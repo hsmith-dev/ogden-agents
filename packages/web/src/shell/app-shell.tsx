@@ -1,6 +1,7 @@
 import { Outlet, useRouterState } from '@tanstack/react-router';
 import { useEventStream } from '@/events/event-stream';
 import { SidebarInset, SidebarProvider } from '@/ui/sidebar';
+import { AppShortcutOffer } from './app-shortcut-offer';
 import { OpenOgdenAgents } from './open-ogden-agents';
 import { ServerStopped } from './server-stopped';
 import { StatusSidebar } from './status-sidebar';
@@ -23,6 +24,7 @@ export function AppShell() {
       <StatusSidebar />
       <SidebarInset data-testid="workspace-area">
         <VersionBanner />
+        <AppShortcutOffer />
         <Outlet />
       </SidebarInset>
     </SidebarProvider>

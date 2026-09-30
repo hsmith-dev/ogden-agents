@@ -1,4 +1,6 @@
 export * from './agent-port.js';
+export * from './agent-setup-port.js';
+export * from './app-shortcut-port.js';
 export * from './chat.js';
 export * from './core.js';
 export * from './data-dir.js';
@@ -17,5 +19,7 @@ export {
   type ReadOptions,
 } from './event-log.js';
 export { newId } from './ids.js';
+export * from './permissions.js';
+export * from './secret-store-port.js';
 export * from './session-events.js';
 export * from './toolchain.js';

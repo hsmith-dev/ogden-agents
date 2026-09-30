@@ -19,6 +19,14 @@ export const API_ERROR_CODES = [
   'sessions_busy',
   /** uv's status or install could not be read or started (500). */
   'toolchain_unavailable',
+  /** A route or socket request whose lane has not shipped yet (501; the story 2.3 stubs). */
+  'not_implemented',
+  /** A permission decision for a request that is no longer waiting: already decided, cancelled, or unknown (409). */
+  'permission_not_pending',
+  /** The app shortcut can't be added on this computer (422). */
+  'shortcut_unsupported',
+  /** An agent's install, sign-in or API key could not be done (500). The message says why in plain words. */
+  'agent_setup_failed',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

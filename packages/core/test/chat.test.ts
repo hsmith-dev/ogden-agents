@@ -20,17 +20,23 @@ import {
   type AgentPort,
   type AgentSession,
   type Core,
+  type Permissions,
+  type StartAgentSession,
 } from '../src/index.js';
 import { openTestCore, tempDir } from './helpers.js';
 
 /** An agent whose every prompt runs `script`, which reports through `emit`. */
-function scriptedAgent(script: (text: string, emit: (event: AgentEvent) => void) => Promise<{ stopReason: string }>) {
+function scriptedAgent(
+  script: (text: string, emit: (event: AgentEvent) => void, ask: StartAgentSession['onPermissionRequest']) => Promise<{ stopReason: string }>,
+) {
   const starts: Array<{ cwd: string; env: Readonly<Record<string, string>> }> = [];
   let closed = 0;
   const port: AgentPort = {
     displayName: 'Test Agent',
+    reopenSession: () => Promise.reject(new Error('not in this test')),
+    listAuthMethods: async () => [],
     async startSession(input) {
-      starts.push(input);
+      starts.push({ cwd: input.cwd, env: input.env });
       const listeners = new Set<(event: AgentEvent) => void>();
       const emit = (event: AgentEvent) => {
         for (const listener of [...listeners]) listener(event);
@@ -44,7 +50,7 @@ function scriptedAgent(script: (text: string, emit: (event: AgentEvent) => void)
         async prompt(text) {
           emit({ type: 'state', state: 'working' });
           try {
-            const result = await script(text, emit);
+            const result = await script(text, emit, input.onPermissionRequest);
             emit({ type: 'state', state: 'idle' });
             return result;
           } catch (error) {
@@ -70,13 +76,14 @@ const hello = scriptedAgent(async (_text, emit) => {
   return { stopReason: 'end_turn' };
 });
 
-function setUp(core: Core, port: AgentPort, env: Record<string, string> = {}, dataDir = tempDir('ogden-agents-data-')) {
+function setUp(core: Core, port: AgentPort, env: Record<string, string> = {}, dataDir = tempDir('ogden-agents-data-'), permissions?: Permissions) {
   const errors: Array<[SessionId, AgentError]> = [];
   const chat = createChat({
     dataDir,
     entities: core.entities,
     sessionEvents: core.sessionEvents,
     agent: port,
+    ...(permissions === undefined ? {} : { permissions }),
     agentEnv: () => env,
     onAgentError: (sessionId, error) => errors.push([sessionId, error]),
   });
@@ -165,6 +172,8 @@ describe('chat', () => {
     let attempts = 0;
     const port: AgentPort = {
       displayName: 'Test Agent',
+      reopenSession: () => Promise.reject(new Error('not in this test')),
+      listAuthMethods: async () => [],
       async startSession() {
         attempts++;
         throw new AgentError('agent_unavailable', "Test Agent isn't set up on this computer yet.", { details: { adapterPath: '/nowhere' } });
@@ -253,6 +262,8 @@ describe('chat', () => {
     let closedAgents = 0;
     const port: AgentPort = {
       displayName: 'Test Agent',
+      reopenSession: () => Promise.reject(new Error('not in this test')),
+      listAuthMethods: async () => [],
       async startSession() {
         await new Promise<void>((resolve) => (finishStart = resolve));
         return {
@@ -340,5 +351,78 @@ describe('chat', () => {
     const { chat, workspace, repo } = setUp(core, hello.port);
     expect(() => chat.openWorkspace(`${repo}/does-not-exist`)).toThrow(/no folder at that path/);
     expect(chat.openWorkspace(repo).id).toBe(workspace.id);
+  });
+});
+
+describe('tool calls and permission requests', () => {
+  it('appends each tool call and its updates as session events, the whole call each time', async () => {
+    const core = openTestCore();
+    const agent = scriptedAgent(async (_text, emit) => {
+      emit({ type: 'tool_call', toolCallId: 't1', title: 'Edit src/a.ts', kind: 'edit', status: 'in_progress' });
+      emit({ type: 'tool_call_update', toolCallId: 't1', status: 'completed', diffs: [{ path: 'src/a.ts', oldText: null, newText: 'x' }] });
+      emit({ type: 'tool_call', toolCallId: 't2', title: 'Something new', kind: 'not-an-acp-kind' });
+      return { stopReason: 'end_turn' };
+    });
+    const { chat, workspace, session } = setUp(core, agent.port);
+    chat.sendMessage(workspace.id, session.id, 'edit it');
+    await chat.settled();
+    const calls = sessionEvents(core, session.id).filter((e) => e.type === 'session.tool_call' || e.type === 'session.tool_call_updated');
+    expect(calls.map((e) => [e.type, e.workspaceId, e.payload])).toEqual([
+      ['session.tool_call', workspace.id, { sessionId: session.id, toolCallId: 't1', title: 'Edit src/a.ts', kind: 'edit', status: 'in_progress' }],
+      [
+        'session.tool_call_updated',
+        workspace.id,
+        { sessionId: session.id, toolCallId: 't1', title: 'Edit src/a.ts', kind: 'edit', status: 'completed', diffs: [{ path: 'src/a.ts', oldText: null, newText: 'x' }] },
+      ],
+      // An unknown kind is `other`; a missing status is `pending`.
+      ['session.tool_call', workspace.id, { sessionId: session.id, toolCallId: 't2', title: 'Something new', kind: 'other', status: 'pending' }],
+    ]);
+  });
+
+  it('by default denies every permission request and appends no permission event', async () => {
+    const core = openTestCore();
+    const decisions: unknown[] = [];
+    const agent = scriptedAgent(async (_text, _emit, ask) => {
+      decisions.push(await ask!({ toolCallId: 't1', title: 'Run npm test', kind: 'execute', command: 'npm test' }));
+      return { stopReason: 'end_turn' };
+    });
+    const { chat, workspace, session } = setUp(core, agent.port);
+    chat.sendMessage(workspace.id, session.id, 'run the tests');
+    await chat.settled();
+    expect(decisions).toEqual([{ outcome: 'deny' }]);
+    expect(core.events.readAfter(0).some((e) => e.type.startsWith('permission.'))).toBe(false);
+  });
+
+  it('passes each request to the permissions it is given, with the session; one that fails is a deny', async () => {
+    const core = openTestCore();
+    const asked: Array<[SessionId, string]> = [];
+    const permissions: Permissions = {
+      request: async (sessionId, request) => {
+        asked.push([sessionId, request.toolCallId]);
+        if (request.toolCallId === 'broken') throw new Error('boom');
+        return { outcome: 'allow_once' };
+      },
+    };
+    const decisions: unknown[] = [];
+    const agent = scriptedAgent(async (_text, _emit, ask) => {
+      decisions.push(await ask!({ toolCallId: 't1', title: 'Run npm test' }));
+      decisions.push(await ask!({ toolCallId: 'broken', title: 'Run it' }));
+      return { stopReason: 'end_turn' };
+    });
+    const { chat, workspace, session } = setUp(core, agent.port, {}, undefined, permissions);
+    chat.sendMessage(workspace.id, session.id, 'run');
+    await chat.settled();
+    expect(asked).toEqual([
+      [session.id, 't1'],
+      [session.id, 'broken'],
+    ]);
+    expect(decisions).toEqual([{ outcome: 'allow_once' }, { outcome: 'deny' }]);
+  });
+
+  it('answers sendMessage with queued: false while there is no queue (2.10)', async () => {
+    const core = openTestCore();
+    const { chat, workspace, session } = setUp(core, hello.port);
+    expect(chat.sendMessage(workspace.id, session.id, 'hi')).toMatchObject({ queued: false });
+    await chat.settled();
   });
 });

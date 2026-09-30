@@ -3,17 +3,27 @@ import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { createClaudeCodeAgent, createUvToolchain } from '@ogden-agents/adapters';
+import {
+  createClaudeCodeAgent,
+  createMemoryAgentSetup,
+  createMemoryAppShortcut,
+  createMemorySecretStore,
+  createUvToolchain,
+} from '@ogden-agents/adapters';
 import {
   createChat,
   createDataDir,
+  createDecliningPermissions,
   RESTARTED_REASON,
   createToolchain,
   ensureDataDir,
   openCore,
   PORT_FILE,
   type AgentPort,
+  type AgentSetupPort,
+  type AppShortcutPort,
   type Core,
+  type SecretStorePort,
   type ToolchainPort,
 } from '@ogden-agents/core';
 import { SERVER_STREAM, ServerMessage } from '@ogden-agents/shared';
@@ -131,6 +141,15 @@ export interface StartOptions {
   claudeAdapterPath?: string;
   /** Variables added to every agent's environment on top of {@link agentEnvironment} (tests: the fake agent's switches). */
   extraAgentEnv?: Readonly<Record<string, string>>;
+  /**
+   * Installing and signing into each agent. Default: the in-memory
+   * `setup-memory` stub, until onboarding (9.x) brings the real adapters.
+   */
+  agentSetup?: readonly AgentSetupPort[];
+  /** Where API keys are kept (AD-16). Default: the in-memory `secrets-memory` stub, until 9.4 brings the keychain. */
+  secrets?: SecretStorePort;
+  /** The Ogden Agents app shortcut (E2-R10). Default: the in-memory `shortcut-memory` stub, until 2.4. */
+  appShortcut?: AppShortcutPort;
   /**
    * Called once the server has stopped by itself (Quit, or a restart the
    * launcher asked for) and everything is closed. A server process exits here.
@@ -314,17 +333,33 @@ async function listenAndAnnounce({
   const settled = core.entities.settleInterruptedSessions(RESTARTED_REASON);
   if (settled.length > 0) log.info('sessions left working by a stopped server are idle and resumable', { sessions: settled.length });
   const extraAgentEnv = options.extraAgentEnv ?? {};
+  // One instance for the chat that asks and the routes that answer (2.6 replaces the stub in core).
+  const permissions = createDecliningPermissions();
   const chat = createChat({
     dataDir,
     entities: core.entities,
     sessionEvents: core.sessionEvents,
     agent,
+    permissions,
     agentEnv: () => ({ ...agentEnvironment(), ...extraAgentEnv }),
     // The event carries the plain reason; the log also gets the details (never the environment).
     onAgentError: (sessionId, error) => log.warn('agent failed', { sessionId, code: error.code, reason: error.message, ...error.details }),
     onInternalError: (sessionId, error) => log.error('applying an agent event failed', { sessionId, reason: String(error) }),
   });
-  const app = createApp({ events: core.events, webRoot: options.webRoot ?? defaultWebRoot(), log, gate, control, toolchain, chat, tabs });
+  const app = createApp({
+    events: core.events,
+    webRoot: options.webRoot ?? defaultWebRoot(),
+    log,
+    gate,
+    control,
+    toolchain,
+    chat,
+    permissions,
+    agentSetup: options.agentSetup ?? [createMemoryAgentSetup()],
+    secrets: options.secrets ?? createMemorySecretStore(),
+    appShortcut: options.appShortcut ?? createMemoryAppShortcut({ platform: process.platform }),
+    tabs,
+  });
 
   let bound: { server: ReturnType<typeof createAdaptorServer>; wss: WebSocketServer; port: number } | undefined;
   let lastTried = requested;

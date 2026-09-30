@@ -154,6 +154,8 @@ export function EventStreamProvider({ children, auth = tabAuth }: { children: Re
           stop(data.reason);
           return;
         }
+        // Answers to the scoped subscriptions and paging (2.9), which this legacy subscriber never sends.
+        if (data.type === 'history_page' || data.type === 'request_failed') return;
         if (data.seq <= lastSeq.current) return;
         lastSeq.current = data.seq;
         setLastSeqState(data.seq);

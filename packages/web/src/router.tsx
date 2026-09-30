@@ -36,6 +36,33 @@ const toolsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/tools-page'), 'ToolsPage'),
 });
 
+const agentsSettingsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/agents',
+  component: lazyRouteComponent(() => import('./routes/agents-settings-page'), 'AgentsSettingsPage'),
+});
+
+/** The first-run Welcome (onboarding 9.5). */
+const welcomeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/welcome',
+  component: lazyRouteComponent(() => import('./routes/welcome-page'), 'WelcomePage'),
+});
+
+/** A workspace's Chats list (story 2.5), `/w/:wsId`. */
+const workspaceChatsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$wsId',
+  component: lazyRouteComponent(() => import('./routes/workspace-chats-page'), 'WorkspaceChatsPage'),
+});
+
+/** A workspace's settings (stories 2.5 and 2.8), `/w/:wsId/settings`. */
+const workspaceSettingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$wsId/settings',
+  component: lazyRouteComponent(() => import('./routes/workspace-settings-page'), 'WorkspaceSettingsPage'),
+});
+
 /** One chat in a workspace (story 2.2): the session view, `/w/:wsId/s/:sesId`. */
 const sessionRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -43,7 +70,15 @@ const sessionRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/session-page'), 'SessionPage'),
 });
 
-const routeTree = rootRoute.addChildren([homeRoute, sessionRoute, settingsRoute.addChildren([appearanceRoute, toolsRoute])]);
+// Story 2.3 registers every route the epic's lanes and onboarding need, so none of them edits this file.
+const routeTree = rootRoute.addChildren([
+  homeRoute,
+  welcomeRoute,
+  workspaceChatsRoute,
+  workspaceSettingsRoute,
+  sessionRoute,
+  settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute]),
+]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });
 

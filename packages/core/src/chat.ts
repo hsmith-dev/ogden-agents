@@ -9,16 +9,28 @@
  * prunes its deltas; AD-5) and the state is set. Every session event goes
  * through the session-event helper (E2-R7).
  *
+ * Tool calls become `session.tool_call` and `session.tool_call_updated`
+ * events, each carrying the whole call as it stands. Permission requests go
+ * to {@link Permissions} (the declining stub until 2.6).
+ *
  * The agent itself sits behind {@link AgentPort} (AD-1); this file names none.
- * Not yet here: queued messages (E2-R1), resume (2.7), permission cards (2.6).
+ * Not yet here: queued messages (E2-R1, 2.10), resume (2.7), permission cards (2.6).
  */
 import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
-import type { Session, SessionId, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import { ToolCallStatus, ToolKind, type Session, type SessionId, type ToolCallDiff, type Workspace, type WorkspaceId } from '@ogden-agents/shared';
 import { monotonicFactory } from 'ulid';
-import { AgentError, type AgentEvent, type AgentPort, type AgentSession } from './agent-port.js';
+import {
+  AgentError,
+  type AgentEvent,
+  type AgentPermissionDecision,
+  type AgentPermissionRequest,
+  type AgentPort,
+  type AgentSession,
+} from './agent-port.js';
 import { canonicalWorkspacePath, type Entities } from './entities.js';
 import { CoreError, InvalidOperationError, NotFoundError, SessionBusyError } from './errors.js';
+import { createDecliningPermissions, type Permissions } from './permissions.js';
 import type { SessionEvents } from './session-events.js';
 
 /** The reason on sessions the server moved to `idle` because it stopped or restarted under them (AD-3). */
@@ -33,6 +45,11 @@ export interface ChatOptions {
   dataDir: string;
   sessionEvents: SessionEvents;
   agent: AgentPort;
+  /**
+   * Answers the agents' permission requests. Default: the declining stub
+   * ({@link createDecliningPermissions}), which denies every request.
+   */
+  permissions?: Permissions;
   /**
    * The environment each agent process gets (AD-16: API keys go here and
    * nowhere else). Called for every agent start. Default: none.
@@ -63,7 +80,7 @@ export interface Chat {
    * {@link SessionBusyError} while the agent is still answering, and
    * {@link InvalidOperationError} while the terminal drives the session (AD-6).
    */
-  sendMessage(workspaceId: WorkspaceId, sessionId: SessionId, text: string): { messageId: string };
+  sendMessage(workspaceId: WorkspaceId, sessionId: SessionId, text: string): { messageId: string; queued: boolean };
   /** Resolves once no agent turn is running (tests, shutdown). */
   settled(): Promise<void>;
   /**
@@ -75,19 +92,48 @@ export interface Chat {
 }
 
 const nextUlid = monotonicFactory();
+
+/** An adapter's tool kind as the shared enum, or `undefined` when it named none or an unknown one. */
+const toolKind = (kind: string | undefined): ToolKind | undefined => {
+  const parsed = ToolKind.safeParse(kind);
+  return parsed.success ? parsed.data : undefined;
+};
+const toolStatus = (status: string | undefined): ToolCallStatus | undefined => {
+  const parsed = ToolCallStatus.safeParse(status);
+  return parsed.success ? parsed.data : undefined;
+};
+const toolCallPayload = (sessionId: SessionId, toolCallId: string, call: ToolCallState) => ({
+  sessionId,
+  toolCallId,
+  title: call.title,
+  kind: call.kind,
+  status: call.status,
+  ...(call.diffs === undefined || call.diffs.length === 0 ? {} : { diffs: call.diffs }),
+});
 /** Message ids are unique within the install; they are not entity keys. */
 const newMessageId = () => `msg_${nextUlid()}`;
+
+/** A tool call as core last recorded it: each event carries the whole call. */
+interface ToolCallState {
+  title: string;
+  kind: ToolKind;
+  status: ToolCallStatus;
+  diffs: ToolCallDiff[] | undefined;
+}
 
 /** One session's live agent, and the reply it is writing, if any. */
 interface Live {
   agent: Promise<AgentSession>;
   reply: { messageId: string; text: string } | undefined;
+  /** The tool calls this agent session reported, by id. */
+  toolCalls: Map<string, ToolCallState>;
   /** Stops listening to the agent. */
   off: (() => void) | undefined;
 }
 
 export function createChat(options: ChatOptions): Chat {
   const { entities, sessionEvents, agent } = options;
+  const permissions = options.permissions ?? createDecliningPermissions();
   const agentEnv = options.agentEnv ?? (() => ({}));
   const live = new Map<SessionId, Live>();
   /** Sessions whose agent is answering; a second message is refused until it ends. */
@@ -178,10 +224,35 @@ export function createChat(options: ChatOptions): Chat {
             fail(sessionId, entry, new AgentError('agent_failed', event.reason ?? `${agent.displayName} stopped unexpectedly.`), event.fatal === true);
           }
           return;
-        case 'tool_call':
-        case 'tool_call_update':
-          // Tool-call events get their schema and rows with the full session view (2.3, 2.10).
+        case 'tool_call': {
+          const call: ToolCallState = {
+            title: event.title,
+            kind: toolKind(event.kind) ?? 'other',
+            status: toolStatus(event.status) ?? 'pending',
+            diffs: event.diffs,
+          };
+          entry.toolCalls.set(event.toolCallId, call);
+          sessionEvents.appendSessionEvent(sessionId, {
+            type: 'session.tool_call',
+            payload: toolCallPayload(sessionId, event.toolCallId, call),
+          });
           return;
+        }
+        case 'tool_call_update': {
+          const known = entry.toolCalls.get(event.toolCallId);
+          const call: ToolCallState = {
+            title: event.title ?? known?.title ?? '',
+            kind: toolKind(event.kind) ?? known?.kind ?? 'other',
+            status: toolStatus(event.status) ?? known?.status ?? 'pending',
+            diffs: event.diffs ?? known?.diffs,
+          };
+          entry.toolCalls.set(event.toolCallId, call);
+          sessionEvents.appendSessionEvent(sessionId, {
+            type: 'session.tool_call_updated',
+            payload: toolCallPayload(sessionId, event.toolCallId, call),
+          });
+          return;
+        }
       }
     } catch (error) {
       internalError(sessionId, error);
@@ -191,9 +262,18 @@ export function createChat(options: ChatOptions): Chat {
   const agentFor = (session: Session, workspace: Workspace): Live => {
     const existing = live.get(session.id);
     if (existing !== undefined) return existing;
-    const entry: Live = { agent: Promise.resolve(undefined as never), reply: undefined, off: undefined };
+    const entry: Live = { agent: Promise.resolve(undefined as never), reply: undefined, toolCalls: new Map(), off: undefined };
+    const onPermissionRequest = async (request: AgentPermissionRequest): Promise<AgentPermissionDecision> => {
+      try {
+        return await permissions.request(session.id, request);
+      } catch (error) {
+        // A failure never lets the tool call run.
+        internalError(session.id, error);
+        return { outcome: 'deny' };
+      }
+    };
     // The real-cased path: the case-folded key is for uniqueness only (AD-2).
-    entry.agent = agent.startSession({ cwd: workspace.realPath ?? workspace.path, env: { ...agentEnv() } }).then(async (started) => {
+    entry.agent = agent.startSession({ cwd: workspace.realPath ?? workspace.path, env: { ...agentEnv() }, onPermissionRequest }).then(async (started) => {
       if (live.get(session.id) !== entry) {
         // Closed (or dropped) while starting: stop it before anyone waiting on this
         // entry goes on, so `close` returns only once its process has exited.
@@ -278,7 +358,7 @@ export function createChat(options: ChatOptions): Chat {
           turns.delete(turn);
         });
       turns.add(turn);
-      return { messageId };
+      return { messageId, queued: false };
     },
 
     async settled() {

@@ -6,7 +6,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AgentError, type AgentEvent, type AgentSession } from '@ogden-agents/core';
+import { AgentError, type AgentEvent, type AgentPermissionDecision, type AgentPermissionRequest, type AgentSession } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createClaudeCodeAgent, createStreamMasker, findClaudeExecutable, MASKED, maskSecrets, resolveClaudeAgentAcp, secretValues } from '../src/index.js';
 
@@ -30,14 +30,20 @@ function baseEnv(extra: Record<string, string> = {}): Record<string, string> {
   return { PATH: process.env.PATH ?? '', ...extra };
 }
 
-async function startFake(options: { env?: Record<string, string>; claudeExecutable?: string | null } = {}) {
+async function startFake(
+  options: {
+    env?: Record<string, string>;
+    claudeExecutable?: string | null;
+    onPermissionRequest?: (request: AgentPermissionRequest) => Promise<AgentPermissionDecision>;
+  } = {},
+) {
   const diagnostics: string[] = [];
   const agent = createClaudeCodeAgent({
     adapterPath: FAKE_AGENT,
     claudeExecutable: options.claudeExecutable === undefined ? null : options.claudeExecutable,
     onDiagnostic: (message, fields) => diagnostics.push(`${message} ${JSON.stringify(fields ?? {})}`),
   });
-  const session = await agent.startSession({ cwd: tempDir(), env: baseEnv(options.env) });
+  const session = await agent.startSession({ cwd: tempDir(), env: baseEnv(options.env), onPermissionRequest: options.onPermissionRequest });
   sessions.push(session);
   const events: AgentEvent[] = [];
   session.onEvent((event) => events.push(event));
@@ -164,6 +170,159 @@ describe('acp-claude-code over ACP', () => {
     await session.close();
     await session.close();
     await expect(session.prompt('hello')).rejects.toBeInstanceOf(AgentError);
+  });
+});
+
+/** The reply text of a turn: every chunk since `from`. */
+const replyText = (events: AgentEvent[], from = 0) =>
+  events
+    .slice(from)
+    .flatMap((e) => (e.type === 'message_chunk' ? [e.text] : []))
+    .join('');
+
+describe('permission requests', () => {
+  it('asks core through onPermissionRequest, and allow_once lets the tool call run', async () => {
+    const asked: AgentPermissionRequest[] = [];
+    const { session, events } = await startFake({
+      onPermissionRequest: async (request) => (asked.push(request), { outcome: 'allow_once' }),
+    });
+    await session.prompt('permission');
+    expect(asked).toEqual([{ toolCallId: 'call-permission', title: 'Run npm test', kind: 'execute', command: 'npm test' }]);
+    expect(replyText(events)).toBe('Ran npm test.');
+    expect(events).toContainEqual(expect.objectContaining({ type: 'tool_call_update', toolCallId: 'call-permission', status: 'completed' }));
+  });
+
+  it('deny (and cancelled) keep the tool call from running', async () => {
+    const denied = await startFake({ onPermissionRequest: async () => ({ outcome: 'deny', reason: 'not now' }) });
+    await denied.session.prompt('permission');
+    expect(replyText(denied.events)).toBe('Denied npm test.');
+
+    const cancelled = await startFake({ onPermissionRequest: async () => ({ outcome: 'cancelled' }) });
+    await cancelled.session.prompt('permission');
+    expect(replyText(cancelled.events)).toBe('Denied npm test.');
+  });
+
+  it('with no callback, or a callback that fails, every request is declined', async () => {
+    const none = await startFake();
+    await none.session.prompt('permission');
+    expect(replyText(none.events)).toBe('Denied npm test.');
+
+    const broken = await startFake({ onPermissionRequest: () => Promise.reject(new Error('boom')) });
+    await broken.session.prompt('permission');
+    expect(replyText(broken.events)).toBe('Denied npm test.');
+  });
+
+  it('a null decision or an unknown outcome is declined', async () => {
+    const nothing = await startFake({ onPermissionRequest: async () => null as unknown as AgentPermissionDecision });
+    await nothing.session.prompt('permission');
+    expect(replyText(nothing.events)).toBe('Denied npm test.');
+
+    const unknown = await startFake({ onPermissionRequest: async () => ({ outcome: 'allow_always' }) as unknown as AgentPermissionDecision });
+    await unknown.session.prompt('permission');
+    expect(replyText(unknown.events)).toBe('Denied npm test.');
+  });
+
+  it('masks secrets in what it asks about', async () => {
+    const secret = 'npm test';
+    const asked: AgentPermissionRequest[] = [];
+    const { session } = await startFake({
+      env: { FAKE_TOKEN: secret },
+      onPermissionRequest: async (request) => (asked.push(request), { outcome: 'deny' }),
+    });
+    await session.prompt('permission');
+    expect(asked[0]?.command).toBe(MASKED);
+    expect(asked[0]?.title).toBe(`Run ${MASKED}`);
+  });
+});
+
+describe('tool calls', () => {
+  it('reports the call and its update, with the diff it carries', async () => {
+    const { session, events } = await startFake();
+    await session.prompt('tool');
+    const calls = events.filter((e) => e.type === 'tool_call' || e.type === 'tool_call_update');
+    expect(calls).toEqual([
+      { type: 'tool_call', toolCallId: 'call-edit', title: 'Edit src/example.ts', kind: 'edit', status: 'in_progress', diffs: undefined },
+      {
+        type: 'tool_call_update',
+        toolCallId: 'call-edit',
+        title: undefined,
+        kind: undefined,
+        status: 'completed',
+        diffs: [{ path: 'src/example.ts', oldText: 'const a = 1;\n', newText: 'const a = 2;\n' }],
+      },
+    ]);
+    expect(replyText(events)).toBe('Edited.');
+  });
+
+  it('masks secrets in diffs', async () => {
+    const { session, events } = await startFake({ env: { EXAMPLE_KEY: 'const a = 2' } });
+    await session.prompt('tool');
+    const update = events.find((e) => e.type === 'tool_call_update');
+    expect(JSON.stringify(update)).not.toContain('const a = 2');
+    expect(update).toMatchObject({ diffs: [{ newText: `${MASKED};\n` }] });
+  });
+});
+
+describe('reopening a session', () => {
+  const reopen = async (mode: 'resume' | 'load' | 'none', agentSessionId = 'fake-session-earlier') => {
+    const agent = createClaudeCodeAgent({ adapterPath: FAKE_AGENT, claudeExecutable: null });
+    // A secret starting with the end of the replayed chunk ("Earlier reply."), so a replayed
+    // chunk that was not swallowed would be held back and surface in the next turn's reply.
+    const env = baseEnv({ FAKE_ACP_RESUME: mode, HELD_BACK_KEY: 'reply.and-more' });
+    const opened = await agent.reopenSession({ cwd: tempDir(), env, agentSessionId });
+    sessions.push(opened.session);
+    const events: AgentEvent[] = [];
+    opened.session.onEvent((event) => events.push(event));
+    return { ...opened, events };
+  };
+
+  it('resumes when the agent advertises session/resume', async () => {
+    const { session, restored, events } = await reopen('resume');
+    expect(restored).toBe('resumed');
+    expect(session.agentSessionId).toBe('fake-session-earlier');
+    await session.prompt('context');
+    expect(replyText(events)).toBe('session=fake-session-earlier via=resumed');
+  });
+
+  it('loads when it advertises only loadSession, and swallows the history the load replays', async () => {
+    const { session, restored, events } = await reopen('load');
+    expect(restored).toBe('loaded');
+    expect(session.agentSessionId).toBe('fake-session-earlier');
+    await session.prompt('context');
+    expect(replyText(events)).toBe('session=fake-session-earlier via=loaded');
+    expect(replyText(events)).not.toContain('Earlier reply.');
+  });
+
+  it('starts a new session when it can do neither', async () => {
+    const { session, restored, events } = await reopen('none');
+    expect(restored).toBe('new');
+    expect(session.agentSessionId).toMatch(/^fake-session-\d+$/);
+    await session.prompt('context');
+    expect(replyText(events)).toBe(`session=${session.agentSessionId} via=new`);
+  });
+});
+
+describe('sign-in methods', () => {
+  it('advertises auth.terminal in initialize, so the agent lists its terminal sign-in', async () => {
+    const agent = createClaudeCodeAgent({ adapterPath: FAKE_AGENT, claudeExecutable: null });
+    // The fake lists the method only to a client that set clientCapabilities.auth.terminal.
+    await expect(agent.listAuthMethods({ env: baseEnv({ FAKE_ACP_AUTH: 'terminal' }) })).resolves.toEqual([
+      {
+        id: 'fake-login',
+        name: 'Log in with your account',
+        description: 'Signs in with the fake agent',
+        kind: 'terminal',
+        args: ['--login'],
+        env: { FAKE_LOGIN: '1' },
+      },
+    ]);
+    await expect(agent.listAuthMethods({ env: baseEnv() })).resolves.toEqual([]);
+  });
+
+  it('a prompt refused for an expired sign-in says to sign in again', async () => {
+    const { session, events } = await startFake();
+    await expect(session.prompt('auth-expired')).rejects.toMatchObject({ message: 'Claude Code needs you to sign in again.' });
+    expect(events.at(-1)).toMatchObject({ type: 'state', state: 'error', reason: 'Claude Code needs you to sign in again.' });
   });
 });
 

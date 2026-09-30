@@ -1,6 +1,6 @@
 /**
  * The session-event helper (E2-R7, carried from story 1.3's review): the only
- * way a `session.*` event is appended. It takes a session id, looks the
+ * way a `session.*` or `permission.*` event is appended. It takes a session id, looks the
  * session up and stamps its `workspaceId` and stream, so no event can name a
  * session in another workspace, and deleting a workspace's history removes
  * every one of its session events.
@@ -13,10 +13,14 @@ import { eq } from 'drizzle-orm';
 import type { Database } from './db/database.js';
 import { sessions } from './db/schema.js';
 import { NotFoundError, SessionEventScopeError } from './errors.js';
-import { sessionAppender, type EventLog } from './event-log.js';
+import { isSessionEventType, sessionAppender, type EventLog } from './event-log.js';
 
-/** Every session event type (`session.created`, `session.message_delta`, …). */
-export type SessionEventType = Extract<CoreEventType, `session.${string}`>;
+/**
+ * Every session-scoped event type (`session.created`, `session.message_delta`,
+ * …, and `permission.requested` and `permission.resolved`, which live on the
+ * session's stream).
+ */
+export type SessionEventType = Extract<CoreEventType, `session.${string}` | `permission.${string}`>;
 
 /**
  * A session event as a caller writes it: its type and payload. `workspaceId`
@@ -65,7 +69,7 @@ export function createSessionEvents(db: Database, log: EventLog): SessionEvents 
   /** The event with its session's scope stamped in, or a refusal if it names another. */
   const scoped = (sessionId: SessionId, event: SessionEventDraft) => {
     const type = (event as { type?: unknown }).type;
-    if (typeof type !== 'string' || !type.startsWith('session.')) {
+    if (typeof type !== 'string' || !isSessionEventType(type)) {
       throw new SessionEventScopeError(`${String(type)} is not a session event`);
     }
     const session = lookUp(sessionId);

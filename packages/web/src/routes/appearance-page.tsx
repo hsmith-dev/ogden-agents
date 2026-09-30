@@ -1,5 +1,6 @@
 import { Desktop, Moon, Sun } from '@phosphor-icons/react';
 import { useAppearance } from '@/appearance/appearance-provider';
+import { AppShortcutSetting } from '@/appearance/app-shortcut-setting';
 import type { Density, ThemePreference } from '@/appearance/appearance';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Field } from '@/ui/field';
@@ -69,6 +70,7 @@ export function AppearancePage() {
               onCheckedChange={(checked) => update({ developerMode: checked })}
             />
           </Field>
+          <AppShortcutSetting />
         </PageSection>
       </PageBody>
     </>

@@ -1,6 +1,7 @@
 /**
- * The port every chat agent implements (AD-1): start a session in a folder,
- * send it a prompt, cancel, close, and listen to what it does. Core names no
+ * The port every chat agent implements (AD-1): start or reopen a session in
+ * a folder, send it a prompt, answer its permission requests, cancel, close,
+ * listen to what it does, and list how it signs in. Core names no
  * agent, CLI or protocol here; the `acp-*` adapters do.
  *
  * An adapter never touches the database or the event log (AD-11): it reports
@@ -9,24 +10,72 @@
  */
 import { CoreError } from './errors.js';
 
+/** One file change a tool call reports (secrets masked). `oldText` is `null` for a new file. */
+export interface AgentToolCallDiff {
+  path: string;
+  oldText: string | null;
+  newText: string;
+}
+
 /** What an agent session reports while it works. */
 export type AgentEvent =
   /** A piece of the agent's reply, in order. */
   | { type: 'message_chunk'; text: string }
   /** The agent started a tool call (read a file, run a command, …). */
-  | { type: 'tool_call'; toolCallId: string; title: string; kind?: string | undefined; status?: string | undefined }
+  | {
+      type: 'tool_call';
+      toolCallId: string;
+      title: string;
+      kind?: string | undefined;
+      status?: string | undefined;
+      diffs?: AgentToolCallDiff[] | undefined;
+    }
   /** A tool call's progress or result. */
-  | { type: 'tool_call_update'; toolCallId: string; title?: string | undefined; status?: string | undefined }
+  | {
+      type: 'tool_call_update';
+      toolCallId: string;
+      title?: string | undefined;
+      kind?: string | undefined;
+      status?: string | undefined;
+      diffs?: AgentToolCallDiff[] | undefined;
+    }
   /**
    * The adapter's view of the session (AD-4): `working` while a prompt runs,
    * `idle` once it has ended, `error` when the agent failed or went away.
    * `reason` is plain words for the user and never holds a secret. `fatal`
    * means the agent's process is gone and the session can't take another
-   * prompt; without it (say, a rate limit) the session stays usable.
+   * prompt; without it (say, a rate limit) the session stays usable. `code`
+   * says why, when the UI acts on it (`auth_required`: sign in again; 9.4).
    */
-  | { type: 'state'; state: 'working' | 'idle' | 'error'; reason?: string | undefined; fatal?: boolean | undefined };
+  | {
+      type: 'state';
+      state: 'working' | 'idle' | 'error';
+      reason?: string | undefined;
+      fatal?: boolean | undefined;
+      code?: AgentErrorCode | undefined;
+    };
 
 export type AgentEventListener = (event: AgentEvent) => void;
+
+/** A tool call the agent asks permission to run (CAP-4). Secrets masked. */
+export interface AgentPermissionRequest {
+  toolCallId: string;
+  title: string;
+  /** The tool kind as the agent names it (`execute`, `edit`, …), if it said. */
+  kind?: string | undefined;
+  /** The command a shell tool call would run, if it said. */
+  command?: string | undefined;
+}
+
+/**
+ * Core's answer to a permission request. There is no `allow_always`: an
+ * always-allow is a rule core stores and enforces itself, and the agent is
+ * only ever told "once" (epic decision, 2026-09-30).
+ */
+export type AgentPermissionDecision =
+  | { outcome: 'allow_once' }
+  | { outcome: 'deny'; reason?: string | undefined }
+  | { outcome: 'cancelled' };
 
 export interface StartAgentSession {
   /** The folder the agent works in: the workspace's repo root. */
@@ -37,6 +86,34 @@ export interface StartAgentSession {
    * own agent-specific variables but must not log it.
    */
   env: Readonly<Record<string, string>>;
+  /**
+   * Called when the agent asks to run a tool call. The tool call does not run
+   * until it resolves. Without it the adapter declines every request, so
+   * nothing runs without a person.
+   */
+  onPermissionRequest?: ((request: AgentPermissionRequest) => Promise<AgentPermissionDecision>) | undefined;
+}
+
+/** How a reopened session got its context back: the agent resumed it, loaded it, or had to start a new one. */
+export type AgentRestored = 'resumed' | 'loaded' | 'new';
+
+export interface ReopenAgentSession extends StartAgentSession {
+  /** The agent's own id for the session to reopen (the adapter ref stored on the session; AD-9). */
+  agentSessionId: string;
+}
+
+/**
+ * One way to sign in to an agent. `terminal` methods run the agent's own
+ * login in a terminal the server drives (with `args` and `env`); `agent`
+ * methods are done by the agent itself.
+ */
+export interface AgentAuthMethod {
+  id: string;
+  name: string;
+  description?: string | undefined;
+  kind: 'terminal' | 'agent';
+  args?: readonly string[] | undefined;
+  env?: Readonly<Record<string, string>> | undefined;
 }
 
 export interface AgentSession {
@@ -66,9 +143,21 @@ export interface AgentPort {
    * {@link AgentError} (code `agent_unavailable` when it can't be started).
    */
   startSession(input: StartAgentSession): Promise<AgentSession>;
+  /**
+   * Starts the agent on a session it had before (E2-R2): the adapter resumes
+   * it if the agent can, else loads it (its replayed history is not reported
+   * again), else starts a new session (`restored: 'new'`), and core primes it
+   * from the stored transcript (2.7). Rejects as {@link startSession} does.
+   */
+  reopenSession(input: ReopenAgentSession): Promise<{ session: AgentSession; restored: AgentRestored }>;
+  /**
+   * The ways the agent offers to sign in (onboarding 9.x): starts the agent,
+   * asks, and stops it. Rejects with an {@link AgentError} when it can't be started.
+   */
+  listAuthMethods(input: { env: Readonly<Record<string, string>> }): Promise<AgentAuthMethod[]>;
 }
 
-export type AgentErrorCode = 'agent_unavailable' | 'agent_failed';
+export type AgentErrorCode = 'agent_unavailable' | 'agent_failed' | 'auth_required';
 
 /**
  * An agent failure with a plain-language message for the UI. `details` are

@@ -6,6 +6,7 @@
  */
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createMemoryAgentSetup, createMemoryAppShortcut, createMemorySecretStore } from '@ogden-agents/adapters';
 import { createChat, LEGACY_AUTH_KEY_FILE, openCore, PORT_FILE } from '@ogden-agents/core';
 import { API_BASE, API_ROUTES, ApiErrorBody, WS_PROTOCOL } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
@@ -537,6 +538,43 @@ describe('security gate', () => {
   });
 });
 
+/** Every API route with its methods, as the lanes' route files register them (stories 2.2 and 2.3). */
+const EXPECTED_API_ROUTES = [
+  `GET ${API_ROUTES.tabCheck}`,
+  `POST ${API_ROUTES.launchCodes}`,
+  `POST ${API_ROUTES.serverQuit}`,
+  `GET ${API_ROUTES.toolchain}`,
+  `POST ${API_ROUTES.uvInstall}`,
+  `GET ${API_ROUTES.workspaces}`,
+  `POST ${API_ROUTES.workspaces}`,
+  `GET ${API_ROUTES.workspace}`,
+  `DELETE ${API_ROUTES.workspaceHistory}`,
+  `GET ${API_ROUTES.workspaceSettings}`,
+  `PATCH ${API_ROUTES.workspaceSettings}`,
+  `GET ${API_ROUTES.folders}`,
+  `POST ${API_ROUTES.folders}`,
+  `GET ${API_ROUTES.workspaceSessions}`,
+  `POST ${API_ROUTES.workspaceSessions}`,
+  `GET ${API_ROUTES.workspaceSession}`,
+  `POST ${API_ROUTES.sessionMessages}`,
+  `POST ${API_ROUTES.sessionCancel}`,
+  `POST ${API_ROUTES.sessionPermission}`,
+  `GET ${API_ROUTES.permissionRules}`,
+  `DELETE ${API_ROUTES.permissionRule}`,
+  `GET ${API_ROUTES.appShortcut}`,
+  `POST ${API_ROUTES.appShortcut}`,
+  `DELETE ${API_ROUTES.appShortcut}`,
+  `DELETE ${API_ROUTES.appShortcutOffer}`,
+  `GET ${API_ROUTES.agents}`,
+  `POST ${API_ROUTES.agentInstall}`,
+  `POST ${API_ROUTES.agentSignIn}`,
+  `DELETE ${API_ROUTES.agentSignIn}`,
+  `PUT ${API_ROUTES.agentApiKey}`,
+  `DELETE ${API_ROUTES.agentApiKey}`,
+  `GET ${API_ROUTES.onboarding}`,
+  `PATCH ${API_ROUTES.onboarding}`,
+] as const;
+
 describe('gate placement', () => {
   it('registers no route outside /api, /ws and /launcher except the static files and the SPA shell, which alone are token-free', () => {
     const core = openCore(tempDataDir());
@@ -558,12 +596,35 @@ describe('gate placement', () => {
         dataDir: tempDataDir(),
         entities: core.entities,
         sessionEvents: core.sessionEvents,
-        agent: { displayName: 'Test Agent', startSession: () => Promise.reject(new Error('no agent in this test')) },
+        agent: {
+          displayName: 'Test Agent',
+          startSession: () => Promise.reject(new Error('no agent in this test')),
+          reopenSession: () => Promise.reject(new Error('no agent in this test')),
+          listAuthMethods: () => Promise.reject(new Error('no agent in this test')),
+        },
       });
-      const app = createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate, control, toolchain, chat, tabs: createTabTokens() });
-      // The chat routes (story 2.2) are registered, and every one is a shared route under the gate.
-      const chatRoutes = [API_ROUTES.workspaces, API_ROUTES.workspaceSessions, API_ROUTES.workspaceSession, API_ROUTES.sessionMessages];
-      for (const path of chatRoutes) expect(app.routes.map((route) => route.path), path).toContain(path);
+      const app = createApp({
+        events: core.events,
+        webRoot: tinyWebRoot(),
+        log,
+        gate,
+        control,
+        toolchain,
+        chat,
+        agentSetup: [createMemoryAgentSetup()],
+        secrets: createMemorySecretStore(),
+        appShortcut: createMemoryAppShortcut(),
+        tabs: createTabTokens(),
+      });
+      // Every lane's route (stories 2.2 and 2.3) is registered with exactly its methods, both ways:
+      // a missing route or a stray extra method on a known path fails. The code exchange is
+      // answered by the gate itself and registers no route.
+      const registered = [...new Set(app.routes.filter((route) => isApiPath(route.path)).map((route) => `${route.method} ${route.path}`))].sort();
+      expect(registered).toEqual([...EXPECTED_API_ROUTES].sort());
+      // Every shared route has a handler; the code exchange is answered by the gate itself.
+      for (const path of Object.values(API_ROUTES).filter((route) => route !== API_ROUTES.tabExchange)) {
+        expect(app.routes.map((route) => route.path), path).toContain(path);
+      }
       const outside = app.routes.filter((route) => !isServerPath(route.path)).map((route) => `${route.method} ${route.path}`);
       // The gate and the static files (ALL /*), then the SPA shell's guard and index.html (GET /*). Nothing else:
       // a new page-level route would be reachable without a token, so it must live under /api instead.

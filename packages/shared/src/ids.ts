@@ -11,6 +11,8 @@ export const ID_PREFIXES = {
   session: 'ses',
   run: 'run',
   event: 'evt',
+  /** An always-allow permission rule, scoped to one workspace (story 2.3; stored by 2.6). */
+  permissionRule: 'rule',
 } as const;
 export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];
 
@@ -36,3 +38,7 @@ export type RunId = z.infer<typeof RunId>;
 
 export const EventId = prefixedUlid('evt');
 export type EventId = z.infer<typeof EventId>;
+
+/** An always-allow permission rule (E2-R3): stored and enforced in core, scoped to one workspace. */
+export const PermissionRuleId = prefixedUlid('rule');
+export type PermissionRuleId = z.infer<typeof PermissionRuleId>;

@@ -1,6 +1,8 @@
 /**
  * The chat routes (story 2.2): create a workspace from a repo path, create a
- * chat session, read it, and send it a message. All live under `/api/v1`
+ * chat session, read it, and send it a message. Story 2.3 adds stubs, which
+ * answer 501 `not_implemented`, for the workspace and session lists (2.5)
+ * and cancel (2.10); stories 2.7 and 2.10 own this file next. All live under `/api/v1`
  * (`API_ROUTES`), behind the gate: a tab token on every request, and a
  * matching `Origin` on these state-changing POSTs (AD-15). Routes call the
  * core chat use-case and never write themselves (AD-11).
@@ -26,7 +28,7 @@ import {
 } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { apiError } from './errors.js';
+import { apiError, notImplemented } from './errors.js';
 import type { Logger } from './log.js';
 
 /** Largest request body these routes read (a message is at most 100,000 characters). */
@@ -118,6 +120,12 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger): void {
       return refusal(c, error);
     }
   });
+
+  // `GET` → `WorkspacesResponse` and `SessionsResponse` (2.5).
+  app.get(API_ROUTES.workspaces, notImplemented);
+  app.get(API_ROUTES.workspaceSessions, notImplemented);
+  // `POST` → 202: stops the running prompt (2.10).
+  app.post(API_ROUTES.sessionCancel, notImplemented);
 
   app.post(API_ROUTES.sessionMessages, limit, async (c) => {
     const scope = ids(c);

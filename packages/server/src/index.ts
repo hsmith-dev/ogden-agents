@@ -27,3 +27,5 @@ export {
 export { ToolchainError, type DetectedToolStatus, type ToolchainPort, type ToolProgress } from '@ogden-agents/core';
 // Agent port types for callers that stub the agent (tests).
 export { AgentError, type AgentEvent, type AgentPort, type AgentSession } from '@ogden-agents/core';
+// Setup, secret and shortcut port types for callers that stub them (tests; story 2.3).
+export type { AgentSetupPort, AppShortcutPort, SecretStorePort } from '@ogden-agents/core';

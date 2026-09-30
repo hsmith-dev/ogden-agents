@@ -6,11 +6,19 @@
 //
 //   node fake-acp-agent.mjs
 //
-// It answers `initialize`, `session/new`, `session/prompt` (streaming its
-// reply as `agent_message_chunk` updates, then `end_turn`), `session/cancel`
-// and `session/close`. The prompt text picks the behavior:
+// It answers `initialize`, `session/new`, `session/resume`, `session/load`,
+// `session/prompt` (streaming its reply as `agent_message_chunk` updates,
+// then `end_turn`), `session/cancel` and `session/close`. The prompt text
+// picks the behavior:
 //
 //   anything else  "Hello from the fake agent." in three chunks
+//   "permission"   an `execute` tool call (`npm test`), then asks permission
+//                  to run it; replies "Ran npm test." if allowed, else
+//                  "Denied npm test."
+//   "tool"         an `edit` tool call, then an update completing it with a
+//                  diff of src/example.ts; replies "Edited."
+//   "context"      replies `session=<its id> via=<new|resumed|loaded>`
+//   "auth-expired" the prompt fails with ACP's auth-required error (-32000)
 //   "crash"        one chunk, then the process exits with code 1 mid-prompt
 //   "slow"         one chunk, then waits until cancelled (`cancelled`) or 10 s
 //   "fail"         the prompt fails with a JSON-RPC internal error
@@ -22,6 +30,15 @@
 // With FAKE_ACP_EXIT_AT_START=1 it exits before answering anything. With
 // FAKE_ACP_SPAWN_GRANDCHILD=1 it starts a long-lived child of its own (as the
 // real adapter starts `claude`), which it never stops.
+//
+// FAKE_ACP_RESUME picks how it reopens a session: `resume` advertises
+// `sessionCapabilities.resume`, `load` advertises `loadSession` (and replays
+// one earlier chunk, "Earlier reply.", while loading), `none` neither.
+// Unset, it advertises neither. Any session id is accepted: a reopen is a new
+// process, and the fake keeps nothing on disk.
+//
+// FAKE_ACP_AUTH=terminal advertises one terminal-type sign-in method, but only
+// to a client that sets `clientCapabilities.auth.terminal`.
 import { spawn } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
@@ -37,9 +54,17 @@ const grandchild =
 const CHUNK_DELAY_MS = Number(process.env.FAKE_ACP_CHUNK_DELAY_MS ?? '20');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** @type {Map<string, { cancel?: () => void }>} */
+/** @type {Map<string, { cancel?: () => void, via: 'new' | 'resumed' | 'loaded' }>} */
 const sessions = new Map();
 let nextSession = 1;
+const RESUME = process.env.FAKE_ACP_RESUME ?? '';
+
+/**
+ * @param {import('@agentclientprotocol/sdk').AgentContext} client
+ * @param {string} sessionId
+ * @param {Record<string, unknown>} update
+ */
+const update = (client, sessionId, update) => client.notify('session/update', { sessionId, update });
 
 /**
  * @param {import('@agentclientprotocol/sdk').AgentContext} client
@@ -56,15 +81,37 @@ const stream = acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(p
 
 acp
   .agent({ name: 'fake-acp-agent' })
-  .onRequest('initialize', () => ({
-    protocolVersion: acp.PROTOCOL_VERSION,
-    agentCapabilities: { loadSession: false, sessionCapabilities: { close: {} } },
-    agentInfo: { name: 'fake-acp-agent', version: '1.0.0' },
-  }))
+  .onRequest('initialize', ({ params }) => {
+    const terminalAuth = params.clientCapabilities?.auth?.terminal === true;
+    return {
+      protocolVersion: acp.PROTOCOL_VERSION,
+      agentCapabilities: {
+        loadSession: RESUME === 'load',
+        sessionCapabilities: { close: {}, ...(RESUME === 'resume' ? { resume: {} } : {}) },
+      },
+      authMethods:
+        process.env.FAKE_ACP_AUTH === 'terminal' && terminalAuth
+          ? [{ type: 'terminal', id: 'fake-login', name: 'Log in with your account', description: 'Signs in with the fake agent', args: ['--login'], env: { FAKE_LOGIN: '1' } }]
+          : [],
+      agentInfo: { name: 'fake-acp-agent', version: '1.0.0' },
+    };
+  })
   .onRequest('session/new', () => {
     const sessionId = `fake-session-${nextSession++}`;
-    sessions.set(sessionId, {});
+    sessions.set(sessionId, { via: 'new' });
     return { sessionId };
+  })
+  .onRequest('session/resume', ({ params }) => {
+    if (RESUME !== 'resume') throw acp.RequestError.methodNotFound('session/resume');
+    sessions.set(params.sessionId, { via: 'resumed' });
+    return {};
+  })
+  .onRequest('session/load', async ({ params, client }) => {
+    if (RESUME !== 'load') throw acp.RequestError.methodNotFound('session/load');
+    // The history a load replays: the client already has it.
+    await say(client, params.sessionId, 'Earlier reply.');
+    sessions.set(params.sessionId, { via: 'loaded' });
+    return {};
   })
   .onRequest('session/prompt', async ({ params, client }) => {
     const session = sessions.get(params.sessionId);
@@ -80,6 +127,40 @@ acp
       process.exit(1);
     }
     if (text === 'fail') throw acp.RequestError.internalError(undefined, 'the fake agent failed on purpose');
+    if (text === 'auth-expired') throw acp.RequestError.authRequired(undefined, 'the fake agent needs a new sign-in');
+    if (text === 'context') {
+      await say(client, params.sessionId, `session=${params.sessionId} via=${session.via}`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text === 'permission') {
+      const toolCall = { toolCallId: 'call-permission', title: 'Run npm test', kind: 'execute', rawInput: { command: 'npm test' } };
+      await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
+      const answer = await client.request('session/request_permission', {
+        sessionId: params.sessionId,
+        toolCall,
+        options: [
+          { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
+          { optionId: 'always', name: 'Always allow', kind: 'allow_always' },
+          { optionId: 'reject', name: 'Deny', kind: 'reject_once' },
+          { optionId: 'never', name: 'Always deny', kind: 'reject_always' },
+        ],
+      });
+      const ran = answer.outcome.outcome === 'selected' && (answer.outcome.optionId === 'allow' || answer.outcome.optionId === 'always');
+      await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: ran ? 'completed' : 'failed' });
+      await say(client, params.sessionId, ran ? 'Ran npm test.' : 'Denied npm test.');
+      return { stopReason: 'end_turn' };
+    }
+    if (text === 'tool') {
+      await update(client, params.sessionId, { sessionUpdate: 'tool_call', toolCallId: 'call-edit', title: 'Edit src/example.ts', kind: 'edit', status: 'in_progress' });
+      await update(client, params.sessionId, {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'call-edit',
+        status: 'completed',
+        content: [{ type: 'diff', path: 'src/example.ts', oldText: 'const a = 1;\n', newText: 'const a = 2;\n' }],
+      });
+      await say(client, params.sessionId, 'Edited.');
+      return { stopReason: 'end_turn' };
+    }
     if (text === 'env') {
       await say(client, params.sessionId, `CLAUDE_CODE_EXECUTABLE=${process.env.CLAUDE_CODE_EXECUTABLE ?? '(unset)'}`);
       return { stopReason: 'end_turn' };

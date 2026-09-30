@@ -52,6 +52,7 @@ graph LR
   - Each external concern sits behind a core port: `AgentPort`, `BuildRunnerPort`, `TicketStorePort`, `BmadCatalogPort`, `SandboxPort`, `VcsPort`, `TerminalPort`, `SecretStorePort`, `NotifierPort`.
   - Adding an agent or sandbox means adding an adapter, never a change to core.
   - `packages/web` never imports `core`, `adapters` or `server`.
+  - Note (story 2.3, 2026-09-30): two more core ports join the list: `AgentSetupPort` (installing and signing into an agent, onboarding epic) and `AppShortcutPort` (the OS app shortcut, E2-R10), because both are OS- or agent-specific. Until their adapters ship, the server wires in-memory stubs named `<port>-memory` (`setup-memory`, `secrets-memory`, `shortcut-memory`). No rule changes.
 
 ### AD-2 — Workspace is the top-level scope
 
@@ -127,6 +128,7 @@ graph LR
 - **Prevents:** keys breaking when an agent changes its session ID scheme, and collisions between agents.
 - **Rule:**
   - Primary keys are prefixed ULIDs: `ws_`, `ses_`, `run_`, `evt_`.
+  - Note (story 2.3, 2026-09-30): always-allow permission rules take the prefix `rule_` (`PermissionRuleId`). No rule changes.
   - Agent session IDs and CLI resume IDs are stored as adapter refs on the session and are never used as keys or in URLs.
 
 ### AD-10 — Ticket state lives only in the BMAD files [ADOPTED]

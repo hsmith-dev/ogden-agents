@@ -20,16 +20,35 @@
  * - Adapter signals map to AD-4 states: `working` while `session/prompt`
  *   runs, `idle` when it returns, `error` when it fails or the process exits.
  *
- * Permission requests are declined until permission cards ship (story 2.6):
- * nothing the agent asks to run, runs without a person.
+ * - Reopening a session (E2-R2) initializes once, then uses `session/resume`
+ *   when the agent advertises it, else `session/load` (the history it
+ *   replays is swallowed, not reported again), else `session/new`.
+ * - `initialize` advertises `clientCapabilities.auth.terminal`, so the agent
+ *   lists its terminal-type sign-in methods (agent-matrix, CAP-16).
+ *
+ * Permission requests go to core's `onPermissionRequest`; without one they
+ * are declined, so nothing the agent asks to run, runs without a person.
+ * Core is only ever told "once": always-allow rules live in core.
  */
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
-import { AgentError, type AgentEvent, type AgentEventListener, type AgentPort, type AgentSession } from '@ogden-agents/core';
+import {
+  AgentError,
+  type AgentAuthMethod,
+  type AgentEvent,
+  type AgentEventListener,
+  type AgentPermissionDecision,
+  type AgentPermissionRequest,
+  type AgentPort,
+  type AgentRestored,
+  type AgentSession,
+  type AgentToolCallDiff,
+} from '@ogden-agents/core';
 import { findClaudeExecutable } from './detect.js';
 import { createStreamMasker, maskSecrets, secretValues } from './mask.js';
 
@@ -110,41 +129,94 @@ export function createClaudeCodeAgent(options: ClaudeCodeAgentOptions = {}): Age
       // Logging must never break a session.
     }
   };
+  const startTimeoutMs = options.startTimeoutMs ?? START_TIMEOUT_MS;
+
+  /** Spawns the adapter in `cwd` with core's environment (AD-16), in its own process group. */
+  const spawnAdapter = (cwd: string, env: Readonly<Record<string, string>>) => {
+    const adapterPath = options.adapterPath ?? resolveClaudeAgentAcp();
+    if (adapterPath === undefined || !existsSync(adapterPath)) {
+      throw new AgentError('agent_unavailable', NOT_SET_UP, { details: { adapterPath: adapterPath ?? null } });
+    }
+    const childEnv: Record<string, string> = { ...env };
+    if (childEnv.CLAUDE_CODE_EXECUTABLE === undefined) {
+      const claude = options.claudeExecutable === undefined ? findClaudeExecutable(childEnv) : options.claudeExecutable;
+      if (claude !== null && claude !== undefined) childEnv.CLAUDE_CODE_EXECUTABLE = claude;
+    }
+    diagnostic('starting the Claude Code adapter', {
+      adapterPath,
+      claudeExecutable: childEnv.CLAUDE_CODE_EXECUTABLE ?? 'bundled',
+    });
+
+    let child: ChildProcessWithoutNullStreams;
+    try {
+      child = spawn(options.nodePath ?? process.execPath, [adapterPath], {
+        cwd,
+        env: childEnv,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+        // Its own process group, so the whole tree can be stopped (see `killTree`).
+        detached: process.platform !== 'win32',
+      });
+    } catch (error) {
+      throw new AgentError('agent_unavailable', COULD_NOT_START, { details: { reason: String(error) }, cause: error });
+    }
+    return { child, secrets: secretValues(childEnv) };
+  };
+
+  const open = async (
+    input: { cwd: string; env: Readonly<Record<string, string>>; onPermissionRequest?: PermissionCallback | undefined },
+    opening: Opening,
+  ) => {
+    const { child, secrets } = spawnAdapter(input.cwd, input.env);
+    return startOnChild(child, { cwd: input.cwd, secrets, diagnostic, startTimeoutMs, onPermissionRequest: input.onPermissionRequest }, opening);
+  };
 
   return {
     displayName: CLAUDE_CODE,
 
-    async startSession({ cwd, env }) {
-      const adapterPath = options.adapterPath ?? resolveClaudeAgentAcp();
-      if (adapterPath === undefined || !existsSync(adapterPath)) {
-        throw new AgentError('agent_unavailable', NOT_SET_UP, { details: { adapterPath: adapterPath ?? null } });
-      }
-      const childEnv: Record<string, string> = { ...env };
-      if (childEnv.CLAUDE_CODE_EXECUTABLE === undefined) {
-        const claude = options.claudeExecutable === undefined ? findClaudeExecutable(childEnv) : options.claudeExecutable;
-        if (claude !== null && claude !== undefined) childEnv.CLAUDE_CODE_EXECUTABLE = claude;
-      }
-      diagnostic('starting the Claude Code adapter', {
-        adapterPath,
-        claudeExecutable: childEnv.CLAUDE_CODE_EXECUTABLE ?? 'bundled',
-      });
+    async startSession(input) {
+      const opened = await open(input, { kind: 'new' });
+      return opened.session!;
+    },
 
-      let child: ChildProcessWithoutNullStreams;
-      try {
-        child = spawn(options.nodePath ?? process.execPath, [adapterPath], {
-          cwd,
-          env: childEnv,
-          stdio: ['pipe', 'pipe', 'pipe'],
-          windowsHide: true,
-          // Its own process group, so the whole tree can be stopped (see `killTree`).
-          detached: process.platform !== 'win32',
-        });
-      } catch (error) {
-        throw new AgentError('agent_unavailable', COULD_NOT_START, { details: { reason: String(error) }, cause: error });
-      }
-      return startOnChild(child, cwd, secretValues(childEnv), diagnostic, options.startTimeoutMs ?? START_TIMEOUT_MS);
+    async reopenSession(input) {
+      const opened = await open(input, { kind: 'reopen', agentSessionId: input.agentSessionId });
+      return { session: opened.session!, restored: opened.restored };
+    },
+
+    async listAuthMethods({ env }) {
+      // Any folder will do: only `initialize` runs.
+      const opened = await open({ cwd: homedir(), env }, { kind: 'probe' });
+      return (opened.init.authMethods ?? []).map((method): AgentAuthMethod => {
+        const description = method.description ?? undefined;
+        if ((method as { type?: unknown }).type === 'terminal') {
+          const terminal = method as acp.AuthMethodTerminal;
+          return { id: terminal.id, name: terminal.name, description, kind: 'terminal', args: terminal.args, env: terminal.env };
+        }
+        return { id: method.id, name: method.name, description, kind: 'agent' };
+      });
     },
   };
+}
+
+type PermissionCallback = (request: AgentPermissionRequest) => Promise<AgentPermissionDecision>;
+
+/** What the adapter is started for: a new session, a session it had before, or only to ask what it offers (`initialize`). */
+type Opening = { kind: 'new' } | { kind: 'reopen'; agentSessionId: string } | { kind: 'probe' };
+
+interface StartContext {
+  cwd: string;
+  secrets: readonly string[];
+  diagnostic: Diagnostic;
+  startTimeoutMs: number;
+  onPermissionRequest: PermissionCallback | undefined;
+}
+
+/** The command a shell tool call would run, when the agent put one in its raw input. */
+function commandOf(rawInput: unknown): string | undefined {
+  if (typeof rawInput !== 'object' || rawInput === null) return undefined;
+  const command = (rawInput as { command?: unknown }).command;
+  return typeof command === 'string' ? command : undefined;
 }
 
 type Diagnostic = (message: string, fields?: Record<string, unknown>) => void;
@@ -166,12 +238,12 @@ function killTree(child: ChildProcessWithoutNullStreams): void {
 
 async function startOnChild(
   child: ChildProcessWithoutNullStreams,
-  cwd: string,
-  secrets: readonly string[],
-  diagnostic: Diagnostic,
-  startTimeoutMs: number,
-): Promise<AgentSession> {
+  { cwd, secrets, diagnostic, startTimeoutMs, onPermissionRequest }: StartContext,
+  opening: Opening,
+): Promise<{ init: acp.InitializeResponse; session: AgentSession | undefined; restored: AgentRestored }> {
   const listeners = new Set<AgentEventListener>();
+  /** While `session/load` replays history the chat already has: those updates are swallowed. */
+  let replaying = false;
   let state: 'idle' | 'working' | 'error' = 'idle';
   let closing = false;
   let exited = false;
@@ -179,6 +251,13 @@ async function startOnChild(
   let agentSessionId: string | undefined;
   const mask = (text: string) => maskSecrets(text, secrets);
   let reply = createStreamMasker(secrets);
+  /** A tool call's file changes, secrets masked; `undefined` when it reports none. */
+  const diffsOf = (content: acp.ToolCallContent[] | null | undefined): AgentToolCallDiff[] | undefined => {
+    const diffs = (content ?? []).flatMap((item) =>
+      item.type === 'diff' ? [{ path: mask(item.path), oldText: item.oldText == null ? null : mask(item.oldText), newText: mask(item.newText) }] : [],
+    );
+    return diffs.length === 0 ? undefined : diffs;
+  };
 
   const emit = (event: AgentEvent) => {
     for (const listener of [...listeners]) {
@@ -239,6 +318,7 @@ async function startOnChild(
   const connection = acp
     .client({ name: 'ogden-agents' })
     .onNotification('session/update', ({ params }) => {
+      if (replaying) return;
       if (agentSessionId !== undefined && params.sessionId !== agentSessionId) return;
       const update = params.update;
       switch (update.sessionUpdate) {
@@ -249,27 +329,67 @@ async function startOnChild(
           }
           break;
         case 'tool_call':
-          emit({ type: 'tool_call', toolCallId: update.toolCallId, title: mask(update.title), kind: update.kind ?? undefined, status: update.status ?? undefined });
+          emit({
+            type: 'tool_call',
+            toolCallId: update.toolCallId,
+            title: mask(update.title),
+            kind: update.kind ?? undefined,
+            status: update.status ?? undefined,
+            diffs: diffsOf(update.content),
+          });
           break;
         case 'tool_call_update':
           emit({
             type: 'tool_call_update',
             toolCallId: update.toolCallId,
             title: update.title == null ? undefined : mask(update.title),
+            kind: update.kind ?? undefined,
             status: update.status ?? undefined,
+            diffs: diffsOf(update.content),
           });
           break;
         default:
           break;
       }
     })
-    .onRequest('session/request_permission', ({ params }) => {
-      // Permission cards arrive in story 2.6; until then nothing runs without a person.
-      const reject = params.options.find((option) => option.kind === 'reject_once');
-      diagnostic('declined a permission request (permission cards are not built yet)', { toolKind: params.toolCall.kind ?? null });
-      return reject === undefined
-        ? { outcome: { outcome: 'cancelled' } }
-        : { outcome: { outcome: 'selected', optionId: reject.optionId } };
+    .onRequest('session/request_permission', async ({ params }): Promise<acp.RequestPermissionResponse> => {
+      const option = (kind: acp.PermissionOptionKind) => params.options.find((candidate) => candidate.kind === kind);
+      const select = (kind: acp.PermissionOptionKind): acp.RequestPermissionResponse => {
+        const chosen = option(kind);
+        if (chosen === undefined) {
+          diagnostic('the agent offered no option for the decision; cancelling the request', { option: kind });
+          return { outcome: { outcome: 'cancelled' } };
+        }
+        return { outcome: { outcome: 'selected', optionId: chosen.optionId } };
+      };
+      if (onPermissionRequest === undefined) {
+        diagnostic('declined a permission request (no one to ask)', { toolKind: params.toolCall.kind ?? null });
+        return select('reject_once');
+      }
+      try {
+        const command = commandOf(params.toolCall.rawInput);
+        const decision: AgentPermissionDecision | null | undefined = await onPermissionRequest({
+          toolCallId: params.toolCall.toolCallId,
+          title: mask(params.toolCall.title ?? ''),
+          kind: params.toolCall.kind ?? undefined,
+          command: command === undefined ? undefined : mask(command),
+        });
+        switch (decision?.outcome) {
+          case 'allow_once':
+            return select('allow_once');
+          case 'deny':
+            return select('reject_once');
+          case 'cancelled':
+            return { outcome: { outcome: 'cancelled' } };
+          default:
+            // A missing or unknown decision never lets the tool call run.
+            diagnostic('the permission request got no known decision; declining it', { outcome: String((decision as { outcome?: unknown } | null | undefined)?.outcome ?? null) });
+            return select('reject_once');
+        }
+      } catch (error) {
+        diagnostic('the permission request could not be decided; declining it', { reason: mask(String(error)) });
+        return select('reject_once');
+      }
     })
     .connect(stream);
 
@@ -309,15 +429,46 @@ async function startOnChild(
   };
 
   let init: acp.InitializeResponse;
+  let restored: AgentRestored = 'new';
   try {
+    /** Resumes, else loads, the agent's session; `undefined` when it can do neither (or refused), for a new one. */
+    const reopen = async (initialized: acp.InitializeResponse, sessionId: string): Promise<AgentRestored | undefined> => {
+      const capabilities = initialized.agentCapabilities;
+      try {
+        if (capabilities?.sessionCapabilities?.resume != null) {
+          await connection.agent.request('session/resume', { sessionId, cwd, mcpServers: [] });
+          return 'resumed';
+        }
+        if (capabilities?.loadSession === true) {
+          replaying = true;
+          try {
+            await connection.agent.request('session/load', { sessionId, cwd, mcpServers: [] });
+          } finally {
+            replaying = false;
+          }
+          return 'loaded';
+        }
+      } catch (error) {
+        // The agent no longer has the session: a new one, primed by core from the transcript (2.7).
+        if (!(error instanceof acp.RequestError) || error.code === -32000) throw error;
+        diagnostic('the agent could not reopen its session; starting a new one', { reason: mask(error.message) });
+      }
+      return undefined;
+    };
     const started = (async () => {
       const initialized = await connection.agent.request('initialize', {
         protocolVersion: acp.PROTOCOL_VERSION,
-        clientCapabilities: {},
+        // Terminal-type sign-in methods (agent-matrix, CAP-16) are run by the server in a hidden PTY.
+        clientCapabilities: { auth: { terminal: true } },
         clientInfo: { name: 'ogden-agents', version: '0' },
       });
+      if (opening.kind === 'probe') return { initialized, sessionId: undefined, restored: 'new' as const };
+      if (opening.kind === 'reopen') {
+        const reopened = await reopen(initialized, opening.agentSessionId);
+        if (reopened !== undefined) return { initialized, sessionId: opening.agentSessionId, restored: reopened };
+      }
       const created = await connection.agent.request('session/new', { cwd, mcpServers: [] });
-      return { initialized, created };
+      return { initialized, sessionId: created.sessionId, restored: 'new' as const };
     })();
     const result = await withTimeout(
       Promise.race([started, gone]),
@@ -325,7 +476,8 @@ async function startOnChild(
       () => new AgentError('agent_unavailable', COULD_NOT_START, { details: { reason: 'timed out starting' } }),
     );
     init = result.initialized;
-    agentSessionId = result.created.sessionId;
+    agentSessionId = result.sessionId;
+    restored = result.restored;
   } catch (error) {
     closing = true;
     connection.close();
@@ -337,11 +489,18 @@ async function startOnChild(
       output: output(),
     });
   }
+  if (opening.kind === 'probe' || agentSessionId === undefined) {
+    // Only `initialize` was wanted: stop the agent again.
+    closing = true;
+    connection.close();
+    await kill();
+    return { init, session: undefined, restored };
+  }
   const sessionId = agentSessionId;
-  diagnostic('agent session started', { protocolVersion: init.protocolVersion });
+  diagnostic('agent session started', { protocolVersion: init.protocolVersion, restored });
 
   let closed: Promise<void> | undefined;
-  return {
+  const session: AgentSession = {
     agentSessionId: sessionId,
 
     onEvent(listener) {
@@ -398,4 +557,5 @@ async function startOnChild(
       return closed;
     },
   };
+  return { init, session, restored };
 }

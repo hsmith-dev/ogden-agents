@@ -34,19 +34,82 @@ export const API_ROUTES = {
   /** `POST` → 202 `{ started, uv }`: installs the private uv, only when the user clicks Install. */
   uvInstall: `${API_BASE}/toolchain/uv/install`,
   /**
+   * `GET` → `{ workspaces }` (`WorkspacesResponse`; 2.5): every workspace.
    * `POST { path }` → 201 `{ workspace }`: the workspace for the repo at
    * `path`, created if new; the same repo always returns the same one (AD-2).
    */
   workspaces: `${API_BASE}/workspaces`,
-  /** `POST { kind? }` → 201 `{ session }`: a new chat session in the workspace. */
+  /** `GET` → `{ workspace }` (`WorkspaceResponse`; 2.5); 404 if there is no such workspace. */
+  workspace: `${API_BASE}/workspaces/:wsId`,
+  /**
+   * `DELETE` → `HistoryDeletedResponse` (2.5): deletes the workspace's
+   * events, sessions and runs; the workspace stays. Appends `workspace.history_deleted`.
+   */
+  workspaceHistory: `${API_BASE}/workspaces/:wsId/history`,
+  /**
+   * `GET` → `WorkspaceSettingsResponse`; `PATCH UpdateWorkspaceSettingsRequest`
+   * → `WorkspaceSettingsResponse` (2.5, caution level 2.8). A change appends
+   * `workspace.settings_changed`.
+   */
+  workspaceSettings: `${API_BASE}/workspaces/:wsId/settings`,
+  /**
+   * The server-side folder browser for Add project (2.5). `GET ?path=` →
+   * `FolderListing` (no `path`: the home folder); `POST CreateFolderRequest`
+   * → 201 `CreateFolderResponse` (Start a new project folder).
+   */
+  folders: `${API_BASE}/folders`,
+  /**
+   * `GET` → `{ sessions }` (`SessionsResponse`; 2.5): the Chats list.
+   * `POST { kind? }` → 201 `{ session }`: a new chat session in the workspace.
+   */
   workspaceSessions: `${API_BASE}/workspaces/:wsId/sessions`,
   /** `GET` → `{ session }`: one session of the workspace; 404 if it is another workspace's. */
   workspaceSession: `${API_BASE}/workspaces/:wsId/sessions/:sesId`,
   /**
-   * `POST { text }` → 202 `{ messageId }`: sends a message to the session's
-   * agent. The reply and the session's state arrive through the event log.
+   * `POST { text }` → 202 `{ messageId, queued }`: sends a message to the
+   * session's agent, queued while it works (2.10). The reply and the
+   * session's state arrive through the event log.
    */
   sessionMessages: `${API_BASE}/workspaces/:wsId/sessions/:sesId/messages`,
+  /** `POST` → 202 (2.10): asks the agent to stop its running prompt; the session ends `idle`. */
+  sessionCancel: `${API_BASE}/workspaces/:wsId/sessions/:sesId/cancel`,
+  /**
+   * `POST PermissionDecisionRequest` → 204 (2.6): the user's answer on a
+   * permission card. 409 `permission_not_pending` when it is no longer waiting.
+   */
+  sessionPermission: `${API_BASE}/workspaces/:wsId/sessions/:sesId/permissions/:requestId`,
+  /** `GET` → `PermissionRulesResponse` (2.6): the workspace's always-allow rules. */
+  permissionRules: `${API_BASE}/workspaces/:wsId/permission-rules`,
+  /** `DELETE` → 204 (2.6): undoes an always-allow rule; appends `workspace.permission_rule_removed`. */
+  permissionRule: `${API_BASE}/workspaces/:wsId/permission-rules/:ruleId`,
+  /**
+   * The Ogden Agents app shortcut (E2-R10; 2.4). `GET` → `AppShortcutStatus`;
+   * `POST` → 201 `AppShortcutStatus` adds it (422 `shortcut_unsupported`);
+   * `DELETE` → 204 removes it.
+   */
+  appShortcut: `${API_BASE}/app-shortcut`,
+  /** `DELETE` → 204 (2.4): dismisses the first-run shortcut offer. */
+  appShortcutOffer: `${API_BASE}/app-shortcut/offer`,
+  /** `GET` → `AgentsResponse` (9.1): every supported agent's install and sign-in state. */
+  agents: `${API_BASE}/agents`,
+  /**
+   * `POST` → 202 `AgentSetupStatus` (9.3): installs the agent, only when the
+   * user clicks Install. Progress arrives as `agent.install_*` events.
+   */
+  agentInstall: `${API_BASE}/agents/:agentId/install`,
+  /**
+   * `POST` → `SignInResponse`, sent `Cache-Control: no-store` (9.2): starts
+   * sign-in with the user's own account; the URL is never in an event.
+   * `DELETE` → 204 cancels a sign-in in progress.
+   */
+  agentSignIn: `${API_BASE}/agents/:agentId/sign-in`,
+  /**
+   * `PUT SetApiKeyRequest` → 204 (9.4): stores the key in the keychain
+   * (AD-16); the body is never logged or echoed. `DELETE` → 204 removes it.
+   */
+  agentApiKey: `${API_BASE}/agents/:agentId/api-key`,
+  /** `GET` → `OnboardingState`; `PATCH OnboardingState` → `OnboardingState` (9.5): whether Welcome is done. */
+  onboarding: `${API_BASE}/onboarding`,
 } as const;
 
 /** The parameters a route pattern names, e.g. `{ wsId, sesId }`. */

@@ -1,7 +1,11 @@
 /**
  * Adapters (AD-1): implementations of core ports for specific agents, OSes,
  * sandboxes and tools (`acp-*`, `buildrunner-bmad-loop`, `tickets-v7`,
- * `sandbox-*`, `vcs-git`, ...).
+ * `sandbox-*`, `vcs-git`, ...). The `*-memory` adapters are deterministic
+ * in-memory stubs, wired as defaults until their real adapters ship.
  */
 export * from './acp-claude-code/index.js';
+export * from './secrets-memory/index.js';
+export * from './setup-memory/index.js';
+export * from './shortcut-memory/index.js';
 export * from './toolchain-uv/index.js';

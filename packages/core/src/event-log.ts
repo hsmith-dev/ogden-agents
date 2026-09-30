@@ -9,7 +9,8 @@
  * tick, and so do reading a subscriber's backlog and registering it. That is
  * what makes "subscribe after seq N" gap-free and duplicate-free without locks.
  *
- * Session events (`session.*`) are refused here: they go only through the
+ * Session events (`session.*`, and `permission.*`, which live on the
+ * session's stream) are refused here: they go only through the
  * session-event helper (`session-events.ts`), which looks the session up and
  * stamps its `workspaceId`, so no event can name a session in another
  * workspace (E2-R7). The helper reaches the raw append through
@@ -52,8 +53,8 @@ export interface EventLog {
    * Validates and appends one event, then notifies subscribers (after commit,
    * when called inside {@link EventLog.transaction}). Throws
    * {@link EventValidationError}, writing nothing, if the event fails its schema,
-   * and {@link SessionEventScopeError} for any `session.*` event: those go
-   * through the session-event helper (`appendSessionEvent`).
+   * and {@link SessionEventScopeError} for any `session.*` or `permission.*`
+   * event: those go through the session-event helper (`appendSessionEvent`).
    */
   append<E extends NewCoreEvent>(event: E): Extract<CoreEvent, { type: E['type'] }>;
   /** Events with `seq > afterSeq`, in `seq` order. */
@@ -105,8 +106,12 @@ export function sessionAppender(log: EventLog): SessionAppender {
   return appender;
 }
 
-/** Whether `type` is a session event, which only the session-event helper appends. */
-export const isSessionEventType = (type: unknown): boolean => typeof type === 'string' && type.startsWith('session.');
+/**
+ * Whether `type` is a session-scoped event (`session.*` or `permission.*`),
+ * which only the session-event helper appends (E2-R7).
+ */
+export const isSessionEventType = (type: unknown): boolean =>
+  typeof type === 'string' && (type.startsWith('session.') || type.startsWith('permission.'));
 
 export const DEFAULT_READ_LIMIT = 500;
 /** Backlog page size for {@link EventLog.subscribe}. */

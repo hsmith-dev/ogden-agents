@@ -114,8 +114,50 @@ describe('appendSessionEvent', () => {
   });
 });
 
+describe('permission events through the helper', () => {
+  it('stamps the session’s workspace and stream, and refuses a payload naming another session', () => {
+    const core = openTestCore();
+    const { a, session, other } = twoWorkspaces(core);
+    const requested = core.sessionEvents.appendSessionEvent(session.id, {
+      type: 'permission.requested',
+      payload: {
+        sessionId: session.id,
+        requestId: 'req-1',
+        toolCall: { toolCallId: 't1', title: 'Run npm test', kind: 'execute', command: 'npm test' },
+        alwaysAllowScope: { kind: 'command_prefix', value: 'npm test', label: 'npm test in this project' },
+        cautionLevel: 'ask_every_time',
+      },
+    });
+    expect(requested).toMatchObject({ type: 'permission.requested', workspaceId: a.id, streamId: session.id });
+    const resolved = core.sessionEvents.appendSessionEvent(session.id, {
+      type: 'permission.resolved',
+      payload: { sessionId: session.id, requestId: 'req-1', decision: 'allow_once', by: 'user' },
+    });
+    expect(resolved).toMatchObject({ workspaceId: a.id, streamId: session.id });
+    const before = core.events.lastSeq();
+    expect(() =>
+      core.sessionEvents.appendSessionEvent(session.id, {
+        type: 'permission.resolved',
+        payload: { sessionId: other.id, requestId: 'req-1', decision: 'deny', by: 'user' },
+      }),
+    ).toThrow(SessionEventScopeError);
+    expect(core.events.lastSeq()).toBe(before);
+  });
+
+  it('deleting a workspace’s history removes its permission events too', () => {
+    const core = openTestCore();
+    const { a, session } = twoWorkspaces(core);
+    core.sessionEvents.appendSessionEvent(session.id, {
+      type: 'permission.resolved',
+      payload: { sessionId: session.id, requestId: 'req-1', decision: 'deny', by: 'cancelled' },
+    });
+    core.events.deleteWorkspaceHistory(a.id);
+    expect(core.events.readAfter(0).some((e) => e.type.startsWith('permission.'))).toBe(false);
+  });
+});
+
 describe('the raw event log', () => {
-  it('refuses every session.* event, even one with the right workspace, and stores nothing', () => {
+  it('refuses every session.* and permission.* event, even one with the right workspace, and stores nothing', () => {
     const core = openTestCore();
     const { a, session } = twoWorkspaces(core);
     const before = core.events.lastSeq();
@@ -124,6 +166,24 @@ describe('the raw event log', () => {
       { type: 'session.message_completed', workspaceId: a.id, streamId: session.id, payload: { messageId: 'm1', role: 'agent', content: 'x' } },
       { type: 'session.state_changed', workspaceId: a.id, streamId: session.id, payload: { sessionId: session.id, state: 'working', previous: 'idle' } },
       { type: 'session.created', workspaceId: a.id, streamId: session.id, payload: { session } },
+      {
+        type: 'permission.requested',
+        workspaceId: a.id,
+        streamId: session.id,
+        payload: {
+          sessionId: session.id,
+          requestId: 'req-1',
+          toolCall: { toolCallId: 't1', title: 'Run npm test', kind: 'execute', command: 'npm test' },
+          alwaysAllowScope: null,
+          cautionLevel: 'ask_every_time',
+        },
+      },
+      {
+        type: 'permission.resolved',
+        workspaceId: a.id,
+        streamId: session.id,
+        payload: { sessionId: session.id, requestId: 'req-1', decision: 'deny', by: 'user' },
+      },
     ];
     for (const event of raw) expect(() => core.events.append(event)).toThrow(SessionEventScopeError);
     expect(core.events.lastSeq()).toBe(before);

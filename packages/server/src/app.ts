@@ -1,15 +1,18 @@
-import { upgradeWebSocket } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
-import type { Chat, EventLog, Toolchain } from '@ogden-agents/core';
-import { API_ROUTES, ClientMessage, ServerMessage, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
+import type { AgentSetupPort, AppShortcutPort, Chat, EventLog, Permissions, SecretStorePort, Toolchain } from '@ogden-agents/core';
+import { API_ROUTES, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
-import type { WSContext } from 'hono/ws';
-import { webSocketToken, type TabTokens } from './auth.js';
+import { registerAgentSetupRoutes } from './agent-setup-routes.js';
+import type { TabTokens } from './auth.js';
 import { registerChatRoutes } from './chat-routes.js';
 import { apiError } from './errors.js';
+import { registerEventSocket } from './event-socket.js';
 import type { Logger } from './log.js';
 import { isServerPath } from './paths.js';
+import { registerPermissionRoutes } from './permission-routes.js';
+import { registerShortcutRoutes } from './shortcut-routes.js';
+import { registerWorkspaceRoutes } from './workspace-routes.js';
 
 /** What `GET /launcher/hello` reports about the running server (AD-20). */
 export interface ServerInfo {
@@ -59,6 +62,14 @@ export interface AppOptions {
   toolchain?: Toolchain;
   /** Workspaces, chat sessions and messages (story 2.2); without it those routes answer 404. */
   chat?: Chat;
+  /** Core's answers to permission requests, which the permission routes decide through (the declining stub until 2.6). */
+  permissions?: Permissions;
+  /** Installing and signing into each agent (onboarding 9.x; the `setup-memory` stub until then). */
+  agentSetup?: readonly AgentSetupPort[];
+  /** Where API keys are kept (AD-16; the `secrets-memory` stub until 9.4). */
+  secrets?: SecretStorePort;
+  /** The Ogden Agents app shortcut (E2-R10; the `shortcut-memory` stub until 2.4). */
+  appShortcut?: AppShortcutPort;
   /**
    * The tab tokens the gate checks. An open `/ws` holds its tab's token, so a
    * tab that stays connected never hits the idle expiry.
@@ -66,25 +77,11 @@ export interface AppOptions {
   tabs?: TabTokens;
 }
 
-const WS_OPEN = 1;
-
-export function createApp({ events, webRoot, log, gate, control, toolchain, chat, tabs }: AppOptions): Hono {
+export function createApp({ events, webRoot, log, gate, control, toolchain, chat, permissions, agentSetup, secrets, appShortcut, tabs }: AppOptions): Hono {
   const app = new Hono();
 
   // First, for every method and path: no route may be registered before this line.
   app.use('*', gate);
-
-  /** Validate against the shared contract, then send; never send unschematized data. */
-  const send = (ws: WSContext, message: unknown) => {
-    const parsed = ServerMessage.safeParse(message);
-    if (!parsed.success) {
-      log.error('refusing to send a message that fails the shared schema', {
-        issues: parsed.error.issues,
-      });
-      return;
-    }
-    if (ws.readyState === WS_OPEN) ws.send(JSON.stringify(parsed.data));
-  };
 
   // The gate has already checked the tab's token; this only says so, so a tab
   // whose socket was refused can tell "not connected" from "server gone".
@@ -157,70 +154,15 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, chat
     });
   }
 
+  // One route file per lane (story 2.3): each fills only its own. Every route is in
+  // `API_ROUTES` under `/api/v1`, registered after the gate.
   if (chat !== undefined) registerChatRoutes(app, chat, log);
+  registerWorkspaceRoutes(app, { chat, log });
+  registerPermissionRoutes(app, { permissions, log });
+  registerShortcutRoutes(app, { appShortcut, log });
+  registerAgentSetupRoutes(app, { agentSetup, secrets, log });
 
-  app.get(
-    '/ws',
-    upgradeWebSocket((c) => {
-      // Nothing is sent until the client says where to start: `{ type: 'subscribe', afterSeq }`.
-      let unsubscribe: (() => void) | undefined;
-      // The gate verified this token; holding it keeps a connected tab's token alive.
-      const token = webSocketToken(c.req.header('sec-websocket-protocol'));
-      let release: (() => void) | undefined;
-      const end = () => {
-        unsubscribe?.();
-        release?.();
-        release = undefined;
-      };
-
-      return {
-        onOpen() {
-          release = tabs?.hold(token);
-        },
-
-        onMessage(event, ws) {
-          const raw = typeof event.data === 'string' ? event.data : null;
-          let json: unknown;
-          try {
-            if (raw === null) throw new Error('binary frames are not supported');
-            json = JSON.parse(raw);
-          } catch (error) {
-            log.warn('ignoring unparseable client message', { reason: String(error) });
-            return;
-          }
-          const parsed = ClientMessage.safeParse(json);
-          if (!parsed.success) {
-            log.warn('ignoring client message that fails the shared schema', {
-              issues: parsed.error.issues,
-            });
-            return;
-          }
-          switch (parsed.data.type) {
-            case 'ping':
-              send(ws, { type: 'pong', at: new Date().toISOString() });
-              break;
-            case 'subscribe':
-              // Replaces any earlier subscription. The backlog after `afterSeq`
-              // is sent synchronously, then live events, with no gap or repeat.
-              unsubscribe?.();
-              unsubscribe = events.subscribe(parsed.data.afterSeq, (event) => send(ws, event));
-              // The backlog went out synchronously above; everything after this is live.
-              send(ws, { type: 'caught_up' });
-              break;
-          }
-        },
-
-        onClose() {
-          end();
-        },
-
-        onError(event) {
-          log.warn('websocket error', { error: String((event as Event & { error?: unknown }).error ?? event.type) });
-          end();
-        },
-      };
-    }),
-  );
+  registerEventSocket(app, { events, log, tabs });
 
   // The built UI, never under the server's own paths (`paths.ts`).
   const staticFiles = serveStatic({ root: webRoot });

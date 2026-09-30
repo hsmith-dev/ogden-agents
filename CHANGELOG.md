@@ -10,5 +10,6 @@ The first build on npm. Run it with `npx ogden-agents` (Node 24 or later on macO
 - **Security gate.** Every HTTP and WebSocket request passes one gate: a single-use launch code exchanged for an `HttpOnly`, `SameSite=Strict` cookie, plus `Host` and `Origin` checks.
 - **Event log.** State reaches the UI through one append-only event log in SQLite, in the per-user data folder, over one WebSocket.
 - **App shell.** The design system (light and dark themes, density) and the app layout with the workspace switcher and status sidebar, in their empty states.
+- **Python tools, installed for you.** Settings > Tools checks for `uv` (the tool BMad Method's scripts run on) and, with one click, installs a private copy: the official release for your OS and CPU, verified against pinned hashes, with no terminal and no system changes.
 - **Bundled forks.** The package ships pinned copies of the BMAD-METHOD and bmad-loop forks, locked by `forks.lock`.
 - **Release pipeline.** Tagged releases publish from GitHub Actions through npm trusted publishing, only after the full test matrix passes, and then run `npx ogden-agents@<version>` from the registry on macOS, Windows and Linux.

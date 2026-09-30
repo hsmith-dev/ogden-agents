@@ -21,11 +21,6 @@ const STUBS: ReadonlyArray<readonly [method: string, path: string]> = [
   ['PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId })],
   // 2.10
   ['POST', apiPath(API_ROUTES.sessionCancel, { wsId, sesId })],
-  // 2.4
-  ['GET', API_ROUTES.appShortcut],
-  ['POST', API_ROUTES.appShortcut],
-  ['DELETE', API_ROUTES.appShortcut],
-  ['DELETE', API_ROUTES.appShortcutOffer],
   // 9.x
   ['GET', API_ROUTES.agents],
   ['POST', apiPath(API_ROUTES.agentInstall, { agentId: 'claude-code' })],

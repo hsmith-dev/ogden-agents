@@ -10,7 +10,7 @@ import { LAUNCH_COMMAND } from './server-stopped';
  * after the server restarted) or whose token the server refused. The app's
  * files load without a token, so this is the app's own page; nothing here
  * talks to the server. Opening the app again through the launcher gives the
- * new tab its own token. The shortcut clause joins the copy with story 2.4.
+ * new tab its own token, and the app shortcut runs that launcher (story 2.4).
  */
 export function OpenOgdenAgents() {
   const [copy, setCopy] = useState<'idle' | 'copied' | 'failed'>('idle');
@@ -31,7 +31,7 @@ export function OpenOgdenAgents() {
           title="Open Ogden Agents"
           description={
             <>
-              This tab isn't connected. Run <code>{LAUNCH_COMMAND}</code> in a terminal.
+              This tab isn't connected. Open Ogden Agents from its shortcut, or run <code>{LAUNCH_COMMAND}</code> in a terminal.
             </>
           }
           actions={

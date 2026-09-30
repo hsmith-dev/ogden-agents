@@ -8,6 +8,7 @@ import {
   createMemoryAgentSetup,
   createMemoryAppShortcut,
   createMemorySecretStore,
+  createOsAppShortcut,
   createUvToolchain,
 } from '@ogden-agents/adapters';
 import {
@@ -35,6 +36,7 @@ import { createGate, launchUrl as launchUrlFor } from './gate.js';
 import { acquireInstanceLock, type InstanceLock } from './instance-lock.js';
 import { createLauncherToken, type LauncherToken } from './launcher-token.js';
 import { createLogger, createRotatingFileWriter, LOG_DIR, teeWriters, type Logger } from './log.js';
+import { shortcutErrorCode } from './shortcut-routes.js';
 import { VERSION } from './version.js';
 
 /** The only interface the server ever binds (AD-15). */
@@ -147,7 +149,15 @@ export interface StartOptions {
   agentSetup?: readonly AgentSetupPort[];
   /** Where API keys are kept (AD-16). Default: the in-memory `secrets-memory` stub, until 9.4 brings the keychain. */
   secrets?: SecretStorePort;
-  /** The Ogden Agents app shortcut (E2-R10). Default: the in-memory `shortcut-memory` stub, until 2.4. */
+  /**
+   * This install's launcher, `bin/ogden.js`, for the app shortcut to run
+   * (E2-R10). With it, the default {@link appShortcut} is the `shortcut-os`
+   * adapter, and a shortcut already there is re-pointed at this Node and
+   * launcher once the server is up (never created). Without it (tests), the
+   * in-memory `shortcut-memory` stub.
+   */
+  launcherEntry?: string;
+  /** Override the app shortcut (tests). Default: see {@link launcherEntry}. */
   appShortcut?: AppShortcutPort;
   /**
    * Called once the server has stopped by itself (Quit, or a restart the
@@ -347,6 +357,11 @@ async function listenAndAnnounce({
     onAgentError: (sessionId, error) => log.warn('agent failed', { sessionId, code: error.code, reason: error.message, ...error.details }),
     onInternalError: (sessionId, error) => log.error('applying an agent event failed', { sessionId, reason: String(error) }),
   });
+  const appShortcut =
+    options.appShortcut ??
+    (options.launcherEntry === undefined
+      ? createMemoryAppShortcut({ platform: process.platform })
+      : createOsAppShortcut({ platform: process.platform, launcherEntry: options.launcherEntry, nodePath: process.execPath, stateDir: dataDir }));
   const app = createApp({
     events: core.events,
     webRoot: options.webRoot ?? defaultWebRoot(),
@@ -358,7 +373,7 @@ async function listenAndAnnounce({
     permissions,
     agentSetup: options.agentSetup ?? [createMemoryAgentSetup()],
     secrets: options.secrets ?? createMemorySecretStore(),
-    appShortcut: options.appShortcut ?? createMemoryAppShortcut({ platform: process.platform }),
+    appShortcut,
     tabs,
   });
 
@@ -475,6 +490,9 @@ async function listenAndAnnounce({
     },
   };
 
+  // Off the start path: a shortcut already there follows this install's Node and launcher (story 2.4).
+  void repointAppShortcut(appShortcut, log);
+
   if (options.open === true && launchUrl !== undefined) {
     try {
       await openBrowser(launchUrl);
@@ -495,6 +513,21 @@ async function listenAndAnnounce({
     stopped,
     close: () => shutdown('close'),
   };
+}
+
+/**
+ * Re-points an app shortcut that is already there at this server's Node and
+ * launcher, which may have moved since it was added (a Node upgrade, a new
+ * npx cache). It never creates one; a failure is logged, without paths, and
+ * the server runs on.
+ */
+async function repointAppShortcut(appShortcut: AppShortcutPort, log: Logger): Promise<void> {
+  try {
+    if (!(await appShortcut.status()).installed) return;
+    await appShortcut.add();
+  } catch (error) {
+    log.warn('could not re-point the app shortcut', { code: shortcutErrorCode(error) });
+  }
 }
 
 /** Sends one schema-checked message to every connected WebSocket client. */

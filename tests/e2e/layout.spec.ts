@@ -314,7 +314,7 @@ test.describe('a tab without a token', () => {
           expect(response!.status()).toBe(200);
           const launch = page.getByTestId('open-ogden-agents');
           await expect(launch.getByRole('heading', { name: 'Open Ogden Agents' })).toBeVisible();
-          await expect(launch).toContainText("This tab isn't connected. Run npx ogden-agents in a terminal.");
+          await expect(launch).toContainText("This tab isn't connected. Open Ogden Agents from its shortcut, or run npx ogden-agents in a terminal.");
           await expect(launch.getByRole('button', { name: 'Copy command' })).toBeVisible();
           await expect(page.locator('aside[data-slot="sidebar"]')).toHaveCount(0);
           // The bookmark's path is kept.

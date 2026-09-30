@@ -9,12 +9,23 @@
  * stderr writes, and fatal errors) goes to the rotating log in
  * `<dataDir>/logs/server.log`.
  */
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { ensureDataDir } from '@ogden-agents/core';
 import { createLogger, createRotatingFileWriter, LOG_DIR, redact, type Logger, type LogWriter } from './log.js';
 import { EXIT_ALREADY_RUNNING, ServerAlreadyRunningError } from './instance-lock.js';
 import { start, type RunningServer } from './start.js';
+
+/**
+ * The launcher beside this bundle (`dist/serve.js` next to `bin/ogden.js`, as
+ * packed), for the app shortcut to run; `undefined` where there is none.
+ */
+function siblingLauncher(): string | undefined {
+  const entry = fileURLToPath(new URL('../bin/ogden.js', import.meta.url));
+  return existsSync(entry) ? entry : undefined;
+}
 
 function parsePort(value: string | undefined): number | undefined {
   if (value === undefined) return undefined;
@@ -72,6 +83,7 @@ async function main(): Promise<void> {
     return;
   }
 
+  const launcherEntry = siblingLauncher();
   let server: RunningServer;
   try {
     server = await start({
@@ -80,6 +92,7 @@ async function main(): Promise<void> {
       open: false,
       ...(port === undefined ? {} : { port }),
       ...(webRoot === undefined ? {} : { webRoot }),
+      ...(launcherEntry === undefined ? {} : { launcherEntry }),
       onStop: (reason) => {
         log.info('server process exiting', { reason });
         process.exit(0);

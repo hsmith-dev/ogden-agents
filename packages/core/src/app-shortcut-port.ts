@@ -11,6 +11,8 @@ export interface AppShortcutState {
   supported: boolean;
   /** Whether it is there now. */
   installed: boolean;
+  /** Whether the user answered the first-run offer (Add or Not now); kept across restarts. */
+  offerDismissed: boolean;
 }
 
 export interface AppShortcutPort {
@@ -19,4 +21,6 @@ export interface AppShortcutPort {
   add(): Promise<void>;
   /** Removes it; removing a missing one is not an error. */
   remove(): Promise<void>;
+  /** Records that the first-run offer was answered, so it is never shown again. */
+  dismissOffer(): Promise<void>;
 }

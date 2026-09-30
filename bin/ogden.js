@@ -74,6 +74,8 @@ async function runForeground(cli) {
       launch: true,
       open: cli.open,
       webRoot: WEB_ROOT,
+      // The app shortcut runs this launcher (story 2.4).
+      launcherEntry: fileURLToPath(import.meta.url),
       // Quit in the UI stops the server; then this process ends too.
       onStop: () => process.exit(0),
     });

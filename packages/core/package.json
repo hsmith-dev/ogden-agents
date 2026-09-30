@@ -8,12 +8,22 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "db:generate": "drizzle-kit generate",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@ogdenmad/shared": "workspace:*"
+    "@ogdenmad/shared": "workspace:*",
+    "better-sqlite3": "^13.0.3",
+    "drizzle-orm": "^0.45.3",
+    "env-paths": "^4.0.0",
+    "ulid": "^3.0.2",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "typescript": "^7.0.2"
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^24.0.0",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
   }
 }

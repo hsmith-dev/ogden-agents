@@ -1,13 +1,14 @@
 import { upgradeWebSocket } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
-import type { EventBus } from '@ogdenmad/core';
+import type { EventLog } from '@ogdenmad/core';
 import { ClientMessage, ServerMessage } from '@ogdenmad/shared';
 import { Hono } from 'hono';
 import type { WSContext } from 'hono/ws';
 import type { Logger } from './log.js';
 
 export interface AppOptions {
-  bus: EventBus;
+  /** Core's event log; `/ws` clients subscribe to it (AD-5). */
+  events: EventLog;
   /** Absolute path to the built web UI (`packages/web/dist`). */
   webRoot: string;
   log: Logger;
@@ -15,7 +16,7 @@ export interface AppOptions {
 
 const WS_OPEN = 1;
 
-export function createApp({ bus, webRoot, log }: AppOptions): Hono {
+export function createApp({ events, webRoot, log }: AppOptions): Hono {
   const app = new Hono();
 
   /** Validate against the shared contract, then send; never send unschematized data. */
@@ -33,13 +34,10 @@ export function createApp({ bus, webRoot, log }: AppOptions): Hono {
   app.get(
     '/ws',
     upgradeWebSocket(() => {
+      // Nothing is sent until the client says where to start: `{ type: 'subscribe', afterSeq }`.
       let unsubscribe: (() => void) | undefined;
 
       return {
-        onOpen(_event, ws) {
-          unsubscribe = bus.subscribe((event) => send(ws, event));
-        },
-
         onMessage(event, ws) {
           const raw = typeof event.data === 'string' ? event.data : null;
           let json: unknown;
@@ -60,6 +58,12 @@ export function createApp({ bus, webRoot, log }: AppOptions): Hono {
           switch (parsed.data.type) {
             case 'ping':
               send(ws, { type: 'pong', at: new Date().toISOString() });
+              break;
+            case 'subscribe':
+              // Replaces any earlier subscription. The backlog after `afterSeq`
+              // is sent synchronously, then live events, with no gap or repeat.
+              unsubscribe?.();
+              unsubscribe = events.subscribe(parsed.data.afterSeq, (event) => send(ws, event));
               break;
           }
         },

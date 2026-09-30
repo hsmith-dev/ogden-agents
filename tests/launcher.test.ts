@@ -3,19 +3,35 @@
  * `dist/` (the bundled server and web UI; `pnpm test` builds first).
  */
 import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const BIN = join(import.meta.dirname, '..', 'bin', 'ogdenmad.js');
 
 const children: ChildProcess[] = [];
+const dataDirs: string[] = [];
 
-afterEach(() => {
-  for (const child of children.splice(0)) if (child.exitCode === null) child.kill('SIGKILL');
+afterEach(async () => {
+  const exits = children.splice(0).map((child) => {
+    if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+    const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+    child.kill('SIGKILL');
+    return exited;
+  });
+  await Promise.all(exits);
+  for (const dir of dataDirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 });
 
 function launch(args: string[]) {
-  const child = spawn(process.execPath, [BIN, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+  // A throwaway data folder, so the test never touches the user's real one.
+  const dataDir = mkdtempSync(join(tmpdir(), 'ogdenmad-launcher-'));
+  dataDirs.push(dataDir);
+  const child = spawn(process.execPath, [BIN, ...args], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, OGDENMAD_DATA_DIR: dataDir },
+  });
   children.push(child);
   let stdout = '';
   child.stdout!.on('data', (chunk) => (stdout += String(chunk)));

@@ -10,6 +10,12 @@ export default defineConfig({
   clean: true,
   dts: false,
   fixedExtension: false,
+  // Core's committed SQL migrations ship beside the bundle (`dist/drizzle/`),
+  // where core looks for them first, so an installed package migrates on first run.
+  copy: [
+    { from: '../core/drizzle/*.sql', to: 'dist/drizzle' },
+    { from: '../core/drizzle/meta/*.json', to: 'dist/drizzle/meta' },
+  ],
   deps: {
     // Every third-party import stays external and loads from node_modules,
     // whichever workspace package imports it (the root package must declare

@@ -6,7 +6,9 @@
 // In a fresh temp directory, with a fresh npm cache and no workspace in sight,
 // runs `npx --yes --package=<tgz> ogdenmad --no-open --port 0`, waits for the
 // printed 127.0.0.1 URL, checks that `GET /` returns the page and that a
-// WebSocket client receives `server.started`, then stops the process tree.
+// WebSocket client that subscribes receives `server.started` (which needs the
+// installed `better-sqlite3` to load and the bundled migrations to apply),
+// then stops the process tree. The data folder is a temp directory.
 // Exits non-zero with the captured output on any failure.
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -40,6 +42,9 @@ env.npm_config_cache = cacheDir;
 env.npm_config_update_notifier = 'false';
 env.npm_config_fund = 'false';
 env.npm_config_audit = 'false';
+// Keep the database and logs out of the user's real data folder.
+const dataDir = mkdtempSync(join(tmpdir(), 'ogdenmad-smoke-data-'));
+env.OGDENMAD_DATA_DIR = dataDir;
 
 const args = ['--yes', `--package=${tarball}`, 'ogdenmad', '--no-open', '--port', '0'];
 // On Windows `npx` is `npx.cmd`. Run through a shell by a quoted bare name, cmd.exe
@@ -112,6 +117,8 @@ async function checkPage(url) {
 function checkServerStarted(url) {
   return new Promise((resolveEvent, reject) => {
     const ws = new WebSocket(`${url.replace(/^http/, 'ws')}/ws`);
+    // The server sends nothing until the client subscribes (AD-5).
+    ws.addEventListener('open', () => ws.send(JSON.stringify({ type: 'subscribe', afterSeq: 0 })));
     ws.addEventListener('message', (event) => {
       let message;
       try {
@@ -155,7 +162,7 @@ async function stopTree() {
 }
 
 function cleanUp() {
-  for (const dir of [workDir, cacheDir]) {
+  for (const dir of [workDir, cacheDir, dataDir]) {
     try {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     } catch {

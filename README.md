@@ -26,7 +26,11 @@ pnpm install
 pnpm start            # builds, starts the server on 127.0.0.1, opens the browser
 ```
 
-The page shows the connection state and lists server events as they arrive (currently `server.started`).
+The page shows the connection state and lists logged events (currently one `server.started` per server start). Events persist across restarts, and a reloaded or reconnected page catches up from the last event it saw.
+
+OgdenMad keeps its SQLite database (`ogdenmad.db`) and logs (`logs/server.log`) in your OS per-user data folder under `ogdenmad/` (for example `~/Library/Application Support/ogdenmad` on macOS). Set `OGDENMAD_DATA_DIR` to use another folder. Nothing is written into your repos.
+
+To change the database schema, edit `packages/core/src/db/schema.ts`, run `pnpm --filter @ogdenmad/core db:generate`, and commit the new migration in `packages/core/drizzle/`.
 
 Launcher options (after `pnpm build`):
 

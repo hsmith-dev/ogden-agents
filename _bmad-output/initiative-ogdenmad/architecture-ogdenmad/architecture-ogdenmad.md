@@ -85,7 +85,7 @@ graph LR
 - **Binds:** CAP-3, CAP-4, CAP-5, CAP-7, CAP-9, CAP-12
 - **Prevents:** a separate push mechanism per epic, and the UI coupling to agent-native output.
 - **Rule:**
-  - Every state change the UI shows is an event persisted by core in SQLite, with the envelope `{ id, seq, workspaceId, streamId, type, at, payload }`.
+  - Every state change the UI shows is an event persisted by core in SQLite, with the envelope `{ id, seq, workspaceId, streamId, type, at, payload }`. `workspaceId` is `null` only for install-level events (such as `server.started`) that belong to no workspace.
   - `seq` increases strictly across the install.
   - The UI holds one WebSocket and subscribes with "after seq N"; reconnecting and catching up are the same call.
   - Every event type has a Zod schema in `packages/shared`, and nothing unschematized is emitted.

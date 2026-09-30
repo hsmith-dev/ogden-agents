@@ -44,3 +44,5 @@ Chat, onboarding and workspaces with Claude Code only. Other agents come in epic
 ## Notes
 
 - Waits on epic 1 because: see `after` in the initiative's tickets.toml.
+- Decision: session events (message deltas, completions, tool calls) are appended only through a core helper that takes a session ID and derives `workspaceId` from it, so no event can name a session in another workspace and per-workspace history deletion stays complete. This comes from story 1.3's review (user, 2026-09-29).
+- Decision: the UI subscribes per workspace to a recent window and pages older history on demand, instead of replaying the whole install history in one blocking step on every page load. This needs a scoped, paged subscribe protocol in the event log. It comes from story 1.3's review (user, 2026-09-29).

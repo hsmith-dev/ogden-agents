@@ -7,7 +7,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import type { CoreEvent, SessionId } from '@ogden-agents/shared';
+import { MAX_DIFF_TEXT_LENGTH, type CoreEvent, type SessionId } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import {
   AgentError,
@@ -376,6 +376,46 @@ describe('tool calls and permission requests', () => {
       ],
       // An unknown kind is `other`; a missing status is `pending`.
       ['session.tool_call', workspace.id, { sessionId: session.id, toolCallId: 't2', title: 'Something new', kind: 'other', status: 'pending' }],
+    ]);
+  });
+
+  it('an update that only changes the status carries no diffs; one that changes them does (review F1)', async () => {
+    const core = openTestCore();
+    const diff = { path: 'src/a.ts', oldText: 'a', newText: 'b' };
+    const agent = scriptedAgent(async (_text, emit) => {
+      emit({ type: 'tool_call', toolCallId: 't1', title: 'Edit src/a.ts', kind: 'edit', status: 'pending', diffs: [diff] });
+      emit({ type: 'tool_call_update', toolCallId: 't1', status: 'in_progress' });
+      emit({ type: 'tool_call_update', toolCallId: 't1', status: 'in_progress', diffs: [diff] });
+      emit({ type: 'tool_call_update', toolCallId: 't1', status: 'completed', diffs: [{ ...diff, newText: 'c' }] });
+      return { stopReason: 'end_turn' };
+    });
+    const { chat, workspace, session } = setUp(core, agent.port);
+    chat.sendMessage(workspace.id, session.id, 'edit it');
+    await chat.settled();
+    const updates = sessionEvents(core, session.id).filter((e) => e.type === 'session.tool_call_updated');
+    expect(updates.map((e) => [e.payload.status, e.payload.diffs])).toEqual([
+      ['in_progress', undefined],
+      // The same diffs again: still left out.
+      ['in_progress', undefined],
+      ['completed', [{ ...diff, newText: 'c' }]],
+    ]);
+  });
+
+  it('cuts each side of an oversize diff to the shared cap and flags it truncated, before it is appended', async () => {
+    const core = openTestCore();
+    const big = 'x'.repeat(MAX_DIFF_TEXT_LENGTH + 10);
+    const agent = scriptedAgent(async (_text, emit) => {
+      emit({ type: 'tool_call', toolCallId: 't1', title: 'Write big.txt', kind: 'edit', diffs: [{ path: 'big.txt', oldText: null, newText: big }] });
+      emit({ type: 'tool_call_update', toolCallId: 't1', status: 'completed', diffs: [{ path: 'small.txt', oldText: big, newText: 'ok' }] });
+      return { stopReason: 'end_turn' };
+    });
+    const { chat, workspace, session } = setUp(core, agent.port);
+    chat.sendMessage(workspace.id, session.id, 'write it');
+    await chat.settled();
+    const calls = sessionEvents(core, session.id).filter((e) => e.type === 'session.tool_call' || e.type === 'session.tool_call_updated');
+    expect(calls.map((e) => e.payload.diffs)).toEqual([
+      [{ path: 'big.txt', oldText: null, newText: 'x'.repeat(MAX_DIFF_TEXT_LENGTH), truncated: true }],
+      [{ path: 'small.txt', oldText: 'x'.repeat(MAX_DIFF_TEXT_LENGTH), newText: 'ok', truncated: true }],
     ]);
   });
 

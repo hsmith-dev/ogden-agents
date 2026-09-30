@@ -21,6 +21,7 @@ import {
   FolderListing,
   HistoryDeletedResponse,
   HistoryPageMessage,
+  MAX_DIFF_TEXT_LENGTH,
   MAX_PAGE_EVENTS,
   NewCoreEvent,
   OnboardingState,
@@ -34,6 +35,7 @@ import {
   SessionsResponse,
   SetApiKeyRequest,
   SignInResponse,
+  ToolCallDiff,
   ToolKind,
   UpdateWorkspaceSettingsRequest,
   WorkspaceSettingsResponse,
@@ -165,6 +167,12 @@ describe('new event types', () => {
 });
 
 describe('shared enums and ids', () => {
+  it('ToolCallDiff caps each side and may be flagged truncated', () => {
+    expect(ToolCallDiff.parse({ path: 'a.ts', oldText: null, newText: 'x', truncated: true })).toMatchObject({ truncated: true });
+    expect(ToolCallDiff.safeParse({ path: 'a.ts', oldText: null, newText: 'x'.repeat(MAX_DIFF_TEXT_LENGTH + 1) }).success).toBe(false);
+    expect(ToolCallDiff.safeParse({ path: 'a.ts', oldText: 'x'.repeat(MAX_DIFF_TEXT_LENGTH + 1), newText: '' }).success).toBe(false);
+  });
+
   it('ToolKind, CautionLevel, AgentId and PermissionRuleId', () => {
     expect(ToolKind.parse('switch_mode')).toBe('switch_mode');
     expect(ToolKind.safeParse('shell').success).toBe(false);

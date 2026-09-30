@@ -76,11 +76,23 @@ export const AgentId = z
   .max(64);
 export type AgentId = z.infer<typeof AgentId>;
 
-/** One file change a tool call reports: the whole old and new text (`oldText` is `null` for a new file). Secrets masked. */
+/**
+ * The most characters of a diff's old or new text an event carries (each side
+ * on its own). Core cuts longer text before it appends, and flags the diff
+ * `truncated` (story 2.3 review F1).
+ */
+export const MAX_DIFF_TEXT_LENGTH = 64 * 1024;
+
+/**
+ * One file change a tool call reports: the old and new text (`oldText` is
+ * `null` for a new file), each at most {@link MAX_DIFF_TEXT_LENGTH}
+ * characters. `truncated` is `true` when core cut either side. Secrets masked.
+ */
 export const ToolCallDiff = z.object({
   path: z.string().min(1),
-  oldText: z.string().nullable(),
-  newText: z.string(),
+  oldText: z.string().max(MAX_DIFF_TEXT_LENGTH).nullable(),
+  newText: z.string().max(MAX_DIFF_TEXT_LENGTH),
+  truncated: z.literal(true).optional(),
 });
 export type ToolCallDiff = z.infer<typeof ToolCallDiff>;
 
@@ -292,7 +304,11 @@ const SessionToolCallUpdatedInput = z.object({
   ...onSessionStream,
   payload: toolCallPayload,
 });
-/** A tool call's current state after an update: the whole call, not a delta. */
+/**
+ * A tool call's current state after an update: the whole call, not a delta,
+ * except `diffs`, which is present only when the update changed them (the
+ * latest `diffs` seen for the call still apply; story 2.3 review F1).
+ */
 export const SessionToolCallUpdatedEvent = SessionToolCallUpdatedInput.extend(assigned);
 export type SessionToolCallUpdatedEvent = z.infer<typeof SessionToolCallUpdatedEvent>;
 

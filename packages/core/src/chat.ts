@@ -18,7 +18,7 @@
  */
 import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
-import { ToolCallStatus, ToolKind, type Session, type SessionId, type ToolCallDiff, type Workspace, type WorkspaceId } from '@ogden-agents/shared';
+import { MAX_DIFF_TEXT_LENGTH, ToolCallStatus, ToolKind, type Session, type SessionId, type ToolCallDiff, type Workspace, type WorkspaceId } from '@ogden-agents/shared';
 import { monotonicFactory } from 'ulid';
 import {
   AgentError,
@@ -27,6 +27,7 @@ import {
   type AgentPermissionRequest,
   type AgentPort,
   type AgentSession,
+  type AgentToolCallDiff,
 } from './agent-port.js';
 import { canonicalWorkspacePath, type Entities } from './entities.js';
 import { CoreError, InvalidOperationError, NotFoundError, SessionBusyError } from './errors.js';
@@ -102,18 +103,31 @@ const toolStatus = (status: string | undefined): ToolCallStatus | undefined => {
   const parsed = ToolCallStatus.safeParse(status);
   return parsed.success ? parsed.data : undefined;
 };
-const toolCallPayload = (sessionId: SessionId, toolCallId: string, call: ToolCallState) => ({
+/**
+ * The adapter's diffs as events carry them: each side cut to
+ * {@link MAX_DIFF_TEXT_LENGTH} characters and flagged `truncated` when it was
+ * (story 2.3 review F1), so no adapter can put an unbounded file in the log.
+ */
+const capDiffs = (diffs: readonly AgentToolCallDiff[] | undefined): ToolCallDiff[] | undefined =>
+  diffs?.map(({ path, oldText, newText }) => {
+    const cut = (text: string) => (text.length > MAX_DIFF_TEXT_LENGTH ? text.slice(0, MAX_DIFF_TEXT_LENGTH) : text);
+    const truncated = newText.length > MAX_DIFF_TEXT_LENGTH || (oldText !== null && oldText.length > MAX_DIFF_TEXT_LENGTH);
+    return { path, oldText: oldText === null ? null : cut(oldText), newText: cut(newText), ...(truncated ? { truncated: true as const } : {}) };
+  });
+const sameDiffs = (a: readonly ToolCallDiff[] | undefined, b: readonly ToolCallDiff[] | undefined) => JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
+/** The event payload for `call`; `withDiffs: false` leaves its diffs out (an update that did not change them). */
+const toolCallPayload = (sessionId: SessionId, toolCallId: string, call: ToolCallState, withDiffs = true) => ({
   sessionId,
   toolCallId,
   title: call.title,
   kind: call.kind,
   status: call.status,
-  ...(call.diffs === undefined || call.diffs.length === 0 ? {} : { diffs: call.diffs }),
+  ...(!withDiffs || call.diffs === undefined || call.diffs.length === 0 ? {} : { diffs: call.diffs }),
 });
 /** Message ids are unique within the install; they are not entity keys. */
 const newMessageId = () => `msg_${nextUlid()}`;
 
-/** A tool call as core last recorded it: each event carries the whole call. */
+/** A tool call as core last recorded it: each event carries the whole call (diffs only when they change). */
 interface ToolCallState {
   title: string;
   kind: ToolKind;
@@ -229,7 +243,7 @@ export function createChat(options: ChatOptions): Chat {
             title: event.title,
             kind: toolKind(event.kind) ?? 'other',
             status: toolStatus(event.status) ?? 'pending',
-            diffs: event.diffs,
+            diffs: capDiffs(event.diffs),
           };
           entry.toolCalls.set(event.toolCallId, call);
           sessionEvents.appendSessionEvent(sessionId, {
@@ -244,12 +258,14 @@ export function createChat(options: ChatOptions): Chat {
             title: event.title ?? known?.title ?? '',
             kind: toolKind(event.kind) ?? known?.kind ?? 'other',
             status: toolStatus(event.status) ?? known?.status ?? 'pending',
-            diffs: event.diffs ?? known?.diffs,
+            diffs: capDiffs(event.diffs) ?? known?.diffs,
           };
           entry.toolCalls.set(event.toolCallId, call);
+          // Diffs can be large: an update repeats them only when they changed (review F1).
+          const diffsChanged = !sameDiffs(call.diffs, known?.diffs);
           sessionEvents.appendSessionEvent(sessionId, {
             type: 'session.tool_call_updated',
-            payload: toolCallPayload(sessionId, event.toolCallId, call),
+            payload: toolCallPayload(sessionId, event.toolCallId, call, diffsChanged),
           });
           return;
         }

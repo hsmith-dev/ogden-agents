@@ -60,6 +60,7 @@ context:
 
 - The architecture records the additions as dated notes: "Note (story 2.3)" on AD-1 (core ports `AgentSetupPort` and `AppShortcutPort`) and on AD-9 (ID prefix `rule_`). No rule changes (user, 2026-09-30).
 - The plan is kept whole despite its size (about 4,600 tokens), because the contracts must land together (user, 2026-09-30).
+- Decision (2026-09-30, user, review F1): tool_call updates omit `diffs` when they are unchanged from the known call, and each diff's old/new text is capped (constant in shared, e.g. 64 KiB per side) with a `truncated: true` flag.
 
 </frozen-after-approval>
 
@@ -155,7 +156,7 @@ context:
 
 ## Review Triage Log
 
-- F1 (medium; intent_gap, pending user decision): tool-call diffs are uncapped and repeated in full in every `session.tool_call_updated`, since each event carries the whole call.
+- F1 (medium; intent_gap): tool-call diffs were uncapped and repeated in full in every `session.tool_call_updated`. Patched (user decision): unchanged diffs are omitted, and each side is capped at `MAX_DIFF_TEXT_LENGTH` (64 KiB) with `truncated: true`.
 - F2 (patched): the permission handler's `switch (decision.outcome)` had no default; decision handling moved inside the `try` with `default: select('reject_once')`, so a null or unknown decision always declines. Test added.
 - F3 (deferred to 2.7): `reopenSession` falls back to `session/new` when resume fails; it should try `session/load` after a failed resume, and log the error code.
 - F4 (deferred to 9.2): the `args` and `env` of terminal-type auth methods from `listAuthMethods` are passed through unvalidated.

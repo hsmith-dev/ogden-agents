@@ -53,9 +53,11 @@ export interface StateGlyphProps extends Omit<ComponentProps<'span'>, 'children'
   /**
    * `visible`: glyph then word. `rail`: the word is visually hidden only in the
    * collapsed rail (md to lg), where it becomes the accessible name and a
-   * tooltip. `hidden`: the word is the accessible name only.
+   * tooltip. `hidden`: the word is the accessible name only. `none`: the glyph
+   * alone, hidden from screen readers, for a control that already says the
+   * word itself (a status row's caption and accessible name).
    */
-  labelMode?: 'visible' | 'rail' | 'hidden';
+  labelMode?: 'visible' | 'rail' | 'hidden' | 'none';
 }
 
 export function StateGlyph({ state, label = STATE_WORDS[state], labelMode = 'visible', className, ...props }: StateGlyphProps) {
@@ -68,6 +70,13 @@ export function StateGlyph({ state, label = STATE_WORDS[state], labelMode = 'vis
       <Shape state={state} />
     </svg>
   );
+  if (labelMode === 'none') {
+    return (
+      <span data-slot="state-glyph" data-state={state} aria-hidden className={cn('inline-flex shrink-0 items-center', className)} {...props}>
+        {glyph}
+      </span>
+    );
+  }
   const word = (
     <span className={cn('truncate', labelMode === 'hidden' && 'sr-only', labelMode === 'rail' && 'md:max-lg:sr-only')}>{label}</span>
   );

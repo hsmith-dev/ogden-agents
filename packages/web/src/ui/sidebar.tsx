@@ -1,10 +1,26 @@
-import { Bell, List } from '@phosphor-icons/react';
+import type { SessionState } from '@ogden-agents/shared';
+import { Bell, CaretRight, List } from '@phosphor-icons/react';
 import { Slot } from 'radix-ui';
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type MouseEvent, type ReactNode, type RefObject } from 'react';
+import {
+  cloneElement,
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+  type MouseEvent,
+  type ReactElement,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import { Badge } from './badge';
 import { Button } from './button';
 import { ScrollArea } from './scroll-area';
 import { Sheet, SheetContent } from './sheet';
+import { STATE_WORDS, StateGlyph } from './state-glyph';
 import { Tooltip, TooltipContent, TooltipTrigger } from './tooltip';
 import { cn } from './utils';
 
@@ -298,6 +314,150 @@ export function SidebarAttentionButton({ label, count, className, ...props }: Co
         {label}
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+/** The disclosure row of a workspace group or of "Earlier": a chevron that turns, then the label. */
+function DisclosureButton({ expanded, className, children, ...props }: ComponentProps<'button'> & { expanded: boolean }) {
+  return (
+    <button
+      type="button"
+      aria-expanded={expanded}
+      className={cn(
+        'flex h-(--row-height) w-full min-w-0 items-center gap-2 rounded-md px-2 text-label text-sidebar-foreground',
+        'transition-colors duration-(--motion-fast) ease-standard hover:bg-accent',
+        className,
+      )}
+      {...props}
+    >
+      <CaretRight
+        aria-hidden
+        className={cn('size-(--icon) shrink-0 text-muted-foreground motion-safe:transition-transform motion-safe:duration-(--motion-fast)', expanded && 'rotate-90')}
+      />
+      {children}
+    </button>
+  );
+}
+
+/** One glyph and count per non-zero state, for a collapsed workspace group (DESIGN.md Workspace group). */
+export function SidebarStateSummary({ summary, className, ...props }: ComponentProps<'span'> & { summary: readonly { state: SessionState; count: number }[] }) {
+  return (
+    <span data-slot="sidebar-state-summary" className={cn('flex shrink-0 items-center gap-2 text-caption text-muted-foreground', className)} {...props}>
+      {summary.map(({ state, count }) => (
+        <span key={state} data-state={state} className="inline-flex items-center">
+          <span className="sr-only">{STATE_WORDS[state]} </span>
+          <StateGlyph state={state} label={String(count)} className="text-caption tabular-nums" />
+        </span>
+      ))}
+    </span>
+  );
+}
+
+export interface SidebarWorkspaceGroupProps extends Omit<ComponentProps<'div'>, 'title'> {
+  /** The workspace's name: the disclosure's label and the group's accessible name. */
+  name: string;
+  collapsed: boolean;
+  onCollapsedChange: (collapsed: boolean) => void;
+  /** Shown beside the name while collapsed. */
+  summary: readonly { state: SessionState; count: number }[];
+}
+
+/**
+ * A workspace in the sidebar (DESIGN.md Workspace group): its name in label
+ * 600 with a disclosure chevron, then its session rows. Collapsed, it shows
+ * one glyph and count per non-zero state. The rail has no room for the
+ * name, so there every group shows its rows' glyphs, collapsed or not.
+ */
+export function SidebarWorkspaceGroup({ name, collapsed, onCollapsedChange, summary, className, children, ...props }: SidebarWorkspaceGroupProps) {
+  const listId = useId();
+  return (
+    <div
+      role="group"
+      aria-label={name}
+      data-slot="sidebar-workspace-group"
+      data-collapsed={collapsed || undefined}
+      className={cn('flex min-w-0 flex-col gap-0.5 md:max-lg:border-t md:max-lg:border-border md:max-lg:pt-1', className)}
+      {...props}
+    >
+      <DisclosureButton expanded={!collapsed} aria-controls={listId} className="font-semibold md:max-lg:hidden" onClick={() => onCollapsedChange(!collapsed)}>
+        <span className="min-w-0 flex-1 truncate text-left">{name}</span>
+        {collapsed && summary.length > 0 ? <SidebarStateSummary summary={summary} /> : null}
+      </DisclosureButton>
+      <div id={listId} className={cn('flex min-w-0 flex-col gap-0.5', collapsed && 'hidden md:max-lg:flex')}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** "Earlier": done sessions older than a day, collapsed until opened. Only in the full sidebar and the sheet. */
+export function SidebarEarlier({ count, className, children, ...props }: ComponentProps<'div'> & { count: number }) {
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  if (count === 0) return null;
+  return (
+    <div data-slot="sidebar-earlier" className={cn('flex min-w-0 flex-col gap-0.5 md:max-lg:hidden', className)} {...props}>
+      <DisclosureButton expanded={open} aria-controls={listId} className="text-muted-foreground" onClick={() => setOpen(!open)}>
+        <span className="min-w-0 flex-1 truncate text-left">Earlier</span>
+        <Badge>{count}</Badge>
+      </DisclosureButton>
+      <div id={listId} hidden={!open}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export interface SidebarStatusRowProps extends Omit<SidebarMenuButtonProps, 'asChild' | 'tooltip' | 'tooltipAlways' | 'title' | 'children'> {
+  state: SessionState;
+  title: string;
+  /** Under the title: the agent and the state word ("Claude Code, working"). */
+  caption: string;
+  /** The relative time shown right-aligned ("5m"), and the moment it stands for. */
+  time?: { label: string; dateTime: string } | undefined;
+  /** The link the row is (a router Link with no children); the row fills it. */
+  children: ReactElement<{ children?: ReactNode }>;
+}
+
+/**
+ * A session row (DESIGN.md Status row): glyph, one-line title, caption in
+ * muted-foreground, relative time in tabular caption. `waiting` adds the
+ * signal rail on the left. In the rail only the glyph shows; the title and
+ * state word are the accessible name and the tooltip.
+ */
+export function SidebarStatusRow({ state, title, caption, time, className, children, ...props }: SidebarStatusRowProps) {
+  const word = STATE_WORDS[state];
+  return (
+    <SidebarMenuButton
+      asChild
+      tooltip={`${title}: ${word}`}
+      // Not `data-state`: the tooltip trigger sets that one.
+      data-session-state={state}
+      aria-label={`${title}, ${caption}`}
+      className={cn(
+        'h-auto min-h-(--row-height) py-1',
+        state === 'waiting' && 'border-l-(length:--rail-row) border-l-signal',
+        className,
+      )}
+      {...props}
+    >
+      {cloneElement(
+        children,
+        undefined,
+        <>
+          <StateGlyph state={state} labelMode="none" />
+          <span className="flex min-w-0 flex-1 flex-col md:max-lg:sr-only">
+            <span className="truncate">{title}</span>
+            <span className="truncate text-caption text-muted-foreground">{caption}</span>
+          </span>
+          {time === undefined ? null : (
+            <time dateTime={time.dateTime} className="shrink-0 self-start text-caption tabular-nums text-muted-foreground md:max-lg:hidden">
+              {time.label}
+            </time>
+          )}
+        </>,
+      )}
+    </SidebarMenuButton>
   );
 }
 

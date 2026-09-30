@@ -126,18 +126,29 @@ const BUSY: ReadonlySet<SessionState> = new Set(['working', 'waiting']);
 export const isBusy = (session: Pick<Session, 'state'>): boolean => BUSY.has(session.state);
 
 /** Stable, so TanStack Query keeps the combined result's identity while nothing changes. */
-const combineSessionLists = (results: UseQueryResult<Session[]>[]) => results.map((result) => result.data);
+const combineSessionLists = (results: UseQueryResult<Session[]>[]) => results.map((result) => ({ data: result.data, error: result.isError }));
+
+export interface AllSessions {
+  sessions: Session[];
+  /** The workspaces whose session list has not loaded (still loading, or failed until the next retry). */
+  unloaded: ReadonlySet<string>;
+  /** Whether the workspace list itself has not loaded yet. */
+  loading: boolean;
+}
 
 /**
  * Every workspace's sessions: the REST lists (story 2.5), with each
  * session's live state from the event stream laid over them (AD-4). The
  * stream holds only each workspace's recent window, so a state older than
  * the window comes from REST; a chat started since the lists loaded comes
- * from its `session.created` until the refetch lands.
+ * from its `session.created` until the refetch lands. A state change also
+ * moves the session's `updatedAt` to the event's time. A list that failed is
+ * fetched again whenever the stream catches up (a reconnect).
  */
-export function useAllSessions(): Session[] {
+export function useAllSessionsStatus(): AllSessions {
   const workspaces = useWorkspaces();
-  const { events } = useEventStream();
+  const { events, caughtUp } = useEventStream();
+  const queryClient = useQueryClient();
   const lists = useQueries({
     queries: (workspaces.data ?? []).map((workspace) => ({
       queryKey: ['sessions', workspace.id],
@@ -146,19 +157,35 @@ export function useAllSessions(): Session[] {
     })),
     combine: combineSessionLists,
   });
-  return useMemo(() => {
+  const failed = (workspaces.data ?? []).filter((_workspace, i) => lists[i]?.error === true).map((workspace) => workspace.id).join(' ');
+  useEffect(() => {
+    if (!caughtUp) return;
+    if (workspaces.isError) void queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+    for (const wsId of failed.split(' ').filter(Boolean)) void queryClient.invalidateQueries({ queryKey: ['sessions', wsId] });
+  }, [caughtUp, failed, workspaces.isError, queryClient]);
+  const sessions = useMemo(() => {
     const byId = new Map<string, Session>();
-    for (const list of lists) for (const session of list ?? []) byId.set(session.id, session);
+    for (const list of lists) for (const session of list.data ?? []) byId.set(session.id, session);
     for (const event of events) {
       if (event.type === 'session.created') {
         if (!byId.has(event.payload.session.id)) byId.set(event.payload.session.id, event.payload.session);
       } else if (event.type === 'session.state_changed') {
         const session = byId.get(event.payload.sessionId);
-        if (session !== undefined) byId.set(session.id, { ...session, state: event.payload.state });
+        if (session !== undefined) byId.set(session.id, { ...session, state: event.payload.state, updatedAt: event.at > session.updatedAt ? event.at : session.updatedAt });
       } else if (event.type === 'workspace.history_deleted') {
         for (const [id, session] of byId) if (session.workspaceId === event.workspaceId) byId.delete(id);
       }
     }
     return [...byId.values()];
   }, [lists, events]);
+  const unloaded = useMemo(
+    () => new Set((workspaces.data ?? []).filter((_workspace, i) => lists[i]?.data === undefined).map((workspace) => workspace.id)),
+    [workspaces.data, lists],
+  );
+  return { sessions, unloaded, loading: workspaces.data === undefined };
+}
+
+/** Every workspace's sessions, with their live states (see {@link useAllSessionsStatus}). */
+export function useAllSessions(): Session[] {
+  return useAllSessionsStatus().sessions;
 }

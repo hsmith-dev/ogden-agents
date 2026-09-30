@@ -64,3 +64,6 @@
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-chats-persist-and-resume-after-a-restart-plan.md`
   summary: Save a transcript-reopened session's new agent id only once its primed prompt succeeds (story 2.10). Today a restart between the reopen and a successful primed prompt resumes the new, unprimed session, so that chat loses its earlier context.
   evidence: `packages/core/src/chat.ts` `agentFor` calls `setSessionAdapterRefs` as soon as `reopenSession` returns `new`; `prime` lives only in memory (story 2.7 review finding F4).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-live-status-sidebar-and-needs-you-across-workspaces-plan.md`
+  summary: Hold the sidebar order while keyboard focus is inside it, as it is held under the pointer (refactor sweep, story 2.12). Today only `pointerenter`/`pointerleave` freeze the order, so a keyboard user tabbing through the rows can have the focused row move when a state changes.
+  evidence: 2.11 review finding F7; `packages/web/src/shell/status-sidebar.tsx` `useHeldModel` is driven by the pointer only.

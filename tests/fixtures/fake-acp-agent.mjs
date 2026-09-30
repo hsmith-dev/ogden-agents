@@ -29,6 +29,8 @@
 //   "auth-expired" the prompt fails with ACP's auth-required error (-32000)
 //   "crash"        one chunk, then the process exits with code 1 mid-prompt
 //   "slow"         one chunk, then waits until cancelled (`cancelled`) or 10 s
+//   "hold"         one chunk, then waits until cancelled (`cancelled`), with no
+//                  timer: the session stays `working` for as long as a test needs
 //   "fail"         the prompt fails with a JSON-RPC internal error
 //   "env"          replies with the CLAUDE_CODE_EXECUTABLE it was given
 //   "echo-env"     replies with its whole environment, `NAME=value` per line,
@@ -222,6 +224,14 @@ acp
     if (text === 'pids') {
       await say(client, params.sessionId, `pid=${process.pid} grandchild=${grandchild?.pid ?? 'none'}`);
       return { stopReason: 'end_turn' };
+    }
+    if (text === 'hold') {
+      await say(client, params.sessionId, 'Holding');
+      await new Promise((resolve) => {
+        session.cancel = () => resolve(undefined);
+      });
+      session.cancel = undefined;
+      return { stopReason: 'cancelled' };
     }
     if (text === 'slow') {
       await say(client, params.sessionId, 'Thinking');

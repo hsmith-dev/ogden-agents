@@ -4,7 +4,8 @@ import { useEventStream } from '@/events/event-stream';
 import { quitServer } from '@/events/server-control';
 import { AlertDialog, AlertDialogCancel, AlertDialogConfirm, AlertDialogContent, AlertDialogTrigger } from '@/ui/alert-dialog';
 import { SidebarLabel, SidebarMenuButton } from '@/ui/sidebar';
-import { isBusy, useAllSessions } from '@/workspaces/workspace-api';
+import { isBusy } from '@/workspaces/workspace-api';
+import { useSidebarData } from './sidebar-data';
 
 /** The consequence of quitting, in one sentence (EXPERIENCE.md Interaction Rules). */
 export function quitConsequence(busy: number): string {
@@ -23,7 +24,7 @@ export function QuitButton() {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
-  const busy = useAllSessions().filter(isBusy).length;
+  const busy = useSidebarData().sessions.filter(isBusy).length;
 
   const onConfirm = () => {
     setPending(true);

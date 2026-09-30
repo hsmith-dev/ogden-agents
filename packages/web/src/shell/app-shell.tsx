@@ -2,8 +2,10 @@ import { Outlet, useRouterState } from '@tanstack/react-router';
 import { useEventStream } from '@/events/event-stream';
 import { SidebarInset, SidebarProvider } from '@/ui/sidebar';
 import { AppShortcutOffer } from './app-shortcut-offer';
+import { LiveAnnouncer } from './live-announcer';
 import { OpenOgdenAgents } from './open-ogden-agents';
 import { ServerStopped } from './server-stopped';
+import { SidebarDataProvider } from './sidebar-data';
 import { StatusSidebar } from './status-sidebar';
 import { VersionBanner } from './version-banner';
 
@@ -20,13 +22,16 @@ export function AppShell() {
   if (status === 'not-connected') return <OpenOgdenAgents />;
   if (status === 'stopped') return <ServerStopped reason={stoppedReason} />;
   return (
-    <SidebarProvider closeSheetOn={href}>
-      <StatusSidebar />
-      <SidebarInset data-testid="workspace-area">
-        <VersionBanner />
-        <AppShortcutOffer />
-        <Outlet />
-      </SidebarInset>
-    </SidebarProvider>
+    <SidebarDataProvider>
+      <SidebarProvider closeSheetOn={href}>
+        <StatusSidebar />
+        <LiveAnnouncer />
+        <SidebarInset data-testid="workspace-area">
+          <VersionBanner />
+          <AppShortcutOffer />
+          <Outlet />
+        </SidebarInset>
+      </SidebarProvider>
+    </SidebarDataProvider>
   );
 }

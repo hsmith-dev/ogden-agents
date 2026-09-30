@@ -11,7 +11,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const IS_WINDOWS = process.platform === 'win32';
@@ -42,12 +42,19 @@ env.npm_config_fund = 'false';
 env.npm_config_audit = 'false';
 
 const args = ['--yes', `--package=${tarball}`, 'ogdenmad', '--no-open', '--port', '0'];
-// On Windows `npx` is `npx.cmd`, which only runs through a shell; quote each argument.
+// On Windows `npx` is `npx.cmd`. Run through a shell by a quoted bare name, cmd.exe
+// resolves the batch file's own folder (%~dp0) to the current directory, so npx
+// looks for npm inside the empty work dir. Instead run npm's `npx-cli.js` directly
+// with this Node, which ships npm beside it; no shell and no quoting needed.
+const npxCli = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npx-cli.js');
+if (IS_WINDOWS && !existsSync(npxCli)) {
+  console.error(`smoke: npx not found beside Node at ${npxCli}`);
+  process.exit(1);
+}
 const child = IS_WINDOWS
-  ? spawn(['npx', ...args].map((a) => `"${a}"`).join(' '), {
+  ? spawn(process.execPath, [npxCli, ...args], {
       cwd: workDir,
       env,
-      shell: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     })

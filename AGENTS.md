@@ -35,5 +35,6 @@ A local browser UI for running BMAD with coding agents, shipped as one npm packa
 - npm publish needs `package.json` `repository.url` to match the GitHub repo exactly, or trusted publishing fails with E422.
 - Search `packages/` and `scripts/` for an existing helper before writing a new one (two unrelated tar/zip readers already exist).
 - After a restack or rebase, update commit SHAs and `baseline_revision` cited in plans and docs.
+- Windows CI runners are slow: don't fix single timeouts one by one; the root `vitest.config.ts` gives win32 20 s (5 s elsewhere, so slow tests still show up on macOS and Linux).
 
 <!-- /bmad:context -->

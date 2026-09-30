@@ -18,5 +18,7 @@ export default defineConfig({
     // memory, and so do the processes it spawns: no test touches the real
     // OS keychain (story 9.2).
     env: { OGDEN_AGENTS_TEST_SECRET_STORE: 'memory' },
+    // Windows CI runners (Node 26 especially) run ordinary tests past Vitest's 5 s default; elsewhere keep 5 s so slow tests still show (story 2.13).
+    ...(process.platform === 'win32' ? { testTimeout: 20_000, hookTimeout: 20_000 } : { testTimeout: 5_000, hookTimeout: 10_000 }),
   },
 });

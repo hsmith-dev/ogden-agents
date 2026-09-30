@@ -1,15 +1,17 @@
 /**
  * Installs the packed tarball with npx in an empty folder (fresh npm cache,
  * temp data folder) and starts it through the installed `ogden` launcher in
- * background mode, as a user does. The teardown makes sure no server process
- * is left and removes every folder.
+ * background mode, as a user does, with the fake agent (story 2.13). It also
+ * makes the extra folder the specs' own servers and projects live in. The
+ * teardown makes sure no server process is left and removes every folder.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { FullConfig } from '@playwright/test';
 import { prepareInstall, withTimeout } from '../../scripts/installed-package.mjs';
 import { isAlive, ROOT, waitUntil } from '../support.js';
-import { ENV, LAUNCHER_ARGS } from './installed.js';
+import { agentEnv, ENV, FAKE_AGENT, killExtraServers, LAUNCHER_ARGS } from './installed.js';
 
 /** Installing into an empty npm cache can be slow on CI runners. */
 const START_TIMEOUT_MS = 240_000;
@@ -19,7 +21,9 @@ export default async function globalSetup(_config: FullConfig) {
   const tarball = resolve(process.env[ENV.tarball] ?? join(ROOT, `ogden-agents-${version}.tgz`));
   if (!existsSync(tarball)) throw new Error(`e2e:installed: tarball not found: ${tarball}\nRun \`pnpm run pack\` first.`);
 
-  const install = prepareInstall({ tarball, prefix: 'ogden-agents-e2e' });
+  const install = prepareInstall({ tarball, prefix: 'ogden-agents-e2e', env: agentEnv(FAKE_AGENT) });
+  const extraDir = mkdtempSync(join(tmpdir(), 'ogden-agents-e2e-extra-'));
+  const removeExtra = () => rmSync(extraDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   const launcher = install.runLauncher(LAUNCHER_ARGS);
   let pid: number | undefined;
   try {
@@ -41,11 +45,13 @@ export default async function globalSetup(_config: FullConfig) {
       [ENV.url]: url,
       [ENV.pid]: String(pid),
       [ENV.startOutput]: launcher.output(),
+      [ENV.extraDir]: extraDir,
     });
   } catch (error) {
     await launcher.stop();
     install.killBackgroundServer();
     install.removeFolders();
+    removeExtra();
     throw new Error(`${error instanceof Error ? error.message : String(error)}\n--- launcher output ---\n${launcher.output() || '(none)'}`);
   }
 
@@ -54,10 +60,19 @@ export default async function globalSetup(_config: FullConfig) {
     // The journey ends with Quit; a failed run may leave the server up. Kill it, and make sure it's gone.
     if (install.killBackgroundServer()) console.warn(`e2e:installed: the server (${pid}) was still running at the end; killed it`);
     if (pid !== undefined) await waitUntil(() => !isAlive(pid), `server ${pid} to exit`).catch(() => {});
+    // The specs stop their own servers; one a failed spec left is killed here.
+    const leftover = killExtraServers(extraDir);
+    if (leftover.length > 0) console.warn(`e2e:installed: a spec's server (${leftover.join(', ')}) was still running at the end; killed it`);
+    for (const extra of leftover) await waitUntil(() => !isAlive(extra), `server ${extra} to exit`).catch(() => {});
     install.removeFolders();
+    try {
+      removeExtra();
+    } catch {
+      // Reported below.
+    }
     const problems = [
-      ...(pid !== undefined && isAlive(pid) ? [`server process ${pid} is still running`] : []),
-      ...[install.workDir, install.cacheDir, install.dataDir].filter((dir) => existsSync(dir)).map((dir) => `${dir} was not removed`),
+      ...[pid, ...leftover].filter((p) => p !== undefined && isAlive(p)).map((p) => `server process ${p} is still running`),
+      ...[install.workDir, install.cacheDir, install.dataDir, extraDir].filter((dir) => existsSync(dir)).map((dir) => `${dir} was not removed`),
     ];
     if (problems.length > 0) throw new Error(`e2e:installed cleanup: ${problems.join('; ')}`);
   };

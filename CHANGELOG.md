@@ -2,9 +2,25 @@
 
 Every release of the `ogden-agents` npm package. Versions follow [semantic versioning](https://semver.org/); before 1.0.0, a minor version may change behavior. How a release is made is in [RELEASING.md](RELEASING.md).
 
-## 0.1.0 — first release
+## 0.2.0 — chat and workspaces
 
-The first build on npm. Run it with `npx ogden-agents` (Node 24 or later on macOS, Windows or Linux). It is the foundation, not yet a working agent UI: it starts, signs you in and shows the app shell, but runs no agents.
+The first release on npm, published first as `0.2.0-rc.1` on the `next` dist-tag (`npx ogden-agents@next`), then as `0.2.0`. It includes everything listed under 0.1.0, which was never published. Ogden Agents now runs Claude Code: chat with it in your projects, answer its permission requests, and pick up where you left off after a restart. Run it with `npx ogden-agents` (Node 24 or later on macOS, Windows or Linux).
+
+- **Workspaces.** Add a project by browsing to its folder, or start a new project folder, and switch between projects from the sidebar header. Each project has its list of chats with **New chat**, and a settings page where you can delete its history (refused while an agent is working or waiting in it).
+- **Chats with Claude Code.** Replies stream in as the agent writes them. A message sent while the agent works is shown as **Queued** and sent after the reply; **Stop** ends a turn, and whatever was queued comes back to the composer. The agent's reads, edits and commands show as tool-call rows, grouped in Comfortable density, with the diff of each edit. An error shows its reason with **Try again**, and an agent that has gone quiet gets a check-in line with Stop. Long chats open at their latest page, with **Show earlier** and **Jump to latest**.
+- **Chats that persist and resume.** Every chat is kept in the event log. After a restart (or an agent crash) the next message reopens the agent's own session, so the chat keeps its context; where the agent can't resume, it starts again primed with the chat's transcript.
+- **Permission cards and caution levels.** Nothing the agent asks for runs until you answer its card: **Allow once**, **Always allow** (for that command prefix or path, in that project), or **Deny** with an optional reason, which goes to the agent. Each project has a caution level (**Ask every time**, the default; **Ask for commands**; or **Ask only for risky actions**) and a list of its Always allow rules, each with Remove.
+- **Status sidebar and Needs you.** The sidebar shows every project's chats with their live state (working, waiting, idle, error), and **Needs you** lists every request waiting on you, in any project, with a count in the tab title and screen reader announcements.
+- **App shortcut.** With per-tab sign-in, a bookmark can't reopen the app, so Ogden Agents can add a shortcut to your OS app menu (offered on first run, and in Settings > Appearance) that opens a fresh, signed-in tab.
+- **Per-tab token hardening.** API and WebSocket access use only the per-tab bearer token described under 0.1.0, never a cookie, so other web servers on your computer never receive anything they could replay. Event subscriptions are windowed per project, so a page load no longer replays the whole history.
+- **Sign in with your Claude subscription.** Settings > Agents has a Claude Code card that signs you in to your Claude subscription from the browser, with no terminal.
+- **Or use an API key.** **Use an API key instead** checks an Anthropic API key and keeps it in your OS keychain; it is used only while no subscription is signed in, and never shown again (just its last four characters) until **Remove key**.
+- **Install Claude Code from the UI.** The package doesn't bundle Claude Code. The Claude Code card detects it and, with **Install**, installs a pinned, integrity-checked copy into Ogden Agents' data folder, with progress on the card.
+- **Sign in again from a chat.** When Claude Code's sign-in expires, the chat's error offers **Sign in** (or a link to the API key when the key was refused), and **Try again** resends once you're signed in, keeping the chat's context.
+
+## 0.1.0 — first build (not published)
+
+Never published to npm: everything below first ships in 0.2.0. It was the foundation, not yet a working agent UI: it starts, signs you in and shows the app shell, but runs no agents.
 
 - **Launcher and background server.** `npx ogden-agents` starts a local server on `127.0.0.1` in the background, or finds the one already running, and opens the browser with a one-time sign-in link. The server keeps running after the terminal closes, until Quit in the app. The launcher and server compare versions: an older server with no busy session restarts on the new version, and one with busy sessions keeps running until they finish. An open tab whose version differs from the server's shows a reload banner.
 - **Security gate, per-tab sign-in, no cookie.** Every HTTP and WebSocket request passes one gate with `Host` and `Origin` checks. The launcher opens `/#c=<one-time code>`; the page removes the code from the address bar and exchanges it in a same-origin `POST` for a per-tab bearer token, kept in memory and the tab's `sessionStorage`. The token never appears in a URL or browser history, and no cookie is set, so other web servers on your computer never receive it. A bookmark or brand-new tab shows "Open Ogden Agents"; **New tab** in the sidebar opens another connected tab.

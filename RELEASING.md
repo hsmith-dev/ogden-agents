@@ -14,17 +14,21 @@ On a pushed tag `vX.Y.Z`:
 
 A failed publish publishes nothing, since `npm publish` is all or nothing. A failed verify means the release is already public: fix it forward (below).
 
-## First release (0.1.0) checklist
+## First release (0.2.0) checklist
 
-Steps 1 to 3 are one-time setup and need the repository owner.
+The first version on npm is `0.2.0`: epic 2 (chat and workspaces) and onboarding stories 9.1 to 9.4. `0.1.0` was never published (its CHANGELOG entry says so). It goes out in two steps, both by tag: `0.2.0-rc.1` to the `next` dist-tag, checked live with a real Claude Code, then `0.2.0` to `latest`. Every step here is done by the repository owner, by hand; nothing in the repository merges, tags or publishes by itself. Steps 2 and 3 are one-time setup.
 
-### 1. Make the repository public
+### 1. Merge the stack to `main`
+
+Merge the story branches to `main` in order (epic 2's stories, 9.1 to 9.4, then 2.13, which sets the version to `0.2.0-rc.1`), and wait for CI on `main` to pass, including the installed-package end-to-end suite on macOS, Windows and Linux. `main` must then hold the version `0.2.0-rc.1` in the root, server and web `package.json`, a root `package.json` with `"private": false`, and the 0.2.0 entry in `CHANGELOG.md`.
+
+### 2. Make the repository public
 
 GitHub → `hsmith-dev/ogden-agents` → Settings → General → Danger Zone → Change repository visibility → Public.
 
 npm only records provenance for packages published from a public repository. The workflow still publishes from a private one, without provenance.
 
-### 2. Configure the npm trusted publisher
+### 3. Configure the npm trusted publisher
 
 On npmjs.com, signed in as an owner of `ogden-agents`: the package page → Settings → Trusted Publisher → GitHub Actions, with exactly:
 
@@ -41,27 +45,52 @@ After the first successful release, you can also set Settings → Publishing acc
 
 Optional: GitHub → Settings → Environments → `npm-release` (created by the first run if it doesn't exist) → limit deployment to tags matching `v*.*.*`, and add yourself as a required reviewer to approve each publish by hand.
 
-### 3. Merge epic 1 to `main`
+### 4. Tag the release candidate
 
-Merge the epic 1 story branches to `main` in order, and wait for CI on `main` to pass. `main` must hold the versions `0.1.0` (root, server and web `package.json`), a root `package.json` with `"private": false`, and the 0.1.0 entry in `CHANGELOG.md`.
-
-### 4. Tag
-
-On the `main` commit to release:
+On the `main` commit to release (its own first-parent history, as the guard requires):
 
 ```sh
 git switch main && git pull
-git tag -a v0.1.0 -m "v0.1.0"
-git push origin v0.1.0
+git tag -a v0.2.0-rc.1 -m "v0.2.0-rc.1"
+git push origin v0.2.0-rc.1
 ```
 
-### 5. Watch the release
-
-GitHub → Actions → Release. All jobs should go green: guard, CI, publish, then the registry and provenance check and the six verify jobs. Then check:
+GitHub → Actions → Release. All jobs should go green: guard, CI, publish (to the `next` dist-tag), then the registry and provenance check and the six verify jobs. Then check:
 
 ```sh
-npm view ogden-agents version     # 0.1.0
-npx ogden-agents@0.1.0            # starts and opens the page
+npm view ogden-agents dist-tags   # next: 0.2.0-rc.1
+npx ogden-agents@next             # starts and opens the page
+```
+
+If the registry also pointed `latest` at the release candidate (it may, for a package with no stable release yet), that is fixed by step 6, which moves `latest` to `0.2.0`.
+
+### 5. Live checks with Claude Code
+
+In the app `npx ogden-agents@next` opened, with a real Claude account (these are the checks CI can't make, since CI runs only the fake agent):
+
+1. Settings > Agents → the Claude Code card → **Install**. It installs and shows the installed version. Then sign in (or use an API key), unless Claude Code is already signed in.
+2. Epic 2, Done when 1: add a project, start a chat, and see the reply stream in live.
+3. Done when 2: Quit, start the app again, reopen that chat, and ask about the earlier conversation: it keeps its context.
+4. Done when 3: under the default caution level (**Ask every time**), ask Claude Code to run a shell command (say `npm test`). Nothing runs until **Allow once** on the card.
+5. Done when 4: agents working in two projects at once; close every browser window, reopen the app from its shortcut, and the sidebar shows both live states.
+
+If a check fails, fix it on `main` and release `0.2.0-rc.2` the same way (version bump PR, then the tag).
+
+### 6. Release 0.2.0
+
+On a branch, set the version `0.2.0` in `package.json`, `packages/server/package.json` and `packages/web/package.json`, (the CHANGELOG's 0.2.0 entry already covers it). Merge that PR to `main`, wait for CI, then:
+
+```sh
+git switch main && git pull
+git tag -a v0.2.0 -m "v0.2.0"
+git push origin v0.2.0
+```
+
+Watch Release as in step 4, then:
+
+```sh
+npm view ogden-agents dist-tags   # latest: 0.2.0, next: 0.2.0-rc.1
+npx ogden-agents@0.2.0            # starts and opens the page
 ```
 
 The package page on npmjs.com shows a provenance badge linking back to the workflow run.
@@ -81,7 +110,7 @@ For a prerelease, use a version such as `0.2.0-rc.1` and the tag `v0.2.0-rc.1`. 
 | Guard: "Version mismatch" | The package versions don't equal the tag. Delete the tag, fix the versions on `main`, and tag again. |
 | CI fails | Nothing was published. Fix on `main`, delete the tag, and tag again. |
 | Publish: "Already published" (error) | That version is on npm from a different commit. npm never lets a version be reused: release the next patch version. (From the same commit, the job skips publishing and succeeds.) |
-| Publish: `ENEEDAUTH`, `E401`, `E403` or `E404` | The trusted publisher is missing or doesn't match (step 2). Fix it on npmjs.com and re-run the failed jobs. Nothing was published. |
+| Publish: `ENEEDAUTH`, `E401`, `E403` or `E404` | The trusted publisher is missing or doesn't match (step 3). Fix it on npmjs.com and re-run the failed jobs. Nothing was published. |
 | Publish: `E422` | npm's provenance check rejected the package, usually because `repository.url` in the root `package.json` isn't exactly `git+https://github.com/hsmith-dev/ogden-agents.git` (`tests/packaging.test.ts` checks it). Nothing was published. Fix it on `main`, delete the tag, and tag the fixed commit. |
 | Registry and provenance fails | The release is published. If the version never showed up, re-run the job. If provenance is missing from a public repository, check the repository was public when the release ran; the next release will carry it. |
 | Verify fails on one OS | The release is public but broken there. Never unpublish: fix on `main` and release the next patch version. |

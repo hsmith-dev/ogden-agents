@@ -107,11 +107,12 @@ const isAgentAdapter = (name) => AGENT_ADAPTER_PACKAGES.some((adapter) => name =
  * `reuse` picks up the folders of an earlier `prepareInstall` (in another
  * process, say) instead of making new ones. `omitOptional` installs without
  * optional dependencies (`node-pty`, AD-19), as on a computer where they
- * can't build.
- * @param {{ tarball?: string, registrySpec?: string, prefix?: string, reuse?: InstallFolders, omitOptional?: boolean }} options
+ * can't build. `env` adds variables to every launcher run, after the ones set
+ * here (the installed-package suite's fake agent, story 2.13).
+ * @param {{ tarball?: string, registrySpec?: string, prefix?: string, reuse?: InstallFolders, omitOptional?: boolean, env?: Record<string, string> }} options
  * @returns {Install}
  */
-export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-smoke', reuse, omitOptional = false }) {
+export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-smoke', reuse, omitOptional = false, env: extraEnv = {} }) {
   if ((tarball === undefined) === (registrySpec === undefined)) throw new Error('prepareInstall needs exactly one of tarball and registrySpec');
   const workDir = reuse?.workDir ?? mkdtempSync(join(tmpdir(), `${prefix}-`));
   const cacheDir = reuse?.cacheDir ?? mkdtempSync(join(tmpdir(), `${prefix}-cache-`));
@@ -135,6 +136,7 @@ export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-s
   // (story 9.2). The server honours that only in a test run, hence NODE_ENV.
   env.OGDEN_AGENTS_TEST_SECRET_STORE = 'memory';
   env.NODE_ENV = 'test';
+  Object.assign(env, extraEnv);
 
   // A registry spec runs as a user types it: npx picks the package's only bin.
   const packageArgs = registrySpec === undefined ? ['--yes', `--package=${tarball}`, 'ogden'] : ['--yes', registrySpec];

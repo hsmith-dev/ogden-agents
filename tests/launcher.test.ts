@@ -28,6 +28,12 @@ import {
 const BIN = join(ROOT, 'bin', 'ogden.js');
 const FAKE_SERVER = join(import.meta.dirname, 'fixtures', 'fake-server.mjs');
 const { version: VERSION } = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { version: string };
+/**
+ * A version older than any release, prerelease or not. (`${VERSION}-old` is
+ * older only for a stable VERSION: against `0.2.0-rc.1`, `0.2.0-rc.1-old` is
+ * newer, its last identifier being non-numeric; story 2.13.)
+ */
+const OLDER_VERSION = '0.0.0-old';
 
 const children: ChildProcess[] = [];
 const dataDirs: string[] = [];
@@ -115,7 +121,14 @@ async function fakeServer(dataDir: string, version: string, busy: number) {
   return { child, port, pid: child.pid! };
 }
 
-describe('bin/ogden.js --foreground', () => {
+/**
+ * Each test starts real servers and waits on them (10 s for printed URLs, 10 s
+ * in `waitUntil`), so Vitest's 5 s default would fail a test that is only slow
+ * under a loaded full run, not broken (story 2.13).
+ */
+const SUITE = { timeout: 60_000 };
+
+describe('bin/ogden.js --foreground', SUITE, () => {
   it('starts on loopback in this process, prints the URL and launch link, and serves the page through the gate', async () => {
     const dataDir = makeDataDir();
     const child = spawn(process.execPath, [BIN, '--foreground', '--no-open', '--port', '0'], {
@@ -170,7 +183,7 @@ describe('bin/ogden.js --foreground', () => {
   });
 });
 
-describe('bin/ogden.js (background)', () => {
+describe('bin/ogden.js (background)', SUITE, () => {
   it('cold start: spawns a detached server, prints a working link and exits 0; the server outlives it; a second launch attaches with a fresh link; Quit stops it', async () => {
     const dataDir = makeDataDir();
     const first = await runLauncher(dataDir);
@@ -267,11 +280,11 @@ describe('bin/ogden.js (background)', () => {
 
   it('older server, idle: it stops cleanly and the new version starts and opens', async () => {
     const dataDir = makeDataDir();
-    const fake = await fakeServer(dataDir, `${VERSION}-old`, 0);
+    const fake = await fakeServer(dataDir, OLDER_VERSION, 0);
 
     const result = await runLauncher(dataDir);
     expect(result.code, result.stderr).toBe(0);
-    expect(result.stdout).toContain(`Updating Ogden Agents from ${VERSION}-old to ${VERSION}`);
+    expect(result.stdout).toContain(`Updating Ogden Agents from ${OLDER_VERSION} to ${VERSION}`);
     expect(isAlive(fake.pid)).toBe(false);
     const record = readPortFile(dataDir)!;
     expect(record.version).toBe(VERSION);
@@ -282,7 +295,7 @@ describe('bin/ogden.js (background)', () => {
 
   it('older server, busy: it keeps running, the launcher says the update waits, and opens the running version', async () => {
     const dataDir = makeDataDir();
-    const fake = await fakeServer(dataDir, `${VERSION}-old`, 1);
+    const fake = await fakeServer(dataDir, OLDER_VERSION, 1);
 
     const result = await runLauncher(dataDir);
     expect(result.code, result.stderr).toBe(0);

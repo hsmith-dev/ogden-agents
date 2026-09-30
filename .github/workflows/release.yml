@@ -168,7 +168,7 @@ jobs:
         if: steps.published.outputs.already != 'true'
         run: |
           if ! npm publish "ogden-agents-$VERSION.tgz" --access public --tag "$DIST_TAG"; then
-            echo "::error title=npm publish failed::npm rejected ogden-agents@$VERSION, so nothing was published. ENEEDAUTH, E401, E403 or E404: the npm trusted publisher is missing or doesn't match this workflow; set it up as in https://github.com/${{ github.repository }}/blob/main/RELEASING.md#2-configure-the-npm-trusted-publisher. E422: npm's provenance check failed, usually because package.json's repository.url is not exactly git+https://github.com/${{ github.repository }}.git; fix it on main and release a new tag. Then re-run this job."
+            echo "::error title=npm publish failed::npm rejected ogden-agents@$VERSION, so nothing was published. ENEEDAUTH, E401, E403 or E404: the npm trusted publisher is missing or doesn't match this workflow; set it up as in https://github.com/${{ github.repository }}/blob/main/RELEASING.md#3-configure-the-npm-trusted-publisher. E422: npm's provenance check failed, usually because package.json's repository.url is not exactly git+https://github.com/${{ github.repository }}.git; fix it on main and release a new tag. Then re-run this job."
             exit 1
           fi
 

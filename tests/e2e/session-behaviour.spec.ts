@@ -8,6 +8,8 @@
  * check-in line, with Stop, which leaves what was queued "Not sent" and puts
  * its text back in the composer. Each test runs its own server.
  */
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import type { StartOptions } from '../support.js';
 import { composer, send, startChat, withChatServer } from './chat-server.js';
@@ -63,20 +65,29 @@ test('a multi-file change groups its rows in Comfortable and lists them in Compa
 });
 
 test('a message sent while the agent works shows Queued, then is sent after the reply', async ({ page }) => {
-  await withChat(page, async () => {
-    await send(page, 'Say hello');
+  await withChatServer(page, async ({ repo, tempFolder }) => {
+    await startChat(page, repo);
+    // The first turn (`wait <file>`) keeps working until the test creates the file, after the queue
+    // is checked, so the reply can never finish before the second message is queued (story 2.13).
+    const release = join(tempFolder('ogden-agents-e2e-release-'), 'release');
+    const first = `wait ${release}`;
+    await send(page, first);
     await expect(state(page)).toHaveAttribute('data-state', 'working');
+    await expect(page.getByTestId('message-agent')).toContainText('Waiting');
     await send(page, 'And then this');
     const queued = page.getByTestId('message-queued');
     await expect(queued).toHaveAttribute('data-status', 'queued');
     await expect(queued).toContainText('And then this');
     await expect(queued.getByTestId('message-queue-status')).toHaveText('Queued');
     await expect(composer(page)).toHaveValue('');
+    await expect(state(page)).toHaveAttribute('data-state', 'working');
 
     // Sent once the first reply is done: it becomes an ordinary message with its own reply.
-    await expect(page.getByTestId('message-user')).toHaveText(['Say hello', 'And then this']);
+    writeFileSync(release, '');
+    await expect(page.getByTestId('message-user')).toHaveText([first, 'And then this']);
     await expect(queued).toHaveCount(0);
     await expect(page.getByTestId('message-agent')).toHaveCount(2);
+    await expect(page.getByTestId('message-agent').first()).toContainText('Waiting, done.');
     await expect(state(page)).toHaveAttribute('data-state', 'idle');
     await expect(page.getByTestId('message-agent').nth(1)).toContainText('Hello from the fake agent.');
   });

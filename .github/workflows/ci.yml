@@ -159,11 +159,13 @@ jobs:
             test-results/
           retention-days: 7
 
-  # Epic 1's journey in Chromium against the installed package (story 1.12):
-  # the packed tarball installed with npx in an empty folder and started by
-  # its own `ogden` launcher in background mode, plus the security gate's
-  # negative checks and the proof that they fail without the gate. No agent
-  # and no uv download; the suite quits the server and leaves no process.
+  # Epic 1's and epic 2's journeys in Chromium against the installed package
+  # (stories 1.12 and 2.13): the packed tarball installed with npx in an empty
+  # folder and started by its own `ogden` launcher in background mode, plus the
+  # security gate's negative checks and the proof that they fail without the
+  # gate, and the permission hold and its proof. The agent is the repo's fake
+  # ACP agent (OGDEN_AGENTS_CLAUDE_ACP_PATH): no real agent, no agent or uv
+  # download. The suite quits every server it starts and leaves no process.
   e2e-installed:
     name: End-to-end, installed (${{ matrix.os }}, Chromium)
     runs-on: ${{ matrix.os }}

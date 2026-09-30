@@ -29,6 +29,10 @@
 //   "auth-expired" the prompt fails with ACP's auth-required error (-32000)
 //   "crash"        one chunk, then the process exits with code 1 mid-prompt
 //   "slow"         one chunk, then waits until cancelled (`cancelled`) or 10 s
+//   "wait <file>"  one chunk ("Waiting"), then waits until <file> exists (the
+//                  test creates it) or the turn is cancelled; then ", done."
+//                  and `end_turn`: a turn that stays `working` exactly as
+//                  long as a test needs, then ends on its own
 //   "hold"         one chunk, then waits until cancelled (`cancelled`), with no
 //                  timer: the session stays `working` for as long as a test needs
 //   "tools"        reads three files (src/a.ts, src/b.ts, src/c.ts), then edits
@@ -65,6 +69,13 @@
 // (claude-agent-acp 0.84: `claude-ai-login` and `console-login`), to the same
 // clients (story 9.1).
 //
+// FAKE_ACP_SKIP_PERMISSION=1 makes "permission" (and "permission <command>")
+// run the command without asking: the tool call, then "Ran <command>.", and no
+// `session/request_permission` (story 2.13's hold proof, an agent that doesn't
+// wait for a decision). It reaches the agent only through a wrapper
+// (`fake-acp-agent-no-hold.mjs`): the server passes agents an allowlisted
+// environment.
+//
 // FAKE_ACP_REQUIRE_API_KEY=1 makes every prompt need ANTHROPIC_API_KEY (story
 // 9.2): without it the prompt fails with ACP's auth-required error (-32000);
 // with it the reply is "key received" (never the value).
@@ -78,7 +89,7 @@
 // the real adapter runs `claude`: as a child with this process's terminal,
 // passing on its exit code (story 9.1).
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import * as acp from '@agentclientprotocol/sdk';
@@ -263,6 +274,11 @@ acp
       const command = text === 'permission' ? 'npm test' : text.slice('permission '.length).trim();
       const toolCall = { toolCallId: 'call-permission', title: `Run ${command}`, kind: 'execute', rawInput: { command } };
       await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
+      if (process.env.FAKE_ACP_SKIP_PERMISSION === '1') {
+        await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: 'completed' });
+        await say(client, params.sessionId, `Ran ${command}.`);
+        return { stopReason: 'end_turn' };
+      }
       const answer = await client.request('session/request_permission', {
         sessionId: params.sessionId,
         toolCall,
@@ -305,6 +321,25 @@ acp
     }
     if (text === 'pids') {
       await say(client, params.sessionId, `pid=${process.pid} grandchild=${grandchild?.pid ?? 'none'}`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text.startsWith('wait ')) {
+      const file = text.slice('wait '.length).trim();
+      await say(client, params.sessionId, 'Waiting');
+      const cancelled = await new Promise((resolve) => {
+        const timer = setInterval(() => {
+          if (!existsSync(file)) return;
+          clearInterval(timer);
+          resolve(false);
+        }, 25);
+        session.cancel = () => {
+          clearInterval(timer);
+          resolve(true);
+        };
+      });
+      session.cancel = undefined;
+      if (cancelled) return { stopReason: 'cancelled' };
+      await say(client, params.sessionId, ', done.');
       return { stopReason: 'end_turn' };
     }
     if (text === 'hold') {

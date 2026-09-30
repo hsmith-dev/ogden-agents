@@ -151,3 +151,9 @@
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-sign-in-again-from-a-session-plan.md`
   summary: The Sign in again notice's React wiring (`SignInAgain`: the auth effect, the event effect, the start-request observer passed to `useSignIn`) has no unit test: web tests render static markup only, with no DOM. The rules are pure functions with unit tests, and the wiring is covered by `tests/e2e/sign-in-again.spec.ts`. Add component tests once the web package has a DOM test setup (story 9.6; 9.4 review F5).
   evidence: `packages/web/src/chat/sign-in-again.tsx`; `packages/web/test/sign-in-again.test.tsx`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-end-to-end-suite-and-release-plan.md`
+  summary: Resolved: the intermittent e2e failure (story 2.8 entry "One e2e test failed once locally on a toHaveAttribute check…" and story 9.2 entry "The intermittent e2e failure logged for 2.13…") is closed.
+  evidence: It was `tests/e2e/session-behaviour.spec.ts` "a message sent while the agent works shows Queued…": the fake agent's three 400 ms chunks could finish before the second send, so `data-status="queued"` never showed. The first turn is now `wait <file>` (new fake-agent prompt), which stays working until the test creates the file after checking the queue. `--repeat-each=30`: 30/30 passed. `playwright.config.ts` sets `failOnFlakyTests` in CI, so a pass on retry fails the run (story 2.13).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-end-to-end-suite-and-release-plan.md`
+  summary: Resolved: "`tests/launcher.test.ts` '--foreground beside a background server…' timed out once at 5 s" (story 2.12 entry) is closed.
+  evidence: Both launcher suites now run with a 60 s per-test timeout (`SUITE` in `tests/launcher.test.ts`), above their inner waits (10 s for printed URLs, 10 s in `waitUntil`), instead of Vitest's 5 s default (story 2.13).

@@ -1,5 +1,5 @@
 {
-  "name": "@ogdenmad/adapters",
+  "name": "@ogden-agents/adapters",
   "version": "0.0.0",
   "private": true,
   "description": "Adapters: everything that names a specific agent, OS, sandbox or tool, behind core ports (AD-1).",
@@ -11,8 +11,8 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@ogdenmad/core": "workspace:*",
-    "@ogdenmad/shared": "workspace:*"
+    "@ogden-agents/core": "workspace:*",
+    "@ogden-agents/shared": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^7.0.2"

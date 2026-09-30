@@ -13,7 +13,7 @@ afterEach(() => {
 
 /** A fresh temp data folder, removed after the test. */
 export function tempDataDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'ogdenmad-server-'));
+  const dir = mkdtempSync(join(tmpdir(), 'ogden-agents-server-'));
   dirs.push(dir);
   return dir;
 }

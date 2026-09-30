@@ -1,7 +1,7 @@
 /**
  * The SQLite schema (AD-5, AD-8, AD-9, AD-11). Only core opens this database.
  *
- * Migrations are generated from this file by `pnpm --filter @ogdenmad/core
+ * Migrations are generated from this file by `pnpm --filter @ogden-agents/core
  * db:generate` into `packages/core/drizzle/` and committed. Import nothing
  * here but `drizzle-orm` and types: `drizzle-kit` loads this file on its own.
  */
@@ -11,7 +11,7 @@ import type {
   SessionDriver,
   SessionKind,
   SessionState,
-} from '@ogdenmad/shared';
+} from '@ogden-agents/shared';
 import { foreignKey, index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export const workspaces = sqliteTable(

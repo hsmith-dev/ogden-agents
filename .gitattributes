@@ -1,5 +1,5 @@
 # Keep LF line endings on every OS. Git on Windows otherwise checks files out
-# with CRLF, which breaks the `#!/usr/bin/env node` shebang of bin/ogdenmad.js
+# with CRLF, which breaks the `#!/usr/bin/env node` shebang of bin/ogden.js
 # (pnpm refuses to pack it: ERR_PNPM_BIN_CRLF) and the installed command.
 * text=auto eol=lf
 *.png binary

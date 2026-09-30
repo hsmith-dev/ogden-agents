@@ -3,8 +3,8 @@ import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { createDataDir, ensureDataDir, openCore, type Core } from '@ogdenmad/core';
-import { SERVER_STREAM } from '@ogdenmad/shared';
+import { createDataDir, ensureDataDir, openCore, type Core } from '@ogden-agents/core';
+import { SERVER_STREAM } from '@ogden-agents/shared';
 import openBrowser from 'open';
 import { WebSocketServer } from 'ws';
 import pkg from '../package.json' with { type: 'json' };
@@ -45,7 +45,7 @@ export interface StartOptions {
   /**
    * The data folder for the database and logs, created readable only by the
    * user if missing. Default: the per-user data directory, or
-   * `$OGDENMAD_DATA_DIR` (see `ensureDataDir`).
+   * `$OGDEN_AGENTS_DATA_DIR` (see `ensureDataDir`).
    */
   dataDir?: string;
   /** Use this already-open core instead of opening one in `dataDir` (tests). The caller closes it. */

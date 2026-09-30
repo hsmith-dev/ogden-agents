@@ -1,13 +1,13 @@
 {
-  "name": "ogdenmad",
+  "name": "ogden-agents",
   "version": "0.0.0",
   "private": true,
-  "description": "OgdenMad: a local browser UI for running BMAD with coding agents.",
+  "description": "Ogden Agents: a local browser UI for running BMAD with coding agents.",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@12.8.1",
   "bin": {
-    "ogdenmad": "bin/ogdenmad.js"
+    "ogden": "bin/ogden.js"
   },
   "files": [
     "bin",
@@ -18,7 +18,7 @@
   },
   "scripts": {
     "build": "pnpm -r --filter \"./packages/**\" run build && node scripts/assemble-dist.mjs",
-    "start": "pnpm run build && node bin/ogdenmad.js",
+    "start": "pnpm run build && node bin/ogden.js",
     "test": "pnpm run build && vitest run",
     "typecheck": "pnpm -r --filter \"./packages/**\" run typecheck && tsc -p tsconfig.json",
     "pack": "pnpm run build && pnpm pack",
@@ -36,7 +36,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@ogdenmad/server": "workspace:*",
+    "@ogden-agents/server": "workspace:*",
     "@types/node": "^24.0.0",
     "@types/ws": "^8.18.2",
     "typescript": "^7.0.2",

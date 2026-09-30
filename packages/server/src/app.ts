@@ -1,7 +1,7 @@
 import { upgradeWebSocket } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
-import type { EventLog } from '@ogdenmad/core';
-import { ClientMessage, ServerMessage } from '@ogdenmad/shared';
+import type { EventLog } from '@ogden-agents/core';
+import { ClientMessage, ServerMessage } from '@ogden-agents/shared';
 import { Hono } from 'hono';
 import type { WSContext } from 'hono/ws';
 import type { Logger } from './log.js';
@@ -84,7 +84,7 @@ export function createApp({ events, webRoot, log }: AppOptions): Hono {
 
   app.notFound((c) =>
     c.req.path === '/'
-      ? c.text('OgdenMad UI is not built. Run `pnpm build`.', 503)
+      ? c.text('Ogden Agents UI is not built. Run `pnpm build`.', 503)
       : c.text('Not found', 404),
   );
 

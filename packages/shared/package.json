@@ -1,5 +1,5 @@
 {
-  "name": "@ogdenmad/shared",
+  "name": "@ogden-agents/shared",
   "version": "0.0.0",
   "private": true,
   "description": "Contract: Zod schemas and TypeScript types for every event, API shape and ID.",

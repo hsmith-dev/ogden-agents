@@ -7,12 +7,12 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import * as schema from './schema.js';
 
 /** The database file's name inside the data folder. */
-export const DATABASE_FILE = 'ogdenmad.db';
+export const DATABASE_FILE = 'ogden-agents.db';
 
 export type Orm = BetterSQLite3Database<typeof schema>;
 
 /**
- * An open OgdenMad database. Only core holds one (AD-11): adapters never see
+ * An open Ogden Agents database. Only core holds one (AD-11): adapters never see
  * it, and server routes call core operations instead of writing rows.
  */
 export interface Database {
@@ -43,7 +43,7 @@ const MIGRATION_CANDIDATES = [
 export function defaultMigrationsFolder(): string {
   const found = MIGRATION_CANDIDATES.find((dir) => existsSync(join(dir, 'meta', '_journal.json')));
   if (found === undefined) {
-    throw new Error(`OgdenMad database migrations not found; looked in ${MIGRATION_CANDIDATES.join(', ')}`);
+    throw new Error(`Ogden Agents database migrations not found; looked in ${MIGRATION_CANDIDATES.join(', ')}`);
   }
   return found;
 }

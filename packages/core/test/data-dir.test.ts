@@ -6,16 +6,16 @@ import { createDataDir, DATA_DIR_ENV, dataDirPath, ensureDataDir } from '../src/
 import { tempDir } from './helpers.js';
 
 describe('data folder', () => {
-  it('uses the OS per-user data directory named ogdenmad by default', () => {
-    const expected = envPaths('ogdenmad', { suffix: '' }).data;
+  it('uses the OS per-user data directory named ogden-agents by default', () => {
+    const expected = envPaths('ogden-agents', { suffix: '' }).data;
     expect(dataDirPath({})).toBe(expected);
-    expect(expected).toMatch(/ogdenmad$/i);
+    expect(expected).toMatch(/ogden-agents$/i);
   });
 
-  it('honours OGDENMAD_DATA_DIR, resolved to an absolute path', () => {
+  it('honours OGDEN_AGENTS_DATA_DIR, resolved to an absolute path', () => {
     const dir = join(tempDir(), 'data');
     expect(dataDirPath({ [DATA_DIR_ENV]: dir })).toBe(resolve(dir));
-    expect(dataDirPath({ [DATA_DIR_ENV]: '  ' })).toBe(envPaths('ogdenmad', { suffix: '' }).data);
+    expect(dataDirPath({ [DATA_DIR_ENV]: '  ' })).toBe(envPaths('ogden-agents', { suffix: '' }).data);
   });
 
   it('creates the folder, readable only by the user', () => {

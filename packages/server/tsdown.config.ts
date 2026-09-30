@@ -22,7 +22,7 @@ export default defineConfig({
     // it; tests/packaging.test.ts enforces that). Workspace packages export
     // TypeScript source, so they are bundled in.
     neverBundle: true,
-    alwaysBundle: [/^@ogdenmad\//],
+    alwaysBundle: [/^@ogden-agents\//],
     onlyBundle: false,
   },
 });

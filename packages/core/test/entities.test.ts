@@ -1,6 +1,6 @@
 import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CoreEvent, Run, Session, Workspace } from '@ogdenmad/shared';
+import { CoreEvent, Run, Session, Workspace } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import {
   canonicalWorkspacePath,

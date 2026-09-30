@@ -8,17 +8,17 @@ import { describe, expect, it } from 'vitest';
 
 const ROOT = join(import.meta.dirname, '..');
 
-/** The root package is the `bin/ogdenmad` launcher. */
-const ROOT_NAME = 'ogdenmad';
+/** The root package is the `bin/ogden-agents` launcher. */
+const ROOT_NAME = 'ogden-agents';
 
 /** AD-1: package -> internal packages it may depend on. */
 export const ALLOWED: Readonly<Record<string, readonly string[]>> = {
-  [ROOT_NAME]: ['@ogdenmad/server'],
-  '@ogdenmad/server': ['@ogdenmad/core', '@ogdenmad/adapters', '@ogdenmad/shared'],
-  '@ogdenmad/adapters': ['@ogdenmad/core', '@ogdenmad/shared'],
-  '@ogdenmad/core': ['@ogdenmad/shared'],
-  '@ogdenmad/web': ['@ogdenmad/shared'],
-  '@ogdenmad/shared': [],
+  [ROOT_NAME]: ['@ogden-agents/server'],
+  '@ogden-agents/server': ['@ogden-agents/core', '@ogden-agents/adapters', '@ogden-agents/shared'],
+  '@ogden-agents/adapters': ['@ogden-agents/core', '@ogden-agents/shared'],
+  '@ogden-agents/core': ['@ogden-agents/shared'],
+  '@ogden-agents/web': ['@ogden-agents/shared'],
+  '@ogden-agents/shared': [],
 };
 
 const DEPENDENCY_FIELDS = [
@@ -65,7 +65,7 @@ export function findViolations(manifests: readonly LoadedManifest[]): string[] {
     for (const field of DEPENDENCY_FIELDS) {
       const deps = (manifest[field] ?? {}) as Record<string, string>;
       for (const [dep, spec] of Object.entries(deps)) {
-        const isInternal = internal.has(dep) || dep.startsWith('@ogdenmad/') || dep === ROOT_NAME || spec.startsWith('workspace:');
+        const isInternal = internal.has(dep) || dep.startsWith('@ogden-agents/') || dep === ROOT_NAME || spec.startsWith('workspace:');
         if (isInternal && !allowed.has(dep)) {
           violations.push(`${name} -> ${dep} (${field}) is not allowed by AD-1`);
         }
@@ -105,14 +105,14 @@ export function loadWorkspaceSources(root: string = ROOT): SourceFile[] {
   return files;
 }
 
-/** Returns one message per `@ogdenmad/*` import that AD-1 does not allow. */
+/** Returns one message per `@ogden-agents/*` import that AD-1 does not allow. */
 export function findImportViolations(files: readonly SourceFile[]): string[] {
   const violations: string[] = [];
   for (const { pkg, path, source } of files) {
     const allowed = new Set(ALLOWED[pkg] ?? []);
     for (const match of source.matchAll(SPECIFIER)) {
       const specifier = match[2]!;
-      if (!specifier.startsWith('@ogdenmad/')) continue;
+      if (!specifier.startsWith('@ogden-agents/')) continue;
       const target = specifier.split('/').slice(0, 2).join('/');
       if (target !== pkg && !allowed.has(target)) {
         violations.push(`${path}: ${pkg} imports ${specifier}, which AD-1 does not allow`);
@@ -131,14 +131,14 @@ describe('AD-1 package dependency rules', () => {
 
   it('flags a forbidden edge', () => {
     const manifests: LoadedManifest[] = [
-      { path: 'web', manifest: { name: '@ogdenmad/web', dependencies: { '@ogdenmad/core': 'workspace:*' } } },
-      { path: 'core', manifest: { name: '@ogdenmad/core', devDependencies: { '@ogdenmad/server': 'workspace:*' } } },
-      { path: 'root', manifest: { name: ROOT_NAME, dependencies: { '@ogdenmad/shared': 'workspace:*' } } },
+      { path: 'web', manifest: { name: '@ogden-agents/web', dependencies: { '@ogden-agents/core': 'workspace:*' } } },
+      { path: 'core', manifest: { name: '@ogden-agents/core', devDependencies: { '@ogden-agents/server': 'workspace:*' } } },
+      { path: 'root', manifest: { name: ROOT_NAME, dependencies: { '@ogden-agents/shared': 'workspace:*' } } },
     ];
     expect(findViolations(manifests)).toEqual([
-      '@ogdenmad/web -> @ogdenmad/core (dependencies) is not allowed by AD-1',
-      '@ogdenmad/core -> @ogdenmad/server (devDependencies) is not allowed by AD-1',
-      'ogdenmad -> @ogdenmad/shared (dependencies) is not allowed by AD-1',
+      '@ogden-agents/web -> @ogden-agents/core (dependencies) is not allowed by AD-1',
+      '@ogden-agents/core -> @ogden-agents/server (devDependencies) is not allowed by AD-1',
+      'ogden-agents -> @ogden-agents/shared (dependencies) is not allowed by AD-1',
     ]);
   });
 
@@ -150,20 +150,20 @@ describe('AD-1 package dependency rules', () => {
 
   it('flags a forbidden source import even when package.json does not declare it', () => {
     const files: SourceFile[] = [
-      { pkg: '@ogdenmad/web', path: 'web/a.tsx', source: "import { start } from '@ogdenmad/server';" },
-      { pkg: '@ogdenmad/core', path: 'core/b.ts', source: "export * from '@ogdenmad/adapters/sub';\nconst x = import(\"@ogdenmad/server\");" },
-      { pkg: '@ogdenmad/core', path: 'core/c.ts', source: "import type { CoreEvent } from '@ogdenmad/shared';" },
+      { pkg: '@ogden-agents/web', path: 'web/a.tsx', source: "import { start } from '@ogden-agents/server';" },
+      { pkg: '@ogden-agents/core', path: 'core/b.ts', source: "export * from '@ogden-agents/adapters/sub';\nconst x = import(\"@ogden-agents/server\");" },
+      { pkg: '@ogden-agents/core', path: 'core/c.ts', source: "import type { CoreEvent } from '@ogden-agents/shared';" },
     ];
     expect(findImportViolations(files)).toEqual([
-      'web/a.tsx: @ogdenmad/web imports @ogdenmad/server, which AD-1 does not allow',
-      'core/b.ts: @ogdenmad/core imports @ogdenmad/adapters/sub, which AD-1 does not allow',
-      'core/b.ts: @ogdenmad/core imports @ogdenmad/server, which AD-1 does not allow',
+      'web/a.tsx: @ogden-agents/web imports @ogden-agents/server, which AD-1 does not allow',
+      'core/b.ts: @ogden-agents/core imports @ogden-agents/adapters/sub, which AD-1 does not allow',
+      'core/b.ts: @ogden-agents/core imports @ogden-agents/server, which AD-1 does not allow',
     ]);
   });
 
   it('flags a package that is not in the diagram', () => {
-    expect(findViolations([{ path: 'x', manifest: { name: '@ogdenmad/extra' } }])).toEqual([
-      'x: package "@ogdenmad/extra" is not part of the AD-1 diagram',
+    expect(findViolations([{ path: 'x', manifest: { name: '@ogden-agents/extra' } }])).toEqual([
+      'x: package "@ogden-agents/extra" is not part of the AD-1 diagram',
     ]);
   });
 });

@@ -194,7 +194,7 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
     devDependencies:
-      '@ogdenmad/server':
+      '@ogden-agents/server':
         specifier: workspace:*
         version: link:packages/server
       '@types/node':
@@ -212,10 +212,10 @@ importers:
 
   packages/adapters:
     dependencies:
-      '@ogdenmad/core':
+      '@ogden-agents/core':
         specifier: workspace:*
         version: link:../core
-      '@ogdenmad/shared':
+      '@ogden-agents/shared':
         specifier: workspace:*
         version: link:../shared
     devDependencies:
@@ -225,7 +225,7 @@ importers:
 
   packages/core:
     dependencies:
-      '@ogdenmad/shared':
+      '@ogden-agents/shared':
         specifier: workspace:*
         version: link:../shared
       better-sqlite3:
@@ -265,13 +265,13 @@ importers:
       '@hono/node-server':
         specifier: ^2.1.3
         version: 2.1.3(hono@4.13.11)
-      '@ogdenmad/adapters':
+      '@ogden-agents/adapters':
         specifier: workspace:*
         version: link:../adapters
-      '@ogdenmad/core':
+      '@ogden-agents/core':
         specifier: workspace:*
         version: link:../core
-      '@ogdenmad/shared':
+      '@ogden-agents/shared':
         specifier: workspace:*
         version: link:../shared
       hono:
@@ -312,7 +312,7 @@ importers:
 
   packages/web:
     dependencies:
-      '@ogdenmad/shared':
+      '@ogden-agents/shared':
         specifier: workspace:*
         version: link:../shared
       react:

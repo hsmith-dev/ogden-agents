@@ -26,7 +26,7 @@ import {
   type SessionState,
   type Workspace,
   type WorkspaceId,
-} from '@ogdenmad/shared';
+} from '@ogden-agents/shared';
 import { asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Database } from './db/database.js';

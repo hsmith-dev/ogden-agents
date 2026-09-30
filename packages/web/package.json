@@ -1,5 +1,5 @@
 {
-  "name": "@ogdenmad/web",
+  "name": "@ogden-agents/web",
   "version": "0.0.0",
   "private": true,
   "description": "Browser UI (React).",
@@ -9,7 +9,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@ogdenmad/shared": "workspace:*",
+    "@ogden-agents/shared": "workspace:*",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /**
- * OgdenMad-owned identifiers (AD-9): a type prefix, an underscore and a
+ * Ogden Agents-owned identifiers (AD-9): a type prefix, an underscore and a
  * 26-character Crockford base32 ULID, e.g. `ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3`.
  * Agent session IDs and CLI resume IDs are never keys; they live in a
  * session's `adapterRefs`.

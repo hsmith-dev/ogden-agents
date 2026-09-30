@@ -17,7 +17,7 @@ import {
   type SessionMessageCompletedEvent,
   type WorkspaceHistoryDeletedEvent,
   type WorkspaceId,
-} from '@ogdenmad/shared';
+} from '@ogden-agents/shared';
 import { and, asc, eq, gt, isNull, lt, max, sql } from 'drizzle-orm';
 import type { Database } from './db/database.js';
 import { events, runs, sessions, workspaces } from './db/schema.js';

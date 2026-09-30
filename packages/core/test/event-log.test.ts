@@ -1,4 +1,4 @@
-import { CoreEvent, SERVER_STREAM, type NewCoreEvent, type SessionId, type WorkspaceId } from '@ogdenmad/shared';
+import { CoreEvent, SERVER_STREAM, type NewCoreEvent, type SessionId, type WorkspaceId } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { EventValidationError, NotFoundError, type Core } from '../src/index.js';
 import { openTestCore, tempDir } from './helpers.js';
@@ -16,7 +16,7 @@ function appendStarted(core: Core, count: number) {
 
 /** A workspace with one chat session, for message events. */
 function chat(core: Core) {
-  const workspace = core.entities.ensureWorkspace(tempDir('ogdenmad-repo-'));
+  const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
   const session = core.entities.createSession({ workspaceId: workspace.id, kind: 'chat' });
   return { workspaceId: workspace.id, sessionId: session.id };
 }
@@ -307,8 +307,8 @@ describe('deleteWorkspaceHistory', () => {
   it('removes one workspace’s events, sessions and runs, keeping its row and every other workspace', () => {
     const core = openTestCore();
     const [server] = appendStarted(core, 1);
-    const doomed = core.entities.ensureWorkspace(tempDir('ogdenmad-repo-'));
-    const kept = core.entities.ensureWorkspace(tempDir('ogdenmad-repo-'));
+    const doomed = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
+    const kept = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
     for (const ws of [doomed, kept]) {
       const build = core.entities.createSession({ workspaceId: ws.id, kind: 'build' });
       core.entities.createRun({ sessionId: build.id, ticketRef: '1.3' });

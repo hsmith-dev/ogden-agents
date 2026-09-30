@@ -1,4 +1,4 @@
-import { ServerMessage, type ClientMessage, type CoreEvent } from '@ogdenmad/shared';
+import { ServerMessage, type ClientMessage, type CoreEvent } from '@ogden-agents/shared';
 import { useEffect, useRef, useState } from 'react';
 
 type ConnectionState = 'connecting' | 'connected' | 'disconnected';
@@ -86,7 +86,7 @@ export function App() {
 
   return (
     <main>
-      <h1>OgdenMad</h1>
+      <h1>Ogden Agents</h1>
       <p>
         Connection: <strong data-testid="connection-state">{connection}</strong>
       </p>

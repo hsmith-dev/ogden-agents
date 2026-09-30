@@ -13,7 +13,7 @@ afterEach(() => {
 });
 
 /** A fresh temp directory, removed after the test. */
-export function tempDir(prefix = 'ogdenmad-core-'): string {
+export function tempDir(prefix = 'ogden-agents-core-'): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   dirs.push(dir);
   return dir;

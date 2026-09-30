@@ -1,5 +1,5 @@
 /**
- * Launcher end to end: runs the real `bin/ogdenmad.js` against the assembled
+ * Launcher end to end: runs the real `bin/ogden.js` against the assembled
  * `dist/` (the bundled server and web UI; `pnpm test` builds first).
  */
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-const BIN = join(import.meta.dirname, '..', 'bin', 'ogdenmad.js');
+const BIN = join(import.meta.dirname, '..', 'bin', 'ogden.js');
 
 const children: ChildProcess[] = [];
 const dataDirs: string[] = [];
@@ -26,11 +26,11 @@ afterEach(async () => {
 
 function launch(args: string[]) {
   // A throwaway data folder, so the test never touches the user's real one.
-  const dataDir = mkdtempSync(join(tmpdir(), 'ogdenmad-launcher-'));
+  const dataDir = mkdtempSync(join(tmpdir(), 'ogden-agents-launcher-'));
   dataDirs.push(dataDir);
   const child = spawn(process.execPath, [BIN, ...args], {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, OGDENMAD_DATA_DIR: dataDir },
+    env: { ...process.env, OGDEN_AGENTS_DATA_DIR: dataDir },
   });
   children.push(child);
   let stdout = '';
@@ -51,7 +51,7 @@ function launch(args: string[]) {
   return { child, url, exited };
 }
 
-describe('bin/ogdenmad.js', () => {
+describe('bin/ogden.js', () => {
   it('with --no-open, starts on loopback, prints the URL and serves the page', async () => {
     const { child, url, exited } = launch(['--no-open', '--port', '0']);
     const address = await url;

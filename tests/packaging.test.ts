@@ -1,5 +1,5 @@
 /**
- * Packaging guard: the root `ogdenmad` package is the only publishable
+ * Packaging guard: the root `ogden-agents` package is the only publishable
  * artifact. After `pnpm build` (which `pnpm test` runs first), every bare
  * import in the bundled server must be a Node builtin or a root `dependencies`
  * entry, and the packed tarball must hold only the built files.
@@ -69,7 +69,7 @@ export function findRangeMismatches(
   const problems: string[] = [];
   for (const { name, dependencies = {} } of manifests) {
     for (const [dep, range] of Object.entries(dependencies)) {
-      if (dep.startsWith('@ogdenmad/') || range.startsWith('workspace:')) continue;
+      if (dep.startsWith('@ogden-agents/') || range.startsWith('workspace:')) continue;
       if (rootDeps[dep] !== range) {
         problems.push(
           `${name} depends on ${dep}@${range}, but the root package declares ${dep}@${rootDeps[dep] ?? '(nothing)'}`,
@@ -122,7 +122,7 @@ describe('packaging', () => {
   });
 
   it('the server bundle contains no workspace package imports', () => {
-    for (const { source } of loadServerBundle()) expect(source).not.toMatch(/['"]@ogdenmad\//);
+    for (const { source } of loadServerBundle()) expect(source).not.toMatch(/['"]@ogden-agents\//);
   });
 
   it('flags an undeclared import by package name', () => {
@@ -153,12 +153,12 @@ describe('packaging', () => {
 
   it('flags a range that differs from the root, or a dependency the root lacks', () => {
     const manifests: WorkspaceManifest[] = [
-      { name: '@ogdenmad/server', dependencies: { '@ogdenmad/core': 'workspace:*', hono: '^4.14.0', ws: '^8.22.0' } },
-      { name: '@ogdenmad/shared', dependencies: { zod: '^4.6.5' } },
+      { name: '@ogden-agents/server', dependencies: { '@ogden-agents/core': 'workspace:*', hono: '^4.14.0', ws: '^8.22.0' } },
+      { name: '@ogden-agents/shared', dependencies: { zod: '^4.6.5' } },
     ];
     expect(findRangeMismatches(manifests, { hono: '^4.13.11', ws: '^8.22.0' })).toEqual([
-      '@ogdenmad/server depends on hono@^4.14.0, but the root package declares hono@^4.13.11',
-      '@ogdenmad/shared depends on zod@^4.6.5, but the root package declares zod@(nothing)',
+      '@ogden-agents/server depends on hono@^4.14.0, but the root package declares hono@^4.13.11',
+      '@ogden-agents/shared depends on zod@^4.6.5, but the root package declares zod@(nothing)',
     ]);
   });
 
@@ -166,7 +166,7 @@ describe('packaging', () => {
     const files = packedFiles();
     expect(files).toEqual(
       expect.arrayContaining([
-        'bin/ogdenmad.js',
+        'bin/ogden.js',
         'dist/server.js',
         'dist/web/index.html',
         'package.json',

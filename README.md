@@ -1,16 +1,18 @@
-# OgdenMad
+# Ogden Agents
 
-[![CI](https://github.com/hsmith-dev/ogdenmad/actions/workflows/ci.yml/badge.svg)](https://github.com/hsmith-dev/ogdenmad/actions/workflows/ci.yml)
+[![CI](https://github.com/hsmith-dev/ogden-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/hsmith-dev/ogden-agents/actions/workflows/ci.yml)
 
 A local browser UI for running BMAD with coding agents. Early development: the current build is the tracer bullet from launcher to live page.
 
 ## Install
 
-Once published, OgdenMad runs with one command and needs no checkout:
+Once published, Ogden Agents runs with one command and needs no checkout:
 
 ```sh
-npx ogdenmad
+npx ogden-agents
 ```
+
+Installed globally (`npm install -g ogden-agents`), the command is `ogden`.
 
 It is not on npm yet. Until then, run it from a checkout as below.
 
@@ -28,15 +30,15 @@ pnpm start            # builds, starts the server on 127.0.0.1, opens the browse
 
 The page shows the connection state and lists logged events (currently one `server.started` per server start). Events persist across restarts, and a reloaded or reconnected page catches up from the last event it saw.
 
-OgdenMad keeps its SQLite database (`ogdenmad.db`) and logs (`logs/server.log`) in your OS per-user data folder under `ogdenmad/` (for example `~/Library/Application Support/ogdenmad` on macOS). Set `OGDENMAD_DATA_DIR` to use another folder. Nothing is written into your repos.
+Ogden Agents keeps its SQLite database (`ogden-agents.db`) and logs (`logs/server.log`) in your OS per-user data folder under `ogden-agents/` (for example `~/Library/Application Support/ogden-agents` on macOS). Set `OGDEN_AGENTS_DATA_DIR` to use another folder. Nothing is written into your repos.
 
-To change the database schema, edit `packages/core/src/db/schema.ts`, run `pnpm --filter @ogdenmad/core db:generate`, and commit the new migration in `packages/core/drizzle/`.
+To change the database schema, edit `packages/core/src/db/schema.ts`, run `pnpm --filter @ogden-agents/core db:generate`, and commit the new migration in `packages/core/drizzle/`.
 
 Launcher options (after `pnpm build`):
 
 ```sh
-node bin/ogdenmad.js --no-open     # start the server and print the URL only
-node bin/ogdenmad.js --port 5000   # try this port first
+node bin/ogden.js --no-open     # start the server and print the URL only
+node bin/ogden.js --port 5000   # try this port first
 ```
 
 The server binds only to `127.0.0.1`. It tries port 4317 first and moves to the next free port if that one is busy; the URL it prints is the one in use.
@@ -47,11 +49,11 @@ The server binds only to `127.0.0.1`. It tries port 4317 first and moves to the 
 pnpm typecheck   # tsc across every package, the launcher and the tests
 pnpm test        # builds, then Vitest: architecture, packaging, launcher and server tests
 pnpm build       # tsdown bundles packages/server, Vite builds packages/web, both copied into dist/
-pnpm run pack    # builds, then writes the publishable tarball ogdenmad-<version>.tgz
+pnpm run pack    # builds, then writes the publishable tarball ogden-agents-<version>.tgz
 pnpm smoke       # installs that tarball with npx in an empty temp dir and checks it serves the page
 ```
 
-The root `ogdenmad` package is the only publishable artifact. `pnpm build` writes a self-contained `dist/` (`dist/server.js`, the server with every `@ogdenmad/*` package bundled in, and `dist/web/`, the UI), and `bin/ogdenmad.js` loads it by relative path. Third-party runtime dependencies are declared in the root `dependencies`; `tests/packaging.test.ts` fails if the bundle imports anything undeclared or the tarball picks up workspace sources.
+The root `ogden-agents` package is the only publishable artifact. `pnpm build` writes a self-contained `dist/` (`dist/server.js`, the server with every `@ogden-agents/*` package bundled in, and `dist/web/`, the UI), and `bin/ogden.js` loads it by relative path. Third-party runtime dependencies are declared in the root `dependencies`; `tests/packaging.test.ts` fails if the bundle imports anything undeclared or the tarball picks up workspace sources.
 
 CI runs typecheck, tests, pack and the clean-install smoke test on macOS, Windows and Linux, each on Node 24 and 26.
 
@@ -61,7 +63,7 @@ The monorepo follows the hexagonal layout in the architecture (AD-1). `tests/arc
 
 | Path | Role | May depend on |
 | --- | --- | --- |
-| `bin/ogdenmad.js` | Launcher | `server` |
+| `bin/ogden.js` | Launcher | `server` |
 | `packages/server` | Delivery: HTTP and WebSocket, wiring | `core`, `adapters`, `shared` |
 | `packages/adapters` | Agent, OS, sandbox and tool adapters | `core`, `shared` |
 | `packages/core` | Domain, ports, event log | `shared` |

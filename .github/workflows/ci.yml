@@ -50,6 +50,6 @@ jobs:
 
       # Clean npx install of the tarball in an empty directory; must reach the
       # page and receive server.started. With no argument the script uses
-      # ogdenmad-<package.json version>.tgz, the file `pnpm pack` just wrote.
+      # ogden-agents-<package.json version>.tgz, the file `pnpm pack` just wrote.
       - name: Smoke test the installed package
         run: node scripts/smoke-installed.mjs

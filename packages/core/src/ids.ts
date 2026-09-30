@@ -1,4 +1,4 @@
-import type { IdPrefix } from '@ogdenmad/shared';
+import type { IdPrefix } from '@ogden-agents/shared';
 import { monotonicFactory } from 'ulid';
 
 const nextUlid = monotonicFactory();

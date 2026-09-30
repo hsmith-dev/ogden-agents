@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // Clean-install smoke test for the packed tarball.
 //
-//   node scripts/smoke-installed.mjs [path/to/ogdenmad-<version>.tgz]
+//   node scripts/smoke-installed.mjs [path/to/ogden-agents-<version>.tgz]
 //
 // In a fresh temp directory, with a fresh npm cache and no workspace in sight,
-// runs `npx --yes --package=<tgz> ogdenmad --no-open --port 0`, waits for the
+// runs `npx --yes --package=<tgz> ogden-agents --no-open --port 0`, waits for the
 // printed 127.0.0.1 URL, checks that `GET /` returns the page and that a
 // WebSocket client that subscribes receives `server.started` (which needs the
 // installed `better-sqlite3` to load and the bundled migrations to apply),
@@ -23,15 +23,15 @@ const STEP_TIMEOUT_MS = 15_000;
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-const tarball = resolve(process.argv[2] ?? join(root, `ogdenmad-${version}.tgz`));
+const tarball = resolve(process.argv[2] ?? join(root, `ogden-agents-${version}.tgz`));
 
 if (!existsSync(tarball)) {
   console.error(`smoke: tarball not found: ${tarball}\nRun \`pnpm build && pnpm pack\` first.`);
   process.exit(1);
 }
 
-const workDir = mkdtempSync(join(tmpdir(), 'ogdenmad-smoke-'));
-const cacheDir = mkdtempSync(join(tmpdir(), 'ogdenmad-smoke-cache-'));
+const workDir = mkdtempSync(join(tmpdir(), 'ogden-agents-smoke-'));
+const cacheDir = mkdtempSync(join(tmpdir(), 'ogden-agents-smoke-cache-'));
 
 // A clean environment for npm: drop any npm/pnpm config inherited from a
 // `pnpm run` parent, and use an empty cache so no earlier install is reused.
@@ -43,10 +43,10 @@ env.npm_config_update_notifier = 'false';
 env.npm_config_fund = 'false';
 env.npm_config_audit = 'false';
 // Keep the database and logs out of the user's real data folder.
-const dataDir = mkdtempSync(join(tmpdir(), 'ogdenmad-smoke-data-'));
-env.OGDENMAD_DATA_DIR = dataDir;
+const dataDir = mkdtempSync(join(tmpdir(), 'ogden-agents-smoke-data-'));
+env.OGDEN_AGENTS_DATA_DIR = dataDir;
 
-const args = ['--yes', `--package=${tarball}`, 'ogdenmad', '--no-open', '--port', '0'];
+const args = ['--yes', `--package=${tarball}`, 'ogden', '--no-open', '--port', '0'];
 // On Windows `npx` is `npx.cmd`. Run through a shell by a quoted bare name, cmd.exe
 // resolves the batch file's own folder (%~dp0) to the current directory, so npx
 // looks for npm inside the empty work dir. Instead run npm's `npx-cli.js` directly
@@ -99,7 +99,7 @@ function waitForUrl() {
       if (match) resolveUrl(/** @type {string} */ (match[1]));
     };
     child.stdout.on('data', check);
-    void exited.then(() => reject(new Error(`ogdenmad exited before printing a URL (code ${child.exitCode})`)));
+    void exited.then(() => reject(new Error(`ogden-agents exited before printing a URL (code ${child.exitCode})`)));
     check();
   });
 }
@@ -174,7 +174,7 @@ function cleanUp() {
 let failure;
 try {
   console.log(`smoke: installing ${tarball} with npx in ${workDir}`);
-  const url = await withTimeout(waitForUrl(), START_TIMEOUT_MS, 'ogdenmad to print its URL');
+  const url = await withTimeout(waitForUrl(), START_TIMEOUT_MS, 'ogden-agents to print its URL');
   console.log(`smoke: server is at ${url}`);
   await withTimeout(checkPage(url), STEP_TIMEOUT_MS, 'GET /');
   console.log('smoke: GET / returned the page');

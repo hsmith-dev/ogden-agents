@@ -194,26 +194,43 @@ describe('when the agent can’t be started', () => {
 
 describe('finding claude', () => {
   it('takes the first runnable claude on PATH, then Claude Code’s own install locations', () => {
+    // Real folders and a real file on this computer, with its own naming and default runnable check.
+    const name = process.platform === 'win32' ? 'claude.exe' : 'claude';
     const home = tempDir();
     const onPath = join(tempDir(), 'bin');
     mkdirSync(onPath);
     const local = join(home, '.local', 'bin');
     mkdirSync(local, { recursive: true });
-    writeFileSync(join(local, 'claude'), '#!/bin/sh\n');
-    chmodSync(join(local, 'claude'), 0o755);
-    const isExecutable = (file: string) => file === join(local, 'claude') || file === join(onPath, 'claude');
+    writeFileSync(join(local, name), '#!/bin/sh\n');
+    chmodSync(join(local, name), 0o755);
+    const pathKey = process.platform === 'win32' ? 'Path' : 'PATH';
 
-    expect(findClaudeExecutable({ PATH: onPath }, { platform: 'linux', home, isExecutable: (f) => f === join(local, 'claude') })).toBe(join(local, 'claude'));
-    expect(findClaudeExecutable({ PATH: onPath }, { platform: 'linux', home, isExecutable })).toBe(join(onPath, 'claude'));
-    expect(findClaudeExecutable({ PATH: '' }, { platform: 'linux', home, isExecutable: () => false })).toBeUndefined();
+    expect(findClaudeExecutable({ [pathKey]: onPath }, { home })).toBe(join(local, name));
+    writeFileSync(join(onPath, name), '#!/bin/sh\n');
+    chmodSync(join(onPath, name), 0o755);
+    expect(findClaudeExecutable({ [pathKey]: onPath }, { home })).toBe(join(onPath, name));
+    expect(findClaudeExecutable({ [pathKey]: '' }, { home, isExecutable: () => false })).toBeUndefined();
   });
 
   it('skips relative PATH entries, so only absolute paths are ever returned', () => {
     const seen: string[] = [];
     const found = findClaudeExecutable({ PATH: ['.', 'bin', '', '/usr/local/bin'].join(':') }, { platform: 'linux', home: '/home/a', isExecutable: (f) => (seen.push(f), true) });
-    expect(found).toBe(join('/usr/local/bin', 'claude'));
+    expect(found).toBe('/usr/local/bin/claude');
     expect(seen.every((f) => f.startsWith('/'))).toBe(true);
     expect(findClaudeExecutable({ PATH: '.' }, { platform: 'linux', home: 'relative-home', isExecutable: () => true })).toBeUndefined();
+  });
+
+  it('on Windows: Path in any case, quoted and relative entries, USERPROFILE, and only claude.exe', () => {
+    const seen: string[] = [];
+    const found = findClaudeExecutable(
+      { Path: ['.\\bin', '"C:\\Program Files\\Claude"', 'D:\\tools'].join(';'), USERPROFILE: 'C:\\Users\\a' },
+      { platform: 'win32', isExecutable: (f) => (seen.push(f), f === 'D:\\tools\\claude.exe') },
+    );
+    expect(found).toBe('D:\\tools\\claude.exe');
+    expect(seen).toEqual(['C:\\Program Files\\Claude\\claude.exe', 'D:\\tools\\claude.exe']);
+    const home: string[] = [];
+    findClaudeExecutable({ PATH: '' , USERPROFILE: 'C:\\Users\\a' }, { platform: 'win32', isExecutable: (f) => (home.push(f), false) });
+    expect(home).toEqual(['C:\\Users\\a\\.local\\bin\\claude.exe', 'C:\\Users\\a\\.claude\\local\\claude.exe']);
   });
 
   it('on Windows only claude.exe counts', () => {

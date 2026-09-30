@@ -26,8 +26,13 @@ import { signIn, startTestServer, tempDataDir, waitFor, type SignedIn, type Test
 const FAKE_AGENT = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-acp-agent.mjs');
 
 const repos: string[] = [];
-afterEach(() => {
-  for (const dir of repos.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+const servers: TestServer[] = [];
+// Servers first (closing one stops its agents and waits for them to exit),
+// then the repo folders: on Windows a folder can't be removed while an agent
+// process still has it as its working directory.
+afterEach(async () => {
+  await Promise.all(servers.splice(0).map((server) => server.close()));
+  for (const dir of repos.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 });
 
 /** A folder standing in for a repo. */
@@ -39,6 +44,7 @@ function repo(): string {
 
 async function startChatServer(options: StartOptions & { lines?: string[] } = {}) {
   const server = await startTestServer({ claudeAdapterPath: FAKE_AGENT, ...options });
+  servers.push(server);
   return { server, tab: await signIn(server) };
 }
 

@@ -4,9 +4,9 @@
  * signals (AD-4), and an agent that can't start or crashes leaves the session
  * in `error` with a plain reason.
  */
-import { mkdirSync, realpathSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { CoreEvent, SessionId } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import {
@@ -280,7 +280,14 @@ describe('chat', () => {
   it('expands a leading ~ to the user’s home', () => {
     const core = openTestCore();
     const { chat } = setUp(core, hello.port);
-    expect(chat.openWorkspace('~').realPath).toBe(realpathSync.native(homedir()));
+    // A folder of its own in the home folder: on Windows the temp data folder sits
+    // inside home, so `~` itself is (rightly) refused as an ancestor of it.
+    const inHome = mkdtempSync(join(homedir(), '.ogden-agents-test-'));
+    try {
+      expect(chat.openWorkspace(`~/${basename(inHome)}`).realPath).toBe(realpathSync.native(inHome));
+    } finally {
+      rmSync(inHome, { recursive: true, force: true });
+    }
   });
 
   it('a session is found only through its own workspace', () => {

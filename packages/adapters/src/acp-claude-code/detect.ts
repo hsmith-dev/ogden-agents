@@ -5,7 +5,7 @@
  */
 import { accessSync, constants, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, join, posix, win32 } from 'node:path';
+import { posix, win32 } from 'node:path';
 
 export interface FindClaudeOptions {
   platform?: NodeJS.Platform;
@@ -28,7 +28,10 @@ function runnable(file: string): boolean {
 /**
  * The first `claude` on `env.PATH`, else at Claude Code's install locations
  * (`~/.local/bin`, `~/.claude/local`), or `undefined`. On Windows only a real
- * `claude.exe` counts: a `.cmd` shim can't be spawned as an executable.
+ * `claude.exe` counts (what Claude Code's own installer puts in
+ * `%USERPROFILE%\.local\bin`): an npm `.cmd` shim can't be spawned without
+ * a shell, so it is never passed as `CLAUDE_CODE_EXECUTABLE`. Windows
+ * variable names are case-insensitive, so `Path` and `PATH` both count.
  * Relative `PATH` entries (such as `.`) are skipped: they would resolve
  * against whatever folder the agent later runs in, so only absolute paths
  * are ever returned.
@@ -36,17 +39,19 @@ function runnable(file: string): boolean {
 export function findClaudeExecutable(env: Readonly<Record<string, string | undefined>>, options: FindClaudeOptions = {}): string | undefined {
   const platform = options.platform ?? process.platform;
   const isExecutable = options.isExecutable ?? runnable;
-  const name = platform === 'win32' ? 'claude.exe' : 'claude';
-  const pathValue = env.PATH ?? env.Path ?? '';
-  const sep = platform === 'win32' ? ';' : platform === process.platform ? delimiter : ':';
-  const home = options.home ?? env.HOME ?? env.USERPROFILE ?? homedir();
-  const paths = platform === 'win32' ? win32 : posix;
+  const windows = platform === 'win32';
+  const paths = windows ? win32 : posix;
+  const name = windows ? 'claude.exe' : 'claude';
+  const lookup = (key: string) =>
+    windows ? Object.entries(env).find(([name]) => name.toUpperCase() === key)?.[1] : env[key];
+  const pathValue = lookup('PATH') ?? '';
+  const home = options.home ?? (windows ? (lookup('USERPROFILE') ?? lookup('HOME')) : lookup('HOME')) ?? homedir();
   const candidates = [
-    ...pathValue.split(sep),
-    join(home, '.local', 'bin'),
-    join(home, '.claude', 'local'),
+    ...pathValue.split(paths.delimiter).map((dir) => (windows ? dir.replace(/^"(.*)"$/, '$1') : dir)),
+    paths.join(home, '.local', 'bin'),
+    paths.join(home, '.claude', 'local'),
   ]
     .filter((dir) => dir !== '' && paths.isAbsolute(dir))
-    .map((dir) => join(dir, name));
+    .map((dir) => paths.join(dir, name));
   return candidates.find((file) => isExecutable(file));
 }

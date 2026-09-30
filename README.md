@@ -65,8 +65,6 @@ Launch codes, tab tokens and the launcher token never appear in the logs or the 
 
 **Known limit.** On a computer shared by several accounts, another local user can see the launch link (with its one-time code) on the process command line while your browser opens it (macOS, and Linux without `hidepid`), and could race to use it first. The code works once and only for 60 seconds; Ogden Agents is meant for one user per install.
 
-Version 0.1.0 used a session cookie (`ogden_session_<port>`) signed with `auth.key`. Browsers send cookies for `127.0.0.1` to every port on it, so any other local web server could receive it; it has been replaced by the per-tab token. Old cookies are ignored, and a leftover `auth.key` is deleted when the server starts.
-
 ## Develop
 
 ```sh

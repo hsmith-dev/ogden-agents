@@ -10,8 +10,15 @@ covers = ["CAP-1"]
 id = 2
 slug = "epic-chat-and-workspaces"
 title = "Chat with your own agent in workspaces across projects"
-covers = ["CAP-3", "CAP-4", "CAP-16", "CAP-17"]
+covers = ["CAP-3", "CAP-4", "CAP-17"]
 after = [{ epic = 1, needs = "the server, security gate, event log, entity model and design system" }]
+
+[[epic]]
+id = 9
+slug = "epic-first-run-onboarding"
+title = "New users install and sign into their own agent from the browser"
+covers = ["CAP-16"]
+after = [{ epic = 2, needs = "contracts and stubs (2.3), the tracer's Claude Code adapter (2.2), the app shortcut (2.4), workspaces (2.5) and the session view (2.10)" }]
 
 [[epic]]
 id = 3
@@ -39,7 +46,7 @@ id = 6
 slug = "epic-every-agent"
 title = "Every agent BMAD supports works for chat and builds"
 covers = ["CAP-15"]
-after = [{ epic = 2, needs = "the ACP client and session states" }, { epic = 5, needs = "the build runner and sandbox chain" }]
+after = [{ epic = 2, needs = "the ACP client and session states" }, { epic = 9, needs = "the setup adapter and sign-in flow other agents reuse" }, { epic = 5, needs = "the build runner and sandbox chain" }]
 
 [[epic]]
 id = 7

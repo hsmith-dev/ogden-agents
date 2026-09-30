@@ -1,7 +1,7 @@
 // Assembles the publishable `dist/` from the workspace builds:
 //   packages/server/dist/*  -> dist/        (`server.js`, the background server
 //                                           entry `serve.js`, `launcher.js`, and
-//                                           their shared chunks and migrations)
+//                                           their shared chunk and migrations)
 //   packages/web/dist       -> dist/web/    (the built UI)
 // Run by `pnpm build` after every package has built.
 import { cpSync, existsSync, rmSync } from 'node:fs';

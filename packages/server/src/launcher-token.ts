@@ -13,7 +13,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tightenMode } from './auth.js';
+import { tightenMode } from './file-mode.js';
 
 /** The token file in the data folder. */
 export const LAUNCHER_TOKEN_FILE = 'launcher.token';

@@ -16,7 +16,9 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ensureDataDir, DATA_DIR_ENV, PORT_FILE } from '@ogden-agents/core';
+// The data-folder module alone, not core's index: the launcher must not load
+// the database driver (`better-sqlite3`) just to find or start a server.
+import { ensureDataDir, DATA_DIR_ENV, PORT_FILE } from '@ogden-agents/core/data-dir';
 import pkg from '../package.json' with { type: 'json' };
 import { EXIT_ALREADY_RUNNING, isPidAlive } from './instance-lock.js';
 import { LAUNCHER_TOKEN_FILE, LAUNCHER_TOKEN_HEADER, readLauncherToken } from './launcher-token.js';

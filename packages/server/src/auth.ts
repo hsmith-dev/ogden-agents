@@ -7,7 +7,7 @@
  * "issued", "used" or "rejected", or that a token was "minted", never a value.
  */
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { chmodSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { LEGACY_AUTH_KEY_FILE } from '@ogden-agents/core';
 import { TAB_TOKEN_PATTERN, WS_AUTH_PROTOCOL_PREFIX, WS_PROTOCOL } from '@ogden-agents/shared';
@@ -23,11 +23,6 @@ export const TAB_TOKEN_IDLE_TTL_MS = 12 * 60 * 60 * 1000;
 
 /** Milliseconds since the epoch; injected so tests can move time. */
 export type Clock = () => number;
-
-/** Makes an existing file readable only by the user (POSIX; a no-op on Windows). */
-export function tightenMode(file: string): void {
-  if (process.platform !== 'win32') chmodSync(file, 0o600);
-}
 
 /**
  * Deletes the session-cookie signing key that story 1.4 kept in the data

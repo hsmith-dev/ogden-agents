@@ -8,7 +8,7 @@
 import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { builtinModules } from 'node:module';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -94,6 +94,30 @@ function loadServerBundle() {
     .map((name) => ({ path: `dist/${name}`, source: readFileSync(join(DIST, name), 'utf8') }));
 }
 
+/**
+ * Every bare specifier `entry` loads, following its relative imports (static
+ * and dynamic) through the chunks beside it. `read` returns a file's source
+ * by its path relative to the bundle folder.
+ */
+export function bareImportsOf(entry: string, read: (file: string) => string): string[] {
+  const seen = new Set<string>();
+  const bare = new Set<string>();
+  const visit = (file: string) => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    for (const match of read(file).matchAll(SPECIFIER)) {
+      const specifier = match[2]!;
+      if (specifier.startsWith('./')) visit(posix.join(posix.dirname(file), specifier));
+      else if (!specifier.startsWith('.') && !specifier.startsWith('/')) bare.add(specifier);
+    }
+  };
+  visit(entry);
+  return [...bare].sort();
+}
+
+/** Packages only the server needs; the launcher (every `ogden` run) must load none of them. */
+const SERVER_ONLY = ['better-sqlite3', 'drizzle-orm', 'hono', '@hono/node-server', 'ws', 'ulid', 'zod'];
+
 function rootDependencies(): Record<string, string> {
   const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as RootManifest;
   return manifest.dependencies ?? {};
@@ -145,6 +169,20 @@ describe('packaging', () => {
 
   it('the server bundle contains no workspace package imports', () => {
     for (const { source } of loadServerBundle()) expect(source).not.toMatch(/['"]@ogden-agents\//);
+  });
+
+  it('the launcher bundle loads only what the handshake and the spawn need: never better-sqlite3 or the rest of the server', () => {
+    const imports = bareImportsOf('launcher.js', (file) => readFileSync(join(DIST, file), 'utf8'));
+    expect(imports.length).toBeGreaterThan(0);
+    expect(imports.map(packageOf).filter((pkg) => SERVER_ONLY.includes(pkg))).toEqual([]);
+  });
+
+  it('follows chunks when collecting a bundle\'s imports', () => {
+    const files: Record<string, string> = {
+      'launcher.js': "import { a } from './chunk-a.js';\nimport { spawn } from 'node:child_process';",
+      'chunk-a.js': "import Database from 'better-sqlite3';\nexport { b } from './chunk-a.js';\nconst o = await import('open');",
+    };
+    expect(bareImportsOf('launcher.js', (file) => files[file]!)).toEqual(['better-sqlite3', 'node:child_process', 'open']);
   });
 
   it('flags an undeclared import by package name', () => {

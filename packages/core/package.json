@@ -5,7 +5,8 @@
   "description": "Domain: entities, ports, event log, state machines, verification rules.",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./data-dir": "./src/data-dir.ts"
   },
   "scripts": {
     "db:generate": "drizzle-kit generate",

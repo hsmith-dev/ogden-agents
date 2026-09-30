@@ -203,7 +203,7 @@ graph LR
 - **Prevents:** credentials leaking into the database, the event log or logs.
 - **Rule:**
   - Subscription logins stay in each agent's own CLI, and Ogden Agents never reads or stores them.
-  - API keys go through `SecretStorePort`: the OS keychain (`@napi-rs/keyring`), falling back to an encrypted file readable only by the user where no keychain exists.
+  - API keys go through `SecretStorePort`: the OS keychain (`@napi-rs/keyring`); where no keychain exists, saving a key is refused with a plain reason and subscription sign-in remains.
   - Adapters redact secrets before emitting events.
 
 ### AD-17 — Unattended runs are contained

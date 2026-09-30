@@ -3,11 +3,15 @@ export { createLogger, redact, type Logger } from './log.js';
 export {
   AGENT_ENV_KEYS,
   agentEnvironment,
+  agentKeysOf,
   CLAUDE_ACP_PATH_ENV,
   countBusySessions,
   DEFAULT_PORT,
   HOST,
+  SECRET_STORE_ENV,
   start,
+  SUBSCRIPTION_MAX_AGE_MS,
+  testSecretStore,
   type PortFile,
   type RunningServer,
   type StartOptions,
@@ -29,3 +33,5 @@ export { ToolchainError, type DetectedToolStatus, type ToolchainPort, type ToolP
 export { AgentError, type AgentEvent, type AgentPort, type AgentSession } from '@ogden-agents/core';
 // Setup, secret and shortcut port types for callers that stub them (tests; story 2.3).
 export type { AgentSetupPort, AppShortcutPort, SecretStorePort } from '@ogden-agents/core';
+// The in-memory secret store, so tests never touch the real OS keychain (story 9.2).
+export { createMemorySecretStore } from '@ogden-agents/adapters';

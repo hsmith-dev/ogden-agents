@@ -215,7 +215,7 @@ describe('chat through the fake ACP agent', () => {
         .readAfter(0)
         .flatMap((e) => (e.type === 'session.message_completed' && e.payload.role === 'agent' ? [e.payload.content] : []))
         .join('');
-      // The key reached the agent (masked in what it printed); nothing outside the allowlist did.
+      // Signed out, the server's own key reached the agent (masked in what it printed); nothing outside the allowlist did.
       expect(reply).toContain('ANTHROPIC_API_KEY=[redacted]');
       expect(reply).toContain('PATH=');
       expect(reply).not.toContain('OGDEN_TEST_UNLISTED_SECRET_TOKEN');
@@ -237,12 +237,13 @@ describe('chat through the fake ACP agent', () => {
     }
   });
 
-  it('the agent environment is an allowlist plus the user’s agent keys', () => {
+  it('the agent environment is an allowlist; agent keys are left to the precedence rule (story 9.2 review F1)', () => {
     const env = agentEnvironment(
       { PATH: '/bin', HOME: '/h', LANG: 'en', LC_CTYPE: 'UTF-8', TERM: 'x', SHELL: '/bin/zsh', TMPDIR: '/t', ANTHROPIC_API_KEY: 'k', AWS_SECRET_ACCESS_KEY: 's', NODE_OPTIONS: '--inspect', CLAUDECODE: '1' },
       'darwin',
     );
-    expect(Object.keys(env).sort()).toEqual(['ANTHROPIC_API_KEY', 'HOME', 'LANG', 'LC_CTYPE', 'PATH', 'SHELL', 'TERM', 'TMPDIR']);
+    expect(Object.keys(env).sort()).toEqual(['HOME', 'LANG', 'LC_CTYPE', 'PATH', 'SHELL', 'TERM', 'TMPDIR']);
+    expect(Object.keys(agentEnvironment({ Path: 'C:\\bin', Anthropic_Api_Key: 'k' }, 'win32'))).toEqual(['Path']);
     const windows = agentEnvironment({ Path: 'C:\\bin', SYSTEMROOT: 'C:\\Windows', ComSpec: 'cmd', PATHEXT: '.EXE', USERPROFILE: 'C:\\u', APPDATA: 'x' }, 'win32');
     expect(Object.keys(windows).sort()).toEqual(['ComSpec', 'PATHEXT', 'Path', 'SYSTEMROOT', 'USERPROFILE']);
   });

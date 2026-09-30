@@ -7,6 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { request, type IncomingHttpHeaders } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createMemorySecretStore } from '@ogden-agents/adapters';
 import { API_ROUTES, webSocketProtocols } from '@ogden-agents/shared';
 import { afterEach } from 'vitest';
 import type WebSocket from 'ws';
@@ -74,7 +75,9 @@ export const FAKE_AGENT = join(import.meta.dirname, '..', '..', '..', 'tests', '
  * Starts a real server on any free port, a temp data folder and a tiny UI,
  * with a launch link, and closes it after the test. Log lines go to `lines`
  * (if given); any start option overrides these defaults. The agent is the
- * fake one, so no test ever runs the real Claude Code adapter or its login.
+ * fake one, so no test ever runs the real Claude Code adapter or its login;
+ * API keys are kept in memory and their check is a stub, so no test touches
+ * the real keychain or reaches Anthropic (story 9.2).
  */
 export async function startTestServer(options: StartOptions & { lines?: string[] } = {}): Promise<TestServer> {
   const { lines, ...rest } = options;
@@ -85,6 +88,8 @@ export async function startTestServer(options: StartOptions & { lines?: string[]
     dataDir: tempDataDir(),
     webRoot: tinyWebRoot(),
     claudeAdapterPath: FAKE_AGENT,
+    secrets: createMemorySecretStore(),
+    verifyApiKey: async () => 'ok',
     ...rest,
     launch: true,
   });

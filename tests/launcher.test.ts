@@ -66,7 +66,7 @@ function makeDataDir(): string {
 function runLauncher(dataDir: string, args: string[] = ['--no-open', '--port', '0']) {
   const child = spawn(process.execPath, [BIN, ...args], {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, OGDEN_AGENTS_DATA_DIR: dataDir },
+    env: { ...process.env, OGDEN_AGENTS_DATA_DIR: dataDir, OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', NODE_ENV: 'test' },
   });
   children.push(child);
   let stdout = '';
@@ -120,7 +120,7 @@ describe('bin/ogden.js --foreground', () => {
     const dataDir = makeDataDir();
     const child = spawn(process.execPath, [BIN, '--foreground', '--no-open', '--port', '0'], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, OGDEN_AGENTS_DATA_DIR: dataDir },
+      env: { ...process.env, OGDEN_AGENTS_DATA_DIR: dataDir, OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', NODE_ENV: 'test' },
     });
     children.push(child);
     let stdout = '';

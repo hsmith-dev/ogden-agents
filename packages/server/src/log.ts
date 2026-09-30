@@ -4,8 +4,9 @@
  * data folder. There is no logging library. Secrets are never passed to the
  * logger on purpose (AD-16); as a backstop, {@link redact} scrubs every line:
  * credential headers (`Authorization`, `Sec-WebSocket-Protocol`, `Cookie`, the
- * launcher token header) by name, and bearer or subprotocol tokens, launch
- * codes and token fragments wherever they appear in a value.
+ * launcher token header, API key fields) by name, and bearer or subprotocol
+ * tokens, launch codes, token fragments and Anthropic API keys wherever they
+ * appear in a value.
  */
 import { appendFileSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -31,6 +32,11 @@ const SECRET_FIELDS = new Set([
   'cookie',
   'set-cookie',
   'x-ogden-launcher-token',
+  // API keys (story 9.2): never logged on purpose; these catch a slip.
+  'apikey',
+  'api_key',
+  'x-api-key',
+  'anthropic_api_key',
 ]);
 
 /** Field names whose value is a credential when it is a string (a boolean such as "was a token found" is not). */
@@ -40,8 +46,15 @@ const SECRET_STRING_FIELDS = new Set(['token']);
 const MAX_DEPTH = 8;
 export const TOO_DEEP = '[too deep]';
 
-/** Credentials that can appear inside any string: bearer tokens, the auth subprotocol, launch codes, token fragments. */
+/** Credentials that can appear inside any string: bearer tokens, the auth subprotocol, launch codes, token fragments, API keys. */
 const SECRET_PATTERNS: ReadonlyArray<[RegExp, string]> = [
+  // An Anthropic key, with any continuation on the following lines (a key
+  // wrapped or split across lines, raw or as an escaped `\n`), and a key
+  // cut short at the end of a line (just `sk-ant`).
+  [/sk-ant[A-Za-z0-9_-]*(?:(?:\r?\n|\\r|\\n)+[A-Za-z0-9_-]+)*/g, REDACTED],
+  // A key cut earlier, at the end of a line (`sk-an`, `sk-a`, `sk-`), with what follows on the next lines.
+  [/\bsk-(?:an?)?(?:(?:\r?\n|\\r|\\n)+[A-Za-z0-9_-]+)+/g, REDACTED],
+  [/\bsk-(?:an?)?$/gm, REDACTED],
   [/(Bearer\s+)[^\s"',]+/gi, `$1${REDACTED}`],
   [/(ogden\.auth\.)[^\s"',]+/g, `$1${REDACTED}`],
   [/([?&]code=)[^\s"'&#]+/g, `$1${REDACTED}`],

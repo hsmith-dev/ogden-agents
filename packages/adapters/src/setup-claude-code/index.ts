@@ -10,7 +10,10 @@
  * - The method is validated before anything runs (`auth-method.ts`), and
  *   what runs is always `nodePath`, the resolved adapter and fixed arguments.
  * - The terminal's environment is exactly the agent allowlist it is given,
- *   plus `CLAUDE_CODE_EXECUTABLE` and `TERM` (AD-16).
+ *   plus `CLAUDE_CODE_EXECUTABLE` and `TERM`, less any `ANTHROPIC_API_KEY`
+ *   (AD-16): sign-in and `auth status` see the subscription alone.
+ * - An API key instead (story 9.2): `apiKey` declares the variable, the
+ *   format and the free check (`api-key.ts`); core decides when the chat gets it.
  * - Credentials stay in the CLI. The terminal's output, the URL, a pasted
  *   code and the status JSON are never logged or stored; diagnostics carry
  *   only step names and exit codes (AD-16).
@@ -25,9 +28,20 @@ import { SIGN_IN_CODE_PATTERN, MAX_SIGN_IN_CODE_LENGTH, type AgentSetupStatus } 
 import { CLAUDE_CODE } from '../acp-claude-code/claude-code-agent.js';
 import { findClaudeExecutable } from '../acp-claude-code/detect.js';
 import { loadPty as defaultLoadPty, type HiddenPty, type PtyLoader } from '../terminal-pty/index.js';
+import { ANTHROPIC_API_KEY_ENV, createClaudeApiKey, type ClaudeApiKeyOptions } from './api-key.js';
 import { CLAUDE_AI_LOGIN_ARGS, CLAUDE_AUTH_STATUS_ARGS, checkAuthMethods } from './auth-method.js';
 import { DEFAULT_SIGN_IN_HOSTS, findSignInUrl } from './sign-in-output.js';
 
+export {
+  ANTHROPIC_API_KEY_ENV,
+  ANTHROPIC_API_KEY_PATTERN,
+  ANTHROPIC_VERIFY_URL,
+  ANTHROPIC_VERSION,
+  BAD_API_KEY,
+  VERIFY_TIMEOUT_MS,
+  createClaudeApiKey,
+  type ClaudeApiKeyOptions,
+} from './api-key.js';
 export { CLAUDE_AI_LOGIN_ARGS, CLAUDE_AI_LOGIN_ID, CLAUDE_AUTH_STATUS_ARGS, UNSUPPORTED_SIGN_IN, checkAuthMethods } from './auth-method.js';
 export { DEFAULT_SIGN_IN_HOSTS, findSignInUrl, isAllowedSignInUrl, stripTerminalEscapes } from './sign-in-output.js';
 
@@ -77,6 +91,15 @@ export interface ClaudeCodeSetupOptions {
   cliBrowser?: string;
   /** Step names, exit codes and load failures, for the log. Never output, a URL or a code. */
   onDiagnostic?: (message: string, fields?: Record<string, unknown>) => void;
+  /** The API key check's `fetch`, timeout or a stub (tests). Default: the real check with the global `fetch`. */
+  apiKey?: Omit<ClaudeApiKeyOptions, 'onDiagnostic'>;
+}
+
+/** `env` without the API key variable, whatever its case (Windows names are case-insensitive). */
+export function withoutApiKey(env: Readonly<Record<string, string>>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) if (name.toUpperCase() !== ANTHROPIC_API_KEY_ENV) out[name] = value;
+  return out;
 }
 
 export interface ClaudeCodeSetup extends AgentSetupPort {
@@ -119,9 +142,9 @@ export function createClaudeCodeSetup(options: ClaudeCodeSetupOptions): ClaudeCo
   const adapter = (): string | undefined =>
     options.adapterPath !== undefined && existsSync(options.adapterPath) ? options.adapterPath : undefined;
 
-  /** The allowlisted environment, plus the user's own `claude` and a terminal type (AD-16). */
+  /** The allowlisted environment without any API key, plus the user's own `claude` and a terminal type (AD-16). */
   const cliEnv = (): Record<string, string> => {
-    const env: Record<string, string> = { ...options.env() };
+    const env: Record<string, string> = withoutApiKey(options.env());
     if (env.CLAUDE_CODE_EXECUTABLE === undefined) {
       const claude = options.claudeExecutable === undefined ? findClaudeExecutable(env) : options.claudeExecutable;
       if (claude !== null && claude !== undefined) env.CLAUDE_CODE_EXECUTABLE = claude;
@@ -186,17 +209,19 @@ export function createClaudeCodeSetup(options: ClaudeCodeSetupOptions): ClaudeCo
   return {
     agentId: CLAUDE_CODE_AGENT_ID,
     displayName: CLAUDE_CODE,
+    apiKey: createClaudeApiKey({ ...options.apiKey, onDiagnostic: diagnostic }),
 
+    // `subscription` is what `auth status` says, run without any API key (story 9.2's precedence rule).
     async status() {
       const script = adapter();
-      if (script === undefined) return { ...base(), install: 'not_installed', version: null, auth: 'needs_sign_in' };
+      if (script === undefined) return { ...base(), install: 'not_installed', version: null, auth: 'needs_sign_in', subscription: 'unknown' };
       const status = await readAuthStatus(script);
-      if (status === 'missing') return { ...base(), install: 'not_installed', version: null, auth: 'needs_sign_in' };
-      if (status === undefined) return { ...base(), install: 'installed', version: null, auth: 'needs_sign_in', reason: CANT_CHECK };
-      if (status.loggedIn) return { ...base(), install: 'installed', version: null, auth: 'signed_in', method: 'subscription' };
+      if (status === 'missing') return { ...base(), install: 'not_installed', version: null, auth: 'needs_sign_in', subscription: 'unknown' };
+      if (status === undefined) return { ...base(), install: 'installed', version: null, auth: 'needs_sign_in', reason: CANT_CHECK, subscription: 'unknown' };
+      if (status.loggedIn) return { ...base(), install: 'installed', version: null, auth: 'signed_in', method: 'subscription', subscription: 'signed_in' };
       const pty = await loadPty();
-      if (!pty.ok) return { ...base(), install: 'installed', version: null, auth: 'failed', reason: UNAVAILABLE(pty.reason) };
-      return { ...base(), install: 'installed', version: null, auth: 'needs_sign_in' };
+      if (!pty.ok) return { ...base(), install: 'installed', version: null, auth: 'failed', reason: UNAVAILABLE(pty.reason), subscription: 'signed_out' };
+      return { ...base(), install: 'installed', version: null, auth: 'needs_sign_in', subscription: 'signed_out' };
     },
 
     async install() {

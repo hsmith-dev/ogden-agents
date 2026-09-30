@@ -1,6 +1,6 @@
 /**
- * `secrets-memory` (story 2.3): an in-memory `SecretStorePort`, the default
- * until the keychain adapter ships (onboarding 9.4), and for tests.
+ * `secrets-memory` (story 2.3): an in-memory `SecretStorePort` for tests (the
+ * server's default is the keychain, `secrets-keyring`, since onboarding 9.2).
  * Deterministic; nothing is written anywhere and nothing survives a restart.
  */
 import type { SecretStorePort } from '@ogden-agents/core';

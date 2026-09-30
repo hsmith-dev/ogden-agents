@@ -1,18 +1,28 @@
 /**
  * The agent setup use-case (story 9.1): sign-in states become
  * `agent.auth_changed` events that never carry the URL or a code, one
- * sign-in runs per agent, and cancel, failure and dispose behave.
+ * sign-in runs per agent, and cancel, failure and dispose behave. API keys
+ * (story 9.2): checked, stored through the secret store, and put in the chat
+ * environment only while the subscription is known to be signed out.
  */
 import { AGENTS_STREAM, type AgentSetupStatus, type CoreEvent } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import {
   AgentSetupError,
+  ApiKeyRefusedError,
+  KEYCHAIN_NO_ANSWER_MESSAGE,
   NotFoundError,
+  SecretsUnavailableError,
   SignInNotPendingError,
   ValidationError,
   createAgentSetup,
+  type AgentApiKeySupport,
+  type AgentPortStatus,
   type AgentSetupPort,
   type AgentSignIn,
+  type AgentSubscriptionState,
+  type ApiKeyVerification,
+  type SecretStorePort,
 } from '../src/index.js';
 import { openTestCore } from './helpers.js';
 
@@ -166,5 +176,372 @@ describe('agent setup', () => {
     expect(await starting).toEqual({ state: 'needs_sign_in', url: null });
     expect(cancelled).toBe(true);
     expect(authEvents(core.events.readAfter(0)).map((event) => event.payload.state)).toEqual(['signing_in']);
+  });
+});
+
+const API_KEY = 'sk-ant-api03-core_TEST_ONLY_0123456789abcdefWXYZ';
+
+/** An in-memory secret store the test can break and inspect. */
+function memoryStore(initial: Record<string, string> = {}) {
+  const values = new Map(Object.entries(initial));
+  let failing = false;
+  const guard = () => {
+    if (failing) throw new SecretsUnavailableError(undefined, { cause: 'GenericFailure' });
+  };
+  const store: SecretStorePort = {
+    backend: 'memory',
+    get: async (name) => (guard(), values.get(name)),
+    set: async (name, value) => void (guard(), values.set(name, value)),
+    delete: async (name) => void (guard(), values.delete(name)),
+  };
+  return { store, values, fail: (on = true) => void (failing = on) };
+}
+
+/** A port that can use an API key, whose subscription and verify outcome the test sets. */
+function keyPort(options: { subscription?: AgentSubscriptionState; verify?: ApiKeyVerification | (() => Promise<ApiKeyVerification>) } = {}) {
+  let subscription: AgentSubscriptionState | 'throws' = options.subscription ?? 'signed_out';
+  const verified: string[] = [];
+  const apiKey: AgentApiKeySupport = {
+    envName: 'FAKE_API_KEY',
+    check: (value) => (/^sk-ant-[A-Za-z0-9_-]{20,}$/.test(value) ? undefined : "That doesn't look like an Anthropic API key."),
+    verify: async (value) => {
+      verified.push(value);
+      const outcome = options.verify ?? 'ok';
+      return typeof outcome === 'function' ? outcome() : outcome;
+    },
+  };
+  const { port } = fakePort({
+    apiKey,
+    status: async (): Promise<AgentPortStatus> => {
+      if (subscription === 'throws') throw new Error('status unreadable');
+      return {
+        agentId: 'claude-code',
+        displayName: 'Claude Code',
+        install: 'installed',
+        version: null,
+        auth: subscription === 'signed_in' ? 'signed_in' : 'needs_sign_in',
+        ...(subscription === 'signed_in' ? { method: 'subscription' as const } : {}),
+        ...(subscription === 'unknown' ? { reason: 'could not check' } : {}),
+        subscription,
+      };
+    },
+  });
+  return { port, verified, setSubscription: (next: AgentSubscriptionState | 'throws') => void (subscription = next) };
+}
+
+describe('agent setup: API keys (story 9.2)', () => {
+  it('signed out: saving stores the key under agent-api-key/<id>, injects it, and appends signed_in api_key without the key', async () => {
+    const core = openTestCore();
+    const secrets = memoryStore();
+    const { port, verified } = keyPort({ subscription: 'signed_out' });
+    const setup = createAgentSetup(core.events, [port], { secrets: secrets.store });
+    await setup.load();
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    expect((await setup.list())[0]).toMatchObject({ auth: 'needs_sign_in', apiKey: { saved: false } });
+
+    await setup.setApiKey('claude-code', `  ${API_KEY}  `);
+    expect(verified).toEqual([API_KEY]);
+    expect(secrets.values.get('agent-api-key/claude-code')).toBe(API_KEY);
+    expect(setup.agentEnv('claude-code')).toEqual({ FAKE_API_KEY: API_KEY });
+    const [status] = await setup.list();
+    expect(status).toMatchObject({ auth: 'signed_in', method: 'api_key', apiKey: { saved: true, lastFour: 'WXYZ' } });
+    expect(status!.apiKey!.unchecked).toBeUndefined();
+    expect(status!.reason).toBeUndefined();
+
+    const events = authEvents(core.events.readAfter(0));
+    expect(events.map((event) => event.payload)).toEqual([{ agentId: 'claude-code', state: 'signed_in', method: 'api_key' }]);
+    const everything = JSON.stringify(core.events.readAfter(0));
+    expect(everything).not.toContain(API_KEY);
+    expect(everything).not.toContain('WXYZ');
+    expect(JSON.stringify(await setup.list())).not.toContain(API_KEY);
+  });
+
+  it('subscription signed in: the key is saved but never injected, and no event is appended', async () => {
+    const core = openTestCore();
+    const secrets = memoryStore();
+    const { port } = keyPort({ subscription: 'signed_in' });
+    const setup = createAgentSetup(core.events, [port], { secrets: secrets.store });
+    await setup.setApiKey('claude-code', API_KEY);
+    expect(secrets.values.get('agent-api-key/claude-code')).toBe(API_KEY);
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    expect((await setup.list())[0]).toMatchObject({ auth: 'signed_in', method: 'subscription', apiKey: { saved: true, lastFour: 'WXYZ' } });
+    expect(authEvents(core.events.readAfter(0))).toEqual([]);
+  });
+
+  it('unknown sign-in (unreadable, or a status that throws): never injected, and list says why', async () => {
+    const core = openTestCore();
+    const { port, setSubscription } = keyPort({ subscription: 'unknown' });
+    const setup = createAgentSetup(core.events, [port], { secrets: memoryStore().store });
+    await setup.setApiKey('claude-code', API_KEY);
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    expect((await setup.list())[0]).toMatchObject({
+      auth: 'needs_sign_in',
+      reason: "Ogden Agents couldn't check your Claude Code sign-in, so your API key isn't in use.",
+      apiKey: { saved: true, lastFour: 'WXYZ' },
+    });
+    setSubscription('throws');
+    await setup.list();
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    expect(authEvents(core.events.readAfter(0))).toEqual([]);
+  });
+
+  it('the cache follows list(): a subscription signed in elsewhere stops the injection at the next refresh', async () => {
+    const core = openTestCore();
+    const { port, setSubscription } = keyPort({ subscription: 'signed_out' });
+    const setup = createAgentSetup(core.events, [port], { secrets: memoryStore().store });
+    await setup.setApiKey('claude-code', API_KEY);
+    expect(setup.agentEnv('claude-code')).toEqual({ FAKE_API_KEY: API_KEY });
+    setSubscription('signed_in');
+    // A known limit: until the next refresh the cache still says signed out.
+    expect(setup.agentEnv('claude-code')).toEqual({ FAKE_API_KEY: API_KEY });
+    await setup.list();
+    expect(setup.agentEnv('claude-code')).toEqual({});
+  });
+
+  it('a sign-in that finishes makes the subscription come first at once', async () => {
+    const core = openTestCore();
+    const { port } = keyPort({ subscription: 'signed_out' });
+    let finish!: (outcome: 'signed_in') => void;
+    const signingPort: AgentSetupPort = {
+      ...port,
+      signIn: async () => ({ url: SECRET_URL, done: new Promise((resolve) => (finish = resolve)), cancel: async () => {} }),
+    };
+    const setup = createAgentSetup(core.events, [signingPort], { secrets: memoryStore().store });
+    await setup.setApiKey('claude-code', API_KEY);
+    await setup.signIn('claude-code');
+    finish('signed_in');
+    await settle();
+    expect(setup.agentEnv('claude-code')).toEqual({});
+  });
+
+  it('load() reads the saved key (the restart path), so the key is in use and list shows its last 4', async () => {
+    const core = openTestCore();
+    const secrets = memoryStore({ 'agent-api-key/claude-code': API_KEY });
+    const { port } = keyPort({ subscription: 'signed_out' });
+    const setup = createAgentSetup(core.events, [port], { secrets: secrets.store });
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    await setup.load();
+    expect(setup.agentEnv('claude-code')).toEqual({ FAKE_API_KEY: API_KEY });
+    expect((await setup.list())[0]).toMatchObject({ auth: 'signed_in', method: 'api_key', apiKey: { saved: true, lastFour: 'WXYZ' } });
+  });
+
+  it('load() with an unusable keychain reports it and carries on with no key', async () => {
+    const core = openTestCore();
+    const failures: string[] = [];
+    const secrets = memoryStore({ 'agent-api-key/claude-code': API_KEY });
+    secrets.fail();
+    const { port } = keyPort();
+    const setup = createAgentSetup(core.events, [port], { secrets: secrets.store, onFailure: (_agent, step) => failures.push(step) });
+    await setup.load();
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    expect(failures).toEqual(['read_api_key']);
+  });
+
+  it('a refused key is not stored; a malformed one is refused without a check and never echoed', async () => {
+    const core = openTestCore();
+    const secrets = memoryStore();
+    const refusing = keyPort({ verify: 'refused' });
+    const setup = createAgentSetup(core.events, [refusing.port], { secrets: secrets.store });
+    await expect(setup.setApiKey('claude-code', API_KEY)).rejects.toBeInstanceOf(ApiKeyRefusedError);
+    expect(secrets.values.size).toBe(0);
+
+    for (const bad of ['', '   ', 'not-a-key-at-all-but-long-enough', 'sk-ant-short']) {
+      const error = await setup.setApiKey('claude-code', bad).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as Error).message).toBe("That doesn't look like an Anthropic API key.");
+    }
+    expect(refusing.verified).toEqual([API_KEY]);
+    expect(secrets.values.size).toBe(0);
+    expect(authEvents(core.events.readAfter(0))).toEqual([]);
+  });
+
+  it("a key that couldn't be checked (or whose check threw) is saved, marked unchecked", async () => {
+    const core = openTestCore();
+    const { port } = keyPort({ verify: async () => { throw new Error(`boom ${API_KEY}`); } });
+    const failures: unknown[] = [];
+    const setup = createAgentSetup(core.events, [port], { secrets: memoryStore().store, onFailure: (_agent, step) => failures.push(step) });
+    await setup.setApiKey('claude-code', API_KEY);
+    expect((await setup.list())[0]!.apiKey).toEqual({ saved: true, lastFour: 'WXYZ', unchecked: true });
+    expect(failures).toEqual(['verify_api_key']);
+    const second = keyPort({ verify: 'unchecked' });
+    const other = createAgentSetup(openTestCore().events, [second.port], { secrets: memoryStore().store });
+    await other.setApiKey('claude-code', API_KEY);
+    expect((await other.list())[0]!.apiKey).toEqual({ saved: true, lastFour: 'WXYZ', unchecked: true });
+  });
+
+  it('no keychain: saving is refused with a plain reason and nothing is kept in memory either', async () => {
+    const core = openTestCore();
+    const secrets = memoryStore();
+    secrets.fail();
+    const { port } = keyPort();
+    const setup = createAgentSetup(core.events, [port], { secrets: secrets.store });
+    const error = await setup.setApiKey('claude-code', API_KEY).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(SecretsUnavailableError);
+    expect((error as Error).message).toBe("There's no keychain on this computer to keep an API key in. Sign in with your account instead.");
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    // No store at all is the same refusal.
+    const without = createAgentSetup(core.events, [keyPort().port]);
+    await expect(without.setApiKey('claude-code', API_KEY)).rejects.toBeInstanceOf(SecretsUnavailableError);
+  });
+
+  it('remove deletes the key, re-reads the store, stops the injection and appends needs_sign_in; removing again is harmless', async () => {
+    const core = openTestCore();
+    const secrets = memoryStore();
+    const { port } = keyPort({ subscription: 'signed_out' });
+    const setup = createAgentSetup(core.events, [port], { secrets: secrets.store });
+    await setup.setApiKey('claude-code', API_KEY);
+    await setup.deleteApiKey('claude-code');
+    await setup.deleteApiKey('claude-code');
+    expect(secrets.values.size).toBe(0);
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    expect((await setup.list())[0]).toMatchObject({ auth: 'needs_sign_in', apiKey: { saved: false } });
+    expect(authEvents(core.events.readAfter(0)).map((event) => event.payload)).toEqual([
+      { agentId: 'claude-code', state: 'signed_in', method: 'api_key' },
+      { agentId: 'claude-code', state: 'needs_sign_in' },
+    ]);
+    secrets.fail();
+    await expect(setup.deleteApiKey('claude-code')).rejects.toBeInstanceOf(SecretsUnavailableError);
+  });
+
+  it('an unknown agent is not found; an agent without API key support refuses a key and has no apiKey in list', async () => {
+    const core = openTestCore();
+    const { port } = fakePort();
+    const setup = createAgentSetup(core.events, [port], { secrets: memoryStore().store });
+    await expect(setup.setApiKey('nope', API_KEY)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(setup.deleteApiKey('nope')).rejects.toBeInstanceOf(NotFoundError);
+    await expect(setup.setApiKey('claude-code', API_KEY)).rejects.toBeInstanceOf(ValidationError);
+    await setup.deleteApiKey('claude-code');
+    expect((await setup.list())[0]!.apiKey).toBeUndefined();
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    expect(setup.agentEnv('nope')).toEqual({});
+  });
+
+  it("list never passes on the port's subscription field", async () => {
+    const core = openTestCore();
+    const setup = createAgentSetup(core.events, [keyPort().port], { secrets: memoryStore().store });
+    expect((await setup.list())[0]).not.toHaveProperty('subscription');
+  });
+});
+
+describe('agent setup: API key review fixes (story 9.2)', () => {
+  const ENV_KEY = 'sk-ant-api03-core_ENVIRONMENT_0123456789-envK';
+
+  it("F1: a key from the server's environment (any case) is used only signed out, and a saved key comes first", async () => {
+    const core = openTestCore();
+    const { port, setSubscription } = keyPort({ subscription: 'signed_out' });
+    const env: Record<string, string> = { fake_api_key: ENV_KEY };
+    const setup = createAgentSetup(core.events, [port], { secrets: memoryStore().store, inheritedEnv: () => env });
+    await setup.load();
+    expect(setup.agentEnv('claude-code')).toEqual({ FAKE_API_KEY: ENV_KEY });
+    expect((await setup.list())[0]).toMatchObject({ auth: 'signed_in', method: 'api_key', apiKey: { saved: false, fromEnvironment: true } });
+
+    await setup.setApiKey('claude-code', API_KEY);
+    expect(setup.agentEnv('claude-code')).toEqual({ FAKE_API_KEY: API_KEY });
+    expect((await setup.list())[0]!.apiKey).toEqual({ saved: true, lastFour: 'WXYZ' });
+
+    setSubscription('signed_in');
+    await setup.list();
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    setSubscription('unknown');
+    await setup.list();
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    await setup.deleteApiKey('claude-code');
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    expect((await setup.list())[0]!.apiKey).toEqual({ saved: false, fromEnvironment: true });
+    // No key anywhere: nothing.
+    delete env.fake_api_key;
+    setSubscription('signed_out');
+    await setup.list();
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    expect(JSON.stringify(core.events.readAfter(0))).not.toContain(ENV_KEY);
+  });
+
+  it('F2: a write that timed out re-reads the store at once and at each list, so memory matches a late completion', async () => {
+    const core = openTestCore();
+    const values = new Map<string, string>();
+    let land!: () => void;
+    const store: SecretStorePort = {
+      backend: 'keychain',
+      get: async (name) => values.get(name),
+      // The prompt is answered after the timeout: the write lands late.
+      set: async (name, value) => {
+        void new Promise<void>((resolve) => (land = resolve)).then(() => values.set(name, value));
+        throw new SecretsUnavailableError(KEYCHAIN_NO_ANSWER_MESSAGE, { cause: 'timeout' });
+      },
+      delete: async () => {
+        throw new SecretsUnavailableError(KEYCHAIN_NO_ANSWER_MESSAGE, { cause: 'timeout' });
+      },
+    };
+    const { port } = keyPort({ subscription: 'signed_out' });
+    const setup = createAgentSetup(core.events, [port], { secrets: store });
+    const error = await setup.setApiKey('claude-code', API_KEY).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(SecretsUnavailableError);
+    expect((error as Error).message).toBe(KEYCHAIN_NO_ANSWER_MESSAGE);
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    expect((await setup.list())[0]!.apiKey).toEqual({ saved: false });
+
+    land();
+    await settle();
+    expect((await setup.list())[0]!.apiKey).toEqual({ saved: true, lastFour: 'WXYZ' });
+    expect(setup.agentEnv('claude-code')).toEqual({ FAKE_API_KEY: API_KEY });
+
+    // A removal that times out keeps what the store still holds.
+    await expect(setup.deleteApiKey('claude-code')).rejects.toMatchObject({ message: KEYCHAIN_NO_ANSWER_MESSAGE });
+    expect((await setup.list())[0]!.apiKey).toEqual({ saved: true, lastFour: 'WXYZ' });
+  });
+
+  it('F2: a write that timed out but had landed is shown as saved at once', async () => {
+    const core = openTestCore();
+    const values = new Map<string, string>();
+    const store: SecretStorePort = {
+      backend: 'keychain',
+      get: async (name) => values.get(name),
+      set: async (name, value) => {
+        values.set(name, value);
+        throw new SecretsUnavailableError(KEYCHAIN_NO_ANSWER_MESSAGE, { cause: 'timeout' });
+      },
+      delete: async (name) => void values.delete(name),
+    };
+    const setup = createAgentSetup(core.events, [keyPort().port], { secrets: store });
+    await expect(setup.setApiKey('claude-code', API_KEY)).rejects.toBeInstanceOf(SecretsUnavailableError);
+    expect(setup.agentEnv('claude-code')).toEqual({ FAKE_API_KEY: API_KEY });
+  });
+
+  it('F4: refreshIfStale re-reads the subscription only when a key exists and the state is older than the limit; a failure means no key', async () => {
+    const core = openTestCore();
+    let clock = 1_000;
+    let reads = 0;
+    const { port, setSubscription } = keyPort({ subscription: 'signed_out' });
+    const counted: AgentSetupPort = {
+      ...port,
+      status: async () => {
+        reads++;
+        return port.status();
+      },
+    };
+    const setup = createAgentSetup(core.events, [counted], { secrets: memoryStore().store, now: () => clock });
+    // No key: nothing to refresh.
+    await setup.refreshIfStale('claude-code', 30_000);
+    expect(reads).toBe(0);
+    await setup.setApiKey('claude-code', API_KEY);
+    const afterSave = reads;
+    expect(setup.agentEnv('claude-code')).toEqual({ FAKE_API_KEY: API_KEY });
+
+    setSubscription('signed_in');
+    clock += 29_999;
+    await setup.refreshIfStale('claude-code', 30_000);
+    expect(reads).toBe(afterSave);
+    expect(setup.agentEnv('claude-code')).toEqual({ FAKE_API_KEY: API_KEY });
+    clock += 1;
+    // Two chats starting together share one read.
+    await Promise.all([setup.refreshIfStale('claude-code', 30_000), setup.refreshIfStale('claude-code', 30_000)]);
+    expect(reads).toBe(afterSave + 1);
+    expect(setup.agentEnv('claude-code')).toEqual({});
+
+    setSubscription('throws');
+    clock += 30_000;
+    await setup.refreshIfStale('claude-code', 30_000);
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    await expect(setup.refreshIfStale('nope', 0)).resolves.toBeUndefined();
   });
 });

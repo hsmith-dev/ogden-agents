@@ -6,12 +6,15 @@
  * (`tests/fixtures/fake-claude-login.mjs`); the browser's requests to
  * `https://claude.ai/**` are routed to that program's localhost callback, so
  * no real account or sign-in page is ever reached. Each test runs its own server.
+ *
+ * An API key instead (story 9.2): kept in an in-memory secret store and
+ * checked by a stub, so no test touches the real keychain or reaches Anthropic.
  */
-import { mkdtempSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
-import { makeDataDir, removeDataDir, startServer, type RunningServer, type StartOptions } from '../support.js';
+import { makeDataDir, removeDataDir, serverModule, startServer, type RunningServer, type StartOptions } from '../support.js';
 import { openConnected } from './tab.js';
 
 async function withAgentsServer(page: Page, env: Record<string, string>, extra: StartOptions, body: (server: RunningServer) => Promise<void>) {
@@ -117,4 +120,96 @@ test('when node-pty cannot load, the card shows the reason and the rest of the a
     await page.goto(new URL('/settings/tools', page.url()).href);
     await expect(page.getByRole('heading', { name: 'Tools', level: 1 })).toBeVisible();
   });
+});
+
+/** Every file under `dir`, read as bytes: the database, the event log's files and the logs. */
+function filesUnder(dir: string): Array<{ path: string; bytes: Buffer }> {
+  return readdirSync(dir, { recursive: true, encoding: 'utf8' })
+    .map((name) => join(dir, name))
+    .filter((path) => statSync(path).isFile())
+    .map((path) => ({ path, bytes: readFileSync(path) }));
+}
+
+test('signed out, an API key pasted on the card is saved, used by the chat, kept across a restart, and never written to the data folder', async ({ page }) => {
+  const key = 'sk-ant-api03-E2E_TEST_ONLY_not_real_0123456789-abcdWXYZ';
+  const dataDir = makeDataDir();
+  const stateDir = mkdtempSync(join(tmpdir(), 'ogden-agents-e2e-login-'));
+  const repo = mkdtempSync(join(tmpdir(), 'ogden-agents-e2e-repo-'));
+  // One in-memory keychain for both runs, standing in for the OS one.
+  const { createMemorySecretStore, createLogger } = await serverModule();
+  const secrets = createMemorySecretStore();
+  // The server's log goes to the data folder, as the background server's does, so the search below covers it.
+  const logFile = join(dataDir, 'logs', 'e2e.log');
+  mkdirSync(join(dataDir, 'logs'), { recursive: true });
+  const options: StartOptions = {
+    secrets,
+    log: createLogger((line) => appendFileSync(logFile, line)),
+    extraAgentEnv: { FAKE_ACP_AUTH: 'claude-terminal', FAKE_LOGIN_STATE: join(stateDir, 'state.json'), FAKE_ACP_REQUIRE_API_KEY: '1' },
+  };
+  let server = await startServer(dataDir, 0, options);
+  try {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openConnected(page, '/settings/agents', server.launchUrl);
+    await expect(card(page).getByTestId('agent-state')).toContainText('Installed, needs sign-in');
+
+    await card(page).getByRole('button', { name: 'Use an API key instead' }).click();
+    const field = card(page).getByLabel('API key');
+    await expect(field).toHaveAttribute('type', 'password');
+    // No browser or password manager is invited to save it (review F3): no form, and the opt-outs are set.
+    await expect(field).toHaveAttribute('autocomplete', 'one-time-code');
+    for (const attribute of ['data-1p-ignore', 'data-lpignore', 'data-bwignore']) await expect(field).toHaveAttribute(attribute);
+    await expect(card(page).locator('form')).toHaveCount(0);
+    // A malformed key is refused in plain words, not echoed, and the field is cleared.
+    await field.fill('not-a-key-e2e');
+    await card(page).getByRole('button', { name: 'Save' }).click();
+    await expect(card(page).getByTestId('agent-api-key-error')).toHaveText("That doesn't look like an Anthropic API key.");
+    await expect(field).toHaveValue('');
+
+    // Enter saves, as a form would.
+    await field.fill(key);
+    await field.press('Enter');
+    await expect(card(page).getByTestId('agent-api-key-saved')).toHaveText('API key saved …WXYZ');
+    await expect(card(page).getByTestId('agent-state')).toContainText('Installed, signed in');
+    await expect(card(page)).not.toContainText(key);
+
+    // The chat's Claude Code needs the key (the fake agent refuses a prompt without one).
+    await page.goto(new URL('/', page.url()).href);
+    await page.getByLabel('Project folder').fill(repo);
+    await page.getByRole('button', { name: 'Start a chat' }).click();
+    await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
+    const composer = page.getByRole('textbox', { name: 'Message Claude Code' });
+    await composer.fill('hello');
+    await composer.press('Enter');
+    await expect(page.getByTestId('message-agent')).toContainText('key received');
+
+    // After a restart the key is read back from the keychain: the card shows its last 4 and it is in use.
+    await server.close();
+    server = await startServer(dataDir, 0, options);
+    await openConnected(page, '/settings/agents', server.launchUrl);
+    await expect(card(page).getByTestId('agent-api-key-saved')).toHaveText('API key saved …WXYZ');
+    await expect(card(page).getByTestId('agent-state')).toContainText('Installed, signed in');
+
+    await card(page).getByRole('button', { name: 'Remove key' }).click();
+    await expect(card(page).getByRole('button', { name: 'Use an API key instead' })).toBeVisible();
+    await expect(card(page).getByTestId('agent-state')).toContainText('Installed, needs sign-in');
+    expect(await secrets.get('agent-api-key/claude-code')).toBeUndefined();
+  } finally {
+    await server.close();
+  }
+  try {
+    // Nothing in the data folder (database, event log, logs) holds the key, in any file, as bytes.
+    const files = filesUnder(dataDir);
+    expect(files.map(({ path }) => path)).toContain(logFile);
+    expect(readFileSync(logFile, 'utf8')).toContain('agent API key saved');
+    // The database (with the event log) is there to search.
+    expect(files.map(({ path }) => path)).toContain(join(dataDir, 'ogden-agents.db'));
+    for (const { path, bytes } of files) {
+      expect(bytes.includes(Buffer.from(key)), path).toBe(false);
+      expect(bytes.includes(Buffer.from('E2E_TEST_ONLY_not_real')), path).toBe(false);
+    }
+  } finally {
+    removeDataDir(dataDir);
+    removeDataDir(stateDir);
+    removeDataDir(repo);
+  }
 });

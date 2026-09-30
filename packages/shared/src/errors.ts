@@ -29,6 +29,10 @@ export const API_ERROR_CODES = [
   'shortcut_unsupported',
   /** A sign-in code was sent, but no sign-in is in progress for that agent (409). */
   'sign_in_not_pending',
+  /** An API key was saved, but there is no usable OS keychain to keep it in (503; AD-16: no on-disk fallback). */
+  'secrets_unavailable',
+  /** The agent's provider refused an API key; it was not stored (400). */
+  'api_key_refused',
   /** An agent's install, sign-in or API key could not be done (500). The message says why in plain words. */
   'agent_setup_failed',
   /** Anything else that went wrong on the server (500). */

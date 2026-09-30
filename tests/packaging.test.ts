@@ -237,6 +237,19 @@ describe('packaging', () => {
     }
   });
 
+  it('@napi-rs/keyring is pinned to 2.1.0 (AD-16, story 9.2): a root dependency, the same in the adapters, never optional', () => {
+    const read = (path: string) =>
+      JSON.parse(readFileSync(join(ROOT, path), 'utf8')) as { dependencies?: Record<string, string>; optionalDependencies?: Record<string, string> };
+    const root = read('package.json');
+    expect(root.dependencies?.['@napi-rs/keyring']).toBe('2.1.0');
+    expect(root.optionalDependencies?.['@napi-rs/keyring']).toBeUndefined();
+    expect(read('packages/adapters/package.json').dependencies?.['@napi-rs/keyring']).toBe('2.1.0');
+    // The lockfile resolves exactly that version and no other.
+    const lock = readFileSync(join(ROOT, 'pnpm-lock.yaml'), 'utf8');
+    expect(lock).toContain("'@napi-rs/keyring@2.1.0'");
+    expect(lock).not.toMatch(/'@napi-rs\/keyring@(?!2\.1\.0')/);
+  });
+
   it('the root, server and web packages share one version (the launcher, server and UI compare it; AD-20)', () => {
     const versionOf = (path: string) => (JSON.parse(readFileSync(join(ROOT, path), 'utf8')) as { version: string }).version;
     const root = versionOf('package.json');

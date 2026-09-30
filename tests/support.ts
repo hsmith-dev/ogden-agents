@@ -43,11 +43,24 @@ export const FAKE_AGENT = join(ROOT, 'tests', 'fixtures', 'fake-acp-agent.mjs');
 /**
  * Starts the built server on `port` (0: any free port) with `dataDir`, logging nowhere, with a launch link.
  * `extra` adds options (a stub toolchain, say). The agent is the fake one unless `extra` names another,
- * so no test runs the real Claude Code adapter or its login.
+ * so no test runs the real Claude Code adapter or its login. API keys are kept in memory and their
+ * check is a stub unless `extra` says otherwise, so no test touches the real keychain or reaches
+ * Anthropic (story 9.2).
  */
 export async function startServer(dataDir: string, port = 0, extra: StartOptions = {}): Promise<RunningServer> {
-  const { start, createLogger } = await serverModule();
-  return start({ port, open: false, dataDir, webRoot: WEB_ROOT, log: createLogger(() => {}), claudeAdapterPath: FAKE_AGENT, ...extra, launch: true });
+  const { start, createLogger, createMemorySecretStore } = await serverModule();
+  return start({
+    port,
+    open: false,
+    dataDir,
+    webRoot: WEB_ROOT,
+    log: createLogger(() => {}),
+    claudeAdapterPath: FAKE_AGENT,
+    secrets: createMemorySecretStore(),
+    verifyApiKey: async () => 'ok',
+    ...extra,
+    launch: true,
+  });
 }
 
 // Shared with the plain-Node install scripts: whether a process with a pid

@@ -202,6 +202,25 @@ async function quit(url, token, pid) {
   }
 }
 
+/**
+ * The keychain module (`@napi-rs/keyring`, story 9.2) loads from the install:
+ * its prebuilt binary for this platform came along. Loading it touches no
+ * keychain. Without optional dependencies the binary is missing and API keys
+ * are refused with a plain reason, which the app survives (the server ran).
+ */
+function checkKeyringModule() {
+  let keyring;
+  try {
+    keyring = install.requireInstalled('@napi-rs/keyring');
+  } catch (error) {
+    if (!omitOptional) throw new Error(`the keychain module did not load: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`);
+    console.log('smoke: the keychain module has no binary without optional dependencies, and the app ran all the same');
+    return;
+  }
+  if (typeof keyring.AsyncEntry !== 'function') throw new Error('the keychain module has no AsyncEntry');
+  console.log('smoke: the keychain module loads (no keychain was touched)');
+}
+
 let failure;
 try {
   let urls;
@@ -237,6 +256,7 @@ try {
   console.log('smoke: Quit stopped the server and removed server.json and launcher.token');
   install.checkNoAgentAdapter();
   console.log('smoke: the package installs no agent adapter');
+  checkKeyringModule();
 } catch (error) {
   failure = error;
 } finally {

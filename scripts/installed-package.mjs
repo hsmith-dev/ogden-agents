@@ -131,6 +131,10 @@ export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-s
   if (omitOptional) env.npm_config_omit = 'optional';
   // Keep the database and logs out of the user's real data folder.
   env.OGDEN_AGENTS_DATA_DIR = dataDir;
+  // And API keys out of the real OS keychain: the server keeps them in memory
+  // (story 9.2). The server honours that only in a test run, hence NODE_ENV.
+  env.OGDEN_AGENTS_TEST_SECRET_STORE = 'memory';
+  env.NODE_ENV = 'test';
 
   // A registry spec runs as a user types it: npx picks the package's only bin.
   const packageArgs = registrySpec === undefined ? ['--yes', `--package=${tarball}`, 'ogden'] : ['--yes', registrySpec];

@@ -12,7 +12,9 @@ import { useEventStream } from '@/events/event-stream';
  *
  * The sign-in URL is a secret-like value (AD-15): it is kept only in this
  * tab's memory (component state) and never stored, logged or put in a URL
- * of ours; a pasted code is sent once and never kept.
+ * of ours; a pasted code is sent once and never kept. So is an API key
+ * (9.2): sent once in a `PUT`, never kept, and never read back (the server
+ * returns only its last 4 characters).
  */
 
 type Auth = Pick<TabAuth, 'fetch'>;
@@ -59,6 +61,19 @@ export const cancelSignIn = (agentId: string, auth: Auth = tabAuth) =>
 /** `POST /api/v1/agents/:agentId/sign-in/code`: types the pasted code into the sign-in. */
 export const sendSignInCode = (agentId: string, code: string, auth: Auth = tabAuth) =>
   callNoContent(auth, apiPath(API_ROUTES.agentSignInCode, { agentId }), postJson({ code }), "Ogden Agents couldn't send the code");
+
+/** `PUT /api/v1/agents/:agentId/api-key`: checks the key and keeps it in the keychain. */
+export const saveApiKey = (agentId: string, apiKey: string, auth: Auth = tabAuth) =>
+  callNoContent(
+    auth,
+    apiPath(API_ROUTES.agentApiKey, { agentId }),
+    { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ apiKey }) },
+    "Ogden Agents couldn't save the API key",
+  );
+
+/** `DELETE /api/v1/agents/:agentId/api-key`: removes the key from the keychain. */
+export const removeApiKey = (agentId: string, auth: Auth = tabAuth) =>
+  callNoContent(auth, apiPath(API_ROUTES.agentApiKey, { agentId }), { method: 'DELETE' }, "Ogden Agents couldn't remove the API key");
 
 /** The seq of the newest `agent.*` event received, or 0. */
 function lastAgentSeq(events: readonly { seq: number; type: string }[]): number {
@@ -165,4 +180,55 @@ export function useSignIn(agentId: string, auth: Auth = tabAuth): SignIn {
   };
 
   return { start, cancel, sendCode, link, busy, error };
+}
+
+export interface ApiKeyActions {
+  /** Sends the key once; resolves `true` once it was saved. The caller clears its field either way. */
+  save(apiKey: string): Promise<boolean>;
+  remove(): void;
+  /** Whether a request is running. */
+  busy: boolean;
+  /** Plain words for the last request that failed (never the key). */
+  error: string | undefined;
+}
+
+/** Saving and removing an agent's API key (9.2), for Settings: Agents and Welcome (9.5). */
+export function useApiKey(agentId: string, auth: Auth = tabAuth): ApiKeyActions {
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
+
+  const save = async (apiKey: string) => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await saveApiKey(agentId, apiKey, auth);
+      return true;
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Ogden Agents couldn't save the API key. Try again.");
+      return false;
+    } finally {
+      setBusy(false);
+      refresh();
+    }
+  };
+
+  const remove = () => {
+    setBusy(true);
+    setError(undefined);
+    removeApiKey(agentId, auth).then(
+      () => {
+        setBusy(false);
+        refresh();
+      },
+      (caught: unknown) => {
+        setBusy(false);
+        setError(caught instanceof Error ? caught.message : "Ogden Agents couldn't remove the API key. Try again.");
+        refresh();
+      },
+    );
+  };
+
+  return { save, remove, busy, error };
 }

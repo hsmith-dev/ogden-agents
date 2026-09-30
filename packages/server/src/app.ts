@@ -1,5 +1,5 @@
 import { serveStatic } from '@hono/node-server/serve-static';
-import type { AgentSetup, AppShortcutPort, Chat, EventLog, Permissions, SecretStorePort, Toolchain } from '@ogden-agents/core';
+import type { AgentSetup, AppShortcutPort, Chat, EventLog, Permissions, Toolchain } from '@ogden-agents/core';
 import { API_ROUTES, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
@@ -66,8 +66,6 @@ export interface AppOptions {
   permissions?: Permissions;
   /** Core's agent setup use-case: each agent's state and signing in (9.1); without it those routes answer 501. */
   agentSetup?: AgentSetup;
-  /** Where API keys are kept (AD-16; the `secrets-memory` stub until 9.4). */
-  secrets?: SecretStorePort;
   /** The Ogden Agents app shortcut (E2-R10; the `shortcut-memory` stub until 2.4). */
   appShortcut?: AppShortcutPort;
   /**
@@ -77,7 +75,7 @@ export interface AppOptions {
   tabs?: TabTokens;
 }
 
-export function createApp({ events, webRoot, log, gate, control, toolchain, chat, permissions, agentSetup, secrets, appShortcut, tabs }: AppOptions): Hono {
+export function createApp({ events, webRoot, log, gate, control, toolchain, chat, permissions, agentSetup, appShortcut, tabs }: AppOptions): Hono {
   const app = new Hono();
 
   // First, for every method and path: no route may be registered before this line.
@@ -160,7 +158,7 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, chat
   registerWorkspaceRoutes(app, { chat, permissions, log });
   registerPermissionRoutes(app, { permissions, log });
   registerShortcutRoutes(app, { appShortcut, log });
-  registerAgentSetupRoutes(app, { agentSetup, secrets, log });
+  registerAgentSetupRoutes(app, { agentSetup, log });
 
   registerEventSocket(app, { events, log, tabs });
 

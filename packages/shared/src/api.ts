@@ -115,8 +115,11 @@ export const API_ROUTES = {
    */
   agentSignInCode: `${API_BASE}/agents/:agentId/sign-in/code`,
   /**
-   * `PUT SetApiKeyRequest` → 204 (9.4): stores the key in the keychain
-   * (AD-16); the body is never logged or echoed. `DELETE` → 204 removes it.
+   * `PUT SetApiKeyRequest` → 204, sent `Cache-Control: no-store` (9.2):
+   * checks the key with the agent's provider and stores it in the keychain
+   * (AD-16); the body is never logged or echoed. 400 for a malformed key or
+   * `api_key_refused`, 503 `secrets_unavailable` without a usable keychain.
+   * `DELETE` → 204 removes it (idempotent).
    */
   agentApiKey: `${API_BASE}/agents/:agentId/api-key`,
   /** `GET` → `OnboardingState`; `PATCH OnboardingState` → `OnboardingState` (9.5): whether Welcome is done. */

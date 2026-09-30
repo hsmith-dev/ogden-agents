@@ -90,3 +90,33 @@ export class WorkspaceBusyError extends CoreError {
     super('sessions_busy', `workspace ${workspaceId} has a session that is working or waiting`);
   }
 }
+
+/** What {@link SecretsUnavailableError} says when nothing more specific applies (AD-16 as amended in story 9.2). */
+export const SECRETS_UNAVAILABLE_MESSAGE = "There's no keychain on this computer to keep an API key in. Sign in with your account instead.";
+
+/** What {@link SecretsUnavailableError} says when the keychain is there but didn't answer: a timeout, a locked keychain or a dismissed prompt. */
+export const KEYCHAIN_NO_ANSWER_MESSAGE = "The keychain didn't answer. Check for a prompt from your computer and try again.";
+
+/**
+ * The OS keychain can't be used: there is none (Linux without Secret
+ * Service), it is locked, the user dismissed its prompt, or its module didn't
+ * load, with {@link SECRETS_UNAVAILABLE_MESSAGE}; or it didn't answer (a
+ * timeout, locked, a dismissed prompt), with {@link KEYCHAIN_NO_ANSWER_MESSAGE}.
+ * AD-16: there is no on-disk fallback. `message` is plain words for the user;
+ * `cause` carries a code only, never a secret.
+ */
+export class SecretsUnavailableError extends CoreError {
+  override readonly name = 'SecretsUnavailableError';
+  constructor(message: string = SECRETS_UNAVAILABLE_MESSAGE, options: { cause?: string } = {}) {
+    super('secrets_unavailable', message);
+    if (options.cause !== undefined) this.cause = options.cause;
+  }
+}
+
+/** The agent's provider refused the API key (story 9.2); it was not stored. The message never echoes the key. */
+export class ApiKeyRefusedError extends CoreError {
+  override readonly name = 'ApiKeyRefusedError';
+  constructor() {
+    super('api_key_refused', 'That key was refused. Check it and paste it again.');
+  }
+}

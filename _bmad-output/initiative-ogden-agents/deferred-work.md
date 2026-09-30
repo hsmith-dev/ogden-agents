@@ -106,3 +106,21 @@
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-session-view-completes-part-b-history-and-streaming-plan.md`
   summary: Install-scope scan cost (refactor sweep, story 2.12). The install scope's filter (`workspace_id IS NULL OR type = 'workspace.created'`) has no index on `type`, so `countAfter` and `subscribeScope` for the install scope may scan workspace rows after `afterSeq`. Add an index on `type` or a partial index for the install scope, after checking the query plan (`EXPLAIN QUERY PLAN`).
   evidence: 2.10b review finding F5; `packages/core/src/event-log.ts` `scopeFilter`, `countAfter`; `events_workspace_seq_idx` serves the workspace scope only.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-use-an-api-key-instead-kept-in-the-keychain-plan.md`
+  summary: A saved API key reaches Claude Code's chat process only when that process starts; a chat agent already running keeps its old environment after a key is saved or removed, or a subscription signs in or out. Restart the session's agent on those changes (or say so on the card) later.
+  evidence: `packages/server/src/start.ts` chat `agentEnv`; `packages/core/src/chat.ts` reads `agentEnv()` at each agent start.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-use-an-api-key-instead-kept-in-the-keychain-plan.md`
+  summary: The keychain is read at every server start (`agentSetup.load()`). On macOS a Node binary that changed since the key was saved (a Node upgrade) makes Keychain ask for access; the background server's 5 s timeout then leaves the key unread (not in use, card shows no key) until the next start. Re-read on `list()` when the load failed, or explain the prompt on the card (human keychain check in 9.2 will show whether this bites).
+  evidence: `packages/adapters/src/secrets-keyring/index.ts` `KEYRING_READ_TIMEOUT_MS`; `packages/core/src/agent-setup.ts` `load`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-use-an-api-key-instead-kept-in-the-keychain-plan.md`
+  summary: Installs without optional dependencies (`npm --omit=optional`) lack `@napi-rs/keyring`'s platform binary, so saving an API key is refused as "no keychain" there. The app runs; the reason could say "the keychain module isn't installed" instead.
+  evidence: `scripts/smoke-installed.mjs` `checkKeyringModule` (the `--omit-optional` smoke).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-use-an-api-key-instead-kept-in-the-keychain-plan.md`
+  summary: Two API key saves (or a save and a removal) for the same agent can run at once, and their keychain writes and in-memory updates may interleave, so the card can show a different key than the keychain holds until the next list. Serialize key writes per agent in core (story 9.6). (9.2 review F7.)
+  evidence: `packages/core/src/agent-setup.ts` `setApiKey`, `deleteApiKey` (no per-agent lock).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-use-an-api-key-instead-kept-in-the-keychain-plan.md`
+  summary: The generic agent card names Anthropic ("Ogden Agents checks it with Anthropic first", "couldn't check it with Anthropic"). When a second agent arrives, take the provider name from the agent's setup status instead (epic 6, every agent). (9.2 review.)
+  evidence: `packages/web/src/agents/agent-card.tsx` `ApiKeySection`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-use-an-api-key-instead-kept-in-the-keychain-plan.md`
+  summary: The intermittent e2e failure logged for 2.13 is "a message sent while the agent works shows Queued, then is sent after the reply" (tests/e2e/session-behaviour.spec.ts), failing on an attribute check; seen once more during 9.2's runs.
+  evidence: 2026-09-30, 9.2 full e2e run: 1 failure, then 4 runs of the file alone and 2 full runs all passed.

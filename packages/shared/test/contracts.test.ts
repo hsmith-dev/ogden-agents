@@ -252,7 +252,7 @@ describe('REST shapes', () => {
     ],
     ['AgentsResponse', AgentsResponse, { agents: [] }, { agents: null }],
     ['SignInResponse', SignInResponse, { state: 'signing_in', url: 'https://claude.ai/oauth/authorize' }, { state: 'signing_in', url: 'not a url' }],
-    ['SetApiKeyRequest', SetApiKeyRequest, { apiKey: 'sk-ant-api03-abc' }, { apiKey: '   ' }],
+    ['SetApiKeyRequest', SetApiKeyRequest, { apiKey: 'sk-ant-api03-abc' }, { apiKey: 'x'.repeat(1001) }],
     ['OnboardingState', OnboardingState, { welcomeCompleted: false }, { welcomeCompleted: 'no' }],
     ['AppShortcutStatus', AppShortcutStatus, { platform: 'darwin', supported: true, installed: false, offerPending: true }, { platform: 'darwin', supported: true, installed: false }],
   ];

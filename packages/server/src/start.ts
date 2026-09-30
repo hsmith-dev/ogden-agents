@@ -4,8 +4,10 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
 import {
+  CLAUDE_CODE_AGENT_ID,
   createClaudeCodeAgent,
   createClaudeCodeSetup,
+  createKeyringSecretStore,
   createMemoryAgentSetup,
   createMemoryAppShortcut,
   createMemorySecretStore,
@@ -25,6 +27,7 @@ import {
   ensureDataDir,
   openCore,
   PORT_FILE,
+  type AgentApiKeySupport,
   type AgentPort,
   type AgentSetupPort,
   type AppShortcutPort,
@@ -78,6 +81,26 @@ export const CLAUDE_ACP_PATH_ENV = 'OGDEN_AGENTS_CLAUDE_ACP_PATH';
 
 /** Test-only: shortens the quiet-agent check-in delay, in milliseconds (story 2.10). */
 export const CHECK_IN_MS_ENV = 'OGDEN_AGENTS_TEST_CHECK_IN_MS';
+/**
+ * Set to `memory` (tests that start the packaged server as its own process:
+ * the launcher tests and the installed-package smoke) to keep API keys in
+ * memory, so no test ever reads or writes the real OS keychain. Honoured only
+ * under a test runner: `NODE_ENV=test` or `VITEST` set ({@link testSecretStore}).
+ */
+export const SECRET_STORE_ENV = 'OGDEN_AGENTS_TEST_SECRET_STORE';
+
+/** `memory` when a test asked for the in-memory secret store and this is a test run; otherwise `undefined` (the keychain). */
+export function testSecretStore(env: Readonly<Record<string, string | undefined>> = process.env): 'memory' | undefined {
+  const testing = env.NODE_ENV === 'test' || (env.VITEST !== undefined && env.VITEST !== '');
+  return testing && env[SECRET_STORE_ENV] === 'memory' ? 'memory' : undefined;
+}
+
+/**
+ * How old the subscription state may be when a Claude Code chat starts: older,
+ * it is read again first, so a sign-in made outside the app stops the API key
+ * being used within this long (story 9.2 review F4).
+ */
+export const SUBSCRIPTION_MAX_AGE_MS = 30_000;
 
 /**
  * The check-in delay from {@link CHECK_IN_MS_ENV}, clamped to core's range
@@ -95,20 +118,40 @@ export function checkInDelayFromEnv(env: NodeJS.ProcessEnv = process.env): numbe
 const AGENT_ENV_ALLOWED = ['PATH', 'HOME', 'USERPROFILE', 'USER', 'USERNAME', 'LANG', 'TERM', 'TMPDIR', 'TEMP', 'TMP', 'SHELL'];
 /** The same on Windows only, where a process can't start without them. */
 const AGENT_ENV_ALLOWED_WINDOWS = ['SystemRoot', 'ComSpec', 'PATHEXT'];
-/** Agent credentials passed on when the user has set them (AD-16: the keychain replaces this in epic 9). */
+/**
+ * Agent credentials the user may set in this server's environment (AD-16).
+ * They are not in the agent allowlist: core's precedence rule decides (story
+ * 9.2), exactly as for a saved key, which comes first. A chat process gets
+ * one only while the subscription is known to be signed out; sign-in and
+ * `auth status` never do ({@link withoutAgentKeys}).
+ */
 export const AGENT_ENV_KEYS = ['ANTHROPIC_API_KEY'];
+
+/** Only the {@link AGENT_ENV_KEYS} of `env`, whatever their case, for core's precedence rule. Never logged. */
+export function agentKeysOf(env: Readonly<Record<string, string | undefined>>): Record<string, string> {
+  const keys = new Set(AGENT_ENV_KEYS.map((name) => name.toUpperCase()));
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) if (value !== undefined && keys.has(name.toUpperCase())) out[name] = value;
+  return out;
+}
+
+/** `env` without any {@link AGENT_ENV_KEYS}, whatever their case (Windows names are case-insensitive). */
+export function withoutAgentKeys(env: Readonly<Record<string, string>>): Record<string, string> {
+  const keys = new Set(AGENT_ENV_KEYS.map((name) => name.toUpperCase()));
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !keys.has(name.toUpperCase())));
+}
 
 /**
  * The environment agent processes get (AD-16): an allowlist of what a CLI
  * needs to run as the user (`PATH`, home, user, locale, terminal, temp,
- * shell), plus the agent keys the user set, and nothing else of this
- * server's environment. Never logged.
+ * shell), and nothing else of this server's environment. Agent keys are
+ * added only by core's precedence rule (story 9.2). Never logged.
  */
 export function agentEnvironment(
   source: Readonly<Record<string, string | undefined>> = process.env,
   platform: NodeJS.Platform = process.platform,
 ): Record<string, string> {
-  const allowed = new Set([...AGENT_ENV_ALLOWED, ...AGENT_ENV_KEYS, ...(platform === 'win32' ? AGENT_ENV_ALLOWED_WINDOWS : [])]);
+  const allowed = new Set([...AGENT_ENV_ALLOWED, ...(platform === 'win32' ? AGENT_ENV_ALLOWED_WINDOWS : [])]);
   // Windows variable names are case-insensitive (`Path`, `SYSTEMROOT`).
   const fold = (name: string) => (platform === 'win32' ? name.toUpperCase() : name);
   const allowedFolded = new Set([...allowed].map(fold));
@@ -183,8 +226,16 @@ export interface StartOptions {
    * works (story 9.1): the CLI opens its tab and the page shows a link.
    */
   claudeCliBrowser?: string;
-  /** Where API keys are kept (AD-16). Default: the in-memory `secrets-memory` stub, until 9.4 brings the keychain. */
+  /**
+   * Where API keys are kept (AD-16). Default: the OS keychain
+   * (`secrets-keyring`), or memory when `$OGDEN_AGENTS_TEST_SECRET_STORE` is
+   * `memory`. Tests pass `secrets-memory`: none touches the real keychain.
+   */
   secrets?: SecretStorePort;
+  /** Replaces Claude Code's API key check (tests: a stub, so none reaches Anthropic). Default: the real `GET /v1/models`. */
+  verifyApiKey?: AgentApiKeySupport['verify'];
+  /** How old the subscription state may be when a chat starts before it is read again. Default {@link SUBSCRIPTION_MAX_AGE_MS}. */
+  subscriptionMaxAgeMs?: number;
   /**
    * This install's launcher, `bin/ogden.js`, for the app shortcut to run
    * (E2-R10). With it, the default {@link appShortcut} is the `shortcut-os`
@@ -387,7 +438,9 @@ async function listenAndAnnounce({
     options.agentSetup === undefined && claudeAdapterPath !== undefined
       ? createClaudeCodeSetup({
           adapterPath: claudeAdapterPath,
-          env: agentEnv,
+          // Sign-in and `auth status` never see an API key (story 9.2).
+          env: () => withoutAgentKeys(agentEnv()),
+          ...(options.verifyApiKey === undefined ? {} : { apiKey: { verify: options.verifyApiKey } }),
           listAuthMethods: (env) => agent.listAuthMethods({ env }),
           ...(options.loadPty === undefined ? {} : { loadPty: options.loadPty }),
           ...(options.claudeCliBrowser === undefined ? {} : { cliBrowser: options.claudeCliBrowser }),
@@ -395,7 +448,12 @@ async function listenAndAnnounce({
           onDiagnostic: (message, fields) => log.info(`agent setup: ${message}`, fields),
         })
       : undefined;
+  const secrets = options.secrets ?? (testSecretStore() === 'memory' ? createMemorySecretStore() : createKeyringSecretStore());
   const agentSetup = createAgentSetup(core.events, options.agentSetup ?? (claudeSetup === undefined ? [createMemoryAgentSetup()] : [claudeSetup]), {
+    secrets,
+    // A key in this server's own environment follows the same rule as a saved one (review F1).
+    inheritedEnv: () => agentKeysOf({ ...process.env, ...extraAgentEnv }),
+    // Codes and plain reasons only: never a URL, a code or a key.
     onFailure: (agentId, step, error) =>
       log.warn('agent sign-in step failed', {
         agentId,
@@ -408,13 +466,33 @@ async function listenAndAnnounce({
   const permissions = core.permissions;
   const configuredCheckIn = options.checkInDelayMs ?? checkInDelayFromEnv();
   const checkInDelayMs = configuredCheckIn === undefined ? undefined : clampCheckInDelay(configuredCheckIn);
+  /**
+   * The chat runs Claude Code: its API key (saved, else from this server's
+   * environment) joins only while its subscription is known to be signed out
+   * (story 9.2). Every case variant of the key's name is removed first, so
+   * Windows never sees two.
+   */
+  const chatEnv = () => ({ ...withoutAgentKeys(agentEnv()), ...agentSetup.agentEnv(CLAUDE_CODE_AGENT_ID) });
+  /** The same, with the subscription state read again first when it is older than {@link SUBSCRIPTION_MAX_AGE_MS} (review F4). */
+  const freshChatEnv = async (env: Readonly<Record<string, string>>) => {
+    await agentSetup.refreshIfStale(CLAUDE_CODE_AGENT_ID, options.subscriptionMaxAgeMs ?? SUBSCRIPTION_MAX_AGE_MS);
+    return { ...withoutAgentKeys(env), ...agentSetup.agentEnv(CLAUDE_CODE_AGENT_ID) };
+  };
+  const chatAgent: AgentPort = {
+    get displayName() {
+      return agent.displayName;
+    },
+    startSession: async (input) => agent.startSession({ ...input, env: await freshChatEnv(input.env) }),
+    reopenSession: async (input) => agent.reopenSession({ ...input, env: await freshChatEnv(input.env) }),
+    listAuthMethods: (input) => agent.listAuthMethods(input),
+  };
   const chat = createChat({
     dataDir,
     entities: core.entities,
     sessionEvents: core.sessionEvents,
-    agent,
+    agent: chatAgent,
     permissions,
-    agentEnv,
+    agentEnv: chatEnv,
     // The event carries the plain reason; the log also gets the details (never the environment).
     onAgentError: (sessionId, error) => log.warn('agent failed', { sessionId, code: error.code, reason: error.message, ...error.details }),
     onInternalError: (sessionId, error) => log.error('applying an agent event failed', { sessionId, reason: String(error) }),
@@ -435,10 +513,13 @@ async function listenAndAnnounce({
     chat,
     permissions,
     agentSetup,
-    secrets: options.secrets ?? createMemorySecretStore(),
     appShortcut,
     tabs,
   });
+
+  // Saved API keys and, for an agent with one, its subscription state, before the first chat (story 9.2).
+  await agentSetup.load();
+  log.info('secrets store', { backend: secrets.backend });
 
   let bound: { server: ReturnType<typeof createAdaptorServer>; wss: WebSocketServer; port: number } | undefined;
   let lastTried = requested;

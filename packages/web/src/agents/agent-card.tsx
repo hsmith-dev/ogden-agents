@@ -1,23 +1,26 @@
-import { MAX_SIGN_IN_CODE_LENGTH, type AgentSetupStatus } from '@ogden-agents/shared';
-import { ArrowSquareOut, SignIn as SignInIcon } from '@phosphor-icons/react';
-import { useState, type FormEvent } from 'react';
+import { MAX_API_KEY_LENGTH, MAX_SIGN_IN_CODE_LENGTH, type AgentSetupStatus } from '@ogden-agents/shared';
+import { ArrowSquareOut, Key, SignIn as SignInIcon } from '@phosphor-icons/react';
+import { useState, type FormEvent, type KeyboardEvent } from 'react';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
 import { Notice } from '@/ui/notice';
 import { StateGlyph } from '@/ui/state-glyph';
 import { Text } from '@/ui/typography';
-import { useSignIn, type SignIn } from './agent-setup-api';
+import { useApiKey, useSignIn, type ApiKeyActions, type SignIn } from './agent-setup-api';
 
 /**
  * One agent's setup card (DESIGN.md Onboarding agent card; EXPERIENCE.md
  * State Patterns): its name, then "Installed, signed in", "Installed, needs
  * sign-in" or "Not installed", and the one sign-in action. While signing in
  * it says where to finish, offers Cancel, and takes a code the sign-in page
- * may show. Welcome (9.5) reuses it.
+ * may show. Below it, for an agent that can use one, the API key (9.2):
+ * **Use an API key instead** (a write-only field), "API key saved …<last
+ * 4>", when it is in use, and **Remove key**. Welcome (9.5) reuses it.
  */
 export function AgentCard({ agent }: { agent: AgentSetupStatus }) {
   const signIn = useSignIn(agent.agentId);
+  const apiKey = useApiKey(agent.agentId);
   const headingId = `agent-${agent.agentId}-name`;
   return (
     <section
@@ -31,6 +34,14 @@ export function AgentCard({ agent }: { agent: AgentSetupStatus }) {
         {agent.displayName}
       </Text>
       <AgentState agent={agent} signIn={signIn} />
+      {agent.install === 'installed' && agent.apiKey !== undefined && agent.auth !== 'signing_in' ? (
+        <ApiKeySection agent={agent} saved={agent.apiKey} actions={apiKey} />
+      ) : null}
+      {apiKey.error === undefined ? null : (
+        <Text variant="caption" role="alert" data-testid="agent-api-key-error">
+          {apiKey.error}
+        </Text>
+      )}
       {signIn.error === undefined ? null : (
         <Text variant="caption" role="alert" data-testid="agent-request-error">
           {signIn.error}
@@ -137,5 +148,113 @@ function SigningIn({ agentId, signIn }: { agentId: string; signIn: SignIn }) {
         </Button>
       </div>
     </>
+  );
+}
+
+/**
+ * The agent's API key: saved (its last 4 characters, whether it is in use,
+ * Remove key), or **Use an API key instead**, which opens a write-only
+ * password field. The field is cleared after every attempt; the key is
+ * never kept in the page. It is not a `<form>` and the field opts out of
+ * autofill and password managers, so no browser offers to save the key
+ * (Enter still saves).
+ */
+function ApiKeySection({ agent, saved, actions }: { agent: AgentSetupStatus; saved: NonNullable<AgentSetupStatus['apiKey']>; actions: ApiKeyActions }) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState('');
+  const fieldId = `agent-${agent.agentId}-api-key`;
+
+  if (saved.saved) {
+    return (
+      <div className="flex flex-col gap-2" data-testid="agent-api-key">
+        <Text variant="body" data-testid="agent-api-key-saved">
+          API key saved …{saved.lastFour}
+          {saved.unchecked === true ? ". Ogden Agents couldn't check it with Anthropic." : null}
+        </Text>
+        {agent.auth === 'signed_in' && agent.method === 'subscription' ? (
+          <Text variant="caption" data-testid="agent-api-key-note">
+            Signed in with your account. Your API key is used when you're signed out.
+          </Text>
+        ) : null}
+        <div className="flex">
+          <Button variant="outline" aria-disabled={actions.busy} onClick={actions.busy ? undefined : actions.remove}>
+            Remove key
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const fromEnvironment =
+    saved.fromEnvironment === true ? (
+      <Text variant="caption" data-testid="agent-api-key-environment">
+        An API key from the environment Ogden Agents started in is used when you're signed out. A key you save here comes first.
+      </Text>
+    ) : null;
+
+  if (!open) {
+    return (
+      <div className="flex flex-col gap-2" data-testid="agent-api-key">
+        {fromEnvironment}
+        <div className="flex">
+          <Button variant="ghost" onClick={() => setOpen(true)}>
+            <Key aria-hidden />
+            Use an API key instead
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const submit = () => {
+    if (value.trim() === '' || actions.busy) return;
+    const key = value;
+    // Cleared at once, whatever the answer: the key never stays in the page.
+    setValue('');
+    void actions.save(key).then((ok) => {
+      if (ok) setOpen(false);
+    });
+  };
+
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    submit();
+  };
+
+  return (
+    <div className="flex flex-col gap-1" data-testid="agent-api-key">
+      {fromEnvironment}
+      <Label htmlFor={fieldId}>API key</Label>
+      <Text variant="caption" id={`${fieldId}-description`}>
+        Kept in this computer's keychain. Ogden Agents checks it with Anthropic first.
+      </Text>
+      <div className="flex gap-2">
+        <Input
+          id={fieldId}
+          type="password"
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={onKeyDown}
+          name="ogden-agents-api-key"
+          autoComplete="one-time-code"
+          data-1p-ignore=""
+          data-lpignore="true"
+          data-bwignore=""
+          data-form-type="other"
+          spellCheck={false}
+          maxLength={MAX_API_KEY_LENGTH}
+          aria-describedby={`${fieldId}-description`}
+        />
+        <Button type="button" variant="secondary" aria-disabled={actions.busy || value.trim() === ''} onClick={submit}>
+          {actions.busy ? 'Saving...' : 'Save'}
+        </Button>
+      </div>
+      <div className="flex">
+        <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
+          Cancel
+        </Button>
+      </div>
+    </div>
   );
 }

@@ -65,6 +65,10 @@
 // (claude-agent-acp 0.84: `claude-ai-login` and `console-login`), to the same
 // clients (story 9.1).
 //
+// FAKE_ACP_REQUIRE_API_KEY=1 makes every prompt need ANTHROPIC_API_KEY (story
+// 9.2): without it the prompt fails with ACP's auth-required error (-32000);
+// with it the reply is "key received" (never the value).
+//
 // `--cli <args>` runs the fake Claude CLI, `fake-claude-login.mjs <args>`, as
 // the real adapter runs `claude`: as a child with this process's terminal,
 // passing on its exit code (story 9.1).
@@ -174,6 +178,11 @@ acp
     const primed = primer.split('\n').filter((line) => line.startsWith('User: ') || line.startsWith('Claude Code: ')).length;
     const text = (primedAt === -1 ? whole : whole.slice(primedAt + NEW_MESSAGE.length)).trim();
 
+    if (process.env.FAKE_ACP_REQUIRE_API_KEY === '1') {
+      if (!process.env.ANTHROPIC_API_KEY) throw acp.RequestError.authRequired(undefined, 'the fake agent needs an API key');
+      await say(client, params.sessionId, 'key received');
+      return { stopReason: 'end_turn' };
+    }
     if (text === 'crash') {
       await say(client, params.sessionId, 'About to ');
       await sleep(CHUNK_DELAY_MS);

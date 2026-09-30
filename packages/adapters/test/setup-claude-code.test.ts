@@ -3,7 +3,8 @@
  * reading the sign-in URL, and every sign-in outcome through an injected fake
  * terminal, then the real `node-pty` running the fake login program
  * (`tests/fixtures/fake-claude-login.mjs`, through the fake ACP agent's
- * `--cli`). No test runs a real login or touches an account.
+ * `--cli`). No test runs a real login or touches an account. The API key
+ * check (story 9.2) runs against a fake `fetch`: no test reaches Anthropic.
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
@@ -12,7 +13,11 @@ import { join } from 'node:path';
 import { AgentSetupError, type AgentAuthMethod } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  ANTHROPIC_API_KEY_ENV,
+  ANTHROPIC_VERIFY_URL,
+  BAD_API_KEY,
   CLAUDE_AI_LOGIN_ARGS,
+  createClaudeApiKey,
   UNSUPPORTED_SIGN_IN,
   checkAuthMethods,
   createClaudeCodeSetup,
@@ -496,4 +501,131 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('signing in through t
     const cliPid = Number(readFileSync(pidFile, 'utf8'));
     await expect.poll(() => alive(cliPid), { timeout: 10_000 }).toBe(false);
   }, 30_000);
+});
+
+const KEY = 'sk-ant-api03-TEST_ONLY_not_a_real_key_0123456789abcd';
+
+/** A fake `fetch` recording each request; `answer` decides the outcome. */
+function fakeFetch(answer: (init: RequestInit) => Promise<Response>) {
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), init: init ?? {} });
+    return answer(init ?? {});
+  }) as typeof fetch;
+  return { fetchImpl, calls };
+}
+
+describe("Claude Code's API key (story 9.2)", () => {
+  it('declares ANTHROPIC_API_KEY and accepts only sk-ant- keys, never echoing one', () => {
+    const apiKey = createClaudeApiKey({ fetch: fakeFetch(async () => new Response(null, { status: 200 })).fetchImpl });
+    expect(apiKey.envName).toBe('ANTHROPIC_API_KEY');
+    expect(ANTHROPIC_API_KEY_ENV).toBe('ANTHROPIC_API_KEY');
+    expect(apiKey.check(KEY)).toBeUndefined();
+    for (const bad of ['', '   ', 'sk-ant-short', 'sk-proj-0123456789abcdefghijklmnop', `${KEY} trailing`, `x${KEY}`, 'sk-ant-api03-has space inside 0123456789']) {
+      expect(apiKey.check(bad), bad).toBe(BAD_API_KEY);
+    }
+    expect(BAD_API_KEY).toBe("That doesn't look like an Anthropic API key.");
+  });
+
+  it('checks the key with a GET of /v1/models on the fixed host, the key only in x-api-key, redirects refused', async () => {
+    const { fetchImpl, calls } = fakeFetch(async () => new Response('{"data":[]}', { status: 200 }));
+    const apiKey = createClaudeApiKey({ fetch: fetchImpl });
+    await expect(apiKey.verify(KEY, new AbortController().signal)).resolves.toBe('ok');
+    expect(calls).toHaveLength(1);
+    const [call] = calls;
+    expect(call!.url).toBe('https://api.anthropic.com/v1/models');
+    expect(ANTHROPIC_VERIFY_URL).toBe('https://api.anthropic.com/v1/models');
+    expect(call!.init.method).toBe('GET');
+    expect(call!.init.redirect).toBe('error');
+    expect(call!.init.headers).toEqual({ 'x-api-key': KEY, 'anthropic-version': '2023-06-01' });
+    expect(call!.init.body).toBeUndefined();
+    expect(call!.init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('401 and 403 are refused; 500, a thrown error and a timeout are unchecked; the log never holds the key or the body', async () => {
+    const diagnostics: string[] = [];
+    const outcome = async (answer: (init: RequestInit) => Promise<Response>, timeoutMs?: number) =>
+      createClaudeApiKey({
+        fetch: fakeFetch(answer).fetchImpl,
+        onDiagnostic: (message, fields) => diagnostics.push(`${message} ${JSON.stringify(fields ?? {})}`),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      }).verify(KEY, new AbortController().signal);
+
+    const body = `{"error":{"message":"invalid x-api-key ${KEY}"}}`;
+    expect(await outcome(async () => new Response(body, { status: 401 }))).toBe('refused');
+    expect(await outcome(async () => new Response(body, { status: 403 }))).toBe('refused');
+    expect(await outcome(async () => new Response(body, { status: 500 }))).toBe('unchecked');
+    expect(await outcome(async () => new Response(body, { status: 529 }))).toBe('unchecked');
+    expect(
+      await outcome(async () => {
+        throw Object.assign(new TypeError(`fetch failed for ${KEY}`), { cause: { code: 'ENOTFOUND' } });
+      }),
+    ).toBe('unchecked');
+    // A request that never answers: stopped by the timeout, through its signal.
+    const hang = (init: RequestInit) =>
+      new Promise<Response>((_, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'TimeoutError'))));
+    expect(await outcome(hang, 10)).toBe('unchecked');
+
+    const log = diagnostics.join('\n');
+    expect(log).not.toContain(KEY);
+    expect(log).not.toContain('sk-ant');
+    expect(log).not.toContain('invalid x-api-key');
+    expect(log).toContain('"status":401');
+    expect(log).toContain('"status":500');
+    expect(log).toContain('"code":"ENOTFOUND"');
+    expect(log).toContain('"code":"timeout"');
+  });
+
+  it('stops when the caller aborts (the server stopping)', async () => {
+    const controller = new AbortController();
+    const apiKey = createClaudeApiKey({
+      fetch: fakeFetch((init) => new Promise((_, reject) => init.signal?.addEventListener('abort', () => reject(new Error('aborted'))))).fetchImpl,
+    });
+    const pending = apiKey.verify(KEY, controller.signal);
+    controller.abort();
+    await expect(pending).resolves.toBe('unchecked');
+  });
+
+  it('the setup port carries it, and a stub replaces the check', async () => {
+    const { setup } = setupWith({ apiKey: { verify: async () => 'refused' } });
+    expect(setup.apiKey?.envName).toBe('ANTHROPIC_API_KEY');
+    await expect(setup.apiKey!.verify(KEY, new AbortController().signal)).resolves.toBe('refused');
+  });
+
+  it('sign-in and auth status never see an API key, whatever its case, so the status is the subscription alone', async () => {
+    const pty = fakePty();
+    const dir = tempDir();
+    // A stand-in adapter that says "signed in" whenever it was given a key: it must never be.
+    const adapter = join(dir, 'adapter.mjs');
+    writeFileSync(
+      adapter,
+      `const keyed = Object.keys(process.env).some((name) => name.toUpperCase() === 'ANTHROPIC_API_KEY');\n` +
+        `process.stdout.write(JSON.stringify({ loggedIn: keyed }) + '\\n');\n`,
+    );
+    const setup = createClaudeCodeSetup({
+      adapterPath: adapter,
+      env: () => ({ PATH: process.env.PATH ?? '', ANTHROPIC_API_KEY: KEY, anthropic_api_key: KEY }),
+      claudeExecutable: '/opt/claude/bin/claude',
+      listAuthMethods: async (env) => {
+        expect(Object.keys(env).map((name) => name.toUpperCase())).not.toContain('ANTHROPIC_API_KEY');
+        return [CLAUDE_METHOD];
+      },
+      loadPty: pty.loader,
+    });
+    setups.push(setup);
+    expect(await setup.status()).toMatchObject({ install: 'installed', auth: 'needs_sign_in', subscription: 'signed_out' });
+    void setup.signIn().catch(() => {});
+    await expect.poll(() => pty.spawned.length).toBe(1);
+    expect(Object.keys(pty.spawned[0]!.options.env).map((name) => name.toUpperCase())).not.toContain('ANTHROPIC_API_KEY');
+    expect(JSON.stringify(pty.spawned[0]!.options.env)).not.toContain(KEY);
+  });
+
+  it('status reports the subscription: signed in, signed out, or unknown when it can\'t tell', async () => {
+    const { setup, signIn } = setupWith({ loadPty: fakePty().loader });
+    expect((await setup.status()).subscription).toBe('signed_out');
+    signIn();
+    expect((await setup.status()).subscription).toBe('signed_in');
+    const missing = createClaudeCodeSetup({ adapterPath: undefined, env: () => ({}), listAuthMethods: async () => [] });
+    expect((await missing.status()).subscription).toBe('unknown');
+  });
 });

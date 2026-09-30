@@ -35,6 +35,21 @@ export const AgentSetupStatus = z.object({
    * the agent opens it itself, so the page shows a link instead of a second tab.
    */
   signInTab: z.enum(['page', 'agent']).optional(),
+  /**
+   * The agent's API key (9.2), for agents that can use one: whether one is
+   * saved in the keychain, its last 4 characters (never more), whether
+   * Ogden Agents couldn't check it with the provider when it was saved, and
+   * (with none saved) whether one comes from the environment Ogden Agents
+   * was started in, which follows the same rule: used only when signed out.
+   */
+  apiKey: z
+    .object({
+      saved: z.boolean(),
+      lastFour: z.string().length(4).optional(),
+      unchecked: z.boolean().optional(),
+      fromEnvironment: z.boolean().optional(),
+    })
+    .optional(),
 });
 export type AgentSetupStatus = z.infer<typeof AgentSetupStatus>;
 
@@ -73,9 +88,17 @@ export const SignInCodeRequest = z.object({
 });
 export type SignInCodeRequest = z.infer<typeof SignInCodeRequest>;
 
-/** `PUT /api/v1/agents/:agentId/api-key`: the key, stored in the keychain. Never logged, never echoed. */
+/** The longest API key accepted, in characters. */
+export const MAX_API_KEY_LENGTH = 1000;
+
+/**
+ * `PUT /api/v1/agents/:agentId/api-key` (sent `Cache-Control: no-store`; 9.2):
+ * the key, stored in the keychain. Never logged, evented, stored anywhere
+ * else or echoed, not even in a validation message (AD-16). A blank or
+ * malformed key is refused by the agent's own format check, with plain words.
+ */
 export const SetApiKeyRequest = z.object({
-  apiKey: z.string().trim().min(1, 'Paste your API key.').max(1000, 'That is too long to be an API key.'),
+  apiKey: z.string().trim().max(MAX_API_KEY_LENGTH, 'That is too long to be an API key.'),
 });
 export type SetApiKeyRequest = z.infer<typeof SetApiKeyRequest>;
 

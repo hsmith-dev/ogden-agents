@@ -6,7 +6,7 @@
  */
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createMemoryAgentSetup, createMemoryAppShortcut, createMemorySecretStore } from '@ogden-agents/adapters';
+import { createMemoryAgentSetup, createMemoryAppShortcut } from '@ogden-agents/adapters';
 import { createAgentSetup, createChat, LEGACY_AUTH_KEY_FILE, openCore, PORT_FILE } from '@ogden-agents/core';
 import { API_BASE, API_ROUTES, ApiErrorBody, WS_PROTOCOL } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
@@ -613,7 +613,6 @@ describe('gate placement', () => {
         toolchain,
         chat,
         agentSetup: createAgentSetup(core.events, [createMemoryAgentSetup()]),
-        secrets: createMemorySecretStore(),
         appShortcut: createMemoryAppShortcut(),
         tabs: createTabTokens(),
       });

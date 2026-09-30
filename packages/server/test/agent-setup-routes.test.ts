@@ -6,13 +6,19 @@
  * The sign-in URL leaves the server only in the `no-store` sign-in answer:
  * never in an event or a log line, and neither do the login's output or a
  * pasted code (AD-15, AD-16).
+ *
+ * The API key routes (story 9.2) keep keys in memory and check them with a
+ * stub: no test touches the real keychain or reaches Anthropic. The key never
+ * leaves in a response, an event or a log line; only its last 4 do, in the list.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { loadPty, type PtyLoader } from '@ogden-agents/adapters';
-import { AgentsResponse, API_ROUTES, ApiErrorBody, apiPath, SignInResponse } from '@ogden-agents/shared';
+import { createClaudeApiKey, createMemorySecretStore, loadPty, type PtyLoader } from '@ogden-agents/adapters';
+import { SecretsUnavailableError, type AgentSetupPort, type ApiKeyVerification, type SecretStorePort } from '@ogden-agents/core';
+import { AgentsResponse, API_ROUTES, ApiErrorBody, apiPath, SessionResponse, SignInResponse, WorkspaceResponse } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
+import { testSecretStore, type StartOptions } from '../src/start.js';
 import { send, signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
 const signInPath = (agentId = 'claude-code') => apiPath(API_ROUTES.agentSignIn, { agentId });
@@ -29,7 +35,7 @@ function stateFile(): string {
   return join(dir, 'state.json');
 }
 
-async function startSetupServer(env: Record<string, string> = {}, extra: { loadPty?: PtyLoader } = {}) {
+async function startSetupServer(env: Record<string, string> = {}, extra: StartOptions = {}) {
   const lines: string[] = [];
   const server = await startTestServer({
     lines,
@@ -143,7 +149,7 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('agent setup routes: 
   it('lists Claude Code, signs in through the callback, and keeps the URL out of every event and log line', async () => {
     const { server, tab, lines } = await startSetupServer();
     expect(await agents(server, tab)).toEqual([
-      { agentId: 'claude-code', displayName: 'Claude Code', install: 'installed', version: null, auth: 'needs_sign_in', signInTab: 'agent' },
+      { agentId: 'claude-code', displayName: 'Claude Code', install: 'installed', version: null, auth: 'needs_sign_in', signInTab: 'agent', apiKey: { saved: false } },
     ]);
 
     const reply = await send(server, signInPath(), { method: 'POST', headers: tab.headers });
@@ -209,4 +215,278 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('agent setup routes: 
     await server.close();
     await waitFor(() => !alive(cliPid), 'the CLI to stop', 10_000);
   }, 30_000);
+});
+
+const KEY = 'sk-ant-api03-ROUTES_TEST_only_0123456789-abcdWXYZ';
+const keyPath = (agentId = 'claude-code') => apiPath(API_ROUTES.agentApiKey, { agentId });
+
+/** A server whose Claude Code key check answers `verification` (counting its calls), keys kept in `secrets`. */
+async function startKeyServer(
+  options: { env?: Record<string, string>; verification?: ApiKeyVerification; secrets?: SecretStorePort; signedIn?: boolean; extra?: StartOptions } = {},
+) {
+  const state = stateFile();
+  if (options.signedIn === true) writeFileSync(state, JSON.stringify({ loggedIn: true }));
+  const checked: string[] = [];
+  const started = await startSetupServer(
+    { FAKE_LOGIN_STATE: state, ...options.env },
+    {
+      secrets: options.secrets ?? createMemorySecretStore(),
+      verifyApiKey: async (value) => {
+        checked.push(value);
+        return options.verification ?? 'ok';
+      },
+      ...options.extra,
+    },
+  );
+  return { ...started, checked };
+}
+
+/** Opens a chat in a fresh folder and sends `text`; returns the session id and a cleanup (after the server closes). */
+async function chatOnce(server: TestServer, tab: SignedIn, text: string) {
+  const repo = mkdtempSync(join(tmpdir(), 'ogden-agents-key-repo-'));
+  temps.push(repo);
+  const post = (path: string, body: unknown) => fetch(`${server.url}${path}`, { method: 'POST', headers: json(tab), body: JSON.stringify(body) });
+  const { workspace } = WorkspaceResponse.parse(await (await post(API_ROUTES.workspaces, { path: repo })).json());
+  const { session } = SessionResponse.parse(await (await post(apiPath(API_ROUTES.workspaceSessions, { wsId: workspace.id }), {})).json());
+  expect((await post(apiPath(API_ROUTES.sessionMessages, { wsId: workspace.id, sesId: session.id }), { text })).status).toBe(202);
+  return session.id;
+}
+
+const settledState = (server: TestServer, sessionId: string) => {
+  const state = server.core.entities.getSession(sessionId as never)?.state;
+  return state === 'idle' || state === 'error' ? state : undefined;
+};
+
+const putKey = (server: TestServer, tab: SignedIn, body: string, agentId?: string) =>
+  send(server, keyPath(agentId), { method: 'PUT', headers: json(tab), body });
+
+describe('agent setup routes: the API key (story 9.2)', () => {
+  it('signed out: a good key is saved (204, no-store), the card reads "saved …WXYZ" and signed in with an API key, and nothing keeps the key', async () => {
+    const secrets = createMemorySecretStore();
+    const { server, tab, lines, checked } = await startKeyServer({ secrets });
+    const saved = await putKey(server, tab, JSON.stringify({ apiKey: KEY }));
+    expect(saved.status).toBe(204);
+    expect(saved.headers['cache-control']).toBe('no-store');
+    expect(saved.body).toBe('');
+    expect(checked).toEqual([KEY]);
+    expect(await secrets.get('agent-api-key/claude-code')).toBe(KEY);
+
+    const [claude] = await agents(server, tab);
+    expect(claude).toMatchObject({ auth: 'signed_in', method: 'api_key', apiKey: { saved: true, lastFour: 'WXYZ' } });
+    expect(claude!.apiKey!.unchecked).toBeUndefined();
+    const auth = server.core.events.readAfter(0).filter((event) => event.type === 'agent.auth_changed');
+    expect(auth.map((event) => event.payload)).toEqual([{ agentId: 'claude-code', state: 'signed_in', method: 'api_key' }]);
+
+    const list = await send(server, API_ROUTES.agents, { headers: tab.headers });
+    expect(list.body).not.toContain(KEY);
+    expect(everythingKept(server, lines)).not.toContain(KEY);
+    expect(everythingKept(server, lines)).not.toContain('ROUTES_TEST_only');
+  });
+
+  it('a refused key is 400 api_key_refused and nothing is stored', async () => {
+    const secrets = createMemorySecretStore();
+    const { server, tab, lines } = await startKeyServer({ verification: 'refused', secrets });
+    const refused = await putKey(server, tab, JSON.stringify({ apiKey: KEY }));
+    expect(refused.status).toBe(400);
+    expect(refused.headers['cache-control']).toBe('no-store');
+    expect(ApiErrorBody.parse(refused.json()).error).toEqual({ code: 'api_key_refused', message: 'That key was refused. Check it and paste it again.' });
+    expect(refused.body).not.toContain(KEY);
+    expect(await secrets.get('agent-api-key/claude-code')).toBeUndefined();
+    expect((await agents(server, tab))[0]!.apiKey).toEqual({ saved: false });
+    expect(everythingKept(server, lines)).not.toContain(KEY);
+  });
+
+  it("a key that couldn't be checked is saved (204), and the card says so", async () => {
+    const { server, tab } = await startKeyServer({ verification: 'unchecked' });
+    expect((await putKey(server, tab, JSON.stringify({ apiKey: KEY }))).status).toBe(204);
+    expect((await agents(server, tab))[0]!.apiKey).toEqual({ saved: true, lastFour: 'WXYZ', unchecked: true });
+  });
+
+  it("a key that's blank or malformed is 400 in plain words, never echoed, with no check made", async () => {
+    const { server, tab, lines, checked } = await startKeyServer();
+    for (const apiKey of ['', '   ', 'sk-proj-looks-like-another-providers-key-12345', 'sk-ant-short', `${KEY} ${KEY}`]) {
+      const reply = await putKey(server, tab, JSON.stringify({ apiKey }));
+      expect(reply.status, apiKey).toBe(400);
+      expect(ApiErrorBody.parse(reply.json()).error).toEqual({ code: 'invalid_request', message: "That doesn't look like an Anthropic API key." });
+      if (apiKey.trim() !== '') expect(reply.body).not.toContain(apiKey.trim());
+    }
+    expect((await putKey(server, tab, '{"apiKey": 42}')).status).toBe(400);
+    expect((await putKey(server, tab, 'apiKey=sk-ant')).status).toBe(400);
+    expect(checked).toEqual([]);
+    expect(lines.join('')).not.toContain('sk-proj-looks');
+    expect(lines.join('')).not.toContain(KEY);
+  });
+
+  it('no keychain: 503 secrets_unavailable in plain words, the log gets the code only, and sign-in still works', async () => {
+    const broken: SecretStorePort = {
+      backend: 'keychain',
+      get: async () => undefined,
+      set: async () => {
+        throw new SecretsUnavailableError(undefined, { cause: 'GenericFailure' });
+      },
+      delete: async () => {
+        throw new SecretsUnavailableError(undefined, { cause: 'GenericFailure' });
+      },
+    };
+    const { server, tab, lines } = await startKeyServer({ secrets: broken });
+    const reply = await putKey(server, tab, JSON.stringify({ apiKey: KEY }));
+    expect(reply.status).toBe(503);
+    expect(ApiErrorBody.parse(reply.json()).error).toEqual({
+      code: 'secrets_unavailable',
+      message: "There's no keychain on this computer to keep an API key in. Sign in with your account instead.",
+    });
+    expect((await send(server, keyPath(), { method: 'DELETE', headers: tab.headers })).status).toBe(503);
+    expect(lines.join('')).toContain('GenericFailure');
+    expect(lines.join('')).not.toContain(KEY);
+    expect((await agents(server, tab))[0]).toMatchObject({ auth: 'needs_sign_in', apiKey: { saved: false } });
+  });
+
+  it('subscription signed in: the key is saved but not in use, and no event says otherwise', async () => {
+    const { server, tab } = await startKeyServer({ signedIn: true });
+    expect((await putKey(server, tab, JSON.stringify({ apiKey: KEY }))).status).toBe(204);
+    expect((await agents(server, tab))[0]).toMatchObject({ auth: 'signed_in', method: 'subscription', apiKey: { saved: true, lastFour: 'WXYZ' } });
+    expect(authStates(server)).toEqual([]);
+  });
+
+  it("unknown sign-in: the key is not in use, and the card's reason says why", async () => {
+    const setupPort: AgentSetupPort = {
+      agentId: 'claude-code',
+      displayName: 'Claude Code',
+      status: async () => ({ agentId: 'claude-code', displayName: 'Claude Code', install: 'installed', version: null, auth: 'needs_sign_in', reason: 'x', subscription: 'unknown' }),
+      install: async () => ({ version: null }),
+      signIn: async () => ({ url: null, done: new Promise(() => {}), cancel: async () => {} }),
+      apiKey: createClaudeApiKey({ verify: async () => 'ok' }),
+    };
+    const { server, tab } = await startKeyServer({ extra: { agentSetup: [setupPort] } });
+    expect((await putKey(server, tab, JSON.stringify({ apiKey: KEY }))).status).toBe(204);
+    expect((await agents(server, tab))[0]).toMatchObject({
+      auth: 'needs_sign_in',
+      reason: "Ogden Agents couldn't check your Claude Code sign-in, so your API key isn't in use.",
+      apiKey: { saved: true, lastFour: 'WXYZ' },
+    });
+  });
+
+  it('remove is 204 (no-store) and idempotent, and the card re-reads the store', async () => {
+    const secrets = createMemorySecretStore();
+    const { server, tab } = await startKeyServer({ secrets });
+    expect((await putKey(server, tab, JSON.stringify({ apiKey: KEY }))).status).toBe(204);
+    for (let i = 0; i < 2; i++) {
+      const removed = await send(server, keyPath(), { method: 'DELETE', headers: tab.headers });
+      expect(removed.status).toBe(204);
+      expect(removed.headers['cache-control']).toBe('no-store');
+    }
+    expect(await secrets.get('agent-api-key/claude-code')).toBeUndefined();
+    expect((await agents(server, tab))[0]).toMatchObject({ auth: 'needs_sign_in', apiKey: { saved: false } });
+    expect(authStates(server)).toEqual(['signed_in', 'needs_sign_in']);
+  });
+
+  it('an unknown agent is 404, a body over 4 KiB is 413, and both routes need a token and a matching Origin', async () => {
+    const { server, tab, lines } = await startKeyServer();
+    for (const agentId of ['nope', 'Not_An_Id']) {
+      expect((await putKey(server, tab, JSON.stringify({ apiKey: KEY }), agentId)).status).toBe(404);
+      expect((await send(server, keyPath(agentId), { method: 'DELETE', headers: tab.headers })).status).toBe(404);
+    }
+    const huge = await putKey(server, tab, JSON.stringify({ apiKey: `${KEY}${'a'.repeat(5000)}` }));
+    expect(huge.status).toBe(413);
+    expect(huge.body).not.toContain(KEY);
+    for (const method of ['PUT', 'DELETE']) {
+      expect((await send(server, keyPath(), { method, headers: { origin: server.url } })).status).toBe(401);
+      expect((await send(server, keyPath(), { method, headers: { ...tab.headers, origin: 'http://evil.example' } })).status).toBe(403);
+    }
+    expect(lines.join('')).not.toContain(KEY);
+  });
+
+  it('a saved key survives a restart: after load() the card shows its last 4 and the chat uses it while signed out', async () => {
+    const secrets = createMemorySecretStore({ 'agent-api-key/claude-code': KEY });
+    const repo = mkdtempSync(join(tmpdir(), 'ogden-agents-key-repo-'));
+    const { server, tab, lines } = await startKeyServer({ secrets, env: { FAKE_ACP_REQUIRE_API_KEY: '1' } });
+    try {
+      expect((await agents(server, tab))[0]).toMatchObject({ auth: 'signed_in', method: 'api_key', apiKey: { saved: true, lastFour: 'WXYZ' } });
+      const post = (path: string, body: unknown) => fetch(`${server.url}${path}`, { method: 'POST', headers: json(tab), body: JSON.stringify(body) });
+      const { workspace } = WorkspaceResponse.parse(await (await post(API_ROUTES.workspaces, { path: repo })).json());
+      const { session } = SessionResponse.parse(await (await post(apiPath(API_ROUTES.workspaceSessions, { wsId: workspace.id }), {})).json());
+      expect((await post(apiPath(API_ROUTES.sessionMessages, { wsId: workspace.id, sesId: session.id }), { text: 'hello' })).status).toBe(202);
+      await waitFor(() => JSON.stringify(server.core.events.readAfter(0)).includes('key received'), 'the reply', 20_000);
+      expect(everythingKept(server, lines)).not.toContain(KEY);
+    } finally {
+      await server.close();
+      rmSync(repo, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    }
+  }, 30_000);
+
+  it('signed in with the subscription, the chat never gets the key', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'ogden-agents-key-repo-'));
+    const { server, tab } = await startKeyServer({ signedIn: true, env: { FAKE_ACP_REQUIRE_API_KEY: '1' } });
+    try {
+      expect((await putKey(server, tab, JSON.stringify({ apiKey: KEY }))).status).toBe(204);
+      const post = (path: string, body: unknown) => fetch(`${server.url}${path}`, { method: 'POST', headers: json(tab), body: JSON.stringify(body) });
+      const { workspace } = WorkspaceResponse.parse(await (await post(API_ROUTES.workspaces, { path: repo })).json());
+      const { session } = SessionResponse.parse(await (await post(apiPath(API_ROUTES.workspaceSessions, { wsId: workspace.id }), {})).json());
+      expect((await post(apiPath(API_ROUTES.sessionMessages, { wsId: workspace.id, sesId: session.id }), { text: 'hello' })).status).toBe(202);
+      await waitFor(() => server.core.entities.getSession(session.id)?.state === 'error', 'the auth-required failure', 20_000);
+      expect(JSON.stringify(server.core.events.readAfter(0))).not.toContain('key received');
+    } finally {
+      await server.close();
+      rmSync(repo, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    }
+  }, 30_000);
+});
+
+describe('agent setup routes: review fixes (story 9.2)', () => {
+  it("F1: a key in the server's own environment (any case) follows the same rule: used signed out, never signed in", async () => {
+    const ENV_KEY = 'sk-ant-api03-FROM_ENVIRONMENT_0123456789-envK';
+    const out = await startKeyServer({ env: { FAKE_ACP_REQUIRE_API_KEY: '1' }, extra: { extraAgentEnv: { FAKE_ACP_AUTH: 'claude-terminal', FAKE_LOGIN_STATE: stateFile(), FAKE_ACP_REQUIRE_API_KEY: '1', Anthropic_Api_Key: ENV_KEY } } });
+    expect((await agents(out.server, out.tab))[0]).toMatchObject({ auth: 'signed_in', method: 'api_key', apiKey: { saved: false, fromEnvironment: true } });
+    const used = await chatOnce(out.server, out.tab, 'hello');
+    await waitFor(() => settledState(out.server, used) !== undefined, 'the reply', 20_000);
+    expect(JSON.stringify(out.server.core.events.readAfter(0))).toContain('key received');
+    expect(everythingKept(out.server, out.lines)).not.toContain(ENV_KEY);
+    await out.server.close();
+
+    const signedIn = stateFile();
+    writeFileSync(signedIn, JSON.stringify({ loggedIn: true }));
+    const inn = await startKeyServer({ extra: { extraAgentEnv: { FAKE_ACP_AUTH: 'claude-terminal', FAKE_LOGIN_STATE: signedIn, FAKE_ACP_REQUIRE_API_KEY: '1', ANTHROPIC_API_KEY: ENV_KEY } } });
+    expect((await agents(inn.server, inn.tab))[0]).toMatchObject({ auth: 'signed_in', method: 'subscription', apiKey: { saved: false, fromEnvironment: true } });
+    const refused = await chatOnce(inn.server, inn.tab, 'hello');
+    await waitFor(() => settledState(inn.server, refused) === 'error', 'the auth-required failure', 20_000);
+    expect(JSON.stringify(inn.server.core.events.readAfter(0))).not.toContain('key received');
+    await inn.server.close();
+  }, 60_000);
+
+  it('F1: only one spelling of the key reaches the chat, however the server environment spelled it', async () => {
+    const ENV_KEY = 'sk-ant-api03-ONE_SPELLING_0123456789-abcd';
+    const { server, tab } = await startKeyServer({ extra: { extraAgentEnv: { FAKE_ACP_AUTH: 'claude-terminal', FAKE_LOGIN_STATE: stateFile(), anthropic_api_key: ENV_KEY } } });
+    const session = await chatOnce(server, tab, 'echo-env');
+    await waitFor(() => settledState(server, session) !== undefined, 'the reply', 20_000);
+    const reply = server.core.events
+      .readAfter(0)
+      .flatMap((e) => (e.type === 'session.message_completed' && e.payload.role === 'agent' ? [e.payload.content] : []))
+      .join('');
+    const names = reply.split('\n').map((line) => line.split('=')[0]!).filter((name) => name.toUpperCase() === 'ANTHROPIC_API_KEY');
+    expect(names).toEqual(['ANTHROPIC_API_KEY']);
+    await server.close();
+  }, 30_000);
+
+  it('F4: a sign-in made outside the app stops the key before the next chat starts, once the state is stale', async () => {
+    const state = stateFile();
+    const { server, tab } = await startKeyServer({
+      extra: { subscriptionMaxAgeMs: 0, extraAgentEnv: { FAKE_ACP_AUTH: 'claude-terminal', FAKE_LOGIN_STATE: state, FAKE_ACP_REQUIRE_API_KEY: '1' } },
+    });
+    expect((await putKey(server, tab, JSON.stringify({ apiKey: KEY }))).status).toBe(204);
+    // Signed in in a terminal, behind the app's back; no list() refresh in between.
+    writeFileSync(state, JSON.stringify({ loggedIn: true }));
+    const session = await chatOnce(server, tab, 'hello');
+    await waitFor(() => settledState(server, session) === 'error', 'the auth-required failure', 20_000);
+    expect(JSON.stringify(server.core.events.readAfter(0))).not.toContain('key received');
+    await server.close();
+  }, 30_000);
+
+  it('F5: the in-memory store is honoured only in a test run', () => {
+    expect(testSecretStore({ OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', NODE_ENV: 'test' })).toBe('memory');
+    expect(testSecretStore({ OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', VITEST: 'true' })).toBe('memory');
+    expect(testSecretStore({ OGDEN_AGENTS_TEST_SECRET_STORE: 'memory' })).toBeUndefined();
+    expect(testSecretStore({ OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', NODE_ENV: 'production', VITEST: '' })).toBeUndefined();
+    expect(testSecretStore({ NODE_ENV: 'test' })).toBeUndefined();
+    expect(testSecretStore({ OGDEN_AGENTS_TEST_SECRET_STORE: 'keychain', NODE_ENV: 'test' })).toBeUndefined();
+  });
 });

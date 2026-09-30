@@ -106,6 +106,40 @@ describe('redaction', () => {
     expect(redact({ token: 'abc' })).toEqual({ token: REDACTED });
   });
 
+  it('an Anthropic API key is redacted by field name and wherever it appears in a value (story 9.2 backstop)', () => {
+    const key = 'sk-ant-api03-backstop_0123456789-abcdefghij';
+    expect(redact({ apiKey: key, api_key: key, 'X-Api-Key': key, ANTHROPIC_API_KEY: key })).toEqual({
+      apiKey: REDACTED,
+      api_key: REDACTED,
+      'X-Api-Key': REDACTED,
+      ANTHROPIC_API_KEY: REDACTED,
+    });
+    const out = JSON.stringify(redact({ reason: `failed with ${key} inside`, nested: [{ text: `env ${key}` }] }));
+    expect(out).not.toContain(key);
+    expect(out).not.toContain('backstop_0123456789');
+    expect(out).toContain('failed with [redacted] inside');
+  });
+
+  it('an API key split across lines, raw or escaped, or cut at the end of a line, is redacted with its continuation (review F6)', () => {
+    const head = 'sk-ant-api03-SPLITHEAD_0123456789';
+    const tail = 'SPLITTAIL_abcdefghij-WXYZ';
+    for (const text of [`key: ${head}\n${tail}\nnext`, `key: ${head}\r\n${tail}`, `key: ${head}\\n${tail}`, `"${head}\n\n${tail}"`]) {
+      const out = redact(text) as string;
+      expect(out, JSON.stringify(text)).not.toContain('SPLITHEAD');
+      expect(out, JSON.stringify(text)).not.toContain('SPLITTAIL');
+      expect(out).toContain(REDACTED);
+    }
+    // A key cut before its prefix ends: the start is redacted, and so is what follows on the next line.
+    for (const [cut, rest] of [['sk-an', 't-api03-CUTREST_0123456789'], ['sk-a', 'nt-api03-CUTREST_0123456789'], ['sk-', 'ant-api03-CUTREST_0123456789']] as const) {
+      const out = redact(`prefix ${cut}\n${rest}`) as string;
+      expect(out).not.toContain('CUTREST');
+      expect(redact(`line ends with ${cut}`)).toBe(`line ends with ${REDACTED}`);
+    }
+    expect(redact('just sk-ant')).toBe(`just ${REDACTED}`);
+    // Ordinary text is kept. (A word that merely contains "sk-ant", such as "task-ant", is redacted: a backstop errs that way.)
+    expect(redact('a risk-free sketch of sk8 and ask-me')).toBe('a risk-free sketch of sk8 and ask-me');
+  });
+
   it('leaves ordinary fields alone', () => {
     expect(redact({ port: 4317, msg: 'server listening', url: 'http://127.0.0.1:4317', code: 'EADDRINUSE' })).toEqual({
       port: 4317,

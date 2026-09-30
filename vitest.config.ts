@@ -14,5 +14,9 @@ export default defineConfig({
   },
   test: {
     include: ['tests/**/*.test.ts', 'packages/*/test/**/*.test.{ts,tsx}'],
+    // A server a test starts without its own secret store keeps API keys in
+    // memory, and so do the processes it spawns: no test touches the real
+    // OS keychain (story 9.2).
+    env: { OGDEN_AGENTS_TEST_SECRET_STORE: 'memory' },
   },
 });

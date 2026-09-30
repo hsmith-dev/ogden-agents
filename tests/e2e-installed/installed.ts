@@ -4,7 +4,7 @@
  * the environment; `installed()` rebuilds the install around them, so a test
  * can run the installed launcher again (by its path in the npx install).
  */
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { prepareInstall, withTimeout, type Install } from '../../scripts/installed-package.mjs';
 import { isAlive, readPortFile, ROOT, waitUntil } from '../support.js';
@@ -76,15 +76,19 @@ export function extraFolder(prefix: string): string {
 
 /**
  * The same installed package, set up for a server of a spec's own: its own
- * data folder and `agent`. Nothing is installed again: its launcher runs by
+ * data folder (Welcome already done) and `agent`. Nothing is installed again: its launcher runs by
  * path (`runInstalledLauncher`). Never call its `removeFolders`, which would
  * remove the shared install; `stopOwnServer` cleans up.
  */
 export function ownInstall(name: string, agent: string): Install {
+  const dataDir = extraFolder(`${name}-data`);
+  // These specs are not about the first run: Welcome is marked done, so a tab lands on Projects (story 9.5).
+  // The first run on an installed package is journey.spec.ts's.
+  writeFileSync(join(dataDir, 'onboarding.json'), `${JSON.stringify({ welcomeCompleted: true })}\n`, { mode: 0o600 });
   return prepareInstall({
     tarball: env(ENV.tarball),
     prefix: 'ogden-agents-e2e',
-    reuse: { workDir: env(ENV.workDir), cacheDir: env(ENV.cacheDir), dataDir: extraFolder(`${name}-data`) },
+    reuse: { workDir: env(ENV.workDir), cacheDir: env(ENV.cacheDir), dataDir },
     env: agentEnv(agent),
   });
 }

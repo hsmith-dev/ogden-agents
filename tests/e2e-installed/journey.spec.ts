@@ -45,10 +45,16 @@ test('the epic 1 journey on the installed package', async ({ page, context }) =>
     expect(install.readPortFile()?.pid).toBe(pid);
   });
 
-  await test.step('2. land connected through the launch link', async () => {
-    // The boot script strips #c= and exchanges the code for this tab's token.
-    await landConnected(page, launchUrl);
+  await test.step('2. land connected through the launch link: a fresh install goes through Welcome (story 9.5)', async () => {
+    // The boot script strips #c= and exchanges the code for this tab's token; a first run goes on to Welcome.
+    await page.goto(launchUrl);
+    await expect(page).toHaveURL(`${url}/welcome`);
+    await expect.poll(() => storedToken(page)).toMatch(/^[A-Za-z0-9_-]{43}$/);
     await connected(page);
+    await expect(page.getByTestId('welcome-headline')).toHaveText('Pick the agent that will do the work.');
+    await page.getByRole('button', { name: 'Skip for now' }).click();
+    await expect(page).toHaveURL(`${url}/`);
+    await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible();
   });
 
   await test.step('3. see the shell', async () => {

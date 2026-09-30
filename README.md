@@ -67,6 +67,8 @@ Launch codes, tab tokens and the launcher token never appear in the logs or the 
 
 ## Develop
 
+Coding agents (and people) working in this repo: read [AGENTS.md](AGENTS.md) first for conventions and known pitfalls.
+
 ```sh
 pnpm typecheck   # tsc across every package, the launcher and the tests
 pnpm test        # builds, then Vitest: architecture, packaging, design-token, launcher and server tests

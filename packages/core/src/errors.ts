@@ -69,3 +69,11 @@ export class SessionBusyError extends CoreError {
     super('session_busy', `session ${sessionId} is still answering the last message`);
   }
 }
+
+/** A session of the workspace is `working` or `waiting`, so its history was not deleted. */
+export class WorkspaceBusyError extends CoreError {
+  override readonly name = 'WorkspaceBusyError';
+  constructor(workspaceId: string) {
+    super('sessions_busy', `workspace ${workspaceId} has a session that is working or waiting`);
+  }
+}

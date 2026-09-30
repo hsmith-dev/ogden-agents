@@ -18,14 +18,8 @@ const ruleId = 'rule_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
 /** Every stubbed route with its method and a concrete path, by the lane that fills it. */
 const STUBS: ReadonlyArray<readonly [method: string, path: string]> = [
   // 2.5
-  ['GET', API_ROUTES.workspaces],
-  ['GET', apiPath(API_ROUTES.workspace, { wsId })],
-  ['DELETE', apiPath(API_ROUTES.workspaceHistory, { wsId })],
   ['GET', apiPath(API_ROUTES.workspaceSettings, { wsId })],
   ['PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId })],
-  ['GET', `${API_ROUTES.folders}?path=%2Ftmp`],
-  ['POST', API_ROUTES.folders],
-  ['GET', apiPath(API_ROUTES.workspaceSessions, { wsId })],
   // 2.10
   ['POST', apiPath(API_ROUTES.sessionCancel, { wsId, sesId })],
   // 2.6
@@ -79,7 +73,7 @@ describe('stub routes', () => {
     });
     expect(put.status).toBe(501);
     // Not even a malformed body is looked at.
-    const junk = await send(server, API_ROUTES.folders, { method: 'POST', headers: { ...tab.headers, 'content-type': 'application/json' }, body: '{nope' });
+    const junk = await send(server, apiPath(API_ROUTES.workspaceSettings, { wsId }), { method: 'PATCH', headers: { ...tab.headers, 'content-type': 'application/json' }, body: '{nope' });
     expect(junk.status).toBe(501);
     expect(lines.join('')).not.toContain(apiKey);
 

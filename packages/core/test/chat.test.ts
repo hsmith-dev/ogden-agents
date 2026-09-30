@@ -16,6 +16,7 @@ import {
   NotFoundError,
   RESTARTED_REASON,
   SessionBusyError,
+  WorkspaceBusyError,
   type AgentEvent,
   type AgentPort,
   type AgentSession,
@@ -464,5 +465,66 @@ describe('tool calls and permission requests', () => {
     const { chat, workspace, session } = setUp(core, hello.port);
     expect(chat.sendMessage(workspace.id, session.id, 'hi')).toMatchObject({ queued: false });
     await chat.settled();
+  });
+});
+
+describe('workspaces and history (story 2.5)', () => {
+  it('lists workspaces and their sessions; an unknown workspace is not found', () => {
+    const core = openTestCore();
+    const { chat, workspace, session } = setUp(core, hello.port);
+    const other = chat.openWorkspace(tempDir('ogden-agents-repo-'));
+    expect(chat.listWorkspaces()).toEqual([workspace, other]);
+    expect(chat.getWorkspace(other.id)).toEqual(other);
+    expect(chat.listSessions(workspace.id)).toEqual([session]);
+    expect(chat.listSessions(other.id)).toEqual([]);
+    const unknown = 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3' as typeof workspace.id;
+    expect(() => chat.getWorkspace(unknown)).toThrow(NotFoundError);
+    expect(() => chat.listSessions(unknown)).toThrow(NotFoundError);
+    expect(() => chat.deleteHistory(unknown)).toThrow(NotFoundError);
+  });
+
+  it('deletes one workspace’s history, keeps the other’s, and stops the deleted sessions’ idle agents', async () => {
+    const core = openTestCore();
+    const agent = scriptedAgent(async (_t, emit) => (emit({ type: 'message_chunk', text: 'ok' }), { stopReason: 'end_turn' }));
+    const { chat, workspace, session } = setUp(core, agent.port);
+    chat.sendMessage(workspace.id, session.id, 'hi');
+    await chat.settled();
+    const other = chat.openWorkspace(tempDir('ogden-agents-repo-'));
+    const kept = chat.createChatSession(other.id);
+
+    const deleted = chat.deleteHistory(workspace.id);
+    expect(deleted.deletedSessions).toBe(1);
+    expect(deleted.deletedEvents).toBeGreaterThan(0);
+    expect(chat.listSessions(workspace.id)).toEqual([]);
+    expect(chat.getWorkspace(workspace.id)).toEqual(workspace);
+    expect(chat.listSessions(other.id)).toEqual([kept]);
+    expect(core.events.readAfter(0).some((e) => e.streamId === kept.id && e.type === 'session.created')).toBe(true);
+    // The agent process of the deleted session was stopped.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(agent.closed()).toBe(1);
+  });
+
+  it('refuses while a session is working, deleting nothing', async () => {
+    const core = openTestCore();
+    let finish!: () => void;
+    const agent = scriptedAgent(() => new Promise((resolve) => (finish = () => resolve({ stopReason: 'end_turn' }))));
+    const { chat, workspace, session } = setUp(core, agent.port);
+    chat.sendMessage(workspace.id, session.id, 'one');
+    // Refused even before the agent has reported `working`.
+    expect(() => chat.deleteHistory(workspace.id)).toThrow(WorkspaceBusyError);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(() => chat.deleteHistory(workspace.id)).toThrow(WorkspaceBusyError);
+    expect(chat.listSessions(workspace.id)).toHaveLength(1);
+    finish();
+    await chat.settled();
+    expect(chat.deleteHistory(workspace.id).deletedSessions).toBe(1);
+  });
+
+  it('refuses a workspace with a waiting session in core itself', () => {
+    const core = openTestCore();
+    const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
+    core.entities.createSession({ workspaceId: workspace.id, kind: 'chat', state: 'waiting' });
+    expect(() => core.entities.deleteWorkspaceHistory(workspace.id)).toThrow(WorkspaceBusyError);
+    expect(core.entities.listSessions(workspace.id)).toHaveLength(1);
   });
 });

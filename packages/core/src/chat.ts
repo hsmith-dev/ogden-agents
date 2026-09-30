@@ -30,7 +30,8 @@ import {
   type AgentToolCallDiff,
 } from './agent-port.js';
 import { canonicalWorkspacePath, type Entities } from './entities.js';
-import { CoreError, InvalidOperationError, NotFoundError, SessionBusyError } from './errors.js';
+import { CoreError, InvalidOperationError, NotFoundError, SessionBusyError, WorkspaceBusyError } from './errors.js';
+import type { HistoryDeleted } from './event-log.js';
 import { createDecliningPermissions, type Permissions } from './permissions.js';
 import type { SessionEvents } from './session-events.js';
 
@@ -70,6 +71,21 @@ export interface Chat {
    * folder, or if it is, holds or sits inside Ogden Agents' data folder.
    */
   openWorkspace(path: string): Workspace;
+  /** Every workspace of this install, oldest first. */
+  listWorkspaces(): Workspace[];
+  /** The workspace ({@link NotFoundError} if there is none). */
+  getWorkspace(workspaceId: WorkspaceId): Workspace;
+  /** The workspace's sessions, oldest first ({@link NotFoundError} for an unknown workspace). */
+  listSessions(workspaceId: WorkspaceId): Session[];
+  /**
+   * Deletes the workspace's history: its events, sessions and runs; the
+   * workspace and every other workspace stay. Throws
+   * {@link WorkspaceBusyError}, deleting nothing, while one of its sessions is
+   * `working` or `waiting` or its agent is still answering, and
+   * {@link NotFoundError} for an unknown workspace. The deleted sessions'
+   * idle agents are then stopped.
+   */
+  deleteHistory(workspaceId: WorkspaceId): Omit<HistoryDeleted, 'event'>;
   /** A new chat session in the workspace, `idle`. */
   createChatSession(workspaceId: WorkspaceId): Session;
   /** The session, which must belong to the workspace ({@link NotFoundError} otherwise). */
@@ -323,6 +339,12 @@ export function createChat(options: ChatOptions): Chat {
     }
   };
 
+  const getWorkspace = (workspaceId: WorkspaceId): Workspace => {
+    const workspace = entities.getWorkspace(workspaceId);
+    if (workspace === undefined) throw new NotFoundError('workspace', workspaceId);
+    return workspace;
+  };
+
   const getSession = (workspaceId: WorkspaceId, sessionId: SessionId): Session => {
     const session = entities.getSession(sessionId);
     // Another workspace's session is as absent as a missing one: nothing leaks across (AD-2).
@@ -348,6 +370,27 @@ export function createChat(options: ChatOptions): Chat {
         if (code === 'EACCES' || code === 'EPERM') throw new InvalidOperationError("Ogden Agents can't open that folder: permission denied.");
         throw error;
       }
+    },
+
+    listWorkspaces: () => entities.listWorkspaces(),
+
+    getWorkspace,
+
+    listSessions(workspaceId) {
+      getWorkspace(workspaceId);
+      return entities.listSessions(workspaceId);
+    },
+
+    deleteHistory(workspaceId) {
+      const sessionIds = entities.listSessions(workspaceId).map((session) => session.id);
+      // A turn can be starting before its state reads `working`: the busy set covers that gap.
+      if (sessionIds.some((id) => busy.has(id))) throw new WorkspaceBusyError(workspaceId);
+      const { deletedEvents, deletedSessions, deletedRuns } = entities.deleteWorkspaceHistory(workspaceId);
+      for (const sessionId of sessionIds) {
+        const entry = live.get(sessionId);
+        if (entry !== undefined) drop(sessionId, entry);
+      }
+      return { deletedEvents, deletedSessions, deletedRuns };
     },
 
     createChatSession(workspaceId) {

@@ -1,31 +1,100 @@
 /**
- * The workspace routes (story 2.3 stubs; story 2.5 fills them, then 2.8 the
- * caution level): one workspace, its history deletion and settings, and the
- * server-side folder browser for Add project. Under `/api/v1`, behind the
- * gate (AD-15). Until their lane ships each answers 501 `not_implemented`
- * without reading the body.
+ * The workspace routes (story 2.5; 2.8 fills the caution level): one
+ * workspace, its history deletion, and the server-side folder browser for
+ * Add project. Under `/api/v1`, behind the gate (AD-15). Routes call core and
+ * never write themselves (AD-11); the folder browser only reads the disk and
+ * creates the one folder asked for (`folders.ts`). The settings routes stay
+ * 501 `not_implemented` stubs until 2.8, without reading the body.
  */
-import type { Chat } from '@ogden-agents/core';
-import { API_ROUTES } from '@ogden-agents/shared';
-import type { Hono } from 'hono';
-import { notImplemented } from './errors.js';
+import { NotFoundError, WorkspaceBusyError, type Chat } from '@ogden-agents/core';
+import {
+  API_ROUTES,
+  CreateFolderRequest,
+  CreateFolderResponse,
+  FolderListing,
+  FolderListingQuery,
+  HistoryDeletedResponse,
+  WorkspaceResponse,
+} from '@ogden-agents/shared';
+import type { Context, Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
+import { ids, readBody } from './chat-routes.js';
+import { apiError, notImplemented } from './errors.js';
+import { createFolder, FolderError, listFolder } from './folders.js';
 import type { Logger } from './log.js';
 
+/** Largest request body these routes read (a folder path and name). */
+const MAX_BODY_BYTES = 64 * 1024;
+
+const NOT_FOUND = 'There is no such project.';
+
 export interface WorkspaceRoutesOptions {
-  /** The chat use-case, for the workspaces it opens (2.5). */
+  /** The chat use-case, for the workspaces it opens; without it the workspace routes answer 404. */
   chat?: Chat | undefined;
   log: Logger;
 }
 
 export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptions): void {
-  // `GET` → `WorkspaceResponse` (2.5).
-  app.get(API_ROUTES.workspace, notImplemented);
-  // `DELETE` → `HistoryDeletedResponse` (2.5).
-  app.delete(API_ROUTES.workspaceHistory, notImplemented);
-  // `GET` and `PATCH` → `WorkspaceSettingsResponse` (2.5, caution level 2.8).
+  const { chat, log } = options;
+  const limit = bodyLimit({
+    maxSize: MAX_BODY_BYTES,
+    onError: (c) => apiError(c, 413, 'invalid_request', 'That request is too large.'),
+  });
+
+  /** Core's and the folder browser's refusals as API errors; anything else is left for `onError` (500). */
+  const refusal = (c: Context, error: unknown): Response => {
+    if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', NOT_FOUND);
+    if (error instanceof WorkspaceBusyError) {
+      return apiError(c, 409, 'sessions_busy', 'A chat in this project is still working or waiting for you. Let it finish, then delete the history.');
+    }
+    if (error instanceof FolderError) return apiError(c, 400, 'invalid_request', error.message);
+    throw error;
+  };
+
+  app.get(API_ROUTES.workspace, (c) => {
+    const scope = ids(c);
+    if (chat === undefined || scope === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+    try {
+      return c.json(WorkspaceResponse.parse({ workspace: chat.getWorkspace(scope.workspaceId) }));
+    } catch (error) {
+      return refusal(c, error);
+    }
+  });
+
+  app.delete(API_ROUTES.workspaceHistory, (c) => {
+    const scope = ids(c);
+    if (chat === undefined || scope === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+    try {
+      const deleted = chat.deleteHistory(scope.workspaceId);
+      log.info('workspace history deleted', { workspaceId: scope.workspaceId, ...deleted });
+      return c.json(HistoryDeletedResponse.parse(deleted));
+    } catch (error) {
+      return refusal(c, error);
+    }
+  });
+
+  // `GET` and `PATCH` → `WorkspaceSettingsResponse` (caution level, 2.8).
   app.get(API_ROUTES.workspaceSettings, notImplemented);
   app.patch(API_ROUTES.workspaceSettings, notImplemented);
-  // `GET ?path=` → `FolderListing`; `POST CreateFolderRequest` → 201 `CreateFolderResponse` (2.5).
-  app.get(API_ROUTES.folders, notImplemented);
-  app.post(API_ROUTES.folders, notImplemented);
+
+  app.get(API_ROUTES.folders, async (c) => {
+    const query = FolderListingQuery.safeParse({ path: c.req.query('path') });
+    if (!query.success) return apiError(c, 400, 'invalid_request', 'Enter the full path of the folder, starting from the top of the disk.');
+    try {
+      return c.json(FolderListing.parse(await listFolder(query.data.path)));
+    } catch (error) {
+      return refusal(c, error);
+    }
+  });
+
+  app.post(API_ROUTES.folders, limit, async (c) => {
+    const body = await readBody(c, CreateFolderRequest);
+    if (!body.ok) return body.response;
+    try {
+      // Paths are the user's own content: never logged.
+      return c.json(CreateFolderResponse.parse({ path: await createFolder(body.value.parent, body.value.name) }), 201);
+    } catch (error) {
+      return refusal(c, error);
+    }
+  });
 }

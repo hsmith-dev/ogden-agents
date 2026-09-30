@@ -1,3 +1,4 @@
+import { Check } from '@phosphor-icons/react';
 import { DropdownMenu as DropdownMenuPrimitive } from 'radix-ui';
 import type { ComponentProps } from 'react';
 import { tokenNumber } from './tokens';
@@ -45,6 +46,29 @@ export function DropdownMenuItem({ className, ...props }: ComponentProps<typeof 
       )}
       {...props}
     />
+  );
+}
+
+/** An item that shows whether it is the current choice (a check mark), such as the current workspace. */
+export function DropdownMenuCheckboxItem({ className, children, ...props }: ComponentProps<typeof DropdownMenuPrimitive.CheckboxItem>) {
+  return (
+    <DropdownMenuPrimitive.CheckboxItem
+      data-slot="dropdown-menu-checkbox-item"
+      className={cn(
+        'relative flex h-(--row-height) cursor-default select-none items-center gap-2 rounded-md pr-2 pl-8 text-label outline-none',
+        'focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        '[&_svg]:pointer-events-none [&_svg]:size-(--icon) [&_svg]:shrink-0',
+        className,
+      )}
+      {...props}
+    >
+      <span className="absolute left-2 inline-flex items-center justify-center">
+        <DropdownMenuPrimitive.ItemIndicator>
+          <Check aria-hidden />
+        </DropdownMenuPrimitive.ItemIndicator>
+      </span>
+      <span className="min-w-0 truncate">{children}</span>
+    </DropdownMenuPrimitive.CheckboxItem>
   );
 }
 

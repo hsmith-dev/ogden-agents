@@ -126,7 +126,7 @@ test('first load: the empty sidebar and the empty workspace area, in plain langu
   await page.setViewportSize({ width: 1440, height: 900 });
   await openConnected(page);
   await expect(page.getByRole('heading', { name: 'Add a project to get started.' })).toBeVisible();
-  await expect(page.getByTestId('workspace-empty').getByRole('button', { name: 'Add project' })).toHaveAttribute('aria-disabled', 'true');
+  await expect(page.getByTestId('workspace-empty').getByRole('button', { name: 'Add project' })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Start a new project folder' })).toBeVisible();
   await expect(page.getByTestId('needs-you')).toHaveCount(0);
   await expect(page.getByTestId('server-status').filter({ visible: true })).toContainText('Running on this computer');

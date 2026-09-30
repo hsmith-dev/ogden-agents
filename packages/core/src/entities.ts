@@ -27,12 +27,12 @@ import {
   type Workspace,
   type WorkspaceId,
 } from '@ogden-agents/shared';
-import { asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Database } from './db/database.js';
 import { runs, sessions, workspaces } from './db/schema.js';
-import { InvalidOperationError, NotFoundError, ValidationError } from './errors.js';
-import type { EventLog } from './event-log.js';
+import { InvalidOperationError, NotFoundError, ValidationError, WorkspaceBusyError } from './errors.js';
+import type { EventLog, HistoryDeleted } from './event-log.js';
 import { newId } from './ids.js';
 import type { SessionEvents } from './session-events.js';
 
@@ -72,6 +72,13 @@ export interface Entities {
   ensureWorkspace(path: string): Workspace;
   getWorkspace(id: WorkspaceId): Workspace | undefined;
   listWorkspaces(): Workspace[];
+  /**
+   * Deletes the workspace's events, sessions and runs (the workspace stays)
+   * and appends `workspace.history_deleted`, in one transaction. Throws
+   * {@link WorkspaceBusyError}, deleting nothing, while any of its sessions is
+   * `working` or `waiting`, and {@link NotFoundError} for an unknown workspace.
+   */
+  deleteWorkspaceHistory(workspaceId: WorkspaceId): HistoryDeleted;
 
   /** Creates a session and appends `session.created`. */
   createSession(input: NewSession): Session;
@@ -237,6 +244,18 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
 
     listWorkspaces() {
       return orm.select().from(workspaces).orderBy(asc(workspaces.createdAt), asc(workspaces.id)).all().map(toWorkspace);
+    },
+
+    deleteWorkspaceHistory(workspaceId) {
+      return log.transaction(() => {
+        const busy = orm
+          .select({ id: sessions.id })
+          .from(sessions)
+          .where(and(eq(sessions.workspaceId, workspaceId), inArray(sessions.state, ['working', 'waiting'])))
+          .get();
+        if (busy !== undefined) throw new WorkspaceBusyError(workspaceId);
+        return log.deleteWorkspaceHistory(workspaceId);
+      });
     },
 
     createSession(input) {

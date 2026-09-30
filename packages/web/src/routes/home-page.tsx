@@ -1,16 +1,19 @@
 import { FolderPlus, Plus } from '@phosphor-icons/react';
+import { useState } from 'react';
 import { StartChatForm } from '@/chat/start-chat-form';
-import { ADD_PROJECT_UNAVAILABLE } from '@/shell/status-sidebar';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
 import { EmptyState, PageBody } from '@/ui/page';
+import { AddProjectDialog } from '@/workspaces/add-project-dialog';
 
 /**
- * `/`: the workspace area with no workspaces (EXPERIENCE.md State Patterns:
- * No workspaces). Both actions arrive with the workspace switcher (story
- * 2.5); until then a chat starts in a folder typed by path.
+ * `/`: the workspace area with no workspace open (EXPERIENCE.md State
+ * Patterns: No workspaces). Add project opens the folder browser; Start a
+ * new project folder opens it with the cursor in the new folder's name. The
+ * typed-path form stays until story 2.12's sweep.
  */
 export function HomePage() {
+  const [adding, setAdding] = useState<'pick' | 'new' | undefined>(undefined);
   return (
     <>
       <WorkspaceHeader title="Projects" />
@@ -21,18 +24,18 @@ export function HomePage() {
           description="A project is a folder on this computer. Your agents plan and build inside it, and every conversation stays with its project."
           actions={
             <>
-              <Button aria-disabled aria-describedby="home-add-unavailable" onClick={(event) => event.preventDefault()}>
+              <Button onClick={() => setAdding('pick')}>
                 <Plus aria-hidden />
                 Add project
               </Button>
-              <Button variant="outline" aria-disabled aria-describedby="home-add-unavailable" onClick={(event) => event.preventDefault()}>
+              <Button variant="outline" onClick={() => setAdding('new')}>
                 <FolderPlus aria-hidden />
                 Start a new project folder
               </Button>
             </>
           }
-          footnote={<span id="home-add-unavailable">{ADD_PROJECT_UNAVAILABLE}</span>}
         />
+        <AddProjectDialog open={adding !== undefined} startNew={adding === 'new'} onOpenChange={(open) => setAdding(open ? adding : undefined)} />
         <StartChatForm />
       </PageBody>
     </>

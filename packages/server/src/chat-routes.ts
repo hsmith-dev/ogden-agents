@@ -1,8 +1,8 @@
 /**
  * The chat routes (story 2.2): create a workspace from a repo path, create a
- * chat session, read it, and send it a message. Story 2.3 adds stubs, which
- * answer 501 `not_implemented`, for the workspace and session lists (2.5)
- * and cancel (2.10); stories 2.7 and 2.10 own this file next. All live under `/api/v1`
+ * chat session, read it, and send it a message; story 2.5 adds the workspace
+ * and session lists. Story 2.3 adds a stub, which answers 501
+ * `not_implemented`, for cancel (2.10); stories 2.7 and 2.10 own this file next. All live under `/api/v1`
  * (`API_ROUTES`), behind the gate: a tab token on every request, and a
  * matching `Origin` on these state-changing POSTs (AD-15). Routes call the
  * core chat use-case and never write themselves (AD-11).
@@ -23,8 +23,10 @@ import {
   SendMessageResponse,
   SessionId,
   SessionResponse,
+  SessionsResponse,
   WorkspaceId,
   WorkspaceResponse,
+  WorkspacesResponse,
 } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -42,7 +44,7 @@ interface Schema<T> {
 }
 
 /** Parses the JSON body against `schema`, or answers 400 when it doesn't fit. */
-async function readBody<T>(c: Context, schema: Schema<T>, { optional = false } = {}): Promise<{ ok: true; value: T } | { ok: false; response: Response }> {
+export async function readBody<T>(c: Context, schema: Schema<T>, { optional = false } = {}): Promise<{ ok: true; value: T } | { ok: false; response: Response }> {
   let json: unknown;
   try {
     const text = await c.req.text();
@@ -58,7 +60,7 @@ async function readBody<T>(c: Context, schema: Schema<T>, { optional = false } =
 }
 
 /** The route's `:wsId` and `:sesId`, if they are well-formed ids; otherwise nothing matches them. */
-function ids(c: Context): { workspaceId: WorkspaceId; sessionId?: SessionId } | undefined {
+export function ids(c: Context): { workspaceId: WorkspaceId; sessionId?: SessionId } | undefined {
   const workspace = WorkspaceId.safeParse(c.req.param('wsId'));
   if (!workspace.success) return undefined;
   const raw = c.req.param('sesId');
@@ -121,9 +123,18 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger): void {
     }
   });
 
-  // `GET` → `WorkspacesResponse` and `SessionsResponse` (2.5).
-  app.get(API_ROUTES.workspaces, notImplemented);
-  app.get(API_ROUTES.workspaceSessions, notImplemented);
+  app.get(API_ROUTES.workspaces, (c) => c.json(WorkspacesResponse.parse({ workspaces: chat.listWorkspaces() })));
+
+  app.get(API_ROUTES.workspaceSessions, (c) => {
+    const scope = ids(c);
+    if (scope === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+    try {
+      return c.json(SessionsResponse.parse({ sessions: chat.listSessions(scope.workspaceId) }));
+    } catch (error) {
+      return refusal(c, error);
+    }
+  });
+
   // `POST` → 202: stops the running prompt (2.10).
   app.post(API_ROUTES.sessionCancel, notImplemented);
 

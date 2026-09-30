@@ -30,7 +30,7 @@ export class ChatApiError extends Error {
   }
 }
 
-async function call(auth: Pick<TabAuth, 'fetch'>, path: string, init: RequestInit, fallback: string): Promise<unknown> {
+export async function call(auth: Pick<TabAuth, 'fetch'>, path: string, init: RequestInit, fallback: string): Promise<unknown> {
   let response: Response;
   try {
     response = await auth.fetch(path, init);
@@ -48,7 +48,7 @@ async function call(auth: Pick<TabAuth, 'fetch'>, path: string, init: RequestIni
   throw new ChatApiError(message, response.status);
 }
 
-const postJson = (body: unknown): RequestInit => ({
+export const postJson = (body: unknown): RequestInit => ({
   method: 'POST',
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify(body),

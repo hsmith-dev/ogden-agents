@@ -1,7 +1,7 @@
 import { API_ROUTES, AppShortcutStatus } from '@ogden-agents/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
-import { call, ChatApiError } from '@/chat/chat-api';
+import { call, callNoContent } from '@/api/http';
 
 /**
  * The app shortcut REST calls (story 2.4, E2-R10), sent with this tab's
@@ -10,8 +10,6 @@ import { call, ChatApiError } from '@/chat/chat-api';
  */
 
 type Auth = Pick<TabAuth, 'fetch'>;
-
-const UNREACHABLE = "Couldn't reach Ogden Agents. Check that it is still running, then try again.";
 
 export const APP_SHORTCUT_QUERY_KEY = ['app-shortcut'] as const;
 
@@ -27,30 +25,11 @@ export async function addAppShortcut(auth: Auth = tabAuth): Promise<AppShortcutS
   return AppShortcutStatus.parse(json);
 }
 
-/** A `DELETE` answered 204. */
-async function callDelete(auth: Auth, path: string, fallback: string): Promise<void> {
-  let response: Response;
-  try {
-    response = await auth.fetch(path, { method: 'DELETE' });
-  } catch {
-    throw new ChatApiError(UNREACHABLE, 0);
-  }
-  if (response.ok) return;
-  let message = `${fallback} (error ${response.status}).`;
-  try {
-    const body = (await response.json()) as { error?: { message?: unknown } };
-    if (typeof body.error?.message === 'string') message = body.error.message;
-  } catch {
-    // Not JSON: keep the fallback.
-  }
-  throw new ChatApiError(message, response.status);
-}
-
 /** `DELETE /api/v1/app-shortcut`. */
-export const removeAppShortcut = (auth: Auth = tabAuth) => callDelete(auth, API_ROUTES.appShortcut, "Ogden Agents couldn't remove the app shortcut");
+export const removeAppShortcut = (auth: Auth = tabAuth) => callNoContent(auth, API_ROUTES.appShortcut, { method: 'DELETE' }, "Ogden Agents couldn't remove the app shortcut");
 
 /** `DELETE /api/v1/app-shortcut/offer`: Not now. */
-export const dismissAppShortcutOffer = (auth: Auth = tabAuth) => callDelete(auth, API_ROUTES.appShortcutOffer, "Ogden Agents couldn't save your answer");
+export const dismissAppShortcutOffer = (auth: Auth = tabAuth) => callNoContent(auth, API_ROUTES.appShortcutOffer, { method: 'DELETE' }, "Ogden Agents couldn't save your answer");
 
 /** Whether this computer can have the shortcut, has it, and still shows the offer. */
 export function useAppShortcut() {

@@ -18,9 +18,6 @@ export const TAB_TOKEN_STORAGE_KEY = 'ogden-agents.tab-token';
 /** The URL fragment parameter of a launch link: `/#c=<launch code>`. Never a token. */
 export const LAUNCH_CODE_FRAGMENT_PARAM = 'c';
 
-/** A launch code as the server issues it: 32 random bytes in base64url. */
-export const LAUNCH_CODE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
-
 /** The WebSocket subprotocol the app speaks; the only one the server ever echoes. */
 export const WS_PROTOCOL = 'ogden.v1';
 

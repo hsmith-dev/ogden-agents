@@ -106,9 +106,9 @@ function useCollapsedWorkspaces(): [ReadonlySet<string>, (wsId: string, collapse
 }
 
 /**
- * The model as shown: while the pointer is over the sidebar nothing moves
- * (rows update in place), and the new order applies once it leaves
- * (EXPERIENCE.md Interaction Rules).
+ * The model as shown: while the pointer is over the sidebar, or keyboard focus
+ * is inside it, nothing moves (rows update in place), and the new order applies
+ * once both have left (EXPERIENCE.md Interaction Rules).
  */
 function useHeldModel(model: SidebarModel, holding: boolean): SidebarModel {
   const shown = useRef<SidebarModel>(model);
@@ -119,6 +119,15 @@ function useHeldModel(model: SidebarModel, holding: boolean): SidebarModel {
   return held;
 }
 
+/** Whether focus arrived from the keyboard (the browser's :focus-visible heuristic). */
+function isKeyboardFocus(element: Element): boolean {
+  try {
+    return element.matches(':focus-visible');
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The sidebar's content. Below md it is mounted twice (the hidden column and
  * the sheet), so its ids come from useId to stay unique per instance.
@@ -127,7 +136,13 @@ function StatusSidebarBody() {
   const projectsId = useId();
   const { model: live, loading, unloaded, now } = useSidebarData();
   const [pointerInside, setPointerInside] = useState(false);
-  const model = useHeldModel(live, pointerInside);
+  const [focusInside, setFocusInside] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+  // A focused item that unmounts (a Needs you entry answered elsewhere) fires no blur: release the hold then.
+  useEffect(() => {
+    if (focusInside && !(contentRef.current?.contains(document.activeElement) ?? false)) setFocusInside(false);
+  }, [live, focusInside]);
+  const model = useHeldModel(live, pointerInside || focusInside);
   const [collapsed, setCollapsed] = useCollapsedWorkspaces();
   const [adding, setAdding] = useState(false);
   const navigate = useNavigate();
@@ -139,7 +154,17 @@ function StatusSidebarBody() {
         {/* The rail has no room for it; Add project stays below. */}
         <WorkspaceSwitcher className="ml-auto md:max-lg:hidden" />
       </SidebarHeader>
-      <SidebarContent onPointerEnter={() => setPointerInside(true)} onPointerLeave={() => setPointerInside(false)}>
+      <SidebarContent
+        ref={contentRef}
+        onPointerEnter={() => setPointerInside(true)}
+        onPointerLeave={() => setPointerInside(false)}
+        // Keyboard focus only (a clicked row keeps focus after the pointer leaves),
+        // and only in this subtree: React also bubbles focus out of portals (the dialog).
+        onFocus={(event) => setFocusInside(event.currentTarget.contains(event.target) && isKeyboardFocus(event.target))}
+        onBlur={(event) => {
+          if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setFocusInside(false);
+        }}
+      >
         <NeedsYouGroup
           items={model.needsYou}
           onOpenFirst={first === undefined ? undefined : () => void navigate({ to: '/w/$wsId/s/$sesId', params: { wsId: first.wsId, sesId: first.sesId } })}

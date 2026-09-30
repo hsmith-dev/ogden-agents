@@ -10,6 +10,7 @@ import {
   type Session,
   type Workspace,
 } from '@ogden-agents/shared';
+import { call, callNoContent, ChatApiError, postJson } from '@/api/http';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
 
 /**
@@ -20,42 +21,8 @@ import { tabAuth, type TabAuth } from '@/auth/tab-token';
 /** The only agent in this epic; the UI names it by its product name (EXPERIENCE.md Voice). */
 export const AGENT_NAME = 'Claude Code';
 
-const UNREACHABLE = "Couldn't reach Ogden Agents. Check that it is still running, then try again.";
-
-/** A refused request, with the server's plain message and its HTTP status. */
-export class ChatApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
-    super(message);
-    this.name = 'ChatApiError';
-  }
-}
-
-export async function call(auth: Pick<TabAuth, 'fetch'>, path: string, init: RequestInit, fallback: string): Promise<unknown> {
-  let response: Response;
-  try {
-    response = await auth.fetch(path, init);
-  } catch {
-    throw new ChatApiError(UNREACHABLE, 0);
-  }
-  if (response.ok) return response.json();
-  let message = `${fallback} (error ${response.status}).`;
-  try {
-    const body = (await response.json()) as { error?: { message?: unknown } };
-    if (typeof body.error?.message === 'string') message = body.error.message;
-  } catch {
-    // Not JSON: keep the fallback.
-  }
-  throw new ChatApiError(message, response.status);
-}
-
-export const postJson = (body: unknown): RequestInit => ({
-  method: 'POST',
-  headers: { 'content-type': 'application/json' },
-  body: JSON.stringify(body),
-});
+// The shared fetch-error helper, re-exported for this module's importers.
+export { call, ChatApiError, postJson };
 
 /** `POST /api/v1/workspaces`: the workspace for the folder at `path`. */
 export async function openWorkspace(path: string, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<Workspace> {
@@ -84,25 +51,6 @@ export async function sendMessage(wsId: string, sesId: string, text: string, aut
 // ---------------------------------------------------------------------------
 // Permission cards (story 2.6).
 // ---------------------------------------------------------------------------
-
-/** A call answered 204 No Content, or a refusal with the server's plain message. */
-async function callNoContent(auth: Pick<TabAuth, 'fetch'>, path: string, init: RequestInit, fallback: string): Promise<void> {
-  let response: Response;
-  try {
-    response = await auth.fetch(path, init);
-  } catch {
-    throw new ChatApiError(UNREACHABLE, 0);
-  }
-  if (response.ok) return;
-  let message = `${fallback} (error ${response.status}).`;
-  try {
-    const body = (await response.json()) as { error?: { message?: unknown } };
-    if (typeof body.error?.message === 'string') message = body.error.message;
-  } catch {
-    // Not JSON: keep the fallback.
-  }
-  throw new ChatApiError(message, response.status);
-}
 
 /** `POST /api/v1/workspaces/:wsId/sessions/:sesId/permissions/:requestId`: the user's answer on a card. */
 export async function decidePermission(

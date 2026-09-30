@@ -1,18 +1,6 @@
 import { API_ROUTES, ToolchainInstallResponse, ToolchainResponse, type ToolchainStatus } from '@ogden-agents/shared';
+import { errorMessage, UNREACHABLE } from '@/api/http';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
-
-/** Reads the `error.message` of a failed reply, or falls back to `fallback`. */
-async function errorMessage(response: Response, fallback: string): Promise<string> {
-  try {
-    const body = (await response.json()) as { error?: { message?: unknown } };
-    if (typeof body.error?.message === 'string') return body.error.message;
-  } catch {
-    // Not JSON: keep the plain message.
-  }
-  return fallback;
-}
-
-const UNREACHABLE = "Couldn't reach Ogden Agents. Check that it is still running, then try again.";
 
 /** `GET /api/v1/toolchain`: whether a usable uv exists (story 1.8). Sent with this tab's token. */
 export async function fetchUvStatus(auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<ToolchainStatus> {

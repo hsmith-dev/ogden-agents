@@ -1,6 +1,5 @@
 import { FolderPlus, Plus } from '@phosphor-icons/react';
 import { useState } from 'react';
-import { StartChatForm } from '@/chat/start-chat-form';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
 import { EmptyState, PageBody } from '@/ui/page';
@@ -9,8 +8,7 @@ import { AddProjectDialog } from '@/workspaces/add-project-dialog';
 /**
  * `/`: the workspace area with no workspace open (EXPERIENCE.md State
  * Patterns: No workspaces). Add project opens the folder browser; Start a
- * new project folder opens it with the cursor in the new folder's name. The
- * typed-path form stays until story 2.12's sweep.
+ * new project folder opens it with the cursor in the new folder's name.
  */
 export function HomePage() {
   const [adding, setAdding] = useState<'pick' | 'new' | undefined>(undefined);
@@ -36,7 +34,6 @@ export function HomePage() {
           }
         />
         <AddProjectDialog open={adding !== undefined} startNew={adding === 'new'} onOpenChange={(open) => setAdding(open ? adding : undefined)} />
-        <StartChatForm />
       </PageBody>
     </>
   );

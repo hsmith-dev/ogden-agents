@@ -6,45 +6,21 @@
  * line; Always allow lets the same command prefix run without a card until
  * it is undone from the record line. Each test runs its own server.
  */
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { makeDataDir, removeDataDir, ROOT, startServer, type RunningServer } from '../support.js';
-import { openConnected } from './tab.js';
+import { send, startChat, withChatServer } from './chat-server.js';
 
-const FAKE_AGENT = join(ROOT, 'tests', 'fixtures', 'fake-acp-agent.mjs');
-
-async function withChatServer(page: Page, body: (server: RunningServer) => Promise<void>) {
-  const dataDir = makeDataDir();
-  const repo = mkdtempSync(join(tmpdir(), 'ogden-agents-e2e-repo-'));
-  const server = await startServer(dataDir, 0, { claudeAdapterPath: FAKE_AGENT });
-  try {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await openConnected(page, '/', server.launchUrl);
-    await page.getByLabel('Project folder').fill(repo);
-    await page.getByRole('button', { name: 'Start a chat' }).click();
-    await expect(page).toHaveURL(/\/w\/ws_[0-9A-Z]{26}\/s\/ses_[0-9A-Z]{26}$/);
-    await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
-    await body(server);
-  } finally {
-    await server.close();
-    removeDataDir(dataDir);
-    removeDataDir(repo);
-  }
-}
-
-async function send(page: Page, text: string) {
-  const composer = page.getByRole('textbox', { name: 'Message Claude Code' });
-  await composer.fill(text);
-  await composer.press('Enter');
-}
+/** A server with a chat open in its project. */
+const withChat = (page: Page, body: () => Promise<void>) =>
+  withChatServer(page, async ({ repo }) => {
+    await startChat(page, repo);
+    await body();
+  });
 
 const replies = (page: Page) => page.getByTestId('message-agent');
 const card = (page: Page) => page.getByTestId('permission-card');
 
 test('nothing runs until Allow once; the card collapses to its record and focus returns to the composer', async ({ page }) => {
-  await withChatServer(page, async () => {
+  await withChat(page, async () => {
     await send(page, 'permission');
     await expect(card(page)).toBeVisible();
     await expect(card(page)).toContainText('Claude Code wants to run a command');
@@ -76,7 +52,7 @@ test('nothing runs until Allow once; the card collapses to its record and focus 
 });
 
 test('Deny records its reason on the record line, and the agent reports Denied', async ({ page }) => {
-  await withChatServer(page, async () => {
+  await withChat(page, async () => {
     await send(page, 'permission');
     await expect(card(page)).toBeVisible();
     await card(page).getByLabel('Reason for Deny (optional)').fill('Run only the unit tests');
@@ -102,7 +78,7 @@ test('Deny records its reason on the record line, and the agent reports Denied',
 });
 
 test('Always allow lets the same prefix run without a card, until it is undone from the record line', async ({ page }) => {
-  await withChatServer(page, async () => {
+  await withChat(page, async () => {
     await send(page, 'permission npm install stripe');
     await expect(card(page)).toBeVisible();
     await expect(card(page).getByTestId('permission-scope')).toContainText('npm install in ');
@@ -136,7 +112,7 @@ test('Always allow lets the same prefix run without a card, until it is undone f
 });
 
 test('a command led by an interpreter or wrapper offers only Allow once and Deny, with the reason', async ({ page }) => {
-  await withChatServer(page, async () => {
+  await withChat(page, async () => {
     await send(page, 'permission bash -c ls');
     await expect(card(page)).toBeVisible();
     await expect(card(page).getByRole('button', { name: 'Allow once' })).toBeVisible();

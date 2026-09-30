@@ -13,7 +13,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
-import { call } from '@/chat/chat-api';
+import { call } from '@/api/http';
 import { createFrameBatch } from './frame-batch';
 import { createPendingPages, type PageRequest, type PendingPages } from './pending-pages';
 import {

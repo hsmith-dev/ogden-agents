@@ -1,49 +1,30 @@
 /// <reference lib="dom" />
 /**
- * The tracer bullet in a real browser (story 2.2): a chat started in a folder
- * from the home page, a message sent from the session view at
+ * The tracer bullet in a real browser (story 2.2): a chat started in a
+ * project, a message sent from the session view at
  * `/w/:wsId/s/:sesId`, and the reply streaming in while the session goes
  * working, then idle. The server's agent is the real `acp-claude-code`
  * adapter talking ACP to the fake agent (`tests/fixtures/fake-acp-agent.mjs`),
  * so this is the same path a live Claude Code chat takes. Each test runs its
  * own server.
  */
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { makeDataDir, removeDataDir, ROOT, startServer, type RunningServer } from '../support.js';
-import { openConnected } from './tab.js';
+import { startChat, withChatServer } from './chat-server.js';
 
-const FAKE_AGENT = join(ROOT, 'tests', 'fixtures', 'fake-acp-agent.mjs');
-
-async function withChatServer(page: Page, body: (server: RunningServer, repo: string) => Promise<void>) {
-  const dataDir = makeDataDir();
-  const repo = mkdtempSync(join(tmpdir(), 'ogden-agents-e2e-repo-'));
-  // Slow chunks, so the browser sees the reply stream in and the session at work.
-  const server = await startServer(dataDir, 0, { claudeAdapterPath: FAKE_AGENT, extraAgentEnv: { FAKE_ACP_CHUNK_DELAY_MS: '400' } });
-  try {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await openConnected(page, '/', server.launchUrl);
-    await body(server, repo);
-  } finally {
-    await server.close();
-    removeDataDir(dataDir);
-    removeDataDir(repo);
-  }
-}
-
-async function startChat(page: Page, repo: string) {
-  await page.getByLabel('Project folder').fill(repo);
-  await page.getByRole('button', { name: 'Start a chat' }).click();
-  await expect(page).toHaveURL(/\/w\/ws_[0-9A-Z]{26}\/s\/ses_[0-9A-Z]{26}$/);
-  await expect(page.getByRole('heading', { name: 'Chat', level: 1 })).toBeVisible();
-  await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
-}
+/** A server with a chat open in its project, titled Chat. Slow chunks, so the browser sees the reply stream in and the session at work. */
+const withChat = (page: Page, body: () => Promise<void>) =>
+  withChatServer(
+    page,
+    async ({ repo }) => {
+      await startChat(page, repo);
+      await expect(page.getByRole('heading', { name: 'Chat', level: 1 })).toBeVisible();
+      await body();
+    },
+    { chunkDelayMs: 400 },
+  );
 
 test('a message sent from the session view streams its reply while the session goes working, then idle', async ({ page }) => {
-  await withChatServer(page, async (_server, repo) => {
-    await startChat(page, repo);
+  await withChat(page, async () => {
     const composer = page.getByRole('textbox', { name: 'Message Claude Code' });
     await expect(composer).toBeFocused();
     await composer.fill('Say hello in five words');
@@ -74,8 +55,7 @@ test('a message sent from the session view streams its reply while the session g
 });
 
 test('an agent that crashes mid-reply leaves the session in error with a plain message; the next message resumes the chat', async ({ page }) => {
-  await withChatServer(page, async (_server, repo) => {
-    await startChat(page, repo);
+  await withChat(page, async () => {
     const composer = page.getByRole('textbox', { name: 'Message Claude Code' });
     await composer.fill('crash');
     await composer.press('Enter');
@@ -91,14 +71,5 @@ test('an agent that crashes mid-reply leaves the session in error with a plain m
     const marker = page.getByRole('separator', { name: 'Resumed from history' });
     await expect(marker).toHaveText('Resumed from history');
     await expect(page.locator('[data-testid="resumed-marker"] + [data-testid="message-user"]')).toHaveText('Still there?');
-  });
-});
-
-test('a folder that does not exist is refused in plain words, on the home page', async ({ page }) => {
-  await withChatServer(page, async (_server, repo) => {
-    await page.getByLabel('Project folder').fill(join(repo, 'missing'));
-    await page.getByRole('button', { name: 'Start a chat' }).click();
-    await expect(page.getByTestId('start-chat-error')).toHaveText('There is no folder at that path on this computer.');
-    await expect(page).toHaveURL(/\/$/);
   });
 });

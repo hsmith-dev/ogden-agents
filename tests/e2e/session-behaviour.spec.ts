@@ -8,48 +8,28 @@
  * check-in line, with Stop, which leaves what was queued "Not sent" and puts
  * its text back in the composer. Each test runs its own server.
  */
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { makeDataDir, removeDataDir, ROOT, startServer, type RunningServer, type StartOptions } from '../support.js';
-import { openConnected } from './tab.js';
+import type { StartOptions } from '../support.js';
+import { composer, send, startChat, withChatServer } from './chat-server.js';
 
-const FAKE_AGENT = join(ROOT, 'tests', 'fixtures', 'fake-acp-agent.mjs');
 /** The web app's appearance key (`APPEARANCE_STORAGE_KEY` in packages/shared). */
 const APPEARANCE_KEY = 'ogden-agents.appearance';
 
-async function withChatServer(page: Page, body: (server: RunningServer) => Promise<void>, extra: StartOptions = {}) {
-  const dataDir = makeDataDir();
-  const repo = mkdtempSync(join(tmpdir(), 'ogden-agents-e2e-repo-'));
-  // Slow chunks, so a second message is sent while the first reply is still coming.
-  const server = await startServer(dataDir, 0, { claudeAdapterPath: FAKE_AGENT, extraAgentEnv: { FAKE_ACP_CHUNK_DELAY_MS: '400' }, ...extra });
-  try {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await openConnected(page, '/', server.launchUrl);
-    await page.getByLabel('Project folder').fill(repo);
-    await page.getByRole('button', { name: 'Start a chat' }).click();
-    await expect(page).toHaveURL(/\/w\/ws_[0-9A-Z]{26}\/s\/ses_[0-9A-Z]{26}$/);
-    await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
-    await body(server);
-  } finally {
-    await server.close();
-    removeDataDir(dataDir);
-    removeDataDir(repo);
-  }
-}
-
-const composer = (page: Page) => page.getByRole('textbox', { name: 'Message Claude Code' });
-
-async function send(page: Page, text: string) {
-  await composer(page).fill(text);
-  await composer(page).press('Enter');
-}
+/** A server with a chat open in its project. Slow chunks, so a second message is sent while the first reply is still coming. */
+const withChat = (page: Page, body: () => Promise<void>, extra: StartOptions = {}) =>
+  withChatServer(
+    page,
+    async ({ repo }) => {
+      await startChat(page, repo);
+      await body();
+    },
+    { chunkDelayMs: 400, extra },
+  );
 
 const state = (page: Page) => page.getByTestId('session-state');
 
 test('a multi-file change groups its rows in Comfortable and lists them in Compact; the edit expands to its hunk', async ({ page }) => {
-  await withChatServer(page, async () => {
+  await withChat(page, async () => {
     await send(page, 'tools');
     await expect(page.getByTestId('message-agent')).toContainText('Changed src/a.ts.');
     await expect(state(page)).toHaveAttribute('data-state', 'idle');
@@ -83,7 +63,7 @@ test('a multi-file change groups its rows in Comfortable and lists them in Compa
 });
 
 test('a message sent while the agent works shows Queued, then is sent after the reply', async ({ page }) => {
-  await withChatServer(page, async () => {
+  await withChat(page, async () => {
     await send(page, 'Say hello');
     await expect(state(page)).toHaveAttribute('data-state', 'working');
     await send(page, 'And then this');
@@ -103,7 +83,7 @@ test('a message sent while the agent works shows Queued, then is sent after the 
 });
 
 test('an error shows its reason with Try again, which sends the last message again', async ({ page }) => {
-  await withChatServer(page, async () => {
+  await withChat(page, async () => {
     await send(page, 'fail');
     await expect(state(page)).toHaveAttribute('data-state', 'error');
     const notice = page.getByTestId('session-error');
@@ -115,7 +95,7 @@ test('an error shows its reason with Try again, which sends the last message aga
 });
 
 test('a quiet agent gets the check-in line with Stop; Stop ends it, and what was queued is not sent and comes back to the composer', async ({ page }) => {
-  await withChatServer(
+  await withChat(
     page,
     async () => {
       await send(page, 'quiet');
@@ -145,7 +125,7 @@ test('a quiet agent gets the check-in line with Stop; Stop ends it, and what was
 });
 
 test('a quiet agent with a tool call running says what it waits on, and keeps waiting', async ({ page }) => {
-  await withChatServer(
+  await withChat(
     page,
     async () => {
       await send(page, 'quiet-tool');

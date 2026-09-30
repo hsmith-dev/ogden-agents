@@ -1,4 +1,5 @@
 import { API_ROUTES } from '@ogden-agents/shared';
+import { errorMessage, UNREACHABLE } from '@/api/http';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
 
 /**
@@ -20,18 +21,9 @@ export async function quitServer(auth: Pick<TabAuth, 'fetch'> = tabAuth): Promis
       body: JSON.stringify({ force: true }),
     });
   } catch {
-    throw new Error("Couldn't reach Ogden Agents. Check that it is still running, then try again.");
+    throw new Error(UNREACHABLE);
   }
-  if (response.status !== 202) {
-    let message = `Ogden Agents didn't quit (error ${response.status}). Try again.`;
-    try {
-      const body = (await response.json()) as { error?: { message?: unknown } };
-      if (typeof body.error?.message === 'string') message = body.error.message;
-    } catch {
-      // Not JSON: keep the plain message.
-    }
-    throw new Error(message);
-  }
+  if (response.status !== 202) throw new Error(await errorMessage(response, `Ogden Agents didn't quit (error ${response.status}). Try again.`));
 }
 
 /**
@@ -44,7 +36,7 @@ export async function requestNewTabLink(auth: Pick<TabAuth, 'fetch'> = tabAuth):
   try {
     response = await auth.fetch(API_ROUTES.launchCodes, { method: 'POST' });
   } catch {
-    throw new Error("Couldn't reach Ogden Agents. Check that it is still running, then try again.");
+    throw new Error(UNREACHABLE);
   }
   const body = (await response.json().catch(() => ({}))) as { launchUrl?: unknown };
   if (response.status !== 201 || typeof body.launchUrl !== 'string') {

@@ -124,3 +124,27 @@
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-use-an-api-key-instead-kept-in-the-keychain-plan.md`
   summary: The intermittent e2e failure logged for 2.13 is "a message sent while the agent works shows Queued, then is sent after the reply" (tests/e2e/session-behaviour.spec.ts), failing on an attribute check; seen once more during 9.2's runs.
   evidence: 2026-09-30, 9.2 full e2e run: 1 failure, then 4 runs of the file alone and 2 full runs all passed.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-refactor-sweep-plan.md`
+  summary: Resolved: the sidebar holds its order while keyboard focus is inside it, as under the pointer (2.11 F7). Focus from the keyboard only (`:focus-visible`), so a clicked row doesn't hold it after the pointer leaves; the new order applies once focus and pointer have both left.
+  evidence: `packages/web/src/shell/status-sidebar.tsx` `StatusSidebarBody`; `tests/e2e/sidebar.spec.ts` "while keyboard focus is in the sidebar".
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-refactor-sweep-plan.md`
+  summary: Install-scope scan cost (2.10b F5), still open: no full table scan (verified). `EXPLAIN QUERY PLAN` shows every `countAfter` and `subscribeScope` install-scope read as `SEARCH events USING INTEGER PRIMARY KEY` (a `seq` range), so 2.12 added no index and no migration 0004. The seq range still steps over other workspaces' rows after `afterSeq`; revisit (an index on `type`, or a partial index for the install scope) if it proves slow.
+  evidence: `packages/core/test/event-log.test.ts` "install-scope query plans (2.10b F5)".
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-refactor-sweep-plan.md`
+  summary: Three `killTree` copies call `taskkill` differently on Windows (bare name vs absolute path); make them one helper (story 9.6).
+  evidence: `packages/server/src/launcher.ts`, `packages/adapters/src/acp-claude-code/claude-code-agent.ts`, `packages/adapters/src/terminal-pty/index.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-refactor-sweep-plan.md`
+  summary: Split the source files over 600 lines (`core/src/chat.ts` 919, `shared/src/events.ts` 776, `server/src/start.ts` 656, `core/src/permissions.ts` 649, `adapters/.../claude-code-agent.ts` 620) when next changed; left out of the 2.12 sweep so it stays behaviour-free and clear of 9.2.
+  evidence: `wc -l` on the 2.12 baseline.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-refactor-sweep-plan.md`
+  summary: Move `readBody` and the id helpers out of `packages/server/src/chat-routes.ts` into a shared server module, so other route files stop reaching into the chat routes.
+  evidence: `packages/server/src/chat-routes.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-refactor-sweep-plan.md`
+  summary: `packages/web/src/agents/agent-setup-api.ts` keeps its own `callNoContent` and `UNREACHABLE` copy (9.2 owns the file); switch it to `@/api/http` once 9.2 lands.
+  evidence: `packages/web/src/api/http.ts` `callNoContent`; `agent-setup-api.ts` `callNoContent`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-refactor-sweep-plan.md`
+  summary: The "9.4" note in `packages/core/src/secret-store-port.ts` is left for 9.2/9.4 to update (9.2 owns the secrets files).
+  evidence: `packages/core/src/secret-store-port.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-refactor-sweep-plan.md`
+  summary: `tests/launcher.test.ts` "--foreground beside a background server…" timed out once at 5 s under a full run (passed 10/10 alone); likely load. Consider a longer timeout (story 2.13, the end-to-end suite).
+  evidence: 2.12 review, 2026-09-30 local full run.

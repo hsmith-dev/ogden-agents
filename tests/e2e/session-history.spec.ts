@@ -7,14 +7,9 @@
  * "Jump to latest (n)" counts them and takes them there. The test runs its
  * own server with the fake agent.
  */
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { makeDataDir, removeDataDir, ROOT, startServer } from '../support.js';
-import { landConnected, launchLink, openConnected } from './tab.js';
-
-const FAKE_AGENT = join(ROOT, 'tests', 'fixtures', 'fake-acp-agent.mjs');
+import { startChat, withChatServer } from './chat-server.js';
+import { landConnected, launchLink } from './tab.js';
 
 /** Messages seeded into the old chat: more than two pages of Show earlier (200 events each). */
 const OLD_MESSAGES = 450;
@@ -23,27 +18,12 @@ const NEWER_EVENTS = 300;
 
 const label = (i: number) => `Old message ${String(i).padStart(3, '0')}`;
 
-async function startChat(page: Page, origin: string, repo: string): Promise<{ wsId: string; sesId: string }> {
-  await page.goto(`${origin}/`);
-  await page.getByLabel('Project folder').fill(repo);
-  await page.getByRole('button', { name: 'Start a chat' }).click();
-  await expect(page).toHaveURL(/\/w\/ws_[0-9A-Z]{26}\/s\/ses_[0-9A-Z]{26}$/);
-  await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
-  const [, wsId, sesId] = /\/w\/(ws_[0-9A-Z]{26})\/s\/(ses_[0-9A-Z]{26})$/.exec(page.url())!;
-  return { wsId: wsId!, sesId: sesId! };
-}
-
 const messageTexts = (page: Page) => page.getByTestId('transcript').locator('[data-testid="message-user"], [data-testid="message-agent"]').allInnerTexts();
 
 test('an old chat opens with its latest page; Show earlier pages the rest in order, without a reload; Jump to latest counts new items', async ({ page, context }) => {
-  const dataDir = makeDataDir();
-  const repo = mkdtempSync(join(tmpdir(), 'ogden-agents-e2e-history-'));
-  const server = await startServer(dataDir, 0, { claudeAdapterPath: FAKE_AGENT });
-  try {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await openConnected(page, '/', server.launchUrl);
-    const old = await startChat(page, server.url, repo);
-    const newer = await startChat(page, server.url, repo);
+  await withChatServer(page, async ({ server, dataDir, repo }) => {
+    const old = await startChat(page, repo);
+    const newer = await startChat(page, repo);
     expect(newer.wsId).toBe(old.wsId);
 
     // The old chat's messages, then enough of the newer chat's events to push them out of the window.
@@ -115,9 +95,5 @@ test('an old chat opens with its latest page; Show earlier pages the rest in ord
     await expect(jump).toHaveCount(0);
     await expect(tab.getByTestId('message-agent').last()).toBeInViewport();
     await expect.poll(() => body.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(50);
-  } finally {
-    await server.close();
-    removeDataDir(dataDir);
-    removeDataDir(repo);
-  }
+  });
 });

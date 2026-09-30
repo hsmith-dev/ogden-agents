@@ -107,6 +107,16 @@ test('Add project opens a folder through the browser, the same folder twice open
   });
 });
 
+test('Add project, then New chat: the app opens the new chat with the composer focused', async ({ page }) => {
+  await withServer(page, async () => {
+    await addAlpha(page);
+    await page.getByTestId('new-chat').click();
+    await expect(page).toHaveURL(/\/w\/ws_[0-9A-Z]{26}\/s\/ses_[0-9A-Z]{26}$/);
+    await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
+    await expect(page.getByRole('textbox', { name: 'Message Claude Code' })).toBeFocused();
+  });
+});
+
 test('the switcher moves between projects, and Delete history is refused while a chat works, then deletes only that project’s chats', async ({ page, browser }) => {
   await withServer(page, async (server, home, dataDir) => {
     const alpha = await addAlpha(page);

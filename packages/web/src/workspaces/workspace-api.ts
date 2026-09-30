@@ -14,7 +14,7 @@ import {
 import { useQueries, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef } from 'react';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
-import { call, postJson } from '@/chat/chat-api';
+import { call, postJson } from '@/api/http';
 import { useEventStream } from '@/events/event-stream';
 
 /**
@@ -183,9 +183,4 @@ export function useAllSessionsStatus(): AllSessions {
     [workspaces.data, lists],
   );
   return { sessions, unloaded, loading: workspaces.data === undefined };
-}
-
-/** Every workspace's sessions, with their live states (see {@link useAllSessionsStatus}). */
-export function useAllSessions(): Session[] {
-  return useAllSessionsStatus().sessions;
 }

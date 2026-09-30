@@ -11,7 +11,7 @@
  *
  * Tool calls become `session.tool_call` and `session.tool_call_updated`
  * events, each carrying the whole call as it stands. Permission requests go
- * to {@link Permissions} (the declining stub until 2.6).
+ * to {@link Permissions}.
  *
  * The agent's own session id is stored as the adapter ref
  * {@link AGENT_SESSION_REF} (AD-9), never in an event. When a chat that has

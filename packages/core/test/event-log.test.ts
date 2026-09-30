@@ -1,5 +1,7 @@
 import { CoreEvent, SERVER_STREAM, type NewCoreEvent, type SessionId, type WorkspaceId } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
+import { openDatabase } from '../src/db/database.js';
+import { createEventLog } from '../src/event-log.js';
 import { EventValidationError, NotFoundError, type Core } from '../src/index.js';
 import { openTestCore, tempDir } from './helpers.js';
 
@@ -459,6 +461,36 @@ describe('countAfter (story 2.10)', () => {
     expect(core.events.countAfter('install', 0, 100)).toBe(4);
     expect(() => core.events.countAfter('install', -1, 10)).toThrow(RangeError);
     expect(() => core.events.countAfter('install', 0, 0)).toThrow(RangeError);
+  });
+});
+
+describe('install-scope query plans (2.10b F5)', () => {
+  it('countAfter and subscribeScope never scan the events table for the install scope', () => {
+    const db = openDatabase(tempDir());
+    try {
+      // Records every SELECT on events the log prepares, exactly as Drizzle writes it.
+      const selects: string[] = [];
+      const prepare = db.sqlite.prepare.bind(db.sqlite);
+      db.sqlite.prepare = ((source: string) => {
+        if (/^select\b/i.test(source) && /from "events"/.test(source)) selects.push(source);
+        return prepare(source);
+      }) as typeof db.sqlite.prepare;
+      const log = createEventLog(db);
+      log.countAfter('install', 0, 10);
+      log.subscribeScope('install', { window: 5 }, () => {}).unsubscribe();
+      log.subscribeScope('install', { afterSeq: 0 }, () => {}).unsubscribe();
+      db.sqlite.prepare = prepare;
+
+      expect(selects.length).toBeGreaterThanOrEqual(4);
+      for (const source of selects) {
+        // Placeholder values don't change the plan's shape; the table is empty and unanalyzed.
+        const params = Array.from(source.matchAll(/\?/g), () => 0);
+        const plan = db.sqlite.prepare<unknown[], { detail: string }>(`EXPLAIN QUERY PLAN ${source}`).all(...params);
+        expect(plan.map((row) => row.detail).join('; '), source).not.toMatch(/\bSCAN (TABLE )?events\b/);
+      }
+    } finally {
+      db.close();
+    }
   });
 });
 

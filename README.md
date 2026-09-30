@@ -76,11 +76,18 @@ pnpm e2e         # builds, then Playwright (Chromium): shell layout at 1440/900/
 pnpm build       # tsdown bundles packages/server, Vite builds packages/web, both copied into dist/
 pnpm run pack    # builds, then writes the publishable tarball ogden-agents-<version>.tgz
 pnpm smoke       # installs that tarball with npx in an empty temp dir and checks it serves the page
+pnpm e2e:installed  # installs that tarball the same way and drives Chromium through it (see below)
+```
+
+**End-to-end against the installed package.** `pnpm e2e:installed` tests what a user gets, not the workspace. It installs `ogden-agents-<version>.tgz` (run `pnpm run pack` first; set `E2E_INSTALLED_TARBALL` to use another tarball) with npx in an empty temp folder. It starts the package through its own `ogden` launcher in background mode, with a temp data folder. It then drives Chromium through epic 1's journey: launch, the launch link, the shell, theme and density, Settings > Tools (status only, nothing is downloaded), New tab, a bookmark-style tab, and Quit. Before the journey it runs the security gate's negative checks: no tab token, a foreign Origin or Host, and the launcher endpoint without its token. It also runs them through a test-only proxy that takes the gate out of the way, where every check must fail, so the checks really detect a weakened gate. At the end no server process is left and the temp folders are removed. Screenshots and traces of failures go to `test-results/e2e-installed/`. It needs Chromium for Playwright (`pnpm exec playwright install chromium`).
+
+```sh
+pnpm run pack && pnpm e2e:installed
 ```
 
 The root `ogden-agents` package is the only publishable artifact. `pnpm build` writes a self-contained `dist/` (`dist/server.js`, the server with every `@ogden-agents/*` package bundled in, and `dist/web/`, the UI), and `bin/ogden.js` loads it by relative path. Third-party runtime dependencies are declared in the root `dependencies`; `tests/packaging.test.ts` fails if the bundle imports anything undeclared or the tarball picks up workspace sources.
 
-CI runs typecheck, tests, pack and the clean-install smoke test on macOS, Windows and Linux, each on Node 24 and 26, plus the Playwright browser tests on Linux Chromium.
+CI runs typecheck, tests, pack and the clean-install smoke test on macOS, Windows and Linux, each on Node 24 and 26, plus the Playwright browser tests on Linux Chromium, and the end-to-end suite against the installed package on macOS, Windows and Linux (Node 24, Chromium).
 
 Releases are published to npm only by GitHub Actions, from a version tag on `main`, after the same CI passes; see [RELEASING.md](https://github.com/hsmith-dev/ogden-agents/blob/main/RELEASING.md).
 

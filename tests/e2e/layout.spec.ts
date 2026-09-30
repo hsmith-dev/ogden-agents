@@ -8,11 +8,7 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 import { makeDataDir, removeDataDir, startServer } from '../support.js';
-import { openConnected, sharedUrl as url } from './tab.js';
-
-/** DESIGN.md background tokens as the browser reports them. */
-const LIGHT_BG = 'rgb(246, 247, 245)';
-const DARK_BG = 'rgb(15, 18, 16)';
+import { DARK_BG, LIGHT_BG, openConnected, sharedUrl as url, sidebarOf as sidebarColumn } from './tab.js';
 
 async function expectNoHorizontalOverflow(page: Page) {
   const { scrollWidth, clientWidth } = await page.evaluate(() => ({
@@ -23,9 +19,6 @@ async function expectNoHorizontalOverflow(page: Page) {
 }
 
 const background = (page: Page) => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-
-/** The sidebar column (md and up), not its sheet copy. */
-const sidebarColumn = (page: Page) => page.locator('aside[data-slot="sidebar"]');
 
 for (const path of ['/', '/settings/appearance']) {
   test.describe(`layout of ${path}`, () => {

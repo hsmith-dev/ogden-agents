@@ -7,6 +7,32 @@
 import { expect, type Page } from '@playwright/test';
 import { launchLink as handshakeLink } from '../support.js';
 
+/** Where the page's boot script keeps this tab's token (sessionStorage). */
+export const TOKEN_KEY = 'ogden-agents.tab-token';
+
+/** DESIGN.md background tokens as the browser reports them. */
+export const LIGHT_BG = 'rgb(246, 247, 245)';
+export const DARK_BG = 'rgb(15, 18, 16)';
+
+/** The sidebar column (md and up), not its sheet copy. */
+export const sidebarOf = (page: Page) => page.locator('aside[data-slot="sidebar"]');
+
+/** This tab's stored token, or null. */
+export const storedToken = (page: Page) => page.evaluate((key) => sessionStorage.getItem(key), TOKEN_KEY);
+
+/** The sidebar's server status says connected. */
+export const expectConnected = (page: Page) => expect(sidebarOf(page).getByTestId('server-status')).toHaveAttribute('data-status', 'connected');
+
+/**
+ * Opens a launch link (`/#c=<code>`) in `page` and waits until it lands on `/`
+ * with the token the boot script's code exchange stored.
+ */
+export async function landConnected(page: Page, launch: string): Promise<void> {
+  await page.goto(launch);
+  await expect(page).toHaveURL(`${new URL(launch).origin}/`);
+  await expect.poll(() => storedToken(page)).toMatch(/^[A-Za-z0-9_-]{43}$/);
+}
+
 /** The shared server's base URL (set by global-setup.ts). */
 export function sharedUrl(): string {
   const value = process.env.E2E_URL;
@@ -27,10 +53,6 @@ export async function launchLink(url = sharedUrl(), dataDir = process.env.E2E_DA
  */
 export async function openConnected(page: Page, path = '/', link?: string): Promise<void> {
   const launch = link ?? (await launchLink());
-  const base = new URL(launch).origin;
-  await page.goto(launch);
-  await expect(page).toHaveURL(`${base}/`);
-  // The boot script's code exchange has stored this tab's token.
-  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('ogden-agents.tab-token'))).toMatch(/^[A-Za-z0-9_-]{43}$/);
-  if (path !== '/') await page.goto(base + path);
+  await landConnected(page, launch);
+  if (path !== '/') await page.goto(new URL(launch).origin + path);
 }

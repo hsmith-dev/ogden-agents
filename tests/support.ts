@@ -43,15 +43,9 @@ export async function startServer(dataDir: string, port = 0, extra: StartOptions
   return start({ port, open: false, dataDir, webRoot: WEB_ROOT, log: createLogger(() => {}), ...extra, launch: true });
 }
 
-/** Whether a process with this pid exists. */
-export function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
-  }
-}
+// Shared with the plain-Node install scripts: whether a process with a pid
+// exists, and the running server's port file (`server.json`) in a data folder.
+export { isAlive, readPortFile } from '../scripts/installed-package.mjs';
 
 /** Polls `predicate` until it holds, or throws after `timeoutMs`. */
 export async function waitUntil(predicate: () => boolean, what: string, timeoutMs = 10_000): Promise<void> {
@@ -62,13 +56,9 @@ export async function waitUntil(predicate: () => boolean, what: string, timeoutM
   }
 }
 
-/** The running server's port file (`server.json`) in `dataDir`, or undefined. */
-export function readPortFile(dataDir: string): { port: number; pid: number; version: string } | undefined {
-  try {
-    return JSON.parse(readFileSync(join(dataDir, 'server.json'), 'utf8')) as { port: number; pid: number; version: string };
-  } catch {
-    return undefined;
-  }
+/** The launcher token the running server wrote to `launcher.token` in `dataDir`. */
+export function readLauncherToken(dataDir: string): string {
+  return readFileSync(join(dataDir, 'launcher.token'), 'utf8').trim();
 }
 
 /**
@@ -77,7 +67,7 @@ export function readPortFile(dataDir: string): { port: number; pid: number; vers
  * exactly as `npx ogden-agents` asks for one.
  */
 export async function launchLink(url: string, dataDir: string): Promise<string> {
-  const token = readFileSync(join(dataDir, 'launcher.token'), 'utf8').trim();
+  const token = readLauncherToken(dataDir);
   const response = await fetch(`${url}/launcher/hello?launch=1`, { headers: { 'x-ogden-launcher-token': token } });
   if (!response.ok) throw new Error(`the launcher handshake returned ${response.status}`);
   return ((await response.json()) as { launchUrl: string }).launchUrl;

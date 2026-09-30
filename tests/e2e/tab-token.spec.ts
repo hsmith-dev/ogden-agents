@@ -7,16 +7,9 @@
  * token; a bookmark, a wrong token or an old cookie shows "Open Ogden
  * Agents"; and the Content-Security-Policy is in force with no inline script.
  */
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { API_ROUTES } from '../support.js';
-import { launchLink, openConnected, sharedUrl as url } from './tab.js';
-
-const TOKEN_KEY = 'ogden-agents.tab-token';
-
-const connected = (page: Page) =>
-  expect(page.locator('aside[data-slot="sidebar"]').getByTestId('server-status')).toHaveAttribute('data-status', 'connected');
-
-const storedToken = (page: Page) => page.evaluate((key) => sessionStorage.getItem(key), TOKEN_KEY);
+import { expectConnected as connected, launchLink, openConnected, sharedUrl as url, storedToken, TOKEN_KEY } from './tab.js';
 
 test.use({ viewport: { width: 1440, height: 900 } });
 

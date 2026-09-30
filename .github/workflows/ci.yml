@@ -127,3 +127,49 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 7
+
+  # Epic 1's journey in Chromium against the installed package (story 1.12):
+  # the packed tarball installed with npx in an empty folder and started by
+  # its own `ogden` launcher in background mode, plus the security gate's
+  # negative checks and the proof that they fail without the gate. No agent
+  # and no uv download; the suite quits the server and leaves no process.
+  e2e-installed:
+    name: End-to-end, installed (${{ matrix.os }}, Chromium)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Builds dist/, then writes ogden-agents-<version>.tgz, which the suite installs.
+      - name: Pack
+        run: pnpm run pack
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: End-to-end suite against the installed package
+        run: pnpm e2e:installed
+
+      - name: Upload screenshots and traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-installed-${{ matrix.os }}
+          path: |
+            playwright-report/e2e-installed/
+            test-results/e2e-installed/
+          retention-days: 7

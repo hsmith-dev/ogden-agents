@@ -3,13 +3,13 @@ title: 'End-to-end suite'
 type: 'feature'
 ticket: '12'
 created: '2026-09-30'
-status: 'draft'
-baseline_revision: ''
+status: 'built'
+baseline_revision: 'fa6041055acb44e0b19b48f02a0684f24d4c27ce'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md'
@@ -55,7 +55,7 @@ context:
 
 ## Code Map
 
-Baseline: set when the story starts (after 1.11).
+Baseline: worktree `../ogden-agents-wt-1.12`, branch `story/1.12-end-to-end-suite`, on top of 1.11 (`fa60410`). API routes are under `/api/v1` (`packages/shared/src/api.ts`); the launch flow is `/#c=<code>` exchanged at `API_ROUTES.tabExchange` (story 2.1); `tests/support.ts` holds shared helpers; story 2.2 is built in parallel and touches core, adapters, server and web but not `ci.yml` or `tests/e2e-installed/`.
 
 - `scripts/smoke-installed.mjs` -- installs the tarball with `npx` in an empty folder; reuse its install and cleanup logic.
 - `tests/e2e/` -- the Linux Playwright suite against the workspace build (`global-setup.ts`, `server.ts`); the new suite lives beside it (e.g. `tests/e2e-installed/`) with its own config.
@@ -72,10 +72,24 @@ Baseline: set when the story starts (after 1.11).
 - Given CI, when the suite runs on macOS, Windows and Linux, then the journey and gate checks pass, and the bypass fixture proves the gate checks fail without the gate.
 
 ## Implementation Notes
+- Orchestrator audit (macOS): matrix rows Journey, Gate, Bypass and Cleanup are covered by `tests/e2e-installed/{journey,gate,bypass}.spec.ts` and the global teardown; 15/15 pass against the installed tarball, with no process left. The bypass is a test-only proxy (the plan allowed a fixture). Windows and Linux are pending CI.
 
 ## Plan Change Log
 
 ## Review Triage Log
+
+### Pass 1 (quick lens) — 2026-09-30
+
+Counts: medium 2, low 3; 1 settled by CI.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---|---|---|---|
+| 1 | The bypass proves only the first assertion of each grouped check (about 6 of 16) | medium | patch | 14 independent named cases; the gate spec needs each refusal and the bypass spec needs each success. |
+| 2 | The proxy dropped `ogden.v1` when the client offered no subprotocol, so that case was never bypassed | low | patch | Always forwards `ogden.v1, ogden.auth.<token>`. |
+| 3 | Any non-401/403 status counted as "gate open" | medium | patch | Exact success statuses (101/201/204/200); a refusal or any other status fails as a broken fixture. |
+| 4 | Not yet run on Windows or Linux | — | CI | Settled by this PR's `e2e-installed` 3-OS job. |
+| 5 | The second launch relied on npx reusing the install beside the running server (Windows locked-addon risk) | low | patch | `runInstalledLauncher` runs the installed bin by absolute path. |
+| 6 | Duplicated test helpers | low | patch | Shared via `tests/support.ts` and `tests/e2e/tab.ts`. |
 
 ## Verification
 

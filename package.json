@@ -30,6 +30,7 @@
     "start": "pnpm run build && node bin/ogden.js",
     "test": "pnpm run build && vitest run",
     "e2e": "pnpm run build && playwright test",
+    "e2e:installed": "playwright test --config tests/e2e-installed/playwright.config.ts",
     "typecheck": "pnpm -r --filter \"./packages/**\" run typecheck && tsc -p tsconfig.json",
     "pack": "pnpm run build && pnpm pack",
     "smoke": "node scripts/smoke-installed.mjs"

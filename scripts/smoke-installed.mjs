@@ -62,6 +62,14 @@ if (tarball !== undefined && !existsSync(tarball)) {
   process.exit(1);
 }
 
+/**
+ * Hides one-time launch codes: they are secrets (AD-15), and CI logs are kept.
+ * @param {string} text
+ */
+function redact(text) {
+  return text.replace(/#c=[A-Za-z0-9_-]+/g, '#c=<code>');
+}
+
 /** Prints the launcher's (and npx's) output as it arrives, line by line. */
 function echoLines() {
   let partial = '';
@@ -69,8 +77,7 @@ function echoLines() {
   return (chunk) => {
     const lines = (partial + chunk).split(/\r?\n/);
     partial = lines.pop() ?? '';
-    // The one-time code is spent within seconds, but keep it out of CI logs anyway.
-    for (const line of lines) if (line.trim() !== '') console.log(`  | ${line.replace(/#c=[A-Za-z0-9_-]+/g, '#c=<code>')}`);
+    for (const line of lines) if (line.trim() !== '') console.log(`  | ${redact(line)}`);
   };
 }
 
@@ -232,7 +239,7 @@ try {
 if (failure !== undefined) {
   console.error(`smoke: FAILED: ${failure instanceof Error ? failure.message : String(failure)}`);
   console.error('--- captured output ---');
-  console.error(launcher.output() || '(none)');
+  console.error(redact(launcher.output()) || '(none)');
   process.exit(1);
 }
 console.log('smoke: OK');

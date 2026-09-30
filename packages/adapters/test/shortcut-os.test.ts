@@ -349,7 +349,7 @@ describe('Windows: Ogden Agents.lnk in the Start Menu', () => {
     await shortcut.add();
     await shortcut.remove();
     expect(existsSync(link)).toBe(false);
-  });
+  }, 60_000); // PowerShell starts cold several times on CI runners.
 });
 
 describe('Linux: ogden-agents.desktop', () => {

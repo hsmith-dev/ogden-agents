@@ -16,7 +16,6 @@ import {
 import { SERVER_STREAM, ServerMessage } from '@ogden-agents/shared';
 import openBrowser from 'open';
 import { WebSocketServer } from 'ws';
-import pkg from '../package.json' with { type: 'json' };
 import { createApp, type ServerControl } from './app.js';
 import { chooseWebSocketProtocol, createLaunchCodes, createTabTokens, retireLegacyAuthKey, type Clock, type TabTokens } from './auth.js';
 import { tightenMode } from './file-mode.js';
@@ -24,6 +23,7 @@ import { createGate, launchUrl as launchUrlFor } from './gate.js';
 import { acquireInstanceLock, type InstanceLock } from './instance-lock.js';
 import { createLauncherToken, type LauncherToken } from './launcher-token.js';
 import { createLogger, createRotatingFileWriter, LOG_DIR, teeWriters, type Logger } from './log.js';
+import { VERSION } from './version.js';
 
 /** The only interface the server ever binds (AD-15). */
 export const HOST = '127.0.0.1';
@@ -212,7 +212,7 @@ async function listenAndAnnounce({
   // The gate refuses everything until the port is known, and the handshake until the token exists.
   let boundPort: number | undefined;
   let launcherToken: LauncherToken | undefined;
-  const version = pkg.version;
+  const version = VERSION;
   /** Set once the server is running; the routes only run after that. */
   let lifecycle: { issueLaunchUrl(origin?: string): string; stop(reason: 'quit' | 'restart'): void } | undefined;
   const control: ServerControl = {

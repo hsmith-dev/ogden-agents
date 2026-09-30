@@ -19,13 +19,13 @@ import { join } from 'node:path';
 // The data-folder module alone, not core's index: the launcher must not load
 // the database driver (`better-sqlite3`) just to find or start a server.
 import { ensureDataDir, DATA_DIR_ENV, PORT_FILE } from '@ogden-agents/core/data-dir';
-import pkg from '../package.json' with { type: 'json' };
 import { EXIT_ALREADY_RUNNING, isPidAlive } from './instance-lock.js';
 import { LAUNCHER_TOKEN_FILE, LAUNCHER_TOKEN_HEADER, readLauncherToken } from './launcher-token.js';
 import { createLogger, createRotatingFileWriter, LOG_DIR, type Logger } from './log.js';
+import { VERSION } from './version.js';
 
 /** The launcher's own version: the version it would start. */
-export const LAUNCHER_VERSION: string = pkg.version;
+export const LAUNCHER_VERSION: string = VERSION;
 /** How long a new server has to answer the handshake. */
 export const START_TIMEOUT_MS = 20_000;
 /** How long an idle older server has to stop after agreeing to restart. */

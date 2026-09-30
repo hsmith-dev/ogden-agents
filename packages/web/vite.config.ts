@@ -8,7 +8,7 @@ import { APPEARANCE_STORAGE_KEY } from '../shared/src/appearance.ts';
 import { API_ROUTES } from '../shared/src/api.ts';
 import { LAUNCH_CODE_FRAGMENT_PARAM, TAB_TOKEN_STORAGE_KEY } from '../shared/src/tab-token.ts';
 import { defineConfig, type Plugin } from 'vite';
-import pkg from './package.json' with { type: 'json' };
+import rootPkg from '../../package.json' with { type: 'json' };
 
 /** The published path of the boot script that index.html loads. */
 const BOOT_PATH = '/boot.js';
@@ -51,9 +51,9 @@ function bootFile(): Plugin {
 export default defineConfig({
   plugins: [bootFile(), react(), tailwindcss()],
   // The version this UI was built as, compared with the server's `server.started`
-  // version for the reload banner (AD-20). tests/packaging.test.ts keeps the
-  // root, server and web versions equal.
-  define: { __OGDEN_AGENTS_VERSION__: JSON.stringify(pkg.version) },
+  // version for the reload banner (AD-20): the root package's, the same
+  // build-time constant the server and launcher bundles carry.
+  define: { __OGDEN_AGENTS_VERSION__: JSON.stringify(rootPkg.version) },
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },

@@ -1,4 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { defineConfig, type UserConfig } from 'tsdown';
+
+/** The published package's version, the one build-time constant every part reads (`src/version.ts`). */
+const { version } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string };
 
 /** What both bundles share: ESM for Node 24, into `dist/` beside each other. */
 const common = {
@@ -10,6 +14,7 @@ const common = {
   clean: true,
   dts: false,
   fixedExtension: false,
+  define: { __OGDEN_AGENTS_VERSION__: JSON.stringify(version) },
   deps: {
     // Every third-party import stays external and loads from node_modules,
     // whichever workspace package imports it (the root package must declare

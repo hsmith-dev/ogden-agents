@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 const ROOT = join(import.meta.dirname, '..');
 const BIN = join(ROOT, 'bin', 'ogden.js');
 const FAKE_SERVER = join(import.meta.dirname, 'fixtures', 'fake-server.mjs');
-const { version: VERSION } = JSON.parse(readFileSync(join(ROOT, 'packages', 'server', 'package.json'), 'utf8')) as { version: string };
+const { version: VERSION } = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { version: string };
 
 const children: ChildProcess[] = [];
 const dataDirs: string[] = [];

@@ -229,6 +229,27 @@ describe('packaging', () => {
     expect(versionOf('packages/web/package.json')).toBe(root);
   });
 
+  it('the server, launcher and UI bundles carry the root version as one build-time constant, reading no package.json', () => {
+    const { version } = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { version: string };
+    const bundles = [...loadServerBundle(), ...readdirSync(join(DIST, 'web', 'assets')).filter((n) => n.endsWith('.js')).map((name) => ({
+      path: `dist/web/assets/${name}`,
+      source: readFileSync(join(DIST, 'web', 'assets', name), 'utf8'),
+    }))];
+    for (const { path, source } of bundles) expect(source, path).not.toContain('__OGDEN_AGENTS_VERSION__');
+    // No package reads its own manifest's version at run time any more.
+    for (const dir of ['server', 'web']) {
+      const src = join(ROOT, 'packages', dir, 'src');
+      for (const file of readdirSync(src, { recursive: true, encoding: 'utf8' }).filter((f) => /\.tsx?$/.test(f))) {
+        expect(readFileSync(join(src, file), 'utf8'), `packages/${dir}/src/${file}`).not.toMatch(/from\s*['"][^'"]*package\.json['"]/);
+      }
+    }
+    const carrying = bundles.filter(({ source }) => source.includes(JSON.stringify(version)) || source.includes(`'${version}'`) || source.includes(`\`${version}\``));
+    const paths = carrying.map((b) => b.path);
+    expect(paths).toContain('dist/launcher.js');
+    expect(paths.some((p) => p.startsWith('dist/web/assets/'))).toBe(true);
+    expect(paths.some((p) => p !== 'dist/launcher.js' && !p.startsWith('dist/web/'))).toBe(true);
+  });
+
   it('only the root package is publishable; every workspace package stays private', () => {
     const manifest = (path: string) => JSON.parse(readFileSync(join(ROOT, path), 'utf8')) as { private?: boolean };
     expect(manifest('package.json').private).not.toBe(true);

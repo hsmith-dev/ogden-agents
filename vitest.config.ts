@@ -1,7 +1,13 @@
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
+const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version: string };
+
 export default defineConfig({
+  // The build-time version constant (packages/server/src/version.ts), as the
+  // server's tsdown build and the UI's Vite build define it.
+  define: { __OGDEN_AGENTS_VERSION__: JSON.stringify(version) },
   resolve: {
     // packages/web's `@/` alias, for its component tests.
     alias: { '@': fileURLToPath(new URL('./packages/web/src', import.meta.url)) },

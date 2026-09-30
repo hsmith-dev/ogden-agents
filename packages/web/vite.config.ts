@@ -60,7 +60,5 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
-    // One local bundle served from 127.0.0.1; there is no network cost to split for.
-    chunkSizeWarningLimit: 1000,
   },
 });

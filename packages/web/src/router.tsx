@@ -1,14 +1,16 @@
-import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router';
-import { AppearancePage } from './routes/appearance-page';
+import { createRootRoute, createRoute, createRouter, lazyRouteComponent, redirect } from '@tanstack/react-router';
 import { HomePage } from './routes/home-page';
 import { NotFoundPage } from './routes/not-found-page';
-import { ToolsPage } from './routes/tools-page';
 import { AppShell } from './shell/app-shell';
 
 /*
  * Code-based routes (EXPERIENCE.md Information Architecture). The launch page
  * is not a route: on any URL, a tab without a valid token shows the shell's
  * launch state (AppShell, story 2.1), so a bookmark keeps its path.
+ *
+ * The first load carries only the shell and home; every other page is its own
+ * chunk, loaded on navigation (or on hover or focus of a link to it, with
+ * `defaultPreload: 'intent'`).
  */
 const rootRoute = createRootRoute({ component: AppShell, notFoundComponent: NotFoundPage });
 
@@ -22,9 +24,17 @@ const settingsRoute = createRoute({
   },
 });
 
-const appearanceRoute = createRoute({ getParentRoute: () => settingsRoute, path: '/appearance', component: AppearancePage });
+const appearanceRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/appearance',
+  component: lazyRouteComponent(() => import('./routes/appearance-page'), 'AppearancePage'),
+});
 
-const toolsRoute = createRoute({ getParentRoute: () => settingsRoute, path: '/tools', component: ToolsPage });
+const toolsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/tools',
+  component: lazyRouteComponent(() => import('./routes/tools-page'), 'ToolsPage'),
+});
 
 const routeTree = rootRoute.addChildren([homeRoute, settingsRoute.addChildren([appearanceRoute, toolsRoute])]);
 

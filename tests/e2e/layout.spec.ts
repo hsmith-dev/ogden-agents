@@ -154,6 +154,24 @@ test('Settings in the sidebar footer opens Appearance', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Appearance', level: 1 })).toBeVisible();
 });
 
+test('first load carries only the shell and home; a settings page loads its own chunk on navigation', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const scripts: string[] = [];
+  page.on('request', (request) => {
+    if (request.resourceType() === 'script') scripts.push(new URL(request.url()).pathname);
+  });
+  await openConnected(page);
+  await expect(page.getByRole('heading', { name: 'Add a project to get started.' })).toBeVisible();
+  const lazyPage = /\/assets\/(appearance|tools)-page-[^/]+\.js$/;
+  expect(scripts.some((path) => path.startsWith('/assets/'))).toBe(true);
+  expect(scripts.filter((path) => lazyPage.test(path))).toEqual([]);
+
+  await sidebarColumn(page).getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('menuitem', { name: 'Appearance' }).click();
+  await expect(page.getByRole('heading', { name: 'Appearance', level: 1 })).toBeVisible();
+  expect(scripts.some((path) => /\/assets\/appearance-page-[^/]+\.js$/.test(path))).toBe(true);
+});
+
 test('theme: follows the system, the override applies at once and persists across reloads', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ colorScheme: 'dark' });

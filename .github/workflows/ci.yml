@@ -38,6 +38,21 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      # Builds the bmad-loop wheel when checking the vendored forks.
+      # No uv.lock here, so nothing to key a cache on.
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: false
+
+      # Re-derives vendor/ from forks.lock (fork tarballs at the locked commits,
+      # a rebuilt bmad-loop wheel) and fails naming any file that differs
+      # (AD-13). Hashes are LF-normalized, so it passes on Windows checkouts too.
+      - name: Check vendored forks
+        run: node scripts/vendor-forks.mjs --check
+        env:
+          # Tag lookups go through the GitHub API; the token lifts the anonymous rate limit.
+          GITHUB_TOKEN: ${{ github.token }}
+
       - name: Typecheck
         run: pnpm typecheck
 

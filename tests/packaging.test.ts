@@ -2,7 +2,8 @@
  * Packaging guard: the root `ogden-agents` package is the only publishable
  * artifact. After `pnpm build` (which `pnpm test` runs first), every bare
  * import in the bundled server must be a Node builtin or a root `dependencies`
- * entry, and the packed tarball must hold only the built files.
+ * entry, and the packed tarball must hold only the built files and the
+ * vendored forks (AD-13).
  */
 import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -98,6 +99,27 @@ function rootDependencies(): Record<string, string> {
   return manifest.dependencies ?? {};
 }
 
+/** The bmad-loop wheel `forks.lock` pins, such as `vendor/bmad-loop/bmad_loop-0.13.0-py3-none-any.whl`. */
+function lockedWheel(): string {
+  const lock = JSON.parse(readFileSync(join(ROOT, 'forks.lock'), 'utf8')) as { forks: Record<string, { vendored: string }> };
+  const wheel = lock.forks['bmad-loop']!.vendored;
+  expect(wheel).toMatch(/^vendor\/bmad-loop\/bmad_loop-.+\.whl$/);
+  return wheel;
+}
+
+/**
+ * Files git tracks (or would track) under `vendor/`, as repo-relative POSIX
+ * paths. Ignored files such as `.DS_Store` are left out.
+ */
+function vendoredFiles(): string[] {
+  const result = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', 'vendor'], {
+    cwd: ROOT,
+    encoding: 'utf8',
+  });
+  if (result.status !== 0) throw new Error(`git ls-files failed (${result.status}): ${result.stderr}`);
+  return [...new Set(result.stdout.split('\0').filter(Boolean))].sort();
+}
+
 /** Paths `pnpm pack` would put in the tarball. */
 function packedFiles(): string[] {
   const result = spawnSync('pnpm', ['pack', '--dry-run', '--json'], {
@@ -169,7 +191,7 @@ describe('packaging', () => {
     expect(versionOf('packages/web/package.json')).toBe(root);
   });
 
-  it('the tarball holds the launcher, the bundle and the UI, and no workspace sources', () => {
+  it('the tarball holds the launcher, the bundle, the UI and the vendored forks, and no workspace sources', () => {
     const files = packedFiles();
     expect(files).toEqual(
       expect.arrayContaining([
@@ -181,9 +203,13 @@ describe('packaging', () => {
         'package.json',
         'README.md',
         'LICENSE',
+        'vendor/bmad-method/skills/bmod-method/bmod.toml',
+        lockedWheel(),
       ]),
     );
+    // Exactly the vendored files ship: every one git lists, and nothing else under vendor/.
+    expect(files.filter((f) => f.startsWith('vendor/')).sort()).toEqual(vendoredFiles());
     expect(files.filter((f) => f.startsWith('packages/'))).toEqual([]);
-    expect(files.filter((f) => !/^(bin|dist)\//.test(f) && !['package.json', 'README.md', 'LICENSE'].includes(f))).toEqual([]);
+    expect(files.filter((f) => !/^(bin|dist|vendor)\//.test(f) && !['package.json', 'README.md', 'LICENSE'].includes(f))).toEqual([]);
   });
 });

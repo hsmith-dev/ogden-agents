@@ -247,6 +247,35 @@ describe('chat', () => {
     expect(() => chat.sendMessage(workspace.id, session.id, 'again')).toThrow(InvalidOperationError);
   });
 
+  it('closing while an agent is still starting waits until that agent is stopped', async () => {
+    const core = openTestCore();
+    let finishStart!: () => void;
+    let closedAgents = 0;
+    const port: AgentPort = {
+      displayName: 'Test Agent',
+      async startSession() {
+        await new Promise<void>((resolve) => (finishStart = resolve));
+        return {
+          agentSessionId: 'slow-start',
+          onEvent: () => () => undefined,
+          prompt: () => new Promise(() => {}),
+          cancel: async () => {},
+          close: async () => {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            closedAgents++;
+          },
+        };
+      },
+    };
+    const { chat, workspace, session } = setUp(core, port);
+    chat.sendMessage(workspace.id, session.id, 'hello');
+    const closing = chat.close();
+    finishStart();
+    await closing;
+    expect(closedAgents).toBe(1);
+    expect(core.entities.getSession(session.id)!.state).toBe('idle');
+  });
+
   it('settles sessions a stopped server left working or waiting: idle, resumable (AD-3)', () => {
     const core = openTestCore();
     const { chat, workspace } = setUp(core, hello.port);

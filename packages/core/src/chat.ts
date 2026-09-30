@@ -193,10 +193,11 @@ export function createChat(options: ChatOptions): Chat {
     if (existing !== undefined) return existing;
     const entry: Live = { agent: Promise.resolve(undefined as never), reply: undefined, off: undefined };
     // The real-cased path: the case-folded key is for uniqueness only (AD-2).
-    entry.agent = agent.startSession({ cwd: workspace.realPath ?? workspace.path, env: { ...agentEnv() } }).then((started) => {
+    entry.agent = agent.startSession({ cwd: workspace.realPath ?? workspace.path, env: { ...agentEnv() } }).then(async (started) => {
       if (live.get(session.id) !== entry) {
-        // Closed while starting.
-        void started.close().catch(() => undefined);
+        // Closed (or dropped) while starting: stop it before anyone waiting on this
+        // entry goes on, so `close` returns only once its process has exited.
+        await started.close().catch(() => undefined);
         throw new AgentError('agent_failed', `${agent.displayName} was stopped.`);
       }
       entry.off = started.onEvent((event) => apply(session.id, entry, event));

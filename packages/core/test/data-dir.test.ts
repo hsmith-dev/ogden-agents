@@ -1,5 +1,5 @@
 import { statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import envPaths from 'env-paths';
 import { describe, expect, it } from 'vitest';
 import { createDataDir, DATA_DIR_ENV, dataDirPath, ensureDataDir } from '../src/index.js';
@@ -9,7 +9,9 @@ describe('data folder', () => {
   it('uses the OS per-user data directory named ogden-agents by default', () => {
     const expected = envPaths('ogden-agents', { suffix: '' }).data;
     expect(dataDirPath({})).toBe(expected);
-    expect(expected).toMatch(/ogden-agents$/i);
+    // env-paths names the folder after the app; on Windows it adds a `Data` subfolder
+    // (`%LOCALAPPDATA%\\ogden-agents\\Data`), so check the segment, not the ending.
+    expect(expected.split(sep)).toContain('ogden-agents');
   });
 
   it('honours OGDEN_AGENTS_DATA_DIR, resolved to an absolute path', () => {

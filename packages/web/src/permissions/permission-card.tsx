@@ -2,7 +2,7 @@ import { Check, ClockCounterClockwise, Prohibit, ShieldCheck } from '@phosphor-i
 import type { CautionLevel, PermissionDecision, ToolKind } from '@ogden-agents/shared';
 import { alwaysAllowRefusal, MAX_DENY_REASON_LENGTH } from '@ogden-agents/shared';
 import { useId, useState, type KeyboardEvent } from 'react';
-import { AGENT_NAME, decidePermission, removePermissionRule } from '@/chat/chat-api';
+import { AGENT_NAME, ChatApiError, decidePermission, removePermissionRule } from '@/chat/chat-api';
 import type { TranscriptPermission } from '@/chat/transcript';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
@@ -163,15 +163,28 @@ export function PermissionCard({ permission, wsId, sesId, projectName, onDecided
   );
 }
 
+/**
+ * What a failed Undo Always allow means. A rule that no longer exists (404
+ * `not_found`) was already undone, for example in another tab, or its
+ * `workspace.permission_rule_removed` is no longer in the loaded events: the
+ * record says "Always allow undone", not an error.
+ */
+export function undoFailure(failure: unknown): { undone: true } | { error: string } {
+  if (failure instanceof ChatApiError && failure.status === 404) return { undone: true };
+  return { error: failure instanceof Error ? failure.message : "The rule couldn't be undone. Try again." };
+}
+
 /** The card after its answer: one caption line with a glyph and the time. */
 function PermissionRecordLine({ permission, wsId, projectName }: { permission: TranscriptPermission; wsId: string; projectName: string }) {
   const [error, setError] = useState<string | undefined>(undefined);
   const [open, setOpen] = useState(false);
+  /** The rule was found already gone when this record tried to undo it. */
+  const [goneHere, setGoneHere] = useState(false);
   const target = permissionTarget(permission);
   const resolution = permission.resolution;
   const at = resolution?.at ?? permission.requestedAt;
   const ruleId = resolution?.ruleId;
-  const undoable = ruleId !== undefined && resolution?.ruleRemoved === false && resolution.decision !== 'deny';
+  const undoable = ruleId !== undefined && resolution?.ruleRemoved === false && resolution.decision !== 'deny' && !goneHere;
 
   let Icon = ClockCounterClockwise;
   let text = `Not answered: ${target}`;
@@ -184,14 +197,22 @@ function PermissionRecordLine({ permission, wsId, projectName }: { permission: T
     else if (resolution.decision === 'allow_always') text = `Always allowed: ${target}`;
     else text = `Denied: ${target}`;
   }
-  const undone = ruleId !== undefined && resolution?.ruleRemoved === true;
+  const undone = ruleId !== undefined && (resolution?.ruleRemoved === true || goneHere);
 
   const undo = () => {
     if (ruleId === undefined) return;
     setError(undefined);
     removePermissionRule(wsId, ruleId).then(
       () => setOpen(false),
-      (failure: unknown) => setError(failure instanceof Error ? failure.message : "The rule couldn't be undone. Try again."),
+      (failure: unknown) => {
+        const outcome = undoFailure(failure);
+        if ('error' in outcome) {
+          setError(outcome.error);
+          return;
+        }
+        setOpen(false);
+        setGoneHere(true);
+      },
     );
   };
 

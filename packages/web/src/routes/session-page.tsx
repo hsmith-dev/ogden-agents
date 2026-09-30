@@ -1,13 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from '@tanstack/react-router';
-import { ArrowClockwise, House, Stop } from '@phosphor-icons/react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowClockwise, ArrowDown, House, Stop } from '@phosphor-icons/react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAppearance } from '@/appearance/appearance-provider';
 import { AGENT_NAME, cancelSession, ChatApiError, fetchSession, sendMessage } from '@/chat/chat-api';
 import { Composer } from '@/chat/composer';
 import { ToolCalls } from '@/chat/tool-call-row';
-import { sessionView, type TranscriptCheckIn, type TranscriptMessage } from '@/chat/transcript';
-import { useEventStream } from '@/events/event-stream';
+import { sessionView, type TranscriptCheckIn, type TranscriptItem, type TranscriptMessage } from '@/chat/transcript';
+import { useCaughtUp, useEarlierHistory, useSessionEvents } from '@/events/event-stream';
 import { PermissionCard, permissionAnnouncement } from '@/permissions/permission-card';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
@@ -18,12 +18,23 @@ import { EmptyState, PageBody, PageFooter } from '@/ui/page';
 import { Skeleton } from '@/ui/skeleton';
 import { StateGlyph } from '@/ui/state-glyph';
 import { Text } from '@/ui/typography';
+import { fetchWorkspace, workspaceName } from '@/workspaces/workspace-api';
 
 /** The marker at the break where a reopened chat continues (EXPERIENCE.md). */
 const RESUMED_FROM_HISTORY = 'Resumed from history';
 
-/** The last segment of a folder path, on any OS. */
-const folderName = (path: string) => path.split(/[\\/]/).filter((part) => part !== '').at(-1) ?? path;
+/** How close to the bottom (px) still counts as at the bottom, for auto-scroll. */
+const AT_BOTTOM_PX = 48;
+
+/** An item's identity, as its React key: the Jump to latest count finds where the reader left off by it. */
+const itemKey = (item: TranscriptItem, index: number): string =>
+  item.type === 'message'
+    ? item.message.messageId
+    : item.type === 'tools'
+      ? `tools-${item.calls[0]?.toolCallId ?? index}`
+      : item.type === 'resumed'
+        ? `resumed-${item.at}-${index}`
+        : item.permission.requestId;
 
 /** Puts the cursor back in the composer (after a permission decision; EXPERIENCE.md Accessibility Floor). */
 const focusComposer = () => document.querySelector<HTMLTextAreaElement>('[data-testid="composer"] textarea')?.focus();
@@ -41,20 +52,30 @@ const checkInWords = (checkIn: TranscriptCheckIn) =>
  * sent while the agent works shown "Queued" (or "Not sent", their text put
  * back in the composer), the quiet-agent status line, Stop beside the
  * composer while the agent works or waits (no confirmation; `Esc` never
- * stops), and the error notice with Try again.
+ * stops), and the error notice with Try again. Story 2.10 part B: the fold
+ * runs over this session's own stream, older history loads with Show earlier
+ * at the top (a chat older than the workspace window loads its latest page on
+ * opening), and while the reader is scrolled up new items do not move the
+ * view but count on "Jump to latest".
  */
 export function SessionPage() {
   const { wsId, sesId } = useParams({ strict: false }) as { wsId: string; sesId: string };
-  const { events, caughtUp } = useEventStream();
+  const events = useSessionEvents(wsId, sesId);
+  // The workspace's own stream carries the always-allow rules undone since (the cards' Undo).
+  const workspaceEvents = useSessionEvents(wsId, wsId);
+  const caughtUp = useCaughtUp();
+  const history = useEarlierHistory(wsId, sesId);
   const { appearance } = useAppearance();
-  const view = useMemo(() => sessionView(events, sesId), [events, sesId]);
+  const rulesRemoved = useMemo(
+    () => new Set(workspaceEvents.flatMap((event) => (event.type === 'workspace.permission_rule_removed' ? [event.payload.ruleId] : []))),
+    [workspaceEvents],
+  );
+  const view = useMemo(() => sessionView(events, sesId, rulesRemoved), [events, sesId, rulesRemoved]);
   const session = useQuery({ queryKey: ['session', wsId, sesId], queryFn: () => fetchSession(wsId, sesId), retry: false });
+  const workspace = useQuery({ queryKey: ['workspace', wsId], queryFn: () => fetchWorkspace(wsId), retry: false });
   const end = useRef<HTMLDivElement>(null);
   const lastText = view.messages.at(-1)?.text.length ?? 0;
-  const projectName = useMemo(() => {
-    for (const event of events) if (event.type === 'workspace.created' && event.payload.workspace.id === wsId) return folderName(event.payload.workspace.realPath ?? event.payload.workspace.path);
-    return 'this project';
-  }, [events, wsId]);
+  const projectName = workspace.data === undefined ? 'this project' : workspaceName(workspace.data);
   const waitingFor = view.pendingPermissions[0];
   const [announcement, setAnnouncement] = useState('');
   const announced = useRef(new Set<string>());
@@ -74,9 +95,71 @@ export function SessionPage() {
     setRestore({ key: back.map((message) => message.messageId).join(','), text: back.map((message) => message.text).join('\n\n') });
   }, [view.queued, view.notSent]);
 
+  // A chat whose events are all older than the workspace window: load its latest page once.
+  const autoLoaded = useRef<string | undefined>(undefined);
+  const { hasEarlier, loadEarlier } = history;
   useEffect(() => {
+    if (!caughtUp || view.known || !hasEarlier || autoLoaded.current === sesId) return;
+    autoLoaded.current = sesId;
+    loadEarlier();
+  }, [caughtUp, view.known, hasEarlier, sesId, loadEarlier]);
+
+  // Auto-scroll only while the reader is at the bottom; otherwise count what arrives.
+  const keys = useMemo(() => [...view.items.map(itemKey), ...view.queued.map((message) => message.messageId)], [view.items, view.queued]);
+  const lastKey = keys.at(-1);
+  const atBottom = useRef(true);
+  const [scrolledUp, setScrolledUp] = useState(false);
+  /** The last item the reader saw at the bottom, before scrolling up. */
+  const [seenKey, setSeenKey] = useState<string | undefined>(undefined);
+  const lastKeyRef = useRef(lastKey);
+  lastKeyRef.current = lastKey;
+  const scroller = useCallback(() => end.current?.closest<HTMLElement>('[data-slot="page-body"]') ?? null, []);
+  useEffect(() => {
+    const container = scroller();
+    if (container === null) return;
+    const onScroll = () => {
+      const bottom = container.scrollHeight - container.scrollTop - container.clientHeight <= AT_BOTTOM_PX;
+      if (bottom === atBottom.current) return;
+      atBottom.current = bottom;
+      setScrolledUp(!bottom);
+      setSeenKey(bottom ? undefined : lastKeyRef.current);
+    };
+    container.addEventListener('scroll', onScroll, { passive: true });
+    return () => container.removeEventListener('scroll', onScroll);
+  }, [scroller]);
+  useEffect(() => {
+    if (atBottom.current) end.current?.scrollIntoView?.({ block: 'end' });
+  }, [lastKey, lastText]);
+  const seenAt = seenKey === undefined ? -1 : keys.lastIndexOf(seenKey);
+  const unseen = scrolledUp && seenAt !== -1 ? keys.length - 1 - seenAt : 0;
+  const jumpToLatest = () => {
+    atBottom.current = true;
+    setScrolledUp(false);
+    setSeenKey(undefined);
     end.current?.scrollIntoView?.({ block: 'end' });
-  }, [view.items.length, lastText]);
+    focusComposer();
+  };
+
+  // Show earlier keeps what the reader sees in place: the older items go in above it.
+  const anchor = useRef<{ height: number; top: number } | undefined>(undefined);
+  const showEarlier = () => {
+    const container = scroller();
+    anchor.current = container === null ? undefined : { height: container.scrollHeight, top: container.scrollTop };
+    loadEarlier();
+  };
+  const firstKey = keys[0];
+  useLayoutEffect(() => {
+    const container = scroller();
+    if (anchor.current === undefined || container === null) return;
+    container.scrollTop = container.scrollHeight - anchor.current.height + anchor.current.top;
+    anchor.current = undefined;
+  }, [firstKey, scroller]);
+  // A load that settled without new items above (an error, or an empty page) leaves nothing to
+  // hold in place: forget the anchor, so a later change at the top does not jump the view (review F3).
+  // Declared after the effect above, so a page that did add items is placed first.
+  useLayoutEffect(() => {
+    if (!history.loading) anchor.current = undefined;
+  }, [history.loading]);
 
   // A new card announces once, assertively, and never takes focus.
   useEffect(() => {
@@ -128,7 +211,9 @@ export function SessionPage() {
 
   const state = view.state ?? session.data?.state;
   const streaming = view.messages.some((message) => message.streaming);
-  const loading = !view.known && !caughtUp;
+  // Until the backlog arrives, or while an older chat's first page loads.
+  const firstPagePending = history.loading || (history.hasEarlier && history.error === undefined && autoLoaded.current !== sesId);
+  const loading = !view.known && (!caughtUp || (firstPagePending && view.items.length === 0));
   const busy = state === 'working' || state === 'waiting';
 
   const stop = () => {
@@ -161,6 +246,9 @@ export function SessionPage() {
       </WorkspaceHeader>
       <PageBody>
         <section aria-label="Conversation" aria-busy={streaming} data-testid="transcript" className="flex w-full max-w-(--space-chat-column) flex-col gap-4 self-center">
+          {!loading && (history.hasEarlier || history.error !== undefined) ? (
+            <EarlierHistory loading={history.loading} error={history.error} onShow={showEarlier} />
+          ) : null}
           {loading ? (
             <>
               <Skeleton />
@@ -169,7 +257,7 @@ export function SessionPage() {
                 Loading the conversation
               </span>
             </>
-          ) : view.items.length === 0 ? (
+          ) : view.items.length === 0 && !history.hasEarlier ? (
             <Text variant="caption">Ask {AGENT_NAME} about this project.</Text>
           ) : (
             view.items.map((item, index) =>
@@ -240,6 +328,14 @@ export function SessionPage() {
         </div>
       </PageBody>
       <PageFooter>
+        {unseen > 0 ? (
+          <div className="flex justify-center pb-2">
+            <Button variant="outline" data-testid="jump-to-latest" data-count={unseen} onClick={jumpToLatest}>
+              <ArrowDown aria-hidden />
+              Jump to latest ({unseen})
+            </Button>
+          </div>
+        ) : null}
         {waitingFor !== undefined && cardOffscreen ? (
           <div className="pb-2">
             <Button variant="outline" className="w-full justify-start" data-testid="waiting-bar" onClick={showCard}>
@@ -266,6 +362,34 @@ export function SessionPage() {
         />
       </PageFooter>
     </>
+  );
+}
+
+/**
+ * "Show earlier" at the top of the transcript (EXPERIENCE.md: no infinite
+ * scroll): one page per press, in place, with no reload. A page that fails or
+ * times out says so inline, with Try again.
+ */
+function EarlierHistory({ loading, error, onShow }: { loading: boolean; error: string | undefined; onShow: () => void }) {
+  if (error !== undefined && !loading) {
+    return (
+      <div data-testid="earlier-history-error" className="flex items-center justify-center gap-2" title={error}>
+        <Text as="span" variant="caption" role="alert">
+          Couldn't load.
+        </Text>
+        <Button variant="outline" onClick={onShow} data-testid="earlier-history-retry">
+          <ArrowClockwise aria-hidden />
+          Try again
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex justify-center">
+      <Button variant="ghost" onClick={onShow} aria-disabled={loading} aria-busy={loading} data-testid="show-earlier">
+        {loading ? 'Loading earlier messages' : 'Show earlier'}
+      </Button>
+    </div>
   );
 }
 

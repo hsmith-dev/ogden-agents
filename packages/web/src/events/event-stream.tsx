@@ -3,25 +3,29 @@ import {
   DEFAULT_WINDOW_EVENTS,
   ServerMessage,
   WorkspacesResponse,
+  type CaughtUpMessage,
   type ClientMessage,
   type CoreEvent,
   type HistoryPageMessage,
   type SessionId,
   type WorkspaceId,
 } from '@ogden-agents/shared';
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
 import { call } from '@/chat/chat-api';
+import { createFrameBatch } from './frame-batch';
 import { createPendingPages, type PageRequest, type PendingPages } from './pending-pages';
 import {
   applyCaughtUp,
-  applyEvent,
+  applyEvents,
   applyHistoryPage,
   beginConnection,
   emptyStore,
   mergedEvents,
   pageCursor,
   streamEvents,
+  trimWorkspaces,
   type EventStoreState,
 } from './event-store';
 
@@ -83,6 +87,26 @@ interface EventStreamValue {
 const EventStreamContext = createContext<EventStreamValue | null>(null);
 
 /**
+ * The store as an external store (story 2.10), so a reader can select one
+ * slice and re-render only when that slice changes: a chat re-renders for its
+ * own session's events, not for every chunk of another session. Stable for
+ * the life of the provider.
+ */
+interface EventStoreHandle {
+  subscribe(listener: () => void): () => void;
+  getState(): EventStoreState;
+  getCaughtUp(): boolean;
+  /** Keeps a session's stream whole while it is on screen (the store trims the rest); returns the release. */
+  retain(wsId: string, sesId: string): () => void;
+  loadEarlier(wsId: string, sesId?: string): Promise<void>;
+}
+
+const EventStoreHandleContext = createContext<EventStoreHandle | null>(null);
+
+/** A message the store applies on the next frame: an event, or a scope's `caught_up`. */
+type Queued = CoreEvent | CaughtUpMessage;
+
+/**
  * The UI's one WebSocket to the event log (AD-5 as amended in story 2.9). On
  * every (re)connect it subscribes to the install-level events after the last
  * `seq` it has, lists the workspaces and subscribes to each one's recent
@@ -100,6 +124,20 @@ export function EventStreamProvider({ children, auth = tabAuth }: { children: Re
   const stopRef = useRef<(reason: StoppedReason) => void>(() => {});
   /** Sends one `page_history` on the open socket; set by the effect below. */
   const requestRef = useRef<(message: PageRequest) => Promise<HistoryPageMessage>>(() => Promise.reject(new Error(DROPPED)));
+  /** Applies the queued messages now; set by the effect below. */
+  const flushRef = useRef<() => void>(() => {});
+  /** Changes the store and tells its readers; set by the effect below. */
+  const updateRef = useRef<(change: (state: EventStoreState) => EventStoreState) => void>((change) => {
+    storeRef.current = change(storeRef.current);
+    setStore(storeRef.current);
+  });
+  const caughtUpRef = useRef(false);
+  const listeners = useRef(new Set<() => void>());
+  /** The sessions on screen, as `wsId/sesId`, with how many readers hold each. */
+  const retained = useRef(new Map<string, number>());
+  const queryClient = useQueryClient();
+  const queryClientRef = useRef(queryClient);
+  queryClientRef.current = queryClient;
 
   useEffect(() => {
     let socket: WebSocket | undefined;
@@ -129,13 +167,52 @@ export function EventStreamProvider({ children, auth = tabAuth }: { children: Re
       setStore(storeRef.current);
       const current = connection;
       const state = storeRef.current;
-      setCaughtUp(
+      caughtUpRef.current =
         current !== undefined &&
-          current.listed &&
-          state.install.caughtUp &&
-          [...current.subscribed].every((wsId) => state.workspaces.get(wsId)?.caughtUp === true),
-      );
+        current.listed &&
+        state.install.caughtUp &&
+        [...current.subscribed].every((wsId) => state.workspaces.get(wsId)?.caughtUp === true);
+      setCaughtUp(caughtUpRef.current);
+      for (const listener of [...listeners.current]) listener();
     };
+    updateRef.current = update;
+
+    /**
+     * Applies one frame's messages in one store update, in the order they
+     * came, then trims the live lists. Follows each project created meanwhile,
+     * and refetches the lists a reset scope's events no longer cover.
+     */
+    const applyQueued = (items: Queued[]) => {
+      const created: WorkspaceId[] = [];
+      const resets: string[] = [];
+      update((state) => {
+        let next = state;
+        let events: CoreEvent[] = [];
+        const drain = () => {
+          if (events.length === 0) return;
+          next = applyEvents(next, events);
+          events = [];
+        };
+        for (const item of items) {
+          if (item.type === 'caught_up') {
+            drain();
+            next = applyCaughtUp(next, item);
+            if (item.reset === true && item.scope !== undefined) resets.push(item.scope);
+          } else {
+            events.push(item);
+            if (item.type === 'workspace.created') created.push(item.workspaceId);
+          }
+        }
+        drain();
+        return trimWorkspaces(next, new Set(retained.current.keys()));
+      });
+      // A project added in any tab: follow it too.
+      for (const wsId of created) subscribeWorkspace(wsId);
+      // A reset dropped the events the REST lists' live states came from: load the lists again.
+      for (const scope of resets) void queryClientRef.current.invalidateQueries({ queryKey: scope === 'install' ? ['workspaces'] : ['sessions', scope] });
+    };
+    const batch = createFrameBatch(applyQueued);
+    flushRef.current = batch.flush;
 
     /** Rejects the dropped connection's pending pages. */
     const dropConnection = () => {
@@ -170,6 +247,7 @@ export function EventStreamProvider({ children, auth = tabAuth }: { children: Re
       clearTimeout(slow);
       clearTimeout(gone);
       socket?.close();
+      batch.dispose();
       dropConnection();
       return true;
     };
@@ -277,7 +355,7 @@ export function EventStreamProvider({ children, auth = tabAuth }: { children: Re
         if (connection?.ws !== ws) return;
         if (data.type === 'pong') return;
         if (data.type === 'caught_up') {
-          update((state) => applyCaughtUp(state, data));
+          batch.push(data);
           return;
         }
         if (data.type === 'server.stopping') {
@@ -299,12 +377,13 @@ export function EventStreamProvider({ children, auth = tabAuth }: { children: Re
           }
           return;
         }
-        update((state) => applyEvent(state, data));
-        // A project added in any tab: follow it too.
-        if (data.type === 'workspace.created') subscribeWorkspace(data.workspaceId);
+        // Applied with the rest of this frame's messages.
+        batch.push(data);
       });
       ws.addEventListener('close', () => {
         if (connection?.ws === ws) {
+          // What this connection delivered is still good: apply it before the next one starts.
+          batch.flush();
           dropConnection();
           setCaughtUp(false);
         }
@@ -330,6 +409,7 @@ export function EventStreamProvider({ children, auth = tabAuth }: { children: Re
       clearTimeout(slow);
       clearTimeout(gone);
       socket?.close();
+      batch.dispose();
       dropConnection();
     };
   }, [auth]);
@@ -346,16 +426,42 @@ export function EventStreamProvider({ children, auth = tabAuth }: { children: Re
       beforeSeq: cursor.beforeSeq,
       limit: EARLIER_PAGE_EVENTS,
     });
-    storeRef.current = applyHistoryPage(storeRef.current, page, sesId);
-    setStore(storeRef.current);
+    // The events queued before the page are applied first, so the page never runs ahead of them.
+    flushRef.current();
+    updateRef.current((state) => applyHistoryPage(state, page, sesId));
   }, []);
+  const handle = useMemo<EventStoreHandle>(
+    () => ({
+      subscribe(listener) {
+        listeners.current.add(listener);
+        return () => listeners.current.delete(listener);
+      },
+      getState: () => storeRef.current,
+      getCaughtUp: () => caughtUpRef.current,
+      retain(wsId, sesId) {
+        const key = `${wsId}/${sesId}`;
+        retained.current.set(key, (retained.current.get(key) ?? 0) + 1);
+        return () => {
+          const count = (retained.current.get(key) ?? 1) - 1;
+          if (count > 0) retained.current.set(key, count);
+          else retained.current.delete(key);
+        };
+      },
+      loadEarlier,
+    }),
+    [loadEarlier],
+  );
   const events = useMemo(() => mergedEvents(store), [store]);
   const value = useMemo(() => {
     let lastSeq = store.install.lastSeq;
     for (const workspace of store.workspaces.values()) lastSeq = Math.max(lastSeq, workspace.lastSeq);
     return { status, events, store, lastSeq, caughtUp, loadEarlier, stoppedReason, markStopped };
   }, [status, events, store, caughtUp, loadEarlier, stoppedReason, markStopped]);
-  return <EventStreamContext.Provider value={value}>{children}</EventStreamContext.Provider>;
+  return (
+    <EventStoreHandleContext.Provider value={handle}>
+      <EventStreamContext.Provider value={value}>{children}</EventStreamContext.Provider>
+    </EventStoreHandleContext.Provider>
+  );
 }
 
 export function useEventStream(): EventStreamValue {
@@ -387,13 +493,28 @@ export function useServerVersion(): string | undefined {
   return caughtUp ? latestServerVersion(events) : undefined;
 }
 
+function useStoreHandle(): EventStoreHandle {
+  const context = useContext(EventStoreHandleContext);
+  if (context === null) throw new Error('the event store hooks must be used inside <EventStreamProvider>');
+  return context;
+}
+
 /**
- * One session's events in its workspace's window (plus any pages loaded).
- * The array keeps its identity while other sessions stream, so a view
- * memoized on it recomputes only for its own session.
+ * One session's events: those in its workspace's window, plus any pages
+ * loaded. Re-renders only when that session's events change, not for other
+ * sessions' chunks, and keeps the stream whole while it is on screen (the
+ * store trims every other one to its live limit).
  */
 export function useSessionEvents(wsId: string, sesId: string): readonly CoreEvent[] {
-  return streamEvents(useEventStream().store, wsId, sesId);
+  const handle = useStoreHandle();
+  useEffect(() => handle.retain(wsId, sesId), [handle, wsId, sesId]);
+  return useSyncExternalStore(handle.subscribe, () => streamEvents(handle.getState(), wsId, sesId));
+}
+
+/** Whether the current connection's backlog has all arrived; re-renders only when that changes. */
+export function useCaughtUp(): boolean {
+  const handle = useStoreHandle();
+  return useSyncExternalStore(handle.subscribe, handle.getCaughtUp);
 }
 
 export interface EarlierHistory {
@@ -406,9 +527,10 @@ export interface EarlierHistory {
   loadEarlier(): void;
 }
 
-/** "Show earlier" for a workspace, or for one of its sessions (story 2.10 renders it). */
+/** "Show earlier" for a workspace, or for one of its sessions. Re-renders only when its own state changes. */
 export function useEarlierHistory(wsId: string, sesId?: string): EarlierHistory {
-  const { store, loadEarlier } = useEventStream();
+  const handle = useStoreHandle();
+  const hasEarlier = useSyncExternalStore(handle.subscribe, () => pageCursor(handle.getState(), wsId, sesId).hasEarlier);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const busy = useRef(false);
@@ -417,12 +539,13 @@ export function useEarlierHistory(wsId: string, sesId?: string): EarlierHistory 
     busy.current = true;
     setLoading(true);
     setError(undefined);
-    loadEarlier(wsId, sesId)
+    handle
+      .loadEarlier(wsId, sesId)
       .catch((failure: unknown) => setError(failure instanceof Error ? failure.message : DROPPED))
       .finally(() => {
         busy.current = false;
         setLoading(false);
       });
-  }, [loadEarlier, wsId, sesId]);
-  return { hasEarlier: pageCursor(store, wsId, sesId).hasEarlier, loading, error, loadEarlier: load };
+  }, [handle, wsId, sesId]);
+  return { hasEarlier, loading, error, loadEarlier: load };
 }

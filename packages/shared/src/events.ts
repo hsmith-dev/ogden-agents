@@ -622,6 +622,13 @@ export const CaughtUpMessage = z.object({
   oldestSeq: Seq.nullable().optional(),
   /** Whether older events exist before the window (the UI offers "Show earlier"). */
   hasEarlier: z.boolean().optional(),
+  /**
+   * Story 2.10: a reconnect's `afterSeq` missed more than `MAX_PAGE_EVENTS`
+   * events of this scope, so the server sent the scope's recent window
+   * instead of the gap. The client replaces the scope's events and paging
+   * cursors with that window. Absent on an exact catch-up.
+   */
+  reset: z.literal(true).optional(),
 });
 export type CaughtUpMessage = z.infer<typeof CaughtUpMessage>;
 
@@ -705,7 +712,9 @@ export type SubscribeMessage = z.infer<typeof SubscribeMessage>;
  * Stream the install-level events (`workspaceId: null`: server, toolchain,
  * agents) and every `workspace.created` (so a project added in another tab
  * is seen) with `seq > afterSeq`, then live (E2-R8). Replaces an earlier
- * `subscribe_install`.
+ * `subscribe_install`. A reconnect (`afterSeq > 0`) that missed more than
+ * `MAX_PAGE_EVENTS` of them gets the newest {@link DEFAULT_WINDOW_EVENTS}
+ * instead, and a `caught_up` with `reset: true` (story 2.10).
  */
 export const SubscribeInstallMessage = z.object({
   type: z.literal('subscribe_install'),
@@ -717,7 +726,9 @@ export type SubscribeInstallMessage = z.infer<typeof SubscribeInstallMessage>;
  * Stream one workspace's events, then live (E2-R8). With `afterSeq` (a
  * reconnect) every event after it; without, only the most recent `window`
  * events (default {@link DEFAULT_WINDOW_EVENTS}). Older history is paged with
- * `page_history`. Ends with a `caught_up` naming the workspace.
+ * `page_history`. Ends with a `caught_up` naming the workspace. A reconnect
+ * that missed more than `MAX_PAGE_EVENTS` events gets the window instead,
+ * and a `caught_up` with `reset: true` (story 2.10).
  */
 export const SubscribeWorkspaceMessage = z.object({
   type: z.literal('subscribe_workspace'),

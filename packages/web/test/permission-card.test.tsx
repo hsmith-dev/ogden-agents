@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { TranscriptPermission } from '../src/chat/transcript';
-import { PermissionCard } from '../src/permissions/permission-card';
+import { ChatApiError } from '../src/chat/chat-api';
+import { PermissionCard, undoFailure } from '../src/permissions/permission-card';
 
 const pending = (overrides: Partial<TranscriptPermission> = {}): TranscriptPermission => ({
   requestId: 'preq_1',
@@ -74,5 +75,13 @@ describe('PermissionCard (DESIGN.md Permission card; EXPERIENCE.md Permission ca
     const html = render(pending({ toolCall: { toolCallId: 't1', title: 'Edit .git/hooks/pre-commit', kind: 'edit', protectedPath: true }, scope: { kind: 'tool', value: 'edit', label: 'Editing files' } }));
     expect(html).toContain('It touches a file that controls how Claude Code or git runs, so Ogden Agents always asks.');
     expect(render(pending())).not.toContain('permission-protected');
+  });
+});
+
+describe('Undo Always allow (story 2.10 review F1)', () => {
+  it('a rule already gone (404 not_found) reads as undone; any other failure is shown', () => {
+    expect(undoFailure(new ChatApiError('That rule does not exist.', 404))).toEqual({ undone: true });
+    expect(undoFailure(new ChatApiError('Ogden Agents is busy.', 500))).toEqual({ error: 'Ogden Agents is busy.' });
+    expect(undoFailure('offline')).toEqual({ error: "The rule couldn't be undone. Try again." });
   });
 });

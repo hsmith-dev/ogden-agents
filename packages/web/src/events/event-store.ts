@@ -15,7 +15,10 @@ export interface ScopeState {
   events: readonly CoreEvent[];
   /** Highest `seq` received live or in a backlog; a reconnect subscribes after it. */
   lastSeq: number;
-  /** The oldest `seq` loaded (window or pages), or `null` when there is none. */
+  /**
+   * Where paging back starts: the oldest `seq` loaded (window or pages), or
+   * just after the newest event a trim dropped; `null` when there is none.
+   */
   oldestSeq: number | null;
   /** Whether older events exist before `oldestSeq`. */
   hasEarlier: boolean;
@@ -46,6 +49,13 @@ export interface EventStoreState {
 }
 
 const NO_EVENTS: readonly CoreEvent[] = Object.freeze([]);
+
+/**
+ * The most events a workspace's live list keeps (story 2.10). Beyond it the
+ * oldest are trimmed (see {@link trimWorkspaces}); "Show earlier" pages them
+ * back in.
+ */
+export const MAX_LIVE_EVENTS = 2000;
 
 const emptyScope = (): ScopeState => ({ events: NO_EVENTS, lastSeq: 0, oldestSeq: null, hasEarlier: false, caughtUp: false, synced: false });
 const emptyWorkspace = (): WorkspaceState => ({ ...emptyScope(), streams: new Map(), floorSeq: 0 });
@@ -121,6 +131,76 @@ export function applyEvent(state: EventStoreState, event: CoreEvent): EventStore
   });
 }
 
+/** Appends `event` to a list this batch owns, dropping the deltas a completed message replaces (AD-5). */
+function addInPlace(list: CoreEvent[], event: CoreEvent): void {
+  if (event.type === 'session.message_completed') {
+    const { messageId } = event.payload;
+    let kept = 0;
+    for (const e of list) {
+      if (e.type === 'session.message_delta' && e.streamId === event.streamId && e.payload.messageId === messageId) continue;
+      list[kept++] = e;
+    }
+    list.length = kept;
+  }
+  list.push(event);
+}
+
+/** A workspace being changed by one batch: its lists are copied once, then appended to in place. */
+interface WorkspaceDraft {
+  workspace: WorkspaceState;
+  events: CoreEvent[];
+  streams: Map<string, readonly CoreEvent[]>;
+  /** The streams this batch copied, so it may append to them. */
+  owned: Set<string>;
+  lastSeq: number;
+  oldestSeq: number | null;
+}
+
+/**
+ * {@link applyEvent} for a batch of events, in order (story 2.10: the socket's
+ * messages are applied once per frame). Each list the batch touches is copied
+ * once, not once per event, so a burst of streamed chunks costs one copy; a
+ * stream no event touched keeps its array.
+ */
+export function applyEvents(state: EventStoreState, batch: readonly CoreEvent[]): EventStoreState {
+  let next = state;
+  const drafts = new Map<string, WorkspaceDraft>();
+  const commit = () => {
+    for (const [wsId, draft] of drafts) {
+      next = withWorkspace(next, wsId, { ...draft.workspace, events: draft.events, streams: draft.streams, lastSeq: draft.lastSeq, oldestSeq: draft.oldestSeq });
+    }
+    drafts.clear();
+  };
+  for (const event of batch) {
+    if (isInstallEvent(event) || event.type === 'workspace.history_deleted') {
+      commit();
+      next = applyEvent(next, event);
+      continue;
+    }
+    const wsId = event.workspaceId!;
+    let draft = drafts.get(wsId);
+    if (draft === undefined) {
+      const workspace = next.workspaces.get(wsId) ?? emptyWorkspace();
+      if (event.seq <= workspace.lastSeq) continue;
+      draft = { workspace, events: [...workspace.events], streams: new Map(workspace.streams), owned: new Set(), lastSeq: workspace.lastSeq, oldestSeq: workspace.oldestSeq };
+      drafts.set(wsId, draft);
+    }
+    if (event.seq <= draft.lastSeq) continue;
+    addInPlace(draft.events, event);
+    let stream = draft.streams.get(event.streamId);
+    if (!draft.owned.has(event.streamId)) {
+      stream = [...(stream ?? NO_EVENTS)];
+      draft.owned.add(event.streamId);
+    }
+    addInPlace(stream as CoreEvent[], event);
+    draft.streams.set(event.streamId, stream!);
+    draft.lastSeq = event.seq;
+    draft.oldestSeq ??= event.seq;
+  }
+  commit();
+  return next;
+}
+
 /**
  * A scope's backlog has all arrived. The first `caught_up` of a scope sets
  * its paging cursor; a reconnect's keeps the one the store already has.
@@ -128,11 +208,126 @@ export function applyEvent(state: EventStoreState, event: CoreEvent): EventStore
 export function applyCaughtUp(state: EventStoreState, message: CaughtUpMessage): EventStoreState {
   const { scope } = message;
   if (scope === undefined) return state; // The legacy `subscribe`, which the web no longer sends.
+  if (message.reset === true) return applyReset(state, scope, message.oldestSeq ?? null, message.hasEarlier ?? false);
   const cursor = (current: ScopeState) =>
     current.synced ? {} : { oldestSeq: message.oldestSeq ?? current.oldestSeq, hasEarlier: message.hasEarlier ?? false };
   if (scope === 'install') return { ...state, install: { ...state.install, ...cursor(state.install), caughtUp: true, synced: true } };
   const workspace = state.workspaces.get(scope) ?? emptyWorkspace();
   return withWorkspace(state, scope, { ...workspace, ...cursor(workspace), caughtUp: true, synced: true });
+}
+
+/**
+ * The server sent a fresh window instead of a gap too large to replay
+ * (`caught_up {reset: true}`, story 2.10): the scope keeps only that window
+ * (the events from `oldestSeq` on, which arrived just before), and its paging
+ * cursors start again from it. Older events, and any session's own cursor,
+ * are dropped: keeping them would leave a gap between them and the window.
+ */
+export function applyReset(state: EventStoreState, scope: 'install' | string, oldestSeq: number | null, hasEarlier: boolean): EventStoreState {
+  const fresh = (event: CoreEvent) => oldestSeq !== null && event.seq >= oldestSeq;
+  const reset = <T extends ScopeState>(current: T): T => ({
+    ...current,
+    events: current.events.filter(fresh),
+    oldestSeq,
+    hasEarlier,
+    caughtUp: true,
+    synced: true,
+  });
+  if (scope === 'install') return { ...state, install: reset(state.install) };
+  const workspace = state.workspaces.get(scope) ?? emptyWorkspace();
+  const streams = new Map<string, readonly CoreEvent[]>();
+  for (const [streamId, events] of workspace.streams) {
+    const kept = events.every(fresh) ? events : events.filter(fresh);
+    if (kept.length > 0) streams.set(streamId, kept);
+  }
+  const sessionCursors = new Map([...state.sessionCursors].filter(([key]) => !key.startsWith(`${scope}/`)));
+  return { ...withWorkspace(state, scope, { ...reset(workspace), streams }), sessionCursors };
+}
+
+/**
+ * Trims each workspace's live list, oldest first, to {@link MAX_LIVE_EVENTS}
+ * events that may be trimmed (story 2.10). What the UI still reads is held
+ * and never trimmed or counted: the streams in `keep` (the sessions open on
+ * screen, as `wsId/sesId`), the newest `session.state_changed` of each
+ * session and every permission request without an answer (the sidebar and
+ * Needs you, story 2.11), every `workspace.permission_rule_removed` (the
+ * cards' Undo), and the `workspace.history_deleted` floor. A trimmed workspace has earlier history
+ * again, paged from just after the newest event it dropped; an open session
+ * keeps paging from where it was. A workspace under the limit is returned as it was.
+ */
+export function trimWorkspaces(state: EventStoreState, keep: ReadonlySet<string> = new Set(), max = MAX_LIVE_EVENTS): EventStoreState {
+  let next = state;
+  for (const [wsId, workspace] of state.workspaces) {
+    if (workspace.events.length <= max) continue;
+    next = trimWorkspace(next, wsId, workspace, keep, max);
+  }
+  return next;
+}
+
+function trimWorkspace(state: EventStoreState, wsId: string, workspace: WorkspaceState, keep: ReadonlySet<string>, max: number): EventStoreState {
+  const { events } = workspace;
+  const newestState = new Set<number>();
+  const statesSeen = new Set<string>();
+  const answered = new Set<string>();
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i]!;
+    if (event.type === 'session.state_changed' && !statesSeen.has(event.streamId)) {
+      statesSeen.add(event.streamId);
+      newestState.add(event.seq);
+    } else if (event.type === 'permission.resolved') answered.add(event.payload.requestId);
+  }
+  const held = (event: CoreEvent) =>
+    keep.has(sessionKey(wsId, event.streamId)) ||
+    event.type === 'workspace.history_deleted' ||
+    // The permission cards' Undo reads it (story 2.10 review F1).
+    event.type === 'workspace.permission_rule_removed' ||
+    newestState.has(event.seq) ||
+    (event.type === 'permission.requested' && !answered.has(event.payload.requestId));
+
+  // Only what may be trimmed counts against the limit, so held events never crowd out new ones (review F2).
+  let unheld = 0;
+  for (const event of events) if (!held(event)) unheld++;
+  let excess = unheld - max;
+  if (excess <= 0) return state;
+  let lastDropped: number | undefined;
+  const dropped = new Set<string>();
+  const kept: CoreEvent[] = [];
+  for (const event of events) {
+    if (excess > 0 && !held(event)) {
+      excess--;
+      lastDropped = event.seq;
+      dropped.add(event.streamId);
+      continue;
+    }
+    kept.push(event);
+  }
+  if (lastDropped === undefined) return state;
+
+  const streams = new Map(workspace.streams);
+  for (const streamId of dropped) {
+    const list = (workspace.streams.get(streamId) ?? NO_EVENTS).filter((event) => event.seq > lastDropped! || held(event));
+    if (list.length > 0) streams.set(streamId, list);
+    else streams.delete(streamId);
+  }
+  const sessionCursors = new Map(state.sessionCursors);
+  // A stream that lost events pages again from the workspace's new cursor, so nothing is skipped.
+  for (const streamId of dropped) sessionCursors.delete(sessionKey(wsId, streamId));
+  // An open session keeps all it has, so it goes on paging from the cursor it had.
+  for (const key of keep) {
+    if (key.startsWith(`${wsId}/`) && !sessionCursors.has(key)) {
+      sessionCursors.set(key, { beforeSeq: workspace.oldestSeq, hasEarlier: workspace.hasEarlier });
+    }
+  }
+  return {
+    ...withWorkspace(state, wsId, {
+      ...workspace,
+      events: kept,
+      streams,
+      oldestSeq: Math.max(workspace.oldestSeq ?? 0, lastDropped + 1),
+      hasEarlier: true,
+    }),
+    sessionCursors,
+  };
 }
 
 /** Merges `older` into `list` by `seq`, dropping any `seq` already there. Both are in `seq` order. */

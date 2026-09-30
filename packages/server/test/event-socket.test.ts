@@ -190,6 +190,37 @@ describe('scoped subscriptions', () => {
     expect(await client.next(caughtUpFor(ids.b))).toMatchObject({ oldestSeq: null, hasEarlier: true });
   });
 
+  it('a reconnect that missed more than MAX_PAGE_EVENTS gets the window and a reset; one that missed exactly that many catches up exactly', async () => {
+    const server = await startTestServer();
+    const ids = seed(server, MAX_PAGE_EVENTS + 50);
+    const client = await connect(server, await signIn(server));
+    const all = server.core.events.readAfter(0, { workspaceId: ids.a, limit: 10_000 }).filter((e) => e.type !== 'workspace.created');
+    expect(all.length).toBeGreaterThan(MAX_PAGE_EVENTS + 1);
+
+    // Large gap: the newest window instead of the gap, then live.
+    const large = all.at(-(MAX_PAGE_EVENTS + 2))!.seq;
+    client.sendJson({ type: 'subscribe_workspace', workspaceId: ids.a, afterSeq: large });
+    const reset = await client.next(caughtUpFor(ids.a));
+    const window = all.slice(-DEFAULT_WINDOW_EVENTS);
+    expect(client.messages.filter(isEvent)).toEqual(window);
+    expect(reset).toEqual({ type: 'caught_up', scope: ids.a, oldestSeq: window[0]!.seq, hasEarlier: true, reset: true });
+
+    // Exactly MAX_PAGE_EVENTS missed: every one of them, and no reset.
+    let from = client.messages.length;
+    const exact = all.at(-(MAX_PAGE_EVENTS + 1))!.seq;
+    client.sendJson({ type: 'subscribe_workspace', workspaceId: ids.a, afterSeq: exact });
+    const caught = await client.next(caughtUpFor(ids.a), from);
+    expect(client.messages.slice(from).filter(isEvent)).toEqual(all.slice(-MAX_PAGE_EVENTS));
+    expect(caught).toEqual({ type: 'caught_up', scope: ids.a, oldestSeq: all.at(-MAX_PAGE_EVENTS)!.seq, hasEarlier: true });
+
+    // The install scope counts its own events only: a small gap there is exact.
+    from = client.messages.length;
+    client.sendJson({ type: 'subscribe_install', afterSeq: 1 });
+    const install = await client.next(caughtUpFor('install'), from);
+    expect(install.reset).toBeUndefined();
+    expect(client.messages.slice(from).filter(isEvent).map((e) => e.type)).toEqual(['workspace.created', 'workspace.created']);
+  });
+
   it('subscribing to the same workspace again replaces the old one, however often: live events arrive once', async () => {
     const { server, ids, client } = await ready();
     client.sendJson({ type: 'subscribe_workspace', workspaceId: ids.a, window: 5 });

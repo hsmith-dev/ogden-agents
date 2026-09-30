@@ -104,6 +104,12 @@ export interface EventLog {
    */
   subscribeScope(scope: EventScope, from: ScopeStart, listener: EventListener): ScopeSubscription;
   /**
+   * How many of the scope's events have `seq > afterSeq`, counting at most
+   * `cap` (story 2.10): whether a reconnect missed too many to replay, read
+   * from `events_workspace_seq_idx` and bounded, however large the gap.
+   */
+  countAfter(scope: EventScope, afterSeq: number, cap: number): number;
+  /**
    * Up to `limit` (at most `MAX_PAGE_EVENTS`) of the workspace's events with
    * `seq < beforeSeq`, oldest first; with `sessionId`, only that session's
    * stream in this workspace (another workspace's session gives an empty
@@ -431,6 +437,18 @@ export function createEventLog(db: Database, options: EventLogOptions = {}): Eve
           subscribers.delete(subscriber);
         },
       };
+    },
+
+    countAfter(scope, afterSeq, cap) {
+      assertCursor(afterSeq);
+      if (!Number.isSafeInteger(cap) || cap < 1) throw new RangeError(`cap must be a positive integer, got ${String(cap)}`);
+      // Reads at most `cap` seqs: the work stays bounded, however many events were missed.
+      return orm
+        .select({ seq: events.seq })
+        .from(events)
+        .where(and(scopeFilter(scope).where, gt(events.seq, afterSeq)))
+        .limit(cap)
+        .all().length;
     },
 
     readBefore(workspaceId, beforeSeq, limit, sessionId) {

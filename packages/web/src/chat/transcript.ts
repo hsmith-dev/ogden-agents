@@ -114,8 +114,10 @@ export interface SessionView {
  * message waits outside the order until it is sent (its
  * `session.message_completed`), and becomes "Not sent" when the session goes
  * `idle` or `error` first. Consecutive tool calls share one `tools` item.
+ * `rulesRemoved` names the always-allow rules undone since, when `events` is
+ * the session's own stream (story 2.10), which does not carry them.
  */
-export function sessionView(events: readonly CoreEvent[], sessionId: string): SessionView {
+export function sessionView(events: readonly CoreEvent[], sessionId: string, rulesRemoved: ReadonlySet<string> = new Set()): SessionView {
   const view: SessionView = {
     known: false,
     state: undefined,
@@ -133,7 +135,7 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string): Se
   const permissions = new Map<string, TranscriptPermission>();
   const toolCalls = new Map<string, TranscriptToolCall>();
   const queued = new Map<string, TranscriptMessage>();
-  const removedRules = new Set<string>();
+  const removedRules = new Set<string>(rulesRemoved);
   const message = (messageId: string, role: MessageRole) => {
     let found = byId.get(messageId);
     if (found === undefined) {

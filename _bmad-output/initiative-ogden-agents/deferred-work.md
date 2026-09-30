@@ -94,3 +94,15 @@
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-tracer-bullet-sign-in-with-a-claude-subscription-through-a-h-plan.md`
   summary: On Windows CI, node-pty 1.1.0's conpty_console_list_agent.js prints an uncaught "AttachConsole failed" when a PTY that already exited is killed; no test fails, but it is noise (and a helper process crash). Kill through taskkill only, or skip node-pty's kill when the process is gone (story 9.6).
   evidence: PR #26 CI run, windows-latest Node 24/26 logs (twice per run).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-session-view-completes-part-b-history-and-streaming-plan.md`
+  summary: Resolved: the chat screen reads its own session's stream (`useSessionEvents`) with Show earlier, so a chat older than the workspace window opens with its latest page (2.9 OQ1), and the 2.2 streaming refold (web half) is gone.
+  evidence: `packages/web/src/routes/session-page.tsx`; `tests/e2e/session-history.spec.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-session-view-completes-part-b-history-and-streaming-plan.md`
+  summary: Resolved: the reconnect backlog is bounded (2.9 F2). A reconnect that missed more than `MAX_PAGE_EVENTS` events of a scope gets its window and `caught_up {reset: true}`; the client replaces that scope.
+  evidence: `packages/core/src/event-log.ts` `countAfter`; `packages/server/src/event-socket.ts`; `packages/server/test/event-socket.test.ts`; `packages/web/src/events/event-store.ts` `applyReset`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-session-view-completes-part-b-history-and-streaming-plan.md`
+  summary: Resolved: per-chunk cost and live growth in the web store (2.9 F3). Socket messages are applied once per frame in one batch, and each workspace's live list is trimmed to `MAX_LIVE_EVENTS` (2,000).
+  evidence: `packages/web/src/events/frame-batch.ts`; `event-store.ts` `applyEvents`, `trimWorkspaces`; `packages/web/test/frame-batch.test.ts`, `event-store.test.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-session-view-completes-part-b-history-and-streaming-plan.md`
+  summary: Install-scope scan cost (refactor sweep, story 2.12). The install scope's filter (`workspace_id IS NULL OR type = 'workspace.created'`) has no index on `type`, so `countAfter` and `subscribeScope` for the install scope may scan workspace rows after `afterSeq`. Add an index on `type` or a partial index for the install scope, after checking the query plan (`EXPLAIN QUERY PLAN`).
+  evidence: 2.10b review finding F5; `packages/core/src/event-log.ts` `scopeFilter`, `countAfter`; `events_workspace_seq_idx` serves the workspace scope only.

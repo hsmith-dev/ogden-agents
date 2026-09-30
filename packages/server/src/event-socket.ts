@@ -13,6 +13,10 @@
  * - `unsubscribe_workspace` stops one; `page_history` answers `history_page`
  *   with at most `MAX_PAGE_EVENTS` older events.
  *
+ * A reconnect (`afterSeq > 0`) that missed more than `MAX_PAGE_EVENTS` events
+ * of a scope gets that scope's window instead, and `caught_up {reset: true}`
+ * (story 2.10), so no message replays an unbounded backlog.
+ *
  * Each subscription ends its backlog with a `caught_up` naming its scope. An
  * unknown workspace is answered `request_failed` / `not_found`. The legacy
  * install-wide `subscribe { afterSeq }` still streams every event after
@@ -24,6 +28,7 @@ import {
   ClientMessage,
   ClientRequestType,
   DEFAULT_WINDOW_EVENTS,
+  MAX_PAGE_EVENTS,
   PageHistoryMessage,
   ServerMessage,
   WorkspaceId as WorkspaceIdSchema,
@@ -126,7 +131,14 @@ export function registerEventSocket(app: Hono, { events, log, tabs }: EventSocke
         request: { type: ClientRequestType; workspaceId?: WorkspaceId },
       ): ScopeSubscription | undefined => {
         let subscription: ScopeSubscription;
+        let reset = false;
         try {
+          // A reconnect that missed too much gets the window and a reset. The
+          // count (bounded) and the subscription run in the same synchronous tick.
+          if ('afterSeq' in from && from.afterSeq > 0 && events.countAfter(scope, from.afterSeq, MAX_PAGE_EVENTS + 1) > MAX_PAGE_EVENTS) {
+            reset = true;
+            from = { window: DEFAULT_WINDOW_EVENTS };
+          }
           subscription = events.subscribeScope(scope, from, (event) => send(ws, event));
         } catch (error) {
           if (error instanceof NotFoundError) fail(ws, request, 'not_found', 'That project does not exist.');
@@ -137,7 +149,7 @@ export function registerEventSocket(app: Hono, { events, log, tabs }: EventSocke
           return undefined;
         }
         // The backlog went out synchronously above; everything after this is live.
-        send(ws, { type: 'caught_up', scope, oldestSeq: subscription.oldestSeq, hasEarlier: subscription.hasEarlier });
+        send(ws, { type: 'caught_up', scope, oldestSeq: subscription.oldestSeq, hasEarlier: subscription.hasEarlier, ...(reset ? { reset: true } : {}) });
         return subscription;
       };
 

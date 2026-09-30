@@ -439,6 +439,29 @@ describe('subscribeScope (E2-R8)', () => {
   });
 });
 
+describe('countAfter (story 2.10)', () => {
+  it("counts a scope's events after a seq, at most the cap", () => {
+    const core = openTestCore();
+    appendStarted(core, 2);
+    const a = chat(core);
+    const b = chat(core);
+    for (let i = 0; i < 6; i++) {
+      appendDelta(core, a, `a${i}`, 'x');
+      appendDelta(core, b, `b${i}`, 'y');
+    }
+    const all = core.events.readAfter(0, { workspaceId: a.workspaceId }).filter((e) => e.type !== 'workspace.created');
+    // The workspace scope leaves out its own workspace.created, as subscribeScope does.
+    expect(core.events.countAfter(a.workspaceId, 0, 100)).toBe(all.length);
+    expect(core.events.countAfter(a.workspaceId, all[2]!.seq, 100)).toBe(all.length - 3);
+    expect(core.events.countAfter(a.workspaceId, 0, 3)).toBe(3);
+    expect(core.events.countAfter(a.workspaceId, core.events.lastSeq(), 100)).toBe(0);
+    // Install: the two server.started and both workspace.created.
+    expect(core.events.countAfter('install', 0, 100)).toBe(4);
+    expect(() => core.events.countAfter('install', -1, 10)).toThrow(RangeError);
+    expect(() => core.events.countAfter('install', 0, 0)).toThrow(RangeError);
+  });
+});
+
 describe('readBefore (E2-R8)', () => {
   it('pages back to the start, oldest first, and the pages concatenate to exactly readAfter', () => {
     const core = openTestCore();

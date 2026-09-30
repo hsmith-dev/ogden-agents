@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ogden Agents: workspace key screen</title>
+<style>
+/*
+  Key screen: workspace view (status sidebar + chat session + permission card).
+  Governing spine sections:
+    DESIGN.md: Colors, Typography, Layout & Spacing (density swap), Shapes,
+               Components (Status glyph, Status row, Needs you group, Workspace group,
+               Message user/agent, Tool-call row, Permission card, Composer, Driver toggle).
+    EXPERIENCE.md: Information Architecture (shell, tabs), Component Patterns
+               (Status sidebar, Needs you, Session view, Permission card, Driver toggle),
+               State Patterns (working/waiting/idle/done/error), Key Flows 1 step 6 and 2 step 3.
+  Frame 1: light theme, Comfortable density, Developer mode off (no terminal toggle).
+  Frame 2: dark theme, Compact density, Developer mode on (terminal toggle, kbd hints, tool calls listed).
+  Production uses self-hosted Geist / Geist Mono and Phosphor icons; this offline mock
+  falls back to system fonts and draws only the five status glyph shapes in CSS.
+  Spines win on conflict.
+*/
+.theme-light {
+  --background:#F6F7F5; --foreground:#141715; --card:#FBFCFA; --sidebar:#EEF1ED;
+  --muted:#ECEFEB; --muted-foreground:#5C645D; --accent:#E5E9E4; --border:#DCE0DA;
+  --input:#CCD2CB; --ring:#2F4FD8; --primary:#1B1F1C; --primary-foreground:#F6F7F5;
+  --destructive:#C2352C; --signal:#2F4FD8; --signal-subtle:#E5EAFC;
+  --state-working:#1E7A4C; --state-waiting:#2F4FD8; --state-idle:#7A817A;
+  --state-done:#4E5850; --state-error:#C2352C; --terminal:#101311;
+  --shadow: 0 8px 24px rgba(20,23,21,.10);
+}
+.theme-dark {
+  --background:#0F1210; --foreground:#E6EAE6; --card:#151916; --sidebar:#0B0E0C;
+  --muted:#1C211D; --muted-foreground:#959E96; --accent:#222823; --border:#262C27;
+  --input:#323933; --ring:#8198FF; --primary:#E6EAE6; --primary-foreground:#111412;
+  --destructive:#F0776B; --signal:#8198FF; --signal-subtle:#1A2042;
+  --state-working:#5BC68C; --state-waiting:#8198FF; --state-idle:#7E877F;
+  --state-done:#AEB7AF; --state-error:#F0776B; --terminal:#0A0C0B;
+  --shadow: 0 8px 24px rgba(0,0,0,.45);
+}
+.density-comfortable {
+  --row:40px; --pad:20px; --header:52px; --sidebar-w:272px;
+  --body-size:15px; --body-lh:1.55; --mono-size:13px;
+}
+.density-compact {
+  --row:30px; --pad:12px; --header:44px; --sidebar-w:232px;
+  --body-size:13px; --body-lh:1.45; --mono-size:12px;
+}
+:root {
+  --sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --r-sm:4px; --r-md:6px; --r-lg:10px;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+* { box-sizing: border-box; }
+html, body { margin:0; }
+body {
+  background:#D9DDD8; font-family:var(--sans); color:#141715;
+  padding:32px 16px 64px; font-feature-settings:"tnum" 1;
+}
+.caption-page { max-width:1320px; margin:0 auto 12px; font-size:13px; color:#3B423C; }
+.caption-page strong { font-weight:600; }
+
+/* Browser frame */
+.browser { max-width:1320px; margin:0 auto 48px; border-radius:12px; overflow:hidden;
+  box-shadow:0 20px 50px rgba(20,23,21,.18); border:1px solid rgba(20,23,21,.15); }
+.chrome { height:38px; background:#E3E6E2; display:flex; align-items:center; gap:12px; padding:0 14px; }
+.theme-dark .chrome, .chrome.dark { background:#1B1F1C; }
+.lights { display:flex; gap:6px; }
+.lights i { width:11px; height:11px; border-radius:50%; background:#C5CAC4; display:block; }
+.chrome.dark .lights i { background:#3A413B; }
+.url { flex:1; max-width:520px; margin:0 auto; height:24px; border-radius:6px; background:#F6F7F5;
+  font:12px/24px var(--mono); color:#5C645D; padding:0 10px; }
+.chrome.dark .url { background:#0F1210; color:#959E96; }
+
+/* App shell */
+.app { display:grid; grid-template-columns:var(--sidebar-w) 1fr; min-height:760px;
+  background:var(--background); color:var(--foreground); font-family:var(--sans); }
+
+/* Sidebar */
+.sidebar { background:var(--sidebar); border-right:1px solid var(--border); display:flex; flex-direction:column; padding:12px 10px; gap:14px; }
+.switcher { display:flex; align-items:center; justify-content:space-between; padding:4px 8px; }
+.wordmark { font-weight:600; font-size:14px; letter-spacing:-0.01em; }
+.addbtn { font-size:12px; font-weight:500; color:var(--muted-foreground); border:1px solid var(--border);
+  border-radius:var(--r-md); padding:3px 8px; background:transparent; }
+.needs { background:var(--signal-subtle); border-radius:var(--r-lg); padding:8px 6px 6px; }
+.needs-head { display:flex; justify-content:space-between; align-items:center; padding:0 6px 6px; font-size:13px; font-weight:600; }
+.needs-head .count { color:var(--signal); font-variant-numeric:tabular-nums; }
+.group-label { font-size:13px; font-weight:600; padding:4px 8px; display:flex; align-items:center; gap:6px; }
+.chev { width:0; height:0; border-left:4px solid transparent; border-right:4px solid transparent; border-top:5px solid var(--muted-foreground); }
+.chev.closed { transform:rotate(-90deg); }
+.summary { margin-left:auto; display:flex; gap:8px; font-size:12px; font-weight:400; color:var(--muted-foreground); }
+.summary span { display:inline-flex; align-items:center; gap:4px; }
+.row { display:grid; grid-template-columns:14px 1fr auto; align-items:center; gap:8px;
+  min-height:var(--row); padding:0 8px; border-radius:var(--r-md); font-size:13px; font-weight:500; position:relative; }
+.row:hover { background:var(--accent); }
+.row.selected { background:var(--card); box-shadow:inset 0 0 0 1px var(--border); }
+.row.waiting::before { content:""; position:absolute; left:0; top:6px; bottom:6px; width:2px; border-radius:2px; background:var(--signal); }
+.row .title { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.row .sub { display:block; overflow:hidden; text-overflow:ellipsis; font-size:12px; font-weight:400; color:var(--muted-foreground); }
+.density-compact .row .sub { display:none; }
+.row time { font-size:12px; color:var(--muted-foreground); font-weight:400; font-variant-numeric:tabular-nums; }
+.row .ws { font-size:12px; font-weight:400; color:var(--muted-foreground); }
+.sidebar-foot { margin-top:auto; border-top:1px solid var(--border); padding:10px 8px 2px; font-size:12px; color:var(--muted-foreground); display:flex; justify-content:space-between; }
+
+/* Status glyphs: one shape per state */
+.g { width:10px; height:10px; display:inline-block; flex:none; }
+.g.working { border-radius:50%; background:var(--state-working); }
+.g.waiting { border-radius:50%; background:var(--state-waiting); box-shadow:0 0 0 2px var(--background), 0 0 0 3.5px var(--state-waiting); width:8px; height:8px; margin:1px; }
+.g.idle { border-radius:50%; border:1.5px solid var(--state-idle); }
+.g.done { width:5px; height:9px; border:solid var(--state-done); border-width:0 2px 2px 0; transform:rotate(45deg) translate(-1px,-1px); margin:0 3px; }
+.g.error { width:8px; height:8px; background:var(--state-error); transform:rotate(45deg); margin:1px; }
+@media (prefers-reduced-motion: no-preference) {
+  .g.working { animation:breathe 1.6s ease-in-out infinite; }
+  @keyframes breathe { 0%,100% { opacity:1 } 50% { opacity:.45 } }
+}
+.sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
+
+/* Workspace area */
+.main { display:flex; flex-direction:column; min-width:0; }
+.ws-header { height:var(--header); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:24px; padding:0 24px; }
+.ws-name { font-size:14px; font-weight:600; }
+.ws-name .path { font:400 12px var(--mono); color:var(--muted-foreground); margin-left:8px; }
+.tabs { display:flex; gap:4px; height:100%; }
+.tab { display:flex; align-items:center; padding:0 10px; font-size:13px; font-weight:500; color:var(--muted-foreground); border-bottom:2px solid transparent; }
+.tab.active { color:var(--foreground); border-bottom-color:var(--foreground); }
+.ws-header .spacer { flex:1; }
+.kbd { font:12px var(--mono); background:var(--muted); border:1px solid var(--border); border-radius:var(--r-sm); padding:1px 5px; color:var(--muted-foreground); }
+
+.session-head { display:flex; align-items:center; gap:14px; padding:14px 24px; border-bottom:1px solid var(--border); }
+.session-title { font-size:20px; font-weight:600; letter-spacing:-0.01em; }
+.density-compact .session-title { font-size:16px; }
+.state-chip { display:inline-flex; align-items:center; gap:7px; font-size:13px; font-weight:500; }
+.meta { font-size:12px; color:var(--muted-foreground); }
+.driver { margin-left:auto; display:inline-flex; background:var(--muted); border-radius:var(--r-md); padding:2px; }
+.driver span { font-size:13px; font-weight:500; padding:4px 12px; border-radius:5px; color:var(--muted-foreground); }
+.driver span.on { background:var(--card); color:var(--foreground); box-shadow:inset 0 0 0 1px var(--border); }
+
+.transcript { flex:1; padding:28px 24px 12px; }
+.column { max-width:760px; margin:0 auto; display:flex; flex-direction:column; gap:18px; font-size:var(--body-size); line-height:var(--body-lh); }
+.density-compact .column { gap:12px; }
+.msg-user { align-self:flex-end; max-width:85%; background:var(--muted); border-radius:var(--r-lg); padding:12px 16px; }
+.msg-meta { font-size:12px; color:var(--muted-foreground); margin-bottom:4px; }
+.msg-agent p { margin:0 0 8px; }
+.msg-agent p:last-child { margin:0; }
+code { font-family:var(--mono); font-size:.9em; background:var(--muted); border-radius:var(--r-sm); padding:1px 5px; }
+.tool { display:flex; align-items:center; gap:10px; border:1px solid var(--border); border-radius:var(--r-md);
+  padding:7px 12px; font-size:13px; color:var(--muted-foreground); }
+.density-compact .tool { padding:4px 10px; font-size:12px; }
+.tool .verb { color:var(--foreground); font-weight:500; }
+.tool .target { font-family:var(--mono); font-size:var(--mono-size); }
+.tool .more { margin-left:auto; font-size:12px; }
+.tools { display:flex; flex-direction:column; gap:4px; }
+
+/* Permission card */
+.perm { background:var(--card); border:1px solid var(--border); border-radius:var(--r-lg); padding:var(--pad);
+  position:relative; overflow:hidden; box-shadow:none; }
+.perm::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--signal); }
+.perm h3 { margin:0 0 4px; font-size:15px; font-weight:600; line-height:1.35; display:flex; align-items:center; gap:8px; }
+.perm .why { margin:0 0 12px; color:var(--muted-foreground); font-size:var(--body-size); }
+.cmd { font:var(--mono-size)/1.5 var(--mono); background:var(--muted); border-radius:var(--r-md); padding:10px 12px; margin-bottom:10px; overflow-x:auto; white-space:nowrap; }
+.perm .context { font-size:12px; color:var(--muted-foreground); margin-bottom:14px; }
+.actions { display:flex; gap:10px; align-items:flex-start; flex-wrap:wrap; }
+.btn { font:500 13px/1 var(--sans); height:36px; padding:0 14px; border-radius:var(--r-md); border:1px solid transparent; display:inline-flex; align-items:center; gap:8px; white-space:nowrap; cursor:pointer; }
+.density-compact .btn { height:30px; padding:0 12px; }
+.btn:active { transform:scale(.98); }
+.btn-primary { background:var(--primary); color:var(--primary-foreground); }
+.btn-outline { background:transparent; color:var(--foreground); border-color:var(--border); }
+.btn-destructive { background:transparent; color:var(--destructive); border-color:var(--border); }
+.btn:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+.stack { display:flex; flex-direction:column; gap:4px; align-items:flex-start; }
+.scope { font-size:12px; color:var(--muted-foreground); padding-left:2px; }
+.record { font-size:12px; color:var(--muted-foreground); display:flex; align-items:center; gap:8px; }
+
+/* Composer */
+.composer-wrap { padding:8px 24px 22px; }
+.composer { max-width:760px; margin:0 auto; background:var(--card); border:1px solid var(--input); border-radius:var(--r-lg); padding:12px 14px 10px; }
+.composer .ph { color:var(--muted-foreground); font-size:var(--body-size); min-height:44px; }
+.density-compact .composer .ph { min-height:30px; }
+.composer .foot { display:flex; align-items:center; justify-content:space-between; font-size:12px; color:var(--muted-foreground); }
+.send { width:30px; height:30px; border-radius:var(--r-md); background:var(--primary); display:inline-flex; align-items:center; justify-content:center; }
+.send i { width:0; height:0; border-top:5px solid transparent; border-bottom:5px solid transparent; border-left:8px solid var(--primary-foreground); margin-left:2px; }
+
+@media (max-width: 900px) {
+  .app { grid-template-columns:56px 1fr; }
+  .sidebar > *:not(.switcher) .title, .sidebar .sub, .sidebar time, .sidebar .ws, .needs-head, .group-label, .sidebar-foot, .addbtn, .wordmark { display:none; }
+  .row { grid-template-columns:1fr; justify-items:center; }
+  .ws-header .path, .tabs { display:none; }
+}
+</style>
+</head>
+<body>
+
+<p class="caption-page"><strong>Frame 1.</strong> Light theme, Comfortable density, Developer mode off. Rosa's planning session in <code>clay-and-kiln</code> is waiting on a permission card (Flow 1, step 6). The Needs you group gathers what is waiting across every workspace.</p>
+
+<div class="browser">
+  <div class="chrome"><div class="lights"><i></i><i></i><i></i></div><div class="url">127.0.0.1:4317/w/clay-and-kiln/s/plan-booking-app</div></div>
+  <div class="app theme-light density-comfortable">
+
+    <aside class="sidebar" aria-label="All sessions">
+      <div class="switcher"><span class="wordmark">Ogden Agents</span><button class="addbtn">Add project</button></div>
+
+      <section class="needs" aria-label="Needs you">
+        <div class="needs-head"><span>Needs you</span><span class="count">2</span></div>
+        <div class="row waiting"><span class="g waiting"></span><span class="title">Wants to create a file<span class="sub">Clay and kiln, Claude Code</span></span><time>now</time></div>
+        <div class="row waiting"><span class="g waiting"></span><span class="title">2.1 Subscriber import<span class="sub">Letterpress digest, ready for review</span></span><time>6m</time></div>
+      </section>
+
+      <section>
+        <div class="group-label"><i class="chev"></i>clay-and-kiln</div>
+        <div class="row selected"><span class="g waiting" aria-hidden="true"></span><span class="title">Plan the booking app<span class="sub">Claude Code, waiting</span></span><time>now</time></div>
+        <div class="row"><span class="g idle" aria-hidden="true"></span><span class="title">Questions about hosting<span class="sub">Claude Code, idle</span></span><time>2d</time></div>
+      </section>
+
+      <section>
+        <div class="group-label"><i class="chev"></i>letterpress-digest</div>
+        <div class="row"><span class="g working" aria-hidden="true"></span><span class="title">Build 2.2 Weekly send<span class="sub">Codex, working</span></span><time>14m</time></div>
+        <div class="row"><span class="g working" aria-hidden="true"></span><span class="title">Build 2.3 Unsubscribe link<span class="sub">Codex, working</span></span><time>11m</time></div>
+        <div class="row"><span class="g done" aria-hidden="true"></span><span class="title">Build 2.1 Subscriber import<span class="sub">Codex, done</span></span><time>6m</time></div>
+      </section>
+
+      <section>
+        <div class="group-label"><i class="chev closed"></i>st-brendan-rota
+          <span class="summary"><span><i class="g working"></i>1</span><span><i class="g error"></i>1</span></span>
+        </div>
+      </section>
+
+      <div class="sidebar-foot"><span>Running on this computer</span><span>Settings</span></div>
+    </aside>
+
+    <main class="main">
+      <header class="ws-header">
+        <div class="ws-name">clay-and-kiln<span class="path">~/Projects/clay-and-kiln</span></div>
+        <nav class="tabs" aria-label="Workspace"><span class="tab active">Chats</span><span class="tab">Plan</span><span class="tab">Board</span><span class="tab">Runs</span></nav>
+      </header>
+
+      <div class="session-head">
+        <div>
+          <div class="session-title">Plan the booking app</div>
+          <div class="meta">Claude Code, started 18 minutes ago</div>
+        </div>
+        <span class="state-chip"><span class="g waiting"></span>Waiting for you</span>
+      </div>
+
+      <div class="transcript">
+        <div class="column">
+          <div class="msg-user">A booking page for my pottery classes where students pick a date and pay a 20 dollar deposit.</div>
+
+          <div class="msg-agent">
+            <div class="msg-meta">Claude Code</div>
+            <p>Got it. Before I write this up, three quick questions: how many students fit in one class, do you want to refund the deposit if someone cancels, and should you get an email for each booking?</p>
+          </div>
+
+          <div class="msg-user">Eight per class. Refund if they cancel two days ahead. Yes, email me.</div>
+
+          <div class="msg-agent">
+            <div class="msg-meta">Claude Code</div>
+            <p>That is everything I need. I have written a spec for the booking page with class sizes, the deposit and the refund rule, and I would like to save it in your project.</p>
+          </div>
+
+          <div class="tool"><span class="verb">Read</span><span>4 files, searched the project once</span><span class="more">Show</span></div>
+
+          <section class="perm" aria-label="Permission request">
+            <h3><span class="g waiting"></span>Claude Code wants to create a file</h3>
+            <p class="why">This saves the spec it just wrote so you can review it and turn it into tickets.</p>
+            <div class="cmd">_bmad-output/clay-and-kiln/spec-clay-and-kiln/spec-clay-and-kiln.md</div>
+            <div class="context">Project clay-and-kiln. Caution level: Ask every time.</div>
+            <div class="actions">
+              <button class="btn btn-primary">Allow once</button>
+              <div class="stack"><button class="btn btn-outline">Always allow</button><span class="scope">Creating files in clay-and-kiln</span></div>
+              <button class="btn btn-destructive">Deny</button>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="composer-wrap">
+        <div class="composer">
+          <div class="ph">Reply to Claude Code</div>
+          <div class="foot"><span>Claude Code</span><span class="send" aria-label="Send"><i></i></span></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<p class="caption-page"><strong>Frame 2.</strong> Dark theme, Compact density, Developer mode on. Tomasz's Codex chat in <code>ledger-api</code> (Flow 2, step 3): tool calls listed one per row, Chat and Terminal toggle in the header, keyboard hints on the permission card. An earlier decision shows as its collapsed record line.</p>
+
+<div class="browser">
+  <div class="chrome dark"><div class="lights"><i></i><i></i><i></i></div><div class="url">127.0.0.1:4317/w/ledger-api/s/split-reconciliation</div></div>
+  <div class="app theme-dark density-compact">
+
+    <aside class="sidebar" aria-label="All sessions">
+      <div class="switcher"><span class="wordmark">Ogden Agents</span><button class="addbtn">Add project</button></div>
+
+      <section class="needs" aria-label="Needs you">
+        <div class="needs-head"><span>Needs you</span><span class="count">1</span></div>
+        <div class="row waiting"><span class="g waiting"></span><span class="title">pnpm test --filter reconc...</span><span class="ws">ledger</span></div>
+      </section>
+
+      <section>
+        <div class="group-label"><i class="chev"></i>ledger-api</div>
+        <div class="row selected"><span class="g waiting"></span><span class="title">Split reconciliation job</span><time>now</time></div>
+        <div class="row"><span class="g working"></span><span class="title">Build 4.2 Idempotency keys</span><time>9m</time></div>
+        <div class="row"><span class="g working"></span><span class="title">Build 4.3 Retry backoff</span><time>9m</time></div>
+        <div class="row"><span class="g error"></span><span class="title">Build 4.1 Ledger export</span><time>41m</time></div>
+        <div class="row"><span class="g idle"></span><span class="title">Why is CI slow</span><time>3d</time></div>
+      </section>
+
+      <section>
+        <div class="group-label"><i class="chev"></i>dotfiles</div>
+        <div class="row"><span class="g done"></span><span class="title">Tidy zsh prompt</span><time>1d</time></div>
+      </section>
+
+      <section>
+        <div class="group-label"><i class="chev closed"></i>ogden-agents
+          <span class="summary"><span><i class="g working"></i>3</span><span><i class="g idle"></i>2</span></span>
+        </div>
+      </section>
+
+      <div class="sidebar-foot"><span>Running on this computer</span><span class="kbd">⌘K</span></div>
+    </aside>
+
+    <main class="main">
+      <header class="ws-header">
+        <div class="ws-name">ledger-api<span class="path">~/code/ledger-api</span></div>
+        <nav class="tabs" aria-label="Workspace"><span class="tab active">Chats</span><span class="tab">Plan</span><span class="tab">Board</span><span class="tab">Runs</span></nav>
+        <span class="spacer"></span><span class="kbd">g c</span>
+      </header>
+
+      <div class="session-head">
+        <div>
+          <div class="session-title">Split reconciliation job</div>
+          <div class="meta">Codex, main, started 7 minutes ago</div>
+        </div>
+        <span class="state-chip"><span class="g waiting"></span>Waiting for you</span>
+        <div class="driver" role="group" aria-label="Who drives this session"><span class="on">Chat</span><span>Terminal <span class="kbd">⌘.</span></span></div>
+      </div>
+
+      <div class="transcript">
+        <div class="column">
+          <div class="msg-user">Split the reconciliation job into a producer and a consumer; keep the current tests green.</div>
+
+          <div class="tools">
+            <div class="tool"><span class="verb">Read</span><span class="target">src/jobs/reconcile.ts</span></div>
+            <div class="tool"><span class="verb">Read</span><span class="target">src/jobs/reconcile.test.ts</span></div>
+            <div class="tool"><span class="verb">Read</span><span class="target">src/queue/index.ts</span></div>
+            <div class="tool"><span class="verb">Edited</span><span class="target">src/jobs/reconcile-producer.ts</span><span class="more">+84</span></div>
+            <div class="tool"><span class="verb">Edited</span><span class="target">src/jobs/reconcile-consumer.ts</span><span class="more">+61 -3</span></div>
+            <div class="tool"><span class="verb">Edited</span><span class="target">src/jobs/reconcile.ts</span><span class="more">+12 -118</span></div>
+          </div>
+
+          <div class="record"><span class="g done"></span>Allowed once: pnpm tsc --noEmit, 3 minutes ago</div>
+
+          <div class="msg-agent">
+            <div class="msg-meta">Codex</div>
+            <p>The split compiles. Producer batches unmatched entries onto <code>reconcile.pending</code>; the consumer acks per batch. I want to run the reconciliation tests next.</p>
+          </div>
+
+          <section class="perm" aria-label="Permission request">
+            <h3><span class="g waiting"></span>Codex wants to run a command</h3>
+            <div class="cmd">pnpm test --filter reconciliation</div>
+            <div class="context">Project ledger-api. Caution level: Ask for commands.</div>
+            <div class="actions">
+              <button class="btn btn-primary">Allow once <span class="kbd">1</span></button>
+              <div class="stack"><button class="btn btn-outline">Always allow <span class="kbd">2</span></button><span class="scope">pnpm test in ledger-api</span></div>
+              <button class="btn btn-destructive">Deny <span class="kbd">3</span></button>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="composer-wrap">
+        <div class="composer">
+          <div class="ph">Reply to Codex</div>
+          <div class="foot"><span>Codex <span class="kbd">/</span></span><span class="send" aria-label="Send"><i></i></span></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+</body>
+</html>

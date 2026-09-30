@@ -1,6 +1,6 @@
 /**
- * Launcher end to end: runs the real `bin/ogdenmad.js` against the built server
- * and web UI (`pnpm test` builds first).
+ * Launcher end to end: runs the real `bin/ogdenmad.js` against the assembled
+ * `dist/` (the bundled server and web UI; `pnpm test` builds first).
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
@@ -19,7 +19,9 @@ function launch(args: string[]) {
   children.push(child);
   let stdout = '';
   child.stdout!.on('data', (chunk) => (stdout += String(chunk)));
-  const exited = new Promise<number | null>((resolve) => child.once('exit', (code) => resolve(code)));
+  const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
+    child.once('exit', (code, signal) => resolve({ code, signal })),
+  );
   const url = new Promise<string>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`no URL printed; stdout: ${stdout}`)), 10_000);
     child.stdout!.on('data', () => {
@@ -44,11 +46,17 @@ describe('bin/ogdenmad.js', () => {
     expect(await response.text()).toContain('<div id="root"></div>');
 
     child.kill('SIGTERM');
-    expect(await exited).toBe(0);
+    const { code, signal } = await exited;
+    // On Windows there are no signals: Node terminates the process without
+    // running the SIGTERM handler, so `exited` resolving (above) is the check.
+    if (process.platform !== 'win32') {
+      // POSIX delivers SIGTERM, and the launcher shuts the server down cleanly.
+      expect({ code, signal }).toEqual({ code: 0, signal: null });
+    }
   });
 
   it('rejects an invalid --port with exit code 2', async () => {
     const { exited } = launch(['--no-open', '--port', 'abc']);
-    expect(await exited).toBe(2);
+    expect((await exited).code).toBe(2);
   });
 });

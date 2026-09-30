@@ -1,6 +1,18 @@
 # OgdenMad
 
+[![CI](https://github.com/hsmith-dev/ogdenmad/actions/workflows/ci.yml/badge.svg)](https://github.com/hsmith-dev/ogdenmad/actions/workflows/ci.yml)
+
 A local browser UI for running BMAD with coding agents. Early development: the current build is the tracer bullet from launcher to live page.
+
+## Install
+
+Once published, OgdenMad runs with one command and needs no checkout:
+
+```sh
+npx ogdenmad
+```
+
+It is not on npm yet. Until then, run it from a checkout as below.
 
 ## Requirements
 
@@ -29,9 +41,15 @@ The server binds only to `127.0.0.1`. It tries port 4317 first and moves to the 
 
 ```sh
 pnpm typecheck   # tsc across every package, the launcher and the tests
-pnpm test        # Vitest: architecture rules and server tests
-pnpm build       # tsdown bundles packages/server, Vite builds packages/web
+pnpm test        # builds, then Vitest: architecture, packaging, launcher and server tests
+pnpm build       # tsdown bundles packages/server, Vite builds packages/web, both copied into dist/
+pnpm run pack    # builds, then writes the publishable tarball ogdenmad-<version>.tgz
+pnpm smoke       # installs that tarball with npx in an empty temp dir and checks it serves the page
 ```
+
+The root `ogdenmad` package is the only publishable artifact. `pnpm build` writes a self-contained `dist/` (`dist/server.js`, the server with every `@ogdenmad/*` package bundled in, and `dist/web/`, the UI), and `bin/ogdenmad.js` loads it by relative path. Third-party runtime dependencies are declared in the root `dependencies`; `tests/packaging.test.ts` fails if the bundle imports anything undeclared or the tarball picks up workspace sources.
+
+CI runs typecheck, tests, pack and the clean-install smoke test on macOS, Windows and Linux, each on Node 24 and 26.
 
 ## Layout
 

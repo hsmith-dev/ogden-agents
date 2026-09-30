@@ -5,5 +5,5 @@
     "checkJs": true,
     "types": ["node"]
   },
-  "include": ["bin/**/*.js", "tests/**/*.ts", "vitest.config.ts"]
+  "include": ["bin/**/*.js", "scripts/**/*.mjs", "tests/**/*.ts", "vitest.config.ts"]
 }

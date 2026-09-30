@@ -1,8 +1,16 @@
 #!/usr/bin/env node
 // OgdenMad launcher: starts the local server and opens the browser.
 // Background detaching (story 1.7) and the version handshake (AD-20) come later.
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { start } from '@ogdenmad/server';
+
+// The server bundle and the UI are loaded by path relative to this file, so the
+// same launcher runs from a built checkout (`pnpm build`) and from the installed
+// package, where `dist/` sits next to `bin/`. The specifier is computed so that
+// type checking does not need a build; the types come from the server's source.
+const SERVER_BUNDLE = new URL('../dist/server.js', import.meta.url);
+const WEB_ROOT = fileURLToPath(new URL('../dist/web', import.meta.url));
 
 const USAGE = `Usage: ogdenmad [--port <number>] [--no-open]
 
@@ -47,8 +55,20 @@ async function main() {
     process.exit(2);
   }
 
+  // Checked after parsing, so `--help` and argument errors work without a build.
+  if (!existsSync(SERVER_BUNDLE)) {
+    console.error('OgdenMad is not built: dist/server.js is missing. Run `pnpm build` first.');
+    process.exit(1);
+  }
+  /** @type {typeof import('@ogdenmad/server')} */
+  const { start } = await import(SERVER_BUNDLE.href);
+
   // The server opens the browser itself (using `open`) once it is listening.
-  const server = await start(cli.port === undefined ? { open: cli.open } : { port: cli.port, open: cli.open });
+  const server = await start(
+    cli.port === undefined
+      ? { open: cli.open, webRoot: WEB_ROOT }
+      : { port: cli.port, open: cli.open, webRoot: WEB_ROOT },
+  );
   console.log(`OgdenMad is running at ${server.url}`);
 
   const shutdown = () => {

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
@@ -15,8 +16,22 @@ export const DEFAULT_PORT = 4317;
 /** How many consecutive ports to try before giving up. */
 export const PORT_ATTEMPTS = 20;
 
-/** `packages/web/dist`, resolved from both `src/start.ts` and the bundled `dist/index.js`. */
-const DEFAULT_WEB_ROOT = fileURLToPath(new URL('../../web/dist', import.meta.url));
+/**
+ * Where the built UI is when no `webRoot` is given, in order:
+ * - `./web` beside the root bundle (`dist/server.js` next to `dist/web/`, as packed);
+ * - `packages/web/dist` in the workspace, resolved from `src/start.ts` or
+ *   `packages/server/dist/server.js`.
+ * The first that exists wins; if neither does, the workspace path is used and
+ * `/` answers that the UI is not built.
+ */
+const WEB_ROOT_CANDIDATES = [
+  fileURLToPath(new URL('./web', import.meta.url)),
+  fileURLToPath(new URL('../../web/dist', import.meta.url)),
+] as const;
+
+function defaultWebRoot(): string {
+  return WEB_ROOT_CANDIDATES.find((dir) => existsSync(dir)) ?? WEB_ROOT_CANDIDATES[1];
+}
 
 export interface StartOptions {
   /** Port to try first. `0` asks the OS for any free port. Default {@link DEFAULT_PORT}. */
@@ -42,7 +57,7 @@ export async function start(options: StartOptions = {}): Promise<RunningServer> 
   const log = options.log ?? createLogger();
   const bus = options.bus ?? createEventBus();
   const requested = options.port ?? DEFAULT_PORT;
-  const app = createApp({ bus, webRoot: options.webRoot ?? DEFAULT_WEB_ROOT, log });
+  const app = createApp({ bus, webRoot: options.webRoot ?? defaultWebRoot(), log });
 
   let bound: { server: ReturnType<typeof createAdaptorServer>; wss: WebSocketServer; port: number } | undefined;
   let lastTried = requested;

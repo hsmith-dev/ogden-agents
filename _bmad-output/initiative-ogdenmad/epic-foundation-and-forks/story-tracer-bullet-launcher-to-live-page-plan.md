@@ -76,7 +76,7 @@ Verified APIs:
 - [x] `bin/ogdenmad.js` -- parses `--no-open` and `--port`, calls the server's `start`, prints the URL, and opens the browser with `open`. This is the entry point.
 - [x] `tests/architecture.test.ts` -- reads every workspace `package.json` and fails on any dependency edge outside AD-1, enforcing the layout in code.
 - [x] `packages/server/test/start.test.ts` -- starts on port 0 with `open: false`, connects with `ws`, and asserts that a schema-valid `server.started` arrives, including after a late connect; also checks a bad client message is ignored. This covers the I/O matrix.
-- [ ] hitl: the user reserves the `ogdenmad` npm name (publishing `0.0.0` from an empty placeholder after `npm login`). It's done at the end of implementation, with the user's confirmation.
+- [x] hitl: the user reserves the `ogdenmad` npm name (publishing `0.0.0` from an empty placeholder after `npm login`). It's done at the end of implementation, with the user's confirmation.
 
 **Acceptance Criteria:**
 - Given a clean checkout with Node ≥ 24, when the user runs `pnpm install && pnpm start`, then a browser page opens and shows a live `server.started` event from the running server.
@@ -92,6 +92,7 @@ Verified APIs:
 - Logs are JSON lines on stderr (data-directory log file comes later). `exactOptionalPropertyTypes` was left off because `ws`'s `WebSocketServer` types don't satisfy `@hono/node-server`'s `WebSocketServerLike` under it.
 - `pnpm install` added a `minimumReleaseAgeExclude` list to `pnpm-workspace.yaml` for three recently published packages (pnpm 12 supply-chain default).
 - Matrix test audit (orchestrator): the Launch and --no-open rows had no automated test (verified by hand only). Added `tests/launcher.test.ts` (runs the real `bin/ogdenmad.js --no-open --port 0`, fetches the page, SIGTERM exits 0; invalid `--port` exits 2) and `packages/server/test/open.test.ts` (mocks `open`: called with the URL when asked, not otherwise, and a failure only warns). `pnpm test` now builds first so the launcher test runs against real output. Result: 15 tests in 4 files pass, none skipped; typecheck clean.
+- 2026-09-29: the user published the empty placeholder `ogdenmad@0.0.0` (npm account `harrisonsmith.ai`, web 2FA) from a separate folder, reserving the name; the first real release is `0.1.0` (story 1.10).
 
 ## Plan Change Log
 

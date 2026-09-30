@@ -20,7 +20,7 @@ const RELEASE_FILE = fileURLToPath(new URL('../packages/adapters/src/toolchain-u
 /** @type {{ version: string, baseUrl: string, archives: Record<string, Archive> }} */
 const release = JSON.parse(readFileSync(RELEASE_FILE, 'utf8'));
 
-const ATTEMPTS = 3;
+const ATTEMPTS = 5;
 
 /**
  * Downloads `url` and returns its lowercase hex SHA-256 and its size.
@@ -50,7 +50,7 @@ async function sha256WithRetry(url) {
       return await sha256Of(url);
     } catch (error) {
       lastError = error;
-      if (attempt < ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
+      if (attempt < ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, 5000 * 2 ** (attempt - 1)));
     }
   }
   throw lastError;

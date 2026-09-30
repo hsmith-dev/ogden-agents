@@ -88,3 +88,6 @@
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-caution-level-per-project-plan.md`
   summary: At Ask for commands and Ask only for risky actions, the `think` kind is auto-allowed, and Claude Code reports helper-agent launches (Agent/Task) and TodoWrite as `think`. So a helper agent starts without a card; each of its own tool calls still goes through the level, rules and cards. Say so in the caution-level copy in EXPERIENCE.md (and the settings page descriptions) later.
   evidence: 2.8 review finding F3; `packages/core/src/permissions.ts` `cautionAllows`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-caution-level-per-project-plan.md`
+  summary: One e2e test failed once locally on a toHaveAttribute check after 2.8 was rebased onto 9.1, then passed four full reruns; find and fix the flake (story 2.13, the end-to-end suite).
+  evidence: 2026-09-30 local run: 1 failed, 63 passed; the next four runs were 64/64. CI retries once, which hides a rare flake.

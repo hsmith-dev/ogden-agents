@@ -15,6 +15,13 @@
       "when": 1790754247900,
       "tag": "0001_workspace_real_path",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790781763595,
+      "tag": "0002_permission_rules",
+      "breakpoints": true
     }
   ]
 }

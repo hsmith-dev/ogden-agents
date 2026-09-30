@@ -36,6 +36,74 @@ describe('sessionView', () => {
 
   it("ignores other sessions' events, and knows nothing of a session it never saw created", () => {
     const view = sessionView([event('session.message_delta', { messageId: 'x', role: 'agent', text: 'other' }, 'ses_2')], 'ses_1');
-    expect(view).toEqual({ known: false, state: undefined, errorReason: undefined, messages: [] });
+    expect(view).toEqual({ known: false, state: undefined, errorReason: undefined, messages: [], items: [], pendingPermissions: [] });
+  });
+});
+
+const requested = (requestId: string, command = 'npm test', scope: unknown = { kind: 'command_prefix', value: 'npm test', label: 'npm test' }) =>
+  event('permission.requested', {
+    sessionId: 'ses_1',
+    requestId,
+    toolCall: { toolCallId: `t-${requestId}`, title: `Run ${command}`, kind: 'execute', command },
+    alwaysAllowScope: scope,
+    cautionLevel: 'ask_every_time',
+  });
+const resolved = (requestId: string, decision: string, by: string, extra: Record<string, unknown> = {}) =>
+  event('permission.resolved', { sessionId: 'ses_1', requestId, decision, by, ...extra });
+
+describe('sessionView: permission requests (story 2.6)', () => {
+  it('folds a request in order among the messages, pending while the session waits', () => {
+    const events = [created(), completed('u1', 'user', 'Run the tests'), stateChanged('working', 'idle'), requested('p1'), stateChanged('waiting', 'working')];
+    const view = sessionView(events, 'ses_1');
+    expect(view.items.map((item) => item.type)).toEqual(['message', 'permission']);
+    expect(view.pendingPermissions.map((p) => p.requestId)).toEqual(['p1']);
+    expect(view.pendingPermissions[0]).toMatchObject({
+      status: 'pending',
+      toolCall: { command: 'npm test', kind: 'execute' },
+      scope: { value: 'npm test' },
+      cautionLevel: 'ask_every_time',
+      resolution: undefined,
+    });
+  });
+
+  it('a decision resolves it with its reason; the reply after it follows in order', () => {
+    const events = [
+      created(),
+      stateChanged('working', 'idle'),
+      requested('p1'),
+      stateChanged('waiting', 'working'),
+      resolved('p1', 'deny', 'user', { reason: 'Not now' }),
+      stateChanged('working', 'waiting'),
+      completed('a1', 'agent', 'Denied npm test.'),
+      stateChanged('idle', 'working'),
+    ];
+    const view = sessionView(events, 'ses_1');
+    expect(view.items.map((item) => (item.type === 'message' ? item.message.text : item.permission.requestId))).toEqual(['p1', 'Denied npm test.']);
+    expect(view.pendingPermissions).toEqual([]);
+    const [first] = view.items;
+    expect(first?.type === 'permission' && first.permission).toMatchObject({ status: 'resolved', resolution: { decision: 'deny', by: 'user', reason: 'Not now' } });
+  });
+
+  it('a request with no answer once the session stopped waiting is unanswered (after a restart)', () => {
+    const events = [created(), stateChanged('working', 'idle'), requested('p1'), stateChanged('waiting', 'working'), stateChanged('idle', 'waiting', 'Ogden Agents was restarted')];
+    const view = sessionView(events, 'ses_1');
+    expect(view.pendingPermissions).toEqual([]);
+    const [item] = view.items;
+    expect(item?.type === 'permission' && item.permission.status).toBe('unanswered');
+  });
+
+  it('knows a rule was undone from the workspace stream', () => {
+    const events = [
+      created(),
+      stateChanged('working', 'idle'),
+      requested('p1'),
+      resolved('p1', 'allow_always', 'user', { ruleId: 'rule_1' }),
+      requested('p2', 'npm test --watch'),
+      resolved('p2', 'allow_once', 'rule', { ruleId: 'rule_1' }),
+    ];
+    const before = sessionView(events, 'ses_1');
+    expect(before.items.map((item) => item.type === 'permission' && item.permission.resolution?.ruleRemoved)).toEqual([false, false]);
+    const after = sessionView([...events, event('workspace.permission_rule_removed', { ruleId: 'rule_1' }, 'ws_1')], 'ses_1');
+    expect(after.items.map((item) => item.type === 'permission' && item.permission.resolution?.ruleRemoved)).toEqual([true, true]);
   });
 });

@@ -219,6 +219,28 @@ function commandOf(rawInput: unknown): string | undefined {
   return typeof command === 'string' ? command : undefined;
 }
 
+/** Input fields that name a file or folder, in the tools Claude Code reports. */
+const PATH_FIELDS = ['file_path', 'notebook_path', 'path'] as const;
+
+/**
+ * Every path a tool call names: its locations, its diffs, and the path
+ * fields of its raw input. Core lets a file-kind rule match only when all
+ * of them lie inside the workspace, so naming more paths only narrows it.
+ */
+function pathsOf(toolCall: acp.ToolCallUpdate): string[] {
+  const paths = new Set<string>();
+  for (const location of toolCall.locations ?? []) if (typeof location.path === 'string') paths.add(location.path);
+  for (const item of toolCall.content ?? []) if (item.type === 'diff' && typeof item.path === 'string') paths.add(item.path);
+  const raw = toolCall.rawInput;
+  if (typeof raw === 'object' && raw !== null) {
+    for (const field of PATH_FIELDS) {
+      const value = (raw as Record<string, unknown>)[field];
+      if (typeof value === 'string' && value !== '') paths.add(value);
+    }
+  }
+  return [...paths];
+}
+
 type Diagnostic = (message: string, fields?: Record<string, unknown>) => void;
 
 /** Stops `child` and everything it started: its process group on POSIX, its tree on Windows. */
@@ -373,6 +395,7 @@ async function startOnChild(
           title: mask(params.toolCall.title ?? ''),
           kind: params.toolCall.kind ?? undefined,
           command: command === undefined ? undefined : mask(command),
+          paths: pathsOf(params.toolCall).map(mask),
         });
         switch (decision?.outcome) {
           case 'allow_once':

@@ -93,3 +93,24 @@ export const events = sqliteTable(
     index('events_stream_idx').on(t.streamId),
   ],
 );
+
+/**
+ * Always-allow permission rules (E2-R3, story 2.6): stored and enforced in
+ * core, scoped to one workspace. They survive Delete history, which removes
+ * events, sessions and runs only.
+ */
+export const permissionRules = sqliteTable(
+  'permission_rules',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id),
+    /** `command_prefix` or `tool` (`AlwaysAllowScope.kind`). */
+    kind: text('kind').$type<'command_prefix' | 'tool'>().notNull(),
+    value: text('value').notNull(),
+    label: text('label').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => [uniqueIndex('permission_rules_scope_unique').on(t.workspaceId, t.kind, t.value)],
+);

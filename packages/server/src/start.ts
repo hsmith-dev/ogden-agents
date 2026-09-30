@@ -13,7 +13,6 @@ import {
 import {
   createChat,
   createDataDir,
-  createDecliningPermissions,
   RESTARTED_REASON,
   createToolchain,
   ensureDataDir,
@@ -249,6 +248,8 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
     options.core ??
     openCore(dataDir, {
       onListenerError: (error) => log.error('event subscriber failed', { reason: String(error) }),
+      // The request is declined all the same; the reason names no command.
+      onPermissionError: (error) => log.warn('a permission request was declined after a failure', { reason: String(error) }),
     });
   try {
     return await listenAndAnnounce({ options, dataDir, log, core, ownsCore, lock });
@@ -333,8 +334,8 @@ async function listenAndAnnounce({
   const settled = core.entities.settleInterruptedSessions(RESTARTED_REASON);
   if (settled.length > 0) log.info('sessions left working by a stopped server are idle and resumable', { sessions: settled.length });
   const extraAgentEnv = options.extraAgentEnv ?? {};
-  // One instance for the chat that asks and the routes that answer (2.6 replaces the stub in core).
-  const permissions = createDecliningPermissions();
+  // One instance for the chat that asks and the routes that answer: core's (story 2.6).
+  const permissions = core.permissions;
   const chat = createChat({
     dataDir,
     entities: core.entities,

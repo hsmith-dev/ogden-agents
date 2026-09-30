@@ -65,6 +65,12 @@ export interface AgentPermissionRequest {
   kind?: string | undefined;
   /** The command a shell tool call would run, if it said. */
   command?: string | undefined;
+  /**
+   * Every file path the tool call names (its locations, its diffs, and path
+   * fields of its input), as the agent gave them. Always-allow rules for
+   * file kinds match only when all of them lie inside the workspace.
+   */
+  paths?: readonly string[] | undefined;
 }
 
 /**

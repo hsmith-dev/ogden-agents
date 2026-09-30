@@ -13,7 +13,6 @@ import { send, signIn, startTestServer, trackSocket, waitFor, type SignedIn, typ
 
 const wsId = 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
 const sesId = 'ses_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
-const ruleId = 'rule_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
 
 /** Every stubbed route with its method and a concrete path, by the lane that fills it. */
 const STUBS: ReadonlyArray<readonly [method: string, path: string]> = [
@@ -22,10 +21,6 @@ const STUBS: ReadonlyArray<readonly [method: string, path: string]> = [
   ['PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId })],
   // 2.10
   ['POST', apiPath(API_ROUTES.sessionCancel, { wsId, sesId })],
-  // 2.6
-  ['POST', apiPath(API_ROUTES.sessionPermission, { wsId, sesId, requestId: 'req-1' })],
-  ['GET', apiPath(API_ROUTES.permissionRules, { wsId })],
-  ['DELETE', apiPath(API_ROUTES.permissionRule, { wsId, ruleId })],
   // 2.4
   ['GET', API_ROUTES.appShortcut],
   ['POST', API_ROUTES.appShortcut],

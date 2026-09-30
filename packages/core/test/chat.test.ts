@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AgentError,
   createChat,
+  createDecliningPermissions,
   InvalidOperationError,
   NotFoundError,
   RESTARTED_REASON,
@@ -438,6 +439,7 @@ describe('tool calls and permission requests', () => {
     const core = openTestCore();
     const asked: Array<[SessionId, string]> = [];
     const permissions: Permissions = {
+      ...createDecliningPermissions(),
       request: async (sessionId, request) => {
         asked.push([sessionId, request.toolCallId]);
         if (request.toolCallId === 'broken') throw new Error('boom');

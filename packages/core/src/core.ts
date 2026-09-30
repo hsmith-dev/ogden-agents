@@ -1,11 +1,12 @@
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
 import { createEntities, type Entities } from './entities.js';
 import { createEventLog, type EventLog, type EventLogOptions } from './event-log.js';
+import { createPermissions, type Permissions } from './permissions.js';
 import { createSessionEvents, type SessionEvents } from './session-events.js';
 
 /**
- * Core as the server wires it: the event log, the session-event helper and
- * the entity model. The database handle stays inside core (AD-11), so callers
+ * Core as the server wires it: the event log, the session-event helper, the
+ * entity model and the permissions (story 2.6). The database handle stays inside core (AD-11), so callers
  * can only change state through these operations, which append events.
  */
 export interface Core {
@@ -13,10 +14,16 @@ export interface Core {
   /** The only way `session.*` events are appended (E2-R7). */
   readonly sessionEvents: SessionEvents;
   readonly entities: Entities;
+  /** Permission requests, their cards' decisions and the always-allow rules (CAP-4, E2-R3). */
+  readonly permissions: Permissions;
   close(): void;
 }
 
-export type OpenCoreOptions = OpenDatabaseOptions & EventLogOptions;
+export type OpenCoreOptions = OpenDatabaseOptions &
+  EventLogOptions & {
+    /** Called with a failure while deciding a permission request (it is declined all the same). */
+    onPermissionError?: (error: unknown) => void;
+  };
 
 /** Opens (and migrates) the database in `dataDir` and builds core on it. */
 export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
@@ -24,5 +31,24 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
   const events = createEventLog(db, options);
   const sessionEvents = createSessionEvents(db, events);
   const entities = createEntities(db, events, sessionEvents);
-  return { events, sessionEvents, entities, close: () => db.close() };
+  const permissions = createPermissions({
+    db,
+    events,
+    entities,
+    sessionEvents,
+    ...(options.onPermissionError === undefined ? {} : { onError: options.onPermissionError }),
+  });
+  return {
+    events,
+    sessionEvents,
+    entities,
+    permissions,
+    close: () => {
+      try {
+        permissions.close();
+      } finally {
+        db.close();
+      }
+    },
+  };
 }

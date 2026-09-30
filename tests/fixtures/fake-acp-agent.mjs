@@ -15,6 +15,11 @@
 //   "permission"   an `execute` tool call (`npm test`), then asks permission
 //                  to run it; replies "Ran npm test." if allowed, else
 //                  "Denied npm test."
+//   "permission <command>"  the same for <command> ("Ran <command>." or
+//                  "Denied <command>.")
+//   "permission-edit <path>[|<path>…]"  an `edit` tool call naming those
+//                  paths (as its locations), then asks permission; replies
+//                  "Edited <paths>." if allowed, else "Denied <paths>."
 //   "tool"         an `edit` tool call, then an update completing it with a
 //                  diff of src/example.ts; replies "Edited."
 //   "context"      replies `session=<its id> via=<new|resumed|loaded>`
@@ -132,8 +137,27 @@ acp
       await say(client, params.sessionId, `session=${params.sessionId} via=${session.via}`);
       return { stopReason: 'end_turn' };
     }
-    if (text === 'permission') {
-      const toolCall = { toolCallId: 'call-permission', title: 'Run npm test', kind: 'execute', rawInput: { command: 'npm test' } };
+    if (text.startsWith('permission-edit ')) {
+      const paths = text.slice('permission-edit '.length).split('|').map((path) => path.trim()).filter((path) => path !== '');
+      const toolCall = { toolCallId: 'call-edit-permission', title: `Edit ${paths.join(', ')}`, kind: 'edit', locations: paths.map((path) => ({ path })) };
+      await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
+      const answer = await client.request('session/request_permission', {
+        sessionId: params.sessionId,
+        toolCall,
+        options: [
+          { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
+          { optionId: 'always', name: 'Always allow', kind: 'allow_always' },
+          { optionId: 'reject', name: 'Deny', kind: 'reject_once' },
+        ],
+      });
+      const edited = answer.outcome.outcome === 'selected' && (answer.outcome.optionId === 'allow' || answer.outcome.optionId === 'always');
+      await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: edited ? 'completed' : 'failed' });
+      await say(client, params.sessionId, `${edited ? 'Edited' : 'Denied'} ${paths.join(', ')}.`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text === 'permission' || text.startsWith('permission ')) {
+      const command = text === 'permission' ? 'npm test' : text.slice('permission '.length).trim();
+      const toolCall = { toolCallId: 'call-permission', title: `Run ${command}`, kind: 'execute', rawInput: { command } };
       await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
       const answer = await client.request('session/request_permission', {
         sessionId: params.sessionId,
@@ -147,7 +171,7 @@ acp
       });
       const ran = answer.outcome.outcome === 'selected' && (answer.outcome.optionId === 'allow' || answer.outcome.optionId === 'always');
       await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: ran ? 'completed' : 'failed' });
-      await say(client, params.sessionId, ran ? 'Ran npm test.' : 'Denied npm test.');
+      await say(client, params.sessionId, ran ? `Ran ${command}.` : `Denied ${command}.`);
       return { stopReason: 'end_turn' };
     }
     if (text === 'tool') {

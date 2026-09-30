@@ -1,9 +1,12 @@
 import {
   API_ROUTES,
   apiPath,
+  PermissionRulesResponse,
   SendMessageResponse,
   SessionResponse,
   WorkspaceResponse,
+  type PermissionDecisionRequest,
+  type PermissionRule,
   type Session,
   type Workspace,
 } from '@ogden-agents/shared';
@@ -76,4 +79,49 @@ export async function fetchSession(wsId: string, sesId: string, auth: Pick<TabAu
 export async function sendMessage(wsId: string, sesId: string, text: string, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<string> {
   const json = await call(auth, apiPath(API_ROUTES.sessionMessages, { wsId, sesId }), postJson({ text }), "Your message couldn't be sent");
   return SendMessageResponse.parse(json).messageId;
+}
+
+// ---------------------------------------------------------------------------
+// Permission cards (story 2.6).
+// ---------------------------------------------------------------------------
+
+/** A call answered 204 No Content, or a refusal with the server's plain message. */
+async function callNoContent(auth: Pick<TabAuth, 'fetch'>, path: string, init: RequestInit, fallback: string): Promise<void> {
+  let response: Response;
+  try {
+    response = await auth.fetch(path, init);
+  } catch {
+    throw new ChatApiError(UNREACHABLE, 0);
+  }
+  if (response.ok) return;
+  let message = `${fallback} (error ${response.status}).`;
+  try {
+    const body = (await response.json()) as { error?: { message?: unknown } };
+    if (typeof body.error?.message === 'string') message = body.error.message;
+  } catch {
+    // Not JSON: keep the fallback.
+  }
+  throw new ChatApiError(message, response.status);
+}
+
+/** `POST /api/v1/workspaces/:wsId/sessions/:sesId/permissions/:requestId`: the user's answer on a card. */
+export async function decidePermission(
+  wsId: string,
+  sesId: string,
+  requestId: string,
+  body: PermissionDecisionRequest,
+  auth: Pick<TabAuth, 'fetch'> = tabAuth,
+): Promise<void> {
+  await callNoContent(auth, apiPath(API_ROUTES.sessionPermission, { wsId, sesId, requestId }), postJson(body), "Your answer couldn't be sent");
+}
+
+/** `GET /api/v1/workspaces/:wsId/permission-rules`: the project's always-allow rules. */
+export async function fetchPermissionRules(wsId: string, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<PermissionRule[]> {
+  const json = await call(auth, apiPath(API_ROUTES.permissionRules, { wsId }), {}, "Ogden Agents couldn't load this project's rules");
+  return PermissionRulesResponse.parse(json).rules;
+}
+
+/** `DELETE /api/v1/workspaces/:wsId/permission-rules/:ruleId`: undoes an always-allow rule. */
+export async function removePermissionRule(wsId: string, ruleId: string, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<void> {
+  await callNoContent(auth, apiPath(API_ROUTES.permissionRule, { wsId, ruleId }), { method: 'DELETE' }, "The rule couldn't be undone");
 }

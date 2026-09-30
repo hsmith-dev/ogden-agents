@@ -1,0 +1,131 @@
+# Epic 3 breakdown (approved by the user 2026-09-30; drafted by autonomous inception). Table order is the build order; ids never change once approved.
+# Epic 3 starts after epic 2's persistent sessions (2.7) and completed session view (2.10); both are built. References to other epics use "<epic id>.<entry id>".
+# Live checks use the developer's existing Claude Code login or an API key saved through 9.2.
+
+[[entry]]
+id = 1
+type = "story"
+title = "Tracer bullet: switch one Claude Code chat to its terminal and back"
+description = "Adds a minimal TerminalPort to core and a terminal-pty implementation with resize, a core switchDriver that refuses unless the session is idle, releases that session's ACP process (a new per-session release in chat.ts), sets driver = terminal and spawns the same claude the chat uses (CLAUDE_CODE_EXECUTABLE, else the SDK's bundled CLI) as `claude --resume <agentSessionId>` in the workspace folder with the chat's environment, a gated WebSocket at /ws/terminal/:sessionId carrying the bytes, REST to switch the driver, a bare xterm panel and switch button on the session page, and a fake CLI test fixture (a script that echoes typed lines and records the session id it was resumed with) that later entries extend; switching back kills the CLI, sets driver = ui and reopens the session through ACP resume or load; the hitl step is the developer's live run with their signed-in Claude Code."
+verify = "Live on the developer's machine, a Claude Code chat switches to the terminal, shows the same conversation in Claude Code's own TUI, accepts a typed message, switches back, and the next chat message gets a reply that knows about the terminal message; in CI against the fake ACP agent and a fake CLI, the switch round-trip emits two session.driver_changed events and a chat message sent while driver = terminal is refused."
+covers = ["E3-R1", "E3-R2"]
+after = ["2.7", "2.10", "9.1"]
+hitl = true
+risk = "high"
+unknown = "Whether claude-agent-acp's session id is the id `claude --resume` accepts (agent-matrix says yes, no code checks it), and whether releasing the ACP process leaves the session file free for the CLI; record both in the build record."
+references = [
+  "_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-6--terminal-bytes-use-their-own-channel-adopted",
+  "_bmad-output/initiative-ogden-agents/spec-ogden-agents/architecture-diagrams.md",
+  "_bmad-output/initiative-ogden-agents/spec-ogden-agents/agent-matrix.md",
+]
+
+[[entry]]
+id = 2
+type = "story"
+title = "Epic contracts and stubs"
+description = "Freezes in shared the terminal socket frame format (binary frames for bytes, JSON text frames for attach, resize and exit), the driver-switch REST shape and its error codes (driver_is_terminal replacing the invalid_request the refusal returns today, terminal_unavailable, session_not_idle), the terminal availability shape { available, reason } on the session response (GET session), the from-terminal origin field on user message events, and no terminal lifecycle event (only session.driver_changed and the imported messages reach the event log); completes TerminalPort (open, attach, write, resize, close, onExit, availability) and AgentPort's terminal-resume capability (acp-claude-code declares it here, so entry 7 never edits that adapter) with a terminal-memory stub, and extends entry 1's fake CLI fixture with exit, crash and resize, so the handoff, socket, UI and availability lanes open at once; entry 6 renders the availability shape and the from-terminal caption, entry 7 fills the availability, and entry 3 sets the origin field."
+verify = "Contract tests parse every new frame, REST shape, error code and event; the terminal-memory stub drives every TerminalPort method in a test; the route-registry test in gate.test.ts lists the terminal socket behind the gate."
+covers = ["E3-R1", "E3-R2", "E3-R3", "E3-R7"]
+after = [1]
+hitl = false
+risk = "medium"
+unknown = "Confirm at planning the coordinator's assumptions: binary bytes and JSON control frames on the separate gated socket, and no terminal event beyond session.driver_changed and the imported messages."
+
+[[entry]]
+id = 3
+type = "story"
+title = "Terminal messages appear in the chat after switching back"
+description = "On switching back, brings the turns the CLI added into the session's event log through the core session-event helper, the user's messages marked from terminal, either from the replay ACP session/load sends or by reading Claude Code's session file and diffing against the stored transcript, whichever the investigation at the start of this story shows works, setting entry 2's origin field that entry 6 renders as the caption."
+verify = "Against the fake ACP agent and a fake CLI that writes a session file the way Claude Code does, a message typed in the terminal and its reply appear once each in the chat transcript after switching back, the user's carrying origin terminal, with no duplicate of earlier turns, and survive a page reload."
+covers = ["E3-R4"]
+after = [2]
+hitl = false
+risk = "high"
+unknown = "Whether claude-agent-acp's session/load or session/resume replays turns the CLI added; if neither does, core must read Claude Code's session file, which ties the adapter to its file format."
+references = ["_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#key-flows"]
+
+[[entry]]
+id = 4
+type = "story"
+title = "The handoff never leaves a session stuck"
+description = "Using entry 2's error codes, enforces in core the user's rule that a switch is refused unless the session is idle (working, waiting on a permission card, or queued messages: refused with session_not_idle and a short reason, nothing interrupted); returns the driver to the chat when the CLI exits on its own (/exit or a crash); makes a server restart with driver = terminal start the session idle, driver = ui and resumable; and returns each outcome as an error code or event with a plain reason that entry 6 renders; a PTY left without a viewer is not closed (user decision)."
+verify = "Tests against the fake CLI show a switch asked while working, while waiting on a permission and with a queued message is refused with session_not_idle and the turn, card and queue are untouched, a CLI that exits by itself leaves driver = ui and a chat message then gets a reply, and a server restarted while the terminal drove reopens the session as idle with driver = ui."
+covers = ["E3-R5"]
+after = [3]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 5
+type = "story"
+title = "Terminal socket: resize, reattach and several viewers"
+description = "Completes the server side of the per-session terminal socket from entry 2's frame format (the xterm client is entry 6's): resize reaches the PTY, closing or reloading the tab leaves the CLI running, reopening attaches with a bounded buffer of recent output held in memory only, two tabs on one session both see the output and can both type with the size following whichever tab typed or resized last, and a PTY with no viewer keeps running until the session is switched back or the server stops; no byte reaches the event log, database or logs."
+verify = "A test attaches two sockets to one fake CLI, types in each and resizes each, and checks both receive the output and the PTY size follows whichever typed or resized last; a PTY with every viewer closed is still running a minute later; a reload reattaches and shows recent output; upgrades without the tab token or with a foreign Origin are refused; a marker string typed in the terminal is absent from the database and log files afterwards."
+covers = ["E3-R2", "E3-R3"]
+after = [4]
+hitl = false
+risk = "medium"
+references = ["_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-15--one-security-gate-adopted"]
+
+[[entry]]
+id = 6
+type = "story"
+title = "Driver toggle and terminal panel in Developer mode"
+description = "Replaces the tracer's bare button and panel with the designed UI and owns the xterm client (paste, colors, resize and attach frames per entry 2's format, reattach after reload), with the route ?driver=terminal: the Chat | Terminal toggle-group in the session header shown only in Developer mode (the only gate, user decision) and disabled with a tooltip reason when the session is not idle or entry 2's availability shape says unavailable, Switching... until session.driver_changed arrives, the dark xterm panel in Geist Mono replacing the transcript, the from terminal caption on user messages whose origin is terminal (set by entry 3), the read-only banner and disabled composer with Switch to Chat, Cmd+. / Ctrl+. captured before xterm, focus into the terminal on switch, the read-only transcript peek at xl, and xterm screen-reader mode."
+verify = "Playwright against the fake agent and fake CLI shows no toggle with Developer mode off; with it on, the toggle is disabled with a reason while the fake agent is working, Ctrl+. on an idle session switches to the terminal panel with focus inside it, the composer is disabled with Switch to Chat, Ctrl+. switches back, a disabled availability shows its reason in the tooltip, and the peek opens at 1280px."
+covers = ["E3-R6"]
+after = [2]
+hitl = false
+risk = "medium"
+references = [
+  "_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#component-patterns",
+  "_bmad-output/initiative-ogden-agents/ux-ogden-agents/DESIGN.md#components",
+]
+
+[[entry]]
+id = 7
+type = "story"
+title = "Toggle availability per agent, recorded in the agent matrix"
+description = "Fills entry 2's availability shape in the server from the capability acp-claude-code declares since entry 2 and from entry 1's CLI resolver, without editing the adapter: an adapter that does not is unavailable with the plain reason from EXPERIENCE.md, a node-pty load failure (AD-19) or a missing CLI makes it unavailable with that reason, and the Claude Code result measured in entry 1's live run (from its build record), with the other agents marked not yet measured and Codex left to epic 6, is written in agent-matrix.md."
+verify = "Tests show available for Claude Code with node-pty loaded, unavailable with the node-pty reason when the loader fails, unavailable with a reason when the CLI cannot be found, and unavailable for an agent without the capability; the toggle from entry 6 shows each reason; agent-matrix.md records the measured Claude Code result."
+covers = ["E3-R7"]
+after = [6]
+hitl = false
+risk = "low"
+references = ["_bmad-output/initiative-ogden-agents/spec-ogden-agents/agent-matrix.md"]
+
+[[entry]]
+id = 8
+type = "story"
+title = "The terminal works on Windows"
+description = "Makes the toggle work under ConPTY on Windows: resolves claude whether it is a .cmd shim, a native binary or the bundled CLI, checks paste, resize, colors and Ctrl+. in xterm against ConPTY, quiets the AttachConsole noise when killing an exited PTY, and adds the terminal round-trip to the Windows CI job; a person runs the live flow on a Windows machine."
+verify = "The terminal round-trip test passes in the Windows CI job, and a person on Windows with Claude Code signed in switches a chat to the terminal, types a message, resizes the window, switches back and sees the message in the chat."
+covers = ["E3-R8"]
+after = [5, 7]
+hitl = true
+risk = "high"
+unknown = "How claude is installed on Windows (npm .cmd shim or native installer) and whether ConPTY passes Ctrl+. and bracketed paste through."
+references = ["_bmad-output/initiative-ogden-agents/deferred-work.md"]
+
+[[entry]]
+id = 9
+type = "story"
+title = "Refactor sweep"
+description = "Cleans up code across the epic, scoped when it starts from the build records and the review findings deferred during the epic (including the chat.ts split and the killTree copies in deferred-work.md where this epic touched them), with no behavior change."
+verify = "All tests pass and no behavior changes."
+covers = ["E3-R1"]
+after = [1, 2, 3, 4, 5, 6, 7, 8]
+hitl = false
+risk = "low"
+references = ["_bmad-output/initiative-ogden-agents/deferred-work.md"]
+
+[[entry]]
+id = 10
+type = "story"
+title = "End-to-end suite and release"
+description = "Extends epic 2's end-to-end suite, run in CI on macOS, Windows and Linux against the packed package, to turn on Developer mode, switch a chat to the terminal, type a message, reload the tab and reattach, switch back and see the message marked from terminal, and check the refused chat input and the node-pty-failure reason; then the user runs the live Claude Code checks and tags the release through the epic 1 release workflow."
+verify = "The suite passes on all three OSes and fails when the driver lock is removed from core, and the tagged ogden-agents version from npm passes the epic's live Done when checks on the user's machine."
+covers = ["E3-R1", "E3-R2", "E3-R3", "E3-R4", "E3-R5", "E3-R6", "E3-R7", "E3-R8"]
+after = [9, "2.13"]
+hitl = true
+risk = "medium"

@@ -5,7 +5,7 @@
  *
  * 1. `Host` is exactly `127.0.0.1:<port>` or `localhost:<port>` (403), which
  *    defeats DNS rebinding;
- * 2. `POST /api/tab/exchange` with `{ code }`: the launcher opened
+ * 2. `POST /api/v1/tab/exchange` with `{ code }`: the launcher opened
  *    `/#c=<code>`, and the page's boot script sends the single-use launch code
  *    here (Host and Origin checked, no token needed). The response body
  *    carries a new per-tab token, so the token never appears in any URL; no
@@ -31,7 +31,7 @@
  * and the launcher token are never logged (AD-16).
  */
 import type { Context, MiddlewareHandler } from 'hono';
-import { LAUNCH_CODE_FRAGMENT_PARAM, TAB_EXCHANGE_PATH } from '@ogden-agents/shared';
+import { API_ROUTES, LAUNCH_CODE_FRAGMENT_PARAM } from '@ogden-agents/shared';
 import { bearerToken, webSocketToken, type LaunchCodes, type TabTokens } from './auth.js';
 import { LAUNCHER_TOKEN_HEADER, type LauncherToken } from './launcher-token.js';
 import type { Logger } from './log.js';
@@ -119,7 +119,7 @@ export function createGate({ port, codes, tabs, launcherToken, log }: GateOption
       return;
     }
 
-    if (path === TAB_EXCHANGE_PATH && c.req.method === 'POST' && !upgrade) {
+    if (path === API_ROUTES.tabExchange && c.req.method === 'POST' && !upgrade) {
       if (!originOk()) return c.text('Forbidden', 403);
       let code: unknown;
       try {

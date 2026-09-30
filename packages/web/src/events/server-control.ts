@@ -1,8 +1,5 @@
-import { LAUNCH_CODES_PATH } from '@ogden-agents/shared';
+import { API_ROUTES } from '@ogden-agents/shared';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
-
-/** The route that stops the server (Quit Ogden Agents). */
-export const QUIT_PATH = '/api/server/quit';
 
 /**
  * Asks the local server to stop cleanly (AD-3: it runs until Quit). A
@@ -17,7 +14,7 @@ export const QUIT_PATH = '/api/server/quit';
 export async function quitServer(auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<void> {
   let response: Response;
   try {
-    response = await auth.fetch(QUIT_PATH, {
+    response = await auth.fetch(API_ROUTES.serverQuit, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ force: true }),
@@ -45,7 +42,7 @@ export async function quitServer(auth: Pick<TabAuth, 'fetch'> = tabAuth): Promis
 export async function requestNewTabLink(auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<string> {
   let response: Response;
   try {
-    response = await auth.fetch(LAUNCH_CODES_PATH, { method: 'POST' });
+    response = await auth.fetch(API_ROUTES.launchCodes, { method: 'POST' });
   } catch {
     throw new Error("Couldn't reach Ogden Agents. Check that it is still running, then try again.");
   }

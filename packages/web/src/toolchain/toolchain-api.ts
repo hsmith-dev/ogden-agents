@@ -1,10 +1,4 @@
-import {
-  TOOLCHAIN_PATH,
-  ToolchainInstallResponse,
-  ToolchainResponse,
-  UV_INSTALL_PATH,
-  type ToolchainStatus,
-} from '@ogden-agents/shared';
+import { API_ROUTES, ToolchainInstallResponse, ToolchainResponse, type ToolchainStatus } from '@ogden-agents/shared';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
 
 /** Reads the `error.message` of a failed reply, or falls back to `fallback`. */
@@ -20,11 +14,11 @@ async function errorMessage(response: Response, fallback: string): Promise<strin
 
 const UNREACHABLE = "Couldn't reach Ogden Agents. Check that it is still running, then try again.";
 
-/** `GET /api/toolchain`: whether a usable uv exists (story 1.8). Sent with this tab's token. */
+/** `GET /api/v1/toolchain`: whether a usable uv exists (story 1.8). Sent with this tab's token. */
 export async function fetchUvStatus(auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<ToolchainStatus> {
   let response: Response;
   try {
-    response = await auth.fetch(TOOLCHAIN_PATH);
+    response = await auth.fetch(API_ROUTES.toolchain);
   } catch {
     throw new Error(UNREACHABLE);
   }
@@ -33,14 +27,14 @@ export async function fetchUvStatus(auth: Pick<TabAuth, 'fetch'> = tabAuth): Pro
 }
 
 /**
- * `POST /api/toolchain/uv/install`: asks the server to install its private uv.
+ * `POST /api/v1/toolchain/uv/install`: asks the server to install its private uv.
  * A same-origin POST with this tab's token, so the browser sends the
  * `Origin` the gate checks. Progress and the outcome arrive through the event log.
  */
 export async function installUv(auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<ToolchainStatus> {
   let response: Response;
   try {
-    response = await auth.fetch(UV_INSTALL_PATH, { method: 'POST' });
+    response = await auth.fetch(API_ROUTES.uvInstall, { method: 'POST' });
   } catch {
     throw new Error(UNREACHABLE);
   }

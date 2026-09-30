@@ -1,4 +1,4 @@
-import { ServerMessage, TAB_CHECK_PATH, type ClientMessage, type CoreEvent, type SessionState } from '@ogden-agents/shared';
+import { API_ROUTES, ServerMessage, type ClientMessage, type CoreEvent, type SessionState } from '@ogden-agents/shared';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
 import { addEvent } from './fold';
@@ -99,7 +99,7 @@ export function EventStreamProvider({ children, auth = tabAuth }: { children: Re
      * server is down, so keep retrying.
      */
     const afterClose = () => {
-      auth.fetch(TAB_CHECK_PATH).then(
+      auth.fetch(API_ROUTES.tabCheck).then(
         (response) => {
           if (disposed) return;
           if (response.status === 401) return; // forget() already moved this tab to the launch state.

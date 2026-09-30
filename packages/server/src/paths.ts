@@ -4,12 +4,17 @@
  * what needs a token, and the SPA fallback uses it so those paths never fall
  * back to `index.html`. Everything else is the static app.
  */
+import { API_NAMESPACE } from '@ogden-agents/shared';
 import { LAUNCHER_PREFIX } from './launcher-token.js';
 
 const under = (path: string, root: string) => path === root || path.startsWith(`${root}/`);
 
-/** `/api` and everything below it. */
-export const isApiPath = (path: string): boolean => under(path, '/api');
+/**
+ * `/api` and everything below it. The routes themselves live under
+ * `/api/v1` (`API_ROUTES` in `packages/shared`), but the whole namespace is
+ * the server's, so an unversioned path is never static and never token-free.
+ */
+export const isApiPath = (path: string): boolean => under(path, API_NAMESPACE);
 /** `/ws` and everything below it. */
 export const isWsPath = (path: string): boolean => under(path, '/ws');
 /** `/launcher` and everything below it (the handshake). */

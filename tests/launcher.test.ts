@@ -103,14 +103,14 @@ function runLauncher(dataDir: string, args: string[] = ['--no-open', '--port', '
 
 /**
  * Opens a launch link (`/#c=<code>`) as the page's boot script does: POSTs
- * the code to `/api/tab/exchange` and returns the tab's `Authorization`
+ * the code to `/api/v1/tab/exchange` and returns the tab's `Authorization`
  * header, with the token from the response body (never a URL; no cookie).
  */
 async function signIn(launchUrl: string): Promise<string> {
   const { origin, hash } = new URL(launchUrl);
   const code = /^#c=([A-Za-z0-9_-]{43})$/.exec(hash)?.[1];
   expect(code).toBeDefined();
-  const exchange = await fetch(`${origin}/api/tab/exchange`, {
+  const exchange = await fetch(`${origin}/api/v1/tab/exchange`, {
     method: 'POST',
     headers: { origin, 'content-type': 'application/json' },
     body: JSON.stringify({ code }),
@@ -125,7 +125,7 @@ async function signIn(launchUrl: string): Promise<string> {
 /** Quit, as the UI does it, then waits for the process to exit. */
 async function quit(url: string, launchUrl: string, pid: number): Promise<void> {
   const authorization = await signIn(launchUrl);
-  const response = await fetch(`${url}/api/server/quit`, { method: 'POST', headers: { authorization, origin: url } });
+  const response = await fetch(`${url}/api/v1/server/quit`, { method: 'POST', headers: { authorization, origin: url } });
   expect(response.status).toBe(202);
   await waitUntil(() => !isAlive(pid), 'the server to exit after Quit');
 }
@@ -180,10 +180,10 @@ describe('bin/ogden.js --foreground', () => {
     const page = await fetch(address);
     expect(page.status).toBe(200);
     expect(await page.text()).toContain('<div id="root"></div>');
-    expect((await fetch(`${address}/api/tab`)).status).toBe(401);
+    expect((await fetch(`${address}/api/v1/tab`)).status).toBe(401);
 
     const authorization = await signIn(launchUrl);
-    expect((await fetch(`${address}/api/tab`, { headers: { authorization } })).status).toBe(204);
+    expect((await fetch(`${address}/api/v1/tab`, { headers: { authorization } })).status).toBe(204);
 
     child.kill('SIGTERM');
     const { code, signal } = await exited;
@@ -215,7 +215,7 @@ describe('bin/ogden.js (background)', () => {
     expect(existsSync(join(dataDir, 'launcher.token'))).toBe(true);
 
     const authorization = await signIn(first.launchUrl);
-    expect((await fetch(`${first.url}/api/tab`, { headers: { authorization } })).status).toBe(204);
+    expect((await fetch(`${first.url}/api/v1/tab`, { headers: { authorization } })).status).toBe(204);
     const page = await fetch(first.url);
     expect(page.status).toBe(200);
     expect(await page.text()).toContain('<div id="root"></div>');
@@ -228,7 +228,7 @@ describe('bin/ogden.js (background)', () => {
     expect(second.url).toBe(first.url);
     expect(second.launchUrl).not.toBe(first.launchUrl);
     expect(readPortFile(dataDir)!.pid).toBe(record.pid);
-    const spent = await fetch(`${first.url}/api/tab/exchange`, {
+    const spent = await fetch(`${first.url}/api/v1/tab/exchange`, {
       method: 'POST',
       headers: { origin: first.url, 'content-type': 'application/json' },
       body: JSON.stringify({ code: new URL(first.launchUrl).hash.slice('#c='.length) }),

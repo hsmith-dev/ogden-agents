@@ -77,7 +77,7 @@ test('Quit names running agents in its consequence, and a failed quit is shown i
     await expect(confirm).toContainText('1 agent is still working and will stop');
 
     // The server refuses (say, it is having trouble): the dialog says so and stays open.
-    await page.route('**/api/server/quit', (route) =>
+    await page.route('**/api/v1/server/quit', (route) =>
       route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { code: 'internal', message: 'Something went wrong.' } }) }),
     );
     await confirm.getByRole('button', { name: 'Quit', exact: true }).click();
@@ -85,7 +85,7 @@ test('Quit names running agents in its consequence, and a failed quit is shown i
     await expect(sidebar.getByTestId('server-status')).toHaveAttribute('data-status', 'connected');
 
     // Trying again for real sends the confirmation's force, so busy agents don't block it.
-    await page.unroute('**/api/server/quit');
+    await page.unroute('**/api/v1/server/quit');
     await confirm.getByRole('button', { name: 'Quit', exact: true }).click();
     await expect(page.getByTestId('server-stopped')).toBeVisible();
     expect(await server.stopped).toBe('quit');

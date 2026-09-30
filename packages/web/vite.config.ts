@@ -5,7 +5,8 @@ import react from '@vitejs/plugin-react';
 // The shared constants' own files: Node loads this config, and the shared
 // package's index uses `.js` specifiers that only a bundler maps to `.ts`.
 import { APPEARANCE_STORAGE_KEY } from '../shared/src/appearance.ts';
-import { LAUNCH_CODE_FRAGMENT_PARAM, TAB_EXCHANGE_PATH, TAB_TOKEN_STORAGE_KEY } from '../shared/src/tab-token.ts';
+import { API_ROUTES } from '../shared/src/api.ts';
+import { LAUNCH_CODE_FRAGMENT_PARAM, TAB_TOKEN_STORAGE_KEY } from '../shared/src/tab-token.ts';
 import { defineConfig, type Plugin } from 'vite';
 import pkg from './package.json' with { type: 'json' };
 
@@ -19,7 +20,7 @@ export function bootScript(): string {
     __APPEARANCE_STORAGE_KEY__: APPEARANCE_STORAGE_KEY,
     __TAB_TOKEN_STORAGE_KEY__: TAB_TOKEN_STORAGE_KEY,
     __LAUNCH_CODE_FRAGMENT_PARAM__: LAUNCH_CODE_FRAGMENT_PARAM,
-    __TAB_EXCHANGE_PATH__: TAB_EXCHANGE_PATH,
+    __TAB_EXCHANGE_PATH__: API_ROUTES.tabExchange,
   };
   let script = source;
   for (const [name, value] of Object.entries(values)) script = script.replaceAll(name, JSON.stringify(value));

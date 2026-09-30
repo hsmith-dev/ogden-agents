@@ -33,7 +33,7 @@ test('launch: /#c=<code> is exchanged over POST; the token never appears in any 
     const location = response.headers()['location'];
     if (location !== undefined) urls.push(location);
   });
-  const exchanged = page.waitForResponse((response) => response.url().endsWith('/api/tab/exchange'));
+  const exchanged = page.waitForResponse((response) => response.url().endsWith('/api/v1/tab/exchange'));
 
   const link = await launchLink();
   expect(link).toMatch(/\/#c=[A-Za-z0-9_-]{43}$/);
@@ -135,7 +135,7 @@ test('cookie only: an old session cookie opens nothing', async ({ page, context 
   ]);
   await page.goto(url());
   await expect(page.getByTestId('open-ogden-agents')).toBeVisible();
-  const api = await page.evaluate(async () => (await fetch('/api/tab')).status);
+  const api = await page.evaluate(async () => (await fetch('/api/v1/tab')).status);
   expect(api).toBe(401);
   // Nor does a /ws upgrade that carries only the cookie, with or without ogden.v1.
   for (const protocols of [[], ['ogden.v1']]) {

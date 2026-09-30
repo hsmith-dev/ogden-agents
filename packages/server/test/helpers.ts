@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { TAB_EXCHANGE_PATH, webSocketProtocols } from '@ogden-agents/shared';
+import { API_ROUTES, webSocketProtocols } from '@ogden-agents/shared';
 import { afterEach } from 'vitest';
 
 const dirs: string[] = [];
@@ -64,12 +64,12 @@ export function codeOfLink(launchUrl: string): string {
 
 /**
  * Opens a launch link as the page's boot script does: POSTs its code to
- * `/api/tab/exchange` with the page's Origin and returns the tab token from
+ * `/api/v1/tab/exchange` with the page's Origin and returns the tab token from
  * the response body. Checks that no cookie was set.
  */
 export async function exchange(launchUrl: string): Promise<string> {
   const { origin } = new URL(launchUrl);
-  const response = await fetch(`${origin}${TAB_EXCHANGE_PATH}`, {
+  const response = await fetch(`${origin}${API_ROUTES.tabExchange}`, {
     method: 'POST',
     headers: { origin, 'content-type': 'application/json' },
     body: JSON.stringify({ code: codeOfLink(launchUrl) }),

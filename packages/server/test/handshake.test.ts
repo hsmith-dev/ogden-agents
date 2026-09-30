@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { request } from 'node:http';
 import { join } from 'node:path';
 import { PORT_FILE } from '@ogden-agents/core';
-import { ServerMessage } from '@ogden-agents/shared';
+import { API_ROUTES, ServerMessage } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { LOCK_FILE, ServerAlreadyRunningError } from '../src/instance-lock.js';
@@ -183,9 +183,9 @@ describe('the gate on the handshake', () => {
   it('the token opens nothing but the handshake', async () => {
     const server = await startServer();
     // The static app needs no token at all; the API and /ws need a tab's.
-    expect((await send(server, '/api/tab', withToken(server))).status).toBe(401);
+    expect((await send(server, API_ROUTES.tabCheck, withToken(server))).status).toBe(401);
     expect((await send(server, '/ws', withToken(server))).status).toBe(401);
-    expect((await send(server, '/api/server/quit', { method: 'POST', ...withToken(server, { origin: server.url }) })).status).toBe(401);
+    expect((await send(server, API_ROUTES.serverQuit, { method: 'POST', ...withToken(server, { origin: server.url }) })).status).toBe(401);
   });
 
   it('the handshake is still Host-checked', async () => {
@@ -276,19 +276,19 @@ describe('restart re-checks busy sessions when it stops', () => {
   });
 });
 
-describe('POST /api/server/quit', () => {
+describe('POST /api/v1/server/quit', () => {
   it('with busy sessions: refuses (409, with the count) unless the request says force: true', async () => {
     const server = await startServer();
     sessionIn(server, 'waiting');
     const tab = tabOf(await exchange(server.launchUrl), server.url);
     const headers = { ...tab.headers, 'content-type': 'application/json' };
-    const refused = await sendBody(server, '/api/server/quit', headers, '{}');
+    const refused = await sendBody(server, API_ROUTES.serverQuit, headers, '{}');
     expect(refused.status).toBe(409);
     expect(refused.json()).toMatchObject({ error: { code: 'sessions_busy', details: { busySessions: 1 } } });
     await new Promise((r) => setTimeout(r, 150));
     expect((await send(server, '/launcher/hello', withToken(server))).status).toBe(200);
 
-    const forced = await sendBody(server, '/api/server/quit', headers, JSON.stringify({ force: true }));
+    const forced = await sendBody(server, API_ROUTES.serverQuit, headers, JSON.stringify({ force: true }));
     expect(forced.status).toBe(202);
     expect(await server.stopped).toBe('quit');
   });
@@ -299,7 +299,7 @@ describe('POST /api/server/quit', () => {
     const other = tabOf(await exchange(server.issueLaunchUrl()), server.url);
     const tabs = [await subscriber(server, tab), await subscriber(server, other)];
     await waitFor(() => tabs.every((t) => t.types.includes('caught_up')), 'both tabs to catch up');
-    const reply = await sendBody(server, '/api/server/quit', tab.headers, '');
+    const reply = await sendBody(server, API_ROUTES.serverQuit, tab.headers, '');
     expect(reply.status).toBe(202);
     await server.stopped;
     for (const tab of tabs) {
@@ -311,7 +311,7 @@ describe('POST /api/server/quit', () => {
     const stops: string[] = [];
     const server = await startServer({ onStop: (reason) => stops.push(reason) });
     const tab = tabOf(await exchange(server.launchUrl), server.url);
-    const reply = await send(server, '/api/server/quit', { method: 'POST', headers: tab.headers });
+    const reply = await send(server, API_ROUTES.serverQuit, { method: 'POST', headers: tab.headers });
     expect(reply.status).toBe(202);
     expect(await server.stopped).toBe('quit');
     // onStop runs right after everything is closed (a server process exits there).
@@ -324,9 +324,9 @@ describe('POST /api/server/quit', () => {
   it('is refused without a matching Origin (403) or without a token (401), and the server keeps running', async () => {
     const server = await startServer();
     const { authorization } = tabOf(await exchange(server.launchUrl), server.url).headers as { authorization: string };
-    expect((await send(server, '/api/server/quit', { method: 'POST', headers: { authorization } })).status).toBe(403);
-    expect((await send(server, '/api/server/quit', { method: 'POST', headers: { authorization, origin: 'http://evil.example' } })).status).toBe(403);
-    expect((await send(server, '/api/server/quit', { method: 'POST', headers: { origin: server.url } })).status).toBe(401);
+    expect((await send(server, API_ROUTES.serverQuit, { method: 'POST', headers: { authorization } })).status).toBe(403);
+    expect((await send(server, API_ROUTES.serverQuit, { method: 'POST', headers: { authorization, origin: 'http://evil.example' } })).status).toBe(403);
+    expect((await send(server, API_ROUTES.serverQuit, { method: 'POST', headers: { origin: server.url } })).status).toBe(401);
     await new Promise((r) => setTimeout(r, 150));
     expect((await send(server, '/launcher/hello', withToken(server))).status).toBe(200);
   });

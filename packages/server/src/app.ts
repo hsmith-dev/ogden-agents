@@ -1,16 +1,7 @@
 import { upgradeWebSocket } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import type { EventLog, Toolchain } from '@ogden-agents/core';
-import {
-  ClientMessage,
-  LAUNCH_CODES_PATH,
-  ServerMessage,
-  TAB_CHECK_PATH,
-  TOOLCHAIN_PATH,
-  ToolchainInstallResponse,
-  ToolchainResponse,
-  UV_INSTALL_PATH,
-} from '@ogden-agents/shared';
+import { API_ROUTES, ClientMessage, ServerMessage, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
 import { Hono, type MiddlewareHandler } from 'hono';
 import type { WSContext } from 'hono/ws';
 import { webSocketToken, type TabTokens } from './auth.js';
@@ -92,7 +83,7 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, tabs
 
   // The gate has already checked the tab's token; this only says so, so a tab
   // whose socket was refused can tell "not connected" from "server gone".
-  app.get(TAB_CHECK_PATH, (c) => c.body(null, 204));
+  app.get(API_ROUTES.tabCheck, (c) => c.body(null, 204));
 
   if (control !== undefined) {
     // The launcher handshake (AD-20). The gate lets these through only with the launcher token.
@@ -111,14 +102,14 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, tabs
     // New tab (sidebar footer): a fresh launch link for another tab, which
     // mints that tab its own token when it opens. A state-changing POST, so the
     // gate checks its Origin as well as this tab's token.
-    app.post(LAUNCH_CODES_PATH, (c) => {
+    app.post(API_ROUTES.launchCodes, (c) => {
       log.info('launch code issued for a new tab');
       const origin = `http://${c.req.header('host')!}`;
       return c.json({ launchUrl: control.issueLaunchUrl(origin) }, 201, { 'Cache-Control': 'no-store' });
     });
 
     // Quit (EXPERIENCE.md sidebar footer). A state-changing POST, so the gate checks its Origin.
-    app.post('/api/server/quit', async (c) => {
+    app.post(API_ROUTES.serverQuit, async (c) => {
       let force = false;
       try {
         const body = (await c.req.json()) as { force?: unknown } | null;
@@ -146,7 +137,7 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, tabs
   if (toolchain !== undefined) {
     const failure = (message: string) => ({ error: { code: 'toolchain_unavailable', message } });
 
-    app.get(TOOLCHAIN_PATH, async (c) => {
+    app.get(API_ROUTES.toolchain, async (c) => {
       try {
         return c.json(ToolchainResponse.parse({ uv: await toolchain.status() }));
       } catch (error) {
@@ -157,7 +148,7 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, tabs
 
     // Install only ever starts here, when the user clicks Install: a
     // state-changing POST, so the gate has already checked its Origin (AD-15).
-    app.post(UV_INSTALL_PATH, async (c) => {
+    app.post(API_ROUTES.uvInstall, async (c) => {
       try {
         const result = ToolchainInstallResponse.parse(await toolchain.installUv());
         if (result.started) log.info('uv install started');

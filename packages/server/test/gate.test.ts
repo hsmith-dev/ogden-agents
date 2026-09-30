@@ -8,13 +8,15 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { request, type IncomingHttpHeaders } from 'node:http';
 import { join } from 'node:path';
 import { LEGACY_AUTH_KEY_FILE, openCore, PORT_FILE } from '@ogden-agents/core';
-import { LAUNCH_CODES_PATH, TAB_CHECK_PATH, TAB_EXCHANGE_PATH, WS_PROTOCOL } from '@ogden-agents/shared';
+import { API_BASE, API_ROUTES, WS_PROTOCOL } from '@ogden-agents/shared';
+
+const { launchCodes: LAUNCH_CODES_PATH, tabCheck: TAB_CHECK_PATH, tabExchange: TAB_EXCHANGE_PATH } = API_ROUTES;
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { createApp } from '../src/app.js';
 import { createLaunchCodes, createTabTokens, LAUNCH_CODE_TTL_MS, TAB_TOKEN_IDLE_TTL_MS } from '../src/auth.js';
 import { createGate } from '../src/gate.js';
-import { isServerPath } from '../src/paths.js';
+import { isApiPath, isServerPath } from '../src/paths.js';
 import { createLogger } from '../src/log.js';
 import { start, type RunningServer, type StartOptions } from '../src/start.js';
 import { codeOfLink, exchange, tabOf, tempDataDir, type SignedIn } from './helpers.js';
@@ -216,7 +218,7 @@ describe('security gate', () => {
     const server = await startGated();
     const cookie = oldCookie(server);
     expect((await send(server, TAB_CHECK_PATH, { headers: { cookie } })).status).toBe(401);
-    expect((await send(server, '/api/server/quit', { method: 'POST', headers: { cookie, origin: server.url } })).status).toBe(401);
+    expect((await send(server, API_ROUTES.serverQuit, { method: 'POST', headers: { cookie, origin: server.url } })).status).toBe(401);
     expect(await upgradeRaw(server, { cookie, origin: server.url })).toBe(401);
 
     const tab = await signInRaw(server);
@@ -303,7 +305,7 @@ describe('security gate', () => {
     expect((await send(server, TAB_CHECK_PATH, { headers: bearer(connected) })).status).toBe(401);
   });
 
-  it('new tab: POST /api/launch-codes returns a fresh launch link on the same host, which opens a second tab with its own token', async () => {
+  it('new tab: POST /api/v1/launch-codes returns a fresh launch link on the same host, which opens a second tab with its own token', async () => {
     const lines: string[] = [];
     const server = await startGated({ lines });
     const tab = await signInRaw(server);
@@ -443,7 +445,7 @@ describe('security gate', () => {
     const server = await startGated();
     const tab = await signInRaw(server);
     const fake = { upgrade: 'websocket', connection: 'keep-alive', 'sec-websocket-protocol': tab.protocols.join(', '), origin: server.url };
-    for (const path of [TAB_CHECK_PATH, '/api/launch-codes', '/ws']) {
+    for (const path of [TAB_CHECK_PATH, LAUNCH_CODES_PATH, '/ws']) {
       const reply = await send(server, path, { headers: fake });
       expect(reply.status, path).toBe(401);
       expect(String(reply.headers['content-security-policy']), path).toContain("script-src 'self'");
@@ -469,6 +471,25 @@ describe('security gate', () => {
       ws.once('error', reject);
     });
     expect(csp).toContain("script-src 'self'");
+  });
+
+  it('API routes live under /api/v1: the old unversioned paths answer 404, even with a valid token, and still need one', async () => {
+    const server = await startGated();
+    const tab = await signInRaw(server);
+    const old: Array<[string, string]> = [
+      ['GET', '/api/tab'],
+      ['POST', '/api/tab/exchange'],
+      ['POST', '/api/launch-codes'],
+      ['POST', '/api/server/quit'],
+      ['GET', '/api/toolchain'],
+      ['POST', '/api/toolchain/uv/install'],
+    ];
+    for (const [method, path] of old) {
+      expect((await send(server, path, { method, headers: tab.headers })).status, `${method} ${path}`).toBe(404);
+      expect((await send(server, path, { method, headers: { origin: server.url } })).status, `${method} ${path} without a token`).toBe(401);
+    }
+    // Nothing above stopped the server or spent anything: the new paths answer as before.
+    expect((await send(server, TAB_CHECK_PATH, { headers: bearer(tab) })).status).toBe(204);
   });
 
   it('/api, /api/*, /ws and /ws/* never fall back to the app shell, even with a valid token', async () => {
@@ -582,6 +603,13 @@ describe('gate placement', () => {
       // a new page-level route would be reachable without a token, so it must live under /api instead.
       expect(outside).toEqual(['ALL /*', 'ALL /*', 'GET /*', 'GET /*']);
       expect(app.routes[0]!.handler).toBe(gate);
+      // Every API route is one of the shared routes, all under /api/v1 (Conventions).
+      const api = app.routes.filter((route) => isApiPath(route.path)).map((route) => route.path);
+      expect(api.length).toBeGreaterThan(0);
+      for (const path of api) {
+        expect(path.startsWith(`${API_BASE}/`), path).toBe(true);
+        expect(Object.values(API_ROUTES) as string[], path).toContain(path);
+      }
     } finally {
       core.close();
     }

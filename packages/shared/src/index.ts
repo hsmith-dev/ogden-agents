@@ -1,3 +1,4 @@
+export * from './api.js';
 export * from './appearance.js';
 export * from './entities.js';
 export * from './events.js';

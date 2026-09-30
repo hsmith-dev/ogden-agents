@@ -14,7 +14,7 @@
 // 127.0.0.1 URL and one-time launch link and a clean launcher exit, checks that
 // the server outlived the launcher, that `GET /` serves the page without a
 // token while the API refuses one without it, connects a tab through the launch
-// link (AD-15 as amended: `/#c=<code>`, exchanged at `POST /api/tab/exchange`
+// link (AD-15 as amended: `/#c=<code>`, exchanged at `POST /api/v1/tab/exchange`
 // for a token in the response body, never a URL; no cookie), checks that the
 // API accepts the tab's Bearer token and that a WebSocket client offering the
 // token subprotocol and a matching Origin receives `server.started` (which needs the installed
@@ -158,7 +158,7 @@ async function checkPageWithoutToken(url) {
   }
   const csp = response.headers.get('content-security-policy') ?? '';
   if (!csp.includes("script-src 'self'")) throw new Error(`GET / has no script-src 'self' policy: "${csp}"`);
-  const api = await fetch(`${url}/api/tab`);
+  const api = await fetch(`${url}/api/v1/tab`);
   if (api.status !== 401) throw new Error(`the API without a token returned ${api.status}, not 401`);
 }
 
@@ -172,7 +172,7 @@ async function signIn(launchUrl) {
   const { origin, hash } = new URL(launchUrl);
   const code = /^#c=([A-Za-z0-9_-]{43})$/.exec(hash)?.[1];
   if (code === undefined) throw new Error('the launch link has no #c=<code>');
-  const response = await fetch(`${origin}/api/tab/exchange`, {
+  const response = await fetch(`${origin}/api/v1/tab/exchange`, {
     method: 'POST',
     headers: { origin, 'content-type': 'application/json' },
     body: JSON.stringify({ code }),
@@ -189,7 +189,7 @@ async function signIn(launchUrl) {
  * @param {string} token
  */
 async function checkApi(url, token) {
-  const response = await fetch(`${url}/api/tab`, { headers: { authorization: `Bearer ${token}` } });
+  const response = await fetch(`${url}/api/v1/tab`, { headers: { authorization: `Bearer ${token}` } });
   if (response.status !== 204) throw new Error(`the API with the tab's token returned ${response.status}, not 204`);
 }
 
@@ -265,7 +265,7 @@ function readPortFile() {
  * @param {number} pid
  */
 async function quit(url, token, pid) {
-  const response = await fetch(`${url}/api/server/quit`, { method: 'POST', headers: { authorization: `Bearer ${token}`, origin: url } });
+  const response = await fetch(`${url}/api/v1/server/quit`, { method: 'POST', headers: { authorization: `Bearer ${token}`, origin: url } });
   if (response.status !== 202) throw new Error(`Quit returned ${response.status}`);
   while (isAlive(pid)) await new Promise((r) => setTimeout(r, 100));
   for (const file of ['server.json', 'launcher.token']) {

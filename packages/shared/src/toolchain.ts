@@ -50,11 +50,11 @@ export const ToolFailed = z.object({
 export const ToolchainStatus = z.discriminatedUnion('state', [ToolReady, ToolMissing, ToolInstalling, ToolFailed]);
 export type ToolchainStatus = z.infer<typeof ToolchainStatus>;
 
-/** `GET /api/toolchain`. */
+/** `GET /api/v1/toolchain` (`API_ROUTES.toolchain`). */
 export const ToolchainResponse = z.object({ uv: ToolchainStatus });
 export type ToolchainResponse = z.infer<typeof ToolchainResponse>;
 
-/** `POST /api/toolchain/uv/install` answers 202 with whether it started a download, and the status now. */
+/** `POST /api/v1/toolchain/uv/install` (`API_ROUTES.uvInstall`) answers 202 with whether it started a download, and the status now. */
 export const ToolchainInstallResponse = z.object({ started: z.boolean(), uv: ToolchainStatus });
 export type ToolchainInstallResponse = z.infer<typeof ToolchainInstallResponse>;
 
@@ -68,7 +68,3 @@ export const TOOLCHAIN_ERROR_CODES = [
 ] as const;
 export const ToolchainErrorCode = z.enum(TOOLCHAIN_ERROR_CODES);
 export type ToolchainErrorCode = z.infer<typeof ToolchainErrorCode>;
-
-/** The HTTP paths, shared by the server routes and the UI. */
-export const TOOLCHAIN_PATH = '/api/toolchain';
-export const UV_INSTALL_PATH = '/api/toolchain/uv/install';

@@ -6,7 +6,7 @@
 //
 // It writes `server.json` and `launcher.token` the way a real server does,
 // answers `GET /launcher/hello` (with `?launch=1`, a launch link to its own
-// `/#c=`, exchanged at `POST /api/tab/exchange`) and `POST /launcher/restart-when-idle` (202 and a clean exit when
+// `/#c=`, exchanged at `POST /api/v1/tab/exchange`) and `POST /launcher/restart-when-idle` (202 and a clean exit when
 // idle, 409 when busy). It prints `ready <port>` once listening.
 import { randomBytes } from 'node:crypto';
 import { rmSync, writeFileSync } from 'node:fs';
@@ -49,7 +49,7 @@ const server = createServer((req, res) => {
     setTimeout(cleanUpAndExit, 50);
     return;
   }
-  if (req.method === 'POST' && url.pathname === '/api/tab/exchange') {
+  if (req.method === 'POST' && url.pathname === '/api/v1/tab/exchange') {
     // As the real gate does (AD-15 as amended): the token in the body, never in a URL; no cookie.
     return json(200, { token: randomBytes(32).toString('base64url') });
   }

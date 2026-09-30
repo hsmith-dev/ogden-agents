@@ -1,5 +1,5 @@
 import { runInNewContext } from 'node:vm';
-import { APPEARANCE_STORAGE_KEY, TAB_EXCHANGE_PATH, TAB_TOKEN_STORAGE_KEY, WS_PROTOCOL } from '@ogden-agents/shared';
+import { API_ROUTES, APPEARANCE_STORAGE_KEY, TAB_TOKEN_STORAGE_KEY, WS_PROTOCOL } from '@ogden-agents/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { bootScript } from '../vite.config';
 import { createTabAuth, NotConnectedError } from '../src/auth/tab-token';
@@ -83,7 +83,7 @@ describe('boot script', () => {
     expect(run.replaced).toEqual(['/settings/appearance?x=1']);
     expect(run.url.hash).toBe('');
     expect(run.requests).toHaveLength(1);
-    expect(run.requests[0]!.path).toBe(TAB_EXCHANGE_PATH);
+    expect(run.requests[0]!.path).toBe(API_ROUTES.tabExchange);
     expect(run.requests[0]!.init.method).toBe('POST');
     expect(run.requests[0]!.init.credentials).toBe('omit');
     expect(JSON.parse(String(run.requests[0]!.init.body))).toEqual({ code: CODE });
@@ -136,9 +136,9 @@ describe('tab auth', () => {
     const auth = createTabAuth({ storage: memoryStorage({ [TAB_TOKEN_STORAGE_KEY]: TOKEN }), fetchImpl });
     expect(auth.token()).toBe(TOKEN);
     expect(auth.webSocketProtocols()).toEqual([WS_PROTOCOL, `ogden.auth.${TOKEN}`]);
-    await auth.fetch('/api/tab', { headers: { 'content-type': 'application/json' } });
+    await auth.fetch(API_ROUTES.tabCheck, { headers: { 'content-type': 'application/json' } });
     const [path, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
-    expect(path).toBe('/api/tab');
+    expect(path).toBe(API_ROUTES.tabCheck);
     expect(init.credentials).toBe('omit');
     const headers = new Headers(init.headers);
     expect(headers.get('authorization')).toBe(`Bearer ${TOKEN}`);
@@ -150,13 +150,13 @@ describe('tab auth', () => {
     const auth = createTabAuth({ storage, fetchImpl: async () => new Response(null, { status: 401 }) });
     const lost = vi.fn();
     auth.onForget(lost);
-    expect((await auth.fetch('/api/tab')).status).toBe(401);
+    expect((await auth.fetch(API_ROUTES.tabCheck)).status).toBe(401);
     expect(auth.token()).toBeUndefined();
     expect(storage.values.has(TAB_TOKEN_STORAGE_KEY)).toBe(false);
     expect(lost).toHaveBeenCalledOnce();
     auth.forget();
     expect(lost).toHaveBeenCalledOnce();
-    await expect(auth.fetch('/api/tab')).rejects.toBeInstanceOf(NotConnectedError);
+    await expect(auth.fetch(API_ROUTES.tabCheck)).rejects.toBeInstanceOf(NotConnectedError);
   });
 
   it('with no token (a bookmark or a new tab) is not connected; a malformed stored value is ignored', () => {

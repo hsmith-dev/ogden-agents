@@ -1,12 +1,12 @@
 /**
- * The toolchain routes (story 1.8): `GET /api/toolchain` reports uv's status
- * and `POST /api/toolchain/uv/install` starts the private install, behind the
+ * The toolchain routes (story 1.8): `GET /api/v1/toolchain` reports uv's status
+ * and `POST /api/v1/toolchain/uv/install` starts the private install, behind the
  * gate (AD-15), with progress and the outcome in the event log (AD-5).
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ToolchainError, type DetectedToolStatus, type ToolchainPort, type ToolProgress } from '@ogden-agents/core';
-import { ToolchainInstallResponse, ToolchainResponse, TOOLCHAIN_PATH, UV_INSTALL_PATH } from '@ogden-agents/shared';
+import { API_ROUTES, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createLogger } from '../src/log.js';
 import { start, type RunningServer } from '../src/start.js';
@@ -69,12 +69,12 @@ const toolchainTypes = (server: RunningServer) =>
 describe('toolchain routes', () => {
   it("report the status to a connected tab, and nothing without its token (an old cookie doesn't count)", async () => {
     const server = await startServer(stubPort().port);
-    expect((await fetch(`${server.url}${TOOLCHAIN_PATH}`)).status).toBe(401);
+    expect((await fetch(`${server.url}${API_ROUTES.toolchain}`)).status).toBe(401);
     const cookie = `ogden_session_${server.port}=AAAAAAAAAAAAAAAAAAAAAA.${Math.floor(Date.now() / 1000) + 3600}.${'A'.repeat(43)}`;
-    expect((await fetch(`${server.url}${TOOLCHAIN_PATH}`, { headers: { cookie } })).status).toBe(401);
+    expect((await fetch(`${server.url}${API_ROUTES.toolchain}`, { headers: { cookie } })).status).toBe(401);
 
     const { token } = await signIn(server);
-    const response = await fetch(`${server.url}${TOOLCHAIN_PATH}`, { headers: { authorization: `Bearer ${token}` } });
+    const response = await fetch(`${server.url}${API_ROUTES.toolchain}`, { headers: { authorization: `Bearer ${token}` } });
     expect(response.status).toBe(200);
     expect(ToolchainResponse.parse(await response.json())).toEqual({ uv: { state: 'missing' } });
   });
@@ -85,7 +85,7 @@ describe('toolchain routes', () => {
     const { token } = await signIn(server);
     const authorization = `Bearer ${token}`;
     for (const headers of [{ authorization }, { authorization, origin: 'http://evil.example' }]) {
-      expect((await fetch(`${server.url}${UV_INSTALL_PATH}`, { method: 'POST', headers })).status).toBe(403);
+      expect((await fetch(`${server.url}${API_ROUTES.uvInstall}`, { method: 'POST', headers })).status).toBe(403);
     }
     expect(stub.installs()).toBe(0);
     expect(toolchainTypes(server)).toEqual([]);
@@ -99,7 +99,7 @@ describe('toolchain routes', () => {
     // Nothing downloads at startup.
     expect(stub.installs()).toBe(0);
 
-    const response = await fetch(`${server.url}${UV_INSTALL_PATH}`, { method: 'POST', headers });
+    const response = await fetch(`${server.url}${API_ROUTES.uvInstall}`, { method: 'POST', headers });
     expect(response.status).toBe(202);
     expect(ToolchainInstallResponse.parse(await response.json())).toMatchObject({ started: true, uv: { state: 'installing' } });
 
@@ -110,11 +110,11 @@ describe('toolchain routes', () => {
       'toolchain.install_progress',
       'toolchain.install_completed',
     ]);
-    const status = await fetch(`${server.url}${TOOLCHAIN_PATH}`, { headers: { authorization } });
+    const status = await fetch(`${server.url}${API_ROUTES.toolchain}`, { headers: { authorization } });
     expect(await status.json()).toEqual({ uv: { state: 'ready', version: '0.12.21', source: 'private' } });
 
     // Already ready: a second request starts nothing.
-    const again = await fetch(`${server.url}${UV_INSTALL_PATH}`, { method: 'POST', headers });
+    const again = await fetch(`${server.url}${API_ROUTES.uvInstall}`, { method: 'POST', headers });
     expect(await again.json()).toMatchObject({ started: false, uv: { state: 'ready' } });
     expect(stub.installs()).toBe(1);
   });
@@ -124,10 +124,10 @@ describe('toolchain routes', () => {
     const server = await startServer(stubPort('hash_mismatch').port, lines);
     const { token, headers } = await signIn(server);
     const authorization = `Bearer ${token}`;
-    await fetch(`${server.url}${UV_INSTALL_PATH}`, { method: 'POST', headers });
+    await fetch(`${server.url}${API_ROUTES.uvInstall}`, { method: 'POST', headers });
     await waitFor(() => toolchainTypes(server).includes('toolchain.install_failed'), 'the install to fail');
 
-    const status = await fetch(`${server.url}${TOOLCHAIN_PATH}`, { headers: { authorization } });
+    const status = await fetch(`${server.url}${API_ROUTES.toolchain}`, { headers: { authorization } });
     expect(await status.json()).toEqual({
       uv: { state: 'failed', reason: "The download didn't match the expected file, so nothing was installed. Try again.", canInstall: true },
     });

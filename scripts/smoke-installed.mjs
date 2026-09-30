@@ -5,13 +5,16 @@
 //
 // In a fresh temp directory, with a fresh npm cache and no workspace in sight,
 // runs `npx --yes --package=<tgz> ogden-agents --no-open --port 0`, waits for the
-// printed 127.0.0.1 URL, checks that `GET /` returns the page and that a
-// WebSocket client that subscribes receives `server.started` (which needs the
+// printed 127.0.0.1 URL and one-time launch link, checks that `GET /` without a
+// session is refused, signs in through the launch link (AD-15), checks that
+// `GET /` with the cookie returns the page and that a WebSocket client sending
+// the cookie and a matching Origin receives `server.started` (which needs the
 // installed `better-sqlite3` to load and the bundled migrations to apply),
 // then stops the process tree. The data folder is a temp directory.
 // Exits non-zero with the captured output on any failure.
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -91,12 +94,13 @@ function withTimeout(promise, ms, what) {
   ]).finally(() => clearTimeout(timer));
 }
 
-/** @returns {Promise<string>} */
+/** @returns {Promise<{ url: string, launchUrl: string }>} */
 function waitForUrl() {
   return new Promise((resolveUrl, reject) => {
     const check = () => {
-      const match = /running at (http:\/\/127\.0\.0\.1:\d+)/.exec(output);
-      if (match) resolveUrl(/** @type {string} */ (match[1]));
+      const url = /running at (http:\/\/127\.0\.0\.1:\d+)/.exec(output)?.[1];
+      const launchUrl = /one-time link: (http:\/\/127\.0\.0\.1:\d+\/auth\?code=[A-Za-z0-9_-]+)/.exec(output)?.[1];
+      if (url !== undefined && launchUrl !== undefined) resolveUrl({ url, launchUrl });
     };
     child.stdout.on('data', check);
     void exited.then(() => reject(new Error(`ogden-agents exited before printing a URL (code ${child.exitCode})`)));
@@ -105,24 +109,69 @@ function waitForUrl() {
 }
 
 /** @param {string} url */
-async function checkPage(url) {
+async function checkRefusedWithoutSession(url) {
   const response = await fetch(url);
+  const body = await response.text();
+  if (response.status !== 401 || !body.includes('npx ogden-agents')) {
+    throw new Error(`GET / without a session returned ${response.status}, not the 401 page:\n${body.slice(0, 500)}`);
+  }
+}
+
+/**
+ * Exchanges the launch link for the session cookie, as a browser does.
+ * @param {string} launchUrl
+ * @returns {Promise<string>} the cookie's `name=value`
+ */
+async function signIn(launchUrl) {
+  const response = await fetch(launchUrl, { redirect: 'manual' });
+  const setCookie = response.headers.get('set-cookie');
+  if (response.status !== 303 || setCookie === null) {
+    throw new Error(`the launch link returned ${response.status}${setCookie === null ? ' and no cookie' : ''}`);
+  }
+  return /** @type {string} */ (setCookie.split(';')[0]);
+}
+
+/**
+ * @param {string} url
+ * @param {string} cookie
+ */
+async function checkPage(url, cookie) {
+  const response = await fetch(url, { headers: { cookie } });
   const body = await response.text();
   if (response.status !== 200 || !body.includes('<div id="root"></div>')) {
     throw new Error(`GET / returned ${response.status} without the page:\n${body.slice(0, 500)}`);
   }
 }
 
-/** @param {string} url */
-function checkServerStarted(url) {
+/**
+ * The `ws` client from the package npx just installed (it is a runtime
+ * dependency). Node's global WebSocket can't send the Cookie and Origin headers
+ * the gate requires; `ws` can.
+ * @returns {typeof import('ws').WebSocket}
+ */
+function installedWs() {
+  const npxDir = join(cacheDir, '_npx');
+  for (const entry of existsSync(npxDir) ? readdirSync(npxDir) : []) {
+    const manifest = join(npxDir, entry, 'node_modules', 'ws', 'package.json');
+    if (existsSync(manifest)) return createRequire(manifest)('ws');
+  }
+  throw new Error(`ws is not installed under ${npxDir}`);
+}
+
+/**
+ * @param {string} url
+ * @param {string} cookie
+ */
+function checkServerStarted(url, cookie) {
+  const WebSocket = installedWs();
   return new Promise((resolveEvent, reject) => {
-    const ws = new WebSocket(`${url.replace(/^http/, 'ws')}/ws`);
+    const ws = new WebSocket(`${url.replace(/^http/, 'ws')}/ws`, { headers: { cookie, origin: url } });
     // The server sends nothing until the client subscribes (AD-5).
-    ws.addEventListener('open', () => ws.send(JSON.stringify({ type: 'subscribe', afterSeq: 0 })));
-    ws.addEventListener('message', (event) => {
+    ws.on('open', () => ws.send(JSON.stringify({ type: 'subscribe', afterSeq: 0 })));
+    ws.on('message', (data) => {
       let message;
       try {
-        message = JSON.parse(String(event.data));
+        message = JSON.parse(String(data));
       } catch {
         return;
       }
@@ -131,8 +180,8 @@ function checkServerStarted(url) {
         resolveEvent(message);
       }
     });
-    ws.addEventListener('error', () => reject(new Error('WebSocket error before server.started')));
-    ws.addEventListener('close', () => reject(new Error('WebSocket closed before server.started')));
+    ws.on('error', (error) => reject(new Error(`WebSocket error before server.started: ${error.message}`)));
+    ws.on('close', () => reject(new Error('WebSocket closed before server.started')));
   });
 }
 
@@ -174,11 +223,15 @@ function cleanUp() {
 let failure;
 try {
   console.log(`smoke: installing ${tarball} with npx in ${workDir}`);
-  const url = await withTimeout(waitForUrl(), START_TIMEOUT_MS, 'ogden-agents to print its URL');
+  const { url, launchUrl } = await withTimeout(waitForUrl(), START_TIMEOUT_MS, 'ogden-agents to print its URLs');
   console.log(`smoke: server is at ${url}`);
-  await withTimeout(checkPage(url), STEP_TIMEOUT_MS, 'GET /');
+  await withTimeout(checkRefusedWithoutSession(url), STEP_TIMEOUT_MS, 'GET / without a session');
+  console.log('smoke: GET / without a session was refused');
+  const cookie = await withTimeout(signIn(launchUrl), STEP_TIMEOUT_MS, 'the launch link');
+  console.log('smoke: signed in through the launch link');
+  await withTimeout(checkPage(url, cookie), STEP_TIMEOUT_MS, 'GET /');
   console.log('smoke: GET / returned the page');
-  const event = await withTimeout(checkServerStarted(url), STEP_TIMEOUT_MS, 'server.started over /ws');
+  const event = await withTimeout(checkServerStarted(url, cookie), STEP_TIMEOUT_MS, 'server.started over /ws');
   console.log(`smoke: received ${JSON.stringify(event)}`);
 } catch (error) {
   failure = error;

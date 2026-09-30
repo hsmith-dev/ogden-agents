@@ -2,7 +2,7 @@ import { upgradeWebSocket } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import type { EventLog } from '@ogden-agents/core';
 import { ClientMessage, ServerMessage } from '@ogden-agents/shared';
-import { Hono } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
 import type { WSContext } from 'hono/ws';
 import type { Logger } from './log.js';
 
@@ -12,12 +12,20 @@ export interface AppOptions {
   /** Absolute path to the built web UI (`packages/web/dist`). */
   webRoot: string;
   log: Logger;
+  /**
+   * The security gate (AD-15; see `createGate`). Registered before every route,
+   * so nothing the app serves, now or later, is reachable around it.
+   */
+  gate: MiddlewareHandler;
 }
 
 const WS_OPEN = 1;
 
-export function createApp({ events, webRoot, log }: AppOptions): Hono {
+export function createApp({ events, webRoot, log, gate }: AppOptions): Hono {
   const app = new Hono();
+
+  // First, for every method and path: no route may be registered before this line.
+  app.use('*', gate);
 
   /** Validate against the shared contract, then send; never send unschematized data. */
   const send = (ws: WSContext, message: unknown) => {

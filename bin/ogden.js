@@ -15,7 +15,7 @@ const WEB_ROOT = fileURLToPath(new URL('../dist/web', import.meta.url));
 const USAGE = `Usage: ogden [--port <number>] [--no-open]
 
   --port <number>  Port to try first (default 4317; falls back to the next free port)
-  --no-open        Do not open a browser; just print the URL
+  --no-open        Do not open a browser; just print the URL and one-time link
   -h, --help       Show this help`;
 
 /** @returns {{ port: number | undefined, open: boolean }} */
@@ -63,13 +63,16 @@ async function main() {
   /** @type {typeof import('@ogden-agents/server')} */
   const { start } = await import(SERVER_BUNDLE.href);
 
-  // The server opens the browser itself (using `open`) once it is listening.
+  // The server opens the browser itself (using `open`) at the launch link once it is listening.
   const server = await start(
     cli.port === undefined
       ? { open: cli.open, webRoot: WEB_ROOT }
       : { port: cli.port, open: cli.open, webRoot: WEB_ROOT },
   );
   console.log(`Ogden Agents is running at ${server.url}`);
+  // The launch link signs this browser in once, within 60 seconds (AD-15).
+  // Print it so a user whose browser didn't open can click it instead.
+  console.log(`Open it with this one-time link: ${server.launchUrl}`);
 
   const shutdown = () => {
     server.close().finally(() => process.exit(0));

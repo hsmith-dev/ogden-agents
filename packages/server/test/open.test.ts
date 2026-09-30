@@ -15,10 +15,11 @@ afterEach(async () => {
 });
 
 describe('opening the browser', () => {
-  it('opens the server URL when asked', async () => {
+  it('opens the one-time launch link when asked', async () => {
     const server = await start({ port: 0, open: true, log: quiet, dataDir: tempDataDir() });
     running.push(server);
-    expect(openBrowser).toHaveBeenCalledExactlyOnceWith(server.url);
+    expect(server.launchUrl).toMatch(new RegExp(`^${server.url}/auth\\?code=[A-Za-z0-9_-]{43}$`));
+    expect(openBrowser).toHaveBeenCalledExactlyOnceWith(server.launchUrl);
   });
 
   it('does not open a browser when not asked', async () => {
@@ -38,5 +39,8 @@ describe('opening the browser', () => {
     });
     running.push(server);
     expect(lines.some((l) => l.level === 'warn' && l.msg === 'could not open a browser')).toBe(true);
+    // The warning names the base URL, never the launch code (AD-16).
+    const code = new URL(server.launchUrl).searchParams.get('code')!;
+    expect(JSON.stringify(lines)).not.toContain(code);
   });
 });

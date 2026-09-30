@@ -1,14 +1,16 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { createDataDir, ensureDataDir, openCore, type Core } from '@ogden-agents/core';
+import { createDataDir, ensureDataDir, openCore, PORT_FILE, type Core } from '@ogden-agents/core';
 import { SERVER_STREAM } from '@ogden-agents/shared';
 import openBrowser from 'open';
 import { WebSocketServer } from 'ws';
 import pkg from '../package.json' with { type: 'json' };
 import { createApp } from './app.js';
+import { createLaunchCodes, createSessions, loadOrCreateAuthKey, tightenMode, type Clock } from './auth.js';
+import { AUTH_PATH, createGate } from './gate.js';
 import { createLogger, createRotatingFileWriter, LOG_DIR, teeWriters, type Logger } from './log.js';
 
 /** The only interface the server ever binds (AD-15). */
@@ -38,7 +40,7 @@ function defaultWebRoot(): string {
 export interface StartOptions {
   /** Port to try first. `0` asks the OS for any free port. Default {@link DEFAULT_PORT}. */
   port?: number;
-  /** Open the default browser at the server URL. Default `false`. */
+  /** Open the default browser at the single-use launch URL (`launchUrl`). Default `false`. */
   open?: boolean;
   /** Override the built UI directory. */
   webRoot?: string;
@@ -52,10 +54,27 @@ export interface StartOptions {
   core?: Core;
   /** Override the logger (tests). Default: stderr plus a rotating file in `<dataDir>/logs`. */
   log?: Logger;
+  /** Override the clock for launch code and session expiry (tests). Default `Date.now`. */
+  now?: Clock;
+}
+
+/** The contents of the port file `<dataDir>/server.json` (AD-15). */
+export interface PortFile {
+  port: number;
+  pid: number;
+  version: string;
+  /** ISO 8601 UTC. */
+  startedAt: string;
 }
 
 export interface RunningServer {
+  /** The base URL. Opening it without the session cookie shows how to get in. */
   url: string;
+  /**
+   * `<url>/auth?code=…`: a single-use link, valid for 60 seconds, that signs a
+   * browser in (AD-15). It is a secret: print it for the user, never log it.
+   */
+  launchUrl: string;
   port: number;
   version: string;
   /** The data folder in use. */
@@ -103,7 +122,13 @@ async function listenAndAnnounce({
   ownsCore: boolean;
 }): Promise<RunningServer> {
   const requested = options.port ?? DEFAULT_PORT;
-  const app = createApp({ events: core.events, webRoot: options.webRoot ?? defaultWebRoot(), log });
+  const now = options.now ?? Date.now;
+  const codes = createLaunchCodes(now);
+  const sessions = createSessions(loadOrCreateAuthKey(dataDir), now);
+  // The gate refuses everything until the port is known.
+  let boundPort: number | undefined;
+  const gate = createGate({ port: () => boundPort, codes, sessions, log });
+  const app = createApp({ events: core.events, webRoot: options.webRoot ?? defaultWebRoot(), log, gate });
 
   let bound: { server: ReturnType<typeof createAdaptorServer>; wss: WebSocketServer; port: number } | undefined;
   let lastTried = requested;
@@ -129,24 +154,32 @@ async function listenAndAnnounce({
   }
 
   const { server, wss, port } = bound;
+  boundPort = port;
   const url = `http://${HOST}:${port}`;
   const version = pkg.version;
+  const portFile = join(dataDir, PORT_FILE);
   if (port !== requested && requested !== 0) {
     log.warn('requested port was busy', { requested, port });
   }
   log.info('server listening', { url, port, version, dataDir });
 
+  const identity: PortFile = { port, pid: process.pid, version, startedAt: new Date().toISOString() };
   try {
+    writePortFile(portFile, identity);
     core.events.append({ type: 'server.started', workspaceId: null, streamId: SERVER_STREAM, payload: { version } });
   } catch (error) {
     // Nothing may stay listening on a server that failed to start.
     await closeServer(server, wss);
+    removePortFile(portFile, identity);
     throw error;
   }
 
+  const launchUrl = `${url}${AUTH_PATH}?code=${codes.issue()}`;
+  log.info('launch code issued');
+
   if (options.open === true) {
     try {
-      await openBrowser(url);
+      await openBrowser(launchUrl);
     } catch (error) {
       log.warn('could not open a browser', { url, reason: String(error) });
     }
@@ -154,15 +187,41 @@ async function listenAndAnnounce({
 
   return {
     url,
+    launchUrl,
     port,
     version,
     dataDir,
     core,
     close: () =>
       closeServer(server, wss).finally(() => {
-        if (ownsCore) core.close();
+        try {
+          removePortFile(portFile, identity);
+        } finally {
+          if (ownsCore) core.close();
+        }
       }),
   };
+}
+
+/** Writes the port file readable only by the user, replacing any stale one in one step. */
+function writePortFile(file: string, identity: PortFile): void {
+  const temp = `${file}.${process.pid}.tmp`;
+  writeFileSync(temp, `${JSON.stringify(identity)}\n`, { mode: 0o600 });
+  tightenMode(temp);
+  renameSync(temp, file);
+}
+
+/** Removes the port file only if it is still this server's; another server may have replaced it. */
+function removePortFile(file: string, identity: PortFile): void {
+  let current: Partial<PortFile>;
+  try {
+    current = JSON.parse(readFileSync(file, 'utf8')) as Partial<PortFile>;
+  } catch {
+    return;
+  }
+  if (current.pid === identity.pid && current.port === identity.port && current.startedAt === identity.startedAt) {
+    rmSync(file, { force: true });
+  }
 }
 
 /** Stops the WebSocket clients and the HTTP server, and resolves once the port is released. */

@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import { createLogger, LOG_DIR, type Logger } from '../src/log.js';
 import { HOST, start, type RunningServer } from '../src/start.js';
-import { tempDataDir } from './helpers.js';
+import { signIn, tempDataDir } from './helpers.js';
 
 interface Captured {
   log: Logger;
@@ -21,11 +21,13 @@ function captureLog(): Captured {
 }
 
 /**
- * Connects, sends `subscribe` after `afterSeq` (unless `null`), and collects
- * every schema-valid server message.
+ * Signs in through the launch link, connects with the session cookie and a
+ * matching `Origin`, sends `subscribe` after `afterSeq` (unless `null`), and
+ * collects every schema-valid server message.
  */
-async function connect(url: string, afterSeq: number | null = 0) {
-  const ws = new WebSocket(`${url.replace('http', 'ws')}/ws`);
+async function connect(server: RunningServer, afterSeq: number | null = 0) {
+  const { cookie, origin } = await signIn(server);
+  const ws = new WebSocket(`${server.url.replace('http', 'ws')}/ws`, { headers: { cookie, origin } });
   sockets.push(ws);
   const received: ServerMessage[] = [];
   const waiters: Array<() => void> = [];
@@ -132,7 +134,7 @@ describe('server start', () => {
 
   it('appends a schema-valid server.started event and pushes it to a subscriber', async () => {
     const server = await startTest();
-    const client = await connect(server.url);
+    const client = await connect(server);
     const event = await client.next('server.started');
     expect(event).toMatchObject({
       type: 'server.started',
@@ -148,7 +150,7 @@ describe('server start', () => {
 
   it('sends nothing until the client subscribes', async () => {
     const server = await startTest();
-    const client = await connect(server.url, null);
+    const client = await connect(server, null);
     client.ws.send(JSON.stringify({ type: 'ping' }));
     await client.next('pong');
     expect(client.events()).toEqual([]);
@@ -157,8 +159,8 @@ describe('server start', () => {
   it('gives a late client the same logged event', async () => {
     const server = await startTest();
     await new Promise((resolve) => setTimeout(resolve, 50));
-    const first = await connect(server.url);
-    const late = await connect(server.url);
+    const first = await connect(server);
+    const late = await connect(server);
     const a = await first.next('server.started');
     const b = await late.next('server.started');
     expect(b).toEqual(a);
@@ -168,7 +170,7 @@ describe('server start', () => {
     const server = await startTest();
     const stored = [...server.core.events.readAfter(0), ...appendEvents(server, 5)];
     const n = stored[2]!.seq;
-    const client = await connect(server.url, n);
+    const client = await connect(server, n);
     const expected = stored.filter((e) => e.seq > n);
     await client.until((all) => all.length >= expected.length, 'the backlog');
     expect(client.events()).toEqual(expected);
@@ -181,13 +183,13 @@ describe('server start', () => {
   it('page reconnect: a client that drops and resubscribes after its last seq sees nothing twice', async () => {
     const server = await startTest();
     appendEvents(server, 2);
-    const first = await connect(server.url);
+    const first = await connect(server);
     await first.until((all) => all.length === 3, 'initial events');
     const lastSeen = first.seqs().at(-1)!;
     await first.close();
 
     const missed = appendEvents(server, 3);
-    const again = await connect(server.url, lastSeen);
+    const again = await connect(server, lastSeen);
     await again.until((all) => all.length === 3, 'missed events');
     const live = appendEvents(server, 1);
     await again.until((all) => all.length === 4, 'a live event');
@@ -200,7 +202,7 @@ describe('server start', () => {
 
   it('a second subscribe on one connection replaces the first', async () => {
     const server = await startTest();
-    const client = await connect(server.url);
+    const client = await connect(server);
     await client.next('server.started');
     const [event] = appendEvents(server, 1);
     await client.until((all) => all.length === 2, 'the appended event');
@@ -222,7 +224,7 @@ describe('server start', () => {
     running.splice(running.indexOf(first), 1);
 
     const second = await startTest({ dataDir });
-    const client = await connect(second.url);
+    const client = await connect(second);
     await client.until((all) => all.length === before.length + 1, 'all events');
     const events = client.events();
     expect(events.slice(0, before.length)).toEqual(before);
@@ -234,7 +236,7 @@ describe('server start', () => {
   it('ignores bad client messages, including a bad afterSeq, logs warnings and keeps the connection', async () => {
     const { log, lines } = captureLog();
     const server = await startTest({ log });
-    const client = await connect(server.url, null);
+    const client = await connect(server, null);
 
     client.ws.send('not json');
     client.ws.send(JSON.stringify({ type: 'launch.missiles' }));
@@ -271,7 +273,7 @@ describe('server start', () => {
     const core = openCore(tempDataDir());
     try {
       const server = await startTest({ core });
-      const client = await connect(server.url);
+      const client = await connect(server);
       await client.next('server.started');
       core.events.append({ type: 'server.started', workspaceId: null, streamId: SERVER_STREAM, payload: { version: '9.9.9' } });
       await client.until(

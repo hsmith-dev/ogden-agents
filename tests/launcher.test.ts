@@ -38,26 +38,40 @@ function launch(args: string[]) {
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
     child.once('exit', (code, signal) => resolve({ code, signal })),
   );
-  const url = new Promise<string>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`no URL printed; stdout: ${stdout}`)), 10_000);
+  /** The base URL and the one-time launch link, once both are printed. */
+  const urls = new Promise<{ url: string; launchUrl: string }>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`no URLs printed; stdout: ${stdout}`)), 10_000);
     child.stdout!.on('data', () => {
-      const match = /running at (http:\/\/\S+)/.exec(stdout);
-      if (match) {
+      const url = /running at (http:\/\/\S+)/.exec(stdout)?.[1];
+      const launchUrl = /one-time link: (http:\/\/\S+)/.exec(stdout)?.[1];
+      if (url !== undefined && launchUrl !== undefined) {
         clearTimeout(timer);
-        resolve(match[1]!);
+        resolve({ url, launchUrl });
       }
     });
   });
-  return { child, url, exited };
+  // A launch that exits early never prints them; only tests that await `urls` care.
+  urls.catch(() => {});
+  return { child, urls, exited };
 }
 
 describe('bin/ogden.js', () => {
-  it('with --no-open, starts on loopback, prints the URL and serves the page', async () => {
-    const { child, url, exited } = launch(['--no-open', '--port', '0']);
-    const address = await url;
+  it('with --no-open, starts on loopback, prints the URL and launch link, and serves the page through the gate', async () => {
+    const { child, urls, exited } = launch(['--no-open', '--port', '0']);
+    const { url: address, launchUrl } = await urls;
     expect(address).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(launchUrl).toMatch(new RegExp(`^${address.replaceAll('.', '\\.')}/auth\\?code=[A-Za-z0-9_-]+$`));
 
-    const response = await fetch(address);
+    // Without the session cookie, the page says to open the app from the terminal.
+    const refused = await fetch(address);
+    expect(refused.status).toBe(401);
+    expect(await refused.text()).toContain('npx ogden-agents');
+
+    // The launch link sets the cookie and redirects to the page.
+    const exchange = await fetch(launchUrl, { redirect: 'manual' });
+    expect(exchange.status).toBe(303);
+    const cookie = exchange.headers.get('set-cookie')!.split(';')[0]!;
+    const response = await fetch(address, { headers: { cookie } });
     expect(response.status).toBe(200);
     expect(await response.text()).toContain('<div id="root"></div>');
 

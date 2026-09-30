@@ -6,9 +6,21 @@ import envPaths from 'env-paths';
 export const DATA_DIR_ENV = 'OGDEN_AGENTS_DATA_DIR';
 
 /**
+ * The server's session-signing key in the data folder (AD-15): 32 random bytes,
+ * readable only by the user. Deleting it logs every browser out.
+ */
+export const AUTH_KEY_FILE = 'auth.key';
+
+/**
+ * The port file in the data folder (AD-15): `{ port, pid, version, startedAt }`
+ * of the running server, readable only by the user, so a launcher can find it.
+ */
+export const PORT_FILE = 'server.json';
+
+/**
  * The per-user data folder (Conventions): the OS data directory's `ogden-agents/`,
- * or `$OGDEN_AGENTS_DATA_DIR` when set. It holds the database and logs; nothing is
- * ever written into user repos.
+ * or `$OGDEN_AGENTS_DATA_DIR` when set. It holds the database, logs, the auth key
+ * and the port file; nothing is ever written into user repos.
  */
 export function dataDirPath(env: NodeJS.ProcessEnv = process.env): string {
   const override = env[DATA_DIR_ENV];

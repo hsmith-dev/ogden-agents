@@ -1,0 +1,49 @@
+# OgdenMad epics, in build order. `after` names what each epic needs and from which epic.
+
+[[epic]]
+id = 1
+slug = "epic-foundation-and-forks"
+title = "OgdenMad installs, opens and stays up to date on every OS"
+covers = ["CAP-1"]
+
+[[epic]]
+id = 2
+slug = "epic-chat-and-workspaces"
+title = "Chat with your own agent in workspaces across projects"
+covers = ["CAP-3", "CAP-4", "CAP-16", "CAP-17"]
+after = [{ epic = 1, needs = "the server, security gate, event log, entity model and design system" }]
+
+[[epic]]
+id = 3
+slug = "epic-terminal-toggle"
+title = "Advanced users switch a chat to the agent's own terminal and back"
+covers = ["CAP-5"]
+after = [{ epic = 2, needs = "persistent sessions and the session view" }]
+
+[[epic]]
+id = 4
+slug = "epic-planning-and-board"
+title = "Plan with every BMAD skill and track it on a live board"
+covers = ["CAP-2", "CAP-6", "CAP-7", "CAP-18"]
+after = [{ epic = 1, needs = "the bundled forks and forks.lock" }, { epic = 2, needs = "chat sessions, which planning runs in" }]
+
+[[epic]]
+id = 5
+slug = "epic-unattended-builds"
+title = "Tickets build themselves safely and wait for your approval"
+covers = ["CAP-8", "CAP-9", "CAP-10", "CAP-12", "CAP-14"]
+after = [{ epic = 1, needs = "the bundled bmad-loop fork" }, { epic = 4, needs = "the ticket store and board" }]
+
+[[epic]]
+id = 6
+slug = "epic-every-agent"
+title = "Every agent BMAD supports works for chat and builds"
+covers = ["CAP-15"]
+after = [{ epic = 2, needs = "the ACP client and session states" }, { epic = 5, needs = "the build runner and sandbox chain" }]
+
+[[epic]]
+id = 7
+slug = "epic-retrospectives"
+title = "Each finished epic teaches the next one"
+covers = ["CAP-13"]
+after = [{ epic = 5, needs = "finished runs with build records" }]

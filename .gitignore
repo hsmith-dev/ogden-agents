@@ -1,0 +1,10 @@
+# BMAD rendered workflow snapshots (regenerated per run)
+_bmad/render/
+# Personal BMAD overrides
+*.user.toml
+# Node
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store

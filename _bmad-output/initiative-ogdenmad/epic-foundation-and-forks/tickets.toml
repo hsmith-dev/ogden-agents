@@ -1,0 +1,137 @@
+# Epic 1 breakdown. Table order is the build order; ids never change.
+
+[[entry]]
+id = 1
+type = "story"
+title = "Tracer bullet: launcher to live page"
+description = "Creates the pnpm monorepo with bin/ogdenmad and the shared, core, adapters, server and web packages, where the launcher starts a Hono server on 127.0.0.1 and opens a page that shows a core event arriving live over WebSocket; the user creates the ogdenmad GitHub repo, reserves the npm name, and the planning files move into the repo."
+verify = "Running the launcher from a clean checkout opens a page on which a server-started event appears live."
+covers = ["R1", "R4"]
+after = []
+hitl = true
+risk = "medium"
+unknown = "The live stream here is temporary; entry 3 replaces it with the real event log."
+
+[[entry]]
+id = 2
+type = "story"
+title = "CI matrix and single-package bundling"
+description = "Bundles the workspace into one publishable ogdenmad package and adds CI on macOS, Windows and Linux for Node 24 and 26 that runs the tests and a clean npx install of the packed tarball."
+verify = "All six CI jobs pass, including the clean-install job on each OS."
+covers = ["R8"]
+after = [1]
+hitl = false
+risk = "high"
+unknown = "Whether better-sqlite3 ships prebuilt binaries for every OS and Node pairing; a gap fails CI rather than users."
+
+[[entry]]
+id = 3
+type = "story"
+title = "Event log and entity model"
+description = "Adds the Zod schemas for the event envelope, ids, workspace, session and run in shared, SQLite through Drizzle and better-sqlite3 in the user data folder, core-only writes, subscribe after a sequence number, message compaction, per-workspace deletion and structured logs, replacing the tracer's temporary stream."
+verify = "A test client that disconnects and resubscribes after sequence N receives exactly the missed events, and events survive a server restart."
+covers = ["R4"]
+after = [1]
+hitl = false
+risk = "medium"
+unknown = "The structured-logging library and Drizzle migration tool are chosen here (architecture Deferred)."
+
+[[entry]]
+id = 4
+type = "story"
+title = "Security gate"
+description = "Puts every HTTP and WebSocket route behind one gate that exchanges a single-use launch code for an HttpOnly SameSite=Strict cookie, checks Host and Origin, and writes the port file readable only by the user."
+verify = "Scripted requests without the cookie, with a foreign Host, or with a foreign Origin on a WebSocket are refused, and a launch code works once and fails after 60 seconds."
+covers = ["R2"]
+after = [3]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 5
+type = "story"
+title = "Design direction"
+description = "Runs the design-taste-frontend Design Read on OgdenMad's brief, then bmad-ux, producing DESIGN.md and EXPERIENCE.md that the user approves."
+verify = "DESIGN.md and EXPERIENCE.md exist in the repo and the user has approved the direction."
+covers = ["R5"]
+after = [1]
+hitl = true
+risk = "low"
+
+[[entry]]
+id = 6
+type = "story"
+title = "Design system and app shell"
+description = "Sets up shadcn/ui in packages/web/ui with light and dark tokens from DESIGN.md and builds the app layout with the workspace switcher and status sidebar in their empty states, checked in a real browser."
+verify = "Playwright shows no horizontal overflow at phone, tablet and desktop widths, and the app uses only packages/web/ui components and tokens."
+covers = ["R5"]
+after = [3, 5]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 7
+type = "story"
+title = "Background server lifecycle and version handshake"
+description = "Makes the launcher start the server detached or attach to a running one, adds Quit to the app shell, and adds the version handshake that offers a restart to an older server without stopping it."
+verify = "The server keeps running after the terminal closes, a second launch attaches, and a simulated older server gets a restart offer and keeps running."
+covers = ["R1", "R3"]
+after = [4, 6]
+hitl = false
+risk = "high"
+unknown = "Detached background processes behave differently on Windows."
+
+[[entry]]
+id = 8
+type = "story"
+title = "uv bootstrap"
+description = "Has the server detect uv and install it per OS when missing, with progress and errors shown in the app shell."
+verify = "On a machine without uv, uv installs from the UI with no terminal, and the UI reports its version."
+covers = ["R6"]
+after = [3, 4, 6]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 9
+type = "story"
+title = "Forks bundled and locked"
+description = "Sets up the BMAD-METHOD and bmad-loop forks with upstream and ogdenmad branches and first tags, bundles them in vendor/ with forks.lock and a built bmad-loop wheel, fails CI on any mismatch, and documents the upstream-PR process; the user creates the forks."
+verify = "Changing one vendored file makes CI fail, and restoring it makes CI pass."
+covers = ["R7", "R8"]
+after = [2]
+hitl = true
+risk = "medium"
+
+[[entry]]
+id = 10
+type = "story"
+title = "First npm release"
+description = "Adds a tagged-release workflow that publishes ogdenmad to npm and a CI job that runs npx ogdenmad from the registry on all three OSes; the user adds the npm token."
+verify = "A fresh machine on each OS runs the published package and reaches the app shell."
+covers = ["R1", "R8"]
+after = [2, 7, 8, 9]
+hitl = true
+risk = "medium"
+
+[[entry]]
+id = 11
+type = "story"
+title = "Refactor sweep"
+description = "Cleans up code across the epic, scoped when it starts from the build records and the review findings deferred during the epic, with no behavior change."
+verify = "All tests pass and no behavior changes."
+covers = ["R4"]
+after = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 12
+type = "story"
+title = "End-to-end suite"
+description = "Adds an end-to-end suite that installs the packed package, launches it, passes the security gate, and reaches the app shell on each OS, run in CI."
+verify = "The suite passes in CI on all three OSes and fails when the security gate is removed."
+covers = ["R1", "R2", "R8"]
+after = [11]
+hitl = false
+risk = "low"

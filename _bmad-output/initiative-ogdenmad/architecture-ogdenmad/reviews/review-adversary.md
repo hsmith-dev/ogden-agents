@@ -1,0 +1,7 @@
+# Review — adversarial divergence (configured floor)
+Verdict: 2 high, 2 medium, 1 low. Pairs of units that obey every AD yet clash:
+- HIGH (epic 4 board vs epic 5 builds): build-auto writes plan status inside the run's worktree branch; a board reading the main checkout shows no progress until merge, while a watcher that also scans worktrees under the repo double-indexes tickets. Close: worktrees outside the repo in the data dir; TicketStorePort reads a ticket's plan from its active run's worktree, else the main checkout; the watcher never scans worktrees.
+- HIGH (epic 2 chat view vs epic 5 run view): ACP adapters and the bmad-loop BuildRunner adapter can each emit their own event shapes, so the shared read-only session view cannot render builds. Close: every adapter producing agent activity emits the same session.* schemas.
+- MEDIUM (epic 2 compaction vs any reconnecting client): a client resumed mid-message after chunks were compacted misses content. Close: compaction appends session.message_completed with full content; chunks pruned only after it; UI replaces chunks with it.
+- MEDIUM (epic 5 run view vs epic 4 board): session state, run result and ticket status are three statuses; one epic may derive ticket state from session done. Close: Run has its own outcome enum; ticket status comes only from TicketStorePort; UI never derives one from another.
+- LOW (two workspaces for one repo): /Users/x/repo vs /users/x/repo or a symlink creates duplicate workspaces. Close: canonical realpath, case-folded on case-insensitive filesystems.

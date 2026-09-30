@@ -48,8 +48,9 @@ jobs:
       - name: Pack
         run: pnpm pack
 
-      # Clean npx install of the tarball in an empty directory; must reach the
-      # page and receive server.started. With no argument the script uses
+      # Clean npx install of the tarball in an empty directory; the launcher
+      # starts a detached server and exits, which must serve the page and
+      # send server.started, and then stop through Quit. With no argument the script uses
       # ogden-agents-<package.json version>.tgz, the file `pnpm pack` just wrote.
       - name: Smoke test the installed package
         run: node scripts/smoke-installed.mjs

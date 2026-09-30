@@ -4,13 +4,15 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
 import { createDataDir, ensureDataDir, openCore, PORT_FILE, type Core } from '@ogden-agents/core';
-import { SERVER_STREAM } from '@ogden-agents/shared';
+import { SERVER_STREAM, ServerMessage } from '@ogden-agents/shared';
 import openBrowser from 'open';
 import { WebSocketServer } from 'ws';
 import pkg from '../package.json' with { type: 'json' };
-import { createApp } from './app.js';
+import { createApp, type ServerControl } from './app.js';
 import { createLaunchCodes, createSessions, loadOrCreateAuthKey, tightenMode, type Clock } from './auth.js';
 import { AUTH_PATH, createGate } from './gate.js';
+import { acquireInstanceLock, type InstanceLock } from './instance-lock.js';
+import { createLauncherToken, type LauncherToken } from './launcher-token.js';
 import { createLogger, createRotatingFileWriter, LOG_DIR, teeWriters, type Logger } from './log.js';
 
 /** The only interface the server ever binds (AD-15). */
@@ -56,6 +58,29 @@ export interface StartOptions {
   log?: Logger;
   /** Override the clock for launch code and session expiry (tests). Default `Date.now`. */
   now?: Clock;
+  /**
+   * Called once the server has stopped by itself (Quit, or a restart the
+   * launcher asked for) and everything is closed. A server process exits here.
+   */
+  onStop?: (reason: StopReason) => void;
+}
+
+/**
+ * Why the server stopped: `quit` from the UI, `restart` for a newer version
+ * (the launcher starts it), or `close` from its owner.
+ */
+export type StopReason = 'quit' | 'restart' | 'close';
+
+/** Session states that keep the server from restarting (AD-4, AD-20). */
+const BUSY_STATES = new Set(['working', 'waiting']);
+
+/** Sessions across every workspace that are `working` or `waiting`. */
+export function countBusySessions(core: Core): number {
+  let busy = 0;
+  for (const workspace of core.entities.listWorkspaces()) {
+    for (const session of core.entities.listSessions(workspace.id)) if (BUSY_STATES.has(session.state)) busy++;
+  }
+  return busy;
 }
 
 /** The contents of the port file `<dataDir>/server.json` (AD-15). */
@@ -81,11 +106,38 @@ export interface RunningServer {
   dataDir: string;
   /** Core as wired into this server: the event log and entity model. */
   core: Core;
+  /** A fresh single-use launch link, as `launchUrl`. A secret: never log it. */
+  issueLaunchUrl(): string;
+  /** Resolves once the server has stopped, however it stopped, with the reason. */
+  stopped: Promise<StopReason>;
+  /**
+   * Stops the server: closes the port and the sockets, removes `server.json`
+   * and `launcher.token`, and closes core if the server opened it. Safe to call
+   * more than once.
+   */
   close(): Promise<void>;
 }
 
+/** How long a stop waits after answering Quit or restart, so the reply reaches the client first. */
+const STOP_AFTER_REPLY_MS = 50;
+
+/**
+ * Starts the server on the data folder. Only one server runs per data folder:
+ * if another live one holds it, this throws `ServerAlreadyRunningError`
+ * before opening anything.
+ */
 export async function start(options: StartOptions = {}): Promise<RunningServer> {
   const dataDir = options.dataDir === undefined ? ensureDataDir() : createDataDir(options.dataDir);
+  const lock = acquireInstanceLock(dataDir);
+  try {
+    return await startLocked(options, dataDir, lock);
+  } catch (error) {
+    lock.release();
+    throw error;
+  }
+}
+
+async function startLocked(options: StartOptions, dataDir: string, lock: InstanceLock): Promise<RunningServer> {
   const log =
     options.log ??
     createLogger(
@@ -101,7 +153,7 @@ export async function start(options: StartOptions = {}): Promise<RunningServer> 
       onListenerError: (error) => log.error('event subscriber failed', { reason: String(error) }),
     });
   try {
-    return await listenAndAnnounce({ options, dataDir, log, core, ownsCore });
+    return await listenAndAnnounce({ options, dataDir, log, core, ownsCore, lock });
   } catch (error) {
     if (ownsCore) core.close();
     throw error;
@@ -114,21 +166,57 @@ async function listenAndAnnounce({
   log,
   core,
   ownsCore,
+  lock,
 }: {
   options: StartOptions;
   dataDir: string;
   log: Logger;
   core: Core;
   ownsCore: boolean;
+  lock: InstanceLock;
 }): Promise<RunningServer> {
   const requested = options.port ?? DEFAULT_PORT;
   const now = options.now ?? Date.now;
   const codes = createLaunchCodes(now);
   const sessions = createSessions(loadOrCreateAuthKey(dataDir), now);
-  // The gate refuses everything until the port is known.
+  // The gate refuses everything until the port is known, and the handshake until the token exists.
   let boundPort: number | undefined;
-  const gate = createGate({ port: () => boundPort, codes, sessions, log });
-  const app = createApp({ events: core.events, webRoot: options.webRoot ?? defaultWebRoot(), log, gate });
+  let launcherToken: LauncherToken | undefined;
+  const version = pkg.version;
+  /** Set once the server is running; the routes only run after that. */
+  let lifecycle: { issueLaunchUrl(): string; stop(reason: 'quit' | 'restart'): void } | undefined;
+  const control: ServerControl = {
+    info: () => ({ version, pid: process.pid, port: boundPort ?? 0, busySessions: countBusySessions(core) }),
+    issueLaunchUrl: () => lifecycle!.issueLaunchUrl(),
+    restartWhenIdle: () => {
+      const busySessions = countBusySessions(core);
+      if (busySessions > 0) {
+        log.info('restart declined: sessions are busy', { busySessions });
+        return { restarting: false, busySessions };
+      }
+      log.info('restarting for a newer version');
+      lifecycle!.stop('restart');
+      return { restarting: true, busySessions };
+    },
+    quit: (force) => {
+      const busySessions = countBusySessions(core);
+      if (busySessions > 0 && !force) {
+        log.info('quit declined: sessions are busy and it was not confirmed', { busySessions });
+        return { stopping: false, busySessions };
+      }
+      log.info('quit requested', { busySessions });
+      lifecycle!.stop('quit');
+      return { stopping: true, busySessions };
+    },
+  };
+  const gate = createGate({
+    port: () => boundPort,
+    codes,
+    sessions,
+    launcherToken: { verify: (given) => launcherToken?.verify(given) ?? false },
+    log,
+  });
+  const app = createApp({ events: core.events, webRoot: options.webRoot ?? defaultWebRoot(), log, gate, control });
 
   let bound: { server: ReturnType<typeof createAdaptorServer>; wss: WebSocketServer; port: number } | undefined;
   let lastTried = requested;
@@ -156,7 +244,6 @@ async function listenAndAnnounce({
   const { server, wss, port } = bound;
   boundPort = port;
   const url = `http://${HOST}:${port}`;
-  const version = pkg.version;
   const portFile = join(dataDir, PORT_FILE);
   if (port !== requested && requested !== 0) {
     log.warn('requested port was busy', { requested, port });
@@ -165,17 +252,80 @@ async function listenAndAnnounce({
 
   const identity: PortFile = { port, pid: process.pid, version, startedAt: new Date().toISOString() };
   try {
+    // The token before the port file: once a launcher can find the server, it can also reach it.
+    launcherToken = createLauncherToken(dataDir);
     writePortFile(portFile, identity);
     core.events.append({ type: 'server.started', workspaceId: null, streamId: SERVER_STREAM, payload: { version } });
   } catch (error) {
     // Nothing may stay listening on a server that failed to start.
     await closeServer(server, wss);
     removePortFile(portFile, identity);
+    launcherToken?.remove();
     throw error;
   }
 
-  const launchUrl = `${url}${AUTH_PATH}?code=${codes.issue()}`;
-  log.info('launch code issued');
+  const issueLaunchUrl = () => {
+    const launchUrl = `${url}${AUTH_PATH}?code=${codes.issue()}`;
+    log.info('launch code issued');
+    return launchUrl;
+  };
+  const launchUrl = issueLaunchUrl();
+
+  let resolveStopped!: (reason: StopReason) => void;
+  const stopped = new Promise<StopReason>((resolve) => (resolveStopped = resolve));
+  let closing: Promise<void> | undefined;
+  const shutdown = (reason: StopReason): Promise<void> => {
+    closing ??= closeServer(server, wss)
+      .finally(() => {
+        try {
+          removePortFile(portFile, identity);
+          launcherToken?.remove();
+        } finally {
+          try {
+            if (ownsCore) core.close();
+          } finally {
+            lock.release();
+          }
+        }
+      })
+      .finally(() => {
+        log.info('server stopped', { reason });
+        resolveStopped(reason);
+      });
+    return closing;
+  };
+  let stopRequested = false;
+  lifecycle = {
+    issueLaunchUrl,
+    stop: (reason) => {
+      if (stopRequested) return;
+      stopRequested = true;
+      // After the reply to Quit or restart has been written.
+      setTimeout(() => {
+        // A session may have started working since the launcher asked: a
+        // restart never stops the server under a busy session (AD-20).
+        if (reason === 'restart') {
+          const busySessions = countBusySessions(core);
+          if (busySessions > 0) {
+            log.info('restart aborted: a session became busy', { busySessions });
+            stopRequested = false;
+            return;
+          }
+        }
+        // Every open tab shows the stopped state instead of reconnecting.
+        broadcast(wss, { type: 'server.stopping', reason }, log);
+        setTimeout(() => {
+          shutdown(reason).then(
+            () => options.onStop?.(reason),
+            (error: unknown) => {
+              log.error('clean stop failed', { reason: String(error) });
+              options.onStop?.(reason);
+            },
+          );
+        }, STOP_AFTER_REPLY_MS);
+      }, STOP_AFTER_REPLY_MS);
+    },
+  };
 
   if (options.open === true) {
     try {
@@ -192,15 +342,23 @@ async function listenAndAnnounce({
     version,
     dataDir,
     core,
-    close: () =>
-      closeServer(server, wss).finally(() => {
-        try {
-          removePortFile(portFile, identity);
-        } finally {
-          if (ownsCore) core.close();
-        }
-      }),
+    issueLaunchUrl,
+    stopped,
+    close: () => shutdown('close'),
   };
+}
+
+/** Sends one schema-checked message to every connected WebSocket client. */
+function broadcast(wss: WebSocketServer, message: ServerMessage, log: Logger): void {
+  const parsed = ServerMessage.safeParse(message);
+  if (!parsed.success) {
+    log.error('refusing to broadcast a message that fails the shared schema', { issues: parsed.error.issues });
+    return;
+  }
+  const text = JSON.stringify(parsed.data);
+  for (const client of wss.clients) {
+    if (client.readyState === client.OPEN) client.send(text);
+  }
 }
 
 /** Writes the port file readable only by the user, replacing any stale one in one step. */

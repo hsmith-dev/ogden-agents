@@ -162,12 +162,21 @@ describe('packaging', () => {
     ]);
   });
 
+  it('the root, server and web packages share one version (the launcher, server and UI compare it; AD-20)', () => {
+    const versionOf = (path: string) => (JSON.parse(readFileSync(join(ROOT, path), 'utf8')) as { version: string }).version;
+    const root = versionOf('package.json');
+    expect(versionOf('packages/server/package.json')).toBe(root);
+    expect(versionOf('packages/web/package.json')).toBe(root);
+  });
+
   it('the tarball holds the launcher, the bundle and the UI, and no workspace sources', () => {
     const files = packedFiles();
     expect(files).toEqual(
       expect.arrayContaining([
         'bin/ogden.js',
         'dist/server.js',
+        'dist/serve.js',
+        'dist/launcher.js',
         'dist/web/index.html',
         'package.json',
         'README.md',

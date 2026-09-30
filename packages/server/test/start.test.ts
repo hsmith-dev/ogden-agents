@@ -30,9 +30,12 @@ async function connect(server: RunningServer, afterSeq: number | null = 0) {
   const ws = new WebSocket(`${server.url.replace('http', 'ws')}/ws`, { headers: { cookie, origin } });
   sockets.push(ws);
   const received: ServerMessage[] = [];
+  /** `caught_up` and `server.stopping`, kept apart so `received` counts events and pongs as before. */
+  const control: ServerMessage[] = [];
   const waiters: Array<() => void> = [];
   ws.on('message', (data) => {
-    received.push(ServerMessage.parse(JSON.parse(String(data))));
+    const message = ServerMessage.parse(JSON.parse(String(data)));
+    (message.type === 'caught_up' || message.type === 'server.stopping' ? control : received).push(message);
     for (const wake of waiters.splice(0)) wake();
   });
   await new Promise<void>((resolve, reject) => {
@@ -55,8 +58,8 @@ async function connect(server: RunningServer, afterSeq: number | null = 0) {
     }
   };
   const next = async (type: ServerMessage['type']) => {
-    await until((all) => all.some((m) => m.type === type), type);
-    return received.find((m) => m.type === type)!;
+    await until(() => [...received, ...control].some((m) => m.type === type), type);
+    return [...received, ...control].find((m) => m.type === type)!;
   };
   const events = () => received.filter((m): m is CoreEvent => m.type !== 'pong');
   const seqs = () => events().map((e) => e.seq);
@@ -65,7 +68,7 @@ async function connect(server: RunningServer, afterSeq: number | null = 0) {
       ws.once('close', () => resolve());
       ws.close();
     });
-  return { ws, received, next, until, events, seqs, close };
+  return { ws, received, control, next, until, events, seqs, close };
 }
 
 const running: RunningServer[] = [];

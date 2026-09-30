@@ -191,8 +191,32 @@ export const PongMessage = z.object({
 });
 export type PongMessage = z.infer<typeof PongMessage>;
 
-/** Every message the server may send over `/ws`: logged events, and `pong`. */
-export const ServerMessage = z.discriminatedUnion('type', [...CoreEvent.options, PongMessage]);
+/**
+ * Sent once after the backlog of a `subscribe`: every event up to now has been
+ * delivered, and what follows is live. The UI waits for it before judging
+ * state that a replayed backlog could briefly misstate (the version banner).
+ */
+export const CaughtUpMessage = z.object({
+  type: z.literal('caught_up'),
+});
+export type CaughtUpMessage = z.infer<typeof CaughtUpMessage>;
+
+/** Why the server is stopping: Quit from the UI, or a restart for a newer version (AD-20). */
+export const StopReason = z.enum(['quit', 'restart']);
+export type StopReason = z.infer<typeof StopReason>;
+
+/**
+ * Sent to every connected client just before the server stops on purpose,
+ * so every open tab shows the stopped state rather than reconnecting.
+ */
+export const ServerStoppingMessage = z.object({
+  type: z.literal('server.stopping'),
+  reason: StopReason,
+});
+export type ServerStoppingMessage = z.infer<typeof ServerStoppingMessage>;
+
+/** Every message the server may send over `/ws`: logged events, `pong`, `caught_up` and `server.stopping`. */
+export const ServerMessage = z.discriminatedUnion('type', [...CoreEvent.options, PongMessage, CaughtUpMessage, ServerStoppingMessage]);
 export type ServerMessage = z.infer<typeof ServerMessage>;
 
 /** A client asking the server to answer with `pong`. */

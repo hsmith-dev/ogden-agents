@@ -1,8 +1,10 @@
 import { defineConfig } from 'tsdown';
 
 export default defineConfig({
-  // Named `server` so the root build can copy it to `dist/server.js` unchanged.
-  entry: { server: 'src/index.ts' },
+  // Named so the root build can copy them to `dist/` unchanged: `server.js`
+  // (the library the tests and `--foreground` load), `serve.js` (the detached
+  // background server process) and `launcher.js` (what `bin/ogden.js` runs).
+  entry: { server: 'src/index.ts', serve: 'src/serve.ts', launcher: 'src/launcher.ts' },
   format: 'esm',
   platform: 'node',
   target: 'node24',

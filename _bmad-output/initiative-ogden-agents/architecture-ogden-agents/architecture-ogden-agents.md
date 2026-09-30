@@ -188,6 +188,7 @@ graph LR
     - a matching `Origin` on WebSocket upgrades and on requests that change state.
   - No route is registered outside the gate.
   - The launcher finds the server through a port file in the user data directory, readable only by the user.
+  - Note (story 1.7): the launcher handshake (`/launcher/…`) sits behind the same gate and is opened only by the launcher token: 256 random bits the server writes to `launcher.token` in the data directory on each start (readable only by the user, removed on stop), sent in a request header and compared in constant time. It opens nothing but the handshake, no cookie opens the handshake, and it is never logged. It grants nothing beyond what the same OS user can already read in `auth.key`.
 
 ### AD-16 — Secrets [ADOPTED]
 

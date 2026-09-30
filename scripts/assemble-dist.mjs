@@ -1,5 +1,7 @@
 // Assembles the publishable `dist/` from the workspace builds:
-//   packages/server/dist/*  -> dist/        (the bundled server, `dist/server.js`)
+//   packages/server/dist/*  -> dist/        (`server.js`, the background server
+//                                           entry `serve.js`, `launcher.js`, and
+//                                           their shared chunks and migrations)
 //   packages/web/dist       -> dist/web/    (the built UI)
 // Run by `pnpm build` after every package has built.
 import { cpSync, existsSync, rmSync } from 'node:fs';
@@ -15,6 +17,8 @@ const out = path('dist');
 /** @type {Array<[file: string, what: string]>} */
 const required = [
   [path('packages/server/dist/server.js'), 'the server bundle'],
+  [path('packages/server/dist/serve.js'), 'the background server entry'],
+  [path('packages/server/dist/launcher.js'), 'the launcher bundle'],
   [path('packages/web/dist/index.html'), 'the web UI'],
 ];
 for (const [file, what] of required) {
@@ -27,4 +31,4 @@ for (const [file, what] of required) {
 rmSync(out, { recursive: true, force: true });
 cpSync(serverDist, out, { recursive: true });
 cpSync(webDist, path('dist/web'), { recursive: true });
-console.log('assemble-dist: wrote dist/server.js and dist/web/');
+console.log('assemble-dist: wrote dist/server.js, dist/serve.js, dist/launcher.js and dist/web/');

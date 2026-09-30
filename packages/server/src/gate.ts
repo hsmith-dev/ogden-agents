@@ -4,18 +4,23 @@
  *
  * 1. `Host` is exactly `127.0.0.1:<port>` or `localhost:<port>` (403), which
  *    defeats DNS rebinding;
- * 2. `GET /auth?code=…` exchanges a launch code for the session cookie and
+ * 2. the launcher handshake (`/launcher/…`) needs the launcher token in its
+ *    header (401) and nothing else: no cookie opens it, and the token opens
+ *    nothing but it (see `launcher-token.ts`);
+ * 3. `GET /auth?code=…` exchanges a launch code for the session cookie and
  *    redirects (303) to `/`; this is the only thing reachable without a cookie;
- * 3. a valid signed session cookie (401);
- * 4. on WebSocket upgrades and on every method but GET, HEAD and OPTIONS, an
+ * 4. a valid signed session cookie (401);
+ * 5. on WebSocket upgrades and on every method but GET, HEAD and OPTIONS, an
  *    `Origin` of `http://127.0.0.1:<port>` or `http://localhost:<port>` (403).
  *
- * Refusals carry no event data. Launch codes are never logged (AD-16).
+ * Refusals carry no event data. Launch codes and the launcher token are
+ * never logged (AD-16).
  */
 import type { MiddlewareHandler } from 'hono';
 import { APPEARANCE_STORAGE_KEY } from '@ogden-agents/shared';
 import { getCookie, setCookie } from 'hono/cookie';
 import { sessionCookieName, type LaunchCodes, type Sessions } from './auth.js';
+import { LAUNCHER_PREFIX, LAUNCHER_TOKEN_HEADER, type LauncherToken } from './launcher-token.js';
 import type { Logger } from './log.js';
 
 export interface GateOptions {
@@ -23,6 +28,8 @@ export interface GateOptions {
   port: () => number | undefined;
   codes: LaunchCodes;
   sessions: Sessions;
+  /** The launcher token; without one, the handshake prefix refuses everything. */
+  launcherToken?: Pick<LauncherToken, 'verify'>;
   log: Logger;
 }
 
@@ -195,7 +202,7 @@ function isPageRequest(method: string, path: string, accept: string | undefined)
   return (accept ?? '').includes('text/html') && !/\.[A-Za-z0-9]+$/.test(path);
 }
 
-export function createGate({ port, codes, sessions, log }: GateOptions): MiddlewareHandler {
+export function createGate({ port, codes, sessions, launcherToken, log }: GateOptions): MiddlewareHandler {
   return async (c, next) => {
     const bound = port();
     if (bound === undefined) return c.text('Forbidden', 403);
@@ -203,6 +210,17 @@ export function createGate({ port, codes, sessions, log }: GateOptions): Middlew
     const cookieName = sessionCookieName(bound);
 
     if (!allowedHosts.includes(c.req.header('host') ?? '')) return c.text('Forbidden', 403);
+
+    if (c.req.path.startsWith(LAUNCHER_PREFIX) || c.req.path === LAUNCHER_PREFIX.slice(0, -1)) {
+      if (launcherToken === undefined || !launcherToken.verify(c.req.header(LAUNCHER_TOKEN_HEADER))) {
+        log.warn('launcher token rejected', { path: c.req.path });
+        return c.json({ error: { code: 'unauthorized', message: 'A valid launcher token is required.' } }, 401);
+      }
+      // The launcher is not a browser: it sends no cookie and no Origin. The
+      // token, readable only by this OS user, is what a browser can never send.
+      await next();
+      return;
+    }
 
     if (c.req.path === AUTH_PATH && c.req.method === 'GET') {
       const code = c.req.query('code');

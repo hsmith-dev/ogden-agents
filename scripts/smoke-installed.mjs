@@ -4,13 +4,16 @@
 //   node scripts/smoke-installed.mjs [path/to/ogden-agents-<version>.tgz]
 //
 // In a fresh temp directory, with a fresh npm cache and no workspace in sight,
-// runs `npx --yes --package=<tgz> ogden-agents --no-open --port 0`, waits for the
-// printed 127.0.0.1 URL and one-time launch link, checks that `GET /` without a
-// session is refused, signs in through the launch link (AD-15), checks that
-// `GET /` with the cookie returns the page and that a WebSocket client sending
-// the cookie and a matching Origin receives `server.started` (which needs the
-// installed `better-sqlite3` to load and the bundled migrations to apply),
-// then stops the process tree. The data folder is a temp directory.
+// runs `npx --yes --package=<tgz> ogden-agents --no-open --port 0`, which starts
+// a detached background server and exits (story 1.7). It waits for the printed
+// 127.0.0.1 URL and one-time launch link and a clean launcher exit, checks that
+// the server outlived the launcher, that `GET /` without a session is refused,
+// signs in through the launch link (AD-15), checks that `GET /` with the cookie
+// returns the page and that a WebSocket client sending the cookie and a
+// matching Origin receives `server.started` (which needs the installed
+// `better-sqlite3` to load and the bundled migrations to apply), then quits the
+// server as the UI does and checks it removed `server.json` and
+// `launcher.token`. The data folder is a temp directory.
 // Exits non-zero with the captured output on any failure.
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
@@ -72,7 +75,9 @@ let output = '';
 child.stdout.on('data', (chunk) => (output += String(chunk)));
 child.stderr.on('data', (chunk) => (output += String(chunk)));
 /** @type {Promise<void>} */
-const exited = new Promise((resolveExit) => child.once('exit', () => resolveExit()));
+// `close`, not `exit`: the launcher prints its URLs and exits at once, and
+// `close` fires only after its output has all been read.
+const exited = new Promise((resolveExit) => child.once('close', () => resolveExit()));
 let childExited = false;
 void exited.then(() => (childExited = true));
 
@@ -103,7 +108,10 @@ function waitForUrl() {
       if (url !== undefined && launchUrl !== undefined) resolveUrl({ url, launchUrl });
     };
     child.stdout.on('data', check);
-    void exited.then(() => reject(new Error(`ogden-agents exited before printing a URL (code ${child.exitCode})`)));
+    void exited.then(() => {
+      check();
+      reject(new Error(`ogden-agents exited before printing a URL (code ${child.exitCode})`));
+    });
     check();
   });
 }
@@ -185,7 +193,53 @@ function checkServerStarted(url, cookie) {
   });
 }
 
-/** Stops npx and everything it started (npm, the shell, the node server). */
+/** @param {number} pid */
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return /** @type {NodeJS.ErrnoException} */ (error).code === 'EPERM';
+  }
+}
+
+/** @returns {{ pid: number } | undefined} */
+function readPortFile() {
+  try {
+    return JSON.parse(readFileSync(join(dataDir, 'server.json'), 'utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Quit, as the UI does it, and waits for the background server to exit and
+ * remove its files.
+ * @param {string} url
+ * @param {string} cookie
+ * @param {number} pid
+ */
+async function quit(url, cookie, pid) {
+  const response = await fetch(`${url}/api/server/quit`, { method: 'POST', headers: { cookie, origin: url } });
+  if (response.status !== 202) throw new Error(`Quit returned ${response.status}`);
+  while (isAlive(pid)) await new Promise((r) => setTimeout(r, 100));
+  for (const file of ['server.json', 'launcher.token']) {
+    if (existsSync(join(dataDir, file))) throw new Error(`${file} is still there after Quit`);
+  }
+}
+
+/** Kills the background server if a failure left it running. */
+function killBackgroundServer() {
+  const record = readPortFile();
+  if (record === undefined || !isAlive(record.pid)) return;
+  try {
+    process.kill(record.pid, 'SIGKILL');
+  } catch {
+    // Already gone.
+  }
+}
+
+/** Stops npx and everything it started (npm, the shell, the launcher). */
 async function stopTree() {
   if (childExited || child.pid === undefined) return;
   if (IS_WINDOWS) {
@@ -225,6 +279,10 @@ try {
   console.log(`smoke: installing ${tarball} with npx in ${workDir}`);
   const { url, launchUrl } = await withTimeout(waitForUrl(), START_TIMEOUT_MS, 'ogden-agents to print its URLs');
   console.log(`smoke: server is at ${url}`);
+  // The launcher exits once the background server is up (AD-21: the terminal is free).
+  await withTimeout(exited, STEP_TIMEOUT_MS, 'the launcher to exit');
+  if (child.exitCode !== 0) throw new Error(`the launcher exited with code ${child.exitCode}`);
+  console.log('smoke: the launcher exited 0 and the server kept running');
   await withTimeout(checkRefusedWithoutSession(url), STEP_TIMEOUT_MS, 'GET / without a session');
   console.log('smoke: GET / without a session was refused');
   const cookie = await withTimeout(signIn(launchUrl), STEP_TIMEOUT_MS, 'the launch link');
@@ -233,10 +291,15 @@ try {
   console.log('smoke: GET / returned the page');
   const event = await withTimeout(checkServerStarted(url, cookie), STEP_TIMEOUT_MS, 'server.started over /ws');
   console.log(`smoke: received ${JSON.stringify(event)}`);
+  const record = readPortFile();
+  if (record === undefined) throw new Error('server.json is missing while the server runs');
+  await withTimeout(quit(url, cookie, record.pid), STEP_TIMEOUT_MS, 'the server to quit');
+  console.log('smoke: Quit stopped the server and removed server.json and launcher.token');
 } catch (error) {
   failure = error;
 } finally {
   await stopTree();
+  killBackgroundServer();
   cleanUp();
 }
 

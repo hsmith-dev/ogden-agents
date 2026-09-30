@@ -37,9 +37,12 @@ To change the database schema, edit `packages/core/src/db/schema.ts`, run `pnpm 
 Launcher options (after `pnpm build`):
 
 ```sh
-node bin/ogden.js --no-open     # start the server and print the URL and one-time link only
-node bin/ogden.js --port 5000   # try this port first
+node bin/ogden.js --no-open     # print the URL and one-time link only; don't open a browser
+node bin/ogden.js --port 5000   # a new server tries this port first
+node bin/ogden.js --foreground  # run the server in this terminal (Ctrl+C stops it), for development
 ```
+
+By default the launcher starts the server as a background process and exits, so the server keeps running after you close the terminal; its output goes to `logs/server.log` in the data folder. Running the launcher again finds that server (through `server.json` and the launcher handshake) and opens it with a fresh one-time link. Stop it with **Quit Ogden Agents** in the app's sidebar footer (it confirms first, and names any agents still working). Only one server runs per data folder (`server.lock`); a second one, such as `--foreground` beside a background server, refuses to start. If an older version is running and no session is busy, the launcher restarts it on the new version; if sessions are busy, it opens the running version and the update applies on a later launch once they finish. The page shows a reload banner when the server's version differs from its own.
 
 The server binds only to `127.0.0.1`. It tries port 4317 first and moves to the next free port if that one is busy; the URL it prints is the one in use.
 
@@ -53,8 +56,9 @@ Ogden Agents is for one user on one machine, and it keeps other web pages and lo
 - **Files in the data folder**, both readable only by you:
   - `auth.key` signs the session cookies, so a browser stays signed in across restarts. Delete it to sign every browser out.
   - `server.json` holds the running server's `port`, `pid`, `version` and `startedAt`. It is written when the server starts and removed when it stops.
+  - `launcher.token` is a random secret the server creates on every start and removes when it stops. The launcher sends it to reach the handshake (`/launcher/…`), which reports the server's version and issues launch links; it opens nothing else, and no cookie opens the handshake.
 
-Launch codes and cookies never appear in the logs or the event log.
+Launch codes, the launcher token and cookies never appear in the logs or the event log.
 
 **Known limit.** Browsers send cookies for `127.0.0.1` to every port on it, so any other local web server you open in the same browser also receives the session cookie (named `ogden_session_<port>`, so installs on different ports don't overwrite each other). Before agents can run commands (epic 2), API and WebSocket access moves to a per-tab token that other local servers never see.
 

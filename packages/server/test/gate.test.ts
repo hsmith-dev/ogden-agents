@@ -365,11 +365,12 @@ describe('security gate', () => {
   it("close leaves another server's port file alone", async () => {
     const dataDir = tempDataDir();
     const first = await startGated({ dataDir });
-    const second = await startGated({ dataDir });
+    // Another server's record replaced ours (only one runs per data folder, but a file can still change).
+    const theirs = JSON.stringify({ port: first.port + 1, pid: 1, version: 'x', startedAt: new Date().toISOString() });
+    writeFileSync(join(dataDir, PORT_FILE), theirs);
     await first.close();
     running.splice(running.indexOf(first), 1);
-    const contents = JSON.parse(readFileSync(join(dataDir, PORT_FILE), 'utf8')) as { port: number };
-    expect(contents.port).toBe(second.port);
+    expect(readFileSync(join(dataDir, PORT_FILE), 'utf8')).toBe(theirs);
   });
 });
 

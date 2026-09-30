@@ -107,6 +107,39 @@ describe('sessions', () => {
     });
   });
 
+  it('merges adapter refs without an event and without touching updatedAt (AD-9)', () => {
+    const core = openTestCore();
+    const workspace = core.entities.ensureWorkspace(tempDir());
+    const session = core.entities.createSession({ workspaceId: workspace.id, kind: 'chat', adapterRefs: { other: 'kept' } });
+    const before = core.events.readAfter(0).length;
+    const updated = core.entities.setSessionAdapterRefs(session.id, { agentSessionId: 'agent-owned-id-456' });
+    expect(updated.adapterRefs).toEqual({ other: 'kept', agentSessionId: 'agent-owned-id-456' });
+    expect(core.entities.setSessionAdapterRefs(session.id, { agentSessionId: 'agent-owned-id-789' }).adapterRefs).toEqual({
+      other: 'kept',
+      agentSessionId: 'agent-owned-id-789',
+    });
+    expect(core.entities.getSession(session.id)).toEqual({ ...session, adapterRefs: { other: 'kept', agentSessionId: 'agent-owned-id-789' } });
+    expect(core.events.readAfter(0)).toHaveLength(before);
+    expect(() => core.entities.setSessionAdapterRefs('ses_01J00000000000000000000000' as Session['id'], { a: 'b' })).toThrow(NotFoundError);
+    expect(() => core.entities.setSessionAdapterRefs(session.id, { '': 'empty key' })).toThrow(ValidationError);
+  });
+
+  it('lists a session’s completed messages in order, and no one else’s', () => {
+    const core = openTestCore();
+    const workspace = core.entities.ensureWorkspace(tempDir());
+    const session = core.entities.createSession({ workspaceId: workspace.id, kind: 'chat' });
+    const other = core.entities.createSession({ workspaceId: workspace.id, kind: 'chat' });
+    expect(core.entities.listCompletedMessages(session.id)).toEqual([]);
+    core.sessionEvents.completeMessage(session.id, { messageId: 'msg_1', role: 'user', content: 'Hi' });
+    core.sessionEvents.appendSessionEvent(session.id, { type: 'session.message_delta', payload: { messageId: 'msg_2', role: 'agent', text: 'Hel' } });
+    core.sessionEvents.completeMessage(other.id, { messageId: 'msg_3', role: 'user', content: 'Elsewhere' });
+    core.sessionEvents.completeMessage(session.id, { messageId: 'msg_2', role: 'agent', content: 'Hello.' });
+    expect(core.entities.listCompletedMessages(session.id)).toEqual([
+      { messageId: 'msg_1', role: 'user', content: 'Hi' },
+      { messageId: 'msg_2', role: 'agent', content: 'Hello.' },
+    ]);
+  });
+
   it('changes state and driver, appending one event per real change', () => {
     const core = openTestCore();
     const workspace = core.entities.ensureWorkspace(tempDir());

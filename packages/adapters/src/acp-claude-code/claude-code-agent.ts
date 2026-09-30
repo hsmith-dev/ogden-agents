@@ -21,8 +21,9 @@
  *   runs, `idle` when it returns, `error` when it fails or the process exits.
  *
  * - Reopening a session (E2-R2) initializes once, then uses `session/resume`
- *   when the agent advertises it, else `session/load` (the history it
- *   replays is swallowed, not reported again), else `session/new`.
+ *   when the agent advertises it, else (or when the resume is refused)
+ *   `session/load` (the history it replays is swallowed, not reported
+ *   again), else `session/new`.
  * - `initialize` advertises `clientCapabilities.auth.terminal`, so the agent
  *   lists its terminal-type sign-in methods (agent-matrix, CAP-16).
  *
@@ -454,28 +455,40 @@ async function startOnChild(
   let init: acp.InitializeResponse;
   let restored: AgentRestored = 'new';
   try {
-    /** Resumes, else loads, the agent's session; `undefined` when it can do neither (or refused), for a new one. */
+    /**
+     * Resumes, else loads, the agent's session; `undefined` when it can do
+     * neither, for a new one. A resume the agent refused falls back to a load
+     * when it offers one (2.3 review F3). An expired sign-in (`-32000`) is not
+     * "session gone": it fails the start. The log gets the method and error
+     * code only, never the agent's message (it may quote the transcript).
+     */
     const reopen = async (initialized: acp.InitializeResponse, sessionId: string): Promise<AgentRestored | undefined> => {
       const capabilities = initialized.agentCapabilities;
-      try {
-        if (capabilities?.sessionCapabilities?.resume != null) {
-          await connection.agent.request('session/resume', { sessionId, cwd, mcpServers: [] });
-          return 'resumed';
+      const attempt = async (method: 'session/resume' | 'session/load', request: () => Promise<unknown>): Promise<boolean> => {
+        try {
+          await request();
+          return true;
+        } catch (error) {
+          if (!(error instanceof acp.RequestError) || error.code === -32000) throw error;
+          diagnostic('the agent could not reopen its session', { method, code: error.code });
+          return false;
         }
-        if (capabilities?.loadSession === true) {
-          replaying = true;
-          try {
-            await connection.agent.request('session/load', { sessionId, cwd, mcpServers: [] });
-          } finally {
-            replaying = false;
-          }
-          return 'loaded';
-        }
-      } catch (error) {
-        // The agent no longer has the session: a new one, primed by core from the transcript (2.7).
-        if (!(error instanceof acp.RequestError) || error.code === -32000) throw error;
-        diagnostic('the agent could not reopen its session; starting a new one', { reason: mask(error.message) });
+      };
+      if (
+        capabilities?.sessionCapabilities?.resume != null &&
+        (await attempt('session/resume', () => connection.agent.request('session/resume', { sessionId, cwd, mcpServers: [] })))
+      ) {
+        return 'resumed';
       }
+      if (capabilities?.loadSession === true) {
+        replaying = true;
+        try {
+          if (await attempt('session/load', () => connection.agent.request('session/load', { sessionId, cwd, mcpServers: [] }))) return 'loaded';
+        } finally {
+          replaying = false;
+        }
+      }
+      // The agent no longer has the session: a new one, primed by core from the transcript (2.7).
       return undefined;
     };
     const started = (async () => {

@@ -10,11 +10,15 @@ import { PermissionCard, permissionAnnouncement } from '@/permissions/permission
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
+import { Separator } from '@/ui/separator';
 import { AgentMessage, UserMessage } from '@/ui/message';
 import { EmptyState, PageBody, PageFooter } from '@/ui/page';
 import { Skeleton } from '@/ui/skeleton';
 import { StateGlyph } from '@/ui/state-glyph';
 import { Text } from '@/ui/typography';
+
+/** The marker at the break where a reopened chat continues (EXPERIENCE.md). */
+const RESUMED_FROM_HISTORY = 'Resumed from history';
 
 /** The last segment of a folder path, on any OS. */
 const folderName = (path: string) => path.split(/[\\/]/).filter((part) => part !== '').at(-1) ?? path;
@@ -120,9 +124,11 @@ export function SessionPage() {
           ) : view.items.length === 0 ? (
             <Text variant="caption">Ask {AGENT_NAME} about this project.</Text>
           ) : (
-            view.items.map((item) =>
+            view.items.map((item, index) =>
               item.type === 'message' ? (
                 <Message key={item.message.messageId} message={item.message} />
+              ) : item.type === 'resumed' ? (
+                <ResumedMarker key={`resumed-${item.at}-${index}`} />
               ) : (
                 <PermissionCard
                   key={item.permission.requestId}
@@ -169,6 +175,22 @@ export function SessionPage() {
         />
       </PageFooter>
     </>
+  );
+}
+
+/**
+ * Where a chat was reopened after its agent's process was gone (story 2.7):
+ * the same words for every way it came back (EXPERIENCE.md, session `idle`).
+ */
+function ResumedMarker() {
+  return (
+    <div role="separator" aria-label={RESUMED_FROM_HISTORY} data-testid="resumed-marker" className="flex items-center gap-3">
+      <Separator className="flex-1" />
+      <Text as="span" variant="caption" className="shrink-0">
+        {RESUMED_FROM_HISTORY}
+      </Text>
+      <Separator className="flex-1" />
+    </div>
   );
 }
 

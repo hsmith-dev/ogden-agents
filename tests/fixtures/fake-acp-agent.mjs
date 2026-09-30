@@ -22,7 +22,10 @@
 //                  "Edited <paths>." if allowed, else "Denied <paths>."
 //   "tool"         an `edit` tool call, then an update completing it with a
 //                  diff of src/example.ts; replies "Edited."
-//   "context"      replies `session=<its id> via=<new|resumed|loaded>`
+//   "context"      replies `session=<its id> via=<new|resumed|loaded> primed=<n>`,
+//                  n being the earlier messages ("User: " or "Claude Code: "
+//                  lines) of a transcript core primed the prompt with
+//   "/<command>"   replies `command=/<command> primed=<n>` (a slash command)
 //   "auth-expired" the prompt fails with ACP's auth-required error (-32000)
 //   "crash"        one chunk, then the process exits with code 1 mid-prompt
 //   "slow"         one chunk, then waits until cancelled (`cancelled`) or 10 s
@@ -39,8 +42,15 @@
 // FAKE_ACP_RESUME picks how it reopens a session: `resume` advertises
 // `sessionCapabilities.resume`, `load` advertises `loadSession` (and replays
 // one earlier chunk, "Earlier reply.", while loading), `none` neither.
-// Unset, it advertises neither. Any session id is accepted: a reopen is a new
-// process, and the fake keeps nothing on disk.
+// `both` advertises both. Unset, it advertises neither. Any session id is
+// accepted: a reopen is a new process, and the fake keeps nothing on disk.
+//
+// FAKE_ACP_REOPEN_FAIL lists (comma-separated) the reopen methods that refuse:
+// `resume` and `load` fail with resource-not-found, `resume-auth` fails resume
+// with ACP's auth-required error (-32000).
+//
+// A prompt that core primed with a transcript ends with the user's text after
+// the "[Ogden Agents] New message:" line; the keywords above match that text.
 //
 // FAKE_ACP_AUTH=terminal advertises one terminal-type sign-in method, but only
 // to a client that sets `clientCapabilities.auth.terminal`.
@@ -63,6 +73,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const sessions = new Map();
 let nextSession = 1;
 const RESUME = process.env.FAKE_ACP_RESUME ?? '';
+const REOPEN_FAIL = new Set((process.env.FAKE_ACP_REOPEN_FAIL ?? '').split(',').filter((method) => method !== ''));
+const NEW_MESSAGE = '[Ogden Agents] New message:\n';
 
 /**
  * @param {import('@agentclientprotocol/sdk').AgentContext} client
@@ -91,8 +103,8 @@ acp
     return {
       protocolVersion: acp.PROTOCOL_VERSION,
       agentCapabilities: {
-        loadSession: RESUME === 'load',
-        sessionCapabilities: { close: {}, ...(RESUME === 'resume' ? { resume: {} } : {}) },
+        loadSession: RESUME === 'load' || RESUME === 'both',
+        sessionCapabilities: { close: {}, ...(RESUME === 'resume' || RESUME === 'both' ? { resume: {} } : {}) },
       },
       authMethods:
         process.env.FAKE_ACP_AUTH === 'terminal' && terminalAuth
@@ -107,24 +119,28 @@ acp
     return { sessionId };
   })
   .onRequest('session/resume', ({ params }) => {
-    if (RESUME !== 'resume') throw acp.RequestError.methodNotFound('session/resume');
+    if (RESUME !== 'resume' && RESUME !== 'both') throw acp.RequestError.methodNotFound('session/resume');
+    if (REOPEN_FAIL.has('resume-auth')) throw acp.RequestError.authRequired(undefined, 'the fake agent needs a new sign-in');
+    if (REOPEN_FAIL.has('resume')) throw acp.RequestError.resourceNotFound(params.sessionId);
     sessions.set(params.sessionId, { via: 'resumed' });
     return {};
   })
   .onRequest('session/load', async ({ params, client }) => {
-    if (RESUME !== 'load') throw acp.RequestError.methodNotFound('session/load');
+    if (RESUME !== 'load' && RESUME !== 'both') throw acp.RequestError.methodNotFound('session/load');
     // The history a load replays: the client already has it.
     await say(client, params.sessionId, 'Earlier reply.');
+    if (REOPEN_FAIL.has('load')) throw acp.RequestError.resourceNotFound(params.sessionId);
     sessions.set(params.sessionId, { via: 'loaded' });
     return {};
   })
   .onRequest('session/prompt', async ({ params, client }) => {
     const session = sessions.get(params.sessionId);
     if (session === undefined) throw acp.RequestError.invalidParams(undefined, `no session ${params.sessionId}`);
-    const text = params.prompt
-      .map((block) => (block.type === 'text' ? block.text : ''))
-      .join('')
-      .trim();
+    const whole = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('');
+    const primedAt = whole.lastIndexOf(NEW_MESSAGE);
+    const primer = primedAt === -1 ? '' : whole.slice(0, primedAt);
+    const primed = primer.split('\n').filter((line) => line.startsWith('User: ') || line.startsWith('Claude Code: ')).length;
+    const text = (primedAt === -1 ? whole : whole.slice(primedAt + NEW_MESSAGE.length)).trim();
 
     if (text === 'crash') {
       await say(client, params.sessionId, 'About to ');
@@ -133,8 +149,12 @@ acp
     }
     if (text === 'fail') throw acp.RequestError.internalError(undefined, 'the fake agent failed on purpose');
     if (text === 'auth-expired') throw acp.RequestError.authRequired(undefined, 'the fake agent needs a new sign-in');
+    if (text.startsWith('/')) {
+      await say(client, params.sessionId, `command=${text} primed=${primed}`);
+      return { stopReason: 'end_turn' };
+    }
     if (text === 'context') {
-      await say(client, params.sessionId, `session=${params.sessionId} via=${session.via}`);
+      await say(client, params.sessionId, `session=${params.sessionId} via=${session.via} primed=${primed}`);
       return { stopReason: 'end_turn' };
     }
     if (text.startsWith('permission-edit ')) {

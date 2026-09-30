@@ -264,24 +264,28 @@ describe('tool calls', () => {
 });
 
 describe('reopening a session', () => {
-  const reopen = async (mode: 'resume' | 'load' | 'none', agentSessionId = 'fake-session-earlier') => {
-    const agent = createClaudeCodeAgent({ adapterPath: FAKE_AGENT, claudeExecutable: null });
+  const reopen = async (mode: 'resume' | 'load' | 'none' | 'both', agentSessionId = 'fake-session-earlier', fail = '') => {
+    const diagnostics: Array<[string, Record<string, unknown> | undefined]> = [];
+    const agent = createClaudeCodeAgent({ adapterPath: FAKE_AGENT, claudeExecutable: null, onDiagnostic: (message, fields) => diagnostics.push([message, fields]) });
     // A secret starting with the end of the replayed chunk ("Earlier reply."), so a replayed
     // chunk that was not swallowed would be held back and surface in the next turn's reply.
-    const env = baseEnv({ FAKE_ACP_RESUME: mode, HELD_BACK_KEY: 'reply.and-more' });
+    const env = baseEnv({ FAKE_ACP_RESUME: mode, HELD_BACK_KEY: 'reply.and-more', ...(fail === '' ? {} : { FAKE_ACP_REOPEN_FAIL: fail }) });
     const opened = await agent.reopenSession({ cwd: tempDir(), env, agentSessionId });
     sessions.push(opened.session);
     const events: AgentEvent[] = [];
     opened.session.onEvent((event) => events.push(event));
-    return { ...opened, events };
+    return { ...opened, events, diagnostics };
   };
+  /** What the log got about refused reopens: the method and the error code, nothing else. */
+  const refusals = (diagnostics: Array<[string, Record<string, unknown> | undefined]>) =>
+    diagnostics.filter(([message]) => message === 'the agent could not reopen its session').map(([, fields]) => fields);
 
   it('resumes when the agent advertises session/resume', async () => {
     const { session, restored, events } = await reopen('resume');
     expect(restored).toBe('resumed');
     expect(session.agentSessionId).toBe('fake-session-earlier');
     await session.prompt('context');
-    expect(replyText(events)).toBe('session=fake-session-earlier via=resumed');
+    expect(replyText(events)).toBe('session=fake-session-earlier via=resumed primed=0');
   });
 
   it('loads when it advertises only loadSession, and swallows the history the load replays', async () => {
@@ -289,8 +293,45 @@ describe('reopening a session', () => {
     expect(restored).toBe('loaded');
     expect(session.agentSessionId).toBe('fake-session-earlier');
     await session.prompt('context');
-    expect(replyText(events)).toBe('session=fake-session-earlier via=loaded');
+    expect(replyText(events)).toBe('session=fake-session-earlier via=loaded primed=0');
     expect(replyText(events)).not.toContain('Earlier reply.');
+  });
+
+  it('prefers resume when the agent offers both', async () => {
+    const { restored, diagnostics } = await reopen('both');
+    expect(restored).toBe('resumed');
+    expect(refusals(diagnostics)).toEqual([]);
+  });
+
+  it('a refused resume falls back to load when the agent offers it, and logs only the method and code (2.3 review F3)', async () => {
+    const { session, restored, events, diagnostics } = await reopen('both', 'fake-session-earlier', 'resume');
+    expect(restored).toBe('loaded');
+    await session.prompt('context');
+    expect(replyText(events)).toBe('session=fake-session-earlier via=loaded primed=0');
+    expect(refusals(diagnostics)).toEqual([{ method: 'session/resume', code: -32002 }]);
+    expect(JSON.stringify(diagnostics)).not.toContain('fake-session-earlier');
+  });
+
+  it('a refused resume with no load, or a refused load, starts a new session', async () => {
+    const onlyResume = await reopen('resume', 'fake-session-earlier', 'resume');
+    expect(onlyResume.restored).toBe('new');
+    expect(onlyResume.session.agentSessionId).not.toBe('fake-session-earlier');
+    const both = await reopen('both', 'fake-session-earlier', 'resume,load');
+    expect(both.restored).toBe('new');
+    expect(refusals(both.diagnostics)).toEqual([
+      { method: 'session/resume', code: -32002 },
+      { method: 'session/load', code: -32002 },
+    ]);
+    // The failed load's replay was swallowed too.
+    await both.session.prompt('context');
+    expect(replyText(both.events)).toBe(`session=${both.session.agentSessionId} via=new primed=0`);
+  });
+
+  it('an expired sign-in on resume fails the reopen instead of starting a new session', async () => {
+    await expect(reopen('both', 'fake-session-earlier', 'resume-auth')).rejects.toMatchObject({
+      code: 'agent_unavailable',
+      message: 'Claude Code needs you to sign in again.',
+    });
   });
 
   it('starts a new session when it can do neither', async () => {
@@ -298,7 +339,7 @@ describe('reopening a session', () => {
     expect(restored).toBe('new');
     expect(session.agentSessionId).toMatch(/^fake-session-\d+$/);
     await session.prompt('context');
-    expect(replyText(events)).toBe(`session=${session.agentSessionId} via=new`);
+    expect(replyText(events)).toBe(`session=${session.agentSessionId} via=new primed=0`);
   });
 });
 

@@ -5,6 +5,7 @@ import type {
   MessageRole,
   PermissionDecision,
   PermissionResolvedEvent,
+  ResumedVia,
   SessionState,
   ToolKind,
 } from '@ogden-agents/shared';
@@ -45,8 +46,15 @@ export interface TranscriptPermission {
     | undefined;
 }
 
-/** The transcript in the order things happened: messages and permission requests. */
-export type TranscriptItem = { type: 'message'; message: TranscriptMessage } | { type: 'permission'; permission: TranscriptPermission };
+/**
+ * The transcript in the order things happened: messages, permission requests,
+ * and the breaks where a chat was reopened after its agent was gone (story
+ * 2.7), each just before the user message that reopened it.
+ */
+export type TranscriptItem =
+  | { type: 'message'; message: TranscriptMessage }
+  | { type: 'permission'; permission: TranscriptPermission }
+  | { type: 'resumed'; via: ResumedVia; at: string };
 
 export interface SessionView {
   /** Whether the event log has this session at all (its `session.created`). */
@@ -102,6 +110,14 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string): Se
         const done = message(event.payload.messageId, event.payload.role);
         done.text = event.payload.content;
         done.streaming = false;
+        break;
+      }
+      case 'session.resumed': {
+        // The chat reopens on the user's next message: the break goes just before it.
+        const reopenedBy = view.items.findLastIndex((item) => item.type === 'message' && item.message.role === 'user');
+        const marker: TranscriptItem = { type: 'resumed', via: event.payload.via, at: event.at };
+        if (reopenedBy === -1) view.items.push(marker);
+        else view.items.splice(reopenedBy, 0, marker);
         break;
       }
       case 'permission.requested': {

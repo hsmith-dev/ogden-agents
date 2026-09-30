@@ -16,6 +16,7 @@ import {
   SessionState as SessionStateSchema,
   TicketRef as TicketRefSchema,
   type AdapterRefs,
+  type MessageRole,
   type Run,
   type RunId,
   type RunOutcome,
@@ -30,7 +31,7 @@ import {
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Database } from './db/database.js';
-import { runs, sessions, workspaces } from './db/schema.js';
+import { events, runs, sessions, workspaces } from './db/schema.js';
 import { InvalidOperationError, NotFoundError, ValidationError, WorkspaceBusyError } from './errors.js';
 import type { EventLog, HistoryDeleted } from './event-log.js';
 import { newId } from './ids.js';
@@ -61,6 +62,13 @@ export interface NewRun {
 export interface SessionStateDetail {
   reason?: string | undefined;
   resumable?: boolean | undefined;
+}
+
+/** One completed message of a session, as `session.message_completed` stored it. */
+export interface CompletedMessage {
+  messageId: string;
+  role: MessageRole;
+  content: string;
 }
 
 export interface Entities {
@@ -95,6 +103,14 @@ export interface Entities {
    * with `reason`: their agent processes are gone (AD-3). Returns them.
    */
   settleInterruptedSessions(reason: string): Session[];
+  /**
+   * Merges `refs` into the session's adapter refs (AD-9: the agent's own ids,
+   * never keys). Appends no event, so an agent's id never reaches the log,
+   * and leaves `updatedAt` alone. {@link NotFoundError} for an unknown session.
+   */
+  setSessionAdapterRefs(id: SessionId, refs: AdapterRefs): Session;
+  /** The session's completed messages (`session.message_completed`), oldest first. */
+  listCompletedMessages(sessionId: SessionId): CompletedMessage[];
   /** Sets the driver (AD-6), appending `session.driver_changed` if it changed. */
   setSessionDriver(id: SessionId, driver: SessionDriver): Session;
 
@@ -321,6 +337,29 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
           .all()
           .map((row) => this.setSessionState(row.id as SessionId, 'idle', { reason, resumable: true })),
       );
+    },
+
+    setSessionAdapterRefs(id, refs) {
+      check(AdapterRefsSchema, refs, 'adapter refs');
+      return log.transaction(() => {
+        const session = requireSession(id);
+        const adapterRefs = { ...session.adapterRefs, ...refs };
+        orm.update(sessions).set({ adapterRefs }).where(eq(sessions.id, id)).run();
+        return { ...session, adapterRefs };
+      });
+    },
+
+    listCompletedMessages(sessionId) {
+      return orm
+        .select({ payload: events.payload })
+        .from(events)
+        .where(and(eq(events.streamId, sessionId), eq(events.type, 'session.message_completed')))
+        .orderBy(asc(events.seq))
+        .all()
+        .map(({ payload }) => {
+          const { messageId, role, content } = payload as CompletedMessage;
+          return { messageId, role, content };
+        });
     },
 
     setSessionDriver(id, driver) {

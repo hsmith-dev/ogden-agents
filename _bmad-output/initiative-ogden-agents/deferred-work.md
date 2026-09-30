@@ -58,3 +58,9 @@
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-per-workspace-windowed-paged-event-subscriptions-plan.md`
   summary: Per-chunk cost and live growth in the web store (story 2.10). Every streamed chunk re-merges all scopes into the flat `events` list, and each workspace's list (window plus live events) grows without bound for the life of the tab. Coalesce chunks and trim or window live lists when the chat screen moves to `useSessionEvents`.
   evidence: 2.9 review finding F3; `event-store.ts` `mergedEvents` and `applyEvent`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-chats-persist-and-resume-after-a-restart-plan.md`
+  summary: Resolved: reopen order on failure (2.3 F3). A refused `session/resume` now falls back to `session/load` when advertised, then `session/new`; each refusal logs only `{method, code}`. An auth failure (`-32000`) still fails the reopen.
+  evidence: `packages/adapters/src/acp-claude-code/claude-code-agent.ts` `reopen()`; tests in `packages/adapters/test/acp-claude-code.test.ts` ("reopening a session").
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-chats-persist-and-resume-after-a-restart-plan.md`
+  summary: Save a transcript-reopened session's new agent id only once its primed prompt succeeds (story 2.10). Today a restart between the reopen and a successful primed prompt resumes the new, unprimed session, so that chat loses its earlier context.
+  evidence: `packages/core/src/chat.ts` `agentFor` calls `setSessionAdapterRefs` as soon as `reopenSession` returns `new`; `prime` lives only in memory (story 2.7 review finding F4).

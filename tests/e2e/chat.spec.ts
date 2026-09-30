@@ -72,7 +72,7 @@ test('a message sent from the session view streams its reply while the session g
   });
 });
 
-test('an agent that crashes mid-reply leaves the session in error with a plain message', async ({ page }) => {
+test('an agent that crashes mid-reply leaves the session in error with a plain message; the next message resumes the chat', async ({ page }) => {
   await withChatServer(page, async (_server, repo) => {
     await startChat(page, repo);
     const composer = page.getByRole('textbox', { name: 'Message Claude Code' });
@@ -81,6 +81,15 @@ test('an agent that crashes mid-reply leaves the session in error with a plain m
     await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'error');
     await expect(page.getByTestId('session-error')).toContainText('Claude Code stopped unexpectedly.');
     await expect(page.getByTestId('message-agent')).toContainText('About to');
+
+    // Story 2.7: the chat reopens, and the break shows just before the message that reopened it.
+    await composer.fill('Still there?');
+    await composer.press('Enter');
+    await expect(page.getByTestId('message-agent').last()).toContainText('Hello from the fake agent.');
+    await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
+    const marker = page.getByRole('separator', { name: 'Resumed from history' });
+    await expect(marker).toHaveText('Resumed from history');
+    await expect(page.locator('[data-testid="resumed-marker"] + [data-testid="message-user"]')).toHaveText('Still there?');
   });
 });
 

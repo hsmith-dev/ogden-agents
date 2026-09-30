@@ -78,7 +78,7 @@ describe('sessionView: permission requests (story 2.6)', () => {
       stateChanged('idle', 'working'),
     ];
     const view = sessionView(events, 'ses_1');
-    expect(view.items.map((item) => (item.type === 'message' ? item.message.text : item.permission.requestId))).toEqual(['p1', 'Denied npm test.']);
+    expect(view.items.map((item) => (item.type === 'message' ? item.message.text : item.type === 'permission' ? item.permission.requestId : item.type))).toEqual(['p1', 'Denied npm test.']);
     expect(view.pendingPermissions).toEqual([]);
     const [first] = view.items;
     expect(first?.type === 'permission' && first.permission).toMatchObject({ status: 'resolved', resolution: { decision: 'deny', by: 'user', reason: 'Not now' } });
@@ -105,5 +105,41 @@ describe('sessionView: permission requests (story 2.6)', () => {
     expect(before.items.map((item) => item.type === 'permission' && item.permission.resolution?.ruleRemoved)).toEqual([false, false]);
     const after = sessionView([...events, event('workspace.permission_rule_removed', { ruleId: 'rule_1' }, 'ws_1')], 'ses_1');
     expect(after.items.map((item) => item.type === 'permission' && item.permission.resolution?.ruleRemoved)).toEqual([true, true]);
+  });
+});
+
+const resumed = (via: string) => event('session.resumed', { sessionId: 'ses_1', via });
+
+describe('sessionView: resumed chats (story 2.7)', () => {
+  it('puts the marker just before the user message that reopened the chat, for every way it came back', () => {
+    for (const via of ['resumed', 'loaded', 'transcript']) {
+      const events = [
+        created(),
+        completed('u1', 'user', 'First'),
+        completed('a1', 'agent', 'Answer'),
+        stateChanged('idle', 'working', 'Ogden Agents was restarted'),
+        completed('u2', 'user', 'What did I say?'),
+        stateChanged('working', 'idle'),
+        resumed(via),
+        delta('a2', 'You said'),
+      ];
+      const view = sessionView(events, 'ses_1');
+      expect(view.items.map((item) => (item.type === 'message' ? item.message.messageId : item.type))).toEqual(['u1', 'a1', 'resumed', 'u2', 'a2']);
+      expect(view.items[2]).toEqual({ type: 'resumed', via, at });
+    }
+  });
+
+  it('shows one marker per reopen, and one with no user message before it at the end', () => {
+    const events = [
+      created(),
+      completed('u1', 'user', 'One'),
+      resumed('resumed'),
+      completed('a1', 'agent', 'Answer'),
+      completed('u2', 'user', 'Two'),
+      resumed('transcript'),
+    ];
+    const view = sessionView(events, 'ses_1');
+    expect(view.items.map((item) => item.type)).toEqual(['resumed', 'message', 'message', 'resumed', 'message']);
+    expect(sessionView([created(), resumed('loaded')], 'ses_1').items).toEqual([{ type: 'resumed', via: 'loaded', at }]);
   });
 });

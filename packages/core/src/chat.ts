@@ -13,8 +13,16 @@
  * events, each carrying the whole call as it stands. Permission requests go
  * to {@link Permissions} (the declining stub until 2.6).
  *
+ * The agent's own session id is stored as the adapter ref
+ * {@link AGENT_SESSION_REF} (AD-9), never in an event. When a chat that has
+ * one gets a message and has no live agent (after a restart or a crash), core
+ * reopens it (story 2.7, E2-R2): the adapter resumes or loads it, else starts
+ * a new session that core primes with the chat's transcript
+ * ({@link primedPrompt}). Every reopen appends `session.resumed`. Reopening is
+ * lazy, so a server start spawns no agent.
+ *
  * The agent itself sits behind {@link AgentPort} (AD-1); this file names none.
- * Not yet here: queued messages (E2-R1, 2.10), resume (2.7), permission cards (2.6).
+ * Not yet here: queued messages (E2-R1, 2.10).
  */
 import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
@@ -26,6 +34,7 @@ import {
   type AgentPermissionDecision,
   type AgentPermissionRequest,
   type AgentPort,
+  type AgentRestored,
   type AgentSession,
   type AgentToolCallDiff,
 } from './agent-port.js';
@@ -33,10 +42,14 @@ import { canonicalWorkspacePath, type Entities } from './entities.js';
 import { CoreError, InvalidOperationError, NotFoundError, SessionBusyError, WorkspaceBusyError } from './errors.js';
 import type { HistoryDeleted } from './event-log.js';
 import { createDecliningPermissions, type Permissions } from './permissions.js';
+import { primedPrompt } from './resume-prime.js';
 import type { SessionEvents } from './session-events.js';
 
 /** The reason on sessions the server moved to `idle` because it stopped or restarted under them (AD-3). */
 export const RESTARTED_REASON = 'Ogden Agents was restarted';
+
+/** The adapter ref that holds the agent's own session id (AD-9). */
+export const AGENT_SESSION_REF = 'agentSessionId';
 
 export interface ChatOptions {
   entities: Entities;
@@ -159,6 +172,11 @@ interface Live {
   toolCalls: Map<string, ToolCallState>;
   /** Stops listening to the agent. */
   off: (() => void) | undefined;
+  /**
+   * The agent started a new session in place of the chat's earlier one: the
+   * next prompt carries the transcript ({@link primedPrompt}) until one succeeds.
+   */
+  prime: boolean;
 }
 
 export function createChat(options: ChatOptions): Chat {
@@ -291,10 +309,16 @@ export function createChat(options: ChatOptions): Chat {
     }
   };
 
+  /** The session's current adapter ref for its agent session, if it ever reached an agent. */
+  const storedAgentSessionId = (sessionId: SessionId): string | undefined => {
+    const ref = entities.getSession(sessionId)?.adapterRefs[AGENT_SESSION_REF];
+    return ref === undefined || ref === '' ? undefined : ref;
+  };
+
   const agentFor = (session: Session, workspace: Workspace): Live => {
     const existing = live.get(session.id);
     if (existing !== undefined) return existing;
-    const entry: Live = { agent: Promise.resolve(undefined as never), reply: undefined, toolCalls: new Map(), off: undefined };
+    const entry: Live = { agent: Promise.resolve(undefined as never), reply: undefined, toolCalls: new Map(), off: undefined, prime: false };
     const onPermissionRequest = async (request: AgentPermissionRequest): Promise<AgentPermissionDecision> => {
       try {
         return await permissions.request(session.id, request);
@@ -305,13 +329,34 @@ export function createChat(options: ChatOptions): Chat {
       }
     };
     // The real-cased path: the case-folded key is for uniqueness only (AD-2).
-    entry.agent = agent.startSession({ cwd: workspace.realPath ?? workspace.path, env: { ...agentEnv() }, onPermissionRequest }).then(async (started) => {
+    const input = { cwd: workspace.realPath ?? workspace.path, env: { ...agentEnv() }, onPermissionRequest };
+    const previous = storedAgentSessionId(session.id);
+    // A chat that reached an agent before, and has none now, reopens that agent's session (2.7).
+    const opening: Promise<{ session: AgentSession; restored: AgentRestored | undefined }> =
+      previous === undefined
+        ? agent.startSession(input).then((started) => ({ session: started, restored: undefined }))
+        : agent.reopenSession({ ...input, agentSessionId: previous });
+    entry.agent = opening.then(async ({ session: started, restored }) => {
       if (live.get(session.id) !== entry) {
         // Closed (or dropped) while starting: stop it before anyone waiting on this
         // entry goes on, so `close` returns only once its process has exited.
         await started.close().catch(() => undefined);
         throw new AgentError('agent_failed', `${agent.displayName} was stopped.`);
       }
+      try {
+        // The id stays an adapter ref: it is in no event (AD-9).
+        if (started.agentSessionId !== previous) entities.setSessionAdapterRefs(session.id, { [AGENT_SESSION_REF]: started.agentSessionId });
+        if (restored !== undefined) {
+          sessionEvents.appendSessionEvent(session.id, {
+            type: 'session.resumed',
+            payload: { sessionId: session.id, via: restored === 'new' ? 'transcript' : restored },
+          });
+        }
+      } catch (error) {
+        await started.close().catch(() => undefined);
+        throw error;
+      }
+      entry.prime = restored === 'new';
       entry.off = started.onEvent((event) => apply(session.id, entry, event));
       return started;
     });
@@ -319,7 +364,20 @@ export function createChat(options: ChatOptions): Chat {
     return entry;
   };
 
-  const runTurn = async (session: Session, workspace: Workspace, text: string): Promise<void> => {
+  /**
+   * What the agent is sent for the user's `text`: the text itself, or, on a
+   * session that replaced the chat's earlier one, the text after the chat's
+   * transcript up to (not including) this message. A slash command (`/…`)
+   * goes as it is, so the agent still reads it as a command, and the next
+   * ordinary message is primed instead (review F1). `primed` says which.
+   */
+  const promptFor = (sessionId: SessionId, entry: Live, messageId: string, text: string): { prompt: string; primed: boolean } => {
+    if (!entry.prime || text.trimStart().startsWith('/')) return { prompt: text, primed: false };
+    const earlier = entities.listCompletedMessages(sessionId).filter((message) => message.messageId !== messageId);
+    return { prompt: primedPrompt(earlier, text, agent.displayName), primed: true };
+  };
+
+  const runTurn = async (session: Session, workspace: Workspace, messageId: string, text: string): Promise<void> => {
     const entry = agentFor(session, workspace);
     let started: AgentSession;
     try {
@@ -329,7 +387,10 @@ export function createChat(options: ChatOptions): Chat {
       return;
     }
     try {
-      await started.prompt(text);
+      const { prompt, primed } = promptFor(session.id, entry, messageId, text);
+      await started.prompt(prompt);
+      // Primed once: the agent has the transcript now.
+      if (primed) entry.prime = false;
       // The adapter reports `idle` itself; this only covers one that didn't.
       apply(session.id, entry, { type: 'state', state: 'idle' });
     } catch (error) {
@@ -410,7 +471,7 @@ export function createChat(options: ChatOptions): Chat {
       sessionEvents.completeMessage(sessionId, { messageId, role: 'user', content: text });
       entities.setSessionState(sessionId, 'working');
       busy.add(sessionId);
-      const turn = runTurn(session, workspace, text)
+      const turn = runTurn(session, workspace, messageId, text)
         .catch((error: unknown) => internalError(sessionId, error))
         .finally(() => {
           busy.delete(sessionId);

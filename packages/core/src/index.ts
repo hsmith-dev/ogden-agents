@@ -24,6 +24,7 @@ export {
 } from './event-log.js';
 export { newId } from './ids.js';
 export * from './permissions.js';
+export * from './resume-prime.js';
 export * from './secret-store-port.js';
 export * from './session-events.js';
 export * from './toolchain.js';

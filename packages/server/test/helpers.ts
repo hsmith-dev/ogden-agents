@@ -28,6 +28,15 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
+/**
+ * Removes `dir` after the test, once its servers (and the agents they ran
+ * there) are closed; Windows refuses to delete a folder a process still uses.
+ */
+export function removeAfterTest(dir: string): string {
+  dirs.push(dir);
+  return dir;
+}
+
 /** A fresh temp data folder, removed after the test. */
 export function tempDataDir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'ogden-agents-server-'));

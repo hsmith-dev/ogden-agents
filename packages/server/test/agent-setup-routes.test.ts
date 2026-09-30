@@ -18,21 +18,17 @@ import { pathToFileURL } from 'node:url';
 import { createClaudeApiKey, createMemorySecretStore, loadPty, type AdapterPins, type NpmRunInput, type NpmRunner, type PtyLoader } from '@ogden-agents/adapters';
 import { SecretsUnavailableError, type AgentSetupPort, type ApiKeyVerification, type SecretStorePort } from '@ogden-agents/core';
 import { AgentSetupStatus, AgentsResponse, API_ROUTES, ApiErrorBody, apiPath, SessionResponse, SignInResponse, WorkspaceResponse } from '@ogden-agents/shared';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { testSecretStore, type StartOptions } from '../src/start.js';
-import { FAKE_AGENT, send, signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
+import { FAKE_AGENT, removeAfterTest, send, signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
 const signInPath = (agentId = 'claude-code') => apiPath(API_ROUTES.agentSignIn, { agentId });
 const codePath = (agentId = 'claude-code') => apiPath(API_ROUTES.agentSignInCode, { agentId });
 
-const temps: string[] = [];
-afterEach(() => {
-  for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-});
 
 function stateFile(): string {
   const dir = mkdtempSync(join(tmpdir(), 'ogden-agents-login-'));
-  temps.push(dir);
+  removeAfterTest(dir);
   return join(dir, 'state.json');
 }
 
@@ -245,7 +241,7 @@ async function startKeyServer(
 /** Opens a chat in a fresh folder and sends `text`; returns the session id and a cleanup (after the server closes). */
 async function chatOnce(server: TestServer, tab: SignedIn, text: string) {
   const repo = mkdtempSync(join(tmpdir(), 'ogden-agents-key-repo-'));
-  temps.push(repo);
+  removeAfterTest(repo);
   const post = (path: string, body: unknown) => fetch(`${server.url}${path}`, { method: 'POST', headers: json(tab), body: JSON.stringify(body) });
   const { workspace } = WorkspaceResponse.parse(await (await post(API_ROUTES.workspaces, { path: repo })).json());
   const { session } = SessionResponse.parse(await (await post(apiPath(API_ROUTES.workspaceSessions, { wsId: workspace.id }), {})).json());
@@ -538,7 +534,7 @@ describe('agent setup routes: installing Claude Code (story 9.3)', () => {
 
   async function startInstallServer(npm: ReturnType<typeof handNpm>, dataDir?: string) {
     const npmCli = join(mkdtempSync(join(tmpdir(), 'ogden-agents-npm-')), 'npm-cli.js');
-    temps.push(dirname(npmCli));
+    removeAfterTest(dirname(npmCli));
     writeFileSync(npmCli, '');
     return startSetupServer({}, {
       claudeAdapterPath: undefined,
@@ -604,7 +600,7 @@ describe('agent setup routes: installing Claude Code (story 9.3)', () => {
 
   it("an npm that can't start logs its errno code only: no path reaches the log or an event (review F3)", async () => {
     const npmCli = join(mkdtempSync(join(tmpdir(), 'ogden-agents-npm-')), 'npm-cli.js');
-    temps.push(dirname(npmCli));
+    removeAfterTest(dirname(npmCli));
     writeFileSync(npmCli, '');
     const hidden = join(tmpdir(), 'secret-dir-f3', 'node');
     const { server, tab, lines } = await startSetupServer({}, {
@@ -632,7 +628,7 @@ describe('agent setup routes: installing Claude Code (story 9.3)', () => {
   it('stopping the server kills npm and removes its work folder', async () => {
     const npm = handNpm();
     const dataDir = mkdtempSync(join(tmpdir(), 'ogden-agents-install-stop-'));
-    temps.push(dataDir);
+    removeAfterTest(dataDir);
     const { server, tab } = await startInstallServer(npm, dataDir);
     expect((await send(server, installPath(), { method: 'POST', headers: tab.headers })).status).toBe(202);
     await waitFor(() => npm.runs.length === 1, 'npm to start');

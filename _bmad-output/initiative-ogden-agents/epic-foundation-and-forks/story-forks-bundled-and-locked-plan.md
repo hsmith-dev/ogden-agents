@@ -4,7 +4,7 @@ type: 'chore'
 ticket: '9'
 created: '2026-09-29'
 status: 'built'
-baseline_revision: '1f5baef63ac179919df71162e24e66a244fb864c'
+baseline_revision: '8b92eeb95126b723708333d37145303d6554dc34'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
@@ -91,6 +91,8 @@ Baseline `1f5baef` (worktree `../ogden-agents-wt-1.9`, branch `story/1.9-forks-b
 ## Plan Change Log
 
 - Added `vendored` (path of the output) and, for bmad-loop, `buildConstraints` to `forks.lock`. bmad-loop's `build-system.requires` is an unpinned `hatchling>=1.30`, and the wheel's `WHEEL` file names the hatchling version, so a new hatchling release would otherwise fail `--check` with no fork change.
+
+- Provenance (epic 1 retrospective, A8, 2026-09-30): the stack was reordered after this plan was written (1.9 now sits on 1.7), so `baseline_revision` moved from `1f5baef` to `8b92eeb`, the parent of this story's commit `695ebcd`.
 
 ## Review Triage Log
 

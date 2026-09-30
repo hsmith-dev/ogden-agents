@@ -73,9 +73,11 @@ Baseline: worktree `../ogden-agents-wt-1.11`, branch `story/1.11-refactor-sweep`
 - Given the full suite, e2e, smoke, fork and pin checks, when run after the sweep, then all pass with no user-visible behavior change beyond start-up and page-load speed.
 
 ## Implementation Notes
-- Orchestrator audit: the implementer committed the seven items as seven commits on top of `bf4dbb2` (`98f8f84` item 1 to `91ba682` item 7, then `4b1419c` item 5; corrected after review). All 4 matrix rows are covered (route-enumeration and old-path 404 tests; the launcher import-graph packaging test; error-shape tests across ten refusals; a lazy-chunk e2e test). 228 tests, 34 e2e, smoke, fork and pin checks pass.
+- Orchestrator audit: the implementer committed the seven items as seven commits on top of `bf4dbb2` (`a4fef75` item 1 to `c3944a5` item 7, then `d2692cb` item 5; review fixes in `fa60410`). All 4 matrix rows are covered (route-enumeration and old-path 404 tests; the launcher import-graph packaging test; error-shape tests across ten refusals; a lazy-chunk e2e test). 228 tests, 34 e2e, smoke, fork and pin checks pass.
 
 ## Plan Change Log
+
+- Provenance (epic 1 retrospective, A8, 2026-09-30): the audit note cited pre-restack SHAs `98f8f84`, `91ba682` and `4b1419c`, which are not on the branch; replaced with the restacked `a4fef75`, `c3944a5`, `d2692cb` and the review-fix commit `fa60410`.
 
 ## Review Triage Log
 

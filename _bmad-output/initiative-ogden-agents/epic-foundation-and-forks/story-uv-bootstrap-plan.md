@@ -4,7 +4,7 @@ type: 'feature'
 ticket: '8'
 created: '2026-09-30'
 status: 'built'
-baseline_revision: '8b92eeb95126b723708333d37145303d6554dc34'
+baseline_revision: '695ebcd14b4b1ced1f64564bf68d6ab4bfa18bbe'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
@@ -103,6 +103,8 @@ Baseline `8b92eeb` (worktree `../ogden-agents-wt-1.8`, branch `story/1.8-uv-boot
 - Orchestrator audit (macOS): all 8 matrix rows covered (adapter unit tests with a local fixture server for good and bad hashes, offline, unsupported; `tests/e2e` Settings > Tools for install, mismatch, system and too-old, and 403 without Origin). A real private install from GitHub was done by the implementer (`uv 0.12.21`). Windows zip layout (top-level `uv.exe`) differs from the plan's note; handled.
 
 ## Plan Change Log
+
+- Provenance (epic 1 retrospective, A8, 2026-09-30): the branch was rebased onto 1.9 after this plan was written, so `baseline_revision` moved from `8b92eeb` to `695ebcd`, the parent of this story's commit `8209469`.
 
 ## Review Triage Log
 

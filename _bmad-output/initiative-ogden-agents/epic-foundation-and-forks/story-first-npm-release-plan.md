@@ -4,7 +4,7 @@ type: 'chore'
 ticket: '10'
 created: '2026-09-30'
 status: 'built'
-baseline_revision: '695ebcd14b4b1ced1f64564bf68d6ab4bfa18bbe'
+baseline_revision: '82094694635973f62a8e38ce5990e3eb25ef9fa0'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
@@ -75,6 +75,8 @@ Baseline: worktree `../ogden-agents-wt-1.10`, branch `story/1.10-first-npm-relea
 - Orchestrator audit (macOS): the matrix rows Version mismatch and Not main were checked by running the extracted guard logic; Release, CI red, No trusted publisher and Registry verify can only run on a real tag (the user's steps). 160 tests pass; tarball and `file:` registry-mode smoke pass. Ticket 10's entry text was updated from the npm token to trusted publishing.
 
 ## Plan Change Log
+
+- Provenance (epic 1 retrospective, A8, 2026-09-30): story 1.8 was rebased under this branch, so `baseline_revision` moved from `695ebcd` to `8209469`, the parent of this story's commit `9ca222d`.
 
 ## Review Triage Log
 

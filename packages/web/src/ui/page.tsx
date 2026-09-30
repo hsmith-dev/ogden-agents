@@ -30,6 +30,15 @@ export function PageBody({ className, ...props }: ComponentProps<'div'>) {
   );
 }
 
+/** A bar pinned under the page body, holding a control in the reading column (the session view's composer). */
+export function PageFooter({ className, children, ...props }: ComponentProps<'div'>) {
+  return (
+    <div data-slot="page-footer" className={cn('shrink-0 border-t border-border p-(--panel-padding)', className)} {...props}>
+      <div className="mx-auto w-full max-w-(--space-chat-column)">{children}</div>
+    </div>
+  );
+}
+
 /** A section of a settings-like page: an optional heading, then its fields. */
 export function PageSection({ title, className, children, ...props }: ComponentProps<'section'> & { title?: string }) {
   return (

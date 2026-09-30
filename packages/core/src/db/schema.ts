@@ -20,6 +20,11 @@ export const workspaces = sqliteTable(
     id: text('id').primaryKey(),
     /** Canonical real path, case-folded on case-insensitive filesystems (AD-2). */
     path: text('path').notNull(),
+    /**
+     * The real path as the filesystem spells it (not case-folded): what the
+     * agent runs in. Added in story 2.2; rows from before it hold `path`.
+     */
+    realPath: text('real_path').notNull().default(''),
     createdAt: text('created_at').notNull(),
   },
   (t) => [uniqueIndex('workspaces_path_unique').on(t.path)],

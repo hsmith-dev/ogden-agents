@@ -1,11 +1,12 @@
 import { upgradeWebSocket } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
-import type { EventLog, Toolchain } from '@ogden-agents/core';
+import type { Chat, EventLog, Toolchain } from '@ogden-agents/core';
 import { API_ROUTES, ClientMessage, ServerMessage, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import type { WSContext } from 'hono/ws';
 import { webSocketToken, type TabTokens } from './auth.js';
+import { registerChatRoutes } from './chat-routes.js';
 import { apiError } from './errors.js';
 import type { Logger } from './log.js';
 import { isServerPath } from './paths.js';
@@ -56,6 +57,8 @@ export interface AppOptions {
   control?: ServerControl;
   /** The `uv` status and its user-initiated install (story 1.8); without it those routes answer 404. */
   toolchain?: Toolchain;
+  /** Workspaces, chat sessions and messages (story 2.2); without it those routes answer 404. */
+  chat?: Chat;
   /**
    * The tab tokens the gate checks. An open `/ws` holds its tab's token, so a
    * tab that stays connected never hits the idle expiry.
@@ -65,7 +68,7 @@ export interface AppOptions {
 
 const WS_OPEN = 1;
 
-export function createApp({ events, webRoot, log, gate, control, toolchain, tabs }: AppOptions): Hono {
+export function createApp({ events, webRoot, log, gate, control, toolchain, chat, tabs }: AppOptions): Hono {
   const app = new Hono();
 
   // First, for every method and path: no route may be registered before this line.
@@ -153,6 +156,8 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, tabs
       }
     });
   }
+
+  if (chat !== undefined) registerChatRoutes(app, chat, log);
 
   app.get(
     '/ws',

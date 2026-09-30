@@ -6,7 +6,7 @@
  */
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { LEGACY_AUTH_KEY_FILE, openCore, PORT_FILE } from '@ogden-agents/core';
+import { createChat, LEGACY_AUTH_KEY_FILE, openCore, PORT_FILE } from '@ogden-agents/core';
 import { API_BASE, API_ROUTES, ApiErrorBody, WS_PROTOCOL } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
@@ -554,7 +554,16 @@ describe('gate placement', () => {
         installUv: async () => ({ started: false, uv: { state: 'missing' as const } }),
         settled: async () => {},
       };
-      const app = createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate, control, toolchain, tabs: createTabTokens() });
+      const chat = createChat({
+        dataDir: tempDataDir(),
+        entities: core.entities,
+        sessionEvents: core.sessionEvents,
+        agent: { displayName: 'Test Agent', startSession: () => Promise.reject(new Error('no agent in this test')) },
+      });
+      const app = createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate, control, toolchain, chat, tabs: createTabTokens() });
+      // The chat routes (story 2.2) are registered, and every one is a shared route under the gate.
+      const chatRoutes = [API_ROUTES.workspaces, API_ROUTES.workspaceSessions, API_ROUTES.workspaceSession, API_ROUTES.sessionMessages];
+      for (const path of chatRoutes) expect(app.routes.map((route) => route.path), path).toContain(path);
       const outside = app.routes.filter((route) => !isServerPath(route.path)).map((route) => `${route.method} ${route.path}`);
       // The gate and the static files (ALL /*), then the SPA shell's guard and index.html (GET /*). Nothing else:
       // a new page-level route would be reachable without a token, so it must live under /api instead.

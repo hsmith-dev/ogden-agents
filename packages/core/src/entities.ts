@@ -27,13 +27,14 @@ import {
   type Workspace,
   type WorkspaceId,
 } from '@ogden-agents/shared';
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Database } from './db/database.js';
 import { runs, sessions, workspaces } from './db/schema.js';
 import { InvalidOperationError, NotFoundError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import { newId } from './ids.js';
+import type { SessionEvents } from './session-events.js';
 
 export interface NewSession {
   workspaceId: WorkspaceId;
@@ -57,6 +58,11 @@ export interface NewRun {
   deadline?: string | null;
 }
 
+export interface SessionStateDetail {
+  reason?: string | undefined;
+  resumable?: boolean | undefined;
+}
+
 export interface Entities {
   /**
    * Returns the workspace for the repo at `path`, creating it (and appending
@@ -71,8 +77,17 @@ export interface Entities {
   createSession(input: NewSession): Session;
   getSession(id: SessionId): Session | undefined;
   listSessions(workspaceId: WorkspaceId): Session[];
-  /** Sets the normalized state (AD-4), appending `session.state_changed` if it changed. */
-  setSessionState(id: SessionId, state: SessionState): Session;
+  /**
+   * Sets the normalized state (AD-4), appending `session.state_changed` if it
+   * changed. `reason` is plain words for the user (an error's cause), never a
+   * secret; `resumable` marks an `idle` whose agent process is gone (AD-3).
+   */
+  setSessionState(id: SessionId, state: SessionState, detail?: SessionStateDetail): Session;
+  /**
+   * Moves every `working` or `waiting` session to `idle`, marked resumable,
+   * with `reason`: their agent processes are gone (AD-3). Returns them.
+   */
+  settleInterruptedSessions(reason: string): Session[];
   /** Sets the driver (AD-6), appending `session.driver_changed` if it changed. */
   setSessionDriver(id: SessionId, driver: SessionDriver): Session;
 
@@ -102,6 +117,7 @@ type RunRow = typeof runs.$inferSelect;
 const toWorkspace = (row: WorkspaceRow): Workspace => ({
   id: row.id as WorkspaceId,
   path: row.path,
+  realPath: row.realPath === '' ? row.path : row.realPath,
   createdAt: row.createdAt,
 });
 
@@ -159,14 +175,24 @@ export function isCaseInsensitivePath(path: string): boolean {
  * be an existing directory.
  */
 export function canonicalWorkspacePath(path: string): string {
+  return foldWorkspacePath(realWorkspacePath(path));
+}
+
+/** The real path of an existing directory, symlinks resolved, spelled as the filesystem spells it. */
+export function realWorkspacePath(path: string): string {
   const real = realpathSync.native(resolve(path));
   if (!statSync(real).isDirectory()) {
     throw new InvalidOperationError(`workspace path is not a directory: ${real}`);
   }
+  return real;
+}
+
+/** A real path case-folded when its filesystem is case-insensitive: the workspace key (AD-2). */
+function foldWorkspacePath(real: string): string {
   return isCaseInsensitivePath(real) ? real.toLowerCase() : real;
 }
 
-export function createEntities(db: Database, log: EventLog): Entities {
+export function createEntities(db: Database, log: EventLog, sessionEvents: SessionEvents): Entities {
   const { orm } = db;
   const now = () => new Date().toISOString();
 
@@ -190,12 +216,13 @@ export function createEntities(db: Database, log: EventLog): Entities {
 
   return {
     ensureWorkspace(path) {
-      const canonical = canonicalWorkspacePath(path);
+      const real = realWorkspacePath(path);
+      const canonical = foldWorkspacePath(real);
       return log.transaction(() => {
         const existing = orm.select().from(workspaces).where(eq(workspaces.path, canonical)).get();
         if (existing !== undefined) return toWorkspace(existing);
-        const workspace: Workspace = { id: newId('ws'), path: canonical, createdAt: now() };
-        orm.insert(workspaces).values(workspace).run();
+        const workspace: Workspace = { id: newId('ws'), path: canonical, realPath: real, createdAt: now() };
+        orm.insert(workspaces).values({ ...workspace, realPath: real }).run();
         log.append({
           type: 'workspace.created',
           workspaceId: workspace.id,
@@ -228,7 +255,7 @@ export function createEntities(db: Database, log: EventLog): Entities {
       return log.transaction(() => {
         if (getWorkspace(input.workspaceId) === undefined) throw new NotFoundError('workspace', input.workspaceId);
         orm.insert(sessions).values(session).run();
-        log.append({ type: 'session.created', workspaceId: session.workspaceId, streamId: session.id, payload: { session } });
+        sessionEvents.appendSessionEvent(session.id, { type: 'session.created', payload: { session } });
         return session;
       });
     },
@@ -245,21 +272,36 @@ export function createEntities(db: Database, log: EventLog): Entities {
         .map(toSession);
     },
 
-    setSessionState(id, state) {
+    setSessionState(id, state, { reason, resumable } = {}) {
       check(SessionStateSchema, state, 'session state');
       return log.transaction(() => {
         const session = requireSession(id);
         if (session.state === state) return session;
         const updated: Session = { ...session, state, updatedAt: now() };
         orm.update(sessions).set({ state, updatedAt: updated.updatedAt }).where(eq(sessions.id, id)).run();
-        log.append({
+        sessionEvents.appendSessionEvent(session.id, {
           type: 'session.state_changed',
-          workspaceId: session.workspaceId,
-          streamId: session.id,
-          payload: { sessionId: session.id, state, previous: session.state },
+          payload: {
+            sessionId: session.id,
+            state,
+            previous: session.state,
+            ...(reason === undefined || reason === '' ? {} : { reason }),
+            ...(resumable === true ? { resumable: true as const } : {}),
+          },
         });
         return updated;
       });
+    },
+
+    settleInterruptedSessions(reason) {
+      return log.transaction(() =>
+        orm
+          .select()
+          .from(sessions)
+          .where(inArray(sessions.state, ['working', 'waiting']))
+          .all()
+          .map((row) => this.setSessionState(row.id as SessionId, 'idle', { reason, resumable: true })),
+      );
     },
 
     setSessionDriver(id, driver) {
@@ -269,10 +311,8 @@ export function createEntities(db: Database, log: EventLog): Entities {
         if (session.driver === driver) return session;
         const updated: Session = { ...session, driver, updatedAt: now() };
         orm.update(sessions).set({ driver, updatedAt: updated.updatedAt }).where(eq(sessions.id, id)).run();
-        log.append({
+        sessionEvents.appendSessionEvent(session.id, {
           type: 'session.driver_changed',
-          workspaceId: session.workspaceId,
-          streamId: session.id,
           payload: { sessionId: session.id, driver, previous: session.driver },
         });
         return updated;

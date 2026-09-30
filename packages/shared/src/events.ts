@@ -91,7 +91,18 @@ export type SessionCreatedEvent = z.infer<typeof SessionCreatedEvent>;
 const SessionStateChangedInput = z.object({
   type: z.literal('session.state_changed'),
   ...onSessionStream,
-  payload: z.object({ sessionId: SessionId, state: SessionState, previous: SessionState }),
+  payload: z.object({
+    sessionId: SessionId,
+    state: SessionState,
+    previous: SessionState,
+    /** Why, in plain words for the user, when there is something to say (an `error`'s cause). Never a secret. */
+    reason: z.string().min(1).optional(),
+    /**
+     * Set when the server moved the session to `idle` because its agent's
+     * process is gone (a restart or a crash; AD-3): the chat can be resumed.
+     */
+    resumable: z.literal(true).optional(),
+  }),
 });
 /** A session's normalized state changed (AD-4). */
 export const SessionStateChangedEvent = SessionStateChangedInput.extend(assigned);

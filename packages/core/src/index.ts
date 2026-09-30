@@ -1,8 +1,21 @@
+export * from './agent-port.js';
+export * from './chat.js';
 export * from './core.js';
 export * from './data-dir.js';
 export { DATABASE_FILE, type OpenDatabaseOptions } from './db/database.js';
 export * from './entities.js';
 export * from './errors.js';
-export * from './event-log.js';
+// Not `sessionAppender`: the raw session append stays inside core (E2-R7).
+export {
+  DEFAULT_READ_LIMIT,
+  createEventLog,
+  isSessionEventType,
+  type EventListener,
+  type EventLog,
+  type EventLogOptions,
+  type HistoryDeleted,
+  type ReadOptions,
+} from './event-log.js';
 export { newId } from './ids.js';
+export * from './session-events.js';
 export * from './toolchain.js';

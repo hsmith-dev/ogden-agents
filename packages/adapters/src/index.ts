@@ -3,4 +3,5 @@
  * sandboxes and tools (`acp-*`, `buildrunner-bmad-loop`, `tickets-v7`,
  * `sandbox-*`, `vcs-git`, ...).
  */
+export * from './acp-claude-code/index.js';
 export * from './toolchain-uv/index.js';

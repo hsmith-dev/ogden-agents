@@ -1,4 +1,5 @@
 import { FolderPlus, Plus } from '@phosphor-icons/react';
+import { StartChatForm } from '@/chat/start-chat-form';
 import { ADD_PROJECT_UNAVAILABLE } from '@/shell/status-sidebar';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
@@ -6,7 +7,8 @@ import { EmptyState, PageBody } from '@/ui/page';
 
 /**
  * `/`: the workspace area with no workspaces (EXPERIENCE.md State Patterns:
- * No workspaces). Both actions arrive with epic 2.
+ * No workspaces). Both actions arrive with the workspace switcher (story
+ * 2.5); until then a chat starts in a folder typed by path.
  */
 export function HomePage() {
   return (
@@ -31,6 +33,7 @@ export function HomePage() {
           }
           footnote={<span id="home-add-unavailable">{ADD_PROJECT_UNAVAILABLE}</span>}
         />
+        <StartChatForm />
       </PageBody>
     </>
   );

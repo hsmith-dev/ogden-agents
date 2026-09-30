@@ -228,6 +228,8 @@ try {
   if (record === undefined) throw new Error('server.json is missing while the server runs');
   await withTimeout(quit(url, token, record.pid), STEP_TIMEOUT_MS, 'the server to quit');
   console.log('smoke: Quit stopped the server and removed server.json and launcher.token');
+  install.checkNoAgentAdapter();
+  console.log('smoke: the package installs no agent adapter');
 } catch (error) {
   failure = error;
 } finally {

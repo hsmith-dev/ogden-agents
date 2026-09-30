@@ -1,6 +1,9 @@
 export { createApp, type AppOptions, type ServerControl, type ServerInfo } from './app.js';
 export { createLogger, redact, type Logger } from './log.js';
 export {
+  AGENT_ENV_KEYS,
+  agentEnvironment,
+  CLAUDE_ACP_PATH_ENV,
   countBusySessions,
   DEFAULT_PORT,
   HOST,
@@ -22,3 +25,5 @@ export {
 } from './launcher-token.js';
 // Toolchain types for callers that stub the uv install (tests).
 export { ToolchainError, type DetectedToolStatus, type ToolchainPort, type ToolProgress } from '@ogden-agents/core';
+// Agent port types for callers that stub the agent (tests).
+export { AgentError, type AgentEvent, type AgentPort, type AgentSession } from '@ogden-agents/core';

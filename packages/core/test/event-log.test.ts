@@ -21,12 +21,12 @@ function chat(core: Core) {
   return { workspaceId: workspace.id, sessionId: session.id };
 }
 
-const delta = (ids: { workspaceId: WorkspaceId; sessionId: SessionId }, messageId: string, text: string): NewCoreEvent => ({
-  type: 'session.message_delta',
-  workspaceId: ids.workspaceId,
-  streamId: ids.sessionId,
-  payload: { messageId, role: 'agent', text },
-});
+/** Appends a message delta through the session-event helper, the only way (E2-R7). */
+const appendDelta = (core: Core, ids: { workspaceId: WorkspaceId; sessionId: SessionId }, messageId: string, text: string) =>
+  core.sessionEvents.appendSessionEvent(ids.sessionId, {
+    type: 'session.message_delta',
+    payload: { messageId, role: 'agent', text },
+  });
 
 describe('append', () => {
   it('stores a schema-valid envelope with a strictly increasing seq', () => {
@@ -219,7 +219,7 @@ describe('restart', () => {
     const dataDir = tempDir();
     const first = openTestCore(dataDir);
     const ids = chat(first);
-    const newest = first.events.append(delta(ids, 'm1', 'x'));
+    const newest = appendDelta(first, ids, 'm1', 'x');
     first.events.deleteWorkspaceHistory(ids.workspaceId);
     const deletedAndAppended = first.events.lastSeq();
     expect(deletedAndAppended).toBeGreaterThan(newest.seq);
@@ -235,15 +235,10 @@ describe('message compaction', () => {
   it('appends the completed message with full content, then removes that message’s deltas', () => {
     const core = openTestCore();
     const ids = chat(core);
-    const other = core.events.append(delta(ids, 'm2', 'other message'));
-    const deltas = ['Hel', 'lo, ', 'world'].map((text) => core.events.append(delta(ids, 'm1', text)));
+    const other = appendDelta(core, ids, 'm2', 'other message');
+    const deltas = ['Hel', 'lo, ', 'world'].map((text) => appendDelta(core, ids, 'm1', text));
 
-    const completed = core.events.completeMessage({
-      type: 'session.message_completed',
-      workspaceId: ids.workspaceId,
-      streamId: ids.sessionId,
-      payload: { messageId: 'm1', role: 'agent', content: 'Hello, world' },
-    });
+    const completed = core.sessionEvents.completeMessage(ids.sessionId, { messageId: 'm1', role: 'agent', content: 'Hello, world' });
     expect(completed.seq).toBeGreaterThan(deltas.at(-1)!.seq);
     expect(completed.payload.content).toBe('Hello, world');
 
@@ -257,8 +252,8 @@ describe('message compaction', () => {
   it('a client resuming mid-message ends with exactly the completed message', () => {
     const core = openTestCore();
     const ids = chat(core);
-    const first = core.events.append(delta(ids, 'm1', 'Hel'));
-    core.events.append(delta(ids, 'm1', 'lo'));
+    const first = appendDelta(core, ids, 'm1', 'Hel');
+    appendDelta(core, ids, 'm1', 'lo');
 
     // The client has seen the first delta, then drops.
     const messages = new Map<string, string>();
@@ -271,12 +266,7 @@ describe('message compaction', () => {
     };
     fold(first);
 
-    core.events.completeMessage({
-      type: 'session.message_completed',
-      workspaceId: ids.workspaceId,
-      streamId: ids.sessionId,
-      payload: { messageId: 'm1', role: 'agent', content: 'Hello' },
-    });
+    core.sessionEvents.completeMessage(ids.sessionId, { messageId: 'm1', role: 'agent', content: 'Hello' });
 
     const received: CoreEvent[] = [];
     core.events.subscribe(first.seq, (e) => {
@@ -292,13 +282,8 @@ describe('message compaction', () => {
     const ids = chat(core);
     const types: string[] = [];
     core.events.subscribe(core.events.lastSeq(), (e) => types.push(e.type));
-    core.events.append(delta(ids, 'm1', 'a'));
-    core.events.completeMessage({
-      type: 'session.message_completed',
-      workspaceId: ids.workspaceId,
-      streamId: ids.sessionId,
-      payload: { messageId: 'm1', role: 'agent', content: 'a' },
-    });
+    appendDelta(core, ids, 'm1', 'a');
+    core.sessionEvents.completeMessage(ids.sessionId, { messageId: 'm1', role: 'agent', content: 'a' });
     expect(types).toEqual(['session.message_delta', 'session.message_completed']);
   });
 });

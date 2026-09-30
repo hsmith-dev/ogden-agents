@@ -11,6 +11,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^1.5.1",
     "@ogden-agents/core": "workspace:*",
     "@ogden-agents/shared": "workspace:*"
   },

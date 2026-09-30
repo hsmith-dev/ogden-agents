@@ -78,12 +78,28 @@ export function readPortFile(dataDir) {
  * @property {() => { port: number, pid: number, version: string } | undefined} readPortFile the running server's `server.json`
  * @property {() => boolean} killBackgroundServer kills the background server if one is still running; true if it had to
  * @property {(name: string) => any} requireInstalled loads a dependency of the installed package (such as `ws`)
+ * @property {() => void} checkNoAgentAdapter throws if the installed package declares or pulled in an agent adapter (story 2.2)
  * @property {() => void} removeFolders removes the work folder, the npm cache and the data folder (best effort)
  */
 
 /**
  * @typedef {{ workDir: string, cacheDir: string, dataDir: string }} InstallFolders
  */
+
+/**
+ * Agent adapters are not dependencies of the package (story 2.2): the Claude
+ * Agent ACP adapter and its Agent SDK add about 230 MB, and onboarding
+ * installs them on demand. Only the ACP client SDK ships.
+ */
+export const AGENT_ADAPTER_PACKAGES = [
+  '@agentclientprotocol/claude-agent-acp',
+  '@anthropic-ai/claude-agent-sdk',
+  '@anthropic-ai/claude-code',
+  '@agentclientprotocol/codex-acp',
+];
+
+/** @param {string} name */
+const isAgentAdapter = (name) => AGENT_ADAPTER_PACKAGES.some((adapter) => name === adapter || name.startsWith(`${adapter}-`));
 
 /**
  * Prepares an empty work folder, npm cache and data folder for installing
@@ -240,6 +256,20 @@ export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-s
     return createRequire(join(installedDir(name), 'package.json'))(name);
   }
 
+  function checkNoAgentAdapter() {
+    const packageDir = installedDir('ogden-agents');
+    const { dependencies = {}, optionalDependencies = {} } = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'));
+    const declared = [...Object.keys(dependencies), ...Object.keys(optionalDependencies)].filter(isAgentAdapter);
+    if (declared.length > 0) throw new Error(`the package depends on agent adapters: ${declared.join(', ')}`);
+    const modules = dirname(packageDir);
+    const installed = [];
+    for (const scope of new Set(AGENT_ADAPTER_PACKAGES.map((name) => /** @type {string} */ (name.split('/')[0])))) {
+      if (!existsSync(join(modules, scope))) continue;
+      for (const name of readdirSync(join(modules, scope))) if (isAgentAdapter(`${scope}/${name}`)) installed.push(`${scope}/${name}`);
+    }
+    if (installed.length > 0) throw new Error(`installing the package pulled in agent adapters: ${installed.join(', ')}`);
+  }
+
   function removeFolders() {
     for (const dir of [workDir, cacheDir, dataDir]) {
       try {
@@ -260,6 +290,7 @@ export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-s
     readPortFile: () => readPortFile(dataDir),
     killBackgroundServer,
     requireInstalled,
+    checkNoAgentAdapter,
     removeFolders,
   };
 }

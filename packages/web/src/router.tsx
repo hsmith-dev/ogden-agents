@@ -36,7 +36,14 @@ const toolsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/tools-page'), 'ToolsPage'),
 });
 
-const routeTree = rootRoute.addChildren([homeRoute, settingsRoute.addChildren([appearanceRoute, toolsRoute])]);
+/** One chat in a workspace (story 2.2): the session view, `/w/:wsId/s/:sesId`. */
+const sessionRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$wsId/s/$sesId',
+  component: lazyRouteComponent(() => import('./routes/session-page'), 'SessionPage'),
+});
+
+const routeTree = rootRoute.addChildren([homeRoute, sessionRoute, settingsRoute.addChildren([appearanceRoute, toolsRoute])]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });
 

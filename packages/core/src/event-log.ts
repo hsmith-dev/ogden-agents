@@ -8,6 +8,12 @@
  * `better-sqlite3` is synchronous, so appending and notifying happen in one
  * tick, and so do reading a subscriber's backlog and registering it. That is
  * what makes "subscribe after seq N" gap-free and duplicate-free without locks.
+ *
+ * Session events (`session.*`) are refused here: they go only through the
+ * session-event helper (`session-events.ts`), which looks the session up and
+ * stamps its `workspaceId`, so no event can name a session in another
+ * workspace (E2-R7). The helper reaches the raw append through
+ * {@link sessionAppender}, which the package index does not export.
  */
 import {
   NewCoreEvent as NewCoreEventSchema,
@@ -21,7 +27,7 @@ import {
 import { and, asc, eq, gt, isNull, lt, max, sql } from 'drizzle-orm';
 import type { Database } from './db/database.js';
 import { events, runs, sessions, workspaces } from './db/schema.js';
-import { EventValidationError, NotFoundError } from './errors.js';
+import { EventValidationError, NotFoundError, SessionEventScopeError } from './errors.js';
 import { newId } from './ids.js';
 
 export type EventListener = (event: CoreEvent) => void;
@@ -45,7 +51,9 @@ export interface EventLog {
   /**
    * Validates and appends one event, then notifies subscribers (after commit,
    * when called inside {@link EventLog.transaction}). Throws
-   * {@link EventValidationError}, writing nothing, if the event fails its schema.
+   * {@link EventValidationError}, writing nothing, if the event fails its schema,
+   * and {@link SessionEventScopeError} for any `session.*` event: those go
+   * through the session-event helper (`appendSessionEvent`).
    */
   append<E extends NewCoreEvent>(event: E): Extract<CoreEvent, { type: E['type'] }>;
   /** Events with `seq > afterSeq`, in `seq` order. */
@@ -56,11 +64,6 @@ export interface EventLog {
    * skipped. Returns an unsubscribe function.
    */
   subscribe(afterSeq: number, listener: EventListener): () => void;
-  /**
-   * Appends `session.message_completed` with the full content, then prunes
-   * that message's `session.message_delta` events (AD-5), atomically.
-   */
-  completeMessage(event: NewEventOf<'session.message_completed'>): SessionMessageCompletedEvent;
   /**
    * Deletes one workspace's events, sessions and runs, keeps the workspace
    * row, and appends `workspace.history_deleted`.
@@ -79,6 +82,31 @@ export interface EventLogOptions {
   /** Called when a subscriber throws; the error never reaches the appender. Default: `console.error`. */
   onListenerError?: (error: unknown) => void;
 }
+
+/**
+ * The raw appends the session-event helper uses once it has checked an
+ * event's scope. Internal to core: not exported from the package index.
+ */
+export interface SessionAppender {
+  append(event: NewCoreEvent): CoreEvent;
+  /**
+   * Appends `session.message_completed` with the full content, then prunes
+   * that message's `session.message_delta` events (AD-5), atomically.
+   */
+  completeMessage(event: NewEventOf<'session.message_completed'>): SessionMessageCompletedEvent;
+}
+
+const appenders = new WeakMap<EventLog, SessionAppender>();
+
+/** The raw session appends of `log`, for the session-event helper only. */
+export function sessionAppender(log: EventLog): SessionAppender {
+  const appender = appenders.get(log);
+  if (appender === undefined) throw new Error('not an event log created by createEventLog');
+  return appender;
+}
+
+/** Whether `type` is a session event, which only the session-event helper appends. */
+export const isSessionEventType = (type: unknown): boolean => typeof type === 'string' && type.startsWith('session.');
 
 export const DEFAULT_READ_LIMIT = 500;
 /** Backlog page size for {@link EventLog.subscribe}. */
@@ -193,8 +221,36 @@ export function createEventLog(db: Database, options: EventLogOptions = {}): Eve
       .map(toEvent);
   };
 
-  return {
-    append: append as EventLog['append'],
+  const completeMessage = (input: NewEventOf<'session.message_completed'>): SessionMessageCompletedEvent =>
+    transaction(() => {
+      const completed = append(input) as SessionMessageCompletedEvent;
+      orm
+        .delete(events)
+        .where(
+          and(
+            eq(events.streamId, completed.streamId),
+            eq(events.type, 'session.message_delta'),
+            sql`json_extract(${events.payload}, '$.messageId') = ${completed.payload.messageId}`,
+            lt(events.seq, completed.seq),
+          ),
+        )
+        .run();
+      return completed;
+    });
+
+  /** The public append: every event but a session event (E2-R7). */
+  const guardedAppend = (input: NewCoreEvent): CoreEvent => {
+    const type = (input as { type?: unknown } | null)?.type;
+    if (isSessionEventType(type)) {
+      throw new SessionEventScopeError(
+        `${String(type)} must be appended through appendSessionEvent, which stamps the session's workspace`,
+      );
+    }
+    return append(input);
+  };
+
+  const log: EventLog = {
+    append: guardedAppend as EventLog['append'],
     readAfter,
     transaction,
 
@@ -228,24 +284,6 @@ export function createEventLog(db: Database, options: EventLogOptions = {}): Eve
       };
     },
 
-    completeMessage(input) {
-      return transaction(() => {
-        const completed = append(input) as SessionMessageCompletedEvent;
-        orm
-          .delete(events)
-          .where(
-            and(
-              eq(events.streamId, completed.streamId),
-              eq(events.type, 'session.message_delta'),
-              sql`json_extract(${events.payload}, '$.messageId') = ${completed.payload.messageId}`,
-              lt(events.seq, completed.seq),
-            ),
-          )
-          .run();
-        return completed;
-      });
-    },
-
     deleteWorkspaceHistory(workspaceId) {
       return transaction(() => {
         const exists = orm.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, workspaceId)).get();
@@ -273,5 +311,7 @@ export function createEventLog(db: Database, options: EventLogOptions = {}): Eve
       return Math.max(recorded?.seq ?? 0, stored);
     },
   };
+  appenders.set(log, { append, completeMessage });
+  return log;
 }
 

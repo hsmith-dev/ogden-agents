@@ -49,3 +49,23 @@ export class InvalidOperationError extends CoreError {
     super('invalid_operation', message);
   }
 }
+
+/**
+ * A session event was refused: it was appended around the session-event
+ * helper, or it names a workspace or stream other than its session's (E2-R7).
+ * Nothing was written.
+ */
+export class SessionEventScopeError extends CoreError {
+  override readonly name = 'SessionEventScopeError';
+  constructor(message: string) {
+    super('session_event_scope', message);
+  }
+}
+
+/** The session's agent is still answering; the message was not sent. */
+export class SessionBusyError extends CoreError {
+  override readonly name = 'SessionBusyError';
+  constructor(sessionId: string) {
+    super('session_busy', `session ${sessionId} is still answering the last message`);
+  }
+}

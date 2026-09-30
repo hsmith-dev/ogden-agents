@@ -3,13 +3,16 @@ import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { createUvToolchain } from '@ogden-agents/adapters';
+import { createClaudeCodeAgent, createUvToolchain } from '@ogden-agents/adapters';
 import {
+  createChat,
   createDataDir,
+  RESTARTED_REASON,
   createToolchain,
   ensureDataDir,
   openCore,
   PORT_FILE,
+  type AgentPort,
   type Core,
   type ToolchainPort,
 } from '@ogden-agents/core';
@@ -49,6 +52,42 @@ function defaultWebRoot(): string {
   return WEB_ROOT_CANDIDATES.find((dir) => existsSync(dir)) ?? WEB_ROOT_CANDIDATES[1];
 }
 
+/**
+ * The Claude Agent ACP adapter's entry script, for a server started without
+ * `claudeAdapterPath` (`pnpm dev:chat` sets it). Until onboarding installs
+ * the adapter (story 9.3), a server without it finds it only in a dev install.
+ */
+export const CLAUDE_ACP_PATH_ENV = 'OGDEN_AGENTS_CLAUDE_ACP_PATH';
+
+/** What an agent process needs from this server's environment to run as the user (AD-16). */
+const AGENT_ENV_ALLOWED = ['PATH', 'HOME', 'USERPROFILE', 'USER', 'USERNAME', 'LANG', 'TERM', 'TMPDIR', 'TEMP', 'TMP', 'SHELL'];
+/** The same on Windows only, where a process can't start without them. */
+const AGENT_ENV_ALLOWED_WINDOWS = ['SystemRoot', 'ComSpec', 'PATHEXT'];
+/** Agent credentials passed on when the user has set them (AD-16: the keychain replaces this in epic 9). */
+export const AGENT_ENV_KEYS = ['ANTHROPIC_API_KEY'];
+
+/**
+ * The environment agent processes get (AD-16): an allowlist of what a CLI
+ * needs to run as the user (`PATH`, home, user, locale, terminal, temp,
+ * shell), plus the agent keys the user set, and nothing else of this
+ * server's environment. Never logged.
+ */
+export function agentEnvironment(
+  source: Readonly<Record<string, string | undefined>> = process.env,
+  platform: NodeJS.Platform = process.platform,
+): Record<string, string> {
+  const allowed = new Set([...AGENT_ENV_ALLOWED, ...AGENT_ENV_KEYS, ...(platform === 'win32' ? AGENT_ENV_ALLOWED_WINDOWS : [])]);
+  // Windows variable names are case-insensitive (`Path`, `SYSTEMROOT`).
+  const fold = (name: string) => (platform === 'win32' ? name.toUpperCase() : name);
+  const allowedFolded = new Set([...allowed].map(fold));
+  const env: Record<string, string> = {};
+  for (const [name, value] of Object.entries(source)) {
+    if (value === undefined) continue;
+    if (allowedFolded.has(fold(name)) || name === 'LC_ALL' || name.startsWith('LC_')) env[name] = value;
+  }
+  return env;
+}
+
 export interface StartOptions {
   /** Port to try first. `0` asks the OS for any free port. Default {@link DEFAULT_PORT}. */
   port?: number;
@@ -81,6 +120,17 @@ export interface StartOptions {
    * clicks Install.
    */
   toolchain?: ToolchainPort;
+  /** Override the chat agent (tests). Default: the `acp-claude-code` adapter. */
+  agent?: AgentPort;
+  /**
+   * The Claude Agent ACP adapter's entry script (or, in tests, any script
+   * that speaks ACP over stdio, such as the fake agent). Default:
+   * `$OGDEN_AGENTS_CLAUDE_ACP_PATH`, else the adapter in `node_modules` if
+   * this is a dev install.
+   */
+  claudeAdapterPath?: string;
+  /** Variables added to every agent's environment on top of {@link agentEnvironment} (tests: the fake agent's switches). */
+  extraAgentEnv?: Readonly<Record<string, string>>;
   /**
    * Called once the server has stopped by itself (Quit, or a restart the
    * launcher asked for) and everything is closed. A server process exits here.
@@ -254,7 +304,27 @@ async function listenAndAnnounce({
     // The event carries the plain reason; the log also gets the target, URL and (on a mismatch) both hashes.
     onFailure: (error) => log.warn('uv install failed', { code: error.code, reason: error.message, ...error.details }),
   });
-  const app = createApp({ events: core.events, webRoot: options.webRoot ?? defaultWebRoot(), log, gate, control, toolchain, tabs });
+  const agent =
+    options.agent ??
+    createClaudeCodeAgent({
+      adapterPath: options.claudeAdapterPath ?? (process.env[CLAUDE_ACP_PATH_ENV] || undefined),
+      onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields),
+    });
+  // Agents from before this start are gone with their processes (AD-3): their sessions can be resumed, not left working.
+  const settled = core.entities.settleInterruptedSessions(RESTARTED_REASON);
+  if (settled.length > 0) log.info('sessions left working by a stopped server are idle and resumable', { sessions: settled.length });
+  const extraAgentEnv = options.extraAgentEnv ?? {};
+  const chat = createChat({
+    dataDir,
+    entities: core.entities,
+    sessionEvents: core.sessionEvents,
+    agent,
+    agentEnv: () => ({ ...agentEnvironment(), ...extraAgentEnv }),
+    // The event carries the plain reason; the log also gets the details (never the environment).
+    onAgentError: (sessionId, error) => log.warn('agent failed', { sessionId, code: error.code, reason: error.message, ...error.details }),
+    onInternalError: (sessionId, error) => log.error('applying an agent event failed', { sessionId, reason: String(error) }),
+  });
+  const app = createApp({ events: core.events, webRoot: options.webRoot ?? defaultWebRoot(), log, gate, control, toolchain, chat, tabs });
 
   let bound: { server: ReturnType<typeof createAdaptorServer>; wss: WebSocketServer; port: number } | undefined;
   let lastTried = requested;
@@ -316,6 +386,8 @@ async function listenAndAnnounce({
   let closing: Promise<void> | undefined;
   const shutdown = (reason: StopReason): Promise<void> => {
     closing ??= closeServer(server, wss)
+      // The server owns agent processes (AD-3): none outlives it.
+      .finally(() => chat.close().catch((error: unknown) => log.warn('stopping agents failed', { reason: String(error) })))
       .finally(() => {
         try {
           removePortFile(portFile, identity);

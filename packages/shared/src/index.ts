@@ -1,5 +1,6 @@
 export * from './api.js';
 export * from './appearance.js';
+export * from './chat.js';
 export * from './entities.js';
 export * from './errors.js';
 export * from './events.js';

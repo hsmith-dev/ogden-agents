@@ -9,8 +9,12 @@ export const API_ERROR_CODES = [
   'unauthorized',
   /** A wrong Host, or a missing or foreign Origin (403, AD-15). */
   'forbidden',
-  /** No such route (404), such as an old path outside `/api/v1`. */
+  /** A request body that fails its shared schema, or a workspace path that is not a folder (400). */
+  'invalid_request',
+  /** No such route (404), such as an old path outside `/api/v1`, or no such workspace or session. */
   'not_found',
+  /** The session's agent is still answering the last message (409). */
+  'session_busy',
   /** Quit was refused while agents are working; `details.busySessions` says how many (409). */
   'sessions_busy',
   /** uv's status or install could not be read or started (500). */

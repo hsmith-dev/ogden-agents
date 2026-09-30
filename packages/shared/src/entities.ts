@@ -43,6 +43,11 @@ export type AdapterRefs = z.infer<typeof AdapterRefs>;
 export const Workspace = z.object({
   id: WorkspaceId,
   path: z.string().min(1),
+  /**
+   * The real path as the filesystem spells it, not case-folded: where agents
+   * run. Absent only in `workspace.created` events written before story 2.2.
+   */
+  realPath: z.string().min(1).optional(),
   createdAt: IsoUtcTimestamp,
 });
 export type Workspace = z.infer<typeof Workspace>;

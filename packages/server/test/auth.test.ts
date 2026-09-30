@@ -1,11 +1,7 @@
 import { WS_PROTOCOL } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { bearerToken, chooseWebSocketProtocol, createTabTokens, TAB_TOKEN_IDLE_TTL_MS, webSocketToken } from '../src/auth.js';
-
-function manualClock() {
-  let t = 1_000_000;
-  return { now: () => t, advance: (ms: number) => (t += ms) };
-}
+import { manualClock } from './helpers.js';
 
 describe('tab tokens', () => {
   it('are random, 256-bit, base64url, and valid only as minted', () => {

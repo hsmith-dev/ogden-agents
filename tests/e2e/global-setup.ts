@@ -1,5 +1,5 @@
 import type { FullConfig } from '@playwright/test';
-import { makeDataDir, removeDataDir, startServer } from './server.js';
+import { makeDataDir, removeDataDir, startServer } from '../support.js';
 
 /**
  * Starts one server for the run. Tests read `E2E_URL` and `E2E_DATA_DIR`, and

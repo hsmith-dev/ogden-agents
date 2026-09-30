@@ -3,20 +3,11 @@
  * and `POST /api/v1/toolchain/uv/install` starts the private install, behind the
  * gate (AD-15), with progress and the outcome in the event log (AD-5).
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { ToolchainError, type DetectedToolStatus, type ToolchainPort, type ToolProgress } from '@ogden-agents/core';
 import { API_ROUTES, ApiErrorBody, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
-import { afterEach, describe, expect, it } from 'vitest';
-import { createLogger } from '../src/log.js';
-import { start, type RunningServer } from '../src/start.js';
-import { signIn, tempDataDir } from './helpers.js';
-
-const running: RunningServer[] = [];
-
-afterEach(async () => {
-  await Promise.all(running.splice(0).map((s) => s.close()));
-});
+import { describe, expect, it } from 'vitest';
+import type { RunningServer } from '../src/start.js';
+import { signIn, startTestServer, waitFor } from './helpers.js';
 
 /** A stub port: missing until installed; `outcome` decides how the install ends. */
 function stubPort(outcome: 'ok' | 'hash_mismatch' = 'ok') {
@@ -42,23 +33,8 @@ function stubPort(outcome: 'ok' | 'hash_mismatch' = 'ok') {
   return { port, installs: () => installs };
 }
 
-async function startServer(toolchain: ToolchainPort, lines: string[] = []) {
-  const dataDir = tempDataDir();
-  const webRoot = join(dataDir, 'web');
-  mkdirSync(webRoot, { recursive: true });
-  writeFileSync(join(webRoot, 'index.html'), '<!doctype html><div id="root"></div>');
-  const server = await start({ port: 0, open: false, launch: true, dataDir, webRoot, toolchain, log: createLogger((line) => lines.push(line)) });
-  running.push(server);
-  return server;
-}
-
-async function waitFor(predicate: () => boolean | Promise<boolean>, what: string): Promise<void> {
-  const deadline = Date.now() + 3000;
-  while (!(await predicate())) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
+/** A test server whose uv comes from `toolchain`. */
+const startServer = (toolchain: ToolchainPort, lines: string[] = []) => startTestServer({ toolchain, lines });
 
 const toolchainTypes = (server: RunningServer) =>
   server.core.events

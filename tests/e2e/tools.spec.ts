@@ -7,7 +7,7 @@
  */
 import { expect, test, type Browser } from '@playwright/test';
 import type { DetectedToolStatus, ToolchainPort, ToolProgress } from '@ogden-agents/server';
-import { makeDataDir, removeDataDir, serverModule, startServer, type RunningServer } from './server.js';
+import { API_ROUTES, makeDataDir, removeDataDir, serverModule, startServer, type RunningServer } from '../support.js';
 import { openConnected } from './tab.js';
 
 /** A stub port whose install waits for the test to let it finish. */
@@ -142,7 +142,7 @@ test('an install request without a matching Origin is refused by the gate', asyn
     // The tab's own token, but another site's Origin: refused (403).
     const token = await page.evaluate(() => sessionStorage.getItem('ogden-agents.tab-token'));
     expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    const install = `${server.url}/api/v1/toolchain/uv/install`;
+    const install = `${server.url}${API_ROUTES.uvInstall}`;
     const foreign = await page.request.post(install, { headers: { authorization: `Bearer ${token}`, origin: 'http://evil.example' } });
     expect(foreign.status()).toBe(403);
     // What a cross-site form or another local server could send: no token at all (401).

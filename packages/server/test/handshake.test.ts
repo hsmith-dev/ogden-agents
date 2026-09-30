@@ -3,33 +3,35 @@
  * token and the gate, `GET /launcher/hello`, restart-when-idle with and
  * without busy sessions, Quit, and the version comparison.
  */
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { request } from 'node:http';
 import { join } from 'node:path';
 import { PORT_FILE } from '@ogden-agents/core';
 import { API_ROUTES, ServerMessage } from '@ogden-agents/shared';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { LOCK_FILE, ServerAlreadyRunningError } from '../src/instance-lock.js';
 import { compareVersions } from '../src/launcher.js';
 import { LAUNCHER_TOKEN_FILE, LAUNCHER_TOKEN_HEADER, readLauncherToken } from '../src/launcher-token.js';
 import { createLogger } from '../src/log.js';
-import { start, type RunningServer, type StartOptions } from '../src/start.js';
-import { codeOfLink, exchange, tabOf, tempDataDir, type SignedIn } from './helpers.js';
-
-const running: RunningServer[] = [];
-const sockets: WebSocket[] = [];
-
-afterEach(async () => {
-  for (const ws of sockets.splice(0)) ws.terminate();
-  await Promise.all(running.splice(0).map((s) => s.close()));
-});
+import { start, type RunningServer } from '../src/start.js';
+import {
+  codeOfLink,
+  connectTab,
+  exchange,
+  send,
+  startTestServer,
+  tempDataDir,
+  tinyWebRoot,
+  trackServer,
+  trackSocket,
+  waitFor,
+  type SignedIn,
+} from './helpers.js';
 
 /** A connected tab's `/ws` client that subscribes from the start and records every message type. */
 async function subscriber(server: RunningServer, tab: SignedIn) {
-  const ws = new WebSocket(`${server.url.replace('http', 'ws')}/ws`, tab.protocols, { headers: { origin: server.url } });
-  sockets.push(ws);
+  const ws = trackSocket(new WebSocket(`${server.url.replace('http', 'ws')}/ws`, tab.protocols, { headers: { origin: server.url } }));
   const types: string[] = [];
   const messages: ServerMessage[] = [];
   ws.on('message', (data) => {
@@ -43,86 +45,6 @@ async function subscriber(server: RunningServer, tab: SignedIn) {
   });
   ws.send(JSON.stringify({ type: 'subscribe', afterSeq: 0 }));
   return { ws, types, messages };
-}
-
-async function waitFor(predicate: () => boolean, what: string): Promise<void> {
-  const deadline = Date.now() + 3000;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
-
-function webRoot(): string {
-  const dir = join(tempDataDir(), 'web');
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'index.html'), '<!doctype html><div id="root"></div>');
-  return dir;
-}
-
-async function startServer(options: StartOptions & { lines?: string[] } = {}) {
-  const { lines, ...rest } = options;
-  const server = await start({
-    port: 0,
-    open: false,
-    log: createLogger((l) => lines?.push(l)),
-    dataDir: tempDataDir(),
-    webRoot: webRoot(),
-    ...rest,
-    launch: true,
-  });
-  running.push(server);
-  return server;
-}
-
-interface Reply {
-  status: number;
-  body: string;
-  json: () => unknown;
-}
-
-function send(
-  server: RunningServer,
-  path: string,
-  { method = 'GET', headers = {} }: { method?: string; headers?: Record<string, string> } = {},
-): Promise<Reply> {
-  return new Promise((resolve, reject) => {
-    const req = request(
-      { host: '127.0.0.1', port: server.port, path, method, agent: false, headers: { host: `127.0.0.1:${server.port}`, ...headers } },
-      (res) => {
-        let body = '';
-        res.setEncoding('utf8');
-        res.on('data', (chunk: string) => (body += chunk));
-        res.on('end', () => resolve({ status: res.statusCode!, body, json: () => JSON.parse(body) }));
-      },
-    );
-    req.on('error', reject);
-    req.end();
-  });
-}
-
-/** A POST with a raw body. */
-function sendBody(server: RunningServer, path: string, headers: Record<string, string>, body: string): Promise<Reply> {
-  return new Promise((resolve, reject) => {
-    const req = request(
-      {
-        host: '127.0.0.1',
-        port: server.port,
-        path,
-        method: 'POST',
-        agent: false,
-        headers: { host: `127.0.0.1:${server.port}`, 'content-length': String(Buffer.byteLength(body)), ...headers },
-      },
-      (res) => {
-        let text = '';
-        res.setEncoding('utf8');
-        res.on('data', (chunk: string) => (text += chunk));
-        res.on('end', () => resolve({ status: res.statusCode!, body: text, json: () => JSON.parse(text) }));
-      },
-    );
-    req.on('error', reject);
-    req.end(body);
-  });
 }
 
 const tokenOf = (server: RunningServer) => readLauncherToken(server.dataDir)!;
@@ -139,7 +61,7 @@ function sessionIn(server: RunningServer, state: 'working' | 'waiting' | 'idle' 
 describe('launcher token', () => {
   it('is 256 random bits in launcher.token, mode 0600, fresh per start, and removed on close', async () => {
     const dataDir = tempDataDir();
-    const first = await startServer({ dataDir });
+    const first = await startTestServer({ dataDir });
     const file = join(dataDir, LAUNCHER_TOKEN_FILE);
     const token = readFileSync(file, 'utf8');
     expect(Buffer.from(token, 'base64url')).toHaveLength(32);
@@ -148,13 +70,13 @@ describe('launcher token', () => {
     await first.close();
     expect(existsSync(file)).toBe(false);
 
-    await startServer({ dataDir });
+    await startTestServer({ dataDir });
     expect(readFileSync(file, 'utf8')).not.toBe(token);
   });
 
   it('close leaves a token it did not write alone', async () => {
     const dataDir = tempDataDir();
-    const first = await startServer({ dataDir });
+    const first = await startTestServer({ dataDir });
     writeFileSync(join(dataDir, LAUNCHER_TOKEN_FILE), 'someone-elses-token');
     await first.close();
     expect(readLauncherToken(dataDir)).toBe('someone-elses-token');
@@ -164,7 +86,7 @@ describe('launcher token', () => {
 describe('the gate on the handshake', () => {
   it('refuses the handshake without a token, or with a wrong one (401), and never logs the value', async () => {
     const lines: string[] = [];
-    const server = await startServer({ lines });
+    const server = await startTestServer({ lines });
     expect((await send(server, '/launcher/hello')).status).toBe(401);
     const wrong = 'x'.repeat(43);
     expect((await send(server, '/launcher/hello', { headers: { [LAUNCHER_TOKEN_HEADER]: wrong } })).status).toBe(401);
@@ -176,13 +98,13 @@ describe('the gate on the handshake', () => {
   });
 
   it('a tab token does not open the handshake', async () => {
-    const server = await startServer();
-    const tab = tabOf(await exchange(server.launchUrl), server.url);
+    const server = await startTestServer();
+    const tab = await connectTab(server);
     expect((await send(server, '/launcher/hello', { headers: tab.headers })).status).toBe(401);
   });
 
   it('the token opens nothing but the handshake', async () => {
-    const server = await startServer();
+    const server = await startTestServer();
     // The static app needs no token at all; the API and /ws need a tab's.
     expect((await send(server, API_ROUTES.tabCheck, withToken(server))).status).toBe(401);
     expect((await send(server, '/ws', withToken(server))).status).toBe(401);
@@ -190,7 +112,7 @@ describe('the gate on the handshake', () => {
   });
 
   it('the handshake is still Host-checked', async () => {
-    const server = await startServer();
+    const server = await startTestServer();
     const reply = await send(server, '/launcher/hello', withToken(server, { host: `evil.example:${server.port}` }));
     expect(reply.status).toBe(403);
   });
@@ -198,14 +120,14 @@ describe('the gate on the handshake', () => {
 
 describe('GET /launcher/hello', () => {
   it('reports version, pid, port and busy sessions', async () => {
-    const server = await startServer();
+    const server = await startTestServer();
     const reply = await send(server, '/launcher/hello', withToken(server));
     expect(reply.status).toBe(200);
     expect(reply.json()).toEqual({ version: server.version, pid: process.pid, port: server.port, busySessions: 0 });
   });
 
   it('counts working and waiting sessions as busy, and no others', async () => {
-    const server = await startServer();
+    const server = await startTestServer();
     sessionIn(server, 'working');
     sessionIn(server, 'waiting');
     sessionIn(server, 'idle');
@@ -217,7 +139,7 @@ describe('GET /launcher/hello', () => {
 
   it('with launch=1, issues a fresh single-use launch link every time, and logs no code', async () => {
     const lines: string[] = [];
-    const server = await startServer({ lines });
+    const server = await startTestServer({ lines });
     const first = (await send(server, '/launcher/hello?launch=1', withToken(server))).json() as { launchUrl: string };
     const second = (await send(server, '/launcher/hello?launch=1', withToken(server))).json() as { launchUrl: string };
     expect(first.launchUrl).toMatch(new RegExp(`^${server.url.replaceAll('.', '\\.')}/#c=[A-Za-z0-9_-]{43}$`));
@@ -235,8 +157,8 @@ describe('GET /launcher/hello', () => {
 describe('launch codes on request', () => {
   it('a background start (no launch, no open) issues no code; the handshake with launch=1 issues one that works', async () => {
     const lines: string[] = [];
-    const server = await start({ port: 0, open: false, log: createLogger((l) => lines.push(l)), dataDir: tempDataDir(), webRoot: webRoot() });
-    running.push(server);
+    // Not startTestServer, which asks for a launch link.
+    const server = trackServer(await start({ port: 0, open: false, log: createLogger((l) => lines.push(l)), dataDir: tempDataDir(), webRoot: tinyWebRoot() }));
     expect(server.launchUrl).toBeUndefined();
     const issued = () => lines.filter((l) => (JSON.parse(l) as { msg: string }).msg.startsWith('launch code issued')).length;
     expect(issued()).toBe(0);
@@ -250,7 +172,7 @@ describe('launch codes on request', () => {
   });
 
   it('with launch (foreground mode), the start issues one link', async () => {
-    const server = await startServer();
+    const server = await startTestServer();
     expect(server.launchUrl).toMatch(new RegExp(`^${server.url.replaceAll('.', '\\.')}/#c=[A-Za-z0-9_-]{43}$`));
     await exchange(server.launchUrl);
   });
@@ -258,7 +180,7 @@ describe('launch codes on request', () => {
 
 describe('POST /launcher/restart-when-idle', () => {
   it('with a busy session: refuses (409) and keeps serving', async () => {
-    const server = await startServer();
+    const server = await startTestServer();
     sessionIn(server, 'working');
     const reply = await send(server, '/launcher/restart-when-idle', { method: 'POST', ...withToken(server) });
     expect(reply.status).toBe(409);
@@ -270,7 +192,7 @@ describe('POST /launcher/restart-when-idle', () => {
 
   it('when idle: agrees (202), then stops cleanly and removes server.json and launcher.token', async () => {
     const stops: string[] = [];
-    const server = await startServer({ onStop: (reason) => stops.push(reason) });
+    const server = await startTestServer({ onStop: (reason) => stops.push(reason) });
     sessionIn(server, 'done');
     const reply = await send(server, '/launcher/restart-when-idle', { method: 'POST', ...withToken(server) });
     expect(reply.status).toBe(202);
@@ -288,7 +210,7 @@ describe('POST /launcher/restart-when-idle', () => {
 describe('restart re-checks busy sessions when it stops', () => {
   it('aborts if a session became busy after the launcher asked', async () => {
     const stops: string[] = [];
-    const server = await startServer({ onStop: (reason) => stops.push(reason) });
+    const server = await startTestServer({ onStop: (reason) => stops.push(reason) });
     const session = sessionIn(server, 'idle');
     const reply = await send(server, '/launcher/restart-when-idle', { method: 'POST', ...withToken(server) });
     expect(reply.status).toBe(202);
@@ -303,28 +225,28 @@ describe('restart re-checks busy sessions when it stops', () => {
 
 describe('POST /api/v1/server/quit', () => {
   it('with busy sessions: refuses (409, with the count) unless the request says force: true', async () => {
-    const server = await startServer();
+    const server = await startTestServer();
     sessionIn(server, 'waiting');
-    const tab = tabOf(await exchange(server.launchUrl), server.url);
+    const tab = await connectTab(server);
     const headers = { ...tab.headers, 'content-type': 'application/json' };
-    const refused = await sendBody(server, API_ROUTES.serverQuit, headers, '{}');
+    const refused = await send(server, API_ROUTES.serverQuit, { method: 'POST', headers: headers, body: '{}' });
     expect(refused.status).toBe(409);
     expect(refused.json()).toMatchObject({ error: { code: 'sessions_busy', details: { busySessions: 1 } } });
     await new Promise((r) => setTimeout(r, 150));
     expect((await send(server, '/launcher/hello', withToken(server))).status).toBe(200);
 
-    const forced = await sendBody(server, API_ROUTES.serverQuit, headers, JSON.stringify({ force: true }));
+    const forced = await send(server, API_ROUTES.serverQuit, { method: 'POST', headers: headers, body: JSON.stringify({ force: true }) });
     expect(forced.status).toBe(202);
     expect(await server.stopped).toBe('quit');
   });
 
   it('tells every connected tab the server is stopping, before it goes', async () => {
-    const server = await startServer();
-    const tab = tabOf(await exchange(server.launchUrl), server.url);
-    const other = tabOf(await exchange(server.issueLaunchUrl()), server.url);
+    const server = await startTestServer();
+    const tab = await connectTab(server);
+    const other = await connectTab(server, server.issueLaunchUrl());
     const tabs = [await subscriber(server, tab), await subscriber(server, other)];
     await waitFor(() => tabs.every((t) => t.types.includes('caught_up')), 'both tabs to catch up');
-    const reply = await sendBody(server, API_ROUTES.serverQuit, tab.headers, '');
+    const reply = await send(server, API_ROUTES.serverQuit, { method: 'POST', headers: tab.headers, body: '' });
     expect(reply.status).toBe(202);
     await server.stopped;
     for (const tab of tabs) {
@@ -334,8 +256,8 @@ describe('POST /api/v1/server/quit', () => {
 
   it("with the tab's token and a matching Origin: stops cleanly and removes both files", async () => {
     const stops: string[] = [];
-    const server = await startServer({ onStop: (reason) => stops.push(reason) });
-    const tab = tabOf(await exchange(server.launchUrl), server.url);
+    const server = await startTestServer({ onStop: (reason) => stops.push(reason) });
+    const tab = await connectTab(server);
     const reply = await send(server, API_ROUTES.serverQuit, { method: 'POST', headers: tab.headers });
     expect(reply.status).toBe(202);
     expect(await server.stopped).toBe('quit');
@@ -347,8 +269,8 @@ describe('POST /api/v1/server/quit', () => {
   });
 
   it('is refused without a matching Origin (403) or without a token (401), and the server keeps running', async () => {
-    const server = await startServer();
-    const { authorization } = tabOf(await exchange(server.launchUrl), server.url).headers as { authorization: string };
+    const server = await startTestServer();
+    const { authorization } = (await connectTab(server)).headers as { authorization: string };
     expect((await send(server, API_ROUTES.serverQuit, { method: 'POST', headers: { authorization } })).status).toBe(403);
     expect((await send(server, API_ROUTES.serverQuit, { method: 'POST', headers: { authorization, origin: 'http://evil.example' } })).status).toBe(403);
     expect((await send(server, API_ROUTES.serverQuit, { method: 'POST', headers: { origin: server.url } })).status).toBe(401);
@@ -359,8 +281,8 @@ describe('POST /api/v1/server/quit', () => {
 
 describe('caught_up', () => {
   it('follows the subscribe backlog, before any live event', async () => {
-    const server = await startServer();
-    const tab = await subscriber(server, tabOf(await exchange(server.launchUrl), server.url));
+    const server = await startTestServer();
+    const tab = await subscriber(server, await connectTab(server));
     await waitFor(() => tab.types.includes('caught_up'), 'caught_up');
     server.core.events.append({ type: 'server.started', workspaceId: null, streamId: 'server', payload: { version: 'live' } });
     await waitFor(() => tab.types.length === 3, 'the live event');
@@ -371,9 +293,9 @@ describe('caught_up', () => {
 describe('one server per data folder', () => {
   it('a second server on the same folder refuses to start; after close one can start again', async () => {
     const dataDir = tempDataDir();
-    const first = await startServer({ dataDir });
+    const first = await startTestServer({ dataDir });
     expect(existsSync(join(dataDir, LOCK_FILE))).toBe(true);
-    const second = startServer({ dataDir });
+    const second = startTestServer({ dataDir });
     await expect(second).rejects.toBeInstanceOf(ServerAlreadyRunningError);
     await expect(second).rejects.toMatchObject({ pid: process.pid });
     // The refused start touched nothing of the running one.
@@ -381,12 +303,12 @@ describe('one server per data folder', () => {
 
     await first.close();
     expect(existsSync(join(dataDir, LOCK_FILE))).toBe(false);
-    await startServer({ dataDir });
+    await startTestServer({ dataDir });
   });
 
   it('simultaneous starts on one folder: exactly one wins', async () => {
     const dataDir = tempDataDir();
-    const results = await Promise.allSettled([startServer({ dataDir }), startServer({ dataDir }), startServer({ dataDir })]);
+    const results = await Promise.allSettled([startTestServer({ dataDir }), startTestServer({ dataDir }), startTestServer({ dataDir })]);
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     for (const r of results) if (r.status === 'rejected') expect(r.reason).toBeInstanceOf(ServerAlreadyRunningError);
   });
@@ -395,7 +317,7 @@ describe('one server per data folder', () => {
     const dataDir = tempDataDir();
     const dead = spawnSync(process.execPath, ['-e', 'console.log(process.pid)'], { encoding: 'utf8' });
     writeFileSync(join(dataDir, LOCK_FILE), JSON.stringify({ pid: Number(dead.stdout.trim()), nonce: 'old' }));
-    const server = await startServer({ dataDir });
+    const server = await startTestServer({ dataDir });
     expect(JSON.parse(readFileSync(join(dataDir, LOCK_FILE), 'utf8')).pid).toBe(process.pid);
     await server.close();
   });

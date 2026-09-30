@@ -9,7 +9,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { makeDataDir, removeDataDir, startServer } from './server.js';
+import { API_ROUTES, makeDataDir, removeDataDir, startServer } from '../support.js';
 import { openConnected } from './tab.js';
 
 test('Quit in the sidebar footer confirms once, then every open tab shows the stopped state and the files are gone', async ({ browser }) => {
@@ -77,15 +77,15 @@ test('Quit names running agents in its consequence, and a failed quit is shown i
     await expect(confirm).toContainText('1 agent is still working and will stop');
 
     // The server refuses (say, it is having trouble): the dialog says so and stays open.
-    await page.route('**/api/v1/server/quit', (route) =>
-      route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { code: 'internal', message: 'Something went wrong.' } }) }),
+    await page.route(`**${API_ROUTES.serverQuit}`, (route) =>
+      route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { code: 'internal_error', message: 'Something went wrong.' } }) }),
     );
     await confirm.getByRole('button', { name: 'Quit', exact: true }).click();
     await expect(confirm.getByRole('alert')).toHaveText('Something went wrong.');
     await expect(sidebar.getByTestId('server-status')).toHaveAttribute('data-status', 'connected');
 
     // Trying again for real sends the confirmation's force, so busy agents don't block it.
-    await page.unroute('**/api/v1/server/quit');
+    await page.unroute(`**${API_ROUTES.serverQuit}`);
     await confirm.getByRole('button', { name: 'Quit', exact: true }).click();
     await expect(page.getByTestId('server-stopped')).toBeVisible();
     expect(await server.stopped).toBe('quit');

@@ -7,7 +7,7 @@
  * (`openConnected`), since a tab's token lives only in that tab.
  */
 import { expect, test, type Page } from '@playwright/test';
-import { makeDataDir, removeDataDir, startServer } from './server.js';
+import { makeDataDir, removeDataDir, startServer } from '../support.js';
 import { openConnected, sharedUrl as url } from './tab.js';
 
 /** DESIGN.md background tokens as the browser reports them. */

@@ -4,88 +4,34 @@
  * with the clock injected for expiry. The page's side (reload, launch state,
  * New tab, CSP in force) is in tests/e2e/tab-token.spec.ts.
  */
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { request, type IncomingHttpHeaders } from 'node:http';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LEGACY_AUTH_KEY_FILE, openCore, PORT_FILE } from '@ogden-agents/core';
 import { API_BASE, API_ROUTES, ApiErrorBody, WS_PROTOCOL } from '@ogden-agents/shared';
-
-const { launchCodes: LAUNCH_CODES_PATH, tabCheck: TAB_CHECK_PATH, tabExchange: TAB_EXCHANGE_PATH } = API_ROUTES;
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { createApp } from '../src/app.js';
 import { createLaunchCodes, createTabTokens, LAUNCH_CODE_TTL_MS, TAB_TOKEN_IDLE_TTL_MS } from '../src/auth.js';
 import { createGate } from '../src/gate.js';
 import { isApiPath, isServerPath } from '../src/paths.js';
 import { createLogger } from '../src/log.js';
-import { start, type RunningServer, type StartOptions } from '../src/start.js';
-import { codeOfLink, exchange, tabOf, tempDataDir, type SignedIn } from './helpers.js';
+import type { RunningServer } from '../src/start.js';
+import {
+  codeOfLink,
+  connectTab,
+  exchange,
+  manualClock,
+  send,
+  startTestServer,
+  tabOf,
+  tempDataDir,
+  tinyWebRoot,
+  trackSocket,
+  type Reply,
+  type SignedIn,
+} from './helpers.js';
 
-const running: RunningServer[] = [];
-const sockets: WebSocket[] = [];
-
-afterEach(async () => {
-  for (const ws of sockets.splice(0)) ws.terminate();
-  await Promise.all(running.splice(0).map((s) => s.close()));
-});
-
-/** A tiny built UI, so these tests don't depend on `packages/web` being built. */
-function webRoot(): string {
-  const dir = join(tempDataDir(), 'web');
-  mkdirSync(join(dir, 'assets'), { recursive: true });
-  writeFileSync(join(dir, 'index.html'), '<!doctype html><div id="root"></div>');
-  writeFileSync(join(dir, 'assets', 'app.js'), 'console.log("app")');
-  return dir;
-}
-
-/** A clock the test moves by hand. */
-function manualClock() {
-  let t = Date.now();
-  return { now: () => t, advance: (ms: number) => (t += ms) };
-}
-
-async function startGated(options: StartOptions & { lines?: string[] } = {}) {
-  const { lines, ...rest } = options;
-  const server = await start({
-    port: 0,
-    open: false,
-    log: createLogger((l) => lines?.push(l)),
-    dataDir: tempDataDir(),
-    webRoot: webRoot(),
-    ...rest,
-    launch: true,
-  });
-  running.push(server);
-  return server;
-}
-
-interface Reply {
-  status: number;
-  headers: IncomingHttpHeaders;
-  body: string;
-}
-
-/** A raw HTTP request, so `Host` and `Origin` can be anything a hostile client sends. */
-function send(
-  server: RunningServer,
-  path: string,
-  { method = 'GET', headers = {}, body }: { method?: string; headers?: Record<string, string>; body?: string } = {},
-): Promise<Reply> {
-  return new Promise((resolve, reject) => {
-    const req = request(
-      // agent: false, so no kept-alive socket is reused across a restart on the same port.
-      { host: '127.0.0.1', port: server.port, path, method, agent: false, headers: { host: `127.0.0.1:${server.port}`, ...headers } },
-      (res) => {
-        let body = '';
-        res.setEncoding('utf8');
-        res.on('data', (chunk: string) => (body += chunk));
-        res.on('end', () => resolve({ status: res.statusCode!, headers: res.headers, body }));
-      },
-    );
-    req.on('error', reject);
-    req.end(body);
-  });
-}
+const { launchCodes: LAUNCH_CODES_PATH, tabCheck: TAB_CHECK_PATH, tabExchange: TAB_EXCHANGE_PATH } = API_ROUTES;
 
 /**
  * Opens `/ws` offering `protocols`, and resolves with 101 on success (with the
@@ -99,7 +45,7 @@ function upgradeWith(
 ): Promise<{ status: number; protocol?: string; ws: WebSocket }> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://127.0.0.1:${server.port}${path}`, protocols, { headers });
-    sockets.push(ws);
+    trackSocket(ws);
     ws.once('open', () => resolve({ status: 101, protocol: ws.protocol, ws }));
     ws.once('unexpected-response', (_req, res) => {
       resolve({ status: res.statusCode!, ws });
@@ -118,7 +64,7 @@ async function upgrade(server: RunningServer, tab: SignedIn | undefined, headers
 function upgradeRaw(server: RunningServer, headers: Record<string, string>): Promise<number> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://127.0.0.1:${server.port}/ws`, { headers });
-    sockets.push(ws);
+    trackSocket(ws);
     ws.once('open', () => resolve(101));
     ws.once('unexpected-response', (_req, res) => {
       resolve(res.statusCode!);
@@ -132,7 +78,7 @@ function upgradeRaw(server: RunningServer, headers: Record<string, string>): Pro
 function firstEvent(server: RunningServer, tab: SignedIn): Promise<string> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://127.0.0.1:${server.port}/ws`, tab.protocols, { headers: { origin: tab.origin } });
-    sockets.push(ws);
+    trackSocket(ws);
     ws.once('open', () => ws.send(JSON.stringify({ type: 'subscribe', afterSeq: 0 })));
     ws.once('message', (data) => resolve((JSON.parse(String(data)) as { type: string }).type));
     ws.once('error', reject);
@@ -150,16 +96,6 @@ function exchangeRaw(server: RunningServer, body: unknown, headers: Record<strin
   });
 }
 
-/** Exchanges a launch code over a raw request and returns the connected tab. */
-async function signInRaw(server: RunningServer & { launchUrl: string }, code = codeOf(server)): Promise<SignedIn> {
-  const reply = await exchangeRaw(server, { code });
-  expect(reply.status).toBe(200);
-  expect(reply.headers['set-cookie']).toBeUndefined();
-  const { token } = JSON.parse(reply.body) as { token: string };
-  expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
-  return tabOf(token, server.url);
-}
-
 /** A tab's token as a Bearer header, without an Origin. */
 const bearer = (tab: SignedIn) => ({ authorization: `Bearer ${tab.token}` });
 
@@ -170,7 +106,7 @@ const oldCookie = (server: RunningServer) =>
 describe('security gate', () => {
   it('launch: the link is /#c=<code>; the code is exchanged over POST for a token in the body, never in a URL, with no cookie; the token opens the API and /ws', async () => {
     const lines: string[] = [];
-    const server = await startGated({ lines });
+    const server = await startTestServer({ lines });
     expect(server.launchUrl).toBe(`${server.url}/#c=${codeOf(server)}`);
     const reply = await exchangeRaw(server, { code: codeOf(server) });
     expect(reply.status).toBe(200);
@@ -192,7 +128,7 @@ describe('security gate', () => {
   });
 
   it('bookmark: the app and its assets load without a token (they hold no user data); API calls and /ws get 401', async () => {
-    const server = await startGated();
+    const server = await startTestServer();
     const html = { accept: 'text/html,application/xhtml+xml' };
     for (const path of ['/', '/settings/appearance', '/no-such-path']) {
       const page = await send(server, path, { headers: html });
@@ -216,20 +152,20 @@ describe('security gate', () => {
   });
 
   it('cookie only: a valid-looking old session cookie opens nothing; the same requests with the token pass', async () => {
-    const server = await startGated();
+    const server = await startTestServer();
     const cookie = oldCookie(server);
     expect((await send(server, TAB_CHECK_PATH, { headers: { cookie } })).status).toBe(401);
     expect((await send(server, API_ROUTES.serverQuit, { method: 'POST', headers: { cookie, origin: server.url } })).status).toBe(401);
     expect(await upgradeRaw(server, { cookie, origin: server.url })).toBe(401);
 
-    const tab = await signInRaw(server);
+    const tab = await connectTab(server);
     expect((await send(server, TAB_CHECK_PATH, { headers: { cookie, ...bearer(tab) } })).status).toBe(204);
     expect(await upgrade(server, tab, { cookie, origin: server.url })).toBe(101);
   });
 
   it('token: the WebSocket needs ogden.v1 and exactly one ogden.auth.<token>, and the server echoes only ogden.v1', async () => {
-    const server = await startGated();
-    const tab = await signInRaw(server);
+    const server = await startTestServer();
+    const tab = await connectTab(server);
     const origin = { origin: server.url };
 
     const ok = await upgradeWith(server, tab.protocols, origin);
@@ -239,7 +175,7 @@ describe('security gate', () => {
     const reversed = await upgradeWith(server, [tab.protocols[1], tab.protocols[0]], origin);
     expect(reversed.protocol).toBe(WS_PROTOCOL);
 
-    const other = await signInRaw(server, codeOfLink(server.issueLaunchUrl()));
+    const other = await connectTab(server, server.issueLaunchUrl());
     const refused: Array<[string, string[], Record<string, string>]> = [
       ['no offer', [], origin],
       ['token without ogden.v1', [tab.protocols[1]], origin],
@@ -257,8 +193,8 @@ describe('security gate', () => {
   });
 
   it('wrong token: a tampered, foreign or malformed token gets 401 on the API and on /ws', async () => {
-    const server = await startGated();
-    const tab = await signInRaw(server);
+    const server = await startTestServer();
+    const tab = await connectTab(server);
     const flip = (s: string) => (s[0] === 'A' ? 'B' : 'A') + s.slice(1);
     const forged = {
       flipped: flip(tab.token),
@@ -279,10 +215,10 @@ describe('security gate', () => {
 
   it('expiry: a token unused for 12 hours is forgotten; each use restarts the clock; an open socket keeps it alive', async () => {
     const clock = manualClock();
-    const server = await startGated({ now: clock.now });
-    const idle = await signInRaw(server);
-    const used = await signInRaw(server, codeOfLink(server.issueLaunchUrl()));
-    const connected = await signInRaw(server, codeOfLink(server.issueLaunchUrl()));
+    const server = await startTestServer({ now: clock.now });
+    const idle = await connectTab(server);
+    const used = await connectTab(server, server.issueLaunchUrl());
+    const connected = await connectTab(server, server.issueLaunchUrl());
     const socket = await upgradeWith(server, connected.protocols, { origin: server.url });
     expect(socket.status).toBe(101);
 
@@ -308,8 +244,8 @@ describe('security gate', () => {
 
   it('new tab: POST /api/v1/launch-codes returns a fresh launch link on the same host, which opens a second tab with its own token', async () => {
     const lines: string[] = [];
-    const server = await startGated({ lines });
-    const tab = await signInRaw(server);
+    const server = await startTestServer({ lines });
+    const tab = await connectTab(server);
 
     const reply = await send(server, LAUNCH_CODES_PATH, { method: 'POST', headers: tab.headers });
     expect(reply.status).toBe(201);
@@ -340,8 +276,8 @@ describe('security gate', () => {
 
   it('code reuse: a second exchange is refused with 401 and no token, and logged without the code', async () => {
     const lines: string[] = [];
-    const server = await startGated({ lines });
-    await signInRaw(server);
+    const server = await startTestServer({ lines });
+    await connectTab(server);
     const again = await exchangeRaw(server, { code: codeOf(server) });
     expect(again.status).toBe(401);
     expect(again.body).not.toContain('token"');
@@ -352,7 +288,7 @@ describe('security gate', () => {
   });
 
   it('refuses a missing, unknown or malformed code, a foreign or missing Origin, and the retired GET /auth', async () => {
-    const server = await startGated();
+    const server = await startTestServer();
     const bodies: unknown[] = ['', 'not json', {}, { code: '' }, { code: 'nope' }, { code: `${codeOf(server)}x` }, { code: 7 }, [codeOf(server)]];
     for (const body of bodies) {
       expect((await exchangeRaw(server, body)).status, JSON.stringify(body)).toBe(401);
@@ -368,31 +304,31 @@ describe('security gate', () => {
     expect(retired.headers.location).toBeUndefined();
     expect(server.tabs.size()).toBe(0);
     // None of those spent the real code.
-    await signInRaw(server);
+    await connectTab(server);
   });
 
   it('code expiry: an exchange 61 s after issue is refused; one at 59 s works', async () => {
     const late = manualClock();
-    const expired = await startGated({ now: late.now });
+    const expired = await startTestServer({ now: late.now });
     late.advance(61_000);
     const reply = await exchangeRaw(expired, { code: codeOf(expired) });
     expect(reply.status).toBe(401);
     expect(expired.tabs.size()).toBe(0);
 
     const early = manualClock();
-    const fresh = await startGated({ now: early.now });
+    const fresh = await startTestServer({ now: early.now });
     early.advance(LAUNCH_CODE_TTL_MS - 1_000);
-    await signInRaw(fresh);
+    await connectTab(fresh);
   });
 
   it('bad Host: a foreign host or a wrong port gets 403, even with a valid token or a fresh code', async () => {
-    const server = await startGated();
+    const server = await startTestServer();
     const hosts = ['evil.example', `evil.example:${server.port}`, `127.0.0.1:${server.port + 1}`, `localhost:${server.port + 1}`, '127.0.0.1', `[::1]:${server.port}`];
     for (const host of hosts) {
       expect((await exchangeRaw(server, { code: codeOf(server) }, { host, origin: `http://${host}` })).status, host).toBe(403);
     }
     // The refused exchanges didn't spend the code.
-    const tab = await signInRaw(server);
+    const tab = await connectTab(server);
     for (const host of hosts) {
       const page = await send(server, '/', { headers: { host } });
       expect(page.status, host).toBe(403);
@@ -405,8 +341,8 @@ describe('security gate', () => {
   });
 
   it('bad Origin: /ws and POST with a missing or foreign Origin get 403, even with a valid token', async () => {
-    const server = await startGated();
-    const tab = await signInRaw(server);
+    const server = await startTestServer();
+    const tab = await connectTab(server);
     const foreign = ['http://evil.example', `http://evil.example:${server.port}`, `http://127.0.0.1:${server.port + 1}`, `https://127.0.0.1:${server.port}`, 'null'];
 
     expect(await upgrade(server, tab, {})).toBe(403);
@@ -429,22 +365,21 @@ describe('security gate', () => {
 
   it('restart: tokens live in memory only, so a restarted server refuses the old one; a new launch link works', async () => {
     const dataDir = tempDataDir();
-    const first = await startGated({ dataDir });
+    const first = await startTestServer({ dataDir });
     const port = first.port;
-    const tab = await signInRaw(first);
+    const tab = await connectTab(first);
     await first.close();
-    running.splice(running.indexOf(first), 1);
 
-    const second = await startGated({ dataDir, port });
+    const second = await startTestServer({ dataDir, port });
     expect((await send(second, TAB_CHECK_PATH, { headers: bearer(tab) })).status).toBe(401);
     expect(await upgrade(second, tab, { origin: second.url })).toBe(401);
-    const fresh = await signInRaw(second);
+    const fresh = await connectTab(second);
     expect(await firstEvent(second, fresh)).toBe('server.started');
   });
 
   it('an ordinary request carrying Upgrade and the token subprotocol is not an upgrade: it needs Bearer, and gets the CSP', async () => {
-    const server = await startGated();
-    const tab = await signInRaw(server);
+    const server = await startTestServer();
+    const tab = await connectTab(server);
     const fake = { upgrade: 'websocket', connection: 'keep-alive', 'sec-websocket-protocol': tab.protocols.join(', '), origin: server.url };
     for (const path of [TAB_CHECK_PATH, LAUNCH_CODES_PATH, '/ws']) {
       const reply = await send(server, path, { headers: fake });
@@ -461,10 +396,10 @@ describe('security gate', () => {
   });
 
   it('a refused WebSocket upgrade carries the CSP too', async () => {
-    const server = await startGated();
+    const server = await startTestServer();
     const csp = await new Promise<string>((resolve, reject) => {
       const ws = new WebSocket(`ws://127.0.0.1:${server.port}/ws`, { headers: { origin: server.url } });
-      sockets.push(ws);
+      trackSocket(ws);
       ws.once('unexpected-response', (_req, res) => {
         resolve(String(res.headers['content-security-policy']));
         res.resume();
@@ -475,8 +410,8 @@ describe('security gate', () => {
   });
 
   it('API routes live under /api/v1: the old unversioned paths answer 404, even with a valid token, and still need one', async () => {
-    const server = await startGated();
-    const tab = await signInRaw(server);
+    const server = await startTestServer();
+    const tab = await connectTab(server);
     const old: Array<[string, string]> = [
       ['GET', '/api/tab'],
       ['POST', '/api/tab/exchange'],
@@ -494,8 +429,8 @@ describe('security gate', () => {
   });
 
   it('errors: every refusal from an API, socket or handshake path has the shared error body, with a shared code', async () => {
-    const server = await startGated();
-    const tab = await signInRaw(server);
+    const server = await startTestServer();
+    const tab = await connectTab(server);
     const replies: Array<[string, number, Reply]> = [
       ['no token', 401, await send(server, TAB_CHECK_PATH)],
       ['wrong token', 401, await send(server, TAB_CHECK_PATH, { headers: { authorization: 'Bearer nope' } })],
@@ -517,8 +452,8 @@ describe('security gate', () => {
   });
 
   it('/api, /api/*, /ws and /ws/* never fall back to the app shell, even with a valid token', async () => {
-    const server = await startGated();
-    const tab = await signInRaw(server);
+    const server = await startTestServer();
+    const tab = await connectTab(server);
     for (const path of ['/api', '/api/', '/api/nothing', '/ws/', '/ws/x', '/launcher']) {
       const reply = await send(server, path, { headers: bearer(tab) });
       expect(reply.body, path).not.toContain('id="root"');
@@ -534,14 +469,14 @@ describe('security gate', () => {
   it('retires the old cookie-signing key: a leftover auth.key is deleted at start', async () => {
     const dataDir = tempDataDir();
     writeFileSync(join(dataDir, LEGACY_AUTH_KEY_FILE), Buffer.alloc(32, 7));
-    const server = await startGated({ dataDir });
+    const server = await startTestServer({ dataDir });
     expect(existsSync(join(server.dataDir, LEGACY_AUTH_KEY_FILE))).toBe(false);
   });
 
   it('logs: requests carrying a token, a subprotocol or a code never put them in the log', async () => {
     const lines: string[] = [];
-    const server = await startGated({ lines });
-    const tab = await signInRaw(server);
+    const server = await startTestServer({ lines });
+    const tab = await connectTab(server);
     await send(server, TAB_CHECK_PATH, { headers: bearer(tab) });
     await send(server, TAB_CHECK_PATH, { headers: { authorization: 'Bearer forged-token-value' } });
     await upgrade(server, tab, { origin: 'http://evil.example' });
@@ -553,8 +488,8 @@ describe('security gate', () => {
   });
 
   it('CSP: every response carries a policy that allows only the app\'s own scripts', async () => {
-    const server = await startGated();
-    const tab = await signInRaw(server);
+    const server = await startTestServer();
+    const tab = await connectTab(server);
     const replies = [
       await send(server, '/'),
       await send(server, '/settings/appearance'),
@@ -574,7 +509,7 @@ describe('security gate', () => {
   });
 
   it('port file: server.json holds port, pid, version and start time, mode 0600, and is gone after close', async () => {
-    const server = await startGated();
+    const server = await startTestServer();
     const file = join(server.dataDir, PORT_FILE);
     const contents = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
     expect(contents).toEqual({
@@ -588,18 +523,16 @@ describe('security gate', () => {
     expect(readFileSync(file, 'utf8')).not.toContain(codeOf(server));
 
     await server.close();
-    running.splice(running.indexOf(server), 1);
     expect(() => statSync(file)).toThrow();
   });
 
   it("close leaves another server's port file alone", async () => {
     const dataDir = tempDataDir();
-    const first = await startGated({ dataDir });
+    const first = await startTestServer({ dataDir });
     // Another server's record replaced ours (only one runs per data folder, but a file can still change).
     const theirs = JSON.stringify({ port: first.port + 1, pid: 1, version: 'x', startedAt: new Date().toISOString() });
     writeFileSync(join(dataDir, PORT_FILE), theirs);
     await first.close();
-    running.splice(running.indexOf(first), 1);
     expect(readFileSync(join(dataDir, PORT_FILE), 'utf8')).toBe(theirs);
   });
 });
@@ -621,7 +554,7 @@ describe('gate placement', () => {
         installUv: async () => ({ started: false, uv: { state: 'missing' as const } }),
         settled: async () => {},
       };
-      const app = createApp({ events: core.events, webRoot: webRoot(), log, gate, control, toolchain, tabs: createTabTokens() });
+      const app = createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate, control, toolchain, tabs: createTabTokens() });
       const outside = app.routes.filter((route) => !isServerPath(route.path)).map((route) => `${route.method} ${route.path}`);
       // The gate and the static files (ALL /*), then the SPA shell's guard and index.html (GET /*). Nothing else:
       // a new page-level route would be reachable without a token, so it must live under /api instead.
@@ -645,7 +578,7 @@ describe('gate placement', () => {
     try {
       const log = createLogger(() => {});
       const gate = createGate({ port: () => 1, codes: createLaunchCodes(), tabs: createTabTokens(), log });
-      const app = createApp({ events: core.events, webRoot: webRoot(), log, gate });
+      const app = createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate });
       expect(app.routes[0]).toMatchObject({ method: 'ALL', path: '/*', handler: gate });
     } finally {
       core.close();
@@ -659,7 +592,7 @@ describe('gate placement', () => {
       const codes = createLaunchCodes();
       const code = codes.issue();
       const gate = createGate({ port: () => undefined, codes, tabs: createTabTokens(), log });
-      const app = createApp({ events: core.events, webRoot: webRoot(), log, gate });
+      const app = createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate });
       const response = await app.request(TAB_EXCHANGE_PATH, {
         method: 'POST',
         headers: { host: '127.0.0.1:4317', origin: 'http://127.0.0.1:4317', 'content-type': 'application/json' },

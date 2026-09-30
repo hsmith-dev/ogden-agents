@@ -6,8 +6,9 @@
 //
 // It writes `server.json` and `launcher.token` the way a real server does,
 // answers `GET /launcher/hello` (with `?launch=1`, a launch link to its own
-// `/#c=`, exchanged at `POST /api/v1/tab/exchange`) and `POST /launcher/restart-when-idle` (202 and a clean exit when
-// idle, 409 when busy). It prints `ready <port>` once listening.
+// `/#c=`, exchanged at `POST /api/v1/tab/exchange`, the shared
+// `API_ROUTES.tabExchange`) and `POST /launcher/restart-when-idle` (202 and a
+// clean exit when idle, 409 when busy). It prints `ready <port>` once listening.
 import { randomBytes } from 'node:crypto';
 import { rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';

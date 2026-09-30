@@ -8,43 +8,29 @@
  * which speaks only the launcher handshake.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import {
+  API_ROUTES,
+  codeOfLink,
+  exchange,
+  isAlive,
+  makeDataDir as makeTempDir,
+  postCode,
+  readPortFile,
+  removeDataDir,
+  requestQuit,
+  ROOT,
+  waitUntil,
+} from './support.js';
 
-const ROOT = join(import.meta.dirname, '..');
 const BIN = join(ROOT, 'bin', 'ogden.js');
 const FAKE_SERVER = join(import.meta.dirname, 'fixtures', 'fake-server.mjs');
 const { version: VERSION } = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { version: string };
 
 const children: ChildProcess[] = [];
 const dataDirs: string[] = [];
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
-  }
-}
-
-async function waitUntil(predicate: () => boolean, what: string, timeoutMs = 10_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-}
-
-function readPortFile(dataDir: string): { port: number; pid: number; version: string } | undefined {
-  try {
-    return JSON.parse(readFileSync(join(dataDir, 'server.json'), 'utf8')) as { port: number; pid: number; version: string };
-  } catch {
-    return undefined;
-  }
-}
 
 afterEach(async () => {
   const exits = children.splice(0).map((child) => {
@@ -65,13 +51,13 @@ afterEach(async () => {
       }
       await waitUntil(() => !isAlive(record.pid), 'a leftover server to exit').catch(() => {});
     }
-    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    removeDataDir(dir);
   }
 });
 
 /** A throwaway data folder, so the test never touches the user's real one. */
 function makeDataDir(): string {
-  const dataDir = mkdtempSync(join(tmpdir(), 'ogden-agents-launcher-'));
+  const dataDir = makeTempDir('ogden-agents-launcher-');
   dataDirs.push(dataDir);
   return dataDir;
 }
@@ -101,31 +87,14 @@ function runLauncher(dataDir: string, args: string[] = ['--no-open', '--port', '
   );
 }
 
-/**
- * Opens a launch link (`/#c=<code>`) as the page's boot script does: POSTs
- * the code to `/api/v1/tab/exchange` and returns the tab's `Authorization`
- * header, with the token from the response body (never a URL; no cookie).
- */
+/** Opens a launch link as the page's boot script does, and returns the tab's `Authorization` header. */
 async function signIn(launchUrl: string): Promise<string> {
-  const { origin, hash } = new URL(launchUrl);
-  const code = /^#c=([A-Za-z0-9_-]{43})$/.exec(hash)?.[1];
-  expect(code).toBeDefined();
-  const exchange = await fetch(`${origin}/api/v1/tab/exchange`, {
-    method: 'POST',
-    headers: { origin, 'content-type': 'application/json' },
-    body: JSON.stringify({ code }),
-  });
-  expect(exchange.status).toBe(200);
-  expect(exchange.headers.get('set-cookie')).toBeNull();
-  const { token } = (await exchange.json()) as { token: string };
-  expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
-  return `Bearer ${token}`;
+  return `Bearer ${await exchange(launchUrl)}`;
 }
 
 /** Quit, as the UI does it, then waits for the process to exit. */
 async function quit(url: string, launchUrl: string, pid: number): Promise<void> {
-  const authorization = await signIn(launchUrl);
-  const response = await fetch(`${url}/api/v1/server/quit`, { method: 'POST', headers: { authorization, origin: url } });
+  const response = await requestQuit(url, await exchange(launchUrl));
   expect(response.status).toBe(202);
   await waitUntil(() => !isAlive(pid), 'the server to exit after Quit');
 }
@@ -180,10 +149,10 @@ describe('bin/ogden.js --foreground', () => {
     const page = await fetch(address);
     expect(page.status).toBe(200);
     expect(await page.text()).toContain('<div id="root"></div>');
-    expect((await fetch(`${address}/api/v1/tab`)).status).toBe(401);
+    expect((await fetch(`${address}${API_ROUTES.tabCheck}`)).status).toBe(401);
 
     const authorization = await signIn(launchUrl);
-    expect((await fetch(`${address}/api/v1/tab`, { headers: { authorization } })).status).toBe(204);
+    expect((await fetch(`${address}${API_ROUTES.tabCheck}`, { headers: { authorization } })).status).toBe(204);
 
     child.kill('SIGTERM');
     const { code, signal } = await exited;
@@ -215,7 +184,7 @@ describe('bin/ogden.js (background)', () => {
     expect(existsSync(join(dataDir, 'launcher.token'))).toBe(true);
 
     const authorization = await signIn(first.launchUrl);
-    expect((await fetch(`${first.url}/api/v1/tab`, { headers: { authorization } })).status).toBe(204);
+    expect((await fetch(`${first.url}${API_ROUTES.tabCheck}`, { headers: { authorization } })).status).toBe(204);
     const page = await fetch(first.url);
     expect(page.status).toBe(200);
     expect(await page.text()).toContain('<div id="root"></div>');
@@ -228,11 +197,7 @@ describe('bin/ogden.js (background)', () => {
     expect(second.url).toBe(first.url);
     expect(second.launchUrl).not.toBe(first.launchUrl);
     expect(readPortFile(dataDir)!.pid).toBe(record.pid);
-    const spent = await fetch(`${first.url}/api/v1/tab/exchange`, {
-      method: 'POST',
-      headers: { origin: first.url, 'content-type': 'application/json' },
-      body: JSON.stringify({ code: new URL(first.launchUrl).hash.slice('#c='.length) }),
-    });
+    const spent = await postCode(first.url, codeOfLink(first.launchUrl));
     expect(spent.status).toBe(401);
 
     await quit(second.url, second.launchUrl, record.pid);

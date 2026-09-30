@@ -7,8 +7,8 @@ import { SERVER_STREAM, ServerMessage, type CoreEvent } from '@ogden-agents/shar
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import { createLogger, LOG_DIR, type Logger } from '../src/log.js';
-import { HOST, start, type RunningServer } from '../src/start.js';
-import { signIn, tempDataDir } from './helpers.js';
+import { HOST, start, type RunningServer, type StartOptions } from '../src/start.js';
+import { signIn, startTestServer, tempDataDir, trackServer, trackSocket } from './helpers.js';
 
 interface Captured {
   log: Logger;
@@ -28,7 +28,7 @@ function captureLog(): Captured {
 async function connect(server: RunningServer & { launchUrl: string }, afterSeq: number | null = 0) {
   const { protocols, origin } = await signIn(server);
   const ws = new WebSocket(`${server.url.replace('http', 'ws')}/ws`, protocols, { headers: { origin } });
-  sockets.push(ws);
+  trackSocket(ws);
   const received: ServerMessage[] = [];
   /** `caught_up` and `server.stopping`, kept apart so `received` counts events and pongs as before. */
   const control: ServerMessage[] = [];
@@ -71,23 +71,16 @@ async function connect(server: RunningServer & { launchUrl: string }, afterSeq: 
   return { ws, received, control, next, until, events, seqs, close };
 }
 
-const running: RunningServer[] = [];
-const sockets: WebSocket[] = [];
 const blockers: Server[] = [];
 
 afterEach(async () => {
-  for (const ws of sockets.splice(0)) ws.terminate();
-  await Promise.all(running.splice(0).map((s) => s.close()));
   await Promise.all(
     blockers.splice(0).map((b) => new Promise<void>((resolve) => b.close(() => resolve()))),
   );
 });
 
-async function startTest(options: Parameters<typeof start>[0] = {}) {
-  const server = await start({ port: 0, open: false, log: captureLog().log, dataDir: tempDataDir(), ...options, launch: true });
-  running.push(server);
-  return server;
-}
+/** A test server logging to a capture nobody reads, unless `options.log` says otherwise. */
+const startTest = (options: StartOptions = {}) => startTestServer({ log: captureLog().log, ...options });
 
 /** A port that was free a moment ago. */
 async function freePort(): Promise<number> {
@@ -224,7 +217,6 @@ describe('server start', () => {
     appendEvents(first, 2);
     const before = first.core.events.readAfter(0);
     await first.close();
-    running.splice(running.indexOf(first), 1);
 
     const second = await startTest({ dataDir });
     const client = await connect(second);
@@ -284,7 +276,6 @@ describe('server start', () => {
         'the appended event',
       );
       await server.close();
-      running.splice(running.indexOf(server), 1);
       // Still open: appending works after the server has closed.
       expect(() =>
         core.events.append({ type: 'server.started', workspaceId: null, streamId: SERVER_STREAM, payload: { version: '1' } }),
@@ -333,7 +324,7 @@ describe('server start', () => {
     const dataDir = tempDataDir();
     const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     try {
-      running.push(await start({ port: 0, open: false, dataDir }));
+      trackServer(await start({ port: 0, open: false, dataDir }));
     } finally {
       stderr.mockRestore();
     }

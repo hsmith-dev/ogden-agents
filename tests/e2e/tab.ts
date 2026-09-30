@@ -4,9 +4,8 @@
  * launch link comes from the shared server's handshake, with its launcher
  * token, exactly as `npx ogden-agents` asks for one.
  */
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
+import { launchLink as handshakeLink } from '../support.js';
 
 /** The shared server's base URL (set by global-setup.ts). */
 export function sharedUrl(): string {
@@ -15,13 +14,10 @@ export function sharedUrl(): string {
   return value;
 }
 
-/** A fresh single-use launch link from the server at `url` whose data folder is `dataDir`. */
+/** A fresh single-use launch link from the shared server (or the one at `url` with data folder `dataDir`). */
 export async function launchLink(url = sharedUrl(), dataDir = process.env.E2E_DATA_DIR): Promise<string> {
   if (dataDir === undefined) throw new Error('E2E_DATA_DIR is not set; run through `pnpm e2e`');
-  const token = readFileSync(join(dataDir, 'launcher.token'), 'utf8').trim();
-  const response = await fetch(`${url}/launcher/hello?launch=1`, { headers: { 'x-ogden-launcher-token': token } });
-  if (!response.ok) throw new Error(`the launcher handshake returned ${response.status}`);
-  return ((await response.json()) as { launchUrl: string }).launchUrl;
+  return handshakeLink(url, dataDir);
 }
 
 /**

@@ -3,13 +3,13 @@ title: 'Refactor sweep'
 type: 'refactor'
 ticket: '11'
 created: '2026-09-30'
-status: 'draft'
-baseline_revision: ''
+status: 'built'
+baseline_revision: 'bf4dbb253fd97357fee467324d1099e3b92580a4'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md'
@@ -55,7 +55,7 @@ context:
 
 ## Code Map
 
-Baseline: set when the story starts (on top of 2.1, so the sweep also covers 2.1's new routes).
+Baseline: worktree `../ogden-agents-wt-1.11`, branch `story/1.11-refactor-sweep`, on top of 2.1 (`bf4dbb2`). 2.1 added `POST /api/tab/exchange`, `POST /api/launch-codes`, `GET /api/tab` and `packages/server/src/paths.ts` (the shared path helper); item 1 moves all API routes under `/api/v1/` through that helper and the shared constants.
 
 - Routes: `packages/server/src/app.ts` (quit, toolchain, launch codes) and the web callers in `packages/web/src/events/` and `routes/`.
 - Launcher bundle: `packages/server/tsdown.config.ts` (entries `server`, `serve`, `launcher`) and `src/launcher.ts` imports.
@@ -73,10 +73,25 @@ Baseline: set when the story starts (on top of 2.1, so the sweep also covers 2.1
 - Given the full suite, e2e, smoke, fork and pin checks, when run after the sweep, then all pass with no user-visible behavior change beyond start-up and page-load speed.
 
 ## Implementation Notes
+- Orchestrator audit: the implementer committed the seven items as seven commits on top of `bf4dbb2` (`98f8f84` item 1 to `91ba682` item 7, then `4b1419c` item 5; corrected after review). All 4 matrix rows are covered (route-enumeration and old-path 404 tests; the launcher import-graph packaging test; error-shape tests across ten refusals; a lazy-chunk e2e test). 228 tests, 34 e2e, smoke, fork and pin checks pass.
 
 ## Plan Change Log
 
 ## Review Triage Log
+
+### Pass 1 (quick lens) — 2026-09-30
+
+Counts: low 4 (2 patched, 2 rejected), 1 deliberate exclusion, 2 records. All story 2.1 security properties confirmed unchanged.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---|---|---|---|
+| 1 | `/launcher/restart-when-idle` 409 keeps its ad hoc body | — | reject | Deliberate: launchers and servers of different versions speak this handshake; changing the body breaks older launchers. Out of item 7's scope (not under `/api`). |
+| 2 | `app.onError` turns `HTTPException` 4xx into 500 | low | patch | Returns `error.getResponse()` for `HTTPException`. |
+| 3 | Bad-Host/Origin 403s are now JSON on page paths too | low | reject | Only hostile or misconfigured clients see it; harmless. |
+| 4 | The first load shrank by only about 33 kB (split rather than reduced) | low | reject | The plan asked for lazy routes and the default warning limit, both met; size budget noted for later. |
+| 5 | Unrecorded public-surface changes: `@ogden-agents/core/data-dir` export; `RunningServer.launchUrl` now optional | — | record | Both required by items 2 and 3; recorded here. |
+| 6 | Route literals hard-coded in `smoke-installed.mjs` and `fake-server.mjs` | low | patch | `tests/route-literals.test.ts` fails if any literal isn't in `API_ROUTES` (drift proven). |
+| 7 | The commit range in the audit note is wrong | — | record | Corrected above. |
 
 ## Verification
 

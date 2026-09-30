@@ -3,6 +3,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import type { EventLog, Toolchain } from '@ogden-agents/core';
 import { API_ROUTES, ClientMessage, ServerMessage, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
 import { Hono, type MiddlewareHandler } from 'hono';
+import { HTTPException } from 'hono/http-exception';
 import type { WSContext } from 'hono/ws';
 import { webSocketToken, type TabTokens } from './auth.js';
 import { apiError } from './errors.js';
@@ -243,6 +244,8 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, tabs
   });
 
   app.onError((error, c) => {
+    // A deliberate HTTP error (e.g. a body-limit 413) keeps its own status and response.
+    if (error instanceof HTTPException) return error.getResponse();
     log.error('request failed', { path: c.req.path, reason: String(error) });
     if (isServerPath(c.req.path)) return apiError(c, 500, 'internal_error', 'Something went wrong in Ogden Agents. Try again.');
     return c.text('Internal Server Error', 500);

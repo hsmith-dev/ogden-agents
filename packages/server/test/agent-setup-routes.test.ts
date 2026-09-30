@@ -11,15 +11,16 @@
  * stub: no test touches the real keychain or reaches Anthropic. The key never
  * leaves in a response, an event or a log line; only its last 4 do, in the list.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { createClaudeApiKey, createMemorySecretStore, loadPty, type PtyLoader } from '@ogden-agents/adapters';
+import { pathToFileURL } from 'node:url';
+import { createClaudeApiKey, createMemorySecretStore, loadPty, type AdapterPins, type NpmRunInput, type NpmRunner, type PtyLoader } from '@ogden-agents/adapters';
 import { SecretsUnavailableError, type AgentSetupPort, type ApiKeyVerification, type SecretStorePort } from '@ogden-agents/core';
-import { AgentsResponse, API_ROUTES, ApiErrorBody, apiPath, SessionResponse, SignInResponse, WorkspaceResponse } from '@ogden-agents/shared';
+import { AgentSetupStatus, AgentsResponse, API_ROUTES, ApiErrorBody, apiPath, SessionResponse, SignInResponse, WorkspaceResponse } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { testSecretStore, type StartOptions } from '../src/start.js';
-import { send, signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
+import { FAKE_AGENT, send, signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
 const signInPath = (agentId = 'claude-code') => apiPath(API_ROUTES.agentSignIn, { agentId });
 const codePath = (agentId = 'claude-code') => apiPath(API_ROUTES.agentSignInCode, { agentId });
@@ -488,5 +489,156 @@ describe('agent setup routes: review fixes (story 9.2)', () => {
     expect(testSecretStore({ OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', NODE_ENV: 'production', VITEST: '' })).toBeUndefined();
     expect(testSecretStore({ NODE_ENV: 'test' })).toBeUndefined();
     expect(testSecretStore({ OGDEN_AGENTS_TEST_SECRET_STORE: 'keychain', NODE_ENV: 'test' })).toBeUndefined();
+  });
+});
+
+describe('agent setup routes: installing Claude Code (story 9.3)', () => {
+  const installPath = (agentId = 'claude-code') => apiPath(API_ROUTES.agentInstall, { agentId });
+  const FAKE_AGENT_URL = pathToFileURL(FAKE_AGENT).href;
+
+  /** Pins for a stand-in adapter; the fake npm below "installs" it. */
+  const pins: AdapterPins = {
+    packageJson: { name: 'ogden-agents-claude-code', private: true, dependencies: { '@agentclientprotocol/claude-agent-acp': '9.9.9' } },
+    lock: { lockfileVersion: 3, packages: { '': {}, 'node_modules/@agentclientprotocol/claude-agent-acp': { version: '9.9.9', integrity: 'sha512-x' } } },
+  };
+
+  /** A fake npm the test ends by hand: `succeed` writes an adapter that runs the fake agent, `fail` prints an error code. */
+  function handNpm() {
+    const runs: Array<{ input: NpmRunInput; end: (exitCode: number | null) => void; killed: boolean }> = [];
+    const runNpm: NpmRunner = (input) => {
+      let end!: (exitCode: number | null) => void;
+      const exited = new Promise<{ exitCode: number | null }>((resolve) => (end = (exitCode) => resolve({ exitCode })));
+      const run = { input, end, killed: false };
+      runs.push(run);
+      return {
+        exited,
+        kill: () => {
+          run.killed = true;
+          end(null);
+        },
+      };
+    };
+    const succeed = (index = 0) => {
+      const run = runs[index]!;
+      const root = join(run.input.cwd, 'node_modules', '@agentclientprotocol', 'claude-agent-acp');
+      mkdirSync(join(root, 'dist'), { recursive: true });
+      writeFileSync(join(root, 'package.json'), JSON.stringify({ name: '@agentclientprotocol/claude-agent-acp', version: '9.9.9' }));
+      writeFileSync(join(root, 'dist', 'index.js'), `await import(${JSON.stringify(FAKE_AGENT_URL)});\n`);
+      run.input.onLine('npm http fetch GET 200 https://registry.npmjs.org/@agentclientprotocol/claude-agent-acp/-/x.tgz 3ms (cache miss)');
+      run.end(0);
+    };
+    const fail = (code: string, index = 0) => {
+      const run = runs[index]!;
+      run.input.onLine(`npm error code ${code}`);
+      run.input.onLine('npm error secret-looking output https://user:token@registry.example/');
+      run.end(1);
+    };
+    return { runNpm, runs, succeed, fail };
+  }
+
+  async function startInstallServer(npm: ReturnType<typeof handNpm>, dataDir?: string) {
+    const npmCli = join(mkdtempSync(join(tmpdir(), 'ogden-agents-npm-')), 'npm-cli.js');
+    temps.push(dirname(npmCli));
+    writeFileSync(npmCli, '');
+    return startSetupServer({}, {
+      claudeAdapterPath: undefined,
+      claudeInstall: { devAdapter: false, pins, runNpm: npm.runNpm, npmCli },
+      claudeExecutable: null,
+      ...(dataDir === undefined ? {} : { dataDir }),
+    });
+  }
+
+  const installEvents = (server: TestServer) => server.core.events.readAfter(0).filter((event) => event.type.startsWith('agent.install_'));
+
+  it('Not installed → Install (202) → progress → Installed, needs sign-in; a second Install starts no second npm; a chat then runs the installed adapter', async () => {
+    const npm = handNpm();
+    const { server, tab, lines } = await startInstallServer(npm);
+    expect((await agents(server, tab))[0]).toMatchObject({ install: 'not_installed', installSize: 'large' });
+
+    const first = await send(server, installPath(), { method: 'POST', headers: tab.headers });
+    expect(first.status).toBe(202);
+    expect(AgentSetupStatus.parse(first.json())).toMatchObject({ install: 'installing' });
+    await waitFor(() => npm.runs.length === 1, 'npm to start');
+    const second = await send(server, installPath(), { method: 'POST', headers: tab.headers });
+    expect(second.status).toBe(202);
+    expect(AgentSetupStatus.parse(second.json()).install).toBe('installing');
+    expect((await agents(server, tab))[0]!.install).toBe('installing');
+    // Bundled: no claude was found.
+    expect(npm.runs[0]!.input.args).not.toContain('--omit=optional');
+
+    npm.succeed();
+    await waitFor(() => installEvents(server).some((event) => event.type === 'agent.install_completed'), 'the install to complete');
+    expect(npm.runs).toHaveLength(1);
+    expect(installEvents(server).map((event) => event.type)).toEqual(expect.arrayContaining(['agent.install_started', 'agent.install_progress', 'agent.install_completed']));
+    expect((await agents(server, tab))[0]).toMatchObject({ install: 'installed', version: '9.9.9', auth: 'needs_sign_in' });
+    // Installed: Install answers 202 with the status and starts nothing.
+    expect(AgentSetupStatus.parse((await send(server, installPath(), { method: 'POST', headers: tab.headers })).json()).install).toBe('installed');
+
+    // A chat starts through the adapter in the data folder, without a restart.
+    const sessionId = await chatOnce(server, tab, 'hello');
+    await waitFor(() => settledState(server, sessionId) !== undefined, 'the chat to answer', 10_000);
+    expect(settledState(server, sessionId)).toBe('idle');
+    await waitFor(() => lines.some((line) => line.includes('starting the Claude Code adapter') && line.includes('adapter-9.9.9-bundled')), 'the installed adapter to start', 10_000);
+  });
+
+  it('a failed install is agent.install_failed in plain words, the log gets npm code only, and Try again installs', async () => {
+    const npm = handNpm();
+    const { server, tab, lines } = await startInstallServer(npm);
+    expect((await send(server, installPath(), { method: 'POST', headers: tab.headers })).status).toBe(202);
+    await waitFor(() => npm.runs.length === 1, 'npm to start');
+    npm.fail('EINTEGRITY');
+    await waitFor(() => installEvents(server).some((event) => event.type === 'agent.install_failed'), 'the install to fail');
+    const failed = installEvents(server).find((event) => event.type === 'agent.install_failed')!;
+    expect(failed.payload).toEqual({ agentId: 'claude-code', reason: "The download didn't match the expected files, so nothing was installed. Try again." });
+    expect((await agents(server, tab))[0]).toMatchObject({ install: 'failed', reason: "The download didn't match the expected files, so nothing was installed. Try again." });
+    const kept = everythingKept(server, lines);
+    expect(kept).toContain('EINTEGRITY');
+    expect(kept).not.toContain('token@registry');
+    expect(kept).not.toContain('secret-looking');
+
+    expect((await send(server, installPath(), { method: 'POST', headers: tab.headers })).status).toBe(202);
+    await waitFor(() => npm.runs.length === 2, 'npm to start again');
+    npm.succeed(1);
+    await waitFor(async () => (await agents(server, tab))[0]!.install === 'installed', 'the second install');
+  });
+
+  it("an npm that can't start logs its errno code only: no path reaches the log or an event (review F3)", async () => {
+    const npmCli = join(mkdtempSync(join(tmpdir(), 'ogden-agents-npm-')), 'npm-cli.js');
+    temps.push(dirname(npmCli));
+    writeFileSync(npmCli, '');
+    const hidden = join(tmpdir(), 'secret-dir-f3', 'node');
+    const { server, tab, lines } = await startSetupServer({}, {
+      claudeAdapterPath: undefined,
+      claudeInstall: { devAdapter: false, pins, npmCli, nodePath: hidden },
+      claudeExecutable: null,
+    });
+    expect((await send(server, installPath(), { method: 'POST', headers: tab.headers })).status).toBe(202);
+    await waitFor(() => installEvents(server).some((event) => event.type === 'agent.install_failed'), 'the install to fail');
+    const kept = everythingKept(server, lines);
+    expect(kept).toContain('ENOENT');
+    expect(kept).not.toContain('secret-dir-f3');
+    expect(kept).not.toContain(npmCli);
+  });
+
+  it('an unknown agent is 404, and Install needs a token and a matching Origin', async () => {
+    const npm = handNpm();
+    const { server, tab } = await startInstallServer(npm);
+    expect((await send(server, installPath('nope'), { method: 'POST', headers: tab.headers })).status).toBe(404);
+    expect((await send(server, installPath(), { method: 'POST', headers: { origin: server.url } })).status).toBe(401);
+    expect((await send(server, installPath(), { method: 'POST', headers: { ...tab.headers, origin: 'http://evil.example' } })).status).toBe(403);
+    expect(npm.runs).toHaveLength(0);
+  });
+
+  it('stopping the server kills npm and removes its work folder', async () => {
+    const npm = handNpm();
+    const dataDir = mkdtempSync(join(tmpdir(), 'ogden-agents-install-stop-'));
+    temps.push(dataDir);
+    const { server, tab } = await startInstallServer(npm, dataDir);
+    expect((await send(server, installPath(), { method: 'POST', headers: tab.headers })).status).toBe(202);
+    await waitFor(() => npm.runs.length === 1, 'npm to start');
+    expect(readdirSync(join(dataDir, 'agents', 'claude-code')).some((name) => name.startsWith('.install-'))).toBe(true);
+    await server.close();
+    expect(npm.runs[0]!.killed).toBe(true);
+    expect(readdirSync(join(dataDir, 'agents', 'claude-code'))).toEqual([]);
   });
 });

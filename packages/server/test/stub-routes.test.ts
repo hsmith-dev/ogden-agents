@@ -6,7 +6,7 @@
  * messages are built (story 2.9, `event-socket.test.ts`); an invalid one is
  * still ignored, and the legacy `subscribe` still works.
  */
-import { API_ROUTES, ApiErrorBody, apiPath, ServerMessage } from '@ogden-agents/shared';
+import { API_ROUTES, ApiErrorBody, ServerMessage } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { send, signIn, startTestServer, trackSocket, waitFor, type SignedIn, type TestServer } from './helpers.js';
@@ -16,8 +16,7 @@ const sesId = 'ses_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
 
 /** Every stubbed route with its method and a concrete path, by the lane that fills it. */
 const STUBS: ReadonlyArray<readonly [method: string, path: string]> = [
-  // 9.x (9.1's agents list and sign-in and 9.2's API key are built: agent-setup-routes.test.ts)
-  ['POST', apiPath(API_ROUTES.agentInstall, { agentId: 'claude-code' })],
+  // 9.x (9.1's agents list and sign-in, 9.2's API key and 9.3's install are built: agent-setup-routes.test.ts)
   ['GET', API_ROUTES.onboarding],
   ['PATCH', API_ROUTES.onboarding],
 ];
@@ -46,8 +45,8 @@ describe('stub routes', () => {
     const server = await startTestServer({ lines });
     const tab = await signIn(server);
     const apiKey = 'sk-ant-api03-never-logged-0123456789';
-    const put = await send(server, apiPath(API_ROUTES.agentInstall, { agentId: 'claude-code' }), {
-      method: 'POST',
+    const put = await send(server, API_ROUTES.onboarding, {
+      method: 'PATCH',
       headers: { ...tab.headers, 'content-type': 'application/json' },
       body: JSON.stringify({ apiKey }),
     });

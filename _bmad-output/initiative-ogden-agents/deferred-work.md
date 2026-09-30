@@ -140,8 +140,8 @@
   summary: Move `readBody` and the id helpers out of `packages/server/src/chat-routes.ts` into a shared server module, so other route files stop reaching into the chat routes.
   evidence: `packages/server/src/chat-routes.ts`.
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-refactor-sweep-plan.md`
-  summary: `packages/web/src/agents/agent-setup-api.ts` keeps its own `callNoContent` and `UNREACHABLE` copy (9.2 owns the file); switch it to `@/api/http` once 9.2 lands.
-  evidence: `packages/web/src/api/http.ts` `callNoContent`; `agent-setup-api.ts` `callNoContent`.
+  summary: Resolved (story 9.3): `packages/web/src/agents/agent-setup-api.ts` now uses `@/api/http` (`call`, `callNoContent`, `postJson`, `Auth`); its own `callNoContent` and `UNREACHABLE` copies are gone.
+  evidence: `packages/web/src/agents/agent-setup-api.ts` imports from `@/api/http`.
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-refactor-sweep-plan.md`
   summary: The "9.4" note in `packages/core/src/secret-store-port.ts` is left for 9.2/9.4 to update (9.2 owns the secrets files).
   evidence: `packages/core/src/secret-store-port.ts`.

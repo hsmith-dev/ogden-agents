@@ -19,9 +19,14 @@
  *   only step names and exit codes (AD-16).
  * - Cancel, the sign-in timeout, `close` and every failure kill the
  *   terminal's whole process tree.
+ * - Install (story 9.3, `install.ts`): the pinned adapter into
+ *   `<dataDir>/agents/claude-code/`, with the Agent SDK's own `claude` only
+ *   when no usable `claude` is found. The adapter is found afresh at each
+ *   status, sign-in and chat start, so a new install works without a restart;
+ *   one installed without the SDK's `claude` counts only while the user's
+ *   `claude` is found. `close` stops a running install.
  */
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { AgentSetupError, type AgentAuthMethod, type AgentSetupPort, type AgentSignIn } from '@ogden-agents/core';
 import { SIGN_IN_CODE_PATTERN, MAX_SIGN_IN_CODE_LENGTH, type AgentSetupStatus } from '@ogden-agents/shared';
@@ -29,6 +34,7 @@ import { CLAUDE_CODE } from '../acp-claude-code/claude-code-agent.js';
 import { findClaudeExecutable } from '../acp-claude-code/detect.js';
 import { loadPty as defaultLoadPty, type HiddenPty, type PtyLoader } from '../terminal-pty/index.js';
 import { ANTHROPIC_API_KEY_ENV, createClaudeApiKey, type ClaudeApiKeyOptions } from './api-key.js';
+import { installAdapter, locateClaudeAdapter, removeStaleInstalls, type InstallAdapterOptions } from './install.js';
 import { CLAUDE_AI_LOGIN_ARGS, CLAUDE_AUTH_STATUS_ARGS, checkAuthMethods } from './auth-method.js';
 import { DEFAULT_SIGN_IN_HOSTS, findSignInUrl } from './sign-in-output.js';
 
@@ -44,6 +50,30 @@ export {
 } from './api-key.js';
 export { CLAUDE_AI_LOGIN_ARGS, CLAUDE_AI_LOGIN_ID, CLAUDE_AUTH_STATUS_ARGS, UNSUPPORTED_SIGN_IN, checkAuthMethods } from './auth-method.js';
 export { DEFAULT_SIGN_IN_HOSTS, findSignInUrl, isAllowedSignInUrl, stripTerminalEscapes } from './sign-in-output.js';
+export {
+  ADAPTER_PINS,
+  CLAUDE_CODE_DIR,
+  findNpmCli,
+  installAdapter,
+  pathOf,
+  type FindNpmOptions,
+  installedAdapter,
+  locateClaudeAdapter,
+  NPM_IDLE_TIMEOUT_MS,
+  npmEnv,
+  packagesToFetch,
+  pinnedVersion,
+  removeStaleInstalls,
+  spawnNpm,
+  type AdapterLock,
+  type AdapterPins,
+  type InstallAdapterOptions,
+  type InstalledAdapter,
+  type LocatedAdapter,
+  type NpmProcess,
+  type NpmRunInput,
+  type NpmRunner,
+} from './install.js';
 
 export const CLAUDE_CODE_AGENT_ID = 'claude-code';
 
@@ -63,10 +93,22 @@ const COULD_NOT_START = `${CLAUDE_CODE} couldn't start signing in. Try again.`;
 const NO_URL = `${CLAUDE_CODE} didn't show a sign-in link. Try again.`;
 const UNAVAILABLE = (reason: string) => `Sign-in isn't available on this computer: ${reason}`;
 const CANT_CHECK = `Ogden Agents couldn't check whether ${CLAUDE_CODE} is signed in. Try again.`;
+const NO_CLAUDE = `${CLAUDE_CODE} isn't found on this computer any more. Install again to use Ogden Agents' own copy.`;
+const NO_INSTALL = `Installing ${CLAUDE_CODE} from Ogden Agents isn't available here.`;
+const ALREADY_INSTALLING = `${CLAUDE_CODE} is already being installed.`;
 
 export interface ClaudeCodeSetupOptions {
-  /** The Claude Agent ACP adapter's entry script, or `undefined` when it isn't installed. */
-  adapterPath: string | undefined;
+  /**
+   * The Claude Agent ACP adapter's entry script, or a function read at each
+   * use (`$OGDEN_AGENTS_CLAUDE_ACP_PATH`, then a dev install's
+   * `node_modules`). When it gives none, the adapter installed in
+   * {@link dataDir} is used, if any.
+   */
+  adapterPath?: string | (() => string | undefined) | undefined;
+  /** The Ogden Agents data folder: Install puts the adapter in `agents/claude-code/`. Without it, Install is refused. */
+  dataDir?: string;
+  /** The install's pins, npm, runner and timeout (tests: a local fixture lock and a fake runner). */
+  install?: Pick<InstallAdapterOptions, 'pins' | 'runNpm' | 'npmCli' | 'launcherNpm' | 'nodePath' | 'env' | 'idleTimeoutMs' | 'onCleanupError'>;
   /** The Node that runs the adapter. Default: this one. */
   nodePath?: string;
   /** The agent environment allowlist (AD-16), read at each run. Never logged. */
@@ -103,7 +145,7 @@ export function withoutApiKey(env: Readonly<Record<string, string>>): Record<str
 }
 
 export interface ClaudeCodeSetup extends AgentSetupPort {
-  /** Kills a running sign-in's terminal (server stop). Safe to call more than once. */
+  /** Kills a running sign-in's terminal and stops a running install (server stop). Safe to call more than once. */
   close(): void;
 }
 
@@ -139,8 +181,26 @@ export function createClaudeCodeSetup(options: ClaudeCodeSetupOptions): ClaudeCo
     }
   };
 
-  const adapter = (): string | undefined =>
-    options.adapterPath !== undefined && existsSync(options.adapterPath) ? options.adapterPath : undefined;
+  /** A running install, stopped by `close`. */
+  let installing: AbortController | undefined;
+  if (options.dataDir !== undefined) removeStaleInstalls(options.dataDir, options.install?.onCleanupError);
+
+  const locate = () => locateClaudeAdapter({ adapterPath: options.adapterPath, dataDir: options.dataDir, pins: options.install?.pins });
+
+  /** The user's own `claude`: the one in the environment, else the one given, else one found on this computer. */
+  const userClaude = (): string | undefined => {
+    const env = withoutApiKey(options.env());
+    if (env.CLAUDE_CODE_EXECUTABLE !== undefined) return env.CLAUDE_CODE_EXECUTABLE;
+    const claude = options.claudeExecutable === undefined ? findClaudeExecutable(env) : options.claudeExecutable;
+    return claude ?? undefined;
+  };
+
+  /** The adapter to run: found, and able to run a `claude` (its own, or the user's). */
+  const adapter = (): string | undefined => {
+    const located = locate();
+    if (located === undefined || (located.needsClaude && userClaude() === undefined)) return undefined;
+    return located.path;
+  };
 
   /** The allowlisted environment without any API key, plus the user's own `claude` and a terminal type (AD-16). */
   const cliEnv = (): Record<string, string> => {
@@ -213,19 +273,44 @@ export function createClaudeCodeSetup(options: ClaudeCodeSetupOptions): ClaudeCo
 
     // `subscription` is what `auth status` says, run without any API key (story 9.2's precedence rule).
     async status() {
-      const script = adapter();
-      if (script === undefined) return { ...base(), install: 'not_installed', version: null, auth: 'needs_sign_in', subscription: 'unknown' };
-      const status = await readAuthStatus(script);
-      if (status === 'missing') return { ...base(), install: 'not_installed', version: null, auth: 'needs_sign_in', subscription: 'unknown' };
-      if (status === undefined) return { ...base(), install: 'installed', version: null, auth: 'needs_sign_in', reason: CANT_CHECK, subscription: 'unknown' };
-      if (status.loggedIn) return { ...base(), install: 'installed', version: null, auth: 'signed_in', method: 'subscription', subscription: 'signed_in' };
+      const located = locate();
+      const claude = userClaude();
+      // What Install would download: the adapter alone with the user's `claude`, else with the SDK's own.
+      const notInstalled = (reason?: string) => ({
+        ...base(),
+        install: 'not_installed' as const,
+        version: null,
+        auth: 'needs_sign_in' as const,
+        ...(reason === undefined ? {} : { reason }),
+        installSize: claude === undefined ? ('large' as const) : ('small' as const),
+        subscription: 'unknown' as const,
+      });
+      if (located === undefined) return notInstalled();
+      if (located.needsClaude && claude === undefined) return notInstalled(NO_CLAUDE);
+      const version = located.version;
+      const status = await readAuthStatus(located.path);
+      if (status === 'missing') return notInstalled();
+      if (status === undefined) return { ...base(), install: 'installed', version, auth: 'needs_sign_in', reason: CANT_CHECK, subscription: 'unknown' };
+      if (status.loggedIn) return { ...base(), install: 'installed', version, auth: 'signed_in', method: 'subscription', subscription: 'signed_in' };
       const pty = await loadPty();
-      if (!pty.ok) return { ...base(), install: 'installed', version: null, auth: 'failed', reason: UNAVAILABLE(pty.reason), subscription: 'signed_out' };
-      return { ...base(), install: 'installed', version: null, auth: 'needs_sign_in', subscription: 'signed_out' };
+      if (!pty.ok) return { ...base(), install: 'installed', version, auth: 'failed', reason: UNAVAILABLE(pty.reason), subscription: 'signed_out' };
+      return { ...base(), install: 'installed', version, auth: 'needs_sign_in', subscription: 'signed_out' };
     },
 
-    async install() {
-      throw new AgentSetupError(`Installing ${CLAUDE_CODE} from Ogden Agents isn't available yet.`);
+    async install(onProgress) {
+      if (options.dataDir === undefined) throw new AgentSetupError(NO_INSTALL, { details: { step: 'start' } });
+      if (installing !== undefined) throw new AgentSetupError(ALREADY_INSTALLING, { details: { step: 'start' } });
+      const controller = new AbortController();
+      installing = controller;
+      try {
+        const withBinary = userClaude() === undefined;
+        diagnostic('Claude Code install started', { step: 'install', withBinary });
+        const installed = await installAdapter({ ...options.install, dataDir: options.dataDir, withBinary, onProgress, signal: controller.signal });
+        diagnostic('Claude Code installed', { step: 'install', version: installed.version, bundled: installed.bundled });
+        return { version: installed.version };
+      } finally {
+        if (installing === controller) installing = undefined;
+      }
     },
 
     async signIn(): Promise<AgentSignIn> {
@@ -372,6 +457,8 @@ export function createClaudeCodeSetup(options: ClaudeCodeSetupOptions): ClaudeCo
     },
 
     close() {
+      installing?.abort();
+      installing = undefined;
       generation++;
       stopRunning('cancelled');
       for (const terminal of live) terminal.kill();

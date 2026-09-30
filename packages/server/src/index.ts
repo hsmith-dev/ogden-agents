@@ -35,3 +35,5 @@ export { AgentError, type AgentEvent, type AgentPort, type AgentSession } from '
 export type { AgentSetupPort, AppShortcutPort, SecretStorePort } from '@ogden-agents/core';
 // The in-memory secret store, so tests never touch the real OS keychain (story 9.2).
 export { createMemorySecretStore } from '@ogden-agents/adapters';
+// The Claude Code install's runner and pins, for tests that install a local fixture (story 9.3).
+export { spawnNpm, type AdapterPins, type NpmRunInput, type NpmRunner } from '@ogden-agents/adapters';

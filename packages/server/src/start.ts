@@ -8,15 +8,17 @@ import {
   createClaudeCodeAgent,
   createClaudeCodeSetup,
   createKeyringSecretStore,
-  createMemoryAgentSetup,
   createMemoryAppShortcut,
   createMemorySecretStore,
   createOsAppShortcut,
   createUvToolchain,
+  locateClaudeAdapter,
   resolveClaudeAgentAcp,
+  type ClaudeCodeSetupOptions,
   type PtyLoader,
 } from '@ogden-agents/adapters';
 import {
+  AgentSetupError,
   CoreError,
   createAgentSetup,
   createChat,
@@ -74,10 +76,14 @@ function defaultWebRoot(): string {
 
 /**
  * The Claude Agent ACP adapter's entry script, for a server started without
- * `claudeAdapterPath` (`pnpm dev:chat` sets it). Until onboarding installs
- * the adapter (story 9.3), a server without it finds it only in a dev install.
+ * `claudeAdapterPath` (`pnpm dev:chat` sets it). Without either, a dev
+ * install's `node_modules` adapter is used, else the one Install put in the
+ * data folder (story 9.3).
  */
 export const CLAUDE_ACP_PATH_ENV = 'OGDEN_AGENTS_CLAUDE_ACP_PATH';
+
+/** How long a stopping server waits for a killed install to remove its temp folder. */
+const INSTALL_STOP_MS = 10_000;
 
 /** Test-only: shortens the quiet-agent check-in delay, in milliseconds (story 2.10). */
 export const CHECK_IN_MS_ENV = 'OGDEN_AGENTS_TEST_CHECK_IN_MS';
@@ -201,9 +207,22 @@ export interface StartOptions {
    * The Claude Agent ACP adapter's entry script (or, in tests, any script
    * that speaks ACP over stdio, such as the fake agent). Default:
    * `$OGDEN_AGENTS_CLAUDE_ACP_PATH`, else the adapter in `node_modules` if
-   * this is a dev install.
+   * this is a dev install, else the one Install put in the data folder,
+   * looked for at each chat start and status (story 9.3).
    */
-  claudeAdapterPath?: string;
+  claudeAdapterPath?: string | undefined;
+  /**
+   * Installing Claude Code (story 9.3): the pins, npm and its runner (tests: a
+   * local fixture lock, the test's npm, a slowed runner), and `devAdapter:
+   * false` to ignore a dev install's `node_modules` adapter, so only the data
+   * folder's counts. Default: the pinned adapter, npm beside this Node.
+   */
+  claudeInstall?: NonNullable<ClaudeCodeSetupOptions['install']> & { devAdapter?: boolean };
+  /**
+   * The user's own `claude` for Claude Code (tests: `null`, none). Default:
+   * one found on `PATH` or at Claude Code's install locations.
+   */
+  claudeExecutable?: string | null;
   /**
    * How long a `working` agent may be silent before core checks in (story
    * 2.10). Default: `$OGDEN_AGENTS_TEST_CHECK_IN_MS` if set (tests and
@@ -214,8 +233,8 @@ export interface StartOptions {
   extraAgentEnv?: Readonly<Record<string, string>>;
   /**
    * Installing and signing into each agent. Default: the `setup-claude-code`
-   * adapter when the Claude Agent ACP adapter is found (see
-   * {@link claudeAdapterPath}), else the in-memory `setup-memory` stub.
+   * adapter, which finds the Claude Agent ACP adapter (see
+   * {@link claudeAdapterPath}) or installs it into the data folder.
    */
   agentSetup?: readonly AgentSetupPort[];
   /** Loads `node-pty` for the hidden sign-in terminal (tests: one that fails, AD-19). Default: `terminal-pty`'s lazy loader. */
@@ -421,10 +440,18 @@ async function listenAndAnnounce({
     // The event carries the plain reason; the log also gets the target, URL and (on a mismatch) both hashes.
     onFailure: (error) => log.warn('uv install failed', { code: error.code, reason: error.message, ...error.details }),
   });
+  // The adapter given, else a dev install's; else (read at each use) the one Install put in the data folder (story 9.3).
+  const givenClaudeAdapter =
+    options.claudeAdapterPath ??
+    (process.env[CLAUDE_ACP_PATH_ENV] || undefined) ??
+    (options.claudeInstall?.devAdapter === false ? undefined : resolveClaudeAgentAcp());
+  const { devAdapter: _devAdapter, ...claudeInstall } = options.claudeInstall ?? {};
+  const claudeAdapter = () => locateClaudeAdapter({ adapterPath: givenClaudeAdapter, dataDir, pins: claudeInstall.pins })?.path;
   const agent =
     options.agent ??
     createClaudeCodeAgent({
-      adapterPath: options.claudeAdapterPath ?? (process.env[CLAUDE_ACP_PATH_ENV] || undefined),
+      adapterPath: claudeAdapter,
+      ...(options.claudeExecutable === undefined ? {} : { claudeExecutable: options.claudeExecutable }),
       onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields),
     });
   // Agents from before this start are gone with their processes (AD-3): their sessions can be resumed, not left working.
@@ -432,12 +459,18 @@ async function listenAndAnnounce({
   if (settled.length > 0) log.info('sessions left working by a stopped server are idle and resumable', { sessions: settled.length });
   const extraAgentEnv = options.extraAgentEnv ?? {};
   const agentEnv = () => ({ ...agentEnvironment(), ...extraAgentEnv });
-  const claudeAdapterPath = options.claudeAdapterPath ?? (process.env[CLAUDE_ACP_PATH_ENV] || undefined) ?? resolveClaudeAgentAcp();
-  // The real sign-in only where the adapter is found; the memory stub (not installed) elsewhere.
   const claudeSetup =
-    options.agentSetup === undefined && claudeAdapterPath !== undefined
+    options.agentSetup === undefined
       ? createClaudeCodeSetup({
-          adapterPath: claudeAdapterPath,
+          adapterPath: givenClaudeAdapter,
+          dataDir,
+          install: {
+            // The npm that launched Ogden Agents (`npx ogden-agents`), read here before any child environment drops npm_* (story 9.3).
+            launcherNpm: process.env.npm_execpath,
+            ...claudeInstall,
+            onCleanupError: (error) => log.warn('could not remove Claude Code install temp files', { code: (error as NodeJS.ErrnoException).code ?? 'unknown' }),
+          },
+          ...(options.claudeExecutable === undefined ? {} : { claudeExecutable: options.claudeExecutable }),
           // Sign-in and `auth status` never see an API key (story 9.2).
           env: () => withoutAgentKeys(agentEnv()),
           ...(options.verifyApiKey === undefined ? {} : { apiKey: { verify: options.verifyApiKey } }),
@@ -449,17 +482,19 @@ async function listenAndAnnounce({
         })
       : undefined;
   const secrets = options.secrets ?? (testSecretStore() === 'memory' ? createMemorySecretStore() : createKeyringSecretStore());
-  const agentSetup = createAgentSetup(core.events, options.agentSetup ?? (claudeSetup === undefined ? [createMemoryAgentSetup()] : [claudeSetup]), {
+  const agentSetup = createAgentSetup(core.events, options.agentSetup ?? (claudeSetup === undefined ? [] : [claudeSetup]), {
     secrets,
     // A key in this server's own environment follows the same rule as a saved one (review F1).
     inheritedEnv: () => agentKeysOf({ ...process.env, ...extraAgentEnv }),
     // Codes and plain reasons only: never a URL, a code or a key.
     onFailure: (agentId, step, error) =>
-      log.warn('agent sign-in step failed', {
+      log.warn('agent setup step failed', {
         agentId,
         step,
         code: error instanceof CoreError ? error.code : 'unexpected',
         ...(error instanceof CoreError ? { reason: error.message } : {}),
+        // An install's step and npm's error code only (story 9.3): never npm's output.
+        ...(error instanceof AgentSetupError ? error.details : {}),
       }),
   });
   // One instance for the chat that asks and the routes that answer: core's (story 2.6).
@@ -585,9 +620,11 @@ async function listenAndAnnounce({
   const shutdown = (reason: StopReason): Promise<void> => {
     closing ??= closeServer(server, wss)
       // The server owns agent processes (AD-3): none outlives it, a hidden sign-in terminal included.
-      .finally(() => {
+      .finally(async () => {
+        // Kills a running npm too; its temp folder goes once it has exited.
         claudeSetup?.close();
-        return agentSetup.dispose().catch((error: unknown) => log.warn('stopping sign-ins failed', { reason: String(error) }));
+        await agentSetup.dispose().catch((error: unknown) => log.warn('stopping sign-ins failed', { reason: String(error) }));
+        await Promise.race([agentSetup.settled(), new Promise((resolve) => setTimeout(resolve, INSTALL_STOP_MS).unref())]);
       })
       .finally(() => chat.close().catch((error: unknown) => log.warn('stopping agents failed', { reason: String(error) })))
       .finally(() => {

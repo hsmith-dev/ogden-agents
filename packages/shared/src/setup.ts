@@ -50,6 +50,14 @@ export const AgentSetupStatus = z.object({
       fromEnvironment: z.boolean().optional(),
     })
     .optional(),
+  /**
+   * What Install downloads (9.3), while not installed: `small` (about 60 MB)
+   * when the agent can run the user's own CLI, `large` (about 250 MB) when it
+   * brings its own.
+   */
+  installSize: z.enum(['small', 'large']).optional(),
+  /** The step under way and how far it is (0 to 100, or `null` when it can't tell), while `install` is `installing` (9.3). */
+  progress: z.object({ step: z.string().min(1), percent: z.number().min(0).max(100).nullable() }).optional(),
 });
 export type AgentSetupStatus = z.infer<typeof AgentSetupStatus>;
 

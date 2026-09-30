@@ -387,7 +387,7 @@ function removeLeftovers(toolsDir: string, onError: (error: unknown) => void): v
 const RETRYABLE_RENAME = new Set(['EPERM', 'EBUSY', 'EACCES']);
 
 /** `renameSync`, retried briefly when Windows (an antivirus scan, say) holds the folder. */
-async function renameWithRetry(from: string, to: string, attempts = 5): Promise<void> {
+export async function renameWithRetry(from: string, to: string, attempts = 5): Promise<void> {
   for (let attempt = 1; ; attempt++) {
     try {
       renameSync(from, to);

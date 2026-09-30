@@ -545,3 +545,111 @@ describe('agent setup: API key review fixes (story 9.2)', () => {
     await expect(setup.refreshIfStale('nope', 0)).resolves.toBeUndefined();
   });
 });
+
+describe('agent setup: install (story 9.3)', () => {
+  /** A port that is not installed until its install finishes; the test drives each install by hand. */
+  function installablePort() {
+    let installed = false;
+    const runs: Array<{ progress: (step: string, percent: number | null) => void; finish: (version: string) => void; fail: (error: unknown) => void }> = [];
+    const { port } = fakePort({
+      status: async () => ({ agentId: 'claude-code', displayName: 'Claude Code', install: installed ? 'installed' : 'not_installed', version: installed ? '0.84.0' : null, auth: 'needs_sign_in', ...(installed ? {} : { installSize: 'small' as const }) }),
+      install: (onProgress) =>
+        new Promise((resolve, reject) => {
+          runs.push({
+            progress: (step, percent) => onProgress({ step, percent }),
+            finish: (version) => {
+              installed = true;
+              resolve({ version });
+            },
+            fail: reject,
+          });
+        }),
+    });
+    return { port, runs };
+  }
+
+  const installEvents = (events: readonly CoreEvent[]) =>
+    events.filter((event) => event.type.startsWith('agent.install_')).map((event) => [event.type, (event as { payload: unknown }).payload]);
+
+  it('one install at a time: started, throttled progress, completed, and list follows it', async () => {
+    const core = openTestCore();
+    const { port, runs } = installablePort();
+    let clock = 0;
+    const setup = createAgentSetup(core.events, [port], { now: () => clock, progressIntervalMs: 500 });
+    const first = await setup.install('claude-code');
+    expect(first.started).toBe(true);
+    expect(first.agent).toMatchObject({ install: 'installing', progress: { percent: 0 } });
+    expect(first.agent.installSize).toBeUndefined();
+    // A second click while it runs starts nothing.
+    const second = await setup.install('claude-code');
+    expect(second).toMatchObject({ started: false, agent: { install: 'installing' } });
+    await settle();
+    expect(runs).toHaveLength(1);
+
+    runs[0]!.progress('Downloading Claude Code', 10);
+    runs[0]!.progress('Downloading Claude Code', 20); // throttled
+    clock = 600;
+    runs[0]!.progress('Downloading Claude Code', 50);
+    expect((await setup.list())[0]).toMatchObject({ install: 'installing', progress: { step: 'Downloading Claude Code', percent: 50 } });
+    runs[0]!.progress('Checking Claude Code', 100);
+    runs[0]!.finish('0.84.0');
+    await setup.settled();
+    expect(installEvents(core.events.readAfter(0))).toEqual([
+      ['agent.install_started', { agentId: 'claude-code' }],
+      ['agent.install_progress', { agentId: 'claude-code', step: 'Downloading Claude Code', percent: 10 }],
+      ['agent.install_progress', { agentId: 'claude-code', step: 'Downloading Claude Code', percent: 50 }],
+      ['agent.install_progress', { agentId: 'claude-code', step: 'Checking Claude Code', percent: 100 }],
+      ['agent.install_completed', { agentId: 'claude-code', version: '0.84.0' }],
+    ]);
+    expect((await setup.list())[0]).toMatchObject({ install: 'installed', version: '0.84.0', auth: 'needs_sign_in' });
+    // Installed: Install starts nothing.
+    expect(await setup.install('claude-code')).toMatchObject({ started: false, agent: { install: 'installed' } });
+  });
+
+  it('a failed install appends the plain reason (details go to onFailure only), list shows it, and Try again clears it', async () => {
+    const core = openTestCore();
+    const { port, runs } = installablePort();
+    const failures: Array<[string, unknown]> = [];
+    const setup = createAgentSetup(core.events, [port], { onFailure: (_agentId, step, error) => failures.push([step, error]) });
+    await setup.install('claude-code');
+    await settle();
+    runs[0]!.fail(new AgentSetupError("The download didn't match the expected files, so nothing was installed. Try again.", { details: { npmCode: 'EINTEGRITY' } }));
+    await setup.settled();
+    const failed = core.events.readAfter(0).find((event) => event.type === 'agent.install_failed');
+    expect(failed?.payload).toEqual({ agentId: 'claude-code', reason: "The download didn't match the expected files, so nothing was installed. Try again." });
+    expect(JSON.stringify(core.events.readAfter(0))).not.toContain('EINTEGRITY');
+    expect(failures[0]![0]).toBe('install');
+    expect((failures[0]![1] as AgentSetupError).details).toEqual({ npmCode: 'EINTEGRITY' });
+    expect((await setup.list())[0]).toMatchObject({ install: 'failed', reason: "The download didn't match the expected files, so nothing was installed. Try again." });
+
+    // An unexpected error gets the generic words.
+    expect((await setup.install('claude-code')).started).toBe(true);
+    expect((await setup.list())[0]!.install).toBe('installing');
+    await settle();
+    runs[1]!.fail(new Error('/secret/path exploded'));
+    await setup.settled();
+    expect((await setup.list())[0]!.reason).toBe("Claude Code couldn't be installed. Try again.");
+    expect(JSON.stringify(core.events.readAfter(0))).not.toContain('/secret/path');
+
+    await setup.install('claude-code');
+    await settle();
+    runs[2]!.finish('0.84.0');
+    await setup.settled();
+    expect((await setup.list())[0]).toMatchObject({ install: 'installed' });
+    expect((await setup.list())[0]!.reason).toBeUndefined();
+  });
+
+  it('an unknown agent is not found; after dispose an install appends nothing', async () => {
+    const core = openTestCore();
+    const { port, runs } = installablePort();
+    const setup = createAgentSetup(core.events, [port]);
+    await expect(setup.install('nope')).rejects.toBeInstanceOf(NotFoundError);
+    await setup.install('claude-code');
+    await settle();
+    await setup.dispose();
+    runs[0]!.fail(new AgentSetupError('Installing Claude Code was stopped.'));
+    await setup.settled();
+    expect(installEvents(core.events.readAfter(0)).map(([type]) => type)).toEqual(['agent.install_started']);
+    await expect(setup.install('claude-code')).rejects.toBeInstanceOf(AgentSetupError);
+  });
+});

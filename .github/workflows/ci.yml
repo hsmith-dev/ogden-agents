@@ -96,6 +96,32 @@ jobs:
       - name: Check every pinned uv archive
         run: node scripts/check-uv-pins.mjs
 
+  # The Claude Agent ACP adapter Ogden Agents may install (story 9.3): a real
+  # `npm ci` of the pins in packages/adapters/src/setup-claude-code/pins/ into
+  # a temp folder, as the app runs it (--ignore-scripts, integrity checked),
+  # without and with the Agent SDK's bundled claude, on each OS. The only job
+  # that downloads the adapter; the unit and browser tests use a local fixture.
+  agent-pins:
+    name: Agent pins (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install the pinned adapter without the bundled claude
+        run: node scripts/agent-pins.mjs --check
+
+      - name: Install the pinned adapter with the bundled claude
+        run: node scripts/agent-pins.mjs --check --with-binary
+
   # UI layout in a real browser (architecture Conventions: jsdom doesn't
   # evaluate media queries): sidebar forms and overflow at 1440, 900 and 390
   # px, theme and density switching, and the signed-out launch page.

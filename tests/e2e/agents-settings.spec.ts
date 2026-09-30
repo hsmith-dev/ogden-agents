@@ -9,11 +9,16 @@
  *
  * An API key instead (story 9.2): kept in an in-memory secret store and
  * checked by a stub, so no test touches the real keychain or reaches Anthropic.
+ *
+ * Install (story 9.3): the real npm installs a fake adapter packed at test
+ * time from a local tarball pinned by integrity (`tests/fixtures/fake-adapter`),
+ * offline, into the test's data folder; its `dist/index.js` runs the fake agent.
  */
 import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { packFakeAdapter, testNpmCli } from '../fixtures/fake-adapter/pack.mjs';
 import { makeDataDir, removeDataDir, serverModule, startServer, type RunningServer, type StartOptions } from '../support.js';
 import { send, startChat } from './chat-server.js';
 import { openConnected } from './tab.js';
@@ -207,5 +212,55 @@ test('signed out, an API key pasted on the card is saved, used by the chat, kept
     removeDataDir(dataDir);
     removeDataDir(stateDir);
     removeDataDir(repo);
+  }
+});
+
+test('not installed, Install shows its size, then its progress, then Installed, needs sign-in, and a chat runs the installed adapter', async ({ page }) => {
+  const work = mkdtempSync(join(tmpdir(), 'ogden-agents-e2e-install-'));
+  try {
+    const npmCli = testNpmCli();
+    const { pins, version } = packFakeAdapter(join(work, 'fixture'), { npmCli });
+    const { spawnNpm, createLogger } = await serverModule();
+    // npm's home is an empty temp folder that must stay empty: nothing is written outside the data folder.
+    const home = join(work, 'home');
+    mkdirSync(home);
+    const repo = join(work, 'repo');
+    mkdirSync(repo);
+    const lines: string[] = [];
+    // The real npm, held a moment after it exits, so the page shows the install under way.
+    const heldNpm: typeof spawnNpm = (input) => {
+      const run = spawnNpm(input);
+      return { kill: run.kill, exited: run.exited.then(async (result) => (await new Promise((resolve) => setTimeout(resolve, 1500)), result)) };
+    };
+    const extra: StartOptions = {
+      claudeAdapterPath: undefined,
+      claudeExecutable: null,
+      claudeInstall: { devAdapter: false, pins, npmCli, runNpm: heldNpm, env: { ...process.env, HOME: home, USERPROFILE: home } },
+      log: createLogger((line) => lines.push(line)),
+    };
+    await withAgentsServer(page, {}, extra, async () => {
+      await expect(card(page)).toHaveAttribute('data-install', 'not_installed');
+      await expect(card(page).getByTestId('agent-state')).toContainText('Not installed');
+      // No claude on this computer: the adapter comes with the SDK's own.
+      await expect(card(page).getByTestId('agent-install-size')).toHaveText('about 250 MB');
+
+      await card(page).getByRole('button', { name: 'Install' }).click();
+      await expect(card(page)).toHaveAttribute('data-install', 'installing');
+      await expect(card(page).getByTestId('agent-state')).toContainText('Installing Claude Code');
+      await expect(card(page).getByTestId('agent-install-progress')).toBeVisible();
+
+      await expect(card(page).getByTestId('agent-state')).toContainText('Installed, needs sign-in', { timeout: 30_000 });
+      await expect(card(page)).toHaveAttribute('data-install', 'installed');
+      await expect(card(page).getByTestId('agent-install-size')).toHaveCount(0);
+
+      // A chat runs through the adapter just installed in the data folder, without a restart.
+      await startChat(page, repo);
+      await send(page, 'hello');
+      await expect(page.getByTestId('message-agent')).toContainText('Hello from the fake agent.');
+      expect(lines.join('')).toContain(`adapter-${version}-bundled`);
+      expect(readdirSync(home)).toEqual([]);
+    });
+  } finally {
+    removeDataDir(work);
   }
 });

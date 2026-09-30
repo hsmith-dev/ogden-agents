@@ -10,6 +10,12 @@
  *
  * One sign-in runs per agent: starting a new one cancels the one before.
  *
+ * Install (story 9.3): one install per agent at a time, only when the user
+ * asks. Its start, throttled progress, completion and failure become
+ * `agent.install_*` events with plain words only (the port's details go to
+ * `onFailure`, for the log); the last failure is shown until the agent is
+ * found installed or another install starts.
+ *
  * API keys (story 9.2, AD-16): a key is checked with the agent's free verify
  * call, stored through {@link SecretStorePort} under `agent-api-key/<agentId>`
  * and kept in memory for {@link AgentSetup.agentEnv}, which puts it in the
@@ -28,10 +34,11 @@ import {
   type AgentSetupStatus,
   type SignInResponse,
 } from '@ogden-agents/shared';
-import type { AgentPortStatus, AgentSetupPort, AgentSignIn, AgentSubscriptionState, ApiKeyVerification } from './agent-setup-port.js';
+import type { AgentInstallProgress, AgentPortStatus, AgentSetupPort, AgentSignIn, AgentSubscriptionState, ApiKeyVerification } from './agent-setup-port.js';
 import { ApiKeyRefusedError, CoreError, NotFoundError, SecretsUnavailableError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import type { SecretStorePort } from './secret-store-port.js';
+import { PROGRESS_INTERVAL_MS } from './toolchain.js';
 
 /** The secret name an agent's API key is stored under. */
 export const apiKeySecretName = (agentId: string) => `agent-api-key/${agentId}`;
@@ -42,8 +49,11 @@ export const apiKeySecretName = (agentId: string) => `agent-api-key/${agentId}`;
  */
 export class AgentSetupError extends CoreError {
   override readonly name = 'AgentSetupError';
-  constructor(message: string, options: { cause?: unknown } = {}) {
+  /** For the log only (an install's step and npm's error code, say); never a secret, a URL or the agent's output. */
+  readonly details: Readonly<Record<string, unknown>>;
+  constructor(message: string, options: { cause?: unknown; details?: Record<string, unknown> } = {}) {
     super('agent_setup_failed', message);
+    this.details = options.details ?? {};
     if (options.cause !== undefined) this.cause = options.cause;
   }
 }
@@ -103,6 +113,15 @@ export interface AgentSetup {
   submitCode(agentId: string, code: string): Promise<void>;
   /** Stops the running sign-in, if there is one. Idempotent. */
   cancelSignIn(agentId: string): Promise<void>;
+  /**
+   * Starts installing `agentId`, only when the user asks, unless it is
+   * already installed or an install is running (`started: false`, with its
+   * status). Returns at once; progress and the outcome arrive as
+   * `agent.install_*` events.
+   */
+  install(agentId: string): Promise<{ started: boolean; agent: AgentSetupStatus }>;
+  /** Resolves once no install is running (tests, shutdown). */
+  settled(): Promise<void>;
   /** Stops every sign-in (server stop). Appends nothing. */
   dispose(): Promise<void>;
 }
@@ -118,8 +137,10 @@ export interface AgentSetupOptions {
    * key, which comes first. Never logged.
    */
   inheritedEnv?: () => Readonly<Record<string, string | undefined>>;
-  /** The clock for the subscription state's age. Default `Date.now`. */
+  /** The clock for the subscription state's age and install progress throttling. Default `Date.now`. */
   now?: () => number;
+  /** Minimum time between two install progress events. Default {@link PROGRESS_INTERVAL_MS}. */
+  progressIntervalMs?: number;
 }
 
 /** A saved API key, in memory only. `unchecked`: the provider couldn't be asked when it was saved (not kept across a restart). */
@@ -134,6 +155,18 @@ function subscriptionOf(status: AgentPortStatus): AgentSubscriptionState {
   if (status.auth === 'signed_in' && status.method !== 'api_key') return 'signed_in';
   if (status.install === 'installed' && status.auth === 'needs_sign_in' && status.reason === undefined) return 'signed_out';
   return 'unknown';
+}
+
+/** The port status as core shows it: no subscription state, which never leaves core. */
+function shown(reported: AgentPortStatus): AgentSetupStatus {
+  const { subscription: _subscription, ...rest } = reported;
+  return rest;
+}
+
+/** `status` while an install runs: its progress in place of a reason or a size. */
+function installingStatus(status: AgentSetupStatus, progress: AgentInstallProgress): AgentSetupStatus {
+  const { reason: _reason, installSize: _size, method: _method, ...rest } = status;
+  return { ...rest, install: 'installing', progress: { step: progress.step, percent: progress.percent } };
 }
 
 interface Flight {
@@ -159,6 +192,11 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
   /** Agents whose last key write failed (a timeout may still complete): re-read from the store at each `list()` until a write succeeds. */
   const resync = new Set<string>();
   const now = options.now ?? Date.now;
+  const progressInterval = options.progressIntervalMs ?? PROGRESS_INTERVAL_MS;
+  /** Each running install's latest progress, and when it is done. */
+  const installs = new Map<string, { progress: AgentInstallProgress; done: Promise<void> }>();
+  /** The last failed install's plain reason, shown until the agent is found installed or another install starts. */
+  const installFailure = new Map<string, string>();
   /** Aborted by `dispose`, so a verify call in flight stops with the server. */
   const lifetime = new AbortController();
   let disposed = false;
@@ -275,6 +313,92 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
     return { ...status, apiKey };
   };
 
+  /** Appends an install event, unless the server is stopping. */
+  const appendInstall = (agentId: string, event: Parameters<EventLog['append']>[0]) => {
+    if (disposed) return;
+    try {
+      events.append(event);
+    } catch (error) {
+      report(agentId, 'append', error);
+    }
+  };
+
+  /** One agent's setup as `list` shows it. */
+  const statusFor = async (port: AgentSetupPort): Promise<AgentSetupStatus> => {
+    // A key write that failed (timed out) may have completed since: show what the store holds.
+    if (resync.has(port.agentId)) await syncFromStore(port);
+    let status: AgentSetupStatus;
+    try {
+      const reported = await port.status();
+      setSubscription(port.agentId, subscriptionOf(reported));
+      status = shown(reported);
+    } catch (error) {
+      report(port.agentId, 'status', error);
+      setSubscription(port.agentId, 'unknown');
+      status = {
+        agentId: port.agentId,
+        displayName: port.displayName,
+        install: 'not_installed',
+        version: null,
+        auth: 'needs_sign_in',
+        reason: `Ogden Agents couldn't check ${port.displayName}. Try again.`,
+      };
+    }
+    const install = installs.get(port.agentId);
+    if (install !== undefined) return withApiKey(port, installingStatus(status, install.progress));
+    if (status.install === 'installed') installFailure.delete(port.agentId);
+    else {
+      const failure = installFailure.get(port.agentId);
+      if (failure !== undefined) return withApiKey(port, { ...status, install: 'failed', reason: failure });
+    }
+    if (flights.has(port.agentId)) {
+      const { reason: _reason, method: _method, ...rest } = status;
+      return withApiKey(port, { ...rest, auth: 'signing_in' });
+    }
+    const failure = lastFailure.get(port.agentId);
+    if (status.auth === 'signed_in') lastFailure.delete(port.agentId);
+    else if (failure !== undefined) return withApiKey(port, { ...status, auth: 'failed', reason: failure });
+    return withApiKey(port, status);
+  };
+
+  /** Runs the port's install, turning what it reports into events. Never throws. */
+  const runInstall = async (port: AgentSetupPort, progress: AgentInstallProgress): Promise<void> => {
+    const agentId = port.agentId;
+    let lastEmitted = Number.NEGATIVE_INFINITY;
+    /** The step and percent last sent; the same pair is never sent twice. */
+    let emitted: string | undefined;
+    const key = () => `${progress.step}\u0000${progress.percent ?? ''}`;
+    const emit = () => {
+      lastEmitted = now();
+      emitted = key();
+      appendInstall(agentId, { type: 'agent.install_progress', workspaceId: null, streamId: AGENTS_STREAM, payload: { agentId, step: progress.step, percent: progress.percent } });
+    };
+    try {
+      const { version } = await port.install((next) => {
+        progress.step = next.step;
+        progress.percent = next.percent === null ? null : Math.max(0, Math.min(100, next.percent));
+        if (key() === emitted) return;
+        if (progress.percent === 100 || now() - lastEmitted >= progressInterval) emit();
+      });
+      // The last step always goes out, even when it was throttled.
+      if (key() !== emitted) emit();
+      // Read the new install's status before announcing it, so the page's refetch finds it installed.
+      await readSubscription(port);
+      installFailure.delete(agentId);
+      appendInstall(agentId, {
+        type: 'agent.install_completed',
+        workspaceId: null,
+        streamId: AGENTS_STREAM,
+        payload: { agentId, ...(version === null ? {} : { version }) },
+      });
+    } catch (error) {
+      report(agentId, 'install', error);
+      const reason = error instanceof AgentSetupError ? error.message : `${port.displayName} couldn't be installed. Try again.`;
+      installFailure.set(agentId, reason);
+      appendInstall(agentId, { type: 'agent.install_failed', workspaceId: null, streamId: AGENTS_STREAM, payload: { agentId, reason } });
+    }
+  };
+
   const stop = async (flight: Flight) => {
     flight.stopped = true;
     try {
@@ -325,38 +449,44 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
     },
 
     async list() {
-      return Promise.all(
-        ports.map(async (port): Promise<AgentSetupStatus> => {
-          // A key write that failed (timed out) may have completed since: show what the store holds.
-          if (resync.has(port.agentId)) await syncFromStore(port);
-          let status: AgentSetupStatus;
-          try {
-            const reported = await port.status();
-            setSubscription(port.agentId, subscriptionOf(reported));
-            const { subscription: _subscription, ...rest } = reported;
-            status = rest;
-          } catch (error) {
-            report(port.agentId, 'status', error);
-            setSubscription(port.agentId, 'unknown');
-            status = {
-              agentId: port.agentId,
-              displayName: port.displayName,
-              install: 'not_installed',
-              version: null,
-              auth: 'needs_sign_in',
-              reason: `Ogden Agents couldn't check ${port.displayName}. Try again.`,
-            };
-          }
-          if (flights.has(port.agentId)) {
-            const { reason: _reason, method: _method, ...rest } = status;
-            return withApiKey(port, { ...rest, auth: 'signing_in' });
-          }
-          const failure = lastFailure.get(port.agentId);
-          if (status.auth === 'signed_in') lastFailure.delete(port.agentId);
-          else if (failure !== undefined) return withApiKey(port, { ...status, auth: 'failed', reason: failure });
-          return withApiKey(port, status);
-        }),
-      );
+      return Promise.all(ports.map(statusFor));
+    },
+
+    async install(agentId) {
+      const port = portFor(agentId);
+      if (disposed) throw new AgentSetupError(`${port.displayName} couldn't be installed. Try again.`);
+      if (installs.has(agentId)) return { started: false, agent: await statusFor(port) };
+      // Claimed before any await, so two clicks start one install.
+      const progress: AgentInstallProgress = { step: `Installing ${port.displayName}`, percent: 0 };
+      let release!: () => void;
+      installs.set(agentId, { progress, done: new Promise<void>((resolve) => (release = resolve)) });
+      let detected: AgentPortStatus;
+      try {
+        detected = await port.status();
+      } catch (error) {
+        report(agentId, 'status', error);
+        detected = { agentId, displayName: port.displayName, install: 'not_installed', version: null, auth: 'needs_sign_in' };
+      }
+      if (detected.install === 'installed' || disposed) {
+        installs.delete(agentId);
+        release();
+        return { started: false, agent: await statusFor(port) };
+      }
+      installFailure.delete(agentId);
+      appendInstall(agentId, { type: 'agent.install_started', workspaceId: null, streamId: AGENTS_STREAM, payload: { agentId } });
+      void runInstall(port, progress).finally(() => {
+        installs.delete(agentId);
+        release();
+      });
+      return { started: true, agent: withApiKey(port, installingStatus(shown(detected), progress)) };
+    },
+
+    async settled() {
+      for (;;) {
+        const running = [...installs.values()];
+        if (running.length === 0) return;
+        await Promise.all(running.map((install) => install.done));
+      }
     },
 
     async setApiKey(agentId, apiKey) {

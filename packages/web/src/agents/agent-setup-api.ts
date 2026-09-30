@@ -1,8 +1,8 @@
-import { AgentsResponse, API_ROUTES, apiPath, SignInResponse, type AgentSetupStatus } from '@ogden-agents/shared';
+import { AgentSetupStatus, AgentsResponse, API_ROUTES, apiPath, SignInResponse } from '@ogden-agents/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useState } from 'react';
-import { tabAuth, type TabAuth } from '@/auth/tab-token';
-import { call, ChatApiError, postJson } from '@/chat/chat-api';
+import { call, callNoContent, postJson, type Auth } from '@/api/http';
+import { tabAuth } from '@/auth/tab-token';
 import { useEventStream } from '@/events/event-stream';
 
 /**
@@ -14,12 +14,10 @@ import { useEventStream } from '@/events/event-stream';
  * tab's memory (component state) and never stored, logged or put in a URL
  * of ours; a pasted code is sent once and never kept. So is an API key
  * (9.2): sent once in a `PUT`, never kept, and never read back (the server
- * returns only its last 4 characters).
+ * returns only its last 4 characters). Install (9.3) asks the server to
+ * install the agent; its progress and outcome arrive as `agent.install_*`
+ * events, which refetch the agents query.
  */
-
-type Auth = Pick<TabAuth, 'fetch'>;
-
-const UNREACHABLE = "Couldn't reach Ogden Agents. Check that it is still running, then try again.";
 
 export const AGENTS_QUERY_KEY = ['agents'] as const;
 
@@ -35,23 +33,10 @@ export async function startSignIn(agentId: string, auth: Auth = tabAuth): Promis
   return SignInResponse.parse(json);
 }
 
-/** A request answered 204. */
-async function callNoContent(auth: Auth, path: string, init: RequestInit, fallback: string): Promise<void> {
-  let response: Response;
-  try {
-    response = await auth.fetch(path, init);
-  } catch {
-    throw new ChatApiError(UNREACHABLE, 0);
-  }
-  if (response.ok) return;
-  let message = `${fallback} (error ${response.status}).`;
-  try {
-    const body = (await response.json()) as { error?: { message?: unknown } };
-    if (typeof body.error?.message === 'string') message = body.error.message;
-  } catch {
-    // Not JSON: keep the fallback.
-  }
-  throw new ChatApiError(message, response.status);
+/** `POST /api/v1/agents/:agentId/install`: starts installing (202), or answers with the install already running. */
+export async function installAgent(agentId: string, auth: Auth = tabAuth): Promise<AgentSetupStatus> {
+  const json = await call(auth, apiPath(API_ROUTES.agentInstall, { agentId }), { method: 'POST' }, "Ogden Agents couldn't start the install");
+  return AgentSetupStatus.parse(json);
 }
 
 /** `DELETE /api/v1/agents/:agentId/sign-in`: stops a sign-in in progress. */
@@ -231,4 +216,38 @@ export function useApiKey(agentId: string, auth: Auth = tabAuth): ApiKeyActions 
   };
 
   return { save, remove, busy, error };
+}
+
+export interface InstallAction {
+  /** Asks the server to install the agent; the card then follows the agents query. */
+  start(): void;
+  /** Whether the request is running. */
+  busy: boolean;
+  /** Plain words for a request that failed (not an install that failed: that is the agent's `reason`). */
+  error: string | undefined;
+}
+
+/** Install (9.3), for Settings: Agents and Welcome (9.5). */
+export function useInstall(agentId: string, auth: Auth = tabAuth): InstallAction {
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+
+  const start = () => {
+    setBusy(true);
+    setError(undefined);
+    installAgent(agentId, auth).then(
+      (agent) => {
+        setBusy(false);
+        queryClient.setQueryData<AgentSetupStatus[]>(AGENTS_QUERY_KEY, (agents) => agents?.map((known) => (known.agentId === agent.agentId ? agent : known)));
+      },
+      (caught: unknown) => {
+        setBusy(false);
+        setError(caught instanceof Error ? caught.message : "Ogden Agents couldn't start the install. Try again.");
+        void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
+      },
+    );
+  };
+
+  return { start, busy, error };
 }

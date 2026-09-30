@@ -6,8 +6,9 @@
  *
  * - The adapter is not a dependency of the published package (about 230 MB
  *   with its bundled CLI); it is found at a configurable path, by default
- *   resolved from `node_modules` where a dev install has it. Installing it on
- *   demand is onboarding story 9.3.
+ *   resolved from `node_modules` where a dev install has it. Onboarding
+ *   (story 9.3) installs it on demand into the data folder; the server then
+ *   passes a function that finds it at each start.
  * - The adapter runs the user's own `claude` when one is found, through
  *   `CLAUDE_CODE_EXECUTABLE`, so their login and version are used; otherwise
  *   it falls back to the Agent SDK's bundled binary.
@@ -75,10 +76,12 @@ const FAILED = `${CLAUDE_CODE} stopped with an error. Try again.`;
 export interface ClaudeCodeAgentOptions {
   /**
    * The adapter's entry script (`claude-agent-acp`'s `dist/index.js`), or
-   * any script that speaks ACP over stdio (the tests' fake agent). Default:
-   * resolved from `node_modules` ({@link resolveClaudeAgentAcp}).
+   * any script that speaks ACP over stdio (the tests' fake agent), or a
+   * function read at each start (so an adapter installed while the server
+   * runs is used without a restart, story 9.3). Default: resolved from
+   * `node_modules` ({@link resolveClaudeAgentAcp}).
    */
-  adapterPath?: string | undefined;
+  adapterPath?: string | (() => string | undefined) | undefined;
   /**
    * The `claude` CLI the adapter runs. Default: one found on `PATH` or at
    * Claude Code's install locations ({@link findClaudeExecutable}); `null`
@@ -134,7 +137,8 @@ export function createClaudeCodeAgent(options: ClaudeCodeAgentOptions = {}): Age
 
   /** Spawns the adapter in `cwd` with core's environment (AD-16), in its own process group. */
   const spawnAdapter = (cwd: string, env: Readonly<Record<string, string>>) => {
-    const adapterPath = options.adapterPath ?? resolveClaudeAgentAcp();
+    const given = typeof options.adapterPath === 'function' ? options.adapterPath() : options.adapterPath;
+    const adapterPath = typeof options.adapterPath === 'function' ? given : (given ?? resolveClaudeAgentAcp());
     if (adapterPath === undefined || !existsSync(adapterPath)) {
       throw new AgentError('agent_unavailable', NOT_SET_UP, { details: { adapterPath: adapterPath ?? null } });
     }

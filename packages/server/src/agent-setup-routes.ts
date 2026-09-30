@@ -5,9 +5,10 @@
  * (AD-15). Routes call core's agent setup use-case and never write
  * themselves (AD-11).
  *
- * Story 9.1 fills the agents list and sign-in (with its pasted code), and
- * story 9.2 the API key. Install (9.3) and onboarding (9.5) still answer 501
- * `not_implemented`, and neither stub reads the body.
+ * Story 9.1 fills the agents list and sign-in (with its pasted code),
+ * story 9.2 the API key and story 9.3 Install, which never reads the body.
+ * Onboarding (9.5) still answers 501 `not_implemented`, and its stub reads
+ * no body either.
  *
  * The sign-in answers are `no-store`: the start carries the sign-in URL,
  * which never enters an event or a log line (AD-15), and the code route
@@ -24,7 +25,7 @@ import {
   ValidationError,
   type AgentSetup,
 } from '@ogden-agents/core';
-import { AgentId, AgentsResponse, API_ROUTES, SetApiKeyRequest, SignInCodeRequest, SignInResponse } from '@ogden-agents/shared';
+import { AgentId, AgentSetupStatus, AgentsResponse, API_ROUTES, SetApiKeyRequest, SignInCodeRequest, SignInResponse } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { readBody } from './chat-routes.js';
@@ -48,20 +49,20 @@ const COULD_NOT_CHECK = "Ogden Agents couldn't check your agents. Try again.";
 const COULD_NOT_SIGN_IN = "Ogden Agents couldn't start signing in. Try again.";
 const COULD_NOT_SAVE_KEY = "Ogden Agents couldn't save the API key. Try again.";
 const COULD_NOT_REMOVE_KEY = "Ogden Agents couldn't remove the API key. Try again.";
+const COULD_NOT_INSTALL = "Ogden Agents couldn't start the install. Try again.";
 
 const noStore = (c: Context) => c.header('Cache-Control', 'no-store');
 
 export function registerAgentSetupRoutes(app: Hono, options: AgentSetupRoutesOptions): void {
   const { agentSetup, log } = options;
 
-  // `POST` → 202 `AgentSetupStatus` (9.3).
-  app.post(API_ROUTES.agentInstall, notImplemented);
   // `GET` and `PATCH` → `OnboardingState` (9.5).
   app.get(API_ROUTES.onboarding, notImplemented);
   app.patch(API_ROUTES.onboarding, notImplemented);
 
   if (agentSetup === undefined) {
     app.get(API_ROUTES.agents, notImplemented);
+    app.post(API_ROUTES.agentInstall, notImplemented);
     // Never reads the body: a key sent here is not parsed or logged.
     app.put(API_ROUTES.agentApiKey, (c) => {
       noStore(c);
@@ -109,6 +110,19 @@ export function registerAgentSetupRoutes(app: Hono, options: AgentSetupRoutesOpt
       return c.json(AgentsResponse.parse({ agents: await agentSetup.list() }));
     } catch (error) {
       return refusal(c, error, COULD_NOT_CHECK);
+    }
+  });
+
+  // `POST` → 202 `AgentSetupStatus`: starts installing, or answers with the install already running (or done).
+  app.post(API_ROUTES.agentInstall, async (c) => {
+    const agentId = agentIdOf(c);
+    if (agentId === undefined) return apiError(c, 404, 'not_found', NO_SUCH_AGENT);
+    try {
+      const { started, agent } = await agentSetup.install(agentId);
+      log.info('agent install requested', { agentId, started, install: agent.install });
+      return c.json(AgentSetupStatus.parse(agent), 202);
+    } catch (error) {
+      return refusal(c, error, COULD_NOT_INSTALL);
     }
   });
 

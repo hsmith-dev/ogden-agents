@@ -6,7 +6,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ToolchainError, type DetectedToolStatus, type ToolchainPort, type ToolProgress } from '@ogden-agents/core';
-import { API_ROUTES, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
+import { API_ROUTES, ApiErrorBody, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createLogger } from '../src/log.js';
 import { start, type RunningServer } from '../src/start.js';
@@ -117,6 +117,22 @@ describe('toolchain routes', () => {
     const again = await fetch(`${server.url}${API_ROUTES.uvInstall}`, { method: 'POST', headers });
     expect(await again.json()).toMatchObject({ started: false, uv: { state: 'ready' } });
     expect(stub.installs()).toBe(1);
+  });
+
+  it('answer a status the server could not read with the shared error body (500)', async () => {
+    const broken: ToolchainPort = {
+      ...stubPort().port,
+      status: async () => {
+        throw new Error('disk on fire');
+      },
+    };
+    const server = await startServer(broken);
+    const { headers } = await signIn(server);
+    const response = await fetch(`${server.url}${API_ROUTES.toolchain}`, { headers });
+    expect(response.status).toBe(500);
+    expect(ApiErrorBody.parse(await response.json())).toEqual({
+      error: { code: 'toolchain_unavailable', message: "Ogden Agents couldn't check for uv. Try again." },
+    });
   });
 
   it('report a failed install plainly, logging the target and both hashes', async () => {

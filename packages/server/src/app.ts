@@ -5,6 +5,7 @@ import { API_ROUTES, ClientMessage, ServerMessage, ToolchainInstallResponse, Too
 import { Hono, type MiddlewareHandler } from 'hono';
 import type { WSContext } from 'hono/ws';
 import { webSocketToken, type TabTokens } from './auth.js';
+import { apiError } from './errors.js';
 import type { Logger } from './log.js';
 import { isServerPath } from './paths.js';
 
@@ -119,30 +120,22 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, tabs
       }
       const result = control.quit(force);
       if (!result.stopping) {
-        return c.json(
-          {
-            error: {
-              code: 'sessions_busy',
-              message: 'Agents are still working. Confirm to stop them and quit.',
-              details: { busySessions: result.busySessions },
-            },
-          },
-          409,
-        );
+        return apiError(c, 409, 'sessions_busy', 'Agents are still working. Confirm to stop them and quit.', {
+          busySessions: result.busySessions,
+        });
       }
       return c.json(result, 202);
     });
   }
 
   if (toolchain !== undefined) {
-    const failure = (message: string) => ({ error: { code: 'toolchain_unavailable', message } });
 
     app.get(API_ROUTES.toolchain, async (c) => {
       try {
         return c.json(ToolchainResponse.parse({ uv: await toolchain.status() }));
       } catch (error) {
         log.error('toolchain status failed', { reason: String(error) });
-        return c.json(failure("Ogden Agents couldn't check for uv. Try again."), 500);
+        return apiError(c, 500, 'toolchain_unavailable', "Ogden Agents couldn't check for uv. Try again.");
       }
     });
 
@@ -155,7 +148,7 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, tabs
         return c.json(result, 202);
       } catch (error) {
         log.error('uv install could not start', { reason: String(error) });
-        return c.json(failure("uv couldn't be installed. Try again."), 500);
+        return apiError(c, 500, 'toolchain_unavailable', "uv couldn't be installed. Try again.");
       }
     });
   }
@@ -243,11 +236,17 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, tabs
     serveStatic({ root: webRoot, rewriteRequestPath: () => '/index.html' }),
   );
 
-  app.notFound((c) =>
-    c.req.path === '/'
-      ? c.text('Ogden Agents UI is not built. Run `pnpm build`.', 503)
-      : c.text('Not found', 404),
-  );
+  // The server's own paths answer in the API's error shape; the app's pages and files in plain text.
+  app.notFound((c) => {
+    if (isServerPath(c.req.path)) return apiError(c, 404, 'not_found', 'There is nothing here.');
+    return c.req.path === '/' ? c.text('Ogden Agents UI is not built. Run `pnpm build`.', 503) : c.text('Not found', 404);
+  });
+
+  app.onError((error, c) => {
+    log.error('request failed', { path: c.req.path, reason: String(error) });
+    if (isServerPath(c.req.path)) return apiError(c, 500, 'internal_error', 'Something went wrong in Ogden Agents. Try again.');
+    return c.text('Internal Server Error', 500);
+  });
 
   return app;
 }

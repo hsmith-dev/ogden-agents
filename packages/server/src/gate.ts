@@ -27,12 +27,14 @@
  *    matched right after the Host check, so rules 2 to 5 never apply to it.
  *
  * Every response carries a Content-Security-Policy that allows only the
- * app's own scripts. Refusals carry no event data. Launch codes, tab tokens
+ * app's own scripts. Refusals carry no event data, only the shared error
+ * shape `{ error: { code, message } }`. Launch codes, tab tokens
  * and the launcher token are never logged (AD-16).
  */
 import type { Context, MiddlewareHandler } from 'hono';
 import { API_ROUTES, LAUNCH_CODE_FRAGMENT_PARAM } from '@ogden-agents/shared';
 import { bearerToken, webSocketToken, type LaunchCodes, type TabTokens } from './auth.js';
+import { apiError } from './errors.js';
 import { LAUNCHER_TOKEN_HEADER, type LauncherToken } from './launcher-token.js';
 import type { Logger } from './log.js';
 import { isLauncherPath, isServerPath, isWsPath } from './paths.js';
@@ -88,18 +90,20 @@ function isRealUpgrade(c: Context): boolean {
     .some((part) => part.trim().toLowerCase() === 'upgrade');
 }
 
-const unauthorized = (c: Context, message = 'This tab is not connected to Ogden Agents.') =>
-  c.json({ error: { code: 'unauthorized', message } }, 401);
+const unauthorized = (c: Context, message = 'This tab is not connected to Ogden Agents.') => apiError(c, 401, 'unauthorized', message);
+
+/** A wrong Host or Origin (AD-15), in the shared error shape like every refusal. */
+const forbidden = (c: Context) => apiError(c, 403, 'forbidden', 'This request did not come from Ogden Agents on this computer.');
 
 export function createGate({ port, codes, tabs, launcherToken, log }: GateOptions): MiddlewareHandler {
   return async (c, next) => {
     const bound = port();
-    if (bound === undefined) return c.text('Forbidden', 403);
+    if (bound === undefined) return forbidden(c);
     const allowedHosts = [`127.0.0.1:${bound}`, `localhost:${bound}`];
     // Set before any response is made, so refusals, routes and upgrades alike carry it.
     c.header('Content-Security-Policy', contentSecurityPolicy(bound));
 
-    if (!allowedHosts.includes(c.req.header('host') ?? '')) return c.text('Forbidden', 403);
+    if (!allowedHosts.includes(c.req.header('host') ?? '')) return forbidden(c);
 
     const path = c.req.path;
     const upgrade = isRealUpgrade(c);
@@ -111,7 +115,7 @@ export function createGate({ port, codes, tabs, launcherToken, log }: GateOption
     if (isLauncherPath(path)) {
       if (launcherToken === undefined || !launcherToken.verify(c.req.header(LAUNCHER_TOKEN_HEADER))) {
         log.warn('launcher token rejected', { path });
-        return c.json({ error: { code: 'unauthorized', message: 'A valid launcher token is required.' } }, 401);
+        return unauthorized(c, 'A valid launcher token is required.');
       }
       // The launcher is not a browser: it sends no tab token and no Origin. The
       // launcher token, readable only by this OS user, is what a page can never send.
@@ -120,7 +124,7 @@ export function createGate({ port, codes, tabs, launcherToken, log }: GateOption
     }
 
     if (path === API_ROUTES.tabExchange && c.req.method === 'POST' && !upgrade) {
-      if (!originOk()) return c.text('Forbidden', 403);
+      if (!originOk()) return forbidden(c);
       let code: unknown;
       try {
         code = ((await c.req.json()) as { code?: unknown } | null)?.code;
@@ -146,7 +150,7 @@ export function createGate({ port, codes, tabs, launcherToken, log }: GateOption
     const token = upgrade && isWsPath(path) ? webSocketToken(c.req.header('sec-websocket-protocol')) : bearerToken(c.req.header('authorization'));
     if (!tabs.verify(token)) return unauthorized(c);
 
-    if ((upgrade || !SAFE_METHODS.has(c.req.method)) && !originOk()) return c.text('Forbidden', 403);
+    if ((upgrade || !SAFE_METHODS.has(c.req.method)) && !originOk()) return forbidden(c);
 
     await next();
   };

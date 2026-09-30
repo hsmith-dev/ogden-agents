@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { request, type IncomingHttpHeaders } from 'node:http';
 import { join } from 'node:path';
 import { LEGACY_AUTH_KEY_FILE, openCore, PORT_FILE } from '@ogden-agents/core';
-import { API_BASE, API_ROUTES, WS_PROTOCOL } from '@ogden-agents/shared';
+import { API_BASE, API_ROUTES, ApiErrorBody, WS_PROTOCOL } from '@ogden-agents/shared';
 
 const { launchCodes: LAUNCH_CODES_PATH, tabCheck: TAB_CHECK_PATH, tabExchange: TAB_EXCHANGE_PATH } = API_ROUTES;
 import { afterEach, describe, expect, it } from 'vitest';
@@ -491,6 +491,29 @@ describe('security gate', () => {
     }
     // Nothing above stopped the server or spent anything: the new paths answer as before.
     expect((await send(server, TAB_CHECK_PATH, { headers: bearer(tab) })).status).toBe(204);
+  });
+
+  it('errors: every refusal from an API, socket or handshake path has the shared error body, with a shared code', async () => {
+    const server = await startGated();
+    const tab = await signInRaw(server);
+    const replies: Array<[string, number, Reply]> = [
+      ['no token', 401, await send(server, TAB_CHECK_PATH)],
+      ['wrong token', 401, await send(server, TAB_CHECK_PATH, { headers: { authorization: 'Bearer nope' } })],
+      ['no Origin on a POST', 403, await send(server, LAUNCH_CODES_PATH, { method: 'POST', headers: bearer(tab) })],
+      ['foreign Host', 403, await send(server, TAB_CHECK_PATH, { headers: { host: 'evil.example', ...bearer(tab) } })],
+      ['spent or unknown code', 401, await exchangeRaw(server, { code: 'nope' })],
+      ['exchange without Origin', 403, await exchangeRaw(server, { code: 'nope' }, {})],
+      ['unknown API path', 404, await send(server, `${API_BASE}/nothing`, { headers: bearer(tab) })],
+      ['old unversioned path', 404, await send(server, '/api/tab', { headers: bearer(tab) })],
+      ['/ws without an upgrade', 401, await send(server, '/ws')],
+      ['handshake without the launcher token', 401, await send(server, '/launcher/hello')],
+    ];
+    for (const [what, status, reply] of replies) {
+      expect(reply.status, what).toBe(status);
+      expect(String(reply.headers['content-type']), what).toContain('application/json');
+      const body = ApiErrorBody.safeParse(JSON.parse(reply.body));
+      expect(body.success, `${what}: ${reply.body}`).toBe(true);
+    }
   });
 
   it('/api, /api/*, /ws and /ws/* never fall back to the app shell, even with a valid token', async () => {

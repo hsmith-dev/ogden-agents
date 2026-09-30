@@ -455,8 +455,11 @@ async function listenAndAnnounce({
       bound = { server, wss, port };
     } catch (error) {
       wss.close();
-      if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE' || requested === 0) throw error;
-      log.info('port busy, trying the next one', { port: candidate });
+      // Windows answers EACCES for ports in a range the system reserved (for
+      // example for Hyper-V), so that port is as unusable as a busy one.
+      const code = (error as NodeJS.ErrnoException).code;
+      if ((code !== 'EADDRINUSE' && code !== 'EACCES') || requested === 0) throw error;
+      log.info('port busy, trying the next one', { port: candidate, code });
     }
   }
 

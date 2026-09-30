@@ -91,3 +91,6 @@
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-caution-level-per-project-plan.md`
   summary: One e2e test failed once locally on a toHaveAttribute check after 2.8 was rebased onto 9.1, then passed four full reruns; find and fix the flake (story 2.13, the end-to-end suite).
   evidence: 2026-09-30 local run: 1 failed, 63 passed; the next four runs were 64/64. CI retries once, which hides a rare flake.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-tracer-bullet-sign-in-with-a-claude-subscription-through-a-h-plan.md`
+  summary: On Windows CI, node-pty 1.1.0's conpty_console_list_agent.js prints an uncaught "AttachConsole failed" when a PTY that already exited is killed; no test fails, but it is noise (and a helper process crash). Kill through taskkill only, or skip node-pty's kill when the process is gone (story 9.6).
+  evidence: PR #26 CI run, windows-latest Node 24/26 logs (twice per run).

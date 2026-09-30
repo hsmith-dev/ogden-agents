@@ -1,5 +1,5 @@
 import { readFileSync, statSync } from 'node:fs';
-import { connect as tcpConnect, createServer, type Server } from 'node:net';
+import { Server as NetServer, connect as tcpConnect, createServer, type Server } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { openCore } from '@ogden-agents/core';
@@ -262,6 +262,25 @@ describe('server start', () => {
     expect(server.port).not.toBe(busyPort);
     expect(server.port).toBeGreaterThan(busyPort);
     expect(lines.some((l) => l.level === 'warn' && l.msg === 'requested port was busy')).toBe(true);
+  });
+
+  it('skips a port Windows reserved (EACCES) the same way as a busy one', async () => {
+    const reserved = 43_217;
+    const realListen = NetServer.prototype.listen;
+    const spy = vi.spyOn(NetServer.prototype, 'listen').mockImplementation(function (this: NetServer, ...args: unknown[]) {
+      if (args[0] === reserved) {
+        const error = Object.assign(new Error(`listen EACCES: permission denied ${HOST}:${reserved}`), { code: 'EACCES' });
+        queueMicrotask(() => this.emit('error', error));
+        return this;
+      }
+      return (realListen as (...a: unknown[]) => NetServer).apply(this, args);
+    });
+    try {
+      const server = await startTest({ port: reserved });
+      expect(server.port).toBeGreaterThan(reserved);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('serves the core it was given, and leaves it open on close', async () => {

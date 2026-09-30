@@ -703,7 +703,7 @@ describe('caution level (story 2.8)', () => {
         }
       }
     }
-  });
+  }, 30_000); // Every level against every kind resolves many paths; Windows file calls are slow.
 
   it('an unknown kind, execute, and interpreter or wrapper commands are never auto-allowed at any level', async () => {
     const core = openTestCore();

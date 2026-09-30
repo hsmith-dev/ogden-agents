@@ -73,7 +73,7 @@ export function readPortFile(dataDir) {
  * @property {string} cacheDir the fresh npm cache (npx installs the package under it)
  * @property {string} dataDir the temp data folder (`OGDEN_AGENTS_DATA_DIR`)
  * @property {Record<string, string | undefined>} env the environment every launcher run gets
- * @property {(launcherArgs: string[]) => LauncherRun} runLauncher runs the launcher through npx, as a user does (installing it first if needed)
+ * @property {(launcherArgs: string[], options?: { echo?: (chunk: string) => void }) => LauncherRun} runLauncher runs the launcher through npx, as a user does (installing it first if needed); `echo` receives its output (npm's progress included) as it arrives
  * @property {(launcherArgs: string[]) => LauncherRun} runInstalledLauncher runs the already installed `bin/ogden.js` by its absolute path, with this Node: no npx, so nothing is reinstalled under a running server
  * @property {() => { port: number, pid: number, version: string } | undefined} readPortFile the running server's `server.json`
  * @property {() => boolean} killBackgroundServer kills the background server if one is still running; true if it had to
@@ -107,6 +107,9 @@ export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-s
   env.npm_config_update_notifier = 'false';
   env.npm_config_fund = 'false';
   env.npm_config_audit = 'false';
+  // Log each registry fetch, so a slow or stalled install shows progress
+  // (and what it was waiting on) instead of nothing.
+  env.npm_config_loglevel = 'http';
   // Keep the database and logs out of the user's real data folder.
   env.OGDEN_AGENTS_DATA_DIR = dataDir;
 
@@ -120,10 +123,13 @@ export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-s
   const npxCli = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npx-cli.js');
   if (IS_WINDOWS && !existsSync(npxCli)) throw new Error(`npx not found beside Node at ${npxCli}`);
 
-  /** @param {string[]} launcherArgs */
-  function runLauncher(launcherArgs) {
+  /**
+   * @param {string[]} launcherArgs
+   * @param {{ echo?: (chunk: string) => void }} [options]
+   */
+  function runLauncher(launcherArgs, { echo } = {}) {
     const args = [...packageArgs, ...launcherArgs];
-    return track(IS_WINDOWS ? spawnNode([npxCli, ...args]) : spawn('npx', args, { cwd: workDir, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] }));
+    return track(IS_WINDOWS ? spawnNode([npxCli, ...args]) : spawn('npx', args, { cwd: workDir, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] }), echo);
   }
 
   /** @param {string[]} launcherArgs */
@@ -141,12 +147,19 @@ export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-s
 
   /**
    * @param {import('node:child_process').ChildProcessByStdio<null, import('node:stream').Readable, import('node:stream').Readable>} child
+   * @param {(chunk: string) => void} [echo]
    * @returns {LauncherRun}
    */
-  function track(child) {
+  function track(child, echo) {
     let output = '';
-    child.stdout?.on('data', (chunk) => (output += String(chunk)));
-    child.stderr?.on('data', (chunk) => (output += String(chunk)));
+    /** @param {unknown} chunk */
+    const collect = (chunk) => {
+      output += String(chunk);
+      echo?.(String(chunk));
+    };
+    child.stdout?.on('data', collect);
+    child.stderr?.on('data', collect);
+    child.on('error', (error) => collect(`\n(spawn error: ${error.message})\n`));
     // `close`, not `exit`: the launcher prints its URLs and exits at once, and
     // `close` fires only after its output has all been read.
     /** @type {Promise<void>} */

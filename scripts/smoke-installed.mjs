@@ -22,6 +22,11 @@
 // server as the UI does and checks it removed `server.json` and
 // `launcher.token`. The data folder is a temp directory.
 // Exits non-zero with the captured output on any failure.
+//
+// npx's output, with npm's per-request `http` log lines, is streamed as it
+// arrives, so a slow install shows progress. If the install and start stall
+// past START_TIMEOUT_MS, the phase is retried once in fresh folders, with a
+// log line saying so; any other failure is not retried.
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -57,17 +62,32 @@ if (tarball !== undefined && !existsSync(tarball)) {
   process.exit(1);
 }
 
-/** @type {import('./installed-package.mjs').Install} */
-let install;
-try {
-  install = prepareInstall(registrySpec === undefined ? { tarball } : { registrySpec });
-} catch (error) {
-  console.error(`smoke: ${error instanceof Error ? error.message : String(error)}`);
-  process.exit(1);
+/** Prints the launcher's (and npx's) output as it arrives, line by line. */
+function echoLines() {
+  let partial = '';
+  /** @param {string} chunk */
+  return (chunk) => {
+    const lines = (partial + chunk).split(/\r?\n/);
+    partial = lines.pop() ?? '';
+    // The one-time code is spent within seconds, but keep it out of CI logs anyway.
+    for (const line of lines) if (line.trim() !== '') console.log(`  | ${line.replace(/#c=[A-Za-z0-9_-]+/g, '#c=<code>')}`);
+  };
 }
-const { workDir, dataDir } = install;
-const launcher = install.runLauncher(['--no-open', '--port', '0']);
-const { child, exited } = launcher;
+
+/** @returns {{ install: import('./installed-package.mjs').Install, launcher: import('./installed-package.mjs').LauncherRun }} */
+function startInstall() {
+  let next;
+  try {
+    next = prepareInstall(registrySpec === undefined ? { tarball } : { registrySpec });
+  } catch (error) {
+    console.error(`smoke: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+  console.log(`smoke: installing ${registrySpec ?? tarball} with npx in ${next.workDir}`);
+  return { install: next, launcher: next.runLauncher(['--no-open', '--port', '0'], { echo: echoLines() }) };
+}
+
+let { install, launcher } = startInstall();
 
 /**
  * The app's files load without a token (the page shows "Open Ogden Agents"
@@ -164,18 +184,30 @@ async function quit(url, token, pid) {
   if (response.status !== 202) throw new Error(`Quit returned ${response.status}`);
   while (isAlive(pid)) await new Promise((r) => setTimeout(r, 100));
   for (const file of ['server.json', 'launcher.token']) {
-    if (existsSync(join(dataDir, file))) throw new Error(`${file} is still there after Quit`);
+    if (existsSync(join(install.dataDir, file))) throw new Error(`${file} is still there after Quit`);
   }
 }
 
 let failure;
 try {
-  console.log(`smoke: installing ${registrySpec ?? tarball} with npx in ${workDir}`);
-  const { url, launchUrl } = await withTimeout(launcher.urls(), START_TIMEOUT_MS, 'ogden-agents to print its URLs');
+  let urls;
+  try {
+    urls = await withTimeout(launcher.urls(), START_TIMEOUT_MS, 'ogden-agents to print its URLs');
+  } catch (error) {
+    if (!(error instanceof Error && error.message.startsWith('timed out'))) throw error;
+    // A registry stall on a CI runner, most likely: retry once from scratch.
+    console.log(`smoke: RETRY: npx install and start stalled (${error.message}); retrying once in fresh folders`);
+    await launcher.stop();
+    install.killBackgroundServer();
+    install.removeFolders();
+    ({ install, launcher } = startInstall());
+    urls = await withTimeout(launcher.urls(), START_TIMEOUT_MS, 'ogden-agents to print its URLs (retry)');
+  }
+  const { url, launchUrl } = urls;
   console.log(`smoke: server is at ${url}`);
   // The launcher exits once the background server is up (AD-21: the terminal is free).
-  await withTimeout(exited, STEP_TIMEOUT_MS, 'the launcher to exit');
-  if (child.exitCode !== 0) throw new Error(`the launcher exited with code ${child.exitCode}`);
+  await withTimeout(launcher.exited, STEP_TIMEOUT_MS, 'the launcher to exit');
+  if (launcher.child.exitCode !== 0) throw new Error(`the launcher exited with code ${launcher.child.exitCode}`);
   console.log('smoke: the launcher exited 0 and the server kept running');
   await withTimeout(checkPageWithoutToken(url), STEP_TIMEOUT_MS, 'GET / without a token');
   console.log('smoke: GET / returned the page with its CSP, and the API refused a request without a token');

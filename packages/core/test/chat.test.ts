@@ -8,23 +8,30 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { MAX_DIFF_TEXT_LENGTH, type CoreEvent, type SessionId } from '@ogden-agents/shared';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AgentError,
   createChat,
   createDecliningPermissions,
   AGENT_SESSION_REF,
+  clampCheckInDelay,
+  deniedMessage,
+  DELTA_INTERVAL_MS,
   InvalidOperationError,
   MAX_PRIME_CHARS,
+  MAX_QUEUED_MESSAGES,
   NotFoundError,
   PRIME_HEADER,
   PRIME_NEW_MESSAGE,
   PRIME_SHORTENED,
   primedPrompt,
+  QueueFullError,
   RESTARTED_REASON,
   SessionBusyError,
+  SessionNotBusyError,
   WorkspaceBusyError,
   type AgentEvent,
+  type AgentPermissionDecision,
   type AgentPort,
   type AgentRestored,
   type AgentSession,
@@ -177,20 +184,20 @@ describe('chat', () => {
     expect(agent.closed()).toBe(1);
   });
 
-  it('refuses a second message while the agent is answering', async () => {
+  it('queues a second message while the agent is answering and sends it once the turn ends', async () => {
     const core = openTestCore();
     let finish!: () => void;
     const agent = scriptedAgent(() => new Promise((resolve) => (finish = () => resolve({ stopReason: 'end_turn' }))));
     const { chat, workspace, session } = setUp(core, agent.port);
     chat.sendMessage(workspace.id, session.id, 'one');
-    expect(() => chat.sendMessage(workspace.id, session.id, 'two')).toThrow(SessionBusyError);
+    expect(chat.sendMessage(workspace.id, session.id, 'two')).toMatchObject({ queued: true });
     await new Promise((resolve) => setTimeout(resolve, 0));
     finish();
-    await chat.settled();
-    expect(() => chat.sendMessage(workspace.id, session.id, 'three')).not.toThrow();
     await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(agent.prompts).toEqual(['one', 'two']);
     finish();
     await chat.settled();
+    expect(core.entities.getSession(session.id)!.state).toBe('idle');
   });
 
   it('an agent that can’t be started puts the session in error with a plain reason, and the next message tries again', async () => {
@@ -488,7 +495,7 @@ describe('tool calls and permission requests', () => {
     expect(decisions).toEqual([{ outcome: 'allow_once' }, { outcome: 'deny' }]);
   });
 
-  it('answers sendMessage with queued: false while there is no queue (2.10)', async () => {
+  it('answers sendMessage with queued: false when the agent is not answering (2.10)', async () => {
     const core = openTestCore();
     const { chat, workspace, session } = setUp(core, hello.port);
     expect(chat.sendMessage(workspace.id, session.id, 'hi')).toMatchObject({ queued: false });
@@ -776,5 +783,528 @@ describe('primedPrompt', () => {
     expect(lines[2]!.endsWith('THE END')).toBe(true);
     expect(lines[2]!.length).toBe(MAX_PRIME_CHARS);
     expect(lines.slice(3)).toEqual([PRIME_NEW_MESSAGE, 'now']);
+  });
+});
+
+/**
+ * An agent the test drives by hand: each prompt reports `working` and waits
+ * until the test ends it (`end`) or fails it (`fail`). `cancel` ends the
+ * running prompt with `cancelled`, unless `ignoreCancel` (a hung agent).
+ */
+function handAgent({ ignoreCancel = false, reopen }: { ignoreCancel?: boolean; reopen?: AgentRestored } = {}) {
+  const prompts: string[] = [];
+  let cancels = 0;
+  let closed = 0;
+  let sessionsOpened = 0;
+  let emit: (event: AgentEvent) => void = () => undefined;
+  let ask: StartAgentSession['onPermissionRequest'];
+  let turn: { end: (stopReason?: string) => void; fail: (reason: string) => void } | undefined;
+  const open = (input: StartAgentSession, agentSessionId: string): AgentSession => {
+    const listeners = new Set<(event: AgentEvent) => void>();
+    emit = (event) => {
+      for (const listener of [...listeners]) listener(event);
+    };
+    ask = input.onPermissionRequest;
+    return {
+      agentSessionId,
+      onEvent(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      prompt(text) {
+        prompts.push(text);
+        emit({ type: 'state', state: 'working' });
+        return new Promise((resolve, reject) => {
+          turn = {
+            end: (stopReason = 'end_turn') => {
+              turn = undefined;
+              emit({ type: 'state', state: 'idle' });
+              resolve({ stopReason });
+            },
+            fail: (reason) => {
+              turn = undefined;
+              emit({ type: 'state', state: 'error', reason });
+              reject(new AgentError('agent_failed', reason));
+            },
+          };
+        });
+      },
+      async cancel() {
+        cancels++;
+        if (!ignoreCancel) turn?.end('cancelled');
+      },
+      async close() {
+        closed++;
+      },
+    };
+  };
+  const port: AgentPort = {
+    displayName: 'Test Agent',
+    listAuthMethods: async () => [],
+    async startSession(input) {
+      return open(input, `agent-${++sessionsOpened}`);
+    },
+    async reopenSession(input) {
+      if (reopen === undefined) throw new AgentError('agent_unavailable', 'Test Agent can’t reopen sessions.');
+      return { session: open(input, reopen === 'new' ? `agent-${++sessionsOpened}` : input.agentSessionId), restored: reopen };
+    },
+  };
+  return {
+    port,
+    prompts,
+    emit: (event: AgentEvent) => emit(event),
+    ask: (request: Parameters<NonNullable<StartAgentSession['onPermissionRequest']>>[0]) => ask!(request),
+    end: (stopReason?: string) => turn!.end(stopReason),
+    fail: (reason: string) => turn!.fail(reason),
+    running: () => turn !== undefined,
+    cancels: () => cancels,
+    closed: () => closed,
+  };
+}
+
+/** Lets pending promise callbacks run (`setImmediate` is not faked). */
+const settle = async () => {
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+};
+
+const CHECK_IN_MS = 1_000;
+
+function setUpHand(core: Core, agent: ReturnType<typeof handAgent>, permissions?: Permissions) {
+  const errors: AgentError[] = [];
+  const internal: unknown[] = [];
+  const chat = createChat({
+    dataDir: tempDir('ogden-agents-data-'),
+    entities: core.entities,
+    sessionEvents: core.sessionEvents,
+    agent: agent.port,
+    ...(permissions === undefined ? {} : { permissions }),
+    checkInDelayMs: CHECK_IN_MS,
+    onAgentError: (_sessionId, error) => errors.push(error),
+    onInternalError: (_sessionId, error) => internal.push(error),
+  });
+  const workspace = chat.openWorkspace(tempDir('ogden-agents-repo-'));
+  const session = chat.createChatSession(workspace.id);
+  return { chat, workspace, session, errors, internal };
+}
+
+const userMessages = (core: Core, sessionId: SessionId) =>
+  sessionEvents(core, sessionId).flatMap((e) => (e.type === 'session.message_completed' && e.payload.role === 'user' ? [[e.payload.messageId, e.payload.content]] : []));
+const stateOf = (core: Core, sessionId: SessionId) => core.entities.getSession(sessionId)!.state;
+
+describe('session behaviour (story 2.10)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('queues messages first in, first out, each queued then completed under its own id, while the session stays working', async () => {
+    const core = openTestCore();
+    const agent = handAgent();
+    const { chat, workspace, session } = setUpHand(core, agent);
+    chat.sendMessage(workspace.id, session.id, 'first');
+    await settle();
+    const second = chat.sendMessage(workspace.id, session.id, 'second');
+    const third = chat.sendMessage(workspace.id, session.id, 'third');
+    expect([second.queued, third.queued]).toEqual([true, true]);
+    const queued = sessionEvents(core, session.id).filter((e) => e.type === 'session.message_queued');
+    expect(queued.map((e) => e.payload)).toEqual([
+      { sessionId: session.id, messageId: second.messageId, content: 'second' },
+      { sessionId: session.id, messageId: third.messageId, content: 'third' },
+    ]);
+    // Nothing reaches the agent mid-turn.
+    expect(agent.prompts).toEqual(['first']);
+
+    agent.end();
+    await settle();
+    expect(agent.prompts).toEqual(['first', 'second']);
+    agent.end();
+    await settle();
+    agent.end();
+    await chat.settled();
+    expect(agent.prompts).toEqual(['first', 'second', 'third']);
+    expect(userMessages(core, session.id).slice(1)).toEqual([
+      [second.messageId, 'second'],
+      [third.messageId, 'third'],
+    ]);
+    // Straight from one queued message to the next: no idle in between.
+    const states = sessionEvents(core, session.id).filter((e) => e.type === 'session.state_changed').map((e) => e.payload.state);
+    expect(states).toEqual(['working', 'idle']);
+  });
+
+  it(`holds at most ${MAX_QUEUED_MESSAGES} queued messages; the next one is refused as busy and stored nowhere`, async () => {
+    const core = openTestCore();
+    const agent = handAgent();
+    const { chat, workspace, session } = setUpHand(core, agent);
+    chat.sendMessage(workspace.id, session.id, 'first');
+    for (let i = 0; i < MAX_QUEUED_MESSAGES; i++) chat.sendMessage(workspace.id, session.id, `queued ${i}`);
+    const refused = (() => {
+      try {
+        chat.sendMessage(workspace.id, session.id, 'one too many');
+      } catch (error) {
+        return error;
+      }
+      return undefined;
+    })();
+    expect(refused).toBeInstanceOf(QueueFullError);
+    expect(refused).toBeInstanceOf(SessionBusyError);
+    expect(JSON.stringify(sessionEvents(core, session.id))).not.toContain('one too many');
+    await chat.close();
+  });
+
+  it('sends a Deny reason after the turn, as the user’s message, ahead of the queue; a Deny without one sends nothing', async () => {
+    const core = openTestCore();
+    const agent = handAgent();
+    const { chat, workspace, session } = setUpHand(core, agent, core.permissions);
+    chat.sendMessage(workspace.id, session.id, 'clean up');
+    await settle();
+    const denied = agent.ask({ toolCallId: 't1', title: 'Run rm -rf build', kind: 'execute', command: 'rm -rf build' });
+    const quiet = agent.ask({ toolCallId: 't2', title: 'Edit a.ts', kind: 'edit' });
+    await settle();
+    const queued = chat.sendMessage(workspace.id, session.id, 'and then this');
+    const [first, second] = sessionEvents(core, session.id).filter((e) => e.type === 'permission.requested');
+    core.permissions.decide(workspace.id, session.id, first!.payload.requestId, { decision: 'deny', reason: 'Use the clean script.' });
+    core.permissions.decide(workspace.id, session.id, second!.payload.requestId, { decision: 'deny' });
+    expect(await denied).toEqual({ outcome: 'deny', reason: 'Use the clean script.' });
+    expect(await quiet).toEqual({ outcome: 'deny' });
+    // Mid-turn the agent is sent nothing.
+    expect(agent.prompts).toEqual(['clean up']);
+
+    agent.end();
+    await settle();
+    agent.end();
+    await settle();
+    agent.end();
+    await chat.settled();
+    expect(agent.prompts).toEqual(['clean up', 'I denied "rm -rf build": Use the clean script.', 'and then this']);
+    expect(userMessages(core, session.id).map(([, content]) => content)).toEqual(['clean up', 'I denied "rm -rf build": Use the clean script.', 'and then this']);
+    expect(userMessages(core, session.id)[2]![0]).toBe(queued.messageId);
+    expect(stateOf(core, session.id)).toBe('idle');
+  });
+
+  it('coalesces reply chunks to one delta per interval, flushed before any other event and at the end; the reply is unchanged', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const core = openTestCore();
+    const live: CoreEvent[] = [];
+    core.events.subscribe(0, (event) => live.push(event));
+    const agent = handAgent();
+    const { chat, workspace, session } = setUpHand(core, agent);
+    chat.sendMessage(workspace.id, session.id, 'talk');
+    await settle();
+    const deltas = () => live.filter((e) => e.type === 'session.message_delta').map((e) => (e.type === 'session.message_delta' ? e.payload.text : ''));
+
+    agent.emit({ type: 'message_chunk', text: 'a' });
+    expect(deltas()).toEqual(['a']);
+    agent.emit({ type: 'message_chunk', text: 'b' });
+    agent.emit({ type: 'message_chunk', text: 'c' });
+    expect(deltas()).toEqual(['a']);
+    await vi.advanceTimersByTimeAsync(DELTA_INTERVAL_MS);
+    expect(deltas()).toEqual(['a', 'bc']);
+    agent.emit({ type: 'message_chunk', text: 'd' });
+    expect(deltas()).toEqual(['a', 'bc']);
+    // Held-back text goes before the tool call.
+    agent.emit({ type: 'tool_call', toolCallId: 't1', title: 'Read a.ts', kind: 'read', status: 'completed' });
+    const mine = live.filter((e) => e.streamId === session.id).map((e) => e.type);
+    expect(mine.slice(-2)).toEqual(['session.message_delta', 'session.tool_call']);
+    expect(deltas()).toEqual(['a', 'bc', 'd']);
+    agent.emit({ type: 'message_chunk', text: 'e' });
+    agent.emit({ type: 'message_chunk', text: 'f' });
+    agent.end();
+    await settle();
+    expect(deltas()).toEqual(['a', 'bc', 'd', 'ef']);
+    const reply = live.filter((e) => e.type === 'session.message_completed').at(-1)!;
+    expect(reply).toMatchObject({ payload: { role: 'agent', content: 'abcdef' } });
+    await chat.settled();
+    await chat.close();
+  });
+
+  it('keeps a pending card pending when the agent reports working (the working guard)', async () => {
+    const core = openTestCore();
+    const agent = handAgent();
+    const { chat, workspace, session } = setUpHand(core, agent, core.permissions);
+    chat.sendMessage(workspace.id, session.id, 'run it');
+    await settle();
+    void agent.ask({ toolCallId: 't1', title: 'Run npm test', kind: 'execute', command: 'npm test' });
+    await settle();
+    expect(stateOf(core, session.id)).toBe('waiting');
+    agent.emit({ type: 'state', state: 'working' });
+    await settle();
+    expect(stateOf(core, session.id)).toBe('waiting');
+    expect(sessionEvents(core, session.id).some((e) => e.type === 'permission.resolved')).toBe(false);
+    await chat.close();
+  });
+
+  it('checks in on a quiet agent with a tool call in progress, naming it, and keeps waiting: no error, no timeout', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const core = openTestCore();
+    const agent = handAgent();
+    const { chat, workspace, session, errors } = setUpHand(core, agent);
+    chat.sendMessage(workspace.id, session.id, 'build it');
+    await settle();
+    agent.emit({ type: 'tool_call', toolCallId: 't1', title: 'Read a.ts', kind: 'read', status: 'completed' });
+    agent.emit({ type: 'tool_call', toolCallId: 't2', title: 'Run npm run build', kind: 'execute', status: 'in_progress' });
+    await vi.advanceTimersByTimeAsync(CHECK_IN_MS - 10);
+    expect(sessionEvents(core, session.id).some((e) => e.type === 'session.check_in')).toBe(false);
+    await vi.advanceTimersByTimeAsync(10);
+    const checkIns = () => sessionEvents(core, session.id).filter((e) => e.type === 'session.check_in');
+    expect(checkIns().map((e) => e.payload)).toEqual([{ sessionId: session.id, waitingOn: 'Run npm run build' }]);
+    // Once per quiet stretch; the session keeps working and never errs.
+    await vi.advanceTimersByTimeAsync(CHECK_IN_MS * 10);
+    expect(checkIns()).toHaveLength(1);
+    expect(stateOf(core, session.id)).toBe('working');
+    expect(errors).toEqual([]);
+    expect(agent.cancels()).toBe(0);
+    // The agent speaks again: the stretch starts over.
+    agent.emit({ type: 'message_chunk', text: 'Still building.' });
+    await vi.advanceTimersByTimeAsync(CHECK_IN_MS);
+    expect(checkIns()).toHaveLength(2);
+    agent.end();
+    await chat.settled();
+    expect(stateOf(core, session.id)).toBe('idle');
+  });
+
+  it('checks in with nothing named when no tool call is in progress, forgets a turn’s tool calls when it ends, and never checks in while waiting', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const core = openTestCore();
+    const agent = handAgent();
+    const { chat, workspace, session, errors } = setUpHand(core, agent, core.permissions);
+    chat.sendMessage(workspace.id, session.id, 'one');
+    await settle();
+    // A tool call left in progress when its turn ended is forgotten (2.3 F7).
+    agent.emit({ type: 'tool_call', toolCallId: 't1', title: 'Run a server', kind: 'execute', status: 'in_progress' });
+    agent.end();
+    await chat.settled();
+    chat.sendMessage(workspace.id, session.id, 'two');
+    await settle();
+    await vi.advanceTimersByTimeAsync(CHECK_IN_MS);
+    const checkIns = () => sessionEvents(core, session.id).filter((e) => e.type === 'session.check_in');
+    expect(checkIns().map((e) => e.payload)).toEqual([{ sessionId: session.id }]);
+    expect(stateOf(core, session.id)).toBe('working');
+
+    // While waiting on the user, no check-in.
+    agent.emit({ type: 'message_chunk', text: 'Asking.' });
+    void agent.ask({ toolCallId: 't2', title: 'Run npm test', kind: 'execute', command: 'npm test' });
+    await settle();
+    expect(stateOf(core, session.id)).toBe('waiting');
+    await vi.advanceTimersByTimeAsync(CHECK_IN_MS * 3);
+    expect(checkIns()).toHaveLength(1);
+    expect(errors).toEqual([]);
+
+    // Stop still works from here.
+    chat.cancel(workspace.id, session.id);
+    await settle();
+    await chat.settled();
+    expect(stateOf(core, session.id)).toBe('idle');
+  });
+
+  it('Stop cancels the running prompt, drops the queue unsent, and ends idle; Stop with nothing running is refused', async () => {
+    const core = openTestCore();
+    const agent = handAgent();
+    const { chat, workspace, session } = setUpHand(core, agent);
+    expect(() => chat.cancel(workspace.id, session.id)).toThrow(SessionNotBusyError);
+    chat.sendMessage(workspace.id, session.id, 'long job');
+    await settle();
+    const queued = chat.sendMessage(workspace.id, session.id, 'after that');
+    agent.emit({ type: 'message_chunk', text: 'Working on' });
+    chat.cancel(workspace.id, session.id);
+    // A second Stop is harmless.
+    chat.cancel(workspace.id, session.id);
+    await chat.settled();
+    expect(agent.cancels()).toBe(1);
+    expect(agent.prompts).toEqual(['long job']);
+    expect(stateOf(core, session.id)).toBe('idle');
+    expect(userMessages(core, session.id).map(([id]) => id)).not.toContain(queued.messageId);
+    expect(sessionEvents(core, session.id).filter((e) => e.type === 'session.message_completed').at(-1)).toMatchObject({ payload: { role: 'agent', content: 'Working on' } });
+    expect(() => chat.cancel(workspace.id, session.id)).toThrow(SessionNotBusyError);
+    // The chat goes on as before, with the same agent.
+    chat.sendMessage(workspace.id, session.id, 'next');
+    await settle();
+    agent.end();
+    await chat.settled();
+    expect(agent.prompts).toEqual(['long job', 'next']);
+    expect(agent.closed()).toBe(0);
+  });
+
+  it('Stop while waiting declines the pending card and leaves waiting for idle at once', async () => {
+    const core = openTestCore();
+    const agent = handAgent();
+    const { chat, workspace, session } = setUpHand(core, agent, core.permissions);
+    chat.sendMessage(workspace.id, session.id, 'run it');
+    await settle();
+    const decision: Promise<AgentPermissionDecision> = agent.ask({ toolCallId: 't1', title: 'Run npm test', kind: 'execute', command: 'npm test' });
+    await settle();
+    expect(stateOf(core, session.id)).toBe('waiting');
+    chat.cancel(workspace.id, session.id);
+    expect(stateOf(core, session.id)).toBe('idle');
+    expect(await decision).toEqual({ outcome: 'cancelled' });
+    await settle();
+    expect(sessionEvents(core, session.id).filter((e) => e.type === 'permission.resolved').map((e) => e.payload.by)).toEqual(['cancelled']);
+    await chat.settled();
+    expect(agent.cancels()).toBe(1);
+    expect(stateOf(core, session.id)).toBe('idle');
+  });
+
+  it('Stop drops an agent that does not end its turn within the grace period: idle, resumable, process closed', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const core = openTestCore();
+    const agent = handAgent({ ignoreCancel: true });
+    const { chat, workspace, session } = setUpHand(core, agent);
+    chat.sendMessage(workspace.id, session.id, 'hang');
+    await settle();
+    chat.cancel(workspace.id, session.id);
+    await vi.advanceTimersByTimeAsync(4_900);
+    expect(stateOf(core, session.id)).toBe('working');
+    await vi.advanceTimersByTimeAsync(100);
+    await chat.settled();
+    expect(stateOf(core, session.id)).toBe('idle');
+    expect(sessionEvents(core, session.id).at(-1)).toMatchObject({ type: 'session.state_changed', payload: { state: 'idle', resumable: true } });
+    expect(agent.closed()).toBe(1);
+  });
+
+  it('a turn that ends in error sends nothing queued; the next message is sent at once', async () => {
+    const core = openTestCore();
+    const agent = handAgent();
+    const { chat, workspace, session } = setUpHand(core, agent);
+    chat.sendMessage(workspace.id, session.id, 'one');
+    await settle();
+    const queued = chat.sendMessage(workspace.id, session.id, 'queued');
+    agent.fail('Test Agent is rate limited.');
+    await chat.settled();
+    expect(stateOf(core, session.id)).toBe('error');
+    expect(agent.prompts).toEqual(['one']);
+    expect(userMessages(core, session.id).map(([id]) => id)).not.toContain(queued.messageId);
+    expect(chat.sendMessage(workspace.id, session.id, 'try again')).toMatchObject({ queued: false });
+    await settle();
+    agent.end();
+    await chat.settled();
+    expect(stateOf(core, session.id)).toBe('idle');
+  });
+
+  it('a close with a queue leaves the session idle and resumable, the queued message unsent, and no timer running', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const core = openTestCore();
+    const agent = handAgent();
+    const { chat, workspace, session } = setUpHand(core, agent);
+    chat.sendMessage(workspace.id, session.id, 'one');
+    await settle();
+    agent.emit({ type: 'message_chunk', text: 'Partly' });
+    agent.emit({ type: 'message_chunk', text: ' done' });
+    const queued = chat.sendMessage(workspace.id, session.id, 'queued');
+    await chat.close();
+    await chat.settled();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(sessionEvents(core, session.id).at(-1)).toMatchObject({ payload: { state: 'idle', reason: RESTARTED_REASON, resumable: true } });
+    expect(userMessages(core, session.id).map(([id]) => id)).not.toContain(queued.messageId);
+    expect(sessionEvents(core, session.id).filter((e) => e.type === 'session.message_completed').at(-1)).toMatchObject({ payload: { role: 'agent', content: 'Partly done' } });
+  });
+
+  it('saves a transcript reopen’s new agent id only once its primed prompt succeeded (2.7 F4)', async () => {
+    const core = openTestCore();
+    const agent = handAgent({ reopen: 'new' });
+    const { chat, workspace, session } = setUpHand(core, agent);
+    core.entities.setSessionAdapterRefs(session.id, { [AGENT_SESSION_REF]: 'agent-gone' });
+    core.sessionEvents.completeMessage(session.id, { messageId: 'msg_earlier', role: 'user', content: 'earlier' });
+    chat.sendMessage(workspace.id, session.id, 'one');
+    await settle();
+    // The primed prompt is running: the old ref stays, so a restart now primes again.
+    expect(core.entities.getSession(session.id)!.adapterRefs[AGENT_SESSION_REF]).toBe('agent-gone');
+    agent.fail('Test Agent is rate limited.');
+    await chat.settled();
+    expect(core.entities.getSession(session.id)!.adapterRefs[AGENT_SESSION_REF]).toBe('agent-gone');
+    chat.sendMessage(workspace.id, session.id, 'two');
+    await settle();
+    expect(agent.prompts[1]).toContain('User: earlier');
+    agent.end();
+    await chat.settled();
+    expect(core.entities.getSession(session.id)!.adapterRefs[AGENT_SESSION_REF]).toBe('agent-1');
+    await chat.close();
+  });
+
+  it('review F1: a message sent after a Stop whose agent ignores it is sent once, after the grace, never shown "Not sent"', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const core = openTestCore();
+    const agent = handAgent({ ignoreCancel: true, reopen: 'resumed' });
+    const { chat, workspace, session } = setUpHand(core, agent);
+    chat.sendMessage(workspace.id, session.id, 'hang');
+    await settle();
+    chat.cancel(workspace.id, session.id);
+    const after = chat.sendMessage(workspace.id, session.id, 'after the stop');
+    expect(after.queued).toBe(true);
+    const queuedSeq = sessionEvents(core, session.id).find((e) => e.type === 'session.message_queued')!.seq;
+    await vi.advanceTimersByTimeAsync(5_000);
+    await settle();
+    expect(agent.closed()).toBe(1);
+    expect(agent.prompts).toEqual(['hang', 'after the stop']);
+    // No idle (or error) between the queueing and its sending: the web never marks it "Not sent".
+    const sentSeq = sessionEvents(core, session.id).find((e) => e.type === 'session.message_completed' && e.payload.messageId === after.messageId)!.seq;
+    const between = sessionEvents(core, session.id).filter((e) => e.seq > queuedSeq && e.seq < sentSeq && e.type === 'session.state_changed');
+    expect(between).toEqual([]);
+    agent.end();
+    await chat.settled();
+    expect(userMessages(core, session.id).filter(([id]) => id === after.messageId)).toHaveLength(1);
+    expect(stateOf(core, session.id)).toBe('idle');
+  });
+
+  it('review F2: after a Stop, a permission request is declined at once with no card, and recorded as cancelled', async () => {
+    const core = openTestCore();
+    const agent = handAgent({ ignoreCancel: true });
+    const { chat, workspace, session } = setUpHand(core, agent, core.permissions);
+    chat.sendMessage(workspace.id, session.id, 'run it');
+    await settle();
+    chat.cancel(workspace.id, session.id);
+    expect(await agent.ask({ toolCallId: 't1', title: 'Run npm test', kind: 'execute', command: 'npm test' })).toEqual({ outcome: 'cancelled' });
+    expect(stateOf(core, session.id)).toBe('working');
+    const permissionEvents = sessionEvents(core, session.id).filter((e) => e.type.startsWith('permission.'));
+    expect(permissionEvents.map((e) => e.type)).toEqual(['permission.requested', 'permission.resolved']);
+    expect(permissionEvents[1]!.payload).toMatchObject({ decision: 'deny', by: 'cancelled' });
+    agent.end();
+    await chat.settled();
+    expect(stateOf(core, session.id)).toBe('idle');
+  });
+
+  it('review F3: an update for a tool call this turn never reported (a late one) is ignored', async () => {
+    const core = openTestCore();
+    const agent = handAgent();
+    const { chat, workspace, session } = setUpHand(core, agent);
+    chat.sendMessage(workspace.id, session.id, 'one');
+    await settle();
+    agent.emit({ type: 'tool_call', toolCallId: 't1', title: 'Read a.ts', kind: 'read', status: 'in_progress' });
+    agent.end();
+    await chat.settled();
+    agent.emit({ type: 'tool_call_update', toolCallId: 't1', status: 'completed' });
+    expect(sessionEvents(core, session.id).filter((e) => e.type === 'session.tool_call_updated')).toEqual([]);
+  });
+
+  it('review F4: clamps the check-in delay to 1 s .. 2^31-1 ms', () => {
+    expect(clampCheckInDelay(10)).toBe(1_000);
+    expect(clampCheckInDelay(-1)).toBe(1_000);
+    expect(clampCheckInDelay(90_000)).toBe(90_000);
+    expect(clampCheckInDelay(1e15)).toBe(2 ** 31 - 1);
+    expect(clampCheckInDelay(Number.NaN)).toBe(10 * 60_000);
+  });
+
+  it('review F5: a Deny-reason message quotes at most 200 characters of the command, with an ellipsis', () => {
+    const long = `npm run ${'x'.repeat(400)}`;
+    const text = deniedMessage(long, 'Too much.');
+    const quoted = text.slice('I denied "'.length, text.indexOf('": Too much.'));
+    expect(quoted).toHaveLength(200);
+    expect(quoted.endsWith('…')).toBe(true);
+    expect(deniedMessage('npm test', 'No.')).toBe('I denied "npm test": No.');
+  });
+
+  it('keeps error (and so Try again) when the adapter reported a non-fatal error and the prompt then resolved', async () => {
+    const core = openTestCore();
+    const agent = scriptedAgent(async (_text, emit) => {
+      emit({ type: 'message_chunk', text: 'Partly' });
+      emit({ type: 'state', state: 'error', reason: 'Test Agent hit a rate limit.' });
+      return { stopReason: 'end_turn' };
+    });
+    const { chat, workspace, session } = setUp(core, agent.port);
+    chat.sendMessage(workspace.id, session.id, 'go');
+    await chat.settled();
+    expect(core.entities.getSession(session.id)!.state).toBe('error');
+    expect(sessionEvents(core, session.id).at(-1)).toMatchObject({ type: 'session.state_changed', payload: { state: 'error', reason: 'Test Agent hit a rate limit.' } });
+    // The next message is sent as usual.
+    chat.sendMessage(workspace.id, session.id, 'again');
+    await chat.settled();
+    expect(agent.prompts).toEqual(['go', 'again']);
   });
 });

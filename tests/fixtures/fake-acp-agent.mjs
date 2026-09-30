@@ -31,6 +31,11 @@
 //   "slow"         one chunk, then waits until cancelled (`cancelled`) or 10 s
 //   "hold"         one chunk, then waits until cancelled (`cancelled`), with no
 //                  timer: the session stays `working` for as long as a test needs
+//   "tools"        reads three files (src/a.ts, src/b.ts, src/c.ts), then edits
+//                  src/a.ts with a diff; replies "Changed src/a.ts."
+//   "quiet-tool"   one chunk and an `execute` tool call left in progress
+//                  ("Run npm run build"), then silence until cancelled
+//   "quiet"        one chunk, then silence until cancelled (no tool call)
 //   "fail"         the prompt fails with a JSON-RPC internal error
 //   "env"          replies with the CLAUDE_CODE_EXECUTABLE it was given
 //   "echo-env"     replies with its whole environment, `NAME=value` per line,
@@ -230,6 +235,32 @@ acp
       await new Promise((resolve) => {
         session.cancel = () => resolve(undefined);
       });
+      session.cancel = undefined;
+      return { stopReason: 'cancelled' };
+    }
+    if (text === 'tools') {
+      for (const name of ['a', 'b', 'c']) {
+        const toolCallId = `call-read-${name}`;
+        await update(client, params.sessionId, { sessionUpdate: 'tool_call', toolCallId, title: `Read src/${name}.ts`, kind: 'read', status: 'in_progress', locations: [{ path: `src/${name}.ts` }] });
+        await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' });
+      }
+      await update(client, params.sessionId, { sessionUpdate: 'tool_call', toolCallId: 'call-edit-a', title: 'Edit src/a.ts', kind: 'edit', status: 'in_progress' });
+      await update(client, params.sessionId, {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'call-edit-a',
+        status: 'completed',
+        content: [{ type: 'diff', path: 'src/a.ts', oldText: 'export const a = 1;\n', newText: 'export const a = 2;\n' }],
+      });
+      await say(client, params.sessionId, 'Changed src/a.ts.');
+      return { stopReason: 'end_turn' };
+    }
+    if (text === 'quiet' || text === 'quiet-tool') {
+      await say(client, params.sessionId, 'Starting');
+      if (text === 'quiet-tool') {
+        await update(client, params.sessionId, { sessionUpdate: 'tool_call', toolCallId: 'call-quiet', title: 'Run npm run build', kind: 'execute', status: 'in_progress' });
+      }
+      // Silence until cancelled: no timer, as a hung agent.
+      await new Promise((resolve) => (session.cancel = () => resolve(undefined)));
       session.cancel = undefined;
       return { stopReason: 'cancelled' };
     }

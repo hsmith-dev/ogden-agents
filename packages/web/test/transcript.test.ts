@@ -1,5 +1,6 @@
 import type { CoreEvent } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
+import { diffHunk, groupSummary, toolCallLabel } from '../src/chat/tool-call-row';
 import { sessionView } from '../src/chat/transcript';
 
 const at = '2026-09-30T00:00:00.000Z';
@@ -36,7 +37,19 @@ describe('sessionView', () => {
 
   it("ignores other sessions' events, and knows nothing of a session it never saw created", () => {
     const view = sessionView([event('session.message_delta', { messageId: 'x', role: 'agent', text: 'other' }, 'ses_2')], 'ses_1');
-    expect(view).toEqual({ known: false, state: undefined, errorReason: undefined, messages: [], items: [], pendingPermissions: [] });
+    expect(view).toEqual({
+      known: false,
+      state: undefined,
+      errorReason: undefined,
+      errorCode: undefined,
+      messages: [],
+      items: [],
+      pendingPermissions: [],
+      queued: [],
+      notSent: [],
+      checkIn: undefined,
+      lastUserText: undefined,
+    });
   });
 });
 
@@ -141,5 +154,146 @@ describe('sessionView: resumed chats (story 2.7)', () => {
     const view = sessionView(events, 'ses_1');
     expect(view.items.map((item) => item.type)).toEqual(['resumed', 'message', 'message', 'resumed', 'message']);
     expect(sessionView([created(), resumed('loaded')], 'ses_1').items).toEqual([{ type: 'resumed', via: 'loaded', at }]);
+  });
+});
+
+const queuedMessage = (messageId: string, content: string) => event('session.message_queued', { sessionId: 'ses_1', messageId, content });
+const toolCall = (toolCallId: string, title: string, kind: string, status: string, diffs?: unknown) =>
+  event('session.tool_call', { sessionId: 'ses_1', toolCallId, title, kind, status, ...(diffs === undefined ? {} : { diffs }) });
+const toolCallUpdated = (toolCallId: string, title: string, kind: string, status: string, diffs?: unknown) =>
+  event('session.tool_call_updated', { sessionId: 'ses_1', toolCallId, title, kind, status, ...(diffs === undefined ? {} : { diffs }) });
+const checkIn = (waitingOn?: string) => event('session.check_in', { sessionId: 'ses_1', ...(waitingOn === undefined ? {} : { waitingOn }) });
+
+describe('sessionView: session behaviour (story 2.10)', () => {
+  it('groups consecutive tool calls into one item, keeps each call current, and the latest diffs when an update leaves them out', () => {
+    const diff = [{ path: 'src/a.ts', oldText: 'a', newText: 'b' }];
+    const view = sessionView(
+      [
+        created(),
+        completed('u1', 'user', 'Change a'),
+        stateChanged('working', 'idle'),
+        toolCall('r1', 'Read src/a.ts', 'read', 'in_progress'),
+        toolCallUpdated('r1', 'Read src/a.ts', 'read', 'completed'),
+        toolCall('r2', 'Read src/b.ts', 'read', 'completed'),
+        toolCall('e1', 'Edit src/a.ts', 'edit', 'in_progress', diff),
+        toolCallUpdated('e1', 'Edit src/a.ts', 'edit', 'completed'),
+        delta('a1', 'Done.'),
+        toolCall('r3', 'Read src/c.ts', 'read', 'completed'),
+      ],
+      'ses_1',
+    );
+    expect(view.items.map((item) => item.type)).toEqual(['message', 'tools', 'message', 'tools']);
+    const first = view.items[1]!;
+    expect(first.type === 'tools' && first.calls.map((call) => [call.toolCallId, call.status])).toEqual([
+      ['r1', 'completed'],
+      ['r2', 'completed'],
+      ['e1', 'completed'],
+    ]);
+    expect(first.type === 'tools' && first.calls[2]!.diffs).toEqual(diff);
+  });
+
+  it('review F3: a late update with no title or kind never blanks a known row, and makes no row for an unknown call', () => {
+    const view = sessionView(
+      [
+        created(),
+        stateChanged('working', 'idle'),
+        toolCall('r1', 'Read src/a.ts', 'read', 'in_progress'),
+        toolCallUpdated('r1', '', 'other', 'completed'),
+        toolCallUpdated('ghost', '', 'other', 'completed'),
+      ],
+      'ses_1',
+    );
+    const tools = view.items.filter((item) => item.type === 'tools');
+    expect(tools).toHaveLength(1);
+    expect(tools[0]!.type === 'tools' && tools[0]!.calls.map((call) => [call.toolCallId, call.title, call.kind, call.status])).toEqual([['r1', 'Read src/a.ts', 'read', 'completed']]);
+  });
+
+  it('holds a queued message apart until it is sent, then puts it where it was sent', () => {
+    const base = [created(), completed('u1', 'user', 'First'), stateChanged('working', 'idle'), delta('a1', 'Working'), queuedMessage('u2', 'Second')];
+    const during = sessionView(base, 'ses_1');
+    expect(during.queued).toEqual([{ messageId: 'u2', role: 'user', text: 'Second', streaming: false, status: 'queued' }]);
+    expect(during.items.map((item) => item.type === 'message' && item.message.messageId)).toEqual(['u1', 'a1']);
+    expect(during.lastUserText).toBe('First');
+
+    const sent = sessionView([...base, completed('a1', 'agent', 'Working done'), completed('u2', 'user', 'Second')], 'ses_1');
+    expect(sent.queued).toEqual([]);
+    expect(sent.notSent).toEqual([]);
+    expect(sent.items.map((item) => item.type === 'message' && [item.message.messageId, item.message.status])).toEqual([
+      ['u1', undefined],
+      ['a1', undefined],
+      ['u2', undefined],
+    ]);
+    expect(sent.lastUserText).toBe('Second');
+  });
+
+  it.each(['error', 'idle'])('marks what is still queued "Not sent" when the session goes %s first (an error, a Stop, a restart)', (state) => {
+    const view = sessionView(
+      [created(), completed('u1', 'user', 'First'), stateChanged('working', 'idle'), queuedMessage('u2', 'Second'), queuedMessage('u3', 'Third'), stateChanged(state, 'working')],
+      'ses_1',
+    );
+    expect(view.queued).toEqual([]);
+    expect(view.notSent.map((message) => [message.messageId, message.status])).toEqual([
+      ['u2', 'not_sent'],
+      ['u3', 'not_sent'],
+    ]);
+    expect(view.items.at(-1)).toMatchObject({ type: 'message', message: { messageId: 'u3', status: 'not_sent' } });
+    // Try again resends the last message that was sent.
+    expect(view.lastUserText).toBe('First');
+  });
+
+  it('keeps a message queued after a Stop already left waiting for idle, until it is sent', () => {
+    const view = sessionView([created(), stateChanged('working', 'idle'), stateChanged('waiting', 'working'), stateChanged('idle', 'waiting'), queuedMessage('u2', 'After stop')], 'ses_1');
+    expect(view.queued.map((message) => message.messageId)).toEqual(['u2']);
+    expect(view.notSent).toEqual([]);
+  });
+
+  it('shows the latest check-in until anything else happens in the session, and only while working', () => {
+    const quiet = [created(), stateChanged('working', 'idle'), toolCall('t1', 'Run npm run build', 'execute', 'in_progress'), checkIn('Run npm run build')];
+    expect(sessionView(quiet, 'ses_1').checkIn).toMatchObject({ waitingOn: 'Run npm run build' });
+    expect(sessionView([...quiet.slice(0, 3), checkIn()], 'ses_1').checkIn).toMatchObject({ waitingOn: undefined });
+    expect(sessionView([...quiet, delta('a1', 'Built.')], 'ses_1').checkIn).toBeUndefined();
+    // Another session's events do not clear it.
+    expect(sessionView([...quiet, event('session.message_delta', { messageId: 'x', role: 'agent', text: 'other' }, 'ses_2')], 'ses_1').checkIn).toBeDefined();
+    expect(sessionView([...quiet, stateChanged('idle', 'working')], 'ses_1').checkIn).toBeUndefined();
+  });
+
+  it('carries the error code of an error, for the notice', () => {
+    const failed = [created(), stateChanged('working', 'idle'), event('session.state_changed', { sessionId: 'ses_1', state: 'error', previous: 'working', reason: 'Sign in again.', errorCode: 'auth_required' })];
+    expect(sessionView(failed, 'ses_1')).toMatchObject({ state: 'error', errorCode: 'auth_required' });
+    expect(sessionView([...failed, stateChanged('working', 'error')], 'ses_1').errorCode).toBeUndefined();
+  });
+});
+
+describe('tool-call rows', () => {
+  it('say a plain verb and the target, without repeating the verb in the agent’s title', () => {
+    expect(toolCallLabel({ title: 'Read src/a.ts', kind: 'read', status: 'completed', diffs: undefined })).toEqual({ verb: 'Read', target: 'src/a.ts' });
+    expect(toolCallLabel({ title: 'Edit src/a.ts', kind: 'edit', status: 'in_progress', diffs: undefined })).toEqual({ verb: 'Editing', target: 'src/a.ts' });
+    expect(toolCallLabel({ title: 'Run npm test', kind: 'execute', status: 'completed', diffs: undefined })).toEqual({ verb: 'Ran', target: 'npm test' });
+    expect(toolCallLabel({ title: 'Write', kind: 'edit', status: 'completed', diffs: [{ path: 'b.ts', oldText: null, newText: 'x' }] })).toEqual({ verb: 'Edited', target: 'b.ts' });
+    expect(toolCallLabel({ title: 'Something new', kind: 'other', status: 'completed', diffs: undefined })).toEqual({ verb: undefined, target: 'Something new' });
+  });
+
+  it('sum a run up in one line, kinds in the order they came', () => {
+    const kinds = (...list: string[]) => list.map((kind) => ({ kind }) as { kind: 'read' });
+    expect(groupSummary(kinds('read', 'read', 'read', 'edit'))).toBe('Read 3 files, edited 1');
+    expect(groupSummary(kinds('read', 'read', 'read', 'read', 'edit', 'edit'))).toBe('Read 4 files, edited 2');
+    expect(groupSummary(kinds('execute', 'read'))).toBe('Ran 1 command, read 1 file');
+  });
+
+  it('show an edit as its hunk: the changed lines with a little context', () => {
+    const before = ['one', 'two', 'three', 'four', 'five', 'six'].join('\n');
+    const after = ['one', 'two', 'three', 'FOUR', 'five', 'six'].join('\n');
+    expect(diffHunk(before, after)).toEqual([
+      { mark: ' ', text: 'two' },
+      { mark: ' ', text: 'three' },
+      { mark: '-', text: 'four' },
+      { mark: '+', text: 'FOUR' },
+      { mark: ' ', text: 'five' },
+      { mark: ' ', text: 'six' },
+    ]);
+    expect(diffHunk(null, 'new\nfile\n')).toEqual([
+      { mark: '+', text: 'new' },
+      { mark: '+', text: 'file' },
+    ]);
   });
 });

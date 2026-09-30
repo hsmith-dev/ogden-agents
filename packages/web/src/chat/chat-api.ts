@@ -121,6 +121,11 @@ export async function fetchPermissionRules(wsId: string, auth: Pick<TabAuth, 'fe
   return PermissionRulesResponse.parse(json).rules;
 }
 
+/** `POST /api/v1/workspaces/:wsId/sessions/:sesId/cancel`: Stop (story 2.10). 409 when nothing is running any more. */
+export async function cancelSession(wsId: string, sesId: string, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<void> {
+  await callNoContent(auth, apiPath(API_ROUTES.sessionCancel, { wsId, sesId }), { method: 'POST' }, "Ogden Agents couldn't stop the agent");
+}
+
 /** `DELETE /api/v1/workspaces/:wsId/permission-rules/:ruleId`: undoes an always-allow rule. */
 export async function removePermissionRule(wsId: string, ruleId: string, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<void> {
   await callNoContent(auth, apiPath(API_ROUTES.permissionRule, { wsId, ruleId }), { method: 'DELETE' }, "The rule couldn't be undone");

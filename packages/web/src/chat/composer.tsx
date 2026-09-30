@@ -1,5 +1,5 @@
 import { PaperPlaneRight } from '@phosphor-icons/react';
-import { useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { Button } from '@/ui/button';
 import { ComposerFrame } from '@/ui/composer-frame';
 import { Textarea } from '@/ui/textarea';
@@ -8,19 +8,34 @@ import { Text } from '@/ui/typography';
 export interface ComposerProps {
   /** The accessible name of the text field, e.g. "Message Claude Code". */
   label: string;
-  /** Why sending is not possible right now (the agent is still answering), shown under the field. */
+  /** Why sending is not possible right now (the agent waits for an answer), shown under the field. */
   blockedReason?: string | undefined;
+  /** A note under the field when sending is possible (the message will be queued). */
+  hint?: string | undefined;
+  /** Beside Send: the Stop button while the agent works (story 2.10). */
+  action?: ReactNode;
+  /**
+   * Text to put back in the field (messages that were not sent; story 2.10),
+   * ahead of anything already typed. Applied once per `key`.
+   */
+  restore?: { key: string; text: string } | undefined;
   /** Sends the text; rejects with a plain message to show if it wasn't sent. */
   onSend(text: string): Promise<void>;
 }
 
 /**
  * The session view's composer (EXPERIENCE.md Composer): `Enter` sends,
- * `Shift+Enter` starts a new line. Queueing a message while the agent works
- * comes with the full session view; until then sending waits for it.
+ * `Shift+Enter` starts a new line. While the agent works, sending queues the
+ * message (the page says so in `hint`). `Esc` does nothing here: it never stops the agent.
  */
-export function Composer({ label, blockedReason, onSend }: ComposerProps) {
+export function Composer({ label, blockedReason, hint, action, restore, onSend }: ComposerProps) {
   const [text, setText] = useState('');
+  const restoreKey = restore?.key;
+  const restoreText = restore?.text;
+  useEffect(() => {
+    if (restoreKey === undefined || restoreText === undefined || restoreText === '') return;
+    setText((typed) => (typed.trim() === '' ? restoreText : `${restoreText}\n\n${typed}`));
+  }, [restoreKey, restoreText]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const blocked = sending || blockedReason !== undefined;
@@ -66,6 +81,7 @@ export function Composer({ label, blockedReason, onSend }: ComposerProps) {
           autoFocus
         />
         <div className="flex items-center justify-end gap-2">
+          {action}
           <Button type="submit" size="icon" aria-label="Send" aria-disabled={blocked || text.trim() === ''}>
             <PaperPlaneRight aria-hidden />
           </Button>
@@ -77,6 +93,10 @@ export function Composer({ label, blockedReason, onSend }: ComposerProps) {
         </Text>
       ) : blockedReason !== undefined ? (
         <Text variant="caption">{blockedReason}</Text>
+      ) : hint !== undefined ? (
+        <Text variant="caption" data-testid="composer-hint">
+          {hint}
+        </Text>
       ) : null}
     </form>
   );

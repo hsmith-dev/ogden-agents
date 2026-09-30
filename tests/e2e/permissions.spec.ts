@@ -86,7 +86,11 @@ test('Deny records its reason on the record line, and the agent reports Denied',
     await card(page).getByLabel('Reason for Deny (optional)').fill('Run only the unit tests');
     await card(page).getByRole('button', { name: 'Deny' }).click();
 
-    await expect(replies(page)).toContainText('Denied npm test.');
+    await expect(replies(page).first()).toContainText('Denied npm test.');
+    // Story 2.10: after the turn, the reason goes to the agent as the user's next message.
+    await expect(page.getByTestId('message-user').nth(1)).toHaveText('I denied "npm test": Run only the unit tests');
+    await expect(replies(page)).toHaveCount(2);
+    await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
     const record = page.getByTestId('permission-record');
     await expect(record).toContainText('Denied: npm test');
     await expect(record.getByTestId('permission-reason')).toHaveText('Your reason: Run only the unit tests');

@@ -67,3 +67,18 @@
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-live-status-sidebar-and-needs-you-across-workspaces-plan.md`
   summary: Hold the sidebar order while keyboard focus is inside it, as it is held under the pointer (refactor sweep, story 2.12). Today only `pointerenter`/`pointerleave` freeze the order, so a keyboard user tabbing through the rows can have the focused row move when a state changes.
   evidence: 2.11 review finding F7; `packages/web/src/shell/status-sidebar.tsx` `useHeldModel` is driven by the pointer only.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-session-view-completes-part-a-session-behaviour-plan.md`
+  summary: Resolved: core per-chunk writes (2.2 streaming performance, core half). Reply chunks are coalesced to at most one delta per 50 ms per reply; the web half (session-scoped events, windowed lists) stays with 2.10b.
+  evidence: `packages/core/src/chat.ts` `flushDelta`/`tickDelta`; `packages/core/test/chat.test.ts` "coalesces reply chunks".
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-session-view-completes-part-a-session-behaviour-plan.md`
+  summary: Resolved: the hung agent (2.2). No timeout (user decision): after 10 minutes of silence while `working`, core appends `session.check_in` and the chat shows "waiting on <tool>" or "quiet for 10 minutes" with Stop; `POST …/cancel` is Stop.
+  evidence: `packages/core/src/chat.ts` `checkIn`, `cancel`; `packages/server/test/cancel.test.ts`; `tests/e2e/session-behaviour.spec.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-session-view-completes-part-a-session-behaviour-plan.md`
+  summary: Resolved: prune core's per-session tool-call map (2.3 F7). It is cleared when each turn ends.
+  evidence: `packages/core/src/chat.ts` `endTurn`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-session-view-completes-part-a-session-behaviour-plan.md`
+  summary: Resolved: an empty chat left behind by a failed first send (2.5 F6). A retry from the empty Chats list reuses the chat it created.
+  evidence: `packages/web/src/routes/workspace-chats-page.tsx` `firstChat`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-session-view-completes-part-a-session-behaviour-plan.md`
+  summary: Resolved: save a transcript-reopened session's new agent id only once its primed prompt succeeds (2.7 F4).
+  evidence: `packages/core/src/chat.ts` `unsavedRef`; `packages/core/test/chat.test.ts` "saves a transcript reopen’s new agent id only once".

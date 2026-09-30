@@ -334,6 +334,23 @@ const SessionMessageQueuedInput = z.object({
 export const SessionMessageQueuedEvent = SessionMessageQueuedInput.extend(assigned);
 export type SessionMessageQueuedEvent = z.infer<typeof SessionMessageQueuedEvent>;
 
+const SessionCheckInInput = z.object({
+  type: z.literal('session.check_in'),
+  ...onSessionStream,
+  payload: z.object({
+    sessionId: SessionId,
+    /** The title of the tool call still in progress, when there is one ("Claude Code is waiting on <title>"). */
+    waitingOn: z.string().min(1).optional(),
+  }),
+});
+/**
+ * The agent has sent nothing for a while (10 minutes) while `working`, never
+ * while `waiting`: the session stays `working` and nothing times out (story
+ * 2.10). Any later event of the session supersedes it.
+ */
+export const SessionCheckInEvent = SessionCheckInInput.extend(assigned);
+export type SessionCheckInEvent = z.infer<typeof SessionCheckInEvent>;
+
 // Permission events live on the session's stream and, like session events,
 // are appended only through the session-event helper (E2-R7).
 
@@ -516,6 +533,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   SessionToolCallUpdatedEvent,
   SessionResumedEvent,
   SessionMessageQueuedEvent,
+  SessionCheckInEvent,
   PermissionRequestedEvent,
   PermissionResolvedEvent,
   RunCreatedEvent,
@@ -550,6 +568,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   SessionToolCallUpdatedInput,
   SessionResumedInput,
   SessionMessageQueuedInput,
+  SessionCheckInInput,
   PermissionRequestedInput,
   PermissionResolvedInput,
   RunCreatedInput,

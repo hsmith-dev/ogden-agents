@@ -88,6 +88,11 @@ const EVENTS: Array<[type: string, valid: Record<string, unknown>, invalid: Reco
     { ...onSession, payload: { sessionId: sesId, content: 'next' } },
   ],
   [
+    'session.check_in',
+    { ...onSession, payload: { sessionId: sesId, waitingOn: 'Run npm test' } },
+    { ...onSession, payload: { sessionId: sesId, waitingOn: '' } },
+  ],
+  [
     'permission.requested',
     {
       ...onSession,

@@ -14,6 +14,7 @@ import {
 import {
   createChat,
   createDataDir,
+  clampCheckInDelay,
   RESTARTED_REASON,
   createToolchain,
   ensureDataDir,
@@ -69,6 +70,21 @@ function defaultWebRoot(): string {
  * the adapter (story 9.3), a server without it finds it only in a dev install.
  */
 export const CLAUDE_ACP_PATH_ENV = 'OGDEN_AGENTS_CLAUDE_ACP_PATH';
+
+/** Test-only: shortens the quiet-agent check-in delay, in milliseconds (story 2.10). */
+export const CHECK_IN_MS_ENV = 'OGDEN_AGENTS_TEST_CHECK_IN_MS';
+
+/**
+ * The check-in delay from {@link CHECK_IN_MS_ENV}, clamped to core's range
+ * (`clampCheckInDelay`: 1 s to 2^31-1 ms), or `undefined` (core's 10 minutes)
+ * when unset or not a number.
+ */
+export function checkInDelayFromEnv(env: NodeJS.ProcessEnv = process.env): number | undefined {
+  const raw = env[CHECK_IN_MS_ENV];
+  if (raw === undefined || raw.trim() === '') return undefined;
+  const ms = Number(raw);
+  return Number.isFinite(ms) ? clampCheckInDelay(ms) : undefined;
+}
 
 /** What an agent process needs from this server's environment to run as the user (AD-16). */
 const AGENT_ENV_ALLOWED = ['PATH', 'HOME', 'USERPROFILE', 'USER', 'USERNAME', 'LANG', 'TERM', 'TMPDIR', 'TEMP', 'TMP', 'SHELL'];
@@ -140,6 +156,12 @@ export interface StartOptions {
    * this is a dev install.
    */
   claudeAdapterPath?: string;
+  /**
+   * How long a `working` agent may be silent before core checks in (story
+   * 2.10). Default: `$OGDEN_AGENTS_TEST_CHECK_IN_MS` if set (tests and
+   * `pnpm dev:chat` only), else 10 minutes.
+   */
+  checkInDelayMs?: number;
   /** Variables added to every agent's environment on top of {@link agentEnvironment} (tests: the fake agent's switches). */
   extraAgentEnv?: Readonly<Record<string, string>>;
   /**
@@ -346,6 +368,8 @@ async function listenAndAnnounce({
   const extraAgentEnv = options.extraAgentEnv ?? {};
   // One instance for the chat that asks and the routes that answer: core's (story 2.6).
   const permissions = core.permissions;
+  const configuredCheckIn = options.checkInDelayMs ?? checkInDelayFromEnv();
+  const checkInDelayMs = configuredCheckIn === undefined ? undefined : clampCheckInDelay(configuredCheckIn);
   const chat = createChat({
     dataDir,
     entities: core.entities,
@@ -356,6 +380,7 @@ async function listenAndAnnounce({
     // The event carries the plain reason; the log also gets the details (never the environment).
     onAgentError: (sessionId, error) => log.warn('agent failed', { sessionId, code: error.code, reason: error.message, ...error.details }),
     onInternalError: (sessionId, error) => log.error('applying an agent event failed', { sessionId, reason: String(error) }),
+    ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
   const appShortcut =
     options.appShortcut ??

@@ -64,9 +64,22 @@ export class SessionEventScopeError extends CoreError {
 
 /** The session's agent is still answering; the message was not sent. */
 export class SessionBusyError extends CoreError {
-  override readonly name = 'SessionBusyError';
+  override readonly name: string = 'SessionBusyError';
   constructor(sessionId: string) {
     super('session_busy', `session ${sessionId} is still answering the last message`);
+  }
+}
+
+/** The session already holds the most queued messages it may (`MAX_QUEUED_MESSAGES`); this one was not stored. */
+export class QueueFullError extends SessionBusyError {
+  override readonly name = 'QueueFullError';
+}
+
+/** Stop was asked of a session whose agent is not answering (nothing to stop). */
+export class SessionNotBusyError extends CoreError {
+  override readonly name = 'SessionNotBusyError';
+  constructor(sessionId: string) {
+    super('session_not_busy', `session ${sessionId} has no turn running`);
   }
 }
 

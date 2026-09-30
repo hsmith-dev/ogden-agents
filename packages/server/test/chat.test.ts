@@ -100,7 +100,9 @@ describe('chat through the fake ACP agent', () => {
     const user = mine.find((e) => e.type === 'session.message_completed' && e.payload.role === 'user');
     expect(user).toMatchObject({ payload: { messageId, content: 'Say hello in five words' } });
     const deltas = mine.filter((e) => e.type === 'session.message_delta').map((e) => e.payload.text);
-    expect(deltas).toEqual(['Hello', ' from the', ' fake agent.']);
+    // Coalesced (story 2.10): at most one delta per 50 ms, together the whole reply.
+    expect(deltas.length).toBeGreaterThan(0);
+    expect(deltas.join('')).toBe('Hello from the fake agent.');
     const reply = mine.find((e) => e.type === 'session.message_completed' && e.payload.role === 'agent');
     expect(reply).toMatchObject({ payload: { content: 'Hello from the fake agent.' } });
     const states = mine.filter((e) => e.type === 'session.state_changed').map((e) => e.payload.state);
@@ -158,13 +160,13 @@ describe('chat through the fake ACP agent', () => {
     expect(ApiErrorBody.parse(await empty.json()).error.message).toBe('Write a message first.');
   });
 
-  it('refuses a second message while the agent answers (409)', async () => {
+  it('queues a second message while the agent answers (202, queued: true; story 2.10)', async () => {
     const { server, tab } = await startChatServer();
     const { workspace, session } = await openChat(server, tab);
     expect((await send(server, tab, workspace.id, session.id, 'slow')).status).toBe(202);
-    const busy = await send(server, tab, workspace.id, session.id, 'hello');
-    expect(busy.status).toBe(409);
-    expect(ApiErrorBody.parse(await busy.json()).error.code).toBe('session_busy');
+    const queued = await send(server, tab, workspace.id, session.id, 'hello');
+    expect(queued.status).toBe(202);
+    expect(SendMessageResponse.parse(await queued.json())).toMatchObject({ queued: true });
   });
 
   it('an agent that can’t be spawned sends the session to error with a plain message; the server stays up', async () => {

@@ -71,7 +71,11 @@ export const API_ROUTES = {
    * session's state arrive through the event log.
    */
   sessionMessages: `${API_BASE}/workspaces/:wsId/sessions/:sesId/messages`,
-  /** `POST` → 202 (2.10): asks the agent to stop its running prompt; the session ends `idle`. */
+  /**
+   * `POST` → 204 (2.10): Stop. Asks the agent to stop its running prompt,
+   * declines any pending permission request and drops the queued messages;
+   * the session ends `idle`. 409 `session_not_busy` when nothing is running.
+   */
   sessionCancel: `${API_BASE}/workspaces/:wsId/sessions/:sesId/cancel`,
   /**
    * `POST PermissionDecisionRequest` → 204 (2.6): the user's answer on a

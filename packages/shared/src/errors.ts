@@ -15,6 +15,8 @@ export const API_ERROR_CODES = [
   'not_found',
   /** The session's agent is still answering the last message (409). */
   'session_busy',
+  /** Stop was asked of a session whose agent is not answering (409). */
+  'session_not_busy',
   /** Quit was refused while agents are working; `details.busySessions` says how many (409). */
   'sessions_busy',
   /** uv's status or install could not be read or started (500). */

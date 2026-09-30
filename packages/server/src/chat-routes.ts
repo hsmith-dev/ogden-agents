@@ -1,8 +1,8 @@
 /**
  * The chat routes (story 2.2): create a workspace from a repo path, create a
  * chat session, read it, and send it a message; story 2.5 adds the workspace
- * and session lists. Story 2.3 adds a stub, which answers 501
- * `not_implemented`, for cancel (2.10); stories 2.7 and 2.10 own this file next. All live under `/api/v1`
+ * and session lists; story 2.10 queues a message sent while the agent
+ * answers (409 only when the queue is full) and adds Stop (`cancel`). All live under `/api/v1`
  * (`API_ROUTES`), behind the gate: a tab token on every request, and a
  * matching `Origin` on these state-changing POSTs (AD-15). Routes call the
  * core chat use-case and never write themselves (AD-11).
@@ -11,7 +11,9 @@ import {
   CoreError,
   InvalidOperationError,
   NotFoundError,
+  QueueFullError,
   SessionBusyError,
+  SessionNotBusyError,
   ValidationError,
   type Chat,
 } from '@ogden-agents/core';
@@ -30,7 +32,7 @@ import {
 } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { apiError, notImplemented } from './errors.js';
+import { apiError } from './errors.js';
 import type { Logger } from './log.js';
 
 /** Largest request body these routes read (a message is at most 100,000 characters). */
@@ -78,6 +80,10 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger): void {
   /** Core's refusals as API errors; anything else is left for `onError` (500). */
   const refusal = (c: Context, error: unknown): Response => {
     if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', NOT_FOUND);
+    if (error instanceof QueueFullError) {
+      return apiError(c, 409, 'session_busy', 'Too many messages are waiting. Send this one when the agent has caught up.');
+    }
+    if (error instanceof SessionNotBusyError) return apiError(c, 409, 'session_not_busy', 'The agent is not working on anything to stop.');
     if (error instanceof SessionBusyError) {
       return apiError(c, 409, 'session_busy', 'The agent is still answering. Send your message when it is done.');
     }
@@ -135,8 +141,18 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger): void {
     }
   });
 
-  // `POST` → 202: stops the running prompt (2.10).
-  app.post(API_ROUTES.sessionCancel, notImplemented);
+  // Stop (2.10): never asks for confirmation; the session ends `idle`.
+  app.post(API_ROUTES.sessionCancel, (c) => {
+    const scope = ids(c);
+    if (scope?.sessionId === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+    try {
+      chat.cancel(scope.workspaceId, scope.sessionId);
+      log.info('session stopped', { workspaceId: scope.workspaceId, sessionId: scope.sessionId });
+      return c.body(null, 204);
+    } catch (error) {
+      return refusal(c, error);
+    }
+  });
 
   app.post(API_ROUTES.sessionMessages, limit, async (c) => {
     const scope = ids(c);

@@ -2,7 +2,7 @@ import { ChatCircle, GearSix, House } from '@phosphor-icons/react';
 import type { Session } from '@ogden-agents/shared';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { AGENT_NAME, ChatApiError, createChatSession, sendMessage } from '@/chat/chat-api';
 import { Composer } from '@/chat/composer';
 import { WorkspaceHeader } from '@/shell/workspace-header';
@@ -30,6 +30,11 @@ export function WorkspaceChatsPage() {
   const { sessions, error } = useSessions(wsId);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | undefined>(undefined);
+  /** The chat the first message created: a retry after a failed send reuses it, never leaving an empty one behind (2.5 F6). */
+  const firstChat = useRef<Session | undefined>(undefined);
+  const [firstChatId, setFirstChatId] = useState<string | undefined>(undefined);
+  // The chat a first send created (and failed in) keeps the empty-state composer, for the retry.
+  const onlyFirstChat = sessions !== undefined && sessions.length === 1 && sessions[0]?.id === firstChatId;
   const missing = (workspace.error instanceof ChatApiError && workspace.error.status === 404) || (error instanceof ChatApiError && error.status === 404);
 
   const openChat = (session: Session) => navigate({ to: '/w/$wsId/s/$sesId', params: { wsId, sesId: session.id } });
@@ -103,13 +108,15 @@ export function WorkspaceChatsPage() {
                   Loading the chats
                 </span>
               </div>
-            ) : sessions.length === 0 ? (
+            ) : sessions.length === 0 || onlyFirstChat ? (
               <div className="flex max-w-(--space-chat-column) flex-col gap-4" data-testid="chats-empty">
                 <EmptyState title="No conversations yet." />
                 <Composer
                   label={`Message ${AGENT_NAME}`}
                   onSend={async (text) => {
-                    const session = await createChatSession(wsId);
+                    const session = firstChat.current ?? (await createChatSession(wsId));
+                    firstChat.current = session;
+                    setFirstChatId(session.id);
                     await sendMessage(wsId, session.id, text);
                     await openChat(session);
                   }}

@@ -465,7 +465,7 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
         throw error;
       }
       // The agent is only ever told "once"; a Deny's reason reaches it with story 2.10.
-      entry.answer(decision === 'deny' ? { outcome: 'deny' } : { outcome: 'allow_once' });
+      entry.answer(decision === 'deny' ? { outcome: 'deny', ...(kept === undefined ? {} : { reason: kept }) } : { outcome: 'allow_once' });
     },
 
     listRules(workspaceId) {

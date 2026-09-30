@@ -56,8 +56,9 @@ test('a message sent from the session view streams its reply while the session g
     const reply = page.getByTestId('message-agent');
     await expect(reply).toHaveAttribute('data-streaming', 'true');
     await expect(reply).toContainText('Hello');
-    // While it works, sending waits.
-    await expect(page.getByRole('button', { name: 'Send' })).toHaveAttribute('aria-disabled', 'true');
+    // While it works, a message can still be sent (it waits its turn), and Stop is there (story 2.10).
+    await expect(page.getByTestId('composer-hint')).toHaveText('Claude Code is working. A message you send now waits its turn.');
+    await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
 
     await expect(reply).toContainText('Hello from the fake agent.');
     await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');

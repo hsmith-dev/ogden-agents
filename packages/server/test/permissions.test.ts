@@ -113,7 +113,10 @@ describe('permission cards through the fake ACP agent', () => {
     const reason = 'Run the unit tests only, secret-reason-words';
     expect((await decide(server, tab, workspace.id, session.id, payload.requestId, { decision: 'deny', reason })).status).toBe(204);
     await idle(server, session.id);
-    expect(replies(server, session.id)).toEqual(['Denied npm test.']);
+    // Story 2.10: after the turn, the reason goes to the agent as the user's next message.
+    expect(replies(server, session.id)).toEqual(['Denied npm test.', 'Hello from the fake agent.']);
+    const users = sessionEvents(server, session.id).flatMap((e) => (e.type === 'session.message_completed' && e.payload.role === 'user' ? [e.payload.content] : []));
+    expect(users).toEqual(['permission', `I denied "npm test": ${reason}`]);
     const resolved = sessionEvents(server, session.id).find((e) => e.type === 'permission.resolved');
     expect(resolved?.payload).toMatchObject({ decision: 'deny', by: 'user', reason });
     expect(lines.join('')).not.toContain('secret-reason-words');

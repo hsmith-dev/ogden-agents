@@ -85,7 +85,7 @@ describe('asking', () => {
     });
   });
 
-  it('Deny records its reason in permission.resolved only; the agent is told reject_once without it', async () => {
+  it('Deny records its reason in permission.resolved and hands it to core (sent after the turn; story 2.10)', async () => {
     const core = openTestCore();
     const { workspace, session } = workingSession(core);
     const asked = track(core.permissions.request(session.id, npm('rm -rf build')));
@@ -96,7 +96,7 @@ describe('asking', () => {
 
     core.permissions.decide(workspace.id, session.id, requestId, { decision: 'deny', reason: 'Use the clean script instead.' });
     await flush();
-    expect(asked.decision).toEqual({ outcome: 'deny' });
+    expect(asked.decision).toEqual({ outcome: 'deny', reason: 'Use the clean script instead.' });
     expect(permissionEvents(core, session.id).at(-1)?.payload).toMatchObject({ decision: 'deny', by: 'user', reason: 'Use the clean script instead.' });
   });
 

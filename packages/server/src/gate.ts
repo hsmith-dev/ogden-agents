@@ -1,259 +1,152 @@
 /**
- * The security gate (AD-15): one Hono middleware that every HTTP request and
- * WebSocket upgrade passes before any route. In order it checks:
+ * The security gate (AD-15 as amended in story 2.1): one Hono middleware that
+ * every HTTP request and WebSocket upgrade passes before any route. In order
+ * it checks:
  *
  * 1. `Host` is exactly `127.0.0.1:<port>` or `localhost:<port>` (403), which
  *    defeats DNS rebinding;
- * 2. the launcher handshake (`/launcher/…`) needs the launcher token in its
- *    header (401) and nothing else: no cookie opens it, and the token opens
- *    nothing but it (see `launcher-token.ts`);
- * 3. `GET /auth?code=…` exchanges a launch code for the session cookie and
- *    redirects (303) to `/`; this is the only thing reachable without a cookie;
- * 4. a valid signed session cookie (401);
+ * 2. `POST /api/tab/exchange` with `{ code }`: the launcher opened
+ *    `/#c=<code>`, and the page's boot script sends the single-use launch code
+ *    here (Host and Origin checked, no token needed). The response body
+ *    carries a new per-tab token, so the token never appears in any URL; no
+ *    cookie is set;
+ * 3. static app files (GET or HEAD outside `/api`, `/ws` and `/launcher`, and
+ *    not a WebSocket upgrade) pass without a token: they hold no user data,
+ *    and a tab without a token shows the app's own "Open Ogden Agents" state.
+ *    Only the static handler and the SPA shell serve such paths; a test
+ *    enumerates the app's routes to keep it that way;
+ * 4. everything else needs this tab's token: the subprotocols `ogden.v1` and
+ *    `ogden.auth.<token>` on a real WebSocket upgrade to `/ws`, and
+ *    `Authorization: Bearer <token>` on every other request (401). Cookies
+ *    are ignored;
  * 5. on WebSocket upgrades and on every method but GET, HEAD and OPTIONS, an
- *    `Origin` of `http://127.0.0.1:<port>` or `http://localhost:<port>` (403).
+ *    `Origin` of `http://127.0.0.1:<port>` or `http://localhost:<port>` (403);
+ * 6. the launcher handshake (`/launcher/…`) needs the launcher token in its
+ *    header (401) and nothing else: no tab token opens it, and it opens
+ *    nothing but the handshake (see `launcher-token.ts`). Its paths are
+ *    matched right after the Host check, so rules 2 to 5 never apply to it.
  *
- * Refusals carry no event data. Launch codes and the launcher token are
- * never logged (AD-16).
+ * Every response carries a Content-Security-Policy that allows only the
+ * app's own scripts. Refusals carry no event data. Launch codes, tab tokens
+ * and the launcher token are never logged (AD-16).
  */
-import type { MiddlewareHandler } from 'hono';
-import { APPEARANCE_STORAGE_KEY } from '@ogden-agents/shared';
-import { getCookie, setCookie } from 'hono/cookie';
-import { sessionCookieName, type LaunchCodes, type Sessions } from './auth.js';
-import { LAUNCHER_PREFIX, LAUNCHER_TOKEN_HEADER, type LauncherToken } from './launcher-token.js';
+import type { Context, MiddlewareHandler } from 'hono';
+import { LAUNCH_CODE_FRAGMENT_PARAM, TAB_EXCHANGE_PATH } from '@ogden-agents/shared';
+import { bearerToken, webSocketToken, type LaunchCodes, type TabTokens } from './auth.js';
+import { LAUNCHER_TOKEN_HEADER, type LauncherToken } from './launcher-token.js';
 import type { Logger } from './log.js';
+import { isLauncherPath, isServerPath, isWsPath } from './paths.js';
 
 export interface GateOptions {
   /** The bound port; `undefined` until the server is listening, when every request is refused. */
   port: () => number | undefined;
   codes: LaunchCodes;
-  sessions: Sessions;
+  tabs: TabTokens;
   /** The launcher token; without one, the handshake prefix refuses everything. */
   launcherToken?: Pick<LauncherToken, 'verify'>;
   log: Logger;
 }
 
-/** The path of the launch code exchange. */
-export const AUTH_PATH = '/auth';
+/** A launch link: the app's origin with the single-use code in the fragment, `/#c=<code>`. */
+export function launchUrl(origin: string, code: string): string {
+  return `${origin}/#${LAUNCH_CODE_FRAGMENT_PARAM}=${code}`;
+}
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /**
- * Shown for an unauthenticated page request: how to get in, and nothing else.
- * React can't load without a session (its assets are gated), so this page is
- * server-rendered and styled inline with DESIGN.md's tokens (launch-page),
- * in light and dark. The saved Light or Dark override from Settings >
- * Appearance is honored too, since it lives in this origin's localStorage.
- * Fonts fall back to the system stack: the self-hosted Geist files are gated.
+ * The app's Content-Security-Policy for the server on `port`: scripts only
+ * from the app's own origin (no inline script, no third-party origin), and
+ * connections only back to it. Inline styles stay allowed: the UI's
+ * components set `style` for positioning.
  */
-export const OPEN_FROM_TERMINAL_PAGE = `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ogden Agents</title>
-<script>
-try {
-  var saved = JSON.parse(localStorage.getItem(${JSON.stringify(APPEARANCE_STORAGE_KEY)}) || '{}');
-  if (saved.theme === 'light' || saved.theme === 'dark') document.documentElement.setAttribute('data-theme', saved.theme);
-} catch (e) {}
-</script>
-<style>
-/* Copied from packages/web/src/ui/tokens.css; tests/design-tokens.test.ts checks every value. */
-:root {
-  color-scheme: light;
-  --background: #F6F7F5;
-  --foreground: #141715;
-  --muted: #ECEFEB;
-  --muted-foreground: #5C645D;
-  --border: #DCE0DA;
-  --primary: #1B1F1C;
-  --primary-foreground: #F6F7F5;
-  --ring: #2F4FD8;
-  --family-sans: 'Geist Variable', 'Geist', ui-sans-serif, system-ui, sans-serif;
-  --family-mono: 'Geist Mono Variable', 'Geist Mono', ui-monospace, 'SFMono-Regular', monospace;
-  --type-display-size: 28px;
-  --type-display-weight: 600;
-  --type-display-line-height: 1.15;
-  --type-display-tracking: -0.02em;
-  --type-heading-weight: 600;
-  --type-body-size: 15px;
-  --type-body-line-height: 1.55;
-  --type-label-size: 13px;
-  --type-label-weight: 500;
-  --type-label-line-height: 1.3;
-  --type-mono-size: 13px;
-  --type-mono-line-height: 1.5;
-  --rounded-md: 6px;
-  --rounded-lg: 10px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-6: 24px;
-  --button-height: 36px;
-  --focus-ring-width: 2px;
-  --focus-ring-offset: 2px;
-  --measure: 70ch;
+export function contentSecurityPolicy(port: number): string {
+  return [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    // 'self' covers ws: in current browsers; the explicit origins cover older ones.
+    `connect-src 'self' ws://127.0.0.1:${port} ws://localhost:${port}`,
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join('; ');
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    color-scheme: dark;
-    --background: #0F1210;
-    --foreground: #E6EAE6;
-    --muted: #1C211D;
-    --muted-foreground: #959E96;
-    --border: #262C27;
-    --primary: #E6EAE6;
-    --primary-foreground: #111412;
-    --ring: #8198FF;
-  }
-}
-:root[data-theme='dark'] {
-  color-scheme: dark;
-  --background: #0F1210;
-  --foreground: #E6EAE6;
-  --muted: #1C211D;
-  --muted-foreground: #959E96;
-  --border: #262C27;
-  --primary: #E6EAE6;
-  --primary-foreground: #111412;
-  --ring: #8198FF;
-}
-* { box-sizing: border-box; }
-html { height: 100%; }
-html, body { background: var(--background); color: var(--foreground); }
-body {
-  margin: 0; min-height: 100%; display: grid; place-items: center; padding: var(--space-6) var(--space-4);
-  font-family: var(--family-sans); font-size: var(--type-body-size); line-height: var(--type-body-line-height);
-  -webkit-font-smoothing: antialiased;
-}
-main { width: 100%; max-width: var(--measure); display: flex; flex-direction: column; gap: var(--space-4); }
-.wordmark { display: flex; align-items: center; gap: var(--space-2); font-size: var(--type-label-size); font-weight: var(--type-heading-weight); line-height: var(--type-label-line-height); }
-.mark { display: grid; place-items: center; width: var(--button-height); height: var(--button-height); border-radius: var(--rounded-md); background: var(--primary); color: var(--primary-foreground); }
-h1 {
-  margin: var(--space-4) 0 0; font-size: var(--type-display-size); font-weight: var(--type-display-weight);
-  line-height: var(--type-display-line-height); letter-spacing: var(--type-display-tracking);
-}
-p { margin: 0; color: var(--muted-foreground); max-width: var(--measure); }
-code { font-family: var(--family-mono); font-size: var(--type-mono-size); }
-.command {
-  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
-  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
-  border: thin solid var(--border); border-radius: var(--rounded-lg); background: var(--muted);
-}
-.command code { color: var(--foreground); line-height: var(--type-mono-line-height); overflow-wrap: anywhere; }
-button {
-  height: var(--button-height); padding: 0 var(--space-3); border: 0; border-radius: var(--rounded-md); cursor: pointer;
-  background: var(--primary); color: var(--primary-foreground);
-  font: inherit; font-size: var(--type-label-size); font-weight: var(--type-label-weight); line-height: var(--type-label-line-height); white-space: nowrap;
-}
-button:active { transform: scale(0.98); }
-.status { font-size: var(--type-label-size); line-height: var(--type-label-line-height); min-height: var(--type-label-size); }
-:focus-visible { outline: var(--focus-ring-width) solid var(--ring); outline-offset: var(--focus-ring-offset); }
-</style>
-</head>
-<body>
-<main>
-<div class="wordmark"><span class="mark" aria-hidden="true">O</span>Ogden Agents</div>
-<h1>Open Ogden Agents from your terminal</h1>
-<p>This browser isn't signed in to Ogden Agents. Run <code>npx ogden-agents</code> (or <code>ogden</code>) in a terminal: it opens the app here with a one-time link.</p>
-<div class="command"><code id="command">npx ogden-agents</code><button type="button" id="copy">Copy</button></div>
-<p class="status" id="copy-status" role="status"></p>
-</main>
-<script>
-(function () {
-  var button = document.getElementById('copy');
-  var status = document.getElementById('copy-status');
-  var failed = function () {
-    button.textContent = 'Copy';
-    status.textContent = "Couldn't copy. The command is selected; copy it with your keyboard.";
-    var range = document.createRange();
-    range.selectNodeContents(document.getElementById('command'));
-    var selection = window.getSelection();
-    selection.removeAllRanges();
-    selection.addRange(range);
-  };
-  button.addEventListener('click', function () {
-    status.textContent = '';
-    try {
-      navigator.clipboard.writeText('npx ogden-agents').then(function () {
-        button.textContent = 'Copied';
-        setTimeout(function () { button.textContent = 'Copy'; }, 1500);
-      }, failed);
-    } catch (e) {
-      failed();
-    }
-  });
-})();
-</script>
-</body>
-</html>
-`;
 
 /**
- * A browser navigating to a page (not fetching an asset or calling the API):
- * a GET or HEAD that accepts HTML. Without a session these get the launch
- * page, so a bookmarked app URL such as `/settings/appearance` explains how
- * to get in (EXPERIENCE.md State Patterns: Unauthenticated).
+ * A real WebSocket upgrade: a GET with `Upgrade: websocket` and `Connection`
+ * listing `upgrade`, the only requests Node hands to the WebSocket server. An
+ * ordinary request that merely carries an `Upgrade` header is not one.
  */
-function isPageRequest(method: string, path: string, accept: string | undefined): boolean {
-  if (method !== 'GET' && method !== 'HEAD') return false;
-  if (path === '/') return true;
-  return (accept ?? '').includes('text/html') && !/\.[A-Za-z0-9]+$/.test(path);
+function isRealUpgrade(c: Context): boolean {
+  if (c.req.method !== 'GET' || c.req.header('upgrade')?.toLowerCase() !== 'websocket') return false;
+  return (c.req.header('connection') ?? '')
+    .split(',')
+    .some((part) => part.trim().toLowerCase() === 'upgrade');
 }
 
-export function createGate({ port, codes, sessions, launcherToken, log }: GateOptions): MiddlewareHandler {
+const unauthorized = (c: Context, message = 'This tab is not connected to Ogden Agents.') =>
+  c.json({ error: { code: 'unauthorized', message } }, 401);
+
+export function createGate({ port, codes, tabs, launcherToken, log }: GateOptions): MiddlewareHandler {
   return async (c, next) => {
     const bound = port();
     if (bound === undefined) return c.text('Forbidden', 403);
     const allowedHosts = [`127.0.0.1:${bound}`, `localhost:${bound}`];
-    const cookieName = sessionCookieName(bound);
+    // Set before any response is made, so refusals, routes and upgrades alike carry it.
+    c.header('Content-Security-Policy', contentSecurityPolicy(bound));
 
     if (!allowedHosts.includes(c.req.header('host') ?? '')) return c.text('Forbidden', 403);
 
-    if (c.req.path.startsWith(LAUNCHER_PREFIX) || c.req.path === LAUNCHER_PREFIX.slice(0, -1)) {
+    const path = c.req.path;
+    const upgrade = isRealUpgrade(c);
+    const originOk = () => {
+      const origin = c.req.header('origin');
+      return origin !== undefined && allowedHosts.some((host) => origin === `http://${host}`);
+    };
+
+    if (isLauncherPath(path)) {
       if (launcherToken === undefined || !launcherToken.verify(c.req.header(LAUNCHER_TOKEN_HEADER))) {
-        log.warn('launcher token rejected', { path: c.req.path });
+        log.warn('launcher token rejected', { path });
         return c.json({ error: { code: 'unauthorized', message: 'A valid launcher token is required.' } }, 401);
       }
-      // The launcher is not a browser: it sends no cookie and no Origin. The
-      // token, readable only by this OS user, is what a browser can never send.
+      // The launcher is not a browser: it sends no tab token and no Origin. The
+      // launcher token, readable only by this OS user, is what a page can never send.
       await next();
       return;
     }
 
-    if (c.req.path === AUTH_PATH && c.req.method === 'GET') {
-      const code = c.req.query('code');
-      if (code === undefined || !codes.redeem(code)) {
+    if (path === TAB_EXCHANGE_PATH && c.req.method === 'POST' && !upgrade) {
+      if (!originOk()) return c.text('Forbidden', 403);
+      let code: unknown;
+      try {
+        code = ((await c.req.json()) as { code?: unknown } | null)?.code;
+      } catch {
+        code = undefined;
+      }
+      if (typeof code !== 'string' || !codes.redeem(code)) {
         log.warn('launch code rejected');
-        return c.text('This link has expired or was already used. Run `npx ogden-agents` (or `ogden`) again.', 401);
+        return unauthorized(c, 'This link has expired or was already used. Run `npx ogden-agents` (or `ogden`) again.');
       }
-      log.info('launch code used');
-      const session = sessions.create();
-      setCookie(c, cookieName, session.value, {
-        httpOnly: true,
-        sameSite: 'Strict',
-        path: '/',
-        maxAge: session.maxAgeSeconds,
-      });
-      // 303 takes the (now spent) code out of the address bar.
-      return c.redirect('/', 303);
+      const token = tabs.mint();
+      log.info('launch code used; tab token minted');
+      return c.json({ token }, 200, { 'Cache-Control': 'no-store' });
     }
 
-    if (!sessions.verify(getCookie(c, cookieName))) {
-      if (isPageRequest(c.req.method, c.req.path, c.req.header('accept'))) {
-        return c.html(OPEN_FROM_TERMINAL_PAGE, 401);
-      }
-      return c.text('Unauthorized', 401);
+    const isStatic = !upgrade && (c.req.method === 'GET' || c.req.method === 'HEAD') && !isServerPath(path);
+    if (isStatic) {
+      await next();
+      return;
     }
 
-    const isUpgrade = c.req.header('upgrade')?.toLowerCase() === 'websocket';
-    if (isUpgrade || !SAFE_METHODS.has(c.req.method)) {
-      const origin = c.req.header('origin');
-      if (origin === undefined || !allowedHosts.some((host) => origin === `http://${host}`)) {
-        return c.text('Forbidden', 403);
-      }
-    }
+    // The subprotocol carries the token only on a real upgrade to the event socket.
+    const token = upgrade && isWsPath(path) ? webSocketToken(c.req.header('sec-websocket-protocol')) : bearerToken(c.req.header('authorization'));
+    if (!tabs.verify(token)) return unauthorized(c);
+
+    if ((upgrade || !SAFE_METHODS.has(c.req.method)) && !originOk()) return c.text('Forbidden', 403);
 
     await next();
   };

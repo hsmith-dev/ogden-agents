@@ -18,8 +18,8 @@ import openBrowser from 'open';
 import { WebSocketServer } from 'ws';
 import pkg from '../package.json' with { type: 'json' };
 import { createApp, type ServerControl } from './app.js';
-import { createLaunchCodes, createSessions, loadOrCreateAuthKey, tightenMode, type Clock } from './auth.js';
-import { AUTH_PATH, createGate } from './gate.js';
+import { chooseWebSocketProtocol, createLaunchCodes, createTabTokens, retireLegacyAuthKey, tightenMode, type Clock, type TabTokens } from './auth.js';
+import { createGate, launchUrl as launchUrlFor } from './gate.js';
 import { acquireInstanceLock, type InstanceLock } from './instance-lock.js';
 import { createLauncherToken, type LauncherToken } from './launcher-token.js';
 import { createLogger, createRotatingFileWriter, LOG_DIR, teeWriters, type Logger } from './log.js';
@@ -65,7 +65,7 @@ export interface StartOptions {
   core?: Core;
   /** Override the logger (tests). Default: stderr plus a rotating file in `<dataDir>/logs`. */
   log?: Logger;
-  /** Override the clock for launch code and session expiry (tests). Default `Date.now`. */
+  /** Override the clock for launch code and tab token expiry (tests). Default `Date.now`. */
   now?: Clock;
   /**
    * Override how `uv` is found and installed (tests). Default: the
@@ -108,11 +108,12 @@ export interface PortFile {
 }
 
 export interface RunningServer {
-  /** The base URL. Opening it without the session cookie shows how to get in. */
+  /** The base URL. A tab opened on it without a token shows how to get in. */
   url: string;
   /**
-   * `<url>/auth?code=…`: a single-use link, valid for 60 seconds, that signs a
-   * browser in (AD-15). It is a secret: print it for the user, never log it.
+   * `<url>/#c=…`: a single-use link, valid for 60 seconds, that opens one
+   * connected tab (AD-15: the page exchanges the code for its token over
+   * POST). It is a secret: print it for the user, never log it.
    */
   launchUrl: string;
   port: number;
@@ -121,6 +122,8 @@ export interface RunningServer {
   dataDir: string;
   /** Core as wired into this server: the event log and entity model. */
   core: Core;
+  /** The live tab tokens (in memory only; gone when the server stops). */
+  tabs: TabTokens;
   /** A fresh single-use launch link, as `launchUrl`. A secret: never log it. */
   issueLaunchUrl(): string;
   /** Resolves once the server has stopped, however it stopped, with the reason. */
@@ -193,16 +196,17 @@ async function listenAndAnnounce({
   const requested = options.port ?? DEFAULT_PORT;
   const now = options.now ?? Date.now;
   const codes = createLaunchCodes(now);
-  const sessions = createSessions(loadOrCreateAuthKey(dataDir), now);
+  const tabs = createTabTokens(now);
+  retireLegacyAuthKey(dataDir);
   // The gate refuses everything until the port is known, and the handshake until the token exists.
   let boundPort: number | undefined;
   let launcherToken: LauncherToken | undefined;
   const version = pkg.version;
   /** Set once the server is running; the routes only run after that. */
-  let lifecycle: { issueLaunchUrl(): string; stop(reason: 'quit' | 'restart'): void } | undefined;
+  let lifecycle: { issueLaunchUrl(origin?: string): string; stop(reason: 'quit' | 'restart'): void } | undefined;
   const control: ServerControl = {
     info: () => ({ version, pid: process.pid, port: boundPort ?? 0, busySessions: countBusySessions(core) }),
-    issueLaunchUrl: () => lifecycle!.issueLaunchUrl(),
+    issueLaunchUrl: (origin) => lifecycle!.issueLaunchUrl(origin),
     restartWhenIdle: () => {
       const busySessions = countBusySessions(core);
       if (busySessions > 0) {
@@ -227,7 +231,7 @@ async function listenAndAnnounce({
   const gate = createGate({
     port: () => boundPort,
     codes,
-    sessions,
+    tabs,
     launcherToken: { verify: (given) => launcherToken?.verify(given) ?? false },
     log,
   });
@@ -239,7 +243,7 @@ async function listenAndAnnounce({
     // The event carries the plain reason; the log also gets the target, URL and (on a mismatch) both hashes.
     onFailure: (error) => log.warn('uv install failed', { code: error.code, reason: error.message, ...error.details }),
   });
-  const app = createApp({ events: core.events, webRoot: options.webRoot ?? defaultWebRoot(), log, gate, control, toolchain });
+  const app = createApp({ events: core.events, webRoot: options.webRoot ?? defaultWebRoot(), log, gate, control, toolchain, tabs });
 
   let bound: { server: ReturnType<typeof createAdaptorServer>; wss: WebSocketServer; port: number } | undefined;
   let lastTried = requested;
@@ -248,7 +252,8 @@ async function listenAndAnnounce({
     const candidate = requested === 0 ? 0 : requested + attempt;
     if (candidate > 65535) break;
     lastTried = candidate;
-    const wss = new WebSocketServer({ noServer: true });
+    // Echo only `ogden.v1`, never the offer that carries the tab token (AD-15).
+    const wss = new WebSocketServer({ noServer: true, handleProtocols: chooseWebSocketProtocol });
     const server = createAdaptorServer({ fetch: app.fetch, websocket: { server: wss } });
     try {
       const port = await listen(server, candidate);
@@ -287,8 +292,8 @@ async function listenAndAnnounce({
     throw error;
   }
 
-  const issueLaunchUrl = () => {
-    const launchUrl = `${url}${AUTH_PATH}?code=${codes.issue()}`;
+  const issueLaunchUrl = (origin: string = url) => {
+    const launchUrl = launchUrlFor(origin, codes.issue());
     log.info('launch code issued');
     return launchUrl;
   };
@@ -365,7 +370,8 @@ async function listenAndAnnounce({
     version,
     dataDir,
     core,
-    issueLaunchUrl,
+    tabs,
+    issueLaunchUrl: () => issueLaunchUrl(),
     stopped,
     close: () => shutdown('close'),
   };

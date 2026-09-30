@@ -2,6 +2,10 @@
 
 Every release of the `ogden-agents` npm package. Versions follow [semantic versioning](https://semver.org/); before 1.0.0, a minor version may change behavior. How a release is made is in [RELEASING.md](RELEASING.md).
 
+## Unreleased
+
+- **Per-tab sign-in, no cookie.** Each browser tab now holds its own token, exchanged from the one-time launch link inside the page, so the token never appears in a URL or browser history. Other web servers running on your computer can no longer receive a session cookie, because there isn't one. A bookmark or brand-new tab shows "Open Ogden Agents"; **New tab** in the sidebar opens another connected tab. The app sends a strict Content-Security-Policy.
+
 ## 0.1.0 — first release
 
 The first build on npm. Run it with `npx ogden-agents` (Node 24 or later on macOS, Windows or Linux). It is the foundation, not yet a working agent UI: it starts, signs you in and shows the app shell, but runs no agents.

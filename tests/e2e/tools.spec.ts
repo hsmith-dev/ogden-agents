@@ -8,6 +8,7 @@
 import { expect, test, type Browser } from '@playwright/test';
 import type { DetectedToolStatus, ToolchainPort, ToolProgress } from '@ogden-agents/server';
 import { makeDataDir, removeDataDir, serverModule, startServer, type RunningServer } from './server.js';
+import { openConnected } from './tab.js';
 
 /** A stub port whose install waits for the test to let it finish. */
 function stubToolchain(initial: DetectedToolStatus, outcome: 'ok' | 'hash_mismatch', ToolchainError: typeof import('@ogden-agents/server').ToolchainError) {
@@ -47,7 +48,7 @@ async function withServer(
   const context = await browser.newContext({ viewport: { width, height: 900 } });
   try {
     const page = await context.newPage();
-    await page.goto(server.launchUrl);
+    await openConnected(page, '/', server.launchUrl);
     await body(page, server);
   } finally {
     await context.close();
@@ -138,9 +139,14 @@ test('an install request without a matching Origin is refused by the gate', asyn
   const { ToolchainError } = await serverModule();
   const stub = stubToolchain({ state: 'missing' }, 'ok', ToolchainError);
   await withServer(browser, stub.port, async (page, server) => {
-    // The page's own cookie, but another site's Origin: what a cross-site form or script would send.
-    const response = await page.request.post(`${server.url}/api/toolchain/uv/install`, { headers: { origin: 'http://evil.example' } });
-    expect(response.status()).toBe(403);
+    // The tab's own token, but another site's Origin: refused (403).
+    const token = await page.evaluate(() => sessionStorage.getItem('ogden-agents.tab-token'));
+    expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const install = `${server.url}/api/toolchain/uv/install`;
+    const foreign = await page.request.post(install, { headers: { authorization: `Bearer ${token}`, origin: 'http://evil.example' } });
+    expect(foreign.status()).toBe(403);
+    // What a cross-site form or another local server could send: no token at all (401).
+    expect((await page.request.post(install, { headers: { origin: server.url } })).status()).toBe(401);
     expect(stub.installs()).toBe(0);
   });
 });

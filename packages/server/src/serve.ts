@@ -12,7 +12,7 @@
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { ensureDataDir } from '@ogden-agents/core';
-import { createLogger, createRotatingFileWriter, LOG_DIR, type Logger, type LogWriter } from './log.js';
+import { createLogger, createRotatingFileWriter, LOG_DIR, redact, type Logger, type LogWriter } from './log.js';
 import { EXIT_ALREADY_RUNNING, ServerAlreadyRunningError } from './instance-lock.js';
 import { start, type RunningServer } from './start.js';
 
@@ -32,7 +32,7 @@ function captureStdio(write: LogWriter): void {
     stream.write = ((chunk: unknown, ...rest: unknown[]) => {
       try {
         const text = typeof chunk === 'string' ? chunk : Buffer.from(chunk as Uint8Array).toString('utf8');
-        write(`${JSON.stringify({ level, at: new Date().toISOString(), msg: 'process output', text: text.trimEnd() })}\n`);
+        write(`${JSON.stringify({ level, at: new Date().toISOString(), msg: 'process output', text: redact(text.trimEnd()) })}\n`);
       } catch {
         // Logging must never take the server down.
       }

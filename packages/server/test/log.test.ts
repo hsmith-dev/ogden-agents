@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createLogger, createRotatingFileWriter, teeWriters } from '../src/log.js';
+import { createLogger, createRotatingFileWriter, redact, REDACTED, teeWriters, TOO_DEEP } from '../src/log.js';
 import { tempDataDir } from './helpers.js';
 
 describe('rotating log file', () => {
@@ -52,5 +52,66 @@ describe('rotating log file', () => {
     );
     write('x\n');
     expect(lines).toEqual(['x\n']);
+  });
+});
+
+describe('redaction', () => {
+  it('never writes credential headers, bearer or subprotocol tokens, launch codes or token fragments', () => {
+    const token = 'A'.repeat(43);
+    const lines: string[] = [];
+    const log = createLogger((l) => lines.push(l));
+    log.warn('request', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'sec-websocket-protocol': `ogden.v1, ogden.auth.${token}`,
+        cookie: `ogden_session_4317=${token}`,
+        'x-ogden-launcher-token': token,
+        host: '127.0.0.1:4317',
+      },
+      url: `http://127.0.0.1:4317/auth?code=${token}`,
+      location: `/#t=${token}`,
+      launchUrl: `http://127.0.0.1:4317/#c=${token}`,
+      token,
+      nested: [{ reason: `failed with Bearer ${token}` }],
+      error: new Error(`offer ogden.auth.${token} refused`),
+    });
+    log.info(`message with Bearer ${token}`);
+    const all = lines.join('');
+    expect(all).not.toContain(token);
+    const first = JSON.parse(lines[0]!) as { headers: Record<string, string>; url: string; location: string };
+    expect(first.headers).toEqual({
+      Authorization: REDACTED,
+      'sec-websocket-protocol': REDACTED,
+      cookie: REDACTED,
+      'x-ogden-launcher-token': REDACTED,
+      host: '127.0.0.1:4317',
+    });
+    expect(first.url).toBe(`http://127.0.0.1:4317/auth?code=${REDACTED}`);
+    expect(first.location).toBe(`/#t=${REDACTED}`);
+    expect((first as unknown as { launchUrl: string }).launchUrl).toBe(`http://127.0.0.1:4317/#c=${REDACTED}`);
+    expect((first as unknown as { token: string }).token).toBe(REDACTED);
+  });
+
+  it('replaces values nested too deep to check with a placeholder', () => {
+    const token = 'A'.repeat(43);
+    let deep: Record<string, unknown> = { secret: `Bearer ${token}`, plain: token };
+    for (let i = 0; i < 20; i++) deep = { next: deep };
+    const out = JSON.stringify(redact({ deep }));
+    expect(out).not.toContain(token);
+    expect(out).toContain(TOO_DEEP);
+  });
+
+  it('a boolean "token" diagnostic is kept; only a string token is redacted', () => {
+    expect(redact({ token: true, launcherTokenFound: false })).toEqual({ token: true, launcherTokenFound: false });
+    expect(redact({ token: 'abc' })).toEqual({ token: REDACTED });
+  });
+
+  it('leaves ordinary fields alone', () => {
+    expect(redact({ port: 4317, msg: 'server listening', url: 'http://127.0.0.1:4317', code: 'EADDRINUSE' })).toEqual({
+      port: 4317,
+      msg: 'server listening',
+      url: 'http://127.0.0.1:4317',
+      code: 'EADDRINUSE',
+    });
   });
 });

@@ -6,7 +6,7 @@
 //
 // It writes `server.json` and `launcher.token` the way a real server does,
 // answers `GET /launcher/hello` (with `?launch=1`, a launch link to its own
-// `/auth`) and `POST /launcher/restart-when-idle` (202 and a clean exit when
+// `/#c=`, exchanged at `POST /api/tab/exchange`) and `POST /launcher/restart-when-idle` (202 and a clean exit when
 // idle, 409 when busy). It prints `ready <port>` once listening.
 import { randomBytes } from 'node:crypto';
 import { rmSync, writeFileSync } from 'node:fs';
@@ -41,7 +41,7 @@ const server = createServer((req, res) => {
   const port = /** @type {import('node:net').AddressInfo} */ (server.address()).port;
   if (req.method === 'GET' && url.pathname === '/launcher/hello') {
     const info = { version, pid: process.pid, port, busySessions };
-    return json(200, url.searchParams.get('launch') === '1' ? { ...info, launchUrl: `http://127.0.0.1:${port}/auth?code=fake${randomBytes(4).toString('hex')}` } : info);
+    return json(200, url.searchParams.get('launch') === '1' ? { ...info, launchUrl: `http://127.0.0.1:${port}/#c=${randomBytes(32).toString('base64url')}` } : info);
   }
   if (req.method === 'POST' && url.pathname === '/launcher/restart-when-idle') {
     if (busySessions > 0) return json(409, { restarting: false, busySessions });
@@ -49,9 +49,9 @@ const server = createServer((req, res) => {
     setTimeout(cleanUpAndExit, 50);
     return;
   }
-  if (url.pathname === '/auth') {
-    res.writeHead(303, { location: '/' });
-    return res.end();
+  if (req.method === 'POST' && url.pathname === '/api/tab/exchange') {
+    // As the real gate does (AD-15 as amended): the token in the body, never in a URL; no cookie.
+    return json(200, { token: randomBytes(32).toString('base64url') });
   }
   res.writeHead(404);
   res.end();

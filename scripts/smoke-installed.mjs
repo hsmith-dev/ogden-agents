@@ -12,10 +12,12 @@
 // runs `npx --yes --package=<tgz> ogden-agents --no-open --port 0`, which starts
 // a detached background server and exits (story 1.7). It waits for the printed
 // 127.0.0.1 URL and one-time launch link and a clean launcher exit, checks that
-// the server outlived the launcher, that `GET /` without a session is refused,
-// signs in through the launch link (AD-15), checks that `GET /` with the cookie
-// returns the page and that a WebSocket client sending the cookie and a
-// matching Origin receives `server.started` (which needs the installed
+// the server outlived the launcher, that `GET /` serves the page without a
+// token while the API refuses one without it, connects a tab through the launch
+// link (AD-15 as amended: `/#c=<code>`, exchanged at `POST /api/tab/exchange`
+// for a token in the response body, never a URL; no cookie), checks that the
+// API accepts the tab's Bearer token and that a WebSocket client offering the
+// token subprotocol and a matching Origin receives `server.started` (which needs the installed
 // `better-sqlite3` to load and the bundled migrations to apply), then quits the
 // server as the UI does and checks it removed `server.json` and
 // `launcher.token`. The data folder is a temp directory.
@@ -130,7 +132,7 @@ function waitForUrl() {
   return new Promise((resolveUrl, reject) => {
     const check = () => {
       const url = /running at (http:\/\/127\.0\.0\.1:\d+)/.exec(output)?.[1];
-      const launchUrl = /one-time link: (http:\/\/127\.0\.0\.1:\d+\/auth\?code=[A-Za-z0-9_-]+)/.exec(output)?.[1];
+      const launchUrl = /one-time link: (http:\/\/127\.0\.0\.1:\d+\/#c=[A-Za-z0-9_-]+)/.exec(output)?.[1];
       if (url !== undefined && launchUrl !== undefined) resolveUrl({ url, launchUrl });
     };
     child.stdout.on('data', check);
@@ -142,45 +144,59 @@ function waitForUrl() {
   });
 }
 
-/** @param {string} url */
-async function checkRefusedWithoutSession(url) {
-  const response = await fetch(url);
-  const body = await response.text();
-  if (response.status !== 401 || !body.includes('npx ogden-agents')) {
-    throw new Error(`GET / without a session returned ${response.status}, not the 401 page:\n${body.slice(0, 500)}`);
-  }
-}
-
 /**
- * Exchanges the launch link for the session cookie, as a browser does.
- * @param {string} launchUrl
- * @returns {Promise<string>} the cookie's `name=value`
- */
-async function signIn(launchUrl) {
-  const response = await fetch(launchUrl, { redirect: 'manual' });
-  const setCookie = response.headers.get('set-cookie');
-  if (response.status !== 303 || setCookie === null) {
-    throw new Error(`the launch link returned ${response.status}${setCookie === null ? ' and no cookie' : ''}`);
-  }
-  return /** @type {string} */ (setCookie.split(';')[0]);
-}
-
-/**
+ * The app's files load without a token (the page shows "Open Ogden Agents"
+ * until a tab has one), with the Content-Security-Policy; the API refuses a
+ * request without a token.
  * @param {string} url
- * @param {string} cookie
  */
-async function checkPage(url, cookie) {
-  const response = await fetch(url, { headers: { cookie } });
+async function checkPageWithoutToken(url) {
+  const response = await fetch(url);
   const body = await response.text();
   if (response.status !== 200 || !body.includes('<div id="root"></div>')) {
     throw new Error(`GET / returned ${response.status} without the page:\n${body.slice(0, 500)}`);
   }
+  const csp = response.headers.get('content-security-policy') ?? '';
+  if (!csp.includes("script-src 'self'")) throw new Error(`GET / has no script-src 'self' policy: "${csp}"`);
+  const api = await fetch(`${url}/api/tab`);
+  if (api.status !== 401) throw new Error(`the API without a token returned ${api.status}, not 401`);
+}
+
+/**
+ * Exchanges the launch link's code for a tab token, as the page's boot script
+ * does: a same-origin POST, with the token in the response body.
+ * @param {string} launchUrl
+ * @returns {Promise<string>} the token
+ */
+async function signIn(launchUrl) {
+  const { origin, hash } = new URL(launchUrl);
+  const code = /^#c=([A-Za-z0-9_-]{43})$/.exec(hash)?.[1];
+  if (code === undefined) throw new Error('the launch link has no #c=<code>');
+  const response = await fetch(`${origin}/api/tab/exchange`, {
+    method: 'POST',
+    headers: { origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  if (response.headers.get('set-cookie') !== null) throw new Error('the code exchange set a cookie');
+  const body = response.ok ? await response.json() : {};
+  const token = typeof body.token === 'string' && /^[A-Za-z0-9_-]{43}$/.test(body.token) ? body.token : undefined;
+  if (response.status !== 200 || token === undefined) throw new Error(`the code exchange returned ${response.status} without a token`);
+  return token;
+}
+
+/**
+ * @param {string} url
+ * @param {string} token
+ */
+async function checkApi(url, token) {
+  const response = await fetch(`${url}/api/tab`, { headers: { authorization: `Bearer ${token}` } });
+  if (response.status !== 204) throw new Error(`the API with the tab's token returned ${response.status}, not 204`);
 }
 
 /**
  * The `ws` client from the package npx just installed (it is a runtime
- * dependency). Node's global WebSocket can't send the Cookie and Origin headers
- * the gate requires; `ws` can.
+ * dependency). Node's global WebSocket can't send the Origin header the gate
+ * requires; `ws` can.
  * @returns {typeof import('ws').WebSocket}
  */
 function installedWs() {
@@ -194,12 +210,15 @@ function installedWs() {
 
 /**
  * @param {string} url
- * @param {string} cookie
+ * @param {string} token
  */
-function checkServerStarted(url, cookie) {
+function checkServerStarted(url, token) {
   const WebSocket = installedWs();
   return new Promise((resolveEvent, reject) => {
-    const ws = new WebSocket(`${url.replace(/^http/, 'ws')}/ws`, { headers: { cookie, origin: url } });
+    const ws = new WebSocket(`${url.replace(/^http/, 'ws')}/ws`, ['ogden.v1', `ogden.auth.${token}`], { headers: { origin: url } });
+    ws.on('open', () => {
+      if (ws.protocol !== 'ogden.v1') reject(new Error(`the server chose the subprotocol "${ws.protocol}", not ogden.v1`));
+    });
     // The server sends nothing until the client subscribes (AD-5).
     ws.on('open', () => ws.send(JSON.stringify({ type: 'subscribe', afterSeq: 0 })));
     ws.on('message', (data) => {
@@ -242,11 +261,11 @@ function readPortFile() {
  * Quit, as the UI does it, and waits for the background server to exit and
  * remove its files.
  * @param {string} url
- * @param {string} cookie
+ * @param {string} token
  * @param {number} pid
  */
-async function quit(url, cookie, pid) {
-  const response = await fetch(`${url}/api/server/quit`, { method: 'POST', headers: { cookie, origin: url } });
+async function quit(url, token, pid) {
+  const response = await fetch(`${url}/api/server/quit`, { method: 'POST', headers: { authorization: `Bearer ${token}`, origin: url } });
   if (response.status !== 202) throw new Error(`Quit returned ${response.status}`);
   while (isAlive(pid)) await new Promise((r) => setTimeout(r, 100));
   for (const file of ['server.json', 'launcher.token']) {
@@ -309,17 +328,17 @@ try {
   await withTimeout(exited, STEP_TIMEOUT_MS, 'the launcher to exit');
   if (child.exitCode !== 0) throw new Error(`the launcher exited with code ${child.exitCode}`);
   console.log('smoke: the launcher exited 0 and the server kept running');
-  await withTimeout(checkRefusedWithoutSession(url), STEP_TIMEOUT_MS, 'GET / without a session');
-  console.log('smoke: GET / without a session was refused');
-  const cookie = await withTimeout(signIn(launchUrl), STEP_TIMEOUT_MS, 'the launch link');
-  console.log('smoke: signed in through the launch link');
-  await withTimeout(checkPage(url, cookie), STEP_TIMEOUT_MS, 'GET /');
-  console.log('smoke: GET / returned the page');
-  const event = await withTimeout(checkServerStarted(url, cookie), STEP_TIMEOUT_MS, 'server.started over /ws');
+  await withTimeout(checkPageWithoutToken(url), STEP_TIMEOUT_MS, 'GET / without a token');
+  console.log('smoke: GET / returned the page with its CSP, and the API refused a request without a token');
+  const token = await withTimeout(signIn(launchUrl), STEP_TIMEOUT_MS, 'the launch link');
+  console.log('smoke: the launch link gave this tab a token');
+  await withTimeout(checkApi(url, token), STEP_TIMEOUT_MS, 'the API with the token');
+  console.log("smoke: the API accepted the tab's token");
+  const event = await withTimeout(checkServerStarted(url, token), STEP_TIMEOUT_MS, 'server.started over /ws');
   console.log(`smoke: received ${JSON.stringify(event)}`);
   const record = readPortFile();
   if (record === undefined) throw new Error('server.json is missing while the server runs');
-  await withTimeout(quit(url, cookie, record.pid), STEP_TIMEOUT_MS, 'the server to quit');
+  await withTimeout(quit(url, token, record.pid), STEP_TIMEOUT_MS, 'the server to quit');
   console.log('smoke: Quit stopped the server and removed server.json and launcher.token');
 } catch (error) {
   failure = error;

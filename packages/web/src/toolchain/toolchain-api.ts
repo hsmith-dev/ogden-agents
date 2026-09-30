@@ -5,6 +5,7 @@ import {
   UV_INSTALL_PATH,
   type ToolchainStatus,
 } from '@ogden-agents/shared';
+import { tabAuth, type TabAuth } from '@/auth/tab-token';
 
 /** Reads the `error.message` of a failed reply, or falls back to `fallback`. */
 async function errorMessage(response: Response, fallback: string): Promise<string> {
@@ -19,11 +20,11 @@ async function errorMessage(response: Response, fallback: string): Promise<strin
 
 const UNREACHABLE = "Couldn't reach Ogden Agents. Check that it is still running, then try again.";
 
-/** `GET /api/toolchain`: whether a usable uv exists (story 1.8). */
-export async function fetchUvStatus(fetchImpl: typeof fetch = fetch): Promise<ToolchainStatus> {
+/** `GET /api/toolchain`: whether a usable uv exists (story 1.8). Sent with this tab's token. */
+export async function fetchUvStatus(auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<ToolchainStatus> {
   let response: Response;
   try {
-    response = await fetchImpl(TOOLCHAIN_PATH, { credentials: 'same-origin' });
+    response = await auth.fetch(TOOLCHAIN_PATH);
   } catch {
     throw new Error(UNREACHABLE);
   }
@@ -33,13 +34,13 @@ export async function fetchUvStatus(fetchImpl: typeof fetch = fetch): Promise<To
 
 /**
  * `POST /api/toolchain/uv/install`: asks the server to install its private uv.
- * A same-origin POST, so the browser sends the `Origin` the gate checks.
- * Progress and the outcome arrive through the event log.
+ * A same-origin POST with this tab's token, so the browser sends the
+ * `Origin` the gate checks. Progress and the outcome arrive through the event log.
  */
-export async function installUv(fetchImpl: typeof fetch = fetch): Promise<ToolchainStatus> {
+export async function installUv(auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<ToolchainStatus> {
   let response: Response;
   try {
-    response = await fetchImpl(UV_INSTALL_PATH, { method: 'POST', credentials: 'same-origin' });
+    response = await auth.fetch(UV_INSTALL_PATH, { method: 'POST' });
   } catch {
     throw new Error(UNREACHABLE);
   }

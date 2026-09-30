@@ -216,7 +216,7 @@ async function findRunning(dataDir: string, log: Logger): Promise<Found | undefi
     if (reply !== undefined && reply.pid === record.pid && reply.port === record.port) {
       return { record, token: token!, hello: reply };
     }
-    log.warn('running server is not responding', { pid: record.pid, port: record.port, token: token !== undefined });
+    log.warn('running server is not responding', { pid: record.pid, port: record.port, launcherTokenFound: token !== undefined });
     throw new LauncherError(
       `Ogden Agents (process ${record.pid}) is running but not responding. Wait a moment and run this command again. ` +
         `If it stays stuck, restart your computer, or end that process. Its log: ${join(dataDir, LOG_DIR, 'server.log')}`,

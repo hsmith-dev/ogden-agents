@@ -1,5 +1,6 @@
-import { ServerMessage, type ClientMessage, type CoreEvent, type SessionState } from '@ogden-agents/shared';
+import { ServerMessage, TAB_CHECK_PATH, type ClientMessage, type CoreEvent, type SessionState } from '@ogden-agents/shared';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { tabAuth, type TabAuth } from '@/auth/tab-token';
 import { addEvent } from './fold';
 
 /**
@@ -7,9 +8,11 @@ import { addEvent } from './fold';
  * open; `reconnecting` once the socket has been gone for RECONNECTING_AFTER_MS
  * (EXPERIENCE.md State Patterns: Reconnecting); `stopped` once the server said
  * it is stopping, or has been unreachable for UNREACHABLE_AFTER_MS, after
- * which it never reconnects (see {@link StoppedReason}).
+ * which it never reconnects (see {@link StoppedReason}); `not-connected` when
+ * this tab has no token, or the server refused it (a bookmark, a new tab, a
+ * restarted server), so it shows "Open Ogden Agents" and never connects.
  */
-export type ServerStatus = 'connecting' | 'connected' | 'reconnecting' | 'stopped';
+export type ServerStatus = 'connecting' | 'connected' | 'reconnecting' | 'stopped' | 'not-connected';
 
 /** Why the page shows the stopped state: Quit, a restart for an update, or no server for too long. */
 export type StoppedReason = 'quit' | 'restart' | 'unreachable';
@@ -39,8 +42,8 @@ const EventStreamContext = createContext<EventStreamValue | null>(null);
  * subscribes after the last `seq` it has, so reconnecting and catching up are
  * the same call, and it never applies an event twice.
  */
-export function EventStreamProvider({ children }: { children: ReactNode }) {
-  const [status, setStatus] = useState<ServerStatus>('connecting');
+export function EventStreamProvider({ children, auth = tabAuth }: { children: ReactNode; auth?: TabAuth }) {
+  const [status, setStatus] = useState<ServerStatus>(() => (auth.token() === undefined ? 'not-connected' : 'connecting'));
   const [events, setEvents] = useState<CoreEvent[]>([]);
   const [lastSeqState, setLastSeqState] = useState(0);
   const [caughtUp, setCaughtUp] = useState(false);
@@ -57,15 +60,26 @@ export function EventStreamProvider({ children }: { children: ReactNode }) {
     let gone: ReturnType<typeof setTimeout> | undefined;
     let disposed = false;
 
-    const stop = (reason: StoppedReason) => {
-      if (disposed) return;
+    const shutDown = () => {
+      if (disposed) return false;
       disposed = true;
       clearTimeout(retry);
       clearTimeout(slow);
       clearTimeout(gone);
       socket?.close();
+      return true;
+    };
+
+    const stop = (reason: StoppedReason) => {
+      if (!shutDown()) return;
       setStoppedReason(reason);
       setStatus('stopped');
+    };
+
+    /** The server doesn't know this tab (or it has no token): show the launch state for good. */
+    const notConnected = () => {
+      if (!shutDown()) return;
+      setStatus('not-connected');
     };
 
     const markDown = () => {
@@ -78,9 +92,33 @@ export function EventStreamProvider({ children }: { children: ReactNode }) {
       gone ??= setTimeout(() => stop('unreachable'), UNREACHABLE_AFTER_MS);
     };
 
+    /**
+     * After the socket closed or was refused: a browser can't see the HTTP
+     * status of a refused upgrade, so ask the API whether this tab's token is
+     * still good. 401 forgets it (the launch state); no answer means the
+     * server is down, so keep retrying.
+     */
+    const afterClose = () => {
+      auth.fetch(TAB_CHECK_PATH).then(
+        (response) => {
+          if (disposed) return;
+          if (response.status === 401) return; // forget() already moved this tab to the launch state.
+          retry = setTimeout(connect, RECONNECT_DELAY_MS);
+        },
+        () => {
+          if (!disposed) retry = setTimeout(connect, RECONNECT_DELAY_MS);
+        },
+      );
+    };
+
     const connect = () => {
+      const protocols = auth.webSocketProtocols();
+      if (protocols === undefined) {
+        notConnected();
+        return;
+      }
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+      const ws = new WebSocket(`${protocol}//${window.location.host}/ws`, protocols);
       socket = ws;
 
       ws.addEventListener('open', () => {
@@ -124,22 +162,28 @@ export function EventStreamProvider({ children }: { children: ReactNode }) {
       ws.addEventListener('close', () => {
         if (disposed) return;
         markDown();
-        retry = setTimeout(connect, RECONNECT_DELAY_MS);
+        afterClose();
       });
     };
 
     stopRef.current = stop;
+    const unsubscribe = auth.onForget(notConnected);
 
+    if (auth.token() === undefined) {
+      notConnected();
+      return unsubscribe;
+    }
     markDown();
     connect();
     return () => {
+      unsubscribe();
       disposed = true;
       clearTimeout(retry);
       clearTimeout(slow);
       clearTimeout(gone);
       socket?.close();
     };
-  }, []);
+  }, [auth]);
 
   const markStopped = useCallback((reason: StoppedReason) => stopRef.current(reason), []);
   const value = useMemo(

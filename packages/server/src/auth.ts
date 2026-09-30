@@ -1,98 +1,54 @@
 /**
- * Authentication for the security gate (AD-15): the signing key, single-use
- * launch codes and signed session cookies. Built only on `node:crypto`.
+ * Authentication for the security gate (AD-15 as amended in story 2.1):
+ * single-use launch codes, and the per-tab tokens they are exchanged for.
+ * Built only on `node:crypto`; nothing here is written to disk.
  *
  * Secrets never reach logs or events (AD-16): callers log that a code was
- * "issued", "used" or "rejected", never its value.
+ * "issued", "used" or "rejected", or that a token was "minted", never a value.
  */
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { chmodSync, linkSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { AUTH_KEY_FILE } from '@ogden-agents/core';
+import { LEGACY_AUTH_KEY_FILE } from '@ogden-agents/core';
+import { TAB_TOKEN_PATTERN, WS_AUTH_PROTOCOL_PREFIX, WS_PROTOCOL } from '@ogden-agents/shared';
 
-/** Length of the HMAC-SHA256 key in `auth.key`. */
-export const AUTH_KEY_BYTES = 32;
 /** Randomness in each launch code (256 bits; AD-15 asks for at least 128). */
 export const LAUNCH_CODE_BYTES = 32;
 /** A launch code is redeemable for this long after it is issued. */
 export const LAUNCH_CODE_TTL_MS = 60_000;
-/** How long a session cookie stays valid. */
-export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-/** Randomness in each session ID. */
-export const SESSION_ID_BYTES = 16;
-/**
- * The session cookie's name for the server on `port`. Browsers send loopback
- * cookies to every port on the host, so the name carries the port: two installs
- * on different ports never overwrite each other's session. Known limit: any other
- * web server the user opens on 127.0.0.1 still receives this cookie; API and
- * WebSocket auth moves to a per-tab token before epic 2 (AD-15 amendment).
- */
-export const sessionCookieName = (port: number): string => `ogden_session_${port}`;
+/** Randomness in each tab token (256 bits). */
+export const TAB_TOKEN_BYTES = 32;
+/** A tab token that has not been used for this long is forgotten. */
+export const TAB_TOKEN_IDLE_TTL_MS = 12 * 60 * 60 * 1000;
 
 /** Milliseconds since the epoch; injected so tests can move time. */
 export type Clock = () => number;
-
-/**
- * Reads `<dataDir>/auth.key`, or creates it with fresh random bytes (mode 0600)
- * if it is missing or not {@link AUTH_KEY_BYTES} long. Keeping the key on disk
- * lets session cookies survive a server restart.
- *
- * The key is written to a temp file first and then linked (or, replacing a
- * corrupt key, renamed) into place, so `auth.key` never exists half-written:
- * two servers starting together always end up with the same key.
- */
-export function loadOrCreateAuthKey(dataDir: string): Buffer {
-  const file = join(dataDir, AUTH_KEY_FILE);
-  const existing = readIfExists(file);
-  if (existing?.length === AUTH_KEY_BYTES) {
-    tightenMode(file);
-    return existing;
-  }
-
-  const key = randomBytes(AUTH_KEY_BYTES);
-  const temp = `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
-  writeFileSync(temp, key, { mode: 0o600, flag: 'wx' });
-  tightenMode(temp);
-  try {
-    if (existing !== undefined) {
-      // A truncated or corrupt key: replace it in one step (this logs every browser out).
-      renameSync(temp, file);
-      return key;
-    }
-    try {
-      // Fails with EEXIST if another process created the key in the meantime.
-      linkSync(temp, file);
-      return key;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    }
-    // Theirs was linked complete, so use it as it is; never overwrite it.
-    const theirs = readFileSync(file);
-    if (theirs.length !== AUTH_KEY_BYTES) {
-      throw new Error(`${file} was just created by another process but is not ${AUTH_KEY_BYTES} bytes`);
-    }
-    return theirs;
-  } finally {
-    rmSync(temp, { force: true });
-  }
-}
-
-function readIfExists(file: string): Buffer | undefined {
-  try {
-    return readFileSync(file);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw error;
-  }
-}
 
 /** Makes an existing file readable only by the user (POSIX; a no-op on Windows). */
 export function tightenMode(file: string): void {
   if (process.platform !== 'win32') chmodSync(file, 0o600);
 }
 
+/**
+ * Deletes the session-cookie signing key that story 1.4 kept in the data
+ * folder. Nothing reads it any more, and a secret nobody uses shouldn't stay
+ * on disk. Browsers that still hold the old cookie are simply ignored.
+ */
+export function retireLegacyAuthKey(dataDir: string): void {
+  rmSync(join(dataDir, LEGACY_AUTH_KEY_FILE), { force: true });
+}
+
 const base64url = (bytes: Buffer) => bytes.toString('base64url');
 const sha256 = (value: string) => createHash('sha256').update(value).digest();
+
+/** Index of the entry whose digest equals `digest`, checking every entry in constant time; -1 if none. */
+function findDigest(entries: ReadonlyArray<{ digest: Buffer }>, digest: Buffer): number {
+  let found = -1;
+  for (let i = 0; i < entries.length; i++) {
+    if (timingSafeEqual(entries[i]!.digest, digest)) found = i;
+  }
+  return found;
+}
 
 export interface LaunchCodes {
   /** Issues a new single-use code, valid for {@link LAUNCH_CODE_TTL_MS}. */
@@ -123,11 +79,7 @@ export function createLaunchCodes(now: Clock = Date.now, ttlMs: number = LAUNCH_
     },
     redeem(code) {
       prune();
-      const digest = sha256(code);
-      let found = -1;
-      for (let i = 0; i < live.length; i++) {
-        if (timingSafeEqual(live[i]!.digest, digest)) found = i;
-      }
+      const found = findDigest(live, sha256(code));
       if (found === -1) return false;
       live.splice(found, 1);
       return true;
@@ -135,39 +87,105 @@ export function createLaunchCodes(now: Clock = Date.now, ttlMs: number = LAUNCH_
   };
 }
 
-export interface Sessions {
-  /** A new signed cookie value: `<id>.<expiry seconds>.<HMAC-SHA256>`. */
-  create(): { value: string; maxAgeSeconds: number };
-  /** True only for an untampered, unexpired value signed with this key. */
-  verify(value: string | undefined): boolean;
+export interface TabTokens {
+  /** Mints a new random token for one tab. Only the launch-code exchange calls this. */
+  mint(): string;
+  /** True for a live token, which counts as a use: its idle clock restarts. */
+  verify(token: string | undefined): boolean;
+  /**
+   * Keeps a live token from expiring while something (an open WebSocket) uses
+   * it; call the returned function when that ends. Returns undefined for a
+   * token that isn't live.
+   */
+  hold(token: string | undefined): (() => void) | undefined;
+  /** How many tokens are live. */
+  size(): number;
 }
 
 /**
- * Stateless sessions: the cookie carries a random ID and an expiry, signed
- * with the key. Nothing is stored, so sessions can't be revoked one by one;
- * replacing `auth.key` revokes them all.
+ * The in-memory tab token store (AD-15 as amended). A token lives until the
+ * server stops (Quit, restart) or it goes {@link TAB_TOKEN_IDLE_TTL_MS}
+ * without being used; a token held by an open WebSocket doesn't expire.
+ * Tokens are kept only as SHA-256 digests and compared in constant time.
  */
-export function createSessions(key: Buffer, now: Clock = Date.now, ttlMs: number = SESSION_TTL_MS): Sessions {
-  const sign = (payload: string) => createHmac('sha256', key).update(payload).digest();
+export function createTabTokens(now: Clock = Date.now, idleTtlMs: number = TAB_TOKEN_IDLE_TTL_MS): TabTokens {
+  const live: Array<{ digest: Buffer; lastUsed: number; holds: number }> = [];
+
+  const prune = () => {
+    const t = now();
+    for (let i = live.length - 1; i >= 0; i--) {
+      const entry = live[i]!;
+      if (entry.holds === 0 && entry.lastUsed + idleTtlMs <= t) live.splice(i, 1);
+    }
+  };
+
+  const find = (token: string | undefined) => {
+    prune();
+    if (token === undefined || !TAB_TOKEN_PATTERN.test(token)) return undefined;
+    const found = findDigest(live, sha256(token));
+    return found === -1 ? undefined : live[found];
+  };
 
   return {
-    create() {
-      const id = base64url(randomBytes(SESSION_ID_BYTES));
-      const expires = Math.floor((now() + ttlMs) / 1000);
-      const payload = `${id}.${expires}`;
-      return { value: `${payload}.${base64url(sign(payload))}`, maxAgeSeconds: Math.floor(ttlMs / 1000) };
+    mint() {
+      prune();
+      const token = base64url(randomBytes(TAB_TOKEN_BYTES));
+      live.push({ digest: sha256(token), lastUsed: now(), holds: 0 });
+      return token;
     },
-    verify(value) {
-      if (value === undefined) return false;
-      const match = /^([A-Za-z0-9_-]+)\.(\d{1,15})\.([A-Za-z0-9_-]+)$/.exec(value);
-      if (match === null) return false;
-      const [, id, expires, signature] = match as unknown as [string, string, string, string];
-      const expected = sign(`${id}.${expires}`);
-      const given = Buffer.from(signature, 'base64url');
-      // Re-encoding rejects non-canonical base64url that would decode to the same bytes.
-      if (given.length !== expected.length || base64url(given) !== signature) return false;
-      if (!timingSafeEqual(given, expected)) return false;
-      return Number(expires) * 1000 > now();
+    verify(token) {
+      const entry = find(token);
+      if (entry === undefined) return false;
+      entry.lastUsed = now();
+      return true;
+    },
+    hold(token) {
+      const entry = find(token);
+      if (entry === undefined) return undefined;
+      entry.holds++;
+      entry.lastUsed = now();
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        entry.holds--;
+        entry.lastUsed = now();
+      };
+    },
+    size() {
+      prune();
+      return live.length;
     },
   };
+}
+
+/** The token in an `Authorization: Bearer <token>` header, or undefined. */
+export function bearerToken(header: string | undefined): string | undefined {
+  const match = /^Bearer +(\S+)$/i.exec(header?.trim() ?? '');
+  return match?.[1];
+}
+
+/**
+ * The tab token in a WebSocket upgrade's `Sec-WebSocket-Protocol` offer, or
+ * undefined unless the offer names {@link WS_PROTOCOL} and exactly one
+ * `ogden.auth.<token>`.
+ */
+export function webSocketToken(header: string | undefined): string | undefined {
+  const offered = (header ?? '')
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part !== '');
+  if (!offered.includes(WS_PROTOCOL)) return undefined;
+  const auth = offered.filter((part) => part.startsWith(WS_AUTH_PROTOCOL_PREFIX));
+  if (auth.length !== 1) return undefined;
+  const token = auth[0]!.slice(WS_AUTH_PROTOCOL_PREFIX.length);
+  return token === '' ? undefined : token;
+}
+
+/**
+ * The `ws` server's subprotocol choice: only ever {@link WS_PROTOCOL}, never
+ * the offer that carries the token, so the token isn't echoed back.
+ */
+export function chooseWebSocketProtocol(offered: Set<string>): string | false {
+  return offered.has(WS_PROTOCOL) ? WS_PROTOCOL : false;
 }

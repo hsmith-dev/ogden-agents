@@ -1,6 +1,6 @@
 ---
 status: final
-updated: 2026-09-29
+updated: 2026-09-30
 name: Ogden Agents
 sources:
   - ../spec-ogden-agents/spec-ogden-agents.md
@@ -35,7 +35,7 @@ The shell is always the same: the **status sidebar** on the left, the **workspac
 
 | Surface | Reached from | Purpose | Route |
 |---|---|---|---|
-| Launch page | Opening the app without a valid session cookie | Tells the user to open Ogden Agents from their terminal (AD-15). The only unauthenticated page. | `/launch` |
+| Launch state ("Open Ogden Agents") | Any tab without a tab token: a bookmark, a new tab, after a restart | The app's own not-connected state: tells the user to open Ogden Agents from its shortcut or run `npx ogden-agents` (AD-15, per-tab token). It shows no data. | any route (shown in place) |
 | Welcome (onboarding) | First run after launch | Pick an agent, install it, sign in or paste an API key, add a first project (CAP-16, CAP-2) | `/welcome/*` |
 | Status sidebar | Always visible | Every session in every workspace with its state; "Needs you" group on top; workspace switcher and Add project (CAP-17) | shell |
 | Workspace: Chats | Sidebar workspace row, or `g c` | Session list for this project and the session view | `/w/:wsId/s/:sesId` |
@@ -105,7 +105,7 @@ Behavioral. Visual specs live in `DESIGN.md` Components.
 | Review | Needs you, board, runs, notification | Top: plain-language summary of what changed and the three verification checks (CAP-10). Then review findings. Then the diff: collapsed behind "Show the code changes (6 files)" in Comfortable, open in Compact. Sticky approve bar. **Approve and merge** is disabled until every check passes, with the failing check named. Approve asks no confirmation dialog; it shows "Merging..." then the result. **Reject and retry** asks for an optional note to the agent and redispatches. |
 | Notifications settings | Settings | Add a webhook URL, choose events (Blocked, Ready for review), **Send test** shows the HTTP result inline. Browser notifications are an opt-in toggle using the Notification API while a tab is open. |
 | Reduced-mode notice | Plan, Board, Workspace settings | Inline in the surface where the missing capability would be. States what is unavailable and why in one sentence, offers **Upgrade this project** (runs the setup through the server with progress, AD-21). Never hides the feature silently (AD-14). |
-| Launch page | Unauthenticated visit | Headline, one sentence ("For your security, Ogden Agents only opens from the computer it runs on. Run this in your terminal:"), the command with Copy. No sign-in form, no token field. |
+| Launch state | Tab without a token | Headline "Open Ogden Agents", then "This tab isn't connected. Open Ogden Agents from its shortcut, or run `npx ogden-agents` in a terminal." with the command and Copy (the shortcut clause appears once the app shortcut ships). No sign-in form, no token field. |
 | Server version prompt | Top of workspace area | When the launcher reports a newer version (AD-20): "A new version is ready. Restart when your agents finish." Restart is enabled only when every session is `idle` or `done`. |
 | Toasts | Global | Only for transient confirmations that need no decision ("Copied", "Webhook test sent"). Anything that needs the user goes to Needs you instead. |
 
@@ -135,7 +135,7 @@ Behavioral. Visual specs live in `DESIGN.md` Components.
 | Terminal driving | Session view | Read-only banner "The terminal is driving this session." Composer disabled with **Switch to Chat**. |
 | Reconnecting | Global, sidebar footer | Sidebar footer line "Reconnecting..." after 2s without the socket; on reconnect the UI catches up from the last `seq` silently (AD-5). No modal. |
 | Server stopped | Global | Full-surface notice: "Ogden Agents is not running." with the launch command and Copy. Agents that were running have stopped only if the server stopped. |
-| Unauthenticated | Any URL | Redirect to Launch page. |
+| Not connected | Any URL, no tab token | Show the launch state in place; no redirect. **New tab** in the sidebar footer opens another connected tab. |
 | Loading surface | Any | Skeletons shaped like the final rows (sidebar rows, ticket cards, message blocks). No spinners except inside buttons. |
 | Catalog updated | Plan | New module actions appear with "New" tag; no reload needed. |
 | Webhook test failed | Notifications | Inline error under the field with the HTTP status and a plain sentence. |
@@ -230,17 +230,16 @@ Failure: while the terminal drives, he clicks into the chat composer by habit. I
 ### Flow 3: Coming back to two busy workspaces (Imani Okafor, runs a newsletter tool and her church's volunteer rota, Thursday)
 
 1. Before lunch Imani starts **Build all ready** in `letterpress-digest` (three stories) and a chat in `st-brendan-rota` asking Claude Code to add a swap-shift form. She closes the browser window and leaves for an hour. The server keeps running (AD-3).
-2. She reopens her bookmark to Ogden Agents. The session cookie is still valid, so the shell loads straight away, with skeleton rows for a moment while it catches up from the last event (AD-5).
+2. She opens Ogden Agents from its app shortcut, which asks the running server for a fresh one-time link, so the shell loads straight away, with skeleton rows for a moment while it catches up from the last event (AD-5). (A plain bookmark shows the launch state instead, because each tab needs its own token.)
 3. The sidebar fills in: `letterpress-digest` shows two sessions working and one done; `st-brendan-rota` shows its chat waiting.
 4. "Needs you 2" sits at the top: "St Brendan rota: Claude Code wants to run `npm install date-fns`" and "Letterpress digest: 2.1 Subscriber import is ready for review".
 5. She clicks the first row; the rota session opens scrolled to the permission card. She clicks **Always allow** (scope: "npm install in st-brendan-rota"). The session flips to working.
 6. **Climax:** She glances at the sidebar: both workspaces are live, the letterpress builds still breathing green, the rota chat now working again, and the review waiting for her with its checks already green. Everything carried on while she was gone, and the one decision that had paused anything took her one click.
 7. She opens the review, approves, and the letterpress board updates.
 
-Failure: she opens the bookmark after a reboot. The server is not running, so the Launch page says "Open Ogden Agents from your terminal" with `npx ogden-agents` and Copy. After she runs it, her sessions reappear as idle with "Resumed from history" markers, ready to continue (CAP-3). Failure: her webhook to her phone's notification app is configured, so the ready-for-review event also reached her while she was out (CAP-14).
+Failure: after a reboot the server is not running; the app shortcut starts it and opens a fresh link (a stale bookmark shows the launch state, "Open Ogden Agents", with `npx ogden-agents` and Copy). After she runs it, her sessions reappear as idle with "Resumed from history" markers, ready to continue (CAP-3). Failure: her webhook to her phone's notification app is configured, so the ready-for-review event also reached her while she was out (CAP-14).
 
 ## Open Questions
 
 - Default concurrency limits and maximum run time (architecture Deferred, epic 5) affect the copy in the time-limit state.
 - Which agents show the terminal toggle (agent-matrix, epic 3).
-- Session cookie lifetime across browser restarts while the server keeps running (AD-15 sets the exchange, not the lifetime); Flow 3 assumes it survives.

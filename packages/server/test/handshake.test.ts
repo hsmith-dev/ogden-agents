@@ -16,7 +16,7 @@ import { compareVersions } from '../src/launcher.js';
 import { LAUNCHER_TOKEN_FILE, LAUNCHER_TOKEN_HEADER, readLauncherToken } from '../src/launcher-token.js';
 import { createLogger } from '../src/log.js';
 import { start, type RunningServer, type StartOptions } from '../src/start.js';
-import { exchange, tempDataDir } from './helpers.js';
+import { codeOfLink, exchange, tabOf, tempDataDir, type SignedIn } from './helpers.js';
 
 const running: RunningServer[] = [];
 const sockets: WebSocket[] = [];
@@ -26,9 +26,9 @@ afterEach(async () => {
   await Promise.all(running.splice(0).map((s) => s.close()));
 });
 
-/** A signed-in `/ws` client that subscribes from the start and records every message type. */
-async function subscriber(server: RunningServer, cookie: string) {
-  const ws = new WebSocket(`${server.url.replace('http', 'ws')}/ws`, { headers: { cookie, origin: server.url } });
+/** A connected tab's `/ws` client that subscribes from the start and records every message type. */
+async function subscriber(server: RunningServer, tab: SignedIn) {
+  const ws = new WebSocket(`${server.url.replace('http', 'ws')}/ws`, tab.protocols, { headers: { origin: server.url } });
   sockets.push(ws);
   const types: string[] = [];
   const messages: ServerMessage[] = [];
@@ -174,15 +174,17 @@ describe('the gate on the handshake', () => {
     expect(all).not.toContain(tokenOf(server));
   });
 
-  it('a session cookie does not open the handshake', async () => {
+  it('a tab token does not open the handshake', async () => {
     const server = await startServer();
-    const cookie = await exchange(server.launchUrl);
-    expect((await send(server, '/launcher/hello', { headers: { cookie, origin: server.url } })).status).toBe(401);
+    const tab = tabOf(await exchange(server.launchUrl), server.url);
+    expect((await send(server, '/launcher/hello', { headers: tab.headers })).status).toBe(401);
   });
 
   it('the token opens nothing but the handshake', async () => {
     const server = await startServer();
-    expect((await send(server, '/', withToken(server))).status).toBe(401);
+    // The static app needs no token at all; the API and /ws need a tab's.
+    expect((await send(server, '/api/tab', withToken(server))).status).toBe(401);
+    expect((await send(server, '/ws', withToken(server))).status).toBe(401);
     expect((await send(server, '/api/server/quit', { method: 'POST', ...withToken(server, { origin: server.url }) })).status).toBe(401);
   });
 
@@ -217,14 +219,14 @@ describe('GET /launcher/hello', () => {
     const server = await startServer({ lines });
     const first = (await send(server, '/launcher/hello?launch=1', withToken(server))).json() as { launchUrl: string };
     const second = (await send(server, '/launcher/hello?launch=1', withToken(server))).json() as { launchUrl: string };
-    expect(first.launchUrl).toMatch(new RegExp(`^${server.url.replaceAll('.', '\\.')}/auth\\?code=[A-Za-z0-9_-]+$`));
+    expect(first.launchUrl).toMatch(new RegExp(`^${server.url.replaceAll('.', '\\.')}/#c=[A-Za-z0-9_-]{43}$`));
     expect(second.launchUrl).not.toBe(first.launchUrl);
     await exchange(first.launchUrl);
     await exchange(second.launchUrl);
     // Spent.
-    expect((await fetch(first.launchUrl, { redirect: 'manual' })).status).toBe(401);
+    await expect(exchange(first.launchUrl)).rejects.toThrow(/401/);
     for (const url of [first.launchUrl, second.launchUrl]) {
-      expect(lines.join('')).not.toContain(new URL(url).searchParams.get('code')!);
+      expect(lines.join('')).not.toContain(codeOfLink(url));
     }
   });
 });
@@ -278,8 +280,8 @@ describe('POST /api/server/quit', () => {
   it('with busy sessions: refuses (409, with the count) unless the request says force: true', async () => {
     const server = await startServer();
     sessionIn(server, 'waiting');
-    const cookie = await exchange(server.launchUrl);
-    const headers = { cookie, origin: server.url, 'content-type': 'application/json' };
+    const tab = tabOf(await exchange(server.launchUrl), server.url);
+    const headers = { ...tab.headers, 'content-type': 'application/json' };
     const refused = await sendBody(server, '/api/server/quit', headers, '{}');
     expect(refused.status).toBe(409);
     expect(refused.json()).toMatchObject({ error: { code: 'sessions_busy', details: { busySessions: 1 } } });
@@ -293,10 +295,11 @@ describe('POST /api/server/quit', () => {
 
   it('tells every connected tab the server is stopping, before it goes', async () => {
     const server = await startServer();
-    const cookie = await exchange(server.launchUrl);
-    const tabs = [await subscriber(server, cookie), await subscriber(server, cookie)];
+    const tab = tabOf(await exchange(server.launchUrl), server.url);
+    const other = tabOf(await exchange(server.issueLaunchUrl()), server.url);
+    const tabs = [await subscriber(server, tab), await subscriber(server, other)];
     await waitFor(() => tabs.every((t) => t.types.includes('caught_up')), 'both tabs to catch up');
-    const reply = await sendBody(server, '/api/server/quit', { cookie, origin: server.url }, '');
+    const reply = await sendBody(server, '/api/server/quit', tab.headers, '');
     expect(reply.status).toBe(202);
     await server.stopped;
     for (const tab of tabs) {
@@ -304,11 +307,11 @@ describe('POST /api/server/quit', () => {
     }
   });
 
-  it('with the session cookie and a matching Origin: stops cleanly and removes both files', async () => {
+  it("with the tab's token and a matching Origin: stops cleanly and removes both files", async () => {
     const stops: string[] = [];
     const server = await startServer({ onStop: (reason) => stops.push(reason) });
-    const cookie = await exchange(server.launchUrl);
-    const reply = await send(server, '/api/server/quit', { method: 'POST', headers: { cookie, origin: server.url } });
+    const tab = tabOf(await exchange(server.launchUrl), server.url);
+    const reply = await send(server, '/api/server/quit', { method: 'POST', headers: tab.headers });
     expect(reply.status).toBe(202);
     expect(await server.stopped).toBe('quit');
     // onStop runs right after everything is closed (a server process exits there).
@@ -318,11 +321,11 @@ describe('POST /api/server/quit', () => {
     expect(existsSync(join(server.dataDir, LAUNCHER_TOKEN_FILE))).toBe(false);
   });
 
-  it('is refused without a matching Origin (403) or without a cookie (401), and the server keeps running', async () => {
+  it('is refused without a matching Origin (403) or without a token (401), and the server keeps running', async () => {
     const server = await startServer();
-    const cookie = await exchange(server.launchUrl);
-    expect((await send(server, '/api/server/quit', { method: 'POST', headers: { cookie } })).status).toBe(403);
-    expect((await send(server, '/api/server/quit', { method: 'POST', headers: { cookie, origin: 'http://evil.example' } })).status).toBe(403);
+    const { authorization } = tabOf(await exchange(server.launchUrl), server.url).headers as { authorization: string };
+    expect((await send(server, '/api/server/quit', { method: 'POST', headers: { authorization } })).status).toBe(403);
+    expect((await send(server, '/api/server/quit', { method: 'POST', headers: { authorization, origin: 'http://evil.example' } })).status).toBe(403);
     expect((await send(server, '/api/server/quit', { method: 'POST', headers: { origin: server.url } })).status).toBe(401);
     await new Promise((r) => setTimeout(r, 150));
     expect((await send(server, '/launcher/hello', withToken(server))).status).toBe(200);
@@ -332,8 +335,7 @@ describe('POST /api/server/quit', () => {
 describe('caught_up', () => {
   it('follows the subscribe backlog, before any live event', async () => {
     const server = await startServer();
-    const cookie = await exchange(server.launchUrl);
-    const tab = await subscriber(server, cookie);
+    const tab = await subscriber(server, tabOf(await exchange(server.launchUrl), server.url));
     await waitFor(() => tab.types.includes('caught_up'), 'caught_up');
     server.core.events.append({ type: 'server.started', workspaceId: null, streamId: 'server', payload: { version: 'live' } });
     await waitFor(() => tab.types.length === 3, 'the live event');

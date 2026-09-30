@@ -3,7 +3,9 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import type { EventLog, Toolchain } from '@ogden-agents/core';
 import {
   ClientMessage,
+  LAUNCH_CODES_PATH,
   ServerMessage,
+  TAB_CHECK_PATH,
   TOOLCHAIN_PATH,
   ToolchainInstallResponse,
   ToolchainResponse,
@@ -11,7 +13,9 @@ import {
 } from '@ogden-agents/shared';
 import { Hono, type MiddlewareHandler } from 'hono';
 import type { WSContext } from 'hono/ws';
+import { webSocketToken, type TabTokens } from './auth.js';
 import type { Logger } from './log.js';
+import { isServerPath } from './paths.js';
 
 /** What `GET /launcher/hello` reports about the running server (AD-20). */
 export interface ServerInfo {
@@ -25,8 +29,12 @@ export interface ServerInfo {
 /** The server's own lifecycle, as the launcher handshake and Quit drive it. */
 export interface ServerControl {
   info(): ServerInfo;
-  /** A fresh single-use launch link (AD-15). A secret: never log it. */
-  issueLaunchUrl(): string;
+  /**
+   * A fresh single-use launch link (AD-15). With `origin` (an allowed
+   * `http://host:port` the gate has checked) the link uses it, so a tab on
+   * `localhost` opens its new tab on `localhost` too. A secret: never log it.
+   */
+  issueLaunchUrl(origin?: string): string;
   /**
    * Stops the server cleanly if no session is busy, and says whether it will.
    * The stop happens after the reply is sent.
@@ -51,15 +59,20 @@ export interface AppOptions {
    * so nothing the app serves, now or later, is reachable around it.
    */
   gate: MiddlewareHandler;
-  /** The launcher handshake and Quit; without it those routes answer 404. */
+  /** The launcher handshake, Quit and New tab; without it those routes answer 404. */
   control?: ServerControl;
   /** The `uv` status and its user-initiated install (story 1.8); without it those routes answer 404. */
   toolchain?: Toolchain;
+  /**
+   * The tab tokens the gate checks. An open `/ws` holds its tab's token, so a
+   * tab that stays connected never hits the idle expiry.
+   */
+  tabs?: TabTokens;
 }
 
 const WS_OPEN = 1;
 
-export function createApp({ events, webRoot, log, gate, control, toolchain }: AppOptions): Hono {
+export function createApp({ events, webRoot, log, gate, control, toolchain, tabs }: AppOptions): Hono {
   const app = new Hono();
 
   // First, for every method and path: no route may be registered before this line.
@@ -77,6 +90,10 @@ export function createApp({ events, webRoot, log, gate, control, toolchain }: Ap
     if (ws.readyState === WS_OPEN) ws.send(JSON.stringify(parsed.data));
   };
 
+  // The gate has already checked the tab's token; this only says so, so a tab
+  // whose socket was refused can tell "not connected" from "server gone".
+  app.get(TAB_CHECK_PATH, (c) => c.body(null, 204));
+
   if (control !== undefined) {
     // The launcher handshake (AD-20). The gate lets these through only with the launcher token.
     app.get('/launcher/hello', (c) => {
@@ -89,6 +106,15 @@ export function createApp({ events, webRoot, log, gate, control, toolchain }: Ap
     app.post('/launcher/restart-when-idle', (c) => {
       const result = control.restartWhenIdle();
       return c.json(result, result.restarting ? 202 : 409);
+    });
+
+    // New tab (sidebar footer): a fresh launch link for another tab, which
+    // mints that tab its own token when it opens. A state-changing POST, so the
+    // gate checks its Origin as well as this tab's token.
+    app.post(LAUNCH_CODES_PATH, (c) => {
+      log.info('launch code issued for a new tab');
+      const origin = `http://${c.req.header('host')!}`;
+      return c.json({ launchUrl: control.issueLaunchUrl(origin) }, 201, { 'Cache-Control': 'no-store' });
     });
 
     // Quit (EXPERIENCE.md sidebar footer). A state-changing POST, so the gate checks its Origin.
@@ -145,11 +171,23 @@ export function createApp({ events, webRoot, log, gate, control, toolchain }: Ap
 
   app.get(
     '/ws',
-    upgradeWebSocket(() => {
+    upgradeWebSocket((c) => {
       // Nothing is sent until the client says where to start: `{ type: 'subscribe', afterSeq }`.
       let unsubscribe: (() => void) | undefined;
+      // The gate verified this token; holding it keeps a connected tab's token alive.
+      const token = webSocketToken(c.req.header('sec-websocket-protocol'));
+      let release: (() => void) | undefined;
+      const end = () => {
+        unsubscribe?.();
+        release?.();
+        release = undefined;
+      };
 
       return {
+        onOpen() {
+          release = tabs?.hold(token);
+        },
+
         onMessage(event, ws) {
           const raw = typeof event.data === 'string' ? event.data : null;
           let json: unknown;
@@ -183,27 +221,30 @@ export function createApp({ events, webRoot, log, gate, control, toolchain }: Ap
         },
 
         onClose() {
-          unsubscribe?.();
+          end();
         },
 
         onError(event) {
           log.warn('websocket error', { error: String((event as Event & { error?: unknown }).error ?? event.type) });
-          unsubscribe?.();
+          end();
         },
       };
     }),
   );
 
-  app.use('/*', serveStatic({ root: webRoot }));
+  // The built UI, never under the server's own paths (`paths.ts`).
+  const staticFiles = serveStatic({ root: webRoot });
+  app.use('/*', (c, next) => (isServerPath(c.req.path) ? next() : staticFiles(c, next)));
 
   // The UI's client-side routes (such as `/settings/appearance`) load the app,
   // so a reload or a bookmark lands on the same screen. Only extensionless GET
-  // paths outside `/ws`, `/api` and `/launcher`; a missing asset stays a 404.
+  // paths outside `/ws`, `/api` and `/launcher` (and below them; see
+  // `paths.ts`, which the gate shares); a missing asset stays a 404.
   app.get(
     '/*',
     async (c, next) => {
       const path = c.req.path;
-      if (path === '/ws' || path.startsWith('/api/') || path.startsWith('/launcher/') || /\.[A-Za-z0-9]+$/.test(path)) {
+      if (isServerPath(path) || /\.[A-Za-z0-9]+$/.test(path)) {
         return c.notFound();
       }
       await next();

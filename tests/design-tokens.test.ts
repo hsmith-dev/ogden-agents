@@ -195,56 +195,6 @@ export function findFeatureStyling(files: ReadonlyArray<{ path: string; source: 
   return problems;
 }
 
-const GATE_TS = join(ROOT, 'packages/server/src/gate.ts');
-
-/**
- * Checks the server-rendered launch page's inline CSS: each custom property
- * it copies equals DESIGN.md (colors, light and dark) or tokens.css (all
- * else), every rule reads only those properties, and no raw value appears
- * outside them.
- */
-export function findLaunchPageDrift(css: string, design: Design, tokens: CssBlocks): string[] {
-  const problems: string[] = [];
-  const blocks = parseBlocks(css);
-  const light = blocks.get(LIGHT) ?? new Map<string, string>();
-  const colorNames = new Set(Object.keys(design.colors).filter((n) => !n.endsWith('-dark')));
-  const copiedColors: string[] = [];
-  for (const [name, value] of light) {
-    const key = name.slice(2);
-    const expected = colorNames.has(key) ? design.colors[key] : tokens.get(LIGHT)?.get(name);
-    if (colorNames.has(key)) copiedColors.push(key);
-    if (expected === undefined) problems.push(`launch page: ${name} is not a DESIGN.md token`);
-    else if (norm(value) !== norm(expected)) problems.push(`launch page: ${name} is ${value}, the token is ${expected}`);
-  }
-  for (const block of [DARK_SYSTEM, DARK_OVERRIDE]) {
-    const dark = blocks.get(block) ?? new Map<string, string>();
-    for (const key of copiedColors) {
-      const value = dark.get(`--${key}`);
-      const expected = design.colors[`${key}-dark`]!;
-      if (value === undefined) problems.push(`launch page ${block}: --${key} is missing`);
-      else if (norm(value) !== norm(expected)) problems.push(`launch page ${block}: --${key} is ${value}, DESIGN.md says ${expected}`);
-    }
-    for (const name of dark.keys()) {
-      if (!copiedColors.includes(name.slice(2))) problems.push(`launch page ${block}: ${name} has no light value`);
-    }
-  }
-  const rules = css.replace(/\/\*[\s\S]*?\*\//g, '').split(/[;{}]/).filter((d) => !d.trim().startsWith('--'));
-  for (const declaration of rules) {
-    for (const match of declaration.matchAll(RAW_VALUE)) problems.push(`launch page: raw value "${match[0]}" in "${declaration.trim()}"`);
-    for (const ref of declaration.matchAll(/var\((--[\w-]+)\)/g)) {
-      if (!light.has(ref[1]!)) problems.push(`launch page: ${ref[1]} is used but not declared`);
-    }
-  }
-  return problems;
-}
-
-function launchPageCss(): string {
-  const source = readFileSync(GATE_TS, 'utf8');
-  const match = /<style>([\s\S]*?)<\/style>/.exec(source);
-  if (match === null) throw new Error('gate.ts: the launch page has no <style>');
-  return match[1]!;
-}
-
 function loadWebSources() {
   return readdirSync(WEB_SRC, { recursive: true, encoding: 'utf8' })
     .filter((entry) => /\.(tsx?|css)$/.test(entry))
@@ -312,30 +262,6 @@ describe('design tokens (AD-18)', () => {
       'packages/web/src/shell/a.tsx: "font-semibold" is visual styling; put it in a ui/ component',
       'packages/web/src/shell/a.tsx: "border-b" is visual styling; put it in a ui/ component',
       'packages/web/src/shell/a.tsx: "shadow-float" is visual styling; put it in a ui/ component',
-    ]);
-  });
-
-  it("the launch page's copied tokens match DESIGN.md and tokens.css, and it uses no raw values", () => {
-    const tokens = parseBlocks(readFileSync(TOKENS_CSS, 'utf8'));
-    expect(findLaunchPageDrift(launchPageCss(), loadDesign(), tokens)).toEqual([]);
-  });
-
-  it('flags a launch page value that drifted, a missing dark value, or a raw value in a rule', () => {
-    const design = loadDesign();
-    const tokens = parseBlocks(readFileSync(TOKENS_CSS, 'utf8'));
-    const css = `
-      :root { --background: #F6F7F5; --ring: #000000; --space-4: 18px; --made-up: 1; }
-      @media (prefers-color-scheme: dark) { :root:not([data-theme='light']) { --background: #0F1210; } }
-      :root[data-theme='dark'] { --background: #0F1210; --ring: #8198FF; }
-      body { padding: var(--space-4); margin: 12px; color: var(--nope); }
-    `;
-    expect(findLaunchPageDrift(css, design, tokens)).toEqual([
-      'launch page: --ring is #000000, the token is #2F4FD8',
-      'launch page: --space-4 is 18px, the token is 16px',
-      'launch page: --made-up is not a DESIGN.md token',
-      "launch page @media (prefers-color-scheme: dark) > :root:not([data-theme='light']): --ring is missing",
-      'launch page: raw value "12px" in "margin: 12px"',
-      'launch page: --nope is used but not declared',
     ]);
   });
 

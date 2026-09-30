@@ -3,22 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="no-referrer" />
     <title>Ogden Agents</title>
-    <script>
-      // Applies the saved appearance before first paint, so there is no flash
-      // of the wrong theme or density. The key is injected at build (vite.config.ts).
-      (function () {
-        try {
-          var saved = JSON.parse(localStorage.getItem(__APPEARANCE_STORAGE_KEY__) || '{}');
-          var root = document.documentElement;
-          if (saved.theme === 'light' || saved.theme === 'dark') root.setAttribute('data-theme', saved.theme);
-          if (saved.density === 'compact') root.setAttribute('data-density', 'compact');
-          if (saved.developerMode === true) root.setAttribute('data-developer', 'true');
-        } catch (e) {
-          // No saved appearance: follow the system theme, Comfortable density.
-        }
-      })();
-    </script>
+    <!-- Appearance before first paint, and this tab's token out of the URL (boot/boot.js). -->
+    <script src="/boot.js"></script>
   </head>
   <body>
     <div id="root"></div>

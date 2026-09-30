@@ -17,6 +17,7 @@ import {
   useSidebar,
 } from '@/ui/sidebar';
 import { NeedsYouGroup } from './needs-you-group';
+import { NewTabButton } from './new-tab-button';
 import { QuitButton } from './quit-button';
 import { ServerStatus } from './server-status';
 import { Wordmark } from './wordmark';
@@ -26,7 +27,7 @@ export const ADD_PROJECT_UNAVAILABLE = "Adding a project isn't available yet.";
 /**
  * The status sidebar (EXPERIENCE.md Information Architecture): Needs you on
  * top, then workspaces with their session rows and Add project, then the
- * footer with Settings, Quit Ogden Agents and the server status. Workspaces and sessions arrive
+ * footer with Settings, New tab, Quit Ogden Agents and the server status. Workspaces and sessions arrive
  * with epic 2; until then it shows its empty state.
  */
 export function StatusSidebar() {
@@ -76,6 +77,7 @@ function StatusSidebarBody() {
       </SidebarContent>
       <SidebarFooter>
         <SettingsMenu />
+        <NewTabButton />
         <QuitButton />
         <ServerStatus />
       </SidebarFooter>

@@ -2,7 +2,10 @@
  * Minimal structured logger: one JSON object per line (Conventions), written
  * to stderr and, when the server runs, to a size-capped rotating file in the
  * data folder. There is no logging library. Secrets are never passed to the
- * logger (AD-16); redaction arrives with the first secret-handling adapter.
+ * logger on purpose (AD-16); as a backstop, {@link redact} scrubs every line:
+ * credential headers (`Authorization`, `Sec-WebSocket-Protocol`, `Cookie`, the
+ * launcher token header) by name, and bearer or subprotocol tokens, launch
+ * codes and token fragments wherever they appear in a value.
  */
 import { appendFileSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -17,9 +20,60 @@ export interface Logger {
   error(msg: string, fields?: LogFields): void;
 }
 
+/** What a redacted value is replaced with. */
+export const REDACTED = '[redacted]';
+
+/** Field names (any case) whose values are credentials and are never written. */
+const SECRET_FIELDS = new Set([
+  'authorization',
+  'proxy-authorization',
+  'sec-websocket-protocol',
+  'cookie',
+  'set-cookie',
+  'x-ogden-launcher-token',
+]);
+
+/** Field names whose value is a credential when it is a string (a boolean such as "was a token found" is not). */
+const SECRET_STRING_FIELDS = new Set(['token']);
+
+/** Values nested deeper than this are replaced, not walked: nothing unredacted gets through. */
+const MAX_DEPTH = 8;
+export const TOO_DEEP = '[too deep]';
+
+/** Credentials that can appear inside any string: bearer tokens, the auth subprotocol, launch codes, token fragments. */
+const SECRET_PATTERNS: ReadonlyArray<[RegExp, string]> = [
+  [/(Bearer\s+)[^\s"',]+/gi, `$1${REDACTED}`],
+  [/(ogden\.auth\.)[^\s"',]+/g, `$1${REDACTED}`],
+  [/([?&]code=)[^\s"'&#]+/g, `$1${REDACTED}`],
+  [/(#[ct]=)[^\s"'&]+/g, `$1${REDACTED}`],
+];
+
+/**
+ * Returns `value` with every credential replaced by {@link REDACTED}: fields
+ * named in SECRET_FIELDS (and string values of SECRET_STRING_FIELDS), the
+ * SECRET_PATTERNS in strings, and anything nested too deep to check.
+ */
+export function redact(value: unknown, depth = 0): unknown {
+  if (typeof value === 'string') {
+    return SECRET_PATTERNS.reduce((text, [pattern, replacement]) => text.replace(pattern, replacement), value);
+  }
+  if (value === null || typeof value !== 'object') return value;
+  if (depth > MAX_DEPTH) return TOO_DEEP;
+  if (Array.isArray(value)) return value.map((item) => redact(item, depth + 1));
+  if (value instanceof Error) return redact(value.stack ?? value.message, depth + 1);
+  const out: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    const name = key.toLowerCase();
+    const secret = SECRET_FIELDS.has(name) || (SECRET_STRING_FIELDS.has(name) && typeof item === 'string');
+    out[key] = secret ? REDACTED : redact(item, depth + 1);
+  }
+  return out;
+}
+
 export function createLogger(write: LogWriter = (line) => process.stderr.write(line)): Logger {
   const log = (level: LogLevel, msg: string, fields?: LogFields) => {
-    write(`${JSON.stringify({ level, at: new Date().toISOString(), msg, ...fields })}\n`);
+    const safe = fields === undefined ? {} : (redact(fields) as LogFields);
+    write(`${JSON.stringify({ level, at: new Date().toISOString(), msg: redact(msg), ...safe })}\n`);
   };
   return {
     info: (msg, fields) => log('info', msg, fields),

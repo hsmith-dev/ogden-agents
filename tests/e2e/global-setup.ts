@@ -1,29 +1,18 @@
-import { join } from 'node:path';
-import { chromium, type FullConfig } from '@playwright/test';
+import type { FullConfig } from '@playwright/test';
 import { makeDataDir, removeDataDir, startServer } from './server.js';
 
 /**
- * Starts one server for the run and signs a browser in through its launch
- * link (AD-15), saving the session cookie for every test. Tests read
- * `E2E_URL` and `E2E_STATE`.
+ * Starts one server for the run. Tests read `E2E_URL` and `E2E_DATA_DIR`, and
+ * open each connected tab with a fresh launch link (see `tab.ts`): a tab's
+ * token lives in that tab's sessionStorage (AD-15 as amended), so there is no
+ * signed-in browser state to save and share.
  */
 export default async function globalSetup(_config: FullConfig) {
   const dataDir = makeDataDir();
   const server = await startServer(dataDir);
 
-  const browser = await chromium.launch();
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  const response = await page.goto(server.launchUrl);
-  if (response === null || !response.ok() || new URL(page.url()).pathname !== '/') {
-    throw new Error(`signing in through the launch link failed: ${response?.status()} at ${page.url()}`);
-  }
-  const state = join(dataDir, 'storage-state.json');
-  await context.storageState({ path: state });
-  await browser.close();
-
   process.env.E2E_URL = server.url;
-  process.env.E2E_STATE = state;
+  process.env.E2E_DATA_DIR = dataDir;
 
   return async () => {
     await server.close();

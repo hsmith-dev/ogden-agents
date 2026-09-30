@@ -4,8 +4,9 @@
  * the user, and removes when it closes. The `npx ogden-agents` launcher reads
  * it and sends it in the {@link LAUNCHER_TOKEN_HEADER} header; the gate
  * accepts it only on the handshake prefix ({@link LAUNCHER_PREFIX}), never for
- * the app. It is readable only by the same OS user who can already read
- * `auth.key`, so it grants nothing that user doesn't already have.
+ * the app. It is readable only by the same OS user who runs the server, and
+ * the handshake only issues launch links, which that user can already get by
+ * running the launcher, so it grants nothing that user doesn't already have.
  *
  * The token is a secret: it is never logged (AD-16).
  */

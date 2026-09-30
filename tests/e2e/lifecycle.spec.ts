@@ -10,6 +10,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { makeDataDir, removeDataDir, startServer } from './server.js';
+import { openConnected } from './tab.js';
 
 test('Quit in the sidebar footer confirms once, then every open tab shows the stopped state and the files are gone', async ({ browser }) => {
   const dataDir = makeDataDir();
@@ -17,10 +18,10 @@ test('Quit in the sidebar footer confirms once, then every open tab shows the st
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   try {
     const page = await context.newPage();
-    await page.goto(server.launchUrl);
-    // A second tab of the same browser (it shares the session cookie).
+    await openConnected(page, '/', server.launchUrl);
+    // A second tab of the same browser, with its own token.
     const other = await context.newPage();
-    await other.goto(server.url);
+    await openConnected(other, '/', server.issueLaunchUrl());
     for (const tab of [page, other]) {
       await expect(tab.locator('aside[data-slot="sidebar"]').getByTestId('server-status')).toHaveAttribute('data-status', 'connected');
     }
@@ -68,7 +69,7 @@ test('Quit names running agents in its consequence, and a failed quit is shown i
     server.core.entities.createSession({ workspaceId: workspace.id, kind: 'chat', state: 'working' });
 
     const page = await context.newPage();
-    await page.goto(server.launchUrl);
+    await openConnected(page, '/', server.launchUrl);
     const sidebar = page.locator('aside[data-slot="sidebar"]');
     await expect(sidebar.getByTestId('server-status')).toHaveAttribute('data-status', 'connected');
     await sidebar.getByRole('button', { name: 'Quit Ogden Agents' }).click();
@@ -101,7 +102,7 @@ test('a server of another version shows a non-blocking reload banner', async ({ 
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   try {
     const page = await context.newPage();
-    await page.goto(server.launchUrl);
+    await openConnected(page, '/', server.launchUrl);
     await expect(page.getByTestId('server-status').filter({ visible: true })).toHaveAttribute('data-status', 'connected');
     // Same version as the build: no banner.
     await expect(page.getByTestId('version-banner')).toHaveCount(0);

@@ -1,48 +1,73 @@
-import * as fs from 'node:fs';
-import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { AUTH_KEY_FILE } from '@ogden-agents/core';
-import { describe, expect, it, vi } from 'vitest';
-import { loadOrCreateAuthKey } from '../src/auth.js';
-import { tempDataDir } from './helpers.js';
+import { WS_PROTOCOL } from '@ogden-agents/shared';
+import { describe, expect, it } from 'vitest';
+import { bearerToken, chooseWebSocketProtocol, createTabTokens, TAB_TOKEN_IDLE_TTL_MS, webSocketToken } from '../src/auth.js';
 
-vi.mock('node:fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:fs')>();
-  return { ...actual, readFileSync: vi.fn(actual.readFileSync) };
+function manualClock() {
+  let t = 1_000_000;
+  return { now: () => t, advance: (ms: number) => (t += ms) };
+}
+
+describe('tab tokens', () => {
+  it('are random, 256-bit, base64url, and valid only as minted', () => {
+    const tabs = createTabTokens();
+    const a = tabs.mint();
+    const b = tabs.mint();
+    expect(a).not.toBe(b);
+    expect(a).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(Buffer.from(a, 'base64url')).toHaveLength(32);
+    expect(tabs.verify(a)).toBe(true);
+    expect(tabs.verify(b)).toBe(true);
+    expect(tabs.verify(undefined)).toBe(false);
+    expect(tabs.verify('')).toBe(false);
+    expect(tabs.verify(`${a.slice(0, -1)}${a.endsWith('A') ? 'B' : 'A'}`)).toBe(false);
+    expect(tabs.verify(createTabTokens().mint())).toBe(false);
+  });
+
+  it('expire after 12 hours unused; a use restarts the clock; a hold keeps them until released', () => {
+    const clock = manualClock();
+    const tabs = createTabTokens(clock.now);
+    const idle = tabs.mint();
+    const used = tabs.mint();
+    const held = tabs.mint();
+    const release = tabs.hold(held)!;
+    clock.advance(TAB_TOKEN_IDLE_TTL_MS - 1);
+    expect(tabs.verify(used)).toBe(true);
+    clock.advance(1);
+    expect(tabs.verify(idle)).toBe(false);
+    expect(tabs.size()).toBe(2);
+    clock.advance(TAB_TOKEN_IDLE_TTL_MS * 3);
+    expect(tabs.verify(held)).toBe(true);
+    expect(tabs.verify(used)).toBe(false);
+    release();
+    release(); // A second release changes nothing.
+    clock.advance(TAB_TOKEN_IDLE_TTL_MS - 1);
+    expect(tabs.size()).toBe(1);
+    clock.advance(1);
+    expect(tabs.verify(held)).toBe(false);
+    expect(tabs.hold(held)).toBeUndefined();
+    expect(tabs.size()).toBe(0);
+  });
 });
 
-describe('auth.key', () => {
-  it('creates a 32-byte key readable only by the user, and reuses it', () => {
-    const dir = tempDataDir();
-    const key = loadOrCreateAuthKey(dir);
-    expect(key).toHaveLength(32);
-    if (process.platform !== 'win32') expect(statSync(join(dir, AUTH_KEY_FILE)).mode & 0o777).toBe(0o600);
-    expect(loadOrCreateAuthKey(dir).equals(key)).toBe(true);
-    expect(readdirSync(dir)).toEqual([AUTH_KEY_FILE]);
+describe('reading the token from a request', () => {
+  it('Authorization: only a well-formed Bearer header', () => {
+    expect(bearerToken('Bearer abc')).toBe('abc');
+    expect(bearerToken('bearer abc')).toBe('abc');
+    for (const header of [undefined, '', 'Bearer', 'Bearer ', 'Basic abc', 'abc', 'Bearer a b']) {
+      expect(bearerToken(header), String(header)).toBeUndefined();
+    }
   });
 
-  it('race: when another process creates the key after our read, uses theirs and never overwrites it', () => {
-    const dir = tempDataDir();
-    const file = join(dir, AUTH_KEY_FILE);
-    const theirs = Buffer.alloc(32, 9);
-    // Our first read finds nothing; the other process creates its key right after.
-    vi.mocked(fs.readFileSync).mockImplementationOnce(() => {
-      writeFileSync(file, theirs, { mode: 0o600 });
-      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-    });
-    expect(loadOrCreateAuthKey(dir).equals(theirs)).toBe(true);
-    expect(readFileSync(file).equals(theirs)).toBe(true);
-    // No temp file is left behind.
-    expect(readdirSync(dir)).toEqual([AUTH_KEY_FILE]);
+  it('Sec-WebSocket-Protocol: ogden.v1 plus exactly one ogden.auth.<token>', () => {
+    expect(webSocketToken(`${WS_PROTOCOL}, ogden.auth.abc`)).toBe('abc');
+    expect(webSocketToken(`ogden.auth.abc,${WS_PROTOCOL}`)).toBe('abc');
+    for (const header of [undefined, '', WS_PROTOCOL, 'ogden.auth.abc', `${WS_PROTOCOL}, ogden.auth.`, `${WS_PROTOCOL}, ogden.auth.a, ogden.auth.b`]) {
+      expect(webSocketToken(header), String(header)).toBeUndefined();
+    }
   });
 
-  it('replaces a corrupt key found at start-up', () => {
-    const dir = tempDataDir();
-    const file = join(dir, AUTH_KEY_FILE);
-    writeFileSync(file, 'short');
-    const key = loadOrCreateAuthKey(dir);
-    expect(key).toHaveLength(32);
-    expect(readFileSync(file).equals(key)).toBe(true);
-    expect(readdirSync(dir)).toEqual([AUTH_KEY_FILE]);
+  it('the server echoes only ogden.v1, never the offer that carries the token', () => {
+    expect(chooseWebSocketProtocol(new Set(['ogden.auth.abc', WS_PROTOCOL]))).toBe(WS_PROTOCOL);
+    expect(chooseWebSocketProtocol(new Set(['ogden.auth.abc']))).toBe(false);
   });
 });

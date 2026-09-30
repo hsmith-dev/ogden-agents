@@ -7,8 +7,8 @@ import { AppShell } from './shell/app-shell';
 
 /*
  * Code-based routes (EXPERIENCE.md Information Architecture). The launch page
- * is not a route: without a session the server's gate answers instead, since
- * the app's assets are gated (story 1.4).
+ * is not a route: on any URL, a tab without a valid token shows the shell's
+ * launch state (AppShell, story 2.1), so a bookmark keeps its path.
  */
 const rootRoute = createRootRoute({ component: AppShell, notFoundComponent: NotFoundPage });
 

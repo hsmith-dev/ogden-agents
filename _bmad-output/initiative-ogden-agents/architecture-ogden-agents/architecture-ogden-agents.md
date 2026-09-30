@@ -7,7 +7,7 @@ paradigm: 'hexagonal (ports and adapters) with an append-only event log'
 scope: 'Ogden Agents as a whole: launcher, local server, browser UI, agent/tool adapters, and its BMAD-METHOD and bmad-loop forks'
 status: final
 created: '2026-09-29'
-updated: '2026-09-29'
+updated: '2026-09-30'
 binds: [CAP-1, CAP-2, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-12, CAP-13, CAP-14, CAP-15, CAP-16, CAP-17, CAP-18]
 sources: ['../spec-ogden-agents/spec-ogden-agents.md']
 companions: []
@@ -179,16 +179,21 @@ graph LR
 ### AD-15 — One security gate [ADOPTED]
 
 - **Binds:** all
-- **Prevents:** an epic adding an endpoint without protection, leaving it open to cross-site requests or DNS rebinding.
+- **Prevents:** an epic adding an endpoint without protection, leaving it open to cross-site requests, DNS rebinding, or another local web server replaying a loopback cookie.
 - **Rule:**
   - The server binds only to `127.0.0.1`.
-  - Every HTTP and WebSocket request passes one middleware, which checks:
-    - a valid session cookie (`HttpOnly`, `SameSite=Strict`) obtained by exchanging a launch code that is single-use and expires within 60 seconds;
-    - `Host` exactly `127.0.0.1:<port>` or `localhost:<port>`;
-    - a matching `Origin` on WebSocket upgrades and on requests that change state.
-  - No route is registered outside the gate.
+  - Every HTTP and WebSocket request passes one middleware that checks, in order:
+    1. `Host` exactly `127.0.0.1:<port>` or `localhost:<port>`, otherwise 403.
+    2. The launcher opens `/#c=<launch code>`. The page's boot script sends the single-use launch code, valid for 60 seconds, in a same-origin `POST /api/tab/exchange` (Host and Origin checked, no token needed). The response body carries a new random per-tab token (256 bits, held in server memory until Quit, restart, or 12 hours unused). The token never appears in any URL. No cookie is set. (Renegotiated by the user, 2026-09-30, after the security review found `/#t=<token>` recorded in browser history.)
+    3. Static app files (the built UI) are served without a token; they contain no user data. Only the static handler and the SPA shell serve paths outside `/api`, `/ws` and `/launcher`, and a test enumerates the registered routes to keep it so.
+    4. Every API request needs `Authorization: Bearer <tab token>`. Every WebSocket upgrade needs the subprotocols `ogden.v1` and `ogden.auth.<token>`, and the server echoes only `ogden.v1`. The subprotocol counts only on a real upgrade (`Connection: upgrade`) to `/ws`; every other request needs Bearer. Otherwise 401.
+    5. WebSocket upgrades and every method other than GET, HEAD and OPTIONS also need a matching `Origin`, otherwise 403.
+    6. `/launcher/*` is reachable only with the launcher token (unchanged).
+  - No route is registered outside the gate. Tokens and codes never appear in logs or events, and the `Sec-WebSocket-Protocol` and `Authorization` headers are redacted. The app sends a Content-Security-Policy that allows only its own scripts: no inline script and no third-party origins.
   - The launcher finds the server through a port file in the user data directory, readable only by the user.
-  - Note (story 1.7): the launcher handshake (`/launcher/…`) sits behind the same gate and is opened only by the launcher token: 256 random bits the server writes to `launcher.token` in the data directory on each start (readable only by the user, removed on stop), sent in a request header and compared in constant time. It opens nothing but the handshake, no cookie opens the handshake, and it is never logged. It grants nothing beyond what the same OS user can already read in `auth.key`.
+  - Note (story 1.7): the launcher token is 256 random bits the server writes to `launcher.token` in the data directory on each start (readable only by the user, removed on stop), sent in a request header and compared in constant time. It opens nothing but the handshake, and no tab token opens the handshake.
+  - Note (story 2.1, amending story 1.4's cookie): browsers send cookies for `127.0.0.1` to every port on it, so the session cookie and its signing key `auth.key` are retired; a leftover `auth.key` is deleted at start and old cookies are ignored. The page's boot script (a same-origin file, not inline) strips `#c=` from the URL with `history.replaceState`, exchanges the code, and keeps the token in memory and `sessionStorage`, so a reload keeps the tab connected, while a new tab or a bookmark has no token and shows the app's own "Open Ogden Agents" state. New tab in the sidebar footer asks `POST /api/launch-codes` (token and Origin required) for a fresh launch link.
+  - Known limit: on a computer shared by several accounts, another local user can see the launch URL (with its single-use code) on the process command line while the browser opens it (macOS; Linux without `hidepid`) and race to redeem it. Mitigated by 60-second single-use codes; an install is for one user.
 
 ### AD-16 — Secrets [ADOPTED]
 

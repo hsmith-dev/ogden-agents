@@ -6,6 +6,7 @@ const WORDS: Record<Status, string> = {
   connected: 'Running on this computer',
   reconnecting: 'Reconnecting...',
   stopped: 'Stopped',
+  'not-connected': 'Not connected',
 };
 
 /**

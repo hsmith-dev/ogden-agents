@@ -1,5 +1,5 @@
 export { createApp, type AppOptions, type ServerControl, type ServerInfo } from './app.js';
-export { createLogger, type Logger } from './log.js';
+export { createLogger, redact, type Logger } from './log.js';
 export {
   countBusySessions,
   DEFAULT_PORT,
@@ -10,8 +10,8 @@ export {
   type StartOptions,
   type StopReason,
 } from './start.js';
-export { createGate, AUTH_PATH, type GateOptions } from './gate.js';
-export { createLaunchCodes, createSessions, loadOrCreateAuthKey, sessionCookieName } from './auth.js';
+export { createGate, contentSecurityPolicy, launchUrl, type GateOptions } from './gate.js';
+export { createLaunchCodes, createTabTokens, type TabTokens } from './auth.js';
 export { acquireInstanceLock, isPidAlive, LOCK_FILE, ServerAlreadyRunningError } from './instance-lock.js';
 export {
   createLauncherToken,

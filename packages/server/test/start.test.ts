@@ -21,13 +21,13 @@ function captureLog(): Captured {
 }
 
 /**
- * Signs in through the launch link, connects with the session cookie and a
- * matching `Origin`, sends `subscribe` after `afterSeq` (unless `null`), and
- * collects every schema-valid server message.
+ * Connects a tab through the launch link, opens `/ws` with its token
+ * subprotocol and a matching `Origin`, sends `subscribe` after `afterSeq`
+ * (unless `null`), and collects every schema-valid server message.
  */
 async function connect(server: RunningServer, afterSeq: number | null = 0) {
-  const { cookie, origin } = await signIn(server);
-  const ws = new WebSocket(`${server.url.replace('http', 'ws')}/ws`, { headers: { cookie, origin } });
+  const { protocols, origin } = await signIn(server);
+  const ws = new WebSocket(`${server.url.replace('http', 'ws')}/ws`, protocols, { headers: { origin } });
   sockets.push(ws);
   const received: ServerMessage[] = [];
   /** `caught_up` and `server.stopping`, kept apart so `received` counts events and pongs as before. */

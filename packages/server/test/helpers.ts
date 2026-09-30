@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { TAB_EXCHANGE_PATH, webSocketProtocols } from '@ogden-agents/shared';
 import { afterEach } from 'vitest';
 
 const dirs: string[] = [];
@@ -18,33 +19,64 @@ export function tempDataDir(): string {
   return dir;
 }
 
-/** What a signed-in browser sends: its session cookie and the page's own origin. */
+/** What a connected tab sends: its token and the page's own origin. */
 export interface SignedIn {
-  cookie: string;
+  token: string;
   origin: string;
+  /** `Authorization: Bearer <token>` and `Origin`, for REST calls. */
+  headers: Record<string, string>;
+  /** The subprotocols a tab offers on `/ws`. */
+  protocols: [string, string];
 }
 
 const signedIn = new WeakMap<object, Promise<SignedIn>>();
 
 /**
- * Signs in the way a browser does (AD-15): exchanges the server's single-use
- * launch link for the session cookie. Cached per server, since the code can be
- * spent only once.
+ * Connects a tab the way a browser does (AD-15 as amended): exchanges the
+ * server's single-use launch link for a tab token. Cached per server, since
+ * the code can be spent only once.
  */
 export function signIn(server: { url: string; launchUrl: string }): Promise<SignedIn> {
   let pending = signedIn.get(server);
   if (pending === undefined) {
-    pending = exchange(server.launchUrl).then((cookie) => ({ cookie, origin: server.url }));
+    pending = exchange(server.launchUrl).then((token) => tabOf(token, server.url));
     signedIn.set(server, pending);
   }
   return pending;
 }
 
-/** Exchanges a launch link and returns the `name=value` of the session cookie it sets. */
+/** What a tab holding `token` sends to the server at `origin`. */
+export function tabOf(token: string, origin: string): SignedIn {
+  return {
+    token,
+    origin,
+    headers: { authorization: `Bearer ${token}`, origin },
+    protocols: webSocketProtocols(token),
+  };
+}
+
+/** The launch code in a launch link (`<origin>/#c=<code>`). */
+export function codeOfLink(launchUrl: string): string {
+  const match = /^#c=([A-Za-z0-9_-]{43})$/.exec(new URL(launchUrl).hash);
+  if (match === null) throw new Error(`not a launch link: ${launchUrl.replace(/#.*/, '#…')}`);
+  return match[1]!;
+}
+
+/**
+ * Opens a launch link as the page's boot script does: POSTs its code to
+ * `/api/tab/exchange` with the page's Origin and returns the tab token from
+ * the response body. Checks that no cookie was set.
+ */
 export async function exchange(launchUrl: string): Promise<string> {
-  const response = await fetch(launchUrl, { redirect: 'manual' });
-  if (response.status !== 303) throw new Error(`launch link returned ${response.status}, not 303`);
-  const setCookie = response.headers.get('set-cookie');
-  if (setCookie === null) throw new Error('launch link set no cookie');
-  return setCookie.split(';')[0]!;
+  const { origin } = new URL(launchUrl);
+  const response = await fetch(`${origin}${TAB_EXCHANGE_PATH}`, {
+    method: 'POST',
+    headers: { origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ code: codeOfLink(launchUrl) }),
+  });
+  if (response.status !== 200) throw new Error(`the code exchange returned ${response.status}, not 200`);
+  if (response.headers.get('set-cookie') !== null) throw new Error('the code exchange set a cookie');
+  const { token } = (await response.json()) as { token?: unknown };
+  if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token)) throw new Error('the code exchange returned no token');
+  return token;
 }

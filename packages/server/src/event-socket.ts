@@ -3,22 +3,57 @@
  * owned by story 2.9 from here). The gate has already checked the upgrade's
  * Origin and the tab token it carries (AD-15).
  *
- * Nothing is sent until the client says where to start. The legacy
- * install-wide `subscribe { afterSeq }` streams every event after `afterSeq`,
- * then live, then `caught_up`. The scoped, windowed subscriptions and paging
- * (`subscribe_install`, `subscribe_workspace`, `unsubscribe_workspace`,
- * `page_history`; E2-R8) are answered `request_failed` with
- * `not_implemented` until 2.9 builds them.
+ * Nothing is sent until the client says where to start (E2-R8, story 2.9):
+ *
+ * - `subscribe_install { afterSeq }` streams the install-level events (and
+ *   every `workspace.created`) after `afterSeq`, then live.
+ * - `subscribe_workspace { workspaceId, afterSeq?, window? }` streams one
+ *   workspace's recent window (or, on a reconnect, every event after
+ *   `afterSeq`), then live. Subscribing again replaces the earlier one.
+ * - `unsubscribe_workspace` stops one; `page_history` answers `history_page`
+ *   with at most `MAX_PAGE_EVENTS` older events.
+ *
+ * Each subscription ends its backlog with a `caught_up` naming its scope. An
+ * unknown workspace is answered `request_failed` / `not_found`. The legacy
+ * install-wide `subscribe { afterSeq }` still streams every event after
+ * `afterSeq`, then live, then `caught_up`; the web no longer sends it.
  */
 import { upgradeWebSocket } from '@hono/node-server';
-import type { EventLog } from '@ogden-agents/core';
-import { ClientMessage, ServerMessage, type RequestFailedMessage } from '@ogden-agents/shared';
+import { NotFoundError, type EventLog, type EventScope, type ScopeSubscription } from '@ogden-agents/core';
+import {
+  ClientMessage,
+  ClientRequestType,
+  DEFAULT_WINDOW_EVENTS,
+  PageHistoryMessage,
+  ServerMessage,
+  WorkspaceId as WorkspaceIdSchema,
+  type RequestFailedMessage,
+  type WorkspaceId,
+} from '@ogden-agents/shared';
 import type { Hono } from 'hono';
 import type { WSContext } from 'hono/ws';
 import { webSocketToken, type TabTokens } from './auth.js';
 import type { Logger } from './log.js';
 
 const WS_OPEN = 1;
+
+/** A request id as the shared messages define it. */
+const RequestId = PageHistoryMessage.shape.requestId;
+
+/**
+ * The request id and workspace of a client message that failed its schema,
+ * when they are themselves valid, so the refusal can be correlated; `undefined`
+ * for anything that is not a request carrying a valid `requestId`.
+ */
+function correlate(json: unknown): { type: ClientRequestType; requestId: string; workspaceId?: WorkspaceId } | undefined {
+  if (typeof json !== 'object' || json === null) return undefined;
+  const { type, requestId, workspaceId } = json as Record<string, unknown>;
+  const request = ClientRequestType.safeParse(type);
+  const id = RequestId.safeParse(requestId);
+  if (!request.success || !id.success) return undefined;
+  const workspace = WorkspaceIdSchema.safeParse(workspaceId);
+  return { type: request.data, requestId: id.data, ...(workspace.success ? { workspaceId: workspace.data } : {}) };
+}
 
 export interface EventSocketOptions {
   events: EventLog;
@@ -46,15 +81,64 @@ export function registerEventSocket(app: Hono, { events, log, tabs }: EventSocke
   app.get(
     '/ws',
     upgradeWebSocket((c) => {
-      // Nothing is sent until the client says where to start: `{ type: 'subscribe', afterSeq }`.
+      // Nothing is sent until the client says where to start.
       let unsubscribe: (() => void) | undefined;
+      let install: ScopeSubscription | undefined;
+      const workspaceSubscriptions = new Map<WorkspaceId, ScopeSubscription>();
+      let closed = false;
       // The gate verified this token; holding it keeps a connected tab's token alive.
       const token = webSocketToken(c.req.header('sec-websocket-protocol'));
       let release: (() => void) | undefined;
       const end = () => {
+        closed = true;
         unsubscribe?.();
+        unsubscribe = undefined;
+        install?.unsubscribe();
+        install = undefined;
+        for (const subscription of workspaceSubscriptions.values()) subscription.unsubscribe();
+        workspaceSubscriptions.clear();
         release?.();
         release = undefined;
+      };
+
+      const fail = (
+        ws: WSContext,
+        request: { type: ClientRequestType; requestId?: string; workspaceId?: WorkspaceId },
+        code: RequestFailedMessage['code'],
+        message: string,
+      ) => {
+        const failed: RequestFailedMessage = {
+          type: 'request_failed',
+          for: request.type,
+          ...(request.requestId === undefined ? {} : { requestId: request.requestId }),
+          ...(request.workspaceId === undefined ? {} : { workspaceId: request.workspaceId }),
+          code,
+          message,
+        };
+        send(ws, failed);
+      };
+
+      /** Reads the backlog and registers in one tick, then says `caught_up`; `undefined` if the workspace is unknown. */
+      const subscribeScope = (
+        ws: WSContext,
+        scope: EventScope,
+        from: { afterSeq: number } | { window: number },
+        request: { type: ClientRequestType; workspaceId?: WorkspaceId },
+      ): ScopeSubscription | undefined => {
+        let subscription: ScopeSubscription;
+        try {
+          subscription = events.subscribeScope(scope, from, (event) => send(ws, event));
+        } catch (error) {
+          if (error instanceof NotFoundError) fail(ws, request, 'not_found', 'That project does not exist.');
+          else {
+            log.error('scoped subscription failed', { error: String(error) });
+            fail(ws, request, 'internal_error', 'Ogden Agents could not load these events.');
+          }
+          return undefined;
+        }
+        // The backlog went out synchronously above; everything after this is live.
+        send(ws, { type: 'caught_up', scope, oldestSeq: subscription.oldestSeq, hasEarlier: subscription.hasEarlier });
+        return subscription;
       };
 
       return {
@@ -63,6 +147,8 @@ export function registerEventSocket(app: Hono, { events, log, tabs }: EventSocke
         },
 
         onMessage(event, ws) {
+          // A message racing the close must not register anything that is never released.
+          if (closed) return;
           const raw = typeof event.data === 'string' ? event.data : null;
           let json: unknown;
           try {
@@ -77,6 +163,9 @@ export function registerEventSocket(app: Hono, { events, log, tabs }: EventSocke
             log.warn('ignoring client message that fails the shared schema', {
               issues: parsed.error.issues,
             });
+            // A request the client is waiting on (it carries a valid request id) is refused, not left to time out.
+            const request = correlate(json);
+            if (request !== undefined) fail(ws, request, 'invalid_request', 'Ogden Agents could not read that request.');
             return;
           }
           const message = parsed.data;
@@ -93,19 +182,43 @@ export function registerEventSocket(app: Hono, { events, log, tabs }: EventSocke
               send(ws, { type: 'caught_up' });
               break;
             case 'subscribe_install':
-            case 'subscribe_workspace':
+              // Replaces any earlier install subscription.
+              install?.unsubscribe();
+              install = subscribeScope(ws, 'install', { afterSeq: message.afterSeq }, message);
+              break;
+            case 'subscribe_workspace': {
+              const { workspaceId } = message;
+              // Replaces an earlier subscription to the same workspace, so nothing arrives twice.
+              const previous = workspaceSubscriptions.get(workspaceId);
+              // The map is keyed by workspace, and only existing workspaces can be
+              // subscribed, so it never holds more than the install's projects.
+              if (previous !== undefined) {
+                previous.unsubscribe();
+                workspaceSubscriptions.delete(workspaceId);
+              }
+              const from = message.afterSeq !== undefined ? { afterSeq: message.afterSeq } : { window: message.window ?? DEFAULT_WINDOW_EVENTS };
+              const subscription = subscribeScope(ws, workspaceId, from, message);
+              if (subscription !== undefined) workspaceSubscriptions.set(workspaceId, subscription);
+              break;
+            }
             case 'unsubscribe_workspace':
+              workspaceSubscriptions.get(message.workspaceId)?.unsubscribe();
+              workspaceSubscriptions.delete(message.workspaceId);
+              break;
             case 'page_history': {
-              // Story 2.9 builds the scoped, windowed subscriptions and paging.
-              const failed: RequestFailedMessage = {
-                type: 'request_failed',
-                for: message.type,
-                ...('requestId' in message ? { requestId: message.requestId } : {}),
-                ...('workspaceId' in message ? { workspaceId: message.workspaceId } : {}),
-                code: 'not_implemented',
-                message: 'Ogden Agents cannot do this yet.',
-              };
-              send(ws, failed);
+              let page: ReturnType<EventLog['readBefore']>;
+              try {
+                // At most MAX_PAGE_EVENTS: the schema caps `limit`, and so does core.
+                page = events.readBefore(message.workspaceId, message.beforeSeq, message.limit, message.sessionId);
+              } catch (error) {
+                if (error instanceof NotFoundError) fail(ws, message, 'not_found', 'That project does not exist.');
+                else {
+                  log.error('reading older history failed', { error: String(error) });
+                  fail(ws, message, 'internal_error', 'Ogden Agents could not load earlier history.');
+                }
+                break;
+              }
+              send(ws, { type: 'history_page', requestId: message.requestId, workspaceId: message.workspaceId, events: page.events, hasMore: page.hasMore });
               break;
             }
           }

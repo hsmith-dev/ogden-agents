@@ -49,3 +49,12 @@
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-permission-cards-plan.md`
   summary: The inside-the-project check for file-kind rules runs before the agent acts (check-then-use); a symlink created inside the project between the check and the write could redirect it.
   evidence: 2.6 implementation note. Closing it needs the agent, not core, to enforce paths (a sandbox or ACP-side path policy); revisit with epic 5 (unattended builds).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-per-workspace-windowed-paged-event-subscriptions-plan.md`
+  summary: Chat screen switches to `useSessionEvents` and paged history (story 2.10); until then a chat whose events are older than the workspace window opens without its history, and the session fold runs over the merged window list.
+  evidence: User decision on 2.9 OQ1, 2026-09-30.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-per-workspace-windowed-paged-event-subscriptions-plan.md`
+  summary: Bound the reconnect backlog (story 2.10). `subscribe_workspace {afterSeq}` (and `subscribe_install`) sends every missed event in one synchronous burst however long the tab was away; bounding it needs a protocol change where the server answers with a fresh window and the client resets that scope.
+  evidence: 2.9 review finding F2; `event-log.ts` `subscribeScope` drains every event after `afterSeq`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-per-workspace-windowed-paged-event-subscriptions-plan.md`
+  summary: Per-chunk cost and live growth in the web store (story 2.10). Every streamed chunk re-merges all scopes into the flat `events` list, and each workspace's list (window plus live events) grows without bound for the life of the tab. Coalesce chunks and trim or window live lists when the chat screen moves to `useSessionEvents`.
+  evidence: 2.9 review finding F3; `event-store.ts` `mergedEvents` and `applyEvent`.

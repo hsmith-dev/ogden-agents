@@ -17,15 +17,17 @@
  * {@link sessionAppender}, which the package index does not export.
  */
 import {
+  MAX_PAGE_EVENTS,
   NewCoreEvent as NewCoreEventSchema,
   type CoreEvent,
   type NewCoreEvent,
   type NewEventOf,
   type SessionMessageCompletedEvent,
   type WorkspaceHistoryDeletedEvent,
+  type SessionId,
   type WorkspaceId,
 } from '@ogden-agents/shared';
-import { and, asc, eq, gt, isNull, lt, max, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNull, lt, lte, max, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { Database } from './db/database.js';
 import { events, runs, sessions, workspaces } from './db/schema.js';
 import { EventValidationError, NotFoundError, SessionEventScopeError } from './errors.js';
@@ -38,6 +40,35 @@ export interface ReadOptions {
   workspaceId?: WorkspaceId | null;
   /** At most this many events. Default {@link DEFAULT_READ_LIMIT}. */
   limit?: number;
+}
+
+/**
+ * What a scoped subscription streams (E2-R8): `'install'` is every
+ * install-level event (`workspaceId: null`) plus every `workspace.created`,
+ * so a project added in another tab is seen; a workspace id is that
+ * workspace's other events (each event reaches a tab following both once).
+ */
+export type EventScope = 'install' | WorkspaceId;
+
+/**
+ * Where a scoped subscription starts: after a `seq` (a reconnect, or the
+ * install stream), or with only the most recent `window` events.
+ */
+export type ScopeStart = { afterSeq: number } | { window: number };
+
+export interface ScopeSubscription {
+  unsubscribe(): void;
+  /** The oldest `seq` the backlog delivered, or `null` when it delivered none. */
+  oldestSeq: number | null;
+  /** Whether the scope has events older than the backlog (the UI offers "Show earlier"). */
+  hasEarlier: boolean;
+}
+
+export interface HistoryPage {
+  /** Oldest first. */
+  events: CoreEvent[];
+  /** Whether still older events exist. */
+  hasMore: boolean;
 }
 
 export interface HistoryDeleted {
@@ -65,6 +96,20 @@ export interface EventLog {
    * skipped. Returns an unsubscribe function.
    */
   subscribe(afterSeq: number, listener: EventListener): () => void;
+  /**
+   * {@link EventLog.subscribe} for one scope (E2-R8): the backlog (every
+   * scope event after `afterSeq`, or the newest `window` of them, oldest
+   * first), then the scope's new events live, read and registered in one
+   * synchronous tick. Throws {@link NotFoundError} for an unknown workspace.
+   */
+  subscribeScope(scope: EventScope, from: ScopeStart, listener: EventListener): ScopeSubscription;
+  /**
+   * Up to `limit` (at most `MAX_PAGE_EVENTS`) of the workspace's events with
+   * `seq < beforeSeq`, oldest first; with `sessionId`, only that session's
+   * stream in this workspace (another workspace's session gives an empty
+   * page). Throws {@link NotFoundError} for an unknown workspace.
+   */
+  readBefore(workspaceId: WorkspaceId, beforeSeq: number, limit: number, sessionId?: SessionId): HistoryPage;
   /**
    * Deletes one workspace's events, sessions and runs, keeps the workspace
    * row, and appends `workspace.history_deleted`.
@@ -120,6 +165,12 @@ const SUBSCRIBE_PAGE = 500;
 function assertCursor(afterSeq: number): void {
   if (!Number.isSafeInteger(afterSeq) || afterSeq < 0) {
     throw new RangeError(`afterSeq must be a non-negative integer, got ${String(afterSeq)}`);
+  }
+}
+
+function assertCount(name: string, value: number): void {
+  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_PAGE_EVENTS) {
+    throw new RangeError(`${name} must be an integer from 1 to ${MAX_PAGE_EVENTS}, got ${String(value)}`);
   }
 }
 
@@ -207,6 +258,16 @@ export function createEventLog(db: Database, options: EventLogOptions = {}): Eve
     return event;
   };
 
+  const readWhere = (afterSeq: number, scope: SQL | undefined, limit: number) =>
+    orm
+      .select()
+      .from(events)
+      .where(and(gt(events.seq, afterSeq), scope))
+      .orderBy(asc(events.seq))
+      .limit(limit)
+      .all()
+      .map(toEvent);
+
   const readAfter = (afterSeq: number, { workspaceId, limit = DEFAULT_READ_LIMIT }: ReadOptions = {}) => {
     assertCursor(afterSeq);
     if (!Number.isSafeInteger(limit) || limit < 1) throw new RangeError(`limit must be a positive integer, got ${limit}`);
@@ -216,14 +277,49 @@ export function createEventLog(db: Database, options: EventLogOptions = {}): Eve
         : workspaceId === null
           ? isNull(events.workspaceId)
           : eq(events.workspaceId, workspaceId);
-    return orm
-      .select()
+    return readWhere(afterSeq, scope, limit);
+  };
+
+  const assertWorkspace = (workspaceId: WorkspaceId) => {
+    const exists = orm.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, workspaceId)).get();
+    if (exists === undefined) throw new NotFoundError('workspace', workspaceId);
+  };
+
+  /** The SQL filter and the live match of a scope. */
+  const scopeFilter = (scope: EventScope): { where: SQL; matches: (event: CoreEvent) => boolean } =>
+    scope === 'install'
+      ? {
+          where: or(isNull(events.workspaceId), eq(events.type, 'workspace.created'))!,
+          matches: (event) => event.workspaceId === null || event.type === 'workspace.created',
+        }
+      : {
+          // Its `workspace.created` comes with the install scope, so a tab following both gets it once.
+          where: and(eq(events.workspaceId, scope), ne(events.type, 'workspace.created'))!,
+          matches: (event) => event.workspaceId === scope && event.type !== 'workspace.created',
+        };
+
+  /** Whether any event matching `where` has `seq < beforeSeq`. */
+  const anyBefore = (where: SQL, beforeSeq: number) =>
+    orm
+      .select({ seq: events.seq })
       .from(events)
-      .where(and(gt(events.seq, afterSeq), scope))
-      .orderBy(asc(events.seq))
-      .limit(limit)
-      .all()
-      .map(toEvent);
+      .where(and(where, lt(events.seq, beforeSeq)))
+      .limit(1)
+      .get() !== undefined;
+
+  /**
+   * Registers `subscriber` for live events after delivering the backlog
+   * after `cursor()`, in one synchronous tick. Reads until a read comes back
+   * empty, so an event the listener itself appends while it handles the
+   * backlog is still delivered.
+   */
+  const drainAndRegister = (subscriber: Subscriber, cursor: () => number, active: () => boolean, where: SQL | undefined) => {
+    for (;;) {
+      const page = readWhere(cursor(), where, SUBSCRIBE_PAGE);
+      if (page.length === 0 || !active()) break;
+      for (const event of page) subscriber.deliver(event);
+    }
+    subscribers.add(subscriber);
   };
 
   const completeMessage = (input: NewEventOf<'session.message_completed'>): SessionMessageCompletedEvent =>
@@ -274,25 +370,95 @@ export function createEventLog(db: Database, options: EventLogOptions = {}): Eve
           }
         },
       };
-      // Backlog, then live, in one synchronous tick. Keep reading until a read
-      // comes back empty, so an event appended by the listener itself while it
-      // handles the backlog is still delivered.
-      for (;;) {
-        const page = readAfter(cursor, { limit: SUBSCRIBE_PAGE });
-        if (page.length === 0 || !active) break;
-        for (const event of page) subscriber.deliver(event);
-      }
-      subscribers.add(subscriber);
+      // Backlog, then live, in one synchronous tick.
+      drainAndRegister(subscriber, () => cursor, () => active, undefined);
       return () => {
         active = false;
         subscribers.delete(subscriber);
       };
     },
 
+    subscribeScope(scope, from, listener) {
+      if ('afterSeq' in from) assertCursor(from.afterSeq);
+      else assertCount('window', from.window);
+      if (scope !== 'install') assertWorkspace(scope);
+      const { where, matches } = scopeFilter(scope);
+      let active = true;
+      let oldestSeq: number | null = null;
+      let cursor: number;
+      const subscriber: Subscriber = {
+        deliver(event) {
+          if (!active || event.seq <= cursor || !matches(event)) return;
+          cursor = event.seq;
+          oldestSeq ??= event.seq;
+          try {
+            listener(event);
+          } catch (error) {
+            onListenerError(error);
+          }
+        },
+      };
+      let hasEarlierBefore: number;
+      if ('afterSeq' in from) {
+        cursor = from.afterSeq;
+        hasEarlierBefore = from.afterSeq + 1;
+      } else {
+        // The newest `window` events, read newest first and delivered oldest
+        // first. Everything up to the log's end is then behind the cursor.
+        const end = log.lastSeq();
+        const window = orm
+          .select()
+          .from(events)
+          .where(and(where, lte(events.seq, end)))
+          .orderBy(desc(events.seq))
+          .limit(from.window)
+          .all()
+          .map(toEvent)
+          .reverse();
+        cursor = 0;
+        for (const event of window) subscriber.deliver(event);
+        cursor = Math.max(cursor, end);
+        hasEarlierBefore = window[0]?.seq ?? 0;
+      }
+      // Then anything newer (or appended by the listener), then live, in the same tick.
+      drainAndRegister(subscriber, () => cursor, () => active, where);
+      const hasEarlier = anyBefore(where, oldestSeq ?? hasEarlierBefore);
+      return {
+        oldestSeq,
+        hasEarlier,
+        unsubscribe() {
+          active = false;
+          subscribers.delete(subscriber);
+        },
+      };
+    },
+
+    readBefore(workspaceId, beforeSeq, limit, sessionId) {
+      if (!Number.isSafeInteger(beforeSeq) || beforeSeq < 1) {
+        throw new RangeError(`beforeSeq must be a positive integer, got ${String(beforeSeq)}`);
+      }
+      assertCount('limit', limit);
+      assertWorkspace(workspaceId);
+      const rows = orm
+        .select()
+        .from(events)
+        .where(
+          and(
+            eq(events.workspaceId, workspaceId),
+            sessionId === undefined ? undefined : eq(events.streamId, sessionId),
+            lt(events.seq, beforeSeq),
+          ),
+        )
+        .orderBy(desc(events.seq))
+        .limit(limit + 1)
+        .all();
+      const hasMore = rows.length > limit;
+      return { events: rows.slice(0, limit).map(toEvent).reverse(), hasMore };
+    },
+
     deleteWorkspaceHistory(workspaceId) {
       return transaction(() => {
-        const exists = orm.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, workspaceId)).get();
-        if (exists === undefined) throw new NotFoundError('workspace', workspaceId);
+        assertWorkspace(workspaceId);
         const deletedEvents = orm.delete(events).where(eq(events.workspaceId, workspaceId)).run().changes;
         const deletedRuns = orm.delete(runs).where(eq(runs.workspaceId, workspaceId)).run().changes;
         const deletedSessions = orm.delete(sessions).where(eq(sessions.workspaceId, workspaceId)).run().changes;

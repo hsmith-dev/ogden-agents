@@ -1,9 +1,10 @@
 import { Power } from '@phosphor-icons/react';
 import { useState } from 'react';
-import { busySessionCount, useEventStream } from '@/events/event-stream';
+import { useEventStream } from '@/events/event-stream';
 import { quitServer } from '@/events/server-control';
 import { AlertDialog, AlertDialogCancel, AlertDialogConfirm, AlertDialogContent, AlertDialogTrigger } from '@/ui/alert-dialog';
 import { SidebarLabel, SidebarMenuButton } from '@/ui/sidebar';
+import { isBusy, useAllSessions } from '@/workspaces/workspace-api';
 
 /** The consequence of quitting, in one sentence (EXPERIENCE.md Interaction Rules). */
 export function quitConsequence(busy: number): string {
@@ -18,11 +19,11 @@ export function quitConsequence(busy: number): string {
  * user sees it and can try again.
  */
 export function QuitButton() {
-  const { events, markStopped } = useEventStream();
+  const { markStopped } = useEventStream();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
-  const busy = busySessionCount(events);
+  const busy = useAllSessions().filter(isBusy).length;
 
   const onConfirm = () => {
     setPending(true);

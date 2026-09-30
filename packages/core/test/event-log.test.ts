@@ -323,3 +323,170 @@ describe('deleteWorkspaceHistory', () => {
     expect(() => core.events.deleteWorkspaceHistory('ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3')).toThrow(NotFoundError);
   });
 });
+
+describe('subscribeScope (E2-R8)', () => {
+  /** Two workspaces with a chat each, and `count` deltas in each chat, interleaved. */
+  function twoWorkspaces(core: Core, count: number) {
+    const a = chat(core);
+    const b = chat(core);
+    core.events.transaction(() => {
+      for (let i = 0; i < count; i++) {
+        appendDelta(core, a, `a${i}`, 'x');
+        appendDelta(core, b, `b${i}`, 'y');
+      }
+    });
+    return { a, b };
+  }
+
+  it('install scope: install-level events plus every workspace.created, then live', () => {
+    const core = openTestCore();
+    const [server] = appendStarted(core, 1);
+    const { a } = twoWorkspaces(core, 3);
+    const seen: CoreEvent[] = [];
+    const sub = core.events.subscribeScope('install', { afterSeq: 0 }, (event) => seen.push(event));
+    expect(seen.map((e) => e.type)).toEqual(['server.started', 'workspace.created', 'workspace.created']);
+    expect(sub).toMatchObject({ oldestSeq: server!.seq, hasEarlier: false });
+    appendDelta(core, a, 'live', 'z');
+    const [next] = appendStarted(core, 1);
+    expect(seen.at(-1)).toEqual(next);
+    expect(seen).toHaveLength(4);
+    sub.unsubscribe();
+    appendStarted(core, 1);
+    expect(seen).toHaveLength(4);
+  });
+
+  it('workspace window: the newest N of that workspace only, oldest first, then live; hasEarlier says whether more exist', () => {
+    const core = openTestCore();
+    const { a, b } = twoWorkspaces(core, 10);
+    // Its workspace.created comes with the install scope instead.
+    const all = core.events.readAfter(0, { workspaceId: a.workspaceId, limit: 1000 }).filter((e) => e.type !== 'workspace.created');
+    const seen: CoreEvent[] = [];
+    const sub = core.events.subscribeScope(a.workspaceId, { window: 4 }, (event) => seen.push(event));
+    expect(seen).toEqual(all.slice(-4));
+    expect(sub).toMatchObject({ oldestSeq: all.at(-4)!.seq, hasEarlier: true });
+
+    appendDelta(core, b, 'other', 'no');
+    const live = appendDelta(core, a, 'live', 'yes');
+    expect(seen.at(-1)).toEqual(live);
+    expect(seen).toHaveLength(5);
+
+    // A window larger than the history sends it all, with nothing earlier.
+    const whole: CoreEvent[] = [];
+    const big = core.events.subscribeScope(a.workspaceId, { window: 500 }, (event) => whole.push(event));
+    expect(whole).toEqual([...all, live]);
+    expect(big).toMatchObject({ oldestSeq: all[0]!.seq, hasEarlier: false });
+  });
+
+  it("sends only what there is: a deleted history's window, and nothing (oldestSeq null) after the last seq, then live", () => {
+    const core = openTestCore();
+    const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
+    core.events.deleteWorkspaceHistory(workspace.id);
+    const deleted = core.events.readAfter(0, { workspaceId: workspace.id });
+    const seen: CoreEvent[] = [];
+    const sub = core.events.subscribeScope(workspace.id, { window: 1 }, (event) => seen.push(event));
+    expect(seen).toEqual(deleted);
+    expect(sub.hasEarlier).toBe(false);
+
+    const fresh = openTestCore();
+    const ws = fresh.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
+    fresh.events.deleteWorkspaceHistory(ws.id);
+    const empty: CoreEvent[] = [];
+    // After the only event: nothing in the backlog, and the one event is earlier.
+    const after = fresh.events.subscribeScope(ws.id, { afterSeq: fresh.events.lastSeq() }, (event) => empty.push(event));
+    expect(empty).toEqual([]);
+    expect(after).toMatchObject({ oldestSeq: null, hasEarlier: true });
+    const s = fresh.entities.createSession({ workspaceId: ws.id, kind: 'chat' });
+    expect(empty.map((e) => e.type)).toEqual(['session.created']);
+    expect(empty[0]!.streamId).toBe(s.id);
+  });
+
+  it('reconnect after a seq: exactly the missed events of that scope, then live', () => {
+    const core = openTestCore();
+    const { a } = twoWorkspaces(core, 5);
+    const all = core.events.readAfter(0, { workspaceId: a.workspaceId });
+    const cut = all[3]!.seq;
+    const seen: CoreEvent[] = [];
+    const sub = core.events.subscribeScope(a.workspaceId, { afterSeq: cut }, (event) => seen.push(event));
+    expect(seen).toEqual(all.filter((e) => e.seq > cut));
+    expect(sub).toMatchObject({ oldestSeq: all[4]!.seq, hasEarlier: true });
+  });
+
+  it('has no gap while events are appended during delivery, including by the listener itself', () => {
+    const core = openTestCore();
+    const { a } = twoWorkspaces(core, 5);
+    const seen: number[] = [];
+    let appended = 0;
+    core.events.subscribeScope(a.workspaceId, { window: 3 }, (event) => {
+      seen.push(event.seq);
+      if (appended < 3) {
+        appended++;
+        appendDelta(core, a, `during${appended}`, 'x');
+      }
+    });
+    for (let i = 0; i < 3; i++) appendDelta(core, a, `after${i}`, 'x');
+    const all = core.events.readAfter(0, { workspaceId: a.workspaceId, limit: 1000 }).map((e) => e.seq);
+    expect(seen).toEqual(all.slice(all.indexOf(seen[0]!)));
+    expect(new Set(seen).size).toBe(seen.length);
+  });
+
+  it('throws NotFoundError for an unknown workspace, and RangeError for a bad window', () => {
+    const core = openTestCore();
+    const { a } = twoWorkspaces(core, 1);
+    expect(() => core.events.subscribeScope('ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3', { window: 10 }, () => {})).toThrow(NotFoundError);
+    expect(() => core.events.subscribeScope(a.workspaceId, { window: 0 }, () => {})).toThrow(RangeError);
+    expect(() => core.events.subscribeScope(a.workspaceId, { window: 501 }, () => {})).toThrow(RangeError);
+    expect(() => core.events.subscribeScope(a.workspaceId, { afterSeq: -1 }, () => {})).toThrow(RangeError);
+  });
+});
+
+describe('readBefore (E2-R8)', () => {
+  it('pages back to the start, oldest first, and the pages concatenate to exactly readAfter', () => {
+    const core = openTestCore();
+    const a = chat(core);
+    const b = chat(core);
+    core.events.transaction(() => {
+      for (let i = 0; i < 40; i++) {
+        appendDelta(core, a, `a${i}`, 'x');
+        appendDelta(core, b, `b${i}`, 'y');
+      }
+    });
+    const all = core.events.readAfter(0, { workspaceId: a.workspaceId, limit: 1000 });
+    const pages: CoreEvent[][] = [];
+    let before = core.events.lastSeq() + 1;
+    for (;;) {
+      const page = core.events.readBefore(a.workspaceId, before, 7);
+      expect(page.events.length).toBeLessThanOrEqual(7);
+      for (const event of page.events) expect(event.seq).toBeLessThan(before);
+      pages.unshift(page.events);
+      if (!page.hasMore) break;
+      before = page.events[0]!.seq;
+    }
+    expect(pages.flat()).toEqual(all);
+  });
+
+  it("filters by session, and another workspace's session gives an empty page", () => {
+    const core = openTestCore();
+    const a = chat(core);
+    const b = chat(core);
+    const second = core.entities.createSession({ workspaceId: a.workspaceId, kind: 'chat' });
+    appendDelta(core, a, 'm1', 'x');
+    core.sessionEvents.appendSessionEvent(second.id, { type: 'session.message_delta', payload: { messageId: 'm2', role: 'agent', text: 'y' } });
+    appendDelta(core, b, 'm3', 'z');
+    const end = core.events.lastSeq() + 1;
+
+    const page = core.events.readBefore(a.workspaceId, end, 500, a.sessionId);
+    expect(page.hasMore).toBe(false);
+    expect(page.events.map((e) => e.type)).toEqual(['session.created', 'session.message_delta']);
+    for (const event of page.events) expect(event.streamId).toBe(a.sessionId);
+
+    expect(core.events.readBefore(a.workspaceId, end, 500, b.sessionId)).toEqual({ events: [], hasMore: false });
+  });
+
+  it('throws NotFoundError for an unknown workspace, and RangeError past MAX_PAGE_EVENTS', () => {
+    const core = openTestCore();
+    const a = chat(core);
+    expect(() => core.events.readBefore('ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3', 10, 10)).toThrow(NotFoundError);
+    expect(() => core.events.readBefore(a.workspaceId, 10, 501)).toThrow(RangeError);
+    expect(() => core.events.readBefore(a.workspaceId, 0, 10)).toThrow(RangeError);
+  });
+});

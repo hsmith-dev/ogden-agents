@@ -581,8 +581,9 @@ export const PongMessage = z.object({
 export type PongMessage = z.infer<typeof PongMessage>;
 
 /**
- * Sent once after the backlog of a `subscribe`: every event up to now has been
- * delivered, and what follows is live. The UI waits for it before judging
+ * Sent once after the backlog of each subscription (`subscribe_install`,
+ * `subscribe_workspace`, or the legacy `subscribe`): every event of that
+ * scope up to now has been delivered, and what follows is live. The UI waits for it before judging
  * state that a replayed backlog could briefly misstate (the version banner).
  */
 export const CaughtUpMessage = z.object({
@@ -663,10 +664,11 @@ export const PingMessage = z.object({
 export type PingMessage = z.infer<typeof PingMessage>;
 
 /**
- * Stream every event with `seq > afterSeq`, then every new event live
- * (AD-5). Connecting and catching up are the same call: a new client sends
- * `0`, a reconnecting one sends the last `seq` it received. Sending it again
- * replaces the previous subscription.
+ * Deprecated (story 2.9): the web sends `subscribe_install` and
+ * `subscribe_workspace` instead. Stream every event with `seq > afterSeq`,
+ * then every new event live. Connecting and catching up are the same call: a
+ * new client sends `0`, a reconnecting one sends the last `seq` it received.
+ * Sending it again replaces the previous subscription. Still served.
  */
 export const SubscribeMessage = z.object({
   type: z.literal('subscribe'),
@@ -676,7 +678,8 @@ export type SubscribeMessage = z.infer<typeof SubscribeMessage>;
 
 /**
  * Stream the install-level events (`workspaceId: null`: server, toolchain,
- * agents) with `seq > afterSeq`, then live (E2-R8). Replaces an earlier
+ * agents) and every `workspace.created` (so a project added in another tab
+ * is seen) with `seq > afterSeq`, then live (E2-R8). Replaces an earlier
  * `subscribe_install`.
  */
 export const SubscribeInstallMessage = z.object({
@@ -723,7 +726,8 @@ export type PageHistoryMessage = z.infer<typeof PageHistoryMessage>;
 
 /**
  * Every message a client may send over `/ws`. The legacy install-wide
- * `subscribe` keeps working until the scoped subscriptions replace it (2.9).
+ * `subscribe` is deprecated: it keeps working, but the web no longer sends it
+ * (story 2.9).
  */
 export const ClientMessage = z.discriminatedUnion('type', [
   PingMessage,

@@ -229,7 +229,10 @@ test('density: Developer mode sets compact tokens; rows and body type shrink; th
 test('server status: a dropped socket shows reconnecting, then reconnects and catches up with no event repeated', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   const subscribes: number[] = [];
+  const legacy: unknown[] = [];
   const received: number[] = [];
+  /** Install-scope seqs (install-level events and `workspace.created`), which `subscribe_install` resumes after. */
+  const installReceived: number[] = [];
   const sockets: Array<{ close(): Promise<void> }> = [];
   let refuse = false;
   // Stands between the page and the server, so the test can drop the connection.
@@ -242,12 +245,14 @@ test('server status: a dropped socket shows reconnecting, then reconnects and ca
     sockets.push({ close: () => ws.close() });
     ws.onMessage((payload) => {
       const message = JSON.parse(String(payload)) as { type: string; afterSeq?: number };
-      if (message.type === 'subscribe') subscribes.push(message.afterSeq!);
+      if (message.type === 'subscribe_install') subscribes.push(message.afterSeq!);
+      if (message.type === 'subscribe') legacy.push(message);
       server.send(payload);
     });
     server.onMessage((payload) => {
-      const message = JSON.parse(String(payload)) as { seq?: number };
+      const message = JSON.parse(String(payload)) as { seq?: number; type: string; workspaceId?: string | null };
       if (message.seq !== undefined) received.push(message.seq);
+      if (message.seq !== undefined && (message.workspaceId === null || message.type === 'workspace.created')) installReceived.push(message.seq);
       ws.send(payload);
     });
   });
@@ -255,8 +260,8 @@ test('server status: a dropped socket shows reconnecting, then reconnects and ca
   await openConnected(page);
   const status = page.getByTestId('server-status').filter({ visible: true });
   await expect(status).toHaveAttribute('data-status', 'connected');
-  await expect.poll(() => received.length).toBeGreaterThan(0);
-  const before = received.length;
+  await expect.poll(() => installReceived.length).toBeGreaterThan(0);
+  const before = installReceived.length;
 
   refuse = true;
   await sockets.at(-1)!.close();
@@ -268,8 +273,10 @@ test('server status: a dropped socket shows reconnecting, then reconnects and ca
   await expect.poll(() => subscribes.length).toBeGreaterThanOrEqual(2);
   expect(subscribes[0]).toBe(0);
   // The reconnect subscribed after the last event it had, so nothing came twice.
-  expect(subscribes.at(-1)).toBe(received[before - 1]);
+  expect(subscribes.at(-1)).toBe(installReceived[before - 1]);
   expect(new Set(received).size).toBe(received.length);
+  // The page never replays the whole install history (story 2.9).
+  expect(legacy).toEqual([]);
 });
 
 test('restart: a tab of the old server shows reconnecting while it is gone, then the launch state; a new launch link connects', async ({ browser }) => {

@@ -15,8 +15,12 @@ export {
   type EventListener,
   type EventLog,
   type EventLogOptions,
+  type EventScope,
   type HistoryDeleted,
+  type HistoryPage,
   type ReadOptions,
+  type ScopeStart,
+  type ScopeSubscription,
 } from './event-log.js';
 export { newId } from './ids.js';
 export * from './permissions.js';

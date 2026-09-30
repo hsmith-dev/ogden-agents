@@ -11,7 +11,7 @@ import {
   type SessionState,
   type Workspace,
 } from '@ogden-agents/shared';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueries, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef } from 'react';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
 import { call, postJson } from '@/chat/chat-api';
@@ -118,4 +118,47 @@ export function useSessions(wsId: string) {
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : a.id < b.id ? 1 : -1));
   }, [query.data, events, wsId]);
   return { ...query, sessions };
+}
+
+const BUSY: ReadonlySet<SessionState> = new Set(['working', 'waiting']);
+
+/** Whether a session's agent is `working` or `waiting` (AD-4). */
+export const isBusy = (session: Pick<Session, 'state'>): boolean => BUSY.has(session.state);
+
+/** Stable, so TanStack Query keeps the combined result's identity while nothing changes. */
+const combineSessionLists = (results: UseQueryResult<Session[]>[]) => results.map((result) => result.data);
+
+/**
+ * Every workspace's sessions: the REST lists (story 2.5), with each
+ * session's live state from the event stream laid over them (AD-4). The
+ * stream holds only each workspace's recent window, so a state older than
+ * the window comes from REST; a chat started since the lists loaded comes
+ * from its `session.created` until the refetch lands.
+ */
+export function useAllSessions(): Session[] {
+  const workspaces = useWorkspaces();
+  const { events } = useEventStream();
+  const lists = useQueries({
+    queries: (workspaces.data ?? []).map((workspace) => ({
+      queryKey: ['sessions', workspace.id],
+      queryFn: () => fetchSessions(workspace.id),
+      retry: false,
+    })),
+    combine: combineSessionLists,
+  });
+  return useMemo(() => {
+    const byId = new Map<string, Session>();
+    for (const list of lists) for (const session of list ?? []) byId.set(session.id, session);
+    for (const event of events) {
+      if (event.type === 'session.created') {
+        if (!byId.has(event.payload.session.id)) byId.set(event.payload.session.id, event.payload.session);
+      } else if (event.type === 'session.state_changed') {
+        const session = byId.get(event.payload.sessionId);
+        if (session !== undefined) byId.set(session.id, { ...session, state: event.payload.state });
+      } else if (event.type === 'workspace.history_deleted') {
+        for (const [id, session] of byId) if (session.workspaceId === event.workspaceId) byId.delete(id);
+      }
+    }
+    return [...byId.values()];
+  }, [lists, events]);
 }

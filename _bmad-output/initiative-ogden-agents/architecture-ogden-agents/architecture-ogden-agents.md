@@ -88,7 +88,7 @@ graph LR
 - **Rule:**
   - Every state change the UI shows is an event persisted by core in SQLite, with the envelope `{ id, seq, workspaceId, streamId, type, at, payload }`. `workspaceId` is `null` only for install-level events (such as `server.started`) that belong to no workspace.
   - `seq` increases strictly across the install.
-  - The UI holds one WebSocket and subscribes with "after seq N"; reconnecting and catching up are the same call.
+  - The UI holds one WebSocket; it subscribes to install-level events after seq N and to each workspace's recent window, pages older history on demand, and reconnects per scope after its last seq.
   - Every event type has a Zod schema in `packages/shared`, and nothing unschematized is emitted.
   - Every adapter that produces agent activity, whether an ACP chat or the bmad-loop build runner, emits the same `session.*` event types, so one session view renders both.
   - All events are retained, and history is deletable per workspace.

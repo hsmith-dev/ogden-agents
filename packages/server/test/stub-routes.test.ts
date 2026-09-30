@@ -2,9 +2,9 @@
  * The story 2.3 stubs: every route a later lane fills is registered now,
  * under the gate, and answers 501 `not_implemented` in the shared error
  * shape until its lane ships. Without a tab token it is 401, and a
- * state-changing one from a foreign Origin is 403 (AD-15). The new `/ws`
- * client messages are answered `request_failed`, and the legacy `subscribe`
- * still works.
+ * state-changing one from a foreign Origin is 403 (AD-15). The `/ws`
+ * messages are built (story 2.9, `event-socket.test.ts`); an invalid one is
+ * still ignored, and the legacy `subscribe` still works.
  */
 import { API_ROUTES, ApiErrorBody, apiPath, ServerMessage } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
@@ -93,23 +93,7 @@ async function socket(server: TestServer, tab: SignedIn) {
   return { ws, messages };
 }
 
-describe('the new /ws client messages', () => {
-  it('are answered request_failed / not_implemented, echoing the request id and workspace', async () => {
-    const server = await startTestServer();
-    const { ws, messages } = await socket(server, await signIn(server));
-    ws.send(JSON.stringify({ type: 'subscribe_install', afterSeq: 0 }));
-    ws.send(JSON.stringify({ type: 'subscribe_workspace', workspaceId: wsId, window: 50 }));
-    ws.send(JSON.stringify({ type: 'unsubscribe_workspace', workspaceId: wsId }));
-    ws.send(JSON.stringify({ type: 'page_history', requestId: 'r1', workspaceId: wsId, sessionId: sesId, beforeSeq: 10, limit: 20 }));
-    await waitFor(() => messages.length >= 4, 'four replies');
-    expect(messages).toEqual([
-      { type: 'request_failed', for: 'subscribe_install', code: 'not_implemented', message: expect.any(String) },
-      { type: 'request_failed', for: 'subscribe_workspace', workspaceId: wsId, code: 'not_implemented', message: expect.any(String) },
-      { type: 'request_failed', for: 'unsubscribe_workspace', workspaceId: wsId, code: 'not_implemented', message: expect.any(String) },
-      { type: 'request_failed', for: 'page_history', requestId: 'r1', workspaceId: wsId, code: 'not_implemented', message: expect.any(String) },
-    ]);
-  });
-
+describe('/ws client messages', () => {
   it('an invalid one is ignored, and the legacy subscribe still streams the backlog then caught_up', async () => {
     const lines: string[] = [];
     const server = await startTestServer({ lines });

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useAppearance } from '@/appearance/appearance-provider';
 import { AGENT_NAME, cancelSession, ChatApiError, fetchSession, sendMessage } from '@/chat/chat-api';
 import { Composer } from '@/chat/composer';
+import { SignInAgain } from '@/chat/sign-in-again';
 import { ToolCalls } from '@/chat/tool-call-row';
 import { sessionView, type TranscriptCheckIn, type TranscriptItem, type TranscriptMessage } from '@/chat/transcript';
 import { useCaughtUp, useEarlierHistory, useSessionEvents } from '@/events/event-stream';
@@ -215,6 +216,8 @@ export function SessionPage() {
   const firstPagePending = history.loading || (history.hasEarlier && history.error === undefined && autoLoaded.current !== sesId);
   const loading = !view.known && (!caughtUp || (firstPagePending && view.items.length === 0));
   const busy = state === 'working' || state === 'waiting';
+  /** The latest user message that was sent: an error after a new one (a resend) is a new error. */
+  const lastSentUserId = view.messages.findLast((message) => message.role === 'user' && message.status === undefined)?.messageId;
 
   const stop = () => {
     if (stopping) return;
@@ -299,7 +302,15 @@ export function SessionPage() {
               <StateGlyph state="working" label={checkInWords(view.checkIn)} />
             </Notice>
           ) : null}
-          {state === 'error' ? (
+          {state === 'error' && view.errorCode === 'auth_required' ? (
+            // Keyed per error (the message it failed on), so each one starts unarmed (9.4).
+            <SignInAgain
+              key={`${sesId}:${lastSentUserId ?? ''}`}
+              reason={view.errorReason}
+              canTryAgain={view.lastUserText !== undefined}
+              onTryAgain={tryAgain}
+            />
+          ) : state === 'error' ? (
             <Notice
               variant="blocked"
               data-testid="session-error"

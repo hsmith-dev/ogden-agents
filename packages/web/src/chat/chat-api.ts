@@ -21,6 +21,9 @@ import { tabAuth, type TabAuth } from '@/auth/tab-token';
 /** The only agent in this epic; the UI names it by its product name (EXPERIENCE.md Voice). */
 export const AGENT_NAME = 'Claude Code';
 
+/** That agent's id in the agent setup API (`/api/v1/agents/:agentId`), for Sign in again (9.4). */
+export const AGENT_ID = 'claude-code';
+
 // The shared fetch-error helper, re-exported for this module's importers.
 export { call, ChatApiError, postJson };
 

@@ -463,6 +463,8 @@ export function createChat(options: ChatOptions): Chat {
    * Puts the session in `error` with the plain reason. `dropAgent` only when
    * the agent's process is gone (or never started): a prompt that merely
    * failed, such as a rate limit, keeps the agent session for the next message.
+   * An expired sign-in (`auth_required`) always drops it, so the next message
+   * starts a fresh process with the new credentials and reopens the session (9.4).
    * Nothing queued is sent after it.
    */
   const fail = (sessionId: SessionId, entry: Live | undefined, error: AgentError, dropAgent: boolean) => {
@@ -479,11 +481,14 @@ export function createChat(options: ChatOptions): Chat {
     }
     try {
       if (entry !== undefined) endTurn(sessionId, entry);
-      entities.setSessionState(sessionId, 'error', { reason: error.message });
+      entities.setSessionState(sessionId, 'error', {
+        reason: error.message,
+        ...(error.code === 'auth_required' ? { errorCode: error.code } : {}),
+      });
     } catch (caught) {
       internalError(sessionId, caught);
     }
-    if (entry !== undefined && dropAgent) drop(sessionId, entry);
+    if (entry !== undefined && (dropAgent || error.code === 'auth_required')) drop(sessionId, entry);
   };
 
   /** Applies one adapter event to the session (AD-4, AD-5). */
@@ -516,7 +521,12 @@ export function createChat(options: ChatOptions): Chat {
             // A turn that recorded an `error` keeps it (and its Try again), even if the prompt then ends.
             if (!hasNext(sessionId) && busy.get(sessionId)?.failed !== true) entities.setSessionState(sessionId, 'idle');
           } else {
-            fail(sessionId, entry, new AgentError('agent_failed', event.reason ?? `${agent.displayName} stopped unexpectedly.`), event.fatal === true);
+            fail(
+              sessionId,
+              entry,
+              new AgentError(event.code ?? 'agent_failed', event.reason ?? `${agent.displayName} stopped unexpectedly.`),
+              event.fatal === true,
+            );
           }
           return;
         case 'tool_call': {
@@ -717,7 +727,13 @@ export function createChat(options: ChatOptions): Chat {
         clearTurnTimers(turn);
         flushSession(session.id);
         // A queued message completes under its own id; a Deny reason is a new user message.
-        sessionEvents.completeMessage(session.id, { messageId: following.messageId, role: 'user', content: following.text });
+        sessionEvents.completeMessage(session.id, {
+          messageId: following.messageId,
+          role: 'user',
+          content: following.text,
+          // A Deny reason is marked, so Try again never resends it as the user's own message (9.4 review F4).
+          ...(following.queued ? {} : { origin: 'deny_reason' as const }),
+        });
         entities.setSessionState(session.id, 'working');
       } catch (error) {
         internalError(session.id, error);

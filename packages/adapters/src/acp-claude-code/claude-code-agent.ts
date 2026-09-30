@@ -43,6 +43,7 @@ import {
   AgentError,
   type AgentAuthMethod,
   type AgentEvent,
+  type AgentErrorCode,
   type AgentEventListener,
   type AgentPermissionDecision,
   type AgentPermissionRequest,
@@ -110,8 +111,13 @@ export function resolveClaudeAgentAcp(from: string | URL = import.meta.url): str
 
 /** A plain reason for a failed ACP request, for the UI; the raw error goes to the log. */
 function plainReason(error: unknown, fallback: string): string {
-  if (error instanceof acp.RequestError && error.code === -32000) return SIGN_IN;
+  if (isAuthRequired(error)) return SIGN_IN;
   return fallback;
+}
+
+/** ACP's `-32000`: the agent needs the user to sign in again (9.4). */
+function isAuthRequired(error: unknown): boolean {
+  return error instanceof acp.RequestError && error.code === -32000;
 }
 
 /** `promise`, or a rejection with `error` after `ms`. */
@@ -325,11 +331,15 @@ async function startOnChild(
     if (rest !== '') emit({ type: 'message_chunk', text: rest });
   };
   /** Reports a state only when it changes, so a failed prompt is one `error`, not two. */
-  const setState = (next: 'idle' | 'working' | 'error', reason?: string) => {
+  const setState = (next: 'idle' | 'working' | 'error', reason?: string, code?: AgentErrorCode) => {
     if (next !== 'working') flushReply();
     if (state === next) return;
     state = next;
-    emit(next === 'error' ? { type: 'state', state: 'error', reason: reason ?? FAILED } : { type: 'state', state: next });
+    emit(
+      next === 'error'
+        ? { type: 'state', state: 'error', reason: reason ?? FAILED, ...(code === undefined ? {} : { code }) }
+        : { type: 'state', state: next },
+    );
   };
   /** The process is gone: one `fatal` error, even after a non-fatal one for the same failure. */
   const reportGone = (reason: string) => {
@@ -546,7 +556,7 @@ async function startOnChild(
     connection.close();
     await kill();
     if (error instanceof AgentError) throw error;
-    throw new AgentError('agent_unavailable', plainReason(error, COULD_NOT_START), {
+    throw new AgentError(isAuthRequired(error) ? 'auth_required' : 'agent_unavailable', plainReason(error, COULD_NOT_START), {
       details: { reason: mask(error instanceof Error ? error.message : String(error)) },
       cause: error,
       output: output(),
@@ -587,13 +597,13 @@ async function startOnChild(
         const failure =
           error instanceof AgentError
             ? error
-            : new AgentError('agent_failed', processGone ? STOPPED : plainReason(error, FAILED), {
+            : new AgentError(!processGone && isAuthRequired(error) ? 'auth_required' : 'agent_failed', processGone ? STOPPED : plainReason(error, FAILED), {
                 details: { reason: mask(error instanceof Error ? error.message : String(error)) },
                 cause: error,
                 output: output(),
               });
         if (processGone) reportGone(failure.message);
-        else setState('error', failure.message);
+        else setState('error', failure.message, failure.code === 'auth_required' ? failure.code : undefined);
         throw failure;
       }
     },

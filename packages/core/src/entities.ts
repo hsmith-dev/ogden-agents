@@ -22,6 +22,7 @@ import {
   type RunOutcome,
   type Session,
   type SessionDriver,
+  type SessionErrorCode,
   type SessionId,
   type SessionKind,
   type SessionState,
@@ -62,6 +63,8 @@ export interface NewRun {
 export interface SessionStateDetail {
   reason?: string | undefined;
   resumable?: boolean | undefined;
+  /** Set with `error` when the UI acts on the cause (`auth_required`: sign in again; 9.4). */
+  errorCode?: SessionErrorCode | undefined;
 }
 
 /** One completed message of a session, as `session.message_completed` stored it. */
@@ -307,7 +310,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         .map(toSession);
     },
 
-    setSessionState(id, state, { reason, resumable } = {}) {
+    setSessionState(id, state, { reason, resumable, errorCode } = {}) {
       check(SessionStateSchema, state, 'session state');
       return log.transaction(() => {
         const session = requireSession(id);
@@ -322,6 +325,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
             previous: session.state,
             ...(reason === undefined || reason === '' ? {} : { reason }),
             ...(resumable === true ? { resumable: true as const } : {}),
+            ...(state === 'error' && errorCode !== undefined ? { errorCode } : {}),
           },
         });
         return updated;

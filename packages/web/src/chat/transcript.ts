@@ -207,7 +207,8 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
         const done = message(event.payload.messageId, event.payload.role);
         done.text = event.payload.content;
         done.streaming = false;
-        if (event.payload.role === 'user') view.lastUserText = event.payload.content;
+        // A Deny reason core sent is not the user's message to try again (9.4 review F4).
+        if (event.payload.role === 'user' && event.payload.origin !== 'deny_reason') view.lastUserText = event.payload.content;
         break;
       }
       case 'session.tool_call':

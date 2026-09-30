@@ -77,7 +77,8 @@ function scriptedAgent(
         } catch (error) {
           // A prompt that failed with the process still alive: not fatal.
           const failure = error instanceof AgentError ? error : new AgentError('agent_failed', 'Test Agent stopped with an error.');
-          emit({ type: 'state', state: 'error', reason: failure.message });
+          // As the adapter does: the code rides on the event only when the UI acts on it (9.4).
+          emit({ type: 'state', state: 'error', reason: failure.message, ...(failure.code === 'auth_required' ? { code: failure.code } : {}) });
           throw failure;
         }
       },
@@ -647,7 +648,9 @@ describe('resuming a chat (story 2.7)', () => {
     chat.sendMessage(workspace.id, session.id, 'hello?');
     await chat.settled();
     expect(core.entities.getSession(session.id)!.state).toBe('error');
-    expect(sessionEvents(core, session.id).at(-1)).toMatchObject({ payload: { state: 'error', reason: 'Test Agent needs you to sign in again.' } });
+    expect(sessionEvents(core, session.id).at(-1)).toMatchObject({
+      payload: { state: 'error', reason: 'Test Agent needs you to sign in again.', errorCode: 'auth_required' },
+    });
     expect(resumedEvents(core, session.id)).toEqual([]);
     // The ref stays, for the next try.
     expect(core.entities.getSession(session.id)!.adapterRefs[AGENT_SESSION_REF]).toBe('agent-1');
@@ -658,6 +661,70 @@ describe('resuming a chat (story 2.7)', () => {
     expect(agent.reopens).toEqual(['agent-1', 'agent-1']);
     expect(core.entities.getSession(session.id)!.state).toBe('idle');
     expect(resumedEvents(core, session.id)).toHaveLength(1);
+    await chat.close();
+  });
+
+  it('an expired sign-in mid-chat sets errorCode, drops the agent, and the next message reopens its session (9.4)', async () => {
+    const core = openTestCore();
+    let expired = false;
+    const agent = scriptedAgent(async (text, emit) => {
+      if (expired) throw new AgentError('auth_required', 'Test Agent needs you to sign in again.');
+      return echo(text, emit);
+    }, () => 'resumed');
+    const { chat, workspace, session } = setUp(core, agent.port);
+    chat.sendMessage(workspace.id, session.id, 'first');
+    await chat.settled();
+    expired = true;
+    chat.sendMessage(workspace.id, session.id, 'second');
+    await chat.settled();
+    const failed = sessionEvents(core, session.id).filter((event) => event.type === 'session.state_changed' && event.payload.state === 'error');
+    expect(failed.map((event) => event.payload)).toEqual([
+      { sessionId: session.id, state: 'error', previous: 'working', reason: 'Test Agent needs you to sign in again.', errorCode: 'auth_required' },
+    ]);
+    // The process is dropped, not kept for the next message (it would keep the old credentials).
+    expect(agent.closed()).toBe(1);
+
+    expired = false;
+    chat.sendMessage(workspace.id, session.id, 'third');
+    await chat.settled();
+    expect(agent.starts).toHaveLength(1);
+    expect(agent.reopens).toEqual(['agent-1']);
+    expect(agent.prompts).toEqual(['first', 'second', 'third']);
+    expect(resumedEvents(core, session.id).map((event) => event.payload.via)).toEqual(['resumed']);
+    const last = sessionEvents(core, session.id).filter((event) => event.type === 'session.state_changed').at(-1);
+    expect(last).toMatchObject({ payload: { state: 'idle' } });
+    expect(last?.type === 'session.state_changed' && 'errorCode' in last.payload).toBe(false);
+    await chat.close();
+  });
+
+  it('an error event with code auth_required alone drops the agent; other errors carry no errorCode (9.4)', async () => {
+    const core = openTestCore();
+    const agent = scriptedAgent(async (text, emit) => {
+      if (text === 'expired') {
+        emit({ type: 'state', state: 'error', reason: 'Test Agent needs you to sign in again.', code: 'auth_required' });
+        return { stopReason: 'end_turn' };
+      }
+      if (text === 'fail') throw new AgentError('agent_failed', 'Test Agent stopped with an error.');
+      return echo(text, emit);
+    }, () => 'resumed');
+    const { chat, workspace, session } = setUp(core, agent.port);
+    chat.sendMessage(workspace.id, session.id, 'fail');
+    await chat.settled();
+    const plain = sessionEvents(core, session.id).at(-1);
+    expect(plain).toMatchObject({ type: 'session.state_changed', payload: { state: 'error', reason: 'Test Agent stopped with an error.' } });
+    expect(plain?.type === 'session.state_changed' && 'errorCode' in plain.payload).toBe(false);
+    // A failed prompt that isn't a sign-in keeps its agent.
+    expect(agent.closed()).toBe(0);
+
+    chat.sendMessage(workspace.id, session.id, 'expired');
+    await chat.settled();
+    expect(sessionEvents(core, session.id).filter((event) => event.type === 'session.state_changed').at(-1)).toMatchObject({
+      payload: { state: 'error', errorCode: 'auth_required' },
+    });
+    expect(agent.closed()).toBe(1);
+    chat.sendMessage(workspace.id, session.id, 'again');
+    await chat.settled();
+    expect(agent.reopens).toEqual(['agent-1']);
     await chat.close();
   });
 
@@ -977,6 +1044,9 @@ describe('session behaviour (story 2.10)', () => {
     expect(agent.prompts).toEqual(['clean up', 'I denied "rm -rf build": Use the clean script.', 'and then this']);
     expect(userMessages(core, session.id).map(([, content]) => content)).toEqual(['clean up', 'I denied "rm -rf build": Use the clean script.', 'and then this']);
     expect(userMessages(core, session.id)[2]![0]).toBe(queued.messageId);
+    // Only the Deny reason is marked, so Try again never resends it (9.4 review F4).
+    const completed = sessionEvents(core, session.id).flatMap((e) => (e.type === 'session.message_completed' && e.payload.role === 'user' ? [e.payload] : []));
+    expect(completed.map((payload) => payload.origin)).toEqual([undefined, 'deny_reason', undefined]);
     expect(stateOf(core, session.id)).toBe('idle');
   });
 

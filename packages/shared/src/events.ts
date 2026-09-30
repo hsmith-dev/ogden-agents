@@ -274,7 +274,16 @@ export type SessionMessageDeltaEvent = z.infer<typeof SessionMessageDeltaEvent>;
 const SessionMessageCompletedInput = z.object({
   type: z.literal('session.message_completed'),
   ...onSessionStream,
-  payload: z.object({ messageId: MessageId, role: MessageRole, content: z.string() }),
+  payload: z.object({
+    messageId: MessageId,
+    role: MessageRole,
+    content: z.string(),
+    /**
+     * Set on a user message core sent for the user: the reason they gave with
+     * a Deny (`deny_reason`). Try again never resends it as a plain message (9.4 review F4).
+     */
+    origin: z.literal('deny_reason').optional(),
+  }),
 });
 /** A finished message with its full content; it replaces that message's deltas. */
 export const SessionMessageCompletedEvent = SessionMessageCompletedInput.extend(assigned);

@@ -148,3 +148,6 @@
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-refactor-sweep-plan.md`
   summary: `tests/launcher.test.ts` "--foreground beside a background server…" timed out once at 5 s under a full run (passed 10/10 alone); likely load. Consider a longer timeout (story 2.13, the end-to-end suite).
   evidence: 2.12 review, 2026-09-30 local full run.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-sign-in-again-from-a-session-plan.md`
+  summary: The Sign in again notice's React wiring (`SignInAgain`: the auth effect, the event effect, the start-request observer passed to `useSignIn`) has no unit test: web tests render static markup only, with no DOM. The rules are pure functions with unit tests, and the wiring is covered by `tests/e2e/sign-in-again.spec.ts`. Add component tests once the web package has a DOM test setup (story 9.6; 9.4 review F5).
+  evidence: `packages/web/src/chat/sign-in-again.tsx`; `packages/web/test/sign-in-again.test.tsx`.

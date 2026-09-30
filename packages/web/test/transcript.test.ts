@@ -241,6 +241,21 @@ describe('sessionView: session behaviour (story 2.10)', () => {
     expect(view.lastUserText).toBe('First');
   });
 
+  it('Try again never resends a Deny reason core sent; the user’s own last message stays the one to resend (9.4 review F4)', () => {
+    const view = sessionView(
+      [
+        created(),
+        completed('u1', 'user', 'clean up'),
+        stateChanged('working', 'idle'),
+        event('session.message_completed', { messageId: 'u2', role: 'user', content: 'I denied "rm -rf build": Use the clean script.', origin: 'deny_reason' }),
+        stateChanged('error', 'working', 'Claude Code needs you to sign in again.'),
+      ],
+      'ses_1',
+    );
+    expect(view.messages.map((message) => message.text)).toEqual(['clean up', 'I denied "rm -rf build": Use the clean script.']);
+    expect(view.lastUserText).toBe('clean up');
+  });
+
   it('keeps a message queued after a Stop already left waiting for idle, until it is sent', () => {
     const view = sessionView([created(), stateChanged('working', 'idle'), stateChanged('waiting', 'working'), stateChanged('idle', 'waiting'), queuedMessage('u2', 'After stop')], 'ses_1');
     expect(view.queued.map((message) => message.messageId)).toEqual(['u2']);

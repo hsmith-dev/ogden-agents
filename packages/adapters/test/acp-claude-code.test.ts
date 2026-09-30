@@ -330,7 +330,7 @@ describe('reopening a session', () => {
 
   it('an expired sign-in on resume fails the reopen instead of starting a new session', async () => {
     await expect(reopen('both', 'fake-session-earlier', 'resume-auth')).rejects.toMatchObject({
-      code: 'agent_unavailable',
+      code: 'auth_required',
       message: 'Claude Code needs you to sign in again.',
     });
   });
@@ -363,8 +363,25 @@ describe('sign-in methods', () => {
 
   it('a prompt refused for an expired sign-in says to sign in again', async () => {
     const { session, events } = await startFake();
-    await expect(session.prompt('auth-expired')).rejects.toMatchObject({ message: 'Claude Code needs you to sign in again.' });
-    expect(events.at(-1)).toMatchObject({ type: 'state', state: 'error', reason: 'Claude Code needs you to sign in again.' });
+    await expect(session.prompt('auth-expired')).rejects.toMatchObject({ code: 'auth_required', message: 'Claude Code needs you to sign in again.' });
+    expect(events.at(-1)).toMatchObject({ type: 'state', state: 'error', reason: 'Claude Code needs you to sign in again.', code: 'auth_required' });
+  });
+
+  it('with FAKE_ACP_REQUIRE_LOGIN, prompts are refused until the fake login signed in (9.4)', async () => {
+    const state = join(tempDir(), 'login.json');
+    const { session, events } = await startFake({ env: { FAKE_ACP_REQUIRE_LOGIN: state } });
+    await expect(session.prompt('hi')).rejects.toMatchObject({ code: 'auth_required' });
+    expect(events.at(-1)).toMatchObject({ type: 'state', state: 'error', code: 'auth_required' });
+    writeFileSync(state, JSON.stringify({ loggedIn: true }));
+    await expect(session.prompt('hi')).resolves.toEqual({ stopReason: 'end_turn' });
+  });
+
+  it('any other refused prompt has no code on its error event (9.4)', async () => {
+    const { session, events } = await startFake();
+    await expect(session.prompt('fail')).rejects.toMatchObject({ code: 'agent_failed' });
+    const error = events.at(-1);
+    expect(error).toMatchObject({ type: 'state', state: 'error' });
+    expect(error).not.toHaveProperty('code');
   });
 });
 

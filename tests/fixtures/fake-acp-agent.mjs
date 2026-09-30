@@ -69,10 +69,16 @@
 // 9.2): without it the prompt fails with ACP's auth-required error (-32000);
 // with it the reply is "key received" (never the value).
 //
+// FAKE_ACP_REQUIRE_LOGIN=<state file> makes every prompt need a sign-in (story
+// 9.4): until `fake-claude-login.mjs` has written `{"loggedIn":true}` to that
+// file (its FAKE_LOGIN_STATE), the prompt fails with ACP's auth-required error
+// (-32000); after it, prompts behave as usual. The file is read on each prompt.
+//
 // `--cli <args>` runs the fake Claude CLI, `fake-claude-login.mjs <args>`, as
 // the real adapter runs `claude`: as a child with this process's terminal,
 // passing on its exit code (story 9.1).
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import * as acp from '@agentclientprotocol/sdk';
@@ -106,6 +112,15 @@ let nextSession = 1;
 const RESUME = process.env.FAKE_ACP_RESUME ?? '';
 const REOPEN_FAIL = new Set((process.env.FAKE_ACP_REOPEN_FAIL ?? '').split(',').filter((method) => method !== ''));
 const NEW_MESSAGE = '[Ogden Agents] New message:\n';
+
+/** Whether the fake login's state file says signed in (FAKE_ACP_REQUIRE_LOGIN). */
+const loggedIn = (stateFile) => {
+  try {
+    return JSON.parse(readFileSync(stateFile, 'utf8')).loggedIn === true;
+  } catch {
+    return false;
+  }
+};
 
 /**
  * @param {import('@agentclientprotocol/sdk').AgentContext} client
@@ -178,6 +193,9 @@ acp
     const primed = primer.split('\n').filter((line) => line.startsWith('User: ') || line.startsWith('Claude Code: ')).length;
     const text = (primedAt === -1 ? whole : whole.slice(primedAt + NEW_MESSAGE.length)).trim();
 
+    if (process.env.FAKE_ACP_REQUIRE_LOGIN && !loggedIn(process.env.FAKE_ACP_REQUIRE_LOGIN)) {
+      throw acp.RequestError.authRequired(undefined, 'the fake agent needs a new sign-in');
+    }
     if (process.env.FAKE_ACP_REQUIRE_API_KEY === '1') {
       if (!process.env.ANTHROPIC_API_KEY) throw acp.RequestError.authRequired(undefined, 'the fake agent needs an API key');
       await say(client, params.sessionId, 'key received');

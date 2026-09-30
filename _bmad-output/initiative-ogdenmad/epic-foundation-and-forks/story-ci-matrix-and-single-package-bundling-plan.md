@@ -87,6 +87,7 @@ Baseline `be4eda7` (story 1.1, on the stacked branch `story/1.2-ci-and-packaging
 - The smoke script uses an empty temporary npm cache and drops inherited `npm_*`/`pnpm_*` env so no earlier install is reused; POSIX stops the process group, Windows uses `taskkill /T /F`.
 - `scripts/**/*.mjs` was added to the root `tsconfig.json` so the scripts are type-checked too.
 - Matrix test audit (orchestrator, macOS, Node 24.21): Pack, Clean npx run and Undeclared import rows ran and passed (21 tests in 5 files; `pnpm pack` + `scripts/smoke-installed.mjs` exit 0 with page and `server.started`). The Windows stop row (win32 branch of `tests/launcher.test.ts`) and the CI row (6 matrix jobs) cannot run on this machine; they stay pending until the branch is pushed, which the user has deferred.
+- CI confirmation (resolves the deferred AC2 item): after pushing PR #1, the first run failed both Windows jobs on `ERR_PNPM_BIN_CRLF` (Git checked `bin/ogdenmad.js` out with CRLF); fixed with `.gitattributes` forcing LF (`0c7a4a7`). The second run failed only the Windows smoke step: cmd.exe resolved `npx.cmd`'s `%~dp0` to the work dir when invoked as quoted `"npx"`; fixed by running npm's `npx-cli.js` with `process.execPath` and no shell (`c66955d`). GitHub Actions run 36665078789: 6/6 jobs green (macOS, Ubuntu, Windows × Node 24 and 26), including the Windows launcher and smoke paths.
 
 ## Plan Change Log
 

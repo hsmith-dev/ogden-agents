@@ -70,6 +70,8 @@ async function runForeground(cli) {
   try {
     server = await start({
       ...(cli.port === undefined ? {} : { port: cli.port }),
+      // This process prints the launch link below, so it asks for one.
+      launch: true,
       open: cli.open,
       webRoot: WEB_ROOT,
       // Quit in the UI stops the server; then this process ends too.

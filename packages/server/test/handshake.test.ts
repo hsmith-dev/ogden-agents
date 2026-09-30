@@ -69,6 +69,7 @@ async function startServer(options: StartOptions & { lines?: string[] } = {}) {
     dataDir: tempDataDir(),
     webRoot: webRoot(),
     ...rest,
+    launch: true,
   });
   running.push(server);
   return server;
@@ -228,6 +229,30 @@ describe('GET /launcher/hello', () => {
     for (const url of [first.launchUrl, second.launchUrl]) {
       expect(lines.join('')).not.toContain(codeOfLink(url));
     }
+  });
+});
+
+describe('launch codes on request', () => {
+  it('a background start (no launch, no open) issues no code; the handshake with launch=1 issues one that works', async () => {
+    const lines: string[] = [];
+    const server = await start({ port: 0, open: false, log: createLogger((l) => lines.push(l)), dataDir: tempDataDir(), webRoot: webRoot() });
+    running.push(server);
+    expect(server.launchUrl).toBeUndefined();
+    const issued = () => lines.filter((l) => (JSON.parse(l) as { msg: string }).msg.startsWith('launch code issued')).length;
+    expect(issued()).toBe(0);
+    // A plain handshake (attach check) issues none either.
+    expect((await send(server, '/launcher/hello', withToken(server))).status).toBe(200);
+    expect(issued()).toBe(0);
+
+    const { launchUrl } = (await send(server, '/launcher/hello?launch=1', withToken(server))).json() as { launchUrl: string };
+    expect(issued()).toBeGreaterThan(0);
+    await exchange(launchUrl);
+  });
+
+  it('with launch (foreground mode), the start issues one link', async () => {
+    const server = await startServer();
+    expect(server.launchUrl).toMatch(new RegExp(`^${server.url.replaceAll('.', '\\.')}/#c=[A-Za-z0-9_-]{43}$`));
+    await exchange(server.launchUrl);
   });
 });
 

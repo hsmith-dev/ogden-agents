@@ -25,7 +25,7 @@ function captureLog(): Captured {
  * subprotocol and a matching `Origin`, sends `subscribe` after `afterSeq`
  * (unless `null`), and collects every schema-valid server message.
  */
-async function connect(server: RunningServer, afterSeq: number | null = 0) {
+async function connect(server: RunningServer & { launchUrl: string }, afterSeq: number | null = 0) {
   const { protocols, origin } = await signIn(server);
   const ws = new WebSocket(`${server.url.replace('http', 'ws')}/ws`, protocols, { headers: { origin } });
   sockets.push(ws);
@@ -84,7 +84,7 @@ afterEach(async () => {
 });
 
 async function startTest(options: Parameters<typeof start>[0] = {}) {
-  const server = await start({ port: 0, open: false, log: captureLog().log, dataDir: tempDataDir(), ...options });
+  const server = await start({ port: 0, open: false, log: captureLog().log, dataDir: tempDataDir(), ...options, launch: true });
   running.push(server);
   return server;
 }

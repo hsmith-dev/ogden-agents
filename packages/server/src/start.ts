@@ -52,8 +52,15 @@ function defaultWebRoot(): string {
 export interface StartOptions {
   /** Port to try first. `0` asks the OS for any free port. Default {@link DEFAULT_PORT}. */
   port?: number;
-  /** Open the default browser at the single-use launch URL (`launchUrl`). Default `false`. */
+  /** Open the default browser at the single-use launch URL (`launchUrl`); implies `launch`. Default `false`. */
   open?: boolean;
+  /**
+   * Issue a single-use launch link as the server starts (`launchUrl`), for
+   * `--foreground`, which prints it, and tests. Default `false`: the
+   * background server issues codes only on request (the launcher's
+   * `/launcher/hello?launch=1`, New tab), so none goes unused.
+   */
+  launch?: boolean;
   /** Override the built UI directory. */
   webRoot?: string;
   /**
@@ -114,9 +121,10 @@ export interface RunningServer {
   /**
    * `<url>/#c=…`: a single-use link, valid for 60 seconds, that opens one
    * connected tab (AD-15: the page exchanges the code for its token over
-   * POST). It is a secret: print it for the user, never log it.
+   * POST), issued at start only with `launch` or `open`. It is a secret:
+   * print it for the user, never log it.
    */
-  launchUrl: string;
+  launchUrl: string | undefined;
   port: number;
   version: string;
   /** The data folder in use. */
@@ -145,6 +153,8 @@ const STOP_AFTER_REPLY_MS = 50;
  * if another live one holds it, this throws `ServerAlreadyRunningError`
  * before opening anything.
  */
+export function start(options: StartOptions & ({ launch: true } | { open: true })): Promise<RunningServer & { launchUrl: string }>;
+export function start(options?: StartOptions): Promise<RunningServer>;
 export async function start(options: StartOptions = {}): Promise<RunningServer> {
   const dataDir = options.dataDir === undefined ? ensureDataDir() : createDataDir(options.dataDir);
   const lock = acquireInstanceLock(dataDir);
@@ -298,7 +308,8 @@ async function listenAndAnnounce({
     log.info('launch code issued');
     return launchUrl;
   };
-  const launchUrl = issueLaunchUrl();
+  // Only when asked: a code nobody redeems is a live secret for nothing.
+  const launchUrl = options.launch === true || options.open === true ? issueLaunchUrl() : undefined;
 
   let resolveStopped!: (reason: StopReason) => void;
   const stopped = new Promise<StopReason>((resolve) => (resolveStopped = resolve));
@@ -356,7 +367,7 @@ async function listenAndAnnounce({
     },
   };
 
-  if (options.open === true) {
+  if (options.open === true && launchUrl !== undefined) {
     try {
       await openBrowser(launchUrl);
     } catch (error) {

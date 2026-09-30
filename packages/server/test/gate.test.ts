@@ -53,6 +53,7 @@ async function startGated(options: StartOptions & { lines?: string[] } = {}) {
     dataDir: tempDataDir(),
     webRoot: webRoot(),
     ...rest,
+    launch: true,
   });
   running.push(server);
   return server;
@@ -138,7 +139,7 @@ function firstEvent(server: RunningServer, tab: SignedIn): Promise<string> {
   });
 }
 
-const codeOf = (server: RunningServer) => codeOfLink(server.launchUrl);
+const codeOf = (server: { launchUrl: string }) => codeOfLink(server.launchUrl);
 
 /** POSTs `body` to the code exchange as the page would, with its Origin unless `headers` say otherwise. */
 function exchangeRaw(server: RunningServer, body: unknown, headers: Record<string, string> = { origin: server.url }): Promise<Reply> {
@@ -150,7 +151,7 @@ function exchangeRaw(server: RunningServer, body: unknown, headers: Record<strin
 }
 
 /** Exchanges a launch code over a raw request and returns the connected tab. */
-async function signInRaw(server: RunningServer, code = codeOf(server)): Promise<SignedIn> {
+async function signInRaw(server: RunningServer & { launchUrl: string }, code = codeOf(server)): Promise<SignedIn> {
   const reply = await exchangeRaw(server, { code });
   expect(reply.status).toBe(200);
   expect(reply.headers['set-cookie']).toBeUndefined();

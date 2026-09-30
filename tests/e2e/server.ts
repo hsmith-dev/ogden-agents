@@ -8,7 +8,8 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 type ServerModule = typeof import('@ogden-agents/server');
-export type RunningServer = Awaited<ReturnType<ServerModule['start']>>;
+/** A started server with its launch link (the tests start it with `launch: true`). */
+export type RunningServer = Awaited<ReturnType<ServerModule['start']>> & { launchUrl: string };
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 export const WEB_ROOT = join(ROOT, 'dist', 'web');
@@ -31,7 +32,7 @@ export type StartOptions = Parameters<ServerModule['start']>[0];
 /** Starts the server on `port` (0: any free port) with `dataDir`, logging nowhere. `extra` adds options (a stub toolchain, say). */
 export async function startServer(dataDir: string, port = 0, extra: StartOptions = {}): Promise<RunningServer> {
   const { start, createLogger } = await load();
-  return start({ port, open: false, dataDir, webRoot: WEB_ROOT, log: createLogger(() => {}), ...extra });
+  return start({ port, open: false, dataDir, webRoot: WEB_ROOT, log: createLogger(() => {}), ...extra, launch: true });
 }
 
 /** The built server module, for its exports (such as `ToolchainError`). */

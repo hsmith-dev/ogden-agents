@@ -47,7 +47,7 @@ async function startServer(toolchain: ToolchainPort, lines: string[] = []) {
   const webRoot = join(dataDir, 'web');
   mkdirSync(webRoot, { recursive: true });
   writeFileSync(join(webRoot, 'index.html'), '<!doctype html><div id="root"></div>');
-  const server = await start({ port: 0, open: false, dataDir, webRoot, toolchain, log: createLogger((line) => lines.push(line)) });
+  const server = await start({ port: 0, open: false, launch: true, dataDir, webRoot, toolchain, log: createLogger((line) => lines.push(line)) });
   running.push(server);
   return server;
 }

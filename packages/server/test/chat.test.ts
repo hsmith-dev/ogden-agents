@@ -5,7 +5,7 @@
  * streamed reply with working then idle, the gate on every new route, a
  * missing agent, and an agent crashing mid-prompt.
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { openCore, RESTARTED_REASON } from '@ogden-agents/core';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -302,6 +302,44 @@ describe('chat through the fake ACP agent', () => {
     } finally {
       core.close();
     }
+  });
+
+  it('an expired sign-in drops the agent, and closing the server waits until its process is gone (9.4, AD-3)', async () => {
+    const login = join(repo(), 'login.json');
+    writeFileSync(login, JSON.stringify({ loggedIn: true }));
+    // With a child of its own the fake agent outlives its closed stdin, as the real adapter
+    // (running `claude`) can: stopping it takes the grace period and the tree kill.
+    const { server, tab } = await startChatServer({ extraAgentEnv: { FAKE_ACP_REQUIRE_LOGIN: login, FAKE_ACP_SPAWN_GRANDCHILD: '1' } });
+    const { workspace, session } = await openChat(server, tab);
+    await send(server, tab, workspace.id, session.id, 'pids');
+    await waitFor(() => stateOf(server, session.id) === 'idle', 'idle', 10_000);
+    const reply = server.core.events
+      .readAfter(0)
+      .flatMap((e) => (e.type === 'session.message_completed' && e.payload.role === 'agent' ? [e.payload.content] : []))
+      .join('');
+    const [, pid, grandchild] = (/pid=(\d+) grandchild=(\d+)/.exec(reply) ?? []).map(Number);
+    expect(alive(pid!) && alive(grandchild!)).toBe(true);
+
+    // The sign-in expires: the prompt is refused with -32000 and core drops that agent.
+    // The server is closed at once, while the dropped agent is still stopping.
+    rmSync(login);
+    const closed = new Promise<void>((resolve, reject) => {
+      const off = server.core.events.subscribe(server.core.events.lastSeq(), (event) => {
+        if (event.type !== 'session.state_changed' || event.payload.errorCode !== 'auth_required') return;
+        off();
+        // Right after core's drop, which follows this event in the same call.
+        setImmediate(() => {
+          if (!alive(pid!)) reject(new Error('the dropped agent had already exited: the test proves nothing'));
+          else server.close().then(resolve, reject);
+        });
+      });
+    });
+    await send(server, tab, workspace.id, session.id, 'hello');
+    await closed;
+    // Gone as soon as close resolved: no orphan still holding the repo folder (Windows EPERM).
+    expect(alive(pid!)).toBe(false);
+    // Its child was killed with the tree; the system reaps it a moment later.
+    await waitFor(() => !alive(grandchild!), 'the agent’s child to exit', 10_000);
   });
 
   it('a session a crashed server left working is idle and resumable after the next start (AD-3)', async () => {

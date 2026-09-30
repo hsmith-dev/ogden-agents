@@ -697,6 +697,98 @@ describe('resuming a chat (story 2.7)', () => {
     await chat.close();
   });
 
+  it('a dropped agent is waited for: close resolves, and the next agent starts, only once it has stopped (9.4, AD-3)', async () => {
+    const core = openTestCore();
+    const order: string[] = [];
+    let finishFirstClose!: () => void;
+    let opened = 0;
+    const open = (id: string): AgentSession => ({
+      agentSessionId: id,
+      onEvent: () => () => undefined,
+      async prompt(text) {
+        if (text === 'expired') throw new AgentError('auth_required', 'Test Agent needs you to sign in again.');
+        return { stopReason: 'end_turn' };
+      },
+      cancel: async () => {},
+      async close() {
+        order.push(`close ${id}`);
+        // The first agent's process takes a while to exit (the grace period, a tree kill).
+        if (id === 'agent-1') await new Promise<void>((resolve) => (finishFirstClose = resolve));
+        order.push(`closed ${id}`);
+      },
+    });
+    const port: AgentPort = {
+      displayName: 'Test Agent',
+      listAuthMethods: async () => [],
+      async startSession() {
+        order.push('start');
+        return open(`agent-${++opened}`);
+      },
+      async reopenSession({ agentSessionId }) {
+        order.push(`reopen ${agentSessionId}`);
+        return { session: open(agentSessionId === 'agent-1' ? `agent-${++opened}` : agentSessionId), restored: 'resumed' };
+      },
+    };
+    const { chat, workspace, session } = setUp(core, port);
+    chat.sendMessage(workspace.id, session.id, 'expired');
+    await chat.settled();
+    expect(core.entities.getSession(session.id)!.state).toBe('error');
+    expect(order).toEqual(['start', 'close agent-1']);
+
+    // The next message reopens only once the dropped agent has stopped.
+    chat.sendMessage(workspace.id, session.id, 'again');
+    await settle();
+    expect(order).toEqual(['start', 'close agent-1']);
+    finishFirstClose();
+    await chat.settled();
+    expect(order).toEqual(['start', 'close agent-1', 'closed agent-1', 'reopen agent-1']);
+
+    // Dropped again: close waits for it.
+    chat.sendMessage(workspace.id, session.id, 'expired');
+    await chat.settled();
+    let closeResolved = false;
+    const closing = chat.close().then(() => (closeResolved = true));
+    await settle();
+    expect(order.at(-1)).toBe('closed agent-2');
+    await closing;
+    expect(closeResolved).toBe(true);
+  });
+
+  it('close waits for an agent dropped just before it, still stopping (9.4, AD-3)', async () => {
+    const core = openTestCore();
+    let finishClose!: () => void;
+    let stopped = false;
+    const port: AgentPort = {
+      displayName: 'Test Agent',
+      listAuthMethods: async () => [],
+      reopenSession: () => Promise.reject(new Error('not in this test')),
+      async startSession() {
+        return {
+          agentSessionId: 'agent-1',
+          onEvent: () => () => undefined,
+          prompt: async () => {
+            throw new AgentError('auth_required', 'Test Agent needs you to sign in again.');
+          },
+          cancel: async () => {},
+          async close() {
+            await new Promise<void>((resolve) => (finishClose = resolve));
+            stopped = true;
+          },
+        };
+      },
+    };
+    const { chat, workspace, session } = setUp(core, port);
+    chat.sendMessage(workspace.id, session.id, 'hello');
+    await chat.settled();
+    let closed = false;
+    const closing = chat.close().then(() => (closed = true));
+    await settle();
+    expect(closed).toBe(false);
+    finishClose();
+    await closing;
+    expect(stopped).toBe(true);
+  });
+
   it('an error event with code auth_required alone drops the agent; other errors carry no errorCode (9.4)', async () => {
     const core = openTestCore();
     const agent = scriptedAgent(async (text, emit) => {

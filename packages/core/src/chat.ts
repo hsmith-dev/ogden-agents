@@ -288,6 +288,12 @@ export function createChat(options: ChatOptions): Chat {
   /** Sessions whose agent is answering, with what is left to send; another message is queued until it ends. */
   const busy = new Map<SessionId, Turn>();
   const running = new Set<Promise<void>>();
+  /**
+   * Dropped agents still stopping, by session: `close` waits for them, and so
+   * does the session's next agent, so no agent process (or its tree) outlives
+   * the chat or runs beside its replacement (AD-3).
+   */
+  const droppedAgents = new Map<SessionId, Promise<void>>();
   /** Set by `close`: no event from a stopping agent changes a session any more. */
   let closing = false;
   const dataHome = canonicalWorkspacePath(options.dataDir);
@@ -439,10 +445,20 @@ export function createChat(options: ChatOptions): Chat {
     entry.off?.();
     entry.off = undefined;
     entry.markGone();
-    entry.agent.then(
-      (session) => session.close(),
-      () => undefined,
-    ).catch((error: unknown) => internalError(sessionId, error));
+    const before = droppedAgents.get(sessionId);
+    const stopped: Promise<void> = Promise.all([
+      before,
+      entry.agent.then(
+        (session) => session.close(),
+        () => undefined,
+      ),
+    ])
+      .then(() => undefined)
+      .catch((error: unknown) => internalError(sessionId, error))
+      .finally(() => {
+        if (droppedAgents.get(sessionId) === stopped) droppedAgents.delete(sessionId);
+      });
+    droppedAgents.set(sessionId, stopped);
   };
 
   /** Whether the session has a Deny reason or a queued message to send once this turn ends. */
@@ -619,10 +635,13 @@ export function createChat(options: ChatOptions): Chat {
     const input = { cwd: workspace.realPath ?? workspace.path, env: { ...agentEnv() }, onPermissionRequest };
     const previous = storedAgentSessionId(session.id);
     // A chat that reached an agent before, and has none now, reopens that agent's session (2.7).
-    const opening: Promise<{ session: AgentSession; restored: AgentRestored | undefined }> =
+    // A dropped agent of this session stops first: never two of its processes at once.
+    const begin = (): Promise<{ session: AgentSession; restored: AgentRestored | undefined }> =>
       previous === undefined
         ? agent.startSession(input).then((started) => ({ session: started, restored: undefined }))
         : agent.reopenSession({ ...input, agentSessionId: previous });
+    const dropped = droppedAgents.get(session.id);
+    const opening = dropped === undefined ? begin() : dropped.then(begin);
     entry.agent = opening.then(async ({ session: started, restored }) => {
       if (live.get(session.id) !== entry) {
         // Closed (or dropped) while starting: stop it before anyone waiting on this
@@ -930,6 +949,8 @@ export function createChat(options: ChatOptions): Chat {
           }
         }),
       );
+      // And the agents dropped before (a failure, an expired sign-in, a Stop past its grace).
+      while (droppedAgents.size > 0) await Promise.all([...droppedAgents.values()]);
     },
   };
 }

@@ -1,7 +1,12 @@
 #!/usr/bin/env node
-// Clean-install smoke test for the packed tarball.
+// Clean-install smoke test for the packed tarball, or for a published version.
 //
 //   node scripts/smoke-installed.mjs [path/to/ogden-agents-<version>.tgz]
+//   node scripts/smoke-installed.mjs --registry-spec ogden-agents@<version>
+//
+// Registry mode (the release workflow's verify job) runs exactly what a user
+// types, `npx --yes ogden-agents@<version> --no-open --port 0`, against the npm
+// registry instead of a local tarball; every check below is the same.
 //
 // In a fresh temp directory, with a fresh npm cache and no workspace in sight,
 // runs `npx --yes --package=<tgz> ogden-agents --no-open --port 0`, which starts
@@ -29,9 +34,26 @@ const STEP_TIMEOUT_MS = 15_000;
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-const tarball = resolve(process.argv[2] ?? join(root, `ogden-agents-${version}.tgz`));
 
-if (!existsSync(tarball)) {
+/** @returns {string | undefined} the value of `--registry-spec <spec>` or `--registry-spec=<spec>` */
+function registrySpecArg() {
+  const argv = process.argv.slice(2);
+  const index = argv.findIndex((arg) => arg === '--registry-spec' || arg.startsWith('--registry-spec='));
+  if (index === -1) return undefined;
+  const arg = /** @type {string} */ (argv[index]);
+  const spec = arg.includes('=') ? arg.slice(arg.indexOf('=') + 1) : argv[index + 1];
+  if (spec === undefined || spec === '' || spec.startsWith('-')) {
+    console.error('smoke: --registry-spec needs a package spec, such as ogden-agents@0.1.0');
+    process.exit(1);
+  }
+  return spec;
+}
+
+const registrySpec = registrySpecArg();
+const tarball =
+  registrySpec === undefined ? resolve(process.argv[2] ?? join(root, `ogden-agents-${version}.tgz`)) : undefined;
+
+if (tarball !== undefined && !existsSync(tarball)) {
   console.error(`smoke: tarball not found: ${tarball}\nRun \`pnpm build && pnpm pack\` first.`);
   process.exit(1);
 }
@@ -52,7 +74,11 @@ env.npm_config_audit = 'false';
 const dataDir = mkdtempSync(join(tmpdir(), 'ogden-agents-smoke-data-'));
 env.OGDEN_AGENTS_DATA_DIR = dataDir;
 
-const args = ['--yes', `--package=${tarball}`, 'ogden', '--no-open', '--port', '0'];
+// A registry spec runs as a user types it: npx picks the package's only bin.
+const args =
+  registrySpec === undefined
+    ? ['--yes', `--package=${tarball}`, 'ogden', '--no-open', '--port', '0']
+    : ['--yes', registrySpec, '--no-open', '--port', '0'];
 // On Windows `npx` is `npx.cmd`. Run through a shell by a quoted bare name, cmd.exe
 // resolves the batch file's own folder (%~dp0) to the current directory, so npx
 // looks for npm inside the empty work dir. Instead run npm's `npx-cli.js` directly
@@ -276,7 +302,7 @@ function cleanUp() {
 
 let failure;
 try {
-  console.log(`smoke: installing ${tarball} with npx in ${workDir}`);
+  console.log(`smoke: installing ${registrySpec ?? tarball} with npx in ${workDir}`);
   const { url, launchUrl } = await withTimeout(waitForUrl(), START_TIMEOUT_MS, 'ogden-agents to print its URLs');
   console.log(`smoke: server is at ${url}`);
   // The launcher exits once the background server is up (AD-21: the terminal is free).

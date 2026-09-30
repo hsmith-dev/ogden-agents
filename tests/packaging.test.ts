@@ -191,6 +191,25 @@ describe('packaging', () => {
     expect(versionOf('packages/web/package.json')).toBe(root);
   });
 
+  it('only the root package is publishable; every workspace package stays private', () => {
+    const manifest = (path: string) => JSON.parse(readFileSync(join(ROOT, path), 'utf8')) as { private?: boolean };
+    expect(manifest('package.json').private).not.toBe(true);
+    const workspaces = readdirSync(join(ROOT, 'packages'), { withFileTypes: true }).filter((d) => d.isDirectory());
+    expect(workspaces.length).toBeGreaterThan(0);
+    for (const dir of workspaces) expect(manifest(`packages/${dir.name}/package.json`).private, dir.name).toBe(true);
+  });
+
+  it('the root package names the GitHub repo that trusted publishing and provenance check against', () => {
+    const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as {
+      repository?: unknown;
+      homepage?: string;
+      bugs?: unknown;
+    };
+    expect(manifest.repository).toEqual({ type: 'git', url: 'git+https://github.com/hsmith-dev/ogden-agents.git' });
+    expect(manifest.homepage).toBe('https://github.com/hsmith-dev/ogden-agents#readme');
+    expect(manifest.bugs).toEqual({ url: 'https://github.com/hsmith-dev/ogden-agents/issues' });
+  });
+
   it('the tarball holds the launcher, the bundle, the UI and the vendored forks, and no workspace sources', () => {
     const files = packedFiles();
     expect(files).toEqual(

@@ -6,7 +6,7 @@ A local browser UI for running BMAD with coding agents. Early development: the c
 
 ## Install
 
-Once published, Ogden Agents runs with one command and needs no checkout:
+Ogden Agents runs with one command and needs no checkout:
 
 ```sh
 npx ogden-agents
@@ -14,7 +14,7 @@ npx ogden-agents
 
 Installed globally (`npm install -g ogden-agents`), the command is `ogden`.
 
-It is not on npm yet. Until then, run it from a checkout as below.
+To run it from a checkout instead, see below. Release notes are in [CHANGELOG.md](https://github.com/hsmith-dev/ogden-agents/blob/main/CHANGELOG.md).
 
 ## Requirements
 
@@ -76,6 +76,8 @@ pnpm smoke       # installs that tarball with npx in an empty temp dir and check
 The root `ogden-agents` package is the only publishable artifact. `pnpm build` writes a self-contained `dist/` (`dist/server.js`, the server with every `@ogden-agents/*` package bundled in, and `dist/web/`, the UI), and `bin/ogden.js` loads it by relative path. Third-party runtime dependencies are declared in the root `dependencies`; `tests/packaging.test.ts` fails if the bundle imports anything undeclared or the tarball picks up workspace sources.
 
 CI runs typecheck, tests, pack and the clean-install smoke test on macOS, Windows and Linux, each on Node 24 and 26, plus the Playwright browser tests on Linux Chromium.
+
+Releases are published to npm only by GitHub Actions, from a version tag on `main`, after the same CI passes; see [RELEASING.md](https://github.com/hsmith-dev/ogden-agents/blob/main/RELEASING.md).
 
 ## Layout
 

@@ -22,6 +22,13 @@
       "when": 1790781763595,
       "tag": "0002_permission_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1790789547428,
+      "tag": "0003_caution_level",
+      "breakpoints": true
     }
   ]
 }

@@ -157,7 +157,7 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, chat
   // One route file per lane (story 2.3): each fills only its own. Every route is in
   // `API_ROUTES` under `/api/v1`, registered after the gate.
   if (chat !== undefined) registerChatRoutes(app, chat, log);
-  registerWorkspaceRoutes(app, { chat, log });
+  registerWorkspaceRoutes(app, { chat, permissions, log });
   registerPermissionRoutes(app, { permissions, log });
   registerShortcutRoutes(app, { appShortcut, log });
   registerAgentSetupRoutes(app, { agentSetup, secrets, log });

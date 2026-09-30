@@ -69,4 +69,10 @@ describe('PermissionCard (DESIGN.md Permission card; EXPERIENCE.md Permission ca
     expect(undone).not.toContain('<button');
     expect(undone).toContain('Always allow undone');
   });
+
+  it('says in one line why a protected file always asks (2.8 F1)', () => {
+    const html = render(pending({ toolCall: { toolCallId: 't1', title: 'Edit .git/hooks/pre-commit', kind: 'edit', protectedPath: true }, scope: { kind: 'tool', value: 'edit', label: 'Editing files' } }));
+    expect(html).toContain('It touches a file that controls how Claude Code or git runs, so Ogden Agents always asks.');
+    expect(render(pending())).not.toContain('permission-protected');
+  });
 });

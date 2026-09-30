@@ -3,10 +3,12 @@
  * workspace, its history deletion, and the server-side folder browser for
  * Add project. Under `/api/v1`, behind the gate (AD-15). Routes call core and
  * never write themselves (AD-11); the folder browser only reads the disk and
- * creates the one folder asked for (`folders.ts`). The settings routes stay
- * 501 `not_implemented` stubs until 2.8, without reading the body.
+ * creates the one folder asked for (`folders.ts`). The settings routes read
+ * and set the caution level through core's permissions (2.8); a PATCH is
+ * state-changing, so the gate has checked its Origin. Without permissions
+ * (an app wired without core) they answer 501 without reading the body.
  */
-import { NotFoundError, WorkspaceBusyError, type Chat } from '@ogden-agents/core';
+import { NotFoundError, ValidationError, WorkspaceBusyError, type Chat, type Permissions } from '@ogden-agents/core';
 import {
   API_ROUTES,
   CreateFolderRequest,
@@ -14,7 +16,9 @@ import {
   FolderListing,
   FolderListingQuery,
   HistoryDeletedResponse,
+  UpdateWorkspaceSettingsRequest,
   WorkspaceResponse,
+  WorkspaceSettingsResponse,
 } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -31,11 +35,13 @@ const NOT_FOUND = 'There is no such project.';
 export interface WorkspaceRoutesOptions {
   /** The chat use-case, for the workspaces it opens; without it the workspace routes answer 404. */
   chat?: Chat | undefined;
+  /** Core's permissions, which keep each workspace's caution level (2.8); without them the settings routes answer 501. */
+  permissions?: Permissions | undefined;
   log: Logger;
 }
 
 export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptions): void {
-  const { chat, log } = options;
+  const { chat, permissions, log } = options;
   const limit = bodyLimit({
     maxSize: MAX_BODY_BYTES,
     onError: (c) => apiError(c, 413, 'invalid_request', 'That request is too large.'),
@@ -47,7 +53,7 @@ export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptio
     if (error instanceof WorkspaceBusyError) {
       return apiError(c, 409, 'sessions_busy', 'A chat in this project is still working or waiting for you. Let it finish, then delete the history.');
     }
-    if (error instanceof FolderError) return apiError(c, 400, 'invalid_request', error.message);
+    if (error instanceof FolderError || error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);
     throw error;
   };
 
@@ -74,8 +80,34 @@ export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptio
   });
 
   // `GET` and `PATCH` → `WorkspaceSettingsResponse` (caution level, 2.8).
-  app.get(API_ROUTES.workspaceSettings, notImplemented);
-  app.patch(API_ROUTES.workspaceSettings, notImplemented);
+  if (permissions === undefined) {
+    app.get(API_ROUTES.workspaceSettings, notImplemented);
+    app.patch(API_ROUTES.workspaceSettings, notImplemented);
+  } else {
+    app.get(API_ROUTES.workspaceSettings, (c) => {
+      const scope = ids(c);
+      if (scope === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+      try {
+        return c.json(WorkspaceSettingsResponse.parse({ settings: permissions.getSettings(scope.workspaceId) }));
+      } catch (error) {
+        return refusal(c, error);
+      }
+    });
+
+    app.patch(API_ROUTES.workspaceSettings, limit, async (c) => {
+      const scope = ids(c);
+      if (scope === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+      const body = await readBody(c, UpdateWorkspaceSettingsRequest);
+      if (!body.ok) return body.response;
+      try {
+        const settings = permissions.updateSettings(scope.workspaceId, body.value);
+        log.info('workspace settings saved', { workspaceId: scope.workspaceId, cautionLevel: settings.cautionLevel });
+        return c.json(WorkspaceSettingsResponse.parse({ settings }));
+      } catch (error) {
+        return refusal(c, error);
+      }
+    });
+  }
 
   app.get(API_ROUTES.folders, async (c) => {
     const query = FolderListingQuery.safeParse({ path: c.req.query('path') });

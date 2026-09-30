@@ -366,6 +366,12 @@ const PermissionRequestedInput = z.object({
       kind: ToolKind,
       /** The command a shell tool call would run, secrets masked. */
       command: z.string().optional(),
+      /**
+       * It writes to, or its command names, a file that controls how the
+       * agent or git runs (`.claude/`, `.git/`, `.mcp.json`, ...): it always
+       * asks, whatever the caution level or rules (story 2.8, F1).
+       */
+      protectedPath: z.literal(true).optional(),
     }),
     /** What "Always allow" would cover; `null` when it is not offered. */
     alwaysAllowScope: AlwaysAllowScope.nullable(),

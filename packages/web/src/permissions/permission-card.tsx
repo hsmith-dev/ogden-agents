@@ -116,6 +116,11 @@ export function PermissionCard({ permission, wsId, sesId, projectName, onDecided
       <Text variant="caption">
         {projectName} · {CAUTION_WORDS[permission.cautionLevel]}
       </Text>
+      {permission.toolCall.protectedPath === true ? (
+        <Text variant="caption" data-testid="permission-protected">
+          It touches a file that controls how {AGENT_NAME} or git runs, so Ogden Agents always asks.
+        </Text>
+      ) : null}
       <div className="flex flex-wrap items-start gap-2">
         <Button aria-keyshortcuts="1" aria-disabled={sending} onClick={() => decide('allow_once')}>
           Allow once

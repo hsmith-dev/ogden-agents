@@ -189,6 +189,31 @@ acp
       await say(client, params.sessionId, `session=${params.sessionId} via=${session.via} primed=${primed}`);
       return { stopReason: 'end_turn' };
     }
+    if (text.startsWith('permission-kind ')) {
+      // `permission-kind <kind> [<path>|…]`: a request of any tool kind naming those paths (story 2.8).
+      // `permission-kind search-pattern <pattern> [<folder>]`: a Glob-like search, its pattern and folder in rawInput only (2.8 review F2).
+      const [kind = 'other', ...rest] = text.slice('permission-kind '.length).trim().split(' ');
+      const paths = rest.join(' ').split('|').map((path) => path.trim()).filter((path) => path !== '');
+      const [pattern, folder] = rest;
+      const toolCall =
+        kind === 'search-pattern'
+          ? { toolCallId: 'call-search-permission', title: `search ${pattern}`, kind: 'search', rawInput: { pattern, ...(folder === undefined ? {} : { path: folder }) } }
+          : { toolCallId: `call-${kind}-permission`, title: `${kind} ${paths.join(', ')}`.trim(), kind, locations: paths.map((path) => ({ path })) };
+      await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
+      const answer = await client.request('session/request_permission', {
+        sessionId: params.sessionId,
+        toolCall,
+        options: [
+          { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
+          { optionId: 'always', name: 'Always allow', kind: 'allow_always' },
+          { optionId: 'reject', name: 'Deny', kind: 'reject_once' },
+        ],
+      });
+      const ran = answer.outcome.outcome === 'selected' && (answer.outcome.optionId === 'allow' || answer.outcome.optionId === 'always');
+      await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: ran ? 'completed' : 'failed' });
+      await say(client, params.sessionId, `${ran ? 'Did' : 'Denied'} ${toolCall.title}.`);
+      return { stopReason: 'end_turn' };
+    }
     if (text.startsWith('permission-edit ')) {
       const paths = text.slice('permission-edit '.length).split('|').map((path) => path.trim()).filter((path) => path !== '');
       const toolCall = { toolCallId: 'call-edit-permission', title: `Edit ${paths.join(', ')}`, kind: 'edit', locations: paths.map((path) => ({ path })) };

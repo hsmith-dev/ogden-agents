@@ -52,7 +52,7 @@ export interface TranscriptCheckIn {
  */
 export interface TranscriptPermission {
   requestId: string;
-  toolCall: { toolCallId: string; title: string; kind: ToolKind; command?: string | undefined };
+  toolCall: { toolCallId: string; title: string; kind: ToolKind; command?: string | undefined; protectedPath?: true | undefined };
   /** What Always allow would cover; `null` when it is not offered. */
   scope: AlwaysAllowScope | null;
   cautionLevel: CautionLevel;

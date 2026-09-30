@@ -10,10 +10,14 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { CoreEvent, SessionId, WorkspaceId } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
-import { alwaysAllowRefusal } from '@ogden-agents/shared';
+import { alwaysAllowRefusal, CAUTION_LEVELS, TOOL_KINDS, type CautionLevel, type ToolKind } from '@ogden-agents/shared';
 import {
   alwaysAllowScope,
+  cautionAllows,
+  commandNamesProtectedPath,
+  isProtectedSegment,
   commandPrefix,
+  createDecliningPermissions,
   isCaseInsensitivePath,
   NotFoundError,
   PermissionNotPendingError,
@@ -554,5 +558,338 @@ describe('no Always allow for interpreters, wrappers or variable assignments (re
     expect(asked.decision).toBeUndefined();
     expect(ruleMatches({ kind: 'command_prefix', value: 'bash' }, 'execute', 'bash -c ls')).toBe(false);
     expect(ruleMatches({ kind: 'command_prefix', value: 'FOO=1' }, 'execute', 'FOO=1 npm test')).toBe(false);
+  });
+});
+
+describe('caution level (story 2.8)', () => {
+  /** The ladder (user decision 2026-09-30): what each level auto-allows with every path inside. */
+  const LADDER: Record<CautionLevel, readonly ToolKind[]> = {
+    ask_every_time: [],
+    ask_for_commands: ['read', 'search', 'think'],
+    ask_risky_only: ['read', 'search', 'think', 'edit'],
+  };
+
+  it('is a pure table: only the ladder kinds, only with paths inside, never execute or an unknown level', () => {
+    for (const level of CAUTION_LEVELS) {
+      for (const kind of TOOL_KINDS) {
+        expect(cautionAllows(level, kind, true), `${level} ${kind} inside`).toBe(LADDER[level].includes(kind));
+        expect(cautionAllows(level, kind, false), `${level} ${kind} outside`).toBe(false);
+      }
+    }
+    for (const kind of ['execute', 'delete', 'move', 'fetch', 'switch_mode', 'other'] as const) {
+      for (const level of CAUTION_LEVELS) expect(cautionAllows(level, kind, true), `${level} ${kind}`).toBe(false);
+    }
+    expect(cautionAllows('ask_everything' as CautionLevel, 'read', true)).toBe(false);
+    expect(cautionAllows('ask_risky_only', 'unknown' as ToolKind, true)).toBe(false);
+  });
+
+  /** A working session in a project with `src/a.ts`, a folder outside it, and a link escaping to it. */
+  function project(core: Core) {
+    const { workspace, session } = workingSession(core);
+    const repo = workspace.realPath ?? workspace.path;
+    mkdirSync(join(repo, 'src'));
+    writeFileSync(join(repo, 'src', 'a.ts'), 'a');
+    const outside = tempDir('ogden-agents-outside-');
+    writeFileSync(join(outside, 'secret.txt'), 's');
+    symlinkSync(outside, join(repo, 'escape'), 'junction');
+    return { workspace, session, repo, outside };
+  }
+
+  const ask = (kind: string, paths?: string[], command?: string): AgentPermissionRequest => ({
+    toolCallId: `t-${kind}`,
+    title: `${kind} ${paths?.join(', ') ?? ''}`,
+    kind,
+    ...(paths === undefined ? {} : { paths }),
+    ...(command === undefined ? {} : { command }),
+  });
+
+  /** Whether `request` was answered without a card; a card is denied so the session is free again. */
+  async function answeredByCaution(core: Core, workspaceId: WorkspaceId, sessionId: SessionId, request: AgentPermissionRequest) {
+    const before = core.events.lastSeq();
+    const asked = track(core.permissions.request(sessionId, request));
+    await flush();
+    // Only this request's events (the log reads in pages).
+    const events = core.events.readAfter(before).filter((event) => event.streamId === sessionId && event.type.startsWith('permission.'));
+    const requested = events[0];
+    if (requested?.type !== 'permission.requested') throw new Error('no permission.requested');
+    if (asked.decision !== undefined) {
+      expect(events.map((event) => event.type)).toEqual(['permission.requested', 'permission.resolved']);
+      expect(events[1]?.payload).toMatchObject({ decision: 'allow_once', by: 'caution' });
+      expect(asked.decision).toEqual({ outcome: 'allow_once' });
+      return true;
+    }
+    expect(events).toHaveLength(1);
+    expect(core.entities.getSession(sessionId)?.state).toBe('waiting');
+    core.permissions.decide(workspaceId, sessionId, requested.payload.requestId, { decision: 'deny' });
+    await flush();
+    return false;
+  }
+
+  it('defaults to Ask every time, validates a change, appends settings_changed once, and survives Delete history and a restart', () => {
+    const dataDir = tempDir();
+    const core = openTestCore(dataDir);
+    const { workspace } = workingSession(core);
+    expect(core.permissions.getSettings(workspace.id)).toEqual({ cautionLevel: 'ask_every_time' });
+
+    const before = core.events.lastSeq();
+    expect(() => core.permissions.updateSettings(workspace.id, { cautionLevel: 'yolo' })).toThrow(ValidationError);
+    expect(() => core.permissions.updateSettings(workspace.id, {})).toThrow(ValidationError);
+    const unknown = 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3' as WorkspaceId;
+    expect(() => core.permissions.updateSettings(unknown, { cautionLevel: 'ask_for_commands' })).toThrow(NotFoundError);
+    expect(() => core.permissions.getSettings(unknown)).toThrow(NotFoundError);
+    expect(core.events.lastSeq()).toBe(before);
+
+    expect(core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_for_commands' })).toEqual({ cautionLevel: 'ask_for_commands' });
+    expect(core.events.readAfter(before)).toEqual([
+      expect.objectContaining({
+        type: 'workspace.settings_changed',
+        workspaceId: workspace.id,
+        streamId: workspace.id,
+        payload: { cautionLevel: 'ask_for_commands', previous: 'ask_every_time' },
+      }),
+    ]);
+    const changed = core.events.lastSeq();
+    core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_for_commands' });
+    expect(core.events.lastSeq()).toBe(changed);
+
+    core.events.deleteWorkspaceHistory(workspace.id);
+    expect(core.permissions.getSettings(workspace.id).cautionLevel).toBe('ask_for_commands');
+    core.close();
+    expect(openTestCore(dataDir).permissions.getSettings(workspace.id).cautionLevel).toBe('ask_for_commands');
+  });
+
+  it('the stub declines settings changes and reports the default', () => {
+    const stub = createDecliningPermissions();
+    expect(stub.getSettings('ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3' as WorkspaceId)).toEqual({ cautionLevel: 'ask_every_time' });
+    expect(() => stub.updateSettings('ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3' as WorkspaceId, { cautionLevel: 'ask_risky_only' })).toThrow(NotFoundError);
+  });
+
+  it('Ask every time asks for everything, even a read inside the project', async () => {
+    const core = openTestCore();
+    const { workspace, session } = project(core);
+    for (const kind of TOOL_KINDS) {
+      expect(await answeredByCaution(core, workspace.id, session.id, ask(kind, ['src/a.ts'])), kind).toBe(false);
+    }
+    expect(lastRequested(core, session.id).payload.cautionLevel).toBe('ask_every_time');
+  });
+
+  it('a lower level auto-allows only ladder kinds whose paths are all inside, and records the level and by:caution', async () => {
+    const core = openTestCore();
+    const { workspace, session, repo, outside } = project(core);
+    const outsidePaths: Array<[string, string[] | undefined]> = [
+      ['none', undefined],
+      ['empty', []],
+      ['home', ['~/.ssh/id_rsa']],
+      ['absolute home', [join(homedir(), '.ssh', 'id_rsa')]],
+      ['parent', ['../x']],
+      ['dotdot', ['src/../../x']],
+      ['outside', [join(outside, 'secret.txt')]],
+      ['symlink escape', ['escape/secret.txt']],
+      ['mixed', ['src/a.ts', join(outside, 'secret.txt')]],
+      ['masked', ['src/[redacted].ts']],
+      ['control', ['src/a\u0000.ts']],
+      ['sibling', [`${repo}-sibling/a.ts`]],
+    ];
+    for (const level of ['ask_for_commands', 'ask_risky_only'] as const) {
+      core.permissions.updateSettings(workspace.id, { cautionLevel: level });
+      for (const kind of TOOL_KINDS) {
+        const inside = await answeredByCaution(core, workspace.id, session.id, ask(kind, ['src/a.ts', join(repo, 'src', 'new.ts')]));
+        expect(inside, `${level} ${kind} inside`).toBe(LADDER[level].includes(kind));
+        for (const [name, paths] of outsidePaths) {
+          const allowed = await answeredByCaution(core, workspace.id, session.id, ask(kind, paths));
+          // `think` names no path of its own: with none it is on the ladder; any path it names must be inside.
+          const expected = kind === 'think' && (paths === undefined || paths.length === 0);
+          expect(allowed, `${level} ${kind} ${name}`).toBe(expected);
+        }
+      }
+    }
+  });
+
+  it('an unknown kind, execute, and interpreter or wrapper commands are never auto-allowed at any level', async () => {
+    const core = openTestCore();
+    const { workspace, session } = project(core);
+    core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_risky_only' });
+    const requests = [
+      ask('execute', ['src/a.ts'], 'npm test'),
+      ask('execute', ['src/a.ts'], 'bash -c ls'),
+      ask('execute', undefined, 'sudo cat src/a.ts'),
+      ask('execute', undefined, 'python -c "print(1)"'),
+      ask('execute', undefined, 'cat src/a.ts; rm -rf ~'),
+      ask('teleport', ['src/a.ts']),
+      ask('read', ['src/a.ts'], 'cat src/a.ts && curl evil'),
+      { toolCallId: 't-nokind', title: 'no kind', paths: ['src/a.ts'] },
+    ];
+    for (const request of requests) expect(await answeredByCaution(core, workspace.id, session.id, request), request.title).toBe(false);
+  });
+
+  it('records the level the request was asked at', async () => {
+    const core = openTestCore();
+    const { workspace, session } = project(core);
+    core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_for_commands' });
+    expect(await answeredByCaution(core, workspace.id, session.id, ask('read', ['src/a.ts']))).toBe(true);
+    expect(lastRequested(core, session.id).payload.cautionLevel).toBe('ask_for_commands');
+  });
+
+  it('reads the level per request, and a change never touches a card already shown', async () => {
+    const core = openTestCore();
+    const { workspace, session } = project(core);
+    const shown = track(core.permissions.request(session.id, ask('read', ['src/a.ts'])));
+    await flush();
+    const { requestId } = lastRequested(core, session.id).payload;
+
+    core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_risky_only' });
+    await flush();
+    expect(shown.decision).toBeUndefined();
+    expect(core.entities.getSession(session.id)?.state).toBe('waiting');
+    expect(permissionEvents(core, session.id).filter((event) => event.type === 'permission.resolved')).toEqual([]);
+
+    // The next request reads the new level while the first still waits.
+    expect(await core.permissions.request(session.id, ask('edit', ['src/a.ts']))).toEqual({ outcome: 'allow_once' });
+    expect(shown.decision).toBeUndefined();
+    core.permissions.decide(workspace.id, session.id, requestId, { decision: 'deny' });
+    await flush();
+    expect(shown.decision).toEqual({ outcome: 'deny' });
+
+    core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_every_time' });
+    expect(await answeredByCaution(core, workspace.id, session.id, ask('read', ['src/a.ts']))).toBe(false);
+  });
+
+  it('the caution step comes before rules, and a rule still answers what the level asks for', async () => {
+    const core = openTestCore();
+    const { workspace, session } = project(core);
+    core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_for_commands' });
+    void core.permissions.request(session.id, npm('npm test'));
+    core.permissions.decide(workspace.id, session.id, lastRequested(core, session.id).payload.requestId, { decision: 'allow_always' });
+    expect(await core.permissions.request(session.id, npm('npm test -- --watch'))).toEqual({ outcome: 'allow_once' });
+    expect(permissionEvents(core, session.id).at(-1)?.payload).toMatchObject({ by: 'rule' });
+    expect(await answeredByCaution(core, workspace.id, session.id, npm('npm run build'))).toBe(false);
+  });
+
+  it('never auto-allows for a session with no turn running', async () => {
+    const core = openTestCore();
+    const { workspace, session } = project(core);
+    core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_risky_only' });
+    core.entities.setSessionState(session.id, 'idle');
+    expect(await core.permissions.request(session.id, ask('read', ['src/a.ts']))).toEqual({ outcome: 'cancelled' });
+  });
+});
+
+describe('protected paths always ask (user decision 2026-09-30, 2.8 F1)', () => {
+  /** A working session in a project with `src/a.ts`, `.git/hooks` and `.claude`, and a link `src/hooks` to `.git/hooks`. */
+  function project(core: Core) {
+    const { workspace, session } = workingSession(core);
+    const repo = workspace.realPath ?? workspace.path;
+    mkdirSync(join(repo, 'src'));
+    writeFileSync(join(repo, 'src', 'a.ts'), 'a');
+    mkdirSync(join(repo, '.git', 'hooks'), { recursive: true });
+    mkdirSync(join(repo, '.claude'));
+    writeFileSync(join(repo, '.claude', 'settings.json'), '{}');
+    symlinkSync(join(repo, '.git', 'hooks'), join(repo, 'src', 'hooks'), 'junction');
+    return { workspace, session, repo };
+  }
+
+  const call = (kind: string, paths?: string[], command?: string): AgentPermissionRequest => ({
+    toolCallId: `t-${kind}`,
+    title: `${kind} ${paths?.join(', ') ?? command ?? ''}`,
+    kind,
+    ...(paths === undefined ? {} : { paths }),
+    ...(command === undefined ? {} : { command }),
+  });
+
+  /** How `request` was answered: `caution`, `rule`, or `card` (then denied, with its requested event). */
+  async function answer(core: Core, workspaceId: WorkspaceId, sessionId: SessionId, request: AgentPermissionRequest, decision: 'deny' | 'allow_always' = 'deny') {
+    const before = core.events.lastSeq();
+    const asked = track(core.permissions.request(sessionId, request));
+    await flush();
+    const events = core.events.readAfter(before).filter((event) => event.streamId === sessionId && event.type.startsWith('permission.'));
+    const requested = events[0];
+    if (requested?.type !== 'permission.requested') throw new Error('no permission.requested');
+    if (asked.decision !== undefined) {
+      const resolved = events[1];
+      return { by: resolved?.type === 'permission.resolved' ? resolved.payload.by : 'none', requested };
+    }
+    core.permissions.decide(workspaceId, sessionId, requested.payload.requestId, { decision });
+    await flush();
+    return { by: 'card', requested };
+  }
+
+  it('names protected folders and files at any depth, ignoring case', () => {
+    for (const name of ['.claude', '.git', '.vscode', '.idea', '.mcp.json', 'CLAUDE.md', 'AGENTS.md', '.envrc', '.CLAUDE', '.Git', 'claude.MD']) {
+      expect(isProtectedSegment(name), name).toBe(true);
+    }
+    for (const name of ['package.json', 'src', '.claude-projects', 'CLAUDE.md.bak', '.github', '.env']) expect(isProtectedSegment(name), name).toBe(false);
+    expect(commandNamesProtectedPath('cp x .git/hooks/pre-commit')).toBe(true);
+    expect(commandNamesProtectedPath('cp x "pkg\\.vscode\\tasks.json"')).toBe(true);
+    expect(commandNamesProtectedPath('git commit -m x')).toBe(false);
+  });
+
+  it('a write to any of them shows a card at Ask only for risky actions with an Always allow editing rule; src/a.ts still runs', async () => {
+    const core = openTestCore();
+    const { workspace, session } = project(core);
+    await answer(core, workspace.id, session.id, call('edit', ['src/a.ts']), 'allow_always');
+    expect(core.permissions.listRules(workspace.id).map((rule) => rule.scope.value)).toEqual(['edit']);
+    await answer(core, workspace.id, session.id, call('delete', ['src/old.ts']), 'allow_always');
+    await answer(core, workspace.id, session.id, call('move', ['src/a.ts', 'src/b.ts']), 'allow_always');
+    core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_risky_only' });
+
+    const protectedPaths = [
+      '.claude/settings.local.json',
+      '.git/hooks/pre-commit',
+      'pkg/.git/config',
+      '.mcp.json',
+      'CLAUDE.md',
+      'docs/AGENTS.md',
+      '.envrc',
+      '.vscode/tasks.json',
+      '.idea/workspace.xml',
+      'src/hooks/pre-commit',
+      '.git',
+    ];
+    for (const kind of ['edit', 'delete', 'move'] as const) {
+      for (const path of protectedPaths) {
+        const { by, requested } = await answer(core, workspace.id, session.id, call(kind, kind === 'move' ? ['src/a.ts', path] : [path]));
+        expect(by, `${kind} ${path}`).toBe('card');
+        expect(requested.type === 'permission.requested' && requested.payload.toolCall.protectedPath, `${kind} ${path}`).toBe(true);
+      }
+    }
+    const inside = await answer(core, workspace.id, session.id, call('edit', ['src/a.ts']));
+    expect(inside.by).toBe('caution');
+    expect(inside.requested.type === 'permission.requested' && inside.requested.payload.toolCall.protectedPath).toBeUndefined();
+    expect((await answer(core, workspace.id, session.id, call('delete', ['src/old.ts']))).by).toBe('rule');
+
+    // Only at the default level, the edit rule alone still never answers them.
+    core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_every_time' });
+    expect((await answer(core, workspace.id, session.id, call('edit', ['.git/hooks/pre-commit']))).by).toBe('card');
+    expect((await answer(core, workspace.id, session.id, call('edit', ['src/b.ts']))).by).toBe('rule');
+  });
+
+  it('case variants are protected where the filesystem ignores case (and everywhere else too)', async () => {
+    const core = openTestCore();
+    const { workspace, session, repo } = project(core);
+    core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_risky_only' });
+    for (const path of ['.CLAUDE/settings.json', '.Git/HOOKS/pre-commit', 'Claude.md', join(repo, '.VSCODE', 'tasks.json')]) {
+      expect((await answer(core, workspace.id, session.id, call('edit', [path]))).by, path).toBe('card');
+    }
+    if (isCaseInsensitivePath(repo)) expect((await answer(core, workspace.id, session.id, call('edit', [join(repo.toUpperCase(), '.claude', 'x.json')]))).by).toBe('card');
+  });
+
+  it('reading or searching them is not protected: a read of .claude/settings.json runs at Ask for commands', async () => {
+    const core = openTestCore();
+    const { workspace, session } = project(core);
+    core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_for_commands' });
+    const read = await answer(core, workspace.id, session.id, call('read', ['.claude/settings.json']));
+    expect(read.by).toBe('caution');
+    expect(read.requested.type === 'permission.requested' && read.requested.payload.toolCall.protectedPath).toBeUndefined();
+    expect((await answer(core, workspace.id, session.id, call('search', ['.git']))).by).toBe('caution');
+  });
+
+  it('a command naming one is never answered by its command rule', async () => {
+    const core = openTestCore();
+    const { workspace, session } = project(core);
+    await answer(core, workspace.id, session.id, call('execute', undefined, 'cp -r a b'), 'allow_always');
+    expect((await answer(core, workspace.id, session.id, call('execute', undefined, 'cp src/a.ts src/c.ts'))).by).toBe('rule');
+    const hook = await answer(core, workspace.id, session.id, call('execute', undefined, 'cp evil .git/hooks/pre-commit'));
+    expect(hook.by).toBe('card');
+    expect(hook.requested.type === 'permission.requested' && hook.requested.payload.toolCall.protectedPath).toBe(true);
   });
 });

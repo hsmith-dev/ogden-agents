@@ -14,17 +14,23 @@
  * session leaves `waiting` for any other reason (the agent went away, a
  * restart, a close), or when its history is deleted.
  *
- * Caution levels (2.8) are not here yet: every request is asked, at
- * {@link DEFAULT_CAUTION_LEVEL}.
+ * Before any rule, the workspace's caution level (story 2.8) may answer a
+ * low-risk request in code: `requested` and `resolved by:caution` in one
+ * transaction ({@link cautionAllows}). The level is read inside that
+ * transaction, so a card already shown is never re-evaluated. A write to a
+ * protected path ({@link isProtectedSegment}) is never answered by the
+ * level or by a rule: it always shows a card.
  */
 import { realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import {
   alwaysAllowRefusal,
+  CautionLevel as CautionLevelSchema,
   DEFAULT_CAUTION_LEVEL,
   MAX_DENY_REASON_LENGTH,
   ToolKind as ToolKindSchema,
   type AlwaysAllowScope,
+  type CautionLevel,
   type CoreEvent,
   type PermissionDecision,
   type PermissionRule,
@@ -33,12 +39,13 @@ import {
   type ToolKind,
   type Workspace,
   type WorkspaceId,
+  type WorkspaceSettings,
 } from '@ogden-agents/shared';
 import { and, asc, eq } from 'drizzle-orm';
 import { monotonicFactory } from 'ulid';
 import type { AgentPermissionDecision, AgentPermissionRequest } from './agent-port.js';
 import type { Database } from './db/database.js';
-import { permissionRules } from './db/schema.js';
+import { permissionRules, workspaces } from './db/schema.js';
 import { canonicalWorkspacePath, isCaseInsensitivePath, type Entities } from './entities.js';
 import { CoreError, NotFoundError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
@@ -79,6 +86,15 @@ export interface Permissions {
    * {@link NotFoundError} when the workspace has no such rule.
    */
   removeRule(workspaceId: WorkspaceId, ruleId: PermissionRuleId): void;
+  /** The workspace's settings (its caution level). {@link NotFoundError} for an unknown workspace. */
+  getSettings(workspaceId: WorkspaceId): WorkspaceSettings;
+  /**
+   * Changes the workspace's settings and appends `workspace.settings_changed`
+   * in the same transaction; an unchanged level appends nothing. It applies
+   * to requests not yet shown. {@link ValidationError} for an unknown level,
+   * {@link NotFoundError} for an unknown workspace.
+   */
+  updateSettings(workspaceId: WorkspaceId, input: { cautionLevel?: unknown }): WorkspaceSettings;
   /** Stops listening and tells every agent still waiting that its request was cancelled. */
   close(): void;
 }
@@ -96,6 +112,10 @@ export function createDecliningPermissions(): Permissions {
     listRules: () => [],
     removeRule: (_workspaceId, ruleId) => {
       throw new NotFoundError('permission rule', ruleId);
+    },
+    getSettings: () => ({ cautionLevel: DEFAULT_CAUTION_LEVEL }),
+    updateSettings: (workspaceId) => {
+      throw new NotFoundError('workspace', workspaceId);
     },
     close: () => undefined,
   };
@@ -246,6 +266,78 @@ export function ruleMatches(
   return prefix.length > 0 && prefix.length <= given.length && prefix.every((word, index) => given[index] === word);
 }
 
+/**
+ * The caution ladder (user decision 2026-09-30, strictest first), a pure
+ * table: whether `level` answers a request of `kind` without a card.
+ * `pathsInside` is whether the request's paths all lie inside the workspace;
+ * for `read`, `search` and `edit` it must also name at least one
+ * ({@link pathsInsideWorkspace}), for `think` it must name none or only
+ * inside ones.
+ *
+ * - `ask_every_time`: nothing.
+ * - `ask_for_commands`: `read` and `search` inside the project, and `think`.
+ * - `ask_risky_only`: those, and `edit` inside the project.
+ *
+ * `execute`, `delete`, `move`, `fetch`, `switch_mode`, `other`, an unknown
+ * kind or level, and any path outside the project always ask (a 2.6 rule may
+ * still answer them).
+ */
+export function cautionAllows(level: CautionLevel, kind: ToolKind, pathsInside: boolean): boolean {
+  if (pathsInside !== true) return false;
+  switch (level) {
+    case 'ask_for_commands':
+      return kind === 'read' || kind === 'search' || kind === 'think';
+    case 'ask_risky_only':
+      return kind === 'read' || kind === 'search' || kind === 'think' || kind === 'edit';
+    default:
+      return false;
+  }
+}
+
+/**
+ * Protected paths (user decision 2026-09-30, 2.8 F1): files and folders that
+ * control how the agent or git runs, so writing one could give the agent
+ * more than the request says (a hook, a settings allow-list, an MCP server).
+ * Folder or file names, at any depth, compared ignoring case everywhere
+ * (stricter than the filesystem needs on a case-sensitive one).
+ */
+const PROTECTED_NAMES: ReadonlySet<string> = new Set(['.claude', '.git', '.vscode', '.idea', '.mcp.json', 'claude.md', 'agents.md', '.envrc']);
+
+/** Tool kinds that write: a protected path among their paths always asks. Reads and searches are not protected. */
+export const WRITE_KINDS: ReadonlySet<ToolKind> = new Set<ToolKind>(['edit', 'delete', 'move']);
+
+/** Whether one path segment is a protected name. */
+export const isProtectedSegment = (segment: string): boolean => PROTECTED_NAMES.has(segment.toLowerCase());
+
+/**
+ * Whether any path the tool call names reaches a protected name inside the
+ * workspace, symlinks resolved (a link to `.git/hooks` counts). Paths
+ * outside the workspace or unresolvable are not checked here: they never
+ * pass {@link pathsInsideWorkspace}, so they ask anyway.
+ */
+export function touchesProtectedPath(workspace: Pick<Workspace, 'path' | 'realPath'>, paths: readonly string[] | undefined): boolean {
+  if (paths === undefined || paths.length === 0) return false;
+  let root: string;
+  let base: string;
+  try {
+    base = realpathSync.native(workspace.realPath ?? workspace.path);
+    root = canonicalWorkspacePath(base);
+  } catch {
+    return false;
+  }
+  const prefix = root.endsWith(sep) ? root : root + sep;
+  return paths.some((path) => {
+    const reached = reachedPath(base, path);
+    if (reached === undefined || !reached.startsWith(prefix)) return false;
+    return reached.slice(prefix.length).split(/[\\/]/).some(isProtectedSegment);
+  });
+}
+
+/** Whether a command names a protected path in any word (`cp x .git/hooks/pre-commit`): no rule answers it. */
+export function commandNamesProtectedPath(command: string): boolean {
+  return words(command).some((word) => word.replace(/["']/g, '').split(/[\\/]/).some(isProtectedSegment));
+}
+
 // ---------------------------------------------------------------------------
 // Core's permissions.
 // ---------------------------------------------------------------------------
@@ -329,6 +421,14 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
     }
   });
 
+  /** The workspace's stored level; the strictest one when it can't be read. */
+  const readLevel = (workspaceId: string): CautionLevel | undefined => {
+    const row = orm.select({ cautionLevel: workspaces.cautionLevel }).from(workspaces).where(eq(workspaces.id, workspaceId)).get();
+    if (row === undefined) return undefined;
+    const parsed = CautionLevelSchema.safeParse(row.cautionLevel);
+    return parsed.success ? parsed.data : DEFAULT_CAUTION_LEVEL;
+  };
+
   const findRule = (workspaceId: string, kind: ToolKind, command: string | undefined, pathsInside: boolean) =>
     orm
       .select()
@@ -351,18 +451,35 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
         const owner = entities.getSession(sessionId);
         const workspace = owner === undefined ? undefined : entities.getWorkspace(owner.workspaceId);
         const pathsInside = workspace !== undefined && PATH_KINDS.has(kind) && pathsInsideWorkspace(workspace, request.paths);
+        // For the caution level: a path kind needs its paths inside; `think`
+        // needs no path, but any path it names must be inside too.
+        const named = Array.isArray(request.paths) ? request.paths : [];
+        // A write to a protected path, or a command naming one, always shows a card (F1).
+        const protectedPath =
+          (WRITE_KINDS.has(kind) && (workspace === undefined || touchesProtectedPath(workspace, request.paths))) ||
+          (command !== undefined && commandNamesProtectedPath(command));
+        const cautionPathsInside = PATH_KINDS.has(kind)
+          ? pathsInside
+          : workspace !== undefined && (named.length === 0 || pathsInsideWorkspace(workspace, named));
 
         const outcome = events.transaction(() => {
           const session = entities.getSession(sessionId);
           if (session === undefined) throw new NotFoundError('session', sessionId);
+          const cautionLevel = readLevel(session.workspaceId) ?? DEFAULT_CAUTION_LEVEL;
           sessionEvents.appendSessionEvent(sessionId, {
             type: 'permission.requested',
             payload: {
               sessionId,
               requestId,
-              toolCall: { toolCallId: request.toolCallId, title: request.title, kind, ...(command === undefined ? {} : { command }) },
+              toolCall: {
+                toolCallId: request.toolCallId,
+                title: request.title,
+                kind,
+                ...(command === undefined ? {} : { command }),
+                ...(protectedPath ? { protectedPath: true as const } : {}),
+              },
               alwaysAllowScope: scope,
-              cautionLevel: DEFAULT_CAUTION_LEVEL,
+              cautionLevel,
             },
           });
           if (session.state !== 'working' && session.state !== 'waiting') {
@@ -373,7 +490,15 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
             });
             return { type: 'cancelled' as const };
           }
-          const rule = findRule(session.workspaceId, kind, command, pathsInside && session.workspaceId === workspace?.id);
+          // A request that names a command never runs on the level: a command is asked or ruled (2.6).
+          if (!protectedPath && command === undefined && session.workspaceId === workspace?.id && cautionAllows(cautionLevel, kind, cautionPathsInside)) {
+            sessionEvents.appendSessionEvent(sessionId, {
+              type: 'permission.resolved',
+              payload: { sessionId, requestId, decision: 'allow_once', by: 'caution' },
+            });
+            return { type: 'caution' as const };
+          }
+          const rule = protectedPath ? undefined : findRule(session.workspaceId, kind, command, pathsInside && session.workspaceId === workspace?.id);
           if (rule !== undefined) {
             sessionEvents.appendSessionEvent(sessionId, {
               type: 'permission.resolved',
@@ -385,7 +510,7 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
           return { type: 'ask' as const, workspaceId: session.workspaceId };
         });
 
-        if (outcome.type === 'rule') return { outcome: 'allow_once' };
+        if (outcome.type === 'rule' || outcome.type === 'caution') return { outcome: 'allow_once' };
         if (outcome.type === 'cancelled') return { outcome: 'cancelled' };
         return await new Promise<AgentPermissionDecision>((answer) => {
           const refusal = kind === 'execute' && command !== undefined ? alwaysAllowRefusal(command) : undefined;
@@ -487,6 +612,30 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
           .run().changes;
         if (removed === 0) throw new NotFoundError('permission rule', ruleId);
         events.append({ type: 'workspace.permission_rule_removed', workspaceId, streamId: workspaceId, payload: { ruleId } });
+      });
+    },
+
+    getSettings(workspaceId) {
+      const cautionLevel = readLevel(workspaceId);
+      if (cautionLevel === undefined) throw new NotFoundError('workspace', workspaceId);
+      return { cautionLevel };
+    },
+
+    updateSettings(workspaceId, input) {
+      const parsed = CautionLevelSchema.safeParse(input.cautionLevel);
+      if (!parsed.success) {
+        throw new ValidationError('Choose Ask every time, Ask for commands or Ask only for risky actions.', [
+          { path: ['cautionLevel'], message: 'unknown caution level' },
+        ]);
+      }
+      const cautionLevel = parsed.data;
+      return events.transaction(() => {
+        const previous = readLevel(workspaceId);
+        if (previous === undefined) throw new NotFoundError('workspace', workspaceId);
+        if (previous === cautionLevel) return { cautionLevel };
+        orm.update(workspaces).set({ cautionLevel }).where(eq(workspaces.id, workspaceId)).run();
+        events.append({ type: 'workspace.settings_changed', workspaceId, streamId: workspaceId, payload: { cautionLevel, previous } });
+        return { cautionLevel };
       });
     },
 

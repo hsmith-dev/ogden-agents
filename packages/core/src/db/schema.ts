@@ -7,6 +7,7 @@
  */
 import type {
   AdapterRefs,
+  CautionLevel,
   RunOutcome,
   SessionDriver,
   SessionKind,
@@ -25,6 +26,8 @@ export const workspaces = sqliteTable(
      * agent runs in. Added in story 2.2; rows from before it hold `path`.
      */
     realPath: text('real_path').notNull().default(''),
+    /** What the workspace's agents may run without a card (E2-R4; story 2.8). */
+    cautionLevel: text('caution_level').$type<CautionLevel>().notNull().default('ask_every_time'),
     createdAt: text('created_at').notNull(),
   },
   (t) => [uniqueIndex('workspaces_path_unique').on(t.path)],

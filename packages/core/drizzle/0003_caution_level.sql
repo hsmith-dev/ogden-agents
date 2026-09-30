@@ -1,0 +1,1 @@
+ALTER TABLE `workspaces` ADD `caution_level` text DEFAULT 'ask_every_time' NOT NULL;

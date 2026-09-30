@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AgentError, type AgentEvent, type AgentPermissionDecision, type AgentPermissionRequest, type AgentSession } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
+import { pathsOf } from '../src/acp-claude-code/claude-code-agent.js';
 import { createClaudeCodeAgent, createStreamMasker, findClaudeExecutable, MASKED, maskSecrets, resolveClaudeAgentAcp, secretValues } from '../src/index.js';
 
 const FAKE_AGENT = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-acp-agent.mjs');
@@ -466,5 +467,21 @@ describe('masking secrets', () => {
       expect(out, `chunks of ${size}`).toBe(maskSecrets(text, secrets));
       expect(out).not.toContain('abcdef');
     }
+  });
+});
+
+describe('paths a search can reach (story 2.8 review F2)', () => {
+  const cwd = join(tmpdir(), 'ogden-agents-repo');
+  const search = (rawInput: Record<string, unknown>) => pathsOf({ toolCallId: 't', kind: 'search', rawInput }, cwd);
+
+  it('names an absolute or ~ pattern as given, resolves a .. pattern against its folder, and names cwd for a search without one', () => {
+    expect(search({ pattern: 'src/**/*.ts' })).toEqual([cwd]);
+    expect(search({ pattern: 'src/**/*.ts', path: 'src' })).toEqual(['src']);
+    expect(search({ pattern: '/Users/x/.ssh/*' })).toEqual(['/Users/x/.ssh/*', cwd]);
+    expect(search({ pattern: '~/x/*' })).toEqual(['~/x/*', cwd]);
+    expect(search({ pattern: '../../x/*' })).toEqual([join(cwd, '..', '..', 'x', '*'), cwd]);
+    expect(search({ pattern: 'TODO', glob: '../secrets/*', path: 'src' })).toEqual(['src', join('src', '..', 'secrets', '*')]);
+    expect(search({ pattern: '../x', path: '~/a' })).toEqual(['~/a']);
+    expect(pathsOf({ toolCallId: 't', kind: 'read', rawInput: { file_path: 'a.ts' } }, cwd)).toEqual(['a.ts']);
   });
 });

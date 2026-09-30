@@ -35,7 +35,7 @@ import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:chil
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
 import {
@@ -223,12 +223,21 @@ function commandOf(rawInput: unknown): string | undefined {
 /** Input fields that name a file or folder, in the tools Claude Code reports. */
 const PATH_FIELDS = ['file_path', 'notebook_path', 'path'] as const;
 
+/** Input fields of a search (Glob's `pattern`, Grep's `glob` and `pattern`) that can reach past its folder (story 2.8 review F2). */
+const PATTERN_FIELDS = ['pattern', 'glob'] as const;
+
 /**
  * Every path a tool call names: its locations, its diffs, and the path
  * fields of its raw input. Core lets a file-kind rule match only when all
  * of them lie inside the workspace, so naming more paths only narrows it.
+ *
+ * A search pattern is a path too when it can reach elsewhere: an absolute
+ * one or one starting with `~` as given (core can't resolve `~`, so it
+ * asks), and one with a `..` segment resolved against the search folder
+ * (its `path`, else `cwd`). A search that names no folder searches `cwd`,
+ * which is named for it.
  */
-function pathsOf(toolCall: acp.ToolCallUpdate): string[] {
+export function pathsOf(toolCall: acp.ToolCallUpdate, cwd: string): string[] {
   const paths = new Set<string>();
   for (const location of toolCall.locations ?? []) if (typeof location.path === 'string') paths.add(location.path);
   for (const item of toolCall.content ?? []) if (item.type === 'diff' && typeof item.path === 'string') paths.add(item.path);
@@ -238,6 +247,20 @@ function pathsOf(toolCall: acp.ToolCallUpdate): string[] {
       const value = (raw as Record<string, unknown>)[field];
       if (typeof value === 'string' && value !== '') paths.add(value);
     }
+    const folder = (raw as Record<string, unknown>).path;
+    const root = typeof folder === 'string' && folder !== '' ? folder : undefined;
+    let patterned = false;
+    for (const field of PATTERN_FIELDS) {
+      const value = (raw as Record<string, unknown>)[field];
+      if (typeof value !== 'string' || value === '') continue;
+      patterned = true;
+      if (value.startsWith('~') || isAbsolute(value)) paths.add(value);
+      else if (value.split(/[\\/]/).includes('..')) {
+        // Under a `~` folder the folder itself is already named, and core asks for it.
+        if (root === undefined || !root.startsWith('~')) paths.add(join(root ?? cwd, value));
+      }
+    }
+    if (patterned && root === undefined) paths.add(cwd);
   }
   return [...paths];
 }
@@ -396,7 +419,7 @@ async function startOnChild(
           title: mask(params.toolCall.title ?? ''),
           kind: params.toolCall.kind ?? undefined,
           command: command === undefined ? undefined : mask(command),
-          paths: pathsOf(params.toolCall).map(mask),
+          paths: pathsOf(params.toolCall, cwd).map(mask),
         });
         switch (decision?.outcome) {
           case 'allow_once':

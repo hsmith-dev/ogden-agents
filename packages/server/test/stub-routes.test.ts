@@ -16,9 +16,6 @@ const sesId = 'ses_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
 
 /** Every stubbed route with its method and a concrete path, by the lane that fills it. */
 const STUBS: ReadonlyArray<readonly [method: string, path: string]> = [
-  // 2.5
-  ['GET', apiPath(API_ROUTES.workspaceSettings, { wsId })],
-  ['PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId })],
   // 9.x (9.1's agents list and sign-in are built: agent-setup-routes.test.ts)
   ['POST', apiPath(API_ROUTES.agentInstall, { agentId: 'claude-code' })],
   ['PUT', apiPath(API_ROUTES.agentApiKey, { agentId: 'claude-code' })],
@@ -58,7 +55,7 @@ describe('stub routes', () => {
     });
     expect(put.status).toBe(501);
     // Not even a malformed body is looked at.
-    const junk = await send(server, apiPath(API_ROUTES.workspaceSettings, { wsId }), { method: 'PATCH', headers: { ...tab.headers, 'content-type': 'application/json' }, body: '{nope' });
+    const junk = await send(server, API_ROUTES.onboarding, { method: 'PATCH', headers: { ...tab.headers, 'content-type': 'application/json' }, body: '{nope' });
     expect(junk.status).toBe(501);
     expect(lines.join('')).not.toContain(apiKey);
   });

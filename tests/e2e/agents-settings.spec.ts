@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { makeDataDir, removeDataDir, serverModule, startServer, type RunningServer, type StartOptions } from '../support.js';
+import { send, startChat } from './chat-server.js';
 import { openConnected } from './tab.js';
 
 async function withAgentsServer(page: Page, env: Record<string, string>, extra: StartOptions, body: (server: RunningServer) => Promise<void>) {
@@ -173,13 +174,8 @@ test('signed out, an API key pasted on the card is saved, used by the chat, kept
     await expect(card(page)).not.toContainText(key);
 
     // The chat's Claude Code needs the key (the fake agent refuses a prompt without one).
-    await page.goto(new URL('/', page.url()).href);
-    await page.getByLabel('Project folder').fill(repo);
-    await page.getByRole('button', { name: 'Start a chat' }).click();
-    await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
-    const composer = page.getByRole('textbox', { name: 'Message Claude Code' });
-    await composer.fill('hello');
-    await composer.press('Enter');
+    await startChat(page, repo);
+    await send(page, 'hello');
     await expect(page.getByTestId('message-agent')).toContainText('key received');
 
     // After a restart the key is read back from the keychain: the card shows its last 4 and it is in use.

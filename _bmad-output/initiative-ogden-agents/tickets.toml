@@ -47,3 +47,12 @@ slug = "epic-retrospectives"
 title = "Each finished epic teaches the next one"
 covers = ["CAP-13"]
 after = [{ epic = 5, needs = "finished runs with build records" }]
+
+# ---- v2 (planned; outside the v1 initiative's Done when) ----
+
+[[epic]]
+id = 8
+slug = "epic-v2-developer-experience"
+title = "Developers review and navigate their project without leaving Ogden Agents (v2)"
+covers = []
+after = [{ epic = 5, needs = "sessions, planning files, and the review and approve flow" }]

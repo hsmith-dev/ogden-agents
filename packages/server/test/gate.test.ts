@@ -364,6 +364,35 @@ describe('security gate', () => {
     expect((await send(server, TAB_CHECK_PATH, { headers: bearer(tab) })).status).toBe(204);
   });
 
+  it('terminal socket (story 3.1): /ws/terminal/* needs the tab token subprotocol and a matching Origin exactly like /ws, and echoes only ogden.v1', async () => {
+    const server = await startTestServer();
+    const tab = await connectTab(server);
+    const other = await connectTab(server, server.issueLaunchUrl());
+    const path = '/ws/terminal/ses_00000000000000000000000000';
+    const origin = { origin: server.url };
+    const status = async (protocols: string[], headers: Record<string, string>) => (await upgradeWith(server, protocols, headers, path)).status;
+
+    // Unauthenticated: no offer, no token, a forged or second token, the token in the query or as Bearer.
+    expect(await status([], origin)).toBe(401);
+    expect(await status([WS_PROTOCOL], origin)).toBe(401);
+    expect(await status([tab.protocols[1]], origin)).toBe(401);
+    expect(await status([WS_PROTOCOL, `ogden.auth.${'A'.repeat(43)}`], origin)).toBe(401);
+    expect(await status([WS_PROTOCOL, tab.protocols[1], other.protocols[1]], origin)).toBe(401);
+    expect((await upgradeWith(server, [WS_PROTOCOL], origin, `${path}?token=${tab.token}`)).status).toBe(401);
+    expect(await status([WS_PROTOCOL], { ...origin, ...bearer(tab) })).toBe(401);
+    // A valid token from a foreign or missing Origin, or to a foreign Host.
+    expect(await status(tab.protocols, {})).toBe(403);
+    for (const foreign of ['http://evil.example', `http://127.0.0.1:${server.port + 1}`, 'null']) {
+      expect(await status(tab.protocols, { origin: foreign }), foreign).toBe(403);
+    }
+    expect(await status(tab.protocols, { ...origin, host: `evil.example:${server.port}` })).toBe(403);
+
+    // The tab's own upgrade passes the gate; only ogden.v1 is echoed, never the token's offer.
+    const ok = await upgradeWith(server, [tab.protocols[1], tab.protocols[0]], origin, path);
+    expect(ok.status).toBe(101);
+    expect(ok.protocol).toBe(WS_PROTOCOL);
+  });
+
   it('restart: tokens live in memory only, so a restarted server refuses the old one; a new launch link works', async () => {
     const dataDir = tempDataDir();
     const first = await startTestServer({ dataDir });
@@ -558,6 +587,7 @@ const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.workspaceSession}`,
   `POST ${API_ROUTES.sessionMessages}`,
   `POST ${API_ROUTES.sessionCancel}`,
+  `POST ${API_ROUTES.sessionDriver}`,
   `POST ${API_ROUTES.sessionPermission}`,
   `GET ${API_ROUTES.permissionRules}`,
   `DELETE ${API_ROUTES.permissionRule}`,

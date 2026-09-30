@@ -161,6 +161,21 @@ export interface AgentPort {
    * asks, and stops it. Rejects with an {@link AgentError} when it can't be started.
    */
   listAuthMethods(input: { env: Readonly<Record<string, string>> }): Promise<AgentAuthMethod[]>;
+  /**
+   * The agent's own CLI resuming its session `agentSessionId` (CAP-5, story
+   * 3.1), for an agent whose sessions its CLI can resume; absent otherwise.
+   * `env` is the environment the chat's agent process gets; the CLI runs
+   * with the `env` returned (the same, or with the caller's own rules
+   * applied). Rejects with an {@link AgentError} when the CLI can't be found.
+   */
+  terminalCommand?(agentSessionId: string, env: Readonly<Record<string, string>>): Promise<AgentTerminalCommand>;
+}
+
+/** The CLI to run for a session's terminal: a file, its arguments (no shell) and its whole environment. */
+export interface AgentTerminalCommand {
+  file: string;
+  args: readonly string[];
+  env: Readonly<Record<string, string>>;
 }
 
 export type AgentErrorCode = 'agent_unavailable' | 'agent_failed' | 'auth_required';

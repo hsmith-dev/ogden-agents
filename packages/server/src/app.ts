@@ -12,6 +12,7 @@ import type { Logger } from './log.js';
 import { isServerPath } from './paths.js';
 import { registerPermissionRoutes } from './permission-routes.js';
 import { registerShortcutRoutes } from './shortcut-routes.js';
+import { registerTerminalSocket } from './terminal-socket.js';
 import { registerWorkspaceRoutes } from './workspace-routes.js';
 
 /** What `GET /launcher/hello` reports about the running server (AD-20). */
@@ -163,6 +164,8 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, chat
   registerAgentSetupRoutes(app, { agentSetup, onboarding, log });
 
   registerEventSocket(app, { events, log, tabs });
+  // A session's terminal (story 3.1): behind the same gate as `/ws`.
+  if (chat !== undefined) registerTerminalSocket(app, { chat, log, tabs });
 
   // The built UI, never under the server's own paths (`paths.ts`).
   const staticFiles = serveStatic({ root: webRoot });

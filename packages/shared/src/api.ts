@@ -78,6 +78,14 @@ export const API_ROUTES = {
    */
   sessionCancel: `${API_BASE}/workspaces/:wsId/sessions/:sesId/cancel`,
   /**
+   * `POST SetDriverRequest` → `{ session }` (story 3.1, AD-6): hands the
+   * session to its agent's own terminal (`terminal`) or back to the chat
+   * (`ui`); appends `session.driver_changed`. 409 `session_busy` with a plain
+   * reason when the switch can't happen (not idle, never reached its agent,
+   * no terminal on this computer); nothing changes then.
+   */
+  sessionDriver: `${API_BASE}/workspaces/:wsId/sessions/:sesId/driver`,
+  /**
    * `POST PermissionDecisionRequest` → 204 (2.6): the user's answer on a
    * permission card. 409 `permission_not_pending` when it is no longer waiting.
    */
@@ -125,6 +133,15 @@ export const API_ROUTES = {
   /** `GET` → `OnboardingState`; `PATCH OnboardingState` → `OnboardingState` (9.5): whether Welcome is done. */
   onboarding: `${API_BASE}/onboarding`,
 } as const;
+
+/**
+ * The terminal WebSocket of a session the terminal drives (story 3.1, AD-6):
+ * under `/ws`, so the gate checks it exactly as the event socket (Host, the
+ * tab-token subprotocol, Origin). Binary frames carry the terminal's bytes
+ * both ways; text frames carry `TerminalClientFrame` and `TerminalServerFrame`.
+ * Not an `API_ROUTES` entry: it is no REST route.
+ */
+export const TERMINAL_SOCKET_ROUTE = '/ws/terminal/:sesId' as const;
 
 /** The parameters a route pattern names, e.g. `{ wsId, sesId }`. */
 type RouteParams<Route extends string> = Route extends `${string}:${infer Name}/${infer Rest}`

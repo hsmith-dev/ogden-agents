@@ -11,6 +11,7 @@ import {
   createMemoryAppShortcut,
   createMemorySecretStore,
   createOsAppShortcut,
+  createPtyTerminalPort,
   createUvToolchain,
   locateClaudeAdapter,
   resolveClaudeAgentAcp,
@@ -38,7 +39,7 @@ import {
   type SecretStorePort,
   type ToolchainPort,
 } from '@ogden-agents/core';
-import { SERVER_STREAM, ServerMessage } from '@ogden-agents/shared';
+import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM, ServerMessage } from '@ogden-agents/shared';
 import openBrowser from 'open';
 import { WebSocketServer } from 'ws';
 import { createApp, type ServerControl } from './app.js';
@@ -331,6 +332,14 @@ export interface RunningServer {
   close(): Promise<void>;
 }
 
+/**
+ * The largest WebSocket frame the server reads (story 3.1 review F1): the
+ * terminal's largest input and some room. `/ws` client messages (subscribe,
+ * page history, ping) are a few hundred bytes. A larger frame closes the
+ * socket (1009) before it is buffered.
+ */
+export const MAX_WS_PAYLOAD_BYTES = MAX_TERMINAL_INPUT_BYTES + 1024;
+
 /** How long a stop waits after answering Quit or restart, so the reply reaches the client first. */
 const STOP_AFTER_REPLY_MS = 50;
 
@@ -466,6 +475,9 @@ async function listenAndAnnounce({
   // Agents from before this start are gone with their processes (AD-3): their sessions can be resumed, not left working.
   const settled = core.entities.settleInterruptedSessions(RESTARTED_REASON);
   if (settled.length > 0) log.info('sessions left working by a stopped server are idle and resumable', { sessions: settled.length });
+  // Their terminals are gone too (story 3.1 review F3): those chats drive again.
+  const released = core.entities.releaseTerminalDrivers();
+  if (released.length > 0) log.info('sessions a stopped server left in the terminal are back in the chat', { sessions: released.length });
   const extraAgentEnv = options.extraAgentEnv ?? {};
   const agentEnv = () => ({ ...agentEnvironment(), ...extraAgentEnv });
   const claudeSetup =
@@ -529,6 +541,8 @@ async function listenAndAnnounce({
     startSession: async (input) => agent.startSession({ ...input, env: await freshChatEnv(input.env) }),
     reopenSession: async (input) => agent.reopenSession({ ...input, env: await freshChatEnv(input.env) }),
     listAuthMethods: (input) => agent.listAuthMethods(input),
+    // The terminal runs with the chat's environment rules, the API key's included (story 3.1).
+    ...(agent.terminalCommand === undefined ? {} : { terminalCommand: async (id: string, env: Readonly<Record<string, string>>) => agent.terminalCommand!(id, await freshChatEnv(env)) }),
   };
   const chat = createChat({
     dataDir,
@@ -537,6 +551,7 @@ async function listenAndAnnounce({
     agent: chatAgent,
     permissions,
     agentEnv: chatEnv,
+    terminal: createPtyTerminalPort(options.loadPty),
     // The event carries the plain reason; the log also gets the details (never the environment).
     onAgentError: (sessionId, error) => log.warn('agent failed', { sessionId, code: error.code, reason: error.message, ...error.details }),
     onInternalError: (sessionId, error) => log.error('applying an agent event failed', { sessionId, reason: String(error) }),
@@ -580,7 +595,8 @@ async function listenAndAnnounce({
     if (candidate > 65535) break;
     lastTried = candidate;
     // Echo only `ogden.v1`, never the offer that carries the tab token (AD-15).
-    const wss = new WebSocketServer({ noServer: true, handleProtocols: chooseWebSocketProtocol });
+    // No frame over the terminal's largest input (story 3.1 review F1) is ever buffered, on any socket.
+    const wss = new WebSocketServer({ noServer: true, handleProtocols: chooseWebSocketProtocol, maxPayload: MAX_WS_PAYLOAD_BYTES });
     const server = createAdaptorServer({ fetch: app.fetch, websocket: { server: wss } });
     try {
       const port = await listen(server, candidate);

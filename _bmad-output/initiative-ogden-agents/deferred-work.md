@@ -20,6 +20,7 @@ Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 
 - Unowned: consider failing the release smoke if "test hooks in use" ever appears in a registry install's log. From 9.7 security review.
 - Epic 3 refactor sweep (3.9): one shared npm-stall retry for the installed-package scripts (retrospective A6). From the epic 2 retrospective.
 - Confirm only: node-pty's "AttachConsole failed" fix is resolved pending the PR's Windows CI logs. From 9.6.
+- Story 3.5 (multi-viewer): rate-limit terminal input per viewer; each frame is capped at 1 MiB, but a tab may send them as fast as it likes. From 3.1 F4.
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
 
@@ -235,3 +236,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/epic-chat-and-workspaces-retrospective.md`
   summary: Share the npm-stall retry (epic 3 refactor sweep, 3.9; retrospective A6). `scripts/smoke-installed.mjs` and `tests/e2e-installed/global-setup.ts` each keep their own copy of the line echo (`echoLines`, plus `redact` in the smoke) and the retry-once-on-stall loop around `prepareInstall` and `launcher.urls()`. Move both into `scripts/installed-package.mjs` and use it from both callers.
   evidence: `scripts/smoke-installed.mjs` `redact`, `echoLines` and the `RETRY` branch; `tests/e2e-installed/global-setup.ts` `echoLines` and the `RETRY` branch (`305825d`, `0a8e34c`). Only `prepareInstall` and `withTimeout` are shared today.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-tracer-bullet-switch-one-claude-code-chat-to-its-terminal-an-plan.md`
+  summary: Rate-limit terminal input per viewer (3.1 security review F4): today each binary frame is capped at 1 MiB, but a tab may send frames as fast as it likes into the CLI. Add a per-viewer input budget when several viewers can type (story 3.5, multi-viewer).
+  evidence: `packages/server/src/terminal-socket.ts` `receive`.

@@ -36,11 +36,33 @@
  * ({@link Chat.cancel}) asks the agent to cancel its prompt and drops it if it
  * has not ended within {@link STOP_GRACE_MS}.
  *
+ * Story 3.1 (CAP-5, AD-6): an `idle` chat that reached its agent can switch
+ * to the agent's own CLI ({@link Chat.switchDriver}). Core releases the
+ * session's agent process, waits for it to exit, and opens the CLI on the
+ * same agent session in a terminal the server owns ({@link TerminalPort});
+ * only then is `driver` set, through the entities, which appends
+ * `session.driver_changed`. Switching back kills the CLI and its tree; the
+ * next message reopens the agent session as after a restart (2.7). A CLI that
+ * exits by itself returns the driver to the chat. What the terminal prints or
+ * is typed into it is kept in memory only (a short backlog for a viewer that
+ * attaches): it is never evented, stored or logged (AD-16).
+ *
  * The agent itself sits behind {@link AgentPort} (AD-1); this file names none.
  */
 import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
-import { DEFAULT_CAUTION_LEVEL, MAX_DIFF_TEXT_LENGTH, ToolCallStatus, ToolKind, type Session, type SessionId, type ToolCallDiff, type Workspace, type WorkspaceId } from '@ogden-agents/shared';
+import {
+  DEFAULT_CAUTION_LEVEL,
+  MAX_DIFF_TEXT_LENGTH,
+  ToolCallStatus,
+  ToolKind,
+  type Session,
+  type SessionDriver,
+  type SessionId,
+  type ToolCallDiff,
+  type Workspace,
+  type WorkspaceId,
+} from '@ogden-agents/shared';
 import { monotonicFactory } from 'ulid';
 import {
   AgentError,
@@ -55,6 +77,7 @@ import {
 import { canonicalWorkspacePath, type Entities } from './entities.js';
 import {
   CoreError,
+  DriverSwitchRefusedError,
   InvalidOperationError,
   NotFoundError,
   QueueFullError,
@@ -66,6 +89,7 @@ import type { HistoryDeleted } from './event-log.js';
 import { createDecliningPermissions, type Permissions } from './permissions.js';
 import { primedPrompt } from './resume-prime.js';
 import type { SessionEvents } from './session-events.js';
+import type { TerminalPort, TerminalProcess } from './terminal-port.js';
 
 /** The reason on sessions the server moved to `idle` because it stopped or restarted under them (AD-3). */
 export const RESTARTED_REASON = 'Ogden Agents was restarted';
@@ -102,6 +126,16 @@ export const DELTA_INTERVAL_MS = 50;
 /** How long Stop waits for the agent to end its turn before it drops the agent. */
 export const STOP_GRACE_MS = 5_000;
 
+/** The most recent terminal output core keeps (in memory only) for a viewer that attaches. */
+export const TERMINAL_BACKLOG_CHARS = 64 * 1024;
+
+/** How long switching back (or a close) waits for a killed terminal to report its exit. */
+export const TERMINAL_EXIT_GRACE_MS = 2_000;
+
+/** The size a terminal opens at, until its viewer resizes it. */
+export const TERMINAL_COLS = 80;
+export const TERMINAL_ROWS = 24;
+
 export interface ChatOptions {
   entities: Entities;
   /**
@@ -129,6 +163,25 @@ export interface ChatOptions {
   checkInDelayMs?: number;
   /** How long Stop waits for the turn to end before dropping the agent. Default {@link STOP_GRACE_MS}. */
   stopGraceMs?: number;
+  /** Opens the agent's own CLI in a terminal (story 3.1). Without it, switching to the terminal is refused. */
+  terminal?: TerminalPort;
+}
+
+/**
+ * One viewer's hold on a session's terminal (story 3.1). What it carries is
+ * the user's content: never log, event or store it.
+ */
+export interface TerminalViewer {
+  /** The most recent output, at most {@link TERMINAL_BACKLOG_CHARS}, for a viewer that just attached. */
+  readonly backlog: string;
+  /** Everything the terminal prints from now on. Returns the unsubscribe. */
+  onData(listener: (data: string) => void): () => void;
+  /** Called once when the terminal ends: its CLI exited (`exitCode`), or the session switched back (`null`). Returns the unsubscribe. */
+  onEnd(listener: (end: { exitCode: number | null }) => void): () => void;
+  /** Types into the terminal. */
+  write(data: string): void;
+  /** Resizes the terminal. */
+  resize(cols: number, rows: number): void;
 }
 
 export interface Chat {
@@ -177,6 +230,19 @@ export interface Chat {
    * turn is running and {@link NotFoundError} for an unknown session.
    */
   cancel(workspaceId: WorkspaceId, sessionId: SessionId): void;
+  /**
+   * Hands the session to `driver` (story 3.1, AD-6). To `terminal`: only
+   * while the session is `idle`, with no turn or queue, and has reached its
+   * agent; the agent's process is released and has exited before its CLI
+   * opens on the same agent session. To `ui`: the CLI and its tree are
+   * killed. Each change appends `session.driver_changed`; asking for the
+   * current driver changes nothing. Throws {@link DriverSwitchRefusedError}
+   * with a plain reason (nothing changed) and {@link NotFoundError} for an
+   * unknown session.
+   */
+  switchDriver(workspaceId: WorkspaceId, sessionId: SessionId, driver: SessionDriver): Promise<Session>;
+  /** A hold on the session's running terminal, or `undefined` when the terminal does not drive it. */
+  attachTerminal(sessionId: SessionId): TerminalViewer | undefined;
   /** Resolves once no agent turn is running (tests, shutdown). */
   settled(): Promise<void>;
   /**
@@ -263,6 +329,17 @@ interface Live {
   markGone: () => void;
 }
 
+/** A session's terminal and its viewers (story 3.1). Its output is never logged, evented or stored. */
+interface Terminal {
+  process: TerminalProcess;
+  backlog: string;
+  data: Set<(data: string) => void>;
+  end: Set<(end: { exitCode: number | null }) => void>;
+  ended: boolean;
+  /** Resolves when the process has exited. */
+  exited: Promise<void>;
+}
+
 /** A session whose agent is answering: from the first message until nothing is left to send. */
 interface Turn {
   /** Messages sent while the agent answered, oldest first. */
@@ -294,6 +371,10 @@ export function createChat(options: ChatOptions): Chat {
    * the chat or runs beside its replacement (AD-3).
    */
   const droppedAgents = new Map<SessionId, Promise<void>>();
+  /** The terminals driving sessions (story 3.1). */
+  const terminals = new Map<SessionId, Terminal>();
+  /** Sessions between drivers: no message is taken and no other switch starts. */
+  const switching = new Set<SessionId>();
   /** Set by `close`: no event from a stopping agent changes a session any more. */
   let closing = false;
   const dataHome = canonicalWorkspacePath(options.dataDir);
@@ -783,6 +864,145 @@ export function createChat(options: ChatOptions): Chat {
     return session;
   };
 
+  // --- The agent's own terminal (story 3.1, AD-6) --------------------------------------------
+
+  /** Keeps the newest {@link TERMINAL_BACKLOG_CHARS} of output, starting at a line where it can. */
+  const trimBacklog = (text: string): string => {
+    if (text.length <= TERMINAL_BACKLOG_CHARS) return text;
+    const cut = text.slice(-TERMINAL_BACKLOG_CHARS);
+    const line = cut.indexOf('\n');
+    return line === -1 ? cut : cut.slice(line + 1);
+  };
+
+  /** Tells the terminal's viewers it has ended, once. */
+  const endTerminal = (sessionId: SessionId, terminal: Terminal, exitCode: number | null) => {
+    if (terminal.ended) return;
+    terminal.ended = true;
+    for (const listener of [...terminal.end]) {
+      try {
+        listener({ exitCode });
+      } catch (error) {
+        internalError(sessionId, error);
+      }
+    }
+    terminal.end.clear();
+    terminal.data.clear();
+  };
+
+  /** Kills the session's terminal, if any, and waits (bounded) for it to exit. The driver is the caller's to set. */
+  const stopTerminal = async (sessionId: SessionId): Promise<void> => {
+    const terminal = terminals.get(sessionId);
+    if (terminal === undefined) return;
+    terminals.delete(sessionId);
+    try {
+      terminal.process.kill();
+    } catch (error) {
+      internalError(sessionId, error);
+    }
+    endTerminal(sessionId, terminal, null);
+    let timer: Timer | undefined;
+    await Promise.race([terminal.exited, new Promise<void>((resolve) => (timer = later(TERMINAL_EXIT_GRACE_MS, resolve)))]);
+    clearTimeout(timer);
+  };
+
+  /** Releases the session's agent process and waits for it to exit, so the CLI never shares the session with it. */
+  const releaseAgent = async (sessionId: SessionId): Promise<void> => {
+    // The same drop as a failure's (9.4): the CLI starts only once this agent, and any dropped before, has stopped.
+    const entry = live.get(sessionId);
+    if (entry !== undefined) drop(sessionId, entry);
+    await droppedAgents.get(sessionId);
+  };
+
+  const toTerminal = async (session: Session): Promise<Session> => {
+    const terminal = options.terminal;
+    const terminalCommand = agent.terminalCommand?.bind(agent);
+    if (terminal === undefined || terminalCommand === undefined) {
+      throw new DriverSwitchRefusedError(`${agent.displayName} can't be opened in its own terminal here.`);
+    }
+    if (busy.has(session.id) || session.state !== 'idle') {
+      throw new DriverSwitchRefusedError(`${agent.displayName} is busy. Switch to the terminal when it is idle.`);
+    }
+    const agentSessionId = storedAgentSessionId(session.id);
+    if (agentSessionId === undefined) {
+      throw new DriverSwitchRefusedError(`Send ${agent.displayName} a message first, then switch to the terminal.`);
+    }
+    const workspace = getWorkspace(session.workspaceId);
+    const availability = await terminal.available();
+    if (!availability.ok) throw new DriverSwitchRefusedError(`The terminal can't start on this computer: ${availability.reason}`);
+    let command: Awaited<ReturnType<typeof terminalCommand>>;
+    try {
+      command = await terminalCommand(agentSessionId, { ...agentEnv() });
+    } catch (error) {
+      throw new DriverSwitchRefusedError(error instanceof AgentError ? error.message : `${agent.displayName}'s terminal couldn't be found.`);
+    }
+    if (closing) throw new InvalidOperationError('Ogden Agents is stopping.');
+    await releaseAgent(session.id);
+    let cli: TerminalProcess;
+    try {
+      cli = await terminal.open({
+        file: command.file,
+        args: command.args,
+        // The real-cased path, as the agent had it: the CLI finds its sessions by folder.
+        cwd: workspace.realPath ?? workspace.path,
+        env: { ...command.env, TERM: 'xterm-256color' },
+        cols: TERMINAL_COLS,
+        rows: TERMINAL_ROWS,
+      });
+    } catch (error) {
+      internalError(session.id, error);
+      throw new DriverSwitchRefusedError(`${agent.displayName}'s terminal couldn't start. Try again.`);
+    }
+    let markExited!: () => void;
+    const entry: Terminal = {
+      process: cli,
+      backlog: '',
+      data: new Set(),
+      end: new Set(),
+      ended: false,
+      exited: new Promise<void>((resolve) => (markExited = resolve)),
+    };
+    terminals.set(session.id, entry);
+    cli.onData((data) => {
+      entry.backlog = trimBacklog(entry.backlog + data);
+      for (const listener of [...entry.data]) {
+        try {
+          listener(data);
+        } catch (error) {
+          internalError(session.id, error);
+        }
+      }
+    });
+    cli.onExit(({ exitCode }) => {
+      markExited();
+      // Switched back (or closed) already: the driver is set there.
+      if (terminals.get(session.id) !== entry) return;
+      terminals.delete(session.id);
+      endTerminal(session.id, entry, exitCode);
+      if (closing) return;
+      try {
+        // The CLI exited by itself (`/exit`, a crash): the chat drives again.
+        entities.setSessionDriver(session.id, 'ui');
+      } catch (error) {
+        internalError(session.id, error);
+      }
+    });
+    if (closing) {
+      await stopTerminal(session.id);
+      throw new InvalidOperationError('Ogden Agents is stopping.');
+    }
+    try {
+      return entities.setSessionDriver(session.id, 'terminal');
+    } catch (error) {
+      await stopTerminal(session.id);
+      throw error;
+    }
+  };
+
+  const toChat = async (session: Session): Promise<Session> => {
+    await stopTerminal(session.id);
+    return entities.setSessionDriver(session.id, 'ui');
+  };
+
   return {
     openWorkspace(input) {
       const path = input === '~' ? homedir() : input.startsWith('~/') || input.startsWith('~\\') ? join(homedir(), input.slice(2)) : input;
@@ -820,6 +1040,7 @@ export function createChat(options: ChatOptions): Chat {
       for (const sessionId of sessionIds) {
         const entry = live.get(sessionId);
         if (entry !== undefined) drop(sessionId, entry);
+        void stopTerminal(sessionId);
       }
       return { deletedEvents, deletedSessions, deletedRuns };
     },
@@ -836,6 +1057,7 @@ export function createChat(options: ChatOptions): Chat {
       const workspace = entities.getWorkspace(workspaceId);
       if (workspace === undefined) throw new NotFoundError('workspace', workspaceId);
       if (session.driver === 'terminal') throw new InvalidOperationError('The terminal is driving this session.');
+      if (switching.has(sessionId)) throw new InvalidOperationError('This chat is switching to or from the terminal. Try again in a moment.');
       const current = busy.get(sessionId);
       if (current !== undefined) {
         // A failed turn is ending: nothing more goes after it.
@@ -909,6 +1131,37 @@ export function createChat(options: ChatOptions): Chat {
       });
     },
 
+    async switchDriver(workspaceId, sessionId, driver) {
+      if (closing) throw new InvalidOperationError('Ogden Agents is stopping.');
+      const session = getSession(workspaceId, sessionId);
+      if (switching.has(sessionId)) throw new DriverSwitchRefusedError('This chat is already switching. Try again in a moment.');
+      if (session.driver === driver) return session;
+      switching.add(sessionId);
+      try {
+        return driver === 'terminal' ? await toTerminal(session) : await toChat(session);
+      } finally {
+        switching.delete(sessionId);
+      }
+    },
+
+    attachTerminal(sessionId) {
+      const terminal = terminals.get(sessionId);
+      if (terminal === undefined || terminal.ended) return undefined;
+      return {
+        backlog: terminal.backlog,
+        onData(listener) {
+          terminal.data.add(listener);
+          return () => void terminal.data.delete(listener);
+        },
+        onEnd(listener) {
+          terminal.end.add(listener);
+          return () => void terminal.end.delete(listener);
+        },
+        write: (data) => terminal.process.write(data),
+        resize: (cols, rows) => terminal.process.resize(cols, rows),
+      };
+    },
+
     async settled() {
       while (running.size > 0) await Promise.all([...running]);
     },
@@ -927,8 +1180,17 @@ export function createChat(options: ChatOptions): Chat {
             internalError(sessionId, error);
           }
         }
+        // The server owns the terminals (AD-3): they stop with it, and their chats drive again.
+        for (const sessionId of terminals.keys()) {
+          try {
+            entities.setSessionDriver(sessionId, 'ui');
+          } catch (error) {
+            internalError(sessionId, error);
+          }
+        }
       }
       closing = true;
+      const stoppingTerminals = Promise.all([...terminals.keys()].map((sessionId) => stopTerminal(sessionId)));
       // Queued messages are not sent: the `idle` above marks them "Not sent".
       for (const turn of busy.values()) {
         clearTurnTimers(turn);
@@ -951,6 +1213,7 @@ export function createChat(options: ChatOptions): Chat {
       );
       // And the agents dropped before (a failure, an expired sign-in, a Stop past its grace).
       while (droppedAgents.size > 0) await Promise.all([...droppedAgents.values()]);
+      await stoppingTerminals;
     },
   };
 }

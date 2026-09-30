@@ -22,6 +22,7 @@ interface PtyTerminal {
   onData(listener: (data: string) => void): unknown;
   onExit(listener: (event: { exitCode: number; signal?: number | undefined }) => void): unknown;
   write(data: string): void;
+  resize?(cols: number, rows: number): void;
   kill(signal?: string): void;
   on?(event: 'error', listener: (error: unknown) => void): void;
 }
@@ -52,6 +53,8 @@ export interface HiddenPty {
   onExit(listener: (exit: { exitCode: number; signal: number | null }) => void): void;
   /** Types into the terminal. Ignored once the program has exited. */
   write(data: string): void;
+  /** Resizes the terminal (story 3.1; every spawn has it). Ignored once the program has exited. */
+  resize?(cols: number, rows: number): void;
   /** Stops the program and everything it started. Safe to call more than once. */
   kill(): void;
 }
@@ -167,6 +170,14 @@ export function hiddenPtySpawner(pty: PtyModule, platform: NodeJS.Platform = pro
           terminal.write(data);
         } catch {
           // The program exited while this was typed; `onExit` reports it.
+        }
+      },
+      resize(cols, rows) {
+        if (exited || killed) return;
+        try {
+          terminal.resize?.(cols, rows);
+        } catch {
+          // The program exited meanwhile; `onExit` reports it.
         }
       },
       kill() {

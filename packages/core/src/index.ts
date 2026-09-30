@@ -1,4 +1,5 @@
 export * from './agent-port.js';
+export * from './agent-setup.js';
 export * from './agent-setup-port.js';
 export * from './app-shortcut-port.js';
 export * from './chat.js';

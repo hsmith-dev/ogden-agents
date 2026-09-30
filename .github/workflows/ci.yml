@@ -73,6 +73,11 @@ jobs:
       - name: Smoke test the installed package
         run: node scripts/smoke-installed.mjs
 
+      # The same without optional dependencies, as where node-pty can't build
+      # (AD-19): the app must still start.
+      - name: Smoke test without optional dependencies
+        run: node scripts/smoke-installed.mjs --omit-optional
+
   # The uv archives Ogden Agents may install (story 1.8): re-download each one
   # pinned in packages/adapters/src/toolchain-uv/uv-release.json and check its
   # SHA-256, so a wrong pin fails here and not on a user's computer. The only

@@ -105,11 +105,13 @@ const isAgentAdapter = (name) => AGENT_ADAPTER_PACKAGES.some((adapter) => name =
  * Prepares an empty work folder, npm cache and data folder for installing
  * `tarball` (a path) or `registrySpec` (such as `ogden-agents@0.1.0`).
  * `reuse` picks up the folders of an earlier `prepareInstall` (in another
- * process, say) instead of making new ones.
- * @param {{ tarball?: string, registrySpec?: string, prefix?: string, reuse?: InstallFolders }} options
+ * process, say) instead of making new ones. `omitOptional` installs without
+ * optional dependencies (`node-pty`, AD-19), as on a computer where they
+ * can't build.
+ * @param {{ tarball?: string, registrySpec?: string, prefix?: string, reuse?: InstallFolders, omitOptional?: boolean }} options
  * @returns {Install}
  */
-export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-smoke', reuse }) {
+export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-smoke', reuse, omitOptional = false }) {
   if ((tarball === undefined) === (registrySpec === undefined)) throw new Error('prepareInstall needs exactly one of tarball and registrySpec');
   const workDir = reuse?.workDir ?? mkdtempSync(join(tmpdir(), `${prefix}-`));
   const cacheDir = reuse?.cacheDir ?? mkdtempSync(join(tmpdir(), `${prefix}-cache-`));
@@ -126,6 +128,7 @@ export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-s
   // Log each registry fetch, so a slow or stalled install shows progress
   // (and what it was waiting on) instead of nothing.
   env.npm_config_loglevel = 'http';
+  if (omitOptional) env.npm_config_omit = 'optional';
   // Keep the database and logs out of the user's real data folder.
   env.OGDEN_AGENTS_DATA_DIR = dataDir;
 

@@ -19,11 +19,8 @@ const STUBS: ReadonlyArray<readonly [method: string, path: string]> = [
   // 2.5
   ['GET', apiPath(API_ROUTES.workspaceSettings, { wsId })],
   ['PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId })],
-  // 9.x
-  ['GET', API_ROUTES.agents],
+  // 9.x (9.1's agents list and sign-in are built: agent-setup-routes.test.ts)
   ['POST', apiPath(API_ROUTES.agentInstall, { agentId: 'claude-code' })],
-  ['POST', apiPath(API_ROUTES.agentSignIn, { agentId: 'claude-code' })],
-  ['DELETE', apiPath(API_ROUTES.agentSignIn, { agentId: 'claude-code' })],
   ['PUT', apiPath(API_ROUTES.agentApiKey, { agentId: 'claude-code' })],
   ['DELETE', apiPath(API_ROUTES.agentApiKey, { agentId: 'claude-code' })],
   ['GET', API_ROUTES.onboarding],
@@ -49,7 +46,7 @@ describe('stub routes', () => {
     }
   });
 
-  it('never read the body: an API key sent to the stub is not parsed or logged, and sign-in is no-store', async () => {
+  it('never read the body: an API key sent to the stub is not parsed or logged', async () => {
     const lines: string[] = [];
     const server = await startTestServer({ lines });
     const tab = await signIn(server);
@@ -64,10 +61,6 @@ describe('stub routes', () => {
     const junk = await send(server, apiPath(API_ROUTES.workspaceSettings, { wsId }), { method: 'PATCH', headers: { ...tab.headers, 'content-type': 'application/json' }, body: '{nope' });
     expect(junk.status).toBe(501);
     expect(lines.join('')).not.toContain(apiKey);
-
-    const signInReply = await send(server, apiPath(API_ROUTES.agentSignIn, { agentId: 'claude-code' }), { method: 'POST', headers: tab.headers });
-    expect(signInReply.status).toBe(501);
-    expect(signInReply.headers['cache-control']).toBe('no-store');
   });
 
   it('leave the story 2.2 routes working', async () => {

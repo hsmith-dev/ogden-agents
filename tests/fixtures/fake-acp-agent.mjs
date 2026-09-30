@@ -61,11 +61,31 @@
 //
 // FAKE_ACP_AUTH=terminal advertises one terminal-type sign-in method, but only
 // to a client that sets `clientCapabilities.auth.terminal`.
+// FAKE_ACP_AUTH=claude-terminal advertises the real adapter's methods
+// (claude-agent-acp 0.84: `claude-ai-login` and `console-login`), to the same
+// clients (story 9.1).
+//
+// `--cli <args>` runs the fake Claude CLI, `fake-claude-login.mjs <args>`, as
+// the real adapter runs `claude`: as a child with this process's terminal,
+// passing on its exit code (story 9.1).
 import { spawn } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
+import { fileURLToPath } from 'node:url';
 import * as acp from '@agentclientprotocol/sdk';
 
 if (process.env.FAKE_ACP_EXIT_AT_START === '1') process.exit(3);
+
+if (process.argv.includes('--cli')) {
+  const cliArgs = process.argv.slice(2).filter((arg) => arg !== '--cli');
+  const cli = spawn(process.execPath, [fileURLToPath(new URL('./fake-claude-login.mjs', import.meta.url)), ...cliArgs], { stdio: 'inherit' });
+  for (const signal of process.platform === 'win32' ? ['SIGINT', 'SIGTERM'] : ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    process.on(signal, () => cli.kill(signal));
+  }
+  cli.on('error', () => process.exit(1));
+  cli.on('exit', (code) => process.exit(code ?? 1));
+  // Nothing below runs: this process only wraps the CLI.
+  await new Promise(() => {});
+}
 
 const grandchild =
   process.env.FAKE_ACP_SPAWN_GRANDCHILD === '1'
@@ -116,7 +136,12 @@ acp
       authMethods:
         process.env.FAKE_ACP_AUTH === 'terminal' && terminalAuth
           ? [{ type: 'terminal', id: 'fake-login', name: 'Log in with your account', description: 'Signs in with the fake agent', args: ['--login'], env: { FAKE_LOGIN: '1' } }]
-          : [],
+          : process.env.FAKE_ACP_AUTH === 'claude-terminal' && terminalAuth
+            ? [
+                { type: 'terminal', id: 'claude-ai-login', name: 'Claude Subscription', description: 'Use Claude subscription ', args: ['--cli', 'auth', 'login', '--claudeai'] },
+                { type: 'terminal', id: 'console-login', name: 'Anthropic Console', description: 'Use Anthropic Console (API usage billing)', args: ['--cli', 'auth', 'login', '--console'] },
+              ]
+            : [],
       agentInfo: { name: 'fake-acp-agent', version: '1.0.0' },
     };
   })

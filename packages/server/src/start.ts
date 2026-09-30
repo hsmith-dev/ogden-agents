@@ -5,13 +5,18 @@ import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
 import {
   createClaudeCodeAgent,
+  createClaudeCodeSetup,
   createMemoryAgentSetup,
   createMemoryAppShortcut,
   createMemorySecretStore,
   createOsAppShortcut,
   createUvToolchain,
+  resolveClaudeAgentAcp,
+  type PtyLoader,
 } from '@ogden-agents/adapters';
 import {
+  CoreError,
+  createAgentSetup,
   createChat,
   createDataDir,
   clampCheckInDelay,
@@ -165,10 +170,19 @@ export interface StartOptions {
   /** Variables added to every agent's environment on top of {@link agentEnvironment} (tests: the fake agent's switches). */
   extraAgentEnv?: Readonly<Record<string, string>>;
   /**
-   * Installing and signing into each agent. Default: the in-memory
-   * `setup-memory` stub, until onboarding (9.x) brings the real adapters.
+   * Installing and signing into each agent. Default: the `setup-claude-code`
+   * adapter when the Claude Agent ACP adapter is found (see
+   * {@link claudeAdapterPath}), else the in-memory `setup-memory` stub.
    */
   agentSetup?: readonly AgentSetupPort[];
+  /** Loads `node-pty` for the hidden sign-in terminal (tests: one that fails, AD-19). Default: `terminal-pty`'s lazy loader. */
+  loadPty?: PtyLoader;
+  /**
+   * A `BROWSER` value that stops the Claude CLI opening its own sign-in tab,
+   * so the page opens it. Unset by default until the live check proves one
+   * works (story 9.1): the CLI opens its tab and the page shows a link.
+   */
+  claudeCliBrowser?: string;
   /** Where API keys are kept (AD-16). Default: the in-memory `secrets-memory` stub, until 9.4 brings the keychain. */
   secrets?: SecretStorePort;
   /**
@@ -366,6 +380,30 @@ async function listenAndAnnounce({
   const settled = core.entities.settleInterruptedSessions(RESTARTED_REASON);
   if (settled.length > 0) log.info('sessions left working by a stopped server are idle and resumable', { sessions: settled.length });
   const extraAgentEnv = options.extraAgentEnv ?? {};
+  const agentEnv = () => ({ ...agentEnvironment(), ...extraAgentEnv });
+  const claudeAdapterPath = options.claudeAdapterPath ?? (process.env[CLAUDE_ACP_PATH_ENV] || undefined) ?? resolveClaudeAgentAcp();
+  // The real sign-in only where the adapter is found; the memory stub (not installed) elsewhere.
+  const claudeSetup =
+    options.agentSetup === undefined && claudeAdapterPath !== undefined
+      ? createClaudeCodeSetup({
+          adapterPath: claudeAdapterPath,
+          env: agentEnv,
+          listAuthMethods: (env) => agent.listAuthMethods({ env }),
+          ...(options.loadPty === undefined ? {} : { loadPty: options.loadPty }),
+          ...(options.claudeCliBrowser === undefined ? {} : { cliBrowser: options.claudeCliBrowser }),
+          // Step names, exit codes and load failures only: never the terminal's output, the URL or a code (AD-16).
+          onDiagnostic: (message, fields) => log.info(`agent setup: ${message}`, fields),
+        })
+      : undefined;
+  const agentSetup = createAgentSetup(core.events, options.agentSetup ?? (claudeSetup === undefined ? [createMemoryAgentSetup()] : [claudeSetup]), {
+    onFailure: (agentId, step, error) =>
+      log.warn('agent sign-in step failed', {
+        agentId,
+        step,
+        code: error instanceof CoreError ? error.code : 'unexpected',
+        ...(error instanceof CoreError ? { reason: error.message } : {}),
+      }),
+  });
   // One instance for the chat that asks and the routes that answer: core's (story 2.6).
   const permissions = core.permissions;
   const configuredCheckIn = options.checkInDelayMs ?? checkInDelayFromEnv();
@@ -376,7 +414,7 @@ async function listenAndAnnounce({
     sessionEvents: core.sessionEvents,
     agent,
     permissions,
-    agentEnv: () => ({ ...agentEnvironment(), ...extraAgentEnv }),
+    agentEnv,
     // The event carries the plain reason; the log also gets the details (never the environment).
     onAgentError: (sessionId, error) => log.warn('agent failed', { sessionId, code: error.code, reason: error.message, ...error.details }),
     onInternalError: (sessionId, error) => log.error('applying an agent event failed', { sessionId, reason: String(error) }),
@@ -396,7 +434,7 @@ async function listenAndAnnounce({
     toolchain,
     chat,
     permissions,
-    agentSetup: options.agentSetup ?? [createMemoryAgentSetup()],
+    agentSetup,
     secrets: options.secrets ?? createMemorySecretStore(),
     appShortcut,
     tabs,
@@ -462,7 +500,11 @@ async function listenAndAnnounce({
   let closing: Promise<void> | undefined;
   const shutdown = (reason: StopReason): Promise<void> => {
     closing ??= closeServer(server, wss)
-      // The server owns agent processes (AD-3): none outlives it.
+      // The server owns agent processes (AD-3): none outlives it, a hidden sign-in terminal included.
+      .finally(() => {
+        claudeSetup?.close();
+        return agentSetup.dispose().catch((error: unknown) => log.warn('stopping sign-ins failed', { reason: String(error) }));
+      })
       .finally(() => chat.close().catch((error: unknown) => log.warn('stopping agents failed', { reason: String(error) })))
       .finally(() => {
         try {

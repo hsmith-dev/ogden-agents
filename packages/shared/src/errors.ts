@@ -27,6 +27,8 @@ export const API_ERROR_CODES = [
   'permission_not_pending',
   /** The app shortcut can't be added on this computer (422). */
   'shortcut_unsupported',
+  /** A sign-in code was sent, but no sign-in is in progress for that agent (409). */
+  'sign_in_not_pending',
   /** An agent's install, sign-in or API key could not be done (500). The message says why in plain words. */
   'agent_setup_failed',
   /** Anything else that went wrong on the server (500). */

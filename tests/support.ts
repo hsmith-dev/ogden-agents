@@ -37,10 +37,17 @@ export function removeDataDir(dir: string): void {
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }
 
-/** Starts the built server on `port` (0: any free port) with `dataDir`, logging nowhere, with a launch link. `extra` adds options (a stub toolchain, say). */
+/** The fake ACP agent, which also stands in for the Claude CLI (`--cli`, the fake login program). */
+export const FAKE_AGENT = join(ROOT, 'tests', 'fixtures', 'fake-acp-agent.mjs');
+
+/**
+ * Starts the built server on `port` (0: any free port) with `dataDir`, logging nowhere, with a launch link.
+ * `extra` adds options (a stub toolchain, say). The agent is the fake one unless `extra` names another,
+ * so no test runs the real Claude Code adapter or its login.
+ */
 export async function startServer(dataDir: string, port = 0, extra: StartOptions = {}): Promise<RunningServer> {
   const { start, createLogger } = await serverModule();
-  return start({ port, open: false, dataDir, webRoot: WEB_ROOT, log: createLogger(() => {}), ...extra, launch: true });
+  return start({ port, open: false, dataDir, webRoot: WEB_ROOT, log: createLogger(() => {}), claudeAdapterPath: FAKE_AGENT, ...extra, launch: true });
 }
 
 // Shared with the plain-Node install scripts: whether a process with a pid

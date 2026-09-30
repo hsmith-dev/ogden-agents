@@ -3,6 +3,11 @@
 //
 //   node scripts/smoke-installed.mjs [path/to/ogden-agents-<version>.tgz]
 //   node scripts/smoke-installed.mjs --registry-spec ogden-agents@<version>
+//   node scripts/smoke-installed.mjs --omit-optional [path/to/…tgz]
+//
+// `--omit-optional` installs without optional dependencies (`node-pty`, the
+// hidden sign-in terminal; AD-19), as on a computer where it can't build: the
+// app must start all the same.
 //
 // Registry mode (the release workflow's verify job) runs exactly what a user
 // types, `npx --yes ogden-agents@<version> --no-open --port 0`, against the npm
@@ -54,8 +59,10 @@ function registrySpecArg() {
 }
 
 const registrySpec = registrySpecArg();
+const omitOptional = process.argv.slice(2).includes('--omit-optional');
+const tarballArg = process.argv.slice(2).find((arg) => !arg.startsWith('--'));
 const tarball =
-  registrySpec === undefined ? resolve(process.argv[2] ?? join(root, `ogden-agents-${version}.tgz`)) : undefined;
+  registrySpec === undefined ? resolve(tarballArg ?? join(root, `ogden-agents-${version}.tgz`)) : undefined;
 
 if (tarball !== undefined && !existsSync(tarball)) {
   console.error(`smoke: tarball not found: ${tarball}\nRun \`pnpm build && pnpm pack\` first.`);
@@ -85,12 +92,12 @@ function echoLines() {
 function startInstall() {
   let next;
   try {
-    next = prepareInstall(registrySpec === undefined ? { tarball } : { registrySpec });
+    next = prepareInstall(registrySpec === undefined ? { tarball, omitOptional } : { registrySpec, omitOptional });
   } catch (error) {
     console.error(`smoke: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
-  console.log(`smoke: installing ${registrySpec ?? tarball} with npx in ${next.workDir}`);
+  console.log(`smoke: installing ${registrySpec ?? tarball} with npx in ${next.workDir}${omitOptional ? ', without optional dependencies' : ''}`);
   return { install: next, launcher: next.runLauncher(['--no-open', '--port', '0'], { echo: echoLines() }) };
 }
 

@@ -29,6 +29,12 @@ export const AgentSetupStatus = z.object({
   method: AgentAuthMethodKind.optional(),
   /** Plain words when there is something to say (why an install or sign-in failed). Never a secret. */
   reason: z.string().min(1).optional(),
+  /**
+   * Who opens the sign-in page (9.1): `page` when the agent's own browser
+   * opening is suppressed, so the page opens it in a new tab; `agent` when
+   * the agent opens it itself, so the page shows a link instead of a second tab.
+   */
+  signInTab: z.enum(['page', 'agent']).optional(),
 });
 export type AgentSetupStatus = z.infer<typeof AgentSetupStatus>;
 
@@ -46,6 +52,26 @@ export const SignInResponse = z.object({
   url: z.url().nullable(),
 });
 export type SignInResponse = z.infer<typeof SignInResponse>;
+
+/** The characters a pasted sign-in code may have (9.1): letters, digits and `. _ # ~ -`. */
+export const SIGN_IN_CODE_PATTERN = /^[A-Za-z0-9._#~-]+$/;
+/** The longest sign-in code accepted, in characters. */
+export const MAX_SIGN_IN_CODE_LENGTH = 512;
+
+/**
+ * `POST /api/v1/agents/:agentId/sign-in/code` (sent `Cache-Control: no-store`):
+ * the code the sign-in page showed, typed into the agent's sign-in. Never
+ * logged, evented, stored or echoed, not even in a validation message (AD-16).
+ */
+export const SignInCodeRequest = z.object({
+  code: z
+    .string()
+    .trim()
+    .min(1, 'Paste the code from the sign-in page.')
+    .max(MAX_SIGN_IN_CODE_LENGTH, 'That is too long to be a sign-in code.')
+    .regex(SIGN_IN_CODE_PATTERN, "That doesn't look like a sign-in code. Copy it again from the sign-in page."),
+});
+export type SignInCodeRequest = z.infer<typeof SignInCodeRequest>;
 
 /** `PUT /api/v1/agents/:agentId/api-key`: the key, stored in the keychain. Never logged, never echoed. */
 export const SetApiKeyRequest = z.object({

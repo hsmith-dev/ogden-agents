@@ -1,5 +1,5 @@
 import { serveStatic } from '@hono/node-server/serve-static';
-import type { AgentSetupPort, AppShortcutPort, Chat, EventLog, Permissions, SecretStorePort, Toolchain } from '@ogden-agents/core';
+import type { AgentSetup, AppShortcutPort, Chat, EventLog, Permissions, SecretStorePort, Toolchain } from '@ogden-agents/core';
 import { API_ROUTES, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
@@ -64,8 +64,8 @@ export interface AppOptions {
   chat?: Chat;
   /** Core's answers to permission requests, which the permission routes decide through (the declining stub until 2.6). */
   permissions?: Permissions;
-  /** Installing and signing into each agent (onboarding 9.x; the `setup-memory` stub until then). */
-  agentSetup?: readonly AgentSetupPort[];
+  /** Core's agent setup use-case: each agent's state and signing in (9.1); without it those routes answer 501. */
+  agentSetup?: AgentSetup;
   /** Where API keys are kept (AD-16; the `secrets-memory` stub until 9.4). */
   secrets?: SecretStorePort;
   /** The Ogden Agents app shortcut (E2-R10; the `shortcut-memory` stub until 2.4). */

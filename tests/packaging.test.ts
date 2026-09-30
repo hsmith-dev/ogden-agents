@@ -222,6 +222,21 @@ describe('packaging', () => {
     ]);
   });
 
+  it('node-pty is optional (AD-19): a root optionalDependency, never a dependency, and every bundled package pins the same version', () => {
+    const read = (path: string) =>
+      JSON.parse(readFileSync(join(ROOT, path), 'utf8')) as { dependencies?: Record<string, string>; optionalDependencies?: Record<string, string> };
+    const root = read('package.json');
+    const pinned = root.optionalDependencies?.['node-pty'];
+    expect(pinned).toBe('1.1.0');
+    expect(root.dependencies?.['node-pty']).toBeUndefined();
+    for (const dir of BUNDLED_PACKAGES) {
+      const manifest = read(`packages/${dir}/package.json`);
+      expect(manifest.dependencies?.['node-pty'], dir).toBeUndefined();
+      const optional = manifest.optionalDependencies?.['node-pty'];
+      if (optional !== undefined) expect(optional, dir).toBe(pinned);
+    }
+  });
+
   it('the root, server and web packages share one version (the launcher, server and UI compare it; AD-20)', () => {
     const versionOf = (path: string) => (JSON.parse(readFileSync(join(ROOT, path), 'utf8')) as { version: string }).version;
     const root = versionOf('package.json');

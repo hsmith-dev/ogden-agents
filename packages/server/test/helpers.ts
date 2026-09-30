@@ -67,10 +67,14 @@ export async function waitFor(predicate: () => boolean | Promise<boolean>, what:
 /** A started test server; it has a launch link, since tests start it with `launch: true`. */
 export type TestServer = RunningServer & { launchUrl: string };
 
+/** The fake ACP agent (`tests/fixtures/fake-acp-agent.mjs`), which also stands in for the Claude CLI (`--cli`). */
+export const FAKE_AGENT = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-acp-agent.mjs');
+
 /**
  * Starts a real server on any free port, a temp data folder and a tiny UI,
  * with a launch link, and closes it after the test. Log lines go to `lines`
- * (if given); any start option overrides these defaults.
+ * (if given); any start option overrides these defaults. The agent is the
+ * fake one, so no test ever runs the real Claude Code adapter or its login.
  */
 export async function startTestServer(options: StartOptions & { lines?: string[] } = {}): Promise<TestServer> {
   const { lines, ...rest } = options;
@@ -80,6 +84,7 @@ export async function startTestServer(options: StartOptions & { lines?: string[]
     log: createLogger((line) => lines?.push(line)),
     dataDir: tempDataDir(),
     webRoot: tinyWebRoot(),
+    claudeAdapterPath: FAKE_AGENT,
     ...rest,
     launch: true,
   });

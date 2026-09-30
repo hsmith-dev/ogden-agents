@@ -82,3 +82,6 @@
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-session-view-completes-part-a-session-behaviour-plan.md`
   summary: Resolved: save a transcript-reopened session's new agent id only once its primed prompt succeeds (2.7 F4).
   evidence: `packages/core/src/chat.ts` `unsavedRef`; `packages/core/test/chat.test.ts` "saves a transcript reopen’s new agent id only once".
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-tracer-bullet-sign-in-with-a-claude-subscription-through-a-h-plan.md`
+  summary: Resolved: validate terminal-type auth methods before running them (2.3 F4, filed for 9.2; closed by 9.1, the first story to run one). Only `claude-ai-login` with exactly `["--cli","auth","login","--claudeai"]` and no env is run, always as this Node plus the resolved adapter; `_meta.terminal-auth.command` is ignored; anything else fails with a plain reason and spawns nothing.
+  evidence: `packages/adapters/src/setup-claude-code/auth-method.ts` `checkAuthMethods`; tests in `packages/adapters/test/setup-claude-code.test.ts` ("the auth method check") and `packages/server/test/agent-setup-routes.test.ts`.

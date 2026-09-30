@@ -102,11 +102,18 @@ export const API_ROUTES = {
    */
   agentInstall: `${API_BASE}/agents/:agentId/install`,
   /**
-   * `POST` → `SignInResponse`, sent `Cache-Control: no-store` (9.2): starts
+   * `POST` → `SignInResponse`, sent `Cache-Control: no-store` (9.1): starts
    * sign-in with the user's own account; the URL is never in an event.
    * `DELETE` → 204 cancels a sign-in in progress.
    */
   agentSignIn: `${API_BASE}/agents/:agentId/sign-in`,
+  /**
+   * `POST SignInCodeRequest` → 204, sent `Cache-Control: no-store` (9.1):
+   * types the code the sign-in page showed into the sign-in in progress.
+   * 400 for a malformed code (never echoed), 409 `sign_in_not_pending`
+   * without one in progress. The code is never logged, evented or stored.
+   */
+  agentSignInCode: `${API_BASE}/agents/:agentId/sign-in/code`,
   /**
    * `PUT SetApiKeyRequest` → 204 (9.4): stores the key in the keychain
    * (AD-16); the body is never logged or echoed. `DELETE` → 204 removes it.

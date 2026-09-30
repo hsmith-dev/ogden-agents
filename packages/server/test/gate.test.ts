@@ -7,7 +7,7 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createMemoryAgentSetup, createMemoryAppShortcut, createMemorySecretStore } from '@ogden-agents/adapters';
-import { createChat, LEGACY_AUTH_KEY_FILE, openCore, PORT_FILE } from '@ogden-agents/core';
+import { createAgentSetup, createChat, LEGACY_AUTH_KEY_FILE, openCore, PORT_FILE } from '@ogden-agents/core';
 import { API_BASE, API_ROUTES, ApiErrorBody, WS_PROTOCOL } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
@@ -538,7 +538,7 @@ describe('security gate', () => {
   });
 });
 
-/** Every API route with its methods, as the lanes' route files register them (stories 2.2 and 2.3). */
+/** Every API route with its methods, as the lanes' route files register them (stories 2.2, 2.3 and 9.1). */
 const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.tabCheck}`,
   `POST ${API_ROUTES.launchCodes}`,
@@ -569,6 +569,7 @@ const EXPECTED_API_ROUTES = [
   `POST ${API_ROUTES.agentInstall}`,
   `POST ${API_ROUTES.agentSignIn}`,
   `DELETE ${API_ROUTES.agentSignIn}`,
+  `POST ${API_ROUTES.agentSignInCode}`,
   `PUT ${API_ROUTES.agentApiKey}`,
   `DELETE ${API_ROUTES.agentApiKey}`,
   `GET ${API_ROUTES.onboarding}`,
@@ -611,7 +612,7 @@ describe('gate placement', () => {
         control,
         toolchain,
         chat,
-        agentSetup: [createMemoryAgentSetup()],
+        agentSetup: createAgentSetup(core.events, [createMemoryAgentSetup()]),
         secrets: createMemorySecretStore(),
         appShortcut: createMemoryAppShortcut(),
         tabs: createTabTokens(),

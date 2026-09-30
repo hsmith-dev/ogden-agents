@@ -1,4 +1,4 @@
-import { GearSix, PaintBrush, Plus } from '@phosphor-icons/react';
+import { GearSix, PaintBrush, Plus, Wrench } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
 import { useId } from 'react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/ui/dropdown-menu';
@@ -83,7 +83,7 @@ function StatusSidebarBody() {
   );
 }
 
-/** Settings sections (Agents and Notifications arrive with later epics). */
+/** Settings sections: Appearance and Tools (Agents and Notifications arrive with later epics). */
 function SettingsMenu() {
   const { setSheetOpen } = useSidebar();
   return (
@@ -100,6 +100,12 @@ function SettingsMenu() {
           <Link to="/settings/appearance">
             <PaintBrush aria-hidden />
             Appearance
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
+          <Link to="/settings/tools">
+            <Wrench aria-hidden />
+            Tools
           </Link>
         </DropdownMenuItem>
       </DropdownMenuContent>

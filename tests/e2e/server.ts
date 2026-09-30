@@ -26,8 +26,13 @@ export function removeDataDir(dir: string): void {
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }
 
-/** Starts the server on `port` (0: any free port) with `dataDir`, logging nowhere. */
-export async function startServer(dataDir: string, port = 0): Promise<RunningServer> {
+export type StartOptions = Parameters<ServerModule['start']>[0];
+
+/** Starts the server on `port` (0: any free port) with `dataDir`, logging nowhere. `extra` adds options (a stub toolchain, say). */
+export async function startServer(dataDir: string, port = 0, extra: StartOptions = {}): Promise<RunningServer> {
   const { start, createLogger } = await load();
-  return start({ port, open: false, dataDir, webRoot: WEB_ROOT, log: createLogger(() => {}) });
+  return start({ port, open: false, dataDir, webRoot: WEB_ROOT, log: createLogger(() => {}), ...extra });
 }
+
+/** The built server module, for its exports (such as `ToolchainError`). */
+export const serverModule = load;

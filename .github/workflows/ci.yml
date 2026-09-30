@@ -70,6 +70,24 @@ jobs:
       - name: Smoke test the installed package
         run: node scripts/smoke-installed.mjs
 
+  # The uv archives Ogden Agents may install (story 1.8): re-download each one
+  # pinned in packages/adapters/src/toolchain-uv/uv-release.json and check its
+  # SHA-256, so a wrong pin fails here and not on a user's computer. The only
+  # job that downloads uv; the unit tests use a local fixture server.
+  uv-pins:
+    name: uv pins
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Check every pinned uv archive
+        run: node scripts/check-uv-pins.mjs
+
   # UI layout in a real browser (architecture Conventions: jsdom doesn't
   # evaluate media queries): sidebar forms and overflow at 1440, 900 and 390
   # px, theme and density switching, and the signed-out launch page.

@@ -1,7 +1,14 @@
 import { upgradeWebSocket } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
-import type { EventLog } from '@ogden-agents/core';
-import { ClientMessage, ServerMessage } from '@ogden-agents/shared';
+import type { EventLog, Toolchain } from '@ogden-agents/core';
+import {
+  ClientMessage,
+  ServerMessage,
+  TOOLCHAIN_PATH,
+  ToolchainInstallResponse,
+  ToolchainResponse,
+  UV_INSTALL_PATH,
+} from '@ogden-agents/shared';
 import { Hono, type MiddlewareHandler } from 'hono';
 import type { WSContext } from 'hono/ws';
 import type { Logger } from './log.js';
@@ -46,11 +53,13 @@ export interface AppOptions {
   gate: MiddlewareHandler;
   /** The launcher handshake and Quit; without it those routes answer 404. */
   control?: ServerControl;
+  /** The `uv` status and its user-initiated install (story 1.8); without it those routes answer 404. */
+  toolchain?: Toolchain;
 }
 
 const WS_OPEN = 1;
 
-export function createApp({ events, webRoot, log, gate, control }: AppOptions): Hono {
+export function createApp({ events, webRoot, log, gate, control, toolchain }: AppOptions): Hono {
   const app = new Hono();
 
   // First, for every method and path: no route may be registered before this line.
@@ -105,6 +114,32 @@ export function createApp({ events, webRoot, log, gate, control }: AppOptions): 
         );
       }
       return c.json(result, 202);
+    });
+  }
+
+  if (toolchain !== undefined) {
+    const failure = (message: string) => ({ error: { code: 'toolchain_unavailable', message } });
+
+    app.get(TOOLCHAIN_PATH, async (c) => {
+      try {
+        return c.json(ToolchainResponse.parse({ uv: await toolchain.status() }));
+      } catch (error) {
+        log.error('toolchain status failed', { reason: String(error) });
+        return c.json(failure("Ogden Agents couldn't check for uv. Try again."), 500);
+      }
+    });
+
+    // Install only ever starts here, when the user clicks Install: a
+    // state-changing POST, so the gate has already checked its Origin (AD-15).
+    app.post(UV_INSTALL_PATH, async (c) => {
+      try {
+        const result = ToolchainInstallResponse.parse(await toolchain.installUv());
+        if (result.started) log.info('uv install started');
+        return c.json(result, 202);
+      } catch (error) {
+        log.error('uv install could not start', { reason: String(error) });
+        return c.json(failure("uv couldn't be installed. Try again."), 500);
+      }
     });
   }
 

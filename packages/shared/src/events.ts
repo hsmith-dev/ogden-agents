@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { Run, RunOutcome, Session, SessionDriver, SessionState, Workspace } from './entities.js';
 import { EventId, RunId, SessionId, WorkspaceId } from './ids.js';
 import { IsoUtcTimestamp } from './time.js';
+import { ToolchainErrorCode, ToolName, ToolSource } from './toolchain.js';
 
 /**
  * The event log contract (AD-5) and the wire contract for the events
@@ -23,6 +24,9 @@ export type Seq = z.infer<typeof Seq>;
 
 /** The stream of install-level events (those with `workspaceId: null`). */
 export const SERVER_STREAM = 'server';
+
+/** The stream of toolchain events (install-level: `workspaceId: null`). */
+export const TOOLCHAIN_STREAM = 'toolchain';
 
 /** Fields core fills in when it appends an event. */
 const assigned = {
@@ -146,6 +150,53 @@ const RunOutcomeChangedInput = z.object({
 export const RunOutcomeChangedEvent = RunOutcomeChangedInput.extend(assigned);
 export type RunOutcomeChangedEvent = z.infer<typeof RunOutcomeChangedEvent>;
 
+const onToolchainStream = { workspaceId: z.null(), streamId: z.literal(TOOLCHAIN_STREAM) };
+
+const ToolchainInstallStartedInput = z.object({
+  type: z.literal('toolchain.install_started'),
+  ...onToolchainStream,
+  payload: z.object({ tool: ToolName, version: z.string().min(1) }),
+});
+/** The user clicked Install and the download began (story 1.8). */
+export const ToolchainInstallStartedEvent = ToolchainInstallStartedInput.extend(assigned);
+export type ToolchainInstallStartedEvent = z.infer<typeof ToolchainInstallStartedEvent>;
+
+const ToolchainInstallProgressInput = z.object({
+  type: z.literal('toolchain.install_progress'),
+  ...onToolchainStream,
+  payload: z.object({
+    tool: ToolName,
+    bytes: z.number().int().nonnegative(),
+    total: z.number().int().positive().nullable(),
+  }),
+});
+/** Bytes downloaded so far (throttled); `total` is `null` when the server did not say. */
+export const ToolchainInstallProgressEvent = ToolchainInstallProgressInput.extend(assigned);
+export type ToolchainInstallProgressEvent = z.infer<typeof ToolchainInstallProgressEvent>;
+
+const ToolchainInstallCompletedInput = z.object({
+  type: z.literal('toolchain.install_completed'),
+  ...onToolchainStream,
+  payload: z.object({ tool: ToolName, version: z.string().min(1), source: ToolSource }),
+});
+/** The private copy is verified, unpacked and ready. */
+export const ToolchainInstallCompletedEvent = ToolchainInstallCompletedInput.extend(assigned);
+export type ToolchainInstallCompletedEvent = z.infer<typeof ToolchainInstallCompletedEvent>;
+
+const ToolchainInstallFailedInput = z.object({
+  type: z.literal('toolchain.install_failed'),
+  ...onToolchainStream,
+  payload: z.object({
+    tool: ToolName,
+    code: ToolchainErrorCode,
+    reason: z.string().min(1),
+    canInstall: z.boolean(),
+  }),
+});
+/** The install failed; nothing half-installed is left behind. `reason` is plain words, no secrets. */
+export const ToolchainInstallFailedEvent = ToolchainInstallFailedInput.extend(assigned);
+export type ToolchainInstallFailedEvent = z.infer<typeof ToolchainInstallFailedEvent>;
+
 /** Every event core may append (grows with later stories). Nothing unschematized is emitted. */
 export const CoreEvent = z.discriminatedUnion('type', [
   ServerStartedEvent,
@@ -158,6 +209,10 @@ export const CoreEvent = z.discriminatedUnion('type', [
   SessionMessageCompletedEvent,
   RunCreatedEvent,
   RunOutcomeChangedEvent,
+  ToolchainInstallStartedEvent,
+  ToolchainInstallProgressEvent,
+  ToolchainInstallCompletedEvent,
+  ToolchainInstallFailedEvent,
 ]);
 export type CoreEvent = z.infer<typeof CoreEvent>;
 export type CoreEventType = CoreEvent['type'];
@@ -174,6 +229,10 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   SessionMessageCompletedInput,
   RunCreatedInput,
   RunOutcomeChangedInput,
+  ToolchainInstallStartedInput,
+  ToolchainInstallProgressInput,
+  ToolchainInstallCompletedInput,
+  ToolchainInstallFailedInput,
 ]);
 export type NewCoreEvent = z.infer<typeof NewCoreEvent>;
 

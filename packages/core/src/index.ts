@@ -5,3 +5,4 @@ export * from './entities.js';
 export * from './errors.js';
 export * from './event-log.js';
 export { newId } from './ids.js';
+export * from './toolchain.js';

@@ -20,3 +20,5 @@ export {
   LAUNCHER_TOKEN_HEADER,
   readLauncherToken,
 } from './launcher-token.js';
+// Toolchain types for callers that stub the uv install (tests).
+export { ToolchainError, type DetectedToolStatus, type ToolchainPort, type ToolProgress } from '@ogden-agents/core';

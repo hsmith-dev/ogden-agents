@@ -2,6 +2,7 @@ import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/
 import { AppearancePage } from './routes/appearance-page';
 import { HomePage } from './routes/home-page';
 import { NotFoundPage } from './routes/not-found-page';
+import { ToolsPage } from './routes/tools-page';
 import { AppShell } from './shell/app-shell';
 
 /*
@@ -23,7 +24,9 @@ const settingsRoute = createRoute({
 
 const appearanceRoute = createRoute({ getParentRoute: () => settingsRoute, path: '/appearance', component: AppearancePage });
 
-const routeTree = rootRoute.addChildren([homeRoute, settingsRoute.addChildren([appearanceRoute])]);
+const toolsRoute = createRoute({ getParentRoute: () => settingsRoute, path: '/tools', component: ToolsPage });
+
+const routeTree = rootRoute.addChildren([homeRoute, settingsRoute.addChildren([appearanceRoute, toolsRoute])]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });
 

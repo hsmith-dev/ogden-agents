@@ -3,7 +3,16 @@ import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { createDataDir, ensureDataDir, openCore, PORT_FILE, type Core } from '@ogden-agents/core';
+import { createUvToolchain } from '@ogden-agents/adapters';
+import {
+  createDataDir,
+  createToolchain,
+  ensureDataDir,
+  openCore,
+  PORT_FILE,
+  type Core,
+  type ToolchainPort,
+} from '@ogden-agents/core';
 import { SERVER_STREAM, ServerMessage } from '@ogden-agents/shared';
 import openBrowser from 'open';
 import { WebSocketServer } from 'ws';
@@ -58,6 +67,12 @@ export interface StartOptions {
   log?: Logger;
   /** Override the clock for launch code and session expiry (tests). Default `Date.now`. */
   now?: Clock;
+  /**
+   * Override how `uv` is found and installed (tests). Default: the
+   * `toolchain-uv` adapter on `dataDir`, which downloads only when the user
+   * clicks Install.
+   */
+  toolchain?: ToolchainPort;
   /**
    * Called once the server has stopped by itself (Quit, or a restart the
    * launcher asked for) and everything is closed. A server process exits here.
@@ -216,7 +231,15 @@ async function listenAndAnnounce({
     launcherToken: { verify: (given) => launcherToken?.verify(given) ?? false },
     log,
   });
-  const app = createApp({ events: core.events, webRoot: options.webRoot ?? defaultWebRoot(), log, gate, control });
+  const toolchain = createToolchain(core.events, options.toolchain ??
+      createUvToolchain({
+        dataDir,
+        onCleanupError: (error) => log.warn('could not remove uv install temp files', { reason: String(error) }),
+      }), {
+    // The event carries the plain reason; the log also gets the target, URL and (on a mismatch) both hashes.
+    onFailure: (error) => log.warn('uv install failed', { code: error.code, reason: error.message, ...error.details }),
+  });
+  const app = createApp({ events: core.events, webRoot: options.webRoot ?? defaultWebRoot(), log, gate, control, toolchain });
 
   let bound: { server: ReturnType<typeof createAdaptorServer>; wss: WebSocketServer; port: number } | undefined;
   let lastTried = requested;

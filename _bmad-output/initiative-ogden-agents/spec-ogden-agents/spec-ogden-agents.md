@@ -102,6 +102,8 @@ CAP-11 (cost caps) is retired and its number is not reused.
 - An MCP registry, memory/RAG, a semantic cache, and cross-project tickets.
 - Tracker stores (Jira, Linear, GitHub Issues, Notion, Trello) in v1. The board covers the repo store only.
 
+- Planned for v2, not v1 (epic 8): viewing the project's markdown files in the app, code-change review, and a VS Code extension.
+
 ## Success signal
 
 - A non-developer runs `npx ogden-agents`, picks an agent and signs in with their subscription, describes an app idea in the browser, gets a spec and a ticketed epic, clicks Build, watches stories build in parallel, and approves merges, all without opening a terminal. An advanced user flips to the agent's terminal mid-session and back without losing the session.

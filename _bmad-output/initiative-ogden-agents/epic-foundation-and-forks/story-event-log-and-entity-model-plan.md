@@ -104,6 +104,7 @@ Baseline `bb4451b` on `story/1.3-event-log-and-entity-model` (built on 1.1 and 1
 - The launcher test and the smoke script now run with a temp `OGDEN_AGENTS_DATA_DIR`, and the smoke client sends `subscribe` before waiting for `server.started`.
 - Orchestrator: the uncommitted 1.3 work was rebased (stash, rebase, pop; no conflicts) from `0c7a4a7` onto `2e4dd2b`, which adds only 1.2's Windows smoke fix and CI note. `baseline_revision` moved with it so the review diff covers only 1.3.
 - Matrix test audit (orchestrator, macOS, Node 24.21): all 8 rows have tests that ran and passed (65 passed; 1 skipped is the case-sensitive-filesystem test `it.runIf(!caseInsensitive)`, which runs on Linux CI); `pnpm pack` plus the smoke test pass with `better-sqlite3` and migrations loading from the installed tarball.
+- CI confirmation (PR #2, after the rename): the first run failed only the Windows data-folder test, which assumed the env-paths folder ends in the app name (Windows adds `\\Data`); fixed in `b93b335`. GitHub Actions run 36667176996: 6/6 green, including `better-sqlite3`, migrations, symlink/junction and permission paths on Windows.
 
 ## Plan Change Log
 

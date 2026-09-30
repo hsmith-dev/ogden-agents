@@ -239,8 +239,9 @@ graph LR
 - **Prevents:** an update killing agents mid-work, or a new UI talking to an old server.
 - **Rule:**
   - The launcher asks the running server for its version.
-  - If the server is older, the launcher offers a restart once all sessions are `idle` or `done`, and never stops running sessions itself.
-  - The server rejects UI assets from another version.
+  - If the server is older and idle (no active runs or sessions), the launcher asks it to restart and it restarts automatically, then the launcher starts the new version. If any session is busy, the older server keeps running and is opened as it is; the launcher never stops running sessions itself.
+  - If an open tab's UI is older than the server it talks to (a newer server was found by an older open tab), the page shows a non-blocking reload banner. The server does not reject UI assets from another version.
+  - Note (epic 1 retrospective, 2026-09-30): amended in place to match what story 1.7 built; the earlier text said the launcher *offers* a restart and the server rejects UI assets from another version.
 
 ### AD-21 — No standard flow requires a terminal
 

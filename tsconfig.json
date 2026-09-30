@@ -3,7 +3,15 @@
   "compilerOptions": {
     "allowJs": true,
     "checkJs": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["bin/**/*.js", "scripts/**/*.mjs", "tests/**/*.ts", "vitest.config.ts"]
+  "include": [
+    "bin/**/*.js",
+    "scripts/**/*.mjs",
+    "tests/**/*.ts",
+    "vitest.config.ts",
+    "playwright.config.ts"
+  ]
 }

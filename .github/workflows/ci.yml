@@ -53,3 +53,40 @@ jobs:
       # ogden-agents-<package.json version>.tgz, the file `pnpm pack` just wrote.
       - name: Smoke test the installed package
         run: node scripts/smoke-installed.mjs
+
+  # UI layout in a real browser (architecture Conventions: jsdom doesn't
+  # evaluate media queries): sidebar forms and overflow at 1440, 900 and 390
+  # px, theme and density switching, and the signed-out launch page.
+  e2e:
+    name: Browser layout (Linux, Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      # Builds dist/ first, then runs tests/e2e against the built server.
+      - name: Browser tests
+        run: pnpm e2e
+
+      - name: Upload report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

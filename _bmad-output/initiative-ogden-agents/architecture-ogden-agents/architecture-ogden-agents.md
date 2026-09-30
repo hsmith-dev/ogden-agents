@@ -254,7 +254,7 @@ graph LR
 | API | REST under `/api/v1`, scoped by workspace: `/api/v1/workspaces/:wsId/…` |
 | Errors | `{ "error": { "code": "snake_case", "message": "…", "details"?: {} } }`; codes live in `packages/shared` |
 | Adapter naming | `<port>-<variant>`: `acp-claude-code`, `sandbox-seatbelt`, `notify-webhook` |
-| Files | kebab-case; one exported React component per file |
+| Files | kebab-case; one exported React component per file, except shadcn-style compound components in `packages/web/src/ui` (for example `sidebar.tsx` exporting `Sidebar`, `SidebarGroup`, …), which keep their parts together |
 | Config and data | The OS per-user data directory `ogden-agents/` holds the SQLite database, logs and the encrypted-secrets fallback. Nothing is written to user repos except BMAD's own files and worktrees |
 | Logging | Structured JSON lines to the data directory; secrets redacted (AD-16) |
 | Tests | Every ticket ships its tests; UI layout is checked in a real browser with Playwright, since jsdom doesn't evaluate media queries |

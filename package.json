@@ -20,6 +20,7 @@
     "build": "pnpm -r --filter \"./packages/**\" run build && node scripts/assemble-dist.mjs",
     "start": "pnpm run build && node bin/ogden.js",
     "test": "pnpm run build && vitest run",
+    "e2e": "pnpm run build && playwright test",
     "typecheck": "pnpm -r --filter \"./packages/**\" run typecheck && tsc -p tsconfig.json",
     "pack": "pnpm run build && pnpm pack",
     "smoke": "node scripts/smoke-installed.mjs"
@@ -37,9 +38,11 @@
   },
   "devDependencies": {
     "@ogden-agents/server": "workspace:*",
+    "@playwright/test": "^1.63.0",
     "@types/node": "^24.0.0",
     "@types/ws": "^8.18.2",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.2",
+    "yaml": "^2.9.1"
   }
 }

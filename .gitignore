@@ -9,3 +9,6 @@ coverage/
 *.log
 .DS_Store
 *.tgz
+# Playwright
+test-results/
+playwright-report/

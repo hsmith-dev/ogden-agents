@@ -1,10 +1,31 @@
+import { fileURLToPath } from 'node:url';
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+// The shared constant's own file: Node loads this config, and the shared
+// package's index uses `.js` specifiers that only a bundler maps to `.ts`.
+import { APPEARANCE_STORAGE_KEY } from '../shared/src/appearance.ts';
+import { defineConfig, type Plugin } from 'vite';
+
+/** Puts the one appearance storage key into index.html's pre-paint script. */
+function appearanceKey(): Plugin {
+  return {
+    name: 'ogden-agents:appearance-key',
+    transformIndexHtml: {
+      order: 'pre',
+      handler: (html) => html.replaceAll('__APPEARANCE_STORAGE_KEY__', JSON.stringify(APPEARANCE_STORAGE_KEY)),
+    },
+  };
+}
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [appearanceKey(), react(), tailwindcss()],
+  resolve: {
+    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    // One local bundle served from 127.0.0.1; there is no network cost to split for.
+    chunkSizeWarningLimit: 1000,
   },
 });

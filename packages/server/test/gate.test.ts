@@ -144,6 +144,36 @@ describe('security gate', () => {
     expect(lines.join('')).not.toContain(codeOf(server));
   });
 
+  it('no cookie: a page navigation to an app route gets the launch page (401); assets and API calls get plain 401', async () => {
+    const server = await startGated();
+    const html = { accept: 'text/html,application/xhtml+xml' };
+    const page = await send(server, '/settings/appearance', { headers: html });
+    expect(page.status).toBe(401);
+    expect(page.body).toContain('Open Ogden Agents from your terminal');
+    expect(page.body).not.toContain('id="root"');
+    // Styled with DESIGN.md tokens in both themes.
+    expect(page.body).toContain('--background: #F6F7F5');
+    expect(page.body).toContain('--background: #0F1210');
+    expect(page.body).toContain('prefers-color-scheme: dark');
+
+    const asset = await send(server, '/assets/app.js', { headers: html });
+    expect(asset.status).toBe(401);
+    expect(asset.body).toBe('Unauthorized');
+    const api = await send(server, '/api/v1/anything', { headers: { accept: 'application/json' } });
+    expect(api.body).toBe('Unauthorized');
+    expect((await send(server, '/settings', { method: 'POST', headers: html })).body).toBe('Unauthorized');
+  });
+
+  it('signed in: an app route serves the UI, and a missing asset is a 404', async () => {
+    const server = await startGated();
+    const cookie = await signInRaw(server);
+    const page = await send(server, '/settings/appearance', { headers: { cookie } });
+    expect(page.status).toBe(200);
+    expect(page.body).toContain('<div id="root"></div>');
+    expect((await send(server, '/assets/missing.js', { headers: { cookie } })).status).toBe(404);
+    expect((await send(server, '/api/v1/missing', { headers: { cookie } })).status).toBe(404);
+  });
+
   it('the launch URL works through fetch the way a browser follows it', async () => {
     const server = await startGated();
     const cookie = await exchange(server.launchUrl);

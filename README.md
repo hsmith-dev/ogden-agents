@@ -62,7 +62,8 @@ Launch codes and cookies never appear in the logs or the event log.
 
 ```sh
 pnpm typecheck   # tsc across every package, the launcher and the tests
-pnpm test        # builds, then Vitest: architecture, packaging, launcher and server tests
+pnpm test        # builds, then Vitest: architecture, packaging, design-token, launcher and server tests
+pnpm e2e         # builds, then Playwright (Chromium): shell layout at 1440/900/390, theme, density, launch page
 pnpm build       # tsdown bundles packages/server, Vite builds packages/web, both copied into dist/
 pnpm run pack    # builds, then writes the publishable tarball ogden-agents-<version>.tgz
 pnpm smoke       # installs that tarball with npx in an empty temp dir and checks it serves the page
@@ -70,7 +71,7 @@ pnpm smoke       # installs that tarball with npx in an empty temp dir and check
 
 The root `ogden-agents` package is the only publishable artifact. `pnpm build` writes a self-contained `dist/` (`dist/server.js`, the server with every `@ogden-agents/*` package bundled in, and `dist/web/`, the UI), and `bin/ogden.js` loads it by relative path. Third-party runtime dependencies are declared in the root `dependencies`; `tests/packaging.test.ts` fails if the bundle imports anything undeclared or the tarball picks up workspace sources.
 
-CI runs typecheck, tests, pack and the clean-install smoke test on macOS, Windows and Linux, each on Node 24 and 26.
+CI runs typecheck, tests, pack and the clean-install smoke test on macOS, Windows and Linux, each on Node 24 and 26, plus the Playwright browser tests on Linux Chromium.
 
 ## Layout
 

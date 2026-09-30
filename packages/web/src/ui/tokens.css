@@ -1,0 +1,280 @@
+/*
+ * Design tokens: every value in DESIGN.md as a CSS variable (AD-18).
+ *
+ * This is the only file in packages/web/src that may hold raw colors or
+ * pixel sizes; everything else reads these variables. tests/design-tokens
+ * checks this file against DESIGN.md's YAML so the two can't drift.
+ *
+ * Layout of the file (the drift test relies on it):
+ *   :root                                              light colors, type, radii, spacing, components, motion
+ *   @media (prefers-color-scheme: dark) :root:not([data-theme='light'])   dark colors (system)
+ *   :root[data-theme='dark']                           dark colors (override)
+ *   :root[data-density='compact']                      compact density swaps
+ */
+
+:root {
+  color-scheme: light;
+
+  /* Colors: light set */
+  --background: #f6f7f5;
+  --foreground: #141715;
+  --card: #fbfcfa;
+  --card-foreground: #141715;
+  --popover: #fbfcfa;
+  --popover-foreground: #141715;
+  --sidebar: #eef1ed;
+  --sidebar-foreground: #141715;
+  --muted: #ecefeb;
+  --muted-foreground: #5c645d;
+  --accent: #e5e9e4;
+  --accent-foreground: #141715;
+  --secondary: #e5e9e4;
+  --secondary-foreground: #141715;
+  --border: #dce0da;
+  --input: #ccd2cb;
+  --ring: #2f4fd8;
+  --primary: #1b1f1c;
+  --primary-foreground: #f6f7f5;
+  --destructive: #c2352c;
+  --destructive-foreground: #fbfcfa;
+  --signal: #2f4fd8;
+  --signal-foreground: #f6f7f5;
+  --signal-subtle: #e5eafc;
+  --state-working: #1e7a4c;
+  --state-working-subtle: #e0f1e6;
+  --state-waiting: #2f4fd8;
+  --state-idle: #7a817a;
+  --state-done: #4e5850;
+  --state-error: #c2352c;
+  --state-error-subtle: #fae6e3;
+  --diff-add: #e0f1e6;
+  --diff-add-strong: #b9e0c7;
+  --diff-remove: #fae6e3;
+  --diff-remove-strong: #f1c3bd;
+  --terminal: #101311;
+  --terminal-foreground: #dce2dc;
+
+  /* Elevation (DESIGN.md Elevation & Depth): floating layers only */
+  --elevation-float: 0 8px 24px rgba(20, 23, 21, 0.1);
+
+  /* Font families (self-hosted through @fontsource-variable) */
+  --family-sans: 'Geist Variable', 'Geist', ui-sans-serif, system-ui, sans-serif;
+  --family-mono: 'Geist Mono Variable', 'Geist Mono', ui-monospace, 'SFMono-Regular', monospace;
+
+  /* Typography roles */
+  --type-display-family: var(--family-sans);
+  --type-display-size: 28px;
+  --type-display-weight: 600;
+  --type-display-line-height: 1.15;
+  --type-display-tracking: -0.02em;
+  --type-title-family: var(--family-sans);
+  --type-title-size: 20px;
+  --type-title-weight: 600;
+  --type-title-line-height: 1.25;
+  --type-title-tracking: -0.01em;
+  --type-heading-family: var(--family-sans);
+  --type-heading-size: 15px;
+  --type-heading-weight: 600;
+  --type-heading-line-height: 1.35;
+  --type-body-family: var(--family-sans);
+  --type-body-size: 15px;
+  --type-body-weight: 400;
+  --type-body-line-height: 1.55;
+  --type-body-compact-family: var(--family-sans);
+  --type-body-compact-size: 13px;
+  --type-body-compact-weight: 400;
+  --type-body-compact-line-height: 1.45;
+  --type-label-family: var(--family-sans);
+  --type-label-size: 13px;
+  --type-label-weight: 500;
+  --type-label-line-height: 1.3;
+  --type-caption-family: var(--family-sans);
+  --type-caption-size: 12px;
+  --type-caption-weight: 400;
+  --type-caption-line-height: 1.35;
+  --type-mono-family: var(--family-mono);
+  --type-mono-size: 13px;
+  --type-mono-weight: 400;
+  --type-mono-line-height: 1.5;
+  --type-mono-compact-family: var(--family-mono);
+  --type-mono-compact-size: 12px;
+  --type-mono-compact-weight: 400;
+  --type-mono-compact-line-height: 1.45;
+
+  /* Radii */
+  --rounded-none: 0px;
+  --rounded-sm: 4px;
+  --rounded-md: 6px;
+  --rounded-lg: 10px;
+  --rounded-full: 9999px;
+
+  /* Spacing scale and layout sizes */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-sidebar-width: 272px;
+  --space-sidebar-width-compact: 232px;
+  --space-sidebar-rail: 56px;
+  --space-header-height: 52px;
+  --space-header-height-compact: 44px;
+  --space-row-height: 40px;
+  --space-row-height-compact: 30px;
+  --space-panel-padding: 20px;
+  --space-panel-padding-compact: 12px;
+  --space-chat-column: 760px;
+  --space-content-max: 1400px;
+
+  /* Component sizes (DESIGN.md Components and Accessibility Floor) */
+  --button-height: 36px;
+  --button-height-compact: 30px;
+  --glyph-size: 10px;
+  --glyph-ring: 2px;
+  --icon-size: 16px;
+  --icon-size-compact: 14px;
+  --rail-signal: 3px;
+  --rail-row: 2px;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --measure: 70ch;
+
+  /* Motion */
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 260ms;
+  --motion-breathe: 1.6s;
+  --motion-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Live values: what components read. Compact density swaps these below. */
+  --sidebar-width: var(--space-sidebar-width);
+  --sidebar-rail: var(--space-sidebar-rail);
+  --header-height: var(--space-header-height);
+  --row-height: var(--space-row-height);
+  --panel-padding: var(--space-panel-padding);
+  --control-height: var(--button-height);
+  --icon: var(--icon-size);
+  --body-family: var(--type-body-family);
+  --body-size: var(--type-body-size);
+  --body-weight: var(--type-body-weight);
+  --body-line-height: var(--type-body-line-height);
+  --mono-family: var(--type-mono-family);
+  --mono-size: var(--type-mono-size);
+  --mono-weight: var(--type-mono-weight);
+  --mono-line-height: var(--type-mono-line-height);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --background: #0f1210;
+    --foreground: #e6eae6;
+    --card: #151916;
+    --card-foreground: #e6eae6;
+    --popover: #181c19;
+    --popover-foreground: #e6eae6;
+    --sidebar: #0b0e0c;
+    --sidebar-foreground: #e6eae6;
+    --muted: #1c211d;
+    --muted-foreground: #959e96;
+    --accent: #222823;
+    --accent-foreground: #e6eae6;
+    --secondary: #222823;
+    --secondary-foreground: #e6eae6;
+    --border: #262c27;
+    --input: #323933;
+    --ring: #8198ff;
+    --primary: #e6eae6;
+    --primary-foreground: #111412;
+    --destructive: #f0776b;
+    --destructive-foreground: #1a0c0a;
+    --signal: #8198ff;
+    --signal-foreground: #0d1230;
+    --signal-subtle: #1a2042;
+    --state-working: #5bc68c;
+    --state-working-subtle: #14271c;
+    --state-waiting: #8198ff;
+    --state-idle: #7e877f;
+    --state-done: #aeb7af;
+    --state-error: #f0776b;
+    --state-error-subtle: #2d1815;
+    --diff-add: #13251a;
+    --diff-add-strong: #1e4a2e;
+    --diff-remove: #2d1815;
+    --diff-remove-strong: #5a2620;
+    --terminal: #0a0c0b;
+    --terminal-foreground: #dce2dc;
+    --elevation-float: 0 0 0 1px #262c27, 0 8px 24px rgba(0, 0, 0, 0.45);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --background: #0f1210;
+  --foreground: #e6eae6;
+  --card: #151916;
+  --card-foreground: #e6eae6;
+  --popover: #181c19;
+  --popover-foreground: #e6eae6;
+  --sidebar: #0b0e0c;
+  --sidebar-foreground: #e6eae6;
+  --muted: #1c211d;
+  --muted-foreground: #959e96;
+  --accent: #222823;
+  --accent-foreground: #e6eae6;
+  --secondary: #222823;
+  --secondary-foreground: #e6eae6;
+  --border: #262c27;
+  --input: #323933;
+  --ring: #8198ff;
+  --primary: #e6eae6;
+  --primary-foreground: #111412;
+  --destructive: #f0776b;
+  --destructive-foreground: #1a0c0a;
+  --signal: #8198ff;
+  --signal-foreground: #0d1230;
+  --signal-subtle: #1a2042;
+  --state-working: #5bc68c;
+  --state-working-subtle: #14271c;
+  --state-waiting: #8198ff;
+  --state-idle: #7e877f;
+  --state-done: #aeb7af;
+  --state-error: #f0776b;
+  --state-error-subtle: #2d1815;
+  --diff-add: #13251a;
+  --diff-add-strong: #1e4a2e;
+  --diff-remove: #2d1815;
+  --diff-remove-strong: #5a2620;
+  --terminal: #0a0c0b;
+  --terminal-foreground: #dce2dc;
+  --elevation-float: 0 0 0 1px #262c27, 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+:root[data-density='compact'] {
+  --sidebar-width: var(--space-sidebar-width-compact);
+  --header-height: var(--space-header-height-compact);
+  --row-height: var(--space-row-height-compact);
+  --panel-padding: var(--space-panel-padding-compact);
+  --control-height: var(--button-height-compact);
+  --icon: var(--icon-size-compact);
+  --body-family: var(--type-body-compact-family);
+  --body-size: var(--type-body-compact-size);
+  --body-weight: var(--type-body-compact-weight);
+  --body-line-height: var(--type-body-compact-line-height);
+  --mono-family: var(--type-mono-compact-family);
+  --mono-size: var(--type-mono-compact-size);
+  --mono-weight: var(--type-mono-compact-weight);
+  --mono-line-height: var(--type-mono-compact-line-height);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+    --motion-slow: 0ms;
+  }
+}

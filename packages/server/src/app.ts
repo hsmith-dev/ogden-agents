@@ -90,6 +90,19 @@ export function createApp({ events, webRoot, log, gate }: AppOptions): Hono {
 
   app.use('/*', serveStatic({ root: webRoot }));
 
+  // The UI's client-side routes (such as `/settings/appearance`) load the app,
+  // so a reload or a bookmark lands on the same screen. Only extensionless GET
+  // paths outside `/ws` and `/api`; a missing asset stays a 404.
+  app.get(
+    '/*',
+    async (c, next) => {
+      const path = c.req.path;
+      if (path === '/ws' || path.startsWith('/api/') || /\.[A-Za-z0-9]+$/.test(path)) return c.notFound();
+      await next();
+    },
+    serveStatic({ root: webRoot, rewriteRequestPath: () => '/index.html' }),
+  );
+
   app.notFound((c) =>
     c.req.path === '/'
       ? c.text('Ogden Agents UI is not built. Run `pnpm build`.', 503)

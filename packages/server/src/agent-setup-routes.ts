@@ -7,8 +7,8 @@
  *
  * Story 9.1 fills the agents list and sign-in (with its pasted code),
  * story 9.2 the API key and story 9.3 Install, which never reads the body.
- * Onboarding (9.5) still answers 501 `not_implemented`, and its stub reads
- * no body either.
+ * Story 9.5 fills onboarding (whether Welcome is done) through core's
+ * onboarding use-case; without one it answers 501 and reads no body.
  *
  * The sign-in answers are `no-store`: the start carries the sign-in URL,
  * which never enters an event or a log line (AD-15), and the code route
@@ -24,8 +24,18 @@ import {
   SignInNotPendingError,
   ValidationError,
   type AgentSetup,
+  type Onboarding,
 } from '@ogden-agents/core';
-import { AgentId, AgentSetupStatus, AgentsResponse, API_ROUTES, SetApiKeyRequest, SignInCodeRequest, SignInResponse } from '@ogden-agents/shared';
+import {
+  AgentId,
+  AgentSetupStatus,
+  AgentsResponse,
+  API_ROUTES,
+  OnboardingState,
+  SetApiKeyRequest,
+  SignInCodeRequest,
+  SignInResponse,
+} from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { readBody } from './chat-routes.js';
@@ -35,6 +45,8 @@ import type { Logger } from './log.js';
 export interface AgentSetupRoutesOptions {
   /** Core's agent setup use-case over every supported agent (it owns the API keys' store, AD-16). */
   agentSetup?: AgentSetup | undefined;
+  /** Core's onboarding use-case (9.5): whether Welcome is done; without it those routes answer 501. */
+  onboarding?: Onboarding | undefined;
   log: Logger;
 }
 
@@ -42,6 +54,8 @@ export interface AgentSetupRoutesOptions {
 const MAX_CODE_BODY_BYTES = 4 * 1024;
 /** Largest API key body read (a key is at most 1000 characters). */
 const MAX_API_KEY_BODY_BYTES = 4 * 1024;
+/** Largest onboarding body read (`{"welcomeCompleted":false}` is 26 bytes). */
+const MAX_ONBOARDING_BODY_BYTES = 1024;
 
 const NO_SUCH_AGENT = 'There is no such agent.';
 const NOT_PENDING = 'No sign-in is waiting for a code. Start signing in again.';
@@ -50,15 +64,14 @@ const COULD_NOT_SIGN_IN = "Ogden Agents couldn't start signing in. Try again.";
 const COULD_NOT_SAVE_KEY = "Ogden Agents couldn't save the API key. Try again.";
 const COULD_NOT_REMOVE_KEY = "Ogden Agents couldn't remove the API key. Try again.";
 const COULD_NOT_INSTALL = "Ogden Agents couldn't start the install. Try again.";
+const COULD_NOT_SAVE_WELCOME = "Ogden Agents couldn't save that. Try again.";
 
 const noStore = (c: Context) => c.header('Cache-Control', 'no-store');
 
 export function registerAgentSetupRoutes(app: Hono, options: AgentSetupRoutesOptions): void {
-  const { agentSetup, log } = options;
+  const { agentSetup, onboarding, log } = options;
 
-  // `GET` and `PATCH` → `OnboardingState` (9.5).
-  app.get(API_ROUTES.onboarding, notImplemented);
-  app.patch(API_ROUTES.onboarding, notImplemented);
+  registerOnboardingRoutes(app, onboarding, log);
 
   if (agentSetup === undefined) {
     app.get(API_ROUTES.agents, notImplemented);
@@ -212,4 +225,33 @@ export function registerAgentSetupRoutes(app: Hono, options: AgentSetupRoutesOpt
       return refusal(c, error, COULD_NOT_REMOVE_KEY);
     }
   });
+}
+
+/** `GET` → `OnboardingState`; `PATCH OnboardingState` → `OnboardingState` (9.5). Only codes reach the log. */
+function registerOnboardingRoutes(app: Hono, onboarding: Onboarding | undefined, log: Logger): void {
+  if (onboarding === undefined) {
+    app.get(API_ROUTES.onboarding, notImplemented);
+    app.patch(API_ROUTES.onboarding, notImplemented);
+    return;
+  }
+
+  app.get(API_ROUTES.onboarding, (c) => c.json(OnboardingState.parse(onboarding.get())));
+
+  app.patch(
+    API_ROUTES.onboarding,
+    bodyLimit({ maxSize: MAX_ONBOARDING_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', 'The request is too large.') }),
+    async (c) => {
+      const body = await readBody(c, OnboardingState);
+      if (!body.ok) return body.response;
+      try {
+        const state = onboarding.set(body.value);
+        log.info('onboarding saved', state);
+        return c.json(OnboardingState.parse(state));
+      } catch (error) {
+        if (error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);
+        log.error('saving onboarding failed', { code: (error as NodeJS.ErrnoException).code ?? (error instanceof CoreError ? error.code : 'unexpected') });
+        return apiError(c, 500, 'internal_error', COULD_NOT_SAVE_WELCOME);
+      }
+    },
+  );
 }

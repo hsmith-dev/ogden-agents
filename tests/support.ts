@@ -5,7 +5,7 @@
  * the launcher handshake, and connecting and quitting the way the page does.
  * Routes come from the shared `API_ROUTES`.
  */
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -46,9 +46,13 @@ export const FAKE_AGENT = join(ROOT, 'tests', 'fixtures', 'fake-acp-agent.mjs');
  * so no test runs the real Claude Code adapter or its login. API keys are kept in memory and their
  * check is a stub unless `extra` says otherwise, so no test touches the real keychain or reaches
  * Anthropic (story 9.2).
+ *
+ * Welcome (story 9.5) is marked done in `dataDir` first, so a tab lands on
+ * Projects, unless `firstRun` is set (the Welcome tests).
  */
-export async function startServer(dataDir: string, port = 0, extra: StartOptions = {}): Promise<RunningServer> {
+export async function startServer(dataDir: string, port = 0, { firstRun = false, ...extra }: StartOptions & { firstRun?: boolean } = {}): Promise<RunningServer> {
   const { start, createLogger, createMemorySecretStore } = await serverModule();
+  if (!firstRun) writeFileSync(join(dataDir, 'onboarding.json'), `${JSON.stringify({ welcomeCompleted: true })}\n`, { mode: 0o600 });
   return start({
     port,
     open: false,

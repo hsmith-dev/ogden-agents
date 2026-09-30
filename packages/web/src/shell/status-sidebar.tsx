@@ -1,4 +1,4 @@
-import { GearSix, PaintBrush, Plus, Robot, Wrench } from '@phosphor-icons/react';
+import { GearSix, HandWaving, PaintBrush, Plus, Robot, Wrench } from '@phosphor-icons/react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { memo, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { AGENT_NAME } from '@/chat/chat-api';
@@ -270,7 +270,7 @@ const SessionRow = memo(function SessionRow({
   );
 });
 
-/** Settings sections: Agents (9.1), Appearance and Tools (Notifications arrives with a later epic). */
+/** Settings sections: Agents (9.1), Appearance and Tools (Notifications arrives with a later epic), and Welcome again (9.5). */
 function SettingsMenu() {
   const { setSheetOpen } = useSidebar();
   return (
@@ -299,6 +299,12 @@ function SettingsMenu() {
           <Link to="/settings/tools">
             <Wrench aria-hidden />
             Tools
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
+          <Link to="/welcome">
+            <HandWaving aria-hidden />
+            Welcome
           </Link>
         </DropdownMenuItem>
       </DropdownMenuContent>

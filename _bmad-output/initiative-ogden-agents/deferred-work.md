@@ -157,3 +157,9 @@
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/story-end-to-end-suite-and-release-plan.md`
   summary: Resolved: "`tests/launcher.test.ts` '--foreground beside a background server…' timed out once at 5 s" (story 2.12 entry) is closed.
   evidence: Both launcher suites now run with a 60 s per-test timeout (`SUITE` in `tests/launcher.test.ts`), above their inner waits (10 s for printed URLs, 10 s in `waitUntil`), instead of Vitest's 5 s default (story 2.13).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-first-run-welcome-plan.md`
+  summary: Welcome's shortcut step answers the app shortcut offer when it appears, but ignores a failed answer (9.5 review F4). If that DELETE fails and the user then leaves the step without Add, Not now or Skip, the shell's notice can show the offer again. Retry the answer, or say in place that it failed (story 9.6).
+  evidence: `packages/web/src/routes/welcome-page.tsx` `ShortcutStep` (`dismiss.mutate()` in its mount effect, no `onError`).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-first-run-welcome-plan.md`
+  summary: A corrupt `onboarding.json` in a data folder with no projects is logged ("onboarding record unusable", code `corrupt`) on every `GET /api/v1/onboarding`, because nothing rewrites it until Welcome is finished or skipped (9.5 review F7). Log it once per server run, or replace the bad record on first read (story 9.6).
+  evidence: `packages/core/src/onboarding.ts` `read()` → `onError('corrupt')`; `packages/server/src/start.ts` `onError` → `log.warn`.

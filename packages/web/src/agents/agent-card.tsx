@@ -8,6 +8,7 @@ import { Notice } from '@/ui/notice';
 import { Progress } from '@/ui/progress';
 import { StateGlyph } from '@/ui/state-glyph';
 import { Text } from '@/ui/typography';
+import { cn } from '@/ui/utils';
 import { useApiKey, useInstall, useSignIn, type ApiKeyActions, type InstallAction, type SignIn } from './agent-setup-api';
 import { SigningIn } from './signing-in';
 
@@ -21,12 +22,12 @@ import { SigningIn } from './signing-in';
  * 4>", when it is in use, and **Remove key**. Not installed (9.3), it
  * offers **Install** with the download's size beside it, then shows the
  * install's progress, and a failure's plain reason with **Try again**.
- * Welcome (9.5) reuses it.
+ * Welcome (9.5) reuses it, `selected` (DESIGN.md: the heavier ink border).
  */
 
 /** What Install downloads, as the card says it beside the button. */
 const INSTALL_SIZE = { small: 'about 60 MB', large: 'about 250 MB' } as const;
-export function AgentCard({ agent }: { agent: AgentSetupStatus }) {
+export function AgentCard({ agent, selected = false }: { agent: AgentSetupStatus; selected?: boolean }) {
   const signIn = useSignIn(agent.agentId);
   const apiKey = useApiKey(agent.agentId);
   const install = useInstall(agent.agentId);
@@ -37,7 +38,8 @@ export function AgentCard({ agent }: { agent: AgentSetupStatus }) {
       data-testid={`agent-card-${agent.agentId}`}
       data-auth={agent.auth}
       data-install={agent.install}
-      className="flex flex-col gap-3 rounded-lg border border-border bg-card p-(--panel-padding)"
+      data-selected={selected ? '' : undefined}
+      className={cn('flex flex-col gap-3 rounded-lg bg-card p-(--panel-padding)', selected ? 'border-2 border-foreground' : 'border border-border')}
     >
       <Text as="h2" variant="heading" id={headingId}>
         {agent.displayName}

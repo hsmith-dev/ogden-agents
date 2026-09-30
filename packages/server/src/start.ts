@@ -23,6 +23,7 @@ import {
   createAgentSetup,
   createChat,
   createDataDir,
+  createOnboarding,
   clampCheckInDelay,
   RESTARTED_REASON,
   createToolchain,
@@ -538,6 +539,12 @@ async function listenAndAnnounce({
     (options.launcherEntry === undefined
       ? createMemoryAppShortcut({ platform: process.platform })
       : createOsAppShortcut({ platform: process.platform, launcherEntry: options.launcherEntry, nodePath: process.execPath, stateDir: dataDir }));
+  // Whether Welcome is done (9.5): a data folder that already has projects counts it as done.
+  const onboarding = createOnboarding({
+    dataDir,
+    hasProjects: () => core.entities.listWorkspaces().length > 0,
+    onError: (code) => log.warn('onboarding record unusable', { code }),
+  });
   const app = createApp({
     events: core.events,
     webRoot: options.webRoot ?? defaultWebRoot(),
@@ -548,6 +555,7 @@ async function listenAndAnnounce({
     chat,
     permissions,
     agentSetup,
+    onboarding,
     appShortcut,
     tabs,
   });

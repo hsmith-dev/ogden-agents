@@ -11,16 +11,29 @@
  * stub: no test touches the real keychain or reaches Anthropic. The key never
  * leaves in a response, an event or a log line; only its last 4 do, in the list.
  */
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createClaudeApiKey, createMemorySecretStore, loadPty, type AdapterPins, type NpmRunInput, type NpmRunner, type PtyLoader } from '@ogden-agents/adapters';
-import { SecretsUnavailableError, type AgentSetupPort, type ApiKeyVerification, type SecretStorePort } from '@ogden-agents/core';
-import { AgentSetupStatus, AgentsResponse, API_ROUTES, ApiErrorBody, apiPath, SessionResponse, SignInResponse, WorkspaceResponse } from '@ogden-agents/shared';
+import { ONBOARDING_FILE, SecretsUnavailableError, type AgentSetupPort, type ApiKeyVerification, type SecretStorePort } from '@ogden-agents/core';
+import {
+  AgentSetupStatus,
+  AgentsResponse,
+  API_ROUTES,
+  ApiErrorBody,
+  apiPath,
+  OnboardingState,
+  SessionResponse,
+  SignInResponse,
+  WorkspaceResponse,
+} from '@ogden-agents/shared';
+import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
+import { registerAgentSetupRoutes } from '../src/agent-setup-routes.js';
+import { createLogger } from '../src/log.js';
 import { testSecretStore, type StartOptions } from '../src/start.js';
-import { FAKE_AGENT, removeAfterTest, send, signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
+import { FAKE_AGENT, removeAfterTest, send, signIn, startTestServer, tempDataDir, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
 const signInPath = (agentId = 'claude-code') => apiPath(API_ROUTES.agentSignIn, { agentId });
 const codePath = (agentId = 'claude-code') => apiPath(API_ROUTES.agentSignInCode, { agentId });
@@ -636,5 +649,88 @@ describe('agent setup routes: installing Claude Code (story 9.3)', () => {
     await server.close();
     expect(npm.runs[0]!.killed).toBe(true);
     expect(readdirSync(join(dataDir, 'agents', 'claude-code'))).toEqual([]);
+  });
+});
+
+describe('onboarding routes (story 9.5)', () => {
+  const onboardingOf = async (server: TestServer, tab: SignedIn) => {
+    const reply = await send(server, API_ROUTES.onboarding, { headers: tab.headers });
+    expect(reply.status).toBe(200);
+    return OnboardingState.parse(reply.json());
+  };
+  const patch = (server: TestServer, tab: SignedIn, body: string) => send(server, API_ROUTES.onboarding, { method: 'PATCH', headers: json(tab), body });
+
+  it('need a token (401) and a matching Origin to change state (403)', async () => {
+    const server = await startTestServer();
+    const tab = await signIn(server);
+    expect((await send(server, API_ROUTES.onboarding, { headers: { origin: server.url } })).status).toBe(401);
+    expect((await send(server, API_ROUTES.onboarding, { method: 'PATCH', headers: { origin: server.url, 'content-type': 'application/json' }, body: '{"welcomeCompleted":true}' })).status).toBe(401);
+    const foreign = await send(server, API_ROUTES.onboarding, {
+      method: 'PATCH',
+      headers: { ...json(tab), origin: 'http://evil.example' },
+      body: '{"welcomeCompleted":true}',
+    });
+    expect(foreign.status).toBe(403);
+    expect(await onboardingOf(server, tab)).toEqual({ welcomeCompleted: false });
+  });
+
+  it('a fresh data folder is not done; PATCH keeps the answer (0600, in the data folder) across a restart', async () => {
+    const dataDir = tempDataDir();
+    const first = await startTestServer({ dataDir });
+    const tab = await signIn(first);
+    expect(await onboardingOf(first, tab)).toEqual({ welcomeCompleted: false });
+    const reply = await patch(first, tab, JSON.stringify({ welcomeCompleted: true }));
+    expect(reply.status).toBe(200);
+    expect(OnboardingState.parse(reply.json())).toEqual({ welcomeCompleted: true });
+    const file = join(dataDir, ONBOARDING_FILE);
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ welcomeCompleted: true });
+    if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600);
+    await first.close();
+
+    const second = await startTestServer({ dataDir });
+    expect(await onboardingOf(second, await signIn(second))).toEqual({ welcomeCompleted: true });
+  });
+
+  it('a bad body is 400 invalid_request and a large one 413; the stored state is unchanged', async () => {
+    const server = await startTestServer();
+    const tab = await signIn(server);
+    expect((await patch(server, tab, '{"welcomeCompleted":true}')).status).toBe(200);
+    for (const body of ['{nope', '{"welcomeCompleted":"no"}', '{}', 'null']) {
+      const reply = await patch(server, tab, body);
+      expect(reply.status, body).toBe(400);
+      expect(ApiErrorBody.parse(reply.json()).error.code).toBe('invalid_request');
+    }
+    const large = await patch(server, tab, JSON.stringify({ welcomeCompleted: false, pad: 'x'.repeat(2048) }));
+    expect(large.status).toBe(413);
+    expect(ApiErrorBody.parse(large.json()).error.code).toBe('invalid_request');
+    expect(await onboardingOf(server, tab)).toEqual({ welcomeCompleted: true });
+  });
+
+  it('a data folder that already has projects but no record counts Welcome as done', async () => {
+    const dataDir = tempDataDir();
+    const first = await startTestServer({ dataDir });
+    const tab = await signIn(first);
+    const repo = mkdtempSync(join(tmpdir(), 'ogden-agents-onboarding-'));
+    removeAfterTest(repo);
+    const opened = await send(first, API_ROUTES.workspaces, { method: 'POST', headers: json(tab), body: JSON.stringify({ path: repo }) });
+    expect(opened.status).toBeLessThan(300);
+    await first.close();
+    expect(existsSync(join(dataDir, ONBOARDING_FILE))).toBe(false);
+
+    const second = await startTestServer({ dataDir });
+    expect(await onboardingOf(second, await signIn(second))).toEqual({ welcomeCompleted: true });
+  });
+
+  it('answer 501 without the use-case, and never read the body', async () => {
+    const lines: string[] = [];
+    const app = new Hono();
+    registerAgentSetupRoutes(app, { log: createLogger((line) => lines.push(line)) });
+    const secret = 'sk-ant-api03-never-logged-0123456789';
+    for (const init of [{ method: 'GET' }, { method: 'PATCH', body: JSON.stringify({ apiKey: secret }) }, { method: 'PATCH', body: '{nope' }]) {
+      const reply = await app.request(API_ROUTES.onboarding, { ...init, headers: { 'content-type': 'application/json' } });
+      expect(reply.status).toBe(501);
+      expect(ApiErrorBody.parse(await reply.json()).error.code).toBe('not_implemented');
+    }
+    expect(lines.join('')).not.toContain(secret);
   });
 });

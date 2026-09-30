@@ -8,6 +8,7 @@ import {
   type PermissionDecisionRequest,
   type PermissionRule,
   type Session,
+  type SessionDriver,
   type Workspace,
 } from '@ogden-agents/shared';
 import { call, callNoContent, ChatApiError, postJson } from '@/api/http';
@@ -49,6 +50,16 @@ export async function fetchSession(wsId: string, sesId: string, auth: Pick<TabAu
 export async function sendMessage(wsId: string, sesId: string, text: string, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<string> {
   const json = await call(auth, apiPath(API_ROUTES.sessionMessages, { wsId, sesId }), postJson({ text }), "Your message couldn't be sent");
   return SendMessageResponse.parse(json).messageId;
+}
+
+/**
+ * `POST /api/v1/workspaces/:wsId/sessions/:sesId/driver` (story 3.1): hands
+ * the chat to the agent's own terminal or back. 409 with a plain reason when
+ * it can't switch now.
+ */
+export async function switchDriver(wsId: string, sesId: string, driver: SessionDriver, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<Session> {
+  const json = await call(auth, apiPath(API_ROUTES.sessionDriver, { wsId, sesId }), postJson({ driver }), "Ogden Agents couldn't switch this chat");
+  return SessionResponse.parse(json).session;
 }
 
 // ---------------------------------------------------------------------------

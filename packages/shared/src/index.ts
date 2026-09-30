@@ -9,4 +9,5 @@ export * from './permissions.js';
 export * from './setup.js';
 export * from './time.js';
 export * from './tab-token.js';
+export * from './terminal.js';
 export * from './toolchain.js';

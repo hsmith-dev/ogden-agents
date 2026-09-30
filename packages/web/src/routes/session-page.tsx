@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from '@tanstack/react-router';
-import { ArrowClockwise, ArrowDown, House, Stop } from '@phosphor-icons/react';
+import { ArrowClockwise, ArrowDown, ChatCircle, House, Stop, TerminalWindow } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAppearance } from '@/appearance/appearance-provider';
-import { AGENT_NAME, cancelSession, ChatApiError, fetchSession, sendMessage } from '@/chat/chat-api';
+import { AGENT_NAME, cancelSession, ChatApiError, fetchSession, sendMessage, switchDriver } from '@/chat/chat-api';
 import { Composer } from '@/chat/composer';
 import { SignInAgain } from '@/chat/sign-in-again';
 import { ToolCalls } from '@/chat/tool-call-row';
@@ -11,6 +11,7 @@ import { sessionView, type TranscriptCheckIn, type TranscriptItem, type Transcri
 import { useCaughtUp, useEarlierHistory, useSessionEvents } from '@/events/event-stream';
 import { PermissionCard, permissionAnnouncement } from '@/permissions/permission-card';
 import { WorkspaceHeader } from '@/shell/workspace-header';
+import { TerminalPanel } from '@/terminal/terminal-panel';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
 import { Separator } from '@/ui/separator';
@@ -83,6 +84,10 @@ export function SessionPage() {
   const [cardOffscreen, setCardOffscreen] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [actionError, setActionError] = useState<string | undefined>(undefined);
+  const [switching, setSwitching] = useState(false);
+  /** Who drives the chat (story 3.1): the latest `session.driver_changed`, else the session as read. */
+  const driverChange = useMemo(() => events.findLast((event) => event.type === 'session.driver_changed'), [events]);
+  const driver = (driverChange?.type === 'session.driver_changed' ? driverChange.payload.driver : undefined) ?? session.data?.driver ?? 'ui';
   /** Messages this page saw queued: only those go back into the composer when they are not sent. */
   const seenQueued = useRef(new Set<string>());
   const restored = useRef(new Set<string>());
@@ -234,6 +239,21 @@ export function SessionPage() {
     );
   };
 
+  // The chat's own terminal and back (story 3.1): only while idle; the server refuses otherwise, with a reason.
+  const canSwitchToTerminal = state === 'idle' && !switching;
+  const switchTo = (next: 'ui' | 'terminal') => {
+    if (switching || (next === 'terminal' && !canSwitchToTerminal)) return;
+    setSwitching(true);
+    setActionError(undefined);
+    switchDriver(wsId, sesId, next).then(
+      () => setSwitching(false),
+      (failure: unknown) => {
+        setSwitching(false);
+        setActionError(failure instanceof Error ? failure.message : "Ogden Agents couldn't switch this chat. Try again.");
+      },
+    );
+  };
+
   const tryAgain = () => {
     if (view.lastUserText === undefined) return;
     setActionError(undefined);
@@ -246,8 +266,26 @@ export function SessionPage() {
     <>
       <WorkspaceHeader title="Chat">
         {state === undefined ? null : <StateGlyph state={state} data-testid="session-state" className="ml-auto" />}
+        {driver === 'terminal' ? (
+          <Button variant="outline" onClick={() => switchTo('ui')} aria-disabled={switching} data-testid="switch-to-chat">
+            <ChatCircle aria-hidden />
+            Switch to chat
+          </Button>
+        ) : appearance.developerMode ? (
+          <Button
+            variant="outline"
+            onClick={() => switchTo('terminal')}
+            aria-disabled={!canSwitchToTerminal}
+            title={state === 'idle' ? `Open this chat in ${AGENT_NAME}'s own terminal` : `${AGENT_NAME} is busy. Switch when it is idle.`}
+            data-testid="switch-to-terminal"
+          >
+            <TerminalWindow aria-hidden />
+            Terminal
+          </Button>
+        ) : null}
       </WorkspaceHeader>
-      <PageBody>
+      {driver === 'terminal' ? <TerminalPanel sesId={sesId} /> : null}
+      <PageBody className={driver === 'terminal' ? 'hidden' : undefined}>
         <section aria-label="Conversation" aria-busy={streaming} data-testid="transcript" className="flex w-full max-w-(--space-chat-column) flex-col gap-4 self-center">
           {!loading && (history.hasEarlier || history.error !== undefined) ? (
             <EarlierHistory loading={history.loading} error={history.error} onShow={showEarlier} />
@@ -339,6 +377,11 @@ export function SessionPage() {
         </div>
       </PageBody>
       <PageFooter>
+        {driver === 'terminal' && actionError !== undefined ? (
+          <Text variant="caption" role="alert" data-testid="terminal-switch-error" className="pb-2">
+            {actionError}
+          </Text>
+        ) : null}
         {unseen > 0 ? (
           <div className="flex justify-center pb-2">
             <Button variant="outline" data-testid="jump-to-latest" data-count={unseen} onClick={jumpToLatest}>
@@ -356,7 +399,13 @@ export function SessionPage() {
         ) : null}
         <Composer
           label={`Message ${AGENT_NAME}`}
-          blockedReason={state === 'waiting' ? `${AGENT_NAME} is waiting for your answer above.` : undefined}
+          blockedReason={
+            driver === 'terminal'
+              ? `${AGENT_NAME}'s terminal is driving this chat. Switch to chat to send a message here.`
+              : state === 'waiting'
+                ? `${AGENT_NAME} is waiting for your answer above.`
+                : undefined
+          }
           hint={state === 'working' ? `${AGENT_NAME} is working. A message you send now waits its turn.` : undefined}
           restore={restore}
           action={

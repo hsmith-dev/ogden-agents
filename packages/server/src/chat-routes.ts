@@ -9,6 +9,7 @@
  */
 import {
   CoreError,
+  DriverSwitchRefusedError,
   InvalidOperationError,
   NotFoundError,
   QueueFullError,
@@ -26,6 +27,7 @@ import {
   SessionId,
   SessionResponse,
   SessionsResponse,
+  SetDriverRequest,
   WorkspaceId,
   WorkspaceResponse,
   WorkspacesResponse,
@@ -84,6 +86,8 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger): void {
       return apiError(c, 409, 'session_busy', 'Too many messages are waiting. Send this one when the agent has caught up.');
     }
     if (error instanceof SessionNotBusyError) return apiError(c, 409, 'session_not_busy', 'The agent is not working on anything to stop.');
+    // The plain reason says why (story 3.1); entry 2 gives the refusals their own codes.
+    if (error instanceof DriverSwitchRefusedError) return apiError(c, 409, 'session_busy', error.message);
     if (error instanceof SessionBusyError) {
       return apiError(c, 409, 'session_busy', 'The agent is still answering. Send your message when it is done.');
     }
@@ -149,6 +153,21 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger): void {
       chat.cancel(scope.workspaceId, scope.sessionId);
       log.info('session stopped', { workspaceId: scope.workspaceId, sessionId: scope.sessionId });
       return c.body(null, 204);
+    } catch (error) {
+      return refusal(c, error);
+    }
+  });
+
+  // Chat or terminal (story 3.1, AD-6): core decides whether the switch can happen.
+  app.post(API_ROUTES.sessionDriver, limit, async (c) => {
+    const scope = ids(c);
+    if (scope?.sessionId === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+    const body = await readBody(c, SetDriverRequest);
+    if (!body.ok) return body.response;
+    try {
+      const session = await chat.switchDriver(scope.workspaceId, scope.sessionId, body.value.driver);
+      log.info('session driver switched', { workspaceId: scope.workspaceId, sessionId: scope.sessionId, driver: session.driver });
+      return c.json(SessionResponse.parse({ session }));
     } catch (error) {
       return refusal(c, error);
     }

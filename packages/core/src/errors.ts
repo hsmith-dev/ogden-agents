@@ -83,6 +83,18 @@ export class SessionNotBusyError extends CoreError {
   }
 }
 
+/**
+ * A switch between the chat and the agent's terminal was refused (story 3.1):
+ * the session is not `idle`, has never reached its agent, or the terminal
+ * can't start here. `message` is plain words for the user; nothing changed.
+ */
+export class DriverSwitchRefusedError extends CoreError {
+  override readonly name = 'DriverSwitchRefusedError';
+  constructor(message: string) {
+    super('driver_switch_refused', message);
+  }
+}
+
 /** A session of the workspace is `working` or `waiting`, so its history was not deleted. */
 export class WorkspaceBusyError extends CoreError {
   override readonly name = 'WorkspaceBusyError';

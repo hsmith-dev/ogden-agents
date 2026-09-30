@@ -53,6 +53,7 @@ import {
   type AgentToolCallDiff,
 } from '@ogden-agents/core';
 import { findClaudeExecutable } from './detect.js';
+import { claudeTerminalCommand } from './terminal-command.js';
 import { createStreamMasker, maskSecrets, secretValues } from './mask.js';
 
 /** The product name the UI shows (EXPERIENCE.md Voice: the agent by its product name). */
@@ -141,10 +142,15 @@ export function createClaudeCodeAgent(options: ClaudeCodeAgentOptions = {}): Age
   };
   const startTimeoutMs = options.startTimeoutMs ?? START_TIMEOUT_MS;
 
+  /** The adapter's entry script as things stand now (a function is asked each time; 9.3). */
+  const currentAdapterPath = () => {
+    const given = typeof options.adapterPath === 'function' ? options.adapterPath() : options.adapterPath;
+    return typeof options.adapterPath === 'function' ? given : (given ?? resolveClaudeAgentAcp());
+  };
+
   /** Spawns the adapter in `cwd` with core's environment (AD-16), in its own process group. */
   const spawnAdapter = (cwd: string, env: Readonly<Record<string, string>>) => {
-    const given = typeof options.adapterPath === 'function' ? options.adapterPath() : options.adapterPath;
-    const adapterPath = typeof options.adapterPath === 'function' ? given : (given ?? resolveClaudeAgentAcp());
+    const adapterPath = currentAdapterPath();
     if (adapterPath === undefined || !existsSync(adapterPath)) {
       throw new AgentError('agent_unavailable', NOT_SET_UP, { details: { adapterPath: adapterPath ?? null } });
     }
@@ -207,6 +213,8 @@ export function createClaudeCodeAgent(options: ClaudeCodeAgentOptions = {}): Age
         return { id: method.id, name: method.name, description, kind: 'agent' };
       });
     },
+
+    terminalCommand: async (agentSessionId, env) => claudeTerminalCommand(agentSessionId, env, { ...options, adapterPath: currentAdapterPath() }),
   };
 }
 

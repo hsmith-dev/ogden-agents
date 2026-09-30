@@ -107,6 +107,12 @@ export interface Entities {
    */
   settleInterruptedSessions(reason: string): Session[];
   /**
+   * Hands every session a stopped server left with `driver = terminal` back
+   * to the chat (story 3.1 review F3): its terminal died with that server.
+   * Appends `session.driver_changed` for each. Returns them.
+   */
+  releaseTerminalDrivers(): Session[];
+  /**
    * Merges `refs` into the session's adapter refs (AD-9: the agent's own ids,
    * never keys). Appends no event, so an agent's id never reaches the log,
    * and leaves `updatedAt` alone. {@link NotFoundError} for an unknown session.
@@ -340,6 +346,17 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
           .where(inArray(sessions.state, ['working', 'waiting']))
           .all()
           .map((row) => this.setSessionState(row.id as SessionId, 'idle', { reason, resumable: true })),
+      );
+    },
+
+    releaseTerminalDrivers() {
+      return log.transaction(() =>
+        orm
+          .select()
+          .from(sessions)
+          .where(eq(sessions.driver, 'terminal'))
+          .all()
+          .map((row) => this.setSessionDriver(row.id as SessionId, 'ui')),
       );
     },
 

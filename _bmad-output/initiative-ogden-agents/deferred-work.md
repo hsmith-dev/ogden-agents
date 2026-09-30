@@ -163,3 +163,6 @@
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-first-run-welcome-plan.md`
   summary: A corrupt `onboarding.json` in a data folder with no projects is logged ("onboarding record unusable", code `corrupt`) on every `GET /api/v1/onboarding`, because nothing rewrites it until Welcome is finished or skipped (9.5 review F7). Log it once per server run, or replace the bad record on first read (story 9.6).
   evidence: `packages/core/src/onboarding.ts` `read()` → `onError('corrupt')`; `packages/server/src/start.ts` `onError` → `log.warn`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-tracer-bullet-switch-one-claude-code-chat-to-its-terminal-an-plan.md`
+  summary: Rate-limit terminal input per viewer (3.1 security review F4): today each binary frame is capped at 1 MiB, but a tab may send frames as fast as it likes into the CLI. Add a per-viewer input budget when several viewers can type (story 3.5, multi-viewer).
+  evidence: `packages/server/src/terminal-socket.ts` `receive`.

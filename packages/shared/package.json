@@ -1,0 +1,19 @@
+{
+  "name": "@ogdenmad/shared",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Contract: Zod schemas and TypeScript types for every event, API shape and ID.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

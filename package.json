@@ -1,0 +1,31 @@
+{
+  "name": "ogdenmad",
+  "version": "0.0.0",
+  "private": true,
+  "description": "OgdenMad: a local browser UI for running BMAD with coding agents.",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@12.8.1",
+  "bin": {
+    "ogdenmad": "bin/ogdenmad.js"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter \"./packages/**\" run build",
+    "start": "pnpm run build && node bin/ogdenmad.js",
+    "test": "pnpm run build && vitest run",
+    "typecheck": "pnpm -r --filter \"./packages/**\" run typecheck && tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ogdenmad/server": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2",
+    "ws": "^8.22.0"
+  }
+}

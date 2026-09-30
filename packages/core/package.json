@@ -1,0 +1,19 @@
+{
+  "name": "@ogdenmad/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Domain: entities, ports, event log, state machines, verification rules.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ogdenmad/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

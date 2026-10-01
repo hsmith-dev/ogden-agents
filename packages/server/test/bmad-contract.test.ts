@@ -21,7 +21,6 @@ import {
   FEATURE_UNAVAILABLE_MESSAGE,
   WorkspaceResponse,
   WorkspaceSettingsResponse,
-  type WorkspaceId,
 } from '@ogden-agents/shared';
 import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -219,19 +218,16 @@ describe('bmadPieceRoutes, the one helper (story 10.2)', () => {
 });
 
 describe('the pre-registered BMad routes (story 10.2)', () => {
-  it('detection, the offer and the new-projects default answer 501 and never read the body; pieces answers 501 without core', async () => {
+  it('the new-projects default answers 501 and never reads the body; pieces answers 501 without core', async () => {
     const lines: string[] = [];
     const app = new Hono();
     registerBmadRoutes(app, { log: createLogger((line) => lines.push(line)) });
     const secret = 'never-read-0123456789';
-    const wsId = UNKNOWN as WorkspaceId;
     const calls: Array<[string, string, string | undefined]> = [
       ['GET', API_ROUTES.bmadPieces, undefined],
       ['GET', API_ROUTES.newProjectDefaults, undefined],
       ['PATCH', API_ROUTES.newProjectDefaults, JSON.stringify({ bmadPieces: [secret] })],
       ['PATCH', API_ROUTES.newProjectDefaults, '{nope'],
-      ['GET', apiPath(API_ROUTES.workspaceBmadDetection, { wsId }), undefined],
-      ['DELETE', apiPath(API_ROUTES.workspaceBmadOffer, { wsId }), secret],
     ];
     for (const [method, path, body] of calls) {
       const reply = await app.request(path, { method, headers: { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body }) });
@@ -243,10 +239,7 @@ describe('the pre-registered BMad routes (story 10.2)', () => {
   it('are behind the gate on a real server', async () => {
     const server = await startTestServer();
     const tab = await signIn(server);
-    const workspace = await addProject(server, tab);
     for (const [method, path] of [
-      ['GET', apiPath(API_ROUTES.workspaceBmadDetection, { wsId: workspace.id })],
-      ['DELETE', apiPath(API_ROUTES.workspaceBmadOffer, { wsId: workspace.id })],
       ['GET', API_ROUTES.newProjectDefaults],
       ['PATCH', API_ROUTES.newProjectDefaults],
     ] as const) {

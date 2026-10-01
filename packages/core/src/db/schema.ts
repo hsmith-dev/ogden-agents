@@ -35,6 +35,12 @@ export const workspaces = sqliteTable(
      * value reads as off rather than failing every workspace read.
      */
     bmadPieces: text('bmad_pieces').notNull().default('[]'),
+    /**
+     * Whether the user answered the "already uses BMad Method" offer with
+     * Not now (story 10.3): kept per project, so the offer never shows again
+     * for it. Changed only by `bmadDetection.dismissOffer`.
+     */
+    bmadOfferDismissed: integer('bmad_offer_dismissed', { mode: 'boolean' }).notNull().default(false),
     createdAt: text('created_at').notNull(),
   },
   (t) => [uniqueIndex('workspaces_path_unique').on(t.path)],

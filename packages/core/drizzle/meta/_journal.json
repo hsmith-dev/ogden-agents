@@ -36,6 +36,13 @@
       "when": 1790879222220,
       "tag": "0004_bmad_pieces",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790894073503,
+      "tag": "0005_bmad_offer_dismissed",
+      "breakpoints": true
     }
   ]
 }

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
 import {
   CLAUDE_CODE_AGENT_ID,
+  createBmadCatalog,
   createClaudeCodeAgent,
   createClaudeCodeSetup,
   createKeyringSecretStore,
@@ -150,6 +151,8 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
     options.core ??
     openCore(dataDir, {
       availableBmadPieces,
+      // The read-only detection of a repo's `_bmad/` (story 10.3); a test may pass its own.
+      bmadCatalog: options.bmadCatalog ?? createBmadCatalog(),
       onListenerError: (error) => log.error('event subscriber failed', { reason: String(error) }),
       // The request is declined all the same; the reason names no command.
       onPermissionError: (error) => log.warn('a permission request was declined after a failure', { reason: String(error) }),
@@ -383,6 +386,7 @@ async function listenAndAnnounce({
     bmad: core.bmad,
     // The test-only BMad probe route (story 10.1): a test run on a temp data folder, with its own variable set.
     bmadProbe,
+    bmadDetection: core.bmadDetection,
     agentSetup,
     onboarding,
     appShortcut,

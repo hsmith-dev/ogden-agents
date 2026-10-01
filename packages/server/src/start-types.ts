@@ -3,7 +3,7 @@
  * `start.ts`, story 3.9).
  */
 import type { ClaudeCodeSetupOptions, PtyLoader } from '@ogden-agents/adapters';
-import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, Core, SecretStorePort, ToolchainPort } from '@ogden-agents/core';
+import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, Core, SecretStorePort, ToolchainPort } from '@ogden-agents/core';
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
 import type { Logger } from './log.js';
@@ -112,6 +112,11 @@ export interface StartOptions {
    * already has its own list.
    */
   availableBmadPieces?: readonly BmadPiece[];
+  /**
+   * Override the read-only BMad detection (story 10.3). Default: the
+   * `bmad-catalog` adapter. Ignored when {@link core} is given.
+   */
+  bmadCatalog?: BmadCatalogPort;
   /**
    * Called once the server has stopped by itself (Quit, or a restart the
    * launcher asked for) and everything is closed. A server process exits here.

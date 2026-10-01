@@ -157,6 +157,7 @@ export const API_ROUTES = {
   /**
    * `DELETE` → 204 (story 10.2 stub; entry 10.3 fills it): Not now on the
    * "already uses BMad Method" offer, remembered per project. Not guarded.
+   * The first one appends `workspace.bmad_offer_dismissed`; a repeat changes nothing.
    */
   workspaceBmadOffer: `${API_BASE}/workspaces/:wsId/bmad/offer`,
 } as const;

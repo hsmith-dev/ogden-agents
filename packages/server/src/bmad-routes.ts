@@ -26,6 +26,5 @@ export function registerBmadRoutes(app: Hono, { bmad }: BmadRoutesOptions): void
   // Filled by entry 10.4 (the app-wide default) and 10.3 (detection and the offer).
   app.get(API_ROUTES.newProjectDefaults, notImplemented);
   app.patch(API_ROUTES.newProjectDefaults, notImplemented);
-  app.get(API_ROUTES.workspaceBmadDetection, notImplemented);
-  app.delete(API_ROUTES.workspaceBmadOffer, notImplemented);
+  // Detection and the offer (10.3) are registered by `bmad-detection-routes.ts`.
 }

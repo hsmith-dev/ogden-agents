@@ -1,9 +1,10 @@
 import { serveStatic } from '@hono/node-server/serve-static';
-import type { AgentSetup, AppShortcutPort, BmadFeatures, Chat, EventLog, Onboarding, Permissions, Toolchain } from '@ogden-agents/core';
+import type { AgentSetup, AppShortcutPort, BmadDetectionUseCases, BmadFeatures, Chat, EventLog, Onboarding, Permissions, Toolchain } from '@ogden-agents/core';
 import { API_ROUTES, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { registerAgentSetupRoutes } from './agent-setup-routes.js';
+import { registerBmadDetectionRoutes } from './bmad-detection-routes.js';
 import { registerBmadRoutes } from './bmad-routes.js';
 import type { TabTokens } from './auth.js';
 import { registerChatRoutes } from './chat-routes.js';
@@ -73,6 +74,8 @@ export interface AppOptions {
   bmad?: BmadFeatures;
   /** Registers the test-only BMad probe route (story 10.1); `start()` sets it only when its test hook is allowed. */
   bmadProbe?: boolean;
+  /** Core's read-only BMad detection and Not now on its offer (story 10.3); without it those routes answer 501. */
+  bmadDetection?: BmadDetectionUseCases;
   /** Core's agent setup use-case: each agent's state and signing in (9.1); without it those routes answer 501. */
   agentSetup?: AgentSetup;
   /** Whether the first-run Welcome is done (9.5); without it those routes answer 501. */
@@ -86,7 +89,7 @@ export interface AppOptions {
   tabs?: TabTokens;
 }
 
-export function createApp({ events, webRoot, log, gate, control, toolchain, chat, terminalAvailability, permissions, bmad, bmadProbe, agentSetup, onboarding, appShortcut, tabs }: AppOptions): Hono {
+export function createApp({ events, webRoot, log, gate, control, toolchain, chat, terminalAvailability, permissions, bmad, bmadProbe, bmadDetection, agentSetup, onboarding, appShortcut, tabs }: AppOptions): Hono {
   const app = new Hono();
 
   // First, for every method and path: no route may be registered before this line.
@@ -171,6 +174,7 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, chat
   registerShortcutRoutes(app, { appShortcut, log });
   registerAgentSetupRoutes(app, { agentSetup, onboarding, log });
   registerBmadRoutes(app, { bmad, log });
+  registerBmadDetectionRoutes(app, { bmadDetection, log });
 
   registerEventSocket(app, { events, log, tabs });
   // A session's terminal (story 3.1): behind the same gate as `/ws`.

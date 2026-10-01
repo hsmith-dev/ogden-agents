@@ -229,6 +229,19 @@ const WorkspaceSettingsChangedInput = z.object({
 export const WorkspaceSettingsChangedEvent = WorkspaceSettingsChangedInput.extend(assigned);
 export type WorkspaceSettingsChangedEvent = z.infer<typeof WorkspaceSettingsChangedEvent>;
 
+const WorkspaceBmadOfferDismissedInput = z.object({
+  type: z.literal('workspace.bmad_offer_dismissed'),
+  ...onWorkspaceStream,
+  payload: z.object({}),
+});
+/**
+ * The user answered the "already uses BMad Method" offer with Not now
+ * (story 10.3): core keeps it per project and the offer never shows again
+ * for it. Appended once; a second Not now changes nothing.
+ */
+export const WorkspaceBmadOfferDismissedEvent = WorkspaceBmadOfferDismissedInput.extend(assigned);
+export type WorkspaceBmadOfferDismissedEvent = z.infer<typeof WorkspaceBmadOfferDismissedEvent>;
+
 const SessionCreatedInput = z.object({
   type: z.literal('session.created'),
   ...onSessionStream,
@@ -564,6 +577,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   WorkspacePermissionRuleAddedEvent,
   WorkspacePermissionRuleRemovedEvent,
   WorkspaceSettingsChangedEvent,
+  WorkspaceBmadOfferDismissedEvent,
   SessionCreatedEvent,
   SessionStateChangedEvent,
   SessionDriverChangedEvent,
@@ -599,6 +613,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   WorkspacePermissionRuleAddedInput,
   WorkspacePermissionRuleRemovedInput,
   WorkspaceSettingsChangedInput,
+  WorkspaceBmadOfferDismissedInput,
   SessionCreatedInput,
   SessionStateChangedInput,
   SessionDriverChangedInput,

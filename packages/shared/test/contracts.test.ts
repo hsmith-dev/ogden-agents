@@ -183,6 +183,7 @@ const EVENTS: Array<[type: string, valid: Record<string, unknown>, invalid: Reco
     { ...onWorkspace, payload: { cautionLevel: 'ask_for_commands', previous: 'ask_every_time' } },
     { ...onWorkspace, payload: { cautionLevel: 'ask_for_commands' } },
   ],
+  ['workspace.bmad_offer_dismissed', { ...onWorkspace, payload: {} }, { ...onAgents, payload: {} }],
   ['agent.install_started', { ...onAgents, payload: { agentId: 'claude-code' } }, { ...onAgents, payload: { agentId: 'Claude Code' } }],
   [
     'agent.install_progress',

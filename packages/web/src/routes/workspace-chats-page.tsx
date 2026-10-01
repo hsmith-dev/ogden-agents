@@ -12,6 +12,7 @@ import { Row, RowList, RowMeta } from '@/ui/row-list';
 import { Skeleton } from '@/ui/skeleton';
 import { StateGlyph } from '@/ui/state-glyph';
 import { Text } from '@/ui/typography';
+import { BmadOffer } from '@/workspaces/bmad-offer';
 import { fetchWorkspace, useSessions, workspaceName } from '@/workspaces/workspace-api';
 
 const started = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -91,6 +92,8 @@ export function WorkspaceChatsPage() {
                 {workspaceName(workspace.data)}
               </Text>
             )}
+            {/* The "already uses BMad Method" offer (story 10.3): detected when this page opens, never when the project is added. */}
+            {workspace.data === undefined ? null : <BmadOffer key={wsId} wsId={wsId} />}
             {createError === undefined ? null : (
               <Text variant="caption" role="alert">
                 {createError}

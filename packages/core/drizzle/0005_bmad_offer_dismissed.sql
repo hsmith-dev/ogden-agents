@@ -1,0 +1,1 @@
+ALTER TABLE `workspaces` ADD `bmad_offer_dismissed` integer DEFAULT false NOT NULL;

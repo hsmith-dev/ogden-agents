@@ -1,3 +1,5 @@
+import type { BmadCatalogPort } from './bmad-catalog-port.js';
+import { createBmadDetection, type BmadDetectionUseCases } from './bmad-detection.js';
 import { createBmadFeatures, parseAvailableBmadPieces, type BmadFeatures, type BmadFeaturesOptions } from './bmad-features.js';
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
 import { createEntities, type Entities } from './entities.js';
@@ -19,6 +21,8 @@ export interface Core {
   readonly permissions: Permissions;
   /** The BMad pieces guard (AD-22): every use-case serving a piece calls it first. */
   readonly bmad: BmadFeatures;
+  /** Whether a project's repo already uses BMad Method, and Not now on the offer (story 10.3). */
+  readonly bmadDetection: BmadDetectionUseCases;
   close(): void;
 }
 
@@ -26,6 +30,8 @@ export type OpenCoreOptions = OpenDatabaseOptions &
   EventLogOptions & {
     /** Called with a failure while deciding a permission request (it is declined all the same). */
     onPermissionError?: (error: unknown) => void;
+    /** The read-only BMad detection (story 10.3). Without it, every repo answers that it has no `_bmad/`. */
+    bmadCatalog?: BmadCatalogPort;
   } & BmadFeaturesOptions;
 
 /** Opens (and migrates) the database in `dataDir` and builds core on it. */
@@ -38,6 +44,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
   const entities = createEntities(db, events, sessionEvents);
   // Which pieces this install ships is the server wiring's list (story 10.2), never core's.
   const bmad = createBmadFeatures(db, { availableBmadPieces });
+  const bmadDetection = createBmadDetection({ orm: db.orm, events, entities, catalog: options.bmadCatalog });
   const permissions = createPermissions({
     db,
     events,
@@ -52,6 +59,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     entities,
     permissions,
     bmad,
+    bmadDetection,
     close: () => {
       try {
         permissions.close();

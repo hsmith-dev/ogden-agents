@@ -124,7 +124,8 @@ async function addProjectAndFinish(page: Page, server: OnboardingServer) {
   await expect(page.getByRole('heading', { name: 'Chats', level: 1 })).toBeVisible();
   await expect(page.getByTestId('workspace-name')).toHaveText(server.projectName);
   await expect(page.getByTestId('chats-empty')).toContainText('No conversations yet.');
-  expect(JSON.parse(readFileSync(join(server.install.dataDir, 'onboarding.json'), 'utf8'))).toEqual({ welcomeCompleted: true });
+  // Welcome asked its one first-project question (10.4); Simple chats was kept.
+  expect(JSON.parse(readFileSync(join(server.install.dataDir, 'onboarding.json'), 'utf8'))).toEqual({ welcomeCompleted: true, firstProjectChoice: 'simple_chats' });
 }
 
 /** Quits the server as the UI does, and waits for its process to exit. */

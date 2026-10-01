@@ -84,6 +84,7 @@ context:
 - Web: no checkbox existed in `ui/`, so `ui/checkbox.tsx` (`CheckboxOption`, radix Checkbox, laid out like `RadioGroupOption`) was added. Welcome latches the question once shown for the visit (so the project it adds doesn't hide it before the answer is used) and saves the answer only when a project was added with it. Simple chats sends `bmadPieces: []` explicitly.
 - CHANGELOG had no unreleased section; one was added above 0.3.0.
 - Verified: `pnpm typecheck`; `pnpm test` (1110 passed, 4 skipped, after the review patches); `pnpm e2e` (86 passed); `pnpm run pack && pnpm smoke` OK.
+- CI: the installed onboarding journey expected `onboarding.json` to be exactly `{ welcomeCompleted: true }`; Welcome now also keeps `firstProjectChoice: simple_chats`, so the expectation was updated (`pnpm e2e:installed` 36 passed locally).
 
 ## Plan Change Log
 

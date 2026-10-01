@@ -218,7 +218,7 @@ describe('bmadPieceRoutes, the one helper (story 10.2)', () => {
 });
 
 describe('the pre-registered BMad routes (story 10.2)', () => {
-  it('the new-projects default answers 501 and never reads the body; pieces answers 501 without core', async () => {
+  it('pieces and the new-projects default answer 501 without core and never read the body', async () => {
     const lines: string[] = [];
     const app = new Hono();
     registerBmadRoutes(app, { log: createLogger((line) => lines.push(line)) });
@@ -244,7 +244,10 @@ describe('the pre-registered BMad routes (story 10.2)', () => {
       ['PATCH', API_ROUTES.newProjectDefaults],
     ] as const) {
       expect((await send(server, path, { method })).status, `${method} ${path}`).toBe(401);
-      expect((await refusalOf(await request(server, tab, method, path, method === 'PATCH' ? { bmadPieces: [] } : undefined))).status, `${method} ${path}`).toBe(501);
     }
+    // Filled by story 10.4: served behind the gate, never guarded by a piece.
+    // Detection and the offer (story 10.3) are covered by bmad-detection-routes.test.ts.
+    expect((await request(server, tab, 'GET', API_ROUTES.newProjectDefaults)).status).toBe(200);
+    expect((await request(server, tab, 'PATCH', API_ROUTES.newProjectDefaults, { bmadPieces: [] })).status).toBe(200);
   });
 });

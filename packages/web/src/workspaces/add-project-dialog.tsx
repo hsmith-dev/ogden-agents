@@ -1,7 +1,7 @@
 import { ArrowUp, Folder, FolderOpen, FolderPlus } from '@phosphor-icons/react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import type { Workspace } from '@ogden-agents/shared';
+import type { BmadPiece, Workspace } from '@ogden-agents/shared';
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { openWorkspace } from '@/chat/chat-api';
 import { Button } from '@/ui/button';
@@ -23,6 +23,8 @@ export interface AddProjectDialogProps {
   startNew?: boolean;
   /** Called with the opened project instead of going to its Chats (Welcome, 9.5). The dialog closes first. */
   onOpened?(workspace: Workspace): void;
+  /** The BMad pieces a new project starts with (Welcome's answer, 10.4); omitted, the server applies the app-wide default. */
+  bmadPieces?: readonly BmadPiece[] | undefined;
 }
 
 /**
@@ -33,7 +35,7 @@ export interface AddProjectDialogProps {
  * (AD-2). Nothing is set up in a new folder (no git, no BMad Method).
  * With `onOpened` (Welcome) the caller decides where to go instead.
  */
-export function AddProjectDialog({ open, onOpenChange, startNew = false, onOpened }: AddProjectDialogProps) {
+export function AddProjectDialog({ open, onOpenChange, startNew = false, onOpened, bmadPieces }: AddProjectDialogProps) {
   const nameId = useId();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -48,14 +50,24 @@ export function AddProjectDialog({ open, onOpenChange, startNew = false, onOpene
             document.getElementById(nameId)?.focus();
           }}
         >
-          <FolderBrowser nameId={nameId} onDone={() => onOpenChange(false)} onOpened={onOpened} />
+          <FolderBrowser nameId={nameId} onDone={() => onOpenChange(false)} onOpened={onOpened} bmadPieces={bmadPieces} />
         </DialogContent>
       ) : null}
     </Dialog>
   );
 }
 
-function FolderBrowser({ nameId, onDone, onOpened }: { nameId: string; onDone(): void; onOpened: ((workspace: Workspace) => void) | undefined }) {
+function FolderBrowser({
+  nameId,
+  onDone,
+  onOpened,
+  bmadPieces,
+}: {
+  nameId: string;
+  onDone(): void;
+  onOpened: ((workspace: Workspace) => void) | undefined;
+  bmadPieces: readonly BmadPiece[] | undefined;
+}) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const nameRef = useRef<HTMLInputElement>(null);
@@ -83,7 +95,7 @@ function FolderBrowser({ nameId, onDone, onOpened }: { nameId: string; onDone():
 
   /** Opens `folder` as a project and goes to its Chats list (or hands it to `onOpened`). */
   const openProject = async (folder: string) => {
-    const workspace = await openWorkspace(folder);
+    const workspace = await openWorkspace(folder, undefined, bmadPieces);
     onDone();
     if (onOpened !== undefined) onOpened(workspace);
     else await navigate({ to: '/w/$wsId', params: { wsId: workspace.id } });

@@ -11,7 +11,9 @@
  */
 import {
   CoreError,
+  createAddProject,
   DriverIsTerminalError,
+  FeatureUnavailableError,
   InvalidOperationError,
   NotFoundError,
   QueueFullError,
@@ -20,12 +22,14 @@ import {
   SessionNotIdleError,
   TerminalUnavailableError,
   ValidationError,
+  type AddProject,
   type Chat,
 } from '@ogden-agents/core';
 import {
   API_ROUTES,
   CreateSessionRequest,
   CreateWorkspaceRequest,
+  FEATURE_UNAVAILABLE_MESSAGE,
   SendMessageRequest,
   SendMessageResponse,
   SessionResponse,
@@ -53,9 +57,16 @@ export const TERMINAL_CHECK_FAILED = "Ogden Agents couldn't check whether the te
 export interface ChatRouteOptions {
   /** Whether a session's terminal can work (story 3.2; 3.7 fills it in). Without it, `GET` session has no `terminal`. */
   terminalAvailability?: TerminalAvailabilityCheck | undefined;
+  /**
+   * Adding a project with its first BMad pieces (story 10.4): the given ones
+   * or the app-wide default. Without it a new project starts Simple and
+   * given pieces are refused as unavailable.
+   */
+  addProject?: AddProject | undefined;
 }
 
-export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { terminalAvailability }: ChatRouteOptions = {}): void {
+export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { terminalAvailability, addProject }: ChatRouteOptions = {}): void {
+  const projects = addProject ?? createAddProject({ chat });
   const limit = bodyLimit({
     maxSize: MAX_BODY_BYTES,
     onError: (c) => apiError(c, 413, 'invalid_request', 'That message is too long.'),
@@ -72,6 +83,7 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     if (error instanceof SessionNotIdleError) return apiError(c, 409, 'session_not_idle', error.message);
     if (error instanceof TerminalUnavailableError) return apiError(c, 409, 'terminal_unavailable', error.message, { terminal: error.terminal });
     if (error instanceof DriverIsTerminalError) return apiError(c, 409, 'driver_is_terminal', error.message);
+    if (error instanceof FeatureUnavailableError) return apiError(c, 409, 'feature_unavailable', FEATURE_UNAVAILABLE_MESSAGE);
     if (error instanceof SessionBusyError) {
       return apiError(c, 409, 'session_busy', 'The agent is still answering. Send your message when it is done.');
     }
@@ -86,7 +98,7 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     const body = await readBody(c, CreateWorkspaceRequest);
     if (!body.ok) return body.response;
     try {
-      const workspace = chat.openWorkspace(body.value.path);
+      const workspace = projects.addProject(body.value.path, body.value.bmadPieces);
       return c.json(WorkspaceResponse.parse({ workspace }), 201);
     } catch (error) {
       return refusal(c, error);

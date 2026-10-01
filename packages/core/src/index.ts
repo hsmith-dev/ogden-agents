@@ -27,6 +27,7 @@ export {
   type ScopeSubscription,
 } from './event-log.js';
 export { newId } from './ids.js';
+export * from './new-projects.js';
 export * from './onboarding.js';
 export * from './permissions.js';
 export * from './resume-prime.js';

@@ -16,7 +16,10 @@ import {
   SessionKind as SessionKindSchema,
   SessionState as SessionStateSchema,
   TicketRef as TicketRefSchema,
+  canonicalBmadPieces,
+  DEFAULT_CAUTION_LEVEL,
   type AdapterRefs,
+  type BmadPiece,
   type DriverChangeCause,
   type MessageRole,
   type Run,
@@ -52,6 +55,17 @@ export interface NewSession {
   adapterRefs?: AdapterRefs;
 }
 
+/** What a newly created workspace starts with (story 10.4). Ignored when the workspace already exists. */
+export interface NewWorkspaceOptions {
+  /**
+   * The BMad pieces it starts with, in the creating transaction, or a
+   * function that returns them, called only when the workspace is created
+   * (inside that transaction: a throw creates nothing). The caller checks
+   * them (pieces, dependency rule, availability). Default none.
+   */
+  bmadPieces?: readonly BmadPiece[] | (() => readonly BmadPiece[]);
+}
+
 export interface NewRun {
   /** Must be a `build` session without a run. */
   sessionId: SessionId;
@@ -82,7 +96,7 @@ export interface Entities {
    * `workspace.created`) if none exists. A symlink or a different casing of
    * the same repo returns the existing workspace (AD-2).
    */
-  ensureWorkspace(path: string): Workspace;
+  ensureWorkspace(path: string, options?: NewWorkspaceOptions): Workspace;
   getWorkspace(id: WorkspaceId): Workspace | undefined;
   listWorkspaces(): Workspace[];
   /**
@@ -249,20 +263,34 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
   };
 
   return {
-    ensureWorkspace(path) {
+    ensureWorkspace(path, options = {}) {
       const real = realWorkspacePath(path);
       const canonical = foldWorkspacePath(real);
       return log.transaction(() => {
         const existing = orm.select().from(workspaces).where(eq(workspaces.path, canonical)).get();
         if (existing !== undefined) return toWorkspace(existing);
+        const given = typeof options.bmadPieces === 'function' ? options.bmadPieces() : (options.bmadPieces ?? []);
+        const bmadPieces = canonicalBmadPieces(given);
         const workspace: Workspace = { id: newId('ws'), path: canonical, realPath: real, createdAt: now() };
-        orm.insert(workspaces).values({ ...workspace, realPath: real }).run();
+        orm
+          .insert(workspaces)
+          .values({ ...workspace, realPath: real, cautionLevel: DEFAULT_CAUTION_LEVEL, bmadPieces: JSON.stringify(bmadPieces) })
+          .run();
         log.append({
           type: 'workspace.created',
           workspaceId: workspace.id,
           streamId: workspace.id,
           payload: { workspace },
         });
+        // A project that starts with pieces on (story 10.4) says so right after it is created, in the same transaction.
+        if (bmadPieces.length > 0) {
+          log.append({
+            type: 'workspace.settings_changed',
+            workspaceId: workspace.id,
+            streamId: workspace.id,
+            payload: { cautionLevel: DEFAULT_CAUTION_LEVEL, previous: DEFAULT_CAUTION_LEVEL, bmadPieces, previousBmadPieces: [] },
+          });
+        }
         return workspace;
       });
     },

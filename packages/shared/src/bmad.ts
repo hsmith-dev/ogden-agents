@@ -185,6 +185,31 @@ export const BMAD_OFFER_NOT_NOW = 'Not now';
 export const BMAD_FILES_STAY_TEXT = 'Your BMad files stay in this project.';
 /** Welcome's one question, asked once for the first project (entry 10.4). */
 export const FIRST_PROJECT_QUESTION = 'Simple chats or BMad Method?';
+/** Settings' entry and page title for the app-wide default (entry 10.4). */
+export const NEW_PROJECTS_SETTINGS_LABEL = 'New projects';
+/** The intro of Settings → New projects. */
+export const NEW_PROJECTS_SETTINGS_INTRO =
+  "What a project you add starts with. Projects you already have keep their own settings, and nothing is written into a project's folder.";
+/** The sentence under Simple chats, in Settings → New projects and in Welcome. */
+export const SIMPLE_CHATS_SENTENCE = 'Chat with your agent. Every BMad Method feature starts off, and you can turn them on later in the project.';
+/** The sentence under BMad Method, in Settings → New projects and in Welcome. */
+export const BMAD_METHOD_SENTENCE = 'Plan and track the work with BMad Method features, starting with Planning and Board.';
+/** Welcome's line under the question: what the answer changes. */
+export const FIRST_PROJECT_QUESTION_HINT = 'This applies to the project you add now. You can change it later in its settings.';
+/** Said when BMad Method can't be chosen because this install ships none of its features yet. */
+export const BMAD_METHOD_COMING_SOON_SENTENCE = "Coming soon. This version of Ogden Agents doesn't include BMad Method features yet.";
+/** `internal_error` (500) when the default for new projects couldn't be kept. */
+export const NEW_PROJECTS_SAVE_FAILED = "Ogden Agents couldn't save the default for new projects. Try again.";
+/** The fallback when the default for new projects couldn't be loaded. */
+export const NEW_PROJECTS_LOAD_FAILED = "Ogden Agents couldn't load the default for new projects";
+/** The fallback when a change to the default for new projects couldn't be saved (no reason from the server). */
+export const NEW_PROJECTS_SAVE_FALLBACK = "The default for new projects couldn't be saved";
+/** The accessible name of Settings → New projects' Simple chats / BMad Method choice. */
+export const NEW_PROJECTS_MODE_LABEL = 'New projects start with';
+/** The accessible name of the BMad Method features new projects start with. */
+export const NEW_PROJECTS_PIECES_LABEL = 'BMad Method features new projects start with';
+/** Settings → New projects' status line after a save. */
+export const NEW_PROJECTS_SAVED_TEXT = 'Saved. New projects start with this.';
 
 // ---- What the install ships ----
 

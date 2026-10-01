@@ -5,7 +5,7 @@
  */
 import type { Session, SessionDriver, SessionId, ToolCallDiff, ToolCallStatus, ToolKind, Workspace, WorkspaceId } from '@ogden-agents/shared';
 import type { AgentError, AgentPort, AgentSession } from '../agent-port.js';
-import type { Entities } from '../entities.js';
+import type { Entities, NewWorkspaceOptions } from '../entities.js';
 import type { HistoryDeleted } from '../event-log.js';
 import type { Permissions } from '../permissions.js';
 import type { SessionEvents } from '../session-events.js';
@@ -94,8 +94,9 @@ export interface Chat {
    * be absolute (a leading `~` is the user's home). Throws
    * `InvalidOperationError` if it isn't, if it is not an existing
    * folder, or if it is, holds or sits inside Ogden Agents' data folder.
+   * `options` apply only when the workspace is created (story 10.4).
    */
-  openWorkspace(path: string): Workspace;
+  openWorkspace(path: string, options?: NewWorkspaceOptions): Workspace;
   /** Every workspace of this install, oldest first. */
   listWorkspaces(): Workspace[];
   /** The workspace (`NotFoundError` if there is none). */

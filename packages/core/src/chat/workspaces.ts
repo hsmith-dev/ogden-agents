@@ -13,7 +13,7 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
   const { drop, stopTerminal } = deps;
 
   const methods: Pick<Chat, 'openWorkspace' | 'listWorkspaces' | 'getWorkspace' | 'listSessions' | 'deleteHistory' | 'createChatSession' | 'getSession'> = {
-    openWorkspace(input) {
+    openWorkspace(input, options) {
       const path = input === '~' ? homedir() : input.startsWith('~/') || input.startsWith('~\\') ? join(homedir(), input.slice(2)) : input;
       if (!isAbsolute(path)) throw new InvalidOperationError('Enter the full path of the folder, starting from the top of the disk.');
       try {
@@ -22,7 +22,7 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
         if (within(candidate, dataHome) || within(dataHome, candidate)) {
           throw new InvalidOperationError("That folder holds Ogden Agents' own data, so it can't be a project.");
         }
-        return entities.ensureWorkspace(path);
+        return entities.ensureWorkspace(path, options);
       } catch (error) {
         if (error instanceof CoreError) throw error;
         const code = (error as NodeJS.ErrnoException).code;

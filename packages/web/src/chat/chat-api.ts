@@ -5,6 +5,7 @@ import {
   SendMessageResponse,
   SessionResponse,
   WorkspaceResponse,
+  type BmadPiece,
   type PermissionDecisionRequest,
   type PermissionRule,
   type Session,
@@ -28,9 +29,13 @@ export const AGENT_ID = 'claude-code';
 // The shared fetch-error helper, re-exported for this module's importers.
 export { call, ChatApiError, postJson };
 
-/** `POST /api/v1/workspaces`: the workspace for the folder at `path`. */
-export async function openWorkspace(path: string, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<Workspace> {
-  const json = await call(auth, API_ROUTES.workspaces, postJson({ path }), "Ogden Agents couldn't open that folder");
+/**
+ * `POST /api/v1/workspaces`: the workspace for the folder at `path`. A new
+ * one starts with `bmadPieces` when given (Welcome's answer, story 10.4),
+ * otherwise with the app-wide default, which the server applies.
+ */
+export async function openWorkspace(path: string, auth: Pick<TabAuth, 'fetch'> = tabAuth, bmadPieces?: readonly BmadPiece[]): Promise<Workspace> {
+  const json = await call(auth, API_ROUTES.workspaces, postJson(bmadPieces === undefined ? { path } : { path, bmadPieces }), "Ogden Agents couldn't open that folder");
   return WorkspaceResponse.parse(json).workspace;
 }
 

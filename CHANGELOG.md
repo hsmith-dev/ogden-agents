@@ -2,6 +2,10 @@
 
 Every release of the `ogden-agents` npm package. Versions follow [semantic versioning](https://semver.org/); before 1.0.0, a minor version may change behavior. How a release is made is in [RELEASING.md](RELEASING.md).
 
+## Unreleased
+
+- **New projects start Simple, or as you choose.** Settings > New projects sets what a project you add starts with: Simple chats (every BMad Method feature off, the default) or BMad Method with the features you pick (those this version ships). Welcome asks "Simple chats or BMad Method?" once for your first project; the answer sets only that project. Projects you already have are never changed, and nothing is written into a project's folder.
+
 ## 0.3.0 — the agent's own terminal
 
 Published first as `0.3.0-rc.1` on the `next` dist-tag (`npx ogden-agents@next`), then as `0.3.0`. For advanced users: switch a chat to Claude Code's own terminal and back, on the same session.

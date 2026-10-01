@@ -1,4 +1,5 @@
-import { GearSix, HandWaving, PaintBrush, Plus, Robot, Wrench } from '@phosphor-icons/react';
+import { FolderSimplePlus, GearSix, HandWaving, PaintBrush, Plus, Robot, Wrench } from '@phosphor-icons/react';
+import { NEW_PROJECTS_SETTINGS_LABEL } from '@ogden-agents/shared';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { memo, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { AGENT_NAME } from '@/chat/chat-api';
@@ -270,7 +271,7 @@ const SessionRow = memo(function SessionRow({
   );
 });
 
-/** Settings sections: Agents (9.1), Appearance and Tools (Notifications arrives with a later epic), and Welcome again (9.5). */
+/** Settings sections: Agents (9.1), Appearance, New projects (10.4) and Tools (Notifications arrives with a later epic), and Welcome again (9.5). */
 function SettingsMenu() {
   const { setSheetOpen } = useSidebar();
   return (
@@ -293,6 +294,12 @@ function SettingsMenu() {
           <Link to="/settings/appearance">
             <PaintBrush aria-hidden />
             Appearance
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
+          <Link to="/settings/new-projects">
+            <FolderSimplePlus aria-hidden />
+            {NEW_PROJECTS_SETTINGS_LABEL}
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>

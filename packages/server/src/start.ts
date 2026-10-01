@@ -23,6 +23,7 @@ import {
   createAgentSetup,
   createChat,
   createDataDir,
+  createNewProjectDefaults,
   createOnboarding,
   clampCheckInDelay,
   RESTARTED_REASON,
@@ -372,6 +373,12 @@ async function listenAndAnnounce({
     hasProjects: () => core.entities.listWorkspaces().length > 0,
     onError: (code) => log.warn('onboarding record unusable', { code }),
   });
+  // The app-wide default for new projects (10.4): Simple until the user changes it in Settings.
+  const newProjectDefaults = createNewProjectDefaults({
+    dataDir,
+    bmad: core.bmad,
+    onError: (code) => log.warn('new project defaults unusable', { code }),
+  });
   const app = createApp({
     events: core.events,
     webRoot: options.webRoot ?? defaultWebRoot(),
@@ -389,6 +396,7 @@ async function listenAndAnnounce({
     bmadDetection: core.bmadDetection,
     agentSetup,
     onboarding,
+    newProjectDefaults,
     appShortcut,
     tabs,
   });

@@ -1,6 +1,16 @@
-import type { AgentSetupStatus } from '@ogden-agents/shared';
+import { BMAD_COMING_SOON_REASON, BMAD_PIECES, type AgentSetupStatus, type BmadPieceAvailability } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
-import { advancesOnReady, agentReady, exitTarget, redirectsToWelcome, selectedAgent, stepAfterProject } from '../src/onboarding/welcome-model';
+import {
+  advancesOnReady,
+  agentReady,
+  asksFirstProjectChoice,
+  bmadMethodPieces,
+  exitTarget,
+  firstProjectPieces,
+  redirectsToWelcome,
+  selectedAgent,
+  stepAfterProject,
+} from '../src/onboarding/welcome-model';
 
 const agent = (extra: Partial<AgentSetupStatus> = {}): AgentSetupStatus => ({
   agentId: 'claude-code',
@@ -53,5 +63,27 @@ describe('Welcome rules', () => {
     expect(redirectsToWelcome({ welcomeCompleted: false })).toBe(true);
     expect(redirectsToWelcome({ welcomeCompleted: true })).toBe(false);
     expect(redirectsToWelcome(undefined)).toBe(false);
+  });
+});
+
+describe("Welcome's first-project question (story 10.4)", () => {
+  const all = (available: readonly string[]): BmadPieceAvailability[] =>
+    BMAD_PIECES.map((piece) => (available.includes(piece) ? { piece, available: true } : { piece, available: false, reason: BMAD_COMING_SOON_REASON }));
+
+  it('is asked only with no answer kept and no project, once both are known', () => {
+    expect(asksFirstProjectChoice({}, 0)).toBe(true);
+    expect(asksFirstProjectChoice({ firstProjectChoice: 'simple_chats' }, 0)).toBe(false);
+    expect(asksFirstProjectChoice({}, 1)).toBe(false);
+    expect(asksFirstProjectChoice(undefined, 0)).toBe(false);
+    expect(asksFirstProjectChoice({}, undefined)).toBe(false);
+  });
+
+  it('Simple chats starts the project with every piece off; BMad Method with Planning and Board as far as they ship', () => {
+    expect(firstProjectPieces('simple_chats', all(BMAD_PIECES))).toEqual([]);
+    expect(firstProjectPieces('bmad_method', all(['planning', 'board']))).toEqual(['planning', 'board']);
+    expect(firstProjectPieces('bmad_method', all(['board']))).toEqual(['board']);
+    expect(firstProjectPieces('bmad_method', all([]))).toEqual([]);
+    expect(firstProjectPieces('bmad_method', undefined)).toEqual([]);
+    expect(bmadMethodPieces(all(['builds', 'retrospectives']))).toEqual([]);
   });
 });

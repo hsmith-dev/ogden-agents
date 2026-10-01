@@ -42,6 +42,13 @@ const agentsSettingsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/agents-settings-page'), 'AgentsSettingsPage'),
 });
 
+/** The app-wide default for new projects (story 10.4). */
+const newProjectsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/new-projects',
+  component: lazyRouteComponent(() => import('./routes/new-projects-page'), 'NewProjectsPage'),
+});
+
 /** The first-run Welcome (onboarding 9.5). */
 const welcomeRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -83,7 +90,7 @@ const routeTree = rootRoute.addChildren([
   workspaceChatsRoute,
   workspaceSettingsRoute,
   sessionRoute,
-  settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute]),
+  settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute]),
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

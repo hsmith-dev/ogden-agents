@@ -1,19 +1,44 @@
-import type { Workspace } from '@ogden-agents/shared';
+import {
+  BMAD_COMING_SOON_LABEL,
+  BMAD_METHOD_SENTENCE,
+  FIRST_PROJECT_CHOICE_LABELS,
+  FIRST_PROJECT_CHOICES,
+  FIRST_PROJECT_QUESTION,
+  FIRST_PROJECT_QUESTION_HINT,
+  SIMPLE_CHATS_SENTENCE,
+  type BmadPiece,
+  type FirstProjectChoice,
+  type Workspace,
+} from '@ogden-agents/shared';
 import { ArrowRight, FolderPlus, Plus } from '@phosphor-icons/react';
 import { useNavigate } from '@tanstack/react-router';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { AgentCard } from '@/agents/agent-card';
 import { useAgents } from '@/agents/agent-setup-api';
 import { shortcutLocation, useAppShortcut, useAppShortcutActions } from '@/appearance/app-shortcut-api';
-import { useCompleteWelcome } from '@/onboarding/onboarding-api';
-import { advancesOnReady, agentReady, exitTarget, selectedAgent, stepAfterProject, type WelcomeStep } from '@/onboarding/welcome-model';
+import { useCompleteWelcome, useOnboarding } from '@/onboarding/onboarding-api';
+import {
+  advancesOnReady,
+  agentReady,
+  asksFirstProjectChoice,
+  bmadMethodPieces,
+  exitTarget,
+  firstProjectPieces,
+  selectedAgent,
+  stepAfterProject,
+  type WelcomeStep,
+} from '@/onboarding/welcome-model';
 import { WorkspaceHeader } from '@/shell/workspace-header';
+import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
 import { PageBody } from '@/ui/page';
+import { RadioGroup, RadioGroupOption } from '@/ui/radio-group';
 import { Skeleton } from '@/ui/skeleton';
 import { Text } from '@/ui/typography';
 import { AddProjectDialog } from '@/workspaces/add-project-dialog';
+import { useWorkspaces } from '@/workspaces/workspace-api';
+import { useBmadPieces } from '@/workspaces/workspace-settings-api';
 
 /**
  * `/welcome`: the first-run Welcome (onboarding 9.5; EXPERIENCE.md Key Flow
@@ -23,6 +48,11 @@ import { AddProjectDialog } from '@/workspaces/add-project-dialog';
  * opens the new project's Chats. The steps are this page's state, not
  * routes. **Skip for now** on every step marks it done too; Settings →
  * Welcome brings it back.
+ *
+ * The project step asks "Simple chats or BMad Method?" once (10.4): only
+ * while no answer is kept and no project exists. The answer sets the pieces
+ * of the project added with it (never the app-wide default) and is kept with
+ * Welcome done.
  */
 export function WelcomePage() {
   const navigate = useNavigate();
@@ -30,19 +60,22 @@ export function WelcomePage() {
   const shortcut = useAppShortcut();
   const [step, setStep] = useState<WelcomeStep>('agent');
   const [workspace, setWorkspace] = useState<Workspace | undefined>(undefined);
+  /** The first-project answer the added project was created with (10.4), kept when Welcome is done. */
+  const [answered, setAnswered] = useState<FirstProjectChoice | undefined>(undefined);
 
   /** Marks Welcome done, then leaves for the project's Chats (or Projects). A failure stays here, said in place. */
-  const exit = (opened: Workspace | undefined = workspace) => {
+  const exit = (opened: Workspace | undefined = workspace, choice: FirstProjectChoice | undefined = answered) => {
     if (complete.isPending) return;
-    complete.mutate(undefined, { onSuccess: () => void navigate(exitTarget(opened?.id)) });
+    complete.mutate(choice, { onSuccess: () => void navigate(exitTarget(opened?.id)) });
   };
 
   const toProject = useCallback(() => setStep('project'), []);
 
-  const onProject = (opened: Workspace) => {
+  const onProject = (opened: Workspace, choice: FirstProjectChoice | undefined) => {
     setWorkspace(opened);
+    setAnswered(choice);
     const next = stepAfterProject(shortcut.data?.offerPending);
-    if (next === 'finish') exit(opened);
+    if (next === 'finish') exit(opened, choice);
     else setStep(next);
   };
 
@@ -138,18 +171,34 @@ function AgentStep({ onContinue, skip }: { onContinue(): void; skip: ReactNode }
 }
 
 /** Add a first project, through the same dialog as `/`, which hands the project back here. */
-function ProjectStep({
+export function ProjectStep({
   workspace,
   onOpened,
   onContinue,
   skip,
 }: {
   workspace: Workspace | undefined;
-  onOpened(workspace: Workspace): void;
+  /** The project added, with the first-project answer it was created with when the question was asked. */
+  onOpened(workspace: Workspace, choice: FirstProjectChoice | undefined): void;
   onContinue(): void;
   skip: ReactNode;
 }) {
   const [adding, setAdding] = useState<'pick' | 'new' | undefined>(undefined);
+  const onboarding = useOnboarding();
+  const projects = useWorkspaces();
+  const pieces = useBmadPieces();
+  const [choice, setChoice] = useState<FirstProjectChoice>('simple_chats');
+  // Once asked, the question stays for this visit: the project it adds (or one added elsewhere) doesn't take back the answer.
+  const [asks, setAsks] = useState(false);
+  if (!asks && asksFirstProjectChoice(onboarding.data, projects.data?.length)) setAsks(true);
+  // The question can't be bypassed: adding waits until it is known whether it is asked.
+  const settled = (onboarding.data !== undefined || onboarding.isError) && (projects.data !== undefined || projects.isError);
+  // BMad Method needs at least one of its pieces shipped; otherwise it is greyed and marked Coming soon
+  // (greyed without the mark while that is loading or couldn't be checked).
+  const bmadOffered = bmadMethodPieces(pieces.data).length > 0;
+  const comingSoon = pieces.data !== undefined && !bmadOffered;
+  const chosen: FirstProjectChoice = choice === 'bmad_method' && !bmadOffered ? 'simple_chats' : choice;
+  const bmadPieces: readonly BmadPiece[] | undefined = asks ? firstProjectPieces(chosen, pieces.data) : undefined;
   // A project added while the step stays (finishing is under way or failed): focus goes to Continue, not the removed Add project.
   const continueRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -161,14 +210,17 @@ function ProjectStep({
       <Text variant="body" tone="muted">
         A project is a folder on this computer. Your agents plan and build inside it, and every conversation stays with its project.
       </Text>
+      {asks && workspace === undefined ? (
+        <FirstProjectQuestion value={chosen} bmadOffered={bmadOffered} comingSoon={comingSoon} onChange={setChoice} />
+      ) : null}
       <Actions>
         {workspace === undefined ? (
           <>
-            <Button onClick={() => setAdding('pick')}>
+            <Button aria-disabled={!settled} onClick={settled ? () => setAdding('pick') : undefined}>
               <Plus aria-hidden />
               Add project
             </Button>
-            <Button variant="outline" onClick={() => setAdding('new')}>
+            <Button variant="outline" aria-disabled={!settled} onClick={settled ? () => setAdding('new') : undefined}>
               <FolderPlus aria-hidden />
               Start a new project folder
             </Button>
@@ -185,9 +237,67 @@ function ProjectStep({
         open={adding !== undefined}
         startNew={adding === 'new'}
         onOpenChange={(open) => setAdding(open ? adding : undefined)}
-        onOpened={onOpened}
+        onOpened={(opened) => onOpened(opened, asks ? chosen : undefined)}
+        bmadPieces={bmadPieces}
       />
     </section>
+  );
+}
+
+/** "Simple chats or BMad Method?" (10.4): Simple chats preselected; BMad Method greyed and marked Coming soon when none of its features ships. */
+function FirstProjectQuestion({
+  value,
+  bmadOffered,
+  comingSoon,
+  onChange,
+}: {
+  value: FirstProjectChoice;
+  bmadOffered: boolean;
+  comingSoon: boolean;
+  onChange(choice: FirstProjectChoice): void;
+}) {
+  const sentences: Record<FirstProjectChoice, ReactNode> = {
+    simple_chats: SIMPLE_CHATS_SENTENCE,
+    bmad_method: !comingSoon ? (
+      BMAD_METHOD_SENTENCE
+    ) : (
+      <>
+        {BMAD_METHOD_SENTENCE}{' '}
+        <Badge variant="outline" data-testid="first-project-bmad-coming-soon">
+          {BMAD_COMING_SOON_LABEL}
+        </Badge>
+      </>
+    ),
+  };
+  return (
+    <div className="flex flex-col gap-2" data-testid="first-project-question">
+      <Text as="h3" variant="heading" id="first-project-question">
+        {FIRST_PROJECT_QUESTION}
+      </Text>
+      <Text variant="caption" id="first-project-question-hint">
+        {FIRST_PROJECT_QUESTION_HINT}
+      </Text>
+      <RadioGroup
+        aria-labelledby="first-project-question"
+        aria-describedby="first-project-question-hint"
+        value={value}
+        onValueChange={(next) => {
+          if ((FIRST_PROJECT_CHOICES as readonly string[]).includes(next)) onChange(next as FirstProjectChoice);
+        }}
+      >
+        {FIRST_PROJECT_CHOICES.map((each) => (
+          <RadioGroupOption
+            key={each}
+            id={`first-project-${each}`}
+            value={each}
+            data-testid={`first-project-${each}`}
+            label={FIRST_PROJECT_CHOICE_LABELS[each]}
+            description={sentences[each]}
+            disabled={each === 'bmad_method' && !bmadOffered}
+          />
+        ))}
+      </RadioGroup>
+    </div>
   );
 }
 

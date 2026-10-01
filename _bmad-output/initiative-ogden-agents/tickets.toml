@@ -46,7 +46,7 @@ id = 5
 slug = "epic-unattended-builds"
 title = "Tickets build themselves safely and wait for your approval"
 covers = ["CAP-8", "CAP-9", "CAP-10", "CAP-12", "CAP-14"]
-after = [{ epic = 1, needs = "the bundled bmad-loop fork" }, { epic = 4, needs = "the ticket store and board" }]
+after = [{ epic = 1, needs = "the bundled bmad-loop fork (1.9) and the uv bootstrap (1.8)" }, { epic = 4, needs = "the board, ticket detail, TicketStorePort with mark and the live index, through its sweep (4.12); the release after 4.13" }, { epic = 10, needs = "the per-project BMad pieces contract, requireBmadFeature, bmadPieceRoutes and SHIPPED_BMAD_PIECES (10.2) and the Runs tab slot (10.6)" }]
 
 [[epic]]
 id = 6

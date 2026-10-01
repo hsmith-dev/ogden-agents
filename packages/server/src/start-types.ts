@@ -63,8 +63,9 @@ export interface StartOptions {
   claudeExecutable?: string | null;
   /**
    * How long a `working` agent may be silent before core checks in (story
-   * 2.10). Default: `$OGDEN_AGENTS_TEST_CHECK_IN_MS` if set (tests and
-   * `pnpm dev:chat` only), else 10 minutes.
+   * 2.10). Default: `$OGDEN_AGENTS_TEST_CHECK_IN_MS` if set and test hooks
+   * are allowed (a test run, `NODE_ENV=test` or `VITEST`, on a data folder
+   * inside the OS temp folder), else 10 minutes.
    */
   checkInDelayMs?: number;
   /** Variables added to every agent's environment on top of `agentEnvironment` (tests: the fake agent's switches). */

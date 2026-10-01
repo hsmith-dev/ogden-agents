@@ -155,10 +155,28 @@ describe('the quiet agent', () => {
   });
 
   it('reads the test-only delay from the environment, clamped to 1 s .. 2^31-1 ms; anything but a number is ignored', () => {
-    expect(checkInDelayFromEnv({})).toBeUndefined();
-    expect(checkInDelayFromEnv({ OGDEN_AGENTS_TEST_CHECK_IN_MS: '5000' })).toBe(5000);
-    for (const low of ['250', '0', '-5', '1.5']) expect(checkInDelayFromEnv({ OGDEN_AGENTS_TEST_CHECK_IN_MS: low })).toBe(1000);
-    expect(checkInDelayFromEnv({ OGDEN_AGENTS_TEST_CHECK_IN_MS: '1e12' })).toBe(2 ** 31 - 1);
-    for (const bad of ['', '  ', 'soon']) expect(checkInDelayFromEnv({ OGDEN_AGENTS_TEST_CHECK_IN_MS: bad })).toBeUndefined();
+    const dataDir = mkdtempSync(join(tmpdir(), 'ogden-check-in-'));
+    try {
+      const delay = (value?: string) => checkInDelayFromEnv({ VITEST: 'true', ...(value === undefined ? {} : { OGDEN_AGENTS_TEST_CHECK_IN_MS: value }) }, dataDir);
+      expect(delay()).toBeUndefined();
+      expect(delay('5000')).toBe(5000);
+      for (const low of ['250', '0', '-5', '1.5']) expect(delay(low)).toBe(1000);
+      expect(delay('1e12')).toBe(2 ** 31 - 1);
+      for (const bad of ['', '  ', 'soon']) expect(delay(bad)).toBeUndefined();
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores the test-only delay outside a test run, or on a data folder outside the temp folder (testHooksAllowed)', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'ogden-check-in-'));
+    try {
+      expect(checkInDelayFromEnv({ OGDEN_AGENTS_TEST_CHECK_IN_MS: '5000' }, dataDir)).toBeUndefined();
+      expect(checkInDelayFromEnv({ NODE_ENV: 'production', OGDEN_AGENTS_TEST_CHECK_IN_MS: '5000' }, dataDir)).toBeUndefined();
+      expect(checkInDelayFromEnv({ NODE_ENV: 'test', OGDEN_AGENTS_TEST_CHECK_IN_MS: '5000' }, dataDir)).toBe(5000);
+      expect(checkInDelayFromEnv({ VITEST: 'true', OGDEN_AGENTS_TEST_CHECK_IN_MS: '5000' }, import.meta.dirname)).toBeUndefined();
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 });

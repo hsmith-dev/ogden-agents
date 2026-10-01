@@ -290,7 +290,7 @@ async function listenAndAnnounce({
   });
   // One instance for the chat that asks and the routes that answer: core's (story 2.6).
   const permissions = core.permissions;
-  const configuredCheckIn = options.checkInDelayMs ?? checkInDelayFromEnv();
+  const configuredCheckIn = options.checkInDelayMs ?? checkInDelayFromEnv(process.env, dataDir);
   const checkInDelayMs = configuredCheckIn === undefined ? undefined : clampCheckInDelay(configuredCheckIn);
   /**
    * The chat runs Claude Code: its API key (saved, else from this server's

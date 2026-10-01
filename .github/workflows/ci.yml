@@ -63,7 +63,10 @@ jobs:
       # node-pty's Windows kill() prints an uncaught "AttachConsole failed" when its
       # console list runs after the tree is gone; the terminal always skips that list
       # (stories 9.6 and 3.8), so the line in any test output fails the job.
+      # Windows keeps its default shell (pwsh): Git Bash would put its own tools
+      # on PATH and set HOME and SHELL for every test, which no user's Windows has.
       - name: Test
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           pnpm test 2>&1 | tee "$RUNNER_TEMP/test-output.log"
@@ -71,6 +74,18 @@ jobs:
             echo "::error::node-pty printed \"AttachConsole failed\" during the tests"
             exit 1
           fi
+
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'test-output.log'
+          pnpm test 2>&1 | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (Select-String -Path $log -SimpleMatch -Quiet 'AttachConsole failed') {
+            Write-Output '::error::node-pty printed "AttachConsole failed" during the tests'
+            exit 1
+          }
 
       - name: Pack
         run: pnpm pack

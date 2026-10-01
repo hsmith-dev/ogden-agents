@@ -323,3 +323,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-the-terminal-works-on-windows-plan.md`
   summary: For whoever sees it on Windows (3.8 CI probe): under system ConPTY, when a leftover program the CLI started outside its job keeps writing to the console, node-pty's flush timer keeps resetting and its exit report never comes (3 of 4 probe runs, 15 s), so the dead CLI's terminal stays open until stopped. Options then: watch the CLI's pid as well, or a Job Object (architecture change).
   evidence: node-pty 1.1.0 `lib/windowsPtyAgent.js` `_$onProcessExit`/`_flushDataAndCleanUp`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-the-terminal-works-on-windows-plan.md`
+  summary: Resolved: `OGDEN_AGENTS_TEST_CHECK_IN_MS` (story 2.10) was read from any environment, unlike the other test hooks (9.7 security review). It is now honoured only when `testHooksAllowed` (`NODE_ENV=test` or `VITEST`, on a data folder inside the OS temp folder); tests behave as before. `pnpm dev:chat` needs `NODE_ENV=test` to use it.
+  evidence: `packages/server/src/start-env.ts` `checkInDelayFromEnv`; `packages/server/test/cancel.test.ts` "ignores the test-only delay outside a test run".

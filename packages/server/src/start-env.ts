@@ -6,7 +6,7 @@
 import { clampCheckInDelay } from '@ogden-agents/core';
 import { testHooksAllowed } from './test-hooks.js';
 
-/** Test-only: shortens the quiet-agent check-in delay, in milliseconds (story 2.10). */
+/** Test-only: shortens the quiet-agent check-in delay, in milliseconds (story 2.10). Honoured only when `testHooksAllowed`. */
 export const CHECK_IN_MS_ENV = 'OGDEN_AGENTS_TEST_CHECK_IN_MS';
 /**
  * Set to `memory` (tests that start the packaged server as its own process:
@@ -32,11 +32,12 @@ export const SUBSCRIPTION_MAX_AGE_MS = 30_000;
 /**
  * The check-in delay from {@link CHECK_IN_MS_ENV}, clamped to core's range
  * (`clampCheckInDelay`: 1 s to 2^31-1 ms), or `undefined` (core's 10 minutes)
- * when unset or not a number.
+ * when unset, not a number, or test hooks aren't allowed for `dataDir`
+ * (`testHooksAllowed`: a test run on a data folder inside the OS temp folder).
  */
-export function checkInDelayFromEnv(env: NodeJS.ProcessEnv = process.env): number | undefined {
+export function checkInDelayFromEnv(env: Readonly<Record<string, string | undefined>>, dataDir: string): number | undefined {
   const raw = env[CHECK_IN_MS_ENV];
-  if (raw === undefined || raw.trim() === '') return undefined;
+  if (raw === undefined || raw.trim() === '' || !testHooksAllowed(env, dataDir)) return undefined;
   const ms = Number(raw);
   return Number.isFinite(ms) ? clampCheckInDelay(ms) : undefined;
 }

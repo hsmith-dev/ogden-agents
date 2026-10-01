@@ -83,6 +83,8 @@ context: []
 
 ## Plan Change Log
 
+- 2026-10-01: Windows CI run 36910454951 failed once at step 7 (the reply after switching back). The trace's event socket shows the import was on time (the terminal turns came before `driver_changed` to ui); `context` was accepted at 19:07:02 and the restarted agent's `session.resumed` and reply came at 19:07:42, 40 s later, while the runner was stalled (a key press in the page took 12 s). Not a lost or mis-matched reply. Step 7 now waits as long as the adapter lets an agent start (`START_TIMEOUT_MS`, 60 s), and a failed journey attaches the server's log (`server.log`, codes and timings only) to the report so the next stall can be timed from the server side.
+
 ## Review Triage Log
 
 - 2026-10-01 quick review (one lens, with a security brief on AD-15 and AD-16). Verdicts: 0 high, 2 medium, 7 low, 0 false, 0 maybe-false, 1 rejected. No intent_gap or bad_plan findings.

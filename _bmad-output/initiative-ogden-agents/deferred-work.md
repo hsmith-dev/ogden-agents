@@ -2,7 +2,7 @@
 
 ## Open items
 
-Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 2 retrospective, action A7). Every entry stays in the log below for history, resolved ones included; an entry that starts with "Resolved:" closes an earlier one. When you add or resolve an entry, update this index too.
+Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 2 retrospective, action A7); updated 2026-10-01 by the epic 9 and epic 3 retrospectives. Every entry stays in the log below for history, resolved ones included; an entry that starts with "Resolved:" closes an earlier one. When you add or resolve an entry, update this index too.
 
 - Remove-project story (not yet ticketed): delete a project's always-allow rules before its workspace row (`permission_rules.workspace_id` has no `ON DELETE`). From 2.6 F9.
 - Epic 5 (unattended builds): the inside-the-project check for file-kind rules is check-then-use, so a symlink swapped in before the write could redirect it. From 2.6.
@@ -17,10 +17,21 @@ Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 
 - Kept separate by decision (revisit if they converge): the two `removeLeftovers` and the two `InstallButton`s. From 9.6.
 - Release live checks (RELEASING step 5, retrospective A2): the real sign-in tab the Claude CLI opens itself is covered by no test. From 9.7.
 - Unowned: consider failing the release smoke if "test hooks in use" ever appears in a registry install's log. From 9.7 security review.
-- Confirm only: node-pty's "AttachConsole failed" fix is resolved pending the PR's Windows CI logs. From 9.6; 3.8's CI now fails the test job on that line.
 - Unowned (Windows, revisit if seen): under system ConPTY a leftover program the CLI started outside its job that keeps writing to the console can hold off node-pty's exit report indefinitely, so the dead CLI's terminal stays open until it is stopped. From 3.8's CI probe.
 - Unowned (by decision, log only): after a switch refused past the 10 s release bound, the next message still waits on the late agent without a bound; 3.9 logs `terminal_release_late` when it stops. From 3.4 review F5.
 - Unowned: core's internal errors, the handoff codes included (`terminal_release_late`, `terminal_open_timeout`...), are logged as "applying an agent event failed" at error level; give them their own message. From the 3.9 sweep.
+- Unowned (when the terminal is next changed): turns typed after `/clear` or in a forked session are not imported, and a `/rewind` of imported turns is not reflected. From 3.3 review F9.
+- Unowned (a sweep): `trimBacklog` treats `ESC` + a control character as a two-byte sequence, dropping one extra line from the replay. From 3.9 review F2.
+- Unowned (a sweep): with no line break after the cut, the backlog replay can start with a lone low surrogate (one replacement character). From 3.9 review F3.
+- Unowned (log only): the `terminal_release_late` line can arrive after `chat.close()` returned. From 3.9 review F5.
+- Next installed-suite story (10.9 or 4.13, proposed): own-server installed specs SIGKILL only the server on a failed test, so agent and CLI children can keep the project folder busy on Windows. From 3.10 review F7.
+- Unowned (next sweep that touches it, not "when next changed"): split `core/src/chat/terminal.ts` (602 lines, grown by epic 3: handoff lock and steps, viewers and backlog, crash import) and `core/src/agent-setup.ts` (703 lines, grown by epic 9; also on the list above). From the epic 3 retro A7 and the epic 9 retro A6.
+- 10.8 (proposed): a provenance check: every plan's `baseline_revision` is an ancestor of HEAD, and every Open items line has a log entry. Then backfill epic 3's baselines (6 stale, 4 missing). From the epic 3 retro A5.
+- 10.8 (proposed): put `OGDEN_AGENTS_TEST_CHECK_IN_MS` behind `testHooksAllowed` (or rename it if it is a real setting) and name it in the "test hooks in use" line. From the epic 9 retro A5.
+- Unowned: find why `tests/launcher.test.ts` "--foreground beside a background server" hangs on macOS (recurred after 2.13; `59bddbb` only adds diagnostics). From the epic 9 retro A7.
+- Process (orchestrator, user decides): no new story stacks on a release story (9.7, 3.10) still taking fixes; base epic 10 on `main` after 0.2.0 and 0.3.0. From the epic 9 retro A4.
+- Process (`bmad-build`, from 10.1): each HITL plan gets a "Live check result" line, filled before the ticket is called done. From the epic 9 retro A3.
+- 4.8 (proposed): probe recursive `fs.watch` on windows-latest and ubuntu-latest in CI before building the watcher. From the epic 3 retro A8.
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
 
@@ -329,3 +340,24 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-end-to-end-suite-and-release-plan.md`
   summary: Installed-suite specs that start their own server (terminal, chat, onboarding journeys) SIGKILL only the server when a test fails partway, so its agent and terminal CLI children can outlive it and, on Windows, keep the project folder busy, turning the real failure into a teardown "was not removed" error.
   evidence: `stopOwnServer` (tests/e2e-installed/installed.ts) kills the pid in server.json only; agents run in their own process group (claude-code-agent.ts spawnAdapter) and the CLI in a PTY; the happy path quits through requestQuit, so only failed runs are affected (story 3.10 review F7).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/epic-terminal-toggle-retrospective.md`
+  summary: Resolved: node-pty's "AttachConsole failed" on Windows (9.6 entry "Resolved (pending the PR's Windows CI logs)"). 3.8's `test` job fails if the line appears, and PR #46's run 36903485293 is green on both Windows jobs.
+  evidence: `.github/workflows/ci.yml` (3.8, `c473db7`); story 3.8 Implementation Notes.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/epic-terminal-toggle-retrospective.md`
+  summary: Split `core/src/chat/terminal.ts` (602 lines after epic 3: handoff lock and bounded steps, viewers and backlog, crash import) and `core/src/agent-setup.ts` (703 lines after epic 9: sign-in, API key and precedence, install) in the next sweep that touches them.
+  evidence: epic 3 retro A1/A7 and epic 9 retro A1/A6 (`git_evidence.py` per story range; `wc -l` at `abfb2ed`).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/epic-terminal-toggle-retrospective.md`
+  summary: Add a provenance check (a test or a `tickets.py` lint): every plan's `baseline_revision` is an ancestor of HEAD, and every Open items index line matches a log entry. Then backfill epic 3's baselines (3.1, 3.2, 3.11, 3.6, 3.3, 3.4 cite pre-restack commits; 3.5, 3.7, 3.8, 3.9 have none). Proposed for 10.8.
+  evidence: `git merge-base --is-ancestor` fails for `c4d9235`, `5d2d019`, `3de6f38`, `51d98b3`, `fd31d93`, `07bddee`; five epic 3 deferrals had no index line (epic 3 retro P2, P3).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/epic-first-run-onboarding-retrospective.md`
+  summary: `OGDEN_AGENTS_TEST_CHECK_IN_MS` is read without `testHooksAllowed`, the gate every other shipped `OGDEN_AGENTS_TEST_*` switch uses since the 9.7 security review. Gate it (or rename it if it is a real setting) and name it in the "test hooks in use" log line. Proposed for 10.8.
+  evidence: `packages/server/src/start-env.ts:10`, `:37` (`checkInDelayFromEnv`), `packages/server/src/start.ts:297`; effect is the check-in delay only, clamped to at least 1 s.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/epic-first-run-onboarding-retrospective.md`
+  summary: Find the cause of the `tests/launcher.test.ts` "--foreground beside a background server" hang on macOS. It recurred after 2.13's fix (run 36893325693); `59bddbb` bounds it and prints the launcher's output, server.json and the server log.
+  evidence: epic 9 retro P1 and A7.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/epic-first-run-onboarding-retrospective.md`
+  summary: Process follow-ups: (1) no new story stacks on a release story still taking fixes, and epic 10 builds on `main` after 0.2.0 and 0.3.0 merge (user decides); (2) each HITL plan gets a "Live check result" line, filled before the ticket is called done.
+  evidence: five restack waves of the epic 3 stack under 9.7's late fixes (CI runs at 12:45, 15:57, 16:36, 17:23, 17:53 UTC, 2026-10-01); no recorded live result for 9.1, 9.2, 9.3, 3.8 or 3.10 (epic 9 retro P2, S2, L3, L4).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/epic-terminal-toggle-retrospective.md`
+  summary: Probe recursive `fs.watch` on windows-latest and ubuntu-latest in CI (a temporary job, facts with run ids, removed before review) before 4.8 builds the ticket-index watcher; it answers 4.8's own `unknown`. Proposed for 4.8.
+  evidence: 3.8's probe settled resize, process exit and the `.cmd` shim in three rounds after 3.1's four red runs on a wrong hypothesis (epic 3 retro P1, L2).

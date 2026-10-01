@@ -18,8 +18,11 @@
  * - Several viewers (story 3.5): each sees all the output and may type; the
  *   terminal's size follows whichever viewer last resized or typed.
  * - Each viewer's typing is rate limited ({@link INPUT_BURST_BYTES}, refilled
- *   at {@link INPUT_BYTES_PER_SECOND}; 3.1 review F4): a viewer over it is
- *   closed (1008, `rate_limited`); the terminal and its other viewers go on.
+ *   at {@link INPUT_BYTES_PER_SECOND}; 3.1 review F4), each control frame
+ *   costing {@link CONTROL_FRAME_COST_BYTES}: a viewer over it is closed
+ *   (1008, `rate_limited`); the terminal and its other viewers go on.
+ * - A session's terminal has at most {@link MAX_TERMINAL_VIEWERS} viewers; one
+ *   more is closed ({@link TERMINAL_TOO_MANY_VIEWERS}).
  * - An unknown session, or one the terminal does not drive, is closed at
  *   once ({@link TERMINAL_CLOSE}.notTerminal). A frame over its size limit
  *   closes the socket (1009); so does the server's `maxPayload` before a
@@ -68,6 +71,16 @@ export const ATTACH_WAIT_MS = 5_000;
 export const INPUT_BURST_BYTES = 4 * 1024 * 1024;
 /** How fast a viewer's typing allowance refills. */
 export const INPUT_BYTES_PER_SECOND = 1024 * 1024;
+/** What each control frame (`attach`, `resize`, or one that fails its schema) costs from the same allowance (3.5 review F3), so resizing in a loop is limited too. */
+export const CONTROL_FRAME_COST_BYTES = 1024;
+/** The most viewers one session's terminal may have at once (3.5 review F2, coordinator decision). */
+export const MAX_TERMINAL_VIEWERS = 8;
+/**
+ * The close code for a viewer over {@link MAX_TERMINAL_VIEWERS} (3.5 review
+ * F2). Not in `shared`'s `TERMINAL_CLOSE` (frozen for this story): the web
+ * panel keeps the same number as `TOO_MANY_VIEWERS`.
+ */
+export const TERMINAL_TOO_MANY_VIEWERS = 4429;
 
 export interface TerminalSocketOptions {
   chat: Chat;
@@ -100,6 +113,14 @@ export function createInputBudget(burst: number, perSecond: number, now: () => n
 }
 
 export function registerTerminalSocket(app: Hono, { chat, log, tabs, now = Date.now, attachWaitMs = ATTACH_WAIT_MS }: TerminalSocketOptions): void {
+  /** How many viewers each session's terminal has now, over every socket. */
+  const viewerCounts = new Map<SessionId, number>();
+  const countViewer = (id: SessionId, change: 1 | -1) => {
+    const next = (viewerCounts.get(id) ?? 0) + change;
+    if (next <= 0) viewerCounts.delete(id);
+    else viewerCounts.set(id, next);
+  };
+
   app.get(
     TERMINAL_SOCKET_ROUTE,
     upgradeWebSocket((c) => {
@@ -114,9 +135,13 @@ export function registerTerminalSocket(app: Hono, { chat, log, tabs, now = Date.
       let attachTimer: ReturnType<typeof setTimeout> | undefined;
       const budget = createInputBudget(INPUT_BURST_BYTES, INPUT_BYTES_PER_SECOND, now);
       let closed = false;
+      /** Whether this socket counts toward its session's {@link MAX_TERMINAL_VIEWERS}. */
+      let counted = false;
       /** Detaches only this viewer: the terminal runs on. */
       const end = () => {
         closed = true;
+        if (counted && sessionId !== undefined) countViewer(sessionId, -1);
+        counted = false;
         clearTimeout(attachTimer);
         attachTimer = undefined;
         viewer?.detach();
@@ -142,6 +167,11 @@ export function registerTerminalSocket(app: Hono, { chat, log, tabs, now = Date.
           if (Buffer.byteLength(data) > MAX_TERMINAL_CONTROL_BYTES) {
             log.warn('terminal control frame too large; closing', { sessionId });
             close(ws, TOO_BIG, 'too_large');
+            return;
+          }
+          if (!budget.take(CONTROL_FRAME_COST_BYTES)) {
+            log.warn('terminal viewer sent control frames too fast; closing it', { sessionId });
+            close(ws, POLICY, 'rate_limited');
             return;
           }
           let json: unknown;
@@ -227,10 +257,17 @@ export function registerTerminalSocket(app: Hono, { chat, log, tabs, now = Date.
         onOpen(_event, ws) {
           release = tabs?.hold(token);
           viewer = sessionId === undefined ? undefined : chat.attachTerminal(sessionId);
-          if (viewer === undefined) {
+          if (viewer === undefined || sessionId === undefined) {
             close(ws, TERMINAL_CLOSE.notTerminal, 'not_terminal');
             return;
           }
+          if ((viewerCounts.get(sessionId) ?? 0) >= MAX_TERMINAL_VIEWERS) {
+            log.warn('too many terminal viewers; closing the newest', { sessionId, max: MAX_TERMINAL_VIEWERS });
+            close(ws, TERMINAL_TOO_MANY_VIEWERS, 'too_many_viewers');
+            return;
+          }
+          countViewer(sessionId, 1);
+          counted = true;
           // Told even before attaching: the terminal can end first.
           viewer.onEnd(({ exitCode }) => {
             const frame = TerminalServerFrame.parse({ type: 'exit', exitCode });

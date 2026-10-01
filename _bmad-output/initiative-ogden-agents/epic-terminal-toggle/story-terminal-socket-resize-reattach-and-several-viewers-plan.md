@@ -88,6 +88,13 @@ context:
 
 ## Review Triage Log
 
+- 2026-10-01, coordinator review (nothing high). All fixed in a follow-up commit except F5.
+  - F1 (fixed): the panel's try count started again on any bytes, so a socket that attached and dropped could loop forever. Now it starts again only after a connection stays up 10 s (`STABLE_CONNECTION_MS`) or sends live output after the recent output; the slow-viewer close (1013) gets the same waits and limit. Tests: `web/test/terminal-panel.dom.test.tsx`.
+  - F2 (fixed; coordinator decision: 8 viewers): at most `MAX_TERMINAL_VIEWERS` = 8 viewers per session; the 9th is closed 4429 (`TERMINAL_TOO_MANY_VIEWERS`, not in `shared`, which is frozen here; the panel keeps the same number) and the panel says "Too many open terminal views. Close one, then reload." Tests: server "closes a viewer over the session's limit", panel DOM test.
+  - F3 (fixed): each control frame costs 1 KiB (`CONTROL_FRAME_COST_BYTES`) from the same per-viewer budget, so resize flapping is closed 1008. Test: server "charges each control frame".
+  - F4 (fixed): on a reconnect xterm is reset on the first bytes, not on open; a reconnect closed with 4404 keeps what was shown and says the agent left the terminal, 4429 says too many views. Tests: panel DOM tests.
+  - F5 (deferred to 3.9): the backlog cut can fall inside an escape sequence. Logged in `deferred-work.md`.
+
 ## Design Notes
 
 On a resize, the server sends `size` to everyone except the sender, since the sender is already at that size. On a write that changes the size, it sends `size` to every viewer: the typer's xterm may have followed someone else's size, and the client ignores a size it already has (`terminal-panel.tsx` `onSize`). Backlog read and output subscribe happen in one tick, so no byte is lost between them.

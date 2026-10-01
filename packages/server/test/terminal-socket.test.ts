@@ -30,7 +30,16 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { MAX_WS_PAYLOAD_BYTES, type StartOptions } from '../src/start.js';
 import { registerChatRoutes, TERMINAL_CHECK_FAILED } from '../src/chat-routes.js';
 import { createLogger, LOG_DIR } from '../src/log.js';
-import { ATTACH_WAIT_MS, createInputBudget, INPUT_BURST_BYTES, INPUT_BYTES_PER_SECOND, registerTerminalSocket } from '../src/terminal-socket.js';
+import {
+  ATTACH_WAIT_MS,
+  CONTROL_FRAME_COST_BYTES,
+  createInputBudget,
+  INPUT_BURST_BYTES,
+  INPUT_BYTES_PER_SECOND,
+  MAX_TERMINAL_VIEWERS,
+  registerTerminalSocket,
+  TERMINAL_TOO_MANY_VIEWERS,
+} from '../src/terminal-socket.js';
 import { signIn, startTestServer, tempDataDir, trackSocket, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
 const FIXTURES = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures');
@@ -806,12 +815,12 @@ describe('the terminal socket: attach, several viewers, the typing limit (story 
     const other = open();
     await Promise.all([flooder.opened, other.opened]);
     await pause(100);
+    // Its `attach` cost one control frame: the fourth full chunk no longer fits.
     const chunk = Buffer.alloc(MAX_TERMINAL_INPUT_BYTES, MARKER);
     for (let sent = 0; sent < INPUT_BURST_BYTES; sent += chunk.byteLength) flooder.ws.send(chunk, { binary: true });
-    flooder.type('x');
     await waitFor(() => flooder.state.closed !== undefined, 'the flooder to be closed', 10_000);
     expect(flooder.state.closed).toBe(1008);
-    expect(cli.writes.join('').length).toBe(INPUT_BURST_BYTES);
+    expect(cli.writes.join('').length).toBe(INPUT_BURST_BYTES - MAX_TERMINAL_INPUT_BYTES);
     expect(lines.filter((line) => line.includes('typed too fast'))).toHaveLength(1);
     expect(lines.join('\n')).not.toContain(MARKER);
     // The CLI runs on, and the other viewer still types and sees output.
@@ -822,6 +831,45 @@ describe('the terminal socket: attach, several viewers, the typing limit (story 
     cli.print('output');
     await waitFor(() => other.state.output.endsWith('output'), 'the other viewer’s output');
     expect(other.state.closed).toBeUndefined();
+  });
+
+  it('charges each control frame against the same budget, so resizing in a loop is closed 1008 too (review F3)', async () => {
+    const { cli, open, lines } = await socketOnMemoryTerminal({ now: () => 0 });
+    const flapper = open({ cols: 100, rows: 30 });
+    const other = open();
+    await Promise.all([flapper.opened, other.opened]);
+    await pause(100);
+    // The attach took one frame's cost: this many more fit, and one more doesn't.
+    const fit = INPUT_BURST_BYTES / CONTROL_FRAME_COST_BYTES - 1;
+    for (let i = 0; i < fit; i++) flapper.control({ type: 'resize', cols: 100 + (i % 2), rows: 30 });
+    await pause(300);
+    expect(flapper.state.closed).toBeUndefined();
+    flapper.control({ type: 'resize', cols: 120, rows: 40 });
+    await waitFor(() => flapper.state.closed !== undefined, 'the flapper to be closed', 10_000);
+    expect(flapper.state.closed).toBe(1008);
+    expect(cli.resizes.some((size) => size.cols === 120)).toBe(false);
+    expect(lines.filter((line) => line.includes('control frames too fast'))).toHaveLength(1);
+    expect(other.state.closed).toBeUndefined();
+  });
+
+  it(`closes a viewer over the session's limit of ${MAX_TERMINAL_VIEWERS} (${TERMINAL_TOO_MANY_VIEWERS}); one that leaves frees its place (review F2)`, async () => {
+    const { cli, open } = await socketOnMemoryTerminal();
+    cli.print('shown');
+    const viewers = Array.from({ length: MAX_TERMINAL_VIEWERS }, () => open());
+    await Promise.all(viewers.map((viewer) => viewer.opened));
+    await waitFor(() => viewers.every((viewer) => viewer.state.output === 'shown'), 'every viewer to attach');
+    const extra = open();
+    await extra.opened;
+    await waitFor(() => extra.state.closed !== undefined, 'the extra viewer to be closed');
+    expect(extra.state.closed).toBe(TERMINAL_TOO_MANY_VIEWERS);
+    expect(extra.state.raw).toBe('');
+    expect(viewers.every((viewer) => viewer.state.closed === undefined)).toBe(true);
+    viewers[0]!.ws.close();
+    await waitFor(() => viewers[0]!.state.closed !== undefined, 'a viewer to leave');
+    const next = open();
+    await next.opened;
+    await waitFor(() => next.state.output === 'shown', 'a new viewer in its place');
+    expect(next.state.closed).toBeUndefined();
   });
 
   it('closing a socket only detaches its viewer: the CLI runs on with no viewer, and a new one (a reload) gets the recent output', async () => {

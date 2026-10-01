@@ -22,6 +22,7 @@ Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 
 - Confirm only: node-pty's "AttachConsole failed" fix is resolved pending the PR's Windows CI logs. From 9.6.
 - Story 3.8 (Windows): a terminal resize never reached the console under ConPTY with node-pty 1.1.0 (80x24 for 10 s); the resize checks are skipped on win32. From 3.1 CI.
 - Story 3.8 (Windows; and a POSIX residual): after a CLI exits by itself, what it started is not stopped on Windows; on POSIX its group is killed as the exit is reported, after the reap, so a reused id is a small residual risk. From 3.4 (review F2).
+- Epic 3 sweep (3.9): the terminal backlog is cut at a character count, so a reattaching viewer's replay can start mid escape sequence (a stray attribute or a few garbled characters until the next repaint). From 3.5 review F5.
 - Epic 3 sweep (3.9): core's test fake terminal and `terminal-memory` can drift; an agent released after the 10 s bound stops late, unwatched. From 3.4 review F5.
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
@@ -268,3 +269,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-terminal-socket-resize-reattach-and-several-viewers-plan.md`
   summary: Resolved: rate-limit terminal input per viewer (3.1 security review F4). Each terminal viewer has a token bucket (4 MiB burst, refilled at 1 MiB/s, counted from its first frame); a viewer over it is closed 1008 `rate_limited`, logging only the frame's byte count. The terminal and its other viewers go on.
   evidence: `packages/server/src/terminal-socket.ts` `createInputBudget`, `INPUT_BURST_BYTES`, `INPUT_BYTES_PER_SECOND`; `packages/server/test/terminal-socket.test.ts` "closes a viewer that types over its budget".
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-terminal-socket-resize-reattach-and-several-viewers-plan.md`
+  summary: For the 3.9 sweep (3.5 review F5): `trimBacklog` keeps the newest 64 KiB of output, starting at a line break where it can, but a cut can still fall inside an escape sequence (a colour, a cursor move, an OSC title), so a viewer that reattaches may show a stray attribute or a few garbled characters until the CLI repaints. Cut at a point outside any escape sequence (or reset attributes before the replay).
+  evidence: `packages/core/src/chat/terminal.ts` `trimBacklog`; `packages/server/src/terminal-socket.ts` `attach`.

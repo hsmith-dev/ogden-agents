@@ -49,6 +49,7 @@ import { PROGRESS_INTERVAL_MS } from './toolchain.js';
  * this, such a check means `unknown`, which never injects a key (user
  * decision, 2026-10-01).
  */
+// Accepted risk (user's trade-off, 2026-10-01): a sign-in made outside the app while checks fail leaves a recent confirmed signed_out in place, so the key is still used for up to 5 minutes.
 export const LAST_KNOWN_AUTH_MAX_AGE_MS = 5 * 60_000;
 
 /** The secret name an agent's API key is stored under. */
@@ -148,7 +149,7 @@ export interface AgentSetupOptions {
    * key, which comes first. Never logged.
    */
   inheritedEnv?: () => Readonly<Record<string, string | undefined>>;
-  /** The clock for the subscription state's age and install progress throttling. Default `Date.now`. */
+  /** The clock for the subscription state's age and install progress throttling. Default `performance.now` (monotonic). */
   now?: () => number;
   /** Minimum time between two install progress events. Default {@link PROGRESS_INTERVAL_MS}. */
   progressIntervalMs?: number;
@@ -200,6 +201,9 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
   const readAt = new Map<string, number>();
   /** Each agent's last confirmed subscription state (never `unknown`), and when it was confirmed. */
   const confirmed = new Map<string, { state: AgentSubscriptionState; at: number }>();
+  /** Bumped at each subscription change, so a status read that started before one (a sign-in finishing) is dropped. */
+  const generations = new Map<string, number>();
+  const generationOf = (agentId: string) => generations.get(agentId) ?? 0;
   /** A refresh under way per agent, so concurrent chats share one status read. */
   const refreshing = new Map<string, Promise<void>>();
   /** Each agent's key writes (save or remove), run one at a time in call order; settles, never rejects. */
@@ -219,7 +223,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
   };
   /** Agents whose last key write failed (a timeout may still complete): re-read from the store at each `list()` until a write succeeds. */
   const resync = new Set<string>();
-  const now = options.now ?? Date.now;
+  const now = options.now ?? (() => performance.now());
   const progressInterval = options.progressIntervalMs ?? PROGRESS_INTERVAL_MS;
   /** Each running install's latest progress, and when it is done. */
   const installs = new Map<string, { progress: AgentInstallProgress; done: Promise<void> }>();
@@ -255,7 +259,13 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
     }
   };
 
-  const setSubscription = (agentId: string, state: AgentSubscriptionState) => {
+  /**
+   * Stores a subscription state. A read passes the generation it started at;
+   * when something changed the state meanwhile, its stale result is dropped.
+   */
+  const setSubscription = (agentId: string, state: AgentSubscriptionState, startedAt?: number) => {
+    if (startedAt !== undefined && generationOf(agentId) !== startedAt) return;
+    generations.set(agentId, generationOf(agentId) + 1);
     const at = now();
     subscriptions.set(agentId, state);
     readAt.set(agentId, at);
@@ -271,7 +281,10 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
     const state = subscriptions.get(agentId) ?? 'unknown';
     if (state !== 'unknown') return state;
     const last = confirmed.get(agentId);
-    return last !== undefined && now() - last.at < LAST_KNOWN_AUTH_MAX_AGE_MS ? last.state : 'unknown';
+    if (last === undefined) return 'unknown';
+    // A negative age (a clock that went backwards) counts as expired.
+    const age = now() - last.at;
+    return age >= 0 && age < LAST_KNOWN_AUTH_MAX_AGE_MS ? last.state : 'unknown';
   };
 
   /** The agent's key variable in the server's own environment, whatever its case; `undefined` when unset or empty. */
@@ -304,8 +317,9 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
     return true;
   };
 
-  /** The subscription state `port.status()` reports now; `unknown` when it throws. */
-  const readSubscription = async (port: AgentSetupPort): Promise<AgentSubscriptionState> => {
+  /** Reads the subscription state `port.status()` reports now (`unknown` when it throws); a read overtaken by a newer change is dropped. */
+  const readSubscription = async (port: AgentSetupPort): Promise<void> => {
+    const startedAt = generationOf(port.agentId);
     let state: AgentSubscriptionState;
     try {
       state = subscriptionOf(await port.status());
@@ -313,8 +327,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       report(port.agentId, 'status', error);
       state = 'unknown';
     }
-    setSubscription(port.agentId, state);
-    return state;
+    setSubscription(port.agentId, state, startedAt);
   };
 
   /** The secrets store, or the refusal a missing one means. */
@@ -370,13 +383,14 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
     // A key write that failed (timed out) may have completed since: show what the store holds.
     if (resync.has(port.agentId)) await syncFromStore(port);
     let status: AgentSetupStatus;
+    const startedAt = generationOf(port.agentId);
     try {
       const reported = await port.status();
-      setSubscription(port.agentId, subscriptionOf(reported));
+      setSubscription(port.agentId, subscriptionOf(reported), startedAt);
       status = shown(reported);
     } catch (error) {
       report(port.agentId, 'status', error);
-      setSubscription(port.agentId, 'unknown');
+      setSubscription(port.agentId, 'unknown', startedAt);
       status = {
         agentId: port.agentId,
         displayName: port.displayName,
@@ -606,7 +620,9 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       const port = byId.get(agentId);
       if (port?.apiKey === undefined || keyFor(port) === undefined) return;
       const at = readAt.get(agentId);
-      if (at !== undefined && now() - at < maxAgeMs) return;
+      // A negative age (a clock that went backwards) counts as stale.
+      const age = at === undefined ? undefined : now() - at;
+      if (age !== undefined && age >= 0 && age < maxAgeMs) return;
       let running = refreshing.get(agentId);
       if (running === undefined) {
         running = readSubscription(port).then(

@@ -657,6 +657,66 @@ describe('agent setup: a slow or failed status check uses the last confirmed sta
   });
 });
 
+describe('agent setup: last-known state review fixes (story 9.2)', () => {
+  afterEach(() => void vi.useRealTimers());
+
+  it('a status read that started before an in-app sign-in finished is dropped: still signed in, no key', async () => {
+    const core = openTestCore();
+    const { port, setSubscription, started: signIns } = keyPort({ subscription: 'signed_out' });
+    /** When armed, the next status read is held open until `release`. */
+    let armed = false;
+    let release: (status: AgentPortStatus) => void = () => undefined;
+    const held: AgentSetupPort = {
+      ...port,
+      status: () => {
+        if (!armed) return port.status();
+        armed = false;
+        return new Promise<AgentPortStatus>((resolve) => {
+          release = resolve;
+        });
+      },
+    };
+    const setup = createAgentSetup(core.events, [held], { secrets: memoryStore().store });
+    await setup.setApiKey('claude-code', API_KEY);
+    expect(setup.agentEnv('claude-code')).toEqual({ FAKE_API_KEY: API_KEY });
+    // A slow read starts while the subscription is still signed out...
+    const stale = await port.status();
+    armed = true;
+    const refresh = setup.refreshIfStale('claude-code', 0);
+    // ...then a sign-in in the app finishes.
+    await setup.signIn('claude-code');
+    signIns[0]!.finish('signed_in');
+    setSubscription('signed_in');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    // The read now resolves with its stale signed_out: dropped.
+    release(stale);
+    await refresh;
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    expect((await setup.list())[0]).toMatchObject({ auth: 'signed_in', method: 'subscription' });
+    expect(setup.agentEnv('claude-code')).toEqual({});
+  });
+
+  it('a clock that went backwards (negative age) counts as expired: no last-known fallback, and refreshIfStale reads again', async () => {
+    const core = openTestCore();
+    let clock = 1_000_000;
+    const { port, setSubscription } = keyPort({ subscription: 'signed_out' });
+    let reads = 0;
+    const counted: AgentSetupPort = { ...port, status: () => (reads++, port.status()) };
+    const setup = createAgentSetup(core.events, [counted], { secrets: memoryStore().store, now: () => clock });
+    await setup.setApiKey('claude-code', API_KEY);
+    setSubscription('throws');
+    await setup.refreshIfStale('claude-code', 0);
+    // Confirmed signed_out just now, the read failed: the recent state stands in.
+    expect(setup.agentEnv('claude-code')).toEqual({ FAKE_API_KEY: API_KEY });
+    clock -= 60_000;
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    const before = reads;
+    await setup.refreshIfStale('claude-code', 30_000);
+    expect(reads).toBe(before + 1);
+  });
+});
+
 describe('agent setup: key writes run one at a time per agent (story 9.6; 9.2 review F7)', () => {
   const OTHER_KEY = 'sk-ant-api03-core_TEST_ONLY_9876543210fedcbaQRST';
 

@@ -1668,7 +1668,7 @@ describe('the terminal (story 3.1)', () => {
 
     // The agent's CLI can't resume its sessions.
     const noResume = await answeredOnce(fakeTerminal(), { resumes: false });
-    await refusedWith(noResume.chat.switchDriver(noResume.workspace.id, noResume.session.id, 'terminal'), unavailable('agent_unsupported'), /can't be opened in its own terminal/);
+    await refusedWith(noResume.chat.switchDriver(noResume.workspace.id, noResume.session.id, 'terminal'), unavailable('agent_unsupported'), /can't pick up this session in its terminal/);
     await noResume.chat.close();
 
     // The CLI can't be found, by `locate` or when its command is built.
@@ -1758,6 +1758,8 @@ describe('the terminal (story 3.1)', () => {
     chat.attachTerminal(session.id)!.onEnd(({ exitCode }) => ends.push(exitCode));
     terminal.processes[0]!.exit(0);
     expect(ends).toEqual([0]);
+    // The import and the driver change follow under the switching lock (story 3.4).
+    await chat.settled();
     expect(core.entities.getSession(session.id)!.driver).toBe('ui');
     expect(chat.attachTerminal(session.id)).toBeUndefined();
     expect(driverChanges(core, session.id)).toEqual([

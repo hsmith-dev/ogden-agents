@@ -86,3 +86,31 @@ describe('the memory terminal port', () => {
     expect(memory.exitCode).toBeNull();
   });
 });
+
+describe('the memory terminal port’s failure modes (story 3.4)', () => {
+  it('openError: open rejects, and nothing is opened', async () => {
+    const port = createMemoryTerminalPort({ openError: new Error('spawn failed') });
+    await expect(port.open(input)).rejects.toThrow('spawn failed');
+    expect(port.opened).toEqual([]);
+  });
+
+  it('exitOnKill false: a kill is counted, and no exit is reported', async () => {
+    const port = createMemoryTerminalPort({ exitOnKill: false });
+    const cli = await port.open(input);
+    const exits: Array<number | null> = [];
+    cli.onExit(({ exitCode }) => exits.push(exitCode));
+    cli.kill();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(port.opened[0]!.kills).toBe(1);
+    expect(port.opened[0]!.exitCode).toBeUndefined();
+    expect(exits).toEqual([]);
+  });
+
+  it('exitOnOpen: each terminal has exited with the code as open returns; a listener added then still hears it, once', async () => {
+    const port = createMemoryTerminalPort({ exitOnOpen: 70 });
+    const cli = await port.open(input);
+    expect(port.opened[0]!.exitCode).toBe(70);
+    const late = await new Promise<number | null>((resolve) => cli.onExit(({ exitCode }) => resolve(exitCode)));
+    expect(late).toBe(70);
+  });
+});

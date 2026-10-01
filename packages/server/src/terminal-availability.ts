@@ -7,15 +7,15 @@
  * same order, so a session this calls available is one core switches:
  * `agent_unsupported` → no terminal port (`pty_unavailable`) →
  * `no_agent_session` → `node-pty` (`pty_unavailable`) → the CLI
- * (`cli_not_found`). Core exposes no such query without switching; story 3.9
- * makes the two share one function (deferred-work).
+ * (`cli_not_found`). The words and their filtering are core's
+ * ({@link terminalUnavailableReason}, story 3.4), shared with its refusal.
  *
  * Cheap and side-effect free: no subscription refresh, no process spawn, no
  * cache beyond the request. A reason is plain words for the user: never a
  * path, a command line, an error stack or a secret. Not being `idle` is not a
  * reason here: the UI reads the session's state.
  */
-import { AGENT_SESSION_REF, type AgentPort, type TerminalPort } from '@ogden-agents/core';
+import { AGENT_SESSION_REF, PTY_LOAD_FAILED, terminalUnavailableReason, type AgentPort, type TerminalPort } from '@ogden-agents/core';
 import type { Session, SessionTerminal } from '@ogden-agents/shared';
 
 /** The terminal of one session, as `GET` session reports it. */
@@ -30,36 +30,27 @@ export interface TerminalAvailabilityOptions {
   env?: () => Readonly<Record<string, string>>;
 }
 
-/** Shown in place of `node-pty`'s own reason when that names a path or spans lines. */
-export const PTY_LOAD_FAILED = 'the terminal module could not be loaded';
-
-/** Anything that reads as a file path, a home folder, a stack frame or a second line. */
-const NOT_PLAIN = /[/\\~\r\n]|\bat\s+\S+\s*\(/;
-
-/** `reason` when it is plain words, else `fallback`. */
-function plainOr(reason: string, fallback: string): string {
-  const trimmed = reason.trim();
-  return trimmed === '' || NOT_PLAIN.test(trimmed) ? fallback : trimmed;
-}
+/** Re-exported for the callers that named it here (story 3.7); core owns it (story 3.4). */
+export { PTY_LOAD_FAILED };
 
 export function createTerminalAvailability({ agent, terminal, env = () => ({}) }: TerminalAvailabilityOptions): TerminalAvailabilityCheck {
   return async (session) => {
     const resume = agent.terminalResume;
     if (resume === undefined) {
-      return { available: false, code: 'agent_unsupported', reason: `${agent.displayName} can't pick up this session in its terminal.` };
+      return { available: false, code: 'agent_unsupported', reason: terminalUnavailableReason.agentUnsupported(agent.displayName) };
     }
-    if (terminal === undefined) return { available: false, code: 'pty_unavailable', reason: "The terminal couldn't start on this computer." };
+    if (terminal === undefined) return { available: false, code: 'pty_unavailable', reason: terminalUnavailableReason.noTerminalPort() };
     const ref = session.adapterRefs[AGENT_SESSION_REF];
     if (ref === undefined || ref === '') {
-      return { available: false, code: 'no_agent_session', reason: `Send ${agent.displayName} a message first, then switch to the terminal.` };
+      return { available: false, code: 'no_agent_session', reason: terminalUnavailableReason.noAgentSession(agent.displayName) };
     }
     const pty = await terminal.available();
     if (!pty.ok) {
-      return { available: false, code: 'pty_unavailable', reason: `The terminal couldn't start on this computer: ${plainOr(pty.reason, PTY_LOAD_FAILED)}` };
+      return { available: false, code: 'pty_unavailable', reason: terminalUnavailableReason.ptyUnavailable(pty.reason) };
     }
     const located = await resume.locate({ ...env() });
     if (!located.found) {
-      return { available: false, code: 'cli_not_found', reason: plainOr(located.reason, `${agent.displayName}'s terminal couldn't be found on this computer.`) };
+      return { available: false, code: 'cli_not_found', reason: terminalUnavailableReason.cliNotFound(agent.displayName, located.reason) };
     }
     return { available: true };
   };

@@ -32,7 +32,11 @@
 // thinking block, a `tool_use` and its `tool_result`, a sidechain record off
 // the chain, then the reply text `echo:<line>`. Never the user's own ~/.claude.
 // With FAKE_CLAUDE_GRANDCHILD=1 it first starts a long-lived child of its own
-// (as the real CLI starts tools), whose pid it records too.
+// (as the real CLI starts tools), whose pid it records too. The child ignores
+// SIGHUP (as `nohup` tools do), so only a tree kill stops it once the CLI has
+// gone (story 3.4).
+// With FAKE_CLAUDE_CRASH_ON_START=1 it exits 70 right after starting (and
+// recording), printing nothing: a CLI that crashes on start (story 3.4).
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -42,9 +46,19 @@ import { createInterface } from 'node:readline';
 const args = process.argv.slice(2);
 let grandchild = null;
 if (process.env.FAKE_CLAUDE_GRANDCHILD === '1') {
-  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true });
+  const child = spawn(process.execPath, ['-e', "process.on('SIGHUP', () => {}); process.stdout.write('up'); setInterval(() => {}, 1000)"], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+    windowsHide: true,
+  });
   child.on('error', () => {});
   grandchild = child.pid ?? null;
+  // Only once it ignores the hang-up: a crash right after must not stop it by accident.
+  await new Promise((resolve) => {
+    child.stdout.once('data', resolve);
+    child.once('exit', resolve);
+    child.once('error', resolve);
+  });
+  child.stdout.destroy();
 }
 if (process.env.FAKE_CLAUDE_RECORD) {
   writeFileSync(
@@ -59,6 +73,8 @@ if (process.env.FAKE_CLAUDE_RECORD) {
     }),
   );
 }
+
+if (process.env.FAKE_CLAUDE_CRASH_ON_START === '1') process.exit(70);
 
 /** The terminal's size now: on Windows `columns`/`rows` can lag a ConPTY resize. */
 const windowSize = () => process.stdout.getWindowSize?.() ?? [process.stdout.columns, process.stdout.rows];

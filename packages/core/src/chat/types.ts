@@ -173,6 +173,8 @@ export interface Terminal {
   ended: boolean;
   /** Resolves when the process has exited. */
   exited: Promise<void>;
+  /** Set when the CLI exited by itself while the switch that opened it still held the session (story 3.4): that switch finishes it. */
+  exit: { exitCode: number | null } | undefined;
 }
 
 /** A session whose agent is answering: from the first message until nothing is left to send. */

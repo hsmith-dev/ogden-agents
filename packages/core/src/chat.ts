@@ -52,6 +52,12 @@
  * driver change its cause, and switching back first imports the turns typed
  * in the terminal ({@link turnsToImport}, story 3.3).
  *
+ * Story 3.4: no handoff leaves a session stuck. Every driver change holds
+ * the session's `switching` lock with bounded waits, a CLI that exits by
+ * itself is killed with its tree and its turns imported (an error exit adds
+ * the agent's note), `close` waits for the switches in flight and imports
+ * the terminals' turns, and a start after a crash imports what it couldn't.
+ *
  * The agent itself sits behind {@link AgentPort} (AD-1); this file names none.
  */
 import { AgentError } from './agent-port.js';
@@ -72,7 +78,7 @@ export type { Chat, ChatOptions, TerminalViewer } from './chat/types.js';
 export function createChat(options: ChatOptions): Chat {
   // One context per chat: its collections and `closing` are shared by reference, never copied (story 3.11).
   const ctx = createChatContext(options);
-  const { entities, live, busy, running, droppedAgents, terminals, internalError } = ctx;
+  const { entities, live, busy, running, droppedAgents, internalError } = ctx;
   // Each module gets only functions of the modules built before it.
   const { flushDelta, stopDeltaTimer, tickDelta, flushSession, finishReply } = createReplies(ctx);
   const { clearQuiet, clearTurnTimers, armQuiet } = createCheckIn(ctx, { flushDelta });
@@ -80,8 +86,10 @@ export function createChat(options: ChatOptions): Chat {
   const { drop, storedAgentSessionId, agentFor, promptFor, releaseAgent } = createAgents(ctx, { stopDeltaTimer, onPermissionRequestFor });
   const turns = createTurns(ctx, { flushDelta, tickDelta, flushSession, finishReply, clearQuiet, clearTurnTimers, armQuiet, drop, agentFor, promptFor });
   const terminal = createTerminal(ctx, { releaseAgent, storedAgentSessionId });
-  const { stopTerminal } = terminal;
+  const { stopTerminal, closeTerminals } = terminal;
   const workspaces = createWorkspaces(ctx, { drop, stopTerminal });
+  // A stop that couldn't import the terminal's turns (a crash): they come in now (story 3.4).
+  terminal.importAfterRestart();
 
   return {
     openWorkspace: workspaces.openWorkspace,
@@ -114,17 +122,11 @@ export function createChat(options: ChatOptions): Chat {
             internalError(sessionId, error);
           }
         }
-        // The server owns the terminals (AD-3): they stop with it, and their chats drive again.
-        for (const sessionId of terminals.keys()) {
-          try {
-            entities.setSessionDriver(sessionId, 'ui', 'server_stopped');
-          } catch (error) {
-            internalError(sessionId, error);
-          }
-        }
       }
       ctx.closing = true;
-      const stoppingTerminals = Promise.all([...terminals.keys()].map((sessionId) => stopTerminal(sessionId)));
+      // The server owns the terminals (AD-3): once the switches in flight end (bounded), they stop
+      // with it, their turns are imported and their chats drive again (story 3.4).
+      const stoppingTerminals = closeTerminals();
       // Queued messages are not sent: the `idle` above marks them "Not sent".
       for (const turn of busy.values()) {
         clearTurnTimers(turn);

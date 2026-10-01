@@ -54,6 +54,7 @@ interface CliRecord {
   argv: string[];
   cwd: string;
   pid: number;
+  grandchild: number | null;
   term: string;
   envNames: string[];
 }
@@ -68,12 +69,15 @@ async function startTerminalServer(options: StartOptions & { lines?: string[] } 
   const record = join(tempDir('ogden-agents-cli-'), 'record.json');
   const claudeConfig = tempDir('ogden-agents-claude-');
   const server = await startTestServer({
-    extraAgentEnv: { CLAUDE_CODE_EXECUTABLE: FAKE_CLI, FAKE_CLAUDE_RECORD: record, FAKE_ACP_RESUME: 'resume', CLAUDE_CONFIG_DIR: claudeConfig },
     ...options,
+    extraAgentEnv: { CLAUDE_CODE_EXECUTABLE: FAKE_CLI, FAKE_CLAUDE_RECORD: record, FAKE_ACP_RESUME: 'resume', CLAUDE_CONFIG_DIR: claudeConfig, ...options.extraAgentEnv },
   });
   servers.push(server);
   return { server, claudeConfig, tab: await signIn(server), record: () => JSON.parse(readFileSync(record, 'utf8')) as CliRecord, recorded: () => existsSync(record) };
 }
+
+/** The fake CLI's switches for a test: it starts a child of its own (story 3.4), plus `extra`. */
+const grandchildEnv = (extra: Record<string, string> = {}) => ({ FAKE_CLAUDE_GRANDCHILD: '1', ...extra });
 
 function post(server: TestServer, tab: SignedIn, path: string, body: unknown) {
   return fetch(`${server.url}${path}`, { method: 'POST', headers: { ...tab.headers, 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -468,23 +472,48 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     viewer.type('/exit\r');
     await waitFor(() => viewer.state.closed !== undefined, 'the terminal socket to close', 10_000);
     expect(viewer.state.frames).toEqual([{ type: 'exit', exitCode: 0 }]);
-    expect(server.core.entities.getSession(sessionId)!.driver).toBe('ui');
+    // Its turns are imported first (story 3.4), then the chat drives.
+    await waitFor(() => server.core.entities.getSession(sessionId)!.driver === 'ui', 'the chat to drive', 10_000);
     expect(driverChanges(server, sessionId)).toEqual(['terminal', 'ui']);
     expect(driverCauses(server, sessionId)).toEqual(['user', 'cli_exited']);
   }, 60_000);
 
-  it('a CLI that crashes gives the chat back and tells the viewer its exit code (story 3.2 fake CLI: crash)', async () => {
-    const { server, tab } = await startTerminalServer();
+  it('a CLI that crashes gives the chat back with a note, tells the viewer its exit code, and leaves nothing it started running (stories 3.2, 3.4)', async () => {
+    const { server, tab, record, recorded } = await startTerminalServer({ extraAgentEnv: grandchildEnv() });
     const { ids, sessionId } = await answeredChat(server, tab);
     expect((await switchTo(server, tab, ids, 'terminal')).status).toBe(200);
+    await waitFor(recorded, 'the CLI to start', 10_000);
+    const { pid, grandchild } = record();
     const viewer = openTerminal(server, tab, sessionId);
     await viewer.opened;
     await waitFor(() => viewer.state.output.includes('ready>'), 'the prompt', 10_000);
     viewer.type('crash\r');
     await waitFor(() => viewer.state.closed !== undefined, 'the terminal socket to close', 10_000);
     expect(viewer.state.frames).toEqual([{ type: 'exit', exitCode: 70 }]);
-    expect(server.core.entities.getSession(sessionId)!.driver).toBe('ui');
+    await waitFor(() => server.core.entities.getSession(sessionId)!.driver === 'ui', 'the chat to drive', 10_000);
     expect(driverCauses(server, sessionId)).toEqual(['user', 'cli_exited']);
+    expect(replies(server, sessionId).at(-1)).toMatchObject({ payload: { content: "Claude Code's terminal closed unexpectedly (exit code 70)." } });
+    expect(alive(pid)).toBe(false);
+    // What it started is stopped with it (POSIX; Windows is story 3.8).
+    if (grandchild !== null && process.platform !== 'win32') await waitFor(() => !alive(grandchild), 'what the CLI started to be gone', 10_000);
+    // And the chat answers again.
+    expect((await post(server, tab, apiPath(API_ROUTES.sessionMessages, ids), { text: 'after the crash' })).status).toBe(202);
+    await waitFor(() => stateOf(server, sessionId) === 'idle' && replies(server, sessionId).length === 3, 'the next reply', 15_000);
+  }, 60_000);
+
+  it('a CLI that crashes on start gives the chat back with a note; the chat answers again (story 3.4)', async () => {
+    const { server, tab, record, recorded } = await startTerminalServer({ extraAgentEnv: grandchildEnv({ FAKE_CLAUDE_CRASH_ON_START: '1' }) });
+    const { ids, sessionId } = await answeredChat(server, tab);
+    // Whether the crash is heard before or after the switch answers, the chat drives in the end.
+    expect((await switchTo(server, tab, ids, 'terminal')).status).toBe(200);
+    await waitFor(recorded, 'the CLI to start', 10_000);
+    await waitFor(() => server.core.entities.getSession(sessionId)!.driver === 'ui' && driverCauses(server, sessionId).length === 2, 'the chat to drive', 10_000);
+    expect(driverCauses(server, sessionId)).toEqual(['user', 'cli_exited']);
+    expect(replies(server, sessionId).at(-1)).toMatchObject({ payload: { content: "Claude Code's terminal closed unexpectedly (exit code 70)." } });
+    const { grandchild } = record();
+    if (grandchild !== null && process.platform !== 'win32') await waitFor(() => !alive(grandchild), 'what the CLI started to be gone', 10_000);
+    expect((await post(server, tab, apiPath(API_ROUTES.sessionMessages, ids), { text: 'after the crash' })).status).toBe(202);
+    await waitFor(() => stateOf(server, sessionId) === 'idle' && replies(server, sessionId).length === 3, 'the next reply', 15_000);
   }, 60_000);
 
   it('closing the viewer leaves the CLI running; a new viewer gets the recent output; the server stop kills it', async () => {

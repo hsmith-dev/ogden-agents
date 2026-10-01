@@ -31,4 +31,5 @@ export * from './secret-store-port.js';
 export * from './session-events.js';
 export * from './terminal-import.js';
 export * from './terminal-port.js';
+export * from './terminal-reasons.js';
 export * from './toolchain.js';

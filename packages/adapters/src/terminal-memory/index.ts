@@ -4,7 +4,9 @@
  * it, records every write and resize, and exits when the test says so
  * ({@link MemoryTerminalProcess.exit}) or when it is killed. Whether a
  * terminal can be opened is switchable ({@link MemoryTerminalPort.setAvailable}),
- * as when `node-pty` fails to load (AD-19).
+ * as when `node-pty` fails to load (AD-19). Story 3.4's failure modes: an
+ * `open` that rejects, a CLI that ignores its kill, and one that crashes as
+ * it starts.
  */
 import type { OpenTerminal, TerminalAvailability, TerminalPort, TerminalProcess } from '@ogden-agents/core';
 
@@ -38,11 +40,18 @@ export interface MemoryTerminalOptions {
   available?: TerminalAvailability;
   /** Whether typed text is printed back, as a terminal with echo on does. Default `true`. */
   echo?: boolean;
+  /** When set, `open` rejects with it while available (the CLI couldn't be spawned). */
+  openError?: Error;
+  /** Whether a killed terminal reports its exit. Default `true`; `false` is a CLI that ignores the kill. */
+  exitOnKill?: boolean;
+  /** When set, each terminal exits by itself with this code as it opens (a CLI that crashes on start). */
+  exitOnOpen?: number;
 }
 
 export function createMemoryTerminalPort(options: MemoryTerminalOptions = {}): MemoryTerminalPort {
   let availability: TerminalAvailability = options.available ?? { ok: true };
   const echo = options.echo ?? true;
+  const exitOnKill = options.exitOnKill ?? true;
   const opened: MemoryTerminalProcess[] = [];
 
   const openOne = (input: OpenTerminal): MemoryTerminalProcess => {
@@ -95,8 +104,8 @@ export function createMemoryTerminalPort(options: MemoryTerminalOptions = {}): M
       },
       kill() {
         kills++;
-        // A killed program reports its exit a moment later, as a real one does.
-        setImmediate(() => finish(null));
+        // A killed program reports its exit a moment later, as a real one does (unless told to ignore it).
+        if (exitOnKill) setImmediate(() => finish(null));
       },
       print(text) {
         if (exitCode === undefined) emit(text);
@@ -113,8 +122,10 @@ export function createMemoryTerminalPort(options: MemoryTerminalOptions = {}): M
     available: async () => availability,
     async open(input) {
       if (!availability.ok) throw new Error(availability.reason);
+      if (options.openError !== undefined) throw options.openError;
       const terminal = openOne(input);
       opened.push(terminal);
+      if (options.exitOnOpen !== undefined) terminal.exit(options.exitOnOpen);
       return terminal;
     },
   };

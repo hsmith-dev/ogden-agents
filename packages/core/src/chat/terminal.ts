@@ -3,20 +3,84 @@
  * 3.11): switching a session's driver, and a viewer's hold on its terminal.
  * What the terminal prints or is typed into it is never logged, evented or
  * stored (AD-16).
+ *
+ * Story 3.4 (E3-R5): every driver change (a switch either way, a CLI that
+ * exits by itself, a close, the import after a crash) holds the session's
+ * `switching` lock, so no message is taken and no other switch starts, and
+ * each one's wait is bounded. Each ends at `driver = ui` (idle, resumable)
+ * or at `driver = terminal` with a live CLI, and every path that ends a CLI
+ * kills its whole tree, even once the CLI itself has exited.
  */
 import type { Session, SessionId } from '@ogden-agents/shared';
 import { AgentError, type AgentTerminalResume, type AgentTranscriptTurn } from '../agent-port.js';
-import { InvalidOperationError, SessionNotIdleError, TerminalImportError, TerminalUnavailableError } from '../errors.js';
+import { InvalidOperationError, SessionNotIdleError, TerminalHandoffError, TerminalImportError, TerminalUnavailableError } from '../errors.js';
 import { omittedNote, START_MARK, turnsToImport } from '../terminal-import.js';
 import type { TerminalProcess } from '../terminal-port.js';
+import { terminalUnavailableReason } from '../terminal-reasons.js';
 import type { Agents } from './agents.js';
-import { TERMINAL_BACKLOG_CHARS, TERMINAL_COLS, TERMINAL_EXIT_GRACE_MS, TERMINAL_IMPORT_REF, TERMINAL_ROWS } from './constants.js';
+import {
+  TERMINAL_BACKLOG_CHARS,
+  TERMINAL_CLOSE_WAIT_MS,
+  TERMINAL_COLS,
+  TERMINAL_EXIT_GRACE_MS,
+  TERMINAL_IMPORT_PENDING_REF,
+  TERMINAL_IMPORT_REF,
+  TERMINAL_RELEASE_TIMEOUT_MS,
+  TERMINAL_ROWS,
+  terminalClosedNote,
+} from './constants.js';
 import type { ChatContext } from './context.js';
 import type { Chat, Terminal, Timer } from './types.js';
 
 export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgent' | 'storedAgentSessionId'>) {
-  const { options, entities, sessionEvents, agent, agentEnv, busy, terminals, switching, internalError, later, newMessageId, getWorkspace, getSession } = ctx;
+  const { options, entities, sessionEvents, agent, agentEnv, busy, running, terminals, switching, internalError, later, newMessageId, getWorkspace, getSession } = ctx;
   const { releaseAgent, storedAgentSessionId } = deps;
+
+  /** The driver changes in flight (each holding its session's `switching`): `close` waits for them. */
+  const switches = new Set<Promise<void>>();
+
+  /** Whether `promise` settled within `ms` (its rejection counts as settled). */
+  const within = async (promise: Promise<unknown>, ms: number): Promise<boolean> => {
+    let timer: Timer | undefined;
+    try {
+      return await Promise.race([
+        promise.then(
+          () => true,
+          () => true,
+        ),
+        new Promise<false>((resolve) => (timer = later(ms, () => resolve(false)))),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  /**
+   * Runs `work` holding the session's `switching` lock, taken before this
+   * returns and released when `work` ends however it ends. Tracked, so
+   * `settled` and `close` wait for it.
+   */
+  const holdingSwitch = <T>(sessionId: SessionId, work: () => Promise<T>): Promise<T> => {
+    switching.add(sessionId);
+    const done = (async () => {
+      try {
+        return await work();
+      } finally {
+        switching.delete(sessionId);
+      }
+    })();
+    const tracked = done.then(
+      () => undefined,
+      () => undefined,
+    );
+    switches.add(tracked);
+    running.add(tracked);
+    void tracked.then(() => {
+      switches.delete(tracked);
+      running.delete(tracked);
+    });
+    return done;
+  };
 
   /** Keeps the newest {@link TERMINAL_BACKLOG_CHARS} of output, starting at a line where it can. */
   const trimBacklog = (text: string): string => {
@@ -52,9 +116,8 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
       internalError(sessionId, error);
     }
     endTerminal(sessionId, terminal, null);
-    let timer: Timer | undefined;
-    await Promise.race([terminal.exited, new Promise<void>((resolve) => (timer = later(TERMINAL_EXIT_GRACE_MS, resolve)))]);
-    clearTimeout(timer);
+    // A CLI that ignores the kill doesn't hold the switch: it goes on, with a code in the log.
+    if (!(await within(terminal.exited, TERMINAL_EXIT_GRACE_MS))) internalError(sessionId, new TerminalHandoffError('terminal_exit_timeout'));
   };
 
   /** The CLI's record of the session's agent session (story 3.3), `undefined` when the agent can't read it back; rejects as the adapter's `transcript` does. */
@@ -90,30 +153,35 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     const terminal = options.terminal;
     const resume = agent.terminalResume;
     if (resume === undefined) {
-      throw new TerminalUnavailableError('agent_unsupported', `${agent.displayName} can't be opened in its own terminal.`);
+      throw new TerminalUnavailableError('agent_unsupported', terminalUnavailableReason.agentUnsupported(agent.displayName));
     }
-    if (terminal === undefined) throw new TerminalUnavailableError('pty_unavailable', "The terminal can't start on this computer.");
+    if (terminal === undefined) throw new TerminalUnavailableError('pty_unavailable', terminalUnavailableReason.noTerminalPort());
     if (busy.has(session.id) || session.state !== 'idle') {
       throw new SessionNotIdleError(`${agent.displayName} is busy. Switch to the terminal when it is idle.`);
     }
     const agentSessionId = storedAgentSessionId(session.id);
     if (agentSessionId === undefined) {
-      throw new TerminalUnavailableError('no_agent_session', `Send ${agent.displayName} a message first, then switch to the terminal.`);
+      throw new TerminalUnavailableError('no_agent_session', terminalUnavailableReason.noAgentSession(agent.displayName));
     }
     const workspace = getWorkspace(session.workspaceId);
     const availability = await terminal.available();
-    if (!availability.ok) throw new TerminalUnavailableError('pty_unavailable', `The terminal can't start on this computer: ${availability.reason}`);
+    // `node-pty`'s own reason can name a path: only plain words reach the user (3.7's filter, shared).
+    if (!availability.ok) throw new TerminalUnavailableError('pty_unavailable', terminalUnavailableReason.ptyUnavailable(availability.reason));
     const env = { ...agentEnv() };
     const located = await resume.locate(env);
-    if (!located.found) throw new TerminalUnavailableError('cli_not_found', located.reason);
+    if (!located.found) throw new TerminalUnavailableError('cli_not_found', terminalUnavailableReason.cliNotFound(agent.displayName, located.reason));
     let command: Awaited<ReturnType<AgentTerminalResume['command']>>;
     try {
       command = await resume.command(agentSessionId, env);
     } catch (error) {
-      throw new TerminalUnavailableError('cli_not_found', error instanceof AgentError ? error.message : `${agent.displayName}'s terminal couldn't be found.`);
+      throw new TerminalUnavailableError('cli_not_found', terminalUnavailableReason.cliNotFound(agent.displayName, error instanceof AgentError ? error.message : ''));
     }
     if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
-    await releaseAgent(session.id);
+    // Bounded (E3-R5): an agent that won't stop leaves the chat driving, idle; its next message waits for it.
+    if (!(await within(releaseAgent(session.id), TERMINAL_RELEASE_TIMEOUT_MS))) {
+      internalError(session.id, new TerminalHandoffError('terminal_release_timeout'));
+      throw new SessionNotIdleError(`${agent.displayName} is still stopping. Try again.`);
+    }
     // The agent has stopped: its record is complete, so what the terminal adds comes after the mark.
     await markTerminalImport(session, agentSessionId);
     if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
@@ -140,6 +208,7 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
       end: new Set(),
       ended: false,
       exited: new Promise<void>((resolve) => (markExited = resolve)),
+      exit: undefined,
     };
     terminals.set(session.id, entry);
     cli.onData((data) => {
@@ -154,28 +223,68 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     });
     cli.onExit(({ exitCode }) => {
       markExited();
-      // Switched back (or closed) already: the driver is set there.
+      // Stopped by a switch back, a close or a delete: they finish it.
       if (terminals.get(session.id) !== entry) return;
-      terminals.delete(session.id);
-      endTerminal(session.id, entry, exitCode);
-      if (ctx.closing) return;
-      try {
-        // The CLI exited by itself (`/exit`, a crash): the chat drives again.
-        entities.setSessionDriver(session.id, 'ui', 'cli_exited');
-      } catch (error) {
-        internalError(session.id, error);
+      // Exited while this switch still holds the session: it finishes it below.
+      if (switching.has(session.id)) {
+        entry.exit = { exitCode };
+        return;
       }
+      // The CLI exited by itself (`/exit`, a crash): the chat drives again, under the lock.
+      holdingSwitch(session.id, () => cliExited(session.id, entry, exitCode)).catch((error: unknown) => internalError(session.id, error));
     });
     if (ctx.closing) {
       await stopTerminal(session.id);
       throw new InvalidOperationError('Ogden Agents is stopping.');
     }
+    // From here a crash before the switch back still imports its turns, at the next start (user decision).
+    if (agent.terminalResume?.transcript !== undefined) setImportPending(session.id, '1');
+    let switched: Session;
     try {
-      return entities.setSessionDriver(session.id, 'terminal', 'user');
+      switched = entities.setSessionDriver(session.id, 'terminal', 'user');
     } catch (error) {
       await stopTerminal(session.id);
       throw error;
     }
+    // A CLI that crashed as it started hands the chat straight back, with its note.
+    if (entry.exit !== undefined) return cliExited(session.id, entry, entry.exit.exitCode);
+    return switched;
+  };
+
+  /** Sets or clears {@link TERMINAL_IMPORT_PENDING_REF}; a failure is logged as a code. */
+  const setImportPending = (sessionId: SessionId, value: '1' | '') => {
+    try {
+      entities.setSessionAdapterRefs(sessionId, { [TERMINAL_IMPORT_PENDING_REF]: value });
+    } catch (error) {
+      internalError(sessionId, new TerminalImportError('terminal_import_failed', error));
+    }
+  };
+
+  /**
+   * The session's CLI exited by itself (story 3.4): its viewers are told,
+   * whatever it started is killed, its turns are imported and, after an
+   * error exit, the agent's note says so (user decision); then the chat
+   * drives again (`cli_exited`). The caller holds the `switching` lock.
+   */
+  const cliExited = async (sessionId: SessionId, entry: Terminal, exitCode: number | null): Promise<Session> => {
+    if (terminals.get(sessionId) === entry) terminals.delete(sessionId);
+    endTerminal(sessionId, entry, exitCode);
+    try {
+      // Its children outlive it (tools it started): the whole tree goes.
+      entry.process.kill();
+    } catch (error) {
+      internalError(sessionId, error);
+    }
+    const session = entities.getSession(sessionId);
+    if (session !== undefined) await importTerminalTurns(session);
+    if (exitCode !== 0) {
+      try {
+        sessionEvents.completeMessage(sessionId, { messageId: newMessageId(), role: 'agent', content: terminalClosedNote(agent.displayName, exitCode) });
+      } catch (error) {
+        internalError(sessionId, error);
+      }
+    }
+    return entities.setSessionDriver(sessionId, 'ui', 'cli_exited');
   };
 
   /**
@@ -186,6 +295,15 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
    * nothing more: the switch back still completes.
    */
   const importTerminalTurns = async (session: Session): Promise<void> => {
+    try {
+      await importTurns(session);
+    } finally {
+      // Tried once: a later start doesn't try again (the mark keeps a later import from repeating it anyway).
+      if (entities.getSession(session.id)?.adapterRefs[TERMINAL_IMPORT_PENDING_REF] === '1') setImportPending(session.id, '');
+    }
+  };
+
+  const importTurns = async (session: Session): Promise<void> => {
     const agentSessionId = storedAgentSessionId(session.id);
     if (agentSessionId === undefined) return;
     let turns: AgentTranscriptTurn[] | undefined;
@@ -223,18 +341,64 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     return entities.setSessionDriver(session.id, 'ui', 'user');
   };
 
+  /**
+   * For `close` (AD-3: the server owns the terminals): waits, at most
+   * {@link TERMINAL_CLOSE_WAIT_MS}, for the driver changes in flight, then
+   * stops every terminal, imports its turns (user decision: a clean stop
+   * imports them) and gives its chat back (`server_stopped`).
+   */
+  const closeTerminals = async (): Promise<void> => {
+    const deadline = Date.now() + TERMINAL_CLOSE_WAIT_MS;
+    while (switches.size > 0) {
+      const left = deadline - Date.now();
+      if (left <= 0 || !(await within(Promise.all([...switches]), left))) {
+        for (const sessionId of switching) internalError(sessionId, new TerminalHandoffError('terminal_close_timeout'));
+        break;
+      }
+    }
+    await Promise.all(
+      [...terminals.keys()].map(async (sessionId) => {
+        // A switch past the wait still holds it: stop its terminal; that switch sees `closing` and ends at `ui`.
+        if (switching.has(sessionId)) return stopTerminal(sessionId);
+        try {
+          await holdingSwitch(sessionId, async () => {
+            await stopTerminal(sessionId);
+            const session = entities.getSession(sessionId);
+            if (session === undefined) return;
+            await importTerminalTurns(session);
+            entities.setSessionDriver(sessionId, 'ui', 'server_stopped');
+          });
+        } catch (error) {
+          internalError(sessionId, error);
+        }
+      }),
+    );
+  };
+
+  /**
+   * After a stop that couldn't import (a crash), imports the terminal turns
+   * of every session still marked {@link TERMINAL_IMPORT_PENDING_REF} (user
+   * decision), each under its `switching` lock; an import's failures are
+   * logged as codes.
+   */
+  const importAfterRestart = (): void => {
+    const pending = entities
+      .listWorkspaces()
+      .flatMap((workspace) => entities.listSessions(workspace.id))
+      .filter((session) => session.adapterRefs[TERMINAL_IMPORT_PENDING_REF] === '1');
+    for (const session of pending) {
+      if (switching.has(session.id) || terminals.has(session.id)) continue;
+      holdingSwitch(session.id, () => importTerminalTurns(session)).catch((error: unknown) => internalError(session.id, error));
+    }
+  };
+
   const methods: Pick<Chat, 'switchDriver' | 'attachTerminal'> = {
     async switchDriver(workspaceId, sessionId, driver) {
       if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
       const session = getSession(workspaceId, sessionId);
       if (switching.has(sessionId)) throw new SessionNotIdleError('This chat is already switching. Try again in a moment.');
       if (session.driver === driver) return session;
-      switching.add(sessionId);
-      try {
-        return driver === 'terminal' ? await toTerminal(session) : await toChat(session);
-      } finally {
-        switching.delete(sessionId);
-      }
+      return holdingSwitch(sessionId, () => (driver === 'terminal' ? toTerminal(session) : toChat(session)));
     },
 
     attachTerminal(sessionId) {
@@ -256,5 +420,5 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     },
   };
 
-  return { trimBacklog, endTerminal, stopTerminal, toTerminal, importTerminalTurns, toChat, ...methods };
+  return { trimBacklog, endTerminal, stopTerminal, toTerminal, importTerminalTurns, toChat, closeTerminals, importAfterRestart, ...methods };
 }

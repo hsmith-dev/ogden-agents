@@ -49,13 +49,17 @@ export interface HiddenPty {
   readonly pid: number;
   /** Everything the program prints (terminal escape sequences included). Never log it. */
   onData(listener: (data: string) => void): void;
-  /** Called once when the program has exited. */
+  /** Called once when the program has exited; a listener added after that is called a moment later. */
   onExit(listener: (exit: { exitCode: number; signal: number | null }) => void): void;
   /** Types into the terminal. Ignored once the program has exited. */
   write(data: string): void;
   /** Resizes the terminal (story 3.1; every spawn has it). Ignored once the program has exited. */
   resize?(cols: number, rows: number): void;
-  /** Stops the program and everything it started. Safe to call more than once. */
+  /**
+   * Stops the program and everything it started. Safe to call more than
+   * once. Called after the program exited, it still stops what it started
+   * (its process group, POSIX), once.
+   */
   kill(): void;
 }
 
@@ -146,8 +150,9 @@ export function hiddenPtySpawner(pty: PtyModule, platform: NodeJS.Platform = pro
       cwd: options.cwd,
       env: { ...options.env },
     });
-    let exited = false;
+    let exit: { exitCode: number; signal: number | null } | undefined;
     let killed = false;
+    let groupKilled = false;
     const dataListeners = new Set<(data: string) => void>();
     const exitListeners = new Set<(exit: { exitCode: number; signal: number | null }) => void>();
     // An unhandled terminal error would crash the server; a closed terminal is reported through `onExit`.
@@ -156,16 +161,25 @@ export function hiddenPtySpawner(pty: PtyModule, platform: NodeJS.Platform = pro
       for (const listener of dataListeners) listener(data);
     });
     terminal.onExit(({ exitCode, signal }) => {
-      if (exited) return;
-      exited = true;
-      for (const listener of exitListeners) listener({ exitCode, signal: signal === undefined || signal === 0 ? null : signal });
+      if (exit !== undefined) return;
+      exit = { exitCode, signal: signal === undefined || signal === 0 ? null : signal };
+      const reported = exit;
+      for (const listener of [...exitListeners]) listener(reported);
+      exitListeners.clear();
     });
     return {
       pid: terminal.pid,
       onData: (listener) => void dataListeners.add(listener),
-      onExit: (listener) => void exitListeners.add(listener),
+      onExit(listener) {
+        // Once, as before: a listener added after the exit hears it a moment later (story 3.4).
+        if (exit === undefined) exitListeners.add(listener);
+        else {
+          const reported = exit;
+          setImmediate(() => listener(reported));
+        }
+      },
       write(data) {
-        if (exited || killed) return;
+        if (exit !== undefined || killed) return;
         try {
           terminal.write(data);
         } catch {
@@ -173,7 +187,7 @@ export function hiddenPtySpawner(pty: PtyModule, platform: NodeJS.Platform = pro
         }
       },
       resize(cols, rows) {
-        if (exited || killed) return;
+        if (exit !== undefined || killed) return;
         try {
           terminal.resize?.(cols, rows);
         } catch {
@@ -181,9 +195,19 @@ export function hiddenPtySpawner(pty: PtyModule, platform: NodeJS.Platform = pro
         }
       },
       kill() {
-        if (killed) return;
+        if (!killed && exit === undefined) {
+          killed = true;
+          groupKilled = true;
+          killTerminalTree(terminal, platform);
+          return;
+        }
         killed = true;
-        if (!exited) killTerminalTree(terminal, platform);
+        // The program already exited (a crash, `/exit`): what it started may still run in its
+        // process group, which outlives it (POSIX). Stopped once. Windows is story 3.8's.
+        if (!groupKilled && platform !== 'win32') {
+          groupKilled = true;
+          killProcessTree(terminal.pid, { ...nodeProcessTreeSystem, platform });
+        }
       },
     };
   };

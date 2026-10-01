@@ -13,6 +13,14 @@ export const AGENT_SESSION_REF = 'agentSessionId';
  */
 export const TERMINAL_IMPORT_REF = 'terminalImportMark';
 
+/**
+ * The adapter ref that says a terminal opened and its turns have not been
+ * imported yet (story 3.4): `1` from the CLI's start until an import ran,
+ * else empty. A start after a crash imports the turns of every session that
+ * has it.
+ */
+export const TERMINAL_IMPORT_PENDING_REF = 'terminalImportPending';
+
 /** The most messages a session holds queued while its agent answers; the next one is refused (409). */
 export const MAX_QUEUED_MESSAGES = 20;
 
@@ -47,6 +55,16 @@ export const TERMINAL_BACKLOG_CHARS = 64 * 1024;
 
 /** How long switching back (or a close) waits for a killed terminal to report its exit. */
 export const TERMINAL_EXIT_GRACE_MS = 2_000;
+
+/** How long switching to the terminal waits for the session's agent to stop before it refuses ("still stopping"). */
+export const TERMINAL_RELEASE_TIMEOUT_MS = 10_000;
+
+/** How long a close waits for the switches in flight to end before it stops their terminals anyway. */
+export const TERMINAL_CLOSE_WAIT_MS = TERMINAL_RELEASE_TIMEOUT_MS + TERMINAL_EXIT_GRACE_MS;
+
+/** The agent's note in the chat when its CLI exited by itself with an error (story 3.4, user decision). */
+export const terminalClosedNote = (agentName: string, exitCode: number | null): string =>
+  exitCode === null ? `${agentName}'s terminal closed unexpectedly.` : `${agentName}'s terminal closed unexpectedly (exit code ${exitCode}).`;
 
 /** The size a terminal opens at, until its viewer resizes it. */
 export const TERMINAL_COLS = 80;

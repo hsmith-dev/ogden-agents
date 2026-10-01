@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # TEMPORARY (story 3.8): the branch runs CI on push so the conpty-probe job runs.
+    branches: [main, story/3.8-terminal-windows]
   pull_request:
   # The release workflow reruns the full matrix for the tagged commit before it
   # publishes (release.yml).
@@ -77,6 +78,49 @@ jobs:
       # (AD-19): the app must still start.
       - name: Smoke test without optional dependencies
         run: node scripts/smoke-installed.mjs --omit-optional
+
+  # TEMPORARY (story 3.8): facts about ConPTY on windows-latest (resize, the
+  # children of a CLI that exits, paste, Ctrl+C, truecolour, the npm `claude`
+  # shim, AttachConsole noise). Prints facts only; removed before review.
+  conpty-probe:
+    name: ConPTY probe (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Probe ConPTY
+        continue-on-error: true
+        run: node scripts/conpty-probe.mjs
+
+      - name: Install the real claude (npm)
+        continue-on-error: true
+        run: npm i -g @anthropic-ai/claude-code
+
+      - name: Probe the real claude shim
+        continue-on-error: true
+        run: node scripts/conpty-probe.mjs claude
+
+      - name: Terminal tests, AttachConsole noise
+        continue-on-error: true
+        shell: bash
+        run: |
+          pnpm run build > /dev/null
+          pnpm exec vitest run packages/adapters/test/terminal-pty.test.ts packages/server/test/terminal-socket.test.ts > terminal-tests.log 2>&1 || echo "tests exit $?"
+          tail -n 40 terminal-tests.log
+          echo "AttachConsole lines: $(grep -c AttachConsole terminal-tests.log || true)"
+          grep -n AttachConsole terminal-tests.log | head -n 10 || true
 
   # The uv archives Ogden Agents may install (story 1.8): re-download each one
   # pinned in packages/adapters/src/toolchain-uv/uv-release.json and check its

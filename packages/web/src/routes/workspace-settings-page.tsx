@@ -1,12 +1,4 @@
-import {
-  applyBmadPieceChoice,
-  BMAD_COMING_SOON_LABEL,
-  BMAD_PIECE_INFO,
-  CAUTION_LEVELS,
-  WORKSPACE_SETTINGS_BMAD_ANCHOR,
-  type CautionLevel,
-  type PermissionRule,
-} from '@ogden-agents/shared';
+import { CAUTION_LEVELS, type CautionLevel, type PermissionRule } from '@ogden-agents/shared';
 import { House, Trash } from '@phosphor-icons/react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from '@tanstack/react-router';
@@ -14,23 +6,21 @@ import { useRef, useState } from 'react';
 import { ChatApiError, removePermissionRule } from '@/chat/chat-api';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { AlertDialog, AlertDialogCancel, AlertDialogConfirm, AlertDialogContent, AlertDialogTrigger } from '@/ui/alert-dialog';
-import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
-import { Field } from '@/ui/field';
 import { EmptyState, PageBody, PageSection } from '@/ui/page';
 import { RadioGroup, RadioGroupOption } from '@/ui/radio-group';
-import { Switch } from '@/ui/switch';
 import { Text } from '@/ui/typography';
 import { deleteHistory, fetchWorkspace, workspaceName } from '@/workspaces/workspace-api';
-import { createLatestGate, updateBmadPieces, updateCautionLevel, useBmadPieces, usePermissionRules, useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
+import { BmadMethodSection } from '@/workspaces/bmad-method-section';
+import { createLatestGate, updateCautionLevel, usePermissionRules, useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
 
 /**
  * `/w/:wsId/settings`: the workspace's settings (story 2.5, then the
- * caution level in 2.8): caution level, history deletion, the BMad Method
- * switch (story 10.1's bare one; 10.5 designs the section), and later the
- * default agent. Story 2.3 registers the route; 2.5
- * and 2.8 fill this file.
+ * caution level in 2.8): caution level, the BMad Method section (story
+ * 10.5's, in `workspaces/bmad-method-section.tsx`, at `#bmad-method`), the
+ * Always allow rules, history deletion, and later the default agent. Story
+ * 2.3 registers the route; 2.5 and 2.8 fill this file.
  */
 export function WorkspaceSettingsPage() {
   const { wsId } = useParams({ strict: false }) as { wsId: string };
@@ -154,112 +144,6 @@ function CautionLevelSection({ wsId }: { wsId: string }) {
 
   const loadError = settings.error instanceof Error ? { kind: 'error' as const, text: settings.error.message } : undefined;
   return <CautionLevelView value={chosen ?? settings.data?.cautionLevel} onChange={onChange} saving={saving} status={status ?? loadError} />;
-}
-
-export interface BmadMethodViewProps {
-  /** Whether Planning is on; `undefined` while loading. */
-  planning: boolean | undefined;
-  /**
-   * Whether this install ships Planning (story 10.2's `GET` pieces);
-   * `undefined` while loading. When it doesn't, the switch is marked Coming
-   * soon and can't be turned on; one already on can still be turned off.
-   */
-  available: boolean | undefined;
-  onChange: (on: boolean) => void;
-  saving: boolean;
-  /** Why the change wasn't saved, or the settings couldn't load. */
-  error: string | undefined;
-}
-
-/**
- * Story 10.1's bare switch for one BMad piece, Planning (CAP-19, AD-22),
- * with 10.2's availability: the label and sentence come from the shared
- * piece list, and a piece this install doesn't ship is greyed and marked
- * Coming soon. It only asks the server; core's guard decides what runs.
- * Entry 10.5 replaces it with the designed section.
- */
-export function BmadMethodView({ planning, available, onChange, saving, error }: BmadMethodViewProps) {
-  const info = BMAD_PIECE_INFO.planning;
-  const comingSoon = available !== true;
-  return (
-    <PageSection id={WORKSPACE_SETTINGS_BMAD_ANCHOR} title="BMad Method" data-testid="bmad-section">
-      <Text>Projects start as simple chats. Turn on the BMad Method features this project uses. Your project's files are never changed by turning one off.</Text>
-      {planning === undefined ? null : (
-        <Field
-          id="bmad-planning"
-          layout="inline"
-          label={info.label}
-          description={
-            <>
-              {info.sentence}
-              {available === false ? (
-                <>
-                  {' '}
-                  <Badge variant="outline" data-testid="bmad-planning-coming-soon">
-                    {BMAD_COMING_SOON_LABEL}
-                  </Badge>
-                </>
-              ) : null}
-            </>
-          }
-        >
-          <Switch
-            id="bmad-planning"
-            data-testid="bmad-planning"
-            aria-describedby="bmad-planning-description"
-            checked={planning}
-            // Turning a piece on needs it shipped; turning one off is always allowed (AD-22).
-            disabled={saving || (comingSoon && !planning)}
-            onCheckedChange={onChange}
-          />
-        </Field>
-      )}
-      {error === undefined ? null : (
-        <Notice variant="blocked" role="alert" data-testid="bmad-error">
-          {error}
-        </Notice>
-      )}
-    </PageSection>
-  );
-}
-
-/** Loads the pieces and saves each change at once; other tabs follow `workspace.settings_changed`. */
-function BmadMethodSection({ wsId }: { wsId: string }) {
-  const settings = useWorkspaceSettings(wsId);
-  const pieces = useBmadPieces();
-  const queryClient = useQueryClient();
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | undefined>(undefined);
-  const [chosen, setChosen] = useState<boolean | undefined>(undefined);
-  const latest = useRef(createLatestGate()).current;
-
-  const onChange = (on: boolean) => {
-    // The shared dependency rule decides what else changes with Planning (nothing, today).
-    const next = applyBmadPieceChoice(settings.data?.bmadPieces ?? [], 'planning', on).pieces;
-    const ticket = latest.next();
-    setSaving(true);
-    setChosen(on);
-    setError(undefined);
-    updateBmadPieces(wsId, next).then(
-      (saved) => {
-        if (!latest.isLatest(ticket)) return;
-        setSaving(false);
-        setChosen(undefined);
-        queryClient.setQueryData(['workspace-settings', wsId], saved);
-      },
-      (failure: unknown) => {
-        if (!latest.isLatest(ticket)) return;
-        setSaving(false);
-        setChosen(undefined);
-        setError(failure instanceof Error ? failure.message : "The BMad Method setting couldn't be saved. Try again.");
-      },
-    );
-  };
-
-  const loadError = settings.error instanceof Error ? settings.error.message : pieces.error instanceof Error ? pieces.error.message : undefined;
-  const planning = chosen ?? (settings.data === undefined ? undefined : settings.data.bmadPieces.includes('planning'));
-  const available = pieces.data?.find((entry) => entry.piece === 'planning')?.available;
-  return <BmadMethodView planning={planning} available={available} onChange={onChange} saving={saving} error={error ?? loadError} />;
 }
 
 export interface AlwaysAllowRulesViewProps {

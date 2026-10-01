@@ -1,8 +1,8 @@
-import { BMAD_COMING_SOON_LABEL, BMAD_PIECE_INFO, WORKSPACE_SETTINGS_BMAD_ANCHOR, type PermissionRule, type PermissionRuleId, type WorkspaceId } from '@ogden-agents/shared';
+import { type PermissionRule, type PermissionRuleId, type WorkspaceId } from '@ogden-agents/shared';
 import type { ReactElement } from 'react';
 import { renderToStaticMarkup as renderMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { AlwaysAllowRulesView, BmadMethodView, CAUTION_OPTIONS, CautionLevelView } from '../src/routes/workspace-settings-page';
+import { AlwaysAllowRulesView, CAUTION_OPTIONS, CautionLevelView } from '../src/routes/workspace-settings-page';
 import { TooltipProvider } from '../src/ui/tooltip';
 import { createLatestGate } from '../src/workspaces/workspace-settings-api';
 
@@ -63,36 +63,5 @@ describe('workspace settings page (story 2.8)', () => {
     const second = gate.next();
     expect(gate.isLatest(first)).toBe(false);
     expect(gate.isLatest(second)).toBe(true);
-  });
-});
-
-describe('the BMad Method switch (story 10.1, availability 10.2)', () => {
-  it('shows Planning as a switch in its state, says files are never changed, and shows a save error', () => {
-    const off = renderToStaticMarkup(<BmadMethodView planning={false} available onChange={() => {}} saving={false} error={undefined} />);
-    expect(off).toContain('>BMad Method<');
-    expect(off).toContain(`id="${WORKSPACE_SETTINGS_BMAD_ANCHOR}"`);
-    expect(off).toMatch(/role="switch"[^>]*aria-checked="false"/);
-    expect(off).not.toMatch(/role="switch"[^>]* disabled=""/);
-    expect(off).toContain('>Planning<');
-    expect(off).toContain(BMAD_PIECE_INFO.planning.sentence);
-    expect(off).toContain('never changed');
-    expect(off).not.toContain(BMAD_COMING_SOON_LABEL);
-    const on = renderToStaticMarkup(<BmadMethodView planning available onChange={() => {}} saving={false} error="Nope." />);
-    expect(on).toMatch(/role="switch"[^>]*aria-checked="true"/);
-    expect(on).toMatch(/data-testid="bmad-error"[^>]*>.*Nope\./);
-    expect(renderToStaticMarkup(<BmadMethodView planning={undefined} available onChange={() => {}} saving={false} error={undefined} />)).not.toContain('role="switch"');
-  });
-
-  it('greys an unavailable Planning as Coming soon and refuses to turn it on, but lets one already on be turned off', () => {
-    const off = renderToStaticMarkup(<BmadMethodView planning={false} available={false} onChange={() => {}} saving={false} error={undefined} />);
-    expect(off).toMatch(/role="switch"[^>]* disabled=""/);
-    expect(off).toMatch(/data-testid="bmad-planning-coming-soon"[^>]*>Coming soon</);
-    const on = renderToStaticMarkup(<BmadMethodView planning available={false} onChange={() => {}} saving={false} error={undefined} />);
-    expect(on).toContain(BMAD_COMING_SOON_LABEL);
-    expect(on).not.toMatch(/role="switch"[^>]* disabled=""/);
-    // While availability loads, an off switch can't be turned on yet, and nothing says Coming soon.
-    const loading = renderToStaticMarkup(<BmadMethodView planning={false} available={undefined} onChange={() => {}} saving={false} error={undefined} />);
-    expect(loading).toMatch(/role="switch"[^>]* disabled=""/);
-    expect(loading).not.toContain(BMAD_COMING_SOON_LABEL);
   });
 });

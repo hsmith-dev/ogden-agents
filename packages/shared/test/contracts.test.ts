@@ -19,6 +19,16 @@ import {
   BMAD_COMING_SOON_REASON,
   BMAD_FILES_STAY_TEXT,
   BMAD_METHOD_PRESELECTED_PIECES,
+  BMAD_OFF_TEXT,
+  BMAD_ON_TEXT,
+  BMAD_PIECES_LIST_LABEL,
+  BMAD_SAVE_FAILED_TEXT,
+  BMAD_SECTION_INTRO,
+  BMAD_SECTION_TITLE,
+  BMAD_USE_DESCRIPTION,
+  BMAD_USE_LABEL,
+  bmadMainSwitchPieces,
+  bmadNeedsUnavailableText,
   BMAD_OFFER_CHOOSE,
   BMAD_OFFER_NOT_NOW,
   BMAD_OFFER_TEXT,
@@ -498,6 +508,41 @@ describe('the per-project BMad pieces contract (story 10.2)', () => {
     expect(API_ROUTES.newProjectDefaults).toBe(`${API_BASE}/settings/new-projects`);
     expect(apiPath(API_ROUTES.workspaceBmadDetection, { wsId })).toBe(`${API_BASE}/workspaces/${wsId}/bmad/detection`);
     expect(apiPath(API_ROUTES.workspaceBmadOffer, { wsId })).toBe(`${API_BASE}/workspaces/${wsId}/bmad/offer`);
+  });
+});
+
+describe('the Workspace settings section texts (story 10.5)', () => {
+  it('every text is plain, with no em or en dash, and turning off says the files stay', () => {
+    const texts = [BMAD_SECTION_TITLE, BMAD_PIECES_LIST_LABEL, BMAD_SECTION_INTRO, BMAD_USE_LABEL, BMAD_USE_DESCRIPTION, BMAD_ON_TEXT, BMAD_OFF_TEXT, BMAD_SAVE_FAILED_TEXT, bmadNeedsUnavailableText(['board']), bmadNeedsUnavailableText(['board', 'builds'])];
+    for (const text of texts) {
+      expect(text, text).not.toMatch(/[\u2013\u2014]/);
+      expect(text, text).not.toMatch(/bmad-|_bmad/);
+    }
+    for (const text of [BMAD_SECTION_INTRO, BMAD_USE_DESCRIPTION, BMAD_ON_TEXT, BMAD_OFF_TEXT, BMAD_SAVE_FAILED_TEXT]) expect(text, text).toMatch(/^[A-Z].*\.$/);
+    expect(BMAD_SECTION_TITLE).toBe('BMad Method');
+    expect(BMAD_USE_LABEL).toBe('Use BMad Method in this project');
+    expect(BMAD_OFF_TEXT.endsWith(BMAD_FILES_STAY_TEXT)).toBe(true);
+  });
+
+  it('the needs reason names what is missing', () => {
+    expect(bmadNeedsUnavailableText(['board'])).toBe("Needs Board, which isn't in this version yet.");
+    expect(bmadNeedsUnavailableText(['builds', 'board'])).toBe("Needs Board and Unattended builds, which aren't in this version yet.");
+  });
+
+  it('the main switch turns on the preselected pieces this install ships, with their needs', () => {
+    expect(bmadMainSwitchPieces(BMAD_PIECES)).toEqual(['planning', 'board']);
+    expect(bmadMainSwitchPieces(['planning', 'board'])).toEqual(['planning', 'board']);
+    expect(bmadMainSwitchPieces(['board', 'builds'])).toEqual(['board']);
+    expect(bmadMainSwitchPieces(['planning'])).toEqual(['planning']);
+    expect(bmadMainSwitchPieces(['builds', 'retrospectives'])).toEqual([]);
+    expect(bmadMainSwitchPieces([])).toEqual([]);
+    // Whatever it turns on satisfies the rule.
+    for (const mask of Array.from({ length: 16 }, (_, index) => index)) {
+      const available = BMAD_PIECES.filter((_, index) => (mask & (1 << index)) !== 0);
+      const pieces = bmadMainSwitchPieces(available);
+      expect(bmadPiecesProblem(pieces), JSON.stringify(available)).toBeUndefined();
+      expect(pieces.every((piece) => available.includes(piece)), JSON.stringify(available)).toBe(true);
+    }
   });
 });
 

@@ -259,3 +259,43 @@ export const WORKSPACE_SETTINGS_BMAD_ANCHOR = 'bmad-method';
 export function bmadSettingsHref(wsId: string): string {
   return `/w/${encodeURIComponent(wsId)}/settings#${WORKSPACE_SETTINGS_BMAD_ANCHOR}`;
 }
+
+// ---- Workspace settings section texts (entry 10.5) ----
+
+/** The section's heading. */
+export const BMAD_SECTION_TITLE = 'BMad Method';
+/** The sentence under the heading. */
+export const BMAD_SECTION_INTRO = 'Projects start as simple chats. Turn on the BMad Method features this project uses. Turning one off never changes your files.';
+/** The main switch's label: on when any piece is on (derived, never stored). */
+export const BMAD_USE_LABEL = 'Use BMad Method in this project';
+/** The main switch's sentence. */
+export const BMAD_USE_DESCRIPTION = 'Turns on the features most projects start with. Turning it off turns every feature off. Choose each feature below.';
+/** The accessible name of the list of the four pieces under the main switch. */
+export const BMAD_PIECES_LIST_LABEL = 'BMad Method features';
+/** Said when the main switch turned BMad on. */
+export const BMAD_ON_TEXT = 'BMad Method is on in this project.';
+/** Said when BMad ends up off (every piece off): turning off never deletes or edits files. */
+export const BMAD_OFF_TEXT = `BMad Method is off in this project. ${BMAD_FILES_STAY_TEXT}`;
+/** Said when a change couldn't be saved and the server gave no reason. */
+export const BMAD_SAVE_FAILED_TEXT = "The BMad Method setting couldn't be saved. Try again.";
+
+/**
+ * Why a piece can't be turned on although this install ships it: something
+ * it needs doesn't ship yet ("Needs Board, which isn't in this version yet.").
+ */
+export function bmadNeedsUnavailableText(missing: readonly BmadPiece[]): string {
+  const pieces = canonicalBmadPieces(missing);
+  return `Needs ${labelList(pieces)}, which ${pieces.length === 1 ? "isn't" : "aren't"} in this version yet.`;
+}
+
+/**
+ * What the main switch turns on: each preselected piece
+ * ({@link BMAD_METHOD_PRESELECTED_PIECES}) this install ships, with
+ * everything it needs, when those ship too. Empty when none can be turned on
+ * (the main switch is then Coming soon).
+ */
+export function bmadMainSwitchPieces(available: Iterable<BmadPiece>): BmadPiece[] {
+  const shipped = new Set(available);
+  const pieces = BMAD_METHOD_PRESELECTED_PIECES.filter((piece) => shipped.has(piece) && bmadPieceNeeds(piece).every((need) => shipped.has(need)));
+  return canonicalBmadPieces(pieces.flatMap((piece) => [piece, ...bmadPieceNeeds(piece)]));
+}

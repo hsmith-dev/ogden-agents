@@ -31,7 +31,7 @@ after = [{ epic = 2, needs = "persistent sessions and the session view" }]
 id = 10
 slug = "epic-bmad-optional-per-project"
 title = "Projects start as simple multi-agent chats, and each turns on the BMad pieces it wants"
-covers = ["CAP-17", "CAP-2"]
+covers = ["CAP-19", "CAP-17"]
 after = [{ epic = 2, needs = "workspace settings, the caution-level pattern and workspace.settings_changed (2.5, 2.8)" }, { epic = 9, needs = "Welcome's project step (9.5)" }, { epic = 3, needs = "its refactor sweep (3.9) and its suite and release (3.10) first" }]
 
 [[epic]]
@@ -39,7 +39,7 @@ id = 4
 slug = "epic-planning-and-board"
 title = "Plan with every BMAD skill and track it on a live board"
 covers = ["CAP-2", "CAP-6", "CAP-7", "CAP-18"]
-after = [{ epic = 1, needs = "the bundled forks and forks.lock" }, { epic = 2, needs = "chat sessions, which planning runs in" }]
+after = [{ epic = 1, needs = "the bundled forks and forks.lock" }, { epic = 2, needs = "chat sessions, which planning runs in" }, { epic = 10, needs = "the per-project BMad pieces contract, guard, route helper and BmadCatalogPort.detect (10.2)" }]
 
 [[epic]]
 id = 5

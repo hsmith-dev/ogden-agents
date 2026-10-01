@@ -17,7 +17,7 @@ sources: []
 
 ## Why
 
-A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the strongest workers available, and the BMAD method gives them a disciplined process, but both live in a terminal: nothing lets a non-developer plan, dispatch, watch, and approve agent work from a browser. BMAD's own docs say `bmad-build-auto` never picks work, so something else must run the loop. The official orchestrator, bmad-loop, is terminal-only and does not read the v7 ticket tree. bmad-method-ui only monitors (see `prior-art.md`). Ogden proved the value of a browser control panel with scheduling and approval gates, but it was its own agent runtime and its planning was too thin: its agents produced incoherent code (Ogden commit `b5af7c3`). Ogden Agents is a new, single-install local app. Like herdr, it gives each project its own workspace and keeps agents running across many projects at once. The user's chosen agent does the work, the whole of BMAD (reused as much as possible) supplies the process, and a modern browser UI makes it manageable by anyone without a CLI, while advanced users keep one.
+A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the strongest workers available, and the BMAD method gives them a disciplined process, but both live in a terminal: nothing lets a non-developer plan, dispatch, watch, and approve agent work from a browser. BMAD's own docs say `bmad-build-auto` never picks work, so something else must run the loop. The official orchestrator, bmad-loop, is terminal-only and does not read the v7 ticket tree. bmad-method-ui only monitors (see `prior-art.md`). Ogden proved the value of a browser control panel with scheduling and approval gates, but it was its own agent runtime and its planning was too thin: its agents produced incoherent code (Ogden commit `b5af7c3`). Ogden Agents is a new, single-install local app. Like herdr, it gives each project its own workspace and keeps agents running across many projects at once. The user's chosen agent does the work, the whole of BMAD (reused as much as possible) supplies the process for projects that want it, and a modern browser UI makes it manageable by anyone without a CLI, while advanced users keep one.
 
 ## Capabilities
 
@@ -25,7 +25,7 @@ A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the str
   - **intent:** A user installs and launches Ogden Agents with one command, and the browser UI opens.
   - **success:** On a fresh macOS, Windows, or Linux machine, `npx ogden-agents` gets the user to a first browser chat with no further commands.
 - **CAP-2**
-  - **intent:** A user connects a local repo and installs and sets up BMAD in it from the UI.
+  - **intent:** A user who turns on BMad Method for a project sets it up there from the UI. A repo that already has it is detected and offered, never changed.
   - **success:** The repo gains a working `_bmad` setup that reports current, with no terminal use.
 - **CAP-3**
   - **intent:** Users hold persistent browser chat sessions with whichever supported agent they select, listed and resumable. Agents that can't resume a session reopen from Ogden Agents's stored transcript.
@@ -37,13 +37,13 @@ A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the str
   - **intent:** An advanced user toggles to the selected agent's real interactive CLI on the same session, with only one side driving at a time. The toggle appears only for agents whose chat session can be resumed in their own CLI.
   - **success:** The user switches to the terminal mid-session, sends a message there, switches back, and the UI shows that message and continues the session.
 - **CAP-6**
-  - **intent:** A user goes from an idea to a brief or spec, then to ticketed epics, through plain-language actions, without knowing skill names.
+  - **intent:** In a project with Planning turned on (CAP-19), a user goes from an idea to a brief or spec, then to ticketed epics, through plain-language actions, without knowing skill names.
   - **success:** A user produces a spec and a ticketed epic using only UI chat and buttons.
 - **CAP-7**
-  - **intent:** A board shows the v7 ticket tree (initiatives, epics, stories, statuses, prerequisites, ready items) and stays in sync with the files in both directions.
+  - **intent:** In a project with Board turned on (CAP-19), a board shows the v7 ticket tree (initiatives, epics, stories, statuses, prerequisites, ready items) and stays in sync with the files in both directions.
   - **success:** A status change an agent writes to a file appears in the UI within seconds, and a status change made in the UI lands in the plan file.
 - **CAP-8**
-  - **intent:** Unattended builds dispatch `bmad-build-auto` per ticket in isolation, respecting prerequisites and a concurrency limit, either for one ticket or autonomously.
+  - **intent:** In a project with Unattended builds turned on (CAP-19), unattended builds dispatch `bmad-build-auto` per ticket in isolation, respecting prerequisites and a concurrency limit, either for one ticket or autonomously.
   - **success:** Two ready, independent tickets build in parallel without touching each other's files, and a ticket with an unmet prerequisite is not dispatched.
 - **CAP-9**
   - **intent:** Each run streams live: activity, tool calls, final status, and a plain-language reason if blocked, with a Retry action.
@@ -55,10 +55,10 @@ A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the str
   - **intent:** A user reviews a diff and its review findings, then approves (merge and mark done) or rejects and retries.
   - **success:** Approving a built ticket merges its branch and marks it done, and no ticket reaches done without approval.
 - **CAP-13**
-  - **intent:** When an epic completes, a retrospective records evidence-based findings and adds recurring pitfalls to the project's `AGENTS.md`.
+  - **intent:** In a project with Retrospectives turned on (CAP-19), when an epic completes, a retrospective records evidence-based findings and adds recurring pitfalls to the project's `AGENTS.md`.
   - **success:** After an epic completes, a retrospective file exists and later runs include the new pitfall.
 - **CAP-14**
-  - **intent:** Users are notified when a ticket is blocked or is ready for review.
+  - **intent:** In a project with Unattended builds turned on (CAP-19), users are notified when a ticket is blocked or is ready for review.
   - **success:** Each of these events reaches a configured webhook.
 - **CAP-15**
   - **intent:** Every agent BMAD supports can be selected: Claude Code, Codex, Gemini, Copilot, and Antigravity (bmad-loop's profiles). Chat covers every agent that speaks ACP; builds cover all of them.
@@ -70,8 +70,11 @@ A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the str
   - **intent:** Each project is a workspace with its own chats, board and runs, and many workspaces can be worked at once. Sessions keep running when the browser closes, and one sidebar shows every session's state across workspaces.
   - **success:** Agents work in two projects at once; the browser is closed and reopened, and both show their live state.
 - **CAP-18**
-  - **intent:** Every installed BMAD skill and module, including ones added after an Ogden Agents release, is usable from the UI without an Ogden Agents code change.
+  - **intent:** In a project with Planning turned on (CAP-19), every installed BMAD skill and module, including ones added after an Ogden Agents release, is usable from the UI without an Ogden Agents code change.
   - **success:** A BMAD module installed after an Ogden Agents release appears in the UI and runs.
+- **CAP-19**
+  - **intent:** Each project chooses whether to use BMad Method and which of its pieces (planning, board, unattended builds, retrospectives). A project without it is a plain multi-agent, multi-chat workspace over the user's agent. New projects start without it unless the user changes the default.
+  - **success:** A new project holds chats with two agents in two chats with nothing written under `_bmad/` and no Plan or Board shown; turning on Planning in its settings sets BMad up and shows Plan, and turning BMad off hides Plan again and leaves every file in the repo.
 
 CAP-11 (cost caps) is retired and its number is not reused.
 
@@ -91,6 +94,7 @@ CAP-11 (cost caps) is retired and its number is not reused.
 - The UI is built with the `design-taste-frontend` skill: modern, and without the look of a generic Claude/AI app.
 - BMAD-METHOD and bmad-loop are forked. Every Ogden Agents change is carried in the forks and also opened as an upstream PR, and a patch is dropped once upstream accepts it.
 - Interactive chat talks to every agent through ACP (Agent Client Protocol), so Ogden Agents needs no chat integration specific to each agent.
+- BMad Method is optional per project. Ogden Agents writes nothing BMad into a repo, and adds no BMad skill or prompt to a session, unless that project turned a BMad piece on. Turning it off never deletes files.
 
 ## Non-goals
 
@@ -107,6 +111,7 @@ CAP-11 (cost caps) is retired and its number is not reused.
 ## Success signal
 
 - A non-developer runs `npx ogden-agents`, picks an agent and signs in with their subscription, describes an app idea in the browser, gets a spec and a ticketed epic, clicks Build, watches stories build in parallel, and approves merges, all without opening a terminal. An advanced user flips to the agent's terminal mid-session and back without losing the session.
+- A user who only wants chats runs several agents in several projects and never sees BMad.
 
 ## Assumptions
 

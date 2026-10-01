@@ -4,6 +4,8 @@ Targets BMAD method v7 (the modules installed here report version 6.13.0-next).
 
 ## Files Ogden Agents reads
 
+For a project with the matching piece on (CAP-19): Ogden Agents reads none of these in a project with every BMad piece off.
+
 | Item | Where | Used for |
 |---|---|---|
 | Ticket tree | `{output_folder}/{active_initiative}/…/tickets.toml` (epic entries: id, prerequisites, verification) | Board, prerequisite ordering (CAP-7, CAP-8) |

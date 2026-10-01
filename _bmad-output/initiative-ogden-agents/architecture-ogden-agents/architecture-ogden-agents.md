@@ -7,8 +7,8 @@ paradigm: 'hexagonal (ports and adapters) with an append-only event log'
 scope: 'Ogden Agents as a whole: launcher, local server, browser UI, agent/tool adapters, and its BMAD-METHOD and bmad-loop forks'
 status: final
 created: '2026-09-29'
-updated: '2026-09-30'
-binds: [CAP-1, CAP-2, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-12, CAP-13, CAP-14, CAP-15, CAP-16, CAP-17, CAP-18]
+updated: '2026-10-01'
+binds: [CAP-1, CAP-2, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-12, CAP-13, CAP-14, CAP-15, CAP-16, CAP-17, CAP-18, CAP-19]
 sources: ['../spec-ogden-agents/spec-ogden-agents.md']
 companions: []
 ---
@@ -63,6 +63,7 @@ graph LR
   - Every session, run and event carries exactly one `workspaceId`.
   - Any number of workspaces may be active at once.
   - The unattended-run concurrency limit applies per workspace and globally, and both are enforced in core.
+  - Note (epic 10, 2026-10-01): a workspace also carries its BMad pieces (AD-22). No rule changes.
 
 ### AD-3 — The server owns agent processes
 
@@ -160,6 +161,7 @@ graph LR
   - Skill names appear only inside the adapters that must invoke a specific skill (`buildrunner-bmad-loop` for `bmad-build-auto`, `tickets-v7` for `tickets.py`).
   - Plain-language labels live in fork metadata.
   - Note (epic 4, 2026-10-01): the `bmad-catalog` adapter may also name the `bmad` setup skill, because it runs that skill's `setup.py` to install BMAD into a project (CAP-2). No rule changes.
+  - Note (epic 10, 2026-10-01): the catalog is built only for workspaces with Planning on (AD-22). AD-1's port list is unchanged: `BmadCatalogPort` gains a read-only `detect` (does the repo already have `_bmad/`). No rule changes.
 
 ### AD-13 — Forks are bundled and locked [ADOPTED]
 
@@ -253,6 +255,20 @@ graph LR
 - **Rule:**
   - Every CLI step a standard flow needs, including installing `uv`, installing or signing into agent CLIs, running BMAD setup, and applying a saved patch, is run by the server and shown in the UI with progress and errors.
   - The terminal toggle (AD-6) is only for advanced users and is never required.
+  - Note (epic 10, 2026-10-01): a project with BMad off needs no `uv`; turning on a piece that needs BMad installed runs setup through the server (epic 4). No rule changes.
+
+### AD-22 — BMad Method is opt-in per workspace
+
+- **Binds:** CAP-2, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-12, CAP-13, CAP-14, CAP-18, CAP-19
+- **Prevents:** each epic inventing its own on/off check, BMad work (scans, watchers, installs, injected skills) leaking into projects that did not choose it, and a guard that lives only in prompts or the UI.
+- **Rule:**
+  - A workspace holds a set of BMad pieces (`planning`, `board`, `builds`, `retrospectives`), stored by core on the workspace row (AD-11) and changed only through a core use-case that emits `workspace.settings_changed`. The piece list, labels and dependency rule live in `packages/shared`.
+  - Every core use-case that serves a piece calls one guard, which refuses with `feature_off`. Every route serving a piece is registered through one helper that applies the guard, and a test fails otherwise. The UI hides what is off but is never the guard.
+  - Adapters for a piece do no work for a workspace with it off: no catalog scan, no ticket watcher, no dispatch, no retrospective. With every piece off, Ogden Agents writes nothing BMad into the repo and adds no BMad skill or text to the workspace's sessions. Files the repo already has, including its own `.claude/skills`, are left alone: Ogden never hides or rewrites them.
+  - Turning a piece off never deletes or edits repo files. Detecting an existing `_bmad/` is read-only, through `BmadCatalogPort`.
+  - The default pieces for new projects are an install-level preference kept by core in the data directory; it starts empty (Simple).
+  - The install reports which pieces it ships; a piece is turned on only when available, and one not yet shipped is shown disabled as coming soon. AD-22 (the user's choice) and AD-14 (the project's installed capabilities) both gate a surface: it shows only when its piece is on, and then shows the reduced-mode notice if a capability is missing.
+  - Developer mode and the terminal toggle (AD-6) are independent of the pieces.
 
 ## Consistency Conventions
 
@@ -265,7 +281,7 @@ graph LR
 | Errors | `{ "error": { "code": "snake_case", "message": "…", "details"?: {} } }`; codes live in `packages/shared` |
 | Adapter naming | `<port>-<variant>`: `acp-claude-code`, `sandbox-seatbelt`, `notify-webhook` |
 | Files | kebab-case; one exported React component per file, except shadcn-style compound components in `packages/web/src/ui` (for example `sidebar.tsx` exporting `Sidebar`, `SidebarGroup`, …), which keep their parts together |
-| Config and data | The OS per-user data directory `ogden-agents/` holds the SQLite database, logs and the encrypted-secrets fallback. Nothing is written to user repos except BMAD's own files and worktrees |
+| Config and data | The OS per-user data directory `ogden-agents/` holds the SQLite database, logs and the encrypted-secrets fallback. Nothing is written to user repos except BMAD's own files (only in projects that turned a BMad piece on, AD-22; note epic 10, 2026-10-01) and worktrees |
 | Logging | Structured JSON lines to the data directory; secrets redacted (AD-16) |
 | Tests | Every ticket ships its tests; UI layout is checked in a real browser with Playwright, since jsdom doesn't evaluate media queries |
 
@@ -355,6 +371,7 @@ Delivery: GitHub Actions runs the tests on macOS, Windows and Linux for every ch
 | CAP-16 sign-in | `acp-*` authenticate, `secrets-keyring` | AD-16, AD-21 |
 | CAP-17 workspaces and status sidebar | core, shared UI patterns | AD-2, AD-3, AD-4, AD-18 |
 | CAP-18 every BMAD skill and module | `bmad-catalog` adapter | AD-12, AD-14 |
+| CAP-19 BMad optional per project | core workspace settings, `bmad-catalog` detect, shared piece list | AD-2, AD-11, AD-22 |
 
 ## Deferred
 

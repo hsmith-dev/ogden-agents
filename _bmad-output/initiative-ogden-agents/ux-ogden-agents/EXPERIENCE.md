@@ -1,6 +1,6 @@
 ---
 status: final
-updated: 2026-09-30
+updated: 2026-10-01
 name: Ogden Agents
 sources:
   - ../spec-ogden-agents/spec-ogden-agents.md
@@ -28,6 +28,7 @@ Ground truths this spine inherits from the architecture and never restates diffe
 - Agents keep running when the browser closes; the UI only attaches and detaches (AD-3, AD-5).
 - No standard flow requires a terminal (AD-21). The terminal toggle is only for developers (AD-6).
 - The product is described as "works with BMad Method" and never uses BMad as its own brand.
+- Projects start simple; BMad is opt-in per project (AD-22, CAP-19; note epic 10, 2026-10-01). A simple project is chats only, with nothing BMad shown or written; each project turns on the BMad pieces it wants (Planning, Board, Unattended builds, Retrospectives).
 
 ## Information Architecture
 
@@ -36,7 +37,7 @@ The shell is always the same: the **status sidebar** on the left, the **workspac
 | Surface | Reached from | Purpose | Route |
 |---|---|---|---|
 | Launch state ("Open Ogden Agents") | Any tab without a tab token: a bookmark, a new tab, after a restart | The app's own not-connected state: tells the user to open Ogden Agents from its shortcut or run `npx ogden-agents` (AD-15, per-tab token). It shows no data. | any route (shown in place) |
-| Welcome (onboarding) | First run after launch | Pick an agent, install it, sign in or paste an API key, add a first project (CAP-16, CAP-2) | `/welcome/*` |
+| Welcome (onboarding) | First run after launch | Pick an agent, install it, sign in or paste an API key, add a first project and answer once "Simple chats or BMad Method?" for it (CAP-16, CAP-19; note epic 10, 2026-10-01) | `/welcome/*` |
 | Status sidebar | Always visible | Every session in every workspace with its state; "Needs you" group on top; workspace switcher and Add project (CAP-17) | shell |
 | Workspace: Chats | Sidebar workspace row, or `g c` | Session list for this project and the session view | `/w/:wsId/s/:sesId` |
 | Session view | Sidebar row, Chats list, run row | Chat or planning transcript with permission cards and composer; build sessions render read-only as the live run view (AD-8) | `/w/:wsId/s/:sesId` |
@@ -46,15 +47,16 @@ The shell is always the same: the **status sidebar** on the left, the **workspac
 | Ticket detail | Ticket card | Side sheet: plan summary, status, prerequisites, runs, Build / Review actions | `/w/:wsId/board/:ref` |
 | Workspace: Runs | Workspace tab, or `g r` | Every build run with outcome; opens the live run view (CAP-9) | `/w/:wsId/runs` |
 | Review | Needs you row, ticket card, run row, notification link | Verification checks, findings, diff, Approve and merge / Reject and retry (CAP-10, CAP-12) | `/w/:wsId/review/:ref` |
-| Workspace settings | Workspace header menu | Caution level, default agent, concurrency limit, history deletion, BMad Method setup status and upgrade | `/w/:wsId/settings` |
+| Workspace settings | Workspace header menu | Caution level, default agent, concurrency limit, history deletion, BMad Method pieces (all four listed; ones not yet built greyed as coming soon; note epic 10, 2026-10-01), BMad Method setup status and upgrade | `/w/:wsId/settings` |
 | Settings: Agents | Sidebar footer menu | Installed agents, sign-in state, API keys, install more (CAP-15, CAP-16) | `/settings/agents` |
 | Settings: Notifications | Sidebar footer menu | Webhook targets and which events send (blocked, ready for review) with a Send test (CAP-14) | `/settings/notifications` |
 | Settings: Appearance | Sidebar footer menu | Theme, density, Developer mode | `/settings/appearance` |
+| Settings: New projects | Sidebar footer menu | The app-wide default for new projects: Simple (default) or BMad Method with chosen pieces (CAP-19; note epic 10, 2026-10-01) | `/settings` section |
 | Command palette | `⌘K` / `Ctrl+K` | Jump to any workspace, session, ticket or action | overlay |
 
 Navigation rules:
 
-- Workspace tabs, in this order: **Chats**, **Plan**, **Board**, **Runs**. Review is not a tab; it is reached from what needs reviewing.
+- Workspace tabs, in this order: **Chats**, **Plan**, **Board**, **Runs**. Review is not a tab; it is reached from what needs reviewing. Chats is always shown; Plan, Board and Runs appear only when their BMad piece is on (note epic 10, 2026-10-01).
 - The sidebar footer holds Settings, the server status ("Running on this computer"), and **Quit Ogden Agents** (AD-3).
 - Modals stack one level deep. Ticket detail is a sheet, not a dialog, so it never stacks under a confirmation.
 
@@ -118,7 +120,7 @@ Behavioral. Visual specs live in `DESIGN.md` Components.
 | Sign-in in progress | Welcome | "Finish signing in in the tab that just opened." Returns automatically when the agent reports signed in. Cancel available. |
 | Sign-in expired | Session view, Settings | Session goes to `error`; notice "Claude Code needs you to sign in again." with **Sign in**. Session resumes after. |
 | No workspaces | Workspace area | `display`: "Add a project to get started." **Add project** (pick a folder) and **Start a new project folder**. |
-| Workspace without BMad Method | Plan, Board | "Set up BMad Method in this project to plan and build here." **Set up** runs setup with progress. Chats still work. |
+| Workspace without BMad Method | Workspace header, Workspace settings | Plan and Board tabs are absent; Workspace settings offers the pieces. Turning on a piece in a repo without `_bmad/` runs setup with progress. Chats work as always (note epic 10, 2026-10-01). |
 | Reduced mode | Plan, Board | Reduced-mode notice (Component Patterns). |
 | Empty chats | Chats | "No conversations yet." Composer focused, agent picker visible. No suggestion chip grid. |
 | Session `working` | Sidebar, session header | Working glyph breathing; header shows the latest activity line ("Editing src/booking.ts"). |
@@ -205,7 +207,7 @@ Rosa wants students to book wheel-throwing classes and pay a deposit online. She
 1. Rosa pastes `npx ogden-agents` into Terminal, the one allowed CLI step. Her browser opens to Welcome.
 2. `display`: "Pick the agent that will do the work." Claude Code shows "Not installed". She clicks **Install**; progress streams under the card.
 3. She clicks **Sign in with your account**. Claude's login opens in a new tab; she signs in with her subscription and the Welcome tab moves on by itself.
-4. "Add a project to get started." She has no folder, so she clicks **Start a new project folder**, names it `clay-and-kiln`. [ASSUMPTION: create-folder path] **Set up BMad Method in this project** runs with a progress list and finishes with "Ready to plan."
+4. "Add a project to get started." She has no folder, so she clicks **Start a new project folder**, names it `clay-and-kiln`. [ASSUMPTION: create-folder path] Welcome asks once, "Simple chats or BMad Method?"; she picks **BMad Method**, and setting it up runs with a progress list and finishes with "Ready to plan." (Note epic 10, 2026-10-01: had she picked Simple chats, the project would open as chats, and she could turn on Planning later in the project's settings.)
 5. The workspace opens on Plan. She types into "Start from an idea": "A booking page for my pottery classes where students pick a date and pay a 20 dollar deposit." The planning session starts.
 6. Claude Code asks her three questions in plain language; she answers in chat. Mid-way, a permission card appears: "Claude Code wants to create a file: `_bmad-output/.../spec-clay-and-kiln.md`". The caption says "Clay and kiln, Ask every time". She clicks **Allow once**. The card collapses to "Allowed once: create spec file".
 7. A document card appears: "Spec: Clay and Kiln bookings" with **Open**, and a button "Turn this spec into tickets". She clicks it. The Board tab lights with one epic and four stories; two are Ready, two show "Waits for 1.1".

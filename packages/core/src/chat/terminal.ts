@@ -10,8 +10,13 @@
  * each one's wait is bounded. Each ends at `driver = ui` (idle, resumable)
  * or at `driver = terminal` with a live CLI, and every path that ends a CLI
  * kills its whole tree, even once the CLI itself has exited.
+ *
+ * Story 3.5: a terminal has several viewers, each with its own size; the
+ * terminal takes the size of whichever viewer last resized or typed, and the
+ * others are told. A viewer that detaches leaves the terminal running, with or
+ * without viewers, until it is switched back or the server stops.
  */
-import type { Session, SessionId } from '@ogden-agents/shared';
+import { MAX_TERMINAL_COLS, MAX_TERMINAL_ROWS, type Session, type SessionId } from '@ogden-agents/shared';
 import { AgentError, type AgentTerminalResume, type AgentTranscriptTurn } from '../agent-port.js';
 import { InvalidOperationError, SessionNotIdleError, TerminalHandoffError, TerminalImportError, TerminalUnavailableError } from '../errors.js';
 import { omittedNote, START_MARK, turnsToImport } from '../terminal-import.js';
@@ -31,7 +36,7 @@ import {
   terminalClosedNote,
 } from './constants.js';
 import type { ChatContext } from './context.js';
-import type { Chat, Terminal, Timer } from './types.js';
+import type { Chat, Terminal, TerminalSize, TerminalViewerEntry, Timer } from './types.js';
 
 export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgent' | 'storedAgentSessionId'>) {
   const { options, entities, sessionEvents, agent, agentEnv, busy, running, terminals, switching, internalError, later, newMessageId, getWorkspace, getSession } = ctx;
@@ -263,6 +268,8 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     const entry: Terminal = {
       process: cli,
       backlog: '',
+      size: { cols: TERMINAL_COLS, rows: TERMINAL_ROWS },
+      viewers: new Set(),
       data: new Set(),
       end: new Set(),
       ended: false,
@@ -458,6 +465,31 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     }
   };
 
+  const sameSize = (a: TerminalSize, b: TerminalSize) => a.cols === b.cols && a.rows === b.rows;
+
+  /** A size within `1..MAX_TERMINAL_COLS` × `1..MAX_TERMINAL_ROWS` (the schema checks it too), or `undefined` for a non-finite one. */
+  const clampSize = (cols: number, rows: number): TerminalSize | undefined => {
+    if (!Number.isFinite(cols) || !Number.isFinite(rows)) return undefined;
+    const clamp = (value: number, max: number) => Math.min(max, Math.max(1, Math.round(value)));
+    return { cols: clamp(cols, MAX_TERMINAL_COLS), rows: clamp(rows, MAX_TERMINAL_ROWS) };
+  };
+
+  /** Gives the terminal `size` and tells its viewers, all but `except`. */
+  const applySize = (sessionId: SessionId, terminal: Terminal, size: TerminalSize, except: TerminalViewerEntry | undefined) => {
+    terminal.process.resize(size.cols, size.rows);
+    terminal.size = { ...size };
+    for (const viewer of [...terminal.viewers]) {
+      if (viewer === except) continue;
+      for (const listener of [...viewer.sized]) {
+        try {
+          listener({ ...size });
+        } catch (error) {
+          internalError(sessionId, error);
+        }
+      }
+    }
+  };
+
   const methods: Pick<Chat, 'switchDriver' | 'attachTerminal'> = {
     async switchDriver(workspaceId, sessionId, driver) {
       if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
@@ -470,18 +502,52 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     attachTerminal(sessionId) {
       const terminal = terminals.get(sessionId);
       if (terminal === undefined || terminal.ended) return undefined;
+      const self: TerminalViewerEntry = { size: undefined, sized: new Set() };
+      terminal.viewers.add(self);
+      const subscriptions = new Set<() => void>();
+      let detached = false;
+      /** Adds `listener` to `set` until it is unsubscribed or the viewer detaches. */
+      const hold = <T>(set: Set<T>, listener: T): (() => void) => {
+        if (detached) return () => undefined;
+        set.add(listener);
+        const off = () => {
+          set.delete(listener);
+          subscriptions.delete(off);
+        };
+        subscriptions.add(off);
+        return off;
+      };
       return {
-        backlog: terminal.backlog,
-        onData(listener) {
-          terminal.data.add(listener);
-          return () => void terminal.data.delete(listener);
+        get backlog() {
+          return terminal.backlog;
         },
-        onEnd(listener) {
-          terminal.end.add(listener);
-          return () => void terminal.end.delete(listener);
+        get size() {
+          return { ...terminal.size };
         },
-        write: (data) => terminal.process.write(data),
-        resize: (cols, rows) => terminal.process.resize(cols, rows),
+        onData: (listener) => hold(terminal.data, listener),
+        onEnd: (listener) => hold(terminal.end, listener),
+        onSize: (listener) => hold(self.sized, listener),
+        write(data) {
+          if (detached || terminal.ended) return;
+          // Whoever types last sets the size (epic decision): every viewer is told, the typer's own screen may have followed another's.
+          if (self.size !== undefined && !sameSize(self.size, terminal.size)) applySize(sessionId, terminal, self.size, undefined);
+          terminal.process.write(data);
+        },
+        resize(cols, rows) {
+          if (detached || terminal.ended) return;
+          const size = clampSize(cols, rows);
+          if (size === undefined) return;
+          self.size = size;
+          // The resizer is already at its size: only the others are told.
+          if (!sameSize(size, terminal.size)) applySize(sessionId, terminal, size, self);
+        },
+        detach() {
+          if (detached) return;
+          detached = true;
+          for (const off of [...subscriptions]) off();
+          self.sized.clear();
+          terminal.viewers.delete(self);
+        },
       };
     },
   };

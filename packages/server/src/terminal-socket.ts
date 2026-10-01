@@ -5,20 +5,29 @@
  * Origin; AD-15), and the server echoes only `ogden.v1`.
  *
  * - Binary frames are bytes: from the client they are typed into the
- *   terminal, from the server they are what it printed. A new viewer first
- *   gets the recent output core kept.
+ *   terminal, from the server they are what it printed.
  * - Text frames are JSON control frames: `attach` (the viewer's first, with
  *   its size) and `resize` in; `exit` out (then the socket closes,
- *   {@link TERMINAL_CLOSE}.ended) and `size` (another viewer resized; story
- *   3.5 sends it). Story 3.2's stub takes `attach` as a resize; story 3.5
- *   orders reattaching around it. A frame that fails its schema is ignored.
+ *   {@link TERMINAL_CLOSE}.ended) and `size` (the terminal took another
+ *   viewer's size). A frame that fails its schema is ignored.
+ * - Attaching (story 3.5): on `attach` the terminal takes the viewer's size
+ *   (the other viewers get `size`), then the viewer gets the recent output
+ *   core kept, then the live output. A viewer that sends no `attach` within
+ *   {@link ATTACH_WAIT_MS} is attached at the terminal's current size (and
+ *   told it). Bytes and `resize` before attaching are ignored.
+ * - Several viewers (story 3.5): each sees all the output and may type; the
+ *   terminal's size follows whichever viewer last resized or typed.
+ * - Each viewer's typing is rate limited ({@link INPUT_BURST_BYTES}, refilled
+ *   at {@link INPUT_BYTES_PER_SECOND}; 3.1 review F4): a viewer over it is
+ *   closed (1008, `rate_limited`); the terminal and its other viewers go on.
  * - An unknown session, or one the terminal does not drive, is closed at
  *   once ({@link TERMINAL_CLOSE}.notTerminal). A frame over its size limit
  *   closes the socket (1009); so does the server's `maxPayload` before a
  *   larger one is buffered. A viewer more than {@link MAX_VIEWER_BUFFERED_BYTES}
  *   behind is closed ({@link TERMINAL_CLOSE}.slowViewer) and reattaches.
- * - Closing the socket never stops the terminal: the server owns it until
- *   the session switches back or the server stops.
+ * - Closing the socket only detaches that viewer: the server owns the
+ *   terminal until the session switches back or the server stops, with or
+ *   without viewers.
  *
  * Nothing here logs, events or stores a frame's contents (AD-16): only that
  * a viewer came or went, and why a frame was refused.
@@ -51,14 +60,46 @@ const TOO_BIG = 1009;
  */
 export const MAX_VIEWER_BUFFERED_BYTES = 1024 * 1024;
 
+/** The standard close code for a policy violation: here, typing faster than {@link INPUT_BYTES_PER_SECOND}. */
+const POLICY = 1008;
+/** How long a new viewer has to send `attach` before it is attached at the terminal's current size (story 3.5). */
+export const ATTACH_WAIT_MS = 5_000;
+/** How much a viewer may type at once (a long paste) before its rate applies (story 3.5; 3.1 review F4). */
+export const INPUT_BURST_BYTES = 4 * 1024 * 1024;
+/** How fast a viewer's typing allowance refills. */
+export const INPUT_BYTES_PER_SECOND = 1024 * 1024;
+
 export interface TerminalSocketOptions {
   chat: Chat;
   log: Logger;
   /** The tab tokens the gate checks: an open terminal socket holds its tab's token, as `/ws` does. */
   tabs?: TabTokens | undefined;
+  /** The clock of the typing rate limit, in milliseconds (tests). Default `Date.now`. */
+  now?: () => number;
+  /** How long a viewer has to send `attach` (tests). Default {@link ATTACH_WAIT_MS}. */
+  attachWaitMs?: number;
 }
 
-export function registerTerminalSocket(app: Hono, { chat, log, tabs }: TerminalSocketOptions): void {
+/**
+ * A token bucket of `burst` bytes refilled at `perSecond` (story 3.5): `take`
+ * says whether `bytes` more fit, and spends them if they do.
+ */
+export function createInputBudget(burst: number, perSecond: number, now: () => number = Date.now) {
+  let tokens = burst;
+  let last = now();
+  return {
+    take(bytes: number): boolean {
+      const time = now();
+      tokens = Math.min(burst, tokens + (Math.max(0, time - last) * perSecond) / 1000);
+      last = time;
+      if (bytes > tokens) return false;
+      tokens -= bytes;
+      return true;
+    },
+  };
+}
+
+export function registerTerminalSocket(app: Hono, { chat, log, tabs, now = Date.now, attachWaitMs = ATTACH_WAIT_MS }: TerminalSocketOptions): void {
   app.get(
     TERMINAL_SOCKET_ROUTE,
     upgradeWebSocket((c) => {
@@ -68,11 +109,17 @@ export function registerTerminalSocket(app: Hono, { chat, log, tabs }: TerminalS
       const token = webSocketToken(c.req.header('sec-websocket-protocol'));
       let release: (() => void) | undefined;
       let viewer: TerminalViewer | undefined;
-      const unsubscribe: Array<() => void> = [];
+      /** Whether the viewer has attached (`attach`, or the wait ran out): until then, nothing is sent or typed. */
+      let attached = false;
+      let attachTimer: ReturnType<typeof setTimeout> | undefined;
+      const budget = createInputBudget(INPUT_BURST_BYTES, INPUT_BYTES_PER_SECOND, now);
       let closed = false;
+      /** Detaches only this viewer: the terminal runs on. */
       const end = () => {
         closed = true;
-        for (const off of unsubscribe.splice(0)) off();
+        clearTimeout(attachTimer);
+        attachTimer = undefined;
+        viewer?.detach();
         viewer = undefined;
         release?.();
         release = undefined;
@@ -110,8 +157,12 @@ export function registerTerminalSocket(app: Hono, { chat, log, tabs }: TerminalS
             log.warn('ignoring a terminal control frame that fails the shared schema', { sessionId });
             return;
           }
-          // `attach` and `resize` both size the terminal for now (story 3.2; 3.5 owns attaching).
-          target.resize(frame.data.cols, frame.data.rows);
+          if (frame.data.type === 'attach' && !attached) {
+            attach(ws, target, frame.data);
+            return;
+          }
+          // A second `attach` is a resize; a `resize` before attaching is ignored.
+          if (attached) target.resize(frame.data.cols, frame.data.rows);
           return;
         }
         const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : undefined;
@@ -121,7 +172,55 @@ export function registerTerminalSocket(app: Hono, { chat, log, tabs }: TerminalS
           close(ws, TOO_BIG, 'too_large');
           return;
         }
+        // Counted before attaching too, though ignored then: a flood is a flood.
+        if (!budget.take(bytes.byteLength)) {
+          // Only how much: never what.
+          log.warn('terminal viewer typed too fast; closing it', { sessionId, bytes: bytes.byteLength });
+          close(ws, POLICY, 'rate_limited');
+          return;
+        }
+        if (!attached) return;
         target.write(decoder.decode(bytes, { stream: true }));
+      };
+
+      /**
+       * Attaches the viewer: the terminal takes its size (the other viewers
+       * are told), or, with none, it is told the terminal's; then the recent
+       * output, then the live output, read and subscribed in one tick.
+       */
+      const attach = (ws: WSContext, target: TerminalViewer, size: { cols: number; rows: number } | undefined) => {
+        attached = true;
+        clearTimeout(attachTimer);
+        attachTimer = undefined;
+        log.info('terminal viewer attached', { sessionId, waited: size === undefined });
+        const sendBytes = (data: string) => {
+          if (closed || ws.readyState !== WS_OPEN) return;
+          ws.send(encoder.encode(data));
+          const buffered = (ws.raw as { bufferedAmount?: number } | undefined)?.bufferedAmount ?? 0;
+          if (buffered > MAX_VIEWER_BUFFERED_BYTES) {
+            log.warn('terminal viewer fell behind; closing it', { sessionId });
+            close(ws, TERMINAL_CLOSE.slowViewer, 'slow_viewer');
+          }
+        };
+        const sendSize = (cols: number, rows: number) => {
+          if (closed || ws.readyState !== WS_OPEN) return;
+          ws.send(JSON.stringify(TerminalServerFrame.parse({ type: 'size', cols, rows })));
+        };
+        if (size === undefined) {
+          const current = target.size;
+          sendSize(current.cols, current.rows);
+        } else {
+          try {
+            target.resize(size.cols, size.rows);
+          } catch (error) {
+            // It still gets the output, at whatever size the terminal has.
+            log.warn('the terminal could not be resized', { sessionId, error: error instanceof Error ? error.name : 'unknown' });
+          }
+        }
+        target.onSize(({ cols, rows }) => sendSize(cols, rows));
+        const backlog = target.backlog;
+        if (backlog !== '') sendBytes(backlog);
+        target.onData(sendBytes);
       };
 
       return {
@@ -132,25 +231,17 @@ export function registerTerminalSocket(app: Hono, { chat, log, tabs }: TerminalS
             close(ws, TERMINAL_CLOSE.notTerminal, 'not_terminal');
             return;
           }
-          log.info('terminal viewer attached', { sessionId });
-          const sendBytes = (data: string) => {
-            if (closed || ws.readyState !== WS_OPEN) return;
-            ws.send(encoder.encode(data));
-            const buffered = (ws.raw as { bufferedAmount?: number } | undefined)?.bufferedAmount ?? 0;
-            if (buffered > MAX_VIEWER_BUFFERED_BYTES) {
-              log.warn('terminal viewer fell behind; closing it', { sessionId });
-              close(ws, TERMINAL_CLOSE.slowViewer, 'slow_viewer');
-            }
-          };
-          if (viewer.backlog !== '') sendBytes(viewer.backlog);
-          unsubscribe.push(viewer.onData(sendBytes));
-          unsubscribe.push(
-            viewer.onEnd(({ exitCode }) => {
-              const frame = TerminalServerFrame.parse({ type: 'exit', exitCode });
-              if (ws.readyState === WS_OPEN) ws.send(JSON.stringify(frame));
-              close(ws, TERMINAL_CLOSE.ended, 'ended');
-            }),
-          );
+          // Told even before attaching: the terminal can end first.
+          viewer.onEnd(({ exitCode }) => {
+            const frame = TerminalServerFrame.parse({ type: 'exit', exitCode });
+            if (ws.readyState === WS_OPEN) ws.send(JSON.stringify(frame));
+            close(ws, TERMINAL_CLOSE.ended, 'ended');
+          });
+          const target = viewer;
+          attachTimer = setTimeout(() => {
+            attachTimer = undefined;
+            if (!closed && !attached) attach(ws, target, undefined);
+          }, attachWaitMs);
         },
 
         onMessage(event, ws) {

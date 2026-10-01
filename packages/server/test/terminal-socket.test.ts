@@ -8,8 +8,10 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadPty, projectSlug, stripTerminalEscapes } from '@ogden-agents/adapters';
-import { AGENT_SESSION_REF, createChat, openCore } from '@ogden-agents/core';
+import type { AddressInfo } from 'node:net';
+import { createAdaptorServer } from '@hono/node-server';
+import { createMemoryTerminalPort, loadPty, projectSlug, stripTerminalEscapes } from '@ogden-agents/adapters';
+import { AGENT_SESSION_REF, createChat, openCore, type AgentEvent, type AgentPort, type AgentSession } from '@ogden-agents/core';
 import { Hono } from 'hono';
 import {
   API_ROUTES,
@@ -23,11 +25,12 @@ import {
   type CoreEvent,
   type SessionId,
 } from '@ogden-agents/shared';
-import { afterEach, describe, expect, it } from 'vitest';
-import WebSocket from 'ws';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import WebSocket, { WebSocketServer } from 'ws';
 import { MAX_WS_PAYLOAD_BYTES, type StartOptions } from '../src/start.js';
 import { registerChatRoutes, TERMINAL_CHECK_FAILED } from '../src/chat-routes.js';
 import { createLogger, LOG_DIR } from '../src/log.js';
+import { ATTACH_WAIT_MS, createInputBudget, INPUT_BURST_BYTES, INPUT_BYTES_PER_SECOND, registerTerminalSocket } from '../src/terminal-socket.js';
 import { signIn, startTestServer, tempDataDir, trackSocket, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
 const FIXTURES = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures');
@@ -38,9 +41,13 @@ const WINDOWS_RESIZE = 'ConPTY resize not applied under node-pty 1.1.0 — inves
 
 const dirs: string[] = [];
 const servers: TestServer[] = [];
+/** The in-memory socket servers' own stops. */
+const stops: Array<() => Promise<void>> = [];
 // Servers first (closing one stops its agents and terminals), then the folders they ran in.
 afterEach(async () => {
+  vi.useRealTimers();
   await Promise.all(servers.splice(0).map((server) => server.close()));
+  await Promise.all(stops.splice(0).map((stop) => stop()));
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 });
 
@@ -114,9 +121,17 @@ const getSession = async (server: TestServer, tab: SignedIn, ids: { wsId: string
 const switchTo = (server: TestServer, tab: SignedIn, ids: { wsId: string; sesId: string }, driver: 'ui' | 'terminal') =>
   post(server, tab, apiPath(API_ROUTES.sessionDriver, ids), { driver });
 
-/** A terminal viewer: the text of every binary frame, the control frames, and how it closed. */
-function openTerminal(server: TestServer, tab: SignedIn, sessionId: string) {
-  const ws = trackSocket(new WebSocket(`ws://127.0.0.1:${server.port}/ws/terminal/${sessionId}`, tab.protocols, { headers: { origin: tab.origin } }));
+/**
+ * A terminal viewer: the text of every binary frame, the control frames, and
+ * how it closed. Like the web client, its first frame is `attach` with
+ * `attach`'s size (story 3.5), unless `attach` is `false`.
+ */
+function openTerminal(server: TestServer, tab: SignedIn, sessionId: string, attach: { cols: number; rows: number } | false = { cols: 80, rows: 24 }) {
+  return viewerOn(`ws://127.0.0.1:${server.port}/ws/terminal/${sessionId}`, tab, attach);
+}
+
+function viewerOn(url: string, tab: Pick<SignedIn, 'protocols' | 'origin'> | undefined, attach: { cols: number; rows: number } | false) {
+  const ws = trackSocket(new WebSocket(url, tab?.protocols ?? [], tab === undefined ? {} : { headers: { origin: tab.origin } }));
   const state = {
     raw: '',
     /** What the screen shows: ConPTY (Windows) repaints with escape sequences between the CLI's tokens. */
@@ -137,11 +152,18 @@ function openTerminal(server: TestServer, tab: SignedIn, sessionId: string) {
   const opened = new Promise<void>((resolve, reject) => {
     ws.once('open', () => {
       state.protocol = ws.protocol;
+      if (attach !== false) ws.send(JSON.stringify({ type: 'attach', ...attach }));
       resolve();
     });
     ws.once('unexpected-response', (_req, res) => reject(new Error(`upgrade refused: ${res.statusCode}`)));
   });
-  return { ws, state, opened, type: (text: string) => ws.send(Buffer.from(text, 'utf8'), { binary: true }) };
+  return {
+    ws,
+    state,
+    opened,
+    type: (text: string) => ws.send(Buffer.from(text, 'utf8'), { binary: true }),
+    control: (frame: unknown) => ws.send(JSON.stringify(frame)),
+  };
 }
 
 /** The session's events after `seq`: completed messages as `[role, content, origin]`, others by type. */
@@ -435,32 +457,94 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     }
   }, 90_000);
 
-  it.skipIf(process.platform === 'win32')(`a resize frame resizes the terminal (skipped on Windows: ${WINDOWS_RESIZE})`, async () => {
+  it.skipIf(process.platform === 'win32')(`attach sizes the terminal before anything is sent; nothing typed before it counts; resize frames resize it (skipped on Windows: ${WINDOWS_RESIZE})`, async () => {
     const { server, tab, recorded } = await startTerminalServer();
     const { ids, sessionId } = await answeredChat(server, tab);
     expect((await switchTo(server, tab, ids, 'terminal')).status).toBe(200);
     await waitFor(recorded, 'the CLI to start', 10_000);
-    const viewer = openTerminal(server, tab, sessionId);
+    const viewer = openTerminal(server, tab, sessionId, false);
     await viewer.opened;
-    await waitFor(() => viewer.state.output.includes('ready>'), 'the prompt', 10_000);
-    // Story 3.2's stub takes the attach frame as a resize.
-    viewer.ws.send(JSON.stringify({ type: 'attach', cols: 102, rows: 32 }));
+    // Before `attach` (story 3.5): no output is sent, and bytes and resizes are ignored.
+    viewer.type('before-attach\r');
+    viewer.control({ type: 'resize', cols: 60, rows: 15 });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(viewer.state.raw).toBe('');
+    viewer.control({ type: 'attach', cols: 102, rows: 32 });
+    await waitFor(() => viewer.state.output.includes('ready>'), 'the recent output', 10_000);
     await waitFor(() => viewer.state.output.includes('resized=102x32'), 'the attach size to reach the CLI', 10_000);
-    viewer.ws.send(JSON.stringify({ type: 'resize', cols: 101, rows: 31 }));
+    viewer.control({ type: 'resize', cols: 101, rows: 31 });
     // A resize can apply after input already on its way: ask until it shows.
     for (let tries = 0; tries < 20 && !viewer.state.output.includes('size=101x31'); tries++) {
       viewer.type('size\r');
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     expect(viewer.state.output).toContain('size=101x31');
+    expect(viewer.state.output).not.toContain('before-attach');
+    expect(viewer.state.output).not.toContain('60x15');
     // A malformed attach is ignored: the socket stays open and the size stays.
     const asked = (output: string) => output.split('\nsize=101x31').length - 1;
     const before = asked(viewer.state.output);
-    viewer.ws.send(JSON.stringify({ type: 'attach', cols: 0, rows: 32 }));
+    viewer.control({ type: 'attach', cols: 0, rows: 32 });
     viewer.type('size\r');
     await waitFor(() => asked(viewer.state.output) > before, 'the size asked again', 10_000);
     expect(viewer.state.closed).toBeUndefined();
+    // The one viewer was never told a size: it set every one.
+    expect(viewer.state.frames).toEqual([]);
   }, 60_000);
+
+  it.skipIf(process.platform === 'win32')(`two viewers of one CLI: each types and resizes, both see all the output, the size follows the last; nothing typed is evented, stored or logged (story 3.5; skipped on Windows: ${WINDOWS_RESIZE})`, async () => {
+    const lines: string[] = [];
+    const { server, tab, recorded } = await startTerminalServer({ lines });
+    const { ids, sessionId } = await answeredChat(server, tab);
+    expect((await switchTo(server, tab, ids, 'terminal')).status).toBe(200);
+    await waitFor(recorded, 'the CLI to start', 10_000);
+    const sizeFrames = (viewer: ReturnType<typeof openTerminal>) => viewer.state.frames.filter((frame) => (frame as { type: string }).type === 'size');
+    const a = openTerminal(server, tab, sessionId, { cols: 100, rows: 30 });
+    await a.opened;
+    await waitFor(() => a.state.output.includes('ready>'), 'the prompt', 10_000);
+    const b = openTerminal(server, tab, sessionId, { cols: 90, rows: 20 });
+    await b.opened;
+    // B gets the recent output; A is told the terminal took B's size.
+    await waitFor(() => b.state.output.includes('ready>'), 'the recent output', 10_000);
+    await waitFor(() => sizeFrames(a).length === 1, 'A to be told the size', 10_000);
+    expect(sizeFrames(a)).toEqual([{ type: 'size', cols: 90, rows: 20 }]);
+
+    // A types: the terminal takes A's size again and both are told; both see the echo.
+    const eventsBefore = server.core.events.lastSeq();
+    a.type(`${MARKER}-a\r`);
+    await waitFor(() => a.state.output.includes(`echo:${MARKER}-a`) && b.state.output.includes(`echo:${MARKER}-a`), 'both to see A’s echo', 10_000);
+    await waitFor(() => sizeFrames(b).length === 1, 'B to be told A’s size', 10_000);
+    expect(sizeFrames(b)).toEqual([{ type: 'size', cols: 100, rows: 30 }]);
+    expect(sizeFrames(a).at(-1)).toEqual({ type: 'size', cols: 100, rows: 30 });
+
+    // B types: B's size.
+    b.type(`${MARKER}-b\r`);
+    await waitFor(() => a.state.output.includes(`echo:${MARKER}-b`) && b.state.output.includes(`echo:${MARKER}-b`), 'both to see B’s echo', 10_000);
+    b.type('size\r');
+    await waitFor(() => a.state.output.includes('size=90x20') && b.state.output.includes('size=90x20'), 'B’s size to reach the CLI', 10_000);
+
+    // A resizes: B is told, A is not; the CLI has A's new size.
+    const aFrames = sizeFrames(a).length;
+    a.control({ type: 'resize', cols: 110, rows: 35 });
+    await waitFor(() => sizeFrames(b).at(-1) !== undefined && JSON.stringify(sizeFrames(b).at(-1)) === JSON.stringify({ type: 'size', cols: 110, rows: 35 }), 'B to be told A’s resize', 10_000);
+    expect(sizeFrames(a).length).toBe(aFrames);
+    for (let tries = 0; tries < 20 && !b.state.output.includes('size=110x35'); tries++) {
+      a.type('size\r');
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    expect(b.state.output).toContain('size=110x35');
+
+    // While the terminal drives, what was typed is in no event, no file of the data folder and no log line (AD-16).
+    expect(JSON.stringify(server.core.events.readAfter(eventsBefore))).not.toContain(MARKER);
+    for (const file of filesUnder(server.dataDir)) expect(readFileSync(file).includes(MARKER), file).toBe(false);
+    expect(lines.join('\n')).not.toContain(MARKER);
+    expect(a.state.closed).toBeUndefined();
+    expect(b.state.closed).toBeUndefined();
+    await server.close();
+    expect(lines.join('\n')).not.toContain(MARKER);
+    const logs = join(server.dataDir, LOG_DIR);
+    for (const file of existsSync(logs) ? filesUnder(logs) : []) expect(readFileSync(file).includes(MARKER), file).toBe(false);
+  }, 90_000);
 
   it('a CLI that exits by itself gives the chat back and tells the viewer its exit code', async () => {
     const { server, tab } = await startTerminalServer();
@@ -581,4 +665,215 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     // The terminal itself runs on.
     expect(server.core.entities.getSession(sessionId)!.driver).toBe('terminal');
   }, 60_000);
+});
+
+/** A Claude-Code-like agent that answers at once and whose sessions resume in its CLI (for the in-memory terminal). */
+function resumingAgent(): AgentPort {
+  let sessions = 0;
+  const open = (agentSessionId: string): AgentSession => {
+    const listeners = new Set<(event: AgentEvent) => void>();
+    return {
+      agentSessionId,
+      onEvent(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      async prompt(text) {
+        for (const listener of [...listeners]) listener({ type: 'message_chunk', text: `re: ${text}` });
+        return { stopReason: 'end_turn' };
+      },
+      async cancel() {},
+      async close() {},
+    };
+  };
+  return {
+    displayName: 'Claude Code',
+    listAuthMethods: async () => [],
+    startSession: async () => open(`agent-${++sessions}`),
+    reopenSession: async (input) => ({ session: open(input.agentSessionId), restored: 'resumed' }),
+    terminalResume: {
+      command: async (id, env) => ({ file: 'claude', args: ['--resume', id], env: { ...env } }),
+      locate: async () => ({ found: true }),
+    },
+  };
+}
+
+/**
+ * The terminal socket alone (story 3.5), on a real chat whose terminal is
+ * `terminal-memory` (no echo: what is typed is only recorded): no PTY, so
+ * these run everywhere. The gate is not in front of it (gate.test.ts and
+ * the tests above check the upgrade); the in-memory socket offers no token.
+ */
+async function socketOnMemoryTerminal(options: { now?: () => number; attachWaitMs?: number } = {}) {
+  const core = openCore(tempDataDir());
+  const terminal = createMemoryTerminalPort({ echo: false });
+  const chat = createChat({ dataDir: tempDataDir(), entities: core.entities, sessionEvents: core.sessionEvents, agent: resumingAgent(), terminal });
+  const workspace = chat.openWorkspace(tempDir('ogden-agents-repo-'));
+  const session = chat.createChatSession(workspace.id);
+  chat.sendMessage(workspace.id, session.id, 'first question');
+  await chat.settled();
+  expect((await chat.switchDriver(workspace.id, session.id, 'terminal')).driver).toBe('terminal');
+  const lines: string[] = [];
+  const app = new Hono();
+  registerTerminalSocket(app, { chat, log: createLogger((line) => void lines.push(line)), ...options });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_PAYLOAD_BYTES });
+  const http = createAdaptorServer({ fetch: app.fetch, websocket: { server: wss } });
+  await new Promise<void>((resolve) => http.listen(0, '127.0.0.1', resolve));
+  const { port } = http.address() as AddressInfo;
+  stops.push(async () => {
+    for (const client of wss.clients) client.terminate();
+    wss.close();
+    await new Promise<void>((resolve) => http.close(() => resolve()));
+    await chat.close();
+    core.close();
+  });
+  return {
+    chat,
+    core,
+    workspace,
+    session,
+    cli: terminal.opened[0]!,
+    lines,
+    open: (attach: { cols: number; rows: number } | false = { cols: 80, rows: 24 }) => viewerOn(`ws://127.0.0.1:${port}/ws/terminal/${session.id}`, undefined, attach),
+  };
+}
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+describe('the terminal socket: attach, several viewers, the typing limit (story 3.5, in-memory terminal)', () => {
+  it('sends the recent output only after attach, ignores bytes and resizes before it, and tells the other viewers the new size', async () => {
+    const { cli, open } = await socketOnMemoryTerminal();
+    cli.print('earlier output\r\n');
+    const a = open({ cols: 100, rows: 30 });
+    await a.opened;
+    await waitFor(() => a.state.output === 'earlier output\r\n', 'A’s recent output');
+    expect(cli.resizes).toEqual([{ cols: 100, rows: 30 }]);
+
+    const b = open(false);
+    await b.opened;
+    b.type('too early');
+    b.control({ type: 'resize', cols: 50, rows: 10 });
+    await pause(200);
+    expect(b.state.raw).toBe('');
+    expect(cli.writes).toEqual([]);
+    expect(cli.resizes).toHaveLength(1);
+
+    b.control({ type: 'attach', cols: 90, rows: 20 });
+    await waitFor(() => b.state.output === 'earlier output\r\n', 'B’s recent output');
+    await waitFor(() => a.state.frames.length === 1, 'A to be told the size');
+    expect(a.state.frames).toEqual([{ type: 'size', cols: 90, rows: 20 }]);
+    expect(b.state.frames).toEqual([]);
+    expect(cli.resizes.at(-1)).toEqual({ cols: 90, rows: 20 });
+
+    cli.print('live');
+    await waitFor(() => a.state.output.endsWith('live') && b.state.output.endsWith('live'), 'both to see live output');
+
+    // A resizes: B is told, A is not. Then B types: B's size again, and both are told.
+    a.control({ type: 'resize', cols: 110, rows: 35 });
+    await waitFor(() => b.state.frames.length === 1, 'B to be told A’s resize');
+    expect(b.state.frames).toEqual([{ type: 'size', cols: 110, rows: 35 }]);
+    b.type('hi');
+    await waitFor(() => cli.writes.join('') === 'hi', 'B’s typing');
+    expect(cli.resizes.at(-1)).toEqual({ cols: 90, rows: 20 });
+    await waitFor(() => a.state.frames.length === 2 && b.state.frames.length === 2, 'both to be told B’s size');
+    expect(a.state.frames.at(-1)).toEqual({ type: 'size', cols: 90, rows: 20 });
+    expect(b.state.frames.at(-1)).toEqual({ type: 'size', cols: 90, rows: 20 });
+    // A second attach is a resize.
+    b.control({ type: 'attach', cols: 91, rows: 21 });
+    await waitFor(() => a.state.frames.length === 3, 'A to be told');
+    expect(b.state.output).toBe('earlier output\r\nlive');
+  });
+
+  it(`attaches a viewer that sends no attach within the wait (${ATTACH_WAIT_MS} ms) at the terminal's size, and tells it that size`, async () => {
+    expect(ATTACH_WAIT_MS).toBe(5_000);
+    const { cli, open } = await socketOnMemoryTerminal({ attachWaitMs: 200 });
+    cli.print('earlier');
+    const viewer = open(false);
+    await viewer.opened;
+    await waitFor(() => viewer.state.output === 'earlier', 'the recent output after the wait');
+    expect(viewer.state.frames).toEqual([{ type: 'size', cols: 80, rows: 24 }]);
+    expect(cli.resizes).toEqual([]);
+    viewer.type('late');
+    await waitFor(() => cli.writes.join('') === 'late', 'its typing');
+    // It never sized the terminal: its typing doesn't resize it.
+    expect(cli.resizes).toEqual([]);
+  });
+
+  it('closes a viewer that types over its budget (1008 rate_limited), logging only the count; the CLI and the other viewer go on', async () => {
+    // A clock that never moves: no refill.
+    const { cli, open, lines, core, session } = await socketOnMemoryTerminal({ now: () => 0 });
+    const flooder = open();
+    const other = open();
+    await Promise.all([flooder.opened, other.opened]);
+    await pause(100);
+    const chunk = Buffer.alloc(MAX_TERMINAL_INPUT_BYTES, MARKER);
+    for (let sent = 0; sent < INPUT_BURST_BYTES; sent += chunk.byteLength) flooder.ws.send(chunk, { binary: true });
+    flooder.type('x');
+    await waitFor(() => flooder.state.closed !== undefined, 'the flooder to be closed', 10_000);
+    expect(flooder.state.closed).toBe(1008);
+    expect(cli.writes.join('').length).toBe(INPUT_BURST_BYTES);
+    expect(lines.filter((line) => line.includes('typed too fast'))).toHaveLength(1);
+    expect(lines.join('\n')).not.toContain(MARKER);
+    // The CLI runs on, and the other viewer still types and sees output.
+    expect(cli.exitCode).toBeUndefined();
+    expect(core.entities.getSession(session.id)!.driver).toBe('terminal');
+    other.type('still here');
+    await waitFor(() => cli.writes.at(-1) === 'still here', 'the other viewer’s typing');
+    cli.print('output');
+    await waitFor(() => other.state.output.endsWith('output'), 'the other viewer’s output');
+    expect(other.state.closed).toBeUndefined();
+  });
+
+  it('closing a socket only detaches its viewer: the CLI runs on with no viewer, and a new one (a reload) gets the recent output', async () => {
+    const { cli, open, core, session } = await socketOnMemoryTerminal();
+    const first = open({ cols: 100, rows: 30 });
+    await first.opened;
+    cli.print('before the reload');
+    await waitFor(() => first.state.output === 'before the reload', 'the output');
+    first.ws.close();
+    await waitFor(() => first.state.closed !== undefined, 'the close');
+    cli.print(' / while away');
+    await pause(100);
+    expect(cli.exitCode).toBeUndefined();
+    expect(cli.kills).toBe(0);
+    expect(core.entities.getSession(session.id)!.driver).toBe('terminal');
+    const again = open({ cols: 100, rows: 30 });
+    await again.opened;
+    await waitFor(() => again.state.output === 'before the reload / while away', 'the recent output');
+  });
+
+  it('when the terminal ends every viewer gets exit, then 4000', async () => {
+    const { chat, workspace, session, open } = await socketOnMemoryTerminal();
+    const a = open();
+    const b = open(false);
+    await Promise.all([a.opened, b.opened]);
+    await pause(100);
+    expect((await chat.switchDriver(workspace.id, session.id, 'ui')).driver).toBe('ui');
+    await waitFor(() => a.state.closed !== undefined && b.state.closed !== undefined, 'both to close');
+    for (const viewer of [a, b]) {
+      expect(viewer.state.frames).toEqual([{ type: 'exit', exitCode: null }]);
+      expect(viewer.state.closed).toBe(TERMINAL_CLOSE.ended);
+    }
+  });
+});
+
+describe('the typing budget (story 3.5; fake timers)', () => {
+  it(`takes a burst of ${INPUT_BURST_BYTES} bytes, then refills at ${INPUT_BYTES_PER_SECOND} a second, never above the burst`, () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const budget = createInputBudget(INPUT_BURST_BYTES, INPUT_BYTES_PER_SECOND);
+    expect(budget.take(INPUT_BURST_BYTES)).toBe(true);
+    expect(budget.take(1)).toBe(false);
+    vi.advanceTimersByTime(500);
+    expect(budget.take(INPUT_BYTES_PER_SECOND / 2)).toBe(true);
+    expect(budget.take(1)).toBe(false);
+    // A long quiet refills only up to the burst.
+    vi.advanceTimersByTime(60_000);
+    expect(budget.take(INPUT_BURST_BYTES)).toBe(true);
+    expect(budget.take(1)).toBe(false);
+    // Steady typing within the rate is never refused.
+    for (let second = 0; second < 10; second++) {
+      vi.advanceTimersByTime(1_000);
+      expect(budget.take(INPUT_BYTES_PER_SECOND)).toBe(true);
+    }
+  });
 });

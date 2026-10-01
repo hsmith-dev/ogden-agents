@@ -42,21 +42,50 @@ export interface ChatOptions {
   terminal?: TerminalPort;
 }
 
+/** A terminal's size in character cells. */
+export interface TerminalSize {
+  cols: number;
+  rows: number;
+}
+
 /**
  * One viewer's hold on a session's terminal (story 3.1). What it carries is
  * the user's content: never log, event or store it.
+ *
+ * Story 3.5: several viewers may hold the same terminal; each sees all its
+ * output and may type. Each viewer has its own size (from {@link resize});
+ * the terminal takes the size of whichever viewer last resized or typed
+ * (epic decision), and the other viewers hear of it through {@link onSize}.
  */
 export interface TerminalViewer {
-  /** The most recent output, at most {@link TERMINAL_BACKLOG_CHARS}, for a viewer that just attached. */
+  /**
+   * The most recent output now, at most {@link TERMINAL_BACKLOG_CHARS}. Read
+   * it in the same tick as subscribing with {@link onData}, so no output is
+   * missed or repeated between them.
+   */
   readonly backlog: string;
+  /** The terminal's size now. */
+  readonly size: TerminalSize;
   /** Everything the terminal prints from now on. Returns the unsubscribe. */
   onData(listener: (data: string) => void): () => void;
   /** Called once when the terminal ends: its CLI exited (`exitCode`), or the session switched back (`null`). Returns the unsubscribe. */
   onEnd(listener: (end: { exitCode: number | null }) => void): () => void;
-  /** Types into the terminal. */
+  /**
+   * The terminal's new size: another viewer resized it, or a viewer typed and
+   * the terminal took that viewer's size (then every viewer is told, the
+   * typer included). Returns the unsubscribe.
+   */
+  onSize(listener: (size: TerminalSize) => void): () => void;
+  /** Types into the terminal, first giving it this viewer's size if it has one and the terminal is at another. */
   write(data: string): void;
-  /** Resizes the terminal. */
+  /**
+   * Sets this viewer's size, clamped to `1..MAX_TERMINAL_COLS` ×
+   * `1..MAX_TERMINAL_ROWS` (a non-finite one is ignored); the terminal takes
+   * it, and the other viewers are told when it changed.
+   */
   resize(cols: number, rows: number): void;
+  /** Lets go of the terminal: its listeners are removed. The terminal runs on, with or without viewers. */
+  detach(): void;
 }
 
 export interface Chat {
@@ -165,9 +194,21 @@ export interface Live {
 }
 
 /** A session's terminal and its viewers (story 3.1). Its output is never logged, evented or stored. */
+/** One viewer of a {@link Terminal} (story 3.5). */
+export interface TerminalViewerEntry {
+  /** Its own size, once it has resized; until then it types at whatever size the terminal has. */
+  size: TerminalSize | undefined;
+  /** Told when the terminal's size changes because of another viewer, or of this one's write. */
+  sized: Set<(size: TerminalSize) => void>;
+}
+
 export interface Terminal {
   process: TerminalProcess;
   backlog: string;
+  /** The size the terminal is at (story 3.5): its opening size, then the last viewer's to resize or type. */
+  size: TerminalSize;
+  /** Its viewers now (story 3.5). */
+  viewers: Set<TerminalViewerEntry>;
   data: Set<(data: string) => void>;
   end: Set<(end: { exitCode: number | null }) => void>;
   ended: boolean;

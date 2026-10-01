@@ -73,7 +73,7 @@ import type { Chat, ChatOptions } from './chat/types.js';
 import { createWorkspaces } from './chat/workspaces.js';
 
 export * from './chat/constants.js';
-export type { Chat, ChatOptions, TerminalViewer } from './chat/types.js';
+export type { Chat, ChatOptions, TerminalSize, TerminalViewer } from './chat/types.js';
 
 export function createChat(options: ChatOptions): Chat {
   // One context per chat: its collections and `closing` are shared by reference, never copied (story 3.11).

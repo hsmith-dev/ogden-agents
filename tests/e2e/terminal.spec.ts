@@ -7,12 +7,13 @@
  * under the unchanged Content-Security-Policy. No test runs the real `claude`.
  * Skipped only where node-pty can't load (never on CI). Story 3.6: the
  * Chat | Terminal toggle, `Ctrl+.`, the read-only banner and peek, focus, the
- * URL mirroring the driver, and the toggle's disabled reasons.
+ * URL mirroring the driver, and the toggle's disabled reasons. Story 3.5: the
+ * panel reconnects by itself after the connection drops.
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type WebSocketRoute } from '@playwright/test';
 import { ROOT } from '../support.js';
 import { composer, send, startChat, withChatServer } from './chat-server.js';
 
@@ -161,6 +162,70 @@ test('in Developer mode a chat switches to its terminal, takes typing there, and
     // xterm's script and styles loaded under the unchanged policy. The one report every page of
     // the app makes is zod's feature probe (`Function('')`, caught), which the policy rightly blocks.
     expect((await violations()).filter((violation) => violation !== ZOD_EVAL_PROBE)).toEqual([]);
+  });
+});
+
+test('in Developer mode the terminal reconnects by itself after the connection drops, with the recent output; after five failed tries it says to reload (story 3.5)', async ({ page }) => {
+  test.skip(!process.env.CI && !(await ptyLoads()), 'node-pty cannot load on this computer');
+  // Five tries wait 1, 2, 4, 4 and 4 s.
+  test.setTimeout(120_000);
+  await withTerminalChat(page, true, async () => {
+    await send(page, 'first question');
+    await expect(page.getByTestId('message-agent')).toContainText('Hello from the fake agent.');
+    await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
+
+    // Every terminal socket goes through here: passed to the server, or (while `refuse`) dropped at once.
+    let refuse = false;
+    let refused = 0;
+    const live: WebSocketRoute[] = [];
+    await page.routeWebSocket(/\/ws\/terminal\//, (ws) => {
+      if (refuse) {
+        refused++;
+        void ws.close({ code: 1001, reason: 'going away' });
+        return;
+      }
+      ws.connectToServer();
+      live.push(ws);
+    });
+    /** Drops the open terminal sockets as a network or server would (1001). */
+    const drop = async () => {
+      for (const ws of live.splice(0)) await ws.close({ code: 1001, reason: 'going away' });
+    };
+    // The routing applies to the page loaded after it.
+    await page.reload();
+    await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
+
+    await page.getByTestId('switch-to-terminal').click();
+    const terminal = page.getByTestId('terminal');
+    await expect(terminal).toHaveAttribute('data-status', 'connected');
+    await expect(terminal.locator('.xterm-rows')).toContainText('fake-claude:--resume,');
+    await terminal.click();
+    await page.keyboard.type(MARKER);
+    await page.keyboard.press('Enter');
+    await expect(terminal.locator('.xterm-rows')).toContainText(`echo:${MARKER}`);
+
+    // Dropped: it reconnects by itself, and the screen is the server's recent output again.
+    await drop();
+    await expect(page.getByTestId('terminal-status')).toHaveText('Reconnecting to the terminal');
+    await expect(terminal).toHaveAttribute('data-status', 'connected', { timeout: 10_000 });
+    await expect(terminal.locator('.xterm-rows')).toContainText(`echo:${MARKER}`);
+    await terminal.click();
+    await page.keyboard.type('size');
+    await page.keyboard.press('Enter');
+    await expect(terminal.locator('.xterm-rows')).toContainText('size=');
+
+    // Dropped for good: five tries, then "Reload to reconnect".
+    refuse = true;
+    await drop();
+    await expect(terminal).toHaveAttribute('data-status', 'disconnected', { timeout: 40_000 });
+    await expect(page.getByTestId('terminal-status')).toHaveText('The terminal is not connected. Reload to reconnect.');
+    expect(refused).toBe(5);
+
+    // A reload connects again.
+    refuse = false;
+    await page.reload();
+    await expect(page.getByTestId('terminal')).toHaveAttribute('data-status', 'connected');
+    await expect(page.getByTestId('terminal').locator('.xterm-rows')).toContainText(`echo:${MARKER}`);
   });
 });
 

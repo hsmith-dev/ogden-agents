@@ -23,7 +23,6 @@ Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 
 - Story 3.8 (Windows): a terminal resize never reached the console under ConPTY with node-pty 1.1.0 (80x24 for 10 s); the resize checks are skipped on win32. From 3.1 CI.
 - Story 3.8 (Windows; and a POSIX residual): after a CLI exits by itself, what it started is not stopped on Windows; on POSIX its group is killed as the exit is reported, after the reap, so a reused id is a small residual risk. From 3.4 (review F2).
 - Epic 3 sweep (3.9): core's test fake terminal and `terminal-memory` can drift; an agent released after the 10 s bound stops late, unwatched. From 3.4 review F5.
-- Story 3.5 (multi-viewer): rate-limit terminal input per viewer; each frame is capped at 1 MiB, but a tab may send them as fast as it likes. From 3.1 F4.
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
 
@@ -266,3 +265,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-the-handoff-never-leaves-a-session-stuck-plan.md`
   summary: For the 3.9 sweep (3.4 review F5): (1) core's handoff tests have their own fake terminal (core can't import adapters, AD-1) with the same failure modes as `terminal-memory` (`openError`, `exitOnKill`, `exitOnOpen`); the two can drift. Share one (a core test-support export, or a contract test both pass). (2) When the agent's release passes the 10 s bound the switch is refused, but the dropped agent keeps stopping in the background, unwatched: nothing logs when (or whether) it finally stops, and the next message waits on it without a bound.
   evidence: `packages/core/test/terminal-handoff.test.ts` `handoffTerminal`; `packages/adapters/src/terminal-memory/index.ts`; `packages/core/src/chat/terminal.ts` `toTerminal` (`terminal_release_timeout`); `packages/core/src/chat/agents.ts` `releaseAgent`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-terminal-socket-resize-reattach-and-several-viewers-plan.md`
+  summary: Resolved: rate-limit terminal input per viewer (3.1 security review F4). Each terminal viewer has a token bucket (4 MiB burst, refilled at 1 MiB/s, counted from its first frame); a viewer over it is closed 1008 `rate_limited`, logging only the frame's byte count. The terminal and its other viewers go on.
+  evidence: `packages/server/src/terminal-socket.ts` `createInputBudget`, `INPUT_BURST_BYTES`, `INPUT_BYTES_PER_SECOND`; `packages/server/test/terminal-socket.test.ts` "closes a viewer that types over its budget".

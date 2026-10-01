@@ -16,7 +16,9 @@ import {
   claudeTerminalCommand,
   createPtyTerminalPort,
   hiddenPtySpawner,
+  INVALID_PTY_HANDLE,
   loadPty,
+  PTY_SPAWN_ATTEMPTS,
   locateClaudeTerminal,
   resolveClaudeAgentAcp,
   resolveClaudeExecutable,
@@ -87,6 +89,39 @@ describe('the terminal port when node-pty cannot load (AD-19)', () => {
     const port = createPtyTerminalPort(async () => ({ ok: false, reason: 'no prebuilt terminal for this platform', detail: 'Error: injected' }));
     expect(await port.available()).toEqual({ ok: false, reason: 'no prebuilt terminal for this platform' });
     await expect(port.open({ file: 'x', args: [], cwd: '.', env: {}, cols: 80, rows: 24 })).rejects.toThrow('no prebuilt terminal for this platform');
+  });
+});
+
+// node-pty (Windows) can lose a new pseudo-console's handle when another terminal exits at that moment (CI run 36910450998).
+describe('a spawn that loses its pseudo-console handle (story 3.8)', () => {
+  const flakyPty = (failures: number, message = INVALID_PTY_HANDLE) => {
+    let calls = 0;
+    const spawn = hiddenPtySpawner({
+      spawn: () => {
+        calls += 1;
+        if (calls <= failures) throw new Error(message);
+        return { pid: 7, onData: () => {}, onExit: () => {}, write: () => {}, kill: () => {} };
+      },
+    });
+    return { open: () => spawn('node', [], { env: {}, cwd: '.', cols: 80, rows: 24 }), calls: () => calls };
+  };
+
+  it('is tried again, and opens', () => {
+    const pty = flakyPty(PTY_SPAWN_ATTEMPTS - 1);
+    expect(pty.open().pid).toBe(7);
+    expect(pty.calls()).toBe(PTY_SPAWN_ATTEMPTS);
+  });
+
+  it('is tried a bounded number of times, then fails with that error', () => {
+    const pty = flakyPty(PTY_SPAWN_ATTEMPTS);
+    expect(pty.open).toThrow(INVALID_PTY_HANDLE);
+    expect(pty.calls()).toBe(PTY_SPAWN_ATTEMPTS);
+  });
+
+  it('any other spawn error is not retried', () => {
+    const pty = flakyPty(1, 'File not found: ');
+    expect(pty.open).toThrow('File not found');
+    expect(pty.calls()).toBe(1);
   });
 });
 
@@ -198,6 +233,26 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('the real terminal (f
     cli.write('crash\r');
     await expect.poll(() => exits, { timeout: 10_000 }).toEqual([70]);
   }, 30_000);
+
+  // Opening one terminal just as another closes (Windows: node-pty's handle race, retried; story 3.8).
+  it('opens a terminal just as another is closed, many times over', async () => {
+    const port = createPtyTerminalPort();
+    const exited: Array<Promise<unknown>> = [];
+    for (let i = 0; i < 12; i += 1) {
+      const cli = await port.open({
+        file: process.execPath,
+        args: [FAKE_CLI, '--resume', 'session-1'],
+        cwd: tempDir(),
+        env: { ...baseEnv(), TERM: 'xterm-256color', FAKE_CLAUDE_RECORD: join(tempDir(), 'record.json') },
+        cols: 80,
+        rows: 24,
+      });
+      processes.push(cli);
+      exited.push(new Promise((resolve) => cli.onExit(resolve)));
+      cli.kill();
+    }
+    await Promise.all(exited);
+  }, 60_000);
 
   it('resizes it', async () => {
     const { cli, output } = await openFake({});

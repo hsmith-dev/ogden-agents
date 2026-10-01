@@ -140,16 +140,43 @@ function killTerminalTree(terminal: PtyTerminal, platform: NodeJS.Platform): voi
   }
 }
 
+/** node-pty's Windows error when the pseudo-console it just made is missing from its own list (see {@link spawnWithRetry}). */
+export const INVALID_PTY_HANDLE = 'Invalid pty handle';
+/** How many times a spawn is tried when it fails with {@link INVALID_PTY_HANDLE}. */
+export const PTY_SPAWN_ATTEMPTS = 3;
+
+/**
+ * node-pty 1.1.0 (Windows, ConPTY) keeps its open pseudo-consoles in a list
+ * with no lock: a terminal's exit removes its entry on a background thread
+ * while a new spawn adds one on the main thread. When the two meet (a
+ * terminal opened just as another is closed or exits) the new entry can be
+ * lost, and the spawn throws "Invalid pty handle" before anything has run.
+ * That spawn is simply tried again, a bounded number of times; any other
+ * error is thrown at once.
+ */
+function spawnWithRetry(spawn: () => PtyTerminal): PtyTerminal {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return spawn();
+    } catch (error) {
+      const lost = error instanceof Error && error.message === INVALID_PTY_HANDLE;
+      if (!lost || attempt >= PTY_SPAWN_ATTEMPTS) throw error;
+    }
+  }
+}
+
 /** Wraps a loaded `node-pty` so every spawn has its error handlers attached and a tree kill. `platform` is replaced in tests only. */
 export function hiddenPtySpawner(pty: PtyModule, platform: NodeJS.Platform = process.platform): Extract<PtyLoad, { ok: true }>['spawnHidden'] {
   return (file, args, options) => {
-    const terminal = pty.spawn(file, args, {
-      name: 'xterm-256color',
-      cols: options.cols,
-      rows: options.rows,
-      cwd: options.cwd,
-      env: { ...options.env },
-    });
+    const terminal = spawnWithRetry(() =>
+      pty.spawn(file, args, {
+        name: 'xterm-256color',
+        cols: options.cols,
+        rows: options.rows,
+        cwd: options.cwd,
+        env: { ...options.env },
+      }),
+    );
     let exit: { exitCode: number; signal: number | null } | undefined;
     let killed = false;
     let groupKilled = false;

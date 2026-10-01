@@ -1,9 +1,10 @@
 ---
 title: 'Tracer bullet: switch one Claude Code chat to its terminal and back'
 type: 'feature'
-ticket: '3.1'
+ticket: '1'
 created: '2026-09-30'
 status: 'built'
+baseline_revision: 'c4d9235f018a63f6fcd6115a3ef442d5f3a6b84a'
 route: 'full'
 route_source: 'auto'
 review: ''

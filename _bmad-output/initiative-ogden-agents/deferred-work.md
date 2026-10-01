@@ -20,6 +20,7 @@ Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 
 - Unowned: consider failing the release smoke if "test hooks in use" ever appears in a registry install's log. From 9.7 security review.
 - Epic 3 refactor sweep (3.9): one shared npm-stall retry for the installed-package scripts (retrospective A6). From the epic 2 retrospective.
 - Confirm only: node-pty's "AttachConsole failed" fix is resolved pending the PR's Windows CI logs. From 9.6.
+- Story 3.8 (Windows): a terminal resize never reached the console under ConPTY with node-pty 1.1.0 (80x24 for 10 s); the resize checks are skipped on win32. From 3.1 CI.
 - Story 3.5 (multi-viewer): rate-limit terminal input per viewer; each frame is capped at 1 MiB, but a tab may send them as fast as it likes. From 3.1 F4.
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.

@@ -1,5 +1,6 @@
 # Epic 3 breakdown (approved by the user 2026-09-30; drafted by autonomous inception). Table order is the build order; ids never change once approved.
 # Epic 3 starts after epic 2's persistent sessions (2.7) and completed session view (2.10); both are built. References to other epics use "<epic id>.<entry id>".
+# Entry 11 (the chat.ts split) was added after approval, by the user's decision of 2026-09-30, to run before the lanes that edit chat.ts (3, 4, 5).
 # Live checks use the developer's existing Claude Code login or an API key saved through 9.2.
 
 [[entry]]
@@ -32,13 +33,25 @@ risk = "medium"
 unknown = "Confirm at planning the coordinator's assumptions: binary bytes and JSON control frames on the separate gated socket, and no terminal event beyond session.driver_changed and the imported messages."
 
 [[entry]]
+id = 11
+type = "story"
+title = "Split core chat.ts into modules (no behaviour change)"
+description = "Splits packages/core/src/chat.ts (over 1,200 lines after 2.10, 9.4 and 3.1) into modules by concern, such as turns and the queue, agent lifecycle with dropped agents, reply deltas, permissions wiring and the terminal handoff, behind the unchanged createChat and Chat interface, before the epic's lanes edit it (user decision 2026-09-30; epic 2 retrospective A5); no behaviour, API or event change."
+verify = "All tests pass unchanged; createChat, the Chat interface and core's exports are identical; no module of the split is over 600 lines."
+covers = ["E3-R1"]
+after = [2]
+hitl = false
+risk = "low"
+references = ["_bmad-output/initiative-ogden-agents/deferred-work.md"]
+
+[[entry]]
 id = 3
 type = "story"
 title = "Terminal messages appear in the chat after switching back"
 description = "On switching back, brings the turns the CLI added into the session's event log through the core session-event helper, the user's messages marked from terminal, either from the replay ACP session/load sends or by reading Claude Code's session file and diffing against the stored transcript, whichever the investigation at the start of this story shows works, setting entry 2's origin field that entry 6 renders as the caption."
 verify = "Against the fake ACP agent and a fake CLI that writes a session file the way Claude Code does, a message typed in the terminal and its reply appear once each in the chat transcript after switching back, the user's carrying origin terminal, with no duplicate of earlier turns, and survive a page reload."
 covers = ["E3-R4"]
-after = [2]
+after = [2, 11]
 hitl = false
 risk = "high"
 unknown = "Whether claude-agent-acp's session/load or session/resume replays turns the CLI added; if neither does, core must read Claude Code's session file, which ties the adapter to its file format."
@@ -51,7 +64,7 @@ title = "The handoff never leaves a session stuck"
 description = "Using entry 2's error codes, enforces in core the user's rule that a switch is refused unless the session is idle (working, waiting on a permission card, or queued messages: refused with session_not_idle and a short reason, nothing interrupted); returns the driver to the chat when the CLI exits on its own (/exit or a crash); makes a server restart with driver = terminal start the session idle, driver = ui and resumable; and returns each outcome as an error code or event with a plain reason that entry 6 renders; a PTY left without a viewer is not closed (user decision)."
 verify = "Tests against the fake CLI show a switch asked while working, while waiting on a permission and with a queued message is refused with session_not_idle and the turn, card and queue are untouched, a CLI that exits by itself leaves driver = ui and a chat message then gets a reply, and a server restarted while the terminal drove reopens the session as idle with driver = ui."
 covers = ["E3-R5"]
-after = [3]
+after = [3, 11]
 hitl = false
 risk = "medium"
 
@@ -62,7 +75,7 @@ title = "Terminal socket: resize, reattach and several viewers"
 description = "Completes the server side of the per-session terminal socket from entry 2's frame format (the xterm client is entry 6's): resize reaches the PTY, closing or reloading the tab leaves the CLI running, reopening attaches with a bounded buffer of recent output held in memory only, two tabs on one session both see the output and can both type with the size following whichever tab typed or resized last, and a PTY with no viewer keeps running until the session is switched back or the server stops; no byte reaches the event log, database or logs."
 verify = "A test attaches two sockets to one fake CLI, types in each and resizes each, and checks both receive the output and the PTY size follows whichever typed or resized last; a PTY with every viewer closed is still running a minute later; a reload reattaches and shows recent output; upgrades without the tab token or with a foreign Origin are refused; a marker string typed in the terminal is absent from the database and log files afterwards."
 covers = ["E3-R2", "E3-R3"]
-after = [4]
+after = [4, 11]
 hitl = false
 risk = "medium"
 references = ["_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-15--one-security-gate-adopted"]
@@ -111,10 +124,10 @@ references = ["_bmad-output/initiative-ogden-agents/deferred-work.md"]
 id = 9
 type = "story"
 title = "Refactor sweep"
-description = "Cleans up code across the epic, scoped when it starts from the build records and the review findings deferred during the epic (including the chat.ts split and the killTree copies in deferred-work.md where this epic touched them), with no behavior change."
+description = "Cleans up code across the epic, scoped when it starts from the build records and the review findings deferred during the epic (the chat.ts split is entry 11; the killTree copies were made one helper in 9.6), with no behavior change."
 verify = "All tests pass and no behavior changes."
 covers = ["E3-R1"]
-after = [1, 2, 3, 4, 5, 6, 7, 8]
+after = [1, 2, 3, 4, 5, 6, 7, 8, 11]
 hitl = false
 risk = "low"
 references = ["_bmad-output/initiative-ogden-agents/deferred-work.md"]

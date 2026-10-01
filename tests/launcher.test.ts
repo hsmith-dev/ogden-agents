@@ -68,6 +68,25 @@ function makeDataDir(): string {
   return dataDir;
 }
 
+/**
+ * How long a launcher may run before the test stops it and fails with what it
+ * printed. A launcher always exits: the background flow's longest path is an
+ * update (restart 15 s, then start 20 s), and `--foreground` beside a running
+ * server refuses at once. One still running after this is the bug itself (a
+ * `--foreground` run that took the data folder and is serving, say), so the
+ * test names it instead of hanging until the suite's timeout says nothing.
+ */
+const LAUNCHER_EXIT_MS = 45_000;
+
+/** The last lines of the data folder's server log, for a failure message. */
+function serverLogTail(dataDir: string): string {
+  try {
+    return readFileSync(join(dataDir, 'logs', 'server.log'), 'utf8').split('\n').slice(-20).join('\n');
+  } catch {
+    return '(no server log)';
+  }
+}
+
 /** Runs the launcher to completion (the background flow exits once the server is up). */
 function runLauncher(dataDir: string, args: string[] = ['--no-open', '--port', '0']) {
   const child = spawn(process.execPath, [BIN, ...args], {
@@ -79,18 +98,29 @@ function runLauncher(dataDir: string, args: string[] = ['--no-open', '--port', '
   let stderr = '';
   child.stdout!.on('data', (chunk) => (stdout += String(chunk)));
   child.stderr!.on('data', (chunk) => (stderr += String(chunk)));
-  return new Promise<{ code: number | null; stdout: string; stderr: string; url: string; launchUrl: string }>((resolve) =>
+  return new Promise<{ code: number | null; stdout: string; stderr: string; url: string; launchUrl: string }>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const exited = child.exitCode !== null || child.signalCode !== null;
+      child.kill('SIGKILL');
+      reject(
+        new Error(
+          `ogden ${args.join(' ')} ${exited ? 'exited, but its output never closed' : 'never exited'} (pid ${child.pid}).\n` +
+            `stdout: ${stdout}\nstderr: ${stderr}\nserver.json: ${JSON.stringify(readPortFile(dataDir))}\nserver log:\n${serverLogTail(dataDir)}`,
+        ),
+      );
+    }, LAUNCHER_EXIT_MS);
     // `close`, not `exit`: it fires only once all output has been read.
-    child.once('close', (code) =>
+    child.once('close', (code) => {
+      clearTimeout(timer);
       resolve({
         code,
         stdout,
         stderr,
         url: /running at (http:\/\/\S+)/.exec(stdout)?.[1] ?? '',
         launchUrl: /one-time link: (http:\/\/\S+)/.exec(stdout)?.[1] ?? '',
-      }),
-    ),
-  );
+      });
+    });
+  });
 }
 
 /** Opens a launch link as the page's boot script does, and returns the tab's `Authorization` header. */
@@ -270,9 +300,11 @@ describe('bin/ogden.js (background)', SUITE, () => {
     const background = await runLauncher(dataDir);
     expect(background.code, background.stderr).toBe(0);
     const record = readPortFile(dataDir)!;
+    // The refusal below needs the background server alive and holding the data folder's lock.
+    expect(isAlive(record.pid), `the background server (${record.pid}) is gone; its log:\n${serverLogTail(dataDir)}`).toBe(true);
 
     const foreground = await runLauncher(dataDir, ['--foreground', '--no-open', '--port', '0']);
-    expect(foreground.code).toBe(1);
+    expect(foreground.code, `stdout: ${foreground.stdout}\nstderr: ${foreground.stderr}`).toBe(1);
     expect(foreground.stderr).toContain(`Ogden Agents is already running (process ${record.pid})`);
     expect(readPortFile(dataDir)!.pid).toBe(record.pid);
     await quit(background.url, background.launchUrl, record.pid);

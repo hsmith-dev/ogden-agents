@@ -44,9 +44,16 @@ after = [{ epic = 1, needs = "the bundled forks and forks.lock" }, { epic = 2, n
 [[epic]]
 id = 5
 slug = "epic-unattended-builds"
-title = "Tickets build themselves safely and wait for your approval"
-covers = ["CAP-8", "CAP-9", "CAP-10", "CAP-12", "CAP-14"]
-after = [{ epic = 1, needs = "the bundled bmad-loop fork (1.9) and the uv bootstrap (1.8)" }, { epic = 4, needs = "the board, ticket detail, TicketStorePort with mark and the live index, through its sweep (4.12); the release after 4.13" }, { epic = 10, needs = "the per-project BMad pieces contract, requireBmadFeature, bmadPieceRoutes and SHIPPED_BMAD_PIECES (10.2) and the Runs tab slot (10.6)" }]
+title = "One ticket builds safely, and you approve and merge it"
+covers = ["CAP-8", "CAP-9", "CAP-12"]
+after = [{ epic = 1, needs = "the bundled bmad-loop fork (1.9) and the uv bootstrap (1.8)" }, { epic = 4, needs = "the board, ticket detail, TicketStorePort with mark and the live index, through its sweep (4.12); the release after 4.13" }, { epic = 10, needs = "the BMad pieces contract, requireBmadFeature, the piece route helper and piece registration (10.2), and 10.6's architecture test (5.3)" }]
+
+[[epic]]
+id = 11
+slug = "epic-build-runs-and-notifications"
+title = "Watch every build, build all that's ready, and hear when one needs you"
+covers = ["CAP-8", "CAP-9", "CAP-10", "CAP-14"]
+after = [{ epic = 5, needs = "its contracts, stubs and fixtures for both halves (5.3), worktrees (5.5), the Build dialog (5.6), the dispatcher (5.8) and the review page (5.9), through its sweep (5.10); the release after 5.11" }, { epic = 10, needs = "the Runs tab slot (10.6)" }]
 
 [[epic]]
 id = 6
@@ -60,7 +67,7 @@ id = 7
 slug = "epic-retrospectives"
 title = "Each finished epic teaches the next one"
 covers = ["CAP-13"]
-after = [{ epic = 5, needs = "finished runs with build records" }]
+after = [{ epic = 5, needs = "finished, approved and merged runs with build records (5.9)" }]
 
 # ---- v2 (planned; outside the v1 initiative's Done when) ----
 
@@ -69,4 +76,4 @@ id = 8
 slug = "epic-v2-developer-experience"
 title = "Developers review and navigate their project without leaving Ogden Agents (v2)"
 covers = []
-after = [{ epic = 5, needs = "sessions, planning files, and the review and approve flow" }, { epic = 6, needs = "for its agent work (V4): the agent registry, acp-base, the agent list and the picker, built on a go or a no-go" }]
+after = [{ epic = 5, needs = "the review page and approve (5.9)" }, { epic = 6, needs = "for its agent work (V4): the agent registry, acp-base, the agent list and the picker, built on a go or a no-go" }]

@@ -65,6 +65,7 @@ graph LR
   - Any number of workspaces may be active at once.
   - The unattended-run concurrency limit applies per workspace and globally, and both are enforced in core.
   - Note (epic 10, 2026-10-01): a workspace also carries its BMad pieces (AD-22). No rule changes.
+  - Note (epic 5, 2026-10-01): the default limits are 2 runs per workspace and 3 per install, kept in `packages/shared`, editable in settings and enforced in core. No rule changes.
 
 ### AD-3 — The server owns agent processes
 
@@ -74,6 +75,7 @@ graph LR
   - Only the server spawns and stops agent processes. The UI attaches and detaches through the event log and never controls a process directly.
   - `npx ogden-agents` starts a detached server if none is running. The server runs until Quit in the UI, or a reboot.
   - When the server starts, any session whose process is gone becomes `idle` and is marked resumable.
+  - Note (epic 5, 2026-10-01): an unattended run is not resumed. Quit with active runs (after one confirmation), a crash or a reboot leaves each run `blocked` with the reason `interrupted`, its worktree kept, and the user retries it by hand. No rule changes.
 
 ### AD-4 — One normalized session state
 
@@ -93,6 +95,7 @@ graph LR
   - The UI holds one WebSocket; it subscribes to install-level events after seq N and to each workspace's recent window, pages older history on demand, and reconnects per scope after its last seq.
   - Every event type has a Zod schema in `packages/shared`, and nothing unschematized is emitted.
   - Every adapter that produces agent activity, whether an ACP chat or the bmad-loop build runner, emits the same `session.*` event types, so one session view renders both.
+  - Note (epic 5, 2026-10-01): the `buildrunner-bmad-loop` adapter maps bmad-loop's events and the agent's transcript to `session.*` events; where the agent's activity is not available as structured events, the run view shows bmad-loop's activity lines as messages. No rule changes.
   - All events are retained, and history is deletable per workspace.
   - When a message completes, core appends a `session.message_completed` event carrying the full content. Its chunk events are pruned only after that, and the UI replaces chunks with the completed message.
   - Note (chat names, backlog story 12, 2026-10-04): a session's name is two fields core keeps, the user's `title` and the automatic `autoTitle` (set once: a planning action's label, or the first user message that isn't a Deny reason, inside the same `completeMessage` transaction). Each change is a `session.renamed` carrying both. Names are normalized in `packages/shared` and never sent to an agent. No rule change.
@@ -223,6 +226,7 @@ graph LR
   - Adapters redact secrets before emitting events.
   - Note (epic 6, user-approved 2026-10-02): each agent's API key is `agent-api-key/<agentId>` (Antigravity: `agent-api-key/antigravity`) and reaches only that agent's process; log redaction covers each supported provider's key format. Antigravity keeps its own sign-in under `~/.gemini/antigravity-acp/`, which Ogden never reads or writes. Ogden offers Antigravity's Google sign-in and the Gemini API key; the user accepted that Google's current terms call third-party use of Antigravity OAuth a breach (account risk; user, 2026-10-02). Antigravity is installed as a pinned copy in the data folder (registry archive checked against Ogden's SHA-256), an existing copy is used only when it matches the pin, and nothing is installed globally. No rule changes.
   - Note (epic 6 entry 10, 2026-10-04, security; closes the 6.5 review's deferred item): every child process gets an explicit environment built from one allowlist (`packages/adapters/src/child-env.ts`). An agent's process gets the allowlist, its own home variable and only its own key, from its descriptor; helper processes (the kill helper, the Windows shortcut script, npm's install of Claude Code's adapter, uv and BMad Method's scripts, setup probes, the browser opener) get the allowlist plus named non-secret variables only, never a key. `tests/architecture.test.ts` fails when a spawn in `packages/` passes `process.env` or no `env`; the one exemption is the launcher starting the server itself, which is Ogden, not a helper. No rule changes.
+  - Note (epic 5, 2026-10-01): webhook URLs are secrets: stored through `SecretStorePort` and redacted in logs and events (epic 11). No rule changes.
 
 ### AD-17 — Unattended runs are contained
 
@@ -235,6 +239,9 @@ graph LR
   - After a run, core runs verification before the UI may show `built`: plan status, an independent test re-run, and a non-empty diff.
   - Merging and `done` happen only through the approve action. If the merge conflicts, the run is blocked as needing a rebase. It is never force-merged.
   - Note (epic 6, user-approved 2026-10-02): v1 builds run Claude Code only. Builds with Antigravity (bmad-loop's `agy` profile, whose `--dangerously-skip-permissions` bypasses its approvals and which has no native sandbox recorded), Codex, Gemini CLI and Copilot are v2 (epic 8). When they come, an agent profile that bypasses its own approvals runs only inside a sandbox `SandboxPort` started, and the sandbox chain is per agent and per OS. No rule changes.
+  - Note (epic 5, 2026-10-01): `VcsPort` creates the worktree; the build runner runs in it and never creates its own, and bmad-loop's run folder also lives in the data directory. No rule changes.
+  - Note (epic 5, 2026-10-01): approve merges locally into the branch the main checkout has checked out, with a merge commit, and never pushes; it is refused while that checkout has uncommitted changes. **Update and retry** rebases the run's branch in its worktree and runs it again; there is no automatic conflict resolution in v1. No rule changes.
+  - Note (epic 5, 2026-10-01): "attended", the third choice when no sandbox exists, is not an unattended run: every tool call goes through permission cards. Windows defaults to it, and Docker Desktop is optional there. The maximum run time defaults to 45 minutes, editable in settings. No rule changes.
 
 ### AD-18 — One design system [ADOPTED]
 
@@ -272,6 +279,7 @@ graph LR
   - Every CLI step a standard flow needs, including installing `uv`, installing or signing into agent CLIs, running BMAD setup, and applying a saved patch, is run by the server and shown in the UI with progress and errors.
   - The terminal toggle (AD-6) is only for advanced users and is never required.
   - Note (epic 10, 2026-10-01): a project with BMad off needs no `uv`; turning on a piece that needs BMad installed runs setup through the server (epic 4). No rule changes.
+  - Note (epic 5, 2026-10-01): bmad-loop's process hosting needs no multiplexer the user installs; if it needs one, the server installs it like `uv`. No rule changes.
 
 ### AD-22 — BMad Method is opt-in per workspace
 
@@ -287,6 +295,7 @@ graph LR
   - Developer mode and the terminal toggle (AD-6) are independent of the pieces.
   - Note (epic 4, 2026-10-02, user decision, security): a piece that runs the project's own BMad scripts (Board through `tickets.py`, which executes the repo's `_bmad/scripts/config_utils.py`; later Unattended builds and Retrospectives) also needs the user's one-time trust for that project, kept by core on the workspace row with a `workspace.bmad_scripts_trusted` event. The same guard path checks it: the route helper after the piece guard (409 `scripts_not_trusted`), and each core use-case that runs project scripts. Turning a piece on is not refused; its script-running routes and watchers wait for the trust. Project scripts and every `uv` process run with one minimal allowlisted environment, never an API key, token or other secret (AD-16).
   - Note (story 4.13, 2026-10-04, user decision, security): the trust is bound to the contents of the project scripts Ogden Agents runs. Trusting records a fingerprint of the repo's `_bmad/scripts/` (`BmadCatalogPort.scriptsFingerprint`: regular files, no links, `__pycache__` left out, since every script run keeps Python's bytecode cache in Ogden Agents' own folder); every run re-checks it right before the scripts run (the board use-cases and each ticket-watch read), and scripts changed since are refused with 409 `scripts_changed` and the UI asks again ("This project's BMad Method scripts changed. Run them?"). Ogden Agents' own setup or Upgrade, which writes them only from the verified pinned copy, keeps a trust that still matched just before it. Alongside, `_bmad/` joins the protected paths (the 2.8 rule's one list, which Auto's ask rules use), so an agent's edit there always comes as a card in Ask and Auto; Skip all is unchanged by design.
+  - Note (epic 5, 2026-10-01): epic 5 registers `builds` as available. Turning `builds` (or `board`) off lets active runs finish and dispatches nothing new. No rule changes.
 
 ## Consistency Conventions
 
@@ -299,7 +308,7 @@ graph LR
 | Errors | `{ "error": { "code": "snake_case", "message": "…", "details"?: {} } }`; codes live in `packages/shared` |
 | Adapter naming | `<port>-<variant>`: `acp-claude-code`, `sandbox-seatbelt`, `notify-webhook` |
 | Files | kebab-case; one exported React component per file, except shadcn-style compound components in `packages/web/src/ui` (for example `sidebar.tsx` exporting `Sidebar`, `SidebarGroup`, …), which keep their parts together |
-| Config and data | The OS per-user data directory `ogden-agents/` holds the SQLite database, logs and the encrypted-secrets fallback. Nothing is written to user repos except BMAD's own files (only in projects that turned a BMad piece on, AD-22; note epic 10, 2026-10-01) and worktrees |
+| Config and data | The OS per-user data directory `ogden-agents/` holds the SQLite database, logs and the encrypted-secrets fallback. Nothing is written to user repos except BMAD's own files (only in projects that turned a BMad piece on, AD-22; note epic 10, 2026-10-01), and for builds only run branches and git's worktree metadata; the worktrees themselves live in the data directory (AD-17; note epic 5, 2026-10-01) |
 | Logging | Structured JSON lines to the data directory; secrets redacted (AD-16) |
 | Tests | Every ticket ships its tests; UI layout is checked in a real browser with Playwright, since jsdom doesn't evaluate media queries |
 
@@ -392,10 +401,9 @@ Delivery: GitHub Actions runs the tests on macOS, Windows and Linux for every ch
 ## Deferred
 
 - **Visual direction:** decided in epic 1 by `bmad-ux` with `design-taste-frontend`. AD-18 fixes only the mechanism.
-- **Default concurrency limits and maximum run time:** tuned in epic 5. AD-2 and AD-17 fix only that the limits exist and that core enforces them.
 - **Where the CAP-5 toggle appears for each agent:** measured in epic 3, recorded in the spec's `agent-matrix.md`. Antigravity's is measured by epic 6's spike (2026-10-02); other agents' in v2.
-- **Notification transports beyond webhook:** decided in epic 5 behind `NotifierPort`.
+- **Notification transports beyond webhook and opt-in browser notifications:** later, behind `NotifierPort` (v1 transports decided in epic 5, built in epic 11).
 - **Start at login, a tray icon, or a desktop wrapper:** later, and neither breaks AD-3.
 - **Tracker stores, remote access, and several users per install:** out of scope (spec non-goals).
 - **Logging library and Drizzle migration tooling:** epic 1, within the Conventions.
-- **Merge-conflict handling beyond blocking as needing a rebase:** epic 5.
+- **Merge-conflict handling beyond Update and retry (a rebase in the run's worktree):** later; see the AD-17 note.

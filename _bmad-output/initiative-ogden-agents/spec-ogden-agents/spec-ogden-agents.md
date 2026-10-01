@@ -46,13 +46,13 @@ A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the str
   - **intent:** In a project with Unattended builds turned on (CAP-19), unattended builds dispatch `bmad-build-auto` per ticket in isolation, respecting prerequisites and a concurrency limit, either for one ticket or autonomously.
   - **success:** Two ready, independent tickets build in parallel without touching each other's files, and a ticket with an unmet prerequisite is not dispatched.
 - **CAP-9**
-  - **intent:** Each run streams live: activity, tool calls, final status, and a plain-language reason if blocked, with a Retry action.
+  - **intent:** In a project with Unattended builds turned on (CAP-19), each run streams live: activity, tool calls, final status, and a plain-language reason if blocked, with a Retry action.
   - **success:** A blocked run shows its reason, and Retry resumes it from the correct status.
 - **CAP-10**
-  - **intent:** After every run, the system itself verifies the outcome: the plan status, an independent re-run of the tests, and a non-empty diff.
+  - **intent:** In a project with Unattended builds turned on (CAP-19), after every run, the system itself verifies the outcome: the plan status, an independent re-run of the tests, and a non-empty diff.
   - **success:** A run that claims success but whose tests fail is shown as failed.
 - **CAP-12**
-  - **intent:** A user reviews a diff and its review findings, then approves (merge and mark done) or rejects and retries.
+  - **intent:** In a project with Unattended builds turned on (CAP-19), a user reviews a diff and its review findings, then approves (merge and mark done) or rejects and retries.
   - **success:** Approving a built ticket merges its branch and marks it done, and no ticket reaches done without approval.
 - **CAP-13**
   - **intent:** In a project with Retrospectives turned on (CAP-19), when an epic completes, a retrospective records evidence-based findings and adds recurring pitfalls to the project's `AGENTS.md`.

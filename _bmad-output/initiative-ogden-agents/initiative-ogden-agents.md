@@ -31,7 +31,7 @@ A non-developer goes from an idea to approved, agent-built code without opening 
 Each epic is one user-facing outcome, built in the spec's delivery-phase order. Everything else is out of scope; see the spec's non-goals. Tracer path: `npx ogden-agents`, then sign in, then chat with Claude Code in a workspace; later epics add plan, build and approve.
 
 - Touch point: the user's agent CLIs and ACP adapters (consumed); owner: epic-chat-and-workspaces, then epic-every-agent
-- Touch point: the user's repos (`_bmad/` and worktrees written); owner: epic-planning-and-board, then epic-unattended-builds
+- Touch point: the user's repos (`_bmad/` written, plus run branches and git worktree metadata; worktrees live in the data folder, AD-17); owner: epic-planning-and-board, then epic-unattended-builds
 - Touch point: Docker, only where already installed (sandbox fallback); owner: epic-unattended-builds
 - Touch point: the npm registry (publishing); owner: epic-foundation-and-forks
 - Touch point: the upstream BMAD-METHOD and bmad-loop repos (PRs); owner: epic-foundation-and-forks sets up the process, and each epic sends its own patches
@@ -50,3 +50,4 @@ Each epic is one user-facing outcome, built in the spec's delivery-phase order. 
 - Decision: epic 1 is built interactively with `bmad-build`; later epics may run unattended with `bmad-build-auto`, with checkpoints set at their inception (user, 2026-09-29).
 - Decision: v1 is Claude Code, fully: chat, planning and builds. Epic 6 becomes "Add Antigravity beside Claude Code, if possible", chat only, gated by a spike's go or no-go; builds with Antigravity, and Codex, Gemini CLI and GitHub Copilot CLI for chat and builds, move out of v1 to epic 8 (v2). Their research is kept in epic 6's Notes as v2 input (user, 2026-10-02).
 - Decision: epic 6's agent-choice groundwork (session agent, agent registry and list, shared ACP client, picker and default per project) is built whatever Antigravity's spike decides; a no-go drops only the Antigravity entries. v1.1 (Codex and Grok) builds on it (user, 2026-10-02).
+- Decision: epic 5 (Unattended builds) is split in two at its inception: epic 5 builds one ticket for the user to approve and merge, and epic 11 (`epic-build-runs-and-notifications`) adds the run view, Runs tab, Build all ready, verification's test re-run and notifications; each ships on its own (user, 2026-10-01). Costs and budgets stay out (reaffirmed, 2026-10-01).

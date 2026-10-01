@@ -199,7 +199,8 @@ test('a first run on the installed package: Welcome, Install, sign in, a project
     await tab.close();
 
     // Signed in again: the chat resends its last message by itself, once, and the agent's own session answers.
-    await expect(replies(page).last()).toHaveText(/via=resumed primed=0$/);
+    // Noticing the sign-in, resending and starting a fresh agent takes several seconds on Windows runners.
+    await expect(replies(page).last()).toHaveText(/via=resumed primed=0$/, { timeout: 30_000 });
     await expect(state(page)).toHaveAttribute('data-state', 'idle');
     await expect(userMessages(page)).toHaveText(['hello', 'context', 'context']);
     await expect(page.getByTestId('session-error')).toHaveCount(0);

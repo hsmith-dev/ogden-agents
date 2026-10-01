@@ -163,3 +163,36 @@
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-first-run-welcome-plan.md`
   summary: A corrupt `onboarding.json` in a data folder with no projects is logged ("onboarding record unusable", code `corrupt`) on every `GET /api/v1/onboarding`, because nothing rewrites it until Welcome is finished or skipped (9.5 review F7). Log it once per server run, or replace the bad record on first read (story 9.6).
   evidence: `packages/core/src/onboarding.ts` `read()` → `onError('corrupt')`; `packages/server/src/start.ts` `onError` → `log.warn`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-refactor-sweep-plan.md`
+  summary: Resolved: the three `killTree` copies (2.12) are one `killProcessTree(pid)`: nothing unless `pid` is a positive integer, `taskkill.exe /pid <pid> /T /F` by absolute path on Windows (the launcher and the Claude Code adapter ran a bare `taskkill` before), the process group on POSIX. The launcher, the Claude Code adapter and `terminal-pty` use it.
+  evidence: `packages/adapters/src/process-tree.ts` (`@ogden-agents/adapters/process-tree`); `packages/adapters/test/process-tree.test.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-refactor-sweep-plan.md`
+  summary: Resolved (pending the PR's Windows CI logs): node-pty's "AttachConsole failed" on Windows (9.1). After `taskkill` stops the tree, `terminal-pty` skips node-pty 1.1.0's console process list (an internal of the pinned version) before its `kill()`, which still closes the pseudo-console and its output worker.
+  evidence: `packages/adapters/src/terminal-pty/index.ts` `skipConsoleProcessList`; `packages/adapters/test/setup-claude-code.test.ts` "on Windows, kill closes the terminal without node-pty's console list".
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-refactor-sweep-plan.md`
+  summary: Resolved: API key saves and removals for one agent run one at a time in call order (9.2 F7), check included; a failed one doesn't block the next; different agents stay concurrent.
+  evidence: `packages/core/src/agent-setup.ts` `serially`; `packages/core/test/agent-setup.test.ts` "key writes run one at a time per agent".
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-refactor-sweep-plan.md`
+  summary: Resolved: Welcome's shortcut step sends a failed answer to the offer again, quietly and after the step is left (9.5 F4), up to 3 times with back-off, so the shell's notice doesn't offer it again.
+  evidence: `packages/web/src/appearance/app-shortcut-api.ts` `retryAnswer`; `tests/e2e/welcome.spec.ts` "a failed answer to the shortcut offer from Welcome is sent again".
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-refactor-sweep-plan.md`
+  summary: Resolved: a corrupt `onboarding.json` is logged once per server run while it stays corrupt (9.5 F7); the file is left as it is, and a record that becomes corrupt again after being usable is logged again.
+  evidence: `packages/core/src/onboarding.ts` `corruptReported`; `packages/core/test/onboarding.test.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-refactor-sweep-plan.md`
+  summary: Resolved: the Sign in again notice's React wiring has DOM tests (9.4 F5): happy-dom with Testing Library (root devDependencies, opt-in per file with `// @vitest-environment happy-dom`), covering the auth effect, the event effect and the start-request observer.
+  evidence: `packages/web/test/sign-in-again.dom.test.tsx`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-refactor-sweep-plan.md`
+  summary: Resolved (9.4 bug found by the 9.4 F5 DOM test, fixed in 9.6): `observeAuth` dropped `armedAfter` once the agents query reported `signing_in`, so a second sign-in started elsewhere after that no longer disarmed the notice (the 9.4 review F2 guard) and two chats could resend on one sign-in. It now keeps `armedAfter` while armed, so only the chat whose notice started the sign-in resends, once.
+  evidence: `packages/web/src/chat/sign-in-again.tsx` `observeAuth`; `packages/web/test/sign-in-again.dom.test.tsx` "a second sign-in seen after the agents query says signing_in still disarms it"; `packages/web/test/sign-in-again.test.tsx` (review F2 case).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-refactor-sweep-plan.md`
+  summary: Deferred from the 9.6 sweep: move `readBody` and the id helpers out of `packages/server/src/chat-routes.ts` (epic 3 edits it).
+  evidence: `packages/server/src/chat-routes.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-refactor-sweep-plan.md`
+  summary: Deferred from the 9.6 sweep: split the source files over 600 lines when next changed (see the 2.12 entry).
+  evidence: `wc -l packages/*/src/**/*.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-refactor-sweep-plan.md`
+  summary: Deferred from the 9.6 sweep: `GET /api/v1/onboarding` answers a thrown `get()` with Hono's default 500 instead of `apiError` (changing it changes the body).
+  evidence: `packages/server/src/agent-setup-routes.ts` `GET` onboarding.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-refactor-sweep-plan.md`
+  summary: Deferred from the 9.6 sweep: the two `removeLeftovers` (uv's has no swap restore) and the two `InstallButton`s (different props) stay separate.
+  evidence: `packages/adapters/src/toolchain-uv/uv-toolchain.ts`, `packages/adapters/src/setup-claude-code/install.ts`; `packages/web/src/agents/agent-card.tsx`, `packages/web/src/routes/tools-page.tsx`.

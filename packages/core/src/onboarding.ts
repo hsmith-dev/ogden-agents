@@ -47,23 +47,32 @@ export function createOnboarding(options: OnboardingOptions): Onboarding {
     }
   };
 
+  /** Whether the record's corruption was reported: once per run while it stays corrupt (nothing rewrites it until Welcome ends). */
+  let corruptReported = false;
+
   /** The kept record, or `undefined` when there is none or it can't be used. */
   const read = (): OnboardingState | undefined => {
     let text: string;
     try {
       text = readFileSync(file, 'utf8');
     } catch (error) {
+      corruptReported = false;
       const code = (error as NodeJS.ErrnoException).code ?? 'unreadable';
       if (code !== 'ENOENT') options.onError?.(code);
       return undefined;
     }
     try {
       const parsed = OnboardingState.safeParse(JSON.parse(text));
-      if (parsed.success) return parsed.data;
+      if (parsed.success) {
+        corruptReported = false;
+        return parsed.data;
+      }
     } catch {
       // Not JSON: as if there were no record.
     }
-    options.onError?.('corrupt');
+    // Left as it is: the file is the user's to inspect.
+    if (!corruptReported) options.onError?.('corrupt');
+    corruptReported = true;
     return undefined;
   };
 

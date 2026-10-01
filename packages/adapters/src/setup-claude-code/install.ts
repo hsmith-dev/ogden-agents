@@ -28,6 +28,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { dirname, join, posix, win32 } from 'node:path';
 import { AgentSetupError, type AgentInstallProgress } from '@ogden-agents/core';
 import { CLAUDE_AGENT_ACP_PACKAGE, CLAUDE_CODE } from '../acp-claude-code/claude-code-agent.js';
+import { errorCode } from '../error-code.js';
 import { renameWithRetry } from '../toolchain-uv/uv-toolchain.js';
 import pinnedLock from './pins/package-lock.json' with { type: 'json' };
 import pinnedManifest from './pins/package.json' with { type: 'json' };
@@ -226,10 +227,7 @@ export interface NpmRunInput {
 export type NpmRunner = (input: NpmRunInput) => NpmProcess;
 
 /** An error's errno code (`ENOENT`), or `unknown`: never its message, which can hold paths. */
-const errnoCode = (error: unknown): string => {
-  const code = (error as { code?: unknown } | null)?.code;
-  return typeof code === 'string' && /^[A-Z0-9_]{1,40}$/.test(code) ? code : 'unknown';
-};
+const errnoCode = (error: unknown): string => errorCode(error, 'unknown');
 
 /** Runs `node npm-cli.js <args>`: an argument array, no shell, a hidden window on Windows. */
 export const spawnNpm: NpmRunner = (input) => {

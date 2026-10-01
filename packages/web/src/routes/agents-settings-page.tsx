@@ -8,8 +8,8 @@ import { Skeleton } from '@/ui/skeleton';
 
 /**
  * `/settings/agents`: each supported agent, whether it is installed and
- * signed in, and signing in with the user's own account (onboarding 9.1;
- * CAP-15, CAP-16). API keys (9.2) and installing (9.3) join it later. The
+ * signed in, signing in with the user's own account (onboarding 9.1), an API
+ * key kept in the keychain (9.2) and installing (9.3); CAP-15, CAP-16. The
  * cards follow `agent.auth_changed` through the event log.
  */
 export function AgentsSettingsPage() {

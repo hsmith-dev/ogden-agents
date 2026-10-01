@@ -210,6 +210,10 @@ describe('Sign in again resends by itself exactly once (user decision B)', () =>
     const replaced = observeSignInStarts(armed, [...own, authChanged(13, 'signing_in')], 'claude-code');
     expect(replaced.armed).toBe(false);
     expect(observeAuth(observeAuth(replaced, 'signing_in').tracker, 'signed_in').resend).toBe(false);
+    // The agents query saying signing_in first keeps where it was armed, so a later second start still disarms (9.4 bug, fixed in 9.6).
+    const signingIn = observeAuth(armed, 'signing_in').tracker;
+    expect(signingIn).toMatchObject({ armed: true, armedAfter: 10 });
+    expect(observeSignInStarts(signingIn, [...own, authChanged(13, 'signing_in')], 'claude-code').armed).toBe(false);
     // Not armed: nothing to do.
     expect(observeSignInStarts(initialTracker, [authChanged(1, 'signing_in'), authChanged(2, 'signing_in')], 'claude-code')).toBe(initialTracker);
   });

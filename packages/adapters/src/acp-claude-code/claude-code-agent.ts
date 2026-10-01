@@ -32,7 +32,7 @@
  * are declined, so nothing the agent asks to run, runs without a person.
  * Core is only ever told "once": always-allow rules live in core.
  */
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
@@ -52,6 +52,7 @@ import {
   type AgentSession,
   type AgentToolCallDiff,
 } from '@ogden-agents/core';
+import { killProcessTree } from '../process-tree.js';
 import { findClaudeExecutable } from './detect.js';
 import { createStreamMasker, maskSecrets, secretValues } from './mask.js';
 
@@ -279,17 +280,7 @@ type Diagnostic = (message: string, fields?: Record<string, unknown>) => void;
 
 /** Stops `child` and everything it started: its process group on POSIX, its tree on Windows. */
 function killTree(child: ChildProcessWithoutNullStreams): void {
-  const pid = child.pid;
-  if (pid === undefined) return;
-  if (process.platform === 'win32') {
-    spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-    return;
-  }
-  try {
-    process.kill(-pid, 'SIGKILL');
-  } catch {
-    // The group is already gone.
-  }
+  killProcessTree(child.pid);
 }
 
 async function startOnChild(

@@ -189,6 +189,21 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
   const readAt = new Map<string, number>();
   /** A refresh under way per agent, so concurrent chats share one status read. */
   const refreshing = new Map<string, Promise<void>>();
+  /** Each agent's key writes (save or remove), run one at a time in call order; settles, never rejects. */
+  const keyWrites = new Map<string, Promise<void>>();
+  /** Runs `write` after the agent's earlier key writes have finished (failed ones too); other agents' writes don't wait. */
+  const serially = <T>(agentId: string, write: () => Promise<T>): Promise<T> => {
+    const result = (keyWrites.get(agentId) ?? Promise.resolve()).then(write);
+    const done = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    keyWrites.set(agentId, done);
+    void done.then(() => {
+      if (keyWrites.get(agentId) === done) keyWrites.delete(agentId);
+    });
+    return result;
+  };
   /** Agents whose last key write failed (a timeout may still complete): re-read from the store at each `list()` until a write succeeds. */
   const resync = new Set<string>();
   const now = options.now ?? Date.now;
@@ -498,33 +513,35 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       const problem = support.check(value);
       if (problem !== undefined) throw new ValidationError(problem, []);
       const secrets = store();
+      // One at a time per agent, check included, so the store and the card end on the later call.
+      return serially(agentId, async () => {
+        let verification: ApiKeyVerification;
+        try {
+          verification = await support.verify(value, lifetime.signal);
+        } catch (error) {
+          report(agentId, 'verify_api_key', error);
+          verification = 'unchecked';
+        }
+        if (verification === 'refused') throw new ApiKeyRefusedError();
+        if (disposed) throw new SecretsUnavailableError(undefined, { cause: 'stopping' });
 
-      let verification: ApiKeyVerification;
-      try {
-        verification = await support.verify(value, lifetime.signal);
-      } catch (error) {
-        report(agentId, 'verify_api_key', error);
-        verification = 'unchecked';
-      }
-      if (verification === 'refused') throw new ApiKeyRefusedError();
-      if (disposed) throw new SecretsUnavailableError(undefined, { cause: 'stopping' });
-
-      const wasInUse = keyInUse(port);
-      try {
-        await secrets.set(apiKeySecretName(agentId), value);
-      } catch (error) {
-        const refusal = unavailable(agentId, 'save_api_key', error);
-        // A write that timed out may have landed (or still land): match memory to the store.
-        resync.add(agentId);
-        await syncFromStore(port);
-        if (keyFor(port) !== undefined) await readSubscription(port);
-        throw refusal;
-      }
-      resync.delete(agentId);
-      keys.set(agentId, { value, unchecked: verification === 'unchecked' });
-      // Subscription first: the key is used only when the subscription is known to be signed out.
-      const subscription = await readSubscription(port);
-      if (subscription === 'signed_out' && !wasInUse) announce(agentId, 'signed_in', { method: 'api_key' });
+        const wasInUse = keyInUse(port);
+        try {
+          await secrets.set(apiKeySecretName(agentId), value);
+        } catch (error) {
+          const refusal = unavailable(agentId, 'save_api_key', error);
+          // A write that timed out may have landed (or still land): match memory to the store.
+          resync.add(agentId);
+          await syncFromStore(port);
+          if (keyFor(port) !== undefined) await readSubscription(port);
+          throw refusal;
+        }
+        resync.delete(agentId);
+        keys.set(agentId, { value, unchecked: verification === 'unchecked' });
+        // Subscription first: the key is used only when the subscription is known to be signed out.
+        const subscription = await readSubscription(port);
+        if (subscription === 'signed_out' && !wasInUse) announce(agentId, 'signed_in', { method: 'api_key' });
+      });
     },
 
     async deleteApiKey(agentId) {
@@ -532,21 +549,23 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       if (port.apiKey === undefined) return;
       const secrets = store();
       const name = apiKeySecretName(agentId);
-      const wasInUse = keyInUse(port);
-      try {
-        await secrets.delete(name);
-      } catch (error) {
-        const refusal = unavailable(agentId, 'delete_api_key', error);
-        resync.add(agentId);
-        await syncFromStore(port);
-        if (keyFor(port) !== undefined) await readSubscription(port);
-        throw refusal;
-      }
-      resync.delete(agentId);
-      // Re-read, so the card shows what the store holds now; unreadable counts as deleted.
-      if (!(await syncFromStore(port))) keys.delete(agentId);
-      await readSubscription(port);
-      if (wasInUse && !keyInUse(port)) announce(agentId, 'needs_sign_in');
+      return serially(agentId, async () => {
+        const wasInUse = keyInUse(port);
+        try {
+          await secrets.delete(name);
+        } catch (error) {
+          const refusal = unavailable(agentId, 'delete_api_key', error);
+          resync.add(agentId);
+          await syncFromStore(port);
+          if (keyFor(port) !== undefined) await readSubscription(port);
+          throw refusal;
+        }
+        resync.delete(agentId);
+        // Re-read, so the card shows what the store holds now; unreadable counts as deleted.
+        if (!(await syncFromStore(port))) keys.delete(agentId);
+        await readSubscription(port);
+        if (wasInUse && !keyInUse(port)) announce(agentId, 'needs_sign_in');
+      });
     },
 
     agentEnv(agentId) {

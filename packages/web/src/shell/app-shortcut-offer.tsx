@@ -1,5 +1,5 @@
 import { useRouterState } from '@tanstack/react-router';
-import { useAppShortcut, useAppShortcutActions } from '@/appearance/app-shortcut-api';
+import { useAppShortcut, useAppShortcutActions, useOfferAnswerPending } from '@/appearance/app-shortcut-api';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
 
@@ -9,13 +9,15 @@ import { Notice } from '@/ui/notice';
  * supported computer, no shortcut yet, and no answer yet. **Add shortcut**
  * and **Not now** both answer it for good; a failed Add says why in place.
  * Never on `/welcome`, whose own shortcut step makes the offer (9.5), so it
- * shows once.
+ * shows once, nor while an answer is still being sent or retried (9.6).
  */
 export function AppShortcutOffer() {
   const { data } = useAppShortcut();
   const { add, dismiss } = useAppShortcutActions();
   const onWelcome = useRouterState({ select: (state) => state.location.pathname === '/welcome' });
-  if (onWelcome || data?.offerPending !== true) return null;
+  // An answer still being sent (Welcome's retries included) counts as answered; one that failed for good brings the offer back.
+  const answering = useOfferAnswerPending();
+  if (onWelcome || data?.offerPending !== true || answering) return null;
   const busy = add.isPending || dismiss.isPending;
   return (
     <div className="px-(--panel-padding) pt-(--panel-padding)" data-testid="app-shortcut-offer">

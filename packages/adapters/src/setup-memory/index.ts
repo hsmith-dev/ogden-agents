@@ -1,7 +1,7 @@
 /**
- * `setup-memory` (story 2.3): an in-memory `AgentSetupPort`, the default until
- * the real install and sign-in adapters ship (onboarding 9.1 to 9.5), and for
- * tests. Deterministic: install reports two steps and succeeds, and sign-in
+ * `setup-memory` (story 2.3): an in-memory `AgentSetupPort` for tests; the
+ * server runs the real install and sign-in adapters (`setup-claude-code`,
+ * onboarding 9.1 to 9.3). Deterministic: install reports two steps and succeeds, and sign-in
  * returns a fixed placeholder URL and succeeds when `complete` is called
  * (or is cancelled). It installs nothing and signs into nothing.
  */

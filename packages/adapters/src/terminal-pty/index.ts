@@ -8,10 +8,10 @@
  * Nothing here logs what the program prints: its output goes only to the
  * caller's `onData` (a sign-in prints a URL and reads a code; AD-16).
  */
-import { spawnSync } from 'node:child_process';
 import { accessSync, chmodSync, constants, existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
+import { killProcessTree, nodeProcessTreeSystem } from '../process-tree.js';
 
 /** The module's package name. Kept in a variable so neither TypeScript nor the bundler needs it at build time (AD-19). */
 const NODE_PTY = 'node-pty';
@@ -95,33 +95,36 @@ function ensureSpawnHelperExecutable(packageDir: string): void {
   }
 }
 
-/** `taskkill.exe` by absolute path, so no `PATH` entry can stand in for it. */
-function taskkillPath(): string {
-  return join(process.env.SystemRoot || process.env.SYSTEMROOT || 'C:\\Windows', 'System32', 'taskkill.exe');
+/**
+ * node-pty 1.1.0's Windows `kill()` forks `conpty_console_list_agent` to list
+ * and stop the console's processes. Once `taskkill` has stopped the tree that
+ * agent can't attach to the console and prints an uncaught "AttachConsole
+ * failed". The tree is already stopped, so its list is skipped; the rest of
+ * `kill()` (closing the pseudo-console and its output worker) still runs. A
+ * node-pty without that internal is left as it is.
+ */
+function skipConsoleProcessList(terminal: PtyTerminal): void {
+  const agent = (terminal as { _agent?: { _getConsoleProcessList?: unknown } })._agent;
+  if (agent !== undefined && agent !== null && typeof agent._getConsoleProcessList === 'function') {
+    agent._getConsoleProcessList = () => Promise.resolve([]);
+  }
 }
 
 /** Stops `terminal` and its whole process tree: its process group on POSIX, its console's processes on Windows. */
-function killTree(terminal: PtyTerminal): void {
-  const pid = terminal.pid;
-  const validPid = Number.isInteger(pid) && pid > 0;
-  if (process.platform === 'win32') {
-    // The whole tree, then the console; node-pty takes no signal on Windows.
-    if (validPid) spawnSync(taskkillPath(), ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+function killTerminalTree(terminal: PtyTerminal, platform: NodeJS.Platform): void {
+  // The terminal's program leads its own session and process group (POSIX). The same
+  // platform throughout, so a test that says `win32` never signals a real POSIX group.
+  killProcessTree(terminal.pid, { ...nodeProcessTreeSystem, platform });
+  if (platform === 'win32') {
+    // Then the console; node-pty takes no signal on Windows. Its console list is
+    // skipped only when taskkill ran (a valid pid) and stopped the tree.
+    if (Number.isInteger(terminal.pid) && terminal.pid > 0) skipConsoleProcessList(terminal);
     try {
       terminal.kill();
     } catch {
       // Already gone.
     }
     return;
-  }
-  // The terminal's program leads its own session and process group. Never `-0` or a
-  // bad pid, which would signal this process's own group.
-  if (validPid) {
-    try {
-      process.kill(-pid, 'SIGKILL');
-    } catch {
-      // The group is already gone.
-    }
   }
   try {
     terminal.kill('SIGKILL');
@@ -130,8 +133,8 @@ function killTree(terminal: PtyTerminal): void {
   }
 }
 
-/** Wraps a loaded `node-pty` so every spawn has its error handlers attached and a tree kill. */
-export function hiddenPtySpawner(pty: PtyModule): Extract<PtyLoad, { ok: true }>['spawnHidden'] {
+/** Wraps a loaded `node-pty` so every spawn has its error handlers attached and a tree kill. `platform` is replaced in tests only. */
+export function hiddenPtySpawner(pty: PtyModule, platform: NodeJS.Platform = process.platform): Extract<PtyLoad, { ok: true }>['spawnHidden'] {
   return (file, args, options) => {
     const terminal = pty.spawn(file, args, {
       name: 'xterm-256color',
@@ -169,7 +172,7 @@ export function hiddenPtySpawner(pty: PtyModule): Extract<PtyLoad, { ok: true }>
       kill() {
         if (killed) return;
         killed = true;
-        if (!exited) killTree(terminal);
+        if (!exited) killTerminalTree(terminal, platform);
       },
     };
   };

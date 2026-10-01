@@ -239,6 +239,14 @@ Decisions and steps that only you can take (nothing here was done for you):
 6. **Approve or reject** the proposed ticket changes for epics 10 and 4, listed in the epic 3 retrospective's Action items.
 7. **After 1 and 2:** move 9.1 to 9.7 to `done` (A9).
 
+### Decisions (2026-10-01, user)
+
+- **Q1 (how the stack reaches `main`):** the user merges through epic 3 (#36, #37, #34, #38 to #47). Epic 10 rebases onto `main` after that merge (A4).
+- **Q2 (`OGDEN_AGENTS_TEST_CHECK_IN_MS`):** a test switch. It is gated behind `testHooksAllowed`; done in 3.8 (A5's first half). Naming it in the "test hooks in use" log line, and any switch added later, is 10.8's.
+- **Q3 (the 5-minute last-known sign-in window):** keep it, as the user decided earlier (9.2).
+- **Proposed ticket changes for epics 10 and 4:** apply all; applied (see the epic 3 retrospective's Decisions).
+- **Still open:** items 1, 2 and 7 above.
+
 ## Assumptions
 
 Headless run (the caller said not to ask the user):

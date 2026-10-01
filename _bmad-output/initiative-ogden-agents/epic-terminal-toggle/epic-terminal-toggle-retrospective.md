@@ -229,7 +229,7 @@ All are proposed; none was applied by this run, except the `deferred-work.md` in
 
 **Logged in `deferred-work.md` Open items** (this run, each with a log entry): A5's provenance check, A7 and A8. The five epic 3 deferrals (A10) were added to the index too. The 9.6 "Confirm only: AttachConsole" line was closed with a "Resolved:" log entry (P1).
 
-**Proposed ticket changes (not applied; `tickets.toml` for epics 10 and 4 is untouched):**
+**Proposed ticket changes** (proposed by this run; applied 2026-10-01 on the user's approval, see Decisions under For the user):
 
 - **10.8 (refactor sweep):** add to the description: "also runs the provenance check (every plan's `baseline_revision` is an ancestor of HEAD, every Open items line has a log entry); puts any `OGDEN_AGENTS_TEST_*` switch behind `testHooksAllowed`; splits any file the epic grew past 600 lines (`core/src/agent-setup.ts` if touched)." (A5; epic 9 retro A5, A6.)
 - **10.9 and 4.13 (end-to-end suite and release):** add to `verify`: "each live check's result is written into the plan before the ticket moves to `done`". Add 3.10 F7 (kill an own-server spec's agent and CLI children on failure) to whichever runs first. (Epic 9 retro A3; A10.)
@@ -280,6 +280,14 @@ Epic 3 is built. Its live checks and its release (3.10 is HITL) are yours. Nothi
 5. **Decide Q4:** build epics 10 and 4 on `main` after the releases?
 6. **Approve or reject the proposed ticket changes** for 10.1, 10.2, 10.8, 10.9, 4.2, 4.8 and 4.13 (Action items). No `tickets.toml` was edited.
 7. **After 1 and 2:** move 3.1 to 3.11 to `done`.
+
+### Decisions (2026-10-01, user)
+
+- **Q1 (3.8 `built`):** done. 3.8 was called `built` after its review (A3, A4); the review is recorded in its plan.
+- **Q2 (Done when 3):** yes. Reworded in the epic file, wording only: terminal bytes and terminal-only output are stored nowhere, and messages typed in the terminal are imported and stored as chat messages marked "from terminal" (A6). The wording is not in the spec kernel, so no memlog line was needed.
+- **Q4 (base for epics 10 and 4):** the user merges the stack through epic 3 (#36, #37, #34, #38 to #47) to `main`. 10.1 was already built on the stack; it rebases onto `main` after that merge.
+- **Proposed ticket changes:** apply all. Applied to 10.1 (a note only: it is built, and the change touches no code), 10.2, 10.8, 10.9, 4.2, 4.8 and 4.13 in the epics' `tickets.toml`, with a dated "From the epic 9/3 retros" note in each epic file. 3.10 F7 went to 10.9, which runs before 4.13.
+- **Still open:** Q3 (where the live Windows check runs), and items 1, 2 and 7 above.
 
 ## Assumptions
 

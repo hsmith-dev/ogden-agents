@@ -35,7 +35,7 @@ Each line maps to CAP-5 and names the architecture decisions and UX sections it 
 
 1. The user switches a Claude Code chat to the terminal mid-session, sends a message there, switches back, and the chat shows that message, marked "from terminal", with its reply, and continues the session (CAP-5; E3-R1, E3-R4).
 2. While the terminal drives, chat input for that session is refused by the server as well as disabled in the UI (AD-6).
-3. A terminal WebSocket upgrade without the tab's token or with a foreign Origin is refused, and after a terminal session that typed a known marker string, the marker appears nowhere in the event log, database or logs (AD-6, AD-15, AD-16).
+3. A terminal WebSocket upgrade without the tab's token or with a foreign Origin is refused. The terminal's bytes and output only the terminal showed (its prompt, thinking, tool output) appear nowhere in the event log, database or logs; messages typed in the terminal are imported after switching back and stored as chat messages marked "from terminal", as check 1 requires (AD-6, AD-15, AD-16; E3-R4; reworded 2026-10-01, see Notes).
 4. If `node-pty` fails to load, the app still runs and the toggle shows why it is disabled (AD-19); with Developer mode off, no toggle is shown.
 5. The epic's end-to-end suite passes on macOS, Windows and Linux, and the flow in check 1 is run live on Windows.
 6. Released in an `ogden-agents` npm version.
@@ -75,3 +75,4 @@ The toggle for Claude Code, plus a recorded result per agent in `agent-matrix.md
 - Open question: Windows: does `claude` resolve as a `.cmd` shim or a native binary under ConPTY, and do `Ctrl+.`, paste and resize behave in xterm against ConPTY? Entry 8 waits on it.
 - Unknown: which ACP adapters map to a CLI-resumable session (spec Open Questions); decides where the toggle appears. Entry 7 records Claude Code; epic 6 measures the rest.
 - Waits on epic 2 because: the toggle hands off a persistent, resumable ACP session (2.7) and renders in the completed session view (2.10).
+- Decision (2026-10-01, user): Done when 3 is reworded, in wording only (epic 3 retro S2, A6, Q2). As first written, a marker typed in the terminal had to appear nowhere in the event log, which contradicted E3-R4 and Done when 1: terminal messages are imported as chat messages. The as-built rule is unchanged: terminal bytes and terminal-only output are stored nowhere, and messages typed in the terminal are imported and stored as chat messages marked "from terminal" (3.3, its review F8). The wording is only in this file, not in the spec kernel.

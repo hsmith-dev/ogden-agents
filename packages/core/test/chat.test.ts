@@ -1866,13 +1866,15 @@ describe('the terminal (story 3.1)', () => {
     await chat.close();
   });
 
-  it('a CLI that had recorded nothing at open has every turn imported; a reply cut off imports the user turn alone (3.3)', async () => {
+  it('a CLI that had recorded nothing at open: its turns after the chat’s last message are imported; a reply cut off imports the user turn alone (3.3, review F1)', async () => {
     const record = cliRecord();
-    const { core, chat, workspace, session } = await answeredOnce(fakeTerminal(), {
+    const { core, chat, workspace, session, internal } = await answeredOnce(fakeTerminal(), {
       resume: cliResume({ transcript: async () => [...record.turns] }),
     });
     await chat.switchDriver(workspace.id, session.id, 'terminal');
     expect(core.entities.getSession(session.id)!.adapterRefs[TERMINAL_IMPORT_REF]).toBe('start');
+    // The record turned up after all, the chat's own exchange in it: that is not imported again.
+    record.say('first question', 're: first question');
     record.say('one', 'two');
     record.say('killed mid-reply');
     const before = sessionEvents(core, session.id).length;
@@ -1883,6 +1885,7 @@ describe('the terminal (story 3.1)', () => {
       ['user', 'killed mid-reply', 'terminal'],
       ['session.driver_changed'],
     ]);
+    expect(internal).toEqual([]);
     await chat.close();
   });
 
@@ -1931,6 +1934,7 @@ describe('the terminal (story 3.1)', () => {
     const { core, chat, workspace, session } = await answeredOnce(fakeTerminal(), {
       resume: cliResume({ transcript: async () => [...record.turns] }),
     });
+    record.say('first question', 're: first question');
     await chat.switchDriver(workspace.id, session.id, 'terminal');
     for (let i = 0; i < 101; i++) record.say(`q${i}`, `a${i}`);
     const before = sessionEvents(core, session.id).length;

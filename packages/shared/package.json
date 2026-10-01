@@ -5,7 +5,8 @@
   "description": "Contract: Zod schemas and TypeScript types for every event, API shape and ID.",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./secret-patterns": "./src/secret-patterns.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"

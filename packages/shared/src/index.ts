@@ -6,6 +6,7 @@ export * from './errors.js';
 export * from './events.js';
 export * from './ids.js';
 export * from './permissions.js';
+export * from './secret-patterns.js';
 export * from './setup.js';
 export * from './time.js';
 export * from './tab-token.js';

@@ -5,10 +5,10 @@
  * the real `node-pty`, over `/ws/terminal/:sesId`. No test runs the real
  * `claude`. The gate's refusals of the terminal socket are in gate.test.ts.
  */
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadPty, stripTerminalEscapes } from '@ogden-agents/adapters';
+import { loadPty, projectSlug, stripTerminalEscapes } from '@ogden-agents/adapters';
 import { AGENT_SESSION_REF, createChat, openCore } from '@ogden-agents/core';
 import { Hono } from 'hono';
 import {
@@ -67,12 +67,13 @@ interface CliRecord {
  */
 async function startTerminalServer(options: StartOptions & { lines?: string[] } = {}) {
   const record = join(tempDir('ogden-agents-cli-'), 'record.json');
+  const claudeConfig = tempDir('ogden-agents-claude-');
   const server = await startTestServer({
-    extraAgentEnv: { CLAUDE_CODE_EXECUTABLE: FAKE_CLI, FAKE_CLAUDE_RECORD: record, FAKE_ACP_RESUME: 'resume', CLAUDE_CONFIG_DIR: tempDir('ogden-agents-claude-') },
+    extraAgentEnv: { CLAUDE_CODE_EXECUTABLE: FAKE_CLI, FAKE_CLAUDE_RECORD: record, FAKE_ACP_RESUME: 'resume', CLAUDE_CONFIG_DIR: claudeConfig },
     ...options,
   });
   servers.push(server);
-  return { server, tab: await signIn(server), record: () => JSON.parse(readFileSync(record, 'utf8')) as CliRecord, recorded: () => existsSync(record) };
+  return { server, claudeConfig, tab: await signIn(server), record: () => JSON.parse(readFileSync(record, 'utf8')) as CliRecord, recorded: () => existsSync(record) };
 }
 
 function post(server: TestServer, tab: SignedIn, path: string, body: unknown) {
@@ -334,9 +335,21 @@ const realPty = await loadPty();
 describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to its terminal and back (fake CLI in the real terminal)', () => {
   it('opens the CLI on the same session in the project folder, carries bytes, and back; the next message gets a reply; nothing typed is stored or logged', async () => {
     const lines: string[] = [];
-    const { server, tab, record, recorded } = await startTerminalServer({ lines });
+    const { server, tab, record, recorded, claudeConfig } = await startTerminalServer({ lines });
     const { repo, ids, sessionId } = await answeredChat(server, tab);
     const ref = server.core.entities.getSession(sessionId)!.adapterRefs[AGENT_SESSION_REF]!;
+    // The chat's own exchange in Claude Code's record, as the real agent leaves it (the fake ACP agent writes none).
+    const recordFolder = join(claudeConfig, 'projects', projectSlug(realpathSync.native(repo)));
+    mkdirSync(recordFolder, { recursive: true });
+    writeFileSync(
+      join(recordFolder, `${ref}.jsonl`),
+      [
+        { type: 'user', uuid: 'chat-u1', parentUuid: null, isSidechain: false, sessionId: ref, message: { role: 'user', content: 'first question' } },
+        { type: 'assistant', uuid: 'chat-a1', parentUuid: 'chat-u1', isSidechain: false, sessionId: ref, message: { role: 'assistant', content: [{ type: 'text', text: 'the chat reply' }] } },
+      ]
+        .map((line) => `${JSON.stringify(line)}\n`)
+        .join(''),
+    );
 
     const switched = await switchTo(server, tab, ids, 'terminal');
     expect(switched.status).toBe(200);
@@ -415,6 +428,12 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     expect(lines.join('\n')).not.toContain('fake-claude:--resume');
     const logs = join(server.dataDir, LOG_DIR);
     for (const file of existsSync(logs) ? filesUnder(logs) : []) expect(readFileSync(file).includes(MARKER), file).toBe(false);
+    // What only the terminal showed or the CLI recorded beside the text (its prompt, thinking, tool output,
+    // sidechain) is in no file of the data folder: database, its WAL, logs (review F8).
+    for (const file of filesUnder(server.dataDir)) {
+      const bytes = readFileSync(file);
+      for (const only of ['ready>', `thinking about ${MARKER}`, 'tool-output', 'sidechain-text', 'the chat reply']) expect(bytes.includes(only), `${only} in ${file}`).toBe(false);
+    }
   }, 90_000);
 
   it.skipIf(process.platform === 'win32')(`a resize frame resizes the terminal (skipped on Windows: ${WINDOWS_RESIZE})`, async () => {

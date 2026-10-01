@@ -4,7 +4,7 @@
  * fake CLI (`tests/fixtures/fake-claude-cli.mjs`). Never the user's own
  * `~/.claude`.
  */
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -126,6 +126,9 @@ describe('parseClaudeTranscript', () => {
     const u1 = rec('user', null, `my key is ${SECRET}`);
     const a1 = rec('assistant', u1.uuid, [{ type: 'text', text: `echo ${SECRET}` }]);
     expect(parseClaudeTranscript(jsonl(u1, a1), [SECRET]).map((turn) => turn.text)).toEqual([`my key is ${MASKED}`, `echo ${MASKED}`]);
+    // Anthropic keys are redacted even when not in the environment, as the log's backstop does (review F4).
+    const u2 = rec('user', null, 'try sk-ant-api03-AbC_dEf-123 please');
+    expect(parseClaudeTranscript(jsonl(u2), []).map((turn) => turn.text)).toEqual([`try ${MASKED} please`]);
     expect(parseClaudeTranscript('', [])).toEqual([]);
     expect(parseClaudeTranscript('null\n42\n"text"\n{"type":"user"}\n[1]\n', [])).toEqual([]);
   });
@@ -199,6 +202,12 @@ describe('readClaudeTranscript', () => {
     writeFileSync(join(outside, `${SESSION}.jsonl`), jsonl(rec('user', null, 'outside')));
     symlinkSync(outside, join(config, 'projects', projectSlug(other)));
     expect(await codeOf(readClaudeTranscript({ agentSessionId: SESSION, cwd: other, env }))).toBe('transcript_unsafe_path');
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a FIFO in place of the record without blocking on it (review F3)', async () => {
+    const { cwd, env, file } = setup();
+    execFileSync('mkfifo', [file]);
+    expect(await codeOf(readClaudeTranscript({ agentSessionId: SESSION, cwd, env }))).toBe('transcript_unsafe_path');
   });
 
   it('finds a long folder’s record under the shortened slug Claude Code gives it', async () => {

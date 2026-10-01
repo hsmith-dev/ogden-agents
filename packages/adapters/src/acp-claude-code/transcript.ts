@@ -14,7 +14,8 @@
  *   of it only what a person reads: the user's own text and the text of the
  *   agent's reply, never thinking, tool calls, tool results, meta records or
  *   the CLI's `<command-…>`/`<local-command-…>`/`<system-reminder>` wrappers.
- * - Every text is masked with the session environment's secrets (AD-16).
+ * - Every text is masked with the session environment's secrets, and any
+ *   Anthropic key in it redacted as the log's backstop does (AD-16).
  *   Nothing read is logged; an error carries a code, never a path or content.
  */
 import { constants, type Stats } from 'node:fs';
@@ -22,6 +23,7 @@ import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { AgentError, type AgentTranscriptTurn } from '@ogden-agents/core';
+import { redactAnthropicKeys } from '@ogden-agents/shared';
 import { maskSecrets, secretValues } from './mask.js';
 import { SESSION_ID } from './terminal-command.js';
 
@@ -111,10 +113,13 @@ export async function readClaudeTranscript(input: {
   try {
     const file = await findRecord(projects, input.cwd, input.agentSessionId);
     if (file === undefined) return [];
-    // No following a symlink swapped in since the check, where the platform can say so.
-    const handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    // No following a symlink swapped in since the check, and no blocking on a FIFO, where the platform can say so.
+    const handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
     try {
-      const { size } = await handle.stat();
+      const stats = await handle.stat();
+      // What was opened, not what was checked: a plain file only (review F3).
+      if (!stats.isFile()) throw transcriptError('transcript_unsafe_path', "Claude Code's session record isn't a plain file.");
+      const { size } = stats;
       if (size > MAX_TRANSCRIPT_BYTES) throw transcriptError('transcript_too_large', "Claude Code's session record is too large to import.");
       const buffer = Buffer.alloc(size);
       let read = 0;
@@ -222,11 +227,12 @@ export function parseClaudeTranscript(text: string, secrets: readonly string[]):
   }
   chain.reverse();
 
+  const mask = (value: string) => redactAnthropicKeys(maskSecrets(value, secrets));
   const turns: AgentTranscriptTurn[] = [];
   let exchange: string | undefined;
   let reply: string[] = [];
   const flush = () => {
-    if (exchange !== undefined && reply.length > 0) turns.push({ id: exchange, role: 'agent', text: maskSecrets(reply.join('\n\n'), secrets) });
+    if (exchange !== undefined && reply.length > 0) turns.push({ id: exchange, role: 'agent', text: mask(reply.join('\n\n')) });
     reply = [];
   };
   for (const record of chain) {
@@ -236,7 +242,7 @@ export function parseClaudeTranscript(text: string, secrets: readonly string[]):
       if (typed === undefined) continue;
       flush();
       exchange = record.uuid;
-      turns.push({ id: exchange, role: 'user', text: maskSecrets(typed, secrets) });
+      turns.push({ id: exchange, role: 'user', text: mask(typed) });
     } else if (record.type === 'assistant' && exchange !== undefined) {
       for (const piece of textPieces(record.content)) if (piece.trim() !== '') reply.push(piece.trim());
     }

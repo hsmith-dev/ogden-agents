@@ -21,8 +21,16 @@ describe('turnsToImport', () => {
     expect(turnsToImport(chat, [...before, ...typed], 'u2')).toEqual({ turns: [], omitted: 0, unaligned: false });
   });
 
-  it('imports every turn after the start mark (no record when the terminal opened)', () => {
-    expect(turnsToImport(chat, typed, START_MARK).turns).toEqual(typed);
+  it('imports every turn after the start mark (no record when the terminal opened) on a chat with no user message', () => {
+    expect(turnsToImport([], typed, START_MARK).turns).toEqual(typed);
+    expect(turnsToImport(stored(['agent', 'a note']), typed, START_MARK).turns).toEqual(typed);
+  });
+
+  it('a start mark on a chat with user messages lines up on the last one instead (review F1)', () => {
+    const ab = stored(['user', 'A'], ['agent', 're A'], ['user', 'B'], ['agent', 're B']);
+    const cli = [user('a', 'A'), agent('a', 're A'), user('b', 'B'), agent('b', 're B'), user('c', 'C'), agent('c', 're C')];
+    expect(turnsToImport(ab, cli, START_MARK)).toEqual({ turns: [user('c', 'C'), agent('c', 're C')], omitted: 0, unaligned: false });
+    expect(turnsToImport(ab, [user('c', 'C')], START_MARK)).toEqual({ turns: [], omitted: 0, unaligned: true });
   });
 
   it('imports a user turn whose reply never came (CLI killed mid-reply)', () => {
@@ -49,7 +57,7 @@ describe('turnsToImport', () => {
 
   it(`imports at most the newest ${MAX_IMPORTED_TURNS} turns and counts the rest`, () => {
     const many = Array.from({ length: MAX_IMPORTED_TURNS + 5 }, (_, i) => user(`u${i}`, `t${i}`));
-    const result = turnsToImport(chat, many, START_MARK);
+    const result = turnsToImport([], many, START_MARK);
     expect(result.omitted).toBe(5);
     expect(result.turns).toHaveLength(MAX_IMPORTED_TURNS);
     expect(result.turns[0]).toEqual(user('u5', 't5'));
@@ -59,6 +67,6 @@ describe('turnsToImport', () => {
 
   it('cuts each text at the longest message', () => {
     const long = 'x'.repeat(MAX_MESSAGE_LENGTH + 10);
-    expect(turnsToImport(chat, [user('u2', long)], START_MARK).turns[0]!.text).toHaveLength(MAX_MESSAGE_LENGTH);
+    expect(turnsToImport([], [user('u2', long)], START_MARK).turns[0]!.text).toHaveLength(MAX_MESSAGE_LENGTH);
   });
 });

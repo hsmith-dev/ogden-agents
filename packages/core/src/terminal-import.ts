@@ -7,8 +7,10 @@
  *
  * Where the import starts is the mark core saved when the terminal opened:
  * the id of the CLI's last turn then ({@link START_MARK} when it had none).
- * Without a mark (the read failed then) it lines up on the chat's last user
- * message instead, and imports nothing when it can't find it.
+ * Without a mark (the read failed then), or with {@link START_MARK} on a chat
+ * that already has a user message (its record was elsewhere at open, so the
+ * CLI's turns may repeat the chat's; review F1), it lines up on the chat's
+ * last user message instead, and imports nothing when it can't find it.
  */
 import { MAX_MESSAGE_LENGTH } from '@ogden-agents/shared';
 import type { AgentTranscriptTurn } from './agent-port.js';
@@ -51,15 +53,16 @@ const endOfExchange = (turns: readonly AgentTranscriptTurn[], at: number): numbe
  * saved when the terminal opened (`undefined` or `''` when none was).
  */
 export function turnsToImport(stored: readonly CompletedMessage[], turns: readonly AgentTranscriptTurn[], after?: string): TerminalImport {
+  const typed = stored.findLast((message) => message.role === 'user')?.content.trim();
   let from: number | undefined;
-  if (after === START_MARK) from = 0;
+  // `start` is trusted only on a chat with nothing the CLI could repeat.
+  if (after === START_MARK) from = typed === undefined || typed === '' ? 0 : undefined;
   else if (after !== undefined && after !== '') {
     const at = lastIndexOf(turns, (turn) => turn.id === after);
     if (at !== -1) from = at + 1;
   }
   if (from === undefined) {
     // No usable mark: after the chat's last user message, found among the CLI's.
-    const typed = stored.findLast((message) => message.role === 'user')?.content.trim();
     const at = typed === undefined || typed === '' ? -1 : lastIndexOf(turns, (turn) => turn.role === 'user' && turn.text.trim() === typed);
     if (at === -1) return { turns: [], omitted: 0, unaligned: true };
     from = endOfExchange(turns, at);

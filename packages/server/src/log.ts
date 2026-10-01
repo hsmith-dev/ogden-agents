@@ -10,6 +10,8 @@
  */
 import { appendFileSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+// The subpath, not the index: the launcher bundle includes this file and must not load zod.
+import { ANTHROPIC_KEY_PATTERNS } from '@ogden-agents/shared/secret-patterns';
 
 export type LogLevel = 'info' | 'warn' | 'error';
 export type LogFields = Record<string, unknown>;
@@ -48,13 +50,8 @@ export const TOO_DEEP = '[too deep]';
 
 /** Credentials that can appear inside any string: bearer tokens, the auth subprotocol, launch codes, token fragments, API keys. */
 const SECRET_PATTERNS: ReadonlyArray<[RegExp, string]> = [
-  // An Anthropic key, with any continuation on the following lines (a key
-  // wrapped or split across lines, raw or as an escaped `\n`), and a key
-  // cut short at the end of a line (just `sk-ant`).
-  [/sk-ant[A-Za-z0-9_-]*(?:(?:\r?\n|\\r|\\n)+[A-Za-z0-9_-]+)*/g, REDACTED],
-  // A key cut earlier, at the end of a line (`sk-an`, `sk-a`, `sk-`), with what follows on the next lines.
-  [/\bsk-(?:an?)?(?:(?:\r?\n|\\r|\\n)+[A-Za-z0-9_-]+)+/g, REDACTED],
-  [/\bsk-(?:an?)?$/gm, REDACTED],
+  // Anthropic keys, shared with the terminal import (story 3.3 review F4).
+  ...ANTHROPIC_KEY_PATTERNS.map((pattern): [RegExp, string] => [pattern, REDACTED]),
   [/(Bearer\s+)[^\s"',]+/gi, `$1${REDACTED}`],
   [/(ogden\.auth\.)[^\s"',]+/g, `$1${REDACTED}`],
   [/([?&]code=)[^\s"'&#]+/g, `$1${REDACTED}`],

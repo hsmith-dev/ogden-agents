@@ -9,6 +9,8 @@
  * Chat | Terminal toggle, `Ctrl+.`, the read-only banner and peek, focus, the
  * URL mirroring the driver, and the toggle's disabled reasons.
  */
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { ROOT } from '../support.js';
@@ -46,19 +48,30 @@ const stubTerminal = (page: Page, terminal: unknown) =>
     await route.fulfill({ response, json: { ...json, terminal } });
   });
 
-const withTerminalChat = (page: Page, developerMode: boolean, body: () => Promise<void>) =>
-  withChatServer(
-    page,
-    async ({ repo }) => {
-      await page.evaluate(({ key, on }) => localStorage.setItem(key, JSON.stringify({ theme: 'system', density: 'comfortable', developerMode: on })), {
-        key: APPEARANCE_KEY,
-        on: developerMode,
-      });
-      await startChat(page, repo);
-      await body();
-    },
-    { extra: { extraAgentEnv: { CLAUDE_CODE_EXECUTABLE: FAKE_CLI, FAKE_ACP_RESUME: 'resume' } } },
-  );
+/**
+ * Runs `body` on a chat whose terminal runs the fake CLI. Claude Code's config
+ * folder is a temp one (story 3.3 review F2): reading the session record back
+ * never probes the user's own `~/.claude`.
+ */
+const withTerminalChat = async (page: Page, developerMode: boolean, body: () => Promise<void>) => {
+  const claudeConfig = mkdtempSync(join(tmpdir(), 'ogden-agents-e2e-claude-'));
+  try {
+    await withChatServer(
+      page,
+      async ({ repo }) => {
+        await page.evaluate(({ key, on }) => localStorage.setItem(key, JSON.stringify({ theme: 'system', density: 'comfortable', developerMode: on })), {
+          key: APPEARANCE_KEY,
+          on: developerMode,
+        });
+        await startChat(page, repo);
+        await body();
+      },
+      { extra: { extraAgentEnv: { CLAUDE_CODE_EXECUTABLE: FAKE_CLI, FAKE_ACP_RESUME: 'resume', CLAUDE_CONFIG_DIR: claudeConfig } } },
+    );
+  } finally {
+    rmSync(claudeConfig, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  }
+};
 
 test('in Developer mode a chat switches to its terminal, takes typing there, and switches back; the next message gets a reply', async ({ page }) => {
   test.skip(!process.env.CI && !(await ptyLoads()), 'node-pty cannot load on this computer');

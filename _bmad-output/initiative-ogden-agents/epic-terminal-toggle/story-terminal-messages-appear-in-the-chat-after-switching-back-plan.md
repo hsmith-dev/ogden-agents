@@ -73,11 +73,23 @@ context:
 
 - Adapter `acp-claude-code/transcript.ts`: reads only `<CLAUDE_CONFIG_DIR, else $HOME|%USERPROFILE%/.claude>/projects/<slug(cwd)>/<id>.jsonl` (the id must match the terminal's `SESSION_ID`, now exported). A cwd whose slug is over 200 chars matches the folder named `<slug[0..200]>-*` (Claude Code adds a hash this can't recompute). A symlinked file, or a project folder resolving outside `projects`, is refused (`transcript_unsafe_path`); opened with `O_NOFOLLOW` where available. Errors are `AgentError`s with `details.code` and no path. Main chain follows `parentUuid`, else `logicalParentUuid` (compaction), cycle-safe. Besides the listed wrappers, `<bash-…>` text, `[Request interrupted by user]`, `isCompactSummary`, `isVisibleInTranscriptOnly` and `isApiErrorMessage` records are skipped. An agent turn shares its user turn's id.
 - Core `turnsToImport(stored, turns, after?)` now returns `{ turns, omitted, unaligned }`; a mark the record no longer holds (rewritten) falls back to alignment. `terminal.ts` reads at open after `releaseAgent` (empty ref on failure, so an older mark never lingers), imports on switch back, then moves the mark. Failures are logged through `onInternalError` as `TerminalImportError` (`terminal_import_unreadable` / `_unaligned` / `_failed`, plus the adapter's own code), never the adapter's error text.
-- Server terminal tests always set a temp `CLAUDE_CONFIG_DIR`. The round-trip test's old "marker in no event/no data file" check became "in no log line and no log file" (the import puts it in the event log by design, as the acceptance criterion allows). `terminal.spec.ts` (e2e) is unchanged and sets no `CLAUDE_CONFIG_DIR`: there the reader only stats a missing file under the real home and reads nothing.
+- Not imported (deferred, review F9): turns after `/clear` or in a forked session (another session id), and a terminal `/rewind` of turns already imported.
+- Server terminal tests always set a temp `CLAUDE_CONFIG_DIR`. The round-trip test's old "marker in no event/no data file" check became "in no log line and no log file" (the import puts it in the event log by design, as the acceptance criterion allows). `terminal.spec.ts` (e2e) only gained a temp `CLAUDE_CONFIG_DIR` (review F2).
 
 ## Plan Change Log
 
 ## Review Triage Log
+
+Security review (coordinator, 2026-10-01): no blockers.
+
+| ID | Finding | Decision | Change |
+|---|---|---|---|
+| F1 | A `start` mark on a chat that already has user messages can re-import the chat's own turns (the record was elsewhere at open). | Fixed | `turnsToImport` trusts `start` only when the chat has no user message; otherwise it lines up on the last one (core tests: start, chat A,B, CLI A,B,C → only C). |
+| F2 | `terminal.spec.ts` let the reader probe the real `~/.claude`. | Fixed | The e2e sets a temp `CLAUDE_CONFIG_DIR`, removed afterwards. |
+| F3 | Opening a FIFO or a swapped-in special file could block or read the wrong thing. | Fixed | Opened with `O_NOFOLLOW | O_NONBLOCK` where available; the opened handle must be a regular file (`transcript_unsafe_path`). FIFO test on POSIX. |
+| F4 | Key-shaped secrets not in the agent's environment were imported unmasked. | Fixed | The log backstop's Anthropic key patterns moved to `@ogden-agents/shared` (`ANTHROPIC_KEY_PATTERNS`, `redactAnthropicKeys`), used by `log.ts` and by the reader after `maskSecrets`. They may over-redact a word on the line after a key, which is acceptable. |
+| F8 | The data-folder scan was narrowed to logs. | Fixed | `terminal-socket.test.ts` scans every data-folder file for terminal-only strings (prompt, thinking, tool output, sidechain, the chat's own CLI-recorded reply). The server test now seeds the chat's exchange in the record, as the real agent leaves it. |
+| F9 | `/clear`, `--fork-session` and `/rewind` in the terminal aren't imported/reflected. | Deferred | `deferred-work.md` entry (3.3 review F9). |
 
 ## Design Notes
 

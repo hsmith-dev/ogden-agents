@@ -315,7 +315,9 @@ setTimeout(() => process.exit(4), 500);
 async function exit3Case(bunKind) {
   const label = `exit3 bun ${bunKind}`;
   const gcFile = join(dir, `gc3-${bunKind}.txt`);
-  const bun = execFileSync('where', ['bun.exe'], { encoding: 'utf8' }).split(/\r?\n/)[0].trim();
+  const prefix = execFileSync(process.env.ComSpec || 'cmd.exe', ['/d', '/c', 'npm prefix -g'], { encoding: 'utf8' }).trim();
+  const bun = join(prefix, 'node_modules', 'bun', 'bin', 'bun.exe');
+  log(`${label}: bun.exe at ${bun}: ${existsSync(bun)}; bin/: ${existsSync(dirname(bun)) ? readdirSync(dirname(bun)).join(', ') : 'none'}`);
   const term = pty.spawn(bun, [bunParent], { name: 'xterm-256color', cols: 80, rows: 24, cwd: dir, env: { ...process.env, GC_FILE: gcFile, BUN_SPAWN: bunKind, NODE_EXE: process.execPath, GC_SCRIPT: gcNode } });
   term.onData(() => {});
   let exit;

@@ -196,3 +196,12 @@
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-refactor-sweep-plan.md`
   summary: Deferred from the 9.6 sweep: the two `removeLeftovers` (uv's has no swap restore) and the two `InstallButton`s (different props) stay separate.
   evidence: `packages/adapters/src/toolchain-uv/uv-toolchain.ts`, `packages/adapters/src/setup-claude-code/install.ts`; `packages/web/src/agents/agent-card.tsx`, `packages/web/src/routes/tools-page.tsx`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-end-to-end-suite-and-release-plan.md`
+  summary: The installed onboarding journey signs in through the card's "Open the sign-in page" link: the installed server has no `BROWSER` override (9.1: unset until a live check proves one), so for a real user the Claude CLI opens the sign-in tab itself, which no test can see. That path is covered only by RELEASING step 5's live checks.
+  evidence: `tests/e2e-installed/onboarding-journey.spec.ts` steps 3 and 6; `packages/adapters/src/setup-claude-code/index.ts` `signInTab`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-end-to-end-suite-and-release-plan.md`
+  summary: The plan's step 6 says "Sign in, then Try again resends"; per 9.4 the chat whose notice started the sign-in resends by itself, once (Try again is for the other chats in error). The installed journey asserts the automatic resend.
+  evidence: `tests/e2e-installed/onboarding-journey.spec.ts` step 6; `tests/e2e/sign-in-again.spec.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-end-to-end-suite-and-release-plan.md`
+  summary: New shipped test hooks (security review asked for): `OGDEN_AGENTS_TEST_CLAUDE_INSTALL` (Install's pins and npm from a JSON file; every locked package must carry a sha512 integrity, so npm still checks it) and `OGDEN_AGENTS_TEST_API_KEY_CHECK=accept`. Both, and `OGDEN_AGENTS_TEST_SECRET_STORE`, act only in a test run (`NODE_ENV=test` or `VITEST`) on a data folder inside the OS temp folder (real paths), and the install source must be `file:` fixtures inside it (security review F1, F2); the server logs "test hooks in use" when either is active. Consider failing the release smoke if that line ever appears in a registry install's log.
+  evidence: `packages/server/src/test-hooks.ts`; `packages/server/test/test-hooks.test.ts`.

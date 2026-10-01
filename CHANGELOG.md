@@ -4,7 +4,7 @@ Every release of the `ogden-agents` npm package. Versions follow [semantic versi
 
 ## 0.2.0 — chat and workspaces
 
-The first release on npm, published first as `0.2.0-rc.1` on the `next` dist-tag (`npx ogden-agents@next`), then as `0.2.0`. It includes everything listed under 0.1.0, which was never published. Ogden Agents now runs Claude Code: chat with it in your projects, answer its permission requests, and pick up where you left off after a restart. Run it with `npx ogden-agents` (Node 24 or later on macOS, Windows or Linux).
+The first real release on npm (`0.0.0` was a name reservation), published first as `0.2.0-rc.1` on the `next` dist-tag (`npx ogden-agents@next`), then as `0.2.0`. It includes everything listed under 0.1.0, which was never published. Ogden Agents now runs Claude Code: chat with it in your projects, answer its permission requests, and pick up where you left off after a restart. Run it with `npx ogden-agents` (Node 24 or later on macOS, Windows or Linux).
 
 - **Workspaces.** Add a project by browsing to its folder, or start a new project folder, and switch between projects from the sidebar header. Each project has its list of chats with **New chat**, and a settings page where you can delete its history (refused while an agent is working or waiting in it).
 - **Chats with Claude Code.** Replies stream in as the agent writes them. A message sent while the agent works is shown as **Queued** and sent after the reply; **Stop** ends a turn, and whatever was queued comes back to the composer. The agent's reads, edits and commands show as tool-call rows, grouped in Comfortable density, with the diff of each edit. An error shows its reason with **Try again**, and an agent that has gone quiet gets a check-in line with Stop. Long chats open at their latest page, with **Show earlier** and **Jump to latest**.
@@ -17,6 +17,8 @@ The first release on npm, published first as `0.2.0-rc.1` on the `next` dist-tag
 - **Or use an API key.** **Use an API key instead** checks an Anthropic API key and keeps it in your OS keychain; it is used only while no subscription is signed in, and never shown again (just its last four characters) until **Remove key**.
 - **Install Claude Code from the UI.** The package doesn't bundle Claude Code. The Claude Code card detects it and, with **Install**, installs a pinned, integrity-checked copy into Ogden Agents' data folder, with progress on the card.
 - **Sign in again from a chat.** When Claude Code's sign-in expires, the chat's error offers **Sign in** (or a link to the API key when the key was refused), and **Try again** resends once you're signed in, keeping the chat's context.
+- **Welcome on first run.** A first launch opens Welcome: set up Claude Code (install it, sign in or use an API key; it moves on by itself once ready), add your first project, and take or decline the app shortcut once, ending in that project's chats. **Skip for now** ends it for good, and Settings > Welcome brings it back. A data folder that already has projects skips it.
+- **Reliability fixes.** Stopping a sign-in, an agent or the server ends its whole process tree the same way on every OS, with no stray console message on Windows; saving or removing an API key twice at once can't leave the wrong one in use; an answer to the shortcut offer that fails to send is retried; and signing in again resends only the chat it was started from, once.
 
 ## 0.1.0 — first build (not published)
 

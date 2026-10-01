@@ -2,7 +2,7 @@
 export declare function testNpmCli(): string;
 export declare function packFakeAdapter(
   dir: string,
-  options?: { npmCli?: string },
+  options?: { npmCli?: string; agent?: string },
 ): {
   tarball: string;
   pins: {

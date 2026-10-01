@@ -78,7 +78,7 @@
 //
 // FAKE_ACP_REQUIRE_API_KEY=1 makes every prompt need ANTHROPIC_API_KEY (story
 // 9.2): without it the prompt fails with ACP's auth-required error (-32000);
-// with it the reply is "key received" (never the value).
+// with it the reply is "key received …<last 4>" (never the whole value).
 //
 // FAKE_ACP_REQUIRE_LOGIN=<state file> makes every prompt need a sign-in (story
 // 9.4): until `fake-claude-login.mjs` has written `{"loggedIn":true}` to that
@@ -209,7 +209,7 @@ acp
     }
     if (process.env.FAKE_ACP_REQUIRE_API_KEY === '1') {
       if (!process.env.ANTHROPIC_API_KEY) throw acp.RequestError.authRequired(undefined, 'the fake agent needs an API key');
-      await say(client, params.sessionId, 'key received');
+      await say(client, params.sessionId, `key received …${process.env.ANTHROPIC_API_KEY.slice(-4)}`);
       return { stopReason: 'end_turn' };
     }
     if (text === 'crash') {

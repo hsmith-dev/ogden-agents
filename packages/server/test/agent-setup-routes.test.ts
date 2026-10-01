@@ -491,13 +491,16 @@ describe('agent setup routes: review fixes (story 9.2)', () => {
     await server.close();
   }, 30_000);
 
-  it('F5: the in-memory store is honoured only in a test run', () => {
-    expect(testSecretStore({ OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', NODE_ENV: 'test' })).toBe('memory');
-    expect(testSecretStore({ OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', VITEST: 'true' })).toBe('memory');
-    expect(testSecretStore({ OGDEN_AGENTS_TEST_SECRET_STORE: 'memory' })).toBeUndefined();
-    expect(testSecretStore({ OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', NODE_ENV: 'production', VITEST: '' })).toBeUndefined();
-    expect(testSecretStore({ NODE_ENV: 'test' })).toBeUndefined();
-    expect(testSecretStore({ OGDEN_AGENTS_TEST_SECRET_STORE: 'keychain', NODE_ENV: 'test' })).toBeUndefined();
+  it('F5: the in-memory store is honoured only in a test run, on a data folder inside the temp folder (9.7 review F1)', () => {
+    const dir = tempDataDir();
+    expect(testSecretStore({ OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', NODE_ENV: 'test' }, dir)).toBe('memory');
+    expect(testSecretStore({ OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', VITEST: 'true' }, dir)).toBe('memory');
+    expect(testSecretStore({ OGDEN_AGENTS_TEST_SECRET_STORE: 'memory' }, dir)).toBeUndefined();
+    expect(testSecretStore({ OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', NODE_ENV: 'production', VITEST: '' }, dir)).toBeUndefined();
+    expect(testSecretStore({ NODE_ENV: 'test' }, dir)).toBeUndefined();
+    expect(testSecretStore({ OGDEN_AGENTS_TEST_SECRET_STORE: 'keychain', NODE_ENV: 'test' }, dir)).toBeUndefined();
+    // A data folder outside the temp folder (a user's own) never gets it, even in a test run.
+    expect(testSecretStore({ OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', NODE_ENV: 'test' }, process.cwd())).toBeUndefined();
   });
 });
 

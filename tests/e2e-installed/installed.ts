@@ -4,9 +4,11 @@
  * the environment; `installed()` rebuilds the install around them, so a test
  * can run the installed launcher again (by its path in the npx install).
  */
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { prepareInstall, withTimeout, type Install } from '../../scripts/installed-package.mjs';
+import { packFakeAdapter, testNpmCli } from '../fixtures/fake-adapter/pack.mjs';
 import { isAlive, readPortFile, ROOT, waitUntil } from '../support.js';
 
 /**
@@ -19,6 +21,17 @@ export const CLAUDE_ACP_PATH_ENV = 'OGDEN_AGENTS_CLAUDE_ACP_PATH';
 export const FAKE_AGENT = join(ROOT, 'tests', 'fixtures', 'fake-acp-agent-installed.mjs');
 /** The same, but it runs a command without asking for permission: the hold proof's agent. */
 export const FAKE_AGENT_NO_HOLD = join(ROOT, 'tests', 'fixtures', 'fake-acp-agent-no-hold.mjs');
+
+/**
+ * The installed server's test hooks (`packages/server/src/test-hooks.ts`,
+ * story 9.7), honoured only because `prepareInstall` sets `NODE_ENV=test`:
+ * Install's source (fixture pins and npm, in a JSON file) and an API key
+ * check that accepts without reaching Anthropic.
+ */
+export const CLAUDE_INSTALL_ENV = 'OGDEN_AGENTS_TEST_CLAUDE_INSTALL';
+export const API_KEY_CHECK_ENV = 'OGDEN_AGENTS_TEST_API_KEY_CHECK';
+/** The fake agent itself, which the onboarding wrapper runs. */
+const FAKE_AGENT_CORE = join(ROOT, 'tests', 'fixtures', 'fake-acp-agent.mjs');
 
 /** The variables every launcher run of a server with `agent` gets. */
 export const agentEnv = (agent: string): Record<string, string> => ({ [CLAUDE_ACP_PATH_ENV]: agent });
@@ -83,7 +96,7 @@ export function extraFolder(prefix: string): string {
 export function ownInstall(name: string, agent: string): Install {
   const dataDir = extraFolder(`${name}-data`);
   // These specs are not about the first run: Welcome is marked done, so a tab lands on Projects (story 9.5).
-  // The first run on an installed package is journey.spec.ts's.
+  // The first run on an installed package is journey.spec.ts's (Skip for now) and onboarding-journey.spec.ts's (story 9.7).
   writeFileSync(join(dataDir, 'onboarding.json'), `${JSON.stringify({ welcomeCompleted: true })}\n`, { mode: 0o600 });
   return prepareInstall({
     tarball: env(ENV.tarball),
@@ -161,4 +174,90 @@ export function killExtraServers(extraDir: string): number[] {
     killed.push(record.pid);
   }
   return killed;
+}
+
+/** How the onboarding journey's Claude Code gets signed in: the fake login, or an API key. */
+export type OnboardingSignIn = 'subscription' | 'apiKey';
+
+export interface OnboardingServer {
+  /** The install, set up for this server: its own data folder (nothing in it), home folder and Claude Code. */
+  install: Install;
+  /** The server's home folder (HOME, USERPROFILE, APPDATA, XDG_DATA_HOME under it): the folder browser starts here, and the app shortcut would go here. */
+  home: string;
+  /** The project folder, `<home>/Documents/<projectName>`. */
+  project: string;
+  projectName: string;
+  /** The fake login's state file: present (`{"loggedIn":true}`) means signed in. */
+  loginState: string;
+  /** The fixture adapter's version, which Install installs. */
+  fixtureVersion: string;
+  /** Stops the server if it still runs, and removes every folder of it. */
+  remove(): Promise<void>;
+}
+
+/**
+ * A first-run server of the installed package for the onboarding journey
+ * (story 9.7): a fresh data folder with nothing written in advance, so its
+ * launch link lands on Welcome; its own home folder and project folder; and
+ * no Claude Code until Install puts the fixture adapter in the data folder
+ * (`OGDEN_AGENTS_CLAUDE_ACP_PATH` is left empty, else Install never runs).
+ * The fixture is packed here with a wrapper whose fake-agent switches are
+ * baked in (the server passes agents only an allowlisted environment): the
+ * `claude-terminal` sign-in, the fake login's state file, and either a
+ * sign-in (`subscription`) or an API key (`apiKey`) for every prompt.
+ * Keys stay in memory (`prepareInstall`'s `OGDEN_AGENTS_TEST_SECRET_STORE`).
+ */
+export function onboardingServer(name: string, signIn: OnboardingSignIn): OnboardingServer {
+  const dataDir = extraFolder(`${name}-data`);
+  const work = extraFolder(`${name}-fixture`);
+  // The real path: Windows temp folders may be 8.3 short names, which the folder browser shows long.
+  const home = realpathSync.native(extraFolder(`${name}-home`));
+  const projectName = `${name}-repo`;
+  const project = join(home, 'Documents', projectName);
+  mkdirSync(project, { recursive: true });
+  const loginState = join(work, 'login-state.json');
+
+  const switches: Record<string, string> = {
+    FAKE_ACP_AUTH: 'claude-terminal',
+    FAKE_LOGIN_STATE: loginState,
+    // A resend after signing in again reopens the agent's own session (`via=resumed`).
+    FAKE_ACP_RESUME: 'resume',
+    ...(signIn === 'subscription' ? { FAKE_ACP_REQUIRE_LOGIN: loginState } : { FAKE_ACP_REQUIRE_API_KEY: '1' }),
+  };
+  const wrapper = join(work, 'agent.mjs');
+  writeFileSync(wrapper, `Object.assign(process.env, ${JSON.stringify(switches)});\nawait import(${JSON.stringify(pathToFileURL(FAKE_AGENT_CORE).href)});\n`);
+  const npmCli = testNpmCli();
+  const { pins, version } = packFakeAdapter(join(work, 'pack'), { npmCli, agent: wrapper });
+  const source = join(work, 'install.json');
+  writeFileSync(source, `${JSON.stringify({ pins, npmCli })}\n`);
+
+  const install = prepareInstall({
+    tarball: env(ENV.tarball),
+    prefix: 'ogden-agents-e2e',
+    reuse: { workDir: env(ENV.workDir), cacheDir: env(ENV.cacheDir), dataDir },
+    env: {
+      // Empty: no adapter is given, so Install runs (start.ts reads an empty value as unset).
+      [CLAUDE_ACP_PATH_ENV]: '',
+      [CLAUDE_INSTALL_ENV]: source,
+      [API_KEY_CHECK_ENV]: 'accept',
+      HOME: home,
+      USERPROFILE: home,
+      APPDATA: join(home, 'AppData', 'Roaming'),
+      LOCALAPPDATA: join(home, 'AppData', 'Local'),
+      XDG_DATA_HOME: join(home, '.local', 'share'),
+      XDG_CONFIG_HOME: join(home, '.config'),
+    },
+  });
+
+  const remove = async () => {
+    await stopOwnServer(install);
+    for (const dir of [work, home]) {
+      try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      } catch {
+        // Windows may still hold a handle briefly; the teardown removes the extra folder and reports what remains.
+      }
+    }
+  };
+  return { install, home, project, projectName, loginState, fixtureVersion: version, remove };
 }

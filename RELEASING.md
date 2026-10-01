@@ -16,11 +16,13 @@ A failed publish publishes nothing, since `npm publish` is all or nothing. A fai
 
 ## First release (0.2.0) checklist
 
-The first version on npm is `0.2.0`: epic 2 (chat and workspaces) and onboarding stories 9.1 to 9.4. `0.1.0` was never published (its CHANGELOG entry says so). It goes out in two steps, both by tag: `0.2.0-rc.1` to the `next` dist-tag, checked live with a real Claude Code, then `0.2.0` to `latest`. Every step here is done by the repository owner, by hand; nothing in the repository merges, tags or publishes by itself. Steps 2 and 3 are one-time setup.
+`0.2.0` is the first real release on npm: `0.0.0` was a name reservation, and it holds the `latest` dist-tag until `0.2.0` ships. `0.2.0` is epic 2 (chat and workspaces) and epic 9 (first-run onboarding, stories 9.1 to 9.7). Epic 3 (the terminal) is not in it: the release is cut before any epic 3 story merges. `0.1.0` was never published (its CHANGELOG entry says so).
+
+It goes out in two steps, both by tag: `0.2.0-rc.1` to the `next` dist-tag, checked live with a real Claude Code, then `0.2.0` to `latest`. Every step here is done by the repository owner, by hand; nothing in the repository merges, tags or publishes by itself. Steps 2 and 3 are one-time setup.
 
 ### 1. Merge the stack to `main`
 
-Merge the story branches to `main` in order (epic 2's stories, 9.1 to 9.4, then 2.13, which sets the version to `0.2.0-rc.1`), and wait for CI on `main` to pass, including the installed-package end-to-end suite on macOS, Windows and Linux. `main` must then hold the version `0.2.0-rc.1` in the root, server and web `package.json`, a root `package.json` with `"private": false`, and the 0.2.0 entry in `CHANGELOG.md`.
+Merge the story branches to `main` in this order: epic 2's stories, then 9.1 to 9.4, then 2.13 (which sets the version to `0.2.0-rc.1`), then 9.5, 9.6 and 9.7. No epic 3 branch is merged before the release. Wait for CI on `main` to pass, including the installed-package end-to-end suite (with the first-run onboarding journey) on macOS, Windows and Linux. `main` must then hold the version `0.2.0-rc.1` in the root, server and web `package.json`, a root `package.json` with `"private": false`, and the 0.2.0 entry in `CHANGELOG.md`.
 
 ### 2. Make the repository public
 
@@ -30,7 +32,14 @@ npm only records provenance for packages published from a public repository. The
 
 ### 3. Configure the npm trusted publisher
 
-On npmjs.com, signed in as an owner of `ogden-agents`: the package page → Settings → Trusted Publisher → GitHub Actions, with exactly:
+**First, create the GitHub environment** (required, before any tag is pushed): GitHub → `hsmith-dev/ogden-agents` → Settings → Environments → New environment → `npm-release`. In it:
+
+- Deployment branches and tags → Selected branches and tags → add a **tag** rule `v*.*.*` (and no branch rule), so only a version tag can publish.
+- Required reviewers → add yourself, so each publish waits for your approval.
+
+Do this first: a workflow run that names an environment which doesn't exist creates it with no protection, and the first publish would then go out unreviewed.
+
+Then on npmjs.com, signed in as an owner of `ogden-agents`: the package page → Settings → Trusted Publisher → GitHub Actions, with exactly:
 
 | Field | Value |
 | --- | --- |
@@ -43,8 +52,6 @@ Save. The values are case-sensitive and must match the workflow: renaming `relea
 
 After the first successful release, you can also set Settings → Publishing access to "Require two-factor authentication and disallow tokens", so only trusted publishing can publish.
 
-Optional: GitHub → Settings → Environments → `npm-release` (created by the first run if it doesn't exist) → limit deployment to tags matching `v*.*.*`, and add yourself as a required reviewer to approve each publish by hand.
-
 ### 4. Tag the release candidate
 
 On the `main` commit to release (its own first-parent history, as the guard requires):
@@ -55,30 +62,35 @@ git tag -a v0.2.0-rc.1 -m "v0.2.0-rc.1"
 git push origin v0.2.0-rc.1
 ```
 
-GitHub → Actions → Release. All jobs should go green: guard, CI, publish (to the `next` dist-tag), then the registry and provenance check and the six verify jobs. Then check:
+GitHub → Actions → Release. The publish job waits for your approval (the `npm-release` reviewer, step 3): approve it once guard and CI are green. All jobs should then go green: guard, CI, publish (to the `next` dist-tag), then the registry and provenance check and the six verify jobs. Then check:
 
 ```sh
-npm view ogden-agents dist-tags   # next: 0.2.0-rc.1
+npm view ogden-agents dist-tags
+# latest: 0.0.0
+# next: 0.2.0-rc.1
 npx ogden-agents@next             # starts and opens the page
 ```
 
-If the registry also pointed `latest` at the release candidate (it may, for a package with no stable release yet), that is fixed by step 6, which moves `latest` to `0.2.0`.
+`latest` stays on `0.0.0` (the name reservation): a prerelease is published with `--tag next` and never moves `latest`. Until step 6, `npx ogden-agents` without `@next` still installs `0.0.0`, so use `npx ogden-agents@next` for the checks below.
 
 ### 5. Live checks with Claude Code
 
-In the app `npx ogden-agents@next` opened, with a real Claude account (these are the checks CI can't make, since CI runs only the fake agent):
+On a fresh computer (or a fresh user account) with Node 24 or later, run `npx ogden-agents@next` with a real Claude account. These are the checks CI can't make, since CI runs only the fake agent, fake login and an in-memory keychain:
 
-1. Settings > Agents → the Claude Code card → **Install**. It installs and shows the installed version. Then sign in (or use an API key), unless Claude Code is already signed in.
-2. Epic 2, Done when 1: add a project, start a chat, and see the reply stream in live.
-3. Done when 2: Quit, start the app again, reopen that chat, and ask about the earlier conversation: it keeps its context.
-4. Done when 3: under the default caution level (**Ask every time**), ask Claude Code to run a shell command (say `npm test`). Nothing runs until **Allow once** on the card.
-5. Done when 4: agents working in two projects at once; close every browser window, reopen the app from its shortcut, and the sidebar shows both live states.
+1. Epic 9, Done when 1 (Welcome): the first launch opens **Welcome**. On the Claude Code card, **Install** installs it and shows the installed version.
+2. Sign in with your Claude subscription from the card: the sign-in page opens, and Welcome moves on by itself. Add a project, answer the shortcut offer, and land in that project's empty Chats.
+3. Epic 2, Done when 1 (chat): start a chat and see the reply stream in live.
+4. Epic 9, Done when 2 (API key): as a second user (or after signing out of the subscription), with only an Anthropic API key: **Use an API key instead**, save it (it goes to the real OS keychain), and a chat works. The key is shown only as its last four characters.
+5. Epic 9, Done when 3 (sign in again): when the subscription sign-in expires (or after signing out, for example `claude auth logout` where the Claude CLI is installed), the next message's error offers **Sign in**; after signing in, the chat resends and keeps its context.
+6. Epic 2, Done when 3 (permission cards and caution levels): under the default caution level (**Ask every time**), ask Claude Code to run a shell command (say `npm test`). Nothing runs until **Allow once** on the card. Change the project's caution level and check that its cards follow it.
+7. Epic 2, Done when 2 (restart and resume): Quit, start the app again, reopen that chat, and ask about the earlier conversation: it keeps its context.
+8. Epic 2, Done when 4: agents working in two projects at once; close every browser window, then open a fresh launch link (run `npx ogden-agents@next` again, which prints one and opens it; it stands in for the app shortcut here), and the sidebar shows both live states.
 
 If a check fails, fix it on `main` and release `0.2.0-rc.2` the same way (version bump PR, then the tag).
 
 ### 6. Release 0.2.0
 
-On a branch, set the version `0.2.0` in `package.json`, `packages/server/package.json` and `packages/web/package.json`, (the CHANGELOG's 0.2.0 entry already covers it). Merge that PR to `main`, wait for CI, then:
+On a branch, set the version `0.2.0` in `package.json`, `packages/server/package.json` and `packages/web/package.json` (the CHANGELOG's 0.2.0 entry already covers it). Merge that PR to `main`, wait for CI, then:
 
 ```sh
 git switch main && git pull
@@ -86,11 +98,14 @@ git tag -a v0.2.0 -m "v0.2.0"
 git push origin v0.2.0
 ```
 
-Watch Release as in step 4, then:
+Watch Release as in step 4 (approve the publish), then move `next` to the stable version too, so `@next` never installs an older release candidate than `latest` (signed in to npm as an owner):
 
 ```sh
-npm view ogden-agents dist-tags   # latest: 0.2.0, next: 0.2.0-rc.1
-npx ogden-agents@0.2.0            # starts and opens the page
+npm dist-tag add ogden-agents@0.2.0 next
+npm view ogden-agents dist-tags
+# latest: 0.2.0
+# next: 0.2.0
+npx ogden-agents                  # installs 0.2.0, starts and opens the page
 ```
 
 The package page on npmjs.com shows a provenance badge linking back to the workflow run.

@@ -49,6 +49,7 @@ import { acquireInstanceLock, type InstanceLock } from './instance-lock.js';
 import { createLauncherToken, type LauncherToken } from './launcher-token.js';
 import { createLogger, createRotatingFileWriter, LOG_DIR, teeWriters, type Logger } from './log.js';
 import { shortcutErrorCode } from './shortcut-routes.js';
+import { testApiKeyCheck, testClaudeInstall, testHooksAllowed } from './test-hooks.js';
 import { VERSION } from './version.js';
 
 /** The only interface the server ever binds (AD-15). */
@@ -92,14 +93,14 @@ export const CHECK_IN_MS_ENV = 'OGDEN_AGENTS_TEST_CHECK_IN_MS';
  * Set to `memory` (tests that start the packaged server as its own process:
  * the launcher tests and the installed-package smoke) to keep API keys in
  * memory, so no test ever reads or writes the real OS keychain. Honoured only
- * under a test runner: `NODE_ENV=test` or `VITEST` set ({@link testSecretStore}).
+ * under a test runner (`NODE_ENV=test` or `VITEST` set) on a data folder inside
+ * the OS temp folder ({@link testSecretStore}, `testHooksAllowed`).
  */
 export const SECRET_STORE_ENV = 'OGDEN_AGENTS_TEST_SECRET_STORE';
 
-/** `memory` when a test asked for the in-memory secret store and this is a test run; otherwise `undefined` (the keychain). */
-export function testSecretStore(env: Readonly<Record<string, string | undefined>> = process.env): 'memory' | undefined {
-  const testing = env.NODE_ENV === 'test' || (env.VITEST !== undefined && env.VITEST !== '');
-  return testing && env[SECRET_STORE_ENV] === 'memory' ? 'memory' : undefined;
+/** `memory` when a test asked for the in-memory secret store and test hooks are allowed for `dataDir`; otherwise `undefined` (the keychain). */
+export function testSecretStore(env: Readonly<Record<string, string | undefined>>, dataDir: string): 'memory' | undefined {
+  return env[SECRET_STORE_ENV] === 'memory' && testHooksAllowed(env, dataDir) ? 'memory' : undefined;
 }
 
 /**
@@ -441,12 +442,19 @@ async function listenAndAnnounce({
     // The event carries the plain reason; the log also gets the target, URL and (on a mismatch) both hashes.
     onFailure: (error) => log.warn('uv install failed', { code: error.code, reason: error.message, ...error.details }),
   });
+  // Install's source: the option, else (a test run only) a local fixture from the environment, which also ignores a dev install's adapter (story 9.7).
+  const testInstall = options.claudeInstall === undefined ? testClaudeInstall(process.env, dataDir) : undefined;
+  const claudeInstallOption = options.claudeInstall ?? (testInstall === undefined ? undefined : { ...testInstall, devAdapter: false });
   // The adapter given, else a dev install's; else (read at each use) the one Install put in the data folder (story 9.3).
   const givenClaudeAdapter =
     options.claudeAdapterPath ??
     (process.env[CLAUDE_ACP_PATH_ENV] || undefined) ??
-    (options.claudeInstall?.devAdapter === false ? undefined : resolveClaudeAgentAcp());
-  const { devAdapter: _devAdapter, ...claudeInstall } = options.claudeInstall ?? {};
+    (claudeInstallOption?.devAdapter === false ? undefined : resolveClaudeAgentAcp());
+  const { devAdapter: _devAdapter, ...claudeInstall } = claudeInstallOption ?? {};
+  // The API key check: the option, else (a test run only) one that accepts without the network (story 9.7).
+  const testVerify = options.verifyApiKey === undefined ? testApiKeyCheck(process.env, dataDir) : undefined;
+  const verifyApiKey = options.verifyApiKey ?? testVerify;
+  if (testInstall !== undefined || testVerify !== undefined) log.info('test hooks in use', { claudeInstall: testInstall !== undefined, apiKeyCheck: testVerify !== undefined });
   const claudeAdapter = () => locateClaudeAdapter({ adapterPath: givenClaudeAdapter, dataDir, pins: claudeInstall.pins })?.path;
   const agent =
     options.agent ??
@@ -474,7 +482,7 @@ async function listenAndAnnounce({
           ...(options.claudeExecutable === undefined ? {} : { claudeExecutable: options.claudeExecutable }),
           // Sign-in and `auth status` never see an API key (story 9.2).
           env: () => withoutAgentKeys(agentEnv()),
-          ...(options.verifyApiKey === undefined ? {} : { apiKey: { verify: options.verifyApiKey } }),
+          ...(verifyApiKey === undefined ? {} : { apiKey: { verify: verifyApiKey } }),
           listAuthMethods: (env) => agent.listAuthMethods({ env }),
           ...(options.loadPty === undefined ? {} : { loadPty: options.loadPty }),
           ...(options.claudeCliBrowser === undefined ? {} : { cliBrowser: options.claudeCliBrowser }),
@@ -482,7 +490,7 @@ async function listenAndAnnounce({
           onDiagnostic: (message, fields) => log.info(`agent setup: ${message}`, fields),
         })
       : undefined;
-  const secrets = options.secrets ?? (testSecretStore() === 'memory' ? createMemorySecretStore() : createKeyringSecretStore());
+  const secrets = options.secrets ?? (testSecretStore(process.env, dataDir) === 'memory' ? createMemorySecretStore() : createKeyringSecretStore());
   const agentSetup = createAgentSetup(core.events, options.agentSetup ?? (claudeSetup === undefined ? [] : [claudeSetup]), {
     secrets,
     // A key in this server's own environment follows the same rule as a saved one (review F1).

@@ -2,9 +2,12 @@
 // packed at test time into a local tarball with a lockfile that pins it by
 // `integrity`, so `npm ci` installs it offline, exactly as it would the real
 // adapter from the registry. Its `dist/index.js` runs the fake ACP agent
-// (`../fake-acp-agent.mjs`, by absolute URL), which also answers `--cli`.
+// (`../fake-acp-agent.mjs`, by absolute URL), which also answers `--cli`, or
+// `agent`, a script that runs it with its switches set (the installed-package
+// suite's wrapper, story 9.7: an installed server passes agents only an
+// allowlisted environment).
 //
-//   packFakeAdapter(dir)  → { tarball, pins: { packageJson, lock }, version }
+//   packFakeAdapter(dir, { agent? })  → { tarball, pins: { packageJson, lock }, version }
 //   testNpmCli()          → npm-cli.js to run with `process.execPath`
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -53,15 +56,16 @@ export function testNpmCli() {
 /**
  * Packs the fake adapter into `dir` and returns its tarball and the pins
  * that install it: a `file:` dependency and a v3 lockfile with its sha512.
+ * Its `dist/index.js` runs `options.agent` (an absolute path), else the fake agent.
  * @param {string} dir
- * @param {{ npmCli?: string }} [options]
+ * @param {{ npmCli?: string, agent?: string }} [options]
  */
 export function packFakeAdapter(dir, options = {}) {
   const npmCli = options.npmCli ?? testNpmCli();
   const source = join(dir, 'fake-adapter');
   mkdirSync(join(source, 'dist'), { recursive: true });
   cpSync(join(HERE, 'package.json'), join(source, 'package.json'));
-  writeFileSync(join(source, 'dist', 'index.js'), `#!/usr/bin/env node\nawait import(${JSON.stringify(pathToFileURL(FAKE_AGENT).href)});\n`);
+  writeFileSync(join(source, 'dist', 'index.js'), `#!/usr/bin/env node\nawait import(${JSON.stringify(pathToFileURL(options.agent ?? FAKE_AGENT).href)});\n`);
   const out = join(dir, 'packed');
   mkdirSync(out, { recursive: true });
   const env = { ...process.env, npm_config_cache: join(dir, 'npm-cache'), npm_config_update_notifier: 'false' };

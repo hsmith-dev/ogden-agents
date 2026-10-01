@@ -23,8 +23,6 @@ import {
   stripTerminalEscapes,
 } from '../src/index.js';
 
-/** Why the resize check is skipped on Windows (story 3.1 CI; deferred-work). */
-const WINDOWS_RESIZE = 'ConPTY resize not applied under node-pty 1.1.0 — investigate in 3.8';
 const FAKE_CLI = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-claude-cli.mjs');
 
 const dirs: string[] = [];
@@ -201,7 +199,7 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('the real terminal (f
     await expect.poll(() => exits, { timeout: 10_000 }).toEqual([70]);
   }, 30_000);
 
-  it.skipIf(process.platform === 'win32')(`resizes it (skipped on Windows: ${WINDOWS_RESIZE})`, async () => {
+  it('resizes it', async () => {
     const { cli, output } = await openFake({});
     cli.resize(100, 30);
     // A resize can apply after input already on its way: ask until it shows.
@@ -214,24 +212,26 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('the real terminal (f
         { timeout: 10_000, interval: 500 },
       )
       .toContain('size=100x30');
-    // The fake CLI also says so unasked when the resize reaches it (SIGWINCH).
+    // The fake CLI also says so unasked when the resize reaches it (SIGWINCH; ConPTY's resize on Windows, read raw).
     await expect.poll(output, { timeout: 10_000 }).toContain('resized=100x30');
   }, 30_000);
 
-  // Windows: taskkill can't find a tree whose root has exited (story 3.8).
-  it.skipIf(process.platform === 'win32')('a CLI that crashed takes what it started with it, though that ignores the hang-up; its exit is heard late too (story 3.4)', async () => {
+  // POSIX: its process group is stopped as its exit is reported. Windows: nothing is done after the exit
+  // (taskkill can't find a tree whose root has gone); a Node or Bun CLI's children are in libuv's
+  // kill-on-close job and stop with it, which is what this checks there (story 3.8, decision Q2a).
+  it('a CLI that crashed takes what it started with it, though that ignores the hang-up; its exit is heard late too (story 3.4)', async () => {
     const { cli, record, exits } = await openFake({ FAKE_CLAUDE_GRANDCHILD: '1' });
     const grandchild = record().grandchild!;
     expect(alive(grandchild)).toBe(true);
     cli.write('crash\r');
     await expect.poll(() => exits, { timeout: 10_000 }).toEqual([70]);
-    // No kill() is needed: its group was stopped as its exit was reported.
+    // No kill() is needed: its group was stopped as its exit was reported (Windows: its job closed).
     await expect.poll(() => alive(grandchild), { timeout: 10_000 }).toBe(false);
     const late = await new Promise<number | null>((resolve) => cli.onExit(({ exitCode }) => resolve(exitCode)));
     expect(late).toBe(70);
   }, 30_000);
 
-  it.skipIf(process.platform === 'win32')('a CLI that crashes on start reports exit 70, and what it started is stopped with it (story 3.4)', async () => {
+  it('a CLI that crashes on start reports exit 70, and what it started is stopped with it (story 3.4)', async () => {
     const record = join(tempDir(), 'record.json');
     const cli = await createPtyTerminalPort().open({
       file: process.execPath,
@@ -246,6 +246,22 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('the real terminal (f
     expect(exited).toBe(70);
     const { grandchild } = JSON.parse(readFileSync(record, 'utf8')) as { grandchild: number };
     await expect.poll(() => alive(grandchild), { timeout: 10_000 }).toBe(false);
+  }, 30_000);
+
+  it('passes a bracketed paste, Ctrl+C and a truecolour colour through unchanged (story 3.8)', async () => {
+    const { cli, output, exits } = await openFake({});
+    let raw = '';
+    cli.onData((data) => (raw += data));
+    cli.write('\x1b[200~pa ste\x1b[201~');
+    await expect.poll(output, { timeout: 10_000 }).toContain(`pasted:${Buffer.from('pa ste').toString('hex')}`);
+    // Ctrl+C reaches the CLI as a byte (it reads raw, as Claude Code does) and doesn't stop it.
+    cli.write('\x03');
+    await expect.poll(output, { timeout: 10_000 }).toContain('ctrl-c');
+    expect(exits).toEqual([]);
+    cli.write('colour\r');
+    await expect.poll(output, { timeout: 10_000 }).toContain('TC');
+    // ConPTY repaints, so the colour may come before the line break, but its bytes are the same.
+    expect(raw).toContain('\x1b[38;2;12;34;56m');
   }, 30_000);
 
   it('kill stops the whole tree: the CLI and what it started', async () => {

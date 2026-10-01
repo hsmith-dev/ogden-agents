@@ -12,11 +12,20 @@
 //   crash       exits 70 at once, printing nothing (the CLI crashing; story 3.2)
 //   size        prints `size=<cols>x<rows>` (the terminal's size)
 //   flood       prints 64 KiB chunks of `x` without end, as fast as the terminal takes them
+//   colour      prints `colour:` then `TC` in a truecolour SGR (`ESC[38;2;12;34;56m`), then a reset
 //   anything    prints `echo:<line>`
 //
-// On POSIX, each time the terminal is resized (SIGWINCH) it prints
-// `resized=<cols>x<rows>` unasked (story 3.2). Windows has no SIGWINCH:
-// story 3.8 decides how a resize shows there.
+// In a terminal it reads raw, as the real CLI (Ink) does, and echoes what is
+// typed itself (story 3.8). A bracketed paste (`ESC[200~ ... ESC[201~`) prints
+// `pasted:<hex of the text>`; Ctrl+C (0x03) prints `ctrl-c` and leaves it
+// running; Backspace (0x7f or 0x08) removes the last character; any other
+// escape sequence is dropped. Enter is CR, LF or CR LF. With stdin a pipe it
+// reads the same lines, without echo.
+//
+// Each time the terminal is resized it prints `resized=<cols>x<rows>` unasked
+// (story 3.2): SIGWINCH on POSIX; on Windows libuv sees ConPTY's resize only
+// while stdin is read raw, and otherwise keeps the first size (story 3.8,
+// CI probe run 36896007333).
 //
 // Every token it prints has no spaces and no trailing blank: Windows' ConPTY
 // repaints the screen (cursor moves, trimmed or skipped blanks) rather than
@@ -41,7 +50,6 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 
 const args = process.argv.slice(2);
 let grandchild = null;
@@ -79,13 +87,12 @@ if (process.env.FAKE_CLAUDE_CRASH_ON_START === '1') process.exit(70);
 /** The terminal's size now: on Windows `columns`/`rows` can lag a ConPTY resize. */
 const windowSize = () => process.stdout.getWindowSize?.() ?? [process.stdout.columns, process.stdout.rows];
 
-if (process.platform !== 'win32') {
-  // Node's own SIGWINCH handling: a `SIGWINCH` listener would still read the old size.
-  process.stdout.on('resize', () => {
-    const [cols, rows] = windowSize();
-    process.stdout.write(`\r\nresized=${cols}x${rows}\r\nready>`);
-  });
-}
+// Node's own resize event (SIGWINCH on POSIX, ConPTY's resize on Windows while
+// stdin is read raw): a `SIGWINCH` listener would still read the old size.
+process.stdout.on('resize', () => {
+  const [cols, rows] = windowSize();
+  process.stdout.write(`\r\nresized=${cols}x${rows}\r\nready>`);
+});
 
 /** Appends `line` and the reply to it to the session's record, as the CLI does, when CLAUDE_CONFIG_DIR is set. */
 function recordExchange(line, reply) {
@@ -125,9 +132,66 @@ function recordExchange(line, reply) {
 }
 
 process.stdout.write(`fake-claude:${args.join(',')}\r\nready>`);
-const lines = createInterface({ input: process.stdin });
-lines.on('line', (line) => {
-  const text = line.trim();
+
+const PASTE_START = '\x1b[200~';
+const PASTE_END = '\x1b[201~';
+const tty = process.stdin.isTTY === true;
+if (tty) process.stdin.setRawMode(true);
+process.stdin.setEncoding('utf8');
+let pending = '';
+let line = '';
+let lastWasCr = false;
+process.stdin.on('data', (chunk) => {
+  pending += chunk;
+  while (pending.length > 0) {
+    if (pending.startsWith(PASTE_START)) {
+      const end = pending.indexOf(PASTE_END);
+      if (end === -1) return; // The rest of the paste is still on its way.
+      const text = pending.slice(PASTE_START.length, end);
+      pending = pending.slice(end + PASTE_END.length);
+      process.stdout.write(`\r\npasted:${Buffer.from(text).toString('hex')}\r\nready>`);
+      continue;
+    }
+    if (pending[0] === '\x1b') {
+      // Another escape sequence (an arrow, a focus report): dropped whole, or kept until it is.
+      const match = /^\x1b(\[[0-?]*[ -/]*[@-~]|O.|[^[O])/.exec(pending);
+      if (match === null) {
+        if (pending.length < 16) return;
+        pending = pending.slice(1);
+      } else pending = pending.slice(match[0].length);
+      continue;
+    }
+    const char = pending[0];
+    pending = pending.slice(1);
+    const cr = char === '\r';
+    if (cr || char === '\n') {
+      const skip = char === '\n' && lastWasCr;
+      lastWasCr = cr;
+      if (skip) continue;
+      const done = line;
+      line = '';
+      answer(done);
+      continue;
+    }
+    lastWasCr = false;
+    if (char === '\x03') {
+      process.stdout.write('\r\nctrl-c\r\nready>');
+      line = '';
+    } else if (char === '\x7f' || char === '\b') {
+      if (line.length > 0) {
+        line = line.slice(0, -1);
+        if (tty) process.stdout.write('\b \b');
+      }
+    } else if (char >= ' ') {
+      line += char;
+      if (tty) process.stdout.write(char);
+    }
+  }
+});
+
+/** Answers one line typed at the prompt. */
+function answer(typed) {
+  const text = typed.trim();
   if (text === '/exit') {
     process.stdout.write('bye\r\n', () => process.exit(0));
     return;
@@ -144,6 +208,10 @@ lines.on('line', (line) => {
     pump();
     return;
   }
+  if (text === 'colour') {
+    process.stdout.write('\r\ncolour:\x1b[38;2;12;34;56mTC\x1b[0m\r\nready>');
+    return;
+  }
   if (text === 'size') {
     const [cols, rows] = windowSize();
     process.stdout.write(`\r\nsize=${cols}x${rows}\r\nready>`);
@@ -155,4 +223,4 @@ lines.on('line', (line) => {
     // The record is the test's to check; the terminal answers either way.
   }
   process.stdout.write(`\r\necho:${text}\r\nready>`);
-});
+}

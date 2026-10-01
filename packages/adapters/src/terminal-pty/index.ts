@@ -164,7 +164,12 @@ export function hiddenPtySpawner(pty: PtyModule, platform: NodeJS.Platform = pro
       if (exit !== undefined) return;
       // What the program started may still run in its process group, which outlives it (story 3.4).
       // Stopped here, in the tick its exit is reported, while that group is still this program's;
-      // never on a later `kill()`, when the id could be reused (review F2). Windows is story 3.8's.
+      // never on a later `kill()`, when the id could be reused (review F2). Windows: nothing is done
+      // here (story 3.8, decision Q2a). `taskkill /T` can't find a tree whose root has gone, and
+      // neither closing the pseudo-console nor its console list stops what is left; a Node or Bun
+      // CLI's children are in libuv's kill-on-close job and stop with it, so only a program started
+      // outside that job (detached on purpose) outlives it. A live terminal's stop still runs
+      // `taskkill /T` first (`killTerminalTree`).
       if (!groupKilled && platform !== 'win32') {
         groupKilled = true;
         killProcessTree(terminal.pid, { ...nodeProcessTreeSystem, platform });

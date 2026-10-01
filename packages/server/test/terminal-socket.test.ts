@@ -45,8 +45,6 @@ import { signIn, startTestServer, tempDataDir, trackSocket, waitFor, type Signed
 const FIXTURES = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures');
 const FAKE_CLI = join(FIXTURES, 'fake-claude-cli.mjs');
 const MARKER = 'terminal-marker-5b1e0d';
-/** Why the resize check is skipped on Windows (story 3.1 CI; deferred-work). */
-const WINDOWS_RESIZE = 'ConPTY resize not applied under node-pty 1.1.0 — investigate in 3.8';
 
 const dirs: string[] = [];
 const servers: TestServer[] = [];
@@ -466,7 +464,7 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     }
   }, 90_000);
 
-  it.skipIf(process.platform === 'win32')(`attach sizes the terminal before anything is sent; nothing typed before it counts; resize frames resize it (skipped on Windows: ${WINDOWS_RESIZE})`, async () => {
+  it('attach sizes the terminal before anything is sent; nothing typed before it counts; resize frames resize it', async () => {
     const { server, tab, recorded } = await startTerminalServer();
     const { ids, sessionId } = await answeredChat(server, tab);
     expect((await switchTo(server, tab, ids, 'terminal')).status).toBe(200);
@@ -501,7 +499,7 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     expect(viewer.state.frames).toEqual([]);
   }, 60_000);
 
-  it.skipIf(process.platform === 'win32')(`two viewers of one CLI: each types and resizes, both see all the output, the size follows the last; nothing typed is evented, stored or logged (story 3.5; skipped on Windows: ${WINDOWS_RESIZE})`, async () => {
+  it('two viewers of one CLI: each types and resizes, both see all the output, the size follows the last; nothing typed is evented, stored or logged (story 3.5)', async () => {
     const lines: string[] = [];
     const { server, tab, recorded } = await startTerminalServer({ lines });
     const { ids, sessionId } = await answeredChat(server, tab);
@@ -587,8 +585,8 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     expect(driverCauses(server, sessionId)).toEqual(['user', 'cli_exited']);
     expect(replies(server, sessionId).at(-1)).toMatchObject({ payload: { content: "Claude Code's terminal closed unexpectedly (exit code 70)." } });
     expect(alive(pid)).toBe(false);
-    // What it started is stopped with it (POSIX; Windows is story 3.8).
-    if (grandchild !== null && process.platform !== 'win32') await waitFor(() => !alive(grandchild), 'what the CLI started to be gone', 10_000);
+    // What it started is stopped with it (POSIX: its group; Windows: the fake's libuv job, story 3.8).
+    if (grandchild !== null) await waitFor(() => !alive(grandchild), 'what the CLI started to be gone', 10_000);
     // And the chat answers again.
     expect((await post(server, tab, apiPath(API_ROUTES.sessionMessages, ids), { text: 'after the crash' })).status).toBe(202);
     await waitFor(() => stateOf(server, sessionId) === 'idle' && replies(server, sessionId).length === 3, 'the next reply', 15_000);
@@ -604,7 +602,7 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     expect(driverCauses(server, sessionId)).toEqual(['user', 'cli_exited']);
     expect(replies(server, sessionId).at(-1)).toMatchObject({ payload: { content: "Claude Code's terminal closed unexpectedly (exit code 70)." } });
     const { grandchild } = record();
-    if (grandchild !== null && process.platform !== 'win32') await waitFor(() => !alive(grandchild), 'what the CLI started to be gone', 10_000);
+    if (grandchild !== null) await waitFor(() => !alive(grandchild), 'what the CLI started to be gone', 10_000);
     expect((await post(server, tab, apiPath(API_ROUTES.sessionMessages, ids), { text: 'after the crash' })).status).toBe(202);
     await waitFor(() => stateOf(server, sessionId) === 'idle' && replies(server, sessionId).length === 3, 'the next reply', 15_000);
   }, 60_000);

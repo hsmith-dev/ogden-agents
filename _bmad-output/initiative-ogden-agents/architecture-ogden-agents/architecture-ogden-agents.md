@@ -159,6 +159,7 @@ graph LR
   - The UI renders every action from that catalog.
   - Skill names appear only inside the adapters that must invoke a specific skill (`buildrunner-bmad-loop` for `bmad-build-auto`, `tickets-v7` for `tickets.py`).
   - Plain-language labels live in fork metadata.
+  - Note (epic 4, 2026-10-01): the `bmad-catalog` adapter may also name the `bmad` setup skill, because it runs that skill's `setup.py` to install BMAD into a project (CAP-2). No rule changes.
 
 ### AD-13 — Forks are bundled and locked [ADOPTED]
 

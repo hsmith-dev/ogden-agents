@@ -14,6 +14,7 @@
  * optional dependencies, the toggle says node-pty could not load (AD-19).
  * Each test quits or stops its server.
  */
+import { existsSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 // The shared routes' own file (it has no imports), as support.ts reads it.
 import { apiPath } from '../../packages/shared/src/api.ts';
@@ -23,12 +24,19 @@ import { expectConnected, landConnected, storedToken } from '../e2e/tab.js';
 import { terminalServer, waitForExit, type TerminalServer } from './installed.js';
 
 const MARKER = 'e2e-installed-terminal-7d3a';
+/** The adapter's own limit on an agent's start (`START_TIMEOUT_MS`, claude-code-agent.ts). */
+const AGENT_START_MS = 60_000;
 /** What the driver lock check throws when the server took a chat message while the terminal drove. */
 const LOCK_GONE = 'the server took a chat message while the terminal drives: the driver lock is gone';
 
 let server: TerminalServer | undefined;
 
-test.afterEach(async () => {
+test.afterEach(async ({}, testInfo) => {
+  // A failed journey keeps the server's log (its agent starts and terminal steps, with times) in the report.
+  const log = server?.serverLog();
+  if (testInfo.status !== testInfo.expectedStatus && log !== undefined && existsSync(log)) {
+    await testInfo.attach('server.log', { path: log, contentType: 'text/plain' }).catch(() => undefined);
+  }
   await server?.remove();
   server = undefined;
 });
@@ -130,7 +138,10 @@ test('the epic 3 journey on the installed package: terminal, reload, back, "from
 
   await test.step('7. the next chat message continues the same agent session', async () => {
     await send(page, 'context');
-    await expect(replies(page).last()).toHaveText(new RegExp(`session=${agentSession} via=resumed primed=0$`));
+    // The chat's agent starts again here (it was released for the terminal) and resumes its session. A
+    // Windows runner has taken 40 s to do so under load (CI run 36910454951: the reply came, late); the
+    // product allows an agent 60 s to start (START_TIMEOUT_MS), and so does this check.
+    await expect(replies(page).last()).toHaveText(new RegExp(`session=${agentSession} via=resumed primed=0$`), { timeout: AGENT_START_MS });
     await expect(state(page)).toHaveAttribute('data-state', 'idle');
     await expect(composer(page)).toHaveValue('');
   });

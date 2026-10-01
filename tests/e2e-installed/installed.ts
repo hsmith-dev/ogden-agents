@@ -287,6 +287,8 @@ export interface TerminalServer {
   launch(): Promise<Launched>;
   /** Stops the server if it still runs, and removes every folder of it. */
   remove(): Promise<void>;
+  /** The server's own log (codes and timings, never what the terminal prints; AD-16), for a failed test's report. */
+  serverLog(): string;
 }
 
 /** How long an install of its own may take to install and start (a registry stall on a CI runner is retried once). */
@@ -384,5 +386,5 @@ export function terminalServer(name: string, { omitOptional = false }: { omitOpt
       }
     }
   };
-  return { project, launch: () => (omitOptional ? launchFresh() : launch(install)), remove };
+  return { project, launch: () => (omitOptional ? launchFresh() : launch(install)), remove, serverLog: () => join(install.dataDir, 'logs', 'server.log') };
 }

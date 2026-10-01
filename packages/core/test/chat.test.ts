@@ -1570,7 +1570,8 @@ describe('the terminal (story 3.1)', () => {
       {
         file: 'agent-cli',
         args: ['--resume', 'agent-1'],
-        cwd: realpathSync(repo),
+        // As the workspace spells it (Windows: long names, not 8.3 ones).
+        cwd: realpathSync.native(repo),
         env: { PATH: '/bin', CHAT_ONLY: 'yes', FROM_CLI: '1', TERM: 'xterm-256color' },
         cols: 80,
         rows: 24,

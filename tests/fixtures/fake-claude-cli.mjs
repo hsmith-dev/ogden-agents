@@ -5,12 +5,18 @@
 //
 //   node fake-claude-cli.mjs --resume <session id>
 //
-// It prints `fake claude <args>` and a `> ` prompt, then answers each line:
+// It prints `fake-claude:<args, comma-separated>` and a `ready>` prompt, then
+// answers each line:
 //
 //   /exit       prints "bye" and exits 0 (the CLI leaving by itself)
 //   size        prints `size=<cols>x<rows>` (the terminal's size)
 //   flood       prints 64 KiB chunks of `x` without end, as fast as the terminal takes them
-//   anything    prints `echo: <line>`
+//   anything    prints `echo:<line>`
+//
+// Every token it prints has no spaces and no trailing blank: Windows' ConPTY
+// repaints the screen (cursor moves, trimmed or skipped blanks) rather than
+// passing output through, so tests match these tokens in the output with its
+// escape sequences stripped.
 //
 // With FAKE_CLAUDE_RECORD set it writes, as JSON, its arguments, its folder,
 // its pid, its TERM and the names (never the values) of its environment.
@@ -41,7 +47,7 @@ if (process.env.FAKE_CLAUDE_RECORD) {
   );
 }
 
-process.stdout.write(`fake claude ${args.join(' ')}\r\n> `);
+process.stdout.write(`fake-claude:${args.join(',')}\r\nready>`);
 const lines = createInterface({ input: process.stdin });
 lines.on('line', (line) => {
   const text = line.trim();
@@ -58,6 +64,6 @@ lines.on('line', (line) => {
     pump();
     return;
   }
-  if (text === 'size') process.stdout.write(`size=${process.stdout.columns}x${process.stdout.rows}\r\n> `);
-  else process.stdout.write(`echo: ${text}\r\n> `);
+  if (text === 'size') process.stdout.write(`\r\nsize=${process.stdout.columns}x${process.stdout.rows}\r\nready>`);
+  else process.stdout.write(`\r\necho:${text}\r\nready>`);
 });

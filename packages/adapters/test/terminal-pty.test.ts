@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AgentError, type TerminalProcess } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { bundledClaudeExecutable, claudeTerminalCommand, createPtyTerminalPort, loadPty, resolveClaudeAgentAcp } from '../src/index.js';
+import { bundledClaudeExecutable, claudeTerminalCommand, createPtyTerminalPort, loadPty, resolveClaudeAgentAcp, stripTerminalEscapes } from '../src/index.js';
 
 const FAKE_CLI = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-claude-cli.mjs');
 
@@ -100,16 +100,18 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('the real terminal (f
     const exits: Array<number | null> = [];
     cli.onExit(({ exitCode }) => exits.push(exitCode));
     await expect.poll(() => existsSync(record), { timeout: 10_000 }).toBe(true);
-    await expect.poll(() => output, { timeout: 10_000 }).toContain('> ');
-    return { cli, cwd, record: () => JSON.parse(readFileSync(record, 'utf8')) as { argv: string[]; cwd: string; grandchild: number | null; term: string }, output: () => output, exits };
+    // What the screen shows: ConPTY (Windows) repaints with escape sequences between the CLI's tokens.
+    const shown = () => stripTerminalEscapes(output);
+    await expect.poll(shown, { timeout: 10_000 }).toContain('ready>');
+    return { cli, cwd, record: () => JSON.parse(readFileSync(record, 'utf8')) as { argv: string[]; cwd: string; grandchild: number | null; term: string }, output: shown, exits };
   };
 
   it('runs the CLI with its arguments in its folder, types into it, resizes it, and reports its own exit', async () => {
     const { cli, cwd, record, output, exits } = await openFake({});
-    expect(record()).toMatchObject({ argv: ['--resume', 'session-1'], cwd: realpathSync(cwd), term: 'xterm-256color' });
-    expect(output()).toContain('fake claude --resume session-1');
-    cli.write('hello there\r');
-    await expect.poll(output, { timeout: 10_000 }).toContain('echo: hello there');
+    expect(record()).toMatchObject({ argv: ['--resume', 'session-1'], cwd: realpathSync.native(cwd), term: 'xterm-256color' });
+    expect(output()).toContain('fake-claude:--resume,session-1');
+    cli.write('hello-there\r');
+    await expect.poll(output, { timeout: 10_000 }).toContain('echo:hello-there');
     cli.resize(100, 30);
     cli.write('size\r');
     await expect.poll(output, { timeout: 10_000 }).toContain('size=100x30');

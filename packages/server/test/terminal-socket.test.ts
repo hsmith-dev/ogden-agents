@@ -8,7 +8,7 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadPty } from '@ogden-agents/adapters';
+import { loadPty, stripTerminalEscapes } from '@ogden-agents/adapters';
 import { AGENT_SESSION_REF, openCore } from '@ogden-agents/core';
 import {
   API_ROUTES,
@@ -94,10 +94,19 @@ const switchTo = (server: TestServer, tab: SignedIn, ids: { wsId: string; sesId:
 /** A terminal viewer: the text of every binary frame, the control frames, and how it closed. */
 function openTerminal(server: TestServer, tab: SignedIn, sessionId: string) {
   const ws = trackSocket(new WebSocket(`ws://127.0.0.1:${server.port}/ws/terminal/${sessionId}`, tab.protocols, { headers: { origin: tab.origin } }));
-  const state = { output: '', frames: [] as unknown[], closed: undefined as number | undefined, protocol: '' };
+  const state = {
+    raw: '',
+    /** What the screen shows: ConPTY (Windows) repaints with escape sequences between the CLI's tokens. */
+    get output() {
+      return stripTerminalEscapes(this.raw);
+    },
+    frames: [] as unknown[],
+    closed: undefined as number | undefined,
+    protocol: '',
+  };
   const decoder = new TextDecoder();
   ws.on('message', (data, isBinary) => {
-    if (isBinary) state.output += decoder.decode(data as Buffer, { stream: true });
+    if (isBinary) state.raw += decoder.decode(data as Buffer, { stream: true });
     else state.frames.push(JSON.parse(String(data)));
   });
   ws.on('close', (code) => (state.closed = code));
@@ -202,7 +211,7 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     expect(SessionResponse.parse(await switched.json()).session.driver).toBe('terminal');
     await waitFor(recorded, 'the CLI to start', 10_000);
     const cli = record();
-    expect(cli).toMatchObject({ argv: ['--resume', ref], cwd: realpathSync(repo), term: 'xterm-256color' });
+    expect(cli).toMatchObject({ argv: ['--resume', ref], cwd: realpathSync.native(repo), term: 'xterm-256color' });
     // The chat's environment, and none of the server's own beyond it (AD-16).
     expect(cli.envNames).toContain('CLAUDE_CODE_EXECUTABLE');
     expect(cli.envNames).not.toContain('OGDEN_AGENTS_TEST_SECRET_STORE');
@@ -213,9 +222,9 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     const viewer = openTerminal(server, tab, sessionId);
     await viewer.opened;
     expect(viewer.state.protocol).toBe('ogden.v1');
-    await waitFor(() => viewer.state.output.includes(`fake claude --resume ${ref}`), 'the CLI’s first output', 10_000);
+    await waitFor(() => viewer.state.output.includes(`fake-claude:--resume,${ref}`), 'the CLI’s first output', 10_000);
     viewer.type(`${MARKER}\r`);
-    await waitFor(() => viewer.state.output.includes(`echo: ${MARKER}`), 'the echo', 10_000);
+    await waitFor(() => viewer.state.output.includes(`echo:${MARKER}`), 'the echo', 10_000);
     viewer.ws.send(JSON.stringify({ type: 'resize', cols: 101, rows: 31 }));
     viewer.type('size\r');
     await waitFor(() => viewer.state.output.includes('size=101x31'), 'the new size', 10_000);
@@ -237,7 +246,7 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     // The marker is in no event, no file of the data folder (database, logs) and no log line (AD-16).
     expect(JSON.stringify(server.core.events.readAfter(0))).not.toContain(MARKER);
     expect(lines.join('\n')).not.toContain(MARKER);
-    expect(lines.join('\n')).not.toContain('fake claude');
+    expect(lines.join('\n')).not.toContain('fake-claude:--resume');
     for (const file of filesUnder(server.dataDir)) expect(readFileSync(file).includes(MARKER), file).toBe(false);
   }, 60_000);
 
@@ -247,7 +256,7 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     expect((await switchTo(server, tab, ids, 'terminal')).status).toBe(200);
     const viewer = openTerminal(server, tab, sessionId);
     await viewer.opened;
-    await waitFor(() => viewer.state.output.includes('> '), 'the prompt', 10_000);
+    await waitFor(() => viewer.state.output.includes('ready>'), 'the prompt', 10_000);
     viewer.type('/exit\r');
     await waitFor(() => viewer.state.closed !== undefined, 'the terminal socket to close', 10_000);
     expect(viewer.state.frames).toEqual([{ type: 'exit', exitCode: 0 }]);
@@ -263,7 +272,7 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     const first = openTerminal(server, tab, sessionId);
     await first.opened;
     first.type('before\r');
-    await waitFor(() => first.state.output.includes('echo: before'), 'the echo', 10_000);
+    await waitFor(() => first.state.output.includes('echo:before'), 'the echo', 10_000);
     first.ws.close();
     await waitFor(() => first.state.closed !== undefined, 'the first viewer to close', 10_000);
     const { pid } = record();
@@ -271,7 +280,7 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
 
     const second = openTerminal(server, tab, sessionId);
     await second.opened;
-    await waitFor(() => second.state.output.includes('echo: before'), 'the recent output', 10_000);
+    await waitFor(() => second.state.output.includes('echo:before'), 'the recent output', 10_000);
 
     await server.close();
     await waitFor(() => !alive(pid), 'the CLI to be gone', 10_000);
@@ -285,7 +294,7 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     await waitFor(recorded, 'the CLI to start', 10_000);
     const slow = openTerminal(server, tab, sessionId);
     await slow.opened;
-    await waitFor(() => slow.state.output.includes('> '), 'the prompt', 10_000);
+    await waitFor(() => slow.state.output.includes('ready>'), 'the prompt', 10_000);
     slow.type('flood\r');
     // This viewer stops reading: what the server sends it piles up.
     slow.ws.pause();

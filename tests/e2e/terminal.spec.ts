@@ -61,13 +61,13 @@ test('in Developer mode a chat switches to its terminal, takes typing there, and
     const terminal = page.getByTestId('terminal');
     await expect(terminal).toHaveAttribute('data-status', 'connected');
     await expect(page.getByTestId('transcript')).toBeHidden();
-    await expect(terminal.locator('.xterm-rows')).toContainText('fake claude --resume');
+    await expect(terminal.locator('.xterm-rows')).toContainText('fake-claude:--resume,');
     // The composer says why it can't send; the server refuses too.
     await expect(page.getByText("Claude Code's terminal is driving this chat.", { exact: false })).toBeVisible();
 
     await page.keyboard.type(MARKER);
     await page.keyboard.press('Enter');
-    await expect(terminal.locator('.xterm-rows')).toContainText(`echo: ${MARKER}`);
+    await expect(terminal.locator('.xterm-rows')).toContainText(`echo:${MARKER}`);
 
     await page.getByTestId('switch-to-chat').click();
     await expect(page.getByTestId('transcript')).toBeVisible();

@@ -34,6 +34,8 @@ import { launch, onboardingServer, waitForExit, type Launched, type OnboardingSe
 
 /** An offline install of the fixture: slower on Windows runners. */
 const INSTALL_TIMEOUT_MS = 90_000;
+/** The adapter's own limit on an agent's start (`START_TIMEOUT_MS`, claude-code-agent.ts). */
+const AGENT_START_MS = 60_000;
 const SESSION_URL = /\/w\/ws_[0-9A-Z]{26}\/s\/ses_[0-9A-Z]{26}$/;
 const WORKSPACE_URL = /\/w\/ws_[0-9A-Z]{26}$/;
 
@@ -199,8 +201,10 @@ test('a first run on the installed package: Welcome, Install, sign in, a project
     await tab.close();
 
     // Signed in again: the chat resends its last message by itself, once, and the agent's own session answers.
-    // Noticing the sign-in, resending and starting a fresh agent takes several seconds on Windows runners.
-    await expect(replies(page).last()).toHaveText(/via=resumed primed=0$/, { timeout: 30_000 });
+    // Noticing the sign-in, resending and starting a fresh agent takes several seconds on Windows runners, and
+    // a stalled runner has taken over 30 s (run 36916617905, attempt 3): wait as long as the adapter lets an
+    // agent start (START_TIMEOUT_MS, 60 s), as the terminal journey does.
+    await expect(replies(page).last()).toHaveText(/via=resumed primed=0$/, { timeout: AGENT_START_MS });
     await expect(state(page)).toHaveAttribute('data-state', 'idle');
     await expect(userMessages(page)).toHaveText(['hello', 'context', 'context']);
     await expect(page.getByTestId('session-error')).toHaveCount(0);

@@ -84,6 +84,7 @@ context: []
 ## Plan Change Log
 
 - 2026-10-01: Windows CI run 36910454951 failed once at step 7 (the reply after switching back). The trace's event socket shows the import was on time (the terminal turns came before `driver_changed` to ui); `context` was accepted at 19:07:02 and the restarted agent's `session.resumed` and reply came at 19:07:42, 40 s later, while the runner was stalled (a key press in the page took 12 s). Not a lost or mis-matched reply. Step 7 now waits as long as the adapter lets an agent start (`START_TIMEOUT_MS`, 60 s), and a failed journey attaches the server's log (`server.log`, codes and timings only) to the report so the next stall can be timed from the server side.
+- 2026-10-01: three full reruns of each Windows job on #46 and #47 gave one more such failure, in the onboarding journey's step 6 (a resumed reply after Sign in again, not within 30 s; run 36916617905 attempt 3). Both failures followed a hidden PTY closing, so a temporary CI probe (run 36923233383, removed) timed `node -e 0` and the fake ACP agent's `initialize` before and after six ConPTY teardowns (three killed, three exited) on windows-latest: about 55 ms and 180 ms throughout, event-loop lag 0 to 4 ms, no process left spinning. Teardown is not the cause. The stalls are runner-wide (Windows servicing processes such as TrustedInstaller and TiWorker were busy), and in run 36910454951 the reply did arrive. The onboarding check now also waits for the adapter's 60 s start limit.
 
 ## Review Triage Log
 

@@ -70,6 +70,19 @@ export const CautionLevel = z.enum(CAUTION_LEVELS);
 export type CautionLevel = z.infer<typeof CautionLevel>;
 export const DEFAULT_CAUTION_LEVEL: CautionLevel = 'ask_every_time';
 
+/**
+ * The BMad Method pieces a workspace can turn on (CAP-19, AD-22). Every piece
+ * is off for a new or upgraded workspace; "BMad off" is every piece off.
+ * Story 10.1 (the tracer) carries only `planning`; entry 10.2 adds `board`,
+ * `builds` and `retrospectives` with their labels and dependency rule.
+ * Widening this list keeps stored events parseable.
+ */
+export const BMAD_PIECES = ['planning'] as const;
+export const BmadPiece = z.enum(BMAD_PIECES);
+export type BmadPiece = z.infer<typeof BmadPiece>;
+/** A workspace's pieces that are on: each at most once. */
+export const BmadPieces = z.array(BmadPiece).refine((pieces) => new Set(pieces).size === pieces.length, 'Each BMad piece can be listed once.');
+
 /** An agent's stable id, kebab-case (`claude-code`, `codex`). Not an Ogden Agents key (AD-9). */
 export const AgentId = z
   .string()
@@ -208,9 +221,23 @@ export type WorkspacePermissionRuleRemovedEvent = z.infer<typeof WorkspacePermis
 const WorkspaceSettingsChangedInput = z.object({
   type: z.literal('workspace.settings_changed'),
   ...onWorkspaceStream,
-  payload: z.object({ cautionLevel: CautionLevel, previous: CautionLevel }),
+  payload: z.object({
+    /** The caution level now (unchanged when only the pieces changed). */
+    cautionLevel: CautionLevel,
+    previous: CautionLevel,
+    /**
+     * The BMad pieces now and before (story 10.1), present when they changed.
+     * Optional, so the `{ cautionLevel, previous }` events 0.2.0 stored still
+     * parse and replay (E10-R7).
+     */
+    bmadPieces: BmadPieces.optional(),
+    previousBmadPieces: BmadPieces.optional(),
+  }),
 });
-/** The workspace's caution level changed (E2-R4); it applies to requests not yet shown. */
+/**
+ * The workspace's settings changed: its caution level (E2-R4), which applies
+ * to requests not yet shown, or its BMad pieces (CAP-19, AD-22).
+ */
 export const WorkspaceSettingsChangedEvent = WorkspaceSettingsChangedInput.extend(assigned);
 export type WorkspaceSettingsChangedEvent = z.infer<typeof WorkspaceSettingsChangedEvent>;
 

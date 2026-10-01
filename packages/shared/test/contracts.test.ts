@@ -28,6 +28,7 @@ import {
   MAX_TERMINAL_COLS,
   MAX_TERMINAL_ROWS,
   NewCoreEvent,
+  TEST_ROUTES,
   OnboardingState,
   PermissionDecisionRequest,
   PermissionRule,
@@ -251,7 +252,7 @@ describe('REST shapes', () => {
     ['FolderListing', FolderListing, { path: '/home/a', parent: '/home', entries: [{ name: 'repo', path: '/home/a/repo' }] }, { path: '/home/a', entries: [] }],
     ['CreateFolderRequest', CreateFolderRequest, { parent: '/home/a', name: 'clay-and-kiln' }, { parent: '/home/a', name: '../escape' }],
     ['HistoryDeletedResponse', HistoryDeletedResponse, { deletedEvents: 3, deletedSessions: 1, deletedRuns: 0 }, { deletedEvents: -1, deletedSessions: 1, deletedRuns: 0 }],
-    ['WorkspaceSettingsResponse', WorkspaceSettingsResponse, { settings: { cautionLevel: 'ask_every_time' } }, { settings: {} }],
+    ['WorkspaceSettingsResponse', WorkspaceSettingsResponse, { settings: { cautionLevel: 'ask_every_time', bmadPieces: ['planning'] } }, { settings: { cautionLevel: 'ask_every_time' } }],
     ['UpdateWorkspaceSettingsRequest', UpdateWorkspaceSettingsRequest, { cautionLevel: 'ask_risky_only' }, {}],
     ['PermissionDecisionRequest', PermissionDecisionRequest, { decision: 'deny', reason: 'Not in this repo.' }, { decision: 'deny', reason: 'x'.repeat(2001) }],
     ['PermissionRule', PermissionRule, { id: ruleId, workspaceId: wsId, scope, createdAt: at }, { id: ruleId, workspaceId: wsId, scope: { ...scope, kind: 'path' }, createdAt: at }],
@@ -274,6 +275,35 @@ describe('REST shapes', () => {
       expect(schema.safeParse(invalid).success).toBe(false);
     });
   }
+});
+
+describe('the BMad pieces (story 10.1)', () => {
+  const assignedTo = { ...onWorkspace, ...assigned };
+  it('a 0.2.0 workspace.settings_changed (caution level only) still parses; a pieces change parses with both lists', () => {
+    const old = { type: 'workspace.settings_changed', ...assignedTo, payload: { cautionLevel: 'ask_for_commands', previous: 'ask_every_time' } };
+    expect(CoreEvent.parse(old)).toEqual(old);
+    const pieces = {
+      type: 'workspace.settings_changed',
+      ...assignedTo,
+      payload: { cautionLevel: 'ask_every_time', previous: 'ask_every_time', bmadPieces: ['planning'], previousBmadPieces: [] },
+    };
+    expect(CoreEvent.parse(pieces)).toEqual(pieces);
+    expect(CoreEvent.safeParse({ ...pieces, payload: { ...pieces.payload, bmadPieces: ['yolo'] } }).success).toBe(false);
+  });
+
+  it('UpdateWorkspaceSettingsRequest takes the pieces alone or with a level, never an unknown or repeated piece or nothing', () => {
+    expect(UpdateWorkspaceSettingsRequest.parse({ bmadPieces: [] })).toEqual({ bmadPieces: [] });
+    expect(UpdateWorkspaceSettingsRequest.parse({ bmadPieces: ['planning'], cautionLevel: 'ask_for_commands' })).toEqual({ bmadPieces: ['planning'], cautionLevel: 'ask_for_commands' });
+    for (const bad of [{ bmadPieces: ['board'] }, { bmadPieces: ['planning', 'planning'] }, { bmadPieces: 'planning' }, { other: 1 }, {}]) {
+      expect(UpdateWorkspaceSettingsRequest.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it('feature_off is an error code, and the test-only probe is under /api/v1 and outside API_ROUTES', () => {
+    expect(API_ERROR_CODES).toContain('feature_off');
+    expect(TEST_ROUTES.bmadProbe.startsWith(`${API_BASE}/`)).toBe(true);
+    expect(Object.values(API_ROUTES) as string[]).not.toContain(TEST_ROUTES.bmadProbe);
+  });
 });
 
 describe('API routes and error codes', () => {

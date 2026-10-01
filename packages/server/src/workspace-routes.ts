@@ -8,7 +8,7 @@
  * state-changing, so the gate has checked its Origin. Without permissions
  * (an app wired without core) they answer 501 without reading the body.
  */
-import { NotFoundError, ValidationError, WorkspaceBusyError, type Chat, type Permissions } from '@ogden-agents/core';
+import { FeatureOffError, NotFoundError, ValidationError, WorkspaceBusyError, type BmadFeatures, type Chat, type Permissions } from '@ogden-agents/core';
 import {
   API_ROUTES,
   CreateFolderRequest,
@@ -16,6 +16,7 @@ import {
   FolderListing,
   FolderListingQuery,
   HistoryDeletedResponse,
+  TEST_ROUTES,
   UpdateWorkspaceSettingsRequest,
   WorkspaceResponse,
   WorkspaceSettingsResponse,
@@ -37,11 +38,18 @@ export interface WorkspaceRoutesOptions {
   chat?: Chat | undefined;
   /** Core's permissions, which keep each workspace's caution level (2.8); without them the settings routes answer 501. */
   permissions?: Permissions | undefined;
+  /** Core's BMad pieces guard (AD-22), for the test-only probe route. */
+  bmad?: BmadFeatures | undefined;
+  /**
+   * Registers `TEST_ROUTES.bmadProbe` (story 10.1). Only `start()` sets it,
+   * and only when its test hook is allowed (`test-hooks.ts` `testBmadProbe`).
+   */
+  bmadProbe?: boolean;
   log: Logger;
 }
 
 export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptions): void {
-  const { chat, permissions, log } = options;
+  const { chat, permissions, bmad, bmadProbe, log } = options;
   const limit = bodyLimit({
     maxSize: MAX_BODY_BYTES,
     onError: (c) => apiError(c, 413, 'invalid_request', 'That request is too large.'),
@@ -50,6 +58,9 @@ export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptio
   /** Core's and the folder browser's refusals as API errors; anything else is left for `onError` (500). */
   const refusal = (c: Context, error: unknown): Response => {
     if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', NOT_FOUND);
+    if (error instanceof FeatureOffError) {
+      return apiError(c, 409, 'feature_off', "This BMad Method feature is off in this project. Turn it on in the project's settings to use it.");
+    }
     if (error instanceof WorkspaceBusyError) {
       return apiError(c, 409, 'sessions_busy', 'A chat in this project is still working or waiting for you. Let it finish, then delete the history.');
     }
@@ -101,8 +112,23 @@ export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptio
       if (!body.ok) return body.response;
       try {
         const settings = permissions.updateSettings(scope.workspaceId, body.value);
-        log.info('workspace settings saved', { workspaceId: scope.workspaceId, cautionLevel: settings.cautionLevel });
+        log.info('workspace settings saved', { workspaceId: scope.workspaceId, cautionLevel: settings.cautionLevel, bmadPieces: settings.bmadPieces.join(',') });
         return c.json(WorkspaceSettingsResponse.parse({ settings }));
+      } catch (error) {
+        return refusal(c, error);
+      }
+    });
+  }
+
+  // Tests only (story 10.1): a route serving the `planning` piece. Core's guard
+  // is the check (AD-22); this route adds none of its own.
+  if (bmadProbe === true && bmad !== undefined) {
+    app.get(TEST_ROUTES.bmadProbe, (c) => {
+      const scope = ids(c);
+      if (scope === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+      try {
+        bmad.requireBmadFeature(scope.workspaceId, 'planning');
+        return c.json({ piece: 'planning' });
       } catch (error) {
         return refusal(c, error);
       }

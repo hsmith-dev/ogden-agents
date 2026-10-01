@@ -1,4 +1,4 @@
-import { API_ROUTES, apiPath, WorkspaceSettingsResponse, type CautionLevel, type WorkspaceSettings } from '@ogden-agents/shared';
+import { API_ROUTES, apiPath, WorkspaceSettingsResponse, type BmadPiece, type CautionLevel, type WorkspaceSettings } from '@ogden-agents/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
@@ -26,6 +26,20 @@ export async function updateCautionLevel(wsId: string, cautionLevel: CautionLeve
     apiPath(API_ROUTES.workspaceSettings, { wsId }),
     { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cautionLevel }) },
     "The caution level couldn't be saved",
+  );
+  return WorkspaceSettingsResponse.parse(json).settings;
+}
+
+/**
+ * `PATCH /api/v1/workspaces/:wsId/settings`: the BMad pieces the project has
+ * on (story 10.1). The server's guard, not this page, decides what runs (AD-22).
+ */
+export async function updateBmadPieces(wsId: string, bmadPieces: readonly BmadPiece[], auth: Auth = tabAuth): Promise<WorkspaceSettings> {
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.workspaceSettings, { wsId }),
+    { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bmadPieces }) },
+    "The BMad Method setting couldn't be saved",
   );
   return WorkspaceSettingsResponse.parse(json).settings;
 }

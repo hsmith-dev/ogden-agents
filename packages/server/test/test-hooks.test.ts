@@ -10,7 +10,19 @@ import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { API_KEY_CHECK_ENV, CLAUDE_CLI_ENV, CLAUDE_INSTALL_ENV, insideTemp, isTestRun, testApiKeyCheck, testClaudeCli, testClaudeInstall, testHooksAllowed } from '../src/test-hooks.js';
+import {
+  API_KEY_CHECK_ENV,
+  BMAD_PROBE_ENV,
+  CLAUDE_CLI_ENV,
+  CLAUDE_INSTALL_ENV,
+  insideTemp,
+  isTestRun,
+  testApiKeyCheck,
+  testBmadProbe,
+  testClaudeCli,
+  testClaudeInstall,
+  testHooksAllowed,
+} from '../src/test-hooks.js';
 import { startTestServer, tempDataDir } from './helpers.js';
 
 const INTEGRITY = 'sha512-QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=';
@@ -70,6 +82,18 @@ describe('isTestRun and testHooksAllowed', () => {
     expect(insideTemp(inside)).toBe(true);
     expect(insideTemp(join(dir, 'out'))).toBe(false);
     expect(insideTemp(inside, join(dir, 'tmp-link'))).toBe(true);
+  });
+});
+
+describe('testBmadProbe (story 10.1)', () => {
+  it('is on only for a test run on a temp data folder with its variable set to 1', () => {
+    const dir = tempDataDir();
+    expect(testBmadProbe({ NODE_ENV: 'test', [BMAD_PROBE_ENV]: '1' }, dir)).toBe(true);
+    expect(testBmadProbe({ [BMAD_PROBE_ENV]: '1' }, dir)).toBe(false);
+    expect(testBmadProbe({ NODE_ENV: 'production', VITEST: '', [BMAD_PROBE_ENV]: '1' }, dir)).toBe(false);
+    expect(testBmadProbe({ NODE_ENV: 'test', [BMAD_PROBE_ENV]: '1' }, OUTSIDE)).toBe(false);
+    expect(testBmadProbe({ NODE_ENV: 'test' }, dir)).toBe(false);
+    expect(testBmadProbe({ NODE_ENV: 'test', [BMAD_PROBE_ENV]: 'true' }, dir)).toBe(false);
   });
 });
 

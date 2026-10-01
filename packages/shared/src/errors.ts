@@ -44,6 +44,8 @@ export const API_ERROR_CODES = [
   'api_key_refused',
   /** An agent's install, sign-in or API key could not be done (500). The message says why in plain words. */
   'agent_setup_failed',
+  /** A BMad Method piece this project has turned off was asked for (409; AD-22: core's guard refused it). */
+  'feature_off',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

@@ -1,3 +1,4 @@
+import { createBmadFeatures, type BmadFeatures } from './bmad-features.js';
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
 import { createEntities, type Entities } from './entities.js';
 import { createEventLog, type EventLog, type EventLogOptions } from './event-log.js';
@@ -16,6 +17,8 @@ export interface Core {
   readonly entities: Entities;
   /** Permission requests, their cards' decisions and the always-allow rules (CAP-4, E2-R3). */
   readonly permissions: Permissions;
+  /** The BMad pieces guard (AD-22): every use-case serving a piece calls it first. */
+  readonly bmad: BmadFeatures;
   close(): void;
 }
 
@@ -43,6 +46,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     sessionEvents,
     entities,
     permissions,
+    bmad: createBmadFeatures(db),
     close: () => {
       try {
         permissions.close();

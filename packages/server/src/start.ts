@@ -46,7 +46,7 @@ import { createLauncherToken, type LauncherToken } from './launcher-token.js';
 import { createLogger, createRotatingFileWriter, LOG_DIR, teeWriters, type Logger } from './log.js';
 import { shortcutErrorCode } from './shortcut-routes.js';
 import { createTerminalAvailability } from './terminal-availability.js';
-import { testApiKeyCheck, testClaudeCli, testClaudeInstall } from './test-hooks.js';
+import { testApiKeyCheck, testBmadProbe, testClaudeCli, testClaudeInstall } from './test-hooks.js';
 import { VERSION } from './version.js';
 import { agentEnvironment, agentKeysOf, checkInDelayFromEnv, SUBSCRIPTION_MAX_AGE_MS, testSecretStore, withoutAgentKeys } from './start-env.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
@@ -235,8 +235,9 @@ async function listenAndAnnounce({
   const verifyApiKey = options.verifyApiKey ?? testVerify;
   // The terminal's `claude`: the option's, else (a test run only) a stand-in from the environment (story 3.10).
   const testCli = options.extraAgentEnv?.CLAUDE_CODE_EXECUTABLE === undefined ? testClaudeCli(process.env, dataDir) : undefined;
-  if (testInstall !== undefined || testVerify !== undefined || testCli !== undefined) {
-    log.info('test hooks in use', { claudeInstall: testInstall !== undefined, apiKeyCheck: testVerify !== undefined, claudeCli: testCli !== undefined });
+  const bmadProbe = testBmadProbe(process.env, dataDir);
+  if (testInstall !== undefined || testVerify !== undefined || testCli !== undefined || bmadProbe) {
+    log.info('test hooks in use', { claudeInstall: testInstall !== undefined, apiKeyCheck: testVerify !== undefined, claudeCli: testCli !== undefined, bmadProbe });
   }
   const claudeAdapter = () => locateClaudeAdapter({ adapterPath: givenClaudeAdapter, dataDir, pins: claudeInstall.pins })?.path;
   const agent =
@@ -364,6 +365,9 @@ async function listenAndAnnounce({
     // The unwrapped agent and `chatEnv`: core's checks, without reading sign-in again on every GET (story 3.7).
     terminalAvailability: createTerminalAvailability({ agent, terminal, env: chatEnv }),
     permissions,
+    bmad: core.bmad,
+    // The test-only BMad probe route (story 10.1): a test run on a temp data folder, with its own variable set.
+    bmadProbe,
     agentSetup,
     onboarding,
     appShortcut,

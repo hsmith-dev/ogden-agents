@@ -629,7 +629,7 @@ describe('caution level (story 2.8)', () => {
     const dataDir = tempDir();
     const core = openTestCore(dataDir);
     const { workspace } = workingSession(core);
-    expect(core.permissions.getSettings(workspace.id)).toEqual({ cautionLevel: 'ask_every_time' });
+    expect(core.permissions.getSettings(workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [] });
 
     const before = core.events.lastSeq();
     expect(() => core.permissions.updateSettings(workspace.id, { cautionLevel: 'yolo' })).toThrow(ValidationError);
@@ -639,7 +639,7 @@ describe('caution level (story 2.8)', () => {
     expect(() => core.permissions.getSettings(unknown)).toThrow(NotFoundError);
     expect(core.events.lastSeq()).toBe(before);
 
-    expect(core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_for_commands' })).toEqual({ cautionLevel: 'ask_for_commands' });
+    expect(core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_for_commands' })).toEqual({ cautionLevel: 'ask_for_commands', bmadPieces: [] });
     expect(core.events.readAfter(before)).toEqual([
       expect.objectContaining({
         type: 'workspace.settings_changed',
@@ -660,7 +660,7 @@ describe('caution level (story 2.8)', () => {
 
   it('the stub declines settings changes and reports the default', () => {
     const stub = createDecliningPermissions();
-    expect(stub.getSettings('ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3' as WorkspaceId)).toEqual({ cautionLevel: 'ask_every_time' });
+    expect(stub.getSettings('ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3' as WorkspaceId)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [] });
     expect(() => stub.updateSettings('ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3' as WorkspaceId, { cautionLevel: 'ask_risky_only' })).toThrow(NotFoundError);
   });
 

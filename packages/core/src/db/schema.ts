@@ -28,6 +28,13 @@ export const workspaces = sqliteTable(
     realPath: text('real_path').notNull().default(''),
     /** What the workspace's agents may run without a card (E2-R4; story 2.8). */
     cautionLevel: text('caution_level').$type<CautionLevel>().notNull().default('ask_every_time'),
+    /**
+     * The BMad pieces this workspace has on, as JSON array text (CAP-19,
+     * AD-22; story 10.1). `[]`, every piece off, for new and upgraded
+     * workspaces. Plain text, parsed only by `readBmadPieces`, so a damaged
+     * value reads as off rather than failing every workspace read.
+     */
+    bmadPieces: text('bmad_pieces').notNull().default('[]'),
     createdAt: text('created_at').notNull(),
   },
   (t) => [uniqueIndex('workspaces_path_unique').on(t.path)],

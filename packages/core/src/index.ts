@@ -2,6 +2,7 @@ export * from './agent-port.js';
 export * from './agent-setup.js';
 export * from './agent-setup-port.js';
 export * from './app-shortcut-port.js';
+export * from './bmad-features.js';
 export * from './chat.js';
 export * from './core.js';
 export * from './data-dir.js';

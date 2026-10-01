@@ -1,5 +1,5 @@
 import { serveStatic } from '@hono/node-server/serve-static';
-import type { AgentSetup, AppShortcutPort, Chat, EventLog, Onboarding, Permissions, Toolchain } from '@ogden-agents/core';
+import type { AgentSetup, AppShortcutPort, BmadFeatures, Chat, EventLog, Onboarding, Permissions, Toolchain } from '@ogden-agents/core';
 import { API_ROUTES, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
@@ -68,6 +68,10 @@ export interface AppOptions {
   terminalAvailability?: TerminalAvailabilityCheck;
   /** Core's answers to permission requests, which the permission routes decide through (the declining stub until 2.6). */
   permissions?: Permissions;
+  /** Core's BMad pieces guard (AD-22, story 10.1). */
+  bmad?: BmadFeatures;
+  /** Registers the test-only BMad probe route (story 10.1); `start()` sets it only when its test hook is allowed. */
+  bmadProbe?: boolean;
   /** Core's agent setup use-case: each agent's state and signing in (9.1); without it those routes answer 501. */
   agentSetup?: AgentSetup;
   /** Whether the first-run Welcome is done (9.5); without it those routes answer 501. */
@@ -81,7 +85,7 @@ export interface AppOptions {
   tabs?: TabTokens;
 }
 
-export function createApp({ events, webRoot, log, gate, control, toolchain, chat, terminalAvailability, permissions, agentSetup, onboarding, appShortcut, tabs }: AppOptions): Hono {
+export function createApp({ events, webRoot, log, gate, control, toolchain, chat, terminalAvailability, permissions, bmad, bmadProbe, agentSetup, onboarding, appShortcut, tabs }: AppOptions): Hono {
   const app = new Hono();
 
   // First, for every method and path: no route may be registered before this line.
@@ -161,7 +165,7 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, chat
   // One route file per lane (story 2.3): each fills only its own. Every route is in
   // `API_ROUTES` under `/api/v1`, registered after the gate.
   if (chat !== undefined) registerChatRoutes(app, chat, log, { terminalAvailability });
-  registerWorkspaceRoutes(app, { chat, permissions, log });
+  registerWorkspaceRoutes(app, { chat, permissions, bmad, bmadProbe, log });
   registerPermissionRoutes(app, { permissions, log });
   registerShortcutRoutes(app, { appShortcut, log });
   registerAgentSetupRoutes(app, { agentSetup, onboarding, log });

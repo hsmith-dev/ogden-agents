@@ -44,6 +44,17 @@ export class NotFoundError extends CoreError {
   }
 }
 
+/**
+ * A BMad Method piece the workspace has turned off was asked for (AD-22):
+ * core's guard refused it and did nothing. `piece` is the piece's id.
+ */
+export class FeatureOffError extends CoreError {
+  override readonly name = 'FeatureOffError';
+  constructor(readonly piece: string) {
+    super('feature_off', `The ${piece} feature of BMad Method is off in this project.`);
+  }
+}
+
 /** An operation is not allowed in the entity's current state. */
 export class InvalidOperationError extends CoreError {
   override readonly name = 'InvalidOperationError';

@@ -1,0 +1,1 @@
+ALTER TABLE `workspaces` ADD `bmad_pieces` text DEFAULT '[]' NOT NULL;

@@ -25,11 +25,13 @@ import { realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import {
   alwaysAllowRefusal,
+  BmadPieces as BmadPiecesSchema,
   CautionLevel as CautionLevelSchema,
   DEFAULT_CAUTION_LEVEL,
   MAX_DENY_REASON_LENGTH,
   ToolKind as ToolKindSchema,
   type AlwaysAllowScope,
+  type BmadPiece,
   type CautionLevel,
   type CoreEvent,
   type PermissionDecision,
@@ -43,6 +45,7 @@ import {
 } from '@ogden-agents/shared';
 import { and, asc, eq } from 'drizzle-orm';
 import { monotonicFactory } from 'ulid';
+import { readBmadPieces } from './bmad-features.js';
 import type { AgentPermissionDecision, AgentPermissionRequest } from './agent-port.js';
 import type { Database } from './db/database.js';
 import { permissionRules, workspaces } from './db/schema.js';
@@ -86,15 +89,17 @@ export interface Permissions {
    * {@link NotFoundError} when the workspace has no such rule.
    */
   removeRule(workspaceId: WorkspaceId, ruleId: PermissionRuleId): void;
-  /** The workspace's settings (its caution level). {@link NotFoundError} for an unknown workspace. */
+  /** The workspace's settings (its caution level and BMad pieces). {@link NotFoundError} for an unknown workspace. */
   getSettings(workspaceId: WorkspaceId): WorkspaceSettings;
   /**
-   * Changes the workspace's settings and appends `workspace.settings_changed`
-   * in the same transaction; an unchanged level appends nothing. It applies
-   * to requests not yet shown. {@link ValidationError} for an unknown level,
+   * Changes the workspace's settings, its caution level and its BMad pieces
+   * (AD-22; the only way the pieces change), and appends one
+   * `workspace.settings_changed` in the same transaction; nothing changed
+   * appends nothing. A level applies to requests not yet shown.
+   * {@link ValidationError} for an unknown level or piece, or neither given;
    * {@link NotFoundError} for an unknown workspace.
    */
-  updateSettings(workspaceId: WorkspaceId, input: { cautionLevel?: unknown }): WorkspaceSettings;
+  updateSettings(workspaceId: WorkspaceId, input: { cautionLevel?: unknown; bmadPieces?: unknown }): WorkspaceSettings;
   /** Stops listening and tells every agent still waiting that its request was cancelled. */
   close(): void;
 }
@@ -113,7 +118,7 @@ export function createDecliningPermissions(): Permissions {
     removeRule: (_workspaceId, ruleId) => {
       throw new NotFoundError('permission rule', ruleId);
     },
-    getSettings: () => ({ cautionLevel: DEFAULT_CAUTION_LEVEL }),
+    getSettings: () => ({ cautionLevel: DEFAULT_CAUTION_LEVEL, bmadPieces: [] }),
     updateSettings: (workspaceId) => {
       throw new NotFoundError('workspace', workspaceId);
     },
@@ -617,25 +622,49 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
 
     getSettings(workspaceId) {
       const cautionLevel = readLevel(workspaceId);
-      if (cautionLevel === undefined) throw new NotFoundError('workspace', workspaceId);
-      return { cautionLevel };
+      const bmadPieces = readBmadPieces(orm, workspaceId);
+      if (cautionLevel === undefined || bmadPieces === undefined) throw new NotFoundError('workspace', workspaceId);
+      return { cautionLevel, bmadPieces };
     },
 
     updateSettings(workspaceId, input) {
-      const parsed = CautionLevelSchema.safeParse(input.cautionLevel);
-      if (!parsed.success) {
-        throw new ValidationError('Choose Ask every time, Ask for commands or Ask only for risky actions.', [
-          { path: ['cautionLevel'], message: 'unknown caution level' },
-        ]);
+      let cautionLevel: CautionLevel | undefined;
+      if (input.cautionLevel !== undefined) {
+        const parsed = CautionLevelSchema.safeParse(input.cautionLevel);
+        if (!parsed.success) {
+          throw new ValidationError('Choose Ask every time, Ask for commands or Ask only for risky actions.', [
+            { path: ['cautionLevel'], message: 'unknown caution level' },
+          ]);
+        }
+        cautionLevel = parsed.data;
       }
-      const cautionLevel = parsed.data;
+      let bmadPieces: BmadPiece[] | undefined;
+      if (input.bmadPieces !== undefined) {
+        const parsed = BmadPiecesSchema.safeParse(input.bmadPieces);
+        if (!parsed.success) throw new ValidationError('Choose BMad Method features this version has.', [{ path: ['bmadPieces'], message: 'unknown or repeated piece' }]);
+        bmadPieces = parsed.data;
+      }
+      if (cautionLevel === undefined && bmadPieces === undefined) {
+        throw new ValidationError('Choose a setting to change.', [{ path: [], message: 'nothing to change' }]);
+      }
       return events.transaction(() => {
         const previous = readLevel(workspaceId);
-        if (previous === undefined) throw new NotFoundError('workspace', workspaceId);
-        if (previous === cautionLevel) return { cautionLevel };
-        orm.update(workspaces).set({ cautionLevel }).where(eq(workspaces.id, workspaceId)).run();
-        events.append({ type: 'workspace.settings_changed', workspaceId, streamId: workspaceId, payload: { cautionLevel, previous } });
-        return { cautionLevel };
+        const previousBmadPieces = readBmadPieces(orm, workspaceId);
+        if (previous === undefined || previousBmadPieces === undefined) throw new NotFoundError('workspace', workspaceId);
+        const level = cautionLevel ?? previous;
+        // Compared as sets: the same pieces in another order change nothing.
+        const piecesChanged =
+          bmadPieces !== undefined && (bmadPieces.length !== previousBmadPieces.length || bmadPieces.some((piece) => !previousBmadPieces.includes(piece)));
+        const pieces = piecesChanged ? bmadPieces! : previousBmadPieces;
+        if (level === previous && !piecesChanged) return { cautionLevel: level, bmadPieces: pieces };
+        orm.update(workspaces).set({ cautionLevel: level, bmadPieces: JSON.stringify(pieces) }).where(eq(workspaces.id, workspaceId)).run();
+        events.append({
+          type: 'workspace.settings_changed',
+          workspaceId,
+          streamId: workspaceId,
+          payload: { cautionLevel: level, previous, ...(piecesChanged ? { bmadPieces: pieces, previousBmadPieces } : {}) },
+        });
+        return { cautionLevel: level, bmadPieces: pieces };
       });
     },
 

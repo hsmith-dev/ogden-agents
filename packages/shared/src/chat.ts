@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, MessageId, PermissionDecision } from './events.js';
+import { AlwaysAllowScope, BmadPieces, CautionLevel, MAX_DENY_REASON_LENGTH, MessageId, PermissionDecision } from './events.js';
 import { Session, Workspace } from './entities.js';
 import { PermissionRuleId, WorkspaceId } from './ids.js';
 import { SessionTerminal } from './terminal.js';
@@ -114,8 +114,8 @@ export const HistoryDeletedResponse = z.object({
 });
 export type HistoryDeletedResponse = z.infer<typeof HistoryDeletedResponse>;
 
-/** A workspace's settings (Workspace settings page). */
-export const WorkspaceSettings = z.object({ cautionLevel: CautionLevel });
+/** A workspace's settings (Workspace settings page): its caution level and the BMad pieces it has on (AD-22). */
+export const WorkspaceSettings = z.object({ cautionLevel: CautionLevel, bmadPieces: BmadPieces });
 export type WorkspaceSettings = z.infer<typeof WorkspaceSettings>;
 
 /** `GET` and `PATCH /api/v1/workspaces/:wsId/settings`. */
@@ -123,8 +123,8 @@ export const WorkspaceSettingsResponse = z.object({ settings: WorkspaceSettings 
 export type WorkspaceSettingsResponse = z.infer<typeof WorkspaceSettingsResponse>;
 
 /** `PATCH /api/v1/workspaces/:wsId/settings`: the fields to change. */
-export const UpdateWorkspaceSettingsRequest = WorkspaceSettings.partial().refine(
-  (settings) => Object.keys(settings).length > 0,
+export const UpdateWorkspaceSettingsRequest = z.object({ cautionLevel: CautionLevel.optional(), bmadPieces: BmadPieces.optional() }).refine(
+  (settings) => settings.cautionLevel !== undefined || settings.bmadPieces !== undefined,
   'Choose a setting to change.',
 );
 export type UpdateWorkspaceSettingsRequest = z.infer<typeof UpdateWorkspaceSettingsRequest>;

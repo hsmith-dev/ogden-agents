@@ -20,6 +20,9 @@
  *   suite's terminal runs the fake CLI on every OS (Windows takes only a real
  *   `claude.exe` from `PATH`). It is narrower than `OGDEN_AGENTS_CLAUDE_ACP_PATH`,
  *   which already picks the agent's script for anyone.
+ * - {@link BMAD_PROBE_ENV} = `1`: registers the test-only route that serves
+ *   the `planning` BMad piece behind core's guard (story 10.1), so a test can
+ *   see `feature_off` while the piece is off.
  */
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -36,6 +39,9 @@ export const API_KEY_CHECK_ENV = 'OGDEN_AGENTS_TEST_API_KEY_CHECK';
 
 /** Absolute path to a `claude` stand-in inside the temp folder, run as the agents' `CLAUDE_CODE_EXECUTABLE` (tests only). */
 export const CLAUDE_CLI_ENV = 'OGDEN_AGENTS_TEST_CLAUDE_CLI';
+
+/** `1`: register `TEST_ROUTES.bmadProbe`, a route guarded by the `planning` piece (tests only; story 10.1). */
+export const BMAD_PROBE_ENV = 'OGDEN_AGENTS_TEST_BMAD_PROBE';
 
 /** Whether this process runs under a test runner: `NODE_ENV=test`, or `VITEST` set. */
 export function isTestRun(env: Env = process.env): boolean {
@@ -146,4 +152,9 @@ export function testClaudeCli(env: Env, dataDir: string, tmp: string = tmpdir())
   if (!insideTemp(target, tmp) || !/\.[cm]?js$/i.test(target)) return undefined;
   if (!statSync(target).isFile()) throw new Error(`${CLAUDE_CLI_ENV}: not a file`);
   return target;
+}
+
+/** Whether to register the test-only BMad probe route ({@link BMAD_PROBE_ENV}): only when set to `1` and test hooks are allowed. */
+export function testBmadProbe(env: Env, dataDir: string, tmp: string = tmpdir()): boolean {
+  return env[BMAD_PROBE_ENV] === '1' && testHooksAllowed(env, dataDir, tmp);
 }

@@ -169,3 +169,17 @@ export function apiPath<Route extends string>(route: Route, params: RouteParams<
 }
 
 export type ApiRoute = (typeof API_ROUTES)[keyof typeof API_ROUTES];
+
+/**
+ * Routes that exist only in tests: registered only when the server's test
+ * hooks are allowed and the route's own variable is set (`test-hooks.ts`),
+ * always behind the gate (AD-15), and never part of {@link API_ROUTES}.
+ */
+export const TEST_ROUTES = {
+  /**
+   * `GET` → `{ piece }` (story 10.1): a route serving the `planning` piece,
+   * refused by core's guard with 409 `feature_off` while the workspace has it
+   * off (AD-22).
+   */
+  bmadProbe: `${API_BASE}/workspaces/:wsId/test/bmad-probe`,
+} as const;

@@ -226,8 +226,12 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     viewer.type(`${MARKER}\r`);
     await waitFor(() => viewer.state.output.includes(`echo:${MARKER}`), 'the echo', 10_000);
     viewer.ws.send(JSON.stringify({ type: 'resize', cols: 101, rows: 31 }));
-    viewer.type('size\r');
-    await waitFor(() => viewer.state.output.includes('size=101x31'), 'the new size', 10_000);
+    // ConPTY (Windows) applies a resize asynchronously, after input already on its way: ask until it shows.
+    for (let tries = 0; tries < 20 && !viewer.state.output.includes('size=101x31'); tries++) {
+      viewer.type('size\r');
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    expect(viewer.state.output).toContain('size=101x31');
 
     const back = await switchTo(server, tab, ids, 'ui');
     expect(back.status).toBe(200);

@@ -115,8 +115,16 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('the real terminal (f
     cli.write('hello-there\r');
     await expect.poll(output, { timeout: 10_000 }).toContain('echo:hello-there');
     cli.resize(100, 30);
-    cli.write('size\r');
-    await expect.poll(output, { timeout: 10_000 }).toContain('size=100x30');
+    // ConPTY (Windows) applies a resize asynchronously, after input already on its way: ask until it shows.
+    await expect
+      .poll(
+        () => {
+          if (!output().includes('size=100x30')) cli.write('size\r');
+          return output();
+        },
+        { timeout: 10_000, interval: 500 },
+      )
+      .toContain('size=100x30');
     cli.write('/exit\r');
     await expect.poll(() => exits, { timeout: 10_000 }).toEqual([0]);
   }, 30_000);

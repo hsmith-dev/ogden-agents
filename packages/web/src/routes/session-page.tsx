@@ -213,7 +213,7 @@ export function SessionPage() {
   if (session.error instanceof ChatApiError && session.error.status === 404) {
     return (
       <>
-        <WorkspaceHeader title="Chat" />
+        <WorkspaceHeader title="Chat" wsId={wsId} />
         <PageBody>
           <EmptyState
             data-testid="session-not-found"
@@ -266,7 +266,7 @@ export function SessionPage() {
 
   return (
     <>
-      <WorkspaceHeader title="Chat">
+      <WorkspaceHeader title="Chat" wsId={wsId} compactOnPhone={appearance.developerMode}>
         {state === undefined ? null : <StateGlyph state={state} data-testid="session-state" className="ml-auto" />}
         {appearance.developerMode ? (
           <DriverToggle

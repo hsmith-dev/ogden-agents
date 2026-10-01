@@ -45,6 +45,13 @@
 //   "echo-env"     replies with its whole environment, `NAME=value` per line,
 //                  each value split across two chunks, and writes it to stderr
 //   "pids"         replies `pid=<its pid> grandchild=<pid or none>`
+//   "session-start"  replies one JSON line `{ via, cwd, mcpServers, meta,
+//                  prompt, env }`: how the session was opened (`new`,
+//                  `resumed`, `loaded`), the `cwd`, `mcpServers` and `_meta`
+//                  (`null` when absent) its `session/new`, `resume` or `load`
+//                  carried, the whole prompt text it received, and its
+//                  environment (story 10.6: what a simple project's session
+//                  starts with)
 //
 // With FAKE_ACP_EXIT_AT_START=1 it exits before answering anything. With
 // FAKE_ACP_SPAWN_GRANDCHILD=1 it starts a long-lived child of its own (as the
@@ -236,16 +243,16 @@ acp
       agentInfo: { name: 'fake-acp-agent', version: '1.0.0' },
     };
   })
-  .onRequest('session/new', () => {
+  .onRequest('session/new', ({ params }) => {
     const sessionId = `fake-session-${nextSession++}`;
-    sessions.set(sessionId, { via: 'new' });
+    sessions.set(sessionId, { via: 'new', opened: params });
     return { sessionId };
   })
   .onRequest('session/resume', ({ params }) => {
     if (RESUME !== 'resume' && RESUME !== 'both') throw acp.RequestError.methodNotFound('session/resume');
     if (REOPEN_FAIL.has('resume-auth')) throw acp.RequestError.authRequired(undefined, 'the fake agent needs a new sign-in');
     if (REOPEN_FAIL.has('resume')) throw acp.RequestError.resourceNotFound(params.sessionId);
-    sessions.set(params.sessionId, { via: 'resumed' });
+    sessions.set(params.sessionId, { via: 'resumed', opened: params });
     return {};
   })
   .onRequest('session/load', async ({ params, client }) => {
@@ -253,7 +260,7 @@ acp
     // The history a load replays: the client already has it.
     await say(client, params.sessionId, 'Earlier reply.');
     if (REOPEN_FAIL.has('load')) throw acp.RequestError.resourceNotFound(params.sessionId);
-    sessions.set(params.sessionId, { via: 'loaded' });
+    sessions.set(params.sessionId, { via: 'loaded', opened: params });
     return {};
   })
   .onRequest('session/prompt', async ({ params, client }) => {
@@ -378,6 +385,12 @@ acp
         await say(client, params.sessionId, line.slice(0, middle));
         await say(client, params.sessionId, line.slice(middle));
       }
+      return { stopReason: 'end_turn' };
+    }
+    if (text === 'session-start') {
+      const { opened } = session;
+      const reply = { via: session.via, cwd: opened.cwd, mcpServers: opened.mcpServers ?? null, meta: opened._meta ?? null, prompt: whole, env: { ...process.env } };
+      await say(client, params.sessionId, JSON.stringify(reply));
       return { stopReason: 'end_turn' };
     }
     if (text === 'pids') {

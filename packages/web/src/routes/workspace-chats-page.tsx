@@ -55,7 +55,7 @@ export function WorkspaceChatsPage() {
 
   return (
     <>
-      <WorkspaceHeader title="Chats">
+      <WorkspaceHeader title="Chats" wsId={missing ? undefined : wsId}>
         {missing ? null : (
           <div className="ml-auto flex items-center gap-2">
             <Button variant="ghost" size="icon" asChild>

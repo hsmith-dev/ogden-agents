@@ -58,7 +58,7 @@ function UvField() {
       id="uv"
       control="group"
       label="uv"
-      description="Runs BMad Method's scripts and its build loop. If it's missing, Ogden Agents installs its own copy in its data folder; nothing else on your computer changes."
+      description="Needed only for BMad Method features, which a project turns on in its settings; chats don't use it. If it's missing then, Ogden Agents installs its own copy in its data folder; nothing else on your computer changes."
     >
       <div role="group" aria-labelledby="uv-label" aria-describedby="uv-description" data-testid="uv-status" data-state={query.data?.state ?? (query.isError ? 'error' : 'loading')} className="flex flex-col gap-3">
         {query.data === undefined ? (

@@ -6,8 +6,7 @@
  */
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createMemoryAgentSetup, createMemoryAppShortcut } from '@ogden-agents/adapters';
-import { createAgentSetup, createChat, LEGACY_AUTH_KEY_FILE, openCore, PORT_FILE } from '@ogden-agents/core';
+import { LEGACY_AUTH_KEY_FILE, openCore, PORT_FILE } from '@ogden-agents/core';
 import { API_BASE, API_ROUTES, ApiErrorBody, TERMINAL_SOCKET_ROUTE, TEST_ROUTES, WS_PROTOCOL } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
@@ -24,6 +23,7 @@ import {
   exchange,
   manualClock,
   send,
+  fullTestApp,
   startTestServer,
   tabOf,
   tempDataDir,
@@ -616,42 +616,8 @@ describe('gate placement', () => {
   it('registers no route outside /api, /ws and /launcher except the static files and the SPA shell, which alone are token-free', () => {
     const core = openCore(tempDataDir());
     try {
-      const log = createLogger(() => {});
-      const gate = createGate({ port: () => 1, codes: createLaunchCodes(), tabs: createTabTokens(), log });
-      const control = {
-        info: () => ({ version: '0', pid: 1, port: 1, busySessions: 0 }),
-        issueLaunchUrl: () => '',
-        restartWhenIdle: () => ({ restarting: false, busySessions: 0 }),
-        quit: () => ({ stopping: false, busySessions: 0 }),
-      };
-      const toolchain = {
-        status: async () => ({ state: 'missing' as const }),
-        installUv: async () => ({ started: false, uv: { state: 'missing' as const } }),
-        settled: async () => {},
-      };
-      const chat = createChat({
-        dataDir: tempDataDir(),
-        entities: core.entities,
-        sessionEvents: core.sessionEvents,
-        agent: {
-          displayName: 'Test Agent',
-          startSession: () => Promise.reject(new Error('no agent in this test')),
-          reopenSession: () => Promise.reject(new Error('no agent in this test')),
-          listAuthMethods: () => Promise.reject(new Error('no agent in this test')),
-        },
-      });
-      const app = createApp({
-        events: core.events,
-        webRoot: tinyWebRoot(),
-        log,
-        gate,
-        control,
-        toolchain,
-        chat,
-        agentSetup: createAgentSetup(core.events, [createMemoryAgentSetup()]),
-        appShortcut: createMemoryAppShortcut(),
-        tabs: createTabTokens(),
-      });
+      const gate = createGate({ port: () => 1, codes: createLaunchCodes(), tabs: createTabTokens(), log: createLogger(() => {}) });
+      const app = fullTestApp(core, { gate });
       // Every lane's route (stories 2.2 and 2.3) is registered with exactly its methods, both ways:
       // a missing route or a stray extra method on a known path fails. The code exchange is
       // answered by the gate itself and registers no route.

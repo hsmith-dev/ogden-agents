@@ -7,10 +7,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { request, type IncomingHttpHeaders } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createMemorySecretStore } from '@ogden-agents/adapters';
+import { createMemoryAgentSetup, createMemoryAppShortcut, createMemorySecretStore } from '@ogden-agents/adapters';
+import { createAgentSetup, createChat, createOnboarding, type Core } from '@ogden-agents/core';
 import { API_ROUTES, webSocketProtocols } from '@ogden-agents/shared';
+import type { Hono } from 'hono';
 import { afterEach } from 'vitest';
 import type WebSocket from 'ws';
+import { createApp, type AppOptions } from '../src/app.js';
+import { createLaunchCodes, createTabTokens } from '../src/auth.js';
+import { createGate } from '../src/gate.js';
 import { createLogger } from '../src/log.js';
 import { start, type RunningServer, type StartOptions } from '../src/start.js';
 
@@ -209,4 +214,55 @@ export function signIn(server: { url: string; launchUrl: string }): Promise<Sign
     signedIn.set(server, pending);
   }
   return pending;
+}
+
+/**
+ * The server app with every option set, so every route it can have is
+ * registered (the gate's route list, story 2.3; 10.6's guard-coverage
+ * test): control, toolchain, a chat whose agent always refuses, core's
+ * permissions and BMad pieces, the memory agent setup and shortcut,
+ * onboarding and tab tokens. `extra` adds or overrides options, such as
+ * `bmadProbe: true`. Nothing is listened on and no agent ever runs.
+ */
+export function fullTestApp(core: Core, extra: Partial<AppOptions> = {}): Hono {
+  const log = createLogger(() => {});
+  const gate = createGate({ port: () => 1, codes: createLaunchCodes(), tabs: createTabTokens(), log });
+  const control = {
+    info: () => ({ version: '0', pid: 1, port: 1, busySessions: 0 }),
+    issueLaunchUrl: () => '',
+    restartWhenIdle: () => ({ restarting: false, busySessions: 0 }),
+    quit: () => ({ stopping: false, busySessions: 0 }),
+  };
+  const toolchain = {
+    status: async () => ({ state: 'missing' as const }),
+    installUv: async () => ({ started: false, uv: { state: 'missing' as const } }),
+    settled: async () => {},
+  };
+  const chat = createChat({
+    dataDir: tempDataDir(),
+    entities: core.entities,
+    sessionEvents: core.sessionEvents,
+    agent: {
+      displayName: 'Test Agent',
+      startSession: () => Promise.reject(new Error('no agent in this test')),
+      reopenSession: () => Promise.reject(new Error('no agent in this test')),
+      listAuthMethods: () => Promise.reject(new Error('no agent in this test')),
+    },
+  });
+  return createApp({
+    events: core.events,
+    webRoot: tinyWebRoot(),
+    log,
+    gate,
+    control,
+    toolchain,
+    chat,
+    permissions: core.permissions,
+    bmad: core.bmad,
+    agentSetup: createAgentSetup(core.events, [createMemoryAgentSetup()]),
+    onboarding: createOnboarding({ dataDir: tempDataDir(), hasProjects: () => false }),
+    appShortcut: createMemoryAppShortcut(),
+    tabs: createTabTokens(),
+    ...extra,
+  });
 }

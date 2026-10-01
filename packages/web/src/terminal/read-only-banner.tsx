@@ -7,7 +7,7 @@ export interface ReadOnlyBannerProps {
   onSwitchToChat(): void;
   /** A switch is in flight: the button waits. */
   switching: boolean;
-  /** Whether the read-only conversation is shown beside the terminal (`xl` only). */
+  /** Whether the read-only conversation is shown (a sheet over the terminal below `xl`, beside it at `xl`). */
   peekOpen: boolean;
   onTogglePeek(): void;
   /** The id of the conversation the peek button shows and hides. */
@@ -16,9 +16,9 @@ export interface ReadOnlyBannerProps {
 
 /**
  * Above the terminal panel while it drives (DESIGN.md Read-only banner;
- * EXPERIENCE.md "Terminal driving"): one sentence, Switch to Chat, and, at
- * `xl`, Show conversation for the read-only transcript beside the terminal
- * (closed by default; user decision 2026-10-01).
+ * EXPERIENCE.md "Terminal driving"): one sentence, Switch to Chat, and Show
+ * conversation for the read-only transcript, closed by default: a sheet over
+ * the terminal below `xl`, beside it at `xl` (user decisions 2026-10-01).
  */
 export function ReadOnlyBanner({ onSwitchToChat, switching, peekOpen, onTogglePeek, peekId }: ReadOnlyBannerProps) {
   return (
@@ -28,7 +28,6 @@ export function ReadOnlyBanner({ onSwitchToChat, switching, peekOpen, onTogglePe
         <span className="flex items-center gap-1">
           <Button
             variant="link" size="sm"
-            className="hidden xl:inline-flex"
             aria-expanded={peekOpen}
             aria-controls={peekId}
             onClick={onTogglePeek}

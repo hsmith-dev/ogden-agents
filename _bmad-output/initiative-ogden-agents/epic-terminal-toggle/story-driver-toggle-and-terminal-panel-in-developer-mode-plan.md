@@ -4,7 +4,7 @@ type: 'feature'
 ticket: '6'
 created: '2026-09-30'
 status: 'built'
-baseline_revision: 'fd31d93'
+baseline_revision: '51d98b3'
 route: 'full'
 route_source: 'auto'
 review: ''
@@ -46,6 +46,7 @@ context:
 - Decision (2026-10-01, user): screen-reader mode is a "Terminal screen-reader mode" switch in Settings → Appearance, off by default.
 - Decision (2026-10-01, user): the read-only transcript peek is closed by default behind a "Show conversation" button (xl only); the read-only banner sits above the terminal panel.
 - Decision (2026-10-01): plan kept whole.
+- Decision (2026-10-01, user; amends the xl-only peek above, review F6): "Show conversation" is available at every screen size: below `xl` it opens the read-only transcript as a sheet over the terminal, beside it at `xl`; closed by default, read-only (`inert`) at every size.
 
 </frozen-after-approval>
 
@@ -81,9 +82,9 @@ context:
 
 ## Implementation Notes
 
-- Code Map re-checked against fd31d93 (after 3.11's chat split): every web line reference still held; nothing outside `packages/web` and `tests/e2e/terminal.spec.ts` changed.
+- Code Map re-checked against fd31d93, restacked onto 51d98b3 (after 3.11's chat split): every web line reference still held; nothing outside `packages/web` and `tests/e2e/terminal.spec.ts` changed.
 - Open Question 1 (decided): `Appearance.terminalScreenReader` (`appearance.ts`, default off) with a "Terminal screen-reader mode" switch in Settings → Appearance (`appearance-page.tsx`); the panel passes it to xterm's `screenReaderMode` and updates it live.
-- Open Question 2 (decided): `ReadOnlyBanner` above the panel with Switch to Chat and, at `xl` only, Show/Hide conversation (`aria-expanded`, closed by default, closes again on every driver change); the peek is the existing `PageBody` beside the panel.
+- Open Question 2 (decided): `ReadOnlyBanner` above the panel with Switch to Chat and Show/Hide conversation (`aria-expanded`, closed by default, closes again on every driver change); the peek is the existing `PageBody`, beside the panel at `xl` and a sheet over it below (review F6).
 - `terminal/terminal-pane.tsx` (new) holds the terminal-mode layout classes: `tests/design-tokens.test.ts` forbids visual utilities in `src/routes`.
 - The Terminal segment's tooltip trigger is a wrapping `span`: as `asChild` on the item, Radix Tooltip's `data-state` replaced the segment's own `on`/`off`.
 - `⌘.` while the Terminal segment is blocked shows the reason inline (`session-action-error`) instead of doing nothing silently.
@@ -93,6 +94,15 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+Review of f0473e8 (was 0850837 before the restack) (coordinator, 2026-10-01): no blockers.
+- F1 (fixed): "Switching..." is bounded. `use-driver-switch.ts`: after a successful request an 8 s timer refetches the session; the driver already as asked ends the wait quietly, otherwise "Ogden Agents couldn't confirm the switch. Try again."; cleared on any driver change and on unmount. DOM tests.
+- F2 (fixed): while the terminal drives the conversation is `inert` with `role="region"` and the name "Conversation (read-only)" (on the content, so its box still scrolls); the waiting-card observer, the waiting bar and `showCard` are off while the terminal drives. DOM and e2e tests. Note: `inert` also removes the peek from the accessibility tree, so screen-reader users reach the conversation through the banner's Switch to Chat (the AC's "or banner link").
+- F3 (fixed): the help (hint or reason) sits on the segment you would switch to (Chat while the terminal drives), as its tooltip and as its `aria-describedby` text. DOM tests.
+- F4 (fixed): the shortcut ignores a press from inside `[role=dialog]` / `[role=alertdialog]`. DOM test.
+- F5 (fixed): while the session loads (`state` undefined) the Terminal segment is disabled with no reason and no tooltip (`terminalBlockedReason: null`). DOM test.
+- F6 (fixed, user decision above): Show conversation at every size; below `xl` a sheet over the terminal. e2e at 900 px. There is no Esc to close it: Esc belongs to the CLI in xterm, and nothing in the inert sheet takes focus; Hide conversation closes it.
+- F7 (deferred to 3.9): page-level DOM tests of `SessionPage`; recorded in `deferred-work.md`.
 
 ## Design Notes
 

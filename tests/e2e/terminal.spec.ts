@@ -97,8 +97,25 @@ test('in Developer mode a chat switches to its terminal, takes typing there, and
     await peek.click();
     await expect(page.getByTestId('transcript')).toBeVisible();
     await expect(terminal).toBeVisible();
+    // Read-only: nothing in it takes focus or a press (review F2).
+    const readOnly = page.locator('[aria-label="Conversation (read-only)"]');
+    await expect(readOnly).toHaveAttribute('inert', '');
+    await expect(readOnly).toHaveAttribute('role', 'region');
     await peek.click();
     await expect(page.getByTestId('transcript')).toBeHidden();
+
+    // Below xl the same conversation opens as a sheet over the terminal (user decision 2026-10-01, review F6).
+    await page.setViewportSize({ width: 900, height: 720 });
+    await expect(peek).toBeVisible();
+    await peek.click();
+    await expect(page.getByTestId('transcript')).toBeVisible();
+    await expect(readOnly).toHaveAttribute('inert', '');
+    const sheet = await page.locator('[data-slot="page-body"]').boundingBox();
+    const panel = await page.getByTestId('terminal-panel').boundingBox();
+    expect(sheet !== null && panel !== null && sheet.x < panel.x + panel.width && sheet.x + sheet.width > panel.x).toBe(true);
+    await peek.click();
+    await expect(page.getByTestId('transcript')).toBeHidden();
+    await page.setViewportSize({ width: 1280, height: 720 });
 
     await terminal.click();
     await page.keyboard.type(MARKER);

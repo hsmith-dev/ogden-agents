@@ -15,7 +15,8 @@ import { WorkspaceHeader } from '@/shell/workspace-header';
 import { DriverToggle, NOT_IDLE_REASON } from '@/terminal/driver-toggle';
 import { ReadOnlyBanner } from '@/terminal/read-only-banner';
 import { TerminalPanel } from '@/terminal/terminal-panel';
-import { conversationClassName, TerminalPane } from '@/terminal/terminal-pane';
+import { conversationProps, TerminalPane } from '@/terminal/terminal-pane';
+import { useDriverSwitch } from '@/terminal/use-driver-switch';
 import { useDriverShortcut } from '@/terminal/use-driver-shortcut';
 import type { SessionSearch } from '@/router';
 import { Button } from '@/ui/button';
@@ -98,8 +99,6 @@ export function SessionPage() {
   const [cardOffscreen, setCardOffscreen] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [actionError, setActionError] = useState<string | undefined>(undefined);
-  /** The driver a switch asked for (story 3.6): "Switching..." until `session.driver_changed` arrives. */
-  const [switchingTo, setSwitchingTo] = useState<SessionDriver | undefined>(undefined);
   /** The driver this tab asked for last, so switching back to chat puts the cursor in the composer. */
   const requested = useRef<SessionDriver | undefined>(undefined);
   const [peekOpen, setPeekOpen] = useState(false);
@@ -195,36 +194,44 @@ export function SessionPage() {
     setAnnouncement(`${AGENT_NAME} is waiting for you: ${permissionAnnouncement(waitingFor)}`);
   }, [waitingFor]);
 
-  // Whether the waiting card is out of view, for the "waiting for you" bar.
+  // Whether the waiting card is out of view, for the "waiting for you" bar. Not while the terminal
+  // drives: the conversation is read-only then, and nothing in it takes focus (3.6 review F2).
+  const terminalDrives = driver === 'terminal';
   useEffect(() => {
     setCardOffscreen(false);
-    if (waitingFor === undefined || typeof IntersectionObserver === 'undefined') return;
+    if (terminalDrives || waitingFor === undefined || typeof IntersectionObserver === 'undefined') return;
     const card = document.getElementById(`permission-${waitingFor.requestId}`);
     if (card === null) return;
     const observer = new IntersectionObserver(([entry]) => setCardOffscreen(entry !== undefined && !entry.isIntersecting));
     observer.observe(card);
     return () => observer.disconnect();
-  }, [waitingFor]);
+  }, [waitingFor, terminalDrives]);
 
   const showCard = useCallback(() => {
-    if (waitingFor === undefined) return;
+    if (terminalDrives || waitingFor === undefined) return;
     const card = document.getElementById(`permission-${waitingFor.requestId}`);
     card?.scrollIntoView?.({ block: 'center' });
     card?.focus({ preventScroll: true });
-  }, [waitingFor]);
+  }, [waitingFor, terminalDrives]);
 
   const state = view.state ?? session.data?.session.state;
-  /** Why the Terminal segment can't be used now: the terminal can't work here (verbatim), or the agent is not idle. */
+  /**
+   * Why the Terminal segment can't be used now: the terminal can't work here (verbatim), or the agent
+   * is not idle; `null` while the session is still loading (disabled, nothing to say; 3.6 review F5).
+   */
   const terminalBlockedReason =
-    terminal?.available === false ? terminal.reason : state !== 'idle' || view.queued.length > 0 ? NOT_IDLE_REASON : undefined;
+    terminal?.available === false
+      ? terminal.reason
+      : state === undefined
+        ? null
+        : state !== 'idle' || view.queued.length > 0
+          ? NOT_IDLE_REASON
+          : undefined;
 
   // The view flipped (or the session changed driver by itself): the switch is over, and availability may have changed.
   const { refetch: refetchSession } = session;
   const driverSeq = driverChange?.seq;
-  useEffect(() => {
-    setSwitchingTo(undefined);
-    setPeekOpen(false);
-  }, [driver]);
+  useEffect(() => setPeekOpen(false), [driver]);
   useEffect(() => {
     if (driverSeq !== undefined) void refetchSession();
   }, [driverSeq, refetchSession]);
@@ -256,24 +263,29 @@ export function SessionPage() {
     void navigate({ to: '/w/$wsId/s/$sesId', params: { wsId, sesId }, search: wanted === undefined ? {} : { driver: wanted }, replace: true });
   }, [driverKnown, driver, search.driver, navigate, wsId, sesId]);
 
-  // The chat's own terminal and back (stories 3.1, 3.6): one request, then wait for `session.driver_changed`.
+  // The chat's own terminal and back (stories 3.1, 3.6): one request, then wait for `session.driver_changed`
+  // (or, after a while, check with the server; 3.6 review F1).
+  const { switchingTo, start: startSwitch } = useDriverSwitch({
+    driver,
+    send: (next) => switchDriver(wsId, sesId, next),
+    confirm: () => refetchSession().then((result) => result.data?.session.driver),
+    onError: (message, failure) => {
+      requested.current = undefined;
+      setActionError(message);
+      // 409: the server's view differs (busy, unavailable, already switched): read the session again.
+      if (failure instanceof ChatApiError && failure.status === 409) void refetchSession();
+    },
+  });
   const switchTo = (next: SessionDriver) => {
     if (switchingTo !== undefined || next === driver) return;
     if (next === 'terminal' && terminalBlockedReason !== undefined) {
-      // Only the shortcut gets here (the toggle refuses first): say why.
-      setActionError(terminalBlockedReason);
+      // Only the shortcut gets here (the toggle refuses first): say why, if there is anything to say.
+      if (terminalBlockedReason !== null) setActionError(terminalBlockedReason);
       return;
     }
     requested.current = next;
-    setSwitchingTo(next);
     setActionError(undefined);
-    switchDriver(wsId, sesId, next).catch((failure: unknown) => {
-      setSwitchingTo(undefined);
-      requested.current = undefined;
-      setActionError(failure instanceof Error ? failure.message : "Ogden Agents couldn't switch this chat. Try again.");
-      // 409: the server's view differs (busy, unavailable, already switched): read the session again.
-      if (failure instanceof ChatApiError && failure.status === 409) void refetchSession();
-    });
+    startSwitch(next);
   };
   useDriverShortcut(appearance.developerMode && driverKnown, () => switchTo(driver === 'terminal' ? 'ui' : 'terminal'));
 
@@ -359,7 +371,7 @@ export function SessionPage() {
         {driver === 'terminal' ? <TerminalPanel sesId={sesId} screenReaderMode={appearance.terminalScreenReader} /> : null}
         <PageBody
           id={peekId}
-          className={conversationClassName(driver === 'terminal', peekOpen)}
+          {...conversationProps(driver === 'terminal', peekOpen)}
         >
           <section aria-label="Conversation" aria-busy={streaming} data-testid="transcript" className="flex w-full max-w-(--space-chat-column) flex-col gap-4 self-center">
             {!loading && (history.hasEarlier || history.error !== undefined) ? (
@@ -466,7 +478,7 @@ export function SessionPage() {
             </Button>
           </div>
         ) : null}
-        {waitingFor !== undefined && cardOffscreen ? (
+        {waitingFor !== undefined && cardOffscreen && !terminalDrives ? (
           <div className="pb-2">
             <Button variant="outline" className="w-full justify-start" data-testid="waiting-bar" onClick={showCard}>
               <StateGlyph state="waiting" label={`${AGENT_NAME} is waiting for you`} />

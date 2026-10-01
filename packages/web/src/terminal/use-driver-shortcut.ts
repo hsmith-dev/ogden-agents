@@ -9,8 +9,8 @@ export function isDriverShortcut(event: Pick<KeyboardEvent, 'key' | 'metaKey' | 
  * `⌘.` / `Ctrl+.` toggles Chat and Terminal (EXPERIENCE.md Interaction
  * Primitives; story 3.6). Listened for on `window` in the capture phase, so it
  * runs before xterm's own key handler and the terminal never sees it: the
- * event stops there. A held key does not toggle again. Off (`enabled` false)
- * outside Developer mode.
+ * event stops there. A held key does not toggle again, and a press inside a
+ * dialog is left alone. Off (`enabled` false) outside Developer mode.
  */
 export function useDriverShortcut(enabled: boolean, onToggle: () => void, target: Pick<Window, 'addEventListener' | 'removeEventListener'> = window): void {
   const toggle = useRef(onToggle);
@@ -19,6 +19,8 @@ export function useDriverShortcut(enabled: boolean, onToggle: () => void, target
     if (!enabled) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (!isDriverShortcut(event)) return;
+      // Not from inside a dialog: it would switch the chat behind it (3.6 review F4).
+      if (event.target instanceof Element && event.target.closest('[role="dialog"], [role="alertdialog"]') !== null) return;
       event.preventDefault();
       event.stopPropagation();
       if (!event.repeat) toggle.current();

@@ -15,10 +15,15 @@
  *   it never fetches anything and npm still checks it (`npm ci`).
  * - {@link API_KEY_CHECK_ENV} = `accept`: Claude Code's API key check
  *   answers `ok` without reaching Anthropic.
+ * - {@link CLAUDE_CLI_ENV}: a Node script inside the temp folder becomes the
+ *   agents' `CLAUDE_CODE_EXECUTABLE` (story 3.10), so the installed-package
+ *   suite's terminal runs the fake CLI on every OS (Windows takes only a real
+ *   `claude.exe` from `PATH`). It is narrower than `OGDEN_AGENTS_CLAUDE_ACP_PATH`,
+ *   which already picks the agent's script for anyone.
  */
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, isAbsolute, relative } from 'node:path';
+import { basename, dirname, isAbsolute, relative } from 'node:path';
 import type { AdapterPins } from '@ogden-agents/adapters';
 import type { ApiKeyVerification } from '@ogden-agents/core';
 
@@ -28,6 +33,9 @@ type Env = Readonly<Record<string, string | undefined>>;
 export const CLAUDE_INSTALL_ENV = 'OGDEN_AGENTS_TEST_CLAUDE_INSTALL';
 /** `accept`: the API key check answers `ok` without the network (tests only). */
 export const API_KEY_CHECK_ENV = 'OGDEN_AGENTS_TEST_API_KEY_CHECK';
+
+/** Absolute path to a `claude` stand-in inside the temp folder, run as the agents' `CLAUDE_CODE_EXECUTABLE` (tests only). */
+export const CLAUDE_CLI_ENV = 'OGDEN_AGENTS_TEST_CLAUDE_CLI';
 
 /** Whether this process runs under a test runner: `NODE_ENV=test`, or `VITEST` set. */
 export function isTestRun(env: Env = process.env): boolean {
@@ -109,4 +117,33 @@ export function testClaudeInstall(env: Env, dataDir: string, tmp: string = tmpdi
 /** The API key check from {@link API_KEY_CHECK_ENV}: one that accepts every key, or `undefined` (the real check). */
 export function testApiKeyCheck(env: Env, dataDir: string, tmp: string = tmpdir()): ((value: string, signal: AbortSignal) => Promise<ApiKeyVerification>) | undefined {
   return env[API_KEY_CHECK_ENV] === 'accept' && testHooksAllowed(env, dataDir, tmp) ? async () => 'ok' : undefined;
+}
+
+/**
+ * The `claude` stand-in from {@link CLAUDE_CLI_ENV}, by its real path, or
+ * `undefined` (the usual lookup): unset, hooks not allowed, or the file
+ * outside the temp folder (never looked at further). Only a Node script
+ * (`.js`, `.mjs`, `.cjs`) counts, which the terminal runs under Node, never a
+ * shell (no `.cmd`, as story 3.8's lookup). Allowed but unusable (a relative
+ * path, another kind of file, no such file) throws, so the test fails loudly
+ * rather than running whatever `claude` is found. The script runs with the
+ * agents' environment and can do whatever a test asks of it: the hook only
+ * picks which file starts.
+ */
+export function testClaudeCli(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
+  const file = env[CLAUDE_CLI_ENV];
+  if (file === undefined || file === '' || !testHooksAllowed(env, dataDir, tmp)) return undefined;
+  if (!isAbsolute(file)) throw new Error(`${CLAUDE_CLI_ENV}: must be an absolute path`);
+  if (!/\.[cm]?js$/i.test(file)) throw new Error(`${CLAUDE_CLI_ENV}: must be a Node script (.js, .mjs or .cjs)`);
+  if (!insideTemp(dirname(file), tmp)) return undefined;
+  let target: string;
+  try {
+    target = realpathSync.native(file);
+  } catch (error) {
+    throw new Error(`${CLAUDE_CLI_ENV}: unreadable (${(error as NodeJS.ErrnoException).code ?? 'unknown'})`);
+  }
+  // Checked again by its real path, which is what every later spawn uses: a link can't lead out of temp.
+  if (!insideTemp(target, tmp) || !/\.[cm]?js$/i.test(target)) return undefined;
+  if (!statSync(target).isFile()) throw new Error(`${CLAUDE_CLI_ENV}: not a file`);
+  return target;
 }

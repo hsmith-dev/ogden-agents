@@ -2,7 +2,9 @@
  * Installs the packed tarball with npx in an empty folder (fresh npm cache,
  * temp data folder) and starts it through the installed `ogden` launcher in
  * background mode, as a user does, with the fake agent (story 2.13). It also
- * makes the extra folder the specs' own servers and projects live in. The
+ * makes the extra folder the specs' own servers and projects live in, and
+ * any install of a spec's own (the terminal journey's without optional
+ * dependencies, story 3.10, with its work folder and npm cache). The
  * teardown makes sure no server process is left and removes every folder.
  *
  * As in `scripts/smoke-installed.mjs`, and with the same helpers

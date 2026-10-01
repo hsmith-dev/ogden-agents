@@ -4,10 +4,10 @@
  * the environment; `installed()` rebuilds the install around them, so a test
  * can run the installed launcher again (by its path in the npx install).
  */
-import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { prepareInstall, withTimeout, type Install } from '../../scripts/installed-package.mjs';
+import { echoLines, prepareInstall, startWithRetry, withTimeout, type Install, type LauncherRun } from '../../scripts/installed-package.mjs';
 import { packFakeAdapter, testNpmCli } from '../fixtures/fake-adapter/pack.mjs';
 import { isAlive, readPortFile, ROOT, waitUntil } from '../support.js';
 
@@ -30,8 +30,16 @@ export const FAKE_AGENT_NO_HOLD = join(ROOT, 'tests', 'fixtures', 'fake-acp-agen
  */
 export const CLAUDE_INSTALL_ENV = 'OGDEN_AGENTS_TEST_CLAUDE_INSTALL';
 export const API_KEY_CHECK_ENV = 'OGDEN_AGENTS_TEST_API_KEY_CHECK';
-/** The fake agent itself, which the onboarding wrapper runs. */
+/** The fake agent itself, which the onboarding and terminal wrappers run. */
 const FAKE_AGENT_CORE = join(ROOT, 'tests', 'fixtures', 'fake-acp-agent.mjs');
+/** The fake `claude` CLI, which the terminal wrapper runs (story 3.10). */
+const FAKE_CLI = join(ROOT, 'tests', 'fixtures', 'fake-claude-cli.mjs');
+/**
+ * The installed server's `claude` stand-in (`CLAUDE_CLI_ENV` in
+ * packages/server/src/test-hooks.ts, story 3.10): the agents' and the
+ * terminal's `CLAUDE_CODE_EXECUTABLE`, honoured only in a test run.
+ */
+export const CLAUDE_CLI_ENV = 'OGDEN_AGENTS_TEST_CLAUDE_CLI';
 
 /** The variables every launcher run of a server with `agent` gets. */
 export const agentEnv = (agent: string): Record<string, string> => ({ [CLAUDE_ACP_PATH_ENV]: agent });
@@ -121,15 +129,19 @@ export interface Launched {
 export async function launch(install: Install): Promise<Launched> {
   const run = install.runInstalledLauncher(LAUNCHER_ARGS);
   try {
-    const printed = await withTimeout(run.urls(), 60_000, 'the launcher to print its URLs');
-    await withTimeout(run.exited, 15_000, 'the launcher to exit');
-    if (run.child.exitCode !== 0) throw new Error(`the launcher exited with code ${run.child.exitCode}\n${run.output()}`);
-    const record = install.readPortFile();
-    if (record === undefined || !isAlive(record.pid)) throw new Error(`the background server is not running after the launcher exited\n${run.output()}`);
-    return { ...printed, pid: record.pid, output: run.output() };
+    return await launched(install, run, await withTimeout(run.urls(), 60_000, 'the launcher to print its URLs'));
   } finally {
     await run.stop();
   }
+}
+
+/** Waits until the launcher `run` of `install`, which printed `printed`, exits and leaves the server up. */
+async function launched(install: Install, run: LauncherRun, printed: { url: string; launchUrl: string }): Promise<Launched> {
+  await withTimeout(run.exited, 15_000, 'the launcher to exit');
+  if (run.child.exitCode !== 0) throw new Error(`the launcher exited with code ${run.child.exitCode}\n${run.output()}`);
+  const record = install.readPortFile();
+  if (record === undefined || !isAlive(record.pid)) throw new Error(`the background server is not running after the launcher exited\n${run.output()}`);
+  return { ...printed, pid: record.pid, output: run.output() };
 }
 
 /** Waits until the server `pid` has exited (after Quit, say). */
@@ -260,4 +272,117 @@ export function onboardingServer(name: string, signIn: OnboardingSignIn): Onboar
     }
   };
   return { install, home, project, projectName, loginState, fixtureVersion: version, remove };
+}
+
+/** A script that sets `switches` in its environment, then runs `target` (the server passes agents only an allowlisted environment). */
+function wrapper(file: string, switches: Record<string, string>, target: string): string {
+  writeFileSync(file, `Object.assign(process.env, ${JSON.stringify(switches)});\nawait import(${JSON.stringify(pathToFileURL(target).href)});\n`);
+  return file;
+}
+
+export interface TerminalServer {
+  /** The project folder (its real path, as the CLI sees its working folder). */
+  project: string;
+  /** Starts the server in the background, as a user does (installing the package first for `omitOptional`). */
+  launch(): Promise<Launched>;
+  /** Stops the server if it still runs, and removes every folder of it. */
+  remove(): Promise<void>;
+}
+
+/** How long an install of its own may take to install and start (a registry stall on a CI runner is retried once). */
+const FRESH_INSTALL_TIMEOUT_MS = 240_000;
+
+/**
+ * A server of the installed package for the terminal journey (story 3.10):
+ * its own data folder (Welcome done), a home folder of its own (HOME,
+ * USERPROFILE, APPDATA, LOCALAPPDATA and the XDG folders, so nothing reads
+ * the user's own `~/.claude` or app folders), and a project. The chat's
+ * agent is the fake ACP agent with `resume` and `FAKE_ACP_CLAUDE_RECORD` (it
+ * records the chat's exchanges as Claude Code does); the terminal's `claude`
+ * is the fake CLI, through the server's test hook. Both record in
+ * `<home>/.claude`, where the server reads the session's record on switching
+ * back. No real `claude` runs.
+ *
+ * `omitOptional`: an install of its own without optional dependencies
+ * (`node-pty`, AD-19), in its own folders, with a fresh npm cache seeded from
+ * the suite's. As in the global setup, npx's output is streamed and a stalled
+ * install and start is retried once in fresh folders (`startWithRetry`).
+ */
+export function terminalServer(name: string, { omitOptional = false }: { omitOptional?: boolean } = {}): TerminalServer {
+  const work = extraFolder(`${name}-fixture`);
+  // Real paths: macOS temp folders are reached through /var, and Windows ones may be 8.3 short names.
+  const home = realpathSync.native(extraFolder(`${name}-home`));
+  const project = realpathSync.native(extraFolder(`${name}-repo`));
+  const claudeConfig = join(home, '.claude');
+  const agent = wrapper(join(work, 'agent.mjs'), { FAKE_ACP_RESUME: 'resume', FAKE_ACP_CLAUDE_RECORD: '1', CLAUDE_CONFIG_DIR: claudeConfig }, FAKE_AGENT_CORE);
+  const cli = wrapper(join(work, 'claude.mjs'), { CLAUDE_CONFIG_DIR: claudeConfig }, FAKE_CLI);
+  const serverEnv = {
+    [CLAUDE_ACP_PATH_ENV]: agent,
+    [CLAUDE_CLI_ENV]: cli,
+    HOME: home,
+    USERPROFILE: home,
+    APPDATA: join(home, 'AppData', 'Roaming'),
+    LOCALAPPDATA: join(home, 'AppData', 'Local'),
+    XDG_DATA_HOME: join(home, '.local', 'share'),
+    XDG_CONFIG_HOME: join(home, '.config'),
+  };
+
+  /** A data folder of its own, Welcome done (these servers are not about the first run). */
+  const newDataDir = () => {
+    const dataDir = extraFolder(`${name}-data`);
+    writeFileSync(join(dataDir, 'onboarding.json'), `${JSON.stringify({ welcomeCompleted: true })}\n`, { mode: 0o600 });
+    return dataDir;
+  };
+  /** Fresh folders for an install of its own, its npm cache seeded from the suite's (all under the extra folder). */
+  const freshInstall = () => {
+    const cacheDir = extraFolder(`${name}-cache`);
+    const shared = join(env(ENV.cacheDir), '_cacache');
+    if (existsSync(shared)) cpSync(shared, join(cacheDir, '_cacache'), { recursive: true });
+    return prepareInstall({
+      tarball: env(ENV.tarball),
+      prefix: 'ogden-agents-e2e',
+      reuse: { workDir: extraFolder(`${name}-work`), cacheDir, dataDir: newDataDir() },
+      omitOptional: true,
+      env: serverEnv,
+    });
+  };
+
+  let install: Install = omitOptional
+    ? freshInstall()
+    : prepareInstall({
+        tarball: env(ENV.tarball),
+        prefix: 'ogden-agents-e2e',
+        reuse: { workDir: env(ENV.workDir), cacheDir: env(ENV.cacheDir), dataDir: newDataDir() },
+        env: serverEnv,
+      });
+
+  const launchFresh = async (): Promise<Launched> => {
+    let first = true;
+    const start = () => {
+      // The retry gets fresh folders (the first ones are removed by `startWithRetry`).
+      if (!first) install = freshInstall();
+      first = false;
+      console.log(`e2e:installed: installing ${env(ENV.tarball)} without optional dependencies in ${install.workDir}`);
+      return { install, launcher: install.runLauncher(LAUNCHER_ARGS, { echo: echoLines() }) };
+    };
+    const run = startWithRetry({ start, timeoutMs: FRESH_INSTALL_TIMEOUT_MS, what: 'the launcher to print its URLs', label: 'e2e:installed' });
+    try {
+      return await launched(run.install, run.launcher, await run.ready);
+    } finally {
+      await run.launcher.stop();
+    }
+  };
+
+  const remove = async () => {
+    await stopOwnServer(install);
+    const own = omitOptional ? [install.workDir, install.cacheDir] : [];
+    for (const dir of [work, home, project, ...own]) {
+      try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      } catch {
+        // Windows may still hold a handle briefly; the teardown removes the extra folder and reports what remains.
+      }
+    }
+  };
+  return { project, launch: () => (omitOptional ? launchFresh() : launch(install)), remove };
 }

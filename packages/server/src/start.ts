@@ -46,7 +46,7 @@ import { createLauncherToken, type LauncherToken } from './launcher-token.js';
 import { createLogger, createRotatingFileWriter, LOG_DIR, teeWriters, type Logger } from './log.js';
 import { shortcutErrorCode } from './shortcut-routes.js';
 import { createTerminalAvailability } from './terminal-availability.js';
-import { testApiKeyCheck, testClaudeInstall } from './test-hooks.js';
+import { testApiKeyCheck, testClaudeCli, testClaudeInstall } from './test-hooks.js';
 import { VERSION } from './version.js';
 import { agentEnvironment, agentKeysOf, checkInDelayFromEnv, SUBSCRIPTION_MAX_AGE_MS, testSecretStore, withoutAgentKeys } from './start-env.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
@@ -233,7 +233,11 @@ async function listenAndAnnounce({
   // The API key check: the option, else (a test run only) one that accepts without the network (story 9.7).
   const testVerify = options.verifyApiKey === undefined ? testApiKeyCheck(process.env, dataDir) : undefined;
   const verifyApiKey = options.verifyApiKey ?? testVerify;
-  if (testInstall !== undefined || testVerify !== undefined) log.info('test hooks in use', { claudeInstall: testInstall !== undefined, apiKeyCheck: testVerify !== undefined });
+  // The terminal's `claude`: the option's, else (a test run only) a stand-in from the environment (story 3.10).
+  const testCli = options.extraAgentEnv?.CLAUDE_CODE_EXECUTABLE === undefined ? testClaudeCli(process.env, dataDir) : undefined;
+  if (testInstall !== undefined || testVerify !== undefined || testCli !== undefined) {
+    log.info('test hooks in use', { claudeInstall: testInstall !== undefined, apiKeyCheck: testVerify !== undefined, claudeCli: testCli !== undefined });
+  }
   const claudeAdapter = () => locateClaudeAdapter({ adapterPath: givenClaudeAdapter, dataDir, pins: claudeInstall.pins })?.path;
   const agent =
     options.agent ??
@@ -248,7 +252,7 @@ async function listenAndAnnounce({
   // Their terminals are gone too (story 3.1 review F3): those chats drive again.
   const released = core.entities.releaseTerminalDrivers();
   if (released.length > 0) log.info('sessions a stopped server left in the terminal are back in the chat', { sessions: released.length });
-  const extraAgentEnv = options.extraAgentEnv ?? {};
+  const extraAgentEnv = { ...(testCli === undefined ? {} : { CLAUDE_CODE_EXECUTABLE: testCli }), ...options.extraAgentEnv };
   const agentEnv = () => ({ ...agentEnvironment(), ...extraAgentEnv });
   const claudeSetup =
     options.agentSetup === undefined

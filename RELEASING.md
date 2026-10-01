@@ -110,6 +110,39 @@ npx ogden-agents                  # installs 0.2.0, starts and opens the page
 
 The package page on npmjs.com shows a provenance badge linking back to the workflow run.
 
+## Epic 3 release (0.3.0) checklist
+
+`0.3.0` is epic 3: switching a chat to the agent's own terminal and back (CAP-5). It goes out after `0.2.0`, in the same two steps, by tag: `0.3.0-rc.1` to `next`, checked live, then `0.3.0` to `latest`. As before, the repository owner does every step by hand.
+
+### 1. Merge the stack to `main`
+
+After `0.2.0` is released, merge epic 3's story branches to `main` in stack order: 3.1, 3.2, 3.11, 3.6, 3.3, 3.7, 3.4, 3.5, 3.9, 3.8, then 3.10. 3.10 sets the version to `0.3.0-rc.1` and adds the 0.3.0 entry to `CHANGELOG.md`. Wait for CI on `main` to pass. That includes the installed-package end-to-end suite on macOS, Windows and Linux, with epic 3's terminal journey and its check without `node-pty`.
+
+### 2. Tag the release candidate
+
+As in the 0.2.0 checklist, step 4, with the tag `v0.3.0-rc.1`. Then `npm view ogden-agents dist-tags` shows `next: 0.3.0-rc.1`.
+
+### 3. Live checks with Claude Code
+
+CI runs only a fake agent and a fake `claude` CLI, so these checks need the real one. Run them with `npx ogden-agents@next` and a signed-in Claude Code, once on macOS (or Linux) and once on Windows (PowerShell or Windows Terminal, Node 24 or later). On each:
+
+1. Settings > Appearance: turn on **Developer mode**. A Claude Code chat's header now shows **Chat | Terminal**. With Developer mode off, no toggle is shown.
+2. Epic 3, Done when 1: in a project, send the chat a message and wait for the reply. Switch to **Terminal**: Claude Code's own terminal opens on the same conversation, with focus inside it. Send it a message there and wait for the reply.
+3. Epic 3, Done when 2: while the terminal drives, the composer is disabled and says why, and the read-only conversation opens beside the terminal (or as a sheet in a narrow window).
+4. Reload the tab: it reattaches to the same terminal, with its recent output.
+5. Switch back with `⌘.` / `Ctrl+.` (or **Switch to Chat**). The terminal's message is in the chat marked "from terminal", with Claude Code's reply. Send another chat message: the reply carries on the same conversation (ask about what you said in the terminal).
+6. While the chat is working on a reply, the toggle is disabled with a short reason, and nothing is interrupted.
+7. In the terminal, type `/exit`: the chat drives again by itself.
+8. Windows only, Done when 5: in the terminal, paste a multi-line text (it arrives as one paste), resize the window (Claude Code redraws at the new size), check colours, and check that `Ctrl+.` switches back without reaching Claude Code.
+
+Epic 3, Done when 4: its `node-pty` half (the app runs, and the toggle says why it is off) is covered in CI by the installed suite, so it needs no live check; its Developer mode half is check 1.
+
+If a check fails, fix it on `main` and release `0.3.0-rc.2` the same way.
+
+### 4. Release 0.3.0
+
+As in the 0.2.0 checklist, step 6, with the version `0.3.0` and the tag `v0.3.0`. Then move `next` to it too: `npm dist-tag add ogden-agents@0.3.0 next`. Epic 3, Done when 6, is met once `npx ogden-agents` installs `0.3.0`.
+
 ## Later releases
 
 1. On a branch, set the same new version in `package.json`, `packages/server/package.json` and `packages/web/package.json`, and add its entry to `CHANGELOG.md`. Merge to `main`.

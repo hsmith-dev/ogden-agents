@@ -102,7 +102,7 @@ jobs:
 
       - name: Probe ConPTY
         continue-on-error: true
-        run: node scripts/conpty-probe.mjs
+        run: node scripts/conpty-probe.mjs round2
 
       - name: Install the real claude (npm)
         continue-on-error: true

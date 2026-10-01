@@ -6,6 +6,7 @@
 //
 //   node scripts/conpty-probe.mjs            every section
 //   node scripts/conpty-probe.mjs claude     only the real `claude` section
+//   node scripts/conpty-probe.mjs round2     a non-Node CLI's grandchild, and the input checks
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -68,7 +69,9 @@ async function waitFor(predicate, ms = STEP_MS) {
 async function cap(name, fn) {
   log(`--- ${name} ---`);
   try {
-    await Promise.race([fn(), sleep(STEP_MS * 3).then(() => log(`${name}: TIMED OUT (step cap)`))]);
+    let timer;
+    await Promise.race([fn(), new Promise((resolve) => (timer = setTimeout(() => resolve(log(`${name}: TIMED OUT (step cap)`)), STEP_MS * 3)))]);
+    clearTimeout(timer);
   } catch (error) {
     log(`${name}: ERROR ${error?.message ?? error}`);
   }
@@ -222,6 +225,76 @@ async function exitSection() {
   }
 }
 
+// ------------------------------------------------- exit, round 2
+// libuv puts a Node process's non-detached children in a kill-on-close job, so a
+// Node "CLI" takes its children with it on Windows whatever ConPTY does. Here the
+// CLI is PowerShell, whose Start-Process -NoNewWindow leaves the grandchild in
+// the same console, outside any job.
+const gcNode = script('gc-node', "setInterval(() => {}, 1000);\n");
+
+async function exit2Case(dll, gcKind, killVariant) {
+  const label = `exit2 dll=${dll} gc=${gcKind} kill=${killVariant}`;
+  const gcFile = join(dir, `gc2-${dll}-${gcKind}-${killVariant}.txt`);
+  const target = gcKind === 'node' ? `Start-Process -NoNewWindow -PassThru -FilePath '${process.execPath}' -ArgumentList '${gcNode}'` : `Start-Process -NoNewWindow -PassThru -FilePath ping.exe -ArgumentList '-n','120','127.0.0.1'`;
+  const command = `$p = ${target}; Set-Content -Path $env:GC_FILE -Value $p.Id; Start-Sleep -Milliseconds 500; exit 3`;
+  const t0 = Date.now();
+  const term = pty.spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { name: 'xterm-256color', cols: 80, rows: 24, cwd: dir, env: { ...process.env, GC_FILE: gcFile }, useConptyDll: dll });
+  term.onData(() => {});
+  const cliPid = term.pid;
+  let exit;
+  const exited = new Promise((resolve) => term.onExit((e) => resolve((exit = e))));
+  let gcAtExit;
+  const exitedInTime = await Promise.race([
+    exited.then(() => {
+      const gc = existsSync(gcFile) ? Number(readFileSync(gcFile, 'utf8')) : undefined;
+      gcAtExit = gc ? alive(gc) : 'n/a';
+      return true;
+    }),
+    sleep(15000).then(() => false),
+  ]);
+  const gc = existsSync(gcFile) ? Number(readFileSync(gcFile, 'utf8')) : undefined;
+  log(`${label}: onExit fired=${exitedInTime} after ${Date.now() - t0}ms exit=${JSON.stringify(exit)} cliAlive=${alive(cliPid)} grandchild=${gc} aliveAtOnExit=${gcAtExit}`);
+  await sleep(2000);
+  log(`${label}: 2s after onExit, grandchild alive=${gc ? alive(gc) : 'n/a'}`);
+  console.error(`[probe-stderr] ${label}: before kill()`);
+  if (killVariant === 'skipList') skipConsoleList(term);
+  if (killVariant === 'taskkillRoot') {
+    const r = taskkill(cliPid);
+    log(`${label}: taskkill /T of the dead CLI's pid status=${r.status}`);
+  } else {
+    try {
+      term.kill();
+      log(`${label}: kill() returned`);
+    } catch (error) {
+      log(`${label}: kill() threw ${error?.message}`);
+    }
+  }
+  await sleep(3000);
+  console.error(`[probe-stderr] ${label}: 3s after kill()`);
+  log(`${label}: 3s after ${killVariant}, grandchild alive=${gc ? alive(gc) : 'n/a'}`);
+  if (gc && alive(gc)) {
+    taskkill(gc);
+    await sleep(500);
+    log(`${label}: cleanup taskkill grandchild, alive=${alive(gc)}`);
+  }
+  if (killVariant === 'taskkillRoot') {
+    skipConsoleList(term);
+    try {
+      term.kill();
+    } catch {}
+  }
+}
+
+async function exit2Section() {
+  for (const dll of [false, true]) {
+    for (const gcKind of ['node', 'ping']) {
+      for (const killVariant of ['skipList', 'default', 'taskkillRoot']) {
+        await cap(`exit2 dll=${dll} gc=${gcKind} kill=${killVariant}`, () => exit2Case(dll, gcKind, killVariant));
+      }
+    }
+  }
+}
+
 // ---------------------------------------------------------------- input
 const inputChild = script(
   'input',
@@ -245,6 +318,10 @@ async function inputCase(dll) {
   await sleep(500);
   const raw = run.out();
   const sgr = raw.match(/\x1b\[[0-9;]*m(?=TC)/)?.[0];
+  // The rendering of this probe's own test line only: from the last line break before "TC" to "TC".
+  const at = raw.indexOf('TC');
+  const region = at === -1 ? '' : raw.slice(Math.max(0, at - 120), at + 2);
+  log(`input dll=${dll}: bytes rendering the truecolour test line (up to 120 before "TC"): ${Buffer.from(region.slice(region.lastIndexOf('ready') === -1 ? 0 : region.lastIndexOf('ready'))).toString('hex')}`);
   log(`input dll=${dll}: truecolour SGR before "TC" = ${sgr ? Buffer.from(sgr).toString('hex') : 'none'} (sent 1b5b33383b323b31323b33343b35366d) unchanged=${sgr === '\x1b[38;2;12;34;56m'}; output contains ?2004h=${raw.includes('\x1b[?2004h')}`);
   const mark = strip(run.out()).length;
   run.term.write('\x1b[200~pa ste\x1b[201~');
@@ -304,7 +381,10 @@ async function claudeSection() {
 }
 
 const only = process.argv[2];
-if (only === 'claude') {
+if (only === 'round2') {
+  await exit2Section();
+  for (const dll of [false, true]) await cap(`input dll=${dll}`, () => inputCase(dll));
+} else if (only === 'claude') {
   await cap('real claude', claudeSection);
 } else {
   await cap('versions', versions);

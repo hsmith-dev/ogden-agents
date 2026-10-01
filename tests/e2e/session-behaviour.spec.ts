@@ -93,6 +93,39 @@ test('a message sent while the agent works shows Queued, then is sent after the 
   });
 });
 
+test('text typed while a message is still on its way stays in the composer, and is sent next', async ({ page }) => {
+  await withChat(page, async () => {
+    // Hold the first send's answer until the page shows the agent working, as a slow
+    // network or a busy machine can: the session's events can beat the POST's answer.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route(
+      '**/messages',
+      async (route) => {
+        const response = await route.fetch();
+        await held;
+        await route.fulfill({ response });
+      },
+      { times: 1 },
+    );
+    const answered = page.waitForResponse((response) => response.url().endsWith('/messages'));
+    await composer(page).fill('quiet');
+    await composer(page).press('Enter');
+    await expect(state(page)).toHaveAttribute('data-state', 'working');
+    await composer(page).fill('Later, please');
+    release();
+    await answered;
+    // Send is ready again once the first send is done (it is held while one is on its way),
+    // and the text typed meanwhile is still there: it is the next message, not the one sent.
+    await expect(page.getByRole('button', { name: 'Send' })).toHaveAttribute('aria-disabled', 'false');
+    await expect(composer(page)).toHaveValue('Later, please');
+    await send(page, 'Later, please');
+    await expect(page.getByTestId('message-queued')).toHaveAttribute('data-status', 'queued');
+    await page.getByTestId('stop').click();
+    await expect(state(page)).toHaveAttribute('data-state', 'idle');
+  });
+});
+
 test('an error shows its reason with Try again, which sends the last message again', async ({ page }) => {
   await withChat(page, async () => {
     await send(page, 'fail');

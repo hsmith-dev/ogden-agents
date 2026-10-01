@@ -101,8 +101,14 @@ export async function startChat(page: Page, repo: string): Promise<StartedChat> 
 /** The session view's composer. */
 export const composer = (page: Page) => page.getByRole('textbox', { name: 'Message Claude Code' });
 
-/** Sends `text` from the composer, as Enter does. */
+/**
+ * Sends `text` from the composer, as Enter does, and waits until the server
+ * has taken it (the composer clears). Without that wait the next `send` can
+ * land while this one is still on its way: the session can show `working`
+ * before the POST returns, and an Enter while a send is in flight is ignored.
+ */
 export async function send(page: Page, text: string): Promise<void> {
   await composer(page).fill(text);
   await composer(page).press('Enter');
+  await expect(composer(page)).toHaveValue('');
 }

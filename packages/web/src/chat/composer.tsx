@@ -42,12 +42,15 @@ export function Composer({ label, blockedReason, hint, action, restore, onSend }
 
   const submit = () => {
     if (blocked || text.trim() === '') return;
+    const sent = text;
     setSending(true);
     setError(undefined);
-    onSend(text).then(
+    onSend(sent).then(
       () => {
         setSending(false);
-        setText('');
+        // Clear only what was sent: text typed while it was on its way (the
+        // agent already showing working, say) is the next message, not this one.
+        setText((current) => (current === sent ? '' : current));
       },
       (failure: unknown) => {
         setSending(false);

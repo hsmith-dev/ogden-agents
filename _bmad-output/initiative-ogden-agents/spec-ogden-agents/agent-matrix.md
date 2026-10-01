@@ -4,17 +4,23 @@ ACP client library: `@agentclientprotocol/sdk` 1.5.1 (protocol version 1). The `
 
 | Agent | Chat via ACP | Resume (CAP-3) | Terminal resume (CAP-5) | Sign-in (CAP-16) | Builds (bmad-loop profile) | Native sandbox | Unattended on native Windows |
 |---|---|---|---|---|---|---|---|
-| Claude Code | Adapter `@agentclientprotocol/claude-agent-acp` 0.84.0 (on `@anthropic-ai/claude-agent-sdk`; CLI `@anthropic-ai/claude-code`) | `session/resume`, `session/load`, `session/list` | `claude --resume <ACP session id>` (same id) | Subscription and Console login are **terminal-type** auth methods, run in a hidden PTY (never `authenticate`); API key via `ANTHROPIC_API_KEY` | Yes | macOS (Seatbelt), Linux and WSL2 (bubblewrap) | Docker if installed, otherwise attended or another agent |
-| Codex CLI | Adapter `@agentclientprotocol/codex-acp` 2.0.1 (bundles `@openai/codex`; `CODEX_PATH` overrides) | `session/resume`, `session/load`, `session/list` | `codex resume <ACP session id>` (same id as the thread) | ACP `authenticate`: `chat-gpt`, `chat-gpt-device-code`, `api-key` (`CODEX_API_KEY`, then `OPENAI_API_KEY`) | Yes | macOS, Linux, Windows (native since 2026-03) | Yes |
-| Gemini CLI | Native `gemini --acp` (`--experimental-acp` is deprecated) | `session/load` | Unverified: `--resume` takes `latest` or an index, not an id | ACP `authenticate`: `oauth-personal`, `gemini-api-key` (`GEMINI_API_KEY`), `vertex-ai` | Yes | Verify | Verify |
-| GitHub Copilot CLI | Native `copilot --acp --stdio` (public preview) | Unverified | `copilot --resume <id>` exists; mapping unverified | `copilot login` (browser, `--device-code`, `--with-token`); tokens `COPILOT_GITHUB_TOKEN`, then `GH_TOKEN`, then `GITHUB_TOKEN` | Yes | Verify | Verify |
+| Claude Code | Adapter `@agentclientprotocol/claude-agent-acp` 0.84.0 (on `@anthropic-ai/claude-agent-sdk`; CLI `@anthropic-ai/claude-code`) | `session/resume`, `session/load`, `session/list` | `claude --resume <ACP session id>` (same id). **Result (2026-10-01, story 3.7):** expected per vendor docs and the fake-CLI tests; live check pending (3.8 / 3.10) | Subscription and Console login are **terminal-type** auth methods, run in a hidden PTY (never `authenticate`); API key via `ANTHROPIC_API_KEY` | Yes | macOS (Seatbelt), Linux and WSL2 (bubblewrap) | Docker if installed, otherwise attended or another agent |
+| Codex CLI | Adapter `@agentclientprotocol/codex-acp` 2.0.1 (bundles `@openai/codex`; `CODEX_PATH` overrides) | `session/resume`, `session/load`, `session/list` | `codex resume <ACP session id>` (same id as the thread). Measured in epic 6 | ACP `authenticate`: `chat-gpt`, `chat-gpt-device-code`, `api-key` (`CODEX_API_KEY`, then `OPENAI_API_KEY`) | Yes | macOS, Linux, Windows (native since 2026-03) | Yes |
+| Gemini CLI | Native `gemini --acp` (`--experimental-acp` is deprecated) | `session/load` | Unverified: `--resume` takes `latest` or an index, not an id. Not yet measured | ACP `authenticate`: `oauth-personal`, `gemini-api-key` (`GEMINI_API_KEY`), `vertex-ai` | Yes | Verify | Verify |
+| GitHub Copilot CLI | Native `copilot --acp --stdio` (public preview) | Unverified | `copilot --resume <id>` exists; mapping unverified. Not yet measured | `copilot login` (browser, `--device-code`, `--with-token`); tokens `COPILOT_GITHUB_TOKEN`, then `GH_TOKEN`, then `GITHUB_TOKEN` | Yes | Verify | Verify |
 | Antigravity | No (not in the ACP registry) | — | — | — | Yes | Verify | Verify |
 
 ## How the UI uses it
 
 - **Permission cards (CAP-4):** ACP `session/request_permission` with option kinds `allow_once`, `allow_always`, `reject_once`, `reject_always`. "Always allow" rules are stored and enforced by Ogden Agents' core, never handed to the agent as `allow_always` (user decision, 2026-09-30).
 - **Resume (CAP-3):** try ACP `session/resume` when advertised, else `session/load`, else start a new session primed from Ogden Agents' stored transcript, marked "Resumed from history". The two-agent resume proof is epic 6's (user decision, 2026-09-30).
-- **Terminal toggle (CAP-5):** only where the ACP session id is the CLI's own resumable id (Claude Code and Codex today).
+- **Terminal toggle (CAP-5):** only where the ACP session id is the CLI's own resumable id (Claude Code and Codex today). Whether the toggle is offered for a session is `GET` session's `terminal`, from `packages/server/src/terminal-availability.ts` (story 3.7): the same checks, in the same order, as core's switch refusal, each with a plain reason the toggle shows as its tooltip:
+  1. `agent_unsupported`: the agent has no terminal resume (no `terminalResume` on its adapter);
+  2. `pty_unavailable`: no terminal on this computer (`node-pty` failed to load, AD-19);
+  3. `no_agent_session`: the chat has never reached its agent, so there is nothing to resume;
+  4. `cli_not_found`: the agent's CLI can't be found.
+
+  Not being idle is not a code: the UI reads the session's state.
 - **Unattended builds:** the sandbox decision runs in this order:
   1. the agent's native sandbox on this OS;
   2. Docker, if it is already installed;

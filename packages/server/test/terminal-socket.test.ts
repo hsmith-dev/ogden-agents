@@ -28,7 +28,6 @@ import WebSocket from 'ws';
 import { MAX_WS_PAYLOAD_BYTES, type StartOptions } from '../src/start.js';
 import { registerChatRoutes, TERMINAL_CHECK_FAILED } from '../src/chat-routes.js';
 import { createLogger, LOG_DIR } from '../src/log.js';
-import { createTerminalAvailability } from '../src/terminal-availability.js';
 import { signIn, startTestServer, tempDataDir, trackSocket, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
 const FIXTURES = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures');
@@ -232,17 +231,13 @@ describe('the terminal contract on the API (story 3.2)', () => {
     const created = await post(server, tab, apiPath(API_ROUTES.workspaceSessions, { wsId: workspace.id }), {});
     const body = SessionResponse.parse(await created.json());
     expect(body.terminal).toBeUndefined();
-    // Claude Code's CLI resumes its sessions: available (story 3.7 adds the other checks).
-    expect((await getSession(server, tab, { wsId: workspace.id, sesId: body.session.id })).terminal).toEqual({ available: true });
-  }, 30_000);
-
-  it('an agent without terminalResume is agent_unsupported, in plain words', async () => {
-    expect(await createTerminalAvailability({ agent: { displayName: 'Test Agent' } })({} as never)).toEqual({
+    // A chat that never reached its agent has nothing to resume (story 3.7; the other checks are in terminal-availability.test.ts).
+    expect((await getSession(server, tab, { wsId: workspace.id, sesId: body.session.id })).terminal).toEqual({
       available: false,
-      code: 'agent_unsupported',
-      reason: "Test Agent can't be opened in its own terminal.",
+      code: 'no_agent_session',
+      reason: 'Send Claude Code a message first, then switch to the terminal.',
     });
-  });
+  }, 30_000);
 
   it('a throwing availability check still answers GET session: pty_unavailable in plain words, and only a code is logged', async () => {
     const core = openCore(tempDataDir());

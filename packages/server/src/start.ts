@@ -555,6 +555,8 @@ async function listenAndAnnounce({
     // The terminal runs, and its transcript is read, with the chat's environment rules, the API key's included (stories 3.1, 3.2).
     ...(agent.terminalResume === undefined ? {} : { terminalResume: withChatEnv(agent.terminalResume) }),
   };
+  // One terminal port for the chat and the toggle's availability check (story 3.7): they agree on node-pty.
+  const terminal = createPtyTerminalPort(options.loadPty);
   const chat = createChat({
     dataDir,
     entities: core.entities,
@@ -562,7 +564,7 @@ async function listenAndAnnounce({
     agent: chatAgent,
     permissions,
     agentEnv: chatEnv,
-    terminal: createPtyTerminalPort(options.loadPty),
+    terminal,
     // The event carries the plain reason; the log also gets the details (never the environment).
     onAgentError: (sessionId, error) => log.warn('agent failed', { sessionId, code: error.code, reason: error.message, ...error.details }),
     onInternalError: (sessionId, error) => log.error('applying an agent event failed', { sessionId, reason: String(error) }),
@@ -587,7 +589,8 @@ async function listenAndAnnounce({
     control,
     toolchain,
     chat,
-    terminalAvailability: createTerminalAvailability({ agent: chatAgent }),
+    // The unwrapped agent and `chatEnv`: core's checks, without reading sign-in again on every GET (story 3.7).
+    terminalAvailability: createTerminalAvailability({ agent, terminal, env: chatEnv }),
     permissions,
     agentSetup,
     onboarding,

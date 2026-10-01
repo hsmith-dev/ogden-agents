@@ -286,3 +286,22 @@ describe('conversationProps (review F2, F6)', () => {
     }
   });
 });
+
+describe('availability reasons (story 3.7)', () => {
+  // The reasons GET session's `terminal` carries, one per code (server/src/terminal-availability.ts).
+  const reasons: Record<'agent_unsupported' | 'pty_unavailable' | 'no_agent_session' | 'cli_not_found', string> = {
+    agent_unsupported: "Gemini CLI can't pick up this session in its terminal.",
+    pty_unavailable: "The terminal couldn't start on this computer: node-pty failed to load",
+    no_agent_session: 'Send Claude Code a message first, then switch to the terminal.',
+    cli_not_found: "Claude Code's terminal couldn't be found on this computer.",
+  };
+  for (const [code, reason] of Object.entries(reasons)) {
+    it(`${code}: the Terminal segment is disabled and its tooltip shows the reason`, async () => {
+      const { onSwitch, terminal } = mount({ reason });
+      expect(terminal.getAttribute('aria-disabled')).toBe('true');
+      expect(await tooltipText(terminal)).toContain(reason);
+      fireEvent.click(terminal);
+      expect(onSwitch).not.toHaveBeenCalled();
+    });
+  }
+});

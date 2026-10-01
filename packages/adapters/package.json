@@ -5,7 +5,8 @@
   "description": "Adapters: everything that names a specific agent, OS, sandbox or tool, behind core ports (AD-1).",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./process-tree": "./src/process-tree.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"

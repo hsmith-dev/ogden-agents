@@ -546,6 +546,90 @@ describe('agent setup: API key review fixes (story 9.2)', () => {
   });
 });
 
+describe('agent setup: key writes run one at a time per agent (story 9.6; 9.2 review F7)', () => {
+  const OTHER_KEY = 'sk-ant-api03-core_TEST_ONLY_9876543210fedcbaQRST';
+
+  /** A keychain whose writes wait until the test lets each one finish, in order; `failNext` makes the next write throw. */
+  function slowStore() {
+    const values = new Map<string, string>();
+    const calls: string[] = [];
+    const waiting: Array<() => void> = [];
+    let failNext = false;
+    const write = async (call: string, apply: () => void) => {
+      calls.push(call);
+      await new Promise<void>((resolve) => waiting.push(resolve));
+      if (failNext) {
+        failNext = false;
+        throw new SecretsUnavailableError(undefined, { cause: 'GenericFailure' });
+      }
+      apply();
+    };
+    const store: SecretStorePort = {
+      backend: 'keychain',
+      get: async (name) => values.get(name),
+      set: (name, value) => write(`set ${name} ${value.slice(-4)}`, () => values.set(name, value)),
+      delete: (name) => write(`delete ${name}`, () => void values.delete(name)),
+    };
+    const finishNext = async () => {
+      await expect.poll(() => waiting.length).toBeGreaterThan(0);
+      waiting.shift()!();
+    };
+    return { store, values, calls, finishNext, failNext: () => void (failNext = true) };
+  }
+
+  it('a save and a removal for one agent run in call order: the store and the card end on the removal', async () => {
+    const core = openTestCore();
+    const secrets = slowStore();
+    const setup = createAgentSetup(core.events, [keyPort().port], { secrets: secrets.store });
+    const saving = setup.setApiKey('claude-code', API_KEY);
+    const removing = setup.deleteApiKey('claude-code');
+    await expect.poll(() => secrets.calls.length).toBe(1);
+    for (let i = 0; i < 5; i++) await settle();
+    // The removal waits for the save to finish.
+    expect(secrets.calls).toEqual(['set agent-api-key/claude-code WXYZ']);
+    await secrets.finishNext();
+    await saving;
+    await secrets.finishNext();
+    await removing;
+    expect(secrets.calls).toEqual(['set agent-api-key/claude-code WXYZ', 'delete agent-api-key/claude-code']);
+    expect(secrets.values.size).toBe(0);
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    expect((await setup.list())[0]!.apiKey).toEqual({ saved: false });
+  });
+
+  it('two saves end on the later key, and a failed earlier save does not block the next', async () => {
+    const core = openTestCore();
+    const secrets = slowStore();
+    const setup = createAgentSetup(core.events, [keyPort().port], { secrets: secrets.store });
+    secrets.failNext();
+    const first = setup.setApiKey('claude-code', API_KEY);
+    const second = setup.setApiKey('claude-code', OTHER_KEY);
+    await secrets.finishNext();
+    await expect(first).rejects.toBeInstanceOf(SecretsUnavailableError);
+    await secrets.finishNext();
+    await second;
+    expect(secrets.calls).toEqual(['set agent-api-key/claude-code WXYZ', 'set agent-api-key/claude-code QRST']);
+    expect(secrets.values.get('agent-api-key/claude-code')).toBe(OTHER_KEY);
+    expect(setup.agentEnv('claude-code')).toEqual({ FAKE_API_KEY: OTHER_KEY });
+    expect((await setup.list())[0]!.apiKey).toEqual({ saved: true, lastFour: 'QRST' });
+  });
+
+  it("different agents' key writes don't wait for each other", async () => {
+    const core = openTestCore();
+    const secrets = slowStore();
+    const other: AgentSetupPort = { ...keyPort().port, agentId: 'other-agent', displayName: 'Other Agent' };
+    const setup = createAgentSetup(core.events, [keyPort().port, other], { secrets: secrets.store });
+    const saving = setup.setApiKey('claude-code', API_KEY);
+    const savingOther = setup.setApiKey('other-agent', OTHER_KEY);
+    await expect.poll(() => secrets.calls.length).toBe(2);
+    await secrets.finishNext();
+    await secrets.finishNext();
+    await Promise.all([saving, savingOther]);
+    expect(secrets.values.get('agent-api-key/claude-code')).toBe(API_KEY);
+    expect(secrets.values.get('agent-api-key/other-agent')).toBe(OTHER_KEY);
+  });
+});
+
 describe('agent setup: install (story 9.3)', () => {
   /** A port that is not installed until its install finishes; the test drives each install by hand. */
   function installablePort() {

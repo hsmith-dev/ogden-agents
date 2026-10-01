@@ -53,8 +53,11 @@
     "@agentclientprotocol/claude-agent-acp": "0.84.0",
     "@ogden-agents/server": "workspace:*",
     "@playwright/test": "^1.63.0",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
     "@types/node": "^24.0.0",
     "@types/ws": "^8.18.2",
+    "happy-dom": "^20.14.5",
     "typescript": "^7.0.2",
     "vitest": "^5.0.2",
     "yaml": "^2.9.1"

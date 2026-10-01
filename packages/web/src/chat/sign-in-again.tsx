@@ -47,8 +47,11 @@ export function observeAuth(tracker: SignInTracker, auth: AgentAuthState | undef
     if (first) return { tracker: { ...tracker, last: auth }, resend: false };
     return { tracker: { last: auth, armed: false, signedIn: true }, resend: tracker.armed };
   }
-  // Signing in keeps the click armed; a failed or cancelled sign-in, or a sign-out, drops it.
-  return { tracker: { last: auth, armed: auth === 'signing_in' && tracker.armed, signedIn: false }, resend: false };
+  // Signing in keeps the click armed, and where it was armed (`armedAfter`), so a second
+  // sign-in started elsewhere later still disarms it (9.4 F2; fixed in 9.6). A failed or
+  // cancelled sign-in, or a sign-out, drops it.
+  const armed = auth === 'signing_in' && tracker.armed;
+  return { tracker: { last: auth, armed, signedIn: false, ...(armed ? { armedAfter: tracker.armedAfter } : {}) }, resend: false };
 }
 
 /** The user clicked **Sign in** (or Sign in again) on this notice, when the newest event it had was `seq`. */

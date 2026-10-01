@@ -31,6 +31,20 @@ describe('onboarding', () => {
     expect(onboarding.get()).toEqual({ welcomeCompleted: false });
     writeFileSync(file, JSON.stringify({ welcomeCompleted: 'yes' }));
     expect(onboarding.get()).toEqual({ welcomeCompleted: false });
+    expect(codes).toEqual(['corrupt']);
+  });
+
+  it('reports a corrupt record once while it stays corrupt, leaves it as it is, and again once it is corrupt after being usable (9.5 F7)', () => {
+    const { onboarding, file, codes } = setup();
+    writeFileSync(file, '{nope');
+    for (let i = 0; i < 4; i++) expect(onboarding.get()).toEqual({ welcomeCompleted: false });
+    expect(codes).toEqual(['corrupt']);
+    expect(readFileSync(file, 'utf8')).toBe('{nope');
+    onboarding.set({ welcomeCompleted: false });
+    expect(onboarding.get()).toEqual({ welcomeCompleted: false });
+    writeFileSync(file, 'garbage');
+    expect(onboarding.get()).toEqual({ welcomeCompleted: false });
+    expect(onboarding.get()).toEqual({ welcomeCompleted: false });
     expect(codes).toEqual(['corrupt', 'corrupt']);
   });
 

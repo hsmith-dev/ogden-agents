@@ -1,5 +1,5 @@
 import { API_ROUTES, AppShortcutStatus } from '@ogden-agents/shared';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
 import { call, callNoContent } from '@/api/http';
 
@@ -12,6 +12,8 @@ import { call, callNoContent } from '@/api/http';
 type Auth = Pick<TabAuth, 'fetch'>;
 
 export const APP_SHORTCUT_QUERY_KEY = ['app-shortcut'] as const;
+/** Every answer to the offer (Not now, and Welcome's answer) while it is being sent or retried. */
+export const OFFER_ANSWER_MUTATION_KEY = ['app-shortcut', 'offer-answer'] as const;
 
 /** `GET /api/v1/app-shortcut`. */
 export async function fetchAppShortcut(auth: Auth = tabAuth): Promise<AppShortcutStatus> {
@@ -36,8 +38,16 @@ export function useAppShortcut() {
   return useQuery({ queryKey: APP_SHORTCUT_QUERY_KEY, queryFn: () => fetchAppShortcut(), retry: false });
 }
 
-/** Add, Remove and Not now. Each refreshes the shared status; Add answers the offer too. */
-export function useAppShortcutActions() {
+/** How many times a failed answer to the offer is sent again when asked to (Welcome's shortcut step, 9.6). */
+export const OFFER_ANSWER_RETRIES = 3;
+
+/**
+ * Add, Remove and Not now. Each refreshes the shared status; Add answers the
+ * offer too. With `retryAnswer`, a failed Not now is sent again (up to
+ * {@link OFFER_ANSWER_RETRIES} times, backing off) before it counts as failed,
+ * so an answer nobody watches still reaches the server.
+ */
+export function useAppShortcutActions({ retryAnswer = false }: { retryAnswer?: boolean } = {}) {
   const queryClient = useQueryClient();
   const refresh = () => queryClient.invalidateQueries({ queryKey: APP_SHORTCUT_QUERY_KEY });
   const add = useMutation({
@@ -47,7 +57,9 @@ export function useAppShortcutActions() {
   });
   const remove = useMutation({ mutationFn: () => removeAppShortcut(), onSettled: refresh });
   const dismiss = useMutation({
+    mutationKey: OFFER_ANSWER_MUTATION_KEY,
     mutationFn: () => dismissAppShortcutOffer(),
+    retry: retryAnswer ? OFFER_ANSWER_RETRIES : 0,
     // Not now hides the offer at once; the server's answer confirms it.
     onMutate: () => {
       const current = queryClient.getQueryData<AppShortcutStatus>(APP_SHORTCUT_QUERY_KEY);
@@ -56,6 +68,15 @@ export function useAppShortcutActions() {
     onSettled: refresh,
   });
   return { add, remove, dismiss };
+}
+
+/**
+ * Whether an answer to the offer is still being sent (or retried): the offer
+ * counts as answered until it fails for good (9.6), so a status read in the
+ * meantime doesn't bring the offer back.
+ */
+export function useOfferAnswerPending(): boolean {
+  return useIsMutating({ mutationKey: OFFER_ANSWER_MUTATION_KEY }) > 0;
 }
 
 /** Where the shortcut lives on this OS, in the user's words. */

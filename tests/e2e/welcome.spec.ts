@@ -17,7 +17,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
-import { launchLink, makeDataDir, removeDataDir, startServer, type RunningServer, type StartOptions } from '../support.js';
+import { API_ROUTES, launchLink, makeDataDir, removeDataDir, startServer, type RunningServer, type StartOptions } from '../support.js';
 import { sidebarOf, storedToken } from './tab.js';
 
 const WORKSPACE_URL = /\/w\/(ws_[0-9A-Z]{26})$/;
@@ -89,6 +89,24 @@ const headline = (page: Page) => page.getByTestId('welcome-headline');
 const card = (page: Page) => page.getByTestId('agent-card-claude-code');
 const offerNotice = (page: Page) => page.getByTestId('app-shortcut-offer');
 
+/** From the agent step: signs in (which moves the step on by itself), then adds `alpha-repo` as the first project. */
+async function signInAndAddProject(page: Page, context: BrowserContext) {
+  const opened = context.waitForEvent('page');
+  await card(page).getByRole('button', { name: 'Sign in with your account' }).click();
+  const tab = await opened;
+  await expect(tab.getByText('Login successful.')).toBeVisible();
+  await expect(headline(page)).toHaveText('Add a project to get started.');
+  await expect(headline(page)).toBeFocused();
+  await tab.close();
+
+  await page.getByTestId('welcome-page').getByRole('button', { name: 'Add project' }).click();
+  const dialog = page.getByTestId('add-project-dialog');
+  await dialog.getByTestId('folder-quick-picks').getByRole('button', { name: 'Documents' }).click();
+  await dialog.getByTestId('folder-list').getByRole('button', { name: 'alpha-repo' }).click();
+  await expect(dialog.getByTestId('folder-path')).toHaveText(/alpha-repo$/);
+  await dialog.getByRole('button', { name: 'Open this folder' }).click();
+}
+
 async function openWelcomeFromSettings(page: Page) {
   await sidebarOf(page).getByRole('button', { name: 'Settings' }).click();
   await page.getByRole('menuitem', { name: 'Welcome' }).click();
@@ -108,21 +126,7 @@ test('a first run: Welcome, sign in, a project, the shortcut once, then Chats', 
     // Welcome makes the shortcut offer itself; the shell's notice stays hidden here.
     await expect(offerNotice(page)).toHaveCount(0);
 
-    // Signing in moves the step on by itself.
-    const opened = context.waitForEvent('page');
-    await card(page).getByRole('button', { name: 'Sign in with your account' }).click();
-    const tab = await opened;
-    await expect(tab.getByText('Login successful.')).toBeVisible();
-    await expect(headline(page)).toHaveText('Add a project to get started.');
-    await expect(headline(page)).toBeFocused();
-    await tab.close();
-
-    await page.getByTestId('welcome-page').getByRole('button', { name: 'Add project' }).click();
-    const dialog = page.getByTestId('add-project-dialog');
-    await dialog.getByTestId('folder-quick-picks').getByRole('button', { name: 'Documents' }).click();
-    await dialog.getByTestId('folder-list').getByRole('button', { name: 'alpha-repo' }).click();
-    await expect(dialog.getByTestId('folder-path')).toHaveText(/alpha-repo$/);
-    await dialog.getByRole('button', { name: 'Open this folder' }).click();
+    await signInAndAddProject(page, context);
 
     // The shortcut step, offered once (the in-memory shortcut).
     await expect(headline(page)).toHaveText(/^Open Ogden Agents from .+ next time\.$/);
@@ -182,6 +186,54 @@ test('Skip for now marks Welcome done for good, across a restart; Settings → W
     await openWelcomeFromSettings(page);
     await expect(headline(page)).toHaveText('Pick the agent that will do the work.');
     await expect(card(page).getByTestId('agent-state')).toContainText('Installed, needs sign-in');
+    await expect(offerNotice(page)).toHaveCount(0);
+  });
+});
+
+test("a failed answer to the shortcut offer from Welcome is sent again, and the shell doesn't offer it meanwhile or after (9.5 F4)", async ({ page, context }) => {
+  await routeSignInPage(context);
+  // The first two answers fail; the second retry is held until the test lets it reach the server.
+  const answers: number[] = [];
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  await page.route(`**${API_ROUTES.appShortcutOffer}`, async (route) => {
+    if (route.request().method() !== 'DELETE') return route.fallback();
+    if (answers.length >= 2) {
+      answers.push(204);
+      await released;
+      return route.fallback();
+    }
+    answers.push(500);
+    return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { code: 'internal_error', message: 'Something went wrong.' } }) });
+  });
+  await withWelcomeServer(page, async ({ server }) => {
+    await land(page, server.launchUrl, '/welcome');
+    await signInAndAddProject(page, context);
+    await expect(headline(page)).toHaveText(/^Open Ogden Agents from .+ next time\.$/);
+    await expect.poll(() => answers).toEqual([500]);
+    // Quiet: no new words for a failed answer.
+    await expect(page.getByTestId('welcome-shortcut').getByRole('alert')).toHaveCount(0);
+    await page.getByTestId('welcome-shortcut').getByRole('button', { name: 'Not now' }).click();
+
+    await expect(page).toHaveURL(WORKSPACE_URL);
+    await expect(page.getByRole('heading', { name: 'Chats', level: 1 })).toBeVisible();
+    // While the answer is still being sent, a status read (the server still offers it) doesn't bring the offer back.
+    await expect.poll(() => answers, { timeout: 15_000 }).toEqual([500, 500, 204]);
+    const read = page.waitForResponse((response) => new URL(response.url()).pathname === API_ROUTES.appShortcut && response.request().method() === 'GET');
+    await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
+    expect(((await (await read).json()) as { offerPending: boolean }).offerPending).toBe(true);
+    // Rendered with that answer, and still hidden.
+    await expect(page.getByTestId('chats-empty')).toBeVisible();
+    await expect(offerNotice(page)).toHaveCount(0);
+
+    const answered = page.waitForResponse((response) => new URL(response.url()).pathname === API_ROUTES.appShortcut && response.request().method() === 'GET');
+    release();
+    expect(((await (await answered).json()) as { offerPending: boolean }).offerPending).toBe(false);
+    await expect(offerNotice(page)).toHaveCount(0);
+    // The server has the answer: a reload doesn't offer it either.
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Chats', level: 1 })).toBeVisible();
+    await expect(page.getByTestId('chats-empty')).toBeVisible();
     await expect(offerNotice(page)).toHaveCount(0);
   });
 });

@@ -119,6 +119,42 @@ describe('the hidden terminal', () => {
     }
     expect(signalled).toEqual([]);
   });
+
+  it("on Windows, kill closes the terminal without node-pty's console list once taskkill has run (no AttachConsole noise)", () => {
+    // A SystemRoot with no taskkill.exe: the taskkill this runs finds nothing, on every OS.
+    const saved = process.env.SystemRoot;
+    process.env.SystemRoot = join(tmpdir(), 'ogden-agents-no-such-windows');
+    try {
+      const killWith = (pid: number) => {
+        const lists: string[] = [];
+        const agent = { _getConsoleProcessList: () => (lists.push('forked'), Promise.resolve([1])) };
+        const kills: unknown[] = [];
+        const terminal = {
+          pid,
+          _agent: agent,
+          onData: () => {},
+          onExit: () => {},
+          write: () => {},
+          kill: (signal?: string) => {
+            kills.push(signal);
+            // What node-pty 1.1.0's Windows kill does first.
+            void agent._getConsoleProcessList();
+          },
+        };
+        const pty = hiddenPtySpawner({ spawn: () => terminal }, 'win32')('node', [], { env: {}, cwd: '.', cols: 80, rows: 24 });
+        pty.kill();
+        pty.kill();
+        return { kills, lists };
+      };
+      // taskkill ran (a valid pid): the console list is skipped; node-pty's kill still runs, once, with no signal.
+      expect(killWith(4242)).toEqual({ kills: [undefined], lists: [] });
+      // No taskkill for a bad pid, so node-pty's own console list still stops what it can.
+      expect(killWith(0)).toEqual({ kills: [undefined], lists: ['forked'] });
+    } finally {
+      if (saved === undefined) delete process.env.SystemRoot;
+      else process.env.SystemRoot = saved;
+    }
+  });
 });
 
 /** A fake terminal the test drives: what was spawned, typed and killed. */

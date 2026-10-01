@@ -13,12 +13,14 @@
  * The launcher token and launch codes are secrets: they are printed (the link,
  * for the user) but never logged.
  */
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 // The data-folder module alone, not core's index: the launcher must not load
 // the database driver (`better-sqlite3`) just to find or start a server.
 import { ensureDataDir, DATA_DIR_ENV, PORT_FILE } from '@ogden-agents/core/data-dir';
+// The process-tree helper alone, not the adapters index (same reason).
+import { killProcessTree } from '@ogden-agents/adapters/process-tree';
 import { EXIT_ALREADY_RUNNING, isPidAlive } from './instance-lock.js';
 import { LAUNCHER_TOKEN_FILE, LAUNCHER_TOKEN_HEADER, readLauncherToken } from './launcher-token.js';
 import { createLogger, createRotatingFileWriter, LOG_DIR, type Logger } from './log.js';
@@ -237,16 +239,7 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 
 /** Stops the spawned server and anything it started (it leads its own process group on POSIX). */
 function killTree(child: ChildProcess): void {
-  if (child.pid === undefined) return;
-  try {
-    if (process.platform === 'win32') {
-      spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
-    } else {
-      process.kill(-child.pid, 'SIGKILL');
-    }
-  } catch {
-    // Already gone.
-  }
+  killProcessTree(child.pid);
 }
 
 /**

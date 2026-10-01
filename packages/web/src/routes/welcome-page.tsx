@@ -195,10 +195,11 @@ function ProjectStep({
  * The app shortcut, offered here once: showing it answers the server's offer
  * (as Not now does), so the shell's notice never makes it again; **Add
  * shortcut** still adds it. A failed Add says why in place, and Not now
- * still goes on.
+ * still goes on. A failed answer is sent again quietly, after the step is
+ * left too (9.6), so the notice doesn't make the offer again.
  */
 function ShortcutStep({ platform, onDone, skip }: { platform: string | undefined; onDone(): void; skip: ReactNode }) {
-  const { add, dismiss } = useAppShortcutActions();
+  const { add, dismiss } = useAppShortcutActions({ retryAnswer: true });
   const answered = useRef(false);
   const answer = dismiss.mutate;
   useEffect(() => {

@@ -18,6 +18,7 @@
  * - Nothing here logs; a value never leaves the returned promise.
  */
 import { KEYCHAIN_NO_ANSWER_MESSAGE, SecretsUnavailableError, type SecretStorePort } from '@ogden-agents/core';
+import { errorCode } from '../error-code.js';
 
 /** The module's package name. Kept in a variable so the bundler leaves the import alone until it runs. */
 const KEYRING_MODULE = '@napi-rs/keyring';
@@ -57,10 +58,7 @@ export interface KeyringSecretStoreOptions {
 }
 
 /** A failure's code for the log: a short identifier, never a message (which could say anything). */
-function codeOf(error: unknown): string {
-  const code = (error as { code?: unknown } | null)?.code;
-  return typeof code === 'string' && /^[A-Za-z0-9_]{1,40}$/.test(code) ? code : 'keychain_error';
-}
+const codeOf = (error: unknown): string => errorCode(error, 'keychain_error');
 
 /**
  * Whether the keychain is there but refused access: locked, or a prompt the

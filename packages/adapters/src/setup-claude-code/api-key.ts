@@ -8,6 +8,7 @@
  * logged: diagnostics carry the status code or the error's code only.
  */
 import type { AgentApiKeySupport, ApiKeyVerification } from '@ogden-agents/core';
+import { errorCode } from '../error-code.js';
 
 /** The environment variable Claude Code reads its API key from. It prefers it over a subscription when set. */
 export const ANTHROPIC_API_KEY_ENV = 'ANTHROPIC_API_KEY';
@@ -35,12 +36,11 @@ export interface ClaudeApiKeyOptions {
   onDiagnostic?: (message: string, fields?: Record<string, unknown>) => void;
 }
 
-/** A failure's code for the log, never its message. */
+/** A failure's code for the log, never its message: its cause's code (what `fetch` throws), else its own, else its name. */
 function codeOf(error: unknown): string {
-  const code = (error as { code?: unknown; cause?: { code?: unknown } } | null)?.cause?.code ?? (error as { code?: unknown } | null)?.code;
-  if (typeof code === 'string' && /^[A-Za-z0-9_]{1,40}$/.test(code)) return code;
+  const cause = (error as { cause?: { code?: unknown } | null } | null)?.cause;
   const name = (error as { name?: unknown } | null)?.name;
-  return typeof name === 'string' && /^[A-Za-z]{1,40}$/.test(name) ? name : 'unknown';
+  return errorCode(cause?.code != null ? cause : error, typeof name === 'string' && /^[A-Za-z]{1,40}$/.test(name) ? name : 'unknown');
 }
 
 /** Claude Code's {@link AgentApiKeySupport}. */

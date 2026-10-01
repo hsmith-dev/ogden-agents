@@ -111,8 +111,16 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('the real terminal (f
     cli.write('hello there\r');
     await expect.poll(output, { timeout: 10_000 }).toContain('echo: hello there');
     cli.resize(100, 30);
-    cli.write('size\r');
-    await expect.poll(output, { timeout: 10_000 }).toContain('size=100x30');
+    // The CLI learns its new size from SIGWINCH, which can come after the next line it reads: ask until it has.
+    await expect
+      .poll(
+        () => {
+          if (!output().includes('size=100x30')) cli.write('size\r');
+          return output();
+        },
+        { timeout: 10_000, interval: 200 },
+      )
+      .toContain('size=100x30');
     cli.write('/exit\r');
     await expect.poll(() => exits, { timeout: 10_000 }).toEqual([0]);
   }, 30_000);

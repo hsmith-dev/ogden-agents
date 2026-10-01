@@ -108,7 +108,9 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('the real terminal (f
 
   it('runs the CLI with its arguments in its folder, types into it, resizes it, and reports its own exit', async () => {
     const { cli, cwd, record, output, exits } = await openFake({});
-    expect(record()).toMatchObject({ argv: ['--resume', 'session-1'], cwd: realpathSync.native(cwd), term: 'xterm-256color' });
+    expect(record()).toMatchObject({ argv: ['--resume', 'session-1'], term: 'xterm-256color' });
+    // The same folder, however it is spelled (Windows: an 8.3 temp path stays 8.3).
+    expect(realpathSync.native(record().cwd)).toBe(realpathSync.native(cwd));
     expect(output()).toContain('fake-claude:--resume,session-1');
     cli.write('hello-there\r');
     await expect.poll(output, { timeout: 10_000 }).toContain('echo:hello-there');

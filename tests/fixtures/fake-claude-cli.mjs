@@ -64,6 +64,11 @@ lines.on('line', (line) => {
     pump();
     return;
   }
-  if (text === 'size') process.stdout.write(`\r\nsize=${process.stdout.columns}x${process.stdout.rows}\r\nready>`);
-  else process.stdout.write(`\r\necho:${text}\r\nready>`);
+  if (text === 'size') {
+    // Asked of the terminal now: on Windows `columns`/`rows` can lag a ConPTY resize.
+    const [cols, rows] = process.stdout.getWindowSize?.() ?? [process.stdout.columns, process.stdout.rows];
+    process.stdout.write(`\r\nsize=${cols}x${rows}\r\nready>`);
+    return;
+  }
+  process.stdout.write(`\r\necho:${text}\r\nready>`);
 });

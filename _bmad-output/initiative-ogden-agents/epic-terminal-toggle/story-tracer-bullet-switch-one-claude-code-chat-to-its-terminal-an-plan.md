@@ -83,6 +83,7 @@ context:
 - A script `CLAUDE_CODE_EXECUTABLE` (`.js/.mjs/.cjs`) runs under Node, as the Agent SDK runs one; that is how the fake CLI runs on every OS. The session id must match `^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$` before it goes on the argument list.
 - Frame limits: 1 MiB binary, 1 KiB text, else close 1009; unknown/not-terminal session closes 4404; an ended terminal sends `{type:'exit'}` then closes 4000. The `ws` server's own `maxPayload` (100 MiB) is unchanged.
 - e2e CSP check ignores the one violation every page already reports: zod's caught `Function('')` probe (`script-src eval`).
+- Windows CI (ConPTY): ConPTY repaints the screen, so the fake CLI prints space-free tokens (`ready>`, `echo:<line>`, `fake-claude:<args>`) and tests match them with escape sequences stripped; expected folders use `realpathSync.native` (8.3 temp names). A resize never reached the console under node-pty 1.1.0 (80x24 for 10 s), so only the two resize checks are skipped on win32, pointing at 3.8 (deferred-work); everything else is asserted on Windows.
 
 ## Plan Change Log
 

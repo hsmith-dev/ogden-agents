@@ -38,6 +38,8 @@ context: []
 - Decision (2026-10-01, coordinator): Q3 POSIX reused-id residual — accept (a) and close the entry. Q4 `.cmd` scope — (a) change both chat and terminal (one `claude`, 3.1's rule). Q5 hitl timing — (b) merge on green CI; the Windows live check moves into 3.10's release live checks.
 - Q1 (resize if still failing with a raw-mode CLI) and Q2 (children of a dead CLI) are decided by the user AFTER the CI probe results; the build runs the probe first and stops to report.
 - Decision (2026-10-01): plan kept whole.
+- Decision (2026-10-01, after the CI probe): Q1 closed as not needed: resize works with a raw-mode CLI under node-pty 1.1.0's system ConPTY; the fake CLI reads raw (H1).
+- Decision (2026-10-01, after the CI probe): Q2 (a) accept and document: a Node or Bun CLI's children stop with it through libuv's job; only programs started outside it on purpose survive; stopping a live terminal still runs `taskkill /T`.
 
 </frozen-after-approval>
 
@@ -55,12 +57,12 @@ context: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `scripts/conpty-probe.mjs` + a `conpty-probe` job in `ci.yml` (windows-latest, `continue-on-error`) -- temporary (Design Notes). Run it on the story PR, as 3.1 did with PR #34, and read it with `gh run view --log`. Iterate, then delete both.
-- [ ] `tests/fixtures/fake-claude-cli.mjs` -- if H1 holds: raw-mode input with its own echo, and `resized=` on Windows too.
-- [ ] `terminal-pty/index.ts` -- the win32 stop after exit that the probe shows works (likely: close the pseudo-console in `onExit`, with the console list skipped); the POSIX residual per Open Question 3.
-- [ ] `detect.ts` -- on win32, when a `claude.cmd` has the package's `claude.exe` beside it, use that `.exe`. Unit tests use an injected `isExecutable`.
-- [ ] The two test files -- drop the skips the fixes allow; add a bracketed-paste test and a truecolour pass-through test.
-- [ ] `agent-matrix.md`, `deferred-work.md` -- the Windows result; resolve or re-file each of l.22-24.
+- [x] `scripts/conpty-probe.mjs` + a `conpty-probe` job in `ci.yml` (windows-latest, `continue-on-error`) -- temporary (Design Notes). Run it on the story PR, as 3.1 did with PR #34, and read it with `gh run view --log`. Iterate, then delete both.
+- [x] `tests/fixtures/fake-claude-cli.mjs` -- if H1 holds: raw-mode input with its own echo, and `resized=` on Windows too.
+- [x] `terminal-pty/index.ts` -- the win32 stop after exit that the probe shows works (likely: close the pseudo-console in `onExit`, with the console list skipped); the POSIX residual per Open Question 3.
+- [x] `detect.ts` -- on win32, when a `claude.cmd` has the package's `claude.exe` beside it, use that `.exe`. Unit tests use an injected `isExecutable`.
+- [x] The two test files -- drop the skips the fixes allow; add a bracketed-paste test and a truecolour pass-through test.
+- [x] `agent-matrix.md`, `deferred-work.md` -- the Windows result; resolve or re-file each of l.22-24.
 
 **Acceptance Criteria:**
 - Given windows-latest CI, when `pnpm test` runs, then the resize, crash and two-viewer tests run unskipped, or are skipped for a reason the user approved, and "AttachConsole failed" is absent from the logs.
@@ -75,6 +77,13 @@ context: []
 5. **hitl timing:** (a) 3.8 stays open until a person checks it on Windows; (b) merge on green CI and move that check into 3.10's release live checks.
 
 ## Implementation Notes
+
+- CI probe (temporary `scripts/conpty-probe.mjs` and a `conpty-probe` job, removed; runs 36896007333, 36896903713, 36898705640; windows-latest = Windows Server 2025 build 26100, Node 24.21, node-pty 1.1.0, `_useConpty` true):
+  - Resize to 100x30: a line-mode child keeps 80x24 (`getWindowSize` and `columns`), dll off or on; a raw-mode child gets the `resize` event and 100x30 within ~0.5 s (dll: at once); `mode con` shows 100x30. H1 holds.
+  - Exit: a Node or Bun CLI's non-detached grandchild dies with it (libuv's kill-on-close job). A grandchild started outside any job (PowerShell `Start-Process -NoNewWindow`, node or ping) survives the CLI's exit, `kill()` with or without the console list, and `taskkill /T` of the gone root (exit 128). With `useConptyDll` on, `onExit` waits for that grandchild, and `kill()` stops it. A grandchild that keeps writing can hold off `onExit` under system ConPTY (deferred-work).
+  - Input: bracketed paste arrives byte-identical, Ctrl+C in raw mode arrives as 0x03 (no SIGINT, child lives), truecolour SGR comes back unchanged (system ConPTY moves it before the CRLF).
+  - npm: `claude`, `claude.cmd`, `claude.ps1` in the npm prefix; the `.cmd` runs `%dp0%\node_modules\@anthropic-ai\claude-code\bin\claude.exe`; 2.1.286's `bin` is `bin/claude.exe`; `claude.exe --version` through node-pty exits 0.
+  - "AttachConsole failed" comes only from node-pty's default `kill()` console list; never with it skipped (9.6's path, used by every kill) or with the dll. The `test` job now fails if the line appears.
 
 ## Plan Change Log
 

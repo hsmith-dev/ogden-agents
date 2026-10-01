@@ -17,9 +17,8 @@ Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 
 - Kept separate by decision (revisit if they converge): the two `removeLeftovers` and the two `InstallButton`s. From 9.6.
 - Release live checks (RELEASING step 5, retrospective A2): the real sign-in tab the Claude CLI opens itself is covered by no test. From 9.7.
 - Unowned: consider failing the release smoke if "test hooks in use" ever appears in a registry install's log. From 9.7 security review.
-- Confirm only: node-pty's "AttachConsole failed" fix is resolved pending the PR's Windows CI logs. From 9.6.
-- Story 3.8 (Windows): a terminal resize never reached the console under ConPTY with node-pty 1.1.0 (80x24 for 10 s); the resize checks are skipped on win32. From 3.1 CI.
-- Story 3.8 (Windows): after a CLI exits by itself, what it started is not stopped on Windows. From 3.4 (review F2); its POSIX residual was accepted and closed in 3.8.
+- Confirm only: node-pty's "AttachConsole failed" fix is resolved pending the PR's Windows CI logs. From 9.6; 3.8's CI now fails the test job on that line.
+- Unowned (Windows, revisit if seen): under system ConPTY a leftover program the CLI started outside its job that keeps writing to the console can hold off node-pty's exit report indefinitely, so the dead CLI's terminal stays open until it is stopped. From 3.8's CI probe.
 - Unowned (by decision, log only): after a switch refused past the 10 s release bound, the next message still waits on the late agent without a bound; 3.9 logs `terminal_release_late` when it stops. From 3.4 review F5.
 - Unowned: core's internal errors, the handoff codes included (`terminal_release_late`, `terminal_open_timeout`...), are logged as "applying an agent event failed" at error level; give them their own message. From the 3.9 sweep.
 
@@ -315,3 +314,12 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-the-terminal-works-on-windows-plan.md`
   summary: Resolved (accepted, decision Q3a, 2026-10-01): the POSIX reused-id residual of the 3.4 review F2 entry above. A process id isn't reused while its process group still has members, so the risk needs the group to be empty and its id taken, in the same tick the exit is reported, by a new process that leads its own group; checking the group's members with `ps` first would cost a spawn per exit and still race. No code change; the Windows half of that entry stays open for story 3.8.
   evidence: `packages/adapters/src/terminal-pty/index.ts` `hiddenPtySpawner` `onExit`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-the-terminal-works-on-windows-plan.md`
+  summary: Resolved: the Windows resize (3.1 CI entry above). ConPTY delivered the resize all along; libuv on Windows only sees it while stdin is read raw, and the fake CLI read lines. The fake now reads raw as Claude Code does, and the resize tests run on win32 (CI probe run 36896007333: line mode stayed 80x24, raw mode and `mode con` showed 100x30).
+  evidence: `tests/fixtures/fake-claude-cli.mjs`; `packages/adapters/test/terminal-pty.test.ts` "resizes it"; `packages/server/test/terminal-socket.test.ts` the attach and two-viewer tests.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-the-terminal-works-on-windows-plan.md`
+  summary: Resolved (accepted, decision Q2a, 2026-10-01): the Windows half of the 3.4 review F2 entry above. A Node or Bun CLI's children (claude.exe is Bun) are in libuv's kill-on-close job and stop with it; only a program started outside that job outlives a CLI that exits by itself, since neither `taskkill /T` of the gone root nor closing the pseudo-console (with or without node-pty's console list) stops it under system ConPTY (runs 36896903713, 36898705640). Stopping a live terminal still runs `taskkill /T` first. The crash tests run on win32.
+  evidence: `packages/adapters/src/terminal-pty/index.ts` `hiddenPtySpawner` `onExit`; `packages/adapters/test/terminal-pty.test.ts` the two crash tests.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-the-terminal-works-on-windows-plan.md`
+  summary: For whoever sees it on Windows (3.8 CI probe): under system ConPTY, when a leftover program the CLI started outside its job keeps writing to the console, node-pty's flush timer keeps resetting and its exit report never comes (3 of 4 probe runs, 15 s), so the dead CLI's terminal stays open until stopped. Options then: watch the CLI's pid as well, or a Job Object (architecture change).
+  evidence: node-pty 1.1.0 `lib/windowsPtyAgent.js` `_$onProcessExit`/`_flushDataAndCleanUp`.

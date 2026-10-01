@@ -264,7 +264,7 @@ describe('conversationProps (review F2, F6)', () => {
     expect(conversationProps(false, false)).toEqual({});
   });
 
-  it('while the terminal drives, the conversation is hidden until the peek opens, and always inert under its read-only name', () => {
+  it('while the terminal drives, the conversation is hidden until the peek opens, and readable under its read-only name', () => {
     for (const peekOpen of [false, true]) {
       render(
         <PageBody {...conversationProps(true, peekOpen)}>
@@ -272,11 +272,10 @@ describe('conversationProps (review F2, F6)', () => {
         </PageBody>,
       );
       const region = screen.getByRole('region', { name: READ_ONLY_CONVERSATION, hidden: true });
-      expect(region.hasAttribute('inert')).toBe(true);
-      // The scrolling box (outer) is not inert, so the read-only conversation still scrolls.
+      // Kept in the accessibility tree (no inert): read-only comes from the ReadOnlyConversation context.
+      expect(region.hasAttribute('inert')).toBe(false);
       const scroller = region.parentElement!;
       expect(scroller.getAttribute('data-slot')).toBe('page-body');
-      expect(scroller.hasAttribute('inert')).toBe(false);
       expect(scroller.classList.contains('hidden')).toBe(!peekOpen);
       if (peekOpen) {
         // Below xl a sheet over the terminal; at xl beside it.

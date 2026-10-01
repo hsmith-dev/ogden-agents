@@ -22,17 +22,18 @@ export function TerminalPane({ driving, children }: { driving: boolean; children
  * The page body's props for the conversation: as usual while the chat
  * drives. While the terminal drives it is hidden unless the peek is open
  * (user decisions 2026-10-01: closed by default; a sheet over the terminal
- * below `xl`, beside it at `xl`), and always read-only: `inert` (nothing in
- * it can be focused or pressed) under its own name. `className` goes on the
- * scrolling box, the rest on the content inside it, so it still scrolls.
+ * below `xl`, beside it at `xl`), and read-only under its own name: it stays
+ * in the accessibility tree, readable and scrollable, while the
+ * `ReadOnlyConversation` context (`chat/read-only.ts`) makes every action in
+ * it that sends something `aria-disabled` with no handler (3.6 review F2).
+ * `className` goes on the scrolling box, the rest on the content inside it.
  */
-export function conversationProps(driving: boolean, peekOpen: boolean): Pick<ComponentProps<'div'>, 'className' | 'inert' | 'role' | 'aria-label'> {
+export function conversationProps(driving: boolean, peekOpen: boolean): Pick<ComponentProps<'div'>, 'className' | 'role' | 'aria-label'> {
   if (!driving) return {};
   return {
     className: peekOpen
       ? 'absolute inset-y-2 right-(--panel-padding) z-10 w-(--sidebar-width) max-w-[calc(100%-var(--space-12))] rounded-lg border border-border bg-background shadow-float xl:static xl:z-auto xl:w-96 xl:max-w-none xl:flex-none xl:shadow-none'
       : 'hidden',
-    inert: true,
     role: 'region',
     'aria-label': READ_ONLY_CONVERSATION,
   };

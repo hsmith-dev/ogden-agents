@@ -3,6 +3,7 @@ import type { CautionLevel, PermissionDecision, ToolKind } from '@ogden-agents/s
 import { alwaysAllowRefusal, MAX_DENY_REASON_LENGTH } from '@ogden-agents/shared';
 import { useId, useState, type KeyboardEvent } from 'react';
 import { AGENT_NAME, ChatApiError, decidePermission, removePermissionRule } from '@/chat/chat-api';
+import { useReadOnlyConversation } from '@/chat/read-only';
 import type { TranscriptPermission } from '@/chat/transcript';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
@@ -62,6 +63,8 @@ export function PermissionCard({ permission, wsId, sesId, projectName, onDecided
   const [reason, setReason] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  // While the terminal drives, the card can be read but not answered (story 3.6 review F2).
+  const readOnly = useReadOnlyConversation();
 
   if (permission.status !== 'pending') return <PermissionRecordLine permission={permission} wsId={wsId} projectName={projectName} />;
 
@@ -70,7 +73,7 @@ export function PermissionCard({ permission, wsId, sesId, projectName, onDecided
   // An interpreter, a wrapper or a variable assignment: only Allow once and Deny, with the reason.
   const refusal = scope === null && permission.toolCall.command !== undefined ? alwaysAllowRefusal(permission.toolCall.command) : undefined;
   const decide = (decision: PermissionDecision) => {
-    if (sending || (decision === 'allow_always' && scope === null)) return;
+    if (readOnly || sending || (decision === 'allow_always' && scope === null)) return;
     setSending(true);
     setError(undefined);
     const trimmed = reason.trim();
@@ -101,7 +104,8 @@ export function PermissionCard({ permission, wsId, sesId, projectName, onDecided
       tabIndex={-1}
       data-testid="permission-card"
       data-request-id={permission.requestId}
-      onKeyDown={onKeyDown}
+      onKeyDown={readOnly ? undefined : onKeyDown}
+      data-read-only={readOnly || undefined}
       className="flex flex-col gap-3 rounded-lg border border-border border-l-(length:--rail-signal) border-l-signal bg-card p-(--panel-padding) animate-in fade-in-0 slide-in-from-bottom-1 duration-(--motion-base) ease-standard"
     >
       <h2 id={`${id}-headline`} className="m-0 text-heading text-foreground">
@@ -122,17 +126,17 @@ export function PermissionCard({ permission, wsId, sesId, projectName, onDecided
         </Text>
       ) : null}
       <div className="flex flex-wrap items-start gap-2">
-        <Button aria-keyshortcuts="1" aria-disabled={sending} onClick={() => decide('allow_once')}>
+        <Button aria-keyshortcuts={readOnly ? undefined : '1'} aria-disabled={sending || readOnly} onClick={readOnly ? undefined : () => decide('allow_once')}>
           Allow once
         </Button>
         {refusal !== undefined ? null : (
           <div className="flex max-w-64 flex-col gap-1">
             <Button
               variant="outline"
-              aria-keyshortcuts="2"
-              aria-disabled={sending || scope === null}
+              aria-keyshortcuts={readOnly ? undefined : '2'}
+              aria-disabled={sending || scope === null || readOnly}
               aria-describedby={`${id}-scope`}
-              onClick={() => decide('allow_always')}
+              onClick={readOnly ? undefined : () => decide('allow_always')}
             >
               Always allow
             </Button>
@@ -141,7 +145,12 @@ export function PermissionCard({ permission, wsId, sesId, projectName, onDecided
             </Text>
           </div>
         )}
-        <Button variant="destructive" aria-keyshortcuts="3" aria-disabled={sending} onClick={() => decide('deny')}>
+        <Button
+          variant="destructive"
+          aria-keyshortcuts={readOnly ? undefined : '3'}
+          aria-disabled={sending || readOnly}
+          onClick={readOnly ? undefined : () => decide('deny')}
+        >
           Deny
         </Button>
       </div>
@@ -152,7 +161,13 @@ export function PermissionCard({ permission, wsId, sesId, projectName, onDecided
       )}
       <div className="flex flex-col gap-1">
         <Label htmlFor={`${id}-reason`}>Reason for Deny (optional)</Label>
-        <Input id={`${id}-reason`} value={reason} maxLength={MAX_DENY_REASON_LENGTH} onChange={(event) => setReason(event.target.value)} />
+        <Input
+          id={`${id}-reason`}
+          value={reason}
+          maxLength={MAX_DENY_REASON_LENGTH}
+          readOnly={readOnly}
+          onChange={(event) => setReason(event.target.value)}
+        />
       </div>
       {error === undefined ? null : (
         <Text variant="caption" role="alert" data-testid="permission-error">
@@ -180,11 +195,13 @@ function PermissionRecordLine({ permission, wsId, projectName }: { permission: T
   const [open, setOpen] = useState(false);
   /** The rule was found already gone when this record tried to undo it. */
   const [goneHere, setGoneHere] = useState(false);
+  // While the terminal drives, the record reads the same but offers no Undo (story 3.6 review F2).
+  const readOnly = useReadOnlyConversation();
   const target = permissionTarget(permission);
   const resolution = permission.resolution;
   const at = resolution?.at ?? permission.requestedAt;
   const ruleId = resolution?.ruleId;
-  const undoable = ruleId !== undefined && resolution?.ruleRemoved === false && resolution.decision !== 'deny' && !goneHere;
+  const undoable = ruleId !== undefined && resolution?.ruleRemoved === false && resolution.decision !== 'deny' && !goneHere && !readOnly;
 
   let Icon = ClockCounterClockwise;
   let text = `Not answered: ${target}`;

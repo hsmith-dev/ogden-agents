@@ -6,6 +6,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { useAppearance } from '@/appearance/appearance-provider';
 import { AGENT_NAME, cancelSession, ChatApiError, fetchSession, sendMessage, switchDriver } from '@/chat/chat-api';
 import { Composer } from '@/chat/composer';
+import { ReadOnlyConversation } from '@/chat/read-only';
 import { SignInAgain } from '@/chat/sign-in-again';
 import { ToolCalls } from '@/chat/tool-call-row';
 import { sessionView, type TranscriptCheckIn, type TranscriptItem, type TranscriptMessage } from '@/chat/transcript';
@@ -373,95 +374,98 @@ export function SessionPage() {
           id={peekId}
           {...conversationProps(driver === 'terminal', peekOpen)}
         >
-          <section aria-label="Conversation" aria-busy={streaming} data-testid="transcript" className="flex w-full max-w-(--space-chat-column) flex-col gap-4 self-center">
-            {!loading && (history.hasEarlier || history.error !== undefined) ? (
-              <EarlierHistory loading={history.loading} error={history.error} onShow={showEarlier} />
-            ) : null}
-            {loading ? (
-              <>
-                <Skeleton />
-                <Skeleton />
-                <span role="status" className="sr-only">
-                  Loading the conversation
-                </span>
-              </>
-            ) : view.items.length === 0 && !history.hasEarlier ? (
-              <Text variant="caption">Ask {AGENT_NAME} about this project.</Text>
-            ) : (
-              view.items.map((item, index) =>
-                item.type === 'message' ? (
-                  <Message key={item.message.messageId} message={item.message} />
-                ) : item.type === 'tools' ? (
-                  <ToolCalls key={`tools-${item.calls[0]?.toolCallId ?? index}`} calls={item.calls} density={appearance.density} />
-                ) : item.type === 'resumed' ? (
-                  <ResumedMarker key={`resumed-${item.at}-${index}`} />
-                ) : (
-                  <PermissionCard
-                    key={item.permission.requestId}
-                    permission={item.permission}
-                    wsId={wsId}
-                    sesId={sesId}
-                    projectName={projectName}
-                    onDecided={focusComposer}
-                  />
-                ),
-              )
-            )}
-            {view.queued.map((message) => (
-              <Message key={message.messageId} message={message} />
-            ))}
-            {state === 'working' && view.checkIn !== undefined ? (
-              <Notice
-                data-testid="check-in"
-                data-waiting-on={view.checkIn.waitingOn}
-                role="status"
-                action={
-                  view.checkIn.waitingOn === undefined ? (
-                    <Button variant="outline" onClick={stop} aria-disabled={stopping} data-testid="check-in-stop">
-                      <Stop aria-hidden />
-                      Stop
-                    </Button>
-                  ) : null
-                }
-              >
-                <StateGlyph state="working" label={checkInWords(view.checkIn)} />
-              </Notice>
-            ) : null}
-            {state === 'error' && view.errorCode === 'auth_required' ? (
-              // Keyed per error (the message it failed on), so each one starts unarmed (9.4).
-              <SignInAgain
-                key={`${sesId}:${lastSentUserId ?? ''}`}
-                reason={view.errorReason}
-                canTryAgain={view.lastUserText !== undefined}
-                onTryAgain={tryAgain}
-              />
-            ) : state === 'error' ? (
-              <Notice
-                variant="blocked"
-                data-testid="session-error"
-                data-error-code={view.errorCode}
-                action={
-                  view.lastUserText === undefined ? null : (
-                    <Button variant="outline" onClick={tryAgain} data-testid="try-again">
-                      <ArrowClockwise aria-hidden />
-                      Try again
-                    </Button>
-                  )
-                }
-              >
-                {view.errorReason ?? `${AGENT_NAME} stopped with an error. Try again.`}
-              </Notice>
-            ) : null}
-            {actionError === undefined ? null : (
-              <Text variant="caption" role="alert" data-testid="session-action-error">
-                {actionError}
-              </Text>
-            )}
-            <div ref={end} />
-          </section>
-          <div aria-live="assertive" aria-atomic="true" className="sr-only" data-testid="permission-announcement">
-            {announcement}
-          </div>
+          {/* While the terminal drives: readable, nothing in it sends (3.6 review F2). */}
+          <ReadOnlyConversation.Provider value={terminalDrives}>
+            <section aria-label="Conversation" aria-busy={streaming} data-testid="transcript" className="flex w-full max-w-(--space-chat-column) flex-col gap-4 self-center">
+              {!loading && (history.hasEarlier || history.error !== undefined) ? (
+                <EarlierHistory loading={history.loading} error={history.error} onShow={showEarlier} />
+              ) : null}
+              {loading ? (
+                <>
+                  <Skeleton />
+                  <Skeleton />
+                  <span role="status" className="sr-only">
+                    Loading the conversation
+                  </span>
+                </>
+              ) : view.items.length === 0 && !history.hasEarlier ? (
+                <Text variant="caption">Ask {AGENT_NAME} about this project.</Text>
+              ) : (
+                view.items.map((item, index) =>
+                  item.type === 'message' ? (
+                    <Message key={item.message.messageId} message={item.message} />
+                  ) : item.type === 'tools' ? (
+                    <ToolCalls key={`tools-${item.calls[0]?.toolCallId ?? index}`} calls={item.calls} density={appearance.density} />
+                  ) : item.type === 'resumed' ? (
+                    <ResumedMarker key={`resumed-${item.at}-${index}`} />
+                  ) : (
+                    <PermissionCard
+                      key={item.permission.requestId}
+                      permission={item.permission}
+                      wsId={wsId}
+                      sesId={sesId}
+                      projectName={projectName}
+                      onDecided={focusComposer}
+                    />
+                  ),
+                )
+              )}
+              {view.queued.map((message) => (
+                <Message key={message.messageId} message={message} />
+              ))}
+              {state === 'working' && view.checkIn !== undefined ? (
+                <Notice
+                  data-testid="check-in"
+                  data-waiting-on={view.checkIn.waitingOn}
+                  role="status"
+                  action={
+                    view.checkIn.waitingOn === undefined && !terminalDrives ? (
+                      <Button variant="outline" onClick={stop} aria-disabled={stopping} data-testid="check-in-stop">
+                        <Stop aria-hidden />
+                        Stop
+                      </Button>
+                    ) : null
+                  }
+                >
+                  <StateGlyph state="working" label={checkInWords(view.checkIn)} />
+                </Notice>
+              ) : null}
+              {state === 'error' && view.errorCode === 'auth_required' && !terminalDrives ? (
+                // Keyed per error (the message it failed on), so each one starts unarmed (9.4).
+                <SignInAgain
+                  key={`${sesId}:${lastSentUserId ?? ''}`}
+                  reason={view.errorReason}
+                  canTryAgain={view.lastUserText !== undefined}
+                  onTryAgain={tryAgain}
+                />
+              ) : state === 'error' ? (
+                <Notice
+                  variant="blocked"
+                  data-testid="session-error"
+                  data-error-code={view.errorCode}
+                  action={
+                    view.lastUserText === undefined || terminalDrives ? null : (
+                      <Button variant="outline" onClick={tryAgain} data-testid="try-again">
+                        <ArrowClockwise aria-hidden />
+                        Try again
+                      </Button>
+                    )
+                  }
+                >
+                  {view.errorReason ?? `${AGENT_NAME} stopped with an error. Try again.`}
+                </Notice>
+              ) : null}
+              {actionError === undefined ? null : (
+                <Text variant="caption" role="alert" data-testid="session-action-error">
+                  {actionError}
+                </Text>
+              )}
+              <div ref={end} />
+            </section>
+            <div aria-live="assertive" aria-atomic="true" className="sr-only" data-testid="permission-announcement">
+              {announcement}
+            </div>
+          </ReadOnlyConversation.Provider>
         </PageBody>
       </TerminalPane>
       <PageFooter>

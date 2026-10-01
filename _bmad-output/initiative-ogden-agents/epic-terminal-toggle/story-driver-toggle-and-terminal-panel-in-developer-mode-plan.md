@@ -46,7 +46,7 @@ context:
 - Decision (2026-10-01, user): screen-reader mode is a "Terminal screen-reader mode" switch in Settings → Appearance, off by default.
 - Decision (2026-10-01, user): the read-only transcript peek is closed by default behind a "Show conversation" button (xl only); the read-only banner sits above the terminal panel.
 - Decision (2026-10-01): plan kept whole.
-- Decision (2026-10-01, user; amends the xl-only peek above, review F6): "Show conversation" is available at every screen size: below `xl` it opens the read-only transcript as a sheet over the terminal, beside it at `xl`; closed by default, read-only (`inert`) at every size.
+- Decision (2026-10-01, user; amends the xl-only peek above, review F6): "Show conversation" is available at every screen size: below `xl` it opens the read-only transcript as a sheet over the terminal, beside it at `xl`; closed by default, read-only at every size.
 
 </frozen-after-approval>
 
@@ -97,11 +97,11 @@ context:
 
 Review of f0473e8 (was 0850837 before the restack) (coordinator, 2026-10-01): no blockers.
 - F1 (fixed): "Switching..." is bounded. `use-driver-switch.ts`: after a successful request an 8 s timer refetches the session; the driver already as asked ends the wait quietly, otherwise "Ogden Agents couldn't confirm the switch. Try again."; cleared on any driver change and on unmount. DOM tests.
-- F2 (fixed): while the terminal drives the conversation is `inert` with `role="region"` and the name "Conversation (read-only)" (on the content, so its box still scrolls); the waiting-card observer, the waiting bar and `showCard` are off while the terminal drives. DOM and e2e tests. Note: `inert` also removes the peek from the accessibility tree, so screen-reader users reach the conversation through the banner's Switch to Chat (the AC's "or banner link").
+- F2 (fixed, then revised): while the terminal drives the conversation is `role="region"` named "Conversation (read-only)"; the waiting-card observer, the waiting bar and `showCard` are off while the terminal drives. First fix used `inert`, which also hid the peek from screen readers; the coordinator (relaying the user's intent for the all-sizes sheet: keep the transcript reachable) asked to keep it readable instead. Now no `inert`: a `ReadOnlyConversation` context (`chat/read-only.ts`) makes every action that sends something non-operable: permission cards' Allow once / Always allow / Deny are `aria-disabled` with no handler and no `1`/`2`/`3` keys, the Deny reason is `readOnly`, records offer no Undo Always allow, and the check-in Stop, Try again and Sign in again are not rendered while the terminal drives (the error still shows its reason). Show earlier and tool-call disclosure stay (they send nothing). DOM tests (`read-only-conversation.dom.test.tsx`: readable by role, a click or key on a card sends nothing, no Undo) and e2e (the region is reachable by role and name, with the reply in it).
 - F3 (fixed): the help (hint or reason) sits on the segment you would switch to (Chat while the terminal drives), as its tooltip and as its `aria-describedby` text. DOM tests.
 - F4 (fixed): the shortcut ignores a press from inside `[role=dialog]` / `[role=alertdialog]`. DOM test.
 - F5 (fixed): while the session loads (`state` undefined) the Terminal segment is disabled with no reason and no tooltip (`terminalBlockedReason: null`). DOM test.
-- F6 (fixed, user decision above): Show conversation at every size; below `xl` a sheet over the terminal. e2e at 900 px. There is no Esc to close it: Esc belongs to the CLI in xterm, and nothing in the inert sheet takes focus; Hide conversation closes it.
+- F6 (fixed, user decision above): Show conversation at every size; below `xl` a sheet over the terminal. e2e at 900 px. There is no Esc to close it: Esc belongs to the CLI in xterm (the sheet is non-modal); Hide conversation closes it.
 - F7 (deferred to 3.9): page-level DOM tests of `SessionPage`; recorded in `deferred-work.md`.
 
 ## Design Notes

@@ -34,10 +34,11 @@ import {
   type AppShortcutPort,
   type Core,
 } from '@ogden-agents/core';
-import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM, ServerMessage } from '@ogden-agents/shared';
+import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM, ServerMessage, type BmadPiece } from '@ogden-agents/shared';
 import openBrowser from 'open';
 import { WebSocketServer } from 'ws';
 import { createApp, type ServerControl } from './app.js';
+import { SHIPPED_BMAD_PIECES } from './bmad-pieces.js';
 import { chooseWebSocketProtocol, createLaunchCodes, createTabTokens, retireLegacyAuthKey } from './auth.js';
 import { tightenMode } from './file-mode.js';
 import { createGate, launchUrl as launchUrlFor } from './gate.js';
@@ -46,7 +47,7 @@ import { createLauncherToken, type LauncherToken } from './launcher-token.js';
 import { createLogger, createRotatingFileWriter, LOG_DIR, teeWriters, type Logger } from './log.js';
 import { shortcutErrorCode } from './shortcut-routes.js';
 import { createTerminalAvailability } from './terminal-availability.js';
-import { testApiKeyCheck, testBmadProbe, testClaudeCli, testClaudeInstall } from './test-hooks.js';
+import { testApiKeyCheck, testBmadAvailable, testBmadProbe, testClaudeCli, testClaudeInstall } from './test-hooks.js';
 import { VERSION } from './version.js';
 import { agentEnvironment, agentKeysOf, checkInDelayFromEnv, SUBSCRIPTION_MAX_AGE_MS, testSecretStore, withoutAgentKeys } from './start-env.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
@@ -141,15 +142,20 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       ),
     );
   const ownsCore = options.core === undefined;
+  // What this install ships, plus a test's own (story 10.2): the option, and the environment hook on a test run only.
+  // A core passed in already holds its own list, so the hook is read only for the core opened here.
+  const testBmadPieces = ownsCore ? testBmadAvailable(process.env, dataDir) : [];
+  const availableBmadPieces = [...new Set([...SHIPPED_BMAD_PIECES, ...(options.availableBmadPieces ?? []), ...testBmadPieces])];
   const core =
     options.core ??
     openCore(dataDir, {
+      availableBmadPieces,
       onListenerError: (error) => log.error('event subscriber failed', { reason: String(error) }),
       // The request is declined all the same; the reason names no command.
       onPermissionError: (error) => log.warn('a permission request was declined after a failure', { reason: String(error) }),
     });
   try {
-    return await listenAndAnnounce({ options, dataDir, log, core, ownsCore, lock });
+    return await listenAndAnnounce({ options, dataDir, log, core, ownsCore, lock, testBmadPieces });
   } catch (error) {
     if (ownsCore) core.close();
     throw error;
@@ -163,6 +169,7 @@ async function listenAndAnnounce({
   core,
   ownsCore,
   lock,
+  testBmadPieces,
 }: {
   options: StartOptions;
   dataDir: string;
@@ -170,6 +177,8 @@ async function listenAndAnnounce({
   core: Core;
   ownsCore: boolean;
   lock: InstanceLock;
+  /** The BMad pieces the environment's test hook made available (story 10.2). */
+  testBmadPieces: readonly BmadPiece[];
 }): Promise<RunningServer> {
   const requested = options.port ?? DEFAULT_PORT;
   const now = options.now ?? Date.now;
@@ -236,8 +245,14 @@ async function listenAndAnnounce({
   // The terminal's `claude`: the option's, else (a test run only) a stand-in from the environment (story 3.10).
   const testCli = options.extraAgentEnv?.CLAUDE_CODE_EXECUTABLE === undefined ? testClaudeCli(process.env, dataDir) : undefined;
   const bmadProbe = testBmadProbe(process.env, dataDir);
-  if (testInstall !== undefined || testVerify !== undefined || testCli !== undefined || bmadProbe) {
-    log.info('test hooks in use', { claudeInstall: testInstall !== undefined, apiKeyCheck: testVerify !== undefined, claudeCli: testCli !== undefined, bmadProbe });
+  if (testInstall !== undefined || testVerify !== undefined || testCli !== undefined || bmadProbe || testBmadPieces.length > 0) {
+    log.info('test hooks in use', {
+      claudeInstall: testInstall !== undefined,
+      apiKeyCheck: testVerify !== undefined,
+      claudeCli: testCli !== undefined,
+      bmadProbe,
+      bmadAvailable: testBmadPieces.join(','),
+    });
   }
   const claudeAdapter = () => locateClaudeAdapter({ adapterPath: givenClaudeAdapter, dataDir, pins: claudeInstall.pins })?.path;
   const agent =

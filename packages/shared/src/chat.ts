@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { AlwaysAllowScope, BmadPieces, CautionLevel, MAX_DENY_REASON_LENGTH, MessageId, PermissionDecision } from './events.js';
+import { BmadPieceSet } from './bmad.js';
+import { AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, MessageId, PermissionDecision } from './events.js';
 import { Session, Workspace } from './entities.js';
 import { PermissionRuleId, WorkspaceId } from './ids.js';
 import { SessionTerminal } from './terminal.js';
@@ -15,6 +16,12 @@ import { IsoUtcTimestamp } from './time.js';
 /** `POST /api/v1/workspaces`. `path` is a folder on this computer; the server canonicalizes it (AD-2). */
 export const CreateWorkspaceRequest = z.object({
   path: z.string().trim().min(1, 'Enter the path of a folder on this computer.'),
+  /**
+   * The BMad pieces a newly added project starts with (story 10.2's
+   * contract; entry 10.4 applies it, from Welcome's first-project answer).
+   * Omitted: the app-wide default. Ignored for a project that already exists.
+   */
+  bmadPieces: BmadPieceSet.optional(),
 });
 export type CreateWorkspaceRequest = z.infer<typeof CreateWorkspaceRequest>;
 
@@ -115,15 +122,19 @@ export const HistoryDeletedResponse = z.object({
 export type HistoryDeletedResponse = z.infer<typeof HistoryDeletedResponse>;
 
 /** A workspace's settings (Workspace settings page): its caution level and the BMad pieces it has on (AD-22). */
-export const WorkspaceSettings = z.object({ cautionLevel: CautionLevel, bmadPieces: BmadPieces });
+export const WorkspaceSettings = z.object({ cautionLevel: CautionLevel, bmadPieces: BmadPieceSet });
 export type WorkspaceSettings = z.infer<typeof WorkspaceSettings>;
 
 /** `GET` and `PATCH /api/v1/workspaces/:wsId/settings`. */
 export const WorkspaceSettingsResponse = z.object({ settings: WorkspaceSettings });
 export type WorkspaceSettingsResponse = z.infer<typeof WorkspaceSettingsResponse>;
 
-/** `PATCH /api/v1/workspaces/:wsId/settings`: the fields to change. */
-export const UpdateWorkspaceSettingsRequest = z.object({ cautionLevel: CautionLevel.optional(), bmadPieces: BmadPieces.optional() }).refine(
+/**
+ * `PATCH /api/v1/workspaces/:wsId/settings`: the fields to change. The pieces
+ * must satisfy the dependency rule (story 10.2); turning on a piece this
+ * install doesn't ship is refused by core with `feature_unavailable`.
+ */
+export const UpdateWorkspaceSettingsRequest = z.object({ cautionLevel: CautionLevel.optional(), bmadPieces: BmadPieceSet.optional() }).refine(
   (settings) => settings.cautionLevel !== undefined || settings.bmadPieces !== undefined,
   'Choose a setting to change.',
 );

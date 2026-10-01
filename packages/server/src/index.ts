@@ -1,4 +1,5 @@
 export { createApp, type AppOptions, type ServerControl, type ServerInfo } from './app.js';
+export { bmadPieceRoutes, guardedRouteKeys, SHIPPED_BMAD_PIECES, type BmadPieceHandler, type BmadPieceRoutes, type BmadPieceScope } from './bmad-pieces.js';
 export { createLogger, redact, type Logger } from './log.js';
 export {
   AGENT_ENV_KEYS,

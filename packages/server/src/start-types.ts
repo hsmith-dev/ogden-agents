@@ -4,6 +4,7 @@
  */
 import type { ClaudeCodeSetupOptions, PtyLoader } from '@ogden-agents/adapters';
 import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, Core, SecretStorePort, ToolchainPort } from '@ogden-agents/core';
+import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
 import type { Logger } from './log.js';
 
@@ -104,6 +105,13 @@ export interface StartOptions {
   launcherEntry?: string;
   /** Override the app shortcut (tests). Default: see {@link launcherEntry}. */
   appShortcut?: AppShortcutPort;
+  /**
+   * BMad pieces to report as available on top of `SHIPPED_BMAD_PIECES`
+   * (story 10.2), so a test can turn on a piece no epic ships yet. The
+   * launcher never sets it. Ignored when {@link core} is given: that core
+   * already has its own list.
+   */
+  availableBmadPieces?: readonly BmadPiece[];
   /**
    * Called once the server has stopped by itself (Quit, or a restart the
    * launcher asked for) and everything is closed. A server process exits here.

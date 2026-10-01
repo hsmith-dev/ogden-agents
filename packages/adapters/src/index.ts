@@ -5,6 +5,7 @@
  * in-memory stubs, wired as defaults until their real adapters ship.
  */
 export * from './acp-claude-code/index.js';
+export * from './catalog-memory/index.js';
 export * from './secrets-keyring/index.js';
 export * from './secrets-memory/index.js';
 export * from './setup-claude-code/index.js';

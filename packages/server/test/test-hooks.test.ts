@@ -12,12 +12,14 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   API_KEY_CHECK_ENV,
+  BMAD_AVAILABLE_ENV,
   BMAD_PROBE_ENV,
   CLAUDE_CLI_ENV,
   CLAUDE_INSTALL_ENV,
   insideTemp,
   isTestRun,
   testApiKeyCheck,
+  testBmadAvailable,
   testBmadProbe,
   testClaudeCli,
   testClaudeInstall,
@@ -94,6 +96,24 @@ describe('testBmadProbe (story 10.1)', () => {
     expect(testBmadProbe({ NODE_ENV: 'test', [BMAD_PROBE_ENV]: '1' }, OUTSIDE)).toBe(false);
     expect(testBmadProbe({ NODE_ENV: 'test' }, dir)).toBe(false);
     expect(testBmadProbe({ NODE_ENV: 'test', [BMAD_PROBE_ENV]: 'true' }, dir)).toBe(false);
+  });
+});
+
+describe('testBmadAvailable (story 10.2)', () => {
+  it('names pieces only for a test run on a temp data folder with its variable set', () => {
+    const dir = tempDataDir();
+    expect(testBmadAvailable({ NODE_ENV: 'test', [BMAD_AVAILABLE_ENV]: ' board, planning,board ' }, dir)).toEqual(['board', 'planning']);
+    expect(testBmadAvailable({ [BMAD_AVAILABLE_ENV]: 'planning' }, dir)).toEqual([]);
+    expect(testBmadAvailable({ NODE_ENV: 'production', VITEST: '', [BMAD_AVAILABLE_ENV]: 'planning' }, dir)).toEqual([]);
+    expect(testBmadAvailable({ NODE_ENV: 'test', [BMAD_AVAILABLE_ENV]: 'planning' }, OUTSIDE)).toEqual([]);
+    expect(testBmadAvailable({ NODE_ENV: 'test' }, dir)).toEqual([]);
+    expect(testBmadAvailable({ NODE_ENV: 'test', [BMAD_AVAILABLE_ENV]: '  ' }, dir)).toEqual([]);
+  });
+
+  it('throws on a name that is not a piece when hooks are allowed, and ignores it otherwise', () => {
+    const dir = tempDataDir();
+    expect(() => testBmadAvailable({ NODE_ENV: 'test', [BMAD_AVAILABLE_ENV]: 'planning,teleport' }, dir)).toThrow(/not a BMad piece/);
+    expect(testBmadAvailable({ [BMAD_AVAILABLE_ENV]: 'teleport' }, dir)).toEqual([]);
   });
 });
 

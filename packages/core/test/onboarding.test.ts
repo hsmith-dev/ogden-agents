@@ -12,6 +12,14 @@ function setup(projects = false) {
 }
 
 describe('onboarding', () => {
+  it("keeps Welcome's first-project answer once given, through a later save without it (story 10.2)", () => {
+    const { onboarding, file } = setup();
+    expect(onboarding.set({ welcomeCompleted: false, firstProjectChoice: 'bmad_method' })).toEqual({ welcomeCompleted: false, firstProjectChoice: 'bmad_method' });
+    expect(onboarding.set({ welcomeCompleted: true })).toEqual({ welcomeCompleted: true, firstProjectChoice: 'bmad_method' });
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ welcomeCompleted: true, firstProjectChoice: 'bmad_method' });
+    expect(onboarding.get()).toEqual({ welcomeCompleted: true, firstProjectChoice: 'bmad_method' });
+  });
+
   it('reads a missing record as not completed in a data folder with no projects, and writes nothing', () => {
     const { onboarding, file, codes } = setup();
     expect(onboarding.get()).toEqual({ welcomeCompleted: false });

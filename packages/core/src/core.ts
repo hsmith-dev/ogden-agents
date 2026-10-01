@@ -1,4 +1,4 @@
-import { createBmadFeatures, type BmadFeatures } from './bmad-features.js';
+import { createBmadFeatures, parseAvailableBmadPieces, type BmadFeatures, type BmadFeaturesOptions } from './bmad-features.js';
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
 import { createEntities, type Entities } from './entities.js';
 import { createEventLog, type EventLog, type EventLogOptions } from './event-log.js';
@@ -26,19 +26,24 @@ export type OpenCoreOptions = OpenDatabaseOptions &
   EventLogOptions & {
     /** Called with a failure while deciding a permission request (it is declined all the same). */
     onPermissionError?: (error: unknown) => void;
-  };
+  } & BmadFeaturesOptions;
 
 /** Opens (and migrates) the database in `dataDir` and builds core on it. */
 export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
+  // Checked before the database opens, so a wiring bug leaves nothing open.
+  const availableBmadPieces = [...parseAvailableBmadPieces(options.availableBmadPieces)];
   const db = openDatabase(dataDir, options);
   const events = createEventLog(db, options);
   const sessionEvents = createSessionEvents(db, events);
   const entities = createEntities(db, events, sessionEvents);
+  // Which pieces this install ships is the server wiring's list (story 10.2), never core's.
+  const bmad = createBmadFeatures(db, { availableBmadPieces });
   const permissions = createPermissions({
     db,
     events,
     entities,
     sessionEvents,
+    isBmadPieceAvailable: bmad.isAvailable,
     ...(options.onPermissionError === undefined ? {} : { onError: options.onPermissionError }),
   });
   return {
@@ -46,7 +51,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     sessionEvents,
     entities,
     permissions,
-    bmad: createBmadFeatures(db),
+    bmad,
     close: () => {
       try {
         permissions.close();

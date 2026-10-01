@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { Run, RunOutcome, Session, SessionDriver, SessionState, Workspace } from './entities.js';
+import { BmadPieces } from './bmad.js';
 import { ApiErrorCode } from './errors.js';
 import { EventId, PermissionRuleId, RunId, SessionId, WorkspaceId } from './ids.js';
 import { DriverChangeCause } from './terminal.js';
@@ -69,19 +70,6 @@ export const CAUTION_LEVELS = ['ask_every_time', 'ask_for_commands', 'ask_risky_
 export const CautionLevel = z.enum(CAUTION_LEVELS);
 export type CautionLevel = z.infer<typeof CautionLevel>;
 export const DEFAULT_CAUTION_LEVEL: CautionLevel = 'ask_every_time';
-
-/**
- * The BMad Method pieces a workspace can turn on (CAP-19, AD-22). Every piece
- * is off for a new or upgraded workspace; "BMad off" is every piece off.
- * Story 10.1 (the tracer) carries only `planning`; entry 10.2 adds `board`,
- * `builds` and `retrospectives` with their labels and dependency rule.
- * Widening this list keeps stored events parseable.
- */
-export const BMAD_PIECES = ['planning'] as const;
-export const BmadPiece = z.enum(BMAD_PIECES);
-export type BmadPiece = z.infer<typeof BmadPiece>;
-/** A workspace's pieces that are on: each at most once. */
-export const BmadPieces = z.array(BmadPiece).refine((pieces) => new Set(pieces).size === pieces.length, 'Each BMad piece can be listed once.');
 
 /** An agent's stable id, kebab-case (`claude-code`, `codex`). Not an Ogden Agents key (AD-9). */
 export const AgentId = z

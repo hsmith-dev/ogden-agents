@@ -1,4 +1,4 @@
-import { API_ROUTES, apiPath, WorkspaceSettingsResponse, type BmadPiece, type CautionLevel, type WorkspaceSettings } from '@ogden-agents/shared';
+import { API_ROUTES, apiPath, BmadPiecesResponse, WorkspaceSettingsResponse, type BmadPiece, type BmadPieceAvailability, type CautionLevel, type WorkspaceSettings } from '@ogden-agents/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
@@ -42,6 +42,21 @@ export async function updateBmadPieces(wsId: string, bmadPieces: readonly BmadPi
     "The BMad Method setting couldn't be saved",
   );
   return WorkspaceSettingsResponse.parse(json).settings;
+}
+
+/**
+ * `GET /api/v1/bmad/pieces` (story 10.2): every BMad Method piece, in order,
+ * each available on this install or coming soon. Install-wide, so it is the
+ * same for every project and never changes while the server runs.
+ */
+export async function fetchBmadPieces(auth: Auth = tabAuth): Promise<BmadPieceAvailability[]> {
+  const json = await call(auth, API_ROUTES.bmadPieces, {}, "Ogden Agents couldn't check which BMad Method features it has");
+  return BmadPiecesResponse.parse(json).pieces;
+}
+
+/** Which BMad Method pieces this install ships; fetched once per page load. */
+export function useBmadPieces() {
+  return useQuery({ queryKey: ['bmad-pieces'], queryFn: () => fetchBmadPieces(), retry: false, staleTime: Number.POSITIVE_INFINITY });
 }
 
 /** Numbers requests so only the latest one's answer is used; an earlier one's is stale. */

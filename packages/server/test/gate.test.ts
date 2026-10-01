@@ -8,11 +8,12 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createMemoryAgentSetup, createMemoryAppShortcut } from '@ogden-agents/adapters';
 import { createAgentSetup, createChat, LEGACY_AUTH_KEY_FILE, openCore, PORT_FILE } from '@ogden-agents/core';
-import { API_BASE, API_ROUTES, ApiErrorBody, TERMINAL_SOCKET_ROUTE, WS_PROTOCOL } from '@ogden-agents/shared';
+import { API_BASE, API_ROUTES, ApiErrorBody, TERMINAL_SOCKET_ROUTE, TEST_ROUTES, WS_PROTOCOL } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { createApp } from '../src/app.js';
 import { createLaunchCodes, createTabTokens, LAUNCH_CODE_TTL_MS, TAB_TOKEN_IDLE_TTL_MS } from '../src/auth.js';
+import { guardedRouteKeys } from '../src/bmad-pieces.js';
 import { createGate } from '../src/gate.js';
 import { isApiPath, isServerPath } from '../src/paths.js';
 import { createLogger } from '../src/log.js';
@@ -604,6 +605,11 @@ const EXPECTED_API_ROUTES = [
   `DELETE ${API_ROUTES.agentApiKey}`,
   `GET ${API_ROUTES.onboarding}`,
   `PATCH ${API_ROUTES.onboarding}`,
+  `GET ${API_ROUTES.bmadPieces}`,
+  `GET ${API_ROUTES.newProjectDefaults}`,
+  `PATCH ${API_ROUTES.newProjectDefaults}`,
+  `GET ${API_ROUTES.workspaceBmadDetection}`,
+  `DELETE ${API_ROUTES.workspaceBmadOffer}`,
 ] as const;
 
 describe('gate placement', () => {
@@ -676,6 +682,24 @@ describe('gate placement', () => {
     }
   });
 
+
+  it("registers a BMad piece's route through the guarded helper, after the gate, inside a workspace under /api/v1 (story 10.2)", () => {
+    const core = openCore(tempDataDir());
+    try {
+      const log = createLogger(() => {});
+      const gate = createGate({ port: () => 1, codes: createLaunchCodes(), tabs: createTabTokens(), log });
+      const app = createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate, bmad: core.bmad, bmadProbe: true });
+      // The only route serving a piece so far is the test probe (10.1); epics 4 to 7 add theirs the same way.
+      expect(guardedRouteKeys(app)).toEqual([`GET ${TEST_ROUTES.bmadProbe}`]);
+      const index = app.routes.findIndex((route) => route.path === TEST_ROUTES.bmadProbe);
+      expect(index).toBeGreaterThan(0);
+      expect(TEST_ROUTES.bmadProbe.startsWith(`${API_BASE}/workspaces/:wsId/`)).toBe(true);
+      // Without the probe's hook nothing serves a piece.
+      expect(guardedRouteKeys(createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate, bmad: core.bmad }))).toEqual([]);
+    } finally {
+      core.close();
+    }
+  });
 
   it('is the first handler registered, for every method and path', () => {
     const core = openCore(tempDataDir());

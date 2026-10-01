@@ -96,8 +96,12 @@ export function createOnboarding(options: OnboardingOptions): Onboarding {
       if (!parsed.success) {
         throw new ValidationError('The onboarding state is not valid.', parsed.error.issues);
       }
-      write(parsed.data);
-      return parsed.data;
+      // Welcome's first-project answer (10.2's contract) is kept once given: a later save without it, such as
+      // Welcome's `{ welcomeCompleted: true }`, leaves it as it is, so Welcome never asks again.
+      const keptChoice = read()?.firstProjectChoice;
+      const state: OnboardingState = parsed.data.firstProjectChoice === undefined && keptChoice !== undefined ? { ...parsed.data, firstProjectChoice: keptChoice } : parsed.data;
+      write(state);
+      return state;
     },
   };
 }

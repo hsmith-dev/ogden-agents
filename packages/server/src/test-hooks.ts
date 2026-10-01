@@ -23,12 +23,16 @@
  * - {@link BMAD_PROBE_ENV} = `1`: registers the test-only route that serves
  *   the `planning` BMad piece behind core's guard (story 10.1), so a test can
  *   see `feature_off` while the piece is off.
+ * - {@link BMAD_AVAILABLE_ENV}: a comma list of BMad pieces this install
+ *   reports as available on top of the shipped ones (story 10.2), so the
+ *   packaged suite can turn on a piece no epic ships yet.
  */
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, relative } from 'node:path';
 import type { AdapterPins } from '@ogden-agents/adapters';
 import type { ApiKeyVerification } from '@ogden-agents/core';
+import { BmadPiece, type BmadPiece as BmadPieceName } from '@ogden-agents/shared';
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -42,6 +46,9 @@ export const CLAUDE_CLI_ENV = 'OGDEN_AGENTS_TEST_CLAUDE_CLI';
 
 /** `1`: register `TEST_ROUTES.bmadProbe`, a route guarded by the `planning` piece (tests only; story 10.1). */
 export const BMAD_PROBE_ENV = 'OGDEN_AGENTS_TEST_BMAD_PROBE';
+
+/** A comma list of BMad pieces to report as available, such as `planning,board` (tests only; story 10.2). */
+export const BMAD_AVAILABLE_ENV = 'OGDEN_AGENTS_TEST_BMAD_AVAILABLE';
 
 /** Whether this process runs under a test runner: `NODE_ENV=test`, or `VITEST` set. */
 export function isTestRun(env: Env = process.env): boolean {
@@ -157,4 +164,22 @@ export function testClaudeCli(env: Env, dataDir: string, tmp: string = tmpdir())
 /** Whether to register the test-only BMad probe route ({@link BMAD_PROBE_ENV}): only when set to `1` and test hooks are allowed. */
 export function testBmadProbe(env: Env, dataDir: string, tmp: string = tmpdir()): boolean {
   return env[BMAD_PROBE_ENV] === '1' && testHooksAllowed(env, dataDir, tmp);
+}
+
+/**
+ * The BMad pieces {@link BMAD_AVAILABLE_ENV} adds to what this install
+ * ships, in the order given without repeats, or none: unset, empty, or hooks
+ * not allowed. Allowed but naming something that isn't a piece throws, so
+ * the test fails loudly rather than running with less than it asked for.
+ */
+export function testBmadAvailable(env: Env, dataDir: string, tmp: string = tmpdir()): BmadPieceName[] {
+  const list = env[BMAD_AVAILABLE_ENV];
+  if (list === undefined || list.trim() === '' || !testHooksAllowed(env, dataDir, tmp)) return [];
+  const pieces: BmadPieceName[] = [];
+  for (const name of list.split(',').map((part) => part.trim())) {
+    const parsed = BmadPiece.safeParse(name);
+    if (!parsed.success) throw new Error(`${BMAD_AVAILABLE_ENV}: ${JSON.stringify(name)} is not a BMad piece`);
+    if (!pieces.includes(parsed.data)) pieces.push(parsed.data);
+  }
+  return pieces;
 }

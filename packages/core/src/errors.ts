@@ -1,4 +1,4 @@
-import type { SessionTerminal, TerminalUnavailableCode } from '@ogden-agents/shared';
+import { FEATURE_OFF_MESSAGE, FEATURE_UNAVAILABLE_MESSAGE, type SessionTerminal, type TerminalUnavailableCode } from '@ogden-agents/shared';
 
 /** Base class for errors core throws on purpose, so callers can tell them from bugs. */
 export class CoreError extends Error {
@@ -51,7 +51,19 @@ export class NotFoundError extends CoreError {
 export class FeatureOffError extends CoreError {
   override readonly name = 'FeatureOffError';
   constructor(readonly piece: string) {
-    super('feature_off', `The ${piece} feature of BMad Method is off in this project.`);
+    super('feature_off', FEATURE_OFF_MESSAGE);
+  }
+}
+
+/**
+ * Turning on a BMad Method piece this install doesn't ship yet was refused
+ * (AD-22: a piece is turned on only when available; story 10.2). Nothing was
+ * stored. `piece` is the first such piece.
+ */
+export class FeatureUnavailableError extends CoreError {
+  override readonly name = 'FeatureUnavailableError';
+  constructor(readonly piece: string) {
+    super('feature_unavailable', FEATURE_UNAVAILABLE_MESSAGE);
   }
 }
 

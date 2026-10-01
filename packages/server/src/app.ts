@@ -4,6 +4,7 @@ import { API_ROUTES, ToolchainInstallResponse, ToolchainResponse } from '@ogden-
 import { Hono, type MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { registerAgentSetupRoutes } from './agent-setup-routes.js';
+import { registerBmadRoutes } from './bmad-routes.js';
 import type { TabTokens } from './auth.js';
 import { registerChatRoutes } from './chat-routes.js';
 import { apiError } from './errors.js';
@@ -68,7 +69,7 @@ export interface AppOptions {
   terminalAvailability?: TerminalAvailabilityCheck;
   /** Core's answers to permission requests, which the permission routes decide through (the declining stub until 2.6). */
   permissions?: Permissions;
-  /** Core's BMad pieces guard (AD-22, story 10.1). */
+  /** Core's BMad pieces (AD-22): the guard (10.1) and what this install ships (10.2); without it `GET` pieces answers 501. */
   bmad?: BmadFeatures;
   /** Registers the test-only BMad probe route (story 10.1); `start()` sets it only when its test hook is allowed. */
   bmadProbe?: boolean;
@@ -169,6 +170,7 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, chat
   registerPermissionRoutes(app, { permissions, log });
   registerShortcutRoutes(app, { appShortcut, log });
   registerAgentSetupRoutes(app, { agentSetup, onboarding, log });
+  registerBmadRoutes(app, { bmad, log });
 
   registerEventSocket(app, { events, log, tabs });
   // A session's terminal (story 3.1): behind the same gate as `/ws`.

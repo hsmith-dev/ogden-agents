@@ -46,6 +46,11 @@ export const API_ERROR_CODES = [
   'agent_setup_failed',
   /** A BMad Method piece this project has turned off was asked for (409; AD-22: core's guard refused it). */
   'feature_off',
+  /**
+   * Turning on a BMad Method piece this install doesn't ship yet was refused
+   * (409; AD-22: a piece is turned on only when available). Nothing was stored.
+   */
+  'feature_unavailable',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

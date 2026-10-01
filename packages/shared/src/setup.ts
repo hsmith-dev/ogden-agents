@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { FirstProjectChoice } from './bmad.js';
 import { AgentAuthMethodKind, AgentAuthState, AgentId } from './events.js';
 
 /**
@@ -110,8 +111,13 @@ export const SetApiKeyRequest = z.object({
 });
 export type SetApiKeyRequest = z.infer<typeof SetApiKeyRequest>;
 
-/** `GET` and `PATCH /api/v1/onboarding`: whether the first-run Welcome is done. */
-export const OnboardingState = z.object({ welcomeCompleted: z.boolean() });
+/**
+ * `GET` and `PATCH /api/v1/onboarding`: whether the first-run Welcome is
+ * done, and (story 10.2's contract; entry 10.4 asks it) the answer to
+ * "Simple chats or BMad Method?" for the first project, once given, so
+ * Welcome never asks again. Absent in records from before epic 10.
+ */
+export const OnboardingState = z.object({ welcomeCompleted: z.boolean(), firstProjectChoice: FirstProjectChoice.optional() });
 export type OnboardingState = z.infer<typeof OnboardingState>;
 
 /**

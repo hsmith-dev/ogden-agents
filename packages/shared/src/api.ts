@@ -137,6 +137,28 @@ export const API_ROUTES = {
   agentApiKey: `${API_BASE}/agents/:agentId/api-key`,
   /** `GET` → `OnboardingState`; `PATCH OnboardingState` → `OnboardingState` (9.5): whether Welcome is done. */
   onboarding: `${API_BASE}/onboarding`,
+  /**
+   * `GET` → `BmadPiecesResponse` (story 10.2): every BMad Method piece, in
+   * order, each `available` or not with the coming-soon reason. Not guarded:
+   * it serves projects with BMad off.
+   */
+  bmadPieces: `${API_BASE}/bmad/pieces`,
+  /**
+   * `GET` → `NewProjectDefaultsResponse`; `PATCH UpdateNewProjectDefaultsRequest`
+   * → `NewProjectDefaultsResponse` (story 10.2 registers it as a 501 stub;
+   * entry 10.4 fills it): the app-wide default pieces for new projects.
+   */
+  newProjectDefaults: `${API_BASE}/settings/new-projects`,
+  /**
+   * `GET` → `BmadDetectionResponse` (story 10.2 stub; entry 10.3 fills it):
+   * whether the project's repo already has `_bmad/`, read-only. Not guarded.
+   */
+  workspaceBmadDetection: `${API_BASE}/workspaces/:wsId/bmad/detection`,
+  /**
+   * `DELETE` → 204 (story 10.2 stub; entry 10.3 fills it): Not now on the
+   * "already uses BMad Method" offer, remembered per project. Not guarded.
+   */
+  workspaceBmadOffer: `${API_BASE}/workspaces/:wsId/bmad/offer`,
 } as const;
 
 /**
@@ -178,8 +200,9 @@ export type ApiRoute = (typeof API_ROUTES)[keyof typeof API_ROUTES];
 export const TEST_ROUTES = {
   /**
    * `GET` → `{ piece }` (story 10.1): a route serving the `planning` piece,
-   * refused by core's guard with 409 `feature_off` while the workspace has it
-   * off (AD-22).
+   * registered through the server's `bmadPieceRoutes` helper (story 10.2),
+   * so core's guard refuses it with 409 `feature_off` while the workspace
+   * has it off (AD-22).
    */
   bmadProbe: `${API_BASE}/workspaces/:wsId/test/bmad-probe`,
 } as const;

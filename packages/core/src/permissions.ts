@@ -26,6 +26,8 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import {
   alwaysAllowRefusal,
   BmadPieces as BmadPiecesSchema,
+  bmadPiecesProblem,
+  canonicalBmadPieces,
   CautionLevel as CautionLevelSchema,
   DEFAULT_CAUTION_LEVEL,
   MAX_DENY_REASON_LENGTH,
@@ -50,7 +52,7 @@ import type { AgentPermissionDecision, AgentPermissionRequest } from './agent-po
 import type { Database } from './db/database.js';
 import { permissionRules, workspaces } from './db/schema.js';
 import { canonicalWorkspacePath, isCaseInsensitivePath, type Entities } from './entities.js';
-import { CoreError, NotFoundError, ValidationError } from './errors.js';
+import { CoreError, FeatureUnavailableError, NotFoundError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import { newId } from './ids.js';
 import type { SessionEvents } from './session-events.js';
@@ -95,9 +97,14 @@ export interface Permissions {
    * Changes the workspace's settings, its caution level and its BMad pieces
    * (AD-22; the only way the pieces change), and appends one
    * `workspace.settings_changed` in the same transaction; nothing changed
-   * appends nothing. A level applies to requests not yet shown.
-   * {@link ValidationError} for an unknown level or piece, or neither given;
-   * {@link NotFoundError} for an unknown workspace.
+   * appends nothing. A level applies to requests not yet shown. The pieces
+   * are stored in canonical order and must satisfy the dependency rule; a
+   * piece newly turned on must be available (story 10.2), while one already
+   * on is kept and turning off is always allowed.
+   * {@link ValidationError} for an unknown level or piece, a broken
+   * dependency rule, or neither given; {@link FeatureUnavailableError} for a
+   * newly-on piece this install doesn't ship; {@link NotFoundError} for an
+   * unknown workspace. Every refusal writes nothing.
    */
   updateSettings(workspaceId: WorkspaceId, input: { cautionLevel?: unknown; bmadPieces?: unknown }): WorkspaceSettings;
   /** Stops listening and tells every agent still waiting that its request was cancelled. */
@@ -354,6 +361,8 @@ export interface PermissionsOptions {
   sessionEvents: SessionEvents;
   /** Called with a failure while deciding or recording a request (it is declined all the same). Default: nothing. */
   onError?: (error: unknown) => void;
+  /** Whether this install ships a BMad piece, so it may be turned on (core's `bmad.isAvailable`). Default: none is. */
+  isBmadPieceAvailable?: (piece: BmadPiece) => boolean;
 }
 
 interface Pending {
@@ -378,7 +387,7 @@ const toRule = (row: RuleRow): PermissionRule => ({
   createdAt: row.createdAt,
 });
 
-export function createPermissions({ db, events, entities, sessionEvents, onError }: PermissionsOptions): Permissions {
+export function createPermissions({ db, events, entities, sessionEvents, onError, isBmadPieceAvailable = () => false }: PermissionsOptions): Permissions {
   const { orm } = db;
   /** Requests waiting for the user, by request id. */
   const pending = new Map<string, Pending>();
@@ -642,7 +651,9 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
       if (input.bmadPieces !== undefined) {
         const parsed = BmadPiecesSchema.safeParse(input.bmadPieces);
         if (!parsed.success) throw new ValidationError('Choose BMad Method features this version has.', [{ path: ['bmadPieces'], message: 'unknown or repeated piece' }]);
-        bmadPieces = parsed.data;
+        const problem = bmadPiecesProblem(parsed.data);
+        if (problem !== undefined) throw new ValidationError(problem, [{ path: ['bmadPieces'], message: 'dependency rule' }]);
+        bmadPieces = canonicalBmadPieces(parsed.data);
       }
       if (cautionLevel === undefined && bmadPieces === undefined) {
         throw new ValidationError('Choose a setting to change.', [{ path: [], message: 'nothing to change' }]);
@@ -656,6 +667,9 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
         const piecesChanged =
           bmadPieces !== undefined && (bmadPieces.length !== previousBmadPieces.length || bmadPieces.some((piece) => !previousBmadPieces.includes(piece)));
         const pieces = piecesChanged ? bmadPieces! : previousBmadPieces;
+        // A piece is turned on only when this install ships it (AD-22); one already on is kept.
+        const unavailable = pieces.find((piece) => !previousBmadPieces.includes(piece) && !isBmadPieceAvailable(piece));
+        if (unavailable !== undefined) throw new FeatureUnavailableError(unavailable);
         if (level === previous && !piecesChanged) return { cautionLevel: level, bmadPieces: pieces };
         orm.update(workspaces).set({ cautionLevel: level, bmadPieces: JSON.stringify(pieces) }).where(eq(workspaces.id, workspaceId)).run();
         events.append({

@@ -87,17 +87,33 @@
 //
 // `--cli <args>` runs the fake Claude CLI, `fake-claude-login.mjs <args>`, as
 // the real adapter runs `claude`: as a child with this process's terminal,
-// passing on its exit code (story 9.1).
+// passing on its exit code (story 9.1). `--cli auth status --json` is answered
+// here, in this one process and before the ACP SDK loads, as fast as the real
+// `claude auth status`: the server runs it on every read of the agents (with a
+// 5 s limit), and a wrapper process plus a second Node start and the SDK's
+// load could pass that limit on a busy Windows runner, which reads as "can't
+// check the sign-in" and turns a saved API key off.
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import * as acp from '@agentclientprotocol/sdk';
 
 if (process.env.FAKE_ACP_EXIT_AT_START === '1') process.exit(3);
 
 if (process.argv.includes('--cli')) {
   const cliArgs = process.argv.slice(2).filter((arg) => arg !== '--cli');
+  if (cliArgs[0] === 'auth' && cliArgs[1] === 'status') {
+    // As `fake-claude-login.mjs auth status` answers it.
+    const state = process.env.FAKE_LOGIN_STATE;
+    let signedIn = false;
+    try {
+      signedIn = state !== undefined && existsSync(state) && JSON.parse(readFileSync(state, 'utf8')).loggedIn === true;
+    } catch {
+      signedIn = false;
+    }
+    process.stdout.write(`${JSON.stringify({ loggedIn: signedIn, authMethod: signedIn ? 'claude.ai' : 'none' })}\n`, () => process.exit(signedIn ? 0 : 1));
+    await new Promise(() => {});
+  }
   const cli = spawn(process.execPath, [fileURLToPath(new URL('./fake-claude-login.mjs', import.meta.url)), ...cliArgs], { stdio: 'inherit' });
   for (const signal of process.platform === 'win32' ? ['SIGINT', 'SIGTERM'] : ['SIGINT', 'SIGTERM', 'SIGHUP']) {
     process.on(signal, () => cli.kill(signal));
@@ -107,6 +123,9 @@ if (process.argv.includes('--cli')) {
   // Nothing below runs: this process only wraps the CLI.
   await new Promise(() => {});
 }
+
+// Loaded only for the agent itself, so the CLI paths above stay fast.
+const acp = await import('@agentclientprotocol/sdk');
 
 const grandchild =
   process.env.FAKE_ACP_SPAWN_GRANDCHILD === '1'

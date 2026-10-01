@@ -6,11 +6,11 @@
  * test install must still be a local `file:` fixture pinned by integrity. No
  * test here installs anything or reaches the network.
  */
-import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { API_KEY_CHECK_ENV, CLAUDE_INSTALL_ENV, insideTemp, isTestRun, testApiKeyCheck, testClaudeInstall, testHooksAllowed } from '../src/test-hooks.js';
+import { API_KEY_CHECK_ENV, CLAUDE_CLI_ENV, CLAUDE_INSTALL_ENV, insideTemp, isTestRun, testApiKeyCheck, testClaudeCli, testClaudeInstall, testHooksAllowed } from '../src/test-hooks.js';
 import { startTestServer, tempDataDir } from './helpers.js';
 
 const INTEGRITY = 'sha512-QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=';
@@ -136,16 +136,60 @@ describe('testClaudeInstall', () => {
   });
 });
 
+describe('testClaudeCli (story 3.10)', () => {
+  const run = { NODE_ENV: 'test' };
+  const cliFile = () => {
+    const file = join(tempDataDir(), 'claude.mjs');
+    writeFileSync(file, '');
+    return file;
+  };
+
+  it('gives the stand-in inside the temp folder by its real path, when hooks are allowed', () => {
+    const file = cliFile();
+    expect(testClaudeCli({ ...run, [CLAUDE_CLI_ENV]: file }, tempDataDir())).toBe(realpathSync.native(file));
+  });
+
+  it('is inert outside a test run, on a data folder outside the temp folder, or unset; the file is then never checked', () => {
+    const missing = join(tempDataDir(), 'missing.mjs');
+    expect(testClaudeCli({ [CLAUDE_CLI_ENV]: missing }, tempDataDir())).toBeUndefined();
+    expect(testClaudeCli({ ...run, [CLAUDE_CLI_ENV]: missing }, OUTSIDE)).toBeUndefined();
+    expect(testClaudeCli({ ...run }, tempDataDir())).toBeUndefined();
+    expect(testClaudeCli({ ...run, [CLAUDE_CLI_ENV]: '' }, tempDataDir())).toBeUndefined();
+  });
+
+  it('ignores a script outside the temp folder, present or not, and a link in temp that leads out of it', () => {
+    expect(testClaudeCli({ ...run, [CLAUDE_CLI_ENV]: join(OUTSIDE, 'tests', 'fixtures', 'fake-claude-cli.mjs') }, tempDataDir())).toBeUndefined();
+    expect(testClaudeCli({ ...run, [CLAUDE_CLI_ENV]: join(OUTSIDE, 'missing.mjs') }, tempDataDir())).toBeUndefined();
+    const link = join(tempDataDir(), 'claude.mjs');
+    try {
+      symlinkSync(join(OUTSIDE, 'tests', 'fixtures', 'fake-claude-cli.mjs'), link);
+    } catch {
+      return; // No symlinks here (Windows without the privilege).
+    }
+    expect(testClaudeCli({ ...run, [CLAUDE_CLI_ENV]: link }, tempDataDir())).toBeUndefined();
+  });
+
+  it('refuses a relative path, a file that is not a Node script, a missing file and a folder', () => {
+    expect(() => testClaudeCli({ ...run, [CLAUDE_CLI_ENV]: 'claude.mjs' }, tempDataDir())).toThrow(/must be an absolute path/);
+    expect(() => testClaudeCli({ ...run, [CLAUDE_CLI_ENV]: join(tempDataDir(), 'claude.cmd') }, tempDataDir())).toThrow(/must be a Node script/);
+    const folder = join(tempDataDir(), 'claude.mjs');
+    mkdirSync(folder);
+    expect(() => testClaudeCli({ ...run, [CLAUDE_CLI_ENV]: folder }, tempDataDir())).toThrow(/not a file/);
+    expect(() => testClaudeCli({ ...run, [CLAUDE_CLI_ENV]: join(tempDataDir(), 'missing.mjs') }, tempDataDir())).toThrow(/unreadable \(ENOENT\)/);
+  });
+});
+
 describe('the server and the hooks', () => {
-  const parsed = (lines: string[]) => lines.map((line) => JSON.parse(line) as { msg: string; claudeInstall?: boolean; apiKeyCheck?: boolean; backend?: string });
+  const parsed = (lines: string[]) => lines.map((line) => JSON.parse(line) as { msg: string; claudeInstall?: boolean; apiKeyCheck?: boolean; claudeCli?: boolean; backend?: string });
   const hooksLine = (lines: string[]) => parsed(lines).find((line) => line.msg === 'test hooks in use');
   const secretsBackend = (lines: string[]) => parsed(lines).find((line) => line.msg === 'secrets store')?.backend;
 
-  it('outside a test run, a server ignores both variables, even an unusable install file', async () => {
+  it('outside a test run, a server ignores the variables, even an unusable install file or a missing claude stand-in', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('VITEST', '');
     vi.stubEnv(CLAUDE_INSTALL_ENV, join(tempDataDir(), 'missing.json'));
     vi.stubEnv(API_KEY_CHECK_ENV, 'accept');
+    vi.stubEnv(CLAUDE_CLI_ENV, join(tempDataDir(), 'missing.mjs'));
     const lines: string[] = [];
     await startTestServer({ lines, verifyApiKey: undefined });
     expect(hooksLine(lines)).toBeUndefined();
@@ -164,6 +208,18 @@ describe('the server and the hooks', () => {
   it('in a test run, an unusable install file stops the server starting', async () => {
     vi.stubEnv(CLAUDE_INSTALL_ENV, join(tempDataDir(), 'missing.json'));
     await expect(startTestServer()).rejects.toThrow(/OGDEN_AGENTS_TEST_CLAUDE_INSTALL: unreadable/);
+  });
+
+  it('in a test run, a server on a temp data folder takes the claude stand-in and says so; an extraAgentEnv executable wins', async () => {
+    const file = join(tempDataDir(), 'claude.mjs');
+    writeFileSync(file, '');
+    vi.stubEnv(CLAUDE_CLI_ENV, file);
+    const lines: string[] = [];
+    await startTestServer({ lines });
+    expect(hooksLine(lines)).toMatchObject({ claudeInstall: false, apiKeyCheck: false, claudeCli: true });
+    const own: string[] = [];
+    await startTestServer({ lines: own, extraAgentEnv: { CLAUDE_CODE_EXECUTABLE: file } });
+    expect(hooksLine(own)).toBeUndefined();
   });
 
   it("a server's own options win over the variables", async () => {

@@ -2,6 +2,18 @@
 
 Every release of the `ogden-agents` npm package. Versions follow [semantic versioning](https://semver.org/); before 1.0.0, a minor version may change behavior. How a release is made is in [RELEASING.md](RELEASING.md).
 
+## 0.3.0 — the agent's own terminal
+
+Published first as `0.3.0-rc.1` on the `next` dist-tag (`npx ogden-agents@next`), then as `0.3.0`. For advanced users: switch a chat to Claude Code's own terminal and back, on the same session.
+
+- **Chat | Terminal toggle, in Developer mode.** With Developer mode on (Settings > Appearance), a Claude Code chat's header has a **Chat | Terminal** toggle (or `⌘.` / `Ctrl+.`). The terminal runs `claude --resume` on the chat's own session, in the project folder, in a terminal the server owns, shown in the browser. Only one of them drives at a time: while the terminal drives, the chat is read-only (the server refuses chat messages too), and the conversation can be read beside the terminal.
+- **Terminal messages come back to the chat.** On switching back, what you sent in the terminal and Claude Code's replies appear in the chat, yours marked "from terminal", and the next chat message continues the same session.
+- **The terminal keeps running.** Closing or reloading the tab doesn't stop it: reopening the chat reattaches, with the recent output. Several tabs can watch and type, and the size follows the tab that typed or resized last. The connection reconnects by itself after a drop.
+- **Never stuck.** The toggle switches only while the chat is idle. If the terminal's `claude` exits (`/exit`, a crash), the chat drives again; after a server restart, a chat left in the terminal is back in the chat, resumable.
+- **Clear reasons where it can't work.** The toggle is disabled with a plain reason when the agent can't resume its session in its own terminal, when the terminal module (`node-pty`) can't load on this computer (the app still runs), or when Claude Code's CLI can't be found.
+- **macOS, Windows and Linux.** On Windows the terminal runs through ConPTY, and an npm-installed `claude.cmd` resolves to its own `claude.exe`.
+- **Security.** The terminal has its own WebSocket per session, behind the same gate as every other request (`Host`, the tab's token, `Origin`). What passes through the terminal is never written to the event log, the database or the logs; the CLI gets the same environment and credentials as the chat's agent.
+
 ## 0.2.0 — chat and workspaces
 
 The first real release on npm (`0.0.0` was a name reservation), published first as `0.2.0-rc.1` on the `next` dist-tag (`npx ogden-agents@next`), then as `0.2.0`. It includes everything listed under 0.1.0, which was never published. Ogden Agents now runs Claude Code: chat with it in your projects, answer its permission requests, and pick up where you left off after a restart. Run it with `npx ogden-agents` (Node 24 or later on macOS, Windows or Linux).

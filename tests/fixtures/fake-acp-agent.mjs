@@ -85,6 +85,15 @@
 // file (its FAKE_LOGIN_STATE), the prompt fails with ACP's auth-required error
 // (-32000); after it, prompts behave as usual. The file is read on each prompt.
 //
+// FAKE_ACP_CLAUDE_RECORD=1, with CLAUDE_CONFIG_DIR set, records each exchange
+// that gets the default reply as Claude Code's own record of the session, as
+// the real Agent SDK does (story 3.10): the user's text and the reply,
+// appended as JSONL to `$CLAUDE_CONFIG_DIR/projects/<folder slug>/<session
+// id>.jsonl` and chained by `parentUuid`, the file the fake CLI
+// (`fake-claude-cli.mjs`) appends its turns to. So a chat switched back from
+// the terminal lines its turns up and imports them. Off by default, and
+// never without CLAUDE_CONFIG_DIR: never the user's own ~/.claude.
+//
 // `--cli <args>` runs the fake Claude CLI, `fake-claude-login.mjs <args>`, as
 // the real adapter runs `claude`: as a child with this process's terminal,
 // passing on its exit code (story 9.1). `--cli auth status --json` is answered
@@ -94,7 +103,9 @@
 // load could pass that limit on a busy Windows runner, which reads as "can't
 // check the sign-in" and turns a saved API key off.
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
@@ -142,6 +153,37 @@ let nextSession = 1;
 const RESUME = process.env.FAKE_ACP_RESUME ?? '';
 const REOPEN_FAIL = new Set((process.env.FAKE_ACP_REOPEN_FAIL ?? '').split(',').filter((method) => method !== ''));
 const NEW_MESSAGE = '[Ogden Agents] New message:\n';
+
+/** Appends `text` and `reply` to the session's Claude Code record (FAKE_ACP_CLAUDE_RECORD), chained after its last main-chain record. */
+const recordExchange = (sessionId, text, reply) => {
+  const configDir = process.env.CLAUDE_CONFIG_DIR;
+  if (process.env.FAKE_ACP_CLAUDE_RECORD !== '1' || !configDir) return;
+  const folder = join(configDir, 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-'));
+  const file = join(folder, `${sessionId}.jsonl`);
+  mkdirSync(folder, { recursive: true });
+  let parentUuid = null;
+  if (existsSync(file)) {
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      try {
+        const record = JSON.parse(line);
+        if (record.uuid && !record.isSidechain) parentUuid = record.uuid;
+      } catch {
+        // Not a record.
+      }
+    }
+  }
+  const user = { type: 'user', uuid: randomUUID(), parentUuid, isSidechain: false, sessionId, cwd: process.cwd(), message: { role: 'user', content: text } };
+  const agent = {
+    type: 'assistant',
+    uuid: randomUUID(),
+    parentUuid: user.uuid,
+    isSidechain: false,
+    sessionId,
+    cwd: process.cwd(),
+    message: { role: 'assistant', model: 'claude-fake', content: [{ type: 'text', text: reply }] },
+  };
+  appendFileSync(file, `${JSON.stringify(user)}\n${JSON.stringify(agent)}\n`);
+};
 
 /** Whether the fake login's state file says signed in (FAKE_ACP_REQUIRE_LOGIN). */
 const loggedIn = (stateFile) => {
@@ -410,6 +452,11 @@ acp
     for (const chunk of ['Hello', ' from the', ' fake agent.']) {
       await say(client, params.sessionId, chunk);
       await sleep(CHUNK_DELAY_MS);
+    }
+    try {
+      recordExchange(params.sessionId, text, 'Hello from the fake agent.');
+    } catch {
+      // The record is the test's to check; the chat answers either way (as the fake CLI does).
     }
     return { stopReason: 'end_turn' };
   })

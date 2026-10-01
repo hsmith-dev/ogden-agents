@@ -25,7 +25,7 @@ Every status change goes through `tickets.py mark <ref> <status>`. Marking with 
 
 ## Reuse first
 
-- Dispatch and agent profiles: bmad-loop, forked. v7 `tickets.toml` support is added in the fork and opened as an upstream PR.
+- Dispatch and agent profiles: bmad-loop, forked. Ogden Agents chooses each ticket and bmad-loop runs one named ticket; v7 `tickets.toml` dispatch inside bmad-loop is not needed for v1.
 - Ticket writes: `tickets.py`.
 - Installing into a project: BMAD's `bmad` setup scripts, run from the UI wizard.
 - All of these run through `uv`, which Ogden Agents installs if it is missing.
@@ -44,7 +44,7 @@ Every status change goes through `tickets.py mark <ref> <status>`. Marking with 
 - `tickets.py … --json` for machine-readable output.
 - A per-run JSON result file beside each plan.
 - A setup wizard in the UI that replaces running `bmad` setup in a terminal.
-- v7 `tickets.toml` dispatch in bmad-loop.
+- Running one named v7 ticket headless in a given worktree, with its run folder outside the repo and a machine-readable event stream (bmad-loop).
 - Plain-language labels and descriptions per skill ("Describe your idea", "Build next story").
 - Pause hooks for UI approval via `plan_checkpoint` and `done_checkpoint` in `tickets.toml`.
 

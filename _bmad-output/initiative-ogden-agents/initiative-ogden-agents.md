@@ -31,7 +31,7 @@ A non-developer goes from an idea to approved, agent-built code without opening 
 Each epic is one user-facing outcome, built in the spec's delivery-phase order. Everything else is out of scope; see the spec's non-goals. Tracer path: `npx ogden-agents`, then sign in, then chat with Claude Code in a workspace; later epics add plan, build and approve.
 
 - Touch point: the user's agent CLIs and ACP adapters (consumed); owner: epic-chat-and-workspaces, then epic-every-agent
-- Touch point: the user's repos (`_bmad/` and worktrees written); owner: epic-planning-and-board, then epic-unattended-builds
+- Touch point: the user's repos (`_bmad/` written, plus run branches and git worktree metadata; worktrees live in the data folder, AD-17); owner: epic-planning-and-board, then epic-unattended-builds
 - Touch point: Docker, only where already installed (sandbox fallback); owner: epic-unattended-builds
 - Touch point: the npm registry (publishing); owner: epic-foundation-and-forks
 - Touch point: the upstream BMAD-METHOD and bmad-loop repos (PRs); owner: epic-foundation-and-forks sets up the process, and each epic sends its own patches
@@ -48,3 +48,4 @@ Each epic is one user-facing outcome, built in the spec's delivery-phase order. 
 - Decision: no cost or token tracking; CAP-11 retired (user, 2026-09-29).
 - Decision: the cross-epic decisions live in the architecture spine, not in hitl stories (user chose bmad-architecture, 2026-09-29).
 - Decision: epic 1 is built interactively with `bmad-build`; later epics may run unattended with `bmad-build-auto`, with checkpoints set at their inception (user, 2026-09-29).
+- Decision: epic 5 (Unattended builds) is split in two at its inception: epic 5 builds one ticket for the user to approve and merge, and epic 11 (`epic-build-runs-and-notifications`) adds the run view, Runs tab, Build all ready, verification's test re-run and notifications; each ships on its own (user, 2026-10-01). Costs and budgets stay out (reaffirmed, 2026-10-01).

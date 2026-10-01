@@ -54,6 +54,16 @@ describe('trimBacklog (story 3.9)', () => {
     expect(trimBacklog(inTerminator.text, inTerminator.max)).toBe('link');
   });
 
+  it('a cut inside a DCS string (up to ST) starts after it (review F1)', () => {
+    const { text, max } = cutInside(`${ESC}P1$r0m${ESC}\\`, 3, 'after dcs');
+    expect(trimBacklog(text, max)).toBe('after dcs');
+  });
+
+  it('a cut inside an APC string (up to BEL) starts after it (review F1)', () => {
+    const { text, max } = cutInside(`${ESC}_Gi=1;payload\x07`, 4, 'after apc');
+    expect(trimBacklog(text, max)).toBe('after apc');
+  });
+
   it('a cut inside a two-byte ESC sequence (or one with an intermediate byte) starts after it', () => {
     const save = cutInside(`${ESC}7`, 1, 'after');
     expect(trimBacklog(save.text, save.max)).toBe('after');

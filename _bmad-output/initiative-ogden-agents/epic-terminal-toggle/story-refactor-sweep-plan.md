@@ -97,6 +97,13 @@ context: []
 
 ## Review Triage Log
 
+- 2026-10-01 coordinator review: no behaviour changes found.
+  - F1 (backlog cut untested for DCS, APC): fixed, two tests in `core/test/terminal-backlog.test.ts`.
+  - F2 (`ESC` followed by a control character consumes a line feed): deferred (deferred-work).
+  - F3 (lone low surrogate in the no-line-break fallback): deferred (deferred-work).
+  - F4 (`startWithRetry` untested): fixed, `tests/installed-package.test.ts` (stalled first start retried, its cleanup and RETRY line; a non-timeout failure not retried).
+  - F5 (late-release log after `close`): deferred (deferred-work).
+
 ## Design Notes
 
 - **Ownership:** this sweep's files are the ones in the tasks. It shares only `deferred-work.md` (append-only) with 3.8. It starts after 3.8 merges, or during 3.8's hitl wait if it keeps off 3.8's files.

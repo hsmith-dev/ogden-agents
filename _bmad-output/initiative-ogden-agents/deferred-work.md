@@ -303,3 +303,12 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-refactor-sweep-plan.md`
   summary: 3.9's read of the epic-3 diff (`c82cae7..HEAD`): one mechanical fix (the terminal socket closes with `TERMINAL_CLOSE.tooManyViewers` directly). Logged, not changed: core's internal errors, the handoff codes included, are logged by the server as "applying an agent event failed" (index). 3.8's files were not read for this.
   evidence: `packages/server/src/terminal-socket.ts`; `packages/server/src/start.ts` `onInternalError`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-refactor-sweep-plan.md`
+  summary: 3.9 review F2: `escapeEnd` treats `ESC` followed by a control character (such as a line feed) as a two-byte sequence, so a cut just after that `ESC` skips the line feed and starts at the next line break instead (one line more is dropped from the replay). Harmless, rare; revisit if a replay shows it.
+  evidence: `packages/core/src/chat/terminal.ts` `escapeEnd`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-refactor-sweep-plan.md`
+  summary: 3.9 review F3: with no line break after the cut, `trimBacklog` slices at a UTF-16 index, so the replay can start with a lone low surrogate (one replacement character) when the cut splits an astral character (an emoji).
+  evidence: `packages/core/src/chat/terminal.ts` `trimBacklog`, the `text.slice(start)` fallback.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-refactor-sweep-plan.md`
+  summary: 3.9 review F5: the `terminal_release_late` log line can arrive after `chat.close()` has returned (the agent stops late, after the server began stopping), through `onInternalError` to a logger that may be closing. Harmless (one line or none); consider skipping it once `closing`.
+  evidence: `packages/core/src/chat/terminal.ts` `toTerminal` (`released.then(late, late)`).

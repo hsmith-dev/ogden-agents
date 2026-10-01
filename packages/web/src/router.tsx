@@ -63,10 +63,16 @@ const workspaceSettingsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/workspace-settings-page'), 'WorkspaceSettingsPage'),
 });
 
+/** The session view's search: `?driver=terminal` mirrors who drives the chat (story 3.6); it never switches by itself. */
+export interface SessionSearch {
+  driver?: 'terminal';
+}
+
 /** One chat in a workspace (story 2.2): the session view, `/w/:wsId/s/:sesId`. */
 const sessionRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/w/$wsId/s/$sesId',
+  validateSearch: (search: Record<string, unknown>): SessionSearch => (search.driver === 'terminal' ? { driver: 'terminal' } : {}),
   component: lazyRouteComponent(() => import('./routes/session-page'), 'SessionPage'),
 });
 

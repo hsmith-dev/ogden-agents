@@ -312,3 +312,20 @@ describe('tool-call rows', () => {
     ]);
   });
 });
+
+describe('sessionView message origin (story 3.6)', () => {
+  it('carries origin terminal onto a message typed in the terminal, and it still counts as the last user message', () => {
+    const view = sessionView(
+      [
+        created(),
+        completed('u1', 'user', 'from the chat'),
+        event('session.message_completed', { messageId: 'u2', role: 'user', content: 'typed in the terminal', origin: 'terminal' }),
+        completed('a1', 'agent', 'reply'),
+      ],
+      'ses_1',
+    );
+    expect(view.messages.map((message) => message.origin)).toEqual([undefined, 'terminal', undefined]);
+    expect(view.messages[0]).not.toHaveProperty('origin');
+    expect(view.lastUserText).toBe('typed in the terminal');
+  });
+});

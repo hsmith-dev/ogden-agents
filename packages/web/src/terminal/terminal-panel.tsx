@@ -1,6 +1,9 @@
 import { TERMINAL_CLOSE } from '@ogden-agents/shared';
+import type { Terminal } from '@xterm/xterm';
 import { useEffect, useRef, useState } from 'react';
 import { AGENT_NAME } from '@/chat/chat-api';
+import { tokenNumber } from '@/ui/tokens';
+import { cn } from '@/ui/utils';
 import { Text } from '@/ui/typography';
 import { connectTerminal, type TerminalConnection } from './terminal-socket';
 
@@ -14,15 +17,30 @@ const STATUS_WORDS: Partial<Record<PanelStatus, string>> = {
   failed: "The terminal couldn't open. Reload to try again.",
 };
 
+
+export interface TerminalPanelProps {
+  sesId: string;
+  /** xterm's screen-reader mode (Settings → Appearance, "Terminal screen-reader mode"; off by default). */
+  screenReaderMode: boolean;
+  className?: string;
+}
+
 /**
- * The session's terminal while it drives the chat (story 3.1, bare: the
- * design, banner and keyboard rules are entry 6): xterm, loaded only when
- * shown, over the session's terminal socket. Its colors and font are the
- * `terminal` tokens, read from the page.
+ * The session's terminal while it drives the chat (stories 3.1, 3.6; DESIGN.md
+ * Terminal panel): dark in both themes, `rounded.lg`, a hairline signal top
+ * edge, xterm in Geist Mono at the `mono` size (in both densities) with the
+ * panel's inner padding, loaded only when shown.
+ * The socket's first frame is `attach` with the size; a `size` frame (another
+ * viewer resized) resizes xterm to match. Keyboard focus goes into xterm when
+ * the panel opens. Nothing typed or printed is kept or logged here.
  */
-export function TerminalPanel({ sesId }: { sesId: string }) {
+export function TerminalPanel({ sesId, screenReaderMode, className }: TerminalPanelProps) {
   const host = useRef<HTMLDivElement>(null);
+  const terminal = useRef<Terminal | undefined>(undefined);
   const [status, setStatus] = useState<PanelStatus>('loading');
+  // Read when xterm is created; later changes go through the effect below.
+  const screenReader = useRef(screenReaderMode);
+  screenReader.current = screenReaderMode;
 
   useEffect(() => {
     let disposed = false;
@@ -33,23 +51,37 @@ export function TerminalPanel({ sesId }: { sesId: string }) {
       if (disposed || element === null) return;
       const style = getComputedStyle(element);
       const term = new Terminal({
-        cursorBlink: true,
+        // Reduced motion (DESIGN.md Motion): a steady cursor.
+        cursorBlink: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches !== true,
         fontFamily: style.fontFamily,
+        // The `mono` type size of Comfortable density, also in Compact (DESIGN.md Terminal panel).
+        fontSize: tokenNumber('--type-mono-size', 13),
+        screenReaderMode: screenReader.current,
         theme: { background: style.backgroundColor, foreground: style.color, cursor: style.color },
       });
       const fit = new FitAddon();
       term.loadAddon(fit);
       term.open(element);
       fit.fit();
+      terminal.current = term;
       let connection: TerminalConnection | undefined;
       let ended = false;
+      /** True while xterm takes a size the server sent: that resize is not this viewer's to send back. */
+      let following = false;
       const connect = () => {
         connection = connectTerminal(sesId, {
-          onOpen: () => {
-            setStatus('connected');
-            connection?.resize(term.cols, term.rows);
-          },
+          size: () => ({ cols: term.cols, rows: term.rows }),
+          onOpen: () => setStatus('connected'),
           onBytes: (bytes) => term.write(bytes),
+          onSize: (cols, rows) => {
+            if (cols === term.cols && rows === term.rows) return;
+            following = true;
+            try {
+              term.resize(cols, rows);
+            } finally {
+              following = false;
+            }
+          },
           onExit: () => {
             ended = true;
             setStatus('ended');
@@ -68,11 +100,14 @@ export function TerminalPanel({ sesId }: { sesId: string }) {
       connect();
       if (connection === undefined) {
         term.dispose();
+        terminal.current = undefined;
         setStatus('failed');
         return;
       }
       const typing = term.onData((data) => connection?.type(data));
-      const resizing = term.onResize(({ cols, rows }) => connection?.resize(cols, rows));
+      const resizing = term.onResize(({ cols, rows }) => {
+        if (!following) connection?.resize(cols, rows);
+      });
       const observer = new ResizeObserver(() => fit.fit());
       observer.observe(element);
       term.focus();
@@ -82,6 +117,7 @@ export function TerminalPanel({ sesId }: { sesId: string }) {
         resizing.dispose();
         connection?.close();
         term.dispose();
+        terminal.current = undefined;
       };
     })().catch(() => {
       if (!disposed) setStatus('failed');
@@ -92,9 +128,17 @@ export function TerminalPanel({ sesId }: { sesId: string }) {
     };
   }, [sesId]);
 
+  useEffect(() => {
+    if (terminal.current !== undefined) terminal.current.options.screenReaderMode = screenReaderMode;
+  }, [screenReaderMode]);
+
   const words = STATUS_WORDS[status];
   return (
-    <section aria-label={`${AGENT_NAME} terminal`} className="flex min-h-0 flex-1 flex-col gap-2 bg-terminal p-(--panel-padding)">
+    <section
+      aria-label={`${AGENT_NAME} terminal`}
+      data-testid="terminal-panel"
+      className={cn('flex min-h-0 min-w-0 flex-1 flex-col gap-2 rounded-lg border-t border-signal bg-terminal p-3', className)}
+    >
       <div ref={host} data-testid="terminal" data-status={status} className="min-h-0 flex-1 bg-terminal font-mono text-terminal-foreground" />
       {words === undefined ? null : (
         <Text variant="caption" role="status" data-testid="terminal-status" className="text-terminal-foreground">

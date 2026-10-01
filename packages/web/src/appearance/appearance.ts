@@ -1,7 +1,8 @@
 import { APPEARANCE_STORAGE_KEY as APPEARANCE_KEY } from '@ogden-agents/shared';
 
 /**
- * Appearance preferences: theme, density and Developer mode. The UI's only
+ * Appearance preferences: theme, density, Developer mode and the terminal's
+ * screen-reader mode (story 3.6). The UI's only
  * browser persistence (all product state comes from the server). The inline
  * script in index.html applies the same key before first paint.
  */
@@ -12,11 +13,13 @@ export interface Appearance {
   theme: ThemePreference;
   density: Density;
   developerMode: boolean;
+  /** xterm's screen-reader mode in the terminal panel (story 3.6; user decision: a switch, off by default). */
+  terminalScreenReader: boolean;
 }
 
 export { APPEARANCE_STORAGE_KEY as APPEARANCE_KEY } from '@ogden-agents/shared';
 
-export const DEFAULT_APPEARANCE: Appearance = { theme: 'system', density: 'comfortable', developerMode: false };
+export const DEFAULT_APPEARANCE: Appearance = { theme: 'system', density: 'comfortable', developerMode: false, terminalScreenReader: false };
 
 /** Reads a saved value, keeping only fields that are valid; anything else falls back to the default. */
 export function parseAppearance(raw: string | null): Appearance {
@@ -31,6 +34,7 @@ export function parseAppearance(raw: string | null): Appearance {
     theme: saved.theme === 'light' || saved.theme === 'dark' ? saved.theme : 'system',
     density: saved.density === 'compact' ? 'compact' : 'comfortable',
     developerMode: saved.developerMode === true,
+    terminalScreenReader: saved.terminalScreenReader === true,
   };
 }
 

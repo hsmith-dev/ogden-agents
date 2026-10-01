@@ -26,6 +26,12 @@ export interface TranscriptMessage {
    * restart first. Absent on a message that was sent.
    */
   status?: 'queued' | 'not_sent';
+  /**
+   * Where a user message came from when not the composer (story 3.6):
+   * `terminal` was typed in the agent's own terminal (shown "from terminal"),
+   * `deny_reason` was a Deny's reason core sent. Absent otherwise.
+   */
+  origin?: 'deny_reason' | 'terminal';
 }
 
 /** One tool call as it stands now (story 2.10): each event carries the whole call; diffs only when they changed. */
@@ -207,6 +213,7 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
         const done = message(event.payload.messageId, event.payload.role);
         done.text = event.payload.content;
         done.streaming = false;
+        if (event.payload.origin !== undefined) done.origin = event.payload.origin;
         // A Deny reason core sent is not the user's message to try again (9.4 review F4).
         if (event.payload.role === 'user' && event.payload.origin !== 'deny_reason') view.lastUserText = event.payload.content;
         break;

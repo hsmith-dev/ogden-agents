@@ -5,19 +5,23 @@ import { tabAuth, type TabAuth } from '@/auth/tab-token';
  * The terminal WebSocket of one session (story 3.1, AD-6): the tab's token
  * goes as a subprotocol, as on the event socket, never in the URL. Binary
  * frames carry the terminal's bytes both ways; text frames carry control
- * (`resize` out, `exit` in). Nothing here keeps or logs what goes through.
+ * (`attach` and `resize` out, `exit` and `size` in). Nothing here keeps or logs what goes through.
  */
 
 /** The largest binary frame this sends: a long paste goes in several. */
 const MAX_FRAME_BYTES = 64 * 1024;
 
 export interface TerminalSocketHandlers {
-  /** The socket is open: send the terminal's size now. */
+  /** The viewer's terminal size, sent as the `attach` frame the moment the socket opens (story 3.6). */
+  size(): { cols: number; rows: number };
+  /** The socket is open and `attach` was sent. */
   onOpen(): void;
   /** Bytes the terminal printed. */
   onBytes(bytes: Uint8Array): void;
   /** The terminal ended (`null`: it was stopped, such as by switching back). */
   onExit(exitCode: number | null): void;
+  /** Another viewer resized the terminal: follow its size (`size` frame, story 3.2's contract). */
+  onSize(cols: number, rows: number): void;
   /** The socket closed, with its close code. */
   onClose(code: number): void;
 }
@@ -40,7 +44,12 @@ export function connectTerminal(sesId: string, handlers: TerminalSocketHandlers,
   const control = (frame: TerminalClientFrame) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
   };
-  ws.addEventListener('open', () => handlers.onOpen());
+  ws.addEventListener('open', () => {
+    // The first frame is always `attach` with the size, so the server can size the terminal before replaying it (story 3.5).
+    const { cols, rows } = handlers.size();
+    control({ type: 'attach', cols, rows });
+    handlers.onOpen();
+  });
   ws.addEventListener('message', (event: MessageEvent<unknown>) => {
     if (event.data instanceof ArrayBuffer) {
       handlers.onBytes(new Uint8Array(event.data));
@@ -53,10 +62,11 @@ export function connectTerminal(sesId: string, handlers: TerminalSocketHandlers,
     } catch {
       return;
     }
-    // Anything else (the server's `server.stopping`, say) is not for the terminal.
+    // Anything else (the server's `server.stopping`, a malformed frame) is not for the terminal.
     const frame = TerminalServerFrame.safeParse(json);
-    // `size` (another viewer resized; story 3.2's contract) is story 3.6's to follow.
-    if (frame.success && frame.data.type === 'exit') handlers.onExit(frame.data.exitCode);
+    if (!frame.success) return;
+    if (frame.data.type === 'exit') handlers.onExit(frame.data.exitCode);
+    else handlers.onSize(frame.data.cols, frame.data.rows);
   });
   ws.addEventListener('close', (event) => handlers.onClose(event.code));
   return {

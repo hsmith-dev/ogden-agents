@@ -8,7 +8,7 @@ import { PageBody, PageSection } from '@/ui/page';
 import { Switch } from '@/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/ui/toggle-group';
 
-/** `/settings/appearance`: theme, density and Developer mode, applied at once and saved in this browser. */
+/** `/settings/appearance`: theme, density, Developer mode and terminal screen-reader mode, applied at once and saved in this browser. */
 export function AppearancePage() {
   const { appearance, update } = useAppearance();
   return (
@@ -68,6 +68,20 @@ export function AppearancePage() {
               aria-describedby="developer-mode-description"
               checked={appearance.developerMode}
               onCheckedChange={(checked) => update({ developerMode: checked })}
+            />
+          </Field>
+          <Field
+            id="terminal-screen-reader"
+            layout="inline"
+            label="Terminal screen-reader mode"
+            description="Makes the terminal readable by a screen reader, for Developer mode's terminal. It can slow a busy terminal down."
+          >
+            <Switch
+              id="terminal-screen-reader"
+              data-testid="terminal-screen-reader"
+              aria-describedby="terminal-screen-reader-description"
+              checked={appearance.terminalScreenReader}
+              onCheckedChange={(checked) => update({ terminalScreenReader: checked })}
             />
           </Field>
           <AppShortcutSetting />

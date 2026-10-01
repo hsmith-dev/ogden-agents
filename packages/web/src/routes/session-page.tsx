@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link, useParams } from '@tanstack/react-router';
-import { ArrowClockwise, ArrowDown, ChatCircle, House, Stop, TerminalWindow } from '@phosphor-icons/react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { SessionDriver } from '@ogden-agents/shared';
+import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
+import { ArrowClockwise, ArrowDown, ChatCircle, House, Stop } from '@phosphor-icons/react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAppearance } from '@/appearance/appearance-provider';
 import { AGENT_NAME, cancelSession, ChatApiError, fetchSession, sendMessage, switchDriver } from '@/chat/chat-api';
 import { Composer } from '@/chat/composer';
@@ -11,7 +12,12 @@ import { sessionView, type TranscriptCheckIn, type TranscriptItem, type Transcri
 import { useCaughtUp, useEarlierHistory, useSessionEvents } from '@/events/event-stream';
 import { PermissionCard, permissionAnnouncement } from '@/permissions/permission-card';
 import { WorkspaceHeader } from '@/shell/workspace-header';
+import { DriverToggle, NOT_IDLE_REASON } from '@/terminal/driver-toggle';
+import { ReadOnlyBanner } from '@/terminal/read-only-banner';
 import { TerminalPanel } from '@/terminal/terminal-panel';
+import { conversationClassName, TerminalPane } from '@/terminal/terminal-pane';
+import { useDriverShortcut } from '@/terminal/use-driver-shortcut';
+import type { SessionSearch } from '@/router';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
 import { Separator } from '@/ui/separator';
@@ -41,6 +47,9 @@ const itemKey = (item: TranscriptItem, index: number): string =>
 /** Puts the cursor back in the composer (after a permission decision; EXPERIENCE.md Accessibility Floor). */
 const focusComposer = () => document.querySelector<HTMLTextAreaElement>('[data-testid="composer"] textarea')?.focus();
 
+/** What the composer says while the terminal drives (DESIGN.md Composer). */
+const TERMINAL_DRIVING_REASON = 'The terminal is driving this session';
+
 /** What the quiet-agent status line says (user decision, story 2.10). */
 const checkInWords = (checkIn: TranscriptCheckIn) =>
   checkIn.waitingOn === undefined ? `${AGENT_NAME} has been quiet for 10 minutes` : `${AGENT_NAME} is waiting on ${checkIn.waitingOn}`;
@@ -58,7 +67,10 @@ const checkInWords = (checkIn: TranscriptCheckIn) =>
  * runs over this session's own stream, older history loads with Show earlier
  * at the top (a chat older than the workspace window loads its latest page on
  * opening), and while the reader is scrolled up new items do not move the
- * view but count on "Jump to latest".
+ * view but count on "Jump to latest". Story 3.6: in Developer mode the
+ * header's Chat | Terminal toggle (and `⌘.` / `Ctrl+.`) hands the chat to the
+ * agent's own terminal and back; the view follows only
+ * `session.driver_changed`, and `?driver=terminal` mirrors it.
  */
 export function SessionPage() {
   const { wsId, sesId } = useParams({ strict: false }) as { wsId: string; sesId: string };
@@ -74,6 +86,8 @@ export function SessionPage() {
   );
   const view = useMemo(() => sessionView(events, sesId, rulesRemoved), [events, sesId, rulesRemoved]);
   const session = useQuery({ queryKey: ['session', wsId, sesId], queryFn: () => fetchSession(wsId, sesId), retry: false });
+  const search = useSearch({ strict: false }) as SessionSearch;
+  const navigate = useNavigate();
   const workspace = useQuery({ queryKey: ['workspace', wsId], queryFn: () => fetchWorkspace(wsId), retry: false });
   const end = useRef<HTMLDivElement>(null);
   const lastText = view.messages.at(-1)?.text.length ?? 0;
@@ -84,10 +98,17 @@ export function SessionPage() {
   const [cardOffscreen, setCardOffscreen] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [actionError, setActionError] = useState<string | undefined>(undefined);
-  const [switching, setSwitching] = useState(false);
+  /** The driver a switch asked for (story 3.6): "Switching..." until `session.driver_changed` arrives. */
+  const [switchingTo, setSwitchingTo] = useState<SessionDriver | undefined>(undefined);
+  /** The driver this tab asked for last, so switching back to chat puts the cursor in the composer. */
+  const requested = useRef<SessionDriver | undefined>(undefined);
+  const [peekOpen, setPeekOpen] = useState(false);
+  const peekId = useId();
   /** Who drives the chat (story 3.1): the latest `session.driver_changed`, else the session as read. */
   const driverChange = useMemo(() => events.findLast((event) => event.type === 'session.driver_changed'), [events]);
-  const driver = (driverChange?.type === 'session.driver_changed' ? driverChange.payload.driver : undefined) ?? session.data?.driver ?? 'ui';
+  const driver = (driverChange?.type === 'session.driver_changed' ? driverChange.payload.driver : undefined) ?? session.data?.session.driver ?? 'ui';
+  const driverKnown = driverChange !== undefined || session.data !== undefined;
+  const terminal = session.data?.terminal;
   /** Messages this page saw queued: only those go back into the composer when they are not sent. */
   const seenQueued = useRef(new Set<string>());
   const restored = useRef(new Set<string>());
@@ -192,6 +213,70 @@ export function SessionPage() {
     card?.focus({ preventScroll: true });
   }, [waitingFor]);
 
+  const state = view.state ?? session.data?.session.state;
+  /** Why the Terminal segment can't be used now: the terminal can't work here (verbatim), or the agent is not idle. */
+  const terminalBlockedReason =
+    terminal?.available === false ? terminal.reason : state !== 'idle' || view.queued.length > 0 ? NOT_IDLE_REASON : undefined;
+
+  // The view flipped (or the session changed driver by itself): the switch is over, and availability may have changed.
+  const { refetch: refetchSession } = session;
+  const driverSeq = driverChange?.seq;
+  useEffect(() => {
+    setSwitchingTo(undefined);
+    setPeekOpen(false);
+  }, [driver]);
+  useEffect(() => {
+    if (driverSeq !== undefined) void refetchSession();
+  }, [driverSeq, refetchSession]);
+  // Turning idle can make the terminal available (a first reply gives the chat an agent session).
+  const previousState = useRef(state);
+  useEffect(() => {
+    const was = previousState.current;
+    previousState.current = state;
+    if (state === 'idle' && was !== undefined && was !== 'idle') void refetchSession();
+  }, [state, refetchSession]);
+
+  // Back in the chat: the cursor goes to the composer when this tab asked, or when focus fell with the terminal.
+  const previousDriver = useRef(driver);
+  useEffect(() => {
+    const was = previousDriver.current;
+    previousDriver.current = driver;
+    if (was === 'terminal' && driver === 'ui') {
+      const active = document.activeElement;
+      if (requested.current === 'ui' || active === null || active === document.body) focusComposer();
+    }
+    if (was !== driver) requested.current = undefined;
+  }, [driver]);
+
+  // `?driver=terminal` mirrors who drives (replace, no history entry); opening that URL never switches.
+  useEffect(() => {
+    if (!driverKnown) return;
+    const wanted = driver === 'terminal' ? 'terminal' : undefined;
+    if (search.driver === wanted) return;
+    void navigate({ to: '/w/$wsId/s/$sesId', params: { wsId, sesId }, search: wanted === undefined ? {} : { driver: wanted }, replace: true });
+  }, [driverKnown, driver, search.driver, navigate, wsId, sesId]);
+
+  // The chat's own terminal and back (stories 3.1, 3.6): one request, then wait for `session.driver_changed`.
+  const switchTo = (next: SessionDriver) => {
+    if (switchingTo !== undefined || next === driver) return;
+    if (next === 'terminal' && terminalBlockedReason !== undefined) {
+      // Only the shortcut gets here (the toggle refuses first): say why.
+      setActionError(terminalBlockedReason);
+      return;
+    }
+    requested.current = next;
+    setSwitchingTo(next);
+    setActionError(undefined);
+    switchDriver(wsId, sesId, next).catch((failure: unknown) => {
+      setSwitchingTo(undefined);
+      requested.current = undefined;
+      setActionError(failure instanceof Error ? failure.message : "Ogden Agents couldn't switch this chat. Try again.");
+      // 409: the server's view differs (busy, unavailable, already switched): read the session again.
+      if (failure instanceof ChatApiError && failure.status === 409) void refetchSession();
+    });
+  };
+  useDriverShortcut(appearance.developerMode && driverKnown, () => switchTo(driver === 'terminal' ? 'ui' : 'terminal'));
+
   if (session.error instanceof ChatApiError && session.error.status === 404) {
     return (
       <>
@@ -215,7 +300,6 @@ export function SessionPage() {
     );
   }
 
-  const state = view.state ?? session.data?.state;
   const streaming = view.messages.some((message) => message.streaming);
   // Until the backlog arrives, or while an older chat's first page loads.
   const firstPagePending = history.loading || (history.hasEarlier && history.error === undefined && autoLoaded.current !== sesId);
@@ -239,21 +323,6 @@ export function SessionPage() {
     );
   };
 
-  // The chat's own terminal and back (story 3.1): only while idle; the server refuses otherwise, with a reason.
-  const canSwitchToTerminal = state === 'idle' && !switching;
-  const switchTo = (next: 'ui' | 'terminal') => {
-    if (switching || (next === 'terminal' && !canSwitchToTerminal)) return;
-    setSwitching(true);
-    setActionError(undefined);
-    switchDriver(wsId, sesId, next).then(
-      () => setSwitching(false),
-      (failure: unknown) => {
-        setSwitching(false);
-        setActionError(failure instanceof Error ? failure.message : "Ogden Agents couldn't switch this chat. Try again.");
-      },
-    );
-  };
-
   const tryAgain = () => {
     if (view.lastUserText === undefined) return;
     setActionError(undefined);
@@ -266,116 +335,123 @@ export function SessionPage() {
     <>
       <WorkspaceHeader title="Chat">
         {state === undefined ? null : <StateGlyph state={state} data-testid="session-state" className="ml-auto" />}
-        {driver === 'terminal' ? (
-          <Button variant="outline" onClick={() => switchTo('ui')} aria-disabled={switching} data-testid="switch-to-chat">
-            <ChatCircle aria-hidden />
-            Switch to chat
-          </Button>
-        ) : appearance.developerMode ? (
-          <Button
-            variant="outline"
-            onClick={() => switchTo('terminal')}
-            aria-disabled={!canSwitchToTerminal}
-            title={state === 'idle' ? `Open this chat in ${AGENT_NAME}'s own terminal` : `${AGENT_NAME} is busy. Switch when it is idle.`}
-            data-testid="switch-to-terminal"
-          >
-            <TerminalWindow aria-hidden />
-            Terminal
-          </Button>
+        {appearance.developerMode ? (
+          <DriverToggle
+            driver={driver}
+            switching={switchingTo}
+            terminalBlockedReason={terminalBlockedReason}
+            onSwitch={switchTo}
+            className={state === undefined ? 'ml-auto' : undefined}
+          />
         ) : null}
       </WorkspaceHeader>
-      {driver === 'terminal' ? <TerminalPanel sesId={sesId} /> : null}
-      <PageBody className={driver === 'terminal' ? 'hidden' : undefined}>
-        <section aria-label="Conversation" aria-busy={streaming} data-testid="transcript" className="flex w-full max-w-(--space-chat-column) flex-col gap-4 self-center">
-          {!loading && (history.hasEarlier || history.error !== undefined) ? (
-            <EarlierHistory loading={history.loading} error={history.error} onShow={showEarlier} />
-          ) : null}
-          {loading ? (
-            <>
-              <Skeleton />
-              <Skeleton />
-              <span role="status" className="sr-only">
-                Loading the conversation
-              </span>
-            </>
-          ) : view.items.length === 0 && !history.hasEarlier ? (
-            <Text variant="caption">Ask {AGENT_NAME} about this project.</Text>
-          ) : (
-            view.items.map((item, index) =>
-              item.type === 'message' ? (
-                <Message key={item.message.messageId} message={item.message} />
-              ) : item.type === 'tools' ? (
-                <ToolCalls key={`tools-${item.calls[0]?.toolCallId ?? index}`} calls={item.calls} density={appearance.density} />
-              ) : item.type === 'resumed' ? (
-                <ResumedMarker key={`resumed-${item.at}-${index}`} />
-              ) : (
-                <PermissionCard
-                  key={item.permission.requestId}
-                  permission={item.permission}
-                  wsId={wsId}
-                  sesId={sesId}
-                  projectName={projectName}
-                  onDecided={focusComposer}
-                />
-              ),
-            )
-          )}
-          {view.queued.map((message) => (
-            <Message key={message.messageId} message={message} />
-          ))}
-          {state === 'working' && view.checkIn !== undefined ? (
-            <Notice
-              data-testid="check-in"
-              data-waiting-on={view.checkIn.waitingOn}
-              role="status"
-              action={
-                view.checkIn.waitingOn === undefined ? (
-                  <Button variant="outline" onClick={stop} aria-disabled={stopping} data-testid="check-in-stop">
-                    <Stop aria-hidden />
-                    Stop
-                  </Button>
-                ) : null
-              }
-            >
-              <StateGlyph state="working" label={checkInWords(view.checkIn)} />
-            </Notice>
-          ) : null}
-          {state === 'error' && view.errorCode === 'auth_required' ? (
-            // Keyed per error (the message it failed on), so each one starts unarmed (9.4).
-            <SignInAgain
-              key={`${sesId}:${lastSentUserId ?? ''}`}
-              reason={view.errorReason}
-              canTryAgain={view.lastUserText !== undefined}
-              onTryAgain={tryAgain}
-            />
-          ) : state === 'error' ? (
-            <Notice
-              variant="blocked"
-              data-testid="session-error"
-              data-error-code={view.errorCode}
-              action={
-                view.lastUserText === undefined ? null : (
-                  <Button variant="outline" onClick={tryAgain} data-testid="try-again">
-                    <ArrowClockwise aria-hidden />
-                    Try again
-                  </Button>
-                )
-              }
-            >
-              {view.errorReason ?? `${AGENT_NAME} stopped with an error. Try again.`}
-            </Notice>
-          ) : null}
-          {actionError === undefined ? null : (
-            <Text variant="caption" role="alert" data-testid="session-action-error">
-              {actionError}
-            </Text>
-          )}
-          <div ref={end} />
-        </section>
-        <div aria-live="assertive" aria-atomic="true" className="sr-only" data-testid="permission-announcement">
-          {announcement}
-        </div>
-      </PageBody>
+      {driver === 'terminal' ? (
+        <ReadOnlyBanner
+          onSwitchToChat={() => switchTo('ui')}
+          switching={switchingTo !== undefined}
+          peekOpen={peekOpen}
+          onTogglePeek={() => setPeekOpen((open) => !open)}
+          peekId={peekId}
+        />
+      ) : null}
+      {/* While the terminal drives it takes the main pane; at `xl` the read-only conversation can open beside it. */}
+      <TerminalPane driving={driver === 'terminal'}>
+        {driver === 'terminal' ? <TerminalPanel sesId={sesId} screenReaderMode={appearance.terminalScreenReader} /> : null}
+        <PageBody
+          id={peekId}
+          className={conversationClassName(driver === 'terminal', peekOpen)}
+        >
+          <section aria-label="Conversation" aria-busy={streaming} data-testid="transcript" className="flex w-full max-w-(--space-chat-column) flex-col gap-4 self-center">
+            {!loading && (history.hasEarlier || history.error !== undefined) ? (
+              <EarlierHistory loading={history.loading} error={history.error} onShow={showEarlier} />
+            ) : null}
+            {loading ? (
+              <>
+                <Skeleton />
+                <Skeleton />
+                <span role="status" className="sr-only">
+                  Loading the conversation
+                </span>
+              </>
+            ) : view.items.length === 0 && !history.hasEarlier ? (
+              <Text variant="caption">Ask {AGENT_NAME} about this project.</Text>
+            ) : (
+              view.items.map((item, index) =>
+                item.type === 'message' ? (
+                  <Message key={item.message.messageId} message={item.message} />
+                ) : item.type === 'tools' ? (
+                  <ToolCalls key={`tools-${item.calls[0]?.toolCallId ?? index}`} calls={item.calls} density={appearance.density} />
+                ) : item.type === 'resumed' ? (
+                  <ResumedMarker key={`resumed-${item.at}-${index}`} />
+                ) : (
+                  <PermissionCard
+                    key={item.permission.requestId}
+                    permission={item.permission}
+                    wsId={wsId}
+                    sesId={sesId}
+                    projectName={projectName}
+                    onDecided={focusComposer}
+                  />
+                ),
+              )
+            )}
+            {view.queued.map((message) => (
+              <Message key={message.messageId} message={message} />
+            ))}
+            {state === 'working' && view.checkIn !== undefined ? (
+              <Notice
+                data-testid="check-in"
+                data-waiting-on={view.checkIn.waitingOn}
+                role="status"
+                action={
+                  view.checkIn.waitingOn === undefined ? (
+                    <Button variant="outline" onClick={stop} aria-disabled={stopping} data-testid="check-in-stop">
+                      <Stop aria-hidden />
+                      Stop
+                    </Button>
+                  ) : null
+                }
+              >
+                <StateGlyph state="working" label={checkInWords(view.checkIn)} />
+              </Notice>
+            ) : null}
+            {state === 'error' && view.errorCode === 'auth_required' ? (
+              // Keyed per error (the message it failed on), so each one starts unarmed (9.4).
+              <SignInAgain
+                key={`${sesId}:${lastSentUserId ?? ''}`}
+                reason={view.errorReason}
+                canTryAgain={view.lastUserText !== undefined}
+                onTryAgain={tryAgain}
+              />
+            ) : state === 'error' ? (
+              <Notice
+                variant="blocked"
+                data-testid="session-error"
+                data-error-code={view.errorCode}
+                action={
+                  view.lastUserText === undefined ? null : (
+                    <Button variant="outline" onClick={tryAgain} data-testid="try-again">
+                      <ArrowClockwise aria-hidden />
+                      Try again
+                    </Button>
+                  )
+                }
+              >
+                {view.errorReason ?? `${AGENT_NAME} stopped with an error. Try again.`}
+              </Notice>
+            ) : null}
+            {actionError === undefined ? null : (
+              <Text variant="caption" role="alert" data-testid="session-action-error">
+                {actionError}
+              </Text>
+            )}
+            <div ref={end} />
+          </section>
+          <div aria-live="assertive" aria-atomic="true" className="sr-only" data-testid="permission-announcement">
+            {announcement}
+          </div>
+        </PageBody>
+      </TerminalPane>
       <PageFooter>
         {driver === 'terminal' && actionError !== undefined ? (
           <Text variant="caption" role="alert" data-testid="terminal-switch-error" className="pb-2">
@@ -401,7 +477,7 @@ export function SessionPage() {
           label={`Message ${AGENT_NAME}`}
           blockedReason={
             driver === 'terminal'
-              ? `${AGENT_NAME}'s terminal is driving this chat. Switch to chat to send a message here.`
+              ? TERMINAL_DRIVING_REASON
               : state === 'waiting'
                 ? `${AGENT_NAME} is waiting for your answer above.`
                 : undefined
@@ -413,6 +489,17 @@ export function SessionPage() {
               <Button type="button" variant="outline" onClick={stop} aria-disabled={stopping} data-testid="stop">
                 <Stop aria-hidden />
                 Stop
+              </Button>
+            ) : driver === 'terminal' ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => switchTo('ui')}
+                aria-disabled={switchingTo !== undefined || undefined}
+                data-testid="composer-switch-to-chat"
+              >
+                <ChatCircle aria-hidden />
+                Switch to Chat
               </Button>
             ) : null
           }
@@ -483,6 +570,19 @@ function Message({ message }: { message: TranscriptMessage }) {
         <UserMessage className="max-w-full">{message.text}</UserMessage>
         <Text variant="caption" data-testid="message-queue-status">
           {QUEUE_WORDS[message.status]}
+        </Text>
+      </div>
+    );
+  }
+  if (message.role === 'user' && message.origin === 'terminal') {
+    // Typed in the agent's own terminal and brought back on switching (story 3.6; DESIGN.md Caption).
+    return (
+      <div className="flex max-w-[85%] flex-col items-end gap-1 self-end" data-testid="message-from-terminal">
+        <UserMessage className="max-w-full" data-testid="message-user">
+          {message.text}
+        </UserMessage>
+        <Text variant="caption" data-testid="message-origin">
+          from terminal
         </Text>
       </div>
     );

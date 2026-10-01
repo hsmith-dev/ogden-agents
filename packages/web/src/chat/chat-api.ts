@@ -40,10 +40,13 @@ export async function createChatSession(wsId: string, auth: Pick<TabAuth, 'fetch
   return SessionResponse.parse(json).session;
 }
 
-/** `GET /api/v1/workspaces/:wsId/sessions/:sesId`. */
-export async function fetchSession(wsId: string, sesId: string, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<Session> {
+/**
+ * `GET /api/v1/workspaces/:wsId/sessions/:sesId`: the session, and whether
+ * its terminal can work here (`terminal`, story 3.2; absent from older servers).
+ */
+export async function fetchSession(wsId: string, sesId: string, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<SessionResponse> {
   const json = await call(auth, apiPath(API_ROUTES.workspaceSession, { wsId, sesId }), {}, "Ogden Agents couldn't load this chat");
-  return SessionResponse.parse(json).session;
+  return SessionResponse.parse(json);
 }
 
 /** `POST /api/v1/workspaces/:wsId/sessions/:sesId/messages`. */

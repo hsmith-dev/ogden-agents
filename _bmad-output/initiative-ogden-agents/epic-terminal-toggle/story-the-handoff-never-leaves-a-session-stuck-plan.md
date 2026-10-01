@@ -7,7 +7,7 @@ status: 'built'
 baseline_revision: '07bddee'
 route: 'full'
 route_source: 'auto'
-review: ''
+review: 'coordinator'
 review_source: ''
 lenses_ran: []
 review_loop_iteration: 0
@@ -84,13 +84,20 @@ context:
 - `cliExited` (lock held): removes the entry, tells viewers, calls `kill()` (the tree, though the CLI has exited), imports, appends the agent's note for a non-zero exit (`terminalClosedNote`, "(exit code N)", no code for a signal), then `ui`/`cli_exited`. The `onExit` handler finds the lock taken only while the switch that opened that CLI still runs (an exit reported synchronously as core subscribes): it parks the exit on the entry and that switch finishes it, returning `ui`. With an async report the switch returns `terminal` and the exit path follows; both end at `ui` (two tests).
 - Q2: `close` (`closeTerminals`) stops each terminal, imports its turns, then `ui`/`server_stopped`; the old synchronous `server_stopped` loop is gone. For a crash, a new adapter ref `terminalImportPending` (`1` once the CLI has opened, cleared after any import attempt) is swept by `createChat` (`importAfterRestart`), each import under the lock. The mark (3.3) keeps it from importing twice.
 - `sendMessage` checks `switching` before `driver === terminal`, so a message during a switch back (or a CLI's exit) is `session_not_idle` as the Matrix says, not `driver_is_terminal`.
-- `hiddenPtySpawner`: `kill()` after the exit SIGKILLs the POSIX group once (not Windows, story 3.8; deferred-work); `onExit` added after the exit is called once on `setImmediate`. Memory port: `openError`, `exitOnKill`, `exitOnOpen`. Fake CLI: `FAKE_CLAUDE_CRASH_ON_START=1`; its grandchild ignores SIGHUP and reports ready before the CLI goes on (a crash before that killed it under load, so the test proved nothing).
+- `hiddenPtySpawner`: on its program's exit it SIGKILLs the POSIX group in its own `onExit` handler, once, and a later `kill()` does nothing (review F2; not Windows, story 3.8; deferred-work); `onExit` added after the exit is called once on `setImmediate`. Memory port: `openError`, `exitOnKill`, `exitOnOpen`. Fake CLI: `FAKE_CLAUDE_CRASH_ON_START=1`; its grandchild ignores SIGHUP and reports ready before the CLI goes on (a crash before that killed it under load, so the test proved nothing).
 - Reasons (3.7 deferred entry, resolved): `core/src/terminal-reasons.ts` holds EXPERIENCE.md's words and `plainTerminalReason` (3.7's filter); core's refusal and the availability check both use it, so `node-pty`'s raw reason never reaches a 409. Core's `agent_unsupported` and `pty_unavailable` words changed to EXPERIENCE.md's (one core test regex updated).
 - Core tests can't import adapters (AD-1), so `core/test/terminal-handoff.test.ts` has its own fake terminal with the memory port's modes. Two kept tests changed: the core "exits by itself" test awaits `settled()` before reading the driver, and the server crash and `/exit` tests wait for `ui`, since the import now comes first.
 
 ## Plan Change Log
 
 ## Review Triage Log
+
+- Review of cc14fd6 (coordinator), all applied in the follow-up commit:
+  - F1 (medium, fixed): not every wait under the lock was bounded (a hung `available`/`locate`/`command`/`open` or transcript read held `switching` forever). The checks before the release share one `TERMINAL_STEP_TIMEOUT_MS` (10 s) deadline, the spawn has its own (a CLI that starts late is killed at once), and each transcript read is bounded (treated as unreadable). Timeouts refuse `terminal_unavailable` "Claude Code's terminal took too long to start. Try again." and log `terminal_open_timeout`. The close-past-its-wait test became a hanging lookup that the switch gives up on (lock released, `settled()` resolves); one test per hanging step.
+  - F2 (safety, fixed): a `kill()` after the exit could signal a reused process group. The post-exit group kill now runs only in `hiddenPtySpawner`'s own `onExit` handler, in the tick the exit is reported; a later `kill()` signals nothing. Residual risk (the exit is reported after the reap) logged in deferred-work with the Windows gap for 3.8.
+  - F3 (fixed): `plainTerminalReason` also rejects a drive letter (`\b[A-Za-z]:`) and anything with `=`, and cuts a reason at 200 characters (`...`). Tests.
+  - F4 (fixed): the crash-import sweep at `createChat` catches its own failure and logs it; a start never fails over it. Test.
+  - F5 (deferred to 3.9): the two fake terminals can drift; an agent released after the bound stops late, unwatched. Logged in deferred-work.
 
 ## Design Notes
 

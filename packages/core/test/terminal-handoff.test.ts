@@ -18,6 +18,7 @@ import {
   TERMINAL_EXIT_GRACE_MS,
   TERMINAL_IMPORT_PENDING_REF,
   TERMINAL_RELEASE_TIMEOUT_MS,
+  TERMINAL_STEP_TIMEOUT_MS,
   TerminalUnavailableError,
   type AgentEvent,
   type AgentPort,
@@ -505,23 +506,127 @@ describe('the handoff never leaves a session stuck (story 3.4)', () => {
       expect(terminal.processes[0]!.exitCode()).toBeNull();
     });
 
-    it(`a switch stuck past ${TERMINAL_CLOSE_WAIT_MS} ms doesn't hold the close forever`, async () => {
+    it(`a check that hangs: the close waits only until the switch gives up (${TERMINAL_STEP_TIMEOUT_MS} ms, within ${TERMINAL_CLOSE_WAIT_MS} ms)`, async () => {
       useFakeTimers();
       const setup = await answeredOnce();
       const { core, chat, agent, workspace, session, internal } = setup;
       agent.port.terminalResume!.locate = () => new Promise(() => undefined);
-      void refusal(chat.switchDriver(workspace.id, session.id, 'terminal'));
+      const switching = refusal(chat.switchDriver(workspace.id, session.id, 'terminal'));
       await settle();
       let closed = false;
       const closing = chat.close().then(() => (closed = true));
       await settle();
-      await vi.advanceTimersByTimeAsync(TERMINAL_CLOSE_WAIT_MS - 1);
+      await vi.advanceTimersByTimeAsync(TERMINAL_STEP_TIMEOUT_MS - 1);
       expect(closed).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
       await closing;
-      expect(internal.map(String)).toEqual(['TerminalHandoffError: terminal_close_timeout']);
+      expect(await switching).toBeInstanceOf(TerminalUnavailableError);
+      expect(internal.map(String)).toEqual(['TerminalHandoffError: terminal_open_timeout']);
       expect(core.entities.getSession(session.id)!.driver).toBe('ui');
     });
+  });
+
+  describe(`every wait under the lock is bounded (${TERMINAL_STEP_TIMEOUT_MS} ms; review F1): the lock is released and settled() resolves`, () => {
+    const hang = () => new Promise<never>(() => undefined);
+    const cases: Array<[string, (agent: ReturnType<typeof handoffAgent>) => TerminalPort | undefined]> = [
+      ['node-pty’s check', () => ({ available: hang, open: hang })],
+      ['the CLI lookup', (agent) => ((agent.port.terminalResume!.locate = hang), undefined)],
+      ['the CLI’s command', (agent) => ((agent.port.terminalResume!.command = hang), undefined)],
+    ];
+    for (const [name, hangIt] of cases) {
+      it(`${name} hangs: refused as too slow, with a code; the chat drives and answers`, async () => {
+        useFakeTimers();
+        const agent = handoffAgent();
+        const terminal = handoffTerminal();
+        const setup = await answeredOnce(terminal, agent);
+        const { core, chat, workspace, session, internal } = setup;
+        const port = hangIt(agent);
+        if (port !== undefined) Object.assign(terminal.port, port);
+        const switching = refusal(chat.switchDriver(workspace.id, session.id, 'terminal'));
+        await settle();
+        expect(() => chat.sendMessage(workspace.id, session.id, 'too soon')).toThrow(SessionNotIdleError);
+        await vi.advanceTimersByTimeAsync(TERMINAL_STEP_TIMEOUT_MS);
+        const error = (await switching) as TerminalUnavailableError;
+        expect(error).toBeInstanceOf(TerminalUnavailableError);
+        expect(error.terminal).toEqual({ available: false, code: 'pty_unavailable', reason: "Claude Code's terminal took too long to start. Try again." });
+        expect(internal.map(String)).toEqual(['TerminalHandoffError: terminal_open_timeout']);
+        // The agent was never released: nothing was stopped for a switch that didn't happen.
+        expect(agent.closed()).toBe(0);
+        await chat.settled();
+        expect(driverChanges(core, session.id)).toEqual([]);
+        vi.useRealTimers();
+        await expectChatDrives(setup);
+        await chat.close();
+      });
+    }
+
+    it('the spawn hangs: refused as too slow; a CLI that starts after all is killed at once', async () => {
+      useFakeTimers();
+      let started!: () => void;
+      const terminal = handoffTerminal({ opening: () => new Promise<void>((resolve) => (started = resolve)) });
+      const setup = await answeredOnce(terminal);
+      const { chat, workspace, session, internal } = setup;
+      const switching = refusal(chat.switchDriver(workspace.id, session.id, 'terminal'));
+      await settle();
+      await vi.advanceTimersByTimeAsync(TERMINAL_STEP_TIMEOUT_MS);
+      expect(await switching).toBeInstanceOf(TerminalUnavailableError);
+      expect(internal.map(String)).toEqual(['TerminalHandoffError: terminal_open_timeout']);
+      started();
+      await settle();
+      expect(terminal.processes[0]!.kills()).toBe(1);
+      expect(terminal.processes[0]!.exitCode()).toBeNull();
+      vi.useRealTimers();
+      await expectChatDrives(setup);
+      await chat.close();
+    });
+
+    it('a read of the CLI’s record that hangs: the switch goes on, either way, as with an unreadable record', async () => {
+      useFakeTimers();
+      const setup = await answeredOnce();
+      const { core, chat, agent, workspace, session, internal } = setup;
+      agent.port.terminalResume!.transcript = hang;
+      const toTerminal = chat.switchDriver(workspace.id, session.id, 'terminal');
+      await settle();
+      await vi.advanceTimersByTimeAsync(TERMINAL_STEP_TIMEOUT_MS);
+      expect((await toTerminal).driver).toBe('terminal');
+      const back = chat.switchDriver(workspace.id, session.id, 'ui');
+      await settle();
+      await vi.advanceTimersByTimeAsync(TERMINAL_STEP_TIMEOUT_MS);
+      expect((await back).driver).toBe('ui');
+      await chat.settled();
+      expect(internal.map(String)).toEqual(['TerminalImportError: terminal_import_unreadable', 'TerminalImportError: terminal_import_unreadable']);
+      expect(driverChanges(core, session.id)).toEqual([
+        ['ui', 'terminal', 'user'],
+        ['terminal', 'ui', 'user'],
+      ]);
+      vi.useRealTimers();
+      await expectChatDrives(setup);
+      await chat.close();
+    });
+  });
+
+  it('a start whose crash-import sweep fails still starts; the failure is logged (review F4)', async () => {
+    const core = openTestCore();
+    const internal: unknown[] = [];
+    const broken = new Proxy(core.entities, {
+      get: (target, key, receiver) =>
+        key === 'listWorkspaces'
+          ? () => {
+              throw new Error('database is locked');
+            }
+          : Reflect.get(target, key, receiver),
+    });
+    const chat = createChat({
+      dataDir: tempDir('ogden-agents-data-'),
+      entities: broken,
+      sessionEvents: core.sessionEvents,
+      agent: handoffAgent().port,
+      terminal: handoffTerminal().port,
+      onInternalError: (_sessionId, error) => internal.push(error),
+    });
+    expect(internal.map(String)).toEqual(['Error: database is locked']);
+    await chat.settled();
+    await chat.close();
   });
 
   it('a clean stop imports the terminal’s turns before giving the chat back (server_stopped), and kills the CLI', async () => {
@@ -581,7 +686,7 @@ describe('the handoff never leaves a session stuck (story 3.4)', () => {
 
   it('a terminal_unavailable reason from node-pty or the CLI lookup never carries a path, a stack or a second line', async () => {
     const reasons: string[] = [];
-    for (const reason of ['Cannot find module /opt/x/pty.node', 'bad\nsecond line', '~/lib/x', 'C:\\x\\pty.node', 'boom at load (index.js:1:2)']) {
+    for (const reason of ['Cannot find module /opt/x/pty.node', 'bad\nsecond line', '~/lib/x', 'C:\\x\\pty.node', 'boom at load (index.js:1:2)', 'not on drive D: here', 'ANTHROPIC_API_KEY=sk-ant-secret']) {
       const { chat, workspace, session } = await answeredOnce(handoffTerminal({ available: { ok: false, reason } }));
       const error = (await refusal(chat.switchDriver(workspace.id, session.id, 'terminal'))) as TerminalUnavailableError;
       reasons.push(error.message);
@@ -593,6 +698,10 @@ describe('the handoff never leaves a session stuck (story 3.4)', () => {
       "The terminal couldn't start on this computer: no prebuilt terminal for this platform",
     );
     await plain.chat.close();
+    const long = await answeredOnce(handoffTerminal({ available: { ok: false, reason: 'x'.repeat(500) } }));
+    const cut = ((await refusal(long.chat.switchDriver(long.workspace.id, long.session.id, 'terminal'))) as Error).message;
+    expect(cut).toBe(`The terminal couldn't start on this computer: ${'x'.repeat(197)}...`);
+    await long.chat.close();
     const lookup = await answeredOnce(handoffTerminal(), handoffAgent(cliRecord(), { locate: async () => ({ found: false, reason: 'not at /usr/local/bin/claude' }) }));
     expect(((await refusal(lookup.chat.switchDriver(lookup.workspace.id, lookup.session.id, 'terminal'))) as Error).message).toBe(
       "Claude Code's terminal couldn't be found on this computer.",

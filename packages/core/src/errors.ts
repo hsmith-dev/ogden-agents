@@ -188,12 +188,12 @@ export class TerminalImportError extends CoreError {
 }
 
 /** Why a driver change (story 3.4) went past one of its limits: a code, logged on its own. */
-export type TerminalHandoffCode = 'terminal_release_timeout' | 'terminal_exit_timeout' | 'terminal_close_timeout';
+export type TerminalHandoffCode = 'terminal_release_timeout' | 'terminal_exit_timeout' | 'terminal_close_timeout' | 'terminal_open_timeout' | 'terminal_read_timeout';
 
 /**
  * A handoff that hit a bound and went on (story 3.4): the agent did not stop
- * in time, a killed CLI did not report its exit, or a close stopped waiting
- * for a switch. For the log only; its message is its code.
+ * in time, a killed CLI did not report its exit, a close stopped waiting for
+ * a switch, opening the terminal or reading the CLI's record took too long. For the log only; its message is its code.
  */
 export class TerminalHandoffError extends CoreError {
   override readonly name = 'TerminalHandoffError';

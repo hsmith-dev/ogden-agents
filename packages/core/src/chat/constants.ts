@@ -59,6 +59,14 @@ export const TERMINAL_EXIT_GRACE_MS = 2_000;
 /** How long switching to the terminal waits for the session's agent to stop before it refuses ("still stopping"). */
 export const TERMINAL_RELEASE_TIMEOUT_MS = 10_000;
 
+/**
+ * How long the steps of opening the terminal may take (story 3.4 review F1):
+ * the checks before the agent is released (`node-pty`, the CLI lookup, its
+ * command) share one deadline, the spawn has its own, and so does each read
+ * of the CLI's record. Past it the switch is refused, or the import skipped.
+ */
+export const TERMINAL_STEP_TIMEOUT_MS = 10_000;
+
 /** How long a close waits for the switches in flight to end before it stops their terminals anyway. */
 export const TERMINAL_CLOSE_WAIT_MS = TERMINAL_RELEASE_TIMEOUT_MS + TERMINAL_EXIT_GRACE_MS;
 

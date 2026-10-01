@@ -57,8 +57,8 @@ export interface HiddenPty {
   resize?(cols: number, rows: number): void;
   /**
    * Stops the program and everything it started. Safe to call more than
-   * once. Called after the program exited, it still stops what it started
-   * (its process group, POSIX), once.
+   * once. A program that exits by itself has what it started stopped as its
+   * exit is reported (its process group, POSIX); a later call does nothing.
    */
   kill(): void;
 }
@@ -162,6 +162,13 @@ export function hiddenPtySpawner(pty: PtyModule, platform: NodeJS.Platform = pro
     });
     terminal.onExit(({ exitCode, signal }) => {
       if (exit !== undefined) return;
+      // What the program started may still run in its process group, which outlives it (story 3.4).
+      // Stopped here, in the tick its exit is reported, while that group is still this program's;
+      // never on a later `kill()`, when the id could be reused (review F2). Windows is story 3.8's.
+      if (!groupKilled && platform !== 'win32') {
+        groupKilled = true;
+        killProcessTree(terminal.pid, { ...nodeProcessTreeSystem, platform });
+      }
       exit = { exitCode, signal: signal === undefined || signal === 0 ? null : signal };
       const reported = exit;
       for (const listener of [...exitListeners]) listener(reported);
@@ -195,19 +202,12 @@ export function hiddenPtySpawner(pty: PtyModule, platform: NodeJS.Platform = pro
         }
       },
       kill() {
-        if (!killed && exit === undefined) {
-          killed = true;
-          groupKilled = true;
-          killTerminalTree(terminal, platform);
-          return;
-        }
+        if (killed) return;
         killed = true;
-        // The program already exited (a crash, `/exit`): what it started may still run in its
-        // process group, which outlives it (POSIX). Stopped once. Windows is story 3.8's.
-        if (!groupKilled && platform !== 'win32') {
-          groupKilled = true;
-          killProcessTree(terminal.pid, { ...nodeProcessTreeSystem, platform });
-        }
+        // Once it has exited its group was stopped as it exited: nothing to do.
+        if (exit !== undefined) return;
+        groupKilled = true;
+        killTerminalTree(terminal, platform);
       },
     };
   };

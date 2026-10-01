@@ -27,6 +27,7 @@ import {
   TERMINAL_IMPORT_REF,
   TERMINAL_RELEASE_TIMEOUT_MS,
   TERMINAL_ROWS,
+  TERMINAL_STEP_TIMEOUT_MS,
   terminalClosedNote,
 } from './constants.js';
 import type { ChatContext } from './context.js';
@@ -52,6 +53,34 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
       ]);
     } finally {
       clearTimeout(timer);
+    }
+  };
+
+  const TIMED_OUT = Symbol('timed out');
+
+  /**
+   * One bound shared by several steps (story 3.4 review F1): `step` settles as
+   * its promise does, or as {@link TIMED_OUT} once `ms` have passed since the
+   * deadline started. `clear` stops its timer.
+   */
+  const startDeadline = (ms: number) => {
+    let timer: Timer | undefined;
+    const expired = new Promise<typeof TIMED_OUT>((resolve) => (timer = later(ms, () => resolve(TIMED_OUT))));
+    return {
+      step: <T>(promise: Promise<T>): Promise<T | typeof TIMED_OUT> => Promise.race([promise, expired]),
+      clear: () => clearTimeout(timer),
+    };
+  };
+
+  /** `promise`'s value, or {@link TIMED_OUT} after `ms`; a late rejection is swallowed. */
+  const bounded = async <T>(promise: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> => {
+    const deadline = startDeadline(ms);
+    try {
+      const result = await deadline.step(promise);
+      if (result === TIMED_OUT) promise.catch(() => undefined);
+      return result;
+    } finally {
+      deadline.clear();
     }
   };
 
@@ -125,7 +154,10 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     const resume = agent.terminalResume;
     if (resume?.transcript === undefined) return undefined;
     const workspace = getWorkspace(session.workspaceId);
-    return resume.transcript({ agentSessionId, cwd: workspace.realPath ?? workspace.path, env: { ...agentEnv() } });
+    // Bounded (review F1): a read that hangs is an unreadable record; the switch goes on.
+    const read = await bounded(resume.transcript({ agentSessionId, cwd: workspace.realPath ?? workspace.path, env: { ...agentEnv() } }), TERMINAL_STEP_TIMEOUT_MS);
+    if (read === TIMED_OUT) throw new TerminalHandoffError('terminal_read_timeout');
+    return read;
   };
 
   /**
@@ -164,17 +196,33 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
       throw new TerminalUnavailableError('no_agent_session', terminalUnavailableReason.noAgentSession(agent.displayName));
     }
     const workspace = getWorkspace(session.workspaceId);
-    const availability = await terminal.available();
-    // `node-pty`'s own reason can name a path: only plain words reach the user (3.7's filter, shared).
-    if (!availability.ok) throw new TerminalUnavailableError('pty_unavailable', terminalUnavailableReason.ptyUnavailable(availability.reason));
+    /** Opening took too long: a code in the log, plain words to the user. */
+    const tooSlow = () => {
+      internalError(session.id, new TerminalHandoffError('terminal_open_timeout'));
+      return new TerminalUnavailableError('pty_unavailable', terminalUnavailableReason.tooSlow(agent.displayName));
+    };
+    // The checks before the agent is released share one deadline (review F1): none can hold the lock.
     const env = { ...agentEnv() };
-    const located = await resume.locate(env);
-    if (!located.found) throw new TerminalUnavailableError('cli_not_found', terminalUnavailableReason.cliNotFound(agent.displayName, located.reason));
+    const deadline = startDeadline(TERMINAL_STEP_TIMEOUT_MS);
     let command: Awaited<ReturnType<AgentTerminalResume['command']>>;
     try {
-      command = await resume.command(agentSessionId, env);
-    } catch (error) {
-      throw new TerminalUnavailableError('cli_not_found', terminalUnavailableReason.cliNotFound(agent.displayName, error instanceof AgentError ? error.message : ''));
+      const availability = await deadline.step(terminal.available());
+      if (availability === TIMED_OUT) throw tooSlow();
+      // `node-pty`'s own reason can name a path: only plain words reach the user (3.7's filter, shared).
+      if (!availability.ok) throw new TerminalUnavailableError('pty_unavailable', terminalUnavailableReason.ptyUnavailable(availability.reason));
+      const located = await deadline.step(resume.locate(env));
+      if (located === TIMED_OUT) throw tooSlow();
+      if (!located.found) throw new TerminalUnavailableError('cli_not_found', terminalUnavailableReason.cliNotFound(agent.displayName, located.reason));
+      let built: typeof command | typeof TIMED_OUT;
+      try {
+        built = await deadline.step(resume.command(agentSessionId, env));
+      } catch (error) {
+        throw new TerminalUnavailableError('cli_not_found', terminalUnavailableReason.cliNotFound(agent.displayName, error instanceof AgentError ? error.message : ''));
+      }
+      if (built === TIMED_OUT) throw tooSlow();
+      command = built;
+    } finally {
+      deadline.clear();
     }
     if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
     // Bounded (E3-R5): an agent that won't stop leaves the chat driving, idle; its next message waits for it.
@@ -186,17 +234,28 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     await markTerminalImport(session, agentSessionId);
     if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
     let cli: TerminalProcess;
+    const opening = terminal.open({
+      file: command.file,
+      args: command.args,
+      // The real-cased path, as the agent had it: the CLI finds its sessions by folder.
+      cwd: workspace.realPath ?? workspace.path,
+      env: { ...command.env, TERM: 'xterm-256color' },
+      cols: TERMINAL_COLS,
+      rows: TERMINAL_ROWS,
+    });
     try {
-      cli = await terminal.open({
-        file: command.file,
-        args: command.args,
-        // The real-cased path, as the agent had it: the CLI finds its sessions by folder.
-        cwd: workspace.realPath ?? workspace.path,
-        env: { ...command.env, TERM: 'xterm-256color' },
-        cols: TERMINAL_COLS,
-        rows: TERMINAL_ROWS,
-      });
+      const opened = await bounded(opening, TERMINAL_STEP_TIMEOUT_MS);
+      if (opened === TIMED_OUT) {
+        // A CLI that starts after all is stopped at once: nothing drives it.
+        opening.then(
+          (late) => late.kill(),
+          () => undefined,
+        );
+        throw tooSlow();
+      }
+      cli = opened;
     } catch (error) {
+      if (error instanceof TerminalUnavailableError) throw error;
       internalError(session.id, error);
       throw new TerminalUnavailableError('pty_unavailable', `${agent.displayName}'s terminal couldn't start. Try again.`);
     }
@@ -378,14 +437,21 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
   /**
    * After a stop that couldn't import (a crash), imports the terminal turns
    * of every session still marked {@link TERMINAL_IMPORT_PENDING_REF} (user
-   * decision), each under its `switching` lock; an import's failures are
-   * logged as codes.
+   * decision), each under its `switching` lock. Never throws: a failure,
+   * of the sweep or of an import, is logged.
    */
   const importAfterRestart = (): void => {
-    const pending = entities
-      .listWorkspaces()
-      .flatMap((workspace) => entities.listSessions(workspace.id))
-      .filter((session) => session.adapterRefs[TERMINAL_IMPORT_PENDING_REF] === '1');
+    let pending: Session[];
+    try {
+      pending = entities
+        .listWorkspaces()
+        .flatMap((workspace) => entities.listSessions(workspace.id))
+        .filter((session) => session.adapterRefs[TERMINAL_IMPORT_PENDING_REF] === '1');
+    } catch (error) {
+      // A start never fails over it (review F4); the turns stay pending for the next one. No session to name.
+      internalError('' as SessionId, error);
+      return;
+    }
     for (const session of pending) {
       if (switching.has(session.id) || terminals.has(session.id)) continue;
       holdingSwitch(session.id, () => importTerminalTurns(session)).catch((error: unknown) => internalError(session.id, error));

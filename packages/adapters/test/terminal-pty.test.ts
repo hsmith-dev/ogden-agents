@@ -103,7 +103,7 @@ describe('the hidden terminal after its program exited (story 3.4)', () => {
     return { pty: spawn('node', [], { env: {}, cwd: '.', cols: 80, rows: 24 }), exit: (code: number) => exit({ exitCode: code }), ptyKills };
   };
 
-  it.runIf(process.platform !== 'win32')('kill still stops its process group (what it started), once', () => {
+  it.runIf(process.platform !== 'win32')('stops its process group (what it started) as its exit is reported, once; a later kill signals nothing (review F2)', () => {
     const signalled: Array<[number, unknown]> = [];
     const original = process.kill;
     process.kill = ((pid: number, signal?: unknown) => {
@@ -113,11 +113,19 @@ describe('the hidden terminal after its program exited (story 3.4)', () => {
     try {
       const { pty, exit, ptyKills } = handPty(4242);
       exit(70);
+      expect(signalled).toEqual([[-4242, 'SIGKILL']]);
+      // Later, the id could belong to someone else: nothing is signalled, and the exited terminal isn't killed.
       pty.kill();
       pty.kill();
       expect(signalled).toEqual([[-4242, 'SIGKILL']]);
-      // The exited terminal itself is not killed again.
       expect(ptyKills).toEqual([]);
+
+      // Killed first: the tree once, and its exit then signals nothing more.
+      signalled.length = 0;
+      const killed = handPty(4343);
+      killed.pty.kill();
+      killed.exit(0);
+      expect(signalled).toEqual([[-4343, 'SIGKILL']]);
     } finally {
       process.kill = original;
     }
@@ -211,20 +219,19 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('the real terminal (f
   }, 30_000);
 
   // Windows: taskkill can't find a tree whose root has exited (story 3.8).
-  it.skipIf(process.platform === 'win32')('a CLI that crashed leaves what it started running until kill, which stops it; its exit is heard late too (story 3.4)', async () => {
+  it.skipIf(process.platform === 'win32')('a CLI that crashed takes what it started with it, though that ignores the hang-up; its exit is heard late too (story 3.4)', async () => {
     const { cli, record, exits } = await openFake({ FAKE_CLAUDE_GRANDCHILD: '1' });
     const grandchild = record().grandchild!;
+    expect(alive(grandchild)).toBe(true);
     cli.write('crash\r');
     await expect.poll(() => exits, { timeout: 10_000 }).toEqual([70]);
-    // It ignores the hang-up, as a `nohup` tool does: the crash alone doesn't stop it.
-    expect(alive(grandchild)).toBe(true);
+    // No kill() is needed: its group was stopped as its exit was reported.
+    await expect.poll(() => alive(grandchild), { timeout: 10_000 }).toBe(false);
     const late = await new Promise<number | null>((resolve) => cli.onExit(({ exitCode }) => resolve(exitCode)));
     expect(late).toBe(70);
-    cli.kill();
-    await expect.poll(() => alive(grandchild), { timeout: 10_000 }).toBe(false);
   }, 30_000);
 
-  it.skipIf(process.platform === 'win32')('a CLI that crashes on start reports exit 70; kill then stops what it started (story 3.4)', async () => {
+  it.skipIf(process.platform === 'win32')('a CLI that crashes on start reports exit 70, and what it started is stopped with it (story 3.4)', async () => {
     const record = join(tempDir(), 'record.json');
     const cli = await createPtyTerminalPort().open({
       file: process.execPath,
@@ -238,7 +245,6 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('the real terminal (f
     const exited = await new Promise<number | null>((resolve) => cli.onExit(({ exitCode }) => resolve(exitCode)));
     expect(exited).toBe(70);
     const { grandchild } = JSON.parse(readFileSync(record, 'utf8')) as { grandchild: number };
-    cli.kill();
     await expect.poll(() => alive(grandchild), { timeout: 10_000 }).toBe(false);
   }, 30_000);
 

@@ -445,16 +445,55 @@ describe('finding claude', () => {
       { platform: 'win32', isExecutable: (f) => (seen.push(f), f === 'D:\\tools\\claude.exe') },
     );
     expect(found).toBe('D:\\tools\\claude.exe');
-    expect(seen).toEqual(['C:\\Program Files\\Claude\\claude.exe', 'D:\\tools\\claude.exe']);
+    expect(seen).toEqual(['C:\\Program Files\\Claude\\claude.exe', 'C:\\Program Files\\Claude\\claude.cmd', 'D:\\tools\\claude.exe']);
     const home: string[] = [];
     findClaudeExecutable({ PATH: '' , USERPROFILE: 'C:\\Users\\a' }, { platform: 'win32', isExecutable: (f) => (home.push(f), false) });
-    expect(home).toEqual(['C:\\Users\\a\\.local\\bin\\claude.exe', 'C:\\Users\\a\\.claude\\local\\claude.exe']);
+    expect(home).toEqual([
+      'C:\\Users\\a\\.local\\bin\\claude.exe',
+      'C:\\Users\\a\\.local\\bin\\claude.cmd',
+      'C:\\Users\\a\\.claude\\local\\claude.exe',
+      'C:\\Users\\a\\.claude\\local\\claude.cmd',
+    ]);
   });
 
-  it('on Windows only claude.exe counts', () => {
+  it('on Windows only claude.exe counts, never a .cmd or other shim', () => {
     const seen: string[] = [];
     findClaudeExecutable({ PATH: 'C:\\tools' }, { platform: 'win32', home: 'C:\\Users\\a', isExecutable: (f) => (seen.push(f), false) });
-    expect(seen.every((f) => f.endsWith('claude.exe'))).toBe(true);
+    expect(seen.every((f) => f.endsWith('claude.exe') || f.endsWith('claude.cmd'))).toBe(true);
+    // Every file is runnable, yet only an .exe comes back.
+    expect(findClaudeExecutable({ PATH: 'C:\\tools' }, { platform: 'win32', home: 'C:\\Users\\a', isExecutable: (f) => !f.endsWith('claude.exe') })).toBeUndefined();
+  });
+
+  it('on Windows an npm claude.cmd gives the package’s claude.exe beside it', () => {
+    const npm = 'C:\\Users\\a\\AppData\\Roaming\\npm';
+    const packaged = `${npm}\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`;
+    const files = new Set([`${npm}\\claude.cmd`, packaged]);
+    const env = { Path: ['C:\\Windows', npm, 'D:\\tools'].join(';'), USERPROFILE: 'C:\\Users\\a' };
+    expect(findClaudeExecutable(env, { platform: 'win32', isExecutable: (f) => files.has(f) })).toBe(packaged);
+
+    // A claude.exe earlier on Path still wins; in the same folder the shim's own .exe comes second.
+    files.add('C:\\Windows\\claude.exe');
+    expect(findClaudeExecutable(env, { platform: 'win32', isExecutable: (f) => files.has(f) })).toBe('C:\\Windows\\claude.exe');
+    files.delete('C:\\Windows\\claude.exe');
+    files.add(`${npm}\\claude.exe`);
+    expect(findClaudeExecutable(env, { platform: 'win32', isExecutable: (f) => files.has(f) })).toBe(`${npm}\\claude.exe`);
+    files.delete(`${npm}\\claude.exe`);
+
+    // The package's .exe is missing: the next candidate, never the .cmd.
+    files.delete(packaged);
+    files.add('D:\\tools\\claude.exe');
+    expect(findClaudeExecutable(env, { platform: 'win32', isExecutable: (f) => files.has(f) })).toBe('D:\\tools\\claude.exe');
+    files.delete('D:\\tools\\claude.exe');
+    expect(findClaudeExecutable(env, { platform: 'win32', isExecutable: (f) => files.has(f) })).toBeUndefined();
+
+    // A package .exe without the shim beside it isn't looked for.
+    expect(findClaudeExecutable(env, { platform: 'win32', isExecutable: (f) => f === packaged })).toBeUndefined();
+  });
+
+  it('on POSIX no .cmd is looked for', () => {
+    const seen: string[] = [];
+    findClaudeExecutable({ PATH: '/usr/bin' }, { platform: 'linux', home: '/home/a', isExecutable: (f) => (seen.push(f), false) });
+    expect(seen).toEqual(['/usr/bin/claude', '/home/a/.local/bin/claude', '/home/a/.claude/local/claude']);
   });
 
   it('resolves the dev-installed adapter from node_modules (a dev dependency only)', () => {

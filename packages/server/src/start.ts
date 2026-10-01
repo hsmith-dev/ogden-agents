@@ -15,8 +15,6 @@ import {
   createUvToolchain,
   locateClaudeAdapter,
   resolveClaudeAgentAcp,
-  type ClaudeCodeSetupOptions,
-  type PtyLoader,
 } from '@ogden-agents/adapters';
 import {
   AgentSetupError,
@@ -31,20 +29,16 @@ import {
   ensureDataDir,
   openCore,
   PORT_FILE,
-  type AgentApiKeySupport,
   type AgentPort,
   type AgentTerminalResume,
-  type AgentSetupPort,
   type AppShortcutPort,
   type Core,
-  type SecretStorePort,
-  type ToolchainPort,
 } from '@ogden-agents/core';
 import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM, ServerMessage } from '@ogden-agents/shared';
 import openBrowser from 'open';
 import { WebSocketServer } from 'ws';
 import { createApp, type ServerControl } from './app.js';
-import { chooseWebSocketProtocol, createLaunchCodes, createTabTokens, retireLegacyAuthKey, type Clock, type TabTokens } from './auth.js';
+import { chooseWebSocketProtocol, createLaunchCodes, createTabTokens, retireLegacyAuthKey } from './auth.js';
 import { tightenMode } from './file-mode.js';
 import { createGate, launchUrl as launchUrlFor } from './gate.js';
 import { acquireInstanceLock, type InstanceLock } from './instance-lock.js';
@@ -52,8 +46,14 @@ import { createLauncherToken, type LauncherToken } from './launcher-token.js';
 import { createLogger, createRotatingFileWriter, LOG_DIR, teeWriters, type Logger } from './log.js';
 import { shortcutErrorCode } from './shortcut-routes.js';
 import { createTerminalAvailability } from './terminal-availability.js';
-import { testApiKeyCheck, testClaudeInstall, testHooksAllowed } from './test-hooks.js';
+import { testApiKeyCheck, testClaudeInstall } from './test-hooks.js';
 import { VERSION } from './version.js';
+import { agentEnvironment, agentKeysOf, checkInDelayFromEnv, SUBSCRIPTION_MAX_AGE_MS, testSecretStore, withoutAgentKeys } from './start-env.js';
+import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
+
+// Moved out in story 3.9; still exported from here for the callers that import them from `start.ts`.
+export { AGENT_ENV_KEYS, agentEnvironment, agentKeysOf, CHECK_IN_MS_ENV, checkInDelayFromEnv, SECRET_STORE_ENV, SUBSCRIPTION_MAX_AGE_MS, testSecretStore, withoutAgentKeys } from './start-env.js';
+export type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
 
 /** The only interface the server ever binds (AD-15). */
 export const HOST = '127.0.0.1';
@@ -90,199 +90,6 @@ export const CLAUDE_ACP_PATH_ENV = 'OGDEN_AGENTS_CLAUDE_ACP_PATH';
 /** How long a stopping server waits for a killed install to remove its temp folder. */
 const INSTALL_STOP_MS = 10_000;
 
-/** Test-only: shortens the quiet-agent check-in delay, in milliseconds (story 2.10). */
-export const CHECK_IN_MS_ENV = 'OGDEN_AGENTS_TEST_CHECK_IN_MS';
-/**
- * Set to `memory` (tests that start the packaged server as its own process:
- * the launcher tests and the installed-package smoke) to keep API keys in
- * memory, so no test ever reads or writes the real OS keychain. Honoured only
- * under a test runner (`NODE_ENV=test` or `VITEST` set) on a data folder inside
- * the OS temp folder ({@link testSecretStore}, `testHooksAllowed`).
- */
-export const SECRET_STORE_ENV = 'OGDEN_AGENTS_TEST_SECRET_STORE';
-
-/** `memory` when a test asked for the in-memory secret store and test hooks are allowed for `dataDir`; otherwise `undefined` (the keychain). */
-export function testSecretStore(env: Readonly<Record<string, string | undefined>>, dataDir: string): 'memory' | undefined {
-  return env[SECRET_STORE_ENV] === 'memory' && testHooksAllowed(env, dataDir) ? 'memory' : undefined;
-}
-
-/**
- * How old the subscription state may be when a Claude Code chat starts: older,
- * it is read again first, so a sign-in made outside the app stops the API key
- * being used within this long (story 9.2 review F4).
- */
-export const SUBSCRIPTION_MAX_AGE_MS = 30_000;
-
-/**
- * The check-in delay from {@link CHECK_IN_MS_ENV}, clamped to core's range
- * (`clampCheckInDelay`: 1 s to 2^31-1 ms), or `undefined` (core's 10 minutes)
- * when unset or not a number.
- */
-export function checkInDelayFromEnv(env: NodeJS.ProcessEnv = process.env): number | undefined {
-  const raw = env[CHECK_IN_MS_ENV];
-  if (raw === undefined || raw.trim() === '') return undefined;
-  const ms = Number(raw);
-  return Number.isFinite(ms) ? clampCheckInDelay(ms) : undefined;
-}
-
-/** What an agent process needs from this server's environment to run as the user (AD-16). */
-const AGENT_ENV_ALLOWED = ['PATH', 'HOME', 'USERPROFILE', 'USER', 'USERNAME', 'LANG', 'TERM', 'TMPDIR', 'TEMP', 'TMP', 'SHELL'];
-/** The same on Windows only, where a process can't start without them. */
-const AGENT_ENV_ALLOWED_WINDOWS = ['SystemRoot', 'ComSpec', 'PATHEXT'];
-/**
- * Agent credentials the user may set in this server's environment (AD-16).
- * They are not in the agent allowlist: core's precedence rule decides (story
- * 9.2), exactly as for a saved key, which comes first. A chat process gets
- * one only while the subscription is known to be signed out; sign-in and
- * `auth status` never do ({@link withoutAgentKeys}).
- */
-export const AGENT_ENV_KEYS = ['ANTHROPIC_API_KEY'];
-
-/** Only the {@link AGENT_ENV_KEYS} of `env`, whatever their case, for core's precedence rule. Never logged. */
-export function agentKeysOf(env: Readonly<Record<string, string | undefined>>): Record<string, string> {
-  const keys = new Set(AGENT_ENV_KEYS.map((name) => name.toUpperCase()));
-  const out: Record<string, string> = {};
-  for (const [name, value] of Object.entries(env)) if (value !== undefined && keys.has(name.toUpperCase())) out[name] = value;
-  return out;
-}
-
-/** `env` without any {@link AGENT_ENV_KEYS}, whatever their case (Windows names are case-insensitive). */
-export function withoutAgentKeys(env: Readonly<Record<string, string>>): Record<string, string> {
-  const keys = new Set(AGENT_ENV_KEYS.map((name) => name.toUpperCase()));
-  return Object.fromEntries(Object.entries(env).filter(([name]) => !keys.has(name.toUpperCase())));
-}
-
-/**
- * The environment agent processes get (AD-16): an allowlist of what a CLI
- * needs to run as the user (`PATH`, home, user, locale, terminal, temp,
- * shell), and nothing else of this server's environment. Agent keys are
- * added only by core's precedence rule (story 9.2). Never logged.
- */
-export function agentEnvironment(
-  source: Readonly<Record<string, string | undefined>> = process.env,
-  platform: NodeJS.Platform = process.platform,
-): Record<string, string> {
-  const allowed = new Set([...AGENT_ENV_ALLOWED, ...(platform === 'win32' ? AGENT_ENV_ALLOWED_WINDOWS : [])]);
-  // Windows variable names are case-insensitive (`Path`, `SYSTEMROOT`).
-  const fold = (name: string) => (platform === 'win32' ? name.toUpperCase() : name);
-  const allowedFolded = new Set([...allowed].map(fold));
-  const env: Record<string, string> = {};
-  for (const [name, value] of Object.entries(source)) {
-    if (value === undefined) continue;
-    if (allowedFolded.has(fold(name)) || name === 'LC_ALL' || name.startsWith('LC_')) env[name] = value;
-  }
-  return env;
-}
-
-export interface StartOptions {
-  /** Port to try first. `0` asks the OS for any free port. Default {@link DEFAULT_PORT}. */
-  port?: number;
-  /** Open the default browser at the single-use launch URL (`launchUrl`); implies `launch`. Default `false`. */
-  open?: boolean;
-  /**
-   * Issue a single-use launch link as the server starts (`launchUrl`), for
-   * `--foreground`, which prints it, and tests. Default `false`: the
-   * background server issues codes only on request (the launcher's
-   * `/launcher/hello?launch=1`, New tab), so none goes unused.
-   */
-  launch?: boolean;
-  /** Override the built UI directory. */
-  webRoot?: string;
-  /**
-   * The data folder for the database and logs, created readable only by the
-   * user if missing. Default: the per-user data directory, or
-   * `$OGDEN_AGENTS_DATA_DIR` (see `ensureDataDir`).
-   */
-  dataDir?: string;
-  /** Use this already-open core instead of opening one in `dataDir` (tests). The caller closes it. */
-  core?: Core;
-  /** Override the logger (tests). Default: stderr plus a rotating file in `<dataDir>/logs`. */
-  log?: Logger;
-  /** Override the clock for launch code and tab token expiry (tests). Default `Date.now`. */
-  now?: Clock;
-  /**
-   * Override how `uv` is found and installed (tests). Default: the
-   * `toolchain-uv` adapter on `dataDir`, which downloads only when the user
-   * clicks Install.
-   */
-  toolchain?: ToolchainPort;
-  /** Override the chat agent (tests). Default: the `acp-claude-code` adapter. */
-  agent?: AgentPort;
-  /**
-   * The Claude Agent ACP adapter's entry script (or, in tests, any script
-   * that speaks ACP over stdio, such as the fake agent). Default:
-   * `$OGDEN_AGENTS_CLAUDE_ACP_PATH`, else the adapter in `node_modules` if
-   * this is a dev install, else the one Install put in the data folder,
-   * looked for at each chat start and status (story 9.3).
-   */
-  claudeAdapterPath?: string | undefined;
-  /**
-   * Installing Claude Code (story 9.3): the pins, npm and its runner (tests: a
-   * local fixture lock, the test's npm, a slowed runner), and `devAdapter:
-   * false` to ignore a dev install's `node_modules` adapter, so only the data
-   * folder's counts. Default: the pinned adapter, npm beside this Node.
-   */
-  claudeInstall?: NonNullable<ClaudeCodeSetupOptions['install']> & { devAdapter?: boolean };
-  /**
-   * The user's own `claude` for Claude Code (tests: `null`, none). Default:
-   * one found on `PATH` or at Claude Code's install locations.
-   */
-  claudeExecutable?: string | null;
-  /**
-   * How long a `working` agent may be silent before core checks in (story
-   * 2.10). Default: `$OGDEN_AGENTS_TEST_CHECK_IN_MS` if set (tests and
-   * `pnpm dev:chat` only), else 10 minutes.
-   */
-  checkInDelayMs?: number;
-  /** Variables added to every agent's environment on top of {@link agentEnvironment} (tests: the fake agent's switches). */
-  extraAgentEnv?: Readonly<Record<string, string>>;
-  /**
-   * Installing and signing into each agent. Default: the `setup-claude-code`
-   * adapter, which finds the Claude Agent ACP adapter (see
-   * {@link claudeAdapterPath}) or installs it into the data folder.
-   */
-  agentSetup?: readonly AgentSetupPort[];
-  /** Loads `node-pty` for the hidden sign-in terminal (tests: one that fails, AD-19). Default: `terminal-pty`'s lazy loader. */
-  loadPty?: PtyLoader;
-  /**
-   * A `BROWSER` value that stops the Claude CLI opening its own sign-in tab,
-   * so the page opens it. Unset by default until the live check proves one
-   * works (story 9.1): the CLI opens its tab and the page shows a link.
-   */
-  claudeCliBrowser?: string;
-  /**
-   * Where API keys are kept (AD-16). Default: the OS keychain
-   * (`secrets-keyring`), or memory when `$OGDEN_AGENTS_TEST_SECRET_STORE` is
-   * `memory`. Tests pass `secrets-memory`: none touches the real keychain.
-   */
-  secrets?: SecretStorePort;
-  /** Replaces Claude Code's API key check (tests: a stub, so none reaches Anthropic). Default: the real `GET /v1/models`. */
-  verifyApiKey?: AgentApiKeySupport['verify'];
-  /** How old the subscription state may be when a chat starts before it is read again. Default {@link SUBSCRIPTION_MAX_AGE_MS}. */
-  subscriptionMaxAgeMs?: number;
-  /**
-   * This install's launcher, `bin/ogden.js`, for the app shortcut to run
-   * (E2-R10). With it, the default {@link appShortcut} is the `shortcut-os`
-   * adapter, and a shortcut already there is re-pointed at this Node and
-   * launcher once the server is up (never created). Without it (tests), the
-   * in-memory `shortcut-memory` stub.
-   */
-  launcherEntry?: string;
-  /** Override the app shortcut (tests). Default: see {@link launcherEntry}. */
-  appShortcut?: AppShortcutPort;
-  /**
-   * Called once the server has stopped by itself (Quit, or a restart the
-   * launcher asked for) and everything is closed. A server process exits here.
-   */
-  onStop?: (reason: StopReason) => void;
-}
-
-/**
- * Why the server stopped: `quit` from the UI, `restart` for a newer version
- * (the launcher starts it), or `close` from its owner.
- */
-export type StopReason = 'quit' | 'restart' | 'close';
-
 /** Session states that keep the server from restarting (AD-4, AD-20). */
 const BUSY_STATES = new Set(['working', 'waiting']);
 
@@ -293,45 +100,6 @@ export function countBusySessions(core: Core): number {
     for (const session of core.entities.listSessions(workspace.id)) if (BUSY_STATES.has(session.state)) busy++;
   }
   return busy;
-}
-
-/** The contents of the port file `<dataDir>/server.json` (AD-15). */
-export interface PortFile {
-  port: number;
-  pid: number;
-  version: string;
-  /** ISO 8601 UTC. */
-  startedAt: string;
-}
-
-export interface RunningServer {
-  /** The base URL. A tab opened on it without a token shows how to get in. */
-  url: string;
-  /**
-   * `<url>/#c=…`: a single-use link, valid for 60 seconds, that opens one
-   * connected tab (AD-15: the page exchanges the code for its token over
-   * POST), issued at start only with `launch` or `open`. It is a secret:
-   * print it for the user, never log it.
-   */
-  launchUrl: string | undefined;
-  port: number;
-  version: string;
-  /** The data folder in use. */
-  dataDir: string;
-  /** Core as wired into this server: the event log and entity model. */
-  core: Core;
-  /** The live tab tokens (in memory only; gone when the server stops). */
-  tabs: TabTokens;
-  /** A fresh single-use launch link, as `launchUrl`. A secret: never log it. */
-  issueLaunchUrl(): string;
-  /** Resolves once the server has stopped, however it stopped, with the reason. */
-  stopped: Promise<StopReason>;
-  /**
-   * Stops the server: closes the port and the sockets, removes `server.json`
-   * and `launcher.token`, and closes core if the server opened it. Safe to call
-   * more than once.
-   */
-  close(): Promise<void>;
 }
 
 /**

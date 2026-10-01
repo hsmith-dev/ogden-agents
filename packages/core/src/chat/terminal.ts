@@ -21,6 +21,7 @@ import { AgentError, type AgentTerminalResume, type AgentTranscriptTurn } from '
 import { InvalidOperationError, SessionNotIdleError, TerminalHandoffError, TerminalImportError, TerminalUnavailableError } from '../errors.js';
 import { omittedNote, START_MARK, turnsToImport } from '../terminal-import.js';
 import type { TerminalProcess } from '../terminal-port.js';
+import { checkTerminalReady, checkTerminalSupport } from '../terminal-checks.js';
 import { terminalUnavailableReason } from '../terminal-reasons.js';
 import type { Agents } from './agents.js';
 import {
@@ -37,6 +38,57 @@ import {
 } from './constants.js';
 import type { ChatContext } from './context.js';
 import type { Chat, Terminal, TerminalSize, TerminalViewerEntry, Timer } from './types.js';
+
+const ESC = '\x1b';
+const BEL = '\x07';
+
+/**
+ * Where the escape sequence starting at `text[esc]` (an `ESC`) ends, one past
+ * its last character, or `-1` when `text` ends before it does. A CSI
+ * (`ESC [` … a final byte `@`–`~`); an OSC (`ESC ]`), or a DCS, SOS, PM or
+ * APC string, up to BEL or ST (`ESC \\`); otherwise `ESC`, any intermediate
+ * bytes (space–`/`), then one final character (`ESC 7`, `ESC ( B`).
+ */
+function escapeEnd(text: string, esc: number): number {
+  const kind = text[esc + 1];
+  if (kind === undefined) return -1;
+  if (kind === '[') {
+    for (let i = esc + 2; i < text.length; i++) {
+      const code = text.charCodeAt(i);
+      if (code >= 0x40 && code <= 0x7e) return i + 1;
+    }
+    return -1;
+  }
+  if (kind === ']' || kind === 'P' || kind === 'X' || kind === '^' || kind === '_') {
+    for (let i = esc + 2; i < text.length; i++) {
+      if (text[i] === BEL) return i + 1;
+      if (text[i] === ESC) return text[i + 1] === '\\' ? i + 2 : text[i + 1] === undefined ? -1 : i;
+    }
+    return -1;
+  }
+  let i = esc + 1;
+  while (i < text.length && text.charCodeAt(i) >= 0x20 && text.charCodeAt(i) <= 0x2f) i++;
+  return i < text.length ? i + 1 : -1;
+}
+
+/**
+ * Keeps the newest `max` characters of output, starting at a line where it
+ * can (story 3.5), and never inside an escape sequence (story 3.9; 3.5 review
+ * F5): a cut that falls inside one moves past its end, then on to the next
+ * line break. A sequence still unterminated at the end is cut at a line
+ * break, as before.
+ */
+export function trimBacklog(text: string, max: number = TERMINAL_BACKLOG_CHARS): string {
+  if (text.length <= max) return text;
+  let start = text.length - max;
+  const esc = text.lastIndexOf(ESC, start - 1);
+  if (esc !== -1) {
+    const end = escapeEnd(text, esc);
+    if (end > start) start = end;
+  }
+  const line = text.indexOf('\n', start);
+  return line === -1 ? text.slice(start) : text.slice(line + 1);
+}
 
 export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgent' | 'storedAgentSessionId'>) {
   const { options, entities, sessionEvents, agent, agentEnv, busy, running, terminals, switching, internalError, later, newMessageId, getWorkspace, getSession } = ctx;
@@ -116,14 +168,6 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     return done;
   };
 
-  /** Keeps the newest {@link TERMINAL_BACKLOG_CHARS} of output, starting at a line where it can. */
-  const trimBacklog = (text: string): string => {
-    if (text.length <= TERMINAL_BACKLOG_CHARS) return text;
-    const cut = text.slice(-TERMINAL_BACKLOG_CHARS);
-    const line = cut.indexOf('\n');
-    return line === -1 ? cut : cut.slice(line + 1);
-  };
-
   /** Tells the terminal's viewers it has ended, once. */
   const endTerminal = (sessionId: SessionId, terminal: Terminal, exitCode: number | null) => {
     if (terminal.ended) return;
@@ -187,20 +231,13 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
   };
 
   const toTerminal = async (session: Session): Promise<Session> => {
-    const terminal = options.terminal;
-    const resume = agent.terminalResume;
-    if (resume === undefined) {
-      throw new TerminalUnavailableError('agent_unsupported', terminalUnavailableReason.agentUnsupported(agent.displayName));
-    }
-    if (terminal === undefined) throw new TerminalUnavailableError('pty_unavailable', terminalUnavailableReason.noTerminalPort());
+    // The checks are shared with the server's availability check (story 3.9), the idle check between their stages.
+    const support = checkTerminalSupport(agent, options.terminal);
+    if ('available' in support) throw new TerminalUnavailableError(support.code, support.reason);
+    const { resume, terminal } = support;
     if (busy.has(session.id) || session.state !== 'idle') {
       throw new SessionNotIdleError(`${agent.displayName} is busy. Switch to the terminal when it is idle.`);
     }
-    const agentSessionId = storedAgentSessionId(session.id);
-    if (agentSessionId === undefined) {
-      throw new TerminalUnavailableError('no_agent_session', terminalUnavailableReason.noAgentSession(agent.displayName));
-    }
-    const workspace = getWorkspace(session.workspaceId);
     /** Opening took too long: a code in the log, plain words to the user. */
     const tooSlow = () => {
       internalError(session.id, new TerminalHandoffError('terminal_open_timeout'));
@@ -209,15 +246,18 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     // The checks before the agent is released share one deadline (review F1): none can hold the lock.
     const env = { ...agentEnv() };
     const deadline = startDeadline(TERMINAL_STEP_TIMEOUT_MS);
+    const step = async <T>(promise: Promise<T>): Promise<T> => {
+      const result = await deadline.step(promise);
+      if (result === TIMED_OUT) throw tooSlow();
+      return result;
+    };
+    let agentSessionId: string;
     let command: Awaited<ReturnType<AgentTerminalResume['command']>>;
     try {
-      const availability = await deadline.step(terminal.available());
-      if (availability === TIMED_OUT) throw tooSlow();
-      // `node-pty`'s own reason can name a path: only plain words reach the user (3.7's filter, shared).
-      if (!availability.ok) throw new TerminalUnavailableError('pty_unavailable', terminalUnavailableReason.ptyUnavailable(availability.reason));
-      const located = await deadline.step(resume.locate(env));
-      if (located === TIMED_OUT) throw tooSlow();
-      if (!located.found) throw new TerminalUnavailableError('cli_not_found', terminalUnavailableReason.cliNotFound(agent.displayName, located.reason));
+      const sessionId = storedAgentSessionId(session.id);
+      const unavailable = await checkTerminalReady({ agent, support, agentSessionId: sessionId, env: () => env, step });
+      if (unavailable !== undefined) throw new TerminalUnavailableError(unavailable.code, unavailable.reason);
+      agentSessionId = sessionId!;
       let built: typeof command | typeof TIMED_OUT;
       try {
         built = await deadline.step(resume.command(agentSessionId, env));
@@ -229,10 +269,16 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     } finally {
       deadline.clear();
     }
+    const workspace = getWorkspace(session.workspaceId);
     if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
     // Bounded (E3-R5): an agent that won't stop leaves the chat driving, idle; its next message waits for it.
-    if (!(await within(releaseAgent(session.id), TERMINAL_RELEASE_TIMEOUT_MS))) {
+    const releaseStarted = Date.now();
+    const released = releaseAgent(session.id);
+    if (!(await within(released, TERMINAL_RELEASE_TIMEOUT_MS))) {
       internalError(session.id, new TerminalHandoffError('terminal_release_timeout'));
+      // It goes on stopping, unwatched: one log line when it has (story 3.9; 3.4 review F5).
+      const late = () => internalError(session.id, new TerminalHandoffError('terminal_release_late', Date.now() - releaseStarted));
+      released.then(late, late);
       throw new SessionNotIdleError(`${agent.displayName} is still stopping. Try again.`);
     }
     // The agent has stopped: its record is complete, so what the terminal adds comes after the mark.
@@ -552,5 +598,5 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     },
   };
 
-  return { trimBacklog, endTerminal, stopTerminal, toTerminal, importTerminalTurns, toChat, closeTerminals, importAfterRestart, ...methods };
+  return { endTerminal, stopTerminal, toTerminal, importTerminalTurns, toChat, closeTerminals, importAfterRestart, ...methods };
 }

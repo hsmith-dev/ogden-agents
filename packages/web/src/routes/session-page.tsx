@@ -1,10 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
-import type { SessionDriver } from '@ogden-agents/shared';
-import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
+import { Link, useParams } from '@tanstack/react-router';
 import { ArrowClockwise, ArrowDown, ChatCircle, House, Stop } from '@phosphor-icons/react';
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAppearance } from '@/appearance/appearance-provider';
-import { AGENT_NAME, cancelSession, ChatApiError, fetchSession, sendMessage, switchDriver } from '@/chat/chat-api';
+import { AGENT_NAME, cancelSession, ChatApiError, fetchSession, sendMessage } from '@/chat/chat-api';
 import { Composer } from '@/chat/composer';
 import { ReadOnlyConversation } from '@/chat/read-only';
 import { SignInAgain } from '@/chat/sign-in-again';
@@ -13,13 +12,11 @@ import { sessionView, type TranscriptCheckIn, type TranscriptItem, type Transcri
 import { useCaughtUp, useEarlierHistory, useSessionEvents } from '@/events/event-stream';
 import { PermissionCard, permissionAnnouncement } from '@/permissions/permission-card';
 import { WorkspaceHeader } from '@/shell/workspace-header';
-import { DriverToggle, NOT_IDLE_REASON } from '@/terminal/driver-toggle';
+import { DriverToggle } from '@/terminal/driver-toggle';
 import { ReadOnlyBanner } from '@/terminal/read-only-banner';
 import { TerminalPanel } from '@/terminal/terminal-panel';
 import { conversationProps, TerminalPane } from '@/terminal/terminal-pane';
-import { useDriverSwitch } from '@/terminal/use-driver-switch';
-import { useDriverShortcut } from '@/terminal/use-driver-shortcut';
-import type { SessionSearch } from '@/router';
+import { focusComposer, useSessionDriver } from '@/terminal/use-session-driver';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
 import { Separator } from '@/ui/separator';
@@ -45,9 +42,6 @@ const itemKey = (item: TranscriptItem, index: number): string =>
       : item.type === 'resumed'
         ? `resumed-${item.at}-${index}`
         : item.permission.requestId;
-
-/** Puts the cursor back in the composer (after a permission decision; EXPERIENCE.md Accessibility Floor). */
-const focusComposer = () => document.querySelector<HTMLTextAreaElement>('[data-testid="composer"] textarea')?.focus();
 
 /** What the composer says while the terminal drives (DESIGN.md Composer). */
 const TERMINAL_DRIVING_REASON = 'The terminal is driving this session';
@@ -88,8 +82,6 @@ export function SessionPage() {
   );
   const view = useMemo(() => sessionView(events, sesId, rulesRemoved), [events, sesId, rulesRemoved]);
   const session = useQuery({ queryKey: ['session', wsId, sesId], queryFn: () => fetchSession(wsId, sesId), retry: false });
-  const search = useSearch({ strict: false }) as SessionSearch;
-  const navigate = useNavigate();
   const workspace = useQuery({ queryKey: ['workspace', wsId], queryFn: () => fetchWorkspace(wsId), retry: false });
   const end = useRef<HTMLDivElement>(null);
   const lastText = view.messages.at(-1)?.text.length ?? 0;
@@ -100,15 +92,6 @@ export function SessionPage() {
   const [cardOffscreen, setCardOffscreen] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [actionError, setActionError] = useState<string | undefined>(undefined);
-  /** The driver this tab asked for last, so switching back to chat puts the cursor in the composer. */
-  const requested = useRef<SessionDriver | undefined>(undefined);
-  const [peekOpen, setPeekOpen] = useState(false);
-  const peekId = useId();
-  /** Who drives the chat (story 3.1): the latest `session.driver_changed`, else the session as read. */
-  const driverChange = useMemo(() => events.findLast((event) => event.type === 'session.driver_changed'), [events]);
-  const driver = (driverChange?.type === 'session.driver_changed' ? driverChange.payload.driver : undefined) ?? session.data?.session.driver ?? 'ui';
-  const driverKnown = driverChange !== undefined || session.data !== undefined;
-  const terminal = session.data?.terminal;
   /** Messages this page saw queued: only those go back into the composer when they are not sent. */
   const seenQueued = useRef(new Set<string>());
   const restored = useRef(new Set<string>());
@@ -195,9 +178,21 @@ export function SessionPage() {
     setAnnouncement(`${AGENT_NAME} is waiting for you: ${permissionAnnouncement(waitingFor)}`);
   }, [waitingFor]);
 
+  const state = view.state ?? session.data?.session.state;
+  // Who drives, and switching (stories 3.1, 3.6; the wiring is the hook's, story 3.9).
+  const { driver, terminalDrives, terminalBlockedReason, switchingTo, switchTo, peekOpen, togglePeek, peekId } = useSessionDriver({
+    wsId,
+    sesId,
+    events,
+    session,
+    state,
+    queued: view.queued.length,
+    developerMode: appearance.developerMode,
+    setActionError,
+  });
+
   // Whether the waiting card is out of view, for the "waiting for you" bar. Not while the terminal
   // drives: the conversation is read-only then, and nothing in it takes focus (3.6 review F2).
-  const terminalDrives = driver === 'terminal';
   useEffect(() => {
     setCardOffscreen(false);
     if (terminalDrives || waitingFor === undefined || typeof IntersectionObserver === 'undefined') return;
@@ -214,81 +209,6 @@ export function SessionPage() {
     card?.scrollIntoView?.({ block: 'center' });
     card?.focus({ preventScroll: true });
   }, [waitingFor, terminalDrives]);
-
-  const state = view.state ?? session.data?.session.state;
-  /**
-   * Why the Terminal segment can't be used now: the terminal can't work here (verbatim), or the agent
-   * is not idle; `null` while the session is still loading (disabled, nothing to say; 3.6 review F5).
-   */
-  const terminalBlockedReason =
-    terminal?.available === false
-      ? terminal.reason
-      : state === undefined
-        ? null
-        : state !== 'idle' || view.queued.length > 0
-          ? NOT_IDLE_REASON
-          : undefined;
-
-  // The view flipped (or the session changed driver by itself): the switch is over, and availability may have changed.
-  const { refetch: refetchSession } = session;
-  const driverSeq = driverChange?.seq;
-  useEffect(() => setPeekOpen(false), [driver]);
-  useEffect(() => {
-    if (driverSeq !== undefined) void refetchSession();
-  }, [driverSeq, refetchSession]);
-  // Turning idle can make the terminal available (a first reply gives the chat an agent session).
-  const previousState = useRef(state);
-  useEffect(() => {
-    const was = previousState.current;
-    previousState.current = state;
-    if (state === 'idle' && was !== undefined && was !== 'idle') void refetchSession();
-  }, [state, refetchSession]);
-
-  // Back in the chat: the cursor goes to the composer when this tab asked, or when focus fell with the terminal.
-  const previousDriver = useRef(driver);
-  useEffect(() => {
-    const was = previousDriver.current;
-    previousDriver.current = driver;
-    if (was === 'terminal' && driver === 'ui') {
-      const active = document.activeElement;
-      if (requested.current === 'ui' || active === null || active === document.body) focusComposer();
-    }
-    if (was !== driver) requested.current = undefined;
-  }, [driver]);
-
-  // `?driver=terminal` mirrors who drives (replace, no history entry); opening that URL never switches.
-  useEffect(() => {
-    if (!driverKnown) return;
-    const wanted = driver === 'terminal' ? 'terminal' : undefined;
-    if (search.driver === wanted) return;
-    void navigate({ to: '/w/$wsId/s/$sesId', params: { wsId, sesId }, search: wanted === undefined ? {} : { driver: wanted }, replace: true });
-  }, [driverKnown, driver, search.driver, navigate, wsId, sesId]);
-
-  // The chat's own terminal and back (stories 3.1, 3.6): one request, then wait for `session.driver_changed`
-  // (or, after a while, check with the server; 3.6 review F1).
-  const { switchingTo, start: startSwitch } = useDriverSwitch({
-    driver,
-    send: (next) => switchDriver(wsId, sesId, next),
-    confirm: () => refetchSession().then((result) => result.data?.session.driver),
-    onError: (message, failure) => {
-      requested.current = undefined;
-      setActionError(message);
-      // 409: the server's view differs (busy, unavailable, already switched): read the session again.
-      if (failure instanceof ChatApiError && failure.status === 409) void refetchSession();
-    },
-  });
-  const switchTo = (next: SessionDriver) => {
-    if (switchingTo !== undefined || next === driver) return;
-    if (next === 'terminal' && terminalBlockedReason !== undefined) {
-      // Only the shortcut gets here (the toggle refuses first): say why, if there is anything to say.
-      if (terminalBlockedReason !== null) setActionError(terminalBlockedReason);
-      return;
-    }
-    requested.current = next;
-    setActionError(undefined);
-    startSwitch(next);
-  };
-  useDriverShortcut(appearance.developerMode && driverKnown, () => switchTo(driver === 'terminal' ? 'ui' : 'terminal'));
 
   if (session.error instanceof ChatApiError && session.error.status === 404) {
     return (
@@ -363,7 +283,7 @@ export function SessionPage() {
           onSwitchToChat={() => switchTo('ui')}
           switching={switchingTo !== undefined}
           peekOpen={peekOpen}
-          onTogglePeek={() => setPeekOpen((open) => !open)}
+          onTogglePeek={togglePeek}
           peekId={peekId}
         />
       ) : null}

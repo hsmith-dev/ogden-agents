@@ -11,35 +11,35 @@
  *
  * Tool calls become `session.tool_call` and `session.tool_call_updated`
  * events, each carrying the whole call as it stands. Permission requests go
- * to {@link Permissions}.
+ * to `Permissions`.
  *
  * The agent's own session id is stored as the adapter ref
- * {@link AGENT_SESSION_REF} (AD-9), never in an event. When a chat that has
+ * `AGENT_SESSION_REF` (AD-9), never in an event. When a chat that has
  * one gets a message and has no live agent (after a restart or a crash), core
  * reopens it (story 2.7, E2-R2): the adapter resumes or loads it, else starts
  * a new session that core primes with the chat's transcript
- * ({@link primedPrompt}). Every reopen appends `session.resumed`. Reopening is
+ * (`primedPrompt`). Every reopen appends `session.resumed`. Reopening is
  * lazy, so a server start spawns no agent.
  *
  * A reopen that had to start a new session saves the new id only once its
  * primed prompt succeeded (2.7 F4), so a restart before that primes again.
  *
  * Story 2.10: a message sent while the agent answers is queued (E2-R1;
- * `session.message_queued`, at most {@link MAX_QUEUED_MESSAGES}) and sent,
+ * `session.message_queued`, at most `MAX_QUEUED_MESSAGES`) and sent,
  * first in first out, once the turn ends; a Deny reason goes first, as the
  * user's message `I denied "<command or title>": <reason>`. The agent is never
  * sent anything mid-turn. A turn that ends in `error` (or a Stop, or a close)
  * leaves the rest of the queue unsent. Reply chunks are coalesced to at most
- * one delta per {@link DELTA_INTERVAL_MS} per reply. A quiet agent is never
- * timed out: after {@link DEFAULT_CHECK_IN_MS} with no agent event while
+ * one delta per `DELTA_INTERVAL_MS` per reply. A quiet agent is never
+ * timed out: after `DEFAULT_CHECK_IN_MS` with no agent event while
  * `working`, core appends `session.check_in` and keeps waiting. Stop
  * ({@link Chat.cancel}) asks the agent to cancel its prompt and drops it if it
- * has not ended within {@link STOP_GRACE_MS}.
+ * has not ended within `STOP_GRACE_MS`.
  *
  * Story 3.1 (CAP-5, AD-6): an `idle` chat that reached its agent can switch
  * to the agent's own CLI ({@link Chat.switchDriver}). Core releases the
  * session's agent process, waits for it to exit, and opens the CLI on the
- * same agent session in a terminal the server owns ({@link TerminalPort});
+ * same agent session in a terminal the server owns (`TerminalPort`);
  * only then is `driver` set, through the entities, which appends
  * `session.driver_changed`. Switching back kills the CLI and its tree; the
  * next message reopens the agent session as after a restart (2.7). A CLI that
@@ -47,10 +47,10 @@
  * is typed into it is kept in memory only (a short backlog for a viewer that
  * attaches): it is never evented, stored or logged (AD-16).
  *
- * Story 3.2 gives each refusal its own error ({@link SessionNotIdleError},
- * {@link TerminalUnavailableError}, {@link DriverIsTerminalError}) and each
+ * Story 3.2 gives each refusal its own error (`SessionNotIdleError`,
+ * `TerminalUnavailableError`, `DriverIsTerminalError`) and each
  * driver change its cause, and switching back first imports the turns typed
- * in the terminal ({@link turnsToImport}, story 3.3).
+ * in the terminal (`turnsToImport`, story 3.3).
  *
  * Story 3.4: no handoff leaves a session stuck. Every driver change holds
  * the session's `switching` lock with bounded waits, a CLI that exits by
@@ -58,7 +58,7 @@
  * the agent's note), `close` waits for the switches in flight and imports
  * the terminals' turns, and a start after a crash imports what it couldn't.
  *
- * The agent itself sits behind {@link AgentPort} (AD-1); this file names none.
+ * The agent itself sits behind `AgentPort` (AD-1); this file names none.
  */
 import { AgentError } from './agent-port.js';
 import { createAgents } from './chat/agents.js';
@@ -115,7 +115,8 @@ export function createChat(options: ChatOptions): Chat {
           try {
             const state = entities.getSession(sessionId)?.state;
             if (state === 'working' || state === 'waiting') {
-              for (const entry of [live.get(sessionId)]) if (entry !== undefined) finishReply(sessionId, entry);
+              const entry = live.get(sessionId);
+              if (entry !== undefined) finishReply(sessionId, entry);
               entities.setSessionState(sessionId, 'idle', { reason: RESTARTED_REASON, resumable: true });
             }
           } catch (error) {

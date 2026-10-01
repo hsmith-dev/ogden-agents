@@ -41,6 +41,7 @@ import {
   SessionTerminal,
   SetApiKeyRequest,
   SignInResponse,
+  TERMINAL_CLOSE,
   TerminalAttachFrame,
   TerminalClientFrame,
   TerminalServerFrame,
@@ -323,6 +324,11 @@ describe('the terminal contracts (story 3.2)', () => {
     expect(TerminalSizeFrame.safeParse({ type: 'size', cols: 120, rows: MAX_TERMINAL_ROWS + 1 }).success).toBe(false);
     // Bytes are binary frames only: there is no data frame.
     expect(TerminalServerFrame.safeParse({ type: 'data', data: 'x' }).success).toBe(false);
+  });
+
+  it('TERMINAL_CLOSE: the terminal socket\'s close codes, each distinct (story 3.9 adds tooManyViewers)', () => {
+    expect(TERMINAL_CLOSE).toEqual({ notTerminal: 4404, ended: 4000, slowViewer: 1013, tooManyViewers: 4429 });
+    expect(new Set(Object.values(TERMINAL_CLOSE)).size).toBe(Object.keys(TERMINAL_CLOSE).length);
   });
 
   it('session.driver_changed takes an optional cause; an event from before 3.2 still parses', () => {

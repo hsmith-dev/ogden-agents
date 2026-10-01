@@ -34,6 +34,69 @@ export function withTimeout(promise, ms, what) {
   ]).finally(() => clearTimeout(timer));
 }
 
+/**
+ * Hides one-time launch codes: they are secrets (AD-15), and CI logs are kept.
+ * @param {string} text
+ */
+export function redact(text) {
+  return text.replace(/#c=[A-Za-z0-9_-]+/g, '#c=<code>');
+}
+
+/**
+ * Prints the launcher's (and npx's) output as it arrives, line by line, redacted.
+ * @returns {(chunk: string) => void}
+ */
+export function echoLines() {
+  let partial = '';
+  /** @param {string} chunk */
+  return (chunk) => {
+    const lines = (partial + chunk).split(/\r?\n/);
+    partial = lines.pop() ?? '';
+    for (const line of lines) if (line.trim() !== '') console.log(`  | ${redact(line)}`);
+  };
+}
+
+/**
+ * @typedef {object} StartedInstall
+ * @property {Install} install the install in use now (a retry's, after one)
+ * @property {LauncherRun} launcher its launcher run
+ * @property {Promise<{ url: string, launchUrl: string }>} ready the printed URLs; rejects as the start failed
+ */
+
+/**
+ * Starts an install (`start`) and waits up to `timeoutMs` for its launcher to
+ * print its URLs. A start that stalls past that (a registry stall on a CI
+ * runner, most likely) is retried once in fresh folders, with a log line
+ * saying so; any other failure is not retried (retrospective A6: one copy
+ * for the smoke and the installed-package suite). `install` and `launcher`
+ * always name the current run, so the caller can clean it up and show its
+ * output whatever happens.
+ * @param {{ start: () => { install: Install, launcher: LauncherRun }, timeoutMs: number, what: string, label: string }} options
+ *   `what` names the wait in a timeout's message; `label` starts the retry's log line
+ * @returns {StartedInstall}
+ */
+export function startWithRetry({ start, timeoutMs, what, label }) {
+  const first = start();
+  /** @type {StartedInstall} */
+  const run = { install: first.install, launcher: first.launcher, ready: Promise.resolve({ url: '', launchUrl: '' }) };
+  run.ready = (async () => {
+    try {
+      return await withTimeout(run.launcher.urls(), timeoutMs, what);
+    } catch (error) {
+      if (!(error instanceof Error && error.message.startsWith('timed out'))) throw error;
+      console.log(`${label}: RETRY: npx install and start stalled (${error.message}); retrying once in fresh folders`);
+      await run.launcher.stop();
+      run.install.killBackgroundServer();
+      run.install.removeFolders();
+      ({ install: run.install, launcher: run.launcher } = start());
+      return await withTimeout(run.launcher.urls(), timeoutMs, `${what} (retry)`);
+    }
+  })();
+  // The caller awaits it; this keeps a failure before then from going unhandled.
+  run.ready.catch(() => undefined);
+  return run;
+}
+
 /** @param {number} pid */
 export function isAlive(pid) {
   try {

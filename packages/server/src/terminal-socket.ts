@@ -22,7 +22,7 @@
  *   costing {@link CONTROL_FRAME_COST_BYTES}: a viewer over it is closed
  *   (1008, `rate_limited`); the terminal and its other viewers go on.
  * - A session's terminal has at most {@link MAX_TERMINAL_VIEWERS} viewers; one
- *   more is closed ({@link TERMINAL_TOO_MANY_VIEWERS}).
+ *   more is closed ({@link TERMINAL_CLOSE}.tooManyViewers).
  * - An unknown session, or one the terminal does not drive, is closed at
  *   once ({@link TERMINAL_CLOSE}.notTerminal). A frame over its size limit
  *   closes the socket (1009); so does the server's `maxPayload` before a
@@ -77,10 +77,10 @@ export const CONTROL_FRAME_COST_BYTES = 1024;
 export const MAX_TERMINAL_VIEWERS = 8;
 /**
  * The close code for a viewer over {@link MAX_TERMINAL_VIEWERS} (3.5 review
- * F2). Not in `shared`'s `TERMINAL_CLOSE` (frozen for this story): the web
- * panel keeps the same number as `TOO_MANY_VIEWERS`.
+ * F2): `shared`'s `TERMINAL_CLOSE.tooManyViewers`, kept under this name for
+ * its callers (story 3.9).
  */
-export const TERMINAL_TOO_MANY_VIEWERS = 4429;
+export const TERMINAL_TOO_MANY_VIEWERS = TERMINAL_CLOSE.tooManyViewers;
 
 export interface TerminalSocketOptions {
   chat: Chat;
@@ -263,7 +263,7 @@ export function registerTerminalSocket(app: Hono, { chat, log, tabs, now = Date.
           }
           if ((viewerCounts.get(sessionId) ?? 0) >= MAX_TERMINAL_VIEWERS) {
             log.warn('too many terminal viewers; closing the newest', { sessionId, max: MAX_TERMINAL_VIEWERS });
-            close(ws, TERMINAL_TOO_MANY_VIEWERS, 'too_many_viewers');
+            close(ws, TERMINAL_CLOSE.tooManyViewers, 'too_many_viewers');
             return;
           }
           countViewer(sessionId, 1);

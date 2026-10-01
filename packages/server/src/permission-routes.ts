@@ -11,7 +11,7 @@ import { NotFoundError, PermissionNotPendingError, ValidationError, type Permiss
 import { API_ROUTES, PermissionDecisionRequest, PermissionRequestId, PermissionRuleId, PermissionRulesResponse } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { ids, readBody } from './chat-routes.js';
+import { ids, readBody } from './request-input.js';
 import { apiError, notImplemented } from './errors.js';
 import type { Logger } from './log.js';
 

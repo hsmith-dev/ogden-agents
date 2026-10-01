@@ -22,7 +22,7 @@ export interface ChatOptions {
   agent: AgentPort;
   /**
    * Answers the agents' permission requests. Default: the declining stub
-   * ({@link createDecliningPermissions}), which denies every request.
+   * (`createDecliningPermissions`), which denies every request.
    */
   permissions?: Permissions;
   /**
@@ -34,9 +34,9 @@ export interface ChatOptions {
   onAgentError?: (sessionId: SessionId, error: AgentError) => void;
   /** Called when applying an agent's event failed (such as a session deleted mid-reply), for the log. */
   onInternalError?: (sessionId: SessionId, error: unknown) => void;
-  /** How long a `working` agent may be silent before core checks in, clamped by {@link clampCheckInDelay}. Default {@link DEFAULT_CHECK_IN_MS}. */
+  /** How long a `working` agent may be silent before core checks in, clamped by `clampCheckInDelay`. Default `DEFAULT_CHECK_IN_MS`. */
   checkInDelayMs?: number;
-  /** How long Stop waits for the turn to end before dropping the agent. Default {@link STOP_GRACE_MS}. */
+  /** How long Stop waits for the turn to end before dropping the agent. Default `STOP_GRACE_MS`. */
   stopGraceMs?: number;
   /** Opens the agent's own CLI in a terminal (story 3.1). Without it, switching to the terminal is refused. */
   terminal?: TerminalPort;
@@ -53,14 +53,14 @@ export interface TerminalSize {
  * the user's content: never log, event or store it.
  *
  * Story 3.5: several viewers may hold the same terminal; each sees all its
- * output and may type. Each viewer has its own size (from {@link resize});
+ * output and may type. Each viewer has its own size (from {@link TerminalViewer.resize});
  * the terminal takes the size of whichever viewer last resized or typed
- * (epic decision), and the other viewers hear of it through {@link onSize}.
+ * (epic decision), and the other viewers hear of it through {@link TerminalViewer.onSize}.
  */
 export interface TerminalViewer {
   /**
-   * The most recent output now, at most {@link TERMINAL_BACKLOG_CHARS}. Read
-   * it in the same tick as subscribing with {@link onData}, so no output is
+   * The most recent output now, at most `TERMINAL_BACKLOG_CHARS`. Read
+   * it in the same tick as subscribing with {@link TerminalViewer.onData}, so no output is
    * missed or repeated between them.
    */
   readonly backlog: string;
@@ -92,38 +92,38 @@ export interface Chat {
   /**
    * The workspace for the repo at `path`, created if new (AD-2). `path` must
    * be absolute (a leading `~` is the user's home). Throws
-   * {@link InvalidOperationError} if it isn't, if it is not an existing
+   * `InvalidOperationError` if it isn't, if it is not an existing
    * folder, or if it is, holds or sits inside Ogden Agents' data folder.
    */
   openWorkspace(path: string): Workspace;
   /** Every workspace of this install, oldest first. */
   listWorkspaces(): Workspace[];
-  /** The workspace ({@link NotFoundError} if there is none). */
+  /** The workspace (`NotFoundError` if there is none). */
   getWorkspace(workspaceId: WorkspaceId): Workspace;
-  /** The workspace's sessions, oldest first ({@link NotFoundError} for an unknown workspace). */
+  /** The workspace's sessions, oldest first (`NotFoundError` for an unknown workspace). */
   listSessions(workspaceId: WorkspaceId): Session[];
   /**
    * Deletes the workspace's history: its events, sessions and runs; the
    * workspace and every other workspace stay. Throws
-   * {@link WorkspaceBusyError}, deleting nothing, while one of its sessions is
+   * `WorkspaceBusyError`, deleting nothing, while one of its sessions is
    * `working` or `waiting` or its agent is still answering, and
-   * {@link NotFoundError} for an unknown workspace. The deleted sessions'
+   * `NotFoundError` for an unknown workspace. The deleted sessions'
    * idle agents are then stopped.
    */
   deleteHistory(workspaceId: WorkspaceId): Omit<HistoryDeleted, 'event'>;
   /** A new chat session in the workspace, `idle`. */
   createChatSession(workspaceId: WorkspaceId): Session;
-  /** The session, which must belong to the workspace ({@link NotFoundError} otherwise). */
+  /** The session, which must belong to the workspace (`NotFoundError` otherwise). */
   getSession(workspaceId: WorkspaceId, sessionId: SessionId): Session;
   /**
    * Stores the user's message and hands it to the session's agent, starting
    * the agent first if needed. Returns once the message is stored; the reply
    * and the state follow through the event log. While the agent is still
    * answering, the message is queued (`queued: true`) and sent when the turn
-   * ends. Throws {@link QueueFullError} when {@link MAX_QUEUED_MESSAGES} are
-   * already queued, {@link SessionBusyError} while a failed turn is ending,
-   * {@link DriverIsTerminalError} while the terminal drives the session (AD-6),
-   * and {@link SessionNotIdleError} while it is switching drivers.
+   * ends. Throws `QueueFullError` when `MAX_QUEUED_MESSAGES` are
+   * already queued, `SessionBusyError` while a failed turn is ending,
+   * `DriverIsTerminalError` while the terminal drives the session (AD-6),
+   * and `SessionNotIdleError` while it is switching drivers.
    */
   sendMessage(workspaceId: WorkspaceId, sessionId: SessionId, text: string): { messageId: string; queued: boolean };
   /**
@@ -131,8 +131,8 @@ export interface Chat {
    * permission requests (the session leaves `waiting` for `idle`) and drops
    * the queued messages, which stay unsent. The session ends `idle`; an agent
    * that has not ended its turn within the grace period is dropped and the
-   * session is `idle`, resumable. Throws {@link SessionNotBusyError} when no
-   * turn is running and {@link NotFoundError} for an unknown session.
+   * session is `idle`, resumable. Throws `SessionNotBusyError` when no
+   * turn is running and `NotFoundError` for an unknown session.
    */
   cancel(workspaceId: WorkspaceId, sessionId: SessionId): void;
   /**
@@ -142,9 +142,9 @@ export interface Chat {
    * opens on the same agent session. To `ui`: the CLI and its tree are
    * killed, then the turns typed in it are imported. Each change appends
    * `session.driver_changed` with its cause; asking for the current driver
-   * changes nothing. Throws {@link SessionNotIdleError} or
-   * {@link TerminalUnavailableError} with a plain reason (nothing changed)
-   * and {@link NotFoundError} for an unknown session.
+   * changes nothing. Throws `SessionNotIdleError` or
+   * `TerminalUnavailableError` with a plain reason (nothing changed)
+   * and `NotFoundError` for an unknown session.
    */
   switchDriver(workspaceId: WorkspaceId, sessionId: SessionId, driver: SessionDriver): Promise<Session>;
   /** A hold on the session's running terminal, or `undefined` when the terminal does not drive it. */
@@ -154,7 +154,7 @@ export interface Chat {
   /**
    * Ends every agent session and stops their processes (AD-3: the server
    * owns them). Sessions still answering become `idle`, resumable, with
-   * {@link RESTARTED_REASON}, before their agents stop.
+   * `RESTARTED_REASON`, before their agents stop.
    */
   close(): Promise<void>;
 }
@@ -175,7 +175,7 @@ export interface Live {
   reply: { messageId: string; text: string } | undefined;
   /** Reply text received but not yet appended as a delta (coalesced). */
   pendingDelta: string;
-  /** Running while deltas are held back: at most one append per {@link DELTA_INTERVAL_MS}. */
+  /** Running while deltas are held back: at most one append per `DELTA_INTERVAL_MS`. */
   deltaTimer: Timer | undefined;
   /** The tool calls of the current turn, by id; cleared when the turn ends (2.3 F7). */
   toolCalls: Map<string, ToolCallState>;
@@ -183,7 +183,7 @@ export interface Live {
   off: (() => void) | undefined;
   /**
    * The agent started a new session in place of the chat's earlier one: the
-   * next prompt carries the transcript ({@link primedPrompt}) until one succeeds.
+   * next prompt carries the transcript (`primedPrompt`) until one succeeds.
    */
   prime: boolean;
   /** That new session's id, saved as the adapter ref only once a primed prompt succeeded (2.7 F4). */

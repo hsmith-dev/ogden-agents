@@ -36,12 +36,8 @@ const RETRY_CLOSES: ReadonlySet<number> = new Set([1001, 1006, TERMINAL_CLOSE.sl
 /** How long a connection must stay up before its tries start again from the first (3.5 review F1). */
 export const STABLE_CONNECTION_MS = 10_000;
 
-/**
- * The server's close for a viewer over its session's limit of 8 (3.5 review
- * F2): the server's `TERMINAL_TOO_MANY_VIEWERS`, kept in step by hand
- * (`shared`'s `TERMINAL_CLOSE` is frozen for that story).
- */
-export const TOO_MANY_VIEWERS = 4429;
+/** The server's close for a viewer over its session's limit of 8 (3.5 review F2): `shared`'s, under this name for its callers (story 3.9). */
+export const TOO_MANY_VIEWERS = TERMINAL_CLOSE.tooManyViewers;
 
 export interface TerminalPanelProps {
   sesId: string;

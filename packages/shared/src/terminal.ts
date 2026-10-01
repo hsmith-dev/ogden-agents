@@ -101,4 +101,10 @@ export const TERMINAL_CLOSE = {
    * (story 3.1 review F2). The terminal runs on.
    */
   slowViewer: 1013,
+  /**
+   * A viewer over the session's limit of viewers (8; 3.5 review F2): the
+   * panel says so and does not reconnect. The terminal and its other viewers
+   * go on (story 3.9 moved it here from the server and the panel).
+   */
+  tooManyViewers: 4429,
 } as const;

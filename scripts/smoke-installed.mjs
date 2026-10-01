@@ -35,7 +35,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isAlive, prepareInstall, withTimeout } from './installed-package.mjs';
+import { echoLines, isAlive, prepareInstall, redact, startWithRetry, withTimeout } from './installed-package.mjs';
 
 /** Installing from the registry into an empty cache can be slow on CI runners. */
 const START_TIMEOUT_MS = 240_000;
@@ -69,25 +69,6 @@ if (tarball !== undefined && !existsSync(tarball)) {
   process.exit(1);
 }
 
-/**
- * Hides one-time launch codes: they are secrets (AD-15), and CI logs are kept.
- * @param {string} text
- */
-function redact(text) {
-  return text.replace(/#c=[A-Za-z0-9_-]+/g, '#c=<code>');
-}
-
-/** Prints the launcher's (and npx's) output as it arrives, line by line. */
-function echoLines() {
-  let partial = '';
-  /** @param {string} chunk */
-  return (chunk) => {
-    const lines = (partial + chunk).split(/\r?\n/);
-    partial = lines.pop() ?? '';
-    for (const line of lines) if (line.trim() !== '') console.log(`  | ${redact(line)}`);
-  };
-}
-
 /** @returns {{ install: import('./installed-package.mjs').Install, launcher: import('./installed-package.mjs').LauncherRun }} */
 function startInstall() {
   let next;
@@ -101,7 +82,7 @@ function startInstall() {
   return { install: next, launcher: next.runLauncher(['--no-open', '--port', '0'], { echo: echoLines() }) };
 }
 
-let { install, launcher } = startInstall();
+const run = startWithRetry({ start: startInstall, timeoutMs: START_TIMEOUT_MS, what: 'ogden-agents to print its URLs', label: 'smoke' });
 
 /**
  * The app's files load without a token (the page shows "Open Ogden Agents"
@@ -161,7 +142,7 @@ function checkServerStarted(url, token) {
   // dependency). Node's global WebSocket can't send the Origin header the gate
   // requires; `ws` can.
   /** @type {typeof import('ws').WebSocket} */
-  const WebSocket = install.requireInstalled('ws');
+  const WebSocket = run.install.requireInstalled('ws');
   return new Promise((resolveEvent, reject) => {
     const ws = new WebSocket(`${url.replace(/^http/, 'ws')}/ws`, ['ogden.v1', `ogden.auth.${token}`], { headers: { origin: url } });
     ws.on('open', () => {
@@ -198,7 +179,7 @@ async function quit(url, token, pid) {
   if (response.status !== 202) throw new Error(`Quit returned ${response.status}`);
   while (isAlive(pid)) await new Promise((r) => setTimeout(r, 100));
   for (const file of ['server.json', 'launcher.token']) {
-    if (existsSync(join(install.dataDir, file))) throw new Error(`${file} is still there after Quit`);
+    if (existsSync(join(run.install.dataDir, file))) throw new Error(`${file} is still there after Quit`);
   }
 }
 
@@ -211,7 +192,7 @@ async function quit(url, token, pid) {
 function checkKeyringModule() {
   let keyring;
   try {
-    keyring = install.requireInstalled('@napi-rs/keyring');
+    keyring = run.install.requireInstalled('@napi-rs/keyring');
   } catch (error) {
     if (!omitOptional) throw new Error(`the keychain module did not load: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`);
     console.log('smoke: the keychain module has no binary without optional dependencies, and the app ran all the same');
@@ -223,24 +204,11 @@ function checkKeyringModule() {
 
 let failure;
 try {
-  let urls;
-  try {
-    urls = await withTimeout(launcher.urls(), START_TIMEOUT_MS, 'ogden-agents to print its URLs');
-  } catch (error) {
-    if (!(error instanceof Error && error.message.startsWith('timed out'))) throw error;
-    // A registry stall on a CI runner, most likely: retry once from scratch.
-    console.log(`smoke: RETRY: npx install and start stalled (${error.message}); retrying once in fresh folders`);
-    await launcher.stop();
-    install.killBackgroundServer();
-    install.removeFolders();
-    ({ install, launcher } = startInstall());
-    urls = await withTimeout(launcher.urls(), START_TIMEOUT_MS, 'ogden-agents to print its URLs (retry)');
-  }
-  const { url, launchUrl } = urls;
+  const { url, launchUrl } = await run.ready;
   console.log(`smoke: server is at ${url}`);
   // The launcher exits once the background server is up (AD-21: the terminal is free).
-  await withTimeout(launcher.exited, STEP_TIMEOUT_MS, 'the launcher to exit');
-  if (launcher.child.exitCode !== 0) throw new Error(`the launcher exited with code ${launcher.child.exitCode}`);
+  await withTimeout(run.launcher.exited, STEP_TIMEOUT_MS, 'the launcher to exit');
+  if (run.launcher.child.exitCode !== 0) throw new Error(`the launcher exited with code ${run.launcher.child.exitCode}`);
   console.log('smoke: the launcher exited 0 and the server kept running');
   await withTimeout(checkPageWithoutToken(url), STEP_TIMEOUT_MS, 'GET / without a token');
   console.log('smoke: GET / returned the page with its CSP, and the API refused a request without a token');
@@ -250,25 +218,25 @@ try {
   console.log("smoke: the API accepted the tab's token");
   const event = await withTimeout(checkServerStarted(url, token), STEP_TIMEOUT_MS, 'server.started over /ws');
   console.log(`smoke: received ${JSON.stringify(event)}`);
-  const record = install.readPortFile();
+  const record = run.install.readPortFile();
   if (record === undefined) throw new Error('server.json is missing while the server runs');
   await withTimeout(quit(url, token, record.pid), STEP_TIMEOUT_MS, 'the server to quit');
   console.log('smoke: Quit stopped the server and removed server.json and launcher.token');
-  install.checkNoAgentAdapter();
+  run.install.checkNoAgentAdapter();
   console.log('smoke: the package installs no agent adapter');
   checkKeyringModule();
 } catch (error) {
   failure = error;
 } finally {
-  await launcher.stop();
-  install.killBackgroundServer();
-  install.removeFolders();
+  await run.launcher.stop();
+  run.install.killBackgroundServer();
+  run.install.removeFolders();
 }
 
 if (failure !== undefined) {
   console.error(`smoke: FAILED: ${failure instanceof Error ? failure.message : String(failure)}`);
   console.error('--- captured output ---');
-  console.error(redact(launcher.output()) || '(none)');
+  console.error(redact(run.launcher.output()) || '(none)');
   process.exit(1);
 }
 console.log('smoke: OK');

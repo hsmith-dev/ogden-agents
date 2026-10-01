@@ -12,18 +12,16 @@ Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 
 - Unowned: on macOS a changed Node binary makes Keychain prompt, and the 5 s read timeout leaves the key unread until the next start; re-read on `list()` or explain on the card. From 9.2.
 - Unowned: with `--omit=optional` saving a key is refused as "no keychain"; say the keychain module isn't installed. From 9.2.
 - Epic 6 (every agent): the generic agent card names Anthropic; take the provider name from the agent's setup status. From 9.2.
-- Unowned (when next changed): split the other source files over 600 lines (`core/src/chat.ts` was split in 3.11). From 2.12, carried by 9.6.
-- Epic 3 (it edits `chat-routes.ts`): move `readBody` and the id helpers out of `packages/server/src/chat-routes.ts`. From 2.12, carried by 9.6.
+- Unowned (when next changed): split the other source files over 600 lines (`core/src/chat.ts` was split in 3.11; `server/src/start.ts` and `web/src/routes/session-page.tsx` in 3.9): `shared/src/events.ts`, `core/src/agent-setup.ts`, `core/src/permissions.ts`, `claude-code-agent.ts`, `setup-claude-code/install.ts`. From 2.12, carried by 9.6 and 3.9.
 - Unowned (a sweep): `GET /api/v1/onboarding` answers a thrown `get()` with Hono's default 500 instead of `apiError`. From 9.6.
 - Kept separate by decision (revisit if they converge): the two `removeLeftovers` and the two `InstallButton`s. From 9.6.
 - Release live checks (RELEASING step 5, retrospective A2): the real sign-in tab the Claude CLI opens itself is covered by no test. From 9.7.
 - Unowned: consider failing the release smoke if "test hooks in use" ever appears in a registry install's log. From 9.7 security review.
-- Epic 3 refactor sweep (3.9): one shared npm-stall retry for the installed-package scripts (retrospective A6). From the epic 2 retrospective.
 - Confirm only: node-pty's "AttachConsole failed" fix is resolved pending the PR's Windows CI logs. From 9.6.
 - Story 3.8 (Windows): a terminal resize never reached the console under ConPTY with node-pty 1.1.0 (80x24 for 10 s); the resize checks are skipped on win32. From 3.1 CI.
 - Story 3.8 (Windows; and a POSIX residual): after a CLI exits by itself, what it started is not stopped on Windows; on POSIX its group is killed as the exit is reported, after the reap, so a reused id is a small residual risk. From 3.4 (review F2).
-- Epic 3 sweep (3.9): the terminal backlog is cut at a character count, so a reattaching viewer's replay can start mid escape sequence (a stray attribute or a few garbled characters until the next repaint). From 3.5 review F5.
-- Epic 3 sweep (3.9): core's test fake terminal and `terminal-memory` can drift; an agent released after the 10 s bound stops late, unwatched. From 3.4 review F5.
+- Unowned (by decision, log only): after a switch refused past the 10 s release bound, the next message still waits on the late agent without a bound; 3.9 logs `terminal_release_late` when it stops. From 3.4 review F5.
+- Unowned: core's internal errors, the handoff codes included (`terminal_release_late`, `terminal_open_timeout`...), are logged as "applying an agent event failed" at error level; give them their own message. From the 3.9 sweep.
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
 
@@ -272,3 +270,36 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-terminal-socket-resize-reattach-and-several-viewers-plan.md`
   summary: For the 3.9 sweep (3.5 review F5): `trimBacklog` keeps the newest 64 KiB of output, starting at a line break where it can, but a cut can still fall inside an escape sequence (a colour, a cursor move, an OSC title), so a viewer that reattaches may show a stray attribute or a few garbled characters until the CLI repaints. Cut at a point outside any escape sequence (or reset attributes before the replay).
   evidence: `packages/core/src/chat/terminal.ts` `trimBacklog`; `packages/server/src/terminal-socket.ts` `attach`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-refactor-sweep-plan.md`
+  summary: Resolved: the terminal backlog never starts inside an escape sequence (3.5 review F5). A cut that falls inside a CSI, an OSC (or DCS, SOS, PM, APC string, up to BEL or ST) or a two-byte ESC sequence moves past its end, then on to the next line break; a sequence with no terminator in reach falls back to the line-break cut, as before.
+  evidence: `packages/core/src/chat/terminal.ts` `trimBacklog`, `escapeEnd`; `packages/core/test/terminal-backlog.test.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-refactor-sweep-plan.md`
+  summary: Resolved: core's switch refusal and the server's availability check run one check list (3.7 entry and 3.4's "order written in both places"): `checkTerminalSupport` (agent unsupported, no terminal port), then `checkTerminalReady` (no agent session, `node-pty`, the CLI). `toTerminal` checks idle between the stages and bounds each step by its deadline; the server awaits each as it is. Order and wording unchanged.
+  evidence: `packages/core/src/terminal-checks.ts`; `packages/core/src/chat/terminal.ts` `toTerminal`; `packages/server/src/terminal-availability.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-refactor-sweep-plan.md`
+  summary: Resolved (part 2 by decision, log only): an agent that stops after the 10 s release bound (3.4 review F5) is logged once when it does, `terminal_release_late (<ms> ms)`; the switch is still refused as before. The next message's unbounded wait on it stays open (index).
+  evidence: `packages/core/src/chat/terminal.ts` `toTerminal`; `packages/core/src/errors.ts` `TerminalHandoffError.elapsedMs`; `packages/core/test/terminal-handoff.test.ts` "an agent that stops after the bound".
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-refactor-sweep-plan.md`
+  summary: Resolved: core's two test fake terminals (3.4 review F5, part 1) are one, `core/test/support/fake-terminal.ts`, with `terminal-memory`'s options (`available`, `echo`, `openError`, `exitOnKill`, `exitOnOpen`) plus `lateExitAtOnce` and `opening`. The handoff and viewer tests import it (imports and header comments only changed).
+  evidence: `packages/core/test/support/fake-terminal.ts`; `packages/core/test/terminal-handoff.test.ts`, `terminal-viewers.test.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-refactor-sweep-plan.md`
+  summary: Resolved: the too-many-viewers close code is `shared`'s `TERMINAL_CLOSE.tooManyViewers` (4429; 3.5 review F2's hand-kept pair). The server's `TERMINAL_TOO_MANY_VIEWERS` and the panel's `TOO_MANY_VIEWERS` stay as aliases.
+  evidence: `packages/shared/src/terminal.ts`; `packages/shared/test/contracts.test.ts` "TERMINAL_CLOSE"; `packages/server/src/terminal-socket.ts`; `packages/web/src/terminal/terminal-panel.tsx`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-refactor-sweep-plan.md`
+  summary: Resolved: one npm-stall retry for the installed-package scripts (retrospective A6). `redact`, `echoLines` and `startWithRetry` (retry once in fresh folders on a timeout, same log line) live in `scripts/installed-package.mjs`; the smoke and the installed-package suite's global setup use them.
+  evidence: `scripts/installed-package.mjs`; `scripts/smoke-installed.mjs`; `tests/e2e-installed/global-setup.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-refactor-sweep-plan.md`
+  summary: Resolved: `readBody` and `ids` moved out of `chat-routes.ts` (2.12, carried by 9.6) into `server/src/request-input.ts`; the chat, workspace, permission and agent-setup routes import them from there.
+  evidence: `packages/server/src/request-input.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-refactor-sweep-plan.md`
+  summary: Resolved: 3.11's leftovers: `{@link}`s to names `chat.ts` and `chat/types.ts` don't import are plain code spans (a viewer's members link through `TerminalViewer`); `close`'s loop over one value is a plain read; `known?.` after `known` is checked is `known.` (its `?? ''`-style fallbacks were dead); `sendMessage` uses the context's `getWorkspace`.
+  evidence: `packages/core/src/chat.ts`, `chat/types.ts`, `chat/turns.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-refactor-sweep-plan.md`
+  summary: Resolved: page-level DOM tests of `SessionPage`'s driver wiring (3.6 review F7): the switch on `session.driver_changed`, focus into xterm and back to the composer, the URL following the driver, the refetch on a 409, and the waiting bar off while the terminal drives. The wiring moved into `useSessionDriver`, so the page is under 600 lines.
+  evidence: `packages/web/src/terminal/use-session-driver.ts`; `packages/web/test/session-page.dom.test.tsx`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-refactor-sweep-plan.md`
+  summary: Resolved (part of the 2.12 split entry): `server/src/start.ts` (821 lines) is split: the environment helpers into `start-env.ts`, the start options and running-server types into `start-types.ts`, re-exported from `start.ts` under the same names. `session-page.tsx` (612) is under 600 (entry above). The other files over 600 stay open (index).
+  evidence: `packages/server/src/start-env.ts`, `start-types.ts`; `wc -l`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-refactor-sweep-plan.md`
+  summary: 3.9's read of the epic-3 diff (`c82cae7..HEAD`): one mechanical fix (the terminal socket closes with `TERMINAL_CLOSE.tooManyViewers` directly). Logged, not changed: core's internal errors, the handoff codes included, are logged by the server as "applying an agent event failed" (index). 3.8's files were not read for this.
+  evidence: `packages/server/src/terminal-socket.ts`; `packages/server/src/start.ts` `onInternalError`.

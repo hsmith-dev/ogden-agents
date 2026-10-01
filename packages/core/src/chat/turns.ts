@@ -8,7 +8,6 @@ import { AgentError, type AgentEvent, type AgentSession } from '../agent-port.js
 import {
   DriverIsTerminalError,
   InvalidOperationError,
-  NotFoundError,
   QueueFullError,
   SessionBusyError,
   SessionNotBusyError,
@@ -28,7 +27,7 @@ export function createTurns(
     Pick<CheckIn, 'clearQuiet' | 'clearTurnTimers' | 'armQuiet'> &
     Pick<Agents, 'drop' | 'agentFor' | 'promptFor'>,
 ) {
-  const { options, entities, sessionEvents, agent, stopGraceMs, live, busy, running, switching, internalError, toAgentError, later, newMessageId, getSession } = ctx;
+  const { options, entities, sessionEvents, agent, stopGraceMs, live, busy, running, switching, internalError, toAgentError, later, newMessageId, getWorkspace, getSession } = ctx;
   const { flushDelta, tickDelta, flushSession, finishReply, clearQuiet, clearTurnTimers, armQuiet, drop, agentFor, promptFor } = deps;
 
   /** Whether the session has a Deny reason or a queued message to send once this turn ends. */
@@ -134,14 +133,14 @@ export function createTurns(
           // A call this turn never reported (a late update after its turn ended): nothing to update.
           if (known === undefined) return;
           const call: ToolCallState = {
-            title: event.title ?? known?.title ?? '',
-            kind: toolKind(event.kind) ?? known?.kind ?? 'other',
-            status: toolStatus(event.status) ?? known?.status ?? 'pending',
-            diffs: capDiffs(event.diffs) ?? known?.diffs,
+            title: event.title ?? known.title,
+            kind: toolKind(event.kind) ?? known.kind,
+            status: toolStatus(event.status) ?? known.status,
+            diffs: capDiffs(event.diffs) ?? known.diffs,
           };
           entry.toolCalls.set(event.toolCallId, call);
           // Diffs can be large: an update repeats them only when they changed (review F1).
-          const diffsChanged = !sameDiffs(call.diffs, known?.diffs);
+          const diffsChanged = !sameDiffs(call.diffs, known.diffs);
           sessionEvents.appendSessionEvent(sessionId, {
             type: 'session.tool_call_updated',
             payload: toolCallPayload(sessionId, event.toolCallId, call, diffsChanged),
@@ -243,8 +242,7 @@ export function createTurns(
     sendMessage(workspaceId, sessionId, text) {
       if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
       const session = getSession(workspaceId, sessionId);
-      const workspace = entities.getWorkspace(workspaceId);
-      if (workspace === undefined) throw new NotFoundError('workspace', workspaceId);
+      const workspace = getWorkspace(workspaceId);
       // Between drivers first: a switch back (or a CLI's exit) still reads `terminal` until it is done (story 3.4).
       if (switching.has(sessionId)) throw new SessionNotIdleError('This chat is switching to or from the terminal. Try again in a moment.');
       if (session.driver === 'terminal') throw new DriverIsTerminalError();

@@ -4,7 +4,8 @@
  * resized or typed, and the others are told. A viewer that leaves only
  * detaches: the terminal runs on with no viewer. Core depends on no adapter,
  * so the in-memory terminal (it echoes what is typed and records resizes, as
- * `terminal-memory` does) is this file's own; fake timers for "still running".
+ * `terminal-memory` does) is core's own (`support/fake-terminal.ts`, story
+ * 3.9); fake timers for "still running".
  * The socket rows of the plan's matrix (attach order, the 5 s wait, bytes
  * before attach, the rate limit) are in the server's terminal-socket.test.ts.
  */
@@ -18,12 +19,11 @@ import {
   type AgentEvent,
   type AgentPort,
   type AgentSession,
-  type TerminalPort,
-  type TerminalProcess,
   type TerminalSize,
   type TerminalViewer,
 } from '../src/index.js';
 import { openTestCore, tempDir } from './helpers.js';
+import { fakeTerminal as memoryTerminal } from './support/fake-terminal.js';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -63,57 +63,6 @@ function resumingAgent(): AgentPort {
       locate: async () => ({ found: true }),
     },
   };
-}
-
-interface MemoryCli {
-  writes: string[];
-  resizes: TerminalSize[];
-  exitCode: () => number | null | undefined;
-  print: (text: string) => void;
-}
-
-/** A terminal that echoes what is typed and records every resize. */
-function memoryTerminal() {
-  const processes: MemoryCli[] = [];
-  const port: TerminalPort = {
-    available: async () => ({ ok: true }),
-    async open() {
-      const data = new Set<(data: string) => void>();
-      const exits: Array<(exit: { exitCode: number | null }) => void> = [];
-      const writes: string[] = [];
-      const resizes: TerminalSize[] = [];
-      let exitCode: number | null | undefined;
-      const emit = (text: string) => {
-        if (exitCode !== undefined) return;
-        for (const listener of [...data]) listener(text);
-      };
-      const cli: TerminalProcess = {
-        onData(listener) {
-          data.add(listener);
-          return () => void data.delete(listener);
-        },
-        onExit: (listener) => void exits.push(listener),
-        write(text) {
-          if (exitCode !== undefined) return;
-          writes.push(text);
-          emit(text);
-        },
-        resize(cols, rows) {
-          if (exitCode === undefined) resizes.push({ cols, rows });
-        },
-        kill() {
-          if (exitCode !== undefined) return;
-          setImmediate(() => {
-            exitCode = null;
-            for (const listener of exits.splice(0)) listener({ exitCode: null });
-          });
-        },
-      };
-      processes.push({ writes, resizes, exitCode: () => exitCode, print: emit });
-      return cli;
-    },
-  };
-  return { port, processes };
 }
 
 /** A chat that answered once and switched to its terminal. */

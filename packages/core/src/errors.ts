@@ -188,18 +188,30 @@ export class TerminalImportError extends CoreError {
 }
 
 /** Why a driver change (story 3.4) went past one of its limits: a code, logged on its own. */
-export type TerminalHandoffCode = 'terminal_release_timeout' | 'terminal_exit_timeout' | 'terminal_close_timeout' | 'terminal_open_timeout' | 'terminal_read_timeout';
+export type TerminalHandoffCode =
+  | 'terminal_release_timeout'
+  | 'terminal_release_late'
+  | 'terminal_exit_timeout'
+  | 'terminal_close_timeout'
+  | 'terminal_open_timeout'
+  | 'terminal_read_timeout';
 
 /**
  * A handoff that hit a bound and went on (story 3.4): the agent did not stop
  * in time, a killed CLI did not report its exit, a close stopped waiting for
- * a switch, opening the terminal or reading the CLI's record took too long. For the log only; its message is its code.
+ * a switch, opening the terminal or reading the CLI's record took too long;
+ * or an agent past its release bound has stopped at last
+ * (`terminal_release_late`, story 3.9). For the log only; its message is its
+ * code, then the elapsed milliseconds when given.
  */
 export class TerminalHandoffError extends CoreError {
   override readonly name = 'TerminalHandoffError';
   override readonly code: TerminalHandoffCode;
-  constructor(code: TerminalHandoffCode) {
-    super(code, code);
+  /** How long it took, in milliseconds, when that is the point (`terminal_release_late`). */
+  readonly elapsedMs: number | undefined;
+  constructor(code: TerminalHandoffCode, elapsedMs?: number) {
+    super(code, elapsedMs === undefined ? code : `${code} (${elapsedMs} ms)`);
     this.code = code;
+    this.elapsedMs = elapsedMs;
   }
 }

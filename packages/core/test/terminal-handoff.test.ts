@@ -5,8 +5,8 @@
  * driving with a live CLI, and no CLI left unkilled. A scripted agent and a
  * fake terminal with the failure modes (an `open` that rejects, a CLI that
  * ignores its kill, one that crashes on start); fake timers for the bounds.
- * Core depends on no adapter, so the fake terminal is this file's own
- * (`terminal-memory` has the same modes for the adapters' and server's tests).
+ * Core depends on no adapter, so the fake terminal is core's own
+ * (`support/fake-terminal.ts`, with `terminal-memory`'s modes; story 3.9).
  */
 import type { CoreEvent, SessionId } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -19,6 +19,7 @@ import {
   TERMINAL_IMPORT_PENDING_REF,
   TERMINAL_RELEASE_TIMEOUT_MS,
   TERMINAL_STEP_TIMEOUT_MS,
+  TerminalHandoffError,
   TerminalUnavailableError,
   type AgentEvent,
   type AgentPort,
@@ -26,11 +27,10 @@ import {
   type AgentTerminalResume,
   type AgentTranscriptTurn,
   type Core,
-  type TerminalAvailability,
   type TerminalPort,
-  type TerminalProcess,
 } from '../src/index.js';
 import { openTestCore, tempDir } from './helpers.js';
+import { fakeTerminal as handoffTerminal } from './support/fake-terminal.js';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -124,62 +124,6 @@ function handoffAgent(record = cliRecord(), resume: Partial<AgentTerminalResume>
     end: () => ends.shift()?.(),
     slowClose: (gate: () => Promise<void>) => (closing = gate),
   };
-}
-
-interface FakeCli {
-  kills: () => number;
-  exitCode: () => number | null | undefined;
-  /** The CLI exits by itself (`/exit`, a crash). */
-  exit: (code: number | null) => void;
-}
-
-/** A terminal port with story 3.4's failure modes. */
-function handoffTerminal({
-  available = { ok: true } as TerminalAvailability,
-  openError,
-  exitOnKill = true,
-  exitOnOpen,
-  lateExitAtOnce = false,
-  opening,
-}: { available?: TerminalAvailability; openError?: Error; exitOnKill?: boolean; exitOnOpen?: number; lateExitAtOnce?: boolean; opening?: () => Promise<void> } = {}) {
-  const processes: FakeCli[] = [];
-  const port: TerminalPort = {
-    available: async () => available,
-    async open() {
-      await opening?.();
-      if (openError !== undefined) throw openError;
-      const exits: Array<(exit: { exitCode: number | null }) => void> = [];
-      let exitCode: number | null | undefined;
-      let kills = 0;
-      const exit = (code: number | null) => {
-        if (exitCode !== undefined) return;
-        exitCode = code;
-        for (const listener of exits.splice(0)) listener({ exitCode: code });
-      };
-      const cli: TerminalProcess = {
-        onData: () => () => undefined,
-        onExit(listener) {
-          if (exitCode === undefined) exits.push(listener);
-          else {
-            const code = exitCode;
-            // A port may report an exit that already happened at once, or a moment later.
-            if (lateExitAtOnce) listener({ exitCode: code });
-            else setImmediate(() => listener({ exitCode: code }));
-          }
-        },
-        write: () => undefined,
-        resize: () => undefined,
-        kill() {
-          kills++;
-          if (exitOnKill) setImmediate(() => exit(null));
-        },
-      };
-      processes.push({ kills: () => kills, exitCode: () => exitCode, exit });
-      if (exitOnOpen !== undefined) exit(exitOnOpen);
-      return cli;
-    },
-  };
-  return { port, processes };
 }
 
 /** A chat that answered once, on `terminal`, logging internal errors. */
@@ -326,6 +270,32 @@ describe('the handoff never leaves a session stuck (story 3.4)', () => {
     agent.slowClose(async () => {});
     vi.useRealTimers();
     await expectChatDrives(setup);
+    await chat.close();
+  });
+
+  it('an agent that stops after the bound: the switch is still refused, then one log line says when it stopped (story 3.9; 3.4 review F5)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const setup = await answeredOnce();
+    const { core, chat, agent, terminal, workspace, session, internal } = setup;
+    let stopped!: () => void;
+    agent.slowClose(() => new Promise<void>((resolve) => (stopped = resolve)));
+    const switching = refusal(chat.switchDriver(workspace.id, session.id, 'terminal'));
+    await settle();
+    await vi.advanceTimersByTimeAsync(TERMINAL_RELEASE_TIMEOUT_MS);
+    expect(await switching).toBeInstanceOf(SessionNotIdleError);
+    expect(internal.map(String)).toEqual(['TerminalHandoffError: terminal_release_timeout']);
+    await vi.advanceTimersByTimeAsync(4_000);
+    stopped();
+    await settle();
+    expect(internal.map(String)).toEqual(['TerminalHandoffError: terminal_release_timeout', 'TerminalHandoffError: terminal_release_late (14000 ms)']);
+    expect((internal[1] as TerminalHandoffError).elapsedMs).toBe(14_000);
+    // Nothing else changed: no terminal, no driver change, and the chat goes on.
+    expect(terminal.processes).toEqual([]);
+    expect(driverChanges(core, session.id)).toEqual([]);
+    agent.slowClose(async () => {});
+    vi.useRealTimers();
+    await expectChatDrives(setup);
+    expect(internal).toHaveLength(2);
     await chat.close();
   });
 

@@ -28,12 +28,10 @@ import {
   CreateWorkspaceRequest,
   SendMessageRequest,
   SendMessageResponse,
-  SessionId,
   SessionResponse,
   SessionsResponse,
   SetDriverRequest,
   type SessionTerminal,
-  WorkspaceId,
   WorkspaceResponse,
   WorkspacesResponse,
 } from '@ogden-agents/shared';
@@ -41,6 +39,7 @@ import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { apiError } from './errors.js';
 import type { Logger } from './log.js';
+import { ids, readBody } from './request-input.js';
 import type { TerminalAvailabilityCheck } from './terminal-availability.js';
 
 /** Largest request body these routes read (a message is at most 100,000 characters). */
@@ -50,37 +49,6 @@ const NOT_FOUND = 'There is no such project or chat.';
 
 /** The terminal's reason when checking it failed (story 3.2): plain words, never the error itself. */
 export const TERMINAL_CHECK_FAILED = "Ogden Agents couldn't check whether the terminal can start here.";
-
-/** The part of a shared Zod schema these routes use. */
-interface Schema<T> {
-  safeParse(value: unknown): { success: true; data: T } | { success: false; error: { issues: ReadonlyArray<{ message: string }> } };
-}
-
-/** Parses the JSON body against `schema`, or answers 400 when it doesn't fit. */
-export async function readBody<T>(c: Context, schema: Schema<T>, { optional = false } = {}): Promise<{ ok: true; value: T } | { ok: false; response: Response }> {
-  let json: unknown;
-  try {
-    const text = await c.req.text();
-    json = text.trim() === '' && optional ? {} : JSON.parse(text);
-  } catch {
-    return { ok: false, response: apiError(c, 400, 'invalid_request', 'The request body must be JSON.') };
-  }
-  const parsed = schema.safeParse(json);
-  if (!parsed.success) {
-    return { ok: false, response: apiError(c, 400, 'invalid_request', parsed.error.issues[0]?.message ?? 'The request is not valid.') };
-  }
-  return { ok: true, value: parsed.data };
-}
-
-/** The route's `:wsId` and `:sesId`, if they are well-formed ids; otherwise nothing matches them. */
-export function ids(c: Context): { workspaceId: WorkspaceId; sessionId?: SessionId } | undefined {
-  const workspace = WorkspaceId.safeParse(c.req.param('wsId'));
-  if (!workspace.success) return undefined;
-  const raw = c.req.param('sesId');
-  if (raw === undefined) return { workspaceId: workspace.data };
-  const session = SessionId.safeParse(raw);
-  return session.success ? { workspaceId: workspace.data, sessionId: session.data } : undefined;
-}
 
 export interface ChatRouteOptions {
   /** Whether a session's terminal can work (story 3.2; 3.7 fills it in). Without it, `GET` session has no `terminal`. */

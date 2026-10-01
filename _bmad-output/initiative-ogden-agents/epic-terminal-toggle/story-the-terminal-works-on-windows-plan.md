@@ -87,6 +87,8 @@ context: []
 
 ## Plan Change Log
 
+- 2026-10-01 (after review, `eb5fe4f`): Windows CI run 36910450998 (Node 26) failed once with node-pty's "Invalid pty handle" from `connect` inside `pty.spawn`, in a test that opened a terminal right after the previous test's was killed. node-pty 1.1.0 keeps ConPTY handles in an unlocked `std::vector`: an exiting terminal's wait thread erases its entry while the main thread appends the new one, so the new handle can be lost. A user hits the same race opening a terminal as another closes, so `hiddenPtySpawner` now retries a spawn that fails with exactly that error, at most 3 times (`spawnWithRetry`). Tests: the retry bound and other errors with a fake module, and open-then-kill 12 times in a row on the real PTY.
+
 ## Review Triage Log
 
 Lenses: security (the `claude.cmd` -> `claude.exe` resolution), correctness (Windows tree stop, `onExit` residual, fake CLI raw mode, the AttachConsole guard), tests (fakes only, real Windows coverage). Net diff `origin/story/3.9-epic3-sweep...HEAD` (the probe commits net to nothing). Windows CI run 36903485293: `terminal-pty.test.ts` 15 tests, 1 skipped (the POSIX-only group test, by design); `terminal-socket.test.ts` 24 tests, none skipped; no "AttachConsole failed".

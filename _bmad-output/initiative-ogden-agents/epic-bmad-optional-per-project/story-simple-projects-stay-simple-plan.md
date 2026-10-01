@@ -93,6 +93,7 @@ context:
 - Verified: `pnpm typecheck` clean; `pnpm test` 1083 passed, 4 skipped; `pnpm e2e` 85 passed; `pnpm run pack && pnpm smoke` OK.
 
 - Review fixes: `simple-project.test.ts` cleans up through helpers' `removeAfterTest`. Its env check now requires every name to be one the agent environment allows (the allowlist, `AGENT_ENV_KEYS`, `CLAUDE_CODE_EXECUTABLE`, macOS's `__CF_USER_TEXT_ENCODING`, `LC_*`), and checks `/bmad/i` only on values that differ from the test process's own. `WorkspaceTabs` treats a query in error as unknown, because a failed refetch keeps stale data (`workspace-tabs.dom.test.tsx`; `WorkspaceTabs` takes optional `slots`). The coverage test now covers every server path (`/api`, `/ws`, `/launcher`) for BMad names, and an unguarded `/ws/workspaces/:wsId/runs` fails.
+- CI (Windows): libuv adds its required variables (HOMEDRIVE, HOMEPATH, LOGONSERVER, SYSTEMDRIVE, USERDOMAIN, WINDIR) to every spawned child on Windows; the env test lists them as OS-added, not Ogden's.
 
 ## Plan Change Log
 

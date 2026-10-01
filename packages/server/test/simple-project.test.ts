@@ -42,6 +42,8 @@ const ALLOWED_AGENT_ENV = new Set(
     ...AGENT_ENV_KEYS,
     'CLAUDE_CODE_EXECUTABLE',
     '__CF_USER_TEXT_ENCODING',
+    // libuv adds these on Windows to every child it spawns (its required variables), whatever env it is given.
+    'HOMEDRIVE', 'HOMEPATH', 'LOGONSERVER', 'SYSTEMDRIVE', 'USERDOMAIN', 'WINDIR',
   ].map((name) => name.toUpperCase()),
 );
 const allowedAgentEnvName = (name: string) => ALLOWED_AGENT_ENV.has(name.toUpperCase()) || name === 'LC_ALL' || name.startsWith('LC_');

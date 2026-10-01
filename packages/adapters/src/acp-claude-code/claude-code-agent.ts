@@ -56,6 +56,7 @@ import { killProcessTree } from '../process-tree.js';
 import { findClaudeExecutable } from './detect.js';
 import { claudeTerminalCommand, locateClaudeTerminal } from './terminal-command.js';
 import { createStreamMasker, maskSecrets, secretValues } from './mask.js';
+import { readClaudeTranscript } from './transcript.js';
 
 /** The product name the UI shows (EXPERIENCE.md Voice: the agent by its product name). */
 export const CLAUDE_CODE = 'Claude Code';
@@ -215,8 +216,9 @@ export function createClaudeCodeAgent(options: ClaudeCodeAgentOptions = {}): Age
       });
     },
 
-    // `claude --resume <id>` (CAP-5). `transcript` is story 3.3's to add.
+    // `claude --resume <id>` (CAP-5), and its record read back (story 3.3).
     terminalResume: {
+      transcript: readClaudeTranscript,
       command: async (agentSessionId, env) => claudeTerminalCommand(agentSessionId, env, { ...options, adapterPath: currentAdapterPath() }),
       locate: async (env) => locateClaudeTerminal(env, { ...options, adapterPath: currentAdapterPath() }),
     },

@@ -33,6 +33,8 @@ import {
   SessionNotBusyError,
   SessionNotIdleError,
   TERMINAL_BACKLOG_CHARS,
+  TERMINAL_IMPORT_REF,
+  TerminalImportError,
   TerminalUnavailableError,
   WorkspaceBusyError,
   type AgentEvent,
@@ -42,7 +44,6 @@ import {
   type AgentSession,
   type AgentTerminalResume,
   type AgentTranscriptTurn,
-  type CompletedMessage,
   type Core,
   type OpenTerminal,
   type Permissions,
@@ -52,18 +53,6 @@ import {
   type TerminalProcess,
 } from '../src/index.js';
 import { openTestCore, tempDir } from './helpers.js';
-
-/** Lets a test stand in for story 3.3's `turnsToImport` (the stub imports nothing); `undefined` keeps the real one. */
-const importTurns = vi.hoisted(() => ({
-  with: undefined as undefined | ((stored: readonly CompletedMessage[], turns: readonly AgentTranscriptTurn[]) => AgentTranscriptTurn[]),
-}));
-vi.mock('../src/terminal-import.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/terminal-import.js')>();
-  return {
-    ...actual,
-    turnsToImport: (stored: readonly CompletedMessage[], turns: readonly AgentTranscriptTurn[]) => (importTurns.with ?? actual.turnsToImport)(stored, turns),
-  };
-});
 
 /**
  * An agent whose every prompt runs `script`, which reports through `emit`.
@@ -1562,6 +1551,7 @@ describe('the terminal (story 3.1)', () => {
     );
     const port: AgentPort = resumes ? { ...agent.port, terminalResume: resume } : agent.port;
     const repo = tempDir('ogden-agents-repo-');
+    const internal: unknown[] = [];
     const chat = createChat({
       dataDir: tempDir('ogden-agents-data-'),
       entities: core.entities,
@@ -1569,12 +1559,13 @@ describe('the terminal (story 3.1)', () => {
       agent: port,
       agentEnv: () => ({ PATH: '/bin', CHAT_ONLY: 'yes' }),
       terminal: terminal.port,
+      onInternalError: (_sessionId, error) => internal.push(error),
     });
     const workspace = chat.openWorkspace(repo);
     const session = chat.createChatSession(workspace.id);
     chat.sendMessage(workspace.id, session.id, 'first question');
     await chat.settled();
-    return { core, agent, chat, workspace, session, terminal, repo };
+    return { core, agent, chat, workspace, session, terminal, repo, internal };
   };
 
   const driverChanges = (core: Core, sessionId: SessionId) =>
@@ -1811,88 +1802,161 @@ describe('the terminal (story 3.1)', () => {
     expect(driverChanges(core, session.id).at(-1)).toEqual(['terminal', 'ui', 'server_stopped']);
   });
 
-  it('switching back reads the CLI transcript after the CLI stopped, and imports what turnsToImport returns (nothing yet; 3.3)', async () => {
-    const calls: Array<{ input: unknown; killsSoFar: number }> = [];
-    let kills = () => 0;
-    const { core, chat, workspace, session, terminal, repo } = await answeredOnce(fakeTerminal(), {
+  /** The CLI's record as the test grows it: one exchange per `say`, sharing its user turn's id. */
+  const cliRecord = () => {
+    const turns: AgentTranscriptTurn[] = [];
+    let next = 0;
+    return {
+      turns,
+      say(text: string, reply?: string) {
+        const id = `u${++next}`;
+        turns.push({ id, role: 'user', text });
+        if (reply !== undefined) turns.push({ id, role: 'agent', text: reply });
+        return id;
+      },
+    };
+  };
+
+  const imported = (core: Core, sessionId: SessionId, from: number) =>
+    sessionEvents(core, sessionId)
+      .slice(from)
+      .map((e) => (e.type === 'session.message_completed' ? [e.payload.role, e.payload.content, e.payload.origin] : [e.type]));
+
+  it('marks the CLI record as the terminal opens, after the agent stopped; switching back imports what came after, once (3.3)', async () => {
+    const record = cliRecord();
+    record.say('first question', 're: first question');
+    const calls: Array<{ input: unknown; agentsClosed: number; kills: number }> = [];
+    let state = { agentsClosed: () => 0, kills: () => 0 };
+    const { core, agent, chat, workspace, session, terminal, repo, internal } = await answeredOnce(fakeTerminal(), {
       resume: cliResume({
         transcript: async (input) => {
-          calls.push({ input, killsSoFar: kills() });
-          return [
-            { role: 'user', text: 'typed in the terminal' },
-            { role: 'agent', text: 'answered in the terminal' },
-          ];
+          calls.push({ input, agentsClosed: state.agentsClosed(), kills: state.kills() });
+          return [...record.turns];
+        },
+      }),
+    });
+    state = { agentsClosed: agent.closed, kills: () => terminal.processes[0]?.kills() ?? 0 };
+    await chat.switchDriver(workspace.id, session.id, 'terminal');
+    expect(core.entities.getSession(session.id)!.adapterRefs[TERMINAL_IMPORT_REF]).toBe('u1');
+    const typed = record.say('typed in the terminal', 'answered in the terminal');
+    const before = sessionEvents(core, session.id).length;
+    await chat.switchDriver(workspace.id, session.id, 'ui');
+    const input = { agentSessionId: 'agent-1', cwd: realpathSync.native(repo), env: { PATH: '/bin', CHAT_ONLY: 'yes' } };
+    // Read at open once the agent had stopped, and on switching back once the CLI had.
+    expect(calls).toEqual([
+      { input, agentsClosed: 1, kills: 0 },
+      { input, agentsClosed: 1, kills: 1 },
+    ]);
+    expect(imported(core, session.id, before)).toEqual([
+      ['user', 'typed in the terminal', 'terminal'],
+      ['agent', 'answered in the terminal', undefined],
+      ['session.driver_changed'],
+    ]);
+    expect(core.entities.getSession(session.id)!.adapterRefs[TERMINAL_IMPORT_REF]).toBe(typed);
+
+    // Again, with nothing typed: nothing is imported twice.
+    await chat.switchDriver(workspace.id, session.id, 'terminal');
+    const again = sessionEvents(core, session.id).length;
+    await chat.switchDriver(workspace.id, session.id, 'ui');
+    expect(imported(core, session.id, again)).toEqual([['session.driver_changed']]);
+    // Switching back twice without reopening the terminal neither.
+    await chat.switchDriver(workspace.id, session.id, 'ui');
+    expect(sessionEvents(core, session.id).length).toBe(again + 1);
+    expect(internal).toEqual([]);
+    await chat.close();
+  });
+
+  it('a CLI that had recorded nothing at open has every turn imported; a reply cut off imports the user turn alone (3.3)', async () => {
+    const record = cliRecord();
+    const { core, chat, workspace, session } = await answeredOnce(fakeTerminal(), {
+      resume: cliResume({ transcript: async () => [...record.turns] }),
+    });
+    await chat.switchDriver(workspace.id, session.id, 'terminal');
+    expect(core.entities.getSession(session.id)!.adapterRefs[TERMINAL_IMPORT_REF]).toBe('start');
+    record.say('one', 'two');
+    record.say('killed mid-reply');
+    const before = sessionEvents(core, session.id).length;
+    await chat.switchDriver(workspace.id, session.id, 'ui');
+    expect(imported(core, session.id, before)).toEqual([
+      ['user', 'one', 'terminal'],
+      ['agent', 'two', undefined],
+      ['user', 'killed mid-reply', 'terminal'],
+      ['session.driver_changed'],
+    ]);
+    await chat.close();
+  });
+
+  it('a failed read at open saves no mark: switching back lines up on the chat’s last message, or imports nothing (3.3)', async () => {
+    const record = cliRecord();
+    record.say('first question', 're: first question');
+    let failing = true;
+    const { core, chat, workspace, session, internal } = await answeredOnce(fakeTerminal(), {
+      resume: cliResume({
+        transcript: async () => {
+          if (failing) throw new Error(`EACCES: /home/someone/.claude/projects/x/agent-1.jsonl ${MARKER}`);
+          return [...record.turns];
         },
       }),
     });
     await chat.switchDriver(workspace.id, session.id, 'terminal');
-    kills = terminal.processes[0]!.kills;
+    expect(core.entities.getSession(session.id)!.adapterRefs[TERMINAL_IMPORT_REF]).toBe('');
+    // Only a code is reported: never the path or anything read.
+    expect(internal).toEqual([new TerminalImportError('terminal_import_unreadable')]);
+    expect(String(internal[0])).toBe('TerminalImportError: terminal_import_unreadable');
+    failing = false;
+    record.say('typed in the terminal', 'answered in the terminal');
     const before = sessionEvents(core, session.id).length;
     await chat.switchDriver(workspace.id, session.id, 'ui');
-    expect(calls).toEqual([{ input: { agentSessionId: 'agent-1', cwd: realpathSync.native(repo), env: { PATH: '/bin', CHAT_ONLY: 'yes' } }, killsSoFar: 1 }]);
-    // The stub imports nothing: only the driver change was appended.
-    expect(sessionEvents(core, session.id).slice(before).map((e) => e.type)).toEqual(['session.driver_changed']);
+    expect(imported(core, session.id, before)).toEqual([
+      ['user', 'typed in the terminal', 'terminal'],
+      ['agent', 'answered in the terminal', undefined],
+      ['session.driver_changed'],
+    ]);
+
+    // A record that doesn't hold the chat's last message (here: rewritten) imports nothing, with a code.
+    failing = true;
+    await chat.switchDriver(workspace.id, session.id, 'terminal');
+    failing = false;
+    record.turns.splice(0, record.turns.length, { id: 'other', role: 'user', text: 'something else' });
+    internal.length = 0;
+    const later = sessionEvents(core, session.id).length;
+    await chat.switchDriver(workspace.id, session.id, 'ui');
+    expect(imported(core, session.id, later)).toEqual([['session.driver_changed']]);
+    expect(internal).toEqual([new TerminalImportError('terminal_import_unaligned')]);
     await chat.close();
   });
 
-  it('appends the turns to import before the driver change, the user\'s marked from the terminal', async () => {
-    const seen: Array<{ stored: string[]; turns: number }> = [];
-    importTurns.with = (stored, turns) => {
-      seen.push({ stored: stored.map((message) => message.content), turns: turns.length });
-      return turns.slice(1);
-    };
-    try {
-      const { core, chat, workspace, session } = await answeredOnce(fakeTerminal(), {
-        resume: cliResume({
-          transcript: async () => [
-            { role: 'user', text: 'first question' },
-            { role: 'user', text: 'typed in the terminal' },
-            { role: 'agent', text: 'answered in the terminal' },
-          ],
-        }),
-      });
-      await chat.switchDriver(workspace.id, session.id, 'terminal');
-      const before = sessionEvents(core, session.id).length;
-      await chat.switchDriver(workspace.id, session.id, 'ui');
-      expect(seen).toEqual([{ stored: ['first question', 're: first question'], turns: 3 }]);
-      const appended = sessionEvents(core, session.id).slice(before);
-      expect(appended.map((e) => e.type)).toEqual(['session.message_completed', 'session.message_completed', 'session.driver_changed']);
-      expect(appended[0]).toMatchObject({ payload: { role: 'user', content: 'typed in the terminal', origin: 'terminal' } });
-      expect(appended[1]).toMatchObject({ payload: { role: 'agent', content: 'answered in the terminal' } });
-      expect(appended[1]!.type === 'session.message_completed' && appended[1]!.payload.origin).toBeUndefined();
-      await chat.close();
-    } finally {
-      importTurns.with = undefined;
-    }
+  it('over 200 new turns imports the newest 200 after a note saying how many were left out (3.3)', async () => {
+    const record = cliRecord();
+    const { core, chat, workspace, session } = await answeredOnce(fakeTerminal(), {
+      resume: cliResume({ transcript: async () => [...record.turns] }),
+    });
+    await chat.switchDriver(workspace.id, session.id, 'terminal');
+    for (let i = 0; i < 101; i++) record.say(`q${i}`, `a${i}`);
+    const before = sessionEvents(core, session.id).length;
+    await chat.switchDriver(workspace.id, session.id, 'ui');
+    const appended = imported(core, session.id, before);
+    expect(appended).toHaveLength(202);
+    expect(appended[0]).toEqual(['agent', '2 earlier terminal messages were not imported', undefined]);
+    expect(appended[1]).toEqual(['user', 'q1', 'terminal']);
+    expect(appended.at(-2)).toEqual(['agent', 'a100', undefined]);
+    await chat.close();
   });
 
-  it('a failing transcript hook is reported, and the switch back still completes', async () => {
-    const internal: unknown[] = [];
-    const core = openTestCore();
-    const agent = scriptedAgent(async (text, emit) => (emit({ type: 'message_chunk', text: `re: ${text}` }), { stopReason: 'end_turn' }));
-    const terminal = fakeTerminal();
-    const chat = createChat({
-      dataDir: tempDir('ogden-agents-data-'),
-      entities: core.entities,
-      sessionEvents: core.sessionEvents,
-      agent: {
-        ...agent.port,
-        terminalResume: cliResume({
-          transcript: async () => {
-            throw new Error('unreadable session file');
-          },
-        }),
-      },
-      terminal: terminal.port,
-      onInternalError: (_sessionId, error) => internal.push(error),
+  it('a failing read on switching back is reported as a code, and the switch back still completes', async () => {
+    let failing = false;
+    const { core, chat, workspace, session, internal } = await answeredOnce(fakeTerminal(), {
+      resume: cliResume({
+        transcript: async () => {
+          if (failing) throw new Error('unreadable session file');
+          return [];
+        },
+      }),
     });
-    const workspace = chat.openWorkspace(tempDir('ogden-agents-repo-'));
-    const session = chat.createChatSession(workspace.id);
-    chat.sendMessage(workspace.id, session.id, 'first question');
-    await chat.settled();
     await chat.switchDriver(workspace.id, session.id, 'terminal');
+    failing = true;
     expect((await chat.switchDriver(workspace.id, session.id, 'ui')).driver).toBe('ui');
-    expect(internal).toEqual([new Error('unreadable session file')]);
+    expect(internal.map(String)).toEqual(['TerminalImportError: terminal_import_unreadable']);
     expect(driverChanges(core, session.id)).toEqual([
       ['ui', 'terminal', 'user'],
       ['terminal', 'ui', 'user'],

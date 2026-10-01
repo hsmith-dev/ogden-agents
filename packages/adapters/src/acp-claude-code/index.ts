@@ -17,3 +17,11 @@ export {
   type ClaudeTerminalOptions,
 } from './terminal-command.js';
 export { createStreamMasker, maskSecrets, MASKED, secretValues, SECRET_ENV_NAME } from './mask.js';
+export {
+  claudeConfigDir,
+  MAX_TRANSCRIPT_BYTES,
+  parseClaudeTranscript,
+  projectSlug,
+  readClaudeTranscript,
+  type ClaudeTranscriptErrorCode,
+} from './transcript.js';

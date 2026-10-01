@@ -15,7 +15,7 @@ import { AgentError, type AgentCliLocation, type AgentTerminalCommand } from '@o
 import { findClaudeExecutable } from './detect.js';
 
 /** What a session id must look like to go on the command line: never an option, never a path. */
-const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+export const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
 export interface ClaudeTerminalOptions {
   /** As `ClaudeCodeAgentOptions.claudeExecutable`: `null` skips looking for the user's own CLI. */

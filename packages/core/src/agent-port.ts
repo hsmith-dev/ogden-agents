@@ -185,15 +185,26 @@ export interface AgentTerminalResume {
   /**
    * The session's conversation as the CLI recorded it, oldest first, so core
    * can import the turns typed in the terminal after switching back (story
-   * 3.3). Absent when the agent can't read it back.
+   * 3.3). Absent when the agent can't read it back. Resolves `[]` when the
+   * session has no record yet; rejects, with no path or content in the
+   * error, when the record can't be read (too large, unreadable).
    */
   transcript?(input: { agentSessionId: string; cwd: string; env: Readonly<Record<string, string>> }): Promise<AgentTranscriptTurn[]>;
 }
 
 export type AgentCliLocation = { found: true } | { found: false; reason: string };
 
-/** One message of a session's conversation as the agent's CLI recorded it. */
+/**
+ * One message of a session's conversation as the agent's CLI recorded it
+ * (story 3.3): a user's text, or the joined text of the agent's reply to it.
+ */
 export interface AgentTranscriptTurn {
+  /**
+   * The id of the exchange the message belongs to (Claude Code: its user
+   * record's `uuid`), shared by a user message and the agent's reply to it.
+   * Stable across reads, so core can mark where its import got to.
+   */
+  id: string;
   role: 'user' | 'agent';
   text: string;
 }

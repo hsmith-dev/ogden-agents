@@ -20,13 +20,14 @@ import {
   SessionTerminal,
   TERMINAL_CLOSE,
   WorkspaceResponse,
+  type CoreEvent,
   type SessionId,
 } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { MAX_WS_PAYLOAD_BYTES, type StartOptions } from '../src/start.js';
 import { registerChatRoutes, TERMINAL_CHECK_FAILED } from '../src/chat-routes.js';
-import { createLogger } from '../src/log.js';
+import { createLogger, LOG_DIR } from '../src/log.js';
 import { createTerminalAvailability } from '../src/terminal-availability.js';
 import { signIn, startTestServer, tempDataDir, trackSocket, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
@@ -60,12 +61,14 @@ interface CliRecord {
 
 /**
  * A server whose chat agent is the fake ACP agent (resuming sessions) and
- * whose terminal runs the fake CLI, recording to `record`. Never the real `claude`.
+ * whose terminal runs the fake CLI, recording to `record`. Never the real
+ * `claude`, and never the user's own `~/.claude`: Claude Code's config folder
+ * (where the fake CLI records its sessions, story 3.3) is a temp one.
  */
 async function startTerminalServer(options: StartOptions & { lines?: string[] } = {}) {
   const record = join(tempDir('ogden-agents-cli-'), 'record.json');
   const server = await startTestServer({
-    extraAgentEnv: { CLAUDE_CODE_EXECUTABLE: FAKE_CLI, FAKE_CLAUDE_RECORD: record, FAKE_ACP_RESUME: 'resume' },
+    extraAgentEnv: { CLAUDE_CODE_EXECUTABLE: FAKE_CLI, FAKE_CLAUDE_RECORD: record, FAKE_ACP_RESUME: 'resume', CLAUDE_CONFIG_DIR: tempDir('ogden-agents-claude-') },
     ...options,
   });
   servers.push(server);
@@ -135,6 +138,36 @@ function openTerminal(server: TestServer, tab: SignedIn, sessionId: string) {
     ws.once('unexpected-response', (_req, res) => reject(new Error(`upgrade refused: ${res.statusCode}`)));
   });
   return { ws, state, opened, type: (text: string) => ws.send(Buffer.from(text, 'utf8'), { binary: true }) };
+}
+
+/** The session's events after `seq`: completed messages as `[role, content, origin]`, others by type. */
+const appendedSince = (server: TestServer, sessionId: SessionId, seq: number) =>
+  server.core.events
+    .readAfter(seq)
+    .filter((e) => e.streamId === sessionId)
+    .map((e) => (e.type === 'session.message_completed' ? [e.payload.role, e.payload.content, e.payload.origin] : [e.type]));
+
+/** Every completed message of the session as `[role, content, origin]`. */
+const completed = (server: TestServer, sessionId: SessionId) =>
+  appendedSince(server, sessionId, 0).filter((entry) => entry.length === 3);
+
+/** What a freshly loaded page receives for the workspace on `/ws` until it is caught up. */
+async function historyOf(server: TestServer, tab: SignedIn, workspaceId: string): Promise<CoreEvent[]> {
+  const ws = trackSocket(new WebSocket(`ws://127.0.0.1:${server.port}/ws`, tab.protocols, { headers: { origin: tab.origin } }));
+  ws.on('error', () => {});
+  const received: CoreEvent[] = [];
+  const caughtUp = new Promise<void>((resolve) =>
+    ws.on('message', (data) => {
+      const message = JSON.parse(String(data)) as { type: string };
+      if (message.type === 'caught_up') resolve();
+      else if ('seq' in message) received.push(message as unknown as CoreEvent);
+    }),
+  );
+  await new Promise<void>((resolve) => ws.once('open', () => resolve()));
+  ws.send(JSON.stringify({ type: 'subscribe_workspace', workspaceId }));
+  await caughtUp;
+  ws.close();
+  return received;
 }
 
 /** Whether a process with this pid exists. */
@@ -326,6 +359,7 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     await waitFor(() => viewer.state.output.includes(`fake-claude:--resume,${ref}`), 'the CLI’s first output', 10_000);
     viewer.type(`${MARKER}\r`);
     await waitFor(() => viewer.state.output.includes(`echo:${MARKER}`), 'the echo', 10_000);
+    const beforeBack = server.core.events.lastSeq();
 
     const back = await switchTo(server, tab, ids, 'ui');
     expect(back.status).toBe(200);
@@ -336,18 +370,52 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     await waitFor(() => !alive(cli.pid), 'the CLI to be gone', 10_000);
     expect(driverChanges(server, sessionId)).toEqual(['terminal', 'ui']);
     expect(driverCauses(server, sessionId)).toEqual(['user', 'user']);
+    // The line typed in the terminal and its reply are in the chat, once, before the switch back (story 3.3):
+    // text only (no thinking, tool call or sidechain), the user's from the terminal.
+    expect(appendedSince(server, sessionId, beforeBack)).toEqual([
+      ['user', MARKER, 'terminal'],
+      ['agent', `echo:${MARKER}`, undefined],
+      ['session.driver_changed'],
+    ]);
 
-    // The next message goes to the same session and is answered.
+    // The next message goes to the same session and is answered (after the imported reply).
     expect((await post(server, tab, apiPath(API_ROUTES.sessionMessages, ids), { text: 'and now?' })).status).toBe(202);
-    await waitFor(() => stateOf(server, sessionId) === 'idle' && replies(server, sessionId).length === 2, 'the next reply', 15_000);
+    await waitFor(() => stateOf(server, sessionId) === 'idle' && replies(server, sessionId).length === 3, 'the next reply', 15_000);
     expect(server.core.entities.getSession(sessionId)!.adapterRefs[AGENT_SESSION_REF]).toBe(ref);
 
-    // The marker is in no event, no file of the data folder (database, logs) and no log line (AD-16).
-    expect(JSON.stringify(server.core.events.readAfter(0))).not.toContain(MARKER);
+    // Again, with a second line: the first is not imported twice, and the agent's own chat turns never are.
+    expect((await switchTo(server, tab, ids, 'terminal')).status).toBe(200);
+    const again = openTerminal(server, tab, sessionId);
+    await again.opened;
+    await waitFor(() => again.state.output.includes('ready>'), 'the prompt again', 10_000);
+    again.type(`${MARKER}-2\r`);
+    await waitFor(() => again.state.output.includes(`echo:${MARKER}-2`), 'the second echo', 10_000);
+    expect((await switchTo(server, tab, ids, 'ui')).status).toBe(200);
+    const messages = completed(server, sessionId);
+    expect(messages).toEqual([
+      ['user', 'first question', undefined],
+      ['agent', expect.any(String), undefined],
+      ['user', MARKER, 'terminal'],
+      ['agent', `echo:${MARKER}`, undefined],
+      ['user', 'and now?', undefined],
+      ['agent', expect.any(String), undefined],
+      ['user', `${MARKER}-2`, 'terminal'],
+      ['agent', `echo:${MARKER}-2`, undefined],
+    ]);
+
+    // A reloaded page gets them from the event log like any message.
+    const reloaded = await historyOf(server, tab, ids.wsId);
+    expect(reloaded.filter((e) => e.type === 'session.message_completed' && e.payload.origin === 'terminal').map((e) => e.type === 'session.message_completed' && e.payload.content)).toEqual([
+      MARKER,
+      `${MARKER}-2`,
+    ]);
+
+    // The marker is in no log line and no log file (AD-16): only the event log, as a message, holds it.
     expect(lines.join('\n')).not.toContain(MARKER);
     expect(lines.join('\n')).not.toContain('fake-claude:--resume');
-    for (const file of filesUnder(server.dataDir)) expect(readFileSync(file).includes(MARKER), file).toBe(false);
-  }, 60_000);
+    const logs = join(server.dataDir, LOG_DIR);
+    for (const file of existsSync(logs) ? filesUnder(logs) : []) expect(readFileSync(file).includes(MARKER), file).toBe(false);
+  }, 90_000);
 
   it.skipIf(process.platform === 'win32')(`a resize frame resizes the terminal (skipped on Windows: ${WINDOWS_RESIZE})`, async () => {
     const { server, tab, recorded } = await startTerminalServer();

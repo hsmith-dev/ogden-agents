@@ -5,12 +5,12 @@
  * stored (AD-16).
  */
 import type { Session, SessionId } from '@ogden-agents/shared';
-import { AgentError, type AgentTerminalResume } from '../agent-port.js';
-import { InvalidOperationError, SessionNotIdleError, TerminalUnavailableError } from '../errors.js';
-import { turnsToImport } from '../terminal-import.js';
+import { AgentError, type AgentTerminalResume, type AgentTranscriptTurn } from '../agent-port.js';
+import { InvalidOperationError, SessionNotIdleError, TerminalImportError, TerminalUnavailableError } from '../errors.js';
+import { omittedNote, START_MARK, turnsToImport } from '../terminal-import.js';
 import type { TerminalProcess } from '../terminal-port.js';
 import type { Agents } from './agents.js';
-import { TERMINAL_BACKLOG_CHARS, TERMINAL_COLS, TERMINAL_EXIT_GRACE_MS, TERMINAL_ROWS } from './constants.js';
+import { TERMINAL_BACKLOG_CHARS, TERMINAL_COLS, TERMINAL_EXIT_GRACE_MS, TERMINAL_IMPORT_REF, TERMINAL_ROWS } from './constants.js';
 import type { ChatContext } from './context.js';
 import type { Chat, Terminal, Timer } from './types.js';
 
@@ -57,6 +57,35 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     clearTimeout(timer);
   };
 
+  /** The CLI's record of the session's agent session (story 3.3), `undefined` when the agent can't read it back; rejects as the adapter's `transcript` does. */
+  const readTranscript = async (session: Session, agentSessionId: string): Promise<AgentTranscriptTurn[] | undefined> => {
+    const resume = agent.terminalResume;
+    if (resume?.transcript === undefined) return undefined;
+    const workspace = getWorkspace(session.workspaceId);
+    return resume.transcript({ agentSessionId, cwd: workspace.realPath ?? workspace.path, env: { ...agentEnv() } });
+  };
+
+  /**
+   * Saves where the CLI's record stands as the terminal opens (story 3.3): its
+   * last turn's id, or {@link START_MARK} when it has none. A failed read
+   * saves no mark (the switch back then lines up on the chat's last message)
+   * and is logged as a code; the terminal opens either way.
+   */
+  const markTerminalImport = async (session: Session, agentSessionId: string): Promise<void> => {
+    if (agent.terminalResume?.transcript === undefined) return;
+    let mark = '';
+    try {
+      mark = (await readTranscript(session, agentSessionId))?.at(-1)?.id ?? START_MARK;
+    } catch (error) {
+      internalError(session.id, new TerminalImportError('terminal_import_unreadable', error));
+    }
+    try {
+      entities.setSessionAdapterRefs(session.id, { [TERMINAL_IMPORT_REF]: mark });
+    } catch (error) {
+      internalError(session.id, new TerminalImportError('terminal_import_failed', error));
+    }
+  };
+
   const toTerminal = async (session: Session): Promise<Session> => {
     const terminal = options.terminal;
     const resume = agent.terminalResume;
@@ -85,6 +114,9 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     }
     if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
     await releaseAgent(session.id);
+    // The agent has stopped: its record is complete, so what the terminal adds comes after the mark.
+    await markTerminalImport(session, agentSessionId);
+    if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
     let cli: TerminalProcess;
     try {
       cli = await terminal.open({
@@ -147,22 +179,31 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
   };
 
   /**
-   * Appends the turns typed in the terminal that the chat lacks (E3-R4), the
-   * user's marked `origin: 'terminal'`. Any failure is reported and imports
+   * Appends the turns typed in the terminal that the chat lacks (E3-R4, story
+   * 3.3): those after the mark saved when it opened, the user's marked
+   * `origin: 'terminal'`, then moves the mark to the CLI's last turn so
+   * nothing is imported twice. Any failure is logged as a code and imports
    * nothing more: the switch back still completes.
    */
   const importTerminalTurns = async (session: Session): Promise<void> => {
-    const resume = agent.terminalResume;
     const agentSessionId = storedAgentSessionId(session.id);
-    if (resume?.transcript === undefined || agentSessionId === undefined) return;
+    if (agentSessionId === undefined) return;
+    let turns: AgentTranscriptTurn[] | undefined;
     try {
-      const workspace = getWorkspace(session.workspaceId);
-      const turns = await resume.transcript({
-        agentSessionId,
-        cwd: workspace.realPath ?? workspace.path,
-        env: { ...agentEnv() },
-      });
-      for (const turn of turnsToImport(entities.listCompletedMessages(session.id), turns)) {
+      turns = await readTranscript(session, agentSessionId);
+    } catch (error) {
+      internalError(session.id, new TerminalImportError('terminal_import_unreadable', error));
+      return;
+    }
+    if (turns === undefined) return;
+    try {
+      const mark = entities.getSession(session.id)?.adapterRefs[TERMINAL_IMPORT_REF];
+      const plan = turnsToImport(entities.listCompletedMessages(session.id), turns, mark);
+      if (plan.unaligned) internalError(session.id, new TerminalImportError('terminal_import_unaligned'));
+      if (plan.omitted > 0) {
+        sessionEvents.completeMessage(session.id, { messageId: newMessageId(), role: 'agent', content: omittedNote(plan.omitted) });
+      }
+      for (const turn of plan.turns) {
         sessionEvents.completeMessage(session.id, {
           messageId: newMessageId(),
           role: turn.role,
@@ -170,8 +211,9 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
           ...(turn.role === 'user' ? { origin: 'terminal' as const } : {}),
         });
       }
+      entities.setSessionAdapterRefs(session.id, { [TERMINAL_IMPORT_REF]: turns.at(-1)?.id ?? START_MARK });
     } catch (error) {
-      internalError(session.id, error);
+      internalError(session.id, new TerminalImportError('terminal_import_failed', error));
     }
   };
 

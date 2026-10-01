@@ -168,3 +168,21 @@ export class ApiKeyRefusedError extends CoreError {
     super('api_key_refused', 'That key was refused. Check it and paste it again.');
   }
 }
+
+/** Why bringing the terminal's turns into the chat (story 3.3) did less than it should: a code, logged on its own. */
+export type TerminalImportCode = 'terminal_import_unreadable' | 'terminal_import_unaligned' | 'terminal_import_failed';
+
+/**
+ * A terminal import that read or appended nothing (story 3.3), for the log
+ * only. Its message is its code plus, for an agent's failure, the agent's own
+ * code: never a path, a reason text or anything read (AD-16).
+ */
+export class TerminalImportError extends CoreError {
+  override readonly name = 'TerminalImportError';
+  override readonly code: TerminalImportCode;
+  constructor(code: TerminalImportCode, cause?: unknown) {
+    const detail = (cause as { details?: { code?: unknown } } | undefined)?.details?.code;
+    super(code, typeof detail === 'string' && /^[a-z_]{1,64}$/.test(detail) ? `${code} (${detail})` : code);
+    this.code = code;
+  }
+}

@@ -6,6 +6,13 @@ export const RESTARTED_REASON = 'Ogden Agents was restarted';
 /** The adapter ref that holds the agent's own session id (AD-9). */
 export const AGENT_SESSION_REF = 'agentSessionId';
 
+/**
+ * The adapter ref that marks where the CLI's record stood when the session's
+ * terminal opened (story 3.3): its last turn's id, `start` when it had none,
+ * or empty when it couldn't be read. Switching back imports the turns after it.
+ */
+export const TERMINAL_IMPORT_REF = 'terminalImportMark';
+
 /** The most messages a session holds queued while its agent answers; the next one is refused (409). */
 export const MAX_QUEUED_MESSAGES = 20;
 

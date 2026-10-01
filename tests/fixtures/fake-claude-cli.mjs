@@ -16,7 +16,8 @@
 //   anything    prints `echo:<line>`
 //
 // In a terminal it reads raw, as the real CLI (Ink) does, and echoes what is
-// typed itself (story 3.8). A bracketed paste (`ESC[200~ ... ESC[201~`) prints
+// typed itself (story 3.8). It turns on bracketed paste (`ESC[?2004h`)
+// before its banner; a bracketed paste (`ESC[200~ ... ESC[201~`) prints
 // `pasted:<hex of the text>`; Ctrl+C (0x03) prints `ctrl-c` and leaves it
 // running; Backspace (0x7f or 0x08) removes the last character; any other
 // escape sequence is dropped. Enter is CR, LF or CR LF. With stdin a pipe it
@@ -131,11 +132,12 @@ function recordExchange(line, reply) {
   appendFileSync(file, records.map((record) => `${JSON.stringify(record)}\n`).join(''));
 }
 
-process.stdout.write(`fake-claude:${args.join(',')}\r\nready>`);
-
 const PASTE_START = '\x1b[200~';
 const PASTE_END = '\x1b[201~';
 const tty = process.stdin.isTTY === true;
+// Asks for bracketed paste first, as Claude Code does: Windows' ConPTY dropped the
+// markers for a program that hadn't (the CI probe asked first; 3.8 review R10).
+process.stdout.write(`${tty ? '\x1b[?2004h' : ''}fake-claude:${args.join(',')}\r\nready>`);
 if (tty) process.stdin.setRawMode(true);
 process.stdin.setEncoding('utf8');
 let pending = '';

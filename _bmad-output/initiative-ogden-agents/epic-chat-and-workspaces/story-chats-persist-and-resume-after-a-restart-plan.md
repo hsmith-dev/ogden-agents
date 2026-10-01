@@ -1,9 +1,10 @@
 ---
 title: 'Chats persist and resume after a restart'
 type: 'feature'
-ticket: '2.7'
+ticket: '7'
 created: '2026-09-30'
 status: 'built'
+baseline_revision: 'a209973ad7a231a789ca7b56b38031d9fadaec50'
 route: 'full'
 route_source: 'auto'
 review: ''
@@ -105,6 +106,8 @@ context:
 - The REST `Session` payload still carries `adapterRefs`, so the agent's id is readable by a signed-in tab over REST; it is in no event, URL or key (review F3, rejected).
 
 ## Plan Change Log
+
+- 2026-09-30 (epic 2 retrospective, action A4): `ticket:` changed from '2.7' (the global ref, which `tickets.py` can't join) to the epic-local entry id `'7'` from `tickets.toml`. `baseline_revision` backfilled with `a209973`, the parent of the story's first commit `82a7c97` (story 2.7); it wasn't recorded when the build started.
 
 ## Review Triage Log
 

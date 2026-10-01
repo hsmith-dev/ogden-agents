@@ -332,6 +332,8 @@ All items are proposed. None was applied by this run. "Remediation" goes to the 
 
 These are proposed for the Known pitfalls section, and each was observed in this epic. They are not applied: editing AGENTS.md is `bmad-project-context`'s job. The win32 20 s timeout pitfall is already there (`e9044bc`).
 
+**Applied 2026-09-30** (`docs: epic 2 retrospective follow-ups`): all six are in AGENTS.md's Known pitfalls, merged with the existing helper-search and restack/`baseline_revision` lines. In the same commit, A4 (plan `ticket:` and `baseline_revision`, see Q1) and A7 (the open-items index at the top of `deferred-work.md`) are done, and A6 is logged in `deferred-work.md` for epic 3's refactor sweep (3.9).
+
 1. **Windows `EPERM` deleting a temp folder:** a process still runs with that folder as its cwd. Close servers and await every agent's exit, including starting and dropped ones, before removing folders. Do test cleanup through the shared `afterEach` in `packages/server/test/helpers.ts`, never in a file's own earlier hook (`4b6b213`, `e2dfd1b`, `dca005e`).
 2. **Port fallback:** Windows reserved port ranges (Hyper-V) make `listen` fail with `EACCES`, not `EADDRINUSE`. Treat both as "try the next port" (`ba935a9`).
 3. **Plan frontmatter:** `ticket:` is the epic-local id from `tickets.toml` (`'5'`, not `'2.5'`). Write `baseline_revision` when the build starts. `tickets.py status` reports a plan with a wrong `ticket:` under `problems` and leaves the ticket `planned` (P1).
@@ -364,10 +366,16 @@ With those done, the evidence supports **accepted-with-open-items** (A5 to A8 op
 ## Open questions
 
 - **Q1.** Is the plan `ticket:` field meant to be the global ref (`2.5`) or the local id (`5`)? Plans in this epic use both. If `tickets.py` should accept the global ref, this is a tool fix, not a plan fix (A4).
+  - **Answer (2026-09-30, from the tool):** the epic-local id. `tickets.py` `join_plans` turns a digit-only string into an int and joins it to the entry with that `id` in the plan's own folder's `tickets.toml`; any other string is read as a backlog leaf file's stem (`<ticket>.md`), so `'2.5'` joins nothing. The bmad-ticket tree rules say the same ("frontmatter carries `ticket: <entry id>`"), and `tickets.py mark` writes `ticket: <id>`. So this is a plan fix, not a tool fix: A4 is applied in `docs: epic 2 retrospective follow-ups`. The 2.4 to 2.10 and 2.12 plans and the 9.2 and 9.4 to 9.7 plans now carry the local id. Part B of 2.10 carries `part_of_ticket: '10'` instead, since `tickets.py` allows one plan per ticket (part A's plan is the plan of record). `baseline_revision` is backfilled for 2.4 to 2.13 and 9.3 to 9.7, and 9.2's stale `ba935a9` is corrected to `08fc329`. Each value is the parent of the story's first commit, and each plan's change log says so. `tickets.py status` now shows all 13 epic 2 tickets and all 7 epic 9 tickets as `built` / `review`, with no `problems`. 2.3's ticked tasks and 2.11's Implementation Notes (the rest of A4) are not done here.
 - **Q2.** How should the 35-PR stack reach `main`: one merge of everything (epics 1, 2, 9 and the 3.1 tracer), or a split at 2.13 (#32), leaving 9.5, 3.1 and 9.6 for later? Done when 6 and epic 1's release both wait on this.
+  - **Answer (user, 2026-09-30):** release 0.2.0 is epic 2 plus epic 9 (9.1 to 9.7), cut before epic 3.
 - **Q3.** Will you run the live Claude Code checks (A2) on the `next` rc, or before tagging it? 2.13's HITL order puts them after the rc publish.
+  - **Answer (user, 2026-09-30):** after the rc, through `npx ogden-agents@next`.
 - **Q4.** Is reopening from a fresh launch link an acceptable stand-in for "reopened from its shortcut" in Done when 4, or must the shortcut itself be checked on all three OSes before the epic is accepted?
+  - **Answer (user, 2026-09-30):** yes, a fresh launch link is an acceptable stand-in for the shortcut in Done when 4.
 - **Q5.** Session logs weren't available. Was the switch to the global ref in `ticket:` from 2.4 on deliberate (a different builder or template)? Were `baseline_revision` and `lenses_ran` dropped on purpose?
+  - **Answer (2026-09-30):** whether it was deliberate is still unknown (no session logs). Either way the global ref is a value `tickets.py` cannot join (see Q1), so it is corrected rather than adopted, and AGENTS.md now has a pitfall that `ticket:` is the epic-local id and `baseline_revision` is written when the build starts. `lenses_ran` is not backfilled here.
+- **A5 (decision, user, 2026-09-30):** yes, a `chat.ts` split story goes before epic 3's lanes. It will be added to epic 3's tickets when epic 3 is restacked.
 
 ## Assumptions
 

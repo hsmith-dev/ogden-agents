@@ -1,9 +1,10 @@
 ---
 title: 'Session view completes, part B: history and streaming at scale'
 type: 'feature'
-ticket: '2.10'
+part_of_ticket: '10'
 created: '2026-09-30'
 status: 'built'
+baseline_revision: 'ba935a91bcbffabe8674e5265a65d5f1481e7555'
 route: 'full'
 route_source: 'auto'
 review: ''
@@ -99,6 +100,8 @@ context:
 - **Jump to latest** shows only while the reader is scrolled up and new items arrived ("Jump to latest (n)"). It counts items after the last one seen at the bottom, so Show earlier's prepends do not count. It has no live region, so it does not double up with 2.11's announcer or the page's permission announcement. Show earlier keeps the scroll position.
 
 ## Plan Change Log
+
+- 2026-09-30 (epic 2 retrospective, action A4): `ticket: '2.10'` replaced by `part_of_ticket: '10'`. `tickets.py` joins a plan by the epic-local entry id and refuses two plans for one ticket, so part A's plan (`story-session-view-completes-part-a-session-behaviour-plan.md`) is the plan of record for entry 10 (2.10) and this one is its companion. `baseline_revision` backfilled with `ba935a9`, the parent of the story's first commit `08fc329` (story 2.10); it wasn't recorded when the build started.
 
 ## Review Triage Log
 

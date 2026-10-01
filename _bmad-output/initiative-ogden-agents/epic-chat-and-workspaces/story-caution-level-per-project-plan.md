@@ -1,9 +1,10 @@
 ---
 title: 'Caution level per project'
 type: 'feature'
-ticket: '2.8'
+ticket: '8'
 created: '2026-09-30'
 status: 'built'
+baseline_revision: 'f40471c154460d59bdd3da51cdac68446bd2c926'
 route: 'full'
 route_source: 'auto'
 review: ''
@@ -87,6 +88,8 @@ context:
 - Fake agent: `permission-kind <kind> [<path>|…]`, replies `Did <kind> <paths>.` or `Denied …`.
 
 ## Plan Change Log
+
+- 2026-09-30 (epic 2 retrospective, action A4): `ticket:` changed from '2.8' (the global ref, which `tickets.py` can't join) to the epic-local entry id `'8'` from `tickets.toml`. `baseline_revision` backfilled with `f40471c`, the parent of the story's first commit `1bfaf60` (story 2.8); it wasn't recorded when the build started.
 
 ## Review Triage Log
 

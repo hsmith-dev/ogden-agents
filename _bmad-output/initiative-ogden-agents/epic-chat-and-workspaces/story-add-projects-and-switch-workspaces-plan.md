@@ -1,9 +1,10 @@
 ---
 title: 'Add projects and switch workspaces'
 type: 'feature'
-ticket: '2.5'
+ticket: '5'
 created: '2026-09-30'
 status: 'built'
+baseline_revision: '1c54959d7b30731f7c0625bfa1c716900bbf2c43'
 route: 'full'
 route_source: 'auto'
 review: ''
@@ -89,6 +90,8 @@ context:
 - `tests/e2e/workspaces.spec.ts` points the in-process server's home folder at a temp folder by swapping HOME/USERPROFILE for the test.
 
 ## Plan Change Log
+
+- 2026-09-30 (epic 2 retrospective, action A4): `ticket:` changed from '2.5' (the global ref, which `tickets.py` can't join) to the epic-local entry id `'5'` from `tickets.toml`. `baseline_revision` backfilled with `1c54959`, the parent of the story's first commit `afaa48b` (story 2.5); it wasn't recorded when the build started.
 
 ## Review Triage Log
 

@@ -1,9 +1,10 @@
 ---
 title: 'Session view completes, part A: session behaviour'
 type: 'feature'
-ticket: '2.10'
+ticket: '10'
 created: '2026-09-30'
 status: 'built'
+baseline_revision: '7b2d8795a2e441d31ac30a44804ee5f0b17c57aa'
 route: 'full'
 route_source: 'auto'
 review: ''
@@ -117,6 +118,8 @@ context:
 - 2.5 F6: the empty Chats list keeps its composer while the only chat is the one a failed first send created, and a retry reuses it.
 
 ## Plan Change Log
+
+- 2026-09-30 (epic 2 retrospective, action A4): `ticket:` changed from '2.10' (the global ref, which `tickets.py` can't join) to the epic-local entry id `'10'` from `tickets.toml`. `baseline_revision` backfilled with `7b2d879`, the parent of the story's first commit `424a1bc` (story 2.10); it wasn't recorded when the build started. This plan is the plan of record for entry 10; part B's plan (`story-session-view-completes-part-b-history-and-streaming-plan.md`) now carries `part_of_ticket: '10'`, since `tickets.py` allows one plan per ticket.
 
 ## Review Triage Log
 

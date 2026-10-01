@@ -1,9 +1,10 @@
 ---
 title: 'Refactor sweep (epic 9)'
 type: 'refactor'
-ticket: '9.6'
+ticket: '6'
 created: '2026-09-30'
 status: 'built'
+baseline_revision: '66d2c549023ea955d21e31b3901bae85a9777f6e'
 route: 'full'
 route_source: 'auto'
 review: ''
@@ -94,6 +95,8 @@ Baseline `1978bcb` (`story/9.5-first-run-welcome`). Epic 3 (`story/3.1-terminal-
 - Decision A: root devDependencies `happy-dom@^20.14.5`, `@testing-library/react@^16.3.3`, `@testing-library/dom@^10.4.2` (current per `npm view`). `sign-in-again.dom.test.tsx` mocks the agents/sign-in hooks, the event stream and `tabAuth`, and covers the auth effect, the event effect and the start observer.
 
 ## Plan Change Log
+
+- 2026-09-30 (epic 2 retrospective, action A4): `ticket:` changed from '9.6' (the global ref, which `tickets.py` can't join) to the epic-local entry id `'6'` from `tickets.toml`. `baseline_revision` backfilled with `66d2c54`, the parent of the story's first commit `44fde25` (story 9.6); it wasn't recorded when the build started.
 
 ## Review Triage Log
 

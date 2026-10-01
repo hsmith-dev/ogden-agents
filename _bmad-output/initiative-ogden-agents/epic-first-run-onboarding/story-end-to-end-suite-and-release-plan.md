@@ -1,9 +1,10 @@
 ---
 title: 'End-to-end suite and release (onboarding)'
 type: 'feature'
-ticket: '9.7'
+ticket: '7'
 created: '2026-09-30'
 status: 'built'
+baseline_revision: '44fde2555f6ee8208d6585de8695fccc5e2a8564'
 route: 'full'
 route_source: 'auto'
 review: ''
@@ -109,3 +110,7 @@ Security review (2026-09-30), nothing blocking:
 | Minor | The API-key run proved a key reached the agent, not that it was this key. | Fixed | The fake agent replies `key received …<last 4>`; the installed spec expects `…WXYZ`. |
 
 Tests: `packages/server/test/test-hooks.test.ts` (each hook ignored outside a test run, on a data folder outside the temp folder, for a file outside it, for remote `resolved`; real-path links), `agent-setup-routes.test.ts` F5 (secret store outside the temp folder).
+
+## Plan Change Log
+
+- 2026-09-30 (epic 2 retrospective, action A4): `ticket:` changed from '9.7' (the global ref, which `tickets.py` can't join) to the epic-local entry id `'7'` from `tickets.toml`. `baseline_revision` backfilled with `44fde25`, the parent of the story's first commit `5765a09` (story 9.7); it wasn't recorded when the build started.

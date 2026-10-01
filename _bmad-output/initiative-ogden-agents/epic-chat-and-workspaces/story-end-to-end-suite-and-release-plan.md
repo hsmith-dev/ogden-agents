@@ -4,6 +4,7 @@ type: 'feature'
 ticket: '13'
 created: '2026-09-30'
 status: 'built'
+baseline_revision: 'e2dfd1b1356fcfdb64853bcc0778bfa5a478c2a0'
 route: 'full'
 route_source: 'auto'
 review: ''
@@ -107,6 +108,8 @@ Baseline: `story/2.12-refactor-sweep` @ `0978860` (2.12 on 9.2 `5d7fb1a`, PR #28
 - CI `e2e-installed` timeout left at 30 min: the whole installed suite takes about 22 s locally after the install.
 
 ## Plan Change Log
+
+- 2026-09-30 (epic 2 retrospective, action A4): `baseline_revision` backfilled with `e2dfd1b`, the parent of the story's first commit `e9044bc` (story 2.13); it wasn't recorded when the build started.
 
 ## Review Triage Log
 

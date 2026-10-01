@@ -1,9 +1,10 @@
 ---
 title: 'App shortcut to reopen Ogden Agents'
 type: 'feature'
-ticket: '2.4'
+ticket: '4'
 created: '2026-09-30'
 status: 'built'
+baseline_revision: 'b8c3ff45a7109bcbc8fc5c5ecc4b05b3eb287904'
 route: 'full'
 route_source: 'auto'
 review: ''
@@ -104,6 +105,8 @@ context:
 - Verified on macOS: typecheck, test (plutil ran; the win32 `.lnk` and `desktop-file-validate` cases were skipped here), e2e, pack + smoke.
 
 ## Plan Change Log
+
+- 2026-09-30 (epic 2 retrospective, action A4): `ticket:` changed from '2.4' (the global ref, which `tickets.py` can't join) to the epic-local entry id `'4'` from `tickets.toml`. `baseline_revision` backfilled with `b8c3ff4`, the parent of the story's first commit `e74f980` (story 2.4); it wasn't recorded when the build started.
 
 ## Review Triage Log
 

@@ -1,9 +1,10 @@
 ---
 title: 'First-run Welcome'
 type: 'feature'
-ticket: '9.5'
+ticket: '5'
 created: '2026-09-30'
 status: 'built'
+baseline_revision: '0a8e34cc81737e574d5b088ac559c5919572fc07'
 route: 'full'
 route_source: 'auto'
 review: ''
@@ -102,6 +103,7 @@ Readiness is derived, never stored: installed and (signed in or a key in use). A
 - 2026-09-30: The shortcut step answers the server's app shortcut offer (as Not now does) when it appears, so the shell's notice cannot bring the offer back even if the user leaves the step without answering. **Add shortcut** still adds the shortcut. This goes further than the plan (Add and Not now answer it) and meets "Given the shortcut step was shown, then the shell's shortcut notice never appears afterwards" in every case.
 - 2026-09-30: `AgentCard` takes an optional `selected` prop (styling only: the heavier ink border) for Welcome's pre-selected card. It doesn't change install, sign-in or key behaviour.
 - 2026-09-30: No route is a 501 stub any more, so `stub-routes.test.ts` no longer lists onboarding. Its 501 when the use-case isn't wired (a route that reads no body) is tested in `agent-setup-routes.test.ts`.
+- 2026-09-30 (epic 2 retrospective, action A4): `ticket:` changed from '9.5' (the global ref, which `tickets.py` can't join) to the epic-local entry id `'5'` from `tickets.toml`. `baseline_revision` backfilled with `0a8e34c`, the parent of the story's first commit `7a6f01d` (story 9.5); it wasn't recorded when the build started.
 
 ## Review Triage Log
 

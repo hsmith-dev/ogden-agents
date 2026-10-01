@@ -4,6 +4,7 @@ type: 'feature'
 ticket: '11'
 created: '2026-09-30'
 status: 'built'
+baseline_revision: '82a7c97a0f9c21a81b28a372a253614d1284cb8d'
 route: 'full'
 route_source: 'auto'
 review: ''
@@ -101,3 +102,7 @@ context:
 
 **Manual checks:**
 - VoiceOver or NVDA: a burst of changes gives one polite announcement, and a new card in a background workspace is announced once.
+
+## Plan Change Log
+
+- 2026-09-30 (epic 2 retrospective, action A4): `baseline_revision` backfilled with `82a7c97`, the parent of the story's first commit `7b2d879` (story 2.11); it wasn't recorded when the build started.

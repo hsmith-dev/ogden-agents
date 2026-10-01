@@ -1,3 +1,30 @@
+# Deferred work
+
+## Open items
+
+Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 2 retrospective, action A7). Every entry stays in the log below for history, resolved ones included; an entry that starts with "Resolved:" closes an earlier one. When you add or resolve an entry, update this index too.
+
+- Remove-project story (not yet ticketed): delete a project's always-allow rules before its workspace row (`permission_rules.workspace_id` has no `ON DELETE`). From 2.6 F9.
+- Epic 5 (unattended builds): the inside-the-project check for file-kind rules is check-then-use, so a symlink swapped in before the write could redirect it. From 2.6.
+- Unowned (copy change): say in the caution-level copy (EXPERIENCE.md, settings page) that `think` auto-allows helper-agent launches and TodoWrite. From 2.8 F3.
+- Unowned (revisit if slow): the install-scope read is a `seq` range, not a scan, but steps over other workspaces' rows; add an index on `type` or a partial index if it proves slow. From 2.10b F5, checked in 2.12.
+- Unowned: a running chat agent keeps its old environment after an API key is saved or removed or a subscription signs in or out; restart it or say so on the card. From 9.2.
+- Unowned: on macOS a changed Node binary makes Keychain prompt, and the 5 s read timeout leaves the key unread until the next start; re-read on `list()` or explain on the card. From 9.2.
+- Unowned: with `--omit=optional` saving a key is refused as "no keychain"; say the keychain module isn't installed. From 9.2.
+- Epic 6 (every agent): the generic agent card names Anthropic; take the provider name from the agent's setup status. From 9.2.
+- Split-files story before epic 3's lanes (retrospective A5, starting with `core/src/chat.ts`); the other source files over 600 lines when next changed. From 2.12, carried by 9.6.
+- Epic 3 (it edits `chat-routes.ts`): move `readBody` and the id helpers out of `packages/server/src/chat-routes.ts`. From 2.12, carried by 9.6.
+- Unowned (a sweep): `GET /api/v1/onboarding` answers a thrown `get()` with Hono's default 500 instead of `apiError`. From 9.6.
+- Kept separate by decision (revisit if they converge): the two `removeLeftovers` and the two `InstallButton`s. From 9.6.
+- Release live checks (RELEASING step 5, retrospective A2): the real sign-in tab the Claude CLI opens itself is covered by no test. From 9.7.
+- Unowned: consider failing the release smoke if "test hooks in use" ever appears in a registry install's log. From 9.7 security review.
+- Epic 3 refactor sweep (3.9): one shared npm-stall retry for the installed-package scripts (retrospective A6). From the epic 2 retrospective.
+- Confirm only: node-pty's "AttachConsole failed" fix is resolved pending the PR's Windows CI logs. From 9.6.
+
+Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
+
+## Log
+
 - source_plan: `_bmad-output/initiative-ogdenmad/epic-foundation-and-forks/story-ci-matrix-and-single-package-bundling-plan.md`
   summary: Confirm the 6-job CI matrix is green, including the Windows-only smoke, packaging and launcher paths.
   evidence: The user deferred pushing; it's settled by pushing the branch and seeing 6/6 jobs pass. If Windows fails, it's medium severity (the install proof is broken on one supported OS).
@@ -205,3 +232,6 @@
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-first-run-onboarding/story-end-to-end-suite-and-release-plan.md`
   summary: New shipped test hooks (security review asked for): `OGDEN_AGENTS_TEST_CLAUDE_INSTALL` (Install's pins and npm from a JSON file; every locked package must carry a sha512 integrity, so npm still checks it) and `OGDEN_AGENTS_TEST_API_KEY_CHECK=accept`. Both, and `OGDEN_AGENTS_TEST_SECRET_STORE`, act only in a test run (`NODE_ENV=test` or `VITEST`) on a data folder inside the OS temp folder (real paths), and the install source must be `file:` fixtures inside it (security review F1, F2); the server logs "test hooks in use" when either is active. Consider failing the release smoke if that line ever appears in a registry install's log.
   evidence: `packages/server/src/test-hooks.ts`; `packages/server/test/test-hooks.test.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-chat-and-workspaces/epic-chat-and-workspaces-retrospective.md`
+  summary: Share the npm-stall retry (epic 3 refactor sweep, 3.9; retrospective A6). `scripts/smoke-installed.mjs` and `tests/e2e-installed/global-setup.ts` each keep their own copy of the line echo (`echoLines`, plus `redact` in the smoke) and the retry-once-on-stall loop around `prepareInstall` and `launcher.urls()`. Move both into `scripts/installed-package.mjs` and use it from both callers.
+  evidence: `scripts/smoke-installed.mjs` `redact`, `echoLines` and the `RETRY` branch; `tests/e2e-installed/global-setup.ts` `echoLines` and the `RETRY` branch (`305825d`, `0a8e34c`). Only `prepareInstall` and `withTimeout` are shared today.

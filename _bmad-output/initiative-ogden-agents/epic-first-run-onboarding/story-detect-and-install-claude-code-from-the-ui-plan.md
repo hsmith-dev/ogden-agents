@@ -4,6 +4,7 @@ type: 'feature'
 ticket: '3'
 created: '2026-09-30'
 status: 'built'
+baseline_revision: '48f1902eca8e4441386eb95c09da5ec9f99dbeb6'
 route: 'full'
 route_source: 'auto'
 review: ''
@@ -107,6 +108,8 @@ Baseline: `story/2.12-refactor-sweep` @ `0978860` (2.12 on 9.2 `5d7fb1a`, PR #28
 - Tests: adapter unit tests with a fake runner plus two real-npm offline tests on the packed fixture (the stop rule: `HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `npm_config_prefix` temp folders stay empty; a tampered integrity gives EINTEGRITY). `tests/fixtures/fake-adapter/pack.mjs` has `testNpmCli()`, which, unlike the app, also follows an `npm` on `PATH` (for a Node without npm beside it).
 
 ## Plan Change Log
+
+- 2026-09-30 (epic 2 retrospective, action A4): `baseline_revision` backfilled with `48f1902`, the parent of the story's first commit `b944a79` (story 9.3); it wasn't recorded when the build started.
 
 ## Review Triage Log
 

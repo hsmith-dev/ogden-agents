@@ -1,9 +1,10 @@
 ---
 title: 'Permission cards'
 type: 'feature'
-ticket: '2.6'
+ticket: '6'
 created: '2026-09-30'
 status: 'built'
+baseline_revision: '3c0abf59f495d7b00121099d45bea716c58dac8e'
 route: 'full'
 route_source: 'auto'
 review: ''
@@ -97,6 +98,8 @@ context:
 - Mutation check done: making `request` answer `allow_once` instead of holding fails all three tests in `permissions.spec.ts`.
 
 ## Plan Change Log
+
+- 2026-09-30 (epic 2 retrospective, action A4): `ticket:` changed from '2.6' (the global ref, which `tickets.py` can't join) to the epic-local entry id `'6'` from `tickets.toml`. `baseline_revision` backfilled with `3c0abf5`, the parent of the story's first commit `b8c3ff4` (story 2.6); it wasn't recorded when the build started.
 
 ## Review Triage Log
 

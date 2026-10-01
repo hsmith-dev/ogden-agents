@@ -1,10 +1,10 @@
 ---
 title: 'Use an API key instead, kept in the keychain'
 type: 'feature'
-ticket: '9.2'
+ticket: '2'
 created: '2026-09-30'
 status: 'built'
-baseline_revision: 'ba935a9'
+baseline_revision: '08fc329359dc6b04e2fda8e205a00c736a7bd9e1'
 route: 'full'
 route_source: 'auto'
 review: ''
@@ -141,3 +141,7 @@ The agent never writes to the real keychain itself.
 - **F5 (fixed):** `OGDEN_AGENTS_TEST_SECRET_STORE=memory` is honoured only when `NODE_ENV=test` or `VITEST` is set; the launcher tests and the installed-package scripts set `NODE_ENV=test` for their servers. Test: `testSecretStore`.
 - **F6 (fixed):** the log backstop redacts an `sk-ant` key with its continuation across raw or escaped line breaks, and a key cut at the end of a line (`sk-ant`, `sk-an`, `sk-a`, `sk-`) with what follows. Test in `log.test.ts`.
 - **F7 (deferred):** concurrent saves for one agent → story 9.6; the Anthropic wording in the generic card → epic 6 (every agent). Both in `deferred-work.md`.
+
+## Plan Change Log
+
+- 2026-09-30 (epic 2 retrospective, action A4): `ticket:` changed from '9.2' (the global ref, which `tickets.py` can't join) to the epic-local entry id `'2'` from `tickets.toml`. `baseline_revision` corrected from `ba935a9` to `08fc329`, the parent of the story's commit `5d7fb1a` after the restack (ba935a9 no longer precedes it directly).

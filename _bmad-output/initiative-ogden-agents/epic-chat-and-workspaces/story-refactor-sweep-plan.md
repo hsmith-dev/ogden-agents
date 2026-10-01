@@ -1,9 +1,10 @@
 ---
 title: 'Refactor sweep (epic 2)'
 type: 'refactor'
-ticket: '2.12'
+ticket: '12'
 created: '2026-09-30'
 status: 'built'
+baseline_revision: '5d7fb1a85e87054fc638d24a992678d689c230b3'
 route: 'full'
 route_source: 'auto'
 review: ''
@@ -84,6 +85,8 @@ Baseline `08fc329` (branch `story/2.10b-history-at-scale`). 9.2 builds on `ba935
 - Item 6: the `start-chat-form.tsx` comment went with the file.
 
 ## Plan Change Log
+
+- 2026-09-30 (epic 2 retrospective, action A4): `ticket:` changed from '2.12' (the global ref, which `tickets.py` can't join) to the epic-local entry id `'12'` from `tickets.toml`. `baseline_revision` backfilled with `5d7fb1a`, the parent of the story's first commit `0978860` (story 2.12); it wasn't recorded when the build started.
 
 ## Review Triage Log
 

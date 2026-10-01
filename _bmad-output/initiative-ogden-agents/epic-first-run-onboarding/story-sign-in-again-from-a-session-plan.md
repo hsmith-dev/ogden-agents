@@ -1,9 +1,10 @@
 ---
 title: 'Sign in again from a session'
 type: 'feature'
-ticket: '9.4'
+ticket: '4'
 created: '2026-09-30'
 status: 'built'
+baseline_revision: 'dca005efccc31b63ec27a14ba0f6b10f63cef244'
 route: 'full'
 route_source: 'auto'
 review: ''
@@ -104,3 +105,7 @@ context:
 - **F4 (fixed):** a Deny-reason message core sends is marked `origin: 'deny_reason'` on `session.message_completed` (optional, additive in `shared/src/events.ts`; set in `core/src/chat.ts` `drive`), and `lastUserText` skips it, so neither Try again nor the auto-resend sends it as a plain message. Tests: `core/test/chat.test.ts` (only the reason is marked), `web/test/transcript.test.ts` (Try again resends the user's own message).
 - **F5 (deferred):** unit tests for the React wiring of `SignInAgain`, which need a DOM test setup. Logged in `deferred-work.md` for story 9.6.
 - **Windows CI regression (fixed, after merge to the PR):** three 9.2 tests in `server/test/agent-setup-routes.test.ts` failed with EPERM removing the repo folder after `server.close()`. Cause: `drop` in `core/src/chat.ts` closed the dropped agent without tracking it, and `close()` awaited only live agents, so the agent dropped on `auth_required` could outlive the server with its working directory in the repo (an orphan at shutdown, AD-3). Fix: dropped agents are kept by session until they have stopped; `close()` waits for them, and a session's next agent starts only once its dropped one has stopped. Tests: `core/test/chat.test.ts` (close and the next start wait for a slow close) and `server/test/chat.test.ts` (the real fake agent, closed right after an `auth_required` drop, is gone when `close()` resolves). All three fail without the fix.
+
+## Plan Change Log
+
+- 2026-09-30 (epic 2 retrospective, action A4): `ticket:` changed from '9.4' (the global ref, which `tickets.py` can't join) to the epic-local entry id `'4'` from `tickets.toml`. `baseline_revision` backfilled with `dca005e`, the parent of the story's first commit `8db7a60` (story 9.4); it wasn't recorded when the build started.

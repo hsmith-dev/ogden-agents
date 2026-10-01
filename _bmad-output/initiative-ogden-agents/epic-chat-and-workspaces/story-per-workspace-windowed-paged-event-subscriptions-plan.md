@@ -1,9 +1,10 @@
 ---
 title: 'Per-workspace windowed, paged event subscriptions'
 type: 'feature'
-ticket: '2.9'
+ticket: '9'
 created: '2026-09-30'
 status: 'built'
+baseline_revision: '710e652fdacb3d2ed73c80363adf56588ee8bd98'
 route: 'full'
 route_source: 'auto'
 review: ''
@@ -101,6 +102,8 @@ context:
 - `busySessionCount` (event-stream) is replaced by `useAllSessions()` + `isBusy` in `workspace-api.ts`.
 
 ## Plan Change Log
+
+- 2026-09-30 (epic 2 retrospective, action A4): `ticket:` changed from '2.9' (the global ref, which `tickets.py` can't join) to the epic-local entry id `'9'` from `tickets.toml`. `baseline_revision` backfilled with `710e652`, the parent of the story's first commit `a209973` (story 2.9); it wasn't recorded when the build started.
 
 ## Review Triage Log
 

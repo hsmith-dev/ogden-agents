@@ -22,6 +22,9 @@ export default defineConfig({
   // One server for the whole run, and the journey quits it: a retry can't start over.
   retries: 0,
   timeout: 120_000,
+  // Windows runners are slow: starting agents, reopening sessions and redirects
+  // after an install routinely take longer than the 5 s default there.
+  expect: { timeout: process.platform === 'win32' ? 15_000 : 5_000 },
   reporter: process.env.CI ? [['list'], ['html', { open: 'never', outputFolder: '../../playwright-report/e2e-installed' }]] : 'list',
   use: {
     ...devices['Desktop Chrome'],

@@ -1,0 +1,133 @@
+# Epic 10 breakdown (DRAFT for review, 2026-10-01; drafted by autonomous inception, not yet approved). Table order is the build order; ids never change once approved.
+# Epic 10 sits after epic 3 and before epic 4 in build order. References to other epics use "<epic id>.<entry id>".
+# Live checks use the developer's existing Claude Code login or an API key saved through 9.2, in a scratch repo, never Ogden Agents's own repo.
+
+[[entry]]
+id = 1
+type = "story"
+title = "Tracer bullet: one BMad piece switched on and off for a project"
+description = "Adds one piece flag to the workspace row (a drizzle migration after 0003_caution_level, all off), carries it in WorkspaceSettings through GET and PATCH /api/v1/workspaces/:wsId/settings and a core use-case that emits workspace.settings_changed, a minimal requireBmadFeature guard in core that refuses with feature_off, one test-only route behind it, and a bare switch in Workspace settings; the hitl steps are the user approving the proposed CAP-19 and AD-22 text (epic Notes) into the spec and spine before the build starts, and the developer flipping the switch live."
+verify = "Live, flipping the switch in one tab shows the new state in a second open tab without a reload and survives a server restart; in CI, PATCH sets the flag and appends one workspace.settings_changed, and the test-only route returns feature_off while the flag is off and succeeds once it is on."
+covers = ["E10-R1", "E10-R2", "E10-R6"]
+after = ["2.8", "9.5", "3.9"]
+hitl = true
+risk = "medium"
+unknown = "Whether workspace.settings_changed can grow a pieces payload while the stored 0.2.0 caution-level events still parse; the tracer records the approach and entry 2 freezes it."
+references = [
+  "_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-11--only-core-writes-the-database-adopted",
+  "packages/core/drizzle/0003_caution_level.sql",
+]
+
+[[entry]]
+id = 2
+type = "story"
+title = "Epic contracts and stubs: the per-project BMad pieces"
+description = "Freezes in shared the piece list (planning, board, builds, retrospectives) with each plain label and sentence and the dependency rule (builds needs board, retrospectives needs builds) as one function, the WorkspaceSettings pieces field, a workspace.settings_changed payload that old 0.2.0 events still parse, the feature_off error code, the install's available-pieces response (piece, available, reason) and how a later epic registers a piece as available, the app-wide default request and response, the detection response (hasBmad, hasOutput, offerDismissed) and the route and anchor of the Workspace settings BMad section that the offer links to; completes the core requireBmadFeature guard, the server helper that registers a piece's routes through it, and a read-only BmadCatalogPort.detect with a catalog-memory stub, and pre-registers the detection, offer-dismiss, available-pieces and default routes, so epic 4 can depend on this entry alone and entries 3 to 6 open at once."
+verify = "Contract tests parse every new shape, the error code and both the old and new workspace.settings_changed payloads; the dependency function's table test covers every combination; the memory stub drives detect; the route-registry test in gate.test.ts lists every new route behind the gate under /api/v1."
+covers = ["E10-R1", "E10-R2", "E10-R4", "E10-R5", "E10-R7"]
+after = [1]
+hitl = false
+risk = "medium"
+unknown = "Whether a piece should be offered before its epic ships; the draft reports it unavailable with a reason, which entry 5 renders."
+references = [
+  "packages/shared/src/chat.ts",
+  "packages/shared/src/events.ts",
+  "_bmad-output/initiative-ogden-agents/epic-planning-and-board/epic-planning-and-board.md",
+]
+
+[[entry]]
+id = 3
+type = "story"
+title = "Detect a repo that already uses BMad and offer it, never changing it"
+description = "Implements BmadCatalogPort.detect in the bmad-catalog adapter (a read-only check for _bmad/ and _bmad-output/ in the workspace's real path) behind entry 2's detection route, and shows on the project's chats page, when the repo has BMad and every piece is off, the one offer This project already uses BMad Method. Turn on its features? with Choose features (linking to entry 2's Workspace settings anchor, which entry 5 fills) and Not now, remembered per project by core; detection runs when the chats page opens, not inside the add-project use-case, so it does not touch entry 4's code."
+verify = "Against fixture repos with and without _bmad/, the offer shows only for the first, Not now hides it for good after a reload, Choose features opens the settings anchor, and a file-tree hash of the repo is identical before and after detection, turning pieces on and turning them off."
+covers = ["E10-R5"]
+after = [2]
+hitl = false
+risk = "low"
+references = ["_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-12--bmad-is-discovered-not-hard-coded"]
+
+[[entry]]
+id = 4
+type = "story"
+title = "An app-wide default for new projects, Simple to start"
+description = "Adds the install-level default pieces for new projects, kept by core in <dataDir>/preferences.json the way onboarding.json is kept (readable only by the user, replaced in one step, empty meaning Simple when missing or unreadable), behind entry 2's default routes; a New projects section in Settings (owning any Settings sidebar change) to choose Simple or BMad Method with chosen pieces; and the add-project use-case, used by the add-project dialog and Welcome's project step, which creates the workspace with the default; Welcome says nothing about BMad."
+verify = "With no preferences file a project added from the dialog and one added from Welcome both start with every piece off; after choosing BMad Method with Planning in Settings, the next added project starts with Planning on and earlier projects are unchanged; an unreadable preferences file falls back to Simple and logs only its error code."
+covers = ["E10-R4"]
+after = [2]
+hitl = false
+risk = "low"
+unknown = "Whether Welcome should ask Simple or BMad Method once for the first project (epic open question); the draft does not ask."
+references = [
+  "packages/core/src/onboarding.ts",
+  "_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#information-architecture",
+]
+
+[[entry]]
+id = 5
+type = "story"
+title = "The BMad Method section in Workspace settings"
+description = "Replaces the tracer's bare switch with the designed section at entry 2's anchor: Use BMad Method in this project (on preselects Planning and Board), each piece with its plain label and one sentence from entry 2's list, the dependency rule applied as the user picks with one line saying what else changed, pieces this install does not ship shown disabled with Comes in a later version from the available-pieces response, and turning BMad off confirming Your BMad files stay in this project; changes go through PATCH settings and other tabs follow workspace.settings_changed."
+verify = "Playwright against the fake agent shows the section, turning on Unattended builds also turns on Board with its one-line note, turning off Board turns off Unattended builds, an unavailable piece cannot be turned on and shows its reason, and a second tab shows each change without a reload."
+covers = ["E10-R6", "E10-R1"]
+after = [2]
+hitl = false
+risk = "medium"
+references = [
+  "packages/web/src/routes/workspace-settings-page.tsx",
+  "_bmad-output/initiative-ogden-agents/ux-ogden-agents/DESIGN.md#components",
+  "_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#voice-and-tone",
+]
+
+[[entry]]
+id = 6
+type = "story"
+title = "Simple projects stay simple"
+description = "Makes the workspace header render tab slots from the project's pieces (Chats always; Plan, Board and Runs slots only when their piece is on and available, filled later by epics 4 and 5), changes the Tools page to say uv is needed only for BMad Method features, adds an architecture test that fails when a route serving a piece is registered without entry 2's helper, and adds a regression test that a simple project's sessions carry no BMad skill or text from Ogden and that no Ogden code path writes under the repo; records in the build record what Claude Code itself loads in a simple project whose repo already has BMad skills."
+verify = "In a simple project with several chats and Developer mode on, the header shows only Chats, the terminal toggle works as in epic 3, the Tools page shows the new wording, the architecture test fails on a deliberately unguarded test route, and the fake ACP agent receives no BMad skill or text in a simple project's session start."
+covers = ["E10-R3", "E10-R2", "E10-R8"]
+after = [2]
+hitl = false
+risk = "medium"
+unknown = "Whether a simple project should also hide skills Claude Code loads from the repo's own .claude/skills (epic open question); the draft adds nothing and hides nothing."
+references = [
+  "packages/web/src/shell/workspace-header.tsx",
+  "packages/web/src/routes/tools-page.tsx",
+  "tests/architecture.test.ts",
+]
+
+[[entry]]
+id = 7
+type = "story"
+title = "Existing users keep what they have"
+description = "Proves and completes the upgrade from 0.2.0: a fixture data folder saved from 0.2.0 (projects, chats, caution levels, always-allow rules, events) opens with everything intact and every project Simple, its stored workspace.settings_changed events replay through entry 2's back-compatible payload, an install with no preferences file defaults to Simple through entry 4, and a 0.2.0 project whose repo has _bmad/ shows entry 3's offer once."
+verify = "Starting this version on the 0.2.0 fixture data folder in CI on all three OSes keeps every project, chat, caution level and rule, replays every stored event, shows every project with all pieces off, and shows the offer exactly once for the fixture repo with _bmad/."
+covers = ["E10-R7"]
+after = [3, 4]
+hitl = false
+risk = "medium"
+references = ["packages/core/drizzle/"]
+
+[[entry]]
+id = 8
+type = "story"
+title = "Refactor sweep"
+description = "Cleans up code across the epic, scoped when it starts from the build records and the review findings deferred during the epic, with no behavior change."
+verify = "All tests pass and no behavior changes."
+covers = ["E10-R2"]
+after = [1, 2, 3, 4, 5, 6, 7]
+hitl = false
+risk = "low"
+references = ["_bmad-output/initiative-ogden-agents/deferred-work.md"]
+
+[[entry]]
+id = 9
+type = "story"
+title = "End-to-end suite and release"
+description = "Extends the end-to-end suite, run in CI on macOS, Windows and Linux against the packed package, to add a project and chat in several chats with nothing BMad shown or written, turn a test-registered piece on and off in Workspace settings with a second tab following, refuse a guarded route while it is off, show and dismiss the offer for a repo with _bmad/ leaving its files unchanged, change the app-wide default, and upgrade a 0.2.0 data folder; then the user runs the simple-project flow live with Claude Code and tags a release after 0.2.0 through the epic 1 release workflow."
+verify = "The suite passes on all three OSes and fails when the guard in requireBmadFeature is removed, and the tagged ogden-agents version from npm passes the epic's live Done when checks on the user's machine."
+covers = ["E10-R1", "E10-R2", "E10-R3", "E10-R4", "E10-R5", "E10-R6", "E10-R7", "E10-R8"]
+after = [8, "3.10"]
+hitl = true
+risk = "medium"
+unknown = "Which version number this ships as (0.3.0 alone, or with epic 4); 0.2.0 is unchanged."

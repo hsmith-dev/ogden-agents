@@ -28,6 +28,13 @@ covers = ["CAP-5"]
 after = [{ epic = 2, needs = "persistent sessions and the session view" }]
 
 [[epic]]
+id = 10
+slug = "epic-bmad-optional-per-project"
+title = "Projects start as simple multi-agent chats, and each turns on the BMad pieces it wants"
+covers = ["CAP-17", "CAP-2"]
+after = [{ epic = 2, needs = "workspace settings, the caution-level pattern and workspace.settings_changed (2.5, 2.8)" }, { epic = 9, needs = "Welcome's project step (9.5)" }, { epic = 3, needs = "its refactor sweep (3.9) and its suite and release (3.10) first" }]
+
+[[epic]]
 id = 4
 slug = "epic-planning-and-board"
 title = "Plan with every BMAD skill and track it on a live board"

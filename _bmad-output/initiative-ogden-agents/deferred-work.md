@@ -19,7 +19,7 @@ Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 
 - Unowned: consider failing the release smoke if "test hooks in use" ever appears in a registry install's log. From 9.7 security review.
 - Confirm only: node-pty's "AttachConsole failed" fix is resolved pending the PR's Windows CI logs. From 9.6.
 - Story 3.8 (Windows): a terminal resize never reached the console under ConPTY with node-pty 1.1.0 (80x24 for 10 s); the resize checks are skipped on win32. From 3.1 CI.
-- Story 3.8 (Windows; and a POSIX residual): after a CLI exits by itself, what it started is not stopped on Windows; on POSIX its group is killed as the exit is reported, after the reap, so a reused id is a small residual risk. From 3.4 (review F2).
+- Story 3.8 (Windows): after a CLI exits by itself, what it started is not stopped on Windows. From 3.4 (review F2); its POSIX residual was accepted and closed in 3.8.
 - Unowned (by decision, log only): after a switch refused past the 10 s release bound, the next message still waits on the late agent without a bound; 3.9 logs `terminal_release_late` when it stops. From 3.4 review F5.
 - Unowned: core's internal errors, the handoff codes included (`terminal_release_late`, `terminal_open_timeout`...), are logged as "applying an agent event failed" at error level; give them their own message. From the 3.9 sweep.
 
@@ -312,3 +312,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-refactor-sweep-plan.md`
   summary: 3.9 review F5: the `terminal_release_late` log line can arrive after `chat.close()` has returned (the agent stops late, after the server began stopping), through `onInternalError` to a logger that may be closing. Harmless (one line or none); consider skipping it once `closing`.
   evidence: `packages/core/src/chat/terminal.ts` `toTerminal` (`released.then(late, late)`).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-terminal-toggle/story-the-terminal-works-on-windows-plan.md`
+  summary: Resolved (accepted, decision Q3a, 2026-10-01): the POSIX reused-id residual of the 3.4 review F2 entry above. A process id isn't reused while its process group still has members, so the risk needs the group to be empty and its id taken, in the same tick the exit is reported, by a new process that leads its own group; checking the group's members with `ps` first would cost a spawn per exit and still race. No code change; the Windows half of that entry stays open for story 3.8.
+  evidence: `packages/adapters/src/terminal-pty/index.ts` `hiddenPtySpawner` `onExit`.

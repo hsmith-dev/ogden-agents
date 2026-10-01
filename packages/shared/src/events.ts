@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { Run, RunOutcome, Session, SessionDriver, SessionState, Workspace } from './entities.js';
 import { ApiErrorCode } from './errors.js';
 import { EventId, PermissionRuleId, RunId, SessionId, WorkspaceId } from './ids.js';
+import { DriverChangeCause } from './terminal.js';
 import { IsoUtcTimestamp } from './time.js';
 import { ToolchainErrorCode, ToolName, ToolSource } from './toolchain.js';
 
@@ -246,7 +247,13 @@ export type SessionStateChangedEvent = z.infer<typeof SessionStateChangedEvent>;
 const SessionDriverChangedInput = z.object({
   type: z.literal('session.driver_changed'),
   ...onSessionStream,
-  payload: z.object({ sessionId: SessionId, driver: SessionDriver, previous: SessionDriver }),
+  payload: z.object({
+    sessionId: SessionId,
+    driver: SessionDriver,
+    previous: SessionDriver,
+    /** Why it changed (story 3.2). Absent on events from before 3.2. */
+    cause: DriverChangeCause.optional(),
+  }),
 });
 /** A session's driver changed (AD-6). */
 export const SessionDriverChangedEvent = SessionDriverChangedInput.extend(assigned);
@@ -279,10 +286,13 @@ const SessionMessageCompletedInput = z.object({
     role: MessageRole,
     content: z.string(),
     /**
-     * Set on a user message core sent for the user: the reason they gave with
-     * a Deny (`deny_reason`). Try again never resends it as a plain message (9.4 review F4).
+     * Set on a user message that was not typed in the chat's composer: the
+     * reason they gave with a Deny, which core sent for the user
+     * (`deny_reason`; Try again never resends it as a plain message, 9.4
+     * review F4), or one typed in the agent's own terminal and imported after
+     * switching back (`terminal`, story 3.2; shown "from terminal").
      */
-    origin: z.literal('deny_reason').optional(),
+    origin: z.enum(['deny_reason', 'terminal']).optional(),
   }),
 });
 /** A finished message with its full content; it replaces that message's deltas. */

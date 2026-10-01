@@ -11,6 +11,7 @@ export * from './setup-claude-code/index.js';
 export * from './setup-memory/index.js';
 export * from './shortcut-memory/index.js';
 export * from './shortcut-os/index.js';
+export * from './terminal-memory/index.js';
 export * from './terminal-pty/index.js';
 export * from './terminal-pty/terminal-port.js';
 export * from './toolchain-uv/index.js';

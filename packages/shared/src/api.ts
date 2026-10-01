@@ -63,12 +63,16 @@ export const API_ROUTES = {
    * `POST { kind? }` → 201 `{ session }`: a new chat session in the workspace.
    */
   workspaceSessions: `${API_BASE}/workspaces/:wsId/sessions`,
-  /** `GET` → `{ session }`: one session of the workspace; 404 if it is another workspace's. */
+  /**
+   * `GET` → `{ session, terminal }`: one session of the workspace, and whether
+   * its terminal can work (story 3.2); 404 if it is another workspace's.
+   */
   workspaceSession: `${API_BASE}/workspaces/:wsId/sessions/:sesId`,
   /**
    * `POST { text }` → 202 `{ messageId, queued }`: sends a message to the
    * session's agent, queued while it works (2.10). The reply and the
-   * session's state arrive through the event log.
+   * session's state arrive through the event log. 409 `driver_is_terminal`
+   * while the terminal drives the session (story 3.2, AD-6).
    */
   sessionMessages: `${API_BASE}/workspaces/:wsId/sessions/:sesId/messages`,
   /**
@@ -80,9 +84,10 @@ export const API_ROUTES = {
   /**
    * `POST SetDriverRequest` → `{ session }` (story 3.1, AD-6): hands the
    * session to its agent's own terminal (`terminal`) or back to the chat
-   * (`ui`); appends `session.driver_changed`. 409 `session_busy` with a plain
-   * reason when the switch can't happen (not idle, never reached its agent,
-   * no terminal on this computer); nothing changes then.
+   * (`ui`); appends `session.driver_changed`. When the switch can't happen
+   * nothing changes: 409 `session_not_idle` (working, waiting, queued or
+   * switching), or 409 `terminal_unavailable` with `details.terminal`, the
+   * `SessionTerminal` that says why (story 3.2).
    */
   sessionDriver: `${API_BASE}/workspaces/:wsId/sessions/:sesId/driver`,
   /**

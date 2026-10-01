@@ -150,11 +150,13 @@ describe('sessions', () => {
     expect(core.entities.setSessionState(session.id, 'working').state).toBe('working'); // no-op
     expect(core.entities.setSessionDriver(session.id, 'terminal').driver).toBe('terminal');
     expect(core.entities.getSession(session.id)).toMatchObject({ state: 'working', driver: 'terminal' });
+    expect(core.entities.setSessionDriver(session.id, 'ui', 'user').driver).toBe('ui');
 
     const events = core.events.readAfter(from);
     expect(events.map((e) => [e.type, e.payload])).toEqual([
       ['session.state_changed', { sessionId: session.id, state: 'working', previous: 'idle' }],
       ['session.driver_changed', { sessionId: session.id, driver: 'terminal', previous: 'ui' }],
+      ['session.driver_changed', { sessionId: session.id, driver: 'ui', previous: 'terminal', cause: 'user' }],
     ]);
   });
 
@@ -166,6 +168,7 @@ describe('sessions', () => {
 
     expect(() => core.entities.setSessionState(session.id, 'sleeping' as never)).toThrow(ValidationError);
     expect(() => core.entities.setSessionDriver(session.id, 'robot' as never)).toThrow(ValidationError);
+    expect(() => core.entities.setSessionDriver(session.id, 'terminal', 'whim' as never)).toThrow(ValidationError);
     expect(() => core.entities.createSession({ workspaceId: workspace.id, kind: 'meeting' as never })).toThrow(
       ValidationError,
     );

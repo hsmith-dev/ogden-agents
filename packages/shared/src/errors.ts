@@ -19,6 +19,15 @@ export const API_ERROR_CODES = [
   'session_not_busy',
   /** Quit was refused while agents are working; `details.busySessions` says how many (409). */
   'sessions_busy',
+  /** A switch to the terminal was refused: the session is working, waiting on a permission, has queued messages or is switching (409, story 3.2). */
+  'session_not_idle',
+  /**
+   * A switch to the terminal was refused: it can't work for this session here
+   * (409, story 3.2). `details.terminal` is the `SessionTerminal` that says why.
+   */
+  'terminal_unavailable',
+  /** A chat message was refused: the session's terminal drives it (409, story 3.2, AD-6). */
+  'driver_is_terminal',
   /** uv's status or install could not be read or started (500). */
   'toolchain_unavailable',
   /** A route or socket request whose lane has not shipped yet (501; the story 2.3 stubs). */

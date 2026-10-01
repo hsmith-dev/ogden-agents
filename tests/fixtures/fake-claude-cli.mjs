@@ -9,9 +9,14 @@
 // answers each line:
 //
 //   /exit       prints "bye" and exits 0 (the CLI leaving by itself)
+//   crash       exits 70 at once, printing nothing (the CLI crashing; story 3.2)
 //   size        prints `size=<cols>x<rows>` (the terminal's size)
 //   flood       prints 64 KiB chunks of `x` without end, as fast as the terminal takes them
 //   anything    prints `echo:<line>`
+//
+// On POSIX, each time the terminal is resized (SIGWINCH) it prints
+// `resized=<cols>x<rows>` unasked (story 3.2). Windows has no SIGWINCH:
+// story 3.8 decides how a resize shows there.
 //
 // Every token it prints has no spaces and no trailing blank: Windows' ConPTY
 // repaints the screen (cursor moves, trimmed or skipped blanks) rather than
@@ -47,6 +52,17 @@ if (process.env.FAKE_CLAUDE_RECORD) {
   );
 }
 
+/** The terminal's size now: on Windows `columns`/`rows` can lag a ConPTY resize. */
+const windowSize = () => process.stdout.getWindowSize?.() ?? [process.stdout.columns, process.stdout.rows];
+
+if (process.platform !== 'win32') {
+  // Node's own SIGWINCH handling: a `SIGWINCH` listener would still read the old size.
+  process.stdout.on('resize', () => {
+    const [cols, rows] = windowSize();
+    process.stdout.write(`\r\nresized=${cols}x${rows}\r\nready>`);
+  });
+}
+
 process.stdout.write(`fake-claude:${args.join(',')}\r\nready>`);
 const lines = createInterface({ input: process.stdin });
 lines.on('line', (line) => {
@@ -54,6 +70,9 @@ lines.on('line', (line) => {
   if (text === '/exit') {
     process.stdout.write('bye\r\n', () => process.exit(0));
     return;
+  }
+  if (text === 'crash') {
+    process.exit(70);
   }
   if (text === 'flood') {
     const chunk = 'x'.repeat(64 * 1024);
@@ -65,8 +84,7 @@ lines.on('line', (line) => {
     return;
   }
   if (text === 'size') {
-    // Asked of the terminal now: on Windows `columns`/`rows` can lag a ConPTY resize.
-    const [cols, rows] = process.stdout.getWindowSize?.() ?? [process.stdout.columns, process.stdout.rows];
+    const [cols, rows] = windowSize();
     process.stdout.write(`\r\nsize=${cols}x${rows}\r\nready>`);
     return;
   }

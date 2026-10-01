@@ -33,6 +33,7 @@ import {
   PORT_FILE,
   type AgentApiKeySupport,
   type AgentPort,
+  type AgentTerminalResume,
   type AgentSetupPort,
   type AppShortcutPort,
   type Core,
@@ -50,6 +51,7 @@ import { acquireInstanceLock, type InstanceLock } from './instance-lock.js';
 import { createLauncherToken, type LauncherToken } from './launcher-token.js';
 import { createLogger, createRotatingFileWriter, LOG_DIR, teeWriters, type Logger } from './log.js';
 import { shortcutErrorCode } from './shortcut-routes.js';
+import { createTerminalAvailability } from './terminal-availability.js';
 import { testApiKeyCheck, testClaudeInstall, testHooksAllowed } from './test-hooks.js';
 import { VERSION } from './version.js';
 
@@ -534,6 +536,15 @@ async function listenAndAnnounce({
     await agentSetup.refreshIfStale(CLAUDE_CODE_AGENT_ID, options.subscriptionMaxAgeMs ?? SUBSCRIPTION_MAX_AGE_MS);
     return { ...withoutAgentKeys(env), ...agentSetup.agentEnv(CLAUDE_CODE_AGENT_ID) };
   };
+  /** The agent's terminal resume with {@link freshChatEnv} applied to each environment. */
+  const withChatEnv = (resume: AgentTerminalResume): AgentTerminalResume => {
+    const transcript = resume.transcript?.bind(resume);
+    return {
+      command: async (id, env) => resume.command(id, await freshChatEnv(env)),
+      locate: async (env) => resume.locate(await freshChatEnv(env)),
+      ...(transcript === undefined ? {} : { transcript: async (input) => transcript({ ...input, env: await freshChatEnv(input.env) }) }),
+    };
+  };
   const chatAgent: AgentPort = {
     get displayName() {
       return agent.displayName;
@@ -541,8 +552,8 @@ async function listenAndAnnounce({
     startSession: async (input) => agent.startSession({ ...input, env: await freshChatEnv(input.env) }),
     reopenSession: async (input) => agent.reopenSession({ ...input, env: await freshChatEnv(input.env) }),
     listAuthMethods: (input) => agent.listAuthMethods(input),
-    // The terminal runs with the chat's environment rules, the API key's included (story 3.1).
-    ...(agent.terminalCommand === undefined ? {} : { terminalCommand: async (id: string, env: Readonly<Record<string, string>>) => agent.terminalCommand!(id, await freshChatEnv(env)) }),
+    // The terminal runs, and its transcript is read, with the chat's environment rules, the API key's included (stories 3.1, 3.2).
+    ...(agent.terminalResume === undefined ? {} : { terminalResume: withChatEnv(agent.terminalResume) }),
   };
   const chat = createChat({
     dataDir,
@@ -576,6 +587,7 @@ async function listenAndAnnounce({
     control,
     toolchain,
     chat,
+    terminalAvailability: createTerminalAvailability({ agent: chatAgent }),
     permissions,
     agentSetup,
     onboarding,

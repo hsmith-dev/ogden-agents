@@ -9,6 +9,7 @@ import { realpathSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   AdapterRefs as AdapterRefsSchema,
+  DriverChangeCause as DriverChangeCauseSchema,
   IsoUtcTimestamp,
   RunOutcome as RunOutcomeSchema,
   SessionDriver as SessionDriverSchema,
@@ -16,6 +17,7 @@ import {
   SessionState as SessionStateSchema,
   TicketRef as TicketRefSchema,
   type AdapterRefs,
+  type DriverChangeCause,
   type MessageRole,
   type Run,
   type RunId,
@@ -109,7 +111,7 @@ export interface Entities {
   /**
    * Hands every session a stopped server left with `driver = terminal` back
    * to the chat (story 3.1 review F3): its terminal died with that server.
-   * Appends `session.driver_changed` for each. Returns them.
+   * Appends `session.driver_changed` (cause `server_restarted`) for each. Returns them.
    */
   releaseTerminalDrivers(): Session[];
   /**
@@ -120,8 +122,8 @@ export interface Entities {
   setSessionAdapterRefs(id: SessionId, refs: AdapterRefs): Session;
   /** The session's completed messages (`session.message_completed`), oldest first. */
   listCompletedMessages(sessionId: SessionId): CompletedMessage[];
-  /** Sets the driver (AD-6), appending `session.driver_changed` if it changed. */
-  setSessionDriver(id: SessionId, driver: SessionDriver): Session;
+  /** Sets the driver (AD-6), appending `session.driver_changed` (with `cause`, if given) if it changed. */
+  setSessionDriver(id: SessionId, driver: SessionDriver, cause?: DriverChangeCause): Session;
 
   /** Creates the run of a `build` session with outcome `running`, and appends `run.created`. */
   createRun(input: NewRun): Run;
@@ -356,7 +358,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
           .from(sessions)
           .where(eq(sessions.driver, 'terminal'))
           .all()
-          .map((row) => this.setSessionDriver(row.id as SessionId, 'ui')),
+          .map((row) => this.setSessionDriver(row.id as SessionId, 'ui', 'server_restarted')),
       );
     },
 
@@ -383,8 +385,9 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         });
     },
 
-    setSessionDriver(id, driver) {
+    setSessionDriver(id, driver, cause) {
       check(SessionDriverSchema, driver, 'session driver');
+      if (cause !== undefined) check(DriverChangeCauseSchema, cause, 'driver change cause');
       return log.transaction(() => {
         const session = requireSession(id);
         if (session.driver === driver) return session;
@@ -392,7 +395,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         orm.update(sessions).set({ driver, updatedAt: updated.updatedAt }).where(eq(sessions.id, id)).run();
         sessionEvents.appendSessionEvent(session.id, {
           type: 'session.driver_changed',
-          payload: { sessionId: session.id, driver, previous: session.driver },
+          payload: { sessionId: session.id, driver, previous: session.driver, ...(cause === undefined ? {} : { cause }) },
         });
         return updated;
       });

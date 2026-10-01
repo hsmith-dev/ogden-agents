@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, MessageId, PermissionDecision } from './events.js';
 import { Session, Workspace } from './entities.js';
 import { PermissionRuleId, WorkspaceId } from './ids.js';
+import { SessionTerminal } from './terminal.js';
 import { IsoUtcTimestamp } from './time.js';
 
 /**
@@ -26,7 +27,11 @@ export const CreateSessionRequest = z.object({
 });
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequest>;
 
-export const SessionResponse = z.object({ session: Session });
+/**
+ * A session. `GET` adds `terminal`: whether its agent's own terminal can work
+ * here (story 3.2); the other routes that answer a session leave it out.
+ */
+export const SessionResponse = z.object({ session: Session, terminal: SessionTerminal.optional() });
 export type SessionResponse = z.infer<typeof SessionResponse>;
 
 /** The longest message the composer may send, in characters. */

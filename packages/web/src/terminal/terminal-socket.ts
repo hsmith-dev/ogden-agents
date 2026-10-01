@@ -55,7 +55,8 @@ export function connectTerminal(sesId: string, handlers: TerminalSocketHandlers,
     }
     // Anything else (the server's `server.stopping`, say) is not for the terminal.
     const frame = TerminalServerFrame.safeParse(json);
-    if (frame.success) handlers.onExit(frame.data.exitCode);
+    // `size` (another viewer resized; story 3.2's contract) is story 3.6's to follow.
+    if (frame.success && frame.data.type === 'exit') handlers.onExit(frame.data.exitCode);
   });
   ws.addEventListener('close', (event) => handlers.onClose(event.code));
   return {

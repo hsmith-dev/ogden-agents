@@ -162,13 +162,40 @@ export interface AgentPort {
    */
   listAuthMethods(input: { env: Readonly<Record<string, string>> }): Promise<AgentAuthMethod[]>;
   /**
-   * The agent's own CLI resuming its session `agentSessionId` (CAP-5, story
-   * 3.1), for an agent whose sessions its CLI can resume; absent otherwise.
-   * `env` is the environment the chat's agent process gets; the CLI runs
-   * with the `env` returned (the same, or with the caller's own rules
-   * applied). Rejects with an {@link AgentError} when the CLI can't be found.
+   * The agent's own CLI on its sessions (CAP-5, story 3.2), for an agent whose
+   * sessions its CLI can resume; absent otherwise (the terminal is then
+   * `agent_unsupported`).
    */
-  terminalCommand?(agentSessionId: string, env: Readonly<Record<string, string>>): Promise<AgentTerminalCommand>;
+  terminalResume?: AgentTerminalResume;
+}
+
+/**
+ * How an agent's own CLI resumes its sessions in a terminal (CAP-5). Every
+ * `env` is the environment the chat's agent process gets.
+ */
+export interface AgentTerminalResume {
+  /**
+   * The CLI resuming `agentSessionId`. It runs with the `env` returned (the
+   * same, or with the caller's own rules applied). Rejects with an
+   * {@link AgentError} when it can't be built (the CLI is not found).
+   */
+  command(agentSessionId: string, env: Readonly<Record<string, string>>): Promise<AgentTerminalCommand>;
+  /** Whether the CLI can be found, or the plain reason it can't (never a path). */
+  locate(env: Readonly<Record<string, string>>): Promise<AgentCliLocation>;
+  /**
+   * The session's conversation as the CLI recorded it, oldest first, so core
+   * can import the turns typed in the terminal after switching back (story
+   * 3.3). Absent when the agent can't read it back.
+   */
+  transcript?(input: { agentSessionId: string; cwd: string; env: Readonly<Record<string, string>> }): Promise<AgentTranscriptTurn[]>;
+}
+
+export type AgentCliLocation = { found: true } | { found: false; reason: string };
+
+/** One message of a session's conversation as the agent's CLI recorded it. */
+export interface AgentTranscriptTurn {
+  role: 'user' | 'agent';
+  text: string;
 }
 
 /** The CLI to run for a session's terminal: a file, its arguments (no shell) and its whole environment. */

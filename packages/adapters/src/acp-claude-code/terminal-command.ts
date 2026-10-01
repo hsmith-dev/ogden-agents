@@ -11,7 +11,7 @@
  * Node, as the Agent SDK runs one. Always an argument array, never a shell.
  */
 import { createRequire } from 'node:module';
-import { AgentError, type AgentTerminalCommand } from '@ogden-agents/core';
+import { AgentError, type AgentCliLocation, type AgentTerminalCommand } from '@ogden-agents/core';
 import { findClaudeExecutable } from './detect.js';
 
 /** What a session id must look like to go on the command line: never an option, never a path. */
@@ -55,17 +55,36 @@ export function bundledClaudeExecutable(adapterPath: string | undefined): string
   return undefined;
 }
 
+/** What the terminal says when no `claude` can be found: plain words, never a path. */
+export const CLAUDE_CLI_NOT_FOUND = "Claude Code's terminal couldn't be found on this computer.";
+
+/**
+ * The `claude` the terminal runs, or `undefined` when there is none: the
+ * same as the chat's adapter (`CLAUDE_CODE_EXECUTABLE`, else the user's own
+ * CLI, else the Agent SDK's bundled binary). Story 3.8 owns how it resolves
+ * on Windows.
+ */
+export function resolveClaudeExecutable(env: Readonly<Record<string, string>>, options: ClaudeTerminalOptions = {}): string | undefined {
+  return (
+    env.CLAUDE_CODE_EXECUTABLE ||
+    (options.claudeExecutable === undefined ? findClaudeExecutable(env) : (options.claudeExecutable ?? undefined)) ||
+    bundledClaudeExecutable(options.adapterPath)
+  );
+}
+
+/** Whether the terminal's `claude` can be found ({@link resolveClaudeExecutable}); the reason never names a path. */
+export function locateClaudeTerminal(env: Readonly<Record<string, string>>, options: ClaudeTerminalOptions = {}): AgentCliLocation {
+  return resolveClaudeExecutable(env, options) === undefined ? { found: false, reason: CLAUDE_CLI_NOT_FOUND } : { found: true };
+}
+
 export function claudeTerminalCommand(
   agentSessionId: string,
   env: Readonly<Record<string, string>>,
   options: ClaudeTerminalOptions = {},
 ): AgentTerminalCommand {
   if (!SESSION_ID.test(agentSessionId)) throw new AgentError('agent_unavailable', "This chat's Claude Code session can't be opened in a terminal.");
-  const claude =
-    env.CLAUDE_CODE_EXECUTABLE ||
-    (options.claudeExecutable === undefined ? findClaudeExecutable(env) : (options.claudeExecutable ?? undefined)) ||
-    bundledClaudeExecutable(options.adapterPath);
-  if (claude === undefined) throw new AgentError('agent_unavailable', "Claude Code's terminal couldn't be found on this computer.");
+  const claude = resolveClaudeExecutable(env, options);
+  if (claude === undefined) throw new AgentError('agent_unavailable', CLAUDE_CLI_NOT_FOUND);
   const args = ['--resume', agentSessionId];
   return /\.[cm]?js$/i.test(claude) ? { file: options.nodePath ?? process.execPath, args: [claude, ...args], env } : { file: claude, args, env };
 }

@@ -29,5 +29,6 @@ export * from './permissions.js';
 export * from './resume-prime.js';
 export * from './secret-store-port.js';
 export * from './session-events.js';
+export * from './terminal-import.js';
 export * from './terminal-port.js';
 export * from './toolchain.js';

@@ -8,7 +8,7 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createMemoryAgentSetup, createMemoryAppShortcut } from '@ogden-agents/adapters';
 import { createAgentSetup, createChat, LEGACY_AUTH_KEY_FILE, openCore, PORT_FILE } from '@ogden-agents/core';
-import { API_BASE, API_ROUTES, ApiErrorBody, WS_PROTOCOL } from '@ogden-agents/shared';
+import { API_BASE, API_ROUTES, ApiErrorBody, TERMINAL_SOCKET_ROUTE, WS_PROTOCOL } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { createApp } from '../src/app.js';
@@ -660,6 +660,10 @@ describe('gate placement', () => {
       // a new page-level route would be reachable without a token, so it must live under /api instead.
       expect(outside).toEqual(['ALL /*', 'ALL /*', 'GET /*', 'GET /*']);
       expect(app.routes[0]!.handler).toBe(gate);
+      // Both sockets, the events' and the terminal's (story 3.2), are registered after the gate, GET only.
+      const sockets = app.routes.flatMap((route, index) => (route.path.startsWith('/ws') ? [{ route: `${route.method} ${route.path}`, index }] : []));
+      expect(sockets.map((socket) => socket.route).sort()).toEqual(['GET /ws', `GET ${TERMINAL_SOCKET_ROUTE}`].sort());
+      for (const socket of sockets) expect(socket.index, socket.route).toBeGreaterThan(0);
       // Every API route is one of the shared routes, all under /api/v1 (Conventions).
       const api = app.routes.filter((route) => isApiPath(route.path)).map((route) => route.path);
       expect(api.length).toBeGreaterThan(0);

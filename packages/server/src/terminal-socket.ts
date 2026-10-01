@@ -7,8 +7,11 @@
  * - Binary frames are bytes: from the client they are typed into the
  *   terminal, from the server they are what it printed. A new viewer first
  *   gets the recent output core kept.
- * - Text frames are JSON control frames: `resize` in, `exit` out (then the
- *   socket closes, {@link TERMINAL_CLOSE}.ended).
+ * - Text frames are JSON control frames: `attach` (the viewer's first, with
+ *   its size) and `resize` in; `exit` out (then the socket closes,
+ *   {@link TERMINAL_CLOSE}.ended) and `size` (another viewer resized; story
+ *   3.5 sends it). Story 3.2's stub takes `attach` as a resize; story 3.5
+ *   orders reattaching around it. A frame that fails its schema is ignored.
  * - An unknown session, or one the terminal does not drive, is closed at
  *   once ({@link TERMINAL_CLOSE}.notTerminal). A frame over its size limit
  *   closes the socket (1009); so does the server's `maxPayload` before a
@@ -107,6 +110,7 @@ export function registerTerminalSocket(app: Hono, { chat, log, tabs }: TerminalS
             log.warn('ignoring a terminal control frame that fails the shared schema', { sessionId });
             return;
           }
+          // `attach` and `resize` both size the terminal for now (story 3.2; 3.5 owns attaching).
           target.resize(frame.data.cols, frame.data.rows);
           return;
         }

@@ -47,6 +47,11 @@
  * is typed into it is kept in memory only (a short backlog for a viewer that
  * attaches): it is never evented, stored or logged (AD-16).
  *
+ * Story 3.2 gives each refusal its own error ({@link SessionNotIdleError},
+ * {@link TerminalUnavailableError}, {@link DriverIsTerminalError}) and each
+ * driver change its cause, and switching back first imports the turns typed
+ * in the terminal ({@link turnsToImport}, story 3.3).
+ *
  * The agent itself sits behind {@link AgentPort} (AD-1); this file names none.
  */
 import { homedir } from 'node:os';
@@ -72,23 +77,27 @@ import {
   type AgentPort,
   type AgentRestored,
   type AgentSession,
+  type AgentTerminalResume,
   type AgentToolCallDiff,
 } from './agent-port.js';
 import { canonicalWorkspacePath, type Entities } from './entities.js';
 import {
   CoreError,
-  DriverSwitchRefusedError,
+  DriverIsTerminalError,
   InvalidOperationError,
   NotFoundError,
   QueueFullError,
   SessionBusyError,
   SessionNotBusyError,
+  SessionNotIdleError,
+  TerminalUnavailableError,
   WorkspaceBusyError,
 } from './errors.js';
 import type { HistoryDeleted } from './event-log.js';
 import { createDecliningPermissions, type Permissions } from './permissions.js';
 import { primedPrompt } from './resume-prime.js';
 import type { SessionEvents } from './session-events.js';
+import { turnsToImport } from './terminal-import.js';
 import type { TerminalPort, TerminalProcess } from './terminal-port.js';
 
 /** The reason on sessions the server moved to `idle` because it stopped or restarted under them (AD-3). */
@@ -218,7 +227,8 @@ export interface Chat {
    * answering, the message is queued (`queued: true`) and sent when the turn
    * ends. Throws {@link QueueFullError} when {@link MAX_QUEUED_MESSAGES} are
    * already queued, {@link SessionBusyError} while a failed turn is ending,
-   * and {@link InvalidOperationError} while the terminal drives the session (AD-6).
+   * {@link DriverIsTerminalError} while the terminal drives the session (AD-6),
+   * and {@link SessionNotIdleError} while it is switching drivers.
    */
   sendMessage(workspaceId: WorkspaceId, sessionId: SessionId, text: string): { messageId: string; queued: boolean };
   /**
@@ -235,10 +245,11 @@ export interface Chat {
    * while the session is `idle`, with no turn or queue, and has reached its
    * agent; the agent's process is released and has exited before its CLI
    * opens on the same agent session. To `ui`: the CLI and its tree are
-   * killed. Each change appends `session.driver_changed`; asking for the
-   * current driver changes nothing. Throws {@link DriverSwitchRefusedError}
-   * with a plain reason (nothing changed) and {@link NotFoundError} for an
-   * unknown session.
+   * killed, then the turns typed in it are imported. Each change appends
+   * `session.driver_changed` with its cause; asking for the current driver
+   * changes nothing. Throws {@link SessionNotIdleError} or
+   * {@link TerminalUnavailableError} with a plain reason (nothing changed)
+   * and {@link NotFoundError} for an unknown session.
    */
   switchDriver(workspaceId: WorkspaceId, sessionId: SessionId, driver: SessionDriver): Promise<Session>;
   /** A hold on the session's running terminal, or `undefined` when the terminal does not drive it. */
@@ -915,25 +926,29 @@ export function createChat(options: ChatOptions): Chat {
 
   const toTerminal = async (session: Session): Promise<Session> => {
     const terminal = options.terminal;
-    const terminalCommand = agent.terminalCommand?.bind(agent);
-    if (terminal === undefined || terminalCommand === undefined) {
-      throw new DriverSwitchRefusedError(`${agent.displayName} can't be opened in its own terminal here.`);
+    const resume = agent.terminalResume;
+    if (resume === undefined) {
+      throw new TerminalUnavailableError('agent_unsupported', `${agent.displayName} can't be opened in its own terminal.`);
     }
+    if (terminal === undefined) throw new TerminalUnavailableError('pty_unavailable', "The terminal can't start on this computer.");
     if (busy.has(session.id) || session.state !== 'idle') {
-      throw new DriverSwitchRefusedError(`${agent.displayName} is busy. Switch to the terminal when it is idle.`);
+      throw new SessionNotIdleError(`${agent.displayName} is busy. Switch to the terminal when it is idle.`);
     }
     const agentSessionId = storedAgentSessionId(session.id);
     if (agentSessionId === undefined) {
-      throw new DriverSwitchRefusedError(`Send ${agent.displayName} a message first, then switch to the terminal.`);
+      throw new TerminalUnavailableError('no_agent_session', `Send ${agent.displayName} a message first, then switch to the terminal.`);
     }
     const workspace = getWorkspace(session.workspaceId);
     const availability = await terminal.available();
-    if (!availability.ok) throw new DriverSwitchRefusedError(`The terminal can't start on this computer: ${availability.reason}`);
-    let command: Awaited<ReturnType<typeof terminalCommand>>;
+    if (!availability.ok) throw new TerminalUnavailableError('pty_unavailable', `The terminal can't start on this computer: ${availability.reason}`);
+    const env = { ...agentEnv() };
+    const located = await resume.locate(env);
+    if (!located.found) throw new TerminalUnavailableError('cli_not_found', located.reason);
+    let command: Awaited<ReturnType<AgentTerminalResume['command']>>;
     try {
-      command = await terminalCommand(agentSessionId, { ...agentEnv() });
+      command = await resume.command(agentSessionId, env);
     } catch (error) {
-      throw new DriverSwitchRefusedError(error instanceof AgentError ? error.message : `${agent.displayName}'s terminal couldn't be found.`);
+      throw new TerminalUnavailableError('cli_not_found', error instanceof AgentError ? error.message : `${agent.displayName}'s terminal couldn't be found.`);
     }
     if (closing) throw new InvalidOperationError('Ogden Agents is stopping.');
     await releaseAgent(session.id);
@@ -950,7 +965,7 @@ export function createChat(options: ChatOptions): Chat {
       });
     } catch (error) {
       internalError(session.id, error);
-      throw new DriverSwitchRefusedError(`${agent.displayName}'s terminal couldn't start. Try again.`);
+      throw new TerminalUnavailableError('pty_unavailable', `${agent.displayName}'s terminal couldn't start. Try again.`);
     }
     let markExited!: () => void;
     const entry: Terminal = {
@@ -981,7 +996,7 @@ export function createChat(options: ChatOptions): Chat {
       if (closing) return;
       try {
         // The CLI exited by itself (`/exit`, a crash): the chat drives again.
-        entities.setSessionDriver(session.id, 'ui');
+        entities.setSessionDriver(session.id, 'ui', 'cli_exited');
       } catch (error) {
         internalError(session.id, error);
       }
@@ -991,16 +1006,46 @@ export function createChat(options: ChatOptions): Chat {
       throw new InvalidOperationError('Ogden Agents is stopping.');
     }
     try {
-      return entities.setSessionDriver(session.id, 'terminal');
+      return entities.setSessionDriver(session.id, 'terminal', 'user');
     } catch (error) {
       await stopTerminal(session.id);
       throw error;
     }
   };
 
+  /**
+   * Appends the turns typed in the terminal that the chat lacks (E3-R4), the
+   * user's marked `origin: 'terminal'`. Any failure is reported and imports
+   * nothing more: the switch back still completes.
+   */
+  const importTerminalTurns = async (session: Session): Promise<void> => {
+    const resume = agent.terminalResume;
+    const agentSessionId = storedAgentSessionId(session.id);
+    if (resume?.transcript === undefined || agentSessionId === undefined) return;
+    try {
+      const workspace = getWorkspace(session.workspaceId);
+      const turns = await resume.transcript({
+        agentSessionId,
+        cwd: workspace.realPath ?? workspace.path,
+        env: { ...agentEnv() },
+      });
+      for (const turn of turnsToImport(entities.listCompletedMessages(session.id), turns)) {
+        sessionEvents.completeMessage(session.id, {
+          messageId: newMessageId(),
+          role: turn.role,
+          content: turn.text,
+          ...(turn.role === 'user' ? { origin: 'terminal' as const } : {}),
+        });
+      }
+    } catch (error) {
+      internalError(session.id, error);
+    }
+  };
+
   const toChat = async (session: Session): Promise<Session> => {
     await stopTerminal(session.id);
-    return entities.setSessionDriver(session.id, 'ui');
+    await importTerminalTurns(session);
+    return entities.setSessionDriver(session.id, 'ui', 'user');
   };
 
   return {
@@ -1056,8 +1101,8 @@ export function createChat(options: ChatOptions): Chat {
       const session = getSession(workspaceId, sessionId);
       const workspace = entities.getWorkspace(workspaceId);
       if (workspace === undefined) throw new NotFoundError('workspace', workspaceId);
-      if (session.driver === 'terminal') throw new InvalidOperationError('The terminal is driving this session.');
-      if (switching.has(sessionId)) throw new InvalidOperationError('This chat is switching to or from the terminal. Try again in a moment.');
+      if (session.driver === 'terminal') throw new DriverIsTerminalError();
+      if (switching.has(sessionId)) throw new SessionNotIdleError('This chat is switching to or from the terminal. Try again in a moment.');
       const current = busy.get(sessionId);
       if (current !== undefined) {
         // A failed turn is ending: nothing more goes after it.
@@ -1134,7 +1179,7 @@ export function createChat(options: ChatOptions): Chat {
     async switchDriver(workspaceId, sessionId, driver) {
       if (closing) throw new InvalidOperationError('Ogden Agents is stopping.');
       const session = getSession(workspaceId, sessionId);
-      if (switching.has(sessionId)) throw new DriverSwitchRefusedError('This chat is already switching. Try again in a moment.');
+      if (switching.has(sessionId)) throw new SessionNotIdleError('This chat is already switching. Try again in a moment.');
       if (session.driver === driver) return session;
       switching.add(sessionId);
       try {
@@ -1183,7 +1228,7 @@ export function createChat(options: ChatOptions): Chat {
         // The server owns the terminals (AD-3): they stop with it, and their chats drive again.
         for (const sessionId of terminals.keys()) {
           try {
-            entities.setSessionDriver(sessionId, 'ui');
+            entities.setSessionDriver(sessionId, 'ui', 'server_stopped');
           } catch (error) {
             internalError(sessionId, error);
           }

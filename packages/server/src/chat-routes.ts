@@ -5,16 +5,20 @@
  * answers (409 only when the queue is full) and adds Stop (`cancel`). All live under `/api/v1`
  * (`API_ROUTES`), behind the gate: a tab token on every request, and a
  * matching `Origin` on these state-changing POSTs (AD-15). Routes call the
- * core chat use-case and never write themselves (AD-11).
+ * core chat use-case and never write themselves (AD-11). Story 3.1 adds the
+ * driver switch; story 3.2 gives its refusals their own codes and adds the
+ * session's `terminal` to `GET` session.
  */
 import {
   CoreError,
-  DriverSwitchRefusedError,
+  DriverIsTerminalError,
   InvalidOperationError,
   NotFoundError,
   QueueFullError,
   SessionBusyError,
   SessionNotBusyError,
+  SessionNotIdleError,
+  TerminalUnavailableError,
   ValidationError,
   type Chat,
 } from '@ogden-agents/core';
@@ -28,6 +32,7 @@ import {
   SessionResponse,
   SessionsResponse,
   SetDriverRequest,
+  type SessionTerminal,
   WorkspaceId,
   WorkspaceResponse,
   WorkspacesResponse,
@@ -36,11 +41,15 @@ import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { apiError } from './errors.js';
 import type { Logger } from './log.js';
+import type { TerminalAvailabilityCheck } from './terminal-availability.js';
 
 /** Largest request body these routes read (a message is at most 100,000 characters). */
 const MAX_BODY_BYTES = 1024 * 1024;
 
 const NOT_FOUND = 'There is no such project or chat.';
+
+/** The terminal's reason when checking it failed (story 3.2): plain words, never the error itself. */
+export const TERMINAL_CHECK_FAILED = "Ogden Agents couldn't check whether the terminal can start here.";
 
 /** The part of a shared Zod schema these routes use. */
 interface Schema<T> {
@@ -73,7 +82,12 @@ export function ids(c: Context): { workspaceId: WorkspaceId; sessionId?: Session
   return session.success ? { workspaceId: workspace.data, sessionId: session.data } : undefined;
 }
 
-export function registerChatRoutes(app: Hono, chat: Chat, log: Logger): void {
+export interface ChatRouteOptions {
+  /** Whether a session's terminal can work (story 3.2; 3.7 fills it in). Without it, `GET` session has no `terminal`. */
+  terminalAvailability?: TerminalAvailabilityCheck | undefined;
+}
+
+export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { terminalAvailability }: ChatRouteOptions = {}): void {
   const limit = bodyLimit({
     maxSize: MAX_BODY_BYTES,
     onError: (c) => apiError(c, 413, 'invalid_request', 'That message is too long.'),
@@ -86,8 +100,10 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger): void {
       return apiError(c, 409, 'session_busy', 'Too many messages are waiting. Send this one when the agent has caught up.');
     }
     if (error instanceof SessionNotBusyError) return apiError(c, 409, 'session_not_busy', 'The agent is not working on anything to stop.');
-    // The plain reason says why (story 3.1); entry 2 gives the refusals their own codes.
-    if (error instanceof DriverSwitchRefusedError) return apiError(c, 409, 'session_busy', error.message);
+    // A switch refused (story 3.2): core's plain reason, and for the terminal the `SessionTerminal` that says why.
+    if (error instanceof SessionNotIdleError) return apiError(c, 409, 'session_not_idle', error.message);
+    if (error instanceof TerminalUnavailableError) return apiError(c, 409, 'terminal_unavailable', error.message, { terminal: error.terminal });
+    if (error instanceof DriverIsTerminalError) return apiError(c, 409, 'driver_is_terminal', error.message);
     if (error instanceof SessionBusyError) {
       return apiError(c, 409, 'session_busy', 'The agent is still answering. Send your message when it is done.');
     }
@@ -123,14 +139,28 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger): void {
     }
   });
 
-  app.get(API_ROUTES.workspaceSession, (c) => {
+  app.get(API_ROUTES.workspaceSession, async (c) => {
     const scope = ids(c);
     if (scope?.sessionId === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+    let session;
     try {
-      return c.json(SessionResponse.parse({ session: chat.getSession(scope.workspaceId, scope.sessionId) }));
+      session = chat.getSession(scope.workspaceId, scope.sessionId);
     } catch (error) {
       return refusal(c, error);
     }
+    if (terminalAvailability === undefined) return c.json(SessionResponse.parse({ session }));
+    let terminal: SessionTerminal;
+    try {
+      terminal = await terminalAvailability(session);
+    } catch (error) {
+      // A code only: the error's message could name a path.
+      log.error('terminal availability check failed', {
+        sessionId: session.id,
+        code: (error as NodeJS.ErrnoException | undefined)?.code ?? (error instanceof CoreError ? error.code : 'unexpected'),
+      });
+      terminal = { available: false, code: 'pty_unavailable', reason: TERMINAL_CHECK_FAILED };
+    }
+    return c.json(SessionResponse.parse({ session, terminal }));
   });
 
   app.get(API_ROUTES.workspaces, (c) => c.json(WorkspacesResponse.parse({ workspaces: chat.listWorkspaces() })));

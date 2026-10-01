@@ -1,7 +1,7 @@
 /**
  * The story 2.3 contracts: every new schema accepts one valid sample and
  * refuses one invalid one, and every new event type is in the `CoreEvent`,
- * `NewCoreEvent` and `ServerMessage` unions.
+ * `NewCoreEvent` and `ServerMessage` unions. Story 3.2 adds the terminal's.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -11,6 +11,7 @@ import {
   API_BASE,
   API_ERROR_CODES,
   API_ROUTES,
+  ApiErrorBody,
   apiPath,
   AppShortcutStatus,
   CaughtUpMessage,
@@ -18,11 +19,14 @@ import {
   ClientMessage,
   CoreEvent,
   CreateFolderRequest,
+  DriverChangeCause,
   FolderListing,
   HistoryDeletedResponse,
   HistoryPageMessage,
   MAX_DIFF_TEXT_LENGTH,
   MAX_PAGE_EVENTS,
+  MAX_TERMINAL_COLS,
+  MAX_TERMINAL_ROWS,
   NewCoreEvent,
   OnboardingState,
   PermissionDecisionRequest,
@@ -32,9 +36,16 @@ import {
   RequestFailedMessage,
   SendMessageResponse,
   ServerMessage,
+  SessionResponse,
   SessionsResponse,
+  SessionTerminal,
   SetApiKeyRequest,
   SignInResponse,
+  TerminalAttachFrame,
+  TerminalClientFrame,
+  TerminalServerFrame,
+  TerminalSizeFrame,
+  TerminalUnavailableCode,
   ToolCallDiff,
   ToolKind,
   UpdateWorkspaceSettingsRequest,
@@ -276,5 +287,67 @@ describe('API routes and error codes', () => {
 
   it('has the story 2.3 error codes', () => {
     expect(API_ERROR_CODES).toEqual(expect.arrayContaining(['not_implemented', 'permission_not_pending', 'shortcut_unsupported', 'agent_setup_failed']));
+  });
+});
+
+describe('the terminal contracts (story 3.2)', () => {
+  it('SessionTerminal: available, or not with one of its codes and a plain reason', () => {
+    expect(SessionTerminal.parse({ available: true })).toEqual({ available: true });
+    for (const code of ['agent_unsupported', 'no_agent_session', 'pty_unavailable', 'cli_not_found'] as const) {
+      const unavailable = { available: false, code, reason: 'Plain words.' };
+      expect(SessionTerminal.parse(unavailable)).toEqual(unavailable);
+    }
+    expect(TerminalUnavailableCode.options).toEqual(['agent_unsupported', 'no_agent_session', 'pty_unavailable', 'cli_not_found']);
+    // Not idle is the session's state, never a terminal code (E3-R5 vs E3-R7).
+    expect(SessionTerminal.safeParse({ available: false, code: 'session_not_idle', reason: 'Busy.' }).success).toBe(false);
+    expect(SessionTerminal.safeParse({ available: false, code: 'cli_not_found', reason: '' }).success).toBe(false);
+    expect(SessionTerminal.safeParse({ available: false }).success).toBe(false);
+  });
+
+  it('SessionResponse carries terminal optionally', () => {
+    expect(SessionResponse.parse({ session })).toEqual({ session });
+    expect(SessionResponse.parse({ session, terminal: { available: true } })).toEqual({ session, terminal: { available: true } });
+    expect(SessionResponse.safeParse({ session, terminal: { available: 'yes' } }).success).toBe(false);
+  });
+
+  it('client frames: attach and resize with a size in range; server frames: exit and size', () => {
+    for (const type of ['attach', 'resize'] as const) {
+      expect(TerminalClientFrame.parse({ type, cols: 80, rows: 24 })).toEqual({ type, cols: 80, rows: 24 });
+      expect(TerminalClientFrame.safeParse({ type, cols: MAX_TERMINAL_COLS + 1, rows: 24 }).success).toBe(false);
+      expect(TerminalClientFrame.safeParse({ type, cols: 80, rows: 0 }).success).toBe(false);
+    }
+    expect(TerminalAttachFrame.safeParse({ type: 'attach', cols: 80 }).success).toBe(false);
+    expect(TerminalClientFrame.safeParse({ type: 'input', data: 'ls' }).success).toBe(false);
+    expect(TerminalServerFrame.parse({ type: 'exit', exitCode: null })).toEqual({ type: 'exit', exitCode: null });
+    expect(TerminalServerFrame.parse({ type: 'size', cols: 120, rows: MAX_TERMINAL_ROWS })).toEqual({ type: 'size', cols: 120, rows: MAX_TERMINAL_ROWS });
+    expect(TerminalSizeFrame.safeParse({ type: 'size', cols: 120, rows: MAX_TERMINAL_ROWS + 1 }).success).toBe(false);
+    // Bytes are binary frames only: there is no data frame.
+    expect(TerminalServerFrame.safeParse({ type: 'data', data: 'x' }).success).toBe(false);
+  });
+
+  it('session.driver_changed takes an optional cause; an event from before 3.2 still parses', () => {
+    const base = { type: 'session.driver_changed', ...onSession, payload: { sessionId: sesId, driver: 'ui', previous: 'terminal' } };
+    expect(CoreEvent.parse({ ...base, ...assigned })).toMatchObject({ payload: { driver: 'ui' } });
+    for (const cause of DriverChangeCause.options) {
+      expect(CoreEvent.parse({ ...base, ...assigned, payload: { ...base.payload, cause } })).toMatchObject({ payload: { cause } });
+    }
+    expect(DriverChangeCause.options).toEqual(['user', 'cli_exited', 'server_stopped', 'server_restarted']);
+    expect(NewCoreEvent.safeParse({ ...base, payload: { ...base.payload, cause: 'whim' } }).success).toBe(false);
+  });
+
+  it('session.message_completed takes origin deny_reason or terminal; an event without it still parses', () => {
+    const base = { type: 'session.message_completed', ...onSession, payload: { messageId: 'msg_1', role: 'user', content: 'hi' } };
+    expect(CoreEvent.parse({ ...base, ...assigned })).toMatchObject({ payload: { content: 'hi' } });
+    for (const origin of ['deny_reason', 'terminal']) {
+      expect(NewCoreEvent.parse({ ...base, payload: { ...base.payload, origin } })).toMatchObject({ payload: { origin } });
+    }
+    expect(NewCoreEvent.safeParse({ ...base, payload: { ...base.payload, origin: 'shell' } }).success).toBe(false);
+  });
+
+  it('has the story 3.2 error codes', () => {
+    expect(API_ERROR_CODES).toEqual(expect.arrayContaining(['session_not_idle', 'terminal_unavailable', 'driver_is_terminal']));
+    for (const code of ['session_not_idle', 'terminal_unavailable', 'driver_is_terminal']) {
+      expect(ApiErrorBody.parse({ error: { code, message: 'Plain words.', details: { terminal: { available: true } } } }).error.code).toBe(code);
+    }
   });
 });

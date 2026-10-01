@@ -1,3 +1,5 @@
+import type { SessionTerminal, TerminalUnavailableCode } from '@ogden-agents/shared';
+
 /** Base class for errors core throws on purpose, so callers can tell them from bugs. */
 export class CoreError extends Error {
   override readonly name: string = 'CoreError';
@@ -84,14 +86,48 @@ export class SessionNotBusyError extends CoreError {
 }
 
 /**
- * A switch between the chat and the agent's terminal was refused (story 3.1):
- * the session is not `idle`, has never reached its agent, or the terminal
- * can't start here. `message` is plain words for the user; nothing changed.
+ * A switch between the chat and the agent's terminal was refused (story 3.1;
+ * story 3.2 gives each refusal its own class): {@link SessionNotIdleError} or
+ * {@link TerminalUnavailableError}. `message` is plain words for the user;
+ * nothing changed.
  */
-export class DriverSwitchRefusedError extends CoreError {
-  override readonly name = 'DriverSwitchRefusedError';
+export abstract class DriverSwitchRefusedError extends CoreError {
+  override readonly name: string = 'DriverSwitchRefusedError';
+}
+
+/** The switch was refused because the session is working, waiting on a permission, has queued messages, or is switching (E3-R5). */
+export class SessionNotIdleError extends DriverSwitchRefusedError {
+  override readonly name = 'SessionNotIdleError';
   constructor(message: string) {
-    super('driver_switch_refused', message);
+    super('session_not_idle', message);
+  }
+}
+
+/**
+ * The switch to the terminal was refused because the terminal can't work for
+ * this session here (E3-R7): `terminalCode` says why, `message` in plain
+ * words (never a path, a command line or a secret).
+ */
+export class TerminalUnavailableError extends DriverSwitchRefusedError {
+  override readonly name = 'TerminalUnavailableError';
+  constructor(
+    readonly terminalCode: TerminalUnavailableCode,
+    message: string,
+  ) {
+    super('terminal_unavailable', message);
+  }
+
+  /** The `SessionTerminal` this refusal reports. */
+  get terminal(): SessionTerminal {
+    return { available: false, code: this.terminalCode, reason: this.message };
+  }
+}
+
+/** A chat message was refused because the agent's own terminal drives the session (AD-6). */
+export class DriverIsTerminalError extends CoreError {
+  override readonly name = 'DriverIsTerminalError';
+  constructor(message = 'The terminal is driving this chat. Switch back to the chat to send a message.') {
+    super('driver_is_terminal', message);
   }
 }
 

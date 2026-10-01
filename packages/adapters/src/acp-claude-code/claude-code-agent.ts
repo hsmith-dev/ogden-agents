@@ -54,7 +54,7 @@ import {
 } from '@ogden-agents/core';
 import { killProcessTree } from '../process-tree.js';
 import { findClaudeExecutable } from './detect.js';
-import { claudeTerminalCommand } from './terminal-command.js';
+import { claudeTerminalCommand, locateClaudeTerminal } from './terminal-command.js';
 import { createStreamMasker, maskSecrets, secretValues } from './mask.js';
 
 /** The product name the UI shows (EXPERIENCE.md Voice: the agent by its product name). */
@@ -215,7 +215,11 @@ export function createClaudeCodeAgent(options: ClaudeCodeAgentOptions = {}): Age
       });
     },
 
-    terminalCommand: async (agentSessionId, env) => claudeTerminalCommand(agentSessionId, env, { ...options, adapterPath: currentAdapterPath() }),
+    // `claude --resume <id>` (CAP-5). `transcript` is story 3.3's to add.
+    terminalResume: {
+      command: async (agentSessionId, env) => claudeTerminalCommand(agentSessionId, env, { ...options, adapterPath: currentAdapterPath() }),
+      locate: async (env) => locateClaudeTerminal(env, { ...options, adapterPath: currentAdapterPath() }),
+    },
   };
 }
 

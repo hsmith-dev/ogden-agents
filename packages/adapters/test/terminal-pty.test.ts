@@ -10,7 +10,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AgentError, type TerminalProcess } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { bundledClaudeExecutable, claudeTerminalCommand, createPtyTerminalPort, loadPty, resolveClaudeAgentAcp, stripTerminalEscapes } from '../src/index.js';
+import {
+  bundledClaudeExecutable,
+  CLAUDE_CLI_NOT_FOUND,
+  claudeTerminalCommand,
+  createPtyTerminalPort,
+  loadPty,
+  locateClaudeTerminal,
+  resolveClaudeAgentAcp,
+  resolveClaudeExecutable,
+  stripTerminalEscapes,
+} from '../src/index.js';
 
 /** Why the resize check is skipped on Windows (story 3.1 CI; deferred-work). */
 const WINDOWS_RESIZE = 'ConPTY resize not applied under node-pty 1.1.0 — investigate in 3.8';
@@ -49,6 +59,18 @@ describe("the session's CLI command", () => {
       expect(() => claudeTerminalCommand(id, { CLAUDE_CODE_EXECUTABLE: '/c' }), id).toThrow(AgentError);
     }
     expect(() => claudeTerminalCommand(ID, { PATH: '' }, { claudeExecutable: null, adapterPath: undefined })).toThrow("Claude Code's terminal couldn't be found on this computer.");
+  });
+
+  it('resolves the same claude for the command and for locate, whose reason never names a path (story 3.2)', () => {
+    const env = { PATH: '', CLAUDE_CODE_EXECUTABLE: '/opt/claude/bin/claude' };
+    expect(resolveClaudeExecutable(env, { claudeExecutable: null })).toBe('/opt/claude/bin/claude');
+    expect(locateClaudeTerminal(env, { claudeExecutable: null })).toEqual({ found: true });
+    expect(resolveClaudeExecutable({ PATH: '' }, { claudeExecutable: '/elsewhere/claude' })).toBe('/elsewhere/claude');
+    const missing = { PATH: '/nowhere/bin' };
+    expect(resolveClaudeExecutable(missing, { claudeExecutable: null, adapterPath: undefined })).toBeUndefined();
+    const located = locateClaudeTerminal(missing, { claudeExecutable: null, adapterPath: undefined });
+    expect(located).toEqual({ found: false, reason: CLAUDE_CLI_NOT_FOUND });
+    expect(JSON.stringify(located)).not.toMatch(/[\\/]/);
   });
 
   it('finds the Agent SDK’s bundled binary beside the adapter, as claude-agent-acp does (never running it)', () => {
@@ -120,6 +142,12 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('the real terminal (f
     await expect.poll(() => exits, { timeout: 10_000 }).toEqual([0]);
   }, 30_000);
 
+  it('reports a crash with its exit code (story 3.2 fake CLI: crash)', async () => {
+    const { cli, exits } = await openFake({});
+    cli.write('crash\r');
+    await expect.poll(() => exits, { timeout: 10_000 }).toEqual([70]);
+  }, 30_000);
+
   it.skipIf(process.platform === 'win32')(`resizes it (skipped on Windows: ${WINDOWS_RESIZE})`, async () => {
     const { cli, output } = await openFake({});
     cli.resize(100, 30);
@@ -133,6 +161,8 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('the real terminal (f
         { timeout: 10_000, interval: 500 },
       )
       .toContain('size=100x30');
+    // The fake CLI also says so unasked when the resize reaches it (SIGWINCH).
+    await expect.poll(output, { timeout: 10_000 }).toContain('resized=100x30');
   }, 30_000);
 
   it('kill stops the whole tree: the CLI and what it started', async () => {

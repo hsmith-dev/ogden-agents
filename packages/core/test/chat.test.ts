@@ -17,6 +17,7 @@ import {
   clampCheckInDelay,
   deniedMessage,
   DELTA_INTERVAL_MS,
+  DriverIsTerminalError,
   DriverSwitchRefusedError,
   InvalidOperationError,
   MAX_PRIME_CHARS,
@@ -30,13 +31,18 @@ import {
   RESTARTED_REASON,
   SessionBusyError,
   SessionNotBusyError,
+  SessionNotIdleError,
   TERMINAL_BACKLOG_CHARS,
+  TerminalUnavailableError,
   WorkspaceBusyError,
   type AgentEvent,
   type AgentPermissionDecision,
   type AgentPort,
   type AgentRestored,
   type AgentSession,
+  type AgentTerminalResume,
+  type AgentTranscriptTurn,
+  type CompletedMessage,
   type Core,
   type OpenTerminal,
   type Permissions,
@@ -46,6 +52,18 @@ import {
   type TerminalProcess,
 } from '../src/index.js';
 import { openTestCore, tempDir } from './helpers.js';
+
+/** Lets a test stand in for story 3.3's `turnsToImport` (the stub imports nothing); `undefined` keeps the real one. */
+const importTurns = vi.hoisted(() => ({
+  with: undefined as undefined | ((stored: readonly CompletedMessage[], turns: readonly AgentTranscriptTurn[]) => AgentTranscriptTurn[]),
+}));
+vi.mock('../src/terminal-import.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/terminal-import.js')>();
+  return {
+    ...actual,
+    turnsToImport: (stored: readonly CompletedMessage[], turns: readonly AgentTranscriptTurn[]) => (importTurns.with ?? actual.turnsToImport)(stored, turns),
+  };
+});
 
 /**
  * An agent whose every prompt runs `script`, which reports through `emit`.
@@ -385,7 +403,7 @@ describe('chat', () => {
     const core = openTestCore();
     const { chat, workspace, session } = setUp(core, hello.port);
     core.entities.setSessionDriver(session.id, 'terminal');
-    expect(() => chat.sendMessage(workspace.id, session.id, 'hello')).toThrow(InvalidOperationError);
+    expect(() => chat.sendMessage(workspace.id, session.id, 'hello')).toThrow(DriverIsTerminalError);
   });
 
   it('opening a path that is not a folder is refused in plain words; the same repo is one workspace', () => {
@@ -1528,16 +1546,21 @@ function fakeTerminal({ available = { ok: true } as TerminalAvailability, onOpen
 describe('the terminal (story 3.1)', () => {
   const MARKER = 'terminal-marker-7f3a9c';
 
+  /** The CLI side of a Claude-Code-like agent whose CLI resumes its sessions (story 3.2's `terminalResume`). */
+  const cliResume = (overrides: Partial<AgentTerminalResume> = {}): AgentTerminalResume => ({
+    command: async (id, env) => ({ file: 'agent-cli', args: ['--resume', id], env: { ...env, FROM_CLI: '1' } }),
+    locate: async () => ({ found: true }),
+    ...overrides,
+  });
+
   /** A chat that answered once, with a Claude-Code-like agent whose CLI resumes its sessions, and a fake terminal. */
-  const answeredOnce = async (terminal = fakeTerminal(), { resumes = true } = {}) => {
+  const answeredOnce = async (terminal = fakeTerminal(), { resumes = true, resume = cliResume() } = {}) => {
     const core = openTestCore();
     const agent = scriptedAgent(
       async (text, emit) => (emit({ type: 'message_chunk', text: `re: ${text}` }), { stopReason: 'end_turn' }),
       () => 'resumed',
     );
-    const port: AgentPort = resumes
-      ? { ...agent.port, terminalCommand: async (id, env) => ({ file: 'agent-cli', args: ['--resume', id], env: { ...env, FROM_CLI: '1' } }) }
-      : agent.port;
+    const port: AgentPort = resumes ? { ...agent.port, terminalResume: resume } : agent.port;
     const repo = tempDir('ogden-agents-repo-');
     const chat = createChat({
       dataDir: tempDir('ogden-agents-data-'),
@@ -1555,7 +1578,7 @@ describe('the terminal (story 3.1)', () => {
   };
 
   const driverChanges = (core: Core, sessionId: SessionId) =>
-    sessionEvents(core, sessionId).flatMap((e) => (e.type === 'session.driver_changed' ? [[e.payload.previous, e.payload.driver]] : []));
+    sessionEvents(core, sessionId).flatMap((e) => (e.type === 'session.driver_changed' ? [[e.payload.previous, e.payload.driver, e.payload.cause]] : []));
 
   it('switches to the CLI on the same agent session after the agent exited, carries bytes both ways, and back; the next message resumes', async () => {
     let closedAtOpen = -1;
@@ -1578,7 +1601,7 @@ describe('the terminal (story 3.1)', () => {
       },
     ]);
     // Chat input is refused while the terminal drives (AD-6).
-    expect(() => chat.sendMessage(workspace.id, session.id, 'hello?')).toThrow(InvalidOperationError);
+    expect(() => chat.sendMessage(workspace.id, session.id, 'hello?')).toThrow(DriverIsTerminalError);
 
     const cli = terminal.processes[0]!;
     cli.print('welcome\r\n');
@@ -1601,8 +1624,8 @@ describe('the terminal (story 3.1)', () => {
     expect(ends).toEqual([null]);
     expect(chat.attachTerminal(session.id)).toBeUndefined();
     expect(driverChanges(core, session.id)).toEqual([
-      ['ui', 'terminal'],
-      ['terminal', 'ui'],
+      ['ui', 'terminal', 'user'],
+      ['terminal', 'ui', 'user'],
     ]);
 
     // The next message reopens the same agent session and gets a reply.
@@ -1624,33 +1647,89 @@ describe('the terminal (story 3.1)', () => {
     await chat.close();
   });
 
-  it('refuses, changing nothing, a chat that never reached its agent, a busy one, an agent whose CLI cannot resume, and no terminal', async () => {
-    const refusedWith = async (switching: Promise<unknown>, reason: RegExp) => {
-      await expect(switching).rejects.toThrow(DriverSwitchRefusedError);
-      await expect(switching).rejects.toThrow(reason);
+  it('refuses, changing nothing, each case with its own error and code (story 3.2)', async () => {
+    const refusedWith = async (switching: Promise<unknown>, expected: { code: string; terminalCode?: string }, reason: RegExp) => {
+      const error = await switching.then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(DriverSwitchRefusedError);
+      expect(error).toBeInstanceOf(expected.code === 'session_not_idle' ? SessionNotIdleError : TerminalUnavailableError);
+      expect((error as DriverSwitchRefusedError).code).toBe(expected.code);
+      if (expected.terminalCode !== undefined) {
+        expect((error as TerminalUnavailableError).terminal).toEqual({ available: false, code: expected.terminalCode, reason: (error as Error).message });
+      }
+      expect((error as Error).message).toMatch(reason);
     };
+    const unavailable = (terminalCode: string) => ({ code: 'terminal_unavailable', terminalCode });
 
     // Never reached its agent: there is no session to resume.
     const fresh = await answeredOnce();
     const other = fresh.chat.createChatSession(fresh.workspace.id);
-    await refusedWith(fresh.chat.switchDriver(fresh.workspace.id, other.id, 'terminal'), /Send Test Agent a message first/);
+    await refusedWith(fresh.chat.switchDriver(fresh.workspace.id, other.id, 'terminal'), unavailable('no_agent_session'), /Send Test Agent a message first/);
     await fresh.chat.close();
 
     // node-pty did not load (AD-19).
-    const unavailable = await answeredOnce(fakeTerminal({ available: { ok: false, reason: 'no prebuilt terminal' } }));
-    await refusedWith(unavailable.chat.switchDriver(unavailable.workspace.id, unavailable.session.id, 'terminal'), /no prebuilt terminal/);
-    expect(unavailable.agent.closed()).toBe(0);
-    await unavailable.chat.close();
+    const noPty = await answeredOnce(fakeTerminal({ available: { ok: false, reason: 'no prebuilt terminal' } }));
+    await refusedWith(noPty.chat.switchDriver(noPty.workspace.id, noPty.session.id, 'terminal'), unavailable('pty_unavailable'), /no prebuilt terminal/);
+    expect(noPty.agent.closed()).toBe(0);
+    await noPty.chat.close();
 
     // The agent's CLI can't resume its sessions.
-    const noCli = await answeredOnce(fakeTerminal(), { resumes: false });
-    await refusedWith(noCli.chat.switchDriver(noCli.workspace.id, noCli.session.id, 'terminal'), /can't be opened in its own terminal/);
-    await noCli.chat.close();
+    const noResume = await answeredOnce(fakeTerminal(), { resumes: false });
+    await refusedWith(noResume.chat.switchDriver(noResume.workspace.id, noResume.session.id, 'terminal'), unavailable('agent_unsupported'), /can't be opened in its own terminal/);
+    await noResume.chat.close();
 
-    for (const { core, session, terminal } of [fresh, unavailable, noCli]) {
+    // The CLI can't be found, by `locate` or when its command is built.
+    const notLocated = await answeredOnce(fakeTerminal(), { resume: cliResume({ locate: async () => ({ found: false, reason: "Test Agent's CLI isn't installed." }) }) });
+    await refusedWith(notLocated.chat.switchDriver(notLocated.workspace.id, notLocated.session.id, 'terminal'), unavailable('cli_not_found'), /CLI isn't installed/);
+    expect(notLocated.agent.closed()).toBe(0);
+    await notLocated.chat.close();
+    const noCommand = await answeredOnce(fakeTerminal(), {
+      resume: cliResume({
+        command: async () => {
+          throw new AgentError('agent_unavailable', "Test Agent's terminal couldn't be found on this computer.");
+        },
+      }),
+    });
+    await refusedWith(noCommand.chat.switchDriver(noCommand.workspace.id, noCommand.session.id, 'terminal'), unavailable('cli_not_found'), /couldn't be found/);
+    await noCommand.chat.close();
+
+    // The terminal could not start the CLI.
+    const noStart = await answeredOnce({
+      ...fakeTerminal(),
+      port: {
+        available: async () => ({ ok: true }),
+        open: async () => {
+          throw new Error('spawn failed');
+        },
+      },
+      opened: [],
+    });
+    await refusedWith(noStart.chat.switchDriver(noStart.workspace.id, noStart.session.id, 'terminal'), unavailable('pty_unavailable'), /couldn't start/);
+    await noStart.chat.close();
+
+    for (const { core, session, terminal } of [fresh, noPty, noResume, notLocated, noCommand, noStart]) {
       expect(core.entities.getSession(session.id)!.driver).toBe('ui');
       expect(terminal.opened).toEqual([]);
+      expect(driverChanges(core, session.id)).toEqual([]);
     }
+
+    // Already switching: refused as not idle.
+    let release!: () => void;
+    const slow = await answeredOnce(fakeTerminal({ available: { ok: true } }), {
+      resume: cliResume({ locate: () => new Promise((resolve) => (release = () => resolve({ found: true }))) }),
+    });
+    const first = slow.chat.switchDriver(slow.workspace.id, slow.session.id, 'terminal');
+    await settle();
+    await refusedWith(slow.chat.switchDriver(slow.workspace.id, slow.session.id, 'terminal'), { code: 'session_not_idle' }, /already switching/);
+    // A message sent mid-switch is refused the same way, and stored nowhere.
+    const eventsBefore = sessionEvents(slow.core, slow.session.id).length;
+    expect(() => slow.chat.sendMessage(slow.workspace.id, slow.session.id, 'mid-switch')).toThrow(SessionNotIdleError);
+    expect(sessionEvents(slow.core, slow.session.id)).toHaveLength(eventsBefore);
+    release();
+    expect((await first).driver).toBe('terminal');
+    await slow.chat.close();
 
     // Working (and so with a turn): refused; nothing is interrupted.
     const core = openTestCore();
@@ -1660,7 +1739,7 @@ describe('the terminal (story 3.1)', () => {
       dataDir: tempDir('ogden-agents-data-'),
       entities: core.entities,
       sessionEvents: core.sessionEvents,
-      agent: { ...agent.port, terminalCommand: async (id, env) => ({ file: 'agent-cli', args: ['--resume', id], env }) },
+      agent: { ...agent.port, terminalResume: cliResume() },
       terminal: terminal.port,
     });
     const workspace = chat.openWorkspace(tempDir('ogden-agents-repo-'));
@@ -1671,7 +1750,7 @@ describe('the terminal (story 3.1)', () => {
     await chat.settled();
     chat.sendMessage(workspace.id, session.id, 'two');
     await settle();
-    await refusedWith(chat.switchDriver(workspace.id, session.id, 'terminal'), /busy/);
+    await refusedWith(chat.switchDriver(workspace.id, session.id, 'terminal'), { code: 'session_not_idle' }, /busy/);
     expect(agent.running()).toBe(true);
     expect(agent.closed()).toBe(0);
     agent.end();
@@ -1691,8 +1770,8 @@ describe('the terminal (story 3.1)', () => {
     expect(core.entities.getSession(session.id)!.driver).toBe('ui');
     expect(chat.attachTerminal(session.id)).toBeUndefined();
     expect(driverChanges(core, session.id)).toEqual([
-      ['ui', 'terminal'],
-      ['terminal', 'ui'],
+      ['ui', 'terminal', 'user'],
+      ['terminal', 'ui', 'cli_exited'],
     ]);
     await chat.close();
   });
@@ -1715,8 +1794,8 @@ describe('the terminal (story 3.1)', () => {
     expect(core.entities.releaseTerminalDrivers().map((session) => session.id)).toEqual([inTerminal.id]);
     expect(core.entities.getSession(inTerminal.id)!.driver).toBe('ui');
     expect(driverChanges(core, inTerminal.id)).toEqual([
-      ['ui', 'terminal'],
-      ['terminal', 'ui'],
+      ['ui', 'terminal', undefined],
+      ['terminal', 'ui', 'server_restarted'],
     ]);
     expect(driverChanges(core, inChat.id)).toEqual([]);
     expect(core.entities.releaseTerminalDrivers()).toEqual([]);
@@ -1729,5 +1808,95 @@ describe('the terminal (story 3.1)', () => {
     expect(terminal.processes[0]!.kills()).toBe(1);
     expect(core.entities.getSession(session.id)!.driver).toBe('ui');
     expect(chat.attachTerminal(session.id)).toBeUndefined();
+    expect(driverChanges(core, session.id).at(-1)).toEqual(['terminal', 'ui', 'server_stopped']);
+  });
+
+  it('switching back reads the CLI transcript after the CLI stopped, and imports what turnsToImport returns (nothing yet; 3.3)', async () => {
+    const calls: Array<{ input: unknown; killsSoFar: number }> = [];
+    let kills = () => 0;
+    const { core, chat, workspace, session, terminal, repo } = await answeredOnce(fakeTerminal(), {
+      resume: cliResume({
+        transcript: async (input) => {
+          calls.push({ input, killsSoFar: kills() });
+          return [
+            { role: 'user', text: 'typed in the terminal' },
+            { role: 'agent', text: 'answered in the terminal' },
+          ];
+        },
+      }),
+    });
+    await chat.switchDriver(workspace.id, session.id, 'terminal');
+    kills = terminal.processes[0]!.kills;
+    const before = sessionEvents(core, session.id).length;
+    await chat.switchDriver(workspace.id, session.id, 'ui');
+    expect(calls).toEqual([{ input: { agentSessionId: 'agent-1', cwd: realpathSync.native(repo), env: { PATH: '/bin', CHAT_ONLY: 'yes' } }, killsSoFar: 1 }]);
+    // The stub imports nothing: only the driver change was appended.
+    expect(sessionEvents(core, session.id).slice(before).map((e) => e.type)).toEqual(['session.driver_changed']);
+    await chat.close();
+  });
+
+  it('appends the turns to import before the driver change, the user\'s marked from the terminal', async () => {
+    const seen: Array<{ stored: string[]; turns: number }> = [];
+    importTurns.with = (stored, turns) => {
+      seen.push({ stored: stored.map((message) => message.content), turns: turns.length });
+      return turns.slice(1);
+    };
+    try {
+      const { core, chat, workspace, session } = await answeredOnce(fakeTerminal(), {
+        resume: cliResume({
+          transcript: async () => [
+            { role: 'user', text: 'first question' },
+            { role: 'user', text: 'typed in the terminal' },
+            { role: 'agent', text: 'answered in the terminal' },
+          ],
+        }),
+      });
+      await chat.switchDriver(workspace.id, session.id, 'terminal');
+      const before = sessionEvents(core, session.id).length;
+      await chat.switchDriver(workspace.id, session.id, 'ui');
+      expect(seen).toEqual([{ stored: ['first question', 're: first question'], turns: 3 }]);
+      const appended = sessionEvents(core, session.id).slice(before);
+      expect(appended.map((e) => e.type)).toEqual(['session.message_completed', 'session.message_completed', 'session.driver_changed']);
+      expect(appended[0]).toMatchObject({ payload: { role: 'user', content: 'typed in the terminal', origin: 'terminal' } });
+      expect(appended[1]).toMatchObject({ payload: { role: 'agent', content: 'answered in the terminal' } });
+      expect(appended[1]!.type === 'session.message_completed' && appended[1]!.payload.origin).toBeUndefined();
+      await chat.close();
+    } finally {
+      importTurns.with = undefined;
+    }
+  });
+
+  it('a failing transcript hook is reported, and the switch back still completes', async () => {
+    const internal: unknown[] = [];
+    const core = openTestCore();
+    const agent = scriptedAgent(async (text, emit) => (emit({ type: 'message_chunk', text: `re: ${text}` }), { stopReason: 'end_turn' }));
+    const terminal = fakeTerminal();
+    const chat = createChat({
+      dataDir: tempDir('ogden-agents-data-'),
+      entities: core.entities,
+      sessionEvents: core.sessionEvents,
+      agent: {
+        ...agent.port,
+        terminalResume: cliResume({
+          transcript: async () => {
+            throw new Error('unreadable session file');
+          },
+        }),
+      },
+      terminal: terminal.port,
+      onInternalError: (_sessionId, error) => internal.push(error),
+    });
+    const workspace = chat.openWorkspace(tempDir('ogden-agents-repo-'));
+    const session = chat.createChatSession(workspace.id);
+    chat.sendMessage(workspace.id, session.id, 'first question');
+    await chat.settled();
+    await chat.switchDriver(workspace.id, session.id, 'terminal');
+    expect((await chat.switchDriver(workspace.id, session.id, 'ui')).driver).toBe('ui');
+    expect(internal).toEqual([new Error('unreadable session file')]);
+    expect(driverChanges(core, session.id)).toEqual([
+      ['ui', 'terminal', 'user'],
+      ['terminal', 'ui', 'user'],
+    ]);
+    await chat.close();
   });
 });

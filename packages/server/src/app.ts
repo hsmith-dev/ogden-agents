@@ -12,6 +12,7 @@ import type { Logger } from './log.js';
 import { isServerPath } from './paths.js';
 import { registerPermissionRoutes } from './permission-routes.js';
 import { registerShortcutRoutes } from './shortcut-routes.js';
+import type { TerminalAvailabilityCheck } from './terminal-availability.js';
 import { registerTerminalSocket } from './terminal-socket.js';
 import { registerWorkspaceRoutes } from './workspace-routes.js';
 
@@ -63,6 +64,8 @@ export interface AppOptions {
   toolchain?: Toolchain;
   /** Workspaces, chat sessions and messages (story 2.2); without it those routes answer 404. */
   chat?: Chat;
+  /** Whether a session's terminal can work, for `GET` session (story 3.2); without it that answer has no `terminal`. */
+  terminalAvailability?: TerminalAvailabilityCheck;
   /** Core's answers to permission requests, which the permission routes decide through (the declining stub until 2.6). */
   permissions?: Permissions;
   /** Core's agent setup use-case: each agent's state and signing in (9.1); without it those routes answer 501. */
@@ -78,7 +81,7 @@ export interface AppOptions {
   tabs?: TabTokens;
 }
 
-export function createApp({ events, webRoot, log, gate, control, toolchain, chat, permissions, agentSetup, onboarding, appShortcut, tabs }: AppOptions): Hono {
+export function createApp({ events, webRoot, log, gate, control, toolchain, chat, terminalAvailability, permissions, agentSetup, onboarding, appShortcut, tabs }: AppOptions): Hono {
   const app = new Hono();
 
   // First, for every method and path: no route may be registered before this line.
@@ -157,7 +160,7 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, chat
 
   // One route file per lane (story 2.3): each fills only its own. Every route is in
   // `API_ROUTES` under `/api/v1`, registered after the gate.
-  if (chat !== undefined) registerChatRoutes(app, chat, log);
+  if (chat !== undefined) registerChatRoutes(app, chat, log, { terminalAvailability });
   registerWorkspaceRoutes(app, { chat, permissions, log });
   registerPermissionRoutes(app, { permissions, log });
   registerShortcutRoutes(app, { appShortcut, log });

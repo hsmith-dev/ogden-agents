@@ -127,6 +127,10 @@ context:
 
 The agent never writes to the real keychain itself.
 
+## Plan Change Log
+
+- **2026-10-01 (user decision): a slow or failed status check uses the last known state.** When `auth status` times out (`STATUS_TIMEOUT_MS`, 5 s) or fails, core uses the last *confirmed* subscription state (`signed_in` or `signed_out`, read successfully from `auth status --json` or set by a sign-in finishing in the app) while it is under 5 minutes old (`LAST_KNOWN_AUTH_MAX_AGE_MS`); after that the state is `unknown`, which never injects a key. A successful read always replaces the cached state, a sign-in in the app updates it at once, and a key is never injected when the last confirmed state is `signed_in`, whatever its age. This refines the Precedence decision and F4's "a failure means `unknown`". Tests: `agent-setup.test.ts` (fake timers, fake ports).
+
 ## Review Triage Log
 
 - **F1 (fixed, coordinator's call following the user's "subscription first" decision):** an `ANTHROPIC_API_KEY` inherited from the server's environment now follows the same rule as the saved key: passed to the chat only when `signed_out`, never when `signed_in` or `unknown`; a saved key comes first. It left the agent allowlist (`agentEnvironment`); core reads it through `inheritedEnv` (any case). The chat environment removes every case variant before adding the one canonical name. The card says when a key from the environment is in use (`apiKey.fromEnvironment`). Tests: core precedence; server chat with `Anthropic_Api_Key`/`anthropic_api_key`, signed out (used, one spelling) and signed in (not used).

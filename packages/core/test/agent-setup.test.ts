@@ -6,7 +6,7 @@
  * environment only while the subscription is known to be signed out.
  */
 import { AGENTS_STREAM, type AgentSetupStatus, type CoreEvent } from '@ogden-agents/shared';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AgentSetupError,
   ApiKeyRefusedError,
@@ -14,6 +14,7 @@ import {
   NotFoundError,
   SecretsUnavailableError,
   SignInNotPendingError,
+  LAST_KNOWN_AUTH_MAX_AGE_MS,
   ValidationError,
   createAgentSetup,
   type AgentApiKeySupport,
@@ -210,7 +211,7 @@ function keyPort(options: { subscription?: AgentSubscriptionState; verify?: ApiK
       return typeof outcome === 'function' ? outcome() : outcome;
     },
   };
-  const { port } = fakePort({
+  const { port, started } = fakePort({
     apiKey,
     status: async (): Promise<AgentPortStatus> => {
       if (subscription === 'throws') throw new Error('status unreadable');
@@ -226,7 +227,7 @@ function keyPort(options: { subscription?: AgentSubscriptionState; verify?: ApiK
       };
     },
   });
-  return { port, verified, setSubscription: (next: AgentSubscriptionState | 'throws') => void (subscription = next) };
+  return { port, verified, started, setSubscription: (next: AgentSubscriptionState | 'throws') => void (subscription = next) };
 }
 
 describe('agent setup: API keys (story 9.2)', () => {
@@ -543,6 +544,116 @@ describe('agent setup: API key review fixes (story 9.2)', () => {
     await setup.refreshIfStale('claude-code', 30_000);
     expect(setup.agentEnv('claude-code')).toEqual({});
     await expect(setup.refreshIfStale('nope', 0)).resolves.toBeUndefined();
+  });
+});
+
+describe('agent setup: a slow or failed status check uses the last confirmed state for 5 minutes (user decision, 2026-10-01)', () => {
+  afterEach(() => void vi.useRealTimers());
+
+  /** A key port whose status check, once made slow, answers `unknown` only after the adapter's 5 s timeout. */
+  function slowablePort(initial: AgentSubscriptionState) {
+    const { port, setSubscription, started: signIns } = keyPort({ subscription: initial });
+    let slow = false;
+    const slowable: AgentSetupPort = {
+      ...port,
+      status: async () => {
+        if (!slow) return port.status();
+        await new Promise((resolve) => setTimeout(resolve, 5_000));
+        return { agentId: 'claude-code', displayName: 'Claude Code', install: 'installed', version: null, auth: 'needs_sign_in', reason: 'could not check', subscription: 'unknown' };
+      },
+    };
+    return { port: slowable, setSubscription, signIns, makeSlow: (next = true) => void (slow = next) };
+  }
+
+  /** A setup with a saved key whose subscription was confirmed `initial` at the fake clock's start. */
+  async function started(initial: AgentSubscriptionState) {
+    vi.useFakeTimers({ now: 1_000_000 });
+    const core = openTestCore();
+    const fake = slowablePort(initial);
+    const setup = createAgentSetup(core.events, [fake.port], { secrets: memoryStore().store });
+    await setup.setApiKey('claude-code', API_KEY);
+    return { setup, ...fake };
+  }
+
+  /** A chat start's refresh while the status check is slow: it takes the full 5 s timeout. */
+  async function slowRefresh(setup: Awaited<ReturnType<typeof started>>['setup']) {
+    const refresh = setup.refreshIfStale('claude-code', 30_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await refresh;
+  }
+
+  it('slow check after a recent signed_out: the key is still used', async () => {
+    const { setup, makeSlow } = await started('signed_out');
+    makeSlow();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await slowRefresh(setup);
+    expect(setup.agentEnv('claude-code')).toEqual({ FAKE_API_KEY: API_KEY });
+  });
+
+  it('slow check after a recent signed_in: no key', async () => {
+    const { setup, makeSlow } = await started('signed_in');
+    makeSlow();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await slowRefresh(setup);
+    expect(setup.agentEnv('claude-code')).toEqual({});
+  });
+
+  it('slow check with the last confirmed state 6 minutes old: unknown, no key', async () => {
+    const { setup, makeSlow } = await started('signed_out');
+    makeSlow();
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    await slowRefresh(setup);
+    expect(setup.agentEnv('claude-code')).toEqual({});
+  });
+
+  it('the last known state lapses at the limit even without another check', async () => {
+    const { setup, makeSlow } = await started('signed_out');
+    makeSlow();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await slowRefresh(setup);
+    expect(setup.agentEnv('claude-code')).toEqual({ FAKE_API_KEY: API_KEY });
+    // Confirmed at the start: 61 s gone, so it lapses at the 5 minute mark.
+    await vi.advanceTimersByTimeAsync(LAST_KNOWN_AUTH_MAX_AGE_MS - 65_000 - 1);
+    expect(setup.agentEnv('claude-code')).toEqual({ FAKE_API_KEY: API_KEY });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(setup.agentEnv('claude-code')).toEqual({});
+  });
+
+  it('a successful read always replaces the cached state', async () => {
+    const { setup, makeSlow, setSubscription } = await started('signed_out');
+    expect(setup.agentEnv('claude-code')).toEqual({ FAKE_API_KEY: API_KEY });
+    // A sign-in made behind the app's back is read at once, though the last state is recent.
+    setSubscription('signed_in');
+    await vi.advanceTimersByTimeAsync(30_000);
+    await setup.refreshIfStale('claude-code', 30_000);
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    // The slow check now falls back to signed_in (no key), not to the older signed_out.
+    makeSlow();
+    await vi.advanceTimersByTimeAsync(30_000);
+    await slowRefresh(setup);
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    // And a signed_out read puts the key back.
+    makeSlow(false);
+    setSubscription('signed_out');
+    await vi.advanceTimersByTimeAsync(30_000);
+    await setup.refreshIfStale('claude-code', 30_000);
+    expect(setup.agentEnv('claude-code')).toEqual({ FAKE_API_KEY: API_KEY });
+  });
+
+  it('a check that throws also uses the last confirmed state, and a sign-in in the app updates it at once', async () => {
+    const { setup, setSubscription, signIns } = await started('signed_out');
+    setSubscription('throws');
+    await vi.advanceTimersByTimeAsync(30_000);
+    await setup.refreshIfStale('claude-code', 30_000);
+    expect(setup.agentEnv('claude-code')).toEqual({ FAKE_API_KEY: API_KEY });
+    await setup.signIn('claude-code');
+    signIns[0]!.finish('signed_in');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(setup.agentEnv('claude-code')).toEqual({});
+    // Still unreadable later: the sign-in is the last confirmed state, so the key stays out.
+    await vi.advanceTimersByTimeAsync(30_000);
+    await setup.refreshIfStale('claude-code', 30_000);
+    expect(setup.agentEnv('claude-code')).toEqual({});
   });
 });
 

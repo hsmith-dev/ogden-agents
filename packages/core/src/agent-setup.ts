@@ -20,7 +20,9 @@
  * call, stored through {@link SecretStorePort} under `agent-api-key/<agentId>`
  * and kept in memory for {@link AgentSetup.agentEnv}, which puts it in the
  * agent's chat environment only while the subscription is known to be signed
- * out (the agent itself would prefer the key over the subscription). A key
+ * out (the agent itself would prefer the key over the subscription). A
+ * status check that is slow or fails keeps the last confirmed state for
+ * {@link LAST_KNOWN_AUTH_MAX_AGE_MS}, then means `unknown` (no key). A key
  * in the server's own environment (`inheritedEnv`) follows the same rule; a
  * saved key comes before it. The key is never evented, logged or returned:
  * {@link AgentSetup.list} says only whether one is saved and its last 4
@@ -39,6 +41,15 @@ import { ApiKeyRefusedError, CoreError, NotFoundError, SecretsUnavailableError, 
 import type { EventLog } from './event-log.js';
 import type { SecretStorePort } from './secret-store-port.js';
 import { PROGRESS_INTERVAL_MS } from './toolchain.js';
+
+/**
+ * How long the last confirmed subscription state (`signed_in` or
+ * `signed_out`, read from the agent's status or set by a sign-in finishing
+ * in the app) stands in for a status check that is slow or fails. Older than
+ * this, such a check means `unknown`, which never injects a key (user
+ * decision, 2026-10-01).
+ */
+export const LAST_KNOWN_AUTH_MAX_AGE_MS = 5 * 60_000;
 
 /** The secret name an agent's API key is stored under. */
 export const apiKeySecretName = (agentId: string) => `agent-api-key/${agentId}`;
@@ -187,6 +198,8 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
   const subscriptions = new Map<string, AgentSubscriptionState>();
   /** When each agent's subscription state was last read. */
   const readAt = new Map<string, number>();
+  /** Each agent's last confirmed subscription state (never `unknown`), and when it was confirmed. */
+  const confirmed = new Map<string, { state: AgentSubscriptionState; at: number }>();
   /** A refresh under way per agent, so concurrent chats share one status read. */
   const refreshing = new Map<string, Promise<void>>();
   /** Each agent's key writes (save or remove), run one at a time in call order; settles, never rejects. */
@@ -243,8 +256,22 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
   };
 
   const setSubscription = (agentId: string, state: AgentSubscriptionState) => {
+    const at = now();
     subscriptions.set(agentId, state);
-    readAt.set(agentId, now());
+    readAt.set(agentId, at);
+    if (state !== 'unknown') confirmed.set(agentId, { state, at });
+  };
+
+  /**
+   * The subscription state the key rule follows: the last read, or, when that
+   * couldn't tell (`unknown`), the last confirmed state while it is under
+   * {@link LAST_KNOWN_AUTH_MAX_AGE_MS} old.
+   */
+  const subscriptionFor = (agentId: string): AgentSubscriptionState => {
+    const state = subscriptions.get(agentId) ?? 'unknown';
+    if (state !== 'unknown') return state;
+    const last = confirmed.get(agentId);
+    return last !== undefined && now() - last.at < LAST_KNOWN_AUTH_MAX_AGE_MS ? last.state : 'unknown';
   };
 
   /** The agent's key variable in the server's own environment, whatever its case; `undefined` when unset or empty. */
@@ -303,7 +330,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
   };
 
   /** Whether the agent's key is in use: there is one, and the subscription is known to be signed out. */
-  const keyInUse = (port: AgentSetupPort) => keyFor(port) !== undefined && subscriptions.get(port.agentId) === 'signed_out';
+  const keyInUse = (port: AgentSetupPort) => keyFor(port) !== undefined && subscriptionFor(port.agentId) === 'signed_out';
 
   /** The API key's state and its effect on the sign-in state, laid over what the port reports. Never the key. */
   const withApiKey = (port: AgentSetupPort, status: AgentSetupStatus): AgentSetupStatus => {
@@ -315,7 +342,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       key === undefined
         ? { saved: false, fromEnvironment: true }
         : { saved: true, lastFour: key.value.slice(-4), ...(key.unchecked ? { unchecked: true } : {}) };
-    const subscription = subscriptions.get(port.agentId) ?? 'unknown';
+    const subscription = subscriptionFor(port.agentId);
     // A sign-in under way keeps its own state; the key takes over again if it doesn't finish.
     if (status.install !== 'installed' || status.auth === 'signing_in') return { ...status, apiKey };
     if (subscription === 'signed_out') {
@@ -539,8 +566,8 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
         resync.delete(agentId);
         keys.set(agentId, { value, unchecked: verification === 'unchecked' });
         // Subscription first: the key is used only when the subscription is known to be signed out.
-        const subscription = await readSubscription(port);
-        if (subscription === 'signed_out' && !wasInUse) announce(agentId, 'signed_in', { method: 'api_key' });
+        await readSubscription(port);
+        if (subscriptionFor(agentId) === 'signed_out' && !wasInUse) announce(agentId, 'signed_in', { method: 'api_key' });
       });
     },
 
@@ -570,7 +597,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
 
     agentEnv(agentId) {
       const port = byId.get(agentId);
-      if (port?.apiKey === undefined || subscriptions.get(agentId) !== 'signed_out') return {};
+      if (port?.apiKey === undefined || subscriptionFor(agentId) !== 'signed_out') return {};
       const key = keyFor(port);
       return key === undefined ? {} : { [port.apiKey.envName]: key };
     },

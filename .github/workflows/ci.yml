@@ -104,6 +104,14 @@ jobs:
         continue-on-error: true
         run: node scripts/conpty-probe.mjs round2
 
+      - name: Install bun (npm)
+        continue-on-error: true
+        run: npm i -g bun
+
+      - name: Probe a Bun CLI's grandchild
+        continue-on-error: true
+        run: node scripts/conpty-probe.mjs round3
+
       - name: Install the real claude (npm)
         continue-on-error: true
         run: npm i -g @anthropic-ai/claude-code

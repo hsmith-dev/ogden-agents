@@ -7,6 +7,7 @@
 //   node scripts/conpty-probe.mjs            every section
 //   node scripts/conpty-probe.mjs claude     only the real `claude` section
 //   node scripts/conpty-probe.mjs round2     a non-Node CLI's grandchild, and the input checks
+//   node scripts/conpty-probe.mjs round3     a Bun CLI's grandchild (needs bun on PATH)
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -295,6 +296,41 @@ async function exit2Section() {
   }
 }
 
+// ------------------------------------------------- exit, round 3
+// The real claude.exe is a Bun binary: does a Bun CLI take its non-detached
+// children with it on Windows, as a Node one does (libuv's kill-on-close job)?
+const bunParent = script(
+  'bun-parent',
+  `import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+const kind = process.env.BUN_SPAWN;
+let pid;
+if (kind === 'Bun.spawn') pid = Bun.spawn([process.env.NODE_EXE, process.env.GC_SCRIPT], { stdio: ['ignore', 'pipe', 'ignore'] }).pid;
+else pid = spawn(process.env.NODE_EXE, [process.env.GC_SCRIPT], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).pid;
+writeFileSync(process.env.GC_FILE, String(pid));
+setTimeout(() => process.exit(4), 500);
+`,
+);
+
+async function exit3Case(bunKind) {
+  const label = `exit3 bun ${bunKind}`;
+  const gcFile = join(dir, `gc3-${bunKind}.txt`);
+  const bun = execFileSync('where', ['bun.exe'], { encoding: 'utf8' }).split(/\r?\n/)[0].trim();
+  const term = pty.spawn(bun, [bunParent], { name: 'xterm-256color', cols: 80, rows: 24, cwd: dir, env: { ...process.env, GC_FILE: gcFile, BUN_SPAWN: bunKind, NODE_EXE: process.execPath, GC_SCRIPT: gcNode } });
+  term.onData(() => {});
+  let exit;
+  const fired = await Promise.race([new Promise((r) => term.onExit((e) => r((exit = e, true)))), sleep(15000).then(() => false)]);
+  const gc = existsSync(gcFile) ? Number(readFileSync(gcFile, 'utf8')) : undefined;
+  log(`${label}: bun=${bun} onExit fired=${fired} exit=${JSON.stringify(exit)} grandchild=${gc}`);
+  await sleep(2000);
+  log(`${label}: 2s after onExit, grandchild alive=${gc ? alive(gc) : 'n/a'}`);
+  if (gc && alive(gc)) taskkill(gc);
+  skipConsoleList(term);
+  try {
+    term.kill();
+  } catch {}
+}
+
 // ---------------------------------------------------------------- input
 const inputChild = script(
   'input',
@@ -381,7 +417,9 @@ async function claudeSection() {
 }
 
 const only = process.argv[2];
-if (only === 'round2') {
+if (only === 'round3') {
+  for (const kind of ['node:child_process', 'Bun.spawn']) await cap(`exit3 ${kind}`, () => exit3Case(kind));
+} else if (only === 'round2') {
   await exit2Section();
   for (const dll of [false, true]) await cap(`input dll=${dll}`, () => inputCase(dll));
 } else if (only === 'claude') {

@@ -1,0 +1,113 @@
+# Epic 7 breakdown (drafted by autonomous inception 2026-10-02; not approved). Table order is the build order; ids never change once approved.
+# Epic 7 starts after epics 4 and 5 (planning sessions, document cards, board, VcsPort, approve) and epic 10's pieces contract (10.2); its release follows epic 6's. References to other epics use "<epic id>.<entry id>"; epic 5's entries (5.9, 5.11) live on docs/epic-5-inception, so this file waits on the whole epic 5 ("epic-unattended-builds") until that branch merges, then on 5.9 (entry 1); entry 7 waits on the whole epic 6 until its release entry exists.
+# Live checks use the developer's existing Claude Code login or an API key saved through 9.2, in a scratch repo, never Ogden Agents's own repo.
+
+[[entry]]
+id = 1
+type = "story"
+title = "Tracer bullet: look back on one finished epic from the board"
+description = "Adds a bare Look back button on one epic group of the board that calls a minimal core use-case guarded by requireBmadFeature(workspaceId, 'retrospectives') and the 4.2 script trust, which creates a session of kind planning through 4.2's planning-session internals whose first message invokes the bmad-retrospective skill on the epic's folder (formatted by the agent adapter, AD-12), one route registered through bmadPieceRoutes, and retrospectives registered as available for the scratch run; the session runs interactively in the session view and ends with epic-<slug>-retrospective.md in the epic folder and 4.7's document card; the hitl steps are the user approving this epic's spec, architecture and UX deltas before the build starts, and the developer's live run in a scratch repo with a finished epic and Board, Unattended builds and Retrospectives on; the skill name appears only in the agent adapter or a test fixture (AD-12) until entry 4 starts it from the catalog's epic-scoped action."
+verify = "Live on the developer's machine, Look back on a finished epic opens a planning session in which Claude Code runs the retrospective skill and the retrospective file appears beside the epic with a document card in the transcript, recorded in the plan; in CI against the fake ACP agent and a fixture repo, the session is created with kind planning and its first message names the epic folder, the route answers feature_off with Retrospectives off and scripts_not_trusted without trust."
+covers = ["E7-R1", "E7-R2", "E7-R4"]
+after = ["4.7", "4.9", "epic-unattended-builds", "10.2"]
+hitl = true
+risk = "high"
+plan_checkpoint = true
+done_checkpoint = true
+unknown = "Whether the skill, started from an ACP first message, finds the epic from its folder path and runs its uv pre-pass and bmad-review subagents behind permission cards without a terminal, how long a real look-back takes, whether 4.7's write detection makes one card or several as the skill fills its document phase by phase, and whether session routes for a planning-kind session assume the Planning piece is on; record each in the build record."
+references = [
+  "vendor/bmad-method/skills/bmad-retrospective/workflow.md",
+  "_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-22--bmad-method-is-opt-in-per-workspace",
+]
+
+[[entry]]
+id = 2
+type = "story"
+title = "Epic contracts and stubs"
+description = "Freezes in shared the look-back start request (epic folder), the next-step start request (catalog action plus retrospective file) that entry 5 uses, the epic row's retrospective summary added to 4.2's TicketEpic (verdict accepted, accepted-with-open-items or rejected, date, path, or null, plus a problem line when unreadable) and the finished-epic offer state with its dismiss request, the save-the-lessons request and response with its error codes (nothing_to_save, checkout_busy) and plain messages, and the catalog additions (an epic scope on an action and an additive list of further next steps beside 4.2's single next); adds commitPaths to epic 5's VcsPort with a memory stub, the verdict read to TicketStorePort with tickets-memory support, and the per-epic offer dismissal to core, freezes how a retrospective file's change reaches the board (4.8's watcher also matches *-retrospective.md and emits a refresh for its epic, since no ticket row changes), pre-registers every new route through bmadPieceRoutes guarded by retrospectives, each use-case and route in its own file so entries 4 and 5 do not collide, leaving the verdict read and dismissal for entry 4 and commitPaths in vcs-git for entry 5 to complete, adds retrospectives to SHIPPED_BMAD_PIECES, and applies the dependency rule the user chooses (open question 1); owns the epic's fixture repo (a finished epic with plans, commits, a retrospective file and AGENTS.md), the fake agent's retrospective and AGENTS.md writes, and every fake, which behave like the real program. Every shared shape, user-facing reason and code lives in shared (epic 3 retro A2)."
+verify = "Contract tests parse every new shape, request, error code and catalog field, and 4.2's catalog fixtures still parse; the memory stubs drive commitPaths, the verdict read and the dismissal in tests; the route-registry test lists every new route behind the gate, and every new route refuses with feature_off while Retrospectives is off and scripts_not_trusted without trust, and 10.6's guard-coverage test passes with each registered through bmadPieceRoutes; Workspace settings lets Retrospectives be turned on, and the dependency table test matches the chosen rule."
+covers = ["E7-R1", "E7-R2", "E7-R3", "E7-R4", "E7-R5", "E7-R7"]
+after = [1]
+hitl = false
+risk = "medium"
+unknown = "Which dependency rule the user picks (needs Board or needs Unattended builds), and whether a dismissal kept per epic slug survives an epic being renamed; the draft assumes the slug, as tickets.py names it; and which message Save the lessons gives when AGENTS.md is absent or ignored by git."
+references = [
+  "packages/shared/src/bmad.ts",
+  "packages/server/src/bmad-pieces.ts",
+  "vendor/bmad-method/skills/bmad-retrospective/references/retro-document.md",
+]
+
+[[entry]]
+id = 3
+type = "story"
+title = "Look-back and lessons actions in the BMAD fork"
+description = "Adds to the bmad-method fork, on top of 4.5's label patch and in the metadata place 4.5 chose, an epic scope for bmad-retrospective (it takes an epic folder and belongs on the board's epic header, not in Plan home), its plain label Look back on this epic, and its two next steps in entry 2's shape (Add the lessons to AGENTS.md, which starts bmad-project-context on the retrospective file, and Turn the action items into tickets, which starts bmad-ticket on it), with labels from EXPERIENCE.md Voice and Tone, as one patch on the ogden-agents branch, tagged, re-vendored with forks.lock; and extends the bmad-catalog adapter to read the epic scope and the further next steps into entry 2's shape, to report the look-back capability that reduced mode gates on, and to build the catalog for a workspace with only Retrospectives on; entry 4 shows the epic-scoped action on the board and entry 5 renders the next steps on the document card; the hitl step is a person opening the upstream PR."
+verify = "node scripts/vendor-forks.mjs --check passes with the new tag, the catalog adapter run against the vendored metadata lists the look-back action as epic-scoped with both next steps and the project-context label, and the upstream PR link is recorded in the build record."
+covers = ["E7-R7", "E7-R5", "E7-R6"]
+after = [2]
+hitl = true
+risk = "medium"
+unknown = "Whether upstream accepts an epic scope and several next steps in skill metadata, which decides where the catalog reads them; 4.5's choice is the starting point."
+references = [
+  "_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-13--forks-are-bundled-and-locked-adopted",
+  "_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#voice-and-tone",
+]
+
+[[entry]]
+id = 4
+type = "story"
+title = "Look back from the board: the action, the finished-epic offer and the verdict"
+description = "Replaces the tracer's bare button with the designed epic header action Look back on this epic, taken from the catalog's epic-scoped action (catalog-memory until entry 3 lands) with the one-line not-accepted note on an epic with unfinished tickets; adds the offer Every ticket in this epic is done. Look back on it? with Look back and Not now (dismissal through entry 2's core use-case) when every ticket is done or dropped; completes the tickets-v7 adapter's read of each epic's retrospective frontmatter (verdict and date only) into entry 2's summary, refreshed when entry 4.8's watcher sees the file change, and shows it, through entry 2's refresh rule, as a verdict chip on the epic header, or a one-line notice when unreadable; shows the reduced-mode notice in place of the action on plain upstream BMad (4.11's notice); none of it with Retrospectives off."
+verify = "Playwright against tickets-memory and catalog-memory shows the action and the offer only with Retrospectives on, Not now hiding the offer after a reload, the note on an unfinished epic, and the reduced-mode notice when the look-back capability is missing; against the fixture repo, writing a retrospective file into an epic folder shows its verdict chip within seconds, a damaged frontmatter shows the notice, and nothing is read for the epic with Retrospectives off."
+covers = ["E7-R2", "E7-R3", "E7-R4", "E7-R7", "E7-R1"]
+after = [2]
+hitl = false
+risk = "medium"
+unknown = "Whether 4.8's debounced rerun of tickets.py notices a retrospective file at all, which entry 2's refresh rule settles."
+references = [
+  "_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#component-patterns",
+  "_bmad-output/initiative-ogden-agents/ux-ogden-agents/DESIGN.md#components",
+]
+
+[[entry]]
+id = 5
+type = "story"
+title = "Lessons and action items flow back"
+description = "Renders entry 3's further next steps on the retrospective's document card (Add the lessons to AGENTS.md and Turn the action items into tickets, each starting a planning session through the look-back use-case's guard on the retrospective file, the agent editing AGENTS.md or the ticket tree behind permission cards), then Save the lessons for later builds, a core use-case guarded by retrospectives that commits exactly AGENTS.md and that retrospective file through VcsPort.commitPaths in vcs-git to the branch the main checkout has checked out, locally, never pushing and never touching another path, refused with entry 2's codes when there is nothing to save or a merge or rebase is in progress, with one line under it saying later builds will follow the lessons, so a build dispatched after it carries the pitfall in its worktree's AGENTS.md; it uses only entry 2's codes and messages."
+verify = "Against the fake agent and the fixture repo in CI on all three OSes, the card shows both next steps, each opens a planning session naming the retrospective file, Save the lessons makes one local commit holding only AGENTS.md and the retrospective file with every other uncommitted change left in place, a repeat answers nothing_to_save, a merge in progress answers checkout_busy, a worktree created after it has the pitfall in AGENTS.md, and with Retrospectives off the route answers feature_off."
+covers = ["E7-R5", "E7-R6", "E7-R1"]
+after = [3]
+hitl = false
+risk = "medium"
+unknown = "How git commits two paths while other files are staged without disturbing them (a pathspec commit is assumed)."
+references = [
+  "_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-17--unattended-runs-are-contained",
+  "_bmad-output/initiative-ogden-agents/spec-ogden-agents/bmad-integration.md",
+]
+
+[[entry]]
+id = 6
+type = "story"
+title = "Refactor sweep"
+description = "Cleans up code across the epic, scoped when it starts from the build records and the review findings deferred during the epic, with no behavior change; also runs the provenance check and splits any file the epic grew past 600 lines."
+verify = "All tests pass and no behavior changes."
+covers = []
+after = [1, 2, 3, 4, 5]
+hitl = false
+risk = "low"
+unknown = "Its scope, set from the build records and deferred review findings when it starts."
+references = ["_bmad-output/initiative-ogden-agents/deferred-work.md"]
+
+[[entry]]
+id = 7
+type = "story"
+title = "End-to-end suite and release"
+description = "Extends the end-to-end suite, run in CI on macOS, Windows and Linux against the packed package, to turn on Retrospectives, see the finished-epic offer, look back against the fake agent, see the document card and the verdict chip, add a lesson, save it and see the next worktree carry it, turn an action item into a ticket that reaches the board, open a plain-upstream repo in reduced mode, and confirm a Simple project and a project with Retrospectives off show and write nothing of it; then the user runs the look-back, lessons and action-items flow live with Claude Code on a real finished epic and tags the release after epic 6's through the epic 1 release workflow."
+verify = "The suite passes on all three OSes and fails when the retrospectives guard is removed from the look-back use-case, and the tagged ogden-agents version from npm passes the epic's live Done when checks on the user's machine. Each live check's result is written into the plan before the ticket moves to done."
+covers = ["E7-R1", "E7-R2", "E7-R3", "E7-R4", "E7-R5", "E7-R6", "E7-R7"]
+after = [6, "epic-every-agent"]
+hitl = true
+risk = "medium"
+plan_checkpoint = true
+done_checkpoint = true
+unknown = "The version number, set by the user here after epic 6's release."

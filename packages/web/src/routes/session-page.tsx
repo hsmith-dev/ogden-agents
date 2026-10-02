@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from '@tanstack/react-router';
 import { ArrowClockwise, ArrowDown, ChatCircle, House, Stop } from '@phosphor-icons/react';
+import type { PermissionMode } from '@ogden-agents/shared';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAppearance } from '@/appearance/appearance-provider';
-import { AGENT_NAME, cancelSession, ChatApiError, fetchSession, sendMessage } from '@/chat/chat-api';
+import { AGENT_NAME, cancelSession, ChatApiError, fetchSession, sendMessage, setPermissionMode, switchDriver } from '@/chat/chat-api';
 import { Composer } from '@/chat/composer';
 import { ReadOnlyConversation } from '@/chat/read-only';
 import { SignInAgain } from '@/chat/sign-in-again';
@@ -11,6 +12,7 @@ import { ToolCalls } from '@/chat/tool-call-row';
 import { sessionView, type TranscriptCheckIn, type TranscriptItem, type TranscriptMessage } from '@/chat/transcript';
 import { useCaughtUp, useEarlierHistory, useSessionEvents } from '@/events/event-stream';
 import { PermissionCard, permissionAnnouncement } from '@/permissions/permission-card';
+import { PermissionModePicker, SkipAllBanner, usePermissionMode } from '@/permissions/permission-mode-picker';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { DriverToggle } from '@/terminal/driver-toggle';
 import { ReadOnlyBanner } from '@/terminal/read-only-banner';
@@ -66,7 +68,11 @@ const checkInWords = (checkIn: TranscriptCheckIn) =>
  * view but count on "Jump to latest". Story 3.6: in Developer mode the
  * header's Chat | Terminal toggle (and `⌘.` / `Ctrl+.`) hands the chat to the
  * agent's own terminal and back; the view follows only
- * `session.driver_changed`, and `?driver=terminal` mirrors it.
+ * `session.driver_changed`, and `?driver=terminal` mirrors it. Permission
+ * modes: the header's picker sets the chat's mode (Skip all only in
+ * Developer mode, after its red warning), the view follows only
+ * `session.permission_mode_changed`, and a chat in Skip all shows the red
+ * banner above the conversation or the terminal.
  */
 export function SessionPage() {
   const { wsId, sesId } = useParams({ strict: false }) as { wsId: string; sesId: string };
@@ -191,6 +197,48 @@ export function SessionPage() {
     setActionError,
   });
 
+  // The chat's permission mode (permission modes): one change at a time; the view follows the event.
+  const permissionMode = usePermissionMode(events, session.data?.session.permissionMode);
+  const [modeChanging, setModeChanging] = useState(false);
+  /** A change on its way (a ref, so a second click in the same render is ignored too). */
+  const modeInFlight = useRef(false);
+  const { refetch: refetchSession } = session;
+  const changeMode = useCallback(
+    (mode: PermissionMode, confirmed: boolean, fromTerminal = false) => {
+      if (modeInFlight.current) return;
+      modeInFlight.current = true;
+      setModeChanging(true);
+      setActionError(undefined);
+      // From the terminal, back to the chat first: the server changes no mode while the terminal drives.
+      const back = fromTerminal ? switchDriver(wsId, sesId, 'ui').then(() => undefined) : Promise.resolve();
+      back
+        .then(() => setPermissionMode(wsId, sesId, mode, confirmed))
+        .then(
+          () => {
+            modeInFlight.current = false;
+            setModeChanging(false);
+            void refetchSession();
+          },
+          (failure: unknown) => {
+            modeInFlight.current = false;
+            setModeChanging(false);
+            setActionError(failure instanceof Error ? failure.message : "Ogden Agents couldn't change this chat's permission mode. Try again.");
+            // 409 or 403: the server's view differs (unavailable, the terminal drives, Developer mode is off).
+            void refetchSession();
+          },
+        );
+    },
+    [wsId, sesId, refetchSession],
+  );
+
+  // The modes the picker offers depend on the agent session: read the session again when its agent
+  // starts or reopens (working, or `session.resumed`); turning idle after it is read again by the driver hook.
+  const resumedSeq = useMemo(() => events.findLast((event) => event.type === 'session.resumed')?.seq, [events]);
+  const agentWorking = state === 'working';
+  useEffect(() => {
+    if (agentWorking || resumedSeq !== undefined) void refetchSession();
+  }, [agentWorking, resumedSeq, refetchSession]);
+
   // Whether the waiting card is out of view, for the "waiting for you" bar. Not while the terminal
   // drives: the conversation is read-only then, and nothing in it takes focus (3.6 review F2).
   useEffect(() => {
@@ -268,16 +316,27 @@ export function SessionPage() {
     <>
       <WorkspaceHeader title="Chat" wsId={wsId} compactOnPhone={appearance.developerMode}>
         {state === undefined ? null : <StateGlyph state={state} data-testid="session-state" className="ml-auto" />}
+        <span className={state === undefined ? 'ml-auto' : undefined}>
+          <PermissionModePicker
+            mode={permissionMode}
+            options={session.data?.permissionModes}
+            developerMode={appearance.developerMode}
+            terminalDrives={terminalDrives}
+            changing={modeChanging}
+            onChoose={(mode, confirmed) => changeMode(mode, confirmed)}
+          />
+        </span>
         {appearance.developerMode ? (
           <DriverToggle
             driver={driver}
             switching={switchingTo}
             terminalBlockedReason={terminalBlockedReason}
             onSwitch={switchTo}
-            className={state === undefined ? 'ml-auto' : undefined}
           />
         ) : null}
       </WorkspaceHeader>
+      {/* A chat that skips its permission checks says so in red, above the conversation or the terminal, at any scroll position. */}
+      {permissionMode === 'skip_all' ? <SkipAllBanner changing={modeChanging} onBackToAsk={() => changeMode('ask', false, terminalDrives)} /> : null}
       {driver === 'terminal' ? (
         <ReadOnlyBanner
           onSwitchToChat={() => switchTo('ui')}

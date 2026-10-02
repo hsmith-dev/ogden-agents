@@ -77,3 +77,6 @@ export const terminalClosedNote = (agentName: string, exitCode: number | null): 
 /** The size a terminal opens at, until its viewer resizes it. */
 export const TERMINAL_COLS = 80;
 export const TERMINAL_ROWS = 24;
+
+/** How long an agent may take to take a permission mode before it is dropped (permission modes). */
+export const PERMISSION_MODE_TIMEOUT_MS = 5_000;

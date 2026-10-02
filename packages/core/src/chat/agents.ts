@@ -9,13 +9,17 @@ import { AgentError, type AgentEvent, type AgentRestored, type AgentSession } fr
 import { primedPrompt } from '../resume-prime.js';
 import { AGENT_SESSION_REF } from './constants.js';
 import type { ChatContext } from './context.js';
+import type { ModeApplier } from './permission-mode.js';
 import type { PermissionRequests } from './permission-requests.js';
 import type { Replies } from './replies.js';
 import type { Live } from './types.js';
 
-export function createAgents(ctx: ChatContext, deps: Pick<Replies, 'stopDeltaTimer'> & Pick<PermissionRequests, 'onPermissionRequestFor'>) {
-  const { entities, sessionEvents, agent, agentEnv, live, droppedAgents, internalError } = ctx;
-  const { stopDeltaTimer, onPermissionRequestFor } = deps;
+export function createAgents(
+  ctx: ChatContext,
+  deps: Pick<Replies, 'stopDeltaTimer'> & Pick<PermissionRequests, 'onPermissionRequestFor'> & { applyMode: ModeApplier },
+) {
+  const { entities, sessionEvents, agent, agentEnv, live, droppedAgents, internalError, sessionModes } = ctx;
+  const { stopDeltaTimer, onPermissionRequestFor, applyMode } = deps;
 
   /** Ends the session's agent (it failed or went away); the next message starts a fresh one. */
   const drop = (sessionId: SessionId, entry: Live) => {
@@ -62,6 +66,7 @@ export function createAgents(ctx: ChatContext, deps: Pick<Replies, 'stopDeltaTim
       unsavedRef: undefined,
       gone,
       markGone,
+      modeSync: Promise.resolve(),
     };
     const onPermissionRequest = onPermissionRequestFor(session);
     // The real-cased path: the case-folded key is for uniqueness only (AD-2).
@@ -99,6 +104,20 @@ export function createAgents(ctx: ChatContext, deps: Pick<Replies, 'stopDeltaTim
       }
       entry.prime = restored === 'new';
       entry.off = started.onEvent((event) => apply(session.id, entry, event));
+      sessionModes.set(session.id, started.permissionModes ?? ['ask']);
+      ctx.lastSessionModes.value = started.permissionModes ?? ['ask'];
+      // The chat's stored mode before the first prompt, whatever the agent's own settings started it in
+      // (a new chat, and every chat after a restart, in Ask). One it can't be put in, not even Ask, is stopped.
+      if (!(await applyMode(session.id, started))) {
+        entry.off();
+        entry.off = undefined;
+        await started.close().catch(() => undefined);
+        throw new AgentError('agent_failed', `${agent.displayName} couldn't start in this chat's permission mode. Try again.`);
+      }
+      if (live.get(session.id) !== entry) {
+        await started.close().catch(() => undefined);
+        throw new AgentError('agent_failed', `${agent.displayName} was stopped.`);
+      }
       return started;
     });
     live.set(session.id, entry);

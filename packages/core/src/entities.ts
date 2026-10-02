@@ -11,6 +11,8 @@ import {
   AdapterRefs as AdapterRefsSchema,
   DriverChangeCause as DriverChangeCauseSchema,
   IsoUtcTimestamp,
+  PermissionMode as PermissionModeSchema,
+  PermissionModeChangeCause as PermissionModeChangeCauseSchema,
   RunOutcome as RunOutcomeSchema,
   SessionDriver as SessionDriverSchema,
   SessionKind as SessionKindSchema,
@@ -22,6 +24,8 @@ import {
   type BmadPiece,
   type DriverChangeCause,
   type MessageRole,
+  type PermissionMode,
+  type PermissionModeChangeCause,
   type Run,
   type RunId,
   type RunOutcome,
@@ -34,7 +38,7 @@ import {
   type Workspace,
   type WorkspaceId,
 } from '@ogden-agents/shared';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Database } from './db/database.js';
 import { events, runs, sessions, workspaces } from './db/schema.js';
@@ -42,6 +46,9 @@ import { InvalidOperationError, NotFoundError, ValidationError, WorkspaceBusyErr
 import type { EventLog, HistoryDeleted } from './event-log.js';
 import { newId } from './ids.js';
 import type { SessionEvents } from './session-events.js';
+
+/** The reason on a mode a server start set back to Ask. */
+export const RESTART_MODE_REASON = 'Ogden Agents was restarted, so this chat is back in Ask.';
 
 export interface NewSession {
   workspaceId: WorkspaceId;
@@ -138,6 +145,20 @@ export interface Entities {
   listCompletedMessages(sessionId: SessionId): CompletedMessage[];
   /** Sets the driver (AD-6), appending `session.driver_changed` (with `cause`, if given) if it changed. */
   setSessionDriver(id: SessionId, driver: SessionDriver, cause?: DriverChangeCause): Session;
+  /**
+   * Sets the chat's permission mode, appending `session.permission_mode_changed`
+   * with `cause` (and `reason`, plain words) if it changed. Checks nothing
+   * else: who may choose which mode is the caller's to enforce (the chat's
+   * `setPermissionMode`, Developer mode). {@link NotFoundError} for an unknown session.
+   */
+  setSessionPermissionMode(id: SessionId, mode: PermissionMode, cause: PermissionModeChangeCause, reason?: string): Session;
+  /** Every session in `mode`, oldest first, across workspaces. */
+  listSessionsInPermissionMode(mode: PermissionMode): Session[];
+  /**
+   * Sets every session not in `ask` back to `ask` (cause `restart`): run at a
+   * server start, so no mode but Ask outlives the run it was chosen in. Returns them.
+   */
+  resetPermissionModes(): Session[];
 
   /** Creates the run of a `build` session with outcome `running`, and appends `run.created`. */
   createRun(input: NewRun): Run;
@@ -175,6 +196,7 @@ const toSession = (row: SessionRow): Session => ({
   kind: row.kind,
   state: row.state,
   driver: row.driver,
+  permissionMode: row.permissionMode,
   title: row.title,
   adapterRefs: row.adapterRefs,
   createdAt: row.createdAt,
@@ -321,6 +343,8 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         kind: check(SessionKindSchema, input.kind, 'session kind'),
         state: check(SessionStateSchema, input.state ?? 'idle', 'session state'),
         driver: check(SessionDriverSchema, input.driver ?? 'ui', 'session driver'),
+        // Every chat starts in Ask, whatever the agent's own settings say.
+        permissionMode: 'ask',
         title: input.title ?? null,
         adapterRefs: check(AdapterRefsSchema, input.adapterRefs ?? {}, 'adapter refs'),
         createdAt: at,
@@ -427,6 +451,49 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         });
         return updated;
       });
+    },
+
+    setSessionPermissionMode(id, mode, cause, reason) {
+      check(PermissionModeSchema, mode, 'permission mode');
+      check(PermissionModeChangeCauseSchema, cause, 'permission mode change cause');
+      return log.transaction(() => {
+        const session = requireSession(id);
+        if (session.permissionMode === mode) return session;
+        const updated: Session = { ...session, permissionMode: mode, updatedAt: now() };
+        orm.update(sessions).set({ permissionMode: mode, updatedAt: updated.updatedAt }).where(eq(sessions.id, id)).run();
+        sessionEvents.appendSessionEvent(session.id, {
+          type: 'session.permission_mode_changed',
+          payload: {
+            sessionId: session.id,
+            mode,
+            previous: session.permissionMode,
+            cause,
+            ...(reason === undefined || reason === '' ? {} : { reason }),
+          },
+        });
+        return updated;
+      });
+    },
+
+    listSessionsInPermissionMode(mode) {
+      return orm
+        .select()
+        .from(sessions)
+        .where(eq(sessions.permissionMode, mode))
+        .orderBy(asc(sessions.createdAt), asc(sessions.id))
+        .all()
+        .map(toSession);
+    },
+
+    resetPermissionModes() {
+      return log.transaction(() =>
+        orm
+          .select()
+          .from(sessions)
+          .where(ne(sessions.permissionMode, 'ask'))
+          .all()
+          .map((row) => this.setSessionPermissionMode(row.id as SessionId, 'ask', 'restart', RESTART_MODE_REASON)),
+      );
     },
 
     createRun(input) {

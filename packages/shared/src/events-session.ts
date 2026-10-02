@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Session, SessionDriver, SessionState } from './entities.js';
+import { PermissionMode, Session, SessionDriver, SessionState } from './entities.js';
 import { AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, PermissionDecision, PermissionRequestId, SessionErrorCode, ToolCallDiff, ToolCallStatus, ToolKind } from './events-common.js';
 import { assigned, onSessionStream } from './events-envelope.js';
 import { PermissionRuleId, SessionId } from './ids.js';
@@ -55,6 +55,32 @@ export const SessionDriverChangedInput = z.object({
 /** A session's driver changed (AD-6). */
 export const SessionDriverChangedEvent = SessionDriverChangedInput.extend(assigned);
 export type SessionDriverChangedEvent = z.infer<typeof SessionDriverChangedEvent>;
+
+/**
+ * Why a chat's permission mode changed: the user chose it (`user`), Developer
+ * mode was turned off while it skipped checks (`developer_mode_off`), a server
+ * start set it back to Ask (`restart`: no mode but Ask outlives the run it was
+ * chosen in), or the agent reported a mode the chat didn't choose (`agent`).
+ */
+export const PERMISSION_MODE_CHANGE_CAUSES = ['user', 'developer_mode_off', 'restart', 'agent'] as const;
+export const PermissionModeChangeCause = z.enum(PERMISSION_MODE_CHANGE_CAUSES);
+export type PermissionModeChangeCause = z.infer<typeof PermissionModeChangeCause>;
+
+export const SessionPermissionModeChangedInput = z.object({
+  type: z.literal('session.permission_mode_changed'),
+  ...onSessionStream,
+  payload: z.object({
+    sessionId: SessionId,
+    mode: PermissionMode,
+    previous: PermissionMode,
+    cause: PermissionModeChangeCause,
+    /** Why, in plain words for the user, when there is something to say. Never a secret. */
+    reason: z.string().min(1).optional(),
+  }),
+});
+/** A chat's permission mode changed (core is the only one that changes it). */
+export const SessionPermissionModeChangedEvent = SessionPermissionModeChangedInput.extend(assigned);
+export type SessionPermissionModeChangedEvent = z.infer<typeof SessionPermissionModeChangedEvent>;
 
 /** Identifies one message within a session's stream. */
 export const MessageId = z.string().min(1);
@@ -193,6 +219,12 @@ export const PermissionRequestedInput = z.object({
     alwaysAllowScope: AlwaysAllowScope.nullable(),
     /** The workspace's caution level when the card was shown. */
     cautionLevel: CautionLevel,
+    /**
+     * The chat's permission mode when the card was shown. In `skip_all` no
+     * caution level or rule answers it, and Always allow is never offered.
+     * Absent on events from before permission modes (they were `ask`).
+     */
+    permissionMode: PermissionMode.optional(),
   }),
 });
 /** The agent asked to run a tool call; it does not run until the request is resolved (CAP-4). */

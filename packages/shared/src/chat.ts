@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { BmadPieceSet } from './bmad.js';
 import { AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, MessageId, PermissionDecision } from './events.js';
-import { Session, Workspace } from './entities.js';
+import { PermissionMode, Session, Workspace } from './entities.js';
 import { PermissionRuleId, WorkspaceId } from './ids.js';
 import { SessionTerminal } from './terminal.js';
 import { IsoUtcTimestamp } from './time.js';
@@ -35,10 +35,26 @@ export const CreateSessionRequest = z.object({
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequest>;
 
 /**
- * A session. `GET` adds `terminal`: whether its agent's own terminal can work
- * here (story 3.2); the other routes that answer a session leave it out.
+ * One permission mode as the chat's mode picker offers it: whether the
+ * session's agent offers it, and if not, why, in one plain sentence.
  */
-export const SessionResponse = z.object({ session: Session, terminal: SessionTerminal.optional() });
+export const SessionPermissionModeOption = z.object({
+  mode: PermissionMode,
+  available: z.boolean(),
+  reason: z.string().min(1).optional(),
+});
+export type SessionPermissionModeOption = z.infer<typeof SessionPermissionModeOption>;
+
+/**
+ * A session. `GET` adds `terminal`: whether its agent's own terminal can work
+ * here (story 3.2), and `permissionModes`: every mode, in order, and whether
+ * its agent offers it; the other routes that answer a session leave them out.
+ */
+export const SessionResponse = z.object({
+  session: Session,
+  terminal: SessionTerminal.optional(),
+  permissionModes: z.array(SessionPermissionModeOption).optional(),
+});
 export type SessionResponse = z.infer<typeof SessionResponse>;
 
 /** The longest message the composer may send, in characters. */
@@ -167,3 +183,27 @@ export type PermissionRule = z.infer<typeof PermissionRule>;
 /** `GET /api/v1/workspaces/:wsId/permission-rules`. */
 export const PermissionRulesResponse = z.object({ rules: z.array(PermissionRule) });
 export type PermissionRulesResponse = z.infer<typeof PermissionRulesResponse>;
+
+// ---------------------------------------------------------------------------
+// Permission modes and Developer mode.
+// ---------------------------------------------------------------------------
+
+/**
+ * `PUT /api/v1/workspaces/:wsId/sessions/:sesId/permission-mode`. `confirm`
+ * says the user confirmed the red warning: the server refuses `skip_all`
+ * without it.
+ */
+export const SetPermissionModeRequest = z.object({ mode: PermissionMode, confirm: z.boolean().optional() });
+export type SetPermissionModeRequest = z.infer<typeof SetPermissionModeRequest>;
+
+/**
+ * `GET` and `PUT /api/v1/settings/developer-mode`. `everSet` says whether
+ * Developer mode was ever turned on or off on this install (a browser carries
+ * its old browser-only "on" over only when it never was).
+ */
+export const DeveloperModeResponse = z.object({ developerMode: z.boolean(), everSet: z.boolean().optional() });
+export type DeveloperModeResponse = z.infer<typeof DeveloperModeResponse>;
+
+/** `PUT /api/v1/settings/developer-mode`. */
+export const SetDeveloperModeRequest = z.object({ developerMode: z.boolean() });
+export type SetDeveloperModeRequest = z.infer<typeof SetDeveloperModeRequest>;

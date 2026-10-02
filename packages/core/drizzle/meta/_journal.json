@@ -43,6 +43,13 @@
       "when": 1790894073503,
       "tag": "0005_bmad_offer_dismissed",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790954098101,
+      "tag": "0006_permission_modes",
+      "breakpoints": true
     }
   ]
 }

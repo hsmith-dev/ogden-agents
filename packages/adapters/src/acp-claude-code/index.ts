@@ -1,4 +1,7 @@
 export {
+  ACP_MODE_IDS,
+  asksLessThanAsk,
+  ogdenModeOf,
   CLAUDE_AGENT_ACP_PACKAGE,
   CLAUDE_CODE,
   createClaudeCodeAgent,
@@ -11,6 +14,7 @@ export { findClaudeExecutable, type FindClaudeOptions } from './detect.js';
 export {
   bundledClaudeExecutable,
   CLAUDE_CLI_NOT_FOUND,
+  CLAUDE_MODE_ARGS,
   claudeTerminalCommand,
   locateClaudeTerminal,
   resolveClaudeExecutable,

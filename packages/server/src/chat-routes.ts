@@ -7,12 +7,17 @@
  * matching `Origin` on these state-changing POSTs (AD-15). Routes call the
  * core chat use-case and never write themselves (AD-11). Story 3.1 adds the
  * driver switch; story 3.2 gives its refusals their own codes and adds the
- * session's `terminal` to `GET` session.
+ * session's `terminal` to `GET` session. Permission modes add the chat's
+ * mode (`PUT`, core enforces who may choose which) and `permissionModes` on
+ * `GET` session.
  */
 import {
+  ConfirmationRequiredError,
   CoreError,
   createAddProject,
+  DeveloperModeRequiredError,
   DriverIsTerminalError,
+  ModeUnavailableError,
   FeatureUnavailableError,
   InvalidOperationError,
   NotFoundError,
@@ -35,6 +40,7 @@ import {
   SessionResponse,
   SessionsResponse,
   SetDriverRequest,
+  SetPermissionModeRequest,
   type SessionTerminal,
   WorkspaceResponse,
   WorkspacesResponse,
@@ -83,6 +89,10 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     if (error instanceof SessionNotIdleError) return apiError(c, 409, 'session_not_idle', error.message);
     if (error instanceof TerminalUnavailableError) return apiError(c, 409, 'terminal_unavailable', error.message, { terminal: error.terminal });
     if (error instanceof DriverIsTerminalError) return apiError(c, 409, 'driver_is_terminal', error.message);
+    // Permission modes: core's refusals, each with its plain reason; nothing changed.
+    if (error instanceof DeveloperModeRequiredError) return apiError(c, 403, 'developer_mode_required', error.message);
+    if (error instanceof ConfirmationRequiredError) return apiError(c, 400, 'confirmation_required', error.message);
+    if (error instanceof ModeUnavailableError) return apiError(c, 409, 'mode_unavailable', error.message);
     if (error instanceof FeatureUnavailableError) return apiError(c, 409, 'feature_unavailable', FEATURE_UNAVAILABLE_MESSAGE);
     if (error instanceof SessionBusyError) {
       return apiError(c, 409, 'session_busy', 'The agent is still answering. Send your message when it is done.');
@@ -128,7 +138,8 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     } catch (error) {
       return refusal(c, error);
     }
-    if (terminalAvailability === undefined) return c.json(SessionResponse.parse({ session }));
+    const permissionModes = chat.permissionModeOptions(scope.workspaceId, scope.sessionId);
+    if (terminalAvailability === undefined) return c.json(SessionResponse.parse({ session, permissionModes }));
     let terminal: SessionTerminal;
     try {
       terminal = await terminalAvailability(session);
@@ -140,7 +151,24 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
       });
       terminal = { available: false, code: 'pty_unavailable', reason: TERMINAL_CHECK_FAILED };
     }
-    return c.json(SessionResponse.parse({ session, terminal }));
+    return c.json(SessionResponse.parse({ session, terminal, permissionModes }));
+  });
+
+  // The chat's permission mode: core decides (Developer mode, confirmation, what the agent offers, who drives).
+  app.put(API_ROUTES.sessionPermissionMode, limit, async (c) => {
+    const scope = ids(c);
+    if (scope?.sessionId === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+    const body = await readBody(c, SetPermissionModeRequest);
+    if (!body.ok) return body.response;
+    try {
+      const before = chat.getSession(scope.workspaceId, scope.sessionId).permissionMode;
+      const session = chat.setPermissionMode(scope.workspaceId, scope.sessionId, body.value.mode, { confirm: body.value.confirm });
+      if (session.permissionMode !== before) log.info('chat permission mode changed', { workspaceId: scope.workspaceId, sessionId: scope.sessionId, mode: session.permissionMode, previous: before });
+      return c.json(SessionResponse.parse({ session, permissionModes: chat.permissionModeOptions(scope.workspaceId, scope.sessionId) }));
+    } catch (error) {
+      if (error instanceof CoreError) log.info('chat permission mode refused', { workspaceId: scope.workspaceId, sessionId: scope.sessionId, mode: body.value.mode, code: error.code });
+      return refusal(c, error);
+    }
   });
 
   app.get(API_ROUTES.workspaces, (c) => c.json(WorkspacesResponse.parse({ workspaces: chat.listWorkspaces() })));

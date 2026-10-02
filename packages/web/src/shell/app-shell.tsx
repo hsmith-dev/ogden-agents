@@ -1,4 +1,5 @@
 import { Outlet, useRouterState } from '@tanstack/react-router';
+import { DeveloperModeSync } from '@/appearance/developer-mode';
 import { useEventStream } from '@/events/event-stream';
 import { SidebarInset, SidebarProvider } from '@/ui/sidebar';
 import { AppShortcutOffer } from './app-shortcut-offer';
@@ -26,6 +27,8 @@ export function AppShell() {
       <SidebarProvider closeSheetOn={href}>
         <StatusSidebar />
         <LiveAnnouncer />
+        {/* Developer mode is the server's (permission modes): this tab's copy follows it. */}
+        <DeveloperModeSync />
         <SidebarInset data-testid="workspace-area">
           <VersionBanner />
           <AppShortcutOffer />

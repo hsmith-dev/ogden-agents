@@ -248,6 +248,8 @@ export function fullTestApp(core: Core, extra: Partial<AppOptions> = {}): Hono {
       reopenSession: () => Promise.reject(new Error('no agent in this test')),
       listAuthMethods: () => Promise.reject(new Error('no agent in this test')),
     },
+    events: core.events,
+    installSettings: core.installSettings,
   });
   return createApp({
     events: core.events,
@@ -263,6 +265,7 @@ export function fullTestApp(core: Core, extra: Partial<AppOptions> = {}): Hono {
     agentSetup: createAgentSetup(core.events, [createMemoryAgentSetup()]),
     onboarding: createOnboarding({ dataDir: tempDataDir(), hasProjects: () => false }),
     newProjectDefaults: createNewProjectDefaults({ dataDir: tempDataDir(), bmad: core.bmad }),
+    installSettings: core.installSettings,
     appShortcut: createMemoryAppShortcut(),
     tabs: createTabTokens(),
     ...extra,

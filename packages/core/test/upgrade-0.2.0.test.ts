@@ -88,8 +88,11 @@ describe('upgrading a 0.2.0 data folder (story 10.7)', () => {
       expect(event).toEqual({ id: row.id, seq: row.seq, workspaceId: row.workspace_id, streamId: row.stream_id, type: row.type, at: row.at, payload: JSON.parse(row.payload) });
       const parsed = CoreEvent.safeParse(event);
       expect(parsed.success, `${row.type} #${row.seq}: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
-      // Parsing adds and drops nothing: the payload reads back exactly as stored.
-      expect(parsed.data?.payload).toEqual(JSON.parse(row.payload));
+      // Parsing drops nothing: the payload reads back as stored. The one field it adds is a
+      // 0.2.0 session's permission mode, read as Ask (permission modes: old history reads as Ask).
+      const stored = JSON.parse(row.payload) as { session?: Record<string, unknown> };
+      const expected = row.type === 'session.created' ? { ...stored, session: { ...stored.session, permissionMode: 'ask' } } : stored;
+      expect(parsed.data?.payload).toEqual(expected);
     }
     // The 0.2.0 event types the fixture covers.
     expect(new Set(read.map((event) => event.type))).toEqual(

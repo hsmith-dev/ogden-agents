@@ -4,6 +4,7 @@ import { createBmadFeatures, parseAvailableBmadPieces, type BmadFeatures, type B
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
 import { createEntities, type Entities } from './entities.js';
 import { createEventLog, type EventLog, type EventLogOptions } from './event-log.js';
+import { createInstallSettings, type InstallSettings } from './install-settings.js';
 import { createPermissions, type Permissions } from './permissions.js';
 import { createSessionEvents, type SessionEvents } from './session-events.js';
 
@@ -23,6 +24,8 @@ export interface Core {
   readonly bmad: BmadFeatures;
   /** Whether a project's repo already uses BMad Method, and Not now on the offer (story 10.3). */
   readonly bmadDetection: BmadDetectionUseCases;
+  /** Developer mode, which the server keeps and enforces (permission modes). */
+  readonly installSettings: InstallSettings;
   close(): void;
 }
 
@@ -45,6 +48,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
   // Which pieces this install ships is the server wiring's list (story 10.2), never core's.
   const bmad = createBmadFeatures(db, { availableBmadPieces });
   const bmadDetection = createBmadDetection({ orm: db.orm, events, entities, catalog: options.bmadCatalog });
+  const installSettings = createInstallSettings({ db, events, entities });
   const permissions = createPermissions({
     db,
     events,
@@ -60,6 +64,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     permissions,
     bmad,
     bmadDetection,
+    installSettings,
     close: () => {
       try {
         permissions.close();

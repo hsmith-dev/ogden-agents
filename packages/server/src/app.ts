@@ -1,5 +1,5 @@
 import { serveStatic } from '@hono/node-server/serve-static';
-import { createAddProject, type AgentSetup, type AppShortcutPort, type BmadDetectionUseCases, type BmadFeatures, type Chat, type EventLog, type NewProjectDefaultsStore, type Onboarding, type Permissions, type Toolchain } from '@ogden-agents/core';
+import { createAddProject, type AgentSetup, type AppShortcutPort, type BmadDetectionUseCases, type BmadFeatures, type Chat, type EventLog, type InstallSettings, type NewProjectDefaultsStore, type Onboarding, type Permissions, type Toolchain } from '@ogden-agents/core';
 import { API_ROUTES, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
@@ -13,6 +13,7 @@ import { registerEventSocket } from './event-socket.js';
 import type { Logger } from './log.js';
 import { isServerPath } from './paths.js';
 import { registerPermissionRoutes } from './permission-routes.js';
+import { registerSettingsRoutes } from './settings-routes.js';
 import { registerShortcutRoutes } from './shortcut-routes.js';
 import type { TerminalAvailabilityCheck } from './terminal-availability.js';
 import { registerTerminalSocket } from './terminal-socket.js';
@@ -86,6 +87,8 @@ export interface AppOptions {
    * 501 and new projects start Simple.
    */
   newProjectDefaults?: NewProjectDefaultsStore;
+  /** Developer mode, kept and enforced by core (permission modes); without it its routes answer 501. */
+  installSettings?: InstallSettings;
   /** The Ogden Agents app shortcut (E2-R10; the `shortcut-memory` stub until 2.4). */
   appShortcut?: AppShortcutPort;
   /**
@@ -95,7 +98,7 @@ export interface AppOptions {
   tabs?: TabTokens;
 }
 
-export function createApp({ events, webRoot, log, gate, control, toolchain, chat, terminalAvailability, permissions, bmad, bmadProbe, bmadDetection, agentSetup, onboarding, newProjectDefaults, appShortcut, tabs }: AppOptions): Hono {
+export function createApp({ events, webRoot, log, gate, control, toolchain, chat, terminalAvailability, permissions, bmad, bmadProbe, bmadDetection, agentSetup, onboarding, newProjectDefaults, installSettings, appShortcut, tabs }: AppOptions): Hono {
   const app = new Hono();
 
   // First, for every method and path: no route may be registered before this line.
@@ -184,6 +187,7 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, chat
   registerAgentSetupRoutes(app, { agentSetup, onboarding, log });
   registerBmadRoutes(app, { bmad, newProjectDefaults, log });
   registerBmadDetectionRoutes(app, { bmadDetection, log });
+  registerSettingsRoutes(app, { installSettings, log });
 
   registerEventSocket(app, { events, log, tabs });
   // A session's terminal (story 3.1): behind the same gate as `/ws`.

@@ -7,6 +7,7 @@ import {
   WorkspaceResponse,
   type BmadPiece,
   type PermissionDecisionRequest,
+  type PermissionMode,
   type PermissionRule,
   type Session,
   type SessionDriver,
@@ -68,6 +69,21 @@ export async function sendMessage(wsId: string, sesId: string, text: string, aut
 export async function switchDriver(wsId: string, sesId: string, driver: SessionDriver, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<Session> {
   const json = await call(auth, apiPath(API_ROUTES.sessionDriver, { wsId, sesId }), postJson({ driver }), "Ogden Agents couldn't switch this chat");
   return SessionResponse.parse(json).session;
+}
+
+/**
+ * `PUT /api/v1/workspaces/:wsId/sessions/:sesId/permission-mode`: the chat's
+ * permission mode (permission modes). `confirm` says the user confirmed Skip
+ * all's warning; the server refuses Skip all without it, and without Developer mode.
+ */
+export async function setPermissionMode(wsId: string, sesId: string, mode: PermissionMode, confirm = false, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<SessionResponse> {
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.sessionPermissionMode, { wsId, sesId }),
+    { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(confirm ? { mode, confirm: true } : { mode }) },
+    "Ogden Agents couldn't change this chat's permission mode",
+  );
+  return SessionResponse.parse(json);
 }
 
 // ---------------------------------------------------------------------------

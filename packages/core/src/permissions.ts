@@ -20,10 +20,16 @@
  * transaction, so a card already shown is never re-evaluated. A write to a
  * protected path (`isProtectedSegment`) is never answered by the
  * level or by a rule: it always shows a card.
+ *
+ * A chat in Skip all (permission modes) skips both the level and the rules:
+ * whatever reaches core from it is one of the agent's own safety checks, so
+ * it always shows a card, with no Always allow ({@link SKIP_ALL_REFUSAL}).
+ * The mode is read inside the same transaction as the level.
  */
 import {
   alwaysAllowRefusal,
   DEFAULT_CAUTION_LEVEL,
+  SKIP_ALL_REFUSAL,
   MAX_DENY_REASON_LENGTH,
   ToolKind as ToolKindSchema,
   type AlwaysAllowScope,
@@ -246,6 +252,10 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
           const session = entities.getSession(sessionId);
           if (session === undefined) throw new NotFoundError('session', sessionId);
           const cautionLevel = readCautionLevel(orm, session.workspaceId) ?? DEFAULT_CAUTION_LEVEL;
+          const permissionMode = session.permissionMode;
+          // Skip all: no caution level, no rule, and no Always allow (it never writes a rule).
+          const skipAll = permissionMode === 'skip_all';
+          const offered = skipAll ? null : scope;
           sessionEvents.appendSessionEvent(sessionId, {
             type: 'permission.requested',
             payload: {
@@ -258,8 +268,9 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
                 ...(command === undefined ? {} : { command }),
                 ...(protectedPath ? { protectedPath: true as const } : {}),
               },
-              alwaysAllowScope: scope,
+              alwaysAllowScope: offered,
               cautionLevel,
+              permissionMode,
             },
           });
           if (session.state !== 'working' && session.state !== 'waiting') {
@@ -271,14 +282,14 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
             return { type: 'cancelled' as const };
           }
           // A request that names a command never runs on the level: a command is asked or ruled (2.6).
-          if (!protectedPath && command === undefined && session.workspaceId === workspace?.id && cautionAllows(cautionLevel, kind, cautionPathsInside)) {
+          if (!skipAll && !protectedPath && command === undefined && session.workspaceId === workspace?.id && cautionAllows(cautionLevel, kind, cautionPathsInside)) {
             sessionEvents.appendSessionEvent(sessionId, {
               type: 'permission.resolved',
               payload: { sessionId, requestId, decision: 'allow_once', by: 'caution' },
             });
             return { type: 'caution' as const };
           }
-          const rule = protectedPath ? undefined : findRule(session.workspaceId, kind, command, pathsInside && session.workspaceId === workspace?.id);
+          const rule = protectedPath || skipAll ? undefined : findRule(session.workspaceId, kind, command, pathsInside && session.workspaceId === workspace?.id);
           if (rule !== undefined) {
             sessionEvents.appendSessionEvent(sessionId, {
               type: 'permission.resolved',
@@ -287,14 +298,14 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
             return { type: 'rule' as const };
           }
           entities.setSessionState(sessionId, 'waiting');
-          return { type: 'ask' as const, workspaceId: session.workspaceId };
+          return { type: 'ask' as const, workspaceId: session.workspaceId, scope: offered, skipAll };
         });
 
         if (outcome.type === 'rule' || outcome.type === 'caution') return { outcome: 'allow_once' };
         if (outcome.type === 'cancelled') return { outcome: 'cancelled' };
         return await new Promise<AgentPermissionDecision>((answer) => {
-          const refusal = kind === 'execute' && command !== undefined ? alwaysAllowRefusal(command) : undefined;
-          pending.set(requestId, { requestId, sessionId, workspaceId: outcome.workspaceId, scope, refusal, answer });
+          const refusal = outcome.skipAll ? SKIP_ALL_REFUSAL : kind === 'execute' && command !== undefined ? alwaysAllowRefusal(command) : undefined;
+          pending.set(requestId, { requestId, sessionId, workspaceId: outcome.workspaceId, scope: outcome.scope, refusal, answer });
         });
       } catch (error) {
         reportError(error);
@@ -312,6 +323,11 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
       }
       if (decision === 'allow_always' && entry.scope === null) {
         throw new ValidationError(entry.refusal ?? "Always allow isn't offered for this request.", [{ path: ['decision'], message: 'no always-allow scope' }]);
+      }
+      // A card shown before the chat moved to Skip all: a Skip-all chat never writes a rule. Read now, in
+      // the same synchronous step as the write below (no await between), so nothing can change it in between.
+      if (decision === 'allow_always' && entities.getSession(sessionId)?.permissionMode === 'skip_all') {
+        throw new ValidationError(SKIP_ALL_REFUSAL, [{ path: ['decision'], message: 'skip_all writes no rule' }]);
       }
       const kept = decision === 'deny' && reason !== undefined && reason.trim() !== '' ? reason : undefined;
       if (kept !== undefined && kept.length > MAX_DENY_REASON_LENGTH) {

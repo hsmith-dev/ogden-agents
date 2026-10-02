@@ -260,6 +260,9 @@ async function listenAndAnnounce({
   // Their terminals are gone too (story 3.1 review F3): those chats drive again.
   const released = core.entities.releaseTerminalDrivers();
   if (released.length > 0) log.info('sessions a stopped server left in the terminal are back in the chat', { sessions: released.length });
+  // No permission mode but Ask outlives the run it was chosen in (cause `restart`).
+  const reset = core.entities.resetPermissionModes();
+  if (reset.length > 0) log.info('chats in Auto or Skip all are back in Ask after the restart', { sessions: reset.length });
   // The terminal's `claude`: the option's, else (a test run only) a stand-in from the environment (story 3.10).
   const extraAgentEnv = { ...(hooks.claudeCli === undefined ? {} : { CLAUDE_CODE_EXECUTABLE: hooks.claudeCli }), ...options.extraAgentEnv };
   const agentEnv = () => ({ ...agentEnvironment(), ...extraAgentEnv });
@@ -321,7 +324,7 @@ async function listenAndAnnounce({
   const withChatEnv = (resume: AgentTerminalResume): AgentTerminalResume => {
     const transcript = resume.transcript?.bind(resume);
     return {
-      command: async (id, env) => resume.command(id, await freshChatEnv(env)),
+      command: async (id, env, options) => resume.command(id, await freshChatEnv(env), options),
       locate: async (env) => resume.locate(await freshChatEnv(env)),
       ...(transcript === undefined ? {} : { transcript: async (input) => transcript({ ...input, env: await freshChatEnv(input.env) }) }),
     };
@@ -329,6 +332,9 @@ async function listenAndAnnounce({
   const chatAgent: AgentPort = {
     get displayName() {
       return agent.displayName;
+    },
+    get permissionModes() {
+      return agent.permissionModes;
     },
     startSession: async (input) => agent.startSession({ ...input, env: await freshChatEnv(input.env) }),
     reopenSession: async (input) => agent.reopenSession({ ...input, env: await freshChatEnv(input.env) }),
@@ -346,6 +352,9 @@ async function listenAndAnnounce({
     permissions,
     agentEnv: chatEnv,
     terminal,
+    // The chat follows the log (a mode changed by Developer mode reaches its agent) and gates Skip all on Developer mode.
+    events: core.events,
+    installSettings: core.installSettings,
     // The event carries the plain reason; the log also gets the details (never the environment).
     onAgentError: (sessionId, error) => log.warn('agent failed', { sessionId, code: error.code, reason: error.message, ...error.details }),
     onInternalError: (sessionId, error) => log.error('applying an agent event failed', { sessionId, reason: String(error) }),
@@ -386,6 +395,7 @@ async function listenAndAnnounce({
     agentSetup,
     onboarding,
     newProjectDefaults,
+    installSettings: core.installSettings,
     appShortcut,
     tabs,
   });

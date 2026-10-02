@@ -377,3 +377,10 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-bmad-optional-per-project/story-end-to-end-suite-and-release-plan.md`
   summary: The installed suite's cleanup kills a server's whole process tree only while the server's pid is alive, so an agent or CLI orphaned by a server that already exited or crashed is neither killed nor reported by the teardown.
   evidence: `killBackgroundServer` and `killExtraServers` return early when `server.json` is gone or its pid is dead (story 10.9 review F5); a teardown check for leftover processes whose cwd or arguments point into the extra folder would close it.
+
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-each-chat-has-a-permission-mode-ask-auto-or-skip-all-plan.md`
+  summary: An ACP session that returns no `modes` is treated as already in Ask, so a user or project `permissions.defaultMode` could stand unnoticed on a future adapter pin.
+  evidence: The pinned claude-agent-acp 0.84.0 returns `modes` from session/new, resume and load, so it can't happen today; re-check on any pin bump (review S5).
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-each-chat-has-a-permission-mode-ask-auto-or-skip-all-plan.md`
+  summary: Before any agent has started in a server run, a mode the session won't list (Skip all as root) is accepted and then dropped to Ask (cause agent) at start, instead of being refused with no event.
+  evidence: Session modes are known only from a started ACP session; the review Q2 patch covers sessions after the first start in a run.

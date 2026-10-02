@@ -66,7 +66,8 @@ function oldColumns(dataDir: string) {
   try {
     return {
       workspaces: db.prepare('SELECT id, path, real_path, caution_level, created_at FROM workspaces ORDER BY id').all(),
-      sessions: db.prepare('SELECT * FROM sessions ORDER BY id').all(),
+      // Every 0.2.0 column (the permission mode column is new: its rows read Ask).
+      sessions: db.prepare('SELECT id, workspace_id, kind, state, driver, title, adapter_refs, created_at, updated_at FROM sessions ORDER BY id').all(),
       rules: db.prepare('SELECT * FROM permission_rules ORDER BY id').all(),
     };
   } finally {
@@ -96,8 +97,8 @@ describe('starting on a 0.2.0 data folder (story 10.7)', () => {
     expect((await rulesOf(plain)).rules).toEqual([]);
 
     const sessionsOf = (wsId: WorkspaceId) => get(server, tab, apiPath(API_ROUTES.workspaceSessions, { wsId }), SessionsResponse);
-    expect((await sessionsOf(bmad)).sessions.map((session) => [session.id, session.kind, session.state])).toEqual([[data.sessionIds.bmad, 'chat', 'idle']]);
-    expect((await sessionsOf(plain)).sessions.map((session) => [session.id, session.kind, session.state])).toEqual([[data.sessionIds.plain, 'chat', 'idle']]);
+    expect((await sessionsOf(bmad)).sessions.map((session) => [session.id, session.kind, session.state, session.permissionMode])).toEqual([[data.sessionIds.bmad, 'chat', 'idle', 'ask']]);
+    expect((await sessionsOf(plain)).sessions.map((session) => [session.id, session.kind, session.state, session.permissionMode])).toEqual([[data.sessionIds.plain, 'chat', 'idle', 'ask']]);
 
     const detectionOf = (wsId: WorkspaceId) => get(server, tab, apiPath(API_ROUTES.workspaceBmadDetection, { wsId }), BmadDetectionResponse);
     expect((await detectionOf(bmad)).detection).toEqual({ hasBmad: true, hasOutput: false, offerDismissed: false });
@@ -137,8 +138,11 @@ describe('starting on a 0.2.0 data folder (story 10.7)', () => {
     ws.send(JSON.stringify({ type: 'subscribe', afterSeq: 0 }));
     await waitFor(() => messages.some((message) => message.type === 'caught_up'), 'caught up', 10_000);
     const replayed = messages.filter((message): message is CoreEvent => 'seq' in message && message.seq <= data.events.at(-1)!.seq);
+    // As stored; a 0.2.0 `session.created` reads its session's permission mode as Ask (permission modes).
+    const asRead = (type: string, payload: { session?: Record<string, unknown> }) =>
+      type === 'session.created' ? { ...payload, session: { ...payload.session, permissionMode: 'ask' } } : payload;
     expect(replayed).toEqual(
-      data.events.map((row) => ({ id: row.id, seq: row.seq, workspaceId: row.workspace_id, streamId: row.stream_id, type: row.type, at: row.at, payload: JSON.parse(row.payload) as unknown })),
+      data.events.map((row) => ({ id: row.id, seq: row.seq, workspaceId: row.workspace_id, streamId: row.stream_id, type: row.type, at: row.at, payload: asRead(row.type, JSON.parse(row.payload)) as unknown })),
     );
     // The server checks each message against the shared schema before sending it; none was refused.
     expect(messages.some((message) => message.type === 'request_failed')).toBe(false);

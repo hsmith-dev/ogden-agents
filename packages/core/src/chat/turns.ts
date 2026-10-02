@@ -17,6 +17,7 @@ import type { Agents } from './agents.js';
 import type { CheckIn } from './check-in.js';
 import { AGENT_SESSION_REF, DELTA_INTERVAL_MS, MAX_QUEUED_MESSAGES } from './constants.js';
 import type { ChatContext } from './context.js';
+import type { PermissionModes } from './permission-mode.js';
 import type { Replies } from './replies.js';
 import { capDiffs, sameDiffs, toolCallPayload, toolKind, toolStatus } from './tool-calls.js';
 import type { Chat, Live, ToolCallState, Turn } from './types.js';
@@ -25,10 +26,11 @@ export function createTurns(
   ctx: ChatContext,
   deps: Pick<Replies, 'flushDelta' | 'tickDelta' | 'flushSession' | 'finishReply'> &
     Pick<CheckIn, 'clearQuiet' | 'clearTurnTimers' | 'armQuiet'> &
-    Pick<Agents, 'drop' | 'agentFor' | 'promptFor'>,
+    Pick<Agents, 'drop' | 'agentFor' | 'promptFor'> &
+    Pick<PermissionModes, 'onReportedMode'>,
 ) {
   const { options, entities, sessionEvents, agent, stopGraceMs, live, busy, running, switching, internalError, toAgentError, later, newMessageId, getWorkspace, getSession } = ctx;
-  const { flushDelta, tickDelta, flushSession, finishReply, clearQuiet, clearTurnTimers, armQuiet, drop, agentFor, promptFor } = deps;
+  const { flushDelta, tickDelta, flushSession, finishReply, clearQuiet, clearTurnTimers, armQuiet, drop, agentFor, promptFor, onReportedMode } = deps;
 
   /** Whether the session has a Deny reason or a queued message to send once this turn ends. */
   const hasNext = (sessionId: SessionId) => {
@@ -114,6 +116,10 @@ export function createTurns(
             );
           }
           return;
+        case 'permission_mode':
+          // A mode the chat didn't choose never sticks (permission modes).
+          onReportedMode(sessionId, event);
+          return;
         case 'tool_call': {
           const call: ToolCallState = {
             title: event.title,
@@ -166,6 +172,8 @@ export function createTurns(
     }
     // Stopped (or dropped) before the prompt went out: nothing is sent.
     if (started === undefined || turn.stopping) return;
+    // A mode change still being told goes first: the prompt never runs in a looser mode than the chat's.
+    if ((await Promise.race([entry.modeSync.then(() => true), entry.gone.then(() => false)])) === false || turn.stopping || live.get(session.id) !== entry) return;
     try {
       const { prompt, primed } = promptFor(session.id, entry, messageId, text);
       const prompting = started.prompt(prompt);

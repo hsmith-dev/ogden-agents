@@ -53,6 +53,32 @@
 //                  environment (story 10.6: what a simple project's session
 //                  starts with)
 //
+//   "mode"         replies `mode=<its current session mode>` (permission modes)
+//   "mode-switch <mode id>"  switches its own session mode, as the agent does
+//                  entering plan mode, reports it (`current_mode_update`), and
+//                  replies `mode=<mode id>`
+//   "permission-safety <command>"  as "permission <command>", but asked even
+//                  in `bypassPermissions` (one of the agent's own safety checks)
+//   "plan-exit"    asks permission to leave plan mode with the real adapter's
+//                  options (mode-raising ones as `allow_always`, "manually
+//                  approve" as `allow_once`); replies `chose=<option id>`
+//
+// Session modes (permission modes): `session/new`, `session/resume` and
+// `session/load` answer `modes` as claude-agent-acp 0.84 does (`default`,
+// `acceptEdits`, `plan`, `auto`, `bypassPermissions`), starting in
+// FAKE_ACP_START_MODE (default `default`, as a user's or project's
+// `permissions.defaultMode` would set it), and `session/set_mode` sets the
+// mode. In `bypassPermissions`, "permission <command>" runs without asking.
+// FAKE_ACP_SET_MODE_FAIL=<mode id> takes that mode, then fails the `set_mode`;
+// FAKE_ACP_SET_MODE_HANG=<mode id> takes it and never answers (adapter tests only).
+// FAKE_ACP_NO_AUTO=1 lists no `auto`, FAKE_ACP_NO_BYPASS=1 no
+// `bypassPermissions`; FAKE_ACP_AUTO_FALLBACK=1 answers `set_mode auto`, then
+// falls back to `acceptEdits` and reports it (a model without Auto). These
+// switches reach the agent only through wrappers
+// (`fake-acp-agent-start-bypass.mjs`, `fake-acp-agent-no-modes.mjs`,
+// `fake-acp-agent-auto-fallback.mjs`): the server passes agents an
+// allowlisted environment.
+//
 // With FAKE_ACP_EXIT_AT_START=1 it exits before answering anything. With
 // FAKE_ACP_SPAWN_GRANDCHILD=1 it starts a long-lived child of its own (as the
 // real adapter starts `claude`), which it never stops.
@@ -161,6 +187,18 @@ const RESUME = process.env.FAKE_ACP_RESUME ?? '';
 const REOPEN_FAIL = new Set((process.env.FAKE_ACP_REOPEN_FAIL ?? '').split(',').filter((method) => method !== ''));
 const NEW_MESSAGE = '[Ogden Agents] New message:\n';
 
+/** The session modes it lists, as claude-agent-acp 0.84 lists them. */
+const AVAILABLE_MODES = [
+  { id: 'default', name: 'Manual', description: 'Always ask before making changes' },
+  { id: 'acceptEdits', name: 'Accept edits', description: 'Automatically accept all file edits' },
+  { id: 'plan', name: 'Plan', description: 'Create a plan before making changes' },
+  ...(process.env.FAKE_ACP_NO_AUTO === '1' ? [] : [{ id: 'auto', name: 'Auto', description: 'Claude handles permission decisions' }]),
+  ...(process.env.FAKE_ACP_NO_BYPASS === '1' ? [] : [{ id: 'bypassPermissions', name: 'Bypass permissions', description: 'Accepts all permissions' }]),
+];
+const START_MODE = process.env.FAKE_ACP_START_MODE ?? 'default';
+/** The `modes` a session answer carries, for a session now in `currentModeId`. */
+const modesOf = (currentModeId) => ({ currentModeId, availableModes: AVAILABLE_MODES });
+
 /** Appends `text` and `reply` to the session's Claude Code record (FAKE_ACP_CLAUDE_RECORD), chained after its last main-chain record. */
 const recordExchange = (sessionId, text, reply) => {
   const configDir = process.env.CLAUDE_CONFIG_DIR;
@@ -245,22 +283,39 @@ acp
   })
   .onRequest('session/new', ({ params }) => {
     const sessionId = `fake-session-${nextSession++}`;
-    sessions.set(sessionId, { via: 'new', opened: params });
-    return { sessionId };
+    sessions.set(sessionId, { via: 'new', opened: params, mode: START_MODE });
+    return { sessionId, modes: modesOf(START_MODE) };
   })
   .onRequest('session/resume', ({ params }) => {
     if (RESUME !== 'resume' && RESUME !== 'both') throw acp.RequestError.methodNotFound('session/resume');
     if (REOPEN_FAIL.has('resume-auth')) throw acp.RequestError.authRequired(undefined, 'the fake agent needs a new sign-in');
     if (REOPEN_FAIL.has('resume')) throw acp.RequestError.resourceNotFound(params.sessionId);
-    sessions.set(params.sessionId, { via: 'resumed', opened: params });
-    return {};
+    sessions.set(params.sessionId, { via: 'resumed', opened: params, mode: START_MODE });
+    return { modes: modesOf(START_MODE) };
   })
   .onRequest('session/load', async ({ params, client }) => {
     if (RESUME !== 'load' && RESUME !== 'both') throw acp.RequestError.methodNotFound('session/load');
     // The history a load replays: the client already has it.
     await say(client, params.sessionId, 'Earlier reply.');
     if (REOPEN_FAIL.has('load')) throw acp.RequestError.resourceNotFound(params.sessionId);
-    sessions.set(params.sessionId, { via: 'loaded', opened: params });
+    sessions.set(params.sessionId, { via: 'loaded', opened: params, mode: START_MODE });
+    return { modes: modesOf(START_MODE) };
+  })
+  .onRequest('session/set_mode', ({ params, client }) => {
+    const session = sessions.get(params.sessionId);
+    if (session === undefined) throw acp.RequestError.invalidParams(undefined, `no session ${params.sessionId}`);
+    if (!AVAILABLE_MODES.some((mode) => mode.id === params.modeId)) throw acp.RequestError.invalidParams(undefined, `Mode ${params.modeId} is not available`);
+    session.mode = params.modeId;
+    // Takes the mode, then fails the request, or never answers it (an agent whose answer can't be trusted).
+    if (process.env.FAKE_ACP_SET_MODE_FAIL === params.modeId) throw acp.RequestError.internalError(undefined, 'the fake agent failed set_mode on purpose');
+    if (process.env.FAKE_ACP_SET_MODE_HANG === params.modeId) return new Promise(() => {});
+    if (params.modeId === 'auto' && process.env.FAKE_ACP_AUTO_FALLBACK === '1') {
+      // Answers first, then falls back to accepting edits and says so (a model without Auto).
+      setTimeout(() => {
+        session.mode = 'acceptEdits';
+        void update(client, params.sessionId, { sessionUpdate: 'current_mode_update', currentModeId: 'acceptEdits' });
+      }, 20);
+    }
     return {};
   })
   .onRequest('session/prompt', async ({ params, client }) => {
@@ -289,6 +344,34 @@ acp
     if (text === 'auth-expired') throw acp.RequestError.authRequired(undefined, 'the fake agent needs a new sign-in');
     if (text.startsWith('/')) {
       await say(client, params.sessionId, `command=${text} primed=${primed}`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text === 'mode') {
+      await say(client, params.sessionId, `mode=${session.mode}`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text.startsWith('mode-switch ')) {
+      session.mode = text.slice('mode-switch '.length).trim();
+      await update(client, params.sessionId, { sessionUpdate: 'current_mode_update', currentModeId: session.mode });
+      await say(client, params.sessionId, `mode=${session.mode}`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text === 'plan-exit') {
+      // The real adapter's ExitPlanMode card: the mode-raising options are `allow_always`.
+      const toolCall = { toolCallId: 'call-exit-plan', title: 'Ready to code?', kind: 'switch_mode', rawInput: { plan: 'The plan.' } };
+      await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
+      const answer = await client.request('session/request_permission', {
+        sessionId: params.sessionId,
+        toolCall,
+        options: [
+          { optionId: 'exit-plan-clear-auto', name: 'Yes, clear context and use auto mode', kind: 'allow_always' },
+          { optionId: 'exit-plan-auto', name: 'Yes, and use auto mode', kind: 'allow_always' },
+          { optionId: 'exit-plan-bypass', name: 'Yes, and bypass permissions', kind: 'allow_always' },
+          { optionId: 'exit-plan-default', name: 'Yes, manually approve edits', kind: 'allow_once' },
+          { optionId: 'reject', name: 'No, keep planning', kind: 'reject_once' },
+        ],
+      });
+      await say(client, params.sessionId, `chose=${answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'}`);
       return { stopReason: 'end_turn' };
     }
     if (text === 'context') {
@@ -338,11 +421,13 @@ acp
       await say(client, params.sessionId, `${edited ? 'Edited' : 'Denied'} ${paths.join(', ')}.`);
       return { stopReason: 'end_turn' };
     }
-    if (text === 'permission' || text.startsWith('permission ')) {
-      const command = text === 'permission' ? 'npm test' : text.slice('permission '.length).trim();
+    if (text === 'permission' || text.startsWith('permission ') || text.startsWith('permission-safety ')) {
+      const safety = text.startsWith('permission-safety ');
+      const command = text === 'permission' ? 'npm test' : text.slice(safety ? 'permission-safety '.length : 'permission '.length).trim();
       const toolCall = { toolCallId: 'call-permission', title: `Run ${command}`, kind: 'execute', rawInput: { command } };
       await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
-      if (process.env.FAKE_ACP_SKIP_PERMISSION === '1') {
+      // Skipping permission checks (`bypassPermissions`) runs it without asking, unless it is one of its own safety checks.
+      if (process.env.FAKE_ACP_SKIP_PERMISSION === '1' || (session.mode === 'bypassPermissions' && !safety)) {
         await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: 'completed' });
         await say(client, params.sessionId, `Ran ${command}.`);
         return { stopReason: 'end_turn' };

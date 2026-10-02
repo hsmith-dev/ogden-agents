@@ -45,14 +45,23 @@ describe("the session's CLI command", () => {
 
   it('runs the chat’s CLAUDE_CODE_EXECUTABLE first, with --resume and the id as separate arguments, and the env as given', () => {
     const env = { PATH: '/usr/bin', CLAUDE_CODE_EXECUTABLE: '/opt/claude/bin/claude' };
-    expect(claudeTerminalCommand(ID, env, { claudeExecutable: '/elsewhere/claude' })).toEqual({ file: '/opt/claude/bin/claude', args: ['--resume', ID], env });
+    expect(claudeTerminalCommand(ID, env, { claudeExecutable: '/elsewhere/claude' })).toEqual({ file: '/opt/claude/bin/claude', args: ['--resume', ID, '--permission-mode', 'default'], env });
     // Then the one the adapter would find, as the chat's adapter does.
     expect(claudeTerminalCommand(ID, { PATH: '' }, { claudeExecutable: '/elsewhere/claude' }).file).toBe('/elsewhere/claude');
   });
 
   it('runs a script CLI under Node, as the Agent SDK does', () => {
     const command = claudeTerminalCommand(ID, { CLAUDE_CODE_EXECUTABLE: FAKE_CLI }, { nodePath: '/node' });
-    expect(command).toMatchObject({ file: '/node', args: [FAKE_CLI, '--resume', ID] });
+    expect(command).toMatchObject({ file: '/node', args: [FAKE_CLI, '--resume', ID, '--permission-mode', 'default'] });
+  });
+
+  it("starts the CLI in the chat's permission mode: Ask and Auto by --permission-mode, Skip all by its skip-permissions flag", () => {
+    const env = { CLAUDE_CODE_EXECUTABLE: '/opt/claude/bin/claude' };
+    expect(claudeTerminalCommand(ID, env, { permissionMode: 'ask' }).args).toEqual(['--resume', ID, '--permission-mode', 'default']);
+    expect(claudeTerminalCommand(ID, env, { permissionMode: 'auto' }).args).toEqual(['--resume', ID, '--permission-mode', 'auto']);
+    expect(claudeTerminalCommand(ID, env, { permissionMode: 'skip_all' }).args).toEqual(['--resume', ID, '--dangerously-skip-permissions']);
+    // Without a mode, Ask: never the user's own settings' default mode.
+    expect(claudeTerminalCommand(ID, env).args).toEqual(['--resume', ID, '--permission-mode', 'default']);
   });
 
   it('refuses an id that could read as an option or a path, and a CLI it cannot find', () => {

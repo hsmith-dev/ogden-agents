@@ -3,13 +3,13 @@ title: 'Each chat has a permission mode: Ask, Auto, or Skip all'
 type: 'feature'
 ticket: '1'
 created: '2026-10-02'
-status: 'in-progress'
+status: 'built'
 baseline_revision: 'a41f72b5e9714e0c4289329407d6f1d8178ed762'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick', 'security']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/backlog/story-each-chat-has-a-permission-mode-ask-auto-or-skip-all.md'
@@ -79,22 +79,44 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] shared contracts (entities, events, api, errors, terminal cause) + shared tests for back-compat parsing
-- [ ] core: migration, entities, install settings, permissions skip_all branch, chat permission-mode module, agent apply on start, terminal args, restart reset; unit tests for every matrix row
-- [ ] adapters: ACP mode mapping, set_mode, current_mode_update, terminal args; adapter tests on the fake agent
-- [ ] fake agent + wrappers
-- [ ] server: routes, status mapping, start reset; route tests incl. direct-API Skip all refusals
-- [ ] web: Developer mode from server, picker, confirm dialog, banner; DOM tests; Playwright e2e `tests/e2e/permission-modes.spec.ts` (picker, confirm, banner stays visible while scrolling and at phone width, dev-off drops to Ask)
-- [ ] docs: EXPERIENCE.md, agent-matrix, memlog + spine notes
+- [x] shared contracts (entities, events, api, errors, terminal cause) + shared tests for back-compat parsing
+- [x] core: migration, entities, install settings, permissions skip_all branch, chat permission-mode module, agent apply on start, terminal args, restart reset; unit tests for every matrix row
+- [x] adapters: ACP mode mapping, set_mode, current_mode_update, terminal args; adapter tests on the fake agent
+- [x] fake agent + wrappers
+- [x] server: routes, status mapping, start reset; route tests incl. direct-API Skip all refusals
+- [x] web: Developer mode from server, picker, confirm dialog, banner; DOM tests; Playwright e2e `tests/e2e/permission-modes.spec.ts` (picker, confirm, banner stays visible while scrolling and at phone width, dev-off drops to Ask)
+- [x] docs: EXPERIENCE.md, agent-matrix, memlog + spine notes
 
 **Acceptance Criteria:**
 - Given the ticket's criteria 1–10, when the suites run, then each has at least one test that fails without this change.
 
 ## Implementation Notes
 
+- Shared: `PermissionMode` (`ask|auto|skip_all`, `PERMISSION_MODE_RANK`, `PERMISSION_MODE_LABELS`) in `entities.ts`; `Session.permissionMode` defaults to `ask`, so 0.2.0 `session.created` payloads and the event socket's replay read as Ask (the two upgrade tests now expect exactly that one added field). `SKIP_ALL_REFUSAL` lives in shared `permissions.ts` (core refuses with it, the card writes it). `SETTINGS_STREAM = 'settings'` and `settings.developer_mode_changed` are install-level.
+- Core: migration `0006_permission_modes.sql` (generated, renamed as 0003–0005 were). `entities.setSessionPermissionMode / listSessionsInPermissionMode / resetPermissionModes`; `install-settings.ts` (`core.installSettings`) keeps the one-row `install_settings` and, turning Developer mode off, in one transaction appends the Developer mode event, then per Skip-all chat a `driver_changed` (`developer_mode_off`) when the terminal drives it, then its `permission_mode_changed` (`developer_mode_off`). `chat/permission-mode.ts`: `createModeApplier` (bounded by `PERMISSION_MODE_TIMEOUT_MS`, 5 s; a looser mode the agent can't take moves the chat to Ask with cause `agent` and is retried as Ask), `followStoredMode` (serialized per live agent through `Live.modeSync`; an agent that can't be put even in Ask is dropped and a working chat goes `idle`, resumable), `onReportedMode`, `setPermissionMode`, `permissionModeOptions`. The chat subscribes to the log (`ChatOptions.events`) and follows every mode change except cause `agent` (that one tells the agent Ask only when the reported mode asks less), and stops a terminal handed back by `developer_mode_off` (`terminal.releaseTerminal`, under the `switching` lock or once the switch holding it ends). `toTerminal` passes the mode to `resume.command` and, if the stored mode became stricter while the CLI opened, stops it and hands the chat back.
+- Port additions are optional (`AgentPort.permissionModes`, `AgentSession.permissionModes`/`setPermissionMode`): an agent that declares none offers Ask only, so the existing test fakes stay valid. `AgentEvent` gains `permission_mode` with an optional `label` (the agent's own name for the mode, for the reason).
+- Adapter: keeps `modes` from `session/new`/`resume`/`load`, maps `default|auto|bypassPermissions` ↔ Ogden modes (`ogdenModeOf`, `asksLessThanAsk`: `default`, `plan`, `dontAsk` ask; anything else, unknown included, asks less), `setPermissionMode` → `session/set_mode` (no-op when already there), `current_mode_update` → `permission_mode`. `claudeTerminalCommand` appends `CLAUDE_MODE_ARGS`.
+- Fake agent: modes as 0.84 lists them, `session/set_mode`, prompts `mode`, `mode-switch <id>`, `permission-safety <cmd>`, `plan-exit`; wrappers `fake-acp-agent-start-bypass.mjs`, `fake-acp-agent-no-modes.mjs` (no auto, no bypass), `fake-acp-agent-auto-fallback.mjs`.
+- Server: `PUT …/permission-mode` in `chat-routes.ts` (403/400/409 mapping; logs mode and code only), `GET` session adds `permissionModes`; `settings-routes.ts` (`GET`/`PUT /api/v1/settings/developer-mode`, 501 without core's settings); `start.ts` calls `resetPermissionModes()` after `releaseTerminalDrivers()` and wires `events` and `installSettings` into the chat.
+- Web: `appearance/developer-mode.tsx` (`DeveloperModeSync` in the shell follows the server, keeps the tab's density, and carries a browser's old "on" over once, remembered under `ogden-agents.developer-mode-carried`); Appearance's switch saves to the server. `permissions/permission-mode-picker.tsx` (picker, Skip-all `AlertDialog`, `SkipAllBanner`), `ui/banner.tsx` destructive variant, `ui/dropdown-menu.tsx` `DropdownMenuChoiceItem`. The banner's Back to Ask switches back to the chat first when the terminal drives. The e2e terminal helper now also sets Developer mode on the server.
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (2026-10-02; lenses: quick, security). Counts: high 3, medium 3, low 1, false 1, maybe-false 0.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---|---|---|---|
+| Q1/S3 | `permissions.ts` `decide`: a card shown in Ask accepts Always allow after the chat moved to Skip all | high | patch | `scope` fixed at request time; `decide` never reads the mode. Fix: re-read the session mode in `decide` and refuse `allow_always` in `skip_all`. |
+| S1 | Timed-out loosening `set_mode` can leave the agent in bypass while the chat says Ask | high | patch | Verified: adapter `setPermissionMode` returns early when `currentModeId` equals, and still holds the old mode while the late request is in flight; core then "applies" Ask with no request sent. Fix: core drops the agent on a timeout instead of retrying Ask; adapter never short-circuits while a `set_mode` is unresolved or after one failed. |
+| Q4 | `followStoredMode` chain stays rejected after one failure, so later pushes (Ask on Developer mode off) never run | high | patch | `entry.modeSync.then(cb)` with no rejection handler after a rejected link. Fix: catch inside each link. |
+| S2 | First prompt doesn't wait for a pending mode push | medium | patch | `runTurn` awaits `entry.agent` only. Fix: await `entry.modeSync` (never rejects after Q4) before prompting. |
+| Q2 | Session-level unavailability only known after the agent started in this run; PUT before that records an event | medium | patch | `sessionModes` filled only in `agentFor`. Fix: fall back to the modes the agent's last started session listed in this run, and refetch the session in the web when its agent starts. Residual (before any agent start after a server restart) deferred. |
+| S4 | Developer mode carry-over can turn it back on from an old browser after the user turned it off | medium | patch | Verified in `DeveloperModeSync`. Fix: server reports whether Developer mode was ever set; carry over only when it never was. |
+| Q3 | "Back to Ask" on the banner can be clicked twice while a change is in flight | low | patch | `aria-disabled` doesn't block `onClick`; `changeMode` has no guard. Fix: ignore clicks while changing. |
+| S5 | A session that lists no modes is assumed to be in Ask | low | defer | Not reachable with the pinned 0.84.0 (it returns `modes` from new/resume/load); matters only on a future pin. |
+| S6 | Skip-all confirmation is a client-sent boolean; Developer mode PUT needs none | false | reject | By design: AD-15's tab token is the user; the boolean proves the request came through the warning step, as criterion 5 asks. No bad outcome beyond what any tab-token holder can already do. |
 
 ## Design Notes
 

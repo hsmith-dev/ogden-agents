@@ -16,7 +16,7 @@
  * others are told. A viewer that detaches leaves the terminal running, with or
  * without viewers, until it is switched back or the server stops.
  */
-import { MAX_TERMINAL_COLS, MAX_TERMINAL_ROWS, type Session, type SessionId } from '@ogden-agents/shared';
+import { MAX_TERMINAL_COLS, MAX_TERMINAL_ROWS, PERMISSION_MODE_RANK, type Session, type SessionId } from '@ogden-agents/shared';
 import { AgentError, type AgentTerminalResume, type AgentTranscriptTurn } from '../agent-port.js';
 import { InvalidOperationError, SessionNotIdleError, TerminalHandoffError, TerminalImportError, TerminalUnavailableError } from '../errors.js';
 import { omittedNote, START_MARK, turnsToImport } from '../terminal-import.js';
@@ -96,6 +96,8 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
 
   /** The driver changes in flight (each holding its session's `switching`): `close` waits for them. */
   const switches = new Set<Promise<void>>();
+  /** Sessions whose terminal is to stop once the switch holding them ends (Developer mode turned off meanwhile). */
+  const releaseAfterSwitch = new Set<SessionId>();
 
   /** Whether `promise` settled within `ms` (its rejection counts as settled). */
   const within = async (promise: Promise<unknown>, ms: number): Promise<boolean> => {
@@ -153,6 +155,7 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
         return await work();
       } finally {
         switching.delete(sessionId);
+        if (releaseAfterSwitch.delete(sessionId)) releaseTerminal(sessionId);
       }
     })();
     const tracked = done.then(
@@ -253,6 +256,8 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     };
     let agentSessionId: string;
     let command: Awaited<ReturnType<AgentTerminalResume['command']>>;
+    // The CLI starts in the chat's permission mode (permission modes): asking, auto, or skipping its checks.
+    const permissionMode = entities.getSession(session.id)?.permissionMode ?? 'ask';
     try {
       const sessionId = storedAgentSessionId(session.id);
       const unavailable = await checkTerminalReady({ agent, support, agentSessionId: sessionId, env: () => env, step });
@@ -260,7 +265,7 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
       agentSessionId = sessionId!;
       let built: typeof command | typeof TIMED_OUT;
       try {
-        built = await deadline.step(resume.command(agentSessionId, env));
+        built = await deadline.step(resume.command(agentSessionId, env, { permissionMode }));
       } catch (error) {
         throw new TerminalUnavailableError('cli_not_found', terminalUnavailableReason.cliNotFound(agent.displayName, error instanceof AgentError ? error.message : ''));
       }
@@ -360,7 +365,36 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     }
     // A CLI that crashed as it started hands the chat straight back, with its note.
     if (entry.exit !== undefined) return cliExited(session.id, entry, entry.exit.exitCode);
+    // The chat's mode became stricter while the CLI started (Developer mode turned off): never left skipping checks.
+    const now = entities.getSession(session.id)?.permissionMode ?? 'ask';
+    if (PERMISSION_MODE_RANK[now] < PERMISSION_MODE_RANK[permissionMode]) {
+      await stopTerminal(session.id);
+      await importTerminalTurns(switched);
+      return entities.setSessionDriver(session.id, 'ui', 'developer_mode_off');
+    }
     return switched;
+  };
+
+  /**
+   * Developer mode was turned off while the session's terminal skipped
+   * permission checks (permission modes): core has already handed the chat
+   * back (`developer_mode_off`); this stops the CLI and its tree and imports
+   * its turns, under the `switching` lock, or once the switch holding the
+   * session ends. Never throws.
+   */
+  const releaseTerminal = (sessionId: SessionId): void => {
+    if (!terminals.has(sessionId) || ctx.closing) return;
+    if (switching.has(sessionId)) {
+      releaseAfterSwitch.add(sessionId);
+      return;
+    }
+    holdingSwitch(sessionId, async () => {
+      await stopTerminal(sessionId);
+      const session = entities.getSession(sessionId);
+      if (session !== undefined) await importTerminalTurns(session);
+      // Core set the driver in the transaction that turned Developer mode off; this only makes sure.
+      entities.setSessionDriver(sessionId, 'ui', 'developer_mode_off');
+    }).catch((error: unknown) => internalError(sessionId, error));
   };
 
   /** Sets or clears {@link TERMINAL_IMPORT_PENDING_REF}; a failure is logged as a code. */
@@ -598,5 +632,5 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     },
   };
 
-  return { endTerminal, stopTerminal, toTerminal, importTerminalTurns, toChat, closeTerminals, importAfterRestart, ...methods };
+  return { endTerminal, stopTerminal, toTerminal, importTerminalTurns, toChat, closeTerminals, importAfterRestart, releaseTerminal, ...methods };
 }

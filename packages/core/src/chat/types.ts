@@ -3,10 +3,11 @@
  * `ChatOptions`, `TerminalViewer` and `Chat`, and the state the chat modules
  * share by reference (`Live`, `Terminal`, `Turn`).
  */
-import type { Session, SessionDriver, SessionId, ToolCallDiff, ToolCallStatus, ToolKind, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import type { PermissionMode, Session, SessionDriver, SessionId, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, Workspace, WorkspaceId } from '@ogden-agents/shared';
 import type { AgentError, AgentPort, AgentSession } from '../agent-port.js';
 import type { Entities, NewWorkspaceOptions } from '../entities.js';
-import type { HistoryDeleted } from '../event-log.js';
+import type { EventLog, HistoryDeleted } from '../event-log.js';
+import type { InstallSettings } from '../install-settings.js';
 import type { Permissions } from '../permissions.js';
 import type { SessionEvents } from '../session-events.js';
 import type { TerminalPort, TerminalProcess } from '../terminal-port.js';
@@ -40,6 +41,17 @@ export interface ChatOptions {
   stopGraceMs?: number;
   /** Opens the agent's own CLI in a terminal (story 3.1). Without it, switching to the terminal is refused. */
   terminal?: TerminalPort;
+  /**
+   * The event log, which the chat follows (permission modes): each change of a
+   * chat's stored mode is pushed to its live agent (or its terminal is handed
+   * back when Developer mode was turned off). Without it, only the modes the
+   * chat itself sets reach its agents.
+   */
+  events?: Pick<EventLog, 'subscribe' | 'lastSeq'>;
+  /** Developer mode, which gates Skip all. Without it, Developer mode reads off. */
+  installSettings?: Pick<InstallSettings, 'developerMode'>;
+  /** How long an agent may take to take a permission mode before it is dropped. Default `PERMISSION_MODE_TIMEOUT_MS`. */
+  permissionModeTimeoutMs?: number;
 }
 
 /** A terminal's size in character cells. */
@@ -150,6 +162,19 @@ export interface Chat {
   switchDriver(workspaceId: WorkspaceId, sessionId: SessionId, driver: SessionDriver): Promise<Session>;
   /** A hold on the session's running terminal, or `undefined` when the terminal does not drive it. */
   attachTerminal(sessionId: SessionId): TerminalViewer | undefined;
+  /**
+   * Sets the chat's permission mode (the user chose it): appends
+   * `session.permission_mode_changed` (cause `user`) and tells its live
+   * agent. The same mode again changes nothing. Refused, changing nothing:
+   * `DriverIsTerminalError` while the terminal drives, `SessionNotIdleError`
+   * while it switches drivers, for `skip_all` `DeveloperModeRequiredError`
+   * (Developer mode off) and `ConfirmationRequiredError` (no `confirm`),
+   * `ModeUnavailableError` for a mode the agent or its session doesn't
+   * offer, `NotFoundError` for an unknown session.
+   */
+  setPermissionMode(workspaceId: WorkspaceId, sessionId: SessionId, mode: PermissionMode, options?: { confirm?: boolean | undefined }): Session;
+  /** Every permission mode, in order, and whether the session's agent (and its session, when it has one this run) offers it. */
+  permissionModeOptions(workspaceId: WorkspaceId, sessionId: SessionId): SessionPermissionModeOption[];
   /** Resolves once no agent turn is running (tests, shutdown). */
   settled(): Promise<void>;
   /**
@@ -192,6 +217,8 @@ export interface Live {
   /** Resolves when the agent is dropped or closed: a prompt still running is abandoned. */
   gone: Promise<void>;
   markGone: () => void;
+  /** The permission mode changes being told to the agent, one after another (permission modes). */
+  modeSync: Promise<void>;
 }
 
 /** A session's terminal and its viewers (story 3.1). Its output is never logged, evented or stored. */

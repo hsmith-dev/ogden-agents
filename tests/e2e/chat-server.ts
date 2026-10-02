@@ -98,6 +98,19 @@ export async function startChat(page: Page, repo: string): Promise<StartedChat> 
   return { wsId, sesId, url };
 }
 
+/** Turns Developer mode on or off on the server (permission modes), with the tab's own token. */
+export async function setDeveloperMode(page: Page, on: boolean): Promise<void> {
+  const origin = new URL(page.url()).origin;
+  const token = await storedToken(page);
+  if (token === null) throw new Error('the page has no tab token; connect it first');
+  const response = await fetch(`${origin}${API_ROUTES.developerMode}`, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${token}`, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ developerMode: on }),
+  });
+  if (!response.ok) throw new Error(`PUT ${API_ROUTES.developerMode} returned ${response.status}: ${await response.text()}`);
+}
+
 /** The session view's composer. */
 export const composer = (page: Page) => page.getByRole('textbox', { name: 'Message Claude Code' });
 
@@ -141,6 +154,8 @@ export const withTerminalChat = async (page: Page, developerMode: boolean, body:
           key: APPEARANCE_KEY,
           on: developerMode,
         });
+        // Developer mode is the server's (permission modes); the browser's copy above only paints first.
+        await setDeveloperMode(page, developerMode);
         const chat = await startChat(page, server.repo);
         await body({ ...chat, server });
       },

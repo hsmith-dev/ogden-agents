@@ -30,7 +30,18 @@
  *
  * Permission requests go to core's `onPermissionRequest`; without one they
  * are declined, so nothing the agent asks to run, runs without a person.
- * Core is only ever told "once": always-allow rules live in core.
+ * Core is only ever told "once": always-allow rules live in core. Only
+ * `allow_once` and `reject_once` options are ever selected, so a card never
+ * picks an option that changes the agent's mode (the plan-exit card's
+ * mode-raising options are `allow_always`).
+ *
+ * Permission modes: the ACP session modes the adapter lists (`default`,
+ * `acceptEdits`, `plan`, `auto`, `bypassPermissions`) map to Ogden's Ask,
+ * Auto and Skip all (`default`, `auto`, `bypassPermissions`). Core sets the
+ * chat's mode with `session/set_mode` on every start and reopen, and each
+ * `current_mode_update` is reported as a `permission_mode` event. The adapter
+ * is started with skipping permitted (its default), so a chat can move to
+ * Skip all without a restart: Ogden's server is the gate.
  */
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -52,6 +63,7 @@ import {
   type AgentSession,
   type AgentToolCallDiff,
 } from '@ogden-agents/core';
+import type { PermissionMode } from '@ogden-agents/shared';
 import { killProcessTree } from '../process-tree.js';
 import { findClaudeExecutable } from './detect.js';
 import { claudeTerminalCommand, locateClaudeTerminal } from './terminal-command.js';
@@ -110,6 +122,23 @@ export function resolveClaudeAgentAcp(from: string | URL = import.meta.url): str
   } catch {
     return undefined;
   }
+}
+
+/** The ACP session mode each Ogden permission mode is (claude-agent-acp 0.84). */
+export const ACP_MODE_IDS: Readonly<Record<PermissionMode, string>> = { ask: 'default', auto: 'auto', skip_all: 'bypassPermissions' };
+
+/** The Ogden mode an ACP session mode is, or `other` (planning, accepting edits, anything else). */
+export function ogdenModeOf(modeId: string): PermissionMode | 'other' {
+  const entry = (Object.entries(ACP_MODE_IDS) as Array<[PermissionMode, string]>).find(([, id]) => id === modeId);
+  return entry === undefined ? 'other' : entry[0];
+}
+
+/** ACP session modes that ask as much as Ask does (or more); any other, known or not, asks less. */
+const ASKING_MODE_IDS: ReadonlySet<string> = new Set(['default', 'plan', 'dontAsk']);
+
+/** Whether an ACP session mode asks less than Ask (so core tells the agent Ask). An unknown one does, to be safe. */
+export function asksLessThanAsk(modeId: string): boolean {
+  return !ASKING_MODE_IDS.has(modeId);
 }
 
 /** A plain reason for a failed ACP request, for the UI; the raw error goes to the log. */
@@ -192,6 +221,7 @@ export function createClaudeCodeAgent(options: ClaudeCodeAgentOptions = {}): Age
 
   return {
     displayName: CLAUDE_CODE,
+    permissionModes: ['ask', 'auto', 'skip_all'],
 
     async startSession(input) {
       const opened = await open(input, { kind: 'new' });
@@ -219,7 +249,8 @@ export function createClaudeCodeAgent(options: ClaudeCodeAgentOptions = {}): Age
     // `claude --resume <id>` (CAP-5), and its record read back (story 3.3).
     terminalResume: {
       transcript: readClaudeTranscript,
-      command: async (agentSessionId, env) => claudeTerminalCommand(agentSessionId, env, { ...options, adapterPath: currentAdapterPath() }),
+      command: async (agentSessionId, env, terminal) =>
+        claudeTerminalCommand(agentSessionId, env, { ...options, adapterPath: currentAdapterPath(), permissionMode: terminal?.permissionMode ?? 'ask' }),
       locate: async (env) => locateClaudeTerminal(env, { ...options, adapterPath: currentAdapterPath() }),
     },
   };
@@ -310,6 +341,14 @@ async function startOnChild(
   let exited = false;
   let fatalReported = false;
   let agentSessionId: string | undefined;
+  /** The session's modes as the agent last said (`session/new`, `resume`, `load`, then `current_mode_update`); `undefined` when it lists none. */
+  let modes: acp.SessionModeState | undefined;
+  /** Bumped by each `current_mode_update`, so a `session/set_mode` answered after one doesn't overwrite it. */
+  let modeUpdates = 0;
+  /** `session/set_mode` requests not answered yet: while any is, the current mode is not known. */
+  let modeSetsInFlight = 0;
+  /** A `session/set_mode` failed (or is still unanswered): the current mode is not known until one succeeds or the agent reports it. */
+  let modeUnknown = false;
   const mask = (text: string) => maskSecrets(text, secrets);
   let reply = createStreamMasker(secrets);
   /** A tool call's file changes, secrets masked; `undefined` when it reports none. */
@@ -413,6 +452,19 @@ async function startOnChild(
             diffs: diffsOf(update.content),
           });
           break;
+        case 'current_mode_update': {
+          modeUpdates++;
+          if (modes !== undefined) modes = { ...modes, currentModeId: update.currentModeId };
+          if (modeSetsInFlight === 0) modeUnknown = false;
+          const label = modes?.availableModes.find((mode) => mode.id === update.currentModeId)?.name;
+          emit({
+            type: 'permission_mode',
+            mode: ogdenModeOf(update.currentModeId),
+            asksLess: asksLessThanAsk(update.currentModeId),
+            ...(label === undefined ? {} : { label: mask(label) }),
+          });
+          break;
+        }
         default:
           break;
       }
@@ -506,9 +558,9 @@ async function startOnChild(
      */
     const reopen = async (initialized: acp.InitializeResponse, sessionId: string): Promise<AgentRestored | undefined> => {
       const capabilities = initialized.agentCapabilities;
-      const attempt = async (method: 'session/resume' | 'session/load', request: () => Promise<unknown>): Promise<boolean> => {
+      const attempt = async (method: 'session/resume' | 'session/load', request: () => Promise<{ modes?: acp.SessionModeState | null }>): Promise<boolean> => {
         try {
-          await request();
+          modes = (await request()).modes ?? undefined;
           return true;
         } catch (error) {
           if (!(error instanceof acp.RequestError) || error.code === -32000) throw error;
@@ -546,6 +598,7 @@ async function startOnChild(
         if (reopened !== undefined) return { initialized, sessionId: opening.agentSessionId, restored: reopened };
       }
       const created = await connection.agent.request('session/new', { cwd, mcpServers: [] });
+      modes = created.modes ?? undefined;
       return { initialized, sessionId: created.sessionId, restored: 'new' as const };
     })();
     const result = await withTimeout(
@@ -580,6 +633,41 @@ async function startOnChild(
   let closed: Promise<void> | undefined;
   const session: AgentSession = {
     agentSessionId: sessionId,
+
+    get permissionModes(): PermissionMode[] {
+      // A session that lists no modes runs as it is: Ask only.
+      if (modes === undefined) return ['ask'];
+      const listed = new Set(modes.availableModes.map((mode) => mode.id));
+      return (Object.keys(ACP_MODE_IDS) as PermissionMode[]).filter((mode) => mode === 'ask' || listed.has(ACP_MODE_IDS[mode]));
+    },
+
+    async setPermissionMode(mode) {
+      if (exited || closing) throw new AgentError('agent_failed', STOPPED);
+      if (modes === undefined) {
+        if (mode === 'ask') return;
+        throw new AgentError('agent_failed', `${CLAUDE_CODE} doesn't offer that permission mode here.`);
+      }
+      const modeId = ACP_MODE_IDS[mode];
+      // Skipped only when the mode is known: never while a set_mode is unanswered or after one failed.
+      if (modes.currentModeId === modeId && modeSetsInFlight === 0 && !modeUnknown) return;
+      if (!modes.availableModes.some((candidate) => candidate.id === modeId)) {
+        throw new AgentError('agent_failed', `${CLAUDE_CODE} doesn't offer that permission mode here.`);
+      }
+      const before = modeUpdates;
+      modeSetsInFlight++;
+      modeUnknown = true;
+      try {
+        await Promise.race([connection.agent.request('session/set_mode', { sessionId, modeId }), gone]);
+      } catch (error) {
+        modeSetsInFlight--;
+        diagnostic('session/set_mode failed', { mode, code: error instanceof acp.RequestError ? error.code : null });
+        throw error instanceof AgentError ? error : new AgentError('agent_failed', `${CLAUDE_CODE} couldn't switch its permission mode.`, { cause: error });
+      }
+      modeSetsInFlight--;
+      // A mode the agent reported meanwhile (a fallback) stands: it was reported to core as it came.
+      if (modeUpdates === before && modes !== undefined) modes = { ...modes, currentModeId: modeId };
+      if (modeSetsInFlight === 0) modeUnknown = false;
+    },
 
     onEvent(listener) {
       listeners.add(listener);

@@ -14,7 +14,9 @@
  *   watcher on the root instead (see {@link RECURSIVE_BY_DEFAULT}). Filenames are only hints
  *   (a named subfolder is re-armed); the truth is a stat fingerprint.
  * - A scan (`lstat` only, never following a link) builds the fingerprint
- *   (each file's path, size, mtime, ctime and inode) and the folder set. It
+ *   (each file's path, size, mtime, ctime and inode, plus the content of a
+ *   file changed in the last 2 s, whose timestamp can't tell two same-size
+ *   writes in one clock tick apart) and the folder set. It
  *   skips symlinks, `.git` and any folder holding a `.git` entry (a worktree
  *   or a nested repo): those are neither watched nor fingerprinted, so
  *   writes there never reach `onSettled`. Nothing outside the root is read.
@@ -41,8 +43,8 @@
  *   after it.
  */
 import { createHash } from 'node:crypto';
-import { watch as fsWatch, type BigIntStats, type Dirent } from 'node:fs';
-import { lstat, readdir, realpath } from 'node:fs/promises';
+import { constants as fsConstants, watch as fsWatch, type BigIntStats, type Dirent } from 'node:fs';
+import { lstat, open as openFile, readdir, realpath } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
 /** At most this many folder watchers per watch (plan: `MAX_WATCHED_DIRS`). */
@@ -146,6 +148,37 @@ const FATAL_CODES = new Set(['ENOSPC', 'EMFILE', 'ENFILE', 'ENOSYS', 'ENOTSUP', 
 /** Watcher errors in a row (each followed by a rescan; a clean scan resets the count) before polling for good. */
 const MAX_WATCHER_ERRORS = 20;
 
+/**
+ * A file modified this recently has a timestamp too coarse to trust (Windows
+ * ticks every ~15.6 ms; a same-size rewrite in one tick keeps size, mtime and
+ * ctime), so its content goes into the fingerprint too, as git does for
+ * "racily clean" files.
+ */
+const RACY_MS = 2000;
+/** Content of a racy file is hashed only up to this size; a bigger one counts by its stat alone. */
+const RACY_MAX_BYTES = 1024 * 1024;
+/** At most this much racy content is read per scan (a checkout touching every file); past it, stats alone. */
+const RACY_BUDGET_BYTES = 8 * 1024 * 1024;
+/** Never follow a link swapped in after the `lstat` (not on Windows, where opening a junction as a file fails anyway). */
+const NO_FOLLOW = (fsConstants as { O_NOFOLLOW?: number }).O_NOFOLLOW ?? 0;
+
+/** The file's content hash, or `''` when it can't be read (gone, swapped, too big). */
+async function contentHash(file: string, size: bigint): Promise<string> {
+  if (size > BigInt(RACY_MAX_BYTES)) return '';
+  try {
+    const handle = await openFile(file, fsConstants.O_RDONLY | NO_FOLLOW);
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile() || stat.size > RACY_MAX_BYTES) return '';
+      return createHash('sha256').update(await handle.readFile()).digest('hex');
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return '';
+  }
+}
+
 type ScanResult = { missing: true } | { missing: false; fingerprint: string; dirs: Map<string, string>; overflow: boolean };
 
 const identityOf = (stat: BigIntStats): string => `${stat.dev}:${stat.ino}:${stat.birthtimeNs}`;
@@ -168,6 +201,8 @@ async function scanTree(root: string, maxEntries: number): Promise<ScanResult> {
     return { missing: true };
   }
   const hash = createHash('sha256');
+  const racyAfter = BigInt(Date.now() - RACY_MS) * 1_000_000n;
+  let racyBudget = RACY_BUDGET_BYTES;
   const dirs = new Map<string, string>([[root, identityOf(rootStat)]]);
   const queue: string[] = [root];
   let entries = 0;
@@ -213,7 +248,12 @@ async function scanTree(root: string, maxEntries: number): Promise<ScanResult> {
         queue.push(each.full);
       } else if (each.stat.isFile()) {
         const { size, mtimeNs, ctimeNs, ino } = each.stat;
-        hash.update(`${relative(root, each.full)}\0${size}\0${mtimeNs}\0${ctimeNs}\0${ino}\n`);
+        let racy = '';
+        if ((mtimeNs >= racyAfter || ctimeNs >= racyAfter) && size <= BigInt(racyBudget)) {
+          racyBudget -= Number(size);
+          racy = await contentHash(each.full, size);
+        }
+        hash.update(`${relative(root, each.full)}\0${size}\0${mtimeNs}\0${ctimeNs}\0${ino}\0${racy}\n`);
       }
     }
   }

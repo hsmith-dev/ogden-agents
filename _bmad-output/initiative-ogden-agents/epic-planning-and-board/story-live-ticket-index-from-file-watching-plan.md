@@ -88,6 +88,7 @@ context:
 - `errorCode` is now exported from `@ogden-agents/adapters` for the server's logs (codes only).
 - Probe removed (`scripts/watch-probe.mjs`, `.github/workflows/watch-probe.yml`).
 - CI fix (PR #62, Windows): an open `fs.watch` handle on a folder makes Windows refuse (EPERM) to rename any folder above it, so per-folder watchers blocked renaming an epic folder with subfolders (found by the parent-link-swap test's `renameSync`). On Windows the watch now arms one recursive watcher on the root (`RECURSIVE_BY_DEFAULT`); worktree events there only cause a scan that changes nothing. Regression test: renaming folders with subfolders under a watched root with the default mode; the link-swap test runs while polling (no handle open).
+- CI fix 2 (PR #62 re-run, windows Node 24): a same-size rewrite within one Windows clock tick (~15.6 ms) keeps size, mtime and ctime, so the stat fingerprint missed it (the cap-poll test's `one` → `two`). Files changed in the last 2 s now add their content hash (at most 1 MB each, 8 MB per scan, opened with `O_NOFOLLOW` where available), as git does for racily clean files. Regression test: a same-size rewrite with the mtime restored settles.
 
 ## Plan Change Log
 

@@ -7,7 +7,7 @@
  * watcher is closed and re-armed; `close()` leaves no watcher or timer and
  * nothing fires after it.
  */
-import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -263,6 +263,17 @@ describe('folder-watch (story 4.8)', () => {
     watch.close();
     expect(watch.state()).toMatchObject({ watchers: 0, timers: 0, closed: true });
     expect(counting.open()).toBe(0);
+  });
+
+  it('a same-size rewrite that keeps the file timestamp still settles (Windows clock ticks; story 4.8 CI)', async () => {
+    const root = tempTree();
+    const plan = join(root, 'out', 'epic-a', 'plan.md');
+    // Polling, so only the fingerprint can see it.
+    const { settled } = await watchOut(root, { timing: { maxDirs: 0 } });
+    const { atime, mtime } = statSync(plan);
+    writeFileSync(plan, 'status: built\n'.padEnd('status: draft\n'.length));
+    utimesSync(plan, atime, mtime);
+    await waitFor(() => settled() === 1, 'the same-size rewrite');
   });
 
   it('a watcher error like ENOSPC falls back to polling for good', async () => {

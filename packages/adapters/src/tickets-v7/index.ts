@@ -12,9 +12,11 @@
  *   single run.
  * - `find` runs `… find <ref>`; "no ticket matches" is core's `NotFoundError`.
  * - `mark` runs `… mark <ref> <status> [--blocked=<reason>]`, the only write
- *   (to the ticket's plan file). Exit 2 is the script's store refusal (a
- *   tracker store): `store_refused`. Not yet run against a real repo write
- *   (its route stays 501 until entry 4.10).
+ *   (to the ticket's plan file), after its exact `find`; with
+ *   `expectedStatus` (story 4.10) a ticket whose status differs is
+ *   `TicketChangedError` and no `mark` runs. Exit 2 is the script's store
+ *   refusal (a tracker store): `store_refused`. Served by the board's
+ *   `PUT …/tickets/:ref/status` (entry 4.10).
  * - `watch` (story 4.8) watches the output folder (`folder-watch.ts`): the
  *   folder must resolve, links included, inside the repo and never in or
  *   below `.git`, or it rejects. A folder that doesn't exist yet is accepted
@@ -51,7 +53,7 @@
 import { existsSync } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
-import { NotFoundError, TicketsUnavailableError, type TicketStorePort, type TicketsUnavailableReason } from '@ogden-agents/core';
+import { NotFoundError, StatusNotAllowedError, TicketChangedError, TicketsUnavailableError, type TicketStorePort, type TicketsUnavailableReason } from '@ogden-agents/core';
 import {
   TICKET_REF_PATTERN,
   TicketDetail,
@@ -273,8 +275,13 @@ export function createTicketsV7({ runner, script: scriptOf, workDir, onFailure, 
     find,
 
     async mark(repoPath, ref, status, options = {}): Promise<MarkTicketResponse> {
+      // Only approve writes `done` (AD-10): refused here too, before anything runs.
+      if (status === 'done') throw new StatusNotAllowedError(status);
       // Exactly this ticket, or nothing is written: the script would fall back to a title match.
-      await find(repoPath, ref);
+      const picked = await find(repoPath, ref);
+      // A change the user hasn't seen (an agent's write, a `git pull`) is never overwritten (story 4.10).
+      const current = picked.status ?? '';
+      if (options.expectedStatus !== undefined && options.expectedStatus !== current) throw new TicketChangedError(ref, options.expectedStatus, current);
       const blocked = options.blockedReason === undefined ? [] : [`--blocked=${options.blockedReason}`];
       const body = (await run(repoPath, ['mark', ref, status, ...blocked], ref)) as { status?: unknown } | null;
       if (body === null || typeof body !== 'object') return fail(new TicketsUnavailableError('bad_output'));

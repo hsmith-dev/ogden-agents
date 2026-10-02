@@ -7,16 +7,19 @@ import {
   CatalogResponse,
   DOCUMENT_LOAD_FAILED,
   DocumentResponse,
+  MarkTicketResponse,
   PLAN_LOAD_FAILED,
   PLAN_START_FAILED,
   SessionResponse,
   TICKET_LOAD_FAILED,
+  TICKET_MARK_FAILED,
   TicketResponse,
   TicketsResponse,
   type Catalog,
+  type MarkTicketRequest,
   type Session,
 } from '@ogden-agents/shared';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { call, postJson, type Auth } from '@/api/http';
 import { tabAuth } from '@/auth/tab-token';
@@ -63,6 +66,17 @@ export async function fetchDocument(wsId: string, path: string, auth: Auth = tab
 }
 
 /**
+ * `PUT /api/v1/workspaces/:wsId/tickets/:ref/status` (story 4.10): sets the
+ * ticket's status through BMad Method's `tickets.py mark`, refused with 409
+ * `ticket_changed` when its status is no longer `expectedStatus`.
+ */
+export async function markTicket(wsId: string, ref: string, body: MarkTicketRequest, auth: Auth = tabAuth): Promise<MarkTicketResponse> {
+  const init: RequestInit = { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
+  const json = await call(auth, apiPath(API_ROUTES.workspaceTicketStatus, { wsId, ref }), init, TICKET_MARK_FAILED);
+  return MarkTicketResponse.parse(json);
+}
+
+/**
  * `POST /api/v1/bmad/source`: downloads and verifies the pinned BMad Method
  * (story 4.14), only because the user clicked Download BMad Method.
  */
@@ -89,6 +103,26 @@ export function useTicket(wsId: string, ref: string) {
 /** One document's text, read when its sheet opens (fresh each time: the agent may have rewritten it). */
 export function useDocument(wsId: string, path: string) {
   return useQuery({ queryKey: ['document', wsId, path], queryFn: () => fetchDocument(wsId, path), retry: false, staleTime: 0, gcTime: 0 });
+}
+
+/** What a status change sends: the ticket and its {@link MarkTicketRequest}. */
+export type MarkTicketInput = MarkTicketRequest & { ref: string };
+
+/**
+ * A status change (story 4.10). No optimistic update: once it settles,
+ * success or not, the tickets and that ticket refetch, and `mutateAsync`
+ * resolves only after they landed, so the card moves when the files say so.
+ */
+export function useMarkTicket(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ref, ...body }: MarkTicketInput) => markTicket(wsId, ref, body),
+    onSettled: (_data, _error, { ref }) =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['tickets', wsId], exact: true }),
+        queryClient.invalidateQueries({ queryKey: ['ticket', wsId, ref], exact: true }),
+      ]),
+  });
 }
 
 /** How long a changed card's status line stays highlighted (EXPERIENCE.md Board). */

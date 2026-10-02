@@ -35,7 +35,7 @@
  *   folder watcher.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -66,7 +66,11 @@ import {
   DocumentResponse,
   FEATURE_OFF_MESSAGE,
   MAX_IDEA_LENGTH,
+  MarkTicketResponse,
   SCRIPTS_NOT_TRUSTED_MESSAGE,
+  STATUS_NOT_ALLOWED_MESSAGE,
+  TICKET_CHANGED_MESSAGE,
+  TICKETS_STORE_REFUSED_MESSAGE,
   SessionResponse,
   TICKETS_UNAVAILABLE_MESSAGE,
   TicketResponse,
@@ -233,7 +237,7 @@ describe('Plan and Board routes (story 4.1)', () => {
     expect(runs).toBe(0);
   });
 
-  it('PUT script-trust trusts the project once (one event), and the board then answers; one ticket answers (story 4.8), the status stub 501 (story 4.2)', async () => {
+  it('PUT script-trust trusts the project once (one event), and the board then answers; one ticket answers (story 4.8), a status change too (story 4.10)', async () => {
     const repo = fixtureRepo();
     const store = stubStore(realPathOf(repo), [{ ref: '1.1', id: 1, epic: 'epic-a', title: 'One', type: 'story', status: '', state: 'planned', blocked_reason: '' }]);
     const server = await startTestServer({ ticketStore: store });
@@ -273,11 +277,11 @@ describe('Plan and Board routes (story 4.1)', () => {
       ['find', workspace.realPath, '1.1'],
       ['find', workspace.realPath, '9.9'],
     ]);
-    // Entry 4.10 fills the status change: 501 until then.
+    // Entry 4.10 fills the status change.
     const marked = await request(server, tab, 'PUT', status, { status: 'ready-for-dev' });
-    expect(marked.status).toBe(501);
-    expect(ApiErrorBody.parse(await marked.json()).error.code).toBe('not_implemented');
-    expect(store.calls).toHaveLength(3);
+    expect(marked.status).toBe(200);
+    expect(MarkTicketResponse.parse(await marked.json())).toEqual({ ref: '1.1', status: 'ready-for-dev' });
+    expect(store.calls).toHaveLength(4);
 
     // An unknown or malformed project is 404, and nothing is appended.
     const seq = server.core.events.lastSeq();
@@ -423,6 +427,115 @@ describe('Plan and Board routes (story 4.1)', () => {
       expect(response.status, path).toBe(409);
       expect(ApiErrorBody.parse(await response.json()).error).toEqual({ code: 'bmad_not_downloaded', message: BMAD_NOT_DOWNLOADED_MESSAGE });
     }
+  });
+});
+
+describe('changing a ticket status (story 4.10)', () => {
+  const ROWS = [
+    { ref: '1.1', id: 1, epic: 'epic-a', title: 'One', type: 'story', status: 'in-review', state: 'review', blocked_reason: '' },
+    { ref: '1.2', id: 2, epic: 'epic-a', title: 'Two', type: 'story', status: '', state: 'planned', blocked_reason: '' },
+  ];
+  const marksOf = (store: MemoryTicketStore) => store.calls.filter((call) => call[0] === 'mark');
+
+  async function board() {
+    const repo = fixtureRepo();
+    const store = stubStore(realPathOf(repo), ROWS);
+    const server = await startTestServer({ ticketStore: store });
+    const tab = await signIn(server);
+    const workspace = await project(server, tab, repo, ['board'], { trust: true });
+    const status = (ref: string) => apiPath(API_ROUTES.workspaceTicketStatus, { wsId: workspace.id, ref });
+    return { store, server, tab, workspace, status, repoPath: realPathOf(repo), put: (ref: string, body: unknown) => request(server, tab, 'PUT', status(ref), body) };
+  }
+
+  it('moves a planned ticket to Ready and blocks one with its reason; the tree then shows them', async () => {
+    const { store, server, tab, workspace, put } = await board();
+    const ready = await put('1.2', { status: 'ready-for-dev', expectedStatus: '' });
+    expect(ready.status).toBe(200);
+    expect(MarkTicketResponse.parse(await ready.json())).toEqual({ ref: '1.2', status: 'ready-for-dev' });
+    const blocked = await put('1.1', { status: 'blocked', blockedReason: 'Needs the API key', expectedStatus: 'in-review' });
+    expect(blocked.status).toBe(200);
+    const tree = TicketsResponse.parse(await (await request(server, tab, 'GET', paths(workspace.id).tickets)).json());
+    expect(tree.tickets.map((row) => [row.ref, boardColumnOf(row), row.blocked_reason])).toEqual([
+      ['1.1', 'blocked', 'Needs the API key'],
+      ['1.2', 'ready', ''],
+    ]);
+    // Unblock: the blocked fields are cleared.
+    expect((await put('1.1', { status: 'ready-for-dev', expectedStatus: 'blocked' })).status).toBe(200);
+    const after = TicketsResponse.parse(await (await request(server, tab, 'GET', paths(workspace.id).tickets)).json());
+    expect(after.tickets[0]).toMatchObject({ status: 'ready-for-dev', blocked_reason: '', blocked_at: '' });
+    expect(marksOf(store)).toHaveLength(3);
+  });
+
+  it('done is 409 status_not_allowed and the store is never asked', async () => {
+    const { store, put } = await board();
+    const response = await put('1.2', { status: 'done', expectedStatus: '' });
+    expect(response.status).toBe(409);
+    expect(ApiErrorBody.parse(await response.json()).error).toEqual({ code: 'status_not_allowed', message: STATUS_NOT_ALLOWED_MESSAGE });
+    expect(store.calls).toEqual([]);
+  });
+
+  it('a stale expected status is 409 ticket_changed and nothing changes', async () => {
+    const { store, put, repoPath } = await board();
+    const response = await put('1.1', { status: 'draft', expectedStatus: '' });
+    expect(response.status).toBe(409);
+    expect(ApiErrorBody.parse(await response.json()).error).toEqual({ code: 'ticket_changed', message: TICKET_CHANGED_MESSAGE });
+    expect((await store.tree(repoPath)).tickets[0]!.status).toBe('in-review');
+  });
+
+  it('a bad body or ref is 400, an unknown ticket 404, and none of them marks', async () => {
+    const { store, put, server, tab, status, repoPath } = await board();
+    for (const body of ['not json', '', { status: 'shipped' }, {}, { status: 'draft', blockedReason: 'x' }, { status: 'blocked', blockedReason: ' ' }, { status: 'draft', expectedStatus: 'x' }]) {
+      const response = await put('1.2', body);
+      expect(response.status, JSON.stringify(body)).toBe(400);
+      expect(ApiErrorBody.parse(await response.json()).error.code).toBe('invalid_request');
+    }
+    for (const ref of ['-h', 'a b', '..']) {
+      const response = await request(server, tab, 'PUT', status(encodeURIComponent(ref)), { status: 'draft' });
+      expect([400, 404], ref).toContain(response.status);
+    }
+    const unknown = await put('9.9', { status: 'draft' });
+    expect(unknown.status).toBe(404);
+    expect(ApiErrorBody.parse(await unknown.json()).error.code).toBe('not_found');
+    // Core checks the ref and the body before the store; only the unknown ref reaches it (and changes nothing).
+    expect(marksOf(store).map((call) => call[2])).toEqual(['9.9']);
+    expect((await store.tree(repoPath)).tickets.map((row) => row.status)).toEqual(['in-review', '']);
+  });
+
+  it('a store that fails is 503 with its plain message; a tracker store says so', async () => {
+    const { store, put } = await board();
+    store.fail('failed');
+    const failed = await put('1.2', { status: 'draft' });
+    expect(failed.status).toBe(503);
+    expect(ApiErrorBody.parse(await failed.json()).error).toEqual({ code: 'tickets_unavailable', message: TICKETS_UNAVAILABLE_MESSAGE });
+    store.fail('store_refused');
+    const refused = await put('1.2', { status: 'draft' });
+    expect(refused.status).toBe(503);
+    expect(ApiErrorBody.parse(await refused.json()).error).toEqual({ code: 'tickets_unavailable', message: TICKETS_STORE_REFUSED_MESSAGE });
+  });
+
+  it('a body over the limit is 413 and nothing runs', async () => {
+    const { store, put } = await board();
+    const response = await put('1.2', { status: 'blocked', blockedReason: 'x'.repeat(20_000) });
+    expect(response.status).toBe(413);
+    expect(ApiErrorBody.parse(await response.json()).error.code).toBe('invalid_request');
+    expect(store.calls).toEqual([]);
+  });
+
+  it('Board off and untrusted refuse before the body is read', async () => {
+    const repo = fixtureRepo();
+    const store = stubStore(realPathOf(repo), ROWS);
+    const server = await startTestServer({ ticketStore: store });
+    const tab = await signIn(server);
+    const off = await project(server, tab, repo, ['planning']);
+    const path = apiPath(API_ROUTES.workspaceTicketStatus, { wsId: off.id, ref: '1.2' });
+    const offResponse = await request(server, tab, 'PUT', path, { status: 'draft' });
+    expect(offResponse.status).toBe(409);
+    expect(ApiErrorBody.parse(await offResponse.json()).error).toEqual({ code: 'feature_off', message: FEATURE_OFF_MESSAGE });
+    await project(server, tab, repo, ['board']);
+    const untrusted = await request(server, tab, 'PUT', path, { status: 'draft' });
+    expect(untrusted.status).toBe(409);
+    expect(ApiErrorBody.parse(await untrusted.json()).error).toEqual({ code: 'scripts_not_trusted', message: SCRIPTS_NOT_TRUSTED_MESSAGE });
+    expect(store.calls).toEqual([]);
   });
 });
 
@@ -745,4 +858,98 @@ describe('document cards over REST (story 4.7)', () => {
     // The log never names the document.
     expect(lines.join('\n')).not.toContain('spec-x.md');
   });
+});
+
+describe.skipIf(uvMissing)('changing a status through real uv and the verified pinned tickets.py (story 4.10)', () => {
+  it('PUT 1.2 ready-for-dev writes the plan, the tree shows it Ready and a ticket.changed arrives within 3 s; done writes nothing; a blocked reason stays one quoted value', async () => {
+    const uvCache = mkdtempSync(join(tmpdir(), 'ogden-agents-uv-cache-'));
+    removeAfterTest(uvCache);
+    const repo = fixtureRepo(true);
+    const repoPath = realPathOf(repo);
+    const dataDir = tempDataDir();
+    const upstream = fixtureUpstream();
+    const bmadSource = createUpstreamBmadSource({ dataDir, lock: upstream.lock, fetch: upstream.fetch });
+    const runner = createUvScriptRunner({
+      uvCommand: async () => ({ file: 'uv' }),
+      env: () => ({ ...uvEnvironment(), UV_CACHE_DIR: uvCache, ...TEST_UV_PYTHON_ENV }),
+    });
+    const store = createTicketsV7({ runner, script: () => bmadSource.file('bmad-ticket/scripts/tickets.py'), workDir: tempDataDir() });
+    let watchesOpened = 0;
+    const ticketStore: TicketStorePort = {
+      ...store,
+      watch: async (...args) => {
+        const watch = await store.watch(...args);
+        watchesOpened++;
+        return watch;
+      },
+    };
+    try {
+      const server = await startTestServer({ dataDir, ticketStore, bmadSource });
+      const tab = await signIn(server);
+      const workspace = await project(server, tab, repo, ['board'], { trust: true });
+      const put = (ref: string, body: unknown) => request(server, tab, 'PUT', apiPath(API_ROUTES.workspaceTicketStatus, { wsId: workspace.id, ref }), body);
+      // Before Download nothing runs.
+      const missing = await put('1.2', { status: 'ready-for-dev', expectedStatus: '' });
+      expect(missing.status).toBe(409);
+      expect(ApiErrorBody.parse(await missing.json()).error.code).toBe('bmad_not_downloaded');
+      expect((await request(server, tab, 'POST', API_ROUTES.bmadSource)).status).toBe(200);
+
+      // The watcher (entry 4.8) starts once the setup names the output folder.
+      writeFileSync(join(repoPath, '_bmad', 'config.toml'), '[core]\noutput_folder = "{project-root}/_bmad-output"\nactive_initiative = "initiative-demo"\n');
+      const setUp = BmadSetupStatusResponse.parse(await (await request(server, tab, 'GET', paths(workspace.id).setup)).json()).setup;
+      server.core.events.append({ type: 'bmad.setup_completed', workspaceId: workspace.id, streamId: workspace.id, payload: { status: setUp } });
+      await waitFor(() => watchesOpened === 1, 'the watch', 30_000);
+      // Let the watch's first read build its tree.
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const changedSince = (seq: number) => server.core.events.readAfter(seq).flatMap((event) => (event.type === 'ticket.changed' ? [event.payload.ref] : []));
+
+      // `done` is refused before anything runs: no file changes.
+      const before = repo.hash();
+      const done = await put('1.2', { status: 'done', expectedStatus: '' });
+      expect(done.status).toBe(409);
+      expect(ApiErrorBody.parse(await done.json()).error.code).toBe('status_not_allowed');
+      expect(repo.hash()).toBe(before);
+      // A stale view writes nothing either.
+      const stale = await put('1.2', { status: 'ready-for-dev', expectedStatus: 'draft' });
+      expect(stale.status).toBe(409);
+      expect(ApiErrorBody.parse(await stale.json()).error.code).toBe('ticket_changed');
+      expect(repo.hash()).toBe(before);
+
+      const seq = server.core.events.lastSeq();
+      const startedAt = Date.now();
+      const ready = await put('1.2', { status: 'ready-for-dev', expectedStatus: '' });
+      const text = await ready.text();
+      expect(ready.status, text).toBe(200);
+      expect(MarkTicketResponse.parse(JSON.parse(text))).toEqual({ ref: '1.2', status: 'ready-for-dev' });
+      await waitFor(() => changedSince(seq).includes('1.2'), 'ticket.changed for 1.2', 15_000);
+      const latency = Date.now() - startedAt;
+      expect(latency, `latency ${latency} ms`).toBeLessThan(3000);
+      const tree = TicketsResponse.parse(await (await request(server, tab, 'GET', paths(workspace.id).tickets)).json());
+      const row = tree.tickets.find((each) => each.ref === '1.2')!;
+      expect(boardColumnOf(row)).toBe('ready');
+      const one = TicketResponse.parse(await (await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceTicket, { wsId: workspace.id, ref: '1.2' }))).json()).ticket;
+      expect(one.hasPlan).toBe(true);
+      // The plan `tickets.py mark` created for the planned entry.
+      const plan = readdirSync(join(repoPath, '_bmad-output'), { recursive: true, encoding: 'utf8' })
+        .map((path) => join(repoPath, '_bmad-output', path))
+        .find((path) => path.endsWith('.md') && readFileSync(path, 'utf8').includes('title: "Build the second thing"'));
+      expect(plan).toBeDefined();
+      const planOf = (): string => readFileSync(plan!, 'utf8');
+      expect(planOf()).toMatch(/^status: ready-for-dev$/m);
+
+      // Blocked with a reason holding a newline and frontmatter text: one quoted value, the status stays blocked.
+      const blocked = await put('1.2', { status: 'blocked', blockedReason: 'Needs the API key\nstatus: done', expectedStatus: 'ready-for-dev' });
+      expect(blocked.status, await blocked.clone().text()).toBe(200);
+      const content = planOf();
+      expect(content).toMatch(/^status: blocked$/m);
+      expect(content).not.toMatch(/^status: done$/m);
+      expect(content.match(/^blocked_reason: .*$/m)?.[0]).toBe('blocked_reason: "Needs the API key\\nstatus: done"');
+      const blockedRow = TicketsResponse.parse(await (await request(server, tab, 'GET', paths(workspace.id).tickets)).json()).tickets.find((each) => each.ref === '1.2')!;
+      expect(blockedRow).toMatchObject({ status: 'blocked', blocked_reason: 'Needs the API key\nstatus: done' });
+      expect(boardColumnOf(blockedRow)).toBe('blocked');
+      await server.close();
+    } finally {
+      await runner.close();
+    }
+  }, 90_000);
 });

@@ -290,15 +290,35 @@ export const MARKABLE_TICKET_STATUSES: readonly TicketStatus[] = TICKET_STATUSES
 /** The longest blocked reason the board sends, in characters. */
 export const MAX_BLOCKED_REASON_LENGTH = 500;
 
+/** A blocked reason left empty: the schema's message and the board's field error (story 4.10). */
+export const BOARD_BLOCKED_REASON_REQUIRED = 'Say why it is blocked.';
+/** A blocked reason holding a control character (other than a line break or tab) or a broken character. */
+export const BOARD_BLOCKED_REASON_INVALID = 'A reason can only hold plain text.';
+/** Control characters but newline and tab, and lone UTF-16 surrogates (the `u` flag matches only unpaired ones). */
+const NOT_PLAIN_TEXT = /[\u0000-\u0008\u000B-\u001F\u007F]|[\uD800-\uDFFF]/u;
+
 /**
  * `PUT /api/v1/workspaces/:wsId/tickets/:ref/status`: set the ticket's
  * status through `tickets.py mark`. `done` parses but is refused with 409
- * `status_not_allowed`; `blockedReason` goes only with `blocked`.
+ * `status_not_allowed`; `blockedReason` goes only with `blocked`;
+ * `expectedStatus` (story 4.10) refuses a change the user hasn't seen.
  */
 export const MarkTicketRequest = z
   .object({
     status: TicketStatus,
-    blockedReason: z.string().trim().min(1, 'Say why it is blocked.').max(MAX_BLOCKED_REASON_LENGTH).optional(),
+    blockedReason: z
+      .string()
+      .trim()
+      .min(1, BOARD_BLOCKED_REASON_REQUIRED)
+      .max(MAX_BLOCKED_REASON_LENGTH)
+      .refine((reason) => !NOT_PLAIN_TEXT.test(reason), BOARD_BLOCKED_REASON_INVALID)
+      .optional(),
+    /**
+     * The status the board showed (`''`: no plan yet; story 4.10). When
+     * given and the plan's status no longer matches, nothing is written: 409
+     * `ticket_changed`. Left out, the mark runs whatever the status is.
+     */
+    expectedStatus: z.union([TicketStatus, z.literal('')]).optional(),
   })
   .refine((request) => request.blockedReason === undefined || request.status === 'blocked', {
     message: 'A reason goes only with Blocked.',
@@ -659,6 +679,55 @@ export function boardBlockedText(reason: string): string {
 export function boardCardLabel(ref: string, title: string, statusLine: string): string {
   return `${ref} ${title}, ${statusLine}`;
 }
+
+// ---- Changing a ticket's status from the board (story 4.10) ----
+
+/** `ticket_changed` (409): the ticket's status changed since the board showed it, so nothing was written. */
+export const TICKET_CHANGED_MESSAGE = 'This ticket changed since the board showed it, so its status was not changed. Check the board, then try again.';
+/** The status menu's visible trigger text and the detail sheet's button. */
+export const BOARD_CHANGE_STATUS_LABEL = 'Change status';
+/** The status menu trigger's accessible name on a card ("Change status of 1.2 Build the thing"). */
+export function boardChangeStatusLabel(ref: string, title: string): string {
+  return `${BOARD_CHANGE_STATUS_LABEL} of ${ref} ${title}`;
+}
+/** The status menu's item that drops a ticket. */
+export const BOARD_DROP_LABEL = 'Drop this ticket';
+/** The status menu's item for `status` ("Move to Ready", "Drop this ticket"). */
+export function boardStatusActionText(status: TicketStatus): string {
+  const column = COLUMN_OF_STATUS[status];
+  return column === null ? BOARD_DROP_LABEL : boardMoveToText(column);
+}
+/** Where `status` puts a ticket, in words ("Ready", "Dropped"). */
+export function boardStatusPlaceText(status: TicketStatus): string {
+  const column = COLUMN_OF_STATUS[status];
+  return column === null ? BOARD_DROPPED_LABEL : BOARD_COLUMN_LABELS[column];
+}
+/** Announced once a status change landed ("1.2 moved to Ready"). */
+export function boardMovedText(ref: string, label: string): string {
+  return `${ref} moved to ${label}`;
+}
+/** Said while a status change is saved. */
+export const TICKET_SAVING_TEXT = 'Saving the status';
+/** The blocked reason dialog's title. */
+export const BOARD_BLOCKED_DIALOG_TITLE = 'Why is this ticket blocked?';
+/** The blocked reason form's title, naming the ticket ("Why is 1.2 blocked?"). */
+export function boardBlockedDialogTitle(ref: string): string {
+  return `Why is ${ref} blocked?`;
+}
+/** A status change that failed, naming the ticket, then the server's plain message. */
+export function boardMarkFailedText(ref: string, message: string): string {
+  return `Couldn't change ${ref}'s status. ${message}`;
+}
+/** Announced when a dropped ticket left the board because dropped tickets are hidden. */
+export function boardDroppedHiddenText(ref: string): string {
+  return `${boardMovedText(ref, BOARD_DROPPED_LABEL)}. Turn on ${BOARD_SHOW_DROPPED_LABEL} to see it.`;
+}
+/** The blocked reason field's label. */
+export const BOARD_BLOCKED_REASON_LABEL = 'Reason';
+/** The blocked reason dialog's confirm button. */
+export const BOARD_BLOCKED_SAVE_LABEL = 'Save';
+/** The blocked reason dialog's cancel button. */
+export const BOARD_BLOCKED_CANCEL_LABEL = 'Cancel';
 
 /** The setup panel's button (Plan and Board, a piece on without `_bmad/`). */
 export const BMAD_SET_UP_LABEL = 'Set up';

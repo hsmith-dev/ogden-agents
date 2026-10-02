@@ -86,6 +86,11 @@ export const API_ERROR_CODES = [
    * what arrived isn't the pinned content. Nothing was saved.
    */
   'bmad_download_failed',
+  /**
+   * A ticket's status changed since the board showed it (409; story 4.10):
+   * the request's `expectedStatus` no longer matches the plan. Nothing was written.
+   */
+  'ticket_changed',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

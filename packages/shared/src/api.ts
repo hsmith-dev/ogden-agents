@@ -196,8 +196,10 @@ export const API_ROUTES = {
   /**
    * `PUT MarkTicketRequest` → `MarkTicketResponse` (story 4.2's contract;
    * entry 4.10 serves it): sets the ticket's status through `tickets.py
-   * mark`; 409 `status_not_allowed` for `done`. Serves the `board` piece and
-   * needs the project's script trust.
+   * mark`; 409 `status_not_allowed` for `done`. With the optional
+   * `expectedStatus` (the status the board showed, `''` for none), 409
+   * `ticket_changed` when the plan's status no longer matches; nothing is
+   * written. Serves the `board` piece and needs the project's script trust.
    */
   workspaceTicketStatus: `${API_BASE}/workspaces/:wsId/tickets/:ref/status`,
   /**

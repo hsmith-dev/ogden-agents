@@ -4,7 +4,7 @@
  * one ticket with its text, a mark that changes the row as the plan would
  * (never `done`) and tells each open watch, and watches that close.
  */
-import { NotFoundError, StatusNotAllowedError, TicketsUnavailableError } from '@ogden-agents/core';
+import { NotFoundError, StatusNotAllowedError, TicketChangedError, TicketsUnavailableError } from '@ogden-agents/core';
 import { boardColumnOf } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { createMemoryTicketStore } from '../src/index.js';
@@ -58,6 +58,15 @@ describe('tickets-memory (story 4.2)', () => {
     store.emit('/repo', ['1.1']);
     expect(told).toHaveLength(3);
     expect(store.calls.map((call) => call[0])).toEqual(['watch', 'mark', 'tree', 'mark', 'tree', 'mark']);
+  });
+
+  it('mark with an expected status that no longer matches is TicketChangedError and changes nothing (story 4.10)', async () => {
+    const store = createMemoryTicketStore({ repos: { '/repo': tree } });
+    await expect(store.mark('/repo', '1.2', 'ready-for-dev', { expectedStatus: 'draft' })).rejects.toThrow(TicketChangedError);
+    expect((await store.tree('/repo')).tickets[1]!.status).toBe('');
+    expect(await store.mark('/repo', '1.2', 'ready-for-dev', { expectedStatus: '' })).toEqual({ ref: '1.2', status: 'ready-for-dev' });
+    await expect(store.mark('/repo', '1.1', 'draft', { expectedStatus: '' })).rejects.toThrow(TicketChangedError);
+    expect(await store.mark('/repo', '1.1', 'draft', { expectedStatus: 'in-review' })).toEqual({ ref: '1.1', status: 'draft' });
   });
 
   it('fail makes every operation unavailable until cleared', async () => {

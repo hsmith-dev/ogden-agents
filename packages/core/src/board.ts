@@ -45,7 +45,9 @@ export interface BoardUseCases {
    * Sets a ticket's status (entry 4.10's route; E4-R9). As {@link ticket},
    * plus `ValidationError` for a request that fails `MarkTicketRequest` and
    * `StatusNotAllowedError` for `done`, which only approve writes (AD-10);
-   * nothing runs then.
+   * nothing runs then. With `expectedStatus` (story 4.10) the store compares
+   * first: `TicketChangedError` and nothing written when it differs. Marks
+   * of one repo run one at a time.
    */
   mark(workspaceId: WorkspaceId, ref: string, request: unknown): Promise<MarkTicketResponse>;
 }
@@ -68,6 +70,26 @@ function checkedRef(ref: unknown): string {
 }
 
 export function createBoard({ bmad, trust, source, entities, tickets }: BoardDeps): BoardUseCases {
+  /**
+   * The tail of each repo's marks (story 4.10): a mark starts only once the
+   * one before it settled, so two marks of one repo never interleave (each
+   * `find`, compare and `mark` runs as one). A failed mark never breaks the
+   * chain; the entry is dropped once the chain is idle.
+   */
+  const marking = new Map<string, Promise<unknown>>();
+  const serialized = <T>(repoPath: string, run: () => Promise<T>): Promise<T> => {
+    const before = marking.get(repoPath) ?? Promise.resolve();
+    const result = before.then(run, run);
+    const tail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    marking.set(repoPath, tail);
+    void tail.then(() => {
+      if (marking.get(repoPath) === tail) marking.delete(repoPath);
+    });
+    return result;
+  };
   /** The guards in order (the piece, the trust, then the pinned BMad Method), then the repo. */
   const guarded = (workspaceId: WorkspaceId): string => {
     bmad.requireBmadFeature(workspaceId, 'board');
@@ -95,7 +117,9 @@ export function createBoard({ bmad, trust, source, entities, tickets }: BoardDep
       }
       // Only approve writes `done` (AD-10): the board never asks the store for it.
       if (parsed.data.status === 'done') throw new StatusNotAllowedError(parsed.data.status);
-      return tickets.mark(repoPath, checked, parsed.data.status, { blockedReason: parsed.data.blockedReason });
+      const { status, blockedReason, expectedStatus } = parsed.data;
+      // The guards again once it's this mark's turn: Board, the trust or the download may be gone meanwhile.
+      return serialized(repoPath, async () => tickets.mark(guarded(workspaceId), checked, status, { blockedReason, expectedStatus }));
     },
   };
 }

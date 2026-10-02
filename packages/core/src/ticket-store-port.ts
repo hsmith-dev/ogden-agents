@@ -46,11 +46,19 @@ export interface TicketStorePort {
    * Sets the ticket's status in its plan file (creating the plan for a
    * planned entry), with `blockedReason` for `blocked`. The only write the
    * store does (AD-10). Core never asks it for `done` (only approve writes
-   * it). Rejects with `NotFoundError` when no ticket matches, else with
+   * it). With `expectedStatus` (story 4.10; `''` for a ticket with no plan
+   * status), it first compares the ticket's current status and, when it
+   * differs, rejects with core's `TicketChangedError` and writes nothing.
+   * Rejects with `NotFoundError` when no ticket matches, else with
    * {@link TicketsUnavailableError} (`store_refused` when the project keeps
    * its tickets in a tracker).
    */
-  mark(repoPath: string, ref: string, status: TicketStatus, options?: { blockedReason?: string | undefined }): Promise<MarkTicketResponse>;
+  mark(
+    repoPath: string,
+    ref: string,
+    status: TicketStatus,
+    options?: { blockedReason?: string | undefined; expectedStatus?: TicketStatus | '' | undefined },
+  ): Promise<MarkTicketResponse>;
   /**
    * Watches the repo's output folder (`outputFolder`, relative to the repo,
    * in the main checkout, never a worktree; AD-10) and calls `onChange` with

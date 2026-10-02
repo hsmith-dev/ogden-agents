@@ -5,11 +5,12 @@
  * given (any other path rejects as `tickets.py` does without an active
  * initiative); `find` answers a row with its entry's text; `mark` changes the
  * row in memory as `tickets.py mark` would change the plan (it refuses
- * `done`, which only approve writes, AD-10) and tells each watch of the repo;
+ * `done`, which only approve writes, AD-10, and a stale `expectedStatus`
+ * with `TicketChangedError`, story 4.10) and tells each watch of the repo;
  * `watch` records its callback until closed, and `emit` fires it as an
  * agent's write would (entry 4.8's watcher).
  */
-import { NotFoundError, StatusNotAllowedError, TicketsUnavailableError, type TicketStorePort, type TicketsUnavailableReason } from '@ogden-agents/core';
+import { NotFoundError, StatusNotAllowedError, TicketChangedError, TicketsUnavailableError, type TicketStorePort, type TicketsUnavailableReason } from '@ogden-agents/core';
 import { TicketRow, TicketsResponse, type TicketDetail, type TicketStatus } from '@ogden-agents/shared';
 
 /** The status a mark leaves, and the state `tickets.py` derives from it. */
@@ -103,6 +104,8 @@ export function createMemoryTicketStore(options: MemoryTicketStoreOptions = {}):
       calls.push(['mark', repoPath, ref, status, markOptions.blockedReason]);
       if (status === 'done') throw new StatusNotAllowedError(status);
       const row = rowOf(repoPath, ref);
+      const current = row.status ?? '';
+      if (markOptions.expectedStatus !== undefined && markOptions.expectedStatus !== current) throw new TicketChangedError(ref, markOptions.expectedStatus, current);
       const blocked = markOptions.blockedReason !== undefined;
       Object.assign(row, {
         status,

@@ -20,6 +20,11 @@
  * column), the problems one-liner with Show details, the dropped filter,
  * hostile text shown literally, and a fed `ticket.changed` highlighting the
  * card for 1.2 s; the ticket sheet's loaded, 404, error and close states.
+ * Story 4.10: each card's status menu (a button outside the link) lists
+ * every status but Done and the current one; a choice sends the PUT with
+ * the status the board showed; Blocked asks for a reason first; the card
+ * moves only once the refetched tickets say so, announced once; a failure
+ * or `ticket_changed` shows its message and refetches; the sheet's menu too.
  * The REST calls go to a fake `tabAuth.fetch`; the event stream, the
  * router's Link is a stand-in; Developer mode is set in the
  * appearance's stored settings.
@@ -46,6 +51,7 @@ import {
   PLAN_PROJECT_LOADING_TEXT,
   SCRIPT_TRUST_TITLE,
   SCRIPTS_NOT_TRUSTED_MESSAGE,
+  TICKET_CHANGED_MESSAGE,
   TICKET_NO_PLAN_TEXT,
   TICKET_NOT_FOUND,
   TICKETS_UNAVAILABLE_MESSAGE,
@@ -82,6 +88,8 @@ const state = vi.hoisted(() => ({
   trust: undefined as unknown,
   source: undefined as unknown,
   ticket: undefined as unknown,
+  /** The status change's answer, or a function of its body (story 4.10). */
+  mark: undefined as unknown,
 }));
 
 /** The event stream's stand-in: `push` appends events and re-renders what reads them. */
@@ -146,6 +154,11 @@ vi.mock('@/auth/tab-token', () => ({
         const pieces = state.pieces as unknown;
         return reply(Array.isArray(pieces) ? { settings: { cautionLevel: 'ask_every_time', bmadPieces: pieces } } : pieces);
       }
+      if (method === 'PUT' && /\/tickets\/[^/]+\/status$/.test(path)) {
+        const body = JSON.parse(String(init.body)) as unknown;
+        state.bodies.push(body);
+        return reply(typeof state.mark === 'function' ? (state.mark as (body: unknown) => unknown)(body) : state.mark);
+      }
       if (/\/tickets\/[^/]+$/.test(path)) return reply(state.ticket);
       return new Response('{}', { status: 404 });
     },
@@ -200,6 +213,7 @@ beforeEach(() => {
   state.trust = { settings: { cautionLevel: 'ask_every_time', bmadPieces: ['board'], bmadScriptsTrusted: true } };
   state.source = undefined;
   state.ticket = undefined;
+  state.mark = undefined;
   stream.events = [];
   stream.caughtUp = true;
 });
@@ -804,5 +818,190 @@ describe('Ticket sheet (story 4.9)', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
     fireEvent.keyDown(screen.getByTestId('ticket-sheet'), { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('Changing a status from the board (story 4.10)', () => {
+  beforeEach(() => {
+    state.tickets = BOARD;
+  });
+
+  const trigger = (ref: string) => document.querySelector<HTMLElement>(`[data-testid="ticket-status-trigger"][data-ref="${ref}"]`)!;
+  const open = async (ref: string) => {
+    fireEvent.keyDown(trigger(ref), { key: 'Enter' });
+    await settle();
+    return screen.getAllByTestId('ticket-status-item');
+  };
+  const withStatus = (ref: string, status: string, extra: Record<string, unknown> = {}): TicketsResponse =>
+    TicketsResponse.parse({ ...BOARD, tickets: BOARD.tickets.map((row) => (row.ref === ref ? { ...row, status, ...extra } : row)) });
+
+  it('each card has a named menu button outside its link; the menu lists no Done and not the current status', async () => {
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    expect(trigger('1.2').getAttribute('aria-label')).toBe('Change status of 1.2 Build the second thing');
+    expect(trigger('1.2').tagName).toBe('BUTTON');
+    expect(card('1.2').contains(trigger('1.2'))).toBe(false);
+    const planned = await open('1.2');
+    // Neither its status nor its column (a planned ticket shows in Draft): no Move to Draft.
+    expect(planned.map((item) => item.getAttribute('data-status'))).toEqual(['ready-for-dev', 'in-progress', 'in-review', 'built', 'blocked', 'dropped']);
+    expect(planned.map((item) => item.textContent)).toContain('Move to Ready');
+    expect(planned.map((item) => item.textContent)).toContain('Drop this ticket');
+    expect(planned.some((item) => item.textContent === 'Move to Done')).toBe(false);
+    fireEvent.keyDown(screen.getByTestId('ticket-status-menu'), { key: 'Escape' });
+    await settle();
+    const ready = await open('1.3');
+    expect(ready.map((item) => item.getAttribute('data-status'))).not.toContain('ready-for-dev');
+    expect(ready.map((item) => item.getAttribute('data-status'))).not.toContain('done');
+  });
+
+  it('Move to Ready sends the PUT with the status the board showed; the card moves once the tickets refetch, announced once', async () => {
+    state.mark = () => {
+      state.tickets = withStatus('1.2', 'ready-for-dev', { state: 'backlog' });
+      return { ref: '1.2', status: 'ready-for-dev' };
+    };
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    const items = await open('1.2');
+    fireEvent.click(items.find((item) => item.getAttribute('data-status') === 'ready-for-dev')!);
+    await settle();
+    expect(state.calls).toContain(`PUT ${apiPath(API_ROUTES.workspaceTicketStatus, { wsId: WS, ref: '1.2' })}`);
+    expect(state.bodies).toEqual([{ status: 'ready-for-dev', expectedStatus: '' }]);
+    expect(card('1.2').getAttribute('data-column')).toBe('ready');
+    expect(screen.getByTestId('board-announcement').textContent).toBe('1.2 moved to Ready');
+    expect(screen.getByTestId('board-announcement').getAttribute('role')).toBe('status');
+    expect(screen.queryByTestId('board-mark-error')).toBeNull();
+  });
+
+  it('while one change saves, every card’s menu waits and the status region says so', async () => {
+    state.mark = 'pending';
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    fireEvent.click((await open('1.2')).find((item) => item.getAttribute('data-status') === 'ready-for-dev')!);
+    await settle();
+    expect(screen.getByTestId('board-announcement').textContent).toBe('Saving the status');
+    expect(trigger('1.2').getAttribute('aria-disabled')).toBe('true');
+    expect(trigger('1.3').getAttribute('aria-disabled')).toBe('true');
+    fireEvent.keyDown(trigger('1.3'), { key: 'Enter' });
+    await settle();
+    expect(screen.queryByTestId('ticket-status-menu')).toBeNull();
+  });
+
+  it('a dropped ticket hidden by the filter: the announcement says how to see it', async () => {
+    state.mark = () => {
+      state.tickets = withStatus('1.2', 'dropped', { state: 'dropped' });
+      return { ref: '1.2', status: 'dropped' };
+    };
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    fireEvent.click((await open('1.2')).find((item) => item.getAttribute('data-status') === 'dropped')!);
+    await settle();
+    expect(document.querySelector('[data-testid="ticket-card"][data-ref="1.2"]')).toBeNull();
+    expect(screen.getByTestId('board-announcement').textContent).toBe('1.2 moved to Dropped. Turn on Show dropped tickets to see it.');
+  });
+
+  it('Blocked asks for a reason in a labelled dialog that won’t submit empty, then sends it', async () => {
+    state.mark = { ref: '1.3', status: 'blocked' };
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    const items = await open('1.3');
+    fireEvent.click(items.find((item) => item.getAttribute('data-status') === 'blocked')!);
+    await settle();
+    expect(screen.getByRole('dialog', { name: 'Why is 1.3 blocked?' })).toBeTruthy();
+    const field = screen.getByLabelText('Reason');
+    fireEvent.click(screen.getByTestId('ticket-blocked-save'));
+    await settle();
+    expect(state.bodies).toEqual([]);
+    expect(field.getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByTestId('ticket-blocked-reason-error').textContent).toBe('Say why it is blocked.');
+    expect(screen.getByTestId('ticket-blocked-reason-error').getAttribute('role')).toBe('alert');
+    expect(document.activeElement).toBe(field);
+    fireEvent.change(field, { target: { value: '  Needs the API key  ' } });
+    fireEvent.click(screen.getByTestId('ticket-blocked-save'));
+    await settle();
+    expect(state.bodies).toEqual([{ status: 'blocked', blockedReason: 'Needs the API key', expectedStatus: 'ready-for-dev' }]);
+    expect(screen.queryByTestId('ticket-blocked-dialog')).toBeNull();
+  });
+
+  it('a 503 shows its message as an alert, the card stays in its column and the menu works again', async () => {
+    state.mark = { status: 503, code: 'tickets_unavailable', message: TICKETS_UNAVAILABLE_MESSAGE };
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    fireEvent.click((await open('1.2')).find((item) => item.getAttribute('data-status') === 'in-progress')!);
+    await settle();
+    expect(screen.getByTestId('board-mark-error').textContent).toContain(`Couldn't change 1.2's status. ${TICKETS_UNAVAILABLE_MESSAGE}`);
+    expect(screen.getByTestId('board-mark-error').getAttribute('role')).toBe('alert');
+    expect(card('1.2').getAttribute('data-column')).toBe('draft');
+    expect(screen.getByTestId('board-announcement').textContent).toBe('');
+    expect(trigger('1.2').getAttribute('aria-disabled')).toBeNull();
+    expect((await open('1.2')).length).toBe(6);
+  });
+
+  it('ticket_changed shows its message and refetches the tickets', async () => {
+    state.mark = () => {
+      state.tickets = withStatus('1.2', 'in-progress', { state: 'in-progress' });
+      return { status: 409, code: 'ticket_changed', message: TICKET_CHANGED_MESSAGE };
+    };
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    const before = state.calls.filter((call) => call.endsWith('/tickets')).length;
+    fireEvent.click((await open('1.2')).find((item) => item.getAttribute('data-status') === 'ready-for-dev')!);
+    await settle();
+    expect(screen.getByTestId('board-mark-error').textContent).toContain(TICKET_CHANGED_MESSAGE);
+    expect(state.calls.filter((call) => call.endsWith('/tickets')).length).toBe(before + 1);
+    // What the files say now, not what was asked for.
+    expect(card('1.2').getAttribute('data-column')).toBe('in_progress');
+  });
+
+  it('the sheet’s Status section has the same menu; a change is announced and refetches the ticket', async () => {
+    state.ticket = { ticket: DETAIL };
+    state.mark = () => {
+      state.ticket = { ticket: { ...DETAIL, status: 'in-progress', state: 'in-progress' } };
+      return { ref: '1.3', status: 'in-progress' };
+    };
+    mount(<TicketSheet wsId={WS} ticketRef="1.3" onClose={() => {}} />);
+    await settle();
+    const button = screen.getByRole('button', { name: 'Change status of 1.3 Build the third thing' });
+    fireEvent.keyDown(button, { key: 'Enter' });
+    await settle();
+    const items = screen.getAllByTestId('ticket-status-item');
+    expect(items.map((item) => item.getAttribute('data-status'))).not.toContain('done');
+    fireEvent.click(items.find((item) => item.getAttribute('data-status') === 'in-progress')!);
+    await settle();
+    expect(state.bodies).toEqual([{ status: 'in-progress', expectedStatus: 'ready-for-dev' }]);
+    expect(screen.getByTestId('ticket-sheet-announcement').textContent).toBe('1.3 moved to In progress');
+    expect(screen.getByTestId('ticket-sheet-status').textContent).toContain('In progress');
+  });
+
+  it('in the sheet, Blocked asks for the reason inline (no second modal) and Esc closes only the form', async () => {
+    state.ticket = { ticket: DETAIL };
+    state.mark = { ref: '1.3', status: 'blocked' };
+    mount(<TicketSheet wsId={WS} ticketRef="1.3" onClose={() => {}} />);
+    await settle();
+    fireEvent.keyDown(screen.getByTestId('ticket-status-trigger'), { key: 'Enter' });
+    await settle();
+    fireEvent.click(screen.getAllByTestId('ticket-status-item').find((item) => item.getAttribute('data-status') === 'blocked')!);
+    await settle();
+    expect(screen.queryByTestId('ticket-blocked-dialog')).toBeNull();
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    const form = screen.getByRole('form', { name: 'Why is 1.3 blocked?' });
+    expect(screen.getByTestId('ticket-sheet-status').contains(form)).toBe(true);
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Waits on the key' } });
+    fireEvent.click(screen.getByTestId('ticket-blocked-save'));
+    await settle();
+    expect(state.bodies).toEqual([{ status: 'blocked', blockedReason: 'Waits on the key', expectedStatus: 'ready-for-dev' }]);
+    expect(screen.queryByTestId('ticket-blocked-form')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByTestId('ticket-status-trigger'));
+  });
+
+  it('the sheet shows a failure inline', async () => {
+    state.ticket = { ticket: DETAIL };
+    state.mark = { status: 409, code: 'status_not_allowed', message: 'Only approving the work marks a ticket done.' };
+    mount(<TicketSheet wsId={WS} ticketRef="1.3" onClose={() => {}} />);
+    await settle();
+    fireEvent.keyDown(screen.getByTestId('ticket-status-trigger'), { key: 'Enter' });
+    await settle();
+    fireEvent.click(screen.getAllByTestId('ticket-status-item')[0]!);
+    await settle();
+    expect(screen.getByTestId('ticket-sheet-mark-error').textContent).toBe("Couldn't change 1.3's status. Only approving the work marks a ticket done.");
   });
 });

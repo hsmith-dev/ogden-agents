@@ -5,10 +5,16 @@ import {
   BOARD_LOADING_TEXT,
   BOARD_SHOW_DETAILS_LABEL,
   BOARD_SHOW_DROPPED_LABEL,
+  boardDroppedHiddenText,
+  boardMarkFailedText,
+  boardMovedText,
   boardProblemsLine,
+  boardStatusPlaceText,
+  TICKET_SAVING_TEXT,
   type TicketsResponse,
 } from '@ogden-agents/shared';
-import { useId, useMemo, useState, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { isApiError } from '@/api/http';
 import { Button } from '@/ui/button';
 import { CheckboxOption } from '@/ui/checkbox';
@@ -20,13 +26,18 @@ import { ScriptTrustPrompt } from '@/workspaces/script-trust-prompt';
 import { BmadDownloadPrompt } from './bmad-download-prompt';
 import { BoardEpic } from './board-epic';
 import { cardStatusLine, groupBoard, indexTickets, unmetPrerequisites, type CardStatus } from './board-model';
-import { useBoardEvents, useTickets } from './planning-api';
+import { useBoardEvents, useMarkTicket, useTickets } from './planning-api';
+import type { TicketStatusChoice } from './ticket-status-menu';
 
 /**
  * The Board page's body (story 4.9; 4.1's bare list before it): the
  * project's tickets grouped by epic in build order, each epic with its
  * status columns, each card with its ref, title and one status line, as BMad
- * Method's files give them (AD-8, AD-10). Read-only: no card menu, no Build.
+ * Method's files give them (AD-8, AD-10). Story 4.10: each card's status
+ * menu changes its status through the server (never `done`, no optimistic
+ * move: the card moves once the refetched files say so), announced once in
+ * a polite status region, a failure in an alert, focus back on the moved
+ * card. No Build here.
  * A `ticket.changed` refetches and highlights that card's status line for
  * 1.2 s. What couldn't be read is a one-line notice with Show details;
  * dropped tickets stay hidden until "Show dropped tickets" is on. A project
@@ -65,15 +76,83 @@ export function BoardTickets({ wsId, sheet }: { wsId: string; /** The ticket she
           {tickets.error.message}
         </Notice>
       )}
-      <Board wsId={wsId} data={tickets.data} highlighted={highlighted} />
+      <Board wsId={wsId} data={tickets.data} updatedAt={tickets.dataUpdatedAt} highlighted={highlighted} />
       {sheet}
     </>
   );
 }
 
-function Board({ wsId, data, highlighted }: { wsId: string; data: TicketsResponse; highlighted: ReadonlySet<string> }) {
+/**
+ * The board's status changes (story 4.10): one at a time (every card's menu
+ * waits while one saves, and the status region says so), the result
+ * announced once ("1.2 moved to Ready") or the failure named with its
+ * ticket. Once the refetched tickets have rendered, focus that fell to the
+ * page (the menu's button went with the old card) goes to the card wherever
+ * it now is, or, for a dropped card hidden by the filter, to "Show dropped
+ * tickets".
+ */
+function useBoardMarks(wsId: string, updatedAt: number, showDropped: boolean, droppedId: string) {
+  const queryClient = useQueryClient();
+  const mark = useMarkTicket(wsId);
+  const send = useRef(mark.mutateAsync);
+  send.current = mark.mutateAsync;
+  const pending = useRef(false);
+  const shownDropped = useRef(showDropped);
+  shownDropped.current = showDropped;
+  const [saving, setSaving] = useState(false);
+  const [announcement, setAnnouncement] = useState('');
+  const [failure, setFailure] = useState<string | undefined>();
+  /** The moved ticket, and when the cache's tickets were last updated once its change settled (the refetch it waits to see rendered). */
+  const [moved, setMoved] = useState<{ ref: string; at: number } | undefined>();
+
+  const onChoose = useCallback(
+    (choice: TicketStatusChoice) => {
+      if (pending.current) return;
+      pending.current = true;
+      setSaving(true);
+      setFailure(undefined);
+      setAnnouncement(TICKET_SAVING_TEXT);
+      setMoved(undefined);
+      void send
+        .current({ ref: choice.ref, ...choice.request })
+        .then(
+          (result) => {
+            const hidden = result.status === 'dropped' && !shownDropped.current;
+            setAnnouncement(hidden ? boardDroppedHiddenText(result.ref) : boardMovedText(result.ref, boardStatusPlaceText(result.status)));
+            // `mutateAsync` resolves once the refetch landed in the cache.
+            setMoved({ ref: result.ref, at: queryClient.getQueryState(['tickets', wsId])?.dataUpdatedAt ?? 0 });
+          },
+          (error: unknown) => {
+            setAnnouncement('');
+            setFailure(boardMarkFailedText(choice.ref, error instanceof Error ? error.message : String(error)));
+          },
+        )
+        .finally(() => {
+          pending.current = false;
+          setSaving(false);
+        });
+    },
+    [queryClient, wsId],
+  );
+
+  useEffect(() => {
+    // Wait until the tickets the change settled with (or newer ones) are rendered.
+    if (moved === undefined || updatedAt < moved.at) return;
+    setMoved(undefined);
+    const active = document.activeElement;
+    if (active !== null && active !== document.body && active.isConnected) return;
+    const card = document.querySelector<HTMLElement>(`[data-testid="ticket-card"][data-ref="${CSS.escape(moved.ref)}"]`);
+    if (card !== null) card.focus();
+    else document.getElementById(droppedId)?.focus();
+  }, [moved, updatedAt, droppedId]);
+
+  return { onChoose, saving, announcement, failure };
+}
+
+function Board({ wsId, data, updatedAt, highlighted }: { wsId: string; data: TicketsResponse; /** When `data` was fetched. */ updatedAt: number; highlighted: ReadonlySet<string> }) {
   const [showDropped, setShowDropped] = useState(false);
   const droppedId = useId();
+  const { onChoose, saving, announcement, failure } = useBoardMarks(wsId, updatedAt, showDropped, droppedId);
   const epics = useMemo(() => groupBoard(data, showDropped), [data, showDropped]);
   // One status per card, recomputed only when the tickets change, so a highlight re-renders one card.
   const statuses = useMemo(() => {
@@ -84,6 +163,14 @@ function Board({ wsId, data, highlighted }: { wsId: string; data: TicketsRespons
   }, [data]);
   return (
     <div className="flex max-w-(--space-content-max) min-w-0 flex-col gap-6" data-testid="board">
+      <span role="status" className="sr-only" data-testid="board-announcement">
+        {announcement}
+      </span>
+      {failure === undefined ? null : (
+        <Notice variant="blocked" role="alert" data-testid="board-mark-error">
+          {failure}
+        </Notice>
+      )}
       <div className="flex flex-col gap-2">
         {data.problems.length === 0 ? null : <BoardProblems problems={data.problems} />}
         <CheckboxOption
@@ -101,7 +188,7 @@ function Board({ wsId, data, highlighted }: { wsId: string; data: TicketsRespons
         <ul aria-label={BOARD_EPICS_LABEL} className="m-0 flex list-none flex-col gap-8 p-0">
           {epics.map((epic) => (
             <li key={epic.slug} className="min-w-0">
-              <BoardEpic wsId={wsId} epic={epic} statuses={statuses} highlighted={highlighted} />
+              <BoardEpic wsId={wsId} epic={epic} statuses={statuses} highlighted={highlighted} onChoose={onChoose} saving={saving} />
             </li>
           ))}
         </ul>

@@ -21,6 +21,7 @@ import {
   NotFoundError,
   ScriptsNotTrustedError,
   StatusNotAllowedError,
+  TicketChangedError,
   TicketsUnavailableError,
   ValidationError,
   type AgentPort,
@@ -281,8 +282,101 @@ describe('board trust and the rest of the contract (story 4.2)', () => {
       await expect(board.mark(workspace.id, '1.1', bad)).rejects.toThrow(ValidationError);
     }
     expect(marks).toEqual([
-      [workspace.realPath, '1.1', 'ready-for-dev', { blockedReason: undefined }],
-      [workspace.realPath, '1.1', 'blocked', { blockedReason: 'Waiting on the API' }],
+      [workspace.realPath, '1.1', 'ready-for-dev', { blockedReason: undefined, expectedStatus: undefined }],
+      [workspace.realPath, '1.1', 'blocked', { blockedReason: 'Waiting on the API', expectedStatus: undefined }],
     ]);
+  });
+});
+
+describe('changing a status from the board (story 4.10)', () => {
+  /** A board over a store whose marks wait for `release`, compare `expectedStatus` and record when each starts and ends. */
+  function gated() {
+    const base = setup();
+    const log: string[] = [];
+    let status = '';
+    const releases: Array<() => void> = [];
+    const store: TicketStorePort = {
+      tree: () => Promise.reject(new Error('unused')),
+      find: () => Promise.reject(new Error('unused')),
+      watch: () => Promise.reject(new Error('unused')),
+      mark: async (_repoPath, ref, next, options = {}) => {
+        log.push(`start ${next}`);
+        await new Promise<void>((resolve) => releases.push(resolve));
+        try {
+          if (options.expectedStatus !== undefined && options.expectedStatus !== status) throw new TicketChangedError(ref, options.expectedStatus, status);
+          if (next === 'built') throw new TicketsUnavailableError('failed');
+          status = next;
+          return { ref, status: next };
+        } finally {
+          log.push(`end ${next}`);
+        }
+      },
+    };
+    const board = createBoard({ bmad: base.core.bmad, trust: base.core.bmadScriptTrust, source: createBmadSource(fakeSource(true)), entities: base.core.entities, tickets: store });
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+    return { ...base, board, log, releases, flush, statusNow: () => status };
+  }
+
+  it('runs two marks of one repo one after the other, and a failed mark does not break the chain', async () => {
+    const { board, workspace, log, releases, flush } = gated();
+    const first = board.mark(workspace.id, '1.1', { status: 'built' });
+    const second = board.mark(workspace.id, '1.1', { status: 'ready-for-dev' });
+    await flush();
+    expect(log).toEqual(['start built']);
+    releases.shift()!();
+    await expect(first).rejects.toThrow(TicketsUnavailableError);
+    await flush();
+    expect(log).toEqual(['start built', 'end built', 'start ready-for-dev']);
+    releases.shift()!();
+    expect(await second).toEqual({ ref: '1.1', status: 'ready-for-dev' });
+    expect(log).toEqual(['start built', 'end built', 'start ready-for-dev', 'end ready-for-dev']);
+  });
+
+  it('a queued mark checks the guards again on its turn: Board turned off meanwhile runs nothing', async () => {
+    const { board, core, workspace, log, releases, flush } = gated();
+    const first = board.mark(workspace.id, '1.1', { status: 'draft' });
+    const second = board.mark(workspace.id, '1.1', { status: 'ready-for-dev' });
+    await flush();
+    core.permissions.updateSettings(workspace.id, { bmadPieces: [] });
+    releases.shift()!();
+    await first;
+    await expect(second).rejects.toThrow(FeatureOffError);
+    expect(log).toEqual(['start draft', 'end draft']);
+  });
+
+  it('an expected status that no longer matches is ticket_changed and nothing is written', async () => {
+    const { board, workspace, releases, flush, statusNow } = gated();
+    const first = board.mark(workspace.id, '1.1', { status: 'in-progress', expectedStatus: '' });
+    // The second click saw the same board: by its turn the first changed the ticket.
+    const second = board.mark(workspace.id, '1.1', { status: 'ready-for-dev', expectedStatus: '' });
+    await flush();
+    releases.shift()!();
+    await first;
+    await flush();
+    releases.shift()!();
+    const error = await second.catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(TicketChangedError);
+    expect((error as TicketChangedError).code).toBe('ticket_changed');
+    expect(statusNow()).toBe('in-progress');
+  });
+
+  it('passes the expected status through, and refuses done and a bad expected status before the store', async () => {
+    const { board, workspace, marks } = setup();
+    await board.mark(workspace.id, '1.1', { status: 'ready-for-dev', expectedStatus: '' });
+    await expect(board.mark(workspace.id, '1.1', { status: 'done', expectedStatus: '' })).rejects.toThrow(StatusNotAllowedError);
+    await expect(board.mark(workspace.id, '1.1', { status: 'draft', expectedStatus: 'shipped' })).rejects.toThrow(ValidationError);
+    expect(marks).toEqual([[workspace.realPath, '1.1', 'ready-for-dev', { blockedReason: undefined, expectedStatus: '' }]]);
+  });
+
+  it('Board off, untrusted or not downloaded refuse a mark before the store', async () => {
+    for (const [pieces, options, error] of [
+      [['planning'], {}, FeatureOffError],
+      [['board'], { trusted: false }, ScriptsNotTrustedError],
+      [['board'], { downloaded: false }, BmadNotDownloadedError],
+    ] as const) {
+      const { board, workspace, marks } = setup([...pieces], options);
+      await expect(board.mark(workspace.id, '1.1', { status: 'ready-for-dev', expectedStatus: '' })).rejects.toThrow(error);
+      expect(marks).toEqual([]);
+    }
   });
 });

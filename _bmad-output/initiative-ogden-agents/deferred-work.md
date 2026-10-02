@@ -431,3 +431,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-board-and-ticket-detail-plan.md`
   summary: Resolved: the Board page now reuses 4.6's piece gate (`PlanPieceGate` with `piece="board"`), so with Board off it shows the feature-off notice and asks for no setup panel or tickets.
   evidence: Applied in 4.9's branch after the stack rebase (4.8, 4.4, 4.6, 4.9); `routes/workspace-board-page.tsx`, DOM tests "Board piece gate".
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-change-a-ticket-s-status-from-the-board-plan.md`
+  summary: `tickets-v7` `mark` resolves the ref twice (`find`, then `tickets.py mark`); a structural tree change between the two runs (an epic renumbered, an entry removed) could mark another ticket. Needs an upstream `tickets.py mark` option to write a given plan path or refuse when the resolved ticket differs.
+  evidence: 4.10 security review S1: `resolve_ticket` in `cmd_mark`; the adapter ignores `body.plan`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-change-a-ticket-s-status-from-the-board-plan.md`
+  summary: Upstream `tickets.py mark` writes an existing plan with `open("wb")` (truncate then write), so a kill mid-write could leave a short plan; propose a temp file plus rename upstream.
+  evidence: 4.10 security review S3: `cmd_mark` write path; runner kills on timeout and on close.

@@ -27,7 +27,11 @@
  * board puts each card in its column, shows "Waits for 1.2" and the blocked
  * reason, highlights a card its `ticket.changed` names, opens the detail
  * sheet from a card and from its URL (Esc returns to the card), and below
- * `md` stacks each epic's columns. No real `claude` or `uv` runs.
+ * `md` stacks each epic's columns. Story 4.10: a keyboard-only user moves
+ * 1.2 to Ready from its card's menu (Tab, Enter, ArrowDown, Enter): the card
+ * sits in Ready with focus on it, and the menu never shows Done; the sheet's
+ * menu changes a status too; a store that fails shows its message. No real
+ * `claude` or `uv` runs.
  */
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -538,6 +542,136 @@ test('the board: cards in their columns, Waits for and the blocked reason, a liv
       const top = (await review.boundingBox())!;
       const bottom = (await blocked.boundingBox())!;
       expect(bottom.y).toBeGreaterThanOrEqual(top.y + top.height);
+    },
+    { extra: { ticketStore, bmadSource }, files: SET_UP },
+  );
+});
+
+test('changing a status from the board (story 4.10): keyboard only, focus on the moved card, no Done, the sheet menu, and a failure', async ({ page }) => {
+  const server = await serverModule();
+  type MemoryStore = ReturnType<typeof server.createMemoryTicketStore>;
+  let inner: MemoryStore = server.createMemoryTicketStore();
+  const ticketStore: MemoryStore = {
+    get calls() {
+      return inner.calls;
+    },
+    tree: (...args) => inner.tree(...args),
+    find: (...args) => inner.find(...args),
+    mark: (...args) => inner.mark(...args),
+    watch: (...args) => inner.watch(...args),
+    watching: (...args) => inner.watching(...args),
+    emit: (...args) => inner.emit(...args),
+    fail: (...args) => inner.fail(...args),
+  };
+  const bmadSource = server.createMemoryBmadSource({ ready: true });
+  await withChatServer(
+    page,
+    async ({ server: running, repo }) => {
+      const realPath = realpathSync.native(repo);
+      inner = server.createMemoryTicketStore({ repos: { [realPath]: { tickets: BOARD_TICKETS, folder: 'initiative-demo' } } });
+      const { wsId, call } = await openProject(page, repo);
+      await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: ['board'] });
+      await call('PUT', apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId }));
+      await waitUntil(() => ticketStore.watching(realPath) === 1, 'the ticket watch');
+
+      await page.goto(`${running.url}/w/${wsId}/board`);
+      const card = (ref: string) => page.locator(`[data-testid="ticket-card"][data-ref="${ref}"]`);
+      await expect(card('1.2')).toHaveAttribute('data-column', 'draft');
+
+      // Keyboard only: from the card's link, Tab reaches its status button (the next stop), named by the ticket.
+      await card('1.2').focus();
+      await page.keyboard.press('Tab');
+      const trigger = page.getByRole('button', { name: 'Change status of 1.2 Build the second thing' });
+      await expect(trigger).toBeFocused();
+      // ArrowDown opens the menu on its first item; a planned ticket already shows in Draft, so no Move to Draft.
+      await page.keyboard.press('ArrowDown');
+      const menu = page.getByRole('menu');
+      await expect(menu).toBeVisible();
+      await expect(menu.getByRole('menuitem')).toHaveText(['Move to Ready', 'Move to In progress', 'Move to In review', 'Move to Built', 'Move to Blocked', 'Drop this ticket']);
+      await expect(menu.getByRole('menuitem', { name: 'Move to Done' })).toHaveCount(0);
+      await expect(menu.getByRole('menuitem', { name: 'Move to Ready' })).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(card('1.2')).toHaveAttribute('data-column', 'ready');
+      await expect(card('1.2')).toBeFocused();
+      await expect(page.getByTestId('board-announcement')).toHaveText('1.2 moved to Ready');
+      expect(ticketStore.calls.filter((each) => each[0] === 'mark')).toEqual([['mark', realPath, '1.2', 'ready-for-dev', undefined]]);
+      // A ticket in Ready no longer offers Ready, and never Done.
+      await page.keyboard.press('Tab');
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('menu').getByRole('menuitem', { name: 'Move to Ready' })).toHaveCount(0);
+      await expect(page.getByRole('menu').getByRole('menuitem', { name: 'Move to Done' })).toHaveCount(0);
+      await page.keyboard.press('Escape');
+      // Esc closes the menu and focus goes back to its button.
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Change status of 1.2 Build the second thing' })).toBeFocused();
+
+      // Blocked, keyboard only, on 1.1: Cancel puts focus back on its status button; Save blocks it and focus lands on the card.
+      const pointerEvents = () => page.evaluate(() => document.body.style.pointerEvents);
+      const statusButton = page.getByRole('button', { name: 'Change status of 1.1 Build the first thing' });
+      const toBlocked = async () => {
+        await card('1.1').focus();
+        await page.keyboard.press('Tab');
+        await expect(statusButton).toBeFocused();
+        await page.keyboard.press('Enter');
+        const blockedItem = page.getByRole('menuitem', { name: 'Move to Blocked' });
+        const items = page.getByRole('menu').getByRole('menuitem');
+        await expect(items.first()).toBeFocused();
+        const steps = (await items.allTextContents()).indexOf('Move to Blocked');
+        // One step at a time: Radix moves focus on the next tick.
+        for (let i = 0; i < steps; i++) {
+          await page.keyboard.press('ArrowDown');
+          await expect(items.nth(i + 1)).toBeFocused();
+        }
+        await expect(blockedItem).toBeFocused();
+        await page.keyboard.press('Enter');
+        const dialog = page.getByRole('dialog', { name: 'Why is 1.1 blocked?' });
+        await expect(dialog).toBeVisible();
+        await expect(dialog.getByLabel('Reason')).toBeFocused();
+        return dialog;
+      };
+      let dialog = await toBlocked();
+      // An empty reason doesn't save: the error shows and focus stays in the field.
+      await dialog.getByRole('button', { name: 'Save' }).press('Enter');
+      await expect(dialog.getByRole('alert')).toHaveText('Say why it is blocked.');
+      await expect(dialog.getByLabel('Reason')).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(statusButton).toBeFocused();
+      expect(await pointerEvents()).not.toBe('none');
+      dialog = await toBlocked();
+      await page.keyboard.type('Needs the API key');
+      await page.keyboard.press('Tab');
+      await page.keyboard.press('Tab');
+      await expect(dialog.getByRole('button', { name: 'Save' })).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(card('1.1')).toHaveAttribute('data-column', 'blocked');
+      await expect(card('1.1')).toContainText('Needs the API key');
+      await expect(card('1.1')).toBeFocused();
+      await expect(page.getByTestId('board-announcement')).toHaveText('1.1 moved to Blocked');
+      expect(await pointerEvents()).not.toBe('none');
+      expect(ticketStore.calls.filter((each) => each[0] === 'mark').at(-1)).toEqual(['mark', realPath, '1.1', 'blocked', 'Needs the API key']);
+
+      // A store that fails: its plain message, and the card stays.
+      ticketStore.fail('failed');
+      await page.getByRole('button', { name: 'Change status of 1.3 Build the third thing' }).click();
+      await page.getByRole('menuitem', { name: 'Move to In progress' }).click();
+      await expect(page.getByTestId('board-mark-error')).toContainText("Couldn't change 1.3's status. Ogden Agents couldn't read this project's tickets");
+      ticketStore.fail(undefined);
+      await expect(card('1.3')).toHaveAttribute('data-column', 'ready');
+
+      // The detail sheet's menu.
+      await card('1.3').click();
+      const sheet = page.getByRole('dialog', { name: 'Build the third thing' });
+      await expect(sheet).toBeVisible();
+      await sheet.getByRole('button', { name: 'Change status of 1.3 Build the third thing' }).click();
+      await expect(page.getByRole('menuitem', { name: 'Move to Done' })).toHaveCount(0);
+      await page.getByRole('menuitem', { name: 'Move to In progress' }).click();
+      await expect(sheet.getByTestId('ticket-sheet-status')).toContainText('In progress');
+      await expect(sheet.getByTestId('ticket-sheet-announcement')).toHaveText('1.3 moved to In progress');
+      await page.keyboard.press('Escape');
+      await expect(card('1.3')).toHaveAttribute('data-column', 'in_progress');
     },
     { extra: { ticketStore, bmadSource }, files: SET_UP },
   );

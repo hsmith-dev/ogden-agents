@@ -19,8 +19,14 @@
  * - `GET …/tickets/:ref` (`board`, trust) → `TicketResponse` (story 4.8):
  *   one ticket; 400 for a malformed ref, 404 when no ticket matches, 409
  *   `bmad_not_downloaded` and 503 `tickets_unavailable` as the tree.
- * - `PUT …/tickets/:ref/status` (`board`, trust): 501 until entry 4.10
- *   fills it.
+ * - `PUT …/tickets/:ref/status` (`board`, trust; entry 4.10)
+ *   `MarkTicketRequest` → `MarkTicketResponse`: core's `board.mark` runs
+ *   `tickets.py mark` (marks of one repo one at a time). 400 for a malformed
+ *   body or ref, 404 when no ticket matches exactly, 409
+ *   `status_not_allowed` for `done` and `ticket_changed` when the status
+ *   is no longer `expectedStatus` (nothing written either way), 409
+ *   `bmad_not_downloaded` and 503 `tickets_unavailable` as the tree, 413
+ *   for a body over its small limit (read after the guards).
  * - `GET …/bmad/setup` (`planning` or `board`; no trust; entry 4.3) →
  *   `BmadSetupStatusResponse`, read from the project's files only (no
  *   process, no network).
@@ -40,6 +46,7 @@
  */
 import {
   NotFoundError,
+  TicketChangedError,
   TicketsUnavailableError,
   ValidationError,
   type BmadFeatures,
@@ -56,7 +63,9 @@ import {
   CatalogResponse,
   DOCUMENT_NOT_FOUND_TEXT,
   DocumentResponse,
+  MAX_BLOCKED_REASON_LENGTH,
   MAX_IDEA_LENGTH,
+  MarkTicketResponse,
   SessionResponse,
   StartPlanningRequest,
   TicketResponse,
@@ -71,6 +80,8 @@ import { readBody } from './request-input.js';
 
 /** A skill name and an idea (at most `MAX_IDEA_LENGTH` characters of up to 4 bytes each): a body this size is plenty. */
 const MAX_BODY_BYTES = 4 * 1024 + 4 * MAX_IDEA_LENGTH;
+/** A status, an expected status and a blocked reason (at most `MAX_BLOCKED_REASON_LENGTH` characters of up to 4 bytes each, or JSON-escaped). */
+const MAX_MARK_BODY_BYTES = 1024 + 6 * MAX_BLOCKED_REASON_LENGTH;
 
 export interface PlanningRoutesOptions {
   /** Core's guard (AD-22). */
@@ -171,8 +182,38 @@ export function registerPlanningRoutes(app: Hono, { bmad, scriptTrust, planning,
     { projectScripts: false },
   );
 
-  // Pre-registered by story 4.2, so its entry only fills it: it answers 501 once the guards pass.
-  routes.put('board', API_ROUTES.workspaceTicketStatus, (c) => notImplemented(c));
+  // A status change (entry 4.10): core validates the body, refuses `done` and serializes the repo's marks.
+  const markLimit = bodyLimit({ maxSize: MAX_MARK_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', 'That request is too large.') });
+  routes.put('board', API_ROUTES.workspaceTicketStatus, async (c, { workspaceId }) => {
+    if (board === undefined) return notImplemented(c);
+    const ref = c.req.param('ref') ?? '';
+    let response: Response | undefined;
+    // The guards have passed, so the body limit applies here, after them; over it, `markLimit` answers 413 itself.
+    const refused = await markLimit(c, async () => {
+      let body: unknown;
+      try {
+        body = JSON.parse(await c.req.text());
+      } catch {
+        response = apiError(c, 400, 'invalid_request', 'The request body must be JSON.');
+        return;
+      }
+      try {
+        const marked = MarkTicketResponse.parse(await board.mark(workspaceId, ref, body));
+        // The ref and status only: never the blocked reason (the user's own words).
+        log.info('ticket status changed', { workspaceId, ref: marked.ref, status: marked.status });
+        response = c.json(marked);
+      } catch (error) {
+        if (error instanceof ValidationError) response = apiError(c, 400, 'invalid_request', error.message);
+        else if (error instanceof TicketChangedError) {
+          log.info('ticket changed since shown; status not changed', { workspaceId, ref });
+          response = apiError(c, 409, 'ticket_changed', error.message);
+        } else if (error instanceof TicketsUnavailableError) response = ticketsUnavailable(c, workspaceId, error);
+        // `NotFoundError` and `StatusNotAllowedError` answer 404 and 409 through the guarded helper.
+        else throw error;
+      }
+    });
+    return response ?? refused ?? apiError(c, 413, 'invalid_request', 'That request is too large.');
+  });
   // BMad Method's setup runs the verified pinned `setup.py`, never the project's own code (the entry 4.3 trust proof).
   routes.get(
     ['planning', 'board'],

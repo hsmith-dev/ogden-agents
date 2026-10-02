@@ -2,6 +2,9 @@ import {
   BOARD_COLUMN_LABELS,
   BOARD_DROPPED_LABEL,
   boardColumnOf,
+  boardMarkFailedText,
+  boardMovedText,
+  boardStatusPlaceText,
   TICKET_LOADING_TEXT,
   TICKET_NO_PLAN_TEXT,
   TICKET_NO_PREREQUISITES_TEXT,
@@ -11,6 +14,7 @@ import {
   TICKET_PREREQUISITE_WAITING_TEXT,
   TICKET_PREREQUISITES_HEADING,
   TICKET_REFERENCES_HEADING,
+  TICKET_SAVING_TEXT,
   TICKET_STATUS_HEADING,
   TICKET_SUMMARY_HEADING,
   TICKET_UNKNOWN_HEADING,
@@ -18,7 +22,7 @@ import {
   type TicketDetail,
 } from '@ogden-agents/shared';
 import { Check, Lock, Prohibit } from '@phosphor-icons/react';
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { ChatApiError } from '@/api/http';
 import { useAppearance } from '@/appearance/appearance-provider';
 import { Notice } from '@/ui/notice';
@@ -26,7 +30,8 @@ import { Sheet, SheetContent } from '@/ui/sheet';
 import { Skeleton } from '@/ui/skeleton';
 import { Text } from '@/ui/typography';
 import { indexTickets, prerequisitesOf, type Prerequisite } from './board-model';
-import { useTicket, useTickets } from './planning-api';
+import { useMarkTicket, useTicket, useTickets } from './planning-api';
+import { TicketStatusMenu, type TicketStatusChoice } from './ticket-status-menu';
 
 export interface TicketSheetProps {
   wsId: string;
@@ -43,7 +48,8 @@ export interface TicketSheetProps {
  * when it has something, every field is plain text (references in mono,
  * never links). In Developer mode the raw plan `status` and `state` show
  * too. Loading, 404 ("No ticket 1.2 in this project.") and error states.
- * Read-only: no status change and no Build here.
+ * Story 4.10: the Status section has the card's status menu (never Done),
+ * its result announced once and a failure shown inline. No Build here.
  */
 export function TicketSheet({ wsId, ticketRef, onClose }: TicketSheetProps) {
   const ticket = useTicket(wsId, ticketRef);
@@ -125,6 +131,7 @@ function TicketBody({ wsId, detail }: { wsId: string; detail: TicketDetail }) {
             {reason}
           </Text>
         ) : null}
+        <SheetStatusChange wsId={wsId} detail={detail} />
         {appearance.developerMode ? (
           <Text variant="mono-compact" data-testid="ticket-sheet-raw-status">
             {`status: ${detail.status ?? ''}  state: ${detail.state}`}
@@ -195,5 +202,46 @@ function TicketBody({ wsId, detail }: { wsId: string; detail: TicketDetail }) {
         </Section>
       )}
     </>
+  );
+}
+
+/**
+ * The sheet's status menu (story 4.10): the change is sent once, the menu
+ * waits while it saves, then the sheet's ticket and the board refetch (no
+ * optimistic status). The result is announced once in a polite region; a
+ * failure shows its plain message as an alert under the menu.
+ */
+function SheetStatusChange({ wsId, detail }: { wsId: string; detail: TicketDetail }) {
+  const mark = useMarkTicket(wsId);
+  const [announcement, setAnnouncement] = useState('');
+  const onChoose = (choice: TicketStatusChoice) => {
+    if (mark.isPending) return;
+    setAnnouncement(TICKET_SAVING_TEXT);
+    mark.mutate(
+      { ref: choice.ref, ...choice.request },
+      {
+        onSuccess: (result) => setAnnouncement(boardMovedText(result.ref, boardStatusPlaceText(result.status))),
+        onError: () => setAnnouncement(''),
+      },
+    );
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      {/* The menu's button, then (Blocked) its reason form inline: the sheet is the one modal. */}
+      <TicketStatusMenu row={detail} onChoose={onChoose} busy={mark.isPending} variant="sheet" />
+      {mark.isPending ? (
+        <Text variant="caption" tone="muted" aria-hidden data-testid="ticket-sheet-saving">
+          {TICKET_SAVING_TEXT}
+        </Text>
+      ) : null}
+      <span role="status" className="sr-only" data-testid="ticket-sheet-announcement">
+        {announcement}
+      </span>
+      {mark.error === null ? null : (
+        <Text variant="caption" role="alert" data-testid="ticket-sheet-mark-error">
+          {boardMarkFailedText(detail.ref, mark.error.message)}
+        </Text>
+      )}
+    </div>
   );
 }

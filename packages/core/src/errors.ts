@@ -8,6 +8,7 @@ import {
   FEATURE_UNAVAILABLE_MESSAGE,
   SCRIPTS_NOT_TRUSTED_MESSAGE,
   STATUS_NOT_ALLOWED_MESSAGE,
+  TICKET_CHANGED_MESSAGE,
   type BmadSetupFailureReason,
   type SessionTerminal,
   type TerminalUnavailableCode,
@@ -162,6 +163,22 @@ export class StatusNotAllowedError extends CoreError {
   override readonly name = 'StatusNotAllowedError';
   constructor(readonly status: string) {
     super('status_not_allowed', STATUS_NOT_ALLOWED_MESSAGE);
+  }
+}
+
+/**
+ * The ticket's status is no longer the one the request expected (story 4.10):
+ * someone else (an agent, a `git pull`) changed it since the board showed it.
+ * Nothing was written.
+ */
+export class TicketChangedError extends CoreError {
+  override readonly name = 'TicketChangedError';
+  constructor(
+    readonly ref: string,
+    readonly expected: string,
+    readonly actual: string,
+  ) {
+    super('ticket_changed', TICKET_CHANGED_MESSAGE);
   }
 }
 

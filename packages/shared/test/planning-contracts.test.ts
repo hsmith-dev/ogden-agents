@@ -350,3 +350,64 @@ describe('document cards (story 4.7)', () => {
     }
   });
 });
+
+describe('changing a ticket status from the board (story 4.10)', () => {
+  it('MarkTicketRequest takes an optional expectedStatus: a status or empty (no plan), nothing else', () => {
+    expect(MarkTicketRequest.parse({ status: 'ready-for-dev', expectedStatus: '' })).toEqual({ status: 'ready-for-dev', expectedStatus: '' });
+    expect(MarkTicketRequest.parse({ status: 'draft', expectedStatus: 'in-progress' })).toEqual({ status: 'draft', expectedStatus: 'in-progress' });
+    expect(MarkTicketRequest.parse({ status: 'draft' })).toEqual({ status: 'draft' });
+    for (const expectedStatus of ['shipped', null, 3, ' ']) {
+      expect(MarkTicketRequest.safeParse({ status: 'draft', expectedStatus }).success, JSON.stringify(expectedStatus)).toBe(false);
+    }
+  });
+
+  it('a blocked reason is plain text: line breaks and tabs pass, other control characters and lone surrogates do not', () => {
+    const reason = (blockedReason: string) => MarkTicketRequest.safeParse({ status: 'blocked', blockedReason });
+    expect(reason('Needs the API key\nstatus: done\tx').success).toBe(true);
+    expect(reason('Needs the 🔑').success).toBe(true);
+    for (const bad of ['a\u0000b', 'a\u0007b', 'a\rb', 'a\u001bb', 'a\u007fb', 'a\ud800b', 'a\udc00b']) {
+      const parsed = reason(bad);
+      expect(parsed.success, JSON.stringify(bad)).toBe(false);
+      if (!parsed.success) expect(parsed.error.issues[0]!.message).toBe(shared.BOARD_BLOCKED_REASON_INVALID);
+    }
+    const empty = reason(' ');
+    expect(empty.success).toBe(false);
+    if (!empty.success) expect(empty.error.issues[0]!.message).toBe(shared.BOARD_BLOCKED_REASON_REQUIRED);
+  });
+
+  it('has ticket_changed, and the menu texts are plain', () => {
+    expect(API_ERROR_CODES).toContain('ticket_changed');
+    expect(API_ERROR_CODES.at(-1)).toBe('internal_error');
+    expect(shared.boardChangeStatusLabel('1.2', 'Build the thing')).toBe('Change status of 1.2 Build the thing');
+    expect(shared.boardStatusActionText('ready-for-dev')).toBe('Move to Ready');
+    expect(shared.boardStatusActionText('dropped')).toBe('Drop this ticket');
+    expect(shared.boardStatusPlaceText('in-review')).toBe('In review');
+    expect(shared.boardStatusPlaceText('dropped')).toBe('Dropped');
+    expect(shared.boardMovedText('1.2', 'Ready')).toBe('1.2 moved to Ready');
+    expect(shared.boardBlockedDialogTitle('1.2')).toBe('Why is 1.2 blocked?');
+    expect(shared.boardMarkFailedText('1.2', 'Try again.')).toBe("Couldn't change 1.2's status. Try again.");
+    expect(shared.boardDroppedHiddenText('1.2')).toBe('1.2 moved to Dropped. Turn on Show dropped tickets to see it.');
+    const texts = [
+      shared.TICKET_CHANGED_MESSAGE,
+      shared.BOARD_CHANGE_STATUS_LABEL,
+      shared.BOARD_DROP_LABEL,
+      shared.TICKET_SAVING_TEXT,
+      shared.BOARD_BLOCKED_DIALOG_TITLE,
+      shared.BOARD_BLOCKED_REASON_LABEL,
+      shared.BOARD_BLOCKED_REASON_REQUIRED,
+      shared.BOARD_BLOCKED_SAVE_LABEL,
+      shared.BOARD_BLOCKED_CANCEL_LABEL,
+      shared.boardChangeStatusLabel('1.1', 'A'),
+      shared.boardMovedText('1.1', 'Ready'),
+      shared.BOARD_BLOCKED_REASON_INVALID,
+      shared.boardBlockedDialogTitle('1.1'),
+      shared.boardMarkFailedText('1.1', 'Try again.'),
+      shared.boardDroppedHiddenText('1.1'),
+      ...MARKABLE_TICKET_STATUSES.map((status) => shared.boardStatusActionText(status)),
+    ];
+    for (const text of texts) {
+      expect(text).not.toMatch(/[–—]/);
+      expect(text).toMatch(/^[A-Z0-9]/);
+    }
+  });
+});

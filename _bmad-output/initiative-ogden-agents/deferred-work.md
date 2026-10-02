@@ -374,3 +374,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-bmad-optional-per-project/story-an-app-wide-default-for-new-projects-simple-to-start-plan.md`
   summary: `onboarding.ts` logs an unreadable (not corrupt) `onboarding.json` on every read, the gap 10.4 closed for `preferences.ts` (review F3: once per run per persisting failure). Dedupe it the same way in a sweep.
   evidence: 10.4 Review Triage Log row 3; `packages/core/src/onboarding.ts` `read()`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-bmad-optional-per-project/story-end-to-end-suite-and-release-plan.md`
+  summary: The installed suite's cleanup kills a server's whole process tree only while the server's pid is alive, so an agent or CLI orphaned by a server that already exited or crashed is neither killed nor reported by the teardown.
+  evidence: `killBackgroundServer` and `killExtraServers` return early when `server.json` is gone or its pid is dead (story 10.9 review F5); a teardown check for leftover processes whose cwd or arguments point into the extra folder would close it.

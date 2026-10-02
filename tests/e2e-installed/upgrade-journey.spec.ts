@@ -4,9 +4,10 @@
  * CAP-19, AD-5): the installed launcher starts a background server of its
  * own on a data folder as 0.2.0 left it (`fixtures/data-folder-0.2.0.ts`),
  * with the fake agent. The launch link lands on Projects (no Welcome); both
- * projects and their chats are listed; every project is Simple (every BMad
- * piece off); the `_bmad/` project's offer shows exactly once and the plain
- * one has none; and no repo or `onboarding.json` changes and no
+ * projects and their chats are listed; their caution levels and the kept
+ * Always allow rule are there; every project is Simple (every BMad piece
+ * off); the `_bmad/` project's offer shows exactly once and the plain one
+ * has none; and no repo or `onboarding.json` changes and no
  * `preferences.json` appears.
  */
 import { existsSync, readFileSync } from 'node:fs';
@@ -55,9 +56,18 @@ test('the installed package on a 0.2.0 data folder: projects listed, Simple, the
     }
   });
 
-  await test.step('2. every project is Simple: every BMad piece off', async () => {
+  await test.step('2. caution levels and the rule kept; every project is Simple: every BMad piece off', async () => {
+    const caution = { [bmad]: 'Ask for commands', [plain]: 'Ask every time' };
     for (const wsId of [bmad, plain]) {
       await page.goto(`${origin}/w/${wsId}/settings`);
+      await expect(page.getByTestId('bmad-use')).toBeVisible();
+      await expect(page.getByTestId('caution-level').getByRole('radio', { name: caution[wsId] })).toHaveAttribute('aria-checked', 'true');
+      if (wsId === bmad) {
+        await expect(page.getByTestId('rule-row')).toHaveCount(1);
+        await expect(page.getByTestId('rule-row')).toContainText('npm install');
+      } else {
+        await expect(page.getByTestId('rules-empty')).toBeVisible();
+      }
       await expect(page.getByTestId('bmad-use')).toHaveAttribute('aria-checked', 'false');
       for (const piece of BMAD_PIECES) await expect(page.getByTestId(`bmad-${piece}`)).toHaveAttribute('aria-checked', 'false');
     }

@@ -2,8 +2,13 @@
 
 Every release of the `ogden-agents` npm package. Versions follow [semantic versioning](https://semver.org/); before 1.0.0, a minor version may change behavior. How a release is made is in [RELEASING.md](RELEASING.md).
 
-## Unreleased
+## 0.4.0 — BMad Method optional per project
 
+Published first as `0.4.0-rc.1` on the `next` dist-tag (`npx ogden-agents@next`), then as `0.4.0`. Each project chooses whether it uses BMad Method's features, and a project that doesn't stays a plain set of chats. No BMad Method feature ships in this version: they arrive in later releases, and until then each is shown as **Coming soon**.
+
+- **BMad Method, per project.** A project's settings have a BMad Method section: a main switch, **Use BMad Method in this project**, and one switch per feature (Planning, Board, Unattended builds, Retrospectives). A feature that needs another turns it on too, and turning one off turns off what needs it, with a line saying what changed. The choice is kept across restarts and shows at once in every open tab. A feature this version doesn't include is greyed and marked **Coming soon**, and turning a feature off never removes your BMad files. A feature that is off can't be used: the server refuses it.
+- **Simple projects stay simple.** With every feature off, a project shows only its Chats, its chats start Claude Code with nothing BMad Method from Ogden Agents (no extra tools, instructions or settings), and nothing is written into the project's folder. Claude Code still loads the project's own skills, `CLAUDE.md` and settings, as it does in a terminal. Developer mode's Chat | Terminal toggle works as before.
+- **Projects that already use BMad Method.** A project whose folder already has BMad Method's files (`_bmad/`) offers its features once on its chats page: **Choose features** opens its BMad Method settings, and **Not now** hides the offer for good. Looking for the files reads the folder and never changes it.
 - **New projects start Simple, or as you choose.** Settings > New projects sets what a project you add starts with: Simple chats (every BMad Method feature off, the default) or BMad Method with the features you pick (those this version ships). Welcome asks "Simple chats or BMad Method?" once for your first project; the answer sets only that project. Projects you already have are never changed, and nothing is written into a project's folder.
 - **Upgrading from 0.2.0 keeps everything.** Every project, chat, caution level and Always allow rule stays as it was, every project opens as Simple chats, and Welcome doesn't ask its new question. A project whose folder already has BMad Method files offers its features once on its chats page, and its BMad Method settings say so and name the default for new projects.
 

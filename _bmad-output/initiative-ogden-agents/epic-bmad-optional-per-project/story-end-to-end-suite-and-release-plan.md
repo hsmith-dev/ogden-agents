@@ -83,6 +83,8 @@ context: []
 - Local guard proof (2026-10-02, macOS, not committed): `requireBmadFeature`'s check replaced by a no-op, `pnpm run pack`, `pnpm e2e:installed --project bmad --no-deps`: test 1 passed, test 2 failed at the first probe check (`bmad-journey.spec.ts:270`, expected 409 `feature_off`, received 200 `{ piece: 'planning' }`). Restored (`git checkout`), repacked, and the `bmad` project passes again.
 - Local runs (macOS): `pnpm typecheck`, `pnpm test` (103 files, 1225 passed, 4 skipped), `pnpm e2e` (90 passed), `pnpm run pack && pnpm smoke` (OK), `pnpm e2e:installed` (39 passed, no cleanup problem reported). CI on Windows and Linux not yet run (no PR pushed).
 
+- CI on #59 (run 37008590340): every job passed except `End-to-end, installed (windows-latest)`, where the upgrade journey (unchanged by this story except its step 2 checks) failed at step 2: `bmad-use` was not rendered within 15 s. The trace showed every request to that server stalling, including in-memory GETs: `/api/v1/bmad/pieces` took 9.7 s, `/settings/new-projects` 18 s and `/sessions` 16 s, where the same requests took 10 to 400 ms seconds earlier in the run. That is the runner stall seen in 3.10, not a product or test fault. A rerun of the failed job passed all 39 tests, with the upgrade journey at 4.6 s after the same `bmad` project. No timeout was changed.
+
 ## Plan Change Log
 
 ## Review Triage Log

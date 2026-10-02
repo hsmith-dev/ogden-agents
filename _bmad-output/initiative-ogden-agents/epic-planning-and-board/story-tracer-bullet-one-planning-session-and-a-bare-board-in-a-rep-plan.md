@@ -10,7 +10,7 @@ review: 'quick'
 review_source: 'pinned'
 lenses_ran: ['quick', 'security']
 review_loop_iteration: 0
-baseline_revision: 'a3425187ece0e84d0fb1f094e49971edc13605bb'
+baseline_revision: '8dde164a75d5e0c402857f85d5eeb970724a737a'
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md'
   - '{project-root}/AGENTS.md'

@@ -12,6 +12,12 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
+/** Removes `dir` after the test, once every core opened here is closed. Returns it. */
+export function removeAfterTest(dir: string): string {
+  dirs.push(dir);
+  return dir;
+}
+
 /** A fresh temp directory, removed after the test. */
 export function tempDir(prefix = 'ogden-agents-core-'): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));

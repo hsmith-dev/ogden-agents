@@ -13,12 +13,14 @@ import { RadioGroup, RadioGroupOption } from '@/ui/radio-group';
 import { Text } from '@/ui/typography';
 import { deleteHistory, fetchWorkspace, workspaceName } from '@/workspaces/workspace-api';
 import { BmadMethodSection } from '@/workspaces/bmad-method-section';
+import { useBmadRepoNoteSlot, useNewProjectsDefaultSlot } from '@/workspaces/bmad-settings-slots';
 import { createLatestGate, updateCautionLevel, usePermissionRules, useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
 
 /**
  * `/w/:wsId/settings`: the workspace's settings (story 2.5, then the
  * caution level in 2.8): caution level, the BMad Method section (story
- * 10.5's, in `workspaces/bmad-method-section.tsx`, at `#bmad-method`), the
+ * 10.5's, in `workspaces/bmad-method-section.tsx`, at `#bmad-method`, with
+ * story 10.7's slots), the
  * Always allow rules, history deletion, and later the default agent. Story
  * 2.3 registers the route; 2.5 and 2.8 fill this file.
  */
@@ -46,7 +48,7 @@ export function WorkspaceSettingsPage() {
         ) : workspace.data === undefined ? null : (
           <>
             <CautionLevelSection wsId={wsId} />
-            <BmadMethodSection wsId={wsId} />
+            <BmadSection wsId={wsId} />
             <AlwaysAllowRulesSection wsId={wsId} name={workspaceName(workspace.data)} />
             <DeleteHistorySection wsId={wsId} name={workspaceName(workspace.data)} />
           </>
@@ -54,6 +56,13 @@ export function WorkspaceSettingsPage() {
       </PageBody>
     </>
   );
+}
+
+/** The BMad Method section with its two slots: the repo note and the default for new projects (story 10.7). */
+function BmadSection({ wsId }: { wsId: string }) {
+  const offerSlot = useBmadRepoNoteSlot(wsId);
+  const defaultSlot = useNewProjectsDefaultSlot();
+  return <BmadMethodSection wsId={wsId} offerSlot={offerSlot} defaultSlot={defaultSlot} />;
 }
 
 /** The caution ladder in the user's words (EXPERIENCE.md Caution level), strictest first. */

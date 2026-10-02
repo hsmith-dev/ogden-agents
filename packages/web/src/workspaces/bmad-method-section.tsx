@@ -59,13 +59,15 @@ export interface BmadMethodViewProps {
   onToggle: (piece: BmadPiece, on: boolean) => void;
   onUseBmad: (on: boolean) => void;
   /**
-   * Seam for entry 10.3: the "This project already uses BMad Method" offer,
-   * rendered above the main switch. Unused by this entry.
+   * Rendered above the main switch: story 10.7's note that the repo already
+   * has BMad Method files (`workspaces/bmad-settings-slots.tsx`). No wrapper
+   * when `undefined`.
    */
   offerSlot?: ReactNode;
   /**
-   * Seam for entry 10.4: the app-wide default for new projects, rendered
-   * above the main switch. Unused by this entry.
+   * Rendered above the main switch: story 10.7's line naming the app-wide
+   * default for new projects, with a link to Settings → New projects. No
+   * wrapper when `undefined`.
    */
   defaultSlot?: ReactNode;
 }

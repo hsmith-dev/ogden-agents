@@ -19,6 +19,8 @@ import {
   BMAD_COMING_SOON_REASON,
   BMAD_FILES_STAY_TEXT,
   BMAD_METHOD_PRESELECTED_PIECES,
+  BMAD_NEW_PROJECTS_LINK,
+  BMAD_REPO_HAS_BMAD_TEXT,
   BMAD_OFF_TEXT,
   BMAD_ON_TEXT,
   BMAD_PIECES_LIST_LABEL,
@@ -29,6 +31,7 @@ import {
   BMAD_USE_LABEL,
   bmadMainSwitchPieces,
   bmadNeedsUnavailableText,
+  newProjectsDefaultText,
   BMAD_OFFER_CHOOSE,
   BMAD_OFFER_NOT_NOW,
   BMAD_OFFER_TEXT,
@@ -523,6 +526,18 @@ describe('the Workspace settings section texts (story 10.5)', () => {
     expect(BMAD_SECTION_TITLE).toBe('BMad Method');
     expect(BMAD_USE_LABEL).toBe('Use BMad Method in this project');
     expect(BMAD_OFF_TEXT.endsWith(BMAD_FILES_STAY_TEXT)).toBe(true);
+  });
+
+  it('the slots (story 10.7) are plain, with no em or en dash, and name the default', () => {
+    const texts = [BMAD_REPO_HAS_BMAD_TEXT, BMAD_NEW_PROJECTS_LINK, newProjectsDefaultText([]), newProjectsDefaultText(['planning']), newProjectsDefaultText(['board', 'planning', 'builds'])];
+    for (const text of texts) {
+      expect(text, text).not.toMatch(/[\u2013\u2014]/);
+      expect(text, text).not.toMatch(/bmad-|_bmad/);
+      expect(text, text).toMatch(/^[A-Z]/);
+    }
+    expect(BMAD_REPO_HAS_BMAD_TEXT).toContain('already has BMad Method files');
+    expect(newProjectsDefaultText([])).toBe('New projects start as Simple chats.');
+    expect(newProjectsDefaultText(['board', 'planning'])).toBe('New projects start with BMad Method: Planning and Board.');
   });
 
   it('the needs reason names what is missing', () => {

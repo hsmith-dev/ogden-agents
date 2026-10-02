@@ -8,6 +8,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, 
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { echoLines, prepareInstall, startWithRetry, withTimeout, type Install, type LauncherRun } from '../../scripts/installed-package.mjs';
+import { createDataFolder020, type DataFolder020 } from '../fixtures/data-folder-0.2.0.js';
 import { packFakeAdapter, testNpmCli } from '../fixtures/fake-adapter/pack.mjs';
 import { isAlive, readPortFile, ROOT, waitUntil } from '../support.js';
 
@@ -112,6 +113,41 @@ export function ownInstall(name: string, agent: string): Install {
     reuse: { workDir: env(ENV.workDir), cacheDir: env(ENV.cacheDir), dataDir },
     env: agentEnv(agent),
   });
+}
+
+export interface UpgradeServer {
+  /** The install, set up for this server: the 0.2.0 data folder (`data.dataDir`) and the fake agent. */
+  install: Install;
+  /** The data folder as 0.2.0 left it (`fixtures/data-folder-0.2.0.ts`), with its two projects' repos. */
+  data: DataFolder020;
+  /** Stops the server if it still runs, and removes the data folder and the repos. */
+  remove(): Promise<void>;
+}
+
+/**
+ * The same installed package on a data folder as 0.2.0 left it (story 10.7):
+ * its database, as 0.2.0's migrations and server wrote it, and the
+ * `onboarding.json` 0.2.0 writes once its Welcome is finished or skipped (or
+ * when that state is first read with projects); no `preferences.json`. The
+ * fake agent runs. Nothing is installed again.
+ */
+export function upgradeServer(name: string): UpgradeServer {
+  const data = createDataFolder020({ dataDir: extraFolder(`${name}-data`) });
+  const install = prepareInstall({
+    tarball: env(ENV.tarball),
+    prefix: 'ogden-agents-e2e',
+    reuse: { workDir: env(ENV.workDir), cacheDir: env(ENV.cacheDir), dataDir: data.dataDir },
+    env: agentEnv(FAKE_AGENT),
+  });
+  const remove = async () => {
+    await stopOwnServer(install);
+    try {
+      data.remove();
+    } catch {
+      // Windows may still hold a handle briefly; the teardown removes the extra folder and reports what remains.
+    }
+  };
+  return { install, data, remove };
 }
 
 export interface Launched {

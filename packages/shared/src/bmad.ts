@@ -324,3 +324,20 @@ export function bmadMainSwitchPieces(available: Iterable<BmadPiece>): BmadPiece[
   const pieces = BMAD_METHOD_PRESELECTED_PIECES.filter((piece) => shipped.has(piece) && bmadPieceNeeds(piece).every((need) => shipped.has(need)));
   return canonicalBmadPieces(pieces.flatMap((piece) => [piece, ...bmadPieceNeeds(piece)]));
 }
+
+// ---- Workspace settings section slots (entry 10.7) ----
+
+/**
+ * The note in a project's BMad Method section when its repo already has
+ * `_bmad/` and every piece is off: context, not the offer, so it has no
+ * buttons and shows whatever the offer's Not now said.
+ */
+export const BMAD_REPO_HAS_BMAD_TEXT = "This project's folder already has BMad Method files. Ogden Agents leaves them as they are.";
+
+/** The line naming the app-wide default for new projects ("New projects start as Simple chats."). */
+export function newProjectsDefaultText(pieces: readonly BmadPiece[]): string {
+  return pieces.length === 0 ? 'New projects start as Simple chats.' : `New projects start with BMad Method: ${labelList(canonicalBmadPieces(pieces))}.`;
+}
+
+/** The link after {@link newProjectsDefaultText}, to Settings → New projects. */
+export const BMAD_NEW_PROJECTS_LINK = 'Change the default for new projects';

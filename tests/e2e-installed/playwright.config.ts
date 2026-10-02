@@ -38,14 +38,15 @@ export default defineConfig({
   // In order: the gate checks and their proof; the hold proof, epic 2's
   // chat journey (story 2.13), epic 9's first-run journey (story 9.7) and
   // epic 3's terminal journey (story 3.10, with its install without
-  // optional dependencies), each on a server of its own from the same
-  // install; then epic 1's journey on the first server, last since it quits it.
+  // optional dependencies) and the 0.2.0 upgrade (story 10.7), each on a
+  // server of its own from the same install; then epic 1's journey on the first server, last since it quits it.
   projects: [
     { name: 'gate', testMatch: /(^|[\\/])(gate|bypass)\.spec\.ts$/ },
     { name: 'hold-proof', testMatch: /(^|[\\/])hold-proof\.spec\.ts$/, dependencies: ['gate'] },
     { name: 'chat', testMatch: /(^|[\\/])chat-journey\.spec\.ts$/, dependencies: ['hold-proof'] },
     { name: 'onboarding', testMatch: /(^|[\\/])onboarding-journey\.spec\.ts$/, dependencies: ['chat'] },
     { name: 'terminal', testMatch: /(^|[\\/])terminal-journey\.spec\.ts$/, dependencies: ['onboarding'] },
-    { name: 'journey', testMatch: /(^|[\\/])journey\.spec\.ts$/, dependencies: ['terminal'] },
+    { name: 'upgrade', testMatch: /(^|[\\/])upgrade-journey\.spec\.ts$/, dependencies: ['terminal'] },
+    { name: 'journey', testMatch: /(^|[\\/])journey\.spec\.ts$/, dependencies: ['upgrade'] },
   ],
 });

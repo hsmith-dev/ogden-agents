@@ -276,6 +276,16 @@ describe('folder-watch (story 4.8)', () => {
     await waitFor(() => settled() === 1, 'the same-size rewrite');
   });
 
+  it('a file ageing out of the racy window unchanged never settles again', async () => {
+    const root = tempTree();
+    const { settled } = await watchOut(root, { timing: { maxDirs: 0 } });
+    writeFileSync(join(root, 'out', 'epic-a', 'plan.md'), 'status: built\n');
+    await waitFor(() => settled() === 1, 'the write');
+    // Past the 2 s window in which its content is part of the fingerprint.
+    await sleep(2600);
+    expect(settled()).toBe(1);
+  }, 10_000);
+
   it('a watcher error like ENOSPC falls back to polling for good', async () => {
     const root = tempTree();
     const handlers: Array<(error: Error) => void> = [];

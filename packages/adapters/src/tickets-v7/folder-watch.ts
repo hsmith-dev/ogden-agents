@@ -186,7 +186,14 @@ const codeOf = (error: unknown): string => (typeof (error as { code?: unknown } 
 const byName = (a: Dirent, b: Dirent) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
 
 /** Scans `root` (see the header) within `maxEntries`. */
-async function scanTree(root: string, maxEntries: number): Promise<ScanResult> {
+/**
+ * Each file's content hash taken while it was racy, by path, with the stat it
+ * had then: reused once the file ages out of the racy window unchanged, so a
+ * file merely getting older never changes the fingerprint.
+ */
+type RacyCache = Map<string, { stat: string; hash: string }>;
+
+async function scanTree(root: string, maxEntries: number, racyCache: RacyCache): Promise<ScanResult> {
   let rootStat: BigIntStats;
   try {
     rootStat = await lstat(root, { bigint: true });
@@ -203,6 +210,7 @@ async function scanTree(root: string, maxEntries: number): Promise<ScanResult> {
   const hash = createHash('sha256');
   const racyAfter = BigInt(Date.now() - RACY_MS) * 1_000_000n;
   let racyBudget = RACY_BUDGET_BYTES;
+  const seen = new Set<string>();
   const dirs = new Map<string, string>([[root, identityOf(rootStat)]]);
   const queue: string[] = [root];
   let entries = 0;
@@ -248,15 +256,20 @@ async function scanTree(root: string, maxEntries: number): Promise<ScanResult> {
         queue.push(each.full);
       } else if (each.stat.isFile()) {
         const { size, mtimeNs, ctimeNs, ino } = each.stat;
-        let racy = '';
+        const statKey = `${size}\0${mtimeNs}\0${ctimeNs}\0${ino}`;
+        const cached = racyCache.get(each.full);
+        let racy = cached?.stat === statKey ? cached.hash : '';
         if ((mtimeNs >= racyAfter || ctimeNs >= racyAfter) && size <= BigInt(racyBudget)) {
           racyBudget -= Number(size);
           racy = await contentHash(each.full, size);
+          racyCache.set(each.full, { stat: statKey, hash: racy });
         }
+        if (racyCache.has(each.full)) seen.add(each.full);
         hash.update(`${relative(root, each.full)}\0${size}\0${mtimeNs}\0${ctimeNs}\0${ino}\0${racy}\n`);
       }
     }
   }
+  for (const file of [...racyCache.keys()]) if (!seen.has(file)) racyCache.delete(file);
   // Folders queued past the cap were never listed: not watched either.
   for (const dir of queue) dirs.delete(dir);
   return { missing: false, fingerprint: hash.digest('hex'), dirs, overflow };
@@ -271,6 +284,7 @@ export async function startFolderWatch({ root, onSettled, timing = {}, watchDir 
     events: number;
   }
   const watchers = new Map<string, Armed>();
+  const racyCache: RacyCache = new Map();
   /** Paths an event named since the last scan: a folder among them is re-armed. */
   const hinted = new Set<string>();
   let closed = false;
@@ -458,7 +472,7 @@ export async function startFolderWatch({ root, onSettled, timing = {}, watchDir 
   const scanOnce = async () => {
     let result: ScanResult;
     try {
-      result = await scanTree(root, config.maxScanEntries);
+      result = await scanTree(root, config.maxScanEntries, racyCache);
     } catch {
       // Never crash: treat it as a change the next event or poll retries.
       return;

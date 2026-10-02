@@ -23,6 +23,8 @@ For a project with the matching piece on (CAP-19): Ogden Agents reads none of th
 
 Every status change goes through `tickets.py mark <ref> <status>`. Marking with a resume status clears the blocked fields. Only a human approval sets `done`.
 
+On the user's request (**Save the lessons**), Ogden Agents commits the project's `AGENTS.md` and an epic's retrospective file to the checked-out branch, locally; it edits neither (CAP-13).
+
 ## Reuse first
 
 - Dispatch and agent profiles: bmad-loop, forked. v7 `tickets.toml` support is added in the fork and opened as an upstream PR.
@@ -47,6 +49,7 @@ Every status change goes through `tickets.py mark <ref> <status>`. Marking with 
 - v7 `tickets.toml` dispatch in bmad-loop.
 - Plain-language labels and descriptions per skill ("Describe your idea", "Build next story").
 - Pause hooks for UI approval via `plan_checkpoint` and `done_checkpoint` in `tickets.toml`.
+- Epic-scoped actions and next steps in skill metadata (the retrospective on an epic, its lessons and action items).
 
 All of these are carried in the forks of BMAD-METHOD and bmad-loop and opened as upstream PRs. A patch is dropped once upstream accepts it.
 

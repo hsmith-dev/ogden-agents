@@ -7,7 +7,7 @@ paradigm: 'hexagonal (ports and adapters) with an append-only event log'
 scope: 'Ogden Agents as a whole: launcher, local server, browser UI, agent/tool adapters, and its BMAD-METHOD and bmad-loop forks'
 status: final
 created: '2026-09-29'
-updated: '2026-10-01'
+updated: '2026-10-02'
 binds: [CAP-1, CAP-2, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-12, CAP-13, CAP-14, CAP-15, CAP-16, CAP-17, CAP-18, CAP-19]
 sources: ['../spec-ogden-agents/spec-ogden-agents.md']
 companions: []
@@ -162,6 +162,7 @@ graph LR
   - Plain-language labels live in fork metadata.
   - Note (epic 4, 2026-10-01): the `bmad-catalog` adapter may also name the `bmad` setup skill, because it runs that skill's `setup.py` to install BMAD into a project (CAP-2). No rule changes.
   - Note (epic 10, 2026-10-01): the catalog is built only for workspaces with Planning on (AD-22). AD-1's port list is unchanged: `BmadCatalogPort` gains a read-only `detect` (does the repo already have `_bmad/`). No rule changes.
+  - Note (epic 7, 2026-10-02): the catalog is built for workspaces with Planning or Retrospectives on; with only Retrospectives on, the UI shows only epic-scoped actions, on the board. A catalog action may be epic-scoped and carry more than one next step, read from fork metadata. No rule changes.
 
 ### AD-13 — Forks are bundled and locked [ADOPTED]
 
@@ -219,6 +220,7 @@ graph LR
   - Every run has a maximum wall-clock duration, after which core stops it and marks it blocked.
   - After a run, core runs verification before the UI may show `built`: plan status, an independent test re-run, and a non-empty diff.
   - Merging and `done` happen only through the approve action. If the merge conflicts, the run is blocked as needing a rebase. It is never force-merged.
+  - Note (epic 7, 2026-10-02): besides approve's merge, Ogden's only commit is **Save the lessons**, made only when the user clicks it: exactly `AGENTS.md` and one retrospective file, on the branch the main checkout has checked out, locally, never pushed; refused while a merge or rebase is in progress. No rule changes.
 
 ### AD-18 — One design system [ADOPTED]
 
@@ -269,6 +271,7 @@ graph LR
   - The default pieces for new projects are an install-level preference kept by core in the data directory; it starts empty (Simple).
   - The install reports which pieces it ships; a piece is turned on only when available, and one not yet shipped is shown disabled as coming soon. AD-22 (the user's choice) and AD-14 (the project's installed capabilities) both gate a surface: it shows only when its piece is on, and then shows the reduced-mode notice if a capability is missing.
   - Developer mode and the terminal toggle (AD-6) are independent of the pieces.
+  - Note (epic 7, 2026-10-02): epic 7 registers `retrospectives`, which needs `board` (not `builds`; user decision). Ogden never starts a retrospective on its own: it starts only from the user's click on the board or the finished-epic offer, and the offer and the verdict read do no work for a workspace with the piece off. The look-back is given short build summaries of the epic's runs, never full transcripts. No rule changes.
 
 ## Consistency Conventions
 
@@ -365,7 +368,7 @@ Delivery: GitHub Actions runs the tests on macOS, Windows and Linux for every ch
 | CAP-10 verification | core | AD-17 |
 | CAP-11 | retired (no cost tracking) | AD-8 |
 | CAP-12 review and approve | core approve action, `vcs-git` | AD-10, AD-17 |
-| CAP-13 retrospectives | catalog-driven planning session | AD-12 |
+| CAP-13 retrospectives | catalog-driven planning session; board epic header; `tickets-v7` verdict read; `vcs-git` lessons commit | AD-12, AD-17, AD-22 |
 | CAP-14 notifications | `notify-*` | AD-1 |
 | CAP-15 every agent | `acp-*`, bmad-loop profiles | AD-1, AD-4 |
 | CAP-16 sign-in | `acp-*` authenticate, `secrets-keyring` | AD-16, AD-21 |

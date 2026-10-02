@@ -55,8 +55,8 @@ A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the str
   - **intent:** A user reviews a diff and its review findings, then approves (merge and mark done) or rejects and retries.
   - **success:** Approving a built ticket merges its branch and marks it done, and no ticket reaches done without approval.
 - **CAP-13**
-  - **intent:** In a project with Retrospectives turned on (CAP-19), when an epic completes, a retrospective records evidence-based findings and adds recurring pitfalls to the project's `AGENTS.md`.
-  - **success:** After an epic completes, a retrospective file exists and later runs include the new pitfall.
+  - **intent:** In a project with Retrospectives turned on (CAP-19), when an epic completes the user looks back on it from the UI: a retrospective records evidence-based findings beside the epic, its proposed pitfalls are added to the project's `AGENTS.md`, and its action items become tickets, each with the user's approval.
+  - **success:** After an epic completes, a retrospective file exists beside it, and the next build has the new pitfall in its `AGENTS.md`.
 - **CAP-14**
   - **intent:** In a project with Unattended builds turned on (CAP-19), users are notified when a ticket is blocked or is ready for review.
   - **success:** Each of these events reaches a configured webhook.

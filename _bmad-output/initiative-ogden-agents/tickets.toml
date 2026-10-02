@@ -64,8 +64,9 @@ after = [{ epic = 5, needs = "finished runs with build records" }]
 
 # ---- v1.1 (planned; outside the v1 initiative's Done when) ----
 
+# Epic ids (2026-10-02): 11 is epic-build-runs-and-notifications (5b, on docs/epic-5-inception, assigned first); 12 is v1.1 Codex and Grok, renumbered from 11 to avoid the clash.
 [[epic]]
-id = 11
+id = 12
 slug = "epic-v1-1-codex-and-grok"
 title = "v1.1: Codex and Grok beside Claude Code"
 covers = ["CAP-15", "CAP-3", "CAP-5", "CAP-16"]

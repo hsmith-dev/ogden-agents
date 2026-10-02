@@ -62,6 +62,15 @@ title = "Each finished epic teaches the next one"
 covers = ["CAP-13"]
 after = [{ epic = 5, needs = "finished runs with build records" }]
 
+# ---- v1.1 (planned; outside the v1 initiative's Done when) ----
+
+[[epic]]
+id = 11
+slug = "epic-v1-1-codex-and-grok"
+title = "v1.1: Codex and Grok beside Claude Code"
+covers = ["CAP-15", "CAP-3", "CAP-5", "CAP-16"]
+after = [{ epic = 6, needs = "the agents-as-a-choice contracts (6.3) and the shared ACP client moved into acp-base (6.4)" }]
+
 # ---- v2 (planned; outside the v1 initiative's Done when) ----
 
 [[epic]]

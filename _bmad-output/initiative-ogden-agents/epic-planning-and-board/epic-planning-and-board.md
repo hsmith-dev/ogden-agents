@@ -44,7 +44,7 @@ Each line maps to a spec capability in `covers` and names the architecture decis
 
 ## Boundaries
 
-Planning and the board, with Claude Code as the agent that runs planning sessions. No dispatch of builds, Build buttons, Runs tab, review or approve (epic 5): the board shows "Waits for" but no Build action. No other agents (epic 6): the catalog, planning sessions and setup stay agent-neutral behind ports, so epic 6 adds adapters only. No tracker stores (spec Non-goals) and no in-app markdown viewer or editor (epic 8, v2). The fork patches it needs, such as plain-language labels, are carried and sent upstream from here; bmad-loop's v7 patch belongs to epic 5.
+Planning and the board, with Claude Code as the agent that runs planning sessions. No dispatch of builds, Build buttons, Runs tab, review or approve (epic 5): the board shows "Waits for" but no Build action. No other agents: the catalog, planning sessions and setup stay agent-neutral behind ports, so epic 6 adds only Antigravity's skill folder and invocation (6.8), if its spike is a go, and other agents are v2 (user, 2026-10-02). No tracker stores (spec Non-goals) and no in-app markdown viewer or editor (epic 8, v2). The fork patches it needs, such as plain-language labels, are carried and sent upstream from here; bmad-loop's v7 patch belongs to epic 5.
 
 ## References
 

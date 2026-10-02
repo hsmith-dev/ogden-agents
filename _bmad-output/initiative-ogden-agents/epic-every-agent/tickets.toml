@@ -1,49 +1,52 @@
-# Epic 6 breakdown: DRAFT by autonomous inception, 2026-10-02, not approved. Table order is the build order; ids are proposed and fixed once approved.
-# References to other epics use "<epic id>.<entry id>". Epic 5 has no tickets.toml on this base (its inception is on docs/epic-5-inception), so 11 and 14 name "epic-unattended-builds" until it merges; then pin 11 to "5.6", "5.7" and "5.9" (its live check needs dispatch and review) and 14 to "5.11", or to epic 11's release if epic 11 builds before this epic.
-# Live checks use the developer's own Codex and Gemini CLI logins or API keys, in a scratch repo, never Ogden Agents's own repo.
+# Epic 6 breakdown (approved by the user 2026-10-02, reshaped from the autonomous draft to "Antigravity if possible"). Table order is the build order; ids never change once approved.
+# Entry 1 ends with the user's go or no-go. On no-go, entries 2 to 10 are dropped and the decision is recorded in the epic's Notes and the initiative.
+# References to other epics use "<epic id>.<entry id>". The standalone permission modes story (branch story/permission-modes) is not in this tree yet; entry 3 names it in `unknown` and adds it to `after` once it is placed.
+# Live checks use the developer's own Google account or Gemini API key, in a scratch repo, never Ogden Agents's own repo.
 
 [[entry]]
 id = 1
 type = "spike"
-title = "Probe Codex and Gemini CLI over ACP on three OSes"
-description = "Adds a temporary CI job, Windows first, then macOS and Linux, that installs the pinned codex-acp and gemini-cli into a temp data folder with npm ci, spawns each over ACP from a script on @agentclientprotocol/sdk, and records the advertised auth methods and which work headless, new, load and resume, the permission option ids and kinds each sends for a shell command, whether `codex resume <id>` and `gemini --resume <uuid>` reopen the ACP session, binary resolution (including .cmd shims on Windows), the stop-the-tree behaviour, and whether each agent's native sandbox runs on that OS; the hitl step is the user reading the results and answering which agents are in v1."
-verify = "The probe job's logs on all three OSes answer each question for both agents, the results are written into the plan and proposed as agent-matrix.md rows, and the temporary job is removed or left disabled."
-covers = ["E6-R9", "E6-R4", "E6-R5", "E6-R6"]
+title = "Can Ogden drive Antigravity over ACP? Probe it and decide go or no-go"
+description = "Adds a temporary CI job, Windows first, then macOS and Linux, that downloads the registry's pinned antigravity-acp archive for the OS into a temp data folder, checks its SHA-256, spawns agy_acp_server over ACP from a script on @agentclientprotocol/sdk, and records: the binary's version and how to read it from an existing copy, initialize's capabilities and auth methods, which sign-in works without a terminal (oauth-personal's URL or browser, gemini-api-key and how the key is given), new, load, resume and list, the session modes it offers and what each means, the permission option ids and kinds it sends for a shell command, its skill folder, whether the agy CLI can resume an ACP session id, stopping the process tree, and Windows behaviour; it also collects Google's terms on third-party clients; the hitl step is the user reading the results with the terms and deciding go or no-go."
+verify = "The probe's logs on all three OSes answer each question, the results are written into the plan and proposed as agent-matrix.md rows, the user's go or no-go is recorded as a dated Decision in the epic's Notes, and the temporary job is removed or left disabled."
+covers = ["E6-R8", "E6-R4", "E6-R5", "E6-R6"]
 after = []
 hitl = true
 risk = "high"
-unknown = "Whether either agent's sign-in can finish headless without a TTY on Windows, and whether Gemini's ACP session id resumes in its CLI."
+unknown = "Whether a Google sign-in through Ogden is allowed by Antigravity's terms, whether sign-in finishes without a terminal on Windows and Linux, and how an API key reaches the server without Ogden writing its settings file."
+references = ["_bmad-output/initiative-ogden-agents/spec-ogden-agents/agent-matrix.md", "https://github.com/agentclientprotocol/registry/blob/main/antigravity-acp/agent.json", "https://antigravity.google/terms", "https://github.com/zed-industries/zed/issues/63464", "https://github.com/zed-industries/zed/issues/64114"]
 
 [[entry]]
 id = 2
 type = "story"
-title = "Tracer bullet: a Codex chat beside a Claude Code chat in one project"
-description = "Adds agentId to Session (a drizzle migration where existing rows read claude-code) and to the create-session request, a minimal agent registry by AgentId in the server wiring that core looks up through, a bare acp-codex adapter copied from acp-claude-code's chat path, and a bare agent picker in the composer for new chats, so one project holds a Claude Code chat and a Codex chat working at once; the hitl step is a live check with a real Codex login."
-verify = "In CI against two fake ACP agents, two sessions in one workspace each reach their own agent and both stream at once; live, a Codex chat and a Claude Code chat in one scratch project both answer, and the sidebar lists both."
+title = "Tracer bullet: an Antigravity chat beside a Claude Code chat in one project"
+description = "Adds agentId to Session (a drizzle migration where existing rows read claude-code) and to the create-session request, a minimal agent registry by AgentId in the server wiring that core looks up through, a bare acp-antigravity adapter copied from acp-claude-code's chat path that spawns the spike's pinned binary, and a bare agent picker in the composer for new chats (the binary comes from the spike's download, found through a development-only environment variable, and the developer signs in out of band into Antigravity's own folder, because install and sign-in from the UI are entries 6 and 7), so one project holds a Claude Code chat and an Antigravity chat working at once; the hitl step is a live check with a real Google sign-in or API key."
+verify = "In CI against two fake ACP agents, two sessions in one workspace each reach their own agent and both stream at once; live, an Antigravity chat and a Claude Code chat in one scratch project both answer, and the sidebar lists both."
 covers = ["E6-R1", "E6-R2", "E6-R4"]
 after = [1, "2.7", "9.1"]
 hitl = true
 risk = "high"
-unknown = "Whether a session's agent can be looked up per call in core's chat use-cases without changing AgentPort's methods (assumed: a lookup port passed to the chat use-cases)."
+unknown = "Whether a session's agent can be looked up per call in core's chat use-cases without changing AgentPort's methods (assumed: a lookup port passed to the chat use-cases), and whether the standalone permission modes story, which also touches the composer and the Session shape, has merged first; if it is in the tree, this entry waits on it."
 
 [[entry]]
 id = 3
 type = "story"
 title = "Epic contracts and stubs: agents as a choice"
-description = "Freezes in shared: the agent descriptor list response (id, product name, provider name, chat, terminal resume, builds, sign-in methods, key variable, install state); the workspace default agent field in WorkspaceSettings and its settings_changed payload, which old events still parse; error codes and plain reasons (agent_not_installed, agent_signed_out, agent_unknown); key redaction patterns per provider, AGENT_ENV_KEYS derived from each registered agent's key variable, and .codex, .gemini, .agents and gemini.md in core's PROTECTED_NAMES. Makes core refuse a new chat for an agent that is not installed or not signed in with agent_not_installed or agent_signed_out and the action to fix it, and makes the terminal availability check (createTerminalAvailability, wired once in start.ts) look up the session's agent through the registry. Pre-registers the codex and gemini-cli wiring slots in the server's agent registry with their memory stubs, so entries 5 to 8 fill them and never edit start.ts or core's protected names. Adds the architecture test that core and shared name no agent id. Generalizes the fake ACP agent to play Codex and Gemini (their auth method ids, option ids, load-only resume) through FAKE_ACP_* variables. Adds memory stubs for each new adapter, and pins/ folders for codex and gemini with the spike's versions, checked by scripts/agent-pins.mjs. Every later entry builds on these shapes alone."
-verify = "Contract tests parse every new shape and the old settings_changed payload; the architecture test fails on a planted agent id in core and in shared; a new chat for a missing or signed-out fake agent is refused with its code; terminal availability answers per session's agent; the fake agent drives each personality in a test; agent-pins --check passes on three OSes."
-covers = ["E6-R1", "E6-R2", "E6-R5", "E6-R9"]
+description = "Freezes in shared the agent-neutral agent list response (id, product name, provider, sign-in methods, key format, install state, terminal resume, and the permission modes each agent declares, from the permission modes story's AgentPort.permissionModes); the workspace default agent field in WorkspaceSettings and its settings_changed payload, which old events still parse; error codes and plain reasons (agent_not_installed, agent_signed_out, agent_unknown); Antigravity's key redaction pattern, AGENT_ENV_KEYS derived from each registered agent, and .gemini and .agents in core's PROTECTED_NAMES. Makes core refuse a new chat for an agent that is not installed or not signed in with its code and the action to fix it, and makes terminal availability (createTerminalAvailability, wired once in start.ts) look up the session's agent through the registry. Pre-registers the antigravity wiring slot in the server registry with memory stubs for acp-antigravity and setup-antigravity, so entries 5 and 7 fill them and never edit start.ts. Adds the architecture test that core and shared name no agent id. Generalizes the fake ACP agent to play Antigravity (its auth method ids, mode ids, option ids and resume) through FAKE_ACP_* variables. Adds an antigravity pins file (archive URL and SHA-256 per OS, from the spike), checked by scripts/agent-pins.mjs. Every later entry builds on these shapes alone."
+verify = "Contract tests parse every new shape and the old settings_changed payload; the architecture test fails on a planted agent id in core and in shared; a new chat for a missing or signed-out fake agent is refused with its code; terminal availability answers per session's agent; the agent list shows Claude Code's three modes and the fake Antigravity's declared ones; agent-pins --check passes on three OSes."
+covers = ["E6-R1", "E6-R2", "E6-R5", "E6-R8"]
 after = [2, "3.7"]
 hitl = false
 risk = "medium"
+unknown = "Whether the standalone permission modes story has merged by then; this entry builds on its PermissionMode and AgentPort.permissionModes and waits on it once it is in the tree."
 references = ["packages/shared/src/entities.ts", "packages/shared/src/setup.ts", "packages/server/src/terminal-availability.ts", "tests/fixtures/fake-acp-agent.mjs", "scripts/agent-pins.mjs", "tests/architecture.test.ts"]
 
 [[entry]]
 id = 4
 type = "story"
-title = "Extract the shared ACP client from acp-claude-code"
-description = "Moves the agent-neutral parts of acp-claude-code/claude-code-agent.ts (ACP wiring, the session/update and AD-4 state mapping, the resume, load, then new reopen order, permission requests by option kind, auth_required, mask.ts and timeouts) into packages/adapters/src/acp-base, stopping processes through the existing packages/adapters/src/process-tree.ts. acp-claude-code keeps only its spawn, auth methods, path fields, terminal resume and transcript reader, and the tracer's acp-codex moves onto the base. Claude Code's behaviour does not change. The base gains the one rule both new agents need: a permission request that offers neither an allow_once nor a reject_once option is cancelled and logged, never answered with another option."
-verify = "Every existing Claude Code chat, resume, permission and terminal test passes unchanged, acp-claude-code and acp-codex share no copied code, and a fake request offering only allow_always is cancelled and logged."
+title = "Move the shared ACP client out of acp-claude-code"
+description = "Moves the agent-neutral parts of acp-claude-code/claude-code-agent.ts (ACP wiring, the session/update and AD-4 state mapping, the resume, load, then new reopen order, permission requests by option kind, session modes, auth_required, mask.ts and timeouts) into packages/adapters/src/acp-base, stopping processes through the existing process-tree.ts. acp-claude-code keeps only its spawn, auth methods, path fields, mode ids, terminal resume and transcript reader, and the tracer's acp-antigravity moves onto the base. Claude Code's behaviour does not change. The base gains one rule: a permission request that offers neither an allow_once nor a reject_once option is cancelled and logged, never answered with another option."
+verify = "Every existing Claude Code chat, resume, permission, mode and terminal test passes unchanged, acp-claude-code and acp-antigravity share no copied code, and a fake request offering only allow_always is cancelled and logged."
 covers = ["E6-R3"]
 after = [3]
 hitl = false
@@ -53,120 +56,72 @@ references = ["packages/adapters/src/acp-claude-code/claude-code-agent.ts"]
 [[entry]]
 id = 5
 type = "story"
-title = "Codex chat: permissions, resume and the terminal toggle"
-description = "Completes acp-codex on the shared base. Codex's tool input fields map to card paths. Allow once and Deny pick the options of kind allow_once and reject_once, never allow_for_session or a policy amendment. Reopen uses session/resume. terminalResume runs `codex resume <id>` from the pinned binary, with its transcript reader for import after switching back, if the spike confirmed the id."
-verify = "Against the fake agent's Codex personality, a shell command waits for its card, Always allow is enforced by core with no allow option sent to the agent, a chat continues after a server restart, and the terminal toggle is offered for Codex and switches there and back."
+title = "Antigravity chat: permission cards, modes, resume and the terminal toggle if supported"
+description = "Completes acp-antigravity on the shared base. Its tool input fields map to card paths. Allow once and Deny pick the options of kind allow_once and reject_once, never a session-wide option. It declares and maps only the permission modes the spike matched (Ask always; Auto and Skip all only where its own modes mean the same), and a mode change it reports that asks less than the chat's mode drops the chat to Ask, as the permission modes story does for Claude Code. Reopen uses the order the spike found (session/resume, else session/load, else the stored-transcript fallback). terminalResume is added only if the spike showed the agy CLI resumes the ACP session id; otherwise the toggle reports agent_unsupported."
+verify = "Against the fake agent's Antigravity personality, a shell command waits for its card, Always allow is enforced by core with no allow option sent to the agent, an undeclared mode is shown unavailable and refused, a chat continues after a server restart, and the terminal toggle matches the spike's result."
 covers = ["E6-R4", "E6-R6", "E6-R1"]
 after = [4, "3.8"]
 hitl = false
 risk = "medium"
-unknown = "Whether Codex writes a transcript Ogden can import after a terminal turn, as Claude Code's JSONL is."
+unknown = "Whether Antigravity's own modes match Auto or Skip all closely enough to declare them, and whether it writes a transcript Ogden can import."
 
 [[entry]]
 id = 6
 type = "story"
-title = "Codex install, sign-in and API key from the UI"
-description = "Adds setup-codex behind AgentSetupPort. Install puts the pinned codex-acp into the data folder as 9.3 does. Sign-in uses the ChatGPT browser or device-code login by the route the spike chose, with the URL or code shown in the agent card. The API key goes through the keychain as agent-api-key/codex and is passed only as CODEX_API_KEY in Codex's child environment. Saving the key checks it with OpenAI first, and the setup status names OpenAI as the provider, which entry 9's generic agent card shows. This entry owns the sign-in-through-ACP-authenticate path in the setup adapter pattern, which entry 8 reuses for Gemini."
-verify = "Against fake install and login fixtures on three OSes, Settings: Agents installs Codex and signs in with each method, a saved key reaches only Codex's child environment, and a scan of the database, the event log and the logs finds no key; live, a real ChatGPT login and a real key each chat."
-covers = ["E6-R5"]
-after = [9]
-hitl = false
-risk = "high"
-unknown = "Whether codex-acp's chat-gpt method opens the browser itself or hands the URL to the client."
-references = ["packages/adapters/src/setup-claude-code/install.ts", "packages/adapters/src/setup-claude-code/api-key.ts"]
-
-[[entry]]
-id = 7
-type = "story"
-title = "Gemini CLI chat: permissions, resume and context"
-description = "Adds acp-gemini on the shared base, spawning the pinned `gemini --acp`. Gemini's tool input fields map to card paths. Allow once and Deny pick allow_once and reject_once, never ProceedAlways. Reopen uses session/load, else the stored-transcript fallback. AGENTS.md is set as a context file without writing into the repo. terminalResume runs `gemini --resume <uuid>` only if the spike confirmed it; otherwise the toggle reports agent_unsupported."
-verify = "Against the fake agent's Gemini personality, a shell command waits for its card, a chat continues after a restart through session/load, the terminal toggle matches the spike's result, the spawn carries the AGENTS.md context setting, and a repo file-tree hash is unchanged by a Gemini chat in a Simple project."
-covers = ["E6-R4", "E6-R6", "E6-R7"]
-after = [4]
-hitl = false
-risk = "medium"
-unknown = "Whether Gemini CLI takes its context file name from an environment variable or flag, so Ogden writes no .gemini/settings.json."
-
-[[entry]]
-id = 8
-type = "story"
-title = "Gemini CLI install, sign-in and API key from the UI"
-description = "Adds setup-gemini behind AgentSetupPort. Install puts the pinned @google/gemini-cli into the data folder. Sign-in uses Google login (oauth-personal) by the route the spike chose, reusing entry 6's ACP-authenticate sign-in path. The API key goes through the keychain as agent-api-key/gemini-cli and is passed only as GEMINI_API_KEY. Saving the key checks it with Google first, and the setup status names Google as the provider. Vertex AI is not offered."
-verify = "Against fake install and login fixtures on three OSes, Settings: Agents installs Gemini CLI and signs in with each method, a saved key reaches only Gemini's child environment, and a scan of the database, the event log and the logs finds no key; live, a real Google login and a real key each chat."
-covers = ["E6-R5"]
-after = [6]
-hitl = false
-risk = "high"
-unknown = "Whether Gemini's oauth-personal finishes headless through ACP authenticate on Windows."
-
-[[entry]]
-id = 9
-type = "story"
-title = "Pick the agent per chat and per project"
-description = "Builds the designed agent picker in the composer footer for new chats (installed and signed-in agents enabled, others with their reason and a link to Settings: Agents), the default agent in Workspace settings through PATCH settings and workspace.settings_changed, the agent named on every sidebar row, the session header and Needs you, Welcome offering every agent with the chosen one becoming the default, replaces the web's AGENT_ID and AGENT_NAME constants (chat-api.ts, sign-in-again.tsx, status-sidebar.tsx and the other users) with the agent list from 3's response, and makes the agent card and Sign in again generic: the card names the provider from the setup status and shows a sign-in URL or device code when the setup adapter gives one, which entries 6 and 8 supply (closes the 9.2 Anthropic-wording deferral)."
-verify = "Playwright against two fake agents: a new chat preselects the project's default, changing the default in one tab shows in another without a reload, a signed-out agent is shown disabled with its reason, every sidebar row names its agent, and grep finds no AGENT_NAME constant left in packages/web."
-covers = ["E6-R1"]
-after = [3]
+title = "Pick the agent per chat and the default per project"
+description = "Builds the designed agent picker in the composer footer for new chats (installed and signed-in agents enabled, others with their reason and a link to Settings: Agents), the default agent in Workspace settings through PATCH settings and workspace.settings_changed, the agent named on every sidebar row, the session header and Needs you, Welcome offering both agents with the chosen one becoming the install default beside 10.4's default pieces; replaces the web's AGENT_ID and AGENT_NAME constants (chat-api.ts, sign-in-again.tsx, status-sidebar.tsx and the other users) with entry 3's agent list, shows the mode picker's choices from the session's agent, and makes the agent card and Sign in again generic: the card names the provider from the setup status and shows a sign-in URL or code when the setup adapter gives one, which entry 7 supplies (closes the 9.2 Anthropic-wording deferral)."
+verify = "Playwright against two fake agents: a new chat preselects the project's default, changing the default in one tab shows in another without a reload, a signed-out agent is shown disabled with its reason, every sidebar row names its agent, the mode picker lists only the session agent's modes, and grep finds no AGENT_NAME constant left in packages/web."
+covers = ["E6-R1", "E6-R2"]
+after = [3, "10.4"]
 hitl = false
 risk = "medium"
 references = ["packages/web/src/chat/chat-api.ts", "packages/web/src/onboarding/welcome-model.ts", "packages/web/src/agents/agent-card.tsx", "_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#component-patterns"]
 
 [[entry]]
-id = 10
+id = 7
 type = "story"
-title = "BMad skills for every agent where Planning is on, nothing where it is off"
-description = "Extends 4.3's setup to place the bundled skills in each in-use agent's skill folder (.agents/skills for Codex and Gemini CLI, alongside .claude/skills), only for projects with Planning on. Each agent adapter formats the planning skill invocation 4.6 asks for (Codex's $skill syntax, Gemini's prompt form). 10.6's simple-project test is extended so that no agent's session start carries BMad skill or text with every piece off. Entries 11 and 12 rely on these skill folders for builds."
-verify = "In a fixture repo with Planning on, a planning session with the fake Codex and fake Gemini agents receives its adapter's invocation and the skills exist in .agents/skills; with every piece off, each fake agent receives no BMad text and the repo's file-tree hash is unchanged."
+title = "Antigravity install, sign-in and API key from the UI"
+description = "Completes setup-antigravity behind AgentSetupPort. Install downloads the pinned archive for this OS into <dataDir>/agents/antigravity/, checks its SHA-256 and unpacks it; an existing copy found where the spike showed one lives is used only when its version and hash match the pin; nothing is installed globally. Sign-in uses Google login by the route the spike chose, with the URL or code shown in entry 6's generic agent card. The API key goes through the keychain as agent-api-key/antigravity and reaches only Antigravity's process, by the route the spike found; key delivery lives only in setup-antigravity and entry 3's AGENT_ENV_KEYS, and acp-antigravity (entry 5) spawns with the environment the registry gives it, so the two never edit the same code; the setup status names Google as the provider, and on an OS the spike found unsupported it reports Antigravity as not available on this computer with a plain reason, which entry 6's card and picker show. Enterprise methods (oauth-business, agent-platform) are not offered."
+verify = "Against fake archive and login fixtures on three OSes, Settings: Agents installs Antigravity, refuses an archive whose hash does not match, reuses a matching existing copy, and signs in with each offered method; a saved key reaches only Antigravity's child process, and a scan of the database, the event log and the logs finds no key; live, a real Google sign-in and a real key each chat; on an OS marked unsupported, the card and picker show the reason and no install is offered."
+covers = ["E6-R5", "E6-R8"]
+after = [6]
+hitl = false
+risk = "high"
+unknown = "Whether oauth-personal hands its URL to the client or only opens a browser itself, and where an existing copy of the server can be found and its version read."
+references = ["packages/adapters/src/setup-claude-code/install.ts", "packages/adapters/src/setup-claude-code/api-key.ts"]
+
+[[entry]]
+id = 8
+type = "story"
+title = "BMad skills reach Antigravity where Planning is on, nothing where it is off"
+description = "Extends 4.3's setup to place the bundled skills in Antigravity's skill folder (.agents/skills, as the spike confirmed) beside .claude/skills, only for projects with Planning on and only when Antigravity is in use there, meaning the project's default agent is Antigravity or the project has an Antigravity session (open question 4). Antigravity's adapter formats the planning skill invocation 4.6 asks for. 10.6's simple-project test is extended so that no agent's session start carries BMad skill or text with every piece off."
+verify = "In a fixture repo with Planning on, a planning session with the fake Antigravity agent receives its adapter's invocation and the skills exist in .agents/skills; with every piece off, each fake agent receives no BMad text and the repo's file-tree hash is unchanged."
 covers = ["E6-R7"]
-after = [5, 7, "4.3", "4.6", "10.6"]
+after = [5, "4.3", "4.6", "10.6"]
 hitl = false
 risk = "medium"
 unknown = "Whether the bundled setup.py's --root option is enough to place skills in .agents/skills, or a fork patch is needed."
 
 [[entry]]
-id = 11
-type = "story"
-title = "Codex builds through the build runner"
-description = "Lets the Build dialog choose the agent (the project's default preselected) into 5.3's run agent field. 5.7's runner then runs bmad-loop's codex profile with the pinned Codex binary and the key in the child environment only. Codex's native sandbox (Seatbelt, bubblewrap, Windows) is added to 5.6's chain for the codex agent. The server answers the profile's first-run workspace and hook trust prompts. The bypass flag never runs outside a sandbox SandboxPort started. The dialog's use another agent choice lists agents that can build unattended here. An attended Codex build is an ACP build session on 5's acp-codex with permission cards, never the bypass profile. The run needs the .agents/skills folder entry 10 places."
-verify = "In CI on three OSes with the fake bmad-loop and a fake Codex, a Codex run starts only inside a sandbox, a run with no sandbox is refused with the choices, and the run records codex; live on macOS and Windows, a real Codex completes bmad-build-auto on a scratch ticket through the UI."
-covers = ["E6-R8"]
-after = [5, 6, 10, "epic-unattended-builds"]
-hitl = true
-risk = "high"
-unknown = "Whether epic 5's runner is bmad-loop or its ACP fallback (5.1), and whether Codex's Windows sandbox needs elevation the server cannot get without a prompt."
-
-[[entry]]
-id = 12
-type = "story"
-title = "Gemini CLI builds through the build runner"
-description = "Adds the gemini-cli agent to 11's agent choice. The runner runs bmad-loop's gemini profile with the pinned binary and GEMINI_CLI_TRUST_WORKSPACE set. Gemini's sandbox (Seatbelt profile on macOS, the Windows sandbox, Docker or Podman where present) is added to the chain. The yolo approval mode never runs outside a sandbox SandboxPort started."
-verify = "In CI on three OSes with fakes, a Gemini run starts only inside a sandbox and records gemini-cli; live on macOS, a real Gemini CLI completes bmad-build-auto on a scratch ticket through the UI."
-covers = ["E6-R8"]
-after = [7, 8, 11]
-hitl = true
-risk = "high"
-unknown = "Whether Gemini's Windows sandbox leaves integrity-level changes on worktree files that block their removal."
-
-[[entry]]
-id = 13
+id = 9
 type = "story"
 title = "Refactor sweep"
 description = "Cleans up code across the epic, scoped when it starts from the build records and the review findings deferred during the epic, with no behaviour change. It also runs the provenance check, keeps the deferred-work.md Open items index current, splits any file the epic grew past 600 lines (claude-code-agent.ts and setup-claude-code/install.ts are already listed), and removes the spike's CI job if it is still there."
 verify = "All tests pass and no behaviour changes."
 covers = []
-after = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+after = [1, 2, 3, 4, 5, 6, 7, 8]
 hitl = false
 risk = "low"
 references = ["_bmad-output/initiative-ogden-agents/deferred-work.md"]
 
 [[entry]]
-id = 14
+id = 10
 type = "story"
 title = "End-to-end suite and release"
-description = "Extends the installed end-to-end suite, in CI on macOS, Windows and Linux against the packed package, to: install and sign into each fake agent; run three agents' chats at once in one Simple project; restart and resume; toggle the terminal where offered; plan with Codex where Planning is on; and build with each agent where builds are on. Writes the final agent-matrix.md rows for Codex and Gemini CLI from the spike and the live checks, through bmad-spec, leaving no verify cell for a v1 agent. Then the user runs each supported agent's live checks on macOS and Windows on npx ogden-agents@next, records each result in the plan, and tags this epic's release after epic 5's through the release workflow."
-verify = "The suite passes on all three OSes, and the tagged version from npm passes each agent's live Done when checks on the user's machines, each recorded under Live check result before the ticket moves to done."
-covers = ["E6-R1", "E6-R2", "E6-R3", "E6-R4", "E6-R5", "E6-R6", "E6-R7", "E6-R8", "E6-R9"]
-after = [13, "epic-unattended-builds"]
+description = "Extends the installed end-to-end suite, in CI on macOS, Windows and Linux against the packed package, to: install and sign into the fake Antigravity; run a Claude Code chat and an Antigravity chat at once in one Simple project; restart and resume; check each agent's declared modes; toggle the terminal where offered; and plan with Antigravity where Planning is on. Writes the final agent-matrix.md row for Antigravity from the spike and the live checks, through bmad-spec, leaving no verify cell. Then the user runs Antigravity's live checks on macOS and Windows (or the OSes the matrix lists) on npx ogden-agents@next, including a planning session with Antigravity running a BMad skill, records each result in the plan, and tags this epic's release through the release workflow."
+verify = "The suite passes on all three OSes, and the tagged version from npm passes Antigravity's live Done when checks on the user's machines, each recorded under Live check result before the ticket moves to done."
+covers = ["E6-R1", "E6-R2", "E6-R3", "E6-R4", "E6-R5", "E6-R6", "E6-R7", "E6-R8"]
+after = [9]
 hitl = true
 risk = "medium"
-unknown = "The version number, set by the user here after epic 5's release."
+unknown = "The version number, set by the user here."

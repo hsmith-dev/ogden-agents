@@ -61,8 +61,8 @@ A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the str
   - **intent:** In a project with Unattended builds turned on (CAP-19), users are notified when a ticket is blocked or is ready for review.
   - **success:** Each of these events reaches a configured webhook.
 - **CAP-15**
-  - **intent:** Every agent BMAD supports can be selected: Claude Code, Codex, Gemini, Copilot, and Antigravity (bmad-loop's profiles). Chat covers every agent that speaks ACP; builds cover all of them.
-  - **success:** Each supported agent completes a `bmad-build-auto` run through the UI, and each agent that speaks ACP also completes a chat.
+  - **intent:** In v1, Claude Code is supported fully, for chat and builds. Antigravity joins it for chat, picked per chat with a default per project, if it proves possible (epic 6's spike decides). Codex, Gemini CLI and GitHub Copilot CLI, and builds with any agent but Claude Code, are v2 (epic 8); each further ACP agent is one adapter.
+  - **success:** Claude Code completes a chat and a `bmad-build-auto` run through the UI. If Antigravity is supported, an Antigravity chat and a Claude Code chat run at once in one project and both continue after a restart.
 - **CAP-16**
   - **intent:** On first run, onboarding finds the installed agent CLIs, installs missing ones on request, and signs the user into their own account (subscription), or takes an API key instead, all from the UI.
   - **success:** On a fresh machine, a user installs Claude Code and signs into it from the UI, then chats, with no terminal. Another user completes a chat with only an API key.
@@ -87,7 +87,7 @@ CAP-11 (cost caps) is retired and its number is not reused.
 - The BMAD v7 files in the repo are the source of truth for ticket and plan state. The database holds only workspaces, sessions, runs and events, and ticket references.
 - Only one side drives a session at a time. While the terminal drives, the chat view is read-only.
 - Guardrails are enforced in code, not in prompts. Ogden commit `b5af7c3` showed that prompted rules get skipped.
-- Unattended runs are always sandboxed: a per-ticket worktree plus the agent's own sandbox. If the agent has no sandbox on that OS, they use Docker if it's already installed. Otherwise unattended mode is off for that agent, and the UI offers another agent, installing Docker, or attended mode (see `agent-matrix.md`).
+- Unattended runs are always sandboxed: a per-ticket worktree plus the agent's own sandbox. If the agent has no sandbox on that OS, they use Docker if it's already installed. Otherwise unattended mode is off for that agent, and the UI offers installing Docker or attended mode, and in v2 another agent that can build (see `agent-matrix.md`).
 - `bmad-build-auto` stops at `built`. Only a human approval marks a ticket `done`.
 - Every unattended run has a maximum run time that stops hung or looping agents.
 - Ogden Agents does not reimplement agent coding. The selected agent does the work.
@@ -106,7 +106,7 @@ CAP-11 (cost caps) is retired and its number is not reused.
 - An MCP registry, memory/RAG, a semantic cache, and cross-project tickets.
 - Tracker stores (Jira, Linear, GitHub Issues, Notion, Trello) in v1. The board covers the repo store only.
 
-- Planned for v2, not v1 (epic 8): viewing the project's markdown files in the app, code-change review, and a VS Code extension.
+- Planned for v2, not v1 (epic 8): viewing the project's markdown files in the app, code-change review, a VS Code extension, the agents Codex, Gemini CLI and GitHub Copilot CLI, and builds with any agent but Claude Code.
 
 ## Success signal
 
@@ -125,4 +125,4 @@ CAP-11 (cost caps) is retired and its number is not reused.
 These are to be verified during the build; none blocks starting.
 
 - Which ACP adapters give a session ID that the agent's own CLI can resume? This decides where the CAP-5 toggle appears. Check in phase 2.
-- When will Antigravity support ACP? Until it does, it is build-only.
+- Can Ogden Agents drive Antigravity through Google's own ACP server (`antigravity-acp`, in the ACP registry since 2026-08-20): do Google's terms allow a third-party client, does sign-in work without a terminal, and does it run on Windows? Epic 6's spike answers, and the user decides go or no-go.

@@ -1,9 +1,14 @@
 // @vitest-environment happy-dom
 /**
- * The bare Plan and Board pages' bodies (story 4.1), in a DOM: the Plan page
- * lists the catalog's skills, and Start creates a planning session and hands
- * it on (the page opens it); a refused start says why and leaves the list.
- * The Board page lists the tickets with their ref, title, state and status,
+ * The Plan home (story 4.6) and the bare Board page's body (story 4.1), in a
+ * DOM: the Plan home shows "Start from an idea" (Enter starts a planning
+ * session on the catalog's entry action with the idea; a blank idea asks
+ * for one and sends nothing; a refused start says why under the field; no
+ * entry action shows it disabled with one sentence), then the skills in the
+ * UX groups with their plain text, the skill name only in Developer mode,
+ * and a "New" tag; each Start creates a planning session and hands it on.
+ * With Planning off, the feature-off notice and a link to the settings, and
+ * no catalog request. The Board page lists the tickets with their ref, title, state and status,
  * and what couldn't be read. Both have loading, error and empty states.
  * Story 4.2: a Board refused with `scripts_not_trusted` shows the trust
  * prompt, and Allow trusts the project and fetches the tickets again.
@@ -22,8 +27,13 @@ import {
   BOARD_EMPTY_TITLE,
   BOARD_LOADING_TEXT,
   CatalogSkill,
+  APPEARANCE_STORAGE_KEY,
+  FEATURE_OFF_MESSAGE,
   PLAN_EMPTY_TITLE,
+  PLAN_IDEA_UNAVAILABLE_TEXT,
   PLAN_LOADING_TEXT,
+  PLAN_OPEN_SETTINGS_LABEL,
+  PLAN_PROJECT_LOADING_TEXT,
   SCRIPT_TRUST_TITLE,
   SCRIPTS_NOT_TRUSTED_MESSAGE,
   TICKETS_UNAVAILABLE_MESSAGE,
@@ -50,6 +60,8 @@ const SESSION: Session = {
 
 const state = vi.hoisted(() => ({
   catalog: [] as unknown,
+  entryAction: null as string | null,
+  pieces: ['planning', 'board'] as string[],
   tickets: {} as unknown,
   start: undefined as unknown,
   calls: [] as string[],
@@ -74,7 +86,7 @@ vi.mock('@/auth/tab-token', () => ({
       state.calls.push(`${method} ${path}`);
       if (path.endsWith('/catalog')) {
         const catalog = state.catalog;
-        const whole = { modules: [], skills: catalog, agents: [], entryAction: null, capabilities: { plain_labels: false, ticket_tree: true } };
+        const whole = { modules: [], skills: catalog, agents: [], entryAction: state.entryAction, capabilities: { plain_labels: false, ticket_tree: true } };
         return reply(catalog === 'pending' || (catalog as { status?: number }).status !== undefined ? catalog : whole);
       }
       if (path.endsWith('/bmad/script-trust')) return reply(state.trust);
@@ -84,20 +96,37 @@ vi.mock('@/auth/tab-token', () => ({
         return reply(state.start);
       }
       if (path.endsWith('/tickets')) return reply(state.tickets);
+      if (path.endsWith('/settings')) {
+        const pieces = state.pieces as unknown;
+        return reply(Array.isArray(pieces) ? { settings: { cautionLevel: 'ask_every_time', bmadPieces: pieces } } : pieces);
+      }
       return new Response('{}', { status: 404 });
     },
   },
 }));
 
-const { PlanSkills } = await import('../src/planning/plan-skills');
+vi.mock('@tanstack/react-router', () => ({
+  Link: ({ children, to, params, ...props }: { children: ReactNode; to: string; params: { wsId: string } }) => (
+    <a href={to.replace('$wsId', params.wsId)} {...props}>
+      {children}
+    </a>
+  ),
+}));
+vi.mock('@/events/event-stream', () => ({ useEventStream: () => ({ events: [] }) }));
+
+const { PlanHome } = await import('../src/planning/plan-home');
+const { PlanPieceGate } = await import('../src/planning/plan-piece-gate');
 const { BoardTickets } = await import('../src/planning/board-tickets');
 const { TooltipProvider } = await import('../src/ui/tooltip');
+const { AppearanceProvider } = await import('../src/appearance/appearance-provider');
 
 function mount(node: ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <TooltipProvider>{node}</TooltipProvider>
+      <AppearanceProvider>
+        <TooltipProvider>{node}</TooltipProvider>
+      </AppearanceProvider>
     </QueryClientProvider>,
   );
 }
@@ -121,6 +150,9 @@ const TICKETS: TicketsResponse = TicketsResponse.parse({
 
 beforeEach(() => {
   state.catalog = SKILLS;
+  state.entryAction = null;
+  state.pieces = ['planning', 'board'];
+  window.localStorage.removeItem(APPEARANCE_STORAGE_KEY);
   state.tickets = TICKETS;
   state.start = { session: SESSION };
   state.calls = [];
@@ -130,59 +162,215 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe('Plan page body (story 4.1)', () => {
-  it('lists the skills, and Start creates a planning session and hands it on', async () => {
+describe('Plan home (story 4.6)', () => {
+  const NOW = new Date('2026-10-10T00:00:00.000Z');
+  const GROUPED: CatalogSkill[] = [
+    CatalogSkill.parse({ name: 'bmad-checks', description: 'Review the code.', label: 'Check the work', group: 'checking', installedAt: '2026-10-08T00:00:00.000Z' }),
+    CatalogSkill.parse({ name: 'bmad-odd', description: 'An odd one.', group: 'weird', installedAt: '2026-09-30T00:00:00.000Z' }),
+    CatalogSkill.parse({ name: 'bmad-plain', description: '', group: null }),
+    CatalogSkill.parse({ name: 'bmad-product-brief', description: 'Write a brief.', label: 'Write a product brief', group: 'planning' }),
+  ];
+  const groups = () => screen.getAllByTestId('plan-group').map((group) => [group.querySelector('h2')!.textContent, ...[...group.querySelectorAll('[data-testid="skill-row"]')].map((row) => row.getAttribute('data-skill'))]);
+  const ideaInput = () => screen.getByLabelText('Your idea') as HTMLInputElement;
+  const submitIdea = (idea: string) => {
+    fireEvent.change(ideaInput(), { target: { value: idea } });
+    fireEvent.submit(ideaInput().closest('form')!);
+  };
+  const posts = () => state.calls.filter((call) => call.startsWith('POST '));
+
+  it('shows the groups in the UX order, unknown and missing last as Other, each skill by its label or description, and New for a recent module', async () => {
+    state.catalog = GROUPED;
+    mount(<PlanHome wsId={WS} onStarted={() => {}} now={NOW} />);
+    await settle();
+    expect(groups()).toEqual([
+      ['Planning', 'bmad-product-brief'],
+      ['Checking work', 'bmad-checks'],
+      ['Other', 'bmad-odd', 'bmad-plain'],
+    ]);
+    expect(screen.getByRole('list', { name: 'Checking work' })).toBeTruthy();
+    const text = (skill: string) => screen.getAllByTestId('skill-row').find((row) => row.getAttribute('data-skill') === skill)!;
+    // A label shows with its description as the sentence; without one, the description; without either, the name.
+    expect(text('bmad-checks').querySelector('[data-testid="skill-text"]')!.textContent).toBe('Check the work');
+    expect(text('bmad-checks').querySelector('[data-testid="skill-sentence"]')!.textContent).toBe('Review the code.');
+    expect(text('bmad-odd').querySelector('[data-testid="skill-text"]')!.textContent).toBe('An odd one.');
+    expect(text('bmad-odd').querySelector('[data-testid="skill-sentence"]')!.textContent).toBe('');
+    expect(text('bmad-plain').querySelector('[data-testid="skill-text"]')!.textContent).toBe('bmad-plain');
+    // Developer mode off: no skill names anywhere but the fallback above.
+    expect(screen.queryAllByTestId('skill-name')).toHaveLength(0);
+    expect(document.body.textContent).not.toContain('bmad-product-brief');
+    expect(document.body.textContent).not.toContain('bmad-checks');
+    // New: installed 2 days before `now`; the other module 10 days before.
+    expect(text('bmad-checks').querySelector('[data-testid="skill-new"]')!.textContent).toBe('New');
+    expect(text('bmad-odd').querySelector('[data-testid="skill-new"]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Start Write a product brief' })).toBeTruthy();
+  });
+
+  it('Developer mode shows each skill name in mono beside its text', async () => {
+    window.localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify({ theme: 'system', density: 'compact', developerMode: true, terminalScreenReader: false }));
+    state.catalog = GROUPED;
+    mount(<PlanHome wsId={WS} onStarted={() => {}} now={NOW} />);
+    await settle();
+    expect(screen.getAllByTestId('skill-name').map((name) => name.textContent)).toEqual(['bmad-product-brief', 'bmad-checks', 'bmad-odd', 'bmad-plain']);
+    expect(screen.getAllByTestId('skill-name')[0]!.className).toContain('font-mono');
+  });
+
+  it('an idea and Enter start a planning session on the entry action with the idea, and hand it on', async () => {
+    state.catalog = GROUPED;
+    state.entryAction = 'bmad-product-brief';
     const started: Session[] = [];
-    mount(<PlanSkills wsId={WS} onStarted={(session) => void started.push(session)} />);
+    mount(<PlanHome wsId={WS} onStarted={(session) => void started.push(session)} />);
     await settle();
-    const rows = screen.getAllByTestId('skill-row');
-    expect(rows.map((row) => row.getAttribute('data-skill'))).toEqual(['bmad-spec', 'bmad-ticket']);
-    expect(rows[0]!.textContent).toContain('Condense any input into a short spec.');
-    fireEvent.click(screen.getByRole('button', { name: 'Start bmad-spec' }));
+    expect(ideaInput().maxLength).toBe(2000);
+    submitIdea('  A booking page for my pottery classes  ');
     await settle();
-    expect(state.calls).toContain(`POST ${apiPath(API_ROUTES.workspacePlanningSessions, { wsId: WS })}`);
+    expect(posts()).toEqual([`POST ${apiPath(API_ROUTES.workspacePlanningSessions, { wsId: WS })}`]);
+    expect(state.bodies).toEqual([{ skill: 'bmad-product-brief', idea: 'A booking page for my pottery classes' }]);
+    expect(started.map((session) => session.id)).toEqual([SESSION.id]);
+  });
+
+  it('a blank idea asks for one under the field and sends nothing', async () => {
+    state.entryAction = 'bmad-product-brief';
+    mount(<PlanHome wsId={WS} onStarted={() => {}} />);
+    await settle();
+    submitIdea('   ');
+    await settle();
+    expect(screen.getByTestId('plan-idea-error').textContent).toBe('Write your idea first.');
+    expect(ideaInput().getAttribute('aria-invalid')).toBe('true');
+    expect(posts()).toEqual([]);
+  });
+
+  it('a refused idea says why under the field, keeps the idea, and frees Start', async () => {
+    state.entryAction = 'bmad-product-brief';
+    state.start = { status: 404, message: "That doesn't exist in this project any more." };
+    mount(<PlanHome wsId={WS} onStarted={() => {}} />);
+    await settle();
+    submitIdea('A pottery site');
+    await settle();
+    expect(screen.getByTestId('plan-idea-error').textContent).toBe("That doesn't exist in this project any more.");
+    expect(ideaInput().value).toBe('A pottery site');
+    expect(screen.getByTestId('plan-idea-start').getAttribute('aria-disabled')).toBe('false');
+    expect(screen.getByRole('button', { name: 'Start Condense any input into a short spec.' }).getAttribute('aria-disabled')).toBe('false');
+  });
+
+  it('one start at a time: while one is pending, another sends nothing', async () => {
+    state.entryAction = 'bmad-product-brief';
+    state.start = 'pending';
+    mount(<PlanHome wsId={WS} onStarted={() => {}} />);
+    await settle();
+    submitIdea('A pottery site');
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Start Create and manage tickets.' }));
+    submitIdea('Another idea');
+    await settle();
+    expect(posts()).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Start Create and manage tickets.' }).getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('with no entry action, the idea shows disabled with one sentence and sends nothing', async () => {
+    mount(<PlanHome wsId={WS} onStarted={() => {}} />);
+    await settle();
+    expect(screen.getByRole('heading', { name: 'Start from an idea', level: 2 })).toBeTruthy();
+    expect(ideaInput().disabled).toBe(true);
+    expect(screen.getByTestId('plan-idea-unavailable').textContent).toBe(PLAN_IDEA_UNAVAILABLE_TEXT);
+    expect(screen.getByTestId('plan-idea-start').getAttribute('aria-disabled')).toBe('true');
+    // The reason reaches the focusable Start too, not only the disabled field.
+    expect(screen.getByTestId('plan-idea-start').getAttribute('aria-describedby')).toBe('plan-idea-unavailable');
+    fireEvent.submit(ideaInput().closest('form')!);
+    await settle();
+    expect(posts()).toEqual([]);
+  });
+
+  it('a skill’s Start creates a planning session on it and hands it on', async () => {
+    const started: Session[] = [];
+    mount(<PlanHome wsId={WS} onStarted={(session) => void started.push(session)} />);
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Start Condense any input into a short spec.' }));
+    await settle();
     expect(state.bodies).toEqual([{ skill: 'bmad-spec' }]);
     expect(started.map((session) => session.id)).toEqual([SESSION.id]);
   });
 
-  it('a refused start says why and keeps the list', async () => {
+  it('a refused start says why and keeps the list; a failed hand-off frees the buttons', async () => {
     state.start = { status: 404, message: "That doesn't exist in this project any more." };
-    const started: Session[] = [];
-    mount(<PlanSkills wsId={WS} onStarted={(session) => void started.push(session)} />);
+    mount(<PlanHome wsId={WS} onStarted={() => {}} />);
     await settle();
-    fireEvent.click(screen.getByRole('button', { name: 'Start bmad-ticket' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start Create and manage tickets.' }));
     await settle();
     expect(screen.getByTestId('plan-start-error').textContent).toBe("That doesn't exist in this project any more.");
     expect(screen.getAllByTestId('skill-row')).toHaveLength(2);
-    expect(started).toEqual([]);
-  });
+    cleanup();
 
-  it('a failed hand-off (navigation) says why and frees the Start buttons', async () => {
-    mount(<PlanSkills wsId={WS} onStarted={() => Promise.reject(new Error('Could not open the session.'))} />);
+    state.start = { session: SESSION };
+    mount(<PlanHome wsId={WS} onStarted={() => Promise.reject(new Error('Could not open the session.'))} />);
     await settle();
-    fireEvent.click(screen.getByRole('button', { name: 'Start bmad-spec' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start Condense any input into a short spec.' }));
     await settle();
     expect(screen.getByTestId('plan-start-error').textContent).toBe('Could not open the session.');
-    expect(screen.getByRole('button', { name: 'Start bmad-ticket' }).getAttribute('aria-disabled')).toBe('false');
+    expect(screen.getByRole('button', { name: 'Start Create and manage tickets.' }).getAttribute('aria-disabled')).toBe('false');
   });
 
   it('shows loading, then empty; and an error with the server’s message', async () => {
     state.catalog = 'pending';
-    mount(<PlanSkills wsId={WS} onStarted={() => {}} />);
+    mount(<PlanHome wsId={WS} onStarted={() => {}} />);
     await settle();
     expect(screen.getByRole('status').textContent).toBe(PLAN_LOADING_TEXT);
     cleanup();
 
     state.catalog = [];
-    mount(<PlanSkills wsId={WS} onStarted={() => {}} />);
+    mount(<PlanHome wsId={WS} onStarted={() => {}} />);
     await settle();
     expect(screen.getByTestId('plan-empty').textContent).toContain(PLAN_EMPTY_TITLE);
     cleanup();
 
     state.catalog = { status: 409, message: 'This BMad Method feature is off in this project.' };
-    mount(<PlanSkills wsId={WS} onStarted={() => {}} />);
+    mount(<PlanHome wsId={WS} onStarted={() => {}} />);
     await settle();
     expect(screen.getByRole('alert').textContent).toBe('This BMad Method feature is off in this project.');
+  });
+});
+
+describe('Plan piece gate (story 4.6)', () => {
+  const page = () => (
+    <PlanPieceGate wsId={WS}>
+      <PlanHome wsId={WS} onStarted={() => {}} />
+    </PlanPieceGate>
+  );
+
+  it('Planning off: the feature-off notice and a link to the settings, and no catalog request', async () => {
+    state.pieces = ['board'];
+    mount(page());
+    await settle();
+    expect(screen.getByTestId('plan-feature-off').textContent).toContain(FEATURE_OFF_MESSAGE);
+    const link = screen.getByRole('link', { name: PLAN_OPEN_SETTINGS_LABEL });
+    expect(link.getAttribute('href')).toBe(`/w/${WS}/settings`);
+    expect(screen.queryByTestId('plan-idea')).toBeNull();
+    expect(state.calls.filter((call) => call.endsWith('/catalog'))).toEqual([]);
+  });
+
+  it('while the settings load, says the project is loading and asks nothing BMad', async () => {
+    state.pieces = 'pending' as unknown as string[];
+    mount(page());
+    await settle();
+    expect(screen.getByRole('status').textContent).toBe(PLAN_PROJECT_LOADING_TEXT);
+    expect(state.calls.filter((call) => call.endsWith('/catalog') || call.includes('/bmad/'))).toEqual([]);
+  });
+
+  it('settings that can’t be read: their error, not the page (no setup panel, no catalog)', async () => {
+    state.pieces = { status: 500, code: 'internal_error', message: "Ogden Agents couldn't load this project's settings" } as unknown as string[];
+    mount(page());
+    await settle();
+    expect(screen.getByTestId('plan-settings-error').textContent).toBe("Ogden Agents couldn't load this project's settings");
+    expect(screen.getByRole('alert')).toBeTruthy();
+    expect(screen.queryByTestId('plan-idea')).toBeNull();
+    expect(state.calls.filter((call) => call.endsWith('/catalog') || call.includes('/bmad/'))).toEqual([]);
+  });
+
+  it('Planning on: the Plan home, from the catalog', async () => {
+    mount(page());
+    await settle();
+    expect(screen.queryByTestId('plan-feature-off')).toBeNull();
+    expect(screen.getByTestId('plan-idea')).toBeTruthy();
+    expect(state.calls).toContain(`GET ${apiPath(API_ROUTES.workspaceCatalog, { wsId: WS })}`);
   });
 });
 

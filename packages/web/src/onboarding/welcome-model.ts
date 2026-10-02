@@ -41,9 +41,32 @@ export function stepAfterProject(offerPending: boolean | undefined): WelcomeStep
   return offerPending === true ? 'shortcut' : 'finish';
 }
 
-/** Where finishing or skipping goes: the new project's Chats, or Projects when none was added. */
-export function exitTarget(workspaceId: string | undefined): { to: '/w/$wsId'; params: { wsId: string } } | { to: '/' } {
-  return workspaceId === undefined ? { to: '/' } : { to: '/w/$wsId', params: { wsId: workspaceId } };
+/**
+ * Where finishing or skipping goes: the new project's Plan when it was added
+ * with Planning on (Flow 1 step 5, story 4.6), else its Chats, or Projects
+ * when none was added.
+ */
+export function exitTarget(
+  workspaceId: string | undefined,
+  pieces: readonly BmadPiece[] | undefined = undefined,
+): { to: '/w/$wsId' | '/w/$wsId/plan'; params: { wsId: string } } | { to: '/' } {
+  if (workspaceId === undefined) return { to: '/' };
+  return { to: pieces?.includes('planning') === true ? '/w/$wsId/plan' : '/w/$wsId', params: { wsId: workspaceId } };
+}
+
+/**
+ * Where finishing goes, from the pieces the added project actually has
+ * (story 4.6 review): Welcome's answer or, when it wasn't asked, the
+ * New-project defaults the server applied. `loadPieces` reads them (the
+ * project's settings); if it fails, the project's Chats.
+ */
+export async function resolveExitTarget(
+  workspaceId: string | undefined,
+  loadPieces: (workspaceId: string) => Promise<readonly BmadPiece[]>,
+): Promise<ReturnType<typeof exitTarget>> {
+  if (workspaceId === undefined) return exitTarget(undefined);
+  const pieces = await loadPieces(workspaceId).catch(() => undefined);
+  return exitTarget(workspaceId, pieces);
 }
 
 /** Whether `/` sends this tab to Welcome: only once onboarding has loaded as not done (never while loading or on an error). */

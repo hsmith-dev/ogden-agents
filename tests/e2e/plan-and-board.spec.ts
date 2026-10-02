@@ -14,8 +14,14 @@
  * step and then "Ready to plan."; turning Planning on in the settings starts
  * the setup and shows its progress inline; a failed setup says why in plain
  * words and a chat still opens. Setup is `stubSetupCatalog`'s, on the
- * real read-only catalog. No real `claude` or `uv` runs.
+ * real read-only catalog. Story 4.6: on catalog-memory, the Plan home
+ * shows the tabs and their `g` shortcuts with Planning and Board on and
+ * neither Plan nor `g p` with Planning off, the groups in order, no skill
+ * names until Developer mode is on, a New tag on a recent module, and an
+ * idea with Enter opens a planning session on the entry action whose first
+ * message carries the idea. No real `claude` or `uv` runs.
  */
+import { realpathSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 // The shared routes' own file (it has no imports), as support.ts reads it.
 import { apiPath } from '../../packages/shared/src/api.ts';
@@ -88,7 +94,8 @@ test('Plan Start opens the planning session, and Board asks for trust, then to d
       await expect(page).toHaveURL(new RegExp(`/w/${wsId}/plan$`));
       await expect(page.getByRole('heading', { name: 'Plan', level: 1 })).toBeVisible();
       await expect(page.getByTestId('skill-row')).toHaveCount(2);
-      await page.getByRole('button', { name: 'Start bmad-spec' }).click();
+      // Without plain labels (story 4.6), each skill shows as its description.
+      await page.getByRole('button', { name: 'Start Condense any input into a short spec.' }).click();
       await expect(page).toHaveURL(new RegExp(`/w/${wsId}/s/ses_[0-9A-Z]+$`));
       await expect(page.getByTestId('message-user')).toHaveText('/bmad-spec');
       await expect(page.getByTestId('message-agent')).toContainText('command=/bmad-spec primed=0');
@@ -115,13 +122,14 @@ test('Plan Start opens the planning session, and Board asks for trust, then to d
       await expect(page.getByTestId('bmad-download-prompt')).toHaveCount(0);
       expect(bmadSource.downloads).toBe(1);
 
-      // Planning off, Board on: only Board's tab shows, and Plan's page refuses.
+      // Planning off, Board on: only Board's tab shows, and Plan's page says the feature is off (story 4.6).
       await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: ['board'] });
       await page.goto(`${server.url}/w/${wsId}`);
       await expect(page.getByTestId('workspace-tab-board')).toBeVisible();
       await expect(page.getByTestId('workspace-tab-plan')).toHaveCount(0);
       await page.goto(`${server.url}/w/${wsId}/plan`);
-      await expect(page.getByTestId('plan-error')).toContainText('off in this project');
+      await expect(page.getByTestId('plan-feature-off')).toContainText('off in this project');
+      await expect(page.getByTestId('bmad-setup-panel')).toHaveCount(0);
     },
     {
       extra: { ticketStore, bmadSource },
@@ -246,5 +254,117 @@ test('a failed setup says why in plain words, with no path, and a chat still ope
       await startChat(page, repo);
     },
     { extra: { bmadCatalog: await stubSetupCatalog({ fail: true }) } },
+  );
+});
+
+/**
+ * A catalog port bound once the test knows its project folder: the memory
+ * catalog is keyed by the project's real path, which `withChatServer` makes
+ * after the server's options are set.
+ */
+function lateCatalog(initial: object) {
+  let inner = initial as Record<string, unknown>;
+  const port = new Proxy(
+    {},
+    {
+      get: (_target, key) => {
+        const value = inner[key as string];
+        return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(inner) : value;
+      },
+    },
+  ) as NonNullable<NonNullable<Parameters<typeof withChatServer>[2]>['extra']>['bmadCatalog'];
+  return { port, bind: (catalog: object) => void (inner = catalog as Record<string, unknown>) };
+}
+
+test('the Plan home (story 4.6): tabs and g shortcuts, groups in order, names in Developer mode only, New, and an idea starts a planning session', async ({ page }) => {
+  const { createMemoryBmadCatalog } = await serverModule();
+  // Until bound, an empty memory catalog: no repo has BMad Method.
+  const catalog = lateCatalog(createMemoryBmadCatalog());
+  const day = 24 * 60 * 60 * 1000;
+  const recent = new Date(Date.now() - 2 * day).toISOString();
+  const older = new Date(Date.now() - 10 * day).toISOString();
+  const idea = 'A booking page for my pottery classes';
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const real = realpathSync(repo);
+      catalog.bind(
+        createMemoryBmadCatalog(
+          { [real]: { hasBmad: true, hasOutput: true } },
+          {
+            [real]: [
+              { name: 'bmad-product-brief', description: 'Write a short brief for a product idea.', label: 'Write a product brief', group: 'planning', module: 'bmm', installedAt: older, next: null },
+              { name: 'bmad-code-review', description: 'Several reviewers read the change.', label: 'Review the code', group: 'checking', module: 'fresh', installedAt: recent, next: null },
+              { name: 'bmad-odd-one', description: 'A skill with no group.', label: null, group: null, module: null, installedAt: null, next: null },
+            ],
+          },
+          { catalogs: { [real]: { entryAction: 'bmad-product-brief' } } },
+        ),
+      );
+      const { wsId, call } = await openProject(page, repo);
+      await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: ['planning', 'board'] });
+
+      // Planning and Board on: the tabs, and g b / g p / g c move between them.
+      // (Chats focuses its composer, where g types; so the round starts on Plan and ends on Chats.)
+      await page.goto(`${server.url}/w/${wsId}/plan`);
+      await expect(page.getByTestId('workspace-tabs').getByRole('link')).toHaveText(['Chats', 'Plan', 'Board']);
+      await page.keyboard.press('g');
+      await page.keyboard.press('b');
+      await expect(page).toHaveURL(new RegExp(`/w/${wsId}/board$`));
+      await page.keyboard.press('g');
+      await page.keyboard.press('p');
+      await expect(page).toHaveURL(new RegExp(`/w/${wsId}/plan$`));
+      await page.keyboard.press('g');
+      await page.keyboard.press('c');
+      await expect(page).toHaveURL(new RegExp(`/w/${wsId}$`));
+      await expect(page.getByRole('heading', { name: 'Chats', level: 1 })).toBeVisible();
+      await page.goto(`${server.url}/w/${wsId}/plan`);
+
+      // The groups in the UX order, Other last; plain text, no skill names; New on the recent module only.
+      const groups = page.getByTestId('plan-group');
+      await expect(groups.locator('h2')).toHaveText(['Planning', 'Checking work', 'Other']);
+      await expect(page.getByTestId('skill-text')).toHaveText(['Write a product brief', 'Review the code', 'A skill with no group.']);
+      await expect(page.getByTestId('skill-name')).toHaveCount(0);
+      await expect(page.getByTestId('workspace-plan-page')).not.toContainText('bmad-');
+      await expect(page.getByTestId('skill-new')).toHaveCount(1);
+      await expect(page.locator('[data-skill="bmad-code-review"]').getByTestId('skill-new')).toHaveText('New');
+
+      // Developer mode on: each name in mono beside its text.
+      await page.goto(`${server.url}/settings/appearance`);
+      await page.getByRole('switch', { name: 'Developer mode' }).click();
+      await expect(page.getByRole('switch', { name: 'Developer mode' })).toHaveAttribute('aria-checked', 'true');
+      await page.goto(`${server.url}/w/${wsId}/plan`);
+      await expect(page.getByTestId('skill-name')).toHaveText(['bmad-product-brief', 'bmad-code-review', 'bmad-odd-one']);
+
+      // An idea and Enter: a planning session on the entry action, its first message carrying the idea.
+      const input = page.getByLabel('Your idea');
+      await input.press('Enter');
+      await expect(page.getByTestId('plan-idea-error')).toHaveText('Write your idea first.');
+      await input.fill(idea);
+      await input.press('Enter');
+      await expect(page).toHaveURL(new RegExp(`/w/${wsId}/s/ses_[0-9A-Z]+$`));
+      await expect(page.getByTestId('message-user')).toHaveText(`/bmad-product-brief ${idea}`);
+      await expect(page.getByTestId('message-agent')).toContainText(`command=/bmad-product-brief ${idea} primed=0`);
+      // Typing "gp" in the composer types it; it opens nothing.
+      const composer = page.getByRole('textbox', { name: 'Message Claude Code' });
+      await composer.click();
+      await composer.pressSequentially('gp');
+      await expect(composer).toHaveValue('gp');
+      await expect(page).toHaveURL(new RegExp(`/w/${wsId}/s/ses_[0-9A-Z]+$`));
+
+      // Planning off: no Plan tab, and g p does nothing.
+      await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: ['board'] });
+      await page.goto(`${server.url}/w/${wsId}/board`);
+      await expect(page.getByTestId('workspace-tabs').getByRole('link')).toHaveText(['Chats', 'Board']);
+      await page.keyboard.press('g');
+      await page.keyboard.press('p');
+      // A shortcut navigates in its own keydown; give a wrong one a moment to show, then check g p did nothing.
+      await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 200)));
+      await expect(page).toHaveURL(new RegExp(`/w/${wsId}/board$`));
+      await page.keyboard.press('g');
+      await page.keyboard.press('c');
+      await expect(page).toHaveURL(new RegExp(`/w/${wsId}$`));
+    },
+    { extra: { bmadCatalog: catalog.port } },
   );
 });

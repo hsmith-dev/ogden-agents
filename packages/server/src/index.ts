@@ -46,3 +46,5 @@ export { spawnNpm, type AdapterPins, type NpmRunInput, type NpmRunner } from '@o
 // The pinned upstream BMad Method (story 4.14): the in-memory stub the e2e suite passes, so no test downloads it.
 export { createMemoryBmadSource, type MemoryBmadSource } from '@ogden-agents/adapters';
 export type { BmadSourcePort } from '@ogden-agents/core';
+// The in-memory BMad Method catalog (story 4.6): the e2e suite's Plan home renders from it (labels, groups, entry action).
+export { createMemoryBmadCatalog } from '@ogden-agents/adapters';

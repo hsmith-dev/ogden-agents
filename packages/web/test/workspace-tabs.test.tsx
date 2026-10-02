@@ -14,7 +14,7 @@ const availability = (...available: BmadPiece[]): BmadPieceAvailability[] =>
 const PLAN_FILLED: readonly WorkspaceTabSlot[] = WORKSPACE_TAB_SLOTS;
 
 /** The slots before story 4.1: only Chats has a page. */
-const UNFILLED: readonly WorkspaceTabSlot[] = WORKSPACE_TAB_SLOTS.map((slot) => (slot.piece === undefined ? slot : { id: slot.id, label: slot.label, piece: slot.piece }));
+const UNFILLED: readonly WorkspaceTabSlot[] = WORKSPACE_TAB_SLOTS.map((slot) => (slot.piece === undefined ? slot : { id: slot.id, label: slot.label, key: slot.key, piece: slot.piece }));
 
 const ids = (pieces: readonly BmadPiece[] | undefined, available: BmadPieceAvailability[] | undefined, slots = WORKSPACE_TAB_SLOTS) =>
   visibleWorkspaceTabs(pieces, available, slots).map((tab) => tab.id);
@@ -44,6 +44,8 @@ describe('workspace tabs (E10-R6, story 10.6)', () => {
       ['board', 'board'],
       ['runs', 'builds'],
     ]);
+    // Story 4.6: g c, g p, g b, g r.
+    expect(WORKSPACE_TAB_SLOTS.map((slot) => slot.key)).toEqual(['c', 'p', 'b', 'r']);
     expect(WORKSPACE_TAB_SLOTS.filter((slot) => slot.to !== undefined).map((slot) => [slot.id, slot.to])).toEqual([
       ['chats', '/w/$wsId'],
       ['plan', '/w/$wsId/plan'],

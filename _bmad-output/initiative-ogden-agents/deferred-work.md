@@ -422,3 +422,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-the-discovered-catalog-refreshed-as-modules-are-installed-plan.md`
   summary: Re-check a catalog file's containment against the opened handle (or realpath after open) in `readInsideRepo`.
   evidence: Review S1 (4.4): a path component swapped for a link between the realpath check and the open is followed; needs a concurrent writer in the repo.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-plan-home-and-planning-sessions-plan.md`
+  summary: The Board page opened directly with Board off still shows the Set up panel for a project without `_bmad/`; 4.6 gates only the Plan page (`plan-piece-gate.tsx`), and the Board page should reuse that gate.
+  evidence: 4.6 planning: `routes/workspace-board-page.tsx` is 4.9's lane, so 4.6 left it untouched; the gate takes the piece as a prop.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-plan-home-and-planning-sessions-plan.md`
+  summary: Ogden's label mapping is keyed by skill name only, so a repo's own `.claude/skills/<named-skill>/SKILL.md` gets Ogden's trusted label, group and the "Start from an idea" entry action; the catalog should only apply a label when the installed skill matches the verified pinned copy (or mark repo-only skills).
+  evidence: 4.6 security review S1: `bmad-catalog/labels.ts` `applyLabels` checks only that the name is installed; `skill-labels.json` `entry`; Plan home hides names with Developer mode off (UX spec). Catalog lane 4.4/4.5.

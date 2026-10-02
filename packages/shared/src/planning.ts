@@ -546,6 +546,44 @@ export const PLAN_IDEA_LABEL = 'Your idea';
 export const PLAN_IDEA_PLACEHOLDER = 'What do you want to build?';
 /** The tag on a module installed in the last {@link NEW_TAG_DAYS} days. */
 export const PLAN_NEW_TAG = 'New';
+/** Said under "Start from an idea" while the project's catalog names no entry action (story 4.6; entry 4.11 brings the reduced-mode notice). */
+export const PLAN_IDEA_UNAVAILABLE_TEXT = "Starting from an idea isn't available in this project yet. Pick an action below instead.";
+/** The idea's button. */
+export const PLAN_IDEA_START_LABEL = 'Start';
+/** The link from the Plan page with Planning off to the project's settings. */
+export const PLAN_OPEN_SETTINGS_LABEL = 'Open project settings';
+/** The accessible name of the Plan page's grouped actions. */
+export const PLAN_ACTIONS_LABEL = 'Actions';
+/** Said while the Plan page checks the project's settings (whether Planning is on). */
+export const PLAN_PROJECT_LOADING_TEXT = 'Loading the project';
+
+/** One group of the Plan page: its key (a {@link CatalogGroup}, or `other`), heading and skills in catalog order. */
+export interface CatalogSkillGroup {
+  key: CatalogGroup | 'other';
+  label: string;
+  skills: CatalogSkill[];
+}
+
+/**
+ * The catalog's skills in the Plan page's groups (story 4.6): in
+ * {@link catalogGroupRank} order, each group once, a group with no skill
+ * left out, and an unknown or missing group together last as
+ * {@link CATALOG_OTHER_GROUP_LABEL}. Stable: skills keep their order within a group.
+ */
+export function groupCatalogSkills(skills: readonly CatalogSkill[]): CatalogSkillGroup[] {
+  const groups = new Map<number, CatalogSkillGroup>();
+  for (const skill of skills) {
+    const rank = catalogGroupRank(skill.group);
+    let group = groups.get(rank);
+    if (group === undefined) {
+      const known = CATALOG_GROUPS[rank];
+      group = { key: known ?? 'other', label: catalogGroupLabel(known ?? null), skills: [] };
+      groups.set(rank, group);
+    }
+    group.skills.push(skill);
+  }
+  return [...groups.entries()].sort(([a], [b]) => a - b).map(([, group]) => group);
+}
 
 /** The Board page's title. */
 export const BOARD_PAGE_TITLE = 'Board';

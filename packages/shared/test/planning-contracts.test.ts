@@ -34,6 +34,7 @@ import {
   CatalogResponse,
   CatalogSkill,
   CoreEvent,
+  groupCatalogSkills,
   isNewlyInstalled,
   MARKABLE_TICKET_STATUSES,
   MarkTicketRequest,
@@ -102,6 +103,17 @@ describe('the catalog (story 4.2)', () => {
     expect(catalogGroupRank(null)).toBe(6);
     expect(catalogGroupLabel('research')).toBe('Ideas and research');
     expect(catalogGroupLabel('mystery')).toBe('Other');
+  });
+
+  it('groupCatalogSkills groups in the UX order, keeps each group in catalog order, and puts unknown and missing last as Other (story 4.6)', () => {
+    const skill = (name: string, group: string | null) => CatalogSkill.parse({ name, description: '', group });
+    const groups = groupCatalogSkills([skill('a', null), skill('b', 'checking'), skill('c', 'weird'), skill('d', 'planning'), skill('e', 'checking')]);
+    expect(groups.map((group) => [group.key, group.label, group.skills.map((each) => each.name)])).toEqual([
+      ['planning', 'Planning', ['d']],
+      ['checking', 'Checking work', ['b', 'e']],
+      ['other', 'Other', ['a', 'c']],
+    ]);
+    expect(groupCatalogSkills([])).toEqual([]);
   });
 
   it('a module is new for NEW_TAG_DAYS days', () => {

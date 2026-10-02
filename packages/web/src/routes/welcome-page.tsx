@@ -22,8 +22,8 @@ import {
   agentReady,
   asksFirstProjectChoice,
   bmadMethodPieces,
-  exitTarget,
   firstProjectPieces,
+  resolveExitTarget,
   selectedAgent,
   stepAfterProject,
   type WelcomeStep,
@@ -38,14 +38,15 @@ import { Skeleton } from '@/ui/skeleton';
 import { Text } from '@/ui/typography';
 import { AddProjectDialog } from '@/workspaces/add-project-dialog';
 import { useWorkspaces } from '@/workspaces/workspace-api';
-import { useBmadPieces } from '@/workspaces/workspace-settings-api';
+import { fetchWorkspaceSettings, useBmadPieces } from '@/workspaces/workspace-settings-api';
 
 /**
  * `/welcome`: the first-run Welcome (onboarding 9.5; EXPERIENCE.md Key Flow
  * 1): pick the agent (install it, sign in or use an API key, through the same
  * card and hooks as Settings: Agents), add a first project, and, while the
  * server still offers it, the app shortcut. Finishing marks Welcome done and
- * opens the new project's Chats. The steps are this page's state, not
+ * opens the new project's Chats (its Plan when it was added with Planning
+ * on, story 4.6). The steps are this page's state, not
  * routes. **Skip for now** on every step marks it done too; Settings →
  * Welcome brings it back.
  *
@@ -63,10 +64,12 @@ export function WelcomePage() {
   /** The first-project answer the added project was created with (10.4), kept when Welcome is done. */
   const [answered, setAnswered] = useState<FirstProjectChoice | undefined>(undefined);
 
-  /** Marks Welcome done, then leaves for the project's Chats (or Projects). A failure stays here, said in place. */
+  /** Marks Welcome done, then leaves for the project's Plan or Chats (or Projects). A failure stays here, said in place. */
   const exit = (opened: Workspace | undefined = workspace, choice: FirstProjectChoice | undefined = answered) => {
     if (complete.isPending) return;
-    complete.mutate(choice, { onSuccess: () => void navigate(exitTarget(opened?.id)) });
+    // The pieces the project actually got (Welcome's answer, or the New-project defaults): with Planning, its Plan (story 4.6).
+    const leave = async () => navigate(await resolveExitTarget(opened?.id, async (wsId) => (await fetchWorkspaceSettings(wsId)).bmadPieces));
+    complete.mutate(choice, { onSuccess: () => void leave() });
   };
 
   const toProject = useCallback(() => setStep('project'), []);

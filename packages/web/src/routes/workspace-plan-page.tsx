@@ -1,14 +1,17 @@
 import { PLAN_PAGE_TITLE } from '@ogden-agents/shared';
 import { useNavigate, useParams } from '@tanstack/react-router';
-import { PlanSkills } from '@/planning/plan-skills';
 import { BmadSetupGate } from '@/planning/bmad-setup-panel';
+import { PlanHome } from '@/planning/plan-home';
+import { PlanPieceGate } from '@/planning/plan-piece-gate';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { PageBody } from '@/ui/page';
 
 /**
- * `/w/:wsId/plan`: the project's Plan page (story 4.1, bare). Start on a
- * skill creates a planning session, then opens it in the session view.
- * Story 4.3: a project without `_bmad/` shows the setup panel instead.
+ * `/w/:wsId/plan`: the project's Plan home (story 4.6). With Planning off,
+ * the feature-off notice and a link to the settings (story 4.6, AD-22);
+ * without `_bmad/`, the setup panel (story 4.3); otherwise "Start from an
+ * idea" and the grouped actions. Each start creates a planning session,
+ * then opens it in the session view.
  */
 export function WorkspacePlanPage() {
   const { wsId } = useParams({ strict: false }) as { wsId: string };
@@ -17,9 +20,11 @@ export function WorkspacePlanPage() {
     <>
       <WorkspaceHeader title={PLAN_PAGE_TITLE} wsId={wsId} tab="plan" />
       <PageBody data-testid="workspace-plan-page">
-        <BmadSetupGate wsId={wsId}>
-          <PlanSkills wsId={wsId} onStarted={(session) => navigate({ to: '/w/$wsId/s/$sesId', params: { wsId, sesId: session.id } })} />
-        </BmadSetupGate>
+        <PlanPieceGate wsId={wsId}>
+          <BmadSetupGate wsId={wsId}>
+            <PlanHome wsId={wsId} onStarted={(session) => navigate({ to: '/w/$wsId/s/$sesId', params: { wsId, sesId: session.id } })} />
+          </BmadSetupGate>
+        </PlanPieceGate>
       </PageBody>
     </>
   );

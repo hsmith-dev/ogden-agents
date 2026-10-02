@@ -92,7 +92,7 @@ CAP-11 (cost caps) is retired and its number is not reused.
 - Every unattended run has a maximum run time that stops hung or looping agents.
 - Ogden Agents does not reimplement agent coding. The selected agent does the work.
 - The UI is built with the `design-taste-frontend` skill: modern, and without the look of a generic Claude/AI app.
-- BMAD-METHOD and bmad-loop are forked. Every Ogden Agents change is carried in the forks and also opened as an upstream PR, and a patch is dropped once upstream accepts it.
+- BMAD-METHOD and bmad-loop are used as pinned upstream versions, checked against a content hash and downloaded only when the user sets up or updates. Ogden Agents carries no forks: a change it needs in BMad is opened as an upstream PR and used once merged (user decision 2026-10-02).
 - Interactive chat talks to every agent through ACP (Agent Client Protocol), so Ogden Agents needs no chat integration specific to each agent.
 - BMad Method is optional per project. Ogden Agents writes nothing BMad into a repo, and adds no BMad skill or prompt to a session, unless that project turned a BMad piece on. Turning it off never deletes files.
 

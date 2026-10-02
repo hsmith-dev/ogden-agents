@@ -25,10 +25,10 @@ Every status change goes through `tickets.py mark <ref> <status>`. Marking with 
 
 ## Reuse first
 
-- Dispatch and agent profiles: bmad-loop, forked. v7 `tickets.toml` support is added in the fork and opened as an upstream PR.
+- Dispatch and agent profiles: bmad-loop at its pinned upstream commit. v7 `tickets.toml` support is opened as an upstream PR and used once merged and pinned.
 - Ticket writes: `tickets.py`.
 - Installing into a project: BMAD's `bmad` setup scripts, run from the UI wizard.
-- All of these run through `uv`, which Ogden Agents installs if it is missing.
+- All of these run through `uv`, which Ogden Agents installs if it is missing, from the verified copy of the pinned upstream BMad in Ogden Agents's data folder, never from a project's own copy (architecture AD-13).
 
 ## build-auto preconditions the dispatcher must satisfy
 
@@ -39,16 +39,16 @@ Every status change goes through `tickets.py mark <ref> <status>`. Marking with 
 - On an `intent gap` halt, a patch is saved beside the plan. The UI should offer to apply it (`git apply`, set `in-review`, redispatch).
 - The run commits locally and never pushes. Merging is Ogden Agents's approve action.
 
-## Fork extensions
+## Upstream extensions
 
-- `tickets.py … --json` for machine-readable output.
+- `tickets.py … --json` for machine-readable output (not needed: `tickets.py` already prints JSON).
 - A per-run JSON result file beside each plan.
-- A setup wizard in the UI that replaces running `bmad` setup in a terminal.
+- A setup wizard in the UI that replaces running `bmad` setup in a terminal (Ogden Agents's own UI over upstream's `setup.py`).
 - v7 `tickets.toml` dispatch in bmad-loop.
-- Plain-language labels and descriptions per skill ("Describe your idea", "Build next story").
+- Plain-language labels and descriptions per skill ("Describe your idea", "Build next story"): kept in Ogden Agents's own mapping file keyed by skill name, with the `SKILL.md` description as fallback (AD-12).
 - Pause hooks for UI approval via `plan_checkpoint` and `done_checkpoint` in `tickets.toml`.
 
-All of these are carried in the forks of BMAD-METHOD and bmad-loop and opened as upstream PRs. A patch is dropped once upstream accepts it.
+Ogden Agents carries no forks (user decision 2026-10-02, story 4.14). Each extension BMad itself must provide is opened as an upstream PR and used once upstream merges it and Ogden Agents's pin moves to a commit that has it; until then the feature works without it or stays on Ogden Agents's side. Was "Fork extensions", carried in forks of BMAD-METHOD and bmad-loop.
 
 ## Skills surfaced in the UI
 

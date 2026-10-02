@@ -4,7 +4,7 @@ type: architecture-spine
 purpose: build-substrate
 altitude: initiative
 paradigm: 'hexagonal (ports and adapters) with an append-only event log'
-scope: 'Ogden Agents as a whole: launcher, local server, browser UI, agent/tool adapters, and its BMAD-METHOD and bmad-loop forks'
+scope: 'Ogden Agents as a whole: launcher, local server, browser UI, agent/tool adapters, and the pinned upstream BMAD-METHOD and bmad-loop it uses'
 status: final
 created: '2026-09-29'
 updated: '2026-10-02'
@@ -159,19 +159,21 @@ graph LR
   - `BmadCatalogPort` builds the catalog of modules, skills, agents and help from installed metadata (`bmod.toml`, `SKILL.md` frontmatter, `roster.toml`, help files).
   - The UI renders every action from that catalog.
   - Skill names appear only inside the adapters that must invoke a specific skill (`buildrunner-bmad-loop` for `bmad-build-auto`, `tickets-v7` for `tickets.py`).
-  - Plain-language labels live in fork metadata.
+  - Plain-language labels live in Ogden Agents's own mapping file, keyed by skill name, in the `bmad-catalog` adapter; a skill it doesn't name shows its `SKILL.md` description. (Amended, story 4.14, user decision 2026-10-02: was "in fork metadata".)
   - Note (epic 4, 2026-10-01): the `bmad-catalog` adapter may also name the `bmad` setup skill, because it runs that skill's `setup.py` to install BMAD into a project (CAP-2). No rule changes.
   - Note (epic 10, 2026-10-01): the catalog is built only for workspaces with Planning on (AD-22). AD-1's port list is unchanged: `BmadCatalogPort` gains a read-only `detect` (does the repo already have `_bmad/`). No rule changes.
 
-### AD-13 — Forks are bundled and locked [ADOPTED]
+### AD-13 — Upstream BMad is pinned and verified [ADOPTED]
 
 - **Binds:** CAP-2, CAP-8
-- **Prevents:** epics 4 and 5 running against different fork versions.
+- **Prevents:** epics 4 and 5 running against different BMad versions, and Ogden Agents running BMad files nobody checked.
 - **Rule:**
-  - Each Ogden Agents release bundles its BMAD-METHOD and bmad-loop forks inside the npm package. Skills are copied into repos from the package, and bmad-loop is installed by `uv` from a bundled wheel.
-  - `forks.lock` names the fork tags, and CI fails if the bundled files differ from it.
-  - Each fork keeps an `upstream` mirror branch and an `ogden-agents` branch made of upstream plus one patch per upstream PR, tagged `v<upstream>-ogden-agents.<n>`.
-  - A patch is removed once upstream merges it.
+  - Each Ogden Agents release pins upstream `bmad-code-org/BMAD-METHOD` and `bmad-code-org/bmad-loop`, each to one commit and a sha256 content hash, in a lock file in the package (`bmad-lock.json`). The package ships no BMad files.
+  - Ogden Agents downloads a pinned tarball only when the user asks (Set up, Update, or a Download button), never on startup or a page load; offline is a plain error. It verifies the content hash in memory, refuses a mismatch, and writes only the verified regular files (no links, no path outside the target) into a fresh folder in its data folder.
+  - BMad's scripts that Ogden Agents runs itself (`setup.py`, `tickets.py`) run only from that verified copy, never from a project's own copy. Skills are copied into repos from it, and bmad-loop is installed by `uv` from it into a virtual environment in the data folder.
+  - CI fails if a pinned commit's content no longer matches the lock's hash or the commit is not in upstream's history.
+  - Ogden Agents carries no forks. A change it needs in BMad is opened as an upstream PR and used once upstream merges it and the pin moves; until then Ogden Agents works without it or keeps the piece on its own side (such as the plain-language labels, AD-12).
+  - Amended (epic 4 story 4.14, user decision 2026-10-02, "pinned upstream, verified"): replaces "Forks are bundled and locked" (bundled forks in `vendor/`, `forks.lock`, fork branches and tags).
 
 ### AD-14 — Reduced mode on upstream BMAD [ADOPTED]
 
@@ -179,7 +181,8 @@ graph LR
 - **Prevents:** Ogden Agents breaking repos that already have plain upstream BMAD.
 - **Rule:**
   - Features are gated on capabilities detected from installed metadata, not on version strings.
-  - A feature whose fork capability is missing is shown as unavailable, with an upgrade offer. It never fails silently.
+  - A feature whose capability is missing from the project's installed BMad is shown as unavailable, with an upgrade offer that sets the project up from the pinned upstream version (AD-13). It never fails silently.
+  - Note (story 4.14, user decision 2026-10-02): capabilities are judged against the pinned upstream commit, not a fork; plain labels come from Ogden Agents's mapping file (AD-12), so they are not a project capability.
 
 ### AD-15 — One security gate [ADOPTED]
 
@@ -318,7 +321,7 @@ graph TB
     S --> DB[(SQLite in user data dir)]
     S --> K[OS keychain]
     S -- ACP --> A[Agent CLIs: Claude Code, Codex, Gemini, Copilot]
-    S -- uv --> BL[bmad-loop fork] --> A
+    S -- uv --> BL[bmad-loop, pinned upstream] --> A
     S -- tickets.py / file watch --> R[User repos: _bmad, _bmad-output, worktrees]
     S -. fallback sandbox .-> D[Docker if installed]
   end
@@ -343,8 +346,6 @@ ogden-agents/
   packages/adapters/      # acp-*, buildrunner-bmad-loop, tickets-v7, bmad-catalog, sandbox-*, vcs-git, terminal-pty, secrets-keyring, notify-*
   packages/server/        # Hono app, security gate, WS channels, wiring
   packages/web/           # React app; ui/ = design system
-  vendor/                 # bundled forks per forks.lock
-  forks.lock
   _bmad-output/           # Ogden Agents's own spec, architecture, tickets
 ```
 

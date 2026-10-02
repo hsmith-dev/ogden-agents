@@ -67,7 +67,10 @@ describe('uv script runner (story 4.1)', () => {
       expect(out.env.OGDEN_AGENTS_RUNNER_SECRET).toBeUndefined();
       // Only what was given (and what the OS adds to every process by itself).
       const extra = Object.keys(out.env).filter((name) => !['PYTHONUTF8', 'FAKE_UV_MODE', 'SystemRoot', '__CF_USER_TEXT_ENCODING'].includes(name));
-      expect(extra.filter((name) => !/^(HOMEDRIVE|HOMEPATH|LOGONSERVER|SYSTEMDRIVE|USERDOMAIN|WINDIR)$/i.test(name))).toEqual([]);
+      // libuv adds its required variables to every child it spawns on Windows, whatever env it is given
+      // (uv-common/win/process.c `required_vars`: HOMEDRIVE … WINDIR, PATH, TEMP, USERNAME, USERPROFILE included).
+      const osAdded = /^(HOMEDRIVE|HOMEPATH|LOGONSERVER|PATH|SYSTEMDRIVE|SYSTEMROOT|TEMP|USERDOMAIN|USERNAME|USERPROFILE|WINDIR)$/i;
+      expect(extra.filter((name) => !(process.platform === 'win32' && osAdded.test(name)))).toEqual([]);
     } finally {
       delete process.env.OGDEN_AGENTS_RUNNER_SECRET;
     }

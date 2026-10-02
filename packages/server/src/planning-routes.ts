@@ -29,10 +29,17 @@
  *   follows as `bmad.setup_*` events. 409 `bmad_already_set_up` when the
  *   project already has `_bmad/`, nothing written.
  *
+ * - `GET …/documents?path=` (`planning`; no trust: it reads one file, runs
+ *   nothing; story 4.7) → `DocumentResponse`: a Markdown document inside
+ *   the project's output folder; 400 for a malformed path, one outside the
+ *   folder or not `.md`, 404 when it is missing or its real path leaves the
+ *   folder.
+ *
  * Without the use-cases (an app wired without them) each answers 501 once
  * the guards have passed.
  */
 import {
+  NotFoundError,
   TicketsUnavailableError,
   ValidationError,
   type BmadFeatures,
@@ -47,6 +54,8 @@ import {
   BmadSetupStartedResponse,
   BmadSetupStatusResponse,
   CatalogResponse,
+  DOCUMENT_NOT_FOUND_TEXT,
+  DocumentResponse,
   MAX_IDEA_LENGTH,
   SessionResponse,
   StartPlanningRequest,
@@ -143,6 +152,24 @@ export function registerPlanningRoutes(app: Hono, { bmad, scriptTrust, planning,
       throw error;
     }
   });
+
+  // A document a planning session wrote (story 4.7): read-only, confined to the output folder.
+  routes.get(
+    'planning',
+    API_ROUTES.workspaceDocument,
+    async (c, { workspaceId }) => {
+      if (planning === undefined) return notImplemented(c);
+      try {
+        return c.json(DocumentResponse.parse({ document: await planning.document(workspaceId, c.req.query('path')) }));
+      } catch (error) {
+        if (error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);
+        // Never the path in the answer or the log: it is the user's.
+        if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', DOCUMENT_NOT_FOUND_TEXT);
+        throw error;
+      }
+    },
+    { projectScripts: false },
+  );
 
   // Pre-registered by story 4.2, so its entry only fills it: it answers 501 once the guards pass.
   routes.put('board', API_ROUTES.workspaceTicketStatus, (c) => notImplemented(c));

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link, useParams } from '@tanstack/react-router';
+import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { ArrowClockwise, ArrowDown, ChatCircle, House, Stop } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAppearance } from '@/appearance/appearance-provider';
@@ -11,6 +11,7 @@ import { ToolCalls } from '@/chat/tool-call-row';
 import { sessionView, type TranscriptCheckIn, type TranscriptItem, type TranscriptMessage } from '@/chat/transcript';
 import { useCaughtUp, useEarlierHistory, useSessionEvents } from '@/events/event-stream';
 import { PermissionCard, permissionAnnouncement } from '@/permissions/permission-card';
+import { DocumentCard } from '@/planning/document-card';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { DriverToggle } from '@/terminal/driver-toggle';
 import { ReadOnlyBanner } from '@/terminal/read-only-banner';
@@ -41,7 +42,9 @@ const itemKey = (item: TranscriptItem, index: number): string =>
       ? `tools-${item.calls[0]?.toolCallId ?? index}`
       : item.type === 'resumed'
         ? `resumed-${item.at}-${index}`
-        : item.permission.requestId;
+        : item.type === 'document'
+          ? `document-${item.path}`
+          : item.permission.requestId;
 
 /** What the composer says while the terminal drives (DESIGN.md Composer). */
 const TERMINAL_DRIVING_REASON = 'The terminal is driving this session';
@@ -66,11 +69,15 @@ const checkInWords = (checkIn: TranscriptCheckIn) =>
  * view but count on "Jump to latest". Story 3.6: in Developer mode the
  * header's Chat | Terminal toggle (and `⌘.` / `Ctrl+.`) hands the chat to the
  * agent's own terminal and back; the view follows only
- * `session.driver_changed`, and `?driver=terminal` mirrors it.
+ * `session.driver_changed`, and `?driver=terminal` mirrors it. Story 4.7: a
+ * planning session's `session.document_written` shows as a document card
+ * (one per path) with Open and the next suggested step, which opens the new
+ * planning session it starts.
  */
 export function SessionPage() {
   const { wsId, sesId } = useParams({ strict: false }) as { wsId: string; sesId: string };
   const events = useSessionEvents(wsId, sesId);
+  const navigate = useNavigate();
   // The workspace's own stream carries the always-allow rules undone since (the cards' Undo).
   const workspaceEvents = useSessionEvents(wsId, wsId);
   const caughtUp = useCaughtUp();
@@ -318,6 +325,14 @@ export function SessionPage() {
                     <ToolCalls key={`tools-${item.calls[0]?.toolCallId ?? index}`} calls={item.calls} density={appearance.density} />
                   ) : item.type === 'resumed' ? (
                     <ResumedMarker key={`resumed-${item.at}-${index}`} />
+                  ) : item.type === 'document' ? (
+                    <DocumentCard
+                      key={`document-${item.path}`}
+                      wsId={wsId}
+                      path={item.path}
+                      next={item.next}
+                      onStarted={(started) => void navigate({ to: '/w/$wsId/s/$sesId', params: { wsId, sesId: started.id } })}
+                    />
                   ) : (
                     <PermissionCard
                       key={item.permission.requestId}

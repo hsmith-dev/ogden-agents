@@ -706,3 +706,41 @@ export const BMAD_SET_UP_AGAIN_LABEL = 'Set up again';
 export const BMAD_SETUP_CHECKING_TEXT = 'Checking BMad Method in this project';
 /** The document card's button that opens a written document. */
 export const DOCUMENT_OPEN_LABEL = 'Open';
+
+// ---- Document cards and the next suggested step (story 4.7) ----
+
+/** The most of a document `GET …/documents` answers, in bytes: a longer one is cut there (`truncated: true`). */
+export const MAX_DOCUMENT_BYTES = 1024 * 1024;
+
+/** A document as `GET …/documents` answers it: its path, its text (at most {@link MAX_DOCUMENT_BYTES}) and whether it was cut. */
+export const PlanningDocument = z.object({ path: RepoRelativePath, content: z.string(), truncated: z.boolean() });
+export type PlanningDocument = z.infer<typeof PlanningDocument>;
+
+/** `GET /api/v1/workspaces/:wsId/documents?path=`: one document a planning session wrote. */
+export const DocumentResponse = z.object({ document: PlanningDocument });
+export type DocumentResponse = z.infer<typeof DocumentResponse>;
+
+/** `invalid_request` (400): the path isn't a Markdown file inside the project's output folder. */
+export const DOCUMENT_INVALID_PATH_MESSAGE = "That isn't a Markdown document in this project's output folder.";
+/** The document sheet when the file is gone (404). */
+export const DOCUMENT_NOT_FOUND_TEXT = "This document isn't there any more. It may have been moved or deleted.";
+/** The fallback when a document couldn't be loaded. */
+export const DOCUMENT_LOAD_FAILED = "Ogden Agents couldn't open this document";
+/** Said while a document loads. */
+export const DOCUMENT_LOADING_TEXT = 'Loading the document';
+/** Said above a document cut at {@link MAX_DOCUMENT_BYTES}. */
+export const DOCUMENT_TRUNCATED_TEXT = 'This document is long, so only its first part is shown.';
+/** The fallback when the next suggested step couldn't be started. */
+export const DOCUMENT_NEXT_FAILED = "Ogden Agents couldn't start the next step";
+/** The document card's caption over its file name. */
+export const DOCUMENT_CARD_CAPTION = 'Document written';
+
+/** A document card's accessible name ("Document spec-x.md"). */
+export function documentCardLabel(name: string): string {
+  return `Document ${name}`;
+}
+
+/** A document's file name: the last segment of its repo-relative path. */
+export function documentFileName(path: string): string {
+  return path.split('/').filter((segment) => segment !== '').at(-1) ?? path;
+}

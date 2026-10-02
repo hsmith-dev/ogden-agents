@@ -625,6 +625,8 @@ const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.workspaceBmadSetup}`,
   `POST ${API_ROUTES.workspaceBmadSetup}`,
   `PUT ${API_ROUTES.workspaceBmadScriptTrust}`,
+  // A document a planning session wrote (story 4.7), guarded.
+  `GET ${API_ROUTES.workspaceDocument}`,
 ] as const;
 
 describe('gate placement', () => {
@@ -679,6 +681,7 @@ describe('gate placement', () => {
         `PUT ${API_ROUTES.workspaceTicketStatus}`,
         `GET ${API_ROUTES.workspaceBmadSetup}`,
         `POST ${API_ROUTES.workspaceBmadSetup}`,
+        `GET ${API_ROUTES.workspaceDocument}`,
       ];
       expect(guardedRouteKeys(app)).toEqual([...pieceRoutes, `GET ${TEST_ROUTES.bmadProbe}`].sort());
       for (const key of guardedRouteKeys(app)) expect(key.slice(key.indexOf(' ') + 1).startsWith(`${API_BASE}/workspaces/:wsId/`), key).toBe(true);

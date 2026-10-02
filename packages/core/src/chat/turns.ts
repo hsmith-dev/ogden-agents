@@ -76,6 +76,15 @@ export function createTurns(
     if (entry !== undefined && (dropAgent || error.code === 'auth_required')) drop(sessionId, entry);
   };
 
+  /** A tool call turned `completed`: told once, after its event (story 4.7). */
+  const completed = (sessionId: SessionId, toolCallId: string, call: ToolCallState) => {
+    try {
+      options.onToolCallCompleted?.(sessionId, toolCallId, call.diffs);
+    } catch (error) {
+      internalError(sessionId, error);
+    }
+  };
+
   /** Applies one adapter event to the session (AD-4, AD-5). */
   const apply = (sessionId: SessionId, entry: Live, event: AgentEvent) => {
     if (ctx.closing) return;
@@ -121,11 +130,13 @@ export function createTurns(
             status: toolStatus(event.status) ?? 'pending',
             diffs: capDiffs(event.diffs),
           };
+          const before = entry.toolCalls.get(event.toolCallId);
           entry.toolCalls.set(event.toolCallId, call);
           sessionEvents.appendSessionEvent(sessionId, {
             type: 'session.tool_call',
             payload: toolCallPayload(sessionId, event.toolCallId, call),
           });
+          if (call.status === 'completed' && before?.status !== 'completed') completed(sessionId, event.toolCallId, call);
           return;
         }
         case 'tool_call_update': {
@@ -145,6 +156,7 @@ export function createTurns(
             type: 'session.tool_call_updated',
             payload: toolCallPayload(sessionId, event.toolCallId, call, diffsChanged),
           });
+          if (call.status === 'completed' && known.status !== 'completed') completed(sessionId, event.toolCallId, call);
           return;
         }
       }

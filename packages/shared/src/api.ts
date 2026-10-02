@@ -214,6 +214,16 @@ export const API_ROUTES = {
    * changes nothing. Not guarded by a piece; no body.
    */
   workspaceBmadScriptTrust: `${API_BASE}/workspaces/:wsId/bmad/script-trust`,
+  /**
+   * `GET ?path=<repo-relative path>` → `DocumentResponse` (story 4.7): a
+   * Markdown document a planning session wrote, read-only, at most
+   * `MAX_DOCUMENT_BYTES` (longer is cut, `truncated: true`). Only a `.md`
+   * file inside the project's output folder: 400 `invalid_request` for a
+   * malformed path, one outside the folder or not `.md`; 404 when it is
+   * missing or its real path leaves the folder. Serves the `planning` piece
+   * (guarded, AD-22); runs none of the project's scripts, so no trust.
+   */
+  workspaceDocument: `${API_BASE}/workspaces/:wsId/documents`,
 } as const;
 
 /**

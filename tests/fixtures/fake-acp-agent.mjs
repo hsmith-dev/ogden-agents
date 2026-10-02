@@ -52,6 +52,10 @@
 //                  carried, the whole prompt text it received, and its
 //                  environment (story 10.6: what a simple project's session
 //                  starts with)
+//   "write-doc <relpath>"  writes a small Markdown file at <relpath> under the
+//                  session's cwd (never outside it), reports an `edit` tool
+//                  call, then completes it with a diff of the file's absolute
+//                  path; replies "Wrote <relpath>." (story 4.7)
 //
 // With FAKE_ACP_EXIT_AT_START=1 it exits before answering anything. With
 // FAKE_ACP_SPAWN_GRANDCHILD=1 it starts a long-lived child of its own (as the
@@ -112,7 +116,9 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
@@ -371,6 +377,26 @@ acp
         content: [{ type: 'diff', path: 'src/example.ts', oldText: 'const a = 1;\n', newText: 'const a = 2;\n' }],
       });
       await say(client, params.sessionId, 'Edited.');
+      return { stopReason: 'end_turn' };
+    }
+    if (text.startsWith('write-doc ')) {
+      const relpath = text.slice('write-doc '.length).trim();
+      const cwd = session.opened.cwd ?? process.cwd();
+      const file = resolve(cwd, relpath);
+      const inside = relative(cwd, file);
+      if (relpath === '' || inside === '' || inside.startsWith('..') || isAbsolute(inside)) throw acp.RequestError.invalidParams(undefined, 'write-doc writes only inside the session cwd');
+      const content = `---\ntitle: ${relpath}\n---\n\n# Written by the fake agent\n\nA **small** document at \`${relpath}\`.\n\n- one\n- two\n`;
+      const toolCallId = `call-write-${randomUUID()}`;
+      await update(client, params.sessionId, { sessionUpdate: 'tool_call', toolCallId, title: `Write ${relpath}`, kind: 'edit', status: 'in_progress', locations: [{ path: file }] });
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, content);
+      await update(client, params.sessionId, {
+        sessionUpdate: 'tool_call_update',
+        toolCallId,
+        status: 'completed',
+        content: [{ type: 'diff', path: file, oldText: null, newText: content }],
+      });
+      await say(client, params.sessionId, `Wrote ${relpath}.`);
       return { stopReason: 'end_turn' };
     }
     if (text === 'env') {

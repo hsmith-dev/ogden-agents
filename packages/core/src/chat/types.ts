@@ -32,6 +32,12 @@ export interface ChatOptions {
   agentEnv?: () => Readonly<Record<string, string>>;
   /** Called with every agent failure, for the log. Its `details` hold no secret. */
   onAgentError?: (sessionId: SessionId, error: AgentError) => void;
+  /**
+   * Called once when a tool call turns `completed` (story 4.7: core's
+   * document detection), after its event, with its diffs (each side capped).
+   * A throw is caught: it never changes the session.
+   */
+  onToolCallCompleted?: (sessionId: SessionId, toolCallId: string, diffs: readonly ToolCallDiff[] | undefined) => void;
   /** Called when applying an agent's event failed (such as a session deleted mid-reply), for the log. */
   onInternalError?: (sessionId: SessionId, error: unknown) => void;
   /** How long a `working` agent may be silent before core checks in, clamped by `clampCheckInDelay`. Default `DEFAULT_CHECK_IN_MS`. */

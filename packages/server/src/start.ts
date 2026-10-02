@@ -34,6 +34,7 @@ import {
   createNewProjectDefaults,
   createOnboarding,
   createPlanning,
+  createPlanningDocuments,
   createTicketWatcher,
   clampCheckInDelay,
   RESTARTED_REASON,
@@ -409,6 +410,17 @@ async function listenAndAnnounce({
   };
   // One terminal port for the chat and the toggle's availability check (story 3.7): they agree on node-pty.
   const terminal = createPtyTerminalPort(options.loadPty);
+  // Document cards (story 4.7): a planning session's completed write into the output folder appends
+  // `session.document_written` with the next suggested step. Codes only in the log: never a path.
+  const planningDocuments = createPlanningDocuments({
+    bmad: core.bmad,
+    entities: core.entities,
+    catalog: bmadCatalog,
+    agent: chatAgent,
+    sessionEvents: core.sessionEvents,
+    onError: (sessionId, step, error) =>
+      log.info('no document card for a planning write', { sessionId, step, ...(error === undefined ? {} : { code: errorCode(error, 'unexpected') }) }),
+  });
   const chat = createChat({
     dataDir,
     entities: core.entities,
@@ -420,6 +432,7 @@ async function listenAndAnnounce({
     // The event carries the plain reason; the log also gets the details (never the environment).
     onAgentError: (sessionId, error) => log.warn('agent failed', { sessionId, code: error.code, reason: error.message, ...error.details }),
     onInternalError: (sessionId, error) => log.error('applying an agent event failed', { sessionId, reason: String(error) }),
+    onToolCallCompleted: (sessionId, toolCallId, diffs) => planningDocuments.toolCallCompleted(sessionId, toolCallId, diffs),
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
   // Plan and Board (story 4.1): the catalog, planning sessions and the tickets, each behind core's guard (AD-22).
@@ -586,6 +599,8 @@ async function listenAndAnnounce({
         await Promise.race([agentSetup.settled(), new Promise((resolve) => setTimeout(resolve, INSTALL_STOP_MS).unref())]);
       })
       .finally(() => chat.close().catch((error: unknown) => log.warn('stopping agents failed', { reason: String(error) })))
+      // A document detection under way (story 4.7) reads files only; it ends before core closes, bounded.
+      .finally(() => Promise.race([planningDocuments.settled(), new Promise((resolve) => setTimeout(resolve, SETUP_STOP_MS).unref())]))
       // A setup in progress finishes first, so no staging folder is left in a project (story 4.3); bounded.
       .finally(() =>
         Promise.race([

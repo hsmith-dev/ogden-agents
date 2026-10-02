@@ -5,6 +5,8 @@ import {
   BOARD_LOAD_FAILED,
   BmadSourceResponse,
   CatalogResponse,
+  DOCUMENT_LOAD_FAILED,
+  DocumentResponse,
   PLAN_LOAD_FAILED,
   PLAN_START_FAILED,
   SessionResponse,
@@ -34,9 +36,11 @@ export async function fetchCatalog(wsId: string, auth: Auth = tabAuth): Promise<
 /**
  * `POST /api/v1/workspaces/:wsId/planning-sessions`: a planning session on
  * `skill`, its first message already sent, with the user's `idea` when given.
+ * `fallback` is what a refusal without a message says (the Plan page's by
+ * default; a document card passes its own, story 4.7).
  */
-export async function startPlanningSession(wsId: string, skill: string, idea?: string, auth: Auth = tabAuth): Promise<Session> {
-  const json = await call(auth, apiPath(API_ROUTES.workspacePlanningSessions, { wsId }), postJson(idea === undefined ? { skill } : { skill, idea }), PLAN_START_FAILED);
+export async function startPlanningSession(wsId: string, skill: string, idea?: string, auth: Auth = tabAuth, fallback: string = PLAN_START_FAILED): Promise<Session> {
+  const json = await call(auth, apiPath(API_ROUTES.workspacePlanningSessions, { wsId }), postJson(idea === undefined ? { skill } : { skill, idea }), fallback);
   return SessionResponse.parse(json).session;
 }
 
@@ -50,6 +54,12 @@ export async function fetchTickets(wsId: string, auth: Auth = tabAuth): Promise<
 export async function fetchTicket(wsId: string, ref: string, auth: Auth = tabAuth): Promise<TicketResponse> {
   const json = await call(auth, apiPath(API_ROUTES.workspaceTicket, { wsId, ref }), {}, TICKET_LOAD_FAILED);
   return TicketResponse.parse(json);
+}
+
+/** `GET /api/v1/workspaces/:wsId/documents?path=`: a document a planning session wrote (story 4.7's sheet). */
+export async function fetchDocument(wsId: string, path: string, auth: Auth = tabAuth): Promise<DocumentResponse> {
+  const json = await call(auth, `${apiPath(API_ROUTES.workspaceDocument, { wsId })}?${new URLSearchParams({ path }).toString()}`, {}, DOCUMENT_LOAD_FAILED);
+  return DocumentResponse.parse(json);
 }
 
 /**
@@ -74,6 +84,11 @@ export function useTickets(wsId: string) {
 /** One ticket's detail. */
 export function useTicket(wsId: string, ref: string) {
   return useQuery({ queryKey: ['ticket', wsId, ref], queryFn: () => fetchTicket(wsId, ref), retry: false });
+}
+
+/** One document's text, read when its sheet opens (fresh each time: the agent may have rewritten it). */
+export function useDocument(wsId: string, path: string) {
+  return useQuery({ queryKey: ['document', wsId, path], queryFn: () => fetchDocument(wsId, path), retry: false, staleTime: 0, gcTime: 0 });
 }
 
 /** How long a changed card's status line stays highlighted (EXPERIENCE.md Board). */

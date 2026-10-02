@@ -329,3 +329,31 @@ describe('sessionView message origin (story 3.6)', () => {
     expect(view.lastUserText).toBe('typed in the terminal');
   });
 });
+
+describe('document cards in the transcript (story 4.7)', () => {
+  const written = (path: string, next: unknown = { skill: 'bmad-ticket', label: 'Turn this spec into tickets' }, toolCallId: string | null = 't1') =>
+    event('session.document_written', { path, toolCallId, next });
+  const toolCall = (toolCallId: string) => event('session.tool_call', { sessionId: 'ses_1', toolCallId, title: 'Write spec', kind: 'edit', status: 'completed' });
+
+  it('folds a written document into a card after its tool call, with its next step', () => {
+    const view = sessionView([created(), completed('u1', 'user', '/bmad-spec'), toolCall('t1'), written('_bmad-output/spec.md')], 'ses_1');
+    expect(view.items.map((item) => item.type)).toEqual(['message', 'tools', 'document']);
+    expect(view.items.at(-1)).toEqual({ type: 'document', path: '_bmad-output/spec.md', next: { skill: 'bmad-ticket', label: 'Turn this spec into tickets' }, toolCallId: 't1', at });
+  });
+
+  it('keeps one card per path, where the latest write happened; another path is its own card; next may be null', () => {
+    const view = sessionView(
+      [created(), written('_bmad-output/spec.md'), completed('a1', 'agent', 'Done.'), written('_bmad-output/other.md', null, null), written('_bmad-output/spec.md', null, 't9')],
+      'ses_1',
+    );
+    expect(view.items.map((item) => (item.type === 'document' ? `${item.path}:${item.toolCallId ?? '-'}:${item.next?.skill ?? '-'}` : item.type))).toEqual([
+      'message',
+      '_bmad-output/other.md:-:-',
+      '_bmad-output/spec.md:t9:-',
+    ]);
+  });
+
+  it("ignores another session's documents", () => {
+    expect(sessionView([created(), event('session.document_written', { path: 'x/a.md', toolCallId: null, next: null }, 'ses_2')], 'ses_1').items).toEqual([]);
+  });
+});

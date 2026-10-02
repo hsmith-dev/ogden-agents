@@ -15,6 +15,7 @@ import {
   BMAD_SETUP_STEP_LABELS,
   BMAD_SETUP_STEPS,
   CatalogSkill,
+  MAX_DOCUMENT_BYTES,
   type BmadSetupProgress,
   type BmadSetupStatus,
   type Catalog,
@@ -30,6 +31,8 @@ export interface MemoryBmadCatalog extends BmadCatalogPort {
   readonly catalogCalls: readonly string[];
   /** Every `setupStatus` and `setup` call, as `[operation, repoPath]`, in order (story 4.2). */
   readonly setupCalls: ReadonlyArray<readonly ['status' | 'setup', string]>;
+  /** Every `readDocument` call, as `[repoPath, outputFolder, path]`, in order (story 4.7). */
+  readonly documentCalls: ReadonlyArray<readonly [string, string, string]>;
 }
 
 /** The version the memory catalog says Ogden Agents bundles. */
@@ -42,6 +45,12 @@ export interface MemoryBmadCatalogOptions {
   setup?: Readonly<Record<string, BmadSetupStatus>>;
   /** `setup` rejects with this error (a setup that fails). */
   setupFails?: Error;
+  /**
+   * Each repo path's documents (story 4.7), by repo-relative path: what
+   * `readDocument` answers for a path inside the output folder it is asked
+   * with (`null` for any other, as the real adapter answers a missing file).
+   */
+  documents?: Readonly<Record<string, Readonly<Record<string, string>>>>;
 }
 
 const notSetUp = (): BmadSetupStatus => ({
@@ -71,12 +80,25 @@ export function createMemoryBmadCatalog(
   const skillCalls: string[] = [];
   const catalogCalls: string[] = [];
   const setupCalls: Array<readonly ['status' | 'setup', string]> = [];
+  const documentCalls: Array<readonly [string, string, string]> = [];
   const statusOf = (repoPath: string) => structuredClone(setups.get(repoPath) ?? notSetUp());
   return {
     calls,
     skillCalls,
     catalogCalls,
     setupCalls,
+    documentCalls,
+    readDocument: async (repoPath, outputFolder, path) => {
+      documentCalls.push([repoPath, outputFolder, path]);
+      const folder = outputFolder.replace(/\/+$/, '');
+      if (!path.startsWith(`${folder}/`) || !path.endsWith('.md')) return null;
+      const content = options.documents?.[repoPath]?.[path];
+      if (content === undefined) return null;
+      const bytes = Buffer.from(content, 'utf8');
+      return bytes.length > MAX_DOCUMENT_BYTES
+        ? { content: bytes.subarray(0, MAX_DOCUMENT_BYTES).toString('utf8'), truncated: true }
+        : { content, truncated: false };
+    },
     skills: async (repoPath) => {
       skillCalls.push(repoPath);
       return (installed.get(repoPath) ?? []).map((skill) => ({ name: skill.name, description: skill.description }));

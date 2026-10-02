@@ -59,4 +59,17 @@ export interface BmadCatalogPort {
    * for a workspace with Planning or Board on, and only when the user asked.
    */
   setup(repoPath: string, onProgress: (progress: BmadSetupProgress) => void): Promise<BmadSetupStatus>;
+  /**
+   * A Markdown document a planning session wrote (story 4.7), read-only:
+   * `path` (repo-relative, `/`-separated, ending in `.md`) inside
+   * `outputFolder` (the repo-relative output folder of the setup status).
+   * Read only when the file's real path lies inside both the repo's and the
+   * output folder's real paths, and it is a regular file (never a FIFO or a
+   * device, never through a link swapped in), at most `MAX_DOCUMENT_BYTES`
+   * (a longer one is cut there, `truncated: true`). `null` when it is
+   * missing, not a regular file, or its real path leaves either folder; it
+   * rejects only on a bug. Core checks the path and the folder lexically
+   * first and asks it only for a workspace with Planning on (AD-22).
+   */
+  readDocument(repoPath: string, outputFolder: string, path: string): Promise<{ content: string; truncated: boolean } | null>;
 }

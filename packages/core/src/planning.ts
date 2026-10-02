@@ -14,7 +14,15 @@
  * never request input; a skill must be named as {@link SKILL_NAME_PATTERN}
  * allows and be in the catalog. Core names no skill (AD-12).
  */
-import { PlanningIdea, SKILL_NAME_PATTERN, type Catalog, type Session, type WorkspaceId } from '@ogden-agents/shared';
+import {
+  DOCUMENT_INVALID_PATH_MESSAGE,
+  PlanningIdea,
+  SKILL_NAME_PATTERN,
+  type Catalog,
+  type PlanningDocument,
+  type Session,
+  type WorkspaceId,
+} from '@ogden-agents/shared';
 import type { AgentPort } from './agent-port.js';
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
 import type { BmadFeatures } from './bmad-features.js';
@@ -22,6 +30,7 @@ import type { BmadModulesSeen } from './bmad-modules-seen.js';
 import type { Chat } from './chat/types.js';
 import type { Entities } from './entities.js';
 import { NotFoundError, ValidationError } from './errors.js';
+import { documentPath, insideOutputFolder } from './planning-documents.js';
 
 export interface PlanningUseCases {
   /**
@@ -37,12 +46,21 @@ export interface PlanningUseCases {
    * skill not in the catalog or an unknown workspace; nothing is created then.
    */
   start(workspaceId: WorkspaceId, skill: string, idea?: string): Promise<Session>;
+  /**
+   * A Markdown document a planning session wrote (story 4.7), read-only
+   * through the catalog port, confined to the project's output folder.
+   * `FeatureOffError` with Planning off, `ValidationError` for a path that
+   * isn't a repo-relative `.md` path inside the output folder (or a project
+   * with no output folder), `NotFoundError` when the file is missing or its
+   * real path leaves the folder, or for an unknown workspace.
+   */
+  document(workspaceId: WorkspaceId, path: unknown): Promise<PlanningDocument>;
 }
 
 export interface PlanningDeps {
   bmad: Pick<BmadFeatures, 'requireBmadFeature'>;
   entities: Pick<Entities, 'getWorkspace'>;
-  catalog: Pick<BmadCatalogPort, 'catalog'>;
+  catalog: Pick<BmadCatalogPort, 'catalog' | 'setupStatus' | 'readDocument'>;
   chat: Pick<Chat, 'createChatSession' | 'sendMessage'>;
   agent: Pick<AgentPort, 'skillInvocation'>;
   /** Fills the catalog's `installedAt` from when each module first appeared (story 4.4). Without it the port's catalog is answered as it is. */
@@ -93,6 +111,21 @@ export function createPlanning({ bmad, entities, catalog, chat, agent, modulesSe
       const session = chat.createChatSession(workspaceId, 'planning');
       chat.sendMessage(workspaceId, session.id, agent.skillInvocation(skill, checkedIdea));
       return session;
+    },
+
+    async document(workspaceId, path) {
+      bmad.requireBmadFeature(workspaceId, 'planning');
+      const refuse = () => new ValidationError(DOCUMENT_INVALID_PATH_MESSAGE, [{ path: ['path'], message: DOCUMENT_INVALID_PATH_MESSAGE }]);
+      const checked = documentPath(path);
+      if (checked === undefined) throw refuse();
+      const repoPath = workspaceRepoPath(entities, workspaceId);
+      const { outputFolder } = await catalog.setupStatus(repoPath);
+      if (outputFolder === null || !insideOutputFolder(checked, outputFolder)) throw refuse();
+      // Checked again after the (async) read of the status: a piece turned off meanwhile reads nothing.
+      bmad.requireBmadFeature(workspaceId, 'planning');
+      const read = await catalog.readDocument(repoPath, outputFolder, checked);
+      if (read === null) throw new NotFoundError('document', checked);
+      return { path: checked, content: read.content, truncated: read.truncated };
     },
   };
 }

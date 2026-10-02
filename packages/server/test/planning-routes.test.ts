@@ -35,10 +35,11 @@
  *   folder watcher.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  createBmadCatalog,
   createMemoryBmadCatalog,
   createMemoryTicketStore,
   createTicketsV7,
@@ -60,6 +61,9 @@ import {
   BmadSetupStatusResponse,
   boardColumnOf,
   CatalogResponse,
+  DOCUMENT_INVALID_PATH_MESSAGE,
+  DOCUMENT_NOT_FOUND_TEXT,
+  DocumentResponse,
   FEATURE_OFF_MESSAGE,
   MAX_IDEA_LENGTH,
   SCRIPTS_NOT_TRUSTED_MESSAGE,
@@ -70,6 +74,8 @@ import {
   WorkspaceResponse,
   WorkspaceSettingsResponse,
   type BmadPiece,
+  type BmadSetupStatus,
+  type SessionDocumentWrittenEvent,
   type SessionId,
 } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
@@ -652,4 +658,91 @@ describe.skipIf(uvMissing)('the live ticket index through real uv and the verifi
       await runner.close();
     }
   }, 90_000);
+});
+
+/** The real read-only catalog with a set-up status naming `_bmad-output` (story 4.7: no uv, no setup script). */
+function setUpCatalog() {
+  const status: BmadSetupStatus = { state: 'current', outputFolder: '_bmad-output', bundledVersion: '7.0.0', installedVersion: '7.0.0', problems: [] };
+  return { ...createBmadCatalog(), setupStatus: async () => structuredClone(status) };
+}
+
+const documentPath = (wsId: string, path?: string) => `${apiPath(API_ROUTES.workspaceDocument, { wsId })}${path === undefined ? '' : `?${new URLSearchParams({ path })}`}`;
+
+const documentsOf = (server: TestServer, sessionId: SessionId) =>
+  server.core.events.readAfter(0).filter((event): event is SessionDocumentWrittenEvent => event.streamId === sessionId && event.type === 'session.document_written');
+
+describe('document cards over REST (story 4.7)', () => {
+  it('GET documents: 409 with Planning off, the document with it on, 400 outside the folder or not .md, 404 missing or linked out; nothing written', async () => {
+    const repo = createFakeBmadRepo({
+      bmad: true,
+      output: true,
+      files: { ...SKILL_FILES, '_bmad-output/specs/spec-x.md': '# Spec\n\nHello.\n', 'src/x.md': '# Not a document', '_bmad-output/data.toml': 'x = 1' },
+      prefix: 'ogden-agents-plan-repo-',
+    });
+    removeAfterTest(repo.path);
+    let linked = true;
+    try {
+      symlinkSync(join(repo.path, 'src', 'x.md'), join(repo.path, '_bmad-output', 'link.md'), 'file');
+    } catch {
+      linked = false;
+    }
+    const server = await startTestServer({ bmadCatalog: setUpCatalog() });
+    const tab = await signIn(server);
+    const before = repo.hash();
+    const workspace = await project(server, tab, repo, []);
+
+    const off = await request(server, tab, 'GET', documentPath(workspace.id, '_bmad-output/specs/spec-x.md'));
+    expect(off.status).toBe(409);
+    expect(ApiErrorBody.parse(await off.json()).error.code).toBe('feature_off');
+
+    await project(server, tab, repo, ['planning']);
+    const read = await request(server, tab, 'GET', documentPath(workspace.id, '_bmad-output/specs/spec-x.md'));
+    expect(read.status).toBe(200);
+    expect(DocumentResponse.parse(await read.json())).toEqual({ document: { path: '_bmad-output/specs/spec-x.md', content: '# Spec\n\nHello.\n', truncated: false } });
+
+    for (const bad of [undefined, '', 'src/x.md', '../x.md', '_bmad-output/../src/x.md', '/etc/passwd', '_bmad-output/data.toml', '_bmad-output\\x.md']) {
+      const refused = await request(server, tab, 'GET', documentPath(workspace.id, bad));
+      expect(refused.status, String(bad)).toBe(400);
+      expect(ApiErrorBody.parse(await refused.json()).error).toEqual({ code: 'invalid_request', message: DOCUMENT_INVALID_PATH_MESSAGE });
+    }
+    for (const missing of ['_bmad-output/missing.md', ...(linked ? ['_bmad-output/link.md'] : [])]) {
+      const gone = await request(server, tab, 'GET', documentPath(workspace.id, missing));
+      expect(gone.status, missing).toBe(404);
+      expect(ApiErrorBody.parse(await gone.json()).error).toEqual({ code: 'not_found', message: DOCUMENT_NOT_FOUND_TEXT });
+    }
+    await server.close();
+    expect(repo.hash()).toBe(before);
+  });
+
+  it('a planning session writing a spec into the output folder appends one document_written with the next step; outside it, or in a chat, none', async () => {
+    const lines: string[] = [];
+    const server = await startTestServer({ bmadCatalog: setUpCatalog(), lines });
+    const tab = await signIn(server);
+    const repo = fixtureRepo();
+    const workspace = await project(server, tab, repo, ['planning']);
+    const { start } = paths(workspace.id);
+    const send = async (sessionId: SessionId, text: string) => {
+      const replies = repliesOf(server, sessionId).length;
+      expect((await request(server, tab, 'POST', apiPath(API_ROUTES.sessionMessages, { wsId: workspace.id, sesId: sessionId }), { text })).status).toBe(202);
+      await waitFor(() => server.core.entities.getSession(sessionId)!.state === 'idle' && repliesOf(server, sessionId).length > replies, 'the agent reply', 15_000);
+    };
+
+    const { session } = SessionResponse.parse(await (await request(server, tab, 'POST', start, { skill: 'bmad-spec', idea: 'A pottery site' })).json());
+    await waitFor(() => server.core.entities.getSession(session.id)!.state === 'idle' && repliesOf(server, session.id).length > 0, 'the agent reply', 15_000);
+    await send(session.id, 'write-doc _bmad-output/specs/spec-x.md');
+    await waitFor(() => documentsOf(server, session.id).length === 1, 'the document event', 5_000);
+    const [written] = documentsOf(server, session.id);
+    expect(written!.payload).toEqual({ path: '_bmad-output/specs/spec-x.md', toolCallId: expect.stringMatching(/^call-write-/), next: { skill: 'bmad-ticket', label: 'Turn this spec into tickets' } });
+
+    // Outside the output folder: no card. The same file in a plain chat: none either.
+    await send(session.id, 'write-doc src/notes.md');
+    const chatSession = SessionResponse.parse(await (await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceSessions, { wsId: workspace.id }), {})).json()).session;
+    await send(chatSession.id, 'write-doc _bmad-output/specs/spec-z.md');
+    // Detection is async after the tool call: a moment for any stray event to land.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(documentsOf(server, session.id)).toHaveLength(1);
+    expect(documentsOf(server, chatSession.id)).toEqual([]);
+    // The log never names the document.
+    expect(lines.join('\n')).not.toContain('spec-x.md');
+  });
 });

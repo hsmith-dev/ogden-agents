@@ -1,5 +1,6 @@
 import type {
   AlwaysAllowScope,
+  CatalogNext,
   CautionLevel,
   CoreEvent,
   MessageRole,
@@ -87,7 +88,12 @@ export type TranscriptItem =
   | { type: 'message'; message: TranscriptMessage }
   | { type: 'permission'; permission: TranscriptPermission }
   | { type: 'tools'; calls: TranscriptToolCall[] }
-  | { type: 'resumed'; via: ResumedVia; at: string };
+  | { type: 'resumed'; via: ResumedVia; at: string }
+  /**
+   * A document the planning session wrote (story 4.7, `session.document_written`):
+   * one per path, where its latest write happened.
+   */
+  | { type: 'document'; path: string; next: CatalogNext | null; toolCallId: string | null; at: string };
 
 export interface SessionView {
   /** Whether the event log has this session at all (its `session.created`). */
@@ -222,6 +228,14 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
       case 'session.tool_call_updated': {
         const { toolCallId, title, kind, status, diffs } = event.payload;
         toolCall({ toolCallId, title, kind, status, diffs }, event.type === 'session.tool_call_updated');
+        break;
+      }
+      case 'session.document_written': {
+        // One card per path: a rewrite moves it to where the latest write happened.
+        const { path, next, toolCallId } = event.payload;
+        const earlier = view.items.findIndex((item) => item.type === 'document' && item.path === path);
+        if (earlier !== -1) view.items.splice(earlier, 1);
+        view.items.push({ type: 'document', path, next, toolCallId, at: event.at });
         break;
       }
       case 'session.check_in':

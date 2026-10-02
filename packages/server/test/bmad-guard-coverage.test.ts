@@ -118,6 +118,8 @@ const PIECE_ROUTES: readonly string[] = [
   `PUT ${API_ROUTES.workspaceTicketStatus}`,
   `GET ${API_ROUTES.workspaceBmadSetup}`,
   `POST ${API_ROUTES.workspaceBmadSetup}`,
+  // A document a planning session wrote (story 4.7): no trust, it reads one file and runs nothing.
+  `GET ${API_ROUTES.workspaceDocument}`,
 ].sort();
 
 /** The routes that run the project's own scripts, so they check its trust too (story 4.2): every `board` route, never setup. */
@@ -146,6 +148,7 @@ describe('every route serving a BMad piece is guarded (AD-22, story 10.6)', () =
     expect(trustedRouteKeys(app)).toEqual(TRUSTED_ROUTES);
     expect(trustedRouteKeys(app)).not.toContain(`GET ${API_ROUTES.workspaceBmadSetup}`);
     expect(trustedRouteKeys(app)).not.toContain(`POST ${API_ROUTES.workspaceBmadSetup}`);
+    expect(trustedRouteKeys(app)).not.toContain(`GET ${API_ROUTES.workspaceDocument}`);
     // The probe serves Planning, which runs no project script.
     expect(trustedRouteKeys(app)).not.toContain(`GET ${TEST_ROUTES.bmadProbe}`);
   });

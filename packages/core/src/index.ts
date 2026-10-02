@@ -36,6 +36,7 @@ export * from './new-projects.js';
 export * from './onboarding.js';
 export * from './permissions.js';
 export * from './planning.js';
+export * from './planning-documents.js';
 export * from './resume-prime.js';
 export * from './secret-store-port.js';
 export * from './session-events.js';

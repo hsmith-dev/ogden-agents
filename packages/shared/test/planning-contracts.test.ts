@@ -324,3 +324,29 @@ describe('the board and ticket detail texts (story 4.9)', () => {
     expect(shared.TICKET_SUMMARY_HEADING).toBe('Plan summary');
   });
 });
+
+describe('document cards (story 4.7)', () => {
+  it('the document route is inside a workspace under /api/v1', () => {
+    expect(apiPath(API_ROUTES.workspaceDocument, { wsId })).toBe(`${API_BASE}/workspaces/${wsId}/documents`);
+  });
+
+  it('DocumentResponse carries a repo-relative path, the text and whether it was cut', () => {
+    const document = { path: '_bmad-output/spec.md', content: '# Spec', truncated: false };
+    expect(shared.DocumentResponse.parse({ document })).toEqual({ document });
+    expect(shared.DocumentResponse.safeParse({ document: { ...document, path: '/etc/passwd' } }).success).toBe(false);
+    expect(shared.DocumentResponse.safeParse({ document: { ...document, path: '../x.md' } }).success).toBe(false);
+    expect(shared.DocumentResponse.safeParse({ document: { path: document.path, content: '# Spec' } }).success).toBe(false);
+    expect(shared.MAX_DOCUMENT_BYTES).toBe(1024 * 1024);
+  });
+
+  it('the card texts are plain', () => {
+    expect(shared.DOCUMENT_OPEN_LABEL).toBe('Open');
+    expect(shared.documentCardLabel('spec-x.md')).toBe('Document spec-x.md');
+    expect(shared.documentFileName('_bmad-output/specs/spec-x.md')).toBe('spec-x.md');
+    expect(shared.documentFileName('spec.md')).toBe('spec.md');
+    for (const text of [shared.DOCUMENT_INVALID_PATH_MESSAGE, shared.DOCUMENT_NOT_FOUND_TEXT, shared.DOCUMENT_LOAD_FAILED, shared.DOCUMENT_TRUNCATED_TEXT, shared.DOCUMENT_NEXT_FAILED]) {
+      expect(text).not.toMatch(/[–—]/);
+      expect(text).toMatch(/^[A-Z]/);
+    }
+  });
+});

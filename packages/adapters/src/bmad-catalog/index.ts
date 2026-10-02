@@ -5,7 +5,8 @@
  * catalog's installed skills, scanned in `skills.ts`, and `catalog` (story
  * 4.4) is built in `catalog.ts`, so this file keeps
  * `detect`'s lstat-only guarantee below. Setup's status and setup itself
- * (entry 4.3) live in `setup.ts`, built from the options.
+ * (entry 4.3) live in `setup.ts`, built from the options, and
+ * `readDocument` (story 4.7) in `document.ts`.
  *
  * Read-only guarantee: `detect` first `lstat`s `repoPath` itself, which must
  * be a real folder (a repo root that has become a symlink or junction answers
@@ -24,6 +25,7 @@ import { isAbsolute, join } from 'node:path';
 import type { BmadCatalogPort, BmadRepoDetection } from '@ogden-agents/core';
 import type { Catalog } from '@ogden-agents/shared';
 import { buildCatalog } from './catalog.js';
+import { readDocument } from './document.js';
 import { createBmadSetup, type BmadSetupOptions } from './setup.js';
 import { scanSkills } from './skills.js';
 
@@ -76,6 +78,8 @@ export function createBmadCatalog(options?: BmadSetupOptions): BmadCatalogPort {
       return { hasBmad, hasOutput };
     },
     skills: scanSkills,
+    // A document a planning session wrote (story 4.7): confined to the real repo and output folder (`document.ts`).
+    readDocument: (repoPath, outputFolder, path) => readDocument(repoPath, outputFolder, path),
   };
 }
 

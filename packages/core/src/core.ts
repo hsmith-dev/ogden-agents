@@ -2,6 +2,7 @@ import type { BmadCatalogPort } from './bmad-catalog-port.js';
 import { createBmadDetection, type BmadDetectionUseCases } from './bmad-detection.js';
 import { createBmadFeatures, parseAvailableBmadPieces, type BmadFeatures, type BmadFeaturesOptions } from './bmad-features.js';
 import { createBmadScriptTrust, type BmadScriptTrust } from './bmad-script-trust.js';
+import { createBmadSetup, type BmadSetupUseCases } from './bmad-setup.js';
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
 import { createEntities, type Entities } from './entities.js';
 import { createEventLog, type EventLog, type EventLogOptions } from './event-log.js';
@@ -26,6 +27,8 @@ export interface Core {
   readonly bmadDetection: BmadDetectionUseCases;
   /** The per-project script trust (story 4.2): checked with the pieces guard for every use of the project's own scripts. */
   readonly bmadScriptTrust: BmadScriptTrust;
+  /** BMad Method's setup in a project (story 4.3); `undefined` without a catalog to set up with. */
+  readonly bmadSetup: BmadSetupUseCases | undefined;
   close(): void;
 }
 
@@ -35,6 +38,8 @@ export type OpenCoreOptions = OpenDatabaseOptions &
     onPermissionError?: (error: unknown) => void;
     /** The read-only BMad detection (story 10.3). Without it, every repo answers that it has no `_bmad/`. */
     bmadCatalog?: BmadCatalogPort;
+    /** Told why a BMad Method setup failed (story 4.3), for the log. */
+    onBmadSetupFailure?: (workspaceId: string, error: unknown) => void;
   } & BmadFeaturesOptions;
 
 /** Opens (and migrates) the database in `dataDir` and builds core on it. */
@@ -49,6 +54,16 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
   const bmad = createBmadFeatures(db, { availableBmadPieces });
   const bmadDetection = createBmadDetection({ orm: db.orm, events, entities, catalog: options.bmadCatalog });
   const bmadScriptTrust = createBmadScriptTrust({ orm: db.orm, events });
+  const bmadSetup =
+    options.bmadCatalog === undefined
+      ? undefined
+      : createBmadSetup({
+          bmad,
+          entities,
+          catalog: options.bmadCatalog,
+          events,
+          ...(options.onBmadSetupFailure === undefined ? {} : { onFailure: options.onBmadSetupFailure }),
+        });
   const permissions = createPermissions({
     db,
     events,
@@ -65,6 +80,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     bmad,
     bmadDetection,
     bmadScriptTrust,
+    bmadSetup,
     close: () => {
       try {
         permissions.close();

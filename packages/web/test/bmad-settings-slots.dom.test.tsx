@@ -65,7 +65,13 @@ vi.mock('@/workspaces/workspace-settings-api', async () => {
   };
 });
 
-vi.mock('@/workspaces/bmad-detection-api', () => ({ useBmadDetection: () => state.detection }));
+vi.mock('@/workspaces/bmad-detection-api', () => ({ useBmadDetection: () => state.detection, bmadDetectionQueryKey: (wsId: string) => ['bmad-detection', wsId] }));
+// Story 4.3's setup status line: no events, and a status that never loads.
+vi.mock('@/events/event-stream', () => ({ useEventStream: () => ({ events: [], lastSeq: 0, caughtUp: true }) }));
+vi.mock('@/planning/bmad-setup-api', async () => ({
+  ...(await vi.importActual<typeof import('../src/planning/bmad-setup-api')>('../src/planning/bmad-setup-api')),
+  useBmadSetupStatus: () => ({ data: undefined, error: null }),
+}));
 vi.mock('@/settings/new-project-defaults', () => ({ useNewProjectDefaults: () => state.defaults }));
 
 const { BmadMethodSection } = await import('../src/workspaces/bmad-method-section');

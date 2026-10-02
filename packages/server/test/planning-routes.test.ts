@@ -8,7 +8,7 @@
  * - with Board on and the project not trusted, every route that runs
  *   `tickets.py` answers 409 `scripts_not_trusted` and the store is never
  *   called; `PUT …/bmad/script-trust` trusts it once (one event) and they
- *   answer; the setup routes need no trust and answer 501 until entry 4.3;
+ *   answer; the setup routes need no trust (story 4.3: they answer);
  * - the catalog lists the fixture repo's installed skills; starting one
  *   creates a session of kind `planning` whose first message is `/<skill>`
  *   (with the idea when given), which the fake agent answers; an unknown
@@ -22,20 +22,15 @@
  *   managed test Python is absent), writing nothing; a store that fails
  *   answers 503 `tickets_unavailable`.
  */
-import { execFileSync } from 'node:child_process';
 import { mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
+  createMemoryBmadCatalog,
   createMemoryTicketStore,
   createTicketsV7,
   createUpstreamBmadSource,
   createUvScriptRunner,
-  gunzipLimited,
-  hashEntries,
-  parseTar,
-  selectVerified,
   uvEnvironment,
   type MemoryTicketStore,
 } from '@ogden-agents/adapters';
@@ -43,6 +38,8 @@ import {
   API_ROUTES,
   ApiErrorBody,
   apiPath,
+  BMAD_ALREADY_SET_UP_MESSAGE,
+  BmadSetupStatusResponse,
   boardColumnOf,
   CatalogResponse,
   FEATURE_OFF_MESSAGE,
@@ -58,8 +55,7 @@ import {
 } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { createFakeBmadRepo, type FakeBmadRepo } from '../../../tests/fixtures/fake-bmad-repo.js';
-import { repoTarGz } from '../../../tests/fixtures/tar.js';
-import { removeAfterTest, signIn, startTestServer, tempDataDir, waitFor, type SignedIn, type TestServer } from './helpers.js';
+import { FIXTURE_COMMIT, fixtureUpstream, realUvMissing, removeAfterTest, signIn, startTestServer, tempDataDir, TEST_UV_PYTHON_ENV, UPSTREAM_FIXTURE, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
 const SKILL = (name: string, description: string) => `---\nname: ${name}\ndescription: '${description}'\n---\n\n# ${name}\n`;
 const SKILL_FILES = {
@@ -157,7 +153,8 @@ describe('Plan and Board routes (story 4.1)', () => {
   it('Board on and untrusted: every tickets route answers scripts_not_trusted and the store is never called (story 4.2)', async () => {
     const repo = fixtureRepo();
     const store = stubStore(realPathOf(repo));
-    const server = await startTestServer({ ticketStore: store });
+    const bmadCatalog = createMemoryBmadCatalog({ [realPathOf(repo)]: { hasBmad: true } });
+    const server = await startTestServer({ ticketStore: store, bmadCatalog });
     const tab = await signIn(server);
     const workspace = await project(server, tab, repo, ['board']);
     const { tickets, ticket, status, setup, catalog } = paths(workspace.id);
@@ -173,12 +170,14 @@ describe('Plan and Board routes (story 4.1)', () => {
       expect(ApiErrorBody.parse(await response.json()).error).toEqual({ code: 'scripts_not_trusted', message: SCRIPTS_NOT_TRUSTED_MESSAGE });
     }
     expect(store.calls).toEqual([]);
-    // Setup runs no project script: no trust needed, and it answers 501 until entry 4.3.
-    for (const method of ['GET', 'POST'] as const) {
-      const response = await request(server, tab, method, setup);
-      expect(response.status, `${method} setup`).toBe(501);
-      expect(ApiErrorBody.parse(await response.json()).error.code).toBe('not_implemented');
-    }
+    // Setup runs no project script: no trust needed (story 4.3). This repo has `_bmad/`, so a setup is refused.
+    const got = await request(server, tab, 'GET', setup);
+    expect(got.status).toBe(200);
+    expect(BmadSetupStatusResponse.parse(await got.json()).setup.state).toBe('not_set_up');
+    const posted = await request(server, tab, 'POST', setup);
+    expect(posted.status).toBe(409);
+    expect(ApiErrorBody.parse(await posted.json()).error).toEqual({ code: 'bmad_already_set_up', message: BMAD_ALREADY_SET_UP_MESSAGE });
+    expect(bmadCatalog.setupCalls.filter(([what]) => what === 'setup')).toEqual([]);
     // Planning off still answers feature_off before anything about trust.
     expect(ApiErrorBody.parse(await (await request(server, tab, 'GET', catalog)).json()).error.code).toBe('feature_off');
   });
@@ -324,62 +323,10 @@ describe('Plan and Board routes (story 4.1)', () => {
   });
 });
 
-/**
- * The Python the real-uv tests run `tickets.py` with: a uv-managed CPython of
- * this minor version, never a Python preinstalled on the computer. CI
- * provisions it with `uv python install` (ci.yml, before the tests, the only
- * step that downloads it); the tests themselves never download
- * (`UV_PYTHON_DOWNLOADS=never`) and ignore any system Python
- * (`UV_PYTHON_PREFERENCE=only-managed`). The product lets uv find or fetch a
- * Python the same way.
- */
-const TEST_PYTHON = '3.12';
-const TEST_UV_PYTHON_ENV: Readonly<Record<string, string>> = {
-  UV_PYTHON: TEST_PYTHON,
-  UV_PYTHON_PREFERENCE: 'only-managed',
-  UV_PYTHON_DOWNLOADS: 'never',
-  // Where `uv python install` put it: setup-uv sets this in CI, and the server's uv allowlist doesn't carry it.
-  ...(process.env.UV_PYTHON_INSTALL_DIR ? { UV_PYTHON_INSTALL_DIR: process.env.UV_PYTHON_INSTALL_DIR } : {}),
-};
-
-/** Whether `uv` is on PATH and has the uv-managed {@link TEST_PYTHON} installed (no download). */
-function hasManagedPython(): boolean {
-  try {
-    execFileSync('uv', ['python', 'find', '--managed-python', '--no-python-downloads', TEST_PYTHON], { stdio: 'ignore', windowsHide: true });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 // CI always provisions uv and the managed Python (ci.yml), so it never skips; a developer without them skips only these.
-const uvMissing = process.env.CI === undefined && !hasManagedPython();
+const uvMissing = realUvMissing();
 
-/** The upstream fixture (`tests/fixtures/bmad-upstream`): the pinned `tickets.py`, unchanged. */
-const UPSTREAM_FIXTURE = fileURLToPath(new URL('../../../tests/fixtures/bmad-upstream', import.meta.url));
 const FIXTURE_TICKETS = join(UPSTREAM_FIXTURE, 'skills', 'bmad-ticket', 'scripts', 'tickets.py');
-const FIXTURE_COMMIT = 'c0ffee'.padEnd(40, '0');
-
-/**
- * The fixture as codeload would serve it, a lock that pins its content hash,
- * and a `fetch` that answers the tarball and counts its calls: the real
- * `bmad-source` adapter, without the network (story 4.14).
- */
-function fixtureUpstream() {
-  const tarball = repoTarGz(UPSTREAM_FIXTURE, `BMAD-METHOD-${FIXTURE_COMMIT}`);
-  const contentHash = hashEntries(selectVerified(parseTar(gunzipLimited(tarball, 64 * 1024 * 1024)), 'skills/'));
-  const lock = {
-    sources: {
-      'bmad-method': { repo: 'bmad-code-org/BMAD-METHOD', ref: 'main', commit: FIXTURE_COMMIT, version: '6.13.0-fixture', include: 'skills/', contentHash },
-    },
-  };
-  const fetched: string[] = [];
-  const fetch = async (url: string) => {
-    fetched.push(url);
-    return new Response(tarball);
-  };
-  return { lock, fetch, fetched };
-}
 
 describe.skipIf(uvMissing)('the board through real uv and the verified pinned tickets.py (stories 4.1, 4.14)', () => {
   it("answers 409 bmad_not_downloaded until Download, then the fixture repo's tickets with the status and state tickets.py reports, and writes nothing", async () => {

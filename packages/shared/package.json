@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./secret-patterns": "./src/secret-patterns.ts"
+    "./secret-patterns": "./src/secret-patterns.ts",
+    "./semver": "./src/semver.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"

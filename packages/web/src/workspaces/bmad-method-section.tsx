@@ -8,27 +8,36 @@ import {
   BMAD_SAVE_FAILED_TEXT,
   BMAD_SECTION_INTRO,
   BMAD_SECTION_TITLE,
+  BMAD_SETUP_CHECKING_TEXT,
+  BMAD_SETUP_OWED_TEXT,
+  BMAD_SETUP_UNUSABLE_TEXT,
   BMAD_USE_DESCRIPTION,
   BMAD_USE_LABEL,
   bmadMainSwitchPieces,
   bmadNeedsUnavailableText,
   bmadPieceNeeds,
   bmadPiecesRunProjectScripts,
+  bmadSetupCurrentText,
+  bmadUpdateAvailableText,
   canonicalBmadPieces,
   SCRIPT_TRUST_FAILED,
   describeBmadPieceChange,
   WORKSPACE_SETTINGS_BMAD_ANCHOR,
   type BmadPiece,
+  type BmadSetupStatus,
 } from '@ogden-agents/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouterState } from '@tanstack/react-router';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useBmadSetupStatus } from '@/planning/bmad-setup-api';
+import { BmadSetupView, useBmadSetup, type BmadSetupPhase } from '@/planning/bmad-setup-panel';
 import { Field } from '@/ui/field';
 import { Notice } from '@/ui/notice';
 import { PageSection } from '@/ui/page';
 import { Switch } from '@/ui/switch';
 import { Text } from '@/ui/typography';
 import { canTurnOnBmadPiece, ComingSoonBadge } from '@/workspaces/bmad-piece-choice';
+import { fetchBmadDetection } from '@/workspaces/bmad-detection-api';
 import { ScriptTrustDialog } from '@/workspaces/script-trust-dialog';
 import { createLatestGate, trustProjectScripts, updateBmadPieces, useBmadPieces, useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
 
@@ -47,6 +56,12 @@ import { createLatestGate, trustProjectScripts, updateBmadPieces, useBmadPieces,
  * scripts (a piece's switch, or the main switch) in a project not yet
  * trusted opens the trust dialog first; Allow trusts the project, then
  * saves the choice; Cancel changes nothing.
+ *
+ * Story 4.3: with Planning or Board on, a status line says where BMad
+ * Method's setup stands in the project (`GET …/bmad/setup`): set up with
+ * its version, an update, an unfinished setup, what couldn't be read, or
+ * Set up. A save that turns on the first of Planning and Board in a project
+ * without `_bmad/` starts the setup, and its progress shows here.
  */
 
 /** Which pieces this install ships: `true` available, `false` coming soon. */
@@ -77,6 +92,8 @@ export interface BmadMethodViewProps {
    * wrapper when `undefined`.
    */
   defaultSlot?: ReactNode;
+  /** Rendered below the pieces: story 4.3's setup status line. No wrapper when `undefined`. */
+  setupSlot?: ReactNode;
 }
 
 /** The needs of `piece` this install doesn't ship and that are not already on (turning it on would be refused). */
@@ -91,7 +108,7 @@ function canTurnOn(piece: BmadPiece, pieces: readonly BmadPiece[], availability:
 
 const HEADING_ID = `${WORKSPACE_SETTINGS_BMAD_ANCHOR}-heading`;
 
-export function BmadMethodView({ pieces, availability, saving, status, error, onToggle, onUseBmad, offerSlot, defaultSlot }: BmadMethodViewProps) {
+export function BmadMethodView({ pieces, availability, saving, status, error, onToggle, onUseBmad, offerSlot, defaultSlot, setupSlot }: BmadMethodViewProps) {
   const anyOn = pieces !== undefined && pieces.length > 0;
   const mainTarget = availability === undefined ? [] : bmadMainSwitchPieces(BMAD_PIECES.filter((piece) => availability[piece]));
   const mainComingSoon = availability !== undefined && mainTarget.length === 0 && !anyOn;
@@ -176,12 +193,84 @@ export function BmadMethodView({ pieces, availability, saving, status, error, on
       <Text variant="caption" role="status" data-testid="bmad-status">
         {status ?? ''}
       </Text>
+      {setupSlot === undefined ? null : <div data-testid="bmad-setup-slot">{setupSlot}</div>}
       {error === undefined ? null : (
         <Notice variant="blocked" role="alert" data-testid="bmad-error">
           {error}
         </Notice>
       )}
     </PageSection>
+  );
+}
+
+/** The pieces BMad Method's setup serves (story 4.3). */
+const SETUP_PIECES: readonly BmadPiece[] = ['planning', 'board'];
+const servesSetup = (pieces: readonly BmadPiece[]) => pieces.some((piece) => SETUP_PIECES.includes(piece));
+
+/** The status line's sentence for a setup status (story 4.3); `undefined` for `not_set_up` (the panel says it). */
+export function bmadSetupStatusText(status: BmadSetupStatus): string | undefined {
+  switch (status.state) {
+    case 'current':
+      return status.installedVersion === null ? undefined : bmadSetupCurrentText(status.installedVersion);
+    case 'update_available':
+      return bmadUpdateAvailableText(status.installedVersion ?? '', status.bundledVersion);
+    case 'setup_owed':
+      return BMAD_SETUP_OWED_TEXT;
+    case 'unusable':
+      return BMAD_SETUP_UNUSABLE_TEXT;
+    case 'not_set_up':
+      return undefined;
+  }
+}
+
+export interface BmadSetupStatusViewProps {
+  /** The project's setup status; `undefined` while it loads. */
+  status: BmadSetupStatus | undefined;
+  /** Why the status couldn't be loaded. */
+  loadError: string | undefined;
+  /** The setup in this tab's view: its phase, steps and reason. */
+  phase: BmadSetupPhase;
+  steps: Parameters<typeof BmadSetupView>[0]['steps'];
+  reason: string | undefined;
+  onSetUp: () => void;
+}
+
+/**
+ * Story 4.3's status line: a setup's progress while one runs (or just ended,
+ * in this view), else the fetched status; a refused Set up (a 409, say) says
+ * why under it (review Q4).
+ */
+export function BmadSetupStatusView({ status, loadError, phase, steps, reason, onSetUp }: BmadSetupStatusViewProps) {
+  if (phase !== 'idle') return <BmadSetupView phase={phase} steps={steps} reason={reason} onSetUp={onSetUp} />;
+  if (status?.state === 'not_set_up') return <BmadSetupView phase="idle" steps={[]} reason={reason} onSetUp={onSetUp} />;
+  const refused =
+    reason === undefined ? null : (
+      <Text variant="caption" role="alert" data-testid="bmad-setup-error">
+        {reason}
+      </Text>
+    );
+  if (status === undefined) {
+    return (
+      <>
+        <Text variant="caption" role={loadError === undefined ? 'status' : 'alert'} data-testid="bmad-setup-status" data-state="loading">
+          {loadError ?? BMAD_SETUP_CHECKING_TEXT}
+        </Text>
+        {refused}
+      </>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-1" data-testid="bmad-setup-status" data-state={status.state}>
+      <Text variant="caption">{bmadSetupStatusText(status)}</Text>
+      {status.state === 'unusable' && status.problems.length > 0 ? (
+        <ul className="m-0 pl-5 text-caption text-muted-foreground" data-testid="bmad-setup-problems">
+          {status.problems.map((problem) => (
+            <li key={problem}>{problem}</li>
+          ))}
+        </ul>
+      ) : null}
+      {refused}
+    </div>
   );
 }
 
@@ -235,6 +324,10 @@ export function BmadMethodSection({ wsId, offerSlot, defaultSlot }: { wsId: stri
   const [chosen, setChosen] = useState<BmadPiece[] | undefined>(undefined);
   const [status, setStatus] = useState<{ text: string; key: string } | undefined>(undefined);
   const latest = useRef(createLatestGate()).current;
+  // BMad Method's setup (story 4.3): its progress from the events, and the status while Planning or Board is on.
+  const setup = useBmadSetup(wsId);
+  const setupShown = settings.data !== undefined && servesSetup(settings.data.bmadPieces);
+  const setupStatus = useBmadSetupStatus(wsId, setupShown);
   /** The pieces this tab's last save produced, as a key. */
   const lastSaved = useRef<string | undefined>(undefined);
 
@@ -252,6 +345,7 @@ export function BmadMethodSection({ wsId, offerSlot, defaultSlot }: { wsId: stri
 
   const save = (choice: BmadChoice) => {
     const ticket = latest.next();
+    const before = settings.data?.bmadPieces ?? [];
     setSaving(true);
     setChosen(choice.pieces);
     setStatus(undefined);
@@ -264,6 +358,17 @@ export function BmadMethodSection({ wsId, offerSlot, defaultSlot }: { wsId: stri
         lastSaved.current = sameKey(saved.bmadPieces);
         queryClient.setQueryData(['workspace-settings', wsId], saved);
         setStatus(choice.status === undefined ? undefined : { text: choice.status, key: sameKey(saved.bmadPieces) });
+        // The first of Planning and Board turned on, in a project without `_bmad/`: set BMad Method up (story 4.3).
+        if (!servesSetup(before) && servesSetup(saved.bmadPieces)) {
+          fetchBmadDetection(wsId).then(
+            (detection) => {
+              if (!detection.hasBmad) setup.start();
+            },
+            () => {
+              // Unknown: the status line offers Set up.
+            },
+          );
+        }
       },
       (failure: unknown) => {
         if (!latest.isLatest(ticket)) return;
@@ -346,6 +451,18 @@ export function BmadMethodSection({ wsId, offerSlot, defaultSlot }: { wsId: stri
         onUseBmad={onUseBmad}
         offerSlot={offerSlot}
         defaultSlot={defaultSlot}
+        setupSlot={
+          setupShown || setup.phase !== 'idle' ? (
+            <BmadSetupStatusView
+              status={setupStatus.data}
+              loadError={setupStatus.error instanceof Error ? setupStatus.error.message : undefined}
+              phase={setup.phase}
+              steps={setup.steps}
+              reason={setup.reason}
+              onSetUp={setup.start}
+            />
+          ) : undefined
+        }
       />
       <ScriptTrustDialog
         open={awaitingTrust !== undefined}

@@ -26,10 +26,18 @@
 //                   the folder; `pip install … --python <venv> …` writes the
 //                   `bmad-loop` executable into it where uv would (bin/, or
 //                   Scripts\bmad-loop.exe on Windows); both exit 0
+//   bmad-setup      emulates BMad Method's `setup.py` (story 4.3) against its
+//                   `--project-root`: `--list-config-questions` prints
+//                   `FAKE_UV_QUESTIONS` (a JSON list, default `[]`); without
+//                   it, setup creates `_bmad/scripts/`, `_bmad/config.toml`
+//                   and `_bmad-output/` (or, with `FAKE_UV_SETUP_FAIL` set,
+//                   prints `{"error"}` naming it and exits 1).
 //
 // `FAKE_UV_ENV_FILE` lines also carry `argv` and `cwd`.
+// `FAKE_UV_LOG_FILE`: append `{ argv, cwd, answers }` as one JSON line to that
+// file on every run (`answers` is the `--module-answers` file's text, if any).
 import { spawn } from 'node:child_process';
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const argv = process.argv.slice(2);
@@ -37,7 +45,33 @@ const mode = argv[0] === '--version' ? 'version' : (process.env.FAKE_UV_MODE ?? 
 
 if (process.env.FAKE_UV_ENV_FILE) appendFileSync(process.env.FAKE_UV_ENV_FILE, `${JSON.stringify({ mode, argv, cwd: process.cwd(), env: process.env })}\n`);
 
-if (mode === 'echo') {
+/** The value after `flag` in argv, or `undefined`. */
+const option = (flag) => {
+  const index = argv.indexOf(flag);
+  return index === -1 ? undefined : argv[index + 1];
+};
+
+if (process.env.FAKE_UV_LOG_FILE) {
+  const answersFile = option('--module-answers');
+  const answers = answersFile !== undefined && existsSync(answersFile) ? readFileSync(answersFile, 'utf8') : null;
+  appendFileSync(process.env.FAKE_UV_LOG_FILE, `${JSON.stringify({ argv, cwd: process.cwd(), answers })}\n`);
+}
+
+if (mode === 'bmad-setup') {
+  const root = option('--project-root');
+  const bmad = join(root, '_bmad');
+  if (argv.includes('--list-config-questions')) {
+    process.stdout.write(process.env.FAKE_UV_QUESTIONS ?? '[]');
+  } else if (process.env.FAKE_UV_SETUP_FAIL) {
+    process.stderr.write(`${JSON.stringify({ error: `${process.env.FAKE_UV_SETUP_FAIL}: ${bmad}` })}\n`);
+    process.exitCode = 1;
+  } else {
+    mkdirSync(join(bmad, 'scripts'), { recursive: true });
+    writeFileSync(join(bmad, 'config.toml'), '[core]\nproject_name = "repo"\noutput_folder = "{project-root}/_bmad-output"\n');
+    mkdirSync(join(root, '_bmad-output'), { recursive: true });
+    process.stdout.write(JSON.stringify({ mode: 'setup', status: 'created', changed: true, next: null }));
+  }
+} else if (mode === 'echo') {
   process.stdout.write(JSON.stringify({ argv, cwd: process.cwd(), env: process.env }));
 } else if (mode === 'version') {
   process.stdout.write('uv 0.12.21 (fake)\n');

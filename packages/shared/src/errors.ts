@@ -67,6 +67,11 @@ export const API_ERROR_CODES = [
   'status_not_allowed',
   /** A piece that needs BMad Method installed in the project was used before setup (409; story 4.2). */
   'bmad_not_set_up',
+  /**
+   * BMad Method's setup was asked for in a project that already has `_bmad/`
+   * (409; story 4.3). Nothing was written: updating a project is Upgrade's.
+   */
+  'bmad_already_set_up',
   /** The project's BMad Method lacks the capability this needs (409, AD-14; story 4.2). The UI shows the reduced-mode notice. */
   'reduced_mode',
   /**

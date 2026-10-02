@@ -18,14 +18,37 @@
  *   message when they can't be read.
  * - `GET …/tickets/:ref` and `PUT …/tickets/:ref/status` (`board`, trust):
  *   501 until entries 4.9 and 4.10 fill them.
- * - `GET` and `POST …/bmad/setup` (`planning` or `board`; runs only the
- *   verified pinned `setup.py`, so no trust): 501 until entry 4.3 fills them.
+ * - `GET …/bmad/setup` (`planning` or `board`; no trust; entry 4.3) →
+ *   `BmadSetupStatusResponse`, read from the project's files only (no
+ *   process, no network).
+ * - `POST …/bmad/setup` (the same; runs only the verified pinned `setup.py`,
+ *   downloading it first) → 202 `BmadSetupStartedResponse`: a setup started (`started: false` when one already runs); progress
+ *   follows as `bmad.setup_*` events. 409 `bmad_already_set_up` when the
+ *   project already has `_bmad/`, nothing written.
  *
  * Without the use-cases (an app wired without them) each answers 501 once
  * the guards have passed.
  */
-import { TicketsUnavailableError, ValidationError, type BmadFeatures, type BmadScriptTrust, type BoardUseCases, type PlanningUseCases } from '@ogden-agents/core';
-import { API_ROUTES, BMAD_NOT_DOWNLOADED_MESSAGE, CatalogResponse, MAX_IDEA_LENGTH, SessionResponse, StartPlanningRequest, TicketsResponse } from '@ogden-agents/shared';
+import {
+  TicketsUnavailableError,
+  ValidationError,
+  type BmadFeatures,
+  type BmadScriptTrust,
+  type BmadSetupUseCases,
+  type BoardUseCases,
+  type PlanningUseCases,
+} from '@ogden-agents/core';
+import {
+  API_ROUTES,
+  BMAD_NOT_DOWNLOADED_MESSAGE,
+  BmadSetupStartedResponse,
+  BmadSetupStatusResponse,
+  CatalogResponse,
+  MAX_IDEA_LENGTH,
+  SessionResponse,
+  StartPlanningRequest,
+  TicketsResponse,
+} from '@ogden-agents/shared';
 import type { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { bmadPieceRoutes } from './bmad-pieces.js';
@@ -45,10 +68,12 @@ export interface PlanningRoutesOptions {
   planning?: PlanningUseCases | undefined;
   /** The project's tickets; without it the `board` route answers 501. */
   board?: BoardUseCases | undefined;
+  /** BMad Method's setup (entry 4.3); without it the setup routes answer 501. */
+  bmadSetup?: BmadSetupUseCases | undefined;
   log: Logger;
 }
 
-export function registerPlanningRoutes(app: Hono, { bmad, scriptTrust, planning, board, log }: PlanningRoutesOptions): void {
+export function registerPlanningRoutes(app: Hono, { bmad, scriptTrust, planning, board, bmadSetup, log }: PlanningRoutesOptions): void {
   const routes = bmadPieceRoutes(app, { bmad, scriptTrust, log });
 
   routes.get('planning', API_ROUTES.workspaceCatalog, async (c, { workspaceId }) => {
@@ -106,7 +131,26 @@ export function registerPlanningRoutes(app: Hono, { bmad, scriptTrust, planning,
   // Pre-registered by story 4.2, so their entries only fill them: each answers 501 once the guards pass.
   routes.get('board', API_ROUTES.workspaceTicket, (c) => notImplemented(c));
   routes.put('board', API_ROUTES.workspaceTicketStatus, (c) => notImplemented(c));
-  // BMad Method's setup runs the verified pinned `setup.py`, never the project's own code (entry 4.3 confirms it).
-  routes.get(['planning', 'board'], API_ROUTES.workspaceBmadSetup, (c) => notImplemented(c), { projectScripts: false });
-  routes.post(['planning', 'board'], API_ROUTES.workspaceBmadSetup, (c) => notImplemented(c), { projectScripts: false });
+  // BMad Method's setup runs the verified pinned `setup.py`, never the project's own code (the entry 4.3 trust proof).
+  routes.get(
+    ['planning', 'board'],
+    API_ROUTES.workspaceBmadSetup,
+    async (c, { workspaceId }) => {
+      if (bmadSetup === undefined) return notImplemented(c);
+      return c.json(BmadSetupStatusResponse.parse({ setup: await bmadSetup.status(workspaceId) }));
+    },
+    { projectScripts: false },
+  );
+  routes.post(
+    ['planning', 'board'],
+    API_ROUTES.workspaceBmadSetup,
+    async (c, { workspaceId }) => {
+      if (bmadSetup === undefined) return notImplemented(c);
+      // No body is read: setup takes no input but the workspace.
+      const started = await bmadSetup.start(workspaceId);
+      if (started.started) log.info('BMad Method setup started', { workspaceId });
+      return c.json(BmadSetupStartedResponse.parse(started), 202);
+    },
+    { projectScripts: false },
+  );
 }

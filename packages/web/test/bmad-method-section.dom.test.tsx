@@ -7,14 +7,27 @@
  * the switches without a status line, and opening the page at `#bmad-method`
  * focuses the section's heading once. Story 4.2: turning on a piece that
  * runs the project's scripts in a project not yet trusted opens the trust
- * dialog first; Allow trusts, then saves; Cancel changes nothing. The
+ * dialog first; Allow trusts, then saves; Cancel changes nothing. Story
+ * 4.3: with Planning or Board on, the setup status line says where BMad
+ * Method's setup stands; turning on the first of them in a project without
+ * `_bmad/` starts the setup, whose progress (from the workspace's events)
+ * shows inline, then "Ready to plan.". The
  * settings API is replaced (the
  * settings query is a real query on a test client, so saved answers and
  * other tabs' changes land as they would); nothing reaches a server.
  */
 import {
+  BMAD_NOT_SET_UP_TEXT,
   BMAD_OFF_TEXT,
   BMAD_ON_TEXT,
+  BMAD_SETUP_DONE_TEXT,
+  BMAD_SETUP_FAILURE_REASONS,
+  BMAD_SETUP_STEP_LABELS,
+  BMAD_SETUP_UNUSABLE_TEXT,
+  bmadSetupCurrentText,
+  bmadUpdateAvailableText,
+  type BmadSetupStatus,
+  type CoreEvent,
   BMAD_PIECES,
   BMAD_COMING_SOON_REASON,
   SCRIPT_TRUST_TITLE,
@@ -41,7 +54,57 @@ const state = vi.hoisted(() => ({
   /** The router's location hash (without `#`), and who to tell when it changes. */
   hash: '',
   hashListeners: new Set<() => void>(),
+  /** Story 4.3: the workspace's events, the setup status, the detection, and each setup started. */
+  events: [] as CoreEvent[],
+  eventListeners: new Set<() => void>(),
+  setupStatus: undefined as BmadSetupStatus | undefined,
+  hasBmad: false,
+  setupStarts: 0,
+  caughtUp: true,
+  startRefused: undefined as Error | undefined,
 }));
+
+vi.mock('@/events/event-stream', async () => {
+  const { useSyncExternalStore } = await import('react');
+  return {
+    useEventStream: () => {
+      const events = useSyncExternalStore(
+        (listener) => {
+          state.eventListeners.add(listener);
+          return () => state.eventListeners.delete(listener);
+        },
+        () => state.events,
+      );
+      return { events, lastSeq: events.at(-1)?.seq ?? 0, caughtUp: state.caughtUp };
+    },
+  };
+});
+
+vi.mock('@/planning/bmad-setup-api', async () => ({
+  ...(await vi.importActual<typeof import('../src/planning/bmad-setup-api')>('../src/planning/bmad-setup-api')),
+  useBmadSetupStatus: (_wsId: string, enabled: boolean) => ({ data: enabled ? state.setupStatus : undefined, error: null }),
+  startBmadSetup: async () => {
+    state.setupStarts++;
+    if (state.startRefused !== undefined) throw state.startRefused;
+    return Promise.resolve({ started: true, setup: { state: 'not_set_up', outputFolder: null, bundledVersion: '7.0.0', installedVersion: null, problems: [] } });
+  },
+}));
+
+vi.mock('@/workspaces/bmad-detection-api', () => ({
+  bmadDetectionQueryKey: (wsId: string) => ['bmad-detection', wsId],
+  fetchBmadDetection: () => Promise.resolve({ hasBmad: state.hasBmad, hasOutput: false, offerDismissed: false }),
+}));
+
+/** The server appends setup events on the workspace's stream. */
+let nextSeq = 1;
+const emit = (...events: Array<{ type: string; payload: unknown }>) =>
+  act(() => {
+    state.events = [
+      ...state.events,
+      ...events.map((event) => ({ ...event, seq: nextSeq++, workspaceId: WS, streamId: WS, ts: '2026-10-02T00:00:00.000Z' }) as unknown as CoreEvent),
+    ];
+    for (const listener of state.eventListeners) listener();
+  });
 
 vi.mock('@tanstack/react-router', async () => {
   const { useSyncExternalStore } = await import('react');
@@ -125,6 +188,13 @@ beforeEach(() => {
   state.trustAnswer = () => Promise.resolve(settings([], true));
   state.hash = '';
   state.hashListeners.clear();
+  state.events = [];
+  state.eventListeners.clear();
+  state.setupStatus = undefined;
+  state.hasBmad = false;
+  state.setupStarts = 0;
+  state.caughtUp = true;
+  state.startRefused = undefined;
 });
 afterEach(cleanup);
 
@@ -351,5 +421,112 @@ describe('BmadMethodSection: the script trust (story 4.2, DOM)', () => {
     expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(state.patches).toEqual([['board']]);
     expect(state.trusts).toBe(0);
+  });
+});
+
+const setupStatus = (state: BmadSetupStatus['state'], installedVersion: string | null = '7.0.0', problems: string[] = []): BmadSetupStatus => ({
+  state,
+  outputFolder: state === 'not_set_up' ? null : '_bmad-output',
+  bundledVersion: '7.1.0',
+  installedVersion,
+  problems,
+});
+
+describe('BmadMethodSection setup (story 4.3)', () => {
+  const settle = () =>
+    act(async () => {
+      for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+  it('no status line with Planning and Board off', () => {
+    mount([]);
+    expect(screen.queryByTestId('bmad-setup-slot')).toBeNull();
+  });
+
+  it('says current, an update, what could not be read, or offers Set up', () => {
+    state.setupStatus = setupStatus('current');
+    mount(['planning']);
+    expect(screen.getByTestId('bmad-setup-status').textContent).toBe(bmadSetupCurrentText('7.0.0'));
+    cleanup();
+
+    state.setupStatus = setupStatus('update_available');
+    mount(['board']);
+    expect(screen.getByTestId('bmad-setup-status').textContent).toBe(bmadUpdateAvailableText('7.0.0', '7.1.0'));
+    cleanup();
+
+    state.setupStatus = setupStatus('unusable', null, ['A problem in plain words.']);
+    mount(['planning']);
+    expect(screen.getByTestId('bmad-setup-status').textContent).toContain(BMAD_SETUP_UNUSABLE_TEXT);
+    expect(screen.getByTestId('bmad-setup-problems').textContent).toBe('A problem in plain words.');
+    cleanup();
+
+    state.setupStatus = setupStatus('not_set_up', null);
+    mount(['planning']);
+    expect(screen.getByTestId('bmad-setup-text').textContent).toBe(BMAD_NOT_SET_UP_TEXT);
+    fireEvent.click(screen.getByTestId('bmad-set-up'));
+    expect(state.setupStarts).toBe(1);
+  });
+
+  it('turning on Planning in a project without _bmad/ starts the setup; its progress shows, then Ready to plan.', async () => {
+    const { click } = mount([]);
+    await click('bmad-planning');
+    await settle();
+    expect(state.patches).toEqual([['planning']]);
+    expect(state.setupStarts).toBe(1);
+    expect(screen.getByTestId('bmad-setup-panel').getAttribute('data-phase')).toBe('starting');
+
+    emit({ type: 'bmad.setup_started', payload: {} }, { type: 'bmad.setup_progress', payload: { step: 'checking', label: BMAD_SETUP_STEP_LABELS.checking } });
+    expect(screen.getByTestId('bmad-setup-panel').getAttribute('data-phase')).toBe('running');
+    const steps = () => screen.getAllByTestId('bmad-setup-step').map((step) => step.getAttribute('data-state'));
+    expect(steps()).toEqual(['current', 'pending', 'pending', 'pending']);
+    emit({ type: 'bmad.setup_progress', payload: { step: 'copying_skills', label: BMAD_SETUP_STEP_LABELS.copying_skills } });
+    expect(steps()).toEqual(['done', 'current', 'pending', 'pending']);
+    emit({ type: 'bmad.setup_completed', payload: { status: setupStatus('current') } });
+    expect(screen.getByTestId('bmad-setup-done').textContent).toBe(BMAD_SETUP_DONE_TEXT);
+  });
+
+  it('a failure shows its plain reason and Set up again; a project with _bmad/, or Board already on, starts nothing', async () => {
+    const fresh = mount([]);
+    await fresh.click('bmad-planning');
+    await settle();
+    emit({ type: 'bmad.setup_started', payload: {} }, { type: 'bmad.setup_failed', payload: { reason: BMAD_SETUP_FAILURE_REASONS.uv_missing } });
+    expect(screen.getByTestId('bmad-setup-failed').textContent).toContain(BMAD_SETUP_FAILURE_REASONS.uv_missing);
+    fireEvent.click(screen.getByTestId('bmad-set-up-again'));
+    expect(state.setupStarts).toBe(2);
+    cleanup();
+
+    state.setupStarts = 0;
+    state.events = [];
+    state.hasBmad = true;
+    const withBmad = mount([]);
+    await withBmad.click('bmad-planning');
+    await settle();
+    expect(state.setupStarts).toBe(0);
+    cleanup();
+
+    state.hasBmad = false;
+    const already = mount(['board']);
+    await already.click('bmad-planning');
+    await settle();
+    expect(state.setupStarts).toBe(0);
+  });
+
+  it('an old failure in the window does not mask the status, and a refused Set up says why under it (Q4)', async () => {
+    emit({ type: 'bmad.setup_started', payload: {} }, { type: 'bmad.setup_failed', payload: { reason: BMAD_SETUP_FAILURE_REASONS.uv_missing } });
+    state.setupStatus = setupStatus('current');
+    mount(['planning']);
+    expect(screen.getByTestId('bmad-setup-status').textContent).toBe(bmadSetupCurrentText('7.0.0'));
+    expect(screen.queryByTestId('bmad-setup-failed')).toBeNull();
+    cleanup();
+
+    state.events = [];
+    state.setupStatus = setupStatus('unusable', null, ['A problem in plain words.']);
+    state.startRefused = new Error('BMad Method is already set up in this project.');
+    const { click } = mount([]);
+    await click('bmad-planning');
+    await settle();
+    expect(state.setupStarts).toBe(1);
+    expect(screen.getByTestId('bmad-setup-status').getAttribute('data-state')).toBe('unusable');
+    expect(screen.getByTestId('bmad-setup-error').textContent).toBe('BMad Method is already set up in this project.');
   });
 });

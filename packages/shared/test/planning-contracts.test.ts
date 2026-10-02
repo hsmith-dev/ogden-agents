@@ -259,6 +259,16 @@ describe('error codes, routes and events (story 4.2)', () => {
   });
 });
 
+describe('BMad Method setup (story 4.3)', () => {
+  it('has bmad_already_set_up, and a plain reason for each failure', () => {
+    expect(API_ERROR_CODES).toContain('bmad_already_set_up');
+    expect(shared.BMAD_ALREADY_SET_UP_MESSAGE).toMatch(/already set up/);
+    expect(Object.keys(shared.BMAD_SETUP_FAILURE_REASONS).sort()).toEqual(['failed', 'not_writable', 'timeout', 'uv_missing']);
+    for (const reason of Object.values(shared.BMAD_SETUP_FAILURE_REASONS)) expect(shared.BmadSetupFailedEvent.shape.payload.parse({ reason })).toEqual({ reason });
+    expect(shared.bmadSetupCurrentText('6.13.0')).toBe('BMad Method 6.13.0 is set up in this project.');
+  });
+});
+
 describe('the epic 4 texts (story 4.2)', () => {
   it('every user-facing text is plain, with no em or en dash, and names no skill', () => {
     const texts = Object.entries(shared).filter(
@@ -272,6 +282,8 @@ describe('the epic 4 texts (story 4.2)', () => {
       ...Object.entries(CATALOG_GROUP_LABELS),
       ...Object.entries(BMAD_SETUP_STEP_LABELS),
       ['update', shared.bmadUpdateAvailableText('6.0.0', '7.0.0')],
+      ...Object.entries(shared.BMAD_SETUP_FAILURE_REASONS),
+      ['current', shared.bmadSetupCurrentText('7.0.0')],
     ];
     for (const [name, text] of all) {
       expect(text, name).not.toMatch(/[\u2013\u2014]/);

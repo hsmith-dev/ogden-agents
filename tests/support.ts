@@ -49,9 +49,14 @@ export const FAKE_AGENT = join(ROOT, 'tests', 'fixtures', 'fake-acp-agent.mjs');
  *
  * Welcome (story 9.5) is marked done in `dataDir` first, so a tab lands on
  * Projects, unless `firstRun` is set (the Welcome tests).
+ *
+ * BMad Method's setup (story 4.3) is {@link stubSetupCatalog}'s unless
+ * `extra` names a catalog, so turning Planning or Board on never runs uv or
+ * reaches the network.
  */
 export async function startServer(dataDir: string, port = 0, { firstRun = false, ...extra }: StartOptions & { firstRun?: boolean } = {}): Promise<RunningServer> {
   const { start, createLogger, createMemorySecretStore } = await serverModule();
+  const bmadCatalog = extra.bmadCatalog ?? (await stubSetupCatalog(extra.bmadSource === undefined ? {} : { source: extra.bmadSource }));
   if (!firstRun) writeFileSync(join(dataDir, 'onboarding.json'), `${JSON.stringify({ welcomeCompleted: true })}\n`, { mode: 0o600 });
   return start({
     port,
@@ -63,8 +68,61 @@ export async function startServer(dataDir: string, port = 0, { firstRun = false,
     secrets: createMemorySecretStore(),
     verifyApiKey: async () => 'ok',
     ...extra,
+    bmadCatalog,
     launch: true,
   });
+}
+
+type BmadCatalog = NonNullable<NonNullable<StartOptions>['bmadCatalog']>;
+
+/** The setup steps as `BMAD_SETUP_STEP_LABELS` names them (`planning.ts` has imports this module can't load). */
+const SETUP_STEPS = [
+  ['checking', 'Checking the project'],
+  ['copying_skills', 'Copying the BMad Method skills'],
+  ['writing_config', "Writing the project's BMad Method settings"],
+  ['verifying', 'Checking the setup'],
+] as const;
+
+/**
+ * The real read-only BMad Method catalog (detection, skills, catalog) with
+ * a stub setup (story 4.3): it first downloads through `source` when given
+ * (the server's one BMad Method source, as the real setup does: review S1),
+ * then reports each step `stepMs` apart, then the project counts as set up in
+ * memory, or the setup fails with `fail` (an error whose own text names a
+ * path, which the UI must never show). Nothing is written and no uv runs; the
+ * server tests run the real `setup.py`.
+ */
+export async function stubSetupCatalog({
+  fail = false,
+  stepMs = 150,
+  source,
+}: { fail?: boolean; stepMs?: number; source?: Pick<NonNullable<NonNullable<StartOptions>['bmadSource']>, 'download'> } = {}): Promise<BmadCatalog> {
+  const { createBmadCatalog } = await serverModule();
+  const real = createBmadCatalog();
+  const done = new Set<string>();
+  const status = (setUp: boolean) => ({
+    state: setUp ? ('current' as const) : ('not_set_up' as const),
+    outputFolder: setUp ? '_bmad-output' : null,
+    bundledVersion: '7.0.0',
+    installedVersion: setUp ? '7.0.0' : null,
+    problems: [],
+  });
+  const hasBmad = async (repoPath: string) => done.has(repoPath) || (await real.detect(repoPath)).hasBmad;
+  return {
+    ...real,
+    detect: async (repoPath) => ({ ...(await real.detect(repoPath)), hasBmad: await hasBmad(repoPath) }),
+    setupStatus: async (repoPath) => status(await hasBmad(repoPath)),
+    setup: async (repoPath, onProgress) => {
+      if (source !== undefined) await source.download();
+      for (const [step, label] of SETUP_STEPS) {
+        onProgress({ step, label });
+        await new Promise((resolve) => setTimeout(resolve, stepMs));
+      }
+      if (fail) throw new Error(`EACCES: permission denied, mkdir '${repoPath}/_bmad'`);
+      done.add(repoPath);
+      return status(true);
+    },
+  };
 }
 
 // Shared with the plain-Node install scripts: whether a process with a pid

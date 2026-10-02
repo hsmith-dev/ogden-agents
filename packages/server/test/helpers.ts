@@ -3,22 +3,18 @@
  * starting a real server that is closed after the test, raw HTTP requests,
  * and connecting a tab the way the page does (AD-15 as amended in story 2.1).
  */
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { request, type IncomingHttpHeaders } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  createMemoryAgentSetup,
-  createMemoryAppShortcut,
-  createMemoryBmadCatalog,
-  createMemoryBmadSource,
-  createMemorySecretStore,
-  createMemoryTicketStore,
-} from '@ogden-agents/adapters';
+import { fileURLToPath } from 'node:url';
+import { createMemoryAgentSetup, createMemoryAppShortcut, createMemoryBmadCatalog, createMemoryBmadSource, createMemorySecretStore, createMemoryTicketStore, gunzipLimited, hashEntries, parseTar, selectVerified } from '@ogden-agents/adapters';
 import { createAgentSetup, createBmadSource, createBoard, createChat, createNewProjectDefaults, createOnboarding, createPlanning, type AgentPort, type Core } from '@ogden-agents/core';
 import { API_ROUTES, webSocketProtocols } from '@ogden-agents/shared';
 import type { Hono } from 'hono';
 import { afterEach } from 'vitest';
+import { repoTarGz } from '../../../tests/fixtures/tar.js';
 import type WebSocket from 'ws';
 import { createApp, type AppOptions } from '../src/app.js';
 import { createLaunchCodes, createTabTokens } from '../src/auth.js';
@@ -279,4 +275,62 @@ export function fullTestApp(core: Core, extra: Partial<AppOptions> = {}): Hono {
     tabs: createTabTokens(),
     ...extra,
   });
+}
+
+/**
+ * The Python the real-uv tests run BMad Method's scripts with: a uv-managed CPython of
+ * this minor version, never a Python preinstalled on the computer. CI
+ * provisions it with `uv python install` (ci.yml, before the tests, the only
+ * step that downloads it); the tests themselves never download
+ * (`UV_PYTHON_DOWNLOADS=never`) and ignore any system Python
+ * (`UV_PYTHON_PREFERENCE=only-managed`). The product lets uv find or fetch a
+ * Python the same way.
+ */
+export const TEST_PYTHON = '3.12';
+export const TEST_UV_PYTHON_ENV: Readonly<Record<string, string>> = {
+  UV_PYTHON: TEST_PYTHON,
+  UV_PYTHON_PREFERENCE: 'only-managed',
+  UV_PYTHON_DOWNLOADS: 'never',
+  // Where `uv python install` put it: setup-uv sets this in CI, and the server's uv allowlist doesn't carry it.
+  ...(process.env.UV_PYTHON_INSTALL_DIR ? { UV_PYTHON_INSTALL_DIR: process.env.UV_PYTHON_INSTALL_DIR } : {}),
+};
+
+/** Whether `uv` is on PATH and has the uv-managed {@link TEST_PYTHON} installed (no download). */
+export function hasManagedPython(): boolean {
+  try {
+    execFileSync('uv', ['python', 'find', '--managed-python', '--no-python-downloads', TEST_PYTHON], { stdio: 'ignore', windowsHide: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Whether the real-uv tests skip: never in CI (it provisions uv and the managed Python), else when either is missing. */
+export function realUvMissing(): boolean {
+  return process.env.CI === undefined && !hasManagedPython();
+}
+
+/** The upstream fixture (`tests/fixtures/bmad-upstream`): the pinned `tickets.py`, and `setup.py` with its payload and module records (story 4.3), unchanged. */
+export const UPSTREAM_FIXTURE = fileURLToPath(new URL('../../../tests/fixtures/bmad-upstream', import.meta.url));
+export const FIXTURE_COMMIT = 'c0ffee'.padEnd(40, '0');
+
+/**
+ * The fixture as codeload would serve it, a lock that pins its content hash,
+ * and a `fetch` that answers the tarball and counts its calls: the real
+ * `bmad-source` adapter, without the network (story 4.14).
+ */
+export function fixtureUpstream() {
+  const tarball = repoTarGz(UPSTREAM_FIXTURE, `BMAD-METHOD-${FIXTURE_COMMIT}`);
+  const contentHash = hashEntries(selectVerified(parseTar(gunzipLimited(tarball, 64 * 1024 * 1024)), 'skills/'));
+  const lock = {
+    sources: {
+      'bmad-method': { repo: 'bmad-code-org/BMAD-METHOD', ref: 'main', commit: FIXTURE_COMMIT, version: '6.13.0-fixture', include: 'skills/', contentHash },
+    },
+  };
+  const fetched: string[] = [];
+  const fetch = async (url: string) => {
+    fetched.push(url);
+    return new Response(tarball);
+  };
+  return { lock, fetch, fetched };
 }

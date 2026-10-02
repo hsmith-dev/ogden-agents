@@ -22,8 +22,9 @@ describe('bmad-lock.mjs', () => {
 
   it('hashes a tarball as the app does', () => {
     const tarball = repoTarGz(join(ROOT, 'tests', 'fixtures', 'bmad-upstream'), `r-${COMMIT}`);
-    const app = hashEntries(selectVerified(parseTar(gunzipLimited(tarball, 1 << 26)), 'skills/'));
-    expect(contentHashOf(tarball, 'skills/')).toEqual({ hash: app, files: 1 });
+    const selected = selectVerified(parseTar(gunzipLimited(tarball, 1 << 26)), 'skills/');
+    const app = hashEntries(selected);
+    expect(contentHashOf(tarball, 'skills/')).toEqual({ hash: app, files: selected.size });
     expect(checkHash('bmad-method', { ...PIN, contentHash: app }, app)).toEqual([]);
     expect(checkHash('bmad-method', PIN, app)).toEqual([`bmad-method: o/r@${COMMIT} hashes ${app}, but bmad-lock.json pins ${PIN.contentHash}`]);
   });

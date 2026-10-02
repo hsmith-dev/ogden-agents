@@ -7,6 +7,7 @@ import {
   type BmadFeatures,
   type BmadScriptTrust,
   type BmadSourceUseCases,
+  type BmadSetupUseCases,
   type BoardUseCases,
   type Chat,
   type EventLog,
@@ -111,6 +112,8 @@ export interface AppOptions {
   board?: BoardUseCases;
   /** The pinned upstream BMad Method's status and its user-initiated download (story 4.14); without it those routes answer 501. */
   bmadSource?: BmadSourceUseCases;
+  /** BMad Method's setup in a project (story 4.3), behind Planning or Board; without it those routes answer 501 once the guard passes. */
+  bmadSetup?: BmadSetupUseCases | undefined;
   /** Core's agent setup use-case: each agent's state and signing in (9.1); without it those routes answer 501. */
   agentSetup?: AgentSetup;
   /** Whether the first-run Welcome is done (9.5); without it those routes answer 501. */
@@ -147,6 +150,7 @@ export function createApp({
   planning,
   board,
   bmadSource,
+  bmadSetup,
   agentSetup,
   onboarding,
   newProjectDefaults,
@@ -245,7 +249,7 @@ export function createApp({
   registerBmadDetectionRoutes(app, { bmadDetection, log });
   registerBmadTrustRoutes(app, { scriptTrust: bmadScriptTrust, permissions, log });
   // Plan and Board (stories 4.1, 4.2): every route through `bmadPieceRoutes`, behind core's guard and the script trust (AD-22).
-  if (bmad !== undefined && bmadScriptTrust !== undefined) registerPlanningRoutes(app, { bmad, scriptTrust: bmadScriptTrust, planning, board, log });
+  if (bmad !== undefined && bmadScriptTrust !== undefined) registerPlanningRoutes(app, { bmad, scriptTrust: bmadScriptTrust, planning, board, bmadSetup, log });
 
   registerEventSocket(app, { events, log, tabs });
   // A session's terminal (story 3.1): behind the same gate as `/ws`.

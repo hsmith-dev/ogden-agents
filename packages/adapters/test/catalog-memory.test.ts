@@ -4,6 +4,7 @@
  * doesn't know as having neither folder, as the real adapter does for a
  * missing repo.
  */
+import { BmadAlreadySetUpError } from '@ogden-agents/core';
 import { BMAD_SETUP_STEPS, Catalog, type BmadSetupProgress } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { createBmadCatalog, createMemoryBmadCatalog, MEMORY_BUNDLED_BMAD_VERSION } from '../src/index.js';
@@ -60,6 +61,15 @@ describe('catalog-memory: the catalog and setup (story 4.2)', () => {
     ]);
   });
 
+  it('refuses a setup in a repo that already has _bmad or is set up, writing nothing (story 4.3)', async () => {
+    const catalog = createMemoryBmadCatalog({ '/has': { hasBmad: true } }, {}, { setup: { '/done': { state: 'current', outputFolder: '_bmad-output', bundledVersion: MEMORY_BUNDLED_BMAD_VERSION, installedVersion: MEMORY_BUNDLED_BMAD_VERSION, problems: [] } } });
+    const progress: BmadSetupProgress[] = [];
+    await expect(catalog.setup('/has', (step) => progress.push(step))).rejects.toBeInstanceOf(BmadAlreadySetUpError);
+    await expect(catalog.setup('/done', (step) => progress.push(step))).rejects.toBeInstanceOf(BmadAlreadySetUpError);
+    expect(progress).toEqual([]);
+    expect((await catalog.setupStatus('/has')).state).toBe('not_set_up');
+  });
+
   it('a setup told to fail rejects after its steps, and the repo stays as it was', async () => {
     const catalog = createMemoryBmadCatalog({}, {}, { setupFails: new Error('no disk') });
     await expect(catalog.setup('/repo', () => {})).rejects.toThrow('no disk');
@@ -67,8 +77,8 @@ describe('catalog-memory: the catalog and setup (story 4.2)', () => {
   });
 });
 
-describe('bmad-catalog until entries 4.3 and 4.4 (story 4.2)', () => {
-  it('the catalog is the scanned skills with null metadata; setup rejects', async () => {
+describe('bmad-catalog until entry 4.4 (story 4.2)', () => {
+  it('the catalog is the scanned skills with null metadata; setup without the script runner rejects (story 4.3)', async () => {
     const real = createBmadCatalog();
     expect(await real.catalog('/no/such/repo')).toEqual({ modules: [], skills: [], agents: [], entryAction: null, capabilities: { plain_labels: false, ticket_tree: false } });
     await expect(real.setupStatus('/no/such/repo')).rejects.toThrow(/4\.3/);

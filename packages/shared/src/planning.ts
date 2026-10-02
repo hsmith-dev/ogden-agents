@@ -588,5 +588,35 @@ export const BMAD_SETUP_FAILED = "Ogden Agents couldn't set up BMad Method in th
 export function bmadUpdateAvailableText(installed: string, bundled: string): string {
   return `This project has BMad Method ${installed}. Version ${bundled} is available.`;
 }
+/** `bmad_already_set_up` (409, story 4.3): setup was asked for in a project that already has BMad Method. */
+export const BMAD_ALREADY_SET_UP_MESSAGE = 'BMad Method is already set up in this project.';
+/** Why a setup failed (story 4.3), as `bmad.setup_failed`'s `reason`: plain words, never a path or the script's output. */
+export const BMAD_SETUP_FAILURE_REASONS = {
+  uv_missing: 'Setting up BMad Method needs uv. Install it in Settings → Tools, then try again.',
+  not_writable: "Ogden Agents couldn't write to this project's folder. Check that you can change files there, then try again.",
+  timeout: 'Setting up BMad Method took too long. Try again.',
+  failed: "Ogden Agents couldn't set up BMad Method in this project. Try again.",
+} as const;
+export type BmadSetupFailureReason = keyof typeof BMAD_SETUP_FAILURE_REASONS;
+/** The settings' status line when the project's BMad Method is current. */
+export function bmadSetupCurrentText(installed: string): string {
+  return `BMad Method ${installed} is set up in this project.`;
+}
+/** The settings' status line when a setup was started but not finished. */
+export const BMAD_SETUP_OWED_TEXT = "BMad Method's setup in this project isn't finished. Set it up again.";
+/** The settings' status line when `_bmad/` is there but can't be read. */
+export const BMAD_SETUP_UNUSABLE_TEXT = "Ogden Agents can't read this project's BMad Method setup.";
+/** A problem line: the project's `_bmad` entry is a link or a file, not a folder. */
+export const BMAD_SETUP_NOT_A_FOLDER_TEXT = "This project's BMad Method folder is a link or a file, not a folder.";
+/** A problem line: the version of the project's installed BMad Method can't be read. */
+export const BMAD_SETUP_VERSION_UNKNOWN_TEXT = "Ogden Agents can't read which BMad Method version this project has.";
+/** A problem line: the project's settings don't name a usable output folder. */
+export const BMAD_SETUP_OUTPUT_FOLDER_PROBLEM = "This project's BMad Method settings name an output folder outside the project.";
+/** The accessible name of the setup panel's progress list. */
+export const BMAD_SETUP_PROGRESS_LABEL = 'Setting up BMad Method';
+/** The setup panel's button after a failure. */
+export const BMAD_SET_UP_AGAIN_LABEL = 'Set up again';
+/** Said while the settings' setup status loads. */
+export const BMAD_SETUP_CHECKING_TEXT = 'Checking BMad Method in this project';
 /** The document card's button that opens a written document. */
 export const DOCUMENT_OPEN_LABEL = 'Open';

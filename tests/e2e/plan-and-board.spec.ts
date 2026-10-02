@@ -9,14 +9,18 @@
  * trust prompt, and Allow trusts it and shows the tickets; turning Board on
  * in the settings opens the trust dialog first. Story 4.14: a Board with the
  * pinned BMad Method not downloaded offers Download BMad Method, and after it
- * the tickets show (an in-memory source: nothing is downloaded). No real
- * `claude` or `uv` runs.
+ * the tickets show (an in-memory source: nothing is downloaded). Story 4.3: a project
+ * without `_bmad/` shows the setup panel on Plan, whose Set up shows each
+ * step and then "Ready to plan."; turning Planning on in the settings starts
+ * the setup and shows its progress inline; a failed setup says why in plain
+ * words and a chat still opens. Setup is `stubSetupCatalog`'s, on the
+ * real read-only catalog. No real `claude` or `uv` runs.
  */
 import { expect, test } from '@playwright/test';
 // The shared routes' own file (it has no imports), as support.ts reads it.
 import { apiPath } from '../../packages/shared/src/api.ts';
-import { API_ROUTES, serverModule } from '../support.js';
-import { withChatServer } from './chat-server.js';
+import { API_ROUTES, serverModule, stubSetupCatalog } from '../support.js';
+import { startChat, withChatServer } from './chat-server.js';
 import { storedToken } from './tab.js';
 
 const SKILL = (name: string, description: string) => `---\nname: ${name}\ndescription: '${description}'\n---\n\n# ${name}\n`;
@@ -50,6 +54,9 @@ function stubTicketStore() {
   };
   return store;
 }
+
+/** BMad Method's `_bmad/` as a set-up project has it (the tests before 4.3 open Plan and Board in one). */
+const SET_UP = { '_bmad/config.toml': '[core]\noutput_folder = "{project-root}/_bmad-output"\n' };
 
 test('Plan Start opens the planning session, and Board asks for trust, then to download BMad Method, then lists the tickets', async ({ page }) => {
   const ticketStore = stubTicketStore();
@@ -117,6 +124,7 @@ test('Plan Start opens the planning session, and Board asks for trust, then to d
     {
       extra: { ticketStore, bmadSource },
       files: {
+        ...SET_UP,
         '.claude/skills/bmad-spec/SKILL.md': SKILL('bmad-spec', 'Condense any input into a short spec.'),
         '.claude/skills/bmad-ticket/SKILL.md': SKILL('bmad-ticket', 'Create and manage tickets.'),
       },
@@ -160,6 +168,81 @@ test('turning Board on in the settings asks for the trust first: Cancel changes 
       await expect(page.getByTestId('ticket-row')).toHaveCount(2);
       await expect(page.getByTestId('script-trust-prompt')).toHaveCount(0);
     },
-    { extra: { ticketStore, bmadSource } },
+    { extra: { ticketStore, bmadSource }, files: SET_UP },
+  );
+});
+
+/** Opens the project at `repo` through the REST API with the page's tab token; returns its id and a caller for more requests. */
+async function openProject(page: import('@playwright/test').Page, repo: string) {
+  const origin = new URL(page.url()).origin;
+  const token = await storedToken(page);
+  const call = async (method: string, path: string, body?: unknown) => {
+    const response = await fetch(`${origin}${path}`, {
+      method,
+      headers: { authorization: `Bearer ${token!}`, origin, 'content-type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    if (!response.ok) throw new Error(`${method} ${path} returned ${response.status}: ${await response.text()}`);
+    return response.json() as Promise<{ workspace: { id: string } }>;
+  };
+  const wsId = (await call('POST', API_ROUTES.workspaces, { path: repo })).workspace.id;
+  return { wsId, call };
+}
+
+test('a project without _bmad/: Plan shows the setup panel, and Set up downloads BMad Method, shows each step, then Ready to plan.', async ({ page }) => {
+  const bmadSource = (await serverModule()).createMemoryBmadSource();
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const { wsId, call } = await openProject(page, repo);
+      await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: ['planning'] });
+      await page.goto(`${server.url}/w/${wsId}/plan`);
+      const panel = page.getByTestId('bmad-setup-panel');
+      await expect(panel).toContainText("BMad Method isn't set up in this project yet.");
+      await expect(page.getByTestId('skill-list')).toHaveCount(0);
+      expect(bmadSource.downloads).toBe(0);
+      await page.getByTestId('bmad-set-up').click();
+      const steps = page.getByTestId('bmad-setup-step');
+      await expect(steps).toHaveCount(4);
+      await expect(steps.nth(0)).toContainText('Checking the project');
+      await expect(page.locator('[data-testid="bmad-setup-step"][data-state="current"]')).toHaveCount(1);
+      await expect(page.getByTestId('bmad-setup-done')).toHaveText('Ready to plan.');
+      // Set up now: the panel gives way to the page. The user's Set up downloaded the pinned copy, once (S1).
+      await expect(page.getByTestId('bmad-setup-panel')).toHaveCount(0);
+      expect(bmadSource.downloads).toBe(1);
+    },
+    { extra: { bmadSource } },
+  );
+});
+
+test('turning Planning on in the settings sets BMad Method up, showing the progress inline, then Ready to plan.', async ({ page }) => {
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const { wsId } = await openProject(page, repo);
+      await page.goto(`${server.url}/w/${wsId}/settings`);
+      const planning = page.getByRole('switch', { name: 'Planning', exact: true });
+      await planning.click();
+      await expect(planning).toHaveAttribute('aria-checked', 'true');
+      await expect(page.getByTestId('bmad-setup-steps')).toBeVisible();
+      await expect(page.getByTestId('bmad-setup-done')).toHaveText('Ready to plan.');
+    },
+  );
+});
+
+test('a failed setup says why in plain words, with no path, and a chat still opens', async ({ page }) => {
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const { wsId } = await openProject(page, repo);
+      await page.goto(`${server.url}/w/${wsId}/settings`);
+      await page.getByRole('switch', { name: 'Planning', exact: true }).click();
+      const failed = page.getByTestId('bmad-setup-failed');
+      await expect(failed).toContainText("Ogden Agents couldn't set up BMad Method in this project. Try again.");
+      await expect(failed).not.toContainText(repo);
+      await expect(page.getByTestId('bmad-set-up-again')).toBeVisible();
+      await startChat(page, repo);
+    },
+    { extra: { bmadCatalog: await stubSetupCatalog({ fail: true }) } },
   );
 });

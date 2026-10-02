@@ -3,7 +3,8 @@
  * whether a project's repo already has BMad Method's `_bmad/` and
  * `_bmad-output/` folders (E10-R5, AD-22); `skills` (story 4.1) is the
  * catalog's installed skills, scanned in `skills.ts`, so this file keeps
- * `detect`'s lstat-only guarantee below.
+ * `detect`'s lstat-only guarantee below. Setup's status and setup itself
+ * (entry 4.3) live in `setup.ts`, built from the options.
  *
  * Read-only guarantee: `detect` first `lstat`s `repoPath` itself, which must
  * be a real folder (a repo root that has become a symlink or junction answers
@@ -21,7 +22,10 @@ import { lstat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import type { BmadCatalogPort, BmadRepoDetection } from '@ogden-agents/core';
 import { CatalogSkill, type Catalog } from '@ogden-agents/shared';
+import { createBmadSetup, type BmadSetupOptions } from './setup.js';
 import { scanSkills } from './skills.js';
+
+export type { BmadSetupOptions } from './setup.js';
 
 /** The folder BMad Method's installer creates at a repo's root. */
 const BMAD_DIR = '_bmad';
@@ -60,14 +64,17 @@ async function catalogOf(repoPath: string): Promise<Catalog> {
 
 /**
  * The `bmad-catalog` adapter: read-only detection of a repo's BMad Method
- * folders, its installed skills and its catalog. Setup's status and setup
- * itself reject until entry 4.3 builds them (their routes answer 501).
+ * folders, its installed skills and its catalog, and, with `options` (the
+ * script runner, the work folder and the server's pinned BMad Method source), BMad Method's
+ * setup status and setup (entry 4.3). Without them those two reject.
  */
-export function createBmadCatalog(): BmadCatalogPort {
+export function createBmadCatalog(options?: BmadSetupOptions): BmadCatalogPort {
+  const setup = options === undefined ? undefined : createBmadSetup(options);
+  const unconfigured = () => Promise.reject(new Error('BMad Method setup needs the script runner (entry 4.3)'));
   return {
     catalog: catalogOf,
-    setupStatus: () => Promise.reject(new Error('BMad Method setup is not built yet (entry 4.3)')),
-    setup: () => Promise.reject(new Error('BMad Method setup is not built yet (entry 4.3)')),
+    setupStatus: setup === undefined ? unconfigured : setup.setupStatus,
+    setup: setup === undefined ? unconfigured : setup.setup,
     async detect(repoPath): Promise<BmadRepoDetection> {
       // An empty or relative path would resolve against the server's own folder: answer nothing.
       if (typeof repoPath !== 'string' || repoPath === '' || !isAbsolute(repoPath)) return { hasBmad: false, hasOutput: false };

@@ -20,6 +20,7 @@ import {
   locateClaudeAdapter,
   resolveClaudeAgentAcp,
   ScriptRunError,
+  type UvScriptRunner,
 } from '@ogden-agents/adapters';
 import {
   AgentSetupError,
@@ -42,6 +43,7 @@ import {
   type AgentTerminalResume,
   type AppShortcutPort,
   type BmadCatalogPort,
+  type BmadSourcePort,
   type Core,
 } from '@ogden-agents/core';
 import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM, ServerMessage } from '@ogden-agents/shared';
@@ -92,6 +94,9 @@ function defaultWebRoot(): string {
 
 /** The verified pinned BMad Method's `tickets.py`, relative to its `skills/` (story 4.14, AD-13). */
 export const TICKETS_SCRIPT = 'bmad-ticket/scripts/tickets.py';
+
+/** How long a stopping server waits for a BMad Method setup to finish before it kills the run. */
+const SETUP_STOP_MS = 30_000;
 
 /**
  * The working folder of every BMad Method script run (story 4.2 review): an
@@ -170,19 +175,45 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
   const hooks = resolveTestHooks(process.env, dataDir, { ...options, ownsCore });
   // What this install ships, plus a test's own (story 10.2): the option, and the environment hook.
   const availableBmadPieces = [...new Set([...SHIPPED_BMAD_PIECES, ...(options.availableBmadPieces ?? []), ...hooks.bmadAvailable])];
-  // The read-only detection of a repo's `_bmad/` (story 10.3) and its installed skills (story 4.1); a test may pass its own.
-  const bmadCatalog = options.bmadCatalog ?? createBmadCatalog();
+  // The script runner is built with the server (below); setup reaches it through this holder (story 4.3).
+  const setupRunner: { current?: UvScriptRunner } = {};
+  // The pinned upstream BMad Method (story 4.14, AD-13): the server's one source, downloaded only when the user
+  // asks (Download, or Set up: story 4.3), never here.
+  const bmadSourcePort =
+    options.bmadSource ??
+    createUpstreamBmadSource({
+      dataDir,
+      ...(options.bmadFetch === undefined ? {} : { fetch: options.bmadFetch }),
+      onCleanupError: (error) => log.warn('could not remove BMad Method download temp files', { code: (error as NodeJS.ErrnoException).code ?? 'unknown' }),
+    });
+  // The read-only detection of a repo's `_bmad/` (story 10.3), its installed skills (story 4.1) and BMad Method's
+  // setup (story 4.3: the verified `setup.py` of that one source, run in Ogden Agents' own work folder); a test may pass its own.
+  const bmadCatalog =
+    options.bmadCatalog ??
+    createBmadCatalog({
+      runner: { run: (input) => (setupRunner.current === undefined ? Promise.reject(new ScriptRunError('closed')) : setupRunner.current.run(input)) },
+      workDir: uvWorkDir(dataDir),
+      source: bmadSourcePort,
+    });
   const core =
     options.core ??
     openCore(dataDir, {
       availableBmadPieces,
       bmadCatalog,
+      // Codes only: a setup's own error can name the user's paths.
+      onBmadSetupFailure: (workspaceId, error) =>
+        log.warn('BMad Method setup failed', {
+          workspaceId,
+          code: error instanceof CoreError ? error.code : 'unknown',
+          ...(error instanceof CoreError && 'reason' in error ? { reason: String(error.reason) } : {}),
+          ...(typeof (error as { cause?: unknown })?.cause === 'string' ? { cause: (error as { cause: string }).cause } : {}),
+        }),
       onListenerError: (error) => log.error('event subscriber failed', { reason: String(error) }),
       // The request is declined all the same; the reason names no command.
       onPermissionError: (error) => log.warn('a permission request was declined after a failure', { reason: String(error) }),
     });
   try {
-    return await listenAndAnnounce({ options, dataDir, log, core, ownsCore, lock, hooks, bmadCatalog });
+    return await listenAndAnnounce({ options, dataDir, log, core, ownsCore, lock, hooks, bmadCatalog, setupRunner, bmadSourcePort });
   } catch (error) {
     if (ownsCore) core.close();
     throw error;
@@ -198,6 +229,8 @@ async function listenAndAnnounce({
   lock,
   hooks,
   bmadCatalog,
+  setupRunner,
+  bmadSourcePort,
 }: {
   options: StartOptions;
   dataDir: string;
@@ -209,6 +242,10 @@ async function listenAndAnnounce({
   hooks: TestHooks;
   /** The catalog the Plan page reads (story 4.1). */
   bmadCatalog: BmadCatalogPort;
+  /** Where the setup in `bmadCatalog` finds the script runner, once it is built (story 4.3). */
+  setupRunner: { current?: UvScriptRunner };
+  /** The server's one pinned BMad Method source (story 4.14); setup uses the same one (story 4.3). */
+  bmadSourcePort: BmadSourcePort;
 }): Promise<RunningServer> {
   const requested = options.port ?? DEFAULT_PORT;
   const now = options.now ?? Date.now;
@@ -393,15 +430,8 @@ async function listenAndAnnounce({
     },
     env: uvChildEnv,
   });
-  // The pinned upstream BMad Method (story 4.14, AD-13): downloaded only when the user asks, never here.
-  const bmadSourcePort =
-    options.bmadSource ??
-    createUpstreamBmadSource({
-      dataDir,
-      ...(options.bmadFetch === undefined ? {} : { fetch: options.bmadFetch }),
-      onCleanupError: (error) => log.warn('could not remove BMad Method download temp files', { code: (error as NodeJS.ErrnoException).code ?? 'unknown' }),
-    });
   const bmadSource = createBmadSource(bmadSourcePort);
+  setupRunner.current = scriptRunner;
   const ticketStore =
     options.ticketStore ??
     createTicketsV7({
@@ -452,6 +482,7 @@ async function listenAndAnnounce({
     planning,
     board,
     bmadSource,
+    bmadSetup: core.bmadSetup,
     agentSetup,
     onboarding,
     newProjectDefaults,
@@ -535,6 +566,13 @@ async function listenAndAnnounce({
         await Promise.race([agentSetup.settled(), new Promise((resolve) => setTimeout(resolve, INSTALL_STOP_MS).unref())]);
       })
       .finally(() => chat.close().catch((error: unknown) => log.warn('stopping agents failed', { reason: String(error) })))
+      // A setup in progress finishes first, so no staging folder is left in a project (story 4.3); bounded.
+      .finally(() =>
+        Promise.race([
+          core.bmadSetup?.settled().catch(() => undefined),
+          new Promise((resolve) => setTimeout(resolve, SETUP_STOP_MS).unref()),
+        ]),
+      )
       // No BMad Method script outlives the server either (story 4.2).
       .finally(() => scriptRunner.close().catch((error: unknown) => log.warn('stopping scripts failed', { reason: String(error) })))
       .finally(() => {

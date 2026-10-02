@@ -617,7 +617,7 @@ const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.workspaceCatalog}`,
   `POST ${API_ROUTES.workspacePlanningSessions}`,
   `GET ${API_ROUTES.workspaceTickets}`,
-  // Story 4.2's pre-registered routes (guarded; 501 until their entries fill them) and the script trust (unguarded).
+  // Story 4.2's pre-registered routes (guarded; the ticket ones 501 until their entries fill them, setup filled by 4.3) and the script trust (unguarded).
   `GET ${API_ROUTES.workspaceTicket}`,
   `PUT ${API_ROUTES.workspaceTicketStatus}`,
   `GET ${API_ROUTES.workspaceBmadSetup}`,

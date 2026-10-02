@@ -6,9 +6,11 @@
  * answers that it has neither `_bmad/` nor `_bmad-output/`, no skills, an
  * empty catalog and no setup, as the real adapter does for a missing folder.
  * `setup` reports each of the shared setup steps, then marks the repo
- * current with `_bmad-output` as its output folder.
+ * current with `_bmad-output` as its output folder; a repo that already has
+ * `_bmad/` (or a status other than `not_set_up`) is refused with
+ * `BmadAlreadySetUpError` (story 4.3), as the real adapter refuses it.
  */
-import type { BmadCatalogPort, BmadRepoDetection, InstalledSkill } from '@ogden-agents/core';
+import { BmadAlreadySetUpError, type BmadCatalogPort, type BmadRepoDetection, type InstalledSkill } from '@ogden-agents/core';
 import {
   BMAD_SETUP_STEP_LABELS,
   BMAD_SETUP_STEPS,
@@ -101,6 +103,7 @@ export function createMemoryBmadCatalog(
     },
     setup: async (repoPath, onProgress: (progress: BmadSetupProgress) => void) => {
       setupCalls.push(['setup', repoPath]);
+      if (known.get(repoPath)?.hasBmad === true || statusOf(repoPath).state !== 'not_set_up') throw new BmadAlreadySetUpError();
       for (const step of BMAD_SETUP_STEPS) {
         onProgress({ step, label: BMAD_SETUP_STEP_LABELS[step] });
         // Each step after the caller's turn, as the real setup's lines arrive.

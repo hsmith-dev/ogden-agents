@@ -407,3 +407,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
   summary: The pinned source's temp-folder sweep and folder replacement assume one source instance per name per process.
   evidence: 4.14 review S4: `start.ts` creates exactly one `bmad-method` source; 4.3's setup and epic 5's resolver must reuse the server's instance, not build their own.
 
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-set-up-bmad-method-in-a-project-from-the-ui-plan.md`
+  summary: Upgrade or repair of a project that already has `_bmad/` (Upgrade this project) is entry 4.11's: 4.3's setup writes only into a project with no `_bmad` entry and answers 409 `bmad_already_set_up` otherwise; `setup_owed` and `unusable` projects get status only.
+  evidence: `packages/adapters/src/bmad-catalog/setup.ts` `setup` (refuses any `_bmad` entry); `packages/core/src/bmad-setup.ts` `start`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-set-up-bmad-method-in-a-project-from-the-ui-plan.md`
+  summary: Setup checks `.claude`/`.claude/skills` are real folders once, then creates staging folders and renames skills by path, so a link swapped in meanwhile redirects writes outside the repo.
+  evidence: 4.3 review S4: `setup.ts` `copySkills` re-resolves `join(folder, …)` per skill after one `ensureRealFolder` lstat; needs a concurrent writer in the repo (for example an agent session) during setup.

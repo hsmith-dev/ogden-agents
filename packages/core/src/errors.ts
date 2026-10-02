@@ -2,10 +2,13 @@ import {
   BMAD_DOWNLOAD_INTEGRITY_MESSAGE,
   BMAD_DOWNLOAD_OFFLINE_MESSAGE,
   BMAD_NOT_DOWNLOADED_MESSAGE,
+  BMAD_ALREADY_SET_UP_MESSAGE,
+  BMAD_SETUP_FAILURE_REASONS,
   FEATURE_OFF_MESSAGE,
   FEATURE_UNAVAILABLE_MESSAGE,
   SCRIPTS_NOT_TRUSTED_MESSAGE,
   STATUS_NOT_ALLOWED_MESSAGE,
+  type BmadSetupFailureReason,
   type SessionTerminal,
   type TerminalUnavailableCode,
 } from '@ogden-agents/shared';
@@ -102,6 +105,18 @@ export class BmadNotDownloadedError extends CoreError {
 }
 
 /**
+ * BMad Method's setup was asked for in a project that already has `_bmad/`
+ * (story 4.3; a link or a file there counts too). Nothing was written:
+ * updating a set-up project is Upgrade's (entry 4.11).
+ */
+export class BmadAlreadySetUpError extends CoreError {
+  override readonly name = 'BmadAlreadySetUpError';
+  constructor() {
+    super('bmad_already_set_up', BMAD_ALREADY_SET_UP_MESSAGE);
+  }
+}
+
+/**
  * Why downloading the pinned BMad Method failed: it didn't arrive
  * (`offline`: no network, an HTTP error, a timeout, too large) or what
  * arrived isn't the pinned content (`integrity`: a hash mismatch, an unsafe
@@ -122,6 +137,23 @@ export class BmadDownloadError extends CoreError {
     super('bmad_download_failed', reason === 'offline' ? BMAD_DOWNLOAD_OFFLINE_MESSAGE : BMAD_DOWNLOAD_INTEGRITY_MESSAGE);
     this.reason = reason;
     this.detail = detail;
+  }
+}
+
+/**
+ * BMad Method's setup failed (story 4.3): no usable uv (`uv_missing`), the
+ * project's folder can't be written (`not_writable`), it took too long
+ * (`timeout`), or anything else (`failed`). `message` is the plain reason
+ * `bmad.setup_failed` carries; nothing holds a path or the script's output.
+ */
+export class BmadSetupError extends CoreError {
+  override readonly name = 'BmadSetupError';
+  constructor(
+    readonly reason: BmadSetupFailureReason,
+    options: { cause?: unknown } = {},
+  ) {
+    super('bmad_setup_failed', BMAD_SETUP_FAILURE_REASONS[reason]);
+    if (options.cause !== undefined) this.cause = options.cause;
   }
 }
 

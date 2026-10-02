@@ -9,6 +9,7 @@ export * from './ids.js';
 export * from './permissions.js';
 export * from './planning.js';
 export * from './secret-patterns.js';
+export * from './semver.js';
 export * from './setup.js';
 export * from './time.js';
 export * from './tab-token.js';

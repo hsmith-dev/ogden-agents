@@ -38,6 +38,9 @@ export type { AgentSetupPort, AppShortcutPort, SecretStorePort } from '@ogden-ag
 export { TicketsUnavailableError, type TicketStorePort } from '@ogden-agents/core';
 // The in-memory secret store, so tests never touch the real OS keychain (story 9.2).
 export { createMemorySecretStore } from '@ogden-agents/adapters';
+// BMad Method's catalog (story 4.3): the e2e suite keeps the real read-only parts and stubs setup, so no uv runs.
+export { createBmadCatalog } from '@ogden-agents/adapters';
+export type { BmadCatalogPort } from '@ogden-agents/core';
 // The Claude Code install's runner and pins, for tests that install a local fixture (story 9.3).
 export { spawnNpm, type AdapterPins, type NpmRunInput, type NpmRunner } from '@ogden-agents/adapters';
 // The pinned upstream BMad Method (story 4.14): the in-memory stub the e2e suite passes, so no test downloads it.

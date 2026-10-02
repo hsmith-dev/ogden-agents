@@ -29,7 +29,7 @@ A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the str
   - **success:** The repo gains a working `_bmad` setup that reports current, with no terminal use.
 - **CAP-3**
   - **intent:** Users hold persistent browser chat sessions with whichever supported agent they select, listed and resumable. Agents that can't resume a session reopen from Ogden Agents's stored transcript.
-  - **success:** After a server restart, a reopened chat continues with its prior context. This is demonstrated with at least two different agents.
+  - **success:** After a server restart, a reopened chat continues with its prior context. This is demonstrated with at least two different agents (Claude Code and Antigravity; if epic 6's spike is a no-go, the several-agents part moves to v2, user 2026-10-02).
 - **CAP-4**
   - **intent:** Agent permission requests appear as allow-once / always-allow / deny cards in the UI, governed by a caution level set per project.
   - **success:** A requested shell command does not run until it is approved in the UI.
@@ -125,4 +125,4 @@ CAP-11 (cost caps) is retired and its number is not reused.
 These are to be verified during the build; none blocks starting.
 
 - Which ACP adapters give a session ID that the agent's own CLI can resume? This decides where the CAP-5 toggle appears. Check in phase 2.
-- Can Ogden Agents drive Antigravity through Google's own ACP server (`antigravity-acp`, in the ACP registry since 2026-08-20): do Google's terms allow a third-party client, does sign-in work without a terminal, and does it run on Windows? Epic 6's spike answers, and the user decides go or no-go.
+- Can Ogden Agents drive Antigravity through Google's own ACP server (`antigravity-acp`, in the ACP registry since 2026-08-20): does sign-in work without a terminal, and does it run on macOS, Linux and Windows (all three required)? Epic 6's spike answers and re-checks Google's terms, and the user decides go or no-go.

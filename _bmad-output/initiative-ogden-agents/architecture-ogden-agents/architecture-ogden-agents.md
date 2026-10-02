@@ -211,7 +211,7 @@ graph LR
   - Subscription logins stay in each agent's own CLI, and Ogden Agents never reads or stores them.
   - API keys go through `SecretStorePort`: the OS keychain (`@napi-rs/keyring`); where no keychain exists, saving a key is refused with a plain reason and subscription sign-in remains.
   - Adapters redact secrets before emitting events.
-  - Note (epic 6, user-approved 2026-10-02): each agent's API key is `agent-api-key/<agentId>` (Antigravity: `agent-api-key/antigravity`) and reaches only that agent's process; log redaction covers each supported provider's key format. Antigravity keeps its own sign-in under `~/.gemini/antigravity-acp/`, which Ogden never reads or writes. Antigravity is installed as a pinned copy in the data folder (registry archive checked against Ogden's SHA-256), an existing copy is used only when it matches the pin, and nothing is installed globally. No rule changes.
+  - Note (epic 6, user-approved 2026-10-02): each agent's API key is `agent-api-key/<agentId>` (Antigravity: `agent-api-key/antigravity`) and reaches only that agent's process; log redaction covers each supported provider's key format. Antigravity keeps its own sign-in under `~/.gemini/antigravity-acp/`, which Ogden never reads or writes. Ogden offers Antigravity's Google sign-in and the Gemini API key; the user accepted that Google's current terms call third-party use of Antigravity OAuth a breach (account risk; user, 2026-10-02). Antigravity is installed as a pinned copy in the data folder (registry archive checked against Ogden's SHA-256), an existing copy is used only when it matches the pin, and nothing is installed globally. No rule changes.
 
 ### AD-17 — Unattended runs are contained
 

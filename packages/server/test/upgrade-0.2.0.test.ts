@@ -89,8 +89,8 @@ describe('starting on a 0.2.0 data folder (story 10.7)', () => {
     expect(workspaces.find((workspace) => workspace.id === plain)?.realPath).toBe(workspaceKeyOf(data.repos.plain.path).realPath);
 
     const settingsOf = (wsId: WorkspaceId) => get(server, tab, apiPath(API_ROUTES.workspaceSettings, { wsId }), WorkspaceSettingsResponse);
-    expect((await settingsOf(bmad)).settings).toEqual({ cautionLevel: 'ask_for_commands', bmadPieces: [] });
-    expect((await settingsOf(plain)).settings).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [] });
+    expect((await settingsOf(bmad)).settings).toEqual({ cautionLevel: 'ask_for_commands', bmadPieces: [], bmadScriptsTrusted: false });
+    expect((await settingsOf(plain)).settings).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false });
     const rulesOf = (wsId: WorkspaceId) => get(server, tab, apiPath(API_ROUTES.permissionRules, { wsId }), PermissionRulesResponse);
     expect((await rulesOf(bmad)).rules.map((rule) => rule.scope.value)).toEqual(['npm install']);
     expect((await rulesOf(plain)).rules).toEqual([]);

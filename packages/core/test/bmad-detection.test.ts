@@ -8,7 +8,7 @@
 import type { WorkspaceId } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { NotFoundError, type BmadCatalogPort } from '../src/index.js';
-import { openTestCore, tempDir } from './helpers.js';
+import { openTestCore, tempDir, unusedCatalogParts } from './helpers.js';
 
 const UNKNOWN = 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3' as WorkspaceId;
 
@@ -22,6 +22,7 @@ function fakeCatalog(answers: Record<string, { hasBmad: boolean; hasOutput: bool
       return answers[repoPath] ?? { hasBmad: false, hasOutput: false };
     },
     skills: async () => [],
+    ...unusedCatalogParts,
   };
 }
 
@@ -55,7 +56,7 @@ describe('BMad detection (story 10.3)', () => {
 
   it('Not now is kept with one event, a repeat changes nothing, and it survives a restart', async () => {
     const dataDir = tempDir();
-    const core = openTestCore(dataDir, undefined, { bmadCatalog: { detect: async () => ({ hasBmad: true, hasOutput: false }), skills: async () => [] } });
+    const core = openTestCore(dataDir, undefined, { bmadCatalog: { detect: async () => ({ hasBmad: true, hasOutput: false }), skills: async () => [], ...unusedCatalogParts } });
     const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
     const other = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
 

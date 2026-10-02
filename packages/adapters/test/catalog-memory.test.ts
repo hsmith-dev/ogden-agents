@@ -4,8 +4,9 @@
  * doesn't know as having neither folder, as the real adapter does for a
  * missing repo.
  */
+import { BMAD_SETUP_STEPS, Catalog, type BmadSetupProgress } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
-import { createMemoryBmadCatalog } from '../src/index.js';
+import { createBmadCatalog, createMemoryBmadCatalog, MEMORY_BUNDLED_BMAD_VERSION } from '../src/index.js';
 
 describe('catalog-memory', () => {
   it('detects _bmad only, both, and an unknown path as neither, recording every call', async () => {
@@ -24,5 +25,53 @@ describe('catalog-memory', () => {
     first.hasBmad = false;
     expect(await catalog.detect('/repo')).toEqual({ hasBmad: true, hasOutput: false });
     expect(await createMemoryBmadCatalog().detect('/repo')).toEqual({ hasBmad: false, hasOutput: false });
+  });
+});
+
+describe('catalog-memory: the catalog and setup (story 4.2)', () => {
+  it('answers each repo’s catalog with its skills (metadata null) and the rest it was told, recording every call', async () => {
+    const catalog = createMemoryBmadCatalog(
+      {},
+      { '/repo': [{ name: 'bmad-ticket', description: 'Tickets.' }, { name: 'bmad-spec', description: 'Spec.' }] },
+      { catalogs: { '/repo': { entryAction: 'bmad-spec', capabilities: { plain_labels: true, ticket_tree: true } } } },
+    );
+    const answer = Catalog.parse(await catalog.catalog('/repo'));
+    expect(answer.skills.map((skill) => skill.name)).toEqual(['bmad-spec', 'bmad-ticket']);
+    expect(answer.skills[0]).toEqual({ name: 'bmad-spec', description: 'Spec.', label: null, group: null, module: null, installedAt: null, next: null });
+    expect(answer.entryAction).toBe('bmad-spec');
+    expect(answer.capabilities).toEqual({ plain_labels: true, ticket_tree: true });
+    expect(await catalog.catalog('/other')).toEqual({ modules: [], skills: [], agents: [], entryAction: null, capabilities: { plain_labels: false, ticket_tree: false } });
+    expect(catalog.catalogCalls).toEqual(['/repo', '/other']);
+  });
+
+  it('reports each shared setup step, then the repo is current and has _bmad', async () => {
+    const catalog = createMemoryBmadCatalog();
+    expect((await catalog.setupStatus('/repo')).state).toBe('not_set_up');
+    const progress: BmadSetupProgress[] = [];
+    const after = await catalog.setup('/repo', (step) => progress.push(step));
+    expect(progress.map((step) => step.step)).toEqual([...BMAD_SETUP_STEPS]);
+    expect(after).toEqual({ state: 'current', outputFolder: '_bmad-output', bundledVersion: MEMORY_BUNDLED_BMAD_VERSION, installedVersion: MEMORY_BUNDLED_BMAD_VERSION, problems: [] });
+    expect(await catalog.setupStatus('/repo')).toEqual(after);
+    expect((await catalog.detect('/repo')).hasBmad).toBe(true);
+    expect(catalog.setupCalls).toEqual([
+      ['status', '/repo'],
+      ['setup', '/repo'],
+      ['status', '/repo'],
+    ]);
+  });
+
+  it('a setup told to fail rejects after its steps, and the repo stays as it was', async () => {
+    const catalog = createMemoryBmadCatalog({}, {}, { setupFails: new Error('no disk') });
+    await expect(catalog.setup('/repo', () => {})).rejects.toThrow('no disk');
+    expect((await catalog.setupStatus('/repo')).state).toBe('not_set_up');
+  });
+});
+
+describe('bmad-catalog until entries 4.3 and 4.4 (story 4.2)', () => {
+  it('the catalog is the scanned skills with null metadata; setup rejects', async () => {
+    const real = createBmadCatalog();
+    expect(await real.catalog('/no/such/repo')).toEqual({ modules: [], skills: [], agents: [], entryAction: null, capabilities: { plain_labels: false, ticket_tree: false } });
+    await expect(real.setupStatus('/no/such/repo')).rejects.toThrow(/4\.3/);
+    await expect(real.setup('/no/such/repo', () => {})).rejects.toThrow(/4\.3/);
   });
 });

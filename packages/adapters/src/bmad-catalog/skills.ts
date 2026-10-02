@@ -16,7 +16,8 @@
  */
 import { lstat, open, readdir, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative } from 'node:path';
-import { SKILL_NAME_PATTERN, type CatalogSkill } from '@ogden-agents/shared';
+import type { InstalledSkill } from '@ogden-agents/core';
+import { SKILL_NAME_PATTERN } from '@ogden-agents/shared';
 
 /** Where skills are installed in a repo, relative to its root, in the order they are read. */
 export const SKILL_FOLDERS: readonly (readonly string[])[] = [
@@ -95,7 +96,7 @@ export function parseSkillFrontmatter(text: string): { name?: string; descriptio
 }
 
 /** The skills installed in the repo at `repoPath`, sorted by name, each once (the first folder's wins). */
-export async function scanSkills(repoPath: string): Promise<CatalogSkill[]> {
+export async function scanSkills(repoPath: string): Promise<InstalledSkill[]> {
   if (typeof repoPath !== 'string' || repoPath === '' || !isAbsolute(repoPath)) return [];
   let repoReal: string;
   try {
@@ -105,7 +106,7 @@ export async function scanSkills(repoPath: string): Promise<CatalogSkill[]> {
   } catch {
     return [];
   }
-  const found = new Map<string, CatalogSkill>();
+  const found = new Map<string, InstalledSkill>();
   for (const folder of SKILL_FOLDERS) {
     let names: string[];
     try {

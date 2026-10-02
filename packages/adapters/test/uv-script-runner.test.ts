@@ -1,15 +1,18 @@
 /**
- * The uv script runner (story 4.1), against a Node stand-in for `uv`
- * (`tests/fixtures/fake-uv.mjs`): only the environment it is given reaches
- * the script, the arguments go as an array, a run past the time limit kills
- * the whole tree, and each failure (no uv, a non-zero exit with the script's
- * `{"error"}`, output that isn't JSON, too much output) is its own error.
+ * The uv script runner (story 4.1; story 4.2 adds streaming and close),
+ * against a Node stand-in for `uv` (`tests/fixtures/fake-uv.mjs`): only the
+ * environment it is given reaches the script, the arguments go as an array,
+ * a run past the time limit kills the whole tree, and each failure (no uv, a
+ * non-zero exit with the script's `{"error"}`, output that isn't JSON, too
+ * much output) is its own error. Lines stream as they arrive; `close()`
+ * kills every tree in flight. The version probe and a script run get the
+ * same allowlisted environment, with no planted secret, on every OS.
  */
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createUvScriptRunner, ScriptRunError, type UvScriptRunnerOptions } from '../src/index.js';
+import { createUvScriptRunner, runVersion, ScriptRunError, uvEnvironment, type ScriptStream, type UvScriptRunnerOptions } from '../src/index.js';
 
 const FAKE_UV = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-uv.mjs');
 const SCRIPT = '/bundled/tickets.py';
@@ -105,6 +108,8 @@ describe('uv script runner (story 4.1)', () => {
     expect(error.code).toBe('too_much_output');
   });
 
+  // The fake's `hang` mode stands for a `tickets.py` read that never answers (a project's config code
+  // that blocks, say): it starts a child of its own, so the test proves the whole tree goes.
   it('past the time limit, kills the whole tree and fails with timeout', async () => {
     const pidFile = join(tempDir(), 'pids.json');
     const started = Date.now();
@@ -118,4 +123,91 @@ describe('uv script runner (story 4.1)', () => {
     expect(alive(pids.uv)).toBe(false);
     expect(alive(pids.child)).toBe(false);
   }, 20_000);
+});
+
+describe('uv script runner: streaming and close (story 4.2)', () => {
+  it('streams each line of stdout and stderr as it arrives, and still answers the JSON', async () => {
+    const lines: Array<[ScriptStream, string]> = [];
+    const out = await runner({ FAKE_UV_MODE: 'lines' }).run({ script: SCRIPT, args: [], cwd: tempDir(), onLine: (stream, line) => lines.push([stream, line]) });
+    expect(out).toEqual({ done: true });
+    expect(lines.filter(([stream]) => stream === 'stderr')).toEqual([
+      ['stderr', 'step checking'],
+      ['stderr', 'step copying_skills'],
+      ['stderr', 'step verifying'],
+    ]);
+    // The last line, without a line break, is told when the stream ends.
+    expect(lines.filter(([stream]) => stream === 'stdout')).toEqual([
+      ['stdout', '{"done":'],
+      ['stdout', ' true}'],
+    ]);
+  });
+
+  it('a listener that throws changes nothing', async () => {
+    const out = await runner({ FAKE_UV_MODE: 'lines' }).run({
+      script: SCRIPT,
+      args: [],
+      cwd: tempDir(),
+      onLine: () => {
+        throw new Error('listener failed');
+      },
+    });
+    expect(out).toEqual({ done: true });
+  });
+
+  it('exit 2 (the store’s refusal) is failed with its exit code and text', async () => {
+    const error = await failure(runner({ FAKE_UV_MODE: 'refuse' }).run({ script: SCRIPT, args: [], cwd: tempDir() }));
+    expect(error.code).toBe('failed');
+    expect(error.exitCode).toBe(2);
+    expect(error.scriptError).toMatch(/^store is linear/);
+  });
+
+  it('close() kills every tree in flight (a tickets.py read that never answers) and refuses later runs', async () => {
+    const pidFile = join(tempDir(), 'pids.json');
+    const uv = runner({ FAKE_UV_MODE: 'hang', FAKE_UV_PID_FILE: pidFile }, { timeoutMs: 60_000 });
+    const pending = failure(uv.run({ script: SCRIPT, args: [], cwd: tempDir() }));
+    const deadline = Date.now() + 5000;
+    while (!existsSync(pidFile) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(existsSync(pidFile)).toBe(true);
+    const started = Date.now();
+    await uv.close();
+    expect((await pending).code).toBe('closed');
+    expect(Date.now() - started).toBeLessThan(8000);
+    const pids = JSON.parse(readFileSync(pidFile, 'utf8')) as { uv: number; child: number };
+    const gone = Date.now() + 5000;
+    while ((alive(pids.uv) || alive(pids.child)) && Date.now() < gone) await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(alive(pids.uv)).toBe(false);
+    expect(alive(pids.child)).toBe(false);
+    expect((await failure(uv.run({ script: SCRIPT, args: [], cwd: tempDir() }))).code).toBe('closed');
+    // Safe to call again.
+    await uv.close();
+  }, 20_000);
+});
+
+describe('one allowlist for every uv child (story 4.2)', () => {
+  it('the version probe and a script run get the identical environment, with no planted secret', async () => {
+    const envFile = join(tempDir(), 'env.jsonl');
+    const planted = {
+      ...process.env,
+      ANTHROPIC_API_KEY: 'sk-ant-planted',
+      GITHUB_TOKEN: 'ghp_planted',
+      OGDEN_AGENTS_PLANTED: 'planted',
+      NODE_OPTIONS: '--planted',
+    };
+    // The server's one function: the allowlist of its environment, plus the test-only additions (`extraUvEnv`).
+    const childEnv = () => ({ ...uvEnvironment(planted), FAKE_UV_ENV_FILE: envFile });
+    const command = { file: process.execPath, args: [FAKE_UV] };
+    expect(await runVersion(command, childEnv())).toMatch(/^uv 0\.12\.21/);
+    await createUvScriptRunner({ uvCommand: async () => command, env: childEnv }).run({ script: SCRIPT, args: [], cwd: tempDir() });
+    const [probe, script] = readFileSync(envFile, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { mode: string; env: Record<string, string> });
+    expect(probe!.mode).toBe('version');
+    expect(script!.mode).toBe('echo');
+    expect(script!.env).toEqual(probe!.env);
+    const text = JSON.stringify(probe!.env);
+    for (const secret of ['sk-ant-planted', 'ghp_planted', 'planted']) expect(text).not.toContain(secret);
+    for (const name of Object.keys(probe!.env)) expect(name).not.toMatch(/^(ANTHROPIC_API_KEY|GITHUB_TOKEN|OGDEN_AGENTS_|NODE_OPTIONS)/i);
+    expect(probe!.env.PYTHONUTF8).toBe('1');
+  });
 });

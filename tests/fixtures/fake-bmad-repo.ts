@@ -56,11 +56,13 @@ export const FAKE_BMAD_OUTPUT_FILES: Readonly<Record<string, string>> = {
 };
 
 /**
- * A ticket tree as BMad Method's `tickets.py` reads it (story 4.1): the
- * project's config script naming the active initiative `initiative-demo`, an
- * initiative with one epic of two stories, and a plan for the first with
- * `status: in-review`. `tickets.py status` reports `1.1` (status
- * `in-review`, state `review`) then `1.2` (no status, state `planned`).
+ * A ticket tree as BMad Method's `tickets.py` reads it (story 4.1; story 4.2
+ * covers every board column case): the project's config script naming the
+ * active initiative `initiative-demo`, an initiative with one epic of four
+ * stories, and plans for three of them. `tickets.py status` reports `1.1`
+ * (status `in-review`, state `review`), `1.2` (no plan: state `planned`, the
+ * Draft column), `1.3` (status `blocked` with a reason and date, the Blocked
+ * column) and `1.4` (status `dropped`: in no column).
  */
 export const FAKE_TICKET_TREE_FILES: Readonly<Record<string, string>> = {
   '_bmad/scripts/config_utils.py': [
@@ -87,8 +89,23 @@ export const FAKE_TICKET_TREE_FILES: Readonly<Record<string, string>> = {
     'title = "Build the second thing"',
     'after = [1]',
     '',
+    '[[entry]]',
+    'id = 3',
+    'type = "story"',
+    'title = "Build the blocked thing"',
+    'after = []',
+    '',
+    '[[entry]]',
+    'id = 4',
+    'type = "story"',
+    'title = "Build the dropped thing"',
+    'after = []',
+    '',
   ].join('\n'),
   '_bmad-output/initiative-demo/epic-first/story-first-plan.md': '---\ntitle: "Build the first thing"\ntype: "feature"\nticket: 1\nstatus: "in-review"\n---\n',
+  '_bmad-output/initiative-demo/epic-first/story-build-the-blocked-thing-plan.md':
+    '---\ntitle: "Build the blocked thing"\nticket: 3\nstatus: blocked\nblocked_at: "2026-10-01"\nblocked_reason: "Waits on the payment API"\n---\n',
+  '_bmad-output/initiative-demo/epic-first/story-build-the-dropped-thing-plan.md': '---\ntitle: "Build the dropped thing"\nticket: 4\nstatus: dropped\n---\n',
 };
 
 function writeFiles(root: string, files: Readonly<Record<string, string>>): void {

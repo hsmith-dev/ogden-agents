@@ -13,7 +13,9 @@ import {
   bmadMainSwitchPieces,
   bmadNeedsUnavailableText,
   bmadPieceNeeds,
+  bmadPiecesRunProjectScripts,
   canonicalBmadPieces,
+  SCRIPT_TRUST_FAILED,
   describeBmadPieceChange,
   WORKSPACE_SETTINGS_BMAD_ANCHOR,
   type BmadPiece,
@@ -27,7 +29,8 @@ import { PageSection } from '@/ui/page';
 import { Switch } from '@/ui/switch';
 import { Text } from '@/ui/typography';
 import { canTurnOnBmadPiece, ComingSoonBadge } from '@/workspaces/bmad-piece-choice';
-import { createLatestGate, updateBmadPieces, useBmadPieces, useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
+import { ScriptTrustDialog } from '@/workspaces/script-trust-dialog';
+import { createLatestGate, trustProjectScripts, updateBmadPieces, useBmadPieces, useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
 
 /**
  * Workspace settings' BMad Method section (story 10.5; CAP-19, AD-22) at
@@ -39,6 +42,11 @@ import { createLatestGate, updateBmadPieces, useBmadPieces, useWorkspaceSettings
  * Coming soon and can't be turned on; one already on can always be turned
  * off. The section only asks the server; core's guard and availability
  * checks decide (AD-22). Every text comes from `@ogden-agents/shared`.
+ *
+ * Story 4.2: turning on a piece that runs the project's own BMad Method
+ * scripts (a piece's switch, or the main switch) in a project not yet
+ * trusted opens the trust dialog first; Allow trusts the project, then
+ * saves the choice; Cancel changes nothing.
  */
 
 /** Which pieces this install ships: `true` available, `false` coming soon. */
@@ -205,6 +213,11 @@ export function bmadUseChoice(current: readonly BmadPiece[], on: boolean, availa
 
 const sameKey = (pieces: readonly BmadPiece[]) => canonicalBmadPieces(pieces).join(',');
 
+/** Whether `choice` turns on a piece that runs the project's scripts which `current` doesn't have on (story 4.2). */
+export function choiceNeedsScriptTrust(current: readonly BmadPiece[], choice: BmadChoice): boolean {
+  return bmadPiecesRunProjectScripts(choice.pieces.filter((piece) => !current.includes(piece)));
+}
+
 /**
  * Loads the pieces and what the install ships, saves each choice at once
  * through `PATCH settings` (optimistic, reverted on refusal), and scrolls to
@@ -261,12 +274,44 @@ export function BmadMethodSection({ wsId, offerSlot, defaultSlot }: { wsId: stri
     );
   };
 
+  // The choice waiting on the trust dialog (story 4.2), and the dialog's own state.
+  const [awaitingTrust, setAwaitingTrust] = useState<BmadChoice | undefined>(undefined);
+  const [trusting, setTrusting] = useState(false);
+  const [trustError, setTrustError] = useState<string | undefined>(undefined);
+  /** Saves `choice`, asking for the project's trust first when it turns on a script-running piece in a project not yet trusted. */
+  const choose = (current: readonly BmadPiece[], choice: BmadChoice) => {
+    if (settings.data?.bmadScriptsTrusted !== true && choiceNeedsScriptTrust(current, choice)) {
+      setTrustError(undefined);
+      setAwaitingTrust(choice);
+      return;
+    }
+    save(choice);
+  };
+  const allowScripts = () => {
+    const choice = awaitingTrust;
+    if (choice === undefined || trusting) return;
+    setTrusting(true);
+    setTrustError(undefined);
+    trustProjectScripts(wsId).then(
+      (trusted) => {
+        setTrusting(false);
+        setAwaitingTrust(undefined);
+        queryClient.setQueryData(['workspace-settings', wsId], trusted);
+        save(choice);
+      },
+      (failure: unknown) => {
+        setTrusting(false);
+        setTrustError(failure instanceof Error && failure.message !== '' ? failure.message : SCRIPT_TRUST_FAILED);
+      },
+    );
+  };
+
   const onToggle = (piece: BmadPiece, on: boolean) => {
-    if (pieces !== undefined) save(bmadToggleChoice(pieces, piece, on));
+    if (pieces !== undefined) choose(pieces, bmadToggleChoice(pieces, piece, on));
   };
   const onUseBmad = (on: boolean) => {
     if (pieces === undefined) return;
-    save(bmadUseChoice(pieces, on, availability === undefined ? [] : BMAD_PIECES.filter((piece) => availability[piece])));
+    choose(pieces, bmadUseChoice(pieces, on, availability === undefined ? [] : BMAD_PIECES.filter((piece) => availability[piece])));
   };
 
   // Arriving at #bmad-method (on load or by an in-app link): once the settings load, bring the
@@ -290,16 +335,28 @@ export function BmadMethodSection({ wsId, offerSlot, defaultSlot }: { wsId: stri
   // A status line is about the pieces it saved: a change from another tab clears it (above).
   const statusText = status !== undefined && chosen === undefined && storedKey === status.key ? status.text : undefined;
   return (
-    <BmadMethodView
-      pieces={pieces}
-      availability={availability}
-      saving={saving}
-      status={statusText}
-      error={error ?? loadError}
-      onToggle={onToggle}
-      onUseBmad={onUseBmad}
-      offerSlot={offerSlot}
-      defaultSlot={defaultSlot}
-    />
+    <>
+      <BmadMethodView
+        pieces={pieces}
+        availability={availability}
+        saving={saving || awaitingTrust !== undefined}
+        status={statusText}
+        error={error ?? loadError}
+        onToggle={onToggle}
+        onUseBmad={onUseBmad}
+        offerSlot={offerSlot}
+        defaultSlot={defaultSlot}
+      />
+      <ScriptTrustDialog
+        open={awaitingTrust !== undefined}
+        busy={trusting}
+        error={trustError}
+        onAllow={allowScripts}
+        onCancel={() => {
+          setAwaitingTrust(undefined);
+          setTrustError(undefined);
+        }}
+      />
+    </>
   );
 }

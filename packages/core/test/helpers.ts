@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach } from 'vitest';
-import { openCore, type Core, type OpenCoreOptions } from '../src/index.js';
+import { openCore, type BmadCatalogPort, type Core, type OpenCoreOptions } from '../src/index.js';
 
 const dirs: string[] = [];
 const opened: Core[] = [];
@@ -31,3 +31,14 @@ export function openTestCore(dataDir: string = tempDir(), onListenerError?: (err
   opened.push(core);
   return core;
 }
+
+/**
+ * The parts of `BmadCatalogPort` a test that only detects (or only lists
+ * skills) never reaches (story 4.2): each rejects, so a test that did reach
+ * one fails loudly.
+ */
+export const unusedCatalogParts: Pick<BmadCatalogPort, 'catalog' | 'setupStatus' | 'setup'> = {
+  catalog: () => Promise.reject(new Error('catalog is not used in this test')),
+  setupStatus: () => Promise.reject(new Error('setupStatus is not used in this test')),
+  setup: () => Promise.reject(new Error('setup is not used in this test')),
+};

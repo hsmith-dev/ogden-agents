@@ -41,6 +41,13 @@ export const workspaces = sqliteTable(
      * for it. Changed only by `bmadDetection.dismissOffer`.
      */
     bmadOfferDismissed: integer('bmad_offer_dismissed', { mode: 'boolean' }).notNull().default(false),
+    /**
+     * Whether the user allowed Ogden Agents to run this project's own BMad
+     * Method scripts (story 4.2, AD-22 note 2026-10-02). Not trusted for new
+     * and upgraded workspaces; changed only by `bmadScriptTrust.trustScripts`,
+     * never revoked by turning pieces off.
+     */
+    bmadScriptsTrusted: integer('bmad_scripts_trusted', { mode: 'boolean' }).notNull().default(false),
     createdAt: text('created_at').notNull(),
   },
   (t) => [uniqueIndex('workspaces_path_unique').on(t.path)],

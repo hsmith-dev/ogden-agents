@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -103,6 +103,17 @@ const TICKETS_SCRIPT = ['bmad-method', 'skills', 'bmad-ticket', 'scripts', 'tick
 export function bundledTicketsScript(): string {
   const candidates = VENDOR_ROOT_CANDIDATES.map((root) => join(root, ...TICKETS_SCRIPT));
   return candidates.find((file) => existsSync(file)) ?? candidates[1]!;
+}
+
+/**
+ * The working folder of every BMad Method script run (story 4.2 review): an
+ * empty folder of Ogden Agents' own, never a project's, so `uv run` finds no
+ * project `.venv` to run. Created readable only by the user if missing.
+ */
+export function uvWorkDir(dataDir: string): string {
+  const dir = join(dataDir, 'tools', 'uv-work');
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  return dir;
 }
 
 /**
@@ -253,9 +264,13 @@ async function listenAndAnnounce({
     launcherToken: { verify: (given) => launcherToken?.verify(given) ?? false },
     log,
   });
+  // The one environment of every `uv` child, the version probe's and every script run's (story 4.2): an
+  // allowlist, never this server's environment (AD-16), plus a test's own additions.
+  const uvChildEnv = () => ({ ...uvEnvironment(), ...options.extraUvEnv });
   // One uv adapter: the toolchain's status and install, and the uv BMad Method's scripts run with (story 4.1).
   const uvToolchain = createUvToolchain({
     dataDir,
+    childEnv: uvChildEnv,
     onCleanupError: (error) => log.warn('could not remove uv install temp files', { reason: String(error) }),
   });
   const toolchain = createToolchain(core.events, options.toolchain ?? uvToolchain, {
@@ -361,7 +376,7 @@ async function listenAndAnnounce({
     startSession: async (input) => agent.startSession({ ...input, env: await freshChatEnv(input.env) }),
     reopenSession: async (input) => agent.reopenSession({ ...input, env: await freshChatEnv(input.env) }),
     listAuthMethods: (input) => agent.listAuthMethods(input),
-    skillInvocation: (skill) => agent.skillInvocation(skill),
+    skillInvocation: (skill, idea) => agent.skillInvocation(skill, idea),
     // The terminal runs, and its transcript is read, with the chat's environment rules, the API key's included (stories 3.1, 3.2).
     ...(agent.terminalResume === undefined ? {} : { terminalResume: withChatEnv(agent.terminalResume) }),
   };
@@ -382,22 +397,26 @@ async function listenAndAnnounce({
   });
   // Plan and Board (story 4.1): the catalog, planning sessions and the tickets, each behind core's guard (AD-22).
   const planning = createPlanning({ bmad: core.bmad, entities: core.entities, catalog: bmadCatalog, chat, agent: chatAgent });
+  // The one runner of BMad Method's scripts (story 4.1); closed with the server, which kills any tree still running (story 4.2).
+  const scriptRunner = createUvScriptRunner({
+    uvCommand: async () => {
+      const file = await uvToolchain.locate();
+      return file === undefined ? undefined : { file };
+    },
+    env: uvChildEnv,
+  });
   const ticketStore =
     options.ticketStore ??
     createTicketsV7({
-      runner: createUvScriptRunner({
-        uvCommand: async () => {
-          const file = await uvToolchain.locate();
-          return file === undefined ? undefined : { file };
-        },
-        // An allowlist, never this server's environment (AD-16).
-        env: () => ({ ...uvEnvironment(), ...options.extraUvEnv }),
-      }),
+      runner: scriptRunner,
       script: bundledTicketsScript(),
+      // Never the repo: uv would run a `.venv` the project ships (story 4.2 review).
+      workDir: uvWorkDir(dataDir),
       // Codes only: the script's own error text can name the user's paths.
       onFailure: (error) => log.warn('tickets.py run failed', { code: error instanceof ScriptRunError ? error.code : error.reason }),
     });
-  const board = createBoard({ bmad: core.bmad, entities: core.entities, tickets: ticketStore });
+  // Every board use-case checks the piece, then the project's script trust (story 4.2), before the store runs anything.
+  const board = createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, entities: core.entities, tickets: ticketStore });
   const appShortcut =
     options.appShortcut ??
     (options.launcherEntry === undefined
@@ -430,6 +449,7 @@ async function listenAndAnnounce({
     // The test-only BMad probe route (story 10.1): a test run on a temp data folder, with its own variable set.
     bmadProbe: hooks.bmadProbe,
     bmadDetection: core.bmadDetection,
+    bmadScriptTrust: core.bmadScriptTrust,
     planning,
     board,
     agentSetup,
@@ -515,6 +535,8 @@ async function listenAndAnnounce({
         await Promise.race([agentSetup.settled(), new Promise((resolve) => setTimeout(resolve, INSTALL_STOP_MS).unref())]);
       })
       .finally(() => chat.close().catch((error: unknown) => log.warn('stopping agents failed', { reason: String(error) })))
+      // No BMad Method script outlives the server either (story 4.2).
+      .finally(() => scriptRunner.close().catch((error: unknown) => log.warn('stopping scripts failed', { reason: String(error) })))
       .finally(() => {
         try {
           removePortFile(portFile, identity);

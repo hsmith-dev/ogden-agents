@@ -66,6 +66,13 @@ export interface BmadFeatures {
    * piece turned off refuses the next request.
    */
   requireBmadFeature(workspaceId: WorkspaceId, piece: BmadPiece): void;
+  /**
+   * The guard for a use-case serving any of several pieces (BMad Method's
+   * setup serves Planning and Board; story 4.2): returns when at least one
+   * of `pieces` is on; {@link FeatureOffError} (naming the first) when none
+   * is, {@link NotFoundError} for an unknown workspace.
+   */
+  requireAnyBmadFeature(workspaceId: WorkspaceId, pieces: readonly BmadPiece[]): void;
   /** Every piece, in canonical order, each available or not with the coming-soon reason. */
   available(): BmadPieceAvailability[];
   /** Whether this install ships `piece`, so it may be turned on. */
@@ -100,6 +107,11 @@ export function createBmadFeatures(db: Pick<Database, 'orm'>, options: BmadFeatu
   return {
     requireBmadFeature(workspaceId, piece) {
       if (!pieces(workspaceId).includes(piece)) throw new FeatureOffError(piece);
+    },
+    requireAnyBmadFeature(workspaceId, wanted) {
+      const on = pieces(workspaceId);
+      if (wanted.length === 0) throw new Error('requireAnyBmadFeature needs at least one piece');
+      if (!wanted.some((piece) => on.includes(piece))) throw new FeatureOffError(wanted[0]!);
     },
     available: () =>
       BMAD_PIECES.map((piece): BmadPieceAvailability => (shipped.has(piece) ? { piece, available: true } : { piece, available: false, reason: BMAD_COMING_SOON_REASON })),

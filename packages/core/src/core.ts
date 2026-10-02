@@ -1,6 +1,7 @@
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
 import { createBmadDetection, type BmadDetectionUseCases } from './bmad-detection.js';
 import { createBmadFeatures, parseAvailableBmadPieces, type BmadFeatures, type BmadFeaturesOptions } from './bmad-features.js';
+import { createBmadScriptTrust, type BmadScriptTrust } from './bmad-script-trust.js';
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
 import { createEntities, type Entities } from './entities.js';
 import { createEventLog, type EventLog, type EventLogOptions } from './event-log.js';
@@ -23,6 +24,8 @@ export interface Core {
   readonly bmad: BmadFeatures;
   /** Whether a project's repo already uses BMad Method, and Not now on the offer (story 10.3). */
   readonly bmadDetection: BmadDetectionUseCases;
+  /** The per-project script trust (story 4.2): checked with the pieces guard for every use of the project's own scripts. */
+  readonly bmadScriptTrust: BmadScriptTrust;
   close(): void;
 }
 
@@ -45,6 +48,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
   // Which pieces this install ships is the server wiring's list (story 10.2), never core's.
   const bmad = createBmadFeatures(db, { availableBmadPieces });
   const bmadDetection = createBmadDetection({ orm: db.orm, events, entities, catalog: options.bmadCatalog });
+  const bmadScriptTrust = createBmadScriptTrust({ orm: db.orm, events });
   const permissions = createPermissions({
     db,
     events,
@@ -60,6 +64,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     permissions,
     bmad,
     bmadDetection,
+    bmadScriptTrust,
     close: () => {
       try {
         permissions.close();

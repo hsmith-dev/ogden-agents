@@ -121,8 +121,15 @@ export const HistoryDeletedResponse = z.object({
 });
 export type HistoryDeletedResponse = z.infer<typeof HistoryDeletedResponse>;
 
-/** A workspace's settings (Workspace settings page): its caution level and the BMad pieces it has on (AD-22). */
-export const WorkspaceSettings = z.object({ cautionLevel: CautionLevel, bmadPieces: BmadPieceSet });
+/**
+ * A workspace's settings (Workspace settings page): its caution level, the
+ * BMad pieces it has on (AD-22), and whether the user trusted the project's
+ * own BMad Method scripts to run (story 4.2). `bmadScriptsTrusted` is
+ * optional when parsed (an older server's answer reads as not trusted) and
+ * always present once parsed; core always sends it. It changes only through
+ * `PUT …/bmad/script-trust`, never through `PATCH` settings.
+ */
+export const WorkspaceSettings = z.object({ cautionLevel: CautionLevel, bmadPieces: BmadPieceSet, bmadScriptsTrusted: z.boolean().default(false) });
 export type WorkspaceSettings = z.infer<typeof WorkspaceSettings>;
 
 /** `GET` and `PATCH /api/v1/workspaces/:wsId/settings`. */

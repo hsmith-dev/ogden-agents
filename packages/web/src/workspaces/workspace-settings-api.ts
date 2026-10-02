@@ -1,4 +1,14 @@
-import { API_ROUTES, apiPath, BmadPiecesResponse, WorkspaceSettingsResponse, type BmadPiece, type BmadPieceAvailability, type CautionLevel, type WorkspaceSettings } from '@ogden-agents/shared';
+import {
+  API_ROUTES,
+  apiPath,
+  BmadPiecesResponse,
+  SCRIPT_TRUST_FAILED,
+  WorkspaceSettingsResponse,
+  type BmadPiece,
+  type BmadPieceAvailability,
+  type CautionLevel,
+  type WorkspaceSettings,
+} from '@ogden-agents/shared';
 import { useQuery } from '@tanstack/react-query';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
 import { call, fetchPermissionRules } from '@/chat/chat-api';
@@ -44,6 +54,16 @@ export async function updateBmadPieces(wsId: string, bmadPieces: readonly BmadPi
 }
 
 /**
+ * `PUT /api/v1/workspaces/:wsId/bmad/script-trust` (story 4.2): the user
+ * allows Ogden Agents to run this project's own BMad Method scripts, once
+ * for the project. Answers the settings, now trusted.
+ */
+export async function trustProjectScripts(wsId: string, auth: Auth = tabAuth): Promise<WorkspaceSettings> {
+  const json = await call(auth, apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId }), { method: 'PUT' }, SCRIPT_TRUST_FAILED);
+  return WorkspaceSettingsResponse.parse(json).settings;
+}
+
+/**
  * `GET /api/v1/bmad/pieces` (story 10.2): every BMad Method piece, in order,
  * each available on this install or coming soon. Install-wide, so it is the
  * same for every project and never changes while the server runs.
@@ -71,7 +91,8 @@ export function createLatestGate() {
 function useSettingsInvalidation(wsId: string): void {
   useEventInvalidation((event) => {
     if (event.workspaceId !== wsId) return [];
-    if (event.type === 'workspace.settings_changed') return [['workspace-settings', wsId]];
+    // The script trust (story 4.2) is part of the settings: allowed in another tab, this one follows.
+    if (event.type === 'workspace.settings_changed' || event.type === 'workspace.bmad_scripts_trusted') return [['workspace-settings', wsId]];
     if (event.type === 'workspace.permission_rule_added' || event.type === 'workspace.permission_rule_removed') return [['permission-rules', wsId]];
     return [];
   });

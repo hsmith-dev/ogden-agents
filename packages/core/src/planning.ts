@@ -1,17 +1,20 @@
 /**
- * Guided planning (CAP-6; story 4.1, the tracer): the catalog of a project's
- * installed BMad Method skills, and starting a planning session on one. A
- * planning session is a chat session of kind `planning` (AD-8) whose first
- * message is the agent adapter's invocation of the skill
- * (`AgentPort.skillInvocation`); from then on it is an ordinary chat.
+ * Guided planning (CAP-6; story 4.1, the tracer; story 4.2 freezes the
+ * rest): the catalog of a project's installed BMad Method modules, skills
+ * and agents, and starting a planning session on a skill, with the user's
+ * idea when given ("Start from an idea"). A planning session is a chat
+ * session of kind `planning` (AD-8) whose first message is the agent
+ * adapter's invocation of the skill (`AgentPort.skillInvocation`); from then
+ * on it is an ordinary chat.
  *
  * Both use-cases serve the `planning` piece and call core's guard first
- * (AD-22), so a project with Planning off is never scanned. The repo is the
- * workspace's stored real path, never request input; a skill must be named
- * as {@link SKILL_NAME_PATTERN} allows and be in the catalog. Core names no
- * skill (AD-12).
+ * (AD-22), so a project with Planning off is never scanned. Planning runs
+ * none of the project's own scripts (the catalog only reads files), so it
+ * needs no script trust. The repo is the workspace's stored real path,
+ * never request input; a skill must be named as {@link SKILL_NAME_PATTERN}
+ * allows and be in the catalog. Core names no skill (AD-12).
  */
-import { SKILL_NAME_PATTERN, type CatalogSkill, type Session, type WorkspaceId } from '@ogden-agents/shared';
+import { PlanningIdea, SKILL_NAME_PATTERN, type Catalog, type Session, type WorkspaceId } from '@ogden-agents/shared';
 import type { AgentPort } from './agent-port.js';
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
 import type { BmadFeatures } from './bmad-features.js';
@@ -21,23 +24,24 @@ import { NotFoundError, ValidationError } from './errors.js';
 
 export interface PlanningUseCases {
   /**
-   * The project's installed skills. `FeatureOffError` with Planning off
-   * (nothing is scanned), `NotFoundError` for an unknown workspace.
+   * The project's catalog. `FeatureOffError` with Planning off (nothing is
+   * scanned), `NotFoundError` for an unknown workspace.
    */
-  catalog(workspaceId: WorkspaceId): Promise<CatalogSkill[]>;
+  catalog(workspaceId: WorkspaceId): Promise<Catalog>;
   /**
    * Starts a planning session on `skill`: a new `planning` session whose
-   * first message invokes it. `FeatureOffError` with Planning off,
-   * `ValidationError` for a malformed name, `NotFoundError` for a skill not
-   * in the catalog or an unknown workspace; nothing is created then.
+   * first message invokes it, with `idea` when given (trimmed, 1 to
+   * `MAX_IDEA_LENGTH` characters). `FeatureOffError` with Planning off,
+   * `ValidationError` for a malformed name or idea, `NotFoundError` for a
+   * skill not in the catalog or an unknown workspace; nothing is created then.
    */
-  start(workspaceId: WorkspaceId, skill: string): Promise<Session>;
+  start(workspaceId: WorkspaceId, skill: string, idea?: string): Promise<Session>;
 }
 
 export interface PlanningDeps {
   bmad: Pick<BmadFeatures, 'requireBmadFeature'>;
   entities: Pick<Entities, 'getWorkspace'>;
-  catalog: Pick<BmadCatalogPort, 'skills'>;
+  catalog: Pick<BmadCatalogPort, 'catalog'>;
   chat: Pick<Chat, 'createChatSession' | 'sendMessage'>;
   agent: Pick<AgentPort, 'skillInvocation'>;
 }
@@ -51,24 +55,33 @@ export function workspaceRepoPath(entities: Pick<Entities, 'getWorkspace'>, work
 }
 
 export function createPlanning({ bmad, entities, catalog, chat, agent }: PlanningDeps): PlanningUseCases {
-  const skillsOf = (workspaceId: WorkspaceId) => catalog.skills(workspaceRepoPath(entities, workspaceId));
+  const catalogOf = (workspaceId: WorkspaceId) => catalog.catalog(workspaceRepoPath(entities, workspaceId));
   return {
     async catalog(workspaceId) {
       bmad.requireBmadFeature(workspaceId, 'planning');
-      return skillsOf(workspaceId);
+      return catalogOf(workspaceId);
     },
 
-    async start(workspaceId, skill) {
+    async start(workspaceId, skill, idea) {
       bmad.requireBmadFeature(workspaceId, 'planning');
       if (typeof skill !== 'string' || !SKILL_NAME_PATTERN.test(skill)) {
         throw new ValidationError('That is not the name of a skill.', [{ path: ['skill'], message: 'That is not the name of a skill.' }]);
       }
-      const skills = await skillsOf(workspaceId);
+      let checkedIdea: string | undefined;
+      if (idea !== undefined) {
+        const parsed = PlanningIdea.safeParse(idea);
+        if (!parsed.success) {
+          const message = parsed.error.issues[0]?.message ?? 'Write your idea first.';
+          throw new ValidationError(message, [{ path: ['idea'], message }]);
+        }
+        checkedIdea = parsed.data;
+      }
+      const { skills } = await catalogOf(workspaceId);
       if (!skills.some((entry) => entry.name === skill)) throw new NotFoundError('skill', skill);
       // Checked again after the (async) scan: a piece turned off meanwhile starts nothing.
       bmad.requireBmadFeature(workspaceId, 'planning');
       const session = chat.createChatSession(workspaceId, 'planning');
-      chat.sendMessage(workspaceId, session.id, agent.skillInvocation(skill));
+      chat.sendMessage(workspaceId, session.id, agent.skillInvocation(skill, checkedIdea));
       return session;
     },
   };

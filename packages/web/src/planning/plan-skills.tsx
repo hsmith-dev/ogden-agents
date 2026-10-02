@@ -50,7 +50,7 @@ export function PlanSkills({ wsId, onStarted }: { wsId: string; onStarted: (sess
       </div>
     );
   }
-  if (catalog.data.length === 0) return <EmptyState title={PLAN_EMPTY_TITLE} data-testid="plan-empty" />;
+  if (catalog.data.skills.length === 0) return <EmptyState title={PLAN_EMPTY_TITLE} data-testid="plan-empty" />;
   return (
     <div className="flex max-w-(--space-chat-column) flex-col gap-2">
       {startError === undefined ? null : (
@@ -59,7 +59,7 @@ export function PlanSkills({ wsId, onStarted }: { wsId: string; onStarted: (sess
         </Text>
       )}
       <RowList aria-label={PLAN_SKILLS_LABEL} data-testid="skill-list">
-        {catalog.data.map((skill) => (
+        {catalog.data.skills.map((skill) => (
           <li key={skill.name}>
             <Row asChild>
               <div data-testid="skill-row" data-skill={skill.name}>

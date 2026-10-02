@@ -1,0 +1,1 @@
+ALTER TABLE `workspaces` ADD `bmad_scripts_trusted` integer DEFAULT false NOT NULL;

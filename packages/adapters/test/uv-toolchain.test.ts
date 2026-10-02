@@ -19,7 +19,8 @@ import {
   selectTarget,
   shortVersion,
   UV_IGNORE_SYSTEM_ENV,
-  versionEnvironment,
+  uvEnvironment,
+  type UvCommand,
   UV_RELEASE,
   UV_TARGETS,
   type UvRelease,
@@ -43,7 +44,7 @@ function tempDir(): string {
 }
 
 /** Reads a fake `uv`: its contents are what it prints for `--version`. */
-const fakeRunner = async (file: string) => {
+const fakeRunner = async ({ file }: UvCommand) => {
   try {
     const text = readFileSync(file, 'utf8');
     return text.startsWith('uv ') ? text : null;
@@ -196,16 +197,48 @@ describe('status', () => {
   });
 });
 
-describe('versionEnvironment', () => {
-  it('keeps only what uv needs to start: never an agent key or anything else', () => {
-    const source = { PATH: '/bin', HOME: '/h', USERPROFILE: 'C:\\u', ANTHROPIC_API_KEY: 'sk-x', SECRET: 's', SystemRoot: 'C:\\Windows', PATHEXT: '.EXE' };
-    expect(versionEnvironment(source, 'linux')).toEqual({ PATH: '/bin', HOME: '/h', USERPROFILE: 'C:\\u' });
-    expect(versionEnvironment({ ...source, PATH: undefined, Path: 'C:\\bin', anthropic_api_key: 'sk-y' }, 'win32')).toEqual({
+describe('the version probe’s environment (story 4.2)', () => {
+  it('is uvEnvironment of the toolchain’s env by default: never an agent key, a token or an OGDEN_AGENTS_ switch', async () => {
+    const seen: Array<Readonly<Record<string, string>>> = [];
+    const dir = fakeSystemUv(VERSION);
+    const uv = toolchain({
+      dataDir: tempDir(),
+      env: { PATH: dir, HOME: '/h', ANTHROPIC_API_KEY: 'sk-x', GITHUB_TOKEN: 'ghp-x', OGDEN_AGENTS_DATA_DIR: '/d', NODE_OPTIONS: '--x' },
+      runVersion: async (command, env) => {
+        seen.push(env);
+        return fakeRunner(command);
+      },
+    });
+    expect(await uv.locate()).toBe(join(dir, 'uv'));
+    expect(seen.length).toBeGreaterThan(0);
+    for (const env of seen) expect(env).toEqual({ PATH: dir, HOME: '/h', PYTHONUTF8: '1' });
+  });
+
+  it('is exactly what childEnv answers, read at each probe', async () => {
+    let calls = 0;
+    const seen: Array<Readonly<Record<string, string>>> = [];
+    const uv = toolchain({
+      dataDir: tempDir(),
+      env: { PATH: fakeSystemUv(VERSION) },
+      childEnv: () => ({ ONLY: String(++calls) }),
+      runVersion: async (command, env) => {
+        seen.push(env);
+        return fakeRunner(command);
+      },
+    });
+    await uv.locate();
+    await uv.locate();
+    expect(seen).toEqual([{ ONLY: '1' }, { ONLY: '2' }]);
+  });
+
+  it('uvEnvironment keeps what uv needs and drops the rest, on every OS', () => {
+    const source = { PATH: '/bin', HOME: '/h', XDG_CACHE_HOME: '/c', LC_ALL: 'C', ANTHROPIC_API_KEY: 'sk-x', GITHUB_TOKEN: 'g', OGDEN_AGENTS_X: '1', PYTHONPATH: '/p', PYTHONUTF8: '0' };
+    expect(uvEnvironment(source, 'linux')).toEqual({ PATH: '/bin', HOME: '/h', XDG_CACHE_HOME: '/c', LC_ALL: 'C', PYTHONUTF8: '1' });
+    expect(uvEnvironment({ Path: 'C:\\bin', SYSTEMROOT: 'C:\\W', comspec: 'cmd', github_token: 'g', Anthropic_Api_Key: 'k' }, 'win32')).toEqual({
       Path: 'C:\\bin',
-      HOME: '/h',
-      USERPROFILE: 'C:\\u',
-      SystemRoot: 'C:\\Windows',
-      PATHEXT: '.EXE',
+      SYSTEMROOT: 'C:\\W',
+      comspec: 'cmd',
+      PYTHONUTF8: '1',
     });
   });
 });

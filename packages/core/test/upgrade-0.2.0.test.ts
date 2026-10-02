@@ -15,7 +15,7 @@ import Sqlite from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { createDataFolder020, LIVE_MIGRATIONS, MIGRATIONS_020, type DataFolder020 } from '../../../tests/fixtures/data-folder-0.2.0.js';
 import { canonicalWorkspacePath, realWorkspacePath, type BmadCatalogPort, type Core } from '../src/index.js';
-import { openTestCore, removeAfterTest } from './helpers.js';
+import { openTestCore, removeAfterTest, unusedCatalogParts } from './helpers.js';
 
 /** SHA-256 of each migration 0.2.0 shipped, as released: they never change. */
 const FROZEN_020: Record<(typeof MIGRATIONS_020)[number], string> = {
@@ -37,6 +37,7 @@ const FROZEN_JOURNAL_020 = [
 const fsCatalog: BmadCatalogPort = {
   detect: async (repoPath) => ({ hasBmad: existsSync(join(repoPath, '_bmad')), hasOutput: existsSync(join(repoPath, '_bmad-output')) }),
   skills: async () => [],
+    ...unusedCatalogParts,
 };
 
 function folder(stopAt?: 3 | 4 | 5): DataFolder020 {
@@ -128,8 +129,8 @@ describe('upgrading a 0.2.0 data folder (story 10.7)', () => {
     const core = open(data);
 
     expect(core.entities.listWorkspaces().map((workspace) => workspace.id).sort()).toEqual([bmad, plain].sort());
-    expect(core.permissions.getSettings(bmad)).toEqual({ cautionLevel: 'ask_for_commands', bmadPieces: [] });
-    expect(core.permissions.getSettings(plain)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [] });
+    expect(core.permissions.getSettings(bmad)).toEqual({ cautionLevel: 'ask_for_commands', bmadPieces: [], bmadScriptsTrusted: false });
+    expect(core.permissions.getSettings(plain)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false });
     expect(core.permissions.listRules(bmad).map((rule) => rule.scope)).toEqual([{ kind: 'command_prefix', value: 'npm install', label: 'npm install' }]);
     expect(core.permissions.listRules(plain)).toEqual([]);
 
@@ -157,8 +158,8 @@ describe('upgrading a 0.2.0 data folder (story 10.7)', () => {
     const bmad = data.workspaceIds.bmad as WorkspaceId;
     const plain = data.workspaceIds.plain as WorkspaceId;
     const core = open(data);
-    expect(core.permissions.getSettings(bmad)).toEqual({ cautionLevel: 'ask_for_commands', bmadPieces: pieces });
-    expect(core.permissions.getSettings(plain)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [] });
+    expect(core.permissions.getSettings(bmad)).toEqual({ cautionLevel: 'ask_for_commands', bmadPieces: pieces, bmadScriptsTrusted: false });
+    expect(core.permissions.getSettings(plain)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false });
     expect(await core.bmadDetection.detect(bmad)).toEqual({ hasBmad: true, hasOutput: false, offerDismissed: dismissed });
     expect(await core.bmadDetection.detect(plain)).toEqual({ hasBmad: false, hasOutput: false, offerDismissed: false });
     const read = core.events.readAfter(0);

@@ -10,7 +10,11 @@
  * - it runs in its own process group (POSIX) and past `timeoutMs` the whole
  *   tree is killed (`taskkill /T` on Windows);
  * - stdout and stderr together may hold at most `maxOutputBytes`; more kills
- *   the tree too.
+ *   the tree too;
+ * - `close()` (a stopping server, story 4.2) kills every tree still running
+ *   and refuses new runs.
+ * Each complete line of output can be streamed to the caller as it arrives
+ * (`onLine`, story 4.2: setup's progress), besides the JSON answer.
  * Every stream and the child have an `error` handler, so a failure never
  * reaches the server as an unhandled error.
  */
@@ -28,9 +32,10 @@ const KILL_GRACE_MS = 5_000;
  * Why a script run gave no answer: no `uv` to run it (`uv_missing`), it
  * exited non-zero (`failed`, with the script's own `{"error"}` text when it
  * printed one), it ran past the time limit (`timeout`), it printed more than
- * allowed (`too_much_output`), or its stdout wasn't one JSON value (`bad_output`).
+ * allowed (`too_much_output`), its stdout wasn't one JSON value (`bad_output`),
+ * or the runner was closed before it finished (`closed`, story 4.2).
  */
-export type ScriptRunErrorCode = 'uv_missing' | 'failed' | 'timeout' | 'too_much_output' | 'bad_output';
+export type ScriptRunErrorCode = 'uv_missing' | 'failed' | 'timeout' | 'too_much_output' | 'bad_output' | 'closed';
 
 export class ScriptRunError extends Error {
   override readonly name = 'ScriptRunError';
@@ -70,17 +75,60 @@ export interface UvScriptRunnerOptions {
   killTree?: (pid: number | undefined) => void;
 }
 
+/** Which of the child's streams a line came from. */
+export type ScriptStream = 'stdout' | 'stderr';
+
 export interface ScriptRun {
   /** The script's absolute path. */
   script: string;
   args: readonly string[];
-  /** The folder it runs in. */
+  /**
+   * The folder it runs in. Never a project's repo: `uv run --no-project`
+   * still runs a `.venv` it finds there or in a parent (story 4.2 review),
+   * so callers pass a neutral folder and name the repo in the arguments.
+   */
   cwd: string;
+  /**
+   * Told each complete line (without its line break, decoded as UTF-8) of
+   * stdout and stderr as it arrives, and a last line without a break when
+   * the stream ends (story 4.2). A throw is ignored. Lines past
+   * `maxOutputBytes` are not told.
+   */
+  onLine?: (stream: ScriptStream, line: string) => void;
 }
 
 export interface UvScriptRunner {
   /** The JSON value the script printed on stdout, or a {@link ScriptRunError}. */
   run(input: ScriptRun): Promise<unknown>;
+  /**
+   * Kills the process tree of every run still in flight (each rejects with
+   * `closed` once its tree has exited, or after a grace period) and makes
+   * every later run reject with `closed` at once. Resolves once every run
+   * in flight has settled. Safe to call more than once.
+   */
+  close(): Promise<void>;
+}
+
+/** Splits a stream's chunks into lines for `onLine`, keeping a partial line until it ends. */
+function lineSplitter(emit: (line: string) => void) {
+  let pending = '';
+  const decoder = new TextDecoder('utf-8');
+  return {
+    push(chunk: Buffer) {
+      pending += decoder.decode(chunk, { stream: true });
+      let index = pending.indexOf('\n');
+      while (index !== -1) {
+        emit(pending.slice(0, index).replace(/\r$/, ''));
+        pending = pending.slice(index + 1);
+        index = pending.indexOf('\n');
+      }
+    },
+    end() {
+      pending += decoder.decode();
+      if (pending !== '') emit(pending.replace(/\r$/, ''));
+      pending = '';
+    },
+  };
 }
 
 /** The `"error"` of the last stderr line that is a JSON object with one, if any. */
@@ -102,14 +150,38 @@ export function createUvScriptRunner(options: UvScriptRunnerOptions): UvScriptRu
   const maxOutputBytes = options.maxOutputBytes ?? SCRIPT_MAX_OUTPUT_BYTES;
   const platform = options.platform ?? process.platform;
   const killTree = options.killTree ?? ((pid) => killProcessTree(pid));
+  let closed = false;
+  /** The kill of each run in flight, by run; each run removes itself once settled. */
+  const inFlight = new Map<object, { kill: (error: ScriptRunError) => void; settled: Promise<unknown> }>();
 
   return {
-    async run({ script, args, cwd }) {
+    async close() {
+      closed = true;
+      const runs = [...inFlight.values()];
+      for (const entry of runs) entry.kill(new ScriptRunError('closed'));
+      await Promise.all(runs.map((entry) => entry.settled.catch(() => undefined)));
+    },
+
+    async run({ script, args, cwd, onLine }) {
+      if (closed) throw new ScriptRunError('closed');
       const uv = await options.uvCommand();
       if (uv === undefined) throw new ScriptRunError('uv_missing');
+      // Closed while uv was being found: nothing is spawned.
+      if (closed) throw new ScriptRunError('closed');
       const argv = [...(uv.args ?? []), 'run', '--no-project', '--quiet', script, ...args];
+      const key = {};
+      const tell = (stream: ScriptStream) => (line: string) => {
+        try {
+          onLine?.(stream, line);
+        } catch {
+          // The caller's listener never changes the run.
+        }
+      };
 
-      return new Promise<unknown>((resolve, reject) => {
+      let killRun: (error: ScriptRunError) => void = () => {};
+      /** Set once the run has settled, so a spawn that failed at once is never registered. */
+      let done = false;
+      const outcome = new Promise<unknown>((resolve, reject) => {
         let settled = false;
         /** The failure a kill is waiting to report once the tree has exited. */
         let failure: ScriptRunError | undefined;
@@ -119,13 +191,15 @@ export function createUvScriptRunner(options: UvScriptRunnerOptions): UvScriptRu
         const stderr: Buffer[] = [];
         let bytes = 0;
 
-        const finish = (outcome: { value: unknown } | { error: ScriptRunError }) => {
+        const finish = (result: { value: unknown } | { error: ScriptRunError }) => {
           if (settled) return;
           settled = true;
+          done = true;
+          inFlight.delete(key);
           clearTimeout(timer);
           clearTimeout(grace);
-          if ('error' in outcome) reject(outcome.error);
-          else resolve(outcome.value);
+          if ('error' in result) reject(result.error);
+          else resolve(result.value);
         };
 
         let child: ReturnType<typeof spawn>;
@@ -152,8 +226,10 @@ export function createUvScriptRunner(options: UvScriptRunnerOptions): UvScriptRu
           killTree(child.pid);
           grace = setTimeout(() => finish({ error }), KILL_GRACE_MS);
         };
+        killRun = kill;
 
-        const collect = (into: Buffer[]) => (chunk: Buffer) => {
+        const lines = { stdout: lineSplitter(tell('stdout')), stderr: lineSplitter(tell('stderr')) };
+        const collect = (into: Buffer[], stream: ScriptStream) => (chunk: Buffer) => {
           if (failure !== undefined) return;
           bytes += chunk.byteLength;
           if (bytes > maxOutputBytes) {
@@ -161,9 +237,10 @@ export function createUvScriptRunner(options: UvScriptRunnerOptions): UvScriptRu
             return;
           }
           into.push(chunk);
+          if (onLine !== undefined) lines[stream].push(chunk);
         };
-        child.stdout?.on('data', collect(stdout));
-        child.stderr?.on('data', collect(stderr));
+        child.stdout?.on('data', collect(stdout, 'stdout'));
+        child.stderr?.on('data', collect(stderr, 'stderr'));
         // A broken pipe is reported by the exit; it must never be unhandled.
         child.stdout?.on('error', () => {});
         child.stderr?.on('error', () => {});
@@ -176,6 +253,10 @@ export function createUvScriptRunner(options: UvScriptRunnerOptions): UvScriptRu
           if (failure !== undefined) {
             finish({ error: failure });
             return;
+          }
+          if (onLine !== undefined) {
+            lines.stdout.end();
+            lines.stderr.end();
           }
           const err = Buffer.concat(stderr).toString('utf8');
           if (exitCode !== 0) {
@@ -192,6 +273,9 @@ export function createUvScriptRunner(options: UvScriptRunnerOptions): UvScriptRu
 
         timer = setTimeout(() => kill(new ScriptRunError('timeout')), timeoutMs);
       });
+      // Registered unless the run already settled (a spawn that failed at once).
+      if (!done) inFlight.set(key, { kill: (error) => killRun(error), settled: outcome });
+      return outcome;
     },
   };
 }

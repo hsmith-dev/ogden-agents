@@ -3,6 +3,7 @@ import { Session, SessionDriver, SessionState } from './entities.js';
 import { AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, PermissionDecision, PermissionRequestId, SessionErrorCode, ToolCallDiff, ToolCallStatus, ToolKind } from './events-common.js';
 import { assigned, onSessionStream } from './events-envelope.js';
 import { PermissionRuleId, SessionId } from './ids.js';
+import { CatalogNext, RepoRelativePath } from './planning.js';
 import { DriverChangeCause } from './terminal.js';
 
 /**
@@ -166,6 +167,26 @@ export const SessionCheckInInput = z.object({
  */
 export const SessionCheckInEvent = SessionCheckInInput.extend(assigned);
 export type SessionCheckInEvent = z.infer<typeof SessionCheckInEvent>;
+
+export const SessionDocumentWrittenInput = z.object({
+  type: z.literal('session.document_written'),
+  ...onSessionStream,
+  payload: z.object({
+    /** The document, relative to the repo, `/`-separated (inside the project's output folder). */
+    path: RepoRelativePath,
+    /** The write tool call that wrote it, when known. */
+    toolCallId: z.string().min(1).nullable(),
+    /** The next suggested step's skill and button label, when the catalog names one. */
+    next: CatalogNext.nullable(),
+  }),
+});
+/**
+ * A planning session wrote a BMad Method document (story 4.2's contract;
+ * entry 4.7 appends it): the transcript shows a document card with Open and
+ * the next suggested step (E4-R6).
+ */
+export const SessionDocumentWrittenEvent = SessionDocumentWrittenInput.extend(assigned);
+export type SessionDocumentWrittenEvent = z.infer<typeof SessionDocumentWrittenEvent>;
 
 // Permission events live on the session's stream and, like session events,
 // are appended only through the session-event helper (E2-R7).

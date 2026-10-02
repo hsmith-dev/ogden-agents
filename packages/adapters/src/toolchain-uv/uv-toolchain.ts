@@ -19,6 +19,8 @@ import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { ToolchainError, type DetectedToolStatus, type ToolchainPort, type ToolProgress } from '@ogden-agents/core';
 import { ArchiveError, readTarGz, readZip } from './archive.js';
+import type { UvCommand } from './script-runner.js';
+import { uvEnvironment } from './uv-environment.js';
 import {
   archiveUrl,
   compareVersions,
@@ -50,26 +52,16 @@ const MISMATCH = "The download didn't match the expected file, so nothing was in
 /** How long `uv --version` may take. */
 const VERSION_TIMEOUT_MS = 10_000;
 
-/** Runs `<file> --version` and resolves with its stdout, or `null` if it can't run. */
-export type VersionRunner = (file: string) => Promise<string | null>;
+/**
+ * Runs `<file> <args…> --version` with exactly `env` (the same allowlist
+ * every `uv` child gets, story 4.2) and resolves with its stdout, or `null`
+ * if it can't run.
+ */
+export type VersionRunner = (command: UvCommand, env: Readonly<Record<string, string>>) => Promise<string | null>;
 
-/** What `uv --version` may see of this server's environment: enough to start, nothing else (AD-16: never an agent key). */
-const VERSION_ENV_ALLOWED = ['PATH', 'HOME', 'USERPROFILE'];
-/** The same on Windows only, where a process can't start without them. */
-const VERSION_ENV_ALLOWED_WINDOWS = ['SystemRoot', 'PATHEXT'];
-
-/** The environment `uv --version` runs with: an allowlist of `source` (names compared without case on Windows). */
-export function versionEnvironment(source: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): Record<string, string> {
-  const fold = (name: string) => (platform === 'win32' ? name.toUpperCase() : name);
-  const allowed = new Set([...VERSION_ENV_ALLOWED, ...(platform === 'win32' ? VERSION_ENV_ALLOWED_WINDOWS : [])].map(fold));
-  const env: Record<string, string> = {};
-  for (const [name, value] of Object.entries(source)) if (value !== undefined && allowed.has(fold(name))) env[name] = value;
-  return env;
-}
-
-export const runVersion: VersionRunner = (file) =>
+export const runVersion: VersionRunner = ({ file, args = [] }, env) =>
   new Promise((resolve) => {
-    execFile(file, ['--version'], { timeout: VERSION_TIMEOUT_MS, windowsHide: true, env: versionEnvironment() }, (error, stdout) => {
+    execFile(file, [...args, '--version'], { timeout: VERSION_TIMEOUT_MS, windowsHide: true, shell: false, env: { ...env } }, (error, stdout) => {
       resolve(error === null ? String(stdout) : null);
     });
   });
@@ -93,6 +85,13 @@ export interface UvToolchainOptions {
   fetch?: typeof fetch;
   /** Default {@link runVersion}. */
   runVersion?: VersionRunner;
+  /**
+   * The whole environment of every `uv --version` probe, read at each probe
+   * (story 4.2): the server passes the same function its script runner
+   * gets, so every `uv` child has one allowlist. Default
+   * {@link uvEnvironment} of {@link env}.
+   */
+  childEnv?: () => Readonly<Record<string, string>>;
   /** uv's standard install folders, searched after `PATH`. Default: per OS, see {@link standardUvDirs}. */
   standardDirs?: readonly string[];
   /** Default {@link DOWNLOAD_IDLE_TIMEOUT_MS}. */
@@ -136,6 +135,7 @@ export function createUvToolchain(options: UvToolchainOptions): ToolchainPort & 
   const release = options.release ?? UV_RELEASE;
   const fetchImpl = options.fetch ?? fetch;
   const run = options.runVersion ?? runVersion;
+  const childEnv = options.childEnv ?? (() => uvEnvironment(env, platform as NodeJS.Platform));
   const idleTimeoutMs = options.idleTimeoutMs ?? DOWNLOAD_IDLE_TIMEOUT_MS;
   const onCleanupError = options.onCleanupError ?? (() => {});
   const exe = platform === 'win32' ? '.exe' : '';
@@ -148,7 +148,7 @@ export function createUvToolchain(options: UvToolchainOptions): ToolchainPort & 
     selectTarget({ os: platform, cpu: options.arch ?? process.arch, libc: () => (libc ??= detectLibc()) });
 
   const versionOf = async (file: string): Promise<[number, number, number] | undefined> => {
-    const output = await run(file);
+    const output = await run({ file }, childEnv());
     return output === null ? undefined : parseVersion(output);
   };
 

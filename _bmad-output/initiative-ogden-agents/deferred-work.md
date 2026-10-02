@@ -383,3 +383,15 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-tracer-bullet-one-planning-session-and-a-bare-board-in-a-rep-plan.md`
   summary: The catalog (4.4/4.5) should leave out bmod module records (`bmod-method`, `bmod-core-tools`, "Never invoke this skill") and avoid skill names that collide with agent built-in commands, from fork metadata rather than hard-coded names; the live check settles whether skills only under `.agents/skills` are runnable by Claude Code.
   evidence: 4.1 tracer lists every SKILL.md with a matching name; review Q2 and S9.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-epic-contracts-and-stubs-plan.md`
+  summary: `bmadPieceRoutes` lets any route opt out of the script trust with `projectScripts: false`; restrict the opt-out to the setup routes before epics 5 and 7 add script-running routes.
+  evidence: 4.2 review S2: `bmad-guard-coverage.test.ts` registers a board route with the opt-out and passes; only core's re-check in `createBoard` stops a bypass today.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-epic-contracts-and-stubs-plan.md`
+  summary: `uv --version` probes spawned by `locate()` on every script run are not tracked by the runner's `close()` nor killed as a tree; cache the located uv or track the probes.
+  evidence: 4.2 review Q2/S5: `script-runner.ts` adds a run to `inFlight` only after `uvCommand()`; `uv-toolchain.ts` `runVersion` uses `execFile` with a 10 s timeout.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-epic-contracts-and-stubs-plan.md`
+  summary: Processes a trusted project's BMad script leaves in its process group outlive a successful run and server stop.
+  evidence: 4.2 review S6: `script-runner.ts` kills the group only on timeout, output cap or `close()`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-epic-contracts-and-stubs-plan.md`
+  summary: Workspaces from before story 2.5 have no `realPath`, so `tickets.py --project-root` gets the stored, unresolved path that the script trust binds to.
+  evidence: 4.2 review S7: `entities.ts:168` falls back to `row.path`.

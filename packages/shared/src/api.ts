@@ -178,6 +178,33 @@ export const API_ROUTES = {
    * can't be read. Serves the `board` piece (guarded, AD-22).
    */
   workspaceTickets: `${API_BASE}/workspaces/:wsId/tickets`,
+  /**
+   * `GET` → `TicketResponse` (story 4.2's contract; entry 4.9 serves it):
+   * one ticket as `tickets.py find` reports it; 404 when none matches.
+   * Serves the `board` piece and needs the project's script trust.
+   */
+  workspaceTicket: `${API_BASE}/workspaces/:wsId/tickets/:ref`,
+  /**
+   * `PUT MarkTicketRequest` → `MarkTicketResponse` (story 4.2's contract;
+   * entry 4.10 serves it): sets the ticket's status through `tickets.py
+   * mark`; 409 `status_not_allowed` for `done`. Serves the `board` piece and
+   * needs the project's script trust.
+   */
+  workspaceTicketStatus: `${API_BASE}/workspaces/:wsId/tickets/:ref/status`,
+  /**
+   * `GET` → `BmadSetupStatusResponse`; `POST` → 202 `BmadSetupStartedResponse`
+   * (story 4.2's contract; entry 4.3 serves it): BMad Method's setup in the
+   * project, progress as `bmad.setup_*` events. Serves `planning` or `board`
+   * (either on); runs only the bundled `setup.py`, so it needs no script trust.
+   */
+  workspaceBmadSetup: `${API_BASE}/workspaces/:wsId/bmad/setup`,
+  /**
+   * `PUT` → `WorkspaceSettingsResponse` (story 4.2): the user allows Ogden
+   * Agents to run the project's own BMad Method scripts, kept per project.
+   * The first one appends `workspace.bmad_scripts_trusted`; a repeat
+   * changes nothing. Not guarded by a piece; no body.
+   */
+  workspaceBmadScriptTrust: `${API_BASE}/workspaces/:wsId/bmad/script-trust`,
 } as const;
 
 /**

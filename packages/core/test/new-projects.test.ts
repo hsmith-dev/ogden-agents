@@ -113,7 +113,7 @@ describe('adding a project (story 10.4)', () => {
     const before = core.events.lastSeq();
     const workspace = adding(core, { get: () => ({ bmadPieces: ['planning'] }) }).addProject(tempDir('ogden-agents-repo-'));
     expect(core.bmad.pieces(workspace.id)).toEqual(['planning']);
-    expect(core.permissions.getSettings(workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: ['planning'] });
+    expect(core.permissions.getSettings(workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: ['planning'], bmadScriptsTrusted: false });
     const appended = core.events.readAfter(before);
     expect(appended.map((event) => event.type)).toEqual(['workspace.created', 'workspace.settings_changed']);
     expect(appended[1]).toMatchObject({

@@ -7,13 +7,24 @@
  * skills, and `tickets-v7` mapping its runner's answers.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { TicketsUnavailableError } from '@ogden-agents/core';
+import { NotFoundError, TicketsUnavailableError } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createFakeBmadRepo, type FakeBmadRepo } from '../../../tests/fixtures/fake-bmad-repo.js';
-import { createBmadCatalog, createMemoryBmadCatalog, createTicketsV7, parseSkillFrontmatter, ScriptRunError, type UvScriptRunner } from '../src/index.js';
+import {
+  createBmadCatalog,
+  createMemoryBmadCatalog,
+  createTicketsV7,
+  createUvScriptRunner,
+  parseSkillFrontmatter,
+  ScriptRunError,
+  uvEnvironment,
+  type UvScriptRunner,
+} from '../src/index.js';
+
+const FAKE_UV = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-uv.mjs');
 
 const repos: FakeBmadRepo[] = [];
 afterEach(() => {
@@ -138,24 +149,28 @@ describe('tickets-v7 (story 4.1)', () => {
         if (answer instanceof Error) throw answer;
         return answer;
       },
+      close: async () => {},
     };
-    return { runs, failures, tickets: createTicketsV7({ runner, script: '/vendor/tickets.py', onFailure: (error) => failures.push(error) }) };
+    return { runs, failures, tickets: createTicketsV7({ runner, script: '/vendor/tickets.py', workDir: '/work', onFailure: (error) => failures.push(error) }) };
   }
 
-  it('runs `status` pinned to the repo and keeps only the board’s fields', async () => {
-    const { runs, tickets } = store({ folder: 'x', tickets: [ticket, { ref: '1.2', title: 'Two', state: 'backlog' }], problems: ['a/b.md: skipped'] });
-    expect(await tickets.status('/repo')).toEqual({
+  it('runs `status` pinned to the repo and keeps only the board’s fields, with story 4.2’s defaults', async () => {
+    const { runs, tickets } = store({ folder: 'x', tickets: [ticket, { ref: '1.2', title: 'Two', state: 'backlog', estimate: 3 }], problems: ['a/b.md: skipped'] });
+    const defaults = { tracker_id: '', assignee: '', hitl: false, covers: [], after: [], blocks: [], blocked_at: '' };
+    expect(await tickets.tree('/repo')).toEqual({
       tickets: [
-        { ref: '1.1', id: 1, epic: 'epic-a', title: 'One', type: 'story', status: '', state: 'planned', blocked_reason: '' },
-        { ref: '1.2', id: null, epic: null, title: 'Two', type: null, status: null, state: 'backlog', blocked_reason: null },
+        { ref: '1.1', id: 1, epic: 'epic-a', title: 'One', type: 'story', status: '', state: 'planned', blocked_reason: '', file: null, ...defaults, hitl: true },
+        { ref: '1.2', id: null, epic: null, title: 'Two', type: null, status: null, state: 'backlog', blocked_reason: null, file: null, ...defaults },
       ],
       problems: ['a/b.md: skipped'],
+      folder: 'x',
+      epics: [],
     });
-    expect(runs).toEqual([{ script: '/vendor/tickets.py', args: ['--project-root', '/repo', 'status'], cwd: '/repo' }]);
+    expect(runs).toEqual([{ script: '/vendor/tickets.py', args: ['--project-root', '/repo', 'status'], cwd: '/work' }]);
   });
 
   it('no problems key answers an empty list', async () => {
-    expect((await store({ tickets: [] }).tickets.status('/repo')).problems).toEqual([]);
+    expect((await store({ tickets: [] }).tickets.tree('/repo')).problems).toEqual([]);
   });
 
   it.each([
@@ -164,9 +179,10 @@ describe('tickets-v7 (story 4.1)', () => {
     ['timeout', new ScriptRunError('timeout')],
     ['bad_output', new ScriptRunError('bad_output')],
     ['bad_output', new ScriptRunError('too_much_output')],
+    ['failed', new ScriptRunError('closed')],
   ] as const)('a run that fails (%s) is TicketsUnavailableError', async (reason, error) => {
     const { tickets, failures } = store(error);
-    const caught = await tickets.status('/repo').catch((thrown: unknown) => thrown);
+    const caught = await tickets.tree('/repo').catch((thrown: unknown) => thrown);
     expect(caught).toBeInstanceOf(TicketsUnavailableError);
     expect((caught as TicketsUnavailableError).reason).toBe(reason);
     expect(failures).toEqual([error]);
@@ -180,17 +196,18 @@ describe('tickets-v7 (story 4.1)', () => {
         runs++;
         return new Promise((resolve) => (release = resolve));
       },
+      close: async () => {},
     };
-    const tickets = createTicketsV7({ runner, script: '/vendor/tickets.py' });
-    const first = tickets.status('/repo');
-    const second = tickets.status('/repo');
+    const tickets = createTicketsV7({ runner, script: '/vendor/tickets.py', workDir: '/work' });
+    const first = tickets.tree('/repo');
+    const second = tickets.tree('/repo');
     expect(second).toBe(first);
     await Promise.resolve();
     expect(runs).toBe(1);
     release({ tickets: [] });
-    expect(await first).toEqual({ tickets: [], problems: [] });
-    expect(await second).toEqual({ tickets: [], problems: [] });
-    const third = tickets.status('/repo');
+    expect(await first).toEqual({ tickets: [], problems: [], folder: null, epics: [] });
+    expect(await second).toEqual({ tickets: [], problems: [], folder: null, epics: [] });
+    const third = tickets.tree('/repo');
     await Promise.resolve();
     expect(runs).toBe(2);
     release({ tickets: [] });
@@ -198,9 +215,107 @@ describe('tickets-v7 (story 4.1)', () => {
   });
 
   it('JSON that is not a ticket list is TicketsUnavailableError (bad_output)', async () => {
-    for (const answer of [null, [], { tickets: 'no' }, { tickets: [{ title: 'no ref' }] }]) {
-      const caught = await store(answer).tickets.status('/repo').catch((thrown: unknown) => thrown);
+    for (const answer of [null, [], { tickets: 'no' }, { tickets: [{ title: 'no ref' }] }, { tickets: [], epics: [{ slug: 3 }] }]) {
+      const caught = await store(answer).tickets.tree('/repo').catch((thrown: unknown) => thrown);
       expect((caught as TicketsUnavailableError).reason).toBe('bad_output');
+    }
+  });
+
+  it('keeps the initiative’s epics as status reports them (story 4.2)', async () => {
+    const epic = { slug: 'epic-a', id: 1, status: 'in-progress', after: [], blocks: ['epic-b'] };
+    expect((await store({ tickets: [], epics: [epic] }).tickets.tree('/repo')).epics).toEqual([epic]);
+  });
+});
+
+describe('tickets-v7 find, mark and watch (story 4.2)', () => {
+  /** A fake runner answering each subcommand (`find`, `mark`) from `answers`; an Error is thrown. */
+  function store(answers: Record<string, unknown>) {
+    const runs: { script: string; args: readonly string[]; cwd: string }[] = [];
+    const runner: UvScriptRunner = {
+      run: async (input) => {
+        runs.push(input);
+        const answer = answers[input.args[2]!];
+        if (answer instanceof Error) throw answer;
+        return answer;
+      },
+      close: async () => {},
+    };
+    return { runs, tickets: createTicketsV7({ runner, script: '/vendor/tickets.py', workDir: '/work' }) };
+  }
+  const found = {
+    epic: 'epic-a', id: 2, file: null, type: 'story', title: 'Two payment', status: '', state: 'planned', blocked_reason: '', ref: '1.2',
+    folder: 'epic-a', description: 'Do two.', verify: 'It works.', references: ['spec'], notes: [], unknown: '', plan: '/repo/_bmad-output/x/epic-a/story-two-plan.md',
+  };
+  const marked = { plan: '/repo/p.md', created: true, status: 'blocked', assignee: '', blocked_at: '2026-10-02', blocked_reason: '-x y' };
+
+  it('find runs `find <ref>` in the work folder and answers the row with its text; a plan file that is not there is hasPlan false', async () => {
+    const { runs, tickets } = store({ find: found });
+    const detail = await tickets.find('/repo', '1.2');
+    expect(detail).toMatchObject({ ref: '1.2', title: 'Two payment', description: 'Do two.', verify: 'It works.', references: ['spec'], notes: [], unknown: '', hasPlan: false });
+    expect(runs).toEqual([{ script: '/vendor/tickets.py', args: ['--project-root', '/repo', 'find', '1.2'], cwd: '/work' }]);
+  });
+
+  it('find and mark answer NotFoundError for "no ticket matches" and "matches more than one ticket", and never pass a malformed ref', async () => {
+    for (const scriptError of ["no ticket matches '9.9'", "'9.9' matches more than one ticket: a in x, b in y"]) {
+      const missing = new ScriptRunError('failed', { scriptError, exitCode: 1 });
+      await expect(store({ find: missing }).tickets.find('/repo', '9.9')).rejects.toThrow(NotFoundError);
+      const marking = store({ find: missing, mark: marked });
+      await expect(marking.tickets.mark('/repo', '9.9', 'draft')).rejects.toThrow(NotFoundError);
+      expect(marking.runs.map((run) => run.args[2])).toEqual(['find']);
+    }
+    const { runs, tickets } = store({ find: found });
+    await expect(tickets.find('/repo', '--help')).rejects.toThrow(NotFoundError);
+    expect(runs).toEqual([]);
+  });
+
+  it('a ref the script resolved by title or tracker id to another ticket is NotFoundError, and mark writes nothing', async () => {
+    // `tickets.py` resolves "payment" to the ticket whose title contains it (1.2).
+    const { runs, tickets } = store({ find: found, mark: marked });
+    await expect(tickets.find('/repo', 'payment')).rejects.toThrow(NotFoundError);
+    await expect(tickets.mark('/repo', 'payment', 'blocked')).rejects.toThrow(NotFoundError);
+    expect(runs.map((run) => run.args[2])).toEqual(['find', 'find']);
+  });
+
+  it('mark finds the exact ticket first, then runs `mark <ref> <status>` with the blocked reason as one argument', async () => {
+    const { runs, tickets } = store({ find: found, mark: marked });
+    expect(await tickets.mark('/repo', '1.2', 'blocked', { blockedReason: '-x y' })).toEqual({ ref: '1.2', status: 'blocked' });
+    expect(runs.map((run) => run.args)).toEqual([
+      ['--project-root', '/repo', 'find', '1.2'],
+      ['--project-root', '/repo', 'mark', '1.2', 'blocked', '--blocked=-x y'],
+    ]);
+    expect(runs.every((run) => run.cwd === '/work')).toBe(true);
+  });
+
+  it('mark: exit 2 (the store refuses) is store_refused', async () => {
+    const caught = await store({ find: found, mark: new ScriptRunError('failed', { scriptError: 'store is linear', exitCode: 2 }) })
+      .tickets.mark('/repo', '1.2', 'draft')
+      .catch((thrown: unknown) => thrown);
+    expect((caught as TicketsUnavailableError).reason).toBe('store_refused');
+  });
+
+  it('watch rejects until entry 4.8 builds it', async () => {
+    await expect(store({}).tickets.watch('/repo', '_bmad-output', () => {})).rejects.toThrow(/4\.8/);
+  });
+
+  it('runs uv in the work folder, never the repo, so a .venv the repo ships is not found (fake uv, echo)', async () => {
+    const repoDir = repo({ '.venv/bin/python': '#!/bin/sh\necho pwned\n' }, true);
+    const workDir = mkdtempSync(join(tmpdir(), 'ogden-agents-uv-work-'));
+    try {
+      const real = createUvScriptRunner({ uvCommand: async () => ({ file: process.execPath, args: [FAKE_UV] }), env: () => ({ ...uvEnvironment(), FAKE_UV_MODE: 'echo' }) });
+      const echoed: Array<{ cwd: string; argv: string[] }> = [];
+      const runner: UvScriptRunner = {
+        run: async (input) => {
+          echoed.push((await real.run(input)) as { cwd: string; argv: string[] });
+          return { tickets: [] };
+        },
+        close: () => real.close(),
+      };
+      await createTicketsV7({ runner, script: '/vendor/tickets.py', workDir }).tree(repoDir.path);
+      expect(realpathSync(echoed[0]!.cwd)).toBe(realpathSync(workDir));
+      expect(realpathSync(echoed[0]!.cwd)).not.toBe(realpathSync(repoDir.path));
+      expect(echoed[0]!.argv).toEqual(['run', '--no-project', '--quiet', '/vendor/tickets.py', '--project-root', repoDir.path, 'status']);
+    } finally {
+      rmSync(workDir, { recursive: true, force: true });
     }
   });
 });

@@ -17,5 +17,6 @@ export * from './shortcut-os/index.js';
 export * from './terminal-memory/index.js';
 export * from './terminal-pty/index.js';
 export * from './terminal-pty/terminal-port.js';
+export * from './tickets-memory/index.js';
 export * from './tickets-v7/index.js';
 export * from './toolchain-uv/index.js';

@@ -17,13 +17,17 @@ import {
 } from '@ogden-agents/shared';
 import { eq } from 'drizzle-orm';
 import { readBmadPieces } from './bmad-features.js';
+import { readScriptsTrusted } from './bmad-script-trust.js';
 import type { Database, Orm } from './db/database.js';
 import { workspaces } from './db/schema.js';
 import { FeatureUnavailableError, NotFoundError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 
 export interface WorkspaceSettingsAccess {
-  /** The workspace's settings (its caution level and BMad pieces). {@link NotFoundError} for an unknown workspace. */
+  /**
+   * The workspace's settings (its caution level, BMad pieces and whether its
+   * scripts are trusted, story 4.2). {@link NotFoundError} for an unknown workspace.
+   */
   getSettings(workspaceId: WorkspaceId): WorkspaceSettings;
   /**
    * Changes the workspace's settings, its caution level and its BMad pieces
@@ -62,8 +66,9 @@ export function createWorkspaceSettings({ db, events, isBmadPieceAvailable }: Wo
     getSettings(workspaceId) {
       const cautionLevel = readCautionLevel(orm, workspaceId);
       const bmadPieces = readBmadPieces(orm, workspaceId);
-      if (cautionLevel === undefined || bmadPieces === undefined) throw new NotFoundError('workspace', workspaceId);
-      return { cautionLevel, bmadPieces };
+      const bmadScriptsTrusted = readScriptsTrusted(orm, workspaceId);
+      if (cautionLevel === undefined || bmadPieces === undefined || bmadScriptsTrusted === undefined) throw new NotFoundError('workspace', workspaceId);
+      return { cautionLevel, bmadPieces, bmadScriptsTrusted };
     },
 
     updateSettings(workspaceId, input) {
@@ -100,7 +105,8 @@ export function createWorkspaceSettings({ db, events, isBmadPieceAvailable }: Wo
         // A piece is turned on only when this install ships it (AD-22); one already on is kept.
         const unavailable = pieces.find((piece) => !previousBmadPieces.includes(piece) && !isBmadPieceAvailable(piece));
         if (unavailable !== undefined) throw new FeatureUnavailableError(unavailable);
-        if (level === previous && !piecesChanged) return { cautionLevel: level, bmadPieces: pieces };
+        const bmadScriptsTrusted = readScriptsTrusted(orm, workspaceId) ?? false;
+        if (level === previous && !piecesChanged) return { cautionLevel: level, bmadPieces: pieces, bmadScriptsTrusted };
         orm.update(workspaces).set({ cautionLevel: level, bmadPieces: JSON.stringify(pieces) }).where(eq(workspaces.id, workspaceId)).run();
         events.append({
           type: 'workspace.settings_changed',
@@ -108,7 +114,7 @@ export function createWorkspaceSettings({ db, events, isBmadPieceAvailable }: Wo
           streamId: workspaceId,
           payload: { cautionLevel: level, previous, ...(piecesChanged ? { bmadPieces: pieces, previousBmadPieces } : {}) },
         });
-        return { cautionLevel: level, bmadPieces: pieces };
+        return { cautionLevel: level, bmadPieces: pieces, bmadScriptsTrusted };
       });
     },
   };

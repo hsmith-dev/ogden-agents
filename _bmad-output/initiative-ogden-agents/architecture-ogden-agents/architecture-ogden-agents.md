@@ -7,7 +7,7 @@ paradigm: 'hexagonal (ports and adapters) with an append-only event log'
 scope: 'Ogden Agents as a whole: launcher, local server, browser UI, agent/tool adapters, and its BMAD-METHOD and bmad-loop forks'
 status: final
 created: '2026-09-29'
-updated: '2026-10-01'
+updated: '2026-10-02'
 binds: [CAP-1, CAP-2, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-12, CAP-13, CAP-14, CAP-15, CAP-16, CAP-17, CAP-18, CAP-19]
 sources: ['../spec-ogden-agents/spec-ogden-agents.md']
 companions: []
@@ -269,6 +269,7 @@ graph LR
   - The default pieces for new projects are an install-level preference kept by core in the data directory; it starts empty (Simple).
   - The install reports which pieces it ships; a piece is turned on only when available, and one not yet shipped is shown disabled as coming soon. AD-22 (the user's choice) and AD-14 (the project's installed capabilities) both gate a surface: it shows only when its piece is on, and then shows the reduced-mode notice if a capability is missing.
   - Developer mode and the terminal toggle (AD-6) are independent of the pieces.
+  - Note (epic 4, 2026-10-02, user decision, security): a piece that runs the project's own BMad scripts (Board through `tickets.py`, which executes the repo's `_bmad/scripts/config_utils.py`; later Unattended builds and Retrospectives) also needs the user's one-time trust for that project, kept by core on the workspace row with a `workspace.bmad_scripts_trusted` event. The same guard path checks it: the route helper after the piece guard (409 `scripts_not_trusted`), and each core use-case that runs project scripts. Turning a piece on is not refused; its script-running routes and watchers wait for the trust. Project scripts and every `uv` process run with one minimal allowlisted environment, never an API key, token or other secret (AD-16).
 
 ## Consistency Conventions
 

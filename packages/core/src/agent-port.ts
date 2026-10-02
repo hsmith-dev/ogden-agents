@@ -163,10 +163,12 @@ export interface AgentPort {
   listAuthMethods(input: { env: Readonly<Record<string, string>> }): Promise<AgentAuthMethod[]>;
   /**
    * The message that makes this agent run the installed skill `skill` (a
-   * catalog name; story 4.1), sent as a planning session's first message.
-   * Core names no skill and no agent's command syntax (AD-12): this does.
+   * catalog name; story 4.1), with the user's `idea` when given (story 4.2,
+   * "Start from an idea": already trimmed and at most `MAX_IDEA_LENGTH`
+   * characters), sent as a planning session's first message. Core names no
+   * skill and no agent's command syntax (AD-12): this does.
    */
-  skillInvocation(skill: string): string;
+  skillInvocation(skill: string, idea?: string): string;
   /**
    * The agent's own CLI on its sessions (CAP-5, story 3.2), for an agent whose
    * sessions its CLI can resume; absent otherwise (the terminal is then

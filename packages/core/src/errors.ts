@@ -1,4 +1,11 @@
-import { FEATURE_OFF_MESSAGE, FEATURE_UNAVAILABLE_MESSAGE, type SessionTerminal, type TerminalUnavailableCode } from '@ogden-agents/shared';
+import {
+  FEATURE_OFF_MESSAGE,
+  FEATURE_UNAVAILABLE_MESSAGE,
+  SCRIPTS_NOT_TRUSTED_MESSAGE,
+  STATUS_NOT_ALLOWED_MESSAGE,
+  type SessionTerminal,
+  type TerminalUnavailableCode,
+} from '@ogden-agents/shared';
 
 /** Base class for errors core throws on purpose, so callers can tell them from bugs. */
 export class CoreError extends Error {
@@ -64,6 +71,26 @@ export class FeatureUnavailableError extends CoreError {
   override readonly name = 'FeatureUnavailableError';
   constructor(readonly piece: string) {
     super('feature_unavailable', FEATURE_UNAVAILABLE_MESSAGE);
+  }
+}
+
+/**
+ * A use-case that runs the project's own BMad Method scripts was asked for
+ * before the user trusted the project (story 4.2, AD-22 note 2026-10-02):
+ * core refused it and ran nothing.
+ */
+export class ScriptsNotTrustedError extends CoreError {
+  override readonly name = 'ScriptsNotTrustedError';
+  constructor() {
+    super('scripts_not_trusted', SCRIPTS_NOT_TRUSTED_MESSAGE);
+  }
+}
+
+/** A ticket status the board may not set (`done`, AD-10) was asked for (story 4.2); nothing ran. */
+export class StatusNotAllowedError extends CoreError {
+  override readonly name = 'StatusNotAllowedError';
+  constructor(readonly status: string) {
+    super('status_not_allowed', STATUS_NOT_ALLOWED_MESSAGE);
   }
 }
 

@@ -196,7 +196,8 @@ export function createClaudeCodeAgent(options: ClaudeCodeAgentOptions = {}): Age
     // Claude Code's ACP adapter hands the text to the SDK, which runs `/name` as
     // the installed skill; it loads the repo's own skills from the session's cwd
     // (`settingSources` includes `project`). Story 4.1.
-    skillInvocation: (skill) => `/${skill}`,
+    // Claude Code runs an installed skill as a slash command; the idea follows as its argument (story 4.2).
+    skillInvocation: (skill, idea) => (idea === undefined ? `/${skill}` : `/${skill} ${idea}`),
 
     async startSession(input) {
       const opened = await open(input, { kind: 'new' });

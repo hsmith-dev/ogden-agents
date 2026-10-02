@@ -95,7 +95,8 @@ describe('the new-projects default routes (story 10.4)', () => {
 
   it('refuses an unavailable piece with 409 feature_unavailable, writing nothing', async () => {
     const { server, tab, file, dataDir } = await setup(['planning']);
-    expect(await refusalOf(await request(server, tab, 'PATCH', API_ROUTES.newProjectDefaults, { bmadPieces: ['board'] }))).toEqual({
+    // Unattended builds isn't shipped yet (Planning and Board are, since story 4.2).
+    expect(await refusalOf(await request(server, tab, 'PATCH', API_ROUTES.newProjectDefaults, { bmadPieces: ['board', 'builds'] }))).toEqual({
       status: 409,
       code: 'feature_unavailable',
       message: FEATURE_UNAVAILABLE_MESSAGE,
@@ -137,7 +138,7 @@ describe('adding a project with the default (story 10.4)', () => {
   it('with an unavailable body piece answers 409 feature_unavailable: no project, no event', async () => {
     const { server, tab } = await setup(['planning']);
     const before = server.core.events.lastSeq();
-    expect(await refusalOf(await request(server, tab, 'POST', API_ROUTES.workspaces, { path: tempRepo(), bmadPieces: ['board'] }))).toEqual({
+    expect(await refusalOf(await request(server, tab, 'POST', API_ROUTES.workspaces, { path: tempRepo(), bmadPieces: ['board', 'builds'] }))).toEqual({
       status: 409,
       code: 'feature_unavailable',
       message: FEATURE_UNAVAILABLE_MESSAGE,
@@ -165,6 +166,7 @@ describe('adding a project with the default (story 10.4)', () => {
     const tab = await signIn(server);
     expect(await defaultsOf(server, tab)).toEqual({ bmadPieces: ['board', 'builds'] });
     const workspace = await add(server, tab, { path: tempRepo() });
-    expect(server.core.bmad.pieces(workspace.id)).toEqual([]);
+    // Board ships (story 4.2); Unattended builds doesn't yet.
+    expect(server.core.bmad.pieces(workspace.id)).toEqual(['board']);
   });
 });

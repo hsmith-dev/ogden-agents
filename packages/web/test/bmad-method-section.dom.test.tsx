@@ -5,11 +5,23 @@
  * line says what else changed once saved, a refusal reverts the switches and
  * shows the server's message as an alert, a change from another tab updates
  * the switches without a status line, and opening the page at `#bmad-method`
- * focuses the section's heading once. The settings API is replaced (the
+ * focuses the section's heading once. Story 4.2: turning on a piece that
+ * runs the project's scripts in a project not yet trusted opens the trust
+ * dialog first; Allow trusts, then saves; Cancel changes nothing. The
+ * settings API is replaced (the
  * settings query is a real query on a test client, so saved answers and
  * other tabs' changes land as they would); nothing reaches a server.
  */
-import { BMAD_OFF_TEXT, BMAD_ON_TEXT, BMAD_PIECES, BMAD_COMING_SOON_REASON, type BmadPiece, type BmadPieceAvailability, type WorkspaceSettings } from '@ogden-agents/shared';
+import {
+  BMAD_OFF_TEXT,
+  BMAD_ON_TEXT,
+  BMAD_PIECES,
+  BMAD_COMING_SOON_REASON,
+  SCRIPT_TRUST_TITLE,
+  type BmadPiece,
+  type BmadPieceAvailability,
+  type WorkspaceSettings,
+} from '@ogden-agents/shared';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -23,6 +35,9 @@ const state = vi.hoisted(() => ({
   patches: [] as BmadPiece[][],
   /** How the next PATCH answers: saved settings, or a refusal. */
   answer: undefined as undefined | ((pieces: BmadPiece[]) => Promise<WorkspaceSettings>),
+  /** How many times the project was trusted (story 4.2), and how the next trust answers. */
+  trusts: 0,
+  trustAnswer: undefined as undefined | (() => Promise<WorkspaceSettings>),
   /** The router's location hash (without `#`), and who to tell when it changes. */
   hash: '',
   hashListeners: new Set<() => void>(),
@@ -64,6 +79,10 @@ vi.mock('@/workspaces/workspace-settings-api', async () => {
       state.patches.push([...pieces]);
       return state.answer!(pieces);
     },
+    trustProjectScripts: () => {
+      state.trusts++;
+      return state.trustAnswer!();
+    },
   };
 });
 
@@ -72,11 +91,12 @@ const { BmadMethodSection } = await import('../src/workspaces/bmad-method-sectio
 const shipping = (...available: BmadPiece[]): BmadPieceAvailability[] =>
   BMAD_PIECES.map((piece) => (available.includes(piece) ? { piece, available: true } : { piece, available: false, reason: BMAD_COMING_SOON_REASON }));
 
-const settings = (bmadPieces: BmadPiece[]): WorkspaceSettings => ({ cautionLevel: 'ask_every_time', bmadPieces });
+/** Settings as the server answers them; trusted by default, so the 10.5 tests see no trust dialog. */
+const settings = (bmadPieces: BmadPiece[], bmadScriptsTrusted = true): WorkspaceSettings => ({ cautionLevel: 'ask_every_time', bmadPieces, bmadScriptsTrusted });
 
-function mount(stored: BmadPiece[]) {
+function mount(stored: BmadPiece[], { trusted = true }: { trusted?: boolean } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  client.setQueryData(['workspace-settings', WS], settings(stored));
+  client.setQueryData(['workspace-settings', WS], settings(stored, trusted));
   render(
     <QueryClientProvider client={client}>
       <TooltipProvider>
@@ -101,6 +121,8 @@ beforeEach(() => {
   state.available = shipping('planning', 'board', 'builds');
   state.patches = [];
   state.answer = (pieces) => Promise.resolve(settings(pieces));
+  state.trusts = 0;
+  state.trustAnswer = () => Promise.resolve(settings([], true));
   state.hash = '';
   state.hashListeners.clear();
 });
@@ -255,5 +277,79 @@ describe('BmadMethodSection (DOM)', () => {
     navigateToHash('bmad-method');
     expect(document.activeElement).toBe(heading);
     expect(scrolled).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('BmadMethodSection: the script trust (story 4.2, DOM)', () => {
+  /** Lets pending promises (a trust, then a save) settle. */
+  const settle = () =>
+    act(async () => {
+      for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+  it('Board on in an untrusted project opens the dialog first; Cancel changes nothing', async () => {
+    const { isOn, click } = mount([], { trusted: false });
+    await click('bmad-board');
+    expect(screen.getByRole('alertdialog').textContent).toContain(SCRIPT_TRUST_TITLE);
+    expect(state.patches).toEqual([]);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('script-trust-cancel'));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(state.patches).toEqual([]);
+    expect(state.trusts).toBe(0);
+    expect(isOn('bmad-board')).toBe(false);
+  });
+
+  it('Allow trusts the project, then saves the choice', async () => {
+    const { isOn, click } = mount([], { trusted: false });
+    await click('bmad-board');
+    fireEvent.click(screen.getByTestId('script-trust-confirm'));
+    await settle();
+    expect(state.trusts).toBe(1);
+    expect(state.patches).toEqual([['board']]);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(isOn('bmad-board')).toBe(true);
+  });
+
+  it('the main switch asks too (it turns on Board); a failed Allow says why and saves nothing', async () => {
+    state.trustAnswer = () => Promise.reject(new Error('Ogden Agents could not reach the server.'));
+    mount([], { trusted: false });
+    await click();
+    expect(screen.getByRole('alertdialog')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('script-trust-confirm'));
+    await settle();
+    expect(screen.getByRole('alertdialog').textContent).toContain('could not reach the server');
+    expect(state.patches).toEqual([]);
+
+    async function click() {
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('bmad-use'));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+  });
+
+  it('Planning alone, turning pieces off, and a trusted project never ask', async () => {
+    const untrusted = mount([], { trusted: false });
+    await untrusted.click('bmad-planning');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(state.patches).toEqual([['planning']]);
+    cleanup();
+
+    state.patches = [];
+    const off = mount(['board'], { trusted: false });
+    await off.click('bmad-board');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(state.patches).toEqual([[]]);
+    cleanup();
+
+    state.patches = [];
+    const trusted = mount([]);
+    await trusted.click('bmad-board');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(state.patches).toEqual([['board']]);
+    expect(state.trusts).toBe(0);
   });
 });

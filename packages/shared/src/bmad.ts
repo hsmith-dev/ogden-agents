@@ -40,6 +40,14 @@ export interface BmadPieceInfo {
   readonly sentence: string;
   /** The pieces this one needs on (directly; {@link applyBmadPieceChoice} follows them transitively). */
   readonly needs: readonly BmadPiece[];
+  /**
+   * Whether serving the piece runs the project's own BMad Method scripts
+   * (Board through `tickets.py`, which executes the repo's
+   * `_bmad/scripts/config_utils.py`; story 4.2, AD-22 note 2026-10-02). Its
+   * routes and use-cases then also need the user's one-time trust for the
+   * project (`scripts_not_trusted` until given).
+   */
+  readonly runsProjectScripts: boolean;
 }
 
 /**
@@ -49,11 +57,17 @@ export interface BmadPieceInfo {
  * runs); `planning` and `board` are independent.
  */
 export const BMAD_PIECE_INFO: Readonly<Record<BmadPiece, BmadPieceInfo>> = {
-  planning: { label: 'Planning', sentence: 'Turn an idea into a plan, a spec and tickets with guided steps.', needs: [] },
-  board: { label: 'Board', sentence: "See this project's tickets on a board and move them along.", needs: [] },
-  builds: { label: 'Unattended builds', sentence: 'Let an agent build tickets on its own, then review and approve the work.', needs: ['board'] },
-  retrospectives: { label: 'Retrospectives', sentence: 'Look back on finished work and record what to change next time.', needs: ['builds'] },
+  planning: { label: 'Planning', sentence: 'Turn an idea into a plan, a spec and tickets with guided steps.', needs: [], runsProjectScripts: false },
+  board: { label: 'Board', sentence: "See this project's tickets on a board and move them along.", needs: [], runsProjectScripts: true },
+  builds: { label: 'Unattended builds', sentence: 'Let an agent build tickets on its own, then review and approve the work.', needs: ['board'], runsProjectScripts: true },
+  retrospectives: { label: 'Retrospectives', sentence: 'Look back on finished work and record what to change next time.', needs: ['builds'], runsProjectScripts: true },
 };
+
+/** Whether any of `pieces` runs the project's own BMad Method scripts (so turning it on asks for the project's trust first). */
+export function bmadPiecesRunProjectScripts(pieces: Iterable<BmadPiece>): boolean {
+  for (const piece of pieces) if (BMAD_PIECE_INFO[piece].runsProjectScripts) return true;
+  return false;
+}
 
 /** `pieces` without repeats, in the canonical {@link BMAD_PIECES} order. */
 export function canonicalBmadPieces(pieces: Iterable<BmadPiece>): BmadPiece[] {

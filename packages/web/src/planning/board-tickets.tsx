@@ -1,10 +1,12 @@
 import { BOARD_EMPTY_TITLE, BOARD_LOADING_TEXT, BOARD_PROBLEMS_TITLE, BOARD_TICKETS_LABEL } from '@ogden-agents/shared';
+import { isApiError } from '@/api/http';
 import { Badge } from '@/ui/badge';
 import { Notice } from '@/ui/notice';
 import { EmptyState } from '@/ui/page';
 import { Row, RowList, RowMeta } from '@/ui/row-list';
 import { Skeleton } from '@/ui/skeleton';
 import { Text } from '@/ui/typography';
+import { ScriptTrustPrompt } from '@/workspaces/script-trust-prompt';
 import { useTickets } from './planning-api';
 
 /**
@@ -12,10 +14,13 @@ import { useTickets } from './planning-api';
  * list in build order, each with its ref, title and state (and its status
  * when a build has set one), as BMad Method reports them (AD-8, AD-10: the
  * UI works out nothing from them). What couldn't be read is listed under a
- * notice. Loading, error and empty states.
+ * notice. Loading, error and empty states. A project whose BMad Method
+ * scripts aren't trusted yet (`scripts_not_trusted`, story 4.2) shows the
+ * trust prompt instead, and its Allow fetches the tickets again.
  */
 export function BoardTickets({ wsId }: { wsId: string }) {
   const tickets = useTickets(wsId);
+  if (isApiError(tickets.error, 'scripts_not_trusted')) return <ScriptTrustPrompt wsId={wsId} onTrusted={() => void tickets.refetch()} />;
   if (tickets.error !== null) {
     return (
       <Text variant="caption" role="alert" data-testid="board-error">

@@ -88,7 +88,7 @@ function mount() {
 }
 
 const detection = (hasBmad: boolean, offerDismissed = false): Answer<BmadDetection> => ok({ hasBmad, hasOutput: false, offerDismissed });
-const settings = (bmadPieces: BmadPiece[]): Answer<WorkspaceSettings> => ok({ cautionLevel: 'ask_every_time', bmadPieces });
+const settings = (bmadPieces: BmadPiece[]): Answer<WorkspaceSettings> => ok({ cautionLevel: 'ask_every_time', bmadPieces, bmadScriptsTrusted: false });
 const defaults = (bmadPieces: BmadPiece[]): Answer<NewProjectDefaults> => ok({ bmadPieces });
 
 beforeEach(() => {

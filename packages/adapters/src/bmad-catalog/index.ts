@@ -20,6 +20,7 @@
 import { lstat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import type { BmadCatalogPort, BmadRepoDetection } from '@ogden-agents/core';
+import { CatalogSkill, type Catalog } from '@ogden-agents/shared';
 import { scanSkills } from './skills.js';
 
 /** The folder BMad Method's installer creates at a repo's root. */
@@ -39,9 +40,33 @@ async function isRealFolderAt(path: string): Promise<boolean> {
 /** Whether `repoPath/name` is a real folder (not a link to one); `false` on any error. */
 const isRealFolder = (repoPath: string, name: string): Promise<boolean> => isRealFolderAt(join(repoPath, name));
 
-/** The `bmad-catalog` adapter: read-only detection of a repo's BMad Method folders, and its installed skills. */
+/**
+ * The catalog of a repo until entry 4.4 reads its modules, agents and fork
+ * metadata (story 4.2): the installed skills (`scanSkills`, read-only, only
+ * inside the repo) with every metadata field `null`, no modules or agents,
+ * no entry action, and no fork capability detected yet.
+ */
+async function catalogOf(repoPath: string): Promise<Catalog> {
+  const skills = await scanSkills(repoPath);
+  return {
+    modules: [],
+    skills: skills.map((skill) => CatalogSkill.parse(skill)),
+    agents: [],
+    entryAction: null,
+    capabilities: { plain_labels: false, ticket_tree: false },
+  };
+}
+
+/**
+ * The `bmad-catalog` adapter: read-only detection of a repo's BMad Method
+ * folders, its installed skills and its catalog. Setup's status and setup
+ * itself reject until entry 4.3 builds them (their routes answer 501).
+ */
 export function createBmadCatalog(): BmadCatalogPort {
   return {
+    catalog: catalogOf,
+    setupStatus: () => Promise.reject(new Error('BMad Method setup is not built yet (entry 4.3)')),
+    setup: () => Promise.reject(new Error('BMad Method setup is not built yet (entry 4.3)')),
     async detect(repoPath): Promise<BmadRepoDetection> {
       // An empty or relative path would resolve against the server's own folder: answer nothing.
       if (typeof repoPath !== 'string' || repoPath === '' || !isAbsolute(repoPath)) return { hasBmad: false, hasOutput: false };

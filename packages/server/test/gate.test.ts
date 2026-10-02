@@ -614,6 +614,12 @@ const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.workspaceCatalog}`,
   `POST ${API_ROUTES.workspacePlanningSessions}`,
   `GET ${API_ROUTES.workspaceTickets}`,
+  // Story 4.2's pre-registered routes (guarded; 501 until their entries fill them) and the script trust (unguarded).
+  `GET ${API_ROUTES.workspaceTicket}`,
+  `PUT ${API_ROUTES.workspaceTicketStatus}`,
+  `GET ${API_ROUTES.workspaceBmadSetup}`,
+  `POST ${API_ROUTES.workspaceBmadSetup}`,
+  `PUT ${API_ROUTES.workspaceBmadScriptTrust}`,
 ] as const;
 
 describe('gate placement', () => {
@@ -658,16 +664,27 @@ describe('gate placement', () => {
     try {
       const log = createLogger(() => {});
       const gate = createGate({ port: () => 1, codes: createLaunchCodes(), tabs: createTabTokens(), log });
-      const app = createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate, bmad: core.bmad, bmadProbe: true });
-      // The routes serving a piece: Plan and Board (story 4.1) and the test probe (10.1); epics 5 to 7 add theirs the same way.
-      const pieceRoutes = [`GET ${API_ROUTES.workspaceCatalog}`, `POST ${API_ROUTES.workspacePlanningSessions}`, `GET ${API_ROUTES.workspaceTickets}`];
+      const app = createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate, bmad: core.bmad, bmadScriptTrust: core.bmadScriptTrust, bmadProbe: true });
+      // The routes serving a piece: Plan and Board (stories 4.1 and 4.2) and the test probe (10.1); epics 5 to 7 add theirs the same way.
+      const pieceRoutes = [
+        `GET ${API_ROUTES.workspaceCatalog}`,
+        `POST ${API_ROUTES.workspacePlanningSessions}`,
+        `GET ${API_ROUTES.workspaceTickets}`,
+        `GET ${API_ROUTES.workspaceTicket}`,
+        `PUT ${API_ROUTES.workspaceTicketStatus}`,
+        `GET ${API_ROUTES.workspaceBmadSetup}`,
+        `POST ${API_ROUTES.workspaceBmadSetup}`,
+      ];
       expect(guardedRouteKeys(app)).toEqual([...pieceRoutes, `GET ${TEST_ROUTES.bmadProbe}`].sort());
       for (const key of guardedRouteKeys(app)) expect(key.slice(key.indexOf(' ') + 1).startsWith(`${API_BASE}/workspaces/:wsId/`), key).toBe(true);
       const index = app.routes.findIndex((route) => route.path === TEST_ROUTES.bmadProbe);
       expect(index).toBeGreaterThan(0);
       expect(TEST_ROUTES.bmadProbe.startsWith(`${API_BASE}/workspaces/:wsId/`)).toBe(true);
-      // Without the probe's hook only Plan and Board serve a piece; without core's guard nothing does.
-      expect(guardedRouteKeys(createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate, bmad: core.bmad }))).toEqual(pieceRoutes.sort());
+      // Without the probe's hook only Plan and Board serve a piece; without core's guard, or its script trust, nothing does.
+      expect(guardedRouteKeys(createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate, bmad: core.bmad, bmadScriptTrust: core.bmadScriptTrust }))).toEqual(
+        pieceRoutes.sort(),
+      );
+      expect(guardedRouteKeys(createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate, bmad: core.bmad }))).toEqual([]);
       expect(guardedRouteKeys(createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate }))).toEqual([]);
     } finally {
       core.close();

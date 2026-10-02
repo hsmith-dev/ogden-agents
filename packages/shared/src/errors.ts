@@ -57,6 +57,18 @@ export const API_ERROR_CODES = [
    * that isn't the script's JSON. The message says what to do in plain words.
    */
   'tickets_unavailable',
+  /**
+   * A route or use-case that runs the project's own BMad Method scripts was
+   * asked for before the user trusted the project (409; story 4.2, AD-22
+   * note). Nothing ran. The UI shows the trust prompt.
+   */
+  'scripts_not_trusted',
+  /** A ticket status the board may not set (`done`: only approve writes it, AD-10) was asked for (409; story 4.2). */
+  'status_not_allowed',
+  /** A piece that needs BMad Method installed in the project was used before setup (409; story 4.2). */
+  'bmad_not_set_up',
+  /** The project's BMad Method lacks the capability this needs (409, AD-14; story 4.2). The UI shows the reduced-mode notice. */
+  'reduced_mode',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

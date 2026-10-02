@@ -124,9 +124,10 @@ export interface StartOptions {
    */
   ticketStore?: TicketStorePort;
   /**
-   * Variables added to the environment `uv` runs BMad Method's scripts with,
-   * on top of `uvEnvironment` (tests only: a temp `UV_CACHE_DIR`,
-   * the uv-managed test Python with no download). The launcher never sets it.
+   * Variables added to the environment of every `uv` child (the version
+   * probe and every BMad Method script run; story 4.2), on top of
+   * `uvEnvironment` (tests only: a temp `UV_CACHE_DIR`, the uv-managed test
+   * Python with no download). The launcher never sets it.
    */
   extraUvEnv?: Readonly<Record<string, string>>;
   /**

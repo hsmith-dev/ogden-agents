@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { request, type IncomingHttpHeaders } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createMemoryAgentSetup, createMemoryAppShortcut, createMemoryBmadCatalog, createMemorySecretStore } from '@ogden-agents/adapters';
+import { createMemoryAgentSetup, createMemoryAppShortcut, createMemoryBmadCatalog, createMemorySecretStore, createMemoryTicketStore } from '@ogden-agents/adapters';
 import { createAgentSetup, createBoard, createChat, createNewProjectDefaults, createOnboarding, createPlanning, type AgentPort, type Core } from '@ogden-agents/core';
 import { API_ROUTES, webSocketProtocols } from '@ogden-agents/shared';
 import type { Hono } from 'hono';
@@ -221,7 +221,7 @@ export function signIn(server: { url: string; launchUrl: string }): Promise<Sign
  * registered (the gate's route list, story 2.3; 10.6's guard-coverage
  * test): control, toolchain, a chat whose agent always refuses, core's
  * permissions and BMad pieces, the memory agent setup and shortcut,
- * onboarding, tab tokens, and Plan and Board on stubs (story 4.1). `extra` adds or overrides options, such as
+ * onboarding, tab tokens, the script trust (story 4.2), and Plan and Board on stubs (story 4.1). `extra` adds or overrides options, such as
  * `bmadProbe: true`. Nothing is listened on and no agent ever runs.
  */
 export function fullTestApp(core: Core, extra: Partial<AppOptions> = {}): Hono {
@@ -257,8 +257,9 @@ export function fullTestApp(core: Core, extra: Partial<AppOptions> = {}): Hono {
     permissions: core.permissions,
     bmad: core.bmad,
     bmadDetection: core.bmadDetection,
+    bmadScriptTrust: core.bmadScriptTrust,
     planning: createPlanning({ bmad: core.bmad, entities: core.entities, catalog: createMemoryBmadCatalog(), chat, agent }),
-    board: createBoard({ bmad: core.bmad, entities: core.entities, tickets: { status: async () => ({ tickets: [], problems: [] }) } }),
+    board: createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, entities: core.entities, tickets: createMemoryTicketStore() }),
     agentSetup: createAgentSetup(core.events, [createMemoryAgentSetup()]),
     onboarding: createOnboarding({ dataDir: tempDataDir(), hasProjects: () => false }),
     newProjectDefaults: createNewProjectDefaults({ dataDir: tempDataDir(), bmad: core.bmad }),

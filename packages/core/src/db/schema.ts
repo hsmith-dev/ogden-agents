@@ -137,3 +137,27 @@ export const permissionRules = sqliteTable(
   },
   (t) => [uniqueIndex('permission_rules_scope_unique').on(t.workspaceId, t.kind, t.value)],
 );
+
+/**
+ * When each BMad Method module first appeared in a workspace's catalog
+ * (story 4.4), for the catalog's `installedAt` (the Plan page's New tag).
+ * The first catalog read that finds any module is the baseline: those
+ * modules are recorded with `installed_at` `null` (they were there before
+ * Ogden Agents looked); a module first seen later gets that time. Written
+ * only by `bmadModulesSeen.stamp`; a row stays when its module goes.
+ */
+export const bmadModulesSeen = sqliteTable(
+  'bmad_modules_seen',
+  {
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id),
+    /** The module's code (`[bmod] code`). */
+    code: text('code').notNull(),
+    /** When it was installed (first seen after the baseline), or `null` for a baseline module. */
+    installedAt: text('installed_at'),
+    /** When it was first seen. */
+    seenAt: text('seen_at').notNull(),
+  },
+  (t) => [uniqueIndex('bmad_modules_seen_unique').on(t.workspaceId, t.code)],
+);

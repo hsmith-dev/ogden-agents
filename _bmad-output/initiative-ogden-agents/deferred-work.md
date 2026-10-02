@@ -413,3 +413,12 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-set-up-bmad-method-in-a-project-from-the-ui-plan.md`
   summary: Setup checks `.claude`/`.claude/skills` are real folders once, then creates staging folders and renames skills by path, so a link swapped in meanwhile redirects writes outside the repo.
   evidence: 4.3 review S4: `setup.ts` `copySkills` re-resolves `join(folder, …)` per skill after one `ensureRealFolder` lstat; needs a concurrent writer in the repo (for example an agent session) during setup.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-the-discovered-catalog-refreshed-as-modules-are-installed-plan.md`
+  summary: Prune or bound `bmad_modules_seen` rows per workspace and clear them with the workspace's history.
+  evidence: Review S3 (4.4): every module code a repo ever declares stays as a row; history deletion keeps them.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-the-discovered-catalog-refreshed-as-modules-are-installed-plan.md`
+  summary: Bound and sanitize repo-authored catalog text (module version, agent label, skill description) before it reaches the UI.
+  evidence: Review S4 (4.4): 60,000-character values and ESC/bidi characters pass through; React escapes HTML, so the risk is layout and spoofing.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-the-discovered-catalog-refreshed-as-modules-are-installed-plan.md`
+  summary: Re-check a catalog file's containment against the opened handle (or realpath after open) in `readInsideRepo`.
+  evidence: Review S1 (4.4): a path component swapped for a link between the realpath check and the open is followed; needs a concurrent writer in the repo.

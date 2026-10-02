@@ -75,6 +75,22 @@ describe('readModuleLabels', () => {
   });
 });
 
+describe('readModuleLabels modules (story 4.4)', () => {
+  it('reads each module label by code, leaving out and reporting what does not fit', () => {
+    const { labels, problems } = readModuleLabels({
+      skills: {},
+      modules: { method: { label: ' BMad Method ' }, 'Bad Code': { label: 'x' }, nolabel: {}, notatable: 'x', typo: { label: 'Typo', lable: 'x' } },
+    });
+    expect([...labels.modules]).toEqual([
+      ['method', 'BMad Method'],
+      ['typo', 'Typo'],
+    ]);
+    expect(problems).toEqual(["'Bad Code' is not a module code", 'modules.nolabel has no label', 'modules.notatable is not an object', "modules.typo has an unknown key 'lable'"]);
+    expect(readModuleLabels({ skills: {}, modules: [] }).problems).toEqual(["'modules' is not an object"]);
+    expect(readModuleLabels({ skills: {} }).labels.modules.size).toBe(0);
+  });
+});
+
 describe('applyLabels', () => {
   const labels = readModuleLabels({
     entry: 'alpha',
@@ -138,6 +154,17 @@ describe('the shipped label mapping (skill-labels.json)', () => {
         expect(text, name).not.toMatch(/\bbmad-|_bmad/);
       }
       if (skill.next) expect(labels.skills.has(skill.next.skill), `${name} next`).toBe(true);
+    }
+  });
+
+  it('names the upstream modules plainly (story 4.4)', () => {
+    expect([...labels.modules]).toEqual([
+      ['core-tools', 'Core tools'],
+      ['method', 'BMad Method'],
+    ]);
+    for (const [code, label] of labels.modules) {
+      expect(label.length, code).toBeLessThanOrEqual(40);
+      expect(label, code).not.toMatch(/[–—.!?]|\bbmad-|_bmad/);
     }
   });
 

@@ -5,9 +5,11 @@
  * skills. Entry 4.4 calls `applyLabels` from `catalogOf`; this file names no
  * skill (the names are data in the JSON file).
  *
- * The mapping: `entry` (the skill behind "Start from an idea", or `null`)
- * and `skills`, per skill a `label`, an optional one-sentence `description`,
- * a `group` and an optional `next = { skill, label }`. Reading is lenient
+ * The mapping: `entry` (the skill behind "Start from an idea", or `null`),
+ * `skills`, per skill a `label`, an optional one-sentence `description`,
+ * a `group` and an optional `next = { skill, label }`, and an optional
+ * `modules`, per module code its plain `label` (entry 4.4; a module it
+ * doesn't name shows its code). Reading is lenient
  * per entry: a bad entry or field is left out and reported in `problems`,
  * and the rest still counts (AD-14: nothing fails silently); an unknown key
  * (a misspelt field, say) is reported too. A skill the mapping doesn't name
@@ -34,7 +36,12 @@ export interface SkillLabels {
 export interface LabelMap {
   readonly entry: SkillName | null;
   readonly skills: ReadonlyMap<SkillName, SkillLabels>;
+  /** Each named module's plain label, by module code (entry 4.4). */
+  readonly modules: ReadonlyMap<string, string>;
 }
+
+/** A module code (`[bmod] code` in `bmod.toml`): written as a skill name is. */
+export const MODULE_CODE_PATTERN = SKILL_NAME_PATTERN;
 
 const isTable = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -48,7 +55,8 @@ function text(value: unknown): string | undefined {
   return trimmed === '' ? undefined : trimmed;
 }
 
-const FILE_KEYS = new Set(['entry', 'skills']);
+const FILE_KEYS = new Set(['entry', 'skills', 'modules']);
+const MODULE_KEYS = new Set(['label']);
 const SKILL_KEYS = new Set(['label', 'description', 'group', 'next']);
 const NEXT_KEYS = new Set(['skill', 'label']);
 
@@ -59,9 +67,10 @@ const NEXT_KEYS = new Set(['skill', 'label']);
 export function readModuleLabels(raw: unknown): { labels: LabelMap; problems: string[] } {
   const problems: string[] = [];
   const skills = new Map<SkillName, SkillLabels>();
+  const modules = new Map<string, string>();
   if (!isTable(raw)) {
     problems.push(`${LABELS_FILE} is not an object`);
-    return { labels: { entry: null, skills }, problems };
+    return { labels: { entry: null, skills, modules }, problems };
   }
   const unknownKeys = (table: Record<string, unknown>, known: ReadonlySet<string>, where: string) => {
     for (const key of Object.keys(table)) if (!known.has(key)) problems.push(`${where} has an unknown key '${key}'`);
@@ -104,7 +113,23 @@ export function readModuleLabels(raw: unknown): { labels: LabelMap; problems: st
     }
     skills.set(name, { label, description, group, next });
   }
-  return { labels: { entry, skills }, problems };
+
+  if (raw.modules !== undefined && !isTable(raw.modules)) problems.push("'modules' is not an object");
+  for (const [code, value] of Object.entries(isTable(raw.modules) ? raw.modules : {})) {
+    if (!MODULE_CODE_PATTERN.test(code)) {
+      problems.push(`'${code}' is not a module code`);
+      continue;
+    }
+    if (!isTable(value)) {
+      problems.push(`modules.${code} is not an object`);
+      continue;
+    }
+    unknownKeys(value, MODULE_KEYS, `modules.${code}`);
+    const label = text(value.label);
+    if (label === undefined) problems.push(`modules.${code} has no label`);
+    else modules.set(code, label);
+  }
+  return { labels: { entry, skills, modules }, problems };
 }
 
 /**

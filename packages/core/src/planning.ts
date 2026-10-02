@@ -18,6 +18,7 @@ import { PlanningIdea, SKILL_NAME_PATTERN, type Catalog, type Session, type Work
 import type { AgentPort } from './agent-port.js';
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
 import type { BmadFeatures } from './bmad-features.js';
+import type { BmadModulesSeen } from './bmad-modules-seen.js';
 import type { Chat } from './chat/types.js';
 import type { Entities } from './entities.js';
 import { NotFoundError, ValidationError } from './errors.js';
@@ -44,6 +45,8 @@ export interface PlanningDeps {
   catalog: Pick<BmadCatalogPort, 'catalog'>;
   chat: Pick<Chat, 'createChatSession' | 'sendMessage'>;
   agent: Pick<AgentPort, 'skillInvocation'>;
+  /** Fills the catalog's `installedAt` from when each module first appeared (story 4.4). Without it the port's catalog is answered as it is. */
+  modulesSeen?: Pick<BmadModulesSeen, 'stamp'>;
 }
 
 /** The workspace's stored real path; {@link NotFoundError} for an unknown workspace. */
@@ -54,8 +57,15 @@ export function workspaceRepoPath(entities: Pick<Entities, 'getWorkspace'>, work
   return workspace.realPath;
 }
 
-export function createPlanning({ bmad, entities, catalog, chat, agent }: PlanningDeps): PlanningUseCases {
-  const catalogOf = (workspaceId: WorkspaceId) => catalog.catalog(workspaceRepoPath(entities, workspaceId));
+export function createPlanning({ bmad, entities, catalog, chat, agent, modulesSeen }: PlanningDeps): PlanningUseCases {
+  // Rebuilt from the repo on every read (story 4.4): a module copied in shows without a restart.
+  const catalogOf = async (workspaceId: WorkspaceId): Promise<Catalog> => {
+    const read = await catalog.catalog(workspaceRepoPath(entities, workspaceId));
+    if (modulesSeen === undefined) return read;
+    // Checked again after the (async) scan: a Planning turned off meanwhile records nothing.
+    bmad.requireBmadFeature(workspaceId, 'planning');
+    return modulesSeen.stamp(workspaceId, read);
+  };
   return {
     async catalog(workspaceId) {
       bmad.requireBmadFeature(workspaceId, 'planning');

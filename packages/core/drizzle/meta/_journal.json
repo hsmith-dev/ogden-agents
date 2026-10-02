@@ -50,6 +50,13 @@
       "when": 1790944597061,
       "tag": "0006_bmad_scripts_trusted",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1790968723083,
+      "tag": "0007_bmad_modules_seen",
+      "breakpoints": true
     }
   ]
 }

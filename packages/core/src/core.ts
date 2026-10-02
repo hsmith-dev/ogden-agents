@@ -1,6 +1,7 @@
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
 import { createBmadDetection, type BmadDetectionUseCases } from './bmad-detection.js';
 import { createBmadFeatures, parseAvailableBmadPieces, type BmadFeatures, type BmadFeaturesOptions } from './bmad-features.js';
+import { createBmadModulesSeen, type BmadModulesSeen } from './bmad-modules-seen.js';
 import { createBmadScriptTrust, type BmadScriptTrust } from './bmad-script-trust.js';
 import { createBmadSetup, type BmadSetupUseCases } from './bmad-setup.js';
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
@@ -27,6 +28,8 @@ export interface Core {
   readonly bmadDetection: BmadDetectionUseCases;
   /** The per-project script trust (story 4.2): checked with the pieces guard for every use of the project's own scripts. */
   readonly bmadScriptTrust: BmadScriptTrust;
+  /** When each BMad Method module first appeared in a project (story 4.4): fills the catalog's `installedAt`. */
+  readonly bmadModulesSeen: BmadModulesSeen;
   /** BMad Method's setup in a project (story 4.3); `undefined` without a catalog to set up with. */
   readonly bmadSetup: BmadSetupUseCases | undefined;
   close(): void;
@@ -54,6 +57,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
   const bmad = createBmadFeatures(db, { availableBmadPieces });
   const bmadDetection = createBmadDetection({ orm: db.orm, events, entities, catalog: options.bmadCatalog });
   const bmadScriptTrust = createBmadScriptTrust({ orm: db.orm, events });
+  const bmadModulesSeen = createBmadModulesSeen({ orm: db.orm, events });
   const bmadSetup =
     options.bmadCatalog === undefined
       ? undefined
@@ -80,6 +84,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     bmad,
     bmadDetection,
     bmadScriptTrust,
+    bmadModulesSeen,
     bmadSetup,
     close: () => {
       try {

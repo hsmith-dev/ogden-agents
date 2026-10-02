@@ -351,8 +351,13 @@ describe('the shipped files', () => {
     for (const include of ['../', './', 'skills/../', 'a/./', 'skills', '/skills/']) expect(BmadLockSource.safeParse({ ...base, include }).success, include).toBe(false);
   });
 
-  it('the label mapping is keyed by skill name with the per-skill fields 4.5 reads (empty until 4.5 fills it)', () => {
-    expect(Object.keys(SKILL_LABELS).sort()).toEqual(['entry', 'skills']);
+  it('the label mapping is keyed by skill name with the per-skill fields 4.5 reads, and module labels by code (4.4)', () => {
+    expect(Object.keys(SKILL_LABELS).sort()).toEqual(['entry', 'modules', 'skills']);
+    for (const [code, module] of Object.entries(SKILL_LABELS.modules ?? {})) {
+      expect(code).toMatch(SKILL_NAME_PATTERN);
+      expect(Object.keys(module), code).toEqual(['label']);
+      expect(typeof module.label, code).toBe('string');
+    }
     expect(SKILL_LABELS.entry === null || SKILL_NAME_PATTERN.test(SKILL_LABELS.entry)).toBe(true);
     for (const [name, labels] of Object.entries(SKILL_LABELS.skills)) {
       expect(name).toMatch(SKILL_NAME_PATTERN);

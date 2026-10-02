@@ -2,7 +2,8 @@
  * `bmad-catalog` (story 10.3): the real `BmadCatalogPort`. `detect` answers
  * whether a project's repo already has BMad Method's `_bmad/` and
  * `_bmad-output/` folders (E10-R5, AD-22); `skills` (story 4.1) is the
- * catalog's installed skills, scanned in `skills.ts`, so this file keeps
+ * catalog's installed skills, scanned in `skills.ts`, and `catalog` (story
+ * 4.4) is built in `catalog.ts`, so this file keeps
  * `detect`'s lstat-only guarantee below. Setup's status and setup itself
  * (entry 4.3) live in `setup.ts`, built from the options.
  *
@@ -21,7 +22,8 @@
 import { lstat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import type { BmadCatalogPort, BmadRepoDetection } from '@ogden-agents/core';
-import { CatalogSkill, type Catalog } from '@ogden-agents/shared';
+import type { Catalog } from '@ogden-agents/shared';
+import { buildCatalog } from './catalog.js';
 import { createBmadSetup, type BmadSetupOptions } from './setup.js';
 import { scanSkills } from './skills.js';
 
@@ -45,22 +47,12 @@ async function isRealFolderAt(path: string): Promise<boolean> {
 const isRealFolder = (repoPath: string, name: string): Promise<boolean> => isRealFolderAt(join(repoPath, name));
 
 /**
- * The catalog of a repo until entry 4.4 reads its modules and agents and
- * entry 4.5 applies Ogden Agents' label mapping (`skill-labels.json`, story
- * 4.14) (story 4.2): the installed skills (`scanSkills`, read-only, only
- * inside the repo) with every metadata field `null`, no modules or agents,
- * no entry action, and no capability detected yet.
+ * The catalog of a repo (story 4.4): its installed modules, skills and
+ * agents, the label mapping's labels and entry action, and its
+ * capabilities, rebuilt from the repo's metadata on every read
+ * (`catalog.ts`, read-only, only inside the repo).
  */
-async function catalogOf(repoPath: string): Promise<Catalog> {
-  const skills = await scanSkills(repoPath);
-  return {
-    modules: [],
-    skills: skills.map((skill) => CatalogSkill.parse(skill)),
-    agents: [],
-    entryAction: null,
-    capabilities: { plain_labels: false, ticket_tree: false },
-  };
-}
+const catalogOf = (repoPath: string): Promise<Catalog> => buildCatalog(repoPath);
 
 /**
  * The `bmad-catalog` adapter: read-only detection of a repo's BMad Method

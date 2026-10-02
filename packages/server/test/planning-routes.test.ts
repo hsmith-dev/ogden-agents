@@ -9,7 +9,10 @@
  *   `tickets.py` answers 409 `scripts_not_trusted` and the store is never
  *   called; `PUT …/bmad/script-trust` trusts it once (one event) and they
  *   answer; the setup routes need no trust (story 4.3: they answer);
- * - the catalog lists the fixture repo's installed skills; starting one
+ * - the catalog lists the fixture repo's installed skills, labelled by the
+ *   label mapping (story 4.4); a module copied into `.claude/skills` while
+ *   the server runs is listed on the next read with its `installedAt`, and
+ *   its skill starts (the modules there before are the baseline); starting one
  *   creates a session of kind `planning` whose first message is `/<skill>`
  *   (with the idea when given), which the fake agent answers; an unknown
  *   skill is 404 and a malformed one, or a blank or too long idea, 400,
@@ -292,17 +295,20 @@ describe('Plan and Board routes (story 4.1)', () => {
     const catalogBody = CatalogResponse.parse(await listed.json());
     const names = catalogBody.skills.map((skill) => skill.name);
     expect(names).toEqual(expect.arrayContaining(['bmad-help', 'bmad-spec', 'bmad-ticket']));
-    // Until entry 4.4 reads fork metadata, every skill's metadata is null.
+    // The label mapping labels a known skill (story 4.4); without a module record it has no module, and the entry skill isn't installed.
     expect(catalogBody.skills.find((skill) => skill.name === 'bmad-spec')).toEqual({
       name: 'bmad-spec',
-      description: 'Condense any input into a short spec.',
-      label: null,
-      group: null,
+      description: 'Condense your idea, notes or documents into a short spec that every build reads.',
+      label: 'Write the spec',
+      group: 'planning',
       module: null,
       installedAt: null,
-      next: null,
+      next: { skill: 'bmad-ticket', label: 'Turn this spec into tickets' },
     });
+    expect(catalogBody.skills.find((skill) => skill.name === 'bmad-help')).toMatchObject({ description: 'Fake BMad help skill.', label: null });
     expect(catalogBody.entryAction).toBeNull();
+    expect(catalogBody.modules).toEqual([]);
+    expect(catalogBody.capabilities).toEqual({ plain_labels: true, ticket_tree: false });
 
     // Unknown and malformed skills create nothing.
     const unknown = await request(server, tab, 'POST', start, { skill: 'bmad-nothing' });
@@ -335,6 +341,54 @@ describe('Plan and Board routes (story 4.1)', () => {
 
     await server.close();
     expect(repo.hash()).toBe(before);
+  });
+
+  it('a module copied into .claude/skills while the server runs is listed on the next read with installedAt, and its skill starts (story 4.4)', async () => {
+    const server = await startTestServer();
+    const tab = await signIn(server);
+    // The pinned upstream method record installed before Ogden Agents looks: the baseline.
+    const record = (file: string) => readFileSync(join(UPSTREAM_FIXTURE, 'skills', 'bmod-method', file), 'utf8');
+    const repo = createFakeBmadRepo({
+      bmad: true,
+      output: true,
+      files: { ...SKILL_FILES, '.claude/skills/bmod-method/bmod.toml': record('bmod.toml'), '.claude/skills/bmod-method/SKILL.md': record('SKILL.md') },
+      prefix: 'ogden-agents-plan-repo-',
+    });
+    removeAfterTest(repo.path);
+    const workspace = await project(server, tab, repo, ['planning']);
+    const { catalog, start } = paths(workspace.id);
+
+    const first = CatalogResponse.parse(await (await request(server, tab, 'GET', catalog)).json());
+    expect(first.modules).toEqual([{ code: 'method', name: 'BMad Method', version: '6.13.0-next', installedAt: null }]);
+    expect(first.skills.find((skill) => skill.name === 'bmad-spec')).toMatchObject({ module: 'method', installedAt: null });
+    expect(first.skills.map((skill) => skill.name)).not.toContain('bmod-method');
+    // Not there yet: starting it is 404.
+    expect((await request(server, tab, 'POST', start, { skill: 'demo-skill' })).status).toBe(404);
+
+    // A test module copied in, no restart.
+    const before = Date.now();
+    for (const [path, content] of Object.entries({
+      '.claude/skills/bmod-demo/bmod.toml': '[bmod]\ncode = "demo"\nversion = "1.0.0"\nskills = ["demo-skill"]\n',
+      '.claude/skills/demo-skill/SKILL.md': SKILL('demo-skill', 'A demo skill.'),
+    })) {
+      const file = join(repo.path, ...path.split('/'));
+      mkdirSync(join(file, '..'), { recursive: true });
+      writeFileSync(file, content);
+    }
+    const next = CatalogResponse.parse(await (await request(server, tab, 'GET', catalog)).json());
+    const demo = next.modules.find((module) => module.code === 'demo');
+    expect(demo).toMatchObject({ name: 'demo', version: '1.0.0' });
+    expect(Date.parse(demo!.installedAt!)).toBeGreaterThanOrEqual(before - 1000);
+    expect(next.modules.find((module) => module.code === 'method')?.installedAt).toBeNull();
+    expect(next.skills.find((skill) => skill.name === 'demo-skill')).toMatchObject({ module: 'demo', installedAt: demo!.installedAt, label: null, description: 'A demo skill.' });
+
+    const started = await request(server, tab, 'POST', start, { skill: 'demo-skill' });
+    expect(started.status).toBe(201);
+    const { session } = SessionResponse.parse(await started.json());
+    expect(session.kind).toBe('planning');
+    expect(userMessagesOf(server, session.id)).toEqual(['/demo-skill']);
+    await waitFor(() => server.core.entities.getSession(session.id)!.state === 'idle' && repliesOf(server, session.id).length > 0, 'the agent reply', 15_000);
+    await server.close();
   });
 
   it('a ticket store that fails answers 503 tickets_unavailable with a plain message', async () => {

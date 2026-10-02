@@ -77,8 +77,8 @@ describe('catalog-memory: the catalog and setup (story 4.2)', () => {
   });
 });
 
-describe('bmad-catalog until entry 4.4 (story 4.2)', () => {
-  it('the catalog is the scanned skills with null metadata; setup without the script runner rejects (story 4.3)', async () => {
+describe('bmad-catalog without a repo or the script runner (story 4.2)', () => {
+  it('the catalog of a missing repo is empty; setup without the script runner rejects (story 4.3)', async () => {
     const real = createBmadCatalog();
     expect(await real.catalog('/no/such/repo')).toEqual({ modules: [], skills: [], agents: [], entryAction: null, capabilities: { plain_labels: false, ticket_tree: false } });
     await expect(real.setupStatus('/no/such/repo')).rejects.toThrow(/4\.3/);

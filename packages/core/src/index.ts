@@ -5,6 +5,7 @@ export * from './app-shortcut-port.js';
 export * from './bmad-catalog-port.js';
 export * from './bmad-detection.js';
 export * from './bmad-features.js';
+export * from './bmad-modules-seen.js';
 export * from './bmad-script-trust.js';
 export * from './bmad-setup.js';
 export * from './bmad-source-port.js';

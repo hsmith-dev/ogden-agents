@@ -423,7 +423,7 @@ async function listenAndAnnounce({
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
   // Plan and Board (story 4.1): the catalog, planning sessions and the tickets, each behind core's guard (AD-22).
-  const planning = createPlanning({ bmad: core.bmad, entities: core.entities, catalog: bmadCatalog, chat, agent: chatAgent });
+  const planning = createPlanning({ bmad: core.bmad, entities: core.entities, catalog: bmadCatalog, chat, agent: chatAgent, modulesSeen: core.bmadModulesSeen });
   // The one runner of BMad Method's scripts (story 4.1); closed with the server, which kills any tree still running (story 4.2).
   const scriptRunner = createUvScriptRunner({
     uvCommand: async () => {

@@ -7,7 +7,8 @@
  *
  * The file: `entry`, the skill behind "Start from an idea" (or `null`), and
  * `skills`, each skill's `label`, optional one-sentence `description`,
- * `group` and `next = { skill, label }`.
+ * `group` and `next = { skill, label }`, and `modules`, each module's
+ * plain `label` by module code (entry 4.4).
  */
 import raw from './skill-labels.json' with { type: 'json' };
 
@@ -23,6 +24,8 @@ export interface SkillLabelsEntry {
 export interface SkillLabelsFile {
   readonly entry: string | null;
   readonly skills: Readonly<Record<string, SkillLabelsEntry>>;
+  /** Each module's plain name, by module code (entry 4.4); a module it doesn't name shows its code. */
+  readonly modules?: Readonly<Record<string, { readonly label: string }>>;
 }
 
 /** The mapping as shipped (unchecked here: 4.5's reader reports what doesn't fit; a test checks the shipped file's shape). */

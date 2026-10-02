@@ -177,5 +177,13 @@
       "description": "Change how an installed skill or agent behaves in this project.",
       "group": "setup"
     }
+  },
+  "modules": {
+    "core-tools": {
+      "label": "Core tools"
+    },
+    "method": {
+      "label": "BMad Method"
+    }
   }
 }

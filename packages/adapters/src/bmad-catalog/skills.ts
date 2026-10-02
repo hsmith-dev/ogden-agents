@@ -14,7 +14,8 @@
  * real folder (not a link, as `detect`), and a `SKILL.md` that isn't a
  * regular file (a FIFO, say) is never opened.
  */
-import { lstat, open, readdir, realpath, stat } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import { isAbsolute, join, relative } from 'node:path';
 import type { InstalledSkill } from '@ogden-agents/core';
 import { SKILL_NAME_PATTERN } from '@ogden-agents/shared';
@@ -29,18 +30,27 @@ export const SKILL_FOLDERS: readonly (readonly string[])[] = [
 export const MAX_SKILL_FILE_BYTES = 64 * 1024;
 
 /** Whether `inner` is `outer` or inside it (both real paths). */
-function inside(inner: string, outer: string): boolean {
+export function inside(inner: string, outer: string): boolean {
   const rel = relative(outer, inner);
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
+/** At most this many entries of a skills folder are read, in name order (both the skill and the module record scans). */
+export const MAX_SKILL_FOLDER_ENTRIES = 1000;
+
+/** Never follow a link swapped in after the `realpath` (not on Windows, which has no such flag). */
+const NO_FOLLOW = (fsConstants as { O_NOFOLLOW?: number }).O_NOFOLLOW ?? 0;
+/** Opening a FIFO never waits for a writer (not on Windows, which has no such flag). */
+const NON_BLOCK = (fsConstants as { O_NONBLOCK?: number }).O_NONBLOCK ?? 0;
+
 /** The first {@link MAX_SKILL_FILE_BYTES} of `file` as text, or `undefined` on any error. */
-async function readHead(file: string): Promise<string | undefined> {
+export async function readHead(file: string): Promise<string | undefined> {
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    // Only a regular file: opening a FIFO (or a device) could block forever.
-    if (!(await stat(file)).isFile()) return undefined;
-    handle = await open(file, 'r');
+    // Non-blocking, so a FIFO (or a device) swapped in can't block the open; never through a link swapped in.
+    handle = await open(file, fsConstants.O_RDONLY | NON_BLOCK | NO_FOLLOW);
+    // Only a regular file is read: checked on the opened file itself, not the path.
+    if (!(await handle.stat()).isFile()) return undefined;
     const buffer = Buffer.alloc(MAX_SKILL_FILE_BYTES);
     const { bytesRead } = await handle.read(buffer, 0, MAX_SKILL_FILE_BYTES, 0);
     return buffer.subarray(0, bytesRead).toString('utf8');
@@ -48,6 +58,37 @@ async function readHead(file: string): Promise<string | undefined> {
     return undefined;
   } finally {
     await handle?.close().catch(() => undefined);
+  }
+}
+
+/**
+ * The first {@link MAX_SKILL_FILE_BYTES} of the regular file `parts` below
+ * `repoReal` (the repo's real path), only when its real path stays inside
+ * the repo (a link anywhere on the way that leads out is never read);
+ * `undefined` otherwise or on any error.
+ */
+export async function readInsideRepo(repoReal: string, parts: readonly string[]): Promise<string | undefined> {
+  let file: string;
+  try {
+    file = await realpath(join(repoReal, ...parts));
+  } catch {
+    return undefined;
+  }
+  return inside(file, repoReal) ? readHead(file) : undefined;
+}
+
+/**
+ * The repo's real path when `repoPath` is an absolute path to a real folder
+ * (as `detect`: a root swapped for a link is never followed into);
+ * `undefined` otherwise or on any error.
+ */
+export async function realRepoRoot(repoPath: string): Promise<string | undefined> {
+  if (typeof repoPath !== 'string' || repoPath === '' || !isAbsolute(repoPath)) return undefined;
+  try {
+    if (!(await lstat(repoPath)).isDirectory()) return undefined;
+    return await realpath(repoPath);
+  } catch {
+    return undefined;
   }
 }
 
@@ -97,34 +138,23 @@ export function parseSkillFrontmatter(text: string): { name?: string; descriptio
 
 /** The skills installed in the repo at `repoPath`, sorted by name, each once (the first folder's wins). */
 export async function scanSkills(repoPath: string): Promise<InstalledSkill[]> {
-  if (typeof repoPath !== 'string' || repoPath === '' || !isAbsolute(repoPath)) return [];
-  let repoReal: string;
-  try {
-    // As `detect`: the root must be a real folder; a root swapped for a link is never followed into.
-    if (!(await lstat(repoPath)).isDirectory()) return [];
-    repoReal = await realpath(repoPath);
-  } catch {
-    return [];
-  }
+  const repoReal = await realRepoRoot(repoPath);
+  return repoReal === undefined ? [] : scanSkillsAt(repoReal);
+}
+
+/** {@link scanSkills} of the repo whose real path ({@link realRepoRoot}) is `repoReal`. */
+export async function scanSkillsAt(repoReal: string): Promise<InstalledSkill[]> {
   const found = new Map<string, InstalledSkill>();
   for (const folder of SKILL_FOLDERS) {
     let names: string[];
     try {
-      names = (await readdir(join(repoReal, ...folder))).sort();
+      names = (await readdir(join(repoReal, ...folder))).sort().slice(0, MAX_SKILL_FOLDER_ENTRIES);
     } catch {
       continue;
     }
     for (const name of names) {
       if (!SKILL_NAME_PATTERN.test(name) || found.has(name)) continue;
-      let file: string;
-      try {
-        file = await realpath(join(repoReal, ...folder, name, 'SKILL.md'));
-      } catch {
-        continue;
-      }
-      // A link anywhere on the way that leads out of the repo is never read.
-      if (!inside(file, repoReal)) continue;
-      const text = await readHead(file);
+      const text = await readInsideRepo(repoReal, [...folder, name, 'SKILL.md']);
       if (text === undefined) continue;
       const frontmatter = parseSkillFrontmatter(text);
       if (frontmatter?.name !== name) continue;

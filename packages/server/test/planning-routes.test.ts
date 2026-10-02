@@ -185,7 +185,13 @@ describe('Plan and Board routes (story 4.1)', () => {
  * Python the same way.
  */
 const TEST_PYTHON = '3.12';
-const TEST_UV_PYTHON_ENV = { UV_PYTHON: TEST_PYTHON, UV_PYTHON_PREFERENCE: 'only-managed', UV_PYTHON_DOWNLOADS: 'never' } as const;
+const TEST_UV_PYTHON_ENV: Readonly<Record<string, string>> = {
+  UV_PYTHON: TEST_PYTHON,
+  UV_PYTHON_PREFERENCE: 'only-managed',
+  UV_PYTHON_DOWNLOADS: 'never',
+  // Where `uv python install` put it: setup-uv sets this in CI, and the server's uv allowlist doesn't carry it.
+  ...(process.env.UV_PYTHON_INSTALL_DIR ? { UV_PYTHON_INSTALL_DIR: process.env.UV_PYTHON_INSTALL_DIR } : {}),
+};
 
 /** Whether `uv` is on PATH and has the uv-managed {@link TEST_PYTHON} installed (no download). */
 function hasManagedPython(): boolean {

@@ -29,15 +29,15 @@ Completed at inception from the spec capabilities in `covers`, as epic 6 did for
 1. Each agent's spike result is recorded, and the user has said go or no-go for Codex and for Grok. A no-go agent moves back to epic 8 (v2), and nothing below applies to it.
 2. In one project with every BMad piece off, a Claude Code chat runs at the same time as a chat with each go agent. Each shows permission cards that hold a shell command until it is approved, and normalized states. After a server restart, every chat continues with its context (CAP-15, CAP-3).
 3. Each go agent offers only the modes it declares (Ask, Auto, Skip all). A mode it does not declare is shown unavailable and the server refuses it.
-4. On a fresh machine, a user installs each go agent from the UI and signs in by the methods the user approved. Another user chats with only an API key, and no key appears in the database, the event log or the logs (CAP-16).
+4. On a fresh machine, a user installs each go agent from the UI and signs in with the agent's subscription sign-in (ChatGPT login for Codex, Sign in with Grok for Grok). Another user chats with only an API key (for Grok, only if the spike found a way), and no key appears in the database, the event log or the logs (CAP-16).
 5. The terminal toggle appears for exactly the agents and OSes `agent-matrix.md` lists. With Planning on, a planning session with each go agent runs a BMad skill (CAP-5, CAP-6).
 6. The epic's end-to-end suite passes on macOS, Windows and Linux. The epic is released as `ogden-agents` v1.1 with each agent's live check recorded.
 
 ## Boundaries
 
-Chat with Codex and Grok beside Claude Code, on epic 6's mechanism. This epic does not rebuild the registry, the picker or the shared ACP client, unless epic 6's spike is a no-go (open question 5).
+Chat with Codex and Grok beside Claude Code, on epic 6's mechanism. This epic does not rebuild the registry, the picker or the shared ACP client. They stay in epic 6 whatever Antigravity's go or no-go (user, 2026-10-02).
 
-- Builds (unattended runs) with Codex or Grok are not in this epic unless the user says so (open question 4). They stay in epic 8 (v2).
+- Builds (unattended runs) with Codex or Grok are not in this epic (user, 2026-10-02). They come in a later release (epic 8, v2).
 - Gemini CLI, GitHub Copilot CLI and builds with Antigravity stay in epic 8 (v2). Other ACP registry agents are deferred.
 - No model picker and no cost or token tracking (AD-8). Core, `BuildRunnerPort`, `SandboxPort` and the dispatcher do not change.
 
@@ -54,9 +54,16 @@ Chat with Codex and Grok beside Claude Code, on epic 6's mechanism. This epic do
 
 ## Notes
 
-Status: envelope, drafted autonomously 2026-10-02 from the user's request. Not incepted and not approved.
+Status: envelope, drafted autonomously 2026-10-02 from the user's request; the user answered its open questions the same day. Not yet incepted.
 
 - Decision (2026-10-02, user): "we need to add v1.1: Codex and Grok features". Codex moves here from epic 8 (v2). Grok is new to the plan.
+- Decision (2026-10-02, user; was open question 1, Grok route): Grok's subscription "Sign in with Grok" over ACP (`grok agent stdio`) is the main route. An xAI API key is added only if the spike finds a way to give one over ACP. No custom Ogden adapter around the Grok CLI or API.
+- Decision (2026-10-02, user; was open question 2, sign-in versus terms): same rules as Antigravity. Subscription sign-in is allowed for Codex (ChatGPT login) and Grok, with API keys where the agent supports them.
+- Decision (2026-10-02, user; was open question 3, OSes): macOS, Windows and Linux are all required. Each agent's spike probes all three, Windows first, and ends with a go or no-go for that agent.
+- Decision (2026-10-02, user; was open question 4, builds): v1.1 is chats only: chat, install, sign-in, agent picker integration and BMad skills. Builds with Codex and Grok come in a later release (epic 8, v2, unless re-planned).
+- Decision (2026-10-02, user; was open question 5): the shared agent-choice groundwork (contracts, the shared ACP client, the picker) stays in epic 6 whatever Antigravity's go or no-go; only epic 6's Antigravity-specific stories depend on it. This epic therefore always waits on epic 6's groundwork and never rebuilds it.
+- Handoff (2026-10-02, not applied: `docs/epic-6-inception` was being edited at the same time, commit 57fd85a): epic 6's envelope should record the decision above. Its no-go path currently says entries 2 to 10 are dropped and the agent-choice work moves to epic 8. It should say that only the Antigravity-specific entries are dropped, and that the groundwork (at least 3, 4 and 6, and the non-Antigravity parts of 2, 9 and 10) is still built.
+- Inception: the full inception (stories in `tickets.toml`) happens later, after epic 6.
 - Assumption: release target is `ogden-agents` v1.1, after v1 (epics 1 to 7) ships. This epic is placed after epic 7 in the initiative's build order, under its own v1.1 heading.
 - Assumption: agent ids `codex` and `grok`; product names "Codex" and "Grok"; adapters `acp-codex`, `setup-codex`, `acp-grok`, `setup-grok`.
 - Waits on epic 6 because: the agents-as-a-choice contracts (6.3) and the shared ACP client in `acp-base` (6.4). Through epic 6 it also waits on epics 2, 3, 4, 9 and 10.
@@ -87,8 +94,8 @@ Grok:
 2. Spike: Grok over ACP. Same probes, plus how the API key and subscription gating work, and the terms. Ends with the user's go or no-go (hitl).
 3. Codex chat: `acp-codex` on `acp-base`, with cards, modes, resume and the toggle.
 4. Codex install and sign-in: `setup-codex` (pinned `npm ci`, ChatGPT login or device code, and the API key).
-5. Grok chat: `acp-grok`, with cards, modes, resume and the toggle. An Ogden ACP wrapper is built only if spike 2 requires it.
-6. Grok install and sign-in: `setup-grok` (pinned `npm ci`, Grok login, the API key).
+5. Grok chat: `acp-grok`, with cards, modes, resume and the toggle. No custom adapter (user, 2026-10-02).
+6. Grok install and sign-in: `setup-grok` (pinned `npm ci` and Sign in with Grok; the API key only if spike 2 found a way).
 7. Picker integration: both agents in the picker, Welcome, Settings: Agents and the agent matrix.
 8. BMad skills reach Codex and Grok where Planning is on.
 9. Refactor sweep.
@@ -98,8 +105,4 @@ Lanes after the spikes: Codex (3, 4) and Grok (5, 6) run in parallel. Entry 7 jo
 
 ### Open questions (for the user)
 
-1. Grok route: Grok speaks ACP natively, so the default is its own `grok agent stdio`. If the spike finds an API key or the subscription sign-in unusable over ACP, should Ogden write its own ACP adapter around the CLI or the xAI API, or should it drop Grok to v2?
-2. Sign-in versus terms: should Ogden offer ChatGPT login for Codex and Grok/X login for Grok, or API keys only? Grok's CLI may also need a SuperGrok or X Premium+ subscription. The terms are unread for Grok and unconfirmed for Codex.
-3. OSes: you required macOS, Windows and Linux for Antigravity. Is the same true here? Codex on Windows is labelled experimental, and Grok has no Windows sandbox.
-4. Builds: are unattended builds with Codex and Grok part of v1.1, or later (v2)? This envelope assumes later.
-5. If epic 6's spike is a no-go, epic 6's agent-choice work (6.2 to 6.4 and 6.6) goes nowhere. Should it move into this epic instead of epic 8?
+All five were answered by the user on 2026-10-02; see the Decision lines above. None are open.

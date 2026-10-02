@@ -374,7 +374,7 @@ describe('Plan home (story 4.6)', () => {
 
 describe('Plan piece gate (story 4.6)', () => {
   const page = () => (
-    <PlanPieceGate wsId={WS}>
+    <PlanPieceGate wsId={WS} piece="planning">
       <PlanHome wsId={WS} onStarted={() => {}} />
     </PlanPieceGate>
   );
@@ -414,6 +414,31 @@ describe('Plan piece gate (story 4.6)', () => {
     expect(screen.queryByTestId('plan-feature-off')).toBeNull();
     expect(screen.getByTestId('plan-idea')).toBeTruthy();
     expect(state.calls).toContain(`GET ${apiPath(API_ROUTES.workspaceCatalog, { wsId: WS })}`);
+  });
+});
+
+describe('Board piece gate (story 4.9, reusing 4.6 gate)', () => {
+  const page = () => (
+    <PlanPieceGate wsId={WS} piece="board">
+      <BoardTickets wsId={WS} />
+    </PlanPieceGate>
+  );
+
+  it('Board off: the feature-off notice and a link to the settings, and no tickets or BMad request', async () => {
+    state.pieces = ['planning'];
+    mount(page());
+    await settle();
+    expect(screen.getByTestId('plan-feature-off').textContent).toContain(FEATURE_OFF_MESSAGE);
+    expect(screen.getByRole('link', { name: PLAN_OPEN_SETTINGS_LABEL }).getAttribute('href')).toBe(`/w/${WS}/settings`);
+    expect(state.calls.filter((call) => call.includes('/tickets') || call.includes('/bmad/'))).toEqual([]);
+  });
+
+  it('Board on: the board, from the tickets', async () => {
+    state.pieces = ['board'];
+    mount(page());
+    await settle();
+    expect(screen.queryByTestId('plan-feature-off')).toBeNull();
+    expect(state.calls).toContain(`GET ${apiPath(API_ROUTES.workspaceTickets, { wsId: WS })}`);
   });
 });
 

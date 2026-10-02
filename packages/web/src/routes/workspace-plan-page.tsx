@@ -20,7 +20,7 @@ export function WorkspacePlanPage() {
     <>
       <WorkspaceHeader title={PLAN_PAGE_TITLE} wsId={wsId} tab="plan" />
       <PageBody data-testid="workspace-plan-page">
-        <PlanPieceGate wsId={wsId}>
+        <PlanPieceGate wsId={wsId} piece="planning">
           <BmadSetupGate wsId={wsId}>
             <PlanHome wsId={wsId} onStarted={(session) => navigate({ to: '/w/$wsId/s/$sesId', params: { wsId, sesId: session.id } })} />
           </BmadSetupGate>

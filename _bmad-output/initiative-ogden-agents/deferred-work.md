@@ -428,3 +428,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-plan-home-and-planning-sessions-plan.md`
   summary: Ogden's label mapping is keyed by skill name only, so a repo's own `.claude/skills/<named-skill>/SKILL.md` gets Ogden's trusted label, group and the "Start from an idea" entry action; the catalog should only apply a label when the installed skill matches the verified pinned copy (or mark repo-only skills).
   evidence: 4.6 security review S1: `bmad-catalog/labels.ts` `applyLabels` checks only that the name is installed; `skill-labels.json` `entry`; Plan home hides names with Developer mode off (UX spec). Catalog lane 4.4/4.5.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-board-and-ticket-detail-plan.md`
+  summary: Resolved: the Board page now reuses 4.6's piece gate (`PlanPieceGate` with `piece="board"`), so with Board off it shows the feature-off notice and asks for no setup panel or tickets.
+  evidence: Applied in 4.9's branch after the stack rebase (4.8, 4.4, 4.6, 4.9); `routes/workspace-board-page.tsx`, DOM tests "Board piece gate".

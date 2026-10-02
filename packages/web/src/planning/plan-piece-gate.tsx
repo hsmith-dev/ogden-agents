@@ -1,4 +1,4 @@
-import { FEATURE_OFF_MESSAGE, PLAN_OPEN_SETTINGS_LABEL, PLAN_PROJECT_LOADING_TEXT } from '@ogden-agents/shared';
+import { type BmadPiece, FEATURE_OFF_MESSAGE, PLAN_OPEN_SETTINGS_LABEL, PLAN_PROJECT_LOADING_TEXT } from '@ogden-agents/shared';
 import { Link } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import { Button } from '@/ui/button';
@@ -8,13 +8,14 @@ import { Text } from '@/ui/typography';
 import { useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
 
 /**
- * The Plan page's piece gate (story 4.6; AD-22): with Planning off in the
- * project, the feature-off notice and a link to its settings, and nothing
- * BMad is asked for (no setup panel, no catalog). While the settings load,
- * a skeleton; when they can't be read, why (never the page, whose setup
- * panel could run with Planning off); once Planning is on, `children`.
+ * The Plan and Board pages' piece gate (story 4.6, Board's since 4.9; AD-22):
+ * with `piece` off in the project, the feature-off notice and a link to its
+ * settings, and nothing BMad is asked for (no setup panel, no catalog, no
+ * tickets). While the settings load, a skeleton; when they can't be read,
+ * why (never the page, whose setup panel could run with the piece off); once
+ * the piece is on, `children`.
  */
-export function PlanPieceGate({ wsId, children }: { wsId: string; children: ReactNode }) {
+export function PlanPieceGate({ wsId, piece, children }: { wsId: string; piece: BmadPiece; children: ReactNode }) {
   const settings = useWorkspaceSettings(wsId);
   if (settings.isError) {
     return (
@@ -33,7 +34,7 @@ export function PlanPieceGate({ wsId, children }: { wsId: string; children: Reac
       </div>
     );
   }
-  if (!settings.data.bmadPieces.includes('planning')) {
+  if (!settings.data.bmadPieces.includes(piece)) {
     return (
       <Notice
         className="max-w-(--space-chat-column)"

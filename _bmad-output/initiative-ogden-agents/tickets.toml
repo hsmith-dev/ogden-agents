@@ -51,9 +51,9 @@ after = [{ epic = 1, needs = "the bundled bmad-loop fork" }, { epic = 4, needs =
 [[epic]]
 id = 6
 slug = "epic-every-agent"
-title = "Every agent BMAD supports works for chat and builds"
-covers = ["CAP-15"]
-after = [{ epic = 2, needs = "the ACP client and session states" }, { epic = 9, needs = "the setup adapter and sign-in flow other agents reuse" }, { epic = 5, needs = "the build runner and sandbox chain" }]
+title = "Pick Codex or Gemini CLI beside Claude Code for any chat, project or build"
+covers = ["CAP-15", "CAP-3", "CAP-5", "CAP-16"]
+after = [{ epic = 2, needs = "the AgentPort contract, chat use-cases, permission cards, resume and the status sidebar, through its release (2.13)" }, { epic = 9, needs = "AgentSetupPort, install from pins, sign-in, the API key path and Welcome, through its release (9.7)" }, { epic = 3, needs = "terminal availability per agent (3.7) and the Windows terminal work (3.8)" }, { epic = 10, needs = "the pieces guard and 10.6's simple-project test" }, { epic = 4, needs = "BMad setup (4.3) and planning sessions (4.6)" }, { epic = 5, needs = "BuildRunnerPort, SandboxPort and the run's agent field (5.3), the sandbox chain and Build dialog (5.6) and the runner (5.7); the release after 5.11" }]
 
 [[epic]]
 id = 7

@@ -40,3 +40,6 @@ export { TicketsUnavailableError, type TicketStorePort } from '@ogden-agents/cor
 export { createMemorySecretStore } from '@ogden-agents/adapters';
 // The Claude Code install's runner and pins, for tests that install a local fixture (story 9.3).
 export { spawnNpm, type AdapterPins, type NpmRunInput, type NpmRunner } from '@ogden-agents/adapters';
+// The pinned upstream BMad Method (story 4.14): the in-memory stub the e2e suite passes, so no test downloads it.
+export { createMemoryBmadSource, type MemoryBmadSource } from '@ogden-agents/adapters';
+export type { BmadSourcePort } from '@ogden-agents/core';

@@ -6,6 +6,7 @@ import {
   type BmadDetectionUseCases,
   type BmadFeatures,
   type BmadScriptTrust,
+  type BmadSourceUseCases,
   type BoardUseCases,
   type Chat,
   type EventLog,
@@ -21,6 +22,7 @@ import { HTTPException } from 'hono/http-exception';
 import { registerAgentSetupRoutes } from './agent-setup-routes.js';
 import { registerBmadDetectionRoutes } from './bmad-detection-routes.js';
 import { registerBmadRoutes } from './bmad-routes.js';
+import { registerBmadSourceRoutes } from './bmad-source-routes.js';
 import { registerBmadTrustRoutes } from './bmad-trust-routes.js';
 import type { TabTokens } from './auth.js';
 import { registerChatRoutes } from './chat-routes.js';
@@ -107,6 +109,8 @@ export interface AppOptions {
   planning?: PlanningUseCases;
   /** The project's tickets (story 4.1), behind the `board` piece's guard; without it that route answers 501 once the guard passes. */
   board?: BoardUseCases;
+  /** The pinned upstream BMad Method's status and its user-initiated download (story 4.14); without it those routes answer 501. */
+  bmadSource?: BmadSourceUseCases;
   /** Core's agent setup use-case: each agent's state and signing in (9.1); without it those routes answer 501. */
   agentSetup?: AgentSetup;
   /** Whether the first-run Welcome is done (9.5); without it those routes answer 501. */
@@ -142,6 +146,7 @@ export function createApp({
   bmadScriptTrust,
   planning,
   board,
+  bmadSource,
   agentSetup,
   onboarding,
   newProjectDefaults,
@@ -235,6 +240,8 @@ export function createApp({
   registerShortcutRoutes(app, { appShortcut, log });
   registerAgentSetupRoutes(app, { agentSetup, onboarding, log });
   registerBmadRoutes(app, { bmad, newProjectDefaults, log });
+  // The pinned upstream BMad Method (story 4.14): install-level, not a piece's.
+  registerBmadSourceRoutes(app, { bmadSource, log });
   registerBmadDetectionRoutes(app, { bmadDetection, log });
   registerBmadTrustRoutes(app, { scriptTrust: bmadScriptTrust, permissions, log });
   // Plan and Board (stories 4.1, 4.2): every route through `bmadPieceRoutes`, behind core's guard and the script trust (AD-22).

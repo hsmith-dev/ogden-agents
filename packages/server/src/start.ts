@@ -14,6 +14,7 @@ import {
   createOsAppShortcut,
   createPtyTerminalPort,
   createTicketsV7,
+  createUpstreamBmadSource,
   createUvScriptRunner,
   createUvToolchain,
   locateClaudeAdapter,
@@ -24,6 +25,7 @@ import {
   AgentSetupError,
   CoreError,
   createAgentSetup,
+  createBmadSource,
   createBoard,
   createChat,
   createDataDir,
@@ -88,22 +90,8 @@ function defaultWebRoot(): string {
   return WEB_ROOT_CANDIDATES.find((dir) => existsSync(dir)) ?? WEB_ROOT_CANDIDATES[1];
 }
 
-/**
- * Where the bundled forks are (AD-13), in order, as {@link WEB_ROOT_CANDIDATES}:
- * - `../vendor` beside the root bundle (`dist/server.js` next to the package's `vendor/`);
- * - the workspace's `vendor/`, resolved from `packages/server/src/start.ts`
- *   or `packages/server/dist/server.js`.
- */
-const VENDOR_ROOT_CANDIDATES = [fileURLToPath(new URL('../vendor', import.meta.url)), fileURLToPath(new URL('../../../vendor', import.meta.url))] as const;
-
-/** The bundled BMad Method fork's `tickets.py`, below the vendor root (story 4.1). */
-const TICKETS_SCRIPT = ['bmad-method', 'skills', 'bmad-ticket', 'scripts', 'tickets.py'] as const;
-
-/** The bundled `tickets.py`: the first vendor root that has it, else the workspace's path (a run then fails as unavailable). */
-export function bundledTicketsScript(): string {
-  const candidates = VENDOR_ROOT_CANDIDATES.map((root) => join(root, ...TICKETS_SCRIPT));
-  return candidates.find((file) => existsSync(file)) ?? candidates[1]!;
-}
+/** The verified pinned BMad Method's `tickets.py`, relative to its `skills/` (story 4.14, AD-13). */
+export const TICKETS_SCRIPT = 'bmad-ticket/scripts/tickets.py';
 
 /**
  * The working folder of every BMad Method script run (story 4.2 review): an
@@ -405,18 +393,29 @@ async function listenAndAnnounce({
     },
     env: uvChildEnv,
   });
+  // The pinned upstream BMad Method (story 4.14, AD-13): downloaded only when the user asks, never here.
+  const bmadSourcePort =
+    options.bmadSource ??
+    createUpstreamBmadSource({
+      dataDir,
+      ...(options.bmadFetch === undefined ? {} : { fetch: options.bmadFetch }),
+      onCleanupError: (error) => log.warn('could not remove BMad Method download temp files', { code: (error as NodeJS.ErrnoException).code ?? 'unknown' }),
+    });
+  const bmadSource = createBmadSource(bmadSourcePort);
   const ticketStore =
     options.ticketStore ??
     createTicketsV7({
       runner: scriptRunner,
-      script: bundledTicketsScript(),
+      // Only the verified copy, read at each run; never the project's own `tickets.py`.
+      script: () => bmadSourcePort.file(TICKETS_SCRIPT),
       // Never the repo: uv would run a `.venv` the project ships (story 4.2 review).
       workDir: uvWorkDir(dataDir),
       // Codes only: the script's own error text can name the user's paths.
       onFailure: (error) => log.warn('tickets.py run failed', { code: error instanceof ScriptRunError ? error.code : error.reason }),
     });
-  // Every board use-case checks the piece, then the project's script trust (story 4.2), before the store runs anything.
-  const board = createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, entities: core.entities, tickets: ticketStore });
+  // Every board use-case checks the piece, then the project's script trust (story 4.2), then the pinned BMad
+  // Method (story 4.14), before the store runs anything.
+  const board = createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: bmadSource, entities: core.entities, tickets: ticketStore });
   const appShortcut =
     options.appShortcut ??
     (options.launcherEntry === undefined
@@ -452,6 +451,7 @@ async function listenAndAnnounce({
     bmadScriptTrust: core.bmadScriptTrust,
     planning,
     board,
+    bmadSource,
     agentSetup,
     onboarding,
     newProjectDefaults,

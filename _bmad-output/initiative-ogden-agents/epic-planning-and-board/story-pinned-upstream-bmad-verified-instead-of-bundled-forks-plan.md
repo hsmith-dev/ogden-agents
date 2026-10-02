@@ -3,13 +3,14 @@ title: 'Pinned upstream BMad, verified, instead of bundled forks'
 type: 'refactor'
 ticket: '14'
 created: '2026-10-02'
-status: 'ready-for-dev'
+status: 'built'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick', 'security']
 review_loop_iteration: 0
+baseline_revision: '5fe8cc1a1468c81e3102ae29b69ba6f69bf9ba5a'
 context:
   - '{project-root}/AGENTS.md'
   - '{project-root}/_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md'
@@ -63,19 +64,19 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `packages/adapters/src/bmad-source/archive.ts` -- self-contained (node builtins only, erasable TS syntax so `node` can import it): `normalizeText`, `hashEntries`, `parseTar`, `selectVerified(tarEntries, include) → Entries` (strip top folder, keep only `include`, refuse unsafe entries per Boundaries), `extractTo(entries, dir)` (containment check per path, `wx` writes, 0o700 dirs). -- one implementation for runtime and CI.
-- [ ] `packages/adapters/src/bmad-source/bmad-lock.json` -- `{ "sources": { "bmad-method": { repo: "bmad-code-org/BMAD-METHOD", ref: "main", commit: "1cbcfa272fe65787c06a1fa164a901f46117cca7", version: "6.13.0-next", include: "skills/", contentHash: "sha256:6a4471ad7c8861b47a881ca35e0b598b9d32aed10c1e19a78e559d005f2c3c7b" }, "bmad-loop": { repo: "bmad-code-org/bmad-loop", ref: "v0.13.0", commit: "6bbe469637e2b8ac490b1f8c085aed8e2b19ce1b", version: "0.13.0", include: "", buildConstraints: ["hatchling==1.32.4"], contentHash: "sha256:6ded28951264f96bcab4084c07fbe2a13543a463b9f2b2fe0779d0d2749cf332" } } }`, plus `lock.ts` (typed, zod-checked).
-- [ ] `packages/adapters/src/bmad-source/index.ts` -- `createUpstreamBmadSource({ dataDir, lock?, fetch?, timeoutMs?, maxBytes? })` implementing core's `BmadSourcePort`: `status()` (reads marker only), `download()` (deduped; codeload URL `https://codeload.github.com/<repo>/tar.gz/<commit>`; gunzip with `maxOutputLength`; verify; extract to `<data>/bmad/.tmp-<random>` then rename to `<data>/bmad/<name>/<commit>`; marker `{repo, commit, contentHash}` written before rename; remove other commits), `file(relPath)` → absolute path inside the verified tree or undefined; `bmad-loop.ts` `createBmadLoopResolver({ source, uvCommand, env, dataDir })` → `resolve()` downloads loop source via the same pipeline, then `uv venv` + `uv pip install --python <venv> --build-constraints <file> <src>` in the work folder, returns the `bmad-loop` executable (Scripts\\bmad-loop.exe on Windows); not wired to any route.
-- [ ] `packages/adapters/src/bmad-source-memory/index.ts` -- stub port (ready or missing, counts downloads) for server/e2e tests.
-- [ ] `packages/core/src/bmad-source-port.ts` + `core.ts`/`index.ts`/`errors.ts` -- port; install-level use-case `bmadSource` (`status`, `download`, errors `BmadNotDownloadedError`, `BmadDownloadError{reason:'offline'|'integrity'}`); board checks ready after trust.
-- [ ] `packages/shared/src/{planning.ts,errors.ts,api.ts,index.ts}` -- `BmadSourceStatus`, `BmadSourceResponse`; codes `bmad_not_downloaded` (409), `bmad_download_failed`; texts `BMAD_NOT_DOWNLOADED_MESSAGE`, `BMAD_DOWNLOAD_OFFLINE_MESSAGE`, `BMAD_DOWNLOAD_INTEGRITY_MESSAGE`, button label; routes `bmadSource`. No em/en dashes.
-- [ ] `packages/adapters/src/tickets-v7/index.ts`, `packages/server/src/{start.ts,start-types.ts,app.ts,errors.ts,bmad-source-routes.ts}` -- delete vendor lookup; tickets script = `source.file('bmad-ticket/scripts/tickets.py')`; `GET|POST /api/v1/bmad/source` behind the gate (not workspace-scoped, no piece guard); map errors.
-- [ ] `packages/adapters/src/bmad-catalog/skill-labels.json` (+ typed export) -- Ogden's label mapping `{ "entry": null, "skills": {} }`, keyed by skill name with 4.5's per-skill fields; empty until 4.5's rework fills it; a test checks its shape.
-- [ ] `packages/web/src/planning/board-tickets.tsx` -- on `bmad_not_downloaded`: notice + **Download BMad Method** → POST, pending state, error text, then refetch.
-- [ ] `scripts/bmad-lock.mjs` (replaces `vendor-forks.mjs`) -- `--check` (network, CI only): download each pinned tarball, recompute hash through `archive.ts`, compare; GitHub API compare `ref...commit` must be `identical` or `behind` (commit is in upstream's history); no write mode needed beyond `--print` of computed hashes for maintainers.
-- [ ] Delete `vendor/`, `forks.lock`, `scripts/vendor-forks.mjs`, `tests/vendor-forks.test.ts`; `package.json` `files` = `bin`, `dist`; CI: remove the vendored-forks step, add `bmad-pins` job (ubuntu, Node 24, `GITHUB_TOKEN`); docs `AGENTS.md`, `CONTRIBUTING.md` (pinned-upstream section, how to bump), `CHANGELOG.md`.
-- [ ] `tests/fixtures/bmad-upstream/skills/bmad-ticket/scripts/tickets.py` (copy of the pinned file, provenance comment in a README) and `tests/fixtures/tar.ts` (tiny in-memory tar.gz writer, incl. pax paths, symlink, hardlink entries).
-- [ ] Tests -- archive: hash parity with the old algorithm on a fixture, every unsafe-entry case, size caps; source: download/verify/extract/marker/stale removal, mismatch leaves nothing, offline/HTTP/timeout errors, dedupe, status never fetches; loop resolver with fake uv (argv, env = allowlist, venv path per OS); server: no fetch on startup and on every GET (counting fetch), POST downloads, board 409 `bmad_not_downloaded` with zero runner calls, real-uv board test via fixture tarball → POST → tickets; gate/guard-coverage lists; packaging (no `vendor/`, no `forks.lock`); web DOM test for the button; e2e: board missing → Download → tickets (memory source); `bmad-lock.mjs` pure functions.
+- [x] `packages/adapters/src/bmad-source/archive.ts` -- self-contained (node builtins only, erasable TS syntax so `node` can import it): `normalizeText`, `hashEntries`, `parseTar`, `selectVerified(tarEntries, include) → Entries` (strip top folder, keep only `include`, refuse unsafe entries per Boundaries), `extractTo(entries, dir)` (containment check per path, `wx` writes, 0o700 dirs). -- one implementation for runtime and CI.
+- [x] `packages/adapters/src/bmad-source/bmad-lock.json` -- `{ "sources": { "bmad-method": { repo: "bmad-code-org/BMAD-METHOD", ref: "main", commit: "1cbcfa272fe65787c06a1fa164a901f46117cca7", version: "6.13.0-next", include: "skills/", contentHash: "sha256:6a4471ad7c8861b47a881ca35e0b598b9d32aed10c1e19a78e559d005f2c3c7b" }, "bmad-loop": { repo: "bmad-code-org/bmad-loop", ref: "v0.13.0", commit: "6bbe469637e2b8ac490b1f8c085aed8e2b19ce1b", version: "0.13.0", include: "", buildConstraints: ["hatchling==1.32.4"], contentHash: "sha256:6ded28951264f96bcab4084c07fbe2a13543a463b9f2b2fe0779d0d2749cf332" } } }`, plus `lock.ts` (typed, zod-checked).
+- [x] `packages/adapters/src/bmad-source/index.ts` -- `createUpstreamBmadSource({ dataDir, lock?, fetch?, timeoutMs?, maxBytes? })` implementing core's `BmadSourcePort`: `status()` (reads marker only), `download()` (deduped; codeload URL `https://codeload.github.com/<repo>/tar.gz/<commit>`; gunzip with `maxOutputLength`; verify; extract to `<data>/bmad/.tmp-<random>` then rename to `<data>/bmad/<name>/<commit>`; marker `{repo, commit, contentHash}` written before rename; remove other commits), `file(relPath)` → absolute path inside the verified tree or undefined; `bmad-loop.ts` `createBmadLoopResolver({ source, uvCommand, env, dataDir })` → `resolve()` downloads loop source via the same pipeline, then `uv venv` + `uv pip install --python <venv> --build-constraints <file> <src>` in the work folder, returns the `bmad-loop` executable (Scripts\\bmad-loop.exe on Windows); not wired to any route.
+- [x] `packages/adapters/src/bmad-source-memory/index.ts` -- stub port (ready or missing, counts downloads) for server/e2e tests.
+- [x] `packages/core/src/bmad-source-port.ts` + `core.ts`/`index.ts`/`errors.ts` -- port; install-level use-case `bmadSource` (`status`, `download`, errors `BmadNotDownloadedError`, `BmadDownloadError{reason:'offline'|'integrity'}`); board checks ready after trust.
+- [x] `packages/shared/src/{planning.ts,errors.ts,api.ts,index.ts}` -- `BmadSourceStatus`, `BmadSourceResponse`; codes `bmad_not_downloaded` (409), `bmad_download_failed`; texts `BMAD_NOT_DOWNLOADED_MESSAGE`, `BMAD_DOWNLOAD_OFFLINE_MESSAGE`, `BMAD_DOWNLOAD_INTEGRITY_MESSAGE`, button label; routes `bmadSource`. No em/en dashes.
+- [x] `packages/adapters/src/tickets-v7/index.ts`, `packages/server/src/{start.ts,start-types.ts,app.ts,errors.ts,bmad-source-routes.ts}` -- delete vendor lookup; tickets script = `source.file('bmad-ticket/scripts/tickets.py')`; `GET|POST /api/v1/bmad/source` behind the gate (not workspace-scoped, no piece guard); map errors.
+- [x] `packages/adapters/src/bmad-catalog/skill-labels.json` (+ typed export) -- Ogden's label mapping `{ "entry": null, "skills": {} }`, keyed by skill name with 4.5's per-skill fields; empty until 4.5's rework fills it; a test checks its shape.
+- [x] `packages/web/src/planning/board-tickets.tsx` -- on `bmad_not_downloaded`: notice + **Download BMad Method** → POST, pending state, error text, then refetch.
+- [x] `scripts/bmad-lock.mjs` (replaces `vendor-forks.mjs`) -- `--check` (network, CI only): download each pinned tarball, recompute hash through `archive.ts`, compare; GitHub API compare `ref...commit` must be `identical` or `behind` (commit is in upstream's history); no write mode needed beyond `--print` of computed hashes for maintainers.
+- [x] Delete `vendor/`, `forks.lock`, `scripts/vendor-forks.mjs`, `tests/vendor-forks.test.ts`; `package.json` `files` = `bin`, `dist`; CI: remove the vendored-forks step, add `bmad-pins` job (ubuntu, Node 24, `GITHUB_TOKEN`); docs `AGENTS.md`, `CONTRIBUTING.md` (pinned-upstream section, how to bump), `CHANGELOG.md`.
+- [x] `tests/fixtures/bmad-upstream/skills/bmad-ticket/scripts/tickets.py` (copy of the pinned file, provenance comment in a README) and `tests/fixtures/tar.ts` (tiny in-memory tar.gz writer, incl. pax paths, symlink, hardlink entries).
+- [x] Tests -- archive: hash parity with the old algorithm on a fixture, every unsafe-entry case, size caps; source: download/verify/extract/marker/stale removal, mismatch leaves nothing, offline/HTTP/timeout errors, dedupe, status never fetches; loop resolver with fake uv (argv, env = allowlist, venv path per OS); server: no fetch on startup and on every GET (counting fetch), POST downloads, board 409 `bmad_not_downloaded` with zero runner calls, real-uv board test via fixture tarball → POST → tickets; gate/guard-coverage lists; packaging (no `vendor/`, no `forks.lock`); web DOM test for the button; e2e: board missing → Download → tickets (memory source); `bmad-lock.mjs` pure functions.
 
 **Acceptance Criteria:**
 - Given a fresh data folder and no network, when the server starts, the UI loads and every GET is served, then no download is attempted.
@@ -84,9 +85,43 @@ context:
 
 ## Implementation Notes
 
+- The lock's zod schema (`BmadLock`, `BmadLockSource`) lives in `packages/shared/src/planning.ts` with the other BMad contracts: adapters has no `zod` dependency of its own, and adding one would be a new dependency. `lock.ts` parses the JSON with it at load.
+- The install-level use-case is `createBmadSource(port)` in `packages/core/src/bmad-source-port.ts` (`status`, `download`, `requireReady`), wired in `start.ts` beside `createBoard`/`createPlanning`; it is not a member of `Core`, so `core.ts` is unchanged. `BoardDeps.source` is required.
+- `BmadSourceResponse` is the status itself (`{state, version, commit}`, as the I/O matrix shows), not wrapped.
+- Errors: a download that is too large (declared or streamed past `maxBytes`) is `offline` (503) as the matrix says; an archive that unpacks past `maxUnpackedBytes` is `integrity` (502), as it can't be the pinned content. The adapter is the same pipeline for both sources; "one download at a time" is per source (BMad Method and bmad-loop each share one in-flight download; nothing calls the loop yet).
+- `selectVerified` applies the path checks (absolute, drive, backslash, NUL, `..`, `.`/empty segment, a second top folder) to every entry of the archive, not only under `include`; type checks (symlink, hardlink, device) and duplicates (also case-only) only under `include`. Both real pinned tarballs pass (`node scripts/bmad-lock.mjs --check`, 296 and 270 files, hashes equal to the lock).
+- Folders: `<data>/bmad/<name>/<commit>/` with files under `<include>` and the marker `.ogden-verified.json` at the commit folder's top; temp folders are `<data>/bmad/.tmp-<name>-<random>` (leftovers of the same source are swept at the next download). An `include: ''` tree containing a file named like the marker is refused.
+- `skill-labels.json` is typed in `skill-labels.ts` (no zod); its shape test is in `packages/adapters/test/bmad-source.test.ts`.
+- `tests/fixtures/fake-uv.mjs` gained an `install` mode (and its env lines carry `argv` and `cwd`) for the bmad-loop resolver test. `start()` gained `bmadSource` and `bmadFetch`; the server tests' `startTestServer` defaults to a ready memory source unless a test passes either.
+- `packages/server/src/index.ts` re-exports `createMemoryBmadSource` for the e2e suite.
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+### Pass 1 (2026-10-02; lenses: quick, security)
+
+Verdicts: high 0, medium 2, low 12, false 1, maybe-false 0 (quick Q1-Q5, security S1-S11; Q5 and S7 share a root cause).
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---------|---------|-------|-------------------|
+| Q1 | `bmad-source/archive.ts` repeats `toolchain-uv/archive.ts`'s tar reader; already drifted (pax bounds, `K` headers) | medium | patch | AGENTS.md pitfall names exactly this. Fix: `readTarGz` builds on the shared `parseTar`. |
+| Q2 | `scripts/bmad-lock.mjs` copies `tarballUrl` and the size caps | low | patch | Both defined twice. Fix: exported from `archive.ts`, imported by both. |
+| Q3 | `extractTo` writes every file 0600, dropping upstream exec bits (`resolve_customization.py` is 100755) that 4.3 copies into projects | low | patch | `TarEntry.mode` unused. Fix: 0700 when executable upstream. |
+| Q4 | Marker valid but a file missing: 503 `tickets_unavailable` with "download first" text, no button, and POST returns early | low | patch | `download()` short-circuits on `ready()`. Fix: explicit download re-hashes the on-disk tree and re-downloads on mismatch; `not_downloaded` maps to 409 `bmad_not_downloaded`. |
+| Q5+S7 | Lock schema `include` accepts `../` and `./`; `file()` would resolve outside the commit folder | low | patch | Regex class includes `.`; maintainer-only input, defense in depth. Fix: reject `.`/`..` segments. |
+| S1 | bmad-loop's runtime deps and hatchling's deps float from PyPI at install (no hashes, `[tool.uv.sources]` honored) | medium | defer | Same as the bundled wheel before (deps were never pinned); resolver unused until epic 5. Deferred to epic 5 with a hash-locked install (`uv.lock`/`--require-hashes`, `--no-sources`). |
+| S2 | `resolve()` downloads as a side effect; nothing enforces explicit user action | low | patch | Doc comment only (no caller yet); epic 5 must call it from Build. |
+| S3 | Build backend runs with the verified source folder writable | low | defer | Pinned hatchling builds out of tree; epic 5 can build from a temp copy. |
+| S4 | Tmp sweep and `rmSync(folder)` assume one source instance per name | low | defer | `start.ts` creates exactly one; 4.3/epic 5 must reuse it. Recorded for them. |
+| S5 | File-vs-folder or NFC/NFD collisions throw raw EEXIST: 500 that logs the data path | low | patch | Reproduced by the lens; not a bypass (tmp removed). Fix: extraction errors map to `integrity`; NFC+case fold and prefix check. |
+| S6 | Windows names (ADS `ab:c`, `CON`, trailing dot/space) not refused | low | reject | Content is fixed by the pinned hash; hardening adds guards for a case upstream can't reach without CI's drift check failing. |
+| S8 | Pax `size`/`linkpath` ignored (parser differential with `tar`) | low | reject | CI and runtime share the parser, so verify and write agree; no bypass. |
+| S9 | Sync gunzip/hash block the event loop up to the 256 MB cap | low | reject | Real tarball is 1.7 MB; bounded by caps; only on an explicit click. |
+| S10 | Pinned commits are the old fork-tag commits; codeload serves fork-network commits under the upstream URL | false | reject | Checked: `bmad-lock.mjs --check` against GitHub placed both commits in upstream history (`main`, `v0.13.0`) and the content matched; the CI `bmad-pins` job keeps checking (should be a required check, in the PR's Needs you). |
+| S11 | Readers trust the marker and never re-hash | low | reject | By design (Design Notes): the data folder is the user's own (0700). Explicit download now re-hashes (Q4). |
+
+After the patches (2026-10-02): `pnpm typecheck`, `pnpm test` (1399 passed, 4 skipped), `pnpm e2e` (92 passed; one run hit a flake in the untouched `sign-in-again.spec.ts:143`, which passed 3 of 3 alone and in a full rerun), `pnpm run pack && pnpm smoke` (no `vendor/`, `forks.lock` or `tickets.py` in the tarball; startup downloads nothing).
 
 ## Design Notes
 

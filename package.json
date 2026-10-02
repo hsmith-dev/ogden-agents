@@ -19,8 +19,7 @@
   },
   "files": [
     "bin",
-    "dist",
-    "vendor"
+    "dist"
   ],
   "engines": {
     "node": ">=24"

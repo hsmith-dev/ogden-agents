@@ -57,7 +57,7 @@ export interface BmadPieceRouteOptions {
    * also needs the project's trust (story 4.2). Default: whether any of its
    * pieces runs them (`BMAD_PIECE_INFO[piece].runsProjectScripts`). Only a
    * route that runs none of the project's code (BMad Method's setup, which
-   * runs the bundled `setup.py`) is registered with `false`.
+   * runs only the verified pinned `setup.py`) is registered with `false`.
    */
   projectScripts?: boolean;
 }
@@ -109,7 +109,9 @@ function refusal(c: Context, error: unknown, notFound: string): Response {
   if (error instanceof StatusNotAllowedError) return apiError(c, 409, 'status_not_allowed', STATUS_NOT_ALLOWED_MESSAGE);
   if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', notFound);
   // Story 4.2's other refusals, thrown by entries 4.3 to 4.11 as core errors with their shared code.
-  if (error instanceof CoreError && (error.code === 'bmad_not_set_up' || error.code === 'reduced_mode')) return apiError(c, 409, error.code, error.message);
+  if (error instanceof CoreError && (error.code === 'bmad_not_set_up' || error.code === 'reduced_mode' || error.code === 'bmad_not_downloaded')) {
+    return apiError(c, 409, error.code, error.message);
+  }
   throw error;
 }
 

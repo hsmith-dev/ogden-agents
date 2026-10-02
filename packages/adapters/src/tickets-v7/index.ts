@@ -1,8 +1,11 @@
 /**
  * `tickets-v7` (story 4.1; story 4.2 completes the port): the real
  * `TicketStorePort`, on BMad Method's own `tickets.py` (AD-10, AD-12: this
- * adapter may name it), bundled with Ogden Agents in the BMad Method fork
- * (AD-13) and run with `uv` through the one script runner.
+ * adapter may name it), run only from the verified copy of the pinned
+ * upstream BMad Method in the data folder (story 4.14, AD-13: never a
+ * project's own copy), with `uv` through the one script runner. The script's
+ * path is resolved at each run; with BMad Method not downloaded, every
+ * operation is `TicketsUnavailableError('not_downloaded')` and nothing runs.
  *
  * - `tree` runs `tickets.py --project-root <repo> status`, which reads the
  *   active initiative's ticket tree; concurrent reads of one repo share a
@@ -50,8 +53,12 @@ import { ScriptRunError, type UvScriptRunner } from '../toolchain-uv/script-runn
 
 export interface TicketsV7Options {
   runner: UvScriptRunner;
-  /** The bundled `tickets.py`'s absolute path. */
-  script: string;
+  /**
+   * The verified `tickets.py`'s absolute path, read at each run
+   * (`source.file('bmad-ticket/scripts/tickets.py')`); `undefined` while the
+   * pinned BMad Method isn't downloaded.
+   */
+  script: () => string | undefined;
   /**
    * The working folder of every run: an existing folder that is never a
    * project's (the server's `<dataDir>/tools/uv-work`), so uv finds no
@@ -99,7 +106,7 @@ const reasonOf = (error: ScriptRunError): TicketsUnavailableReason =>
 /** The script's own "no ticket matches" and "matches more than one ticket" (exit 1): either way no ticket is that ref. */
 const NO_MATCH = /^no ticket matches |matches more than one ticket/;
 
-export function createTicketsV7({ runner, script, workDir, onFailure }: TicketsV7Options): TicketStorePort {
+export function createTicketsV7({ runner, script: scriptOf, workDir, onFailure }: TicketsV7Options): TicketStorePort {
   const fail = (error: ScriptRunError | TicketsUnavailableError): never => {
     try {
       onFailure?.(error);
@@ -114,6 +121,8 @@ export function createTicketsV7({ runner, script, workDir, onFailure }: TicketsV
 
   /** Runs `tickets.py --project-root <repo> <args…>` in the repo; a "no ticket matches" refusal is `NotFoundError` for `ref`. */
   const run = async (repoPath: string, args: readonly string[], ref?: string): Promise<unknown> => {
+    const script = scriptOf();
+    if (script === undefined) return fail(new TicketsUnavailableError('not_downloaded'));
     try {
       // `--project-root`: the repo itself, never a `_bmad/` found above it. The working folder is never the
       // repo, so uv runs no `.venv` the repo ships (see the header).

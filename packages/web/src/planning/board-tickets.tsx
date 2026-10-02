@@ -7,6 +7,7 @@ import { Row, RowList, RowMeta } from '@/ui/row-list';
 import { Skeleton } from '@/ui/skeleton';
 import { Text } from '@/ui/typography';
 import { ScriptTrustPrompt } from '@/workspaces/script-trust-prompt';
+import { BmadDownloadPrompt } from './bmad-download-prompt';
 import { useTickets } from './planning-api';
 
 /**
@@ -16,11 +17,14 @@ import { useTickets } from './planning-api';
  * UI works out nothing from them). What couldn't be read is listed under a
  * notice. Loading, error and empty states. A project whose BMad Method
  * scripts aren't trusted yet (`scripts_not_trusted`, story 4.2) shows the
- * trust prompt instead, and its Allow fetches the tickets again.
+ * trust prompt instead, and its Allow fetches the tickets again. Without the
+ * pinned BMad Method downloaded (`bmad_not_downloaded`, story 4.14) it
+ * offers Download BMad Method, which fetches the tickets again once done.
  */
 export function BoardTickets({ wsId }: { wsId: string }) {
   const tickets = useTickets(wsId);
   if (isApiError(tickets.error, 'scripts_not_trusted')) return <ScriptTrustPrompt wsId={wsId} onTrusted={() => void tickets.refetch()} />;
+  if (isApiError(tickets.error, 'bmad_not_downloaded')) return <BmadDownloadPrompt onDownloaded={() => void tickets.refetch()} />;
   if (tickets.error !== null) {
     return (
       <Text variant="caption" role="alert" data-testid="board-error">

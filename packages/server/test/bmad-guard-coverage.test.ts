@@ -4,7 +4,8 @@
  * `/launcher`) is classified, by default-deny: a route inside a workspace (`/api/v1/workspaces/:wsId/…`)
  * serves a piece unless it is listed below as one that serves projects with
  * BMad off, and a server route anywhere whose path names BMad or a piece serves one
- * unless it is one of the four routes that serve projects with BMad off. Each
+ * unless it is one of the routes listed as unguarded by design (they serve
+ * projects with BMad off, or the whole install). Each
  * route that serves a piece must have been registered through
  * `bmadPieceRoutes` (`guardedRouteKeys`), or this test fails naming it.
  *
@@ -46,9 +47,12 @@ const WORKSPACE_ROUTES_WITHOUT_A_PIECE: readonly string[] = [
   `PUT ${API_ROUTES.workspaceBmadScriptTrust}`,
 ];
 
-/** The BMad-named routes that serve projects with BMad off (story 10.2): never guarded, by design. */
+/** The BMad-named routes that serve projects with BMad off (story 10.2) or the whole install (story 4.14): never guarded, by design. */
 const UNGUARDED_BY_DESIGN: readonly string[] = [
   `GET ${API_ROUTES.bmadPieces}`,
+  // The pinned upstream BMad Method's status and download (story 4.14): one for the install, never a workspace's piece.
+  `GET ${API_ROUTES.bmadSource}`,
+  `POST ${API_ROUTES.bmadSource}`,
   `GET ${API_ROUTES.newProjectDefaults}`,
   `PATCH ${API_ROUTES.newProjectDefaults}`,
   `GET ${API_ROUTES.workspaceBmadDetection}`,

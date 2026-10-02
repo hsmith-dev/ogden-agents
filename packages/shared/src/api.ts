@@ -144,6 +144,15 @@ export const API_ROUTES = {
    */
   bmadPieces: `${API_BASE}/bmad/pieces`,
   /**
+   * `GET` → `BmadSourceResponse` (story 4.14, AD-13): whether the pinned
+   * upstream BMad Method is downloaded and verified in the data folder; reads
+   * only the folder, never the network. `POST` → `BmadSourceResponse`:
+   * downloads and verifies it, only when the user asks (Download BMad
+   * Method); 503 or 502 `bmad_download_failed`. Install-level, not guarded
+   * by a piece.
+   */
+  bmadSource: `${API_BASE}/bmad/source`,
+  /**
    * `GET` → `NewProjectDefaultsResponse`; `PATCH UpdateNewProjectDefaultsRequest`
    * → `NewProjectDefaultsResponse` (story 10.2's contract; 10.4 serves
    * it): the app-wide default pieces for new projects.
@@ -195,7 +204,7 @@ export const API_ROUTES = {
    * `GET` → `BmadSetupStatusResponse`; `POST` → 202 `BmadSetupStartedResponse`
    * (story 4.2's contract; entry 4.3 serves it): BMad Method's setup in the
    * project, progress as `bmad.setup_*` events. Serves `planning` or `board`
-   * (either on); runs only the bundled `setup.py`, so it needs no script trust.
+   * (either on); runs only the verified pinned `setup.py` (AD-13), so it needs no script trust.
    */
   workspaceBmadSetup: `${API_BASE}/workspaces/:wsId/bmad/setup`,
   /**

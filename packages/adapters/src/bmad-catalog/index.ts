@@ -41,10 +41,11 @@ async function isRealFolderAt(path: string): Promise<boolean> {
 const isRealFolder = (repoPath: string, name: string): Promise<boolean> => isRealFolderAt(join(repoPath, name));
 
 /**
- * The catalog of a repo until entry 4.4 reads its modules, agents and fork
- * metadata (story 4.2): the installed skills (`scanSkills`, read-only, only
+ * The catalog of a repo until entry 4.4 reads its modules and agents and
+ * entry 4.5 applies Ogden Agents' label mapping (`skill-labels.json`, story
+ * 4.14) (story 4.2): the installed skills (`scanSkills`, read-only, only
  * inside the repo) with every metadata field `null`, no modules or agents,
- * no entry action, and no fork capability detected yet.
+ * no entry action, and no capability detected yet.
  */
 async function catalogOf(repoPath: string): Promise<Catalog> {
   const skills = await scanSkills(repoPath);

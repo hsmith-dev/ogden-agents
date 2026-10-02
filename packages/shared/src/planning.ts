@@ -30,7 +30,7 @@ export type SkillName = z.infer<typeof SkillName>;
 
 /**
  * The UI groups of the Plan page, in the order it shows them (EXPERIENCE.md
- * Plan home). A skill's group comes from fork metadata (entry 4.5); a group
+ * Plan home). A skill's group comes from Ogden Agents' label mapping (entry 4.5); a group
  * this list doesn't know, or none, shows last as {@link CATALOG_OTHER_GROUP_LABEL}.
  */
 export const CATALOG_GROUPS = ['planning', 'building', 'checking', 'research', 'agents', 'setup'] as const;
@@ -93,7 +93,7 @@ export const CatalogNext = z.object({ skill: SkillName, label: z.string().min(1)
 export type CatalogNext = z.infer<typeof CatalogNext>;
 
 /**
- * One installed skill, from its `SKILL.md` frontmatter and fork metadata.
+ * One installed skill, from its `SKILL.md` frontmatter and Ogden Agents' label mapping (AD-12).
  * `description` is empty when the skill gives none; each other field is
  * `null` when no metadata says it (the Plan page then falls back to the
  * name and description, AD-12).
@@ -101,7 +101,7 @@ export type CatalogNext = z.infer<typeof CatalogNext>;
 export const CatalogSkill = z.object({
   name: SkillName,
   description: z.string(),
-  /** The plain-language label (fork metadata, entry 4.5). */
+  /** The plain-language label (Ogden Agents' label mapping, entry 4.5). */
   label: z.string().min(1).nullable().default(null),
   /** The UI group ({@link CATALOG_GROUPS}, or an unknown one that shows as Other). */
   group: z.string().min(1).nullable().default(null),
@@ -369,8 +369,8 @@ export function boardColumnOf(row: Pick<TicketRow, 'status' | 'state'> & Partial
  * Where a project's BMad Method stands (`setup.py --status`, entry 4.3):
  * - `not_set_up`: no `_bmad/`;
  * - `setup_owed`: a piece is on but setup hasn't finished (or was interrupted);
- * - `current`: set up with the bundled version;
- * - `update_available`: set up with an older version than the bundled one;
+ * - `current`: set up with the pinned version (AD-13);
+ * - `update_available`: set up with an older version than the pinned one;
  * - `unusable`: `_bmad/` is there but can't be read (`problems` says why).
  */
 export const BMAD_SETUP_STATES = ['not_set_up', 'setup_owed', 'current', 'update_available', 'unusable'] as const;
@@ -391,7 +391,7 @@ export const BmadSetupStatus = z.object({
   state: BmadSetupState,
   /** The output folder the project's config names, relative to the repo (`_bmad-output`); `null` when not set up. */
   outputFolder: RepoRelativePath.nullable(),
-  /** The version Ogden Agents bundles (AD-13). */
+  /** The pinned upstream version (`bmad-lock.json`, AD-13; the name is kept from when it was bundled). */
   bundledVersion: z.string().min(1),
   /** The version installed in the project, `null` when none is. */
   installedVersion: z.string().min(1).nullable(),
@@ -442,6 +442,71 @@ export const SCRIPT_TRUST_ALLOW = 'Allow';
 export const SCRIPT_TRUST_CANCEL = 'Cancel';
 /** The fallback when allowing couldn't be saved. */
 export const SCRIPT_TRUST_FAILED = "Ogden Agents couldn't save your answer. Try again.";
+
+// ---- The pinned upstream BMad Method (story 4.14, AD-13) ----
+
+/**
+ * Whether this install has its pinned BMad Method downloaded and verified in
+ * its data folder:
+ * - `missing`: not downloaded (or downloaded for another pin, before an upgrade);
+ * - `downloading`: a download the user asked for is running;
+ * - `ready`: the exact pinned commit is there, verified.
+ */
+export const BMAD_SOURCE_STATES = ['missing', 'downloading', 'ready'] as const;
+export const BmadSourceState = z.enum(BMAD_SOURCE_STATES);
+export type BmadSourceState = z.infer<typeof BmadSourceState>;
+
+/** The pinned BMad Method's state, its version as upstream names it, and the full commit it is pinned to. */
+export const BmadSourceStatus = z.object({
+  state: BmadSourceState,
+  version: z.string().min(1),
+  commit: z.string().regex(/^[0-9a-f]{40}$/),
+});
+export type BmadSourceStatus = z.infer<typeof BmadSourceStatus>;
+
+/** `GET` and `POST /api/v1/bmad/source`: the status itself (after a download, `ready`). */
+export const BmadSourceResponse = BmadSourceStatus;
+export type BmadSourceResponse = BmadSourceStatus;
+
+/** One upstream source in the lock (`bmad-lock.json`): repo, the ref its commit is reachable from, and the content hash of `include`. */
+export const BmadLockSource = z.object({
+  /** GitHub `owner/name`. */
+  repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+  /** The upstream branch or tag the commit must be in the history of (CI checks it). */
+  ref: z.string().min(1),
+  /** The full commit SHA. */
+  commit: z.string().regex(/^[0-9a-f]{40}$/),
+  /** The version as upstream names it at that commit. */
+  version: z.string().min(1),
+  /** The folder of the tree that is used, ending in `/`, or `''` for the whole tree. */
+  include: z
+    .string()
+    .regex(/^(?:[A-Za-z0-9_.-]+\/)*$/)
+    .refine((include) => include.split('/').every((segment) => segment !== '.' && segment !== '..'), 'A folder inside the tree, without . or .. segments.'),
+  /** Pinned build requirements for `uv` (bmad-loop). */
+  buildConstraints: z.array(z.string().min(1)).optional(),
+  /** `sha256:<hex>` over the selected files' paths and LF-normalized contents. */
+  contentHash: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+});
+export type BmadLockSource = z.infer<typeof BmadLockSource>;
+
+/** The lock: every pinned upstream source, by name. */
+export const BmadLock = z.object({ sources: z.object({ 'bmad-method': BmadLockSource, 'bmad-loop': BmadLockSource }) });
+export type BmadLock = z.infer<typeof BmadLock>;
+
+/** `bmad_not_downloaded` (409): a surface that runs BMad Method's scripts was used before the pinned BMad Method was downloaded. */
+export const BMAD_NOT_DOWNLOADED_MESSAGE = 'Ogden Agents needs to download BMad Method first. Download it, then try again.';
+/** `bmad_download_failed` (503): the download didn't arrive (offline, an HTTP error, too slow or too large). */
+export const BMAD_DOWNLOAD_OFFLINE_MESSAGE = "Ogden Agents couldn't download BMad Method. Check your internet connection, then try again.";
+/** `bmad_download_failed` (502): what arrived isn't the pinned BMad Method, so nothing was saved. */
+export const BMAD_DOWNLOAD_INTEGRITY_MESSAGE =
+  "The BMad Method download didn't match the version this Ogden Agents release expects, so nothing was saved. Try again later.";
+/** The Board's notice when BMad Method isn't downloaded yet. */
+export const BMAD_NOT_DOWNLOADED_TEXT = 'Board runs BMad Method, which Ogden Agents downloads once from GitHub and checks before it uses it.';
+/** The button that downloads it. */
+export const BMAD_DOWNLOAD_LABEL = 'Download BMad Method';
+/** Said while it downloads. */
+export const BMAD_DOWNLOADING_TEXT = 'Downloading BMad Method';
 
 // ---- User-facing texts ----
 
@@ -519,7 +584,7 @@ export const BMAD_NOT_SET_UP_TEXT = "BMad Method isn't set up in this project ye
 export const BMAD_SETUP_DONE_TEXT = 'Ready to plan.';
 /** The fallback when a setup couldn't run. */
 export const BMAD_SETUP_FAILED = "Ogden Agents couldn't set up BMad Method in this project";
-/** The setup status line when a newer bundled version exists. */
+/** The setup status line when a newer pinned version exists. */
 export function bmadUpdateAvailableText(installed: string, bundled: string): string {
   return `This project has BMad Method ${installed}. Version ${bundled} is available.`;
 }

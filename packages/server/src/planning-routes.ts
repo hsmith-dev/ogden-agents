@@ -12,18 +12,20 @@
  *   `SessionResponse`: a `planning` session whose first message invokes the
  *   skill, with the idea when given; 400 for a malformed body, name or idea,
  *   404 for a skill not in the catalog.
- * - `GET …/tickets` (`board`, trust) → `TicketsResponse`; 503
- *   `tickets_unavailable` with a plain message when they can't be read.
+ * - `GET …/tickets` (`board`, trust) → `TicketsResponse`; 409
+ *   `bmad_not_downloaded` before the pinned BMad Method is downloaded
+ *   (story 4.14; nothing runs); 503 `tickets_unavailable` with a plain
+ *   message when they can't be read.
  * - `GET …/tickets/:ref` and `PUT …/tickets/:ref/status` (`board`, trust):
  *   501 until entries 4.9 and 4.10 fill them.
  * - `GET` and `POST …/bmad/setup` (`planning` or `board`; runs only the
- *   bundled `setup.py`, so no trust): 501 until entry 4.3 fills them.
+ *   verified pinned `setup.py`, so no trust): 501 until entry 4.3 fills them.
  *
  * Without the use-cases (an app wired without them) each answers 501 once
  * the guards have passed.
  */
 import { TicketsUnavailableError, ValidationError, type BmadFeatures, type BmadScriptTrust, type BoardUseCases, type PlanningUseCases } from '@ogden-agents/core';
-import { API_ROUTES, CatalogResponse, MAX_IDEA_LENGTH, SessionResponse, StartPlanningRequest, TicketsResponse } from '@ogden-agents/shared';
+import { API_ROUTES, BMAD_NOT_DOWNLOADED_MESSAGE, CatalogResponse, MAX_IDEA_LENGTH, SessionResponse, StartPlanningRequest, TicketsResponse } from '@ogden-agents/shared';
 import type { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { bmadPieceRoutes } from './bmad-pieces.js';
@@ -87,6 +89,12 @@ export function registerPlanningRoutes(app: Hono, { bmad, scriptTrust, planning,
     try {
       return c.json(TicketsResponse.parse(await board.tickets(workspaceId)));
     } catch (error) {
+      // The marker says downloaded but the verified `tickets.py` is gone: the same answer as not downloaded,
+      // so the Board offers Download, which re-checks the copy and downloads it again (story 4.14).
+      if (error instanceof TicketsUnavailableError && error.reason === 'not_downloaded') {
+        log.warn('tickets unavailable', { workspaceId, reason: error.reason });
+        return apiError(c, 409, 'bmad_not_downloaded', BMAD_NOT_DOWNLOADED_MESSAGE);
+      }
       if (error instanceof TicketsUnavailableError) {
         log.warn('tickets unavailable', { workspaceId, reason: error.reason });
         return apiError(c, 503, 'tickets_unavailable', error.message);
@@ -98,7 +106,7 @@ export function registerPlanningRoutes(app: Hono, { bmad, scriptTrust, planning,
   // Pre-registered by story 4.2, so their entries only fill them: each answers 501 once the guards pass.
   routes.get('board', API_ROUTES.workspaceTicket, (c) => notImplemented(c));
   routes.put('board', API_ROUTES.workspaceTicketStatus, (c) => notImplemented(c));
-  // BMad Method's setup runs the bundled `setup.py`, never the project's own code (entry 4.3 confirms it).
+  // BMad Method's setup runs the verified pinned `setup.py`, never the project's own code (entry 4.3 confirms it).
   routes.get(['planning', 'board'], API_ROUTES.workspaceBmadSetup, (c) => notImplemented(c), { projectScripts: false });
   routes.post(['planning', 'board'], API_ROUTES.workspaceBmadSetup, (c) => notImplemented(c), { projectScripts: false });
 }

@@ -7,8 +7,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { request, type IncomingHttpHeaders } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createMemoryAgentSetup, createMemoryAppShortcut, createMemoryBmadCatalog, createMemorySecretStore, createMemoryTicketStore } from '@ogden-agents/adapters';
-import { createAgentSetup, createBoard, createChat, createNewProjectDefaults, createOnboarding, createPlanning, type AgentPort, type Core } from '@ogden-agents/core';
+import {
+  createMemoryAgentSetup,
+  createMemoryAppShortcut,
+  createMemoryBmadCatalog,
+  createMemoryBmadSource,
+  createMemorySecretStore,
+  createMemoryTicketStore,
+} from '@ogden-agents/adapters';
+import { createAgentSetup, createBmadSource, createBoard, createChat, createNewProjectDefaults, createOnboarding, createPlanning, type AgentPort, type Core } from '@ogden-agents/core';
 import { API_ROUTES, webSocketProtocols } from '@ogden-agents/shared';
 import type { Hono } from 'hono';
 import { afterEach } from 'vitest';
@@ -104,6 +111,9 @@ export async function startTestServer(options: StartOptions & { lines?: string[]
     claudeAdapterPath: FAKE_AGENT,
     secrets: createMemorySecretStore(),
     verifyApiKey: async () => 'ok',
+    // The pinned BMad Method as already downloaded (story 4.14), so no test reaches GitHub; a test of the
+    // download itself passes its own source, or `bmadFetch` for the real adapter.
+    ...(rest.bmadSource === undefined && rest.bmadFetch === undefined ? { bmadSource: createMemoryBmadSource({ ready: true }) } : {}),
     ...rest,
     launch: true,
   });
@@ -246,6 +256,7 @@ export function fullTestApp(core: Core, extra: Partial<AppOptions> = {}): Hono {
     listAuthMethods: () => Promise.reject(new Error('no agent in this test')),
   };
   const chat = createChat({ dataDir: tempDataDir(), entities: core.entities, sessionEvents: core.sessionEvents, agent });
+  const bmadSource = createBmadSource(createMemoryBmadSource({ ready: true }));
   return createApp({
     events: core.events,
     webRoot: tinyWebRoot(),
@@ -259,7 +270,8 @@ export function fullTestApp(core: Core, extra: Partial<AppOptions> = {}): Hono {
     bmadDetection: core.bmadDetection,
     bmadScriptTrust: core.bmadScriptTrust,
     planning: createPlanning({ bmad: core.bmad, entities: core.entities, catalog: createMemoryBmadCatalog(), chat, agent }),
-    board: createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, entities: core.entities, tickets: createMemoryTicketStore() }),
+    board: createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: bmadSource, entities: core.entities, tickets: createMemoryTicketStore() }),
+    bmadSource,
     agentSetup: createAgentSetup(core.events, [createMemoryAgentSetup()]),
     onboarding: createOnboarding({ dataDir: tempDataDir(), hasProjects: () => false }),
     newProjectDefaults: createNewProjectDefaults({ dataDir: tempDataDir(), bmad: core.bmad }),

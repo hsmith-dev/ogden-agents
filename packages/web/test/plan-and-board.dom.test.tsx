@@ -6,12 +6,19 @@
  * The Board page lists the tickets with their ref, title, state and status,
  * and what couldn't be read. Both have loading, error and empty states.
  * Story 4.2: a Board refused with `scripts_not_trusted` shows the trust
- * prompt, and Allow trusts the project and fetches the tickets again. The
+ * prompt, and Allow trusts the project and fetches the tickets again.
+ * Story 4.14: a Board refused with `bmad_not_downloaded` offers Download
+ * BMad Method, which posts once, says it is downloading, then fetches the
+ * tickets again; a failed download says why and keeps the button. The
  * REST calls go to a fake `tabAuth.fetch`.
  */
 import {
   API_ROUTES,
   apiPath,
+  BMAD_DOWNLOAD_INTEGRITY_MESSAGE,
+  BMAD_DOWNLOAD_LABEL,
+  BMAD_NOT_DOWNLOADED_MESSAGE,
+  BMAD_NOT_DOWNLOADED_TEXT,
   BOARD_EMPTY_TITLE,
   BOARD_LOADING_TEXT,
   CatalogSkill,
@@ -48,6 +55,7 @@ const state = vi.hoisted(() => ({
   calls: [] as string[],
   bodies: [] as unknown[],
   trust: undefined as unknown,
+  source: undefined as unknown,
 }));
 
 const reply = (answer: unknown): Promise<Response> => {
@@ -70,6 +78,7 @@ vi.mock('@/auth/tab-token', () => ({
         return reply(catalog === 'pending' || (catalog as { status?: number }).status !== undefined ? catalog : whole);
       }
       if (path.endsWith('/bmad/script-trust')) return reply(state.trust);
+      if (path.endsWith('/bmad/source')) return reply(state.source);
       if (path.endsWith('/planning-sessions')) {
         state.bodies.push(JSON.parse(String(init.body)));
         return reply(state.start);
@@ -117,6 +126,7 @@ beforeEach(() => {
   state.calls = [];
   state.bodies = [];
   state.trust = { settings: { cautionLevel: 'ask_every_time', bmadPieces: ['board'], bmadScriptsTrusted: true } };
+  state.source = undefined;
 });
 afterEach(cleanup);
 
@@ -248,5 +258,51 @@ describe('Board page body: the script trust (story 4.2)', () => {
     await settle();
     expect(screen.queryByTestId('script-trust-prompt')).toBeNull();
     expect(screen.getByRole('alert').textContent).toBe('This BMad Method feature is off in this project.');
+  });
+});
+
+describe('Board page body: downloading BMad Method (story 4.14)', () => {
+  const notDownloaded = { status: 409, code: 'bmad_not_downloaded', message: BMAD_NOT_DOWNLOADED_MESSAGE };
+  const ready = { state: 'ready', version: '6.13.0', commit: 'a'.repeat(40) };
+
+  it('bmad_not_downloaded offers Download BMad Method; nothing downloads until clicked, then it posts once and fetches the tickets again', async () => {
+    state.tickets = notDownloaded;
+    state.source = 'pending';
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    expect(screen.getByTestId('bmad-download-prompt').textContent).toContain(BMAD_NOT_DOWNLOADED_TEXT);
+    expect(screen.getByTestId('bmad-download').textContent).toBe(BMAD_DOWNLOAD_LABEL);
+    expect(state.calls.filter((call) => call.includes('/bmad/source'))).toEqual([]);
+    fireEvent.click(screen.getByTestId('bmad-download'));
+    await settle();
+    // Pending: it says so, and a second click sends nothing more.
+    expect(screen.getByTestId('bmad-downloading')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('bmad-download'));
+    await settle();
+    expect(state.calls.filter((call) => call.includes('/bmad/source'))).toEqual([`POST ${API_ROUTES.bmadSource}`]);
+    cleanup();
+
+    state.calls.length = 0;
+    state.source = ready;
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    state.tickets = TICKETS;
+    fireEvent.click(screen.getByTestId('bmad-download'));
+    await settle();
+    expect(state.calls).toContain(`POST ${API_ROUTES.bmadSource}`);
+    expect(screen.queryByTestId('bmad-download-prompt')).toBeNull();
+    expect(screen.getAllByTestId('ticket-row')).toHaveLength(2);
+  });
+
+  it('a failed download says why and keeps the button', async () => {
+    state.tickets = notDownloaded;
+    state.source = { status: 502, code: 'bmad_download_failed', message: BMAD_DOWNLOAD_INTEGRITY_MESSAGE };
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    fireEvent.click(screen.getByTestId('bmad-download'));
+    await settle();
+    expect(screen.getByTestId('bmad-download-error').textContent).toBe(BMAD_DOWNLOAD_INTEGRITY_MESSAGE);
+    expect(screen.getByTestId('bmad-download')).toBeTruthy();
+    expect(screen.queryByTestId('bmad-downloading')).toBeNull();
   });
 });

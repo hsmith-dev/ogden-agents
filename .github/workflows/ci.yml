@@ -41,7 +41,7 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      # Builds the bmad-loop wheel when checking the vendored forks.
+      # The real-uv tests run BMad Method's tickets.py (story 4.1).
       # No uv.lock here, so nothing to key a cache on.
       - uses: astral-sh/setup-uv@v10.2.0
         with:
@@ -54,15 +54,6 @@ jobs:
       - name: Provision the tests' uv-managed Python
         shell: bash
         run: uv python install 3.12 || (sleep 5 && uv python install 3.12)
-
-      # Re-derives vendor/ from forks.lock (fork tarballs at the locked commits,
-      # a rebuilt bmad-loop wheel) and fails naming any file that differs
-      # (AD-13). Hashes are LF-normalized, so it passes on Windows checkouts too.
-      - name: Check vendored forks
-        run: node scripts/vendor-forks.mjs --check
-        env:
-          # Tag lookups go through the GitHub API; the token lifts the anonymous rate limit.
-          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Typecheck
         run: pnpm typecheck
@@ -146,6 +137,27 @@ jobs:
 
       - name: Check every pinned uv archive
         run: node scripts/check-uv-pins.mjs
+
+  # The pinned upstream BMad Method and bmad-loop (story 4.14, AD-13): each
+  # pinned commit's tarball is downloaded and its content hash recomputed
+  # through the app's own archive module, and the commit must be in the
+  # history of the lock's ref. The only job that downloads them; no test does.
+  bmad-pins:
+    name: BMad pins
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Check the pinned upstream BMad sources
+        run: node scripts/bmad-lock.mjs --check
+        env:
+          # The compare lookups go through the GitHub API; the token lifts the anonymous rate limit.
+          GITHUB_TOKEN: ${{ github.token }}
 
   # The Claude Agent ACP adapter Ogden Agents may install (story 9.3): a real
   # `npm ci` of the pins in packages/adapters/src/setup-claude-code/pins/ into

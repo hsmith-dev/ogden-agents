@@ -11,6 +11,9 @@
 import { CatalogSkill, MAX_IDEA_LENGTH, TicketRow, type Catalog, type SessionId, type TicketsResponse, type WorkspaceId } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import {
+  BmadDownloadError,
+  BmadNotDownloadedError,
+  createBmadSource,
   createBoard,
   createChat,
   createPlanning,
@@ -23,6 +26,7 @@ import {
   type AgentPort,
   type AgentSession,
   type BmadCatalogPort,
+  type BmadSourcePort,
   type Core,
   type TicketStorePort,
 } from '../src/index.js';
@@ -85,7 +89,21 @@ function promptRecorder(): AgentPort & { prompts: string[] } {
   };
 }
 
-function setup(pieces: ('planning' | 'board')[] = ['planning', 'board'], { trusted = true }: { trusted?: boolean } = {}) {
+/** A pinned BMad Method that is ready or not, counting status reads; it never downloads here. */
+function fakeSource(ready: boolean): BmadSourcePort & { reads: number } {
+  const source = {
+    reads: 0,
+    status: () => {
+      source.reads++;
+      return { state: ready ? ('ready' as const) : ('missing' as const), version: '6.13.0', commit: 'a'.repeat(40) };
+    },
+    download: () => Promise.reject(new BmadDownloadError('offline')),
+    file: () => undefined,
+  };
+  return source;
+}
+
+function setup(pieces: ('planning' | 'board')[] = ['planning', 'board'], { trusted = true, downloaded = true }: { trusted?: boolean; downloaded?: boolean } = {}) {
   const core: Core = openTestCore(tempDir(), undefined, { availableBmadPieces: ['planning', 'board'] });
   const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
   if (pieces.length > 0) core.permissions.updateSettings(workspace.id, { bmadPieces: pieces });
@@ -114,8 +132,9 @@ function setup(pieces: ('planning' | 'board')[] = ['planning', 'board'], { trust
     },
     watch: () => Promise.reject(new Error('not watched in this test')),
   };
-  const board = createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, entities: core.entities, tickets });
-  return { core, workspace, catalog, agent, chat, planning, board, read, marks, fail: (error: Error) => (answer = error) };
+  const source = fakeSource(downloaded);
+  const board = createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: createBmadSource(source), entities: core.entities, tickets });
+  return { core, workspace, catalog, agent, chat, planning, board, read, marks, source, fail: (error: Error) => (answer = error) };
 }
 
 const firstUserMessage = (core: Core, sessionId: SessionId) =>
@@ -220,6 +239,29 @@ describe('board trust and the rest of the contract (story 4.2)', () => {
   it('checks the piece before the trust: Board off answers feature_off even untrusted', async () => {
     const { board, workspace } = setup(['planning'], { trusted: false });
     await expect(board.tickets(workspace.id)).rejects.toThrow(FeatureOffError);
+  });
+
+  it('without the pinned BMad Method downloaded every board use-case refuses with bmad_not_downloaded and runs nothing (story 4.14)', async () => {
+    const { board, workspace, read, marks } = setup(['board'], { downloaded: false });
+    for (const attempt of [board.tickets(workspace.id), board.ticket(workspace.id, '1.1'), board.mark(workspace.id, '1.1', { status: 'ready-for-dev' })]) {
+      const error = await attempt.then(
+        () => undefined,
+        (failure: unknown) => failure,
+      );
+      expect(error).toBeInstanceOf(BmadNotDownloadedError);
+      expect((error as BmadNotDownloadedError).code).toBe('bmad_not_downloaded');
+    }
+    expect(read).toEqual([]);
+    expect(marks).toEqual([]);
+  });
+
+  it('checks the piece, then the trust, then the download: neither off nor untrusted asks whether it is downloaded (story 4.14)', async () => {
+    const off = setup(['planning'], { trusted: false, downloaded: false });
+    await expect(off.board.tickets(off.workspace.id)).rejects.toThrow(FeatureOffError);
+    expect(off.source.reads).toBe(0);
+    const untrusted = setup(['board'], { trusted: false, downloaded: false });
+    await expect(untrusted.board.tickets(untrusted.workspace.id)).rejects.toThrow(ScriptsNotTrustedError);
+    expect(untrusted.source.reads).toBe(0);
   });
 
   it('reads one ticket, and a missing one is not found; a malformed ref is invalid and runs nothing', async () => {

@@ -7,6 +7,7 @@ export * from './bmad-detection.js';
 export * from './bmad-features.js';
 export * from './bmad-script-trust.js';
 export * from './bmad-setup.js';
+export * from './bmad-source-port.js';
 export * from './board.js';
 export * from './chat.js';
 export * from './core.js';

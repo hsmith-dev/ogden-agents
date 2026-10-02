@@ -7,12 +7,15 @@
  * tickets a stub ticket store reports. With Planning off and Board on, only
  * the Board tab shows. Story 4.2: an untrusted project's Board shows the
  * trust prompt, and Allow trusts it and shows the tickets; turning Board on
- * in the settings opens the trust dialog first. No real `claude` or `uv` runs.
+ * in the settings opens the trust dialog first. Story 4.14: a Board with the
+ * pinned BMad Method not downloaded offers Download BMad Method, and after it
+ * the tickets show (an in-memory source: nothing is downloaded). No real
+ * `claude` or `uv` runs.
  */
 import { expect, test } from '@playwright/test';
 // The shared routes' own file (it has no imports), as support.ts reads it.
 import { apiPath } from '../../packages/shared/src/api.ts';
-import { API_ROUTES } from '../support.js';
+import { API_ROUTES, serverModule } from '../support.js';
 import { withChatServer } from './chat-server.js';
 import { storedToken } from './tab.js';
 
@@ -48,8 +51,9 @@ function stubTicketStore() {
   return store;
 }
 
-test('Plan Start opens the planning session, and Board asks for trust, then lists the tickets', async ({ page }) => {
+test('Plan Start opens the planning session, and Board asks for trust, then to download BMad Method, then lists the tickets', async ({ page }) => {
   const ticketStore = stubTicketStore();
+  const bmadSource = (await serverModule()).createMemoryBmadSource({ delayMs: 200 });
   await withChatServer(
     page,
     async ({ server, repo }) => {
@@ -87,12 +91,20 @@ test('Plan Start opens the planning session, and Board asks for trust, then list
       await expect(page.getByTestId('script-trust-prompt')).toContainText(TRUST_TITLE);
       expect(ticketStore.reads).toBe(0);
       await page.getByTestId('script-trust-allow').click();
+      // Story 4.14: trusted, but the pinned BMad Method isn't downloaded yet, so still nothing ran.
+      await expect(page.getByTestId('bmad-download-prompt')).toBeVisible();
+      expect(ticketStore.reads).toBe(0);
+      expect(bmadSource.downloads).toBe(0);
+      await page.getByTestId('bmad-download').click();
+      await expect(page.getByTestId('bmad-downloading')).toBeVisible();
       const rows = page.getByTestId('ticket-row');
       await expect(rows).toHaveCount(2);
       await expect(rows.nth(0)).toContainText('1.1');
       await expect(rows.nth(0)).toContainText('Build the first thing');
       await expect(rows.nth(0).getByTestId('ticket-state')).toHaveText('review');
       await expect(rows.nth(1).getByTestId('ticket-state')).toHaveText('planned');
+      await expect(page.getByTestId('bmad-download-prompt')).toHaveCount(0);
+      expect(bmadSource.downloads).toBe(1);
 
       // Planning off, Board on: only Board's tab shows, and Plan's page refuses.
       await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: ['board'] });
@@ -103,7 +115,7 @@ test('Plan Start opens the planning session, and Board asks for trust, then list
       await expect(page.getByTestId('plan-error')).toContainText('off in this project');
     },
     {
-      extra: { ticketStore },
+      extra: { ticketStore, bmadSource },
       files: {
         '.claude/skills/bmad-spec/SKILL.md': SKILL('bmad-spec', 'Condense any input into a short spec.'),
         '.claude/skills/bmad-ticket/SKILL.md': SKILL('bmad-ticket', 'Create and manage tickets.'),
@@ -114,6 +126,8 @@ test('Plan Start opens the planning session, and Board asks for trust, then list
 
 test('turning Board on in the settings asks for the trust first: Cancel changes nothing, Allow turns it on', async ({ page }) => {
   const ticketStore = stubTicketStore();
+  // Already downloaded (story 4.14): this test is about the trust.
+  const bmadSource = (await serverModule()).createMemoryBmadSource({ ready: true });
   await withChatServer(
     page,
     async ({ server, repo }) => {
@@ -146,6 +160,6 @@ test('turning Board on in the settings asks for the trust first: Cancel changes 
       await expect(page.getByTestId('ticket-row')).toHaveCount(2);
       await expect(page.getByTestId('script-trust-prompt')).toHaveCount(0);
     },
-    { extra: { ticketStore } },
+    { extra: { ticketStore, bmadSource } },
   );
 });

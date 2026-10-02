@@ -4,6 +4,7 @@ Every release of the `ogden-agents` npm package. Versions follow [semantic versi
 
 ## Unreleased
 
+- **BMad Method from upstream, downloaded when you ask.** The package no longer ships copies of BMad Method or bmad-loop. Each release pins the official upstream `bmad-code-org/BMAD-METHOD` and `bmad-code-org/bmad-loop` to one commit and a content hash. The Board's **Download BMad Method** downloads the pinned version once, checks it against that hash before anything is saved, and keeps it in Ogden Agents' data folder; the Board reads tickets only with that checked copy, never a project's own. Nothing downloads on startup or when a page loads, and offline the download says so plainly. After an upgrade that moves the pin, the Board asks to download again.
 - **New projects start Simple, or as you choose.** Settings > New projects sets what a project you add starts with: Simple chats (every BMad Method feature off, the default) or BMad Method with the features you pick (those this version ships). Welcome asks "Simple chats or BMad Method?" once for your first project; the answer sets only that project. Projects you already have are never changed, and nothing is written into a project's folder.
 - **Upgrading from 0.2.0 keeps everything.** Every project, chat, caution level and Always allow rule stays as it was, every project opens as Simple chats, and Welcome doesn't ask its new question. A project whose folder already has BMad Method files offers its features once on its chats page, and its BMad Method settings say so and name the default for new projects.
 

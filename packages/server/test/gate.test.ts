@@ -606,6 +606,9 @@ const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.onboarding}`,
   `PATCH ${API_ROUTES.onboarding}`,
   `GET ${API_ROUTES.bmadPieces}`,
+  // The pinned upstream BMad Method (story 4.14): install-level, not a piece's.
+  `GET ${API_ROUTES.bmadSource}`,
+  `POST ${API_ROUTES.bmadSource}`,
   `GET ${API_ROUTES.newProjectDefaults}`,
   `PATCH ${API_ROUTES.newProjectDefaults}`,
   `GET ${API_ROUTES.workspaceBmadDetection}`,

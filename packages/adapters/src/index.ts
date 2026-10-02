@@ -6,7 +6,10 @@
  */
 export * from './acp-claude-code/index.js';
 export * from './bmad-catalog/index.js';
+export * from './bmad-catalog/skill-labels.js';
 export { MAX_SKILL_FILE_BYTES, parseSkillFrontmatter, scanSkills, SKILL_FOLDERS } from './bmad-catalog/skills.js';
+export * from './bmad-source/index.js';
+export * from './bmad-source-memory/index.js';
 export * from './catalog-memory/index.js';
 export * from './secrets-keyring/index.js';
 export * from './secrets-memory/index.js';

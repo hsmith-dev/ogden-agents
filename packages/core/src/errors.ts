@@ -1,4 +1,7 @@
 import {
+  BMAD_DOWNLOAD_INTEGRITY_MESSAGE,
+  BMAD_DOWNLOAD_OFFLINE_MESSAGE,
+  BMAD_NOT_DOWNLOADED_MESSAGE,
   FEATURE_OFF_MESSAGE,
   FEATURE_UNAVAILABLE_MESSAGE,
   SCRIPTS_NOT_TRUSTED_MESSAGE,
@@ -83,6 +86,42 @@ export class ScriptsNotTrustedError extends CoreError {
   override readonly name = 'ScriptsNotTrustedError';
   constructor() {
     super('scripts_not_trusted', SCRIPTS_NOT_TRUSTED_MESSAGE);
+  }
+}
+
+/**
+ * A use-case that runs BMad Method's scripts was asked for before the pinned
+ * upstream BMad Method was downloaded and verified (story 4.14, AD-13): core
+ * refused it and ran nothing. The UI offers Download BMad Method.
+ */
+export class BmadNotDownloadedError extends CoreError {
+  override readonly name = 'BmadNotDownloadedError';
+  constructor() {
+    super('bmad_not_downloaded', BMAD_NOT_DOWNLOADED_MESSAGE);
+  }
+}
+
+/**
+ * Why downloading the pinned BMad Method failed: it didn't arrive
+ * (`offline`: no network, an HTTP error, a timeout, too large) or what
+ * arrived isn't the pinned content (`integrity`: a hash mismatch, an unsafe
+ * or unreadable archive).
+ */
+export type BmadDownloadFailure = 'offline' | 'integrity';
+
+/**
+ * Downloading the pinned BMad Method failed (story 4.14); nothing was saved.
+ * `message` is plain words for the user; `detail` is for the log only (a
+ * status code, the hashes), never shown.
+ */
+export class BmadDownloadError extends CoreError {
+  override readonly name = 'BmadDownloadError';
+  readonly reason: BmadDownloadFailure;
+  readonly detail: string | undefined;
+  constructor(reason: BmadDownloadFailure, detail?: string) {
+    super('bmad_download_failed', reason === 'offline' ? BMAD_DOWNLOAD_OFFLINE_MESSAGE : BMAD_DOWNLOAD_INTEGRITY_MESSAGE);
+    this.reason = reason;
+    this.detail = detail;
   }
 }
 

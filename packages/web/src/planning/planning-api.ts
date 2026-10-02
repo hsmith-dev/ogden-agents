@@ -1,7 +1,9 @@
 import {
   API_ROUTES,
   apiPath,
+  BMAD_DOWNLOAD_OFFLINE_MESSAGE,
   BOARD_LOAD_FAILED,
+  BmadSourceResponse,
   CatalogResponse,
   PLAN_LOAD_FAILED,
   PLAN_START_FAILED,
@@ -38,6 +40,15 @@ export async function startPlanningSession(wsId: string, skill: string, idea?: s
 export async function fetchTickets(wsId: string, auth: Auth = tabAuth): Promise<TicketsResponse> {
   const json = await call(auth, apiPath(API_ROUTES.workspaceTickets, { wsId }), {}, BOARD_LOAD_FAILED);
   return TicketsResponse.parse(json);
+}
+
+/**
+ * `POST /api/v1/bmad/source`: downloads and verifies the pinned BMad Method
+ * (story 4.14), only because the user clicked Download BMad Method.
+ */
+export async function downloadBmadSource(auth: Auth = tabAuth): Promise<BmadSourceResponse> {
+  const json = await call(auth, API_ROUTES.bmadSource, { method: 'POST' }, BMAD_DOWNLOAD_OFFLINE_MESSAGE);
+  return BmadSourceResponse.parse(json);
 }
 
 /** The project's catalog. */

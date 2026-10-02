@@ -34,6 +34,8 @@ Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim fr
 - Process (`bmad-build`, from 10.1): each HITL plan gets a "Live check result" line, filled before the ticket is called done. From the epic 9 retro A3. (log: "filled before the ticket is called done")
 - 4.8 (proposed): probe recursive `fs.watch` on windows-latest and ubuntu-latest in CI before building the watcher. From the epic 3 retro A8. (log: "Probe recursive `fs.watch` on windows-latest and ubuntu-latest in CI")
 
+- Epic 5 (bmad-loop resolver, from 4.14 review S1, S3, S4): hash-lock bmad-loop's dependency install, build from a temp copy, reuse the one pinned-source instance. (log: "only bmad-loop's source tree is verified")
+
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
 
 ## Log
@@ -395,3 +397,13 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-epic-contracts-and-stubs-plan.md`
   summary: Workspaces from before story 2.5 have no `realPath`, so `tickets.py --project-root` gets the stored, unresolved path that the script trust binds to.
   evidence: 4.2 review S7: `entities.ts:168` falls back to `row.path`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-pinned-upstream-bmad-verified-instead-of-bundled-forks-plan.md`
+  summary: bmad-loop's resolver installs its runtime dependencies and hatchling's own dependencies from PyPI without hashes, and honors any `[tool.uv.sources]`, so only bmad-loop's source tree is verified.
+  evidence: 4.14 review S1: `bmad-loop.ts` runs `uv pip install --build-constraints` with only `hatchling==1.32.4`; the bundled wheel had the same floating deps. Epic 5 should install from a hash-locked set (`--require-hashes` or upstream's `uv.lock`, `--no-sources`).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-pinned-upstream-bmad-verified-instead-of-bundled-forks-plan.md`
+  summary: bmad-loop's build backend runs with the verified source folder writable, so in-tree build output would sit in the folder readers trust.
+  evidence: 4.14 review S3: the pinned hatchling builds out of tree today; epic 5 can build from a temporary copy.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-pinned-upstream-bmad-verified-instead-of-bundled-forks-plan.md`
+  summary: The pinned source's temp-folder sweep and folder replacement assume one source instance per name per process.
+  evidence: 4.14 review S4: `start.ts` creates exactly one `bmad-method` source; 4.3's setup and epic 5's resolver must reuse the server's instance, not build their own.
+

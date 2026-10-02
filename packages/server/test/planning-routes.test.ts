@@ -14,16 +14,31 @@
  *   (with the idea when given), which the fake agent answers; an unknown
  *   skill is 404 and a malformed one, or a blank or too long idea, 400,
  *   creating nothing;
- * - the board runs the bundled `tickets.py` through real `uv` against a
- *   fixture repo and answers its tickets with the status and state it reports
- *   (skipped only outside CI where uv or its managed test Python is absent), writing nothing; a store
- *   that fails answers 503 `tickets_unavailable`.
+ * - the board runs the verified pinned `tickets.py` through real `uv`
+ *   against a fixture repo (story 4.14: answering 409 `bmad_not_downloaded`
+ *   until `POST /api/v1/bmad/source` downloads a fixture tarball and
+ *   verifies it against a fixture lock) and answers its tickets with the
+ *   status and state it reports (skipped only outside CI where uv or its
+ *   managed test Python is absent), writing nothing; a store that fails
+ *   answers 503 `tickets_unavailable`.
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createMemoryTicketStore, createTicketsV7, createUvScriptRunner, uvEnvironment, type MemoryTicketStore } from '@ogden-agents/adapters';
+import { fileURLToPath } from 'node:url';
+import {
+  createMemoryTicketStore,
+  createTicketsV7,
+  createUpstreamBmadSource,
+  createUvScriptRunner,
+  gunzipLimited,
+  hashEntries,
+  parseTar,
+  selectVerified,
+  uvEnvironment,
+  type MemoryTicketStore,
+} from '@ogden-agents/adapters';
 import {
   API_ROUTES,
   ApiErrorBody,
@@ -43,7 +58,7 @@ import {
 } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { createFakeBmadRepo, type FakeBmadRepo } from '../../../tests/fixtures/fake-bmad-repo.js';
-import { bundledTicketsScript } from '../src/start.js';
+import { repoTarGz } from '../../../tests/fixtures/tar.js';
 import { removeAfterTest, signIn, startTestServer, tempDataDir, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
 const SKILL = (name: string, description: string) => `---\nname: ${name}\ndescription: '${description}'\n---\n\n# ${name}\n`;
@@ -177,7 +192,7 @@ describe('Plan and Board routes (story 4.1)', () => {
       },
       close: async () => {},
     };
-    const ticketStore = createTicketsV7({ runner, script: bundledTicketsScript(), workDir: tempDataDir() });
+    const ticketStore = createTicketsV7({ runner, script: () => '/verified/tickets.py', workDir: tempDataDir() });
     const server = await startTestServer({ ticketStore });
     const tab = await signIn(server);
     const workspace = await project(server, tab, fixtureRepo(), ['board']);
@@ -340,18 +355,55 @@ function hasManagedPython(): boolean {
 // CI always provisions uv and the managed Python (ci.yml), so it never skips; a developer without them skips only these.
 const uvMissing = process.env.CI === undefined && !hasManagedPython();
 
-describe.skipIf(uvMissing)('the board through real uv and the bundled tickets.py (story 4.1)', () => {
-  it("answers the fixture repo's tickets with the status and state tickets.py reports, and writes nothing", async () => {
+/** The upstream fixture (`tests/fixtures/bmad-upstream`): the pinned `tickets.py`, unchanged. */
+const UPSTREAM_FIXTURE = fileURLToPath(new URL('../../../tests/fixtures/bmad-upstream', import.meta.url));
+const FIXTURE_TICKETS = join(UPSTREAM_FIXTURE, 'skills', 'bmad-ticket', 'scripts', 'tickets.py');
+const FIXTURE_COMMIT = 'c0ffee'.padEnd(40, '0');
+
+/**
+ * The fixture as codeload would serve it, a lock that pins its content hash,
+ * and a `fetch` that answers the tarball and counts its calls: the real
+ * `bmad-source` adapter, without the network (story 4.14).
+ */
+function fixtureUpstream() {
+  const tarball = repoTarGz(UPSTREAM_FIXTURE, `BMAD-METHOD-${FIXTURE_COMMIT}`);
+  const contentHash = hashEntries(selectVerified(parseTar(gunzipLimited(tarball, 64 * 1024 * 1024)), 'skills/'));
+  const lock = {
+    sources: {
+      'bmad-method': { repo: 'bmad-code-org/BMAD-METHOD', ref: 'main', commit: FIXTURE_COMMIT, version: '6.13.0-fixture', include: 'skills/', contentHash },
+    },
+  };
+  const fetched: string[] = [];
+  const fetch = async (url: string) => {
+    fetched.push(url);
+    return new Response(tarball);
+  };
+  return { lock, fetch, fetched };
+}
+
+describe.skipIf(uvMissing)('the board through real uv and the verified pinned tickets.py (stories 4.1, 4.14)', () => {
+  it("answers 409 bmad_not_downloaded until Download, then the fixture repo's tickets with the status and state tickets.py reports, and writes nothing", async () => {
     const uvCache = mkdtempSync(join(tmpdir(), 'ogden-agents-uv-cache-'));
     removeAfterTest(uvCache);
+    const dataDir = tempDataDir();
+    const upstream = fixtureUpstream();
     const server = await startTestServer({
-      dataDir: tempDataDir(),
+      dataDir,
+      bmadSource: createUpstreamBmadSource({ dataDir, lock: upstream.lock, fetch: upstream.fetch }),
       extraUvEnv: { UV_CACHE_DIR: uvCache, ...TEST_UV_PYTHON_ENV },
     });
     const tab = await signIn(server);
     const repo = fixtureRepo(true);
     const before = repo.hash();
     const workspace = await project(server, tab, repo, ['board'], { trust: true });
+    const missing = await request(server, tab, 'GET', paths(workspace.id).tickets);
+    expect(missing.status).toBe(409);
+    expect(ApiErrorBody.parse(await missing.json()).error.code).toBe('bmad_not_downloaded');
+    expect(upstream.fetched).toEqual([]);
+    const downloaded = await request(server, tab, 'POST', API_ROUTES.bmadSource);
+    expect(downloaded.status).toBe(200);
+    expect(await downloaded.json()).toEqual({ state: 'ready', version: '6.13.0-fixture', commit: FIXTURE_COMMIT });
+    expect(upstream.fetched).toEqual([`https://codeload.github.com/bmad-code-org/BMAD-METHOD/tar.gz/${FIXTURE_COMMIT}`]);
     const response = await request(server, tab, 'GET', paths(workspace.id).tickets);
     const text = await response.text();
     expect(response.status, text).toBe(200);
@@ -387,16 +439,23 @@ describe.skipIf(uvMissing)('the board through real uv and the bundled tickets.py
   it('a repo with no active initiative answers 503 tickets_unavailable', async () => {
     const uvCache = mkdtempSync(join(tmpdir(), 'ogden-agents-uv-cache-'));
     removeAfterTest(uvCache);
-    const server = await startTestServer({ extraUvEnv: { UV_CACHE_DIR: uvCache, ...TEST_UV_PYTHON_ENV } });
+    const dataDir = tempDataDir();
+    const upstream = fixtureUpstream();
+    const server = await startTestServer({
+      dataDir,
+      bmadSource: createUpstreamBmadSource({ dataDir, lock: upstream.lock, fetch: upstream.fetch }),
+      extraUvEnv: { UV_CACHE_DIR: uvCache, ...TEST_UV_PYTHON_ENV },
+    });
     const tab = await signIn(server);
     const workspace = await project(server, tab, fixtureRepo(false), ['board'], { trust: true });
+    expect((await request(server, tab, 'POST', API_ROUTES.bmadSource)).status).toBe(200);
     const response = await request(server, tab, 'GET', paths(workspace.id).tickets);
     expect(response.status).toBe(503);
     expect(ApiErrorBody.parse(await response.json()).error.code).toBe('tickets_unavailable');
   }, 60_000);
 });
 
-describe.skipIf(uvMissing)('tickets-v7 find through real uv and the bundled tickets.py (story 4.2)', () => {
+describe.skipIf(uvMissing)('tickets-v7 find through real uv and the pinned tickets.py (story 4.2)', () => {
   it("answers a ticket's text and whether its plan exists, and an unknown ref is not found, writing nothing", async () => {
     const uvCache = mkdtempSync(join(tmpdir(), 'ogden-agents-uv-cache-'));
     removeAfterTest(uvCache);
@@ -407,7 +466,7 @@ describe.skipIf(uvMissing)('tickets-v7 find through real uv and the bundled tick
       env: () => ({ ...uvEnvironment(), UV_CACHE_DIR: uvCache, ...TEST_UV_PYTHON_ENV }),
     });
     try {
-      const store = createTicketsV7({ runner, script: bundledTicketsScript(), workDir: tempDataDir() });
+      const store = createTicketsV7({ runner, script: () => FIXTURE_TICKETS, workDir: tempDataDir() });
       const repoPath = realPathOf(repo);
       expect(await store.find(repoPath, '1.3')).toMatchObject({ ref: '1.3', status: 'blocked', blocked_at: '2026-10-01', hasPlan: true, description: '' });
       expect((await store.find(repoPath, '1.2')).hasPlan).toBe(false);

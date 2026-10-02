@@ -151,7 +151,7 @@ describe('tickets-v7 (story 4.1)', () => {
       },
       close: async () => {},
     };
-    return { runs, failures, tickets: createTicketsV7({ runner, script: '/vendor/tickets.py', workDir: '/work', onFailure: (error) => failures.push(error) }) };
+    return { runs, failures, tickets: createTicketsV7({ runner, script: () => '/verified/tickets.py', workDir: '/work', onFailure: (error) => failures.push(error) }) };
   }
 
   it('runs `status` pinned to the repo and keeps only the board’s fields, with story 4.2’s defaults', async () => {
@@ -166,7 +166,7 @@ describe('tickets-v7 (story 4.1)', () => {
       folder: 'x',
       epics: [],
     });
-    expect(runs).toEqual([{ script: '/vendor/tickets.py', args: ['--project-root', '/repo', 'status'], cwd: '/work' }]);
+    expect(runs).toEqual([{ script: '/verified/tickets.py', args: ['--project-root', '/repo', 'status'], cwd: '/work' }]);
   });
 
   it('no problems key answers an empty list', async () => {
@@ -198,7 +198,7 @@ describe('tickets-v7 (story 4.1)', () => {
       },
       close: async () => {},
     };
-    const tickets = createTicketsV7({ runner, script: '/vendor/tickets.py', workDir: '/work' });
+    const tickets = createTicketsV7({ runner, script: () => '/verified/tickets.py', workDir: '/work' });
     const first = tickets.tree('/repo');
     const second = tickets.tree('/repo');
     expect(second).toBe(first);
@@ -240,7 +240,7 @@ describe('tickets-v7 find, mark and watch (story 4.2)', () => {
       },
       close: async () => {},
     };
-    return { runs, tickets: createTicketsV7({ runner, script: '/vendor/tickets.py', workDir: '/work' }) };
+    return { runs, tickets: createTicketsV7({ runner, script: () => '/verified/tickets.py', workDir: '/work' }) };
   }
   const found = {
     epic: 'epic-a', id: 2, file: null, type: 'story', title: 'Two payment', status: '', state: 'planned', blocked_reason: '', ref: '1.2',
@@ -252,7 +252,7 @@ describe('tickets-v7 find, mark and watch (story 4.2)', () => {
     const { runs, tickets } = store({ find: found });
     const detail = await tickets.find('/repo', '1.2');
     expect(detail).toMatchObject({ ref: '1.2', title: 'Two payment', description: 'Do two.', verify: 'It works.', references: ['spec'], notes: [], unknown: '', hasPlan: false });
-    expect(runs).toEqual([{ script: '/vendor/tickets.py', args: ['--project-root', '/repo', 'find', '1.2'], cwd: '/work' }]);
+    expect(runs).toEqual([{ script: '/verified/tickets.py', args: ['--project-root', '/repo', 'find', '1.2'], cwd: '/work' }]);
   });
 
   it('find and mark answer NotFoundError for "no ticket matches" and "matches more than one ticket", and never pass a malformed ref', async () => {
@@ -310,10 +310,10 @@ describe('tickets-v7 find, mark and watch (story 4.2)', () => {
         },
         close: () => real.close(),
       };
-      await createTicketsV7({ runner, script: '/vendor/tickets.py', workDir }).tree(repoDir.path);
+      await createTicketsV7({ runner, script: () => '/verified/tickets.py', workDir }).tree(repoDir.path);
       expect(realpathSync(echoed[0]!.cwd)).toBe(realpathSync(workDir));
       expect(realpathSync(echoed[0]!.cwd)).not.toBe(realpathSync(repoDir.path));
-      expect(echoed[0]!.argv).toEqual(['run', '--no-project', '--quiet', '/vendor/tickets.py', '--project-root', repoDir.path, 'status']);
+      expect(echoed[0]!.argv).toEqual(['run', '--no-project', '--quiet', '/verified/tickets.py', '--project-root', repoDir.path, 'status']);
     } finally {
       rmSync(workDir, { recursive: true, force: true });
     }

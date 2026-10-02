@@ -2,8 +2,8 @@
  * The server's start options and what a started server is (moved from
  * `start.ts`, story 3.9).
  */
-import type { ClaudeCodeSetupOptions, PtyLoader } from '@ogden-agents/adapters';
-import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, Core, SecretStorePort, TicketStorePort, ToolchainPort } from '@ogden-agents/core';
+import type { ClaudeCodeSetupOptions, FetchLike, PtyLoader } from '@ogden-agents/adapters';
+import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, Core, SecretStorePort, TicketStorePort, ToolchainPort } from '@ogden-agents/core';
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
 import type { Logger } from './log.js';
@@ -120,9 +120,22 @@ export interface StartOptions {
   bmadCatalog?: BmadCatalogPort;
   /**
    * Override the project's tickets (story 4.1; tests: a stub). Default: the
-   * `tickets-v7` adapter, running the bundled `tickets.py` with `uv`.
+   * `tickets-v7` adapter, running the verified pinned `tickets.py` with `uv`.
    */
   ticketStore?: TicketStorePort;
+  /**
+   * Override the pinned upstream BMad Method (story 4.14, AD-13; tests: the
+   * `bmad-source-memory` stub, or the real adapter on a fixture lock).
+   * Default: the `bmad-source` adapter on `dataDir`, which downloads only
+   * when the user asks (`POST /api/v1/bmad/source`).
+   */
+  bmadSource?: BmadSourcePort;
+  /**
+   * The `fetch` the default {@link bmadSource} downloads with (tests only: a
+   * counting or failing stub, so no test reaches GitHub). Ignored when
+   * {@link bmadSource} is given. The launcher never sets it.
+   */
+  bmadFetch?: FetchLike;
   /**
    * Variables added to the environment of every `uv` child (the version
    * probe and every BMad Method script run; story 4.2), on top of

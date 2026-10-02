@@ -1,0 +1,21 @@
+{
+  "sources": {
+    "bmad-method": {
+      "repo": "bmad-code-org/BMAD-METHOD",
+      "ref": "main",
+      "commit": "1cbcfa272fe65787c06a1fa164a901f46117cca7",
+      "version": "6.13.0-next",
+      "include": "skills/",
+      "contentHash": "sha256:6a4471ad7c8861b47a881ca35e0b598b9d32aed10c1e19a78e559d005f2c3c7b"
+    },
+    "bmad-loop": {
+      "repo": "bmad-code-org/bmad-loop",
+      "ref": "v0.13.0",
+      "commit": "6bbe469637e2b8ac490b1f8c085aed8e2b19ce1b",
+      "version": "0.13.0",
+      "include": "",
+      "buildConstraints": ["hatchling==1.32.4"],
+      "contentHash": "sha256:6ded28951264f96bcab4084c07fbe2a13543a463b9f2b2fe0779d0d2749cf332"
+    }
+  }
+}

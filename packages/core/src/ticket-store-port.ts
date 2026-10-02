@@ -11,6 +11,7 @@
  * request input.
  */
 import {
+  BMAD_NOT_DOWNLOADED_MESSAGE,
   TICKETS_STORE_REFUSED_MESSAGE,
   TICKETS_UNAVAILABLE_MESSAGE,
   TICKETS_UV_MISSING_MESSAGE,
@@ -64,9 +65,11 @@ export interface TicketStorePort {
  * the store refused (`failed`: no active initiative, a malformed tree), it
  * took too long (`timeout`), it answered something that isn't its JSON
  * (`bad_output`, which includes too much output), or the project's store is
- * a tracker, so it refuses a status change (`store_refused`, story 4.2).
+ * a tracker, so it refuses a status change (`store_refused`, story 4.2), or
+ * the pinned BMad Method whose `tickets.py` runs isn't downloaded
+ * (`not_downloaded`, story 4.14; core's board guard normally refuses first).
  */
-export type TicketsUnavailableReason = 'uv_missing' | 'failed' | 'timeout' | 'bad_output' | 'store_refused';
+export type TicketsUnavailableReason = 'uv_missing' | 'failed' | 'timeout' | 'bad_output' | 'store_refused' | 'not_downloaded';
 
 const MESSAGES: Readonly<Record<TicketsUnavailableReason, string>> = {
   uv_missing: TICKETS_UV_MISSING_MESSAGE,
@@ -74,6 +77,7 @@ const MESSAGES: Readonly<Record<TicketsUnavailableReason, string>> = {
   timeout: TICKETS_UNAVAILABLE_MESSAGE,
   bad_output: TICKETS_UNAVAILABLE_MESSAGE,
   store_refused: TICKETS_STORE_REFUSED_MESSAGE,
+  not_downloaded: BMAD_NOT_DOWNLOADED_MESSAGE,
 };
 
 /**

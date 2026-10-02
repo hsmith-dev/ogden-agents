@@ -69,6 +69,18 @@ export const API_ERROR_CODES = [
   'bmad_not_set_up',
   /** The project's BMad Method lacks the capability this needs (409, AD-14; story 4.2). The UI shows the reduced-mode notice. */
   'reduced_mode',
+  /**
+   * A surface that runs BMad Method's scripts was used before the pinned
+   * BMad Method was downloaded (409; story 4.14, AD-13). Nothing ran. The UI
+   * offers Download BMad Method.
+   */
+  'bmad_not_downloaded',
+  /**
+   * Downloading the pinned BMad Method failed (story 4.14): 503 when it
+   * didn't arrive (offline, an HTTP error, a timeout, too large), 502 when
+   * what arrived isn't the pinned content. Nothing was saved.
+   */
+  'bmad_download_failed',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

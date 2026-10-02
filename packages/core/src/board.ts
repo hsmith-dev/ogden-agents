@@ -4,8 +4,10 @@
  * `TicketStorePort` at each request (AD-7, AD-10: Ogden Agents stores no
  * ticket state). Every use-case serves the `board` piece and calls core's
  * guard first (AD-22), then the per-project script trust (story 4.2: the
- * store runs the project's own BMad Method scripts), so a project with Board
- * off, or not trusted, runs nothing. The repo is the workspace's stored real
+ * store runs the project's own BMad Method scripts), then whether the pinned
+ * BMad Method is downloaded (story 4.14, AD-13: `tickets.py` runs only from
+ * the verified copy), so a project with Board off, not trusted, or an install
+ * without the download runs nothing. The repo is the workspace's stored real
  * path, never request input.
  */
 import {
@@ -18,6 +20,7 @@ import {
 } from '@ogden-agents/shared';
 import type { BmadFeatures } from './bmad-features.js';
 import type { BmadScriptTrust } from './bmad-script-trust.js';
+import type { BmadSourceUseCases } from './bmad-source-port.js';
 import type { Entities } from './entities.js';
 import { StatusNotAllowedError, ValidationError } from './errors.js';
 import { workspaceRepoPath } from './planning.js';
@@ -26,8 +29,9 @@ import type { TicketStorePort } from './ticket-store-port.js';
 export interface BoardUseCases {
   /**
    * Every ticket of the project, in build order, and what couldn't be read.
-   * `FeatureOffError` with Board off and `ScriptsNotTrustedError` without
-   * the project's trust (nothing runs), `NotFoundError` for an unknown
+   * `FeatureOffError` with Board off, `ScriptsNotTrustedError` without
+   * the project's trust and `BmadNotDownloadedError` without the pinned BMad
+   * Method (nothing runs), `NotFoundError` for an unknown
    * workspace, `TicketsUnavailableError` when the store can't answer.
    */
   tickets(workspaceId: WorkspaceId): Promise<TicketsResponse>;
@@ -49,6 +53,8 @@ export interface BoardUseCases {
 export interface BoardDeps {
   bmad: Pick<BmadFeatures, 'requireBmadFeature'>;
   trust: Pick<BmadScriptTrust, 'requireScriptsTrusted'>;
+  /** The pinned BMad Method (story 4.14): checked after the trust, never downloaded from here. */
+  source: Pick<BmadSourceUseCases, 'requireReady'>;
   entities: Pick<Entities, 'getWorkspace'>;
   tickets: TicketStorePort;
 }
@@ -61,11 +67,12 @@ function checkedRef(ref: unknown): string {
   return ref;
 }
 
-export function createBoard({ bmad, trust, entities, tickets }: BoardDeps): BoardUseCases {
-  /** The guards in order (the piece, then the trust), then the repo. */
+export function createBoard({ bmad, trust, source, entities, tickets }: BoardDeps): BoardUseCases {
+  /** The guards in order (the piece, the trust, then the pinned BMad Method), then the repo. */
   const guarded = (workspaceId: WorkspaceId): string => {
     bmad.requireBmadFeature(workspaceId, 'board');
     trust.requireScriptsTrusted(workspaceId);
+    source.requireReady();
     return workspaceRepoPath(entities, workspaceId);
   };
   return {

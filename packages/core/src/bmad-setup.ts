@@ -1,9 +1,12 @@
 /**
  * BMad Method's setup in a project (CAP-2, E4-R2; story 4.2 freezes the
  * interface, entry 4.3 builds it). Setup serves Planning and Board (either
- * on: `requireAnyBmadFeature`), runs only the bundled fork's `setup.py`
- * through `BmadCatalogPort.setup` (never the project's own code, so it
- * needs no script trust; 4.3 confirms that before keeping it so), and
+ * on: `requireAnyBmadFeature`), runs only the pinned upstream `setup.py`
+ * from the verified copy (story 4.14, AD-13: entry 4.3 calls
+ * `BmadSourcePort.download()` first, then runs `source.file('bmad/scripts/setup.py')`
+ * and copies skills from the verified `skills/`) through
+ * `BmadCatalogPort.setup` (never the project's own code, so it needs no
+ * script trust; 4.3 confirms that before keeping it so), and
  * reports progress as `bmad.setup_started`, `bmad.setup_progress`,
  * `bmad.setup_completed` and `bmad.setup_failed` on the workspace's stream
  * (AD-5, AD-21). It starts only when the user asks (turning on the first

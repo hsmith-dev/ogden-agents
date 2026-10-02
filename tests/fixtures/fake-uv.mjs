@@ -22,13 +22,20 @@
 //   hang            starts a child that never exits, writes both pids to
 //                   `FAKE_UV_PID_FILE`, and never exits itself (a `tickets.py`
 //                   read that never answers: the runner's timeout and close())
+//   install         bmad-loop's install (story 4.14): `venv … <dir>` creates
+//                   the folder; `pip install … --python <venv> …` writes the
+//                   `bmad-loop` executable into it where uv would (bin/, or
+//                   Scripts\bmad-loop.exe on Windows); both exit 0
+//
+// `FAKE_UV_ENV_FILE` lines also carry `argv` and `cwd`.
 import { spawn } from 'node:child_process';
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const argv = process.argv.slice(2);
 const mode = argv[0] === '--version' ? 'version' : (process.env.FAKE_UV_MODE ?? 'echo');
 
-if (process.env.FAKE_UV_ENV_FILE) appendFileSync(process.env.FAKE_UV_ENV_FILE, `${JSON.stringify({ mode, env: process.env })}\n`);
+if (process.env.FAKE_UV_ENV_FILE) appendFileSync(process.env.FAKE_UV_ENV_FILE, `${JSON.stringify({ mode, argv, cwd: process.cwd(), env: process.env })}\n`);
 
 if (mode === 'echo') {
   process.stdout.write(JSON.stringify({ argv, cwd: process.cwd(), env: process.env }));
@@ -57,6 +64,15 @@ if (mode === 'echo') {
   process.stdout.write('this is not JSON');
 } else if (mode === 'big') {
   process.stdout.write('x'.repeat(2 * 1024 * 1024));
+} else if (mode === 'install') {
+  if (argv[0] === 'venv') {
+    mkdirSync(argv[argv.length - 1], { recursive: true });
+  } else if (argv[0] === 'pip') {
+    const venv = argv[argv.indexOf('--python') + 1];
+    const exe = process.platform === 'win32' ? join(venv, 'Scripts', 'bmad-loop.exe') : join(venv, 'bin', 'bmad-loop');
+    mkdirSync(join(exe, '..'), { recursive: true });
+    writeFileSync(exe, 'fake bmad-loop');
+  }
 } else if (mode === 'hang') {
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
   writeFileSync(process.env.FAKE_UV_PID_FILE, JSON.stringify({ uv: process.pid, child: child.pid }));

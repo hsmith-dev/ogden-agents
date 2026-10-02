@@ -12,7 +12,7 @@ import type { BmadDetection, BmadSetupProgress, BmadSetupStatus, Catalog, Catalo
 /** What {@link BmadCatalogPort.detect} finds in a repo: the detection without the per-project offer answer core keeps. */
 export type BmadRepoDetection = Omit<BmadDetection, 'offerDismissed'>;
 
-/** One installed skill as its `SKILL.md` frontmatter gives it (story 4.1): the catalog adds the fork metadata. */
+/** One installed skill as its `SKILL.md` frontmatter gives it (story 4.1): the catalog adds Ogden Agents' label mapping (AD-12). */
 export type InstalledSkill = Pick<CatalogSkill, 'name' | 'description'>;
 
 export interface BmadCatalogPort {
@@ -39,20 +39,20 @@ export interface BmadCatalogPort {
   skills(repoPath: string): Promise<InstalledSkill[]>;
   /**
    * The repo's catalog (story 4.2's contract; entry 4.4 builds it from
-   * `bmod.toml`, `SKILL.md`, `roster.toml` and the fork's metadata): its
+   * `bmod.toml`, `SKILL.md`, `roster.toml` and Ogden Agents' label mapping): its
    * modules, skills (sorted by name, each once) and agents, the entry action
    * and its capabilities (AD-14). Read-only and only inside the repo, like
    * {@link skills}. Core asks it only for a workspace with Planning on (AD-22).
    */
   catalog(repoPath: string): Promise<Catalog>;
   /**
-   * Where the repo's BMad Method setup stands against the bundled fork
-   * (entry 4.3: `setup.py --status`). Read-only: it runs only the bundled
-   * setup script, never the project's own code.
+   * Where the repo's BMad Method setup stands against the pinned upstream
+   * version (entry 4.3: `setup.py --status`, AD-13). Read-only: it runs only
+   * the verified pinned setup script, never the project's own code.
    */
   setupStatus(repoPath: string): Promise<BmadSetupStatus>;
   /**
-   * Sets up (or upgrades) BMad Method in the repo from the bundled fork
+   * Sets up (or upgrades) BMad Method in the repo from the verified pinned copy
    * (entry 4.3, AD-13, AD-21), telling `onProgress` each step as it begins,
    * and resolves with the status after it. It writes BMad Method's own
    * files only (`_bmad/` and the agent's skill folders). Core asks it only

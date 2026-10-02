@@ -53,6 +53,7 @@ import {
   ApiErrorBody,
   apiPath,
   BMAD_ALREADY_SET_UP_MESSAGE,
+  BMAD_NOT_DOWNLOADED_MESSAGE,
   BmadSetupStatusResponse,
   boardColumnOf,
   CatalogResponse,
@@ -349,6 +350,20 @@ describe('Plan and Board routes (story 4.1)', () => {
       expect(ApiErrorBody.parse(await response.json()).error).toEqual({ code: 'tickets_unavailable', message: TICKETS_UNAVAILABLE_MESSAGE });
     }
   });
+
+  it("a store whose verified tickets.py is gone answers 409 bmad_not_downloaded, for the tree and one ticket (stories 4.14, 4.8)", async () => {
+    const repo = fixtureRepo();
+    const store = stubStore(realPathOf(repo));
+    store.fail('not_downloaded');
+    const server = await startTestServer({ ticketStore: store });
+    const tab = await signIn(server);
+    const workspace = await project(server, tab, repo, ['board'], { trust: true });
+    for (const path of [paths(workspace.id).tickets, paths(workspace.id).ticket]) {
+      const response = await request(server, tab, 'GET', path);
+      expect(response.status, path).toBe(409);
+      expect(ApiErrorBody.parse(await response.json()).error).toEqual({ code: 'bmad_not_downloaded', message: BMAD_NOT_DOWNLOADED_MESSAGE });
+    }
+  });
 });
 
 // CI always provisions uv and the managed Python (ci.yml), so it never skips; a developer without them skips only these.
@@ -374,6 +389,10 @@ describe.skipIf(uvMissing)('the board through real uv and the verified pinned ti
     const missing = await request(server, tab, 'GET', paths(workspace.id).tickets);
     expect(missing.status).toBe(409);
     expect(ApiErrorBody.parse(await missing.json()).error.code).toBe('bmad_not_downloaded');
+    // One ticket too (story 4.8): the same guard, nothing runs.
+    const missingOne = await request(server, tab, 'GET', paths(workspace.id).ticket);
+    expect(missingOne.status).toBe(409);
+    expect(ApiErrorBody.parse(await missingOne.json()).error.code).toBe('bmad_not_downloaded');
     expect(upstream.fetched).toEqual([]);
     const downloaded = await request(server, tab, 'POST', API_ROUTES.bmadSource);
     expect(downloaded.status).toBe(200);

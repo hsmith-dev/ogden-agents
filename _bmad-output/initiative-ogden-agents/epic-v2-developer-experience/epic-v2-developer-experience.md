@@ -24,7 +24,7 @@ Completed at inception. Candidate lines, not yet agreed:
 - V1: Browse and read the workspace's markdown files, rendered, including BMad Method planning files (specs, architecture, tickets, plans).
 - V2: Review code changes with a file tree, side-by-side and inline diffs, and comments that feed back to the agent.
 - V3: A VS Code extension that connects to the local Ogden Agents server (sessions, Needs you, permission cards, review) through the same security model (AD-15).
-- V4 (spec Non-goals "Planned for v2" and CAP-15, 2026-10-02): Codex, Gemini CLI and GitHub Copilot CLI for chat and builds; builds with Antigravity; Antigravity chat too if epic 6's spike is a no-go; CAP-3's two-agent resume proof on a no-go.
+- V4 (spec Non-goals "Planned for v2" and CAP-15, 2026-10-02): Codex, Gemini CLI and GitHub Copilot CLI for chat and builds; builds with Antigravity; Antigravity chat too if epic 6's spike is a no-go (epic 6 keeps the agent-choice groundwork either way, user 2026-10-02); CAP-3's two-agent resume proof on a no-go.
 
 ## Done when
 
@@ -43,4 +43,4 @@ Not part of the v1 initiative's Done when. It builds on epics 2 (sessions), 4 (p
 
 - Decision: planned for v2, after epic 7; the user wants markdown viewing, code-change review and an elevated development experience, or a VS Code extension as a separate epic (user, 2026-09-29).
 - Open question: one epic for the in-app viewer and review, plus a separate epic for the VS Code extension, or one combined epic? Decide at inception.
-- Decision (2026-10-02, user): more agents move here from v1's epic 6: Codex, Gemini CLI and GitHub Copilot CLI for chat and builds, and builds with Antigravity (or Antigravity chat too, if epic 6's spike is a no-go). The research, the draft's 14-entry plan for Codex and Gemini CLI (commit cced0a9) and the open questions are kept in epic 6's Notes as input. Whether they are part of this epic or a v2 epic of their own is decided at inception.
+- Decision (2026-10-02, user): more agents move here from v1's epic 6: Codex, Gemini CLI and GitHub Copilot CLI for chat and builds, and builds with Antigravity (or Antigravity chat too, if epic 6's spike is a no-go; epic 6 keeps the agent-choice groundwork either way, user 2026-10-02). The research, the draft's 14-entry plan for Codex and Gemini CLI (commit cced0a9) and the open questions are kept in epic 6's Notes as input. Whether they are part of this epic or a v2 epic of their own is decided at inception.

@@ -69,4 +69,4 @@ id = 8
 slug = "epic-v2-developer-experience"
 title = "Developers review and navigate their project without leaving Ogden Agents (v2)"
 covers = []
-after = [{ epic = 5, needs = "sessions, planning files, and the review and approve flow" }, { epic = 6, needs = "for its agent work (V4): the agent registry, acp-base and the agent list on a go, or the no-go decision" }]
+after = [{ epic = 5, needs = "sessions, planning files, and the review and approve flow" }, { epic = 6, needs = "for its agent work (V4): the agent registry, acp-base, the agent list and the picker, built on a go or a no-go" }]

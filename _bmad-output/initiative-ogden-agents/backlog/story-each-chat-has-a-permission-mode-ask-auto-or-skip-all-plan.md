@@ -100,6 +100,8 @@ context:
 - Server: `PUT …/permission-mode` in `chat-routes.ts` (403/400/409 mapping; logs mode and code only), `GET` session adds `permissionModes`; `settings-routes.ts` (`GET`/`PUT /api/v1/settings/developer-mode`, 501 without core's settings); `start.ts` calls `resetPermissionModes()` after `releaseTerminalDrivers()` and wires `events` and `installSettings` into the chat.
 - Web: `appearance/developer-mode.tsx` (`DeveloperModeSync` in the shell follows the server, keeps the tab's density, and carries a browser's old "on" over once, remembered under `ogden-agents.developer-mode-carried`); Appearance's switch saves to the server. `permissions/permission-mode-picker.tsx` (picker, Skip-all `AlertDialog`, `SkipAllBanner`), `ui/banner.tsx` destructive variant, `ui/dropdown-menu.tsx` `DropdownMenuChoiceItem`. The banner's Back to Ask switches back to the chat first when the terminal drives. The e2e terminal helper now also sets Developer mode on the server.
 
+- CI (2026-10-02, PR #63, run 37029847557): windows-latest / Node 24 failed `terminal-socket.test.ts` with "Unexpected end of JSON input". Root cause (test-only, pre-existing race): the fake CLI wrote its record with `writeFileSync`, so the test's `existsSync` wait could read it empty. The fixture now writes a temp file and renames it into place.
+
 ## Plan Change Log
 
 ## Review Triage Log

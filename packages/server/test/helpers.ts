@@ -8,7 +8,7 @@ import { request, type IncomingHttpHeaders } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createMemoryAgentSetup, createMemoryAppShortcut, createMemorySecretStore } from '@ogden-agents/adapters';
-import { createAgentSetup, createChat, createOnboarding, type Core } from '@ogden-agents/core';
+import { createAgentSetup, createChat, createNewProjectDefaults, createOnboarding, type Core } from '@ogden-agents/core';
 import { API_ROUTES, webSocketProtocols } from '@ogden-agents/shared';
 import type { Hono } from 'hono';
 import { afterEach } from 'vitest';
@@ -259,8 +259,10 @@ export function fullTestApp(core: Core, extra: Partial<AppOptions> = {}): Hono {
     chat,
     permissions: core.permissions,
     bmad: core.bmad,
+    bmadDetection: core.bmadDetection,
     agentSetup: createAgentSetup(core.events, [createMemoryAgentSetup()]),
     onboarding: createOnboarding({ dataDir: tempDataDir(), hasProjects: () => false }),
+    newProjectDefaults: createNewProjectDefaults({ dataDir: tempDataDir(), bmad: core.bmad }),
     appShortcut: createMemoryAppShortcut(),
     tabs: createTabTokens(),
     ...extra,

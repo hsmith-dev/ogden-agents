@@ -19,9 +19,14 @@
  * neither Plan nor `g p` with Planning off, the groups in order, no skill
  * names until Developer mode is on, a New tag on a recent module, and an
  * idea with Enter opens a planning session on the entry action whose first
- * message carries the idea. No real `claude` or `uv` runs.
+ * message carries the idea. On the real catalog (story 4.4), the Plan home
+ * shows the label mapping's labels and groups, Start from an idea uses the
+ * mapping's entry action, and a module copied in while the server runs shows
+ * on the next visit with the New tag (the modules there at the first read
+ * don't carry it). No real `claude` or `uv` runs.
  */
-import { realpathSync } from 'node:fs';
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { expect, test } from '@playwright/test';
 // The shared routes' own file (it has no imports), as support.ts reads it.
 import { apiPath } from '../../packages/shared/src/api.ts';
@@ -94,8 +99,8 @@ test('Plan Start opens the planning session, and Board asks for trust, then to d
       await expect(page).toHaveURL(new RegExp(`/w/${wsId}/plan$`));
       await expect(page.getByRole('heading', { name: 'Plan', level: 1 })).toBeVisible();
       await expect(page.getByTestId('skill-row')).toHaveCount(2);
-      // Without plain labels (story 4.6), each skill shows as its description.
-      await page.getByRole('button', { name: 'Start Condense any input into a short spec.' }).click();
+      // On the real catalog (story 4.4), each skill shows the label mapping's plain label.
+      await page.getByRole('button', { name: 'Start Write the spec' }).click();
       await expect(page).toHaveURL(new RegExp(`/w/${wsId}/s/ses_[0-9A-Z]+$`));
       await expect(page.getByTestId('message-user')).toHaveText('/bmad-spec');
       await expect(page.getByTestId('message-agent')).toContainText('command=/bmad-spec primed=0');
@@ -311,9 +316,12 @@ test('the Plan home (story 4.6): tabs and g shortcuts, groups in order, names in
       await page.keyboard.press('g');
       await page.keyboard.press('b');
       await expect(page).toHaveURL(new RegExp(`/w/${wsId}/board$`));
+      // The shortcuts listen from the page's header: wait for the new page before the next keys (the URL changes first).
+      await expect(page.getByRole('heading', { name: 'Board', level: 1 })).toBeVisible();
       await page.keyboard.press('g');
       await page.keyboard.press('p');
       await expect(page).toHaveURL(new RegExp(`/w/${wsId}/plan$`));
+      await expect(page.getByRole('heading', { name: 'Plan', level: 1 })).toBeVisible();
       await page.keyboard.press('g');
       await page.keyboard.press('c');
       await expect(page).toHaveURL(new RegExp(`/w/${wsId}$`));
@@ -366,5 +374,61 @@ test('the Plan home (story 4.6): tabs and g shortcuts, groups in order, names in
       await expect(page).toHaveURL(new RegExp(`/w/${wsId}$`));
     },
     { extra: { bmadCatalog: catalog.port } },
+  );
+});
+
+/** A module record as BMad Method's installer leaves it (`bmod.toml` in its own skill folder), with a `SKILL.md` per skill it lists. */
+function moduleFiles(code: string, skills: readonly [name: string, description: string][]): Record<string, string> {
+  const files: Record<string, string> = {
+    [`.claude/skills/bmod-${code}/bmod.toml`]: `[bmod]\ncode = "${code}"\nversion = "7.0.0"\nskills = [${skills.map(([name]) => `"${name}"`).join(', ')}]\n`,
+    [`.claude/skills/bmod-${code}/SKILL.md`]: SKILL(`bmod-${code}`, `The ${code} module.`),
+  };
+  for (const [name, description] of skills) files[`.claude/skills/${name}/SKILL.md`] = SKILL(name, description);
+  return files;
+}
+
+test('the Plan home on the real catalog (stories 4.4 and 4.6): mapped labels and groups, the mapped entry action, and New on a module copied in later', async ({ page }) => {
+  const idea = 'A newsletter for my bakery';
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const { wsId, call } = await openProject(page, repo);
+      await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: ['planning'] });
+
+      // The first read is the baseline: the modules already installed carry no New tag.
+      await page.goto(`${server.url}/w/${wsId}/plan`);
+      await expect(page.getByTestId('plan-group').locator('h2')).toHaveText(['Planning', 'Checking work', 'Other']);
+      await expect(page.getByTestId('skill-text')).toHaveText(['Describe your idea', 'Review code changes', 'My own skill.']);
+      await expect(page.getByTestId('skill-new')).toHaveCount(0);
+
+      // A module copied in while the server runs: shown on the next visit, with New on its skills only.
+      for (const [path, content] of Object.entries(moduleFiles('core-tools', [['bmad-brainstorming', 'Brainstorm from SKILL.md.']]))) {
+        const file = join(repo, ...path.split('/'));
+        mkdirSync(dirname(file), { recursive: true });
+        writeFileSync(file, content);
+      }
+      await page.goto(`${server.url}/w/${wsId}/plan`);
+      await expect(page.getByTestId('plan-group').locator('h2')).toHaveText(['Planning', 'Checking work', 'Ideas and research', 'Other']);
+      await expect(page.getByTestId('skill-new')).toHaveCount(1);
+      await expect(page.locator('[data-skill="bmad-brainstorming"]').getByTestId('skill-new')).toHaveText('New');
+
+      // Start from an idea runs the mapping's entry action with the idea (exact: "Start Describe your idea" also has the words).
+      const input = page.getByLabel('Your idea', { exact: true });
+      await input.fill(idea);
+      await input.press('Enter');
+      await expect(page).toHaveURL(new RegExp(`/w/${wsId}/s/ses_[0-9A-Z]+$`));
+      await expect(page.getByTestId('message-user')).toHaveText(`/bmad-product-brief ${idea}`);
+      await expect(page.getByTestId('message-agent')).toContainText(`command=/bmad-product-brief ${idea} primed=0`);
+    },
+    {
+      files: {
+        ...SET_UP,
+        ...moduleFiles('method', [
+          ['bmad-product-brief', 'Brief from SKILL.md.'],
+          ['bmad-code-review', 'Review from SKILL.md.'],
+        ]),
+        '.claude/skills/my-own/SKILL.md': SKILL('my-own', 'My own skill.'),
+      },
+    },
   );
 });

@@ -20,9 +20,19 @@
  *   verifies it against a fixture lock) and answers its tickets with the
  *   status and state it reports (skipped only outside CI where uv or its
  *   managed test Python is absent), writing nothing; a store that fails
- *   answers 503 `tickets_unavailable`.
+ *   answers 503 `tickets_unavailable`;
+ * - one ticket answers 200, an unknown ref 404 and a malformed one 400
+ *   (story 4.8);
+ * - with Board on and trusted, the ticket watcher (story 4.8) starts no
+ *   watch until BMad Method's setup names an output folder (entry 4.3's
+ *   status, re-read on `bmad.setup_completed`), then appends one
+ *   `ticket.changed` within 3 s of a plan's status write through real uv,
+ *   one for a new `tickets.toml` entry, none (and no run) for a worktree
+ *   folder's writes, and Board off or the server's stop closes every
+ *   folder watcher.
  */
-import { mkdtempSync, realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -31,9 +41,13 @@ import {
   createTicketsV7,
   createUpstreamBmadSource,
   createUvScriptRunner,
+  defaultWatchDir,
   uvEnvironment,
   type MemoryTicketStore,
+  type UvScriptRunner,
+  type WatchDir,
 } from '@ogden-agents/adapters';
+import type { TicketStorePort } from '@ogden-agents/core';
 import {
   API_ROUTES,
   ApiErrorBody,
@@ -47,6 +61,7 @@ import {
   SCRIPTS_NOT_TRUSTED_MESSAGE,
   SessionResponse,
   TICKETS_UNAVAILABLE_MESSAGE,
+  TicketResponse,
   TicketsResponse,
   WorkspaceResponse,
   WorkspaceSettingsResponse,
@@ -208,7 +223,7 @@ describe('Plan and Board routes (story 4.1)', () => {
     expect(runs).toBe(0);
   });
 
-  it('PUT script-trust trusts the project once (one event), and the board then answers; pre-registered stubs answer 501 (story 4.2)', async () => {
+  it('PUT script-trust trusts the project once (one event), and the board then answers; one ticket answers (story 4.8), the status stub 501 (story 4.2)', async () => {
     const repo = fixtureRepo();
     const store = stubStore(realPathOf(repo), [{ ref: '1.1', id: 1, epic: 'epic-a', title: 'One', type: 'story', status: '', state: 'planned', blocked_reason: '' }]);
     const server = await startTestServer({ ticketStore: store });
@@ -233,15 +248,26 @@ describe('Plan and Board routes (story 4.1)', () => {
     const body = TicketsResponse.parse(await read.json());
     expect(body.tickets.map((row) => [row.ref, boardColumnOf(row)])).toEqual([['1.1', 'draft']]);
     expect(store.calls).toEqual([['tree', workspace.realPath]]);
-    for (const [method, path, payload] of [
-      ['GET', ticket, undefined],
-      ['PUT', status, { status: 'ready-for-dev' }],
-    ] as const) {
-      const response = await request(server, tab, method, path, payload);
-      expect(response.status, `${method} ${path}`).toBe(501);
-      expect(ApiErrorBody.parse(await response.json()).error.code).toBe('not_implemented');
-    }
-    expect(store.calls).toHaveLength(1);
+    // One ticket (story 4.8): 200 for a known ref, 404 for an unknown one, 400 for a malformed one.
+    const one = await request(server, tab, 'GET', ticket);
+    expect(one.status).toBe(200);
+    expect(TicketResponse.parse(await one.json()).ticket).toMatchObject({ ref: '1.1', title: 'One', hasPlan: false });
+    const unknown = await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceTicket, { wsId: workspace.id, ref: '9.9' }));
+    expect(unknown.status).toBe(404);
+    expect(ApiErrorBody.parse(await unknown.json()).error.code).toBe('not_found');
+    const malformed = await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceTicket, { wsId: workspace.id, ref: '-x' }));
+    expect(malformed.status).toBe(400);
+    expect(ApiErrorBody.parse(await malformed.json()).error.code).toBe('invalid_request');
+    expect(store.calls).toEqual([
+      ['tree', workspace.realPath],
+      ['find', workspace.realPath, '1.1'],
+      ['find', workspace.realPath, '9.9'],
+    ]);
+    // Entry 4.10 fills the status change: 501 until then.
+    const marked = await request(server, tab, 'PUT', status, { status: 'ready-for-dev' });
+    expect(marked.status).toBe(501);
+    expect(ApiErrorBody.parse(await marked.json()).error.code).toBe('not_implemented');
+    expect(store.calls).toHaveLength(3);
 
     // An unknown or malformed project is 404, and nothing is appended.
     const seq = server.core.events.lastSeq();
@@ -317,9 +343,11 @@ describe('Plan and Board routes (story 4.1)', () => {
     const server = await startTestServer({ ticketStore: store });
     const tab = await signIn(server);
     const workspace = await project(server, tab, repo, ['board'], { trust: true });
-    const response = await request(server, tab, 'GET', paths(workspace.id).tickets);
-    expect(response.status).toBe(503);
-    expect(ApiErrorBody.parse(await response.json()).error).toEqual({ code: 'tickets_unavailable', message: TICKETS_UNAVAILABLE_MESSAGE });
+    for (const path of [paths(workspace.id).tickets, paths(workspace.id).ticket]) {
+      const response = await request(server, tab, 'GET', path);
+      expect(response.status, path).toBe(503);
+      expect(ApiErrorBody.parse(await response.json()).error).toEqual({ code: 'tickets_unavailable', message: TICKETS_UNAVAILABLE_MESSAGE });
+    }
   });
 });
 
@@ -423,4 +451,132 @@ describe.skipIf(uvMissing)('tickets-v7 find through real uv and the pinned ticke
       await runner.close();
     }
   }, 60_000);
+});
+
+describe.skipIf(uvMissing)('the live ticket index through real uv and the verified pinned tickets.py (stories 4.8, 4.3, 4.14)', () => {
+  it('no watch before BMad Method is set up, one once its setup completes; a plan status write appends one ticket.changed within 3 s; a tickets.toml entry too; a worktree folder runs nothing; Board off closes every watcher', async () => {
+    const uvCache = mkdtempSync(join(tmpdir(), 'ogden-agents-uv-cache-'));
+    removeAfterTest(uvCache);
+    const repo = fixtureRepo(true);
+    const repoPath = realPathOf(repo);
+    const dataDir = tempDataDir();
+    const upstream = fixtureUpstream();
+    // The server's own pinned source: the store runs only its verified `tickets.py` (story 4.14).
+    const bmadSource = createUpstreamBmadSource({ dataDir, lock: upstream.lock, fetch: upstream.fetch });
+    const runner = createUvScriptRunner({
+      uvCommand: async () => ({ file: 'uv' }),
+      env: () => ({ ...uvEnvironment(), UV_CACHE_DIR: uvCache, ...TEST_UV_PYTHON_ENV }),
+    });
+    let runs = 0;
+    const counted: UvScriptRunner = {
+      run: (input) => {
+        runs++;
+        return runner.run(input);
+      },
+      close: () => runner.close(),
+    };
+    // fs.watch, counting the folder watchers open now.
+    let openWatchers = 0;
+    const watchDir: WatchDir = (dir, listener) => {
+      const watcher = defaultWatchDir(dir, listener);
+      openWatchers++;
+      let closed = false;
+      return {
+        close() {
+          if (!closed) {
+            closed = true;
+            openWatchers--;
+          }
+          watcher.close();
+        },
+        on: (event, handler) => watcher.on(event, handler),
+      };
+    };
+    const store = createTicketsV7({ runner: counted, script: () => bmadSource.file('bmad-ticket/scripts/tickets.py'), workDir: tempDataDir(), watchDir });
+    let watchesOpened = 0;
+    const ticketStore: TicketStorePort = {
+      ...store,
+      watch: async (...args) => {
+        const watch = await store.watch(...args);
+        watchesOpened++;
+        return watch;
+      },
+    };
+    try {
+      // The real catalog: its setup status (entry 4.3) names the output folder once `_bmad/config.toml` does.
+      const server = await startTestServer({ dataDir, ticketStore, bmadSource });
+      const tab = await signIn(server);
+      expect((await request(server, tab, 'POST', API_ROUTES.bmadSource)).status).toBe(200);
+      const workspace = await project(server, tab, repo, ['board'], { trust: true });
+      // Board on and trusted, but BMad Method not set up (no config names an output folder): no watch.
+      const notSetUp = BmadSetupStatusResponse.parse(await (await request(server, tab, 'GET', paths(workspace.id).setup)).json()).setup;
+      expect(notSetUp.outputFolder).toBeNull();
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      expect(watchesOpened).toBe(0);
+      expect(runs).toBe(0);
+      // Its setup completes (as entry 4.3's setup ends): the watch starts.
+      writeFileSync(join(repoPath, '_bmad', 'config.toml'), '[core]\noutput_folder = "{project-root}/_bmad-output"\nactive_initiative = "initiative-demo"\n');
+      const setUp = BmadSetupStatusResponse.parse(await (await request(server, tab, 'GET', paths(workspace.id).setup)).json()).setup;
+      expect(setUp.outputFolder).toBe('_bmad-output');
+      server.core.events.append({ type: 'bmad.setup_completed', workspaceId: workspace.id, streamId: workspace.id, payload: { status: setUp } });
+      await waitFor(() => watchesOpened === 1, 'the watch', 30_000);
+      expect(openWatchers).toBeGreaterThan(0);
+      // Written right away, inside the arming window (the confirming scan's), still within 3 s.
+      const changedSince = (seq: number) => server.core.events.readAfter(seq).flatMap((event) => (event.type === 'ticket.changed' ? [[event.workspaceId, event.payload.ref]] : []));
+
+      // An agent's status write to a plan file.
+      const epic = join(repoPath, '_bmad-output', 'initiative-demo', 'epic-first');
+      let seq = server.core.events.lastSeq();
+      const plan = join(epic, 'story-first-plan.md');
+      const startedAt = Date.now();
+      writeFileSync(plan, readFileSync(plan, 'utf8').replace('status: "in-review"', 'status: "in-progress"'));
+      await waitFor(() => changedSince(seq).length > 0, 'ticket.changed for the plan', 15_000);
+      const latency = Date.now() - startedAt;
+      expect(latency, `latency ${latency} ms`).toBeLessThan(3000);
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      expect(changedSince(seq)).toEqual([[workspace.id, '1.1']]);
+      const tree = TicketsResponse.parse(await (await request(server, tab, 'GET', paths(workspace.id).tickets)).json());
+      expect(tree.tickets.find((row) => row.ref === '1.1')?.status).toBe('in-progress');
+
+      // tickets.toml gains an entry.
+      seq = server.core.events.lastSeq();
+      const toml = join(epic, 'tickets.toml');
+      writeFileSync(toml, `${readFileSync(toml, 'utf8')}\n[[entry]]\nid = 5\ntype = "story"\ntitle = "Build the fifth thing"\nafter = []\n`);
+      await waitFor(() => changedSince(seq).length > 0, 'ticket.changed for the new entry', 15_000);
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      expect(changedSince(seq)).toEqual([[workspace.id, '1.5']]);
+
+      // A worktree folder inside the output folder: no read, no event.
+      seq = server.core.events.lastSeq();
+      const before = runs;
+      const worktree = join(repoPath, '_bmad-output', 'wt');
+      mkdirSync(worktree);
+      writeFileSync(join(worktree, '.git'), 'gitdir: /elsewhere\n');
+      writeFileSync(join(worktree, 'story-first-plan.md'), 'status: done\n');
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      writeFileSync(join(worktree, 'story-first-plan.md'), 'status: dropped\n');
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      expect(runs).toBe(before);
+      expect(changedSince(seq)).toEqual([]);
+
+      // One ticket over REST.
+      const one = await request(server, tab, 'GET', paths(workspace.id).ticket);
+      expect(one.status).toBe(200);
+      expect(TicketResponse.parse(await one.json()).ticket).toMatchObject({ ref: '1.1', status: 'in-progress', hasPlan: true });
+      expect((await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceTicket, { wsId: workspace.id, ref: '9.9' }))).status).toBe(404);
+
+      // Board off closes every folder watcher; on again reopens the watch.
+      const settings = apiPath(API_ROUTES.workspaceSettings, { wsId: workspace.id });
+      expect((await request(server, tab, 'PATCH', settings, { bmadPieces: [] })).status).toBe(200);
+      await waitFor(() => openWatchers === 0, 'every watcher closed');
+      expect((await request(server, tab, 'PATCH', settings, { bmadPieces: ['board'] })).status).toBe(200);
+      await waitFor(() => watchesOpened === 2 && openWatchers > 0, 'the reopened watch', 30_000);
+
+      // The server's stop closes them all.
+      await server.close();
+      expect(openWatchers).toBe(0);
+    } finally {
+      await runner.close();
+    }
+  }, 90_000);
 });

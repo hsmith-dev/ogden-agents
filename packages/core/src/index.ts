@@ -44,3 +44,4 @@ export * from './terminal-port.js';
 export * from './terminal-reasons.js';
 export * from './ticket-store-port.js';
 export * from './toolchain.js';
+export * from './ticket-watcher.js';

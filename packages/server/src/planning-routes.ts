@@ -16,8 +16,11 @@
  *   `bmad_not_downloaded` before the pinned BMad Method is downloaded
  *   (story 4.14; nothing runs); 503 `tickets_unavailable` with a plain
  *   message when they can't be read.
- * - `GET …/tickets/:ref` and `PUT …/tickets/:ref/status` (`board`, trust):
- *   501 until entries 4.9 and 4.10 fill them.
+ * - `GET …/tickets/:ref` (`board`, trust) → `TicketResponse` (story 4.8):
+ *   one ticket; 400 for a malformed ref, 404 when no ticket matches, 409
+ *   `bmad_not_downloaded` and 503 `tickets_unavailable` as the tree.
+ * - `PUT …/tickets/:ref/status` (`board`, trust): 501 until entry 4.10
+ *   fills it.
  * - `GET …/bmad/setup` (`planning` or `board`; no trust; entry 4.3) →
  *   `BmadSetupStatusResponse`, read from the project's files only (no
  *   process, no network).
@@ -47,9 +50,10 @@ import {
   MAX_IDEA_LENGTH,
   SessionResponse,
   StartPlanningRequest,
+  TicketResponse,
   TicketsResponse,
 } from '@ogden-agents/shared';
-import type { Hono } from 'hono';
+import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { bmadPieceRoutes } from './bmad-pieces.js';
 import { apiError, notImplemented } from './errors.js';
@@ -75,6 +79,15 @@ export interface PlanningRoutesOptions {
 
 export function registerPlanningRoutes(app: Hono, { bmad, scriptTrust, planning, board, bmadSetup, log }: PlanningRoutesOptions): void {
   const routes = bmadPieceRoutes(app, { bmad, scriptTrust, log });
+
+  /** A store that can't answer: 503 `tickets_unavailable`, or 409 `bmad_not_downloaded` when the verified `tickets.py` is gone. */
+  const ticketsUnavailable = (c: Context, workspaceId: string, error: TicketsUnavailableError): Response => {
+    log.warn('tickets unavailable', { workspaceId, reason: error.reason });
+    // The marker says downloaded but the verified `tickets.py` is gone: the same answer as not downloaded,
+    // so the Board offers Download, which re-checks the copy and downloads it again (story 4.14).
+    if (error.reason === 'not_downloaded') return apiError(c, 409, 'bmad_not_downloaded', BMAD_NOT_DOWNLOADED_MESSAGE);
+    return apiError(c, 503, 'tickets_unavailable', error.message);
+  };
 
   routes.get('planning', API_ROUTES.workspaceCatalog, async (c, { workspaceId }) => {
     if (planning === undefined) return notImplemented(c);
@@ -114,22 +127,24 @@ export function registerPlanningRoutes(app: Hono, { bmad, scriptTrust, planning,
     try {
       return c.json(TicketsResponse.parse(await board.tickets(workspaceId)));
     } catch (error) {
-      // The marker says downloaded but the verified `tickets.py` is gone: the same answer as not downloaded,
-      // so the Board offers Download, which re-checks the copy and downloads it again (story 4.14).
-      if (error instanceof TicketsUnavailableError && error.reason === 'not_downloaded') {
-        log.warn('tickets unavailable', { workspaceId, reason: error.reason });
-        return apiError(c, 409, 'bmad_not_downloaded', BMAD_NOT_DOWNLOADED_MESSAGE);
-      }
-      if (error instanceof TicketsUnavailableError) {
-        log.warn('tickets unavailable', { workspaceId, reason: error.reason });
-        return apiError(c, 503, 'tickets_unavailable', error.message);
-      }
+      if (error instanceof TicketsUnavailableError) return ticketsUnavailable(c, workspaceId, error);
       throw error;
     }
   });
 
-  // Pre-registered by story 4.2, so their entries only fill them: each answers 501 once the guards pass.
-  routes.get('board', API_ROUTES.workspaceTicket, (c) => notImplemented(c));
+  // One ticket (story 4.8): a `NotFoundError` answers 404 through the guarded helper.
+  routes.get('board', API_ROUTES.workspaceTicket, async (c, { workspaceId }) => {
+    if (board === undefined) return notImplemented(c);
+    try {
+      return c.json(TicketResponse.parse({ ticket: await board.ticket(workspaceId, c.req.param('ref') ?? '') }));
+    } catch (error) {
+      if (error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);
+      if (error instanceof TicketsUnavailableError) return ticketsUnavailable(c, workspaceId, error);
+      throw error;
+    }
+  });
+
+  // Pre-registered by story 4.2, so its entry only fills it: it answers 501 once the guards pass.
   routes.put('board', API_ROUTES.workspaceTicketStatus, (c) => notImplemented(c));
   // BMad Method's setup runs the verified pinned `setup.py`, never the project's own code (the entry 4.3 trust proof).
   routes.get(

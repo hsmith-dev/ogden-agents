@@ -54,8 +54,12 @@ export interface TicketStorePort {
   /**
    * Watches the repo's output folder (`outputFolder`, relative to the repo,
    * in the main checkout, never a worktree; AD-10) and calls `onChange` with
-   * the refs whose files changed (entry 4.8: debounced; `[]` when it can't
-   * tell which). Resolves once watching; rejects when it can't watch.
+   * the refs whose files changed (entry 4.8: debounced): the refs of rows
+   * added, changed or removed since the watch last read the tree.
+   * `tickets-v7` never calls it with `[]`; another store may, when it can't
+   * tell which. Resolves once watching; rejects when it can't watch (the
+   * folder is missing or resolves outside the repo). `close` stops it, and
+   * nothing is called after.
    */
   watch(repoPath: string, outputFolder: string, onChange: (refs: string[]) => void): Promise<TicketWatch>;
 }

@@ -17,6 +17,7 @@ import {
   createUpstreamBmadSource,
   createUvScriptRunner,
   createUvToolchain,
+  errorCode,
   locateClaudeAdapter,
   resolveClaudeAgentAcp,
   ScriptRunError,
@@ -33,6 +34,7 @@ import {
   createNewProjectDefaults,
   createOnboarding,
   createPlanning,
+  createTicketWatcher,
   clampCheckInDelay,
   RESTARTED_REASON,
   createToolchain,
@@ -442,10 +444,23 @@ async function listenAndAnnounce({
       workDir: uvWorkDir(dataDir),
       // Codes only: the script's own error text can name the user's paths.
       onFailure: (error) => log.warn('tickets.py run failed', { code: error instanceof ScriptRunError ? error.code : error.reason }),
+      onWatchFallback: (reason) => log.info('ticket watch polls instead of watching', { code: reason }),
     });
   // Every board use-case checks the piece, then the project's script trust (story 4.2), then the pinned BMad
   // Method (story 4.14), before the store runs anything.
   const board = createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: bmadSource, entities: core.entities, tickets: ticketStore });
+  // One watch per project with Board on, trusted and BMad Method set up (story 4.8; the setup status is entry 4.3's):
+  // an agent's ticket write reaches the board as `ticket.changed`.
+  const ticketWatcher = createTicketWatcher({
+    events: core.events,
+    entities: core.entities,
+    bmad: core.bmad,
+    trust: core.bmadScriptTrust,
+    catalog: bmadCatalog,
+    tickets: ticketStore,
+    // Codes only: never a path or the script's output.
+    onError: (workspaceId, step, error) => log.warn('ticket watch failed', { workspaceId, step, code: errorCode(error, 'unexpected') }),
+  });
   const appShortcut =
     options.appShortcut ??
     (options.launcherEntry === undefined
@@ -537,7 +552,12 @@ async function listenAndAnnounce({
     launcherToken = createLauncherToken(dataDir);
     writePortFile(portFile, identity);
     core.events.append({ type: 'server.started', workspaceId: null, streamId: SERVER_STREAM, payload: { version } });
+    ticketWatcher.start();
   } catch (error) {
+    // As on stop: the runner's close kills any run a watch waits on.
+    const watching = ticketWatcher.close();
+    await scriptRunner.close().catch(() => {});
+    await watching;
     // Nothing may stay listening on a server that failed to start.
     await closeServer(server, wss);
     removePortFile(portFile, identity);
@@ -573,8 +593,13 @@ async function listenAndAnnounce({
           new Promise((resolve) => setTimeout(resolve, SETUP_STOP_MS).unref()),
         ]),
       )
-      // No BMad Method script outlives the server either (story 4.2).
-      .finally(() => scriptRunner.close().catch((error: unknown) => log.warn('stopping scripts failed', { reason: String(error) })))
+      // No BMad Method script outlives the server either (story 4.2). The ticket watches stop first (story 4.8);
+      // closing the runner kills a run a watch is waiting on, so their close never waits on a script.
+      .finally(async () => {
+        const watching = ticketWatcher.close().catch((error: unknown) => log.warn('stopping ticket watches failed', { reason: String(error) }));
+        await scriptRunner.close().catch((error: unknown) => log.warn('stopping scripts failed', { reason: String(error) }));
+        await watching;
+      })
       .finally(() => {
         try {
           removePortFile(portFile, identity);

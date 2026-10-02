@@ -293,8 +293,10 @@ describe('tickets-v7 find, mark and watch (story 4.2)', () => {
     expect((caught as TicketsUnavailableError).reason).toBe('store_refused');
   });
 
-  it('watch rejects until entry 4.8 builds it', async () => {
-    await expect(store({}).tickets.watch('/repo', '_bmad-output', () => {})).rejects.toThrow(/4\.8/);
+  it('watch rejects for a repo that is not there, running nothing (story 4.8 builds it: tickets-v7-watch.test.ts)', async () => {
+    const { tickets, runs } = store({});
+    await expect(tickets.watch('/repo-that-is-not-there', '_bmad-output', () => {})).rejects.toThrow();
+    expect(runs).toEqual([]);
   });
 
   it('runs uv in the work folder, never the repo, so a .venv the repo ships is not found (fake uv, echo)', async () => {

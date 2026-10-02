@@ -50,7 +50,9 @@ function stubTicketStore() {
     },
     find: () => Promise.reject(new Error('not used in this test')),
     mark: () => Promise.reject(new Error('not used in this test')),
-    watch: () => Promise.reject(new Error('not used in this test')),
+    // The server's ticket watcher calls it once BMad Method's setup names an output folder (entry 4.3's status);
+    // a no-op watch keeps it harmless here.
+    watch: async () => ({ close() {} }),
   };
   return store;
 }

@@ -219,6 +219,10 @@ export interface Live {
   markGone: () => void;
   /** The permission mode changes being told to the agent, one after another (permission modes). */
   modeSync: Promise<void>;
+  /** Whether it was started with the protected paths guarded (asked for in Auto only). */
+  guardsRequested: boolean;
+  /** Its guards don't fit the chat's mode any more: it is restarted at the next idle point (before the next prompt). */
+  restartPending: boolean;
 }
 
 /** A session's terminal and its viewers (story 3.1). Its output is never logged, evented or stored. */

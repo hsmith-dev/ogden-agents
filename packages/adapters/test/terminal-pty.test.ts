@@ -8,10 +8,11 @@
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AgentError, type TerminalProcess } from '@ogden-agents/core';
+import { AgentError, PROTECTED_PATHS, type TerminalProcess } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   bundledClaudeExecutable,
+  claudeAskRules,
   CLAUDE_CLI_NOT_FOUND,
   claudeTerminalCommand,
   createPtyTerminalPort,
@@ -60,6 +61,15 @@ describe("the session's CLI command", () => {
     expect(claudeTerminalCommand(ID, env, { permissionMode: 'ask' }).args).toEqual(['--resume', ID, '--permission-mode', 'default']);
     expect(claudeTerminalCommand(ID, env, { permissionMode: 'auto' }).args).toEqual(['--resume', ID, '--permission-mode', 'auto']);
     expect(claudeTerminalCommand(ID, env, { permissionMode: 'skip_all' }).args).toEqual(['--resume', ID, '--dangerously-skip-permissions']);
+    // Auto keeps the protected paths guarded: the same ask rules as the chat's session, as --settings.
+    expect(claudeTerminalCommand(ID, env, { permissionMode: 'auto', protectedPaths: PROTECTED_PATHS }).args).toEqual([
+      '--resume',
+      ID,
+      '--permission-mode',
+      'auto',
+      '--settings',
+      JSON.stringify({ permissions: { ask: claudeAskRules(PROTECTED_PATHS) } }),
+    ]);
     // Without a mode, Ask: never the user's own settings' default mode.
     expect(claudeTerminalCommand(ID, env).args).toEqual(['--resume', ID, '--permission-mode', 'default']);
   });

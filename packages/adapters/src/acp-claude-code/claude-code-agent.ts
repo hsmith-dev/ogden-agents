@@ -62,10 +62,12 @@ import {
   type AgentRestored,
   type AgentSession,
   type AgentToolCallDiff,
+  type ProtectedPaths,
 } from '@ogden-agents/core';
 import type { PermissionMode } from '@ogden-agents/shared';
 import { killProcessTree } from '../process-tree.js';
 import { findClaudeExecutable } from './detect.js';
+import { claudeGuardSettings } from './claude-guards.js';
 import { claudeTerminalCommand, locateClaudeTerminal } from './terminal-command.js';
 import { createStreamMasker, maskSecrets, secretValues } from './mask.js';
 import { readClaudeTranscript } from './transcript.js';
@@ -212,11 +214,15 @@ export function createClaudeCodeAgent(options: ClaudeCodeAgentOptions = {}): Age
   };
 
   const open = async (
-    input: { cwd: string; env: Readonly<Record<string, string>>; onPermissionRequest?: PermissionCallback | undefined },
+    input: { cwd: string; env: Readonly<Record<string, string>>; onPermissionRequest?: PermissionCallback | undefined; protectedPaths?: ProtectedPaths | undefined },
     opening: Opening,
   ) => {
     const { child, secrets } = spawnAdapter(input.cwd, input.env);
-    return startOnChild(child, { cwd: input.cwd, secrets, diagnostic, startTimeoutMs, onPermissionRequest: input.onPermissionRequest }, opening);
+    return startOnChild(
+      child,
+      { cwd: input.cwd, secrets, diagnostic, startTimeoutMs, onPermissionRequest: input.onPermissionRequest, protectedPaths: input.protectedPaths },
+      opening,
+    );
   };
 
   return {
@@ -250,7 +256,7 @@ export function createClaudeCodeAgent(options: ClaudeCodeAgentOptions = {}): Age
     terminalResume: {
       transcript: readClaudeTranscript,
       command: async (agentSessionId, env, terminal) =>
-        claudeTerminalCommand(agentSessionId, env, { ...options, adapterPath: currentAdapterPath(), permissionMode: terminal?.permissionMode ?? 'ask' }),
+        claudeTerminalCommand(agentSessionId, env, { ...options, adapterPath: currentAdapterPath(), permissionMode: terminal?.permissionMode ?? 'ask', protectedPaths: terminal?.protectedPaths }),
       locate: async (env) => locateClaudeTerminal(env, { ...options, adapterPath: currentAdapterPath() }),
     },
   };
@@ -267,6 +273,8 @@ interface StartContext {
   diagnostic: Diagnostic;
   startTimeoutMs: number;
   onPermissionRequest: PermissionCallback | undefined;
+  /** Kept guarded for the session's life, as ask rules in its flag settings (Auto only). */
+  protectedPaths: ProtectedPaths | undefined;
 }
 
 /** The command a shell tool call would run, when the agent put one in its raw input. */
@@ -330,10 +338,12 @@ function killTree(child: ChildProcessWithoutNullStreams): void {
 
 async function startOnChild(
   child: ChildProcessWithoutNullStreams,
-  { cwd, secrets, diagnostic, startTimeoutMs, onPermissionRequest }: StartContext,
+  { cwd, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths }: StartContext,
   opening: Opening,
 ): Promise<{ init: acp.InitializeResponse; session: AgentSession | undefined; restored: AgentRestored }> {
   const listeners = new Set<AgentEventListener>();
+  // claude-agent-acp 0.84 passes `_meta.claudeCode.options.settings` to the CLI as its flag settings; it can't be changed later.
+  const sessionMeta = protectedPaths === undefined ? {} : { _meta: { claudeCode: { options: { settings: claudeGuardSettings(protectedPaths) } } } };
   /** While `session/load` replays history the chat already has: those updates are swallowed. */
   let replaying = false;
   let state: 'idle' | 'working' | 'error' = 'idle';
@@ -570,14 +580,14 @@ async function startOnChild(
       };
       if (
         capabilities?.sessionCapabilities?.resume != null &&
-        (await attempt('session/resume', () => connection.agent.request('session/resume', { sessionId, cwd, mcpServers: [] })))
+        (await attempt('session/resume', () => connection.agent.request('session/resume', { sessionId, cwd, mcpServers: [], ...sessionMeta })))
       ) {
         return 'resumed';
       }
       if (capabilities?.loadSession === true) {
         replaying = true;
         try {
-          if (await attempt('session/load', () => connection.agent.request('session/load', { sessionId, cwd, mcpServers: [] }))) return 'loaded';
+          if (await attempt('session/load', () => connection.agent.request('session/load', { sessionId, cwd, mcpServers: [], ...sessionMeta }))) return 'loaded';
         } finally {
           replaying = false;
         }
@@ -597,7 +607,7 @@ async function startOnChild(
         const reopened = await reopen(initialized, opening.agentSessionId);
         if (reopened !== undefined) return { initialized, sessionId: opening.agentSessionId, restored: reopened };
       }
-      const created = await connection.agent.request('session/new', { cwd, mcpServers: [] });
+      const created = await connection.agent.request('session/new', { cwd, mcpServers: [], ...sessionMeta });
       modes = created.modes ?? undefined;
       return { initialized, sessionId: created.sessionId, restored: 'new' as const };
     })();
@@ -633,6 +643,7 @@ async function startOnChild(
   let closed: Promise<void> | undefined;
   const session: AgentSession = {
     agentSessionId: sessionId,
+    protectsPaths: protectedPaths !== undefined,
 
     get permissionModes(): PermissionMode[] {
       // A session that lists no modes runs as it is: Ask only.

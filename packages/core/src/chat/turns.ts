@@ -161,19 +161,24 @@ export function createTurns(
 
   /** One prompt and its turn. Ends when the agent ended it, failed, or was dropped (a Stop past its grace, a close). */
   const runTurn = async (session: Session, workspace: Workspace, turn: Turn, messageId: string, text: string): Promise<void> => {
-    const entry = agentFor(session, workspace, apply);
-    armQuiet(session.id);
+    let entry!: Live;
     let started: AgentSession | undefined;
-    try {
-      started = await Promise.race([entry.agent, entry.gone.then(() => undefined)]);
-    } catch (error) {
-      fail(session.id, entry, toAgentError(error), true);
-      return;
+    // An agent whose guards stop fitting the chat's mode before the prompt goes out restarts first (at most twice).
+    for (let attempt = 0; ; attempt++) {
+      entry = agentFor(session, workspace, apply);
+      armQuiet(session.id);
+      try {
+        started = await Promise.race([entry.agent, entry.gone.then(() => undefined)]);
+      } catch (error) {
+        fail(session.id, entry, toAgentError(error), true);
+        return;
+      }
+      // Stopped (or dropped) before the prompt went out: nothing is sent.
+      if (started === undefined || turn.stopping) return;
+      // A mode change still being told goes first: the prompt never runs in a looser mode than the chat's.
+      if ((await Promise.race([entry.modeSync.then(() => true), entry.gone.then(() => false)])) === false || turn.stopping || live.get(session.id) !== entry) return;
+      if (!entry.restartPending || attempt >= 2) break;
     }
-    // Stopped (or dropped) before the prompt went out: nothing is sent.
-    if (started === undefined || turn.stopping) return;
-    // A mode change still being told goes first: the prompt never runs in a looser mode than the chat's.
-    if ((await Promise.race([entry.modeSync.then(() => true), entry.gone.then(() => false)])) === false || turn.stopping || live.get(session.id) !== entry) return;
     try {
       const { prompt, primed } = promptFor(session.id, entry, messageId, text);
       const prompting = started.prompt(prompt);
@@ -191,6 +196,8 @@ export function createTurns(
       }
       // The adapter reports `idle` itself; this only covers one that didn't. An `error` it reported stays.
       if (!turn.failed) apply(session.id, entry, { type: 'state', state: 'idle' });
+      // Its guards stopped fitting the mode during the turn: restarted now that the turn is over.
+      if (entry.restartPending && live.get(session.id) === entry) drop(session.id, entry);
     } catch (error) {
       // The adapter has usually reported `error` already; this covers one that didn't.
       // A process that is gone reports `fatal` itself, which drops the agent.

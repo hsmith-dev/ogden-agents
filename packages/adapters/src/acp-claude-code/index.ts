@@ -10,6 +10,7 @@ export {
   START_TIMEOUT_MS,
   type ClaudeCodeAgentOptions,
 } from './claude-code-agent.js';
+export { claudeAskRules, claudeGuardSettings } from './claude-guards.js';
 export { findClaudeExecutable, type FindClaudeOptions } from './detect.js';
 export {
   bundledClaudeExecutable,

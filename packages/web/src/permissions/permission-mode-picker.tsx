@@ -18,7 +18,7 @@ import { DropdownMenu, DropdownMenuChoiceItem, DropdownMenuContent, DropdownMenu
 /** What each mode does, in one sentence, as the picker says it. */
 export const PERMISSION_MODE_DESCRIPTIONS: Readonly<Record<PermissionMode, string>> = {
   ask: "Every request shows a card, under this project's caution level and Always-allow rules.",
-  auto: `${AGENT_NAME}'s auto mode approves what it judges safe and asks you about the rest. Its own checks decide, not this project's caution level, even for files that control ${AGENT_NAME} or git.`,
+  auto: `${AGENT_NAME}'s auto mode approves what it judges safe and asks you about the rest, and always about editing files that control ${AGENT_NAME} or git. This project's caution level doesn't apply.`,
   skip_all: `${AGENT_NAME} skips its permission checks and runs everything without asking.`,
 };
 

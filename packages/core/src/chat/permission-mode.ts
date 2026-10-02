@@ -40,7 +40,7 @@ import type { Chat, Live, Timer } from './types.js';
 /** A permission mode an agent couldn't take or confirm in time: a code, for the log only. */
 export class PermissionModeError extends CoreError {
   override readonly name = 'PermissionModeError';
-  constructor(code: 'permission_mode_timeout' | 'permission_mode_refused' | 'permission_mode_unoffered', readonly mode: PermissionMode) {
+  constructor(code: 'permission_mode_timeout' | 'permission_mode_refused' | 'permission_mode_unoffered' | 'permission_mode_unguarded', readonly mode: PermissionMode) {
     super(code, `${code} (${mode})`);
   }
 }
@@ -53,9 +53,9 @@ const offeredBy = (session: Pick<AgentSession, 'permissionModes'>): readonly Per
  * applied), within `ctx.permissionModeTimeoutMs`. A looser mode it can't
  * take (not offered, refused, too slow) moves the chat to Ask (cause
  * `agent`) and is tried again as Ask; one that doesn't answer in time is
- * never tried again (it may still take it). Resolves `true` once the agent runs in
- * the chat's stored mode, `false` when it couldn't be put even in Ask: the
- * caller then stops it. Never rejects.
+ * never tried again (it may still take it). A session whose guards don't fit
+ * the mode (Auto needs the protected paths guarded, Skip all must not have
+ * them) is put in Ask and reported `restart`. Never rejects.
  */
 export function createModeApplier(ctx: ChatContext) {
   const { entities, agent, internalError, later } = ctx;
@@ -78,25 +78,35 @@ export function createModeApplier(ctx: ChatContext) {
     }
   };
 
-  return async (sessionId: SessionId, started: AgentSession): Promise<boolean> => {
+  return async (sessionId: SessionId, started: AgentSession, guardsRequested: boolean): Promise<ModeApplied> => {
     // At most twice: the stored mode, then Ask.
     for (let attempt = 0; attempt < 2; attempt++) {
       const mode = entities.getSession(sessionId)?.permissionMode ?? 'ask';
+      // The guards are fixed for the session's life: Auto only with them, Skip all only without (permission modes).
+      const guarded = started.protectsPaths === true;
+      const unguardable = mode === 'auto' && !guarded && guardsRequested;
+      const restart = !unguardable && ((mode === 'auto' && !guarded) || (mode === 'skip_all' && guarded));
+      // Until it restarts with the right guards, it runs in Ask: always safe.
+      const target: PermissionMode = restart ? 'ask' : mode;
       let ok: boolean;
-      if (!offeredBy(started).includes(mode)) {
-        internalError(sessionId, new PermissionModeError('permission_mode_unoffered', mode));
+      if (unguardable) {
+        // Asked to keep protected files guarded and didn't: it never runs in Auto.
+        internalError(sessionId, new PermissionModeError('permission_mode_unguarded', mode));
+        ok = false;
+      } else if (!offeredBy(started).includes(target)) {
+        internalError(sessionId, new PermissionModeError('permission_mode_unoffered', target));
         ok = false;
       } else if (started.setPermissionMode === undefined) {
         // An agent that takes no mode only ever runs in Ask.
-        ok = mode === 'ask';
+        ok = target === 'ask';
       } else {
-        const result = await told(sessionId, mode, Promise.resolve().then(() => started.setPermissionMode!(mode)));
+        const result = await told(sessionId, target, Promise.resolve().then(() => started.setPermissionMode!(target)));
         // Too slow: the agent may still take that mode later, so it is never trusted again (the caller stops it).
-        if (result === 'timeout') return false;
+        if (result === 'timeout') return 'failed';
         ok = result === 'ok';
       }
-      if (ok) return true;
-      if (mode === 'ask') return false;
+      if (ok) return restart ? 'restart' : 'ok';
+      if (target === 'ask') return 'failed';
       try {
         // Only if the chat still says that mode: a newer choice is applied in its own turn.
         if (entities.getSession(sessionId)?.permissionMode === mode) {
@@ -104,12 +114,19 @@ export function createModeApplier(ctx: ChatContext) {
         }
       } catch (error) {
         internalError(sessionId, error);
-        return false;
+        return 'failed';
       }
     }
-    return false;
+    return 'failed';
   };
 }
+
+/**
+ * How applying the chat's mode went: `ok`, it runs in it; `restart`, it runs
+ * in Ask until it restarts with the guards the mode needs (at the next idle
+ * point); `failed`, it couldn't be put even in Ask (the caller stops it).
+ */
+export type ModeApplied = 'ok' | 'restart' | 'failed';
 
 export type ModeApplier = ReturnType<typeof createModeApplier>;
 
@@ -140,6 +157,18 @@ export function createPermissionModes(ctx: ChatContext, deps: Pick<Agents, 'drop
   };
 
   /**
+   * The agent's guards don't fit the chat's mode (into or out of Auto): it
+   * runs in Ask meanwhile and is restarted at the next idle point, now if
+   * no turn runs, else before the next prompt (the turn ends first). The
+   * next start reopens the same agent session with the right guards.
+   */
+  const restartWhenIdle = (sessionId: SessionId, entry: Live) => {
+    if (live.get(sessionId) !== entry || ctx.closing) return;
+    entry.restartPending = true;
+    if (!ctx.busy.has(sessionId)) drop(sessionId, entry);
+  };
+
+  /**
    * Tells the session's live agent its stored mode (read when it is told),
    * after any change already being told; drops it if it can't be put even in
    * Ask. Nothing to do without a live agent: the next one starts in the mode.
@@ -158,7 +187,9 @@ export function createPermissionModes(ctx: ChatContext, deps: Pick<Agents, 'drop
           return;
         }
         if (live.get(sessionId) !== entry || ctx.closing) return;
-        if (!(await applyMode(sessionId, started))) dropForMode(sessionId, entry);
+        const applied = await applyMode(sessionId, started, entry.guardsRequested);
+        if (applied === 'failed') dropForMode(sessionId, entry);
+        else if (applied === 'restart') restartWhenIdle(sessionId, entry);
       } catch (error) {
         internalError(sessionId, error);
         // Its mode is not known: told once more, after this link; a second failure stops it.

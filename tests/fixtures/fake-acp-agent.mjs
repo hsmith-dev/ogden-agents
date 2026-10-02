@@ -59,6 +59,12 @@
 //                  replies `mode=<mode id>`
 //   "permission-safety <command>"  as "permission <command>", but asked even
 //                  in `bypassPermissions` (one of the agent's own safety checks)
+//   "guards"       replies `ask=<JSON of the permissions.ask rules its session
+//                  was started with>` (`_meta.claudeCode.options.settings`)
+//   In `acceptEdits`, `auto` and `bypassPermissions`, "permission-edit <path>"
+//   edits without asking unless one of those ask rules matches the path
+//   (`Edit(**/<folder>/**)` or `Edit(**/<file>)`), which still asks, as
+//   Claude Code's bypass-immune ask rules do.
 //   "plan-exit"    asks permission to leave plan mode with the real adapter's
 //                  options (mode-raising ones as `allow_always`, "manually
 //                  approve" as `allow_once`); replies `chose=<option id>`
@@ -196,6 +202,20 @@ const AVAILABLE_MODES = [
   ...(process.env.FAKE_ACP_NO_BYPASS === '1' ? [] : [{ id: 'bypassPermissions', name: 'Bypass permissions', description: 'Accepts all permissions' }]),
 ];
 const START_MODE = process.env.FAKE_ACP_START_MODE ?? 'default';
+/** Modes in which it edits files without asking (Claude Code's `acceptEdits`, `auto` and `bypassPermissions`). */
+const EDITS_WITHOUT_ASKING = new Set(['acceptEdits', 'auto', 'bypassPermissions']);
+/** The `permissions.ask` rules its session was started with (`_meta.claudeCode.options.settings`, as claude-agent-acp 0.84 reads them). */
+const askRulesOf = (session) => session.opened?._meta?.claudeCode?.options?.settings?.permissions?.ask ?? [];
+// Whether an `Edit(**/<folder>/**)` or `Edit(**/<file>)` rule matches `path` (the two shapes Ogden sends).
+const askRuleMatches = (rules, path) => {
+  const segments = path.split(/[\\/]/);
+  return rules.some((rule) => {
+    const folder = /^Edit\(\*\*\/(.+)\/\*\*\)$/.exec(rule);
+    if (folder) return segments.slice(0, -1).includes(folder[1]);
+    const file = /^Edit\(\*\*\/(.+)\)$/.exec(rule);
+    return file !== null && segments.at(-1) === file[1];
+  });
+};
 /** The `modes` a session answer carries, for a session now in `currentModeId`. */
 const modesOf = (currentModeId) => ({ currentModeId, availableModes: AVAILABLE_MODES });
 
@@ -403,10 +423,20 @@ acp
       await say(client, params.sessionId, `${ran ? 'Did' : 'Denied'} ${toolCall.title}.`);
       return { stopReason: 'end_turn' };
     }
+    if (text === 'guards') {
+      await say(client, params.sessionId, `ask=${JSON.stringify(askRulesOf(session))}`);
+      return { stopReason: 'end_turn' };
+    }
     if (text.startsWith('permission-edit ')) {
       const paths = text.slice('permission-edit '.length).split('|').map((path) => path.trim()).filter((path) => path !== '');
       const toolCall = { toolCallId: 'call-edit-permission', title: `Edit ${paths.join(', ')}`, kind: 'edit', locations: paths.map((path) => ({ path })) };
       await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
+      // A mode that edits without asking does so, unless an ask rule it was started with matches (bypass-immune, as Claude Code's).
+      if (EDITS_WITHOUT_ASKING.has(session.mode) && !paths.some((path) => askRuleMatches(askRulesOf(session), path))) {
+        await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: 'completed' });
+        await say(client, params.sessionId, `Edited ${paths.join(', ')}.`);
+        return { stopReason: 'end_turn' };
+      }
       const answer = await client.request('session/request_permission', {
         sessionId: params.sessionId,
         toolCall,

@@ -19,6 +19,7 @@
 import { MAX_TERMINAL_COLS, MAX_TERMINAL_ROWS, PERMISSION_MODE_RANK, type Session, type SessionId } from '@ogden-agents/shared';
 import { AgentError, type AgentTerminalResume, type AgentTranscriptTurn } from '../agent-port.js';
 import { InvalidOperationError, SessionNotIdleError, TerminalHandoffError, TerminalImportError, TerminalUnavailableError } from '../errors.js';
+import { PROTECTED_PATHS } from '../permission-matching.js';
 import { omittedNote, START_MARK, turnsToImport } from '../terminal-import.js';
 import type { TerminalProcess } from '../terminal-port.js';
 import { checkTerminalReady, checkTerminalSupport } from '../terminal-checks.js';
@@ -265,7 +266,7 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
       agentSessionId = sessionId!;
       let built: typeof command | typeof TIMED_OUT;
       try {
-        built = await deadline.step(resume.command(agentSessionId, env, { permissionMode }));
+        built = await deadline.step(resume.command(agentSessionId, env, { permissionMode, ...(permissionMode === 'auto' ? { protectedPaths: PROTECTED_PATHS } : {}) }));
       } catch (error) {
         throw new TerminalUnavailableError('cli_not_found', terminalUnavailableReason.cliNotFound(agent.displayName, error instanceof AgentError ? error.message : ''));
       }

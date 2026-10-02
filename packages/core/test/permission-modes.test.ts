@@ -19,6 +19,7 @@ import {
   DeveloperModeRequiredError,
   DriverIsTerminalError,
   ModeUnavailableError,
+  PROTECTED_PATHS,
   RESTART_MODE_REASON,
   ValidationError,
   type AgentEvent,
@@ -43,6 +44,8 @@ interface ModedAgentOptions {
   hangsOn?: readonly PermissionMode[];
   /** When set, `setPermissionMode` for these modes rejects. */
   refuses?: readonly PermissionMode[];
+  /** Started with protected paths, it doesn't keep them (an agent that can't guard). */
+  ignoresGuards?: boolean;
   /** Reading the session's modes throws this many times after its first read (an unexpected failure mid-push). */
   modesThrow?: number;
 }
@@ -56,6 +59,9 @@ interface ModedAgentOptions {
  */
 function modedAgent(options: ModedAgentOptions = {}) {
   const sets: Array<{ session: string; mode: PermissionMode; beforePrompts: number }> = [];
+  /** Whether each session was started with the protected paths guarded, in start order. */
+  const guarded: boolean[] = [];
+  const protectedPathsGiven: Array<StartAgentSession['protectedPaths']> = [];
   const decisions: AgentPermissionDecision[] = [];
   let prompts = 0;
   let sessionsOpened = 0;
@@ -68,10 +74,13 @@ function modedAgent(options: ModedAgentOptions = {}) {
       for (const listener of [...listeners]) listener(event);
     };
     live.set(agentSessionId, { emit, mode: () => mode });
+    guarded.push(input.protectedPaths !== undefined);
+    protectedPathsGiven.push(input.protectedPaths);
     let modeReads = 0;
     let throwsLeft = options.modesThrow ?? 0;
     return {
       agentSessionId,
+      protectsPaths: input.protectedPaths !== undefined && options.ignoresGuards !== true,
       get permissionModes() {
         // The first reads are the start's (recorded twice, then applied); later ones may throw.
         if (++modeReads > 3 && throwsLeft > 0) {
@@ -130,7 +139,7 @@ function modedAgent(options: ModedAgentOptions = {}) {
       locate: async () => ({ found: true }),
     },
   };
-  return { port, sets, decisions, closed, terminalOptions, live, prompts: () => prompts };
+  return { port, sets, guarded, protectedPathsGiven, decisions, closed, terminalOptions, live, prompts: () => prompts };
 }
 
 function setUp(agent = modedAgent(), core: Core = openTestCore(), timeoutMs?: number) {
@@ -213,12 +222,15 @@ describe('the user switches a chat to Auto (criterion 2, 10)', () => {
     expect(updated.permissionMode).toBe('auto');
     expect(core.entities.getSession(session.id)?.permissionMode).toBe('auto');
     expect(modeChanges(core, session.id)).toEqual([{ mode: 'auto', previous: 'ask', cause: 'user', reason: undefined }]);
-    await until(() => agent.sets.some((set) => set.mode === 'auto'), 'the agent told Auto');
+    // Started without the protected paths guarded: it stays in Ask and restarts (idle now, so at once), guarded.
+    await until(() => agent.closed.length === 1, 'the unguarded agent restarted');
+    expect(agent.sets.map((set) => set.mode)).not.toContain('auto');
     chat.setPermissionMode(workspace.id, session.id, 'auto');
     expect(modeChanges(core, session.id)).toHaveLength(1);
     chat.sendMessage(workspace.id, session.id, 'mode');
     await chat.settled();
     expect(replies(core, session.id).at(-1)).toBe('mode=auto');
+    expect(agent.guarded).toEqual([false, true]);
   });
 
   it('a request the agent still sends in Auto is decided by the caution level and rules, as in Ask', async () => {
@@ -298,10 +310,11 @@ describe('a mode the chat did not choose never sticks (criterion 3)', () => {
 
 describe('telling the agent its mode safely (review)', () => {
   it('a looser mode the agent does not take in time stops it: never retried as Ask, never left running', async () => {
-    const { core, chat, agent, workspace, session, internal } = setUp(modedAgent({ hangsOn: ['auto'] }), openTestCore(), 50);
+    const { core, chat, agent, workspace, session, internal } = setUp(modedAgent({ hangsOn: ['skip_all'] }), openTestCore(), 50);
     chat.sendMessage(workspace.id, session.id, 'hello');
     await chat.settled();
-    chat.setPermissionMode(workspace.id, session.id, 'auto');
+    core.installSettings.setDeveloperMode(true);
+    chat.setPermissionMode(workspace.id, session.id, 'skip_all', { confirm: true });
     await until(() => agent.closed.length === 1, 'the agent stopped');
     expect(agent.sets.map((set) => set.mode)).toEqual(['ask']);
     expect(internal.some((error) => (error as { code?: string }).code === 'permission_mode_timeout')).toBe(true);
@@ -314,21 +327,21 @@ describe('telling the agent its mode safely (review)', () => {
     await chat.settled();
     core.installSettings.setDeveloperMode(true);
     // Its first push (and the retry) fails reading the modes: the agent is stopped, never left unknown.
-    chat.setPermissionMode(workspace.id, session.id, 'auto');
+    chat.setPermissionMode(workspace.id, session.id, 'skip_all', { confirm: true });
     await until(() => agent.closed.length === 1, 'the agent stopped');
     // A later change to a fresh agent is told as usual.
-    chat.setPermissionMode(workspace.id, session.id, 'skip_all', { confirm: true });
     chat.sendMessage(workspace.id, session.id, 'mode');
     await chat.settled();
     expect(replies(core, session.id).at(-1)).toBe('mode=skip_all');
   });
 
   it('one failed push is told again: the chain goes on and the agent ends in the chat’s mode', async () => {
-    const { chat, agent, workspace, session } = setUp(modedAgent({ modesThrow: 1 }));
+    const { core, chat, agent, workspace, session } = setUp(modedAgent({ modesThrow: 1 }));
     chat.sendMessage(workspace.id, session.id, 'hello');
     await chat.settled();
-    chat.setPermissionMode(workspace.id, session.id, 'auto');
-    await until(() => agent.sets.at(-1)?.mode === 'auto', 'the agent told Auto on the retry');
+    core.installSettings.setDeveloperMode(true);
+    chat.setPermissionMode(workspace.id, session.id, 'skip_all', { confirm: true });
+    await until(() => agent.sets.at(-1)?.mode === 'skip_all', 'the agent told Skip all on the retry');
     chat.setPermissionMode(workspace.id, session.id, 'ask');
     await until(() => agent.sets.at(-1)?.mode === 'ask', 'the next push');
     expect(agent.closed).toEqual([]);
@@ -352,6 +365,74 @@ describe('telling the agent its mode safely (review)', () => {
     const other = chat.createChatSession(workspace.id);
     expect(chat.permissionModeOptions(workspace.id, other.id).find((option) => option.mode === 'skip_all')).toMatchObject({ available: false });
     expect(() => chat.setPermissionMode(workspace.id, other.id, 'skip_all', { confirm: true })).toThrow();
+  });
+});
+
+describe('Auto keeps protected files guarded (user decision 2026-10-02)', () => {
+  it('an Auto chat starts its agent with the protected paths guarded; Ask and Skip all start without', async () => {
+    const core = openTestCore();
+    const agent = modedAgent();
+    const { chat, workspace, session } = setUp(agent, core);
+    core.installSettings.setDeveloperMode(true);
+    const auto = chat.createChatSession(workspace.id);
+    const skip = chat.createChatSession(workspace.id);
+    chat.setPermissionMode(workspace.id, auto.id, 'auto');
+    chat.setPermissionMode(workspace.id, skip.id, 'skip_all', { confirm: true });
+    for (const each of [session, auto, skip]) {
+      chat.sendMessage(workspace.id, each.id, 'mode');
+      await chat.settled();
+    }
+    expect(agent.guarded).toEqual([false, true, false]);
+    expect(agent.protectedPathsGiven[1]).toBe(PROTECTED_PATHS);
+    expect(PROTECTED_PATHS.folders).toEqual(['.claude', '.git', '.vscode', '.idea']);
+    expect(PROTECTED_PATHS.files).toEqual(expect.arrayContaining(['.mcp.json', 'CLAUDE.md', 'AGENTS.md', '.envrc']));
+  });
+
+  it('Auto to Skip all: the guarded agent goes to Ask (never Skip all while guarded) and restarts unguarded', async () => {
+    const core = openTestCore();
+    const { chat, agent, workspace, session } = setUp(modedAgent(), core);
+    core.installSettings.setDeveloperMode(true);
+    chat.setPermissionMode(workspace.id, session.id, 'auto');
+    chat.sendMessage(workspace.id, session.id, 'mode');
+    await chat.settled();
+    chat.setPermissionMode(workspace.id, session.id, 'skip_all', { confirm: true });
+    await until(() => agent.closed.length === 1, 'the guarded agent restarted');
+    expect(agent.sets.map((set) => [set.session, set.mode])).toEqual([
+      ['agent-1', 'auto'],
+      ['agent-1', 'ask'],
+    ]);
+    chat.sendMessage(workspace.id, session.id, 'mode');
+    await chat.settled();
+    expect(replies(core, session.id).at(-1)).toBe('mode=skip_all');
+    expect(agent.guarded).toEqual([true, false]);
+  });
+
+  it('a change across the guards during a turn: Ask at once, and the agent restarts when the turn ends, never mid-turn', async () => {
+    const { core, chat, agent, workspace, session } = setUp();
+    chat.sendMessage(workspace.id, session.id, 'ask');
+    await until(() => core.entities.getSession(session.id)?.state === 'waiting', 'the card');
+    chat.setPermissionMode(workspace.id, session.id, 'auto');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(agent.closed).toEqual([]);
+    const card = streamOf(core, session.id).findLast((event) => event.type === 'permission.requested');
+    if (card?.type !== 'permission.requested') throw new Error('no card');
+    core.permissions.decide(workspace.id, session.id, card.payload.requestId, { decision: 'allow_once' });
+    await chat.settled();
+    expect(agent.closed).toEqual(['agent-1']);
+    chat.sendMessage(workspace.id, session.id, 'mode');
+    await chat.settled();
+    expect(replies(core, session.id).at(-1)).toBe('mode=auto');
+    expect(agent.guarded).toEqual([false, true]);
+  });
+
+  it('an agent that does not keep the guards it was asked for never runs in Auto: the chat is back in Ask', async () => {
+    const { core, chat, agent, workspace, session } = setUp(modedAgent({ ignoresGuards: true }));
+    chat.setPermissionMode(workspace.id, session.id, 'auto');
+    chat.sendMessage(workspace.id, session.id, 'mode');
+    await chat.settled();
+    expect(replies(core, session.id)).toEqual(['mode=ask']);
+    expect(modeChanges(core, session.id).at(-1)).toMatchObject({ mode: 'ask', previous: 'auto', cause: 'agent' });
+    expect(agent.sets.map((set) => set.mode)).toEqual(['ask']);
   });
 });
 
@@ -541,12 +622,12 @@ describe('the terminal runs in the chat’s mode (criterion 9)', () => {
     await chat.settled();
     chat.setPermissionMode(workspace.id, session.id, 'auto');
     await chat.switchDriver(workspace.id, session.id, 'terminal');
-    expect(agent.terminalOptions).toEqual([{ permissionMode: 'auto' }]);
+    expect(agent.terminalOptions).toEqual([{ permissionMode: 'auto', protectedPaths: PROTECTED_PATHS }]);
     expect(() => chat.setPermissionMode(workspace.id, session.id, 'ask')).toThrow(DriverIsTerminalError);
     expect(modeChanges(core, session.id)).toHaveLength(1);
     await chat.switchDriver(workspace.id, session.id, 'ui');
     await chat.switchDriver(workspace.id, session.id, 'terminal');
-    expect(agent.terminalOptions.at(-1)).toEqual({ permissionMode: 'auto' });
+    expect(agent.terminalOptions.at(-1)).toEqual({ permissionMode: 'auto', protectedPaths: PROTECTED_PATHS });
     await chat.switchDriver(workspace.id, session.id, 'ui');
     await chat.close();
   });

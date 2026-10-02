@@ -6,10 +6,10 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AgentError, type AgentEvent, type AgentPermissionDecision, type AgentPermissionRequest, type AgentSession } from '@ogden-agents/core';
+import { AgentError, PROTECTED_PATHS, type AgentEvent, type AgentPermissionDecision, type AgentPermissionRequest, type AgentSession, type ProtectedPaths } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { asksLessThanAsk, ogdenModeOf, pathsOf } from '../src/acp-claude-code/claude-code-agent.js';
-import { createClaudeCodeAgent, createStreamMasker, findClaudeExecutable, MASKED, maskSecrets, resolveClaudeAgentAcp, secretValues } from '../src/index.js';
+import { claudeAskRules, createClaudeCodeAgent, createStreamMasker, findClaudeExecutable, MASKED, maskSecrets, resolveClaudeAgentAcp, secretValues } from '../src/index.js';
 
 const FAKE_AGENT = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-acp-agent.mjs');
 const dirs: string[] = [];
@@ -36,6 +36,7 @@ async function startFake(
     env?: Record<string, string>;
     claudeExecutable?: string | null;
     onPermissionRequest?: (request: AgentPermissionRequest) => Promise<AgentPermissionDecision>;
+    protectedPaths?: ProtectedPaths;
   } = {},
 ) {
   const diagnostics: string[] = [];
@@ -44,7 +45,7 @@ async function startFake(
     claudeExecutable: options.claudeExecutable === undefined ? null : options.claudeExecutable,
     onDiagnostic: (message, fields) => diagnostics.push(`${message} ${JSON.stringify(fields ?? {})}`),
   });
-  const session = await agent.startSession({ cwd: tempDir(), env: baseEnv(options.env), onPermissionRequest: options.onPermissionRequest });
+  const session = await agent.startSession({ cwd: tempDir(), env: baseEnv(options.env), onPermissionRequest: options.onPermissionRequest, protectedPaths: options.protectedPaths });
   sessions.push(session);
   const events: AgentEvent[] = [];
   session.onEvent((event) => events.push(event));
@@ -340,6 +341,41 @@ describe('permission modes', () => {
     await hung.session.setPermissionMode!('ask');
     await hung.session.prompt('mode');
     expect(replyText(hung.events)).toBe('mode=default');
+  });
+
+  it('keeps the protected paths guarded when asked: ask rules in the session settings, so an Auto edit of one still asks (user decision 2026-10-02)', async () => {
+    expect(claudeAskRules(PROTECTED_PATHS)).toEqual(expect.arrayContaining(['Edit(**/.claude/**)', 'Edit(**/.git/**)', 'Edit(**/CLAUDE.md)', 'Edit(**/.mcp.json)']));
+    const asked: AgentPermissionRequest[] = [];
+    const guarded = await startFake({ protectedPaths: PROTECTED_PATHS, onPermissionRequest: async (request) => (asked.push(request), { outcome: 'allow_once' }) });
+    expect(guarded.session.protectsPaths).toBe(true);
+    await guarded.session.prompt('guards');
+    expect(replyText(guarded.events)).toBe(`ask=${JSON.stringify(claudeAskRules(PROTECTED_PATHS))}`);
+    await guarded.session.setPermissionMode!('auto');
+    await guarded.session.prompt('permission-edit src/a.ts');
+    expect(asked).toEqual([]);
+    await guarded.session.prompt('permission-edit .claude/settings.json');
+    await guarded.session.prompt('permission-edit docs/CLAUDE.md');
+    expect(asked.map((request) => request.paths)).toEqual([['.claude/settings.json'], ['docs/CLAUDE.md']]);
+
+    // Without the guards (Ask or Skip all sessions), the session settings carry no ask rules.
+    const plain = await startFake({ onPermissionRequest: async (request) => (asked.push(request), { outcome: 'allow_once' }) });
+    expect(plain.session.protectsPaths).toBe(false);
+    await plain.session.prompt('guards');
+    expect(replyText(plain.events)).toBe('ask=[]');
+    await plain.session.setPermissionMode!('auto');
+    await plain.session.prompt('permission-edit .claude/settings.json');
+    expect(asked).toHaveLength(2);
+  });
+
+  it('a reopened session gets the same guards', async () => {
+    const agent = createClaudeCodeAgent({ adapterPath: FAKE_AGENT, claudeExecutable: null });
+    const opened = await agent.reopenSession({ cwd: tempDir(), env: baseEnv({ FAKE_ACP_RESUME: 'resume' }), agentSessionId: 'fake-session-earlier', protectedPaths: PROTECTED_PATHS });
+    sessions.push(opened.session);
+    const events: AgentEvent[] = [];
+    opened.session.onEvent((event) => events.push(event));
+    expect(opened.restored).toBe('resumed');
+    await opened.session.prompt('guards');
+    expect(replyText(events)).toBe(`ask=${JSON.stringify(claudeAskRules(PROTECTED_PATHS))}`);
   });
 
   it('a plan-exit card with mode-raising allow_always options gets the allow_once option (manually approve): never a mode change', async () => {

@@ -94,6 +94,18 @@ export type AgentPermissionDecision =
   | { outcome: 'deny'; reason?: string | undefined }
   | { outcome: 'cancelled' };
 
+/**
+ * Folders and files (by name, at any depth) the agent must still ask before
+ * writing, even in its own auto mode (permission modes, user decision
+ * 2026-10-02: "Keep protected files guarded"): so such an edit reaches Ogden
+ * as a card. Core passes the 2.8 protected paths; the adapter turns them into
+ * the agent's own rules.
+ */
+export interface ProtectedPaths {
+  folders: readonly string[];
+  files: readonly string[];
+}
+
 export interface StartAgentSession {
   /** The folder the agent works in: the workspace's repo root. */
   cwd: string;
@@ -109,6 +121,13 @@ export interface StartAgentSession {
    * nothing runs without a person.
    */
   onPermissionRequest?: ((request: AgentPermissionRequest) => Promise<AgentPermissionDecision>) | undefined;
+  /**
+   * Paths to keep guarded (ask before writing) for the whole session. Core
+   * passes them only for a chat in Auto: an agent can't change them once it
+   * runs, and they would hold even in Skip all, so a chat that moves into or
+   * out of Auto gets a new agent session (resumed) at its next idle point.
+   */
+  protectedPaths?: ProtectedPaths | undefined;
 }
 
 /** How a reopened session got its context back: the agent resumed it, loaded it, or had to start a new one. */
@@ -154,6 +173,8 @@ export interface AgentSession {
    * agent declares). Absent: Ask only.
    */
   readonly permissionModes?: readonly PermissionMode[] | undefined;
+  /** Whether the session was started with `protectedPaths` in effect. Core puts only such a session in Auto. */
+  readonly protectsPaths?: boolean | undefined;
   /**
    * Puts the session in `mode`. Resolves once the agent has taken it (at once
    * when it already runs in it); rejects when it can't. Absent: the session
@@ -225,6 +246,8 @@ export interface AgentTerminalResume {
 /** How the agent's CLI is to start (permission modes). */
 export interface AgentTerminalOptions {
   permissionMode: PermissionMode;
+  /** Paths the CLI must still ask before writing (given in Auto only). */
+  protectedPaths?: ProtectedPaths | undefined;
 }
 
 export type AgentCliLocation = { found: true } | { found: false; reason: string };

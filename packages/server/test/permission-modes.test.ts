@@ -135,7 +135,10 @@ describe('Auto (criteria 2, 3, 10)', () => {
     const ids = await openChat(server, tab);
     await say(server, tab, ids, 'hello');
     expect((await setMode(server, tab, ids, { mode: 'auto' })).status).toBe(200);
+    // Its agent restarts with the protected paths guarded, and falls back as it takes Auto.
+    expect((await request(server, tab, 'POST', apiPath(API_ROUTES.sessionMessages, ids), { text: 'hello again' })).status).toBe(202);
     await waitFor(() => modeChanges(server, ids.sesId).length === 2, 'the fallback', 10_000);
+    await waitFor(() => stateOf(server, ids.sesId) === 'idle', 'idle', 15_000);
     expect(modeChanges(server, ids.sesId)).toEqual([
       ['ask', 'auto', 'user'],
       ['auto', 'ask', 'agent'],
@@ -144,6 +147,42 @@ describe('Auto (criteria 2, 3, 10)', () => {
     expect(fallback).toMatchObject({ payload: { reason: 'Claude Code switched itself to Accept edits, so this chat is back in Ask.' } });
     await waitFor(async () => (await say(server, tab, ids, 'mode')) === 'mode=default', 'the agent in Ask', 15_000);
   }, 30_000);
+});
+
+describe('Auto keeps protected files guarded (user decision 2026-10-02)', () => {
+  it("an Auto chat's edit of a protected file still shows a card; another edit runs without one; Ask is unchanged", async () => {
+    const { server, tab } = await startChatServer();
+    const ids = await openChat(server, tab);
+    // In Ask, every edit asks (as before).
+    expect((await request(server, tab, 'POST', apiPath(API_ROUTES.sessionMessages, ids), { text: 'permission-edit src/a.ts' })).status).toBe(202);
+    await waitFor(() => stateOf(server, ids.sesId) === 'waiting', 'the Ask card', 15_000);
+    const askCard = streamOf(server, ids.sesId).findLast((e): e is PermissionRequestedEvent => e.type === 'permission.requested')!;
+    expect((await request(server, tab, 'POST', apiPath(API_ROUTES.sessionPermission, { ...ids, requestId: askCard.payload.requestId }), { decision: 'allow_once' })).status).toBe(204);
+    await waitFor(() => stateOf(server, ids.sesId) === 'idle', 'idle', 15_000);
+
+    expect((await setMode(server, tab, ids, { mode: 'auto' })).status).toBe(200);
+    expect(await say(server, tab, ids, 'guards')).toContain('Edit(**/.claude/**)');
+    expect(await say(server, tab, ids, 'permission-edit src/a.ts')).toBe('Edited src/a.ts.');
+    const cards = () => streamOf(server, ids.sesId).filter((e) => e.type === 'permission.requested').length;
+    expect(cards()).toBe(1);
+    expect((await request(server, tab, 'POST', apiPath(API_ROUTES.sessionMessages, ids), { text: 'permission-edit .claude/settings.json' })).status).toBe(202);
+    await waitFor(() => stateOf(server, ids.sesId) === 'waiting', 'the protected-path card', 15_000);
+    const card = streamOf(server, ids.sesId).findLast((e): e is PermissionRequestedEvent => e.type === 'permission.requested')!;
+    expect(card.payload).toMatchObject({ permissionMode: 'auto', toolCall: { protectedPath: true } });
+    expect((await request(server, tab, 'POST', apiPath(API_ROUTES.sessionPermission, { ...ids, requestId: card.payload.requestId }), { decision: 'deny' })).status).toBe(204);
+    await waitFor(() => stateOf(server, ids.sesId) === 'idle', 'idle', 15_000);
+  }, 45_000);
+
+  it('a Skip-all chat starts with no ask rules, and Auto to Skip all restarts it without them', async () => {
+    const { server, tab } = await startChatServer();
+    const ids = await openChat(server, tab);
+    expect((await setDeveloperMode(server, tab, true)).status).toBe(200);
+    expect((await setMode(server, tab, ids, { mode: 'auto' })).status).toBe(200);
+    expect(await say(server, tab, ids, 'guards')).toContain('Edit(**/.git/**)');
+    expect((await setMode(server, tab, ids, { mode: 'skip_all', confirm: true })).status).toBe(200);
+    expect(await say(server, tab, ids, 'guards')).toBe('ask=[]');
+    expect(await say(server, tab, ids, 'mode')).toBe('mode=bypassPermissions');
+  }, 45_000);
 });
 
 describe('a mode the agent cannot offer (criterion 4)', () => {

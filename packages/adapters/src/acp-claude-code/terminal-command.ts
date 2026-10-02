@@ -16,8 +16,9 @@
  * settings' default mode.
  */
 import { createRequire } from 'node:module';
-import { AgentError, type AgentCliLocation, type AgentTerminalCommand } from '@ogden-agents/core';
+import { AgentError, type AgentCliLocation, type AgentTerminalCommand, type ProtectedPaths } from '@ogden-agents/core';
 import type { PermissionMode } from '@ogden-agents/shared';
+import { claudeGuardSettings } from './claude-guards.js';
 import { findClaudeExecutable } from './detect.js';
 
 /** What a session id must look like to go on the command line: never an option, never a path. */
@@ -32,6 +33,8 @@ export interface ClaudeTerminalOptions {
   nodePath?: string | undefined;
   /** The chat's permission mode, which the CLI starts in. Default Ask. */
   permissionMode?: PermissionMode | undefined;
+  /** Paths it must still ask before writing (Auto): passed as `--settings` with ask rules. */
+  protectedPaths?: ProtectedPaths | undefined;
 }
 
 /** The CLI's arguments for each permission mode. */
@@ -100,6 +103,7 @@ export function claudeTerminalCommand(
   if (!SESSION_ID.test(agentSessionId)) throw new AgentError('agent_unavailable', "This chat's Claude Code session can't be opened in a terminal.");
   const claude = resolveClaudeExecutable(env, options);
   if (claude === undefined) throw new AgentError('agent_unavailable', CLAUDE_CLI_NOT_FOUND);
-  const args = ['--resume', agentSessionId, ...CLAUDE_MODE_ARGS[options.permissionMode ?? 'ask']];
+  const guard = options.protectedPaths === undefined ? [] : ['--settings', JSON.stringify(claudeGuardSettings(options.protectedPaths))];
+  const args = ['--resume', agentSessionId, ...CLAUDE_MODE_ARGS[options.permissionMode ?? 'ask'], ...guard];
   return /\.[cm]?js$/i.test(claude) ? { file: options.nodePath ?? process.execPath, args: [claude, ...args], env } : { file: claude, args, env };
 }

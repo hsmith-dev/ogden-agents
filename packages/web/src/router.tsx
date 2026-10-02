@@ -84,6 +84,13 @@ const workspaceBoardRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/workspace-board-page'), 'WorkspaceBoardPage'),
 });
 
+/** A ticket's detail sheet over the Board (story 4.9), `/w/:wsId/board/:ref`. */
+const workspaceBoardTicketRoute = createRoute({
+  getParentRoute: () => workspaceBoardRoute,
+  path: '$ref',
+  component: lazyRouteComponent(() => import('./routes/workspace-board-ticket'), 'WorkspaceBoardTicket'),
+});
+
 /** The session view's search: `?driver=terminal` mirrors who drives the chat (story 3.6); it never switches by itself. */
 export interface SessionSearch {
   driver?: 'terminal';
@@ -104,7 +111,7 @@ const routeTree = rootRoute.addChildren([
   workspaceChatsRoute,
   workspaceSettingsRoute,
   workspacePlanRoute,
-  workspaceBoardRoute,
+  workspaceBoardRoute.addChildren([workspaceBoardTicketRoute]),
   sessionRoute,
   settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute]),
 ]);

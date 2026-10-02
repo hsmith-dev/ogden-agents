@@ -306,3 +306,21 @@ describe('the epic 4 texts (story 4.2)', () => {
     expect(shared.SCRIPT_TRUST_TEXT).toMatch(/API keys or tokens/);
   });
 });
+
+describe('the board and ticket detail texts (story 4.9)', () => {
+  it('the functions build plain lines, with no em or en dash', () => {
+    expect(shared.boardProblemsLine(2)).toBe('Some ticket files could not be read (2)');
+    expect(shared.TICKET_NOT_FOUND('1.2')).toBe('No ticket 1.2 in this project.');
+    expect(shared.boardCardLabel('1.3', 'Build the third thing', 'Waits for 1.2')).toBe('1.3 Build the third thing, Waits for 1.2');
+    for (const text of [shared.boardProblemsLine(1), shared.TICKET_NOT_FOUND('4.1'), shared.boardCardLabel('1.1', 'A', 'Ready')]) {
+      expect(text).not.toMatch(/[–—]/);
+      expect(text).toMatch(/^[A-Z0-9]/);
+    }
+    expect(shared.boardBlockedText(' Needs the API key ')).toBe('Blocked: Needs the API key');
+    expect(shared.boardBlockedText('')).toBe('Blocked');
+    expect(shared.TICKET_PREREQUISITES_HEADING).toBe('Prerequisites');
+    expect(shared.TICKET_NO_PREREQUISITES_TEXT).toBe('No prerequisites.');
+    expect(shared.BOARD_DROPPED_LABEL).toBe('Dropped');
+    expect(shared.TICKET_SUMMARY_HEADING).toBe('Plan summary');
+  });
+});

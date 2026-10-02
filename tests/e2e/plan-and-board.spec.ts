@@ -23,14 +23,18 @@
  * shows the label mapping's labels and groups, Start from an idea uses the
  * mapping's entry action, and a module copied in while the server runs shows
  * on the next visit with the New tag (the modules there at the first read
- * don't carry it). No real `claude` or `uv` runs.
+ * don't carry it). Story 4.9: against the in-memory ticket store, the
+ * board puts each card in its column, shows "Waits for 1.2" and the blocked
+ * reason, highlights a card its `ticket.changed` names, opens the detail
+ * sheet from a card and from its URL (Esc returns to the card), and below
+ * `md` stacks each epic's columns. No real `claude` or `uv` runs.
  */
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { expect, test } from '@playwright/test';
 // The shared routes' own file (it has no imports), as support.ts reads it.
 import { apiPath } from '../../packages/shared/src/api.ts';
-import { API_ROUTES, serverModule, stubSetupCatalog } from '../support.js';
+import { API_ROUTES, serverModule, stubSetupCatalog, waitUntil } from '../support.js';
 import { startChat, withChatServer } from './chat-server.js';
 import { storedToken } from './tab.js';
 
@@ -118,12 +122,13 @@ test('Plan Start opens the planning session, and Board asks for trust, then to d
       expect(bmadSource.downloads).toBe(0);
       await page.getByTestId('bmad-download').click();
       await expect(page.getByTestId('bmad-downloading')).toBeVisible();
-      const rows = page.getByTestId('ticket-row');
-      await expect(rows).toHaveCount(2);
-      await expect(rows.nth(0)).toContainText('1.1');
-      await expect(rows.nth(0)).toContainText('Build the first thing');
-      await expect(rows.nth(0).getByTestId('ticket-state')).toHaveText('review');
-      await expect(rows.nth(1).getByTestId('ticket-state')).toHaveText('planned');
+      // Story 4.9: the tickets are cards in their status columns.
+      const cards = page.getByTestId('ticket-card');
+      await expect(cards).toHaveCount(2);
+      const first = page.locator('[data-testid="ticket-card"][data-ref="1.1"]');
+      await expect(first).toContainText('Build the first thing');
+      await expect(first).toHaveAttribute('data-column', 'in_review');
+      await expect(page.locator('[data-testid="ticket-card"][data-ref="1.2"]')).toHaveAttribute('data-column', 'draft');
       await expect(page.getByTestId('bmad-download-prompt')).toHaveCount(0);
       expect(bmadSource.downloads).toBe(1);
 
@@ -180,7 +185,7 @@ test('turning Board on in the settings asks for the trust first: Cancel changes 
 
       // Trusted once for the project: the Board lists the tickets with no prompt.
       await page.goto(`${server.url}/w/${wsId}/board`);
-      await expect(page.getByTestId('ticket-row')).toHaveCount(2);
+      await expect(page.getByTestId('ticket-card')).toHaveCount(2);
       await expect(page.getByTestId('script-trust-prompt')).toHaveCount(0);
     },
     { extra: { ticketStore, bmadSource }, files: SET_UP },
@@ -430,5 +435,110 @@ test('the Plan home on the real catalog (stories 4.4 and 4.6): mapped labels and
         '.claude/skills/my-own/SKILL.md': SKILL('my-own', 'My own skill.'),
       },
     },
+  );
+});
+
+/** Four tickets of one epic for the in-memory store: in review, planned, ready but waiting for 1.2, and blocked. */
+const BOARD_TICKETS = [
+  { ...ROW, ref: '1.1', id: 1, epic: 'epic-planning-and-board', title: 'Build the first thing', type: 'story', status: 'in-review', state: 'review', blocked_reason: '' },
+  { ...ROW, ref: '1.2', id: 2, epic: 'epic-planning-and-board', title: 'Build the second thing', type: 'story', status: '', state: 'planned', blocked_reason: '' },
+  { ...ROW, ref: '1.3', id: 3, epic: 'epic-planning-and-board', title: 'Build the third thing', type: 'story', status: 'ready-for-dev', state: 'backlog', blocked_reason: '', after: [2] },
+  {
+    ...ROW,
+    ref: '1.4',
+    id: 4,
+    epic: 'epic-planning-and-board',
+    title: 'Build the fourth thing',
+    type: 'story',
+    status: 'blocked',
+    state: 'in-progress',
+    blocked_reason: 'Needs the payment key',
+    blocked_at: '2026-10-01',
+  },
+];
+
+test('the board: cards in their columns, Waits for and the blocked reason, a live change highlights, the detail sheet, and stacked columns below md', async ({ page }) => {
+  const server = await serverModule();
+  // The project folder is made by withChatServer, so the store is built once its real path is known; until then it has none.
+  type MemoryStore = ReturnType<typeof server.createMemoryTicketStore>;
+  let inner: MemoryStore = server.createMemoryTicketStore();
+  const ticketStore: MemoryStore = {
+    get calls() {
+      return inner.calls;
+    },
+    tree: (...args) => inner.tree(...args),
+    find: (...args) => inner.find(...args),
+    mark: (...args) => inner.mark(...args),
+    watch: (...args) => inner.watch(...args),
+    watching: (...args) => inner.watching(...args),
+    emit: (...args) => inner.emit(...args),
+    fail: (...args) => inner.fail(...args),
+  };
+  const bmadSource = server.createMemoryBmadSource({ ready: true });
+  await withChatServer(
+    page,
+    async ({ server: running, repo }) => {
+      const realPath = realpathSync.native(repo);
+      inner = server.createMemoryTicketStore({
+        repos: { [realPath]: { tickets: BOARD_TICKETS, folder: 'initiative-demo' } },
+        text: { '1.2': { description: 'Show the second thing.', verify: 'The board shows it.', references: ['packages/web/src/x.ts'] } },
+      });
+      const { wsId, call } = await openProject(page, repo);
+      await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: ['board'] });
+      await call('PUT', apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId }));
+      // Board on, trusted and set up: the server's ticket watcher watches the project (story 4.8).
+      await waitUntil(() => ticketStore.watching(realPath) === 1, 'the ticket watch');
+
+      await page.goto(`${running.url}/w/${wsId}/board`);
+      const card = (ref: string) => page.locator(`[data-testid="ticket-card"][data-ref="${ref}"]`);
+      await expect(page.getByTestId('ticket-card')).toHaveCount(4);
+      await expect(card('1.1')).toHaveAttribute('data-column', 'in_review');
+      await expect(card('1.2')).toHaveAttribute('data-column', 'draft');
+      await expect(card('1.3')).toHaveAttribute('data-column', 'ready');
+      await expect(card('1.4')).toHaveAttribute('data-column', 'blocked');
+      await expect(card('1.3')).toContainText('Waits for 1.2');
+      await expect(card('1.4')).toContainText('Needs the payment key');
+      await expect(card('1.3')).toHaveAccessibleName('1.3 Build the third thing, Waits for 1.2');
+
+      // An agent's write: the store tells the watch, the server appends ticket.changed, the card highlights and moves.
+      await ticketStore.mark(realPath, '1.2', 'in-progress');
+      ticketStore.emit(realPath, ['1.2']);
+      await expect(card('1.2')).toHaveAttribute('data-highlighted', 'true');
+      await expect(card('1.2')).toHaveAttribute('data-column', 'in_progress');
+      await expect(card('1.2')).not.toHaveAttribute('data-highlighted', 'true', { timeout: 5_000 });
+
+      // The detail sheet from a card, then Esc back to the board with focus on the card.
+      await card('1.2').click();
+      await expect(page).toHaveURL(new RegExp(`/w/${wsId}/board/1\\.2$`));
+      const sheet = page.getByRole('dialog', { name: 'Build the second thing' });
+      await expect(sheet).toBeVisible();
+      await expect(sheet.getByTestId('ticket-sheet-summary')).toContainText('Show the second thing.');
+      await expect(sheet.getByTestId('ticket-sheet-verify')).toContainText('The board shows it.');
+      await expect(sheet.getByTestId('ticket-sheet-references')).toContainText('packages/web/src/x.ts');
+      await page.keyboard.press('Escape');
+      await expect(page).toHaveURL(new RegExp(`/w/${wsId}/board$`));
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(card('1.2')).toBeFocused();
+
+      // The detail sheet from its URL, over the board; an unknown ref says so.
+      await page.goto(`${running.url}/w/${wsId}/board/1.3`);
+      await expect(page.getByRole('dialog', { name: 'Build the third thing' })).toBeVisible();
+      await expect(page.getByTestId('ticket-sheet-prerequisite')).toContainText('1.2');
+      await page.goto(`${running.url}/w/${wsId}/board/9.9`);
+      await expect(page.getByTestId('ticket-sheet-error')).toHaveText('No ticket 9.9 in this project.');
+      await page.keyboard.press('Escape');
+      await expect(page).toHaveURL(new RegExp(`/w/${wsId}/board$`));
+
+      // Below md, the epic's columns stack as lists.
+      await page.setViewportSize({ width: 600, height: 900 });
+      const review = page.locator('[data-testid="board-column"][data-column="in_review"]');
+      const blocked = page.locator('[data-testid="board-column"][data-column="blocked"]');
+      await expect(blocked).toBeVisible();
+      await expect(page.locator('[data-testid="board-column"][data-column="done"]')).toBeHidden();
+      const top = (await review.boundingBox())!;
+      const bottom = (await blocked.boundingBox())!;
+      expect(bottom.y).toBeGreaterThanOrEqual(top.y + top.height);
+    },
+    { extra: { ticketStore, bmadSource }, files: SET_UP },
   );
 });

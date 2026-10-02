@@ -14,8 +14,15 @@
  * prompt, and Allow trusts the project and fetches the tickets again.
  * Story 4.14: a Board refused with `bmad_not_downloaded` offers Download
  * BMad Method, which posts once, says it is downloading, then fetches the
- * tickets again; a failed download says why and keeps the button. The
- * REST calls go to a fake `tabAuth.fetch`.
+ * tickets again; a failed download says why and keeps the button.
+ * Story 4.9: the board groups tickets by epic in status columns, with each
+ * card's one status line ("Waits for 1.2", the blocked reason, else the
+ * column), the problems one-liner with Show details, the dropped filter,
+ * hostile text shown literally, and a fed `ticket.changed` highlighting the
+ * card for 1.2 s; the ticket sheet's loaded, 404, error and close states.
+ * The REST calls go to a fake `tabAuth.fetch`; the event stream, the
+ * router's Link is a stand-in; Developer mode is set in the
+ * appearance's stored settings.
  */
 import {
   API_ROUTES,
@@ -26,6 +33,9 @@ import {
   BMAD_NOT_DOWNLOADED_TEXT,
   BOARD_EMPTY_TITLE,
   BOARD_LOADING_TEXT,
+  BOARD_SHOW_DETAILS_LABEL,
+  boardProblemsLine,
+  type CoreEvent,
   CatalogSkill,
   APPEARANCE_STORAGE_KEY,
   FEATURE_OFF_MESSAGE,
@@ -36,7 +46,10 @@ import {
   PLAN_PROJECT_LOADING_TEXT,
   SCRIPT_TRUST_TITLE,
   SCRIPTS_NOT_TRUSTED_MESSAGE,
+  TICKET_NO_PLAN_TEXT,
+  TICKET_NOT_FOUND,
   TICKETS_UNAVAILABLE_MESSAGE,
+  TicketDetail,
   TicketsResponse,
   type Session,
 } from '@ogden-agents/shared';
@@ -68,6 +81,39 @@ const state = vi.hoisted(() => ({
   bodies: [] as unknown[],
   trust: undefined as unknown,
   source: undefined as unknown,
+  ticket: undefined as unknown,
+}));
+
+/** The event stream's stand-in: `push` appends events and re-renders what reads them. */
+const stream = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
+  const value = {
+    events: [] as unknown[],
+    caughtUp: true,
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+    push(...more: unknown[]) {
+      value.events = [...value.events, ...more];
+      for (const listener of listeners) listener();
+    },
+  };
+  return value;
+});
+
+vi.mock('@/events/event-stream', async () => {
+  const { useSyncExternalStore } = await import('react');
+  return {
+    useEventStream: () => ({ events: useSyncExternalStore(stream.subscribe, () => stream.events), caughtUp: useSyncExternalStore(stream.subscribe, () => stream.caughtUp) }),
+  };
+});
+vi.mock('@tanstack/react-router', () => ({
+  Link: ({ children, to, params, ...props }: { children: ReactNode; to: string; params: { wsId: string; ref?: string } }) => (
+    <a href={to.replace('$wsId', params.wsId).replace('$ref', params.ref ?? '')} {...props}>
+      {children}
+    </a>
+  ),
 }));
 
 const reply = (answer: unknown): Promise<Response> => {
@@ -100,23 +146,17 @@ vi.mock('@/auth/tab-token', () => ({
         const pieces = state.pieces as unknown;
         return reply(Array.isArray(pieces) ? { settings: { cautionLevel: 'ask_every_time', bmadPieces: pieces } } : pieces);
       }
+      if (/\/tickets\/[^/]+$/.test(path)) return reply(state.ticket);
       return new Response('{}', { status: 404 });
     },
   },
 }));
 
-vi.mock('@tanstack/react-router', () => ({
-  Link: ({ children, to, params, ...props }: { children: ReactNode; to: string; params: { wsId: string } }) => (
-    <a href={to.replace('$wsId', params.wsId)} {...props}>
-      {children}
-    </a>
-  ),
-}));
-vi.mock('@/events/event-stream', () => ({ useEventStream: () => ({ events: [] }) }));
 
 const { PlanHome } = await import('../src/planning/plan-home');
 const { PlanPieceGate } = await import('../src/planning/plan-piece-gate');
 const { BoardTickets } = await import('../src/planning/board-tickets');
+const { TicketSheet } = await import('../src/planning/ticket-sheet');
 const { TooltipProvider } = await import('../src/ui/tooltip');
 const { AppearanceProvider } = await import('../src/appearance/appearance-provider');
 
@@ -159,6 +199,9 @@ beforeEach(() => {
   state.bodies = [];
   state.trust = { settings: { cautionLevel: 'ask_every_time', bmadPieces: ['board'], bmadScriptsTrusted: true } };
   state.source = undefined;
+  state.ticket = undefined;
+  stream.events = [];
+  stream.caughtUp = true;
 });
 afterEach(cleanup);
 
@@ -375,25 +418,6 @@ describe('Plan piece gate (story 4.6)', () => {
 });
 
 describe('Board page body (story 4.1)', () => {
-  it('lists each ticket’s ref, title, state and status in order', async () => {
-    mount(<BoardTickets wsId={WS} />);
-    await settle();
-    const rows = screen.getAllByTestId('ticket-row');
-    expect(rows.map((row) => row.getAttribute('data-ref'))).toEqual(['1.1', '1.2']);
-    expect(rows[0]!.textContent).toContain('Build the first thing');
-    expect(screen.getAllByTestId('ticket-state').map((badge) => badge.textContent)).toEqual(['review', 'planned']);
-    // Only a ticket with a status shows one.
-    expect(screen.getAllByTestId('ticket-status').map((status) => status.textContent)).toEqual(['in-review']);
-    expect(screen.queryByTestId('board-problems')).toBeNull();
-  });
-
-  it('lists what couldn’t be read', async () => {
-    state.tickets = { ...TICKETS, problems: ['epic-first/x-plan.md: ticket 9 names no entry; skipped'] };
-    mount(<BoardTickets wsId={WS} />);
-    await settle();
-    expect(screen.getByTestId('board-problems').textContent).toContain('ticket 9 names no entry');
-  });
-
   it('shows loading, then empty; and tickets_unavailable’s plain message', async () => {
     state.tickets = 'pending';
     mount(<BoardTickets wsId={WS} />);
@@ -420,13 +444,13 @@ describe('Board page body: the script trust (story 4.2)', () => {
     mount(<BoardTickets wsId={WS} />);
     await settle();
     expect(screen.getByTestId('script-trust-prompt').textContent).toContain(SCRIPT_TRUST_TITLE);
-    expect(screen.queryByTestId('ticket-row')).toBeNull();
+    expect(screen.queryByTestId('ticket-card')).toBeNull();
     state.tickets = TICKETS;
     fireEvent.click(screen.getByTestId('script-trust-allow'));
     await settle();
     expect(state.calls).toContain(`PUT ${apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId: WS })}`);
     expect(screen.queryByTestId('script-trust-prompt')).toBeNull();
-    expect(screen.getAllByTestId('ticket-row')).toHaveLength(2);
+    expect(screen.getAllByTestId('ticket-card')).toHaveLength(2);
   });
 
   it('a refused Allow says why and keeps the prompt', async () => {
@@ -479,7 +503,7 @@ describe('Board page body: downloading BMad Method (story 4.14)', () => {
     await settle();
     expect(state.calls).toContain(`POST ${API_ROUTES.bmadSource}`);
     expect(screen.queryByTestId('bmad-download-prompt')).toBeNull();
-    expect(screen.getAllByTestId('ticket-row')).toHaveLength(2);
+    expect(screen.getAllByTestId('ticket-card')).toHaveLength(2);
   });
 
   it('a failed download says why and keeps the button', async () => {
@@ -492,5 +516,268 @@ describe('Board page body: downloading BMad Method (story 4.14)', () => {
     expect(screen.getByTestId('bmad-download-error').textContent).toBe(BMAD_DOWNLOAD_INTEGRITY_MESSAGE);
     expect(screen.getByTestId('bmad-download')).toBeTruthy();
     expect(screen.queryByTestId('bmad-downloading')).toBeNull();
+  });
+});
+
+/** The fields story 4.2 added, as `tickets.py status` gives them. */
+const ROW = { file: null, tracker_id: '', assignee: '', hitl: false, covers: [], after: [], blocks: [], blocked_at: '' };
+const HOSTILE = '<img src=x onerror=alert(1)>';
+const BOARD: TicketsResponse = TicketsResponse.parse({
+  tickets: [
+    { ...ROW, ref: '1.1', id: 1, epic: 'epic-planning-and-board', title: 'Build the first thing', type: 'story', status: 'in-review', state: 'review', blocked_reason: '' },
+    { ...ROW, ref: '1.2', id: 2, epic: 'epic-planning-and-board', title: 'Build the second thing', type: 'story', status: '', state: 'planned', blocked_reason: '' },
+    { ...ROW, ref: '1.3', id: 3, epic: 'epic-planning-and-board', title: 'Build the third thing', type: 'story', status: 'ready-for-dev', state: 'backlog', blocked_reason: '', after: [2] },
+    { ...ROW, ref: '1.4', id: 4, epic: 'epic-planning-and-board', title: HOSTILE, type: 'story', status: 'blocked', state: 'in-progress', blocked_reason: 'Needs the API key', blocked_at: '2026-10-01' },
+    { ...ROW, ref: '1.5', id: 5, epic: 'epic-planning-and-board', title: 'Gone', type: 'story', status: 'dropped', state: 'dropped', blocked_reason: '' },
+    { ...ROW, ref: '2.1', id: 1, epic: 'epic-second', title: 'After the first', type: 'story', status: 'ready-for-dev', state: 'backlog', blocked_reason: '', after: ['1.1'] },
+  ],
+  problems: [],
+  epics: [
+    { slug: 'epic-planning-and-board', id: 1, status: 'in-progress', after: [], blocks: [] },
+    { slug: 'epic-second', id: 2, status: 'planned', after: [], blocks: [] },
+  ],
+});
+
+const card = (ref: string) => document.querySelector<HTMLElement>(`[data-testid="ticket-card"][data-ref="${ref}"]`)!;
+const changed = (seq: number, ref: string, workspaceId = WS) =>
+  ({ id: `evt_${seq}`, seq, at: '2026-10-02T00:00:00.000Z', type: 'ticket.changed', workspaceId, streamId: workspaceId, payload: { ref } }) as unknown as CoreEvent;
+
+describe('Board (story 4.9)', () => {
+  beforeEach(() => {
+    state.tickets = BOARD;
+  });
+
+  it('groups by epic in build order with each card in its column; a planned prerequisite shows Waits for; blocked shows its reason', async () => {
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    const epics = screen.getAllByTestId('board-epic');
+    expect(epics.map((epic) => epic.getAttribute('data-epic'))).toEqual(['epic-planning-and-board', 'epic-second']);
+    expect(epics[0]!.querySelector('h2')!.textContent).toBe('1Planning and board');
+    const cards = screen.getAllByTestId('ticket-card');
+    expect(Object.fromEntries(cards.map((each) => [each.getAttribute('data-ref'), each.getAttribute('data-column')]))).toEqual({
+      '1.1': 'in_review',
+      '1.2': 'draft',
+      '1.3': 'ready',
+      '1.4': 'blocked',
+      '2.1': 'ready',
+    });
+    // Each card is a link to its detail, named by its ref, title and status line.
+    expect(card('1.3').getAttribute('href')).toBe(`/w/${WS}/board/1.3`);
+    expect(card('1.3').getAttribute('aria-label')).toBe('1.3 Build the third thing, Waits for 1.2');
+    expect(card('1.3').querySelector('[data-testid="ticket-status-line"]')!.getAttribute('data-kind')).toBe('waits');
+    // 2.1 waits for 1.1 by ref, which is in review: met, so it shows its column.
+    expect(card('2.1').getAttribute('aria-label')).toBe('2.1 After the first, Ready');
+    expect(card('1.4').getAttribute('aria-label')).toBe(`1.4 ${HOSTILE}, Blocked: Needs the API key`);
+    expect(card('1.4').textContent).toContain('Blocked: Needs the API key');
+    expect(card('1.1').textContent).toContain('In review');
+  });
+
+  it('a met prerequisite (in review or done) shows no Waits for', async () => {
+    state.tickets = { ...BOARD, tickets: BOARD.tickets.map((row) => (row.ref === '1.2' ? { ...row, state: 'review', status: 'in-review' } : row)) };
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    expect(card('1.3').textContent).not.toContain('Waits for');
+    expect(card('1.3').textContent).toContain('Ready');
+  });
+
+  it('shows hostile text literally: no element, no link made from it', async () => {
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    expect(card('1.4').textContent).toContain(HOSTILE);
+    expect(document.querySelector('img')).toBeNull();
+    expect(document.querySelector('a[href^="javascript"]')).toBeNull();
+  });
+
+  it('what couldn’t be read is one line with Show details; dropped tickets show only with the filter on', async () => {
+    state.tickets = { ...BOARD, problems: ['epic-first/x-plan.md: ticket 9 names no entry; skipped', 'b'] };
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    expect(screen.getByTestId('board-problems-line').textContent).toBe(boardProblemsLine(2));
+    expect(screen.getByTestId('board-problems-list').hidden).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: BOARD_SHOW_DETAILS_LABEL }));
+    expect(screen.getByTestId('board-problems-list').hidden).toBe(false);
+    expect(screen.getByTestId('board-problems-list').textContent).toContain('ticket 9 names no entry');
+
+    expect(card('1.5')).toBeNull();
+    fireEvent.click(screen.getByTestId('board-show-dropped'));
+    await settle();
+    expect(card('1.5').getAttribute('data-column')).toBe('dropped');
+    expect(screen.getByTestId('board-dropped').textContent).toContain('Gone');
+  });
+
+  it('a ticket.changed of this workspace refetches and highlights that card for 1.2 s; other workspaces and earlier events are ignored', async () => {
+    stream.events = [changed(1, '1.1')];
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    expect(card('1.1').hasAttribute('data-highlighted')).toBe(false);
+    const fetchesBefore = state.calls.filter((each) => each.endsWith('/tickets')).length;
+
+    vi.useFakeTimers();
+    try {
+      act(() => stream.push(changed(2, '1.2', 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2ZZ')));
+      expect(card('1.2').hasAttribute('data-highlighted')).toBe(false);
+      act(() => stream.push(changed(3, '1.2')));
+      // The highlight waits for the refetched tickets.
+      expect(card('1.2').hasAttribute('data-highlighted')).toBe(false);
+      for (let i = 0; i < 5; i++) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(0);
+        });
+      }
+      expect(card('1.2').getAttribute('data-highlighted')).toBe('true');
+      expect(card('1.1').hasAttribute('data-highlighted')).toBe(false);
+      // Never announced: no live region on the board.
+      expect(document.querySelector('[aria-live]')).toBeNull();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1199);
+      });
+      expect(card('1.2').getAttribute('data-highlighted')).toBe('true');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(card('1.2').hasAttribute('data-highlighted')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+    await settle();
+    expect(state.calls.filter((each) => each.endsWith('/tickets')).length).toBe(fetchesBefore + 1);
+  });
+
+  it('a failed refetch keeps the board, with a quiet line above and no alert', async () => {
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    state.tickets = { status: 503, message: TICKETS_UNAVAILABLE_MESSAGE };
+    act(() => stream.push(changed(1, '1.2')));
+    await settle();
+    expect(screen.getByTestId('board-refetch-error').textContent).toBe(TICKETS_UNAVAILABLE_MESSAGE);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getAllByTestId('ticket-card')).toHaveLength(5);
+  });
+
+  it('the sheet’s outlet shows only over a loaded board, never over the trust prompt', async () => {
+    state.tickets = { status: 409, code: 'scripts_not_trusted', message: SCRIPTS_NOT_TRUSTED_MESSAGE };
+    mount(<BoardTickets wsId={WS} sheet={<div data-testid="sheet-outlet" />} />);
+    await settle();
+    expect(screen.getByTestId('script-trust-prompt')).toBeTruthy();
+    expect(screen.queryByTestId('sheet-outlet')).toBeNull();
+    cleanup();
+
+    state.tickets = BOARD;
+    mount(<BoardTickets wsId={WS} sheet={<div data-testid="sheet-outlet" />} />);
+    await settle();
+    expect(screen.getByTestId('sheet-outlet')).toBeTruthy();
+  });
+
+  it('a backlog replayed while the stream catches up refetches but highlights nothing', async () => {
+    stream.caughtUp = false;
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    const fetchesBefore = state.calls.filter((each) => each.endsWith('/tickets')).length;
+    act(() => stream.push(changed(1, '1.2')));
+    expect(card('1.2').hasAttribute('data-highlighted')).toBe(false);
+    await settle();
+    expect(state.calls.filter((each) => each.endsWith('/tickets')).length).toBe(fetchesBefore + 1);
+  });
+});
+
+const DETAIL = TicketDetail.parse({
+  ...ROW,
+  ref: '1.3',
+  id: 3,
+  epic: 'epic-planning-and-board',
+  title: 'Build the third thing',
+  type: 'story',
+  status: 'ready-for-dev',
+  state: 'backlog',
+  blocked_reason: '',
+  after: [2, 1],
+  description: '[x](javascript:alert(1)) and <b>bold</b>',
+  verify: 'The board shows it.',
+  references: ['../../etc/passwd'],
+  notes: ['A note'],
+  unknown: '',
+  hasPlan: true,
+});
+
+describe('Ticket sheet (story 4.9)', () => {
+  beforeEach(() => {
+    state.tickets = BOARD;
+    state.ticket = { ticket: DETAIL };
+  });
+
+  it('shows the title, ref, status, plan summary, check, prerequisites met or waiting, notes and references as plain text', async () => {
+    mount(<TicketSheet wsId={WS} ticketRef="1.3" onClose={() => {}} />);
+    await settle();
+    const sheet = screen.getByTestId('ticket-sheet');
+    expect(screen.getByRole('dialog', { name: 'Build the third thing' })).toBeTruthy();
+    expect(screen.getByTestId('ticket-sheet-ref').textContent).toBe('1.3');
+    expect(screen.getByTestId('ticket-sheet-status').textContent).toContain('Ready');
+    expect(screen.getByTestId('ticket-sheet-summary').textContent).toContain('[x](javascript:alert(1)) and <b>bold</b>');
+    expect(screen.getByTestId('ticket-sheet-verify').textContent).toContain('The board shows it.');
+    const prerequisites = screen.getAllByTestId('ticket-sheet-prerequisite');
+    expect(prerequisites.map((each) => [each.textContent, each.getAttribute('data-met')])).toEqual([
+      ['1.2Waiting', 'false'],
+      ['1.1Met', 'true'],
+    ]);
+    expect(screen.getByTestId('ticket-sheet-notes').textContent).toContain('A note');
+    expect(screen.getByTestId('ticket-sheet-references').textContent).toContain('../../etc/passwd');
+    expect(screen.queryByTestId('ticket-sheet-unknown')).toBeNull();
+    expect(screen.queryByTestId('ticket-sheet-raw-status')).toBeNull();
+    expect(sheet.querySelector('a, b, img')).toBeNull();
+  });
+
+  it('with no description says there is no plan summary yet; Developer mode shows the raw status and state', async () => {
+    window.localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify({ theme: 'system', density: 'compact', developerMode: true, terminalScreenReader: false }));
+    state.ticket = { ticket: { ...DETAIL, description: '' } };
+    mount(<TicketSheet wsId={WS} ticketRef="1.3" onClose={() => {}} />);
+    await settle();
+    expect(screen.getByTestId('ticket-sheet-summary').textContent).toContain(TICKET_NO_PLAN_TEXT);
+    expect(screen.getByTestId('ticket-sheet-raw-status').textContent).toContain('ready-for-dev');
+  });
+
+  it('404 says there is no such ticket; another error shows its message', async () => {
+    state.ticket = { status: 404, code: 'not_found', message: 'not found' };
+    mount(<TicketSheet wsId={WS} ticketRef="1.9" onClose={() => {}} />);
+    await settle();
+    expect(screen.getByTestId('ticket-sheet-error').textContent).toBe(TICKET_NOT_FOUND('1.9'));
+    cleanup();
+
+    state.ticket = { status: 400, code: 'invalid_request', message: 'That is not a ticket reference.' };
+    mount(<TicketSheet wsId={WS} ticketRef="1.9" onClose={() => {}} />);
+    await settle();
+    expect(screen.getByTestId('ticket-sheet-error').textContent).toBe('That is not a ticket reference.');
+    cleanup();
+
+    state.ticket = 'pending';
+    mount(<TicketSheet wsId={WS} ticketRef="1.9" onClose={() => {}} />);
+    await settle();
+    expect(screen.getByTestId('ticket-sheet-loading')).toBeTruthy();
+  });
+
+  it('without the tickets, prerequisites wait (a skeleton) or, on failure, show as written with no met or waiting word', async () => {
+    state.tickets = 'pending';
+    mount(<TicketSheet wsId={WS} ticketRef="1.3" onClose={() => {}} />);
+    await settle();
+    expect(screen.getByTestId('ticket-sheet-prerequisites-loading')).toBeTruthy();
+    expect(screen.queryByTestId('ticket-sheet-prerequisite')).toBeNull();
+    cleanup();
+
+    state.tickets = { status: 503, message: TICKETS_UNAVAILABLE_MESSAGE };
+    mount(<TicketSheet wsId={WS} ticketRef="1.3" onClose={() => {}} />);
+    await settle();
+    expect(screen.getAllByTestId('ticket-sheet-prerequisite').map((each) => [each.textContent, each.getAttribute('data-met')])).toEqual([
+      ['2', null],
+      ['1', null],
+    ]);
+  });
+
+  it('Close and Esc ask to go back to the board', async () => {
+    const onClose = vi.fn();
+    mount(<TicketSheet wsId={WS} ticketRef="1.3" onClose={onClose} />);
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(screen.getByTestId('ticket-sheet'), { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(2);
   });
 });

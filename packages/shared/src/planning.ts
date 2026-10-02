@@ -612,6 +612,54 @@ export const TICKET_LOAD_FAILED = "Ogden Agents couldn't load this ticket";
 /** The fallback when a status change couldn't be saved. */
 export const TICKET_MARK_FAILED = "Ogden Agents couldn't change this ticket's status";
 
+// ---- The board and its ticket detail (story 4.9) ----
+
+/** The accessible name of the board's list of epics. */
+export const BOARD_EPICS_LABEL = 'Epics';
+/** The heading over an epic's dropped tickets (shown only with the dropped filter on), and a dropped card's status line. */
+export const BOARD_DROPPED_LABEL = 'Dropped';
+/** The heading of tickets that sit in no epic. */
+export const BOARD_NO_EPIC_TITLE = 'Not in an epic';
+/** The one-line notice when `tickets.py` couldn't read some files ("Some ticket files could not be read (2)"). */
+export function boardProblemsLine(count: number): string {
+  return `${BOARD_PROBLEMS_TITLE} (${count})`;
+}
+/** The button that shows the problems' details. */
+export const BOARD_SHOW_DETAILS_LABEL = 'Show details';
+/** The button that hides them again. */
+export const BOARD_HIDE_DETAILS_LABEL = 'Hide details';
+/** The detail sheet when no ticket has that ref (404). */
+export function TICKET_NOT_FOUND(ref: string): string {
+  return `No ticket ${ref} in this project.`;
+}
+/** Said while a ticket's detail loads. */
+export const TICKET_LOADING_TEXT = 'Loading the ticket';
+/** The detail sheet's section headings. */
+export const TICKET_STATUS_HEADING = 'Status';
+export const TICKET_SUMMARY_HEADING = 'Plan summary';
+export const TICKET_VERIFY_HEADING = 'How it is checked';
+export const TICKET_PREREQUISITES_HEADING = 'Prerequisites';
+export const TICKET_NOTES_HEADING = 'Notes';
+export const TICKET_REFERENCES_HEADING = 'References';
+export const TICKET_UNKNOWN_HEADING = 'Open question';
+/** The plan summary of a ticket with no description yet. */
+export const TICKET_NO_PLAN_TEXT = 'No plan summary yet.';
+/** The prerequisites section of a ticket that waits for nothing. */
+export const TICKET_NO_PREREQUISITES_TEXT = 'No prerequisites.';
+/** A prerequisite that is done or in review. */
+export const TICKET_PREREQUISITE_MET_TEXT = 'Met';
+/** A prerequisite that isn't yet. */
+export const TICKET_PREREQUISITE_WAITING_TEXT = 'Waiting';
+/** A blocked card's status line: the word, then the reason when it has one ("Blocked: Needs the API key"). */
+export function boardBlockedText(reason: string): string {
+  const trimmed = reason.trim();
+  return trimmed === '' ? BOARD_COLUMN_LABELS.blocked : `${BOARD_COLUMN_LABELS.blocked}: ${trimmed}`;
+}
+/** A card's accessible name: its ref, title and status line ("1.3 Build the third thing, Waits for 1.2"). */
+export function boardCardLabel(ref: string, title: string, statusLine: string): string {
+  return `${ref} ${title}, ${statusLine}`;
+}
+
 /** The setup panel's button (Plan and Board, a piece on without `_bmad/`). */
 export const BMAD_SET_UP_LABEL = 'Set up';
 /** The reduced-mode notice's and the update's button. */

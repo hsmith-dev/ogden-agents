@@ -262,12 +262,14 @@ export function createApp({
   // The UI's client-side routes (such as `/settings/appearance`) load the app,
   // so a reload or a bookmark lands on the same screen. Only extensionless GET
   // paths outside `/ws`, `/api` and `/launcher` (and below them; see
-  // `paths.ts`, which the gate shares); a missing asset stays a 404.
+  // `paths.ts`, which the gate shares); a missing asset stays a 404. A ticket's
+  // detail (`/w/:wsId/board/:ref`, story 4.9) is a page even though its ref
+  // (`1.2`) looks like an extension.
   app.get(
     '/*',
     async (c, next) => {
       const path = c.req.path;
-      if (isServerPath(path) || /\.[A-Za-z0-9]+$/.test(path)) {
+      if (isServerPath(path) || (/\.[A-Za-z0-9]+$/.test(path) && !/^\/w\/[^/]+\/board\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(path))) {
         return c.notFound();
       }
       await next();

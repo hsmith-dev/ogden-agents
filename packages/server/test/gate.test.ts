@@ -132,7 +132,7 @@ describe('security gate', () => {
   it('bookmark: the app and its assets load without a token (they hold no user data); API calls and /ws get 401', async () => {
     const server = await startTestServer();
     const html = { accept: 'text/html,application/xhtml+xml' };
-    for (const path of ['/', '/settings/appearance', '/no-such-path']) {
+    for (const path of ['/', '/settings/appearance', '/no-such-path', '/w/ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3/board/1.2']) {
       const page = await send(server, path, { headers: html });
       expect(page.status, path).toBe(200);
       expect(page.body, path).toContain('<div id="root"></div>');
@@ -142,6 +142,8 @@ describe('security gate', () => {
     expect(asset.status).toBe(200);
     expect(asset.body).toContain('console.log');
     expect((await send(server, '/assets/missing.js')).status).toBe(404);
+    expect((await send(server, '/w/ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3/board/1.2/x.js')).status).toBe(404);
+    expect((await send(server, '/w/ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3/board/%7Emain.js')).status).toBe(404);
 
     for (const path of ['/api/v1/anything', TAB_CHECK_PATH, '/api', '/ws']) {
       const api = await send(server, path, { headers: { accept: 'application/json' } });

@@ -24,10 +24,12 @@ export interface FakeBmadRepoOptions {
   files?: Readonly<Record<string, string>>;
   /** The temp folder's name prefix. Default `ogden-agents-bmad-repo-`. */
   prefix?: string;
+  /** The folder the repo is created in. Default: the OS temp folder. A suite that sweeps its own folder passes it (story 10.8). */
+  parent?: string;
 }
 
 export interface FakeBmadRepo {
-  /** The repo's absolute path (inside the OS temp folder). */
+  /** The repo's absolute path (inside `parent`, the OS temp folder by default). */
   path: string;
   /** {@link hashFileTree} of the repo now. */
   hash(): string;
@@ -55,9 +57,9 @@ function writeFiles(root: string, files: Readonly<Record<string, string>>): void
   }
 }
 
-/** Creates a fake repo in the OS temp folder; the caller removes it (`remove()`). */
-export function createFakeBmadRepo({ bmad = true, output = false, files = {}, prefix = 'ogden-agents-bmad-repo-' }: FakeBmadRepoOptions = {}): FakeBmadRepo {
-  const path = mkdtempSync(join(tmpdir(), prefix));
+/** Creates a fake repo in `parent` (the OS temp folder by default); the caller removes it (`remove()`). */
+export function createFakeBmadRepo({ bmad = true, output = false, files = {}, prefix = 'ogden-agents-bmad-repo-', parent = tmpdir() }: FakeBmadRepoOptions = {}): FakeBmadRepo {
+  const path = mkdtempSync(join(parent, prefix));
   writeFiles(path, { 'README.md': '# A project\n' });
   if (bmad) writeFiles(path, FAKE_BMAD_FILES);
   if (output) writeFiles(path, FAKE_BMAD_OUTPUT_FILES);

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,22 +36,22 @@ import {
   type AppShortcutPort,
   type Core,
 } from '@ogden-agents/core';
-import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM, ServerMessage, type BmadPiece } from '@ogden-agents/shared';
+import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM, ServerMessage } from '@ogden-agents/shared';
 import openBrowser from 'open';
 import { WebSocketServer } from 'ws';
 import { createApp, type ServerControl } from './app.js';
 import { SHIPPED_BMAD_PIECES } from './bmad-pieces.js';
 import { chooseWebSocketProtocol, createLaunchCodes, createTabTokens, retireLegacyAuthKey } from './auth.js';
-import { tightenMode } from './file-mode.js';
 import { createGate, launchUrl as launchUrlFor } from './gate.js';
 import { acquireInstanceLock, type InstanceLock } from './instance-lock.js';
 import { createLauncherToken, type LauncherToken } from './launcher-token.js';
 import { createLogger, createRotatingFileWriter, LOG_DIR, teeWriters, type Logger } from './log.js';
+import { removePortFile, writePortFile } from './port-file.js';
 import { shortcutErrorCode } from './shortcut-routes.js';
 import { createTerminalAvailability } from './terminal-availability.js';
-import { testApiKeyCheck, testBmadAvailable, testBmadProbe, testClaudeCli, testClaudeInstall } from './test-hooks.js';
+import { resolveTestHooks, testHooksLogFields, type TestHooks } from './test-hooks.js';
 import { VERSION } from './version.js';
-import { agentEnvironment, agentKeysOf, checkInDelayFromEnv, SUBSCRIPTION_MAX_AGE_MS, testSecretStore, withoutAgentKeys } from './start-env.js';
+import { agentEnvironment, agentKeysOf, SUBSCRIPTION_MAX_AGE_MS, withoutAgentKeys } from './start-env.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
 
 // Moved out in story 3.9; still exported from here for the callers that import them from `start.ts`.
@@ -144,10 +144,10 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       ),
     );
   const ownsCore = options.core === undefined;
-  // What this install ships, plus a test's own (story 10.2): the option, and the environment hook on a test run only.
-  // A core passed in already holds its own list, so the hook is read only for the core opened here.
-  const testBmadPieces = ownsCore ? testBmadAvailable(process.env, dataDir) : [];
-  const availableBmadPieces = [...new Set([...SHIPPED_BMAD_PIECES, ...(options.availableBmadPieces ?? []), ...testBmadPieces])];
+  // Every environment hook, on a test run only; one the options already decide is not read (story 10.8).
+  const hooks = resolveTestHooks(process.env, dataDir, { ...options, ownsCore });
+  // What this install ships, plus a test's own (story 10.2): the option, and the environment hook.
+  const availableBmadPieces = [...new Set([...SHIPPED_BMAD_PIECES, ...(options.availableBmadPieces ?? []), ...hooks.bmadAvailable])];
   const core =
     options.core ??
     openCore(dataDir, {
@@ -159,7 +159,7 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       onPermissionError: (error) => log.warn('a permission request was declined after a failure', { reason: String(error) }),
     });
   try {
-    return await listenAndAnnounce({ options, dataDir, log, core, ownsCore, lock, testBmadPieces });
+    return await listenAndAnnounce({ options, dataDir, log, core, ownsCore, lock, hooks });
   } catch (error) {
     if (ownsCore) core.close();
     throw error;
@@ -173,7 +173,7 @@ async function listenAndAnnounce({
   core,
   ownsCore,
   lock,
-  testBmadPieces,
+  hooks,
 }: {
   options: StartOptions;
   dataDir: string;
@@ -181,8 +181,8 @@ async function listenAndAnnounce({
   core: Core;
   ownsCore: boolean;
   lock: InstanceLock;
-  /** The BMad pieces the environment's test hook made available (story 10.2). */
-  testBmadPieces: readonly BmadPiece[];
+  /** The environment's test hooks in use (`resolveTestHooks`). */
+  hooks: TestHooks;
 }): Promise<RunningServer> {
   const requested = options.port ?? DEFAULT_PORT;
   const now = options.now ?? Date.now;
@@ -235,8 +235,7 @@ async function listenAndAnnounce({
     onFailure: (error) => log.warn('uv install failed', { code: error.code, reason: error.message, ...error.details }),
   });
   // Install's source: the option, else (a test run only) a local fixture from the environment, which also ignores a dev install's adapter (story 9.7).
-  const testInstall = options.claudeInstall === undefined ? testClaudeInstall(process.env, dataDir) : undefined;
-  const claudeInstallOption = options.claudeInstall ?? (testInstall === undefined ? undefined : { ...testInstall, devAdapter: false });
+  const claudeInstallOption = options.claudeInstall ?? (hooks.claudeInstall === undefined ? undefined : { ...hooks.claudeInstall, devAdapter: false });
   // The adapter given, else a dev install's; else (read at each use) the one Install put in the data folder (story 9.3).
   const givenClaudeAdapter =
     options.claudeAdapterPath ??
@@ -244,20 +243,9 @@ async function listenAndAnnounce({
     (claudeInstallOption?.devAdapter === false ? undefined : resolveClaudeAgentAcp());
   const { devAdapter: _devAdapter, ...claudeInstall } = claudeInstallOption ?? {};
   // The API key check: the option, else (a test run only) one that accepts without the network (story 9.7).
-  const testVerify = options.verifyApiKey === undefined ? testApiKeyCheck(process.env, dataDir) : undefined;
-  const verifyApiKey = options.verifyApiKey ?? testVerify;
-  // The terminal's `claude`: the option's, else (a test run only) a stand-in from the environment (story 3.10).
-  const testCli = options.extraAgentEnv?.CLAUDE_CODE_EXECUTABLE === undefined ? testClaudeCli(process.env, dataDir) : undefined;
-  const bmadProbe = testBmadProbe(process.env, dataDir);
-  if (testInstall !== undefined || testVerify !== undefined || testCli !== undefined || bmadProbe || testBmadPieces.length > 0) {
-    log.info('test hooks in use', {
-      claudeInstall: testInstall !== undefined,
-      apiKeyCheck: testVerify !== undefined,
-      claudeCli: testCli !== undefined,
-      bmadProbe,
-      bmadAvailable: testBmadPieces.join(','),
-    });
-  }
+  const verifyApiKey = options.verifyApiKey ?? hooks.apiKeyCheck;
+  const hooksInUse = testHooksLogFields(hooks);
+  if (hooksInUse !== undefined) log.info('test hooks in use', hooksInUse);
   const claudeAdapter = () => locateClaudeAdapter({ adapterPath: givenClaudeAdapter, dataDir, pins: claudeInstall.pins })?.path;
   const agent =
     options.agent ??
@@ -272,7 +260,8 @@ async function listenAndAnnounce({
   // Their terminals are gone too (story 3.1 review F3): those chats drive again.
   const released = core.entities.releaseTerminalDrivers();
   if (released.length > 0) log.info('sessions a stopped server left in the terminal are back in the chat', { sessions: released.length });
-  const extraAgentEnv = { ...(testCli === undefined ? {} : { CLAUDE_CODE_EXECUTABLE: testCli }), ...options.extraAgentEnv };
+  // The terminal's `claude`: the option's, else (a test run only) a stand-in from the environment (story 3.10).
+  const extraAgentEnv = { ...(hooks.claudeCli === undefined ? {} : { CLAUDE_CODE_EXECUTABLE: hooks.claudeCli }), ...options.extraAgentEnv };
   const agentEnv = () => ({ ...agentEnvironment(), ...extraAgentEnv });
   const claudeSetup =
     options.agentSetup === undefined
@@ -296,7 +285,7 @@ async function listenAndAnnounce({
           onDiagnostic: (message, fields) => log.info(`agent setup: ${message}`, fields),
         })
       : undefined;
-  const secrets = options.secrets ?? (testSecretStore(process.env, dataDir) === 'memory' ? createMemorySecretStore() : createKeyringSecretStore());
+  const secrets = options.secrets ?? (hooks.secretStore === 'memory' ? createMemorySecretStore() : createKeyringSecretStore());
   const agentSetup = createAgentSetup(core.events, options.agentSetup ?? (claudeSetup === undefined ? [] : [claudeSetup]), {
     secrets,
     // A key in this server's own environment follows the same rule as a saved one (review F1).
@@ -314,7 +303,7 @@ async function listenAndAnnounce({
   });
   // One instance for the chat that asks and the routes that answer: core's (story 2.6).
   const permissions = core.permissions;
-  const configuredCheckIn = options.checkInDelayMs ?? checkInDelayFromEnv(process.env, dataDir);
+  const configuredCheckIn = options.checkInDelayMs ?? hooks.checkInMs;
   const checkInDelayMs = configuredCheckIn === undefined ? undefined : clampCheckInDelay(configuredCheckIn);
   /**
    * The chat runs Claude Code: its API key (saved, else from this server's
@@ -392,7 +381,7 @@ async function listenAndAnnounce({
     permissions,
     bmad: core.bmad,
     // The test-only BMad probe route (story 10.1): a test run on a temp data folder, with its own variable set.
-    bmadProbe,
+    bmadProbe: hooks.bmadProbe,
     bmadDetection: core.bmadDetection,
     agentSetup,
     onboarding,
@@ -578,27 +567,6 @@ function broadcast(wss: WebSocketServer, message: ServerMessage, log: Logger): v
   const text = JSON.stringify(parsed.data);
   for (const client of wss.clients) {
     if (client.readyState === client.OPEN) client.send(text);
-  }
-}
-
-/** Writes the port file readable only by the user, replacing any stale one in one step. */
-function writePortFile(file: string, identity: PortFile): void {
-  const temp = `${file}.${process.pid}.tmp`;
-  writeFileSync(temp, `${JSON.stringify(identity)}\n`, { mode: 0o600 });
-  tightenMode(temp);
-  renameSync(temp, file);
-}
-
-/** Removes the port file only if it is still this server's; another server may have replaced it. */
-function removePortFile(file: string, identity: PortFile): void {
-  let current: Partial<PortFile>;
-  try {
-    current = JSON.parse(readFileSync(file, 'utf8')) as Partial<PortFile>;
-  } catch {
-    return;
-  }
-  if (current.pid === identity.pid && current.port === identity.port && current.startedAt === identity.startedAt) {
-    rmSync(file, { force: true });
   }
 }
 

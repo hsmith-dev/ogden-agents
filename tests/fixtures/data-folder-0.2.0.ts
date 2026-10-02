@@ -64,8 +64,14 @@ interface Rows {
 export interface DataFolder020Options {
   /** The last migration applied (its journal idx). Default 3: 0.2.0 itself. */
   stopAt?: 3 | 4 | 5;
-  /** An existing empty folder to use as the data folder (the installed suite's own). Default: a new temp folder. */
+  /** An existing empty folder to use as the data folder (the installed suite's own). Default: a new folder in `parent`. */
   dataDir?: string;
+  /**
+   * The folder the repos, the migrations scratch folder and (without
+   * `dataDir`) the data folder are created in. Default: the OS temp folder.
+   * A suite that sweeps its own folder passes it (story 10.8).
+   */
+  parent?: string;
   /**
    * Write the `onboarding.json` 0.2.0's Welcome writes when finished or
    * skipped. Default `true`; `false` is a 0.2.0 folder whose Welcome never
@@ -125,12 +131,12 @@ function migrationsUpTo(stopAt: number, into: string): string {
 }
 
 /** Creates the 0.2.0 data folder (or the one `stopAt` names) with two fresh fake repos. */
-export function createDataFolder020({ stopAt = 3, dataDir: given, onboarding = true }: DataFolder020Options = {}): DataFolder020 {
+export function createDataFolder020({ stopAt = 3, dataDir: given, onboarding = true, parent = tmpdir() }: DataFolder020Options = {}): DataFolder020 {
   const rows = JSON.parse(readFileSync(ROWS_FILE, 'utf8')) as Rows;
-  const dataDir = given ?? mkdtempSync(join(tmpdir(), 'ogden-agents-data-0.2.0-'));
-  const scratch = mkdtempSync(join(tmpdir(), 'ogden-agents-migrations-'));
-  const bmad = createFakeBmadRepo({ bmad: true });
-  const plain = createFakeBmadRepo({ bmad: false });
+  const dataDir = given ?? mkdtempSync(join(parent, 'ogden-agents-data-0.2.0-'));
+  const scratch = mkdtempSync(join(parent, 'ogden-agents-migrations-'));
+  const bmad = createFakeBmadRepo({ bmad: true, parent });
+  const plain = createFakeBmadRepo({ bmad: false, parent });
   const remove = () => {
     rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     bmad.remove();

@@ -132,7 +132,8 @@ export interface UpgradeServer {
  * fake agent runs. Nothing is installed again.
  */
 export function upgradeServer(name: string): UpgradeServer {
-  const data = createDataFolder020({ dataDir: extraFolder(`${name}-data`) });
+  // The repos and the scratch folder too, so the teardown's sweep of the extra folder removes whatever `remove()` couldn't (story 10.8).
+  const data = createDataFolder020({ dataDir: extraFolder(`${name}-data`), parent: extraFolder(`${name}-repos`) });
   const install = prepareInstall({
     tarball: env(ENV.tarball),
     prefix: 'ogden-agents-e2e',

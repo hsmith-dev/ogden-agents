@@ -102,6 +102,25 @@ jobs:
       - name: Smoke test without optional dependencies
         run: node scripts/smoke-installed.mjs --omit-optional
 
+  # Planning provenance (story 10.8): every started plan's baseline_revision is
+  # an ancestor of HEAD, and every deferred-work Open items line matches a Log
+  # entry. Needs the full history, so the checkout is not shallow.
+  provenance:
+    name: Provenance
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Check plan baselines and the deferred-work index
+        run: node scripts/check-provenance.mjs
+
   # The uv archives Ogden Agents may install (story 1.8): re-download each one
   # pinned in packages/adapters/src/toolchain-uv/uv-release.json and check its
   # SHA-256, so a wrong pin fails here and not on a user's computer. The only

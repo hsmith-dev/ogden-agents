@@ -1,7 +1,6 @@
 import {
   API_ROUTES,
   applyBmadPieceChoice,
-  BMAD_COMING_SOON_LABEL,
   BMAD_METHOD_COMING_SOON_SENTENCE,
   BMAD_METHOD_SENTENCE,
   BMAD_PIECE_INFO,
@@ -26,12 +25,12 @@ import { useRef, useState } from 'react';
 import { call, type Auth } from '@/api/http';
 import { tabAuth } from '@/auth/tab-token';
 import { bmadMethodPieces } from '@/onboarding/welcome-model';
-import { Badge } from '@/ui/badge';
 import { CheckboxOption } from '@/ui/checkbox';
 import { Notice } from '@/ui/notice';
 import { PageSection } from '@/ui/page';
 import { RadioGroup, RadioGroupOption } from '@/ui/radio-group';
 import { Text } from '@/ui/typography';
+import { canTurnOnBmadPiece, ComingSoonBadge } from '@/workspaces/bmad-piece-choice';
 import { createLatestGate, useBmadPieces } from '@/workspaces/workspace-settings-api';
 
 /**
@@ -68,8 +67,7 @@ type Mode = 'simple_chats' | 'bmad_method';
 
 /** Whether turning `piece` on would turn on only pieces this install ships (it and what it needs). */
 export function canTurnOn(current: readonly BmadPiece[], piece: BmadPiece, availability: readonly BmadPieceAvailability[] | undefined): boolean {
-  const available = new Set((availability ?? []).filter((entry) => entry.available).map((entry) => entry.piece));
-  return applyBmadPieceChoice(current, piece, true).pieces.every((each) => current.includes(each) || available.has(each));
+  return canTurnOnBmadPiece(current, piece, availability === undefined ? undefined : (each) => availability.some((entry) => entry.piece === each && entry.available));
 }
 
 export interface NewProjectDefaultsViewProps {
@@ -116,10 +114,8 @@ export function NewProjectDefaultsView({ pieces, availability, mode, onModeChang
                   BMAD_METHOD_SENTENCE
                 ) : (
                   <>
-                    {BMAD_METHOD_COMING_SOON_SENTENCE}{' '}
-                    <Badge variant="outline" data-testid="new-projects-bmad-coming-soon">
-                      {BMAD_COMING_SOON_LABEL}
-                    </Badge>
+                    {BMAD_METHOD_COMING_SOON_SENTENCE}
+                    <ComingSoonBadge testId="new-projects-bmad-coming-soon" />
                   </>
                 )
               }
@@ -141,10 +137,8 @@ export function NewProjectDefaultsView({ pieces, availability, mode, onModeChang
                         BMAD_PIECE_INFO[piece].sentence
                       ) : (
                         <>
-                          {BMAD_PIECE_INFO[piece].sentence}{' '}
-                          <Badge variant="outline" data-testid={`new-projects-${piece}-coming-soon`}>
-                            {BMAD_COMING_SOON_LABEL}
-                          </Badge>
+                          {BMAD_PIECE_INFO[piece].sentence}
+                          <ComingSoonBadge testId={`new-projects-${piece}-coming-soon`} />
                         </>
                       )
                     }

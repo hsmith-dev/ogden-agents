@@ -34,132 +34,16 @@ import {
   type AgentAuthMethodKind,
   type AgentAuthState,
   type AgentSetupStatus,
-  type SignInResponse,
 } from '@ogden-agents/shared';
 import type { AgentInstallProgress, AgentPortStatus, AgentSetupPort, AgentSignIn, AgentSubscriptionState, ApiKeyVerification } from './agent-setup-port.js';
-import { ApiKeyRefusedError, CoreError, NotFoundError, SecretsUnavailableError, ValidationError } from './errors.js';
+import { AgentSetupError, LAST_KNOWN_AUTH_MAX_AGE_MS, SignInNotPendingError, apiKeySecretName, newFlight, type AgentSetup, type AgentSetupOptions, type Flight, type SavedKey } from './agent-setup-types.js';
+import { ApiKeyRefusedError, NotFoundError, SecretsUnavailableError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import type { SecretStorePort } from './secret-store-port.js';
 import { PROGRESS_INTERVAL_MS } from './toolchain.js';
 
-/**
- * How long the last confirmed subscription state (`signed_in` or
- * `signed_out`, read from the agent's status or set by a sign-in finishing
- * in the app) stands in for a status check that is slow or fails. Older than
- * this, such a check means `unknown`, which never injects a key (user
- * decision, 2026-10-01).
- */
-// Accepted risk (user's trade-off, 2026-10-01): a sign-in made outside the app while checks fail leaves a recent confirmed signed_out in place, so the key is still used for up to 5 minutes.
-export const LAST_KNOWN_AUTH_MAX_AGE_MS = 5 * 60_000;
-
-/** The secret name an agent's API key is stored under. */
-export const apiKeySecretName = (agentId: string) => `agent-api-key/${agentId}`;
-
-/**
- * An agent setup step that failed, with plain words for the user in
- * `message` (never a secret). Adapters throw it when a sign-in can't start.
- */
-export class AgentSetupError extends CoreError {
-  override readonly name = 'AgentSetupError';
-  /** For the log only (an install's step and npm's error code, say); never a secret, a URL or the agent's output. */
-  readonly details: Readonly<Record<string, unknown>>;
-  constructor(message: string, options: { cause?: unknown; details?: Record<string, unknown> } = {}) {
-    super('agent_setup_failed', message);
-    this.details = options.details ?? {};
-    if (options.cause !== undefined) this.cause = options.cause;
-  }
-}
-
-/** A sign-in code was sent, but no sign-in that takes one is in progress for the agent. */
-export class SignInNotPendingError extends CoreError {
-  override readonly name = 'SignInNotPendingError';
-  constructor(agentId: string) {
-    super('sign_in_not_pending', `no sign-in is in progress for ${agentId}`);
-  }
-}
-
-export interface AgentSetup {
-  /**
-   * Reads each agent's saved API key from the secret store, and the
-   * subscription state of each agent that has one. Call once before serving.
-   * Never throws: an unreadable store means no key (the failure is reported).
-   */
-  load(): Promise<void>;
-  /**
-   * Every supported agent's setup, with a sign-in in progress or the last
-   * failure laid over what its port reports, and its API key's state
-   * (never the key). Refreshes the subscription state.
-   */
-  list(): Promise<AgentSetupStatus[]>;
-  /**
-   * Checks `apiKey` with the agent's free verify call and stores it. Rejects
-   * with `ValidationError` (a malformed key, or an agent that takes none),
-   * `ApiKeyRefusedError` (nothing stored) or `SecretsUnavailableError`
-   * (no keychain; nothing stored). A key that couldn't be checked is saved.
-   */
-  setApiKey(agentId: string, apiKey: string): Promise<void>;
-  /** Removes the agent's API key. Idempotent. Rejects with `SecretsUnavailableError` when the store can't be used. */
-  deleteApiKey(agentId: string): Promise<void>;
-  /**
-   * What the agent's chat process gets on top of its environment: the API
-   * key under the port's variable name, only while its subscription is known
-   * to be signed out; otherwise nothing. Never logged.
-   */
-  agentEnv(agentId: string): Record<string, string>;
-  /**
-   * Re-reads the agent's subscription state when it has a key (saved or from
-   * the environment) and the last reading is older than `maxAgeMs`, so a
-   * sign-in made outside the app stops the key being used before the next
-   * chat starts. Bounded by the port's own status timeout; a failure means
-   * `unknown` (no key). Never throws.
-   */
-  refreshIfStale(agentId: string, maxAgeMs: number): Promise<void>;
-  /**
-   * Starts signing in to `agentId`, cancelling a sign-in already running for
-   * it. Resolves with `signing_in` and the URL to open (a secret: only for a
-   * `no-store` response), or `failed` when it couldn't start (the reason is
-   * in the event and in {@link list}).
-   */
-  signIn(agentId: string): Promise<SignInResponse>;
-  /** Types a code the user pasted into the running sign-in. Never logged, evented or stored. */
-  submitCode(agentId: string, code: string): Promise<void>;
-  /** Stops the running sign-in, if there is one. Idempotent. */
-  cancelSignIn(agentId: string): Promise<void>;
-  /**
-   * Starts installing `agentId`, only when the user asks, unless it is
-   * already installed or an install is running (`started: false`, with its
-   * status). Returns at once; progress and the outcome arrive as
-   * `agent.install_*` events.
-   */
-  install(agentId: string): Promise<{ started: boolean; agent: AgentSetupStatus }>;
-  /** Resolves once no install is running (tests, shutdown). */
-  settled(): Promise<void>;
-  /** Stops every sign-in (server stop). Appends nothing. */
-  dispose(): Promise<void>;
-}
-
-export interface AgentSetupOptions {
-  /** Called with every failure, for the log. Never carries the URL, a code, a key or the agent's output. */
-  onFailure?: (agentId: string, step: string, error: unknown) => void;
-  /** Where API keys are kept (AD-16). Without it, saving a key is refused as {@link SecretsUnavailableError}. */
-  secrets?: SecretStorePort;
-  /**
-   * The server's own environment, read at each use: an agent's key variable
-   * set there (any case) is used under the same precedence rule as a saved
-   * key, which comes first. Never logged.
-   */
-  inheritedEnv?: () => Readonly<Record<string, string | undefined>>;
-  /** The clock for the subscription state's age and install progress throttling. Default `performance.now` (monotonic). */
-  now?: () => number;
-  /** Minimum time between two install progress events. Default {@link PROGRESS_INTERVAL_MS}. */
-  progressIntervalMs?: number;
-}
-
-/** A saved API key, in memory only. `unchecked`: the provider couldn't be asked when it was saved (not kept across a restart). */
-interface SavedKey {
-  value: string;
-  unchecked: boolean;
-}
+// Not `Flight`, `newFlight` or `SavedKey`: they stay inside this use-case.
+export { AgentSetupError, LAST_KNOWN_AUTH_MAX_AGE_MS, SignInNotPendingError, apiKeySecretName, type AgentSetup, type AgentSetupOptions } from './agent-setup-types.js';
 
 /** The subscription state a port reports, or the one derived from its status (see `AgentPortStatus`). */
 function subscriptionOf(status: AgentPortStatus): AgentSubscriptionState {
@@ -179,13 +63,6 @@ function shown(reported: AgentPortStatus): AgentSetupStatus {
 function installingStatus(status: AgentSetupStatus, progress: AgentInstallProgress): AgentSetupStatus {
   const { reason: _reason, installSize: _size, method: _method, ...rest } = status;
   return { ...rest, install: 'installing', progress: { step: progress.step, percent: progress.percent } };
-}
-
-interface Flight {
-  /** Set once the port's `signIn` resolved. */
-  handle: AgentSignIn | undefined;
-  /** Cancelled (or superseded, or disposed) before or after the handle arrived. */
-  stopped: boolean;
 }
 
 export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPort[], options: AgentSetupOptions = {}): AgentSetup {
@@ -457,6 +334,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
 
   const stop = async (flight: Flight) => {
     flight.stopped = true;
+    flight.settle();
     try {
       await flight.handle?.cancel();
     } catch {
@@ -639,7 +517,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       const port = portFor(agentId);
       if (disposed) throw new AgentSetupError(failed(port));
       const previous = flights.get(agentId);
-      const flight: Flight = { handle: undefined, stopped: false };
+      const flight = newFlight();
       // Claimed before any await, so two clicks run one sign-in.
       flights.set(agentId, flight);
       lastFailure.delete(agentId);
@@ -651,6 +529,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
         handle = await port.signIn();
       } catch (error) {
         report(agentId, 'start', error);
+        flight.settle();
         if (flights.get(agentId) !== flight) return { state: 'needs_sign_in', url: null };
         flights.delete(agentId);
         const reason = error instanceof AgentSetupError ? error.message : failed(port);
@@ -660,10 +539,12 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       }
       if (flight.stopped || flights.get(agentId) !== flight) {
         // Cancelled, superseded or disposed while it started.
+        flight.settle();
         await handle.cancel().catch(() => {});
         return { state: 'needs_sign_in', url: null };
       }
       flight.handle = handle;
+      flight.settle();
       follow(agentId, port, flight, handle);
       return { state: 'signing_in', url: handle.url };
     },
@@ -673,7 +554,10 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       const parsed = SignInCodeRequest.safeParse({ code });
       // The code is never echoed, not even in the error.
       if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? 'That is not a sign-in code.', []);
-      const handle = flights.get(agentId)?.handle;
+      const flight = flights.get(agentId);
+      // The page offers the code box once the sign-in is announced, which is before the port's sign-in has started: wait for it.
+      if (flight !== undefined && flight.handle === undefined && !flight.stopped) await flight.started;
+      const handle = flight !== undefined && !flight.stopped && flights.get(agentId) === flight ? flight.handle : undefined;
       if (handle?.submitCode === undefined) throw new SignInNotPendingError(agentId);
       try {
         await handle.submitCode(parsed.data.code);

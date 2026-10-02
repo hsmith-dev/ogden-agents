@@ -1,9 +1,36 @@
 import { z } from 'zod';
-import { Run, RunOutcome, Session, SessionDriver, SessionState, Workspace } from './entities.js';
+import { AGENTS_STREAM, AgentAuthMethodKind, AgentAuthState, AgentId, AlwaysAllowScope, CautionLevel, MAX_PAGE_EVENTS, Seq, SERVER_STREAM, TOOLCHAIN_STREAM } from './events-common.js';
+import { assigned, onSessionStream, onWorkspaceStream } from './events-envelope.js';
+import {
+  PermissionRequestedEvent,
+  PermissionRequestedInput,
+  PermissionResolvedEvent,
+  PermissionResolvedInput,
+  SessionCheckInEvent,
+  SessionCheckInInput,
+  SessionCreatedEvent,
+  SessionCreatedInput,
+  SessionDriverChangedEvent,
+  SessionDriverChangedInput,
+  SessionMessageCompletedEvent,
+  SessionMessageCompletedInput,
+  SessionMessageDeltaEvent,
+  SessionMessageDeltaInput,
+  SessionMessageQueuedEvent,
+  SessionMessageQueuedInput,
+  SessionResumedEvent,
+  SessionResumedInput,
+  SessionStateChangedEvent,
+  SessionStateChangedInput,
+  SessionToolCallEvent,
+  SessionToolCallInput,
+  SessionToolCallUpdatedEvent,
+  SessionToolCallUpdatedInput,
+} from './events-session.js';
+import { Run, RunOutcome, Workspace } from './entities.js';
 import { BmadPieces } from './bmad.js';
 import { ApiErrorCode } from './errors.js';
-import { EventId, PermissionRuleId, RunId, SessionId, WorkspaceId } from './ids.js';
-import { DriverChangeCause } from './terminal.js';
+import { PermissionRuleId, RunId, SessionId, WorkspaceId } from './ids.js';
 import { IsoUtcTimestamp } from './time.js';
 import { ToolchainErrorCode, ToolName, ToolSource } from './toolchain.js';
 
@@ -21,132 +48,26 @@ import { ToolchainErrorCode, ToolName, ToolSource } from './toolchain.js';
  * sends must parse as a `ClientMessage`. Anything else is rejected.
  */
 
-/** Install-wide position in the event log, assigned by SQLite. */
-export const Seq = z.number().int().positive();
-export type Seq = z.infer<typeof Seq>;
-
-/** The stream of install-level events (those with `workspaceId: null`). */
-export const SERVER_STREAM = 'server';
-
-/** The stream of toolchain events (install-level: `workspaceId: null`). */
-export const TOOLCHAIN_STREAM = 'toolchain';
-
-/**
- * The stream of agent install and sign-in events (install-level:
- * `workspaceId: null`; onboarding, epic 9). They never carry a sign-in URL,
- * a launch code or a key (AD-15, AD-16): the sign-in URL travels only in a
- * `no-store` REST response.
- */
-export const AGENTS_STREAM = 'agents';
-
-/**
- * How many recent events a `subscribe_workspace` sends when it names no
- * `window` (E2-R8): the UI never replays a workspace's whole history.
- */
-export const DEFAULT_WINDOW_EVENTS = 200;
-/** The most events one `page_history` (or a subscription's `window`) returns. */
-export const MAX_PAGE_EVENTS = 500;
-
-// ---------------------------------------------------------------------------
-// Shared enums (story 2.3).
-// ---------------------------------------------------------------------------
-
-/** What a tool call does, as ACP names it. Caution levels classify requests by it (E2-R4). */
-export const TOOL_KINDS = ['read', 'edit', 'delete', 'move', 'search', 'execute', 'think', 'fetch', 'switch_mode', 'other'] as const;
-export const ToolKind = z.enum(TOOL_KINDS);
-export type ToolKind = z.infer<typeof ToolKind>;
-
-/** A tool call's progress. */
-export const TOOL_CALL_STATUSES = ['pending', 'in_progress', 'completed', 'failed'] as const;
-export const ToolCallStatus = z.enum(TOOL_CALL_STATUSES);
-export type ToolCallStatus = z.infer<typeof ToolCallStatus>;
-
-/**
- * A workspace's caution level (E2-R4; EXPERIENCE.md Caution level): Ask every
- * time (the default for new projects), Ask for commands, Ask only for risky
- * actions. Changing it applies only to requests not yet shown.
- */
-export const CAUTION_LEVELS = ['ask_every_time', 'ask_for_commands', 'ask_risky_only'] as const;
-export const CautionLevel = z.enum(CAUTION_LEVELS);
-export type CautionLevel = z.infer<typeof CautionLevel>;
-export const DEFAULT_CAUTION_LEVEL: CautionLevel = 'ask_every_time';
-
-/** An agent's stable id, kebab-case (`claude-code`, `codex`). Not an Ogden Agents key (AD-9). */
-export const AgentId = z
-  .string()
-  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'expected a kebab-case agent id')
-  .max(64);
-export type AgentId = z.infer<typeof AgentId>;
-
-/**
- * The most characters of a diff's old or new text an event carries (each side
- * on its own). Core cuts longer text before it appends, and flags the diff
- * `truncated` (story 2.3 review F1).
- */
-export const MAX_DIFF_TEXT_LENGTH = 64 * 1024;
-
-/**
- * One file change a tool call reports: the old and new text (`oldText` is
- * `null` for a new file), each at most {@link MAX_DIFF_TEXT_LENGTH}
- * characters. `truncated` is `true` when core cut either side. Secrets masked.
- */
-export const ToolCallDiff = z.object({
-  path: z.string().min(1),
-  oldText: z.string().max(MAX_DIFF_TEXT_LENGTH).nullable(),
-  newText: z.string().max(MAX_DIFF_TEXT_LENGTH),
-  truncated: z.literal(true).optional(),
-});
-export type ToolCallDiff = z.infer<typeof ToolCallDiff>;
-
-/** Identifies one pending permission request within a session. */
-export const PermissionRequestId = z.string().min(1).max(128);
-export type PermissionRequestId = z.infer<typeof PermissionRequestId>;
-
-/**
- * What an "Always allow" would cover (EXPERIENCE.md Permission card: the
- * scope written under the button): a command prefix, or a tool, in this
- * workspace. `label` is plain words for the user.
- */
-export const AlwaysAllowScope = z.object({
-  kind: z.enum(['command_prefix', 'tool']),
-  value: z.string().min(1),
-  label: z.string().min(1),
-});
-export type AlwaysAllowScope = z.infer<typeof AlwaysAllowScope>;
-
-/** The user's (or a rule's) answer to a permission request. `allow_always` is stored as a rule in core, never passed to the agent. */
-export const PERMISSION_DECISIONS = ['allow_once', 'allow_always', 'deny'] as const;
-export const PermissionDecision = z.enum(PERMISSION_DECISIONS);
-export type PermissionDecision = z.infer<typeof PermissionDecision>;
-
-/** Longest reason a Deny may send back to the agent, in characters. */
-export const MAX_DENY_REASON_LENGTH = 2000;
-
-/** Why a session went to `error`, when it is one the UI acts on (`auth_required`: Sign in again). */
-export const SESSION_ERROR_CODES = ['agent_unavailable', 'agent_failed', 'auth_required'] as const;
-export const SessionErrorCode = z.enum(SESSION_ERROR_CODES);
-export type SessionErrorCode = z.infer<typeof SessionErrorCode>;
-
-/** An agent's sign-in state (CAP-16). */
-export const AGENT_AUTH_STATES = ['signed_in', 'needs_sign_in', 'signing_in', 'failed'] as const;
-export const AgentAuthState = z.enum(AGENT_AUTH_STATES);
-export type AgentAuthState = z.infer<typeof AgentAuthState>;
-
-/** How an agent is signed in: the user's own subscription login, or an API key from the keychain (AD-16). */
-export const AgentAuthMethodKind = z.enum(['subscription', 'api_key']);
-export type AgentAuthMethodKind = z.infer<typeof AgentAuthMethodKind>;
-
-/** Fields core fills in when it appends an event. */
-const assigned = {
-  id: EventId,
-  seq: Seq,
-  at: IsoUtcTimestamp,
-};
-
-/** Workspace-level events use the workspace's stream. */
-const onWorkspaceStream = { workspaceId: WorkspaceId, streamId: WorkspaceId };
-/** Session and run events share the session's stream: the run view is the session view (AD-8). */
-const onSessionStream = { workspaceId: WorkspaceId, streamId: SessionId };
+// The common parts and the session and permission events live in sibling
+// modules (story 10.8); every public name is exported from here as before.
+export * from './events-common.js';
+export {
+  SessionCreatedEvent,
+  SessionStateChangedEvent,
+  SessionDriverChangedEvent,
+  MessageId,
+  MessageRole,
+  SessionMessageDeltaEvent,
+  SessionMessageCompletedEvent,
+  SessionToolCallEvent,
+  SessionToolCallUpdatedEvent,
+  ResumedVia,
+  SessionResumedEvent,
+  SessionMessageQueuedEvent,
+  SessionCheckInEvent,
+  PermissionRequestedEvent,
+  PermissionResolvedEvent,
+} from './events-session.js';
 
 // ---------------------------------------------------------------------------
 // Event types. Each is defined once without the core-assigned fields (what a
@@ -241,213 +162,6 @@ const WorkspaceBmadOfferDismissedInput = z.object({
  */
 export const WorkspaceBmadOfferDismissedEvent = WorkspaceBmadOfferDismissedInput.extend(assigned);
 export type WorkspaceBmadOfferDismissedEvent = z.infer<typeof WorkspaceBmadOfferDismissedEvent>;
-
-const SessionCreatedInput = z.object({
-  type: z.literal('session.created'),
-  ...onSessionStream,
-  payload: z.object({ session: Session }),
-});
-export const SessionCreatedEvent = SessionCreatedInput.extend(assigned);
-export type SessionCreatedEvent = z.infer<typeof SessionCreatedEvent>;
-
-const SessionStateChangedInput = z.object({
-  type: z.literal('session.state_changed'),
-  ...onSessionStream,
-  payload: z.object({
-    sessionId: SessionId,
-    state: SessionState,
-    previous: SessionState,
-    /** Why, in plain words for the user, when there is something to say (an `error`'s cause). Never a secret. */
-    reason: z.string().min(1).optional(),
-    /**
-     * Set when the server moved the session to `idle` because its agent's
-     * process is gone (a restart or a crash; AD-3): the chat can be resumed.
-     */
-    resumable: z.literal(true).optional(),
-    /** Set with `error` when the UI acts on the cause (onboarding 9.4 sets `auth_required`). */
-    errorCode: SessionErrorCode.optional(),
-  }),
-});
-/** A session's normalized state changed (AD-4). */
-export const SessionStateChangedEvent = SessionStateChangedInput.extend(assigned);
-export type SessionStateChangedEvent = z.infer<typeof SessionStateChangedEvent>;
-
-const SessionDriverChangedInput = z.object({
-  type: z.literal('session.driver_changed'),
-  ...onSessionStream,
-  payload: z.object({
-    sessionId: SessionId,
-    driver: SessionDriver,
-    previous: SessionDriver,
-    /** Why it changed (story 3.2). Absent on events from before 3.2. */
-    cause: DriverChangeCause.optional(),
-  }),
-});
-/** A session's driver changed (AD-6). */
-export const SessionDriverChangedEvent = SessionDriverChangedInput.extend(assigned);
-export type SessionDriverChangedEvent = z.infer<typeof SessionDriverChangedEvent>;
-
-/** Identifies one message within a session's stream. */
-export const MessageId = z.string().min(1);
-export type MessageId = z.infer<typeof MessageId>;
-
-export const MessageRole = z.enum(['user', 'agent']);
-export type MessageRole = z.infer<typeof MessageRole>;
-
-const SessionMessageDeltaInput = z.object({
-  type: z.literal('session.message_delta'),
-  ...onSessionStream,
-  payload: z.object({ messageId: MessageId, role: MessageRole, text: z.string() }),
-});
-/**
- * A chunk of a message still being written. Pruned once the message's
- * `session.message_completed` has been appended (AD-5).
- */
-export const SessionMessageDeltaEvent = SessionMessageDeltaInput.extend(assigned);
-export type SessionMessageDeltaEvent = z.infer<typeof SessionMessageDeltaEvent>;
-
-const SessionMessageCompletedInput = z.object({
-  type: z.literal('session.message_completed'),
-  ...onSessionStream,
-  payload: z.object({
-    messageId: MessageId,
-    role: MessageRole,
-    content: z.string(),
-    /**
-     * Set on a user message that was not typed in the chat's composer: the
-     * reason they gave with a Deny, which core sent for the user
-     * (`deny_reason`; Try again never resends it as a plain message, 9.4
-     * review F4), or one typed in the agent's own terminal and imported after
-     * switching back (`terminal`, story 3.2; shown "from terminal").
-     */
-    origin: z.enum(['deny_reason', 'terminal']).optional(),
-  }),
-});
-/** A finished message with its full content; it replaces that message's deltas. */
-export const SessionMessageCompletedEvent = SessionMessageCompletedInput.extend(assigned);
-export type SessionMessageCompletedEvent = z.infer<typeof SessionMessageCompletedEvent>;
-
-const toolCallPayload = z.object({
-  sessionId: SessionId,
-  toolCallId: z.string().min(1),
-  /** Plain words, secrets masked ("Edit src/booking.ts"). */
-  title: z.string(),
-  kind: ToolKind,
-  status: ToolCallStatus,
-  diffs: z.array(ToolCallDiff).optional(),
-});
-
-const SessionToolCallInput = z.object({
-  type: z.literal('session.tool_call'),
-  ...onSessionStream,
-  payload: toolCallPayload,
-});
-/** The agent started a tool call (read a file, run a command, …). */
-export const SessionToolCallEvent = SessionToolCallInput.extend(assigned);
-export type SessionToolCallEvent = z.infer<typeof SessionToolCallEvent>;
-
-const SessionToolCallUpdatedInput = z.object({
-  type: z.literal('session.tool_call_updated'),
-  ...onSessionStream,
-  payload: toolCallPayload,
-});
-/**
- * A tool call's current state after an update: the whole call, not a delta,
- * except `diffs`, which is present only when the update changed them (the
- * latest `diffs` seen for the call still apply; story 2.3 review F1).
- */
-export const SessionToolCallUpdatedEvent = SessionToolCallUpdatedInput.extend(assigned);
-export type SessionToolCallUpdatedEvent = z.infer<typeof SessionToolCallUpdatedEvent>;
-
-/** How a reopened chat got its context back (E2-R2): ACP resume, ACP load, or a new session primed from the stored transcript. */
-export const ResumedVia = z.enum(['resumed', 'loaded', 'transcript']);
-export type ResumedVia = z.infer<typeof ResumedVia>;
-
-const SessionResumedInput = z.object({
-  type: z.literal('session.resumed'),
-  ...onSessionStream,
-  payload: z.object({ sessionId: SessionId, via: ResumedVia }),
-});
-/** A chat was reopened after its agent's process was gone ("Resumed from history" when `via` is `transcript`). */
-export const SessionResumedEvent = SessionResumedInput.extend(assigned);
-export type SessionResumedEvent = z.infer<typeof SessionResumedEvent>;
-
-const SessionMessageQueuedInput = z.object({
-  type: z.literal('session.message_queued'),
-  ...onSessionStream,
-  payload: z.object({ sessionId: SessionId, messageId: MessageId, content: z.string() }),
-});
-/** A message sent while the agent works, held until it can take it (E2-R1: shown as "Queued"). */
-export const SessionMessageQueuedEvent = SessionMessageQueuedInput.extend(assigned);
-export type SessionMessageQueuedEvent = z.infer<typeof SessionMessageQueuedEvent>;
-
-const SessionCheckInInput = z.object({
-  type: z.literal('session.check_in'),
-  ...onSessionStream,
-  payload: z.object({
-    sessionId: SessionId,
-    /** The title of the tool call still in progress, when there is one ("Claude Code is waiting on <title>"). */
-    waitingOn: z.string().min(1).optional(),
-  }),
-});
-/**
- * The agent has sent nothing for a while (10 minutes) while `working`, never
- * while `waiting`: the session stays `working` and nothing times out (story
- * 2.10). Any later event of the session supersedes it.
- */
-export const SessionCheckInEvent = SessionCheckInInput.extend(assigned);
-export type SessionCheckInEvent = z.infer<typeof SessionCheckInEvent>;
-
-// Permission events live on the session's stream and, like session events,
-// are appended only through the session-event helper (E2-R7).
-
-const PermissionRequestedInput = z.object({
-  type: z.literal('permission.requested'),
-  ...onSessionStream,
-  payload: z.object({
-    sessionId: SessionId,
-    requestId: PermissionRequestId,
-    toolCall: z.object({
-      toolCallId: z.string().min(1),
-      title: z.string(),
-      kind: ToolKind,
-      /** The command a shell tool call would run, secrets masked. */
-      command: z.string().optional(),
-      /**
-       * It writes to, or its command names, a file that controls how the
-       * agent or git runs (`.claude/`, `.git/`, `.mcp.json`, ...): it always
-       * asks, whatever the caution level or rules (story 2.8, F1).
-       */
-      protectedPath: z.literal(true).optional(),
-    }),
-    /** What "Always allow" would cover; `null` when it is not offered. */
-    alwaysAllowScope: AlwaysAllowScope.nullable(),
-    /** The workspace's caution level when the card was shown. */
-    cautionLevel: CautionLevel,
-  }),
-});
-/** The agent asked to run a tool call; it does not run until the request is resolved (CAP-4). */
-export const PermissionRequestedEvent = PermissionRequestedInput.extend(assigned);
-export type PermissionRequestedEvent = z.infer<typeof PermissionRequestedEvent>;
-
-const PermissionResolvedInput = z.object({
-  type: z.literal('permission.resolved'),
-  ...onSessionStream,
-  payload: z.object({
-    sessionId: SessionId,
-    requestId: PermissionRequestId,
-    decision: PermissionDecision,
-    /** The user's optional reason on Deny, sent back to the agent. */
-    reason: z.string().max(MAX_DENY_REASON_LENGTH).optional(),
-    /** Who decided: the user on the card, a stored rule, the caution level, or the request was cancelled. */
-    by: z.enum(['user', 'rule', 'caution', 'cancelled']),
-    /** The always-allow rule that decided, or that `allow_always` created. */
-    ruleId: PermissionRuleId.optional(),
-  }),
-});
-/** A permission request was decided (or cancelled); the card collapses to its record line. */
-export const PermissionResolvedEvent = PermissionResolvedInput.extend(assigned);
-export type PermissionResolvedEvent = z.infer<typeof PermissionResolvedEvent>;
 
 const RunCreatedInput = z.object({
   type: z.literal('run.created'),

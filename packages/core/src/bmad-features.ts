@@ -4,7 +4,7 @@
  * on, on its row; every core use-case that serves a piece calls
  * {@link BmadFeatures.requireBmadFeature} first, which is the only on/off
  * check: the UI hides what is off but is never the guard. The pieces change
- * only through the workspace settings use-case (`permissions.ts`
+ * only through the workspace settings use-case (`workspace-settings.ts`
  * `updateSettings`), which appends `workspace.settings_changed` in the same
  * transaction.
  *

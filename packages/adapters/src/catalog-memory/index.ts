@@ -1,7 +1,6 @@
 /**
  * `catalog-memory` (story 10.2): an in-memory `BmadCatalogPort`, for tests
- * and as the stub the server can wire until the `bmad-catalog` adapter ships
- * (entry 10.3). It reads nothing on the computer: each repo path it was
+ * (the server wires the real `bmad-catalog` adapter, story 10.3). It reads nothing on the computer: each repo path it was
  * given answers what it was told, any other path answers that it has
  * neither `_bmad/` nor `_bmad-output/`, as the real adapter does for a
  * missing folder.

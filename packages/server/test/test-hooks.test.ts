@@ -15,6 +15,7 @@ import {
   BMAD_AVAILABLE_ENV,
   BMAD_PROBE_ENV,
   CLAUDE_CLI_ENV,
+  CHECK_IN_MS_ENV,
   CLAUDE_INSTALL_ENV,
   insideTemp,
   isTestRun,
@@ -224,7 +225,8 @@ describe('testClaudeCli (story 3.10)', () => {
 });
 
 describe('the server and the hooks', () => {
-  const parsed = (lines: string[]) => lines.map((line) => JSON.parse(line) as { msg: string; claudeInstall?: boolean; apiKeyCheck?: boolean; claudeCli?: boolean; backend?: string });
+  const parsed = (lines: string[]) =>
+    lines.map((line) => JSON.parse(line) as { msg: string; claudeInstall?: boolean; apiKeyCheck?: boolean; claudeCli?: boolean; checkInMs?: number; backend?: string });
   const hooksLine = (lines: string[]) => parsed(lines).find((line) => line.msg === 'test hooks in use');
   const secretsBackend = (lines: string[]) => parsed(lines).find((line) => line.msg === 'secrets store')?.backend;
 
@@ -272,5 +274,23 @@ describe('the server and the hooks', () => {
     const lines: string[] = [];
     await startTestServer({ lines, claudeInstall: { pins: pins() as never } });
     expect(hooksLine(lines)).toBeUndefined();
+  });
+
+  it('in a test run, an honoured check-in delay is named in the line; one the options give, or none, is not (story 10.8)', async () => {
+    vi.stubEnv(CHECK_IN_MS_ENV, '5000');
+    const lines: string[] = [];
+    await startTestServer({ lines });
+    expect(hooksLine(lines)).toMatchObject({ checkInMs: 5000, claudeInstall: false, apiKeyCheck: false });
+    const own: string[] = [];
+    await startTestServer({ lines: own, checkInDelayMs: 5000 });
+    expect(hooksLine(own)).toBeUndefined();
+    vi.stubEnv(CHECK_IN_MS_ENV, '');
+    const file = join(tempDataDir(), 'claude.mjs');
+    writeFileSync(file, '');
+    vi.stubEnv(CLAUDE_CLI_ENV, file);
+    const without: string[] = [];
+    await startTestServer({ lines: without });
+    expect(hooksLine(without)).toMatchObject({ claudeCli: true });
+    expect(hooksLine(without)).not.toHaveProperty('checkInMs');
   });
 });

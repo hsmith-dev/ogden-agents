@@ -12,10 +12,11 @@ import {
   type Workspace,
 } from '@ogden-agents/shared';
 import { useQueries, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo } from 'react';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
 import { call, postJson } from '@/api/http';
 import { useEventStream } from '@/events/event-stream';
+import { useEventInvalidation } from '@/events/use-event-invalidation';
 
 /**
  * The workspace REST calls (story 2.5), sent with this tab's token, and the
@@ -74,22 +75,11 @@ export async function createFolder(parent: string, name: string, auth: Auth = ta
  * on `session.created` and `workspace.history_deleted`, for each new event.
  */
 function useListInvalidation(): void {
-  const { events } = useEventStream();
-  const queryClient = useQueryClient();
-  // What is already in the stream when the lists mount is already in their first fetch.
-  const seen = useRef(events.at(-1)?.seq ?? 0);
-  useEffect(() => {
-    let workspaces = false;
-    const sessions = new Set<string>();
-    for (const event of events) {
-      if (event.seq <= seen.current) continue;
-      if (event.type === 'workspace.created') workspaces = true;
-      else if ((event.type === 'session.created' || event.type === 'workspace.history_deleted') && event.workspaceId !== null) sessions.add(event.workspaceId);
-    }
-    seen.current = Math.max(seen.current, events.at(-1)?.seq ?? 0);
-    if (workspaces) void queryClient.invalidateQueries({ queryKey: ['workspaces'] });
-    for (const wsId of sessions) void queryClient.invalidateQueries({ queryKey: ['sessions', wsId] });
-  }, [events, queryClient]);
+  useEventInvalidation((event) => {
+    if (event.type === 'workspace.created') return [['workspaces']];
+    if ((event.type === 'session.created' || event.type === 'workspace.history_deleted') && event.workspaceId !== null) return [['sessions', event.workspaceId]];
+    return [];
+  });
 }
 
 /** Every workspace, kept current from the event stream. */

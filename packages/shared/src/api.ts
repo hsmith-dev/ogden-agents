@@ -145,17 +145,17 @@ export const API_ROUTES = {
   bmadPieces: `${API_BASE}/bmad/pieces`,
   /**
    * `GET` → `NewProjectDefaultsResponse`; `PATCH UpdateNewProjectDefaultsRequest`
-   * → `NewProjectDefaultsResponse` (story 10.2 registers it as a 501 stub;
-   * entry 10.4 fills it): the app-wide default pieces for new projects.
+   * → `NewProjectDefaultsResponse` (story 10.2's contract; 10.4 serves
+   * it): the app-wide default pieces for new projects.
    */
   newProjectDefaults: `${API_BASE}/settings/new-projects`,
   /**
-   * `GET` → `BmadDetectionResponse` (story 10.2 stub; entry 10.3 fills it):
+   * `GET` → `BmadDetectionResponse` (story 10.2's contract; 10.3 serves it):
    * whether the project's repo already has `_bmad/`, read-only. Not guarded.
    */
   workspaceBmadDetection: `${API_BASE}/workspaces/:wsId/bmad/detection`,
   /**
-   * `DELETE` → 204 (story 10.2 stub; entry 10.3 fills it): Not now on the
+   * `DELETE` → 204 (story 10.2's contract; 10.3 serves it): Not now on the
    * "already uses BMad Method" offer, remembered per project. Not guarded.
    * The first one appends `workspace.bmad_offer_dismissed`; a repeat changes nothing.
    */

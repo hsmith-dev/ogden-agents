@@ -1,9 +1,8 @@
 import { API_ROUTES, apiPath, BmadPiecesResponse, WorkspaceSettingsResponse, type BmadPiece, type BmadPieceAvailability, type CautionLevel, type WorkspaceSettings } from '@ogden-agents/shared';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
 import { call, fetchPermissionRules } from '@/chat/chat-api';
-import { useEventStream } from '@/events/event-stream';
+import { useEventInvalidation } from '@/events/use-event-invalidation';
 
 /**
  * The workspace settings REST calls (story 2.8), sent with this tab's token,
@@ -70,21 +69,12 @@ export function createLatestGate() {
 
 /** Invalidates this workspace's settings and rules on each new settings or rule event. */
 function useSettingsInvalidation(wsId: string): void {
-  const { events } = useEventStream();
-  const queryClient = useQueryClient();
-  const seen = useRef(events.at(-1)?.seq ?? 0);
-  useEffect(() => {
-    let settings = false;
-    let rules = false;
-    for (const event of events) {
-      if (event.seq <= seen.current || event.workspaceId !== wsId) continue;
-      if (event.type === 'workspace.settings_changed') settings = true;
-      else if (event.type === 'workspace.permission_rule_added' || event.type === 'workspace.permission_rule_removed') rules = true;
-    }
-    seen.current = Math.max(seen.current, events.at(-1)?.seq ?? 0);
-    if (settings) void queryClient.invalidateQueries({ queryKey: ['workspace-settings', wsId] });
-    if (rules) void queryClient.invalidateQueries({ queryKey: ['permission-rules', wsId] });
-  }, [events, queryClient, wsId]);
+  useEventInvalidation((event) => {
+    if (event.workspaceId !== wsId) return [];
+    if (event.type === 'workspace.settings_changed') return [['workspace-settings', wsId]];
+    if (event.type === 'workspace.permission_rule_added' || event.type === 'workspace.permission_rule_removed') return [['permission-rules', wsId]];
+    return [];
+  });
 }
 
 /** The workspace's settings, kept current from the event stream. */

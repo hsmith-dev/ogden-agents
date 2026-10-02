@@ -1,9 +1,8 @@
 import { API_ROUTES, apiPath, BmadDetectionResponse, type BmadDetection, type BmadPiece } from '@ogden-agents/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef } from 'react';
 import { call, callNoContent } from '@/api/http';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
-import { useEventStream } from '@/events/event-stream';
+import { useEventInvalidation } from '@/events/use-event-invalidation';
 
 /**
  * Whether a project's repo already uses BMad Method, and Not now on the
@@ -39,18 +38,9 @@ export function bmadOfferVisible(detection: BmadDetection | undefined, pieces: r
 
 /** Invalidates this project's detection on each new pieces change or Not now, from any tab. */
 function useDetectionInvalidation(wsId: string): void {
-  const { events } = useEventStream();
-  const queryClient = useQueryClient();
-  const seen = useRef(events.at(-1)?.seq ?? 0);
-  useEffect(() => {
-    let changed = false;
-    for (const event of events) {
-      if (event.seq <= seen.current || event.workspaceId !== wsId) continue;
-      if (event.type === 'workspace.settings_changed' || event.type === 'workspace.bmad_offer_dismissed') changed = true;
-    }
-    seen.current = Math.max(seen.current, events.at(-1)?.seq ?? 0);
-    if (changed) void queryClient.invalidateQueries({ queryKey: bmadDetectionQueryKey(wsId) });
-  }, [events, queryClient, wsId]);
+  useEventInvalidation((event) =>
+    event.workspaceId === wsId && (event.type === 'workspace.settings_changed' || event.type === 'workspace.bmad_offer_dismissed') ? [bmadDetectionQueryKey(wsId)] : [],
+  );
 }
 
 /** The project's detection, asked again each time the page that shows the offer opens. */

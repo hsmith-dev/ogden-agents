@@ -34,7 +34,8 @@
     "e2e:installed": "playwright test --config tests/e2e-installed/playwright.config.ts",
     "typecheck": "pnpm -r --filter \"./packages/**\" run typecheck && tsc -p tsconfig.json",
     "pack": "pnpm run build && pnpm pack",
-    "smoke": "node scripts/smoke-installed.mjs"
+    "smoke": "node scripts/smoke-installed.mjs",
+    "provenance": "node scripts/check-provenance.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.5.1",

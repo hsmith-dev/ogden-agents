@@ -8,7 +8,8 @@
  * For anyone else they do nothing, and Install, the key check and the
  * keychain behave as shipped.
  *
- * - `OGDEN_AGENTS_TEST_SECRET_STORE=memory` (`start.ts`): API keys in memory.
+ * - {@link SECRET_STORE_ENV} = `memory`: API keys in memory.
+ * - {@link CHECK_IN_MS_ENV}: a shorter quiet-agent check-in delay.
  * - {@link CLAUDE_INSTALL_ENV}: Install takes its pins (and npm) from a JSON
  *   file inside the temp folder instead of the shipped ones. Every locked
  *   package must be a local `file:` fixture with a `sha512-` integrity, so
@@ -26,13 +27,19 @@
  * - {@link BMAD_AVAILABLE_ENV}: a comma list of BMad pieces this install
  *   reports as available on top of the shipped ones (story 10.2), so the
  *   packaged suite can turn on a piece no epic ships yet.
+ *
+ * {@link resolveTestHooks} reads them all for `start()`, and
+ * {@link testHooksLogFields} is its "test hooks in use" line. Every
+ * `OGDEN_AGENTS_TEST_*` name is declared here and read only beside a
+ * {@link testHooksAllowed} call (`test/test-hooks-audit.test.ts`).
  */
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, relative } from 'node:path';
 import type { AdapterPins } from '@ogden-agents/adapters';
-import type { ApiKeyVerification } from '@ogden-agents/core';
+import { clampCheckInDelay, type ApiKeyVerification } from '@ogden-agents/core';
 import { BmadPiece, type BmadPiece as BmadPieceName } from '@ogden-agents/shared';
+import type { StartOptions } from './start-types.js';
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -49,6 +56,22 @@ export const BMAD_PROBE_ENV = 'OGDEN_AGENTS_TEST_BMAD_PROBE';
 
 /** A comma list of BMad pieces to report as available, such as `planning,board` (tests only; story 10.2). */
 export const BMAD_AVAILABLE_ENV = 'OGDEN_AGENTS_TEST_BMAD_AVAILABLE';
+
+/** Test-only: shortens the quiet-agent check-in delay, in milliseconds (story 2.10). Honoured only when `testHooksAllowed`. */
+export const CHECK_IN_MS_ENV = 'OGDEN_AGENTS_TEST_CHECK_IN_MS';
+/**
+ * Set to `memory` (tests that start the packaged server as its own process:
+ * the launcher tests and the installed-package smoke) to keep API keys in
+ * memory, so no test ever reads or writes the real OS keychain. Honoured only
+ * under a test runner (`NODE_ENV=test` or `VITEST` set) on a data folder inside
+ * the OS temp folder ({@link testSecretStore}, `testHooksAllowed`).
+ */
+export const SECRET_STORE_ENV = 'OGDEN_AGENTS_TEST_SECRET_STORE';
+
+/** `memory` when a test asked for the in-memory secret store and test hooks are allowed for `dataDir`; otherwise `undefined` (the keychain). */
+export function testSecretStore(env: Env, dataDir: string, tmp: string = tmpdir()): 'memory' | undefined {
+  return env[SECRET_STORE_ENV] === 'memory' && testHooksAllowed(env, dataDir, tmp) ? 'memory' : undefined;
+}
 
 /** Whether this process runs under a test runner: `NODE_ENV=test`, or `VITEST` set. */
 export function isTestRun(env: Env = process.env): boolean {
@@ -182,4 +205,74 @@ export function testBmadAvailable(env: Env, dataDir: string, tmp: string = tmpdi
     if (!pieces.includes(parsed.data)) pieces.push(parsed.data);
   }
   return pieces;
+}
+
+/**
+ * The check-in delay from {@link CHECK_IN_MS_ENV}, clamped to core's range
+ * (`clampCheckInDelay`: 1 s to 2^31-1 ms), or `undefined` (core's 10 minutes)
+ * when unset, not a number, or test hooks aren't allowed for `dataDir`
+ * (`testHooksAllowed`: a test run on a data folder inside the OS temp folder).
+ */
+export function checkInDelayFromEnv(env: Env, dataDir: string, tmp: string = tmpdir()): number | undefined {
+  const raw = env[CHECK_IN_MS_ENV];
+  if (raw === undefined || raw.trim() === '' || !testHooksAllowed(env, dataDir, tmp)) return undefined;
+  const ms = Number(raw);
+  return Number.isFinite(ms) ? clampCheckInDelay(ms) : undefined;
+}
+
+/** The `start()` options that decide a hook themselves, and whether `start()` opens its own core. */
+export type TestHookOptions = Pick<StartOptions, 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets'> & {
+  /** `false` for a core passed in, which already holds its own BMad pieces: {@link BMAD_AVAILABLE_ENV} is not read. */
+  ownsCore: boolean;
+  tmp?: string;
+};
+
+/** Every honoured hook, as {@link resolveTestHooks} found them. */
+export interface TestHooks {
+  claudeInstall: TestClaudeInstall | undefined;
+  apiKeyCheck: ((value: string, signal: AbortSignal) => Promise<ApiKeyVerification>) | undefined;
+  claudeCli: string | undefined;
+  bmadProbe: boolean;
+  bmadAvailable: BmadPieceName[];
+  checkInMs: number | undefined;
+  secretStore: 'memory' | undefined;
+}
+
+/**
+ * Reads every hook for `start()`, each through its own function above (so
+ * each is honoured only when {@link testHooksAllowed}), except one that
+ * `options` already decides (a given install, key check, `claude`
+ * executable, check-in delay or secret store), which is not read at all.
+ * Throws as those functions do.
+ */
+export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOptions): TestHooks {
+  const tmp = options.tmp ?? tmpdir();
+  return {
+    claudeInstall: options.claudeInstall === undefined ? testClaudeInstall(env, dataDir, tmp) : undefined,
+    apiKeyCheck: options.verifyApiKey === undefined ? testApiKeyCheck(env, dataDir, tmp) : undefined,
+    claudeCli: options.extraAgentEnv?.CLAUDE_CODE_EXECUTABLE === undefined ? testClaudeCli(env, dataDir, tmp) : undefined,
+    bmadProbe: testBmadProbe(env, dataDir, tmp),
+    bmadAvailable: options.ownsCore ? testBmadAvailable(env, dataDir, tmp) : [],
+    checkInMs: options.checkInDelayMs === undefined ? checkInDelayFromEnv(env, dataDir, tmp) : undefined,
+    secretStore: options.secrets === undefined ? testSecretStore(env, dataDir, tmp) : undefined,
+  };
+}
+
+/**
+ * The fields of the "test hooks in use" log line, or `undefined` when no hook
+ * is in use. `checkInMs` appears only when honoured. The memory secret store
+ * keeps its own "secrets store" line: every vitest server sets it.
+ */
+export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | undefined {
+  const inUse =
+    hooks.claudeInstall !== undefined || hooks.apiKeyCheck !== undefined || hooks.claudeCli !== undefined || hooks.bmadProbe || hooks.bmadAvailable.length > 0 || hooks.checkInMs !== undefined;
+  if (!inUse) return undefined;
+  return {
+    claudeInstall: hooks.claudeInstall !== undefined,
+    apiKeyCheck: hooks.apiKeyCheck !== undefined,
+    claudeCli: hooks.claudeCli !== undefined,
+    bmadProbe: hooks.bmadProbe,
+    bmadAvailable: hooks.bmadAvailable.join(','),
+    ...(hooks.checkInMs === undefined ? {} : { checkInMs: hooks.checkInMs }),
+  };
 }

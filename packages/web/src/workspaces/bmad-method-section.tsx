@@ -1,6 +1,5 @@
 import {
   applyBmadPieceChoice,
-  BMAD_COMING_SOON_LABEL,
   BMAD_OFF_TEXT,
   BMAD_ON_TEXT,
   BMAD_PIECE_INFO,
@@ -22,12 +21,12 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouterState } from '@tanstack/react-router';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Badge } from '@/ui/badge';
 import { Field } from '@/ui/field';
 import { Notice } from '@/ui/notice';
 import { PageSection } from '@/ui/page';
 import { Switch } from '@/ui/switch';
 import { Text } from '@/ui/typography';
+import { canTurnOnBmadPiece, ComingSoonBadge } from '@/workspaces/bmad-piece-choice';
 import { createLatestGate, updateBmadPieces, useBmadPieces, useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
 
 /**
@@ -79,18 +78,7 @@ function missingNeeds(piece: BmadPiece, pieces: readonly BmadPiece[], availabili
 
 /** Whether `piece` may be turned on now: it and what it still needs ship. */
 function canTurnOn(piece: BmadPiece, pieces: readonly BmadPiece[], availability: BmadAvailability | undefined): boolean {
-  return availability !== undefined && availability[piece] && missingNeeds(piece, pieces, availability).length === 0;
-}
-
-function ComingSoon({ testId }: { testId: string }) {
-  return (
-    <>
-      {' '}
-      <Badge variant="outline" data-testid={testId}>
-        {BMAD_COMING_SOON_LABEL}
-      </Badge>
-    </>
-  );
+  return canTurnOnBmadPiece(pieces, piece, availability === undefined ? undefined : (each) => availability[each]);
 }
 
 const HEADING_ID = `${WORKSPACE_SETTINGS_BMAD_ANCHOR}-heading`;
@@ -118,7 +106,7 @@ export function BmadMethodView({ pieces, availability, saving, status, error, on
             description={
               <>
                 {BMAD_USE_DESCRIPTION}
-                {mainComingSoon ? <ComingSoon testId="bmad-use-coming-soon" /> : null}
+                {mainComingSoon ? <ComingSoonBadge testId="bmad-use-coming-soon" /> : null}
               </>
             }
           >
@@ -150,7 +138,7 @@ export function BmadMethodView({ pieces, availability, saving, status, error, on
                     description={
                       <>
                         {info.sentence}
-                        {unavailable ? <ComingSoon testId={`${id}-coming-soon`} /> : null}
+                        {unavailable ? <ComingSoonBadge testId={`${id}-coming-soon`} /> : null}
                         {missing.length > 0 ? (
                           <>
                             {' '}

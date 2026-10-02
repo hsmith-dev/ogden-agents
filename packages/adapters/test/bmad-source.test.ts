@@ -302,7 +302,8 @@ describe('the bmad-loop resolver', () => {
     expect(install.at(-1)).toBe(srcDir);
     expect(install).toContain('--build-constraints');
     for (const run of runs) {
-      expect(run.cwd).toBe(realpathSync.native(workDir));
+      // Windows may report the 8.3 short form of the temp path (RUNNER~1); compare resolved paths.
+      expect(realpathSync.native(run.cwd)).toBe(realpathSync.native(workDir));
       const text = JSON.stringify(run.env);
       for (const secret of ['sk-ant-planted', 'ghp_planted']) expect(text).not.toContain(secret);
       expect(run.env.PYTHONUTF8).toBe('1');

@@ -47,6 +47,14 @@ jobs:
         with:
           enable-cache: false
 
+      # The uv-managed Python the real-uv tests run BMad Method's tickets.py
+      # with (story 4.1; TEST_PYTHON in packages/server/test/planning-routes.test.ts).
+      # The tests never download it and ignore any preinstalled Python, so this
+      # is the only download; it retries once.
+      - name: Provision the tests' uv-managed Python
+        shell: bash
+        run: uv python install 3.12 || (sleep 5 && uv python install 3.12)
+
       # Re-derives vendor/ from forks.lock (fork tarballs at the locked commits,
       # a rebuilt bmad-loop wheel) and fails naming any file that differs
       # (AD-13). Hashes are LF-normalized, so it passes on Windows checkouts too.

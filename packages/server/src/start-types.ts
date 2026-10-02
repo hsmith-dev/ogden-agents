@@ -126,7 +126,7 @@ export interface StartOptions {
   /**
    * Variables added to the environment `uv` runs BMad Method's scripts with,
    * on top of `uvEnvironment` (tests only: a temp `UV_CACHE_DIR`,
-   * `UV_PYTHON_DOWNLOADS=never`). The launcher never sets it.
+   * the uv-managed test Python with no download). The launcher never sets it.
    */
   extraUvEnv?: Readonly<Record<string, string>>;
   /**

@@ -10,7 +10,7 @@
  *   one 400, creating nothing;
  * - the board runs the bundled `tickets.py` through real `uv` against a
  *   fixture repo and answers its tickets with the status and state it reports
- *   (skipped only where uv is absent outside CI), writing nothing; a store
+ *   (skipped only outside CI where uv or its managed test Python is absent), writing nothing; a store
  *   that fails answers 503 `tickets_unavailable`.
  */
 import { execFileSync } from 'node:child_process';
@@ -175,18 +175,30 @@ describe('Plan and Board routes (story 4.1)', () => {
   });
 });
 
-/** Whether a `uv` is on this computer's PATH. */
-function hasUv(): boolean {
+/**
+ * The Python the real-uv tests run `tickets.py` with: a uv-managed CPython of
+ * this minor version, never a Python preinstalled on the computer. CI
+ * provisions it with `uv python install` (ci.yml, before the tests, the only
+ * step that downloads it); the tests themselves never download
+ * (`UV_PYTHON_DOWNLOADS=never`) and ignore any system Python
+ * (`UV_PYTHON_PREFERENCE=only-managed`). The product lets uv find or fetch a
+ * Python the same way.
+ */
+const TEST_PYTHON = '3.12';
+const TEST_UV_PYTHON_ENV = { UV_PYTHON: TEST_PYTHON, UV_PYTHON_PREFERENCE: 'only-managed', UV_PYTHON_DOWNLOADS: 'never' } as const;
+
+/** Whether `uv` is on PATH and has the uv-managed {@link TEST_PYTHON} installed (no download). */
+function hasManagedPython(): boolean {
   try {
-    execFileSync('uv', ['--version'], { stdio: 'ignore', windowsHide: true });
+    execFileSync('uv', ['python', 'find', '--managed-python', '--no-python-downloads', TEST_PYTHON], { stdio: 'ignore', windowsHide: true });
     return true;
   } catch {
     return false;
   }
 }
 
-// CI always has uv (the workflow installs it); a developer without uv skips only this.
-const uvMissing = !hasUv() && process.env.CI === undefined;
+// CI always provisions uv and the managed Python (ci.yml), so it never skips; a developer without them skips only these.
+const uvMissing = process.env.CI === undefined && !hasManagedPython();
 
 describe.skipIf(uvMissing)('the board through real uv and the bundled tickets.py (story 4.1)', () => {
   it("answers the fixture repo's tickets with the status and state tickets.py reports, and writes nothing", async () => {
@@ -195,7 +207,7 @@ describe.skipIf(uvMissing)('the board through real uv and the bundled tickets.py
     const server = await startTestServer({
       dataDir: tempDataDir(),
       availableBmadPieces: ['board'],
-      extraUvEnv: { UV_CACHE_DIR: uvCache, UV_PYTHON_DOWNLOADS: 'never' },
+      extraUvEnv: { UV_CACHE_DIR: uvCache, ...TEST_UV_PYTHON_ENV },
     });
     const tab = await signIn(server);
     const repo = fixtureRepo(true);
@@ -216,7 +228,7 @@ describe.skipIf(uvMissing)('the board through real uv and the bundled tickets.py
   it('a repo with no active initiative answers 503 tickets_unavailable', async () => {
     const uvCache = mkdtempSync(join(tmpdir(), 'ogden-agents-uv-cache-'));
     removeAfterTest(uvCache);
-    const server = await startTestServer({ availableBmadPieces: ['board'], extraUvEnv: { UV_CACHE_DIR: uvCache, UV_PYTHON_DOWNLOADS: 'never' } });
+    const server = await startTestServer({ availableBmadPieces: ['board'], extraUvEnv: { UV_CACHE_DIR: uvCache, ...TEST_UV_PYTHON_ENV } });
     const tab = await signIn(server);
     const workspace = await project(server, tab, fixtureRepo(false), ['board']);
     const response = await request(server, tab, 'GET', paths(workspace.id).tickets);

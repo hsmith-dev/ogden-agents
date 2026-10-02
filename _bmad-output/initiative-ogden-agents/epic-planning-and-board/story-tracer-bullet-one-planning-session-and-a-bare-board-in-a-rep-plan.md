@@ -79,6 +79,8 @@ context:
 - `uvEnvironment()` (start-env.ts) is the agents' allowlist minus agent keys, plus `XDG_CACHE_HOME`, `XDG_DATA_HOME`, `LOCALAPPDATA`, `APPDATA` and `PYTHONUTF8=1`.
 - The 503's message is a shared plain text (no active initiative and malformed trees share one; uv missing has its own); the script's own error text is never sent or logged, only a reason code.
 
+- CI follow-up (coordinator, 2026-10-01): the real-uv board tests no longer depend on a preinstalled Python. They run `tickets.py` with a uv-managed CPython 3.12 (`UV_PYTHON=3.12`, `UV_PYTHON_PREFERENCE=only-managed`, `UV_PYTHON_DOWNLOADS=never`), which ci.yml provisions with `uv python install 3.12` right after setup-uv on every OS (the only download, retried once). Outside CI they skip only when uv or that managed Python is absent; in CI they never skip, on any OS.
+
 ## Plan Change Log
 
 ## Review Triage Log

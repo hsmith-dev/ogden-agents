@@ -20,6 +20,12 @@ export interface FakeBmadRepoOptions {
   bmad?: boolean;
   /** Create `_bmad-output/` (with one planning artifact). Default `false`. */
   output?: boolean;
+  /**
+   * Add an active initiative with a ticket tree `tickets.py status` reads
+   * ({@link FAKE_TICKET_TREE_FILES}; story 4.1), and the BMad config script
+   * it loads. Default `false`.
+   */
+  tickets?: boolean;
   /** More files, by `/`-separated path relative to the repo, such as the user's own `.claude/skills`. */
   files?: Readonly<Record<string, string>>;
   /** The temp folder's name prefix. Default `ogden-agents-bmad-repo-`. */
@@ -49,6 +55,42 @@ export const FAKE_BMAD_OUTPUT_FILES: Readonly<Record<string, string>> = {
   '_bmad-output/planning-artifacts/spec.md': '# Spec\n\nA fake planning artifact.\n',
 };
 
+/**
+ * A ticket tree as BMad Method's `tickets.py` reads it (story 4.1): the
+ * project's config script naming the active initiative `initiative-demo`, an
+ * initiative with one epic of two stories, and a plan for the first with
+ * `status: in-review`. `tickets.py status` reports `1.1` (status
+ * `in-review`, state `review`) then `1.2` (no status, state `planned`).
+ */
+export const FAKE_TICKET_TREE_FILES: Readonly<Record<string, string>> = {
+  '_bmad/scripts/config_utils.py': [
+    'class ConfigError(Exception):',
+    '    pass',
+    '',
+    '',
+    'def load_central_config(project_root):',
+    '    return {"core": {"output_folder": "{project-root}/_bmad-output", "active_initiative": "initiative-demo"}}',
+    '',
+  ].join('\n'),
+  '_bmad-output/initiative-demo/tickets.toml': '[[epic]]\nid = 1\nslug = "epic-first"\ntitle = "The first epic"\n',
+  '_bmad-output/initiative-demo/epic-first/epic-first.md': '---\ntype: epic\ntitle: "The first epic"\nparent: initiative-demo\nafter: []\n---\n\n# The first epic\n',
+  '_bmad-output/initiative-demo/epic-first/tickets.toml': [
+    '[[entry]]',
+    'id = 1',
+    'type = "story"',
+    'title = "Build the first thing"',
+    'after = []',
+    '',
+    '[[entry]]',
+    'id = 2',
+    'type = "story"',
+    'title = "Build the second thing"',
+    'after = [1]',
+    '',
+  ].join('\n'),
+  '_bmad-output/initiative-demo/epic-first/story-first-plan.md': '---\ntitle: "Build the first thing"\ntype: "feature"\nticket: 1\nstatus: "in-review"\n---\n',
+};
+
 function writeFiles(root: string, files: Readonly<Record<string, string>>): void {
   for (const [path, content] of Object.entries(files)) {
     const file = join(root, ...path.split('/'));
@@ -58,11 +100,12 @@ function writeFiles(root: string, files: Readonly<Record<string, string>>): void
 }
 
 /** Creates a fake repo in `parent` (the OS temp folder by default); the caller removes it (`remove()`). */
-export function createFakeBmadRepo({ bmad = true, output = false, files = {}, prefix = 'ogden-agents-bmad-repo-', parent = tmpdir() }: FakeBmadRepoOptions = {}): FakeBmadRepo {
+export function createFakeBmadRepo({ bmad = true, output = false, tickets = false, files = {}, prefix = 'ogden-agents-bmad-repo-', parent = tmpdir() }: FakeBmadRepoOptions = {}): FakeBmadRepo {
   const path = mkdtempSync(join(parent, prefix));
   writeFiles(path, { 'README.md': '# A project\n' });
   if (bmad) writeFiles(path, FAKE_BMAD_FILES);
   if (output) writeFiles(path, FAKE_BMAD_OUTPUT_FILES);
+  if (tickets) writeFiles(path, FAKE_TICKET_TREE_FILES);
   writeFiles(path, files);
   return {
     path,

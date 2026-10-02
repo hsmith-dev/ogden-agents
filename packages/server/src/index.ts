@@ -34,6 +34,8 @@ export { ToolchainError, type DetectedToolStatus, type ToolchainPort, type ToolP
 export { AgentError, type AgentEvent, type AgentPort, type AgentSession } from '@ogden-agents/core';
 // Setup, secret and shortcut port types for callers that stub them (tests; story 2.3).
 export type { AgentSetupPort, AppShortcutPort, SecretStorePort } from '@ogden-agents/core';
+// The project's tickets (story 4.1): the e2e suite passes a stub store.
+export { TicketsUnavailableError, type TicketStorePort } from '@ogden-agents/core';
 // The in-memory secret store, so tests never touch the real OS keychain (story 9.2).
 export { createMemorySecretStore } from '@ogden-agents/adapters';
 // The Claude Code install's runner and pins, for tests that install a local fixture (story 9.3).

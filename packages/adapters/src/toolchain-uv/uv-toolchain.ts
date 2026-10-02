@@ -53,9 +53,23 @@ const VERSION_TIMEOUT_MS = 10_000;
 /** Runs `<file> --version` and resolves with its stdout, or `null` if it can't run. */
 export type VersionRunner = (file: string) => Promise<string | null>;
 
+/** What `uv --version` may see of this server's environment: enough to start, nothing else (AD-16: never an agent key). */
+const VERSION_ENV_ALLOWED = ['PATH', 'HOME', 'USERPROFILE'];
+/** The same on Windows only, where a process can't start without them. */
+const VERSION_ENV_ALLOWED_WINDOWS = ['SystemRoot', 'PATHEXT'];
+
+/** The environment `uv --version` runs with: an allowlist of `source` (names compared without case on Windows). */
+export function versionEnvironment(source: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): Record<string, string> {
+  const fold = (name: string) => (platform === 'win32' ? name.toUpperCase() : name);
+  const allowed = new Set([...VERSION_ENV_ALLOWED, ...(platform === 'win32' ? VERSION_ENV_ALLOWED_WINDOWS : [])].map(fold));
+  const env: Record<string, string> = {};
+  for (const [name, value] of Object.entries(source)) if (value !== undefined && allowed.has(fold(name))) env[name] = value;
+  return env;
+}
+
 export const runVersion: VersionRunner = (file) =>
   new Promise((resolve) => {
-    execFile(file, ['--version'], { timeout: VERSION_TIMEOUT_MS, windowsHide: true }, (error, stdout) => {
+    execFile(file, ['--version'], { timeout: VERSION_TIMEOUT_MS, windowsHide: true, env: versionEnvironment() }, (error, stdout) => {
       resolve(error === null ? String(stdout) : null);
     });
   });
@@ -109,6 +123,13 @@ interface Found {
 export function createUvToolchain(options: UvToolchainOptions): ToolchainPort & {
   /** The folder the private copy is installed in. */
   readonly privateDir: string;
+  /**
+   * The `uv` to run BMad Method's scripts with (story 4.1), found as
+   * {@link ToolchainPort.status} finds it: the first usable one on `PATH` or
+   * in uv's standard folders, else the private copy; `undefined` when there
+   * is none.
+   */
+  locate(): Promise<string | undefined>;
 } {
   const env = options.env ?? process.env;
   const platform = options.platform ?? process.platform;
@@ -157,6 +178,22 @@ export function createUvToolchain(options: UvToolchainOptions): ToolchainPort & 
     return found;
   };
 
+  /** The private copy's path, when it runs and reports the pinned version. */
+  const usablePrivate = async (): Promise<string | undefined> => {
+    const privateUv = join(privateDir, `uv${exe}`);
+    if (!existsSync(privateUv)) return undefined;
+    const version = await versionOf(privateUv);
+    return version !== undefined && version.join('.') === release.version ? privateUv : undefined;
+  };
+
+  const locate = async (): Promise<string | undefined> => {
+    if (env[UV_IGNORE_SYSTEM_ENV] !== '1') {
+      const usable = (await systemCandidates()).find((candidate) => compareVersions(candidate.version, minimum) >= 0);
+      if (usable !== undefined) return usable.path;
+    }
+    return usablePrivate();
+  };
+
   const status = async (): Promise<DetectedToolStatus> => {
     let tooOld: Found | undefined;
     if (env[UV_IGNORE_SYSTEM_ENV] !== '1') {
@@ -167,13 +204,7 @@ export function createUvToolchain(options: UvToolchainOptions): ToolchainPort & 
         if (tooOld === undefined || compareVersions(candidate.version, tooOld.version) > 0) tooOld = candidate;
       }
     }
-    const privateUv = join(privateDir, `uv${exe}`);
-    if (existsSync(privateUv)) {
-      const version = await versionOf(privateUv);
-      if (version !== undefined && version.join('.') === release.version) {
-        return { state: 'ready', version: release.version, source: 'private' };
-      }
-    }
+    if ((await usablePrivate()) !== undefined) return { state: 'ready', version: release.version, source: 'private' };
     // No download for this OS or CPU: Install can't help, whatever else is found.
     const selected = target();
     if ('unsupported' in selected) return { state: 'failed', reason: selected.unsupported, canInstall: false };
@@ -369,7 +400,7 @@ export function createUvToolchain(options: UvToolchainOptions): ToolchainPort & 
     }
   };
 
-  return { uvVersion: release.version, privateDir, status, installUv };
+  return { uvVersion: release.version, privateDir, locate, status, installUv };
 }
 
 /** Removes temp folders a crashed or killed install left behind, best effort. */

@@ -160,6 +160,24 @@ export const API_ROUTES = {
    * The first one appends `workspace.bmad_offer_dismissed`; a repeat changes nothing.
    */
   workspaceBmadOffer: `${API_BASE}/workspaces/:wsId/bmad/offer`,
+  /**
+   * `GET` → `CatalogResponse` (story 4.1): the project's installed BMad
+   * Method skills. Serves the `planning` piece (guarded, AD-22).
+   */
+  workspaceCatalog: `${API_BASE}/workspaces/:wsId/catalog`,
+  /**
+   * `POST StartPlanningRequest` → 201 `SessionResponse` (story 4.1): a
+   * session of kind `planning` whose first message invokes the skill. 404
+   * for a skill not in the catalog, 400 for a malformed one. Serves the
+   * `planning` piece (guarded, AD-22).
+   */
+  workspacePlanningSessions: `${API_BASE}/workspaces/:wsId/planning-sessions`,
+  /**
+   * `GET` → `TicketsResponse` (story 4.1): the project's tickets as
+   * `tickets.py status` reports them; 503 `tickets_unavailable` when they
+   * can't be read. Serves the `board` piece (guarded, AD-22).
+   */
+  workspaceTickets: `${API_BASE}/workspaces/:wsId/tickets`,
 } as const;
 
 /**

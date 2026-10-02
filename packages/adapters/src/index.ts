@@ -6,6 +6,7 @@
  */
 export * from './acp-claude-code/index.js';
 export * from './bmad-catalog/index.js';
+export { MAX_SKILL_FILE_BYTES, parseSkillFrontmatter, scanSkills, SKILL_FOLDERS } from './bmad-catalog/skills.js';
 export * from './catalog-memory/index.js';
 export * from './secrets-keyring/index.js';
 export * from './secrets-memory/index.js';
@@ -16,4 +17,5 @@ export * from './shortcut-os/index.js';
 export * from './terminal-memory/index.js';
 export * from './terminal-pty/index.js';
 export * from './terminal-pty/terminal-port.js';
+export * from './tickets-v7/index.js';
 export * from './toolchain-uv/index.js';

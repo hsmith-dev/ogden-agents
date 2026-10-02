@@ -98,6 +98,7 @@ function handoffAgent(record = cliRecord(), resume: Partial<AgentTerminalResume>
   };
   const port: AgentPort = {
     displayName: 'Claude Code',
+    skillInvocation: (skill) => `/${skill}`,
     listAuthMethods: async () => [],
     startSession: async () => open(`agent-${++sessions}`),
     async reopenSession(input) {

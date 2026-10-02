@@ -19,6 +19,7 @@ import {
   selectTarget,
   shortVersion,
   UV_IGNORE_SYSTEM_ENV,
+  versionEnvironment,
   UV_RELEASE,
   UV_TARGETS,
   type UvRelease,
@@ -192,6 +193,39 @@ describe('status', () => {
     expect(await uv.status()).toEqual({ state: 'failed', reason: expect.stringContaining("can't install uv"), canInstall: false });
     const old = toolchain({ dataDir: tempDir(), platform: 'linux', arch: 'ppc64', env: { PATH: fakeSystemUv('0.4.0') } });
     expect(await old.status()).toEqual({ state: 'failed', reason: expect.stringContaining("can't install uv"), canInstall: false });
+  });
+});
+
+describe('versionEnvironment', () => {
+  it('keeps only what uv needs to start: never an agent key or anything else', () => {
+    const source = { PATH: '/bin', HOME: '/h', USERPROFILE: 'C:\\u', ANTHROPIC_API_KEY: 'sk-x', SECRET: 's', SystemRoot: 'C:\\Windows', PATHEXT: '.EXE' };
+    expect(versionEnvironment(source, 'linux')).toEqual({ PATH: '/bin', HOME: '/h', USERPROFILE: 'C:\\u' });
+    expect(versionEnvironment({ ...source, PATH: undefined, Path: 'C:\\bin', anthropic_api_key: 'sk-y' }, 'win32')).toEqual({
+      Path: 'C:\\bin',
+      HOME: '/h',
+      USERPROFILE: 'C:\\u',
+      SystemRoot: 'C:\\Windows',
+      PATHEXT: '.EXE',
+    });
+  });
+});
+
+describe('locate (story 4.1)', () => {
+  it('is the first usable system uv, else the private copy, else none', async () => {
+    const old = fakeSystemUv('0.4.0');
+    const usable = fakeSystemUv('0.12.19');
+    const sep = process.platform === 'win32' ? ';' : ':';
+    expect(await toolchain({ dataDir: tempDir(), env: { PATH: [old, usable].join(sep) } }).locate()).toBe(join(usable, 'uv'));
+
+    const dataDir = tempDir();
+    const uv = toolchain({ dataDir, env: { PATH: old } });
+    expect(await uv.locate()).toBeUndefined();
+    mkdirSync(uv.privateDir, { recursive: true });
+    writeFileSync(join(uv.privateDir, 'uv'), `uv ${VERSION}\n`);
+    expect(await uv.locate()).toBe(join(uv.privateDir, 'uv'));
+
+    // An ignored system uv is never located.
+    expect(await toolchain({ dataDir: tempDir(), env: { PATH: usable, [UV_IGNORE_SYSTEM_ENV]: '1' } }).locate()).toBeUndefined();
   });
 });
 

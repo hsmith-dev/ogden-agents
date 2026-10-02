@@ -104,6 +104,7 @@ function scriptedAgent(
   let sessionsOpened = 0;
   const port: AgentPort = {
     displayName: 'Test Agent',
+    skillInvocation: (skill) => `/${skill}`,
     listAuthMethods: async () => [],
     async startSession(input) {
       starts.push({ cwd: input.cwd, env: input.env });
@@ -219,6 +220,7 @@ describe('chat', () => {
     let attempts = 0;
     const port: AgentPort = {
       displayName: 'Test Agent',
+      skillInvocation: (skill) => `/${skill}`,
       reopenSession: () => Promise.reject(new Error('not in this test')),
       listAuthMethods: async () => [],
       async startSession() {
@@ -311,6 +313,7 @@ describe('chat', () => {
     let closedAgents = 0;
     const port: AgentPort = {
       displayName: 'Test Agent',
+      skillInvocation: (skill) => `/${skill}`,
       reopenSession: () => Promise.reject(new Error('not in this test')),
       listAuthMethods: async () => [],
       async startSession() {
@@ -732,6 +735,7 @@ describe('resuming a chat (story 2.7)', () => {
     });
     const port: AgentPort = {
       displayName: 'Test Agent',
+      skillInvocation: (skill) => `/${skill}`,
       listAuthMethods: async () => [],
       async startSession() {
         order.push('start');
@@ -773,6 +777,7 @@ describe('resuming a chat (story 2.7)', () => {
     let stopped = false;
     const port: AgentPort = {
       displayName: 'Test Agent',
+      skillInvocation: (skill) => `/${skill}`,
       listAuthMethods: async () => [],
       reopenSession: () => Promise.reject(new Error('not in this test')),
       async startSession() {
@@ -1012,6 +1017,7 @@ function handAgent({ ignoreCancel = false, reopen }: { ignoreCancel?: boolean; r
   };
   const port: AgentPort = {
     displayName: 'Test Agent',
+    skillInvocation: (skill) => `/${skill}`,
     listAuthMethods: async () => [],
     async startSession(input) {
       return open(input, `agent-${++sessionsOpened}`);

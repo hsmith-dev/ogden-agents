@@ -610,6 +610,10 @@ const EXPECTED_API_ROUTES = [
   `PATCH ${API_ROUTES.newProjectDefaults}`,
   `GET ${API_ROUTES.workspaceBmadDetection}`,
   `DELETE ${API_ROUTES.workspaceBmadOffer}`,
+  // Plan and Board (story 4.1), each through the guarded helper.
+  `GET ${API_ROUTES.workspaceCatalog}`,
+  `POST ${API_ROUTES.workspacePlanningSessions}`,
+  `GET ${API_ROUTES.workspaceTickets}`,
 ] as const;
 
 describe('gate placement', () => {
@@ -655,13 +659,16 @@ describe('gate placement', () => {
       const log = createLogger(() => {});
       const gate = createGate({ port: () => 1, codes: createLaunchCodes(), tabs: createTabTokens(), log });
       const app = createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate, bmad: core.bmad, bmadProbe: true });
-      // The only route serving a piece so far is the test probe (10.1); epics 4 to 7 add theirs the same way.
-      expect(guardedRouteKeys(app)).toEqual([`GET ${TEST_ROUTES.bmadProbe}`]);
+      // The routes serving a piece: Plan and Board (story 4.1) and the test probe (10.1); epics 5 to 7 add theirs the same way.
+      const pieceRoutes = [`GET ${API_ROUTES.workspaceCatalog}`, `POST ${API_ROUTES.workspacePlanningSessions}`, `GET ${API_ROUTES.workspaceTickets}`];
+      expect(guardedRouteKeys(app)).toEqual([...pieceRoutes, `GET ${TEST_ROUTES.bmadProbe}`].sort());
+      for (const key of guardedRouteKeys(app)) expect(key.slice(key.indexOf(' ') + 1).startsWith(`${API_BASE}/workspaces/:wsId/`), key).toBe(true);
       const index = app.routes.findIndex((route) => route.path === TEST_ROUTES.bmadProbe);
       expect(index).toBeGreaterThan(0);
       expect(TEST_ROUTES.bmadProbe.startsWith(`${API_BASE}/workspaces/:wsId/`)).toBe(true);
-      // Without the probe's hook nothing serves a piece.
-      expect(guardedRouteKeys(createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate, bmad: core.bmad }))).toEqual([]);
+      // Without the probe's hook only Plan and Board serve a piece; without core's guard nothing does.
+      expect(guardedRouteKeys(createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate, bmad: core.bmad }))).toEqual(pieceRoutes.sort());
+      expect(guardedRouteKeys(createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate }))).toEqual([]);
     } finally {
       core.close();
     }

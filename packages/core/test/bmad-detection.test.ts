@@ -21,6 +21,7 @@ function fakeCatalog(answers: Record<string, { hasBmad: boolean; hasOutput: bool
       calls.push(repoPath);
       return answers[repoPath] ?? { hasBmad: false, hasOutput: false };
     },
+    skills: async () => [],
   };
 }
 
@@ -54,7 +55,7 @@ describe('BMad detection (story 10.3)', () => {
 
   it('Not now is kept with one event, a repeat changes nothing, and it survives a restart', async () => {
     const dataDir = tempDir();
-    const core = openTestCore(dataDir, undefined, { bmadCatalog: { detect: async () => ({ hasBmad: true, hasOutput: false }) } });
+    const core = openTestCore(dataDir, undefined, { bmadCatalog: { detect: async () => ({ hasBmad: true, hasOutput: false }), skills: async () => [] } });
     const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
     const other = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
 

@@ -3,7 +3,7 @@
  * `ChatOptions`, `TerminalViewer` and `Chat`, and the state the chat modules
  * share by reference (`Live`, `Terminal`, `Turn`).
  */
-import type { Session, SessionDriver, SessionId, ToolCallDiff, ToolCallStatus, ToolKind, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import type { Session, SessionDriver, SessionKind, SessionId, ToolCallDiff, ToolCallStatus, ToolKind, Workspace, WorkspaceId } from '@ogden-agents/shared';
 import type { AgentError, AgentPort, AgentSession } from '../agent-port.js';
 import type { Entities, NewWorkspaceOptions } from '../entities.js';
 import type { HistoryDeleted } from '../event-log.js';
@@ -112,8 +112,12 @@ export interface Chat {
    * idle agents are then stopped.
    */
   deleteHistory(workspaceId: WorkspaceId): Omit<HistoryDeleted, 'event'>;
-  /** A new chat session in the workspace, `idle`. */
-  createChatSession(workspaceId: WorkspaceId): Session;
+  /**
+   * A new session in the workspace, `idle`: a `chat` by default, or a
+   * `planning` session (story 4.1), which is a chat whose first message the
+   * planning use-case sends.
+   */
+  createChatSession(workspaceId: WorkspaceId, kind?: Exclude<SessionKind, 'build'>): Session;
   /** The session, which must belong to the workspace (`NotFoundError` otherwise). */
   getSession(workspaceId: WorkspaceId, sessionId: SessionId): Session;
   /**

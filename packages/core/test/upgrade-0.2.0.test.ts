@@ -36,6 +36,7 @@ const FROZEN_JOURNAL_020 = [
 /** Detection as the real catalog answers it: `_bmad/` and `_bmad-output/` exist or not, read-only. */
 const fsCatalog: BmadCatalogPort = {
   detect: async (repoPath) => ({ hasBmad: existsSync(join(repoPath, '_bmad')), hasOutput: existsSync(join(repoPath, '_bmad-output')) }),
+  skills: async () => [],
 };
 
 function folder(stopAt?: 3 | 4 | 5): DataFolder020 {

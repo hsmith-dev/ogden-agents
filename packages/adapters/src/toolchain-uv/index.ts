@@ -21,6 +21,18 @@ export {
   standardUvDirs,
   UV_IGNORE_SYSTEM_ENV,
   UV_TOOLS_DIR,
+  versionEnvironment,
   type UvToolchainOptions,
   type VersionRunner,
 } from './uv-toolchain.js';
+export {
+  createUvScriptRunner,
+  SCRIPT_MAX_OUTPUT_BYTES,
+  SCRIPT_TIMEOUT_MS,
+  ScriptRunError,
+  type ScriptRun,
+  type ScriptRunErrorCode,
+  type UvCommand,
+  type UvScriptRunner,
+  type UvScriptRunnerOptions,
+} from './script-runner.js';

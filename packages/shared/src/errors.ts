@@ -51,6 +51,12 @@ export const API_ERROR_CODES = [
    * (409; AD-22: a piece is turned on only when available). Nothing was stored.
    */
   'feature_unavailable',
+  /**
+   * A project's tickets couldn't be read (503; story 4.1): no active
+   * initiative, no usable uv, a malformed ticket tree, a timeout or output
+   * that isn't the script's JSON. The message says what to do in plain words.
+   */
+  'tickets_unavailable',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

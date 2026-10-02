@@ -193,6 +193,11 @@ export function createClaudeCodeAgent(options: ClaudeCodeAgentOptions = {}): Age
   return {
     displayName: CLAUDE_CODE,
 
+    // Claude Code's ACP adapter hands the text to the SDK, which runs `/name` as
+    // the installed skill; it loads the repo's own skills from the session's cwd
+    // (`settingSources` includes `project`). Story 4.1.
+    skillInvocation: (skill) => `/${skill}`,
+
     async startSession(input) {
       const opened = await open(input, { kind: 'new' });
       return opened.session!;

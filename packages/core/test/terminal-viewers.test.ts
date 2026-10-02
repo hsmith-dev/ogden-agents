@@ -55,6 +55,7 @@ function resumingAgent(): AgentPort {
   };
   return {
     displayName: 'Claude Code',
+    skillInvocation: (skill) => `/${skill}`,
     listAuthMethods: async () => [],
     startSession: async () => open(`agent-${++sessions}`),
     reopenSession: async (input) => ({ session: open(input.agentSessionId), restored: 'resumed' }),

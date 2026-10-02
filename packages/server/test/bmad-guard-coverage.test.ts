@@ -102,6 +102,13 @@ function openTestCore(): Core {
   return core;
 }
 
+/** The routes that serve a piece in the fully wired app (story 4.1), sorted as `guardedRouteKeys` lists them. */
+const PIECE_ROUTES: readonly string[] = [
+  `GET ${API_ROUTES.workspaceCatalog}`,
+  `GET ${API_ROUTES.workspaceTickets}`,
+  `POST ${API_ROUTES.workspacePlanningSessions}`,
+].sort();
+
 const BOARD = `${API_BASE}/workspaces/:wsId/board`;
 const CATALOG = `${API_BASE}/bmad/catalog`;
 const ok = (c: { json: (body: unknown) => Response }) => c.json({ ok: true });
@@ -110,8 +117,14 @@ describe('every route serving a BMad piece is guarded (AD-22, story 10.6)', () =
   it('the fully wired app, with the probe, has none unguarded, and the probe counts as one and is guarded', () => {
     const app = fullTestApp(openTestCore(), { bmadProbe: true });
     expect(findUnguardedBmadRoutes(app), HOW_TO_FIX).toEqual([]);
-    expect(bmadRouteKeys(app)).toEqual([`GET ${TEST_ROUTES.bmadProbe}`]);
+    expect(bmadRouteKeys(app)).toEqual(PIECE_ROUTES.concat(`GET ${TEST_ROUTES.bmadProbe}`).sort());
     expect(guardedRouteKeys(app)).toContain(`GET ${TEST_ROUTES.bmadProbe}`);
+  });
+
+  it("epic 4's Plan and Board routes (story 4.1) are registered through bmadPieceRoutes", () => {
+    const app = fullTestApp(openTestCore());
+    expect(guardedRouteKeys(app)).toEqual(PIECE_ROUTES);
+    expect(findUnguardedBmadRoutes(app), HOW_TO_FIX).toEqual([]);
   });
 
   it('every listed piece-less and by-design route is a route the app has (the lists stay current)', () => {
@@ -147,7 +160,7 @@ describe('every route serving a BMad piece is guarded (AD-22, story 10.6)', () =
     const core = openTestCore();
     const app = fullTestApp(core);
     bmadPieceRoutes(app, { bmad: core.bmad, log: createLogger(() => {}) }).get('board', BOARD, (c) => c.json({ ok: true }));
-    expect(bmadRouteKeys(app)).toEqual([`GET ${BOARD}`]);
+    expect(bmadRouteKeys(app)).toEqual(PIECE_ROUTES.concat(`GET ${BOARD}`).sort());
     expect(findUnguardedBmadRoutes(app), HOW_TO_FIX).toEqual([]);
   });
 });

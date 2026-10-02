@@ -281,6 +281,7 @@ describe('the terminal contract on the API (story 3.2)', () => {
         sessionEvents: core.sessionEvents,
         agent: {
           displayName: 'Test Agent',
+          skillInvocation: (skill) => `/${skill}`,
           startSession: () => Promise.reject(new Error('no agent in this test')),
           reopenSession: () => Promise.reject(new Error('no agent in this test')),
           listAuthMethods: () => Promise.reject(new Error('no agent in this test')),
@@ -695,6 +696,7 @@ function resumingAgent(): AgentPort {
   };
   return {
     displayName: 'Claude Code',
+    skillInvocation: (skill) => `/${skill}`,
     listAuthMethods: async () => [],
     startSession: async () => open(`agent-${++sessions}`),
     reopenSession: async (input) => ({ session: open(input.agentSessionId), restored: 'resumed' }),

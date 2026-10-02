@@ -50,8 +50,8 @@ vi.mock('@/chat/chat-api', async (importOriginal) => ({
 
 const { WorkspaceTabs, WORKSPACE_TAB_SLOTS } = await import('../src/shell/workspace-tabs');
 
-/** The slots once epic 4.6 has built the Plan page. */
-const PLAN_FILLED = WORKSPACE_TAB_SLOTS.map((slot) => (slot.id === 'plan' ? { ...slot, to: '/w/$wsId/plan' } : slot));
+/** The slots as story 4.1 fills them (Plan and Board have pages). */
+const PLAN_FILLED = WORKSPACE_TAB_SLOTS;
 
 /** Lets the queries settle and React Query's batched notifications (a timer) reach the component. */
 async function flush() {

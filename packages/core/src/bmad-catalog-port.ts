@@ -5,7 +5,7 @@
  * only for workspaces with Planning on (AD-22). Reading a repo's files is
  * tool-specific, so it sits behind a core port and core names no file.
  */
-import type { BmadDetection } from '@ogden-agents/shared';
+import type { BmadDetection, CatalogSkill } from '@ogden-agents/shared';
 
 /** What {@link BmadCatalogPort.detect} finds in a repo: the detection without the per-project offer answer core keeps. */
 export type BmadRepoDetection = Omit<BmadDetection, 'offerDismissed'>;
@@ -23,4 +23,13 @@ export interface BmadCatalogPort {
    * `false` for it; it rejects only on a bug, never for the repo's state.
    */
   detect(repoPath: string): Promise<BmadRepoDetection>;
+  /**
+   * The skills installed in the repo at `repoPath` (the workspace's real
+   * path; story 4.1), from each skill's `SKILL.md` frontmatter, sorted by
+   * name, each name once. Read-only, and only inside the repo: a skill whose
+   * file resolves outside it, or whose name isn't a skill name, is left out.
+   * A missing folder answers no skills. Core asks it only for a workspace
+   * with Planning on (AD-22).
+   */
+  skills(repoPath: string): Promise<CatalogSkill[]>;
 }

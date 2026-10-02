@@ -23,11 +23,11 @@ export interface WorkspaceTabSlot {
   to?: string;
 }
 
-/** Every slot, in order. Epic 4.6 sets Plan's `to`, 4.9 Board's, epic 5 Runs'. */
+/** Every slot, in order. Story 4.1 sets Plan's and Board's `to` (their bare pages), epic 5 Runs'. */
 export const WORKSPACE_TAB_SLOTS: readonly WorkspaceTabSlot[] = [
   { id: 'chats', label: 'Chats', to: '/w/$wsId' },
-  { id: 'plan', label: 'Plan', piece: 'planning' },
-  { id: 'board', label: 'Board', piece: 'board' },
+  { id: 'plan', label: 'Plan', piece: 'planning', to: '/w/$wsId/plan' },
+  { id: 'board', label: 'Board', piece: 'board', to: '/w/$wsId/board' },
   { id: 'runs', label: 'Runs', piece: 'builds' },
 ];
 

@@ -1,0 +1,171 @@
+/**
+ * Planning and the board in core (story 4.1): each use-case calls the guard
+ * first, so a project with the piece off is never scanned and its tickets
+ * never read; the repo is the workspace's stored real path; a skill must be
+ * well-formed and in the catalog; a planning session is a chat session of
+ * kind `planning` whose first message is the agent's invocation of the skill.
+ */
+import type { CatalogSkill, SessionId, TicketsResponse, WorkspaceId } from '@ogden-agents/shared';
+import { describe, expect, it } from 'vitest';
+import {
+  createBoard,
+  createChat,
+  createPlanning,
+  FeatureOffError,
+  NotFoundError,
+  TicketsUnavailableError,
+  ValidationError,
+  type AgentPort,
+  type AgentSession,
+  type BmadCatalogPort,
+  type Core,
+  type TicketStorePort,
+} from '../src/index.js';
+import { openTestCore, tempDir } from './helpers.js';
+
+const UNKNOWN = 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3' as WorkspaceId;
+const SKILLS: CatalogSkill[] = [
+  { name: 'bmad-spec', description: 'Write a spec.' },
+  { name: 'bmad-ticket', description: 'Make tickets.' },
+];
+const TICKETS: TicketsResponse = {
+  tickets: [{ ref: '1.1', id: 1, epic: 'epic-one', title: 'First', type: 'story', status: '', state: 'planned', blocked_reason: '' }],
+  problems: [],
+};
+
+/** A catalog that records which repos it scanned. */
+function fakeCatalog(skills: CatalogSkill[] = SKILLS): BmadCatalogPort & { scanned: string[] } {
+  const scanned: string[] = [];
+  return {
+    scanned,
+    detect: async () => ({ hasBmad: true, hasOutput: true }),
+    skills: async (repoPath) => {
+      scanned.push(repoPath);
+      return skills;
+    },
+  };
+}
+
+/** An agent whose sessions record every prompt and answer at once. */
+function promptRecorder(): AgentPort & { prompts: string[] } {
+  const prompts: string[] = [];
+  const session = (id: string): AgentSession => {
+    const listeners = new Set<(event: Parameters<Parameters<AgentSession['onEvent']>[0]>[0]) => void>();
+    return {
+      agentSessionId: id,
+      async prompt(text) {
+        prompts.push(text);
+        for (const listener of listeners) listener({ type: 'message_chunk', text: 'ok' });
+        for (const listener of listeners) listener({ type: 'state', state: 'idle' });
+        return { stopReason: 'end_turn' };
+      },
+      cancel: async () => {},
+      close: async () => {},
+      onEvent(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+  };
+  let opened = 0;
+  return {
+    prompts,
+    displayName: 'Test Agent',
+    skillInvocation: (skill) => `run-skill:${skill}`,
+    listAuthMethods: async () => [],
+    startSession: async () => session(`agent-${++opened}`),
+    reopenSession: async (input) => ({ session: session(input.agentSessionId), restored: 'resumed' }),
+  };
+}
+
+function setup(pieces: ('planning' | 'board')[] = ['planning', 'board']) {
+  const core: Core = openTestCore(tempDir(), undefined, { availableBmadPieces: ['planning', 'board'] });
+  const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
+  if (pieces.length > 0) core.permissions.updateSettings(workspace.id, { bmadPieces: pieces });
+  const catalog = fakeCatalog();
+  const agent = promptRecorder();
+  const chat = createChat({ dataDir: tempDir(), entities: core.entities, sessionEvents: core.sessionEvents, agent });
+  const planning = createPlanning({ bmad: core.bmad, entities: core.entities, catalog, chat, agent });
+  const read: string[] = [];
+  let answer: TicketsResponse | Error = TICKETS;
+  const tickets: TicketStorePort = {
+    status: async (repoPath) => {
+      read.push(repoPath);
+      if (answer instanceof Error) throw answer;
+      return answer;
+    },
+  };
+  const board = createBoard({ bmad: core.bmad, entities: core.entities, tickets });
+  return { core, workspace, catalog, agent, chat, planning, board, read, fail: (error: Error) => (answer = error) };
+}
+
+const firstUserMessage = (core: Core, sessionId: SessionId) =>
+  core.events.readAfter(0).find((event) => event.streamId === sessionId && event.type === 'session.message_completed' && event.payload.role === 'user')?.payload;
+
+describe('planning (story 4.1)', () => {
+  it('lists the catalog of the workspace’s stored real path', async () => {
+    const { planning, workspace, catalog } = setup();
+    expect(await planning.catalog(workspace.id)).toEqual(SKILLS);
+    expect(catalog.scanned).toEqual([workspace.realPath]);
+  });
+
+  it('with Planning off, refuses with feature_off and scans nothing', async () => {
+    const { planning, workspace, catalog, core } = setup(['board']);
+    await expect(planning.catalog(workspace.id)).rejects.toThrow(FeatureOffError);
+    await expect(planning.start(workspace.id, 'bmad-spec')).rejects.toThrow(FeatureOffError);
+    expect(catalog.scanned).toEqual([]);
+    expect(core.entities.listSessions(workspace.id)).toEqual([]);
+  });
+
+  it('an unknown workspace is not found', async () => {
+    const { planning } = setup();
+    await expect(planning.catalog(UNKNOWN)).rejects.toThrow(NotFoundError);
+    await expect(planning.start(UNKNOWN, 'bmad-spec')).rejects.toThrow(NotFoundError);
+  });
+
+  it('a skill not in the catalog is not found, and a malformed one is invalid; neither creates a session', async () => {
+    const { planning, workspace, core, catalog } = setup();
+    await expect(planning.start(workspace.id, 'bmad-nothing')).rejects.toThrow(NotFoundError);
+    for (const bad of ['../x', 'Bmad', '', '-x', 'a'.repeat(65), 'a/b']) {
+      await expect(planning.start(workspace.id, bad)).rejects.toThrow(ValidationError);
+    }
+    expect(catalog.scanned).toEqual([workspace.realPath]);
+    expect(core.entities.listSessions(workspace.id)).toEqual([]);
+  });
+
+  it('starts a planning session whose first message is the agent’s invocation of the skill', async () => {
+    const { planning, workspace, core, agent, chat } = setup();
+    const session = await planning.start(workspace.id, 'bmad-spec');
+    expect(session.kind).toBe('planning');
+    expect(core.entities.getSession(session.id)?.kind).toBe('planning');
+    expect(firstUserMessage(core, session.id)).toEqual(expect.objectContaining({ role: 'user', content: 'run-skill:bmad-spec' }));
+    await chat.settled();
+    expect(agent.prompts).toEqual(['run-skill:bmad-spec']);
+    // A plain chat is still a chat.
+    expect(chat.createChatSession(workspace.id).kind).toBe('chat');
+    await chat.close();
+  });
+});
+
+describe('board (story 4.1)', () => {
+  it('reads the tickets of the workspace’s stored real path', async () => {
+    const { board, workspace, read } = setup();
+    expect(await board.tickets(workspace.id)).toEqual(TICKETS);
+    expect(read).toEqual([workspace.realPath]);
+  });
+
+  it('with Board off, refuses with feature_off and reads nothing', async () => {
+    const { board, workspace, read } = setup(['planning']);
+    await expect(board.tickets(workspace.id)).rejects.toThrow(FeatureOffError);
+    expect(read).toEqual([]);
+  });
+
+  it('passes the store’s TicketsUnavailableError on', async () => {
+    const { board, workspace, fail } = setup();
+    fail(new TicketsUnavailableError('uv_missing'));
+    const error = await board.tickets(workspace.id).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(TicketsUnavailableError);
+    expect((error as TicketsUnavailableError).code).toBe('tickets_unavailable');
+    expect((error as TicketsUnavailableError).message).toMatch(/uv/);
+  });
+});

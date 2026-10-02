@@ -1,5 +1,5 @@
 import { serveStatic } from '@hono/node-server/serve-static';
-import { createAddProject, type AgentSetup, type AppShortcutPort, type BmadDetectionUseCases, type BmadFeatures, type Chat, type EventLog, type NewProjectDefaultsStore, type Onboarding, type Permissions, type Toolchain } from '@ogden-agents/core';
+import { createAddProject, type AgentSetup, type AppShortcutPort, type BmadDetectionUseCases, type BmadFeatures, type BoardUseCases, type Chat, type EventLog, type NewProjectDefaultsStore, type Onboarding, type Permissions, type PlanningUseCases, type Toolchain } from '@ogden-agents/core';
 import { API_ROUTES, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
@@ -13,6 +13,7 @@ import { registerEventSocket } from './event-socket.js';
 import type { Logger } from './log.js';
 import { isServerPath } from './paths.js';
 import { registerPermissionRoutes } from './permission-routes.js';
+import { registerPlanningRoutes } from './planning-routes.js';
 import { registerShortcutRoutes } from './shortcut-routes.js';
 import type { TerminalAvailabilityCheck } from './terminal-availability.js';
 import { registerTerminalSocket } from './terminal-socket.js';
@@ -76,6 +77,13 @@ export interface AppOptions {
   bmadProbe?: boolean;
   /** Core's read-only BMad detection and Not now on its offer (story 10.3); without it those routes answer 501. */
   bmadDetection?: BmadDetectionUseCases;
+  /**
+   * The catalog and planning sessions (story 4.1), served behind the
+   * `planning` piece's guard; without it those routes answer 501 once the guard passes.
+   */
+  planning?: PlanningUseCases;
+  /** The project's tickets (story 4.1), behind the `board` piece's guard; without it that route answers 501 once the guard passes. */
+  board?: BoardUseCases;
   /** Core's agent setup use-case: each agent's state and signing in (9.1); without it those routes answer 501. */
   agentSetup?: AgentSetup;
   /** Whether the first-run Welcome is done (9.5); without it those routes answer 501. */
@@ -95,7 +103,7 @@ export interface AppOptions {
   tabs?: TabTokens;
 }
 
-export function createApp({ events, webRoot, log, gate, control, toolchain, chat, terminalAvailability, permissions, bmad, bmadProbe, bmadDetection, agentSetup, onboarding, newProjectDefaults, appShortcut, tabs }: AppOptions): Hono {
+export function createApp({ events, webRoot, log, gate, control, toolchain, chat, terminalAvailability, permissions, bmad, bmadProbe, bmadDetection, planning, board, agentSetup, onboarding, newProjectDefaults, appShortcut, tabs }: AppOptions): Hono {
   const app = new Hono();
 
   // First, for every method and path: no route may be registered before this line.
@@ -184,6 +192,8 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, chat
   registerAgentSetupRoutes(app, { agentSetup, onboarding, log });
   registerBmadRoutes(app, { bmad, newProjectDefaults, log });
   registerBmadDetectionRoutes(app, { bmadDetection, log });
+  // Plan and Board (story 4.1): every route through `bmadPieceRoutes`, behind core's guard (AD-22).
+  if (bmad !== undefined) registerPlanningRoutes(app, { bmad, planning, board, log });
 
   registerEventSocket(app, { events, log, tabs });
   // A session's terminal (story 3.1): behind the same gate as `/ws`.

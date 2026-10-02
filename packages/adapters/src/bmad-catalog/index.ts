@@ -1,8 +1,9 @@
 /**
- * `bmad-catalog` (story 10.3): the real `BmadCatalogPort`. So far it answers
- * only `detect`: whether a project's repo already has BMad Method's
- * `_bmad/` and `_bmad-output/` folders (E10-R5, AD-22). Epic 4 adds the
- * catalog itself here.
+ * `bmad-catalog` (story 10.3): the real `BmadCatalogPort`. `detect` answers
+ * whether a project's repo already has BMad Method's `_bmad/` and
+ * `_bmad-output/` folders (E10-R5, AD-22); `skills` (story 4.1) is the
+ * catalog's installed skills, scanned in `skills.ts`, so this file keeps
+ * `detect`'s lstat-only guarantee below.
  *
  * Read-only guarantee: `detect` first `lstat`s `repoPath` itself, which must
  * be a real folder (a repo root that has become a symlink or junction answers
@@ -19,6 +20,7 @@
 import { lstat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import type { BmadCatalogPort, BmadRepoDetection } from '@ogden-agents/core';
+import { scanSkills } from './skills.js';
 
 /** The folder BMad Method's installer creates at a repo's root. */
 const BMAD_DIR = '_bmad';
@@ -37,7 +39,7 @@ async function isRealFolderAt(path: string): Promise<boolean> {
 /** Whether `repoPath/name` is a real folder (not a link to one); `false` on any error. */
 const isRealFolder = (repoPath: string, name: string): Promise<boolean> => isRealFolderAt(join(repoPath, name));
 
-/** The `bmad-catalog` adapter: read-only detection of a repo's BMad Method folders. */
+/** The `bmad-catalog` adapter: read-only detection of a repo's BMad Method folders, and its installed skills. */
 export function createBmadCatalog(): BmadCatalogPort {
   return {
     async detect(repoPath): Promise<BmadRepoDetection> {
@@ -48,6 +50,7 @@ export function createBmadCatalog(): BmadCatalogPort {
       const [hasBmad, hasOutput] = await Promise.all([isRealFolder(repoPath, BMAD_DIR), isRealFolder(repoPath, BMAD_OUTPUT_DIR)]);
       return { hasBmad, hasOutput };
     },
+    skills: scanSkills,
   };
 }
 

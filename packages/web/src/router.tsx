@@ -70,6 +70,20 @@ const workspaceSettingsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/workspace-settings-page'), 'WorkspaceSettingsPage'),
 });
 
+/** A project's Plan page (story 4.1): its installed skills, each started as a planning session. */
+const workspacePlanRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$wsId/plan',
+  component: lazyRouteComponent(() => import('./routes/workspace-plan-page'), 'WorkspacePlanPage'),
+});
+
+/** A project's Board page (story 4.1): its tickets. */
+const workspaceBoardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$wsId/board',
+  component: lazyRouteComponent(() => import('./routes/workspace-board-page'), 'WorkspaceBoardPage'),
+});
+
 /** The session view's search: `?driver=terminal` mirrors who drives the chat (story 3.6); it never switches by itself. */
 export interface SessionSearch {
   driver?: 'terminal';
@@ -89,6 +103,8 @@ const routeTree = rootRoute.addChildren([
   welcomeRoute,
   workspaceChatsRoute,
   workspaceSettingsRoute,
+  workspacePlanRoute,
+  workspaceBoardRoute,
   sessionRoute,
   settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute]),
 ]);

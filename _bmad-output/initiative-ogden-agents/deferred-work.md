@@ -374,3 +374,12 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-bmad-optional-per-project/story-an-app-wide-default-for-new-projects-simple-to-start-plan.md`
   summary: `onboarding.ts` logs an unreadable (not corrupt) `onboarding.json` on every read, the gap 10.4 closed for `preferences.ts` (review F3: once per run per persisting failure). Dedupe it the same way in a sweep.
   evidence: 10.4 Review Triage Log row 3; `packages/core/src/onboarding.ts` `read()`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-tracer-bullet-one-planning-session-and-a-bare-board-in-a-rep-plan.md`
+  summary: User decision for 4.2/4.8: `tickets.py status` (bundled) executes the project's own `_bmad/scripts/config_utils.py` on every Board read; accept this as the project-trust model (as Claude Code runs the repo's hooks), or carry a fork patch that reads the BMad config without executing repo code.
+  evidence: tickets.py `central_config` (lines 669-680) imports and execs the repo's config_utils.py; 4.1 review S2.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-tracer-bullet-one-planning-session-and-a-bare-board-in-a-rep-plan.md`
+  summary: 4.2's uv runner should track in-flight script children and kill them on server stop (and on Board turned off), not only on its 30 s timeout.
+  evidence: script-runner spawns detached children with no registry; 4.1 review S8.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-tracer-bullet-one-planning-session-and-a-bare-board-in-a-rep-plan.md`
+  summary: The catalog (4.4/4.5) should leave out bmod module records (`bmod-method`, `bmod-core-tools`, "Never invoke this skill") and avoid skill names that collide with agent built-in commands, from fork metadata rather than hard-coded names; the live check settles whether skills only under `.agents/skills` are runnable by Claude Code.
+  evidence: 4.1 tracer lists every SKILL.md with a matching name; review Q2 and S9.

@@ -162,6 +162,12 @@ export interface AgentPort {
    */
   listAuthMethods(input: { env: Readonly<Record<string, string>> }): Promise<AgentAuthMethod[]>;
   /**
+   * The message that makes this agent run the installed skill `skill` (a
+   * catalog name; story 4.1), sent as a planning session's first message.
+   * Core names no skill and no agent's command syntax (AD-12): this does.
+   */
+  skillInvocation(skill: string): string;
+  /**
    * The agent's own CLI on its sessions (CAP-5, story 3.2), for an agent whose
    * sessions its CLI can resume; absent otherwise (the terminal is then
    * `agent_unsupported`).

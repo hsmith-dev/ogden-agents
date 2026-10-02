@@ -7,8 +7,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { request, type IncomingHttpHeaders } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createMemoryAgentSetup, createMemoryAppShortcut, createMemorySecretStore } from '@ogden-agents/adapters';
-import { createAgentSetup, createChat, createNewProjectDefaults, createOnboarding, type Core } from '@ogden-agents/core';
+import { createMemoryAgentSetup, createMemoryAppShortcut, createMemoryBmadCatalog, createMemorySecretStore } from '@ogden-agents/adapters';
+import { createAgentSetup, createBoard, createChat, createNewProjectDefaults, createOnboarding, createPlanning, type AgentPort, type Core } from '@ogden-agents/core';
 import { API_ROUTES, webSocketProtocols } from '@ogden-agents/shared';
 import type { Hono } from 'hono';
 import { afterEach } from 'vitest';
@@ -221,7 +221,7 @@ export function signIn(server: { url: string; launchUrl: string }): Promise<Sign
  * registered (the gate's route list, story 2.3; 10.6's guard-coverage
  * test): control, toolchain, a chat whose agent always refuses, core's
  * permissions and BMad pieces, the memory agent setup and shortcut,
- * onboarding and tab tokens. `extra` adds or overrides options, such as
+ * onboarding, tab tokens, and Plan and Board on stubs (story 4.1). `extra` adds or overrides options, such as
  * `bmadProbe: true`. Nothing is listened on and no agent ever runs.
  */
 export function fullTestApp(core: Core, extra: Partial<AppOptions> = {}): Hono {
@@ -238,17 +238,14 @@ export function fullTestApp(core: Core, extra: Partial<AppOptions> = {}): Hono {
     installUv: async () => ({ started: false, uv: { state: 'missing' as const } }),
     settled: async () => {},
   };
-  const chat = createChat({
-    dataDir: tempDataDir(),
-    entities: core.entities,
-    sessionEvents: core.sessionEvents,
-    agent: {
-      displayName: 'Test Agent',
-      startSession: () => Promise.reject(new Error('no agent in this test')),
-      reopenSession: () => Promise.reject(new Error('no agent in this test')),
-      listAuthMethods: () => Promise.reject(new Error('no agent in this test')),
-    },
-  });
+  const agent: AgentPort = {
+    displayName: 'Test Agent',
+    skillInvocation: (skill) => `/${skill}`,
+    startSession: () => Promise.reject(new Error('no agent in this test')),
+    reopenSession: () => Promise.reject(new Error('no agent in this test')),
+    listAuthMethods: () => Promise.reject(new Error('no agent in this test')),
+  };
+  const chat = createChat({ dataDir: tempDataDir(), entities: core.entities, sessionEvents: core.sessionEvents, agent });
   return createApp({
     events: core.events,
     webRoot: tinyWebRoot(),
@@ -260,6 +257,8 @@ export function fullTestApp(core: Core, extra: Partial<AppOptions> = {}): Hono {
     permissions: core.permissions,
     bmad: core.bmad,
     bmadDetection: core.bmadDetection,
+    planning: createPlanning({ bmad: core.bmad, entities: core.entities, catalog: createMemoryBmadCatalog(), chat, agent }),
+    board: createBoard({ bmad: core.bmad, entities: core.entities, tickets: { status: async () => ({ tickets: [], problems: [] }) } }),
     agentSetup: createAgentSetup(core.events, [createMemoryAgentSetup()]),
     onboarding: createOnboarding({ dataDir: tempDataDir(), hasProjects: () => false }),
     newProjectDefaults: createNewProjectDefaults({ dataDir: tempDataDir(), bmad: core.bmad }),

@@ -62,3 +62,26 @@ export function agentEnvironment(
   }
   return env;
 }
+
+/**
+ * What `uv` and BMad Method's Python scripts add to {@link agentEnvironment}'s
+ * allowlist (story 4.1): where uv keeps its cache and Pythons on each OS.
+ */
+const UV_ENV_ALLOWED = ['XDG_CACHE_HOME', 'XDG_DATA_HOME', 'LOCALAPPDATA', 'APPDATA'];
+
+/**
+ * The environment `uv` runs BMad Method's scripts with (story 4.1): the
+ * agents' allowlist plus uv's own folders, never an agent key, and
+ * `PYTHONUTF8=1` so the scripts read and print UTF-8 on every OS. Never logged.
+ */
+export function uvEnvironment(
+  source: Readonly<Record<string, string | undefined>> = process.env,
+  platform: NodeJS.Platform = process.platform,
+): Record<string, string> {
+  const env = withoutAgentKeys(agentEnvironment(source, platform));
+  const fold = (name: string) => (platform === 'win32' ? name.toUpperCase() : name);
+  const allowed = new Set(UV_ENV_ALLOWED.map(fold));
+  for (const [name, value] of Object.entries(source)) if (value !== undefined && allowed.has(fold(name))) env[name] = value;
+  env.PYTHONUTF8 = '1';
+  return env;
+}

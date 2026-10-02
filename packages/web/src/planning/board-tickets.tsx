@@ -1,0 +1,74 @@
+import { BOARD_EMPTY_TITLE, BOARD_LOADING_TEXT, BOARD_PROBLEMS_TITLE, BOARD_TICKETS_LABEL } from '@ogden-agents/shared';
+import { Badge } from '@/ui/badge';
+import { Notice } from '@/ui/notice';
+import { EmptyState } from '@/ui/page';
+import { Row, RowList, RowMeta } from '@/ui/row-list';
+import { Skeleton } from '@/ui/skeleton';
+import { Text } from '@/ui/typography';
+import { useTickets } from './planning-api';
+
+/**
+ * The Board page's body (story 4.1, bare): the project's tickets as a flat
+ * list in build order, each with its ref, title and state (and its status
+ * when a build has set one), as BMad Method reports them (AD-8, AD-10: the
+ * UI works out nothing from them). What couldn't be read is listed under a
+ * notice. Loading, error and empty states.
+ */
+export function BoardTickets({ wsId }: { wsId: string }) {
+  const tickets = useTickets(wsId);
+  if (tickets.error !== null) {
+    return (
+      <Text variant="caption" role="alert" data-testid="board-error">
+        {tickets.error.message}
+      </Text>
+    );
+  }
+  if (tickets.data === undefined) {
+    return (
+      <div className="flex flex-col gap-2" data-testid="board-loading">
+        <Skeleton />
+        <Skeleton />
+        <span role="status" className="sr-only">
+          {BOARD_LOADING_TEXT}
+        </span>
+      </div>
+    );
+  }
+  const { tickets: rows, problems } = tickets.data;
+  return (
+    <div className="flex max-w-(--space-chat-column) flex-col gap-4">
+      {problems.length === 0 ? null : (
+        <Notice data-testid="board-problems">
+          <span className="flex flex-col gap-1">
+            <span>{BOARD_PROBLEMS_TITLE}</span>
+            {problems.map((problem) => (
+              <span key={problem} className="text-caption text-muted-foreground">
+                {problem}
+              </span>
+            ))}
+          </span>
+        </Notice>
+      )}
+      {rows.length === 0 ? (
+        <EmptyState title={BOARD_EMPTY_TITLE} data-testid="board-empty" />
+      ) : (
+        <RowList aria-label={BOARD_TICKETS_LABEL} data-testid="ticket-list">
+          {rows.map((ticket) => (
+            <li key={ticket.ref}>
+              <Row asChild>
+                <div data-testid="ticket-row" data-ref={ticket.ref}>
+                  <span className="shrink-0 tabular-nums text-muted-foreground">{ticket.ref}</span>
+                  <span className="min-w-0 flex-1 truncate" title={ticket.title}>
+                    {ticket.title}
+                  </span>
+                  <Badge data-testid="ticket-state">{ticket.state}</Badge>
+                  {ticket.status === null || ticket.status === '' ? null : <RowMeta data-testid="ticket-status">{ticket.status}</RowMeta>}
+                </div>
+              </Row>
+            </li>
+          ))}
+        </RowList>
+      )}
+    </div>
+  );
+}

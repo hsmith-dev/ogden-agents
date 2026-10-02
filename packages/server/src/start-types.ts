@@ -3,7 +3,7 @@
  * `start.ts`, story 3.9).
  */
 import type { ClaudeCodeSetupOptions, PtyLoader } from '@ogden-agents/adapters';
-import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, Core, SecretStorePort, ToolchainPort } from '@ogden-agents/core';
+import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, Core, SecretStorePort, TicketStorePort, ToolchainPort } from '@ogden-agents/core';
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
 import type { Logger } from './log.js';
@@ -113,10 +113,22 @@ export interface StartOptions {
    */
   availableBmadPieces?: readonly BmadPiece[];
   /**
-   * Override the read-only BMad detection (story 10.3). Default: the
-   * `bmad-catalog` adapter. Ignored when {@link core} is given.
+   * Override the read-only BMad detection (story 10.3) and the catalog's
+   * skills (story 4.1). Default: the `bmad-catalog` adapter. With {@link core}
+   * given, only the skills come from it.
    */
   bmadCatalog?: BmadCatalogPort;
+  /**
+   * Override the project's tickets (story 4.1; tests: a stub). Default: the
+   * `tickets-v7` adapter, running the bundled `tickets.py` with `uv`.
+   */
+  ticketStore?: TicketStorePort;
+  /**
+   * Variables added to the environment `uv` runs BMad Method's scripts with,
+   * on top of `uvEnvironment` (tests only: a temp `UV_CACHE_DIR`,
+   * `UV_PYTHON_DOWNLOADS=never`). The launcher never sets it.
+   */
+  extraUvEnv?: Readonly<Record<string, string>>;
   /**
    * Called once the server has stopped by itself (Quit, or a restart the
    * launcher asked for) and everything is closed. A server process exits here.

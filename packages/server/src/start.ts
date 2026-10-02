@@ -13,18 +13,23 @@ import {
   createMemorySecretStore,
   createOsAppShortcut,
   createPtyTerminalPort,
+  createTicketsV7,
+  createUvScriptRunner,
   createUvToolchain,
   locateClaudeAdapter,
   resolveClaudeAgentAcp,
+  ScriptRunError,
 } from '@ogden-agents/adapters';
 import {
   AgentSetupError,
   CoreError,
   createAgentSetup,
+  createBoard,
   createChat,
   createDataDir,
   createNewProjectDefaults,
   createOnboarding,
+  createPlanning,
   clampCheckInDelay,
   RESTARTED_REASON,
   createToolchain,
@@ -34,6 +39,7 @@ import {
   type AgentPort,
   type AgentTerminalResume,
   type AppShortcutPort,
+  type BmadCatalogPort,
   type Core,
 } from '@ogden-agents/core';
 import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM, ServerMessage } from '@ogden-agents/shared';
@@ -51,11 +57,11 @@ import { shortcutErrorCode } from './shortcut-routes.js';
 import { createTerminalAvailability } from './terminal-availability.js';
 import { resolveTestHooks, testHooksLogFields, type TestHooks } from './test-hooks.js';
 import { VERSION } from './version.js';
-import { agentEnvironment, agentKeysOf, SUBSCRIPTION_MAX_AGE_MS, withoutAgentKeys } from './start-env.js';
+import { agentEnvironment, agentKeysOf, SUBSCRIPTION_MAX_AGE_MS, uvEnvironment, withoutAgentKeys } from './start-env.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
 
 // Moved out in story 3.9; still exported from here for the callers that import them from `start.ts`.
-export { AGENT_ENV_KEYS, agentEnvironment, agentKeysOf, CHECK_IN_MS_ENV, checkInDelayFromEnv, SECRET_STORE_ENV, SUBSCRIPTION_MAX_AGE_MS, testSecretStore, withoutAgentKeys } from './start-env.js';
+export { AGENT_ENV_KEYS, agentEnvironment, agentKeysOf, CHECK_IN_MS_ENV, checkInDelayFromEnv, SECRET_STORE_ENV, SUBSCRIPTION_MAX_AGE_MS, testSecretStore, uvEnvironment, withoutAgentKeys } from './start-env.js';
 export type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
 
 /** The only interface the server ever binds (AD-15). */
@@ -80,6 +86,23 @@ const WEB_ROOT_CANDIDATES = [
 
 function defaultWebRoot(): string {
   return WEB_ROOT_CANDIDATES.find((dir) => existsSync(dir)) ?? WEB_ROOT_CANDIDATES[1];
+}
+
+/**
+ * Where the bundled forks are (AD-13), in order, as {@link WEB_ROOT_CANDIDATES}:
+ * - `../vendor` beside the root bundle (`dist/server.js` next to the package's `vendor/`);
+ * - the workspace's `vendor/`, resolved from `packages/server/src/start.ts`
+ *   or `packages/server/dist/server.js`.
+ */
+const VENDOR_ROOT_CANDIDATES = [fileURLToPath(new URL('../vendor', import.meta.url)), fileURLToPath(new URL('../../../vendor', import.meta.url))] as const;
+
+/** The bundled BMad Method fork's `tickets.py`, below the vendor root (story 4.1). */
+const TICKETS_SCRIPT = ['bmad-method', 'skills', 'bmad-ticket', 'scripts', 'tickets.py'] as const;
+
+/** The bundled `tickets.py`: the first vendor root that has it, else the workspace's path (a run then fails as unavailable). */
+export function bundledTicketsScript(): string {
+  const candidates = VENDOR_ROOT_CANDIDATES.map((root) => join(root, ...TICKETS_SCRIPT));
+  return candidates.find((file) => existsSync(file)) ?? candidates[1]!;
 }
 
 /**
@@ -148,18 +171,19 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
   const hooks = resolveTestHooks(process.env, dataDir, { ...options, ownsCore });
   // What this install ships, plus a test's own (story 10.2): the option, and the environment hook.
   const availableBmadPieces = [...new Set([...SHIPPED_BMAD_PIECES, ...(options.availableBmadPieces ?? []), ...hooks.bmadAvailable])];
+  // The read-only detection of a repo's `_bmad/` (story 10.3) and its installed skills (story 4.1); a test may pass its own.
+  const bmadCatalog = options.bmadCatalog ?? createBmadCatalog();
   const core =
     options.core ??
     openCore(dataDir, {
       availableBmadPieces,
-      // The read-only detection of a repo's `_bmad/` (story 10.3); a test may pass its own.
-      bmadCatalog: options.bmadCatalog ?? createBmadCatalog(),
+      bmadCatalog,
       onListenerError: (error) => log.error('event subscriber failed', { reason: String(error) }),
       // The request is declined all the same; the reason names no command.
       onPermissionError: (error) => log.warn('a permission request was declined after a failure', { reason: String(error) }),
     });
   try {
-    return await listenAndAnnounce({ options, dataDir, log, core, ownsCore, lock, hooks });
+    return await listenAndAnnounce({ options, dataDir, log, core, ownsCore, lock, hooks, bmadCatalog });
   } catch (error) {
     if (ownsCore) core.close();
     throw error;
@@ -174,6 +198,7 @@ async function listenAndAnnounce({
   ownsCore,
   lock,
   hooks,
+  bmadCatalog,
 }: {
   options: StartOptions;
   dataDir: string;
@@ -183,6 +208,8 @@ async function listenAndAnnounce({
   lock: InstanceLock;
   /** The environment's test hooks in use (`resolveTestHooks`). */
   hooks: TestHooks;
+  /** The catalog the Plan page reads (story 4.1). */
+  bmadCatalog: BmadCatalogPort;
 }): Promise<RunningServer> {
   const requested = options.port ?? DEFAULT_PORT;
   const now = options.now ?? Date.now;
@@ -226,11 +253,12 @@ async function listenAndAnnounce({
     launcherToken: { verify: (given) => launcherToken?.verify(given) ?? false },
     log,
   });
-  const toolchain = createToolchain(core.events, options.toolchain ??
-      createUvToolchain({
-        dataDir,
-        onCleanupError: (error) => log.warn('could not remove uv install temp files', { reason: String(error) }),
-      }), {
+  // One uv adapter: the toolchain's status and install, and the uv BMad Method's scripts run with (story 4.1).
+  const uvToolchain = createUvToolchain({
+    dataDir,
+    onCleanupError: (error) => log.warn('could not remove uv install temp files', { reason: String(error) }),
+  });
+  const toolchain = createToolchain(core.events, options.toolchain ?? uvToolchain, {
     // The event carries the plain reason; the log also gets the target, URL and (on a mismatch) both hashes.
     onFailure: (error) => log.warn('uv install failed', { code: error.code, reason: error.message, ...error.details }),
   });
@@ -333,6 +361,7 @@ async function listenAndAnnounce({
     startSession: async (input) => agent.startSession({ ...input, env: await freshChatEnv(input.env) }),
     reopenSession: async (input) => agent.reopenSession({ ...input, env: await freshChatEnv(input.env) }),
     listAuthMethods: (input) => agent.listAuthMethods(input),
+    skillInvocation: (skill) => agent.skillInvocation(skill),
     // The terminal runs, and its transcript is read, with the chat's environment rules, the API key's included (stories 3.1, 3.2).
     ...(agent.terminalResume === undefined ? {} : { terminalResume: withChatEnv(agent.terminalResume) }),
   };
@@ -351,6 +380,24 @@ async function listenAndAnnounce({
     onInternalError: (sessionId, error) => log.error('applying an agent event failed', { sessionId, reason: String(error) }),
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
+  // Plan and Board (story 4.1): the catalog, planning sessions and the tickets, each behind core's guard (AD-22).
+  const planning = createPlanning({ bmad: core.bmad, entities: core.entities, catalog: bmadCatalog, chat, agent: chatAgent });
+  const ticketStore =
+    options.ticketStore ??
+    createTicketsV7({
+      runner: createUvScriptRunner({
+        uvCommand: async () => {
+          const file = await uvToolchain.locate();
+          return file === undefined ? undefined : { file };
+        },
+        // An allowlist, never this server's environment (AD-16).
+        env: () => ({ ...uvEnvironment(), ...options.extraUvEnv }),
+      }),
+      script: bundledTicketsScript(),
+      // Codes only: the script's own error text can name the user's paths.
+      onFailure: (error) => log.warn('tickets.py run failed', { code: error instanceof ScriptRunError ? error.code : error.reason }),
+    });
+  const board = createBoard({ bmad: core.bmad, entities: core.entities, tickets: ticketStore });
   const appShortcut =
     options.appShortcut ??
     (options.launcherEntry === undefined
@@ -383,6 +430,8 @@ async function listenAndAnnounce({
     // The test-only BMad probe route (story 10.1): a test run on a temp data folder, with its own variable set.
     bmadProbe: hooks.bmadProbe,
     bmadDetection: core.bmadDetection,
+    planning,
+    board,
     agentSetup,
     onboarding,
     newProjectDefaults,

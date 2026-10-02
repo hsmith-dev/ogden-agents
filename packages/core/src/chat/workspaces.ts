@@ -54,8 +54,8 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
       return { deletedEvents, deletedSessions, deletedRuns };
     },
 
-    createChatSession(workspaceId) {
-      return entities.createSession({ workspaceId, kind: 'chat' });
+    createChatSession(workspaceId, kind = 'chat') {
+      return entities.createSession({ workspaceId, kind });
     },
 
     getSession,

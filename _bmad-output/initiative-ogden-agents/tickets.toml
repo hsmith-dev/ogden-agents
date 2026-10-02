@@ -45,7 +45,7 @@ after = [{ epic = 1, needs = "the bundled forks and forks.lock" }, { epic = 2, n
 id = 5
 slug = "epic-unattended-builds"
 title = "One ticket builds safely, and you approve and merge it"
-covers = ["CAP-8", "CAP-9", "CAP-12"]
+covers = ["CAP-8", "CAP-9", "CAP-10", "CAP-12"]
 after = [{ epic = 1, needs = "the bundled bmad-loop fork (1.9) and the uv bootstrap (1.8)" }, { epic = 4, needs = "the board, ticket detail, TicketStorePort with mark and the live index, through its sweep (4.12); the release after 4.13" }, { epic = 10, needs = "the BMad pieces contract, requireBmadFeature, the piece route helper and piece registration (10.2), and 10.6's architecture test (5.3)" }]
 
 [[epic]]

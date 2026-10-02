@@ -224,7 +224,8 @@ graph LR
   - After a run, core runs verification before the UI may show `built`: plan status, an independent test re-run, and a non-empty diff.
   - Merging and `done` happen only through the approve action. If the merge conflicts, the run is blocked as needing a rebase. It is never force-merged.
   - Note (epic 5, 2026-10-01): `VcsPort` creates the worktree; the build runner runs in it and never creates its own, and bmad-loop's run folder also lives in the data directory. No rule changes.
-  - Note (epic 5, 2026-10-01): approve merges locally into the branch the main checkout has checked out, with a merge commit, and never pushes; it is refused while that checkout has uncommitted changes. **Update and retry** rebases the run's branch in its worktree and runs it again; there is no automatic conflict resolution in v1. No rule changes.
+  - Note (epic 5, 2026-10-01): approve merges locally into the branch the main checkout has checked out, with a merge commit, and never pushes; it is refused while that checkout has uncommitted changes outside the BMad output folder (`_bmad-output`), which do not block it, and it commits its own `done` mark together with the merge, in the merge commit (user, 2026-10-01). **Update and retry** rebases the run's branch in its worktree and runs it again; there is no automatic conflict resolution in v1. No rule changes.
+  - Note (epic 5, 2026-10-01): verification, including the independent test re-run in the run's worktree, ships in epic 5 before approve is offered, so this rule holds from its release; epic 11 adds richer reporting (user). No rule changes.
   - Note (epic 5, 2026-10-01): "attended", the third choice when no sandbox exists, is not an unattended run: every tool call goes through permission cards. Windows defaults to it, and Docker Desktop is optional there. The maximum run time defaults to 45 minutes, editable in settings. No rule changes.
 
 ### AD-18 — One design system [ADOPTED]

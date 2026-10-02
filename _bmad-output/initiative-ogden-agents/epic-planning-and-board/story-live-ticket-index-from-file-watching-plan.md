@@ -87,6 +87,7 @@ context:
 - Shutdown begins the watcher's close, closes the script runner (killing any run a watch waits on), then awaits the watcher, so no run blocks or outlives stop.
 - `errorCode` is now exported from `@ogden-agents/adapters` for the server's logs (codes only).
 - Probe removed (`scripts/watch-probe.mjs`, `.github/workflows/watch-probe.yml`).
+- CI fix (PR #62, Windows): an open `fs.watch` handle on a folder makes Windows refuse (EPERM) to rename any folder above it, so per-folder watchers blocked renaming an epic folder with subfolders (found by the parent-link-swap test's `renameSync`). On Windows the watch now arms one recursive watcher on the root (`RECURSIVE_BY_DEFAULT`); worktree events there only cause a scan that changes nothing. Regression test: renaming folders with subfolders under a watched root with the default mode; the link-swap test runs while polling (no handle open).
 
 ## Plan Change Log
 

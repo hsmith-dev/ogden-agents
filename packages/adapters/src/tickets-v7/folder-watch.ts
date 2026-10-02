@@ -10,7 +10,8 @@
  * events fire mid-write. So:
  *
  * - One non-recursive `fs.watch` per folder, which this module arms and
- *   closes itself, each with an `error` handler. Filenames are only hints
+ *   closes itself, each with an `error` handler; on Windows one recursive
+ *   watcher on the root instead (see {@link RECURSIVE_BY_DEFAULT}). Filenames are only hints
  *   (a named subfolder is re-armed); the truth is a stat fingerprint.
  * - A scan (`lstat` only, never following a link) builds the fingerprint
  *   (each file's path, size, mtime, ctime and inode) and the folder set. It
@@ -83,10 +84,25 @@ export interface DirWatcher {
   on(event: 'error', listener: (error: Error) => void): unknown;
 }
 
-/** Watches one folder, non-recursively (default: `fs.watch`); tests inject one to count open watchers. */
-export type WatchDir = (dir: string, listener: (eventType: string, filename: string | Buffer | null) => void) => DirWatcher;
+/**
+ * Watches one folder (default: `fs.watch`), non-recursively, or with
+ * `recursive` its whole tree; tests inject one to count open watchers.
+ */
+export type WatchDir = (dir: string, listener: (eventType: string, filename: string | Buffer | null) => void, recursive?: boolean) => DirWatcher;
 
-export const defaultWatchDir: WatchDir = (dir, listener) => fsWatch(dir, { persistent: false }, listener);
+export const defaultWatchDir: WatchDir = (dir, listener, recursive = false) => fsWatch(dir, { persistent: false, recursive }, listener);
+
+/**
+ * Whether one recursive watcher on the root replaces the per-folder ones:
+ * on Windows, where an open handle on a folder makes the OS refuse to rename
+ * or move any folder above it (EPERM), so per-folder watchers would stop the
+ * user, git or an agent renaming an epic folder that has subfolders. One
+ * handle on the root (ReadDirectoryChangesW over the tree) blocks only the
+ * root's own parents, which every watcher of the root does. The probe showed
+ * Windows' recursive watch keeps up with recreated subfolders and follows no
+ * link out; its `null`-named bursts are only hints here anyway.
+ */
+export const RECURSIVE_BY_DEFAULT = process.platform === 'win32';
 
 export interface FolderWatchState {
   mode: 'watch' | 'poll';
@@ -119,6 +135,8 @@ export interface FolderWatchOptions {
   watchDir?: WatchDir | undefined;
   /** Told, with a code, when the watch falls back to polling for good. */
   onFallback?: ((reason: string) => void) | undefined;
+  /** One recursive watcher on the root instead of one per folder (default {@link RECURSIVE_BY_DEFAULT}). */
+  recursive?: boolean | undefined;
 }
 
 /** The fingerprint of a missing root. */
@@ -205,7 +223,7 @@ async function scanTree(root: string, maxEntries: number): Promise<ScanResult> {
 }
 
 /** Starts watching `root`; resolves once the first scan has armed it (or chosen to poll). */
-export async function startFolderWatch({ root, onSettled, timing = {}, watchDir = defaultWatchDir, onFallback }: FolderWatchOptions): Promise<FolderWatch> {
+export async function startFolderWatch({ root, onSettled, timing = {}, watchDir = defaultWatchDir, onFallback, recursive = RECURSIVE_BY_DEFAULT }: FolderWatchOptions): Promise<FolderWatch> {
   const config: FolderWatchTiming = { ...DEFAULT_FOLDER_WATCH_TIMING, ...timing };
   interface Armed {
     identity: string;
@@ -319,7 +337,10 @@ export async function startFolderWatch({ root, onSettled, timing = {}, watchDir 
   };
 
   /** Closes what is gone or changed and arms what is new; false when it had to fall back or a folder could not be armed. */
-  const reconcile = (dirs: Map<string, string>): boolean => {
+  const reconcile = (scanned: Map<string, string>): boolean => {
+    // Recursive: the root's one watcher covers the tree (a worktree's events only cause a scan that changes nothing).
+    const rootIdentity = scanned.get(root);
+    const dirs = recursive && rootIdentity !== undefined ? new Map([[root, rootIdentity]]) : scanned;
     let clean = true;
     for (const [dir, armed] of [...watchers]) {
       if (dirs.get(dir) !== armed.identity || hinted.has(dir)) closeWatcher(dir);
@@ -329,9 +350,13 @@ export async function startFolderWatch({ root, onSettled, timing = {}, watchDir 
       if (watchers.has(dir)) continue;
       let armed: Armed | undefined;
       try {
-        const watcher = watchDir(dir, (_eventType, filename) => {
-          if (armed !== undefined) onRaw(dir, armed, filename);
-        });
+        const watcher = watchDir(
+          dir,
+          (_eventType, filename) => {
+            if (armed !== undefined) onRaw(dir, armed, filename);
+          },
+          recursive,
+        );
         armed = { identity, watcher, events: 0 };
         const self = armed;
         watcher.on('error', (error) => onWatcherError(dir, self, error));

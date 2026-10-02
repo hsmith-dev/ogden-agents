@@ -477,8 +477,8 @@ describe.skipIf(uvMissing)('the live ticket index through real uv and the verifi
     };
     // fs.watch, counting the folder watchers open now.
     let openWatchers = 0;
-    const watchDir: WatchDir = (dir, listener) => {
-      const watcher = defaultWatchDir(dir, listener);
+    const watchDir: WatchDir = (dir, listener, recursive) => {
+      const watcher = defaultWatchDir(dir, listener, recursive);
       openWatchers++;
       let closed = false;
       return {

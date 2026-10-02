@@ -46,8 +46,8 @@ function countingWatchDir(inner: WatchDir = defaultWatchDir) {
   const live = new Map<string, Array<(eventType: string, filename: string | null) => void>>();
   let openCount = 0;
   let opened = 0;
-  const watchDir: WatchDir = (dir, listener) => {
-    const watcher = inner(dir, listener);
+  const watchDir: WatchDir = (dir, listener, recursive) => {
+    const watcher = inner(dir, listener, recursive);
     openCount++;
     opened++;
     const listeners = live.get(dir) ?? [];
@@ -72,9 +72,17 @@ function countingWatchDir(inner: WatchDir = defaultWatchDir) {
   return { watchDir, open: () => openCount, opened: () => opened, listeners: (dir: string) => live.get(dir) ?? [] };
 }
 
-async function watchOut(root: string, options: { timing?: Partial<FolderWatchTiming>; watchDir?: WatchDir; onFallback?: (reason: string) => void } = {}) {
+/** Per-folder watchers unless `recursive` (the Windows default is covered by its own test). */
+async function watchOut(root: string, options: { timing?: Partial<FolderWatchTiming>; watchDir?: WatchDir; onFallback?: (reason: string) => void; recursive?: boolean } = {}) {
   let settled = 0;
-  const watch = await startFolderWatch({ root: join(root, 'out'), onSettled: () => settled++, timing: { ...TIMING, ...options.timing }, watchDir: options.watchDir, onFallback: options.onFallback });
+  const watch = await startFolderWatch({
+    root: join(root, 'out'),
+    onSettled: () => settled++,
+    timing: { ...TIMING, ...options.timing },
+    watchDir: options.watchDir,
+    onFallback: options.onFallback,
+    recursive: options.recursive ?? false,
+  });
   open.push(watch);
   return { watch, settled: () => settled };
 }
@@ -167,12 +175,12 @@ describe('folder-watch (story 4.8)', () => {
   it('a folder that cannot be armed for another reason (removed meanwhile) rescans instead of polling for good', async () => {
     const root = tempTree();
     let failNext = true;
-    const flaky: WatchDir = (dir, listener) => {
+    const flaky: WatchDir = (dir, listener, recursive) => {
       if (dir.endsWith('epic-a') && failNext) {
         failNext = false;
         throw Object.assign(new Error('gone'), { code: 'ENOENT' });
       }
-      return defaultWatchDir(dir, listener);
+      return defaultWatchDir(dir, listener, recursive);
     };
     const reasons: string[] = [];
     const { watch, settled } = await watchOut(root, { watchDir: flaky, onFallback: (reason) => reasons.push(reason) });
@@ -184,35 +192,84 @@ describe('folder-watch (story 4.8)', () => {
     await waitFor(() => settled() === 1, 'the write');
   });
 
-  it('a root that appears later, or that a parent link swap moves elsewhere, is missing until it is itself again', async () => {
+  it('a root that appears later is polled until it is there, then watched', async () => {
     const parent = tempTree();
     const nested = join(parent, 'out', 'later', 'root');
     let settled = 0;
-    const watch = await startFolderWatch({ root: nested, onSettled: () => settled++, timing: TIMING });
+    const watch = await startFolderWatch({ root: nested, onSettled: () => settled++, timing: TIMING, recursive: false });
     open.push(watch);
     expect(watch.state()).toMatchObject({ mode: 'poll', watchers: 0 });
     mkdirSync(nested, { recursive: true });
     writeFileSync(join(nested, 'plan.md'), 'x\n');
     await waitFor(() => settled === 1 && watch.state().mode === 'watch', 'the appeared root');
+  });
 
-    // Swap `later` for a link to a look-alike tree elsewhere: the root no longer resolves to itself.
+  it('a parent swapped for a link to a look-alike tree is missing: a write in the link target never settles', async () => {
+    // Polling (no folder watcher open), because Windows refuses to rename a folder above an open watch handle.
+    const parent = tempTree();
+    const nested = join(parent, 'out', 'later', 'root');
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(join(nested, 'plan.md'), 'x\n');
+    let settled = 0;
+    const watch = await startFolderWatch({ root: nested, onSettled: () => settled++, timing: { ...TIMING, maxDirs: 0 }, recursive: false });
+    open.push(watch);
+    expect(watch.state()).toMatchObject({ mode: 'poll', watchers: 0 });
     const elsewhere = join(parent, 'elsewhere');
     mkdirSync(join(elsewhere, 'root'), { recursive: true });
     writeFileSync(join(elsewhere, 'root', 'plan.md'), 'x\n');
     renameSync(join(parent, 'out', 'later'), join(parent, 'moved'));
     symlinkSync(elsewhere, join(parent, 'out', 'later'), process.platform === 'win32' ? 'junction' : 'dir');
-    await waitFor(() => watch.state().mode === 'poll' && watch.state().watchers === 0, 'the root treated as missing');
-    const before = settled;
+    // The swap itself reads as the root going missing (one settle), then nothing from the target.
+    await waitFor(() => settled === 1, 'the root treated as missing');
     writeFileSync(join(elsewhere, 'root', 'plan.md'), 'changed\n');
-    await sleep(400);
-    expect(settled).toBe(before);
+    writeFileSync(join(elsewhere, 'root', 'new.md'), 'new\n');
+    await sleep(500);
+    expect(settled).toBe(1);
+  });
+
+  it('with the default mode, folders with subfolders can be renamed while watched, and the rename settles (Windows: one recursive watcher)', async () => {
+    const root = tempTree();
+    mkdirSync(join(root, 'out', 'epic-a', 'sub', 'deeper'), { recursive: true });
+    writeFileSync(join(root, 'out', 'epic-a', 'sub', 'deeper', 'plan.md'), 'x\n');
+    let settled = 0;
+    const watch = await startFolderWatch({ root: join(root, 'out'), onSettled: () => settled++, timing: TIMING });
+    open.push(watch);
+    await sleep(250);
+    expect(watch.state().mode).toBe('watch');
+    // Per-folder handles on Windows made this EPERM (story 4.8 CI): the user, git or an agent couldn't rename an epic.
+    renameSync(join(root, 'out', 'epic-a'), join(root, 'out', 'epic-b'));
+    renameSync(join(root, 'out', 'epic-b', 'sub'), join(root, 'out', 'epic-b', 'sub2'));
+    await waitFor(() => settled >= 1, 'the renamed folders');
+    const before = settled;
+    writeFileSync(join(root, 'out', 'epic-b', 'sub2', 'deeper', 'plan.md'), 'changed\n');
+    await waitFor(() => settled > before, 'a write under the renamed folder');
+    rmSync(join(root, 'out', 'epic-b'), { recursive: true });
+    await waitFor(() => settled > before + 1, 'the removed folder');
+  });
+
+  it('recursive mode: a write settles, a worktree write does not, and close leaves nothing open', async () => {
+    const root = tempTree();
+    mkdirSync(join(root, 'out', 'wt', 'deep'), { recursive: true });
+    writeFileSync(join(root, 'out', 'wt', '.git'), 'gitdir: elsewhere\n');
+    const counting = countingWatchDir();
+    const { watch, settled } = await watchOut(root, { watchDir: counting.watchDir, recursive: true });
+    expect(watch.state()).toMatchObject({ mode: 'watch', watchers: 1 });
+    await sleep(250);
+    writeFileSync(join(root, 'out', 'wt', 'deep', 'x.md'), 'x\n');
+    await sleep(500);
+    expect(settled()).toBe(0);
+    writeFileSync(join(root, 'out', 'epic-a', 'plan.md'), 'status: in-progress\n');
+    await waitFor(() => settled() === 1, 'the plan write');
+    watch.close();
+    expect(watch.state()).toMatchObject({ watchers: 0, timers: 0, closed: true });
+    expect(counting.open()).toBe(0);
   });
 
   it('a watcher error like ENOSPC falls back to polling for good', async () => {
     const root = tempTree();
     const handlers: Array<(error: Error) => void> = [];
-    const erroring: WatchDir = (dir, listener) => {
-      const watcher = defaultWatchDir(dir, listener);
+    const erroring: WatchDir = (dir, listener, recursive) => {
+      const watcher = defaultWatchDir(dir, listener, recursive);
       return {
         close: () => watcher.close(),
         on: (event, handler) => {

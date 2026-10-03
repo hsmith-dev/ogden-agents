@@ -1,0 +1,31 @@
+# Epic 12 breakdown. Table order is the build order; ids never change once written.
+# Only the two spikes are here (user, 2026-10-02): the rest of the inception waits until after epic 6, and the proposed outline in the epic's Notes stays a proposal until then.
+# The epic's Requirements are written at inception, so the spikes cover the spec capabilities in the epic's `covers` directly.
+# Each spike ends with the user's go or no-go for that agent. A no-go agent moves back to epic 8 (v2); the other agent is unaffected.
+# Neither spike signs in or uses a secret; live checks with the developer's own account come after, in a scratch repo, never Ogden Agents's own repo.
+
+[[entry]]
+id = 1
+type = "spike"
+title = "Can Ogden drive Codex over ACP on all three OSes?"
+description = "Adds a temporary CI job on Windows, Linux and macOS that installs the registry's pinned codex-acp adapter (with the Codex CLI it bundles) into a temp data folder with npm ci from a pinned lock, checks its integrity, starts it over stdio with an allowlisted environment and an empty home, and records: initialize's capabilities and auth methods, session/new without auth, list, load and resume, the session modes and how they map to Ask, Auto and Skip all, the permission option kinds it sends (from its source), terminal and MCP support, which skill folders it reads, startup time, install size, stopping the process tree, and Windows behaviour including the sandbox; it also re-checks OpenAI's terms on third-party clients; the hitl step is the user reading the results and deciding go or no-go."
+verify = "The probe's logs on all three OSes answer each question, the findings and a go or no-go recommendation are written into the plan with proposed agent-matrix.md rows, the terms re-check is recorded, the user's live checks are listed, the user's go or no-go is recorded as a dated Decision in the epic's Notes, and the temporary job is removed."
+covers = ["CAP-15", "CAP-3", "CAP-5", "CAP-16"]
+after = []
+hitl = true
+risk = "high"
+unknown = "Whether ChatGPT sign-in finishes without a terminal on every OS, whether Codex's Windows sandbox is still experimental, and whether OpenAI's terms allow a third-party local UI to use a ChatGPT subscription."
+references = ["https://github.com/agentclientprotocol/registry/blob/main/codex-acp/agent.json", "https://github.com/agentclientprotocol/codex-acp", "https://developers.openai.com/codex/windows"]
+
+[[entry]]
+id = 2
+type = "spike"
+title = "Can Ogden drive Grok over ACP on all three OSes?"
+description = "Adds a temporary CI job on Windows, Linux and macOS that installs the registry's pinned Grok Build CLI (@xai-official/grok) into a temp data folder with npm ci from a pinned lock, checks its integrity and the platform binary's SHA-256, starts `grok agent stdio` with an allowlisted environment and an empty GROK_HOME, and records: initialize's capabilities and auth methods, session/new without auth, whether an API key can be given over ACP, list, load and resume, how its permission modes map to Ask, Auto and Skip all, the permission option kinds it sends, terminal and MCP support, which skill folders it reads (.claude/skills included), startup time, install size, stopping the process tree, self-update, and Windows behaviour; it also re-checks xAI's terms on third-party clients; the hitl step is the user reading the results and deciding go or no-go."
+verify = "The probe's logs on all three OSes answer each question, the findings and a go or no-go recommendation are written into the plan with proposed agent-matrix.md rows, the API key finding is stated, the terms re-check is recorded, the user's live checks are listed, the user's go or no-go is recorded as a dated Decision in the epic's Notes, and the temporary job is removed."
+covers = ["CAP-15", "CAP-3", "CAP-5", "CAP-16"]
+after = []
+hitl = true
+risk = "high"
+unknown = "Whether Sign in with Grok finishes without a terminal on every OS, how an API key reaches the agent over ACP (only grok.com is advertised), and whether xAI's terms allow a third-party local UI to use a Grok subscription."
+references = ["https://github.com/agentclientprotocol/registry/blob/main/grok-build/agent.json", "https://docs.x.ai/build/cli/headless-scripting.md", "https://docs.x.ai/build/features/permissions.md", "https://x.ai/legal/terms-of-service"]

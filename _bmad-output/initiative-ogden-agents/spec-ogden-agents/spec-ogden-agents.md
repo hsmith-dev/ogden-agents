@@ -83,7 +83,7 @@ CAP-11 (cost caps) is retired and its number is not reused.
 - It runs natively on macOS, Windows, and Linux, and needs no Docker to install or chat. It binds to `127.0.0.1` with a per-install access token and WebSocket origin checks, because the terminal is effectively a remote shell.
 - No standard flow may require the CLI. The CLI is reachable only through the advanced toggle.
 - It is a single Node process. Both frontend and backend are new builds, and no Ogden code is carried over.
-- Reuse BMAD before building: bmad-loop for dispatch and agent profiles, `tickets.py` for all ticket writes, BMAD's setup scripts for installing into a project.
+- Reuse BMAD before building: `bmad-build-auto` in an Ogden-managed ACP session for builds (bmad-loop only for agents without ACP, not in v1), `tickets.py` for all ticket writes, BMAD's setup scripts for installing into a project.
 - The BMAD v7 files in the repo are the source of truth for ticket and plan state. The database holds only workspaces, sessions, runs and events, and ticket references.
 - Only one side drives a session at a time. While the terminal drives, the chat view is read-only.
 - Guardrails are enforced in code, not in prompts. Ogden commit `b5af7c3` showed that prompted rules get skipped.

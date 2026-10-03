@@ -53,6 +53,7 @@ graph LR
   - Adding an agent or sandbox means adding an adapter, never a change to core.
   - `packages/web` never imports `core`, `adapters` or `server`.
   - Note (story 2.3, 2026-09-30): two more core ports join the list: `AgentSetupPort` (installing and signing into an agent, onboarding epic) and `AppShortcutPort` (the OS app shortcut, E2-R10), because both are OS- or agent-specific. Until their adapters ship, the server wires in-memory stubs named `<port>-memory` (`setup-memory`, `secrets-memory`, `shortcut-memory`). No rule changes.
+  - Note (epic 6, user-approved 2026-10-02): server wiring holds a registry of `AgentPort` and `AgentSetupPort` by `AgentId`, and core looks up a session's agent through it; the agent list is agent-neutral data, and each agent declares the permission modes it supports. Core and shared name no agent id, and an architecture test enforces it. The shared ACP client lives in `packages/adapters/src/acp-base`; adapter naming stays `<port>-<variant>` (`acp-claude-code`, `acp-antigravity`, `setup-antigravity`). Built whatever epic 6's Antigravity spike decides; only `acp-antigravity` and `setup-antigravity` depend on a go (user, 2026-10-02). No rule changes.
 
 ### AD-2 — Workspace is the top-level scope
 
@@ -123,6 +124,7 @@ graph LR
   - Session state, run outcome and ticket status are three separate things. Ticket status comes only from `TicketStorePort`, and the UI never works out one from another.
   - The live run view is the session view in read-only mode.
   - Ogden Agents records no cost or token usage.
+  - Note (epic 6, user-approved 2026-10-02): a session carries `agentId`, set at creation and never changed (rows stored before read as `claude-code`), and a workspace carries a default agent. A run's agent is Claude Code in v1 (builds with other agents are v2, epic 8). No rule changes.
 
 ### AD-9 — Ogden Agents owns identity [ADOPTED]
 
@@ -163,6 +165,7 @@ graph LR
   - Plain-language labels live in Ogden Agents's own mapping file, keyed by skill name, in the `bmad-catalog` adapter; a skill it doesn't name shows its `SKILL.md` description. (Amended, story 4.14, user decision 2026-10-02: was "in fork metadata".)
   - Note (epic 4, 2026-10-01): the `bmad-catalog` adapter may also name the `bmad` setup skill, because it runs that skill's `setup.py` to install BMAD into a project (CAP-2). No rule changes.
   - Note (epic 10, 2026-10-01): the catalog is built only for workspaces with Planning on (AD-22). AD-1's port list is unchanged: `BmadCatalogPort` gains a read-only `detect` (does the repo already have `_bmad/`). No rule changes.
+  - Note (epic 6, user-approved 2026-10-02): an agent adapter may name the skill invocation syntax for its agent, and BMad setup places skills in each in-use agent's skill folder (`.agents/skills` for Antigravity, beside `.claude/skills`), only where Planning is on. Skill names still appear only where this rule allows. No rule changes.
 
 ### AD-13 — Upstream BMad is pinned and verified [ADOPTED]
 
@@ -213,6 +216,7 @@ graph LR
   - Subscription logins stay in each agent's own CLI, and Ogden Agents never reads or stores them.
   - API keys go through `SecretStorePort`: the OS keychain (`@napi-rs/keyring`); where no keychain exists, saving a key is refused with a plain reason and subscription sign-in remains.
   - Adapters redact secrets before emitting events.
+  - Note (epic 6, user-approved 2026-10-02): each agent's API key is `agent-api-key/<agentId>` (Antigravity: `agent-api-key/antigravity`) and reaches only that agent's process; log redaction covers each supported provider's key format. Antigravity keeps its own sign-in under `~/.gemini/antigravity-acp/`, which Ogden never reads or writes. Ogden offers Antigravity's Google sign-in and the Gemini API key; the user accepted that Google's current terms call third-party use of Antigravity OAuth a breach (account risk; user, 2026-10-02). Antigravity is installed as a pinned copy in the data folder (registry archive checked against Ogden's SHA-256), an existing copy is used only when it matches the pin, and nothing is installed globally. No rule changes.
 
 ### AD-17 — Unattended runs are contained
 
@@ -224,6 +228,7 @@ graph LR
   - Every run has a maximum wall-clock duration, after which core stops it and marks it blocked.
   - After a run, core runs verification before the UI may show `built`: plan status, an independent test re-run, and a non-empty diff.
   - Merging and `done` happen only through the approve action. If the merge conflicts, the run is blocked as needing a rebase. It is never force-merged.
+  - Note (epic 6, user-approved 2026-10-02): v1 builds run Claude Code only. Builds with Antigravity (bmad-loop's `agy` profile, whose `--dangerously-skip-permissions` bypasses its approvals and which has no native sandbox recorded), Codex, Gemini CLI and Copilot are v2 (epic 8). When they come, an agent profile that bypasses its own approvals runs only inside a sandbox `SandboxPort` started, and the sandbox chain is per agent and per OS. No rule changes.
 
 ### AD-18 — One design system [ADOPTED]
 
@@ -323,7 +328,7 @@ graph TB
     L[npx ogden-agents launcher] -- version handshake --> S
     S --> DB[(SQLite in user data dir)]
     S --> K[OS keychain]
-    S -- ACP --> A[Agent CLIs: Claude Code, Codex, Gemini, Copilot]
+    S -- ACP --> A[Agent CLIs: Claude Code; Antigravity chat if epic 6 is a go]
     S -- uv --> BL[bmad-loop, pinned upstream] --> A
     S -- tickets.py / file watch --> R[User repos: _bmad, _bmad-output, worktrees]
     S -. fallback sandbox .-> D[Docker if installed]
@@ -372,7 +377,7 @@ Delivery: GitHub Actions runs the tests on macOS, Windows and Linux for every ch
 | CAP-12 review and approve | core approve action, `vcs-git` | AD-10, AD-17 |
 | CAP-13 retrospectives | catalog-driven planning session | AD-12 |
 | CAP-14 notifications | `notify-*` | AD-1 |
-| CAP-15 every agent | `acp-*`, bmad-loop profiles | AD-1, AD-4 |
+| CAP-15 agent choice (v1: Claude Code; Antigravity chat if possible) | `acp-base`, `acp-*`, `setup-*`, server agent registry | AD-1, AD-4, AD-8, AD-12, AD-16 |
 | CAP-16 sign-in | `acp-*` authenticate, `secrets-keyring` | AD-16, AD-21 |
 | CAP-17 workspaces and status sidebar | core, shared UI patterns | AD-2, AD-3, AD-4, AD-18 |
 | CAP-18 every BMAD skill and module | `bmad-catalog` adapter | AD-12, AD-14 |
@@ -382,7 +387,7 @@ Delivery: GitHub Actions runs the tests on macOS, Windows and Linux for every ch
 
 - **Visual direction:** decided in epic 1 by `bmad-ux` with `design-taste-frontend`. AD-18 fixes only the mechanism.
 - **Default concurrency limits and maximum run time:** tuned in epic 5. AD-2 and AD-17 fix only that the limits exist and that core enforces them.
-- **Where the CAP-5 toggle appears for each agent:** measured in epic 3, recorded in the spec's `agent-matrix.md`.
+- **Where the CAP-5 toggle appears for each agent:** measured in epic 3, recorded in the spec's `agent-matrix.md`. Antigravity's is measured by epic 6's spike (2026-10-02); other agents' in v2.
 - **Notification transports beyond webhook:** decided in epic 5 behind `NotifierPort`.
 - **Start at login, a tray icon, or a desktop wrapper:** later, and neither breaks AD-3.
 - **Tracker stores, remote access, and several users per install:** out of scope (spec non-goals).

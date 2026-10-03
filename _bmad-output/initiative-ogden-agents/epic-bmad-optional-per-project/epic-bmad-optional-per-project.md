@@ -109,7 +109,7 @@ The switch, its contract, its settings UI, detection and migration. It installs 
 
 ### Edits to epic 4 (approved by the user 2026-10-01; applied)
 
-- Initiative `tickets.toml`, epic 4 `after`: add `{ epic = 10, needs = "the per-project BMad pieces contract, guard, route helper and BmadCatalogPort.detect (10.2)" }`. Epics 5 and 7 gain the same at their inception (they guard `builds` and `retrospectives`); epic 6's builds use the `builds` guard.
+- Initiative `tickets.toml`, epic 4 `after`: add `{ epic = 10, needs = "the per-project BMad pieces contract, guard, route helper and BmadCatalogPort.detect (10.2)" }`. Epics 5 and 7 gain the same at their inception (they guard `builds` and `retrospectives`); epic 6 has no builds (user, 2026-10-02).
 - Envelope Description and E4-R2: Plan and Board appear only in a project with Planning or Board on; "Set up BMad Method in this project" runs when the user turns on the first piece in a project without `_bmad/` (from 10.5's section), not from a panel shown in every project. "Chats keep working without BMAD" stays.
 - E4-R3: the catalog is scanned only for workspaces with Planning on; `BmadCatalogPort` already exists from 10.2 with `detect`, and epic 4 extends it.
 - E4-R5: the Plan tab and `g p` exist only with Planning on; Board and `g b` only with Board on; they fill 10.6's tab slots.

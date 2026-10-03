@@ -431,11 +431,38 @@ def happy_run() -> dict:
     out["main_checkout_head_moved"] = git("rev-parse", "HEAD", cwd=PROJECT)["out"].strip()
     home_state = Path.home() / (".local/state/bmad-loop" if not WIN else "AppData/Local/bmad-loop")
     out["default_state_root_touched"] = home_state.exists()
-    rm = git("worktree", "remove", str(wt), cwd=PROJECT)
-    out["worktree_remove"] = {"rc": rm["rc"], "err": rm["err"][-600:]}
-    if rm["rc"] != 0:
-        rf = git("worktree", "remove", "--force", str(wt), cwd=PROJECT)
-        out["worktree_remove_force"] = {"rc": rf["rc"], "err": rf["err"][-600:], "dir_left": wt.exists()}
+    # Removal right after the run, then after each cleanup step, until it goes.
+    attempts = []
+    def try_remove(label):
+        rm = git("worktree", "remove", "--force", str(wt), cwd=PROJECT)
+        attempts.append({"after": label, "rc": rm["rc"], "err": rm["err"][-300:], "dir_left": wt.exists()})
+        if wt.exists() and rm["rc"] != 0:
+            try:
+                shutil.rmtree(wt)
+                attempts.append({"after": label + " + rmtree", "dir_left": wt.exists()})
+            except OSError as e:
+                attempts.append({"after": label + " + rmtree", "error": repr(e)[:300], "dir_left": wt.exists()})
+        return not wt.exists()
+    if WIN:
+        ps = run(["powershell", "-NoProfile", "-Command",
+                  "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'psmux|pwsh|python|tmux' } | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress"], timeout=60)
+        out["processes_after_run"] = ps["out"][:3000]
+    done = try_remove("run finished")
+    if not done:
+        c = run([bl_exe(), "cleanup", "--project", wt, "--json"], env=bl_env(), timeout=120)
+        out["cleanup_before_remove"] = c["out"][-800:]
+        done = try_remove("bmad-loop cleanup")
+    if not done:
+        time.sleep(65)  # the fake agent idles 60 s after Stop
+        done = try_remove("65 s wait")
+    if not done and WIN:
+        k = run(["powershell", "-NoProfile", "-Command",
+                 "Get-Process psmux,tmux -ErrorAction SilentlyContinue | Stop-Process -Force"], timeout=60)
+        out["kill_psmux"] = k["rc"]
+        time.sleep(2)
+        done = try_remove("psmux processes killed")
+    out["worktree_remove_attempts"] = attempts
+    git("worktree", "prune", cwd=PROJECT)
     out["branch_kept"] = git("branch", "--list", f"ogden/{SLUG}-h", cwd=PROJECT)["out"].strip()
     return out
 

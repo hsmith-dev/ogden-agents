@@ -63,12 +63,15 @@ Status: envelope, drafted autonomously 2026-10-02 from the user's request; the u
 - Decision (2026-10-02, user; was open question 4, builds): v1.1 is chats only: chat, install, sign-in, agent picker integration and BMad skills. Builds with Codex and Grok come in a later release (epic 8, v2, unless re-planned).
 - Decision (2026-10-02, user; was open question 5): the shared agent-choice groundwork (contracts, the shared ACP client, the picker) stays in epic 6 whatever Antigravity's go or no-go; only epic 6's Antigravity-specific stories depend on it. This epic therefore always waits on epic 6's groundwork and never rebuilds it.
 - Inception: the full inception (stories in `tickets.toml`) happens later, after epic 6.
+- Decision (2026-10-02): `tickets.toml` holds only the two spikes, 12.1 (Codex) and 12.2 (Grok). They probe the agents alone and do not wait on epic 6, so neither carries the epic's `after`; the stories added at inception will. Results and recommendations are in each spike's plan beside this file; the go or no-go per agent is the user's and is recorded here when given.
 - Assumption: release target is `ogden-agents` v1.1, after v1 (epics 1 to 7) ships. This epic is placed after epic 7 in the initiative's build order, under its own v1.1 heading.
 - Assumption: agent ids `codex` and `grok`; product names "Codex" and "Grok"; adapters `acp-codex`, `setup-codex`, `acp-grok`, `setup-grok`.
 - Waits on epic 6 because: the agents-as-a-choice contracts (6.3) and the shared ACP client in `acp-base` (6.4). Through epic 6 it also waits on epics 2, 3, 4, 9 and 10.
 - Handoff (not applied): the spec's CAP-15 and Non-goals, the agent matrix, and the initiative's Notes and Done when name Codex as v2. At inception, record v1.1 through `bmad-spec` and add a dated initiative note. The initiative was not edited here because the epic 6 branch is editing it.
 
 ### What the research found (2026-10-02; the spikes re-check)
+
+Corrected by spikes 12.1 and 12.2 (2026-10-02, CI on all three OSes; details in the spike plans beside this file): the registry now pins Grok 1.0.49 (not 1.0.48) and Codex `@agentclientprotocol/codex-acp` 2.1.1 with Codex 0.159.3. Codex's Windows sandbox is no longer labelled experimental (its feature flags are removed; OpenAI's page prefers `elevated`), and its `shell: true` spawn applies only when `CODEX_PATH` is set. Grok has no ACP session modes; `session/new` takes `_meta.autoMode` and `_meta.yoloMode`. Grok accepts an API key over ACP through the unadvertised `authenticate` method `xai.api_key`. `npm ci` fits Grok only for the download: Ogden must decompress and spawn the platform binary itself, with `GROK_HOME` in its data folder, because npm's launcher prefers `~/.grok/bin/grok`. The lines below are kept as written.
 
 "Verified" means seen first-hand: npm metadata, the ACP registry, vendor docs, or an `initialize` call run locally on macOS arm64 against an empty home folder. "Reported" means from third-party pages only.
 

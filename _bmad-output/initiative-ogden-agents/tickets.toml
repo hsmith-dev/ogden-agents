@@ -46,7 +46,7 @@ id = 5
 slug = "epic-unattended-builds"
 title = "One ticket builds safely, and you approve and merge it"
 covers = ["CAP-8", "CAP-9", "CAP-10", "CAP-12"]
-after = [{ epic = 1, needs = "the bundled bmad-loop fork (1.9) and the uv bootstrap (1.8)" }, { epic = 4, needs = "the board, ticket detail, TicketStorePort with mark and the live index, through its sweep (4.12); the release after 4.13" }, { epic = 10, needs = "the BMad pieces contract, requireBmadFeature, the piece route helper and piece registration (10.2), and 10.6's architecture test (5.3)" }]
+after = [{ epic = 1, needs = "the uv bootstrap (1.8) and the release workflow; no longer the bmad-loop fork (1.9), since builds run as ACP sessions (2026-10-02)" }, { epic = 4, needs = "the board, ticket detail, TicketStorePort with mark and the live index, through its sweep (4.12); the release after 4.13" }, { epic = 10, needs = "the BMad pieces contract, requireBmadFeature, the piece route helper and piece registration (10.2), and 10.6's architecture test (5.3)" }]
 
 [[epic]]
 id = 11
@@ -60,7 +60,7 @@ id = 6
 slug = "epic-every-agent"
 title = "Every agent BMAD supports works for chat and builds"
 covers = ["CAP-15"]
-after = [{ epic = 2, needs = "the ACP client and session states" }, { epic = 9, needs = "the setup adapter and sign-in flow other agents reuse" }, { epic = 5, needs = "BuildRunnerPort, SandboxPort and the run's agent field (5.3), the sandbox chain (5.6) and the runner (5.7)" }]
+after = [{ epic = 2, needs = "the ACP client and session states" }, { epic = 9, needs = "the setup adapter and sign-in flow other agents reuse" }, { epic = 5, needs = "BuildRunnerPort, SandboxPort and the run's agent field (5.3), the sandbox chain (5.6) and the runner over ACP (5.7)" }]
 
 [[epic]]
 id = 7

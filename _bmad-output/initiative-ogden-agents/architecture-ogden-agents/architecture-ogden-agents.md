@@ -22,7 +22,7 @@ The architecture is hexagonal. `packages/core` holds the domain: workspaces, ses
 | Layer | Package | Holds |
 |---|---|---|
 | Domain | `packages/core` | Entities, ports, event log, session and run state machines, verification rules |
-| Adapters | `packages/adapters` | `acp-*`, `buildrunner-bmad-loop`, `tickets-v7`, `bmad-catalog`, `sandbox-*`, `vcs-git`, `terminal-pty`, `secrets-keyring`, `notify-*` |
+| Adapters | `packages/adapters` | `acp-*`, `buildrunner-acp`, `tickets-v7`, `bmad-catalog`, `sandbox-*`, `vcs-git`, `terminal-pty`, `secrets-keyring`, `notify-*` |
 | Delivery | `packages/server` | HTTP and WebSocket, the security gate, wiring, the launcher handshake |
 | UI | `packages/web` | React app; `packages/web/ui` is the design system |
 | Contract | `packages/shared` | Zod schemas and TypeScript types for every event, API shape and ID |
@@ -95,6 +95,7 @@ graph LR
   - Every event type has a Zod schema in `packages/shared`, and nothing unschematized is emitted.
   - Every adapter that produces agent activity, whether an ACP chat or the bmad-loop build runner, emits the same `session.*` event types, so one session view renders both.
   - Note (epic 5, 2026-10-01): the `buildrunner-bmad-loop` adapter maps bmad-loop's events and the agent's transcript to `session.*` events; where the agent's activity is not available as structured events, the run view shows bmad-loop's activity lines as messages. No rule changes.
+  - Note (epic 5, 2026-10-02, user, ACP fallback after spike 5.1): v1 builds run as Ogden-managed headless ACP sessions (`buildrunner-acp`), so a build emits `session.*` events exactly as a chat does; the previous note no longer applies in v1. No rule changes.
   - All events are retained, and history is deletable per workspace.
   - When a message completes, core appends a `session.message_completed` event carrying the full content. Its chunk events are pruned only after that, and the UI replaces chunks with the completed message.
 
@@ -161,7 +162,8 @@ graph LR
 - **Rule:**
   - `BmadCatalogPort` builds the catalog of modules, skills, agents and help from installed metadata (`bmod.toml`, `SKILL.md` frontmatter, `roster.toml`, help files).
   - The UI renders every action from that catalog.
-  - Skill names appear only inside the adapters that must invoke a specific skill (`buildrunner-bmad-loop` for `bmad-build-auto`, `tickets-v7` for `tickets.py`).
+  - Skill names appear only inside the adapters that must invoke a specific skill (the build runner adapter, `buildrunner-acp`, for `bmad-build-auto`; `tickets-v7` for `tickets.py`).
+  - Note (epic 5, 2026-10-02, user): the build runner adapter is `buildrunner-acp`, not `buildrunner-bmad-loop` (ACP fallback after spike 5.1). No rule changes.
   - Plain-language labels live in fork metadata.
   - Note (epic 4, 2026-10-01): the `bmad-catalog` adapter may also name the `bmad` setup skill, because it runs that skill's `setup.py` to install BMAD into a project (CAP-2). No rule changes.
   - Note (epic 10, 2026-10-01): the catalog is built only for workspaces with Planning on (AD-22). AD-1's port list is unchanged: `BmadCatalogPort` gains a read-only `detect` (does the repo already have `_bmad/`). No rule changes.
@@ -175,6 +177,7 @@ graph LR
   - `forks.lock` names the fork tags, and CI fails if the bundled files differ from it.
   - Each fork keeps an `upstream` mirror branch and an `ogden-agents` branch made of upstream plus one patch per upstream PR, tagged `v<upstream>-ogden-agents.<n>`.
   - A patch is removed once upstream merges it.
+  - Note (epic 5, 2026-10-02, user): bmad-loop is no longer used by v1. Spike 5.1 found bmad-loop 0.13.0 needs a user-installed multiplexer on every OS and reads no v7 ticket, so builds run as Ogden-managed ACP sessions (`buildrunner-acp`). Where 4.14 pins bmad-loop (its `bmad-lock.json` entry and `createBmadLoopResolver`), that pin and resolver become unused; remove them in 4.12 (epic 4's sweep), else 5.10. The seven patches bmad-loop would need are kept as a v2 or upstream note in epic 5. No rule changes.
 
 ### AD-14 — Reduced mode on upstream BMAD [ADOPTED]
 
@@ -226,6 +229,7 @@ graph LR
   - Note (epic 5, 2026-10-01): `VcsPort` creates the worktree; the build runner runs in it and never creates its own, and bmad-loop's run folder also lives in the data directory. No rule changes.
   - Note (epic 5, 2026-10-01): approve merges locally into the branch the main checkout has checked out, with a merge commit, and never pushes; it is refused while that checkout has uncommitted changes outside the BMad output folder (`_bmad-output`), which do not block it, and it commits its own `done` mark together with the merge, in the merge commit (user, 2026-10-01). **Update and retry** rebases the run's branch in its worktree and runs it again; there is no automatic conflict resolution in v1. No rule changes.
   - Note (epic 5, 2026-10-01): verification, including the independent test re-run in the run's worktree, ships in epic 5 before approve is offered, so this rule holds from its release; epic 11 adds richer reporting (user). No rule changes.
+  - Note (epic 5, 2026-10-02, user, ACP fallback after spike 5.1): the build runner is an Ogden-managed headless ACP session in the run's worktree; there is no bmad-loop run folder. The run's folder in the data directory holds the session's NDJSON activity and its per-run JSON result (status, blocked code and reason, intent-gap patch path), and checkpoint pauses are Ogden's (5.4). On Windows, every git call uses `core.longpaths=true` with a short worktree layout (spike 5.1). No rule changes.
   - Note (epic 5, 2026-10-01): "attended", the third choice when no sandbox exists, is not an unattended run: every tool call goes through permission cards. Windows defaults to it, and Docker Desktop is optional there. The maximum run time defaults to 45 minutes, editable in settings. No rule changes.
 
 ### AD-18 — One design system [ADOPTED]
@@ -265,6 +269,7 @@ graph LR
   - The terminal toggle (AD-6) is only for advanced users and is never required.
   - Note (epic 10, 2026-10-01): a project with BMad off needs no `uv`; turning on a piece that needs BMad installed runs setup through the server (epic 4). No rule changes.
   - Note (epic 5, 2026-10-01): bmad-loop's process hosting needs no multiplexer the user installs; if it needs one, the server installs it like `uv`. No rule changes.
+  - Note (epic 5, 2026-10-02, user): moot in v1; builds run as ACP sessions with the agent as a direct child, and bmad-loop is not used. No rule changes.
 
 ### AD-22 — BMad Method is opt-in per workspace
 
@@ -327,7 +332,7 @@ graph TB
     S --> DB[(SQLite in user data dir)]
     S --> K[OS keychain]
     S -- ACP --> A[Agent CLIs: Claude Code, Codex, Gemini, Copilot]
-    S -- uv --> BL[bmad-loop fork] --> A
+    S -- "ACP (headless build session)" --> A
     S -- tickets.py / file watch --> R[User repos: _bmad, _bmad-output, worktrees]
     S -. fallback sandbox .-> D[Docker if installed]
   end
@@ -349,7 +354,7 @@ ogden-agents/
   bin/ogden-agents            # launcher: start or attach server, open browser, handshake
   packages/shared/        # Zod schemas: events, API, ids, error codes
   packages/core/          # domain, ports, event log, state machines, verification
-  packages/adapters/      # acp-*, buildrunner-bmad-loop, tickets-v7, bmad-catalog, sandbox-*, vcs-git, terminal-pty, secrets-keyring, notify-*
+  packages/adapters/      # acp-*, buildrunner-acp, tickets-v7, bmad-catalog, sandbox-*, vcs-git, terminal-pty, secrets-keyring, notify-*
   packages/server/        # Hono app, security gate, WS channels, wiring
   packages/web/           # React app; ui/ = design system
   vendor/                 # bundled forks per forks.lock
@@ -370,7 +375,7 @@ Delivery: GitHub Actions runs the tests on macOS, Windows and Linux for every ch
 | CAP-5 terminal toggle | `terminal-pty`, core driver lock | AD-6, AD-19 |
 | CAP-6 guided planning | catalog-driven UI, planning sessions | AD-12, AD-18 |
 | CAP-7 board | `tickets-v7`, TanStack Query | AD-7, AD-10 |
-| CAP-8 unattended builds | `buildrunner-bmad-loop`, `vcs-git`, `sandbox-*` | AD-2, AD-17 |
+| CAP-8 unattended builds | `buildrunner-acp`, `vcs-git`, `sandbox-*` | AD-2, AD-17 |
 | CAP-9 live run view | session view (read-only) | AD-5, AD-8 |
 | CAP-10 verification | core | AD-17 |
 | CAP-11 | retired (no cost tracking) | AD-8 |

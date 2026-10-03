@@ -4,6 +4,10 @@ import {
   BOARD_BLOCKED_REASON_REQUIRED,
   BOARD_BLOCKED_SAVE_LABEL,
   BOARD_CHANGE_STATUS_LABEL,
+  BOARD_REOPEN_CANCEL_LABEL,
+  BOARD_REOPEN_CONFIRM_LABEL,
+  BOARD_REOPEN_DIALOG_TITLE,
+  boardReopenDescription,
   boardBlockedDialogTitle,
   boardChangeStatusLabel,
   boardColumnOf,
@@ -15,7 +19,8 @@ import {
   type TicketRow,
 } from '@ogden-agents/shared';
 import { DotsThree } from '@phosphor-icons/react';
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type RefObject } from 'react';
+import { AlertDialog, AlertDialogCancel, AlertDialogContent } from '@/ui/alert-dialog';
 import { Button } from '@/ui/button';
 import { Dialog, DialogContent } from '@/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/ui/dropdown-menu';
@@ -78,21 +83,60 @@ export interface TicketStatusMenuProps {
  * empty. Focus goes back to the button when the reason is cancelled or
  * saved. Nothing moves here: the caller sends the change and the board shows
  * what the files then say.
+ *
+ * A Done ticket (user decision 2026-10-02) may move out of Done, but only
+ * after "Reopen this ticket?" is confirmed: an alert dialog on a card, an
+ * inline confirmation in the sheet (never a second modal on it). Cancel
+ * (or Esc) sends nothing and gives focus back to the button; Reopen sends
+ * the change with `reopen: true` (Blocked asks for its reason first).
  */
 export function TicketStatusMenu({ row, onChoose, busy = false, variant = 'card', className }: TicketStatusMenuProps) {
   const [blocking, setBlocking] = useState(false);
+  /** The status chosen for a Done ticket, waiting for the reopen confirmation. */
+  const [reopening, setReopening] = useState<TicketStatus | null>(null);
+  /** The user confirmed reopening this Done ticket (kept while Blocked asks for its reason). */
+  const reopenConfirmed = useRef(false);
+  /** Set when the reopen was confirmed for Blocked, so the closing confirmation leaves focus to the reason form. */
+  const toBlocked = useRef(false);
+  /** The inline reopen confirmation's Cancel, focused once the menu has closed. */
+  const reopenCancelRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   /** Set when Blocked was chosen, so the closing menu leaves focus to the reason form. */
   const opening = useRef(false);
   const expectedStatus = expectedStatusOf(row);
+  const isDone = expectedStatus === 'done';
   const choose = (status: TicketStatus, blockedReason?: string) => {
     const request: MarkTicketRequest = { status };
     if (blockedReason !== undefined) request.blockedReason = blockedReason;
     if (expectedStatus !== undefined) request.expectedStatus = expectedStatus;
+    if (isDone && reopenConfirmed.current) request.reopen = true;
+    reopenConfirmed.current = false;
     onChoose({ ref: row.ref, request });
+  };
+  /** A status picked from the menu (or confirmed as a reopen): Blocked asks for a reason, the rest are sent. */
+  const pick = (status: TicketStatus) => {
+    if (status === 'blocked') {
+      opening.current = true;
+      setBlocking(true);
+    } else choose(status);
+  };
+  const confirmReopen = (confirmed: boolean) => {
+    const status = reopening;
+    setReopening(null);
+    reopenConfirmed.current = confirmed && status !== null;
+    toBlocked.current = reopenConfirmed.current && status === 'blocked';
+    if (!reopenConfirmed.current || status === null) {
+      if (variant === 'sheet') triggerRef.current?.focus();
+      return;
+    }
+    if (status === 'blocked') setBlocking(true);
+    else choose(status);
+    // Inline, the reopen confirmation goes at once: focus back to the button (the reason form takes it itself).
+    if (variant === 'sheet' && status !== 'blocked') triggerRef.current?.focus();
   };
   const close = (reason?: string) => {
     setBlocking(false);
+    if (reason === undefined) reopenConfirmed.current = false;
     // The inline form goes at once; the dialog gives focus back once it has closed (`onCloseAutoFocus`).
     if (variant === 'sheet') triggerRef.current?.focus();
     if (reason !== undefined) choose('blocked', reason);
@@ -126,6 +170,8 @@ export function TicketStatusMenu({ row, onChoose, busy = false, variant = 'card'
             if (opening.current) {
               opening.current = false;
               event.preventDefault();
+              // Inline in the sheet, the reopen confirmation starts on Cancel (on a card, the alert dialog does it).
+              reopenCancelRef.current?.focus();
             }
           }}
         >
@@ -135,10 +181,11 @@ export function TicketStatusMenu({ row, onChoose, busy = false, variant = 'card'
               data-testid="ticket-status-item"
               data-status={status}
               onSelect={() => {
-                if (status === 'blocked') {
+                if (isDone) {
+                  // Out of Done only once the reopen is confirmed: the confirmation takes focus, not the button.
                   opening.current = true;
-                  setBlocking(true);
-                } else choose(status);
+                  setReopening(status);
+                } else pick(status);
               }}
             >
               {boardStatusActionText(status)}
@@ -146,6 +193,32 @@ export function TicketStatusMenu({ row, onChoose, busy = false, variant = 'card'
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
+      {variant === 'sheet' ? (
+        reopening === null ? null : (
+          <ReopenConfirmation cancelRef={reopenCancelRef} ticketRef={row.ref} status={reopening} onConfirm={() => confirmReopen(true)} onCancel={() => confirmReopen(false)} />
+        )
+      ) : (
+        <AlertDialog open={reopening !== null} onOpenChange={(open) => (open ? undefined : confirmReopen(false))}>
+          {reopening === null ? null : (
+            <AlertDialogContent
+              title={BOARD_REOPEN_DIALOG_TITLE}
+              description={boardReopenDescription(row.ref, reopening)}
+              data-testid="ticket-reopen-dialog"
+              // No trigger of its own: focus goes back to the status button, or on to the reason dialog.
+              onCloseAutoFocus={(event) => {
+                event.preventDefault();
+                if (toBlocked.current) toBlocked.current = false;
+                else triggerRef.current?.focus();
+              }}
+            >
+              <AlertDialogCancel data-testid="ticket-reopen-cancel">{BOARD_REOPEN_CANCEL_LABEL}</AlertDialogCancel>
+              <Button onClick={() => confirmReopen(true)} data-testid="ticket-reopen-confirm">
+                {BOARD_REOPEN_CONFIRM_LABEL}
+              </Button>
+            </AlertDialogContent>
+          )}
+        </AlertDialog>
+      )}
       {variant === 'sheet' ? (
         blocking ? (
           form
@@ -166,6 +239,63 @@ export function TicketStatusMenu({ row, onChoose, busy = false, variant = 'card'
         </Dialog>
       )}
     </>
+  );
+}
+
+/**
+ * The sheet's "Reopen this ticket?" (user decision 2026-10-02): inline, as
+ * the sheet is a modal already. An alert dialog by role, named by its title
+ * and described by its one sentence; focus starts on Cancel, Esc cancels it
+ * (not the sheet).
+ */
+function ReopenConfirmation({
+  cancelRef,
+  ticketRef,
+  status,
+  onConfirm,
+  onCancel,
+}: {
+  cancelRef: RefObject<HTMLButtonElement | null>;
+  ticketRef: string;
+  status: TicketStatus;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const titleId = useId();
+  const descriptionId = useId();
+  useEffect(() => {
+    cancelRef.current?.focus();
+  }, [cancelRef]);
+  return (
+    <div
+      role="alertdialog"
+      aria-labelledby={titleId}
+      aria-describedby={descriptionId}
+      onKeyDown={(event) => {
+        // Esc closes the confirmation, not the sheet under it.
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        onCancel();
+      }}
+      className="flex flex-col gap-3 rounded-lg border border-border p-3"
+      data-testid="ticket-reopen-dialog"
+    >
+      <Text as="h4" variant="label" id={titleId}>
+        {BOARD_REOPEN_DIALOG_TITLE}
+      </Text>
+      <p id={descriptionId} className="m-0 text-body text-muted-foreground">
+        {boardReopenDescription(ticketRef, status)}
+      </p>
+      <div className="flex justify-end gap-2">
+        <Button ref={cancelRef} variant="outline" onClick={onCancel} data-testid="ticket-reopen-cancel">
+          {BOARD_REOPEN_CANCEL_LABEL}
+        </Button>
+        <Button onClick={onConfirm} data-testid="ticket-reopen-confirm">
+          {BOARD_REOPEN_CONFIRM_LABEL}
+        </Button>
+      </div>
+    </div>
   );
 }
 

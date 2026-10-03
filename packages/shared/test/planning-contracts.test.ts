@@ -411,3 +411,40 @@ describe('changing a ticket status from the board (story 4.10)', () => {
     }
   });
 });
+
+describe('reopening a Done ticket from the board (story 4.10, user decision 2026-10-02)', () => {
+  it('MarkTicketRequest takes reopen: true only with expectedStatus done', () => {
+    expect(MarkTicketRequest.parse({ status: 'ready-for-dev', expectedStatus: 'done', reopen: true })).toEqual({ status: 'ready-for-dev', expectedStatus: 'done', reopen: true });
+    // Without it the request still parses: core answers reopen_not_confirmed.
+    expect(MarkTicketRequest.safeParse({ status: 'ready-for-dev', expectedStatus: 'done' }).success).toBe(true);
+    for (const body of [
+      { status: 'draft', reopen: true },
+      { status: 'draft', expectedStatus: '', reopen: true },
+      { status: 'draft', expectedStatus: 'built', reopen: true },
+      { status: 'draft', expectedStatus: 'done', reopen: false },
+      { status: 'draft', expectedStatus: 'done', reopen: 'yes' },
+    ]) {
+      expect(MarkTicketRequest.safeParse(body).success, JSON.stringify(body)).toBe(false);
+    }
+  });
+
+  it('has reopen_not_confirmed before internal_error, and the confirmation texts are plain', () => {
+    expect(API_ERROR_CODES).toContain('reopen_not_confirmed');
+    expect(API_ERROR_CODES.indexOf('reopen_not_confirmed')).toBe(API_ERROR_CODES.indexOf('ticket_changed') + 1);
+    expect(API_ERROR_CODES.at(-1)).toBe('internal_error');
+    expect(shared.BOARD_REOPEN_DIALOG_TITLE).toBe('Reopen this ticket?');
+    expect(shared.boardReopenDescription('1.2', 'ready-for-dev')).toBe('1.2 is done. It moves to Ready and needs approving again to be done.');
+    expect(shared.boardReopenDescription('1.2', 'dropped')).toBe('1.2 is done. It is dropped and needs approving again to be done.');
+    for (const text of [
+      shared.REOPEN_NOT_CONFIRMED_MESSAGE,
+      shared.REOPEN_ONLY_FROM_DONE_MESSAGE,
+      shared.BOARD_REOPEN_DIALOG_TITLE,
+      shared.BOARD_REOPEN_CONFIRM_LABEL,
+      shared.BOARD_REOPEN_CANCEL_LABEL,
+      ...MARKABLE_TICKET_STATUSES.map((status) => shared.boardReopenDescription('1.1', status)),
+    ]) {
+      expect(text).not.toMatch(/[–—]/);
+      expect(text).toMatch(/^[A-Z0-9]/);
+    }
+  });
+});

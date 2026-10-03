@@ -199,7 +199,8 @@ export const API_ROUTES = {
    * mark`; 409 `status_not_allowed` for `done`. With the optional
    * `expectedStatus` (the status the board showed, `''` for none), 409
    * `ticket_changed` when the plan's status no longer matches; nothing is
-   * written. Serves the `board` piece and needs the project's script trust.
+   * written. Out of Done (`expectedStatus: 'done'`) needs `reopen: true`,
+   * else 409 `reopen_not_confirmed` (user decision 2026-10-02). Serves the `board` piece and needs the project's script trust.
    */
   workspaceTicketStatus: `${API_BASE}/workspaces/:wsId/tickets/:ref/status`,
   /**

@@ -9,6 +9,7 @@ import {
   SCRIPTS_NOT_TRUSTED_MESSAGE,
   STATUS_NOT_ALLOWED_MESSAGE,
   TICKET_CHANGED_MESSAGE,
+  REOPEN_NOT_CONFIRMED_MESSAGE,
   type BmadSetupFailureReason,
   type SessionTerminal,
   type TerminalUnavailableCode,
@@ -179,6 +180,18 @@ export class TicketChangedError extends CoreError {
     readonly actual: string,
   ) {
     super('ticket_changed', TICKET_CHANGED_MESSAGE);
+  }
+}
+
+/**
+ * A change to a ticket the board showed as Done that didn't confirm the
+ * reopen (story 4.10, user decision 2026-10-02): `expectedStatus` was `done`
+ * without `reopen: true`. Nothing ran.
+ */
+export class ReopenNotConfirmedError extends CoreError {
+  override readonly name = 'ReopenNotConfirmedError';
+  constructor(readonly ref: string) {
+    super('reopen_not_confirmed', REOPEN_NOT_CONFIRMED_MESSAGE);
   }
 }
 

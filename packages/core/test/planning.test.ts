@@ -19,6 +19,7 @@ import {
   createPlanning,
   FeatureOffError,
   NotFoundError,
+  ReopenNotConfirmedError,
   ScriptsNotTrustedError,
   StatusNotAllowedError,
   TicketChangedError,
@@ -366,6 +367,24 @@ describe('changing a status from the board (story 4.10)', () => {
     await expect(board.mark(workspace.id, '1.1', { status: 'done', expectedStatus: '' })).rejects.toThrow(StatusNotAllowedError);
     await expect(board.mark(workspace.id, '1.1', { status: 'draft', expectedStatus: 'shipped' })).rejects.toThrow(ValidationError);
     expect(marks).toEqual([[workspace.realPath, '1.1', 'ready-for-dev', { blockedReason: undefined, expectedStatus: '' }]]);
+  });
+
+  it('out of Done needs the confirmed reopen (user decision 2026-10-02): without it reopen_not_confirmed and nothing runs; into Done stays refused', async () => {
+    const { board, workspace, marks } = setup();
+    for (const request of [{ status: 'ready-for-dev', expectedStatus: 'done' }, { status: 'blocked', blockedReason: 'Broke again', expectedStatus: 'done' }]) {
+      const error = await board.mark(workspace.id, '1.1', request).catch((failure: unknown) => failure);
+      expect(error).toBeInstanceOf(ReopenNotConfirmedError);
+      expect((error as ReopenNotConfirmedError).code).toBe('reopen_not_confirmed');
+    }
+    // `reopen` goes only with a Done ticket, and is only ever `true`.
+    await expect(board.mark(workspace.id, '1.1', { status: 'draft', expectedStatus: 'built', reopen: true })).rejects.toThrow(ValidationError);
+    await expect(board.mark(workspace.id, '1.1', { status: 'draft', reopen: true })).rejects.toThrow(ValidationError);
+    await expect(board.mark(workspace.id, '1.1', { status: 'draft', expectedStatus: 'done', reopen: false })).rejects.toThrow(ValidationError);
+    // Into Done is refused even with a reopen.
+    await expect(board.mark(workspace.id, '1.1', { status: 'done', expectedStatus: 'done', reopen: true })).rejects.toThrow(StatusNotAllowedError);
+    expect(marks).toEqual([]);
+    expect(await board.mark(workspace.id, '1.1', { status: 'in-progress', expectedStatus: 'done', reopen: true })).toEqual({ ref: '1.1', status: 'in-progress' });
+    expect(marks).toEqual([[workspace.realPath, '1.1', 'in-progress', { blockedReason: undefined, expectedStatus: 'done' }]]);
   });
 
   it('Board off, untrusted or not downloaded refuse a mark before the store', async () => {

@@ -70,6 +70,7 @@ import {
   SCRIPTS_NOT_TRUSTED_MESSAGE,
   STATUS_NOT_ALLOWED_MESSAGE,
   TICKET_CHANGED_MESSAGE,
+  REOPEN_NOT_CONFIRMED_MESSAGE,
   TICKETS_STORE_REFUSED_MESSAGE,
   SessionResponse,
   TICKETS_UNAVAILABLE_MESSAGE,
@@ -435,11 +436,12 @@ describe('changing a ticket status (story 4.10)', () => {
     { ref: '1.1', id: 1, epic: 'epic-a', title: 'One', type: 'story', status: 'in-review', state: 'review', blocked_reason: '' },
     { ref: '1.2', id: 2, epic: 'epic-a', title: 'Two', type: 'story', status: '', state: 'planned', blocked_reason: '' },
   ];
+  const DONE_ROW = { ref: '1.3', id: 3, epic: 'epic-a', title: 'Three', type: 'story', status: 'done', state: 'done', blocked_reason: '' };
   const marksOf = (store: MemoryTicketStore) => store.calls.filter((call) => call[0] === 'mark');
 
-  async function board() {
+  async function board(rows: typeof ROWS = ROWS) {
     const repo = fixtureRepo();
-    const store = stubStore(realPathOf(repo), ROWS);
+    const store = stubStore(realPathOf(repo), rows);
     const server = await startTestServer({ ticketStore: store });
     const tab = await signIn(server);
     const workspace = await project(server, tab, repo, ['board'], { trust: true });
@@ -472,6 +474,25 @@ describe('changing a ticket status (story 4.10)', () => {
     expect(response.status).toBe(409);
     expect(ApiErrorBody.parse(await response.json()).error).toEqual({ code: 'status_not_allowed', message: STATUS_NOT_ALLOWED_MESSAGE });
     expect(store.calls).toEqual([]);
+  });
+
+  it('out of Done needs reopen: true (user decision 2026-10-02): without it 409 reopen_not_confirmed and the store is never asked; into Done stays refused', async () => {
+    const { store, put, repoPath } = await board([...ROWS, DONE_ROW]);
+    const unconfirmed = await put('1.3', { status: 'ready-for-dev', expectedStatus: 'done' });
+    expect(unconfirmed.status).toBe(409);
+    expect(ApiErrorBody.parse(await unconfirmed.json()).error).toEqual({ code: 'reopen_not_confirmed', message: REOPEN_NOT_CONFIRMED_MESSAGE });
+    // `reopen` only with a Done ticket; into Done never, reopen or not.
+    expect((await put('1.2', { status: 'draft', expectedStatus: '', reopen: true })).status).toBe(400);
+    const intoDone = await put('1.3', { status: 'done', expectedStatus: 'done', reopen: true });
+    expect(intoDone.status).toBe(409);
+    expect(ApiErrorBody.parse(await intoDone.json()).error.code).toBe('status_not_allowed');
+    expect(marksOf(store)).toEqual([]);
+    expect((await store.tree(repoPath)).tickets[2]!.status).toBe('done');
+
+    const reopened = await put('1.3', { status: 'ready-for-dev', expectedStatus: 'done', reopen: true });
+    expect(reopened.status).toBe(200);
+    expect(MarkTicketResponse.parse(await reopened.json())).toEqual({ ref: '1.3', status: 'ready-for-dev' });
+    expect((await store.tree(repoPath)).tickets[2]!.status).toBe('ready-for-dev');
   });
 
   it('a stale expected status is 409 ticket_changed and nothing changes', async () => {

@@ -27,6 +27,8 @@ context:
 
 **Decision (this plan, concurrency):** `MarkTicketRequest` gains an optional `expectedStatus` (a `TicketStatus` or `''` for no status), and `API_ERROR_CODES` gains `ticket_changed` (409, `TICKET_CHANGED_MESSAGE`). When given and the plan's status no longer matches, nothing is written. Both are append-only, backward-compatible contract additions.
 
+**Decision (user, 2026-10-02, reopen):** moving a ticket out of Done from the board is allowed, but only after a "Reopen this ticket?" confirmation (an accessible dialog: keyboard and screen reader; an alert dialog on a card, an inline `role="alertdialog"` in the detail sheet, never a second modal). Moving into Done stays refused (the UI never offers it; the API answers `done` with 409 `status_not_allowed`, reopen or not). Server side, a change whose `expectedStatus` is `done` must carry `reopen: true`, else 409 `reopen_not_confirmed` (`REOPEN_NOT_CONFIRMED_MESSAGE`) and nothing runs; `reopen` goes only with `expectedStatus: 'done'` (else 400). Append-only contract additions: `MarkTicketRequest.reopen`, `reopen_not_confirmed` in `API_ERROR_CODES` (after `ticket_changed`), the confirmation texts in `planning.ts`. This supersedes the S5b+U15 reject below.
+
 ## Boundaries & Constraints
 
 **Always:** The route is registered through `bmadPieceRoutes` (already: `board`, trust); core re-checks the guard, trust and download. The ref matches `TICKET_REF_PATTERN` and the adapter's exact `find` (4.2) runs before `mark`; the script gets argv only (`mark <ref> <status> [--blocked=<reason>]`, no shell); the status is a `TicketStatus` enum value; the blocked reason is one argv element (`tickets.py` JSON-quotes it, so a newline can't add a frontmatter key). Marks of one repo run one at a time (core). Errors become plain messages: 400 invalid request, 404 no such ticket, 409 `status_not_allowed`/`ticket_changed`/`scripts_not_trusted`/`feature_off`/`bmad_not_downloaded`, 503 `tickets_unavailable` (store refusal message included). A PUT body is capped (small `bodyLimit`, after the guard). Accessibility: the menu trigger is a real button outside the card link (no nested interactive), named "Change status of <ref> <title>"; Radix menu keys (Enter/Space/arrows/Esc); a blocked status asks for a reason in a dialog with a labelled field; the result is announced once in a polite status region ("1.2 moved to Ready"), failures in an alert; focus returns to the moved card. New texts are appended to `planning.ts` (after 4.9's block), no em or en dashes.
@@ -41,6 +43,7 @@ context:
 | Done | `PUT {status:'done'}` | 409 `status_not_allowed`, no run, no file change; the menu never lists Done | — |
 | Blocked | Move to Blocked, reason "Needs the API key" | plan gets `status: blocked`, `blocked_at`, `blocked_reason`; card in Blocked | empty reason: the dialog won't submit; 400 from API |
 | Unblock | blocked 1.3 → Move to Ready | blocked fields cleared | — |
+| Reopen | Done 1.9, menu → Move to Ready | "Reopen this ticket?" first; Cancel or Esc sends nothing, focus back on the button; Reopen sends `{status, expectedStatus:'done', reopen:true}`, 200 | no `reopen` → 409 `reopen_not_confirmed`, no run |
 | Stale view | UI saw `''`, an agent wrote `in-progress` meanwhile | 409 `ticket_changed`, nothing written; board refetches; message shown | — |
 | Two clicks at once | two PUTs for one repo | run one after the other, never interleaved | — |
 | Script fails | `tickets.py` exit 1 / timeout / tracker store | 503 with its plain message; card unchanged | message shown inline, menu usable again |
@@ -89,6 +92,8 @@ context:
 
 ## Plan Change Log
 
+- 2026-10-02 (user decision, reopen): out of Done needs a confirmed reopen. Shared: `MarkTicketRequest.reopen` (`true` only, only with `expectedStatus: 'done'`), `reopen_not_confirmed` error code, `REOPEN_NOT_CONFIRMED_MESSAGE`, `REOPEN_ONLY_FROM_DONE_MESSAGE`, `BOARD_REOPEN_*` texts and `boardReopenDescription`. Core: `ReopenNotConfirmedError`, checked in `board.mark` before the store. Server: 409 mapping. Web: `TicketStatusMenu` asks "Reopen this ticket?" for a Done ticket (card: `AlertDialog`, focus on Cancel, focus back to the button; sheet: inline alert dialog, Esc closes only it), Blocked then asks its reason. Tests: core, server routes, shared contracts, DOM (card and sheet), e2e (keyboard only, Esc, Reopen, the API refusal). Rebased onto story 4.7 (`84ad8d4`); `baseline_revision` unchanged.
+
 ## Review Triage Log
 
 ### Pass 1 (2026-10-02; lenses: quick, security, ux-a11y)
@@ -116,7 +121,7 @@ Verdicts: high 0, medium 6, low 21, false 0, maybe-false 1 (quick Q1-Q5, securit
 | S1 | `find` and `mark` resolve the ref in two processes; a tree change between them (epic renumbered, entry removed) can mark another ticket | low | defer | Needs a structural tree change in the milliseconds between two serialized runs; fixing it needs an upstream `tickets.py` option (mark by plan path / expected ref). Deferred. |
 | S2 | The expected-status check is best effort against writers outside Ogden | low | reject | By design (Design Notes): the window is one serialized call; the watcher shows the result. |
 | S3 | Upstream `tickets.py mark` truncates then writes (not atomic); a kill mid-write could cut a plan | low | defer | Pre-existing upstream behaviour; the write takes milliseconds against a 30 s timeout. Deferred to an upstream patch (temp file + rename). |
-| S5b+U15 | A Done ticket can be moved out of Done from the menu | low | reject | The user's decision allows every board move except to Done; reported to the user. |
+| S5b+U15 | A Done ticket can be moved out of Done from the menu | low | reject | The user's decision allows every board move except to Done; reported to the user. Superseded 2026-10-02: the user asked for a "Reopen this ticket?" confirmation and a server-side `reopen` flag (Plan Change Log). |
 | S6 | `mark` follows a symlinked plan file | low | reject | Only in a trusted project, whose own Python already runs (4.2 trust model). |
 | S7 | `expectedStatus` optional; unknown statuses and blocked fields not compared | low | reject | Optional by the contract decision (back-compatible); unknown statuses can't be expressed in the schema. |
 | S9 | A post-mark refetch can join an in-flight `status` read and briefly show the old status | low | reject | The watcher's `ticket.changed` refetches within seconds. |

@@ -676,3 +676,78 @@ test('changing a status from the board (story 4.10): keyboard only, focus on the
     { extra: { ticketStore, bmadSource }, files: SET_UP },
   );
 });
+
+test('reopening a Done ticket from the board (story 4.10, user decision 2026-10-02): confirm first, keyboard only; Esc sends nothing; the API refuses an unconfirmed reopen', async ({ page }) => {
+  const server = await serverModule();
+  const DONE = { ...ROW, ref: '1.9', id: 9, epic: 'epic-planning-and-board', title: 'Build the done thing', type: 'story', status: 'done', state: 'done', blocked_reason: '' };
+  let ticketStore = server.createMemoryTicketStore();
+  const bmadSource = server.createMemoryBmadSource({ ready: true });
+  const store = {
+    get calls() {
+      return ticketStore.calls;
+    },
+    tree: (...args: Parameters<typeof ticketStore.tree>) => ticketStore.tree(...args),
+    find: (...args: Parameters<typeof ticketStore.find>) => ticketStore.find(...args),
+    mark: (...args: Parameters<typeof ticketStore.mark>) => ticketStore.mark(...args),
+    watch: (...args: Parameters<typeof ticketStore.watch>) => ticketStore.watch(...args),
+  };
+  await withChatServer(
+    page,
+    async ({ server: running, repo }) => {
+      const realPath = realpathSync.native(repo);
+      ticketStore = server.createMemoryTicketStore({ repos: { [realPath]: { tickets: [...BOARD_TICKETS, DONE], folder: 'initiative-demo' } } });
+      const { wsId, call } = await openProject(page, repo);
+      await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: ['board'] });
+      await call('PUT', apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId }));
+      const marks = () => store.calls.filter((each) => each[0] === 'mark');
+
+      // The API: out of Done without the confirmation is refused, and nothing runs.
+      await expect(call('PUT', apiPath(API_ROUTES.workspaceTicketStatus, { wsId, ref: '1.9' }), { status: 'draft', expectedStatus: 'done' })).rejects.toThrow(/409: .*reopen_not_confirmed/);
+      expect(marks()).toEqual([]);
+
+      await page.goto(`${running.url}/w/${wsId}/board`);
+      const card = page.locator('[data-testid="ticket-card"][data-ref="1.9"]');
+      await expect(card).toHaveAttribute('data-column', 'done');
+      const trigger = page.getByRole('button', { name: 'Change status of 1.9 Build the done thing' });
+      const pointerEvents = () => page.evaluate(() => document.body.style.pointerEvents);
+
+      // Keyboard only: Tab to the status button, Enter, the first item asks to reopen; focus starts on Cancel; Esc sends nothing.
+      await card.focus();
+      await page.keyboard.press('Tab');
+      await expect(trigger).toBeFocused();
+      await page.keyboard.press('Enter');
+      const items = page.getByRole('menu').getByRole('menuitem');
+      await expect(items.first()).toBeFocused();
+      await expect(page.getByRole('menuitem', { name: 'Move to Done' })).toHaveCount(0);
+      await page.keyboard.press('Enter');
+      const confirm = page.getByRole('alertdialog', { name: 'Reopen this ticket?' });
+      await expect(confirm).toBeVisible();
+      await expect(confirm).toContainText('1.9 is done. It moves to Draft and needs approving again to be done.');
+      await expect(confirm.getByRole('button', { name: 'Cancel' })).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('alertdialog')).toHaveCount(0);
+      await expect(trigger).toBeFocused();
+      expect(await pointerEvents()).not.toBe('none');
+      expect(marks()).toEqual([]);
+      await expect(card).toHaveAttribute('data-column', 'done');
+
+      // Reopen to Ready: the move lands, focus on the moved card.
+      await page.keyboard.press('Enter');
+      await expect(items.first()).toBeFocused();
+      await page.keyboard.press('ArrowDown');
+      await expect(page.getByRole('menuitem', { name: 'Move to Ready' })).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(confirm).toBeVisible();
+      await expect(confirm).toContainText('It moves to Ready');
+      await page.keyboard.press('Tab');
+      await expect(confirm.getByRole('button', { name: 'Reopen' })).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(card).toHaveAttribute('data-column', 'ready');
+      await expect(card).toBeFocused();
+      await expect(page.getByTestId('board-announcement')).toHaveText('1.9 moved to Ready');
+      expect(await pointerEvents()).not.toBe('none');
+      expect(marks()).toEqual([['mark', realPath, '1.9', 'ready-for-dev', undefined]]);
+    },
+    { extra: { ticketStore: store, bmadSource }, files: SET_UP },
+  );
+});

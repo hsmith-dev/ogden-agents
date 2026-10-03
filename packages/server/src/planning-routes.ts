@@ -24,7 +24,8 @@
  *   `tickets.py mark` (marks of one repo one at a time). 400 for a malformed
  *   body or ref, 404 when no ticket matches exactly, 409
  *   `status_not_allowed` for `done` and `ticket_changed` when the status
- *   is no longer `expectedStatus` (nothing written either way), 409
+ *   is no longer `expectedStatus`, `reopen_not_confirmed` when it was
+ *   `done` without `reopen: true` (nothing written in each case), 409
  *   `bmad_not_downloaded` and 503 `tickets_unavailable` as the tree, 413
  *   for a body over its small limit (read after the guards).
  * - `GET …/bmad/setup` (`planning` or `board`; no trust; entry 4.3) →
@@ -47,6 +48,7 @@
 import {
   NotFoundError,
   TicketChangedError,
+  ReopenNotConfirmedError,
   TicketsUnavailableError,
   ValidationError,
   type BmadFeatures,
@@ -207,7 +209,8 @@ export function registerPlanningRoutes(app: Hono, { bmad, scriptTrust, planning,
         else if (error instanceof TicketChangedError) {
           log.info('ticket changed since shown; status not changed', { workspaceId, ref });
           response = apiError(c, 409, 'ticket_changed', error.message);
-        } else if (error instanceof TicketsUnavailableError) response = ticketsUnavailable(c, workspaceId, error);
+        } else if (error instanceof ReopenNotConfirmedError) response = apiError(c, 409, 'reopen_not_confirmed', error.message);
+        else if (error instanceof TicketsUnavailableError) response = ticketsUnavailable(c, workspaceId, error);
         // `NotFoundError` and `StatusNotAllowedError` answer 404 and 409 through the guarded helper.
         else throw error;
       }

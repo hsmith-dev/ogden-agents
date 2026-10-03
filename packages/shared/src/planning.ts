@@ -290,6 +290,9 @@ export const MARKABLE_TICKET_STATUSES: readonly TicketStatus[] = TICKET_STATUSES
 /** The longest blocked reason the board sends, in characters. */
 export const MAX_BLOCKED_REASON_LENGTH = 500;
 
+/** `reopen` sent for a ticket the request doesn't say is Done (story 4.10). */
+export const REOPEN_ONLY_FROM_DONE_MESSAGE = 'Only a Done ticket can be reopened.';
+
 /** A blocked reason left empty: the schema's message and the board's field error (story 4.10). */
 export const BOARD_BLOCKED_REASON_REQUIRED = 'Say why it is blocked.';
 /** A blocked reason holding a control character (other than a line break or tab) or a broken character. */
@@ -319,10 +322,20 @@ export const MarkTicketRequest = z
      * `ticket_changed`. Left out, the mark runs whatever the status is.
      */
     expectedStatus: z.union([TicketStatus, z.literal('')]).optional(),
+    /**
+     * The user confirmed reopening a Done ticket (story 4.10, user decision
+     * 2026-10-02). Required (`true`) when `expectedStatus` is `done`, else
+     * 409 `reopen_not_confirmed` and nothing is written; only with it.
+     */
+    reopen: z.literal(true).optional(),
   })
   .refine((request) => request.blockedReason === undefined || request.status === 'blocked', {
     message: 'A reason goes only with Blocked.',
     path: ['blockedReason'],
+  })
+  .refine((request) => request.reopen === undefined || request.expectedStatus === 'done', {
+    message: REOPEN_ONLY_FROM_DONE_MESSAGE,
+    path: ['reopen'],
   });
 export type MarkTicketRequest = z.infer<typeof MarkTicketRequest>;
 
@@ -728,6 +741,23 @@ export const BOARD_BLOCKED_REASON_LABEL = 'Reason';
 export const BOARD_BLOCKED_SAVE_LABEL = 'Save';
 /** The blocked reason dialog's cancel button. */
 export const BOARD_BLOCKED_CANCEL_LABEL = 'Cancel';
+
+// ---- Reopening a Done ticket from the board (story 4.10, user decision 2026-10-02) ----
+
+/** `reopen_not_confirmed` (409): a change to a Done ticket that wasn't confirmed as a reopen. */
+export const REOPEN_NOT_CONFIRMED_MESSAGE = 'This ticket is done. Confirm that you want to reopen it, then try again.';
+/** The reopen confirmation's title. */
+export const BOARD_REOPEN_DIALOG_TITLE = 'Reopen this ticket?';
+/** The reopen confirmation's one sentence: what happens ("1.2 is done. It moves to Ready and needs approving again."). */
+export function boardReopenDescription(ref: string, status: TicketStatus): string {
+  const column = COLUMN_OF_STATUS[status];
+  const place = column === null ? `${ref} is done. It is dropped` : `${ref} is done. It moves to ${BOARD_COLUMN_LABELS[column]}`;
+  return `${place} and needs approving again to be done.`;
+}
+/** The reopen confirmation's confirm button. */
+export const BOARD_REOPEN_CONFIRM_LABEL = 'Reopen';
+/** The reopen confirmation's cancel button. */
+export const BOARD_REOPEN_CANCEL_LABEL = 'Cancel';
 
 /** The setup panel's button (Plan and Board, a piece on without `_bmad/`). */
 export const BMAD_SET_UP_LABEL = 'Set up';

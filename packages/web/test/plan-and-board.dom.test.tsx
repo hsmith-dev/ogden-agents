@@ -993,6 +993,96 @@ describe('Changing a status from the board (story 4.10)', () => {
     expect(document.activeElement).toBe(screen.getByTestId('ticket-status-trigger'));
   });
 
+  it('a Done ticket (user decision 2026-10-02): a move asks "Reopen this ticket?" first; Cancel and Esc send nothing and give focus back', async () => {
+    state.tickets = withStatus('1.2', 'done', { state: 'done' });
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    const items = await open('1.2');
+    expect(items.map((item) => item.getAttribute('data-status'))).not.toContain('done');
+    fireEvent.click(items.find((item) => item.getAttribute('data-status') === 'ready-for-dev')!);
+    await settle();
+    const dialog = screen.getByRole('alertdialog', { name: 'Reopen this ticket?' });
+    expect(dialog.getAttribute('aria-describedby')).toBeTruthy();
+    expect(document.getElementById(dialog.getAttribute('aria-describedby')!)!.textContent).toBe('1.2 is done. It moves to Ready and needs approving again to be done.');
+    expect(state.bodies).toEqual([]);
+    // Focus starts on Cancel (a confirmation's safe choice).
+    expect(document.activeElement).toBe(screen.getByTestId('ticket-reopen-cancel'));
+    fireEvent.click(screen.getByTestId('ticket-reopen-cancel'));
+    await settle();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(state.bodies).toEqual([]);
+    expect(document.activeElement).toBe(trigger('1.2'));
+    fireEvent.click((await open('1.2')).find((item) => item.getAttribute('data-status') === 'in-progress')!);
+    await settle();
+    fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape' });
+    await settle();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(state.bodies).toEqual([]);
+    expect(card('1.2').getAttribute('data-column')).toBe('done');
+  });
+
+  it('a Done ticket: Reopen sends the change with reopen: true', async () => {
+    state.tickets = withStatus('1.2', 'done', { state: 'done' });
+    state.mark = () => {
+      state.tickets = withStatus('1.2', 'ready-for-dev', { state: 'backlog' });
+      return { ref: '1.2', status: 'ready-for-dev' };
+    };
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    fireEvent.click((await open('1.2')).find((item) => item.getAttribute('data-status') === 'ready-for-dev')!);
+    await settle();
+    fireEvent.click(screen.getByTestId('ticket-reopen-confirm'));
+    await settle();
+    expect(state.bodies).toEqual([{ status: 'ready-for-dev', expectedStatus: 'done', reopen: true }]);
+    expect(card('1.2').getAttribute('data-column')).toBe('ready');
+    expect(screen.getByTestId('board-announcement').textContent).toBe('1.2 moved to Ready');
+  });
+
+  it('a Done ticket: Blocked asks to reopen, then for its reason, and sends both', async () => {
+    state.tickets = withStatus('1.2', 'done', { state: 'done' });
+    state.mark = { ref: '1.2', status: 'blocked' };
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    fireEvent.click((await open('1.2')).find((item) => item.getAttribute('data-status') === 'blocked')!);
+    await settle();
+    fireEvent.click(screen.getByTestId('ticket-reopen-confirm'));
+    await settle();
+    expect(screen.getByRole('dialog', { name: 'Why is 1.2 blocked?' })).toBeTruthy();
+    expect(state.bodies).toEqual([]);
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Broke again' } });
+    fireEvent.click(screen.getByTestId('ticket-blocked-save'));
+    await settle();
+    expect(state.bodies).toEqual([{ status: 'blocked', blockedReason: 'Broke again', expectedStatus: 'done', reopen: true }]);
+  });
+
+  it('in the sheet, a Done ticket asks to reopen inline (no second modal); Esc closes only the confirmation; Reopen sends it', async () => {
+    state.ticket = { ticket: { ...DETAIL, status: 'done', state: 'done' } };
+    state.mark = { ref: '1.3', status: 'in-progress' };
+    mount(<TicketSheet wsId={WS} ticketRef="1.3" onClose={() => {}} />);
+    await settle();
+    const pickInProgress = async () => {
+      fireEvent.keyDown(screen.getByTestId('ticket-status-trigger'), { key: 'Enter' });
+      await settle();
+      fireEvent.click(screen.getAllByTestId('ticket-status-item').find((item) => item.getAttribute('data-status') === 'in-progress')!);
+      await settle();
+    };
+    await pickInProgress();
+    const confirmation = screen.getByRole('alertdialog', { name: 'Reopen this ticket?' });
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(screen.getByTestId('ticket-sheet-status').contains(confirmation)).toBe(true);
+    expect(document.activeElement).toBe(screen.getByTestId('ticket-reopen-cancel'));
+    fireEvent.keyDown(confirmation, { key: 'Escape' });
+    await settle();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(document.activeElement).toBe(screen.getByTestId('ticket-status-trigger'));
+    expect(state.bodies).toEqual([]);
+    await pickInProgress();
+    fireEvent.click(screen.getByTestId('ticket-reopen-confirm'));
+    await settle();
+    expect(state.bodies).toEqual([{ status: 'in-progress', expectedStatus: 'done', reopen: true }]);
+  });
+
   it('the sheet shows a failure inline', async () => {
     state.ticket = { ticket: DETAIL };
     state.mark = { status: 409, code: 'status_not_allowed', message: 'Only approving the work marks a ticket done.' };

@@ -22,7 +22,7 @@ import type { BmadFeatures } from './bmad-features.js';
 import type { BmadScriptTrust } from './bmad-script-trust.js';
 import type { BmadSourceUseCases } from './bmad-source-port.js';
 import type { Entities } from './entities.js';
-import { StatusNotAllowedError, ValidationError } from './errors.js';
+import { ReopenNotConfirmedError, StatusNotAllowedError, ValidationError } from './errors.js';
 import { workspaceRepoPath } from './planning.js';
 import type { TicketStorePort } from './ticket-store-port.js';
 
@@ -46,7 +46,9 @@ export interface BoardUseCases {
    * plus `ValidationError` for a request that fails `MarkTicketRequest` and
    * `StatusNotAllowedError` for `done`, which only approve writes (AD-10);
    * nothing runs then. With `expectedStatus` (story 4.10) the store compares
-   * first: `TicketChangedError` and nothing written when it differs. Marks
+   * first: `TicketChangedError` and nothing written when it differs. With
+   * `expectedStatus: 'done'` it needs `reopen: true` (the user confirmed),
+   * else `ReopenNotConfirmedError` and nothing runs. Marks
    * of one repo run one at a time.
    */
   mark(workspaceId: WorkspaceId, ref: string, request: unknown): Promise<MarkTicketResponse>;
@@ -117,7 +119,9 @@ export function createBoard({ bmad, trust, source, entities, tickets }: BoardDep
       }
       // Only approve writes `done` (AD-10): the board never asks the store for it.
       if (parsed.data.status === 'done') throw new StatusNotAllowedError(parsed.data.status);
-      const { status, blockedReason, expectedStatus } = parsed.data;
+      const { status, blockedReason, expectedStatus, reopen } = parsed.data;
+      // Out of Done only once the user confirmed the reopen (user decision 2026-10-02); nothing runs otherwise.
+      if (expectedStatus === 'done' && reopen !== true) throw new ReopenNotConfirmedError(checked);
       // The guards again once it's this mark's turn: Board, the trust or the download may be gone meanwhile.
       return serialized(repoPath, async () => tickets.mark(guarded(workspaceId), checked, status, { blockedReason, expectedStatus }));
     },

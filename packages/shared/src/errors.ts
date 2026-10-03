@@ -91,6 +91,12 @@ export const API_ERROR_CODES = [
    * the request's `expectedStatus` no longer matches the plan. Nothing was written.
    */
   'ticket_changed',
+  /**
+   * A change to a Done ticket that didn't say it reopens it (409; story 4.10,
+   * user decision 2026-10-02): `expectedStatus` was `done` without `reopen: true`.
+   * Nothing was written.
+   */
+  'reopen_not_confirmed',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

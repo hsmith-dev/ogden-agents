@@ -4,7 +4,7 @@
  * doesn't know as having neither folder, as the real adapter does for a
  * missing repo.
  */
-import { BmadAlreadySetUpError } from '@ogden-agents/core';
+import { BmadAlreadySetUpError, BmadSetupError } from '@ogden-agents/core';
 import { BMAD_SETUP_STEPS, Catalog, type BmadSetupProgress } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { createBmadCatalog, createMemoryBmadCatalog, MEMORY_BUNDLED_BMAD_VERSION } from '../src/index.js';
@@ -41,7 +41,8 @@ describe('catalog-memory: the catalog and setup (story 4.2)', () => {
     expect(answer.skills[0]).toEqual({ name: 'bmad-spec', description: 'Spec.', label: null, group: null, module: null, installedAt: null, next: null });
     expect(answer.entryAction).toBe('bmad-spec');
     expect(answer.capabilities).toEqual({ plain_labels: true, ticket_tree: true });
-    expect(await catalog.catalog('/other')).toEqual({ modules: [], skills: [], agents: [], entryAction: null, capabilities: { plain_labels: false, ticket_tree: false } });
+    // Entry 4.11: a repo lacks no capability unless told (so every board and catalog works).
+    expect(await catalog.catalog('/other')).toEqual({ modules: [], skills: [], agents: [], entryAction: null, capabilities: { plain_labels: true, ticket_tree: true } });
     expect(catalog.catalogCalls).toEqual(['/repo', '/other']);
   });
 
@@ -74,6 +75,40 @@ describe('catalog-memory: the catalog and setup (story 4.2)', () => {
     const catalog = createMemoryBmadCatalog({}, {}, { setupFails: new Error('no disk') });
     await expect(catalog.setup('/repo', () => {})).rejects.toThrow('no disk');
     expect((await catalog.setupStatus('/repo')).state).toBe('not_set_up');
+  });
+});
+
+describe('catalog-memory: reduced mode and Upgrade (entry 4.11)', () => {
+  it('lacks what `missing` names (or what its catalog sets false), in the shared order, only of what is wanted', async () => {
+    const catalog = createMemoryBmadCatalog(
+      {},
+      {},
+      { missing: { '/old': ['ticket_tree', 'plain_labels'] }, catalogs: { '/labelless': { capabilities: { plain_labels: false, ticket_tree: true } } } },
+    );
+    expect(await catalog.missingCapabilities('/old', ['ticket_tree', 'plain_labels'])).toEqual(['plain_labels', 'ticket_tree']);
+    expect(await catalog.missingCapabilities('/old', ['ticket_tree'])).toEqual(['ticket_tree']);
+    expect(await catalog.missingCapabilities('/old', [])).toEqual([]);
+    expect(await catalog.missingCapabilities('/labelless', ['plain_labels', 'ticket_tree'])).toEqual(['plain_labels']);
+    expect(await catalog.missingCapabilities('/current', ['plain_labels', 'ticket_tree'])).toEqual([]);
+    expect((await catalog.catalog('/old')).capabilities).toEqual({ plain_labels: false, ticket_tree: false });
+    expect(catalog.capabilityCalls[0]).toEqual(['/old', ['ticket_tree', 'plain_labels']]);
+  });
+
+  it('upgrade runs in a repo with _bmad, then lacks nothing and has its afterUpgrade catalog; Set up still refuses it', async () => {
+    const catalog = createMemoryBmadCatalog(
+      { '/old': { hasBmad: true } },
+      {},
+      { missing: { '/old': ['plain_labels', 'ticket_tree'] }, catalogs: { '/old': { entryAction: null } }, afterUpgrade: { '/old': { entryAction: 'bmad-spec' } } },
+    );
+    await expect(catalog.setup('/old', () => {})).rejects.toBeInstanceOf(BmadAlreadySetUpError);
+    const steps: BmadSetupProgress[] = [];
+    expect((await catalog.setup('/old', (step) => steps.push(step), { upgrade: true })).state).toBe('current');
+    expect(steps.map((step) => step.step)).toEqual([...BMAD_SETUP_STEPS]);
+    expect(catalog.setupOptions).toEqual([{}, { upgrade: true }]);
+    expect(await catalog.missingCapabilities('/old', ['plain_labels', 'ticket_tree'])).toEqual([]);
+    expect(await catalog.catalog('/old')).toMatchObject({ entryAction: 'bmad-spec', capabilities: { plain_labels: true, ticket_tree: true } });
+    // No `_bmad/`: nothing to upgrade.
+    await expect(catalog.setup('/fresh', () => {}, { upgrade: true })).rejects.toBeInstanceOf(BmadSetupError);
   });
 });
 

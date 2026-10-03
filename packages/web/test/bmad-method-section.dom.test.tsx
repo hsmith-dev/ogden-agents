@@ -11,12 +11,19 @@
  * 4.3: with Planning or Board on, the setup status line says where BMad
  * Method's setup stands; turning on the first of them in a project without
  * `_bmad/` starts the setup, whose progress (from the workspace's events)
- * shows inline, then "Ready to plan.". The
+ * shows inline, then "Ready to plan.". Entry 4.11: under the status line,
+ * one reduced-mode notice per missing capability with one Upgrade this
+ * project (an unfinished setup offers Upgrade alone); Upgrade confirms,
+ * then starts the upgrade, whose progress shows here. The
  * settings API is replaced (the
  * settings query is a real query on a test client, so saved answers and
  * other tabs' changes land as they would); nothing reaches a server.
  */
 import {
+  BMAD_CAPABILITY_REDUCED_TEXT,
+  BMAD_SETUP_OWED_UPGRADE_TEXT,
+  BMAD_UPGRADE_DONE_TEXT,
+  BMAD_UPGRADE_LABEL,
   BMAD_NOT_SET_UP_TEXT,
   BMAD_OFF_TEXT,
   BMAD_ON_TEXT,
@@ -60,6 +67,8 @@ const state = vi.hoisted(() => ({
   setupStatus: undefined as BmadSetupStatus | undefined,
   hasBmad: false,
   setupStarts: 0,
+  /** Each setup start's request (entry 4.11: `{ upgrade: true }` for Upgrade). */
+  setupRequests: [] as unknown[],
   caughtUp: true,
   startRefused: undefined as Error | undefined,
 }));
@@ -83,8 +92,9 @@ vi.mock('@/events/event-stream', async () => {
 vi.mock('@/planning/bmad-setup-api', async () => ({
   ...(await vi.importActual<typeof import('../src/planning/bmad-setup-api')>('../src/planning/bmad-setup-api')),
   useBmadSetupStatus: (_wsId: string, enabled: boolean) => ({ data: enabled ? state.setupStatus : undefined, error: null }),
-  startBmadSetup: async () => {
+  startBmadSetup: async (_wsId: string, request: unknown = {}) => {
     state.setupStarts++;
+    state.setupRequests.push(request);
     if (state.startRefused !== undefined) throw state.startRefused;
     return Promise.resolve({ started: true, setup: { state: 'not_set_up', outputFolder: null, bundledVersion: '7.0.0', installedVersion: null, problems: [] } });
   },
@@ -193,6 +203,7 @@ beforeEach(() => {
   state.setupStatus = undefined;
   state.hasBmad = false;
   state.setupStarts = 0;
+  state.setupRequests = [];
   state.caughtUp = true;
   state.startRefused = undefined;
 });
@@ -528,5 +539,101 @@ describe('BmadMethodSection setup (story 4.3)', () => {
     expect(state.setupStarts).toBe(1);
     expect(screen.getByTestId('bmad-setup-status').getAttribute('data-state')).toBe('unusable');
     expect(screen.getByTestId('bmad-setup-error').textContent).toBe('BMad Method is already set up in this project.');
+  });
+});
+
+describe('BmadMethodSection reduced mode (entry 4.11)', () => {
+  const settle = () =>
+    act(async () => {
+      for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  const notices = () => screen.queryAllByTestId('reduced-mode-notice').map((notice) => [...notice.querySelectorAll('[data-testid="reduced-mode-text"]')].map((text) => text.textContent));
+
+  it('Planning and Board on, both missing: the status line, one notice with both sentences, one Upgrade', () => {
+    state.setupStatus = { ...setupStatus('update_available'), missingCapabilities: ['plain_labels', 'ticket_tree'] };
+    mount(['planning', 'board']);
+    expect(screen.getByTestId('bmad-setup-status').textContent).toContain(bmadUpdateAvailableText('7.0.0', '7.1.0'));
+    expect(notices()).toEqual([[BMAD_CAPABILITY_REDUCED_TEXT.plain_labels, BMAD_CAPABILITY_REDUCED_TEXT.ticket_tree]]);
+    expect(screen.getAllByRole('button', { name: BMAD_UPGRADE_LABEL })).toHaveLength(1);
+    expect(screen.queryByTestId('bmad-set-up')).toBeNull();
+  });
+
+  it('only what the server lists (Board off: plain labels only); nothing missing shows no notice', () => {
+    state.setupStatus = { ...setupStatus('current'), missingCapabilities: ['plain_labels'] };
+    mount(['planning']);
+    expect(notices()).toEqual([[BMAD_CAPABILITY_REDUCED_TEXT.plain_labels]]);
+    cleanup();
+    state.setupStatus = { ...setupStatus('current'), missingCapabilities: [] };
+    mount(['planning', 'board']);
+    expect(notices()).toEqual([]);
+    expect(screen.queryByRole('button', { name: BMAD_UPGRADE_LABEL })).toBeNull();
+  });
+
+  it('an unfinished setup in a project with _bmad/ offers Upgrade, not Set up', () => {
+    state.setupStatus = { ...setupStatus('setup_owed'), missingCapabilities: [] };
+    mount(['planning']);
+    expect(screen.getByTestId('bmad-setup-status').textContent).toContain(BMAD_SETUP_OWED_UPGRADE_TEXT);
+    expect(screen.getByRole('button', { name: BMAD_UPGRADE_LABEL })).toBeTruthy();
+    expect(screen.queryByTestId('bmad-set-up')).toBeNull();
+  });
+
+  it('Upgrade confirms, then starts the upgrade; Cancel starts nothing; the progress shows, then the done line', async () => {
+    state.setupStatus = { ...setupStatus('current'), missingCapabilities: ['ticket_tree'] };
+    mount(['board']);
+    fireEvent.click(screen.getByRole('button', { name: BMAD_UPGRADE_LABEL }));
+    await settle();
+    fireEvent.click(screen.getByTestId('upgrade-confirm-cancel'));
+    await settle();
+    expect(state.setupStarts).toBe(0);
+    fireEvent.click(screen.getByRole('button', { name: BMAD_UPGRADE_LABEL }));
+    await settle();
+    fireEvent.click(screen.getByTestId('upgrade-confirm'));
+    await settle();
+    expect(state.setupRequests).toEqual([{ upgrade: true }]);
+    expect(screen.getByTestId('bmad-setup-panel').getAttribute('data-mode')).toBe('upgrade');
+    emit({ type: 'bmad.setup_started', payload: {} }, { type: 'bmad.setup_progress', payload: { step: 'checking', label: BMAD_SETUP_STEP_LABELS.checking } });
+    expect(screen.getByTestId('bmad-setup-panel').getAttribute('data-phase')).toBe('running');
+    emit({ type: 'bmad.setup_completed', payload: { status: { ...setupStatus('current'), missingCapabilities: [] } } });
+    expect(screen.getByTestId('bmad-upgrade-done').textContent).toBe(BMAD_UPGRADE_DONE_TEXT);
+    // The done line sits above the status line, which stays.
+    expect(screen.getByTestId('bmad-setup-status')).toBeTruthy();
+  });
+
+  it('Esc closes the confirmation and focus returns to Upgrade', async () => {
+    state.setupStatus = { ...setupStatus('current'), missingCapabilities: ['ticket_tree'] };
+    mount(['board']);
+    fireEvent.click(screen.getByRole('button', { name: BMAD_UPGRADE_LABEL }));
+    await settle();
+    fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape' });
+    await settle();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: BMAD_UPGRADE_LABEL }));
+  });
+
+  it('a completed upgrade still lacking a capability shows no done line, and the remaining notice stays', async () => {
+    state.setupStatus = { ...setupStatus('current'), missingCapabilities: ['ticket_tree'] };
+    mount(['board']);
+    fireEvent.click(screen.getByRole('button', { name: BMAD_UPGRADE_LABEL }));
+    await settle();
+    fireEvent.click(screen.getByTestId('upgrade-confirm'));
+    await settle();
+    emit({ type: 'bmad.setup_started', payload: {} }, { type: 'bmad.setup_completed', payload: { status: { ...setupStatus('current'), missingCapabilities: ['ticket_tree'] } } });
+    expect(screen.queryByTestId('bmad-upgrade-done')).toBeNull();
+    expect(notices()).toEqual([[BMAD_CAPABILITY_REDUCED_TEXT.ticket_tree]]);
+  });
+
+  it('a failed Set up retried in a project that now has _bmad/ asks to upgrade and sends upgrade: true', async () => {
+    state.setupStatus = setupStatus('not_set_up', null);
+    mount(['planning']);
+    fireEvent.click(screen.getByTestId('bmad-set-up'));
+    await settle();
+    emit({ type: 'bmad.setup_started', payload: {} }, { type: 'bmad.setup_failed', payload: { reason: BMAD_SETUP_FAILURE_REASONS.timeout } });
+    // The failed run left `_bmad/` behind: the status now says the setup isn't finished.
+    state.setupStatus = setupStatus('setup_owed');
+    emit({ type: 'workspace.settings_changed', payload: {} });
+    fireEvent.click(screen.getByTestId('bmad-set-up-again'));
+    await settle();
+    fireEvent.click(screen.getByTestId('upgrade-confirm'));
+    await settle();
+    expect(state.setupRequests).toEqual([{}, { upgrade: true }]);
   });
 });

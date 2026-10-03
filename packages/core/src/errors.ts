@@ -3,6 +3,9 @@ import {
   BMAD_DOWNLOAD_OFFLINE_MESSAGE,
   BMAD_NOT_DOWNLOADED_MESSAGE,
   BMAD_ALREADY_SET_UP_MESSAGE,
+  BMAD_NOT_SET_UP_MESSAGE,
+  BMAD_UPGRADE_REFUSED_TEXT,
+  REDUCED_MODE_MESSAGE,
   BMAD_SETUP_FAILURE_REASONS,
   FEATURE_OFF_MESSAGE,
   FEATURE_UNAVAILABLE_MESSAGE,
@@ -10,6 +13,7 @@ import {
   STATUS_NOT_ALLOWED_MESSAGE,
   TICKET_CHANGED_MESSAGE,
   REOPEN_NOT_CONFIRMED_MESSAGE,
+  type BmadCapability,
   type BmadSetupFailureReason,
   type SessionTerminal,
   type TerminalUnavailableCode,
@@ -115,6 +119,42 @@ export class BmadAlreadySetUpError extends CoreError {
   override readonly name = 'BmadAlreadySetUpError';
   constructor() {
     super('bmad_already_set_up', BMAD_ALREADY_SET_UP_MESSAGE);
+  }
+}
+
+/**
+ * A piece that needs BMad Method installed was used in a project without
+ * `_bmad/` (story 4.2's `bmad_not_set_up`; entry 4.11: Upgrade this project
+ * asked for in a project that was never set up). Nothing ran.
+ */
+export class BmadNotSetUpError extends CoreError {
+  override readonly name = 'BmadNotSetUpError';
+  constructor() {
+    super('bmad_not_set_up', BMAD_NOT_SET_UP_MESSAGE);
+  }
+}
+
+/**
+ * Upgrade this project was refused before anything was written (entry 4.11):
+ * the project's `_bmad` is a link or a file, not a folder.
+ */
+export class BmadUpgradeRefusedError extends CoreError {
+  override readonly name = 'BmadUpgradeRefusedError';
+  constructor() {
+    super('bmad_upgrade_refused', BMAD_UPGRADE_REFUSED_TEXT);
+  }
+}
+
+/**
+ * The project's BMad Method lacks a capability the use-case needs (AD-14,
+ * entry 4.11): core refused before anything ran (for the board, before
+ * `tickets.py`). `capability` is the first missing one. The UI shows the
+ * reduced-mode notice with Upgrade this project.
+ */
+export class ReducedModeError extends CoreError {
+  override readonly name = 'ReducedModeError';
+  constructor(readonly capability: BmadCapability) {
+    super('reduced_mode', REDUCED_MODE_MESSAGE);
   }
 }
 

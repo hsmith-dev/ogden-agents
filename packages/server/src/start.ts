@@ -461,7 +461,7 @@ async function listenAndAnnounce({
     });
   // Every board use-case checks the piece, then the project's script trust (story 4.2), then the pinned BMad
   // Method (story 4.14), before the store runs anything.
-  const board = createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: bmadSource, entities: core.entities, tickets: ticketStore });
+  const board = createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: bmadSource, entities: core.entities, catalog: bmadCatalog, tickets: ticketStore });
   // One watch per project with Board on, trusted and BMad Method set up (story 4.8; the setup status is entry 4.3's):
   // an agent's ticket write reaches the board as `ticket.changed`.
   const ticketWatcher = createTicketWatcher({

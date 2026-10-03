@@ -7,22 +7,27 @@
  * store runs the project's own BMad Method scripts), then whether the pinned
  * BMad Method is downloaded (story 4.14, AD-13: `tickets.py` runs only from
  * the verified copy), so a project with Board off, not trusted, or an install
- * without the download runs nothing. The repo is the workspace's stored real
- * path, never request input.
+ * without the download runs nothing. Entry 4.11: last, the project's BMad
+ * Method must have the `ticket_tree` capability (read-only, through
+ * `BmadCatalogPort.missingCapabilities`), else `ReducedModeError` and
+ * nothing runs. The repo is the workspace's stored real path, never request
+ * input.
  */
 import {
   MarkTicketRequest,
   TICKET_REF_PATTERN,
+  type BmadCapability,
   type MarkTicketResponse,
   type TicketDetail,
   type TicketsResponse,
   type WorkspaceId,
 } from '@ogden-agents/shared';
+import type { BmadCatalogPort } from './bmad-catalog-port.js';
 import type { BmadFeatures } from './bmad-features.js';
 import type { BmadScriptTrust } from './bmad-script-trust.js';
 import type { BmadSourceUseCases } from './bmad-source-port.js';
 import type { Entities } from './entities.js';
-import { ReopenNotConfirmedError, StatusNotAllowedError, ValidationError } from './errors.js';
+import { BmadNotSetUpError, ReducedModeError, ReopenNotConfirmedError, StatusNotAllowedError, ValidationError } from './errors.js';
 import { workspaceRepoPath } from './planning.js';
 import type { TicketStorePort } from './ticket-store-port.js';
 
@@ -31,7 +36,8 @@ export interface BoardUseCases {
    * Every ticket of the project, in build order, and what couldn't be read.
    * `FeatureOffError` with Board off, `ScriptsNotTrustedError` without
    * the project's trust and `BmadNotDownloadedError` without the pinned BMad
-   * Method (nothing runs), `NotFoundError` for an unknown
+   * Method (nothing runs), `BmadNotSetUpError` without `_bmad/` and `ReducedModeError` when the project's BMad Method
+   * lacks the ticket tree (entry 4.11; nothing runs), `NotFoundError` for an unknown
    * workspace, `TicketsUnavailableError` when the store can't answer.
    */
   tickets(workspaceId: WorkspaceId): Promise<TicketsResponse>;
@@ -60,8 +66,17 @@ export interface BoardDeps {
   /** The pinned BMad Method (story 4.14): checked after the trust, never downloaded from here. */
   source: Pick<BmadSourceUseCases, 'requireReady'>;
   entities: Pick<Entities, 'getWorkspace'>;
+  /**
+   * The project's BMad Method (entry 4.11, AD-14), checked last, read-only,
+   * before the store runs anything: a `_bmad/` folder (`BmadNotSetUpError`
+   * without one), then the ticket tree (`ReducedModeError`).
+   */
+  catalog: Pick<BmadCatalogPort, 'detect' | 'missingCapabilities'>;
   tickets: TicketStorePort;
 }
+
+/** What the board needs of the project's BMad Method (AD-14). */
+const BOARD_CAPABILITIES: readonly BmadCapability[] = ['ticket_tree'];
 
 /** `ref` as the store takes it, or {@link ValidationError}. */
 function checkedRef(ref: unknown): string {
@@ -71,7 +86,7 @@ function checkedRef(ref: unknown): string {
   return ref;
 }
 
-export function createBoard({ bmad, trust, source, entities, tickets }: BoardDeps): BoardUseCases {
+export function createBoard({ bmad, trust, source, entities, catalog, tickets }: BoardDeps): BoardUseCases {
   /**
    * The tail of each repo's marks (story 4.10): a mark starts only once the
    * one before it settled, so two marks of one repo never interleave (each
@@ -92,25 +107,30 @@ export function createBoard({ bmad, trust, source, entities, tickets }: BoardDep
     });
     return result;
   };
-  /** The guards in order (the piece, the trust, then the pinned BMad Method), then the repo. */
-  const guarded = (workspaceId: WorkspaceId): string => {
+  /** The guards in order (the piece, the trust, the pinned BMad Method, `_bmad/`, then the ticket tree), then the repo. */
+  const guarded = async (workspaceId: WorkspaceId): Promise<string> => {
     bmad.requireBmadFeature(workspaceId, 'board');
     trust.requireScriptsTrusted(workspaceId);
     source.requireReady();
-    return workspaceRepoPath(entities, workspaceId);
+    const repoPath = workspaceRepoPath(entities, workspaceId);
+    // No `_bmad/` is Set up's, not reduced mode: Upgrade would be refused there.
+    if (!(await catalog.detect(repoPath)).hasBmad) throw new BmadNotSetUpError();
+    const missing = await catalog.missingCapabilities(repoPath, BOARD_CAPABILITIES);
+    if (missing.length > 0) throw new ReducedModeError(missing[0]!);
+    return repoPath;
   };
   return {
     async tickets(workspaceId) {
-      return tickets.tree(guarded(workspaceId));
+      return tickets.tree(await guarded(workspaceId));
     },
 
     async ticket(workspaceId, ref) {
-      const repoPath = guarded(workspaceId);
+      const repoPath = await guarded(workspaceId);
       return tickets.find(repoPath, checkedRef(ref));
     },
 
     async mark(workspaceId, ref, request) {
-      const repoPath = guarded(workspaceId);
+      const repoPath = await guarded(workspaceId);
       const checked = checkedRef(ref);
       const parsed = MarkTicketRequest.safeParse(request);
       if (!parsed.success) {
@@ -123,7 +143,7 @@ export function createBoard({ bmad, trust, source, entities, tickets }: BoardDep
       // Out of Done only once the user confirmed the reopen (user decision 2026-10-02); nothing runs otherwise.
       if (expectedStatus === 'done' && reopen !== true) throw new ReopenNotConfirmedError(checked);
       // The guards again once it's this mark's turn: Board, the trust or the download may be gone meanwhile.
-      return serialized(repoPath, async () => tickets.mark(guarded(workspaceId), checked, status, { blockedReason, expectedStatus }));
+      return serialized(repoPath, async () => tickets.mark(await guarded(workspaceId), checked, status, { blockedReason, expectedStatus }));
     },
   };
 }

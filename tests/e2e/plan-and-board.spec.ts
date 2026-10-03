@@ -751,3 +751,101 @@ test('reopening a Done ticket from the board (story 4.10, user decision 2026-10-
     { extra: { ticketStore: store, bmadSource }, files: SET_UP },
   );
 });
+
+test('reduced mode (entry 4.11): Plan, Board and Settings explain what is missing, and Upgrade this project ends with the notices gone and the tickets shown', async ({ page }) => {
+  const server = await serverModule();
+  // Until bound, an empty memory catalog and ticket store: no repo has BMad Method.
+  const catalog = lateCatalog(server.createMemoryBmadCatalog());
+  type MemoryStore = ReturnType<typeof server.createMemoryTicketStore>;
+  let inner: MemoryStore = server.createMemoryTicketStore();
+  const ticketStore: MemoryStore = {
+    get calls() {
+      return inner.calls;
+    },
+    tree: (...args) => inner.tree(...args),
+    find: (...args) => inner.find(...args),
+    mark: (...args) => inner.mark(...args),
+    watch: (...args) => inner.watch(...args),
+    watching: (...args) => inner.watching(...args),
+    emit: (...args) => inner.emit(...args),
+    fail: (...args) => inner.fail(...args),
+  };
+  const bmadSource = server.createMemoryBmadSource({ ready: true });
+  const PLAIN_LABELS_TEXT = "This project's BMad Method has actions Ogden Agents doesn't know, so starting from an idea isn't available and its actions show without plain names or groups.";
+  const TICKET_TREE_TEXT = "This project's BMad Method doesn't keep tickets the way Ogden Agents reads them, so the board isn't available.";
+  await withChatServer(
+    page,
+    async ({ server: running, repo }) => {
+      const real = realpathSync.native(repo);
+      const memory = server.createMemoryBmadCatalog(
+        { [real]: { hasBmad: true, hasOutput: true } },
+        { [real]: [{ name: 'bmad-help', description: 'Get help with BMad Method in this project.' }] },
+        {
+          setup: { [real]: { state: 'current', outputFolder: '_bmad-output', bundledVersion: '7.0.0', installedVersion: '7.0.0', problems: [] } },
+          missing: { [real]: ['plain_labels', 'ticket_tree'] },
+          afterUpgrade: { [real]: { entryAction: 'bmad-help' } },
+        },
+      );
+      // The upgrade's steps arrive a little apart, as the real setup's do, so the progress list can be seen.
+      catalog.bind({
+        ...memory,
+        setup: async (repoPath: string, onProgress: (progress: { step: string; label: string }) => void, options?: { upgrade?: boolean }) => {
+          for (const [step, label] of [
+            ['checking', 'Checking the project'],
+            ['copying_skills', 'Copying the BMad Method skills'],
+            ['writing_config', "Writing the project's BMad Method settings"],
+            ['verifying', 'Checking the setup'],
+          ] as const) {
+            onProgress({ step, label });
+            await new Promise((resolve) => setTimeout(resolve, 300));
+          }
+          return memory.setup(repoPath, () => {}, options);
+        },
+      });
+      inner = server.createMemoryTicketStore({ repos: { [real]: { tickets: BOARD_TICKETS, folder: 'initiative-demo' } } });
+      const { wsId, call } = await openProject(page, repo);
+      await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: ['planning', 'board'] });
+      await call('PUT', apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId }));
+
+      // Plan: the notice where "Start from an idea" was; the skills still list and start.
+      await page.goto(`${running.url}/w/${wsId}/plan`);
+      await expect(page.getByTestId('reduced-mode-notice')).toContainText(PLAIN_LABELS_TEXT);
+      await expect(page.getByTestId('plan-idea')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Start Get help with BMad Method in this project.' })).toBeVisible();
+
+      // Board: the notice instead of the board, so no card menu; the store never ran.
+      await page.goto(`${running.url}/w/${wsId}/board`);
+      await expect(page.getByTestId('reduced-mode-notice')).toContainText(TICKET_TREE_TEXT);
+      await expect(page.getByTestId('ticket-card')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: /Change status/ })).toHaveCount(0);
+      expect(ticketStore.calls.filter((each) => each[0] === 'tree')).toEqual([]);
+
+      // Workspace settings: the status line, one notice with a sentence per missing capability, one Upgrade.
+      await page.goto(`${running.url}/w/${wsId}/settings`);
+      await expect(page.getByTestId('reduced-mode-text')).toHaveText([PLAIN_LABELS_TEXT, TICKET_TREE_TEXT]);
+      await expect(page.getByRole('button', { name: 'Upgrade this project' })).toHaveCount(1);
+
+      // Upgrade from the Board: confirm, the progress, then the tickets.
+      await page.goto(`${running.url}/w/${wsId}/board`);
+      await page.getByRole('button', { name: 'Upgrade this project' }).click();
+      const confirm = page.getByRole('alertdialog', { name: 'Upgrade this project?' });
+      await expect(confirm.getByRole('button', { name: 'Cancel' })).toBeFocused();
+      await confirm.getByRole('button', { name: 'Upgrade', exact: true }).click();
+      await expect(page.getByTestId('bmad-setup-steps')).toBeVisible();
+      await expect(page.getByTestId('ticket-card')).toHaveCount(4, { timeout: 15_000 });
+      await expect(page.getByTestId('reduced-mode-notice')).toHaveCount(0);
+      // The upgrade's done line stays above the board.
+      await expect(page.getByTestId('bmad-upgrade-done')).toBeVisible();
+      expect(memory.setupOptions).toEqual([{ upgrade: true }]);
+
+      // The notices are gone everywhere: Plan has its idea prompt, Settings no notice.
+      await page.goto(`${running.url}/w/${wsId}/plan`);
+      await expect(page.getByTestId('plan-idea')).toBeVisible();
+      await expect(page.getByTestId('reduced-mode-notice')).toHaveCount(0);
+      await page.goto(`${running.url}/w/${wsId}/settings`);
+      await expect(page.getByTestId('bmad-setup-status')).toBeVisible();
+      await expect(page.getByTestId('reduced-mode-notice')).toHaveCount(0);
+    },
+    { extra: { bmadCatalog: catalog.port, ticketStore, bmadSource } },
+  );
+});

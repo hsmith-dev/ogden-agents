@@ -5,6 +5,7 @@ import {
   BmadSetupStartedResponse,
   BmadSetupStatusResponse,
   type BmadSetupProgress,
+  type BmadSetupStartRequest,
   type BmadSetupStatus,
   type CoreEvent,
 } from '@ogden-agents/shared';
@@ -34,9 +35,15 @@ export async function fetchBmadSetupStatus(wsId: string, auth: Auth = tabAuth): 
   return BmadSetupStatusResponse.parse(json).setup;
 }
 
-/** `POST /api/v1/workspaces/:wsId/bmad/setup`: starts a setup (`started: false` when one already runs). */
-export async function startBmadSetup(wsId: string, auth: Auth = tabAuth): Promise<BmadSetupStartedResponse> {
-  const json = await call(auth, apiPath(API_ROUTES.workspaceBmadSetup, { wsId }), { method: 'POST' }, BMAD_SETUP_FAILED);
+/**
+ * `POST /api/v1/workspaces/:wsId/bmad/setup`: starts a setup (`started: false`
+ * when one already runs). `{ upgrade: true }` is Upgrade this project (entry
+ * 4.11), sent as the body; Set up sends none, as before.
+ */
+export async function startBmadSetup(wsId: string, request: BmadSetupStartRequest = {}, auth: Auth = tabAuth): Promise<BmadSetupStartedResponse> {
+  const init: RequestInit =
+    request.upgrade === true ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ upgrade: true }) } : { method: 'POST' };
+  const json = await call(auth, apiPath(API_ROUTES.workspaceBmadSetup, { wsId }), init, BMAD_SETUP_FAILED);
   return BmadSetupStartedResponse.parse(json);
 }
 

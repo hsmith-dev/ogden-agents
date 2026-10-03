@@ -26,6 +26,10 @@
  *   folders whose first 64 KB define `load_central_config(` (what the
  *   verified `tickets.py` loads).
  *
+ * `missingCapabilities` (entry 4.11) reads only what the wanted capabilities
+ * need: the config script for `ticket_tree`, the skills (and module records)
+ * for `plain_labels`, so a project with Planning off is never scanned.
+ *
  * Read-only and inside the repo, as `scanSkills`: the root must be a real
  * folder, every file read is a regular file whose real path is inside the
  * repo's, read up to {@link MAX_SKILL_FILE_BYTES}; any error leaves that
@@ -34,7 +38,7 @@
  */
 import { lstat, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { CatalogAgent, CatalogModule, CatalogSkill, SKILL_NAME_PATTERN, type Catalog } from '@ogden-agents/shared';
+import { BMAD_CAPABILITIES, CatalogAgent, CatalogModule, CatalogSkill, SKILL_NAME_PATTERN, type BmadCapability, type Catalog } from '@ogden-agents/shared';
 import { applyLabels, MODULE_CODE_PATTERN, readModuleLabels, type LabelMap } from './labels.js';
 import { SKILL_LABELS } from './skill-labels.js';
 import { MAX_SKILL_FOLDER_ENTRIES, readHead, readInsideRepo, realRepoRoot, scanSkillsAt, SKILL_FOLDERS } from './skills.js';
@@ -170,4 +174,28 @@ export async function buildCatalog(repoPath: string, labels: LabelMap = SHIPPED_
     entryAction: labelled.entryAction,
     capabilities: { plain_labels: labelled.labelled, ticket_tree: ticketTree },
   };
+}
+
+/** Whether an installed skill (not a module record) has a label in `labels`: the `plain_labels` capability. */
+async function hasPlainLabels(repoReal: string, labels: LabelMap): Promise<boolean> {
+  const [{ recordFolders }, installed] = await Promise.all([readModuleRecords(repoReal), scanSkillsAt(repoReal)]);
+  return applyLabels(
+    installed.filter((skill) => !recordFolders.has(skill.name)),
+    labels,
+  ).labelled;
+}
+
+/**
+ * Which of `wanted` the repo at `repoPath` lacks (entry 4.11, AD-14; see the
+ * file's comment), in {@link BMAD_CAPABILITIES} order, each once. Only what
+ * `wanted` names is read. A path that isn't an absolute path to a real
+ * folder lacks every one; nothing throws for the repo's state.
+ */
+export async function missingCapabilities(repoPath: string, wanted: readonly BmadCapability[], labels: LabelMap = SHIPPED_LABELS): Promise<BmadCapability[]> {
+  const asked = BMAD_CAPABILITIES.filter((capability) => wanted.includes(capability));
+  if (asked.length === 0) return [];
+  const repoReal = await realRepoRoot(repoPath);
+  if (repoReal === undefined) return asked;
+  const has = await Promise.all(asked.map((capability) => (capability === 'ticket_tree' ? hasTicketTree(repoReal) : hasPlainLabels(repoReal, labels))));
+  return asked.filter((_capability, index) => !has[index]);
 }

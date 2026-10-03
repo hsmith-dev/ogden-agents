@@ -4,7 +4,7 @@
  * DOM: the Plan home shows "Start from an idea" (Enter starts a planning
  * session on the catalog's entry action with the idea; a blank idea asks
  * for one and sends nothing; a refused start says why under the field; no
- * entry action shows it disabled with one sentence), then the skills in the
+ * entry action shows the reduced-mode notice in its place, entry 4.11), then the skills in the
  * UX groups with their plain text, the skill name only in Developer mode,
  * and a "New" tag; each Start creates a planning session and hands it on.
  * With Planning off, the feature-off notice and a link to the settings, and
@@ -44,8 +44,9 @@ import {
   CatalogSkill,
   APPEARANCE_STORAGE_KEY,
   FEATURE_OFF_MESSAGE,
+  BMAD_UPGRADE_LABEL,
   PLAN_EMPTY_TITLE,
-  PLAN_IDEA_UNAVAILABLE_TEXT,
+  PLAN_ENTRY_REDUCED_TEXT,
   PLAN_LOADING_TEXT,
   PLAN_OPEN_SETTINGS_LABEL,
   PLAN_PROJECT_LOADING_TEXT,
@@ -140,7 +141,7 @@ vi.mock('@/auth/tab-token', () => ({
       state.calls.push(`${method} ${path}`);
       if (path.endsWith('/catalog')) {
         const catalog = state.catalog;
-        const whole = { modules: [], skills: catalog, agents: [], entryAction: state.entryAction, capabilities: { plain_labels: false, ticket_tree: true } };
+        const whole = { modules: [], skills: catalog, agents: [], entryAction: state.entryAction, capabilities: { plain_labels: true, ticket_tree: true } };
         return reply(catalog === 'pending' || (catalog as { status?: number }).status !== undefined ? catalog : whole);
       }
       if (path.endsWith('/bmad/script-trust')) return reply(state.trust);
@@ -323,17 +324,14 @@ describe('Plan home (story 4.6)', () => {
     expect(screen.getByRole('button', { name: 'Start Create and manage tickets.' }).getAttribute('aria-disabled')).toBe('true');
   });
 
-  it('with no entry action, the idea shows disabled with one sentence and sends nothing', async () => {
+  it('with no entry action, the reduced-mode notice stands where the idea was, with Upgrade, and nothing is sent (entry 4.11)', async () => {
     mount(<PlanHome wsId={WS} onStarted={() => {}} />);
     await settle();
-    expect(screen.getByRole('heading', { name: 'Start from an idea', level: 2 })).toBeTruthy();
-    expect(ideaInput().disabled).toBe(true);
-    expect(screen.getByTestId('plan-idea-unavailable').textContent).toBe(PLAN_IDEA_UNAVAILABLE_TEXT);
-    expect(screen.getByTestId('plan-idea-start').getAttribute('aria-disabled')).toBe('true');
-    // The reason reaches the focusable Start too, not only the disabled field.
-    expect(screen.getByTestId('plan-idea-start').getAttribute('aria-describedby')).toBe('plan-idea-unavailable');
-    fireEvent.submit(ideaInput().closest('form')!);
-    await settle();
+    expect(screen.queryByTestId('plan-idea')).toBeNull();
+    expect(screen.getByTestId('reduced-mode-notice').textContent).toContain(PLAN_ENTRY_REDUCED_TEXT);
+    expect(screen.getByRole('button', { name: BMAD_UPGRADE_LABEL })).toBeTruthy();
+    // The skills still list and start.
+    expect(screen.getAllByTestId('skill-row')).toHaveLength(2);
     expect(posts()).toEqual([]);
   });
 
@@ -423,6 +421,7 @@ describe('Plan piece gate (story 4.6)', () => {
   });
 
   it('Planning on: the Plan home, from the catalog', async () => {
+    state.entryAction = 'bmad-spec';
     mount(page());
     await settle();
     expect(screen.queryByTestId('plan-feature-off')).toBeNull();

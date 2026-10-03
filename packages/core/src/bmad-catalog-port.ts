@@ -7,13 +7,28 @@
  * setup status and setup (entry 4.3). Reading a repo's files is
  * tool-specific, so it sits behind a core port and core names no file.
  */
-import type { BmadDetection, BmadSetupProgress, BmadSetupStatus, Catalog, CatalogSkill } from '@ogden-agents/shared';
+import type { BmadCapability, BmadDetection, BmadSetupProgress, BmadSetupStatus, Catalog, CatalogSkill } from '@ogden-agents/shared';
 
 /** What {@link BmadCatalogPort.detect} finds in a repo: the detection without the per-project offer answer core keeps. */
 export type BmadRepoDetection = Omit<BmadDetection, 'offerDismissed'>;
 
 /** One installed skill as its `SKILL.md` frontmatter gives it (story 4.1): the catalog adds Ogden Agents' label mapping (AD-12). */
 export type InstalledSkill = Pick<CatalogSkill, 'name' | 'description'>;
+
+/** How {@link BmadCatalogPort.setup} runs (entry 4.11). */
+export interface BmadSetupRunOptions {
+  /**
+   * Upgrade this project: the repo already has a real `_bmad/` folder, and
+   * setup adds what is missing and repairs BMad Method's scripts (upstream
+   * `setup.py`'s own repair, keeping the config's values, `custom/` and
+   * leftovers), and copies each pinned skill the project lacks in either
+   * skills folder, never touching one it has. Refused, nothing written, when
+   * `_bmad`, `.claude` or `.claude/skills` is a link or a file, or the
+   * existing config's output folder isn't a repo-relative path through real
+   * folders. Without it, setup runs only in a project with no `_bmad` entry.
+   */
+  upgrade?: boolean;
+}
 
 export interface BmadCatalogPort {
   /**
@@ -58,7 +73,19 @@ export interface BmadCatalogPort {
    * files only (`_bmad/` and the agent's skill folders). Core asks it only
    * for a workspace with Planning or Board on, and only when the user asked.
    */
-  setup(repoPath: string, onProgress: (progress: BmadSetupProgress) => void): Promise<BmadSetupStatus>;
+  setup(repoPath: string, onProgress: (progress: BmadSetupProgress) => void, options?: BmadSetupRunOptions): Promise<BmadSetupStatus>;
+  /**
+   * Which of `wanted` the repo's BMad Method lacks (AD-14, entry 4.11),
+   * judged from its files against what the verified pinned scripts need,
+   * never a version string: `ticket_tree` when `_bmad/scripts/config_utils.py`
+   * (through real folders, a regular file) defines `load_central_config`,
+   * `plain_labels` when an installed skill is one Ogden Agents' label mapping
+   * knows. In `BMAD_CAPABILITIES` order, each once. Read-only and inside the repo
+   * (lstat, regular files, bounded reads), no process and no network; only
+   * what `wanted` names is read (core asks only for the pieces that are on).
+   * A missing or unreadable repo lacks everything; it rejects only on a bug.
+   */
+  missingCapabilities(repoPath: string, wanted: readonly BmadCapability[]): Promise<BmadCapability[]>;
   /**
    * A Markdown document a planning session wrote (story 4.7), read-only:
    * `path` (repo-relative, `/`-separated, ending in `.md`) inside

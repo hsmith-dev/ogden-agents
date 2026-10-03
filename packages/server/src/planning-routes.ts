@@ -32,9 +32,15 @@
  *   `BmadSetupStatusResponse`, read from the project's files only (no
  *   process, no network).
  * - `POST …/bmad/setup` (the same; runs only the verified pinned `setup.py`,
- *   downloading it first) → 202 `BmadSetupStartedResponse`: a setup started (`started: false` when one already runs); progress
- *   follows as `bmad.setup_*` events. 409 `bmad_already_set_up` when the
- *   project already has `_bmad/`, nothing written.
+ *   downloading it first) with an optional small body
+ *   `BmadSetupStartRequest` (none, or `{}`, is Set up; `{upgrade: true}` is
+ *   Upgrade this project, entry 4.11) → 202 `BmadSetupStartedResponse`: a
+ *   setup started (`started: false` when one already runs); progress
+ *   follows as `bmad.setup_*` events. 400 for a malformed body, 413 for one
+ *   over its limit. Set up: 409 `bmad_already_set_up` when the project
+ *   already has `_bmad/`, nothing written. Upgrade: 409 `bmad_not_set_up`
+ *   without `_bmad/` and `bmad_upgrade_refused` when it is a link or a file,
+ *   nothing written.
  *
  * - `GET …/documents?path=` (`planning`; no trust: it reads one file, runs
  *   nothing; story 4.7) → `DocumentResponse`: a Markdown document inside
@@ -60,6 +66,7 @@ import {
 import {
   API_ROUTES,
   BMAD_NOT_DOWNLOADED_MESSAGE,
+  BmadSetupStartRequest,
   BmadSetupStartedResponse,
   BmadSetupStatusResponse,
   CatalogResponse,
@@ -84,6 +91,8 @@ import { readBody } from './request-input.js';
 const MAX_BODY_BYTES = 4 * 1024 + 4 * MAX_IDEA_LENGTH;
 /** A status, an expected status and a blocked reason (at most `MAX_BLOCKED_REASON_LENGTH` characters of up to 4 bytes each, or JSON-escaped). */
 const MAX_MARK_BODY_BYTES = 1024 + 6 * MAX_BLOCKED_REASON_LENGTH;
+/** `{"upgrade": true}` with room to spare (entry 4.11). */
+const MAX_SETUP_BODY_BYTES = 256;
 
 export interface PlanningRoutesOptions {
   /** Core's guard (AD-22). */
@@ -227,15 +236,27 @@ export function registerPlanningRoutes(app: Hono, { bmad, scriptTrust, planning,
     },
     { projectScripts: false },
   );
+  const setupLimit = bodyLimit({ maxSize: MAX_SETUP_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', 'That request is too large.') });
   routes.post(
     ['planning', 'board'],
     API_ROUTES.workspaceBmadSetup,
     async (c, { workspaceId }) => {
       if (bmadSetup === undefined) return notImplemented(c);
-      // No body is read: setup takes no input but the workspace.
-      const started = await bmadSetup.start(workspaceId);
-      if (started.started) log.info('BMad Method setup started', { workspaceId });
-      return c.json(BmadSetupStartedResponse.parse(started), 202);
+      let response: Response | undefined;
+      // The guards have passed, so the body limit applies here, after them; over it, `setupLimit` answers 413 itself.
+      const refused = await setupLimit(c, async () => {
+        // An empty body is Set up (story 4.3's request); anything else must be `BmadSetupStartRequest` (entry 4.11).
+        const body = await readBody(c, BmadSetupStartRequest, { optional: true });
+        if (!body.ok) {
+          response = body.response;
+          return;
+        }
+        const upgrade = body.value.upgrade === true;
+        const started = await bmadSetup.start(workspaceId, { upgrade });
+        if (started.started) log.info(upgrade ? 'BMad Method upgrade started' : 'BMad Method setup started', { workspaceId });
+        response = c.json(BmadSetupStartedResponse.parse(started), 202);
+      });
+      return response ?? refused ?? apiError(c, 413, 'invalid_request', 'That request is too large.');
     },
     { projectScripts: false },
   );

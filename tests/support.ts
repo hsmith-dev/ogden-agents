@@ -90,7 +90,9 @@ const SETUP_STEPS = [
  * then reports each step `stepMs` apart, then the project counts as set up in
  * memory, or the setup fails with `fail` (an error whose own text names a
  * path, which the UI must never show). Nothing is written and no uv runs; the
- * server tests run the real `setup.py`.
+ * server tests run the real `setup.py`. Its repos lack no capability (entry
+ * 4.11: as after a setup), so the board is never in reduced mode here; the
+ * reduced-mode browser test uses the memory catalog.
  */
 export async function stubSetupCatalog({
   fail = false,
@@ -112,6 +114,7 @@ export async function stubSetupCatalog({
     ...real,
     detect: async (repoPath) => ({ ...(await real.detect(repoPath)), hasBmad: await hasBmad(repoPath) }),
     setupStatus: async (repoPath) => status(await hasBmad(repoPath)),
+    missingCapabilities: async () => [],
     setup: async (repoPath, onProgress) => {
       if (source !== undefined) await source.download();
       for (const [step, label] of SETUP_STEPS) {

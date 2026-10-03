@@ -437,3 +437,15 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-change-a-ticket-s-status-from-the-board-plan.md`
   summary: Upstream `tickets.py mark` writes an existing plan with `open("wb")` (truncate then write), so a kill mid-write could leave a short plan; propose a temp file plus rename upstream.
   evidence: 4.10 security review S3: `cmd_mark` write path; runner kills on timeout and on close.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-reduced-mode-on-plain-upstream-bmad-plan.md`
+  summary: Upgrade this project fixes missing capabilities only: it never replaces a project's existing skill folders, so an outdated project (`update_available`, an older `bmod-method` record or skill) stays outdated. Updating those folders overwrites the user's files and needs a user decision on overwriting (which folders, whether to keep a copy, local edits).
+  evidence: 4.11 plan decisions: `packages/adapters/src/bmad-catalog/setup.ts` `copySkills` skips any skill in `.agents/skills` or `.claude/skills`; the real-uv upgrade test keeps the `bmod` fixture's `bmod-method` 6.10.0 record, so its status stays `update_available`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-reduced-mode-on-plain-upstream-bmad-plan.md`
+  summary: Setup and Upgrade check `_bmad`, `.claude/skills`, the output folder and `config.toml` by path before writing (and before a download that can take long), so a concurrent writer in the repo (an agent session) could swap in a link or an empty folder between the check and the copy, rename or setup.py run.
+  evidence: 4.11 security review (TOCTOU): `bmad-catalog/setup.ts` `checkUpgradeTarget`, `copySkills` (`rename` onto an empty folder succeeds on POSIX). Needs a concurrent writer; not reproduced. Same class as 4.3 S4.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-reduced-mode-on-plain-upstream-bmad-plan.md`
+  summary: Upstream `setup.py` swaps `_bmad` with renames (`replace_dir`) under the runner's 30 s kill; a kill between the two renames leaves the project's `_bmad` in `_bmad.old-<time>` (and a kill mid-copy leaves a `_bmad.setup-*` folder). Ogden should detect and offer to restore those leftovers, or the upgrade should run without a hard kill in that window.
+  evidence: 4.11 security review: `materialize_bmad`/`replace_dir` in the pinned `setup.py`; `SCRIPT_TIMEOUT_MS`. Mitigated by the upgrade's size cap on `_bmad`; the data is kept, not lost.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-reduced-mode-on-plain-upstream-bmad-plan.md`
+  summary: `setupStatus`'s `plainFileText` reads `_bmad/config.toml` and the `bmod-method` record without a size bound on every status GET; and one setup runs per workspace, not per repo path, if two workspaces can share a repo.
+  evidence: 4.11 security review; both pre-existing from 4.3 (`bmad-catalog/setup.ts` `plainFileText`, `core/src/bmad-setup.ts` `running` keyed by workspace).

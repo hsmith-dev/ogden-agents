@@ -1,4 +1,5 @@
 import {
+  BMAD_CAPABILITY_REDUCED_TEXT,
   BOARD_EMPTY_TITLE,
   BOARD_EPICS_LABEL,
   BOARD_HIDE_DETAILS_LABEL,
@@ -27,6 +28,7 @@ import { BmadDownloadPrompt } from './bmad-download-prompt';
 import { BoardEpic } from './board-epic';
 import { cardStatusLine, groupBoard, indexTickets, unmetPrerequisites, type CardStatus } from './board-model';
 import { useBoardEvents, useMarkTicket, useTickets } from './planning-api';
+import { ReducedModeNotice } from './reduced-mode-notice';
 import type { TicketStatusChoice } from './ticket-status-menu';
 
 /**
@@ -43,10 +45,27 @@ import type { TicketStatusChoice } from './ticket-status-menu';
  * dropped tickets stay hidden until "Show dropped tickets" is on. A project
  * whose BMad Method scripts aren't trusted yet shows the trust prompt (story
  * 4.2); without the pinned BMad Method downloaded, Download BMad Method
- * (story 4.14); each fetches the tickets again once done.
+ * (story 4.14); each fetches the tickets again once done. A project whose
+ * BMad Method lacks the ticket tree (`reduced_mode`, entry 4.11) shows the
+ * reduced-mode notice with Upgrade this project instead of the board (so no
+ * card menu); a completed upgrade fetches the tickets again.
  */
 export function BoardTickets({ wsId, sheet }: { wsId: string; /** The ticket sheet's outlet: shown only over a loaded board, never over a prompt or an error. */ sheet?: ReactNode }) {
   const tickets = useTickets(wsId);
+  const reduced = tickets.data === undefined && isApiError(tickets.error, 'reduced_mode');
+  // Once shown, the reduced-mode notice stays mounted in the same place (empty once the board loads), so an
+  // upgrade it ran keeps its progress and done line above the board (entry 4.11).
+  const shownReduced = useRef(false);
+  if (reduced) shownReduced.current = true;
+  return (
+    <>
+      {shownReduced.current ? <ReducedModeNotice wsId={wsId} texts={reduced ? [BMAD_CAPABILITY_REDUCED_TEXT.ticket_tree] : []} className="mb-4 flex max-w-(--space-chat-column) flex-col gap-3" /> : null}
+      {reduced ? null : <BoardTicketsBody wsId={wsId} sheet={sheet} tickets={tickets} />}
+    </>
+  );
+}
+
+function BoardTicketsBody({ wsId, sheet, tickets }: { wsId: string; sheet?: ReactNode; tickets: ReturnType<typeof useTickets> }) {
   const highlighted = useBoardEvents(wsId);
   if (isApiError(tickets.error, 'scripts_not_trusted')) return <ScriptTrustPrompt wsId={wsId} onTrusted={() => void tickets.refetch()} />;
   if (isApiError(tickets.error, 'bmad_not_downloaded')) return <BmadDownloadPrompt onDownloaded={() => void tickets.refetch()} />;

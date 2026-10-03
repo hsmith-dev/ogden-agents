@@ -1,4 +1,5 @@
 import {
+  BMAD_CAPABILITY_REDUCED_TEXT,
   groupCatalogSkills,
   isNewlyInstalled,
   MAX_IDEA_LENGTH,
@@ -7,13 +8,14 @@ import {
   PLAN_IDEA_ACTION,
   PLAN_IDEA_LABEL,
   PLAN_IDEA_PLACEHOLDER,
+  PLAN_ENTRY_REDUCED_TEXT,
   PLAN_IDEA_START_LABEL,
-  PLAN_IDEA_UNAVAILABLE_TEXT,
   PLAN_LOADING_TEXT,
   PLAN_NEW_TAG,
   PLAN_START_FAILED,
   PLAN_START_LABEL,
   PlanningIdea,
+  type Catalog,
   type CatalogSkill,
   type Session,
 } from '@ogden-agents/shared';
@@ -29,6 +31,7 @@ import { Row, RowList } from '@/ui/row-list';
 import { Skeleton } from '@/ui/skeleton';
 import { Text } from '@/ui/typography';
 import { startPlanningSession, useCatalog } from './planning-api';
+import { ReducedModeNotice } from './reduced-mode-notice';
 
 /**
  * The Plan home (story 4.6; EXPERIENCE.md Plan home): "Start from an idea"
@@ -40,8 +43,10 @@ import { startPlanningSession, useCatalog } from './planning-api';
  * time, and a failed start says why and frees the buttons.
  *
  * The web names no skill (AD-12): the idea's skill is the catalog's
- * `entryAction`. With none, the idea shows disabled with one sentence
- * (never hidden, AD-14).
+ * `entryAction`. Entry 4.11 (AD-14, never hidden): without the
+ * `plain_labels` capability, or without an entry action, the reduced-mode
+ * notice with Upgrade this project stands where the idea prompt was; the
+ * skills still list (by their `SKILL.md` description) and start.
  */
 export function PlanHome({ wsId, onStarted, now }: { wsId: string; onStarted: (session: Session) => void | Promise<void>; now?: Date }) {
   const catalog = useCatalog(wsId);
@@ -83,20 +88,24 @@ export function PlanHome({ wsId, onStarted, now }: { wsId: string; onStarted: (s
       </div>
     );
   }
-  if (catalog.data.skills.length === 0) return <EmptyState title={PLAN_EMPTY_TITLE} data-testid="plan-empty" />;
+  const reduced = planReducedText(catalog.data);
+  if (catalog.data.skills.length === 0) {
+    return (
+      <div className="flex max-w-(--space-chat-column) flex-col gap-6">
+        <ReducedModeNotice wsId={wsId} texts={reduced === undefined ? [] : [reduced]} />
+        <EmptyState title={PLAN_EMPTY_TITLE} data-testid="plan-empty" />
+      </div>
+    );
+  }
 
   const entryAction = catalog.data.entryAction;
   return (
     <div className="flex max-w-(--space-chat-column) flex-col gap-8">
-      <PlanIdea
-        busy={starting !== undefined}
-        unavailable={entryAction === null}
-        error={ideaError}
-        onInvalid={setIdeaError}
-        onSubmit={(idea) => {
-          if (entryAction !== null) start('idea', entryAction, idea, setIdeaError);
-        }}
-      />
+      {/* Always mounted, so an upgrade started here keeps its done line once the notice goes. */}
+      <ReducedModeNotice wsId={wsId} texts={reduced === undefined ? [] : [reduced]} />
+      {reduced !== undefined || entryAction === null ? null : (
+        <PlanIdea busy={starting !== undefined} error={ideaError} onInvalid={setIdeaError} onSubmit={(idea) => start('idea', entryAction, idea, setIdeaError)} />
+      )}
       <section aria-label={PLAN_ACTIONS_LABEL} className="flex flex-col gap-6" data-testid="plan-actions">
         {startError === undefined ? null : (
           <Text variant="caption" role="alert" data-testid="plan-start-error">
@@ -125,6 +134,15 @@ export function PlanHome({ wsId, onStarted, now }: { wsId: string; onStarted: (s
       </section>
     </div>
   );
+}
+
+/**
+ * The Plan page's reduced-mode sentence (entry 4.11), or `undefined` when
+ * "Start from an idea" works: no plain labels, else no entry action.
+ */
+export function planReducedText(catalog: Pick<Catalog, 'capabilities' | 'entryAction'>): string | undefined {
+  if (!catalog.capabilities.plain_labels) return BMAD_CAPABILITY_REDUCED_TEXT.plain_labels;
+  return catalog.entryAction === null ? PLAN_ENTRY_REDUCED_TEXT : undefined;
 }
 
 /**
@@ -174,16 +192,14 @@ function SkillRow({ skill, developerMode, isNew, busy, onStart }: { skill: Catal
   );
 }
 
-/** "Start from an idea": a heading, the labelled one-line prompt, Start (Enter submits), and its error or why it is off below it. */
+/** "Start from an idea": a heading, the labelled one-line prompt, Start (Enter submits), and its error below it. */
 function PlanIdea({
   busy,
-  unavailable,
   error,
   onInvalid,
   onSubmit,
 }: {
   busy: boolean;
-  unavailable: boolean;
   error: string | undefined;
   onInvalid(message: string): void;
   onSubmit(idea: string): void;
@@ -191,7 +207,7 @@ function PlanIdea({
   const [idea, setIdea] = useState('');
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (busy || unavailable) return;
+    if (busy) return;
     const parsed = PlanningIdea.safeParse(idea);
     if (!parsed.success) {
       onInvalid(parsed.error.issues[0]?.message ?? PLAN_START_FAILED);
@@ -199,7 +215,7 @@ function PlanIdea({
     }
     onSubmit(parsed.data);
   };
-  const below = unavailable ? 'plan-idea-unavailable' : error === undefined ? undefined : 'plan-idea-error';
+  const below = error === undefined ? undefined : 'plan-idea-error';
   return (
     <section aria-labelledby="plan-idea-heading" className="flex flex-col gap-3" data-testid="plan-idea">
       <h2 id="plan-idea-heading" className="m-0 text-heading text-foreground">
@@ -214,21 +230,16 @@ function PlanIdea({
               maxLength={MAX_IDEA_LENGTH}
               placeholder={PLAN_IDEA_PLACEHOLDER}
               autoComplete="off"
-              disabled={unavailable}
               aria-invalid={error === undefined ? undefined : true}
               aria-describedby={below}
               onChange={(event) => setIdea(event.target.value)}
               data-testid="plan-idea-input"
             />
-            <Button type="submit" aria-disabled={busy || unavailable} aria-describedby={unavailable ? 'plan-idea-unavailable' : undefined} data-testid="plan-idea-start">
+            <Button type="submit" aria-disabled={busy} data-testid="plan-idea-start">
               {PLAN_IDEA_START_LABEL}
             </Button>
           </div>
-          {unavailable ? (
-            <Text variant="caption" id="plan-idea-unavailable" data-testid="plan-idea-unavailable">
-              {PLAN_IDEA_UNAVAILABLE_TEXT}
-            </Text>
-          ) : error === undefined ? null : (
+          {error === undefined ? null : (
             <Text variant="caption" role="alert" id="plan-idea-error" data-testid="plan-idea-error">
               {error}
             </Text>

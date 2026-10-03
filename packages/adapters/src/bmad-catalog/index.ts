@@ -6,7 +6,8 @@
  * 4.4) is built in `catalog.ts`, so this file keeps
  * `detect`'s lstat-only guarantee below. Setup's status and setup itself
  * (entry 4.3) live in `setup.ts`, built from the options, and
- * `readDocument` (story 4.7) in `document.ts`.
+ * `readDocument` (story 4.7) in `document.ts`, `missingCapabilities`
+ * (entry 4.11) in `catalog.ts`.
  *
  * Read-only guarantee: `detect` first `lstat`s `repoPath` itself, which must
  * be a real folder (a repo root that has become a symlink or junction answers
@@ -24,7 +25,7 @@ import { lstat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import type { BmadCatalogPort, BmadRepoDetection } from '@ogden-agents/core';
 import type { Catalog } from '@ogden-agents/shared';
-import { buildCatalog } from './catalog.js';
+import { buildCatalog, missingCapabilities } from './catalog.js';
 import { readDocument } from './document.js';
 import { createBmadSetup, type BmadSetupOptions } from './setup.js';
 import { scanSkills } from './skills.js';
@@ -69,6 +70,8 @@ export function createBmadCatalog(options?: BmadSetupOptions): BmadCatalogPort {
     catalog: catalogOf,
     setupStatus: setup === undefined ? unconfigured : setup.setupStatus,
     setup: setup === undefined ? unconfigured : setup.setup,
+    // Reduced mode (entry 4.11): read-only, only what is asked for (`catalog.ts`).
+    missingCapabilities: (repoPath, wanted) => missingCapabilities(repoPath, wanted),
     async detect(repoPath): Promise<BmadRepoDetection> {
       // An empty or relative path would resolve against the server's own folder: answer nothing.
       if (typeof repoPath !== 'string' || repoPath === '' || !isAbsolute(repoPath)) return { hasBmad: false, hasOutput: false };

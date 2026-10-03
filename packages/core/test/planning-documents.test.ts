@@ -51,6 +51,7 @@ function fakeCatalog(documents: Record<string, string> = {}): FakeCatalog {
     catalog: async () => structuredClone(CATALOG),
     setupStatus: async () => structuredClone(port.status),
     setup: () => Promise.reject(new Error('not used')),
+    missingCapabilities: () => Promise.reject(new Error('not used')),
     readDocument: async (repoPath: string, outputFolder: string, path: string) => {
       port.reads.push([repoPath, outputFolder, path]);
       const content = documents[path];

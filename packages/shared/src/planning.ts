@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { BmadPiece } from './bmad.js';
 import { IsoUtcTimestamp } from './time.js';
 
 /**
@@ -137,13 +138,33 @@ export type BmadCapability = z.infer<typeof BmadCapability>;
 
 /** The reduced-mode notice's sentence for each missing capability (EXPERIENCE.md Reduced-mode notice). */
 export const BMAD_CAPABILITY_REDUCED_TEXT: Readonly<Record<BmadCapability, string>> = {
-  plain_labels: "This project's BMad Method is an older version, so its skills show without plain-language names or groups.",
-  ticket_tree: "This project's BMad Method is an older version, so its tickets can't be shown on the board.",
+  plain_labels: "This project's BMad Method has actions Ogden Agents doesn't know, so starting from an idea isn't available and its actions show without plain names or groups.",
+  ticket_tree: "This project's BMad Method doesn't keep tickets the way Ogden Agents reads them, so the board isn't available.",
 };
 
 /** Which capabilities the project's installed metadata has: every one is listed, `true` or `false`. */
 export const BmadCapabilities = z.object({ plain_labels: z.boolean(), ticket_tree: z.boolean() });
 export type BmadCapabilities = z.infer<typeof BmadCapabilities>;
+
+/**
+ * The capabilities each piece needs (entry 4.11, AD-14): Planning the plain
+ * labels and the entry action, Board the ticket tree. Builds and
+ * retrospectives need none until epics 5 and 7 say otherwise. A capability
+ * is read (and its notice shown) only for a piece that is on.
+ */
+export const BMAD_PIECE_CAPABILITIES: Readonly<Record<BmadPiece, readonly BmadCapability[]>> = {
+  planning: ['plain_labels'],
+  board: ['ticket_tree'],
+  builds: [],
+  retrospectives: [],
+};
+
+/** The capabilities `pieces` need, each once, in {@link BMAD_CAPABILITIES} order. */
+export function bmadCapabilitiesFor(pieces: Iterable<BmadPiece>): BmadCapability[] {
+  const wanted = new Set<BmadCapability>();
+  for (const piece of pieces) for (const capability of BMAD_PIECE_CAPABILITIES[piece]) wanted.add(capability);
+  return BMAD_CAPABILITIES.filter((capability) => wanted.has(capability));
+}
 
 /**
  * A project's catalog (AD-12): its installed modules, skills (sorted by
@@ -430,6 +451,12 @@ export const BmadSetupStatus = z.object({
   installedVersion: z.string().min(1).nullable(),
   /** What couldn't be read, in plain words. */
   problems: z.array(z.string()),
+  /**
+   * The capabilities the pieces that are on need and the project's BMad
+   * Method lacks (entry 4.11, AD-14), each with its reduced-mode notice.
+   * Absent for `not_set_up` and in payloads stored before 4.11.
+   */
+  missingCapabilities: z.array(BmadCapability).optional(),
 });
 export type BmadSetupStatus = z.infer<typeof BmadSetupStatus>;
 
@@ -444,6 +471,16 @@ export type BmadSetupStatusResponse = z.infer<typeof BmadSetupStatusResponse>;
  */
 export const BmadSetupStartedResponse = z.object({ started: z.boolean(), setup: BmadSetupStatus });
 export type BmadSetupStartedResponse = z.infer<typeof BmadSetupStartedResponse>;
+
+/**
+ * `POST /api/v1/workspaces/:wsId/bmad/setup`'s optional body (entry 4.11):
+ * `upgrade: true` is Upgrade this project, which runs the setup in a project
+ * that already has `_bmad/` (adding what is missing, repairing BMad
+ * Method's scripts, keeping its settings and every existing skill). No body
+ * (or `{}`) is Set up, unchanged.
+ */
+export const BmadSetupStartRequest = z.object({ upgrade: z.boolean().optional() }).strict();
+export type BmadSetupStartRequest = z.infer<typeof BmadSetupStartRequest>;
 
 /** The steps a setup reports, in order, each with its line in the progress list. */
 export const BMAD_SETUP_STEPS = ['checking', 'copying_skills', 'writing_config', 'verifying'] as const;
@@ -555,7 +592,7 @@ export const STATUS_NOT_ALLOWED_MESSAGE = 'Only approving the work marks a ticke
 /** `bmad_not_set_up` (409): a piece that needs BMad Method installed was used in a project without it. */
 export const BMAD_NOT_SET_UP_MESSAGE = "BMad Method isn't set up in this project yet. Set it up, then try again.";
 /** `reduced_mode` (409): the project's BMad Method lacks the capability this needs (AD-14). */
-export const REDUCED_MODE_MESSAGE = "This project's BMad Method is an older version that can't do this. Upgrade this project, then try again.";
+export const REDUCED_MODE_MESSAGE = "This project's BMad Method can't do this yet. Upgrade this project, then try again.";
 
 /** The Plan page's title. */
 export const PLAN_PAGE_TITLE = 'Plan';
@@ -579,7 +616,7 @@ export const PLAN_IDEA_LABEL = 'Your idea';
 export const PLAN_IDEA_PLACEHOLDER = 'What do you want to build?';
 /** The tag on a module installed in the last {@link NEW_TAG_DAYS} days. */
 export const PLAN_NEW_TAG = 'New';
-/** Said under "Start from an idea" while the project's catalog names no entry action (story 4.6; entry 4.11 brings the reduced-mode notice). */
+/** Said under "Start from an idea" while the project's catalog names no entry action (story 4.6). Unused since entry 4.11, whose reduced-mode notice says {@link PLAN_ENTRY_REDUCED_TEXT}; kept for compatibility. */
 export const PLAN_IDEA_UNAVAILABLE_TEXT = "Starting from an idea isn't available in this project yet. Pick an action below instead.";
 /** The idea's button. */
 export const PLAN_IDEA_START_LABEL = 'Start';
@@ -761,8 +798,30 @@ export const BOARD_REOPEN_CANCEL_LABEL = 'Cancel';
 
 /** The setup panel's button (Plan and Board, a piece on without `_bmad/`). */
 export const BMAD_SET_UP_LABEL = 'Set up';
-/** The reduced-mode notice's and the update's button. */
+/** The reduced-mode notice's button (entry 4.11): upgrades the project's BMad Method from the verified pinned copy, after a confirmation. */
 export const BMAD_UPGRADE_LABEL = 'Upgrade this project';
+/** The reduced-mode notice on Plan when the project's BMad Method has plain labels but not the skill that starts from an idea (entry 4.11). */
+export const PLAN_ENTRY_REDUCED_TEXT = "This project's BMad Method doesn't include the action that starts from an idea, so pick an action below instead.";
+/** Upgrade this project's confirmation title (entry 4.11). */
+export const BMAD_UPGRADE_CONFIRM_TITLE = 'Upgrade this project?';
+/** Upgrade this project's confirmation sentence: what it downloads, writes and keeps. */
+export const BMAD_UPGRADE_CONFIRM_TEXT =
+  "Ogden Agents downloads BMad Method if needed, adds the actions this project is missing and updates BMad Method's own scripts, keeping the values you set and your changes.";
+/** The confirmation's button that upgrades. */
+export const BMAD_UPGRADE_CONFIRM = 'Upgrade';
+/** The confirmation's button that changes nothing. */
+export const BMAD_UPGRADE_CANCEL = 'Cancel';
+/** Said when an upgrade finished. */
+export const BMAD_UPGRADE_DONE_TEXT = "Upgraded. This project's BMad Method now has what Ogden Agents uses.";
+/**
+ * Why an upgrade was refused, nothing written (entry 4.11): part of the
+ * project's BMad Method (its folder, skills folder, settings or output
+ * folder) is a link, a file, too large, or points outside the project.
+ */
+export const BMAD_UPGRADE_REFUSED_TEXT =
+  "Ogden Agents can't upgrade this project because part of its BMad Method folder is a link or points outside the project. Fix the _bmad folder, then try again.";
+/** The settings' status line when a setup was started but not finished in a project with `_bmad/` (entry 4.11): Upgrade finishes it. */
+export const BMAD_SETUP_OWED_UPGRADE_TEXT = "BMad Method's setup in this project isn't finished. Upgrade this project to finish it.";
 /** The setup panel's sentence when BMad Method isn't set up. */
 export const BMAD_NOT_SET_UP_TEXT = "BMad Method isn't set up in this project yet. Setting it up adds its files to this project's folder.";
 /** Said when a setup finished and the project reports current. */
@@ -781,6 +840,8 @@ export const BMAD_SETUP_FAILURE_REASONS = {
   not_writable: "Ogden Agents couldn't write to this project's folder. Check that you can change files there, then try again.",
   timeout: 'Setting up BMad Method took too long. Try again.',
   failed: "Ogden Agents couldn't set up BMad Method in this project. Try again.",
+  /** Upgrade this project refused before writing anything (entry 4.11). */
+  upgrade_refused: BMAD_UPGRADE_REFUSED_TEXT,
 } as const;
 export type BmadSetupFailureReason = keyof typeof BMAD_SETUP_FAILURE_REASONS;
 /** The settings' status line when the project's BMad Method is current. */

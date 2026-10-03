@@ -6,9 +6,11 @@
  * workspace's stored real path; a skill must be well-formed and in the
  * catalog; a planning session is a chat session of kind `planning` whose
  * first message is the agent's invocation of the skill, with the idea when
- * given; the board never asks the store for `done`.
+ * given; the board never asks the store for `done`. Entry 4.11: last of the
+ * board's guards, a project whose BMad Method lacks the ticket tree is
+ * refused with `reduced_mode` before the store runs anything.
  */
-import { CatalogSkill, MAX_IDEA_LENGTH, TicketRow, type Catalog, type SessionId, type TicketsResponse, type WorkspaceId } from '@ogden-agents/shared';
+import { CatalogSkill, MAX_IDEA_LENGTH, REDUCED_MODE_MESSAGE, TicketRow, type BmadCapability, type Catalog, type SessionId, type TicketsResponse, type WorkspaceId } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import {
   BmadDownloadError,
@@ -19,6 +21,7 @@ import {
   createPlanning,
   FeatureOffError,
   NotFoundError,
+  ReducedModeError,
   ReopenNotConfirmedError,
   ScriptsNotTrustedError,
   StatusNotAllowedError,
@@ -105,7 +108,23 @@ function fakeSource(ready: boolean): BmadSourcePort & { reads: number } {
   return source;
 }
 
-function setup(pieces: ('planning' | 'board')[] = ['planning', 'board'], { trusted = true, downloaded = true }: { trusted?: boolean; downloaded?: boolean } = {}) {
+/** The board's BMad Method check (entry 4.11): `_bmad/` unless `hasBmad` is false, lacking `missing`, recording each capability question. */
+function capabilityCatalog(missing: readonly BmadCapability[] = [], hasBmad = true) {
+  const asked: Array<[string, BmadCapability[]]> = [];
+  const catalog: Pick<BmadCatalogPort, 'detect' | 'missingCapabilities'> = {
+    detect: async () => ({ hasBmad, hasOutput: false }),
+    missingCapabilities: async (repoPath, wanted) => {
+      asked.push([repoPath, [...wanted]]);
+      return wanted.filter((capability) => missing.includes(capability));
+    },
+  };
+  return { catalog, asked };
+}
+
+function setup(
+  pieces: ('planning' | 'board')[] = ['planning', 'board'],
+  { trusted = true, downloaded = true, missing = [], hasBmad = true }: { trusted?: boolean; downloaded?: boolean; missing?: BmadCapability[]; hasBmad?: boolean } = {},
+) {
   const core: Core = openTestCore(tempDir(), undefined, { availableBmadPieces: ['planning', 'board'] });
   const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
   if (pieces.length > 0) core.permissions.updateSettings(workspace.id, { bmadPieces: pieces });
@@ -135,8 +154,9 @@ function setup(pieces: ('planning' | 'board')[] = ['planning', 'board'], { trust
     watch: () => Promise.reject(new Error('not watched in this test')),
   };
   const source = fakeSource(downloaded);
-  const board = createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: createBmadSource(source), entities: core.entities, tickets });
-  return { core, workspace, catalog, agent, chat, planning, board, read, marks, source, fail: (error: Error) => (answer = error) };
+  const capabilities = capabilityCatalog(missing, hasBmad);
+  const board = createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: createBmadSource(source), entities: core.entities, catalog: capabilities.catalog, tickets });
+  return { core, workspace, catalog, agent, chat, planning, board, read, marks, source, asked: capabilities.asked, fail: (error: Error) => (answer = error) };
 }
 
 const firstUserMessage = (core: Core, sessionId: SessionId) =>
@@ -266,6 +286,41 @@ describe('board trust and the rest of the contract (story 4.2)', () => {
     expect(untrusted.source.reads).toBe(0);
   });
 
+  it('without the ticket tree every board use-case refuses with reduced_mode, after the other guards, and runs nothing (entry 4.11)', async () => {
+    const { board, workspace, read, marks, asked } = setup(['board'], { missing: ['ticket_tree'] });
+    for (const attempt of [board.tickets(workspace.id), board.ticket(workspace.id, '1.1'), board.mark(workspace.id, '1.1', { status: 'ready-for-dev' })]) {
+      const error = await attempt.then(
+        () => undefined,
+        (failure: unknown) => failure,
+      );
+      expect(error).toBeInstanceOf(ReducedModeError);
+      expect(error).toMatchObject({ code: 'reduced_mode', message: REDUCED_MODE_MESSAGE, capability: 'ticket_tree' });
+    }
+    expect(read).toEqual([]);
+    expect(marks).toEqual([]);
+    expect(asked).toEqual(Array.from({ length: 3 }, () => [workspace.realPath, ['ticket_tree']]));
+
+    // Off, untrusted or not downloaded never asks for the capabilities.
+    for (const options of [{ trusted: false }, { downloaded: false }]) {
+      const other = setup(['board'], { ...options, missing: ['ticket_tree'] });
+      await expect(other.board.tickets(other.workspace.id)).rejects.not.toBeInstanceOf(ReducedModeError);
+      expect(other.asked).toEqual([]);
+    }
+    const off = setup(['planning'], { missing: ['ticket_tree'] });
+    await expect(off.board.tickets(off.workspace.id)).rejects.toThrow(FeatureOffError);
+    expect(off.asked).toEqual([]);
+  });
+
+  it('without _bmad/ every board use-case refuses with bmad_not_set_up, never asking for capabilities (entry 4.11)', async () => {
+    const { board, workspace, read, marks, asked } = setup(['board'], { hasBmad: false, missing: ['ticket_tree'] });
+    for (const attempt of [board.tickets(workspace.id), board.ticket(workspace.id, '1.1'), board.mark(workspace.id, '1.1', { status: 'ready-for-dev' })]) {
+      await expect(attempt).rejects.toMatchObject({ code: 'bmad_not_set_up' });
+    }
+    expect(asked).toEqual([]);
+    expect(read).toEqual([]);
+    expect(marks).toEqual([]);
+  });
+
   it('reads one ticket, and a missing one is not found; a malformed ref is invalid and runs nothing', async () => {
     const { board, workspace, read } = setup();
     expect((await board.ticket(workspace.id, '1.1')).ref).toBe('1.1');
@@ -313,7 +368,7 @@ describe('changing a status from the board (story 4.10)', () => {
         }
       },
     };
-    const board = createBoard({ bmad: base.core.bmad, trust: base.core.bmadScriptTrust, source: createBmadSource(fakeSource(true)), entities: base.core.entities, tickets: store });
+    const board = createBoard({ bmad: base.core.bmad, trust: base.core.bmadScriptTrust, source: createBmadSource(fakeSource(true)), entities: base.core.entities, catalog: capabilityCatalog().catalog, tickets: store });
     const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     return { ...base, board, log, releases, flush, statusNow: () => status };
   }

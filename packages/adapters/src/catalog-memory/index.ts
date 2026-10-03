@@ -9,13 +9,21 @@
  * current with `_bmad-output` as its output folder; a repo that already has
  * `_bmad/` (or a status other than `not_set_up`) is refused with
  * `BmadAlreadySetUpError` (story 4.3), as the real adapter refuses it.
+ * Entry 4.11: each repo lacks the capabilities `missing` names (none by
+ * default, so every board and catalog works; a repo whose catalog sets
+ * `capabilities` lacks those set `false`), and `setup` with `upgrade` runs
+ * only in a repo with `_bmad/` (or a status other than `not_set_up`), then
+ * clears its missing capabilities and applies its `afterUpgrade` catalog.
  */
-import { BmadAlreadySetUpError, type BmadCatalogPort, type BmadRepoDetection, type InstalledSkill } from '@ogden-agents/core';
+import { BmadAlreadySetUpError, BmadSetupError, type BmadCatalogPort, type BmadRepoDetection, type InstalledSkill } from '@ogden-agents/core';
 import {
+  BMAD_CAPABILITIES,
   BMAD_SETUP_STEP_LABELS,
   BMAD_SETUP_STEPS,
   CatalogSkill,
   MAX_DOCUMENT_BYTES,
+  type BmadCapabilities,
+  type BmadCapability,
   type BmadSetupProgress,
   type BmadSetupStatus,
   type Catalog,
@@ -33,6 +41,10 @@ export interface MemoryBmadCatalog extends BmadCatalogPort {
   readonly setupCalls: ReadonlyArray<readonly ['status' | 'setup', string]>;
   /** Every `readDocument` call, as `[repoPath, outputFolder, path]`, in order (story 4.7). */
   readonly documentCalls: ReadonlyArray<readonly [string, string, string]>;
+  /** Every `missingCapabilities` call, as `[repoPath, wanted]`, in order (entry 4.11). */
+  readonly capabilityCalls: ReadonlyArray<readonly [string, readonly BmadCapability[]]>;
+  /** Every `setup` call's options, in order (entry 4.11: `{ upgrade: true }` for an upgrade, `{}` otherwise). */
+  readonly setupOptions: ReadonlyArray<{ upgrade?: boolean }>;
 }
 
 /** The version the memory catalog says Ogden Agents bundles. */
@@ -51,6 +63,14 @@ export interface MemoryBmadCatalogOptions {
    * with (`null` for any other, as the real adapter answers a missing file).
    */
   documents?: Readonly<Record<string, Readonly<Record<string, string>>>>;
+  /**
+   * Each repo path's missing capabilities (entry 4.11, AD-14) until an
+   * upgrade; a repo not named lacks those its catalog's `capabilities` sets
+   * `false`, else none.
+   */
+  missing?: Readonly<Record<string, readonly BmadCapability[]>>;
+  /** Each repo path's catalog after an upgrade (merged over `catalogs`), such as the entry action it now has. */
+  afterUpgrade?: Readonly<Record<string, Partial<Omit<Catalog, 'skills' | 'capabilities'>>>>;
 }
 
 const notSetUp = (): BmadSetupStatus => ({
@@ -81,6 +101,21 @@ export function createMemoryBmadCatalog(
   const catalogCalls: string[] = [];
   const setupCalls: Array<readonly ['status' | 'setup', string]> = [];
   const documentCalls: Array<readonly [string, string, string]> = [];
+  const capabilityCalls: Array<readonly [string, readonly BmadCapability[]]> = [];
+  const setupOptions: Array<{ upgrade?: boolean }> = [];
+  const catalogs = new Map(Object.entries(options.catalogs ?? {}).map(([path, rest]) => [path, structuredClone(rest)]));
+  const missing = new Map(Object.entries(options.missing ?? {}).map(([path, list]) => [path, new Set(list)]));
+  /** What the repo lacks now: its `missing`, else what its catalog's capabilities set `false`. */
+  const missingOf = (repoPath: string): Set<BmadCapability> => {
+    const named = missing.get(repoPath);
+    if (named !== undefined) return named;
+    const capabilities = catalogs.get(repoPath)?.capabilities;
+    return new Set(capabilities === undefined ? [] : BMAD_CAPABILITIES.filter((capability) => !capabilities[capability]));
+  };
+  const capabilitiesOf = (repoPath: string): BmadCapabilities => {
+    const lacks = missingOf(repoPath);
+    return { plain_labels: !lacks.has('plain_labels'), ticket_tree: !lacks.has('ticket_tree') };
+  };
   const statusOf = (repoPath: string) => structuredClone(setups.get(repoPath) ?? notSetUp());
   return {
     calls,
@@ -88,6 +123,13 @@ export function createMemoryBmadCatalog(
     catalogCalls,
     setupCalls,
     documentCalls,
+    capabilityCalls,
+    setupOptions,
+    missingCapabilities: async (repoPath, wanted) => {
+      capabilityCalls.push([repoPath, [...wanted]]);
+      const lacks = missingOf(repoPath);
+      return BMAD_CAPABILITIES.filter((capability) => wanted.includes(capability) && lacks.has(capability));
+    },
     readDocument: async (repoPath, outputFolder, path) => {
       documentCalls.push([repoPath, outputFolder, path]);
       const folder = outputFolder.replace(/\/+$/, '');
@@ -110,22 +152,27 @@ export function createMemoryBmadCatalog(
     },
     catalog: async (repoPath) => {
       catalogCalls.push(repoPath);
-      const rest = options.catalogs?.[repoPath] ?? {};
+      const rest = catalogs.get(repoPath) ?? {};
       return structuredClone({
         modules: rest.modules ?? [],
         skills: (installed.get(repoPath) ?? []).map((skill) => CatalogSkill.parse(skill)).sort((a, b) => a.name.localeCompare(b.name)),
         agents: rest.agents ?? [],
         entryAction: rest.entryAction ?? null,
-        capabilities: rest.capabilities ?? { plain_labels: false, ticket_tree: false },
+        capabilities: capabilitiesOf(repoPath),
       });
     },
     setupStatus: async (repoPath) => {
       setupCalls.push(['status', repoPath]);
       return statusOf(repoPath);
     },
-    setup: async (repoPath, onProgress: (progress: BmadSetupProgress) => void) => {
+    setup: async (repoPath, onProgress: (progress: BmadSetupProgress) => void, setupOptionsGiven = {}) => {
       setupCalls.push(['setup', repoPath]);
-      if (known.get(repoPath)?.hasBmad === true || statusOf(repoPath).state !== 'not_set_up') throw new BmadAlreadySetUpError();
+      const upgrade = setupOptionsGiven.upgrade === true;
+      setupOptions.push(upgrade ? { upgrade: true } : {});
+      const hasBmad = known.get(repoPath)?.hasBmad === true || statusOf(repoPath).state !== 'not_set_up';
+      // Set up writes only where there is no `_bmad/`; Upgrade only where there is one (entry 4.11).
+      if (!upgrade && hasBmad) throw new BmadAlreadySetUpError();
+      if (upgrade && !hasBmad) throw new BmadSetupError('failed', { cause: 'not_set_up' });
       for (const step of BMAD_SETUP_STEPS) {
         onProgress({ step, label: BMAD_SETUP_STEP_LABELS[step] });
         // Each step after the caller's turn, as the real setup's lines arrive.
@@ -140,6 +187,12 @@ export function createMemoryBmadCatalog(
         problems: [],
       });
       known.set(repoPath, { ...known.get(repoPath), hasBmad: true });
+      if (upgrade) {
+        // Upgraded: every capability present, and the catalog as configured.
+        missing.set(repoPath, new Set());
+        const { capabilities: _before, ...rest } = catalogs.get(repoPath) ?? {};
+        catalogs.set(repoPath, { ...rest, ...structuredClone(options.afterUpgrade?.[repoPath] ?? {}) });
+      }
       return statusOf(repoPath);
     },
   };

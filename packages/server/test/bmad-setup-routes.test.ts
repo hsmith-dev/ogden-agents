@@ -19,6 +19,16 @@
  *   `pyproject.toml` and `uv.toml` would each leave a marker if run is set
  *   up with no marker written; and a repo's own `bmad` with a hostile
  *   `output_folder`, or a linked one, changes nothing outside the repo.
+ *
+ * Entry 4.11 (Upgrade this project): `POST` with `{upgrade: true}` in a
+ * project with `_bmad/` answers 202 and runs the catalog's upgrade with the
+ * same events; without `_bmad/` 409 `bmad_not_set_up`, with a linked `_bmad`
+ * 409 `bmad_upgrade_refused`, nothing run; Set up's own answers are
+ * unchanged (`{}` or no body, 409 `bmad_already_set_up`); a malformed body is
+ * 400 and one over the limit 413; `GET` lists the missing capabilities of
+ * the pieces that are on. Through real uv, both plain fixtures upgrade: the
+ * config's values and `custom/` are kept, the project's own skill is
+ * unchanged, and both capabilities are present after.
  */
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -30,6 +40,8 @@ import {
   ApiErrorBody,
   apiPath,
   BMAD_ALREADY_SET_UP_MESSAGE,
+  BMAD_NOT_SET_UP_MESSAGE,
+  BMAD_UPGRADE_REFUSED_TEXT,
   BMAD_SETUP_FAILURE_REASONS,
   BMAD_SETUP_STEPS,
   BmadSetupStartedResponse,
@@ -40,6 +52,7 @@ import {
 } from '@ogden-agents/shared';
 import { BmadSetupError } from '@ogden-agents/core';
 import { describe, expect, it } from 'vitest';
+import { createPlainRepo, PLAIN_BMOD_CONFIG, PLAIN_BMOD_OWN_SKILL, PLAIN_BMOD_USER_CONFIG, type PlainRepoKind } from '../../../tests/fixtures/bmad-plain/plain-repos.js';
 import { createFakeBmadRepo, type FakeBmadRepo } from '../../../tests/fixtures/fake-bmad-repo.js';
 import { fixtureUpstream, realUvMissing, removeAfterTest, signIn, startTestServer, tempDataDir, TEST_UV_PYTHON_ENV, UPSTREAM_FIXTURE, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
@@ -130,6 +143,103 @@ describe('BMad Method setup routes (story 4.3, memory catalog)', () => {
   });
 });
 
+describe('Upgrade this project over REST (entry 4.11, memory catalog)', () => {
+  it('POST {upgrade: true} in a project with _bmad/ runs the upgrade with the same events; GET then lacks nothing', async () => {
+    const repo = emptyRepo({}, true);
+    const real = realpathSync.native(repo.path);
+    const bmadCatalog = createMemoryBmadCatalog(
+      { [real]: { hasBmad: true } },
+      {},
+      { setup: { [real]: { state: 'current', outputFolder: '_bmad-output', bundledVersion: '7.0.0', installedVersion: '7.0.0', problems: [] } }, missing: { [real]: ['plain_labels', 'ticket_tree'] } },
+    );
+    const server = await startTestServer({ bmadCatalog });
+    const tab = await signIn(server);
+    const workspace = await project(server, tab, repo.path, ['planning', 'board']);
+    const setup = apiPath(API_ROUTES.workspaceBmadSetup, { wsId: workspace.id });
+    expect(BmadSetupStatusResponse.parse(await (await request(server, tab, 'GET', setup)).json()).setup.missingCapabilities).toEqual(['plain_labels', 'ticket_tree']);
+
+    // Set up is refused as before, with no body and with `{}`.
+    for (const body of [undefined, {}]) {
+      const refused = await request(server, tab, 'POST', setup, body);
+      expect(refused.status).toBe(409);
+      expect(ApiErrorBody.parse(await refused.json()).error).toEqual({ code: 'bmad_already_set_up', message: BMAD_ALREADY_SET_UP_MESSAGE });
+    }
+    const posted = await request(server, tab, 'POST', setup, { upgrade: true });
+    expect(posted.status).toBe(202);
+    expect(BmadSetupStartedResponse.parse(await posted.json()).started).toBe(true);
+    await waitFor(ended(server, workspace.id), 'the upgrade to end');
+    const events = setupEvents(server, workspace.id);
+    expect(events.map((event) => (event.type === 'bmad.setup_progress' ? event.payload.step : event.type))).toEqual(['bmad.setup_started', ...BMAD_SETUP_STEPS, 'bmad.setup_completed']);
+    expect(events.at(-1)).toMatchObject({ payload: { status: { state: 'current', missingCapabilities: [] } } });
+    expect(bmadCatalog.setupOptions).toEqual([{ upgrade: true }]);
+    expect(BmadSetupStatusResponse.parse(await (await request(server, tab, 'GET', setup)).json()).setup.missingCapabilities).toEqual([]);
+  });
+
+  it('GET lists only the capabilities of the pieces that are on, and none before setup', async () => {
+    const repo = emptyRepo({}, true);
+    const real = realpathSync.native(repo.path);
+    const status = { state: 'current' as const, outputFolder: '_bmad-output', bundledVersion: '7.0.0', installedVersion: '7.0.0', problems: [] };
+    const bmadCatalog = createMemoryBmadCatalog({ [real]: { hasBmad: true } }, {}, { setup: { [real]: status }, missing: { [real]: ['plain_labels', 'ticket_tree'] } });
+    const server = await startTestServer({ bmadCatalog });
+    const tab = await signIn(server);
+    const workspace = await project(server, tab, repo.path, ['planning']);
+    const setup = apiPath(API_ROUTES.workspaceBmadSetup, { wsId: workspace.id });
+    expect(BmadSetupStatusResponse.parse(await (await request(server, tab, 'GET', setup)).json()).setup.missingCapabilities).toEqual(['plain_labels']);
+    expect(bmadCatalog.capabilityCalls).toEqual([[real, ['plain_labels']]]);
+
+    const fresh = emptyRepo();
+    const freshWorkspace = await project(server, tab, fresh.path, ['planning', 'board']);
+    const freshStatus = BmadSetupStatusResponse.parse(await (await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceBmadSetup, { wsId: freshWorkspace.id }))).json()).setup;
+    expect(freshStatus.state).toBe('not_set_up');
+    expect(freshStatus.missingCapabilities).toBeUndefined();
+  });
+
+  it('upgrade without _bmad/ is 409 bmad_not_set_up and with a linked _bmad 409 bmad_upgrade_refused; nothing runs', async () => {
+    const bmadCatalog = createBmadCatalog({
+      runner: {
+        run: async () => {
+          throw new Error('nothing may run');
+        },
+      },
+      workDir: removeAfterTest(mkdtempSync(join(tmpdir(), 'ogden-agents-uv-work-'))),
+      source: { status: () => ({ state: 'ready', version: '7.0.0', commit: 'a'.repeat(40) }), download: () => Promise.reject(new Error('nothing may download')), file: () => undefined },
+    });
+    const server = await startTestServer({ bmadCatalog });
+    const tab = await signIn(server);
+    const none = await project(server, tab, emptyRepo().path, ['planning']);
+    const refusedNone = await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBmadSetup, { wsId: none.id }), { upgrade: true });
+    expect(refusedNone.status).toBe(409);
+    expect(ApiErrorBody.parse(await refusedNone.json()).error).toEqual({ code: 'bmad_not_set_up', message: BMAD_NOT_SET_UP_MESSAGE });
+
+    const linked = emptyRepo();
+    symlinkSync(removeAfterTest(mkdtempSync(join(tmpdir(), 'ogden-agents-elsewhere-'))), join(linked.path, '_bmad'), process.platform === 'win32' ? 'junction' : 'dir');
+    const before = linked.hash();
+    const workspace = await project(server, tab, linked.path, ['board']);
+    const refusedLink = await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBmadSetup, { wsId: workspace.id }), { upgrade: true });
+    expect(refusedLink.status).toBe(409);
+    expect(ApiErrorBody.parse(await refusedLink.json()).error).toEqual({ code: 'bmad_upgrade_refused', message: BMAD_UPGRADE_REFUSED_TEXT });
+    expect(linked.hash()).toBe(before);
+    expect(setupEvents(server, workspace.id)).toEqual([]);
+  });
+
+  it('a malformed body is 400, one over the limit 413, and neither starts anything', async () => {
+    const bmadCatalog = createMemoryBmadCatalog();
+    const server = await startTestServer({ bmadCatalog });
+    const tab = await signIn(server);
+    const workspace = await project(server, tab, emptyRepo().path, ['planning']);
+    const setup = apiPath(API_ROUTES.workspaceBmadSetup, { wsId: workspace.id });
+    const post = (body: string) => fetch(`${server.url}${setup}`, { method: 'POST', headers: { ...tab.headers, 'content-type': 'application/json' }, body });
+    for (const body of ['not json', '{"upgrade":"yes"}', '{"upgrade":true,"extra":1}', '[true]', 'null']) {
+      const response = await post(body);
+      expect(response.status, body).toBe(400);
+      expect(ApiErrorBody.parse(await response.json()).error.code).toBe('invalid_request');
+    }
+    const big = await post(JSON.stringify({ upgrade: false, pad: 'x'.repeat(1000) }));
+    expect(big.status).toBe(413);
+    expect(bmadCatalog.setupCalls.filter(([what]) => what === 'setup')).toEqual([]);
+  });
+});
+
 describe('the setup status reads files only (story 4.3, S2)', () => {
   it('GET on a set-up repo spawns no process and fetches nothing', async () => {
     const repo = emptyRepo({
@@ -160,6 +270,8 @@ describe('the setup status reads files only (story 4.3, S2)', () => {
       bundledVersion: '6.13.0-fixture',
       installedVersion: '6.12.0',
       problems: [],
+      // Entry 4.11, read from files too: no skill the label mapping knows.
+      missingCapabilities: ['plain_labels'],
     });
     expect(runs).toBe(0);
     expect(upstream.fetched).toEqual([]);
@@ -281,4 +393,45 @@ describe.skipIf(realUvMissing())('BMad Method setup through real uv and the veri
     expect(existsSync(join(linked.path, '_bmad', 'scripts', 'extra.py'))).toBe(false);
     expect(treeOf(outside)).toEqual(before);
   }, 180_000);
+});
+
+describe.skipIf(realUvMissing())('Upgrade this project through real uv and the verified pinned setup.py (entry 4.11)', () => {
+  const read = (root: string, path: string) => readFileSync(join(root, ...path.split('/')), 'utf8');
+
+  for (const kind of ['bmod', 'older'] as const satisfies readonly PlainRepoKind[]) {
+    it(`upgrades the ${kind} plain fixture: both capabilities after, its settings, custom/ and own skills kept`, async () => {
+      const { server } = await realUvServer();
+      const repo = createPlainRepo(kind);
+      removeAfterTest(repo.path);
+      const ownSkill = kind === 'bmod' ? '.agents/skills/bmad-spec/SKILL.md' : '.claude/skills/bmad-help/SKILL.md';
+      const ownBefore = read(repo.path, ownSkill);
+      const tab = await signIn(server);
+      const workspace = await project(server, tab, repo.path, ['planning', 'board']);
+      const setup = apiPath(API_ROUTES.workspaceBmadSetup, { wsId: workspace.id });
+      const before = BmadSetupStatusResponse.parse(await (await request(server, tab, 'GET', setup)).json()).setup;
+      expect(before.missingCapabilities).toEqual(kind === 'older' ? ['plain_labels', 'ticket_tree'] : ['ticket_tree']);
+
+      expect((await request(server, tab, 'POST', setup, { upgrade: true })).status).toBe(202);
+      await waitFor(ended(server, workspace.id), 'the upgrade to end', 60_000);
+      const events = setupEvents(server, workspace.id);
+      expect(events.at(-1)).toMatchObject({ type: 'bmad.setup_completed', payload: { status: { missingCapabilities: [] } } });
+      expect(BmadSetupStatusResponse.parse(await (await request(server, tab, 'GET', setup)).json()).setup.missingCapabilities).toEqual([]);
+
+      // The project's own skill is byte for byte what it was.
+      expect(read(repo.path, ownSkill)).toBe(ownBefore);
+      if (kind === 'bmod') {
+        const config = read(repo.path, '_bmad/config.toml');
+        for (const line of PLAIN_BMOD_CONFIG.trim().split('\n').slice(1)) expect(config).toContain(line);
+        expect(read(repo.path, '_bmad/custom/config.user.toml')).toBe(PLAIN_BMOD_USER_CONFIG);
+        expect(read(repo.path, '.claude/skills/bmod-method/bmod.toml')).toContain('version = "6.10.0"');
+        expect(existsSync(join(repo.path, '.claude', 'skills', 'bmad-spec'))).toBe(false);
+        expect(read(repo.path, '.agents/skills/bmad-spec/SKILL.md')).toBe(PLAIN_BMOD_OWN_SKILL);
+      } else {
+        // The classic installer's leftovers stay.
+        expect(read(repo.path, '_bmad/bmm/config.yaml')).toContain('project_name: plain-older');
+        expect(existsSync(join(repo.path, '_bmad', '_config', 'manifest.yaml'))).toBe(true);
+        expect(existsSync(join(repo.path, '_bmad', 'config.toml'))).toBe(true);
+      }
+    }, 120_000);
+  }
 });

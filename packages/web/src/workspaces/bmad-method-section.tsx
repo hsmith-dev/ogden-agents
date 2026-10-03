@@ -1,5 +1,6 @@
 import {
   applyBmadPieceChoice,
+  BMAD_CAPABILITY_REDUCED_TEXT,
   BMAD_OFF_TEXT,
   BMAD_ON_TEXT,
   BMAD_PIECE_INFO,
@@ -9,7 +10,7 @@ import {
   BMAD_SECTION_INTRO,
   BMAD_SECTION_TITLE,
   BMAD_SETUP_CHECKING_TEXT,
-  BMAD_SETUP_OWED_TEXT,
+  BMAD_SETUP_OWED_UPGRADE_TEXT,
   BMAD_SETUP_UNUSABLE_TEXT,
   BMAD_USE_DESCRIPTION,
   BMAD_USE_LABEL,
@@ -28,9 +29,10 @@ import {
 } from '@ogden-agents/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouterState } from '@tanstack/react-router';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useBmadSetupStatus } from '@/planning/bmad-setup-api';
-import { BmadSetupView, useBmadSetup, type BmadSetupPhase } from '@/planning/bmad-setup-panel';
+import { BmadSetupView, useBmadSetup, type BmadSetupMode, type BmadSetupPhase } from '@/planning/bmad-setup-panel';
+import { ReducedModeNoticeView, UpgradeButton, UpgradeConfirmDialog } from '@/planning/reduced-mode-notice';
 import { Field } from '@/ui/field';
 import { Notice } from '@/ui/notice';
 import { PageSection } from '@/ui/page';
@@ -62,6 +64,12 @@ import { createLatestGate, trustProjectScripts, updateBmadPieces, useBmadPieces,
  * its version, an update, an unfinished setup, what couldn't be read, or
  * Set up. A save that turns on the first of Planning and Board in a project
  * without `_bmad/` starts the setup, and its progress shows here.
+ *
+ * Entry 4.11: under the status line, one reduced-mode notice per capability
+ * the pieces that are on need and the project lacks (the status's
+ * `missingCapabilities`), with one Upgrade this project; an unfinished setup
+ * in a project with `_bmad/` offers Upgrade this project too (Set up refuses
+ * it). Upgrade confirms first, then shows the same progress here.
  */
 
 /** Which pieces this install ships: `true` available, `false` coming soon. */
@@ -215,7 +223,8 @@ export function bmadSetupStatusText(status: BmadSetupStatus): string | undefined
     case 'update_available':
       return bmadUpdateAvailableText(status.installedVersion ?? '', status.bundledVersion);
     case 'setup_owed':
-      return BMAD_SETUP_OWED_TEXT;
+      // `setup_owed` means `_bmad/` is there, so Set up would be refused: Upgrade finishes it (entry 4.11).
+      return BMAD_SETUP_OWED_UPGRADE_TEXT;
     case 'unusable':
       return BMAD_SETUP_UNUSABLE_TEXT;
     case 'not_set_up':
@@ -233,6 +242,14 @@ export interface BmadSetupStatusViewProps {
   steps: Parameters<typeof BmadSetupView>[0]['steps'];
   reason: string | undefined;
   onSetUp: () => void;
+  /** What this view last started: Set up, or an upgrade (entry 4.11). Default `setup`. */
+  mode?: BmadSetupMode;
+  /** Asks for Upgrade this project (the caller confirms first; entry 4.11). Without it no Upgrade shows. */
+  onUpgrade?: () => void;
+  /** The latest run's completed status (an upgrade's done line shows only when it lacks nothing). */
+  completed?: BmadSetupStatus | undefined;
+  /** Where the Upgrade button is kept, so the confirmation can give focus back to it. */
+  upgradeRef?: RefObject<HTMLButtonElement | null>;
 }
 
 /**
@@ -240,11 +257,22 @@ export interface BmadSetupStatusViewProps {
  * in this view), else the fetched status; a refused Set up (a 409, say) says
  * why under it (review Q4).
  */
-export function BmadSetupStatusView({ status, loadError, phase, steps, reason, onSetUp }: BmadSetupStatusViewProps) {
-  if (phase !== 'idle') return <BmadSetupView phase={phase} steps={steps} reason={reason} onSetUp={onSetUp} />;
-  if (status?.state === 'not_set_up') return <BmadSetupView phase="idle" steps={[]} reason={reason} onSetUp={onSetUp} />;
+export function BmadSetupStatusView({ status, loadError, phase, steps, reason, onSetUp, mode = 'setup', onUpgrade, completed, upgradeRef }: BmadSetupStatusViewProps) {
+  const run = <BmadSetupView mode={mode} phase={phase} steps={steps} reason={reason} completed={completed} onSetUp={onSetUp} />;
+  // A run in progress, and a failed Set up (with its own Set up again), replace the line; a finished run or a
+  // failed upgrade sits above the status line and its notices, whose Upgrade is the retry (entry 4.11).
+  if (phase === 'running' || phase === 'starting' || (phase === 'failed' && mode === 'setup')) return run;
+  const above = phase === 'idle' ? null : run;
+  if (status?.state === 'not_set_up') {
+    return (
+      <>
+        {above}
+        <BmadSetupView phase="idle" steps={[]} reason={phase === 'idle' ? reason : undefined} onSetUp={onSetUp} />
+      </>
+    );
+  }
   const refused =
-    reason === undefined ? null : (
+    reason === undefined || phase !== 'idle' ? null : (
       <Text variant="caption" role="alert" data-testid="bmad-setup-error">
         {reason}
       </Text>
@@ -252,6 +280,7 @@ export function BmadSetupStatusView({ status, loadError, phase, steps, reason, o
   if (status === undefined) {
     return (
       <>
+        {above}
         <Text variant="caption" role={loadError === undefined ? 'status' : 'alert'} data-testid="bmad-setup-status" data-state="loading">
           {loadError ?? BMAD_SETUP_CHECKING_TEXT}
         </Text>
@@ -260,16 +289,43 @@ export function BmadSetupStatusView({ status, loadError, phase, steps, reason, o
     );
   }
   return (
-    <div className="flex flex-col gap-1" data-testid="bmad-setup-status" data-state={status.state}>
-      <Text variant="caption">{bmadSetupStatusText(status)}</Text>
-      {status.state === 'unusable' && status.problems.length > 0 ? (
-        <ul className="m-0 pl-5 text-caption text-muted-foreground" data-testid="bmad-setup-problems">
-          {status.problems.map((problem) => (
-            <li key={problem}>{problem}</li>
-          ))}
-        </ul>
-      ) : null}
-      {refused}
+    <>
+      {above}
+      <div className="flex flex-col gap-1" data-testid="bmad-setup-status" data-state={status.state}>
+        <Text variant="caption">{bmadSetupStatusText(status)}</Text>
+        {status.state === 'unusable' && status.problems.length > 0 ? (
+          <ul className="m-0 pl-5 text-caption text-muted-foreground" data-testid="bmad-setup-problems">
+            {status.problems.map((problem) => (
+              <li key={problem}>{problem}</li>
+            ))}
+          </ul>
+        ) : null}
+        {onUpgrade === undefined ? null : <SettingsUpgrade status={status} onUpgrade={onUpgrade} buttonRef={upgradeRef} />}
+        {refused}
+      </div>
+    </>
+  );
+}
+
+/**
+ * Entry 4.11's part of the status line: a notice per missing capability with
+ * one Upgrade this project, or, for an unfinished setup with nothing
+ * missing, Upgrade this project alone (the project has `_bmad/`, so Set up
+ * would be refused).
+ */
+function SettingsUpgrade({ status, onUpgrade, buttonRef }: { status: BmadSetupStatus; onUpgrade: () => void; buttonRef?: RefObject<HTMLButtonElement | null> | undefined }) {
+  const texts = (status.missingCapabilities ?? []).map((capability) => BMAD_CAPABILITY_REDUCED_TEXT[capability]);
+  if (texts.length > 0) {
+    return (
+      <div className="mt-2">
+        <ReducedModeNoticeView texts={texts} busy={false} onUpgrade={onUpgrade} buttonRef={buttonRef} />
+      </div>
+    );
+  }
+  if (status.state !== 'setup_owed') return null;
+  return (
+    <div className="mt-2 flex">
+      <UpgradeButton busy={false} onUpgrade={onUpgrade} buttonRef={buttonRef} />
     </div>
   );
 }
@@ -379,6 +435,13 @@ export function BmadMethodSection({ wsId, offerSlot, defaultSlot }: { wsId: stri
     );
   };
 
+  // Upgrade this project's confirmation (entry 4.11), and the button it gives focus back to.
+  const [confirmingUpgrade, setConfirmingUpgrade] = useState(false);
+  const upgradeButton = useRef<HTMLButtonElement | null>(null);
+  // The status before the latest run: a run this tab didn't start is an upgrade when `_bmad/` was there.
+  const stateBefore = useRef<BmadSetupStatus['state'] | undefined>(undefined);
+  if (setup.phase === 'idle' && setupStatus.data !== undefined) stateBefore.current = setupStatus.data.state;
+  const runMode: BmadSetupMode = setup.ownRun ? setup.mode : stateBefore.current !== undefined && stateBefore.current !== 'not_set_up' ? 'upgrade' : 'setup';
   // The choice waiting on the trust dialog (story 4.2), and the dialog's own state.
   const [awaitingTrust, setAwaitingTrust] = useState<BmadChoice | undefined>(undefined);
   const [trusting, setTrusting] = useState(false);
@@ -459,10 +522,24 @@ export function BmadMethodSection({ wsId, offerSlot, defaultSlot }: { wsId: stri
               phase={setup.phase}
               steps={setup.steps}
               reason={setup.reason}
-              onSetUp={setup.start}
+              // Set up, or its retry: in a project that now has `_bmad/`, that is Upgrade (Set up would be refused).
+              onSetUp={() => (setupStatus.data !== undefined && setupStatus.data.state !== 'not_set_up' ? setConfirmingUpgrade(true) : setup.start())}
+              mode={runMode}
+              onUpgrade={() => setConfirmingUpgrade(true)}
+              completed={setup.completed}
+              upgradeRef={upgradeButton}
             />
           ) : undefined
         }
+      />
+      <UpgradeConfirmDialog
+        open={confirmingUpgrade}
+        returnFocus={upgradeButton}
+        onCancel={() => setConfirmingUpgrade(false)}
+        onConfirm={() => {
+          setConfirmingUpgrade(false);
+          setup.start(true);
+        }}
       />
       <ScriptTrustDialog
         open={awaitingTrust !== undefined}

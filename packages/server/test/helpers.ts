@@ -266,7 +266,7 @@ export function fullTestApp(core: Core, extra: Partial<AppOptions> = {}): Hono {
     bmadDetection: core.bmadDetection,
     bmadScriptTrust: core.bmadScriptTrust,
     planning: createPlanning({ bmad: core.bmad, entities: core.entities, catalog: createMemoryBmadCatalog(), chat, agent }),
-    board: createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: bmadSource, entities: core.entities, tickets: createMemoryTicketStore() }),
+    board: createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: bmadSource, entities: core.entities, catalog: createMemoryBmadCatalog(), tickets: createMemoryTicketStore() }),
     bmadSource,
     agentSetup: createAgentSetup(core.events, [createMemoryAgentSetup()]),
     onboarding: createOnboarding({ dataDir: tempDataDir(), hasProjects: () => false }),

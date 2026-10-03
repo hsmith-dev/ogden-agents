@@ -13,34 +13,46 @@
  * project set up while Board is on starts its watch then), one decision at
  * a time per workspace. A
  * watch is closed as soon as Board is off (in the event's own listener, not
- * behind a decision under way); a `setupStatus` that rejects, or
+ * behind a decision under way); a project whose BMad Method lacks the ticket
+ * tree (entry 4.11, AD-14: reduced mode, read-only) gets none until a setup
+ * or upgrade completes; a `setupStatus` that rejects, or
  * names no output folder, or a watch that rejects, leaves none (told to
  * `onError`), retried on the next of those events. `close()` stops
  * listening, awaits the decisions under way and closes every watch.
  */
-import type { WorkspaceId } from '@ogden-agents/shared';
+import type { BmadCapability, WorkspaceId } from '@ogden-agents/shared';
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
 import type { BmadFeatures } from './bmad-features.js';
 import type { BmadScriptTrust } from './bmad-script-trust.js';
 import type { Entities } from './entities.js';
 import type { EventLog } from './event-log.js';
+import { ReducedModeError } from './errors.js';
 import type { TicketStorePort, TicketWatch } from './ticket-store-port.js';
 import { workspaceRepoPath } from './planning.js';
 
-/** What failed for a workspace: reading its setup status, naming an output folder, starting the watch, or appending. */
-export type TicketWatcherStep = 'setup_status' | 'no_output_folder' | 'watch' | 'append';
+/**
+ * What failed for a workspace: reading its capabilities or setup status, a
+ * missing ticket tree (`reduced_mode`, entry 4.11), naming an output folder,
+ * starting the watch, or appending.
+ */
+export type TicketWatcherStep = 'capabilities' | 'reduced_mode' | 'setup_status' | 'no_output_folder' | 'watch' | 'append';
+
+/** What a watch needs of the project's BMad Method: `tickets.py` reads the ticket tree. */
+const WATCH_CAPABILITIES: readonly BmadCapability[] = ['ticket_tree'];
+/** The steps told once per workspace until a watch starts. */
+const TOLD_ONCE = new Set<TicketWatcherStep>(['capabilities', 'reduced_mode', 'setup_status', 'no_output_folder']);
 
 export interface TicketWatcherDeps {
   events: Pick<EventLog, 'subscribe' | 'lastSeq' | 'append'>;
   entities: Pick<Entities, 'getWorkspace' | 'listWorkspaces'>;
   bmad: Pick<BmadFeatures, 'pieces'>;
   trust: Pick<BmadScriptTrust, 'scriptsTrusted'>;
-  catalog: Pick<BmadCatalogPort, 'setupStatus'>;
+  catalog: Pick<BmadCatalogPort, 'setupStatus' | 'missingCapabilities'>;
   tickets: Pick<TicketStorePort, 'watch'>;
   /**
-   * Told why a workspace has no watch (for the log). A `setup_status` or
-   * `no_output_folder` failure is told once per workspace until a watch
-   * starts; the others each time.
+   * Told why a workspace has no watch (for the log). A `capabilities`,
+   * `reduced_mode`, `setup_status` or `no_output_folder` failure is told once
+   * per workspace until a watch starts; the others each time.
    */
   onError?: (workspaceId: WorkspaceId, step: TicketWatcherStep, error: unknown) => void;
 }
@@ -68,7 +80,7 @@ export function createTicketWatcher({ events, entities, bmad, trust, catalog, ti
   let unsubscribe: (() => void) | undefined;
 
   const report = (workspaceId: WorkspaceId, step: TicketWatcherStep, error: unknown) => {
-    if (step === 'setup_status' || step === 'no_output_folder') {
+    if (TOLD_ONCE.has(step)) {
       if (told.has(workspaceId)) return;
       told.add(workspaceId);
     }
@@ -117,6 +129,14 @@ export function createTicketWatcher({ events, entities, bmad, trust, catalog, ti
       return report(workspaceId, 'setup_status', error);
     }
     if (outputFolder === null) return report(workspaceId, 'no_output_folder', new Error('BMad Method names no output folder'));
+    // Reduced mode (entry 4.11): the project's BMad Method can't serve `tickets.py`, so nothing watches it.
+    let missing: BmadCapability[];
+    try {
+      missing = await catalog.missingCapabilities(repoPath, WATCH_CAPABILITIES);
+    } catch (error) {
+      return report(workspaceId, 'capabilities', error);
+    }
+    if (missing.length > 0) return report(workspaceId, 'reduced_mode', new ReducedModeError(missing[0]!));
     if (!wanted(workspaceId)) return;
     let watch: TicketWatch;
     const current = { open: true };

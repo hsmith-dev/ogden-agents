@@ -32,7 +32,11 @@
  *   `ticket.changed` within 3 s of a plan's status write through real uv,
  *   one for a new `tickets.toml` entry, none (and no run) for a worktree
  *   folder's writes, and Board off or the server's stop closes every
- *   folder watcher.
+ *   folder watcher;
+ * - entry 4.11: a project whose BMad Method lacks the ticket tree (the real
+ *   catalog, a repo whose config script has no `load_central_config`)
+ *   answers 409 `reduced_mode` for the tree, one ticket and a status change,
+ *   and the store is never called.
  */
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -71,6 +75,7 @@ import {
   STATUS_NOT_ALLOWED_MESSAGE,
   TICKET_CHANGED_MESSAGE,
   REOPEN_NOT_CONFIRMED_MESSAGE,
+  REDUCED_MODE_MESSAGE,
   TICKETS_STORE_REFUSED_MESSAGE,
   SessionResponse,
   TICKETS_UNAVAILABLE_MESSAGE,
@@ -101,8 +106,13 @@ function request(server: TestServer, tab: SignedIn, method: string, path: string
   });
 }
 
+/** The ticket tree's config script with no active initiative (entry 4.11: the board isn't in reduced mode; `tickets.py` then says there is no initiative). */
+const NO_INITIATIVE_CONFIG = {
+  '_bmad/scripts/config_utils.py': 'class ConfigError(Exception):\n    pass\n\n\ndef load_central_config(project_root):\n    return {"core": {"output_folder": "{project-root}/_bmad-output"}}\n',
+};
+
 function fixtureRepo(tickets = false): FakeBmadRepo {
-  const repo = createFakeBmadRepo({ bmad: true, output: true, tickets, files: SKILL_FILES, prefix: 'ogden-agents-plan-repo-' });
+  const repo = createFakeBmadRepo({ bmad: true, output: true, tickets, files: { ...(tickets ? {} : NO_INITIATIVE_CONFIG), ...SKILL_FILES }, prefix: 'ogden-agents-plan-repo-' });
   // Removed by helpers' afterEach, once the server (and its agents) are closed.
   removeAfterTest(repo.path);
   return repo;
@@ -319,7 +329,8 @@ describe('Plan and Board routes (story 4.1)', () => {
     expect(catalogBody.skills.find((skill) => skill.name === 'bmad-help')).toMatchObject({ description: 'Fake BMad help skill.', label: null });
     expect(catalogBody.entryAction).toBeNull();
     expect(catalogBody.modules).toEqual([]);
-    expect(catalogBody.capabilities).toEqual({ plain_labels: true, ticket_tree: false });
+    // The fixture's config script defines `load_central_config` (entry 4.11), so it has the ticket tree.
+    expect(catalogBody.capabilities).toEqual({ plain_labels: true, ticket_tree: true });
 
     // Unknown and malformed skills create nothing.
     const unknown = await request(server, tab, 'POST', start, { skill: 'bmad-nothing' });
@@ -428,6 +439,30 @@ describe('Plan and Board routes (story 4.1)', () => {
       expect(response.status, path).toBe(409);
       expect(ApiErrorBody.parse(await response.json()).error).toEqual({ code: 'bmad_not_downloaded', message: BMAD_NOT_DOWNLOADED_MESSAGE });
     }
+  });
+});
+
+describe('reduced mode on the board (entry 4.11)', () => {
+  it('without the ticket tree every tickets route answers 409 reduced_mode and the store is never called', async () => {
+    // The older layout: `_bmad/` without the config script `tickets.py` loads.
+    const repo = createFakeBmadRepo({ bmad: true, files: SKILL_FILES, prefix: 'ogden-agents-plan-repo-' });
+    removeAfterTest(repo.path);
+    const store = stubStore(realPathOf(repo));
+    const server = await startTestServer({ ticketStore: store });
+    const tab = await signIn(server);
+    const workspace = await project(server, tab, repo, ['board'], { trust: true });
+    const before = repo.hash();
+    for (const [method, path, body] of [
+      ['GET', paths(workspace.id).tickets, undefined],
+      ['GET', paths(workspace.id).ticket, undefined],
+      ['PUT', paths(workspace.id).status, { status: 'ready-for-dev' }],
+    ] as const) {
+      const response = await request(server, tab, method, path, body);
+      expect(response.status, path).toBe(409);
+      expect(ApiErrorBody.parse(await response.json()).error).toEqual({ code: 'reduced_mode', message: REDUCED_MODE_MESSAGE });
+    }
+    expect(store.calls).toEqual([]);
+    expect(repo.hash()).toBe(before);
   });
 });
 

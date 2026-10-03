@@ -97,6 +97,11 @@ export const API_ERROR_CODES = [
    * Nothing was written.
    */
   'reopen_not_confirmed',
+  /**
+   * Upgrade this project was refused before anything was written (409; entry
+   * 4.11): the project's `_bmad` is a link or a file, not a folder.
+   */
+  'bmad_upgrade_refused',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

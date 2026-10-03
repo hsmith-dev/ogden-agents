@@ -16,7 +16,14 @@
  * - the status is read from files only (no run): `not_set_up`, `unusable`,
  *   `setup_owed`, `update_available`, `current`;
  * - questions are answered with their defaults through a file in the work
- *   folder, removed afterwards; failures are plain reasons.
+ *   folder, removed afterwards; failures are plain reasons;
+ * - Upgrade (entry 4.11): on the older `bmod` plain fixture, the same
+ *   verified runs in the work folder; a skill the project has in
+ *   `.agents/skills` or `.claude/skills` is never copied over or touched;
+ *   refused with its plain reason, nothing written, nothing downloaded and
+ *   nothing run, for a linked or file `_bmad`, a linked `.claude/skills`, a
+ *   linked config, and an output folder outside the repo, unreadable here or
+ *   reached through a link.
  */
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -28,11 +35,13 @@ import {
   BMAD_SETUP_NOT_A_FOLDER_TEXT,
   BMAD_SETUP_STEPS,
   BMAD_SETUP_VERSION_UNKNOWN_TEXT,
+  BMAD_UPGRADE_REFUSED_TEXT,
   type BmadSetupProgress,
 } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
+import { createPlainRepo, PLAIN_BMOD_OWN_SKILL } from '../../../tests/fixtures/bmad-plain/plain-repos.js';
 import { createFakeBmadRepo, type FakeBmadRepo } from '../../../tests/fixtures/fake-bmad-repo.js';
-import { tomlString } from '../src/bmad-catalog/setup.js';
+import { MAX_UPGRADE_BMAD_ENTRIES, strictOutputFolder, tomlString } from '../src/bmad-catalog/setup.js';
 import { createBmadCatalog, createMemoryBmadSource, createUvScriptRunner, MEMORY_BMAD_SOURCE_VERSION, uvEnvironment, type UvScriptRunner } from '../src/index.js';
 
 const FAKE_UV = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-uv.mjs');
@@ -276,7 +285,131 @@ describe('bmad-catalog setup status from files (story 4.3, S2)', () => {
   });
 });
 
+describe('bmad-catalog upgrade (entry 4.11)', () => {
+  const plain = (kind: 'older' | 'bmod', files: Record<string, string> = {}) => {
+    const created = createPlainRepo(kind, files);
+    cleanups.push(() => created.remove());
+    return created;
+  };
+
+  it('runs the verified setup.py in the work folder; copies only the skills the project has in neither folder, touching none it has', async () => {
+    const { catalog, source, runs, script, skills, workDir } = adapter();
+    const r = plain('bmod');
+    const recordBefore = readFileSync(join(r.path, '.claude', 'skills', 'bmod-method', 'bmod.toml'), 'utf8');
+    const progress: BmadSetupProgress[] = [];
+    await catalog.setup(r.path, (step) => progress.push(step), { upgrade: true });
+    expect(source.downloads).toBe(1);
+    expect(progress.map((step) => step.step)).toEqual([...BMAD_SETUP_STEPS]);
+    // `bmad-spec` is the project's, in `.agents/skills`: not copied into `.claude/skills`, and unchanged.
+    expect(readdirSync(join(r.path, '.claude', 'skills')).sort()).toEqual(['bmad', 'bmod-method']);
+    expect(readFileSync(join(r.path, '.agents', 'skills', 'bmad-spec', 'SKILL.md'), 'utf8')).toBe(PLAIN_BMOD_OWN_SKILL);
+    expect(readFileSync(join(r.path, '.claude', 'skills', 'bmod-method', 'bmod.toml'), 'utf8')).toBe(recordBefore);
+    const prefix = ['run', '--no-project', '--quiet', script, '--project-root', r.path, '--skill', join(skills, 'bmad')];
+    expect(runs().map((run) => run.argv)).toEqual([[...prefix, '--list-config-questions'], prefix]);
+    for (const run of runs()) expect(run.cwd).toBe(realpathSync(workDir));
+  });
+
+  it('the older layout (no records, no scripts, no config.toml) is upgraded too', async () => {
+    const { catalog } = adapter();
+    const r = plain('older');
+    await catalog.setup(r.path, () => {}, { upgrade: true });
+    expect(readdirSync(join(r.path, '.claude', 'skills')).sort()).toEqual(['bmad', 'bmad-help', 'bmad-spec', 'bmod-method']);
+    expect(readFileSync(join(r.path, '_bmad', 'bmm', 'config.yaml'), 'utf8')).toContain('project_name: plain-older');
+  });
+
+  it('refuses a linked or file _bmad, a linked .claude/skills or config, and an output folder outside, unreadable or through a link: nothing written, downloaded or run', async () => {
+    const { catalog, runs, source } = adapter();
+    const cases: FakeBmadRepo[] = [];
+    // `_bmad` a link, and a file.
+    const linkedBmad = repo();
+    link(tempFolder('ogden-agents-elsewhere-'), join(linkedBmad.path, '_bmad'));
+    cases.push(linkedBmad, repo({ _bmad: 'not a folder\n' }));
+    // `.claude/skills`, or `.claude`, a link.
+    const linkedSkills = plain('older');
+    rmSync(join(linkedSkills.path, '.claude', 'skills'), { recursive: true });
+    link(tempFolder('ogden-agents-elsewhere-'), join(linkedSkills.path, '.claude', 'skills'));
+    cases.push(linkedSkills);
+    const linkedRoot = plain('older');
+    rmSync(join(linkedRoot.path, '.claude'), { recursive: true });
+    link(tempFolder('ogden-agents-elsewhere-'), join(linkedRoot.path, '.claude'));
+    cases.push(linkedRoot);
+    // The config a link; an output folder outside; one this reader can't see; one through a link.
+    const linkedConfig = plain('older');
+    const outsideConfig = join(tempFolder('ogden-agents-elsewhere-'), 'config.toml');
+    writeFileSync(outsideConfig, '[core]\n');
+    symlinkSync(outsideConfig, join(linkedConfig.path, '_bmad', 'config.toml'));
+    cases.push(linkedConfig);
+    cases.push(plain('bmod', { '_bmad/config.toml': '[core]\noutput_folder = "../outside"\n' }));
+    cases.push(plain('bmod', { '_bmad/config.toml': 'core.output_folder = "../outside"\n' }));
+    const throughLink = plain('bmod');
+    rmSync(join(throughLink.path, 'docs'), { recursive: true });
+    link(tempFolder('ogden-agents-elsewhere-'), join(throughLink.path, 'docs'));
+    cases.push(throughLink);
+    for (const r of cases) {
+      const before = r.hash();
+      const caught = await catalog.setup(r.path, () => {}, { upgrade: true }).catch((error: unknown) => error);
+      expect(caught, r.path).toBeInstanceOf(BmadSetupError);
+      expect((caught as BmadSetupError).reason).toBe('upgrade_refused');
+      expect((caught as Error).message).toBe(BMAD_UPGRADE_REFUSED_TEXT);
+      expect(r.hash()).toBe(before);
+    }
+    expect(runs()).toEqual([]);
+    expect(source.downloads).toBe(0);
+  });
+
+  it('refuses a config.toml tomllib would read differently: a decoy in a multi-line string, an escaped quoted key; nothing written or run', async () => {
+    const { catalog, runs, source } = adapter();
+    const decoy = ["note = '''", '[core]', 'output_folder = "_bmad-output"', "'''", '[core]', 'output_folder = "../outside"', ''].join('\n');
+    const escaped = ['[core]', '"output\\u005Ffolder" = "/abs/x"', ''].join('\n');
+    for (const config of [decoy, escaped, 'core = { output_folder = "../x" }\n', '[core]\noutput_folder = "a/b. "\n', '[core]\noutput_folder = "c:x"\n', `[core]\npad = "${'x'.repeat(70 * 1024)}"\n`]) {
+      const r = plain('bmod', { '_bmad/config.toml': config });
+      const before = r.hash();
+      const caught = await catalog.setup(r.path, () => {}, { upgrade: true }).catch((error: unknown) => error);
+      expect((caught as BmadSetupError).reason, config.slice(0, 40)).toBe('upgrade_refused');
+      expect(r.hash()).toBe(before);
+    }
+    expect(runs()).toEqual([]);
+    expect(source.downloads).toBe(0);
+  });
+
+  it('refuses a _bmad holding a link (in custom/) or more entries than the cap, before anything is written', async () => {
+    const { catalog, runs } = adapter();
+    const linked = plain('bmod');
+    link(tempFolder('ogden-agents-elsewhere-'), join(linked.path, '_bmad', 'custom', 'linked'));
+    const many: Record<string, string> = {};
+    for (let index = 0; index <= MAX_UPGRADE_BMAD_ENTRIES; index++) many[`_bmad/leftovers/f${index}`] = '';
+    const crowded = plain('bmod', many);
+    for (const r of [linked, crowded]) {
+      const before = r.hash();
+      const caught = await catalog.setup(r.path, () => {}, { upgrade: true }).catch((error: unknown) => error);
+      expect((caught as BmadSetupError).reason).toBe('upgrade_refused');
+      expect(r.hash()).toBe(before);
+    }
+    expect(runs()).toEqual([]);
+  });
+
+  it('Set up (no upgrade) still refuses a project with _bmad, writing nothing', async () => {
+    const { catalog, runs } = adapter();
+    const r = plain('bmod');
+    const before = r.hash();
+    await expect(catalog.setup(r.path, () => {})).rejects.toBeInstanceOf(BmadAlreadySetUpError);
+    expect(r.hash()).toBe(before);
+    expect(runs()).toEqual([]);
+  });
+});
+
 describe('setup helpers (story 4.3)', () => {
+  it('strictOutputFolder reads the pinned template and plain configs as tomllib does, and refuses the rest (entry 4.11)', () => {
+    const template = readFileSync(join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'bmad-upstream', 'skills', 'bmad', 'assets', 'config.template.toml'), 'utf8');
+    expect(strictOutputFolder(template)).toEqual({ ok: true, folder: '{project-root}/_bmad-output' });
+    expect(strictOutputFolder('# c\n[core]\nname = "x" # y\nlist = ["a", "b"]\n[modules."method"]\n"team".size = "small"\n')).toEqual({ ok: true });
+    expect(strictOutputFolder("[core]\noutput_folder = 'docs/out'\n")).toEqual({ ok: true, folder: 'docs/out' });
+    expect(strictOutputFolder('core.output_folder = "x"\n')).toEqual({ ok: true, folder: 'x' });
+    for (const bad of ['[core]\noutput_folder = "a"\noutput_folder = "b"\n', '[core.output_folder]\n', '[core]\nx = [\n"a"]\n', '[[core]]\n', 'a b = 1\n', '[core]\noutput_folder = 1\n']) {
+      expect(strictOutputFolder(bad), bad).toEqual({ ok: false });
+    }
+  });
+
   it('tomlString reads one-line strings in a section only', () => {
     const text = '[bmod]\ncode = "method"\nversion = "6.13.0-next" # pinned\n[other]\nversion = "1"\n';
     expect(tomlString(text, 'bmod', 'version')).toBe('6.13.0-next');

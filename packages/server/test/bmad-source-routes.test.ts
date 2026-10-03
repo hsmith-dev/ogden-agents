@@ -14,7 +14,7 @@
  * - Board on and trusted without the download answers 409
  *   `bmad_not_downloaded`, and the script runner is never called.
  */
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -78,6 +78,9 @@ function everyRoute(wsId: string): string[] {
 
 async function boardProject(server: TestServer, tab: SignedIn) {
   const path = tempDataDir();
+  // The ticket tree's config script (entry 4.11): the board isn't in reduced mode, so only the download decides.
+  mkdirSync(join(path, '_bmad', 'scripts'), { recursive: true });
+  writeFileSync(join(path, '_bmad', 'scripts', 'config_utils.py'), 'def load_central_config(project_root):\n    return {}\n');
   const { workspace } = WorkspaceResponse.parse(await (await request(server, tab, 'POST', API_ROUTES.workspaces, { path })).json());
   expect((await request(server, tab, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId: workspace.id }), { bmadPieces: ['board'] })).status).toBe(200);
   expect((await request(server, tab, 'PUT', apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId: workspace.id }))).status).toBe(200);

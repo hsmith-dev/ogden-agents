@@ -275,7 +275,7 @@ describe('BMad Method setup (story 4.3)', () => {
   it('has bmad_already_set_up, and a plain reason for each failure', () => {
     expect(API_ERROR_CODES).toContain('bmad_already_set_up');
     expect(shared.BMAD_ALREADY_SET_UP_MESSAGE).toMatch(/already set up/);
-    expect(Object.keys(shared.BMAD_SETUP_FAILURE_REASONS).sort()).toEqual(['failed', 'not_writable', 'timeout', 'uv_missing']);
+    expect(Object.keys(shared.BMAD_SETUP_FAILURE_REASONS).sort()).toEqual(['failed', 'not_writable', 'timeout', 'upgrade_refused', 'uv_missing']);
     for (const reason of Object.values(shared.BMAD_SETUP_FAILURE_REASONS)) expect(shared.BmadSetupFailedEvent.shape.payload.parse({ reason })).toEqual({ reason });
     expect(shared.bmadSetupCurrentText('6.13.0')).toBe('BMad Method 6.13.0 is set up in this project.');
   });

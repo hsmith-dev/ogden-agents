@@ -7,9 +7,10 @@
  * a setup status that fails or names no folder, or a watch that rejects,
  * leaves none (told once) and the next event retries; `close()` awaits a
  * start under way and closes every watch. No ticket state lands in the
- * database.
+ * database. Entry 4.11: a project whose BMad Method lacks the ticket tree
+ * gets no watch (told once) until an upgrade completes.
  */
-import type { BmadSetupStatus, WorkspaceId } from '@ogden-agents/shared';
+import type { BmadCapability, BmadSetupStatus, WorkspaceId } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { createTicketWatcher, type BmadCatalogPort, type Core, type TicketStorePort, type TicketWatcherStep } from '../src/index.js';
 import { openDatabase } from '../src/db/database.js';
@@ -57,11 +58,12 @@ function fakeStore() {
   };
 }
 
-function fakeCatalog(statuses: Map<string, BmadSetupStatus | Error>): BmadCatalogPort & { statusCalls: string[] } {
+function fakeCatalog(statuses: Map<string, BmadSetupStatus | Error>, missing: Map<string, BmadCapability[]>): BmadCatalogPort & { statusCalls: string[] } {
   const statusCalls: string[] = [];
   return {
     ...unusedCatalogParts,
     statusCalls,
+    missingCapabilities: async (repoPath, wanted) => wanted.filter((capability) => (missing.get(repoPath) ?? []).includes(capability)),
     detect: async () => ({ hasBmad: true, hasOutput: true }),
     skills: async () => [],
     setupStatus: async (repoPath) => {
@@ -73,10 +75,10 @@ function fakeCatalog(statuses: Map<string, BmadSetupStatus | Error>): BmadCatalo
   };
 }
 
-function setup(statuses = new Map<string, BmadSetupStatus | Error>()) {
+function setup(statuses = new Map<string, BmadSetupStatus | Error>(), missing = new Map<string, BmadCapability[]>()) {
   const core = openTestCore(tempDir(), undefined, { availableBmadPieces: ['planning', 'board'] });
   const store = fakeStore();
-  const catalog = fakeCatalog(statuses);
+  const catalog = fakeCatalog(statuses, missing);
   const errors: Array<[WorkspaceId, TicketWatcherStep]> = [];
   const watcher = createTicketWatcher({
     events: core.events,
@@ -135,6 +137,30 @@ describe('ticket watcher (story 4.8)', () => {
     statuses.set(workspace.realPath!, done);
     core.events.append({ type: 'bmad.setup_completed', workspaceId: workspace.id, streamId: workspace.id, payload: { status: done } });
     await waitFor(() => watcher.watching(workspace.id), 'the watch after setup');
+    expect(store.calls).toEqual([[workspace.realPath, '_bmad-output']]);
+    await watcher.close();
+  });
+
+  it('a project without the ticket tree gets no watch (told once) until an upgrade completes (entry 4.11)', async () => {
+    const missing = new Map<string, BmadCapability[]>();
+    const { core, store, watcher, errors } = setup(new Map(), missing);
+    const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
+    missing.set(workspace.realPath!, ['ticket_tree']);
+    core.permissions.updateSettings(workspace.id, { bmadPieces: ['board'] });
+    core.bmadScriptTrust.trustScripts(workspace.id);
+    watcher.start();
+    await waitFor(() => errors.length === 1, 'the reduced-mode report');
+    core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_for_commands' });
+    await sleep(30);
+    expect(errors).toEqual([[workspace.id, 'reduced_mode']]);
+    expect(watcher.watching(workspace.id)).toBe(false);
+    expect(store.calls).toEqual([]);
+
+    // Upgraded: the capability is there and `bmad.setup_completed` decides again.
+    missing.delete(workspace.realPath!);
+    const done = status('_bmad-output');
+    core.events.append({ type: 'bmad.setup_completed', workspaceId: workspace.id, streamId: workspace.id, payload: { status: done } });
+    await waitFor(() => watcher.watching(workspace.id), 'the watch after the upgrade');
     expect(store.calls).toEqual([[workspace.realPath, '_bmad-output']]);
     await watcher.close();
   });

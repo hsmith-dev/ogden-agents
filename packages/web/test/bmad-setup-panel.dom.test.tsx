@@ -110,6 +110,16 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('BmadSetupGate (story 4.3)', () => {
+  it('a run seen while the detection loads (an upgrade, say) never says Ready to plan. afterwards (entry 4.11)', async () => {
+    state.hasBmad = 'pending';
+    mount();
+    emit({ type: 'bmad.setup_started', payload: {} });
+    emit({ type: 'bmad.setup_completed', payload: { status: { state: 'current', outputFolder: '_bmad-output', bundledVersion: '7.0.0', installedVersion: '7.0.0', problems: [] } } });
+    await settle();
+    expect(screen.getByTestId('page-content')).toBeTruthy();
+    expect(screen.queryByTestId('bmad-setup-done')).toBeNull();
+  });
+
   it('shows the page while the detection loads, and when the project has _bmad/', async () => {
     state.hasBmad = 'pending';
     mount();

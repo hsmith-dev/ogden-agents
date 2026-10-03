@@ -3,7 +3,7 @@ title: 'Probe the build driver and OS behaviour in CI'
 type: 'chore'
 ticket: '1'
 created: '2026-10-02'
-status: 'in-review'
+status: 'built'
 baseline_revision: '84f0e79d58684e7eaa43f23b1f7ad617b179670d'
 route: 'full'
 route_source: 'auto'
@@ -110,6 +110,10 @@ OS behaviour:
 5. Checkpoint pause hooks for `plan_checkpoint` and `done_checkpoint` on a one-ticket run (today `done_checkpoint` is skipped for the last story and the plan halt needs folder+id dispatch), resumable by `resume`.
 6. Run folder, policy and profiles outside the project (`--run-root` or an env var), so Ogden needs no `.git/info/exclude` entry.
 7. Windows: `core.longpaths=true` on its git calls, and stopping the pane shell and server at run end so the worktree can be removed.
+
+## Decision
+
+- 2026-10-02, user (the hitl step): **no-go on bmad-loop; take the ACP fallback.** Builds run as Ogden-managed ACP agent sessions (`bmad-build-auto`, Claude Code) in their own worktrees in the data folder; no tmux, psmux or bmad-loop in v1. The fallback deltas are applied on `docs/epic-5-inception` (5.4 and 5.7 rewritten for ACP, spec and AD-5/12/13/17/21 notes); the seven patches above are kept there as a v2/upstream note. Status set to `built` on this decision (the spike ships no code; `done` follows the merge).
 
 ## Plan Change Log
 

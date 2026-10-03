@@ -65,6 +65,15 @@ Oneshot: the only lasting change is this record; the probe (`scripts/acp-agent-p
 
 Every question the probe could answer without sign-in came out the same and usable on all three OSes: pinned install, start, auth-required handling, an API-key session, all four modes, list, load and cross-process resume, and a clean stop. Risks to carry into the stories: plaintext `auth.json`, the two `reject_once` options, startup network use, install size (330-440 MB), and the unverified items: sign-in itself, permission requests, the terminal and the Windows sandbox (live checks below).
 
+### Decision: GO for Codex (user, 2026-10-02)
+
+The user said go, pending the live checks below on all three OSes: ChatGPT login and API key, permission choices, mode switching, resume, skills in `.agents/skills`, and the Windows sandbox. Status stays `built` until they pass; the spike is not `done`.
+
+- Both sign-in routes are kept: ChatGPT login and the API key.
+- Codex's files live in Ogden's data folder through `CODEX_HOME`, never `~/.codex`.
+- Codex stores an API key in a plain `auth.json` file. The UI shows this to the user as a known limitation, and Ogden deletes the file on sign-out.
+- The clone of OpenAI's plugins repo at start is network behaviour that Ogden discloses to the user.
+
 ### Proposed agent-matrix.md row (for the user to apply through bmad-spec at inception)
 
 | Codex (v1.1) | Adapter `@agentclientprotocol/codex-acp` 2.1.1 (bundles `@openai/codex` 0.159.3; never set `CODEX_PATH`) | `session/resume`, `session/load`, `session/list`; cross-process reopen verified on 3 OSes (12.1) | `codex resume <id>`; live check | `authenticate`: `chat-gpt` (browser, hidden by `NO_BROWSER`), `chat-gpt-device-code` (needs URL elicitation), `api-key` (`_meta` or `CODEX_API_KEY`; writes `auth.json`) | v2 | macOS Seatbelt, Linux bubblewrap, Windows restricted token (elevated preferred; no longer experimental) | v2 |

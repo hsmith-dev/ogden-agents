@@ -70,6 +70,14 @@ Oneshot: the only lasting change is this record; the probe (`scripts/acp-agent-p
 
 Every question the probe could answer without sign-in came out the same and usable on all three OSes, and an API key reaches xAI over ACP. Conditions: Ogden spawns its own verified binary with its own `GROK_HOME` (never `~/.grok/bin`), the user reads xAI's current terms (unread here), and the live checks below pass. Risks: undocumented `xai.api_key`, near-daily releases on an `alpha` tag, Claude-file inheritance changing modes, and no mid-chat mode change through ACP.
 
+### Decision: GO for Grok, after the terms and live checks (user, 2026-10-02)
+
+The user said go once two things are done: the user has read xAI's current terms (the page blocked automated reading), and the live checks below pass. Status stays `built` until then; the spike is not `done`.
+
+- The API key goes through the unadvertised `authenticate` method `xai.api_key`; the user allowed it.
+- Ogden unpacks the pinned binary itself and runs it with its own `GROK_HOME` in Ogden's data folder.
+- Grok follows the project's `.claude/settings.json`, hooks and `.mcp.json`. So a Grok chat in a project starts only after the user has trusted that project, with the same per-project trust as the board (story 4.2's gate).
+
 ### Proposed agent-matrix.md row (for the user to apply through bmad-spec at inception)
 
 | Grok (v1.1) | Native `grok agent stdio`, `@xai-official/grok` 1.0.49 (binary decompressed by Ogden, SHA-256 per OS; `GROK_HOME` in Ogden's data folder; `GROK_DISABLE_AUTOUPDATER=1`) | `session/resume`, `session/load`, `session/list`; cross-process reopen verified on 3 OSes (12.2) | `grok --resume <id>`; live check | `authenticate`: `grok.com` (Sign in with Grok); `xai.api_key` (unadvertised, `XAI_API_KEY`) verified with a dummy key | v2 | macOS Seatbelt, Linux Landlock; none on Windows | v2 |

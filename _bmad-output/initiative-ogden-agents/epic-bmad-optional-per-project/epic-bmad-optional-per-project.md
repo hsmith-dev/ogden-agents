@@ -57,6 +57,8 @@ The switch, its contract, its settings UI, detection and migration. It installs 
 
 ## Notes
 
+- Decision (2026-10-02, user, epic 10 retro Q1): **0.4.0 ships with epic 4.** Epic 10 is not released on its own; 0.4.0 is one release of epic 10, epic 4 and the per-chat permission modes story (PR #63). 10.9's release prep (`0.4.0-rc.1`, CHANGELOG, RELEASING epic-10 section) is integrated and tagged by 4.13, so Done when 6's "its own `ogden-agents` npm version" is read as "0.4.0, together with epic 4", and the switch ships with Planning and Board behind it.
+- Decision (2026-10-02, user, "Show it now", recorded from the orchestrator log per epic 10 retro A6): the offer for a repo that already has `_bmad/` shows even while every piece is Coming soon.
 - Decision (2026-10-01, user): keep the herdr-like UI for everyone: the multi-workspace sidebar, several agents and several chats per project stay always on. BMad becomes optional per project, with a choice of each piece.
 - Decision (2026-10-01, user): new users start simple (BMad off) and opt in to more.
 - Decision (2026-10-01, user): this is a new epic after epic 3 and before epic 4 in build order.

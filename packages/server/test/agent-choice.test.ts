@@ -323,7 +323,7 @@ describe("a project's default agent and the default for new projects (epic 6, en
     expect(refused.status).toBe(400);
     expect(ApiErrorBody.parse(await refused.json()).error.code).toBe('agent_unknown');
     expect(settingsEvents(server, wsId)).toHaveLength(before);
-    expect(WorkspaceSettingsResponse.parse(await (await request(server, tab, 'GET', path)).json()).settings).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [] });
+    expect(WorkspaceSettingsResponse.parse(await (await request(server, tab, 'GET', path)).json()).settings).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false });
   });
 
   it("keeps the default for new projects beside the pieces; a project added later gets it, one that exists keeps its own", async () => {

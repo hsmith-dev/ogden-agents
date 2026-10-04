@@ -211,7 +211,7 @@ describe("a project's default agent and the default for new projects (epic 6, en
     expect(changes()).toBe(1);
     core.close();
     const later = openTestCore(dataDir, undefined, { isAgentRegistered: registered(['agent-a']) });
-    expect(later.permissions.getSettings(workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [] });
+    expect(later.permissions.getSettings(workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false });
   });
 
   it('keeps an agent the install lacks now through a pieces-only save, and a damaged agent never costs the pieces (review)', () => {

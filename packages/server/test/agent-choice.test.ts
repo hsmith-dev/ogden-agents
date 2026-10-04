@@ -31,7 +31,11 @@ function secondAgent(): RegisteredAgent {
 }
 
 const folders: string[] = [];
-afterEach(() => {
+const servers: TestServer[] = [];
+// The servers (and their agents, whose working folder is the repo) stop before the folders go:
+// Windows refuses to remove a folder a live process runs in (EPERM). This hook runs before the helpers' own.
+afterEach(async () => {
+  await Promise.all(servers.splice(0).map((server) => server.close()));
   for (const dir of folders.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 });
 
@@ -51,6 +55,7 @@ function request(server: TestServer, tab: SignedIn, method: string, path: string
 
 async function setUp() {
   const server = await startTestServer({ extraAgents: [secondAgent()] });
+  servers.push(server);
   const tab = await signIn(server);
   const repo = temp('ogden-agents-repo-');
   const wsId = WorkspaceResponse.parse(await (await request(server, tab, 'POST', API_ROUTES.workspaces, { path: repo })).json()).workspace.id;

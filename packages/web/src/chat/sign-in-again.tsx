@@ -255,7 +255,7 @@ export function SignInAgainView({ agentId, agentName, agent, signedIn, signIn, r
       </Notice>
       {kind === 'signing_in' ? (
         <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-(--panel-padding)" data-testid="sign-in-again-signing-in">
-          <SigningIn agentId={agentId} signIn={signIn} />
+          <SigningIn agentId={agentId} signIn={signIn} takesCode={agent?.signInTakesCode !== false} />
         </div>
       ) : null}
       {signIn.error === undefined ? null : (

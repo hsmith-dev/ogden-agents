@@ -227,20 +227,28 @@ export async function fakeAntigravity(options: { installed?: boolean; setup?: Aw
   const dataDir = makeDataDir('ogden-agents-agy-');
   if (options.installed !== false) plantPinnedAntigravity(dataDir);
   const agent = createAntigravityAgent({ dataDir, server: () => ({ command: process.execPath, args: [FAKE_ANTIGRAVITY, '--uid='] }) });
-  return { dataDir, agent, setup: options.setup ?? createAntigravitySetup({ dataDir }) };
+  // The key check never reaches Google in a test.
+  return { dataDir, agent, setup: options.setup ?? createAntigravitySetup({ dataDir, apiKey: { verify: async () => 'ok' } }) };
 }
 
-/** An empty file where Antigravity's pinned server for this platform is looked for (it is never run: the fake is). */
+/**
+ * Empty files where Antigravity's pinned files for this platform are looked
+ * for, and the install record Install writes once it checked them (epic 6
+ * entry 7), so it reads as installed (the files are never run: the fake is).
+ */
 export function plantPinnedAntigravity(dataDir: string): void {
   const pins = JSON.parse(readFileSync(join(ROOT, 'packages', 'adapters', 'src', 'setup-antigravity', 'pins', 'antigravity-acp.json'), 'utf8')) as {
     version: string;
-    archives: Record<string, { binary: string } | undefined>;
+    archives: Record<string, { binary: string; files: Record<string, unknown> } | undefined>;
   };
-  const pin = pins.archives[`${process.platform}-${process.arch}`];
+  const platform = `${process.platform}-${process.arch}`;
+  const pin = pins.archives[platform];
   if (pin === undefined) return;
   const folder = join(dataDir, 'agents', 'antigravity', pins.version);
   mkdirSync(folder, { recursive: true });
-  writeFileSync(join(folder, pin.binary), '');
+  for (const name of Object.keys(pin.files)) writeFileSync(join(folder, name), '');
+  const files = Object.fromEntries(Object.keys(pin.files).map((name) => [name, 0]));
+  writeFileSync(join(folder, '.ogden-install.json'), JSON.stringify({ version: pins.version, platform, reportedVersion: pins.version, files }));
 }
 
 /** An in-memory setup port for a fake agent (entry 6: readiness in the picker, Welcome's choice); it installs and signs into nothing. */

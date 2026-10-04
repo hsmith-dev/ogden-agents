@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ANTIGRAVITY_PINS, createAntigravityAgent, createAntigravitySetup } from '@ogden-agents/adapters';
+import { ANTIGRAVITY_PINS, createAntigravityAgent, createAntigravitySetup, writeInstallRecord } from '@ogden-agents/adapters';
 import { API_ROUTES, ApiErrorBody, apiPath, ChatAgentsResponse, SessionResponse, WorkspaceResponse, type SessionId } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import type { AntigravityPorts } from '../src/antigravity-wiring.js';
@@ -27,11 +27,13 @@ function antigravity(options: { installed?: boolean } = {}): AntigravityPorts {
   if (options.installed !== false && PINNED !== undefined) {
     const folder = join(dataDir, 'agents', 'antigravity', ANTIGRAVITY_PINS.version);
     mkdirSync(folder, { recursive: true });
-    writeFileSync(join(folder, PINNED.binary), '');
+    for (const name of Object.keys(PINNED.files)) writeFileSync(join(folder, name), '');
+    writeInstallRecord(folder, { version: ANTIGRAVITY_PINS.version, platform: `${process.platform}-${process.arch}`, reportedVersion: ANTIGRAVITY_PINS.version, files: Object.fromEntries(Object.keys(PINNED.files).map((name) => [name, 0])) });
   }
   return {
     agent: createAntigravityAgent({ dataDir, server: () => ({ command: process.execPath, args: [FAKE_ANTIGRAVITY, '--uid='] }) }),
-    setup: createAntigravitySetup({ dataDir }),
+    // The key check never reaches Google in a test.
+    setup: createAntigravitySetup({ dataDir, apiKey: { verify: async () => 'ok' } }),
   };
 }
 

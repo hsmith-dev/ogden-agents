@@ -188,7 +188,7 @@ function check(npmCli, withBinary) {
 
 /**
  * Throws naming every malformed pin in the Antigravity pins file.
- * @param {{ version?: unknown, archives?: Record<string, { url?: unknown, sha256?: unknown, binary?: unknown, args?: unknown }> }} pins
+ * @param {{ version?: unknown, archives?: Record<string, { url?: unknown, sha256?: unknown, size?: unknown, binary?: unknown, args?: unknown, files?: Record<string, { size?: unknown, sha256?: unknown }> }> }} pins
  */
 function assertAntigravityPins(pins) {
   const problems = [];
@@ -204,6 +204,16 @@ function assertAntigravityPins(pins) {
     if (typeof pin.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(pin.sha256)) problems.push(`${platform}: the SHA-256 is not 64 lower-case hex digits`);
     if (typeof pin.binary !== 'string' || !/^agy_acp_server\.(par|exe)$/.test(pin.binary)) problems.push(`${platform}: the server's file name is not agy_acp_server.par or .exe`);
     if (!Array.isArray(pin.args) || pin.args.some((arg) => typeof arg !== 'string')) problems.push(`${platform}: args is not a list of strings`);
+    // Epic 6 entry 7: the archive's identity size (a download never takes more) and each file it holds, the only entries Install unpacks.
+    if (!Number.isSafeInteger(pin.size) || pin.size <= 0) problems.push(`${platform}: size is not a positive whole number of bytes`);
+    const files = Object.entries(pin.files ?? {});
+    if (files.length === 0) problems.push(`${platform}: no file is pinned`);
+    if (typeof pin.binary === 'string' && !files.some(([name]) => name === pin.binary)) problems.push(`${platform}: the server is not among its pinned files`);
+    for (const [name, file] of files) {
+      if (!/^[A-Za-z0-9._-]+$/.test(name) || name === '.' || name === '..') problems.push(`${platform}: ${name} is not a plain file name`);
+      if (!Number.isSafeInteger(file.size) || file.size < 0) problems.push(`${platform}: ${name}'s size is not a whole number of bytes`);
+      if (typeof file.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(file.sha256)) problems.push(`${platform}: ${name}'s SHA-256 is not 64 lower-case hex digits`);
+    }
   }
   if (problems.length > 0) throw new Error(`antigravity pins: ${problems.join('; ')}`);
 }
@@ -220,6 +230,7 @@ async function checkAntigravity() {
   // Hashed as it streams in, never written to disk; retried with back-off (the shared download).
   const { sha256, size } = await sha256WithRetry(pin.url, `agent-pins: antigravity ${platform}`);
   if (sha256 !== pin.sha256) throw new Error(`the ${platform} archive's SHA-256 is ${sha256}, pinned ${pin.sha256}`);
+  if (size !== pin.size) throw new Error(`the ${platform} archive is ${size} bytes, pinned ${pin.size}`);
   console.log(`agent-pins: antigravity ${pins.version} archive for ${platform} matches its pin (${Math.round(size / 1024 / 1024)} MB)`);
 }
 

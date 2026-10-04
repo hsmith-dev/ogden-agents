@@ -19,6 +19,7 @@ import {
   createAntigravitySetup,
   GEMINI_API_KEY_PATTERN,
   pinnedServer,
+  writeInstallRecord,
 } from '../src/index.js';
 
 const FAKE_ANTIGRAVITY = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-antigravity.mjs');
@@ -37,12 +38,13 @@ function tempDir(): string {
   return dir;
 }
 
-/** An empty file where the pinned server for `platform` is looked for. */
+/** Empty files where the pinned files for `platform` are looked for, and the install record Install writes (entry 7). */
 function plant(dataDir: string, platform: string): string {
   const pin = ANTIGRAVITY_PINS.archives[platform as keyof typeof ANTIGRAVITY_PINS.archives]!;
   const folder = join(dataDir, 'agents', 'antigravity', ANTIGRAVITY_PINS.version);
   mkdirSync(folder, { recursive: true });
-  writeFileSync(join(folder, pin.binary), '');
+  for (const name of Object.keys(pin.files)) writeFileSync(join(folder, name), '');
+  writeInstallRecord(folder, { version: ANTIGRAVITY_PINS.version, platform, reportedVersion: ANTIGRAVITY_PINS.version, files: Object.fromEntries(Object.keys(pin.files).map((name) => [name, 0])) });
   return join(folder, pin.binary);
 }
 
@@ -208,28 +210,41 @@ describe("Antigravity's chat (fake personality)", () => {
   });
 });
 
-describe("Antigravity's setup port until entry 7", () => {
+describe("Antigravity's setup port: status from the data folder", () => {
   it('reads not installed, then installed and signed out, from the data folder only', async () => {
     const dataDir = tempDir();
     const setup = createAntigravitySetup({ dataDir, platform: 'win32-x64' });
     expect(await setup.status()).toMatchObject({ agentId: 'antigravity', install: 'not_installed', version: null, subscription: 'unknown' });
     plant(dataDir, 'win32-x64');
-    expect(await setup.status()).toMatchObject({ install: 'installed', version: '1.3.0', auth: 'needs_sign_in', subscription: 'signed_out' });
+    expect(await setup.status()).toMatchObject({ install: 'installed', version: '1.3.0', auth: 'needs_sign_in', subscription: 'signed_out', canUninstall: true, signInTakesCode: false });
   });
 
-  it('says why on a platform with no pin', async () => {
-    const status = await createAntigravitySetup({ dataDir: tempDir(), platform: 'linux-arm64' }).status();
-    expect(status).toMatchObject({ install: 'not_installed', reason: "Antigravity isn't available for this computer's system yet." });
+  it("a copy without Ogden's install record, or with a file changed since, is not installed", async () => {
+    const dataDir = tempDir();
+    plant(dataDir, 'linux-x64');
+    const folder = join(dataDir, 'agents', 'antigravity', ANTIGRAVITY_PINS.version);
+    writeFileSync(join(folder, 'localharness_external'), 'changed');
+    expect(pinnedServer(dataDir, 'linux-x64')).toBeUndefined();
+    rmSync(join(folder, '.ogden-install.json'));
+    writeFileSync(join(folder, 'localharness_external'), '');
+    expect(pinnedServer(dataDir, 'linux-x64')).toBeUndefined();
   });
 
-  it('refuses install and Google sign-in in plain words, and takes a Gemini key without the network', async () => {
-    const setup = createAntigravitySetup({ dataDir: tempDir() });
-    await expect(setup.install(() => {})).rejects.toThrow('Installing Antigravity from Ogden Agents comes in a later version.');
-    await expect(setup.signIn()).rejects.toThrow(/Use a Gemini API key/);
+  it('says plainly that it is not available on a platform with no pin, and offers no install', async () => {
+    const setup = createAntigravitySetup({ dataDir: tempDir(), platform: 'linux-arm64' });
+    const status = await setup.status();
+    expect(status).toMatchObject({ install: 'not_installed', canInstall: false });
+    expect(status.reason).toMatch(/^Antigravity isn't available on this computer\./);
+    await expect(setup.install(() => {})).rejects.toThrow(/isn't available on this computer/);
+  });
+
+  it('takes a Gemini key: its format, and a check that is stubbed here (never the network)', async () => {
+    const setup = createAntigravitySetup({ dataDir: tempDir(), apiKey: { verify: async () => 'ok' } });
     expect(setup.apiKey?.envName).toBe('GEMINI_API_KEY');
     expect(setup.apiKey?.check(KEY)).toBeUndefined();
     expect(setup.apiKey?.check('sk-ant-nope')).toMatch(/starts with AIza/);
     expect(GEMINI_API_KEY_PATTERN.test(KEY)).toBe(true);
-    expect(await setup.apiKey?.verify(KEY, new AbortController().signal)).toBe('unchecked');
+    expect(await setup.apiKey?.verify(KEY, new AbortController().signal)).toBe('ok');
   });
 });
+

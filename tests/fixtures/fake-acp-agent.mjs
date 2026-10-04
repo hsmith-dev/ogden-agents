@@ -156,6 +156,15 @@
 // replies `auth=<method id or none> key=<last 4 of its API key or none>`.
 // FAKE_ACP_INIT_DELAY_MS delays the `initialize` answer (Antigravity takes
 // about 17 s to start on Windows).
+// Its Google sign-in (epic 6 entry 7, spike 6.1's route): `authenticate
+// oauth-personal` prints "Open the following link to authenticate the ACP
+// server: <url>" on stderr (FAKE_ACP_OAUTH_URL, default a fake
+// accounts.google.com link), runs `$BROWSER <url>` when set (no shell), and
+// waits until the "browser" answers: a file `fake-google-consent` (signed in)
+// or `fake-google-deny` (refused) in its home ($GEMINI_HOME). Signed in, it
+// keeps `fake-google-signed-in` there, which a later process counts as a
+// sign-in (as its stored credentials would be); `logout` (advertised as
+// `auth.logout`) removes it.
 //
 // FAKE_ACP_REQUIRE_LOGIN=<state file> makes every prompt need a sign-in (story
 // 9.4): until `fake-claude-login.mjs` has written `{"loggedIn":true}` to that
@@ -181,8 +190,7 @@
 // check the sign-in" and turns a saved API key off.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { Readable, Writable } from 'node:stream';
@@ -237,8 +245,12 @@ const ANTIGRAVITY = process.env.FAKE_ACP_PERSONALITY === 'antigravity';
 const INIT_DELAY_MS = Number(process.env.FAKE_ACP_INIT_DELAY_MS ?? '0');
 /** The sign-in method `authenticate` chose in this process, if any. */
 let authenticatedWith;
+/** Antigravity's home, where its fake Google sign-in is kept (epic 6 entry 7). */
+const googleHome = () => process.env.GEMINI_HOME;
+const googleFile = (name) => (googleHome() === undefined ? undefined : join(googleHome(), name));
+const signedInWithGoogle = () => ANTIGRAVITY && googleFile('fake-google-signed-in') !== undefined && existsSync(googleFile('fake-google-signed-in'));
 const requireAuth = () => {
-  if (process.env.FAKE_ACP_REQUIRE_AUTH === '1' && authenticatedWith === undefined) {
+  if (process.env.FAKE_ACP_REQUIRE_AUTH === '1' && authenticatedWith === undefined && !signedInWithGoogle()) {
     throw acp.RequestError.authRequired({ message: 'Authentication required. Call authenticate first.' }, 'Authentication required');
   }
 };
@@ -359,6 +371,7 @@ acp
       agentCapabilities: {
         loadSession: RESUME === 'load' || RESUME === 'both',
         sessionCapabilities: { ...(ANTIGRAVITY ? { list: {} } : { close: {} }), ...(RESUME === 'resume' || RESUME === 'both' ? { resume: {} } : {}) },
+        ...(ANTIGRAVITY ? { auth: { logout: {} } } : {}),
       },
       authMethods: process.env.FAKE_ACP_AUTH_METHODS
         ? // A generic agent's own sign-in methods, done by the agent itself (6.3).
@@ -374,8 +387,40 @@ acp
       agentInfo: ANTIGRAVITY ? { name: 'antigravity-acp', title: 'Google Antigravity', version: '1.3.0' } : { name: 'fake-acp-agent', version: '1.0.0' },
     };
   })
-  .onRequest('authenticate', ({ params }) => {
+  .onRequest('authenticate', async ({ params }) => {
+    if (ANTIGRAVITY && params.methodId === 'oauth-personal' && !signedInWithGoogle()) {
+      const url = process.env.FAKE_ACP_OAUTH_URL ?? 'https://accounts.google.com/o/oauth2/v2/auth?client_id=fake-client&state=fake-state&redirect_uri=http%3A%2F%2F127.0.0.1%3A9%2F&scope=openid';
+      // What its sign-in process was given, for the tests: whether a key reached it, and its home.
+      writeFileSync(googleFile('fake-google-env'), `key=${process.env.GEMINI_API_KEY ? 'set' : 'none'}\n`);
+      process.stderr.write(`Open the following link to authenticate the ACP server: ${url}\n`);
+      if (process.env.BROWSER) {
+        try {
+          spawn(process.env.BROWSER, [url], { stdio: 'ignore' }).on('error', () => {});
+        } catch {
+          // As Python's webbrowser: a browser that can't start is skipped.
+        }
+      }
+      for (;;) {
+        const consent = googleFile('fake-google-consent');
+        const deny = googleFile('fake-google-deny');
+        if (deny !== undefined && existsSync(deny)) {
+          rmSync(deny, { force: true });
+          throw acp.RequestError.internalError(undefined, 'the fake Google sign-in was refused');
+        }
+        if (consent !== undefined && existsSync(consent)) {
+          rmSync(consent, { force: true });
+          writeFileSync(googleFile('fake-google-signed-in'), 'signed in\n');
+          break;
+        }
+        await sleep(50);
+      }
+    }
     authenticatedWith = params.methodId;
+    return {};
+  })
+  .onRequest('logout', () => {
+    if (googleFile('fake-google-signed-in') !== undefined) rmSync(googleFile('fake-google-signed-in'), { force: true });
+    authenticatedWith = undefined;
     return {};
   })
   .onRequest('session/new', ({ params }) => {

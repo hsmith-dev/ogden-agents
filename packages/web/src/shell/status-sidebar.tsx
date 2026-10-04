@@ -20,6 +20,8 @@ import {
   SidebarWorkspaceGroup,
   useSidebar,
 } from '@/ui/sidebar';
+import { Input } from '@/ui/input';
+import { Label } from '@/ui/label';
 import { Skeleton } from '@/ui/skeleton';
 import { STATE_WORDS } from '@/ui/state-glyph';
 import { AddProjectDialog } from '@/workspaces/add-project-dialog';
@@ -30,13 +32,14 @@ import { ServerStatus } from './server-status';
 import { useSidebarData } from './sidebar-data';
 import { holdOrder, relativeTime, type SidebarModel, type SidebarRow } from './sidebar-model';
 import { Wordmark } from './wordmark';
-import { WorkspaceSwitcher } from './workspace-switcher';
+import { filterProjects, showsProjectFilter } from './project-filter';
 
 /**
- * The status sidebar (EXPERIENCE.md Information Architecture): the workspace
- * switcher in the header, Needs you on top, then each workspace with its
- * session rows (story 2.11) and Add project, then the footer with Settings,
- * New tab, Quit Ogden Agents and the server status.
+ * The status sidebar (EXPERIENCE.md Information Architecture): the one place
+ * to see, open, add and manage projects (backlog story 2). Needs you on top,
+ * then each workspace (its name opens it, a gear its settings) with its
+ * session rows (story 2.11), a filter when there are many, and Add project,
+ * then the footer with Settings, New tab, Quit Ogden Agents and the server status.
  */
 export function StatusSidebar() {
   return (
@@ -134,6 +137,9 @@ function isKeyboardFocus(element: Element): boolean {
  */
 function StatusSidebarBody() {
   const projectsId = useId();
+  const filterId = useId();
+  const [filter, setFilter] = useState('');
+  const { wsId: currentWsId } = useParams({ strict: false }) as { wsId?: string };
   const { model: live, loading, unloaded, now } = useSidebarData();
   const [pointerInside, setPointerInside] = useState(false);
   const [focusInside, setFocusInside] = useState(false);
@@ -147,12 +153,12 @@ function StatusSidebarBody() {
   const [adding, setAdding] = useState(false);
   const navigate = useNavigate();
   const first = model.needsYou[0];
+  const filtering = showsProjectFilter(model.groups.length);
+  const groups = filtering ? filterProjects(model.groups, filter) : model.groups;
   return (
     <>
       <SidebarHeader>
         <Wordmark />
-        {/* The rail has no room for it; Add project stays below. */}
-        <WorkspaceSwitcher className="ml-auto md:max-lg:hidden" />
       </SidebarHeader>
       <SidebarContent
         ref={contentRef}
@@ -173,11 +179,38 @@ function StatusSidebarBody() {
           <SidebarGroupLabel id={projectsId}>Projects</SidebarGroupLabel>
           {!loading && model.groups.length === 0 ? <SidebarText data-testid="no-projects">No projects yet</SidebarText> : null}
           {loading ? <Skeleton data-testid="sidebar-loading" /> : null}
-          {model.groups.map((group) => (
+          {filtering ? (
+            // The rail has no room for it; every project is an icon there.
+            <div data-testid="project-filter" className="flex flex-col gap-1 px-2 pb-1 md:max-lg:hidden">
+              <Label htmlFor={filterId} className="text-caption text-muted-foreground">
+                Filter projects
+              </Label>
+              <Input
+                id={filterId}
+                type="search"
+                autoComplete="off"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                onKeyDown={(event) => {
+                  // The first Esc clears the field; with it empty, Esc goes on to close the drawer.
+                  if (event.key === 'Escape' && filter !== '') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setFilter('');
+                  }
+                }}
+              />
+              {groups.length === 0 ? <SidebarText data-testid="no-project-matches">No projects match</SidebarText> : null}
+            </div>
+          ) : null}
+          {groups.map((group) => (
             <SidebarWorkspaceGroup
               key={group.wsId}
               data-testid="workspace-group"
               name={group.name}
+              current={group.wsId === currentWsId}
+              link={<Link to="/w/$wsId" params={{ wsId: group.wsId }} activeOptions={{ exact: true, includeSearch: false }} data-testid="workspace-link" />}
+              settingsLink={<Link to="/w/$wsId/settings" params={{ wsId: group.wsId }} data-testid="workspace-settings" />}
               collapsed={collapsed.has(group.wsId)}
               onCollapsedChange={(value) => setCollapsed(group.wsId, value)}
               summary={group.summary}

@@ -1,5 +1,5 @@
 import type { SessionState } from '@ogden-agents/shared';
-import { Bell, CaretRight, List } from '@phosphor-icons/react';
+import { Bell, CaretRight, FolderSimple, GearSix, List } from '@phosphor-icons/react';
 import { Slot } from 'radix-ui';
 import {
   cloneElement,
@@ -139,7 +139,7 @@ export function Sidebar({ label, className, children, ...props }: SidebarProps) 
   );
 }
 
-/** Opens the sidebar sheet; shown only below md, in the workspace header. */
+/** Opens the sidebar as a drawer (a sheet); shown only below md, in every page header. */
 export function SidebarTrigger({ className, ...props }: ComponentProps<typeof Button>) {
   const { sheetOpen, setSheetOpen } = useSidebar();
   return (
@@ -147,7 +147,8 @@ export function SidebarTrigger({ className, ...props }: ComponentProps<typeof Bu
       data-slot="sidebar-trigger"
       variant="ghost"
       size="icon"
-      aria-label="Open sidebar"
+      aria-label="Open projects and sessions"
+      aria-haspopup="dialog"
       aria-expanded={sheetOpen}
       className={cn('md:hidden', className)}
       onClick={() => setSheetOpen(!sheetOpen)}
@@ -354,21 +355,29 @@ export function SidebarStateSummary({ summary, className, ...props }: ComponentP
 }
 
 export interface SidebarWorkspaceGroupProps extends Omit<ComponentProps<'div'>, 'title'> {
-  /** The workspace's name: the disclosure's label and the group's accessible name. */
+  /** The workspace's name: the group's accessible name and the text of its link. */
   name: string;
   collapsed: boolean;
   onCollapsedChange: (collapsed: boolean) => void;
   /** Shown beside the name while collapsed. */
   summary: readonly { state: SessionState; count: number }[];
+  /** The link that opens the workspace (a router Link with no children); the name fills it. */
+  link: ReactElement<{ children?: ReactNode }>;
+  /** The link to the workspace's settings (a router Link with no children), shown as a gear after the name. */
+  settingsLink?: ReactElement<{ children?: ReactNode }> | undefined;
+  /** The user is inside this workspace: its name is marked current. */
+  current?: boolean;
 }
 
 /**
- * A workspace in the sidebar (DESIGN.md Workspace group): its name in label
- * 600 with a disclosure chevron, then its session rows. Collapsed, it shows
- * one glyph and count per non-zero state. The rail has no room for the
- * name, so there every group shows its rows' glyphs, collapsed or not.
+ * A workspace in the sidebar (DESIGN.md Workspace group): a chevron that
+ * collapses its chats, its name in label 600 as the link that opens it
+ * (marked when current), a gear to its settings, then its session rows.
+ * Collapsed, it shows one glyph and count per non-zero state. The rail has
+ * no room for the name, so there the link is a folder icon with the name as
+ * tooltip, and every group shows its rows' glyphs, collapsed or not.
  */
-export function SidebarWorkspaceGroup({ name, collapsed, onCollapsedChange, summary, className, children, ...props }: SidebarWorkspaceGroupProps) {
+export function SidebarWorkspaceGroup({ name, collapsed, onCollapsedChange, summary, link, settingsLink, current = false, className, children, ...props }: SidebarWorkspaceGroupProps) {
   const listId = useId();
   return (
     <div
@@ -376,13 +385,58 @@ export function SidebarWorkspaceGroup({ name, collapsed, onCollapsedChange, summ
       aria-label={name}
       data-slot="sidebar-workspace-group"
       data-collapsed={collapsed || undefined}
+      data-current={current || undefined}
       className={cn('flex min-w-0 flex-col gap-0.5 md:max-lg:border-t md:max-lg:border-border md:max-lg:pt-1', className)}
       {...props}
     >
-      <DisclosureButton expanded={!collapsed} aria-controls={listId} className="font-semibold md:max-lg:hidden" onClick={() => onCollapsedChange(!collapsed)}>
-        <span className="min-w-0 flex-1 truncate text-left">{name}</span>
-        {collapsed && summary.length > 0 ? <SidebarStateSummary summary={summary} /> : null}
-      </DisclosureButton>
+      <div data-slot="sidebar-workspace-heading" className="flex min-w-0 items-center gap-0.5">
+        <DisclosureButton
+          expanded={!collapsed}
+          aria-controls={listId}
+          aria-label={`Chats in ${name}`}
+          data-slot="sidebar-workspace-toggle"
+          className="w-(--control-height) shrink-0 justify-center px-0 md:max-lg:hidden"
+          onClick={() => onCollapsedChange(!collapsed)}
+        />
+        <SidebarMenuButton
+          asChild
+          isActive={current}
+          tooltip={name}
+          // Inside the project, on any of its pages: `true` (it marks where the user is, not the exact page).
+          aria-current={current ? 'true' : undefined}
+          data-slot="sidebar-workspace-link"
+          className="flex-1 font-semibold"
+        >
+          {cloneElement(
+            link,
+            undefined,
+            <>
+              <FolderSimple aria-hidden className="hidden md:max-lg:block" />
+              <SidebarLabel>{name}</SidebarLabel>
+            </>,
+          )}
+        </SidebarMenuButton>
+        {collapsed && summary.length > 0 ? <SidebarStateSummary summary={summary} className="md:max-lg:hidden" /> : null}
+        {settingsLink === undefined ? null : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              {cloneElement(
+                settingsLink,
+                {
+                  'aria-label': `${name} settings`,
+                  'data-slot': 'sidebar-workspace-settings',
+                  className: cn(
+                    'inline-flex size-(--control-height) shrink-0 items-center justify-center rounded-md text-muted-foreground md:max-lg:hidden',
+                    'transition-colors duration-(--motion-fast) ease-standard hover:bg-accent hover:text-foreground [&>svg]:size-(--icon)',
+                  ),
+                } as Partial<{ children?: ReactNode }>,
+                <GearSix aria-hidden />,
+              )}
+            </TooltipTrigger>
+            <TooltipContent side="right">Project settings</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
       <div id={listId} className={cn('flex min-w-0 flex-col gap-0.5', collapsed && 'hidden md:max-lg:flex')}>
         {children}
       </div>

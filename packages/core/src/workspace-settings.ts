@@ -5,11 +5,13 @@
  * `updateSettings` here.
  */
 import {
+  AgentId as AgentIdSchema,
   BmadPieces as BmadPiecesSchema,
   bmadPiecesProblem,
   canonicalBmadPieces,
   CautionLevel as CautionLevelSchema,
   DEFAULT_CAUTION_LEVEL,
+  type AgentId,
   type BmadPiece,
   type CautionLevel,
   type WorkspaceId,
@@ -20,7 +22,7 @@ import { readBmadPieces } from './bmad-pieces.js';
 import { readScriptsTrusted } from './bmad-script-trust.js';
 import type { Database, Orm } from './db/database.js';
 import { workspaces } from './db/schema.js';
-import { FeatureUnavailableError, NotFoundError, ValidationError } from './errors.js';
+import { FeatureUnavailableError, NotFoundError, UnknownAgentError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 
 export interface WorkspaceSettingsAccess {
@@ -40,9 +42,23 @@ export interface WorkspaceSettingsAccess {
    * {@link ValidationError} for an unknown level or piece, a broken
    * dependency rule, or neither given; {@link FeatureUnavailableError} for a
    * newly-on piece this install doesn't ship; {@link NotFoundError} for an
-   * unknown workspace. Every refusal writes nothing.
+   * unknown workspace. The default agent (epic 6, entry 6) is an agent id,
+   * or `null` for the install's default; {@link UnknownAgentError} for one
+   * this install doesn't have. Every refusal writes nothing.
    */
-  updateSettings(workspaceId: WorkspaceId, input: { cautionLevel?: unknown; bmadPieces?: unknown }): WorkspaceSettings;
+  updateSettings(workspaceId: WorkspaceId, input: { cautionLevel?: unknown; bmadPieces?: unknown; defaultAgentId?: unknown }): WorkspaceSettings;
+}
+
+/**
+ * The workspace's stored default agent when it is one this install has, else
+ * `undefined` (none chosen, a damaged value, or an agent no longer
+ * registered: all read as the install's default); `null` for an unknown workspace.
+ */
+export function readDefaultAgent(orm: Orm, workspaceId: string, isAgentRegistered: (agentId: AgentId) => boolean): AgentId | undefined | null {
+  const row = orm.select({ defaultAgentId: workspaces.defaultAgentId }).from(workspaces).where(eq(workspaces.id, workspaceId)).get();
+  if (row === undefined) return null;
+  const parsed = AgentIdSchema.safeParse(row.defaultAgentId);
+  return parsed.success && isAgentRegistered(parsed.data) ? parsed.data : undefined;
 }
 
 /** The workspace's stored level; the strictest one when it can't be read; `undefined` for an unknown workspace. */
@@ -58,17 +74,24 @@ export interface WorkspaceSettingsOptions {
   events: EventLog;
   /** Whether this install ships a BMad piece, so it may be turned on (core's `bmad.isAvailable`). */
   isBmadPieceAvailable: (piece: BmadPiece) => boolean;
+  /**
+   * Whether an agent is registered on this install (epic 6, entry 6), so it
+   * may be a project's default. Read at each call: server wiring builds the
+   * registry after core. Absent: every well-formed id counts.
+   */
+  isAgentRegistered?: ((agentId: AgentId) => boolean) | undefined;
 }
 
-export function createWorkspaceSettings({ db, events, isBmadPieceAvailable }: WorkspaceSettingsOptions): WorkspaceSettingsAccess {
+export function createWorkspaceSettings({ db, events, isBmadPieceAvailable, isAgentRegistered = () => true }: WorkspaceSettingsOptions): WorkspaceSettingsAccess {
   const { orm } = db;
   return {
     getSettings(workspaceId) {
       const cautionLevel = readCautionLevel(orm, workspaceId);
       const bmadPieces = readBmadPieces(orm, workspaceId);
       const bmadScriptsTrusted = readScriptsTrusted(orm, workspaceId);
-      if (cautionLevel === undefined || bmadPieces === undefined || bmadScriptsTrusted === undefined) throw new NotFoundError('workspace', workspaceId);
-      return { cautionLevel, bmadPieces, bmadScriptsTrusted };
+      const defaultAgentId = readDefaultAgent(orm, workspaceId, isAgentRegistered);
+      if (cautionLevel === undefined || bmadPieces === undefined || bmadScriptsTrusted === undefined || defaultAgentId === null) throw new NotFoundError('workspace', workspaceId);
+      return { cautionLevel, bmadPieces, bmadScriptsTrusted, ...(defaultAgentId === undefined ? {} : { defaultAgentId }) };
     },
 
     updateSettings(workspaceId, input) {
@@ -90,13 +113,22 @@ export function createWorkspaceSettings({ db, events, isBmadPieceAvailable }: Wo
         if (problem !== undefined) throw new ValidationError(problem, [{ path: ['bmadPieces'], message: 'dependency rule' }]);
         bmadPieces = canonicalBmadPieces(parsed.data);
       }
-      if (cautionLevel === undefined && bmadPieces === undefined) {
+      // The default agent (epic 6, entry 6): an agent this install has, or null for the install's default.
+      let agent: AgentId | null | undefined;
+      if (input.defaultAgentId !== undefined) {
+        const parsed = AgentIdSchema.nullable().safeParse(input.defaultAgentId);
+        if (!parsed.success) throw new UnknownAgentError();
+        if (parsed.data !== null && !isAgentRegistered(parsed.data)) throw new UnknownAgentError();
+        agent = parsed.data;
+      }
+      if (cautionLevel === undefined && bmadPieces === undefined && agent === undefined) {
         throw new ValidationError('Choose a setting to change.', [{ path: [], message: 'nothing to change' }]);
       }
       return events.transaction(() => {
         const previous = readCautionLevel(orm, workspaceId);
         const previousBmadPieces = readBmadPieces(orm, workspaceId);
-        if (previous === undefined || previousBmadPieces === undefined) throw new NotFoundError('workspace', workspaceId);
+        const previousAgent = readDefaultAgent(orm, workspaceId, isAgentRegistered);
+        if (previous === undefined || previousBmadPieces === undefined || previousAgent === null) throw new NotFoundError('workspace', workspaceId);
         const level = cautionLevel ?? previous;
         // Compared as sets: the same pieces in another order change nothing.
         const piecesChanged =
@@ -106,15 +138,28 @@ export function createWorkspaceSettings({ db, events, isBmadPieceAvailable }: Wo
         const unavailable = pieces.find((piece) => !previousBmadPieces.includes(piece) && !isBmadPieceAvailable(piece));
         if (unavailable !== undefined) throw new FeatureUnavailableError(unavailable);
         const bmadScriptsTrusted = readScriptsTrusted(orm, workspaceId) ?? false;
-        if (level === previous && !piecesChanged) return { cautionLevel: level, bmadPieces: pieces, bmadScriptsTrusted };
-        orm.update(workspaces).set({ cautionLevel: level, bmadPieces: JSON.stringify(pieces) }).where(eq(workspaces.id, workspaceId)).run();
+        // Compared as read: a stored agent no longer registered already reads as the install's default.
+        const agentChanged = agent !== undefined && (agent ?? undefined) !== previousAgent;
+        const defaultAgentId = agentChanged ? (agent ?? undefined) : previousAgent;
+        const settings = { cautionLevel: level, bmadPieces: pieces, bmadScriptsTrusted, ...(defaultAgentId === undefined ? {} : { defaultAgentId }) };
+        if (level === previous && !piecesChanged && !agentChanged) return settings;
+        orm
+          .update(workspaces)
+          .set({ cautionLevel: level, bmadPieces: JSON.stringify(pieces), ...(agentChanged ? { defaultAgentId: agent ?? null } : {}) })
+          .where(eq(workspaces.id, workspaceId))
+          .run();
         events.append({
           type: 'workspace.settings_changed',
           workspaceId,
           streamId: workspaceId,
-          payload: { cautionLevel: level, previous, ...(piecesChanged ? { bmadPieces: pieces, previousBmadPieces } : {}) },
+          payload: {
+            cautionLevel: level,
+            previous,
+            ...(piecesChanged ? { bmadPieces: pieces, previousBmadPieces } : {}),
+            ...(agentChanged ? { defaultAgentId: agent ?? null, previousDefaultAgentId: previousAgent ?? null } : {}),
+          },
         });
-        return { cautionLevel: level, bmadPieces: pieces, bmadScriptsTrusted };
+        return settings;
       });
     },
   };

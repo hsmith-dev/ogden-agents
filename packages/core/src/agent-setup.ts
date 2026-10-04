@@ -268,7 +268,9 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
   /** {@link readStatus}, kept as the agent's last status unless something changed it meanwhile. */
   const statusFor = async (port: AgentSetupPort): Promise<AgentSetupStatus> => {
     const mark = { unread: false };
-    const status = await readStatus(port, mark);
+    const read = await readStatus(port, mark);
+    const provider = options.providerOf?.(port.agentId);
+    const status = provider === undefined ? read : { ...read, provider };
     lastStatus.set(port.agentId, { status, at: now(), unread: mark.unread });
     return status;
   };
@@ -596,7 +598,8 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       flight.handle = handle;
       flight.settle();
       follow(agentId, port, flight, handle);
-      return { state: 'signing_in', url: handle.url };
+      // A code the user types on the sign-in page (a device code), when the agent gives one: like the URL, only in this answer.
+      return { state: 'signing_in', url: handle.url, ...(handle.userCode === undefined ? {} : { code: handle.userCode }) };
     },
 
     async submitCode(agentId, code) {

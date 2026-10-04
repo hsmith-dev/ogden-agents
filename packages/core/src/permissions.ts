@@ -32,6 +32,7 @@ import {
   SKIP_ALL_REFUSAL,
   MAX_DENY_REASON_LENGTH,
   ToolKind as ToolKindSchema,
+  type AgentId,
   type AlwaysAllowScope,
   type BmadPiece,
   type CoreEvent,
@@ -140,6 +141,8 @@ export interface PermissionsOptions {
   onError?: (error: unknown) => void;
   /** Whether this install ships a BMad piece, so it may be turned on (core's `bmad.isAvailable`). Default: none is. */
   isBmadPieceAvailable?: (piece: BmadPiece) => boolean;
+  /** Whether an agent is registered, so it may be a project's default (epic 6, entry 6). Default: every well-formed id. */
+  isAgentRegistered?: ((agentId: AgentId) => boolean) | undefined;
 }
 
 interface Pending {
@@ -164,7 +167,7 @@ const toRule = (row: RuleRow): PermissionRule => ({
   createdAt: row.createdAt,
 });
 
-export function createPermissions({ db, events, entities, sessionEvents, onError, isBmadPieceAvailable = () => false }: PermissionsOptions): Permissions {
+export function createPermissions({ db, events, entities, sessionEvents, onError, isBmadPieceAvailable = () => false, isAgentRegistered }: PermissionsOptions): Permissions {
   const { orm } = db;
   /** Requests waiting for the user, by request id. */
   const pending = new Map<string, Pending>();
@@ -223,7 +226,7 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
 
   return {
     // The caution level and BMad pieces (moved to `workspace-settings.ts`, story 10.8).
-    ...createWorkspaceSettings({ db, events, isBmadPieceAvailable }),
+    ...createWorkspaceSettings({ db, events, isBmadPieceAvailable, isAgentRegistered }),
 
     async request(sessionId, request) {
       try {

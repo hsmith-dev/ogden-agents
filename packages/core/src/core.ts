@@ -1,3 +1,4 @@
+import type { AgentId } from '@ogden-agents/shared';
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
 import { createBmadDetection, type BmadDetectionUseCases } from './bmad-detection.js';
 import { createBmadFeatures, parseAvailableBmadPieces, type BmadFeatures, type BmadFeaturesOptions } from './bmad-pieces.js';
@@ -46,6 +47,12 @@ export type OpenCoreOptions = OpenDatabaseOptions &
     bmadCatalog?: BmadCatalogPort;
     /** Told why a BMad Method setup failed (story 4.3), for the log. */
     onBmadSetupFailure?: (workspaceId: string, error: unknown) => void;
+    /**
+     * Whether an agent is registered, so it may be a project's default (epic
+     * 6, entry 6). Read at each call: the server builds its agent registry
+     * after core. Absent: every well-formed id.
+     */
+    isAgentRegistered?: (agentId: AgentId) => boolean;
   } & BmadFeaturesOptions;
 
 /** Opens (and migrates) the database in `dataDir` and builds core on it. */
@@ -85,6 +92,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     entities,
     sessionEvents,
     isBmadPieceAvailable: bmad.isAvailable,
+    isAgentRegistered: options.isAgentRegistered,
     ...(options.onPermissionError === undefined ? {} : { onError: options.onPermissionError }),
   });
   return {

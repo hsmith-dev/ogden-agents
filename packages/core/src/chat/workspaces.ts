@@ -1,7 +1,7 @@
 /** Workspaces and their sessions, and deleting a workspace's history (moved from `chat.ts`, story 3.11). */
 import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
-import { PERMISSION_MODES, type AgentId, type ChatAgent, type SessionId, type WorkspaceId } from '@ogden-agents/shared';
+import { PERMISSION_MODES, projectNotTrustedReason, type AgentId, type ChatAgent, type SessionId, type WorkspaceId } from '@ogden-agents/shared';
 import { apiKeyMethod, type AgentDescriptor } from '../agent-descriptor.js';
 import type { AgentPort } from '../agent-port.js';
 import type { AgentReadiness } from '../agent-setup-types.js';
@@ -28,9 +28,6 @@ export function unavailableReason(descriptor: AgentDescriptor, readiness: AgentR
   }
   return undefined;
 }
-
-/** The plain reason a chat with an agent that needs a trusted project is refused in one that isn't. */
-export const projectNotTrustedReason = (name: string) => `${name} uses this project's own agent settings, so trust the project before starting a ${name} chat.`;
 
 /** One agent as the agent list shows it (6.3): agent-neutral data from its descriptor, its port and its readiness. */
 export function chatAgentOf(descriptor: AgentDescriptor, agent: AgentPort, readiness: AgentReadiness): ChatAgent {
@@ -120,7 +117,9 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
     async createChatSession(workspaceId, options = {}) {
       getWorkspace(workspaceId);
       // Picked by data, never by a branch on an id (E6-R2); fixed for the session's life (E6-R1).
-      const agentId = options.agentId ?? agents.defaultAgentId;
+      // None picked: the project's default (entry 6), when it is still registered, else the install's.
+      const projectDefault = options.agentId === undefined ? ctx.permissions.getSettings(workspaceId).defaultAgentId : undefined;
+      const agentId = options.agentId ?? (projectDefault !== undefined && agents.get(projectDefault) !== undefined ? projectDefault : agents.defaultAgentId);
       const descriptor = agents.describe(agentId);
       if (agents.get(agentId) === undefined || descriptor === undefined) throw new UnknownAgentError();
       // An agent that runs the project's own agent settings or hooks starts only in a trusted project (6.3).

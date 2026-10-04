@@ -20,6 +20,11 @@ export interface AgentInstallProgress {
  */
 export interface AgentSignIn {
   url: string | null;
+  /**
+   * A code the user types on the sign-in page (a device code), when the
+   * agent's sign-in gives one (epic 6, entry 6). Secret-like, as `url`.
+   */
+  userCode?: string;
   /** Resolves with the outcome once the agent reports signed in, or the sign-in failed or was cancelled. */
   done: Promise<'signed_in' | 'failed' | 'cancelled'>;
   /** Stops the sign-in; `done` resolves `cancelled`. Safe to call more than once. */

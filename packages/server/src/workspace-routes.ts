@@ -8,7 +8,17 @@
  * state-changing, so the gate has checked its Origin. Without permissions
  * (an app wired without core) they answer 501 without reading the body.
  */
-import { FeatureOffError, FeatureUnavailableError, NotFoundError, ValidationError, WorkspaceBusyError, type BmadFeatures, type Chat, type Permissions } from '@ogden-agents/core';
+import {
+  FeatureOffError,
+  FeatureUnavailableError,
+  NotFoundError,
+  UnknownAgentError,
+  ValidationError,
+  WorkspaceBusyError,
+  type BmadFeatures,
+  type Chat,
+  type Permissions,
+} from '@ogden-agents/core';
 import {
   API_ROUTES,
   CreateFolderRequest,
@@ -64,6 +74,8 @@ export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptio
     if (error instanceof FeatureOffError) return apiError(c, 409, 'feature_off', FEATURE_OFF_MESSAGE);
     // Turning on a piece this install doesn't ship yet (story 10.2): nothing was stored.
     if (error instanceof FeatureUnavailableError) return apiError(c, 409, 'feature_unavailable', FEATURE_UNAVAILABLE_MESSAGE);
+    // A default agent this install doesn't have (epic 6, entry 6): nothing was stored.
+    if (error instanceof UnknownAgentError) return apiError(c, 400, 'agent_unknown', error.message);
     if (error instanceof WorkspaceBusyError) {
       return apiError(c, 409, 'sessions_busy', 'A chat in this project is still working or waiting for you. Let it finish, then delete the history.');
     }
@@ -113,13 +125,14 @@ export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptio
       if (scope === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
       const body = await readBody(c, UpdateWorkspaceSettingsRequest);
       if (!body.ok) return body.response;
-      // The project's default agent (epic 6 contract, 6.3) is kept from entry 6: refused whole until then, nothing stored.
-      if (body.value.defaultAgentId !== undefined) {
-        return apiError(c, 501, 'not_implemented', "Choosing a project's default agent isn't available in this version yet.");
-      }
       try {
         const settings = permissions.updateSettings(scope.workspaceId, body.value);
-        log.info('workspace settings saved', { workspaceId: scope.workspaceId, cautionLevel: settings.cautionLevel, bmadPieces: settings.bmadPieces.join(',') });
+        log.info('workspace settings saved', {
+          workspaceId: scope.workspaceId,
+          cautionLevel: settings.cautionLevel,
+          bmadPieces: settings.bmadPieces.join(','),
+          defaultAgentId: settings.defaultAgentId ?? 'install default',
+        });
         return c.json(WorkspaceSettingsResponse.parse({ settings }));
       } catch (error) {
         return refusal(c, error);

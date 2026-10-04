@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AgentId } from './events-common.js';
 
 /**
  * The per-project BMad Method pieces contract (CAP-19, AD-22; frozen by story
@@ -249,15 +250,31 @@ export type BmadPiecesResponse = z.infer<typeof BmadPiecesResponse>;
 // ---- The app-wide default for new projects ----
 
 /** The pieces a newly added project starts with (an install-level preference kept by core; entry 10.4). */
-export const NewProjectDefaults = z.object({ bmadPieces: BmadPieceSet });
+export const NewProjectDefaults = z.object({
+  bmadPieces: BmadPieceSet,
+  /**
+   * The agent new projects get as their default (epic 6, entry 6): Welcome's
+   * agent choice, or Settings → New projects. Absent: the install's default
+   * agent (`ChatAgentsResponse.defaultAgentId`). Written on a project's row
+   * when it is added; projects that exist already never change with it.
+   */
+  defaultAgentId: AgentId.optional(),
+});
 export type NewProjectDefaults = z.infer<typeof NewProjectDefaults>;
 /** The app-wide default before the user changes it: Simple (every piece off). */
 export const DEFAULT_NEW_PROJECT_DEFAULTS: NewProjectDefaults = { bmadPieces: [] };
 /** `GET` and `PATCH /api/v1/settings/new-projects`. */
 export const NewProjectDefaultsResponse = z.object({ defaults: NewProjectDefaults });
 export type NewProjectDefaultsResponse = z.infer<typeof NewProjectDefaultsResponse>;
-/** `PATCH /api/v1/settings/new-projects`: the new default pieces (a newly-on unavailable piece is refused with `feature_unavailable`). */
-export const UpdateNewProjectDefaultsRequest = z.object({ bmadPieces: BmadPieceSet });
+/**
+ * `PATCH /api/v1/settings/new-projects`: the new default pieces (a newly-on
+ * unavailable piece is refused with `feature_unavailable`) and/or the new
+ * default agent (epic 6: `null` goes back to the install's default; an agent
+ * this install doesn't have is refused with `agent_unknown`). At least one.
+ */
+export const UpdateNewProjectDefaultsRequest = z
+  .object({ bmadPieces: BmadPieceSet.optional(), defaultAgentId: AgentId.nullable().optional() })
+  .refine((input) => input.bmadPieces !== undefined || input.defaultAgentId !== undefined, 'Choose a setting to change.');
 export type UpdateNewProjectDefaultsRequest = z.infer<typeof UpdateNewProjectDefaultsRequest>;
 
 // ---- Welcome's first-project answer ----

@@ -78,6 +78,13 @@
       "when": 1791128954037,
       "tag": "0010_session_agent",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1791129310850,
+      "tag": "0011_workspace_default_agent",
+      "breakpoints": true
     }
   ]
 }

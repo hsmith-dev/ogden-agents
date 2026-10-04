@@ -122,6 +122,12 @@ export const MAX_WS_PAYLOAD_BYTES = MAX_TERMINAL_INPUT_BYTES + 1024;
 /** How long a stop waits after answering Quit or restart, so the reply reaches the client first. */
 const STOP_AFTER_REPLY_MS = 50;
 
+/** Whether `agentId` is one this server registers (epic 6, entry 6): Claude Code, then any extra agent a test wires. */
+const registeredAgent =
+  (options: Pick<StartOptions, 'extraAgents'>) =>
+  (agentId: string): boolean =>
+    agentId === CLAUDE_CODE_AGENT_ID || (options.extraAgents ?? []).some((wiring) => wiring.descriptor.agentId === agentId);
+
 /**
  * Starts the server on the data folder. Only one server runs per data folder:
  * if another live one holds it, this throws `ServerAlreadyRunningError`
@@ -168,6 +174,8 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       onListenerError: (error) => log.error('event subscriber failed', { reason: String(error) }),
       // The request is declined all the same; the reason names no command.
       onPermissionError: (error) => log.warn('a permission request was declined after a failure', { reason: String(error) }),
+      // A project's default agent (epic 6, entry 6) is one this server registers: Claude Code and any extra agent.
+      isAgentRegistered: registeredAgent(options),
     });
   try {
     return await listenAndAnnounce({ options, dataDir, log, core, ownsCore, lock, hooks, bmadWiring });
@@ -321,6 +329,8 @@ async function listenAndAnnounce({
   const setupPorts = [...(options.agentSetup ?? (claudeSetup === undefined ? [] : [claudeSetup])), ...extraAgents.flatMap((wiring) => (wiring.setup === undefined ? [] : [wiring.setup]))];
   const agentSetup = createAgentSetup(core.events, setupPorts, {
     secrets,
+    // Who makes each agent, from its descriptor (epic 6, entry 6): the agent card names it.
+    providerOf: (agentId) => [claudeDescriptor, ...extraAgents.map((wiring) => wiring.descriptor)].find((descriptor) => descriptor.agentId === agentId)?.provider,
     // A key in this server's own environment follows the same rule as a saved one (review F1).
     inheritedEnv: () => agentKeysOf({ ...process.env, ...extraAgentEnv }, envKeys),
     // Codes and plain reasons only: never a URL, a code or a key.
@@ -460,6 +470,8 @@ async function listenAndAnnounce({
   const newProjectDefaults = createNewProjectDefaults({
     dataDir,
     bmad: core.bmad,
+    // Welcome's agent choice (epic 6, entry 6) names an agent this server registers.
+    isAgentRegistered: (agentId) => agents.get(agentId) !== undefined,
     onError: (code) => log.warn('new project defaults unusable', { code }),
   });
   const app = createApp({

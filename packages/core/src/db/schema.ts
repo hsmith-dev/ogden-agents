@@ -56,6 +56,12 @@ export const workspaces = sqliteTable(
      * `null` when not trusted, or trusted before this column (read as changed: asked again).
      */
     bmadScriptsFingerprint: text('bmad_scripts_fingerprint'),
+    /**
+     * The agent this project's new chats preselect (epic 6, entry 6), or
+     * NULL for the install's default. No SQL default: core names no agent.
+     * Changed only through the workspace settings use-case.
+     */
+    defaultAgentId: text('default_agent_id'),
     createdAt: text('created_at').notNull(),
   },
   (t) => [uniqueIndex('workspaces_path_unique').on(t.path)],

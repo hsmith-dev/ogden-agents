@@ -6,7 +6,7 @@
  * Not now on its offer (10.3) live in `bmad-detection-routes.ts`.
  * Routes that serve a piece go through `bmadPieceRoutes` instead.
  */
-import { CoreError, FeatureUnavailableError, ValidationError, type BmadFeatures, type NewProjectDefaultsStore } from '@ogden-agents/core';
+import { CoreError, FeatureUnavailableError, UnknownAgentError, ValidationError, type BmadFeatures, type NewProjectDefaultsStore } from '@ogden-agents/core';
 import { API_ROUTES, BmadPiecesResponse, FEATURE_UNAVAILABLE_MESSAGE, NEW_PROJECTS_SAVE_FAILED, NewProjectDefaultsResponse, UpdateNewProjectDefaultsRequest } from '@ogden-agents/shared';
 import type { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -44,10 +44,11 @@ export function registerBmadRoutes(app: Hono, { bmad, newProjectDefaults, log }:
         if (!body.ok) return body.response;
         try {
           const defaults = newProjectDefaults.set(body.value);
-          log.info('new project defaults saved', { pieceCount: defaults.bmadPieces.length });
+          log.info('new project defaults saved', { pieceCount: defaults.bmadPieces.length, defaultAgentId: defaults.defaultAgentId ?? 'install default' });
           return c.json(NewProjectDefaultsResponse.parse({ defaults }));
         } catch (error) {
           if (error instanceof FeatureUnavailableError) return apiError(c, 409, 'feature_unavailable', FEATURE_UNAVAILABLE_MESSAGE);
+          if (error instanceof UnknownAgentError) return apiError(c, 400, 'agent_unknown', error.message);
           if (error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);
           log.error('saving new project defaults failed', { code: (error as NodeJS.ErrnoException).code ?? (error instanceof CoreError ? error.code : 'unexpected') });
           return apiError(c, 500, 'internal_error', NEW_PROJECTS_SAVE_FAILED);

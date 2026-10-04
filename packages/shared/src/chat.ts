@@ -91,12 +91,24 @@ export const ChatAgent = z.object({
 });
 export type ChatAgent = z.infer<typeof ChatAgent>;
 
-/** `GET /api/v1/chat-agents`: the agents a chat can be started with, in order, and the one a new chat gets when none is picked. */
+/**
+ * `GET /api/v1/chat-agents`: the agents a chat can be started with, in
+ * order, and the install's default agent: the one a new chat gets when none
+ * is picked in a project with no default of its own, and the agent of every
+ * session stored before agents could be chosen.
+ */
 export const ChatAgentsResponse = z.object({
   agents: z.array(ChatAgent).min(1),
   defaultAgentId: AgentId,
 });
 export type ChatAgentsResponse = z.infer<typeof ChatAgentsResponse>;
+
+/**
+ * The plain reason a chat with an agent that runs the project's own agent
+ * settings or hooks is refused in a project that isn't trusted (6.3's
+ * `project_not_trusted`), shared so the picker says what the server says.
+ */
+export const projectNotTrustedReason = (name: string) => `${name} uses this project's own agent settings, so trust the project before starting a ${name} chat.`;
 
 /**
  * One permission mode as the chat's mode picker offers it: whether the
@@ -223,8 +235,9 @@ export type WorkspaceSettingsResponse = z.infer<typeof WorkspaceSettingsResponse
  * `PATCH /api/v1/workspaces/:wsId/settings`: the fields to change. The pieces
  * must satisfy the dependency rule (story 10.2); turning on a piece this
  * install doesn't ship is refused by core with `feature_unavailable`.
- * `defaultAgentId` (epic 6 contract, 6.3) is answered `not_implemented` (501)
- * until entry 6 keeps it; `null` would go back to the install's default.
+ * `defaultAgentId` (epic 6, entry 6) is the agent new chats preselect;
+ * `null` goes back to the install's default, and an agent this install
+ * doesn't have is refused with `agent_unknown`.
  */
 export const UpdateWorkspaceSettingsRequest = z
   .object({ cautionLevel: CautionLevel.optional(), bmadPieces: BmadPieceSet.optional(), defaultAgentId: AgentId.nullable().optional() })

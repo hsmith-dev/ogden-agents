@@ -22,6 +22,7 @@ import {
   DEFAULT_NEW_PROJECT_DEFAULTS,
   NewProjectDefaults as NewProjectDefaultsSchema,
   UpdateNewProjectDefaultsRequest,
+  type AgentId,
   type BmadPiece,
   type NewProjectDefaults,
   type Workspace,
@@ -29,9 +30,9 @@ import {
 import { z } from 'zod';
 import type { BmadFeatures } from './bmad-pieces.js';
 import type { Chat } from './chat/types.js';
-import { FeatureUnavailableError, ValidationError } from './errors.js';
+import { FeatureUnavailableError, UnknownAgentError, ValidationError } from './errors.js';
 
-/** `<dataDir>/<this>`: `{ "newProjects": { "bmadPieces": [...] } }`. */
+/** `<dataDir>/<this>`: `{ "newProjects": { "bmadPieces": [...], "defaultAgentId"?: "..." } }`. */
 export const PREFERENCES_FILE = 'preferences.json';
 
 /** The preferences record. Other install-level preferences can join it later. */
@@ -43,6 +44,11 @@ export interface NewProjectDefaultsOptions {
   dataDir: string;
   /** What this install ships: a piece is turned on in the default only when available. */
   bmad: Pick<BmadFeatures, 'isAvailable'>;
+  /**
+   * Whether an agent is registered (epic 6, entry 6), so it may be the
+   * default agent for new projects. Absent: every well-formed id.
+   */
+  isAgentRegistered?: ((agentId: AgentId) => boolean) | undefined;
   /** A record that exists but can't be read or parsed: its code only. */
   onError?(code: string): void;
 }
@@ -51,16 +57,19 @@ export interface NewProjectDefaultsStore {
   /** The default as kept (Simple, `[]`, when there is no usable record). */
   get(): NewProjectDefaults;
   /**
-   * Validates and keeps `input` (`UpdateNewProjectDefaultsRequest`). Throws
-   * `ValidationError` for a wrong shape or a broken dependency rule and
-   * `FeatureUnavailableError` for a piece not in the kept default that this
-   * install doesn't ship; nothing is written then.
+   * Validates and keeps `input` (`UpdateNewProjectDefaultsRequest`: the
+   * pieces and/or the default agent, `null` for the install's default); what
+   * it leaves out is kept. Throws `ValidationError` for a wrong shape or a
+   * broken dependency rule, `FeatureUnavailableError` for a piece not in the
+   * kept default that this install doesn't ship, and `UnknownAgentError` for
+   * an agent this install doesn't have; nothing is written then.
    */
   set(input: unknown): NewProjectDefaults;
 }
 
 export function createNewProjectDefaults(options: NewProjectDefaultsOptions): NewProjectDefaultsStore {
   const file = join(options.dataDir, PREFERENCES_FILE);
+  const isAgentRegistered = options.isAgentRegistered ?? (() => true);
 
   const write = (record: PreferencesRecord) => {
     mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
@@ -97,7 +106,9 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
       const parsed = PreferencesRecord.safeParse(JSON.parse(text));
       if (parsed.success) {
         reported = undefined;
-        return { bmadPieces: canonicalBmadPieces(parsed.data.newProjects.bmadPieces) };
+        const agent = parsed.data.newProjects.defaultAgentId;
+        // An agent this install no longer has reads as the install's default (the file keeps it).
+        return { bmadPieces: canonicalBmadPieces(parsed.data.newProjects.bmadPieces), ...(agent !== undefined && isAgentRegistered(agent) ? { defaultAgentId: agent } : {}) };
       }
     } catch {
       // Not JSON: as if there were no record.
@@ -116,12 +127,16 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
           { path: ['bmadPieces'], message: 'unknown or repeated piece, or dependency rule' },
         ]);
       }
-      const kept = read().bmadPieces;
-      const pieces = canonicalBmadPieces(parsed.data.bmadPieces);
+      const current = read();
+      const kept = current.bmadPieces;
+      const pieces = parsed.data.bmadPieces === undefined ? kept : canonicalBmadPieces(parsed.data.bmadPieces);
       // A piece is turned on only when this install ships it (AD-22); one already in the default is kept.
       const unavailable = pieces.find((piece) => !kept.includes(piece) && !options.bmad.isAvailable(piece));
       if (unavailable !== undefined) throw new FeatureUnavailableError(unavailable);
-      const defaults: NewProjectDefaults = { bmadPieces: pieces };
+      const agent = parsed.data.defaultAgentId;
+      if (agent !== undefined && agent !== null && !isAgentRegistered(agent)) throw new UnknownAgentError();
+      const defaultAgentId = agent === undefined ? current.defaultAgentId : (agent ?? undefined);
+      const defaults: NewProjectDefaults = { bmadPieces: pieces, ...(defaultAgentId === undefined ? {} : { defaultAgentId }) };
       write({ newProjects: defaults });
       return defaults;
     },
@@ -178,8 +193,9 @@ export function createAddProject(options: AddProjectOptions): AddProject {
         return parsed.data;
       };
       // Called only when the workspace is created, inside its transaction: a refusal creates nothing,
-      // and an existing project ignores the pieces.
-      return options.chat.openWorkspace(path, { bmadPieces: resolve });
+      // and an existing project ignores the pieces and the agent. The default agent for new projects
+      // (epic 6, entry 6) is read as registered only, so a gone agent leaves the project on the install's.
+      return options.chat.openWorkspace(path, { bmadPieces: resolve, defaultAgentId: () => options.defaults?.get().defaultAgentId });
     },
   };
 }

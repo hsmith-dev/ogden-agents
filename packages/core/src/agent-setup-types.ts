@@ -122,6 +122,11 @@ export interface AgentSetup {
 }
 
 export interface AgentSetupOptions {
+  /**
+   * Who makes each agent ("Anthropic"), from its descriptor (epic 6, entry
+   * 6): added to its status as `provider`, so the agent card names it.
+   */
+  providerOf?: (agentId: string) => string | undefined;
   /** Called with every failure, for the log. Never carries the URL, a code, a key or the agent's output. */
   onFailure?: (agentId: string, step: string, error: unknown) => void;
   /** Where API keys are kept (AD-16). Without it, saving a key is refused as {@link SecretsUnavailableError}. */

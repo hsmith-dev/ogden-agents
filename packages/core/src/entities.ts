@@ -75,6 +75,13 @@ export interface NewWorkspaceOptions {
    * them (pieces, dependency rule, availability). Default none.
    */
   bmadPieces?: readonly BmadPiece[] | (() => readonly BmadPiece[]);
+  /**
+   * The agent its new chats preselect (epic 6, entry 6: the install's default
+   * for new projects), or a function that returns it, called only when the
+   * workspace is created. The caller checks it is registered. Default none
+   * (the install's default).
+   */
+  defaultAgentId?: AgentId | undefined | (() => AgentId | undefined);
 }
 
 export interface NewRun {
@@ -298,10 +305,11 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         if (existing !== undefined) return toWorkspace(existing);
         const given = typeof options.bmadPieces === 'function' ? options.bmadPieces() : (options.bmadPieces ?? []);
         const bmadPieces = canonicalBmadPieces(given);
+        const defaultAgentId = typeof options.defaultAgentId === 'function' ? options.defaultAgentId() : options.defaultAgentId;
         const workspace: Workspace = { id: newId('ws'), path: canonical, realPath: real, createdAt: now() };
         orm
           .insert(workspaces)
-          .values({ ...workspace, realPath: real, cautionLevel: DEFAULT_CAUTION_LEVEL, bmadPieces: JSON.stringify(bmadPieces) })
+          .values({ ...workspace, realPath: real, cautionLevel: DEFAULT_CAUTION_LEVEL, bmadPieces: JSON.stringify(bmadPieces), defaultAgentId: defaultAgentId ?? null })
           .run();
         log.append({
           type: 'workspace.created',
@@ -309,13 +317,19 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
           streamId: workspace.id,
           payload: { workspace },
         });
-        // A project that starts with pieces on (story 10.4) says so right after it is created, in the same transaction.
-        if (bmadPieces.length > 0) {
+        // A project that starts with pieces on (story 10.4) or its own default agent (epic 6, entry 6)
+        // says so right after it is created, in the same transaction.
+        if (bmadPieces.length > 0 || defaultAgentId !== undefined) {
           log.append({
             type: 'workspace.settings_changed',
             workspaceId: workspace.id,
             streamId: workspace.id,
-            payload: { cautionLevel: DEFAULT_CAUTION_LEVEL, previous: DEFAULT_CAUTION_LEVEL, bmadPieces, previousBmadPieces: [] },
+            payload: {
+              cautionLevel: DEFAULT_CAUTION_LEVEL,
+              previous: DEFAULT_CAUTION_LEVEL,
+              ...(bmadPieces.length > 0 ? { bmadPieces, previousBmadPieces: [] } : {}),
+              ...(defaultAgentId === undefined ? {} : { defaultAgentId, previousDefaultAgentId: null }),
+            },
           });
         }
         return workspace;

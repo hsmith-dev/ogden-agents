@@ -22,6 +22,8 @@ export const AgentSetupStatus = z.object({
   agentId: AgentId,
   /** The agent's product name ("Claude Code"). */
   displayName: z.string().min(1),
+  /** Who makes it ("Anthropic"), as the agent card names it (epic 6, entry 6). Absent from older servers. */
+  provider: z.string().min(1).optional(),
   install: AgentInstallState,
   /** The installed version, when known. */
   version: z.string().min(1).nullable(),
@@ -74,6 +76,12 @@ export type AgentsResponse = z.infer<typeof AgentsResponse>;
 export const SignInResponse = z.object({
   state: AgentAuthState,
   url: z.url().nullable(),
+  /**
+   * A code the user types on the sign-in page, when the agent's sign-in gives
+   * one (a device code; epic 6, entry 6). Like the URL, secret-like: only in
+   * this response and the tab's memory.
+   */
+  code: z.string().min(1).max(64).optional(),
 });
 export type SignInResponse = z.infer<typeof SignInResponse>;
 

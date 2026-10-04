@@ -205,6 +205,44 @@ describe('AD-1: core and shared name no agent (epic 6)', () => {
   });
 });
 
+/** The web's own code (epic 6, entry 6): it names each agent from the agent list, never from a constant. */
+const WEB_SOURCE = /(^|[\\/])packages[\\/]web[\\/]src[\\/]/;
+
+/** One message per `AGENT_NAME`/`AGENT_ID` constant, agent id literal or agent product name in web code (comments aside). */
+export function findWebAgentConstants(files: readonly SourceFile[], ids: readonly string[] = AGENT_IDS): string[] {
+  const named = new RegExp(`(['"\`])[^'"\`\\n]*?(?<![a-z0-9-])(${ids.join('|')})(?![a-z0-9-])[^'"\`\\n]*?\\1`, 'g');
+  const violations: string[] = [];
+  for (const { path, source } of files) {
+    if (!WEB_SOURCE.test(path)) continue;
+    const code = withoutComments(source);
+    for (const match of code.matchAll(/(?<![A-Za-z0-9_])AGENT_(NAME|ID)(?![A-Za-z0-9_])/g)) violations.push(`${path}: the web names the agent through the constant ${match[0]} (entry 6: use the agent list)`);
+    for (const match of code.matchAll(named)) violations.push(`${path}: the web names the agent id ${match[2]} (entry 6: use the agent list)`);
+    for (const match of code.matchAll(/Claude Code|Anthropic/g)) violations.push(`${path}: the web names ${match[0]} in code (entry 6: use the agent list)`);
+  }
+  return violations;
+}
+
+describe('E6-R2: the web names agents from the agent list (entry 6)', () => {
+  it('no web source keeps an AGENT_NAME or AGENT_ID constant, an agent id, or an agent product name', () => {
+    const files = loadWorkspaceSources();
+    expect(files.some((file) => WEB_SOURCE.test(file.path))).toBe(true);
+    expect(findWebAgentConstants(files)).toEqual([]);
+  });
+
+  it('flags a planted constant, id or name in web code, but not in a comment, a longer name, or another package', () => {
+    const files: SourceFile[] = [
+      { pkg: '@ogden-agents/web', path: 'packages/web/src/a.ts', source: "export const AGENT_NAME = 'Claude Code';\n// AGENT_ID was here\nconst x = UNKNOWN_AGENT_NAME;" },
+      { pkg: '@ogden-agents/web', path: 'packages/web/src/b.tsx', source: "const id = 'claude-code';" },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/c.ts', source: "const AGENT_ID = 'claude-code';" },
+    ];
+    expect(findWebAgentConstants(files)).toEqual([
+      'packages/web/src/a.ts: the web names the agent through the constant AGENT_NAME (entry 6: use the agent list)',
+      'packages/web/src/a.ts: the web names Claude Code in code (entry 6: use the agent list)',
+      'packages/web/src/b.tsx: the web names the agent id claude-code (entry 6: use the agent list)',
+    ]);
+  });
+});
+
 /** Where the shared ACP client lives (6.4): it names no agent and imports no agent's adapter. */
 const ACP_BASE = /(^|[\\/])packages[\\/]adapters[\\/]src[\\/]acp-base[\\/]/;
 

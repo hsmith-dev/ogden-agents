@@ -4,15 +4,33 @@
  * name, the bare agent picker for new chats (shown only when there is a
  * choice), and the status sidebar naming each chat's agent.
  */
-import type { ChatAgentsResponse, CoreEvent, Session, Workspace } from '@ogden-agents/shared';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { projectNotTrustedReason, type ChatAgentsResponse, type CoreEvent, type Session, type Workspace } from '@ogden-agents/shared';
+import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from '@tanstack/react-router';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentPicker } from '../src/chat/agent-picker';
 import { agentNameOf } from '../src/chat/chat-api';
+import { agentAvailability, projectDefaultAgent } from '../src/chat/use-chat-agents';
 import { applyEvent, emptyStore } from '../src/events/event-store';
 import { buildSidebar } from '../src/shell/sidebar-model';
 
 afterEach(cleanup);
+
+/** Renders `node` in a router that knows Settings → Agents, so its link gets its href. */
+function renderInRouter(node: ReactNode) {
+  const root = createRootRoute({ component: () => <>{node}</> });
+  const agents = createRoute({ getParentRoute: () => root, path: '/settings/agents' });
+  const router = createRouter({ routeTree: root.addChildren([agents]), history: createMemoryHistory({ initialEntries: ['/'] }) });
+  return render(<RouterProvider router={router} />);
+}
+
+/** Opens a Radix menu the way a pointer does (happy-dom has no layout). */
+function openMenu(trigger: HTMLElement) {
+  act(() => {
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+  });
+}
 
 /** What every listed agent has besides its id, name and modes (6.3). */
 const READY = {
@@ -37,7 +55,8 @@ describe('agentNameOf', () => {
     expect(agentNameOf(LIST, 'fake-agent')).toBe('Fake Agent');
     expect(agentNameOf(LIST, 'claude-code')).toBe('Claude Code');
     expect(agentNameOf(LIST, undefined)).toBe('Claude Code');
-    expect(agentNameOf(undefined, 'claude-code')).toBe('Claude Code');
+    // Before the list loads no agent is guessed (entry 6: no AGENT_NAME constant in the web).
+    expect(agentNameOf(undefined, 'claude-code')).toBe('The agent');
     expect(agentNameOf(LIST, 'gone-agent')).toBe('The agent');
     expect(agentNameOf(undefined, 'fake-agent')).toBe('The agent');
   });
@@ -49,18 +68,57 @@ describe('AgentPicker', () => {
     expect(screen.queryByTestId('agent-picker')).toBeNull();
   });
 
-  it('offers each agent by its product name, the chosen one pressed, and reports a new choice only', () => {
+  it('offers each agent by its product name and readiness, the chosen one checked, and reports a new choice only', async () => {
     const onChange = vi.fn();
-    render(<AgentPicker agents={LIST.agents} value="claude-code" onChange={onChange} />);
+    renderInRouter(<AgentPicker agents={LIST.agents} value="claude-code" onChange={onChange} />);
+    const trigger = await screen.findByTestId('agent-picker');
+    expect(trigger.getAttribute('aria-label')).toBe('Agent for new chats: Claude Code');
+    openMenu(trigger);
     const options = screen.getAllByTestId('agent-option');
-    expect(options.map((option) => option.textContent)).toEqual(['Claude Code', 'Fake Agent']);
-    expect(options[0]!.getAttribute('data-state')).toBe('on');
+    expect(options.map((option) => option.textContent)).toEqual(['Claude CodeInstalled, signed in', 'Fake AgentInstalled, signed in']);
+    expect(options[0]!.getAttribute('aria-checked')).toBe('true');
     fireEvent.click(options[1]!);
     expect(onChange).toHaveBeenCalledWith('fake-agent');
     onChange.mockClear();
-    // Clicking the chosen agent again keeps it: a chat always has an agent.
-    fireEvent.click(options[0]!);
+    // Choosing the chosen agent again keeps it: a chat always has an agent.
+    openMenu(screen.getByTestId('agent-picker'));
+    fireEvent.click(screen.getAllByTestId('agent-option')[0]!);
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('keeps an agent that can\'t start a chat in the menu, unavailable but focusable, with its reason and a link to Settings → Agents', async () => {
+    const onChange = vi.fn();
+    const signedOut = { ...LIST.agents[1]!, auth: 'needs_sign_in' as const, unavailable: { code: 'agent_signed_out' as const, reason: "Fake Agent isn't signed in. Sign in in Settings → Agents.", action: 'sign_in' as const } };
+    const trusting = { ...LIST.agents[1]!, agentId: 'trust-agent', displayName: 'Trust Agent', needsProjectTrust: true };
+    renderInRouter(<AgentPicker agents={[LIST.agents[0]!, signedOut, trusting]} value="claude-code" onChange={onChange} />);
+    openMenu(await screen.findByTestId('agent-picker'));
+    const [, out, trust] = screen.getAllByTestId('agent-option');
+    expect(out!.getAttribute('aria-disabled')).toBe('true');
+    expect(out!.hasAttribute('data-disabled')).toBe(true);
+    expect(out!.textContent).toContain("Fake Agent isn't signed in.");
+    expect(trust!.getAttribute('aria-disabled')).toBe('true');
+    expect(trust!.textContent).toContain(projectNotTrustedReason('Trust Agent'));
+    // Reachable by keyboard: a disabled menu item would be skipped, and its reason never read.
+    expect(out!.getAttribute('tabindex')).not.toBeNull();
+    fireEvent.click(out!);
+    fireEvent.keyDown(out!, { key: 'Enter' });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId('agent-set-up-link').getAttribute('href')).toBe('/settings/agents');
+  });
+});
+
+describe('agentAvailability and projectDefaultAgent (entry 6)', () => {
+  it('reads readiness from the list, trust as unavailable with no fix here', () => {
+    expect(agentAvailability(LIST.agents[0]!)).toEqual({ available: true, description: 'Installed, signed in', setUp: false });
+    const notInstalled = { ...LIST.agents[1]!, install: 'not_installed' as const, unavailable: { code: 'agent_not_installed' as const, reason: 'Not here.', action: 'install' as const } };
+    expect(agentAvailability(notInstalled)).toEqual({ available: false, description: 'Not here.', setUp: true });
+    expect(agentAvailability({ ...LIST.agents[1]!, needsProjectTrust: true }).setUp).toBe(false);
+  });
+
+  it("preselects the project's default while the install has it, else the install's", () => {
+    expect(projectDefaultAgent(LIST, 'fake-agent')).toBe('fake-agent');
+    expect(projectDefaultAgent(LIST, undefined)).toBe('claude-code');
+    expect(projectDefaultAgent(LIST, 'gone-agent')).toBe('claude-code');
   });
 });
 

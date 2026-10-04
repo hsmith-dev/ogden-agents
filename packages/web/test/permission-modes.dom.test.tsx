@@ -17,10 +17,10 @@ import { DEVELOPER_MODE_CARRIED_KEY, DeveloperModeSync } from '../src/appearance
 import type { TranscriptPermission } from '../src/chat/transcript';
 import { PermissionCard } from '../src/permissions/permission-card';
 import {
-  PERMISSION_MODE_DESCRIPTIONS,
+  permissionModeDescriptions,
   PermissionModePicker,
-  SKIP_ALL_BANNER,
-  SKIP_ALL_WARNING,
+  skipAllBanner,
+  skipAllWarning,
   SkipAllBanner,
   TERMINAL_MODE_REASON,
   usePermissionMode,
@@ -57,7 +57,7 @@ function mountPicker(props: Partial<Parameters<typeof PermissionModePicker>[0]> 
   const onChoose = vi.fn();
   render(
     <TooltipProvider>
-      <PermissionModePicker mode="ask" options={allAvailable} developerMode={false} terminalDrives={false} changing={false} onChoose={onChoose} {...props} />
+      <PermissionModePicker agentName="Claude Code" mode="ask" options={allAvailable} developerMode={false} terminalDrives={false} changing={false} onChoose={onChoose} {...props} />
     </TooltipProvider>,
   );
   const open = async () => {
@@ -73,8 +73,8 @@ describe('the permission mode picker', () => {
     const { open } = mountPicker();
     expect(screen.getByTestId('permission-mode-picker').textContent).toContain('Ask');
     await open();
-    expect(screen.getByTestId('permission-mode-ask').textContent).toContain(PERMISSION_MODE_DESCRIPTIONS.ask);
-    expect(screen.getByTestId('permission-mode-auto').textContent).toContain(PERMISSION_MODE_DESCRIPTIONS.auto);
+    expect(screen.getByTestId('permission-mode-ask').textContent).toContain(permissionModeDescriptions('Claude Code').ask);
+    expect(screen.getByTestId('permission-mode-auto').textContent).toContain(permissionModeDescriptions('Claude Code').auto);
     expect(screen.queryByTestId('permission-mode-skip_all')).toBeNull();
     cleanup();
     await mountPicker({ developerMode: true }).open();
@@ -94,7 +94,7 @@ describe('the permission mode picker', () => {
     await open();
     fireEvent.click(screen.getByTestId('permission-mode-skip_all'));
     const dialog = await screen.findByTestId('skip-all-confirm');
-    expect(dialog.textContent).toContain(SKIP_ALL_WARNING);
+    expect(dialog.textContent).toContain(skipAllWarning('Claude Code'));
     expect(onChoose).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId('skip-all-cancel'));
     await waitFor(() => expect(screen.queryByTestId('skip-all-confirm')).toBeNull());
@@ -142,9 +142,9 @@ describe('the permission mode picker', () => {
 describe('the Skip-all banner', () => {
   it('names the mode in the destructive variant, with a way back to Ask', () => {
     const onBackToAsk = vi.fn();
-    render(<SkipAllBanner changing={false} onBackToAsk={onBackToAsk} />);
+    render(<SkipAllBanner agentName="Claude Code" changing={false} onBackToAsk={onBackToAsk} />);
     const banner = screen.getByTestId('skip-all-banner');
-    expect(banner.textContent).toContain(SKIP_ALL_BANNER);
+    expect(banner.textContent).toContain(skipAllBanner('Claude Code'));
     expect(banner.getAttribute('data-variant')).toBe('destructive');
     fireEvent.click(screen.getByTestId('skip-all-back-to-ask'));
     expect(onBackToAsk).toHaveBeenCalledTimes(1);
@@ -152,7 +152,7 @@ describe('the Skip-all banner', () => {
 
   it('ignores Back to Ask while a change is on its way', () => {
     const onBackToAsk = vi.fn();
-    render(<SkipAllBanner changing onBackToAsk={onBackToAsk} />);
+    render(<SkipAllBanner agentName="Claude Code" changing onBackToAsk={onBackToAsk} />);
     fireEvent.click(screen.getByTestId('skip-all-back-to-ask'));
     expect(onBackToAsk).not.toHaveBeenCalled();
   });
@@ -170,7 +170,7 @@ describe('a Skip-all permission card', () => {
       status: 'pending',
       resolution: undefined,
     } as TranscriptPermission;
-    render(<PermissionCard permission={permission} wsId="ws_1" sesId="ses_1" projectName="clay" />);
+    render(<PermissionCard permission={permission} wsId="ws_1" sesId="ses_1" projectName="clay" agentName="Claude Code" />);
     expect(screen.queryByRole('button', { name: 'Always allow' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Allow once' })).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Deny' })).not.toBeNull();

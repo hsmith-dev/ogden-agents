@@ -12,7 +12,20 @@ import { createClaudeCodeAgent } from '@ogden-agents/adapters';
 import { createMemoryAgentSetup } from '@ogden-agents/adapters';
 import type { AgentDescriptor, AgentPort } from '@ogden-agents/core';
 import type { AgentWiring } from '../src/agent-wiring.js';
-import { API_ROUTES, ApiErrorBody, apiPath, ChatAgentsResponse, SessionResponse, SessionsResponse, WorkspaceResponse, type SessionId } from '@ogden-agents/shared';
+import {
+  AgentsResponse,
+  API_ROUTES,
+  ApiErrorBody,
+  apiPath,
+  ChatAgentsResponse,
+  NewProjectDefaultsResponse,
+  SessionResponse,
+  SessionsResponse,
+  SignInResponse,
+  WorkspaceResponse,
+  WorkspaceSettingsResponse,
+  type SessionId,
+} from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { signIn, startTestServer, testDescriptor, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
@@ -264,16 +277,83 @@ describe('a new chat only with an agent that can start it (epic 6, 6.3)', () => 
     expect(claudeEnv).not.toMatch(/^(FAKE_AGENT_HOME|FAKE_AGENT_KEY)=/m);
   });
 
-  it("refuses a project's default agent until entry 6 keeps it (501), storing nothing", async () => {
-    const { server, tab, wsId } = await setUp();
-    const refused = await request(server, tab, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { defaultAgentId: 'fake-agent' });
-    expect(refused.status).toBe(501);
-    expect(ApiErrorBody.parse(await refused.json()).error.code).toBe('not_implemented');
-  });
-
   it('refuses a wiring whose setup port is for another agent or gives its key in another variable', async () => {
     await expect(startTestServer({ extraAgents: [secondAgent({ setup: createMemoryAgentSetup({ agentId: 'other-agent' }) })] })).rejects.toThrow(/setup port is other-agent's/);
     const keyed = { ...createMemoryAgentSetup({ agentId: 'fake-agent' }), apiKey: { envName: 'OTHER_KEY', check: () => undefined, verify: async () => 'ok' as const } };
     await expect(startTestServer({ extraAgents: [secondAgent({ setup: keyed })] })).rejects.toThrow(/gives its key in OTHER_KEY/);
+  });
+});
+
+describe("a project's default agent and the default for new projects (epic 6, entry 6)", () => {
+  const settingsEvents = (server: TestServer, wsId: string) =>
+    server.core.events.readAfter(0).filter((event) => event.type === 'workspace.settings_changed' && event.workspaceId === wsId);
+
+  it('keeps a project default through PATCH settings, with its event, and a new chat with no agent picked gets it', async () => {
+    const { server, tab, wsId, chatWith } = await setUp();
+    const path = apiPath(API_ROUTES.workspaceSettings, { wsId });
+    const saved = await request(server, tab, 'PATCH', path, { defaultAgentId: 'fake-agent' });
+    expect(saved.status).toBe(200);
+    expect(WorkspaceSettingsResponse.parse(await saved.json()).settings.defaultAgentId).toBe('fake-agent');
+    expect(WorkspaceSettingsResponse.parse(await (await request(server, tab, 'GET', path)).json()).settings.defaultAgentId).toBe('fake-agent');
+    expect(settingsEvents(server, wsId).at(-1)?.payload).toMatchObject({ defaultAgentId: 'fake-agent', previousDefaultAgentId: null });
+
+    // The same value again changes nothing: no event.
+    const before = settingsEvents(server, wsId).length;
+    expect((await request(server, tab, 'PATCH', path, { defaultAgentId: 'fake-agent' })).status).toBe(200);
+    expect(settingsEvents(server, wsId)).toHaveLength(before);
+
+    const chat = await chatWith();
+    expect(chat.agentId).toBe('fake-agent');
+    expect(await say(server, tab, wsId, chat.id, 'whoami')).toBe('agent=fake-agent');
+    // A chat can still pick another agent.
+    expect((await chatWith('claude-code')).agentId).toBe('claude-code');
+
+    // null goes back to the install's default.
+    const cleared = WorkspaceSettingsResponse.parse(await (await request(server, tab, 'PATCH', path, { defaultAgentId: null })).json()).settings;
+    expect(cleared.defaultAgentId).toBeUndefined();
+    expect(settingsEvents(server, wsId).at(-1)?.payload).toMatchObject({ defaultAgentId: null, previousDefaultAgentId: 'fake-agent' });
+    expect((await chatWith()).agentId).toBe('claude-code');
+  });
+
+  it('refuses an agent this install does not have, storing nothing', async () => {
+    const { server, tab, wsId } = await setUp();
+    const path = apiPath(API_ROUTES.workspaceSettings, { wsId });
+    const before = settingsEvents(server, wsId).length;
+    const refused = await request(server, tab, 'PATCH', path, { defaultAgentId: 'gone-agent', cautionLevel: 'ask_for_commands' });
+    expect(refused.status).toBe(400);
+    expect(ApiErrorBody.parse(await refused.json()).error.code).toBe('agent_unknown');
+    expect(settingsEvents(server, wsId)).toHaveLength(before);
+    expect(WorkspaceSettingsResponse.parse(await (await request(server, tab, 'GET', path)).json()).settings).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [] });
+  });
+
+  it("keeps the default for new projects beside the pieces; a project added later gets it, one that exists keeps its own", async () => {
+    const { server, tab, wsId } = await setUp();
+    const saved = await request(server, tab, 'PATCH', API_ROUTES.newProjectDefaults, { defaultAgentId: 'fake-agent' });
+    expect(saved.status).toBe(200);
+    expect(NewProjectDefaultsResponse.parse(await saved.json()).defaults).toEqual({ bmadPieces: [], defaultAgentId: 'fake-agent' });
+    // Saving the pieces alone keeps the agent.
+    const pieces = NewProjectDefaultsResponse.parse(await (await request(server, tab, 'PATCH', API_ROUTES.newProjectDefaults, { bmadPieces: [] })).json()).defaults;
+    expect(pieces.defaultAgentId).toBe('fake-agent');
+    const unknown = await request(server, tab, 'PATCH', API_ROUTES.newProjectDefaults, { defaultAgentId: 'gone-agent' });
+    expect(unknown.status).toBe(400);
+    expect(ApiErrorBody.parse(await unknown.json()).error.code).toBe('agent_unknown');
+
+    const repo = temp('ogden-agents-repo-');
+    const added = WorkspaceResponse.parse(await (await request(server, tab, 'POST', API_ROUTES.workspaces, { path: repo })).json()).workspace.id;
+    const settingsOf = async (id: string) => WorkspaceSettingsResponse.parse(await (await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceSettings, { wsId: id }))).json()).settings;
+    expect((await settingsOf(added)).defaultAgentId).toBe('fake-agent');
+    expect(settingsEvents(server, added).at(-1)?.payload).toMatchObject({ defaultAgentId: 'fake-agent', previousDefaultAgentId: null });
+    expect((await settingsOf(wsId)).defaultAgentId).toBeUndefined();
+  });
+
+  it('names each agent\'s provider in its setup status, and hands a sign-in code back only in the sign-in answer', async () => {
+    const setup = createMemoryAgentSetup({ agentId: 'fake-agent', displayName: 'Fake Agent', installed: true, auth: 'needs_sign_in', userCode: 'ABCD-1234' });
+    const { server, tab } = await setUp(secondAgent({ setup }));
+    const agents = AgentsResponse.parse(await (await request(server, tab, 'GET', API_ROUTES.agents)).json()).agents;
+    expect(agents.find((agent) => agent.agentId === 'fake-agent')?.provider).toBe('Fake Provider');
+    expect(agents.find((agent) => agent.agentId === 'claude-code')?.provider).toBe('Anthropic');
+    const answer = await request(server, tab, 'POST', apiPath(API_ROUTES.agentSignIn, { agentId: 'fake-agent' }));
+    expect(SignInResponse.parse(await answer.json())).toMatchObject({ state: 'signing_in', code: 'ABCD-1234' });
+    expect(JSON.stringify(server.core.events.readAfter(0))).not.toContain('ABCD-1234');
   });
 });

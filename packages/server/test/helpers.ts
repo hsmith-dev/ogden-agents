@@ -333,5 +333,5 @@ export function fixtureUpstream() {
     fetched.push(url);
     return new Response(tarball);
   };
-  return { lock, fetch, fetched };
+  return { lock, fetch, fetched, tarball };
 }

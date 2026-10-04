@@ -5,7 +5,7 @@
  * builds it), document cards, and Plan and Board (planning sessions, the
  * script runner, the ticket store, the board and the ticket watch).
  */
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createBmadCatalog, createTicketsV7, createUpstreamBmadSource, createUvScriptRunner, createUvToolchain, errorCode, ScriptRunError, type UvScriptRunner } from '@ogden-agents/adapters';
 import {
@@ -22,6 +22,7 @@ import {
 } from '@ogden-agents/core';
 import type { Logger } from './log.js';
 import type { StartOptions } from './start-types.js';
+import type { TestBmadSource } from './test-hooks.js';
 
 /** The verified pinned BMad Method's `tickets.py`, relative to its `skills/` (story 4.14, AD-13). */
 export const TICKETS_SCRIPT = 'bmad-ticket/scripts/tickets.py';
@@ -50,8 +51,14 @@ export interface BmadWiring {
   readonly bmadCatalog: BmadCatalogPort;
 }
 
-/** The pinned BMad Method source, the catalog over it, and where setup finds the script runner once it is built. */
-export function createBmadSourceAndCatalog(options: StartOptions, dataDir: string, log: Logger): BmadWiring {
+/**
+ * The pinned BMad Method source, the catalog over it, and where setup finds
+ * the script runner once it is built. `testSource` is the
+ * `OGDEN_AGENTS_TEST_BMAD_SOURCE` hook's fixture (story 4.13; only when
+ * `testHooksAllowed`): its lock and a local tarball read from disk instead of
+ * GitHub's, still checked against the lock's hash.
+ */
+export function createBmadSourceAndCatalog(options: StartOptions, dataDir: string, log: Logger, testSource?: TestBmadSource): BmadWiring {
   // The script runner is built with the server (below); setup reaches it through this holder (story 4.3).
   const setupRunner: { current?: UvScriptRunner } = {};
   // The pinned upstream BMad Method (story 4.14, AD-13): the server's one source, downloaded only when the user
@@ -61,6 +68,7 @@ export function createBmadSourceAndCatalog(options: StartOptions, dataDir: strin
     createUpstreamBmadSource({
       dataDir,
       ...(options.bmadFetch === undefined ? {} : { fetch: options.bmadFetch }),
+      ...(testSource === undefined ? {} : { lock: testSource.lock, fetch: async () => new Response(readFileSync(testSource.tarball)) }),
       onCleanupError: (error) => log.warn('could not remove BMad Method download temp files', { code: (error as NodeJS.ErrnoException).code ?? 'unknown' }),
     });
   // The read-only detection of a repo's `_bmad/` (story 10.3), its installed skills (story 4.1) and BMad Method's

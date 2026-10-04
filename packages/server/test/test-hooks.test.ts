@@ -14,6 +14,8 @@ import {
   API_KEY_CHECK_ENV,
   BMAD_AVAILABLE_ENV,
   BMAD_PROBE_ENV,
+  BMAD_SOURCE_ENV,
+  resolveTestHooks,
   CLAUDE_CLI_ENV,
   CHECK_IN_MS_ENV,
   CLAUDE_INSTALL_ENV,
@@ -22,11 +24,14 @@ import {
   testApiKeyCheck,
   testBmadAvailable,
   testBmadProbe,
+  testBmadSource,
   testClaudeCli,
   testClaudeInstall,
   testHooksAllowed,
 } from '../src/test-hooks.js';
-import { startTestServer, tempDataDir } from './helpers.js';
+import { createLogger } from '../src/log.js';
+import { createBmadSourceAndCatalog } from '../src/start-planning.js';
+import { fixtureUpstream, startTestServer, tempDataDir } from './helpers.js';
 
 const INTEGRITY = 'sha512-QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=';
 /** Not inside the temp folder: this repository's checkout (a user's data folder stands for it). */
@@ -221,6 +226,75 @@ describe('testClaudeCli (story 3.10)', () => {
     mkdirSync(folder);
     expect(() => testClaudeCli({ ...run, [CLAUDE_CLI_ENV]: folder }, tempDataDir())).toThrow(/not a file/);
     expect(() => testClaudeCli({ ...run, [CLAUDE_CLI_ENV]: join(tempDataDir(), 'missing.mjs') }, tempDataDir())).toThrow(/unreadable \(ENOENT\)/);
+  });
+});
+
+describe('testBmadSource (story 4.13)', () => {
+  const run = { NODE_ENV: 'test' };
+  /** A fixture lock and its tarball written into a fresh temp folder, and the hook's JSON file beside them. */
+  const sourceFile = (body: Record<string, unknown> = {}) => {
+    const dir = tempDataDir();
+    const upstream = fixtureUpstream();
+    const tarball = join(dir, 'bmad.tar.gz');
+    writeFileSync(tarball, upstream.tarball);
+    const file = join(dir, 'bmad-source.json');
+    writeFileSync(file, JSON.stringify({ lock: upstream.lock, tarball, ...body }));
+    return { file, tarball, upstream };
+  };
+
+  it('gives the fixture lock, the tarball by its real path and only the allowlisted uv variables, when hooks are allowed', () => {
+    const { file, tarball, upstream } = sourceFile({ uvEnv: { UV_CACHE_DIR: '/tmp/c', UV_PYTHON_DOWNLOADS: 'never', HTTPS_PROXY: 'http://127.0.0.1:9', ANTHROPIC_API_KEY: 'sk-x', PATH: '/evil', UV_PYTHON: 3 } });
+    expect(testBmadSource({ ...run, [BMAD_SOURCE_ENV]: file }, tempDataDir())).toEqual({
+      lock: upstream.lock,
+      tarball: realpathSync.native(tarball),
+      uvEnv: { UV_CACHE_DIR: '/tmp/c', UV_PYTHON_DOWNLOADS: 'never', HTTPS_PROXY: 'http://127.0.0.1:9' },
+    });
+  });
+
+  it('is inert outside a test run, on a data folder outside the temp folder, or unset; the file is then never read', () => {
+    const missing = join(tempDataDir(), 'missing.json');
+    expect(testBmadSource({ [BMAD_SOURCE_ENV]: missing }, tempDataDir())).toBeUndefined();
+    expect(testBmadSource({ ...run, [BMAD_SOURCE_ENV]: missing }, OUTSIDE)).toBeUndefined();
+    expect(testBmadSource({ ...run }, tempDataDir())).toBeUndefined();
+    expect(testBmadSource({ ...run, [BMAD_SOURCE_ENV]: '' }, tempDataDir())).toBeUndefined();
+  });
+
+  it('ignores a file or a tarball outside the temp folder', () => {
+    expect(testBmadSource({ ...run, [BMAD_SOURCE_ENV]: join(OUTSIDE, 'package.json') }, tempDataDir())).toBeUndefined();
+    const { file } = sourceFile({ tarball: join(OUTSIDE, 'package.json') });
+    expect(testBmadSource({ ...run, [BMAD_SOURCE_ENV]: file }, tempDataDir())).toBeUndefined();
+  });
+
+  it('refuses a relative path, an unreadable or bad file, a lock the schema refuses, and a missing or relative tarball', () => {
+    expect(() => testBmadSource({ ...run, [BMAD_SOURCE_ENV]: 'bmad.json' }, tempDataDir())).toThrow(/must be an absolute path/);
+    expect(() => testBmadSource({ ...run, [BMAD_SOURCE_ENV]: join(tempDataDir(), 'missing.json') }, tempDataDir())).toThrow(/unreadable \(ENOENT\)/);
+    expect(() => testBmadSource({ ...run, [BMAD_SOURCE_ENV]: installFile('{') }, tempDataDir())).toThrow(/bad JSON/);
+    expect(() => testBmadSource({ ...run, [BMAD_SOURCE_ENV]: sourceFile({ lock: { sources: {} } }).file }, tempDataDir())).toThrow(/BmadLock schema/);
+    expect(() => testBmadSource({ ...run, [BMAD_SOURCE_ENV]: sourceFile({ tarball: 'bmad.tar.gz' }).file }, tempDataDir())).toThrow(/tarball must be an absolute path/);
+    expect(() => testBmadSource({ ...run, [BMAD_SOURCE_ENV]: sourceFile({ tarball: join(tempDataDir(), 'missing.tar.gz') }).file }, tempDataDir())).toThrow(/tarball unreadable \(ENOENT\)/);
+  });
+
+  it("is not read when the server's options give a BMad Method source or fetch", () => {
+    const env = { ...run, [BMAD_SOURCE_ENV]: join(tempDataDir(), 'missing.json') };
+    expect(resolveTestHooks(env, tempDataDir(), { ownsCore: true, bmadFetch: async () => new Response('') }).bmadSource).toBeUndefined();
+    expect(() => resolveTestHooks(env, tempDataDir(), { ownsCore: true })).toThrow(/unreadable/);
+  });
+
+  it("the server's source downloads the local tarball, checks it against the lock and is ready; a changed tarball is refused", async () => {
+    const run = sourceFile();
+    const hook = testBmadSource({ NODE_ENV: 'test', [BMAD_SOURCE_ENV]: run.file }, tempDataDir())!;
+    const dataDir = tempDataDir();
+    const { bmadSourcePort } = createBmadSourceAndCatalog({}, dataDir, createLogger(() => {}), hook);
+    expect(bmadSourcePort.status().state).toBe('missing');
+    expect((await bmadSourcePort.download()).state).toBe('ready');
+    expect(bmadSourcePort.file('bmad-ticket/scripts/tickets.py')).toBeDefined();
+
+    const other = sourceFile();
+    writeFileSync(other.tarball, fixtureUpstream().tarball.subarray(0, 64));
+    const changed = testBmadSource({ NODE_ENV: 'test', [BMAD_SOURCE_ENV]: other.file }, tempDataDir())!;
+    const refused = createBmadSourceAndCatalog({}, tempDataDir(), createLogger(() => {}), changed).bmadSourcePort;
+    await expect(refused.download()).rejects.toThrow();
+    expect(refused.status().state).toBe('missing');
   });
 });
 

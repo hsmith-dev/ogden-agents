@@ -150,7 +150,7 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
   // What this install ships, plus a test's own (story 10.2): the option, and the environment hook.
   const availableBmadPieces = [...new Set([...SHIPPED_BMAD_PIECES, ...(options.availableBmadPieces ?? []), ...hooks.bmadAvailable])];
   // The pinned BMad Method source, the catalog and setup's script runner holder (`start-planning.ts`).
-  const bmadWiring = createBmadSourceAndCatalog(options, dataDir, log);
+  const bmadWiring = createBmadSourceAndCatalog(options, dataDir, log, hooks.bmadSource);
   const { bmadCatalog } = bmadWiring;
   const core =
     options.core ??
@@ -236,7 +236,7 @@ async function listenAndAnnounce({
   });
   // The one environment of every `uv` child, the version probe's and every script run's (story 4.2): an
   // allowlist, never this server's environment (AD-16), plus a test's own additions.
-  const uvChildEnv = () => ({ ...uvEnvironment(), ...options.extraUvEnv });
+  const uvChildEnv = () => ({ ...uvEnvironment(), ...hooks.bmadSource?.uvEnv, ...options.extraUvEnv });
   // One uv adapter: the toolchain's status and install, and the uv BMad Method's scripts run with (story 4.1).
   const uvToolchain = createUvToolchain({
     dataDir,

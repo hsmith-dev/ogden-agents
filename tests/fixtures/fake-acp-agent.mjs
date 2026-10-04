@@ -56,6 +56,9 @@
 //                  session's cwd (never outside it), reports an `edit` tool
 //                  call, then completes it with a diff of the file's absolute
 //                  path; replies "Wrote <relpath>." (story 4.7)
+//   "write-file <relpath> <base64>"  as "write-doc", but writes the decoded
+//                  bytes (an agent writing a plan file or `tickets.toml`;
+//                  story 4.13)
 //
 //   "mode"         replies `mode=<its current session mode>` (permission modes)
 //   "mode-switch <mode id>"  switches its own session mode, as the agent does
@@ -494,13 +497,14 @@ acp
       await say(client, params.sessionId, 'Edited.');
       return { stopReason: 'end_turn' };
     }
-    if (text.startsWith('write-doc ')) {
-      const relpath = text.slice('write-doc '.length).trim();
+    if (text.startsWith('write-doc ') || text.startsWith('write-file ')) {
+      const own = text.startsWith('write-file ');
+      const [relpath = '', encoded = ''] = own ? text.slice('write-file '.length).trim().split(/\s+/) : [text.slice('write-doc '.length).trim()];
       const cwd = session.opened.cwd ?? process.cwd();
       const file = resolve(cwd, relpath);
       const inside = relative(cwd, file);
       if (relpath === '' || inside === '' || inside.startsWith('..') || isAbsolute(inside)) throw acp.RequestError.invalidParams(undefined, 'write-doc writes only inside the session cwd');
-      const content = `---\ntitle: ${relpath}\n---\n\n# Written by the fake agent\n\nA **small** document at \`${relpath}\`.\n\n- one\n- two\n`;
+      const content = own ? Buffer.from(encoded, 'base64').toString('utf8') : `---\ntitle: ${relpath}\n---\n\n# Written by the fake agent\n\nA **small** document at \`${relpath}\`.\n\n- one\n- two\n`;
       const toolCallId = `call-write-${randomUUID()}`;
       await update(client, params.sessionId, { sessionUpdate: 'tool_call', toolCallId, title: `Write ${relpath}`, kind: 'edit', status: 'in_progress', locations: [{ path: file }] });
       mkdirSync(dirname(file), { recursive: true });

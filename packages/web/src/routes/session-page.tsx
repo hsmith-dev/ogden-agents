@@ -3,8 +3,9 @@ import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { ArrowClockwise, ArrowDown, ChatCircle, House, Stop } from '@phosphor-icons/react';
 import type { PermissionMode } from '@ogden-agents/shared';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useAgents } from '@/agents/agent-setup-api';
 import { useAppearance } from '@/appearance/appearance-provider';
-import { AGENT_ID, agentNameOf, cancelSession, ChatApiError, fetchSession, sendMessage, setPermissionMode, switchDriver } from '@/chat/chat-api';
+import { agentNameOf, cancelSession, ChatApiError, UNKNOWN_AGENT_NAME, fetchSession, sendMessage, setPermissionMode, switchDriver } from '@/chat/chat-api';
 import { useChatAgents } from '@/chat/use-chat-agents';
 import { Composer } from '@/chat/composer';
 import { ReadOnlyConversation } from '@/chat/read-only';
@@ -98,9 +99,12 @@ export function SessionPage() {
   // The chat's own agent, by its product name (epic 6, E6-R1).
   const chatAgents = useChatAgents();
   // Until the session has loaded its agent isn't known: no agent's name is guessed (review: a second agent's chat named Claude Code).
-  const agentName = session.data === undefined ? 'The agent' : agentNameOf(chatAgents.data, session.data.session.agentId);
-  // Sign in again signs in to Claude Code only (9.4); another agent's expired sign-in shows the plain error until its own setup ships.
-  const signsInHere = session.data !== undefined && (session.data.session.agentId ?? AGENT_ID) === AGENT_ID;
+  const agentName = session.data === undefined ? UNKNOWN_AGENT_NAME : agentNameOf(chatAgents.data, session.data.session.agentId);
+  const agentId = session.data === undefined ? undefined : (session.data.session.agentId ?? chatAgents.data?.defaultAgentId);
+  const severalAgents = (chatAgents.data?.agents.length ?? 0) > 1;
+  // Sign in again (9.4) signs in to the chat's own agent, when it has a setup (entry 6); otherwise the plain error notice.
+  const setups = useAgents();
+  const signsInHere = agentId !== undefined && setups.data?.some((setup) => setup.agentId === agentId) === true;
   const workspace = useQuery({ queryKey: ['workspace', wsId], queryFn: () => fetchWorkspace(wsId), retry: false });
   const end = useRef<HTMLDivElement>(null);
   const lastText = view.messages.at(-1)?.text.length ?? 0;
@@ -207,6 +211,7 @@ export function SessionPage() {
     state,
     queued: view.queued.length,
     developerMode: appearance.developerMode,
+    agentName,
     setActionError,
   });
 
@@ -328,9 +333,16 @@ export function SessionPage() {
   return (
     <>
       <WorkspaceHeader title="Chat" wsId={wsId} compactOnPhone={appearance.developerMode}>
+        {/* The chat's agent (E6-R1), named in the header while the install has more than one. */}
+        {severalAgents && session.data !== undefined ? (
+          <Text as="span" variant="caption" data-testid="session-agent">
+            {agentName}
+          </Text>
+        ) : null}
         {state === undefined ? null : <StateGlyph state={state} data-testid="session-state" className="ml-auto" />}
         <span className={state === undefined ? 'ml-auto' : undefined}>
           <PermissionModePicker
+            agentName={agentName}
             mode={permissionMode}
             options={session.data?.permissionModes}
             developerMode={appearance.developerMode}
@@ -341,6 +353,7 @@ export function SessionPage() {
         </span>
         {appearance.developerMode ? (
           <DriverToggle
+            agentName={agentName}
             driver={driver}
             switching={switchingTo}
             terminalBlockedReason={terminalBlockedReason}
@@ -349,7 +362,7 @@ export function SessionPage() {
         ) : null}
       </WorkspaceHeader>
       {/* A chat that skips its permission checks says so in red, above the conversation or the terminal, at any scroll position. */}
-      {permissionMode === 'skip_all' ? <SkipAllBanner changing={modeChanging} onBackToAsk={() => changeMode('ask', false, terminalDrives)} /> : null}
+      {permissionMode === 'skip_all' ? <SkipAllBanner agentName={agentName} changing={modeChanging} onBackToAsk={() => changeMode('ask', false, terminalDrives)} /> : null}
       {driver === 'terminal' ? (
         <ReadOnlyBanner
           onSwitchToChat={() => switchTo('ui')}
@@ -361,7 +374,7 @@ export function SessionPage() {
       ) : null}
       {/* While the terminal drives it takes the main pane; at `xl` the read-only conversation can open beside it. */}
       <TerminalPane driving={driver === 'terminal'}>
-        {driver === 'terminal' ? <TerminalPanel sesId={sesId} screenReaderMode={appearance.terminalScreenReader} /> : null}
+        {driver === 'terminal' ? <TerminalPanel sesId={sesId} agentName={agentName} screenReaderMode={appearance.terminalScreenReader} /> : null}
         <PageBody
           id={peekId}
           {...conversationProps(driver === 'terminal', peekOpen)}
@@ -405,6 +418,7 @@ export function SessionPage() {
                       wsId={wsId}
                       sesId={sesId}
                       projectName={projectName}
+                      agentName={agentName}
                       onDecided={focusComposer}
                     />
                   ),
@@ -430,10 +444,12 @@ export function SessionPage() {
                   <StateGlyph state="working" label={checkInWords(view.checkIn, agentName)} />
                 </Notice>
               ) : null}
-              {state === 'error' && view.errorCode === 'auth_required' && !terminalDrives && signsInHere ? (
+              {state === 'error' && view.errorCode === 'auth_required' && !terminalDrives && signsInHere && agentId !== undefined ? (
                 // Keyed per error (the message it failed on), so each one starts unarmed (9.4).
                 <SignInAgain
                   key={`${sesId}:${lastSentUserId ?? ''}`}
+                  agentId={agentId}
+                  agentName={agentName}
                   reason={view.errorReason}
                   canTryAgain={view.lastUserText !== undefined}
                   onTryAgain={tryAgain}

@@ -22,16 +22,6 @@ import { tabAuth, type TabAuth } from '@/auth/tab-token';
  * session state never come back here: they arrive through the event log.
  */
 
-/**
- * The install's original agent, by its product name (EXPERIENCE.md Voice):
- * the words that still speak of Claude Code only (sign-in, its terminal, its
- * auto mode) until epic 6's sweep. A chat's own agent is {@link agentNameOf}.
- */
-export const AGENT_NAME = 'Claude Code';
-
-/** That agent's id in the agent setup API (`/api/v1/agents/:agentId`), for Sign in again (9.4). */
-export const AGENT_ID = 'claude-code';
-
 // The shared fetch-error helper, re-exported for this module's importers.
 export { call, ChatApiError, postJson };
 
@@ -64,15 +54,18 @@ export async function fetchChatAgents(auth: Pick<TabAuth, 'fetch'> = tabAuth): P
 /** The query key of {@link fetchChatAgents}: the list only changes when the server restarts. */
 export const CHAT_AGENTS_QUERY_KEY = ['chat-agents'] as const;
 
+/** A chat's agent before the agent list has loaded, or one it doesn't have (EXPERIENCE.md Voice). */
+export const UNKNOWN_AGENT_NAME = 'The agent';
+
 /**
- * A chat's agent by its product name (epic 6): from the agent list, else
- * (the list not loaded yet, or a session stored before agents could be
- * chosen) the original agent's name for that agent or no id, else "The agent".
+ * A chat's agent by its product name (epic 6), from the agent list. A
+ * session stored before agents could be chosen has no id: it is the
+ * install's default agent's. "The agent" while the list loads, or for an
+ * agent the list doesn't have.
  */
 export function agentNameOf(list: ChatAgentsResponse | undefined, agentId: string | undefined): string {
-  const listed = agentId === undefined ? undefined : list?.agents.find((agent) => agent.agentId === agentId);
-  if (listed !== undefined) return listed.displayName;
-  return agentId === undefined || agentId === AGENT_ID ? AGENT_NAME : 'The agent';
+  const id = agentId ?? list?.defaultAgentId;
+  return list?.agents.find((agent) => agent.agentId === id)?.displayName ?? UNKNOWN_AGENT_NAME;
 }
 
 /**

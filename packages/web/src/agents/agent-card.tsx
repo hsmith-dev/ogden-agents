@@ -25,6 +25,9 @@ import { SigningIn } from './signing-in';
  * Welcome (9.5) reuses it, `selected` (DESIGN.md: the heavier ink border).
  */
 
+/** Who makes the agent, from its setup status (epic 6, entry 6; the 9.2 deferral), or plain words when an older server doesn't say. */
+export const providerName = (agent: Pick<AgentSetupStatus, 'provider'>): string => agent.provider ?? "the agent's provider";
+
 /** What Install downloads, as the card says it beside the button. */
 const INSTALL_SIZE = { small: 'about 60 MB', large: 'about 250 MB' } as const;
 export function AgentCard({ agent, selected = false }: { agent: AgentSetupStatus; selected?: boolean }) {
@@ -173,7 +176,7 @@ function ApiKeySection({ agent, saved, actions }: { agent: AgentSetupStatus; sav
       <div className="flex flex-col gap-2" data-testid="agent-api-key">
         <Text variant="body" data-testid="agent-api-key-saved">
           API key saved …{saved.lastFour}
-          {saved.unchecked === true ? ". Ogden Agents couldn't check it with Anthropic." : null}
+          {saved.unchecked === true ? `. Ogden Agents couldn't check it with ${providerName(agent)}.` : null}
         </Text>
         {agent.auth === 'signed_in' && agent.method === 'subscription' ? (
           <Text variant="caption" data-testid="agent-api-key-note">
@@ -231,7 +234,7 @@ function ApiKeySection({ agent, saved, actions }: { agent: AgentSetupStatus; sav
       {fromEnvironment}
       <Label htmlFor={fieldId}>API key</Label>
       <Text variant="caption" id={`${fieldId}-description`}>
-        Kept in this computer's keychain. Ogden Agents checks it with Anthropic first.
+        Kept in this computer's keychain. Ogden Agents checks it with {providerName(agent)} first.
       </Text>
       <div className="flex gap-2">
         <Input

@@ -12,14 +12,18 @@ import {
 } from '@ogden-agents/shared';
 import { ArrowRight, FolderPlus, Plus } from '@phosphor-icons/react';
 import { useNavigate } from '@tanstack/react-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { AgentCard } from '@/agents/agent-card';
 import { useAgents } from '@/agents/agent-setup-api';
 import { shortcutLocation, useAppShortcut, useAppShortcutActions } from '@/appearance/app-shortcut-api';
 import { useCompleteWelcome, useOnboarding } from '@/onboarding/onboarding-api';
+import { NEW_PROJECT_DEFAULTS_QUERY_KEY, updateNewProjectsAgent, useNewProjectDefaults } from '@/settings/new-project-defaults';
 import {
   advancesOnReady,
   agentReady,
+  agentSetupWords,
+  asksAgentChoice,
   asksFirstProjectChoice,
   bmadMethodPieces,
   firstProjectPieces,
@@ -120,19 +124,39 @@ function Actions({ children }: { children: ReactNode }) {
   return <div className="flex flex-wrap items-center gap-2">{children}</div>;
 }
 
-/** Pick the agent: its card, and on the change to ready the step moves on by itself. */
+/**
+ * Pick the agent: with more than one, which one (epic 6, entry 6: kept as
+ * the default for new projects); then its card, and on the change to ready
+ * the step moves on by itself.
+ */
 function AgentStep({ onContinue, skip }: { onContinue(): void; skip: ReactNode }) {
   const query = useAgents();
-  const agent = selectedAgent(query.data);
+  const defaults = useNewProjectDefaults();
+  const queryClient = useQueryClient();
+  const [picked, setPicked] = useState<string | undefined>(undefined);
+  const [saveError, setSaveError] = useState<string | undefined>(undefined);
+  const choosing = asksAgentChoice(query.data);
+  const agent = selectedAgent(query.data, picked ?? defaults.data?.defaultAgentId);
+  const choose = (agentId: string) => {
+    setPicked(agentId);
+    setSaveError(undefined);
+    // The chosen agent becomes the default for new projects, beside the default pieces (10.4).
+    updateNewProjectsAgent(agentId).then(
+      (saved) => queryClient.setQueryData(NEW_PROJECT_DEFAULTS_QUERY_KEY, saved),
+      (failure: unknown) => setSaveError(failure instanceof Error ? failure.message : "The agent couldn't be kept for new projects. Try again."),
+    );
+  };
   const seen = agent !== undefined;
   const ready = agentReady(agent);
-  const previous = useRef<boolean | undefined>(undefined);
+  const agentId = agent?.agentId;
+  // Per agent: choosing another agent that is ready already is not a sign-in finishing, so it never moves on.
+  const previous = useRef<{ agentId: string | undefined; ready: boolean | undefined }>({ agentId: undefined, ready: undefined });
   useEffect(() => {
     if (!seen) return;
-    const was = previous.current;
-    previous.current = ready;
+    const was = previous.current.agentId === agentId ? previous.current.ready : undefined;
+    previous.current = { agentId, ready };
     if (advancesOnReady(was, ready)) onContinue();
-  }, [seen, ready, onContinue]);
+  }, [seen, ready, agentId, onContinue]);
 
   return (
     <section aria-label="Agent" className="flex max-w-(--space-chat-column) flex-col gap-4">
@@ -157,6 +181,20 @@ function AgentStep({ onContinue, skip }: { onContinue(): void; skip: ReactNode }
             </span>
           </>
         )
+      ) : choosing && agent !== undefined ? (
+        <>
+          <RadioGroup aria-label="Agent" data-testid="welcome-agent-choice" value={agent.agentId} onValueChange={choose}>
+            {query.data.map((each) => (
+              <RadioGroupOption key={each.agentId} id={`welcome-agent-${each.agentId}`} value={each.agentId} data-testid={`welcome-agent-${each.agentId}`} label={each.displayName} description={agentSetupWords(each)} />
+            ))}
+          </RadioGroup>
+          {saveError === undefined ? null : (
+            <Text variant="caption" role="alert" data-testid="welcome-agent-error">
+              {saveError}
+            </Text>
+          )}
+          <AgentCard key={agent.agentId} agent={agent} selected />
+        </>
       ) : (
         query.data.map((each) => <AgentCard key={each.agentId} agent={each} selected={each.agentId === agent?.agentId} />)
       )}

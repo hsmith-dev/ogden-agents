@@ -14,6 +14,8 @@ export interface ComposerProps {
   hint?: string | undefined;
   /** Beside Send: the Stop button while the agent works (story 2.10). */
   action?: ReactNode;
+  /** At the start of the footer row: the agent picker, for a composer that starts a new chat (epic 6; DESIGN.md Composer). */
+  footer?: ReactNode;
   /**
    * Text to put back in the field (messages that were not sent; story 2.10),
    * ahead of anything already typed. Applied once per `key`.
@@ -28,7 +30,7 @@ export interface ComposerProps {
  * `Shift+Enter` starts a new line. While the agent works, sending queues the
  * message (the page says so in `hint`). `Esc` does nothing here: it never stops the agent.
  */
-export function Composer({ label, blockedReason, hint, action, restore, onSend }: ComposerProps) {
+export function Composer({ label, blockedReason, hint, action, footer, restore, onSend }: ComposerProps) {
   const [text, setText] = useState('');
   const restoreKey = restore?.key;
   const restoreText = restore?.text;
@@ -84,6 +86,7 @@ export function Composer({ label, blockedReason, hint, action, restore, onSend }
           autoFocus
         />
         <div className="flex items-center justify-end gap-2">
+          {footer === undefined ? null : <div className="mr-auto flex min-w-0 items-center">{footer}</div>}
           {action}
           <Button type="submit" size="icon" aria-label="Send" aria-disabled={blocked || text.trim() === ''}>
             <PaperPlaneRight aria-hidden />

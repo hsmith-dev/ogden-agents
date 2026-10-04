@@ -1,5 +1,5 @@
 import type { CoreEvent, Session, SessionState, Workspace } from '@ogden-agents/shared';
-import { AGENT_NAME } from '@/chat/chat-api';
+import { UNKNOWN_AGENT_NAME } from '@/chat/chat-api';
 import { sessionView, type TranscriptPermission } from '@/chat/transcript';
 import { streamEvents, type EventStoreState } from '@/events/event-store';
 import { permissionAnnouncement } from '@/permissions/permission-card';
@@ -42,6 +42,8 @@ export interface NeedsYouEntry {
   sesId: string;
   workspaceName: string;
   text: string;
+  /** The product name of the session's agent (epic 6), for its announcement. */
+  agentName: string;
   /** When it started waiting (ISO); the list is oldest first. */
   at: string;
   /** The announcement for a new request ("run npm test"); absent for a waiting session with no request in view. */
@@ -64,9 +66,6 @@ export const UNTITLED = 'Chat';
 
 /** The Needs you text for a waiting session whose request is older than the window, naming its agent (epic 6). */
 export const waitingText = (agentName: string) => `${agentName} is waiting for you`;
-
-/** {@link waitingText} for the install's original agent. */
-export const WAITING_TEXT = waitingText(AGENT_NAME);
 
 const rank = (state: SessionState) => STATE_ORDER.indexOf(state);
 const time = (iso: string) => Date.parse(iso) || 0;
@@ -111,8 +110,8 @@ export function buildSidebar(
   sessions: readonly Session[],
   store: EventStoreState,
   now: number,
-  /** A chat's agent by its product name (epic 6); default: the original agent's. */
-  agentName: (agentId: string | undefined) => string = () => AGENT_NAME,
+  /** A chat's agent by its product name (epic 6); default: "The agent", for a list not loaded. */
+  agentName: (agentId: string | undefined) => string = () => UNKNOWN_AGENT_NAME,
 ): SidebarModel {
   const byWorkspace = new Map<string, Session[]>();
   for (const session of sessions) {
@@ -143,6 +142,7 @@ export function buildSidebar(
           sesId: session.id,
           workspaceName: name,
           text: `${agentName(session.agentId)} wants to ${announcement}`,
+          agentName: agentName(session.agentId),
           at: request.requestedAt,
           request: announcement,
         });
@@ -151,7 +151,7 @@ export function buildSidebar(
       // `waiting` the window saw with no open request is a moment between events (the request
       // not yet arrived, or answered before `working`), not something to show.
       if (requests.length === 0 && session.state === 'waiting' && windowState === undefined) {
-        needsYou.push({ id: session.id, wsId: workspace.id, sesId: session.id, workspaceName: name, text: waitingText(agentName(session.agentId)), at: session.updatedAt });
+        needsYou.push({ id: session.id, wsId: workspace.id, sesId: session.id, workspaceName: name, text: waitingText(agentName(session.agentId)), agentName: agentName(session.agentId), at: session.updatedAt });
       }
     }
     rows.sort(compareRows);
@@ -238,7 +238,7 @@ export function diffForAnnouncements(previous: SidebarModel, next: SidebarModel)
   const assertive = next.needsYou.flatMap((entry) =>
     entry.request === undefined || known.has(entry.id) || !before.has(entry.sesId)
       ? []
-      : [{ id: entry.id, sesId: entry.sesId, text: `${WAITING_TEXT}: ${entry.request}` }],
+      : [{ id: entry.id, sesId: entry.sesId, text: `${waitingText(entry.agentName)}: ${entry.request}` }],
   );
   return { polite, assertive };
 }

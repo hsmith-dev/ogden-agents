@@ -4,6 +4,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
 import { ChatApiError, removePermissionRule } from '@/chat/chat-api';
+import { DefaultAgentView, type DefaultAgentViewProps } from '@/chat/default-agent-view';
+import { projectDefaultAgent, useChatAgents } from '@/chat/use-chat-agents';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { AlertDialog, AlertDialogCancel, AlertDialogConfirm, AlertDialogContent, AlertDialogTrigger } from '@/ui/alert-dialog';
 import { Button } from '@/ui/button';
@@ -14,15 +16,16 @@ import { Text } from '@/ui/typography';
 import { deleteHistory, fetchWorkspace, workspaceName } from '@/workspaces/workspace-api';
 import { BmadMethodSection } from '@/workspaces/bmad-method-section';
 import { useBmadRepoNoteSlot, useNewProjectsDefaultSlot } from '@/workspaces/bmad-settings-slots';
-import { createLatestGate, updateCautionLevel, usePermissionRules, useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
+import { createLatestGate, updateCautionLevel, updateDefaultAgent, usePermissionRules, useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
 
 /**
  * `/w/:wsId/settings`: the workspace's settings (story 2.5, then the
  * caution level in 2.8): caution level, the BMad Method section (story
  * 10.5's, in `workspaces/bmad-method-section.tsx`, at `#bmad-method`, with
  * story 10.7's slots), the
- * Always allow rules, history deletion, and later the default agent. Story
- * 2.3 registers the route; 2.5 and 2.8 fill this file.
+ * Always allow rules, history deletion, and the default agent (epic 6,
+ * entry 6, shown only when the install has more than one). Story 2.3
+ * registers the route; 2.5 and 2.8 fill this file.
  */
 export function WorkspaceSettingsPage() {
   const { wsId } = useParams({ strict: false }) as { wsId: string };
@@ -48,6 +51,7 @@ export function WorkspaceSettingsPage() {
         ) : workspace.data === undefined ? null : (
           <>
             <CautionLevelSection wsId={wsId} />
+            <DefaultAgentSection wsId={wsId} />
             <BmadSection wsId={wsId} />
             <AlwaysAllowRulesSection wsId={wsId} name={workspaceName(workspace.data)} />
             <DeleteHistorySection wsId={wsId} name={workspaceName(workspace.data)} />
@@ -153,6 +157,55 @@ function CautionLevelSection({ wsId }: { wsId: string }) {
 
   const loadError = settings.error instanceof Error ? { kind: 'error' as const, text: settings.error.message } : undefined;
   return <CautionLevelView value={chosen ?? settings.data?.cautionLevel} onChange={onChange} saving={saving} status={status ?? loadError} />;
+}
+
+/** Loads the project's default agent and saves each change at once; another tab's change shows through the event stream. */
+function DefaultAgentSection({ wsId }: { wsId: string }) {
+  const chatAgents = useChatAgents();
+  const settings = useWorkspaceSettings(wsId);
+  const queryClient = useQueryClient();
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<DefaultAgentViewProps['status']>(undefined);
+  const [chosen, setChosen] = useState<string | undefined>(undefined);
+  const latest = useRef(createLatestGate()).current;
+  const list = chatAgents.data;
+  if (list === undefined) return null;
+  const nameOf = (agentId: string) => list.agents.find((agent) => agent.agentId === agentId)?.displayName ?? agentId;
+
+  const onChange = (agentId: string) => {
+    const ticket = latest.next();
+    setSaving(true);
+    setChosen(agentId);
+    setStatus(undefined);
+    updateDefaultAgent(wsId, agentId).then(
+      (saved) => {
+        if (!latest.isLatest(ticket)) return;
+        setSaving(false);
+        setChosen(undefined);
+        queryClient.setQueryData(['workspace-settings', wsId], saved);
+        setStatus({ kind: 'saved', text: `Saved: new chats start with ${nameOf(projectDefaultAgent(list, saved.defaultAgentId))}.` });
+      },
+      (failure: unknown) => {
+        if (!latest.isLatest(ticket)) return;
+        setSaving(false);
+        setChosen(undefined);
+        setStatus({ kind: 'error', text: failure instanceof Error ? failure.message : "The default agent couldn't be saved. Try again." });
+      },
+    );
+  };
+
+  const value = chosen ?? (settings.data === undefined ? undefined : projectDefaultAgent(list, settings.data.defaultAgentId));
+  return (
+    <DefaultAgentView
+      agents={list.agents}
+      value={value}
+      onChange={onChange}
+      saving={saving}
+      status={status}
+      testId="default-agent"
+      description="The agent new chats in this project start with. You can still pick another for each new chat."
+    />
+  );
 }
 
 export interface AlwaysAllowRulesViewProps {

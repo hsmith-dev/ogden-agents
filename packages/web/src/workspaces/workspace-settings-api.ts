@@ -28,6 +28,20 @@ export async function fetchWorkspaceSettings(wsId: string, auth: Auth = tabAuth)
   return WorkspaceSettingsResponse.parse(json).settings;
 }
 
+/**
+ * `PATCH /api/v1/workspaces/:wsId/settings`: the agent the project's new
+ * chats preselect (epic 6, entry 6), or `null` for the install's default.
+ */
+export async function updateDefaultAgent(wsId: string, defaultAgentId: string | null, auth: Auth = tabAuth): Promise<WorkspaceSettings> {
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.workspaceSettings, { wsId }),
+    { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ defaultAgentId }) },
+    "The default agent couldn't be saved",
+  );
+  return WorkspaceSettingsResponse.parse(json).settings;
+}
+
 /** `PATCH /api/v1/workspaces/:wsId/settings`: the new caution level, for requests not yet shown. */
 export async function updateCautionLevel(wsId: string, cautionLevel: CautionLevel, auth: Auth = tabAuth): Promise<WorkspaceSettings> {
   const json = await call(

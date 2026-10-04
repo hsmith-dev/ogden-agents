@@ -3,10 +3,10 @@ import type { Session } from '@ogden-agents/shared';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
-import { AgentPicker } from '@/chat/agent-picker';
+import { AgentPicker, SET_UP_AGENTS } from '@/chat/agent-picker';
 import { agentNameOf, ChatApiError, createChatSession, sendMessage } from '@/chat/chat-api';
 import { Composer } from '@/chat/composer';
-import { useChatAgents } from '@/chat/use-chat-agents';
+import { agentAvailability, projectDefaultAgent, useChatAgents } from '@/chat/use-chat-agents';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
 import { EmptyState, PageBody } from '@/ui/page';
@@ -16,6 +16,7 @@ import { StateGlyph } from '@/ui/state-glyph';
 import { Text } from '@/ui/typography';
 import { BmadOffer } from '@/workspaces/bmad-offer';
 import { fetchWorkspace, useSessions, workspaceName } from '@/workspaces/workspace-api';
+import { useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
 
 const started = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -31,11 +32,19 @@ export function WorkspaceChatsPage() {
   const navigate = useNavigate();
   const workspace = useQuery({ queryKey: ['workspace', wsId], queryFn: () => fetchWorkspace(wsId), retry: false });
   const { sessions, error } = useSessions(wsId);
-  // The agent a new chat starts with (epic 6): the install's default until the user picks another.
+  // The agent a new chat starts with (epic 6): the project's default (entry 6), which follows a change made
+  // in another tab, until the user picks another here. Unknown until both the list and the settings are in.
   const chatAgents = useChatAgents();
+  const settings = useWorkspaceSettings(wsId);
   const [pickedAgent, setPickedAgent] = useState<string | undefined>(undefined);
-  const agentId = pickedAgent ?? chatAgents.data?.defaultAgentId;
+  const settingsKnown = settings.data !== undefined || settings.isError;
+  const projectDefault = chatAgents.data === undefined || !settingsKnown ? undefined : projectDefaultAgent(chatAgents.data, settings.data?.defaultAgentId);
+  const agentId = pickedAgent ?? projectDefault;
   const severalAgents = (chatAgents.data?.agents.length ?? 0) > 1;
+  const chosen = chatAgents.data?.agents.find((agent) => agent.agentId === agentId);
+  /** Why a new chat with the chosen agent can't start now (not installed, signed out, needs trust), said before trying. */
+  const unavailable = chosen === undefined ? undefined : agentAvailability(chosen);
+  const blocked = unavailable === undefined || unavailable.available ? undefined : unavailable;
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | undefined>(undefined);
   /** The chat the first message created: a retry after a failed send reuses it, never leaving an empty one behind (2.5 F6). */
@@ -45,10 +54,19 @@ export function WorkspaceChatsPage() {
   const onlyFirstChat = sessions !== undefined && sessions.length === 1 && sessions[0]?.id === firstChatId;
   const missing = (workspace.error instanceof ChatApiError && workspace.error.status === 404) || (error instanceof ChatApiError && error.status === 404);
 
+  /** The chats list is empty (or holds only the chat a failed first send made): the composer starts the chat. */
+  const listEmpty = sessions === undefined || sessions.length === 0 || onlyFirstChat;
+
+  const onPick = (next: string) => {
+    setPickedAgent(next);
+    // A first chat made for another agent is not reused for this one.
+    if (firstChat.current !== undefined && firstChat.current.agentId !== next) firstChat.current = undefined;
+  };
+
   const openChat = (session: Session) => navigate({ to: '/w/$wsId/s/$sesId', params: { wsId, sesId: session.id } });
 
   const onNewChat = () => {
-    if (creating) return;
+    if (creating || blocked !== undefined) return;
     setCreating(true);
     setCreateError(undefined);
     createChatSession(wsId, undefined, agentId).then(
@@ -65,12 +83,14 @@ export function WorkspaceChatsPage() {
       <WorkspaceHeader title="Chats" wsId={missing ? undefined : wsId}>
         {missing ? null : (
           <div className="ml-auto flex items-center gap-2">
+            {/* With chats listed, the agent New chat starts with sits beside it (epic 6, entry 6). */}
+            {chatAgents.data === undefined || agentId === undefined || listEmpty ? null : <AgentPicker agents={chatAgents.data.agents} value={agentId} onChange={onPick} />}
             <Button variant="ghost" size="icon" asChild>
               <Link to="/w/$wsId/settings" params={{ wsId }} aria-label="Workspace settings" data-testid="workspace-settings-link">
                 <GearSix aria-hidden />
               </Link>
             </Button>
-            <Button onClick={onNewChat} aria-disabled={creating} data-testid="new-chat">
+            <Button onClick={onNewChat} aria-disabled={creating || blocked !== undefined} aria-describedby={blocked === undefined ? undefined : 'agent-unavailable'} data-testid="new-chat">
               <ChatCircle aria-hidden />
               New chat
             </Button>
@@ -99,17 +119,19 @@ export function WorkspaceChatsPage() {
                 {workspaceName(workspace.data)}
               </Text>
             )}
-            {/* The agent New chat and the composer start a chat with (epic 6): shown only when there is a choice. */}
-            {chatAgents.data === undefined || agentId === undefined ? null : (
-              <AgentPicker
-                agents={chatAgents.data.agents}
-                value={agentId}
-                onChange={(next) => {
-                  setPickedAgent(next);
-                  // A first chat made for another agent is not reused for this one.
-                  if (firstChat.current !== undefined && firstChat.current.agentId !== next) firstChat.current = undefined;
-                }}
-              />
+            {/* Why the chosen agent can't start a chat now, and where to fix it (epic 6, entry 6). */}
+            {blocked === undefined ? null : (
+              <Text variant="caption" id="agent-unavailable" role="status" data-testid="agent-unavailable">
+                {blocked.description}
+                {blocked.setUp ? (
+                  <>
+                    {' '}
+                    <Link to="/settings/agents" className="text-foreground underline underline-offset-4" data-testid="agent-unavailable-link">
+                      {SET_UP_AGENTS}
+                    </Link>
+                  </>
+                ) : null}
+              </Text>
             )}
             {/* The "already uses BMad Method" offer (story 10.3): detected when this page opens, never when the project is added. */}
             {workspace.data === undefined ? null : <BmadOffer key={wsId} wsId={wsId} />}
@@ -135,6 +157,9 @@ export function WorkspaceChatsPage() {
                 <EmptyState title="No conversations yet." />
                 <Composer
                   label={`Message ${agentNameOf(chatAgents.data, agentId)}`}
+                  // The agent picker sits in the composer footer (EXPERIENCE.md Empty chats, DESIGN.md Composer).
+                  footer={chatAgents.data === undefined || agentId === undefined ? undefined : <AgentPicker agents={chatAgents.data.agents} value={agentId} onChange={onPick} />}
+                  blockedReason={blocked === undefined ? undefined : `Choose an agent that can start a chat.`}
                   onSend={async (text) => {
                     const session = firstChat.current ?? (await createChatSession(wsId, undefined, agentId));
                     firstChat.current = session;

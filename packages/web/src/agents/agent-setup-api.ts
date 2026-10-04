@@ -89,6 +89,11 @@ export interface SignIn {
   sendCode(code: string): Promise<boolean>;
   /** The sign-in page, for a link, when this tab didn't open it (the agent opens its own, or the popup was blocked). */
   link: string | undefined;
+  /**
+   * A code to type on the sign-in page, when the agent's sign-in gives one
+   * (epic 6, entry 6). Like the URL, kept only in this tab's memory.
+   */
+  code: string | undefined;
   /** Whether a request is running (start, cancel or a code). */
   busy: boolean;
   /** Plain words for the last request that failed. */
@@ -99,6 +104,7 @@ export interface SignIn {
 export function useSignIn(agentId: string, auth: Auth = tabAuth): SignIn {
   const queryClient = useQueryClient();
   const [link, setLink] = useState<string | undefined>(undefined);
+  const [code, setCode] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const refresh = useCallback(() => void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY }), [queryClient]);
@@ -114,9 +120,11 @@ export function useSignIn(agentId: string, auth: Auth = tabAuth): SignIn {
     setBusy(true);
     setError(undefined);
     setLink(undefined);
+    setCode(undefined);
     startSignIn(agentId, auth).then(
       (reply) => {
         setBusy(false);
+        if (reply.state === 'signing_in' && reply.code !== undefined) setCode(reply.code);
         if (reply.state === 'signing_in' && reply.url !== null) {
           if (tab !== null && !tab.closed) tab.location.href = reply.url;
           else setLink(reply.url);
@@ -164,7 +172,7 @@ export function useSignIn(agentId: string, auth: Auth = tabAuth): SignIn {
     }
   };
 
-  return { start, cancel, sendCode, link, busy, error };
+  return { start, cancel, sendCode, link, code, busy, error };
 }
 
 export interface ApiKeyActions {

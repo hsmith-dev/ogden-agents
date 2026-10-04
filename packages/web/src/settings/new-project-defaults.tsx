@@ -24,6 +24,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { call, type Auth } from '@/api/http';
 import { tabAuth } from '@/auth/tab-token';
+import { DefaultAgentView, type DefaultAgentViewProps } from '@/chat/default-agent-view';
+import { projectDefaultAgent, useChatAgents } from '@/chat/use-chat-agents';
 import { bmadMethodPieces } from '@/onboarding/welcome-model';
 import { CheckboxOption } from '@/ui/checkbox';
 import { Notice } from '@/ui/notice';
@@ -45,6 +47,20 @@ export const NEW_PROJECT_DEFAULTS_QUERY_KEY = ['new-project-defaults'] as const;
 /** `GET /api/v1/settings/new-projects`. */
 export async function fetchNewProjectDefaults(auth: Auth = tabAuth): Promise<NewProjectDefaults> {
   const json = await call(auth, API_ROUTES.newProjectDefaults, {}, NEW_PROJECTS_LOAD_FAILED);
+  return NewProjectDefaultsResponse.parse(json).defaults;
+}
+
+/**
+ * `PATCH /api/v1/settings/new-projects`: the agent new projects get as their
+ * default (epic 6, entry 6: Welcome's agent choice, or this page).
+ */
+export async function updateNewProjectsAgent(defaultAgentId: string, auth: Auth = tabAuth): Promise<NewProjectDefaults> {
+  const json = await call(
+    auth,
+    API_ROUTES.newProjectDefaults,
+    { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ defaultAgentId }) },
+    "The default agent couldn't be saved",
+  );
   return NewProjectDefaultsResponse.parse(json).defaults;
 }
 
@@ -229,6 +245,59 @@ export function NewProjectDefaultsSection() {
       onChange={onPiecesChange}
       saving={saving}
       status={status ?? (loadError === undefined ? undefined : { kind: 'error', text: loadError })}
+    />
+  );
+}
+
+/**
+ * The agent new projects get as their default (epic 6, entry 6), shown only
+ * while the install has more than one: saved at once; projects that exist
+ * already keep theirs.
+ */
+export function NewProjectsAgentSection() {
+  const chatAgents = useChatAgents();
+  const defaults = useNewProjectDefaults();
+  const queryClient = useQueryClient();
+  const [saving, setSaving] = useState(false);
+  const [chosen, setChosen] = useState<string | undefined>(undefined);
+  const [status, setStatus] = useState<DefaultAgentViewProps['status']>(undefined);
+  const latest = useRef(createLatestGate()).current;
+  const list = chatAgents.data;
+  if (list === undefined) return null;
+
+  const onChange = (agentId: string) => {
+    const ticket = latest.next();
+    setSaving(true);
+    setChosen(agentId);
+    setStatus(undefined);
+    updateNewProjectsAgent(agentId).then(
+      (saved) => {
+        if (!latest.isLatest(ticket)) return;
+        setSaving(false);
+        setChosen(undefined);
+        queryClient.setQueryData(NEW_PROJECT_DEFAULTS_QUERY_KEY, saved);
+        const name = list.agents.find((agent) => agent.agentId === projectDefaultAgent(list, saved.defaultAgentId))?.displayName ?? agentId;
+        setStatus({ kind: 'saved', text: `Saved: new projects start with ${name}.` });
+      },
+      (failure: unknown) => {
+        if (!latest.isLatest(ticket)) return;
+        setSaving(false);
+        setChosen(undefined);
+        setStatus({ kind: 'error', text: failure instanceof Error ? failure.message : "The default agent couldn't be saved. Try again." });
+      },
+    );
+  };
+
+  const value = chosen ?? (defaults.data === undefined ? undefined : projectDefaultAgent(list, defaults.data.defaultAgentId));
+  return (
+    <DefaultAgentView
+      agents={list.agents}
+      value={value}
+      onChange={onChange}
+      saving={saving}
+      status={status}
+      testId="new-projects-agent"
+      description="The agent a new project's chats start with. Projects you already have keep theirs."
     />
   );
 }

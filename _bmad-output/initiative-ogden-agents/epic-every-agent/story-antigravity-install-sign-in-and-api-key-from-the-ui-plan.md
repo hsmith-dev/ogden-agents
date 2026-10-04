@@ -3,12 +3,12 @@ title: 'Antigravity install, sign-in and API key from the UI'
 type: 'feature'
 ticket: '7'
 created: '2026-10-04'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
 review_loop_iteration: 0
 baseline_revision: '5b056209c7acf379f7b7a7931e380920e97e38e2'
 context:
@@ -78,9 +78,39 @@ context:
 
 ## Implementation Notes
 
+- Implemented directly in this session (it held the investigation, as 6.2 to 6.5 were), not by a fresh subagent.
+- Plan about 2,300 tokens, over the 1,600 target; kept whole (autonomous run, one cohesive goal).
+- Pins gained `size` and per-file `files` (hashed 2026-10-04 from the three pinned archives; each holds exactly `agy_acp_server.(par|exe)` and `localharness_external[.exe]`, deflated, no folders or links, no zip64). `agent-pins.mjs` validates them and checks the downloaded size too; run locally on macOS arm64: matches.
+- `setup-antigravity`: `download.ts` (resume by `Range`/`If-Range` with the `ETag` kept in `<part>.json`; undici adds a second `identity` to a range request's `Accept-Encoding`, harmless), `unzip.ts` (fd-based, pinned names only), `acp-probe.ts` (setup connection, `readServerVersion`), `sign-in.ts`, `api-key.ts`, `layout.ts` (install record `.ogden-install.json`, sign-in record `agents/antigravity-signin.json`), `index.ts` (the port, `close`).
+- 6.5's "installed" meant "the binary file exists"; it now needs Ogden's install record with matching sizes. `tests/support.ts`, the 6.5 server and adapter tests plant the record; a hand-unpacked copy is adopted by Install after hashing.
+- Core: optional `AgentSetupPort.uninstall`/`signOut`, `AgentSetup.uninstall`/`signOut`, `AgentBusyError` (`agent_busy`, 409). Shared: optional status fields `canInstall`, `canUninstall`, `canSignOut`, `signInTakesCode`, `installNote`, `signInNote`; `API_ROUTES.agentSignOut`; `DELETE agentInstall`; event `agent.uninstalled`.
+- Server: `antigravity-wiring.ts` gives the setup the allowlist without keys and `testApiKeyCheck` (behind `testHooksAllowed`); `start.ts` untouched. `index.ts` exports `antigravityPlatform`, `pinnedAntigravityServer` and `AntigravityPins` for the e2e.
+- Web: card version line, notes, Uninstall (asked once more), Sign out, "not available on this computer" without Install, no code box when `signInTakesCode === false` (also in Sign in again).
+- Fake agent: Google sign-in (stderr line, `$BROWSER`, consent/deny files in `GEMINI_HOME`, a stored sign-in a later process counts), `auth.logout` and `logout`.
+- Existing tests changed: `acp-antigravity.test.ts` (entry-5 "comes later" refusals replaced by entry-7 behaviour; plant writes the record), `server/test/antigravity.test.ts` (plant, stubbed key check), `gate.test.ts` (two routes), `contracts.test.ts` (new event).
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (quick lens, with the security focus): high 0, medium 7, low 6, false 1, maybe-false 0, rejected 1.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---------|---------|-------|-------------------|
+| 1 | A sign-in that finishes without a link (credentials already in its home) throws "didn't show a link" while status reads signed in | medium | patch | `finish('signed_in')` resolves the link as `null`; `AgentSignIn.url` allows it. Test: a kept sign-in finishes at once with no link. |
+| 2 | The sign-in is not cancellable until its link arrives (uninstall/sign-out/close miss it; Windows says "still running") | medium | patch | `onStarted` hands the port the cancel at spawn. Test: Uninstall stops a sign-in still starting. |
+| 3 | The port is never closed on stop: an install, a version check or a sign-out server can outlive the server | medium | patch | Optional `AgentSetupPort.close`, called by core's `dispose` (start.ts unchanged); the port tracks its version-check and sign-out servers and stops them. |
+| 4 | An uninstall whose removal fails leaves `.antigravity-removing-*` for good | medium | patch | Install and uninstall remove those leftovers. Test. |
+| 5 | Older version folders stay after a pin bump | medium | patch | Leftover cleanup removes version folders other than the pinned one, after a successful install. Test. |
+| 6 | `child.stderr` has no `error` handler (AGENTS.md pitfall) | low | patch | Added. |
+| 7 | The 16 KB stderr cap could drop complete lines (the link) in one large read | medium | patch | The cap applies to the unfinished last line only. |
+| 8 | `rmSync` in the URL poll timer can throw an uncaught EPERM | low | patch | Wrapped. |
+| 9 | The `BROWSER` helper in a `noexec` temp folder fails; two tabs open | medium | patch | The work folder is under `<dataDir>/agents/` (owner-only). |
+| 10 | Links are refused for zip host 3 only, not OS X (19) | low | patch | Host 19 checked too. |
+| 11 | No `ETag` means never resuming; `Content-Range` total not compared | low | patch | Resume with `Range` alone when there is no `ETag` (the SHA-256 still decides); the total must be the pinned size. Test. |
+| 12 | The picker is not checked | low | patch | The server test reads `/chat-agents` (what the picker shows) after install and uninstall. The picker UI itself is 6.6's, unchanged. |
+| 13 | "Only Antigravity's process has `GEMINI_API_KEY`" not checked | false | reject | `packages/server/test/antigravity.test.ts` ("its own home and key, and Claude Code never sees the key", 6.5) checks it; this change only adds that setup servers get no key (`fake-google-env` = `key=none`). |
+| 14 | Sign-out and uninstall don't exclude each other or an install | medium | patch | Core refuses either while the other (or an install) runs, `agent_busy`. |
 
 ## Design Notes
 
@@ -88,7 +118,8 @@ context:
 - Existing copy: the spike found no other place one lives, so only `<dataDir>/agents/antigravity/<version>/` counts, verified by per-file hash and `initialize`, then recorded; status never hashes (cheap size check against the record).
 - Google sign-in state: Antigravity has no status call, so Ogden keeps its own record of a Google sign-in finished (or signed out) in the app (no secret in it). Chats keep 6.5's rule (no `authenticate` without a key); expired credentials show as `auth_required` in the chat.
 - Uninstall keeps `antigravity-home` and the sign-in record; the helper `webm_encoder` in `~/.gemini/antigravity/bin/` is the user's real home and is left (disclosed on the card).
-- Additive contract extensions (optional fields, two routes, one event) in the style of 6.6's `provider` and sign-in code.
+- The sign-in's work folder (the `BROWSER` helper and its URL file) is made under `<dataDir>/agents/` (owner-only), not the temp folder, which may be `noexec` (review 9). An uninstall renames the install folder to a sibling `.antigravity-removing-*` before deleting it; a leftover is removed by the next install or uninstall (review 4).
+- Additive contract extensions (optional fields, two routes, one event, an optional `AgentSetupPort.close` that core's `dispose` calls) in the style of 6.6's `provider` and sign-in code.
 
 ## Verification
 

@@ -72,16 +72,17 @@ async function serve(archive: Buffer): Promise<Served> {
     served.requests.push({ range: req.headers.range, ifRange: req.headers['if-range'] as string | undefined, encoding: req.headers['accept-encoding'] });
     const range = /^bytes=(\d+)-$/.exec(req.headers.range ?? '');
     let start = 0;
-    if (range !== null && !served.ignoreRange && req.headers['if-range'] === served.etag) {
+    const etag = served.etag === '' ? {} : { etag: served.etag };
+    if (range !== null && !served.ignoreRange && (served.etag === '' || req.headers['if-range'] === served.etag)) {
       start = Number(range[1]);
       if (start >= archive.length) {
         res.writeHead(416);
         res.end();
         return;
       }
-      res.writeHead(206, { 'content-range': `bytes ${start}-${archive.length - 1}/${archive.length}`, 'content-length': archive.length - start, etag: served.etag });
+      res.writeHead(206, { 'content-range': `bytes ${start}-${archive.length - 1}/${archive.length}`, 'content-length': archive.length - start, ...etag });
     } else {
-      res.writeHead(200, { 'content-length': archive.length, etag: served.etag, 'accept-ranges': 'bytes' });
+      res.writeHead(200, { 'content-length': archive.length, ...etag, 'accept-ranges': 'bytes' });
     }
     const body = archive.subarray(start);
     if (served.cutAfter !== undefined) {
@@ -213,6 +214,16 @@ describe('the resumable download (entry 7)', () => {
     expect(readFileSync(partFile).equals(archive)).toBe(true);
   });
 
+  it('resumes without an ETag too (the SHA-256 still decides)', async () => {
+    const served = await serve(archive);
+    served.etag = '';
+    served.cutAfter = 800;
+    const partFile = join(tempDir(), 'a.zip.part');
+    await downloadVerified({ url: served.url, size: archive.length, sha256: sha256(archive), partFile, backoffMs: 1 });
+    expect(served.requests[1]?.range).toBe('bytes=800-');
+    expect(readFileSync(partFile).equals(archive)).toBe(true);
+  });
+
   it('starts over when the server answers a resume with the whole file', async () => {
     const served = await serve(archive);
     served.cutAfter = 700;
@@ -320,6 +331,16 @@ describe('Install and Uninstall (entry 7)', { timeout: 60_000 }, () => {
     expect(readFileSync(join(versionDir(other), 'agy_acp_server.par')).equals(SERVER)).toBe(true);
   });
 
+  it('an install removes other versions and an earlier uninstall that could not finish', async () => {
+    const served = await serve(archive);
+    const dataDir = tempDir();
+    mkdirSync(join(dataDir, 'agents', 'antigravity', '1.2.1'), { recursive: true });
+    mkdirSync(join(dataDir, 'agents', '.antigravity-removing-abcd'), { recursive: true });
+    await setupOf(dataDir, pinsFor(archive, served.url)).setup.install(() => {});
+    expect(readdirSync(join(dataDir, 'agents', 'antigravity')).sort()).toEqual(['.download', '1.3.0']);
+    expect(readdirSync(join(dataDir, 'agents'))).not.toContain('.antigravity-removing-abcd');
+  });
+
   it('says it is not available on a computer with no pin, with no download', async () => {
     const dataDir = tempDir();
     const { setup } = setupOf(dataDir, pinsFor(archive, 'http://127.0.0.1:9/x.zip', { platform: 'linux-x64' }), { platform: 'win32-arm64' });
@@ -386,6 +407,25 @@ describe('Google sign-in and sign-out (entry 7)', { timeout: 60_000 }, () => {
       timeouts: { startMs: 20_000, urlMs: 3_000, signInMs: 30_000, backoffMs: 1 },
     });
     await expect(other.setup.signIn()).rejects.toThrow("didn't show a Google sign-in link");
+  });
+
+  it('a sign-in already kept in its home finishes at once, with no link', async () => {
+    const { dataDir, setup } = await installed();
+    writeFileSync(join(home(dataDir), 'fake-google-signed-in'), 'signed in\n');
+    const signIn = await setup.signIn();
+    expect(signIn.url).toBeNull();
+    expect(await signIn.done).toBe('signed_in');
+    expect(existsSync(signInRecordPath(dataDir))).toBe(true);
+  });
+
+  it('Uninstall stops a sign-in still starting, before its link arrives', async () => {
+    const { dataDir, setup } = await installed({ env: () => ({ PATH: process.env.PATH ?? '', SystemRoot: process.env.SystemRoot ?? '', FAKE_ACP_INIT_DELAY_MS: '3000' }) });
+    const starting = setup.signIn().catch((error: unknown) => error);
+    await waitFor(() => readdirSync(join(dataDir, 'agents')).some((name) => name.startsWith('.signin-')), 'the sign-in to start');
+    await setup.uninstall!();
+    expect(await starting).toBeInstanceOf(Error);
+    expect(existsSync(join(dataDir, 'agents', 'antigravity'))).toBe(false);
+    expect(readdirSync(join(dataDir, 'agents')).filter((name) => name.startsWith('.signin-'))).toEqual([]);
   });
 
   it('refuses to sign in or out when not installed', async () => {

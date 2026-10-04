@@ -153,7 +153,8 @@ async function fetchRest(options: DownloadOptions): Promise<void> {
   let meta = await readMeta(metaFile);
   let have = await sizeOf(options.partFile);
   // Another URL (a new pin), no way to resume safely, or more than the pin: start again.
-  if (meta?.url !== options.url || meta.etag === undefined || have > options.size) {
+  // Without an `ETag` a part still resumes: the SHA-256 check catches a file that changed meanwhile.
+  if (meta?.url !== options.url || have > options.size) {
     if (have > 0 || meta !== undefined) await discardPartial(options.partFile);
     have = 0;
     meta = undefined;
@@ -173,9 +174,9 @@ async function fetchRest(options: DownloadOptions): Promise<void> {
   armIdle();
   try {
     const headers: Record<string, string> = { 'accept-encoding': 'identity' };
-    if (have > 0 && meta?.etag !== undefined) {
+    if (have > 0) {
       headers.range = `bytes=${have}-`;
-      headers['if-range'] = meta.etag;
+      if (meta?.etag !== undefined) headers['if-range'] = meta.etag;
     }
     let response: Response;
     try {
@@ -196,7 +197,7 @@ async function fetchRest(options: DownloadOptions): Promise<void> {
     let offset = 0;
     if (response.status === 206) {
       const range = /^bytes (\d+)-\d+\/(\d+|\*)$/.exec(response.headers.get('content-range') ?? '');
-      if (range === null || Number(range[1]) !== have) {
+      if (range === null || Number(range[1]) !== have || (range[2] !== '*' && Number(range[2]) !== options.size)) {
         void response.body.cancel().catch(() => {});
         await discardPartial(options.partFile);
         throw new DownloadError('http', { status: 416, reason: 'range' });
@@ -209,7 +210,7 @@ async function fetchRest(options: DownloadOptions): Promise<void> {
       void response.body.cancel().catch(() => {});
       throw new DownloadError('http', { status: response.status, reason: 'encoded' });
     }
-    const etag = response.headers.get('etag') ?? undefined;
+    const etag = response.headers.get('etag') || undefined;
     await writeFile(metaFile, JSON.stringify({ url: options.url, ...(etag === undefined ? {} : { etag }) }), { mode: 0o600 });
 
     let file;

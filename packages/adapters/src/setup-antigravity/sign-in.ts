@@ -24,7 +24,6 @@
  *   sign-in stop its whole process tree.
  */
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { AgentSetupError, type AgentSignIn } from '@ogden-agents/core';
 import { findSignInUrl } from '../setup-claude-code/sign-in-output.js';
@@ -51,6 +50,14 @@ export interface GoogleSignInInput {
   /** Called once Google sign-in finished, before `done` resolves `signed_in`. */
   onSignedIn: () => void;
   diagnostic: (message: string, fields?: Record<string, unknown>) => void;
+  /**
+   * Where the private work folder (the `BROWSER` helper and its URL file) is
+   * made: Ogden's owner-only data folder, not the temp folder, which may be
+   * mounted `noexec`.
+   */
+  workRoot: string;
+  /** Called once the server is spawned, with the sign-in's cancel, so it can be stopped before its link arrives. */
+  onStarted?: (cancel: () => Promise<void>) => void;
 }
 
 /** A single-quoted POSIX shell word. */
@@ -70,7 +77,7 @@ function writeBrowserHelper(dir: string): string | undefined {
 export async function startGoogleSignIn(input: GoogleSignInInput): Promise<AgentSignIn> {
   const couldNotStart = `${input.displayName} couldn't start signing in. Try again.`;
   const noUrl = `${input.displayName} didn't show a Google sign-in link. Try again.`;
-  const work = mkdtempSync(join(tmpdir(), 'ogden-agy-signin-'));
+  const work = mkdtempSync(join(input.workRoot, '.signin-'));
   if (input.platform !== 'win32') chmodSync(work, 0o700);
   const cleanup = () => {
     try {
@@ -84,9 +91,10 @@ export async function startGoogleSignIn(input: GoogleSignInInput): Promise<Agent
   if (helper !== undefined) env.BROWSER = helper;
 
   let urlTimer: ReturnType<typeof setTimeout> | undefined;
-  let foundUrl: ((url: string) => void) | undefined;
+  let foundUrl: ((url: string | null) => void) | undefined;
   let failUrl: ((error: Error) => void) | undefined;
-  const url = new Promise<string>((resolve, reject) => {
+  // `null` when it finished without a link (a sign-in already kept in its home).
+  const url = new Promise<string | null>((resolve, reject) => {
     foundUrl = resolve;
     failUrl = reject;
   });
@@ -133,7 +141,11 @@ export async function startGoogleSignIn(input: GoogleSignInInput): Promise<Agent
           } catch {
             return;
           }
-          rmSync(join(work, 'url'), { force: true });
+          try {
+            rmSync(join(work, 'url'), { force: true });
+          } catch {
+            // Removed with its folder when the sign-in ends.
+          }
           offer(findSignInUrl(`${text.trim()}\n`, input.hosts));
         }, POLL_MS);
   poll?.unref?.();
@@ -150,6 +162,13 @@ export async function startGoogleSignIn(input: GoogleSignInInput): Promise<Agent
       if (poll !== undefined) clearInterval(poll);
       server.stop();
       cleanup();
+      // Signed in before any link was shown: there is none to open.
+      if (outcome === 'signed_in' && foundUrl !== undefined) {
+        const resolveUrl = foundUrl;
+        foundUrl = undefined;
+        failUrl = undefined;
+        resolveUrl(null);
+      }
       refuseUrl(new AgentSetupError(outcome === 'cancelled' ? couldNotStart : noUrl));
       resolve(outcome);
     };
@@ -194,7 +213,8 @@ export async function startGoogleSignIn(input: GoogleSignInInput): Promise<Agent
     }
   })();
 
-  let signInUrl: string;
+  input.onStarted?.(async () => finish('cancelled'));
+  let signInUrl: string | null;
   try {
     signInUrl = await url;
   } catch (error) {

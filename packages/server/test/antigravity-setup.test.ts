@@ -13,7 +13,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { createAntigravityAgent, createAntigravitySetup, currentPlatform, pinnedServer, type AntigravityPins } from '@ogden-agents/adapters';
-import { API_ROUTES, AgentSetupStatus, AgentsResponse, apiPath, SignInResponse, WorkspaceResponse } from '@ogden-agents/shared';
+import { API_ROUTES, AgentSetupStatus, AgentsResponse, apiPath, ChatAgentsResponse, SignInResponse, WorkspaceResponse } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { zip } from '../../adapters/test/archives.js';
 import { agentHomeDir } from '../src/agent-wiring.js';
@@ -103,6 +103,8 @@ describe('Antigravity set up from Settings: Agents (epic 6 entry 7)', { timeout:
     const agentPath = (route: string) => apiPath(route, { agentId: 'antigravity' });
     const card = async () => AgentsResponse.parse(await (await request(server, tab, 'GET', API_ROUTES.agents)).json()).agents.find((agent) => agent.agentId === 'antigravity')!;
     const events = () => server.core.events.readAfter(0);
+    // What 6.6's picker reads for its readiness.
+    const picker = async () => ChatAgentsResponse.parse(await (await request(server, tab, 'GET', API_ROUTES.chatAgents)).json()).agents.find((agent) => agent.agentId === 'antigravity')!;
 
     expect(await card()).toMatchObject({ install: 'not_installed', provider: 'Google', installNote: expect.stringContaining('from Google') });
     expect((await newChat()).status).toBe(409);
@@ -112,6 +114,7 @@ describe('Antigravity set up from Settings: Agents (epic 6 entry 7)', { timeout:
     await waitFor(() => events().some((event) => event.type === 'agent.install_completed'), 'the install', 60_000);
     expect(await card()).toMatchObject({ install: 'installed', version: '1.3.0', auth: 'needs_sign_in', canUninstall: true, signInTakesCode: false, signInNote: expect.stringContaining('this computer') });
     expect(await (await newChat()).json()).toMatchObject({ error: { code: 'agent_signed_out' } });
+    expect(await picker()).toMatchObject({ install: 'installed', auth: 'needs_sign_in' });
 
     // Google sign-in: the link only in the no-store answer.
     const started = await request(server, tab, 'POST', agentPath(API_ROUTES.agentSignIn));
@@ -141,6 +144,7 @@ describe('Antigravity set up from Settings: Agents (epic 6 entry 7)', { timeout:
     expect(readdirSync(join(dataDir, 'agents')).sort()).toEqual(expect.arrayContaining(['antigravity-home']));
     expect(readdirSync(join(dataDir, 'agents'))).not.toContain('antigravity');
     expect(await (await newChat()).json()).toMatchObject({ error: { code: 'agent_not_installed' } });
+    expect(await picker()).toMatchObject({ install: 'not_installed' });
 
     // Nothing kept the sign-in link, its state or the key: not the event log, the log or the data folder.
     const kept = [JSON.stringify(events()), lines.join('\n'), allText(dataDir)].join('\n');

@@ -115,6 +115,8 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
   const installs = new Map<string, { progress: AgentInstallProgress; done: Promise<void> }>();
   /** Agents being uninstalled (epic 6 entry 7): no install starts meanwhile. */
   const uninstalling = new Set<string>();
+  /** Agents being signed out: no uninstall meanwhile, and the other way round. */
+  const signingOut = new Set<string>();
   /** The last failed install's plain reason, shown until the agent is found installed or another install starts. */
   const installFailure = new Map<string, string>();
   /** Aborted by `dispose`, so a verify call in flight stops with the server. */
@@ -474,6 +476,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       if (port.uninstall === undefined) throw new ValidationError(`${port.displayName} can't be uninstalled from Ogden Agents.`, []);
       if (installs.has(agentId)) throw new AgentBusyError(`${port.displayName} is being installed. Try again when it finishes.`);
       if (uninstalling.has(agentId)) throw new AgentBusyError(`${port.displayName} is already being uninstalled.`);
+      if (signingOut.has(agentId)) throw new AgentBusyError(`${port.displayName} is signing out. Try again when it finishes.`);
       uninstalling.add(agentId);
       try {
         // A sign-in in progress runs the installed copy: stop it first.
@@ -502,16 +505,23 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
     async signOut(agentId) {
       const port = portFor(agentId);
       if (port.signOut === undefined) throw new ValidationError(`${port.displayName} can't be signed out from Ogden Agents.`, []);
-      const flight = flights.get(agentId);
-      if (flight !== undefined) {
-        flights.delete(agentId);
-        await stop(flight);
-      }
+      if (installs.has(agentId) || uninstalling.has(agentId)) throw new AgentBusyError(`${port.displayName} is being installed or uninstalled. Try again when it finishes.`);
+      if (signingOut.has(agentId)) throw new AgentBusyError(`${port.displayName} is already signing out.`);
+      signingOut.add(agentId);
       try {
-        await port.signOut();
-      } catch (error) {
-        report(agentId, 'sign_out', error);
-        throw new AgentBusyError(error instanceof AgentSetupError ? error.message : `${port.displayName} couldn't sign out. Try again.`, { cause: error });
+        const flight = flights.get(agentId);
+        if (flight !== undefined) {
+          flights.delete(agentId);
+          await stop(flight);
+        }
+        try {
+          await port.signOut();
+        } catch (error) {
+          report(agentId, 'sign_out', error);
+          throw new AgentBusyError(error instanceof AgentSetupError ? error.message : `${port.displayName} couldn't sign out. Try again.`, { cause: error });
+        }
+      } finally {
+        signingOut.delete(agentId);
       }
       lastFailure.delete(agentId);
       // Signed out: a key, saved or from the environment, takes over (story 9.2's rule).
@@ -693,6 +703,14 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       const running = [...flights.values()];
       flights.clear();
       await Promise.all(running.map(stop));
+      // Whatever a port still runs (an install, a sign-out) stops with the server (epic 6 entry 7).
+      for (const port of ports) {
+        try {
+          port.close?.();
+        } catch (error) {
+          report(port.agentId, 'close', error);
+        }
+      }
     },
   };
 }

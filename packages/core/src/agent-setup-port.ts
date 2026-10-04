@@ -93,6 +93,12 @@ export interface AgentSetupPort {
    * and then it is still signed in.
    */
   signOut?(): Promise<void>;
+  /**
+   * Stops whatever the port still runs (an install, a sign-in or sign-out
+   * server) when the server stops (epic 6 entry 7). Called by core's
+   * `dispose`; safe to call more than once.
+   */
+  close?(): void;
   /** Present when the agent can use an API key instead (story 9.2). */
   readonly apiKey?: AgentApiKeySupport;
 }

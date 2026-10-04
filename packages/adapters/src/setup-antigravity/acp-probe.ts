@@ -59,13 +59,14 @@ export function startSetupServer(input: {
     child.once('error', () => resolve(null));
   });
   child.stdin.on('error', () => {});
+  child.stderr.on('error', () => {});
   child.stdout.on('error', () => {});
   let pending = '';
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (chunk: string) => {
-    pending = (pending + chunk).slice(-MAX_LINE);
-    const lines = pending.split(/\r?\n/);
-    pending = lines.pop() ?? '';
+    const lines = (pending + chunk).split(/\r?\n/);
+    // Only the unfinished last line is capped: every complete line is looked at.
+    pending = (lines.pop() ?? '').slice(-MAX_LINE);
     for (const line of lines) {
       try {
         input.onStderrLine?.(line);
@@ -107,8 +108,16 @@ export const SETUP_INITIALIZE: acp.InitializeRequest = {
  * `agentInfo.version` (or `undefined` when it gives none). Rejects when it
  * can't start, exits, or doesn't answer in `timeoutMs`.
  */
-export async function readServerVersion(input: { server: ServerCommand; env: Readonly<Record<string, string>>; cwd: string; timeoutMs: number }): Promise<string | undefined> {
+export async function readServerVersion(input: {
+  server: ServerCommand;
+  env: Readonly<Record<string, string>>;
+  cwd: string;
+  timeoutMs: number;
+  /** Told about the running server (so its owner can stop it); returns what to call once it is stopped. */
+  track?: (server: SetupServer) => () => void;
+}): Promise<string | undefined> {
   const server = startSetupServer(input);
+  const untrack = input.track?.(server);
   try {
     const exited = server.exited.then((code) => {
       throw Object.assign(new Error('the server exited'), { code: `exit_${code ?? 'signal'}` });
@@ -118,5 +127,6 @@ export async function readServerVersion(input: { server: ServerCommand; env: Rea
     return init.agentInfo?.version ?? undefined;
   } finally {
     server.stop();
+    untrack?.();
   }
 }

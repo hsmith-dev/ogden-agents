@@ -101,7 +101,8 @@ async function readEntries(archive: string, files: Readonly<Record<string, Antig
       if (!isSafeEntryName(name)) throw new UnsafeArchiveError('an entry has an unsafe name');
       // Unix hosts keep the file type in the high half: anything but a regular file (a link, a device) is refused.
       const mode = external >>> 16;
-      if (madeBy === 3 && mode !== 0 && (mode & S_IFMT) !== S_IFREG) throw new UnsafeArchiveError('an entry is not a regular file');
+      // Unix (3) and OS X (19) hosts keep Unix modes.
+      if ((madeBy === 3 || madeBy === 19) && mode !== 0 && (mode & S_IFMT) !== S_IFREG) throw new UnsafeArchiveError('an entry is not a regular file');
       // MS-DOS directory attribute.
       if ((external & 0x10) !== 0) throw new UnsafeArchiveError('an entry is a folder');
       const pin = Object.hasOwn(files, name) ? files[name] : undefined;

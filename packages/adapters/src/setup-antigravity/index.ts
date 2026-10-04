@@ -33,7 +33,7 @@
 import { randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AgentSetupError, type AgentPlatform, type AgentPortStatus, type AgentSetupPort, type AgentSignIn } from '@ogden-agents/core';
+import { AgentSetupError, type AgentPlatform, type AgentPortStatus, type AgentSetupPort } from '@ogden-agents/core';
 import { renameWithRetry } from '../toolchain-uv/uv-toolchain.js';
 import { errorCode } from '../error-code.js';
 import { readServerVersion, SETUP_INITIALIZE, startSetupServer, withTimeout, type ServerCommand } from './acp-probe.js';
@@ -171,7 +171,11 @@ export function createAntigravitySetup(options: AntigravitySetupOptions): Antigr
   };
   const base = { agentId: ANTIGRAVITY_AGENT_ID, displayName: ANTIGRAVITY } as const;
   let installing: AbortController | undefined;
-  let signingIn: AgentSignIn | undefined;
+  /** Stops the sign-in under way, from the moment its server is spawned. */
+  let cancelSignIn: (() => Promise<void>) | undefined;
+  /** Setup servers running now (a version check, a sign-out), so `close` stops them. */
+  const live = new Set<{ stop(): void }>();
+  const REMOVING_PREFIX = `.${ANTIGRAVITY_AGENT_ID}-removing-`;
 
   /** The server's environment for setup: the allowlist without keys, plus its home (made owner-only). */
   const setupEnv = (): Record<string, string> => {
@@ -189,22 +193,42 @@ export function createAntigravitySetup(options: AntigravitySetupOptions): Antigr
     }
   };
 
-  /** Removes staging and aside folders a crashed install left behind. */
-  const removeLeftovers = () => {
-    let entries: string[];
+  /** Names in `dir`, or none when it can't be read. */
+  const namesIn = (dir: string): string[] => {
     try {
-      entries = readdirSync(installDir);
+      return readdirSync(dir);
     } catch {
-      return;
+      return [];
     }
-    for (const entry of entries) if (entry.startsWith(STAGING_PREFIX) || entry.startsWith(ASIDE_PREFIX)) removeQuietly(join(installDir, entry));
+  };
+
+  /**
+   * Removes what a crashed install or uninstall left behind: staging and
+   * aside folders, other versions than the pinned one (after a reviewed pin
+   * bump), and an uninstall's renamed folder that could not be removed.
+   */
+  const removeLeftovers = () => {
+    for (const entry of namesIn(installDir)) {
+      const otherVersion = /^\d+\.\d+\.\d+$/.test(entry) && entry !== pins.version;
+      if (entry.startsWith(STAGING_PREFIX) || entry.startsWith(ASIDE_PREFIX) || otherVersion) removeQuietly(join(installDir, entry));
+    }
+    for (const entry of namesIn(join(options.dataDir, 'agents'))) if (entry.startsWith(REMOVING_PREFIX)) removeQuietly(join(options.dataDir, 'agents', entry));
   };
 
   /** Starts the server file in `dir` once and checks it reports the pinned version. */
   const checkVersion = async (dir: string, pin: AntigravityArchivePin): Promise<string> => {
     let reported: string | undefined;
     try {
-      reported = await readServerVersion({ server: toServer({ command: join(dir, pin.binary), args: [...pin.args] }), env: setupEnv(), cwd: home, timeoutMs: startMs });
+      reported = await readServerVersion({
+        server: toServer({ command: join(dir, pin.binary), args: [...pin.args] }),
+        env: setupEnv(),
+        cwd: home,
+        timeoutMs: startMs,
+        track: (server) => {
+          live.add(server);
+          return () => live.delete(server);
+        },
+      });
     } catch (error) {
       diagnostic('Antigravity did not answer initialize', { step: 'initialize', code: errorCode(error, 'unknown') });
       throw new AgentSetupError(DID_NOT_START, { cause: error, details: { step: 'initialize' } });
@@ -346,6 +370,7 @@ export function createAntigravitySetup(options: AntigravitySetupOptions): Antigr
         writeInstallRecord(staging, recordOf(pin, reported));
         await moveIntoPlace(staging);
         staging = undefined;
+        removeLeftovers();
         await discardPartial(partFile).catch(onCleanupError);
         diagnostic('Antigravity installed', { step: 'done', version: reported });
         return { version: reported };
@@ -361,10 +386,14 @@ export function createAntigravitySetup(options: AntigravitySetupOptions): Antigr
 
     async uninstall() {
       if (installing !== undefined) throw new AgentSetupError(`${ANTIGRAVITY} is being installed. Try again when it finishes.`);
-      await signingIn?.cancel().catch(() => {});
-      if (!existsSync(installDir)) return;
+      await cancelSignIn?.().catch(() => {});
+      if (!existsSync(installDir)) {
+        removeLeftovers();
+        return;
+      }
       // Renamed first, so a copy in use (Windows) fails before anything is half-removed.
-      const removing = join(options.dataDir, 'agents', `.${ANTIGRAVITY_AGENT_ID}-removing-${randomBytes(4).toString('hex')}`);
+      // A sibling, removed now or, if the OS still holds a file, by the next install or uninstall.
+      const removing = join(options.dataDir, 'agents', `${REMOVING_PREFIX}${randomBytes(4).toString('hex')}`);
       try {
         await renameWithRetry(installDir, removing);
       } catch (error) {
@@ -378,8 +407,14 @@ export function createAntigravitySetup(options: AntigravitySetupOptions): Antigr
     async signIn() {
       const server = installedServer();
       if (server === undefined) throw new AgentSetupError(NOT_SET_UP, { details: { step: 'start' } });
-      await signingIn?.cancel().catch(() => {});
+      await cancelSignIn?.().catch(() => {});
+      let mine: (() => Promise<void>) | undefined;
       const handle = await startGoogleSignIn({
+        workRoot: join(options.dataDir, 'agents'),
+        onStarted: (cancel) => {
+          mine = cancel;
+          cancelSignIn = cancel;
+        },
         server: toServer({ command: server.command, args: server.args }),
         env: setupEnv(),
         cwd: home,
@@ -397,18 +432,18 @@ export function createAntigravitySetup(options: AntigravitySetupOptions): Antigr
         },
         diagnostic,
       });
-      signingIn = handle;
       void handle.done.then(() => {
-        if (signingIn === handle) signingIn = undefined;
+        if (cancelSignIn === mine) cancelSignIn = undefined;
       });
       return handle;
     },
 
     async signOut() {
-      await signingIn?.cancel().catch(() => {});
+      await cancelSignIn?.().catch(() => {});
       const installed = installedServer();
       if (installed === undefined) throw new AgentSetupError(NOT_SET_UP, { details: { step: 'sign_out' } });
       const server = startSetupServer({ server: toServer({ command: installed.command, args: installed.args }), env: setupEnv(), cwd: home });
+      live.add(server);
       try {
         const exited = server.exited.then((code) => {
           throw Object.assign(new Error('the server exited'), { code: `exit_${code ?? 'signal'}` });
@@ -423,6 +458,7 @@ export function createAntigravitySetup(options: AntigravitySetupOptions): Antigr
         throw new AgentSetupError(COULD_NOT_SIGN_OUT, { cause: error, details: { step: 'sign_out' } });
       } finally {
         server.stop();
+        live.delete(server);
       }
       try {
         unlinkSync(signInRecordPath(options.dataDir));
@@ -435,8 +471,10 @@ export function createAntigravitySetup(options: AntigravitySetupOptions): Antigr
     close() {
       installing?.abort();
       installing = undefined;
-      void signingIn?.cancel().catch(() => {});
-      signingIn = undefined;
+      void cancelSignIn?.().catch(() => {});
+      cancelSignIn = undefined;
+      for (const server of live) server.stop();
+      live.clear();
     },
   };
 }

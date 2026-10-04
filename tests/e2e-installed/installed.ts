@@ -36,6 +36,8 @@ export const CLAUDE_INSTALL_ENV = 'OGDEN_AGENTS_TEST_CLAUDE_INSTALL';
 export const API_KEY_CHECK_ENV = 'OGDEN_AGENTS_TEST_API_KEY_CHECK';
 /** The fake agent itself, which the onboarding and terminal wrappers run. */
 const FAKE_AGENT_CORE = join(ROOT, 'tests', 'fixtures', 'fake-acp-agent.mjs');
+/** A fake login state that says signed in (`FAKE_LOGIN_STATE`). */
+const SIGNED_IN_LOGIN = join(ROOT, 'tests', 'fixtures', 'fake-login-signed-in.json');
 /** The fake `claude` CLI, which the terminal wrapper runs (story 3.10). */
 const FAKE_CLI = join(ROOT, 'tests', 'fixtures', 'fake-claude-cli.mjs');
 /**
@@ -353,7 +355,8 @@ export function terminalServer(name: string, { omitOptional = false }: { omitOpt
   const home = realpathSync.native(extraFolder(`${name}-home`));
   const project = realpathSync.native(extraFolder(`${name}-repo`));
   const claudeConfig = join(home, '.claude');
-  const agent = wrapper(join(work, 'agent.mjs'), { FAKE_ACP_RESUME: 'resume', FAKE_ACP_CLAUDE_RECORD: '1', CLAUDE_CONFIG_DIR: claudeConfig }, FAKE_AGENT_CORE);
+  // Signed in (6.3: a new chat with a signed-out agent is refused).
+  const agent = wrapper(join(work, 'agent.mjs'), { FAKE_ACP_RESUME: 'resume', FAKE_ACP_CLAUDE_RECORD: '1', CLAUDE_CONFIG_DIR: claudeConfig, FAKE_LOGIN_STATE: SIGNED_IN_LOGIN }, FAKE_AGENT_CORE);
   const cli = wrapper(join(work, 'claude.mjs'), { CLAUDE_CONFIG_DIR: claudeConfig }, FAKE_CLI);
   const serverEnv = {
     [CLAUDE_ACP_PATH_ENV]: agent,

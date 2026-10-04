@@ -41,6 +41,8 @@ const ALLOWED_AGENT_ENV = new Set(
     'SystemRoot', 'ComSpec', 'PATHEXT',
     ...AGENT_ENV_KEYS,
     'CLAUDE_CODE_EXECUTABLE',
+    // The fake login's state file every test server gives the fake agent (6.3: Claude Code signed in).
+    'FAKE_LOGIN_STATE',
     '__CF_USER_TEXT_ENCODING',
     // libuv adds these on Windows to every child it spawns (its required variables), whatever env it is given.
     'HOMEDRIVE', 'HOMEPATH', 'LOGONSERVER', 'SYSTEMDRIVE', 'USERDOMAIN', 'WINDIR',

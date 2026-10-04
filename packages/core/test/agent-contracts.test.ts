@@ -250,12 +250,13 @@ describe("an agent's readiness, from its setup (6.3)", () => {
     expect(port.reads).toBe(1);
     clock = 1_000;
     expect(await setup.readiness('some-agent', 1_000)).toEqual({ install: 'installed', auth: 'needs_sign_in', blocked: 'agent_signed_out' });
-    port.current = { install: 'installed', auth: 'needs_sign_in', subscription: 'unknown' };
-    clock = 2_000;
-    expect(await setup.readiness('some-agent', 1_000)).toEqual({ install: 'installed', auth: 'needs_sign_in' });
     port.current = { install: 'installed', auth: 'signed_in', subscription: 'signed_in' };
-    clock = 3_000;
+    clock = 2_000;
     expect(await setup.readiness('some-agent', 1_000)).toEqual({ install: 'installed', auth: 'signed_in' });
+    // An agent whose sign-in it never could tell (no confirmed state to fall back on, 9.2) is not refused.
+    const unsure = setupPort({ install: 'installed', auth: 'needs_sign_in', subscription: 'unknown' });
+    const other = createAgentSetup(openTestCore().events, [unsure]);
+    expect(await other.readiness('some-agent', 1_000)).toEqual({ install: 'installed', auth: 'needs_sign_in' });
   });
 
   it('never blocks on a status read that failed: nobody could tell', async () => {

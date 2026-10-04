@@ -229,9 +229,9 @@ export type WorkspaceSettingsResponse = z.infer<typeof WorkspaceSettingsResponse
 export const UpdateWorkspaceSettingsRequest = z
   .object({ cautionLevel: CautionLevel.optional(), bmadPieces: BmadPieceSet.optional(), defaultAgentId: AgentId.nullable().optional() })
   .refine(
-  (settings) => settings.cautionLevel !== undefined || settings.bmadPieces !== undefined || settings.defaultAgentId !== undefined,
-  'Choose a setting to change.',
-);
+    (settings) => settings.cautionLevel !== undefined || settings.bmadPieces !== undefined || settings.defaultAgentId !== undefined,
+    'Choose a setting to change.',
+  );
 export type UpdateWorkspaceSettingsRequest = z.infer<typeof UpdateWorkspaceSettingsRequest>;
 
 // ---------------------------------------------------------------------------

@@ -84,9 +84,10 @@ export async function startServer(
   const { start, createLogger, createMemorySecretStore } = await serverModule();
   const bmadCatalog = extra.bmadCatalog ?? (await stubSetupCatalog(extra.bmadSource === undefined ? {} : { source: extra.bmadSource }));
   if (!firstRun) writeFileSync(join(dataDir, 'onboarding.json'), `${JSON.stringify({ welcomeCompleted: true })}\n`, { mode: 0o600 });
-  // Claude Code (the fake) is signed in unless the test says otherwise (6.3: a signed-out agent refuses a new chat).
+  // Claude Code (the fake) is signed in unless the test says otherwise (6.3: a signed-out agent refuses a new chat);
+  // a first run (the Welcome tests) starts signed out, as a fresh install does.
   const loginState = join(dataDir, 'test-login-state.json');
-  writeFileSync(loginState, `${JSON.stringify({ loggedIn: true })}\n`);
+  if (!firstRun) writeFileSync(loginState, `${JSON.stringify({ loggedIn: true })}\n`);
   return start({
     port,
     open: false,

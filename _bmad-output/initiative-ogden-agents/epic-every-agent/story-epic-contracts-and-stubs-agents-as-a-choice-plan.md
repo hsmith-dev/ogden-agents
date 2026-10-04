@@ -83,6 +83,14 @@ context:
 
 ## Implementation Notes
 
+- Implemented directly in this session (it held the investigation, as 6.2 did), not by a fresh subagent.
+- Plan size ~1300 words, over the 1600-token target; kept whole (the epic says entry 3 stays one slice), autonomous run.
+- Core: `agent-descriptor.ts` (`AgentDescriptor`, `AgentInstallSource` npm|archive, `AGENT_PLATFORMS`, `agentDescriptorProblems`, `declaredModes`, `apiKeyMethod`, `agentEnvKeys`); `RegisteredAgent = { descriptor, agent }`, registry `describe()` and name/mode consistency checks; `AgentNotReadyError`; `AgentSetup.readiness(agentId, maxAgeMs)` (last status kept with its time; a status the port could not give, or a sign-in never confirmed, never blocks); `ChatOptions.agentReadiness` / `projectTrusted`; `createChatSession` and `chatAgents` async; `chatAgentOf`, `unavailableReason`.
+- The Claude Code descriptor lives in `setup-claude-code/descriptor.ts` (not `acp-claude-code/`): it holds the id, pins and key variable; `CLAUDE_CODE_AGENT_ID` moved there (re-exported unchanged).
+- Server: `agent-wiring.ts` (`AgentWiring`, `agentHomeDir`, `describedLike` for a chat port given in Claude Code's place); `start.ts` builds `wirings` (the slot), env keys from descriptors, home folders (0o700) set in chat env, extra agents' setup ports join `createAgentSetup`; `StartOptions.extraAgents: AgentWiring[]`; routes map 409s with `details { agentId, action }`; PATCH `defaultAgentId` → 501.
+- Tests: test servers (server helpers, `tests/support.ts`) default to a signed-in fake login, merged under a test's own `extraAgentEnv`; the installed suite's fake wrapper defaults to `tests/fixtures/fake-login-signed-in.json`. Existing tests adjusted: the spawn-failure chat is made through core (its POST is now refused `agent_not_installed`), the API-key echo test runs signed out, the install test signs in before its chat, `simple-project` allows `FAKE_LOGIN_STATE`.
+- Architecture test also forbids agent env names (`ANTHROPIC_API_KEY`, `CODEX_HOME`, `XAI_API_KEY`, `GEMINI_HOME`, …) anywhere in core/shared code, and `gemini` as an id.
+
 ## Plan Change Log
 
 ## Review Triage Log

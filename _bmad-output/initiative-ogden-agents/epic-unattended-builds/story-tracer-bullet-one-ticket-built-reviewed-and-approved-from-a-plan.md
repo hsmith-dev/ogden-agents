@@ -3,14 +3,14 @@ title: 'Tracer bullet: one ticket built, reviewed and approved from a bare page'
 type: 'feature'
 ticket: '2'
 created: '2026-10-04'
-status: 'in-progress'
+status: 'in-review'
 baseline_revision: '7cb4f4721571886f48384a496b36e8fffc780f1f'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
-review_loop_iteration: 0
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick', 'security']
+review_loop_iteration: 1
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-unattended-builds/epic-unattended-builds.md'
   - '{project-root}/_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md'
@@ -89,6 +89,8 @@ context:
 - [x] `packages/web/src/planning/ticket-card.tsx`, `routes/session-page.tsx`, `routes/workspace-review-page.tsx`, `router.tsx`, `planning/builds-api.ts` -- Build, read-only build session, bare review page.
 - [x] Tests: core `builds.test.ts` (matrix rows), adapter tests for `vcs-git` against temp repos (hooks never run, merge conflict leaves checkout unchanged, `_bmad-output` exception), fake agent build mode, `gate.test.ts` route registry, architecture/guard-coverage, installed suite's Coming soon check, e2e `build-tracer.spec.ts` (Build → session → review → Approve → Done; `feature_off` with builds off).
 
+- [ ] Review loop 1 hardening -- every item in Design Notes "Hardening (review loop 1)", each with a test (policy unit tests for dangling symlink and hard link; vcs-git tests for in-progress merge, staged change, ignored file, reviewed revision; builds tests for protected-path diff, other ticket's plan, rebuild after Reject, failure cleanup, start-time settle; adapter test that the build session's options carry `managedSettings`, `settingSources` and `strictMcpConfig`).
+
 **Acceptance Criteria:**
 - Given a fixture repo with a ready ticket, builds on and trusted, when Build is clicked, then a worktree appears under the data folder (none in the repo), the build session streams in the read-only session view, the run ends `verified`, and Approve leaves one merge commit on the checked-out branch containing the change and the plan `done`, and the board shows Done.
 - Given builds off, when `POST …/builds` is called, then 409 `feature_off` and no worktree, branch or session exists.
@@ -107,7 +109,38 @@ context:
 
 ## Plan Change Log
 
+- 2026-10-04, review loop 1 (security lens S1, S3, S4, S5, S6, S8, S10, S11, S12; quick lens Q1, Q2, Q7). Triggering findings: the policy allowed a write through a dangling symlink; the agent could write the main repo's whole `refs/`, `logs/` and `objects/info` (moving the user's branches); user, project and local Claude Code settings (allow rules, hooks, MCP, sandbox widening) bypassed core's policy; Approve merged whatever the branch pointed to at that moment, could abort the user's own merge, overwrite ignored files and sweep staged changes into the merge commit; the branch could carry protected files or other tickets' plan marks made with git plumbing; a rebuild failed on the fixed branch name. Amended (outside the frozen block): Design Notes "Hardening (review loop 1)" and the Execution task "Review loop 1 hardening". Known-bad states avoided: an escape through a symlink or hard link; changed refs in the user's repo; a policy that user or project settings override; merging unreviewed commits; losing the user's merge or ignored files; `done` reached for another ticket without approve; a ticket that can't be rebuilt or stays `running` forever. KEEP: the whole current implementation (ports, adapters, routes, web, tests, migration, the fake agent's build mode, `core.hooksPath` override and its hook test). Code is amended in place, not reverted: every defect is local to a named function and the rest was reviewed sound. This is a deliberate deviation from the full-revert loopback, recorded here.
+
 ## Review Triage Log
+
+- 2026-10-04, pass 1 (lenses quick, security): high 6, medium 15, low 4, false 0, maybe-false 0. Routed: bad_plan (amended in place, see Plan Change Log) for the design-level group; patch for the rest; defer 2.
+  - S1 dangling symlink passes the policy -- high, bad_plan: `nodePathNormalizer.realpath` treats `ENOENT` of a link as "not yet there"; lstat refusal added to the plan.
+  - S2 race between decision and write; hard links -- medium: hard links patch (nlink > 1 refused); the swap race is inherent to deciding before an unsandboxed write: defer.
+  - S3 whole `refs`/`logs`/`objects` writable -- high, bad_plan: `builds.ts` `sandboxFor` lists `<common>/refs`, `logs`; per-run ref folders in the plan. Deleting `objects` stays possible (data loss, not an escape): defer.
+  - S4 Approve merges the branch as it is then -- high, bad_plan: `vcs-git` `merge` takes `refs/heads/<branch>`; reviewed revision in the plan.
+  - S5 protected files via git plumbing -- high, bad_plan: nothing checks the branch's content; protected-path diff check in the plan.
+  - S6 other tickets' plans marked in the branch -- medium, bad_plan: same root as S5's missing content check.
+  - S7 ignored files overwritten -- medium, patch: `--no-overwrite-ignore`.
+  - S8 Approve aborts the user's merge; staged changes -- high, bad_plan: `merge` aborts on any `MERGE_HEAD`.
+  - S9 catch path leaves a mid-merge checkout with `done` -- medium, patch: restore the plan from `HEAD`, then abort.
+  - S10 user/project settings override the policy -- high, bad_plan: claude-agent-acp defaults `settingSources` to user, project, local; `managedSettings` lockdown in the plan.
+  - S11 sandbox protects names only at the root; no `denyRead` -- medium, bad_plan: `denyWrite` built from root names; pre-created folders and `denyRead` in the plan.
+  - S12 sandbox probe checks presence only -- medium, patch: `failIfUnavailable` (a real key in the SDK typings) makes Claude Code refuse; look up `bwrap`/`socat` on the agent's PATH.
+  - S13 / Q3 core doesn't refuse a build session's mode, messages, cancel -- medium, patch.
+  - S14 / Q4 `runOfSession` guards -- low, patch.
+  - S15 `_bmad/` not committed means every run fails -- medium, patch: refuse at dispatch with a plain reason.
+  - S16 / Q1 rebuild fails on the fixed branch -- medium, bad_plan (per-run branch).
+  - S17 policy decides on masked paths -- low, patch.
+  - Q2 run stuck `running` after a late failure -- medium, patch.
+  - Q5 approve's own serialization -- medium, patch: one shared helper.
+  - Q6 merge commit sweeps staged `_bmad-output` -- medium, merged into S8.
+  - Q7 any merge refusal labelled conflict -- medium, merged into S8.
+  - Q8 workspace not the repo's top level -- medium, patch: refuse at dispatch.
+  - Q9 epic-slug prerequisites -- low, patch.
+  - Q10 sandbox reason dropped -- low, patch.
+  - Q11 agent-written reason stored unmasked -- medium, patch.
+  - Q12 = S11.
+  - Implementer's notes: network failure not named -- medium, patch (plain line); a `running` run after a restart -- medium, patch (settle at start).
 
 ## Design Notes
 
@@ -115,6 +148,16 @@ context:
 - `builds` is made available here (not in 5.3) because the hitl live check needs it on; 5.3 still freezes the contracts.
 - Hooks are disabled because the agent controls the branch content (e.g. `.husky/`, `core.hooksPath` set by a repo) and approve runs git unsandboxed in the main checkout.
 - Record live: whether `bmad-build-auto` accepts `ogden/<ref>-<slug>`, and how a `plan_checkpoint` stop shows over ACP (for 5.4).
+
+### Hardening (review loop 1)
+
+- **Claude Code settings lockdown:** build sessions pass `managedSettings` (policy tier, passed through by claude-agent-acp 0.84) with `allowManagedPermissionRulesOnly`, `allowManagedHooksOnly`, `allowManagedMcpServersOnly`, `permissions.deny` (`WebFetch`, `WebSearch`, `mcp__*`), and the sandbox: `enabled`, `failIfUnavailable`, `autoAllowBashIfSandboxed`, `allowUnsandboxedCommands: false`, `network: { allowedDomains: [], allowManagedDomainsOnly, strictAllowlist }`, filesystem `allowWrite`/`denyWrite`, and `denyRead` of Ogden's data folder (re-allowing the run's worktree) and the usual credential folders (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`, `~/.netrc`, `~/.docker`). Also `settingSources: ['project']` (CLAUDE.md and the repo's skills still load; user and local settings don't) and `strictMcpConfig: true`. Excluded commands then still go through core's policy, which denies them.
+- **Git paths:** run branch `ogden/<run8>/<ref>-<slug>` (unique per run, so Reject or a failed run never blocks a rebuild); writable git paths are only `objects` (minus `objects/info`), `refs/heads/ogden/<run8>`, `logs/refs/heads/ogden/<run8>` and `worktrees/<id>`. Empty protected folders (`.claude`, `.vscode`, `.idea`, and `_bmad` when absent) are created in a new worktree so bubblewrap's read-only binds exist.
+- **Policy engine:** a missing path component that `lstat` finds (a dangling symlink) is refused; an existing target with more than one hard link is refused; decisions use the raw paths (masking is for display only).
+- **Dispatch:** the workspace must be the repo's top level (`rev-parse --show-toplevel`), else `vcs_unavailable` with a plain reason; right after the worktree is made, its `_bmad/scripts/` fingerprint must match the trust, else the worktree is removed and Build is refused with a plain reason (BMad files not committed); any failure after the worktree exists removes it and ends the run (`failed`), so no run stays `running`; the sandbox's own reason reaches the user; prerequisite links that name an epic are met when that epic is done (the board's rule).
+- **Run end:** the agent is released (process tree stopped) when the outcome is decided; the outcome is `failed` with a plain reason when the diff touches a protected path (any segment in the 2.8 list, or `_bmad/`), any `tickets.toml`, or a plan file other than this ticket's; the stored reason is masked (AGENTS.md); a run that isn't verified says builds have no network access when relevant ("Builds have no network, so installs such as npm install fail.").
+- **Approve:** the review returns the branch's head revision and Approve must send it back; Approve merges that revision only when the branch still points at it (else 409 `checks_failed` "The build changed after you reviewed it."). Refused (`checkout_dirty`, run unchanged) when the index has any staged change, when the plan file itself has changes, or when a merge, rebase, cherry-pick or revert is in progress; never aborts a merge Ogden didn't start. `git merge --no-ff --no-commit --no-overwrite-ignore`; only a real conflict (unmerged paths) blocks the run as `merge_conflict`; any other refusal leaves the run `verified`. On a failure after `mark`, the plan file is restored from `HEAD` before the merge is aborted. Approve's `mark` uses the same per-repo serialization as the board's marks (one shared helper).
+- **Build sessions in core:** `chat` refuses user messages, permission-mode and driver changes and cancel for a `build` session in core (not only in routes); `runOfSession` uses the full guard order. At server start a `running` run is set `blocked` with reason "interrupted" (its worktree kept).
 
 ## Verification
 

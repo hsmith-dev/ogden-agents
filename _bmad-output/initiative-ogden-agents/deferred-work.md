@@ -622,3 +622,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-tracer-bullet-one-ticket-built-reviewed-and-approved-from-a-plan.md`
   summary: A network allowlist for an unattended build's sandboxed commands (package registries, so `npm install` or `uv sync` in a fresh worktree can work); until then a build's commands have no network and such a failure is named in the run's result.
   evidence: User decision 2026-10-04 on 5.2's Q1 (deny-by-default policy, Bash sandboxed with no network; "an allowlist is a later story").
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-tracer-bullet-one-ticket-built-reviewed-and-approved-from-a-plan.md`
+  summary: Core decides a build's file write before Claude Code's unsandboxed Edit/Write tool performs it, so sandboxed Bash racing a swap of a checked folder for a symlink can still redirect that write outside the worktree.
+  evidence: 5.2 security review S2 (medium, unverified in practice): `core/src/build-permission-policy.ts` decides on the path at request time; dangling links and hard links are refused, but a swap after the decision isn't. Settled by running file tools inside the sandbox too, or by a write-through-fd check in the agent (5.6).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-tracer-bullet-one-ticket-built-reviewed-and-approved-from-a-plan.md`
+  summary: A build's sandbox can write the main repo's `.git/objects` (a commit needs it), so an agent could delete objects and damage unpushed history; a per-run object store (`GIT_OBJECT_DIRECTORY` with the repo's objects as an alternate, copied in at approve) would close it.
+  evidence: 5.2 security review S3 (medium): `core/src/builds.ts` `sandboxFor`; refs and logs are narrowed to the run's own folder, objects can't be without a separate store (5.5).

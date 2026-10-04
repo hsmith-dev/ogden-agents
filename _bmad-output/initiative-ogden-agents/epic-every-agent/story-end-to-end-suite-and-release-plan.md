@@ -3,12 +3,12 @@ title: 'End-to-end suite and release (epic 6)'
 type: 'feature'
 ticket: '10'
 created: '2026-10-04'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
 review_loop_iteration: 0
 baseline_revision: '56883363a54bcfb42b8ae698522dd02e34af5ef2'
 context:
@@ -84,6 +84,15 @@ context:
 - Given the trust gate removed or Antigravity declaring Auto, when the installed journey runs locally, then it fails.
 
 ## Implementation Notes
+
+- Implemented directly (no implementation subagent): the investigation was already in this session.
+- AD-16: `adapters/src/child-env.ts` (`baseEnvironment`, `helperEnvironment` with extra names refused when they look like a credential, `WINDOWS_FOLDERS`, `NPM_NETWORK`, `DESKTOP_SESSION`), exported also as `@ogden-agents/adapters/child-env`. Moved onto it: `start-env.ts agentEnvironment`, `uvEnvironment`, Antigravity setup's default env. Fixed: `process-tree.ts` (taskkill had no env), `shortcut-os/windows.ts` (PowerShell got `{...process.env}`), `setup-claude-code/install.ts npmEnv` (whole env less `npm_*` → allowlist + proxies/CA/config folders), the `open` package (start.ts, launcher.ts) → `server/src/open-url.ts`, which runs `open` in a Node child with the helper allowlist + desktop variables. `uv --version` was already allowlisted (the deferred item was stale there). Agents unchanged: base + own home + own key (`start-agents.ts chatEnv`). The launcher's server spawn keeps `process.env`: it is Ogden itself (named exemption in the architecture test).
+- `tests/architecture.test.ts` AD-16 rule: each call of a `node:child_process` function imported by name, and `pty.spawn`, must pass `env` and must not mention `process.env`; namespace imports of child_process and `open` outside `open-url.ts` are flagged. Verified it fails on the baseline sources (process-tree, windows.ts, start.ts, launcher.ts). Limit: it is syntactic, so an `env` variable built from `process.env` elsewhere (as `npmEnv` was) is caught by unit tests, not by it.
+- Hooks: `OGDEN_AGENTS_TEST_ANTIGRAVITY_INSTALL` (pins JSON in temp; every archive URL must be `http://127.0.0.1`, else ignored) and `OGDEN_AGENTS_TEST_TRUST_AGENT` (the fake agent as "Fake Agent", `needsProjectTrust: true`), both behind `testHooksAllowed`; audit test green.
+- Installed suite: `tests/e2e-installed/agents-journey.spec.ts` (project `agents`, before epic 1's `journey`), five tests; `bmadServer` gained `antigravityPins`, `trustAgent`, `firstRun`, `env`.
+- Mutation proofs (local, not committed; repacked each time, 2026-10-04 macOS arm64): (1) trust gate disabled in `core/src/chat/workspaces.ts` → the two-agents journey fails at "an agent that needs a trusted project" (Expected 409, Received 201). (2) Antigravity's descriptor declaring `auto: 'auto_edit'` → it fails at "Antigravity offers Ask and Skip all, never Auto" (`permission-mode-auto` not disabled). Both reverted; the clean run passes.
+- The `open.test.ts` mock moved from `open` to `../src/open-url.js` (an unmocked run would open a real browser).
+- Release prep: `0.5.0-rc.1` in the three `package.json`s; CHANGELOG 0.5.0; RELEASING.md "0.5.0 release checklist" (12 live checks per OS); AD-16 dated note; deferred item resolved. Not tagged or published. The final `agent-matrix.md` Antigravity row waits on the live checks (RELEASING.md step 3 says when).
 
 ## Plan Change Log
 

@@ -10,7 +10,7 @@ review: 'quick'
 review_source: 'pinned'
 lenses_ran: ['quick']
 review_loop_iteration: 0
-baseline_revision: '2f6b8444179a2ff0e92bbd6b98d2719b95353e88'
+baseline_revision: '8cd1136e8203405ae2912e1762b17ba184810e2e'
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-every-agent/epic-every-agent.md'
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-every-agent/story-epic-contracts-and-stubs-agents-as-a-choice-plan.md'

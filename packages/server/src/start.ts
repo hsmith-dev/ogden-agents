@@ -6,6 +6,7 @@ import {
   ANTIGRAVITY_AGENT_ID,
   CLAUDE_CODE_AGENT_ID,
   CLAUDE_CODE_DESCRIPTOR,
+  createAntigravityAgent,
   createClaudeCodeAgent,
   createClaudeCodeSetup,
   createKeyringSecretStore,
@@ -44,7 +45,7 @@ import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM, ServerMessage, type AgentId, t
 import openBrowser from 'open';
 import { WebSocketServer } from 'ws';
 import { agentHomeDir, checkAgentWiring, describedLike, type AgentWiring } from './agent-wiring.js';
-import { antigravityWiring } from './antigravity-wiring.js';
+import { antigravityWiring, type AntigravityPorts } from './antigravity-wiring.js';
 import { createApp, type ServerControl } from './app.js';
 import { SHIPPED_BMAD_PIECES } from './bmad-pieces.js';
 import { chooseWebSocketProtocol, createLaunchCodes, createTabTokens, retireLegacyAuthKey } from './auth.js';
@@ -295,7 +296,7 @@ async function listenAndAnnounce({
   const antigravity =
     options.antigravity === false
       ? []
-      : [antigravityWiring({ dataDir, given: options.antigravity, onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
+      : [antigravityWiring({ dataDir, given: options.antigravity ?? testAntigravityPorts(dataDir, hooks, log), onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
   for (const wiring of antigravity) checkAgentWiring(wiring);
   const extraAgents = [...antigravity, ...(options.extraAgents ?? [])];
   // Every registered agent's API key variables (6.3): each is kept out of every process but its own agent's chat.
@@ -672,5 +673,23 @@ async function listenAndAnnounce({
     issueLaunchUrl: () => issueLaunchUrl(),
     stopped,
     close: () => shutdown('close'),
+  };
+}
+
+/**
+ * Antigravity's chat port on the test hook's server script
+ * (`OGDEN_AGENTS_TEST_ANTIGRAVITY_SERVER`, epic 6 entry 8), run under this
+ * Node in place of the pinned server; `undefined` (the shipped ports) when the
+ * hook is not in use. Its setup port stays the shipped one.
+ */
+function testAntigravityPorts(dataDir: string, hooks: TestHooks, log: Logger): AntigravityPorts | undefined {
+  const script = hooks.antigravityServer;
+  if (script === undefined) return undefined;
+  return {
+    agent: createAntigravityAgent({
+      dataDir,
+      server: () => ({ command: process.execPath, args: [script, '--uid='] }),
+      onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields),
+    }),
   };
 }

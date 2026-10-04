@@ -34,6 +34,10 @@
  *   provisioned Python, no Python download), so the installed-package suite
  *   sets BMad Method up with no network. The tarball is still checked
  *   against the lock's content hash before anything is saved.
+ * - {@link ANTIGRAVITY_SERVER_ENV}: a Node script inside the temp folder
+ *   plays Antigravity's ACP server (epic 6 entry 8), so the installed-package
+ *   suite can chat with Antigravity through the fake agent on every OS (the
+ *   pinned server is never run in a test).
  *
  * {@link resolveTestHooks} reads them all for `start()`, and
  * {@link testHooksLogFields} is its "test hooks in use" line. Every
@@ -82,6 +86,9 @@ export const BMAD_SOURCE_UV_ENV_NAMES: readonly string[] = [
   'NO_PROXY',
   'no_proxy',
 ];
+
+/** Absolute path to a Node script inside the temp folder, run under Node as Antigravity's ACP server (tests only; epic 6 entry 8). */
+export const ANTIGRAVITY_SERVER_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_SERVER';
 
 /** Test-only: shortens the quiet-agent check-in delay, in milliseconds (story 2.10). Honoured only when `testHooksAllowed`. */
 export const CHECK_IN_MS_ENV = 'OGDEN_AGENTS_TEST_CHECK_IN_MS';
@@ -193,20 +200,38 @@ export function testApiKeyCheck(env: Env, dataDir: string, tmp: string = tmpdir(
  * picks which file starts.
  */
 export function testClaudeCli(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
-  const file = env[CLAUDE_CLI_ENV];
+  return testNodeScript(CLAUDE_CLI_ENV, env, dataDir, tmp);
+}
+
+/**
+ * The Node script {@link ANTIGRAVITY_SERVER_ENV} names, checked as
+ * {@link testClaudeCli}'s is (inside the temp folder by its real path, a
+ * `.js`/`.mjs`/`.cjs` file), or `undefined` (Antigravity's pinned server):
+ * unset, hooks not allowed, or outside the temp folder. It runs under this
+ * Node with Antigravity's own chat environment, in place of the pinned
+ * server; nothing else about Antigravity changes (its setup still reads the
+ * data folder).
+ */
+export function testAntigravityServer(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
+  return testNodeScript(ANTIGRAVITY_SERVER_ENV, env, dataDir, tmp);
+}
+
+/** A Node script inside the temp folder named by `name` (see {@link testClaudeCli}), or `undefined`; throws when allowed but unusable. */
+function testNodeScript(name: string, env: Env, dataDir: string, tmp: string): string | undefined {
+  const file = env[name];
   if (file === undefined || file === '' || !testHooksAllowed(env, dataDir, tmp)) return undefined;
-  if (!isAbsolute(file)) throw new Error(`${CLAUDE_CLI_ENV}: must be an absolute path`);
-  if (!/\.[cm]?js$/i.test(file)) throw new Error(`${CLAUDE_CLI_ENV}: must be a Node script (.js, .mjs or .cjs)`);
+  if (!isAbsolute(file)) throw new Error(`${name}: must be an absolute path`);
+  if (!/\.[cm]?js$/i.test(file)) throw new Error(`${name}: must be a Node script (.js, .mjs or .cjs)`);
   if (!insideTemp(dirname(file), tmp)) return undefined;
   let target: string;
   try {
     target = realpathSync.native(file);
   } catch (error) {
-    throw new Error(`${CLAUDE_CLI_ENV}: unreadable (${(error as NodeJS.ErrnoException).code ?? 'unknown'})`);
+    throw new Error(`${name}: unreadable (${(error as NodeJS.ErrnoException).code ?? 'unknown'})`);
   }
   // Checked again by its real path, which is what every later spawn uses: a link can't lead out of temp.
   if (!insideTemp(target, tmp) || !/\.[cm]?js$/i.test(target)) return undefined;
-  if (!statSync(target).isFile()) throw new Error(`${CLAUDE_CLI_ENV}: not a file`);
+  if (!statSync(target).isFile()) throw new Error(`${name}: not a file`);
   return target;
 }
 
@@ -303,7 +328,7 @@ export function checkInDelayFromEnv(env: Env, dataDir: string, tmp: string = tmp
 }
 
 /** The `start()` options that decide a hook themselves, and whether `start()` opens its own core. */
-export type TestHookOptions = Pick<StartOptions, 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch'> & {
+export type TestHookOptions = Pick<StartOptions, 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity'> & {
   /** `false` for a core passed in, which already holds its own BMad pieces: {@link BMAD_AVAILABLE_ENV} is not read. */
   ownsCore: boolean;
   tmp?: string;
@@ -314,6 +339,7 @@ export interface TestHooks {
   claudeInstall: TestClaudeInstall | undefined;
   apiKeyCheck: ((value: string, signal: AbortSignal) => Promise<ApiKeyVerification>) | undefined;
   claudeCli: string | undefined;
+  antigravityServer: string | undefined;
   bmadProbe: boolean;
   bmadAvailable: BmadPieceName[];
   bmadSource: TestBmadSource | undefined;
@@ -335,6 +361,8 @@ export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOpt
     claudeInstall: options.claudeInstall === undefined ? testClaudeInstall(env, dataDir, tmp) : undefined,
     apiKeyCheck: options.verifyApiKey === undefined ? testApiKeyCheck(env, dataDir, tmp) : undefined,
     claudeCli: options.extraAgentEnv?.CLAUDE_CODE_EXECUTABLE === undefined ? testClaudeCli(env, dataDir, tmp) : undefined,
+    // Antigravity's ports given (or left out) by a test decide it: the hook is not read.
+    antigravityServer: options.antigravity === undefined ? testAntigravityServer(env, dataDir, tmp) : undefined,
     bmadProbe: testBmadProbe(env, dataDir, tmp),
     bmadAvailable: options.ownsCore ? testBmadAvailable(env, dataDir, tmp) : [],
     bmadSource: options.bmadSource === undefined && options.bmadFetch === undefined ? testBmadSource(env, dataDir, tmp) : undefined,
@@ -350,12 +378,20 @@ export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOpt
  */
 export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | undefined {
   const inUse =
-    hooks.claudeInstall !== undefined || hooks.apiKeyCheck !== undefined || hooks.claudeCli !== undefined || hooks.bmadProbe || hooks.bmadAvailable.length > 0 || hooks.bmadSource !== undefined || hooks.checkInMs !== undefined;
+    hooks.claudeInstall !== undefined ||
+    hooks.apiKeyCheck !== undefined ||
+    hooks.claudeCli !== undefined ||
+    hooks.antigravityServer !== undefined ||
+    hooks.bmadProbe ||
+    hooks.bmadAvailable.length > 0 ||
+    hooks.bmadSource !== undefined ||
+    hooks.checkInMs !== undefined;
   if (!inUse) return undefined;
   return {
     claudeInstall: hooks.claudeInstall !== undefined,
     apiKeyCheck: hooks.apiKeyCheck !== undefined,
     claudeCli: hooks.claudeCli !== undefined,
+    antigravityServer: hooks.antigravityServer !== undefined,
     bmadProbe: hooks.bmadProbe,
     bmadAvailable: hooks.bmadAvailable.join(','),
     bmadSource: hooks.bmadSource !== undefined,

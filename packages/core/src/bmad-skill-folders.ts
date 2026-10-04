@@ -18,7 +18,7 @@
  */
 import type { AgentId, WorkspaceId } from '@ogden-agents/shared';
 import type { AgentRegistry } from './agent-port.js';
-import type { BmadFeatures } from './bmad-features.js';
+import type { BmadFeatures } from './bmad-pieces.js';
 import type { Entities } from './entities.js';
 
 export interface BmadSkillFoldersOptions {

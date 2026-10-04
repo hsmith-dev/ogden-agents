@@ -13,6 +13,7 @@ const UNKNOWN = 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3' as WorkspaceId;
 /** A port that is never started: only its name and modes are read. */
 const port = (displayName: string): AgentPort => ({
   displayName,
+  skillInvocation: (skill) => `/${skill}`,
   startSession: () => Promise.reject(new Error('not started in this test')),
   reopenSession: () => Promise.reject(new Error('not started in this test')),
   listAuthMethods: () => Promise.resolve([]),

@@ -332,7 +332,10 @@ test('a piece on and off with a second tab following, the guard, and the default
   });
 
   await test.step('New projects → BMad Method, Planning only: the next project starts with Planning, the earlier one unchanged', async () => {
+    // The page refetches the default as it opens: let that answer arrive before choosing.
+    const loaded = page.waitForResponse((response) => response.url().endsWith(API_ROUTES.newProjectDefaults) && response.request().method() === 'GET');
     await openNewProjects(page);
+    await loaded;
     const section = page.getByTestId('new-projects-section');
     await expect(section.getByRole('radio', { name: 'Simple chats' })).toHaveAttribute('aria-checked', 'true');
     await section.getByRole('radio', { name: 'BMad Method' }).click();

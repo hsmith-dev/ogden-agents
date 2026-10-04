@@ -181,6 +181,9 @@ export function NewProjectDefaultsSection() {
 
   const save = (pieces: BmadPiece[], note: string | undefined, onFailure?: () => void) => {
     const ticket = latest.next();
+    // A refetch still on its way (the page's mount refetch, say) would land after this save and show the old
+    // default (story 4.13: seen on a Windows runner); the save's answer is the one kept.
+    void queryClient.cancelQueries({ queryKey: NEW_PROJECT_DEFAULTS_QUERY_KEY });
     setSaving(true);
     setChosen(pieces);
     setStatus(undefined);

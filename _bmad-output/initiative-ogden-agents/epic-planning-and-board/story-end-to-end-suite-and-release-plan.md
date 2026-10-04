@@ -67,17 +67,17 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] Merge 10.9 (`--no-ff`), resolve, commit; merge permission-modes, resolve (migration renumber, union of contracts), commit. `pnpm typecheck && pnpm test` green after each.
-- [ ] `test-hooks.ts`, `start-planning.ts`, `start.ts` -- `OGDEN_AGENTS_TEST_BMAD_SOURCE` as Decisions; unit tests (honoured, ignored when not allowed or outside temp, bad lock throws, uvEnv keys outside the allowlist dropped); audit passes.
-- [ ] `fake-acp-agent.mjs` -- `write-file <relpath> <base64>`.
-- [ ] `installed.ts` -- fixture BMad source (tarball + lock + uvEnv JSON in the server's temp) for `bmadServer`; uv/Python availability check.
-- [ ] `bmad-journey.spec.ts`, `onboarding-journey.spec.ts` -- shipped Planning/Board; only unshipped pieces Coming soon; Board on → trust dialog (A3).
-- [ ] `planning-journey.spec.ts` -- matrix rows BMad off, Setup, Trust, Planning, Board live, Status (incl. reopen confirm), Module, Reduced; repo hashes where nothing may be written.
-- [ ] `permission-modes-journey.spec.ts` -- matrix row Modes (Developer mode through Settings).
-- [ ] `playwright.config.ts`, `ci.yml` -- projects and uv provisioning.
-- [ ] `deferred-work.md` -- index lines or `Resolved:` entries so `PROVENANCE_BASE=origin/main pnpm provenance` passes; 3.10 F7 resolved.
-- [ ] `CHANGELOG.md`, `RELEASING.md` -- one 0.4.0 entry (epic 10 + epic 4 + permission modes); a 0.4.0 checklist listing the live checks on `npx ogden-agents@next`: epic 4 tracer (idea to ticketed epic with real Claude Code), 10.1, permission modes (Skip all banner, Auto protected-path card with real Claude Code), BMad setup download on a real network.
-- [ ] Proofs (local, not committed): guard no-op, trust gate removed, `ticket.changed` emit removed: each fails the suite; restore and repack.
+- [x] Merge 10.9 (`--no-ff`), resolve, commit; merge permission-modes, resolve (migration renumber, union of contracts), commit. `pnpm typecheck && pnpm test` green after each.
+- [x] `test-hooks.ts`, `start-planning.ts`, `start.ts` -- `OGDEN_AGENTS_TEST_BMAD_SOURCE` as Decisions; unit tests (honoured, ignored when not allowed or outside temp, bad lock throws, uvEnv keys outside the allowlist dropped); audit passes.
+- [x] `fake-acp-agent.mjs` -- `write-file <relpath> <base64>`.
+- [x] `installed.ts` -- fixture BMad source (tarball + lock + uvEnv JSON in the server's temp) for `bmadServer`; uv/Python availability check.
+- [x] `bmad-journey.spec.ts`, `onboarding-journey.spec.ts` -- shipped Planning/Board; only unshipped pieces Coming soon; Board on → trust dialog (A3).
+- [x] `planning-journey.spec.ts` -- matrix rows BMad off, Setup, Trust, Planning, Board live, Status (incl. reopen confirm), Module, Reduced; repo hashes where nothing may be written.
+- [x] `permission-modes-journey.spec.ts` -- matrix row Modes (Developer mode through Settings).
+- [x] `playwright.config.ts`, `ci.yml` -- projects and uv provisioning.
+- [x] `deferred-work.md` -- index lines or `Resolved:` entries so `PROVENANCE_BASE=origin/main pnpm provenance` passes; 3.10 F7 resolved.
+- [x] `CHANGELOG.md`, `RELEASING.md` -- one 0.4.0 entry (epic 10 + epic 4 + permission modes); a 0.4.0 checklist listing the live checks on `npx ogden-agents@next`: epic 4 tracer (idea to ticketed epic with real Claude Code), 10.1, permission modes (Skip all banner, Auto protected-path card with real Claude Code), BMad setup download on a real network.
+- [x] Proofs (local, not committed): guard no-op, trust gate removed, `ticket.changed` emit removed: each fails the suite; restore and repack.
 
 **Acceptance Criteria:**
 - Given the packed tarball, when `pnpm e2e:installed` runs on macOS, Windows and Linux in CI, then every project passes with no process or folder left.
@@ -102,6 +102,26 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+### Pass 1 (2026-10-03; lenses: quick, security)
+
+Verdicts: high 1, medium 3, low 5, false 1, maybe-false 0 (quick Q1-Q9, security S1; the security lens found nothing else at AD-15, AD-16, AD-22, the trust gate, mode enforcement for planning sessions, the migrations or the new hook). No intent_gap or bad_plan.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---------|---------|-------|-------------------|
+| S1 | `_bmad/` isn't a protected path: an edit a caution level or Auto allows without a card can plant `_bmad/scripts/config_utils.py`, which the Board's watcher then runs via `tickets.py` | high | defer | Real (`PROTECTED_PATHS`, caution shortcut, watcher rerun), but present on the epic 4 chain with caution levels alone (Auto adds a second way in) and in the project-trust model the user decided (4.1 S2, 4.12 S3); the fix is a security policy choice (protect `_bmad` and show a card on every write there, or re-check the script after trust). deferred-work.md with an index line; in the PR's Needs you. |
+| Q1 | Nothing checks BMad Method came from the fixture; a silent fallback to GitHub would pass in CI | medium | patch | The hook returns `undefined` outside temp, and Node's `fetch` isn't proxied. The journey now checks the "test hooks in use" line has `bmadSource: true` and `GET /bmad/source` names the fixture commit. |
+| Q2 | The hash-mismatch unit test fails at gunzip, never the hash, and checks no plain error | medium | patch | A tarball with one extra file and the original lock: refused with `bmad_download_failed`/`integrity`, the plain message, and `expected …, got …` detail. |
+| Q3 | BMad-off step has no server-side refusal, so the guard proof can't fail the planning project | low | patch | Added `GET catalog` → 409 `feature_off` on the off project. `g p` from Plan is trivially a no-op; `g b` stays the check. |
+| Q4 | Proof results not recorded, tasks unticked | false | reject | The reviewer read an earlier HEAD: Implementation Notes record all three proofs (commit after launch). Task boxes ticked. |
+| Q5 | `installed.ts` copies `UPSTREAM_FIXTURE`, `FIXTURE_COMMIT`, the lock and the Python probe from `server/test/helpers.ts` | medium | patch | Moved into `tests/fixtures/bmad-upstream-source.ts` (plain Node: `fixtureSource`, `hasManagedPython`, `realUvMissing`, `TEST_PYTHON`), used by both. |
+| Q6 | The merge put permission modes' settings event back into `shared/src/events.ts` (603 lines) | low | patch | Moved to `events-settings.ts`, re-exported; `events.ts` 592. `session-page.tsx` (605) stays in the over-600 index line. |
+| Q7 | Two backfill quotes are generic (`` `tests/launcher.test.ts` ``, "Resolved (story 9.3):") and would close future entries | low | patch | Longer, specific quotes; provenance passes on both bases. |
+| Q8 | "the hook stays exercised" is untrue: `planning,board` are shipped | low | patch | Test 2 registers `builds` and checks its switch is enabled and not Coming soon. |
+| W1 | CI run 37179473869, windows-latest installed: the modes journey's `say` counted replies before the chat reloaded after Settings (expected 1, received 5) | medium | patch | Test race on a slow runner: `developerMode` now waits for the conversation's earlier replies before returning. Planning journey passed there (54 s). |
+| Q9 | CI comment stale (says no uv download) and run on | low | patch | Rewritten. |
+
+After the patches (2026-10-03, macOS): `pnpm typecheck`; `pnpm test` 1781 passed, 4 skipped (after removing a stray `packages/node_modules` a local `npx vitest` left); `pnpm run pack && pnpm smoke` OK; `pnpm e2e:installed` 41 passed; provenance against `origin/main` and `origin/story/4.12-epic4-sweep`.
 
 ## Design Notes
 

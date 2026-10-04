@@ -21,8 +21,9 @@
  *   after a server restart.
  * - Quit: no repo changed.
  *
- * Test 2, with `planning,board` registered as available and the guarded probe
- * route (`OGDEN_AGENTS_TEST_BMAD_AVAILABLE`, `OGDEN_AGENTS_TEST_BMAD_PROBE`):
+ * Test 2, with `builds` registered as available (its switch can be turned on)
+ * and the guarded probe route (`OGDEN_AGENTS_TEST_BMAD_AVAILABLE`,
+ * `OGDEN_AGENTS_TEST_BMAD_PROBE`):
  * - Planning on and off in one tab shows in a second browser context; the
  *   probe is refused with 409 `feature_off` while it is off, served once on.
  *   With `requireBmadFeature`'s check removed, this test fails at the first
@@ -277,9 +278,9 @@ test('what 0.4.0 ships, Board asking for trust, a simple project, and the offer,
 
 test('a piece on and off with a second tab following, the guard, and the default for new projects, on the installed package', async ({ page, browser }) => {
   test.setTimeout(180_000);
-  // Planning and Board registered as available (0.4.0 ships both, so the hook adds nothing but stays exercised), and
-  // the route guarded by Planning.
-  const server = bmadServer('journey-pieces', { available: ['planning', 'board'], probe: true });
+  // Unattended builds registered as available (0.4.0 ships Planning and Board; the hook adds a piece no release
+  // ships yet), and the route guarded by Planning.
+  const server = bmadServer('journey-pieces', { available: ['builds'], probe: true });
   servers.push(server);
   const earlier = server.addRepo({ prefix: 'earlier-repo-' });
   const later = server.addRepo({ bmad: false, prefix: 'later-repo-' });
@@ -301,7 +302,9 @@ test('a piece on and off with a second tab following, the guard, and the default
     const planning = switchIn(page, BMAD_PIECE_INFO.planning.label);
     await expect(planning).toHaveAttribute('aria-checked', 'false');
     await expect(planning).toBeEnabled();
-    // Not registered: still Coming soon.
+    // Registered by the hook: Unattended builds can be turned on. Not registered: Retrospectives is still Coming soon.
+    await expect(switchIn(page, BMAD_PIECE_INFO.builds.label)).toBeEnabled();
+    await expect(page.getByTestId('bmad-builds-coming-soon')).toHaveCount(0);
     await expect(switchIn(page, BMAD_PIECE_INFO.retrospectives.label)).toBeDisabled();
 
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });

@@ -11,9 +11,12 @@
  * network, no real agent, account or keychain.
  *
  * 1. BMad off: a project added with every piece off shows Chats only, `g b`
- *    does nothing, Plan says the feature is off, and nothing is written.
+ *    does nothing, Plan says the feature is off, the server refuses its
+ *    catalog (`feature_off`; with the AD-22 guard removed, this fails), and
+ *    nothing is written.
  * 2. Set up from the UI: Planning on in an empty repo sets BMad Method up with
- *    its steps, then "Ready to plan."; `_bmad/` and the skills are written.
+ *    its steps, then "Ready to plan."; `_bmad/` and the skills are written,
+ *    from the fixture (the hook is in use, the source is its commit).
  * 3. Trust: turning Board on asks to run the project's scripts; Cancel leaves
  *    it off, Allow turns it on.
  * 4. Plan: Start from an idea opens a planning session whose first message
@@ -41,6 +44,7 @@ import { dirname, join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { apiPath } from '../../packages/shared/src/api.ts';
 import { PLAIN_OLDER_FILES } from '../fixtures/bmad-plain/plain-repos.js';
+import { FIXTURE_COMMIT } from '../fixtures/bmad-upstream-source.js';
 import { API_ROUTES, requestQuit } from '../support.js';
 import { send } from '../e2e/chat-server.js';
 import { expectConnected, landConnected, storedToken } from '../e2e/tab.js';
@@ -174,6 +178,10 @@ test('from BMad off to a ticketed epic on a live board, on the installed package
     await page.keyboard.press('b');
     await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 300)));
     await expect(page).toHaveURL(new RegExp(`/w/${offId}/plan$`));
+    // The server refuses Plan's catalog while Planning is off (AD-22; with the guard removed, this fails).
+    const refused = await api(page, 'GET', apiPath(API_ROUTES.workspaceCatalog, { wsId: offId }));
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { error: { code: string } }).error.code).toBe('feature_off');
     expect(existsSync(join(off.path, '_bmad'))).toBe(false);
     expect(off.hash()).toBe(offHash);
   });
@@ -189,6 +197,10 @@ test('from BMad off to a ticketed epic on a live board, on the installed package
     await expect(page.getByTestId('bmad-setup-done')).toHaveText('Ready to plan.', { timeout: 120_000 });
     expect(existsSync(join(empty.path, '_bmad', 'config.toml'))).toBe(true);
     expect(existsSync(join(empty.path, '.claude', 'skills', 'bmad-spec', 'SKILL.md'))).toBe(true);
+    // It came from the local fixture, never GitHub: the server says the hook is in use, and the source is the fixture's commit.
+    const log = readFileSync(join(server.install.dataDir, 'logs', 'server.log'), 'utf8');
+    expect(log).toMatch(/"msg":"test hooks in use".*"bmadSource":true/);
+    expect(await (await api(page, 'GET', API_ROUTES.bmadSource)).text()).toContain(FIXTURE_COMMIT);
   });
 
   await test.step("turning Board on asks to trust the project's scripts: Cancel leaves it off, Allow turns it on", async () => {

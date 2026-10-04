@@ -49,6 +49,7 @@ async function say(page: Page, text: string) {
 
 /** Turns Developer mode on or off in Settings → Appearance, then returns to the chat. */
 async function developerMode(page: Page, chatUrl: string, on: boolean) {
+  const shown = await replies(page).count();
   await page.goto(new URL('/settings/appearance', chatUrl).toString());
   const toggle = page.getByTestId('developer-mode');
   await expect(toggle).toHaveAttribute('data-state', on ? 'unchecked' : 'checked');
@@ -56,6 +57,8 @@ async function developerMode(page: Page, chatUrl: string, on: boolean) {
   await expect(toggle).toHaveAttribute('data-state', on ? 'checked' : 'unchecked');
   await page.goto(chatUrl);
   await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
+  // The conversation is back in full before the next message counts its replies (slow runners load it late).
+  await expect(replies(page)).toHaveCount(shown);
 }
 
 /** Quits the server as the UI does, and waits for its process to exit. */

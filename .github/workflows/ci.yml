@@ -233,8 +233,10 @@ jobs:
   # folder and started by its own `ogden` launcher in background mode, plus the
   # security gate's negative checks and the proof that they fail without the
   # gate, and the permission hold and its proof. The agent is the repo's fake
-  # ACP agent (OGDEN_AGENTS_CLAUDE_ACP_PATH): no real agent, no agent or uv
-  # download; BMad Method comes from a local fixture tarball (story 4.13). The suite quits every server it starts and leaves no process.
+  # ACP agent (OGDEN_AGENTS_CLAUDE_ACP_PATH): no real agent, and the product
+  # downloads no agent or uv. The job provisions uv and its managed Python
+  # (below) for epic 4's planning journey, whose BMad Method comes from a
+  # local fixture tarball (story 4.13). The suite quits every server it starts and leaves no process.
   e2e-installed:
     name: End-to-end, installed (${{ matrix.os }}, Chromium)
     runs-on: ${{ matrix.os }}

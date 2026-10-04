@@ -10,9 +10,8 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { echoLines, killProcessTree, prepareInstall, startWithRetry, withTimeout, type Install, type LauncherRun } from '../../scripts/installed-package.mjs';
 import { createDataFolder020, type DataFolder020 } from '../fixtures/data-folder-0.2.0.js';
-import { gunzipLimited, hashEntries, parseTar, selectVerified } from '../../packages/adapters/src/bmad-source/archive.ts';
+import { FIXTURE_TOP, fixtureSource, hasManagedPython, TEST_PYTHON } from '../fixtures/bmad-upstream-source.js';
 import { createFakeBmadRepo, type FakeBmadRepo, type FakeBmadRepoOptions } from '../fixtures/fake-bmad-repo.js';
-import { repoTarGz } from '../fixtures/tar.js';
 import { packFakeAdapter, testNpmCli } from '../fixtures/fake-adapter/pack.mjs';
 import { isAlive, readPortFile, ROOT, waitUntil } from '../support.js';
 
@@ -443,11 +442,6 @@ export const BMAD_PROBE_ENV = 'OGDEN_AGENTS_TEST_BMAD_PROBE';
  */
 export const BMAD_SOURCE_ENV = 'OGDEN_AGENTS_TEST_BMAD_SOURCE';
 
-/** The upstream fixture (`tests/fixtures/bmad-upstream`): the pinned `setup.py` and `tickets.py`, unchanged. */
-const UPSTREAM_FIXTURE = join(ROOT, 'tests', 'fixtures', 'bmad-upstream');
-const FIXTURE_COMMIT = 'c0ffee'.padEnd(40, '0');
-/** The uv-managed Python the BMad Method scripts run with: provisioned by CI (`uv python install`), never downloaded by a test. */
-const TEST_PYTHON = '3.12';
 
 /**
  * Skill files added to the fixture tarball (test-only, not upstream's): the
@@ -480,13 +474,7 @@ function uvPythonDir(): string | undefined {
  * provisions both, so a missing one fails there instead of skipping.
  */
 export function uvReady(): boolean {
-  if (process.env.CI) return true;
-  try {
-    execFileSync('uv', ['python', 'find', '--managed-python', '--no-python-downloads', TEST_PYTHON], { stdio: 'ignore', windowsHide: true });
-    return true;
-  } catch {
-    return false;
-  }
+  return process.env.CI !== undefined || hasManagedPython();
 }
 
 /**
@@ -497,13 +485,10 @@ export function uvReady(): boolean {
  * hook file's path.
  */
 function writeFixtureBmadSource(dir: string): string {
-  const top = `BMAD-METHOD-${FIXTURE_COMMIT}`;
-  const tarball = repoTarGz(UPSTREAM_FIXTURE, top, [
-    { name: `${top}/skills/bmad-spec/`, type: 'dir' },
-    ...Object.entries(FIXTURE_SKILL_FILES).map(([path, data]) => ({ name: `${top}/skills/${path}`, data })),
+  const { tarball, lock } = fixtureSource([
+    { name: `${FIXTURE_TOP}/skills/bmad-spec/`, type: 'dir' },
+    ...Object.entries(FIXTURE_SKILL_FILES).map(([path, data]) => ({ name: `${FIXTURE_TOP}/skills/${path}`, data })),
   ]);
-  const contentHash = hashEntries(selectVerified(parseTar(gunzipLimited(tarball, 64 * 1024 * 1024)), 'skills/'));
-  const lock = { sources: { 'bmad-method': { repo: 'bmad-code-org/BMAD-METHOD', ref: 'main', commit: FIXTURE_COMMIT, version: '6.13.0-fixture', include: 'skills/', contentHash } } };
   const tarballPath = join(dir, 'bmad-method.tar.gz');
   writeFileSync(tarballPath, tarball);
   const cache = join(dir, 'uv-cache');

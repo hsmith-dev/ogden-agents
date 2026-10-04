@@ -1,6 +1,9 @@
 import { z } from 'zod';
-import { AGENTS_STREAM, AgentAuthMethodKind, AgentAuthState, AgentId, AlwaysAllowScope, CautionLevel, MAX_PAGE_EVENTS, Seq, SERVER_STREAM, SETTINGS_STREAM, TOOLCHAIN_STREAM } from './events-common.js';
+import { AGENTS_STREAM, AgentAuthMethodKind, AgentAuthState, AgentId, AlwaysAllowScope, CautionLevel, MAX_PAGE_EVENTS, Seq, SERVER_STREAM, TOOLCHAIN_STREAM } from './events-common.js';
 import { assigned, onSessionStream, onWorkspaceStream } from './events-envelope.js';
+import { SettingsDeveloperModeChangedEvent, SettingsDeveloperModeChangedInput } from './events-settings.js';
+
+export { SettingsDeveloperModeChangedEvent } from './events-settings.js';
 import {
   PermissionRequestedEvent,
   PermissionRequestedInput,
@@ -314,20 +317,6 @@ const AgentAuthChangedInput = z.object({
 /** An agent's sign-in state changed. Carries no URL, code or key (AD-15, AD-16). */
 export const AgentAuthChangedEvent = AgentAuthChangedInput.extend(assigned);
 export type AgentAuthChangedEvent = z.infer<typeof AgentAuthChangedEvent>;
-
-const onSettingsStream = { workspaceId: z.null(), streamId: z.literal(SETTINGS_STREAM) };
-
-const SettingsDeveloperModeChangedInput = z.object({
-  type: z.literal('settings.developer_mode_changed'),
-  ...onSettingsStream,
-  payload: z.object({ developerMode: z.boolean(), previous: z.boolean() }),
-});
-/**
- * Developer mode was turned on or off (install-level; every tab follows it).
- * Turning it off drops every Skip-all chat to Ask in the same transaction.
- */
-export const SettingsDeveloperModeChangedEvent = SettingsDeveloperModeChangedInput.extend(assigned);
-export type SettingsDeveloperModeChangedEvent = z.infer<typeof SettingsDeveloperModeChangedEvent>;
 
 /** Every event core may append (grows with later stories). Nothing unschematized is emitted. */
 export const CoreEvent = z.discriminatedUnion('type', [

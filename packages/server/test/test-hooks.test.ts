@@ -9,6 +9,7 @@
 import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { BMAD_DOWNLOAD_INTEGRITY_MESSAGE } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   API_KEY_CHECK_ENV,
@@ -31,6 +32,7 @@ import {
 } from '../src/test-hooks.js';
 import { createLogger } from '../src/log.js';
 import { createBmadSourceAndCatalog } from '../src/start-planning.js';
+import { FIXTURE_TOP, fixtureSource } from '../../../tests/fixtures/bmad-upstream-source.js';
 import { fixtureUpstream, startTestServer, tempDataDir } from './helpers.js';
 
 const INTEGRITY = 'sha512-QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=';
@@ -289,11 +291,17 @@ describe('testBmadSource (story 4.13)', () => {
     expect((await bmadSourcePort.download()).state).toBe('ready');
     expect(bmadSourcePort.file('bmad-ticket/scripts/tickets.py')).toBeDefined();
 
+    // A tarball that unpacks fine but holds one more file than the lock's hash covers: refused at the hash check.
     const other = sourceFile();
-    writeFileSync(other.tarball, fixtureUpstream().tarball.subarray(0, 64));
+    writeFileSync(other.tarball, fixtureSource([{ name: `${FIXTURE_TOP}/skills/bmad/extra.md`, data: 'not pinned\n' }]).tarball);
     const changed = testBmadSource({ NODE_ENV: 'test', [BMAD_SOURCE_ENV]: other.file }, tempDataDir())!;
     const refused = createBmadSourceAndCatalog({}, tempDataDir(), createLogger(() => {}), changed).bmadSourcePort;
-    await expect(refused.download()).rejects.toThrow();
+    await expect(refused.download()).rejects.toMatchObject({
+      code: 'bmad_download_failed',
+      reason: 'integrity',
+      message: BMAD_DOWNLOAD_INTEGRITY_MESSAGE,
+      detail: expect.stringMatching(/^expected sha256:[0-9a-f]{64}, got sha256:[0-9a-f]{64}$/),
+    });
     expect(refused.status().state).toBe('missing');
   });
 });

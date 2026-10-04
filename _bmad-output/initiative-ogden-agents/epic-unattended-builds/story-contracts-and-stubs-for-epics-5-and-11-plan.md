@@ -3,13 +3,13 @@ title: 'Contracts and stubs for epics 5 and 11'
 type: 'feature'
 ticket: '3'
 created: '2026-10-04'
-status: 'in-progress'
+status: 'in-review'
 baseline_revision: 'af433a0fd3ef6790ccb5b0c6d1999c1ee5ca66d2'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick', 'security']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-unattended-builds/epic-unattended-builds.md'
@@ -66,22 +66,30 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `packages/shared/src/build-runs.ts` (new) -- `BUILD_AGENTS = ['claude-code']`; `SANDBOX_KINDS` (`seatbelt`,`bubblewrap`,`docker`) and `ATTENDED_SANDBOX`; `BLOCKED_CODES` + `blockedSentence(code, {minutes?})`; `RUN_DECISIONS`; `RUN_PHASES` + `runPhase(run)`; `RunQueueEntry`; `BuildRunResult` (per-run JSON result).
-- [ ] `packages/shared/src/build-verification.ts` (new) -- `VERIFICATION_CHECKS` (`plan_built`,`tests_pass`,`code_changed`) with labels, `CheckResult` (`pass|fail|not_run`, detail), `VerificationResult`, `testsFailedDetail(n)`, `NO_TEST_COMMAND_DETAIL`, `MAX_TEST_OUTPUT_TAIL_BYTES`, `CheckAgainRequest`.
-- [ ] `packages/shared/src/build-settings.ts` (new) -- `RUN_LIMIT_DEFAULTS` (2, 3, 45) with bounds, `RunLimitSettings`, `WorkspaceBuildSettings {maxConcurrentRuns, testCommand}` and update requests/responses; `NOTIFICATION_EVENTS`, `NotificationSettings`, `WebhookTarget` (id, host, events; never the URL), add/update webhook requests, `WebhookTestResult`, `WebhookPayload`; sentences.
-- [ ] `packages/shared/src/builds.ts`, `entities.ts`, `errors.ts`, `api.ts`, `events-runs.ts` (new), `events.ts`, `index.ts` -- `StartBuildRequest` = `{agent?, ref}` or `{agent?, all: true}`; `ReviewResponse` + `summary`, `verification`, `findings`, `diffStats` (defaulted); `RejectBuildRequest {note?}`, `RetryRunRequest {mode: resume|rebase|apply_fix, note?}`, `RunResponse`, `RunsResponse {runs, queue}`; `Run` fields; events `run.dispatched`, `run.queue_changed`, `run.verification_completed`, `run.decided`, `workspace.build_settings_changed`, `settings.run_limits_changed`, `settings.notifications_changed`, `run.outcome_changed` + optional `blockedCode`; routes `workspaceRuns`, `workspaceRun`, `runStop`, `runRetry`, `runCheckAgain`, `workspaceBuildSettings`, `runLimits`, `notificationSettings`, `notificationWebhooks`, `notificationWebhook`, `notificationWebhookTest`; error `run_not_active`.
-- [ ] `packages/core/src/{vcs-port,sandbox-port,build-runner-port,notifier-port}.ts`, `index.ts` -- `VcsPort` + `diffStats`, `rebase`, `applyPatch`, `worktreeExists`; `SandboxPort.check({agent})` with unavailable `choices`; `BuildRunnerPort` + `agent`, `invocation(ref, {note?, resume?})`, `blockedCode(condition)`, `readResult(runFolder)`; `NotifierPort.send(url, payload, {timeoutMs})` → `WebhookTestResult`.
-- [ ] `packages/core/src/{entities,builds,errors}.ts`, `db/schema.ts`, `drizzle/0011_run_contract.sql` -- columns `agent`, `blocked_code`, `queue_position`, `decision`; 5.2 records `merge_conflict`, `interrupted`, `approved`, `rejected`; `BuildRefusalCode` + `run_not_active`; all-ready → core `NotImplemented`.
-- [ ] `packages/adapters/src/{build-memory,vcs-memory,sandbox-memory,notify-memory}/index.ts`, `buildrunner-acp`, `sandbox-claude-native`, `vcs-git`, `index.ts` -- memory stubs recording calls; `buildrunner-acp` maps every halt; real adapters satisfy the completed ports (new `vcs-git` methods real; `readResult` reads the JSON result if present).
-- [ ] `packages/server/src/{build-routes,run-settings-routes,start-builds,start-types,app}.ts` -- new routes 501 after guards; `StartOptions` `buildRunner`, `notifier` slots.
-- [ ] `tests/fixtures/fake-acp-agent.mjs`, `fake-bmad-repo.ts`, `fake-test-command.mjs` (new) -- build halts by condition (`FAKE_ACP_BUILD_HALT`), intent-gap patch beside the plan, `FAKE_ACP_BUILD_FAIL_TESTS`, `FAKE_ACP_BUILD_DELAY_MS`; `FAKE_TEST_COMMAND_FILES` (package.json `test` → one node process, stdin ignored, "3 tests failed" when the marker exists).
-- [ ] Tests: `packages/shared/test/build-contracts.test.ts` (every shape, request, code, event incl. 5.2-era payloads, every blocked code's sentence, phase table); `packages/adapters/test/build-memory-stubs.test.ts` (every port method of the four stubs), halt mapping test, `vcs-git` new methods; core builds tests for recorded codes/decisions; `gate.test.ts`, `bmad-guard-coverage.test.ts`, `build-routes.test.ts` (501s, all-ready, bad agent), `stub-routes` for install routes; fake test command fixture test.
+- [x] `packages/shared/src/build-runs.ts` (new) -- `BUILD_AGENTS = ['claude-code']`; `SANDBOX_KINDS` (`seatbelt`,`bubblewrap`,`docker`) and `ATTENDED_SANDBOX`; `BLOCKED_CODES` + `blockedSentence(code, {minutes?})`; `RUN_DECISIONS`; `RUN_PHASES` + `runPhase(run)`; `RunQueueEntry`; `BuildRunResult` (per-run JSON result).
+- [x] `packages/shared/src/build-verification.ts` (new) -- `VERIFICATION_CHECKS` (`plan_built`,`tests_pass`,`code_changed`) with labels, `CheckResult` (`pass|fail|not_run`, detail), `VerificationResult`, `testsFailedDetail(n)`, `NO_TEST_COMMAND_DETAIL`, `MAX_TEST_OUTPUT_TAIL_BYTES`, `CheckAgainRequest`.
+- [x] `packages/shared/src/build-settings.ts` (new) -- `RUN_LIMIT_DEFAULTS` (2, 3, 45) with bounds, `RunLimitSettings`, `WorkspaceBuildSettings {maxConcurrentRuns, testCommand}` and update requests/responses; `NOTIFICATION_EVENTS`, `NotificationSettings`, `WebhookTarget` (id, host, events; never the URL), add/update webhook requests, `WebhookTestResult`, `WebhookPayload`; sentences.
+- [x] `packages/shared/src/builds.ts`, `entities.ts`, `errors.ts`, `api.ts`, `events-runs.ts` (new), `events.ts`, `index.ts` -- `StartBuildRequest` = `{agent?, ref}` or `{agent?, all: true}`; `ReviewResponse` + `summary`, `verification`, `findings`, `diffStats` (defaulted); `RejectBuildRequest {note?}`, `RetryRunRequest {mode: resume|rebase|apply_fix, note?}`, `RunResponse`, `RunsResponse {runs, queue}`; `Run` fields; events `run.dispatched`, `run.queue_changed`, `run.verification_completed`, `run.decided`, `workspace.build_settings_changed`, `settings.run_limits_changed`, `settings.notifications_changed`, `run.outcome_changed` + optional `blockedCode`; routes `workspaceRuns`, `workspaceRun`, `runStop`, `runRetry`, `runCheckAgain`, `workspaceBuildSettings`, `runLimits`, `notificationSettings`, `notificationWebhooks`, `notificationWebhook`, `notificationWebhookTest`; error `run_not_active`.
+- [x] `packages/core/src/{vcs-port,sandbox-port,build-runner-port,notifier-port}.ts`, `index.ts` -- `VcsPort` + `diffStats`, `rebase`, `applyPatch`, `worktreeExists`; `SandboxPort.check({agent})` with unavailable `choices`; `BuildRunnerPort` + `agent`, `invocation(ref, {note?, resume?})`, `blockedCode(condition)`, `readResult(runFolder)`; `NotifierPort.send(url, payload, {timeoutMs})` → `WebhookTestResult`.
+- [x] `packages/core/src/{entities,builds,errors}.ts`, `db/schema.ts`, `drizzle/0011_run_contract.sql` -- columns `agent`, `blocked_code`, `queue_position`, `decision`; 5.2 records `merge_conflict`, `interrupted`, `approved`, `rejected`; `BuildRefusalCode` + `run_not_active`; all-ready → core `NotImplemented`.
+- [x] `packages/adapters/src/{build-memory,vcs-memory,sandbox-memory,notify-memory}/index.ts`, `buildrunner-acp`, `sandbox-claude-native`, `vcs-git`, `index.ts` -- memory stubs recording calls; `buildrunner-acp` maps every halt; real adapters satisfy the completed ports (new `vcs-git` methods real; `readResult` reads the JSON result if present).
+- [x] `packages/server/src/{build-routes,run-settings-routes,start-builds,start-types,app}.ts` -- new routes 501 after guards; `StartOptions` `buildRunner`, `notifier` slots.
+- [x] `tests/fixtures/fake-acp-agent.mjs`, `fake-bmad-repo.ts`, `fake-test-command.mjs` (new) -- build halts by condition (`FAKE_ACP_BUILD_HALT`), intent-gap patch beside the plan, `FAKE_ACP_BUILD_FAIL_TESTS`, `FAKE_ACP_BUILD_DELAY_MS`; `FAKE_TEST_COMMAND_FILES` (package.json `test` → one node process, stdin ignored, "3 tests failed" when the marker exists).
+- [x] Tests: `packages/shared/test/build-contracts.test.ts` (every shape, request, code, event incl. 5.2-era payloads, every blocked code's sentence, phase table); `packages/adapters/test/build-memory-stubs.test.ts` (every port method of the four stubs), halt mapping test, `vcs-git` new methods; core builds tests for recorded codes/decisions; `gate.test.ts`, `bmad-guard-coverage.test.ts`, `build-routes.test.ts` (501s, all-ready, bad agent), `stub-routes` for install routes; fake test command fixture test.
 
 **Acceptance Criteria:**
 - Given the fully wired app, when the route-registry and guard-coverage tests run, then every new workspace route is guarded under `/api/v1/workspaces/:wsId`, the install ones are not, and no allow-list entry was added.
 - Given `GET /api/v1/bmad/pieces`, then `builds` is available.
 
 ## Implementation Notes
+
+- 2026-10-04 (build): implemented directly by the build session from this plan (a previous attempt with a subagent stalled without saving), in local milestone commits.
+- Shared: `build-runs.ts` (agents, sandbox kinds and choices, blocked codes and sentences, decisions, `runPhase`, queue entry, `BuildRunResult`), `build-verification.ts`, `build-settings.ts` (limits, project build settings, notifications, `WebhookPayload` `.strict()`), `events-runs.ts` (5.2's two run events moved here, seven new events; `events.ts` imports them as `runs.*` to stay under 600 lines). `WebhookId` (`hook_`). `WebhookUrl` takes `https:`, or `http:` to this computer only, and no user or password in the URL.
+- Core: migration `0011_run_contract` (generated with `drizzle-kit`); `Entities.setRunOutcome(…, { blockedCode })` keeps a code only on `blocked`; `setRunDecision` appends `run.decided`; `settleInterruptedRuns` records `interrupted`. 5.2's builds record `merge_conflict`, `approved` (with the merge commit) and `rejected`, and the plan's blocked reason is turned into a code by `runner.blockedCode` (core still never reads it). `NotImplementedError` (501) for `{ all: true }`; an agent with no runner is 400.
+- Ports: `VcsPort` + `diffStats`, `worktreeExists`, `rebase`, `applyPatch` (real in `vcs-git`, tested on temp repos); `SandboxPort.check({ agent })` with optional `choices` (native adapter gives them, Windows with attended first); `BuildRunnerPort` + `agent`, `invocation(ref, { note, resume })`, `blockedCode`, `readResult`; new `NotifierPort`.
+- Adapters: `build-memory`, `vcs-memory`, `sandbox-memory` (`createFixedSandbox` moved here from `sandbox-claude-native`), `notify-memory`; `buildrunner-acp` maps every halt (test reads the conditions out of `.agents/skills/bmad-build-auto`). The skill's unresolved-questions halt has free text as its condition, so it maps to `other` and its words are the reason shown.
+- Server: 7 workspace routes through `bmadPieceRoutes('builds')` and 8 install routes (`run-settings-routes.ts`), all 501; `StartOptions.buildRunner` and `notifier` slots.
+- Fixtures: the fake agent's `FAKE_ACP_BUILD_HALT`, `FAKE_ACP_BUILD_FAIL_TESTS`, `FAKE_ACP_BUILD_DELAY_MS`; the fake test command is `FAKE_TEST_COMMAND_FILES` in `fake-bmad-repo.ts` (a string the repo gets, so no separate `fake-test-command.mjs`).
 
 ## Plan Change Log
 

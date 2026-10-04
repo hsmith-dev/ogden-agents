@@ -23,6 +23,7 @@ import { openTestCore, registered, tempDir, testDescriptor } from './helpers.js'
 const port = (displayName: string, permissionModes?: AgentPort['permissionModes']): AgentPort => ({
   displayName,
   ...(permissionModes === undefined ? {} : { permissionModes }),
+  skillInvocation: (skill) => `/${skill}`,
   listAuthMethods: async () => [],
   startSession: () => Promise.reject(new Error('no agent runs here')),
   reopenSession: () => Promise.reject(new Error('no agent runs here')),

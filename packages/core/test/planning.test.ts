@@ -208,7 +208,7 @@ describe('planning (story 4.1)', () => {
     await chat.settled();
     expect(agent.prompts).toEqual(['run-skill:bmad-spec']);
     // A plain chat is still a chat.
-    expect(chat.createChatSession(workspace.id).kind).toBe('chat');
+    expect((await chat.createChatSession(workspace.id)).kind).toBe('chat');
     await chat.close();
   });
 

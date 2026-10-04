@@ -10,7 +10,7 @@ review: 'quick'
 review_source: 'pinned'
 lenses_ran: ['quick']
 review_loop_iteration: 0
-baseline_revision: '5b056209c7acf379f7b7a7931e380920e97e38e2'
+baseline_revision: '721a222112ddecd78a626c72df54d8670d3a7b88'
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-every-agent/epic-every-agent.md'
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-every-agent/story-antigravity-chat-permission-cards-modes-resume-and-the-termi-plan.md'

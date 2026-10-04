@@ -6,6 +6,7 @@
 import { ArrowClockwise } from '@phosphor-icons/react';
 import type { TranscriptMessage } from '@/chat/transcript';
 import { Button } from '@/ui/button';
+import { Markdown } from '@/ui/markdown';
 import { AgentMessage, UserMessage } from '@/ui/message';
 import { Separator } from '@/ui/separator';
 import { Text } from '@/ui/typography';
@@ -61,8 +62,9 @@ export function ResumedMarker() {
 const QUEUE_WORDS = { queued: 'Queued', not_sent: 'Not sent' } as const;
 
 /**
- * One message: the user's in a muted block on the right, the agent's as body
- * text under its name (DESIGN.md Message). A queued or unsent one says so under it.
+ * One message: the user's in a muted block on the right, as typed; the
+ * agent's as Markdown under its name (DESIGN.md Message), the same for a
+ * reply brought back from the terminal. A queued or unsent one says so under it.
  */
 export function Message({ message, agentName }: { message: TranscriptMessage; agentName: string }) {
   if (message.role === 'user' && message.status !== undefined) {
@@ -91,7 +93,7 @@ export function Message({ message, agentName }: { message: TranscriptMessage; ag
   if (message.role === 'user') return <UserMessage data-testid="message-user">{message.text}</UserMessage>;
   return (
     <AgentMessage name={agentName} data-testid="message-agent" data-streaming={message.streaming} aria-busy={message.streaming}>
-      {message.text}
+      <Markdown source={message.text} variant="chat" streaming={message.streaming} />
     </AgentMessage>
   );
 }

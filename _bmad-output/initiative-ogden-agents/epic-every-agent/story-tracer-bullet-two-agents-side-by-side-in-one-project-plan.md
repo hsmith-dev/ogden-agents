@@ -3,7 +3,7 @@ title: 'Tracer: a second agent chat beside a Claude Code chat in one project'
 type: 'feature'
 ticket: '2'
 created: '2026-10-03'
-status: 'in-review'
+status: 'built'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
@@ -62,12 +62,12 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] shared -- Session.agentId, CreateSessionRequest.agentId, ChatAgent(s) schemas, route, error code.
-- [ ] core db -- column + generated migration 0007; entities NewSession/toSession.
-- [ ] core registry + chat modules -- per-session agent lookup; unknown → `UnknownAgentError` (400 `agent_unknown`); unregistered at prompt → `agent_unavailable` error state; modes per agent.
-- [ ] server -- registry wiring, per-agent env, extraAgents, routes, terminal availability per agent.
-- [ ] web -- chat-agents query, picker (only with >1 agent), sidebar caption and session view name per chat.
-- [ ] tests -- core (registry, legacy read, unknown agent, modes per agent, two agents concurrently), server routes, arch test, e2e `agent-choice.spec.ts`; update existing `createChat({ agent })` call sites.
+- [x] shared -- Session.agentId, CreateSessionRequest.agentId, ChatAgent(s) schemas, route, error code.
+- [x] core db -- column + generated migration 0007; entities NewSession/toSession.
+- [x] core registry + chat modules -- per-session agent lookup; unknown → `UnknownAgentError` (400 `agent_unknown`); unregistered at prompt → `agent_unavailable` error state; modes per agent.
+- [x] server -- registry wiring, per-agent env, extraAgents, routes, terminal availability per agent.
+- [x] web -- chat-agents query, picker (only with >1 agent), sidebar caption and session view name per chat.
+- [x] tests -- core (registry, legacy read, unknown agent, modes per agent, two agents concurrently), server routes, arch test, e2e `agent-choice.spec.ts`; update existing `createChat({ agent })` call sites.
 
 **Acceptance Criteria:**
 - Given a server with Claude Code and the fake second agent, when a user starts one chat with each in one project and prompts both, then both stream at once and each reply comes from its own agent.
@@ -84,11 +84,21 @@ context:
 - Server: `StartOptions.extraAgents`; registry = Claude Code (default and legacy) + extras, each wrapped by `forChat(agentId, …)` with its own `agentSetup.agentEnv(agentId)`; terminal availability per session's agent; `GET /api/v1/chat-agents`; `createClaudeCodeAgent` re-exported for tests.
 - Web: `useChatAgents`, `agentNameOf`, `AgentPicker` (hidden with one agent) on the Chats page body; session view, sidebar rows, Needs you and Chats rows name the chat's agent. Claude-only words (sign-in again, terminal, mode descriptions) still say Claude Code: entry 9's sweep.
 - Fake agent: `whoami` prompt; tests' second agent = Claude Code ACP adapter on the fake script, `fake-agent`/"Fake Agent", Ask + Skip all, no terminal (`tests/support.ts` `fakeSecondAgent`, server test `secondAgent`).
+- `useChatAgents` lives in `packages/web/src/chat/use-chat-agents.ts` (not `chat-api.ts`).
 - Tests: `packages/core/test/agent-choice.test.ts`, `packages/server/test/agent-choice.test.ts`, `packages/web/test/agent-choice.dom.test.tsx`, `tests/e2e/agent-choice.spec.ts`, architecture test `findAgentIdViolations`; gate route list gains `chat-agents`.
 
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (quick lens, security + correctness): high 0, medium 2, low 1, false 0, maybe-false 0, rejected 1.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---------|---------|-------|-------------------|
+| 1 | Session view named a second agent's chat "Claude Code" until `GET session` loaded (composer, hint, message names, one-shot aria-live announcement) | medium | patch | `agentNameOf(_, undefined)` returns the legacy name; patched: "The agent" until the session has loaded. |
+| 2 | Sign in again (hard-coded `claude-code`) offered on a second agent's `auth_required` error, signing in to the wrong agent | medium | patch | Reachable once a chat can have another agent; patched: shown only for a Claude Code (or legacy) chat, else the plain error notice. Per-agent sign-in stays with entries 6/7. |
+| 3 | "Old database" AC proven only with rows made by today's code | low | patch | `upgrade-0.2.0.test.ts` (real 0.2.0 data folder, migrations to 0007) now asserts sessions read `claude-code` and the row keeps no agent id. |
+| 4 | Plan checklist unchecked; Code Map says `useChatAgents` is in `chat-api.ts` | rejected | — | Fix edits this build's plan (boxes ticked as bookkeeping; notes were written after the diff was staged). |
 
 ## Design Notes
 

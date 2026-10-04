@@ -4,7 +4,7 @@ import { ArrowClockwise, ArrowDown, ChatCircle, House, Stop } from '@phosphor-ic
 import type { PermissionMode } from '@ogden-agents/shared';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAppearance } from '@/appearance/appearance-provider';
-import { agentNameOf, cancelSession, ChatApiError, fetchSession, sendMessage, setPermissionMode, switchDriver } from '@/chat/chat-api';
+import { AGENT_ID, agentNameOf, cancelSession, ChatApiError, fetchSession, sendMessage, setPermissionMode, switchDriver } from '@/chat/chat-api';
 import { useChatAgents } from '@/chat/use-chat-agents';
 import { Composer } from '@/chat/composer';
 import { ReadOnlyConversation } from '@/chat/read-only';
@@ -97,7 +97,10 @@ export function SessionPage() {
   const session = useQuery({ queryKey: ['session', wsId, sesId], queryFn: () => fetchSession(wsId, sesId), retry: false });
   // The chat's own agent, by its product name (epic 6, E6-R1).
   const chatAgents = useChatAgents();
-  const agentName = agentNameOf(chatAgents.data, session.data?.session.agentId);
+  // Until the session has loaded its agent isn't known: no agent's name is guessed (review: a second agent's chat named Claude Code).
+  const agentName = session.data === undefined ? 'The agent' : agentNameOf(chatAgents.data, session.data.session.agentId);
+  // Sign in again signs in to Claude Code only (9.4); another agent's expired sign-in shows the plain error until its own setup ships.
+  const signsInHere = session.data !== undefined && (session.data.session.agentId ?? AGENT_ID) === AGENT_ID;
   const workspace = useQuery({ queryKey: ['workspace', wsId], queryFn: () => fetchWorkspace(wsId), retry: false });
   const end = useRef<HTMLDivElement>(null);
   const lastText = view.messages.at(-1)?.text.length ?? 0;
@@ -427,7 +430,7 @@ export function SessionPage() {
                   <StateGlyph state="working" label={checkInWords(view.checkIn, agentName)} />
                 </Notice>
               ) : null}
-              {state === 'error' && view.errorCode === 'auth_required' && !terminalDrives ? (
+              {state === 'error' && view.errorCode === 'auth_required' && !terminalDrives && signsInHere ? (
                 // Keyed per error (the message it failed on), so each one starts unarmed (9.4).
                 <SignInAgain
                   key={`${sesId}:${lastSentUserId ?? ''}`}

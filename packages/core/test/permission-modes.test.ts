@@ -385,7 +385,7 @@ describe('Auto keeps protected files guarded (user decision 2026-10-02)', () => 
     }
     expect(agent.guarded).toEqual([false, true, false]);
     expect(agent.protectedPathsGiven[1]).toBe(PROTECTED_PATHS);
-    expect(PROTECTED_PATHS.folders).toEqual(['.claude', '.git', '.vscode', '.idea', '_bmad']);
+    expect(PROTECTED_PATHS.folders).toEqual(['.claude', '.git', '.vscode', '.idea', '_bmad', '.gemini', '.agents']);
     expect(PROTECTED_PATHS.files).toEqual(expect.arrayContaining(['.mcp.json', 'CLAUDE.md', 'AGENTS.md', '.envrc']));
   });
 

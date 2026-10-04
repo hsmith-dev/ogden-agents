@@ -12,6 +12,8 @@ describe('skill invocation (epic 6 entry 8)', () => {
   it('is a slash command, the idea as its argument', () => {
     expect(slashSkillInvocation('bmad-prd')).toBe('/bmad-prd');
     expect(slashSkillInvocation('bmad-prd', 'a habit tracker')).toBe('/bmad-prd a habit tracker');
+    // A blank idea (already trimmed) adds nothing.
+    expect(slashSkillInvocation('bmad-prd', '')).toBe('/bmad-prd');
   });
 
   it.each([

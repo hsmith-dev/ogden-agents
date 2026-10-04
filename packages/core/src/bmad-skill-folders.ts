@@ -17,7 +17,7 @@
  * epic 4.
  */
 import type { AgentId, WorkspaceId } from '@ogden-agents/shared';
-import type { AgentRegistry } from './agent-port.js';
+import { effectiveDefaultAgent, type AgentRegistry } from './agent-port.js';
 import type { BmadFeatures } from './bmad-pieces.js';
 import type { Entities } from './entities.js';
 
@@ -47,8 +47,7 @@ export function createBmadSkillFolders(options: BmadSkillFoldersOptions): BmadSk
   const agentsInUse = (workspaceId: WorkspaceId): AgentId[] => {
     bmad.requireBmadFeature(workspaceId, 'planning');
     const registered = (agentId: AgentId | undefined): agentId is AgentId => agentId !== undefined && agents.get(agentId) !== undefined;
-    const own = projectDefaultAgent(workspaceId);
-    const used = new Set<AgentId>([registered(own) ? own : agents.defaultAgentId]);
+    const used = new Set<AgentId>([effectiveDefaultAgent(agents, projectDefaultAgent(workspaceId))]);
     for (const session of entities.listSessions(workspaceId)) {
       const agentId = session.agentId ?? agents.legacyAgentId;
       if (registered(agentId)) used.add(agentId);

@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
 import { PERMISSION_MODES, projectNotTrustedReason, type AgentId, type ChatAgent, type SessionId, type WorkspaceId } from '@ogden-agents/shared';
 import { apiKeyMethod, type AgentDescriptor } from '../agent-descriptor.js';
-import type { AgentPort } from '../agent-port.js';
+import { effectiveDefaultAgent, type AgentPort } from '../agent-port.js';
 import type { AgentReadiness } from '../agent-setup-types.js';
 import { canonicalWorkspacePath } from '../entities.js';
 import { AgentNotReadyError, CoreError, InvalidOperationError, UnknownAgentError, WorkspaceBusyError } from '../errors.js';
@@ -119,7 +119,7 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
       // Picked by data, never by a branch on an id (E6-R2); fixed for the session's life (E6-R1).
       // None picked: the project's default (entry 6), when it is still registered, else the install's.
       const projectDefault = options.agentId === undefined ? ctx.permissions.getSettings(workspaceId).defaultAgentId : undefined;
-      const agentId = options.agentId ?? (projectDefault !== undefined && agents.get(projectDefault) !== undefined ? projectDefault : agents.defaultAgentId);
+      const agentId = options.agentId ?? effectiveDefaultAgent(agents, projectDefault);
       const descriptor = agents.describe(agentId);
       if (agents.get(agentId) === undefined || descriptor === undefined) throw new UnknownAgentError();
       // An agent that runs the project's own agent settings or hooks starts only in a trusted project (6.3).

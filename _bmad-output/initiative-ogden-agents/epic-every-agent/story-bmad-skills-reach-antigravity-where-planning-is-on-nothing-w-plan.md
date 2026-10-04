@@ -3,12 +3,12 @@ title: 'BMad skills reach Antigravity where Planning is on, nothing where it is 
 type: 'feature'
 ticket: '8'
 created: '2026-10-04'
-status: 'ready-for-dev'
+status: 'built'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
 review_loop_iteration: 0
 baseline_revision: '5b056209c7acf379f7b7a7931e380920e97e38e2'
 context:
@@ -64,13 +64,13 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `packages/core/src/agent-port.ts` -- optional `skillInvocation` on `AgentPort` -- 4.x's signature, so the restack keeps one member.
-- [ ] `packages/core/src/bmad-skill-folders.ts` (+ `index.ts` export) -- `createBmadSkillFolders({ bmad, entities, settings, agents }).skillFolders(ws): string[]` per the matrix -- the agent-neutral "in use" rule.
-- [ ] `packages/core/test/bmad-skill-folders.test.ts` -- every matrix row (core test DB, `availableBmadPieces: ['planning']`).
-- [ ] `packages/adapters/src/acp-base/acp-agent.ts`, Claude Code and Antigravity adapters -- the invocation quirk; adapter unit tests.
-- [ ] `packages/server/src/test-hooks.ts`, `start.ts` -- the Antigravity server hook; tests.
-- [ ] `packages/server/test/simple-project.test.ts` -- run against Antigravity too (skip where no pin for the platform).
-- [ ] `tests/e2e-installed/installed.ts`, `bmad-journey.spec.ts` -- Antigravity chat in the simple step.
+- [x] `packages/core/src/agent-port.ts` -- optional `skillInvocation` on `AgentPort` -- 4.x's signature, so the restack keeps one member.
+- [x] `packages/core/src/bmad-skill-folders.ts` (+ `index.ts` export) -- `createBmadSkillFolders({ bmad, entities, settings, agents }).skillFolders(ws): string[]` per the matrix -- the agent-neutral "in use" rule.
+- [x] `packages/core/test/bmad-skill-folders.test.ts` -- every matrix row (core test DB, `availableBmadPieces: ['planning']`).
+- [x] `packages/adapters/src/acp-base/acp-agent.ts`, Claude Code and Antigravity adapters -- the invocation quirk; adapter unit tests.
+- [x] `packages/server/src/test-hooks.ts`, `start.ts` -- the Antigravity server hook; tests.
+- [x] `packages/server/test/simple-project.test.ts` -- run against Antigravity too (skip where no pin for the platform).
+- [x] `tests/e2e-installed/installed.ts`, `bmad-journey.spec.ts` -- Antigravity chat in the simple step.
 
 **Acceptance Criteria:**
 - Given a Simple project, when a Claude Code chat and an Antigravity chat each send `session-start`, then each starts with no MCP server, no `_meta`, exactly the user's text, no BMad environment, and the repo's hash is unchanged (server test and installed journey).
@@ -84,9 +84,31 @@ context:
 
 ## Implementation Notes
 
+- Implemented directly from the plan (no implementation subagent: the planning session held the whole context).
+- `slashSkillInvocation` lives in `acp-base`; each adapter opts in through its `skillInvocation` quirk, and a port built without the quirk has none (tested), so the shared client adds no syntax of its own.
+- `createBmadSkillFolders` also exposes `agentsInUse` (same guard), for setup's status text at the restack.
+- The hook's checks are `testClaudeCli`'s, moved into a private `testNodeScript(name, …)` both call; `TestHookOptions` gains `antigravity`, so a test's own ports (or `false`) mean the hook is not read. `start.ts` builds the hook's chat port in an appended `testAntigravityPorts`; the setup port stays the shipped one (readiness from the planted pin and the key). `antigravity-wiring.ts` (6.7's) is untouched.
+- The server simple-project test runs Antigravity through the hook itself (env stub, real server), proving the hook end to end; the fake's own `FAKE_ACP_*` switches are allowed only on the Antigravity rows, which skip where there is no pin (CI's three OSes all have one).
+- Installed journey: `bmadServer(name, { antigravity: true })` plants the pin, writes the hook's wrapper in the extra folder (inside temp) and sets a fake `GEMINI_API_KEY`; the simple step opens a third chat with Antigravity through the REST API, as `antigravity.spec.ts` does.
+- Tests 6.7 might also touch get new files (`skill-invocation.test.ts`, `antigravity-server-hook.test.ts`); shared-file edits are small.
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (quick, security focus): 0 high, 1 medium, 6 low, 1 false, 0 maybe-false. Patched 5 (and checkbox bookkeeping), rejected 3.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---------|---------|-------|-------------------|
+| 1 | `bmad-skill-folders.ts` copies chat's effective-default rule | medium | patch | Would drift from `createChatSession`; extracted `effectiveDefaultAgent` in `agent-port.ts`, used by both. |
+| 2 | Options take a `projectDefaultAgent` callback, not `settings`; `agentsInUse` extra | low | reject | Same data, narrower dependency (the server passes `getSettings(ws).defaultAgentId`); fix would be a plan edit. |
+| 3 | `slashSkillInvocation(skill, '')` gives a trailing space | low | patch | Blank idea now gives `/skill`; test added. |
+| 4 | Installed Antigravity step passes silently when unpinned | low | patch | Annotates the skip; CI's three OSes are pinned. |
+| 5 | Installed step lacks the env allowlist proof | low | reject | The server simple-project test holds the allowlist proof for Antigravity; the AC's BMad check holds here. |
+| 6 | Whole `FAKE_ACP_*` prefix exempted | low | patch | Now exactly the switches `fake-antigravity.mjs` sets. |
+| 7 | Hook confines only the entry script | false | reject | Same design as `testClaudeCli`; the gate (`testHooksAllowed`) is the protection, and only a test run on a temp data folder reaches it. |
+| 8 | "reading nothing" not asserted | low | patch | Spies on the default and session reads; asserted empty. |
+| 9 | Task checkboxes unticked | low | patch | Ticked. |
 
 ## Verification
 

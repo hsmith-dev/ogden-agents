@@ -130,7 +130,7 @@ export interface AcpAgentQuirks {
 
 /** A skill run as a slash command, the idea as its argument: `/name` or `/name idea` (an adapter's `skillInvocation`, stories 4.1, 4.2). */
 export function slashSkillInvocation(skill: string, idea?: string): string {
-  return idea === undefined ? `/${skill}` : `/${skill} ${idea}`;
+  return idea === undefined || idea === '' ? `/${skill}` : `/${skill} ${idea}`;
 }
 
 export interface AcpAgentOptions {

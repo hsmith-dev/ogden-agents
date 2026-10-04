@@ -89,7 +89,11 @@ const ALLOWED_AGENT_ENV = new Set(
 );
 const allowedAgentEnvName = (name: string) => ALLOWED_AGENT_ENV.has(name.toUpperCase()) || name === 'LC_ALL' || name.startsWith('LC_');
 /** The switches `fake-antigravity.mjs` sets in its own process before it starts the fake agent: the fake's, not Ogden's. */
-const fakeOwnEnvName = (name: string) => name.startsWith('FAKE_ACP_');
+const FAKE_ANTIGRAVITY_SWITCHES = new Set([
+  'FAKE_ACP_PERSONALITY', 'FAKE_ACP_MODES', 'FAKE_ACP_AUTH_METHODS', 'FAKE_ACP_API_KEY_ENV',
+  'FAKE_ACP_HOME_ENV', 'FAKE_ACP_RESUME', 'FAKE_ACP_REQUIRE_AUTH', 'FAKE_ACP_AGENT_NAME',
+]);
+const fakeOwnEnvName = (name: string) => FAKE_ANTIGRAVITY_SWITCHES.has(name);
 
 function request(server: TestServer, tab: SignedIn, method: string, path: string, body?: unknown) {
   return fetch(`${server.url}${path}`, {

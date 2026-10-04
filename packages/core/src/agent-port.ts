@@ -339,6 +339,15 @@ export interface AgentRegistry {
 }
 
 /**
+ * The agent a new chat in a project gets when none is picked (epic 6, entry
+ * 6): the project's own default while it is still registered, else the
+ * install's. One rule for chat and for BMad's skill folders (entry 8).
+ */
+export function effectiveDefaultAgent(agents: Pick<AgentRegistry, 'get' | 'defaultAgentId'>, projectDefault: AgentId | undefined): AgentId {
+  return projectDefault !== undefined && agents.get(projectDefault) !== undefined ? projectDefault : agents.defaultAgentId;
+}
+
+/**
  * A registry of `agents`, in order. `defaultAgentId` and `legacyAgentId`
  * default to the first agent; the default must be registered. Throws (a
  * wiring bug) on an empty list, an id given twice, a descriptor with a

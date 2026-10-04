@@ -250,7 +250,10 @@ test('what 0.4.0 ships, Board asking for trust, a simple project, and the offer,
 
   await test.step('a simple project with the second agent: an Antigravity chat starts with nothing BMad either', async () => {
     // Antigravity runs only where it has a pin for this platform (every OS CI runs on has one).
-    if (!server.antigravity) return;
+    if (!server.antigravity) {
+      test.info().annotations.push({ type: 'skip', description: 'no Antigravity pin for this platform: the Antigravity step did not run' });
+      return;
+    }
     const cwd = realpathSync.native(plain.path);
     const response = await api(page, 'POST', apiPath(API_ROUTES.workspaceSessions, { wsId: plainId }), { kind: 'chat', agentId: 'antigravity' });
     expect(response.status).toBe(201);

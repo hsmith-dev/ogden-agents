@@ -43,11 +43,20 @@ function setUp(planning = true) {
 
 describe('BMad skill folders (epic 6 entry 8)', () => {
   it('refuses a project with Planning off (feature_off) and an unknown project (not_found), reading nothing', () => {
-    const { wsId, folders, chatWith } = setUp(false);
+    const { core, wsId, chatWith } = setUp(false);
     chatWith('second-agent');
+    const reads: string[] = [];
+    const folders = createBmadSkillFolders({
+      bmad: core.bmad,
+      entities: { listSessions: (id) => (reads.push('sessions'), core.entities.listSessions(id)) },
+      projectDefaultAgent: () => (reads.push('default'), undefined),
+      agents,
+    });
     expect(() => folders.skillFolders(wsId)).toThrow(FeatureOffError);
     expect(() => folders.agentsInUse(wsId)).toThrow(FeatureOffError);
     expect(() => folders.skillFolders(UNKNOWN)).toThrow(NotFoundError);
+    // The guard comes first: neither the default nor the chats were read.
+    expect(reads).toEqual([]);
   });
 
   it("is the install default's folder alone in a project with no chats and no default of its own", () => {

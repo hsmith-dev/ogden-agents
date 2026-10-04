@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AgentError, PROTECTED_PATHS, type AgentDescriptor, type AgentEvent, type AgentPermissionRequest, type AgentSession } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { acpReasons, createAcpAgent, type AcpAgentQuirks } from '../src/acp-base/index.js';
+import { acpReasons, createAcpAgent, slashSkillInvocation, type AcpAgentQuirks } from '../src/acp-base/index.js';
 
 const FAKE_AGENT = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-acp-agent.mjs');
 const dirs: string[] = [];
@@ -54,6 +54,7 @@ function secondAgent(quirks: Partial<AcpAgentQuirks> = {}, diagnostics: Array<[s
       launch: () => ({ command: process.execPath, args: [FAKE_AGENT], logFields: { program: 'fake' } }),
       toolInputPaths: { pathFields: ['target'], patternFields: [] },
       askingModeIds: ['careful'],
+      skillInvocation: slashSkillInvocation,
       ...quirks,
     },
     { onDiagnostic: (message, fields) => diagnostics.push([message, fields]) },
@@ -204,5 +205,13 @@ describe('the shared ACP client with a second agent (6.4)', () => {
   it('lists its sign-in methods through initialize', async () => {
     const methods = await secondAgent().listAuthMethods({ env: baseEnv({ FAKE_ACP_AUTH_METHODS: 'second-login:Sign in' }) });
     expect(methods).toEqual([expect.objectContaining({ id: 'second-login', name: 'Sign in', kind: 'agent' })]);
+  });
+});
+
+describe('skill invocation (story 4.1 on the shared client)', () => {
+  it("is the adapter's own syntax, passed through unchanged", () => {
+    expect(slashSkillInvocation('bmad-prd')).toBe('/bmad-prd');
+    expect(slashSkillInvocation('bmad-prd', 'a habit tracker')).toBe('/bmad-prd a habit tracker');
+    expect(secondAgent({ skillInvocation: (skill) => `run ${skill}` }).skillInvocation('bmad-prd')).toBe('run bmad-prd');
   });
 });

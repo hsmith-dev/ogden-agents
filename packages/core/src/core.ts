@@ -1,6 +1,6 @@
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
 import { createBmadDetection, type BmadDetectionUseCases } from './bmad-detection.js';
-import { createBmadFeatures, parseAvailableBmadPieces, type BmadFeatures, type BmadFeaturesOptions } from './bmad-features.js';
+import { createBmadFeatures, parseAvailableBmadPieces, type BmadFeatures, type BmadFeaturesOptions } from './bmad-pieces.js';
 import { createBmadModulesSeen, type BmadModulesSeen } from './bmad-modules-seen.js';
 import { createBmadScriptTrust, type BmadScriptTrust } from './bmad-script-trust.js';
 import { createBmadSetup, type BmadSetupUseCases } from './bmad-setup.js';

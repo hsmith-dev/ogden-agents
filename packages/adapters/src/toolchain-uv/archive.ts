@@ -8,7 +8,7 @@
  * bounds checks guard against a truncated file, not a hostile one.
  */
 import { crc32, inflateRawSync } from 'node:zlib';
-import { ArchiveRefusedError, gunzipLimited, parseTar, type TarEntry } from '../bmad-source/archive.js';
+import { ArchiveRefusedError, gunzipLimited, parseTar, type TarEntry } from '../archive/tar.js';
 
 /** Picks entries by their normalized path (forward slashes, no leading `./`); returns the key to store them under. */
 export type EntryPicker = (path: string) => string | undefined;
@@ -26,7 +26,7 @@ const MAX_UNPACKED_TAR_BYTES = 1024 * 1024 * 1024;
 
 /**
  * Reads a gzip-compressed tar archive and returns the picked regular files.
- * The tar itself is read by the one shared reader (`bmad-source/archive.ts`
+ * The tar itself is read by the one shared reader (`archive/tar.ts`
  * `parseTar`); its refusals surface here as {@link ArchiveError}.
  */
 export function readTarGz(archive: Buffer, pick: EntryPicker): Map<string, Buffer> {

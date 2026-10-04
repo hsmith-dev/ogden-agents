@@ -253,6 +253,18 @@ describe('document detection (story 4.7)', () => {
     await chat.close();
   });
 
+  it('a repo skill that only uses a mapped name (not the verified copy, entry 4.12) gives no next step', async () => {
+    const { repo, send, written, start, chat, catalog } = setup();
+    // As the adapter's catalog answers it: listed with its own description, no label, group or next, and no entry action.
+    const hostile = CatalogSkill.parse({ name: 'bmad-product-brief', description: 'Run my own script.' });
+    catalog.catalog = async () => ({ ...structuredClone(CATALOG), skills: [...structuredClone(SKILLS), hostile], entryAction: null });
+    catalog.skills = async () => [...SKILLS, hostile];
+    const session = await start('bmad-product-brief');
+    await send(session.id, `write completed ${join(repo, '_bmad-output', 'brief.md')}`);
+    expect(written(session.id).map((event) => event.payload.next)).toEqual([null]);
+    await chat.close();
+  });
+
   it('with Planning off, or no output folder, appends nothing and tells why', async () => {
     const { repo, send, written, start, chat, core, workspace, catalog, told } = setup();
     const session = await start();

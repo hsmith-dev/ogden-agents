@@ -1,7 +1,7 @@
 /**
- * `bmad-source` (story 4.14, AD-13): the pinned upstream BMad Method, and
- * bmad-loop's source, downloaded only when the user asks, verified in
- * memory, and kept in the data folder.
+ * `bmad-source` (story 4.14, AD-13): the pinned upstream BMad Method,
+ * downloaded only when the user asks, verified in memory, and kept in the
+ * data folder.
  *
  * A download is, in order:
  * 1. one `GET` of the codeload tarball of the exact pinned commit, with a
@@ -286,5 +286,5 @@ export function createUpstreamBmadSource({ lock, ...options }: UpstreamBmadSourc
 }
 
 export { BMAD_LOCK, type BmadSourceName } from './lock.js';
+export { FOLDER_HASH_MAX_BYTES, FOLDER_HASH_MAX_ENTRIES, hashFolder, hashFolderWithCounts, type FolderHash, type FolderHashLimits } from './folder-hash.js';
 export { ArchiveRefusedError, extractTo, tarballUrl, gunzipLimited, hashEntries, normalizeText, parseTar, selectVerified, type Entries, type TarEntry } from './archive.js';
-export { BMAD_LOOP_INSTALL_TIMEOUT_MS, bmadLoopExecutable, createBmadLoopResolver, type BmadLoopResolver, type BmadLoopResolverOptions } from './bmad-loop.js';

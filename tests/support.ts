@@ -12,6 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // The shared routes' own file (it has no imports): the root package depends
 // only on the server (AD-1), so it doesn't resolve `@ogden-agents/shared`.
 import { API_ROUTES } from '../packages/shared/src/api.ts';
+import { writePinnedCopy } from './fixtures/pinned-copy.js';
 
 export { API_ROUTES };
 
@@ -35,6 +36,27 @@ export function makeDataDir(prefix = 'ogden-agents-e2e-'): string {
 
 export function removeDataDir(dir: string): void {
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+}
+
+/**
+ * The server's BMad Method source as a downloaded pinned copy (entry 4.12)
+ * of the skill folders in `files` (paths under `.claude/skills/`, as a test
+ * writes them into its repo), so the real catalog labels exactly those
+ * skills. In memory: nothing downloads. `remove` deletes the copy.
+ */
+export async function verifiedCopySource(files: Readonly<Record<string, string>>) {
+  const dir = makeDataDir('ogden-agents-e2e-pinned-');
+  const prefix = '.claude/skills/';
+  const copy = writePinnedCopy(dir, Object.fromEntries(Object.entries(files).flatMap(([path, content]) => (path.startsWith(prefix) ? [[path.slice(prefix.length), content]] : []))));
+  const skillFiles: Record<string, string> = {};
+  for (const path of Object.keys(files)) {
+    if (!path.startsWith(prefix)) continue;
+    const name = path.slice(prefix.length).split('/')[0]!;
+    const file = copy.file(`${name}/SKILL.md`);
+    if (file !== undefined) skillFiles[`${name}/SKILL.md`] = file;
+  }
+  const source = (await serverModule()).createMemoryBmadSource({ ready: true, files: skillFiles });
+  return { source, remove: () => removeDataDir(dir) };
 }
 
 /** The fake ACP agent, which also stands in for the Claude CLI (`--cli`, the fake login program). */
@@ -86,7 +108,9 @@ const SETUP_STEPS = [
 /**
  * The real read-only BMad Method catalog (detection, skills, catalog) with
  * a stub setup (story 4.3): it first downloads through `source` when given
- * (the server's one BMad Method source, as the real setup does: review S1),
+ * (the server's one BMad Method source, as the real setup does: review S1;
+ * its catalog labels only the skills that are that source's verified copy's,
+ * entry 4.12),
  * then reports each step `stepMs` apart, then the project counts as set up in
  * memory, or the setup fails with `fail` (an error whose own text names a
  * path, which the UI must never show). Nothing is written and no uv runs; the
@@ -98,9 +122,10 @@ export async function stubSetupCatalog({
   fail = false,
   stepMs = 150,
   source,
-}: { fail?: boolean; stepMs?: number; source?: Pick<NonNullable<NonNullable<StartOptions>['bmadSource']>, 'download'> } = {}): Promise<BmadCatalog> {
+}: { fail?: boolean; stepMs?: number; source?: Pick<NonNullable<NonNullable<StartOptions>['bmadSource']>, 'download' | 'file'> } = {}): Promise<BmadCatalog> {
   const { createBmadCatalog } = await serverModule();
-  const real = createBmadCatalog();
+  // Labels only for skills that are the source's verified copy's (entry 4.12); none without a source.
+  const real = createBmadCatalog(source === undefined ? undefined : { source });
   const done = new Set<string>();
   const status = (setUp: boolean) => ({
     state: setUp ? ('current' as const) : ('not_set_up' as const),

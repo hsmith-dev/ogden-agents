@@ -92,6 +92,8 @@ describe('readModuleLabels modules (story 4.4)', () => {
 });
 
 describe('applyLabels', () => {
+  /** Every installed skill verified (entry 4.12). */
+  const ALL: ReadonlySet<string> = new Set(['alpha', 'beta', 'gamma']);
   const labels = readModuleLabels({
     entry: 'alpha',
     skills: {
@@ -101,7 +103,7 @@ describe('applyLabels', () => {
   }).labels;
 
   it('labels a skill, keeps the SKILL.md description without a sentence, and leaves an unlabelled skill null', () => {
-    const { skills, entryAction, labelled } = applyLabels(installed, labels);
+    const { skills, entryAction, labelled } = applyLabels(installed, labels, ALL);
     expect(skills).toEqual([
       { name: 'alpha', description: 'Alpha in one sentence.', label: 'Describe your idea', group: 'planning', module: null, installedAt: null, next: { skill: 'beta', label: 'Next' } },
       // An unknown group is kept as written (the Plan page shows it under Other); a next that isn't installed is null.
@@ -113,7 +115,7 @@ describe('applyLabels', () => {
   });
 
   it('falls back entirely when the mapping names none of the installed skills, and drops an entry not installed', () => {
-    const { skills, entryAction, labelled } = applyLabels(installed, readModuleLabels({ entry: 'missing', skills: { other: { label: 'x' } } }).labels);
+    const { skills, entryAction, labelled } = applyLabels(installed, readModuleLabels({ entry: 'missing', skills: { other: { label: 'x' } } }).labels, ALL);
     expect(skills.map((s) => [s.name, s.description, s.label])).toEqual([
       ['alpha', 'Alpha from SKILL.md.', null],
       ['beta', 'Beta from SKILL.md.', null],
@@ -121,6 +123,20 @@ describe('applyLabels', () => {
     ]);
     expect(entryAction).toBeNull();
     expect(labelled).toBe(false);
+  });
+
+  it('labels only verified skills (entry 4.12): an unverified one keeps its SKILL.md text, is never the entry action, and no next points at it', () => {
+    const { skills, entryAction, labelled } = applyLabels(installed, labels, new Set(['beta']));
+    expect(skills).toEqual([
+      { name: 'alpha', description: 'Alpha from SKILL.md.', label: null, group: null, module: null, installedAt: null, next: null },
+      { name: 'beta', description: 'Beta from SKILL.md.', label: 'Beta label', group: 'someday', module: null, installedAt: null, next: null },
+      { name: 'gamma', description: '', label: null, group: null, module: null, installedAt: null, next: null },
+    ]);
+    expect(entryAction).toBeNull();
+    expect(labelled).toBe(true);
+    // Alpha verified, beta not: alpha's next (beta) is dropped.
+    expect(applyLabels(installed, labels, new Set(['alpha'])).skills[0]!.next).toBeNull();
+    expect(applyLabels(installed, labels, new Set()).labelled).toBe(false);
   });
 });
 

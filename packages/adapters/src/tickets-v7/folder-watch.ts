@@ -46,6 +46,7 @@ import { createHash } from 'node:crypto';
 import { constants as fsConstants, watch as fsWatch, type BigIntStats, type Dirent } from 'node:fs';
 import { lstat, open as openFile, readdir, realpath } from 'node:fs/promises';
 import { join, relative } from 'node:path';
+import { codeOf, NO_FOLLOW } from '../fs-safe.js';
 
 /** At most this many folder watchers per watch (plan: `MAX_WATCHED_DIRS`). */
 export const MAX_WATCHED_DIRS = 500;
@@ -159,8 +160,6 @@ const RACY_MS = 2000;
 const RACY_MAX_BYTES = 1024 * 1024;
 /** At most this much racy content is read per scan (a checkout touching every file); past it, stats alone. */
 const RACY_BUDGET_BYTES = 8 * 1024 * 1024;
-/** Never follow a link swapped in after the `lstat` (not on Windows, where opening a junction as a file fails anyway). */
-const NO_FOLLOW = (fsConstants as { O_NOFOLLOW?: number }).O_NOFOLLOW ?? 0;
 
 /** The file's content hash, or `''` when it can't be read (gone, swapped, too big). */
 async function contentHash(file: string, size: bigint): Promise<string> {
@@ -182,7 +181,6 @@ async function contentHash(file: string, size: bigint): Promise<string> {
 type ScanResult = { missing: true } | { missing: false; fingerprint: string; dirs: Map<string, string>; overflow: boolean };
 
 const identityOf = (stat: BigIntStats): string => `${stat.dev}:${stat.ino}:${stat.birthtimeNs}`;
-const codeOf = (error: unknown): string => (typeof (error as { code?: unknown } | null)?.code === 'string' ? (error as { code: string }).code : 'unknown');
 const byName = (a: Dirent, b: Dirent) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
 
 /** Scans `root` (see the header) within `maxEntries`. */

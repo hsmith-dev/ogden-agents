@@ -409,7 +409,8 @@ describe.skipIf(realUvMissing())('Upgrade this project through real uv and the v
       const workspace = await project(server, tab, repo.path, ['planning', 'board']);
       const setup = apiPath(API_ROUTES.workspaceBmadSetup, { wsId: workspace.id });
       const before = BmadSetupStatusResponse.parse(await (await request(server, tab, 'GET', setup)).json()).setup;
-      expect(before.missingCapabilities).toEqual(kind === 'older' ? ['plain_labels', 'ticket_tree'] : ['ticket_tree']);
+      // Neither has a skill that is the verified pinned copy (entry 4.12); the upgrade copies in the ones it lacks.
+      expect(before.missingCapabilities).toEqual(['plain_labels', 'ticket_tree']);
 
       expect((await request(server, tab, 'POST', setup, { upgrade: true })).status).toBe(202);
       await waitFor(ended(server, workspace.id), 'the upgrade to end', 60_000);

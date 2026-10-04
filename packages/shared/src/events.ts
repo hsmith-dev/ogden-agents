@@ -31,7 +31,20 @@ import {
 } from './events-session.js';
 import { Run, RunOutcome, Workspace } from './entities.js';
 import { BmadPieces } from './bmad.js';
-import { BmadSetupProgress, BmadSetupStatus } from './planning.js';
+import {
+  BmadSetupCompletedEvent,
+  BmadSetupCompletedInput,
+  BmadSetupFailedEvent,
+  BmadSetupFailedInput,
+  BmadSetupProgressEvent,
+  BmadSetupProgressInput,
+  BmadSetupStartedEvent,
+  BmadSetupStartedInput,
+  TicketChangedEvent,
+  TicketChangedInput,
+  WorkspaceBmadScriptsTrustedEvent,
+  WorkspaceBmadScriptsTrustedInput,
+} from './events-planning.js';
 import { ApiErrorCode } from './errors.js';
 import { PermissionRuleId, RunId, SessionId, WorkspaceId } from './ids.js';
 import { IsoUtcTimestamp } from './time.js';
@@ -52,7 +65,8 @@ import { ToolchainErrorCode, ToolName, ToolSource } from './toolchain.js';
  */
 
 // The common parts and the session and permission events live in sibling
-// modules (story 10.8); every public name is exported from here as before.
+// modules (story 10.8), and epic 4's events too (entry 4.12); every public
+// name is exported from here as before.
 export * from './events-common.js';
 export {
   SessionCreatedEvent,
@@ -72,6 +86,15 @@ export {
   PermissionRequestedEvent,
   PermissionResolvedEvent,
 } from './events-session.js';
+// Epic 4's events (entry 4.12).
+export {
+  WorkspaceBmadScriptsTrustedEvent,
+  TicketChangedEvent,
+  BmadSetupStartedEvent,
+  BmadSetupProgressEvent,
+  BmadSetupCompletedEvent,
+  BmadSetupFailedEvent,
+} from './events-planning.js';
 
 // ---------------------------------------------------------------------------
 // Event types. Each is defined once without the core-assigned fields (what a
@@ -166,71 +189,6 @@ const WorkspaceBmadOfferDismissedInput = z.object({
  */
 export const WorkspaceBmadOfferDismissedEvent = WorkspaceBmadOfferDismissedInput.extend(assigned);
 export type WorkspaceBmadOfferDismissedEvent = z.infer<typeof WorkspaceBmadOfferDismissedEvent>;
-
-const WorkspaceBmadScriptsTrustedInput = z.object({
-  type: z.literal('workspace.bmad_scripts_trusted'),
-  ...onWorkspaceStream,
-  payload: z.object({}),
-});
-/**
- * The user allowed Ogden Agents to run this project's own BMad Method
- * scripts (story 4.2, AD-22 note 2026-10-02): core keeps it on the workspace
- * row, and the routes and use-cases that run project scripts stop refusing
- * with `scripts_not_trusted`. Appended once; a repeat changes nothing, and
- * turning pieces off never revokes it. Logs from before 4.2 lack it, and
- * their workspaces read as not trusted.
- */
-export const WorkspaceBmadScriptsTrustedEvent = WorkspaceBmadScriptsTrustedInput.extend(assigned);
-export type WorkspaceBmadScriptsTrustedEvent = z.infer<typeof WorkspaceBmadScriptsTrustedEvent>;
-
-const TicketChangedInput = z.object({
-  type: z.literal('ticket.changed'),
-  ...onWorkspaceStream,
-  payload: z.object({ ref: z.string().min(1) }),
-});
-/**
- * A ticket's files changed (story 4.2's contract; entry 4.8's watcher
- * appends it). Carries only the ref, never status or content (AD-7): the
- * UI refetches the tickets over REST.
- */
-export const TicketChangedEvent = TicketChangedInput.extend(assigned);
-export type TicketChangedEvent = z.infer<typeof TicketChangedEvent>;
-
-const BmadSetupStartedInput = z.object({
-  type: z.literal('bmad.setup_started'),
-  ...onWorkspaceStream,
-  payload: z.object({}),
-});
-/** BMad Method's setup started in the project (story 4.2's contract; entry 4.3 appends the `bmad.setup_*` events). */
-export const BmadSetupStartedEvent = BmadSetupStartedInput.extend(assigned);
-export type BmadSetupStartedEvent = z.infer<typeof BmadSetupStartedEvent>;
-
-const BmadSetupProgressInput = z.object({
-  type: z.literal('bmad.setup_progress'),
-  ...onWorkspaceStream,
-  payload: BmadSetupProgress,
-});
-/** A setup step began: its code and its line in the progress list. */
-export const BmadSetupProgressEvent = BmadSetupProgressInput.extend(assigned);
-export type BmadSetupProgressEvent = z.infer<typeof BmadSetupProgressEvent>;
-
-const BmadSetupCompletedInput = z.object({
-  type: z.literal('bmad.setup_completed'),
-  ...onWorkspaceStream,
-  payload: z.object({ status: BmadSetupStatus }),
-});
-/** The setup finished; `status` is the project's setup status now. */
-export const BmadSetupCompletedEvent = BmadSetupCompletedInput.extend(assigned);
-export type BmadSetupCompletedEvent = z.infer<typeof BmadSetupCompletedEvent>;
-
-const BmadSetupFailedInput = z.object({
-  type: z.literal('bmad.setup_failed'),
-  ...onWorkspaceStream,
-  payload: z.object({ reason: z.string().min(1) }),
-});
-/** The setup failed. `reason` is plain words: no path, no script output, no secret. */
-export const BmadSetupFailedEvent = BmadSetupFailedInput.extend(assigned);
-export type BmadSetupFailedEvent = z.infer<typeof BmadSetupFailedEvent>;
 
 const RunCreatedInput = z.object({
   type: z.literal('run.created'),

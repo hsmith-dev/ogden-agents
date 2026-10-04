@@ -2,8 +2,10 @@
  * Reduced mode's capability read in the `bmad-catalog` adapter (entry 4.11,
  * AD-14): `missingCapabilities` judges from the repo's files, never a version
  * string. On the two plain fixtures (`tests/fixtures/bmad-plain`): the older
- * layout lacks both capabilities, the older `bmod` layout lacks the ticket
- * tree; a repo laid out from the pinned upstream fixture lacks none. Only
+ * layout lacks both capabilities, and so does the older `bmod` layout (its
+ * genuine but older skills are not the verified pinned copy's, so they get
+ * no labels: entry 4.12); a repo laid out from the pinned upstream fixture,
+ * read against that fixture as the verified copy, lacks none. Only
  * what is wanted is read (a Planning-off project's skills are never
  * scanned), the answer follows the shared order, a missing repo lacks
  * everything, and a read writes nothing.
@@ -13,6 +15,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPlainRepo } from '../../../tests/fixtures/bmad-plain/plain-repos.js';
 import { createFakeBmadRepo, type FakeBmadRepo } from '../../../tests/fixtures/fake-bmad-repo.js';
+import { pinnedCopyAt } from '../../../tests/fixtures/pinned-copy.js';
 
 /** The skill scan, counted: Planning off must never reach it. */
 const scans = vi.hoisted(() => ({ count: 0 }));
@@ -20,17 +23,20 @@ vi.mock('../src/bmad-catalog/skills.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../src/bmad-catalog/skills.js')>();
   return {
     ...original,
-    scanSkillsAt: async (repoReal: string) => {
+    scanSkillFoldersAt: async (repoReal: string) => {
       scans.count++;
-      return original.scanSkillsAt(repoReal);
+      return original.scanSkillFoldersAt(repoReal);
     },
   };
 });
 
 const { createBmadCatalog } = await import('../src/index.js');
 const { missingCapabilities } = await import('../src/bmad-catalog/catalog.js');
+const { createSkillVerifier } = await import('../src/bmad-catalog/verified.js');
 
 const UPSTREAM_SKILLS = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'bmad-upstream', 'skills');
+/** The pinned upstream fixture as the verified copy (entry 4.12). */
+const VERIFIED = { verifier: createSkillVerifier(pinnedCopyAt(UPSTREAM_SKILLS)) };
 
 const repos: FakeBmadRepo[] = [];
 afterEach(() => {
@@ -53,12 +59,15 @@ function pinnedRepo(): FakeBmadRepo {
 }
 
 describe('missingCapabilities (entry 4.11)', () => {
-  it('the older layout lacks both, the older bmod layout lacks the ticket tree, the pinned baseline lacks none', async () => {
-    const catalog = createBmadCatalog();
+  it('the older layout and the older bmod layout lack both, the pinned baseline lacks none', async () => {
+    const catalog = createBmadCatalog({ source: pinnedCopyAt(UPSTREAM_SKILLS) });
     const both = ['plain_labels', 'ticket_tree'] as const;
     expect(await catalog.missingCapabilities(keep(createPlainRepo('older')).path, both)).toEqual(['plain_labels', 'ticket_tree']);
-    expect(await catalog.missingCapabilities(keep(createPlainRepo('bmod')).path, both)).toEqual(['ticket_tree']);
+    // Genuine but older upstream skills are not the verified copy's: no labels (entry 4.12).
+    expect(await catalog.missingCapabilities(keep(createPlainRepo('bmod')).path, both)).toEqual(['plain_labels', 'ticket_tree']);
     expect(await catalog.missingCapabilities(pinnedRepo().path, both)).toEqual([]);
+    // Without a verified copy nothing is labelled (fail closed).
+    expect(await createBmadCatalog().missingCapabilities(pinnedRepo().path, both)).toEqual(['plain_labels']);
   });
 
   it('answers only what is wanted, in the shared order, each once', async () => {
@@ -70,10 +79,10 @@ describe('missingCapabilities (entry 4.11)', () => {
   });
 
   it('with Planning off (only the ticket tree wanted) the skills are never scanned', async () => {
-    const bmod = keep(createPlainRepo('bmod')).path;
-    expect(await missingCapabilities(bmod, ['ticket_tree'])).toEqual(['ticket_tree']);
+    const pinned = pinnedRepo().path;
+    expect(await missingCapabilities(pinned, ['ticket_tree'], VERIFIED)).toEqual([]);
     expect(scans.count).toBe(0);
-    expect(await missingCapabilities(bmod, ['plain_labels'])).toEqual([]);
+    expect(await missingCapabilities(pinned, ['plain_labels'], VERIFIED)).toEqual([]);
     expect(scans.count).toBe(1);
   });
 

@@ -103,7 +103,9 @@ jobs:
 
   # Planning provenance (story 10.8): every started plan's baseline_revision is
   # an ancestor of HEAD, and every deferred-work Open items line matches a Log
-  # entry. Needs the full history, so the checkout is not shallow.
+  # entry, names no resolved one, and (entry 4.12) every Log entry the pull
+  # request adds is indexed or resolved, compared with the base branch. Needs
+  # the full history, so the checkout is not shallow.
   provenance:
     name: Provenance
     runs-on: ubuntu-latest
@@ -119,6 +121,10 @@ jobs:
 
       - name: Check plan baselines and the deferred-work index
         run: node scripts/check-provenance.mjs
+        env:
+          # The pull request's base branch. On a push it is empty and the script falls back to the branch's
+          # upstream (origin/main on main, the pushed commit itself), so the new-entries rule passes trivially there.
+          PROVENANCE_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
 
   # The uv archives Ogden Agents may install (story 1.8): re-download each one
   # pinned in packages/adapters/src/toolchain-uv/uv-release.json and check its
@@ -138,7 +144,7 @@ jobs:
       - name: Check every pinned uv archive
         run: node scripts/check-uv-pins.mjs
 
-  # The pinned upstream BMad Method and bmad-loop (story 4.14, AD-13): each
+  # The pinned upstream BMad Method (story 4.14, AD-13): each
   # pinned commit's tarball is downloaded and its content hash recomputed
   # through the app's own archive module, and the commit must be in the
   # history of the lock's ref. The only job that downloads them; no test does.

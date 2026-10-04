@@ -1,11 +1,9 @@
 import { existsSync, mkdirSync } from 'node:fs';
-import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
 import {
   CLAUDE_CODE_AGENT_ID,
-  createBmadCatalog,
   createClaudeCodeAgent,
   createClaudeCodeSetup,
   createKeyringSecretStore,
@@ -13,29 +11,20 @@ import {
   createMemorySecretStore,
   createOsAppShortcut,
   createPtyTerminalPort,
-  createTicketsV7,
-  createUpstreamBmadSource,
-  createUvScriptRunner,
   createUvToolchain,
   errorCode,
   locateClaudeAdapter,
   resolveClaudeAgentAcp,
-  ScriptRunError,
   type UvScriptRunner,
 } from '@ogden-agents/adapters';
 import {
   AgentSetupError,
   CoreError,
   createAgentSetup,
-  createBmadSource,
-  createBoard,
   createChat,
   createDataDir,
   createNewProjectDefaults,
   createOnboarding,
-  createPlanning,
-  createPlanningDocuments,
-  createTicketWatcher,
   clampCheckInDelay,
   RESTARTED_REASON,
   createToolchain,
@@ -44,12 +33,9 @@ import {
   PORT_FILE,
   type AgentPort,
   type AgentTerminalResume,
-  type AppShortcutPort,
-  type BmadCatalogPort,
-  type BmadSourcePort,
   type Core,
 } from '@ogden-agents/core';
-import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM, ServerMessage } from '@ogden-agents/shared';
+import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM } from '@ogden-agents/shared';
 import openBrowser from 'open';
 import { WebSocketServer } from 'ws';
 import { createApp, type ServerControl } from './app.js';
@@ -60,19 +46,21 @@ import { acquireInstanceLock, type InstanceLock } from './instance-lock.js';
 import { createLauncherToken, type LauncherToken } from './launcher-token.js';
 import { createLogger, createRotatingFileWriter, LOG_DIR, teeWriters, type Logger } from './log.js';
 import { removePortFile, writePortFile } from './port-file.js';
-import { shortcutErrorCode } from './shortcut-routes.js';
 import { createTerminalAvailability } from './terminal-availability.js';
 import { resolveTestHooks, testHooksLogFields, type TestHooks } from './test-hooks.js';
 import { VERSION } from './version.js';
 import { agentEnvironment, agentKeysOf, SUBSCRIPTION_MAX_AGE_MS, uvEnvironment, withoutAgentKeys } from './start-env.js';
+import { broadcast, closeServer, HOST, listen, repointAppShortcut } from './start-io.js';
+import { bmadSetupFailureLogger, createBmadSourceAndCatalog, createDocumentCards, createPlanAndBoard, stopBmadWork, type BmadWiring } from './start-planning.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
 
 // Moved out in story 3.9; still exported from here for the callers that import them from `start.ts`.
 export { AGENT_ENV_KEYS, agentEnvironment, agentKeysOf, CHECK_IN_MS_ENV, checkInDelayFromEnv, SECRET_STORE_ENV, SUBSCRIPTION_MAX_AGE_MS, testSecretStore, uvEnvironment, withoutAgentKeys } from './start-env.js';
 export type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
+// Moved out in entry 4.12; still exported from here.
+export { TICKETS_SCRIPT, uvWorkDir } from './start-planning.js';
 
-/** The only interface the server ever binds (AD-15). */
-export const HOST = '127.0.0.1';
+export { HOST } from './start-io.js';
 /** Fixed default so bookmarks usually keep working; falls back to the next free port. */
 export const DEFAULT_PORT = 4317;
 /** How many consecutive ports to try before giving up. */
@@ -93,23 +81,6 @@ const WEB_ROOT_CANDIDATES = [
 
 function defaultWebRoot(): string {
   return WEB_ROOT_CANDIDATES.find((dir) => existsSync(dir)) ?? WEB_ROOT_CANDIDATES[1];
-}
-
-/** The verified pinned BMad Method's `tickets.py`, relative to its `skills/` (story 4.14, AD-13). */
-export const TICKETS_SCRIPT = 'bmad-ticket/scripts/tickets.py';
-
-/** How long a stopping server waits for a BMad Method setup to finish before it kills the run. */
-const SETUP_STOP_MS = 30_000;
-
-/**
- * The working folder of every BMad Method script run (story 4.2 review): an
- * empty folder of Ogden Agents' own, never a project's, so `uv run` finds no
- * project `.venv` to run. Created readable only by the user if missing.
- */
-export function uvWorkDir(dataDir: string): string {
-  const dir = join(dataDir, 'tools', 'uv-work');
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  return dir;
 }
 
 /**
@@ -178,45 +149,21 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
   const hooks = resolveTestHooks(process.env, dataDir, { ...options, ownsCore });
   // What this install ships, plus a test's own (story 10.2): the option, and the environment hook.
   const availableBmadPieces = [...new Set([...SHIPPED_BMAD_PIECES, ...(options.availableBmadPieces ?? []), ...hooks.bmadAvailable])];
-  // The script runner is built with the server (below); setup reaches it through this holder (story 4.3).
-  const setupRunner: { current?: UvScriptRunner } = {};
-  // The pinned upstream BMad Method (story 4.14, AD-13): the server's one source, downloaded only when the user
-  // asks (Download, or Set up: story 4.3), never here.
-  const bmadSourcePort =
-    options.bmadSource ??
-    createUpstreamBmadSource({
-      dataDir,
-      ...(options.bmadFetch === undefined ? {} : { fetch: options.bmadFetch }),
-      onCleanupError: (error) => log.warn('could not remove BMad Method download temp files', { code: (error as NodeJS.ErrnoException).code ?? 'unknown' }),
-    });
-  // The read-only detection of a repo's `_bmad/` (story 10.3), its installed skills (story 4.1) and BMad Method's
-  // setup (story 4.3: the verified `setup.py` of that one source, run in Ogden Agents' own work folder); a test may pass its own.
-  const bmadCatalog =
-    options.bmadCatalog ??
-    createBmadCatalog({
-      runner: { run: (input) => (setupRunner.current === undefined ? Promise.reject(new ScriptRunError('closed')) : setupRunner.current.run(input)) },
-      workDir: uvWorkDir(dataDir),
-      source: bmadSourcePort,
-    });
+  // The pinned BMad Method source, the catalog and setup's script runner holder (`start-planning.ts`).
+  const bmadWiring = createBmadSourceAndCatalog(options, dataDir, log);
+  const { bmadCatalog } = bmadWiring;
   const core =
     options.core ??
     openCore(dataDir, {
       availableBmadPieces,
       bmadCatalog,
-      // Codes only: a setup's own error can name the user's paths.
-      onBmadSetupFailure: (workspaceId, error) =>
-        log.warn('BMad Method setup failed', {
-          workspaceId,
-          code: error instanceof CoreError ? error.code : 'unknown',
-          ...(error instanceof CoreError && 'reason' in error ? { reason: String(error.reason) } : {}),
-          ...(typeof (error as { cause?: unknown })?.cause === 'string' ? { cause: (error as { cause: string }).cause } : {}),
-        }),
+      onBmadSetupFailure: bmadSetupFailureLogger(log),
       onListenerError: (error) => log.error('event subscriber failed', { reason: String(error) }),
       // The request is declined all the same; the reason names no command.
       onPermissionError: (error) => log.warn('a permission request was declined after a failure', { reason: String(error) }),
     });
   try {
-    return await listenAndAnnounce({ options, dataDir, log, core, ownsCore, lock, hooks, bmadCatalog, setupRunner, bmadSourcePort });
+    return await listenAndAnnounce({ options, dataDir, log, core, ownsCore, lock, hooks, bmadWiring });
   } catch (error) {
     if (ownsCore) core.close();
     throw error;
@@ -231,9 +178,7 @@ async function listenAndAnnounce({
   ownsCore,
   lock,
   hooks,
-  bmadCatalog,
-  setupRunner,
-  bmadSourcePort,
+  bmadWiring,
 }: {
   options: StartOptions;
   dataDir: string;
@@ -243,13 +188,10 @@ async function listenAndAnnounce({
   lock: InstanceLock;
   /** The environment's test hooks in use (`resolveTestHooks`). */
   hooks: TestHooks;
-  /** The catalog the Plan page reads (story 4.1). */
-  bmadCatalog: BmadCatalogPort;
-  /** Where the setup in `bmadCatalog` finds the script runner, once it is built (story 4.3). */
-  setupRunner: { current?: UvScriptRunner };
-  /** The server's one pinned BMad Method source (story 4.14); setup uses the same one (story 4.3). */
-  bmadSourcePort: BmadSourcePort;
+  /** The server's one pinned BMad Method source (story 4.14), the catalog over it (story 4.1) and setup's runner holder (story 4.3). */
+  bmadWiring: BmadWiring;
 }): Promise<RunningServer> {
+  const { bmadCatalog, bmadSourcePort, setupRunner } = bmadWiring;
   const requested = options.port ?? DEFAULT_PORT;
   const now = options.now ?? Date.now;
   const codes = createLaunchCodes(now);
@@ -410,17 +352,8 @@ async function listenAndAnnounce({
   };
   // One terminal port for the chat and the toggle's availability check (story 3.7): they agree on node-pty.
   const terminal = createPtyTerminalPort(options.loadPty);
-  // Document cards (story 4.7): a planning session's completed write into the output folder appends
-  // `session.document_written` with the next suggested step. Codes only in the log: never a path.
-  const planningDocuments = createPlanningDocuments({
-    bmad: core.bmad,
-    entities: core.entities,
-    catalog: bmadCatalog,
-    agent: chatAgent,
-    sessionEvents: core.sessionEvents,
-    onError: (sessionId, step, error) =>
-      log.info('no document card for a planning write', { sessionId, step, ...(error === undefined ? {} : { code: errorCode(error, 'unexpected') }) }),
-  });
+  // Document cards (story 4.7, `start-planning.ts`).
+  const planningDocuments = createDocumentCards({ core, catalog: bmadCatalog, agent: chatAgent, log });
   const chat = createChat({
     dataDir,
     entities: core.entities,
@@ -435,44 +368,19 @@ async function listenAndAnnounce({
     onToolCallCompleted: (sessionId, toolCallId, diffs) => planningDocuments.toolCallCompleted(sessionId, toolCallId, diffs),
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
-  // Plan and Board (story 4.1): the catalog, planning sessions and the tickets, each behind core's guard (AD-22).
-  const planning = createPlanning({ bmad: core.bmad, entities: core.entities, catalog: bmadCatalog, chat, agent: chatAgent, modulesSeen: core.bmadModulesSeen });
-  // The one runner of BMad Method's scripts (story 4.1); closed with the server, which kills any tree still running (story 4.2).
-  const scriptRunner = createUvScriptRunner({
-    uvCommand: async () => {
-      const file = await uvToolchain.locate();
-      return file === undefined ? undefined : { file };
-    },
-    env: uvChildEnv,
-  });
-  const bmadSource = createBmadSource(bmadSourcePort);
-  setupRunner.current = scriptRunner;
-  const ticketStore =
-    options.ticketStore ??
-    createTicketsV7({
-      runner: scriptRunner,
-      // Only the verified copy, read at each run; never the project's own `tickets.py`.
-      script: () => bmadSourcePort.file(TICKETS_SCRIPT),
-      // Never the repo: uv would run a `.venv` the project ships (story 4.2 review).
-      workDir: uvWorkDir(dataDir),
-      // Codes only: the script's own error text can name the user's paths.
-      onFailure: (error) => log.warn('tickets.py run failed', { code: error instanceof ScriptRunError ? error.code : error.reason }),
-      onWatchFallback: (reason) => log.info('ticket watch polls instead of watching', { code: reason }),
-    });
-  // Every board use-case checks the piece, then the project's script trust (story 4.2), then the pinned BMad
-  // Method (story 4.14), before the store runs anything.
-  const board = createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: bmadSource, entities: core.entities, catalog: bmadCatalog, tickets: ticketStore });
-  // One watch per project with Board on, trusted and BMad Method set up (story 4.8; the setup status is entry 4.3's):
-  // an agent's ticket write reaches the board as `ticket.changed`.
-  const ticketWatcher = createTicketWatcher({
-    events: core.events,
-    entities: core.entities,
-    bmad: core.bmad,
-    trust: core.bmadScriptTrust,
-    catalog: bmadCatalog,
-    tickets: ticketStore,
-    // Codes only: never a path or the script's output.
-    onError: (workspaceId, step, error) => log.warn('ticket watch failed', { workspaceId, step, code: errorCode(error, 'unexpected') }),
+  // Plan and Board (story 4.1, `start-planning.ts`): planning sessions, the script runner, the tickets and their watch.
+  const { planning, scriptRunner, bmadSource, board, ticketWatcher } = createPlanAndBoard({
+    options,
+    core,
+    dataDir,
+    log,
+    bmadCatalog,
+    bmadSourcePort,
+    setupRunner,
+    chat,
+    agent: chatAgent,
+    uvToolchain,
+    uvChildEnv,
   });
   const appShortcut =
     options.appShortcut ??
@@ -599,22 +507,8 @@ async function listenAndAnnounce({
         await Promise.race([agentSetup.settled(), new Promise((resolve) => setTimeout(resolve, INSTALL_STOP_MS).unref())]);
       })
       .finally(() => chat.close().catch((error: unknown) => log.warn('stopping agents failed', { reason: String(error) })))
-      // A document detection under way (story 4.7) reads files only; it ends before core closes, bounded.
-      .finally(() => Promise.race([planningDocuments.settled(), new Promise((resolve) => setTimeout(resolve, SETUP_STOP_MS).unref())]))
-      // A setup in progress finishes first, so no staging folder is left in a project (story 4.3); bounded.
-      .finally(() =>
-        Promise.race([
-          core.bmadSetup?.settled().catch(() => undefined),
-          new Promise((resolve) => setTimeout(resolve, SETUP_STOP_MS).unref()),
-        ]),
-      )
-      // No BMad Method script outlives the server either (story 4.2). The ticket watches stop first (story 4.8);
-      // closing the runner kills a run a watch is waiting on, so their close never waits on a script.
-      .finally(async () => {
-        const watching = ticketWatcher.close().catch((error: unknown) => log.warn('stopping ticket watches failed', { reason: String(error) }));
-        await scriptRunner.close().catch((error: unknown) => log.warn('stopping scripts failed', { reason: String(error) }));
-        await watching;
-      })
+      // Document detection, a setup in progress, the ticket watches and every BMad Method script (`start-planning.ts`).
+      .finally(() => stopBmadWork({ planningDocuments, bmadSetup: core.bmadSetup, ticketWatcher, scriptRunner, log }))
       .finally(() => {
         try {
           removePortFile(portFile, identity);
@@ -689,53 +583,4 @@ async function listenAndAnnounce({
     stopped,
     close: () => shutdown('close'),
   };
-}
-
-/**
- * Re-points an app shortcut that is already there at this server's Node and
- * launcher, which may have moved since it was added (a Node upgrade, a new
- * npx cache). It never creates one; a failure is logged, without paths, and
- * the server runs on.
- */
-async function repointAppShortcut(appShortcut: AppShortcutPort, log: Logger): Promise<void> {
-  try {
-    if (!(await appShortcut.status()).installed) return;
-    await appShortcut.add();
-  } catch (error) {
-    log.warn('could not re-point the app shortcut', { code: shortcutErrorCode(error) });
-  }
-}
-
-/** Sends one schema-checked message to every connected WebSocket client. */
-function broadcast(wss: WebSocketServer, message: ServerMessage, log: Logger): void {
-  const parsed = ServerMessage.safeParse(message);
-  if (!parsed.success) {
-    log.error('refusing to broadcast a message that fails the shared schema', { issues: parsed.error.issues });
-    return;
-  }
-  const text = JSON.stringify(parsed.data);
-  for (const client of wss.clients) {
-    if (client.readyState === client.OPEN) client.send(text);
-  }
-}
-
-/** Stops the WebSocket clients and the HTTP server, and resolves once the port is released. */
-function closeServer(server: ReturnType<typeof createAdaptorServer>, wss: WebSocketServer): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    for (const client of wss.clients) client.terminate();
-    wss.close();
-    server.close((error) => (error ? reject(error) : resolve()));
-    if ('closeAllConnections' in server) server.closeAllConnections();
-  });
-}
-
-function listen(server: ReturnType<typeof createAdaptorServer>, port: number): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const onError = (error: Error) => reject(error);
-    server.once('error', onError);
-    server.listen(port, HOST, () => {
-      server.off('error', onError);
-      resolve((server.address() as AddressInfo).port);
-    });
-  });
 }

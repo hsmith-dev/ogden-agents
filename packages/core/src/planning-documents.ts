@@ -19,7 +19,7 @@ import { relative, isAbsolute, posix, win32 } from 'node:path';
 import { RepoRelativePath, type CatalogNext, type Catalog, type SessionId, type WorkspaceId } from '@ogden-agents/shared';
 import type { AgentPort } from './agent-port.js';
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
-import type { BmadFeatures } from './bmad-features.js';
+import type { BmadFeatures } from './bmad-pieces.js';
 import type { Entities } from './entities.js';
 import type { SessionEvents } from './session-events.js';
 

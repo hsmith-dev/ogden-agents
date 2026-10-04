@@ -39,7 +39,6 @@ const ATTEMPTS = 4;
  * @property {string} commit
  * @property {string} version
  * @property {string} include
- * @property {string[]} [buildConstraints]
  * @property {string} contentHash
  */
 /** @typedef {{ sources: Record<string, Pin> }} Lock */

@@ -27,7 +27,7 @@ import {
   type Workspace,
 } from '@ogden-agents/shared';
 import { z } from 'zod';
-import type { BmadFeatures } from './bmad-features.js';
+import type { BmadFeatures } from './bmad-pieces.js';
 import type { Chat } from './chat/types.js';
 import { FeatureUnavailableError, ValidationError } from './errors.js';
 

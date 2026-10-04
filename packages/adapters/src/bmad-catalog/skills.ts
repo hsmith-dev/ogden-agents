@@ -19,6 +19,7 @@ import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import { isAbsolute, join, relative } from 'node:path';
 import type { InstalledSkill } from '@ogden-agents/core';
 import { SKILL_NAME_PATTERN } from '@ogden-agents/shared';
+import { NON_BLOCK, NO_FOLLOW } from '../fs-safe.js';
 
 /** Where skills are installed in a repo, relative to its root, in the order they are read. */
 export const SKILL_FOLDERS: readonly (readonly string[])[] = [
@@ -38,10 +39,6 @@ export function inside(inner: string, outer: string): boolean {
 /** At most this many entries of a skills folder are read, in name order (both the skill and the module record scans). */
 export const MAX_SKILL_FOLDER_ENTRIES = 1000;
 
-/** Never follow a link swapped in after the `realpath` (not on Windows, which has no such flag). */
-const NO_FOLLOW = (fsConstants as { O_NOFOLLOW?: number }).O_NOFOLLOW ?? 0;
-/** Opening a FIFO never waits for a writer (not on Windows, which has no such flag). */
-const NON_BLOCK = (fsConstants as { O_NONBLOCK?: number }).O_NONBLOCK ?? 0;
 
 /** The first {@link MAX_SKILL_FILE_BYTES} of `file` as text, or `undefined` on any error. */
 export async function readHead(file: string): Promise<string | undefined> {
@@ -142,9 +139,33 @@ export async function scanSkills(repoPath: string): Promise<InstalledSkill[]> {
   return repoReal === undefined ? [] : scanSkillsAt(repoReal);
 }
 
+/**
+ * An installed skill, and where it is (relative to the repo): `folder`, the
+ * one it was read from; `folders`, every skills folder's entry of that name
+ * (the one read from first), valid skill or not; `contested`, whether another
+ * folder's `SKILL.md` claims the name in its frontmatter (entry 4.12: the
+ * label trust verifies a name only when every copy is the pinned one and
+ * nothing else claims it).
+ */
+export interface FoundSkill {
+  readonly skill: InstalledSkill;
+  readonly folder: readonly string[];
+  readonly folders: readonly (readonly string[])[];
+  readonly contested: boolean;
+}
+
 /** {@link scanSkills} of the repo whose real path ({@link realRepoRoot}) is `repoReal`. */
 export async function scanSkillsAt(repoReal: string): Promise<InstalledSkill[]> {
-  const found = new Map<string, InstalledSkill>();
+  return (await scanSkillFoldersAt(repoReal)).map((found) => found.skill);
+}
+
+/** {@link scanSkillsAt}, with where each skill is ({@link FoundSkill}; entry 4.12: the label trust hashes it). */
+export async function scanSkillFoldersAt(repoReal: string): Promise<FoundSkill[]> {
+  const found = new Map<string, { skill: InstalledSkill; folder: string[] }>();
+  /** Every skills folder's entry of each name, in reading order. */
+  const entries = new Map<string, string[][]>();
+  /** Names a folder of another name claims in its frontmatter. */
+  const claimed = new Set<string>();
   for (const folder of SKILL_FOLDERS) {
     let names: string[];
     try {
@@ -153,13 +174,20 @@ export async function scanSkillsAt(repoReal: string): Promise<InstalledSkill[]> 
       continue;
     }
     for (const name of names) {
-      if (!SKILL_NAME_PATTERN.test(name) || found.has(name)) continue;
+      if (!SKILL_NAME_PATTERN.test(name)) continue;
+      entries.set(name, [...(entries.get(name) ?? []), [...folder, name]]);
+      if (found.has(name)) continue;
       const text = await readInsideRepo(repoReal, [...folder, name, 'SKILL.md']);
       if (text === undefined) continue;
       const frontmatter = parseSkillFrontmatter(text);
-      if (frontmatter?.name !== name) continue;
-      found.set(name, { name, description: frontmatter.description ?? '' });
+      if (frontmatter?.name !== name) {
+        if (frontmatter?.name !== undefined) claimed.add(frontmatter.name);
+        continue;
+      }
+      found.set(name, { skill: { name, description: frontmatter.description ?? '' }, folder: [...folder, name] });
     }
   }
-  return [...found.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return [...found.values()]
+    .map(({ skill, folder }) => ({ skill, folder, folders: entries.get(skill.name) ?? [folder], contested: claimed.has(skill.name) }))
+    .sort((a, b) => (a.skill.name < b.skill.name ? -1 : a.skill.name > b.skill.name ? 1 : 0));
 }

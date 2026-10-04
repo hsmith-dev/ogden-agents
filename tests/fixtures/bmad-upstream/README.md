@@ -18,3 +18,7 @@ commit.
 `skills/bmod-core-tools/` are unchanged copies of the same folders at the
 same commit (story 4.3): `setup.py`, the runtime payload and the module
 records BMad Method's setup reads. Copy them again too when the pin moves.
+
+`skills/bmad-product-brief/` is an unchanged copy of the same folder at the
+same commit (entry 4.12): the label trust's verified case, a repo skill
+whose folder equals the pinned copy's. Copy it again too when the pin moves.

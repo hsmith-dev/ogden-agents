@@ -16,12 +16,14 @@
  *   appeared, story 4.4).
  * - Skills: `scanSkills` (story 4.1) without the record folders, with the
  *   module whose `skills` lists them, and the label mapping's labels,
- *   groups, `next` and entry action (`applyLabels`, story 4.5).
+ *   groups, `next` and entry action (`applyLabels`, story 4.5), only for
+ *   the skills whose folder is the verified pinned copy's (entry 4.12,
+ *   `verified.ts`; none without a verified copy).
  * - Agents: the `[[members]]` of a record's `roster.toml` whose `skill` is
  *   installed: named by the skill, labelled with its mapped label, else the
  *   member's `title`, else the skill's name; described as the skill is.
  * - Capabilities (AD-14, never a version): `plain_labels` when an installed
- *   skill has a label in the mapping; `ticket_tree` when the repo's
+ *   verified skill has a label in the mapping; `ticket_tree` when the repo's
  *   `_bmad/scripts/config_utils.py` is a regular file reached through real
  *   folders whose first 64 KB define `load_central_config(` (what the
  *   verified `tickets.py` loads).
@@ -41,8 +43,9 @@ import { join } from 'node:path';
 import { BMAD_CAPABILITIES, CatalogAgent, CatalogModule, CatalogSkill, SKILL_NAME_PATTERN, type BmadCapability, type Catalog } from '@ogden-agents/shared';
 import { applyLabels, MODULE_CODE_PATTERN, readModuleLabels, type LabelMap } from './labels.js';
 import { SKILL_LABELS } from './skill-labels.js';
-import { MAX_SKILL_FOLDER_ENTRIES, readHead, readInsideRepo, realRepoRoot, scanSkillsAt, SKILL_FOLDERS } from './skills.js';
+import { MAX_SKILL_FOLDER_ENTRIES, readHead, readInsideRepo, realRepoRoot, scanSkillFoldersAt, SKILL_FOLDERS } from './skills.js';
 import { readToml, type TomlTable } from './toml.js';
+import { UNVERIFIED, type SkillVerifier } from './verified.js';
 
 /** A module record's file, in its skill folder. */
 export const MODULE_RECORD_FILE = 'bmod.toml';
@@ -53,6 +56,26 @@ export const TICKET_TREE_CONFIG_SCRIPT: readonly string[] = ['_bmad', 'scripts',
 
 /** The shipped label mapping, read once (its problems are a test's concern: the shipped file has none). */
 const SHIPPED_LABELS: LabelMap = readModuleLabels(SKILL_LABELS).labels;
+
+/** How a catalog is labelled: the mapping (the shipped one by default) and the label trust (none verified by default). */
+export interface LabelOptions {
+  readonly labels?: LabelMap;
+  readonly verifier?: SkillVerifier;
+}
+
+/** The names the mapping labels or makes the entry action: the only ones the trust checks. */
+const mappedNames = (labels: LabelMap): Set<string> => new Set([...labels.skills.keys(), ...(labels.entry === null ? [] : [labels.entry])]);
+
+/** The repo's skills (not module records), labelled with `labels` where verified. */
+async function labelledSkills(repoReal: string, recordFolders: ReadonlySet<string>, { labels = SHIPPED_LABELS, verifier = UNVERIFIED }: LabelOptions) {
+  const found = (await scanSkillFoldersAt(repoReal)).filter((entry) => !recordFolders.has(entry.skill.name));
+  const verified = await verifier.verified(repoReal, found, mappedNames(labels));
+  return applyLabels(
+    found.map((entry) => entry.skill),
+    labels,
+    verified,
+  );
+}
 
 /** At most this many `[[members]]` of a roster are read. */
 export const MAX_ROSTER_MEMBERS = 200;
@@ -139,21 +162,20 @@ async function hasTicketTree(repoReal: string): Promise<boolean> {
 
 /**
  * The catalog of the repo at `repoPath` (see the file's comment), labelled
- * with `labels` (the shipped mapping by default). An empty catalog for a
- * path that isn't an absolute path to a real folder.
+ * with `options.labels` (the shipped mapping by default) where
+ * `options.verifier` verifies the skill (none by default). An empty catalog
+ * for a path that isn't an absolute path to a real folder.
  */
-export async function buildCatalog(repoPath: string, labels: LabelMap = SHIPPED_LABELS): Promise<Catalog> {
+export async function buildCatalog(repoPath: string, options: LabelOptions = {}): Promise<Catalog> {
+  const labels = options.labels ?? SHIPPED_LABELS;
   const repoReal = await realRepoRoot(repoPath);
   if (repoReal === undefined) return EMPTY_CATALOG;
-  const [{ records, recordFolders }, installed, ticketTree] = await Promise.all([readModuleRecords(repoReal), scanSkillsAt(repoReal), hasTicketTree(repoReal)]);
+  const [{ records, recordFolders }, ticketTree] = await Promise.all([readModuleRecords(repoReal), hasTicketTree(repoReal)]);
 
   const moduleOf = new Map<string, string>();
   for (const record of records) for (const skill of record.skills) if (!moduleOf.has(skill)) moduleOf.set(skill, record.code);
 
-  const labelled = applyLabels(
-    installed.filter((skill) => !recordFolders.has(skill.name)),
-    labels,
-  );
+  const labelled = await labelledSkills(repoReal, recordFolders, options);
   const skills = labelled.skills.map((skill) => CatalogSkill.parse({ ...skill, module: moduleOf.get(skill.name) ?? null }));
   const skillByName = new Map(skills.map((skill) => [skill.name, skill]));
 
@@ -176,13 +198,10 @@ export async function buildCatalog(repoPath: string, labels: LabelMap = SHIPPED_
   };
 }
 
-/** Whether an installed skill (not a module record) has a label in `labels`: the `plain_labels` capability. */
-async function hasPlainLabels(repoReal: string, labels: LabelMap): Promise<boolean> {
-  const [{ recordFolders }, installed] = await Promise.all([readModuleRecords(repoReal), scanSkillsAt(repoReal)]);
-  return applyLabels(
-    installed.filter((skill) => !recordFolders.has(skill.name)),
-    labels,
-  ).labelled;
+/** Whether an installed verified skill (not a module record) has a label: the `plain_labels` capability. */
+async function hasPlainLabels(repoReal: string, options: LabelOptions): Promise<boolean> {
+  const { recordFolders } = await readModuleRecords(repoReal);
+  return (await labelledSkills(repoReal, recordFolders, options)).labelled;
 }
 
 /**
@@ -191,11 +210,11 @@ async function hasPlainLabels(repoReal: string, labels: LabelMap): Promise<boole
  * `wanted` names is read. A path that isn't an absolute path to a real
  * folder lacks every one; nothing throws for the repo's state.
  */
-export async function missingCapabilities(repoPath: string, wanted: readonly BmadCapability[], labels: LabelMap = SHIPPED_LABELS): Promise<BmadCapability[]> {
+export async function missingCapabilities(repoPath: string, wanted: readonly BmadCapability[], options: LabelOptions = {}): Promise<BmadCapability[]> {
   const asked = BMAD_CAPABILITIES.filter((capability) => wanted.includes(capability));
   if (asked.length === 0) return [];
   const repoReal = await realRepoRoot(repoPath);
   if (repoReal === undefined) return asked;
-  const has = await Promise.all(asked.map((capability) => (capability === 'ticket_tree' ? hasTicketTree(repoReal) : hasPlainLabels(repoReal, labels))));
+  const has = await Promise.all(asked.map((capability) => (capability === 'ticket_tree' ? hasTicketTree(repoReal) : hasPlainLabels(repoReal, options))));
   return asked.filter((_capability, index) => !has[index]);
 }

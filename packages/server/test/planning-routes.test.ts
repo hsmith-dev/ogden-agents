@@ -45,6 +45,7 @@ import { join } from 'node:path';
 import {
   createBmadCatalog,
   createMemoryBmadCatalog,
+  createMemoryBmadSource,
   createMemoryTicketStore,
   createTicketsV7,
   createUpstreamBmadSource,
@@ -90,6 +91,7 @@ import {
 } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { createFakeBmadRepo, type FakeBmadRepo } from '../../../tests/fixtures/fake-bmad-repo.js';
+import { writePinnedCopy } from '../../../tests/fixtures/pinned-copy.js';
 import { FIXTURE_COMMIT, fixtureUpstream, realUvMissing, removeAfterTest, signIn, startTestServer, tempDataDir, TEST_UV_PYTHON_ENV, UPSTREAM_FIXTURE, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
 const SKILL = (name: string, description: string) => `---\nname: ${name}\ndescription: '${description}'\n---\n\n# ${name}\n`;
@@ -97,6 +99,17 @@ const SKILL_FILES = {
   '.claude/skills/bmad-spec/SKILL.md': SKILL('bmad-spec', 'Condense any input into a short spec.'),
   '.agents/skills/bmad-ticket/SKILL.md': SKILL('bmad-ticket', 'Create and manage tickets.'),
 };
+
+/**
+ * A downloaded pinned copy whose `bmad-spec` and `bmad-ticket` are
+ * {@link SKILL_FILES}' (entry 4.12: the catalog labels only skills whose
+ * folder is the verified copy's).
+ */
+function verifiedSkillsSource() {
+  const dir = removeAfterTest(mkdtempSync(join(tmpdir(), 'ogden-agents-pinned-copy-')));
+  const copy = writePinnedCopy(dir, Object.fromEntries(Object.entries(SKILL_FILES).map(([path, content]) => [path.split('/').slice(2).join('/'), content])));
+  return createMemoryBmadSource({ ready: true, files: { 'bmad-spec/SKILL.md': copy.file('bmad-spec/SKILL.md')!, 'bmad-ticket/SKILL.md': copy.file('bmad-ticket/SKILL.md')! } });
+}
 
 function request(server: TestServer, tab: SignedIn, method: string, path: string, body?: unknown) {
   return fetch(`${server.url}${path}`, {
@@ -304,7 +317,7 @@ describe('Plan and Board routes (story 4.1)', () => {
   });
 
   it('lists the catalog and starts a planning session whose first message invokes the skill', async () => {
-    const server = await startTestServer();
+    const server = await startTestServer({ bmadSource: verifiedSkillsSource() });
     const tab = await signIn(server);
     const repo = fixtureRepo();
     const before = repo.hash();
@@ -832,7 +845,7 @@ describe.skipIf(uvMissing)('the live ticket index through real uv and the verifi
 /** The real read-only catalog with a set-up status naming `_bmad-output` (story 4.7: no uv, no setup script). */
 function setUpCatalog() {
   const status: BmadSetupStatus = { state: 'current', outputFolder: '_bmad-output', bundledVersion: '7.0.0', installedVersion: '7.0.0', problems: [] };
-  return { ...createBmadCatalog(), setupStatus: async () => structuredClone(status) };
+  return { ...createBmadCatalog({ source: verifiedSkillsSource() }), setupStatus: async () => structuredClone(status) };
 }
 
 const documentPath = (wsId: string, path?: string) => `${apiPath(API_ROUTES.workspaceDocument, { wsId })}${path === undefined ? '' : `?${new URLSearchParams({ path })}`}`;

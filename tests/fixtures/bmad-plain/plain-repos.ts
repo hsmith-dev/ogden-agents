@@ -38,7 +38,8 @@ export const PLAIN_BMOD_OWN_SKILL = skill('bmad-spec', 'My own spec skill, chang
  * version, `_bmad/config.toml` with the project's own values (an output
  * folder in `docs/planning`), `_bmad/custom/`, and a `_bmad/scripts/config_utils.py`
  * from before `load_central_config` existed. Its one skill is a mapped one,
- * kept in `.agents/skills`. Has `plain_labels`, lacks `ticket_tree`.
+ * kept in `.agents/skills`, changed by hand, so it isn't the verified pinned
+ * copy and gets no label (entry 4.12). Lacks both capabilities.
  */
 export const PLAIN_BMOD_FILES: Readonly<Record<string, string>> = {
   '.claude/skills/bmod-method/bmod.toml': '[bmod]\ncode = "method"\nversion = "6.10.0"\nskills = ["bmad-spec"]\n',

@@ -22,10 +22,6 @@
 //   hang            starts a child that never exits, writes both pids to
 //                   `FAKE_UV_PID_FILE`, and never exits itself (a `tickets.py`
 //                   read that never answers: the runner's timeout and close())
-//   install         bmad-loop's install (story 4.14): `venv … <dir>` creates
-//                   the folder; `pip install … --python <venv> …` writes the
-//                   `bmad-loop` executable into it where uv would (bin/, or
-//                   Scripts\bmad-loop.exe on Windows); both exit 0
 //   bmad-setup      emulates BMad Method's `setup.py` (story 4.3) against its
 //                   `--project-root`: `--list-config-questions` prints
 //                   `FAKE_UV_QUESTIONS` (a JSON list, default `[]`); without
@@ -98,15 +94,6 @@ if (mode === 'bmad-setup') {
   process.stdout.write('this is not JSON');
 } else if (mode === 'big') {
   process.stdout.write('x'.repeat(2 * 1024 * 1024));
-} else if (mode === 'install') {
-  if (argv[0] === 'venv') {
-    mkdirSync(argv[argv.length - 1], { recursive: true });
-  } else if (argv[0] === 'pip') {
-    const venv = argv[argv.indexOf('--python') + 1];
-    const exe = process.platform === 'win32' ? join(venv, 'Scripts', 'bmad-loop.exe') : join(venv, 'bin', 'bmad-loop');
-    mkdirSync(join(exe, '..'), { recursive: true });
-    writeFileSync(exe, 'fake bmad-loop');
-  }
 } else if (mode === 'hang') {
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
   writeFileSync(process.env.FAKE_UV_PID_FILE, JSON.stringify({ uv: process.pid, child: child.pid }));

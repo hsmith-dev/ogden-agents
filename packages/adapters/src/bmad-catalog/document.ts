@@ -22,12 +22,8 @@ import { constants as fsConstants } from 'node:fs';
 import { open, realpath, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { MAX_DOCUMENT_BYTES, RepoRelativePath } from '@ogden-agents/shared';
+import { NON_BLOCK, NO_FOLLOW } from '../fs-safe.js';
 import { inside, realRepoRoot } from './skills.js';
-
-/** Never follow a link swapped in after the `realpath` (not on Windows, which has no such flag). */
-const NO_FOLLOW = (fsConstants as { O_NOFOLLOW?: number }).O_NOFOLLOW ?? 0;
-/** Opening a FIFO never waits for a writer (not on Windows, which has no such flag). */
-const NON_BLOCK = (fsConstants as { O_NONBLOCK?: number }).O_NONBLOCK ?? 0;
 
 /** A repo-relative path's segments, or `undefined` when it isn't one (or has an empty or `.` segment). */
 function segmentsOf(path: string): string[] | undefined {

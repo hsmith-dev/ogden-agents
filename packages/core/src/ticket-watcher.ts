@@ -22,7 +22,7 @@
  */
 import type { BmadCapability, WorkspaceId } from '@ogden-agents/shared';
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
-import type { BmadFeatures } from './bmad-features.js';
+import type { BmadFeatures } from './bmad-pieces.js';
 import type { BmadScriptTrust } from './bmad-script-trust.js';
 import type { Entities } from './entities.js';
 import type { EventLog } from './event-log.js';

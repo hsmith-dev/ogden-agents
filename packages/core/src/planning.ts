@@ -25,7 +25,7 @@ import {
 } from '@ogden-agents/shared';
 import type { AgentPort } from './agent-port.js';
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
-import type { BmadFeatures } from './bmad-features.js';
+import type { BmadFeatures } from './bmad-pieces.js';
 import type { BmadModulesSeen } from './bmad-modules-seen.js';
 import type { Chat } from './chat/types.js';
 import type { Entities } from './entities.js';

@@ -35,15 +35,15 @@ describe('bmad-lock.mjs', () => {
       if (status instanceof Error) throw status;
       return { status };
     };
-    expect(await checkHistory('bmad-loop', PIN, api('identical'))).toEqual([]);
-    expect(await checkHistory('bmad-loop', PIN, api('behind'))).toEqual([]);
-    expect(await checkHistory('bmad-loop', PIN, api('diverged'))).toEqual([`bmad-loop: ${COMMIT} is not in the history of o/r main (compare status diverged)`]);
-    expect(await checkHistory('bmad-loop', PIN, api(new Error('HTTP 404')))).toEqual([`bmad-loop: could not compare main...${COMMIT} in o/r: HTTP 404`]);
+    expect(await checkHistory('bmad-method', PIN, api('identical'))).toEqual([]);
+    expect(await checkHistory('bmad-method', PIN, api('behind'))).toEqual([]);
+    expect(await checkHistory('bmad-method', PIN, api('diverged'))).toEqual([`bmad-method: ${COMMIT} is not in the history of o/r main (compare status diverged)`]);
+    expect(await checkHistory('bmad-method', PIN, api(new Error('HTTP 404')))).toEqual([`bmad-method: could not compare main...${COMMIT} in o/r: HTTP 404`]);
   });
 
   it('checks the shipped lock file', () => {
     const lock = JSON.parse(readFileSync(join(ROOT, 'packages', 'adapters', 'src', 'bmad-source', 'bmad-lock.json'), 'utf8')) as { sources: Record<string, { repo: string }> };
-    expect(Object.keys(lock.sources).sort()).toEqual(['bmad-loop', 'bmad-method']);
+    expect(Object.keys(lock.sources).sort()).toEqual(['bmad-method']);
     for (const source of Object.values(lock.sources)) expect(source.repo.startsWith('bmad-code-org/')).toBe(true);
   });
 });

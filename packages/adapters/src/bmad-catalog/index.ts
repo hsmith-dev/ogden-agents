@@ -29,8 +29,15 @@ import { buildCatalog, missingCapabilities } from './catalog.js';
 import { readDocument } from './document.js';
 import { createBmadSetup, type BmadSetupOptions } from './setup.js';
 import { scanSkills } from './skills.js';
+import { createSkillVerifier, type VerifiedSource } from './verified.js';
 
 export type { BmadSetupOptions } from './setup.js';
+export type { VerifiedSource } from './verified.js';
+
+/** The catalog without setup: only the pinned source its labels are verified against (entry 4.12). */
+export interface BmadCatalogReadOptions {
+  readonly source: VerifiedSource;
+}
 
 /** The folder BMad Method's installer creates at a repo's root. */
 const BMAD_DIR = '_bmad';
@@ -50,28 +57,29 @@ async function isRealFolderAt(path: string): Promise<boolean> {
 const isRealFolder = (repoPath: string, name: string): Promise<boolean> => isRealFolderAt(join(repoPath, name));
 
 /**
- * The catalog of a repo (story 4.4): its installed modules, skills and
- * agents, the label mapping's labels and entry action, and its
- * capabilities, rebuilt from the repo's metadata on every read
- * (`catalog.ts`, read-only, only inside the repo).
- */
-const catalogOf = (repoPath: string): Promise<Catalog> => buildCatalog(repoPath);
-
-/**
  * The `bmad-catalog` adapter: read-only detection of a repo's BMad Method
  * folders, its installed skills and its catalog, and, with `options` (the
  * script runner, the work folder and the server's pinned BMad Method source), BMad Method's
  * setup status and setup (entry 4.3). Without them those two reject.
+ *
+ * The catalog (story 4.4): the repo's installed modules, skills and agents,
+ * the label mapping's labels and entry action, and its capabilities, rebuilt
+ * from the repo's metadata on every read (`catalog.ts`, read-only, only
+ * inside the repo). Labels go only to skills whose folder is the verified
+ * pinned copy's (entry 4.12, `verified.ts`): without `options` (no source)
+ * none is labelled. `options` with only a `source` labels without setup.
  */
-export function createBmadCatalog(options?: BmadSetupOptions): BmadCatalogPort {
-  const setup = options === undefined ? undefined : createBmadSetup(options);
+export function createBmadCatalog(options?: BmadSetupOptions | BmadCatalogReadOptions): BmadCatalogPort {
+  const setup = options === undefined || !('runner' in options) ? undefined : createBmadSetup(options);
+  const verifier = createSkillVerifier(options?.source);
+  const catalogOf = (repoPath: string): Promise<Catalog> => buildCatalog(repoPath, { verifier });
   const unconfigured = () => Promise.reject(new Error('BMad Method setup needs the script runner (entry 4.3)'));
   return {
     catalog: catalogOf,
     setupStatus: setup === undefined ? unconfigured : setup.setupStatus,
     setup: setup === undefined ? unconfigured : setup.setup,
     // Reduced mode (entry 4.11): read-only, only what is asked for (`catalog.ts`).
-    missingCapabilities: (repoPath, wanted) => missingCapabilities(repoPath, wanted),
+    missingCapabilities: (repoPath, wanted) => missingCapabilities(repoPath, wanted, { verifier }),
     async detect(repoPath): Promise<BmadRepoDetection> {
       // An empty or relative path would resolve against the server's own folder: answer nothing.
       if (typeof repoPath !== 'string' || repoPath === '' || !isAbsolute(repoPath)) return { hasBmad: false, hasOutput: false };

@@ -16,7 +16,7 @@ import {
   type WorkspaceSettings,
 } from '@ogden-agents/shared';
 import { eq } from 'drizzle-orm';
-import { readBmadPieces } from './bmad-features.js';
+import { readBmadPieces } from './bmad-pieces.js';
 import { readScriptsTrusted } from './bmad-script-trust.js';
 import type { Database, Orm } from './db/database.js';
 import { workspaces } from './db/schema.js';

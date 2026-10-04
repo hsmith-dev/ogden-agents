@@ -8,11 +8,22 @@
  *   restack or rebase can't leave a plan citing a commit no branch has;
  * - every Open items line in `deferred-work.md` ends `(log: "<phrase>")`,
  *   and that phrase appears verbatim in a Log entry's summary, so the index
- *   never names an entry the log doesn't have.
+ *   never names an entry the log doesn't have;
+ * - (entry 4.12) no Open items line is stale: its phrase is in no
+ *   `Resolved:` summary (an entry that closes another quotes it, so an index
+ *   line still naming it is left over);
+ * - (entry 4.12) every Log entry added on the branch is indexed or closed:
+ *   a summary that is not in the base revision's `deferred-work.md`, and
+ *   isn't itself `Resolved:`, must contain an index line's phrase, or be
+ *   quoted (`"<part of its summary>"`) by a `Resolved:` summary.
+ *
+ * The base is `PROVENANCE_BASE` when set, else `origin/$GITHUB_BASE_REF` (a
+ * pull request in CI), else the branch's upstream. With no base the check
+ * says so and skips only that last rule.
  *
  *   node scripts/check-provenance.mjs
  *
- * Exits 0 when both hold, 1 otherwise (listing each problem). Needs the full
+ * Exits 0 when all hold, 1 otherwise (listing each problem). Needs the full
  * history (`fetch-depth: 0` in CI). The parsing and matching are pure and
  * exported for `tests/provenance.test.ts`; only `main` runs git.
  */
@@ -23,7 +34,8 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PLANNING = join(ROOT, '_bmad-output');
-const DEFERRED_WORK = join(PLANNING, 'initiative-ogden-agents', 'deferred-work.md');
+const DEFERRED_WORK_PATH = '_bmad-output/initiative-ogden-agents/deferred-work.md';
+const DEFERRED_WORK = join(ROOT, ...DEFERRED_WORK_PATH.split('/'));
 
 /** Plan statuses that mean the build started, so the baseline must exist. */
 export const BASELINE_STATUSES = new Set(['in-progress', 'in-review', 'built', 'done']);
@@ -103,6 +115,58 @@ export function indexProblems(text) {
 }
 
 /**
+ * A summary that closes an earlier entry: it starts `Resolved:`. A partial
+ * one (`Resolved (part 2 …):`) leaves the rest open, so an index line may
+ * still name it.
+ */
+export const isResolved = (/** @type {string} */ summary) => summary.startsWith('Resolved:');
+
+/** The shortest quote in a `Resolved:` summary that counts as naming an entry. */
+export const MIN_QUOTE_LENGTH = 10;
+
+/**
+ * Each Open items line whose phrase is in a `Resolved:` summary: the entry it
+ * names was closed, so the line is stale.
+ * @param {string} text the whole `deferred-work.md`
+ * @returns {string[]}
+ */
+export function staleIndexProblems(text) {
+  const { index, summaries } = parseDeferredWork(text);
+  const resolved = summaries.filter(isResolved);
+  /** @type {string[]} */
+  const problems = [];
+  for (const line of index) {
+    const phrase = LOG_PHRASE.exec(line.trimEnd())?.[1];
+    if (phrase !== undefined && resolved.some((summary) => summary.includes(phrase))) problems.push(`it names an entry a Resolved summary closes: ${line}`);
+  }
+  return problems;
+}
+
+/**
+ * Each Log entry added since `baseText` (a summary not in the base revision's
+ * `deferred-work.md`) that is not `Resolved:`, contains no Open items line's
+ * phrase, and is quoted by no `Resolved:` summary (a `"…"` of at least
+ * {@link MIN_QUOTE_LENGTH} characters found in it).
+ * @param {string} text the whole `deferred-work.md`
+ * @param {string} baseText the same file at the base revision (`''` when it had none)
+ * @returns {string[]}
+ */
+export function unindexedProblems(text, baseText) {
+  const { index, summaries } = parseDeferredWork(text);
+  const before = new Set(parseDeferredWork(baseText).summaries);
+  const phrases = index.flatMap((line) => LOG_PHRASE.exec(line.trimEnd())?.[1] ?? []);
+  const quotes = summaries.filter(isResolved).flatMap((summary) => [...summary.matchAll(/"([^"]+)"/g)].map((match) => match[1] ?? '').filter((quote) => quote.length >= MIN_QUOTE_LENGTH));
+  /** @type {string[]} */
+  const problems = [];
+  for (const summary of summaries) {
+    if (before.has(summary) || isResolved(summary)) continue;
+    if (phrases.some((phrase) => summary.includes(phrase)) || quotes.some((quote) => summary.includes(quote))) continue;
+    problems.push(`a Log entry added on this branch has no Open items line and no Resolved entry: ${summary}`);
+  }
+  return problems;
+}
+
+/**
  * Every `*-plan.md` under `dir`.
  * @param {string} dir
  * @returns {string[]}
@@ -133,6 +197,44 @@ function isAncestorOfHead(revision) {
   }
 }
 
+/**
+ * Runs git in the repository; its trimmed output, or `undefined` when it fails.
+ * @param {string[]} args
+ * @returns {string | undefined}
+ */
+function git(args) {
+  try {
+    return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The base revision the "added on the branch" rule compares with, and where
+ * it came from; `undefined` when there is none (see the file's comment).
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {{ revision: string, from: string } | undefined}
+ */
+export function baseCandidate(env) {
+  if (env.PROVENANCE_BASE) return { revision: env.PROVENANCE_BASE, from: 'PROVENANCE_BASE' };
+  if (env.GITHUB_BASE_REF) return { revision: `origin/${env.GITHUB_BASE_REF}`, from: 'GITHUB_BASE_REF' };
+  return undefined;
+}
+
+/** The base's `deferred-work.md` (`''` when the base has none), or `undefined` with why there is no base. */
+function baseDeferredWork() {
+  const candidate = baseCandidate(process.env) ?? (() => {
+    const upstream = git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
+    return upstream === undefined || upstream === '' ? undefined : { revision: upstream, from: 'the upstream' };
+  })();
+  if (candidate === undefined) return { why: 'no PROVENANCE_BASE, GITHUB_BASE_REF or upstream' };
+  // A revision that looks like an option is never passed to git.
+  const commit = candidate.revision.startsWith('-') ? undefined : git(['rev-parse', '--verify', '--quiet', `${candidate.revision}^{commit}`]);
+  if (commit === undefined || commit === '') return { why: `${candidate.from} ${candidate.revision} is not a commit here` };
+  return { revision: candidate.revision, text: git(['show', `${commit}:${DEFERRED_WORK_PATH}`]) ?? '' };
+}
+
 function main() {
   /** @type {string[]} */
   const problems = [];
@@ -141,12 +243,16 @@ function main() {
     const problem = planProblem(readFileSync(plan, 'utf8'), isAncestorOfHead);
     if (problem !== undefined) problems.push(`${relative(ROOT, plan).split(sep).join('/')}: ${problem}`);
   }
-  problems.push(...indexProblems(readFileSync(DEFERRED_WORK, 'utf8')).map((problem) => `deferred-work.md: ${problem}`));
+  const deferredWork = readFileSync(DEFERRED_WORK, 'utf8');
+  problems.push(...[...indexProblems(deferredWork), ...staleIndexProblems(deferredWork)].map((problem) => `deferred-work.md: ${problem}`));
+  const base = baseDeferredWork();
+  if (base.text === undefined) console.log(`check-provenance: ${base.why}; skipping the new Log entries check.`);
+  else problems.push(...unindexedProblems(deferredWork, base.text).map((problem) => `deferred-work.md: ${problem}`));
   if (problems.length > 0) {
     console.error(`check-provenance: ${problems.length} problem(s):\n  ${problems.join('\n  ')}`);
     process.exit(1);
   }
-  console.log(`check-provenance: ${plans.length} plans and the deferred-work index check out.`);
+  console.log(`check-provenance: ${plans.length} plans and the deferred-work index check out${base.text === undefined ? '' : ` (new Log entries against ${base.revision})`}.`);
 }
 
 /** True when this file is the script node was started with (not imported by a test). */

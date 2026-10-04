@@ -72,9 +72,6 @@ export async function callNoContent(auth: Auth, path: string, init: RequestInit,
   await send(auth, path, init, fallback);
 }
 
-/** A `PUT` with no body. */
-export const putEmpty = (): RequestInit => ({ method: 'PUT' });
-
 /** A JSON `POST` body. */
 export const postJson = (body: unknown): RequestInit => ({
   method: 'POST',

@@ -23,7 +23,8 @@
  * shows the label mapping's labels and groups, Start from an idea uses the
  * mapping's entry action, and a module copied in while the server runs shows
  * on the next visit with the New tag (the modules there at the first read
- * don't carry it). Story 4.9: against the in-memory ticket store, the
+ * don't carry it); the mapped skills are the server's verified pinned
+ * copy's (entry 4.12: only those get labels). Story 4.9: against the in-memory ticket store, the
  * board puts each card in its column, shows "Waits for 1.2" and the blocked
  * reason, highlights a card its `ticket.changed` names, opens the detail
  * sheet from a card and from its URL (Esc returns to the card), and below
@@ -38,7 +39,7 @@ import { dirname, join } from 'node:path';
 import { expect, test } from '@playwright/test';
 // The shared routes' own file (it has no imports), as support.ts reads it.
 import { apiPath } from '../../packages/shared/src/api.ts';
-import { API_ROUTES, serverModule, stubSetupCatalog, waitUntil } from '../support.js';
+import { API_ROUTES, serverModule, stubSetupCatalog, verifiedCopySource, waitUntil } from '../support.js';
 import { startChat, withChatServer } from './chat-server.js';
 import { storedToken } from './tab.js';
 
@@ -107,8 +108,10 @@ test('Plan Start opens the planning session, and Board asks for trust, then to d
       await expect(page).toHaveURL(new RegExp(`/w/${wsId}/plan$`));
       await expect(page.getByRole('heading', { name: 'Plan', level: 1 })).toBeVisible();
       await expect(page.getByTestId('skill-row')).toHaveCount(2);
-      // On the real catalog (story 4.4), each skill shows the label mapping's plain label.
-      await page.getByRole('button', { name: 'Start Write the spec' }).click();
+      // On the real catalog with the pinned BMad Method not downloaded yet, no skill is verified (entry 4.12):
+      // each shows its own SKILL.md description, and still starts.
+      await expect(page.getByTestId('skill-text')).toHaveText(['Condense any input into a short spec.', 'Create and manage tickets.']);
+      await page.getByRole('button', { name: 'Start Condense any input into a short spec.' }).click();
       await expect(page).toHaveURL(new RegExp(`/w/${wsId}/s/ses_[0-9A-Z]+$`));
       await expect(page.getByTestId('message-user')).toHaveText('/bmad-spec');
       await expect(page.getByTestId('message-agent')).toContainText('command=/bmad-spec primed=0');
@@ -398,48 +401,53 @@ function moduleFiles(code: string, skills: readonly [name: string, description: 
 
 test('the Plan home on the real catalog (stories 4.4 and 4.6): mapped labels and groups, the mapped entry action, and New on a module copied in later', async ({ page }) => {
   const idea = 'A newsletter for my bakery';
-  await withChatServer(
-    page,
-    async ({ server, repo }) => {
-      const { wsId, call } = await openProject(page, repo);
-      await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: ['planning'] });
+  const method = moduleFiles('method', [
+    ['bmad-product-brief', 'Brief from SKILL.md.'],
+    ['bmad-code-review', 'Review from SKILL.md.'],
+  ]);
+  const coreTools = moduleFiles('core-tools', [['bmad-brainstorming', 'Brainstorm from SKILL.md.']]);
+  // The pinned copy has the module copied in later too; the user's own skill isn't in it.
+  const verified = await verifiedCopySource({ ...method, ...coreTools });
+  try {
+    await withChatServer(
+      page,
+      async ({ server, repo }) => {
+        const { wsId, call } = await openProject(page, repo);
+        await call('PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: ['planning'] });
 
-      // The first read is the baseline: the modules already installed carry no New tag.
-      await page.goto(`${server.url}/w/${wsId}/plan`);
-      await expect(page.getByTestId('plan-group').locator('h2')).toHaveText(['Planning', 'Checking work', 'Other']);
-      await expect(page.getByTestId('skill-text')).toHaveText(['Describe your idea', 'Review code changes', 'My own skill.']);
-      await expect(page.getByTestId('skill-new')).toHaveCount(0);
+        // The first read is the baseline: the modules already installed carry no New tag.
+        await page.goto(`${server.url}/w/${wsId}/plan`);
+        await expect(page.getByTestId('plan-group').locator('h2')).toHaveText(['Planning', 'Checking work', 'Other']);
+        await expect(page.getByTestId('skill-text')).toHaveText(['Describe your idea', 'Review code changes', 'My own skill.']);
+        await expect(page.getByTestId('skill-new')).toHaveCount(0);
 
-      // A module copied in while the server runs: shown on the next visit, with New on its skills only.
-      for (const [path, content] of Object.entries(moduleFiles('core-tools', [['bmad-brainstorming', 'Brainstorm from SKILL.md.']]))) {
-        const file = join(repo, ...path.split('/'));
-        mkdirSync(dirname(file), { recursive: true });
-        writeFileSync(file, content);
-      }
-      await page.goto(`${server.url}/w/${wsId}/plan`);
-      await expect(page.getByTestId('plan-group').locator('h2')).toHaveText(['Planning', 'Checking work', 'Ideas and research', 'Other']);
-      await expect(page.getByTestId('skill-new')).toHaveCount(1);
-      await expect(page.locator('[data-skill="bmad-brainstorming"]').getByTestId('skill-new')).toHaveText('New');
+        // A module copied in while the server runs: shown on the next visit, with New on its skills only.
+        for (const [path, content] of Object.entries(coreTools)) {
+          const file = join(repo, ...path.split('/'));
+          mkdirSync(dirname(file), { recursive: true });
+          writeFileSync(file, content);
+        }
+        await page.goto(`${server.url}/w/${wsId}/plan`);
+        await expect(page.getByTestId('plan-group').locator('h2')).toHaveText(['Planning', 'Checking work', 'Ideas and research', 'Other']);
+        await expect(page.getByTestId('skill-new')).toHaveCount(1);
+        await expect(page.locator('[data-skill="bmad-brainstorming"]').getByTestId('skill-new')).toHaveText('New');
 
-      // Start from an idea runs the mapping's entry action with the idea (exact: "Start Describe your idea" also has the words).
-      const input = page.getByLabel('Your idea', { exact: true });
-      await input.fill(idea);
-      await input.press('Enter');
-      await expect(page).toHaveURL(new RegExp(`/w/${wsId}/s/ses_[0-9A-Z]+$`));
-      await expect(page.getByTestId('message-user')).toHaveText(`/bmad-product-brief ${idea}`);
-      await expect(page.getByTestId('message-agent')).toContainText(`command=/bmad-product-brief ${idea} primed=0`);
-    },
-    {
-      files: {
-        ...SET_UP,
-        ...moduleFiles('method', [
-          ['bmad-product-brief', 'Brief from SKILL.md.'],
-          ['bmad-code-review', 'Review from SKILL.md.'],
-        ]),
-        '.claude/skills/my-own/SKILL.md': SKILL('my-own', 'My own skill.'),
+        // Start from an idea runs the mapping's entry action with the idea (exact: "Start Describe your idea" also has the words).
+        const input = page.getByLabel('Your idea', { exact: true });
+        await input.fill(idea);
+        await input.press('Enter');
+        await expect(page).toHaveURL(new RegExp(`/w/${wsId}/s/ses_[0-9A-Z]+$`));
+        await expect(page.getByTestId('message-user')).toHaveText(`/bmad-product-brief ${idea}`);
+        await expect(page.getByTestId('message-agent')).toContainText(`command=/bmad-product-brief ${idea} primed=0`);
       },
-    },
-  );
+      {
+        files: { ...SET_UP, ...method, '.claude/skills/my-own/SKILL.md': SKILL('my-own', 'My own skill.') },
+        extra: { bmadSource: verified.source },
+      },
+    );
+  } finally {
+    verified.remove();
+  }
 });
 
 /** Four tickets of one epic for the in-memory store: in review, planned, ready but waiting for 1.2, and blocked. */

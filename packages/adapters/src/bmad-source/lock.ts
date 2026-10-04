@@ -1,7 +1,6 @@
 /**
- * The lock (story 4.14, AD-13): the upstream BMad Method and bmad-loop
- * commits this release pins, each with the content hash of the files Ogden
- * Agents uses (`include`). It ships inside the server bundle; the package
+ * The lock (story 4.14, AD-13): the upstream BMad Method commit this release
+ * pins, with the content hash of the files Ogden Agents uses (`include`). It ships inside the server bundle; the package
  * ships no BMad files. `scripts/bmad-lock.mjs --check` re-downloads each pin
  * in CI and fails when a hash or the commit's place in upstream's history
  * no longer holds. Moving a pin is a maintainer's edit of `bmad-lock.json`

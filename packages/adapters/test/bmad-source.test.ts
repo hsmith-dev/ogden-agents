@@ -1,6 +1,6 @@
 /**
- * The pinned upstream sources (story 4.14, `bmad-source`), with stub
- * `fetch`es and a fake `uv`, never the network:
+ * The pinned upstream source (story 4.14, `bmad-source`), with stub
+ * `fetch`es, never the network:
  *
  * - a download fetches the exact commit once, verifies it, extracts it to
  *   `<data>/bmad/<name>/<commit>/<include>`, writes the marker, and removes
@@ -10,12 +10,9 @@
  *   error, a timeout and a download that is too large are `offline`;
  * - concurrent downloads share one fetch; `status` and `file` never fetch;
  *   a marker for another pin (an upgrade that moved it) is `missing`;
- * - the bmad-loop resolver installs the verified source with `uv venv` and
- *   `uv pip install --build-constraints`, in the work folder, with exactly
- *   the environment given, and answers the executable;
  * - the shipped lock and label mapping have the shapes their readers expect.
  */
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BmadDownloadError } from '@ogden-agents/core';
@@ -24,8 +21,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { tarGz, type TarEntry } from '../../../tests/fixtures/tar.js';
 import {
   BMAD_LOCK,
-  bmadLoopExecutable,
-  createBmadLoopResolver,
   createMemoryBmadSource,
   createPinnedSource,
   createUpstreamBmadSource,
@@ -34,12 +29,10 @@ import {
   parseTar,
   selectVerified,
   SKILL_LABELS,
-  uvEnvironment,
   VERIFIED_MARKER,
   type FetchLike,
 } from '../src/index.js';
 
-const FAKE_UV = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-uv.mjs');
 const COMMIT = '1'.repeat(40);
 const OLD_COMMIT = '2'.repeat(40);
 const TOP = `BMAD-METHOD-${COMMIT}`;
@@ -266,69 +259,8 @@ describe('the memory source (tests)', () => {
   });
 });
 
-describe('the bmad-loop resolver', () => {
-  it('names the executable where uv puts it on each OS', () => {
-    expect(bmadLoopExecutable(join('v'), 'linux')).toBe(join('v', 'bin', 'bmad-loop'));
-    expect(bmadLoopExecutable(join('v'), 'darwin')).toBe(join('v', 'bin', 'bmad-loop'));
-    expect(bmadLoopExecutable(join('v'), 'win32')).toBe(join('v', 'Scripts', 'bmad-loop.exe'));
-  });
-
-  it('downloads the source, installs it with uv venv and uv pip install --build-constraints in the work folder with only the given environment, and reuses it', async () => {
-    const dataDir = tempDir();
-    const workDir = tempDir();
-    const srcDir = tempDir();
-    writeFileSync(join(srcDir, 'pyproject.toml'), '[project]\nname = "bmad-loop"\n');
-    const envFile = join(tempDir(), 'uv.jsonl');
-    const source = createMemoryBmadSource({ files: { 'pyproject.toml': join(srcDir, 'pyproject.toml') } });
-    const planted = { ...process.env, ANTHROPIC_API_KEY: 'sk-ant-planted', GITHUB_TOKEN: 'ghp_planted' };
-    const env = () => ({ ...uvEnvironment(planted), FAKE_UV_MODE: 'install', FAKE_UV_ENV_FILE: envFile });
-    const pin = { commit: COMMIT, buildConstraints: ['hatchling==1.32.4'] };
-    const resolver = createBmadLoopResolver({ source, pin, uvCommand: async () => ({ file: process.execPath, args: [FAKE_UV] }), env, dataDir, workDir });
-
-    const venv = join(dataDir, 'tools', 'bmad-loop', COMMIT);
-    expect(await resolver.resolve()).toBe(bmadLoopExecutable(venv));
-    expect(source.downloads).toBe(1);
-    const runs = readFileSync(envFile, 'utf8')
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line) as { argv: string[]; cwd: string; env: Record<string, string> });
-    expect(runs.map((run) => run.argv.slice(0, 2))).toEqual([
-      ['venv', '--no-config'],
-      ['pip', 'install'],
-    ]);
-    expect(runs[0]!.argv.at(-1)).toBe(venv);
-    const install = runs[1]!.argv;
-    expect(install[install.indexOf('--python') + 1]).toBe(venv);
-    expect(install.at(-1)).toBe(srcDir);
-    expect(install).toContain('--build-constraints');
-    for (const run of runs) {
-      // Windows may report the 8.3 short form of the temp path (RUNNER~1); compare resolved paths.
-      expect(realpathSync.native(run.cwd)).toBe(realpathSync.native(workDir));
-      const text = JSON.stringify(run.env);
-      for (const secret of ['sk-ant-planted', 'ghp_planted']) expect(text).not.toContain(secret);
-      expect(run.env.PYTHONUTF8).toBe('1');
-    }
-    // The constraints file is gone once installed.
-    expect(readdirSync(join(dataDir, 'tools', 'bmad-loop'))).toEqual([COMMIT]);
-
-    // A finished install is reused: no uv runs again.
-    expect(await resolver.resolve()).toBe(bmadLoopExecutable(venv));
-    expect(readFileSync(envFile, 'utf8').trim().split('\n')).toHaveLength(2);
-  });
-
-  it('without uv it fails and leaves no environment', async () => {
-    const dataDir = tempDir();
-    const srcDir = tempDir();
-    writeFileSync(join(srcDir, 'pyproject.toml'), '');
-    const source = createMemoryBmadSource({ files: { 'pyproject.toml': join(srcDir, 'pyproject.toml') } });
-    const resolver = createBmadLoopResolver({ source, uvCommand: async () => undefined, env: () => ({}), dataDir, workDir: tempDir() });
-    await expect(resolver.resolve()).rejects.toThrow(/needs uv/);
-    expect(existsSync(join(dataDir, 'tools', 'bmad-loop', BMAD_LOCK.sources['bmad-loop'].commit))).toBe(false);
-  });
-});
-
 describe('the shipped files', () => {
-  it('the lock pins both upstream repos to full commits with content hashes, unchanged by this story', () => {
+  it('the lock pins upstream BMad Method to a full commit with a content hash, and nothing else (entry 4.12 removed bmad-loop)', () => {
     expect(BmadLock.parse(BMAD_LOCK)).toEqual(BMAD_LOCK);
     expect(BMAD_LOCK.sources['bmad-method']).toMatchObject({
       repo: 'bmad-code-org/BMAD-METHOD',
@@ -336,13 +268,7 @@ describe('the shipped files', () => {
       include: 'skills/',
       contentHash: 'sha256:6a4471ad7c8861b47a881ca35e0b598b9d32aed10c1e19a78e559d005f2c3c7b',
     });
-    expect(BMAD_LOCK.sources['bmad-loop']).toMatchObject({
-      repo: 'bmad-code-org/bmad-loop',
-      ref: 'v0.13.0',
-      commit: '6bbe469637e2b8ac490b1f8c085aed8e2b19ce1b',
-      include: '',
-      buildConstraints: ['hatchling==1.32.4'],
-    });
+    expect(Object.keys(BMAD_LOCK.sources)).toEqual(['bmad-method']);
   });
 
   it("the lock's include is a folder inside the tree: no . or .. segments", () => {

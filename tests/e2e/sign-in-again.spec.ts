@@ -102,6 +102,36 @@ async function staysSent(page: Page, texts: string[], sessionState: string) {
   }
 }
 
+/**
+ * Starts recording the session state's values in the page (each change once,
+ * in order), so a test can wait for a turn that starts after this call. The
+ * resend's user message lands before its turn starts (core appends it, then
+ * sets `working`), so the state alone can't tell the resend's `error` from
+ * the one before it.
+ */
+async function recordStates(page: Page) {
+  await page.evaluate(() => {
+    const read = () => document.querySelector('[data-testid="session-state"]')?.getAttribute('data-state') ?? '';
+    const seen = [read()];
+    (window as unknown as { __sessionStates: string[] }).__sessionStates = seen;
+    new MutationObserver(() => {
+      const now = read();
+      if (seen.at(-1) !== now) seen.push(now);
+    }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-state'] });
+  });
+}
+
+/** Waits until the states recorded since {@link recordStates} show a turn that started (`working`) and then failed (`error`). */
+async function turnFailedSinceRecording(page: Page) {
+  await expect
+    .poll(async () => {
+      const seen = await page.evaluate(() => (window as unknown as { __sessionStates: string[] }).__sessionStates);
+      const working = seen.indexOf('working');
+      return working !== -1 && seen.indexOf('error', working + 1) !== -1;
+    })
+    .toBe(true);
+}
+
 /** Clicks the notice's Sign in; the page opens the sign-in tab, routed to the fake login, which finishes it. */
 async function signInThroughTab(page: Page, context: BrowserContext) {
   // The agents query has answered, so the notice knows the page opens the tab.
@@ -147,8 +177,11 @@ test('signed in but still refused: the one resend fails and nothing loops', asyn
     await startChat(page, chat.repo);
     await send(page, 'context');
     await expect(state(page)).toHaveAttribute('data-state', 'error');
+    await recordStates(page);
     const tab = await signInThroughTab(page, context);
     await expect(userMessages(page)).toHaveText(['context', 'context']);
+    // The resend's own turn: it started, then failed (not the earlier error, still shown when its message lands).
+    await turnFailedSinceRecording(page);
     await expect(state(page)).toHaveAttribute('data-state', 'error');
     await expect(page.getByTestId('session-error')).toHaveAttribute('data-error-code', 'auth_required');
     // A new error: its notice starts unarmed and offers Sign in and Try again again.

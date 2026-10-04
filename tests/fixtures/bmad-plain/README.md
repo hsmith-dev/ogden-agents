@@ -13,8 +13,9 @@ with `createPlainRepo`, so the fixtures themselves are never written.
   record at version `6.10.0`, a `_bmad/config.toml` with the project's own
   values (its output folder is `docs/planning`), `_bmad/custom/`, a mapped
   skill (`bmad-spec`) the user changed by hand in `.agents/skills`, and a
-  `_bmad/scripts/config_utils.py` without `load_central_config`. It has
-  `plain_labels` and lacks `ticket_tree`.
+  `_bmad/scripts/config_utils.py` without `load_central_config`. Its
+  `bmad-spec` isn't the verified pinned copy, so it gets no label (entry
+  4.12): it lacks both capabilities too.
 
 Provenance: hand-written for these tests, after the shape of upstream
 [`bmad-code-org/BMAD-METHOD`](https://github.com/bmad-code-org/BMAD-METHOD)

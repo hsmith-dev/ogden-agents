@@ -30,7 +30,7 @@
  */
 import { BMAD_SETUP_FAILURE_REASONS, bmadCapabilitiesFor, type BmadPiece, type BmadSetupStatus, type WorkspaceId } from '@ogden-agents/shared';
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
-import type { BmadFeatures } from './bmad-features.js';
+import type { BmadFeatures } from './bmad-pieces.js';
 import type { Entities } from './entities.js';
 import { BmadAlreadySetUpError, BmadNotSetUpError, BmadUpgradeRefusedError, CoreError } from './errors.js';
 import type { EventLog } from './event-log.js';

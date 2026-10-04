@@ -63,6 +63,7 @@ import {
   type MarkTicketResponse,
   type TicketsResponse,
 } from '@ogden-agents/shared';
+import { codeOf } from '../fs-safe.js';
 import { ScriptRunError, type UvScriptRunner } from '../toolchain-uv/script-runner.js';
 import { startFolderWatch, type FolderWatch, type FolderWatchTiming, type WatchDir } from './folder-watch.js';
 
@@ -129,8 +130,6 @@ const reasonOf = (error: ScriptRunError): TicketsUnavailableReason =>
 /** The script's own "no ticket matches" and "matches more than one ticket" (exit 1): either way no ticket is that ref. */
 const NO_MATCH = /^no ticket matches |matches more than one ticket/;
 
-const codeOfError = (error: unknown): unknown => (error as { code?: unknown } | null)?.code;
-
 /**
  * The output folder's real path, when it is inside the repo (never the repo
  * itself, nor in or below `.git`); rejects otherwise, links included. A
@@ -149,7 +148,7 @@ async function containedRoot(repoPath: string, outputFolder: string): Promise<st
       break;
     } catch (error) {
       const parent = dirname(existing);
-      if (codeOfError(error) !== 'ENOENT' || parent === existing) throw error;
+      if (codeOf(error) !== 'ENOENT' || parent === existing) throw error;
       rest.unshift(basename(existing));
       existing = parent;
     }

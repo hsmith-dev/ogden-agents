@@ -1,12 +1,14 @@
 /**
  * Verifying a pinned upstream BMad tarball (story 4.14, AD-13): the one
- * implementation of the content hash, the tar reader and the safe selection,
- * shared by the runtime (`bmad-source`) and the CI check
- * (`scripts/bmad-lock.mjs`, which imports this file directly with Node).
+ * implementation of the content hash and the safe selection, shared by the
+ * runtime (`bmad-source`) and the CI check (`scripts/bmad-lock.mjs`, which
+ * imports this file directly with Node). The tar reader is the adapters'
+ * shared one (`archive/tar.ts`), re-exported here.
  *
- * Self-contained on purpose: Node builtins only, and erasable TypeScript
- * syntax only (no enums, namespaces or parameter properties), so `node` can
- * load it without a build.
+ * Self-contained on purpose: Node builtins and `archive/tar.ts` only
+ * (imported with its `.ts` extension), and erasable TypeScript syntax only
+ * (no enums, namespaces or parameter properties), so `node` can load it
+ * without a build.
  *
  * - The hash is over contents, not archive bytes (codeload's tarball bytes
  *   are not stable): sha256 over each selected file's path and contents, in
@@ -20,7 +22,10 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { gunzipSync } from 'node:zlib';
+import { ArchiveRefusedError, type TarEntry } from '../archive/tar.ts';
+
+// The generic tar reader lives in `archive/tar.ts` (entry 4.12); re-exported here under the same names.
+export { ArchiveRefusedError, gunzipLimited, parseTar, type TarEntry } from '../archive/tar.ts';
 
 /**
  * A file set: POSIX path relative to the selected folder → contents
@@ -30,27 +35,14 @@ import { gunzipSync } from 'node:zlib';
  */
 export type Entries = Map<string, Buffer> & { modes?: Map<string, number> };
 
-/** The largest tarball a download accepts (BMad Method's is under 2 MB, bmad-loop's under 8 MB). */
+/** The largest tarball a download accepts (BMad Method's is under 2 MB). */
 export const BMAD_DOWNLOAD_MAX_BYTES = 64 * 1024 * 1024;
-/** The largest unpacked tar accepted (both are under 25 MB). */
+/** The largest unpacked tar accepted (BMad Method's is under 25 MB). */
 export const BMAD_UNPACKED_MAX_BYTES = 256 * 1024 * 1024;
 
 /** The codeload URL of a pin's tarball: the exact commit, never a branch or tag. */
 export function tarballUrl(pin: { repo: string; commit: string }): string {
   return `https://codeload.github.com/${pin.repo}/tar.gz/${pin.commit}`;
-}
-
-/** One tar entry as {@link parseTar} reads it; `path` is the raw path from the archive. */
-export interface TarEntry {
-  path: string;
-  type: 'file' | 'dir' | 'symlink' | 'hardlink' | 'other';
-  mode: number;
-  data: Buffer;
-}
-
-/** The archive was refused: unreadable, unsafe, too large once unpacked. Nothing was written. */
-export class ArchiveRefusedError extends Error {
-  override readonly name = 'ArchiveRefusedError';
 }
 
 /** Text contents with CRLF turned into LF; a buffer with a NUL byte is binary and returned unchanged. */
@@ -68,104 +60,6 @@ export function hashEntries(entries: Entries): string {
     hash.update(data);
   }
   return `sha256:${hash.digest('hex')}`;
-}
-
-/** Gunzips `archive`, refusing output past `maxBytes` (a decompression bomb) or input that isn't gzip. */
-export function gunzipLimited(archive: Buffer, maxBytes: number): Buffer {
-  try {
-    return gunzipSync(archive, { maxOutputLength: maxBytes });
-  } catch (error) {
-    const code = (error as { code?: unknown }).code;
-    if (code === 'ERR_BUFFER_TOO_LARGE' || error instanceof RangeError) throw new ArchiveRefusedError(`the archive unpacks to more than ${maxBytes} bytes`);
-    throw new ArchiveRefusedError(`not a gzip file: ${String(error)}`);
-  }
-}
-
-const BLOCK = 512;
-
-function cString(buf: Buffer, start: number, length: number): string {
-  const slice = buf.subarray(start, start + length);
-  const end = slice.indexOf(0);
-  return slice.subarray(0, end === -1 ? slice.length : end).toString('utf8');
-}
-
-/** A tar numeric field: octal text, or big-endian base-256 when the high bit is set. */
-function tarNumber(buf: Buffer, start: number, length: number): number {
-  const field = buf.subarray(start, start + length);
-  if ((field[0]! & 0x80) !== 0) {
-    let value = field[0]! & 0x7f;
-    for (let i = 1; i < field.length; i++) value = value * 256 + field[i]!;
-    return value;
-  }
-  const text = cString(buf, start, length).trim();
-  if (text === '') return 0;
-  if (!/^[0-7]+$/.test(text)) throw new ArchiveRefusedError(`bad tar number "${text}"`);
-  return parseInt(text, 8);
-}
-
-/** The `path` record of a pax extended header, if any. */
-function paxPath(data: Buffer): string | undefined {
-  let offset = 0;
-  let path: string | undefined;
-  while (offset < data.length) {
-    const space = data.indexOf(0x20, offset);
-    if (space === -1) break;
-    const length = Number(data.subarray(offset, space).toString('ascii'));
-    if (!Number.isInteger(length) || length <= 0 || offset + length > data.length) break;
-    const record = data.subarray(space + 1, offset + length - 1).toString('utf8');
-    const eq = record.indexOf('=');
-    if (eq !== -1 && record.slice(0, eq) === 'path') path = record.slice(eq + 1);
-    offset += length;
-  }
-  return path;
-}
-
-/**
- * Entries of an uncompressed tar archive (ustar, with pax and GNU long
- * names, as GitHub serves them), in archive order. Pax and GNU long-name
- * headers are applied to the next entry; global pax headers are skipped. An
- * entry running past the end refuses the archive.
- */
-export function parseTar(tar: Buffer): TarEntry[] {
-  const out: TarEntry[] = [];
-  let offset = 0;
-  let longName: string | undefined;
-  while (offset + BLOCK <= tar.length) {
-    const header = tar.subarray(offset, offset + BLOCK);
-    if (header.every((byte) => byte === 0)) break;
-    const size = tarNumber(header, 124, 12);
-    const mode = tarNumber(header, 100, 8);
-    const flag = header[156] === 0 ? '0' : String.fromCharCode(header[156]!);
-    const dataStart = offset + BLOCK;
-    const dataEnd = dataStart + size;
-    if (dataEnd > tar.length) throw new ArchiveRefusedError('a tar entry runs past the end of the archive');
-    const data = tar.subarray(dataStart, dataEnd);
-    offset = dataStart + Math.ceil(size / BLOCK) * BLOCK;
-
-    if (flag === 'x') {
-      longName = paxPath(data) ?? longName;
-      continue;
-    }
-    if (flag === 'L') {
-      longName = cString(data, 0, data.length);
-      continue;
-    }
-    if (flag === 'g' || flag === 'K') continue;
-
-    let name = cString(header, 0, 100);
-    // POSIX ustar (`ustar\0`) has a name prefix; old GNU tar (`ustar  `) keeps other fields there.
-    if (header.subarray(257, 263).toString('latin1') === 'ustar\0') {
-      const prefix = cString(header, 345, 155);
-      if (prefix !== '') name = `${prefix}/${name}`;
-    }
-    if (longName !== undefined) name = longName;
-    longName = undefined;
-
-    const type: TarEntry['type'] =
-      flag === '0' || flag === '7' ? 'file' : flag === '5' ? 'dir' : flag === '2' ? 'symlink' : flag === '1' ? 'hardlink' : 'other';
-    out.push({ path: name, type, mode, data });
-  }
-  return out;
 }
 
 /** Why `path` (a raw archive path) is unsafe to use, or `undefined` when it is a plain relative path. */

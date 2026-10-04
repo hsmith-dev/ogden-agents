@@ -2,8 +2,8 @@
  * The pinned upstream BMad Method (story 4.14, AD-13): the port that gets
  * it, and the install-level use-case over it.
  *
- * Each Ogden Agents release pins upstream BMad Method (and bmad-loop) to one
- * commit and a content hash. The adapter (`bmad-source`) downloads the
+ * Each Ogden Agents release pins upstream BMad Method to one commit and a
+ * content hash. The adapter (`bmad-source`) downloads the
  * pinned tarball only when the user asks, verifies it in memory, and writes
  * only the verified files into a fresh folder in the data folder; BMad
  * Method's scripts that Ogden Agents runs itself run only from there. Core

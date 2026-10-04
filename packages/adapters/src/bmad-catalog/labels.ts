@@ -14,7 +14,8 @@
  * and the rest still counts (AD-14: nothing fails silently); an unknown key
  * (a misspelt field, say) is reported too. A skill the mapping doesn't name
  * keeps its `SKILL.md` description and `null` label, group and next, which
- * the Plan page shows as the name and description.
+ * the Plan page shows as the name and description, and so does a mapped
+ * skill whose folder isn't the verified pinned copy's (entry 4.12).
  */
 import type { InstalledSkill } from '@ogden-agents/core';
 import { CatalogSkill, SKILL_NAME_PATTERN, type CatalogNext, type SkillName } from '@ogden-agents/shared';
@@ -135,18 +136,22 @@ export function readModuleLabels(raw: unknown): { labels: LabelMap; problems: st
 /**
  * The installed skills with the mapping's labels: `label`, `group` and
  * `next` from the skill's entry, and its `description` replaced by the
- * one-sentence one when given. A `next` whose skill isn't installed is
- * `null`, and so is the entry action when its skill isn't installed.
- * `labelled` says whether any installed skill got a label.
+ * one-sentence one when given. Only a skill in `verified` (entry 4.12: its
+ * folder is the verified pinned copy's, `verified.ts`) is labelled; any
+ * other keeps its `SKILL.md` description and no label, group or next. A
+ * `next` whose skill isn't installed and verified is `null`, and so is the
+ * entry action when its skill isn't. `labelled` says whether any installed
+ * skill got a label.
  */
 export function applyLabels(
   skills: readonly InstalledSkill[],
   labels: LabelMap,
+  verified: ReadonlySet<string>,
 ): { skills: CatalogSkill[]; entryAction: SkillName | null; labelled: boolean } {
-  const installed = new Set(skills.map((skill) => skill.name));
+  const installed = new Set(skills.map((skill) => skill.name).filter((name) => verified.has(name)));
   let labelled = false;
   const result = skills.map((skill) => {
-    const found = labels.skills.get(skill.name);
+    const found = installed.has(skill.name) ? labels.skills.get(skill.name) : undefined;
     if (found === undefined) return CatalogSkill.parse(skill);
     labelled = true;
     return CatalogSkill.parse({

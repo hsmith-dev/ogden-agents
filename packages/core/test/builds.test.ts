@@ -335,7 +335,7 @@ describe('starting a build (story 5.2)', () => {
     expect(setup.sandbox.allowedReads).toEqual([run.worktreePath]);
     expect(setup.decide({ toolCallId: 't', title: 'w', kind: 'edit', paths: ['/repo/.git/refs/heads/main'] }).outcome).toBe('deny');
     expect(setup.decide({ toolCallId: 't', title: 'w', kind: 'edit', paths: [`/repo/.git/refs/heads/ogden/${runShort}/x`] }).outcome).toBe('allow_once');
-    expect(setup.sandbox.deniedPaths).toEqual(expect.arrayContaining(['/repo/.git/hooks', '/repo/.git/config', join(run.worktreePath!, '_bmad')]));
+    expect(setup.sandbox.deniedPaths).toEqual(expect.arrayContaining([join('/repo/.git', 'hooks'), join('/repo/.git', 'config'), join(run.worktreePath!, '_bmad')]));
     expect(setup.decide({ toolCallId: 't', title: 'w', kind: 'edit', paths: [join(run.worktreePath!, 'src', 'a.ts')] }).outcome).toBe('allow_once');
     expect(setup.decide({ toolCallId: 't', title: 'w', kind: 'edit', paths: [join(h.repo, 'src', 'a.ts')] }).outcome).toBe('deny');
     expect(setup.decide({ toolCallId: 't', title: 'w', kind: 'execute', command: 'curl x' }).outcome).toBe('deny');

@@ -20,7 +20,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { ANTIGRAVITY_PINS } from '@ogden-agents/adapters';
+import { ANTIGRAVITY_PINS, writeInstallRecord } from '@ogden-agents/adapters';
 import {
   API_ROUTES,
   apiPath,
@@ -54,7 +54,9 @@ async function serverFor(agent: 'claude-code' | 'antigravity'): Promise<TestServ
   const dataDir = tempDataDir();
   const folder = join(dataDir, 'agents', 'antigravity', ANTIGRAVITY_PINS.version);
   mkdirSync(folder, { recursive: true });
-  writeFileSync(join(folder, PINNED!.binary), '');
+  // The pinned files (empty, never run) and the install record Install writes once it checked them (6.7).
+  for (const name of Object.keys(PINNED!.files)) writeFileSync(join(folder, name), '');
+  writeInstallRecord(folder, { version: ANTIGRAVITY_PINS.version, platform: `${process.platform}-${process.arch}`, reportedVersion: ANTIGRAVITY_PINS.version, files: Object.fromEntries(Object.keys(PINNED!.files).map((name) => [name, 0])) });
   const script = join(tempDataDir(), 'antigravity-server.mjs');
   writeFileSync(script, `await import(${JSON.stringify(pathToFileURL(FAKE_ANTIGRAVITY).href)});\n`);
   vi.stubEnv(ANTIGRAVITY_SERVER_ENV, script);

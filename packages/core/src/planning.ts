@@ -112,10 +112,12 @@ export function createPlanning({ bmad, entities, catalog, chat, agent, agentOf, 
         checkedIdea = parsed.data;
       }
       const { skills } = await catalogOf(workspaceId);
-      if (!skills.some((entry) => entry.name === skill)) throw new NotFoundError('skill', skill);
+      const entry = skills.find((candidate) => candidate.name === skill);
+      if (entry === undefined) throw new NotFoundError('skill', skill);
       // Checked again after the (async) scan: a piece turned off meanwhile starts nothing.
       bmad.requireBmadFeature(workspaceId, 'planning');
-      const session = await chat.createChatSession(workspaceId, { kind: 'planning' });
+      // The chat is named after the action that started it (backlog story 2), not its skill invocation.
+      const session = await chat.createChatSession(workspaceId, { kind: 'planning', autoTitle: entry.label ?? entry.name });
       chat.sendMessage(workspaceId, session.id, (agentOf?.(session) ?? agent).skillInvocation(skill, checkedIdea));
       return session;
     },

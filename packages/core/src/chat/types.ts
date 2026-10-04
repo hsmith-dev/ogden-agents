@@ -160,7 +160,10 @@ export interface Chat {
    * needs a project trust the project lacks, isn't installed, or isn't
    * signed in.
    */
-  createChatSession(workspaceId: WorkspaceId, options?: { kind?: Exclude<SessionKind, 'build'> | undefined; agentId?: AgentId | undefined }): Promise<Session>;
+  createChatSession(
+    workspaceId: WorkspaceId,
+    options?: { kind?: Exclude<SessionKind, 'build'> | undefined; agentId?: AgentId | undefined; autoTitle?: string | undefined },
+  ): Promise<Session>;
   /**
    * The agents a chat can be started with, in order (epic 6; frozen in 6.3):
    * what each is, the permission modes it declares, its setup, and why a new
@@ -169,6 +172,13 @@ export interface Chat {
   chatAgents(): Promise<{ agents: ChatAgent[]; defaultAgentId: AgentId }>;
   /** The session, which must belong to the workspace (`NotFoundError` otherwise). */
   getSession(workspaceId: WorkspaceId, sessionId: SessionId): Session;
+  /**
+   * Sets the user's name for the chat (backlog story 2), in any state and
+   * whoever drives; blank or `null` clears it. Appends `session.renamed`
+   * when it changed. Never told to the agent. `ValidationError` for a name
+   * too long (nothing stored), `NotFoundError` for an unknown session.
+   */
+  renameSession(workspaceId: WorkspaceId, sessionId: SessionId, title: string | null): Session;
   /**
    * Stores the user's message and hands it to the session's agent, starting
    * the agent first if needed. Returns once the message is stored; the reply

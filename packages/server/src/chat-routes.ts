@@ -38,6 +38,7 @@ import {
   CreateSessionRequest,
   CreateWorkspaceRequest,
   FEATURE_UNAVAILABLE_MESSAGE,
+  RenameSessionRequest,
   SendMessageRequest,
   SendMessageResponse,
   SessionResponse,
@@ -177,6 +178,22 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
       return c.json(SessionResponse.parse({ session, permissionModes: chat.permissionModeOptions(scope.workspaceId, scope.sessionId) }));
     } catch (error) {
       if (error instanceof CoreError) log.info('chat permission mode refused', { workspaceId: scope.workspaceId, sessionId: scope.sessionId, mode: body.value.mode, code: error.code });
+      return refusal(c, error);
+    }
+  });
+
+  // The chat's name (backlog story 2): core normalizes it and refuses one too long; never sent to the agent.
+  app.put(API_ROUTES.sessionTitle, limit, async (c) => {
+    const scope = ids(c);
+    if (scope?.sessionId === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+    const body = await readBody(c, RenameSessionRequest);
+    if (!body.ok) return body.response;
+    try {
+      const session = chat.renameSession(scope.workspaceId, scope.sessionId, body.value.title);
+      // Never the name itself: it is the user's words.
+      log.info('chat renamed', { workspaceId: scope.workspaceId, sessionId: scope.sessionId, named: session.title !== null });
+      return c.json(SessionResponse.parse({ session }));
+    } catch (error) {
       return refusal(c, error);
     }
   });

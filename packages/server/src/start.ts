@@ -255,6 +255,9 @@ async function listenAndAnnounce({
   // No permission mode but Ask outlives the run it was chosen in (cause `restart`).
   const reset = core.entities.resetPermissionModes();
   if (reset.length > 0) log.info('chats in Auto or Skip all are back in Ask after the restart', { sessions: reset.length });
+  // Chats from before chat names get their automatic name from their first message (backlog story 2).
+  const named = core.entities.backfillAutoTitles();
+  if (named.length > 0) log.info('older chats were named from their first message', { sessions: named.length });
   // One instance for the chat that asks and the routes that answer: core's (story 2.6).
   const permissions = core.permissions;
   const configuredCheckIn = options.checkInDelayMs ?? hooks.checkInMs;

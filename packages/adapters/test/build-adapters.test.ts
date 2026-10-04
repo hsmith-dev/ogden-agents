@@ -34,19 +34,19 @@ describe('sandbox-claude-native (story 5.2, fail closed)', () => {
   const only = (files: string[]) => (file: string) => files.includes(file);
   it('macOS: Seatbelt with sandbox-exec, else unavailable', async () => {
     expect(await createClaudeNativeSandbox({ platform: 'darwin', isExecutable: only(['/usr/bin/sandbox-exec']) }).check()).toEqual({ available: true, kind: 'seatbelt' });
-    expect(await createClaudeNativeSandbox({ platform: 'darwin', isExecutable: only([]) }).check()).toEqual({ available: false, reason: NO_SEATBELT });
+    expect(await createClaudeNativeSandbox({ platform: 'darwin', isExecutable: only([]) }).check()).toEqual({ available: false, reason: NO_SEATBELT, choices: ['install_docker', 'attended', 'other_agent'] });
   });
 
   it('Linux: bubblewrap only with both bwrap and socat on PATH', async () => {
     const path = ['/opt/a', '/usr/bin'].join(':');
     expect(await createClaudeNativeSandbox({ platform: 'linux', path, isExecutable: only(['/usr/bin/bwrap', '/opt/a/socat']) }).check()).toEqual({ available: true, kind: 'bubblewrap' });
-    expect(await createClaudeNativeSandbox({ platform: 'linux', path, isExecutable: only(['/usr/bin/bwrap']) }).check()).toEqual({ available: false, reason: NO_BUBBLEWRAP });
-    expect(await createClaudeNativeSandbox({ platform: 'linux', path: '', isExecutable: () => true }).check()).toEqual({ available: false, reason: NO_BUBBLEWRAP });
+    expect(await createClaudeNativeSandbox({ platform: 'linux', path, isExecutable: only(['/usr/bin/bwrap']) }).check()).toEqual({ available: false, reason: NO_BUBBLEWRAP, choices: ['install_docker', 'attended', 'other_agent'] });
+    expect(await createClaudeNativeSandbox({ platform: 'linux', path: '', isExecutable: () => true }).check()).toEqual({ available: false, reason: NO_BUBBLEWRAP, choices: ['install_docker', 'attended', 'other_agent'] });
   });
 
   it('Windows (and anything else): no native sandbox, never unsandboxed', async () => {
-    expect(await createClaudeNativeSandbox({ platform: 'win32', isExecutable: () => true }).check()).toEqual({ available: false, reason: NO_SANDBOX_ON_WINDOWS });
-    expect(await createClaudeNativeSandbox({ platform: 'freebsd', isExecutable: () => true }).check()).toEqual({ available: false, reason: NO_SANDBOX_ON_WINDOWS });
+    expect(await createClaudeNativeSandbox({ platform: 'win32', isExecutable: () => true }).check()).toEqual({ available: false, reason: NO_SANDBOX_ON_WINDOWS, choices: ['attended', 'install_docker', 'other_agent'] });
+    expect(await createClaudeNativeSandbox({ platform: 'freebsd', isExecutable: () => true }).check()).toEqual({ available: false, reason: NO_SANDBOX_ON_WINDOWS, choices: ['attended', 'install_docker', 'other_agent'] });
   });
 
   it('a fixed sandbox answers what it was given (tests)', async () => {

@@ -65,7 +65,8 @@ export function createMemoryVcs(): MemoryVcs {
     if (found === undefined) throw new VcsError('That is not a worktree.', { step: 'worktree' });
     return found;
   };
-  const branchOfRevision = (state: MemoryRepo, revision: string): string | undefined => [...state.branches].find(([, commit]) => commit === revision)?.[0];
+  /** The branch (other than the checked-out one) at `revision`. */
+  const branchOfRevision = (state: MemoryRepo, revision: string): string | undefined => [...state.branches].find(([name, commit]) => name !== state.branch && commit === revision)?.[0];
 
   return {
     calls,

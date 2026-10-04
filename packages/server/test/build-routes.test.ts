@@ -24,7 +24,20 @@ import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { createFixedSandbox } from '@ogden-agents/adapters';
 import type { TicketStorePort } from '@ogden-agents/core';
-import { API_ROUTES, ApiErrorBody, apiPath, BuildResponse, FEATURE_OFF_MESSAGE, MERGE_CONFLICT_MESSAGE, ReviewResponse, RUN_REASON_NO_NETWORK, SessionRunResponse, WorkspaceResponse } from '@ogden-agents/shared';
+import {
+  ALL_READY_NOT_AVAILABLE_MESSAGE,
+  API_ROUTES,
+  ApiErrorBody,
+  apiPath,
+  BuildResponse,
+  FEATURE_OFF_MESSAGE,
+  MERGE_CONFLICT_MESSAGE,
+  ReviewResponse,
+  RUN_REASON_NO_NETWORK,
+  runPhase,
+  SessionRunResponse,
+  WorkspaceResponse,
+} from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { createFakeBmadRepo, FAKE_BUILD_PLAN, FAKE_BUILD_TICKET_FILES, FAKE_BUILD_WAITING_PLAN, fixtureGit } from '../../../tests/fixtures/fake-bmad-repo.js';
 import { createPlanFileTicketStore } from '../../../tests/fixtures/plan-file-ticket-store.js';
@@ -157,7 +170,13 @@ describe('Unattended builds over REST (story 5.2)', () => {
 
     const approved = await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildApprove, { wsId, ref: '1.1' }), { revision: (await review('1.1')).headRevision });
     expect(approved.status).toBe(200);
-    expect(ReviewResponse.parse(await approved.json()).merged).toBe(true);
+    const approvedReview = ReviewResponse.parse(await approved.json());
+    expect(approvedReview.merged).toBe(true);
+    // Story 5.3: the decision is recorded with the merge commit; the run shows as approved.
+    expect(approvedReview.run).toMatchObject({ outcome: 'verified', decision: 'approved', agent: 'claude-code' });
+    expect(runPhase(approvedReview.run)).toBe('approved');
+    const decided = server.core.events.readAfter(0).find((event) => event.type === 'run.decided');
+    expect(decided?.type === 'run.decided' ? decided.payload : undefined).toEqual({ runId: run.id, decision: 'approved', mergeRevision: fixtureGit(repo.path, 'rev-parse', 'HEAD').trim() });
     // One merge commit on the checked-out branch, with the change and the plan done.
     expect(fixtureGit(repo.path, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe('main');
     expect(fixtureGit(repo.path, 'rev-list', '--parents', '-n', '1', 'HEAD').trim().split(' ')).toHaveLength(3);
@@ -193,12 +212,18 @@ describe('Unattended builds over REST (story 5.2)', () => {
     expect(fixtureGit(repo.path, 'rev-parse', 'HEAD').trim()).toBe(head);
     expect(fixtureGit(repo.path, 'status', '--porcelain').trim()).toBe('');
     expect(readFileSync(conflicting, 'utf8')).toBe('Something else entirely.\n');
-    expect(server.core.entities.getRun(run.id)).toMatchObject({ outcome: 'blocked', reason: MERGE_CONFLICT_MESSAGE });
+    expect(server.core.entities.getRun(run.id)).toMatchObject({ outcome: 'blocked', reason: MERGE_CONFLICT_MESSAGE, blockedCode: 'merge_conflict' });
+    expect(runPhase(server.core.entities.getRun(run.id)!)).toBe('needs_you');
     expect(store.marks).toEqual([]);
 
     const rejected = await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildReject, { wsId, ref: '1.1' }));
     expect(rejected.status).toBe(200);
-    expect(ReviewResponse.parse(await rejected.json()).outcome).toBe('stopped');
+    const rejectedReview = ReviewResponse.parse(await rejected.json());
+    expect(rejectedReview.outcome).toBe('stopped');
+    // Story 5.3: Reject is recorded as the user's decision, so the run shows as rejected (not stopped).
+    expect(rejectedReview.run).toMatchObject({ decision: 'rejected', blockedCode: null });
+    expect(runPhase(rejectedReview.run)).toBe('rejected');
+    expect(server.core.events.readAfter(0).some((event) => event.type === 'run.decided' && event.payload.runId === run.id && event.payload.decision === 'rejected')).toBe(true);
     expect(existsSync(run.worktreePath!)).toBe(false);
     expect(branches(repo.path)).toEqual(['main', run.branch]);
     expect(store.marks).toEqual([]);
@@ -220,6 +245,8 @@ describe('Unattended builds over REST (story 5.2)', () => {
     let review: ReviewResponse | undefined;
     await waitFor(async () => (review = ReviewResponse.parse(await (await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceBuild, { wsId, ref: '1.1' }))).json())).outcome !== 'running', 'the run to end', 15_000);
     expect(review).toMatchObject({ outcome: 'blocked', reason: `The fake agent was told to block. ${RUN_REASON_NO_NETWORK}` });
+    // A halt no code names is `other` (the runner's mapping, story 5.3).
+    expect(review!.run.blockedCode).toBe('other');
     expect((await refusalOf(await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildApprove, { wsId, ref: '1.1' }), { revision: review!.headRevision }))).code).toBe('checks_failed');
   });
 
@@ -234,7 +261,71 @@ describe('Unattended builds over REST (story 5.2)', () => {
     core.entities.setRunOutcome(run.id, 'running');
     core.close();
     const again = await startTestServer({ dataDir, sandbox: createFixedSandbox({ available: true, kind: 'test' }) });
-    expect(again.core.entities.getRun(run.id)).toMatchObject({ outcome: 'blocked', reason: 'interrupted' });
+    expect(again.core.entities.getRun(run.id)).toMatchObject({ outcome: 'blocked', reason: 'interrupted', blockedCode: 'interrupted' });
+    expect(runPhase(again.core.entities.getRun(run.id)!)).toBe('interrupted');
     expect(existsSync(run.worktreePath!)).toBe(true);
+  });
+
+  it("a halt the skill writes is the runner's blocked code; an intent gap leaves its patch beside the plan (story 5.3's fake)", async () => {
+    const repo = buildRepo();
+    const server = await startTestServer({
+      ticketStore: createPlanFileTicketStore(TICKETS) as unknown as TicketStorePort,
+      sandbox: createFixedSandbox({ available: true, kind: 'test' }),
+      extraAgentEnv: { FAKE_ACP_BUILD_HALT: 'intent gap: what should the thing say?', FAKE_ACP_CHUNK_DELAY_MS: '1' },
+    });
+    const tab = await signIn(server);
+    const wsId = WorkspaceResponse.parse(await (await request(server, tab, 'POST', API_ROUTES.workspaces, { path: repo.path })).json()).workspace.id;
+    await request(server, tab, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: ['board', 'builds'] });
+    await request(server, tab, 'PUT', apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId }));
+    const { run } = BuildResponse.parse(await (await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId }), { ref: '1.1' })).json());
+    let review: ReviewResponse | undefined;
+    await waitFor(async () => (review = ReviewResponse.parse(await (await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceBuild, { wsId, ref: '1.1' }))).json())).outcome !== 'running', 'the run to end', 15_000);
+    expect(review!.run).toMatchObject({ outcome: 'blocked', blockedCode: 'intent_gap' });
+    expect(runPhase(review!.run)).toBe('needs_you');
+    const outcome = server.core.events.readAfter(0).find((event) => event.type === 'run.outcome_changed' && event.payload.runId === run.id);
+    expect(outcome?.type === 'run.outcome_changed' ? outcome.payload.blockedCode : undefined).toBe('intent_gap');
+    // The saved fix is beside the plan in the run's worktree, and the code change was reverted.
+    expect(readFileSync(join(run.worktreePath!, ...FAKE_BUILD_PLAN.replace(/\.md$/, '.patch').split('/')), 'utf8')).toContain('+++ b/src/fix-1.1.txt');
+    expect(existsSync(join(run.worktreePath!, 'src', 'built-1.1.txt'))).toBe(false);
+  });
+
+  it("epics 5 and 11's other routes (story 5.3): behind the piece's guard, then 501 until their lanes; Build all ready is 501, an unknown agent 400", async () => {
+    const off = await setup({ builds: false });
+    const runId = 'run_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
+    const routes = (wsId: string): Array<[string, string]> => [
+      ['GET', apiPath(API_ROUTES.workspaceRuns, { wsId })],
+      ['GET', apiPath(API_ROUTES.workspaceRun, { wsId, runId })],
+      ['POST', apiPath(API_ROUTES.runStop, { wsId, runId })],
+      ['POST', apiPath(API_ROUTES.runRetry, { wsId, runId })],
+      ['POST', apiPath(API_ROUTES.runCheckAgain, { wsId, runId })],
+      ['GET', apiPath(API_ROUTES.workspaceBuildSettings, { wsId })],
+      ['PATCH', apiPath(API_ROUTES.workspaceBuildSettings, { wsId })],
+    ];
+    for (const [method, path] of routes(off.wsId)) {
+      expect(await refusalOf(await request(off.server, off.tab, method, path, method === 'GET' ? undefined : {})), `${method} ${path}`).toEqual({ status: 409, code: 'feature_off', message: FEATURE_OFF_MESSAGE });
+    }
+    // The install's run limits and notifications are not a piece's: 501 with builds off too.
+    for (const [method, path] of [
+      ['GET', API_ROUTES.runLimits],
+      ['PATCH', API_ROUTES.runLimits],
+      ['GET', API_ROUTES.notificationSettings],
+      ['PATCH', API_ROUTES.notificationSettings],
+      ['POST', API_ROUTES.notificationWebhooks],
+      ['PATCH', apiPath(API_ROUTES.notificationWebhook, { webhookId: 'hook_01J9Z3K4M5N6P7Q8R9S0T1V2W3' })],
+      ['DELETE', apiPath(API_ROUTES.notificationWebhook, { webhookId: 'hook_01J9Z3K4M5N6P7Q8R9S0T1V2W3' })],
+      ['POST', apiPath(API_ROUTES.notificationWebhookTest, { webhookId: 'hook_01J9Z3K4M5N6P7Q8R9S0T1V2W3' })],
+    ] as Array<[string, string]>) {
+      expect((await refusalOf(await request(off.server, off.tab, method, path, method === 'GET' ? undefined : {}))).code, `${method} ${path}`).toBe('not_implemented');
+    }
+
+    const on = await setup();
+    for (const [method, path] of routes(on.wsId)) {
+      expect((await refusalOf(await request(on.server, on.tab, method, path, method === 'GET' ? undefined : {}))).status, `${method} ${path}`).toBe(501);
+    }
+    const all = await request(on.server, on.tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId: on.wsId }), { all: true });
+    expect(await refusalOf(all)).toEqual({ status: 501, code: 'not_implemented', message: ALL_READY_NOT_AVAILABLE_MESSAGE });
+    expect((await refusalOf(await request(on.server, on.tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId: on.wsId }), { agent: 'codex', ref: '1.1' }))).code).toBe('invalid_request');
+    expect(on.server.core.entities.listSessions(on.wsId)).toEqual([]);
+    expect(branches(on.repo.path)).toEqual(['main']);
   });
 });

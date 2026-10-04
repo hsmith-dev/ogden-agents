@@ -118,13 +118,20 @@ function openTestCore(): Core {
   return core;
 }
 
-/** Unattended builds' routes (story 5.2): each serves `builds` and checks the script trust. */
+/** Unattended builds' routes (story 5.2; story 5.3 adds epics 5 and 11's others): each serves `builds` and checks the script trust. */
 const BUILD_ROUTES: readonly string[] = [
   `POST ${API_ROUTES.workspaceBuilds}`,
   `GET ${API_ROUTES.workspaceBuild}`,
   `POST ${API_ROUTES.workspaceBuildApprove}`,
   `POST ${API_ROUTES.workspaceBuildReject}`,
   `GET ${API_ROUTES.sessionRun}`,
+  `GET ${API_ROUTES.workspaceRuns}`,
+  `GET ${API_ROUTES.workspaceRun}`,
+  `POST ${API_ROUTES.runStop}`,
+  `POST ${API_ROUTES.runRetry}`,
+  `POST ${API_ROUTES.runCheckAgain}`,
+  `GET ${API_ROUTES.workspaceBuildSettings}`,
+  `PATCH ${API_ROUTES.workspaceBuildSettings}`,
 ];
 
 /** The routes that serve a piece in the fully wired app (stories 4.1 and 4.2), sorted as `guardedRouteKeys` lists them. */

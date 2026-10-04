@@ -254,3 +254,73 @@ describe('vcs-git (story 5.2)', () => {
     expect(await vcs.staged(repo)).toEqual([]);
   });
 });
+
+describe('vcs-git (story 5.3: diff stats, worktree lookup, rebase, patch)', () => {
+  const branched = async () => {
+    const context = setup();
+    const path = join(context.data, 'w', 'abcdefgh');
+    mkdirSync(join(context.data, 'w'));
+    await context.vcs.addWorktree(context.repo, { path, branch: 'ogden/abcdefgh/1.1-x', base: context.head });
+    return { ...context, path, branch: 'ogden/abcdefgh/1.1-x' };
+  };
+
+  it("counts a branch's files, insertions and deletions as git does", async () => {
+    const { repo, vcs, head, path, branch } = await branched();
+    writeFileSync(join(path, 'src', 'a.ts'), 'export const a = 2;\nexport const b = 3;\n');
+    writeFileSync(join(path, 'src', 'c.ts'), 'one\ntwo\nthree\n');
+    writeFileSync(join(path, 'image.bin'), Buffer.from([0, 1, 2, 0, 255]));
+    git(path, 'add', '-A');
+    git(path, 'commit', '-q', '--no-verify', '-m', 'change');
+    expect(await vcs.diffStats(repo, head, branch)).toEqual({ files: 3, insertions: 5, deletions: 1 });
+    git(path, 'reset', '-q', '--hard', head);
+    expect(await vcs.diffStats(repo, head, branch)).toEqual({ files: 0, insertions: 0, deletions: 0 });
+  });
+
+  it("knows its own worktrees, and nothing else (a plain folder, a removed one)", async () => {
+    const { repo, data, vcs, path } = await branched();
+    expect(await vcs.worktreeExists(repo, path)).toBe(true);
+    expect(await vcs.worktreeExists(repo, temp('ogden-agents-vcs-other-'))).toBe(false);
+    await vcs.removeWorktree(repo, path);
+    expect(await vcs.worktreeExists(repo, path)).toBe(false);
+    expect(await vcs.worktreeExists(repo, join(data, 'w', 'missing'))).toBe(false);
+  });
+
+  it('rebases the worktree onto a newer commit, and on a conflict leaves it as it was, running no hook', async () => {
+    const { repo, vcs, path, markers } = await branched();
+    writeFileSync(join(path, 'src', 'b.ts'), 'mine\n');
+    git(path, 'add', '-A');
+    git(path, 'commit', '-q', '--no-verify', '-m', 'run');
+    writeFileSync(join(repo, 'README.md'), '# Repo, newer\n');
+    git(repo, 'commit', '-q', '--no-verify', '-am', 'newer');
+    const newer = git(repo, 'rev-parse', 'HEAD').trim();
+    expect(await vcs.rebase(path, newer)).toBe('rebased');
+    expect(git(path, 'merge-base', '--is-ancestor', newer, 'HEAD')).toBe('');
+    expect(readFileSync(join(path, 'README.md'), 'utf8')).toBe('# Repo, newer\n');
+
+    writeFileSync(join(repo, 'src', 'b.ts'), 'theirs\n');
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '--no-verify', '-m', 'conflicting');
+    const before = git(path, 'rev-parse', 'HEAD').trim();
+    expect(await vcs.rebase(path, git(repo, 'rev-parse', 'HEAD').trim())).toBe('conflict');
+    expect(git(path, 'rev-parse', 'HEAD').trim()).toBe(before);
+    expect(git(path, 'status', '--porcelain').trim()).toBe('');
+    expect(readdirSync(markers)).toEqual([]);
+  });
+
+  it('applies a saved patch all or nothing, and refuses one that escapes the worktree or does not apply', async () => {
+    const { data, vcs, path } = await branched();
+    const patches = temp('ogden-agents-vcs-patches-');
+    const good = join(patches, 'good.patch');
+    writeFileSync(good, 'diff --git a/src/fix.txt b/src/fix.txt\nnew file mode 100644\n--- /dev/null\n+++ b/src/fix.txt\n@@ -0,0 +1 @@\n+fixed\n');
+    expect(await vcs.applyPatch(path, good)).toBe('applied');
+    expect(readFileSync(join(path, 'src', 'fix.txt'), 'utf8')).toBe('fixed\n');
+    // Applying it again doesn't apply cleanly: nothing changes.
+    expect(await vcs.applyPatch(path, good)).toBe('refused');
+    const escape = join(patches, 'escape.patch');
+    writeFileSync(escape, 'diff --git a/../escaped.txt b/../escaped.txt\nnew file mode 100644\n--- /dev/null\n+++ b/../escaped.txt\n@@ -0,0 +1 @@\n+out\n');
+    expect(await vcs.applyPatch(path, escape)).toBe('refused');
+    expect(existsSync(join(data, 'w', 'escaped.txt'))).toBe(false);
+    await expect(vcs.applyPatch(path, 'relative.patch')).rejects.toBeInstanceOf(VcsError);
+  });
+});
+

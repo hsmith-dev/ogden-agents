@@ -1,7 +1,7 @@
 /** Workspaces and their sessions, and deleting a workspace's history (moved from `chat.ts`, story 3.11). */
 import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
-import { PERMISSION_MODES, type AgentId, type ChatAgent, type SessionId } from '@ogden-agents/shared';
+import { PERMISSION_MODES, type AgentId, type ChatAgent, type SessionId, type WorkspaceId } from '@ogden-agents/shared';
 import { apiKeyMethod, type AgentDescriptor } from '../agent-descriptor.js';
 import type { AgentPort } from '../agent-port.js';
 import type { AgentReadiness } from '../agent-setup-types.js';
@@ -66,6 +66,15 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
     }
   };
 
+  /** Whether the project is trusted now (story 4.2's gate); no port, a no, or a throw is untrusted. */
+  const projectTrusted = async (workspaceId: WorkspaceId): Promise<boolean> => {
+    try {
+      return (await ctx.options.projectTrusted?.(workspaceId)) === true;
+    } catch {
+      return false;
+    }
+  };
+
   const methods: Pick<Chat, 'openWorkspace' | 'listWorkspaces' | 'getWorkspace' | 'listSessions' | 'deleteHistory' | 'createChatSession' | 'getSession' | 'chatAgents'> = {
     openWorkspace(input, options) {
       const path = input === '~' ? homedir() : input.startsWith('~/') || input.startsWith('~\\') ? join(homedir(), input.slice(2)) : input;
@@ -115,7 +124,7 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
       const descriptor = agents.describe(agentId);
       if (agents.get(agentId) === undefined || descriptor === undefined) throw new UnknownAgentError();
       // An agent that runs the project's own agent settings or hooks starts only in a trusted project (6.3).
-      if (descriptor.needsProjectTrust && ctx.options.projectTrusted?.(workspaceId) !== true) {
+      if (descriptor.needsProjectTrust && !(await projectTrusted(workspaceId))) {
         throw new AgentNotReadyError('project_not_trusted', projectNotTrustedReason(descriptor.displayName), agentId, 'trust_project');
       }
       const unavailable = unavailableReason(descriptor, await readiness(agentId));

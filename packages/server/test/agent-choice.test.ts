@@ -5,7 +5,7 @@
  * each; both stream at once and each reaches its own agent. The server
  * enforces the agent choice and each agent's declared modes from the API.
  */
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createClaudeCodeAgent } from '@ogden-agents/adapters';
@@ -227,6 +227,24 @@ describe('a new chat only with an agent that can start it (epic 6, 6.3)', () => 
     expect(refused.status).toBe(409);
     expect(ApiErrorBody.parse(await refused.json()).error).toMatchObject({ code: 'project_not_trusted', details: { agentId: 'fake-agent', action: 'trust_project' } });
     expect(server.core.entities.listSessions(wsId as never)).toHaveLength(0);
+  });
+
+  it("starts one once the project is trusted (story 4.2's trust), and refuses again once its scripts change (4.13)", async () => {
+    const { server, tab, wsId, newChat, chatWith } = await setUp(secondAgent({ descriptor: { needsProjectTrust: true } }));
+    expect((await newChat({ agentId: 'fake-agent' })).status).toBe(409);
+    expect((await request(server, tab, 'PUT', apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId }))).status).toBe(200);
+    const session = await chatWith('fake-agent');
+    expect(session.agentId).toBe('fake-agent');
+    // A script planted after the trust (by an agent or anyone) means the project is no longer the one the user trusted.
+    const repo = server.core.entities.getWorkspace(wsId as never)!.path;
+    mkdirSync(join(repo, '_bmad', 'scripts'), { recursive: true });
+    writeFileSync(join(repo, '_bmad', 'scripts', 'config_utils.py'), 'print("planted")\n');
+    const refused = await newChat({ agentId: 'fake-agent' });
+    expect(refused.status).toBe(409);
+    expect(ApiErrorBody.parse(await refused.json()).error).toMatchObject({ code: 'project_not_trusted', details: { agentId: 'fake-agent', action: 'trust_project' } });
+    // Agents that need no trust are not held back by it.
+    expect((await chatWith()).agentId).toBeDefined();
+    expect(server.core.entities.listSessions(wsId as never)).toHaveLength(2);
   });
 
   it('gives an agent with a home variable its own folder in the data folder, and no other agent its key', async () => {

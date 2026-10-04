@@ -417,7 +417,9 @@ async function listenAndAnnounce({
     agentEnv: chatEnv,
     // A new chat with an agent that isn't installed or signed in is refused (6.3); its status is read at most every 30 s.
     agentReadiness: (agentId) => agentSetup.readiness(agentId, subscriptionMaxAgeMs),
-    // No project is trusted until the per-project trust gate ships (story 4.2): an agent that needs it is refused.
+    // The per-project trust (story 4.2), as it stands now: trusted, and its scripts the ones the user allowed (4.13).
+    // An agent that needs a trusted project is refused until then, and again once the scripts change.
+    projectTrusted: (workspaceId) => core.bmadScriptTrust.scriptsUnchanged(workspaceId),
     terminal,
     // The chat follows the log (a mode changed by Developer mode reaches its agent) and gates Skip all on Developer mode.
     events: core.events,

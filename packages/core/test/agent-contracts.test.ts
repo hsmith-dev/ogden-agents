@@ -102,7 +102,7 @@ describe('an agent descriptor (6.3)', () => {
   });
 });
 
-function setUp(readiness: Record<string, AgentReadiness | Error> = {}, options: { trusted?: boolean; trustAgent?: boolean } = {}) {
+function setUp(readiness: Record<string, AgentReadiness | Error> = {}, options: { trusted?: boolean | (() => Promise<boolean>); trustAgent?: boolean } = {}) {
   const core = openTestCore();
   const agents = createAgentRegistry([
     registered('first-agent', port('First Agent', ['ask', 'auto', 'skip_all'])),
@@ -120,7 +120,7 @@ function setUp(readiness: Record<string, AgentReadiness | Error> = {}, options: 
       if (answer instanceof Error) throw answer;
       return answer ?? { install: 'installed', auth: 'signed_in' };
     },
-    ...(options.trusted === undefined ? {} : { projectTrusted: () => options.trusted! }),
+    ...(options.trusted === undefined ? {} : { projectTrusted: typeof options.trusted === 'function' ? options.trusted : () => options.trusted as boolean }),
   });
   const workspace = chat.openWorkspace(tempDir('ogden-agents-repo-'));
   return { core, chat, workspace, asked };
@@ -177,6 +177,11 @@ describe('a new chat only with an agent that can start it (6.3)', () => {
     expect((await untrusted.chat.createChatSession(untrusted.workspace.id)).agentId).toBe('first-agent');
     const trusted = setUp({}, { trustAgent: true, trusted: true });
     expect((await trusted.chat.createChatSession(trusted.workspace.id, { agentId: 'second-agent' })).agentId).toBe('second-agent');
+    // The trust may be read asynchronously (4.13: bound to the project's scripts); a check that fails is untrusted.
+    const read = setUp({}, { trustAgent: true, trusted: async () => true });
+    expect((await read.chat.createChatSession(read.workspace.id, { agentId: 'second-agent' })).agentId).toBe('second-agent');
+    const failing = setUp({}, { trustAgent: true, trusted: () => Promise.reject(new Error('unreadable')) });
+    expect(await refusal(failing.chat.createChatSession(failing.workspace.id, { agentId: 'second-agent' }))).toMatchObject({ code: 'project_not_trusted' });
   });
 
   it('lists every agent as the frozen agent list says, with why a chat is refused', async () => {

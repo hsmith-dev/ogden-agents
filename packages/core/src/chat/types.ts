@@ -73,10 +73,11 @@ export interface ChatOptions {
   agentReadiness?: (agentId: AgentId) => Promise<AgentReadiness>;
   /**
    * Whether the user trusted the project (6.3; the per-project trust gate,
-   * story 4.2). A chat with an agent whose descriptor `needsProjectTrust` is
-   * refused unless it says yes. Without it, no project is trusted.
+   * story 4.2, bound to the project's scripts since 4.13). A chat with an
+   * agent whose descriptor `needsProjectTrust` is refused unless it says yes;
+   * one that throws counts as no. Without it, no project is trusted.
    */
-  projectTrusted?: (workspaceId: WorkspaceId) => boolean;
+  projectTrusted?: (workspaceId: WorkspaceId) => boolean | Promise<boolean>;
 }
 
 /** A terminal's size in character cells. */

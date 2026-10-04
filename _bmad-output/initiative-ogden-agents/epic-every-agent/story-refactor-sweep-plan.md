@@ -3,12 +3,12 @@ title: 'Refactor sweep (epic 6)'
 type: 'refactor'
 ticket: '9'
 created: '2026-10-04'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
 review_loop_iteration: 0
 baseline_revision: '726ca509cdbe1375daf004e95a2f20bdc9b19f05'
 context:
@@ -62,19 +62,27 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `packages/web/src/api/keep-saved.ts` -- `keepSaved` -- one rule for every form.
-- [ ] each save site above -- `await keepSaved(...)` before clearing `chosen`, inside the latest gate -- (a).
-- [ ] web DOM tests -- one held-read regression per form -- (a).
-- [ ] `terminal-pty/index.ts` + test -- retry `Cannot create process, error code: 87` -- (b).
-- [ ] seven splits -- verbatim moves into sibling modules, re-exported.
-- [ ] `withTimeout` shared; `redactAnthropicKeys`, `useServerDeveloperMode` removed.
-- [ ] `deferred-work.md` -- index current; Log entries (Resolved: splits; the 87 retry).
+- [x] `packages/web/src/api/keep-saved.ts` -- `keepSaved` -- one rule for every form.
+- [x] each save site above -- `await keepSaved(...)` before clearing `chosen`, inside the latest gate -- (a).
+- [x] web DOM tests -- one held-read regression per form -- (a).
+- [x] `terminal-pty/index.ts` + test -- retry `Cannot create process, error code: 87` -- (b).
+- [x] seven splits -- verbatim moves into sibling modules, re-exported.
+- [x] `withTimeout` shared; `redactAnthropicKeys`, `useServerDeveloperMode` removed.
+- [x] `deferred-work.md` -- index current; Log entries (Resolved: splits; the 87 retry).
 
 **Acceptance Criteria:**
 - Given each settings form with its first read held, when the user saves, then the saved value stays after the held read answers.
 - Given the sweep, when `pnpm typecheck`, `pnpm test`, `pnpm e2e`, `pnpm run pack && pnpm smoke` and the provenance check run, then all pass and no source file the epic touched is over 600 lines.
 
 ## Implementation Notes
+
+- Implemented directly in this session (no implementation subagent).
+- (a) `packages/web/src/api/keep-saved.ts` `keepSaved` (cancel exact-key reads, then `setQueryData`); every save awaits it inside its latest gate and checks the gate again before clearing `chosen`. `keepSavedDeveloperMode` and the unawaited `cancelQueries` of 4.13 are gone; dead `useServerDeveloperMode` removed. `CautionLevelSection`, `DefaultAgentSection` and Welcome's `AgentStep` are exported for the tests. Regression: `web/test/settings-save-race.dom.test.tsx` (six forms) and a case in `bmad-method-section.dom.test.tsx`; Developer mode keeps its 6.7 test. All seven fail with the cancel disabled.
+- (b) Evidence: CI run 37239378578 attempt 1, windows-latest Node 24, `terminal-pty.test.ts` "a CLI that crashes on start", thrown from `connect` in `pty.spawn` right after the previous test's CLI crashed. node-pty 1.1.0 `conpty.cc`: `PtyConnect` holds a `pty_baton*` from an unlocked vector that `remove_pty_baton` edits on an exit thread; a bad `HPCON` makes `CreateProcessW` fail with 87. Retried by exact message (`PTY_CREATE_PROCESS_INVALID_PARAMETER`); tests for retry, bound and other codes (2, 267, 870).
+- (c) Splits (all re-exported, no test edited for them): `acp-agent.ts` 713→571 (`quirks.ts`, `permission-request.ts`), `agent-setup.ts` 716→595 (`agent-setup-sign-in.ts`, `agent-setup-status.ts`), `start.ts` 699→521 (`start-agents.ts`; the session settle and check-in lines now run before the agent wiring, log order only), `chat/terminal.ts` 639→591 (`terminal-backlog.ts`), `install.ts` 639→545 (`npm-cli.ts`), `session-page.tsx` 634→547 (`chat/transcript-parts.tsx`), `events.ts` 620→542 (`events-install.ts`). One `withTimeout` (`adapters/src/with-timeout.ts`); dead `redactAnthropicKeys` and `start.ts`'s unused imports (`errorCode`, `UvScriptRunner`, `ServerMessage`) removed. No naming drift found that a rename would fix without touching public names; no Claude-only UI words left in `web/src` (6.6 swept them). No spike CI job remains.
+- (d) `tests/architecture.test.ts` green (12 tests).
+- Not done (kept open in deferred-work): AD-16 helper environments (needs `AGENT_ENV_KEYS` plumbed into three adapters: a behaviour change), `GEMINI.md` (live check), setup status from `.claude/skills` only.
+- Local: `pnpm typecheck` clean; `pnpm test` 156 files, 1992 passed; provenance passes against `origin/story/6.8-antigravity-skills`.
 
 ## Plan Change Log
 

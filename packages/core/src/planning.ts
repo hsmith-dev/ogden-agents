@@ -62,7 +62,14 @@ export interface PlanningDeps {
   entities: Pick<Entities, 'getWorkspace'>;
   catalog: Pick<BmadCatalogPort, 'catalog' | 'setupStatus' | 'readDocument'>;
   chat: Pick<Chat, 'createChatSession' | 'sendMessage'>;
+  /** The agent whose syntax a planning session's first message uses when {@link agentOf} names none. */
   agent: Pick<AgentPort, 'skillInvocation'>;
+  /**
+   * The agent a session runs (epic 6 entry 8: a planning session starts with
+   * the project's default agent, which may be Antigravity), so its first
+   * message is in that agent's own syntax (AD-12). `undefined`: {@link agent}.
+   */
+  agentOf?: ((session: Session) => Pick<AgentPort, 'skillInvocation'> | undefined) | undefined;
   /** Fills the catalog's `installedAt` from when each module first appeared (story 4.4). Without it the port's catalog is answered as it is. */
   modulesSeen?: Pick<BmadModulesSeen, 'stamp'>;
 }
@@ -75,7 +82,7 @@ export function workspaceRepoPath(entities: Pick<Entities, 'getWorkspace'>, work
   return workspace.realPath;
 }
 
-export function createPlanning({ bmad, entities, catalog, chat, agent, modulesSeen }: PlanningDeps): PlanningUseCases {
+export function createPlanning({ bmad, entities, catalog, chat, agent, agentOf, modulesSeen }: PlanningDeps): PlanningUseCases {
   // Rebuilt from the repo on every read (story 4.4): a module copied in shows without a restart.
   const catalogOf = async (workspaceId: WorkspaceId): Promise<Catalog> => {
     const read = await catalog.catalog(workspaceRepoPath(entities, workspaceId));
@@ -109,7 +116,7 @@ export function createPlanning({ bmad, entities, catalog, chat, agent, modulesSe
       // Checked again after the (async) scan: a piece turned off meanwhile starts nothing.
       bmad.requireBmadFeature(workspaceId, 'planning');
       const session = await chat.createChatSession(workspaceId, { kind: 'planning' });
-      chat.sendMessage(workspaceId, session.id, agent.skillInvocation(skill, checkedIdea));
+      chat.sendMessage(workspaceId, session.id, (agentOf?.(session) ?? agent).skillInvocation(skill, checkedIdea));
       return session;
     },
 

@@ -60,6 +60,7 @@ Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim fr
 - Unowned (TOCTOU, needs a concurrent writer): labels are judged when the catalog is read, not when a skill starts. From the 4.12 review S4. (log: "Labels are judged when the catalog is read, not when a skill starts")
 - Unowned (a sweep, AD-16): `uv --version`, the kill helper and the Windows shortcut script still inherit the server's whole environment, agent keys included; pass `withoutAgentKeys(process.env)`. From the 6.5 review. (log: "A few helper processes still inherit the server's whole environment")
 - Epic 6 (live check): protect `GEMINI.md` too if Antigravity reads it as its instruction file. From the 6.5 review. (log: "may need to join the protected files, if Antigravity reads it as its instruction file")
+- Epic 6 (every agent): setup status reads `.claude/skills` only, so an agent folder that lacks the skills (Antigravity used after Set up) gets them only at the next Set up or Upgrade. From the 6.8 restack. (log: "Setup status reads the installed BMad Method version from `.claude/skills` only")
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
 
@@ -531,3 +532,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-every-agent/story-antigravity-chat-permission-cards-modes-resume-and-the-termi-plan.md`
   summary: `GEMINI.md` (and `gemini.md`) may need to join the protected files, if Antigravity reads it as its instruction file the way Gemini CLI does (unverified, medium if true).
   evidence: 6.5 review; settled by the live check (does Antigravity load `GEMINI.md` from the project root?). Adding it also needs the architecture test's agent-id rule to allow the file name in core.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-every-agent/story-bmad-skills-reach-antigravity-where-planning-is-on-nothing-w-plan.md`
+  summary: Setup status reads the installed BMad Method version from `.claude/skills` only; a project whose other agent's skills folder (`.agents/skills`) lost or never got the skills (Antigravity started being used after Set up) still reads `current`, and the skills reach `.agents/skills` only on the next Set up or Upgrade.
+  evidence: 6.8 restack onto 4.13: `bmad-catalog/setup.ts` `setupStatus(repoPath)` takes no folders; `BmadSetupRunOptions.skillFolders` is passed on start only (`withAgentSkillFolders`).

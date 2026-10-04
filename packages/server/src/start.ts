@@ -59,7 +59,7 @@ import { resolveTestHooks, testHooksLogFields, type TestHooks } from './test-hoo
 import { VERSION } from './version.js';
 import { agentEnvironment, agentKeysOf, SUBSCRIPTION_MAX_AGE_MS, uvEnvironment, withoutAgentKeys } from './start-env.js';
 import { broadcast, closeServer, HOST, listen, repointAppShortcut } from './start-io.js';
-import { bmadSetupFailureLogger, uvPycacheDir, createBmadSourceAndCatalog, createDocumentCards, createPlanAndBoard, stopBmadWork, type BmadWiring } from './start-planning.js';
+import { bmadSetupFailureLogger, uvPycacheDir, createBmadSourceAndCatalog, createDocumentCards, createPlanAndBoard, stopBmadWork, withAgentSkillFolders, type BmadWiring } from './start-planning.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
 
 // Moved out in story 3.9; still exported from here for the callers that import them from `start.ts`.
@@ -416,7 +416,7 @@ async function listenAndAnnounce({
     // The terminal runs, and its transcript is read, with the chat's environment rules, the API key's included (stories 3.1, 3.2).
     ...(agent.terminalResume === undefined ? {} : { terminalResume: withChatEnv(agentId, agent.terminalResume) }),
   });
-  /** Claude Code as a chat runs it: the default agent, and the one Plan and the document cards use (stories 4.1, 4.7). */
+  /** Claude Code as a chat runs it: the default agent, and the one Plan and the document cards fall back to (stories 4.1, 4.7). */
   const chatAgent = forChat(CLAUDE_CODE_AGENT_ID, agent);
   const unwrapped = new Map(wirings.map(({ descriptor, agent: port }) => [descriptor.agentId, port]));
   const agents = createAgentRegistry(
@@ -425,10 +425,12 @@ async function listenAndAnnounce({
   );
   /** A session's agent id: its own, else (stored before agents could be chosen) Claude Code's. */
   const agentIdOf = (session: Session): AgentId => session.agentId ?? agents.legacyAgentId;
+  /** A session's agent as a chat runs it (epic 6 entry 8: a planning session's first message is in its own syntax). */
+  const agentOf = (session: Session): AgentPort | undefined => agents.get(agentIdOf(session));
   // One terminal port for the chat and the toggle's availability check (story 3.7): they agree on node-pty.
   const terminal = createPtyTerminalPort(options.loadPty);
   // Document cards (story 4.7, `start-planning.ts`).
-  const planningDocuments = createDocumentCards({ core, catalog: bmadCatalog, agent: chatAgent, log });
+  const planningDocuments = createDocumentCards({ core, catalog: bmadCatalog, agent: chatAgent, agentOf, log });
   const chat = createChat({
     dataDir,
     entities: core.entities,
@@ -463,6 +465,7 @@ async function listenAndAnnounce({
     setupRunner,
     chat,
     agent: chatAgent,
+    agentOf,
     uvToolchain,
     uvChildEnv,
   });
@@ -508,7 +511,8 @@ async function listenAndAnnounce({
     planning,
     board,
     bmadSource,
-    bmadSetup: core.bmadSetup,
+    // Setup also places the skills in each other agent's folder the project uses (epic 6 entry 8).
+    bmadSetup: withAgentSkillFolders(core.bmadSetup, { core, agents }),
     agentSetup,
     onboarding,
     newProjectDefaults,

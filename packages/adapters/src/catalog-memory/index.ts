@@ -44,7 +44,7 @@ export interface MemoryBmadCatalog extends BmadCatalogPort {
   /** Every `missingCapabilities` call, as `[repoPath, wanted]`, in order (entry 4.11). */
   readonly capabilityCalls: ReadonlyArray<readonly [string, readonly BmadCapability[]]>;
   /** Every `setup` call's options, in order (entry 4.11: `{ upgrade: true }` for an upgrade, `{}` otherwise). */
-  readonly setupOptions: ReadonlyArray<{ upgrade?: boolean }>;
+  readonly setupOptions: ReadonlyArray<{ upgrade?: boolean; skillFolders?: readonly string[] }>;
   /** Sets what `scriptsFingerprint` answers for `repoPath` from now on (story 4.13: the project's scripts changed). */
   setScriptsFingerprint(repoPath: string, fingerprint: string | undefined): void;
 }
@@ -106,7 +106,7 @@ export function createMemoryBmadCatalog(
   const setupCalls: Array<readonly ['status' | 'setup', string]> = [];
   const documentCalls: Array<readonly [string, string, string]> = [];
   const capabilityCalls: Array<readonly [string, readonly BmadCapability[]]> = [];
-  const setupOptions: Array<{ upgrade?: boolean }> = [];
+  const setupOptions: Array<{ upgrade?: boolean; skillFolders?: readonly string[] }> = [];
   const catalogs = new Map(Object.entries(options.catalogs ?? {}).map(([path, rest]) => [path, structuredClone(rest)]));
   const missing = new Map(Object.entries(options.missing ?? {}).map(([path, list]) => [path, new Set(list)]));
   /** What the repo lacks now: its `missing`, else what its catalog's capabilities set `false`. */
@@ -177,7 +177,7 @@ export function createMemoryBmadCatalog(
     setup: async (repoPath, onProgress: (progress: BmadSetupProgress) => void, setupOptionsGiven = {}) => {
       setupCalls.push(['setup', repoPath]);
       const upgrade = setupOptionsGiven.upgrade === true;
-      setupOptions.push(upgrade ? { upgrade: true } : {});
+      setupOptions.push({ ...(upgrade ? { upgrade: true } : {}), ...(setupOptionsGiven.skillFolders === undefined ? {} : { skillFolders: [...setupOptionsGiven.skillFolders] }) });
       const hasBmad = known.get(repoPath)?.hasBmad === true || statusOf(repoPath).state !== 'not_set_up';
       // Set up writes only where there is no `_bmad/`; Upgrade only where there is one (entry 4.11).
       if (!upgrade && hasBmad) throw new BmadAlreadySetUpError();

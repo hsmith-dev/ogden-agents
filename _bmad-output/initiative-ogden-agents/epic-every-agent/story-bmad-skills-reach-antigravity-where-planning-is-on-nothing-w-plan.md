@@ -82,6 +82,13 @@ context:
 - Make `skillInvocation` required (4.x); the fake second agent and test ports gain it.
 - Verify then: planning session with fake Antigravity gets `/skill` and the skills exist in `.agents/skills`; the user's live check 6 confirms the ACP server loads them.
 
+Done at the restack (2026-10-04, on story/4.13-e2e-and-release):
+- `BmadSetupRunOptions.skillFolders`: `bmad-catalog/setup.ts` copies into `.claude/skills` first, then each other folder given (`skillTargets` refuses a folder that isn't a plain repo-relative path); a link or a file at any segment of any target refuses before anything is created; upgrade keeps 4.11's "elsewhere" rule for `.claude/skills` only, and gives another agent's folder each skill it lacks. Core's `bmadSetup.start(ws, { skillFolders })` passes them through; the server (`withAgentSkillFolders`, start-planning.ts) asks core's `skillFolders(ws)` (Planning off: none).
+- `skillInvocation` is required on `AgentPort` and on `AcpAgentQuirks` (4.1); `slashSkillInvocation` lives in acp-base from 6.4.
+- Planning sessions start with the project's effective default agent (6.6), and the first message uses that session's agent's syntax (`agentOf` in planning and document cards).
+- Tests: adapter (`bmad-catalog-setup.test.ts`, entry 8 block), core (`bmad-setup.test.ts` pass-through), server (`antigravity-planning.test.ts`: planning session with fake Antigravity gets `/bmad-spec …`; Set up passes `.agents/skills` by default or by a chat, not with Board alone or Claude Code alone).
+- Not done: setup status still reads the installed version from `.claude/skills` only (deferred-work).
+
 ## Implementation Notes
 
 - Implemented directly from the plan (no implementation subagent: the planning session held the whole context).

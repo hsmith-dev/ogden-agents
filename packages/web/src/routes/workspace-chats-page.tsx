@@ -126,9 +126,11 @@ export function WorkspaceChatsPage() {
                 {blocked.setUp ? (
                   <>
                     {' '}
-                    <Link to="/settings/agents" className="text-foreground underline underline-offset-4" data-testid="agent-unavailable-link">
-                      {SET_UP_AGENTS}
-                    </Link>
+                    <Button variant="link" size="sm" asChild>
+                      <Link to="/settings/agents" data-testid="agent-unavailable-link">
+                        {SET_UP_AGENTS}
+                      </Link>
+                    </Button>
                   </>
                 ) : null}
               </Text>

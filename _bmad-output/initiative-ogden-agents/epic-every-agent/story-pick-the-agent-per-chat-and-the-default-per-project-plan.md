@@ -3,12 +3,12 @@ title: 'Pick the agent per chat and the default per project'
 type: 'feature'
 ticket: '6'
 created: '2026-10-03'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
 review_loop_iteration: 0
 baseline_revision: '2f6b8444179a2ff0e92bbd6b98d2719b95353e88'
 context:
@@ -84,6 +84,15 @@ context:
 - Given any web source, when the architecture test runs, then no `AGENT_NAME` or `AGENT_ID` constant exists in `packages/web/src`.
 
 ## Implementation Notes
+
+- Implemented directly in this session (it held the investigation, as 6.2 to 6.4 did), not by a fresh subagent.
+- Core: `workspaces.default_agent_id` (migration `0008_workspace_default_agent.sql`); `readDefaultAgent`; settings take `defaultAgentId` (unknown → `UnknownAgentError`, 400 `agent_unknown`); `OpenCoreOptions.isAgentRegistered` (server: Claude Code + `extraAgents`, known before the registry is built); `ensureWorkspace` `defaultAgentId` option, in the creation `settings_changed`; `createNewProjectDefaults` keeps `defaultAgentId` (pieces now optional in the PATCH); `createChatSession` uses the project default; `AgentSetupOptions.providerOf`; `AgentSignIn.userCode` → `SignInResponse.code`.
+- Shared: `projectNotTrustedReason` moved here; `AgentSetupStatus.provider?`, `SignInResponse.code?`, `NewProjectDefaults.defaultAgentId?`.
+- Web: `AGENT_NAME`/`AGENT_ID` removed; every former user takes the session's agent name (`permissionModeDescriptions(name)`, `skipAllWarning`, `skipAllBanner`, `notIdleReason`, `signInAgainWords`, `apiKeyRefused`, terminal panel words, Needs you entries carry `agentName`). `AgentPicker` is a menu: unavailable agents are `aria-disabled` but focusable (a Radix `disabled` item is skipped by the keyboard, so its reason would never be read). `DefaultAgentView` (`chat/default-agent-view.tsx`) serves Workspace settings and Settings → New projects. The session header names the agent (`session-agent`) only with more than one agent. Sign in again shows for any agent that has a setup status.
+- Welcome: the per-agent "previous readiness" ref, so choosing an already-ready agent never auto-advances.
+- `createMemoryAgentSetup` gained `userCode`; `tests/support.ts` `fakeSecondAgent({ agentId, displayName })` and `fakeAgentSetup`.
+- Architecture test `findWebAgentConstants`: no `AGENT_NAME`/`AGENT_ID`, agent id literal, "Claude Code" or "Anthropic" in web code.
+- e2e `tests/e2e/agent-picker.spec.ts`; `agent-choice.spec.ts` follows the picker becoming a menu. Radix radios check on arrow-focus only while the key is held, so the Welcome keyboard step holds ArrowDown.
 
 ## Plan Change Log
 

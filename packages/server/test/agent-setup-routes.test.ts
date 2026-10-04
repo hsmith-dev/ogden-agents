@@ -159,7 +159,7 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('agent setup routes: 
   it('lists Claude Code, signs in through the callback, and keeps the URL out of every event and log line', async () => {
     const { server, tab, lines } = await startSetupServer();
     expect(await agents(server, tab)).toEqual([
-      { agentId: 'claude-code', displayName: 'Claude Code', install: 'installed', version: null, auth: 'needs_sign_in', signInTab: 'agent', apiKey: { saved: false } },
+      { agentId: 'claude-code', displayName: 'Claude Code', provider: 'Anthropic', install: 'installed', version: null, auth: 'needs_sign_in', signInTab: 'agent', apiKey: { saved: false } },
     ]);
 
     const reply = await send(server, signInPath(), { method: 'POST', headers: tab.headers });

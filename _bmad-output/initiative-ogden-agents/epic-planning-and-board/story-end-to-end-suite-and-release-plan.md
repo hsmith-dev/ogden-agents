@@ -109,6 +109,7 @@ context:
 - CI run 37209465902 (`3ec1e7e`): every job green, Windows and the installed suite on all three OSes included.
 - Snapshot run checked (2026-10-04, coordinator follow-up) and not built: `tickets.py` `central_config` loads `project_root / "_bmad" / "scripts" / "config_utils.py"`, and `project_root` is the one `--project-root`, which also locates the ticket tree (`tickets_root`, `active_initiative`, `store_config`) and is where `mark` writes plans. Running from a snapshot folder would need the whole tree copied in and writes copied back, so the check-then-run window stays deferred (needs an upstream config-script option, or an Ogden loader shim wrapping the verified script, a separate decision).
 - CI run 37210509147 (`ec484b7`, docs only): windows-latest Node 24 failed the same 4.7 timing bound again (3273 ms against 3000 ms). That's twice in three runs, so not a one-off: the bound is 8 s on win32 (a quadratic parse would take minutes), 3 s elsewhere.
+- CI run 37211439697 (`78af05e`): windows installed waited 15 s for an agent's plan write to move card 1.2. The server logged no failed watch or read after the tree was written, so this was slow delivery on a loaded runner, not a missed change. Both live waits now allow 45 s.
 - Recorded in the epic file (dated decision), the AD-22 note in the architecture spine and `.memlog.md`; the deferred-work S1 entry closed with a `Resolved:` entry.
 
 ## Plan Change Log

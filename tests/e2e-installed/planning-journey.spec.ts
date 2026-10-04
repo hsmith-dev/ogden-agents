@@ -83,6 +83,11 @@ const PLAIN_LABELS_TEXT = "This project's BMad Method has actions Ogden Agents d
 const IDEA = 'A shared todo list for my family';
 /** A new planning session starts its agent first: on a Windows runner that has taken over 15 s. */
 const AGENT_START = { timeout: 60_000 };
+/**
+ * An agent's write reaching the board: the agent's turn, the watch's debounce and confirming read, then the
+ * refetch. A loaded Windows runner once took over 15 s (CI run 37211439697; no read or watch failed).
+ */
+const LIVE = { timeout: 45_000 };
 const BRIEF = '_bmad-output/briefs/brief-todo.md';
 const SPEC = '_bmad-output/specs/spec-todo.md';
 const EPIC = '_bmad-output/initiative-todo/epic-todo';
@@ -271,7 +276,7 @@ test('from BMad off to a ticketed epic on a live board, on the installed package
 
     // The agent, in its session, writes 1.2's plan as ready: the watcher's ticket.changed moves the card here.
     await sayThroughApi(page, wsId, ticketSession, writeFile(`${EPIC}/story-tick-a-todo-off-plan.md`, plan('Tick a todo off', 2, 'ready-for-dev')));
-    await expect(card(page, '1.2')).toHaveAttribute('data-column', 'ready', { timeout: 15_000 });
+    await expect(card(page, '1.2')).toHaveAttribute('data-column', 'ready', LIVE);
     await expect(card(page, '1.2')).toHaveAttribute('data-highlighted', 'true');
     // Ready, but 1.1 is still in progress.
     await expect(card(page, '1.2')).toContainText('Waits for 1.1');
@@ -285,7 +290,7 @@ test('from BMad off to a ticketed epic on a live board, on the installed package
 
     // The agent marks 1.1 done (Ogden never offers Done).
     await sayThroughApi(page, wsId, ticketSession, writeFile(`${EPIC}/story-add-a-todo-plan.md`, plan('Add a todo', 1, 'done')));
-    await expect(card(page, '1.1')).toHaveAttribute('data-column', 'done', { timeout: 15_000 });
+    await expect(card(page, '1.1')).toHaveAttribute('data-column', 'done', LIVE);
     await page.getByRole('button', { name: 'Change status of 1.1 Add a todo' }).click();
     await expect(page.getByRole('menuitem', { name: 'Move to Done' })).toHaveCount(0);
     await page.getByRole('menuitem', { name: 'Move to Ready' }).click();

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AGENTS_STREAM, AgentAuthMethodKind, AgentAuthState, AgentId, AlwaysAllowScope, CautionLevel, MAX_PAGE_EVENTS, Seq, SERVER_STREAM, TOOLCHAIN_STREAM } from './events-common.js';
+import { AGENTS_STREAM, AgentAuthMethodKind, AgentAuthState, AgentId, AlwaysAllowScope, CautionLevel, MAX_PAGE_EVENTS, Seq, SERVER_STREAM, SETTINGS_STREAM, TOOLCHAIN_STREAM } from './events-common.js';
 import { assigned, onSessionStream, onWorkspaceStream } from './events-envelope.js';
 import {
   PermissionRequestedEvent,
@@ -20,6 +20,8 @@ import {
   SessionMessageDeltaInput,
   SessionMessageQueuedEvent,
   SessionMessageQueuedInput,
+  SessionPermissionModeChangedEvent,
+  SessionPermissionModeChangedInput,
   SessionResumedEvent,
   SessionResumedInput,
   SessionStateChangedEvent,
@@ -83,6 +85,9 @@ export {
   SessionMessageQueuedEvent,
   SessionCheckInEvent,
   SessionDocumentWrittenEvent,
+  PERMISSION_MODE_CHANGE_CAUSES,
+  PermissionModeChangeCause,
+  SessionPermissionModeChangedEvent,
   PermissionRequestedEvent,
   PermissionResolvedEvent,
 } from './events-session.js';
@@ -310,6 +315,20 @@ const AgentAuthChangedInput = z.object({
 export const AgentAuthChangedEvent = AgentAuthChangedInput.extend(assigned);
 export type AgentAuthChangedEvent = z.infer<typeof AgentAuthChangedEvent>;
 
+const onSettingsStream = { workspaceId: z.null(), streamId: z.literal(SETTINGS_STREAM) };
+
+const SettingsDeveloperModeChangedInput = z.object({
+  type: z.literal('settings.developer_mode_changed'),
+  ...onSettingsStream,
+  payload: z.object({ developerMode: z.boolean(), previous: z.boolean() }),
+});
+/**
+ * Developer mode was turned on or off (install-level; every tab follows it).
+ * Turning it off drops every Skip-all chat to Ask in the same transaction.
+ */
+export const SettingsDeveloperModeChangedEvent = SettingsDeveloperModeChangedInput.extend(assigned);
+export type SettingsDeveloperModeChangedEvent = z.infer<typeof SettingsDeveloperModeChangedEvent>;
+
 /** Every event core may append (grows with later stories). Nothing unschematized is emitted. */
 export const CoreEvent = z.discriminatedUnion('type', [
   ServerStartedEvent,
@@ -328,6 +347,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   SessionCreatedEvent,
   SessionStateChangedEvent,
   SessionDriverChangedEvent,
+  SessionPermissionModeChangedEvent,
   SessionMessageDeltaEvent,
   SessionMessageCompletedEvent,
   SessionToolCallEvent,
@@ -349,6 +369,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   AgentInstallCompletedEvent,
   AgentInstallFailedEvent,
   AgentAuthChangedEvent,
+  SettingsDeveloperModeChangedEvent,
 ]);
 export type CoreEvent = z.infer<typeof CoreEvent>;
 export type CoreEventType = CoreEvent['type'];
@@ -371,6 +392,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   SessionCreatedInput,
   SessionStateChangedInput,
   SessionDriverChangedInput,
+  SessionPermissionModeChangedInput,
   SessionMessageDeltaInput,
   SessionMessageCompletedInput,
   SessionToolCallInput,
@@ -392,6 +414,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   AgentInstallCompletedInput,
   AgentInstallFailedInput,
   AgentAuthChangedInput,
+  SettingsDeveloperModeChangedInput,
 ]);
 export type NewCoreEvent = z.infer<typeof NewCoreEvent>;
 

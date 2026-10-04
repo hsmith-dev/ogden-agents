@@ -322,6 +322,30 @@ export class DriverIsTerminalError extends CoreError {
   }
 }
 
+/** Skip all was asked for while Developer mode is off (permission modes): nothing changed. */
+export class DeveloperModeRequiredError extends CoreError {
+  override readonly name = 'DeveloperModeRequiredError';
+  constructor(message = 'Skip all is only offered in Developer mode. Turn it on in Settings → Appearance first.') {
+    super('developer_mode_required', message);
+  }
+}
+
+/** Skip all was asked for without the user's confirmation of its warning: nothing changed. */
+export class ConfirmationRequiredError extends CoreError {
+  override readonly name = 'ConfirmationRequiredError';
+  constructor(message = 'Confirm the warning to turn on Skip all.') {
+    super('confirmation_required', message);
+  }
+}
+
+/** A permission mode the chat's agent, or its session, doesn't offer: nothing changed. */
+export class ModeUnavailableError extends CoreError {
+  override readonly name = 'ModeUnavailableError';
+  constructor(message: string) {
+    super('mode_unavailable', message);
+  }
+}
+
 /** A session of the workspace is `working` or `waiting`, so its history was not deleted. */
 export class WorkspaceBusyError extends CoreError {
   override readonly name = 'WorkspaceBusyError';

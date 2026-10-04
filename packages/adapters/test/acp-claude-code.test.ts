@@ -6,10 +6,10 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AgentError, type AgentEvent, type AgentPermissionDecision, type AgentPermissionRequest, type AgentSession } from '@ogden-agents/core';
+import { AgentError, PROTECTED_PATHS, type AgentEvent, type AgentPermissionDecision, type AgentPermissionRequest, type AgentSession, type ProtectedPaths } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { pathsOf } from '../src/acp-claude-code/claude-code-agent.js';
-import { createClaudeCodeAgent, createStreamMasker, findClaudeExecutable, MASKED, maskSecrets, resolveClaudeAgentAcp, secretValues } from '../src/index.js';
+import { asksLessThanAsk, ogdenModeOf, pathsOf } from '../src/acp-claude-code/claude-code-agent.js';
+import { claudeAskRules, createClaudeCodeAgent, createStreamMasker, findClaudeExecutable, MASKED, maskSecrets, resolveClaudeAgentAcp, secretValues } from '../src/index.js';
 
 const FAKE_AGENT = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-acp-agent.mjs');
 const dirs: string[] = [];
@@ -36,6 +36,7 @@ async function startFake(
     env?: Record<string, string>;
     claudeExecutable?: string | null;
     onPermissionRequest?: (request: AgentPermissionRequest) => Promise<AgentPermissionDecision>;
+    protectedPaths?: ProtectedPaths;
   } = {},
 ) {
   const diagnostics: string[] = [];
@@ -44,7 +45,7 @@ async function startFake(
     claudeExecutable: options.claudeExecutable === undefined ? null : options.claudeExecutable,
     onDiagnostic: (message, fields) => diagnostics.push(`${message} ${JSON.stringify(fields ?? {})}`),
   });
-  const session = await agent.startSession({ cwd: tempDir(), env: baseEnv(options.env), onPermissionRequest: options.onPermissionRequest });
+  const session = await agent.startSession({ cwd: tempDir(), env: baseEnv(options.env), onPermissionRequest: options.onPermissionRequest, protectedPaths: options.protectedPaths });
   sessions.push(session);
   const events: AgentEvent[] = [];
   session.onEvent((event) => events.push(event));
@@ -261,6 +262,138 @@ describe('tool calls', () => {
     const update = events.find((e) => e.type === 'tool_call_update');
     expect(JSON.stringify(update)).not.toContain('const a = 2');
     expect(update).toMatchObject({ diffs: [{ newText: `${MASKED};\n` }] });
+  });
+});
+
+describe('permission modes', () => {
+  it('declares Ask, Auto and Skip all, and a session lists what the agent offers', async () => {
+    const { agent, session } = await startFake();
+    expect(agent.permissionModes).toEqual(['ask', 'auto', 'skip_all']);
+    expect(session.permissionModes).toEqual(['ask', 'auto', 'skip_all']);
+    const { session: limited } = await startFake({ env: { FAKE_ACP_NO_AUTO: '1', FAKE_ACP_NO_BYPASS: '1' } });
+    expect(limited.permissionModes).toEqual(['ask']);
+    await expect(limited.setPermissionMode!('skip_all')).rejects.toBeInstanceOf(AgentError);
+    await expect(limited.setPermissionMode!('ask')).resolves.toBeUndefined();
+  });
+
+  it('sets the session mode with session/set_mode: Ask, Auto and Skip all as default, auto and bypassPermissions', async () => {
+    const { session, events } = await startFake({ env: { FAKE_ACP_START_MODE: 'bypassPermissions' } });
+    await session.prompt('mode');
+    expect(replyText(events)).toBe('mode=bypassPermissions');
+    for (const [mode, id] of [['ask', 'default'], ['auto', 'auto'], ['skip_all', 'bypassPermissions']] as const) {
+      events.length = 0;
+      await session.setPermissionMode!(mode);
+      await session.prompt('mode');
+      expect(replyText(events)).toBe(`mode=${id}`);
+    }
+    // Setting it does not report it back: only the agent's own report is an event.
+    expect(events.some((event) => event.type === 'permission_mode')).toBe(false);
+  });
+
+  it("reports the agent's own mode changes, with whether they ask less than Ask and the agent's name for them", async () => {
+    const { session, events } = await startFake();
+    await session.prompt('mode-switch plan');
+    await session.prompt('mode-switch acceptEdits');
+    await session.prompt('mode-switch default');
+    expect(events.filter((event) => event.type === 'permission_mode')).toEqual([
+      { type: 'permission_mode', mode: 'other', asksLess: false, label: 'Plan' },
+      { type: 'permission_mode', mode: 'other', asksLess: true, label: 'Accept edits' },
+      { type: 'permission_mode', mode: 'ask', asksLess: false, label: 'Manual' },
+    ]);
+    expect([ogdenModeOf('default'), ogdenModeOf('auto'), ogdenModeOf('bypassPermissions'), ogdenModeOf('acceptEdits'), ogdenModeOf('plan')]).toEqual(['ask', 'auto', 'skip_all', 'other', 'other']);
+    expect(['default', 'plan', 'dontAsk', 'acceptEdits', 'auto', 'bypassPermissions', 'brandNew'].map(asksLessThanAsk)).toEqual([false, false, false, true, true, true, true]);
+  });
+
+  it('Auto falling back to accepting edits is reported after set_mode answers', async () => {
+    const { session, events } = await startFake({ env: { FAKE_ACP_AUTO_FALLBACK: '1' } });
+    await session.setPermissionMode!('auto');
+    await until(() => events.some((event) => event.type === 'permission_mode'), 'the fallback reported');
+    expect(events.find((event) => event.type === 'permission_mode')).toEqual({ type: 'permission_mode', mode: 'other', asksLess: true, label: 'Accept edits' });
+    // Told Ask again, it is: the reported mode stood, so set_mode is sent.
+    await session.setPermissionMode!('ask');
+    events.length = 0;
+    await session.prompt('mode');
+    expect(replyText(events)).toBe('mode=default');
+  });
+
+  it('in bypassPermissions a command runs without asking; its own safety checks still ask', async () => {
+    const asked: AgentPermissionRequest[] = [];
+    const { session, events } = await startFake({ onPermissionRequest: async (request) => (asked.push(request), { outcome: 'allow_once' }) });
+    await session.setPermissionMode!('skip_all');
+    await session.prompt('permission npm test');
+    expect(asked).toEqual([]);
+    expect(replyText(events)).toBe('Ran npm test.');
+    await session.prompt('permission-safety rm -rf .git');
+    expect(asked.map((request) => request.command)).toEqual(['rm -rf .git']);
+  });
+
+  it('after a set_mode that failed, or while one is unanswered, the mode is not trusted: the next one is sent', async () => {
+    const failed = await startFake({ env: { FAKE_ACP_SET_MODE_FAIL: 'bypassPermissions' } });
+    await expect(failed.session.setPermissionMode!('skip_all')).rejects.toBeInstanceOf(AgentError);
+    // The agent took bypass before failing; its last known mode is still `default`, yet Ask is sent.
+    await failed.session.setPermissionMode!('ask');
+    await failed.session.prompt('mode');
+    expect(replyText(failed.events)).toBe('mode=default');
+
+    const hung = await startFake({ env: { FAKE_ACP_SET_MODE_HANG: 'bypassPermissions' } });
+    void hung.session.setPermissionMode!('skip_all').catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await hung.session.setPermissionMode!('ask');
+    await hung.session.prompt('mode');
+    expect(replyText(hung.events)).toBe('mode=default');
+  });
+
+  it('keeps the protected paths guarded when asked: ask rules in the session settings, so an Auto edit of one still asks (user decision 2026-10-02)', async () => {
+    expect(claudeAskRules(PROTECTED_PATHS)).toEqual(expect.arrayContaining(['Edit(**/.claude/**)', 'Edit(**/.git/**)', 'Edit(**/CLAUDE.md)', 'Edit(**/.mcp.json)']));
+    const asked: AgentPermissionRequest[] = [];
+    const guarded = await startFake({ protectedPaths: PROTECTED_PATHS, onPermissionRequest: async (request) => (asked.push(request), { outcome: 'allow_once' }) });
+    expect(guarded.session.protectsPaths).toBe(true);
+    await guarded.session.prompt('guards');
+    expect(replyText(guarded.events)).toBe(`ask=${JSON.stringify(claudeAskRules(PROTECTED_PATHS))}`);
+    await guarded.session.setPermissionMode!('auto');
+    await guarded.session.prompt('permission-edit src/a.ts');
+    expect(asked).toEqual([]);
+    await guarded.session.prompt('permission-edit .claude/settings.json');
+    await guarded.session.prompt('permission-edit docs/CLAUDE.md');
+    expect(asked.map((request) => request.paths)).toEqual([['.claude/settings.json'], ['docs/CLAUDE.md']]);
+
+    // Without the guards (Ask or Skip all sessions), the session settings carry no ask rules.
+    const plain = await startFake({ onPermissionRequest: async (request) => (asked.push(request), { outcome: 'allow_once' }) });
+    expect(plain.session.protectsPaths).toBe(false);
+    await plain.session.prompt('guards');
+    expect(replyText(plain.events)).toBe('ask=[]');
+    await plain.session.setPermissionMode!('auto');
+    await plain.session.prompt('permission-edit .claude/settings.json');
+    expect(asked).toHaveLength(2);
+  });
+
+  it('a reopened session gets the same guards', async () => {
+    const agent = createClaudeCodeAgent({ adapterPath: FAKE_AGENT, claudeExecutable: null });
+    const opened = await agent.reopenSession({ cwd: tempDir(), env: baseEnv({ FAKE_ACP_RESUME: 'resume' }), agentSessionId: 'fake-session-earlier', protectedPaths: PROTECTED_PATHS });
+    sessions.push(opened.session);
+    const events: AgentEvent[] = [];
+    opened.session.onEvent((event) => events.push(event));
+    expect(opened.restored).toBe('resumed');
+    await opened.session.prompt('guards');
+    expect(replyText(events)).toBe(`ask=${JSON.stringify(claudeAskRules(PROTECTED_PATHS))}`);
+  });
+
+  it('a plan-exit card with mode-raising allow_always options gets the allow_once option (manually approve): never a mode change', async () => {
+    const { session, events } = await startFake({ onPermissionRequest: async () => ({ outcome: 'allow_once' }) });
+    await session.prompt('plan-exit');
+    expect(replyText(events)).toBe('chose=exit-plan-default');
+  });
+
+  it('a reopened session lists its modes too, and is set the same way', async () => {
+    const agent = createClaudeCodeAgent({ adapterPath: FAKE_AGENT, claudeExecutable: null });
+    const opened = await agent.reopenSession({ cwd: tempDir(), env: baseEnv({ FAKE_ACP_RESUME: 'resume', FAKE_ACP_START_MODE: 'auto' }), agentSessionId: 'fake-session-earlier' });
+    sessions.push(opened.session);
+    const events: AgentEvent[] = [];
+    opened.session.onEvent((event) => events.push(event));
+    expect(opened.session.permissionModes).toEqual(['ask', 'auto', 'skip_all']);
+    await opened.session.setPermissionMode!('ask');
+    await opened.session.prompt('mode');
+    expect(replyText(events)).toBe('mode=default');
   });
 });
 

@@ -251,7 +251,7 @@ export function fullTestApp(core: Core, extra: Partial<AppOptions> = {}): Hono {
     reopenSession: () => Promise.reject(new Error('no agent in this test')),
     listAuthMethods: () => Promise.reject(new Error('no agent in this test')),
   };
-  const chat = createChat({ dataDir: tempDataDir(), entities: core.entities, sessionEvents: core.sessionEvents, agent });
+  const chat = createChat({ dataDir: tempDataDir(), entities: core.entities, sessionEvents: core.sessionEvents, agent, events: core.events, installSettings: core.installSettings });
   const bmadSource = createBmadSource(createMemoryBmadSource({ ready: true }));
   return createApp({
     events: core.events,
@@ -271,6 +271,7 @@ export function fullTestApp(core: Core, extra: Partial<AppOptions> = {}): Hono {
     agentSetup: createAgentSetup(core.events, [createMemoryAgentSetup()]),
     onboarding: createOnboarding({ dataDir: tempDataDir(), hasProjects: () => false }),
     newProjectDefaults: createNewProjectDefaults({ dataDir: tempDataDir(), bmad: core.bmad }),
+    installSettings: core.installSettings,
     appShortcut: createMemoryAppShortcut(),
     tabs: createTabTokens(),
     ...extra,

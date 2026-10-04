@@ -38,6 +38,7 @@ const WORKSPACE_ROUTES_WITHOUT_A_PIECE: readonly string[] = [
   `POST ${API_ROUTES.sessionMessages}`,
   `POST ${API_ROUTES.sessionCancel}`,
   `POST ${API_ROUTES.sessionDriver}`,
+  `PUT ${API_ROUTES.sessionPermissionMode}`,
   `POST ${API_ROUTES.sessionPermission}`,
   `GET ${API_ROUTES.permissionRules}`,
   `DELETE ${API_ROUTES.permissionRule}`,

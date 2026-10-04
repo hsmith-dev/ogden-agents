@@ -6,16 +6,21 @@
  */
 import type { Session, SessionId, Workspace } from '@ogden-agents/shared';
 import { AgentError, type AgentEvent, type AgentRestored, type AgentSession } from '../agent-port.js';
+import { PROTECTED_PATHS } from '../permission-matching.js';
 import { primedPrompt } from '../resume-prime.js';
 import { AGENT_SESSION_REF } from './constants.js';
 import type { ChatContext } from './context.js';
+import type { ModeApplier } from './permission-mode.js';
 import type { PermissionRequests } from './permission-requests.js';
 import type { Replies } from './replies.js';
 import type { Live } from './types.js';
 
-export function createAgents(ctx: ChatContext, deps: Pick<Replies, 'stopDeltaTimer'> & Pick<PermissionRequests, 'onPermissionRequestFor'>) {
-  const { entities, sessionEvents, agent, agentEnv, live, droppedAgents, internalError } = ctx;
-  const { stopDeltaTimer, onPermissionRequestFor } = deps;
+export function createAgents(
+  ctx: ChatContext,
+  deps: Pick<Replies, 'stopDeltaTimer'> & Pick<PermissionRequests, 'onPermissionRequestFor'> & { applyMode: ModeApplier },
+) {
+  const { entities, sessionEvents, agent, agentEnv, live, droppedAgents, internalError, sessionModes } = ctx;
+  const { stopDeltaTimer, onPermissionRequestFor, applyMode } = deps;
 
   /** Ends the session's agent (it failed or went away); the next message starts a fresh one. */
   const drop = (sessionId: SessionId, entry: Live) => {
@@ -48,7 +53,9 @@ export function createAgents(ctx: ChatContext, deps: Pick<Replies, 'stopDeltaTim
 
   const agentFor = (session: Session, workspace: Workspace, apply: (sessionId: SessionId, entry: Live, event: AgentEvent) => void): Live => {
     const existing = live.get(session.id);
-    if (existing !== undefined) return existing;
+    // Called before each prompt, an idle point: an agent whose guards no longer fit the chat's mode restarts here.
+    if (existing !== undefined && existing.restartPending) drop(session.id, existing);
+    else if (existing !== undefined) return existing;
     let markGone!: () => void;
     const gone = new Promise<void>((resolve) => (markGone = resolve));
     const entry: Live = {
@@ -62,10 +69,19 @@ export function createAgents(ctx: ChatContext, deps: Pick<Replies, 'stopDeltaTim
       unsavedRef: undefined,
       gone,
       markGone,
+      modeSync: Promise.resolve(),
+      // The protected paths stay guarded in Auto ("Keep protected files guarded", user decision 2026-10-02); fixed for the session's life.
+      guardsRequested: entities.getSession(session.id)?.permissionMode === 'auto',
+      restartPending: false,
     };
     const onPermissionRequest = onPermissionRequestFor(session);
     // The real-cased path: the case-folded key is for uniqueness only (AD-2).
-    const input = { cwd: workspace.realPath ?? workspace.path, env: { ...agentEnv() }, onPermissionRequest };
+    const input = {
+      cwd: workspace.realPath ?? workspace.path,
+      env: { ...agentEnv() },
+      onPermissionRequest,
+      ...(entry.guardsRequested ? { protectedPaths: PROTECTED_PATHS } : {}),
+    };
     const previous = storedAgentSessionId(session.id);
     // A chat that reached an agent before, and has none now, reopens that agent's session (2.7).
     // A dropped agent of this session stops first: never two of its processes at once.
@@ -99,6 +115,23 @@ export function createAgents(ctx: ChatContext, deps: Pick<Replies, 'stopDeltaTim
       }
       entry.prime = restored === 'new';
       entry.off = started.onEvent((event) => apply(session.id, entry, event));
+      sessionModes.set(session.id, started.permissionModes ?? ['ask']);
+      ctx.lastSessionModes.value = started.permissionModes ?? ['ask'];
+      // The chat's stored mode before the first prompt, whatever the agent's own settings started it in
+      // (a new chat, and every chat after a restart, in Ask). One it can't be put in, not even Ask, is stopped.
+      const applied = await applyMode(session.id, started, entry.guardsRequested);
+      // The mode changed while it started, across the guards: it runs in Ask, and restarts before the next prompt.
+      if (applied === 'restart') entry.restartPending = true;
+      if (applied === 'failed') {
+        entry.off();
+        entry.off = undefined;
+        await started.close().catch(() => undefined);
+        throw new AgentError('agent_failed', `${agent.displayName} couldn't start in this chat's permission mode. Try again.`);
+      }
+      if (live.get(session.id) !== entry) {
+        await started.close().catch(() => undefined);
+        throw new AgentError('agent_failed', `${agent.displayName} was stopped.`);
+      }
       return started;
     });
     live.set(session.id, entry);

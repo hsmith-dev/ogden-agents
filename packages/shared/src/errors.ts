@@ -28,6 +28,12 @@ export const API_ERROR_CODES = [
   'terminal_unavailable',
   /** A chat message was refused: the session's terminal drives it (409, story 3.2, AD-6). */
   'driver_is_terminal',
+  /** Skip all was asked for while Developer mode is off (403): nothing changed. */
+  'developer_mode_required',
+  /** Skip all was asked for without the user's confirmation of its warning (400): nothing changed. */
+  'confirmation_required',
+  /** A permission mode the chat's agent, or its session, doesn't offer (409): nothing changed. */
+  'mode_unavailable',
   /** uv's status or install could not be read or started (500). */
   'toolchain_unavailable',
   /** A route or socket request whose lane has not shipped yet (501; the story 2.3 stubs). */

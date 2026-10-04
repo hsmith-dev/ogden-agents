@@ -1,6 +1,6 @@
 import { Check, ClockCounterClockwise, Prohibit, ShieldCheck } from '@phosphor-icons/react';
 import type { CautionLevel, PermissionDecision, ToolKind } from '@ogden-agents/shared';
-import { alwaysAllowRefusal, MAX_DENY_REASON_LENGTH } from '@ogden-agents/shared';
+import { alwaysAllowRefusal, MAX_DENY_REASON_LENGTH, PERMISSION_MODE_LABELS, SKIP_ALL_REFUSAL } from '@ogden-agents/shared';
 import { useId, useState, type KeyboardEvent } from 'react';
 import { AGENT_NAME, ChatApiError, decidePermission, removePermissionRule } from '@/chat/chat-api';
 import { useReadOnlyConversation } from '@/chat/read-only';
@@ -70,8 +70,10 @@ export function PermissionCard({ permission, wsId, sesId, projectName, onDecided
 
   const { scope } = permission;
   const target = permissionTarget(permission);
-  // An interpreter, a wrapper or a variable assignment: only Allow once and Deny, with the reason.
-  const refusal = scope === null && permission.toolCall.command !== undefined ? alwaysAllowRefusal(permission.toolCall.command) : undefined;
+  // A chat in Skip all never writes rules (permission modes); an interpreter, a wrapper or a variable
+  // assignment can run anything: only Allow once and Deny, with the reason.
+  const skipAll = permission.permissionMode === 'skip_all';
+  const refusal = skipAll ? SKIP_ALL_REFUSAL : scope === null && permission.toolCall.command !== undefined ? alwaysAllowRefusal(permission.toolCall.command) : undefined;
   const decide = (decision: PermissionDecision) => {
     if (readOnly || sending || (decision === 'allow_always' && scope === null)) return;
     setSending(true);
@@ -117,8 +119,8 @@ export function PermissionCard({ permission, wsId, sesId, projectName, onDecided
       <pre data-testid="permission-command" className="m-0 whitespace-pre-wrap break-all rounded-md bg-muted px-3 py-2 font-mono text-mono text-foreground">
         {target}
       </pre>
-      <Text variant="caption">
-        {projectName} · {CAUTION_WORDS[permission.cautionLevel]}
+      <Text variant="caption" data-testid="permission-caption">
+        {projectName} · {skipAll ? `${PERMISSION_MODE_LABELS.skip_all}: one of ${AGENT_NAME}'s own safety checks` : CAUTION_WORDS[permission.cautionLevel]}
       </Text>
       {permission.toolCall.protectedPath === true ? (
         <Text variant="caption" data-testid="permission-protected">

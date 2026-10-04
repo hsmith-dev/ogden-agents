@@ -385,7 +385,7 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     expect(SessionResponse.parse(await switched.json()).session.driver).toBe('terminal');
     await waitFor(recorded, 'the CLI to start', 10_000);
     const cli = record();
-    expect(cli).toMatchObject({ argv: ['--resume', ref], cwd: realpathSync.native(repo), term: 'xterm-256color' });
+    expect(cli).toMatchObject({ argv: ['--resume', ref, '--permission-mode', 'default'], cwd: realpathSync.native(repo), term: 'xterm-256color' });
     // The chat's environment, and none of the server's own beyond it (AD-16).
     expect(cli.envNames).toContain('CLAUDE_CODE_EXECUTABLE');
     expect(cli.envNames).not.toContain('OGDEN_AGENTS_TEST_SECRET_STORE');
@@ -672,6 +672,29 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     expect(viewer.state.closed).toBe(1009);
     // The terminal itself runs on.
     expect(server.core.entities.getSession(sessionId)!.driver).toBe('terminal');
+  }, 60_000);
+
+  it("starts the CLI in the chat's permission mode, refuses a mode change while it drives, and Developer mode off stops a Skip-all CLI (permission modes)", async () => {
+    const { server, tab, record, recorded } = await startTerminalServer();
+    const { ids, sessionId } = await answeredChat(server, tab);
+    const ref = server.core.entities.getSession(sessionId)!.adapterRefs[AGENT_SESSION_REF]!;
+    const put = (path: string, body: unknown) => fetch(`${server.url}${path}`, { method: 'PUT', headers: { ...tab.headers, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    expect((await put(API_ROUTES.developerMode, { developerMode: true })).status).toBe(200);
+    expect((await put(apiPath(API_ROUTES.sessionPermissionMode, ids), { mode: 'skip_all', confirm: true })).status).toBe(200);
+
+    expect((await switchTo(server, tab, ids, 'terminal')).status).toBe(200);
+    await waitFor(recorded, 'the CLI to start', 10_000);
+    const cli = record();
+    expect(cli.argv).toEqual(['--resume', ref, '--dangerously-skip-permissions']);
+    const refused = await put(apiPath(API_ROUTES.sessionPermissionMode, ids), { mode: 'ask' });
+    expect(refused.status).toBe(409);
+    expect(ApiErrorBody.parse(await refused.json()).error.code).toBe('driver_is_terminal');
+
+    // Developer mode off: the chat drives again, in Ask, and the CLI skipping its checks is gone.
+    expect((await put(API_ROUTES.developerMode, { developerMode: false })).status).toBe(200);
+    expect(server.core.entities.getSession(sessionId)).toMatchObject({ driver: 'ui', permissionMode: 'ask' });
+    expect(driverCauses(server, sessionId).at(-1)).toBe('developer_mode_off');
+    await waitFor(() => !alive(cli.pid), 'the CLI to be gone', 10_000);
   }, 60_000);
 });
 

@@ -11,6 +11,7 @@ import {
   type BoardUseCases,
   type Chat,
   type EventLog,
+  type InstallSettings,
   type NewProjectDefaultsStore,
   type Onboarding,
   type Permissions,
@@ -33,6 +34,7 @@ import type { Logger } from './log.js';
 import { isServerPath } from './paths.js';
 import { registerPermissionRoutes } from './permission-routes.js';
 import { registerPlanningRoutes } from './planning-routes.js';
+import { registerSettingsRoutes } from './settings-routes.js';
 import { registerShortcutRoutes } from './shortcut-routes.js';
 import type { TerminalAvailabilityCheck } from './terminal-availability.js';
 import { registerTerminalSocket } from './terminal-socket.js';
@@ -124,6 +126,8 @@ export interface AppOptions {
    * 501 and new projects start Simple.
    */
   newProjectDefaults?: NewProjectDefaultsStore;
+  /** Developer mode, kept and enforced by core (permission modes); without it its routes answer 501. */
+  installSettings?: InstallSettings;
   /** The Ogden Agents app shortcut (E2-R10; the `shortcut-memory` stub until 2.4). */
   appShortcut?: AppShortcutPort;
   /**
@@ -154,6 +158,7 @@ export function createApp({
   agentSetup,
   onboarding,
   newProjectDefaults,
+  installSettings,
   appShortcut,
   tabs,
 }: AppOptions): Hono {
@@ -250,6 +255,7 @@ export function createApp({
   registerBmadTrustRoutes(app, { scriptTrust: bmadScriptTrust, permissions, log });
   // Plan and Board (stories 4.1, 4.2): every route through `bmadPieceRoutes`, behind core's guard and the script trust (AD-22).
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerPlanningRoutes(app, { bmad, scriptTrust: bmadScriptTrust, planning, board, bmadSetup, log });
+  registerSettingsRoutes(app, { installSettings, log });
 
   registerEventSocket(app, { events, log, tabs });
   // A session's terminal (story 3.1): behind the same gate as `/ws`.

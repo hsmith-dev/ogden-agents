@@ -591,6 +591,7 @@ const EXPECTED_API_ROUTES = [
   `POST ${API_ROUTES.sessionMessages}`,
   `POST ${API_ROUTES.sessionCancel}`,
   `POST ${API_ROUTES.sessionDriver}`,
+  `PUT ${API_ROUTES.sessionPermissionMode}`,
   `POST ${API_ROUTES.sessionPermission}`,
   `GET ${API_ROUTES.permissionRules}`,
   `DELETE ${API_ROUTES.permissionRule}`,
@@ -613,6 +614,8 @@ const EXPECTED_API_ROUTES = [
   `POST ${API_ROUTES.bmadSource}`,
   `GET ${API_ROUTES.newProjectDefaults}`,
   `PATCH ${API_ROUTES.newProjectDefaults}`,
+  `GET ${API_ROUTES.developerMode}`,
+  `PUT ${API_ROUTES.developerMode}`,
   `GET ${API_ROUTES.workspaceBmadDetection}`,
   `DELETE ${API_ROUTES.workspaceBmadOffer}`,
   // Plan and Board (story 4.1), each through the guarded helper.

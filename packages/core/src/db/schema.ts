@@ -8,6 +8,7 @@
 import type {
   AdapterRefs,
   CautionLevel,
+  PermissionMode,
   RunOutcome,
   SessionDriver,
   SessionKind,
@@ -63,6 +64,11 @@ export const sessions = sqliteTable(
     kind: text('kind').$type<SessionKind>().notNull(),
     state: text('state').$type<SessionState>().notNull(),
     driver: text('driver').$type<SessionDriver>().notNull(),
+    /**
+     * The chat's permission mode (`ask`, `auto`, `skip_all`). Rows from
+     * before it read `ask`; a server start sets every other one back to `ask`.
+     */
+    permissionMode: text('permission_mode').$type<PermissionMode>().notNull().default('ask'),
     title: text('title'),
     /** Agent and CLI ids (AD-9), as a JSON object. Never keys. */
     adapterRefs: text('adapter_refs', { mode: 'json' }).$type<AdapterRefs>().notNull(),
@@ -161,3 +167,12 @@ export const bmadModulesSeen = sqliteTable(
   },
   (t) => [uniqueIndex('bmad_modules_seen_unique').on(t.workspaceId, t.code)],
 );
+
+/**
+ * Install-wide settings the server enforces (one row, `id = 1`, created on
+ * first write): Developer mode, which gates a chat's Skip all.
+ */
+export const installSettings = sqliteTable('install_settings', {
+  id: integer('id').primaryKey(),
+  developerMode: integer('developer_mode', { mode: 'boolean' }).notNull().default(false),
+});

@@ -91,6 +91,16 @@ export const API_ROUTES = {
    */
   sessionDriver: `${API_BASE}/workspaces/:wsId/sessions/:sesId/driver`,
   /**
+   * `PUT SetPermissionModeRequest` → `SessionResponse` (permission modes): the
+   * chat's permission mode; a change appends `session.permission_mode_changed`
+   * (the same mode again: 200, nothing appended). Refused, appending nothing:
+   * `skip_all` without Developer mode 403 `developer_mode_required`, without
+   * `confirm: true` 400 `confirmation_required`; a mode the agent or its
+   * session doesn't offer 409 `mode_unavailable`; while the terminal drives
+   * 409 `driver_is_terminal`.
+   */
+  sessionPermissionMode: `${API_BASE}/workspaces/:wsId/sessions/:sesId/permission-mode`,
+  /**
    * `POST PermissionDecisionRequest` → 204 (2.6): the user's answer on a
    * permission card. 409 `permission_not_pending` when it is no longer waiting.
    */
@@ -158,6 +168,14 @@ export const API_ROUTES = {
    * it): the app-wide default pieces for new projects.
    */
   newProjectDefaults: `${API_BASE}/settings/new-projects`,
+  /**
+   * `GET` → `DeveloperModeResponse`; `PUT SetDeveloperModeRequest` →
+   * `DeveloperModeResponse` (permission modes): Developer mode, kept by the
+   * server so it can gate Skip all. A change appends
+   * `settings.developer_mode_changed`; turning it off drops every Skip-all
+   * chat to Ask in the same transaction.
+   */
+  developerMode: `${API_BASE}/settings/developer-mode`,
   /**
    * `GET` → `BmadDetectionResponse` (story 10.2's contract; 10.3 serves it):
    * whether the project's repo already has `_bmad/`, read-only. Not guarded.

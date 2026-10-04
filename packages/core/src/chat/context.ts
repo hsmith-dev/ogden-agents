@@ -4,14 +4,14 @@
  * instance each, never copied or spread: the modules' identity checks rely on
  * it) and `closing`, read as `ctx.closing` at each use, never copied.
  */
-import type { Session, SessionId, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import type { PermissionMode, Session, SessionId, Workspace, WorkspaceId } from '@ogden-agents/shared';
 import { monotonicFactory } from 'ulid';
 import { AgentError, type AgentPort } from '../agent-port.js';
 import { canonicalWorkspacePath, type Entities } from '../entities.js';
 import { NotFoundError } from '../errors.js';
 import { createDecliningPermissions, type Permissions } from '../permissions.js';
 import type { SessionEvents } from '../session-events.js';
-import { clampCheckInDelay, DEFAULT_CHECK_IN_MS, STOP_GRACE_MS } from './constants.js';
+import { clampCheckInDelay, DEFAULT_CHECK_IN_MS, PERMISSION_MODE_TIMEOUT_MS, STOP_GRACE_MS } from './constants.js';
 import type { ChatOptions, Live, Terminal, Timer, Turn } from './types.js';
 
 // One monotonic factory for the process, as before the split: message ids and `preq_` ids share it.
@@ -50,6 +50,14 @@ export interface ChatContext {
   readonly terminals: Map<SessionId, Terminal>;
   /** Sessions between drivers: no message is taken and no other switch starts. */
   readonly switching: Set<SessionId>;
+  /** The permission modes each session's agent session offered when it last started this run (permission modes). */
+  readonly sessionModes: Map<SessionId, readonly PermissionMode[]>;
+  /** The permission modes the agent session started last in this run offered (any chat): a chat whose own agent hasn't started yet. */
+  readonly lastSessionModes: { value: readonly PermissionMode[] | undefined };
+  /** How long an agent may take to take a permission mode. */
+  readonly permissionModeTimeoutMs: number;
+  /** Whether Developer mode is on now. */
+  readonly developerMode: () => boolean;
   /** Set by `close`: no event from a stopping agent changes a session any more. Read as `ctx.closing`, never copied. */
   closing: boolean;
   readonly dataHome: string;
@@ -74,6 +82,9 @@ export function createChatContext(options: ChatOptions): ChatContext {
   const droppedAgents = new Map<SessionId, Promise<void>>();
   const terminals = new Map<SessionId, Terminal>();
   const switching = new Set<SessionId>();
+  const sessionModes = new Map<SessionId, readonly PermissionMode[]>();
+  const permissionModeTimeoutMs = options.permissionModeTimeoutMs ?? PERMISSION_MODE_TIMEOUT_MS;
+  const developerMode = () => options.installSettings?.developerMode() === true;
   const dataHome = canonicalWorkspacePath(options.dataDir);
 
   const internalError = (sessionId: SessionId, error: unknown) => {
@@ -120,6 +131,10 @@ export function createChatContext(options: ChatOptions): ChatContext {
     droppedAgents,
     terminals,
     switching,
+    sessionModes,
+    lastSessionModes: { value: undefined },
+    permissionModeTimeoutMs,
+    developerMode,
     closing: false,
     dataHome,
     internalError,

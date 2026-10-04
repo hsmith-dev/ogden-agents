@@ -58,6 +58,14 @@
  * the agent's note), `close` waits for the switches in flight and imports
  * the terminals' turns, and a start after a crash imports what it couldn't.
  *
+ * Permission modes: each chat has a mode (Ask, Auto, Skip all) stored on
+ * its session (`chat/permission-mode.ts`). Every agent session starts in it,
+ * each change is told to the live agent, and a mode the agent reports that
+ * the chat didn't choose moves the chat to Ask. With the event log given, the
+ * chat follows it: a stored mode changed elsewhere (Developer mode turned
+ * off) reaches the live agent, and a terminal handed back by Developer mode
+ * is stopped.
+ *
  * The agent itself sits behind `AgentPort` (AD-1); this file names none.
  */
 import { AgentError } from './agent-port.js';
@@ -65,6 +73,7 @@ import { createAgents } from './chat/agents.js';
 import { createCheckIn } from './chat/check-in.js';
 import { RESTARTED_REASON } from './chat/constants.js';
 import { createChatContext } from './chat/context.js';
+import { createModeApplier, createPermissionModes } from './chat/permission-mode.js';
 import { createPermissionRequests } from './chat/permission-requests.js';
 import { createReplies } from './chat/replies.js';
 import { createTerminal } from './chat/terminal.js';
@@ -83,13 +92,34 @@ export function createChat(options: ChatOptions): Chat {
   const { flushDelta, stopDeltaTimer, tickDelta, flushSession, finishReply } = createReplies(ctx);
   const { clearQuiet, clearTurnTimers, armQuiet } = createCheckIn(ctx, { flushDelta });
   const { onPermissionRequestFor } = createPermissionRequests(ctx, { flushSession, armQuiet });
-  const { drop, storedAgentSessionId, agentFor, promptFor, releaseAgent } = createAgents(ctx, { stopDeltaTimer, onPermissionRequestFor });
-  const turns = createTurns(ctx, { flushDelta, tickDelta, flushSession, finishReply, clearQuiet, clearTurnTimers, armQuiet, drop, agentFor, promptFor });
+  const applyMode = createModeApplier(ctx);
+  const { drop, storedAgentSessionId, agentFor, promptFor, releaseAgent } = createAgents(ctx, { stopDeltaTimer, onPermissionRequestFor, applyMode });
+  const modes = createPermissionModes(ctx, { drop, finishReply, applyMode });
+  const turns = createTurns(ctx, {
+    flushDelta,
+    tickDelta,
+    flushSession,
+    finishReply,
+    clearQuiet,
+    clearTurnTimers,
+    armQuiet,
+    drop,
+    agentFor,
+    promptFor,
+    onReportedMode: modes.onReportedMode,
+  });
   const terminal = createTerminal(ctx, { releaseAgent, storedAgentSessionId });
   const { stopTerminal, closeTerminals } = terminal;
   const workspaces = createWorkspaces(ctx, { drop, stopTerminal });
   // A stop that couldn't import the terminal's turns (a crash): they come in now (story 3.4).
   terminal.importAfterRestart();
+  // Changes of a chat's stored mode made elsewhere reach its agent or its terminal (permission modes).
+  // A change the agent itself caused (`agent`) is told by `onReportedMode` only when it must be.
+  const unfollow = options.events?.subscribe(options.events.lastSeq(), (event) => {
+    if (ctx.closing) return;
+    if (event.type === 'session.permission_mode_changed' && event.payload.cause !== 'agent') modes.followStoredMode(event.payload.sessionId);
+    else if (event.type === 'session.driver_changed' && event.payload.cause === 'developer_mode_off') terminal.releaseTerminal(event.payload.sessionId);
+  });
 
   return {
     openWorkspace: workspaces.openWorkspace,
@@ -103,6 +133,8 @@ export function createChat(options: ChatOptions): Chat {
     cancel: turns.cancel,
     switchDriver: terminal.switchDriver,
     attachTerminal: terminal.attachTerminal,
+    setPermissionMode: modes.setPermissionMode,
+    permissionModeOptions: modes.permissionModeOptions,
 
     async settled() {
       while (running.size > 0) await Promise.all([...running]);
@@ -125,6 +157,7 @@ export function createChat(options: ChatOptions): Chat {
         }
       }
       ctx.closing = true;
+      unfollow?.();
       // The server owns the terminals (AD-3): once the switches in flight end (bounded), they stop
       // with it, their turns are imported and their chats drive again (story 3.4).
       const stoppingTerminals = closeTerminals();

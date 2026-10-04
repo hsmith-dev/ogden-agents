@@ -7,6 +7,7 @@ import { createBmadSetup, type BmadSetupUseCases } from './bmad-setup.js';
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
 import { createEntities, type Entities } from './entities.js';
 import { createEventLog, type EventLog, type EventLogOptions } from './event-log.js';
+import { createInstallSettings, type InstallSettings } from './install-settings.js';
 import { createPermissions, type Permissions } from './permissions.js';
 import { createSessionEvents, type SessionEvents } from './session-events.js';
 
@@ -32,6 +33,8 @@ export interface Core {
   readonly bmadModulesSeen: BmadModulesSeen;
   /** BMad Method's setup in a project (story 4.3); `undefined` without a catalog to set up with. */
   readonly bmadSetup: BmadSetupUseCases | undefined;
+  /** Developer mode, which the server keeps and enforces (permission modes). */
+  readonly installSettings: InstallSettings;
   close(): void;
 }
 
@@ -68,6 +71,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
           events,
           ...(options.onBmadSetupFailure === undefined ? {} : { onFailure: options.onBmadSetupFailure }),
         });
+  const installSettings = createInstallSettings({ db, events, entities });
   const permissions = createPermissions({
     db,
     events,
@@ -86,6 +90,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     bmadScriptTrust,
     bmadModulesSeen,
     bmadSetup,
+    installSettings,
     close: () => {
       try {
         permissions.close();

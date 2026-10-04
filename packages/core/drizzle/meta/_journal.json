@@ -57,6 +57,13 @@
       "when": 1790968723083,
       "tag": "0007_bmad_modules_seen",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1791088650874,
+      "tag": "0008_permission_modes",
+      "breakpoints": true
     }
   ]
 }

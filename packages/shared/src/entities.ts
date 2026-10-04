@@ -18,6 +18,28 @@ export const SESSION_DRIVERS = ['ui', 'terminal'] as const;
 export const SessionDriver = z.enum(SESSION_DRIVERS);
 export type SessionDriver = z.infer<typeof SessionDriver>;
 
+/**
+ * A chat's permission mode (story: each chat has a permission mode). `ask`:
+ * every request the agent sends shows a card under the workspace's caution
+ * level and Always-allow rules (where every chat starts). `auto`: the agent's
+ * own auto mode approves what it judges safe and asks, through the cards,
+ * about the rest. `skip_all`: the agent skips its permission checks; only in
+ * Developer mode, after a confirmation. Changed only by core, each change a
+ * `session.permission_mode_changed` event. An agent declares which it offers.
+ */
+export const PERMISSION_MODES = ['ask', 'auto', 'skip_all'] as const;
+export const PermissionMode = z.enum(PERMISSION_MODES);
+export type PermissionMode = z.infer<typeof PermissionMode>;
+
+/**
+ * How much each mode asks, strictest first: a higher rank asks less. A move to
+ * a lower rank is a move to a stricter mode.
+ */
+export const PERMISSION_MODE_RANK: Readonly<Record<PermissionMode, number>> = { ask: 0, auto: 2, skip_all: 3 };
+
+/** The modes' names as the UI shows them. */
+export const PERMISSION_MODE_LABELS: Readonly<Record<PermissionMode, string>> = { ask: 'Ask', auto: 'Auto', skip_all: 'Skip all' };
+
 /** What a session is for (AD-8). */
 export const SESSION_KINDS = ['chat', 'planning', 'build'] as const;
 export const SessionKind = z.enum(SESSION_KINDS);
@@ -58,6 +80,11 @@ export const Session = z.object({
   kind: SessionKind,
   state: SessionState,
   driver: SessionDriver,
+  /**
+   * The chat's permission mode. Absent in `session.created` events and rows
+   * from before it existed: they read as `ask`.
+   */
+  permissionMode: PermissionMode.default('ask'),
   title: z.string().nullable(),
   adapterRefs: AdapterRefs,
   createdAt: IsoUtcTimestamp,

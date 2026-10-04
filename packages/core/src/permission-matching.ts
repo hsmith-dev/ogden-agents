@@ -8,6 +8,7 @@
 import { realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { alwaysAllowRefusal, type AlwaysAllowScope, type CautionLevel, type ToolKind, type Workspace } from '@ogden-agents/shared';
+import type { ProtectedPaths } from './agent-port.js';
 import { canonicalWorkspacePath, isCaseInsensitivePath } from './entities.js';
 
 /**
@@ -186,7 +187,14 @@ export function cautionAllows(level: CautionLevel, kind: ToolKind, pathsInside: 
  * Folder or file names, at any depth, compared ignoring case everywhere
  * (stricter than the filesystem needs on a case-sensitive one).
  */
-const PROTECTED_NAMES: ReadonlySet<string> = new Set(['.claude', '.git', '.vscode', '.idea', '.mcp.json', 'claude.md', 'agents.md', '.envrc']);
+export const PROTECTED_PATHS: ProtectedPaths = {
+  folders: ['.claude', '.git', '.vscode', '.idea'],
+  // As agents write them; the lowercase spellings too, for a case-insensitive filesystem.
+  files: ['.mcp.json', 'CLAUDE.md', 'claude.md', 'AGENTS.md', 'agents.md', '.envrc'],
+};
+
+/** {@link PROTECTED_PATHS} as one set of lowercase names: the one source of the 2.8 rule and of the Auto guards. */
+const PROTECTED_NAMES: ReadonlySet<string> = new Set([...PROTECTED_PATHS.folders, ...PROTECTED_PATHS.files].map((name) => name.toLowerCase()));
 
 /** Tool kinds that write: a protected path among their paths always asks. Reads and searches are not protected. */
 export const WRITE_KINDS: ReadonlySet<ToolKind> = new Set<ToolKind>(['edit', 'delete', 'move']);

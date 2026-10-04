@@ -25,6 +25,12 @@ export const TOOLCHAIN_STREAM = 'toolchain';
 export const AGENTS_STREAM = 'agents';
 
 /**
+ * The stream of install-level settings events (`workspaceId: null`):
+ * Developer mode, which the server keeps and enforces.
+ */
+export const SETTINGS_STREAM = 'settings';
+
+/**
  * How many recent events a `subscribe_workspace` sends when it names no
  * `window` (E2-R8): the UI never replays a workspace's whole history.
  */

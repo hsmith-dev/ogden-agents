@@ -8,6 +8,7 @@
  * through {@link AgentSession.onEvent}, and core turns that into session
  * events and the session's normalized state (AD-4).
  */
+import type { PermissionMode } from '@ogden-agents/shared';
 import { CoreError } from './errors.js';
 
 /** One file change a tool call reports (secrets masked). `oldText` is `null` for a new file. */
@@ -39,6 +40,16 @@ export type AgentEvent =
       status?: string | undefined;
       diffs?: AgentToolCallDiff[] | undefined;
     }
+  /**
+   * The agent says it now runs in another permission mode (permission modes):
+   * `mode` is the Ogden mode it maps to, or `other` (planning, accepting
+   * edits, anything else). `asksLess` says whether it asks less than Ask (an
+   * agent that does is told Ask). `label` is the agent's own name for the
+   * mode, for the plain reason the chat shows. Core moves a chat to Ask on
+   * any mode it didn't choose; the adapter reports a mode it was told to take
+   * only when the agent reports it too (core ignores that echo).
+   */
+  | { type: 'permission_mode'; mode: PermissionMode | 'other'; asksLess: boolean; label?: string | undefined }
   /**
    * The adapter's view of the session (AD-4): `working` while a prompt runs,
    * `idle` once it has ended, `error` when the agent failed or went away.
@@ -83,6 +94,18 @@ export type AgentPermissionDecision =
   | { outcome: 'deny'; reason?: string | undefined }
   | { outcome: 'cancelled' };
 
+/**
+ * Folders and files (by name, at any depth) the agent must still ask before
+ * writing, even in its own auto mode (permission modes, user decision
+ * 2026-10-02: "Keep protected files guarded"): so such an edit reaches Ogden
+ * as a card. Core passes the 2.8 protected paths; the adapter turns them into
+ * the agent's own rules.
+ */
+export interface ProtectedPaths {
+  folders: readonly string[];
+  files: readonly string[];
+}
+
 export interface StartAgentSession {
   /** The folder the agent works in: the workspace's repo root. */
   cwd: string;
@@ -98,6 +121,13 @@ export interface StartAgentSession {
    * nothing runs without a person.
    */
   onPermissionRequest?: ((request: AgentPermissionRequest) => Promise<AgentPermissionDecision>) | undefined;
+  /**
+   * Paths to keep guarded (ask before writing) for the whole session. Core
+   * passes them only for a chat in Auto: an agent can't change them once it
+   * runs, and they would hold even in Skip all, so a chat that moves into or
+   * out of Auto gets a new agent session (resumed) at its next idle point.
+   */
+  protectedPaths?: ProtectedPaths | undefined;
 }
 
 /** How a reopened session got its context back: the agent resumed it, loaded it, or had to start a new one. */
@@ -138,12 +168,31 @@ export interface AgentSession {
   close(): Promise<void>;
   /** Calls `listener` with every event from now on. Returns the unsubscribe. */
   onEvent(listener: AgentEventListener): () => void;
+  /**
+   * The permission modes this session offers (it may offer fewer than its
+   * agent declares). Absent: Ask only.
+   */
+  readonly permissionModes?: readonly PermissionMode[] | undefined;
+  /** Whether the session was started with `protectedPaths` in effect. Core puts only such a session in Auto. */
+  readonly protectsPaths?: boolean | undefined;
+  /**
+   * Puts the session in `mode`. Resolves once the agent has taken it (at once
+   * when it already runs in it); rejects when it can't. Absent: the session
+   * only ever runs in Ask, and core never asks it for another mode.
+   */
+  setPermissionMode?(mode: PermissionMode): Promise<void>;
 }
 
 /** One agent (Claude Code, Codex, …) behind the port. */
 export interface AgentPort {
   /** The agent's product name for the UI ("Claude Code"). */
   readonly displayName: string;
+  /**
+   * The permission modes the agent can run a chat in (permission modes; an
+   * agent declares them, so every agent fills the same contract). Absent:
+   * Ask only. Core starts every session in Ask and offers only these.
+   */
+  readonly permissionModes?: readonly PermissionMode[] | undefined;
   /**
    * Starts the agent and a new session in `cwd`. Rejects with an
    * {@link AgentError} (code `agent_unavailable` when it can't be started).
@@ -183,11 +232,13 @@ export interface AgentPort {
  */
 export interface AgentTerminalResume {
   /**
-   * The CLI resuming `agentSessionId`. It runs with the `env` returned (the
-   * same, or with the caller's own rules applied). Rejects with an
-   * {@link AgentError} when it can't be built (the CLI is not found).
+   * The CLI resuming `agentSessionId`, in the chat's permission mode
+   * (`options.permissionMode`, Ask when absent): the CLI starts in its asking
+   * mode, its auto mode, or skipping its permission checks. It runs with the
+   * `env` returned (the same, or with the caller's own rules applied).
+   * Rejects with an {@link AgentError} when it can't be built (the CLI is not found).
    */
-  command(agentSessionId: string, env: Readonly<Record<string, string>>): Promise<AgentTerminalCommand>;
+  command(agentSessionId: string, env: Readonly<Record<string, string>>, options?: AgentTerminalOptions): Promise<AgentTerminalCommand>;
   /** Whether the CLI can be found, or the plain reason it can't (never a path). */
   locate(env: Readonly<Record<string, string>>): Promise<AgentCliLocation>;
   /**
@@ -198,6 +249,13 @@ export interface AgentTerminalResume {
    * error, when the record can't be read (too large, unreadable).
    */
   transcript?(input: { agentSessionId: string; cwd: string; env: Readonly<Record<string, string>> }): Promise<AgentTranscriptTurn[]>;
+}
+
+/** How the agent's CLI is to start (permission modes). */
+export interface AgentTerminalOptions {
+  permissionMode: PermissionMode;
+  /** Paths the CLI must still ask before writing (given in Auto only). */
+  protectedPaths?: ProtectedPaths | undefined;
 }
 
 export type AgentCliLocation = { found: true } | { found: false; reason: string };

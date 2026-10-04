@@ -24,6 +24,7 @@ const SESSION: Session = {
   kind: 'planning',
   state: 'idle',
   driver: 'ui',
+  permissionMode: 'ask',
   title: null,
   adapterRefs: {},
   createdAt: '2026-10-01T00:00:00.000Z',

@@ -5,6 +5,7 @@ import type {
   CoreEvent,
   MessageRole,
   PermissionDecision,
+  PermissionMode,
   PermissionResolvedEvent,
   ResumedVia,
   SessionErrorCode,
@@ -63,6 +64,8 @@ export interface TranscriptPermission {
   /** What Always allow would cover; `null` when it is not offered. */
   scope: AlwaysAllowScope | null;
   cautionLevel: CautionLevel;
+  /** The chat's permission mode when it asked (absent before permission modes: Ask). */
+  permissionMode?: PermissionMode | undefined;
   requestedAt: string;
   status: 'pending' | 'resolved' | 'unanswered';
   resolution:
@@ -250,13 +253,14 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
         break;
       }
       case 'permission.requested': {
-        const { requestId, toolCall: call, alwaysAllowScope, cautionLevel } = event.payload;
+        const { requestId, toolCall: call, alwaysAllowScope, cautionLevel, permissionMode } = event.payload;
         if (permissions.has(requestId)) break;
         const permission: TranscriptPermission = {
           requestId,
           toolCall: call,
           scope: alwaysAllowScope,
           cautionLevel,
+          ...(permissionMode === undefined ? {} : { permissionMode }),
           requestedAt: event.at,
           status: 'pending',
           resolution: undefined,

@@ -11,7 +11,10 @@
  *    folder, through the installed server's test install source.
  * 3. Sign in through the fake login: the page's visit to `https://claude.ai/**`
  *    goes to the login's localhost callback. Welcome moves on by itself.
- * 4. Add the project, say Not now to the shortcut, land in the empty Chats.
+ * 4. Welcome's one question, Simple chats or BMad Method?, with BMad Method
+ *    greyed as Coming soon (no piece ships); add the project, say Not now to
+ *    the shortcut, land in the empty Chats. Settings → Welcome → Continue
+ *    doesn't ask the question again.
  * 5. The first chat: the reply streams in.
  * 6. Sign in again: the login state is removed, so the chat asks to sign in;
  *    after signing in, the chat resends by itself and the agent answers.
@@ -27,9 +30,10 @@
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { BMAD_COMING_SOON_LABEL, FIRST_PROJECT_QUESTION } from '../../packages/shared/src/bmad.ts';
 import { API_ROUTES, requestQuit } from '../support.js';
 import { send } from '../e2e/chat-server.js';
-import { expectConnected, storedToken } from '../e2e/tab.js';
+import { expectConnected, sidebarOf, storedToken } from '../e2e/tab.js';
 import { launch, onboardingServer, waitForExit, type Launched, type OnboardingServer } from './installed.js';
 
 /** An offline install of the fixture: slower on Windows runners. */
@@ -109,6 +113,12 @@ async function installClaudeCode(page: Page, launched: Launched, server: Onboard
 /** Adds the project from Welcome through the folder browser, says Not now to the shortcut, and lands in its empty Chats. */
 async function addProjectAndFinish(page: Page, server: OnboardingServer) {
   await expect(headline(page)).toHaveText('Add a project to get started.');
+  // The first project's one question (10.4): Simple chats preselected; with no BMad piece shipped, BMad Method is greyed, Coming soon.
+  const question = page.getByTestId('first-project-question');
+  await expect(question).toContainText(FIRST_PROJECT_QUESTION);
+  await expect(question.getByRole('radio', { name: 'Simple chats' })).toHaveAttribute('aria-checked', 'true');
+  await expect(question.getByRole('radio', { name: 'BMad Method' })).toBeDisabled();
+  await expect(page.getByTestId('first-project-bmad-coming-soon')).toHaveText(BMAD_COMING_SOON_LABEL);
   await page.getByTestId('welcome-page').getByRole('button', { name: 'Add project' }).click();
   const dialog = page.getByTestId('add-project-dialog');
   await dialog.getByTestId('folder-quick-picks').getByRole('button', { name: 'Documents' }).click();
@@ -177,6 +187,23 @@ test('a first run on the installed package: Welcome, Install, sign in, a project
 
   await test.step('4. add the project, Not now to the shortcut, the empty Chats', async () => {
     await addProjectAndFinish(page, server);
+  });
+
+  await test.step('4b. Settings → Welcome → Continue: the question is not asked again', async () => {
+    const workspace = page.url();
+    await sidebarOf(page).getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('menuitem', { name: 'Welcome' }).click();
+    await expect(page).toHaveURL(`${launched.url}/welcome`);
+    await expect(headline(page)).toHaveText('Pick the agent that will do the work.');
+    // Opened from Settings it doesn't move on by itself: Continue, once the agent shows signed in.
+    await expect(card(page).getByTestId('agent-state')).toContainText('Installed, signed in');
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(headline(page)).toHaveText('Add a project to get started.');
+    await expect(page.getByTestId('welcome-page').getByRole('button', { name: 'Add project' })).toBeVisible();
+    await expect(page.getByTestId('first-project-question')).toHaveCount(0);
+    // Back to the project's empty Chats for the first chat.
+    await page.goto(workspace);
+    await expect(page.getByTestId('chats-empty')).toContainText('No conversations yet.');
   });
 
   await test.step('5. the first chat: the reply streams in', async () => {

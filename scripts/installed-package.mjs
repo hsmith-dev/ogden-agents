@@ -107,6 +107,112 @@ export function isAlive(pid) {
   }
 }
 
+/** `taskkill.exe` by absolute path, so no `PATH` entry can stand in for it (as `packages/adapters/src/process-tree.ts`). */
+function taskkillPath() {
+  return join(process.env.SystemRoot || process.env.SYSTEMROOT || 'C:\\Windows', 'System32', 'taskkill.exe');
+}
+
+/**
+ * One `ps` listing as parent links: each pid's parent. POSIX only; empty when `ps` fails.
+ * @returns {Map<number, number>}
+ */
+function parentLinks() {
+  /** @type {Map<number, number>} */
+  const parents = new Map();
+  const listing = spawnSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8' });
+  if (listing.status !== 0 || typeof listing.stdout !== 'string') return parents;
+  for (const line of listing.stdout.split('\n')) {
+    const [child, parent] = line.trim().split(/\s+/).map(Number);
+    if (Number.isInteger(child) && Number.isInteger(parent)) parents.set(/** @type {number} */ (child), /** @type {number} */ (parent));
+  }
+  return parents;
+}
+
+/**
+ * Every descendant of `pid` (children, their children, and so on) in `parents`.
+ * @param {number} pid
+ * @param {Map<number, number>} parents
+ * @returns {number[]}
+ */
+function descendantsIn(pid, parents) {
+  /** @type {Map<number, number[]>} */
+  const children = new Map();
+  for (const [child, parent] of parents) children.set(parent, [...(children.get(parent) ?? []), child]);
+  /** @type {number[]} */
+  const found = [];
+  const queue = [pid];
+  while (queue.length > 0) {
+    for (const child of children.get(/** @type {number} */ (queue.shift())) ?? []) {
+      if (child === pid || found.includes(child)) continue;
+      found.push(child);
+      queue.push(child);
+    }
+  }
+  return found;
+}
+
+/**
+ * This process and its ancestors (up the parent chain) in `parents`.
+ * @param {Map<number, number>} parents
+ * @returns {Set<number>}
+ */
+function selfAndAncestorsIn(parents) {
+  const chain = new Set([process.pid]);
+  let current = process.ppid;
+  while (current > 0 && !chain.has(current)) {
+    chain.add(current);
+    current = parents.get(current) ?? 0;
+  }
+  return chain;
+}
+
+/**
+ * Every descendant of `pid` (children, their children, and so on), from one
+ * `ps` listing. POSIX only.
+ * @param {number} pid
+ * @returns {number[]}
+ */
+export function descendantsOf(pid) {
+  return descendantsIn(pid, parentLinks());
+}
+
+/**
+ * Kills `pid` and everything it started (3.10 F7): the installed server with
+ * its agents (each in a process group of its own) and its terminal's CLI (in
+ * a PTY's session). On Windows `taskkill /T /F` by absolute path. On POSIX
+ * every descendant is listed first (a killed parent's children are handed to
+ * init, and could no longer be found), then the root and each descendant are
+ * `SIGKILL`ed, with the process group each leads. Does nothing for a bad pid,
+ * this process or one of its ancestors (a stale pid reused), and never kills
+ * them as descendants either; a tree already gone is not an error.
+ * @param {number} pid
+ */
+export function killProcessTree(pid) {
+  if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return;
+  if (IS_WINDOWS) {
+    spawnSync(taskkillPath(), ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+    return;
+  }
+  const parents = parentLinks();
+  // A stale `server.json` pid reused by this process or one of its ancestors (the test runner, its shell): never kill those.
+  const self = selfAndAncestorsIn(parents);
+  if (self.has(pid)) return;
+  const descendants = descendantsIn(pid, parents).filter((each) => !self.has(each));
+  for (const each of [pid, ...descendants]) {
+    // Its group, if it leads one (an agent spawned detached, a PTY's shell): anything started since the listing goes too.
+    try {
+      process.kill(-each, 'SIGKILL');
+    } catch {
+      // It leads no group, or the group is gone.
+    }
+    try {
+      process.kill(each, 'SIGKILL');
+    } catch {
+      // Already gone.
+    }
+  }
+}
+
 /**
  * The running server's port file (`server.json`) in `dataDir`, or undefined.
  * @param {string} dataDir
@@ -139,7 +245,7 @@ export function readPortFile(dataDir) {
  * @property {(launcherArgs: string[], options?: { echo?: (chunk: string) => void }) => LauncherRun} runLauncher runs the launcher through npx, as a user does (installing it first if needed); `echo` receives its output (npm's progress included) as it arrives
  * @property {(launcherArgs: string[]) => LauncherRun} runInstalledLauncher runs the already installed `bin/ogden.js` by its absolute path, with this Node: no npx, so nothing is reinstalled under a running server
  * @property {() => { port: number, pid: number, version: string } | undefined} readPortFile the running server's `server.json`
- * @property {() => boolean} killBackgroundServer kills the background server if one is still running; true if it had to
+ * @property {() => boolean} killBackgroundServer kills the background server if one is still running, with every process it started (`killProcessTree`); true if it had to
  * @property {(name: string) => any} requireInstalled loads a dependency of the installed package (such as `ws`)
  * @property {() => void} checkNoAgentAdapter throws if the installed package declares or pulled in an agent adapter (story 2.2)
  * @property {() => void} removeFolders removes the work folder, the npm cache and the data folder (best effort)
@@ -302,11 +408,9 @@ export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-s
   function killBackgroundServer() {
     const record = readPortFile(dataDir);
     if (record === undefined || !isAlive(record.pid)) return false;
-    try {
-      process.kill(record.pid, 'SIGKILL');
-    } catch {
-      // Already gone.
-    }
+    // The whole tree (3.10 F7): agents run in process groups of their own and the terminal's CLI in a PTY,
+    // so killing the server alone could leave them holding the data and project folders (on Windows above all).
+    killProcessTree(record.pid);
     return true;
   }
 

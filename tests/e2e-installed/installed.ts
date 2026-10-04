@@ -7,8 +7,9 @@
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { echoLines, prepareInstall, startWithRetry, withTimeout, type Install, type LauncherRun } from '../../scripts/installed-package.mjs';
+import { echoLines, killProcessTree, prepareInstall, startWithRetry, withTimeout, type Install, type LauncherRun } from '../../scripts/installed-package.mjs';
 import { createDataFolder020, type DataFolder020 } from '../fixtures/data-folder-0.2.0.js';
+import { createFakeBmadRepo, type FakeBmadRepo, type FakeBmadRepoOptions } from '../fixtures/fake-bmad-repo.js';
 import { packFakeAdapter, testNpmCli } from '../fixtures/fake-adapter/pack.mjs';
 import { isAlive, readPortFile, ROOT, waitUntil } from '../support.js';
 
@@ -202,7 +203,8 @@ export async function stopOwnServer(install: Install): Promise<void> {
 
 /**
  * The teardown's sweep of the extra folder: kills every server still running
- * from a data folder in it, and returns their pids.
+ * from a data folder in it, with every process it started (3.10 F7), and
+ * returns their pids.
  */
 export function killExtraServers(extraDir: string): number[] {
   const killed: number[] = [];
@@ -215,11 +217,7 @@ export function killExtraServers(extraDir: string): number[] {
   for (const entry of entries) {
     const record = readPortFile(join(extraDir, entry));
     if (record === undefined || !isAlive(record.pid)) continue;
-    try {
-      process.kill(record.pid, 'SIGKILL');
-    } catch {
-      // Already gone.
-    }
+    killProcessTree(record.pid);
     killed.push(record.pid);
   }
   return killed;
@@ -424,4 +422,87 @@ export function terminalServer(name: string, { omitOptional = false }: { omitOpt
     }
   };
   return { project, launch: () => (omitOptional ? launchFresh() : launch(install)), remove, serverLog: () => join(install.dataDir, 'logs', 'server.log') };
+}
+
+/**
+ * The installed server's BMad hooks (`packages/server/src/test-hooks.ts`,
+ * stories 10.1 and 10.2), honoured only because `prepareInstall` sets
+ * `NODE_ENV=test` on a temp data folder: pieces this install reports as
+ * available (a comma list), and the test-only route guarded by `planning`.
+ */
+export const BMAD_AVAILABLE_ENV = 'OGDEN_AGENTS_TEST_BMAD_AVAILABLE';
+export const BMAD_PROBE_ENV = 'OGDEN_AGENTS_TEST_BMAD_PROBE';
+
+export interface BmadServer {
+  /** The install, set up for this server: its own data folder (Welcome done), home folder and the fake agent. */
+  install: Install;
+  /** The server's home folder (HOME, USERPROFILE, APPDATA, LOCALAPPDATA, XDG_* under it): nothing reads the user's own `~/.claude`. */
+  home: string;
+  /** Starts the server in the background with the installed launcher, as a user does. */
+  launch(): Promise<Launched>;
+  /** Kills the server if it still runs (with its children), then starts it again on the same data folder. Quit it first for a clean restart. */
+  restart(): Promise<Launched>;
+  /** A fake repo (`fixtures/fake-bmad-repo.ts`) in this server's repos folder, under the extra folder; its real path. */
+  addRepo(options?: Omit<FakeBmadRepoOptions, 'parent'>): FakeBmadRepo;
+  /** Stops the server if it still runs (with its children), and removes every folder of it. */
+  remove(): Promise<void>;
+}
+
+/**
+ * A server of the installed package for the BMad journey (story 10.9): its
+ * own data folder (Welcome done), a home folder of its own, the fake agent
+ * (`FAKE_AGENT`), and the BMad hooks only when given: `available` pieces and
+ * the guarded `probe` route. Without either it is what a user runs: every
+ * piece Coming soon. Repos are fake repos in a folder of its own. Nothing is
+ * installed again.
+ */
+export function bmadServer(name: string, { available, probe = false }: { available?: string[]; probe?: boolean } = {}): BmadServer {
+  const dataDir = extraFolder(`${name}-data`);
+  writeFileSync(join(dataDir, 'onboarding.json'), `${JSON.stringify({ welcomeCompleted: true })}\n`, { mode: 0o600 });
+  // Real paths: macOS temp folders are reached through /var, and Windows ones may be 8.3 short names.
+  const home = realpathSync.native(extraFolder(`${name}-home`));
+  const reposDir = realpathSync.native(extraFolder(`${name}-repos`));
+  const install = prepareInstall({
+    tarball: env(ENV.tarball),
+    prefix: 'ogden-agents-e2e',
+    reuse: { workDir: env(ENV.workDir), cacheDir: env(ENV.cacheDir), dataDir },
+    env: {
+      ...agentEnv(FAKE_AGENT),
+      // Empty when not asked for, so nothing in the runner's environment turns a hook on.
+      [BMAD_AVAILABLE_ENV]: available === undefined ? '' : available.join(','),
+      [BMAD_PROBE_ENV]: probe ? '1' : '',
+      // The server passes ANTHROPIC_API_KEY on to agents, and `session-start` echoes the agent's whole environment into the page.
+      ANTHROPIC_API_KEY: '',
+      HOME: home,
+      USERPROFILE: home,
+      APPDATA: join(home, 'AppData', 'Roaming'),
+      LOCALAPPDATA: join(home, 'AppData', 'Local'),
+      XDG_DATA_HOME: join(home, '.local', 'share'),
+      XDG_CONFIG_HOME: join(home, '.config'),
+    },
+  });
+  const repos: FakeBmadRepo[] = [];
+
+  const restart = async () => {
+    const pid = install.readPortFile()?.pid;
+    install.killBackgroundServer();
+    if (pid !== undefined) await waitForExit(pid);
+    return launch(install);
+  };
+  const addRepo = (options: Omit<FakeBmadRepoOptions, 'parent'> = {}) => {
+    const repo = createFakeBmadRepo({ ...options, parent: reposDir });
+    repos.push(repo);
+    return repo;
+  };
+  const remove = async () => {
+    await stopOwnServer(install);
+    for (const dir of [...repos.map((repo) => repo.path), reposDir, home]) {
+      try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      } catch {
+        // Windows may still hold a handle briefly; the teardown removes the extra folder and reports what remains.
+      }
+    }
+  };
+  return { install, home, launch: () => launch(install), restart, addRepo, remove };
 }

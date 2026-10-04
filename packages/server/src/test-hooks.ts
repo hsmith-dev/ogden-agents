@@ -38,6 +38,17 @@
  *   plays Antigravity's ACP server (epic 6 entry 8), so the installed-package
  *   suite can chat with Antigravity through the fake agent on every OS (the
  *   pinned server is never run in a test).
+ * - {@link ANTIGRAVITY_INSTALL_ENV} (with {@link ANTIGRAVITY_SERVER_ENV}):
+ *   Antigravity's setup takes its pins from a JSON file inside the temp
+ *   folder (epic 6 entry 10), so the installed-package suite installs and
+ *   uninstalls it from a local fixture archive, checked against its pinned
+ *   SHA-256 as shipped; every archive URL must be `http://127.0.0.1`, so it
+ *   never reaches the network, and the installed server is the fake. Pins
+ *   with no archive for this computer show the unsupported message.
+ * - {@link TRUST_AGENT_ENV}: a Node script inside the temp folder (the fake
+ *   ACP agent) is registered as one more agent, "Fake Agent", that needs a
+ *   trusted project (epic 6 entry 10), so the suite proves core's agent
+ *   trust gate on the installed package.
  *
  * {@link resolveTestHooks} reads them all for `start()`, and
  * {@link testHooksLogFields} is its "test hooks in use" line. Every
@@ -47,7 +58,7 @@
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, relative } from 'node:path';
-import type { AdapterPins } from '@ogden-agents/adapters';
+import type { AdapterPins, AntigravityPins } from '@ogden-agents/adapters';
 import { clampCheckInDelay, type ApiKeyVerification } from '@ogden-agents/core';
 import { BmadLock, BmadPiece, type BmadPiece as BmadPieceName } from '@ogden-agents/shared';
 import type { StartOptions } from './start-types.js';
@@ -89,6 +100,10 @@ export const BMAD_SOURCE_UV_ENV_NAMES: readonly string[] = [
 
 /** Absolute path to a Node script inside the temp folder, run under Node as Antigravity's ACP server (tests only; epic 6 entry 8). */
 export const ANTIGRAVITY_SERVER_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_SERVER';
+/** Absolute path to a JSON file `{ "pins": AntigravityPins }` inside the temp folder, every archive on `http://127.0.0.1` (tests only; epic 6 entry 10). */
+export const ANTIGRAVITY_INSTALL_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_INSTALL';
+/** Absolute path to a Node script inside the temp folder, registered as a test agent that needs a trusted project (tests only; epic 6 entry 10). */
+export const TRUST_AGENT_ENV = 'OGDEN_AGENTS_TEST_TRUST_AGENT';
 
 /** Test-only: shortens the quiet-agent check-in delay, in milliseconds (story 2.10). Honoured only when `testHooksAllowed`. */
 export const CHECK_IN_MS_ENV = 'OGDEN_AGENTS_TEST_CHECK_IN_MS';
@@ -216,6 +231,61 @@ export function testAntigravityServer(env: Env, dataDir: string, tmp: string = t
   return testNodeScript(ANTIGRAVITY_SERVER_ENV, env, dataDir, tmp);
 }
 
+/** What {@link testAntigravityInstall} gives Antigravity's setup: its pins. */
+export interface TestAntigravityInstall {
+  pins: AntigravityPins;
+}
+
+/**
+ * Antigravity's test pins from {@link ANTIGRAVITY_INSTALL_ENV}, or
+ * `undefined` (the shipped pins): unset, hooks not allowed, the file outside
+ * the temp folder, or any archive URL that is not `http://127.0.0.1` (never
+ * fetched through this hook). Allowed but unusable (a relative path,
+ * unreadable, malformed pins) throws, so the test fails loudly.
+ */
+export function testAntigravityInstall(env: Env, dataDir: string, tmp: string = tmpdir()): TestAntigravityInstall | undefined {
+  const file = env[ANTIGRAVITY_INSTALL_ENV];
+  if (file === undefined || file === '' || !testHooksAllowed(env, dataDir, tmp)) return undefined;
+  const fail = (why: string): never => {
+    throw new Error(`${ANTIGRAVITY_INSTALL_ENV}: ${why}`);
+  };
+  if (!isAbsolute(file)) fail('must be an absolute path');
+  let text = '';
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (error) {
+    fail(`unreadable (${(error as NodeJS.ErrnoException).code ?? 'unknown'})`);
+  }
+  if (!insideTemp(file, tmp)) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    fail('unreadable (bad JSON)');
+  }
+  const pins = (parsed as { pins?: Partial<AntigravityPins> } | null)?.pins;
+  if (typeof pins?.registry !== 'string' || typeof pins.version !== 'string' || typeof pins.archives !== 'object' || pins.archives === null) {
+    fail('needs pins with a registry, a version and archives');
+  }
+  for (const pin of Object.values(pins!.archives!)) {
+    if (typeof pin?.url !== 'string' || typeof pin.sha256 !== 'string' || typeof pin.size !== 'number' || typeof pin.files !== 'object') fail('an archive pin needs a url, sha256, size and files');
+    let url: URL | undefined;
+    try {
+      url = new URL(pin!.url);
+    } catch {
+      url = undefined;
+    }
+    // A local fixture only: an archive anywhere but this computer's loopback is never fetched through this hook.
+    if (url?.protocol !== 'http:' || url.hostname !== '127.0.0.1') return undefined;
+  }
+  return { pins: pins as AntigravityPins };
+}
+
+/** The trust-needing test agent's script from {@link TRUST_AGENT_ENV} (see {@link testClaudeCli}), or `undefined`; throws when allowed but unusable. */
+export function testTrustAgent(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
+  return testNodeScript(TRUST_AGENT_ENV, env, dataDir, tmp);
+}
+
 /** A Node script inside the temp folder named by `name` (see {@link testClaudeCli}), or `undefined`; throws when allowed but unusable. */
 function testNodeScript(name: string, env: Env, dataDir: string, tmp: string): string | undefined {
   const file = env[name];
@@ -328,7 +398,7 @@ export function checkInDelayFromEnv(env: Env, dataDir: string, tmp: string = tmp
 }
 
 /** The `start()` options that decide a hook themselves, and whether `start()` opens its own core. */
-export type TestHookOptions = Pick<StartOptions, 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity'> & {
+export type TestHookOptions = Pick<StartOptions, 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'extraAgents'> & {
   /** `false` for a core passed in, which already holds its own BMad pieces: {@link BMAD_AVAILABLE_ENV} is not read. */
   ownsCore: boolean;
   tmp?: string;
@@ -340,6 +410,8 @@ export interface TestHooks {
   apiKeyCheck: ((value: string, signal: AbortSignal) => Promise<ApiKeyVerification>) | undefined;
   claudeCli: string | undefined;
   antigravityServer: string | undefined;
+  antigravityInstall: TestAntigravityInstall | undefined;
+  trustAgent: string | undefined;
   bmadProbe: boolean;
   bmadAvailable: BmadPieceName[];
   bmadSource: TestBmadSource | undefined;
@@ -363,6 +435,9 @@ export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOpt
     claudeCli: options.extraAgentEnv?.CLAUDE_CODE_EXECUTABLE === undefined ? testClaudeCli(env, dataDir, tmp) : undefined,
     // Antigravity's ports given (or left out) by a test decide it: the hook is not read.
     antigravityServer: options.antigravity === undefined ? testAntigravityServer(env, dataDir, tmp) : undefined,
+    antigravityInstall: options.antigravity === undefined ? testAntigravityInstall(env, dataDir, tmp) : undefined,
+    // Agents a test registers decide it: the hook is not read.
+    trustAgent: options.extraAgents === undefined ? testTrustAgent(env, dataDir, tmp) : undefined,
     bmadProbe: testBmadProbe(env, dataDir, tmp),
     bmadAvailable: options.ownsCore ? testBmadAvailable(env, dataDir, tmp) : [],
     bmadSource: options.bmadSource === undefined && options.bmadFetch === undefined ? testBmadSource(env, dataDir, tmp) : undefined,
@@ -382,6 +457,8 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     hooks.apiKeyCheck !== undefined ||
     hooks.claudeCli !== undefined ||
     hooks.antigravityServer !== undefined ||
+    hooks.antigravityInstall !== undefined ||
+    hooks.trustAgent !== undefined ||
     hooks.bmadProbe ||
     hooks.bmadAvailable.length > 0 ||
     hooks.bmadSource !== undefined ||
@@ -392,6 +469,8 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     apiKeyCheck: hooks.apiKeyCheck !== undefined,
     claudeCli: hooks.claudeCli !== undefined,
     antigravityServer: hooks.antigravityServer !== undefined,
+    antigravityInstall: hooks.antigravityInstall !== undefined,
+    trustAgent: hooks.trustAgent !== undefined,
     bmadProbe: hooks.bmadProbe,
     bmadAvailable: hooks.bmadAvailable.join(','),
     bmadSource: hooks.bmadSource !== undefined,

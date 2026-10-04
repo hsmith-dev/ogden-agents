@@ -9,7 +9,11 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import {
   CLAUDE_CODE_AGENT_ID,
   CLAUDE_CODE_DESCRIPTOR,
+  ANTIGRAVITY_DESCRIPTOR,
   createAntigravityAgent,
+  createAntigravitySetup,
+  currentPlatform,
+  pinnedServer,
   createClaudeCodeAgent,
   createClaudeCodeSetup,
   createKeyringSecretStore,
@@ -24,7 +28,7 @@ import { antigravityWiring, type AntigravityPorts } from './antigravity-wiring.j
 import type { Logger } from './log.js';
 import { agentEnvironment, agentKeysOf, SUBSCRIPTION_MAX_AGE_MS, withoutAgentKeys } from './start-env.js';
 import type { StartOptions } from './start-types.js';
-import { testHooksLogFields, type TestHooks } from './test-hooks.js';
+import { testApiKeyCheck, testHooksLogFields, type TestHooks } from './test-hooks.js';
 
 /**
  * The Claude Agent ACP adapter's entry script, for a server started without
@@ -64,7 +68,7 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
       ? []
       : [antigravityWiring({ dataDir, given: options.antigravity ?? testAntigravityPorts(dataDir, hooks, log), onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
   for (const wiring of antigravity) checkAgentWiring(wiring);
-  const extraAgents = [...antigravity, ...(options.extraAgents ?? [])];
+  const extraAgents = [...antigravity, ...(options.extraAgents ?? testTrustAgentWiring(hooks, log))];
   // Every registered agent's API key variables (6.3): each is kept out of every process but its own agent's chat.
   const envKeys = agentEnvKeys([claudeDescriptor, ...extraAgents.map((wiring) => wiring.descriptor)]);
   // The terminal's `claude`: the option's, else (a test run only) a stand-in from the environment (story 3.10).
@@ -175,19 +179,71 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
 }
 
 /**
- * Antigravity's chat port on the test hook's server script
- * (`OGDEN_AGENTS_TEST_ANTIGRAVITY_SERVER`, epic 6 entry 8), run under this
- * Node in place of the pinned server; `undefined` (the shipped ports) when the
- * hook is not in use. Its setup port stays the shipped one.
+ * Antigravity's ports on the test hooks (epic 6 entries 8 and 10), or
+ * `undefined` (the shipped ports) when the server hook is not in use. Its
+ * chat runs the hook's server script under this Node in place of the pinned
+ * server. With the install hook too, its setup is the shipped one on the
+ * hook's pins (a local fixture archive, hash-checked), its installed server
+ * is that script, and a chat runs only once Install put a copy matching
+ * those pins in the data folder; without it, the setup port stays the
+ * shipped one.
  */
 function testAntigravityPorts(dataDir: string, hooks: TestHooks, log: Logger): AntigravityPorts | undefined {
   const script = hooks.antigravityServer;
   if (script === undefined) return undefined;
+  const fake = { command: process.execPath, args: [script, '--uid='] };
+  const onDiagnostic = (message: string, fields?: Record<string, unknown>) => log.info(`agent: ${message}`, fields);
+  const pins = hooks.antigravityInstall?.pins;
+  if (pins === undefined) return { agent: createAntigravityAgent({ dataDir, server: () => fake, onDiagnostic }) };
+  const verify = testApiKeyCheck(process.env, dataDir);
   return {
-    agent: createAntigravityAgent({
+    agent: createAntigravityAgent({ dataDir, server: () => (pinnedServer(dataDir, currentPlatform(), pins) === undefined ? undefined : fake), onDiagnostic }),
+    setup: createAntigravitySetup({
       dataDir,
-      server: () => ({ command: process.execPath, args: [script, '--uid='] }),
-      onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields),
+      pins,
+      homeDir: agentHomeDir(dataDir, ANTIGRAVITY_DESCRIPTOR.agentId),
+      // Install, sign-in and sign-out never see an API key (AD-16), as shipped.
+      env: () => withoutAgentKeys(agentEnvironment()),
+      serverCommand: () => fake,
+      ...(verify === undefined ? {} : { apiKey: { verify } }),
+      onDiagnostic: (message, fields) => onDiagnostic(`setup: ${message}`, fields),
     }),
   };
+}
+
+/** The trust-needing test agent's id and product name (the tests' second agent, `tests/support.ts`). */
+const TRUST_AGENT = { agentId: 'fake-agent', displayName: 'Fake Agent' } as const;
+
+/**
+ * The test agent from {@link TestHooks.trustAgent} (epic 6 entry 10): the
+ * fake ACP agent registered as "Fake Agent", Ask only, with nothing to set
+ * up, whose descriptor says it needs a trusted project, so core refuses its
+ * chats until the project is trusted. None when the hook is not in use.
+ */
+function testTrustAgentWiring(hooks: TestHooks, log: Logger): AgentWiring[] {
+  const script = hooks.trustAgent;
+  if (script === undefined) return [];
+  const base = createClaudeCodeAgent({ adapterPath: script, claudeExecutable: null, onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) });
+  const named = <T extends { env: Readonly<Record<string, string>> }>(input: T): T => ({ ...input, env: { ...input.env, FAKE_ACP_AGENT_NAME: TRUST_AGENT.agentId } });
+  return [
+    {
+      descriptor: {
+        ...TRUST_AGENT,
+        provider: 'Test',
+        install: { kind: 'npm', package: '@fake/agent', version: '1.0.0' },
+        signInMethods: [{ id: 'fake-login', kind: 'subscription', label: 'Sign in with your account' }],
+        permissionModes: { ask: 'default' },
+        needsProjectTrust: true,
+        skillsFolder: '.fake/skills',
+      },
+      agent: {
+        displayName: TRUST_AGENT.displayName,
+        permissionModes: ['ask'],
+        skillInvocation: (skill, idea) => base.skillInvocation(skill, idea),
+        startSession: (input) => base.startSession(named(input)),
+        reopenSession: (input) => base.reopenSession(named(input)),
+        listAuthMethods: (input) => base.listAuthMethods(input),
+      },
+    },
+  ];
 }

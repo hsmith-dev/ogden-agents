@@ -10,7 +10,7 @@ review: 'quick'
 review_source: 'pinned'
 lenses_ran: ['quick']
 review_loop_iteration: 0
-baseline_revision: 'a94a188dab4fbc0a87583bc03e053f190b77dfb3'
+baseline_revision: '53dd529027457755a75268930f90cc47d2eaadee'
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-every-agent/epic-every-agent.md'
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-every-agent/story-move-the-shared-acp-client-out-of-acp-claude-code-plan.md'

@@ -439,6 +439,10 @@ export const BMAD_AVAILABLE_ENV = 'OGDEN_AGENTS_TEST_BMAD_AVAILABLE';
 export const BMAD_PROBE_ENV = 'OGDEN_AGENTS_TEST_BMAD_PROBE';
 /** The installed server's Antigravity server hook (epic 6 entry 8): a Node script in the temp folder plays its ACP server. */
 export const ANTIGRAVITY_SERVER_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_SERVER';
+/** The installed server's Antigravity install hook (epic 6 entry 10): its pins from a JSON file, every archive on 127.0.0.1. */
+export const ANTIGRAVITY_INSTALL_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_INSTALL';
+/** The installed server's trust-needing test agent (epic 6 entry 10): "Fake Agent", the fake agent, refused until the project is trusted. */
+export const TRUST_AGENT_ENV = 'OGDEN_AGENTS_TEST_TRUST_AGENT';
 
 /**
  * The installed server's BMad Method source hook (`BMAD_SOURCE_ENV` in
@@ -527,6 +531,8 @@ export interface BmadServer {
   home: string;
   /** Whether Antigravity can chat here: asked for, and pinned for this platform (its server is the fake's Antigravity personality). */
   antigravity: boolean;
+  /** Antigravity's home folder in the data folder (its `GEMINI_HOME`): where the fake's Google sign-in looks for the stand-in consent. */
+  antigravityHome: string;
   /** Starts the server in the background with the installed launcher, as a user does. */
   launch(): Promise<Launched>;
   /** Kills the server if it still runs (with its children), then starts it again on the same data folder. Quit it first for a clean restart. */
@@ -553,22 +559,53 @@ export interface BmadServer {
  * personality in its place, and a fake Gemini key is in the server's
  * environment. No real Antigravity server, `~/.gemini` or Google.
  */
+export interface BmadServerOptions {
+  available?: string[];
+  probe?: boolean;
+  bmadSource?: boolean;
+  /** Antigravity installed (a planted pinned copy) with a fake Gemini key in the server's environment. */
+  antigravity?: boolean;
+  /**
+   * Antigravity not installed, its setup on these pins (epic 6 entry 10): Install fetches the archive from
+   * 127.0.0.1 and checks it; its installed server is the fake. No key. Excludes `antigravity`.
+   */
+  antigravityPins?: unknown;
+  /** "Fake Agent", which needs a trusted project, registered too (epic 6 entry 10). */
+  trustAgent?: boolean;
+  /** A first run: Welcome not done. */
+  firstRun?: boolean;
+  /** More variables for the server's environment (planted secrets, say). */
+  env?: Record<string, string>;
+}
+
 export function bmadServer(
   name: string,
-  { available, probe = false, bmadSource = false, antigravity = false }: { available?: string[]; probe?: boolean; bmadSource?: boolean; antigravity?: boolean } = {},
+  { available, probe = false, bmadSource = false, antigravity = false, antigravityPins, trustAgent = false, firstRun = false, env: extraEnv = {} }: BmadServerOptions = {},
 ): BmadServer {
   const dataDir = extraFolder(`${name}-data`);
   // The fixture BMad Method source (story 4.13), only when asked for: without it Set up would reach GitHub.
   const sourceFile = bmadSource ? writeFixtureBmadSource(realpathSync.native(extraFolder(`${name}-bmad-source`))) : '';
-  writeFileSync(join(dataDir, 'onboarding.json'), `${JSON.stringify({ welcomeCompleted: true })}\n`, { mode: 0o600 });
+  if (!firstRun) writeFileSync(join(dataDir, 'onboarding.json'), `${JSON.stringify({ welcomeCompleted: true })}\n`, { mode: 0o600 });
   let antigravityServer = '';
-  if (antigravity) {
-    plantPinnedAntigravity(dataDir);
-    const script = join(extraFolder(`${name}-agy`), 'antigravity-server.mjs');
+  let antigravityInstall = '';
+  if (antigravity || antigravityPins !== undefined) {
+    if (antigravityPins === undefined) plantPinnedAntigravity(dataDir);
+    const dir = extraFolder(`${name}-agy`);
+    const script = join(dir, 'antigravity-server.mjs');
     writeFileSync(script, `await import(${JSON.stringify(pathToFileURL(FAKE_ANTIGRAVITY).href)});\n`);
     antigravityServer = script;
+    if (antigravityPins !== undefined) {
+      antigravityInstall = join(dir, 'antigravity-install.json');
+      writeFileSync(antigravityInstall, JSON.stringify({ pins: antigravityPins }));
+    }
   }
-  const agyPinned = antigravity && existsSync(join(dataDir, 'agents', 'antigravity'));
+  let trustAgentScript = '';
+  if (trustAgent) {
+    trustAgentScript = join(extraFolder(`${name}-trust-agent`), 'trust-agent.mjs');
+    writeFileSync(trustAgentScript, `await import(${JSON.stringify(pathToFileURL(FAKE_AGENT).href)});\n`);
+  }
+  const agyPinned = antigravityPins !== undefined || (antigravity && existsSync(join(dataDir, 'agents', 'antigravity')));
+  const agyKey = antigravity && agyPinned;
   // Real paths: macOS temp folders are reached through /var, and Windows ones may be 8.3 short names.
   const home = realpathSync.native(extraFolder(`${name}-home`));
   const reposDir = realpathSync.native(extraFolder(`${name}-repos`));
@@ -583,7 +620,9 @@ export function bmadServer(
       [BMAD_PROBE_ENV]: probe ? '1' : '',
       [BMAD_SOURCE_ENV]: sourceFile,
       [ANTIGRAVITY_SERVER_ENV]: agyPinned ? antigravityServer : '',
-      GEMINI_API_KEY: agyPinned ? FAKE_GEMINI_KEY : '',
+      [ANTIGRAVITY_INSTALL_ENV]: antigravityInstall,
+      [TRUST_AGENT_ENV]: trustAgentScript,
+      GEMINI_API_KEY: agyKey ? FAKE_GEMINI_KEY : '',
       // The server passes ANTHROPIC_API_KEY on to agents, and `session-start` echoes the agent's whole environment into the page.
       ANTHROPIC_API_KEY: '',
       HOME: home,
@@ -592,6 +631,7 @@ export function bmadServer(
       LOCALAPPDATA: join(home, 'AppData', 'Local'),
       XDG_DATA_HOME: join(home, '.local', 'share'),
       XDG_CONFIG_HOME: join(home, '.config'),
+      ...extraEnv,
     },
   });
   const repos: FakeBmadRepo[] = [];
@@ -617,5 +657,5 @@ export function bmadServer(
       }
     }
   };
-  return { install, home, antigravity: agyPinned, launch: () => launch(install), restart, addRepo, remove };
+  return { install, home, antigravity: agyPinned, antigravityHome: join(dataDir, 'agents', 'antigravity-home'), launch: () => launch(install), restart, addRepo, remove };
 }

@@ -8,7 +8,7 @@ import type { Session, SessionId, Workspace } from '@ogden-agents/shared';
 import { AgentError, type AgentEvent, type AgentRestored, type AgentSession } from '../agent-port.js';
 import { PROTECTED_PATHS } from '../permission-matching.js';
 import { primedPrompt } from '../resume-prime.js';
-import { AGENT_SESSION_REF } from './constants.js';
+import { AGENT_SESSION_REF, AGENT_STARTING_NOTICE_MS } from './constants.js';
 import type { ChatContext } from './context.js';
 import type { ModeApplier } from './permission-mode.js';
 import type { PermissionRequests } from './permission-requests.js';
@@ -19,7 +19,7 @@ export function createAgents(
   ctx: ChatContext,
   deps: Pick<Replies, 'stopDeltaTimer'> & Pick<PermissionRequests, 'onPermissionRequestFor'> & { applyMode: ModeApplier },
 ) {
-  const { entities, sessionEvents, agentEnv, agentOf, agentIdOf, live, droppedAgents, internalError, sessionModes } = ctx;
+  const { entities, sessionEvents, agentEnv, agentOf, agentIdOf, live, droppedAgents, internalError, sessionModes, later } = ctx;
   const { stopDeltaTimer, onPermissionRequestFor, applyMode } = deps;
 
   /** Ends the session's agent (it failed or went away); the next message starts a fresh one. */
@@ -94,6 +94,26 @@ export function createAgents(
         : agent.reopenSession({ ...input, agentSessionId: previous });
     const dropped = droppedAgents.get(session.id);
     const opening = dropped === undefined ? begin() : dropped.then(begin);
+    // A start that takes a while shows as starting, not stuck (epic 6 entry 5); a quick one adds no event.
+    const announce = (type: 'session.agent_starting' | 'session.agent_started') => {
+      try {
+        sessionEvents.appendSessionEvent(session.id, { type, payload: { sessionId: session.id } });
+      } catch (error) {
+        internalError(session.id, error);
+      }
+    };
+    let starting: 'pending' | 'announced' | 'ended' = 'pending';
+    const startingTimer = later(AGENT_STARTING_NOTICE_MS, () => {
+      if (starting !== 'pending' || live.get(session.id) !== entry) return;
+      starting = 'announced';
+      announce('session.agent_starting');
+    });
+    const startEnded = () => {
+      clearTimeout(startingTimer);
+      if (starting === 'announced') announce('session.agent_started');
+      starting = 'ended';
+    };
+    opening.then(startEnded, startEnded);
     entry.agent = opening.then(async ({ session: started, restored }) => {
       if (live.get(session.id) !== entry) {
         // Closed (or dropped) while starting: stop it before anyone waiting on this

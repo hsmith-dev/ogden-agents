@@ -5,7 +5,7 @@
  * the launcher handshake, and connecting and quitting the way the page does.
  * Routes come from the shared `API_ROUTES`.
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -97,6 +97,8 @@ export async function startServer(
     claudeAdapterPath: FAKE_AGENT,
     secrets: createMemorySecretStore(),
     verifyApiKey: async () => 'ok',
+    // Antigravity only where a test wires it (`fakeAntigravity`, epic 6 entry 5): the other tests see the agents they name.
+    antigravity: false,
     extraAgentEnv: { FAKE_LOGIN_STATE: loginState, ...extraAgentEnv },
     ...extra,
     bmadCatalog,
@@ -204,6 +206,41 @@ export async function fakeSecondAgent(
       listAuthMethods: (input) => base.listAuthMethods(input),
     },
   };
+}
+
+/** The fake ACP agent as Antigravity's server (`fake-antigravity.mjs`, epic 6 entry 5). */
+export const FAKE_ANTIGRAVITY = join(ROOT, 'tests', 'fixtures', 'fake-antigravity.mjs');
+
+/** A Gemini API key's shape (`AIza` and 35 more), for tests; never a real key. */
+export const FAKE_GEMINI_KEY = `AIza${'F'.repeat(31)}fake`;
+
+/**
+ * Antigravity's own adapters (`StartOptions.antigravity`, epic 6 entry 5)
+ * on a folder of their own (`dataDir`, which the caller removes), with the
+ * fake agent's Antigravity personality in place of its server. Its setup
+ * port is the real one, reading a pinned server planted for this platform
+ * (unless `installed: false`), so a chat needs a Gemini API key, as an
+ * install without Google sign-in does; or `setup` given in its place.
+ */
+export async function fakeAntigravity(options: { installed?: boolean; setup?: Awaited<ReturnType<typeof fakeAgentSetup>> } = {}) {
+  const { createAntigravityAgent, createAntigravitySetup } = await serverModule();
+  const dataDir = makeDataDir('ogden-agents-agy-');
+  if (options.installed !== false) plantPinnedAntigravity(dataDir);
+  const agent = createAntigravityAgent({ dataDir, server: () => ({ command: process.execPath, args: [FAKE_ANTIGRAVITY, '--uid='] }) });
+  return { dataDir, agent, setup: options.setup ?? createAntigravitySetup({ dataDir }) };
+}
+
+/** An empty file where Antigravity's pinned server for this platform is looked for (it is never run: the fake is). */
+export function plantPinnedAntigravity(dataDir: string): void {
+  const pins = JSON.parse(readFileSync(join(ROOT, 'packages', 'adapters', 'src', 'setup-antigravity', 'pins', 'antigravity-acp.json'), 'utf8')) as {
+    version: string;
+    archives: Record<string, { binary: string } | undefined>;
+  };
+  const pin = pins.archives[`${process.platform}-${process.arch}`];
+  if (pin === undefined) return;
+  const folder = join(dataDir, 'agents', 'antigravity', pins.version);
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, pin.binary), '');
 }
 
 /** An in-memory setup port for a fake agent (entry 6: readiness in the picker, Welcome's choice); it installs and signs into nothing. */

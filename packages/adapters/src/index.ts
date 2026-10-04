@@ -4,6 +4,7 @@
  * `sandbox-*`, `vcs-git`, ...). The `*-memory` adapters are deterministic
  * in-memory stubs, wired as defaults until their real adapters ship.
  */
+export * from './acp-antigravity/index.js';
 export * from './acp-base/index.js';
 export * from './acp-claude-code/index.js';
 export * from './bmad-catalog/index.js';
@@ -15,6 +16,7 @@ export * from './catalog-memory/index.js';
 export { errorCode } from './error-code.js';
 export * from './secrets-keyring/index.js';
 export * from './secrets-memory/index.js';
+export * from './setup-antigravity/index.js';
 export * from './setup-claude-code/index.js';
 export * from './setup-memory/index.js';
 export * from './shortcut-memory/index.js';

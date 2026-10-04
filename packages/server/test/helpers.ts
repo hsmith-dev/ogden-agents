@@ -140,6 +140,8 @@ export async function startTestServer(options: StartOptions & { lines?: string[]
     // download itself passes its own source, or `bmadFetch` for the real adapter.
     ...(rest.bmadSource === undefined && rest.bmadFetch === undefined ? { bmadSource: createMemoryBmadSource({ ready: true }) } : {}),
     // Claude Code (the fake) is signed in unless the test says otherwise (6.3: a signed-out agent refuses a new chat).
+    // Antigravity only where a test wires it (`fakeAntigravity`, epic 6 entry 5): the other tests see the agents they name.
+    antigravity: false,
     extraAgentEnv: { FAKE_LOGIN_STATE: signedInLoginState(), ...extraAgentEnv },
     ...rest,
     launch: true,

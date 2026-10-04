@@ -11,7 +11,7 @@
 import { appendFileSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 // The subpath, not the index: the launcher bundle includes this file and must not load zod.
-import { ANTHROPIC_KEY_PATTERNS } from '@ogden-agents/shared/secret-patterns';
+import { API_KEY_PATTERNS } from '@ogden-agents/shared/secret-patterns';
 
 export type LogLevel = 'info' | 'warn' | 'error';
 export type LogFields = Record<string, unknown>;
@@ -39,6 +39,8 @@ const SECRET_FIELDS = new Set([
   'api_key',
   'x-api-key',
   'anthropic_api_key',
+  'gemini_api_key',
+  'google_api_key',
 ]);
 
 /** Field names whose value is a credential when it is a string (a boolean such as "was a token found" is not). */
@@ -50,8 +52,8 @@ export const TOO_DEEP = '[too deep]';
 
 /** Credentials that can appear inside any string: bearer tokens, the auth subprotocol, launch codes, token fragments, API keys. */
 const SECRET_PATTERNS: ReadonlyArray<[RegExp, string]> = [
-  // Anthropic keys, shared with the terminal import (story 3.3 review F4).
-  ...ANTHROPIC_KEY_PATTERNS.map((pattern): [RegExp, string] => [pattern, REDACTED]),
+  // Anthropic and Google keys, shared with the terminal import (story 3.3 review F4; epic 6 entry 5).
+  ...API_KEY_PATTERNS.map((pattern): [RegExp, string] => [pattern, REDACTED]),
   [/(Bearer\s+)[^\s"',]+/gi, `$1${REDACTED}`],
   [/(ogden\.auth\.)[^\s"',]+/g, `$1${REDACTED}`],
   [/([?&]code=)[^\s"'&#]+/g, `$1${REDACTED}`],

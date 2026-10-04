@@ -118,6 +118,11 @@ export interface SessionView {
   notSent: TranscriptMessage[];
   /** The agent has been quiet (`session.check_in`) and nothing has happened since, while it still works. */
   checkIn: TranscriptCheckIn | undefined;
+  /**
+   * The agent is taking a while to start (`session.agent_starting`, epic 6
+   * entry 5) and nothing has come from it since, while the session works.
+   */
+  starting: boolean;
   /** The text of the latest user message that was sent, for Try again. */
   lastUserText: string | undefined;
 }
@@ -144,6 +149,7 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
     queued: [],
     notSent: [],
     checkIn: undefined,
+    starting: false,
     lastUserText: undefined,
   };
   const byId = new Map<string, TranscriptMessage>();
@@ -187,6 +193,9 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
     if (event.streamId !== sessionId) continue;
     // A check-in stands only until the session does anything else.
     if (event.type !== 'session.check_in') view.checkIn = undefined;
+    // Starting stands until the agent is started or anything else happens, but a message queued meanwhile.
+    if (event.type === 'session.agent_starting') view.starting = true;
+    else if (event.type !== 'session.message_queued' && !(event.type === 'session.state_changed' && event.payload.state === 'working')) view.starting = false;
     switch (event.type) {
       case 'session.created':
         view.known = true;
@@ -292,6 +301,7 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
   if (view.state !== 'working') {
     for (const m of view.messages) m.streaming = false;
     view.checkIn = undefined;
+    view.starting = false;
   }
   for (const permission of permissions.values()) {
     if (permission.resolution?.ruleId !== undefined) permission.resolution.ruleRemoved = removedRules.has(permission.resolution.ruleId);

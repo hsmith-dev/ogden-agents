@@ -140,6 +140,23 @@
 // FAKE_ACP_REQUIRE_API_KEY reads; FAKE_ACP_HOME_ENV names its home variable
 // (see "whoami").
 //
+// Antigravity's personality (epic 6 entry 5; spike 6.1's shapes), set by the
+// wrapper `fake-antigravity.mjs` (FAKE_ACP_PERSONALITY=antigravity): its
+// `agentInfo` (`antigravity-acp` 1.3.0), `session/list` beside resume and
+// load, "permission <command>" with its options (`allow` allow_once, `deny`
+// reject_once, `allow_always` "Allow Always") and the command in
+// `rawInput.CommandLine`, replying "Ran <command>. chose=<option id>" or
+// "Denied <command>. chose=<option id>"; `yolo` runs it without asking, as
+// `bypassPermissions` does; "trust" asks its workspace-trust question
+// (`trust` allow_once, `dont_trust` reject_once) and replies
+// `trust=<option id or cancelled>`.
+// FAKE_ACP_REQUIRE_AUTH=1 refuses `session/new`, `resume` and `load` with
+// ACP's auth-required error (-32000) until `authenticate` was called in this
+// process (as Antigravity does before a sign-in method is chosen); "auth"
+// replies `auth=<method id or none> key=<last 4 of its API key or none>`.
+// FAKE_ACP_INIT_DELAY_MS delays the `initialize` answer (Antigravity takes
+// about 17 s to start on Windows).
+//
 // FAKE_ACP_REQUIRE_LOGIN=<state file> makes every prompt need a sign-in (story
 // 9.4): until `fake-claude-login.mjs` has written `{"loggedIn":true}` to that
 // file (its FAKE_LOGIN_STATE), the prompt fails with ACP's auth-required error
@@ -215,6 +232,16 @@ let nextSession = 1;
 const RESUME = process.env.FAKE_ACP_RESUME ?? '';
 const REOPEN_FAIL = new Set((process.env.FAKE_ACP_REOPEN_FAIL ?? '').split(',').filter((method) => method !== ''));
 const NEW_MESSAGE = '[Ogden Agents] New message:\n';
+/** Antigravity's personality (epic 6 entry 5), from `fake-antigravity.mjs`. */
+const ANTIGRAVITY = process.env.FAKE_ACP_PERSONALITY === 'antigravity';
+const INIT_DELAY_MS = Number(process.env.FAKE_ACP_INIT_DELAY_MS ?? '0');
+/** The sign-in method `authenticate` chose in this process, if any. */
+let authenticatedWith;
+const requireAuth = () => {
+  if (process.env.FAKE_ACP_REQUIRE_AUTH === '1' && authenticatedWith === undefined) {
+    throw acp.RequestError.authRequired({ message: 'Authentication required. Call authenticate first.' }, 'Authentication required');
+  }
+};
 
 /**
  * `id:Name,id:Name` (FAKE_ACP_MODES, FAKE_ACP_AUTH_METHODS: a generic second
@@ -244,7 +271,9 @@ const AVAILABLE_MODES = process.env.FAKE_ACP_MODES ? listOf(process.env.FAKE_ACP
 const API_KEY_ENV = process.env.FAKE_ACP_API_KEY_ENV || 'ANTHROPIC_API_KEY';
 const START_MODE = process.env.FAKE_ACP_START_MODE ?? 'default';
 /** Modes in which it edits files without asking (Claude Code's `acceptEdits`, `auto` and `bypassPermissions`). */
-const EDITS_WITHOUT_ASKING = new Set(['acceptEdits', 'auto', 'bypassPermissions']);
+const EDITS_WITHOUT_ASKING = new Set(['acceptEdits', 'auto', 'bypassPermissions', 'auto_edit', 'yolo']);
+/** Modes in which it runs commands without asking (Claude Code's `bypassPermissions`, Antigravity's `yolo`). */
+const RUNS_WITHOUT_ASKING = new Set(['bypassPermissions', 'yolo']);
 /** The `permissions.ask` rules its session was started with (`_meta.claudeCode.options.settings`, as claude-agent-acp 0.84 reads them). */
 const askRulesOf = (session) => session.opened?._meta?.claudeCode?.options?.settings?.permissions?.ask ?? [];
 // Whether an `Edit(**/<folder>/**)` or `Edit(**/<file>)` rule matches `path` (the two shapes Ogden sends).
@@ -322,13 +351,14 @@ const stream = acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(p
 
 acp
   .agent({ name: 'fake-acp-agent' })
-  .onRequest('initialize', ({ params }) => {
+  .onRequest('initialize', async ({ params }) => {
+    if (INIT_DELAY_MS > 0) await sleep(INIT_DELAY_MS);
     const terminalAuth = params.clientCapabilities?.auth?.terminal === true;
     return {
       protocolVersion: acp.PROTOCOL_VERSION,
       agentCapabilities: {
         loadSession: RESUME === 'load' || RESUME === 'both',
-        sessionCapabilities: { close: {}, ...(RESUME === 'resume' || RESUME === 'both' ? { resume: {} } : {}) },
+        sessionCapabilities: { ...(ANTIGRAVITY ? { list: {} } : { close: {} }), ...(RESUME === 'resume' || RESUME === 'both' ? { resume: {} } : {}) },
       },
       authMethods: process.env.FAKE_ACP_AUTH_METHODS
         ? // A generic agent's own sign-in methods, done by the agent itself (6.3).
@@ -341,16 +371,22 @@ acp
                 { type: 'terminal', id: 'console-login', name: 'Anthropic Console', description: 'Use Anthropic Console (API usage billing)', args: ['--cli', 'auth', 'login', '--console'] },
               ]
             : [],
-      agentInfo: { name: 'fake-acp-agent', version: '1.0.0' },
+      agentInfo: ANTIGRAVITY ? { name: 'antigravity-acp', title: 'Google Antigravity', version: '1.3.0' } : { name: 'fake-acp-agent', version: '1.0.0' },
     };
   })
+  .onRequest('authenticate', ({ params }) => {
+    authenticatedWith = params.methodId;
+    return {};
+  })
   .onRequest('session/new', ({ params }) => {
+    requireAuth();
     const sessionId = `fake-session-${nextSession++}`;
     sessions.set(sessionId, { via: 'new', opened: params, mode: START_MODE });
     return { sessionId, modes: modesOf(START_MODE) };
   })
   .onRequest('session/resume', ({ params }) => {
     if (RESUME !== 'resume' && RESUME !== 'both') throw acp.RequestError.methodNotFound('session/resume');
+    requireAuth();
     if (REOPEN_FAIL.has('resume-auth')) throw acp.RequestError.authRequired(undefined, 'the fake agent needs a new sign-in');
     if (REOPEN_FAIL.has('resume')) throw acp.RequestError.resourceNotFound(params.sessionId);
     sessions.set(params.sessionId, { via: 'resumed', opened: params, mode: START_MODE });
@@ -358,6 +394,7 @@ acp
   })
   .onRequest('session/load', async ({ params, client }) => {
     if (RESUME !== 'load' && RESUME !== 'both') throw acp.RequestError.methodNotFound('session/load');
+    requireAuth();
     // The history a load replays: the client already has it.
     await say(client, params.sessionId, 'Earlier reply.');
     if (REOPEN_FAIL.has('load')) throw acp.RequestError.resourceNotFound(params.sessionId);
@@ -387,7 +424,7 @@ acp
     const whole = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('');
     const primedAt = whole.lastIndexOf(NEW_MESSAGE);
     const primer = primedAt === -1 ? '' : whole.slice(0, primedAt);
-    const primed = primer.split('\n').filter((line) => line.startsWith('User: ') || line.startsWith('Claude Code: ')).length;
+    const primed = primer.split('\n').filter((line) => line.startsWith('User: ') || line.startsWith('Claude Code: ') || line.startsWith('Antigravity: ')).length;
     const text = (primedAt === -1 ? whole : whole.slice(primedAt + NEW_MESSAGE.length)).trim();
 
     if (process.env.FAKE_ACP_REQUIRE_LOGIN && !loggedIn(process.env.FAKE_ACP_REQUIRE_LOGIN)) {
@@ -450,6 +487,25 @@ acp
       await say(client, params.sessionId, `chose=${answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'}`);
       return { stopReason: 'end_turn' };
     }
+    if (text === 'auth') {
+      const key = process.env[API_KEY_ENV];
+      await say(client, params.sessionId, `auth=${authenticatedWith ?? 'none'} key=${key ? key.slice(-4) : 'none'}`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text === 'trust') {
+      // Antigravity's workspace-trust question (spike 6.1 saw `trust`/`dont_trust` in its binary).
+      const toolCall = { toolCallId: 'call-trust', title: 'Trust this workspace?', kind: 'other', rawInput: { Cwd: process.cwd() } };
+      const answer = await client.request('session/request_permission', {
+        sessionId: params.sessionId,
+        toolCall,
+        options: [
+          { optionId: 'trust', name: 'Trust', kind: 'allow_once' },
+          { optionId: 'dont_trust', name: "Don't trust", kind: 'reject_once' },
+        ],
+      });
+      await say(client, params.sessionId, `trust=${answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'}`);
+      return { stopReason: 'end_turn' };
+    }
     if (text === 'context') {
       await say(client, params.sessionId, `session=${params.sessionId} via=${session.via} primed=${primed}`);
       return { stopReason: 'end_turn' };
@@ -510,10 +566,11 @@ acp
     if (text === 'permission' || text.startsWith('permission ') || text.startsWith('permission-safety ')) {
       const safety = text.startsWith('permission-safety ');
       const command = text === 'permission' ? 'npm test' : text.slice(safety ? 'permission-safety '.length : 'permission '.length).trim();
-      const toolCall = { toolCallId: 'call-permission', title: `Run ${command}`, kind: 'execute', rawInput: { command } };
+      // Antigravity names the command in `CommandLine` (6.5); Claude Code in `command`.
+      const toolCall = { toolCallId: 'call-permission', title: `Run ${command}`, kind: 'execute', rawInput: ANTIGRAVITY ? { CommandLine: command } : { command } };
       await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
-      // Skipping permission checks (`bypassPermissions`) runs it without asking, unless it is one of its own safety checks.
-      if (process.env.FAKE_ACP_SKIP_PERMISSION === '1' || (session.mode === 'bypassPermissions' && !safety)) {
+      // Skipping permission checks (`bypassPermissions`, `yolo`) runs it without asking, unless it is one of its own safety checks.
+      if (process.env.FAKE_ACP_SKIP_PERMISSION === '1' || (RUNS_WITHOUT_ASKING.has(session.mode) && !safety)) {
         await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: 'completed' });
         await say(client, params.sessionId, `Ran ${command}.`);
         return { stopReason: 'end_turn' };
@@ -521,16 +578,23 @@ acp
       const answer = await client.request('session/request_permission', {
         sessionId: params.sessionId,
         toolCall,
-        options: [
-          { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
-          { optionId: 'always', name: 'Always allow', kind: 'allow_always' },
-          { optionId: 'reject', name: 'Deny', kind: 'reject_once' },
-          { optionId: 'never', name: 'Always deny', kind: 'reject_always' },
-        ],
+        options: ANTIGRAVITY
+          ? [
+              { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+              { optionId: 'deny', name: 'Deny', kind: 'reject_once' },
+              { optionId: 'allow_always', name: 'Allow Always', kind: 'allow_always' },
+            ]
+          : [
+              { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
+              { optionId: 'always', name: 'Always allow', kind: 'allow_always' },
+              { optionId: 'reject', name: 'Deny', kind: 'reject_once' },
+              { optionId: 'never', name: 'Always deny', kind: 'reject_always' },
+            ],
       });
-      const ran = answer.outcome.outcome === 'selected' && (answer.outcome.optionId === 'allow' || answer.outcome.optionId === 'always');
+      const chosen = answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled';
+      const ran = chosen === 'allow' || chosen === 'always' || chosen === 'allow_always';
       await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: ran ? 'completed' : 'failed' });
-      await say(client, params.sessionId, ran ? `Ran ${command}.` : `Denied ${command}.`);
+      await say(client, params.sessionId, `${ran ? 'Ran' : 'Denied'} ${command}.${ANTIGRAVITY ? ` chose=${chosen}` : ''}`);
       return { stopReason: 'end_turn' };
     }
     if (text === 'tool') {

@@ -42,6 +42,9 @@ export type { AgentDescriptor, RegisteredAgent } from '@ogden-agents/core';
 // How an agent is registered (6.3): its descriptor, chat port and optional setup port; tests register fake agents this way.
 export { agentHomeDir, type AgentWiring } from './agent-wiring.js';
 export { createMemoryAgentSetup } from '@ogden-agents/adapters';
+// Antigravity's adapters (epic 6 entry 5), so tests run the fake agent's Antigravity personality through them.
+export { ANTIGRAVITY_AGENT_ID, createAntigravityAgent, createAntigravitySetup } from '@ogden-agents/adapters';
+export type { AntigravityPorts } from './antigravity-wiring.js';
 // The in-memory secret store, so tests never touch the real OS keychain (story 9.2).
 export { createMemorySecretStore } from '@ogden-agents/adapters';
 // BMad Method's catalog (story 4.3): the e2e suite keeps the real read-only parts and stubs setup, so no uv runs.

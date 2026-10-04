@@ -115,6 +115,16 @@ const EVENTS: Array<[type: string, valid: Record<string, unknown>, invalid: Reco
     { ...onSession, payload: { sessionId: sesId, waitingOn: '' } },
   ],
   [
+    'session.agent_starting',
+    { ...onSession, payload: { sessionId: sesId } },
+    { ...onSession, payload: {} },
+  ],
+  [
+    'session.agent_started',
+    { ...onSession, payload: { sessionId: sesId } },
+    { ...onSession, payload: { sessionId: '' } },
+  ],
+  [
     'permission.requested',
     {
       ...onSession,

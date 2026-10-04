@@ -53,9 +53,12 @@ export function toolCallPaths(toolCall: acp.ToolCallUpdate, cwd: string, fields:
   return [...paths];
 }
 
-/** The command a shell tool call would run, when the agent put one in its raw input. */
-export function commandOf(rawInput: unknown): string | undefined {
+/** The command a shell tool call would run, when the agent put one in its raw input: the first of `fields` that holds a string. */
+export function commandOf(rawInput: unknown, fields: readonly string[] = ['command']): string | undefined {
   if (typeof rawInput !== 'object' || rawInput === null) return undefined;
-  const command = (rawInput as { command?: unknown }).command;
-  return typeof command === 'string' ? command : undefined;
+  for (const field of fields) {
+    const command = (rawInput as Record<string, unknown>)[field];
+    if (typeof command === 'string') return command;
+  }
+  return undefined;
 }

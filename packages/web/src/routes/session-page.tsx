@@ -427,6 +427,12 @@ export function SessionPage() {
               {view.queued.map((message) => (
                 <Message key={message.messageId} message={message} agentName={agentName} />
               ))}
+              {state === 'working' && view.starting ? (
+                // A slow agent start (epic 6 entry 5: Antigravity takes about 17 s on Windows) reads as starting, not stuck.
+                <Notice data-testid="agent-starting" role="status">
+                  <StateGlyph state="working" label={`Starting ${agentName}...`} />
+                </Notice>
+              ) : null}
               {state === 'working' && view.checkIn !== undefined ? (
                 <Notice
                   data-testid="check-in"

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
 import {
+  ANTIGRAVITY_AGENT_ID,
   CLAUDE_CODE_AGENT_ID,
   CLAUDE_CODE_DESCRIPTOR,
   createClaudeCodeAgent,
@@ -43,6 +44,7 @@ import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM, ServerMessage, type AgentId, t
 import openBrowser from 'open';
 import { WebSocketServer } from 'ws';
 import { agentHomeDir, checkAgentWiring, describedLike, type AgentWiring } from './agent-wiring.js';
+import { antigravityWiring } from './antigravity-wiring.js';
 import { createApp, type ServerControl } from './app.js';
 import { SHIPPED_BMAD_PIECES } from './bmad-pieces.js';
 import { chooseWebSocketProtocol, createLaunchCodes, createTabTokens, retireLegacyAuthKey } from './auth.js';
@@ -122,11 +124,13 @@ export const MAX_WS_PAYLOAD_BYTES = MAX_TERMINAL_INPUT_BYTES + 1024;
 /** How long a stop waits after answering Quit or restart, so the reply reaches the client first. */
 const STOP_AFTER_REPLY_MS = 50;
 
-/** Whether `agentId` is one this server registers (epic 6, entry 6): Claude Code, then any extra agent a test wires. */
+/** Whether `agentId` is one this server registers (epic 6, entry 6): Claude Code, Antigravity unless left out (entry 5), then any extra agent a test wires. */
 const registeredAgent =
-  (options: Pick<StartOptions, 'extraAgents'>) =>
+  (options: Pick<StartOptions, 'extraAgents' | 'antigravity'>) =>
   (agentId: string): boolean =>
-    agentId === CLAUDE_CODE_AGENT_ID || (options.extraAgents ?? []).some((wiring) => wiring.descriptor.agentId === agentId);
+    agentId === CLAUDE_CODE_AGENT_ID ||
+    (options.antigravity !== false && agentId === ANTIGRAVITY_AGENT_ID) ||
+    (options.extraAgents ?? []).some((wiring) => wiring.descriptor.agentId === agentId);
 
 /**
  * Starts the server on the data folder. Only one server runs per data folder:
@@ -287,7 +291,13 @@ async function listenAndAnnounce({
     });
   // What Claude Code is (6.3); a chat port given in its place (tests) keeps its name and modes.
   const claudeDescriptor = options.agent === undefined ? CLAUDE_CODE_DESCRIPTOR : describedLike(CLAUDE_CODE_DESCRIPTOR, agent);
-  const extraAgents = options.extraAgents ?? [];
+  // Antigravity (epic 6 entry 5), unless a test leaves it out; then any agent a test wires.
+  const antigravity =
+    options.antigravity === false
+      ? []
+      : [antigravityWiring({ dataDir, given: options.antigravity, onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
+  for (const wiring of antigravity) checkAgentWiring(wiring);
+  const extraAgents = [...antigravity, ...(options.extraAgents ?? [])];
   // Every registered agent's API key variables (6.3): each is kept out of every process but its own agent's chat.
   const envKeys = agentEnvKeys([claudeDescriptor, ...extraAgents.map((wiring) => wiring.descriptor)]);
   // Agents from before this start are gone with their processes (AD-3): their sessions can be resumed, not left working.

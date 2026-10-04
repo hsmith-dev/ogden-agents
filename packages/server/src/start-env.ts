@@ -4,7 +4,7 @@
  * precedence rule reads (story 9.2). The test-only switches moved to
  * `test-hooks.ts` (story 10.8) and are re-exported here.
  */
-import { CLAUDE_CODE_DESCRIPTOR } from '@ogden-agents/adapters';
+import { ANTIGRAVITY_DESCRIPTOR, CLAUDE_CODE_DESCRIPTOR } from '@ogden-agents/adapters';
 import { agentEnvKeys } from '@ogden-agents/core';
 
 // The test-only switches live with every other test hook; re-exported so imports stay the same (story 10.8).
@@ -31,7 +31,7 @@ const AGENT_ENV_ALLOWED_WINDOWS = ['SystemRoot', 'ComSpec', 'PATHEXT'];
  * ({@link withoutAgentKeys}). This is the shipped agents' list; `start()`
  * derives its own from the agents it registers.
  */
-export const AGENT_ENV_KEYS: readonly string[] = agentEnvKeys([CLAUDE_CODE_DESCRIPTOR]);
+export const AGENT_ENV_KEYS: readonly string[] = agentEnvKeys([CLAUDE_CODE_DESCRIPTOR, ANTIGRAVITY_DESCRIPTOR]);
 
 /** Only the `keys` (default {@link AGENT_ENV_KEYS}) of `env`, whatever their case, for core's precedence rule. Never logged. */
 export function agentKeysOf(env: Readonly<Record<string, string | undefined>>, names: readonly string[] = AGENT_ENV_KEYS): Record<string, string> {

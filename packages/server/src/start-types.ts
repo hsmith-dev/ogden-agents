@@ -4,6 +4,7 @@
  */
 import type { ClaudeCodeSetupOptions, FetchLike, PtyLoader } from '@ogden-agents/adapters';
 import type { AgentWiring } from './agent-wiring.js';
+import type { AntigravityPorts } from './antigravity-wiring.js';
 import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, Core, SecretStorePort, TicketStorePort, ToolchainPort } from '@ogden-agents/core';
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
@@ -51,6 +52,13 @@ export interface StartOptions {
    * its setup port (if any) decides whether a new chat with it is refused (6.3).
    */
   extraAgents?: readonly AgentWiring[];
+  /**
+   * Antigravity (epic 6 entry 5), registered after Claude Code: by default
+   * its own adapters on the data folder (a pinned copy found there, a
+   * Gemini API key); a test gives ports in their place (the fake agent's
+   * Antigravity personality), or `false` to leave it out.
+   */
+  antigravity?: false | AntigravityPorts;
   /**
    * The Claude Agent ACP adapter's entry script (or, in tests, any script
    * that speaks ACP over stdio, such as the fake agent). Default:

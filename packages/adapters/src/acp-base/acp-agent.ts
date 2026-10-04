@@ -114,6 +114,16 @@ export interface AcpAgentQuirks {
   askingModeIds: readonly string[];
   /** Its own CLI on its sessions (CAP-5), when that CLI can resume them. */
   terminalResume?: AgentTerminalResume | undefined;
+  /**
+   * The sign-in method to `authenticate` with once `initialize` answered and
+   * before any session is opened (an agent that refuses sessions until a
+   * client picks one, such as an API key method whose key is in `env`), or
+   * `undefined` to open sessions as they are. Never sees anything but core's
+   * environment; never logged.
+   */
+  authMethod?: ((input: { env: Readonly<Record<string, string>>; initialized: acp.InitializeResponse }) => string | undefined) | undefined;
+  /** The raw-input fields of its shell tools that hold the command a card shows, first found wins. Default `['command']`. */
+  commandFields?: readonly string[] | undefined;
   /** How it is asked to run an installed skill (`AgentPort.skillInvocation`, story 4.1): its own command syntax; the shared client adds none. */
   skillInvocation: (skill: string, idea?: string) => string;
 }
@@ -212,6 +222,7 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
         quirks,
         reasons,
         cwd: input.cwd,
+        env: input.env,
         secrets,
         diagnostic,
         startTimeoutMs,
@@ -266,6 +277,8 @@ interface StartContext {
   quirks: AcpAgentQuirks;
   reasons: ReturnType<typeof acpReasons>;
   cwd: string;
+  /** Core's environment for the agent, for the `authMethod` quirk only. */
+  env: Readonly<Record<string, string>>;
   secrets: readonly string[];
   diagnostic: Diagnostic;
   startTimeoutMs: number;
@@ -281,7 +294,7 @@ function killTree(child: ChildProcessWithoutNullStreams): void {
 
 async function startOnChild(
   child: ChildProcessWithoutNullStreams,
-  { descriptor, quirks, reasons, cwd, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths }: StartContext,
+  { descriptor, quirks, reasons, cwd, env, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths }: StartContext,
   opening: Opening,
 ): Promise<{ init: acp.InitializeResponse; session: AgentSession | undefined; restored: AgentRestored }> {
   const { couldNotStart: COULD_NOT_START, stopped: STOPPED, failed: FAILED } = reasons;
@@ -449,7 +462,7 @@ async function startOnChild(
         return select('reject_once');
       }
       try {
-        const command = commandOf(params.toolCall.rawInput);
+        const command = commandOf(params.toolCall.rawInput, quirks.commandFields);
         const decision: AgentPermissionDecision | null | undefined = await onPermissionRequest({
           toolCallId: params.toolCall.toolCallId,
           title: mask(params.toolCall.title ?? ''),
@@ -558,6 +571,12 @@ async function startOnChild(
         clientInfo: { name: 'ogden-agents', version: '0' },
       });
       if (opening.kind === 'probe') return { initialized, sessionId: undefined, restored: 'new' as const };
+      // The agent's own sign-in step before any session (6.5): a refusal (`-32000`) fails the start as auth_required.
+      const methodId = quirks.authMethod?.({ env, initialized });
+      if (methodId !== undefined) {
+        await connection.agent.request('authenticate', { methodId });
+        diagnostic('authenticated with the agent', { methodId });
+      }
       if (opening.kind === 'reopen') {
         const reopened = await reopen(initialized, opening.agentSessionId);
         if (reopened !== undefined) return { initialized, sessionId: opening.agentSessionId, restored: reopened };

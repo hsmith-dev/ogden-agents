@@ -80,3 +80,10 @@ export const TERMINAL_ROWS = 24;
 
 /** How long an agent may take to take a permission mode before it is dropped (permission modes). */
 export const PERMISSION_MODE_TIMEOUT_MS = 5_000;
+
+/**
+ * How long an agent may take to start before core says so in the chat
+ * (`session.agent_starting`, epic 6 entry 5): a quick start adds nothing; a
+ * slow one (Antigravity takes about 17 s on Windows) shows as starting.
+ */
+export const AGENT_STARTING_NOTICE_MS = 1_000;

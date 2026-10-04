@@ -214,6 +214,30 @@ export const SessionDocumentWrittenInput = z.object({
 export const SessionDocumentWrittenEvent = SessionDocumentWrittenInput.extend(assigned);
 export type SessionDocumentWrittenEvent = z.infer<typeof SessionDocumentWrittenEvent>;
 
+export const SessionAgentStartingInput = z.object({
+  type: z.literal('session.agent_starting'),
+  ...onSessionStream,
+  payload: z.object({ sessionId: SessionId }),
+});
+/**
+ * The session's agent is taking a while to start (epic 6 entry 5: an agent
+ * whose every start takes many seconds, such as Antigravity on Windows): the
+ * chat shows it as starting, not stuck, until `session.agent_started`, or
+ * until the session leaves `working`. Appended only after a start has run
+ * for a moment, so a quick start adds nothing.
+ */
+export const SessionAgentStartingEvent = SessionAgentStartingInput.extend(assigned);
+export type SessionAgentStartingEvent = z.infer<typeof SessionAgentStartingEvent>;
+
+export const SessionAgentStartedInput = z.object({
+  type: z.literal('session.agent_started'),
+  ...onSessionStream,
+  payload: z.object({ sessionId: SessionId }),
+});
+/** The agent a `session.agent_starting` announced is started (or its start ended): the starting notice goes. */
+export const SessionAgentStartedEvent = SessionAgentStartedInput.extend(assigned);
+export type SessionAgentStartedEvent = z.infer<typeof SessionAgentStartedEvent>;
+
 // Permission events live on the session's stream and, like session events,
 // are appended only through the session-event helper (E2-R7).
 

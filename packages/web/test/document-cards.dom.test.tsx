@@ -328,6 +328,8 @@ describe('Markdown (story 4.7)', () => {
     const started = performance.now();
     md(`${' _a *b `c'.repeat(440)}\n`.repeat(200));
     md(' _a'.repeat(300_000));
-    expect(performance.now() - started).toBeLessThan(3_000);
+    // A quadratic parser would take minutes; Windows runners took 3.2 s to 3.3 s for this linear work (CI runs
+    // 37208501103 and 37210509147, windows-latest Node 24), so the bound there is wider.
+    expect(performance.now() - started).toBeLessThan(process.platform === 'win32' ? 8_000 : 3_000);
   });
 });

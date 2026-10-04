@@ -205,13 +205,13 @@ function assertAntigravityPins(pins) {
     if (typeof pin.binary !== 'string' || !/^agy_acp_server\.(par|exe)$/.test(pin.binary)) problems.push(`${platform}: the server's file name is not agy_acp_server.par or .exe`);
     if (!Array.isArray(pin.args) || pin.args.some((arg) => typeof arg !== 'string')) problems.push(`${platform}: args is not a list of strings`);
     // Epic 6 entry 7: the archive's identity size (a download never takes more) and each file it holds, the only entries Install unpacks.
-    if (!Number.isSafeInteger(pin.size) || pin.size <= 0) problems.push(`${platform}: size is not a positive whole number of bytes`);
+    if (typeof pin.size !== 'number' || !Number.isSafeInteger(pin.size) || pin.size <= 0) problems.push(`${platform}: size is not a positive whole number of bytes`);
     const files = Object.entries(pin.files ?? {});
     if (files.length === 0) problems.push(`${platform}: no file is pinned`);
     if (typeof pin.binary === 'string' && !files.some(([name]) => name === pin.binary)) problems.push(`${platform}: the server is not among its pinned files`);
     for (const [name, file] of files) {
       if (!/^[A-Za-z0-9._-]+$/.test(name) || name === '.' || name === '..') problems.push(`${platform}: ${name} is not a plain file name`);
-      if (!Number.isSafeInteger(file.size) || file.size < 0) problems.push(`${platform}: ${name}'s size is not a whole number of bytes`);
+      if (typeof file.size !== 'number' || !Number.isSafeInteger(file.size) || file.size < 0) problems.push(`${platform}: ${name}'s size is not a whole number of bytes`);
       if (typeof file.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(file.sha256)) problems.push(`${platform}: ${name}'s SHA-256 is not 64 lower-case hex digits`);
     }
   }

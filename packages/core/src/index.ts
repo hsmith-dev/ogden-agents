@@ -11,6 +11,7 @@ export * from './bmad-script-trust.js';
 export * from './bmad-setup.js';
 export * from './bmad-source-port.js';
 export * from './board.js';
+export * from './bmad-skill-folders.js';
 export * from './chat.js';
 export * from './core.js';
 export * from './data-dir.js';

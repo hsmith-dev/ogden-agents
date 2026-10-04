@@ -41,6 +41,8 @@
 //                  ("Run npm run build"), then silence until cancelled
 //   "quiet"        one chunk, then silence until cancelled (no tool call)
 //   "fail"         the prompt fails with a JSON-RPC internal error
+//   "whoami"       replies `agent=<FAKE_ACP_AGENT_NAME, or default>`: which
+//                  registered agent a chat reached (epic 6, two agents at once)
 //   "env"          replies with the CLAUDE_CODE_EXECUTABLE it was given
 //   "echo-env"     replies with its whole environment, `NAME=value` per line,
 //                  each value split across two chunks, and writes it to stderr
@@ -516,6 +518,10 @@ acp
         content: [{ type: 'diff', path: file, oldText: null, newText: content }],
       });
       await say(client, params.sessionId, `Wrote ${relpath}.`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text === 'whoami') {
+      await say(client, params.sessionId, `agent=${process.env.FAKE_ACP_AGENT_NAME ?? 'default'}`);
       return { stopReason: 'end_turn' };
     }
     if (text === 'env') {

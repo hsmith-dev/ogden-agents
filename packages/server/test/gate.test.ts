@@ -579,6 +579,7 @@ const EXPECTED_API_ROUTES = [
   `POST ${API_ROUTES.uvInstall}`,
   `GET ${API_ROUTES.workspaces}`,
   `POST ${API_ROUTES.workspaces}`,
+  `GET ${API_ROUTES.chatAgents}`,
   `GET ${API_ROUTES.workspace}`,
   `DELETE ${API_ROUTES.workspaceHistory}`,
   `GET ${API_ROUTES.workspaceSettings}`,

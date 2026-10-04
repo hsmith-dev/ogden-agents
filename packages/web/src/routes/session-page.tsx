@@ -4,7 +4,8 @@ import { ArrowClockwise, ArrowDown, ChatCircle, House, Stop } from '@phosphor-ic
 import type { PermissionMode } from '@ogden-agents/shared';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAppearance } from '@/appearance/appearance-provider';
-import { AGENT_NAME, cancelSession, ChatApiError, fetchSession, sendMessage, setPermissionMode, switchDriver } from '@/chat/chat-api';
+import { agentNameOf, cancelSession, ChatApiError, fetchSession, sendMessage, setPermissionMode, switchDriver } from '@/chat/chat-api';
+import { useChatAgents } from '@/chat/use-chat-agents';
 import { Composer } from '@/chat/composer';
 import { ReadOnlyConversation } from '@/chat/read-only';
 import { SignInAgain } from '@/chat/sign-in-again';
@@ -52,8 +53,8 @@ const itemKey = (item: TranscriptItem, index: number): string =>
 const TERMINAL_DRIVING_REASON = 'The terminal is driving this session';
 
 /** What the quiet-agent status line says (user decision, story 2.10). */
-const checkInWords = (checkIn: TranscriptCheckIn) =>
-  checkIn.waitingOn === undefined ? `${AGENT_NAME} has been quiet for 10 minutes` : `${AGENT_NAME} is waiting on ${checkIn.waitingOn}`;
+const checkInWords = (checkIn: TranscriptCheckIn, agentName: string) =>
+  checkIn.waitingOn === undefined ? `${agentName} has been quiet for 10 minutes` : `${agentName} is waiting on ${checkIn.waitingOn}`;
 
 /**
  * `/w/:wsId/s/:sesId`: one chat (story 2.2). The transcript and the
@@ -94,6 +95,9 @@ export function SessionPage() {
   );
   const view = useMemo(() => sessionView(events, sesId, rulesRemoved), [events, sesId, rulesRemoved]);
   const session = useQuery({ queryKey: ['session', wsId, sesId], queryFn: () => fetchSession(wsId, sesId), retry: false });
+  // The chat's own agent, by its product name (epic 6, E6-R1).
+  const chatAgents = useChatAgents();
+  const agentName = agentNameOf(chatAgents.data, session.data?.session.agentId);
   const workspace = useQuery({ queryKey: ['workspace', wsId], queryFn: () => fetchWorkspace(wsId), retry: false });
   const end = useRef<HTMLDivElement>(null);
   const lastText = view.messages.at(-1)?.text.length ?? 0;
@@ -187,7 +191,7 @@ export function SessionPage() {
   useEffect(() => {
     if (waitingFor === undefined || announced.current.has(waitingFor.requestId)) return;
     announced.current.add(waitingFor.requestId);
-    setAnnouncement(`${AGENT_NAME} is waiting for you: ${permissionAnnouncement(waitingFor)}`);
+    setAnnouncement(`${agentName} is waiting for you: ${permissionAnnouncement(waitingFor)}`);
   }, [waitingFor]);
 
   const state = view.state ?? session.data?.session.state;
@@ -374,11 +378,11 @@ export function SessionPage() {
                   </span>
                 </>
               ) : view.items.length === 0 && !history.hasEarlier ? (
-                <Text variant="caption">Ask {AGENT_NAME} about this project.</Text>
+                <Text variant="caption">Ask {agentName} about this project.</Text>
               ) : (
                 view.items.map((item, index) =>
                   item.type === 'message' ? (
-                    <Message key={item.message.messageId} message={item.message} />
+                    <Message key={item.message.messageId} message={item.message} agentName={agentName} />
                   ) : item.type === 'tools' ? (
                     <ToolCalls key={`tools-${item.calls[0]?.toolCallId ?? index}`} calls={item.calls} density={appearance.density} />
                   ) : item.type === 'resumed' ? (
@@ -404,7 +408,7 @@ export function SessionPage() {
                 )
               )}
               {view.queued.map((message) => (
-                <Message key={message.messageId} message={message} />
+                <Message key={message.messageId} message={message} agentName={agentName} />
               ))}
               {state === 'working' && view.checkIn !== undefined ? (
                 <Notice
@@ -420,7 +424,7 @@ export function SessionPage() {
                     ) : null
                   }
                 >
-                  <StateGlyph state="working" label={checkInWords(view.checkIn)} />
+                  <StateGlyph state="working" label={checkInWords(view.checkIn, agentName)} />
                 </Notice>
               ) : null}
               {state === 'error' && view.errorCode === 'auth_required' && !terminalDrives ? (
@@ -445,7 +449,7 @@ export function SessionPage() {
                     )
                   }
                 >
-                  {view.errorReason ?? `${AGENT_NAME} stopped with an error. Try again.`}
+                  {view.errorReason ?? `${agentName} stopped with an error. Try again.`}
                 </Notice>
               ) : null}
               {actionError === undefined ? null : (
@@ -478,20 +482,20 @@ export function SessionPage() {
         {waitingFor !== undefined && cardOffscreen && !terminalDrives ? (
           <div className="pb-2">
             <Button variant="outline" className="w-full justify-start" data-testid="waiting-bar" onClick={showCard}>
-              <StateGlyph state="waiting" label={`${AGENT_NAME} is waiting for you`} />
+              <StateGlyph state="waiting" label={`${agentName} is waiting for you`} />
             </Button>
           </div>
         ) : null}
         <Composer
-          label={`Message ${AGENT_NAME}`}
+          label={`Message ${agentName}`}
           blockedReason={
             driver === 'terminal'
               ? TERMINAL_DRIVING_REASON
               : state === 'waiting'
-                ? `${AGENT_NAME} is waiting for your answer above.`
+                ? `${agentName} is waiting for your answer above.`
                 : undefined
           }
-          hint={state === 'working' ? `${AGENT_NAME} is working. A message you send now waits its turn.` : undefined}
+          hint={state === 'working' ? `${agentName} is working. A message you send now waits its turn.` : undefined}
           restore={restore}
           action={
             busy ? (
@@ -572,7 +576,7 @@ const QUEUE_WORDS = { queued: 'Queued', not_sent: 'Not sent' } as const;
  * One message: the user's in a muted block on the right, the agent's as body
  * text under its name (DESIGN.md Message). A queued or unsent one says so under it.
  */
-function Message({ message }: { message: TranscriptMessage }) {
+function Message({ message, agentName }: { message: TranscriptMessage; agentName: string }) {
   if (message.role === 'user' && message.status !== undefined) {
     return (
       <div className="flex max-w-[85%] flex-col items-end gap-1 self-end" data-testid="message-queued" data-status={message.status}>
@@ -598,7 +602,7 @@ function Message({ message }: { message: TranscriptMessage }) {
   }
   if (message.role === 'user') return <UserMessage data-testid="message-user">{message.text}</UserMessage>;
   return (
-    <AgentMessage name={AGENT_NAME} data-testid="message-agent" data-streaming={message.streaming} aria-busy={message.streaming}>
+    <AgentMessage name={agentName} data-testid="message-agent" data-streaming={message.streaming} aria-busy={message.streaming}>
       {message.text}
     </AgentMessage>
   );

@@ -3,8 +3,10 @@ import type { Session } from '@ogden-agents/shared';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
-import { AGENT_NAME, ChatApiError, createChatSession, sendMessage } from '@/chat/chat-api';
+import { AgentPicker } from '@/chat/agent-picker';
+import { agentNameOf, ChatApiError, createChatSession, sendMessage } from '@/chat/chat-api';
 import { Composer } from '@/chat/composer';
+import { useChatAgents } from '@/chat/use-chat-agents';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
 import { EmptyState, PageBody } from '@/ui/page';
@@ -29,6 +31,11 @@ export function WorkspaceChatsPage() {
   const navigate = useNavigate();
   const workspace = useQuery({ queryKey: ['workspace', wsId], queryFn: () => fetchWorkspace(wsId), retry: false });
   const { sessions, error } = useSessions(wsId);
+  // The agent a new chat starts with (epic 6): the install's default until the user picks another.
+  const chatAgents = useChatAgents();
+  const [pickedAgent, setPickedAgent] = useState<string | undefined>(undefined);
+  const agentId = pickedAgent ?? chatAgents.data?.defaultAgentId;
+  const severalAgents = (chatAgents.data?.agents.length ?? 0) > 1;
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | undefined>(undefined);
   /** The chat the first message created: a retry after a failed send reuses it, never leaving an empty one behind (2.5 F6). */
@@ -44,7 +51,7 @@ export function WorkspaceChatsPage() {
     if (creating) return;
     setCreating(true);
     setCreateError(undefined);
-    createChatSession(wsId).then(
+    createChatSession(wsId, undefined, agentId).then(
       (session) => openChat(session),
       (failure: unknown) => {
         setCreating(false);
@@ -92,6 +99,18 @@ export function WorkspaceChatsPage() {
                 {workspaceName(workspace.data)}
               </Text>
             )}
+            {/* The agent New chat and the composer start a chat with (epic 6): shown only when there is a choice. */}
+            {chatAgents.data === undefined || agentId === undefined ? null : (
+              <AgentPicker
+                agents={chatAgents.data.agents}
+                value={agentId}
+                onChange={(next) => {
+                  setPickedAgent(next);
+                  // A first chat made for another agent is not reused for this one.
+                  if (firstChat.current !== undefined && firstChat.current.agentId !== next) firstChat.current = undefined;
+                }}
+              />
+            )}
             {/* The "already uses BMad Method" offer (story 10.3): detected when this page opens, never when the project is added. */}
             {workspace.data === undefined ? null : <BmadOffer key={wsId} wsId={wsId} />}
             {createError === undefined ? null : (
@@ -115,9 +134,9 @@ export function WorkspaceChatsPage() {
               <div className="flex max-w-(--space-chat-column) flex-col gap-4" data-testid="chats-empty">
                 <EmptyState title="No conversations yet." />
                 <Composer
-                  label={`Message ${AGENT_NAME}`}
+                  label={`Message ${agentNameOf(chatAgents.data, agentId)}`}
                   onSend={async (text) => {
-                    const session = firstChat.current ?? (await createChatSession(wsId));
+                    const session = firstChat.current ?? (await createChatSession(wsId, undefined, agentId));
                     firstChat.current = session;
                     setFirstChatId(session.id);
                     await sendMessage(wsId, session.id, text);
@@ -133,6 +152,7 @@ export function WorkspaceChatsPage() {
                       <Link to="/w/$wsId/s/$sesId" params={{ wsId, sesId: session.id }} data-testid="chat-row">
                         <StateGlyph state={session.state} labelMode="hidden" data-testid="chat-row-state" />
                         <span className="min-w-0 flex-1 truncate">{session.title ?? 'Chat'}</span>
+                        {severalAgents ? <RowMeta data-testid="chat-row-agent">{agentNameOf(chatAgents.data, session.agentId)}</RowMeta> : null}
                         <RowMeta>{started.format(new Date(session.createdAt))}</RowMeta>
                       </Link>
                     </Row>

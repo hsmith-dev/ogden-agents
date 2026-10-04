@@ -1,5 +1,7 @@
 import type { Session } from '@ogden-agents/shared';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { agentNameOf } from '@/chat/chat-api';
+import { useChatAgents } from '@/chat/use-chat-agents';
 import { useEventStream } from '@/events/event-stream';
 import { useAllSessionsStatus, useWorkspaces } from '@/workspaces/workspace-api';
 import { buildSidebar, type SidebarModel } from './sidebar-model';
@@ -36,7 +38,12 @@ export function SidebarDataProvider({ children }: { children: ReactNode }) {
     const timer = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
     return () => clearInterval(timer);
   }, []);
-  const model = useMemo(() => buildSidebar(workspaces.data ?? [], sessions, store, now), [workspaces.data, sessions, store, now]);
+  // Each row and Needs you entry names its chat's agent (epic 6, E6-R1).
+  const chatAgents = useChatAgents();
+  const model = useMemo(
+    () => buildSidebar(workspaces.data ?? [], sessions, store, now, (agentId) => agentNameOf(chatAgents.data, agentId)),
+    [workspaces.data, sessions, store, now, chatAgents.data],
+  );
   const value = useMemo(() => ({ model, sessions, loading, unloaded, now }), [model, sessions, loading, unloaded, now]);
   return <SidebarDataContext.Provider value={value}>{children}</SidebarDataContext.Provider>;
 }

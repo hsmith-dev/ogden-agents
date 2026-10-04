@@ -2,7 +2,6 @@ import { FolderSimplePlus, GearSix, HandWaving, PaintBrush, Plus, Robot, Wrench 
 import { NEW_PROJECTS_SETTINGS_LABEL } from '@ogden-agents/shared';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { memo, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { AGENT_NAME } from '@/chat/chat-api';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/ui/dropdown-menu';
 import {
   Sidebar,
@@ -237,6 +236,7 @@ function SessionRows({ rows, now }: { rows: readonly SidebarRow[]; now: number }
           state={row.state}
           title={row.title}
           updatedAt={row.updatedAt}
+          agentName={row.agentName}
           time={relativeTime(row.updatedAt, now)}
           active={params.sesId === row.sesId}
         />
@@ -252,16 +252,17 @@ const SessionRow = memo(function SessionRow({
   state,
   title,
   updatedAt,
+  agentName,
   time,
   active,
-}: Pick<SidebarRow, 'wsId' | 'sesId' | 'state' | 'title' | 'updatedAt'> & { time: string; active: boolean }) {
+}: Pick<SidebarRow, 'wsId' | 'sesId' | 'state' | 'title' | 'updatedAt' | 'agentName'> & { time: string; active: boolean }) {
   return (
     <SidebarMenuItem>
       <SidebarStatusRow
         data-testid="status-row"
         state={state}
         title={title}
-        caption={`${AGENT_NAME}, ${STATE_WORDS[state].toLowerCase()}`}
+        caption={`${agentName}, ${STATE_WORDS[state].toLowerCase()}`}
         time={{ label: time, dateTime: updatedAt }}
         isActive={active}
       >

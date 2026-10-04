@@ -1,6 +1,7 @@
 import {
   API_ROUTES,
   apiPath,
+  ChatAgentsResponse,
   PermissionRulesResponse,
   SendMessageResponse,
   SessionResponse,
@@ -21,7 +22,11 @@ import { tabAuth, type TabAuth } from '@/auth/tab-token';
  * session state never come back here: they arrive through the event log.
  */
 
-/** The only agent in this epic; the UI names it by its product name (EXPERIENCE.md Voice). */
+/**
+ * The install's original agent, by its product name (EXPERIENCE.md Voice):
+ * the words that still speak of Claude Code only (sign-in, its terminal, its
+ * auto mode) until epic 6's sweep. A chat's own agent is {@link agentNameOf}.
+ */
 export const AGENT_NAME = 'Claude Code';
 
 /** That agent's id in the agent setup API (`/api/v1/agents/:agentId`), for Sign in again (9.4). */
@@ -40,10 +45,34 @@ export async function openWorkspace(path: string, auth: Pick<TabAuth, 'fetch'> =
   return WorkspaceResponse.parse(json).workspace;
 }
 
-/** `POST /api/v1/workspaces/:wsId/sessions`: a new chat in the workspace. */
-export async function createChatSession(wsId: string, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<Session> {
-  const json = await call(auth, apiPath(API_ROUTES.workspaceSessions, { wsId }), postJson({ kind: 'chat' }), "Ogden Agents couldn't start a chat");
+/**
+ * `POST /api/v1/workspaces/:wsId/sessions`: a new chat in the workspace,
+ * with the agent `agentId` (epic 6), or the server's default one.
+ */
+export async function createChatSession(wsId: string, auth: Pick<TabAuth, 'fetch'> = tabAuth, agentId?: string): Promise<Session> {
+  const body = agentId === undefined ? { kind: 'chat' } : { kind: 'chat', agentId };
+  const json = await call(auth, apiPath(API_ROUTES.workspaceSessions, { wsId }), postJson(body), "Ogden Agents couldn't start a chat");
   return SessionResponse.parse(json).session;
+}
+
+/** `GET /api/v1/chat-agents` (epic 6): the agents a chat can be started with, and the default one. */
+export async function fetchChatAgents(auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<ChatAgentsResponse> {
+  const json = await call(auth, API_ROUTES.chatAgents, {}, "Ogden Agents couldn't list the agents");
+  return ChatAgentsResponse.parse(json);
+}
+
+/** The query key of {@link fetchChatAgents}: the list only changes when the server restarts. */
+export const CHAT_AGENTS_QUERY_KEY = ['chat-agents'] as const;
+
+/**
+ * A chat's agent by its product name (epic 6): from the agent list, else
+ * (the list not loaded yet, or a session stored before agents could be
+ * chosen) the original agent's name for that agent or no id, else "The agent".
+ */
+export function agentNameOf(list: ChatAgentsResponse | undefined, agentId: string | undefined): string {
+  const listed = agentId === undefined ? undefined : list?.agents.find((agent) => agent.agentId === agentId);
+  if (listed !== undefined) return listed.displayName;
+  return agentId === undefined || agentId === AGENT_ID ? AGENT_NAME : 'The agent';
 }
 
 /**

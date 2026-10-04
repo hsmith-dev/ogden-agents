@@ -122,6 +122,52 @@ export function findImportViolations(files: readonly SourceFile[]): string[] {
   return violations;
 }
 
+/**
+ * Every agent id Ogden Agents registers, or has planned (epic 6, v1.1, v2),
+ * and the tests' second agent. AD-1 (epic 6 note): `packages/core` and
+ * `packages/shared` name none of them outside tests; server wiring does.
+ */
+export const AGENT_IDS = ['claude-code', 'antigravity', 'codex', 'grok', 'gemini-cli', 'copilot', 'fake-agent'] as const;
+
+/** The packages that must name no agent id. */
+const AGENT_NEUTRAL = new Set(['@ogden-agents/core', '@ogden-agents/shared']);
+
+/** `source` without its comments (block and line), so doc comments may still name an agent as an example. */
+export function withoutComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/.*$/gm, '$1');
+}
+
+/** One message per string literal in core or shared code that names an agent id. */
+export function findAgentIdViolations(files: readonly SourceFile[], ids: readonly string[] = AGENT_IDS): string[] {
+  const named = new RegExp(`(['"\`])[^'"\`\\n]*?(?<![a-z0-9-])(${ids.join('|')})(?![a-z0-9-])[^'"\`\\n]*?\\1`, 'g');
+  const violations: string[] = [];
+  for (const { pkg, path, source } of files) {
+    if (!AGENT_NEUTRAL.has(pkg)) continue;
+    for (const match of withoutComments(source).matchAll(named)) violations.push(`${path}: ${pkg} names the agent id ${match[2]} (AD-1: only server wiring does)`);
+  }
+  return violations;
+}
+
+describe('AD-1: core and shared name no agent (epic 6)', () => {
+  it('no core or shared source names an agent id outside tests', () => {
+    const files = loadWorkspaceSources();
+    expect(files.some((file) => file.pkg === '@ogden-agents/core')).toBe(true);
+    expect(findAgentIdViolations(files)).toEqual([]);
+  });
+
+  it('flags an agent id in core or shared code, but not in a comment, another package, or a longer id', () => {
+    const files: SourceFile[] = [
+      { pkg: '@ogden-agents/core', path: 'core/a.ts', source: "const id = 'claude-code';\n// the default is 'codex'\n/** e.g. `grok` */" },
+      { pkg: '@ogden-agents/shared', path: 'shared/b.ts', source: 'const label = `use antigravity here`;\nconst other = "claude-code-x";' },
+      { pkg: '@ogden-agents/server', path: 'server/c.ts', source: "const id = 'claude-code';" },
+    ];
+    expect(findAgentIdViolations(files)).toEqual([
+      'core/a.ts: @ogden-agents/core names the agent id claude-code (AD-1: only server wiring does)',
+      'shared/b.ts: @ogden-agents/shared names the agent id antigravity (AD-1: only server wiring does)',
+    ]);
+  });
+});
+
 describe('AD-1 package dependency rules', () => {
   it('every workspace package follows the diagram', () => {
     const manifests = loadWorkspaceManifests();

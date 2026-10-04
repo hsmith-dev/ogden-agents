@@ -20,6 +20,8 @@ export interface SidebarRow {
   state: SessionState;
   /** When its state last changed (ISO), for the relative time. */
   updatedAt: string;
+  /** The product name of the agent the chat was started with (epic 6). */
+  agentName: string;
 }
 
 /** One workspace's group: its rows, the done ones older than a day under "Earlier", and a count per state. */
@@ -60,8 +62,11 @@ export const EARLIER_AFTER_MS = 24 * 60 * 60 * 1000;
 /** What a session with no title is called. */
 export const UNTITLED = 'Chat';
 
-/** The Needs you text for a waiting session whose request is older than the window. */
-export const WAITING_TEXT = `${AGENT_NAME} is waiting for you`;
+/** The Needs you text for a waiting session whose request is older than the window, naming its agent (epic 6). */
+export const waitingText = (agentName: string) => `${agentName} is waiting for you`;
+
+/** {@link waitingText} for the install's original agent. */
+export const WAITING_TEXT = waitingText(AGENT_NAME);
 
 const rank = (state: SessionState) => STATE_ORDER.indexOf(state);
 const time = (iso: string) => Date.parse(iso) || 0;
@@ -101,7 +106,14 @@ function pendingRequests(store: EventStoreState, session: Session): { requests: 
  * Needs you built from each session's event window. `now` decides which done
  * sessions are "Earlier".
  */
-export function buildSidebar(workspaces: readonly Workspace[], sessions: readonly Session[], store: EventStoreState, now: number): SidebarModel {
+export function buildSidebar(
+  workspaces: readonly Workspace[],
+  sessions: readonly Session[],
+  store: EventStoreState,
+  now: number,
+  /** A chat's agent by its product name (epic 6); default: the original agent's. */
+  agentName: (agentId: string | undefined) => string = () => AGENT_NAME,
+): SidebarModel {
   const byWorkspace = new Map<string, Session[]>();
   for (const session of sessions) {
     const list = byWorkspace.get(session.workspaceId) ?? [];
@@ -117,7 +129,7 @@ export function buildSidebar(workspaces: readonly Workspace[], sessions: readonl
     const earlier: SidebarRow[] = [];
     const counts = new Map<SessionState, number>();
     for (const session of byWorkspace.get(workspace.id) ?? []) {
-      const row: SidebarRow = { sesId: session.id, wsId: workspace.id, title: session.title ?? UNTITLED, state: session.state, updatedAt: session.updatedAt };
+      const row: SidebarRow = { sesId: session.id, wsId: workspace.id, title: session.title ?? UNTITLED, state: session.state, updatedAt: session.updatedAt, agentName: agentName(session.agentId) };
       if (session.state === 'done' && now - time(session.updatedAt) > EARLIER_AFTER_MS) earlier.push(row);
       else rows.push(row);
       counts.set(session.state, (counts.get(session.state) ?? 0) + 1);
@@ -130,7 +142,7 @@ export function buildSidebar(workspaces: readonly Workspace[], sessions: readonl
           wsId: workspace.id,
           sesId: session.id,
           workspaceName: name,
-          text: `${AGENT_NAME} wants to ${announcement}`,
+          text: `${agentName(session.agentId)} wants to ${announcement}`,
           at: request.requestedAt,
           request: announcement,
         });
@@ -139,7 +151,7 @@ export function buildSidebar(workspaces: readonly Workspace[], sessions: readonl
       // `waiting` the window saw with no open request is a moment between events (the request
       // not yet arrived, or answered before `working`), not something to show.
       if (requests.length === 0 && session.state === 'waiting' && windowState === undefined) {
-        needsYou.push({ id: session.id, wsId: workspace.id, sesId: session.id, workspaceName: name, text: WAITING_TEXT, at: session.updatedAt });
+        needsYou.push({ id: session.id, wsId: workspace.id, sesId: session.id, workspaceName: name, text: waitingText(agentName(session.agentId)), at: session.updatedAt });
       }
     }
     rows.sort(compareRows);

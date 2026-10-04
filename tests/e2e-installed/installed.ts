@@ -5,11 +5,14 @@
  * can run the installed launcher again (by its path in the npx install).
  */
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { echoLines, killProcessTree, prepareInstall, startWithRetry, withTimeout, type Install, type LauncherRun } from '../../scripts/installed-package.mjs';
 import { createDataFolder020, type DataFolder020 } from '../fixtures/data-folder-0.2.0.js';
+import { gunzipLimited, hashEntries, parseTar, selectVerified } from '../../packages/adapters/src/bmad-source/archive.ts';
 import { createFakeBmadRepo, type FakeBmadRepo, type FakeBmadRepoOptions } from '../fixtures/fake-bmad-repo.js';
+import { repoTarGz } from '../fixtures/tar.js';
 import { packFakeAdapter, testNpmCli } from '../fixtures/fake-adapter/pack.mjs';
 import { isAlive, readPortFile, ROOT, waitUntil } from '../support.js';
 
@@ -433,6 +436,100 @@ export function terminalServer(name: string, { omitOptional = false }: { omitOpt
 export const BMAD_AVAILABLE_ENV = 'OGDEN_AGENTS_TEST_BMAD_AVAILABLE';
 export const BMAD_PROBE_ENV = 'OGDEN_AGENTS_TEST_BMAD_PROBE';
 
+/**
+ * The installed server's BMad Method source hook (`BMAD_SOURCE_ENV` in
+ * packages/server/src/test-hooks.ts, story 4.13): a fixture lock and a local
+ * tarball in place of GitHub's, and uv kept off the network.
+ */
+export const BMAD_SOURCE_ENV = 'OGDEN_AGENTS_TEST_BMAD_SOURCE';
+
+/** The upstream fixture (`tests/fixtures/bmad-upstream`): the pinned `setup.py` and `tickets.py`, unchanged. */
+const UPSTREAM_FIXTURE = join(ROOT, 'tests', 'fixtures', 'bmad-upstream');
+const FIXTURE_COMMIT = 'c0ffee'.padEnd(40, '0');
+/** The uv-managed Python the BMad Method scripts run with: provisioned by CI (`uv python install`), never downloaded by a test. */
+const TEST_PYTHON = '3.12';
+
+/**
+ * Skill files added to the fixture tarball (test-only, not upstream's): the
+ * spec skill, and a `SKILL.md` for the ticket skill (the fixture carries only
+ * its `tickets.py`). Their label mapping links them (spec, then tickets), so a
+ * spec's document card offers "Turn this spec into tickets". Being in the
+ * tarball, they are part of the verified copy, so they get their labels.
+ */
+export const FIXTURE_SKILL_FILES: Readonly<Record<string, string>> = {
+  'bmad-spec/SKILL.md': "---\nname: bmad-spec\ndescription: 'Condense any input into a short spec.'\n---\n\n# bmad-spec\n\nA test-only stand-in for the spec skill.\n",
+  'bmad-ticket/SKILL.md': "---\nname: bmad-ticket\ndescription: 'Create and manage tickets.'\n---\n\n# bmad-ticket\n\nA test-only stand-in for the ticket skill's instructions.\n",
+};
+
+/** Where uv keeps its managed Pythons for this run: `UV_PYTHON_INSTALL_DIR` (setup-uv sets it in CI), else `uv python dir`. */
+function uvPythonDir(): string | undefined {
+  if (process.env.UV_PYTHON_INSTALL_DIR) return process.env.UV_PYTHON_INSTALL_DIR;
+  try {
+    // `--color never`: under Playwright FORCE_COLOR is set, and uv would wrap the path in colour codes.
+    return execFileSync('uv', ['python', 'dir', '--color', 'never'], { encoding: 'utf8', windowsHide: true })
+      .replace(/\u001b\[[0-9;]*m/g, '')
+      .trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether the BMad Method steps can run: `uv` on PATH with the uv-managed
+ * Python {@link TEST_PYTHON} installed (no download). Always true in CI, which
+ * provisions both, so a missing one fails there instead of skipping.
+ */
+export function uvReady(): boolean {
+  if (process.env.CI) return true;
+  try {
+    execFileSync('uv', ['python', 'find', '--managed-python', '--no-python-downloads', TEST_PYTHON], { stdio: 'ignore', windowsHide: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Writes the hook's files into `dir`: the upstream fixture (plus
+ * {@link FIXTURE_SKILL_FILES}) as codeload would serve it, a lock pinning its
+ * content hash, and uv's variables: its own cache, the provisioned Python
+ * only, no Python download, offline, and every proxy at a closed port. The
+ * hook file's path.
+ */
+function writeFixtureBmadSource(dir: string): string {
+  const top = `BMAD-METHOD-${FIXTURE_COMMIT}`;
+  const tarball = repoTarGz(UPSTREAM_FIXTURE, top, [
+    { name: `${top}/skills/bmad-spec/`, type: 'dir' },
+    ...Object.entries(FIXTURE_SKILL_FILES).map(([path, data]) => ({ name: `${top}/skills/${path}`, data })),
+  ]);
+  const contentHash = hashEntries(selectVerified(parseTar(gunzipLimited(tarball, 64 * 1024 * 1024)), 'skills/'));
+  const lock = { sources: { 'bmad-method': { repo: 'bmad-code-org/BMAD-METHOD', ref: 'main', commit: FIXTURE_COMMIT, version: '6.13.0-fixture', include: 'skills/', contentHash } } };
+  const tarballPath = join(dir, 'bmad-method.tar.gz');
+  writeFileSync(tarballPath, tarball);
+  const cache = join(dir, 'uv-cache');
+  mkdirSync(cache, { recursive: true });
+  // Port 9 (discard) on loopback: nothing answers, so anything uv tried to fetch would fail at once.
+  const proxy = 'http://127.0.0.1:9';
+  const pythonDir = uvPythonDir();
+  const uvEnv = {
+    UV_CACHE_DIR: cache,
+    UV_PYTHON: TEST_PYTHON,
+    UV_PYTHON_PREFERENCE: 'only-managed',
+    UV_PYTHON_DOWNLOADS: 'never',
+    UV_OFFLINE: '1',
+    ...(pythonDir === undefined ? {} : { UV_PYTHON_INSTALL_DIR: pythonDir }),
+    HTTP_PROXY: proxy,
+    HTTPS_PROXY: proxy,
+    http_proxy: proxy,
+    https_proxy: proxy,
+    NO_PROXY: '',
+    no_proxy: '',
+  };
+  const file = join(dir, 'bmad-source.json');
+  writeFileSync(file, JSON.stringify({ lock, tarball: tarballPath, uvEnv }));
+  return file;
+}
+
 export interface BmadServer {
   /** The install, set up for this server: its own data folder (Welcome done), home folder and the fake agent. */
   install: Install;
@@ -451,13 +548,17 @@ export interface BmadServer {
 /**
  * A server of the installed package for the BMad journey (story 10.9): its
  * own data folder (Welcome done), a home folder of its own, the fake agent
- * (`FAKE_AGENT`), and the BMad hooks only when given: `available` pieces and
- * the guarded `probe` route. Without either it is what a user runs: every
- * piece Coming soon. Repos are fake repos in a folder of its own. Nothing is
- * installed again.
+ * (`FAKE_AGENT`), and the BMad hooks only when given: `available` pieces,
+ * the guarded `probe` route, and `bmadSource` (story 4.13: the fixture BMad
+ * Method source, so Set up and the Board run the real `setup.py` and
+ * `tickets.py` through uv with no network). Without any it is what a user
+ * runs: Planning and Board shipped, the rest Coming soon. Repos are fake repos
+ * in a folder of its own. Nothing is installed again.
  */
-export function bmadServer(name: string, { available, probe = false }: { available?: string[]; probe?: boolean } = {}): BmadServer {
+export function bmadServer(name: string, { available, probe = false, bmadSource = false }: { available?: string[]; probe?: boolean; bmadSource?: boolean } = {}): BmadServer {
   const dataDir = extraFolder(`${name}-data`);
+  // The fixture BMad Method source (story 4.13), only when asked for: without it Set up would reach GitHub.
+  const sourceFile = bmadSource ? writeFixtureBmadSource(realpathSync.native(extraFolder(`${name}-bmad-source`))) : '';
   writeFileSync(join(dataDir, 'onboarding.json'), `${JSON.stringify({ welcomeCompleted: true })}\n`, { mode: 0o600 });
   // Real paths: macOS temp folders are reached through /var, and Windows ones may be 8.3 short names.
   const home = realpathSync.native(extraFolder(`${name}-home`));
@@ -471,6 +572,7 @@ export function bmadServer(name: string, { available, probe = false }: { availab
       // Empty when not asked for, so nothing in the runner's environment turns a hook on.
       [BMAD_AVAILABLE_ENV]: available === undefined ? '' : available.join(','),
       [BMAD_PROBE_ENV]: probe ? '1' : '',
+      [BMAD_SOURCE_ENV]: sourceFile,
       // The server passes ANTHROPIC_API_KEY on to agents, and `session-start` echoes the agent's whole environment into the page.
       ANTHROPIC_API_KEY: '',
       HOME: home,

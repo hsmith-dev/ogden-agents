@@ -8,8 +8,11 @@
  * is hashed before and after.
  *
  * Test 1, no BMad hook (what a user of this version sees):
- * - Nothing shipped: every piece and the main switch greyed, Coming soon;
- *   Settings → New projects' BMad Method disabled, Coming soon.
+ * - What 0.4.0 ships (epic 10 retro A3): Planning and Board can be turned
+ *   on and the main switch works; Unattended builds and Retrospectives are
+ *   greyed, Coming soon; Settings → New projects' BMad Method can be picked.
+ *   Turning Board on asks to trust the project's scripts; Cancel leaves it
+ *   off.
  * - A simple project (a plain repo with its own `.claude/skills`): the header
  *   shows Chats only; two chats, each sent `session-start`, start with no MCP
  *   server, no `_meta`, exactly the user's text and nothing "bmad" in their
@@ -55,6 +58,12 @@ const servers: BmadServer[] = [];
 test.afterAll(async () => {
   for (const server of servers) await server.remove();
 });
+
+/** The trust dialog's title (`SCRIPT_TRUST_TITLE`; `planning-setup.ts` has imports this runner can't load). */
+const SCRIPT_TRUST_TITLE = "Run this project's BMad Method scripts?";
+
+/** The pieces 0.4.0 ships (`SHIPPED_BMAD_PIECES` in the server; epic 4). */
+const SHIPPED: readonly string[] = ['planning', 'board'];
 
 const OWN_SKILL = '.claude/skills/x/SKILL.md';
 const OWN_SKILL_TEXT = "---\nname: x\ndescription: The repo's own skill.\n---\n\nDo the thing.\n";
@@ -158,10 +167,10 @@ async function quit(page: Page, launched: Launched) {
   await waitForExit(launched.pid);
 }
 
-test('nothing shipped, a simple project, and the offer, on the installed package', async ({ page }) => {
+test('what 0.4.0 ships, Board asking for trust, a simple project, and the offer, on the installed package', async ({ page }) => {
   // Two launches and two chats on a server of its own.
   test.setTimeout(240_000);
-  // No hook: every piece is Coming soon, as for a user of this version.
+  // No hook: what a user of this version sees (Planning and Board shipped, the rest Coming soon).
   const server = bmadServer('journey-simple');
   servers.push(server);
   // No "bmad" in the simple repo's name, so the environment check can't match it by accident.
@@ -176,22 +185,39 @@ test('nothing shipped, a simple project, and the offer, on the installed package
   const plainId = await addProject(page, plain.path);
   const withBmadId = await addProject(page, withBmad.path);
 
-  await test.step('nothing shipped: every piece and the main switch Coming soon; New projects too', async () => {
+  await test.step('what 0.4.0 ships: Planning and Board can be turned on, the other pieces are Coming soon; New projects too', async () => {
     expect(await piecesOf(page, plainId)).toEqual([]);
     await page.goto(`${launched.url}/w/${plainId}/settings#${WORKSPACE_SETTINGS_BMAD_ANCHOR}`);
     for (const piece of BMAD_PIECES) {
-      await expect(switchIn(page, BMAD_PIECE_INFO[piece].label)).toHaveAttribute('aria-checked', 'false');
-      await expect(switchIn(page, BMAD_PIECE_INFO[piece].label)).toBeDisabled();
-      await expect(page.getByTestId(`bmad-${piece}-coming-soon`)).toHaveText(BMAD_COMING_SOON_LABEL);
+      const control = switchIn(page, BMAD_PIECE_INFO[piece].label);
+      await expect(control).toHaveAttribute('aria-checked', 'false');
+      if (SHIPPED.includes(piece)) {
+        await expect(control).toBeEnabled();
+        await expect(page.getByTestId(`bmad-${piece}-coming-soon`)).toHaveCount(0);
+      } else {
+        await expect(control).toBeDisabled();
+        await expect(page.getByTestId(`bmad-${piece}-coming-soon`)).toHaveText(BMAD_COMING_SOON_LABEL);
+      }
     }
-    await expect(switchIn(page, BMAD_USE_LABEL)).toBeDisabled();
-    await expect(page.getByTestId('bmad-use-coming-soon')).toHaveText(BMAD_COMING_SOON_LABEL);
+    await expect(switchIn(page, BMAD_USE_LABEL)).toBeEnabled();
+    await expect(page.getByTestId('bmad-use-coming-soon')).toHaveCount(0);
+
+    // Board runs the project's own BMad Method scripts, so turning it on asks first (epic 10 retro A3, story 4.2).
+    // Cancel leaves it off; the planning journey allows it on a repo set up from a local fixture.
+    const board = switchIn(page, BMAD_PIECE_INFO.board.label);
+    await board.click();
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toContainText(SCRIPT_TRUST_TITLE);
+    await page.getByTestId('script-trust-cancel').click();
+    await expect(dialog).toHaveCount(0);
+    await expect(board).toHaveAttribute('aria-checked', 'false');
+    expect(await piecesOf(page, plainId)).toEqual([]);
 
     await openNewProjects(page);
     const section = page.getByTestId('new-projects-section');
     await expect(section.getByRole('radio', { name: 'Simple chats' })).toHaveAttribute('aria-checked', 'true');
-    await expect(section.getByRole('radio', { name: 'BMad Method' })).toBeDisabled();
-    await expect(page.getByTestId('new-projects-bmad-coming-soon')).toHaveText(BMAD_COMING_SOON_LABEL);
+    await expect(section.getByRole('radio', { name: 'BMad Method' })).toBeEnabled();
+    await expect(page.getByTestId('new-projects-bmad-coming-soon')).toHaveCount(0);
   });
 
   await test.step('a simple project: Chats only, and two chats start with nothing BMad', async () => {
@@ -251,7 +277,8 @@ test('nothing shipped, a simple project, and the offer, on the installed package
 
 test('a piece on and off with a second tab following, the guard, and the default for new projects, on the installed package', async ({ page, browser }) => {
   test.setTimeout(180_000);
-  // Planning and Board registered as available (no real piece ships until epic 4), and the route guarded by Planning.
+  // Planning and Board registered as available (0.4.0 ships both, so the hook adds nothing but stays exercised), and
+  // the route guarded by Planning.
   const server = bmadServer('journey-pieces', { available: ['planning', 'board'], probe: true });
   servers.push(server);
   const earlier = server.addRepo({ prefix: 'earlier-repo-' });

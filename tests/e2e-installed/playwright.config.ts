@@ -41,7 +41,8 @@ export default defineConfig({
   // In order: the gate checks and their proof; the hold proof, epic 2's
   // chat journey (story 2.13), epic 9's first-run journey (story 9.7),
   // epic 3's terminal journey (story 3.10, with its install without
-  // optional dependencies), epic 10's BMad journey (story 10.9) and the
+  // optional dependencies), epic 10's BMad journey (story 10.9), epic 4's
+  // planning journey and the permission modes journey (story 4.13), and the
   // 0.2.0 upgrade (story 10.7), each on a server of its own from the same
   // install; then epic 1's journey on the first server, last since it quits it.
   projects: [
@@ -51,7 +52,9 @@ export default defineConfig({
     { name: 'onboarding', testMatch: /(^|[\\/])onboarding-journey\.spec\.ts$/, dependencies: ['chat'] },
     { name: 'terminal', testMatch: /(^|[\\/])terminal-journey\.spec\.ts$/, dependencies: ['onboarding'] },
     { name: 'bmad', testMatch: /(^|[\\/])bmad-journey\.spec\.ts$/, dependencies: ['terminal'] },
-    { name: 'upgrade', testMatch: /(^|[\\/])upgrade-journey\.spec\.ts$/, dependencies: ['bmad'] },
+    { name: 'planning', testMatch: /(^|[\\/])planning-journey\.spec\.ts$/, dependencies: ['bmad'] },
+    { name: 'modes', testMatch: /(^|[\\/])permission-modes-journey\.spec\.ts$/, dependencies: ['planning'] },
+    { name: 'upgrade', testMatch: /(^|[\\/])upgrade-journey\.spec\.ts$/, dependencies: ['modes'] },
     { name: 'journey', testMatch: /(^|[\\/])journey\.spec\.ts$/, dependencies: ['upgrade'] },
   ],
 });

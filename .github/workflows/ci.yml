@@ -234,7 +234,7 @@ jobs:
   # security gate's negative checks and the proof that they fail without the
   # gate, and the permission hold and its proof. The agent is the repo's fake
   # ACP agent (OGDEN_AGENTS_CLAUDE_ACP_PATH): no real agent, no agent or uv
-  # download. The suite quits every server it starts and leaves no process.
+  # download; BMad Method comes from a local fixture tarball (story 4.13). The suite quits every server it starts and leaves no process.
   e2e-installed:
     name: End-to-end, installed (${{ matrix.os }}, Chromium)
     runs-on: ${{ matrix.os }}
@@ -259,6 +259,18 @@ jobs:
       # Builds dist/, then writes ogden-agents-<version>.tgz, which the suite installs.
       - name: Pack
         run: pnpm run pack
+
+      # Epic 4's planning journey (story 4.13) sets BMad Method up and reads the
+      # board through the installed server's uv, from a local fixture tarball
+      # (OGDEN_AGENTS_TEST_BMAD_SOURCE): uv on PATH and its managed Python, which
+      # the suite never downloads (offline, UV_PYTHON_DOWNLOADS=never).
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: false
+
+      - name: Provision the suite's uv-managed Python
+        shell: bash
+        run: uv python install 3.12 || (sleep 5 && uv python install 3.12)
 
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium

@@ -78,6 +78,8 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Epic 5 (a later story): a network allowlist (package registries) for a build's sandboxed commands; until then builds have no network. From 5.2's user decision. (log: "A network allowlist for an unattended build's sandboxed commands")
 - Epic 5 (5.6): core decides a build's file write before Claude Code's unsandboxed Edit/Write performs it, so a symlink swapped in after the decision can redirect it. From 5.2 security review S2. (log: "Core decides a build's file write before Claude Code's unsandboxed Edit/Write tool performs it")
 - Epic 5 (5.5): a build's sandbox can write the main repo's `.git/objects`; a per-run object store would close it. From 5.2 security review S3. (log: "A build's sandbox can write the main repo's `.git/objects`")
+- Epic 11 (11.4): mask a webhook's host when listing it back; some providers put the token in the host name. From 5.3 security review S10. (log: "Listing a webhook back by its full host can show part of its secret")
+- Epic 5 (5.5): check a minimum git version (2.31+ for `rev-parse --path-format`, 2.39.2 for `git apply`'s symlink fix) and refuse older git with a plain reason. From 5.3 security review S15. (log: "Nothing checks a minimum git version")
 
 ## Log
 

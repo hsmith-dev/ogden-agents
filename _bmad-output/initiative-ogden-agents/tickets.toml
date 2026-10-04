@@ -70,7 +70,7 @@ id = 12
 slug = "epic-v1-1-codex-and-grok"
 title = "v1.1: Codex and Grok beside Claude Code"
 covers = ["CAP-15", "CAP-3", "CAP-5", "CAP-16"]
-after = [{ epic = 6, needs = "the agents-as-a-choice contracts (6.3) and the shared ACP client moved into acp-base (6.4)" }]
+after = [{ epic = 6, needs = "the agents-as-a-choice contracts (6.3), the shared ACP client in acp-base (6.4), the picker and default agent per project (6.6), its sweep (6.9) and v1 released (6.10)" }, { epic = 4, needs = "the per-project trust store (4.2), BMad setup (4.3), planning sessions (4.6) and its release (4.13)" }]
 
 # ---- v2 (planned; outside the v1 initiative's Done when) ----
 

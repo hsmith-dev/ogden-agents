@@ -10,7 +10,7 @@ review: 'quick'
 review_source: 'pinned'
 lenses_ran: ['quick']
 review_loop_iteration: 0
-baseline_revision: 'd20708ba74528d6f7ada6712dc8bb756fbe1ca59'
+baseline_revision: 'dcf478de01980914135c7038c49507e454701fe0'
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-every-agent/epic-every-agent.md'
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-every-agent/story-tracer-bullet-two-agents-side-by-side-in-one-project-plan.md'

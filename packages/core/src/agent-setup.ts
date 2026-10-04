@@ -74,6 +74,14 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
   const keys = new Map<string, SavedKey>();
   /** Each agent's subscription state, as last read; missing means `unknown`. */
   const subscriptions = new Map<string, AgentSubscriptionState>();
+  /**
+   * Each agent's last status as `statusFor` read it, and when (6.3: a new
+   * chat's readiness). Dropped whenever its sign-in, key or install changes,
+   * so a readiness never answers from a reading that is out of date.
+   */
+  const lastStatus = new Map<string, { status: AgentSetupStatus; at: number; unread: boolean }>();
+  /** Status reads under way for a readiness, by agent: concurrent ones share one. */
+  const readinessReads = new Map<string, Promise<unknown>>();
   /** When each agent's subscription state was last read. */
   const readAt = new Map<string, number>();
   /** Each agent's last confirmed subscription state (never `unknown`), and when it was confirmed. */
@@ -127,6 +135,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
   };
 
   const announce = (agentId: string, state: AgentAuthState, extra: { method?: AgentAuthMethodKind; reason?: string } = {}) => {
+    lastStatus.delete(agentId);
     if (disposed) return;
     try {
       events.append({ type: 'agent.auth_changed', workspaceId: null, streamId: AGENTS_STREAM, payload: { agentId, state, ...extra } });
@@ -142,6 +151,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
    */
   const setSubscription = (agentId: string, state: AgentSubscriptionState, startedAt?: number) => {
     if (startedAt !== undefined && generationOf(agentId) !== startedAt) return;
+    lastStatus.delete(agentId);
     generations.set(agentId, generationOf(agentId) + 1);
     const at = now();
     subscriptions.set(agentId, state);
@@ -255,21 +265,16 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
     }
   };
 
-  /** One agent's setup as `list` shows it. */
-  /** Each agent's last status as {@link statusFor} read it, and when (6.3: a new chat's readiness). */
-  const lastStatus = new Map<string, { status: AgentSetupStatus; at: number; unread: boolean }>();
-  /** Agents whose port's status threw at the last read (shown as not installed, but nobody could tell). */
-  const unreadable = new Set<string>();
-
-  /** {@link readStatus}, kept as the agent's last status. */
+  /** {@link readStatus}, kept as the agent's last status unless something changed it meanwhile. */
   const statusFor = async (port: AgentSetupPort): Promise<AgentSetupStatus> => {
-    unreadable.delete(port.agentId);
-    const status = await readStatus(port);
-    lastStatus.set(port.agentId, { status, at: now(), unread: unreadable.has(port.agentId) });
+    const mark = { unread: false };
+    const status = await readStatus(port, mark);
+    lastStatus.set(port.agentId, { status, at: now(), unread: mark.unread });
     return status;
   };
 
-  const readStatus = async (port: AgentSetupPort): Promise<AgentSetupStatus> => {
+  /** One agent's setup as `list` shows it. `mark.unread` is set when its port's status threw (nobody could tell). */
+  const readStatus = async (port: AgentSetupPort, mark: { unread: boolean }): Promise<AgentSetupStatus> => {
     // A key write that failed (timed out) may have completed since: show what the store holds.
     if (resync.has(port.agentId)) await syncFromStore(port);
     let status: AgentSetupStatus;
@@ -280,7 +285,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       status = shown(reported);
     } catch (error) {
       report(port.agentId, 'status', error);
-      unreadable.add(port.agentId);
+      mark.unread = true;
       setSubscription(port.agentId, 'unknown', startedAt);
       status = {
         agentId: port.agentId,
@@ -407,7 +412,16 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       const last = lastStatus.get(agentId);
       const age = last === undefined ? Number.POSITIVE_INFINITY : now() - last.at;
       // A negative age (a clock that went backwards) counts as stale.
-      const reading = last !== undefined && age >= 0 && age < maxAgeMs ? last : (await statusFor(port), lastStatus.get(agentId)!);
+      let reading = last !== undefined && age >= 0 && age < maxAgeMs ? last : undefined;
+      if (reading === undefined) {
+        let read = readinessReads.get(agentId);
+        if (read === undefined) {
+          read = statusFor(port).finally(() => readinessReads.delete(agentId));
+          readinessReads.set(agentId, read);
+        }
+        const status = (await read) as AgentSetupStatus;
+        reading = lastStatus.get(agentId) ?? { status, at: now(), unread: false };
+      }
       const { status } = reading;
       const shownState = { install: status.install, auth: status.auth };
       // A status the port couldn't give is "can't tell": it never refuses a chat.
@@ -426,6 +440,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       const progress: AgentInstallProgress = { step: `Installing ${port.displayName}`, percent: 0 };
       let release!: () => void;
       installs.set(agentId, { progress, done: new Promise<void>((resolve) => (release = resolve)) });
+      lastStatus.delete(agentId);
       let detected: AgentPortStatus;
       try {
         detected = await port.status();
@@ -442,6 +457,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       appendInstall(agentId, { type: 'agent.install_started', workspaceId: null, streamId: AGENTS_STREAM, payload: { agentId } });
       void runInstall(port, progress).finally(() => {
         installs.delete(agentId);
+        lastStatus.delete(agentId);
         release();
       });
       return { started: true, agent: withApiKey(port, installingStatus(shown(detected), progress)) };
@@ -489,6 +505,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
         }
         resync.delete(agentId);
         keys.set(agentId, { value, unchecked: verification === 'unchecked' });
+        lastStatus.delete(agentId);
         // Subscription first: the key is used only when the subscription is known to be signed out.
         await readSubscription(port);
         if (subscriptionFor(agentId) === 'signed_out' && !wasInUse) announce(agentId, 'signed_in', { method: 'api_key' });
@@ -514,6 +531,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
         resync.delete(agentId);
         // Re-read, so the card shows what the store holds now; unreadable counts as deleted.
         if (!(await syncFromStore(port))) keys.delete(agentId);
+        lastStatus.delete(agentId);
         await readSubscription(port);
         if (wasInUse && !keyInUse(port)) announce(agentId, 'needs_sign_in');
       });

@@ -259,6 +259,21 @@ describe("an agent's readiness, from its setup (6.3)", () => {
     expect(await other.readiness('some-agent', 1_000)).toEqual({ install: 'installed', auth: 'needs_sign_in' });
   });
 
+  it('answers from fresh state at once after a key is saved, and shares one status read between concurrent asks', async () => {
+    const port = Object.assign(setupPort({ install: 'installed', auth: 'needs_sign_in', subscription: 'signed_out' }), {
+      apiKey: { envName: 'SOME_KEY', check: () => undefined, verify: async () => 'ok' as const },
+    });
+    const store = new Map<string, string>();
+    const secrets = { backend: 'memory', get: async (name: string) => store.get(name), set: async (name: string, value: string) => void store.set(name, value), delete: async (name: string) => void store.delete(name) };
+    const setup = createAgentSetup(openTestCore().events, [port], { secrets });
+    const both = await Promise.all([setup.readiness('some-agent', 60_000), setup.readiness('some-agent', 60_000)]);
+    expect(both.map((answer) => answer.blocked)).toEqual(['agent_signed_out', 'agent_signed_out']);
+    expect(port.reads).toBe(1);
+    await setup.setApiKey('some-agent', 'some-key-1234');
+    // Within the cache's age, but the key changed it: the key is in use, so a chat starts.
+    expect(await setup.readiness('some-agent', 60_000)).toEqual({ install: 'installed', auth: 'signed_in' });
+  });
+
   it('never blocks on a status read that failed: nobody could tell', async () => {
     const port = setupPort({ install: 'installed', auth: 'signed_in' });
     port.status = async () => {

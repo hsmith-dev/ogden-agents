@@ -230,8 +230,9 @@ describe('a new chat only with an agent that can start it (epic 6, 6.3)', () => 
   });
 
   it('gives an agent with a home variable its own folder in the data folder, and no other agent its key', async () => {
+    // Claude Code signed out, so its key (from this server's environment) is in use: it still reaches only Claude Code.
     const { server, tab, wsId, chatWith } = await setUp(secondAgent({ descriptor: { homeEnv: 'FAKE_AGENT_HOME' } }), {
-      extraAgentEnv: { ANTHROPIC_API_KEY: 'sk-ant-inherited-key-for-claude-only-0000', FAKE_AGENT_KEY: 'fake-inherited-key-0000' },
+      extraAgentEnv: { FAKE_LOGIN_STATE: join(tmpdir(), 'ogden-agents-no-login-state.json'), ANTHROPIC_API_KEY: 'sk-ant-inherited-key-for-claude-only-0000', FAKE_AGENT_KEY: 'fake-inherited-key-0000' },
     });
     const fake = await chatWith('fake-agent');
     const env = await say(server, tab, wsId, fake.id, 'echo-env');
@@ -240,7 +241,9 @@ describe('a new chat only with an agent that can start it (epic 6, 6.3)', () => 
     // Every registered agent's key variable is kept out (derived from the descriptors), its own included while signed in.
     expect(env).not.toMatch(/^(ANTHROPIC_API_KEY|FAKE_AGENT_KEY)=/m);
     const claude = await chatWith('claude-code');
-    expect(await say(server, tab, wsId, claude.id, 'echo-env')).not.toMatch(/^(FAKE_AGENT_HOME|FAKE_AGENT_KEY|ANTHROPIC_API_KEY)=/m);
+    const claudeEnv = await say(server, tab, wsId, claude.id, 'echo-env');
+    expect(claudeEnv).toMatch(/^ANTHROPIC_API_KEY=/m);
+    expect(claudeEnv).not.toMatch(/^(FAKE_AGENT_HOME|FAKE_AGENT_KEY)=/m);
   });
 
   it("refuses a project's default agent until entry 6 keeps it (501), storing nothing", async () => {
@@ -248,5 +251,11 @@ describe('a new chat only with an agent that can start it (epic 6, 6.3)', () => 
     const refused = await request(server, tab, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { defaultAgentId: 'fake-agent' });
     expect(refused.status).toBe(501);
     expect(ApiErrorBody.parse(await refused.json()).error.code).toBe('not_implemented');
+  });
+
+  it('refuses a wiring whose setup port is for another agent or gives its key in another variable', async () => {
+    await expect(startTestServer({ extraAgents: [secondAgent({ setup: createMemoryAgentSetup({ agentId: 'other-agent' }) })] })).rejects.toThrow(/setup port is other-agent's/);
+    const keyed = { ...createMemoryAgentSetup({ agentId: 'fake-agent' }), apiKey: { envName: 'OTHER_KEY', check: () => undefined, verify: async () => 'ok' as const } };
+    await expect(startTestServer({ extraAgents: [secondAgent({ setup: keyed })] })).rejects.toThrow(/gives its key in OTHER_KEY/);
   });
 });

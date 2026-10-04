@@ -162,6 +162,9 @@ export async function stubSetupCatalog({
   };
 }
 
+/** How a test registers an agent (`StartOptions.extraAgents`, 6.3). */
+type AgentWiringOf = NonNullable<NonNullable<StartOptions>['extraAgents']>[number];
+
 /** The second agent's id and product name (epic 6): the fake ACP agent registered again, for tests only. */
 export const SECOND_AGENT = { agentId: 'fake-agent', displayName: 'Fake Agent' } as const;
 
@@ -170,7 +173,9 @@ export const SECOND_AGENT = { agentId: 'fake-agent', displayName: 'Fake Agent' }
  * name, Ask and Skip all only (as Antigravity will declare), no terminal, and
  * `FAKE_ACP_AGENT_NAME` set so its `whoami` reply says which agent answered.
  */
-export async function fakeSecondAgent(): Promise<NonNullable<NonNullable<StartOptions>['extraAgents']>[number]> {
+export async function fakeSecondAgent(
+  options: { setup?: AgentWiringOf['setup']; needsProjectTrust?: boolean } = {},
+): Promise<AgentWiringOf> {
   const { createClaudeCodeAgent } = await serverModule();
   const base = createClaudeCodeAgent({ adapterPath: FAKE_AGENT, claudeExecutable: null });
   const named = <T extends { env: Readonly<Record<string, string>> }>(input: T): T => ({ ...input, env: { ...input.env, FAKE_ACP_AGENT_NAME: SECOND_AGENT.agentId } });
@@ -183,9 +188,11 @@ export async function fakeSecondAgent(): Promise<NonNullable<NonNullable<StartOp
       install: { kind: 'npm', package: '@fake/agent', version: '1.0.0' },
       signInMethods: [{ id: 'fake-login', kind: 'subscription', label: 'Sign in with your account' }],
       permissionModes: { ask: 'default', skip_all: 'bypassPermissions' },
-      needsProjectTrust: false,
+      needsProjectTrust: options.needsProjectTrust ?? false,
       skillsFolder: '.fake/skills',
     },
+    // Its setup port (6.3), when a test gives one: then a new chat with it is refused while it isn't installed or signed in.
+    ...(options.setup === undefined ? {} : { setup: options.setup }),
     agent: {
       displayName: SECOND_AGENT.displayName,
       permissionModes: ['ask', 'skip_all'],

@@ -5,7 +5,7 @@
  * branch on its id.
  */
 import { join } from 'node:path';
-import type { AgentDescriptor, AgentPort, AgentSetupPort } from '@ogden-agents/core';
+import { apiKeyMethod, type AgentDescriptor, type AgentPort, type AgentSetupPort } from '@ogden-agents/core';
 import { PERMISSION_MODES } from '@ogden-agents/shared';
 import type { AgentId } from '@ogden-agents/shared';
 
@@ -14,8 +14,30 @@ export interface AgentWiring {
   descriptor: AgentDescriptor;
   /** Its chat port. Its `displayName` and `permissionModes` must match the descriptor's. */
   agent: AgentPort;
-  /** Installing and signing into it; absent for an agent with nothing to set up (a test agent), which is always ready. */
+  /**
+   * Installing and signing into it; absent for an agent with nothing to set
+   * up (a test agent), which is always ready. Its `agentId` is the
+   * descriptor's, and its API key variable the descriptor's first
+   * (`checkAgentWiring`). For an agent with a `homeEnv`, the port's own
+   * processes (status, sign-in) must run with the same home,
+   * {@link agentHomeDir}: `start()` sets it only in chat processes.
+   */
   setup?: AgentSetupPort | undefined;
+}
+
+/**
+ * Throws (a wiring bug) when `wiring`'s setup port is for another agent, or
+ * gives its key in a variable other than the descriptor's first: the agent
+ * would never be refused, or its key would escape the stripping of every
+ * other agent's process.
+ */
+export function checkAgentWiring({ descriptor, setup }: AgentWiring): void {
+  if (setup === undefined) return;
+  if (setup.agentId !== descriptor.agentId) throw new Error(`agent wiring: ${descriptor.agentId}'s setup port is ${setup.agentId}'s`);
+  const envNames = apiKeyMethod(descriptor)?.apiKey.envNames;
+  if (setup.apiKey !== undefined && envNames?.[0] !== setup.apiKey.envName) {
+    throw new Error(`agent wiring: ${descriptor.agentId}'s setup port gives its key in ${setup.apiKey.envName}, its descriptor in ${envNames?.[0] ?? 'none'}`);
+  }
 }
 
 /**

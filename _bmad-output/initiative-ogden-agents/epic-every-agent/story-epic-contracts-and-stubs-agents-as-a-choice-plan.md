@@ -3,12 +3,12 @@ title: 'Contracts and stubs: agents as a choice'
 type: 'feature'
 ticket: '3'
 created: '2026-10-03'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
 review_loop_iteration: 0
 baseline_revision: 'd20708ba74528d6f7ada6712dc8bb756fbe1ca59'
 context:
@@ -94,6 +94,19 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (quick lens, security + correctness): high 0, medium 4, low 4, false 0, maybe-false 0, rejected 0. All routed patch.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---------|---------|-------|-------------------|
+| 1 | Readiness answered from a cached status for up to 30 s after a key was saved, an install finished or a sign-in changed, refusing a chat that would work | medium | patch | `lastStatus` was only rewritten by `statusFor`. Now dropped in `setSubscription`, `announce`, key save/delete and install start/end; core test: save key → ready at once within the cache age. |
+| 2 | "Couldn't read" flag was shared state across concurrent status reads | low | patch | `readStatus` now takes its own `mark`, so a failed read can't mark another read's result. |
+| 3 | Concurrent stale readiness checks each spawned a status read | low | patch | `readinessReads` shares one read per agent; core test counts one read for two concurrent asks. |
+| 4 | A wiring's setup port could name another agent (never refused) or another key variable (escapes stripping) | medium | patch | `checkAgentWiring` throws before `start()` opens anything; server test covers both. |
+| 5 | Home variable reaches chat processes only; setup ports' own processes not covered | medium | patch | Contract stated on `AgentWiring.setup` (the port runs with `agentHomeDir`); entry 7's setup adapter owns it. No agent with a home and a setup port exists yet. |
+| 6 | Key isolation test never had a key in use | medium | patch | Test now runs Claude Code signed out with an inherited key: Claude Code's process gets `ANTHROPIC_API_KEY`, the fake agent's doesn't. |
+| 7 | `fakeSecondAgent` options in the Code Map not built | low | patch | `tests/support.ts` `fakeSecondAgent({ setup?, needsProjectTrust? })`. |
+| 8 | Existing home folder not made owner-only | low | patch | `chmodSync(home, 0o700)` off Windows after `mkdirSync`. |
 
 ## Design Notes
 

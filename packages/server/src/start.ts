@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
@@ -42,7 +42,7 @@ import {
 import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM, ServerMessage, type AgentId, type Session } from '@ogden-agents/shared';
 import openBrowser from 'open';
 import { WebSocketServer } from 'ws';
-import { agentHomeDir, describedLike, type AgentWiring } from './agent-wiring.js';
+import { agentHomeDir, checkAgentWiring, describedLike, type AgentWiring } from './agent-wiring.js';
 import { createApp, type ServerControl } from './app.js';
 import { SHIPPED_BMAD_PIECES } from './bmad-pieces.js';
 import { chooseWebSocketProtocol, createLaunchCodes, createTabTokens, retireLegacyAuthKey } from './auth.js';
@@ -130,6 +130,8 @@ const STOP_AFTER_REPLY_MS = 50;
 export function start(options: StartOptions & ({ launch: true } | { open: true })): Promise<RunningServer & { launchUrl: string }>;
 export function start(options?: StartOptions): Promise<RunningServer>;
 export async function start(options: StartOptions = {}): Promise<RunningServer> {
+  // A wiring bug is refused before anything is opened (6.3).
+  for (const wiring of options.extraAgents ?? []) checkAgentWiring(wiring);
   const dataDir = options.dataDir === undefined ? ensureDataDir() : createDataDir(options.dataDir);
   const lock = acquireInstanceLock(dataDir);
   try {
@@ -351,6 +353,8 @@ async function listenAndAnnounce({
     if (descriptor.homeEnv === undefined) continue;
     const home = agentHomeDir(dataDir, descriptor.agentId);
     mkdirSync(home, { recursive: true, mode: 0o700 });
+    // Owner-only even when it was there already (mode applies only to a folder made now).
+    if (process.platform !== 'win32') chmodSync(home, 0o700);
     homeEnvs.set(descriptor.agentId, { [descriptor.homeEnv]: home });
   }
   const homeEnvOf = (agentId: AgentId): Record<string, string> => homeEnvs.get(agentId) ?? {};

@@ -419,6 +419,7 @@ async function listenAndAnnounce({
     agentReadiness: (agentId) => agentSetup.readiness(agentId, subscriptionMaxAgeMs),
     // The per-project trust (story 4.2), as it stands now: trusted, and its scripts the ones the user allowed (4.13).
     // An agent that needs a trusted project is refused until then, and again once the scripts change.
+    // The ACP adapters never see trust (6.4): it is checked here, before a chat is created.
     projectTrusted: (workspaceId) => core.bmadScriptTrust.scriptsUnchanged(workspaceId),
     terminal,
     // The chat follows the log (a mode changed by Developer mode reaches its agent) and gates Skip all on Developer mode.

@@ -79,6 +79,9 @@
 //   "plan-exit"    asks permission to leave plan mode with the real adapter's
 //                  options (mode-raising ones as `allow_always`, "manually
 //                  approve" as `allow_once`); replies `chose=<option id>`
+//   "permission-always-only"  asks permission with one `allow_always` option
+//                  only (no `allow_once`, no `reject_once`); replies
+//                  `chose=<option id>` or `chose=cancelled` (6.4)
 //
 // Session modes (permission modes): `session/new`, `session/resume` and
 // `session/load` answer `modes` as claude-agent-acp 0.84 does (`default`,
@@ -431,6 +434,18 @@ acp
           { optionId: 'exit-plan-default', name: 'Yes, manually approve edits', kind: 'allow_once' },
           { optionId: 'reject', name: 'No, keep planning', kind: 'reject_once' },
         ],
+      });
+      await say(client, params.sessionId, `chose=${answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'}`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text === 'permission-always-only') {
+      // A request a card may not answer (6.4): only a session-wide option is on offer.
+      const toolCall = { toolCallId: 'call-always-only', title: 'Run npm test', kind: 'execute', rawInput: { command: 'npm test' } };
+      await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
+      const answer = await client.request('session/request_permission', {
+        sessionId: params.sessionId,
+        toolCall,
+        options: [{ optionId: 'always', name: 'Always allow', kind: 'allow_always' }],
       });
       await say(client, params.sessionId, `chose=${answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'}`);
       return { stopReason: 'end_turn' };

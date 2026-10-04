@@ -30,7 +30,7 @@ import { execFile } from 'node:child_process';
 import { homedir } from 'node:os';
 import { AgentSetupError, type AgentAuthMethod, type AgentSetupPort, type AgentSignIn } from '@ogden-agents/core';
 import { SIGN_IN_CODE_PATTERN, MAX_SIGN_IN_CODE_LENGTH, type AgentSetupStatus } from '@ogden-agents/shared';
-import { CLAUDE_CODE } from '../acp-claude-code/claude-code-agent.js';
+import { CLAUDE_CODE } from '../acp-claude-code/constants.js';
 import { findClaudeExecutable } from '../acp-claude-code/detect.js';
 import { loadPty as defaultLoadPty, type HiddenPty, type PtyLoader } from '../terminal-pty/index.js';
 import { ANTHROPIC_API_KEY_ENV, createClaudeApiKey, type ClaudeApiKeyOptions } from './api-key.js';

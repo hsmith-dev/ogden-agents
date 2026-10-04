@@ -205,6 +205,50 @@ describe('AD-1: core and shared name no agent (epic 6)', () => {
   });
 });
 
+/** Where the shared ACP client lives (6.4): it names no agent and imports no agent's adapter. */
+const ACP_BASE = /(^|[\\/])packages[\\/]adapters[\\/]src[\\/]acp-base[\\/]/;
+
+/** Agent products and makers the shared ACP client must not name (any case). */
+const AGENT_WORDS = /claude|anthropic|antigravity|gemini|google|codex|openai|grok|xai|copilot/gi;
+
+/** One message per agent name, agent variable or agent-adapter import in `acp-base` code (comments aside). */
+export function findAcpBaseViolations(files: readonly SourceFile[]): string[] {
+  const violations: string[] = [];
+  for (const { path, source } of files) {
+    if (!ACP_BASE.test(path)) continue;
+    const code = withoutComments(source);
+    for (const match of code.matchAll(AGENT_WORDS)) violations.push(`${path}: the shared ACP client names ${match[0]} (E6-R3: agents supply a descriptor and quirks)`);
+    for (const name of AGENT_ENV_NAMES) if (new RegExp(`(?<![A-Za-z0-9_])${name}(?![A-Za-z0-9_])`).test(code)) violations.push(`${path}: the shared ACP client names the agent variable ${name}`);
+    for (const match of source.matchAll(SPECIFIER)) {
+      if (/^\.\.\/(?:acp-(?!base\/)|setup-)/.test(match[2]!)) violations.push(`${path}: the shared ACP client imports ${match[2]} (an agent's own adapter)`);
+    }
+  }
+  return violations;
+}
+
+describe('E6-R3: the shared ACP client names no agent (6.4)', () => {
+  it('no acp-base source names an agent, an agent variable, or imports an agent adapter', () => {
+    const files = loadWorkspaceSources();
+    expect(files.some((file) => ACP_BASE.test(file.path))).toBe(true);
+    expect(findAcpBaseViolations(files)).toEqual([]);
+  });
+
+  it('flags a planted agent name, variable or adapter import in acp-base, but not in a comment or another folder', () => {
+    const files: SourceFile[] = [
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/acp-base/a.ts', source: "const name = 'Claude Code';\n// like Antigravity\nconst key = env.GEMINI_API_KEY;" },
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/acp-base/b.ts', source: "import { x } from '../acp-claude-code/x.js';\nimport { y } from './mask.js';" },
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/acp-claude-code/c.ts', source: "const name = 'Claude Code';" },
+    ];
+    expect(findAcpBaseViolations(files)).toEqual([
+      'packages/adapters/src/acp-base/a.ts: the shared ACP client names Claude (E6-R3: agents supply a descriptor and quirks)',
+      'packages/adapters/src/acp-base/a.ts: the shared ACP client names GEMINI (E6-R3: agents supply a descriptor and quirks)',
+      'packages/adapters/src/acp-base/a.ts: the shared ACP client names the agent variable GEMINI_API_KEY',
+      'packages/adapters/src/acp-base/b.ts: the shared ACP client names claude (E6-R3: agents supply a descriptor and quirks)',
+      'packages/adapters/src/acp-base/b.ts: the shared ACP client imports ../acp-claude-code/x.js (an agent\'s own adapter)',
+    ]);
+  });
+});
+
 describe('AD-1 package dependency rules', () => {
   it('every workspace package follows the diagram', () => {
     const manifests = loadWorkspaceManifests();

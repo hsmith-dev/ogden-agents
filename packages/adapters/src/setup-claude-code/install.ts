@@ -27,7 +27,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix, win32 } from 'node:path';
 import { AgentSetupError, type AgentInstallProgress } from '@ogden-agents/core';
-import { CLAUDE_AGENT_ACP_PACKAGE, CLAUDE_CODE } from '../acp-claude-code/claude-code-agent.js';
+import { CLAUDE_AGENT_ACP_PACKAGE, CLAUDE_CODE } from '../acp-claude-code/constants.js';
 import { errorCode } from '../error-code.js';
 import { renameWithRetry } from '../toolchain-uv/uv-toolchain.js';
 import pinnedLock from './pins/package-lock.json' with { type: 'json' };

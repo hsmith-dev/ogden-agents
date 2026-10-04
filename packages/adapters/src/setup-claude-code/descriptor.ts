@@ -4,7 +4,7 @@
  * no agent (AD-1).
  */
 import type { AgentDescriptor } from '@ogden-agents/core';
-import { ACP_MODE_IDS, CLAUDE_AGENT_ACP_PACKAGE, CLAUDE_CODE } from '../acp-claude-code/claude-code-agent.js';
+import { ACP_MODE_IDS, CLAUDE_AGENT_ACP_PACKAGE, CLAUDE_CODE } from '../acp-claude-code/constants.js';
 import { ANTHROPIC_API_KEY_ENV } from './api-key.js';
 import { CLAUDE_AI_LOGIN_ID } from './auth-method.js';
 import { pinnedVersion } from './install.js';

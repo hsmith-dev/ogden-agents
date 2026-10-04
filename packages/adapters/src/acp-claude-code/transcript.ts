@@ -24,7 +24,7 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { AgentError, type AgentTranscriptTurn } from '@ogden-agents/core';
 import { redactAnthropicKeys } from '@ogden-agents/shared';
-import { maskSecrets, secretValues } from './mask.js';
+import { maskSecrets, secretValues } from '../acp-base/mask.js';
 import { SESSION_ID } from './terminal-command.js';
 
 /** The largest session record read; a larger one is not imported (story 3.3). */

@@ -4,6 +4,7 @@
  * `sandbox-*`, `vcs-git`, ...). The `*-memory` adapters are deterministic
  * in-memory stubs, wired as defaults until their real adapters ship.
  */
+export * from './acp-base/index.js';
 export * from './acp-claude-code/index.js';
 export * from './bmad-catalog/index.js';
 export * from './bmad-catalog/skill-labels.js';

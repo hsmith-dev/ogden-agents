@@ -97,6 +97,15 @@ describe('decideBuildPermission (story 5.2)', () => {
     expect(decideBuildPermission(edit('C:\\Data\\w\\abcdefgh\\_bmad\\x'), scope, fs).outcome).toBe('deny');
   });
 
+  it("on Windows: a git root given without a drive resolves on the worktree's drive, as request paths do (CI: checkout on D:, temp on C:)", () => {
+    const scope: BuildPermissionScope = { worktree: 'C:\\Data\\w\\abcdefgh', gitWritable: ['\\repo\\.git\\refs\\heads\\ogden\\abcdefgh'], protectedPaths: PROTECTED_PATHS };
+    const fs = fakeFs({ platform: 'win32', insensitive: true });
+    expect(decideBuildPermission(edit('/repo/.git/refs/heads/ogden/abcdefgh/x'), scope, fs).outcome).toBe('allow_once');
+    expect(decideBuildPermission(edit('C:\\repo\\.git\\refs\\heads\\ogden\\abcdefgh\\x'), scope, fs).outcome).toBe('allow_once');
+    expect(decideBuildPermission(edit('D:\\repo\\.git\\refs\\heads\\ogden\\abcdefgh\\x'), scope, fs).outcome).toBe('deny');
+    expect(decideBuildPermission(edit('/repo/.git/refs/heads/main'), scope, fs).outcome).toBe('deny');
+  });
+
   it('decides on the raw paths, never the masked ones shown to the user (review loop 1)', () => {
     const fs = fakeFs();
     const masked = { toolCallId: 't', title: 'Write', kind: 'edit', paths: ['/data/w/abcdefgh/[redacted]'], rawPaths: ['/etc/sk-secret'] };

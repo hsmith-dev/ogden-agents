@@ -100,8 +100,9 @@ export function decideBuildPermission(request: AgentPermissionRequest, scope: Bu
   const worktree = fs.realpath(scope.worktree);
   if (worktree === undefined) return deny();
   const folded = fs.caseInsensitive(worktree);
+  // Resolved like every request path (against the worktree), so a root without a drive lands on the same one.
   const gitRoots = scope.gitWritable.flatMap((root) => {
-    const real = fs.realpath(root);
+    const real = fs.realpath(p.resolve(worktree, root));
     return real === undefined ? [] : [real];
   });
   for (const path of paths) {

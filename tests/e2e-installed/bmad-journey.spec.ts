@@ -140,9 +140,19 @@ interface SessionStart {
   env: Record<string, string>;
 }
 
-/** Sends `session-start` in the open chat and reads the agent's one-line JSON reply. */
-async function sessionStart(page: Page): Promise<SessionStart> {
-  await send(page, 'session-start');
+/**
+ * Sends `session-start` in the open chat and reads the agent's one-line JSON
+ * reply. `agentName` is the chat's agent, which names the composer (`send`
+ * knows only Claude Code's).
+ */
+async function sessionStart(page: Page, agentName = 'Claude Code'): Promise<SessionStart> {
+  if (agentName === 'Claude Code') await send(page, 'session-start');
+  else {
+    const composer = page.getByRole('textbox', { name: `Message ${agentName}` });
+    await composer.fill('session-start');
+    await composer.press('Enter');
+    await expect(composer).toHaveValue('');
+  }
   await expect(replies(page)).toHaveCount(1);
   await expect(state(page)).toHaveAttribute('data-state', 'idle');
   await expect(replies(page).last()).toHaveAttribute('data-streaming', 'false');
@@ -262,7 +272,7 @@ test('what 0.4.0 ships, Board asking for trust, a simple project, and the offer,
     await page.goto(`${launched.url}/w/${plainId}/s/${session.id}`);
     await expect(page.getByTestId('session-agent')).toHaveText('Antigravity');
     await expectChatsTabOnly(page);
-    const start = await sessionStart(page);
+    const start = await sessionStart(page, 'Antigravity');
     expectSimpleStart(start, cwd);
     expect(await piecesOf(page, plainId)).toEqual([]);
   });

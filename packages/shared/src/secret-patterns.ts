@@ -20,11 +20,6 @@ export const ANTHROPIC_KEY_PATTERNS: readonly RegExp[] = [
   /\bsk-(?:an?)?$/gm,
 ];
 
-/** `text` with every Anthropic key in it replaced by {@link REDACTED_SECRET}. */
-export function redactAnthropicKeys(text: string): string {
-  return ANTHROPIC_KEY_PATTERNS.reduce((out, pattern) => out.replace(pattern, REDACTED_SECRET), text);
-}
-
 /**
  * A Google API key (a Gemini API key, epic 6 entry 5): `AIza` and 35 more
  * characters; also one cut short at a line's end, or wrapped onto the next

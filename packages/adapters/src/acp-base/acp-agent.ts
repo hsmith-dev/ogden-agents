@@ -58,6 +58,7 @@ import {
 } from '@ogden-agents/core';
 import { PERMISSION_MODES, type PermissionMode } from '@ogden-agents/shared';
 import { killProcessTree } from '../process-tree.js';
+import { withTimeout } from '../with-timeout.js';
 import { createStreamMasker, maskSecrets, secretValues } from './mask.js';
 import { commandOf, toolCallPaths, type AcpToolInputPaths } from './tool-paths.js';
 
@@ -153,17 +154,6 @@ export function acpAsksLessThanAsk(askingModeIds: readonly string[], modeId: str
 /** ACP's `-32000`: the agent needs the user to sign in again (9.4). */
 function isAuthRequired(error: unknown): boolean {
   return error instanceof acp.RequestError && error.code === -32000;
-}
-
-/** `promise`, or a rejection with `error` after `ms`. */
-function withTimeout<T>(promise: Promise<T>, ms: number, error: () => Error): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(error()), ms);
-    }),
-  ]).finally(() => clearTimeout(timer));
 }
 
 /** The permission option kinds ACP defines; anything else is logged as `unknown`. */

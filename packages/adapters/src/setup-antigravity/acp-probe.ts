@@ -16,6 +16,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
 import { killProcessTree } from '../process-tree.js';
+import { withTimeout as raceTimeout } from '../with-timeout.js';
 
 /** How to start a server: a program by absolute path and its arguments. */
 export interface ServerCommand {
@@ -85,15 +86,9 @@ export function startSetupServer(input: {
   return { connection, exited, stop };
 }
 
-/** `promise`, or a rejection after `ms`. */
+/** `promise`, or a rejection after `ms` ("`what` timed out", code `timeout`). */
 export function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(Object.assign(new Error(`${what} timed out`), { code: 'timeout' })), ms);
-    }),
-  ]).finally(() => clearTimeout(timer));
+  return raceTimeout(promise, ms, () => Object.assign(new Error(`${what} timed out`), { code: 'timeout' }));
 }
 
 /** The `initialize` Ogden sends for setup: no file system or terminal for the agent. */

@@ -76,7 +76,7 @@ describe('planning reads the catalog through bmadModulesSeen (story 4.4)', () =>
     const sent: string[] = [];
     // A chat that records what it is asked: planning only creates the session and sends the invocation.
     const chat = {
-      createChatSession: (workspaceId: string, kind: string) => ({ id: 'sess_test', workspaceId, kind }),
+      createChatSession: (workspaceId: string, options?: { kind?: string }) => ({ id: 'sess_test', workspaceId, kind: options?.kind ?? 'chat' }),
       sendMessage: (_workspaceId: string, _sessionId: string, text: string) => void sent.push(text),
     } as unknown as PlanningDeps['chat'];
     const planning = createPlanning({ bmad: core.bmad, entities: core.entities, catalog, chat, agent: { skillInvocation: (name) => `/${name}` }, modulesSeen: core.bmadModulesSeen });

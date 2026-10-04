@@ -3,12 +3,12 @@ title: 'Tracer: a second agent chat beside a Claude Code chat in one project'
 type: 'feature'
 ticket: '2'
 created: '2026-10-03'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
 review_loop_iteration: 0
 baseline_revision: '94e6fbe'
 context:
@@ -77,6 +77,14 @@ context:
 - Given `packages/core/src` or `packages/shared/src` code naming an agent id, when tests run, then the architecture test fails.
 
 ## Implementation Notes
+
+- Implemented directly in this session (it already held the investigation; earlier attempts stalled), not by a fresh subagent.
+- Core: `AgentRegistry`/`createAgentRegistry`/`unregisteredAgent` in `agent-port.ts`; `ChatOptions.agents` replaces `agent`, and `agentEnv` now takes the agent id; `ctx.agentOf`/`agentIdOf`/`withAgentId`; `lastSessionModes` is per agent; `UnknownAgentError` (`agent_unknown`). Every Chat method that answers a session fills `agentId` (legacy agent for NULL rows).
+- DB: `0007_session_agent.sql` adds nullable `agent_id` (no SQL default, so core names no agent).
+- Server: `StartOptions.extraAgents`; registry = Claude Code (default and legacy) + extras, each wrapped by `forChat(agentId, …)` with its own `agentSetup.agentEnv(agentId)`; terminal availability per session's agent; `GET /api/v1/chat-agents`; `createClaudeCodeAgent` re-exported for tests.
+- Web: `useChatAgents`, `agentNameOf`, `AgentPicker` (hidden with one agent) on the Chats page body; session view, sidebar rows, Needs you and Chats rows name the chat's agent. Claude-only words (sign-in again, terminal, mode descriptions) still say Claude Code: entry 9's sweep.
+- Fake agent: `whoami` prompt; tests' second agent = Claude Code ACP adapter on the fake script, `fake-agent`/"Fake Agent", Ask + Skip all, no terminal (`tests/support.ts` `fakeSecondAgent`, server test `secondAgent`).
+- Tests: `packages/core/test/agent-choice.test.ts`, `packages/server/test/agent-choice.test.ts`, `packages/web/test/agent-choice.dom.test.tsx`, `tests/e2e/agent-choice.spec.ts`, architecture test `findAgentIdViolations`; gate route list gains `chat-agents`.
 
 ## Plan Change Log
 

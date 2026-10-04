@@ -58,7 +58,7 @@ describe('the status sidebar names each chat by its agent (E6-R1)', () => {
   const workspace = { id: 'ws_a', path: '/repo', realPath: '/repo', createdAt: '2026-10-01T00:00:00.000Z' } as Workspace;
   const at = '2026-10-03T11:59:00.000Z';
   const session = (id: string, agentId: string | undefined, state: Session['state']) =>
-    ({ id, workspaceId: 'ws_a', kind: 'chat', state, driver: 'ui', title: null, adapterRefs: {}, createdAt: at, updatedAt: at, ...(agentId === undefined ? {} : { agentId }) }) as Session;
+    ({ id, workspaceId: 'ws_a', kind: 'chat', state, driver: 'ui', title: null, adapterRefs: {}, createdAt: at, updatedAt: at, ...(agentId === undefined ? {} : { agentId }) }) as unknown as Session;
 
   it("gives each row its chat's agent, and Needs you names the agent that asks", () => {
     const requested = {

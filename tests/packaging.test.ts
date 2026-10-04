@@ -1,0 +1,309 @@
+/**
+ * Packaging guard: the root `ogden-agents` package is the only publishable
+ * artifact. After `pnpm build` (which `pnpm test` runs first), every bare
+ * import in the bundled server must be a Node builtin or a root `dependencies`
+ * entry, and the packed tarball must hold only the built files: no BMad
+ * files, no `vendor/` and no `forks.lock` (AD-13 as amended by story 4.14:
+ * the pinned upstream BMad Method is downloaded only when the user asks).
+ */
+import { spawnSync } from 'node:child_process';
+import { readdirSync, readFileSync } from 'node:fs';
+import { builtinModules } from 'node:module';
+import { join, posix } from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+const ROOT = join(import.meta.dirname, '..');
+const DIST = join(ROOT, 'dist');
+
+interface RootManifest {
+  dependencies?: Record<string, string>;
+}
+
+/** `from '…'`, `import '…'`, `import('…')`, `export … from '…'`, `require('…')`. */
+const SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)(['"])([^'"]+)\1/g;
+
+/** The package a bare specifier belongs to: `@scope/name` or `name`. */
+export function packageOf(specifier: string): string {
+  const parts = specifier.split('/');
+  return specifier.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]!;
+}
+
+function isBuiltin(specifier: string): boolean {
+  return specifier.startsWith('node:') || builtinModules.includes(packageOf(specifier));
+}
+
+/** Returns one message per bare import whose package is not a root dependency. */
+export function findUndeclaredImports(
+  files: ReadonlyArray<{ path: string; source: string }>,
+  dependencies: Readonly<Record<string, string>>,
+): string[] {
+  const problems = new Set<string>();
+  for (const { path, source } of files) {
+    for (const match of source.matchAll(SPECIFIER)) {
+      const specifier = match[2]!;
+      if (specifier.startsWith('.') || specifier.startsWith('/') || isBuiltin(specifier)) continue;
+      const pkg = packageOf(specifier);
+      if (!(pkg in dependencies)) {
+        problems.add(`${path} imports "${specifier}", but "${pkg}" is not in the root package's dependencies`);
+      }
+    }
+  }
+  return [...problems];
+}
+
+/** Workspace packages whose code is bundled into `dist/server.js`. */
+const BUNDLED_PACKAGES = ['server', 'core', 'adapters', 'shared'] as const;
+
+interface WorkspaceManifest {
+  name: string;
+  dependencies?: Record<string, string>;
+}
+
+/**
+ * Returns one message per third-party runtime dependency of a bundled
+ * workspace package whose range is not declared identically in the root
+ * `dependencies`, since the root range is what an installed package resolves.
+ */
+export function findRangeMismatches(
+  manifests: readonly WorkspaceManifest[],
+  rootDeps: Readonly<Record<string, string>>,
+): string[] {
+  const problems: string[] = [];
+  for (const { name, dependencies = {} } of manifests) {
+    for (const [dep, range] of Object.entries(dependencies)) {
+      if (dep.startsWith('@ogden-agents/') || range.startsWith('workspace:')) continue;
+      if (rootDeps[dep] !== range) {
+        problems.push(
+          `${name} depends on ${dep}@${range}, but the root package declares ${dep}@${rootDeps[dep] ?? '(nothing)'}`,
+        );
+      }
+    }
+  }
+  return problems;
+}
+
+function loadBundledManifests(): WorkspaceManifest[] {
+  return BUNDLED_PACKAGES.map(
+    (dir) => JSON.parse(readFileSync(join(ROOT, 'packages', dir, 'package.json'), 'utf8')) as WorkspaceManifest,
+  );
+}
+
+/** The server bundle and any chunks next to it (the UI in `dist/web` is browser code). */
+function loadServerBundle() {
+  return readdirSync(DIST)
+    .filter((name) => /\.m?js$/.test(name))
+    .map((name) => ({ path: `dist/${name}`, source: readFileSync(join(DIST, name), 'utf8') }));
+}
+
+/**
+ * Every bare specifier `entry` loads, following its relative imports (static
+ * and dynamic) through the chunks beside it. `read` returns a file's source
+ * by its path relative to the bundle folder.
+ */
+export function bareImportsOf(entry: string, read: (file: string) => string): string[] {
+  const seen = new Set<string>();
+  const bare = new Set<string>();
+  const visit = (file: string) => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    for (const match of read(file).matchAll(SPECIFIER)) {
+      const specifier = match[2]!;
+      if (specifier.startsWith('./')) visit(posix.join(posix.dirname(file), specifier));
+      else if (!specifier.startsWith('.') && !specifier.startsWith('/')) bare.add(specifier);
+    }
+  };
+  visit(entry);
+  return [...bare].sort();
+}
+
+/** Packages only the server needs; the launcher (every `ogden` run) must load none of them. */
+const SERVER_ONLY = ['better-sqlite3', 'drizzle-orm', 'hono', '@hono/node-server', 'ws', 'ulid', 'zod'];
+
+function rootDependencies(): Record<string, string> {
+  const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as RootManifest;
+  return manifest.dependencies ?? {};
+}
+
+/** Paths `pnpm pack` would put in the tarball. */
+function packedFiles(): string[] {
+  const result = spawnSync('pnpm', ['pack', '--dry-run', '--json'], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    // `pnpm` is a `.cmd` shim on Windows, which only runs through a shell.
+    shell: process.platform === 'win32',
+  });
+  if (result.status !== 0) {
+    throw new Error(`pnpm pack --dry-run failed (${result.status}): ${result.stderr}${result.stdout}`);
+  }
+  const json = result.stdout.slice(result.stdout.indexOf('{'));
+  const report = JSON.parse(json) as { files: Array<{ path: string }> };
+  return report.files.map((f) => f.path.replaceAll('\\', '/'));
+}
+
+describe('packaging', () => {
+  it('the server bundle imports only Node builtins and declared root dependencies', () => {
+    const files = loadServerBundle();
+    expect(files.map((f) => f.path)).toContain('dist/server.js');
+    expect(findUndeclaredImports(files, rootDependencies())).toEqual([]);
+  });
+
+  it('the server bundle contains no workspace package imports', () => {
+    for (const { source } of loadServerBundle()) expect(source).not.toMatch(/['"]@ogden-agents\//);
+  });
+
+  it('the launcher bundle loads only what the handshake and the spawn need: never better-sqlite3 or the rest of the server', () => {
+    const imports = bareImportsOf('launcher.js', (file) => readFileSync(join(DIST, file), 'utf8'));
+    expect(imports.length).toBeGreaterThan(0);
+    expect(imports.map(packageOf).filter((pkg) => SERVER_ONLY.includes(pkg))).toEqual([]);
+  });
+
+  it('follows chunks when collecting a bundle\'s imports', () => {
+    const files: Record<string, string> = {
+      'launcher.js': "import { a } from './chunk-a.js';\nimport { spawn } from 'node:child_process';",
+      'chunk-a.js': "import Database from 'better-sqlite3';\nexport { b } from './chunk-a.js';\nconst o = await import('open');",
+    };
+    expect(bareImportsOf('launcher.js', (file) => files[file]!)).toEqual(['better-sqlite3', 'node:child_process', 'open']);
+  });
+
+  it('flags an undeclared import by package name', () => {
+    const files = [
+      {
+        path: 'dist/server.js',
+        source: [
+          "import { Hono } from 'hono';",
+          "import { readFileSync } from 'node:fs';",
+          "import path from 'path';",
+          "import { x } from './chunk.js';",
+          "import Database from 'better-sqlite3';",
+          "export { y } from '@scope/pkg/sub';",
+          "const lazy = await import('left-pad');",
+        ].join('\n'),
+      },
+    ];
+    expect(findUndeclaredImports(files, { hono: '^4' })).toEqual([
+      'dist/server.js imports "better-sqlite3", but "better-sqlite3" is not in the root package\'s dependencies',
+      'dist/server.js imports "@scope/pkg/sub", but "@scope/pkg" is not in the root package\'s dependencies',
+      'dist/server.js imports "left-pad", but "left-pad" is not in the root package\'s dependencies',
+    ]);
+  });
+
+  it('every third-party dependency of a bundled package is declared by the root with the same range', () => {
+    expect(findRangeMismatches(loadBundledManifests(), rootDependencies())).toEqual([]);
+  });
+
+  it('flags a range that differs from the root, or a dependency the root lacks', () => {
+    const manifests: WorkspaceManifest[] = [
+      { name: '@ogden-agents/server', dependencies: { '@ogden-agents/core': 'workspace:*', hono: '^4.14.0', ws: '^8.22.0' } },
+      { name: '@ogden-agents/shared', dependencies: { zod: '^4.6.5' } },
+    ];
+    expect(findRangeMismatches(manifests, { hono: '^4.13.11', ws: '^8.22.0' })).toEqual([
+      '@ogden-agents/server depends on hono@^4.14.0, but the root package declares hono@^4.13.11',
+      '@ogden-agents/shared depends on zod@^4.6.5, but the root package declares zod@(nothing)',
+    ]);
+  });
+
+  it('node-pty is optional (AD-19): a root optionalDependency, never a dependency, and every bundled package pins the same version', () => {
+    const read = (path: string) =>
+      JSON.parse(readFileSync(join(ROOT, path), 'utf8')) as { dependencies?: Record<string, string>; optionalDependencies?: Record<string, string> };
+    const root = read('package.json');
+    const pinned = root.optionalDependencies?.['node-pty'];
+    expect(pinned).toBe('1.1.0');
+    expect(root.dependencies?.['node-pty']).toBeUndefined();
+    for (const dir of BUNDLED_PACKAGES) {
+      const manifest = read(`packages/${dir}/package.json`);
+      expect(manifest.dependencies?.['node-pty'], dir).toBeUndefined();
+      const optional = manifest.optionalDependencies?.['node-pty'];
+      if (optional !== undefined) expect(optional, dir).toBe(pinned);
+    }
+  });
+
+  it('@napi-rs/keyring is pinned to 2.1.0 (AD-16, story 9.2): a root dependency, the same in the adapters, never optional', () => {
+    const read = (path: string) =>
+      JSON.parse(readFileSync(join(ROOT, path), 'utf8')) as { dependencies?: Record<string, string>; optionalDependencies?: Record<string, string> };
+    const root = read('package.json');
+    expect(root.dependencies?.['@napi-rs/keyring']).toBe('2.1.0');
+    expect(root.optionalDependencies?.['@napi-rs/keyring']).toBeUndefined();
+    expect(read('packages/adapters/package.json').dependencies?.['@napi-rs/keyring']).toBe('2.1.0');
+    // The lockfile resolves exactly that version and no other.
+    const lock = readFileSync(join(ROOT, 'pnpm-lock.yaml'), 'utf8');
+    expect(lock).toContain("'@napi-rs/keyring@2.1.0'");
+    expect(lock).not.toMatch(/'@napi-rs\/keyring@(?!2\.1\.0')/);
+  });
+
+  it('the root, server and web packages share one version (the launcher, server and UI compare it; AD-20)', () => {
+    const versionOf = (path: string) => (JSON.parse(readFileSync(join(ROOT, path), 'utf8')) as { version: string }).version;
+    const root = versionOf('package.json');
+    expect(versionOf('packages/server/package.json')).toBe(root);
+    expect(versionOf('packages/web/package.json')).toBe(root);
+  });
+
+  it('the server, launcher and UI bundles carry the root version as one build-time constant, reading no package.json', () => {
+    const { version } = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { version: string };
+    const bundles = [...loadServerBundle(), ...readdirSync(join(DIST, 'web', 'assets')).filter((n) => n.endsWith('.js')).map((name) => ({
+      path: `dist/web/assets/${name}`,
+      source: readFileSync(join(DIST, 'web', 'assets', name), 'utf8'),
+    }))];
+    for (const { path, source } of bundles) expect(source, path).not.toContain('__OGDEN_AGENTS_VERSION__');
+    // No package reads its own manifest's version at run time any more.
+    for (const dir of ['server', 'web']) {
+      const src = join(ROOT, 'packages', dir, 'src');
+      for (const file of readdirSync(src, { recursive: true, encoding: 'utf8' }).filter((f) => /\.tsx?$/.test(f))) {
+        expect(readFileSync(join(src, file), 'utf8'), `packages/${dir}/src/${file}`).not.toMatch(/from\s*['"][^'"]*package\.json['"]/);
+      }
+    }
+    const carrying = bundles.filter(({ source }) => source.includes(JSON.stringify(version)) || source.includes(`'${version}'`) || source.includes(`\`${version}\``));
+    const paths = carrying.map((b) => b.path);
+    expect(paths).toContain('dist/launcher.js');
+    expect(paths.some((p) => p.startsWith('dist/web/assets/'))).toBe(true);
+    expect(paths.some((p) => p !== 'dist/launcher.js' && !p.startsWith('dist/web/'))).toBe(true);
+  });
+
+  it('only the root package is publishable; every workspace package stays private', () => {
+    const manifest = (path: string) => JSON.parse(readFileSync(join(ROOT, path), 'utf8')) as { private?: boolean };
+    expect(manifest('package.json').private).not.toBe(true);
+    const workspaces = readdirSync(join(ROOT, 'packages'), { withFileTypes: true }).filter((d) => d.isDirectory());
+    expect(workspaces.length).toBeGreaterThan(0);
+    for (const dir of workspaces) expect(manifest(`packages/${dir.name}/package.json`).private, dir.name).toBe(true);
+  });
+
+  it('the root package names the GitHub repo that trusted publishing and provenance check against', () => {
+    const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as {
+      repository?: unknown;
+      homepage?: string;
+      bugs?: unknown;
+    };
+    expect(manifest.repository).toEqual({ type: 'git', url: 'git+https://github.com/hsmith-dev/ogden-agents.git' });
+    expect(manifest.homepage).toBe('https://github.com/hsmith-dev/ogden-agents#readme');
+    expect(manifest.bugs).toEqual({ url: 'https://github.com/hsmith-dev/ogden-agents/issues' });
+  });
+
+  it('the bundled server carries the BMad lock, so the package needs no file of its own for it (story 4.14)', () => {
+    const lock = JSON.parse(readFileSync(join(ROOT, 'packages', 'adapters', 'src', 'bmad-source', 'bmad-lock.json'), 'utf8')) as { sources: Record<string, { commit: string }> };
+    const bundle = readdirSync(DIST)
+      .filter((name) => name.endsWith('.js'))
+      .map((name) => readFileSync(join(DIST, name), 'utf8'))
+      .join('\n');
+    for (const source of Object.values(lock.sources)) expect(bundle).toContain(source.commit);
+  });
+
+  it('the tarball holds the launcher, the bundle and the UI, and no workspace sources or BMad files', () => {
+    const files = packedFiles();
+    expect(files).toEqual(
+      expect.arrayContaining([
+        'bin/ogden.js',
+        'dist/server.js',
+        'dist/serve.js',
+        'dist/launcher.js',
+        'dist/web/index.html',
+        'package.json',
+        'README.md',
+        'LICENSE',
+      ]),
+    );
+    // Story 4.14: no bundled forks, no fork lock, no BMad file anywhere (the lock ships inside the bundle).
+    expect(files.filter((f) => f.startsWith('vendor/') || f === 'forks.lock')).toEqual([]);
+    expect(files.filter((f) => /(^|\/)(SKILL\.md|tickets\.py|setup\.py|bmod\.toml|[^/]+\.whl)$/.test(f))).toEqual([]);
+    expect(files.filter((f) => f.startsWith('packages/'))).toEqual([]);
+    expect(files.filter((f) => !/^(bin|dist)\//.test(f) && !['package.json', 'README.md', 'LICENSE'].includes(f))).toEqual([]);
+  });
+});

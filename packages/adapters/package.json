@@ -1,0 +1,28 @@
+{
+  "name": "@ogden-agents/adapters",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Adapters: everything that names a specific agent, OS, sandbox or tool, behind core ports (AD-1).",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./process-tree": "./src/process-tree.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^1.5.1",
+    "@napi-rs/keyring": "2.1.0",
+    "@ogden-agents/core": "workspace:*",
+    "@ogden-agents/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  },
+  "optionalDependencies": {
+    "node-pty": "1.1.0"
+  }
+}

@@ -1,0 +1,248 @@
+name: Release
+
+# Publishes the root `ogden-agents` package to npm when a version tag is pushed
+# (see RELEASING.md). Order: guard (tag on main, versions match the tag), the
+# full CI matrix for the tagged commit, publish from Linux through npm trusted
+# publishing (GitHub OIDC, no stored npm token), then `npx ogden-agents@<version>`
+# from the registry on macOS, Windows and Linux, and a registry and provenance
+# check. Publishing is idempotent: re-running a release whose version is already
+# on npm from this same commit skips the publish and goes on to verify.
+#
+# The trusted publisher on npmjs.com names this repository, this file
+# (`release.yml`) and the environment `npm-release`; renaming the file or the
+# environment breaks publishing until the npm setting is updated to match.
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+concurrency:
+  # One release per tag, never cancelled halfway. Distinct from ci.yml's group,
+  # which the called matrix uses.
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: Tag is on main and matches the package versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      dist-tag: ${{ steps.version.outputs.dist-tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history and every branch, so the tagged commit can be checked
+          # against main.
+          fetch-depth: 0
+
+      # First-parent history only: a commit made on a feature branch and later
+      # merged into main is reachable from main but was never main itself.
+      - name: Tagged commit is on main
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git rev-list --first-parent origin/main | grep -qx "$GITHUB_SHA"; then
+            echo "::error title=Not on main::$GITHUB_REF_NAME points at $GITHUB_SHA, which is not a commit on main's own history (a feature-branch commit merged into main doesn't count). Tag a commit on main itself (RELEASING.md). Nothing was published."
+            exit 1
+          fi
+          echo "$GITHUB_REF_NAME ($GITHUB_SHA) is on main"
+
+      # One version everywhere: the root, server and web package.json versions
+      # (tests/packaging.test.ts keeps them equal) must equal the tag without its `v`.
+      - name: Versions match the tag
+        id: version
+        run: |
+          node --input-type=module -e '
+            import { readFileSync, appendFileSync } from "node:fs";
+            const tag = process.env.GITHUB_REF_NAME;
+            const expected = tag.replace(/^v/, "");
+            const files = ["package.json", "packages/server/package.json", "packages/web/package.json"];
+            const mismatches = files
+              .map((file) => ({ file, version: JSON.parse(readFileSync(file, "utf8")).version }))
+              .filter(({ version }) => version !== expected);
+            if (mismatches.length > 0) {
+              const detail = mismatches.map(({ file, version }) => `${file} is ${version}`).join(", ");
+              console.log(`::error title=Version mismatch::Tag ${tag} needs version ${expected}, but ${detail}. Nothing was published.`);
+              process.exit(1);
+            }
+            // A prerelease (0.2.0-rc.1) goes to the `next` dist-tag so `npx ogden-agents` keeps the last stable version.
+            const distTag = expected.includes("-") ? "next" : "latest";
+            appendFileSync(process.env.GITHUB_OUTPUT, `version=${expected}\ndist-tag=${distTag}\n`);
+            console.log(`Tag ${tag} matches version ${expected} in ${files.join(", ")}; npm dist-tag ${distTag}`);
+          '
+
+  ci:
+    name: CI
+    needs: guard
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  publish:
+    name: Publish to npm
+    needs: [guard, ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: npm-release
+    permissions:
+      contents: read
+      # The OIDC token npm exchanges for a short-lived publish credential.
+      id-token: write
+    env:
+      VERSION: ${{ needs.guard.outputs.version }}
+      DIST_TAG: ${{ needs.guard.outputs.dist-tag }}
+    steps:
+      # Idempotent re-runs: the same version from this commit is already done;
+      # the same version from any other commit is an error (npm never reuses a
+      # version). `gitHead` is recorded in the package below.
+      - name: Is this version on npm already
+        id: published
+        run: |
+          if [ -z "$(npm view "ogden-agents@$VERSION" version 2>/dev/null)" ]; then
+            echo "already=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          head="$(npm view "ogden-agents@$VERSION" gitHead 2>/dev/null || true)"
+          if [ "$head" = "$GITHUB_SHA" ]; then
+            echo "::notice title=Already published::ogden-agents@$VERSION is already on npm from this commit; skipping the publish."
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::error title=Already published::ogden-agents@$VERSION is already on npm from ${head:-an unknown commit}, not $GITHUB_SHA. npm never reuses a version: release a new patch version instead (RELEASING.md)."
+          exit 1
+
+      - uses: actions/checkout@v7
+        if: steps.published.outputs.already != 'true'
+
+      - uses: pnpm/action-setup@v6
+        if: steps.published.outputs.already != 'true'
+
+      # No `registry-url`: npm's default registry is npmjs.org, and the .npmrc
+      # setup-node would write expects a token this workflow doesn't have.
+      - uses: actions/setup-node@v7
+        if: steps.published.outputs.already != 'true'
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # Trusted publishing needs npm >= 11.5.1.
+      - name: npm supports trusted publishing
+        if: steps.published.outputs.already != 'true'
+        run: |
+          current="$(npm --version)"
+          if ! node -e 'const [a,b,c]=process.argv[1].split(".").map(Number); process.exit(a>11||(a===11&&(b>5||(b===5&&c>=1)))?0:1)' "$current"; then
+            echo "npm $current is older than 11.5.1; installing npm 11"
+            npm install --global npm@^11.5.1
+          fi
+          npm --version
+
+      - name: Install
+        if: steps.published.outputs.already != 'true'
+        run: pnpm install --frozen-lockfile
+
+      # `gitHead` in the published manifest lets a re-run tell whether the
+      # version on npm came from this commit (a packed tarball carries none).
+      - name: Build and pack
+        if: steps.published.outputs.already != 'true'
+        run: |
+          pnpm build
+          npm pkg set gitHead="$GITHUB_SHA"
+          pnpm pack
+          test -f "ogden-agents-$VERSION.tgz"
+
+      # The exact tarball about to be published, installed with npx in an empty
+      # directory, must serve the page before anything goes public.
+      - name: Smoke test the tarball
+        if: steps.published.outputs.already != 'true'
+        run: node scripts/smoke-installed.mjs "ogden-agents-$VERSION.tgz"
+
+      # `npm publish` of the packed tarball, never `pnpm publish` from the
+      # workspace. Provenance comes automatically with trusted publishing from a
+      # public repo; from a private repo npm publishes without it. A prerelease
+      # goes to the `next` dist-tag, a stable version to `latest`.
+      - name: Publish
+        if: steps.published.outputs.already != 'true'
+        run: |
+          if ! npm publish "ogden-agents-$VERSION.tgz" --access public --tag "$DIST_TAG"; then
+            echo "::error title=npm publish failed::npm rejected ogden-agents@$VERSION, so nothing was published. ENEEDAUTH, E401, E403 or E404: the npm trusted publisher is missing or doesn't match this workflow; set it up as in https://github.com/${{ github.repository }}/blob/main/RELEASING.md#3-configure-the-npm-trusted-publisher. E422: npm's provenance check failed, usually because package.json's repository.url is not exactly git+https://github.com/${{ github.repository }}.git; fix it on main and release a new tag. Then re-run this job."
+            exit 1
+          fi
+
+  # Separate from publish so a slow registry or a missing attestation never
+  # blocks verify, and verify never waits on it.
+  registry:
+    name: Registry and provenance
+    needs: [guard, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VERSION: ${{ needs.guard.outputs.version }}
+    steps:
+      - name: Wait for the registry
+        run: |
+          for attempt in $(seq 1 30); do
+            if [ "$(npm view "ogden-agents@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
+              echo "ogden-agents@$VERSION is on npm"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::ogden-agents@$VERSION did not appear on npm within 5 minutes"
+          exit 1
+
+      - name: Provenance
+        env:
+          REPO_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          attestations="$(npm view "ogden-agents@$VERSION" dist.attestations --json 2>/dev/null || true)"
+          if [ -n "$attestations" ]; then
+            echo "ogden-agents@$VERSION has provenance: $attestations"
+          elif [ "$REPO_PRIVATE" = "true" ]; then
+            echo "::warning title=No provenance::The repository is private, so npm published ogden-agents@$VERSION without provenance. Make it public before the next release (RELEASING.md)."
+          else
+            echo "::error title=No provenance::ogden-agents@$VERSION was published from a public repository but has no provenance attestation."
+            exit 1
+          fi
+
+  verify:
+    name: npx from the registry (${{ matrix.os }} / Node ${{ matrix.node }})
+    # guard only supplies the version; it has passed if publish ran.
+    needs: [guard, publish]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [24, 26]
+    env:
+      VERSION: ${{ needs.guard.outputs.version }}
+    steps:
+      # Only for the smoke script; nothing from the checkout is installed.
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Wait for the registry
+        shell: bash
+        run: |
+          for attempt in $(seq 1 30); do
+            if [ "$(npm view "ogden-agents@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then exit 0; fi
+            sleep 10
+          done
+          echo "::error::ogden-agents@$VERSION is not visible from this runner after 5 minutes"
+          exit 1
+
+      # Runs `npx --yes ogden-agents@<version>` in an empty directory with an
+      # empty cache: reaches the page and server.started, then quits the server.
+      # A failure here means the release is already public: fix forward with a
+      # new patch version.
+      - name: Run the published package
+        shell: bash
+        run: node scripts/smoke-installed.mjs --registry-spec "ogden-agents@$VERSION"

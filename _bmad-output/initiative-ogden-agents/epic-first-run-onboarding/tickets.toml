@@ -1,0 +1,90 @@
+# First-run onboarding breakdown (DRAFT for review, 2026-09-30). Table order is the build order; ids never change once approved.
+# Split from epic 2 (epic-chat-and-workspaces). References to epic 2 entries use "2.<id>", to epic 1 entries "1.<id>".
+
+[[entry]]
+id = 1
+type = "story"
+title = "Tracer bullet: sign in with a Claude subscription through a hidden PTY"
+description = "Adds the lazily loaded terminal-pty loader (AD-19) and a setup-claude-code adapter behind the AgentSetupPort from 2.3 that runs Claude Code's own login in a hidden PTY, hands the sign-in URL to the UI to open in a new tab, detects completion, and reports signed-in, needs-sign-in and failure states as events on the Claude Code card in Settings: Agents, as one sign-in action that entries 4 and 5 also start; it relies on clientCapabilities.auth.terminal, which acp-claude-code sets since 2.3, so the adapter offers the terminal login method, and credentials stay in the CLI (AD-16); the user signs out and back in with a real subscription for the live check."
+verify = "On a machine where Claude Code is installed and signed out, clicking Sign in with your account in Settings: Agents and finishing the provider's page leaves Claude Code signed in with no terminal opened and a chat then works, and a node-pty load failure shows the reason instead of breaking the app."
+covers = ["R2"]
+after = ["2.3"]
+hitl = true
+risk = "high"
+unknown = "Whether Claude Code's login completes through its own localhost callback or needs a code pasted back into the PTY, which would need a paste field in the UI."
+references = [
+  "_bmad-output/initiative-ogden-agents/spec-ogden-agents/agent-matrix.md#how-the-ui-uses-it",
+  "_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-19--the-terminal-is-optional-to-load-adopted",
+  "_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#state-patterns",
+]
+
+[[entry]]
+id = 2
+type = "story"
+title = "Use an API key instead, kept in the keychain"
+description = "Adds the secrets-keyring adapter behind SecretStorePort (the OS keychain through @napi-rs/keyring, falling back to an encrypted file readable only by the user), Use an API key instead on the Claude Code card from entry 1, and a core resolver that passes the key only in the agent child's environment through the env AgentPort accepts since 2.2, with redaction in events and logs."
+verify = "With Claude Code signed out, a user pastes an API key in Settings: Agents and completes a chat, and a search of the database, event log and log files finds no trace of the key on each OS in CI."
+covers = ["R3"]
+after = [1]
+hitl = false
+risk = "high"
+unknown = "Whether a keychain is reachable in the Linux CI runners, or only the encrypted-file fallback is tested there."
+references = ["_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-16--secrets-adopted"]
+
+[[entry]]
+id = 3
+type = "story"
+title = "Detect and install Claude Code from the UI"
+description = "Has setup-claude-code detect whether Claude Code and its ACP adapter are installed and at what version, and install what is missing when the user clicks Install, run by the server per OS with progress and errors streamed to the card in Settings: Agents, reusing the server-run CLI step pattern from the uv bootstrap (AD-21)."
+verify = "In CI on each OS, with Claude Code absent from a temporary prefix, clicking Install on the card installs it with progress shown and the card then reads Installed, needs sign-in."
+covers = ["R1"]
+after = [2, "1.8"]
+hitl = false
+risk = "medium"
+unknown = "Which install method to use per OS (the native installer or a global npm install) and whether it needs rights the user lacks; it follows 2.2's finding on which CLI the adapter uses."
+
+[[entry]]
+id = 4
+type = "story"
+title = "Sign in again from a session"
+description = "Maps an agent's authentication failure to the session's error state and adds Sign in to the error notice from 2.10 (\"Claude Code needs you to sign in again.\"), starting entry 1's sign-in action and resuming the session once signed in."
+verify = "Against the fake agent reporting an expired sign-in, the session shows the notice with Sign in, and after signing in the same session continues with its context."
+covers = ["R4"]
+after = [1, "2.10"]
+hitl = false
+risk = "medium"
+references = ["_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#state-patterns"]
+
+[[entry]]
+id = 5
+type = "story"
+title = "First-run Welcome"
+description = "Fills the /welcome flow registered in 2.3 that a first run opens: pick the agent, Install, Sign in with your account or Use an API key instead, Add a project, and the offer to add the app shortcut, composed from the Settings: Agents card of entries 1 to 3, the Add project flow of 2.5 and the shortcut action of 2.4, then lands in the new workspace's Chats."
+verify = "On a fresh data directory the app opens on Welcome, and a Playwright run against the fake agent setup goes from picking Claude Code to an empty Chats screen in a new workspace with the shortcut offered once; a second launch skips Welcome."
+covers = ["R5"]
+after = [3, "2.4", "2.5"]
+hitl = false
+risk = "low"
+references = ["_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#key-flows"]
+
+[[entry]]
+id = 6
+type = "story"
+title = "Refactor sweep"
+description = "Cleans up code across the epic, scoped when it starts from the build records and the review findings deferred during the epic, with no behavior change."
+verify = "All tests pass and no behavior changes."
+covers = ["R1"]
+after = [1, 2, 3, 4, 5]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 7
+type = "story"
+title = "End-to-end suite and release"
+description = "Extends 2.13's end-to-end suite on macOS, Windows and Linux with onboarding from a fresh data directory (install into a temporary prefix, API-key sign-in, Welcome to first chat, sign-in-again) against the fake agent, then the user runs install and subscription sign-in live on a fresh machine and tags the release through the epic 1 release workflow."
+verify = "The suite passes on all three OSes, and on a fresh machine the tagged ogden-agents version from npm installs Claude Code, signs in and chats with no terminal, and a second user chats with only an API key."
+covers = ["R1", "R2", "R3", "R4", "R5"]
+after = [6, "2.13"]
+hitl = true
+risk = "medium"

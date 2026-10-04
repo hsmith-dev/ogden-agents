@@ -1,0 +1,12 @@
+{
+  "sources": {
+    "bmad-method": {
+      "repo": "bmad-code-org/BMAD-METHOD",
+      "ref": "main",
+      "commit": "1cbcfa272fe65787c06a1fa164a901f46117cca7",
+      "version": "6.13.0-next",
+      "include": "skills/",
+      "contentHash": "sha256:6a4471ad7c8861b47a881ca35e0b598b9d32aed10c1e19a78e559d005f2c3c7b"
+    }
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1790739450131,
+      "tag": "0000_init",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790754247900,
+      "tag": "0001_workspace_real_path",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790781763595,
+      "tag": "0002_permission_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1790789547428,
+      "tag": "0003_caution_level",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1790879222220,
+      "tag": "0004_bmad_pieces",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790894073503,
+      "tag": "0005_bmad_offer_dismissed",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790944597061,
+      "tag": "0006_bmad_scripts_trusted",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1790968723083,
+      "tag": "0007_bmad_modules_seen",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1791088650874,
+      "tag": "0008_permission_modes",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1791122607661,
+      "tag": "0009_bmad_scripts_fingerprint",
+      "breakpoints": true
+    }
+  ]
+}

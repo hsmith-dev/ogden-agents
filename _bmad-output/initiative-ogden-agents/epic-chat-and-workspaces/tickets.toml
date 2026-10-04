@@ -1,0 +1,176 @@
+# Epic 2 breakdown (DRAFT for review, revised 2026-09-30 after the onboarding split). Table order is the build order; ids never change once approved.
+# Epic 2 starts after epic 1 is built. References to epic 1 entries use "1.<id>".
+# Until the onboarding epic ships, live checks use the developer's existing Claude Code login or an API key in the environment.
+
+[[entry]]
+id = 1
+type = "story"
+title = "Per-tab token replaces the session cookie"
+description = "Amends AD-15 and moves API and WebSocket auth from the loopback session cookie to a per-tab token: the launch code exchange redirects to /#t=<token>, the page keeps it in memory and sessionStorage and strips it from the URL, REST sends it as a Bearer header, the WebSocket sends it as an ogden.auth subprotocol, a tab without a token shows the open-from-Ogden-Agents page, an open tab can mint a launch link for a new tab, and CSP and log redaction cover the token; the user approves the amended AD-15 and launch-page copy first."
+verify = "Scripted requests and WebSocket upgrades carrying only a valid session cookie are refused, the same requests with the tab's token pass, a second tab opened with New tab works, and a bookmarked URL without a token shows the open-from-Ogden-Agents page."
+covers = ["E2-R9"]
+after = ["1.4", "1.6", "1.7"]
+hitl = true
+risk = "high"
+references = [
+  "_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-15--one-security-gate-adopted",
+  "_bmad-output/initiative-ogden-agents/deferred-work.md",
+  "_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#information-architecture",
+]
+
+[[entry]]
+id = 2
+type = "story"
+title = "Tracer bullet: one Claude Code chat in a workspace"
+description = "Adds AgentPort to core, an acp-claude-code adapter that spawns @agentclientprotocol/claude-agent-acp through the ACP SDK with the environment core passes it (the onboarding epic's API key uses this), the core session-event helper that takes a session id and derives workspaceId (the only way session events are appended), REST to create a workspace from a path and a chat session and to send a message, and a session view at /w/:wsId/s/:sesId that streams the agent's reply and its working and idle states; it also adds the fake ACP agent test fixture every later slice uses; the developer's existing Claude Code login or API key environment variable is the hitl setup for the live check."
+verify = "With Claude Code already signed in on the dev machine, a message sent from the session view of a workspace streams Claude Code's reply live and the session goes working then idle, the same path passes in CI against the fake ACP agent, and a test shows no session event can carry another workspace's id."
+covers = ["E2-R1", "E2-R7"]
+after = [1]
+hitl = true
+risk = "medium"
+unknown = "Whether the adapter uses the user's installed claude CLI and its stored credentials or its bundled Agent SDK CLI; the onboarding epic's install story depends on the answer, so record it in the build record."
+references = [
+  "_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-1--hexagonal-core-adopted",
+  "_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-5--one-append-only-event-log-is-the-only-path-to-the-ui-adopted",
+  "_bmad-output/initiative-ogden-agents/deferred-work.md",
+]
+
+[[entry]]
+id = 3
+type = "story"
+title = "Epic contracts and stubs"
+description = "Defines in shared the Zod schemas for every epic 2 event and message (tool calls, permission requested and resolved, the per-workspace windowed and paged subscribe protocol) and those the onboarding epic needs (agent install progress, agent auth state), the REST shapes and error codes including the app-shortcut endpoint, the core ports AgentPort (resume, load, permission callback, cancel, auth methods, with acp-claude-code setting clientCapabilities.auth.terminal so the onboarding epic never edits that adapter's initialize), AgentSetupPort and SecretStorePort with in-memory stubs wired in the server, extends the fake ACP agent with permission requests, resume, load and auth methods, and registers the routes of both epics each with its own component file, so later slices replace only their own adapter and component and the shortcut, workspace, session and event lanes, and the onboarding epic, open at once."
+verify = "Contract tests parse every new event, message and REST shape, the fake ACP agent drives every AgentPort method in a test, and each new route renders its own component in Playwright."
+covers = ["E2-R1", "E2-R3", "E2-R8", "E2-R10"]
+after = [2]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 4
+type = "story"
+title = "App shortcut to reopen Ogden Agents"
+description = "On first run the app offers, once, to add an Ogden Agents shortcut (macOS Applications folder and Dock, Windows Start menu, Linux app menu .desktop file) that runs the launcher, which starts or attaches to the server and opens a fresh launch link; the server creates it per OS through the endpoint from entry 3, it can be added or removed later from Settings: Appearance, and the onboarding epic's Welcome offers the same action."
+verify = "After adding the shortcut on each OS, closing every browser window and opening the shortcut brings the app back with a valid tab token and no terminal, and removing it from Settings deletes the shortcut."
+covers = ["E2-R10"]
+after = [3]
+hitl = true
+risk = "medium"
+unknown = "Whether a shortcut that runs the npx launcher starts fast enough and needs a pinned install path, and how macOS Gatekeeper treats a generated app bundle."
+references = ["_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#key-flows"]
+
+[[entry]]
+id = 5
+type = "story"
+title = "Add projects and switch workspaces"
+description = "Adds Add project (a server-side folder browser that lists directories, and Start a new project folder) through ensureWorkspace so the same repo never becomes two workspaces, the workspace switcher in the sidebar header, the Chats tab listing a workspace's sessions with New chat, and a workspace settings page at /w/:wsId/settings with Delete history, refused while a session is working or waiting; it implements the workspace and session list endpoints that entry 9 reads, and its Add project flow is the one the onboarding epic's Welcome reuses."
+verify = "Adding the same folder by a symlink or a different casing opens the existing workspace, two workspaces switch from the sidebar header, and Delete history empties one workspace's chats while the other's remain."
+covers = ["E2-R5"]
+after = [3]
+hitl = false
+risk = "medium"
+unknown = "How far the folder browser may reach (home directory only, or every drive on Windows)."
+references = ["_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-2--workspace-is-the-top-level-scope"]
+
+[[entry]]
+id = 6
+type = "story"
+title = "Permission cards"
+description = "Maps ACP session/request_permission to permission.requested and permission.resolved events and the waiting state, holds the agent's tool call in core until the user decides, shows the permission card inline in the transcript with Allow once, Always allow (its scope written under it) and Deny with an optional reason, stores always-allow rules per workspace in core and answers later matching requests in code without passing allow_always to the agent, and lets the user undo a rule from the card's record line."
+verify = "Against the fake agent and live against Claude Code, a requested shell command does not run until Allow once is clicked, Deny refuses it and records the optional reason in the session (delivering the reason to the agent is entry 10), and after Always allow the same command prefix in that workspace runs without a card until the rule is undone."
+covers = ["E2-R3"]
+after = [3]
+hitl = false
+risk = "high"
+references = [
+  "_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#component-patterns",
+  "_bmad-output/initiative-ogden-agents/ux-ogden-agents/DESIGN.md#components",
+]
+
+[[entry]]
+id = 7
+type = "story"
+title = "Chats persist and resume after a restart"
+description = "Makes the server mark every session whose agent process is gone idle and resumable on start (AD-3), stores the ACP session id as an adapter ref (AD-9), and reopens a chat by ACP session/resume when advertised, else session/load, else a new session primed from the stored transcript, with Resumed from history shown at the break."
+verify = "Against the fake agent in each of its three resume modes and live against Claude Code, a chat continues with its prior context after the server restarts, and the transcript shows Resumed from history at the break."
+covers = ["E2-R2"]
+after = [6]
+hitl = false
+risk = "medium"
+unknown = "Whether claude-agent-acp 0.84 advertises session resume, load, or both."
+
+[[entry]]
+id = 8
+type = "story"
+title = "Caution level per project"
+description = "Adds the caution level to each workspace (Ask every time by default, Ask for commands, Ask only for risky actions), enforced in core by classifying each request by its ACP tool kind before any always-allow rule applies, set on the workspace settings page from entry 5 and named in the permission card caption, taking effect only for requests not yet shown. Also lists this project's Always-allow rules with Remove (user decision 2026-09-30, 2.6 review F3)."
+verify = "A new workspace asks for every request; switching it to Ask for commands lets a file read through without a card while a shell command still waits; a card already shown is unchanged by the switch."
+covers = ["E2-R4"]
+after = [5, 6, 7]
+hitl = false
+risk = "high"
+unknown = "Which ACP tool kinds count as risky for Ask only for risky actions; the draft assumes execute, delete, move and fetch."
+
+[[entry]]
+id = 9
+type = "story"
+title = "Per-workspace windowed, paged event subscriptions"
+description = "Replaces the whole-install replay with the scoped protocol from entry 3: the UI subscribes to install-level events and to each workspace's recent window, the session list per workspace comes from entry 5's endpoint, older history pages on demand through a store API that entry 10's Show earlier uses, and reconnecting catches up per workspace from its last seq."
+verify = "With 100,000 stored events across two workspaces, a page load receives only each workspace's recent window, paging returns the older events in order with no gap or repeat, and a reconnect after missed events catches up exactly."
+covers = ["E2-R8"]
+after = [3, 5]
+hitl = false
+risk = "medium"
+references = [
+  "_bmad-output/initiative-ogden-agents/deferred-work.md",
+  "_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-5--one-append-only-event-log-is-the-only-path-to-the-ui-adopted",
+]
+
+[[entry]]
+id = 10
+type = "story"
+title = "Session view completes: tool calls, queue, errors, earlier history"
+description = "Completes the session view with tool-call rows (grouped in Comfortable, listed in Compact, edits expanding to their hunk), messages queued while the agent is working, the error state with its plain reason and Try again (the onboarding epic adds the sign-in-again action to this notice), Jump to latest, and Show earlier using the paging from entry 9. Sends a recorded Deny reason as the user's next message after the agent's turn (user decision 2026-09-30)."
+verify = "A Playwright run against the fake agent shows grouped tool-call rows, a message sent while working shows Queued then sends, an agent error shows its reason and Try again recovers, and Show earlier loads older messages without a page reload."
+covers = ["E2-R1", "E2-R8"]
+after = [7, 9]
+hitl = false
+risk = "medium"
+references = ["_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#component-patterns"]
+
+[[entry]]
+id = 11
+type = "story"
+title = "Live status sidebar and Needs you across workspaces"
+description = "Fills the status sidebar with every workspace and its sessions and their live states from the event log, active first and updating in place without moving the row under the pointer, the Needs you group aggregating permission requests across workspaces, the tab-title count, and the polite and assertive live-region announcements."
+verify = "With agents working in two workspaces and the browser closed and reopened from the shortcut, the sidebar shows both workspaces' live states, and a permission request in one appears under Needs you with its workspace name and a (1) in the tab title."
+covers = ["E2-R6"]
+after = [4, 5, 6, 9]
+hitl = false
+risk = "medium"
+references = [
+  "_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#component-patterns",
+  "_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#accessibility-floor",
+]
+
+[[entry]]
+id = 12
+type = "story"
+title = "Refactor sweep"
+description = "Cleans up code across the epic, scoped when it starts from the build records and the review findings deferred during the epic, with no behavior change."
+verify = "All tests pass and no behavior changes."
+covers = ["E2-R1"]
+after = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 13
+type = "story"
+title = "End-to-end suite and release"
+description = "Adds an end-to-end suite run in CI on macOS, Windows and Linux that drives the packed package through the per-tab token, two workspaces, a permission card under the default caution level, a server restart with resume and a browser reopen, against the fake agent, then the user runs the live Claude Code checks with their existing login and tags the release through the epic 1 release workflow; the onboarding epic extends this suite."
+verify = "The suite passes on all three OSes and fails when the permission hold is removed, and the tagged ogden-agents version from npm passes the live Done when checks on the user's machine."
+covers = ["E2-R1", "E2-R2", "E2-R3", "E2-R5", "E2-R6", "E2-R9", "E2-R10"]
+after = [12, "1.10"]
+hitl = true
+risk = "medium"

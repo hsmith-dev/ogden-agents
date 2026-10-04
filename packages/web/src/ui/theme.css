@@ -1,0 +1,152 @@
+/*
+ * Tailwind 4 theme for the design system: maps the tokens in tokens.css to
+ * utilities, and removes Tailwind's default palette, fonts, radii, type
+ * scale and shadows so only DESIGN.md values can be used (AD-18).
+ */
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+@import './tokens.css';
+
+@theme inline {
+  --color-*: initial;
+  --font-*: initial;
+  --text-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --ease-*: initial;
+  --animate-*: initial;
+
+  --spacing: var(--space-1);
+
+  --default-transition-duration: var(--motion-fast);
+  --default-transition-timing-function: var(--motion-ease);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-signal: var(--signal);
+  --color-signal-foreground: var(--signal-foreground);
+  --color-signal-subtle: var(--signal-subtle);
+  --color-state-working: var(--state-working);
+  --color-state-working-subtle: var(--state-working-subtle);
+  --color-state-waiting: var(--state-waiting);
+  --color-state-idle: var(--state-idle);
+  --color-state-done: var(--state-done);
+  --color-state-error: var(--state-error);
+  --color-state-error-subtle: var(--state-error-subtle);
+  --color-terminal: var(--terminal);
+  --color-terminal-foreground: var(--terminal-foreground);
+
+  --font-sans: var(--family-sans);
+  --font-mono: var(--family-mono);
+
+  --text-display: var(--type-display-size);
+  --text-display--line-height: var(--type-display-line-height);
+  --text-display--font-weight: var(--type-display-weight);
+  --text-display--letter-spacing: var(--type-display-tracking);
+  --text-title: var(--type-title-size);
+  --text-title--line-height: var(--type-title-line-height);
+  --text-title--font-weight: var(--type-title-weight);
+  --text-title--letter-spacing: var(--type-title-tracking);
+  --text-heading: var(--type-heading-size);
+  --text-heading--line-height: var(--type-heading-line-height);
+  --text-heading--font-weight: var(--type-heading-weight);
+  --text-body: var(--body-size);
+  --text-body--line-height: var(--body-line-height);
+  --text-body--font-weight: var(--body-weight);
+  --text-label: var(--type-label-size);
+  --text-label--line-height: var(--type-label-line-height);
+  --text-label--font-weight: var(--type-label-weight);
+  --text-caption: var(--type-caption-size);
+  --text-caption--line-height: var(--type-caption-line-height);
+  --text-caption--font-weight: var(--type-caption-weight);
+  --text-mono: var(--mono-size);
+  --text-mono--line-height: var(--mono-line-height);
+  --text-mono--font-weight: var(--mono-weight);
+  --text-mono-compact: var(--type-mono-compact-size);
+  --text-mono-compact--line-height: var(--type-mono-compact-line-height);
+  --text-mono-compact--font-weight: var(--type-mono-compact-weight);
+
+  --radius-none: var(--rounded-none);
+  --radius-sm: var(--rounded-sm);
+  --radius-md: var(--rounded-md);
+  --radius-lg: var(--rounded-lg);
+  --radius-full: var(--rounded-full);
+
+  --shadow-float: var(--elevation-float);
+
+  --ease-standard: var(--motion-ease);
+
+  --animate-breathe: breathe var(--motion-breathe) ease-in-out infinite;
+
+  @keyframes breathe {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.4;
+    }
+  }
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border);
+  }
+
+  html {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--body-family);
+    font-size: var(--body-size);
+    line-height: var(--body-line-height);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--background);
+  }
+
+  :focus-visible {
+    outline: var(--focus-ring-width) solid var(--ring);
+    outline-offset: var(--focus-ring-offset);
+  }
+
+  code,
+  kbd,
+  pre,
+  samp {
+    font-family: var(--mono-family);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-breathe {
+    animation: none;
+  }
+}

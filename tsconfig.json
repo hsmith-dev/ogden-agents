@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "allowImportingTsExtensions": true,
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "bin/**/*.js",
+    "scripts/**/*.mjs",
+    "tests/**/*.ts",
+    "vitest.config.ts",
+    "playwright.config.ts"
+  ]
+}

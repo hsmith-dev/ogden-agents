@@ -1,0 +1,9 @@
+{
+  "name": "@agentclientprotocol/claude-agent-acp",
+  "version": "0.0.0-fixture",
+  "description": "A stand-in for the Claude Agent ACP adapter (story 9.3 tests): its dist/index.js, written when it is packed, runs the fake ACP agent.",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "files": ["dist"]
+}

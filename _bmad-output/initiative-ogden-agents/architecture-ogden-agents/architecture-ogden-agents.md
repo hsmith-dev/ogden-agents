@@ -54,6 +54,7 @@ graph LR
   - `packages/web` never imports `core`, `adapters` or `server`.
   - Note (story 2.3, 2026-09-30): two more core ports join the list: `AgentSetupPort` (installing and signing into an agent, onboarding epic) and `AppShortcutPort` (the OS app shortcut, E2-R10), because both are OS- or agent-specific. Until their adapters ship, the server wires in-memory stubs named `<port>-memory` (`setup-memory`, `secrets-memory`, `shortcut-memory`). No rule changes.
   - Note (epic 6, user-approved 2026-10-02): server wiring holds a registry of `AgentPort` and `AgentSetupPort` by `AgentId`, and core looks up a session's agent through it; the agent list is agent-neutral data, and each agent declares the permission modes it supports. Core and shared name no agent id, and an architecture test enforces it. The shared ACP client lives in `packages/adapters/src/acp-base`; adapter naming stays `<port>-<variant>` (`acp-claude-code`, `acp-antigravity`, `setup-antigravity`). Built whatever epic 6's Antigravity spike decides; only `acp-antigravity` and `setup-antigravity` depend on a go (user, 2026-10-02). No rule changes.
+  - Note (epic 12, user-approved 2026-10-04): Codex (`acp-codex`, `setup-codex`) and Grok (`acp-grok`, `setup-grok`) are v1.1 chat agents, each a descriptor plus quirks on `acp-base`. The quirks gain, agent-neutrally: `authenticate` at start, Deny chosen by option id when several are `reject_once`, a permission mode fixed at chat start and given in `_meta`, and a launch that receives the chat's mode and protected paths. An agent's own config folders come from its descriptor, so core still names no agent. No rule changes.
 
 ### AD-2 — Workspace is the top-level scope
 
@@ -212,6 +213,7 @@ graph LR
   - API keys go through `SecretStorePort`: the OS keychain (`@napi-rs/keyring`); where no keychain exists, saving a key is refused with a plain reason and subscription sign-in remains.
   - Adapters redact secrets before emitting events.
   - Note (epic 6, user-approved 2026-10-02): each agent's API key is `agent-api-key/<agentId>` (Antigravity: `agent-api-key/antigravity`) and reaches only that agent's process; log redaction covers each supported provider's key format. Antigravity keeps its own sign-in under `~/.gemini/antigravity-acp/`, which Ogden never reads or writes. Ogden offers Antigravity's Google sign-in and the Gemini API key; the user accepted that Google's current terms call third-party use of Antigravity OAuth a breach (account risk; user, 2026-10-02). Antigravity is installed as a pinned copy in the data folder (registry archive checked against Ogden's SHA-256), an existing copy is used only when it matches the pin, and nothing is installed globally. No rule changes.
+  - Note (epic 12, user-approved 2026-10-04): Codex keeps its sign-in in the OS keychain where Codex supports it, else in a plain `auth.json` in `CODEX_HOME` inside the data folder, shown to the user as a known limitation and removed on sign-out; Grok's token lives in `GROK_HOME` inside the data folder. Ogden never reads either. Keys: `agent-api-key/codex`, `agent-api-key/grok`. No rule changes.
 
 ### AD-17 — Unattended runs are contained
 
@@ -261,6 +263,7 @@ graph LR
   - Every CLI step a standard flow needs, including installing `uv`, installing or signing into agent CLIs, running BMAD setup, and applying a saved patch, is run by the server and shown in the UI with progress and errors.
   - The terminal toggle (AD-6) is only for advanced users and is never required.
   - Note (epic 10, 2026-10-01): a project with BMad off needs no `uv`; turning on a piece that needs BMad installed runs setup through the server (epic 4). No rule changes.
+  - Note (epic 12, user-approved 2026-10-04): Grok is installed by downloading the pinned npm package and decompressing and SHA-256-checking its binary in the data folder; npm's launcher and postinstall never run. Codex's plugins download at start is asked once per install and changeable in Settings. No rule changes.
 
 ### AD-22 — BMad Method is opt-in per workspace
 
@@ -274,6 +277,7 @@ graph LR
   - The default pieces for new projects are an install-level preference kept by core in the data directory; it starts empty (Simple).
   - The install reports which pieces it ships; a piece is turned on only when available, and one not yet shipped is shown disabled as coming soon. AD-22 (the user's choice) and AD-14 (the project's installed capabilities) both gate a surface: it shows only when its piece is on, and then shows the reduced-mode notice if a capability is missing.
   - Developer mode and the terminal toggle (AD-6) are independent of the pieces.
+  - Note (epic 12, user-approved 2026-10-04): the per-project trust (4.2) also gates agents that run the project's own settings, hooks and MCP servers (Grok, descriptor `needsProjectTrust`). One trust covers the board's scripts and such agents; as 4.13 does for scripts, it is bound to the trusted files' contents and asked again when they change. No rule changes.
 
 ## Consistency Conventions
 

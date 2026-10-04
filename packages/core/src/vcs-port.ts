@@ -1,6 +1,6 @@
 /**
- * The version control port (AD-1, AD-17; story 5.2's tracer, the minimal
- * shape 5.3 freezes): a run's own worktree on its own branch, created in
+ * The version control port (AD-1, AD-17; story 5.2's tracer, completed and
+ * frozen by story 5.3 for 5.5, 5.9 and 11.1): a run's own worktree on its own branch, created in
  * Ogden Agents' data folder (never in the repo), what changed in a checkout,
  * a branch's diff, and approve's local merge. Core names no VCS here; the
  * `vcs-git` adapter does. No operation ever pushes, forces or runs a repo's
@@ -10,6 +10,7 @@
  * revision and path passed is core's own (validated before use), never
  * request input.
  */
+import type { DiffStats } from '@ogden-agents/shared';
 import { CoreError } from './errors.js';
 
 /** The main checkout's current branch and its commit. */
@@ -85,6 +86,22 @@ export interface VcsPort {
   add(repoPath: string, paths: readonly string[]): Promise<void>;
   /** Commits what is staged (the merge in progress) with `message`. */
   commit(repoPath: string, message: string): Promise<void>;
+  /** `branch`'s diff size since `base` (story 5.3; the review page's "N files"). */
+  diffStats(repoPath: string, base: string, branch: string): Promise<DiffStats>;
+  /** Whether `path` is one of the repository's worktrees now (story 5.3; restart recovery and cleanup, 5.5 and 5.8). */
+  worktreeExists(repoPath: string, path: string): Promise<boolean>;
+  /**
+   * Rebases the worktree's branch onto commit `onto` (Update and retry after
+   * a merge conflict; 5.9). `conflict` leaves the worktree as it was (the
+   * rebase aborted); never forces anything outside the worktree's branch.
+   */
+  rebase(worktreePath: string, onto: string): Promise<'rebased' | 'conflict'>;
+  /**
+   * Applies the patch file `patchPath` (absolute; an intent gap's saved fix)
+   * to the worktree's files, all or nothing (11.1). `refused` when it doesn't
+   * apply cleanly or names a path outside the worktree; nothing changed then.
+   */
+  applyPatch(worktreePath: string, patchPath: string): Promise<'applied' | 'refused'>;
 }
 
 /** A git operation failed; `message` is plain words, `details` are for the log and hold no secret. */

@@ -103,6 +103,16 @@
 //                  files in <dir> if git ever ran them; then commits it all on
 //                  the run's branch (its own commit runs no hook) and replies
 //                  "Built <ref>." (or "Blocked <ref>.").
+//                  Story 5.3's switches for epics 5 and 11's lanes:
+//                  FAKE_ACP_BUILD_HALT=<blocking condition> blocks the plan
+//                  with that `blocked_reason`, as the skill's HALT writes it
+//                  (an `intent gap` also saves `<plan>.patch` beside the plan,
+//                  a patch adding src/fix-<ref>.txt, and leaves no code
+//                  change); FAKE_ACP_BUILD_FAIL_TESTS=1 also writes
+//                  `.fake-tests-fail`, so the fixture's test command
+//                  (tests/fixtures/fake-test-command.mjs) fails 3 tests;
+//                  FAKE_ACP_BUILD_DELAY_MS=<n> waits n ms before finishing
+//                  (a time limit to hit).
 //   "plan-exit"    asks permission to leave plan mode with the real adapter's
 //                  options (mode-raising ones as `allow_always`, "manually
 //                  approve" as `allow_once`); replies `chose=<option id>`
@@ -729,11 +739,22 @@ async function runPrompt(params, client, session) {
         }
       };
       if (existsSync(join(cwd, '_bmad-output'))) visit(join(cwd, '_bmad-output'));
-      const blocked = process.env.FAKE_ACP_BUILD_OUTCOME === 'blocked';
+      const halt = process.env.FAKE_ACP_BUILD_HALT;
+      const blocked = process.env.FAKE_ACP_BUILD_OUTCOME === 'blocked' || (halt !== undefined && halt !== '');
+      const reason = halt !== undefined && halt !== '' ? halt : 'The fake agent was told to block.';
+      const delay = Number(process.env.FAKE_ACP_BUILD_DELAY_MS ?? '0');
+      if (delay > 0) await new Promise((done) => setTimeout(done, delay));
+      if (process.env.FAKE_ACP_BUILD_FAIL_TESTS === '1') writeFileSync(join(cwd, '.fake-tests-fail'), 'fail\n');
       for (const plan of plans) {
         const before = readFileSync(plan, 'utf8');
-        const status = blocked ? 'status: blocked\nblocked_reason: "The fake agent was told to block."' : 'status: built';
+        const status = blocked ? `status: blocked\nblocked_reason: ${JSON.stringify(reason)}` : 'status: built';
         writeFileSync(plan, before.replace(/^status:.*$/m, status));
+        if (blocked && reason.startsWith('intent gap')) {
+          // As the skill's intent-gap HALT: the attempted change saved as a patch beside the plan, the code reverted.
+          rmSync(inside, { force: true });
+          const file = `src/fix-${ref}.txt`;
+          writeFileSync(plan.replace(/\.md$/, '.patch'), `diff --git a/${file} b/${file}\nnew file mode 100644\n--- /dev/null\n+++ b/${file}\n@@ -0,0 +1 @@\n+Fixed ${ref} by the saved patch.\n`);
+        }
       }
       const hooks = process.env.FAKE_ACP_BUILD_HOOKS;
       if (hooks) {

@@ -37,6 +37,7 @@ import { isServerPath } from './paths.js';
 import { registerPermissionRoutes } from './permission-routes.js';
 import { registerPlanningRoutes } from './planning-routes.js';
 import { registerBuildRoutes } from './build-routes.js';
+import { registerRunSettingsRoutes } from './run-settings-routes.js';
 import { registerSettingsRoutes } from './settings-routes.js';
 import { registerShortcutRoutes } from './shortcut-routes.js';
 import type { TerminalAvailabilityCheck } from './terminal-availability.js';
@@ -267,6 +268,8 @@ export function createApp({
   // Unattended builds (story 5.2): the same helper, guard and trust.
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerBuildRoutes(app, { bmad, scriptTrust: bmadScriptTrust, builds, log });
   registerSettingsRoutes(app, { installSettings, newProjectDefaults, log });
+  // The install's run limits and notification settings (story 5.3; 5.8 and 11.4 fill them): the gate, never a piece's guard.
+  registerRunSettingsRoutes(app);
 
   registerEventSocket(app, { events, log, tabs });
   // A session's terminal (story 3.1): behind the same gate as `/ws`.

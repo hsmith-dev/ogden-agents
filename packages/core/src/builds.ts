@@ -51,6 +51,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import {
+  ALL_READY_NOT_AVAILABLE_MESSAGE,
   ALREADY_MERGED_MESSAGE,
   ApproveBuildRequest,
   BMAD_FILES_UNCOMMITTED_MESSAGE,
@@ -78,8 +79,11 @@ import {
   SANDBOX_UNAVAILABLE_MESSAGE,
   StartBuildRequest,
   TICKET_REF_PATTERN,
+  UNKNOWN_BUILD_AGENT_MESSAGE,
   VCS_NOT_TOP_LEVEL_MESSAGE,
   VCS_UNAVAILABLE_MESSAGE,
+  type BlockedCode,
+  type BuildAgent,
   type ReviewResponse,
   type Run,
   type Session,
@@ -96,7 +100,7 @@ import type { BuildRunnerPort } from './build-runner-port.js';
 import type { BuildSessions } from './build-sessions.js';
 import type { Chat } from './chat/types.js';
 import type { Entities } from './entities.js';
-import { BuildRefusedError, NotFoundError, ScriptsChangedError, ValidationError } from './errors.js';
+import { BuildRefusedError, NotFoundError, NotImplementedError, ScriptsChangedError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import { isProtectedSegment, PROTECTED_PATHS } from './permission-matching.js';
 import { workspaceRepoPath } from './planning.js';
@@ -146,7 +150,7 @@ export interface BuildsDeps {
   bmad: Pick<BmadFeatures, 'requireBmadFeature'>;
   trust: Pick<BmadScriptTrust, 'requireScriptsTrusted' | 'requireScriptsUnchanged' | 'requireScriptsMatch'>;
   source: Pick<BmadSourceUseCases, 'requireReady'>;
-  entities: Pick<Entities, 'getWorkspace' | 'getSession' | 'createRun' | 'getRun' | 'getRunBySession' | 'latestRunForTicket' | 'activeRunForTicket' | 'setRunOutcome'>;
+  entities: Pick<Entities, 'getWorkspace' | 'getSession' | 'createRun' | 'getRun' | 'getRunBySession' | 'latestRunForTicket' | 'activeRunForTicket' | 'setRunOutcome' | 'setRunDecision'>;
   events: Pick<EventLog, 'subscribe' | 'lastSeq'>;
   tickets: TicketStorePort;
   vcs: VcsPort;
@@ -275,9 +279,9 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     return { sandbox: { kind, writableRoots: [worktreePath, ...gitWritable], deniedPaths, deniedReads, allowedReads: [worktreePath] }, gitWritable };
   };
 
-  const startLocked = async (workspaceId: WorkspaceId, repoPath: string, ref: string): Promise<{ run: Run; session: Session }> => {
+  const startLocked = async (workspaceId: WorkspaceId, repoPath: string, ref: string, agent: BuildAgent): Promise<{ run: Run; session: Session }> => {
     // Fail closed: never an unsandboxed unattended run (user decision 2026-10-04); the sandbox says why.
-    const check = await sandbox.check();
+    const check = await sandbox.check({ agent });
     if (!check.available) throw new BuildRefusedError('sandbox_unavailable', `${SANDBOX_UNAVAILABLE_MESSAGE} ${check.reason}`.trim());
     if (entities.activeRunForTicket(workspaceId, ref) !== undefined) throw new BuildRefusedError('run_active', RUN_ACTIVE_MESSAGE);
     const ticket = await tickets.find(repoPath, ref);
@@ -313,8 +317,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       }
       for (const folder of PRECREATED_FOLDERS) mkdirSync(join(real, folder), { recursive: true });
       const { sandbox: contained, gitWritable } = await sandboxFor(check.kind, real, branch);
-      session = await chat.createChatSession(workspaceId, { kind: 'build', agentId: runner.agentId });
-      run = entities.createRun({ sessionId: session.id, ticketRef: ref, worktreePath: real, sandbox: check.kind, branch, baseRevision: head.revision });
+      session = await chat.createChatSession(workspaceId, { kind: 'build', agentId: runner.agent });
+      run = entities.createRun({ sessionId: session.id, ticketRef: ref, worktreePath: real, sandbox: check.kind, branch, baseRevision: head.revision, agent });
       const scope = { worktree: real, gitWritable, protectedPaths: PROTECTED_PATHS };
       buildSessions.set(session.id, { cwd: real, sandbox: contained, decide: (request) => decideBuildPermission(request, scope, paths) });
       chat.sendMessage(workspaceId, session.id, runner.invocation(ref), { build: true });
@@ -345,6 +349,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     }
     let outcome: 'verified' | 'failed' | 'blocked';
     let reason: string | null = null;
+    let blockedCode: BlockedCode | null = null;
     try {
       // The agent may have edited the worktree's scripts: they must be the trusted ones before `tickets.py` runs there.
       await trust.requireScriptsMatch(run.workspaceId, run.worktreePath);
@@ -362,6 +367,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       } else if (status === 'blocked') {
         outcome = 'blocked';
         const said = ticket.blocked_reason === null || ticket.blocked_reason.trim() === '' ? RUN_REASON_NOT_BUILT(status) : ticket.blocked_reason;
+        // The halt's code is the runner's to say (AD-12; story 5.3): core never reads the skill's words.
+        blockedCode = runner.blockedCode(ticket.blocked_reason ?? '');
         reason = `${said} ${RUN_REASON_NO_NETWORK}`;
       } else {
         outcome = 'failed';
@@ -376,7 +383,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     await chat.releaseAgent(run.workspaceId, run.sessionId).catch((error: unknown) => report(run.id, 'release', error));
     // Only a run still running gets an outcome here: a Reject meanwhile stands.
     if (entities.getRunBySession(run.sessionId)?.outcome !== 'running') return;
-    entities.setRunOutcome(run.id, outcome, reason === null ? null : mask(reason));
+    entities.setRunOutcome(run.id, outcome, reason === null ? null : mask(reason), { blockedCode });
   };
 
   const deciding = new Set<Promise<void>>();
@@ -397,7 +404,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
 
   /** The workspace's latest run of `ref`, as the review page shows it. */
   const reviewOf = async (repoPath: string, run: Run): Promise<ReviewResponse> => {
-    const base = { run, outcome: run.outcome, reason: run.reason };
+    // The summary, verification, findings and diff stats are 5.8's and 5.9's (story 5.3 froze them).
+    const base = { run, outcome: run.outcome, reason: run.reason, summary: null, verification: null, findings: [], diffStats: null };
     if (run.branch === null || run.baseRevision === null || !isBuildBranch(run.branch)) return { ...base, diff: '', truncated: false, files: [], merged: false, headRevision: null };
     const headRevision = (await vcs.branchRevision(repoPath, run.branch)) ?? null;
     if (headRevision === null) return { ...base, diff: '', truncated: false, files: [], merged: false, headRevision };
@@ -435,8 +443,13 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         const issue = parsed.error.issues[0];
         throw new ValidationError(issue?.message ?? 'Name one ticket to build.', parsed.error.issues.map((each) => ({ path: each.path, message: each.message })));
       }
+      // Every ready ticket is 5.8's dispatcher (story 5.3 froze the request).
+      if (!('ref' in parsed.data)) throw new NotImplementedError(ALL_READY_NOT_AVAILABLE_MESSAGE);
       const ref = checkedRef(parsed.data.ref);
-      return serializedByRepo(repoPath, () => startLocked(workspaceId, repoPath, ref));
+      // Each agent builds through its own runner (epic 6 adds runners, not core); v1 has Claude Code's.
+      const agent = parsed.data.agent;
+      if (agent !== runner.agent) throw new ValidationError(UNKNOWN_BUILD_AGENT_MESSAGE, [{ path: ['agent'], message: UNKNOWN_BUILD_AGENT_MESSAGE }]);
+      return serializedByRepo(repoPath, () => startLocked(workspaceId, repoPath, ref, agent));
     },
 
     async review(workspaceId, ref) {
@@ -463,7 +476,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         await chat.releaseAgent(workspaceId, run.sessionId).catch((error: unknown) => report(run.id, 'release', error));
         const merged = await vcs.merge(repoPath, reviewed);
         if (merged === 'conflict') {
-          entities.setRunOutcome(run.id, 'blocked', MERGE_CONFLICT_MESSAGE);
+          entities.setRunOutcome(run.id, 'blocked', MERGE_CONFLICT_MESSAGE, { blockedCode: 'merge_conflict' });
           throw new BuildRefusedError('merge_conflict', MERGE_CONFLICT_MESSAGE);
         }
         // Git refused for another reason (an untracked or ignored file in the way): nothing merged, the run stays verified.
@@ -483,6 +496,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
           await vcs.abortMerge(repoPath).catch((abort: unknown) => report(run.id, 'abort', abort));
           throw error;
         }
+        const mergeRevision = (await vcs.head(repoPath).catch(() => undefined))?.revision;
+        entities.setRunDecision(run.id, 'approved', mergeRevision);
         await retire(repoPath, run).catch((error: unknown) => report(run.id, 'retire', error));
         return reviewOf(repoPath, entities.getRunBySession(run.sessionId) ?? run);
       });
@@ -499,8 +514,9 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
           throw new BuildRefusedError('checks_failed', ALREADY_MERGED_MESSAGE);
         }
         await retire(repoPath, run);
-        const stopped = entities.setRunOutcome(run.id, 'stopped', run.reason);
-        return reviewOf(repoPath, stopped);
+        entities.setRunOutcome(run.id, 'stopped', run.reason);
+        const rejected = entities.setRunDecision(run.id, 'rejected');
+        return reviewOf(repoPath, rejected);
       });
     },
 

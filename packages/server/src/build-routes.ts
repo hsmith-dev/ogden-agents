@@ -18,11 +18,20 @@
  * - `POST …/builds/:ref/reject` → `ReviewResponse`; 409 `run_active`, `checks_failed`.
  * - `GET …/sessions/:sesId/run` → `SessionRunResponse`: a `build` session's run; 404 otherwise.
  *
+ * Story 5.3 pre-registers the rest of epics 5 and 11, each behind the same
+ * guard and trust, answering 501 `not_implemented` (no body read) until its
+ * lane: `GET …/runs` and `GET …/runs/:runId` (11.1), `POST …/runs/:runId/stop`
+ * and `…/retry` (5.8, 5.9, 11.1), `…/check-again` (11.2), and `GET` and
+ * `PATCH …/build-settings` (5.8, 11.2). `POST …/builds` with `{ all: true }`
+ * answers 501 until 5.8. A build's live activity is its session's events on
+ * the existing `/ws` workspace subscription: no run socket exists.
+ *
  * Without the use-cases each answers 501 once the guards have passed. A
  * failure of git answers 500 with a plain message (never git's output).
  */
 import {
   BuildRefusedError,
+  NotImplementedError,
   TicketsUnavailableError,
   ValidationError,
   VcsError,
@@ -60,6 +69,7 @@ export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, log 
       return apiError(c, 409, error.code, error.message);
     }
     if (error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);
+    if (error instanceof NotImplementedError) return apiError(c, 501, 'not_implemented', error.message);
     if (error instanceof TicketsUnavailableError) {
       log.warn('tickets unavailable', { workspaceId, reason: error.reason });
       if (error.reason === 'not_downloaded') return apiError(c, 409, 'bmad_not_downloaded', BMAD_NOT_DOWNLOADED_MESSAGE);
@@ -138,6 +148,16 @@ export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, log 
       return refused(c, workspaceId, error);
     }
   });
+
+  // Story 5.3: every other route of epics 5 and 11, guarded and trusted, 501 until its lane fills it.
+  const notYet = (c: Context): Response => notImplemented(c);
+  routes.get('builds', API_ROUTES.workspaceRuns, notYet);
+  routes.get('builds', API_ROUTES.workspaceRun, notYet);
+  routes.post('builds', API_ROUTES.runStop, notYet);
+  routes.post('builds', API_ROUTES.runRetry, notYet);
+  routes.post('builds', API_ROUTES.runCheckAgain, notYet);
+  routes.get('builds', API_ROUTES.workspaceBuildSettings, notYet);
+  routes.patch('builds', API_ROUTES.workspaceBuildSettings, notYet);
 
   routes.get('builds', API_ROUTES.sessionRun, async (c, { workspaceId }) => {
     if (builds === undefined) return notImplemented(c);

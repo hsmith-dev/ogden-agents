@@ -327,7 +327,8 @@ export const API_ROUTES = {
   workspaceDocument: `${API_BASE}/workspaces/:wsId/documents`,
   /**
    * `POST StartBuildRequest` → 201 `BuildResponse` (story 5.2): builds one
-   * ticket unattended in its own worktree and `build` session. Serves the
+   * ticket unattended in its own worktree and `build` session; `{ all: true }`
+   * → 202 `AllReadyBuildsResponse` (5.8; 501 until then). Serves the
    * `builds` piece (guarded, trust). 409 `prerequisite_unmet`, `not_ready`,
    * `run_active`, `sandbox_unavailable`, `plan_uncommitted`,
    * `vcs_unavailable`; nothing is written then.
@@ -342,10 +343,50 @@ export const API_ROUTES = {
    * checkout is unchanged).
    */
   workspaceBuildApprove: `${API_BASE}/workspaces/:wsId/builds/:ref/approve`,
-  /** `POST` → `ReviewResponse` (story 5.2): Reject. Removes the run's worktree (its branch stays) and stops it. */
+  /** `POST RejectBuildRequest` → `ReviewResponse` (story 5.2; 5.9 adds the note and the retry): Reject. Removes the run's worktree (its branch stays) and stops it. */
   workspaceBuildReject: `${API_BASE}/workspaces/:wsId/builds/:ref/reject`,
   /** `GET` → `SessionRunResponse` (story 5.2): the run of a `build` session; 404 for one without a run. */
   sessionRun: `${API_BASE}/workspaces/:wsId/sessions/:sesId/run`,
+  // Pre-registered by story 5.3 for epics 5 and 11: each serves `builds`
+  // (guarded, trust) and answers 501 `not_implemented` until its lane.
+  /** `GET` → `RunsResponse` (11.1, the Runs tab): every run of the workspace and its queue. */
+  workspaceRuns: `${API_BASE}/workspaces/:wsId/runs`,
+  /** `GET` → `RunResponse` (11.1, the run view); 404 for another workspace's run. */
+  workspaceRun: `${API_BASE}/workspaces/:wsId/runs/:runId`,
+  /** `POST StopRunRequest` → `RunResponse` (5.8): Stop. 409 `run_not_active`. */
+  runStop: `${API_BASE}/workspaces/:wsId/runs/:runId/stop`,
+  /**
+   * `POST RetryRunRequest` → `RunResponse` (5.8 `resume`, 5.9 `rebase`, 11.1
+   * `apply_fix`): runs a blocked or failed run's ticket again in its
+   * worktree. 409 `run_active`, `run_not_active`.
+   */
+  runRetry: `${API_BASE}/workspaces/:wsId/runs/:runId/retry`,
+  /** `POST CheckAgainRequest` → `RunResponse` (11.2): re-runs the run's verification. 409 `run_active`. */
+  runCheckAgain: `${API_BASE}/workspaces/:wsId/runs/:runId/check-again`,
+  /**
+   * `GET` → `WorkspaceBuildSettingsResponse`; `PATCH
+   * UpdateWorkspaceBuildSettingsRequest` (5.8 the limit, 11.2 the test
+   * command): the project's build settings, behind the `builds` piece.
+   */
+  workspaceBuildSettings: `${API_BASE}/workspaces/:wsId/build-settings`,
+  /**
+   * `GET` → `RunLimitSettingsResponse`; `PATCH UpdateRunLimitSettingsRequest`
+   * (5.8): the install's limits (builds at a time, time limit). Install-level,
+   * not a piece's (no workspace); 501 until 5.8.
+   */
+  runLimits: `${API_BASE}/settings/run-limits`,
+  /**
+   * `GET` → `NotificationSettingsResponse`; `PATCH
+   * UpdateNotificationSettingsRequest` (11.4): app-wide, never piece-guarded
+   * (E11-R1). A webhook's URL is never answered, only its host.
+   */
+  notificationSettings: `${API_BASE}/settings/notifications`,
+  /** `POST AddWebhookRequest` → 201 `NotificationSettingsResponse` (11.4): the URL goes to `SecretStorePort` (AD-16). */
+  notificationWebhooks: `${API_BASE}/settings/notifications/webhooks`,
+  /** `PATCH UpdateWebhookRequest` → `NotificationSettingsResponse`; `DELETE` → 204 (11.4). */
+  notificationWebhook: `${API_BASE}/settings/notifications/webhooks/:webhookId`,
+  /** `POST` → `WebhookTestResult` (11.4): Send test, with the HTTP result inline. */
+  notificationWebhookTest: `${API_BASE}/settings/notifications/webhooks/:webhookId/test`,
 } as const;
 
 /**

@@ -515,7 +515,7 @@ export class TerminalHandoffError extends CoreError {
   }
 }
 
-/** Why a build use-case refused (story 5.2; 5.3 freezes them): each answers 409 with its code, and nothing was written. */
+/** Why a build use-case refused (story 5.2; frozen by 5.3): each answers 409 with its code, and nothing was written. */
 export type BuildRefusalCode =
   | 'prerequisite_unmet'
   | 'not_ready'
@@ -525,7 +525,20 @@ export type BuildRefusalCode =
   | 'merge_conflict'
   | 'checks_failed'
   | 'plan_uncommitted'
-  | 'vcs_unavailable';
+  | 'vcs_unavailable'
+  | 'run_not_active';
+
+/**
+ * A use-case whose lane has not shipped yet was asked for (story 5.3: such
+ * as building every ready ticket before 5.8). The server answers 501
+ * `not_implemented`; nothing was written.
+ */
+export class NotImplementedError extends CoreError {
+  override readonly name = 'NotImplementedError';
+  constructor(message: string) {
+    super('not_implemented', message);
+  }
+}
 
 /**
  * A build, approve or reject was refused (story 5.2): `code` says why for

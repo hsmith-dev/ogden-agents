@@ -1,6 +1,7 @@
 /**
- * `vcs-git` (story 5.2's tracer, minimal; 5.5 completes it): core's
- * `VcsPort` on the user's own `git`.
+ * `vcs-git` (story 5.2's tracer; story 5.3 adds diff stats, worktree
+ * lookup, rebase and patch apply; 5.5 completes it): core's `VcsPort` on
+ * the user's own `git`.
  *
  * Every call runs `git` through `execFile` with an argument array (never a
  * shell), with:
@@ -304,6 +305,60 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
     async commit(repoPath, message) {
       checkPath(repoPath);
       await must(repoPath, [...(await identity(repoPath)), 'commit', '--no-verify', '--no-edit', '-m', message], 'commit the merge');
+    },
+
+    async diffStats(repoPath, base, branch) {
+      checkPath(repoPath);
+      const out = await must(repoPath, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--numstat', '-z', checkRevision(base), `refs/heads/${checkBranch(branch)}`, '--'], 'read the changes');
+      let files = 0;
+      let insertions = 0;
+      let deletions = 0;
+      // `<added>\t<deleted>\t<path>` per file, NUL-terminated; a binary file counts `-` for both.
+      for (const entry of out.split('\0')) {
+        const match = /^(\d+|-)\t(\d+|-)\t/.exec(entry);
+        if (match === null) continue;
+        files++;
+        if (match[1] !== '-') insertions += Number(match[1]);
+        if (match[2] !== '-') deletions += Number(match[2]);
+      }
+      return { files, insertions, deletions };
+    },
+
+    async worktreeExists(repoPath, path) {
+      checkPath(repoPath);
+      checkPath(path);
+      if (!existsSync(path)) return false;
+      const out = await run(repoPath, ['worktree', 'list', '--porcelain', '-z']);
+      if (out.code !== 0) return false;
+      const real = (dir: string): string => {
+        try {
+          return realpathSync.native(dir);
+        } catch {
+          return resolve(dir);
+        }
+      };
+      const wanted = real(path);
+      return out.stdout.split('\0').some((line) => line.startsWith('worktree ') && real(line.slice('worktree '.length)) === wanted);
+    },
+
+    async rebase(worktreePath, onto) {
+      checkPath(worktreePath);
+      const commit = checkRevision(onto);
+      const result = await run(worktreePath, [...(await identity(worktreePath)), 'rebase', '--no-autostash', '--no-verify', commit]);
+      if (result.code === 0) return 'rebased';
+      // Whatever stopped it, the worktree goes back to how it was before.
+      if ((await gitPathExists(worktreePath, 'rebase-merge')) || (await gitPathExists(worktreePath, 'rebase-apply'))) await must(worktreePath, ['rebase', '--abort'], 'abort the rebase');
+      return 'conflict';
+    },
+
+    async applyPatch(worktreePath, patchPath) {
+      checkPath(worktreePath);
+      checkPath(patchPath);
+      // All or nothing, and never a path outside the worktree (git refuses those without --unsafe-paths).
+      const check = await run(worktreePath, ['apply', '--check', '--whitespace=nowarn', patchPath]);
+      if (check.code !== 0) return 'refused';
+      const applied = await run(worktreePath, ['apply', '--whitespace=nowarn', patchPath]);
+      return applied.code === 0 ? 'applied' : 'refused';
     },
   };
 }

@@ -6,13 +6,20 @@
  * none. Without one the build is refused (`sandbox_unavailable`), never run
  * unsandboxed (user decision 2026-10-04). Only finds programs; runs nothing.
  *
- * `createFixedSandbox` is the in-memory stand-in for tests (and the
- * `OGDEN_AGENTS_TEST_SANDBOX` hook: CI's ubuntu runners have no working
+ * Without one, the answer carries the Build dialog's choices (story 5.3):
+ * on Windows, Build with me watching first (user decision 2026-10-01).
+ * `createFixedSandbox` (`sandbox-memory`) is the stand-in for tests and the
+ * `OGDEN_AGENTS_TEST_SANDBOX` hook (CI's ubuntu runners have no working
  * bwrap, spike 5.1).
  */
 import { accessSync, constants, statSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
 import type { SandboxCheck, SandboxPort } from '@ogden-agents/core';
+import type { SandboxChoice } from '@ogden-agents/shared';
+
+/** The Build dialog's choices without a sandbox: Windows offers building with you watching first. */
+const CHOICES: readonly SandboxChoice[] = ['install_docker', 'attended', 'other_agent'];
+const WINDOWS_CHOICES: readonly SandboxChoice[] = ['attended', 'install_docker', 'other_agent'];
 
 /** Why there is no sandbox, in plain words (EXPERIENCE.md Sandbox unavailable). */
 export const NO_SANDBOX_ON_WINDOWS = "Claude Code has no sandbox of its own on Windows, so it can't build unattended here.";
@@ -48,19 +55,15 @@ export function createClaudeNativeSandbox(options: NativeSandboxOptions = {}): S
     return dirs.some((dir) => isExecutable(rules.join(dir, name)));
   };
   return {
+    // Claude Code's own sandbox: the only agent in v1 (epic 6 adds the others' adapters).
     async check(): Promise<SandboxCheck> {
       try {
-        if (platform === 'darwin') return isExecutable('/usr/bin/sandbox-exec') ? { available: true, kind: 'seatbelt' } : { available: false, reason: NO_SEATBELT };
-        if (platform === 'linux') return onPath('bwrap') && onPath('socat') ? { available: true, kind: 'bubblewrap' } : { available: false, reason: NO_BUBBLEWRAP };
-        return { available: false, reason: NO_SANDBOX_ON_WINDOWS };
+        if (platform === 'darwin') return isExecutable('/usr/bin/sandbox-exec') ? { available: true, kind: 'seatbelt' } : { available: false, reason: NO_SEATBELT, choices: CHOICES };
+        if (platform === 'linux') return onPath('bwrap') && onPath('socat') ? { available: true, kind: 'bubblewrap' } : { available: false, reason: NO_BUBBLEWRAP, choices: CHOICES };
+        return { available: false, reason: NO_SANDBOX_ON_WINDOWS, choices: WINDOWS_CHOICES };
       } catch {
-        return { available: false, reason: platform === 'linux' ? NO_BUBBLEWRAP : NO_SEATBELT };
+        return { available: false, reason: platform === 'linux' ? NO_BUBBLEWRAP : NO_SEATBELT, choices: CHOICES };
       }
     },
   };
-}
-
-/** A sandbox port that always answers `check` (tests and the test hook). */
-export function createFixedSandbox(check: SandboxCheck): SandboxPort {
-  return { check: async () => check };
 }

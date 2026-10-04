@@ -48,6 +48,7 @@ export * from './planning.js';
 export * from './planning-documents.js';
 export * from './repo-serialization.js';
 export * from './resume-prime.js';
+export * from './notifier-port.js';
 export * from './sandbox-port.js';
 export * from './secret-store-port.js';
 export * from './session-events.js';

@@ -2,7 +2,8 @@
  * The server's Unattended builds wiring (story 5.2): git (`vcs-git`, with an
  * empty hooks folder of Ogden Agents' own), the sandbox check (Claude Code's
  * native sandbox, or a test's answer), the build runner (`buildrunner-acp`)
- * and core's builds use-cases over the chat and the ticket store.
+ * and core's builds use-cases over the chat and the ticket store. Each port
+ * is a wiring slot a test (or a later lane) fills through `StartOptions`.
  */
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -50,7 +51,7 @@ export function createBuildsWiring({
     tickets,
     vcs,
     sandbox,
-    runner: createAcpBuildRunner(),
+    runner: options.buildRunner ?? createAcpBuildRunner(),
     chat,
     buildSessions: core.buildSessions,
     dataDir,

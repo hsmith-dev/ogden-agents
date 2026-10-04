@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AgentId } from './events-common.js';
+import { BlockedCode, BuildAgent, DEFAULT_BUILD_AGENT, RunDecision } from './build-runs.js';
 import { RunId, SessionId, WorkspaceId } from './ids.js';
 import { IsoUtcTimestamp } from './time.js';
 
@@ -160,16 +161,26 @@ export const Run = z.object({
   sessionId: SessionId,
   workspaceId: WorkspaceId,
   ticketRef: TicketRef,
+  /** The run's worktree, in Ogden Agents' data folder, never in the repo (AD-17). */
   worktreePath: z.string().nullable(),
+  /** The sandbox it ran in: a `SandboxKind`, `attended` for a build with the user watching (a test sandbox records `test`). */
   sandbox: z.string().nullable(),
   deadline: IsoUtcTimestamp.nullable(),
   outcome: RunOutcome,
-  /** The run's own branch (`ogden/<ref>-<slug>`; story 5.2). `null` in runs from before it. */
+  /** The run's own branch (`ogden/<run8>/<ref>-<slug>`; story 5.2). `null` in runs from before it. */
   branch: z.string().nullable().default(null),
   /** The commit the run's branch started from (story 5.2): its diff is against it. `null` in runs from before it. */
   baseRevision: z.string().nullable().default(null),
   /** Why the run ended as it did, in plain words (a blocked or failed run's reason; story 5.2). Never a secret. */
   reason: z.string().nullable().default(null),
+  /** The agent that builds (story 5.3): Claude Code only in v1, so epic 6 adds adapters only. Runs from before it read as Claude Code. */
+  agent: BuildAgent.default(DEFAULT_BUILD_AGENT),
+  /** Why a `blocked` run is blocked (story 5.3; Ogden Agents' code, its sentence from `blockedSentence`), else `null`. */
+  blockedCode: BlockedCode.nullable().default(null),
+  /** Where a waiting run is in its workspace's queue (1 is next; story 5.3, filled by 5.8), `null` once dispatched. */
+  queuePosition: z.number().int().positive().nullable().default(null),
+  /** What the user decided on the review page (story 5.3): `approved` (merged) or `rejected`, else `null`. */
+  decision: RunDecision.nullable().default(null),
   createdAt: IsoUtcTimestamp,
   updatedAt: IsoUtcTimestamp,
 });

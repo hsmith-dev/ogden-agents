@@ -11,6 +11,13 @@ import {
 } from './events-settings.js';
 
 export { SettingsAgentDefaultModelChangedEvent, SettingsDeveloperModeChangedEvent, SettingsWhileWorkingChangedEvent } from './events-settings.js';
+// Build run events and the builds and notification settings events (stories 5.2, 5.3).
+import * as runs from './events-runs.js';
+
+export {
+  RunCreatedEvent, RunDecidedEvent, RunDispatchedEvent, RunOutcomeChangedEvent, RunQueueChangedEvent, RunVerificationCompletedEvent,
+  SettingsNotificationsChangedEvent, SettingsRunLimitsChangedEvent, WorkspaceBuildSettingsChangedEvent,
+} from './events-runs.js';
 import {
   PermissionRequestedEvent,
   PermissionRequestedInput,
@@ -55,7 +62,7 @@ import {
   SessionToolCallUpdatedEvent,
   SessionToolCallUpdatedInput,
 } from './events-session.js';
-import { ModelId, PermissionMode, Run, RunOutcome, Workspace } from './entities.js';
+import { ModelId, PermissionMode, Workspace } from './entities.js';
 import { BmadPieces } from './bmad.js';
 import {
   BmadSetupCompletedEvent,
@@ -298,22 +305,6 @@ const WorkspaceBmadOfferDismissedInput = z.object({
 export const WorkspaceBmadOfferDismissedEvent = WorkspaceBmadOfferDismissedInput.extend(assigned);
 export type WorkspaceBmadOfferDismissedEvent = z.infer<typeof WorkspaceBmadOfferDismissedEvent>;
 
-const RunCreatedInput = z.object({
-  type: z.literal('run.created'),
-  ...onSessionStream,
-  payload: z.object({ run: Run }),
-});
-export const RunCreatedEvent = RunCreatedInput.extend(assigned);
-export type RunCreatedEvent = z.infer<typeof RunCreatedEvent>;
-
-const RunOutcomeChangedInput = z.object({
-  type: z.literal('run.outcome_changed'),
-  ...onSessionStream,
-  payload: z.object({ runId: RunId, outcome: RunOutcome, previous: RunOutcome, reason: z.string().min(1).optional() }),
-});
-export const RunOutcomeChangedEvent = RunOutcomeChangedInput.extend(assigned);
-export type RunOutcomeChangedEvent = z.infer<typeof RunOutcomeChangedEvent>;
-
 /** Every event core may append (grows with later stories). Nothing unschematized is emitted. */
 export const CoreEvent = z.discriminatedUnion('type', [
   ServerStartedEvent,
@@ -350,8 +341,8 @@ export const CoreEvent = z.discriminatedUnion('type', [
   SessionAgentChangedEvent,
   PermissionRequestedEvent,
   PermissionResolvedEvent,
-  RunCreatedEvent,
-  RunOutcomeChangedEvent,
+  runs.RunCreatedEvent, runs.RunOutcomeChangedEvent, runs.RunDispatchedEvent, runs.RunQueueChangedEvent,
+  runs.RunVerificationCompletedEvent, runs.RunDecidedEvent, runs.WorkspaceBuildSettingsChangedEvent,
   ToolchainInstallStartedEvent,
   ToolchainInstallProgressEvent,
   ToolchainInstallCompletedEvent,
@@ -365,6 +356,8 @@ export const CoreEvent = z.discriminatedUnion('type', [
   SettingsDeveloperModeChangedEvent,
   SettingsAgentDefaultModelChangedEvent,
   SettingsWhileWorkingChangedEvent,
+  runs.SettingsRunLimitsChangedEvent,
+  runs.SettingsNotificationsChangedEvent,
 ]);
 export type CoreEvent = z.infer<typeof CoreEvent>;
 export type CoreEventType = CoreEvent['type'];
@@ -405,8 +398,8 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   SessionAgentChangedInput,
   PermissionRequestedInput,
   PermissionResolvedInput,
-  RunCreatedInput,
-  RunOutcomeChangedInput,
+  runs.RunCreatedInput, runs.RunOutcomeChangedInput, runs.RunDispatchedInput, runs.RunQueueChangedInput,
+  runs.RunVerificationCompletedInput, runs.RunDecidedInput, runs.WorkspaceBuildSettingsChangedInput,
   ToolchainInstallStartedInput,
   ToolchainInstallProgressInput,
   ToolchainInstallCompletedInput,
@@ -420,6 +413,8 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   SettingsDeveloperModeChangedInput,
   SettingsAgentDefaultModelChangedInput,
   SettingsWhileWorkingChangedInput,
+  runs.SettingsRunLimitsChangedInput,
+  runs.SettingsNotificationsChangedInput,
 ]);
 export type NewCoreEvent = z.infer<typeof NewCoreEvent>;
 

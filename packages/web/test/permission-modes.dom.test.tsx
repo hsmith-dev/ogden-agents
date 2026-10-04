@@ -13,7 +13,7 @@ import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@t
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { APPEARANCE_KEY } from '../src/appearance/appearance';
 import { AppearanceProvider, useAppearance } from '../src/appearance/appearance-provider';
-import { DEVELOPER_MODE_CARRIED_KEY, DeveloperModeSync } from '../src/appearance/developer-mode';
+import { DEVELOPER_MODE_CARRIED_KEY, DeveloperModeSync, useDeveloperModeSave } from '../src/appearance/developer-mode';
 import type { TranscriptPermission } from '../src/chat/transcript';
 import { PermissionCard } from '../src/permissions/permission-card';
 import {
@@ -27,7 +27,7 @@ import {
 } from '../src/permissions/permission-mode-picker';
 import { TooltipProvider } from '../src/ui/tooltip';
 
-const server = vi.hoisted(() => ({ developerMode: false, everSet: false, puts: [] as boolean[] }));
+const server = vi.hoisted(() => ({ developerMode: false, everSet: false, puts: [] as boolean[], holdReads: false, heldReads: [] as (() => void)[] }));
 
 vi.mock('@/api/http', async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -38,7 +38,10 @@ vi.mock('@/api/http', async (importOriginal) => ({
       server.developerMode = developerMode;
       server.everSet = true;
     }
-    return { developerMode: server.developerMode, everSet: server.everSet };
+    const answer = { developerMode: server.developerMode, everSet: server.everSet };
+    // A held read answers later with the value it read when it was sent (a request held up behind others).
+    if (init.method !== 'PUT' && server.holdReads) return new Promise((resolve) => server.heldReads.push(() => resolve(answer)));
+    return answer;
   },
 }));
 vi.mock('@/events/use-event-invalidation', () => ({ useEventInvalidation: () => undefined }));
@@ -48,6 +51,8 @@ beforeEach(() => {
   server.developerMode = false;
   server.everSet = false;
   server.puts = [];
+  server.holdReads = false;
+  server.heldReads = [];
   localStorage.clear();
 });
 
@@ -224,6 +229,34 @@ describe('Developer mode follows the server', () => {
     await waitFor(() => expect(result.current.developerMode).toBe(false));
     expect(result.current.density).toBe('compact');
     expect(server.puts).toEqual([]);
+  });
+
+  it('a switch saved while the first read is still on its way stays on when that read answers with the old off', async () => {
+    // Seen on a Windows runner (story 6.7, CI run 37226493048): the page's first read was held up behind other
+    // requests, the switch was saved on, and the read's old "off" then landed and turned the switch back.
+    localStorage.setItem(DEVELOPER_MODE_CARRIED_KEY, '1');
+    server.holdReads = true;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => ({ appearance: useAppearance().appearance, ...useDeveloperModeSave() }), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>
+          <AppearanceProvider>
+            <DeveloperModeSync storage={localStorage} />
+            {children}
+          </AppearanceProvider>
+        </QueryClientProvider>
+      ),
+    });
+    await waitFor(() => expect(server.heldReads).toHaveLength(1));
+    act(() => result.current.save(true));
+    await waitFor(() => expect(result.current.saving).toBe(false));
+    expect(server.puts).toEqual([true]);
+    expect(result.current.appearance.developerMode).toBe(true);
+    await act(async () => server.heldReads.shift()?.());
+    await waitFor(() => expect(client.isFetching()).toBe(0));
+    await act(async () => {});
+    expect(client.getQueryData(['developer-mode'])).toEqual({ developerMode: true, everSet: true });
+    expect(result.current.appearance.developerMode).toBe(true);
   });
 
   it("a browser that had it off takes the server's on, and never carries an off over", async () => {

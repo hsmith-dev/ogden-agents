@@ -88,6 +88,7 @@ context:
 - Web: card version line, notes, Uninstall (asked once more), Sign out, "not available on this computer" without Install, no code box when `signInTakesCode === false` (also in Sign in again).
 - Fake agent: Google sign-in (stderr line, `$BROWSER`, consent/deny files in `GEMINI_HOME`, a stored sign-in a later process counts), `auth.logout` and `logout`.
 - Existing tests changed: `acp-antigravity.test.ts` (entry-5 "comes later" refusals replaced by entry-7 behaviour; plant writes the record), `server/test/antigravity.test.ts` (plant, stubbed key check), `gate.test.ts` (two routes), `contracts.test.ts` (new event).
+- CI after the 0.4.0 restack (run 37226493048, Windows installed): the Developer mode switch turned back off after a save. The settings page's first read was held up behind other requests and answered with the old off after the save's answer (the trace's network log and the event stream show it; the invalidation from `settings.developer_mode_changed` joined that read instead of sending a new one). The save now cancels a read still on its way before keeping its answer (`keepSavedDeveloperMode`, also for the one-time carry-over); a DOM test holds the first read past a save.
 
 ## Plan Change Log
 

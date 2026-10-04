@@ -54,7 +54,7 @@ describe('the agent list (6.3)', () => {
 
 describe("a project's default agent (6.3, kept from entry 6)", () => {
   it('is optional in the settings: absent means the install default', () => {
-    expect(WorkspaceSettings.parse({ cautionLevel: 'ask_every_time', bmadPieces: [] })).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [] });
+    expect(WorkspaceSettings.parse({ cautionLevel: 'ask_every_time', bmadPieces: [] })).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false });
     expect(WorkspaceSettings.parse({ cautionLevel: 'ask_every_time', bmadPieces: [], defaultAgentId: 'some-agent' }).defaultAgentId).toBe('some-agent');
     expect(WorkspaceSettings.safeParse({ cautionLevel: 'ask_every_time', bmadPieces: [], defaultAgentId: 'Some Agent' }).success).toBe(false);
   });

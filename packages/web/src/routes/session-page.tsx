@@ -11,7 +11,8 @@ import { Composer } from '@/chat/composer';
 import { ReadOnlyConversation } from '@/chat/read-only';
 import { SignInAgain } from '@/chat/sign-in-again';
 import { ToolCalls } from '@/chat/tool-call-row';
-import { sessionView, type TranscriptCheckIn, type TranscriptItem, type TranscriptMessage } from '@/chat/transcript';
+import { sessionView, type TranscriptCheckIn, type TranscriptItem } from '@/chat/transcript';
+import { EarlierHistory, Message, ResumedMarker } from '@/chat/transcript-parts';
 import { useCaughtUp, useEarlierHistory, useSessionEvents } from '@/events/event-stream';
 import { PermissionCard, permissionAnnouncement } from '@/permissions/permission-card';
 import { DocumentCard } from '@/planning/document-card';
@@ -24,16 +25,11 @@ import { conversationProps, TerminalPane } from '@/terminal/terminal-pane';
 import { focusComposer, useSessionDriver } from '@/terminal/use-session-driver';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
-import { Separator } from '@/ui/separator';
-import { AgentMessage, UserMessage } from '@/ui/message';
 import { EmptyState, PageBody, PageFooter } from '@/ui/page';
 import { Skeleton } from '@/ui/skeleton';
 import { StateGlyph } from '@/ui/state-glyph';
 import { Text } from '@/ui/typography';
 import { fetchWorkspace, workspaceName } from '@/workspaces/workspace-api';
-
-/** The marker at the break where a reopened chat continues (EXPERIENCE.md). */
-const RESUMED_FROM_HISTORY = 'Resumed from history';
 
 /** How close to the bottom (px) still counts as at the bottom, for auto-scroll. */
 const AT_BOTTOM_PX = 48;
@@ -547,88 +543,5 @@ export function SessionPage() {
         />
       </PageFooter>
     </>
-  );
-}
-
-/**
- * "Show earlier" at the top of the transcript (EXPERIENCE.md: no infinite
- * scroll): one page per press, in place, with no reload. A page that fails or
- * times out says so inline, with Try again.
- */
-function EarlierHistory({ loading, error, onShow }: { loading: boolean; error: string | undefined; onShow: () => void }) {
-  if (error !== undefined && !loading) {
-    return (
-      <div data-testid="earlier-history-error" className="flex items-center justify-center gap-2" title={error}>
-        <Text as="span" variant="caption" role="alert">
-          Couldn't load.
-        </Text>
-        <Button variant="outline" onClick={onShow} data-testid="earlier-history-retry">
-          <ArrowClockwise aria-hidden />
-          Try again
-        </Button>
-      </div>
-    );
-  }
-  return (
-    <div className="flex justify-center">
-      <Button variant="ghost" onClick={onShow} aria-disabled={loading} aria-busy={loading} data-testid="show-earlier">
-        {loading ? 'Loading earlier messages' : 'Show earlier'}
-      </Button>
-    </div>
-  );
-}
-
-/**
- * Where a chat was reopened after its agent's process was gone (story 2.7):
- * the same words for every way it came back (EXPERIENCE.md, session `idle`).
- */
-function ResumedMarker() {
-  return (
-    <div role="separator" aria-label={RESUMED_FROM_HISTORY} data-testid="resumed-marker" className="flex items-center gap-3">
-      <Separator className="flex-1" />
-      <Text as="span" variant="caption" className="shrink-0">
-        {RESUMED_FROM_HISTORY}
-      </Text>
-      <Separator className="flex-1" />
-    </div>
-  );
-}
-
-/** What a message sent while the agent worked says under it (EXPERIENCE.md Composer). */
-const QUEUE_WORDS = { queued: 'Queued', not_sent: 'Not sent' } as const;
-
-/**
- * One message: the user's in a muted block on the right, the agent's as body
- * text under its name (DESIGN.md Message). A queued or unsent one says so under it.
- */
-function Message({ message, agentName }: { message: TranscriptMessage; agentName: string }) {
-  if (message.role === 'user' && message.status !== undefined) {
-    return (
-      <div className="flex max-w-[85%] flex-col items-end gap-1 self-end" data-testid="message-queued" data-status={message.status}>
-        <UserMessage className="max-w-full">{message.text}</UserMessage>
-        <Text variant="caption" data-testid="message-queue-status">
-          {QUEUE_WORDS[message.status]}
-        </Text>
-      </div>
-    );
-  }
-  if (message.role === 'user' && message.origin === 'terminal') {
-    // Typed in the agent's own terminal and brought back on switching (story 3.6; DESIGN.md Caption).
-    return (
-      <div className="flex max-w-[85%] flex-col items-end gap-1 self-end" data-testid="message-from-terminal">
-        <UserMessage className="max-w-full" data-testid="message-user">
-          {message.text}
-        </UserMessage>
-        <Text variant="caption" data-testid="message-origin">
-          from terminal
-        </Text>
-      </div>
-    );
-  }
-  if (message.role === 'user') return <UserMessage data-testid="message-user">{message.text}</UserMessage>;
-  return (
-    <AgentMessage name={agentName} data-testid="message-agent" data-streaming={message.streaming} aria-busy={message.streaming}>
-      {message.text}
-    </AgentMessage>
   );
 }

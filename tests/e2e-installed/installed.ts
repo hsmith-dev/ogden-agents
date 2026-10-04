@@ -13,7 +13,7 @@ import { createDataFolder020, type DataFolder020 } from '../fixtures/data-folder
 import { FIXTURE_TOP, fixtureSource, hasManagedPython, TEST_PYTHON } from '../fixtures/bmad-upstream-source.js';
 import { createFakeBmadRepo, type FakeBmadRepo, type FakeBmadRepoOptions } from '../fixtures/fake-bmad-repo.js';
 import { packFakeAdapter, testNpmCli } from '../fixtures/fake-adapter/pack.mjs';
-import { isAlive, readPortFile, ROOT, waitUntil } from '../support.js';
+import { FAKE_ANTIGRAVITY, FAKE_GEMINI_KEY, isAlive, plantPinnedAntigravity, readPortFile, ROOT, waitUntil } from '../support.js';
 
 /**
  * Where the installed server looks for the Claude Agent ACP adapter
@@ -437,6 +437,8 @@ export function terminalServer(name: string, { omitOptional = false }: { omitOpt
  */
 export const BMAD_AVAILABLE_ENV = 'OGDEN_AGENTS_TEST_BMAD_AVAILABLE';
 export const BMAD_PROBE_ENV = 'OGDEN_AGENTS_TEST_BMAD_PROBE';
+/** The installed server's Antigravity server hook (epic 6 entry 8): a Node script in the temp folder plays its ACP server. */
+export const ANTIGRAVITY_SERVER_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_SERVER';
 
 /**
  * The installed server's BMad Method source hook (`BMAD_SOURCE_ENV` in
@@ -523,6 +525,8 @@ export interface BmadServer {
   install: Install;
   /** The server's home folder (HOME, USERPROFILE, APPDATA, LOCALAPPDATA, XDG_* under it): nothing reads the user's own `~/.claude`. */
   home: string;
+  /** Whether Antigravity can chat here: asked for, and pinned for this platform (its server is the fake's Antigravity personality). */
+  antigravity: boolean;
   /** Starts the server in the background with the installed launcher, as a user does. */
   launch(): Promise<Launched>;
   /** Kills the server if it still runs (with its children), then starts it again on the same data folder. Quit it first for a clean restart. */
@@ -542,12 +546,29 @@ export interface BmadServer {
  * `tickets.py` through uv with no network). Without any it is what a user
  * runs: Planning and Board shipped, the rest Coming soon. Repos are fake repos
  * in a folder of its own. Nothing is installed again.
+ *
+ * With `antigravity` (epic 6 entry 8), Antigravity can chat too, where it
+ * has a pin for this platform: its pinned server is planted (an empty file,
+ * never run), the hook's script starts the fake agent's Antigravity
+ * personality in its place, and a fake Gemini key is in the server's
+ * environment. No real Antigravity server, `~/.gemini` or Google.
  */
-export function bmadServer(name: string, { available, probe = false, bmadSource = false }: { available?: string[]; probe?: boolean; bmadSource?: boolean } = {}): BmadServer {
+export function bmadServer(
+  name: string,
+  { available, probe = false, bmadSource = false, antigravity = false }: { available?: string[]; probe?: boolean; bmadSource?: boolean; antigravity?: boolean } = {},
+): BmadServer {
   const dataDir = extraFolder(`${name}-data`);
   // The fixture BMad Method source (story 4.13), only when asked for: without it Set up would reach GitHub.
   const sourceFile = bmadSource ? writeFixtureBmadSource(realpathSync.native(extraFolder(`${name}-bmad-source`))) : '';
   writeFileSync(join(dataDir, 'onboarding.json'), `${JSON.stringify({ welcomeCompleted: true })}\n`, { mode: 0o600 });
+  let antigravityServer = '';
+  if (antigravity) {
+    plantPinnedAntigravity(dataDir);
+    const script = join(extraFolder(`${name}-agy`), 'antigravity-server.mjs');
+    writeFileSync(script, `await import(${JSON.stringify(pathToFileURL(FAKE_ANTIGRAVITY).href)});\n`);
+    antigravityServer = script;
+  }
+  const agyPinned = antigravity && existsSync(join(dataDir, 'agents', 'antigravity'));
   // Real paths: macOS temp folders are reached through /var, and Windows ones may be 8.3 short names.
   const home = realpathSync.native(extraFolder(`${name}-home`));
   const reposDir = realpathSync.native(extraFolder(`${name}-repos`));
@@ -561,6 +582,8 @@ export function bmadServer(name: string, { available, probe = false, bmadSource 
       [BMAD_AVAILABLE_ENV]: available === undefined ? '' : available.join(','),
       [BMAD_PROBE_ENV]: probe ? '1' : '',
       [BMAD_SOURCE_ENV]: sourceFile,
+      [ANTIGRAVITY_SERVER_ENV]: agyPinned ? antigravityServer : '',
+      GEMINI_API_KEY: agyPinned ? FAKE_GEMINI_KEY : '',
       // The server passes ANTHROPIC_API_KEY on to agents, and `session-start` echoes the agent's whole environment into the page.
       ANTHROPIC_API_KEY: '',
       HOME: home,
@@ -594,5 +617,5 @@ export function bmadServer(name: string, { available, probe = false, bmadSource 
       }
     }
   };
-  return { install, home, launch: () => launch(install), restart, addRepo, remove };
+  return { install, home, antigravity: agyPinned, launch: () => launch(install), restart, addRepo, remove };
 }

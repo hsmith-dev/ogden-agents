@@ -3,7 +3,7 @@ title: 'Refactor sweep (epic 6)'
 type: 'refactor'
 ticket: '9'
 created: '2026-10-04'
-status: 'in-review'
+status: 'built'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
@@ -77,9 +77,9 @@ context:
 ## Implementation Notes
 
 - Implemented directly in this session (no implementation subagent).
-- (a) `packages/web/src/api/keep-saved.ts` `keepSaved` (cancel exact-key reads, then `setQueryData`); every save awaits it inside its latest gate and checks the gate again before clearing `chosen`. `keepSavedDeveloperMode` and the unawaited `cancelQueries` of 4.13 are gone; dead `useServerDeveloperMode` removed. `CautionLevelSection`, `DefaultAgentSection` and Welcome's `AgentStep` are exported for the tests. Regression: `web/test/settings-save-race.dom.test.tsx` (six forms) and a case in `bmad-method-section.dom.test.tsx`; Developer mode keeps its 6.7 test. All seven fail with the cancel disabled.
+- (a) `packages/web/src/api/keep-saved.ts` `keepSaved` (cancel exact-key reads, then `setQueryData`); every save awaits it inside its latest gate and checks the gate again before clearing `chosen`. `keepSavedDeveloperMode` and the unawaited `cancelQueries` of 4.13 are gone; dead `useServerDeveloperMode` removed. `CautionLevelSection`, `DefaultAgentSection` and Welcome's `AgentStep` are exported for the tests. Regression: `web/test/settings-save-race.dom.test.tsx` (six forms) and two in `bmad-method-section.dom.test.tsx` (pieces, trust step); Developer mode keeps its 6.7 test and gains a carry-over one. All ten fail with the cancel disabled.
 - (b) Evidence: CI run 37239378578 attempt 1, windows-latest Node 24, `terminal-pty.test.ts` "a CLI that crashes on start", thrown from `connect` in `pty.spawn` right after the previous test's CLI crashed. node-pty 1.1.0 `conpty.cc`: `PtyConnect` holds a `pty_baton*` from an unlocked vector that `remove_pty_baton` edits on an exit thread; a bad `HPCON` makes `CreateProcessW` fail with 87. Retried by exact message (`PTY_CREATE_PROCESS_INVALID_PARAMETER`); tests for retry, bound and other codes (2, 267, 870).
-- (c) Splits (all re-exported, no test edited for them): `acp-agent.ts` 713→571 (`quirks.ts`, `permission-request.ts`), `agent-setup.ts` 716→595 (`agent-setup-sign-in.ts`, `agent-setup-status.ts`), `start.ts` 699→521 (`start-agents.ts`; the session settle and check-in lines now run before the agent wiring, log order only), `chat/terminal.ts` 639→591 (`terminal-backlog.ts`), `install.ts` 639→545 (`npm-cli.ts`), `session-page.tsx` 634→547 (`chat/transcript-parts.tsx`), `events.ts` 620→542 (`events-install.ts`). One `withTimeout` (`adapters/src/with-timeout.ts`); dead `redactAnthropicKeys` and `start.ts`'s unused imports (`errorCode`, `UvScriptRunner`, `ServerMessage`) removed. No naming drift found that a rename would fix without touching public names; no Claude-only UI words left in `web/src` (6.6 swept them). No spike CI job remains.
+- (c) Splits (all re-exported, no test edited for them): `acp-agent.ts` 713→571 (`quirks.ts`, `permission-request.ts`), `agent-setup.ts` 716→595 (`agent-setup-sign-in.ts`, `agent-setup-status.ts`), `start.ts` 699→521 (`start-agents.ts`; called where the wiring was, before the session settle, so a wiring error still leaves the database untouched), `chat/terminal.ts` 639→591 (`terminal-backlog.ts`), `install.ts` 639→545 (`npm-cli.ts`), `session-page.tsx` 634→547 (`chat/transcript-parts.tsx`), `events.ts` 620→542 (`events-install.ts`). One `withTimeout` (`adapters/src/with-timeout.ts`); dead `redactAnthropicKeys` and `start.ts`'s unused imports (`errorCode`, `UvScriptRunner`, `ServerMessage`) removed. No naming drift found that a rename would fix without touching public names; no Claude-only UI words left in `web/src` (6.6 swept them). No spike CI job remains.
 - (d) `tests/architecture.test.ts` green (12 tests).
 - Not done (kept open in deferred-work): AD-16 helper environments (needs `AGENT_ENV_KEYS` plumbed into three adapters: a behaviour change), `GEMINI.md` (live check), setup status from `.claude/skills` only.
 - Local: `pnpm typecheck` clean; `pnpm test` 156 files, 1992 passed; provenance passes against `origin/story/6.8-antigravity-skills`.
@@ -87,6 +87,17 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (quick lens): 6 findings: high 0, medium 1, low 3, false 0, maybe-false 0, rejected 2.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---------|---------|-------|-------------------|
+| 1 | `start.ts`: `wireAgents` ran after `settleInterruptedSessions`, `releaseTerminalDrivers` and `resetPermissionModes`, so a wiring error (`checkAgentWiring`) now left them applied | medium | patch | Real (the original order wired first). `wireAgents` is called before the settle lines again. |
+| 2 | No held-read test for BMad Method's trust step (`allowScripts`) | low | patch | Added: trust answers, the save after it fails, a held read with `bmadScriptsTrusted: false` lands; trust kept. Fails without the cancel. |
+| 3 | No held-read test for Developer mode's carry-over | low | patch | Added: carry-over PUT held, a refetch held with the old off, both released; on kept. Fails without the cancel. |
+| 4 | deferred-work evidence says "one per form", overstated | low | patch | Evidence now lists the ten tests. |
+| 5 | Two new `Resolved:` Log entries close no earlier entry | low | reject | The file's own precedent (4.13's "Resolved: provenance backfill") and the provenance check accept `Resolved:` history entries; a plain entry would need an index line for closed work. |
+| 6 | `quirks.ts` `{@link START_TIMEOUT_MS}` no longer resolves | low | patch | Doc names the constant and its module in plain text. |
 
 ## Verification
 

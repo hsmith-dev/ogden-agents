@@ -77,7 +77,7 @@ export function slashSkillInvocation(skill: string, idea?: string): string {
 export interface AcpAgentOptions {
   /** Called with protocol notes, for the log. Never includes the environment, stderr or the agent's messages. */
   onDiagnostic?: ((message: string, fields?: Record<string, unknown>) => void) | undefined;
-  /** Default {@link START_TIMEOUT_MS}. */
+  /** Default `START_TIMEOUT_MS` (`acp-agent.ts`). */
   startTimeoutMs?: number | undefined;
 }
 

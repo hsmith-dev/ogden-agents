@@ -337,6 +337,27 @@ describe('BmadMethodSection (DOM)', () => {
     expect(client.getQueryData<WorkspaceSettings>(['workspace-settings', WS])?.bmadPieces).toEqual(['planning', 'board']);
   });
 
+  it("a read on its way when the project's trust answers never undoes the trust, even when the save after it fails (story 6.9)", async () => {
+    state.answer = () => Promise.reject(new Error('Ogden Agents could not reach the server.'));
+    state.trustAnswer = () => Promise.resolve(settings([], true));
+    const { client, click } = mount([], { trusted: false });
+    let answer: () => void = () => {};
+    const held = client
+      .fetchQuery({ queryKey: ['workspace-settings', WS], queryFn: () => new Promise<WorkspaceSettings>((resolve) => (answer = () => resolve(settings([], false)))), staleTime: 0 })
+      .catch(() => undefined);
+    await click('bmad-board');
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('script-trust-confirm'));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(state.trusts).toBe(1);
+    await act(async () => {
+      answer();
+      await held;
+    });
+    expect(client.getQueryData<WorkspaceSettings>(['workspace-settings', WS])?.bmadScriptsTrusted).toBe(true);
+  });
+
   it('switches are disabled while a save is in flight', async () => {
     state.answer = () => new Promise(() => {});
     const { sw, click } = mount([]);

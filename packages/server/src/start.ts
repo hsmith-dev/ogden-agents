@@ -244,6 +244,8 @@ async function listenAndAnnounce({
     // The event carries the plain reason; the log also gets the target, URL and (on a mismatch) both hashes.
     onFailure: (error) => log.warn('uv install failed', { code: error.code, reason: error.message, ...error.details }),
   });
+  // Every agent is wired before the stored sessions are settled, as before story 6.9's split: a wiring error leaves the database untouched.
+  const { claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent } = wireAgents({ options, dataDir, log, hooks, core });
   // Agents from before this start are gone with their processes (AD-3): their sessions can be resumed, not left working.
   const settled = core.entities.settleInterruptedSessions(RESTARTED_REASON);
   if (settled.length > 0) log.info('sessions left working by a stopped server are idle and resumable', { sessions: settled.length });
@@ -257,7 +259,6 @@ async function listenAndAnnounce({
   const permissions = core.permissions;
   const configuredCheckIn = options.checkInDelayMs ?? hooks.checkInMs;
   const checkInDelayMs = configuredCheckIn === undefined ? undefined : clampCheckInDelay(configuredCheckIn);
-  const { claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent } = wireAgents({ options, dataDir, log, hooks, core });
   const unwrapped = new Map(wirings.map(({ descriptor, agent: port }) => [descriptor.agentId, port]));
   const agents = createAgentRegistry(
     wirings.map(({ descriptor, agent: port }) => ({ descriptor, agent: descriptor.agentId === CLAUDE_CODE_AGENT_ID ? chatAgent : forChat(descriptor.agentId, port) })),

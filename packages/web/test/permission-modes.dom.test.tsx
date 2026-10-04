@@ -27,7 +27,7 @@ import {
 } from '../src/permissions/permission-mode-picker';
 import { TooltipProvider } from '../src/ui/tooltip';
 
-const server = vi.hoisted(() => ({ developerMode: false, everSet: false, puts: [] as boolean[], holdReads: false, heldReads: [] as (() => void)[] }));
+const server = vi.hoisted(() => ({ developerMode: false, everSet: false, puts: [] as boolean[], holdReads: false, heldReads: [] as (() => void)[], holdPuts: false, heldPuts: [] as (() => void)[] }));
 
 vi.mock('@/api/http', async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -35,8 +35,14 @@ vi.mock('@/api/http', async (importOriginal) => ({
     if (init.method === 'PUT') {
       const { developerMode } = JSON.parse(String(init.body)) as { developerMode: boolean };
       server.puts.push(developerMode);
-      server.developerMode = developerMode;
-      server.everSet = true;
+      const apply = () => {
+        server.developerMode = developerMode;
+        server.everSet = true;
+        return { developerMode: server.developerMode, everSet: server.everSet };
+      };
+      // A held save reaches the server, and answers, only when released.
+      if (server.holdPuts) return new Promise((resolve) => server.heldPuts.push(() => resolve(apply())));
+      apply();
     }
     const answer = { developerMode: server.developerMode, everSet: server.everSet };
     // A held read answers later with the value it read when it was sent (a request held up behind others).
@@ -53,6 +59,8 @@ beforeEach(() => {
   server.puts = [];
   server.holdReads = false;
   server.heldReads = [];
+  server.holdPuts = false;
+  server.heldPuts = [];
   localStorage.clear();
 });
 
@@ -185,8 +193,7 @@ describe('a Skip-all permission card', () => {
 });
 
 describe('Developer mode follows the server', () => {
-  const mountSync = () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const mountSync = (client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) => {
     return renderHook(
       () => {
         const appearance = useAppearance();
@@ -210,6 +217,25 @@ describe('Developer mode follows the server', () => {
     const { result } = mountSync();
     await waitFor(() => expect(server.puts).toEqual([true]));
     await waitFor(() => expect(localStorage.getItem(DEVELOPER_MODE_CARRIED_KEY)).toBe('1'));
+    expect(result.current.developerMode).toBe(true);
+  });
+
+  it('a carried-over on stays on when a read sent before the carry-over answered lands after it with the old off (story 6.9)', async () => {
+    localStorage.setItem(APPEARANCE_KEY, JSON.stringify({ developerMode: true, density: 'compact' }));
+    server.holdPuts = true;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = mountSync(client);
+    await waitFor(() => expect(server.heldPuts).toHaveLength(1));
+    // A refetch (an event, say) goes out while the carry-over is on its way, and reads the old off.
+    server.holdReads = true;
+    void client.invalidateQueries({ queryKey: ['developer-mode'] });
+    await waitFor(() => expect(server.heldReads).toHaveLength(1));
+    await act(async () => server.heldPuts.shift()?.());
+    await waitFor(() => expect(localStorage.getItem(DEVELOPER_MODE_CARRIED_KEY)).toBe('1'));
+    await act(async () => server.heldReads.shift()?.());
+    await waitFor(() => expect(client.isFetching()).toBe(0));
+    await act(async () => {});
+    expect(client.getQueryData(['developer-mode'])).toEqual({ developerMode: true, everSet: true });
     expect(result.current.developerMode).toBe(true);
   });
 

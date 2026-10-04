@@ -29,7 +29,7 @@ import {
   type Core,
   type PlanningDocumentsStep,
 } from '../src/index.js';
-import { openTestCore, tempDir } from './helpers.js';
+import { openTestCore, soleAgent, tempDir } from './helpers.js';
 
 const NEXT = { skill: 'bmad-ticket', label: 'Turn this spec into tickets' };
 const SKILLS: CatalogSkill[] = [
@@ -123,7 +123,7 @@ function setup({ pieces = ['planning'] as ('planning' | 'board')[], documents = 
     dataDir: tempDir(),
     entities: core.entities,
     sessionEvents: core.sessionEvents,
-    agent,
+    agents: soleAgent(agent),
     onInternalError: (_, error) => internal.push(error),
     onToolCallCompleted: (sessionId, toolCallId, diffs) => {
       if (throwing) throw new Error('hook failed');
@@ -205,7 +205,7 @@ describe('document detection (story 4.7)', () => {
       { type: 'tool_call_update', toolCallId: 'b', status: 'completed', title: 'Write again' },
       { type: 'tool_call', toolCallId: 'c', title: 'Write', kind: 'edit', status: 'failed' },
     ]);
-    const chat = createChat({ dataDir: tempDir(), entities: core.entities, sessionEvents: core.sessionEvents, agent, onToolCallCompleted: (_, id, diffs) => calls.push(`${id}:${diffs?.length ?? 0}`) });
+    const chat = createChat({ dataDir: tempDir(), entities: core.entities, sessionEvents: core.sessionEvents, agents: soleAgent(agent), onToolCallCompleted: (_, id, diffs) => calls.push(`${id}:${diffs?.length ?? 0}`) });
     const session = chat.createChatSession(workspace.id);
     chat.sendMessage(workspace.id, session.id, 'go');
     await chat.settled();
@@ -238,7 +238,7 @@ describe('document detection (story 4.7)', () => {
     await send(tickets.id, `write completed ${join(repo, '_bmad-output', 'tickets.md')}`);
     expect(written(tickets.id).map((event) => event.payload.next)).toEqual([null]);
     // A planning session whose first message invokes no catalog skill.
-    const other = chat.createChatSession(workspace.id, 'planning');
+    const other = chat.createChatSession(workspace.id, { kind: 'planning' });
     await send(other.id, '/bmad-specs-and-more');
     await send(other.id, `write completed ${join(repo, '_bmad-output', 'other.md')}`);
     expect(written(other.id).map((event) => event.payload.next)).toEqual([null]);

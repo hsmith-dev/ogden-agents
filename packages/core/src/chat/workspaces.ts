@@ -1,18 +1,18 @@
 /** Workspaces and their sessions, and deleting a workspace's history (moved from `chat.ts`, story 3.11). */
 import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
-import type { SessionId } from '@ogden-agents/shared';
+import { PERMISSION_MODES, type SessionId } from '@ogden-agents/shared';
 import { canonicalWorkspacePath } from '../entities.js';
-import { CoreError, InvalidOperationError, WorkspaceBusyError } from '../errors.js';
+import { CoreError, InvalidOperationError, UnknownAgentError, WorkspaceBusyError } from '../errors.js';
 import type { Agents } from './agents.js';
 import type { ChatContext } from './context.js';
 import type { Chat } from './types.js';
 
 export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & { stopTerminal: (sessionId: SessionId) => Promise<void> }) {
-  const { entities, live, busy, dataHome, getWorkspace, getSession } = ctx;
+  const { entities, agents, live, busy, dataHome, getWorkspace, getSession } = ctx;
   const { drop, stopTerminal } = deps;
 
-  const methods: Pick<Chat, 'openWorkspace' | 'listWorkspaces' | 'getWorkspace' | 'listSessions' | 'deleteHistory' | 'createChatSession' | 'getSession'> = {
+  const methods: Pick<Chat, 'openWorkspace' | 'listWorkspaces' | 'getWorkspace' | 'listSessions' | 'deleteHistory' | 'createChatSession' | 'getSession' | 'chatAgents'> = {
     openWorkspace(input, options) {
       const path = input === '~' ? homedir() : input.startsWith('~/') || input.startsWith('~\\') ? join(homedir(), input.slice(2)) : input;
       if (!isAbsolute(path)) throw new InvalidOperationError('Enter the full path of the folder, starting from the top of the disk.');
@@ -54,8 +54,23 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
       return { deletedEvents, deletedSessions, deletedRuns };
     },
 
-    createChatSession(workspaceId, kind = 'chat') {
-      return entities.createSession({ workspaceId, kind });
+    createChatSession(workspaceId, options = {}) {
+      getWorkspace(workspaceId);
+      // Picked by data, never by a branch on an id (E6-R2); fixed for the session's life (E6-R1).
+      const agentId = options.agentId ?? agents.defaultAgentId;
+      if (agents.get(agentId) === undefined) throw new UnknownAgentError();
+      return entities.createSession({ workspaceId, kind: options.kind ?? 'chat', agentId });
+    },
+
+    chatAgents() {
+      const listed = agents.agentIds.flatMap((agentId) => {
+        const agent = agents.get(agentId);
+        if (agent === undefined) return [];
+        // Ask is every agent's (where every chat starts); the rest only as it declares them.
+        const declared = agent.permissionModes ?? [];
+        return [{ agentId, displayName: agent.displayName, permissionModes: PERMISSION_MODES.filter((mode) => mode === 'ask' || declared.includes(mode)) }];
+      });
+      return { agents: listed, defaultAgentId: agents.defaultAgentId };
     },
 
     getSession,

@@ -60,7 +60,9 @@ export const API_ROUTES = {
   folders: `${API_BASE}/folders`,
   /**
    * `GET` → `{ sessions }` (`SessionsResponse`; 2.5): the Chats list.
-   * `POST { kind? }` → 201 `{ session }`: a new chat session in the workspace.
+   * `POST { kind?, agentId? }` → 201 `{ session }`: a new chat session in
+   * the workspace, with the agent picked (epic 6); 400 `agent_unknown` for an
+   * agent this install doesn't have.
    */
   workspaceSessions: `${API_BASE}/workspaces/:wsId/sessions`,
   /**
@@ -117,6 +119,8 @@ export const API_ROUTES = {
   appShortcut: `${API_BASE}/app-shortcut`,
   /** `DELETE` → 204 (2.4): dismisses the first-run shortcut offer. */
   appShortcutOffer: `${API_BASE}/app-shortcut/offer`,
+  /** `GET` → `ChatAgentsResponse` (epic 6): the agents a chat can be started with, and the default one. */
+  chatAgents: `${API_BASE}/chat-agents`,
   /** `GET` → `AgentsResponse` (9.1): every supported agent's install and sign-in state. */
   agents: `${API_BASE}/agents`,
   /**

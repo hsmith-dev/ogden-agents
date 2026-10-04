@@ -9,6 +9,7 @@ import { realpathSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   AdapterRefs as AdapterRefsSchema,
+  AgentId as AgentIdSchema,
   DriverChangeCause as DriverChangeCauseSchema,
   IsoUtcTimestamp,
   PermissionMode as PermissionModeSchema,
@@ -21,6 +22,7 @@ import {
   canonicalBmadPieces,
   DEFAULT_CAUTION_LEVEL,
   type AdapterRefs,
+  type AgentId,
   type BmadPiece,
   type DriverChangeCause,
   type MessageRole,
@@ -60,6 +62,8 @@ export interface NewSession {
   title?: string | null;
   /** Agent and CLI ids (AD-9). */
   adapterRefs?: AdapterRefs;
+  /** The agent it is started with (epic 6), never changed. */
+  agentId?: AgentId;
 }
 
 /** What a newly created workspace starts with (story 10.4). Ignored when the workspace already exists. */
@@ -197,6 +201,7 @@ const toSession = (row: SessionRow): Session => ({
   state: row.state,
   driver: row.driver,
   permissionMode: row.permissionMode,
+  ...(row.agentId === null ? {} : { agentId: row.agentId }),
   title: row.title,
   adapterRefs: row.adapterRefs,
   createdAt: row.createdAt,
@@ -345,6 +350,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         driver: check(SessionDriverSchema, input.driver ?? 'ui', 'session driver'),
         // Every chat starts in Ask, whatever the agent's own settings say.
         permissionMode: 'ask',
+        ...(input.agentId === undefined ? {} : { agentId: check(AgentIdSchema, input.agentId, 'agent id') }),
         title: input.title ?? null,
         adapterRefs: check(AdapterRefsSchema, input.adapterRefs ?? {}, 'adapter refs'),
         createdAt: at,

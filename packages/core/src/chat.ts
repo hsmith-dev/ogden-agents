@@ -66,6 +66,10 @@
  * off) reaches the live agent, and a terminal handed back by Developer mode
  * is stopped.
  *
+ * Epic 6: each session carries the agent it was started with (`agentId`),
+ * looked up in the agent registry the server wires; a session stored before
+ * agents could be chosen is the registry's legacy agent.
+ *
  * The agent itself sits behind `AgentPort` (AD-1); this file names none.
  */
 import { AgentError } from './agent-port.js';
@@ -121,19 +125,23 @@ export function createChat(options: ChatOptions): Chat {
     else if (event.type === 'session.driver_changed' && event.payload.cause === 'developer_mode_off') terminal.releaseTerminal(event.payload.sessionId);
   });
 
+  // Every session the chat answers names its agent (epic 6): one stored before agents could be chosen reads as the legacy agent.
+  const { withAgentId } = ctx;
+
   return {
     openWorkspace: workspaces.openWorkspace,
     listWorkspaces: workspaces.listWorkspaces,
     getWorkspace: workspaces.getWorkspace,
-    listSessions: workspaces.listSessions,
+    listSessions: (workspaceId) => workspaces.listSessions(workspaceId).map(withAgentId),
     deleteHistory: workspaces.deleteHistory,
-    createChatSession: workspaces.createChatSession,
-    getSession: workspaces.getSession,
+    createChatSession: (workspaceId, options) => withAgentId(workspaces.createChatSession(workspaceId, options)),
+    chatAgents: workspaces.chatAgents,
+    getSession: (workspaceId, sessionId) => withAgentId(workspaces.getSession(workspaceId, sessionId)),
     sendMessage: turns.sendMessage,
     cancel: turns.cancel,
-    switchDriver: terminal.switchDriver,
+    switchDriver: async (workspaceId, sessionId, driver) => withAgentId(await terminal.switchDriver(workspaceId, sessionId, driver)),
     attachTerminal: terminal.attachTerminal,
-    setPermissionMode: modes.setPermissionMode,
+    setPermissionMode: (workspaceId, sessionId, mode, options) => withAgentId(modes.setPermissionMode(workspaceId, sessionId, mode, options)),
     permissionModeOptions: modes.permissionModeOptions,
 
     async settled() {

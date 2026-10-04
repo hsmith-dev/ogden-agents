@@ -8,7 +8,7 @@
  * through {@link AgentSession.onEvent}, and core turns that into session
  * events and the session's normalized state (AD-4).
  */
-import type { PermissionMode } from '@ogden-agents/shared';
+import { AgentId as AgentIdSchema, type AgentId, type PermissionMode } from '@ogden-agents/shared';
 import { CoreError } from './errors.js';
 
 /** One file change a tool call reports (secrets masked). `oldText` is `null` for a new file. */
@@ -308,4 +308,75 @@ export class AgentError extends CoreError {
     this.output = options.output;
     if (options.cause !== undefined) this.cause = options.cause;
   }
+}
+
+/** One agent a chat can be started with, as server wiring registers it (epic 6). */
+export interface RegisteredAgent {
+  agentId: AgentId;
+  agent: AgentPort;
+}
+
+/**
+ * The agents chats can be started with, by id (epic 6; AD-1 note): server
+ * wiring builds it, and core looks each session's agent up here, so core
+ * names no agent itself.
+ */
+export interface AgentRegistry {
+  /** Every registered agent's id, in the order the UI lists them. */
+  readonly agentIds: readonly AgentId[];
+  /** The agent registered under `agentId`, if any. */
+  get(agentId: AgentId): AgentPort | undefined;
+  /** The agent a new chat gets when none is picked. */
+  readonly defaultAgentId: AgentId;
+  /** The agent the sessions stored before agents could be chosen were started with (they have no `agentId`). */
+  readonly legacyAgentId: AgentId;
+}
+
+/**
+ * A registry of `agents`, in order. `defaultAgentId` and `legacyAgentId`
+ * default to the first agent; the default must be registered. Throws on an
+ * empty list, an id that isn't kebab-case, or an id given twice (a wiring bug).
+ */
+export function createAgentRegistry(
+  agents: readonly RegisteredAgent[],
+  options: { defaultAgentId?: AgentId | undefined; legacyAgentId?: AgentId | undefined } = {},
+): AgentRegistry {
+  const byId = new Map<AgentId, AgentPort>();
+  for (const { agentId, agent } of agents) {
+    if (!AgentIdSchema.safeParse(agentId).success) throw new Error(`agent registry: ${JSON.stringify(agentId)} is not an agent id`);
+    if (byId.has(agentId)) throw new Error(`agent registry: ${agentId} is registered twice`);
+    byId.set(agentId, agent);
+  }
+  const first = agents[0]?.agentId;
+  if (first === undefined) throw new Error('agent registry: no agent registered');
+  const defaultAgentId = options.defaultAgentId ?? first;
+  if (!byId.has(defaultAgentId)) throw new Error(`agent registry: the default agent ${defaultAgentId} is not registered`);
+  const legacyAgentId = options.legacyAgentId ?? first;
+  if (!AgentIdSchema.safeParse(legacyAgentId).success) throw new Error(`agent registry: ${JSON.stringify(legacyAgentId)} is not an agent id`);
+  return {
+    agentIds: [...byId.keys()],
+    get: (agentId) => byId.get(agentId),
+    defaultAgentId,
+    legacyAgentId,
+  };
+}
+
+/** The plain reason a chat whose agent this install no longer has can't reach it. */
+export const AGENT_NOT_REGISTERED_REASON = "This chat's agent isn't available in Ogden Agents on this computer.";
+
+/**
+ * Stands in for a session's agent that isn't registered this run (a test
+ * agent, or one removed): every start fails `agent_unavailable` with
+ * {@link AGENT_NOT_REGISTERED_REASON}, and it offers Ask only and no terminal.
+ */
+export function unregisteredAgent(): AgentPort {
+  const unavailable = () => Promise.reject(new AgentError('agent_unavailable', AGENT_NOT_REGISTERED_REASON));
+  return {
+    displayName: "This chat's agent",
+    permissionModes: ['ask'],
+    skillInvocation: (skill, idea) => (idea === undefined ? `/${skill}` : `/${skill} ${idea}`),
+    startSession: unavailable,
+    reopenSession: unavailable,
+    listAuthMethods: unavailable,
+  };
 }

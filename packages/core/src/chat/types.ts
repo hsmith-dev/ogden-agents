@@ -3,8 +3,8 @@
  * `ChatOptions`, `TerminalViewer` and `Chat`, and the state the chat modules
  * share by reference (`Live`, `Terminal`, `Turn`).
  */
-import type { PermissionMode, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, Workspace, WorkspaceId } from '@ogden-agents/shared';
-import type { AgentError, AgentPort, AgentSession } from '../agent-port.js';
+import type { AgentId, ChatAgent, PermissionMode, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import type { AgentError, AgentRegistry, AgentSession } from '../agent-port.js';
 import type { Entities, NewWorkspaceOptions } from '../entities.js';
 import type { EventLog, HistoryDeleted } from '../event-log.js';
 import type { InstallSettings } from '../install-settings.js';
@@ -20,17 +20,23 @@ export interface ChatOptions {
    */
   dataDir: string;
   sessionEvents: SessionEvents;
-  agent: AgentPort;
+  /**
+   * The agents chats can be started with (epic 6): each session's agent is
+   * looked up here by its `agentId` (sessions without one are the registry's
+   * `legacyAgentId`). Core names no agent.
+   */
+  agents: AgentRegistry;
   /**
    * Answers the agents' permission requests. Default: the declining stub
    * (`createDecliningPermissions`), which denies every request.
    */
   permissions?: Permissions;
   /**
-   * The environment each agent process gets (AD-16: API keys go here and
-   * nowhere else). Called for every agent start. Default: none.
+   * The environment the agent `agentId`'s processes get (AD-16: API keys go
+   * here and nowhere else, each agent's only to its own). Called for every
+   * agent start. Default: none.
    */
-  agentEnv?: () => Readonly<Record<string, string>>;
+  agentEnv?: (agentId: AgentId) => Readonly<Record<string, string>>;
   /** Called with every agent failure, for the log. Its `details` hold no secret. */
   onAgentError?: (sessionId: SessionId, error: AgentError) => void;
   /**
@@ -131,11 +137,16 @@ export interface Chat {
    */
   deleteHistory(workspaceId: WorkspaceId): Omit<HistoryDeleted, 'event'>;
   /**
-   * A new session in the workspace, `idle`: a `chat` by default, or a
-   * `planning` session (story 4.1), which is a chat whose first message the
-   * planning use-case sends.
+   * A new session in the workspace, `idle`, with the agent `agentId` (the
+   * registry's default when absent), fixed for its life (epic 6): a `chat`
+   * by default, or a `planning` session (story 4.1), which is a chat whose
+   * first message the planning use-case sends. Throws `UnknownAgentError`
+   * for an agent that isn't registered and `NotFoundError` for an unknown
+   * workspace; nothing is created.
    */
-  createChatSession(workspaceId: WorkspaceId, kind?: Exclude<SessionKind, 'build'>): Session;
+  createChatSession(workspaceId: WorkspaceId, options?: { kind?: Exclude<SessionKind, 'build'> | undefined; agentId?: AgentId | undefined }): Session;
+  /** The agents a chat can be started with, in order, each with the permission modes it declares (epic 6). */
+  chatAgents(): { agents: ChatAgent[]; defaultAgentId: AgentId };
   /** The session, which must belong to the workspace (`NotFoundError` otherwise). */
   getSession(workspaceId: WorkspaceId, sessionId: SessionId): Session;
   /**

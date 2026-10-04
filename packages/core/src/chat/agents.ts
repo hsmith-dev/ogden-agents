@@ -19,7 +19,7 @@ export function createAgents(
   ctx: ChatContext,
   deps: Pick<Replies, 'stopDeltaTimer'> & Pick<PermissionRequests, 'onPermissionRequestFor'> & { applyMode: ModeApplier },
 ) {
-  const { entities, sessionEvents, agent, agentEnv, live, droppedAgents, internalError, sessionModes } = ctx;
+  const { entities, sessionEvents, agentEnv, agentOf, agentIdOf, live, droppedAgents, internalError, sessionModes } = ctx;
   const { stopDeltaTimer, onPermissionRequestFor, applyMode } = deps;
 
   /** Ends the session's agent (it failed or went away); the next message starts a fresh one. */
@@ -75,10 +75,13 @@ export function createAgents(
       restartPending: false,
     };
     const onPermissionRequest = onPermissionRequestFor(session);
+    // The agent the session was started with (epic 6), looked up for each start: never another one.
+    const agent = agentOf(session.id);
+    const agentId = agentIdOf(session);
     // The real-cased path: the case-folded key is for uniqueness only (AD-2).
     const input = {
       cwd: workspace.realPath ?? workspace.path,
-      env: { ...agentEnv() },
+      env: { ...agentEnv(session.id) },
       onPermissionRequest,
       ...(entry.guardsRequested ? { protectedPaths: PROTECTED_PATHS } : {}),
     };
@@ -116,7 +119,7 @@ export function createAgents(
       entry.prime = restored === 'new';
       entry.off = started.onEvent((event) => apply(session.id, entry, event));
       sessionModes.set(session.id, started.permissionModes ?? ['ask']);
-      ctx.lastSessionModes.value = started.permissionModes ?? ['ask'];
+      ctx.lastSessionModes.set(agentId, started.permissionModes ?? ['ask']);
       // The chat's stored mode before the first prompt, whatever the agent's own settings started it in
       // (a new chat, and every chat after a restart, in Ask). One it can't be put in, not even Ask, is stopped.
       const applied = await applyMode(session.id, started, entry.guardsRequested);
@@ -148,7 +151,7 @@ export function createAgents(
   const promptFor = (sessionId: SessionId, entry: Live, messageId: string, text: string): { prompt: string; primed: boolean } => {
     if (!entry.prime || text.trimStart().startsWith('/')) return { prompt: text, primed: false };
     const earlier = entities.listCompletedMessages(sessionId).filter((message) => message.messageId !== messageId);
-    return { prompt: primedPrompt(earlier, text, agent.displayName), primed: true };
+    return { prompt: primedPrompt(earlier, text, agentOf(sessionId).displayName), primed: true };
   };
 
   /** Releases the session's agent process and waits for it to exit, so the CLI never shares the session with it. */

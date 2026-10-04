@@ -30,7 +30,7 @@ import {
   type Core,
   type StartAgentSession,
 } from '../src/index.js';
-import { openTestCore, tempDir } from './helpers.js';
+import { openTestCore, soleAgent, tempDir } from './helpers.js';
 import { fakeTerminal } from './support/fake-terminal.js';
 
 interface ModedAgentOptions {
@@ -150,7 +150,7 @@ function setUp(agent = modedAgent(), core: Core = openTestCore(), timeoutMs?: nu
     dataDir: tempDir('ogden-agents-data-'),
     entities: core.entities,
     sessionEvents: core.sessionEvents,
-    agent: agent.port,
+    agents: soleAgent(agent.port),
     permissions: core.permissions,
     events: core.events,
     installSettings: core.installSettings,

@@ -26,12 +26,14 @@ import {
   SessionNotBusyError,
   SessionNotIdleError,
   TerminalUnavailableError,
+  UnknownAgentError,
   ValidationError,
   type AddProject,
   type Chat,
 } from '@ogden-agents/core';
 import {
   API_ROUTES,
+  ChatAgentsResponse,
   CreateSessionRequest,
   CreateWorkspaceRequest,
   FEATURE_UNAVAILABLE_MESSAGE,
@@ -97,6 +99,7 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     if (error instanceof SessionBusyError) {
       return apiError(c, 409, 'session_busy', 'The agent is still answering. Send your message when it is done.');
     }
+    if (error instanceof UnknownAgentError) return apiError(c, 400, 'agent_unknown', error.message);
     if (error instanceof InvalidOperationError || error instanceof ValidationError) {
       return apiError(c, 400, 'invalid_request', error.message);
     }
@@ -115,14 +118,18 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     }
   });
 
+  // The agents a chat can be started with (epic 6): agent-neutral data the picker reads.
+  app.get(API_ROUTES.chatAgents, (c) => c.json(ChatAgentsResponse.parse(chat.chatAgents())));
+
   app.post(API_ROUTES.workspaceSessions, limit, async (c) => {
     const scope = ids(c);
     if (scope === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
     const body = await readBody(c, CreateSessionRequest, { optional: true });
     if (!body.ok) return body.response;
     try {
-      const session = chat.createChatSession(scope.workspaceId);
-      log.info('chat session created', { workspaceId: scope.workspaceId, sessionId: session.id });
+      // The agent picked (epic 6), or the default one; an id this install doesn't have is refused by core.
+      const session = chat.createChatSession(scope.workspaceId, { agentId: body.value?.agentId });
+      log.info('chat session created', { workspaceId: scope.workspaceId, sessionId: session.id, agentId: session.agentId });
       return c.json(SessionResponse.parse({ session }), 201);
     } catch (error) {
       return refusal(c, error);

@@ -34,6 +34,8 @@ export const API_ERROR_CODES = [
   'confirmation_required',
   /** A permission mode the chat's agent, or its session, doesn't offer (409): nothing changed. */
   'mode_unavailable',
+  /** A new chat named an agent this install doesn't have (400; epic 6): nothing created. */
+  'agent_unknown',
   /** uv's status or install could not be read or started (500). */
   'toolchain_unavailable',
   /** A route or socket request whose lane has not shipped yet (501; the story 2.3 stubs). */

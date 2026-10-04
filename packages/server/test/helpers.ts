@@ -8,7 +8,7 @@ import { request, type IncomingHttpHeaders } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createMemoryAgentSetup, createMemoryAppShortcut, createMemoryBmadCatalog, createMemoryBmadSource, createMemorySecretStore, createMemoryTicketStore } from '@ogden-agents/adapters';
-import { createAgentSetup, createBmadSource, createBoard, createChat, createNewProjectDefaults, createOnboarding, createPlanning, type AgentPort, type Core } from '@ogden-agents/core';
+import { createAgentRegistry, createAgentSetup, createBmadSource, createBoard, createChat, createNewProjectDefaults, createOnboarding, createPlanning, type AgentPort, type Core } from '@ogden-agents/core';
 import { API_ROUTES, webSocketProtocols } from '@ogden-agents/shared';
 import type { Hono } from 'hono';
 import { afterEach } from 'vitest';
@@ -249,7 +249,14 @@ export function fullTestApp(core: Core, extra: Partial<AppOptions> = {}): Hono {
     reopenSession: () => Promise.reject(new Error('no agent in this test')),
     listAuthMethods: () => Promise.reject(new Error('no agent in this test')),
   };
-  const chat = createChat({ dataDir: tempDataDir(), entities: core.entities, sessionEvents: core.sessionEvents, agent, events: core.events, installSettings: core.installSettings });
+  const chat = createChat({
+    dataDir: tempDataDir(),
+    entities: core.entities,
+    sessionEvents: core.sessionEvents,
+    agents: createAgentRegistry([{ agentId: 'test-agent', agent }]),
+    events: core.events,
+    installSettings: core.installSettings,
+  });
   const bmadSource = createBmadSource(createMemoryBmadSource({ ready: true }));
   return createApp({
     events: core.events,

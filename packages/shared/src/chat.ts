@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { BmadPieceSet } from './bmad.js';
-import { AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, MessageId, PermissionDecision } from './events.js';
+import { AgentId, AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, MessageId, PermissionDecision } from './events.js';
 import { PermissionMode, Session, Workspace } from './entities.js';
 import { PermissionRuleId, WorkspaceId } from './ids.js';
 import { SessionTerminal } from './terminal.js';
@@ -28,11 +28,36 @@ export type CreateWorkspaceRequest = z.infer<typeof CreateWorkspaceRequest>;
 export const WorkspaceResponse = z.object({ workspace: Workspace });
 export type WorkspaceResponse = z.infer<typeof WorkspaceResponse>;
 
-/** `POST /api/v1/workspaces/:wsId/sessions`. Only chat sessions are created this way so far. */
+/**
+ * `POST /api/v1/workspaces/:wsId/sessions`. Only chat sessions are created
+ * this way so far. `agentId` picks the chat's agent (epic 6); omitted, the
+ * install's default agent (`ChatAgentsResponse.defaultAgentId`).
+ */
 export const CreateSessionRequest = z.object({
   kind: z.literal('chat').default('chat'),
+  agentId: AgentId.optional(),
 });
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequest>;
+
+/**
+ * One agent a chat can be started with (epic 6, E6-R2): agent-neutral data,
+ * never a branch on an id. `permissionModes` are the modes it declares, Ask
+ * always among them.
+ */
+export const ChatAgent = z.object({
+  agentId: AgentId,
+  /** The agent's product name, as the UI names it. */
+  displayName: z.string().min(1),
+  permissionModes: z.array(PermissionMode).min(1),
+});
+export type ChatAgent = z.infer<typeof ChatAgent>;
+
+/** `GET /api/v1/chat-agents`: the agents a chat can be started with, in order, and the one a new chat gets when none is picked. */
+export const ChatAgentsResponse = z.object({
+  agents: z.array(ChatAgent).min(1),
+  defaultAgentId: AgentId,
+});
+export type ChatAgentsResponse = z.infer<typeof ChatAgentsResponse>;
 
 /**
  * One permission mode as the chat's mode picker offers it: whether the

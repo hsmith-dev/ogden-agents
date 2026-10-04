@@ -21,6 +21,7 @@ import {
   AgentSetupError,
   CoreError,
   createAgentSetup,
+  createAgentRegistry,
   createChat,
   createDataDir,
   createNewProjectDefaults,
@@ -31,11 +32,13 @@ import {
   ensureDataDir,
   openCore,
   PORT_FILE,
+  unregisteredAgent,
   type AgentPort,
   type AgentTerminalResume,
   type Core,
+  type RegisteredAgent,
 } from '@ogden-agents/core';
-import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM } from '@ogden-agents/shared';
+import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM, ServerMessage, type AgentId, type Session } from '@ogden-agents/shared';
 import openBrowser from 'open';
 import { WebSocketServer } from 'ws';
 import { createApp, type ServerControl } from './app.js';
@@ -325,40 +328,54 @@ async function listenAndAnnounce({
   const configuredCheckIn = options.checkInDelayMs ?? hooks.checkInMs;
   const checkInDelayMs = configuredCheckIn === undefined ? undefined : clampCheckInDelay(configuredCheckIn);
   /**
-   * The chat runs Claude Code: its API key (saved, else from this server's
-   * environment) joins only while its subscription is known to be signed out
-   * (story 9.2). Every case variant of the key's name is removed first, so
+   * Each agent's chat environment (epic 6; AD-16 note): its own API key
+   * (saved, else from this server's environment) joins only while its
+   * subscription is known to be signed out (story 9.2), and no other agent's
+   * key reaches it. Every case variant of a key's name is removed first, so
    * Windows never sees two.
    */
-  const chatEnv = () => ({ ...withoutAgentKeys(agentEnv()), ...agentSetup.agentEnv(CLAUDE_CODE_AGENT_ID) });
+  const chatEnv = (agentId: AgentId) => ({ ...withoutAgentKeys(agentEnv()), ...agentSetup.agentEnv(agentId) });
   /** The same, with the subscription state read again first when it is older than {@link SUBSCRIPTION_MAX_AGE_MS} (review F4). */
-  const freshChatEnv = async (env: Readonly<Record<string, string>>) => {
-    await agentSetup.refreshIfStale(CLAUDE_CODE_AGENT_ID, options.subscriptionMaxAgeMs ?? SUBSCRIPTION_MAX_AGE_MS);
-    return { ...withoutAgentKeys(env), ...agentSetup.agentEnv(CLAUDE_CODE_AGENT_ID) };
+  const freshChatEnv = async (agentId: AgentId, env: Readonly<Record<string, string>>) => {
+    await agentSetup.refreshIfStale(agentId, options.subscriptionMaxAgeMs ?? SUBSCRIPTION_MAX_AGE_MS);
+    return { ...withoutAgentKeys(env), ...agentSetup.agentEnv(agentId) };
   };
   /** The agent's terminal resume with {@link freshChatEnv} applied to each environment. */
-  const withChatEnv = (resume: AgentTerminalResume): AgentTerminalResume => {
+  const withChatEnv = (agentId: AgentId, resume: AgentTerminalResume): AgentTerminalResume => {
     const transcript = resume.transcript?.bind(resume);
     return {
-      command: async (id, env, options) => resume.command(id, await freshChatEnv(env), options),
-      locate: async (env) => resume.locate(await freshChatEnv(env)),
-      ...(transcript === undefined ? {} : { transcript: async (input) => transcript({ ...input, env: await freshChatEnv(input.env) }) }),
+      command: async (id, env, options) => resume.command(id, await freshChatEnv(agentId, env), options),
+      locate: async (env) => resume.locate(await freshChatEnv(agentId, env)),
+      ...(transcript === undefined ? {} : { transcript: async (input) => transcript({ ...input, env: await freshChatEnv(agentId, input.env) }) }),
     };
   };
-  const chatAgent: AgentPort = {
+  /** `agent` as a chat runs it: every start, and its terminal, with its own environment rules (stories 3.1, 3.2, 9.2). */
+  const forChat = (agentId: AgentId, agent: AgentPort): AgentPort => ({
     get displayName() {
       return agent.displayName;
     },
     get permissionModes() {
       return agent.permissionModes;
     },
-    startSession: async (input) => agent.startSession({ ...input, env: await freshChatEnv(input.env) }),
-    reopenSession: async (input) => agent.reopenSession({ ...input, env: await freshChatEnv(input.env) }),
+    startSession: async (input) => agent.startSession({ ...input, env: await freshChatEnv(agentId, input.env) }),
+    reopenSession: async (input) => agent.reopenSession({ ...input, env: await freshChatEnv(agentId, input.env) }),
     listAuthMethods: (input) => agent.listAuthMethods(input),
     skillInvocation: (skill, idea) => agent.skillInvocation(skill, idea),
     // The terminal runs, and its transcript is read, with the chat's environment rules, the API key's included (stories 3.1, 3.2).
-    ...(agent.terminalResume === undefined ? {} : { terminalResume: withChatEnv(agent.terminalResume) }),
-  };
+    ...(agent.terminalResume === undefined ? {} : { terminalResume: withChatEnv(agentId, agent.terminalResume) }),
+  });
+  /** Claude Code as a chat runs it: the default agent, and the one Plan and the document cards use (stories 4.1, 4.7). */
+  const chatAgent = forChat(CLAUDE_CODE_AGENT_ID, agent);
+  // The agents a chat can be started with (epic 6): Claude Code first, the default and the agent of
+  // every session stored before agents could be chosen; then any a test registers (the fake second agent).
+  const registered: RegisteredAgent[] = [{ agentId: CLAUDE_CODE_AGENT_ID, agent }, ...(options.extraAgents ?? [])];
+  const unwrapped = new Map(registered.map(({ agentId, agent: port }) => [agentId, port]));
+  const agents = createAgentRegistry(
+    registered.map(({ agentId, agent: port }) => ({ agentId, agent: agentId === CLAUDE_CODE_AGENT_ID ? chatAgent : forChat(agentId, port) })),
+    { defaultAgentId: CLAUDE_CODE_AGENT_ID, legacyAgentId: CLAUDE_CODE_AGENT_ID },
+  );
+  /** A session's agent id: its own, else (stored before agents could be chosen) Claude Code's. */
+  const agentIdOf = (session: Session): AgentId => session.agentId ?? agents.legacyAgentId;
   // One terminal port for the chat and the toggle's availability check (story 3.7): they agree on node-pty.
   const terminal = createPtyTerminalPort(options.loadPty);
   // Document cards (story 4.7, `start-planning.ts`).
@@ -367,7 +384,7 @@ async function listenAndAnnounce({
     dataDir,
     entities: core.entities,
     sessionEvents: core.sessionEvents,
-    agent: chatAgent,
+    agents,
     permissions,
     agentEnv: chatEnv,
     terminal,
@@ -419,8 +436,12 @@ async function listenAndAnnounce({
     control,
     toolchain,
     chat,
-    // The unwrapped agent and `chatEnv`: core's checks, without reading sign-in again on every GET (story 3.7).
-    terminalAvailability: createTerminalAvailability({ agent, terminal, env: chatEnv }),
+    // The session's unwrapped agent and `chatEnv`: core's checks, without reading sign-in again on every GET (story 3.7).
+    terminalAvailability: createTerminalAvailability({
+      agent: (session) => unwrapped.get(agentIdOf(session)) ?? unregisteredAgent(),
+      terminal,
+      env: (session) => chatEnv(agentIdOf(session)),
+    }),
     permissions,
     bmad: core.bmad,
     // The test-only BMad probe route (story 10.1): a test run on a temp data folder, with its own variable set.

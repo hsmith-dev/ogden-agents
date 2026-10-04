@@ -22,7 +22,7 @@ import {
   type TerminalSize,
   type TerminalViewer,
 } from '../src/index.js';
-import { openTestCore, tempDir } from './helpers.js';
+import { openTestCore, soleAgent, tempDir } from './helpers.js';
 import { fakeTerminal as memoryTerminal } from './support/fake-terminal.js';
 
 afterEach(() => {
@@ -75,7 +75,7 @@ async function chatInTerminal() {
     dataDir: tempDir('ogden-agents-data-'),
     entities: core.entities,
     sessionEvents: core.sessionEvents,
-    agent: resumingAgent(),
+    agents: soleAgent(resumingAgent()),
     terminal: terminal.port,
     onInternalError: (_sessionId, error) => internal.push(error),
   });

@@ -3,7 +3,7 @@
  * `start.ts`, story 3.9).
  */
 import type { ClaudeCodeSetupOptions, FetchLike, PtyLoader } from '@ogden-agents/adapters';
-import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, Core, SecretStorePort, TicketStorePort, ToolchainPort } from '@ogden-agents/core';
+import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, Core, RegisteredAgent, SecretStorePort, TicketStorePort, ToolchainPort } from '@ogden-agents/core';
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
 import type { Logger } from './log.js';
@@ -40,8 +40,15 @@ export interface StartOptions {
    * clicks Install.
    */
   toolchain?: ToolchainPort;
-  /** Override the chat agent (tests). Default: the `acp-claude-code` adapter. */
+  /** Override Claude Code's chat agent (tests). Default: the `acp-claude-code` adapter. */
   agent?: AgentPort;
+  /**
+   * More agents a chat can be started with, after Claude Code (epic 6; tests:
+   * the fake ACP agent as a second agent). Never set by the launcher: a
+   * shipped install has Claude Code only until another agent's adapter ships.
+   * Each runs with its own environment rules, its id's API key only.
+   */
+  extraAgents?: readonly RegisteredAgent[];
   /**
    * The Claude Agent ACP adapter's entry script (or, in tests, any script
    * that speaks ACP over stdio, such as the fake agent). Default:

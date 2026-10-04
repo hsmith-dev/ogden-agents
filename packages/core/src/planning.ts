@@ -108,7 +108,7 @@ export function createPlanning({ bmad, entities, catalog, chat, agent, modulesSe
       if (!skills.some((entry) => entry.name === skill)) throw new NotFoundError('skill', skill);
       // Checked again after the (async) scan: a piece turned off meanwhile starts nothing.
       bmad.requireBmadFeature(workspaceId, 'planning');
-      const session = chat.createChatSession(workspaceId, 'planning');
+      const session = chat.createChatSession(workspaceId, { kind: 'planning' });
       chat.sendMessage(workspaceId, session.id, agent.skillInvocation(skill, checkedIdea));
       return session;
     },

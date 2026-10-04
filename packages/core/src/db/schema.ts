@@ -7,6 +7,7 @@
  */
 import type {
   AdapterRefs,
+  AgentId,
   CautionLevel,
   PermissionMode,
   RunOutcome,
@@ -75,6 +76,12 @@ export const sessions = sqliteTable(
      * before it read `ask`; a server start sets every other one back to `ask`.
      */
     permissionMode: text('permission_mode').$type<PermissionMode>().notNull().default('ask'),
+    /**
+     * The agent the session was started with (epic 6), never changed. `NULL`
+     * on rows from before agents could be chosen: they are the install's
+     * original agent, which the server wiring names (core names none, AD-1).
+     */
+    agentId: text('agent_id').$type<AgentId>(),
     title: text('title'),
     /** Agent and CLI ids (AD-9), as a JSON object. Never keys. */
     adapterRefs: text('adapter_refs', { mode: 'json' }).$type<AdapterRefs>().notNull(),

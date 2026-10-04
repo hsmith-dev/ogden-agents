@@ -29,7 +29,7 @@ export function createTurns(
     Pick<Agents, 'drop' | 'agentFor' | 'promptFor'> &
     Pick<PermissionModes, 'onReportedMode'>,
 ) {
-  const { options, entities, sessionEvents, agent, stopGraceMs, live, busy, running, switching, internalError, toAgentError, later, newMessageId, getWorkspace, getSession } = ctx;
+  const { options, entities, sessionEvents, agentOf, stopGraceMs, live, busy, running, switching, internalError, toAgentError, later, newMessageId, getWorkspace, getSession } = ctx;
   const { flushDelta, tickDelta, flushSession, finishReply, clearQuiet, clearTurnTimers, armQuiet, drop, agentFor, promptFor, onReportedMode } = deps;
 
   /** Whether the session has a Deny reason or a queued message to send once this turn ends. */
@@ -120,7 +120,7 @@ export function createTurns(
             fail(
               sessionId,
               entry,
-              new AgentError(event.code ?? 'agent_failed', event.reason ?? `${agent.displayName} stopped unexpectedly.`),
+              new AgentError(event.code ?? 'agent_failed', event.reason ?? `${agentOf(sessionId).displayName} stopped unexpectedly.`),
               event.fatal === true,
             );
           }
@@ -182,7 +182,7 @@ export function createTurns(
       try {
         started = await Promise.race([entry.agent, entry.gone.then(() => undefined)]);
       } catch (error) {
-        fail(session.id, entry, toAgentError(error), true);
+        fail(session.id, entry, toAgentError(session.id, error), true);
         return;
       }
       // Stopped (or dropped) before the prompt went out: nothing is sent.
@@ -213,7 +213,7 @@ export function createTurns(
     } catch (error) {
       // The adapter has usually reported `error` already; this covers one that didn't.
       // A process that is gone reports `fatal` itself, which drops the agent.
-      if (live.get(session.id) === entry) fail(session.id, entry, toAgentError(error), false);
+      if (live.get(session.id) === entry) fail(session.id, entry, toAgentError(session.id, error), false);
     }
   };
 

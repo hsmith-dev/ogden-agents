@@ -52,7 +52,7 @@ import {
   type TerminalPort,
   type TerminalProcess,
 } from '../src/index.js';
-import { openTestCore, tempDir } from './helpers.js';
+import { openTestCore, soleAgent, tempDir } from './helpers.js';
 
 /**
  * An agent whose every prompt runs `script`, which reports through `emit`.
@@ -130,7 +130,7 @@ function setUp(core: Core, port: AgentPort, env: Record<string, string> = {}, da
     dataDir,
     entities: core.entities,
     sessionEvents: core.sessionEvents,
-    agent: port,
+    agents: soleAgent(port),
     ...(permissions === undefined ? {} : { permissions }),
     agentEnv: () => env,
     onAgentError: (sessionId, error) => errors.push([sessionId, error]),
@@ -592,7 +592,7 @@ describe('resuming a chat (story 2.7)', () => {
     first.chat.sendMessage(first.workspace.id, first.session.id, 'first question');
     await first.chat.settled();
     await first.chat.close();
-    const chat = createChat({ dataDir: tempDir('ogden-agents-data-'), entities: core.entities, sessionEvents: core.sessionEvents, agent: agent.port });
+    const chat = createChat({ dataDir: tempDir('ogden-agents-data-'), entities: core.entities, sessionEvents: core.sessionEvents, agents: soleAgent(agent.port)});
     return { core, agent, chat, workspace: first.workspace, session: first.session };
   };
 
@@ -1054,7 +1054,7 @@ function setUpHand(core: Core, agent: ReturnType<typeof handAgent>, permissions?
     dataDir: tempDir('ogden-agents-data-'),
     entities: core.entities,
     sessionEvents: core.sessionEvents,
-    agent: agent.port,
+    agents: soleAgent(agent.port),
     ...(permissions === undefined ? {} : { permissions }),
     checkInDelayMs: CHECK_IN_MS,
     onAgentError: (_sessionId, error) => errors.push(error),
@@ -1562,7 +1562,7 @@ describe('the terminal (story 3.1)', () => {
       dataDir: tempDir('ogden-agents-data-'),
       entities: core.entities,
       sessionEvents: core.sessionEvents,
-      agent: port,
+      agents: soleAgent(port),
       agentEnv: () => ({ PATH: '/bin', CHAT_ONLY: 'yes' }),
       terminal: terminal.port,
       onInternalError: (_sessionId, error) => internal.push(error),
@@ -1736,7 +1736,7 @@ describe('the terminal (story 3.1)', () => {
       dataDir: tempDir('ogden-agents-data-'),
       entities: core.entities,
       sessionEvents: core.sessionEvents,
-      agent: { ...agent.port, terminalResume: cliResume() },
+      agents: soleAgent({ ...agent.port, terminalResume: cliResume() }),
       terminal: terminal.port,
     });
     const workspace = chat.openWorkspace(tempDir('ogden-agents-repo-'));

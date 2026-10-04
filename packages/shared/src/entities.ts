@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AgentId } from './events-common.js';
 import { RunId, SessionId, WorkspaceId } from './ids.js';
 import { IsoUtcTimestamp } from './time.js';
 
@@ -85,6 +86,13 @@ export const Session = z.object({
    * from before it existed: they read as `ask`.
    */
   permissionMode: PermissionMode.default('ask'),
+  /**
+   * The agent the session was started with (epic 6, E6-R1): set at creation
+   * and never changed. Absent only in `session.created` events and rows from
+   * before agents could be chosen; those sessions are the install's original
+   * agent, which the server fills in every session it answers.
+   */
+  agentId: AgentId.optional(),
   title: z.string().nullable(),
   adapterRefs: AdapterRefs,
   createdAt: IsoUtcTimestamp,

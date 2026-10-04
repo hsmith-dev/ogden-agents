@@ -2,7 +2,15 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach } from 'vitest';
-import { openCore, type BmadCatalogPort, type Core, type OpenCoreOptions } from '../src/index.js';
+import { createAgentRegistry, openCore, type AgentPort, type AgentRegistry, type BmadCatalogPort, type Core, type OpenCoreOptions } from '../src/index.js';
+
+/** The id the core tests register their one agent under. */
+export const TEST_AGENT_ID = 'test-agent';
+
+/** A registry holding only `agent`, as {@link TEST_AGENT_ID} (default and legacy agent alike). */
+export function soleAgent(agent: AgentPort): AgentRegistry {
+  return createAgentRegistry([{ agentId: TEST_AGENT_ID, agent }]);
+}
 
 const dirs: string[] = [];
 const opened: Core[] = [];

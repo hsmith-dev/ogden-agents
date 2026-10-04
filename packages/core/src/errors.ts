@@ -359,6 +359,14 @@ export class ModeUnavailableError extends CoreError {
   }
 }
 
+/** A new chat named an agent that isn't registered (epic 6): nothing was created. */
+export class UnknownAgentError extends CoreError {
+  override readonly name = 'UnknownAgentError';
+  constructor(message = "Ogden Agents doesn't have that agent on this computer. Pick another one.") {
+    super('agent_unknown', message);
+  }
+}
+
 /** A session of the workspace is `working` or `waiting`, so its history was not deleted. */
 export class WorkspaceBusyError extends CoreError {
   override readonly name = 'WorkspaceBusyError';

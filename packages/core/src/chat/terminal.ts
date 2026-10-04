@@ -92,7 +92,7 @@ export function trimBacklog(text: string, max: number = TERMINAL_BACKLOG_CHARS):
 }
 
 export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgent' | 'storedAgentSessionId'>) {
-  const { options, entities, sessionEvents, agent, agentEnv, busy, running, terminals, switching, internalError, later, newMessageId, getWorkspace, getSession } = ctx;
+  const { options, entities, sessionEvents, agentOf, agentEnv, busy, running, terminals, switching, internalError, later, newMessageId, getWorkspace, getSession } = ctx;
   const { releaseAgent, storedAgentSessionId } = deps;
 
   /** The driver changes in flight (each holding its session's `switching`): `close` waits for them. */
@@ -204,11 +204,11 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
 
   /** The CLI's record of the session's agent session (story 3.3), `undefined` when the agent can't read it back; rejects as the adapter's `transcript` does. */
   const readTranscript = async (session: Session, agentSessionId: string): Promise<AgentTranscriptTurn[] | undefined> => {
-    const resume = agent.terminalResume;
+    const resume = agentOf(session.id).terminalResume;
     if (resume?.transcript === undefined) return undefined;
     const workspace = getWorkspace(session.workspaceId);
     // Bounded (review F1): a read that hangs is an unreadable record; the switch goes on.
-    const read = await bounded(resume.transcript({ agentSessionId, cwd: workspace.realPath ?? workspace.path, env: { ...agentEnv() } }), TERMINAL_STEP_TIMEOUT_MS);
+    const read = await bounded(resume.transcript({ agentSessionId, cwd: workspace.realPath ?? workspace.path, env: { ...agentEnv(session.id) } }), TERMINAL_STEP_TIMEOUT_MS);
     if (read === TIMED_OUT) throw new TerminalHandoffError('terminal_read_timeout');
     return read;
   };
@@ -220,7 +220,7 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
    * and is logged as a code; the terminal opens either way.
    */
   const markTerminalImport = async (session: Session, agentSessionId: string): Promise<void> => {
-    if (agent.terminalResume?.transcript === undefined) return;
+    if (agentOf(session.id).terminalResume?.transcript === undefined) return;
     let mark = '';
     try {
       mark = (await readTranscript(session, agentSessionId))?.at(-1)?.id ?? START_MARK;
@@ -235,6 +235,8 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
   };
 
   const toTerminal = async (session: Session): Promise<Session> => {
+    // The session's own agent (epic 6): its CLI, its name.
+    const agent = agentOf(session.id);
     // The checks are shared with the server's availability check (story 3.9), the idle check between their stages.
     const support = checkTerminalSupport(agent, options.terminal);
     if ('available' in support) throw new TerminalUnavailableError(support.code, support.reason);
@@ -248,7 +250,7 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
       return new TerminalUnavailableError('pty_unavailable', terminalUnavailableReason.tooSlow(agent.displayName));
     };
     // The checks before the agent is released share one deadline (review F1): none can hold the lock.
-    const env = { ...agentEnv() };
+    const env = { ...agentEnv(session.id) };
     const deadline = startDeadline(TERMINAL_STEP_TIMEOUT_MS);
     const step = async <T>(promise: Promise<T>): Promise<T> => {
       const result = await deadline.step(promise);
@@ -426,7 +428,7 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     if (session !== undefined) await importTerminalTurns(session);
     if (exitCode !== 0) {
       try {
-        sessionEvents.completeMessage(sessionId, { messageId: newMessageId(), role: 'agent', content: terminalClosedNote(agent.displayName, exitCode) });
+        sessionEvents.completeMessage(sessionId, { messageId: newMessageId(), role: 'agent', content: terminalClosedNote(agentOf(sessionId).displayName, exitCode) });
       } catch (error) {
         internalError(sessionId, error);
       }

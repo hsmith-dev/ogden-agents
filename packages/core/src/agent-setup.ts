@@ -37,14 +37,14 @@ import {
   type AgentSetupStatus,
 } from '@ogden-agents/shared';
 import type { AgentInstallProgress, AgentPortStatus, AgentSetupPort, AgentSignIn, AgentSubscriptionState, ApiKeyVerification } from './agent-setup-port.js';
-import { AgentSetupError, LAST_KNOWN_AUTH_MAX_AGE_MS, SignInNotPendingError, apiKeySecretName, newFlight, type AgentSetup, type AgentSetupOptions, type Flight, type SavedKey } from './agent-setup-types.js';
+import { AgentBusyError, AgentSetupError, LAST_KNOWN_AUTH_MAX_AGE_MS, SignInNotPendingError, apiKeySecretName, newFlight, type AgentSetup, type AgentSetupOptions, type Flight, type SavedKey } from './agent-setup-types.js';
 import { ApiKeyRefusedError, NotFoundError, SecretsUnavailableError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import type { SecretStorePort } from './secret-store-port.js';
 import { PROGRESS_INTERVAL_MS } from './toolchain.js';
 
 // Not `Flight`, `newFlight` or `SavedKey`: they stay inside this use-case.
-export { AgentSetupError, LAST_KNOWN_AUTH_MAX_AGE_MS, SignInNotPendingError, apiKeySecretName, type AgentReadiness, type AgentSetup, type AgentSetupOptions } from './agent-setup-types.js';
+export { AgentBusyError, AgentSetupError, LAST_KNOWN_AUTH_MAX_AGE_MS, SignInNotPendingError, apiKeySecretName, type AgentReadiness, type AgentSetup, type AgentSetupOptions } from './agent-setup-types.js';
 
 /** The subscription state a port reports, or the one derived from its status (see `AgentPortStatus`). */
 function subscriptionOf(status: AgentPortStatus): AgentSubscriptionState {
@@ -113,6 +113,8 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
   const progressInterval = options.progressIntervalMs ?? PROGRESS_INTERVAL_MS;
   /** Each running install's latest progress, and when it is done. */
   const installs = new Map<string, { progress: AgentInstallProgress; done: Promise<void> }>();
+  /** Agents being uninstalled (epic 6 entry 7): no install starts meanwhile. */
+  const uninstalling = new Set<string>();
   /** The last failed install's plain reason, shown until the agent is found installed or another install starts. */
   const installFailure = new Map<string, string>();
   /** Aborted by `dispose`, so a verify call in flight stops with the server. */
@@ -438,6 +440,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
     async install(agentId) {
       const port = portFor(agentId);
       if (disposed) throw new AgentSetupError(`${port.displayName} couldn't be installed. Try again.`);
+      if (uninstalling.has(agentId)) throw new AgentBusyError(`${port.displayName} is being uninstalled. Try again when it finishes.`);
       if (installs.has(agentId)) return { started: false, agent: await statusFor(port) };
       // Claimed before any await, so two clicks start one install.
       const progress: AgentInstallProgress = { step: `Installing ${port.displayName}`, percent: 0 };
@@ -464,6 +467,58 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
         release();
       });
       return { started: true, agent: withApiKey(port, installingStatus(shown(detected), progress)) };
+    },
+
+    async uninstall(agentId) {
+      const port = portFor(agentId);
+      if (port.uninstall === undefined) throw new ValidationError(`${port.displayName} can't be uninstalled from Ogden Agents.`, []);
+      if (installs.has(agentId)) throw new AgentBusyError(`${port.displayName} is being installed. Try again when it finishes.`);
+      if (uninstalling.has(agentId)) throw new AgentBusyError(`${port.displayName} is already being uninstalled.`);
+      uninstalling.add(agentId);
+      try {
+        // A sign-in in progress runs the installed copy: stop it first.
+        const flight = flights.get(agentId);
+        if (flight !== undefined) {
+          flights.delete(agentId);
+          await stop(flight);
+          announce(agentId, 'needs_sign_in');
+        }
+        try {
+          await port.uninstall();
+        } catch (error) {
+          report(agentId, 'uninstall', error);
+          throw new AgentBusyError(error instanceof AgentSetupError ? error.message : `${port.displayName} couldn't be uninstalled. Try again.`, { cause: error });
+        }
+        installFailure.delete(agentId);
+        lastStatus.delete(agentId);
+        await readSubscription(port);
+        appendInstall(agentId, { type: 'agent.uninstalled', workspaceId: null, streamId: AGENTS_STREAM, payload: { agentId } });
+        return await statusFor(port);
+      } finally {
+        uninstalling.delete(agentId);
+      }
+    },
+
+    async signOut(agentId) {
+      const port = portFor(agentId);
+      if (port.signOut === undefined) throw new ValidationError(`${port.displayName} can't be signed out from Ogden Agents.`, []);
+      const flight = flights.get(agentId);
+      if (flight !== undefined) {
+        flights.delete(agentId);
+        await stop(flight);
+      }
+      try {
+        await port.signOut();
+      } catch (error) {
+        report(agentId, 'sign_out', error);
+        throw new AgentBusyError(error instanceof AgentSetupError ? error.message : `${port.displayName} couldn't sign out. Try again.`, { cause: error });
+      }
+      lastFailure.delete(agentId);
+      // Signed out: a key, saved or from the environment, takes over (story 9.2's rule).
+      setSubscription(agentId, 'signed_out');
+      if (keyFor(port) !== undefined) announce(agentId, 'signed_in', { method: 'api_key' });
+      else announce(agentId, 'needs_sign_in');
+      return statusFor(port);
     },
 
     async settled() {

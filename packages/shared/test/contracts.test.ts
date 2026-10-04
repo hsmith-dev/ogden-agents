@@ -180,6 +180,7 @@ const EVENTS: Array<[type: string, valid: Record<string, unknown>, invalid: Reco
     { workspaceId: wsId, streamId: 'agents', payload: { agentId: 'claude-code' } },
   ],
   ['agent.install_failed', { ...onAgents, payload: { agentId: 'codex', reason: 'No network.' } }, { ...onAgents, payload: { agentId: 'codex', reason: '' } }],
+  ['agent.uninstalled', { ...onAgents, payload: { agentId: 'antigravity' } }, { ...onAgents, payload: { agentId: 'Not An Id' } }],
   [
     'agent.auth_changed',
     { ...onAgents, payload: { agentId: 'claude-code', state: 'signed_in', method: 'subscription' } },

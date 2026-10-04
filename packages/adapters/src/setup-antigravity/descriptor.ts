@@ -26,10 +26,20 @@ export const ANTIGRAVITY_API_KEY_METHOD_ID = 'gemini-api-key';
 /** Its session modes (spike 6.1): `default` asks, `auto_edit` approves every file edit, `yolo` approves every tool. */
 export const ANTIGRAVITY_MODE_IDS = { ask: 'default', autoEdit: 'auto_edit', skipAll: 'yolo' } as const;
 
+/** One file the archive holds, as Ogden hashed it from the pinned archive (entry 7). */
+export interface AntigravityFilePin {
+  size: number;
+  sha256: string;
+}
+
 /** One pinned archive: where it is, its SHA-256 (Ogden's own; Google publishes none), and the server in it. */
 export interface AntigravityArchivePin {
   url: string;
   sha256: string;
+  /** The archive's size in bytes, as sent with `Accept-Encoding: identity` (entry 7: a download never takes more). */
+  size: number;
+  /** Every file the archive holds, by name (no folders): the only entries an install unpacks (entry 7). */
+  files: Readonly<Record<string, AntigravityFilePin>>;
   /** The server's file name inside the archive. */
   binary: string;
   /** The arguments it starts with (`--uid=` on Linux, as the ACP registry gives). */

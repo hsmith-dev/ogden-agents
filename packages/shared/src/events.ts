@@ -316,6 +316,15 @@ const AgentInstallFailedInput = z.object({
 export const AgentInstallFailedEvent = AgentInstallFailedInput.extend(assigned);
 export type AgentInstallFailedEvent = z.infer<typeof AgentInstallFailedEvent>;
 
+const AgentUninstalledInput = z.object({
+  type: z.literal('agent.uninstalled'),
+  ...onAgentsStream,
+  payload: z.object({ agentId: AgentId }),
+});
+/** The user uninstalled an agent Ogden Agents had installed (epic 6 entry 7). */
+export const AgentUninstalledEvent = AgentUninstalledInput.extend(assigned);
+export type AgentUninstalledEvent = z.infer<typeof AgentUninstalledEvent>;
+
 const AgentAuthChangedInput = z.object({
   type: z.literal('agent.auth_changed'),
   ...onAgentsStream,
@@ -372,6 +381,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   AgentInstallProgressEvent,
   AgentInstallCompletedEvent,
   AgentInstallFailedEvent,
+  AgentUninstalledEvent,
   AgentAuthChangedEvent,
   SettingsDeveloperModeChangedEvent,
 ]);
@@ -419,6 +429,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   AgentInstallProgressInput,
   AgentInstallCompletedInput,
   AgentInstallFailedInput,
+  AgentUninstalledInput,
   AgentAuthChangedInput,
   SettingsDeveloperModeChangedInput,
 ]);

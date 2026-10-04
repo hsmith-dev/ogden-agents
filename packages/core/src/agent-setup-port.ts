@@ -80,6 +80,19 @@ export interface AgentSetupPort {
   install(onProgress: (progress: AgentInstallProgress) => void): Promise<{ version: string | null }>;
   /** Starts signing in with the user's own account. */
   signIn(): Promise<AgentSignIn>;
+  /**
+   * Removes what Install put in the data folder (epic 6 entry 7), keeping the
+   * agent's own home (its chats and sign-in). Present only for an agent that
+   * can; rejects with plain words (`AgentSetupError`) when it can't now (a
+   * file in use).
+   */
+  uninstall?(): Promise<void>;
+  /**
+   * Signs the agent out of the user's own account (epic 6 entry 7). Present
+   * only for an agent that can; rejects with plain words when it couldn't,
+   * and then it is still signed in.
+   */
+  signOut?(): Promise<void>;
   /** Present when the agent can use an API key instead (story 9.2). */
   readonly apiKey?: AgentApiKeySupport;
 }

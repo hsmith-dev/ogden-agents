@@ -65,6 +65,8 @@ export const API_ERROR_CODES = [
   'api_key_refused',
   /** An agent's install, sign-in or API key could not be done (500). The message says why in plain words. */
   'agent_setup_failed',
+  /** An agent can't be uninstalled or signed out right now (installing, a file in use, a sign-out it refused; 409). The message says why. */
+  'agent_busy',
   /** A BMad Method piece this project has turned off was asked for (409; AD-22: core's guard refused it). */
   'feature_off',
   /**

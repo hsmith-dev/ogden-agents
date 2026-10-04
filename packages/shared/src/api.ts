@@ -128,6 +128,9 @@ export const API_ROUTES = {
   /**
    * `POST` → 202 `AgentSetupStatus` (9.3): installs the agent, only when the
    * user clicks Install. Progress arrives as `agent.install_*` events.
+   * `DELETE` → 200 `AgentSetupStatus` (epic 6 entry 7): uninstalls an agent
+   * whose status says `canUninstall`; 409 `agent_busy` while it installs or
+   * a file is in use, with plain words. `agent.uninstalled` follows.
    */
   agentInstall: `${API_BASE}/agents/:agentId/install`,
   /**
@@ -143,6 +146,12 @@ export const API_ROUTES = {
    * without one in progress. The code is never logged, evented or stored.
    */
   agentSignInCode: `${API_BASE}/agents/:agentId/sign-in/code`,
+  /**
+   * `POST` → 200 `AgentSetupStatus` (epic 6 entry 7): signs the agent out of
+   * the user's own account, for an agent whose status says `canSignOut`;
+   * `agent.auth_changed` follows. Reads no body.
+   */
+  agentSignOut: `${API_BASE}/agents/:agentId/sign-out`,
   /**
    * `PUT SetApiKeyRequest` → 204, sent `Cache-Control: no-store` (9.2):
    * checks the key with the agent's provider and stores it in the keychain

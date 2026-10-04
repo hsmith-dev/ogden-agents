@@ -59,6 +59,22 @@ export const AgentSetupStatus = z.object({
    * brings its own.
    */
   installSize: z.enum(['small', 'large']).optional(),
+  /**
+   * `false` when Install can't help on this computer (no pinned download for
+   * its system; epic 6 entry 7): the card shows `reason` and no Install
+   * button. Absent means it can.
+   */
+  canInstall: z.boolean().optional(),
+  /** `true` when Ogden Agents installed the agent and can remove it (epic 6 entry 7). */
+  canUninstall: z.boolean().optional(),
+  /** `true` when the agent is signed in with the user's account through Ogden Agents and can be signed out here (epic 6 entry 7). */
+  canSignOut: z.boolean().optional(),
+  /** `false` when the agent's sign-in never asks for a code to paste back, so the card offers no code box (epic 6 entry 7). Absent means it may. */
+  signInTakesCode: z.boolean().optional(),
+  /** Plain words about what Install puts where, shown beside Install and Uninstall (epic 6 entry 7). Never a secret. */
+  installNote: z.string().min(1).optional(),
+  /** Plain words to read before signing in (terms, where to finish; epic 6 entry 7). Never a secret. */
+  signInNote: z.string().min(1).optional(),
   /** The step under way and how far it is (0 to 100, or `null` when it can't tell), while `install` is `installing` (9.3). */
   progress: z.object({ step: z.string().min(1), percent: z.number().min(0).max(100).nullable() }).optional(),
 });

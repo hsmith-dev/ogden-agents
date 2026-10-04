@@ -43,6 +43,15 @@ export class SignInNotPendingError extends CoreError {
   }
 }
 
+/** An agent can't do that now (installing, a file in use, a sign-out that failed); `message` is plain words. */
+export class AgentBusyError extends CoreError {
+  override readonly name = 'AgentBusyError';
+  constructor(message: string, options: { cause?: unknown } = {}) {
+    super('agent_busy', message);
+    if (options.cause !== undefined) this.cause = options.cause;
+  }
+}
+
 /**
  * Whether a new chat can be started with an agent now (6.3): its install and
  * sign-in state as last read, and, when it can't, why. `blocked` is set only
@@ -115,6 +124,21 @@ export interface AgentSetup {
    * `agent.install_*` events.
    */
   install(agentId: string): Promise<{ started: boolean; agent: AgentSetupStatus }>;
+  /**
+   * Uninstalls `agentId` (epic 6 entry 7), cancelling a sign-in in progress
+   * first, and resolves with its status after. Rejects with
+   * `AgentBusyError` while it installs or when the port couldn't (a file in
+   * use), `ValidationError` for an agent that can't be uninstalled here.
+   * Appends `agent.uninstalled`.
+   */
+  uninstall(agentId: string): Promise<AgentSetupStatus>;
+  /**
+   * Signs `agentId` out of the user's own account (epic 6 entry 7) and
+   * resolves with its status after: an API key, if any, takes over.
+   * Rejects with `AgentBusyError` when the port couldn't, `ValidationError`
+   * for an agent that can't be signed out here.
+   */
+  signOut(agentId: string): Promise<AgentSetupStatus>;
   /** Resolves once no install is running (tests, shutdown). */
   settled(): Promise<void>;
   /** Stops every sign-in (server stop). Appends nothing. */

@@ -8,6 +8,7 @@ import { useAppearance } from '@/appearance/appearance-provider';
 import { agentNameOf, cancelSession, ChatApiError, UNKNOWN_AGENT_NAME, fetchSession, sendMessage, setPermissionMode, switchDriver } from '@/chat/chat-api';
 import { useChatAgents } from '@/chat/use-chat-agents';
 import { Composer } from '@/chat/composer';
+import { chatDraftKey } from '@/chat/drafts';
 import { ReadOnlyConversation } from '@/chat/read-only';
 import { SignInAgain } from '@/chat/sign-in-again';
 import { ToolCalls } from '@/chat/tool-call-row';
@@ -518,6 +519,7 @@ export function SessionPage() {
           }
           hint={state === 'working' ? `${agentName} is working. A message you send now waits its turn.` : undefined}
           restore={restore}
+          draftKey={chatDraftKey(wsId, sesId)}
           action={
             busy ? (
               <Button type="button" variant="outline" onClick={stop} aria-disabled={stopping} data-testid="stop">

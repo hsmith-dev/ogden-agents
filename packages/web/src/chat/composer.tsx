@@ -1,5 +1,6 @@
 import { PaperPlaneRight } from '@phosphor-icons/react';
-import { useEffect, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { clearDraftIfUnchanged, readDraft, writeDraft } from '@/chat/drafts';
 import { Button } from '@/ui/button';
 import { ComposerFrame } from '@/ui/composer-frame';
 import { Textarea } from '@/ui/textarea';
@@ -23,6 +24,12 @@ export interface ComposerProps {
    * ahead of anything already typed. Applied once per `key`.
    */
   restore?: { key: string; text: string } | undefined;
+  /**
+   * Where the unsent text is kept for the short term (backlog story 6): this
+   * chat's, or a project's new-chat composer's, draft in this browser only.
+   * Without it nothing is kept.
+   */
+  draftKey?: string | undefined;
   /** Sends the text; rejects with a plain message to show if it wasn't sent. */
   onSend(text: string): Promise<void>;
 }
@@ -32,8 +39,19 @@ export interface ComposerProps {
  * `Shift+Enter` starts a new line. While the agent works, sending queues the
  * message (the page says so in `hint`). `Esc` does nothing here: it never stops the agent.
  */
-export function Composer({ label, blockedReason, hint, action, footer, describedBy, restore, onSend }: ComposerProps) {
-  const [text, setText] = useState('');
+export function Composer({ label, blockedReason, hint, action, footer, describedBy, restore, draftKey, onSend }: ComposerProps) {
+  const [text, setText] = useState(() => (draftKey === undefined ? '' : readDraft(draftKey)));
+  // The page may stay mounted from one chat to the next: show the new chat's own draft.
+  const [shownKey, setShownKey] = useState(draftKey);
+  if (shownKey !== draftKey) {
+    setShownKey(draftKey);
+    setText(draftKey === undefined ? '' : readDraft(draftKey));
+  }
+  const currentKey = useRef(draftKey);
+  useEffect(() => {
+    currentKey.current = draftKey;
+    if (draftKey !== undefined) writeDraft(draftKey, text);
+  }, [draftKey, text]);
   const restoreKey = restore?.key;
   const restoreText = restore?.text;
   useEffect(() => {
@@ -47,6 +65,7 @@ export function Composer({ label, blockedReason, hint, action, footer, described
   const submit = () => {
     if (blocked || text.trim() === '') return;
     const sent = text;
+    const sentKey = draftKey;
     setSending(true);
     setError(undefined);
     onSend(sent).then(
@@ -54,7 +73,9 @@ export function Composer({ label, blockedReason, hint, action, footer, described
         setSending(false);
         // Clear only what was sent: text typed while it was on its way (the
         // agent already showing working, say) is the next message, not this one.
-        setText((current) => (current === sent ? '' : current));
+        // The draft too, even when this composer has gone (a first chat opens its page).
+        if (sentKey !== undefined) clearDraftIfUnchanged(sentKey, sent);
+        if (currentKey.current === sentKey) setText((current) => (current === sent ? '' : current));
       },
       (failure: unknown) => {
         setSending(false);

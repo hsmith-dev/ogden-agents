@@ -11,7 +11,7 @@ import { cn } from './utils';
 export function UserMessage({ className, children, ...props }: ComponentProps<'div'>) {
   return (
     <div data-slot="message-user" className={cn('max-w-[85%] self-end rounded-lg bg-muted px-4 py-3', className)} {...props}>
-      <div className="max-w-(--measure) min-w-0 text-body text-foreground">{children}</div>
+      <p className="m-0 max-w-(--measure) whitespace-pre-wrap text-body text-foreground">{children}</p>
     </div>
   );
 }

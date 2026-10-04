@@ -29,14 +29,18 @@ export interface InlineContext {
 /** Lines kept in an {@link InlineContext}'s cache before it starts over. */
 const MAX_CACHED_LINES = 5_000;
 
-/** Links, images, strong and emphasis; code spans are found first by {@link splitCodeSpans}. */
+/**
+ * Links, images, strong and emphasis; code spans are found first by
+ * {@link splitCodeSpans}. A link's text holds no `[`, so a run of brackets
+ * is scanned once, not once per bracket.
+ */
 const INLINE =
-  /!\[([^\]\n]*)\]\(((?:[^()\n]|\([^()\n]*\))*)\)|\[([^\]\n]+)\]\(((?:[^()\n]|\([^()\n]*\))*)\)|\*\*(\S(?:[^\n]*?\S)?)\*\*|__(\S(?:[^\n]*?\S)?)__|\*(\S(?:[^\n]*?\S)?)\*|(?<![A-Za-z0-9])_(\S(?:[^\n]*?\S)?)_(?![A-Za-z0-9])/g;
+  /!\[([^[\]\n]*)\]\(((?:[^()\n]|\([^()\n]*\))*)\)|\[([^[\]\n]+)\]\(((?:[^()\n]|\([^()\n]*\))*)\)|\*\*(\S(?:[^\n]*?\S)?)\*\*|__(\S(?:[^\n]*?\S)?)__|\*(\S(?:[^\n]*?\S)?)\*|(?<![A-Za-z0-9])_(\S(?:[^\n]*?\S)?)_(?![A-Za-z0-9])/g;
 
 /** A bare address in text (chat only): one greedy class, so no backtracking. */
 const BARE_URL = /(?:https?:\/\/|mailto:)[^\s<>"'`]+/gi;
 /** Characters that end a sentence rather than an address. */
-const TRAILING = /[.,;:!?'")\]}*_]/;
+const TRAILING = /[.,;:!?'"\]}*_]/;
 
 const SAFE_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
 
@@ -105,14 +109,17 @@ function pushText(nodes: ReactNode[], text: string, linking: boolean) {
   for (const match of text.matchAll(BARE_URL)) {
     let address = match[0];
     // A sentence's closing punctuation, and a `)` the address didn't open, stay text.
-    while (address.length > 0 && TRAILING.test(address.at(-1)!)) address = address.slice(0, -1);
     let opened = 0;
-    for (const char of address) if (char === '(') opened++;
     let closed = 0;
-    for (const char of address) if (char === ')') closed++;
-    while (closed > opened && address.endsWith(')')) {
+    for (const char of address) {
+      if (char === '(') opened++;
+      else if (char === ')') closed++;
+    }
+    while (address.length > 0) {
+      const last = address.at(-1)!;
+      if (last === ')' ? closed <= opened : !TRAILING.test(last)) break;
+      if (last === ')') closed--;
       address = address.slice(0, -1);
-      closed--;
     }
     const href = safeHref(address);
     if (href === null) continue;

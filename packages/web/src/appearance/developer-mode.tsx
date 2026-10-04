@@ -1,7 +1,8 @@
 import { API_ROUTES, DeveloperModeResponse, type CoreEvent, type DeveloperModeResponse as DeveloperModeState } from '@ogden-agents/shared';
-import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { call, type Auth } from '@/api/http';
+import { keepSaved } from '@/api/keep-saved';
 import { tabAuth } from '@/auth/tab-token';
 import { useEventInvalidation } from '@/events/use-event-invalidation';
 import { useAppearance } from './appearance-provider';
@@ -34,22 +35,8 @@ export async function saveDeveloperMode(developerMode: boolean, auth: Auth = tab
   return DeveloperModeResponse.parse(json).developerMode;
 }
 
-/** The server's Developer mode (`undefined` while it loads). */
-export function useServerDeveloperMode() {
-  return useQuery({ queryKey: DEVELOPER_MODE_QUERY_KEY, queryFn: () => fetchDeveloperMode(), retry: false });
-}
-
-/**
- * Keeps a saved Developer mode as the server's value. A fetch still on its way
- * (the page's first read, held up behind other requests) answers with the value
- * from before the save; landing after it, it would turn the switch back
- * (seen on a Windows runner). So it is cancelled first, and the save's answer is
- * the one kept; anything fetched after this reads the saved value.
- */
-export async function keepSavedDeveloperMode(queryClient: QueryClient, developerMode: boolean): Promise<void> {
-  await queryClient.cancelQueries({ queryKey: DEVELOPER_MODE_QUERY_KEY });
-  queryClient.setQueryData(DEVELOPER_MODE_QUERY_KEY, { developerMode, everSet: true });
-}
+/** A saved Developer mode, as the server now reports it (kept through {@link keepSaved}: a read still on its way never turns the switch back). */
+const savedState = (developerMode: boolean): DeveloperModeState => ({ developerMode, everSet: true });
 
 /** The Developer mode switch's save (Settings > Appearance): one at a time, the saved value kept here and on the server. */
 export function useDeveloperModeSave(auth: Auth = tabAuth) {
@@ -63,7 +50,7 @@ export function useDeveloperModeSave(auth: Auth = tabAuth) {
     setError(undefined);
     saveDeveloperMode(on, auth).then(
       async (saved) => {
-        await keepSavedDeveloperMode(queryClient, saved);
+        await keepSaved(queryClient, DEVELOPER_MODE_QUERY_KEY, savedState(saved));
         update({ developerMode: saved });
         setSaving(false);
       },
@@ -134,7 +121,7 @@ export function DeveloperModeSync({ auth = tabAuth, storage = browserStorage() }
         saveDeveloperMode(true, auth).then(
           async (saved) => {
             markCarried(storage);
-            await keepSavedDeveloperMode(queryClient, saved);
+            await keepSaved(queryClient, DEVELOPER_MODE_QUERY_KEY, savedState(saved));
             carrying.current = false;
           },
           () => {

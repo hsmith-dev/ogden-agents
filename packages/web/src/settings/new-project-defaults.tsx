@@ -22,6 +22,7 @@ import {
 } from '@ogden-agents/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
+import { keepSaved } from '@/api/keep-saved';
 import { call, type Auth } from '@/api/http';
 import { tabAuth } from '@/auth/tab-token';
 import { DefaultAgentView, type DefaultAgentViewProps } from '@/chat/default-agent-view';
@@ -197,18 +198,17 @@ export function NewProjectDefaultsSection() {
 
   const save = (pieces: BmadPiece[], note: string | undefined, onFailure?: () => void) => {
     const ticket = latest.next();
-    // A refetch still on its way (the page's mount refetch, say) would land after this save and show the old
-    // default (story 4.13: seen on a Windows runner); the save's answer is the one kept.
-    void queryClient.cancelQueries({ queryKey: NEW_PROJECT_DEFAULTS_QUERY_KEY });
     setSaving(true);
     setChosen(pieces);
     setStatus(undefined);
     updateNewProjectDefaults(pieces).then(
-      (saved) => {
+      async (saved) => {
+        if (!latest.isLatest(ticket)) return;
+        // A read still on its way (the page's mount refetch, say) would show the old default (story 4.13).
+        await keepSaved(queryClient, NEW_PROJECT_DEFAULTS_QUERY_KEY, saved);
         if (!latest.isLatest(ticket)) return;
         setSaving(false);
         setChosen(undefined);
-        queryClient.setQueryData(NEW_PROJECT_DEFAULTS_QUERY_KEY, saved);
         setStatus({ kind: 'saved', text: note === undefined ? NEW_PROJECTS_SAVED_TEXT : `${note} ${NEW_PROJECTS_SAVED_TEXT}` });
       },
       (failure: unknown) => {
@@ -271,11 +271,12 @@ export function NewProjectsAgentSection() {
     setChosen(agentId);
     setStatus(undefined);
     updateNewProjectsAgent(agentId).then(
-      (saved) => {
+      async (saved) => {
+        if (!latest.isLatest(ticket)) return;
+        await keepSaved(queryClient, NEW_PROJECT_DEFAULTS_QUERY_KEY, saved);
         if (!latest.isLatest(ticket)) return;
         setSaving(false);
         setChosen(undefined);
-        queryClient.setQueryData(NEW_PROJECT_DEFAULTS_QUERY_KEY, saved);
         const name = list.agents.find((agent) => agent.agentId === projectDefaultAgent(list, saved.defaultAgentId))?.displayName ?? agentId;
         setStatus({ kind: 'saved', text: `Saved: new projects start with ${name}.` });
       },

@@ -3,6 +3,7 @@ import { House, Trash } from '@phosphor-icons/react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
+import { keepSaved } from '@/api/keep-saved';
 import { ChatApiError, removePermissionRule } from '@/chat/chat-api';
 import { DefaultAgentView, type DefaultAgentViewProps } from '@/chat/default-agent-view';
 import { projectDefaultAgent, useChatAgents } from '@/chat/use-chat-agents';
@@ -124,7 +125,7 @@ export function CautionLevelView({ value, onChange, saving, status }: CautionLev
 }
 
 /** Loads the level and saves each change at once. */
-function CautionLevelSection({ wsId }: { wsId: string }) {
+export function CautionLevelSection({ wsId }: { wsId: string }) {
   const settings = useWorkspaceSettings(wsId);
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
@@ -139,11 +140,12 @@ function CautionLevelSection({ wsId }: { wsId: string }) {
     setChosen(level);
     setStatus(undefined);
     updateCautionLevel(wsId, level).then(
-      (saved) => {
+      async (saved) => {
+        if (!latest.isLatest(ticket)) return;
+        await keepSaved(queryClient, ['workspace-settings', wsId], saved);
         if (!latest.isLatest(ticket)) return;
         setSaving(false);
         setChosen(undefined);
-        queryClient.setQueryData(['workspace-settings', wsId], saved);
         setStatus({ kind: 'saved', text: `Saved: ${CAUTION_OPTIONS[saved.cautionLevel].label}.` });
       },
       (failure: unknown) => {
@@ -160,7 +162,7 @@ function CautionLevelSection({ wsId }: { wsId: string }) {
 }
 
 /** Loads the project's default agent and saves each change at once; another tab's change shows through the event stream. */
-function DefaultAgentSection({ wsId }: { wsId: string }) {
+export function DefaultAgentSection({ wsId }: { wsId: string }) {
   const chatAgents = useChatAgents();
   const settings = useWorkspaceSettings(wsId);
   const queryClient = useQueryClient();
@@ -178,11 +180,12 @@ function DefaultAgentSection({ wsId }: { wsId: string }) {
     setChosen(agentId);
     setStatus(undefined);
     updateDefaultAgent(wsId, agentId).then(
-      (saved) => {
+      async (saved) => {
+        if (!latest.isLatest(ticket)) return;
+        await keepSaved(queryClient, ['workspace-settings', wsId], saved);
         if (!latest.isLatest(ticket)) return;
         setSaving(false);
         setChosen(undefined);
-        queryClient.setQueryData(['workspace-settings', wsId], saved);
         setStatus({ kind: 'saved', text: `Saved: new chats start with ${nameOf(projectDefaultAgent(list, saved.defaultAgentId))}.` });
       },
       (failure: unknown) => {

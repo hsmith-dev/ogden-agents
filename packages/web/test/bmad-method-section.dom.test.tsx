@@ -319,6 +319,24 @@ describe('BmadMethodSection (DOM)', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  it('a read still on its way when the save answers never turns the switches back (story 6.9)', async () => {
+    const { client, isOn, click } = mount([]);
+    // The page's read, held up behind other requests: it answers later with the pieces from before the save.
+    let answer: () => void = () => {};
+    const held = client
+      .fetchQuery({ queryKey: ['workspace-settings', WS], queryFn: () => new Promise<WorkspaceSettings>((resolve) => (answer = () => resolve(settings([])))), staleTime: 0 })
+      .catch(() => undefined);
+    await click('bmad-use');
+    expect(isOn('bmad-planning')).toBe(true);
+    await act(async () => {
+      answer();
+      await held;
+    });
+    expect(isOn('bmad-planning')).toBe(true);
+    expect(isOn('bmad-board')).toBe(true);
+    expect(client.getQueryData<WorkspaceSettings>(['workspace-settings', WS])?.bmadPieces).toEqual(['planning', 'board']);
+  });
+
   it('switches are disabled while a save is in flight', async () => {
     state.answer = () => new Promise(() => {});
     const { sw, click } = mount([]);

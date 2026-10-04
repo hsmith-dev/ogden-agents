@@ -14,6 +14,7 @@ import { ArrowRight, FolderPlus, Plus } from '@phosphor-icons/react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { keepSaved } from '@/api/keep-saved';
 import { AgentCard } from '@/agents/agent-card';
 import { useAgents } from '@/agents/agent-setup-api';
 import { shortcutLocation, useAppShortcut, useAppShortcutActions } from '@/appearance/app-shortcut-api';
@@ -129,7 +130,7 @@ function Actions({ children }: { children: ReactNode }) {
  * the default for new projects); then its card, and on the change to ready
  * the step moves on by itself.
  */
-function AgentStep({ onContinue, skip }: { onContinue(): void; skip: ReactNode }) {
+export function AgentStep({ onContinue, skip }: { onContinue(): void; skip: ReactNode }) {
   const query = useAgents();
   const defaults = useNewProjectDefaults();
   const queryClient = useQueryClient();
@@ -145,8 +146,8 @@ function AgentStep({ onContinue, skip }: { onContinue(): void; skip: ReactNode }
     setSaveError(undefined);
     // The chosen agent becomes the default for new projects, beside the default pieces (10.4).
     updateNewProjectsAgent(agentId).then(
-      (saved) => {
-        if (latest.isLatest(ticket)) queryClient.setQueryData(NEW_PROJECT_DEFAULTS_QUERY_KEY, saved);
+      async (saved) => {
+        if (latest.isLatest(ticket)) await keepSaved(queryClient, NEW_PROJECT_DEFAULTS_QUERY_KEY, saved);
       },
       (failure: unknown) => {
         if (latest.isLatest(ticket)) setSaveError(failure instanceof Error ? failure.message : "The agent couldn't be kept for new projects. Try again.");

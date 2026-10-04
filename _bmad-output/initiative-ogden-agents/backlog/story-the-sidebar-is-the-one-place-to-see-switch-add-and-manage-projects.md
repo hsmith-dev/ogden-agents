@@ -68,7 +68,7 @@ The sidebar header today has a project drop-down (the workspace switcher) that r
 10. **Landmarks and keyboard**
     **Given** the sidebar at any width
     **When** a keyboard or screen reader user moves through it
-    **Then** it is one navigation landmark named "Projects and sessions", the project list sits under a "Projects" heading, every control is reachable with Tab in visual order, and no id repeats when the drawer and the column are both mounted
+    **Then** it is one landmark named "Projects and sessions" (the column beside the page, or the drawer's navigation), the project list sits under a "Projects" heading, every control is reachable with Tab in visual order, and no id repeats when the drawer and the column are both mounted
 
 ## Boundaries
 
@@ -89,4 +89,5 @@ The sidebar header today has a project drop-down (the workspace switcher) that r
 - Assumption: the filter shows from eight projects up (about one screen of collapsed groups at 900 px height); the number is a constant the builder names.
 - Assumption: the sidebar keeps its creation-order project list (the drop-down sorted A to Z); creation order is what the sidebar has always shown.
 - Overlap: sibling stories built in parallel on the same base also touch the sidebar's project group (an empty project's "Start a chat" entry, renaming a chat from its row). This story changes only the group's heading line and the sidebar header, so those merge beside it.
+- Assumption: the column keeps its complementary landmark (`aside`) rather than becoming `nav`: the drawer already is a `nav`, and many existing tests and the parallel sibling stories select the column by it.
 - Assumption: backlog id 2 is the next unused id on this base; a sibling backlog story made in parallel may need renumbering at merge.

@@ -34,7 +34,12 @@ function setup() {
   const repo = temp('ogden-agents-vcs-repo-');
   const data = temp('ogden-agents-vcs-data-');
   const markers = temp('ogden-agents-vcs-markers-');
+  // No global or system git config for Ogden's calls: what a fresh CI runner or a new computer has.
+  const emptyConfig = join(data, 'empty-gitconfig');
+  writeFileSync(emptyConfig, '');
   git(repo, 'init', '-q', '--initial-branch=main');
+  // Files as written, LF, whatever the OS's git does by default (Windows runners set core.autocrlf).
+  git(repo, 'config', 'core.autocrlf', 'false');
   git(repo, 'config', 'user.name', 'Test');
   git(repo, 'config', 'user.email', 'test@example.com');
   writeFileSync(join(repo, 'README.md'), '# Repo\n');
@@ -48,7 +53,7 @@ function setup() {
     chmodSync(join(dir, name), 0o755);
   };
   for (const name of ['pre-commit', 'commit-msg', 'post-commit', 'post-merge', 'post-checkout', 'pre-merge-commit', 'reference-transaction']) hook(join(repo, '.git', 'hooks'), name);
-  const vcs = createGitVcs({ hooksDir: join(data, 'tools', 'git-hooks-none'), env: () => ({ PATH: process.env.PATH ?? '', HOME: data, ...(process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot ?? '' } : {}) }) });
+  const vcs = createGitVcs({ hooksDir: join(data, 'tools', 'git-hooks-none'), env: () => ({ PATH: process.env.PATH ?? '', HOME: data, GIT_CONFIG_GLOBAL: emptyConfig, GIT_CONFIG_NOSYSTEM: '1', ...(process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot ?? '' } : {}) }) });
   const head = git(repo, 'rev-parse', 'HEAD').trim();
   return { repo, data, markers, vcs, head, hook };
 }
@@ -176,6 +181,8 @@ describe('vcs-git (story 5.2)', () => {
     const { repo, data, vcs, head } = setup();
     git(repo, 'config', '--unset', 'user.name');
     git(repo, 'config', '--unset', 'user.email');
+    // No identity guessed from the host name either (macOS can, a Linux runner can't): git must be given one.
+    git(repo, 'config', 'user.useConfigOnly', 'true');
     const path = join(data, 'w', 'run3');
     mkdirSync(join(data, 'w'));
     await vcs.addWorktree(repo, { path, branch: 'ogden/1.3-z', base: head });
@@ -185,7 +192,7 @@ describe('vcs-git (story 5.2)', () => {
     expect(await vcs.merge(repo, git(repo, 'rev-parse', 'ogden/1.3-z').trim())).toBe('merged');
     // The fallback identity applies only where git has none (no repo or global config here: HOME is the temp data folder).
     await vcs.commit(repo, 'merge');
-    expect(execFileSync('git', ['log', '-1', '--format=%an <%ae>'], { cwd: repo, encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: data } }).trim()).toBe('Ogden Agents <ogden-agents@localhost>');
+    expect(execFileSync('git', ['log', '-1', '--format=%an <%ae>'], { cwd: repo, encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: data, GIT_CONFIG_NOSYSTEM: '1' } }).trim()).toBe('Ogden Agents <ogden-agents@localhost>');
 
     writeFileSync(join(data, 'tools', 'git-hooks-none', 'pre-commit'), '#!/bin/sh\n');
     await expect(vcs.status(repo)).rejects.toBeInstanceOf(VcsError);

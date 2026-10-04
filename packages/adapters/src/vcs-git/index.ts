@@ -121,6 +121,20 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
     return result.stdout;
   };
 
+  /**
+   * The identity a merge or its commit is made with: the user's own where git
+   * has one (repo or global config), else Ogden Agents' for the part missing,
+   * so a computer with no git identity still merges and commits.
+   */
+  const identity = async (repoPath: string): Promise<string[]> => {
+    const email = await run(repoPath, ['config', '--get', 'user.email']);
+    const name = await run(repoPath, ['config', '--get', 'user.name']);
+    return [
+      ...(name.code === 0 && name.stdout.trim() !== '' ? [] : ['-c', 'user.name=Ogden Agents']),
+      ...(email.code === 0 && email.stdout.trim() !== '' ? [] : ['-c', 'user.email=ogden-agents@localhost']),
+    ];
+  };
+
   const head = async (repoPath: string): Promise<VcsHead | undefined> => {
     const ref = await run(checkPath(repoPath), ['symbolic-ref', '--quiet', 'HEAD']);
     if (ref.code !== 0) return undefined;
@@ -266,7 +280,8 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
         if (added.code !== 0 || tracked.code !== 0) return 'refused';
         if (added.stdout.split('\0').some((name) => name !== '' && !inHead.has(name) && existsSync(join(repoPath, ...name.split('/'))))) return 'refused';
       }
-      const result = await run(repoPath, ['merge', '--no-ff', '--no-commit', '--no-verify', '--no-overwrite-ignore', commit]);
+      // git wants an identity for a merge even with `--no-commit` (a computer with none refuses it).
+      const result = await run(repoPath, [...(await identity(repoPath)), 'merge', '--no-ff', '--no-commit', '--no-verify', '--no-overwrite-ignore', commit]);
       if (result.code === 0) return 'merged';
       // Only unmerged paths are a conflict; anything else git refused or failed at.
       const unmerged = await run(repoPath, ['diff', '--name-only', '--diff-filter=U', '-z']);
@@ -288,14 +303,7 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
 
     async commit(repoPath, message) {
       checkPath(repoPath);
-      // The user's own identity; a repo without one still gets its merge commit.
-      const email = await run(repoPath, ['config', '--get', 'user.email']);
-      const name = await run(repoPath, ['config', '--get', 'user.name']);
-      const identity = [
-        ...(name.code === 0 && name.stdout.trim() !== '' ? [] : ['-c', 'user.name=Ogden Agents']),
-        ...(email.code === 0 && email.stdout.trim() !== '' ? [] : ['-c', 'user.email=ogden-agents@localhost']),
-      ];
-      await must(repoPath, [...identity, 'commit', '--no-verify', '--no-edit', '-m', message], 'commit the merge');
+      await must(repoPath, [...(await identity(repoPath)), 'commit', '--no-verify', '--no-edit', '-m', message], 'commit the merge');
     },
   };
 }

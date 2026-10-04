@@ -329,8 +329,8 @@ describe('starting a build (story 5.2)', () => {
     const setup = h.core.buildSessions.get(session.id)!;
     expect(setup.cwd).toBe(run.worktreePath);
     // Only the run's own git paths: never the user's refs, logs or objects/info.
-    expect(setup.sandbox.writableRoots).toEqual([run.worktreePath, '/repo/.git/objects', `/repo/.git/refs/heads/ogden/${runShort}`, `/repo/.git/logs/refs/heads/ogden/${runShort}`, '/repo/.git/worktrees/x']);
-    expect(setup.sandbox.deniedPaths).toContain('/repo/.git/objects/info');
+    expect(setup.sandbox.writableRoots).toEqual([run.worktreePath, join('/repo/.git', 'objects'), `/repo/.git/refs/heads/ogden/${runShort}`, `/repo/.git/logs/refs/heads/ogden/${runShort}`, '/repo/.git/worktrees/x']);
+    expect(setup.sandbox.deniedPaths).toContain(join('/repo/.git', 'objects', 'info'));
     expect(setup.sandbox.deniedReads).toContain(realpathSync.native(h.dataDir));
     expect(setup.sandbox.allowedReads).toEqual([run.worktreePath]);
     expect(setup.decide({ toolCallId: 't', title: 'w', kind: 'edit', paths: ['/repo/.git/refs/heads/main'] }).outcome).toBe('deny');

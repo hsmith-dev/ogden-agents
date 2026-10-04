@@ -154,6 +154,8 @@ export function createFakeBmadRepo({ bmad = true, output = false, tickets = fals
   writeFiles(path, files);
   if (git) {
     fixtureGit(path, 'init', '--quiet', '--initial-branch=main');
+    // Files as written, LF, whatever the OS's git does by default (Windows runners set core.autocrlf).
+    fixtureGit(path, 'config', 'core.autocrlf', 'false');
     fixtureGit(path, 'config', 'user.name', 'Fixture');
     fixtureGit(path, 'config', 'user.email', 'fixture@example.com');
     fixtureGit(path, 'add', '-A');

@@ -43,6 +43,7 @@ test('Build on a ready card builds it unattended, the session streams read-only,
     page,
     async ({ server, dataDir, repo }) => {
       fixtureGit(repo, 'init', '-q', '--initial-branch=main');
+      fixtureGit(repo, 'config', 'core.autocrlf', 'false');
       fixtureGit(repo, 'config', 'user.name', 'Fixture');
       fixtureGit(repo, 'config', 'user.email', 'fixture@example.com');
       fixtureGit(repo, 'add', '-A');

@@ -11,7 +11,7 @@
  * bwrap, spike 5.1).
  */
 import { accessSync, constants, statSync } from 'node:fs';
-import { delimiter, join } from 'node:path';
+import { posix, win32 } from 'node:path';
 import type { SandboxCheck, SandboxPort } from '@ogden-agents/core';
 
 /** Why there is no sandbox, in plain words (EXPERIENCE.md Sandbox unavailable). */
@@ -42,8 +42,10 @@ export function createClaudeNativeSandbox(options: NativeSandboxOptions = {}): S
   const isExecutable = options.isExecutable ?? executable;
   const onPath = (name: string): boolean => {
     const given = typeof options.path === 'function' ? options.path() : options.path;
-    const dirs = (given ?? process.env.PATH ?? '').split(delimiter).filter((dir) => dir !== '');
-    return dirs.some((dir) => isExecutable(join(dir, name)));
+    // The PATH rules of the platform checked (a Linux PATH is `:`-separated, whatever runs the check).
+    const rules = platform === 'win32' ? win32 : posix;
+    const dirs = (given ?? process.env.PATH ?? '').split(rules.delimiter).filter((dir) => dir !== '');
+    return dirs.some((dir) => isExecutable(rules.join(dir, name)));
   };
   return {
     async check(): Promise<SandboxCheck> {

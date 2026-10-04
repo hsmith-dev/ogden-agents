@@ -3,7 +3,7 @@ title: 'Contracts and stubs for epics 5 and 11'
 type: 'feature'
 ticket: '3'
 created: '2026-10-04'
-status: 'in-review'
+status: 'built'
 baseline_revision: 'af433a0fd3ef6790ccb5b0c6d1999c1ee5ca66d2'
 route: 'full'
 route_source: 'auto'
@@ -90,6 +90,8 @@ context:
 - Adapters: `build-memory`, `vcs-memory`, `sandbox-memory` (`createFixedSandbox` moved here from `sandbox-claude-native`), `notify-memory`; `buildrunner-acp` maps every halt (test reads the conditions out of `.agents/skills/bmad-build-auto`). The skill's unresolved-questions halt has free text as its condition, so it maps to `other` and its words are the reason shown.
 - Server: 7 workspace routes through `bmadPieceRoutes('builds')` and 8 install routes (`run-settings-routes.ts`), all 501; `StartOptions.buildRunner` and `notifier` slots.
 - Fixtures: the fake agent's `FAKE_ACP_BUILD_HALT`, `FAKE_ACP_BUILD_FAIL_TESTS`, `FAKE_ACP_BUILD_DELAY_MS`; the fake test command is `FAKE_TEST_COMMAND_FILES` in `fake-bmad-repo.ts` (a string the repo gets, so no separate `fake-test-command.mjs`).
+
+- Verified after the review patches: `pnpm typecheck` clean; `pnpm test` 1891 passed, 4 skipped; `pnpm e2e` 104 passed; `pnpm run pack && pnpm smoke` OK.
 
 ## Plan Change Log
 

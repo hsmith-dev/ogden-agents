@@ -140,20 +140,6 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
     return result.stdout;
   };
 
-  /**
-   * The identity a merge or its commit is made with: the user's own where git
-   * has one (repo or global config), else Ogden Agents' for the part missing,
-   * so a computer with no git identity still merges and commits.
-   */
-  const identity = async (repoPath: string): Promise<string[]> => {
-    const email = await run(repoPath, ['config', '--get', 'user.email']);
-    const name = await run(repoPath, ['config', '--get', 'user.name']);
-    return [
-      ...(name.code === 0 && name.stdout.trim() !== '' ? [] : ['-c', 'user.name=Ogden Agents']),
-      ...(email.code === 0 && email.stdout.trim() !== '' ? [] : ['-c', 'user.email=ogden-agents@localhost']),
-    ];
-  };
-
   const head = async (repoPath: string): Promise<VcsHead | undefined> => {
     const ref = await run(checkPath(repoPath), ['symbolic-ref', '--quiet', 'HEAD']);
     if (ref.code !== 0) return undefined;
@@ -185,8 +171,222 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
     return paths;
   };
 
+  /**
+   * The identity a merge, its commit or a rebase is made with: the user's own
+   * where git has one (repo or global config), else Ogden Agents' for the part
+   * missing, so a computer with no git identity still merges and commits.
+   */
+  const identityFlags = async (repoPath: string): Promise<string[]> => {
+    const email = await run(repoPath, ['config', '--get', 'user.email']);
+    const name = await run(repoPath, ['config', '--get', 'user.name']);
+    return [
+      ...(name.code === 0 && name.stdout.trim() !== '' ? [] : ['-c', 'user.name=Ogden Agents']),
+      ...(email.code === 0 && email.stdout.trim() !== '' ? [] : ['-c', 'user.email=ogden-agents@localhost']),
+    ];
+  };
+
+  /**
+   * Git's own folders for a run's worktree, checked against the repo before
+   * git runs there (security review, story 5.3): the agent can write the
+   * worktree's admin folder (`<common>/worktrees/<id>`), so its `HEAD` must
+   * still name `branch` and its `commondir` the repo's, and git is then run
+   * with `GIT_DIR`, `GIT_COMMON_DIR` and `GIT_WORK_TREE` set by Ogden, never
+   * read from files the agent wrote.
+   */
+  const pinnedWorktree = async (repoPath: string, worktreePath: string, branch: string): Promise<Record<string, string>> => {
+    checkPath(repoPath);
+    checkPath(worktreePath);
+    checkBranch(branch);
+    const common = realOf(resolve(repoPath, (await must(repoPath, ['rev-parse', '--path-format=absolute', '--git-common-dir'], 'read the repository')).trim()));
+    const gitDir = join(common, 'worktrees', basename(worktreePath));
+    try {
+      const head = readFileSync(join(gitDir, 'HEAD'), 'utf8');
+      const commondir = readFileSync(join(gitDir, 'commondir'), 'utf8').trim();
+      const link = readFileSync(join(worktreePath, '.git'), 'utf8').trim();
+      if (head.trim() !== `ref: refs/heads/${branch}`) throw new Error('head');
+      if (realOf(resolve(gitDir, commondir)) !== common) throw new Error('commondir');
+      if (!link.startsWith('gitdir: ') || realOf(resolve(worktreePath, link.slice('gitdir: '.length))) !== realOf(gitDir)) throw new Error('gitdir');
+    } catch {
+      throw new VcsError("The run's worktree isn't as Ogden Agents made it, so git didn't run there.", { step: 'worktree' });
+    }
+    return { GIT_DIR: gitDir, GIT_COMMON_DIR: common, GIT_WORK_TREE: worktreePath };
+  };
+
+  /** Whether git's own file `name` (`MERGE_HEAD`, `rebase-merge`, …) exists in the checkout's git folder. */
+  const gitPathExists = async (repoPath: string, name: string, extraEnv?: Readonly<Record<string, string>>): Promise<boolean> => {
+    const out = await run(repoPath, ['rev-parse', '--path-format=absolute', '--git-path', name], undefined, extraEnv);
+    return out.code === 0 && existsSync(out.stdout.trim());
+  };
+
+  return {
+    head,
+
+    async topLevel(repoPath) {
+      const out = await run(checkPath(repoPath), ['rev-parse', '--show-toplevel']);
+      if (out.code !== 0) return undefined;
+      const top = out.stdout.trim();
+      try {
+        return realpathSync.native(top);
+      } catch {
+        return undefined;
+      }
+    },
+
+    async branchRevision(repoPath, branch) {
+      const out = await run(checkPath(repoPath), ['rev-parse', '--verify', '--quiet', `refs/heads/${checkBranch(branch)}^{commit}`]);
+      const id = out.stdout.trim();
+      return out.code === 0 && REVISION.test(id) ? id : undefined;
+    },
+
+    async operationInProgress(repoPath) {
+      checkPath(repoPath);
+      for (const name of ['MERGE_HEAD', 'rebase-merge', 'rebase-apply', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']) {
+        if (await gitPathExists(repoPath, name)) return true;
+      }
+      return false;
+    },
+
+    async staged(repoPath) {
+      const out = await must(checkPath(repoPath), ['diff', '--cached', '--no-ext-diff', '--no-textconv', '--no-renames', '--name-only', '-z'], 'read the staged changes');
+      return out.split('\0').filter((name) => name !== '');
+    },
+
+    async restore(repoPath, paths) {
+      if (paths.length === 0) return;
+      await must(checkPath(repoPath), ['checkout', 'HEAD', '--', ...paths.map(checkRelative)], 'restore the plan');
+    },
+
+    async addWorktree(repoPath, { path, branch, base }) {
+      checkPath(repoPath);
+      checkPath(path);
+      if (existsSync(path)) throw new VcsError('The run folder already exists.', { step: 'worktree' });
+      await must(repoPath, ['worktree', 'add', '-b', checkBranch(branch), path, checkRevision(base)], 'add the worktree');
+    },
+
+    async worktreeGitPaths(worktreePath, branch): Promise<VcsWorktreeGitPaths> {
+      const folder = checkBranch(branch).split('/').slice(0, -1);
+      if (folder.length === 0) throw new VcsError('That is not a branch Ogden Agents can use.', { step: 'branch' });
+      const out = await must(checkPath(worktreePath), ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'], 'read the worktree');
+      const [gitDir, commonDir] = out.split(/\r?\n/).map((line) => line.trim());
+      if (gitDir === undefined || commonDir === undefined || gitDir === '' || commonDir === '') throw new VcsError("git couldn't read the worktree.", { step: 'worktree' });
+      const common = resolve(worktreePath, commonDir);
+      const branchRefDir = join(common, 'refs', 'heads', ...folder);
+      const branchLogDir = join(common, 'logs', 'refs', 'heads', ...folder);
+      for (const dir of [branchRefDir, branchLogDir]) mkdirSync(dir, { recursive: true });
+      return { gitDir: resolve(worktreePath, gitDir), commonDir: common, branchRefDir, branchLogDir };
+    },
+
+    async removeWorktree(repoPath, path, removeOptions = {}) {
+      checkPath(repoPath);
+      checkPath(path);
+      if (existsSync(path)) {
+        const removed = await run(repoPath, ['worktree', 'remove', '--force', '--force', path]);
+        if (removed.code !== 0 && existsSync(path)) rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      }
+      await run(repoPath, ['worktree', 'prune']);
+      if (removeOptions.deleteBranch !== undefined) await run(repoPath, ['branch', '-D', '--', checkBranch(removeOptions.deleteBranch)]);
+    },
+
+    status,
+
+    async diff(repoPath, base, branch, diffOptions = {}): Promise<VcsDiff> {
+      checkPath(repoPath);
+      const from = checkRevision(base);
+      const to = `refs/heads/${checkBranch(branch)}`;
+      const names = await must(repoPath, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--name-only', '-z', from, to, '--'], 'read the changes');
+      const files = names.split('\0').filter((name) => name !== '');
+      const maxBytes = diffOptions.maxBytes ?? 512 * 1024;
+      if (files.length === 0) return { diff: '', truncated: false, files };
+      const result = await run(repoPath, ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-renames', from, to, '--'], 256 * 1024 * 1024);
+      if (result.code !== 0) throw new VcsError("git couldn't read the changes.", { step: 'diff', exitCode: result.code });
+      const bytes = Buffer.from(result.stdout, 'utf8');
+      if (bytes.length <= maxBytes) return { diff: result.stdout, truncated: false, files };
+      return { diff: bytes.subarray(0, maxBytes).toString('utf8'), truncated: true, files };
+    },
+
+    async isMerged(repoPath, branch) {
+      const result = await run(checkPath(repoPath), ['merge-base', '--is-ancestor', `refs/heads/${checkBranch(branch)}`, 'HEAD']);
+      return result.code === 0;
+    },
+
+    async merge(repoPath, revision) {
+      checkPath(repoPath);
+      const commit = checkRevision(revision);
+      // Never touch a merge (or rebase, …) the user has in progress: nothing to abort that Ogden didn't start.
+      for (const name of ['MERGE_HEAD', 'rebase-merge', 'rebase-apply', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']) {
+        if (await gitPathExists(repoPath, name)) return 'refused';
+      }
+      // A file the merge would add that is already on disk, untracked or ignored, is never overwritten: git's own
+      // `--no-overwrite-ignore` doesn't stop a three-way merge from writing over an ignored file (git 2.54).
+      const base = await run(repoPath, ['merge-base', 'HEAD', commit]);
+      if (base.code === 0) {
+        const added = await run(repoPath, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--name-only', '-z', '--diff-filter=A', base.stdout.trim(), commit, '--']);
+        const tracked = await run(repoPath, ['ls-files', '-z']);
+        const inHead = new Set(tracked.stdout.split('\0'));
+        if (added.code !== 0 || tracked.code !== 0) return 'refused';
+        if (added.stdout.split('\0').some((name) => name !== '' && !inHead.has(name) && existsSync(join(repoPath, ...name.split('/'))))) return 'refused';
+      }
+      // git wants an identity for a merge even with `--no-commit` (a computer with none refuses it).
+      const result = await run(repoPath, [...(await identityFlags(repoPath)), 'merge', '--no-ff', '--no-commit', '--no-verify', '--no-overwrite-ignore', commit]);
+      if (result.code === 0) return 'merged';
+      // Only unmerged paths are a conflict; anything else git refused or failed at.
+      const unmerged = await run(repoPath, ['diff', '--name-only', '--diff-filter=U', '-z']);
+      const conflict = unmerged.code === 0 && unmerged.stdout.split('\0').some((name) => name !== '');
+      // This merge is Ogden's own (none was in progress before it): the checkout goes back to how it was.
+      if (await gitPathExists(repoPath, 'MERGE_HEAD')) await must(repoPath, ['merge', '--abort'], 'abort the merge');
+      return conflict ? 'conflict' : 'refused';
+    },
+
+    async abortMerge(repoPath) {
+      const inProgress = await run(checkPath(repoPath), ['rev-parse', '-q', '--verify', 'MERGE_HEAD']);
+      if (inProgress.code === 0) await must(repoPath, ['merge', '--abort'], 'abort the merge');
+    },
+
+    async add(repoPath, paths) {
+      if (paths.length === 0) return;
+      await must(checkPath(repoPath), ['add', '--', ...paths.map(checkRelative)], 'stage the plan');
+    },
+
+    async commit(repoPath, message) {
+      checkPath(repoPath);
+      // The user's own identity; a repo without one still gets its merge commit.
+      await must(repoPath, [...(await identityFlags(repoPath)), 'commit', '--no-verify', '--no-edit', '-m', message], 'commit the merge');
+    },
+
+    async diffStats(repoPath, base, branch) {
+      checkPath(repoPath);
+      const out = await must(repoPath, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--numstat', '-z', checkRevision(base), `refs/heads/${checkBranch(branch)}`, '--'], 'read the changes');
+      let files = 0;
+      let insertions = 0;
+      let deletions = 0;
+      // `<added>\t<deleted>\t<path>` per file, NUL-terminated; a binary file counts `-` for both.
+      for (const entry of out.split('\0')) {
+        const match = /^(\d+|-)\t(\d+|-)\t/.exec(entry);
+        if (match === null) continue;
+        files++;
+        if (match[1] !== '-') insertions += Number(match[1]);
+        if (match[2] !== '-') deletions += Number(match[2]);
+      }
+      return { files, insertions, deletions };
+    },
+
+    async worktreeExists(repoPath, path) {
+      checkPath(repoPath);
+      checkPath(path);
+      if (!existsSync(path)) return false;
+      // Without `-z` (git 2.36+ only): a worktree path in Ogden's data folder has no line break.
+      const out = await run(repoPath, ['worktree', 'list', '--porcelain']);
+      if (out.code !== 0) throw new VcsError("git couldn't list the worktrees.", { step: 'worktree list', exitCode: out.code });
+      const wanted = realOf(path);
+      // The first entry is the main checkout: never one of the runs' worktrees (review: a removal must never reach the repo).
+      const listed = out.stdout.split(/\r?\n/).filter((line) => line.startsWith('worktree ')).slice(1);
+      return listed.some((line) => realOf(line.slice('worktree '.length)) === wanted) && wanted !== realOf(repoPath);
+    },
+
+    async rebase({ repoPath, worktreePath, branch, onto }) {
+      const commit = checkRevision(onto);
       const pinned = await pinnedWorktree(repoPath, worktreePath, branch);
-      const args = [...SAFE_CONFIG, ...(await identity(repoPath)), 'rebase', '--no-autostash', '--no-update-refs', '--no-verify', commit];
+      const args = [...SAFE_CONFIG, ...(await identityFlags(repoPath)), 'rebase', '--no-autostash', '--no-update-refs', '--no-verify', commit];
       let result: GitResult;
       try {
         result = await run(worktreePath, args, undefined, pinned);

@@ -24,9 +24,15 @@ test('a Claude Code chat and a second agent chat side by side in one project, ea
       await page.goto(new URL(`/w/${claude.wsId}`, claude.url).toString());
       const picker = page.getByTestId('agent-picker');
       await expect(picker).toBeVisible();
-      await expect(page.getByTestId('agent-option')).toHaveText(['Claude Code', SECOND_AGENT.displayName]);
-      await expect(page.getByTestId('agent-option').first()).toHaveAttribute('data-state', 'on');
-      await page.getByTestId('agent-option').nth(1).click();
+      await expect(picker).toHaveAttribute('data-agent', 'claude-code');
+      await picker.click();
+      const options = page.getByTestId('agent-option');
+      await expect(options).toHaveCount(2);
+      await expect(options.first()).toContainText('Claude Code');
+      await expect(options.nth(1)).toContainText(SECOND_AGENT.displayName);
+      await expect(options.first()).toHaveAttribute('aria-checked', 'true');
+      await options.nth(1).click();
+      await expect(picker).toHaveAttribute('data-agent', SECOND_AGENT.agentId);
       await page.getByTestId('new-chat').click();
       await expect(page).toHaveURL(/\/w\/[^/]+\/s\/ses_/);
       const fakeUrl = page.url();

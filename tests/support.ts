@@ -174,16 +174,18 @@ export const SECOND_AGENT = { agentId: 'fake-agent', displayName: 'Fake Agent' }
  * `FAKE_ACP_AGENT_NAME` set so its `whoami` reply says which agent answered.
  */
 export async function fakeSecondAgent(
-  options: { setup?: AgentWiringOf['setup']; needsProjectTrust?: boolean } = {},
+  options: { setup?: AgentWiringOf['setup']; needsProjectTrust?: boolean; agentId?: string; displayName?: string } = {},
 ): Promise<AgentWiringOf> {
   const { createClaudeCodeAgent } = await serverModule();
   const base = createClaudeCodeAgent({ adapterPath: FAKE_AGENT, claudeExecutable: null });
-  const named = <T extends { env: Readonly<Record<string, string>> }>(input: T): T => ({ ...input, env: { ...input.env, FAKE_ACP_AGENT_NAME: SECOND_AGENT.agentId } });
+  const agentId = options.agentId ?? SECOND_AGENT.agentId;
+  const displayName = options.displayName ?? SECOND_AGENT.displayName;
+  const named = <T extends { env: Readonly<Record<string, string>> }>(input: T): T => ({ ...input, env: { ...input.env, FAKE_ACP_AGENT_NAME: agentId } });
   return {
     // What the fake agent is (6.3): agent-neutral data, as a later agent's adapter exports it.
     descriptor: {
-      agentId: SECOND_AGENT.agentId,
-      displayName: SECOND_AGENT.displayName,
+      agentId,
+      displayName,
       provider: 'Fake Provider',
       install: { kind: 'npm', package: '@fake/agent', version: '1.0.0' },
       signInMethods: [{ id: 'fake-login', kind: 'subscription', label: 'Sign in with your account' }],
@@ -194,7 +196,7 @@ export async function fakeSecondAgent(
     // Its setup port (6.3), when a test gives one: then a new chat with it is refused while it isn't installed or signed in.
     ...(options.setup === undefined ? {} : { setup: options.setup }),
     agent: {
-      displayName: SECOND_AGENT.displayName,
+      displayName,
       permissionModes: ['ask', 'skip_all'],
       skillInvocation: (skill, idea) => base.skillInvocation(skill, idea),
       startSession: (input) => base.startSession(named(input)),
@@ -202,6 +204,12 @@ export async function fakeSecondAgent(
       listAuthMethods: (input) => base.listAuthMethods(input),
     },
   };
+}
+
+/** An in-memory setup port for a fake agent (entry 6: readiness in the picker, Welcome's choice); it installs and signs into nothing. */
+export async function fakeAgentSetup(options: { agentId: string; displayName: string; installed?: boolean; auth?: 'signed_in' | 'needs_sign_in'; userCode?: string }) {
+  const { createMemoryAgentSetup } = await serverModule();
+  return createMemoryAgentSetup(options);
 }
 
 // Shared with the plain-Node install scripts: whether a process with a pid

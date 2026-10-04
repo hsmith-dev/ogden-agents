@@ -59,7 +59,13 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
   // Which pieces this install ships is the server wiring's list (story 10.2), never core's.
   const bmad = createBmadFeatures(db, { availableBmadPieces });
   const bmadDetection = createBmadDetection({ orm: db.orm, events, entities, catalog: options.bmadCatalog });
-  const bmadScriptTrust = createBmadScriptTrust({ orm: db.orm, events });
+  const catalog = options.bmadCatalog;
+  const bmadScriptTrust = createBmadScriptTrust({
+    orm: db.orm,
+    events,
+    entities,
+    fingerprint: catalog === undefined ? undefined : (repoPath) => catalog.scriptsFingerprint(repoPath),
+  });
   const bmadModulesSeen = createBmadModulesSeen({ orm: db.orm, events });
   const bmadSetup =
     options.bmadCatalog === undefined
@@ -69,6 +75,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
           entities,
           catalog: options.bmadCatalog,
           events,
+          trust: bmadScriptTrust,
           ...(options.onBmadSetupFailure === undefined ? {} : { onFailure: options.onBmadSetupFailure }),
         });
   const installSettings = createInstallSettings({ db, events, entities });

@@ -33,9 +33,10 @@ import { workspaceRepoPath } from './planning.js';
 /**
  * What failed for a workspace: reading its capabilities or setup status, a
  * missing ticket tree (`reduced_mode`, entry 4.11), naming an output folder,
- * starting the watch, or appending.
+ * starting the watch, appending, or a read skipped because the project's
+ * scripts changed since the user trusted them (story 4.13).
  */
-export type TicketWatcherStep = 'capabilities' | 'reduced_mode' | 'setup_status' | 'no_output_folder' | 'watch' | 'append';
+export type TicketWatcherStep = 'capabilities' | 'reduced_mode' | 'setup_status' | 'no_output_folder' | 'watch' | 'append' | 'scripts_changed';
 
 /** What a watch needs of the project's BMad Method: `tickets.py` reads the ticket tree. */
 const WATCH_CAPABILITIES: readonly BmadCapability[] = ['ticket_tree'];
@@ -46,7 +47,7 @@ export interface TicketWatcherDeps {
   events: Pick<EventLog, 'subscribe' | 'lastSeq' | 'append'>;
   entities: Pick<Entities, 'getWorkspace' | 'listWorkspaces'>;
   bmad: Pick<BmadFeatures, 'pieces'>;
-  trust: Pick<BmadScriptTrust, 'scriptsTrusted'>;
+  trust: Pick<BmadScriptTrust, 'scriptsTrusted' | 'requireScriptsUnchanged'>;
   catalog: Pick<BmadCatalogPort, 'setupStatus' | 'missingCapabilities'>;
   tickets: Pick<TicketStorePort, 'watch'>;
   /**
@@ -151,6 +152,16 @@ export function createTicketWatcher({ events, entities, bmad, trust, catalog, ti
             report(workspaceId, 'append', error);
           }
         }
+      }, {
+        // Every read reruns the project's own scripts: only while they are the ones the user allowed (story 4.13).
+        beforeRun: async () => {
+          try {
+            await trust.requireScriptsUnchanged(workspaceId);
+          } catch (error) {
+            report(workspaceId, 'scripts_changed', error);
+            throw error;
+          }
+        },
       });
     } catch (error) {
       return report(workspaceId, 'watch', error);

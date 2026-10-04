@@ -155,12 +155,12 @@ describe('what the install ships (story 10.2)', () => {
 
 describe('bmadPieceRoutes, the one helper (story 10.2)', () => {
   /** A bare app on a core with every piece available, a workspace in it, and guarded routes that record their runs. */
-  function guardedApp() {
+  async function guardedApp() {
     const core = openCore(tempDataDir(), { availableBmadPieces: BMAD_PIECES });
     cores.push(core);
     const workspace = core.entities.ensureWorkspace(tempRepo());
     // Board runs the project's scripts: these routes check the trust too (story 4.2), which this workspace has.
-    core.bmadScriptTrust.trustScripts(workspace.id);
+    await core.bmadScriptTrust.trustScripts(workspace.id);
     const app = new Hono();
     const runs: string[] = [];
     const routes = bmadPieceRoutes(app, { bmad: core.bmad, scriptTrust: core.bmadScriptTrust, log: createLogger(() => {}) });
@@ -181,7 +181,7 @@ describe('bmadPieceRoutes, the one helper (story 10.2)', () => {
   }
 
   it('refuses with feature_off while the piece is off, without running the handler or reading the body; runs it once on', async () => {
-    const { core, workspace, app, runs, url } = guardedApp();
+    const { core, workspace, app, runs, url } = await guardedApp();
     const off = await app.request(url(workspace.id), { method: 'POST', body: 'secret-body' });
     expect(await refusalOf(off)).toEqual({ status: 409, code: 'feature_off', message: FEATURE_OFF_MESSAGE });
     expect(runs).toEqual([]);
@@ -200,7 +200,7 @@ describe('bmadPieceRoutes, the one helper (story 10.2)', () => {
   });
 
   it('answers not_found for an unknown or malformed workspace without running the handler', async () => {
-    const { app, runs, url } = guardedApp();
+    const { app, runs, url } = await guardedApp();
     for (const wsId of [UNKNOWN, 'not-a-workspace', 'ws_bad']) {
       expect(await refusalOf(await app.request(url(wsId))), wsId).toMatchObject({ status: 404, code: 'not_found' });
     }
@@ -208,13 +208,13 @@ describe('bmadPieceRoutes, the one helper (story 10.2)', () => {
   });
 
   it("maps a handler's own core refusals the same way", async () => {
-    const { core, workspace, app, url } = guardedApp();
+    const { core, workspace, app, url } = await guardedApp();
     core.permissions.updateSettings(workspace.id, { bmadPieces: ['planning'] });
     expect(await refusalOf(await app.request(url(workspace.id), { method: 'PUT' }))).toMatchObject({ status: 409, code: 'feature_off' });
   });
 
-  it('throws at registration for a path outside a workspace, and lists what it registered', () => {
-    const { core, app } = guardedApp();
+  it('throws at registration for a path outside a workspace, and lists what it registered', async () => {
+    const { core, app } = await guardedApp();
     const routes = bmadPieceRoutes(app, { bmad: core.bmad, scriptTrust: core.bmadScriptTrust, log: createLogger(() => {}) });
     for (const path of [`${API_BASE}/bmad/thing`, '/workspaces/:wsId/thing', `${API_BASE}/workspaces/:id/thing`, `${API_BASE}/workspaces/:wsId`]) {
       expect(() => routes.get('board', path, (c) => c.body(null, 204)), path).toThrow(/inside a workspace/);
@@ -268,7 +268,7 @@ describe('bmadPieceRoutes and the script trust (story 4.2)', () => {
     core.permissions.updateSettings(workspace.id, { bmadPieces: [] });
     expect((await refusalOf(await app.request(scripts(workspace.id), { method: 'POST' }))).code).toBe('feature_off');
     core.permissions.updateSettings(workspace.id, { bmadPieces: ['board'] });
-    core.bmadScriptTrust.trustScripts(workspace.id);
+    await core.bmadScriptTrust.trustScripts(workspace.id);
     expect((await app.request(scripts(workspace.id), { method: 'POST', body: 'hello' })).status).toBe(204);
     expect(runs).toEqual(['scripts hello']);
   });

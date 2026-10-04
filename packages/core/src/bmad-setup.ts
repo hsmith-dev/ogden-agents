@@ -29,6 +29,7 @@
  * and runs the same setup in its upgrade mode, with the same events.
  */
 import { BMAD_SETUP_FAILURE_REASONS, bmadCapabilitiesFor, type BmadPiece, type BmadSetupStatus, type WorkspaceId } from '@ogden-agents/shared';
+import type { BmadScriptTrust } from './bmad-script-trust.js';
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
 import type { BmadFeatures } from './bmad-pieces.js';
 import type { Entities } from './entities.js';
@@ -59,6 +60,12 @@ export interface BmadSetupDeps {
   entities: Pick<Entities, 'getWorkspace'>;
   catalog: Pick<BmadCatalogPort, 'setupStatus' | 'setup' | 'detect' | 'missingCapabilities'>;
   events: EventLog;
+  /**
+   * The script trust (story 4.13): a trusted project whose scripts were
+   * unchanged just before the setup keeps its trust over the scripts the
+   * setup wrote from the verified copy. Without it, nothing changes.
+   */
+  trust?: Pick<BmadScriptTrust, 'scriptsUnchanged' | 'keepTrustAfterSetup'> | undefined;
   /** Told why a setup failed or an event couldn't be appended, for the log (never shown to the user). */
   onFailure?: (workspaceId: WorkspaceId, error: unknown) => void;
 }
@@ -75,7 +82,7 @@ export function bmadSetupFailureReason(error: unknown): string {
     : BMAD_SETUP_FAILURE_REASONS.failed;
 }
 
-export function createBmadSetup({ bmad, entities, catalog, events, onFailure }: BmadSetupDeps): BmadSetupUseCases {
+export function createBmadSetup({ bmad, entities, catalog, events, trust, onFailure }: BmadSetupDeps): BmadSetupUseCases {
   /** Each workspace's setup in progress: `ready` resolves with the status it started from (rejects when it was refused), `done` once it ended. */
   const running = new Map<WorkspaceId, { ready: Promise<BmadSetupStatus>; done: Promise<void> }>();
   const tell = (workspaceId: WorkspaceId, error: unknown) => {
@@ -160,8 +167,18 @@ export function createBmadSetup({ bmad, entities, catalog, events, onFailure }: 
       append(workspaceId, { type: 'bmad.setup_started', payload: {} });
       decide.resolve(status);
       const onProgress = (progress: { step: string; label: string }) => append(workspaceId, { type: 'bmad.setup_progress', payload: { step: progress.step, label: progress.label } });
-      void (upgrade ? catalog.setup(repoPath, onProgress, { upgrade: true }) : catalog.setup(repoPath, onProgress))
+      // Whether the trust still matched the project's scripts before setup wrote any (story 4.13).
+      const keepTrust = trust === undefined ? Promise.resolve(false) : trust.scriptsUnchanged(workspaceId).catch(() => false);
+      void keepTrust
+        .then(() => (upgrade ? catalog.setup(repoPath, onProgress, { upgrade: true }) : catalog.setup(repoPath, onProgress)))
         .then(async (after) => {
+          if (trust !== undefined && (await keepTrust)) {
+            try {
+              await trust.keepTrustAfterSetup(workspaceId);
+            } catch (error) {
+              tell(workspaceId, error);
+            }
+          }
           // The capabilities as they are now; a failure to read them leaves the status as setup gave it.
           let status = after;
           try {

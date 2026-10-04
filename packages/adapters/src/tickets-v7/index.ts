@@ -288,7 +288,7 @@ export function createTicketsV7({ runner, script: scriptOf, workDir, onFailure, 
       return { ref, status: written.success ? written.data : status };
     },
 
-    async watch(repoPath, outputFolder, onChange) {
+    async watch(repoPath, outputFolder, onChange, options) {
       const root = await containedRoot(repoPath, outputFolder);
       const open: OpenWatch = { index: undefined, reading: false, again: false, closed: false, folder: undefined };
       let primed = false;
@@ -307,6 +307,9 @@ export function createTicketsV7({ runner, script: scriptOf, workDir, onFailure, 
             if (open.closed) return;
             let next: TicketsResponse;
             try {
+              // The caller's check before each read (story 4.13: the project's scripts are still the ones allowed).
+              await options?.beforeRun?.();
+              if (open.closed) return;
               next = await read(repoPath);
             } catch {
               // Logged by `onFailure`: keep the last tree, tell nothing, retry on the next change.

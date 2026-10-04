@@ -99,4 +99,17 @@ export interface BmadCatalogPort {
    * first and asks it only for a workspace with Planning on (AD-22).
    */
   readDocument(repoPath: string, outputFolder: string, path: string): Promise<{ content: string; truncated: boolean } | null>;
+  /**
+   * The contents of the project's own BMad Method scripts, the code the
+   * verified `tickets.py` imports from the repo (`_bmad/scripts/`, story
+   * 4.13, user decision 2026-10-04): {@link BMAD_SCRIPTS_NONE} when the repo
+   * has no such folder, else a `sha256:` hash of its regular files (paths and
+   * contents). `undefined` when it can't be hashed (a link, a special file, a
+   * bound passed): core treats that as changed, so nothing runs. Read-only,
+   * never follows a link, never rejects for the repo's state.
+   */
+  scriptsFingerprint(repoPath: string): Promise<string | undefined>;
 }
+
+/** {@link BmadCatalogPort.scriptsFingerprint} of a repo with no `_bmad/scripts/` folder. */
+export const BMAD_SCRIPTS_NONE = 'none';

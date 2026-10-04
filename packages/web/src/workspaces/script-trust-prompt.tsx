@@ -1,4 +1,4 @@
-import { SCRIPT_TRUST_ALLOW, SCRIPT_TRUST_FAILED, SCRIPT_TRUST_TEXT, SCRIPT_TRUST_TITLE } from '@ogden-agents/shared';
+import { SCRIPT_TRUST_ALLOW, SCRIPT_TRUST_CHANGED_TEXT, SCRIPT_TRUST_CHANGED_TITLE, SCRIPT_TRUST_FAILED, SCRIPT_TRUST_TEXT, SCRIPT_TRUST_TITLE } from '@ogden-agents/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Button } from '@/ui/button';
@@ -14,9 +14,11 @@ import { trustProjectScripts } from '@/workspaces/workspace-settings-api';
  * project (`PUT …/bmad/script-trust`), then stores the new settings and
  * calls `onTrusted` so the surface fetches again. The server's guard, not
  * this prompt, decides what runs (AD-22). A refusal shows its reason and
- * leaves the prompt.
+ * leaves the prompt. With `changed` (story 4.13, `scripts_changed`: the
+ * project's scripts aren't the ones the user allowed) it says so, and Allow
+ * allows them as they are now.
  */
-export function ScriptTrustPrompt({ wsId, onTrusted }: { wsId: string; onTrusted: () => void }) {
+export function ScriptTrustPrompt({ wsId, onTrusted, changed = false }: { wsId: string; onTrusted: () => void; changed?: boolean }) {
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -37,7 +39,7 @@ export function ScriptTrustPrompt({ wsId, onTrusted }: { wsId: string; onTrusted
     );
   };
   return (
-    <div className="flex max-w-(--space-chat-column) flex-col gap-2" data-testid="script-trust-prompt">
+    <div className="flex max-w-(--space-chat-column) flex-col gap-2" data-testid="script-trust-prompt" data-changed={changed ? 'true' : undefined}>
       <Notice
         aria-labelledby="script-trust-title"
         action={
@@ -47,8 +49,8 @@ export function ScriptTrustPrompt({ wsId, onTrusted }: { wsId: string; onTrusted
         }
       >
         <span className="flex flex-col gap-1">
-          <span id="script-trust-title">{SCRIPT_TRUST_TITLE}</span>
-          <span className="text-caption text-muted-foreground">{SCRIPT_TRUST_TEXT}</span>
+          <span id="script-trust-title">{changed ? SCRIPT_TRUST_CHANGED_TITLE : SCRIPT_TRUST_TITLE}</span>
+          <span className="text-caption text-muted-foreground">{changed ? SCRIPT_TRUST_CHANGED_TEXT : SCRIPT_TRUST_TEXT}</span>
         </span>
       </Notice>
       {error === undefined ? null : (

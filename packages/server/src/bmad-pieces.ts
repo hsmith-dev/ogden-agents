@@ -14,6 +14,7 @@ import {
   FeatureOffError,
   FeatureUnavailableError,
   NotFoundError,
+  ScriptsChangedError,
   ScriptsNotTrustedError,
   StatusNotAllowedError,
   type BmadFeatures,
@@ -26,6 +27,7 @@ import {
   BMAD_PROJECT_NOT_FOUND_MESSAGE,
   FEATURE_OFF_MESSAGE,
   FEATURE_UNAVAILABLE_MESSAGE,
+  SCRIPTS_CHANGED_MESSAGE,
   SCRIPTS_NOT_TRUSTED_MESSAGE,
   STATUS_NOT_ALLOWED_MESSAGE,
   type BmadPiece,
@@ -106,6 +108,7 @@ function refusal(c: Context, error: unknown, notFound: string): Response {
   if (error instanceof FeatureOffError) return apiError(c, 409, 'feature_off', FEATURE_OFF_MESSAGE);
   if (error instanceof FeatureUnavailableError) return apiError(c, 409, 'feature_unavailable', FEATURE_UNAVAILABLE_MESSAGE);
   if (error instanceof ScriptsNotTrustedError) return apiError(c, 409, 'scripts_not_trusted', SCRIPTS_NOT_TRUSTED_MESSAGE);
+  if (error instanceof ScriptsChangedError) return apiError(c, 409, 'scripts_changed', SCRIPTS_CHANGED_MESSAGE);
   if (error instanceof StatusNotAllowedError) return apiError(c, 409, 'status_not_allowed', STATUS_NOT_ALLOWED_MESSAGE);
   if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', notFound);
   // Story 4.2's other refusals, thrown by entries 4.3 to 4.11 as core errors with their shared code.

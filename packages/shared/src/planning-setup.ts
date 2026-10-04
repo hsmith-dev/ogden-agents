@@ -103,6 +103,17 @@ export const SCRIPT_TRUST_TEXT =
 export const SCRIPT_TRUST_ALLOW = 'Allow';
 /** The dialog's button that changes nothing. */
 export const SCRIPT_TRUST_CANCEL = 'Cancel';
+/**
+ * `scripts_changed` (409; story 4.13, user decision 2026-10-04): the
+ * project's BMad Method scripts aren't the ones the user allowed.
+ */
+export const SCRIPTS_CHANGED_MESSAGE =
+  "This project's BMad Method scripts changed since you allowed them, so Ogden Agents didn't run them. Allow them again on the Board page, then try again.";
+/** The trust prompt's title when the scripts changed since the user allowed them. */
+export const SCRIPT_TRUST_CHANGED_TITLE = "This project's BMad Method scripts changed. Run them?";
+/** The trust prompt's sentence when the scripts changed. */
+export const SCRIPT_TRUST_CHANGED_TEXT =
+  "The BMad Method scripts in this project's folder aren't the ones you allowed: something changed them since. Board runs them on your computer, without your API keys or tokens. Allow this only if you know why they changed.";
 /** The fallback when allowing couldn't be saved. */
 export const SCRIPT_TRUST_FAILED = "Ogden Agents couldn't save your answer. Try again.";
 

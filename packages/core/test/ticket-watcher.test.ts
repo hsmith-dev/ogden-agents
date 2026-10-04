@@ -99,7 +99,7 @@ describe('ticket watcher (story 4.8)', () => {
     const { core, store, catalog, watcher } = setup();
     const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
     core.permissions.updateSettings(workspace.id, { bmadPieces: ['board'] });
-    core.bmadScriptTrust.trustScripts(workspace.id);
+    await core.bmadScriptTrust.trustScripts(workspace.id);
     watcher.start();
     await waitFor(() => watcher.watching(workspace.id), 'the watch');
     expect(store.calls).toEqual([[workspace.realPath, '_bmad-output']]);
@@ -125,7 +125,7 @@ describe('ticket watcher (story 4.8)', () => {
     const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
     statuses.set(workspace.realPath!, { ...status(null), state: 'not_set_up', installedVersion: null });
     core.permissions.updateSettings(workspace.id, { bmadPieces: ['board'] });
-    core.bmadScriptTrust.trustScripts(workspace.id);
+    await core.bmadScriptTrust.trustScripts(workspace.id);
     watcher.start();
     await waitFor(() => errors.length === 1, 'the no-folder report');
     expect(errors).toEqual([[workspace.id, 'no_output_folder']]);
@@ -147,7 +147,7 @@ describe('ticket watcher (story 4.8)', () => {
     const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
     missing.set(workspace.realPath!, ['ticket_tree']);
     core.permissions.updateSettings(workspace.id, { bmadPieces: ['board'] });
-    core.bmadScriptTrust.trustScripts(workspace.id);
+    await core.bmadScriptTrust.trustScripts(workspace.id);
     watcher.start();
     await waitFor(() => errors.length === 1, 'the reduced-mode report');
     core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_for_commands' });
@@ -169,14 +169,14 @@ describe('ticket watcher (story 4.8)', () => {
     const { core, store, watcher } = setup();
     const board = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
     const simple = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
-    core.bmadScriptTrust.trustScripts(simple.id);
+    await core.bmadScriptTrust.trustScripts(simple.id);
     watcher.start();
     core.permissions.updateSettings(board.id, { bmadPieces: ['board'] });
     await sleep(30);
     // Board on, not trusted: nothing.
     expect(watcher.watching(board.id)).toBe(false);
     expect(store.calls).toEqual([]);
-    core.bmadScriptTrust.trustScripts(board.id);
+    await core.bmadScriptTrust.trustScripts(board.id);
     await waitFor(() => watcher.watching(board.id), 'the trusted watch');
 
     core.permissions.updateSettings(board.id, { bmadPieces: [] });
@@ -204,7 +204,7 @@ describe('ticket watcher (story 4.8)', () => {
     const { core, watcher } = setup();
     watcher.start();
     const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'), { bmadPieces: ['board'] });
-    core.bmadScriptTrust.trustScripts(workspace.id);
+    await core.bmadScriptTrust.trustScripts(workspace.id);
     await waitFor(() => watcher.watching(workspace.id), 'the watch');
     await watcher.close();
   });
@@ -215,7 +215,7 @@ describe('ticket watcher (story 4.8)', () => {
     const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
     statuses.set(workspace.realPath!, new Error('setup.py is not built yet'));
     core.permissions.updateSettings(workspace.id, { bmadPieces: ['board'] });
-    core.bmadScriptTrust.trustScripts(workspace.id);
+    await core.bmadScriptTrust.trustScripts(workspace.id);
     watcher.start();
     await waitFor(() => catalog.statusCalls.length === 1, 'the status');
     core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_for_commands' });
@@ -249,7 +249,7 @@ describe('ticket watcher (story 4.8)', () => {
     const { core, store, watcher } = setup();
     const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
     core.permissions.updateSettings(workspace.id, { bmadPieces: ['board'] });
-    core.bmadScriptTrust.trustScripts(workspace.id);
+    await core.bmadScriptTrust.trustScripts(workspace.id);
     let release!: () => void;
     store.hold(new Promise((resolve) => (release = resolve)));
     watcher.start();
@@ -266,7 +266,7 @@ describe('ticket watcher (story 4.8)', () => {
     const { core, store, watcher } = setup();
     const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
     core.permissions.updateSettings(workspace.id, { bmadPieces: ['board'] });
-    core.bmadScriptTrust.trustScripts(workspace.id);
+    await core.bmadScriptTrust.trustScripts(workspace.id);
     let release!: () => void;
     store.hold(new Promise((resolve) => (release = resolve)));
     watcher.start();

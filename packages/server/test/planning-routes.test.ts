@@ -39,7 +39,7 @@
  *   and the store is never called.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -670,6 +670,50 @@ describe.skipIf(uvMissing)('the board through real uv and the verified pinned ti
     // The story 4.2 decision: a planned entry is Draft, a dropped one in no column.
     expect(tickets.map(boardColumnOf)).toEqual(['in_review', 'draft', 'blocked', null]);
     expect(repo.hash()).toBe(before);
+  }, 60_000);
+
+  it("a config_utils.py planted after the trust never runs (story 4.13): 409 scripts_changed, the watch reads nothing, and once allowed again it runs; the verified copy is untouched", async () => {
+    const uvCache = mkdtempSync(join(tmpdir(), 'ogden-agents-uv-cache-'));
+    removeAfterTest(uvCache);
+    const markers = mkdtempSync(join(tmpdir(), 'ogden-agents-markers-'));
+    removeAfterTest(markers);
+    const marker = join(markers, 'planted-ran');
+    const dataDir = tempDataDir();
+    const upstream = fixtureUpstream();
+    const server = await startTestServer({
+      dataDir,
+      bmadSource: createUpstreamBmadSource({ dataDir, lock: upstream.lock, fetch: upstream.fetch }),
+      extraUvEnv: { UV_CACHE_DIR: uvCache, ...TEST_UV_PYTHON_ENV },
+    });
+    const tab = await signIn(server);
+    expect((await request(server, tab, 'POST', API_ROUTES.bmadSource)).status).toBe(200);
+    const repo = fixtureRepo(true);
+    const workspace = await project(server, tab, repo, ['board'], { trust: true });
+    // Unchanged since the trust: it runs, and Python's cache never lands in the repo or the verified copy.
+    expect((await request(server, tab, 'GET', paths(workspace.id).tickets)).status).toBe(200);
+    expect(existsSync(join(repo.path, '_bmad', 'scripts', '__pycache__'))).toBe(false);
+    await waitFor(() => server.core.events.readAfter(0).some((event) => event.type === 'workspace.bmad_scripts_trusted'), 'the trust');
+
+    // An agent's edit plants code in the project's config script.
+    const script = join(repo.path, '_bmad', 'scripts', 'config_utils.py');
+    writeFileSync(script, `open(${JSON.stringify(marker)}, "w").write("ran")\n${readFileSync(script, 'utf8')}`);
+    const refused = await request(server, tab, 'GET', paths(workspace.id).tickets);
+    expect(refused.status).toBe(409);
+    expect(ApiErrorBody.parse(await refused.json()).error.code).toBe('scripts_changed');
+    expect((await request(server, tab, 'GET', paths(workspace.id).ticket)).status).toBe(409);
+    // A ticket file changing doesn't make the watch run it either.
+    const plan = join(repo.path, '_bmad-output', 'initiative-demo', 'epic-first', 'story-first-plan.md');
+    writeFileSync(plan, readFileSync(plan, 'utf8').replace('status: "in-review"', 'status: "in-progress"'));
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    expect(existsSync(marker)).toBe(false);
+
+    // The user allows the scripts as they are now: they run.
+    expect((await request(server, tab, 'PUT', paths(workspace.id).trust)).status).toBe(200);
+    expect((await request(server, tab, 'GET', paths(workspace.id).tickets)).status).toBe(200);
+    expect(existsSync(marker)).toBe(true);
+    // Ogden Agents' verified copy is still the pinned one (no cache written into it).
+    expect(((await (await request(server, tab, 'POST', API_ROUTES.bmadSource)).json()) as { state: string }).state).toBe('ready');
+    expect(upstream.fetched).toHaveLength(1);
   }, 60_000);
 
   it('a repo with no active initiative answers 503 tickets_unavailable', async () => {

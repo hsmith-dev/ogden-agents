@@ -31,6 +31,7 @@ import {
   createBmadSetup,
   FeatureOffError,
   NotFoundError,
+  ScriptsChangedError,
   type BmadCatalogPort,
   type Core,
 } from '../src/index.js';
@@ -238,5 +239,45 @@ describe('BMad Method setup in core (story 4.3)', () => {
     const core = openTestCore(tempDir(), undefined, { bmadCatalog: fakeCatalog().catalog });
     expect(core.bmadSetup).toBeDefined();
     expect(openTestCore(tempDir()).bmadSetup).toBeUndefined();
+  });
+});
+
+describe('setup and the trust bound to the scripts (story 4.13)', () => {
+  /** A core whose own setup runs on the fake catalog, with the project's scripts as `scripts.value`; setup writes `written`. */
+  function bound(before: string) {
+    const scripts: { value: string | undefined } = { value: before };
+    const fake = fakeCatalog({ hasBmad: true, state: 'current' });
+    const catalog: BmadCatalogPort = {
+      ...fake.catalog,
+      scriptsFingerprint: async () => scripts.value,
+      setup: async (repoPath, onProgress, ...rest) => {
+        const after = await fake.catalog.setup(repoPath, onProgress, ...rest);
+        scripts.value = 'sha256:written-by-setup';
+        return after;
+      },
+    };
+    const core: Core = openTestCore(tempDir(), undefined, { availableBmadPieces: ['planning', 'board'], bmadCatalog: catalog });
+    const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
+    core.permissions.updateSettings(workspace.id, { bmadPieces: ['board'] });
+    return { core, workspace, scripts, release: fake.release };
+  }
+
+  it('a trust that matched just before keeps over the scripts the setup wrote', async () => {
+    const { core, workspace, release } = bound('sha256:allowed');
+    await core.bmadScriptTrust.trustScripts(workspace.id);
+    await core.bmadSetup!.start(workspace.id, { upgrade: true });
+    release();
+    await core.bmadSetup!.settled();
+    await expect(core.bmadScriptTrust.requireScriptsUnchanged(workspace.id)).resolves.toBeUndefined();
+  });
+
+  it('scripts changed before the setup stay refused after it: the setup never blesses them', async () => {
+    const { core, workspace, scripts, release } = bound('sha256:allowed');
+    await core.bmadScriptTrust.trustScripts(workspace.id);
+    scripts.value = 'sha256:planted';
+    await core.bmadSetup!.start(workspace.id, { upgrade: true });
+    release();
+    await core.bmadSetup!.settled();
+    await expect(core.bmadScriptTrust.requireScriptsUnchanged(workspace.id)).rejects.toBeInstanceOf(ScriptsChangedError);
   });
 });

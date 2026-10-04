@@ -169,7 +169,7 @@ CI runs only a fake agent and a local BMad Method fixture, so these checks need 
 
 **Permission modes (story 4.13's plan), with real Claude Code:**
 
-6. A chat starts in **Ask**. Switch it to **Auto**: Claude Code edits an ordinary file without a card, and asking it to edit a protected path (for example `.git/config` or a file under `.claude/`) still shows a card.
+6. A chat starts in **Ask**. Switch it to **Auto**: Claude Code edits an ordinary file without a card, and asking it to edit a protected path (for example `.git/config`, a file under `.claude/`, or `_bmad/scripts/config_utils.py`) still shows a card. Then, in a project with Board on and trusted, change `_bmad/scripts/config_utils.py` yourself (add a comment): the Board shows "This project's BMad Method scripts changed. Run them?" and no tickets until you allow it.
 7. With Developer mode off, **Skip all** is not offered. Turn Developer mode on (Settings > Appearance): Skip all is offered behind a red warning; once on, the red banner stays in view while the conversation scrolls and at phone width, and Claude Code runs a command without a card. **Back to Ask** in the banner works. Turn Developer mode off: the chat is back in Ask.
 
 **Epic 10 (story 10.9's plan; story 10.1's for check 9):**

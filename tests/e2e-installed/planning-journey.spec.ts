@@ -29,7 +29,10 @@
  *    `ticket.changed` emit removed, this step fails).
  * 7. Status from the board: Move to In progress lands in the plan file; a Done
  *    ticket moves out only after "Reopen this ticket?".
- * 8. A module copied in while the server runs shows on Plan, with New.
+ * 8. Scripts changed after the trust (a planted `config_utils.py`): the
+ *    Board runs nothing and asks again ("…scripts changed. Run them?");
+ *    allowed, they run. A module copied in while the server runs shows on
+ *    Plan, with New.
  * 9. Reduced mode: a plain upstream repo with Board on but not trusted is
  *    refused (409 `scripts_not_trusted`) and its Board asks for the trust
  *    (with the trust gate removed, this step fails); trusted, its Plan shows
@@ -73,6 +76,8 @@ test.afterAll(async () => {
 
 /** The trust dialog's title (`SCRIPT_TRUST_TITLE`; `planning-setup.ts` has imports this runner can't load). */
 const TRUST_TITLE = "Run this project's BMad Method scripts?";
+/** The prompt's title when they changed since (`SCRIPT_TRUST_CHANGED_TITLE`, story 4.13). */
+const SCRIPTS_CHANGED_TITLE = "This project's BMad Method scripts changed. Run them?";
 /** Plan's reduced-mode notice when the project's skills have no plain labels (entry 4.11). */
 const PLAIN_LABELS_TEXT = "This project's BMad Method has actions Ogden Agents doesn't know";
 const IDEA = 'A shared todo list for my family';
@@ -294,6 +299,22 @@ test('from BMad off to a ticketed epic on a live board, on the installed package
     await confirm.getByRole('button', { name: 'Reopen' }).click();
     await expect(card(page, '1.1')).toHaveAttribute('data-column', 'ready');
     await expect.poll(() => planOf(empty.path, 1)).toMatch(/^status: "?ready-for-dev"?$/m);
+  });
+
+  await test.step("scripts changed after the trust (story 4.13): the Board doesn't run them and asks again; allowed, they run", async () => {
+    const marker = join(server.home, 'planted-ran');
+    const script = join(empty.path, '_bmad', 'scripts', 'config_utils.py');
+    // Appended: the real script starts with a `from __future__` import, which must stay first.
+    writeFileSync(script, `${readFileSync(script, 'utf8')}\nopen(${JSON.stringify(marker)}, "w").write("ran")\n`);
+    await page.goto(`${url}/w/${wsId}/board`);
+    const prompt = page.getByTestId('script-trust-prompt');
+    await expect(prompt).toHaveAttribute('data-changed', 'true');
+    await expect(prompt).toContainText(SCRIPTS_CHANGED_TITLE);
+    await expect(page.getByTestId('ticket-card')).toHaveCount(0);
+    expect(existsSync(marker)).toBe(false);
+    await page.getByTestId('script-trust-allow').click();
+    await expect(page.getByTestId('ticket-card')).toHaveCount(2);
+    expect(existsSync(marker)).toBe(true);
   });
 
   await test.step('a module copied in while the server runs shows on Plan, with New', async () => {

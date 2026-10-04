@@ -8,8 +8,9 @@
  * 1. A chat starts in Ask; the picker offers Ask and Auto, and no Skip all
  *    while Developer mode is off.
  * 2. Auto: an edit of an ordinary file runs with no card, and an edit of a
- *    protected path (`.git/config`) still asks with a card (the server starts
- *    Auto sessions with ask rules for the protected paths).
+ *    protected path (`.git/config`, and since story 4.13 BMad Method's
+ *    `_bmad/scripts/config_utils.py`) still asks with a card (the server
+ *    starts Auto sessions with ask rules for the protected paths).
  * 3. Developer mode on in Settings (kept by the server): Skip all is offered,
  *    behind its red warning; on, the red banner shows and a command runs with
  *    no card.
@@ -107,6 +108,11 @@ test('Ask, Auto with protected paths still asking, and Skip all only in Develope
     await expect(card(page)).toBeVisible();
     await card(page).getByRole('button', { name: 'Deny' }).click();
     await expect(replies(page).last()).toContainText('Denied .git/config.');
+    // BMad Method's own scripts are protected too (story 4.13, user decision 2026-10-04): the Board runs them.
+    await send(page, 'permission-edit _bmad/scripts/config_utils.py');
+    await expect(card(page)).toBeVisible();
+    await card(page).getByRole('button', { name: 'Deny' }).click();
+    await expect(replies(page).last()).toContainText('Denied _bmad/scripts/config_utils.py.');
   });
 
   await test.step('Developer mode on: Skip all behind its warning, then the red banner, and a command runs with no card', async () => {

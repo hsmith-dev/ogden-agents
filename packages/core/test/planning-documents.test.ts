@@ -52,6 +52,7 @@ function fakeCatalog(documents: Record<string, string> = {}): FakeCatalog {
     setupStatus: async () => structuredClone(port.status),
     setup: () => Promise.reject(new Error('not used')),
     missingCapabilities: () => Promise.reject(new Error('not used')),
+    scriptsFingerprint: async () => 'none',
     readDocument: async (repoPath: string, outputFolder: string, path: string) => {
       port.reads.push([repoPath, outputFolder, path]);
       const content = documents[path];

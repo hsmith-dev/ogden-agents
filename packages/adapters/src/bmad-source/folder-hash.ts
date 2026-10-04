@@ -30,6 +30,8 @@ export interface FolderHashLimits {
   maxEntries?: number;
   /** Default {@link FOLDER_HASH_MAX_BYTES}. */
   maxBytes?: number;
+  /** Names of real folders, at any depth, left out of the hash and not read (counted as entries all the same). */
+  skipFolders?: ReadonlySet<string>;
 }
 
 /** Thrown inside the walk to stop it: the folder can't be hashed (a link, a special file, past a bound). */
@@ -80,7 +82,10 @@ export async function hashFolderWithCounts(dir: string, limits: FolderHashLimits
     for (const entry of listed) {
       const path = join(folder, entry.name);
       // The entry itself (never followed): a real folder or a regular file, nothing else.
-      if (entry.isDirectory()) await walk(path, `${prefix}${entry.name}/`);
+      if (entry.isDirectory()) {
+        if (limits.skipFolders?.has(entry.name)) continue;
+        await walk(path, `${prefix}${entry.name}/`);
+      }
       else if (entry.isFile()) {
         const data = await readRegularFile(path, maxBytes - bytes);
         bytes += data.length;

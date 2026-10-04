@@ -108,6 +108,12 @@ export const API_ERROR_CODES = [
    * 4.11): the project's `_bmad` is a link or a file, not a folder.
    */
   'bmad_upgrade_refused',
+  /**
+   * The project's own BMad Method scripts (`_bmad/scripts/`) changed since the
+   * user trusted the project (409; story 4.13, user decision 2026-10-04: the
+   * trust is bound to their contents). Nothing ran. The UI asks again.
+   */
+  'scripts_changed',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

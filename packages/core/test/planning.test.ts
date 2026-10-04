@@ -23,6 +23,7 @@ import {
   NotFoundError,
   ReducedModeError,
   ReopenNotConfirmedError,
+  ScriptsChangedError,
   ScriptsNotTrustedError,
   StatusNotAllowedError,
   TicketChangedError,
@@ -121,14 +122,19 @@ function capabilityCatalog(missing: readonly BmadCapability[] = [], hasBmad = tr
   return { catalog, asked };
 }
 
-function setup(
+async function setup(
   pieces: ('planning' | 'board')[] = ['planning', 'board'],
   { trusted = true, downloaded = true, missing = [], hasBmad = true }: { trusted?: boolean; downloaded?: boolean; missing?: BmadCapability[]; hasBmad?: boolean } = {},
 ) {
-  const core: Core = openTestCore(tempDir(), undefined, { availableBmadPieces: ['planning', 'board'] });
+  // The project's scripts as the script trust reads them (story 4.13): a test changes `scripts.value`.
+  const scripts: { value: string | undefined } = { value: 'none' };
+  const core: Core = openTestCore(tempDir(), undefined, {
+    availableBmadPieces: ['planning', 'board'],
+    bmadCatalog: { detect: async () => ({ hasBmad: true, hasOutput: true }), skills: async () => [], ...unusedCatalogParts, scriptsFingerprint: async () => scripts.value },
+  });
   const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
   if (pieces.length > 0) core.permissions.updateSettings(workspace.id, { bmadPieces: pieces });
-  if (trusted) core.bmadScriptTrust.trustScripts(workspace.id);
+  if (trusted) await core.bmadScriptTrust.trustScripts(workspace.id);
   const catalog = fakeCatalog();
   const agent = promptRecorder();
   const chat = createChat({ dataDir: tempDir(), entities: core.entities, sessionEvents: core.sessionEvents, agent });
@@ -156,7 +162,7 @@ function setup(
   const source = fakeSource(downloaded);
   const capabilities = capabilityCatalog(missing, hasBmad);
   const board = createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: createBmadSource(source), entities: core.entities, catalog: capabilities.catalog, tickets });
-  return { core, workspace, catalog, agent, chat, planning, board, read, marks, source, asked: capabilities.asked, fail: (error: Error) => (answer = error) };
+  return { core, workspace, catalog, agent, chat, planning, board, read, marks, source, scripts, asked: capabilities.asked, fail: (error: Error) => (answer = error) };
 }
 
 const firstUserMessage = (core: Core, sessionId: SessionId) =>
@@ -164,13 +170,13 @@ const firstUserMessage = (core: Core, sessionId: SessionId) =>
 
 describe('planning (story 4.1)', () => {
   it('lists the catalog of the workspace’s stored real path', async () => {
-    const { planning, workspace, catalog } = setup();
+    const { planning, workspace, catalog } = await setup();
     expect(await planning.catalog(workspace.id)).toEqual(CATALOG);
     expect(catalog.scanned).toEqual([workspace.realPath]);
   });
 
   it('with Planning off, refuses with feature_off and scans nothing', async () => {
-    const { planning, workspace, catalog, core } = setup(['board']);
+    const { planning, workspace, catalog, core } = await setup(['board']);
     await expect(planning.catalog(workspace.id)).rejects.toThrow(FeatureOffError);
     await expect(planning.start(workspace.id, 'bmad-spec')).rejects.toThrow(FeatureOffError);
     expect(catalog.scanned).toEqual([]);
@@ -178,13 +184,13 @@ describe('planning (story 4.1)', () => {
   });
 
   it('an unknown workspace is not found', async () => {
-    const { planning } = setup();
+    const { planning } = await setup();
     await expect(planning.catalog(UNKNOWN)).rejects.toThrow(NotFoundError);
     await expect(planning.start(UNKNOWN, 'bmad-spec')).rejects.toThrow(NotFoundError);
   });
 
   it('a skill not in the catalog is not found, and a malformed one is invalid; neither creates a session', async () => {
-    const { planning, workspace, core, catalog } = setup();
+    const { planning, workspace, core, catalog } = await setup();
     await expect(planning.start(workspace.id, 'bmad-nothing')).rejects.toThrow(NotFoundError);
     for (const bad of ['../x', 'Bmad', '', '-x', 'a'.repeat(65), 'a/b']) {
       await expect(planning.start(workspace.id, bad)).rejects.toThrow(ValidationError);
@@ -194,7 +200,7 @@ describe('planning (story 4.1)', () => {
   });
 
   it('starts a planning session whose first message is the agent’s invocation of the skill', async () => {
-    const { planning, workspace, core, agent, chat } = setup();
+    const { planning, workspace, core, agent, chat } = await setup();
     const session = await planning.start(workspace.id, 'bmad-spec');
     expect(session.kind).toBe('planning');
     expect(core.entities.getSession(session.id)?.kind).toBe('planning');
@@ -207,7 +213,7 @@ describe('planning (story 4.1)', () => {
   });
 
   it('starts with the idea when given: trimmed, and refused when blank or too long (story 4.2)', async () => {
-    const { planning, workspace, core, chat } = setup();
+    const { planning, workspace, core, chat } = await setup();
     for (const bad of ['', '   ', 'x'.repeat(MAX_IDEA_LENGTH + 1)]) {
       await expect(planning.start(workspace.id, 'bmad-spec', bad)).rejects.toThrow(ValidationError);
     }
@@ -218,7 +224,7 @@ describe('planning (story 4.1)', () => {
   });
 
   it('does not need the script trust: planning runs no project script (story 4.2)', async () => {
-    const { planning, workspace, chat } = setup(['planning'], { trusted: false });
+    const { planning, workspace, chat } = await setup(['planning'], { trusted: false });
     expect(await planning.catalog(workspace.id)).toEqual(CATALOG);
     await planning.start(workspace.id, 'bmad-spec');
     await chat.close();
@@ -227,19 +233,19 @@ describe('planning (story 4.1)', () => {
 
 describe('board (story 4.1)', () => {
   it('reads the tickets of the workspace’s stored real path', async () => {
-    const { board, workspace, read } = setup();
+    const { board, workspace, read } = await setup();
     expect(await board.tickets(workspace.id)).toEqual(TICKETS);
     expect(read).toEqual([workspace.realPath]);
   });
 
   it('with Board off, refuses with feature_off and reads nothing', async () => {
-    const { board, workspace, read } = setup(['planning']);
+    const { board, workspace, read } = await setup(['planning']);
     await expect(board.tickets(workspace.id)).rejects.toThrow(FeatureOffError);
     expect(read).toEqual([]);
   });
 
   it('passes the store’s TicketsUnavailableError on', async () => {
-    const { board, workspace, fail } = setup();
+    const { board, workspace, fail } = await setup();
     fail(new TicketsUnavailableError('uv_missing'));
     const error = await board.tickets(workspace.id).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(TicketsUnavailableError);
@@ -250,7 +256,7 @@ describe('board (story 4.1)', () => {
 
 describe('board trust and the rest of the contract (story 4.2)', () => {
   it('without the project’s trust every board use-case refuses with scripts_not_trusted and runs nothing', async () => {
-    const { board, workspace, read, marks } = setup(['board'], { trusted: false });
+    const { board, workspace, read, marks } = await setup(['board'], { trusted: false });
     await expect(board.tickets(workspace.id)).rejects.toThrow(ScriptsNotTrustedError);
     await expect(board.ticket(workspace.id, '1.1')).rejects.toThrow(ScriptsNotTrustedError);
     await expect(board.mark(workspace.id, '1.1', { status: 'ready-for-dev' })).rejects.toThrow(ScriptsNotTrustedError);
@@ -258,13 +264,26 @@ describe('board trust and the rest of the contract (story 4.2)', () => {
     expect(marks).toEqual([]);
   });
 
+  it('scripts changed since the trust (story 4.13): every board use-case refuses with scripts_changed and runs nothing; allowed again, it runs', async () => {
+    const { core, board, workspace, read, marks, scripts } = await setup(['board']);
+    scripts.value = 'sha256:planted';
+    await expect(board.tickets(workspace.id)).rejects.toThrow(ScriptsChangedError);
+    await expect(board.ticket(workspace.id, '1.1')).rejects.toThrow(ScriptsChangedError);
+    await expect(board.mark(workspace.id, '1.1', { status: 'ready-for-dev' })).rejects.toThrow(ScriptsChangedError);
+    expect(read).toEqual([]);
+    expect(marks).toEqual([]);
+    await core.bmadScriptTrust.trustScripts(workspace.id);
+    await board.tickets(workspace.id);
+    expect(read).toEqual([workspace.realPath]);
+  });
+
   it('checks the piece before the trust: Board off answers feature_off even untrusted', async () => {
-    const { board, workspace } = setup(['planning'], { trusted: false });
+    const { board, workspace } = await setup(['planning'], { trusted: false });
     await expect(board.tickets(workspace.id)).rejects.toThrow(FeatureOffError);
   });
 
   it('without the pinned BMad Method downloaded every board use-case refuses with bmad_not_downloaded and runs nothing (story 4.14)', async () => {
-    const { board, workspace, read, marks } = setup(['board'], { downloaded: false });
+    const { board, workspace, read, marks } = await setup(['board'], { downloaded: false });
     for (const attempt of [board.tickets(workspace.id), board.ticket(workspace.id, '1.1'), board.mark(workspace.id, '1.1', { status: 'ready-for-dev' })]) {
       const error = await attempt.then(
         () => undefined,
@@ -278,16 +297,16 @@ describe('board trust and the rest of the contract (story 4.2)', () => {
   });
 
   it('checks the piece, then the trust, then the download: neither off nor untrusted asks whether it is downloaded (story 4.14)', async () => {
-    const off = setup(['planning'], { trusted: false, downloaded: false });
+    const off = await setup(['planning'], { trusted: false, downloaded: false });
     await expect(off.board.tickets(off.workspace.id)).rejects.toThrow(FeatureOffError);
     expect(off.source.reads).toBe(0);
-    const untrusted = setup(['board'], { trusted: false, downloaded: false });
+    const untrusted = await setup(['board'], { trusted: false, downloaded: false });
     await expect(untrusted.board.tickets(untrusted.workspace.id)).rejects.toThrow(ScriptsNotTrustedError);
     expect(untrusted.source.reads).toBe(0);
   });
 
   it('without the ticket tree every board use-case refuses with reduced_mode, after the other guards, and runs nothing (entry 4.11)', async () => {
-    const { board, workspace, read, marks, asked } = setup(['board'], { missing: ['ticket_tree'] });
+    const { board, workspace, read, marks, asked } = await setup(['board'], { missing: ['ticket_tree'] });
     for (const attempt of [board.tickets(workspace.id), board.ticket(workspace.id, '1.1'), board.mark(workspace.id, '1.1', { status: 'ready-for-dev' })]) {
       const error = await attempt.then(
         () => undefined,
@@ -302,17 +321,17 @@ describe('board trust and the rest of the contract (story 4.2)', () => {
 
     // Off, untrusted or not downloaded never asks for the capabilities.
     for (const options of [{ trusted: false }, { downloaded: false }]) {
-      const other = setup(['board'], { ...options, missing: ['ticket_tree'] });
+      const other = await setup(['board'], { ...options, missing: ['ticket_tree'] });
       await expect(other.board.tickets(other.workspace.id)).rejects.not.toBeInstanceOf(ReducedModeError);
       expect(other.asked).toEqual([]);
     }
-    const off = setup(['planning'], { missing: ['ticket_tree'] });
+    const off = await setup(['planning'], { missing: ['ticket_tree'] });
     await expect(off.board.tickets(off.workspace.id)).rejects.toThrow(FeatureOffError);
     expect(off.asked).toEqual([]);
   });
 
   it('without _bmad/ every board use-case refuses with bmad_not_set_up, never asking for capabilities (entry 4.11)', async () => {
-    const { board, workspace, read, marks, asked } = setup(['board'], { hasBmad: false, missing: ['ticket_tree'] });
+    const { board, workspace, read, marks, asked } = await setup(['board'], { hasBmad: false, missing: ['ticket_tree'] });
     for (const attempt of [board.tickets(workspace.id), board.ticket(workspace.id, '1.1'), board.mark(workspace.id, '1.1', { status: 'ready-for-dev' })]) {
       await expect(attempt).rejects.toMatchObject({ code: 'bmad_not_set_up' });
     }
@@ -322,7 +341,7 @@ describe('board trust and the rest of the contract (story 4.2)', () => {
   });
 
   it('reads one ticket, and a missing one is not found; a malformed ref is invalid and runs nothing', async () => {
-    const { board, workspace, read } = setup();
+    const { board, workspace, read } = await setup();
     expect((await board.ticket(workspace.id, '1.1')).ref).toBe('1.1');
     await expect(board.ticket(workspace.id, '9.9')).rejects.toThrow(NotFoundError);
     for (const bad of ['', '-x', 'a/b', '../1', 'a b']) await expect(board.ticket(workspace.id, bad)).rejects.toThrow(ValidationError);
@@ -330,7 +349,7 @@ describe('board trust and the rest of the contract (story 4.2)', () => {
   });
 
   it('marks through the store, never done, and checks the request', async () => {
-    const { board, workspace, marks } = setup();
+    const { board, workspace, marks } = await setup();
     expect(await board.mark(workspace.id, '1.1', { status: 'ready-for-dev' })).toEqual({ ref: '1.1', status: 'ready-for-dev' });
     await board.mark(workspace.id, '1.1', { status: 'blocked', blockedReason: '  Waiting on the API  ' });
     await expect(board.mark(workspace.id, '1.1', { status: 'done' })).rejects.toThrow(StatusNotAllowedError);
@@ -346,8 +365,8 @@ describe('board trust and the rest of the contract (story 4.2)', () => {
 
 describe('changing a status from the board (story 4.10)', () => {
   /** A board over a store whose marks wait for `release`, compare `expectedStatus` and record when each starts and ends. */
-  function gated() {
-    const base = setup();
+  async function gated() {
+    const base = await setup();
     const log: string[] = [];
     let status = '';
     const releases: Array<() => void> = [];
@@ -374,7 +393,7 @@ describe('changing a status from the board (story 4.10)', () => {
   }
 
   it('runs two marks of one repo one after the other, and a failed mark does not break the chain', async () => {
-    const { board, workspace, log, releases, flush } = gated();
+    const { board, workspace, log, releases, flush } = await gated();
     const first = board.mark(workspace.id, '1.1', { status: 'built' });
     const second = board.mark(workspace.id, '1.1', { status: 'ready-for-dev' });
     await flush();
@@ -389,7 +408,7 @@ describe('changing a status from the board (story 4.10)', () => {
   });
 
   it('a queued mark checks the guards again on its turn: Board turned off meanwhile runs nothing', async () => {
-    const { board, core, workspace, log, releases, flush } = gated();
+    const { board, core, workspace, log, releases, flush } = await gated();
     const first = board.mark(workspace.id, '1.1', { status: 'draft' });
     const second = board.mark(workspace.id, '1.1', { status: 'ready-for-dev' });
     await flush();
@@ -401,7 +420,7 @@ describe('changing a status from the board (story 4.10)', () => {
   });
 
   it('an expected status that no longer matches is ticket_changed and nothing is written', async () => {
-    const { board, workspace, releases, flush, statusNow } = gated();
+    const { board, workspace, releases, flush, statusNow } = await gated();
     const first = board.mark(workspace.id, '1.1', { status: 'in-progress', expectedStatus: '' });
     // The second click saw the same board: by its turn the first changed the ticket.
     const second = board.mark(workspace.id, '1.1', { status: 'ready-for-dev', expectedStatus: '' });
@@ -417,7 +436,7 @@ describe('changing a status from the board (story 4.10)', () => {
   });
 
   it('passes the expected status through, and refuses done and a bad expected status before the store', async () => {
-    const { board, workspace, marks } = setup();
+    const { board, workspace, marks } = await setup();
     await board.mark(workspace.id, '1.1', { status: 'ready-for-dev', expectedStatus: '' });
     await expect(board.mark(workspace.id, '1.1', { status: 'done', expectedStatus: '' })).rejects.toThrow(StatusNotAllowedError);
     await expect(board.mark(workspace.id, '1.1', { status: 'draft', expectedStatus: 'shipped' })).rejects.toThrow(ValidationError);
@@ -425,7 +444,7 @@ describe('changing a status from the board (story 4.10)', () => {
   });
 
   it('out of Done needs the confirmed reopen (user decision 2026-10-02): without it reopen_not_confirmed and nothing runs; into Done stays refused', async () => {
-    const { board, workspace, marks } = setup();
+    const { board, workspace, marks } = await setup();
     for (const request of [{ status: 'ready-for-dev', expectedStatus: 'done' }, { status: 'blocked', blockedReason: 'Broke again', expectedStatus: 'done' }]) {
       const error = await board.mark(workspace.id, '1.1', request).catch((failure: unknown) => failure);
       expect(error).toBeInstanceOf(ReopenNotConfirmedError);
@@ -448,7 +467,7 @@ describe('changing a status from the board (story 4.10)', () => {
       [['board'], { trusted: false }, ScriptsNotTrustedError],
       [['board'], { downloaded: false }, BmadNotDownloadedError],
     ] as const) {
-      const { board, workspace, marks } = setup([...pieces], options);
+      const { board, workspace, marks } = await setup([...pieces], options);
       await expect(board.mark(workspace.id, '1.1', { status: 'ready-for-dev', expectedStatus: '' })).rejects.toThrow(error);
       expect(marks).toEqual([]);
     }

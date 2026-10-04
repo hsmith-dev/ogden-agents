@@ -49,6 +49,12 @@ export const workspaces = sqliteTable(
      * never revoked by turning pieces off.
      */
     bmadScriptsTrusted: integer('bmad_scripts_trusted', { mode: 'boolean' }).notNull().default(false),
+    /**
+     * The contents of the project's `_bmad/scripts/` when the user trusted
+     * them (story 4.13, user decision 2026-10-04): `BmadCatalogPort.scriptsFingerprint`.
+     * `null` when not trusted, or trusted before this column (read as changed: asked again).
+     */
+    bmadScriptsFingerprint: text('bmad_scripts_fingerprint'),
     createdAt: text('created_at').notNull(),
   },
   (t) => [uniqueIndex('workspaces_path_unique').on(t.path)],

@@ -183,12 +183,15 @@ export function cautionAllows(level: CautionLevel, kind: ToolKind, pathsInside: 
 /**
  * Protected paths (user decision 2026-09-30, 2.8 F1): files and folders that
  * control how the agent or git runs, so writing one could give the agent
- * more than the request says (a hook, a settings allow-list, an MCP server).
+ * more than the request says (a hook, a settings allow-list, an MCP server),
+ * and since story 4.13 (user decision 2026-10-04) `_bmad/`, whose scripts the
+ * Board runs.
  * Folder or file names, at any depth, compared ignoring case everywhere
  * (stricter than the filesystem needs on a case-sensitive one).
  */
 export const PROTECTED_PATHS: ProtectedPaths = {
-  folders: ['.claude', '.git', '.vscode', '.idea'],
+  // `_bmad`: BMad Method's own scripts and settings, which the Board runs (story 4.13, user decision 2026-10-04).
+  folders: ['.claude', '.git', '.vscode', '.idea', '_bmad'],
   // As agents write them; the lowercase spellings too, for a case-insensitive filesystem.
   files: ['.mcp.json', 'CLAUDE.md', 'claude.md', 'AGENTS.md', 'agents.md', '.envrc'],
 };

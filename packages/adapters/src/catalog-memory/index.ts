@@ -45,6 +45,8 @@ export interface MemoryBmadCatalog extends BmadCatalogPort {
   readonly capabilityCalls: ReadonlyArray<readonly [string, readonly BmadCapability[]]>;
   /** Every `setup` call's options, in order (entry 4.11: `{ upgrade: true }` for an upgrade, `{}` otherwise). */
   readonly setupOptions: ReadonlyArray<{ upgrade?: boolean }>;
+  /** Sets what `scriptsFingerprint` answers for `repoPath` from now on (story 4.13: the project's scripts changed). */
+  setScriptsFingerprint(repoPath: string, fingerprint: string | undefined): void;
 }
 
 /** The version the memory catalog says Ogden Agents bundles. */
@@ -69,6 +71,8 @@ export interface MemoryBmadCatalogOptions {
    * `false`, else none.
    */
   missing?: Readonly<Record<string, readonly BmadCapability[]>>;
+  /** Each repo path's `scriptsFingerprint` (story 4.13); any other path has no scripts (`'none'`). */
+  scripts?: Readonly<Record<string, string | undefined>>;
   /** Each repo path's catalog after an upgrade (merged over `catalogs`), such as the entry action it now has. */
   afterUpgrade?: Readonly<Record<string, Partial<Omit<Catalog, 'skills' | 'capabilities'>>>>;
 }
@@ -117,6 +121,7 @@ export function createMemoryBmadCatalog(
     return { plain_labels: !lacks.has('plain_labels'), ticket_tree: !lacks.has('ticket_tree') };
   };
   const statusOf = (repoPath: string) => structuredClone(setups.get(repoPath) ?? notSetUp());
+  const scripts = new Map<string, string | undefined>(Object.entries(options.scripts ?? {}));
   return {
     calls,
     skillCalls,
@@ -130,6 +135,10 @@ export function createMemoryBmadCatalog(
       const lacks = missingOf(repoPath);
       return BMAD_CAPABILITIES.filter((capability) => wanted.includes(capability) && lacks.has(capability));
     },
+    setScriptsFingerprint: (repoPath, fingerprint) => {
+      scripts.set(repoPath, fingerprint);
+    },
+    scriptsFingerprint: async (repoPath) => (scripts.has(repoPath) ? scripts.get(repoPath) : 'none'),
     readDocument: async (repoPath, outputFolder, path) => {
       documentCalls.push([repoPath, outputFolder, path]);
       const folder = outputFolder.replace(/\/+$/, '');

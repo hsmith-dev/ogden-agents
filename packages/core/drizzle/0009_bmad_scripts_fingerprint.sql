@@ -1,0 +1,1 @@
+ALTER TABLE `workspaces` ADD `bmad_scripts_fingerprint` text;

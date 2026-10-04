@@ -62,7 +62,7 @@ export interface BoardUseCases {
 
 export interface BoardDeps {
   bmad: Pick<BmadFeatures, 'requireBmadFeature'>;
-  trust: Pick<BmadScriptTrust, 'requireScriptsTrusted'>;
+  trust: Pick<BmadScriptTrust, 'requireScriptsTrusted' | 'requireScriptsUnchanged'>;
   /** The pinned BMad Method (story 4.14): checked after the trust, never downloaded from here. */
   source: Pick<BmadSourceUseCases, 'requireReady'>;
   entities: Pick<Entities, 'getWorkspace'>;
@@ -107,7 +107,7 @@ export function createBoard({ bmad, trust, source, entities, catalog, tickets }:
     });
     return result;
   };
-  /** The guards in order (the piece, the trust, the pinned BMad Method, `_bmad/`, then the ticket tree), then the repo. */
+  /** The guards in order (the piece, the trust, the pinned BMad Method, `_bmad/`, the ticket tree, then the scripts' contents), then the repo. */
   const guarded = async (workspaceId: WorkspaceId): Promise<string> => {
     bmad.requireBmadFeature(workspaceId, 'board');
     trust.requireScriptsTrusted(workspaceId);
@@ -117,6 +117,8 @@ export function createBoard({ bmad, trust, source, entities, catalog, tickets }:
     if (!(await catalog.detect(repoPath)).hasBmad) throw new BmadNotSetUpError();
     const missing = await catalog.missingCapabilities(repoPath, BOARD_CAPABILITIES);
     if (missing.length > 0) throw new ReducedModeError(missing[0]!);
+    // Last, right before the store runs them: the project's scripts are still the ones the user allowed (story 4.13).
+    await trust.requireScriptsUnchanged(workspaceId);
     return repoPath;
   };
   return {

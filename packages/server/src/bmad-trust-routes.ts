@@ -2,9 +2,10 @@
  * The per-project script trust over REST (story 4.2; user decision
  * 2026-10-02, "Trust once per project"). `PUT …/bmad/script-trust` →
  * `WorkspaceSettingsResponse`: the user allows Ogden Agents to run this
- * project's own BMad Method scripts. Core keeps it on the workspace row and
- * appends `workspace.bmad_scripts_trusted` once; a repeat answers the same
- * and appends nothing.
+ * project's own BMad Method scripts, as they are now (story 4.13: bound to
+ * their contents). Core keeps it on the workspace row and appends
+ * `workspace.bmad_scripts_trusted`; a repeat with the same scripts answers
+ * the same and appends nothing, and after they changed it allows the new ones.
  *
  * Not guarded by a piece: the trust is asked for before (or right after) a
  * script-running piece is turned on, and is never revoked by turning pieces
@@ -35,11 +36,11 @@ export function registerBmadTrustRoutes(app: Hono, { scriptTrust, permissions, l
     app.put(API_ROUTES.workspaceBmadScriptTrust, notImplemented);
     return;
   }
-  app.put(API_ROUTES.workspaceBmadScriptTrust, (c) => {
+  app.put(API_ROUTES.workspaceBmadScriptTrust, async (c) => {
     const scope = ids(c);
     if (scope === undefined || scope.sessionId !== undefined) return notFound(c);
     try {
-      scriptTrust.trustScripts(scope.workspaceId);
+      await scriptTrust.trustScripts(scope.workspaceId);
       const settings = permissions.getSettings(scope.workspaceId);
       log.info("project's BMad Method scripts trusted", { workspaceId: scope.workspaceId });
       return c.json(WorkspaceSettingsResponse.parse({ settings }));

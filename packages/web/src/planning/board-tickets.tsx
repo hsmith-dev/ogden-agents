@@ -68,6 +68,8 @@ export function BoardTickets({ wsId, sheet }: { wsId: string; /** The ticket she
 function BoardTicketsBody({ wsId, sheet, tickets }: { wsId: string; sheet?: ReactNode; tickets: ReturnType<typeof useTickets> }) {
   const highlighted = useBoardEvents(wsId);
   if (isApiError(tickets.error, 'scripts_not_trusted')) return <ScriptTrustPrompt wsId={wsId} onTrusted={() => void tickets.refetch()} />;
+  // Story 4.13: the scripts changed since the user allowed them; Allow allows them as they are now.
+  if (isApiError(tickets.error, 'scripts_changed')) return <ScriptTrustPrompt wsId={wsId} changed onTrusted={() => void tickets.refetch()} />;
   if (isApiError(tickets.error, 'bmad_not_downloaded')) return <BmadDownloadPrompt onDownloaded={() => void tickets.refetch()} />;
   if (tickets.data === undefined) {
     if (tickets.error !== null) {

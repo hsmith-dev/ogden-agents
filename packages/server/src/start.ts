@@ -51,7 +51,7 @@ import { resolveTestHooks, testHooksLogFields, type TestHooks } from './test-hoo
 import { VERSION } from './version.js';
 import { agentEnvironment, agentKeysOf, SUBSCRIPTION_MAX_AGE_MS, uvEnvironment, withoutAgentKeys } from './start-env.js';
 import { broadcast, closeServer, HOST, listen, repointAppShortcut } from './start-io.js';
-import { bmadSetupFailureLogger, createBmadSourceAndCatalog, createDocumentCards, createPlanAndBoard, stopBmadWork, type BmadWiring } from './start-planning.js';
+import { bmadSetupFailureLogger, uvPycacheDir, createBmadSourceAndCatalog, createDocumentCards, createPlanAndBoard, stopBmadWork, type BmadWiring } from './start-planning.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
 
 // Moved out in story 3.9; still exported from here for the callers that import them from `start.ts`.
@@ -236,7 +236,10 @@ async function listenAndAnnounce({
   });
   // The one environment of every `uv` child, the version probe's and every script run's (story 4.2): an
   // allowlist, never this server's environment (AD-16), plus a test's own additions.
-  const uvChildEnv = () => ({ ...uvEnvironment(), ...hooks.bmadSource?.uvEnv, ...options.extraUvEnv });
+  // Python's bytecode cache lives in Ogden Agents' own folder, never a project's `__pycache__`, which it then
+  // never reads either (story 4.13: the script trust hashes the project's scripts without it).
+  const pycache = uvPycacheDir(dataDir);
+  const uvChildEnv = () => ({ ...uvEnvironment(), PYTHONDONTWRITEBYTECODE: '1', PYTHONPYCACHEPREFIX: pycache, ...hooks.bmadSource?.uvEnv, ...options.extraUvEnv });
   // One uv adapter: the toolchain's status and install, and the uv BMad Method's scripts run with (story 4.1).
   const uvToolchain = createUvToolchain({
     dataDir,

@@ -41,6 +41,18 @@ export function uvWorkDir(dataDir: string): string {
   return dir;
 }
 
+/**
+ * Where Python keeps the bytecode of every BMad Method script run
+ * (`PYTHONPYCACHEPREFIX`; story 4.13): Ogden Agents' own folder, so Python
+ * neither writes nor reads a project's `__pycache__`. Created readable only
+ * by the user if missing.
+ */
+export function uvPycacheDir(dataDir: string): string {
+  const dir = join(dataDir, 'tools', 'pycache');
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  return dir;
+}
+
 /** What {@link createBmadSourceAndCatalog} builds. */
 export interface BmadWiring {
   /** Where setup finds the script runner, once the server builds it (story 4.3). */

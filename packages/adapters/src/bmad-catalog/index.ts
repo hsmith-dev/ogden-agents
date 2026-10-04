@@ -27,6 +27,7 @@ import type { BmadCatalogPort, BmadRepoDetection } from '@ogden-agents/core';
 import type { Catalog } from '@ogden-agents/shared';
 import { buildCatalog, missingCapabilities } from './catalog.js';
 import { readDocument } from './document.js';
+import { scriptsFingerprint } from './scripts-fingerprint.js';
 import { createBmadSetup, type BmadSetupOptions } from './setup.js';
 import { scanSkills } from './skills.js';
 import { createSkillVerifier, type VerifiedSource } from './verified.js';
@@ -91,6 +92,8 @@ export function createBmadCatalog(options?: BmadSetupOptions | BmadCatalogReadOp
     skills: scanSkills,
     // A document a planning session wrote (story 4.7): confined to the real repo and output folder (`document.ts`).
     readDocument: (repoPath, outputFolder, path) => readDocument(repoPath, outputFolder, path),
+    // The project's own scripts, for the trust bound to their contents (story 4.13).
+    scriptsFingerprint,
   };
 }
 

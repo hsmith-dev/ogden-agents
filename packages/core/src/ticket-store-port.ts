@@ -27,6 +27,11 @@ export interface TicketWatch {
   close(): void;
 }
 
+/** What a watch checks before each read (story 4.13: the project's scripts are still the ones the user allowed). */
+export interface TicketWatchOptions {
+  beforeRun?: (() => Promise<void>) | undefined;
+}
+
 export interface TicketStorePort {
   /**
    * Every ticket of the repo's active initiative, in build order, as the
@@ -67,9 +72,11 @@ export interface TicketStorePort {
    * `tickets-v7` never calls it with `[]`; another store may, when it can't
    * tell which. Resolves once watching; rejects when it can't watch (the
    * folder is missing or resolves outside the repo). `close` stops it, and
-   * nothing is called after.
+   * nothing is called after. `beforeRun` (story 4.13) is awaited before
+   * every read the watch makes; when it rejects, that read doesn't run (the
+   * last tree is kept and the next change tries again).
    */
-  watch(repoPath: string, outputFolder: string, onChange: (refs: string[]) => void): Promise<TicketWatch>;
+  watch(repoPath: string, outputFolder: string, onChange: (refs: string[]) => void, options?: TicketWatchOptions): Promise<TicketWatch>;
 }
 
 /**

@@ -243,3 +243,35 @@ describe('tickets-v7 watch (story 4.8)', () => {
     expect(changedTicketRefs(before as never, after as never)).toEqual(['1.2']);
   });
 });
+
+describe('the watch checks before each read (story 4.13: the script trust bound to the contents)', () => {
+  it('runs nothing while beforeRun refuses, keeps the last tree, and reads again once it passes', async () => {
+    const repo = tempRepo();
+    const { state, runner } = fakeRunner();
+    const store = createTicketsV7({ runner, script: () => '/verified/tickets.py', workDir: repo, watchTiming: TIMING });
+    let allowed = true;
+    let checks = 0;
+    const changes: string[][] = [];
+    const watch = await store.watch(repo, '_bmad-output', (refs) => changes.push(refs), {
+      beforeRun: async () => {
+        checks++;
+        if (!allowed) throw new Error('scripts_changed');
+      },
+    });
+    watches.push(watch);
+    expect(state.runs).toBe(1);
+
+    allowed = false;
+    state.tickets = [row('1.1', 'in-progress'), row('1.2', '')];
+    writeFileSync(join(repo, '_bmad-output', 'epic-a', 'plan.md'), 'status: in-progress\n');
+    await waitFor(() => checks >= 2, 'the refused check');
+    await sleep(300);
+    expect(state.runs).toBe(1);
+    expect(changes).toEqual([]);
+
+    allowed = true;
+    writeFileSync(join(repo, '_bmad-output', 'epic-a', 'plan.md'), 'status: in-progress\n\n');
+    await waitFor(() => changes.length > 0, 'the change once allowed');
+    expect(changes).toEqual([['1.1']]);
+  });
+});

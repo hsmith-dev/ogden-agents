@@ -9,6 +9,7 @@ import {
   BMAD_SETUP_FAILURE_REASONS,
   FEATURE_OFF_MESSAGE,
   FEATURE_UNAVAILABLE_MESSAGE,
+  SCRIPTS_CHANGED_MESSAGE,
   SCRIPTS_NOT_TRUSTED_MESSAGE,
   STATUS_NOT_ALLOWED_MESSAGE,
   TICKET_CHANGED_MESSAGE,
@@ -95,6 +96,18 @@ export class ScriptsNotTrustedError extends CoreError {
   override readonly name = 'ScriptsNotTrustedError';
   constructor() {
     super('scripts_not_trusted', SCRIPTS_NOT_TRUSTED_MESSAGE);
+  }
+}
+
+/**
+ * A use-case that runs the project's own BMad Method scripts found them
+ * changed since the user trusted the project (story 4.13, user decision
+ * 2026-10-04: the trust is bound to their contents): core ran nothing.
+ */
+export class ScriptsChangedError extends CoreError {
+  override readonly name = 'ScriptsChangedError';
+  constructor() {
+    super('scripts_changed', SCRIPTS_CHANGED_MESSAGE);
   }
 }
 

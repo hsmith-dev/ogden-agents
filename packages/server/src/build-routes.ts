@@ -12,8 +12,9 @@
  *   `sandbox_unavailable`, `plan_uncommitted`, `vcs_unavailable`), 409
  *   `bmad_not_downloaded`, 503 `tickets_unavailable`.
  * - `GET …/builds/:ref` → `ReviewResponse`: the ticket's latest run; 404 without one.
- * - `POST …/builds/:ref/approve` → `ReviewResponse`; 409 `checks_failed`,
- *   `checkout_dirty`, `merge_conflict`.
+ * - `POST …/builds/:ref/approve` `ApproveBuildRequest` (the reviewed
+ *   revision) → `ReviewResponse`; 400 without it, 409 `checks_failed`
+ *   (also when the branch moved since), `checkout_dirty`, `merge_conflict`.
  * - `POST …/builds/:ref/reject` → `ReviewResponse`; 409 `run_active`, `checks_failed`.
  * - `GET …/sessions/:sesId/run` → `SessionRunResponse`: a `build` session's run; 404 otherwise.
  *
@@ -106,13 +107,25 @@ export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, log 
 
   routes.post('builds', API_ROUTES.workspaceBuildApprove, async (c, { workspaceId }) => {
     if (builds === undefined) return notImplemented(c);
-    try {
-      const review = ReviewResponse.parse(await builds.approve(workspaceId, c.req.param('ref') ?? ''));
-      log.info('build approved and merged', { workspaceId, runId: review.run.id, ref: review.run.ticketRef });
-      return c.json(review);
-    } catch (error) {
-      return refused(c, workspaceId, error);
-    }
+    let response: Response | undefined;
+    // `{ revision }`: the branch revision the user reviewed (review loop 1).
+    const tooLarge = await limit(c, async () => {
+      let body: unknown;
+      try {
+        body = JSON.parse(await c.req.text());
+      } catch {
+        response = apiError(c, 400, 'invalid_request', 'The request body must be JSON.');
+        return;
+      }
+      try {
+        const review = ReviewResponse.parse(await builds.approve(workspaceId, c.req.param('ref') ?? '', body));
+        log.info('build approved and merged', { workspaceId, runId: review.run.id, ref: review.run.ticketRef });
+        response = c.json(review);
+      } catch (error) {
+        response = refused(c, workspaceId, error);
+      }
+    });
+    return response ?? tooLarge ?? apiError(c, 413, 'invalid_request', 'That request is too large.');
   });
 
   routes.post('builds', API_ROUTES.workspaceBuildReject, async (c, { workspaceId }) => {
@@ -130,6 +143,10 @@ export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, log 
     if (builds === undefined) return notImplemented(c);
     const session = SessionId.safeParse(c.req.param('sesId'));
     if (!session.success) return apiError(c, 404, 'not_found', 'There is no such session.');
-    return c.json(SessionRunResponse.parse({ run: builds.runOfSession(workspaceId, session.data) }));
+    try {
+      return c.json(SessionRunResponse.parse({ run: await builds.runOfSession(workspaceId, session.data) }));
+    } catch (error) {
+      return refused(c, workspaceId, error);
+    }
   });
 }

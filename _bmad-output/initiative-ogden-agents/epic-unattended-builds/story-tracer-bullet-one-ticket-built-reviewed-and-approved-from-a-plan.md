@@ -89,7 +89,7 @@ context:
 - [x] `packages/web/src/planning/ticket-card.tsx`, `routes/session-page.tsx`, `routes/workspace-review-page.tsx`, `router.tsx`, `planning/builds-api.ts` -- Build, read-only build session, bare review page.
 - [x] Tests: core `builds.test.ts` (matrix rows), adapter tests for `vcs-git` against temp repos (hooks never run, merge conflict leaves checkout unchanged, `_bmad-output` exception), fake agent build mode, `gate.test.ts` route registry, architecture/guard-coverage, installed suite's Coming soon check, e2e `build-tracer.spec.ts` (Build → session → review → Approve → Done; `feature_off` with builds off).
 
-- [ ] Review loop 1 hardening -- every item in Design Notes "Hardening (review loop 1)", each with a test (policy unit tests for dangling symlink and hard link; vcs-git tests for in-progress merge, staged change, ignored file, reviewed revision; builds tests for protected-path diff, other ticket's plan, rebuild after Reject, failure cleanup, start-time settle; adapter test that the build session's options carry `managedSettings`, `settingSources` and `strictMcpConfig`).
+- [x] Review loop 1 hardening -- every item in Design Notes "Hardening (review loop 1)", each with a test (policy unit tests for dangling symlink and hard link; vcs-git tests for in-progress merge, staged change, ignored file, reviewed revision; builds tests for protected-path diff, other ticket's plan, rebuild after Reject, failure cleanup, start-time settle; adapter test that the build session's options carry `managedSettings`, `settingSources` and `strictMcpConfig`).
 
 **Acceptance Criteria:**
 - Given a fixture repo with a ready ticket, builds on and trusted, when Build is clicked, then a worktree appears under the data folder (none in the repo), the build session streams in the read-only session view, the run ends `verified`, and Approve leaves one merge commit on the checked-out branch containing the change and the plan `done`, and the board shows Done.
@@ -106,6 +106,16 @@ context:
 - The chat routes refuse a message, a permission mode or a driver change for a `build` session (409 `session_busy`, "read-only"): a Skip-all build session would bypass the policy.
 - The turn-end hook follows `session.state_changed` to `idle`/`error`, but not a `resumable` one (an agent stopped under the run by a server stop): those runs stay `running` until 5.x's restart recovery.
 - Not done here (other stories): "a failure for want of network is named plainly in the run's result" needs the per-run JSON result (5.4); the tracer's run has only its outcome and reason. The hitl live check (a scratch repo with real Claude Code, Seatbelt or bubblewrap) is still to do: record there whether `bmad-build-auto` accepts the `ogden/<ref>-<slug>` branch and how a `plan_checkpoint` stop shows over ACP.
+- 2026-10-04 (review loop 1 hardening, built): every Hardening item is in place, each with a test. Notes on how:
+  - Claude Code options come from `claudeSessionOptions` (`managedSettings`, `settingSources: ['project']`, `strictMcpConfig: true`; the Auto guards stay as flag `settings`). `disableAllHooks` is dropped in favour of `allowManagedHooksOnly`. `AgentSandbox` gained `deniedReads` and `allowedReads`; the home folder's credential folders come from the server (`homeDir`).
+  - Raw paths: `AgentPermissionRequest.rawPaths` (unmasked, never shown or stored). Policy hard links go through an optional `PathNormalizer.linkCount`.
+  - `VcsPort` gained `topLevel`, `branchRevision`, `operationInProgress`, `staged` and `restore`. `worktreeGitPaths(worktree, branch)` returns and creates the run's `branchRefDir` and `branchLogDir`. `merge(repo, revision)` answers `merged | conflict | refused` and never touches a merge it didn't start. `--no-overwrite-ignore` does not stop a three-way merge from overwriting an ignored file (git 2.54), so `vcs-git` also refuses (`refused`) when the merge would add a file that is already on disk untracked.
+  - A refused merge answers 409 `checkout_dirty` (`MERGE_REFUSED_MESSAGE`) with the run left `verified`. Staged changes, a changed plan file or an operation in progress answer `checkout_dirty` (`CHECKOUT_BUSY_MESSAGE`). Uncommitted BMad scripts in the new worktree answer `plan_uncommitted` (`BMAD_FILES_UNCOMMITTED_MESSAGE`).
+  - `ReviewResponse.headRevision` and `ApproveBuildRequest { revision }` (the web sends what the page showed).
+  - The per-repo serialization is `repo-serialization.ts` `serializedByRepo`, used by the board's marks and by builds' start, approve and reject.
+  - Core's chat throws `BuildSessionReadOnlyError` for a build session's user message, mode, driver and cancel. The builds use-case sends its prompt with `sendMessage(…, { build: true })`.
+  - `Entities.settleInterruptedRuns` runs at server start; the reason is `interrupted`.
+  - A diff touching protected paths, any `tickets.toml`, or a `-plan.md` under `_bmad-output/` other than the ticket's own fails the run.
 
 ## Plan Change Log
 

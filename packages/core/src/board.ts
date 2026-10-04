@@ -29,6 +29,7 @@ import type { BmadSourceUseCases } from './bmad-source-port.js';
 import type { Entities } from './entities.js';
 import { BmadNotSetUpError, ReducedModeError, ReopenNotConfirmedError, StatusNotAllowedError, ValidationError } from './errors.js';
 import { workspaceRepoPath } from './planning.js';
+import { serializedByRepo } from './repo-serialization.js';
 import type { TicketStorePort } from './ticket-store-port.js';
 
 export interface BoardUseCases {
@@ -87,26 +88,8 @@ function checkedRef(ref: unknown): string {
 }
 
 export function createBoard({ bmad, trust, source, entities, catalog, tickets }: BoardDeps): BoardUseCases {
-  /**
-   * The tail of each repo's marks (story 4.10): a mark starts only once the
-   * one before it settled, so two marks of one repo never interleave (each
-   * `find`, compare and `mark` runs as one). A failed mark never breaks the
-   * chain; the entry is dropped once the chain is idle.
-   */
-  const marking = new Map<string, Promise<unknown>>();
-  const serialized = <T>(repoPath: string, run: () => Promise<T>): Promise<T> => {
-    const before = marking.get(repoPath) ?? Promise.resolve();
-    const result = before.then(run, run);
-    const tail = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    marking.set(repoPath, tail);
-    void tail.then(() => {
-      if (marking.get(repoPath) === tail) marking.delete(repoPath);
-    });
-    return result;
-  };
+  // The tail of each repo's marks (story 4.10), shared with approve's `done` mark (story 5.2): never two at once.
+  const serialized = serializedByRepo;
   /** The guards in order (the piece, the trust, the pinned BMad Method, `_bmad/`, the ticket tree, then the scripts' contents), then the repo. */
   const guarded = async (workspaceId: WorkspaceId): Promise<string> => {
     bmad.requireBmadFeature(workspaceId, 'board');

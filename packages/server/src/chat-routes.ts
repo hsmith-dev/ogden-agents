@@ -13,6 +13,8 @@
  */
 import {
   AnswerFirstError,
+  BUILD_SESSION_READ_ONLY_MESSAGE,
+  BuildSessionReadOnlyError,
   ConfirmationRequiredError,
   CoreError,
   createAddProject,
@@ -110,11 +112,12 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
 
   /** Whether the session is an unattended build's (story 5.2): it runs on its own, so nobody sends it messages, a mode or a driver. */
   const isBuildSession = (workspaceId: WorkspaceId, sessionId: SessionId): boolean => chat.getSession(workspaceId, sessionId).kind === 'build';
-  const readOnlyBuild = (c: Context): Response => apiError(c, 409, 'session_busy', 'An unattended build runs on its own: its session is read-only.');
+  const readOnlyBuild = (c: Context): Response => apiError(c, 409, 'session_busy', BUILD_SESSION_READ_ONLY_MESSAGE);
 
   /** Core's refusals as API errors; anything else is left for `onError` (500). */
   const refusal = (c: Context, error: unknown): Response => {
     if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', NOT_FOUND);
+    if (error instanceof BuildSessionReadOnlyError) return readOnlyBuild(c);
     if (error instanceof QueueFullError) {
       return apiError(c, 409, 'session_busy', 'Too many messages are waiting. Send this one when the agent has caught up.');
     }

@@ -256,6 +256,12 @@ export interface Entities {
    * not given), appending `run.outcome_changed` if either changed.
    */
   setRunOutcome(id: RunId, outcome: RunOutcome, reason?: string | null): Run;
+  /**
+   * Sets every run still `running` to `blocked` with `reason` (story 5.2
+   * review loop 1): run at a server start, whose agents are gone with the
+   * process that ran them (AD-3). Their worktrees stay. Returns them.
+   */
+  settleInterruptedRuns(reason: string): Run[];
 }
 
 /** Parses `value`, throwing a {@link ValidationError} that names `what`. */
@@ -767,6 +773,15 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         .limit(1)
         .get();
       return row === undefined ? undefined : toRun(row);
+    },
+
+    settleInterruptedRuns(reason) {
+      return orm
+        .select({ id: runs.id })
+        .from(runs)
+        .where(eq(runs.outcome, 'running'))
+        .all()
+        .map((row) => this.setRunOutcome(row.id as RunId, 'blocked', reason));
     },
 
     setRunOutcome(id, outcome, reason = null) {

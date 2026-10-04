@@ -21,8 +21,8 @@ export const NO_BUBBLEWRAP = "Claude Code's sandbox on Linux needs bubblewrap (b
 
 export interface NativeSandboxOptions {
   platform?: NodeJS.Platform;
-  /** The `PATH` to look in (Linux). Default this process's. */
-  path?: string | undefined;
+  /** The `PATH` to look in (Linux): the agent's own (review loop 1), read at each check. Default this process's. */
+  path?: string | (() => string | undefined) | undefined;
   /** Whether `file` is an executable file (tests). */
   isExecutable?: (file: string) => boolean;
 }
@@ -41,7 +41,8 @@ export function createClaudeNativeSandbox(options: NativeSandboxOptions = {}): S
   const platform = options.platform ?? process.platform;
   const isExecutable = options.isExecutable ?? executable;
   const onPath = (name: string): boolean => {
-    const dirs = (options.path ?? process.env.PATH ?? '').split(delimiter).filter((dir) => dir !== '');
+    const given = typeof options.path === 'function' ? options.path() : options.path;
+    const dirs = (given ?? process.env.PATH ?? '').split(delimiter).filter((dir) => dir !== '');
     return dirs.some((dir) => isExecutable(join(dir, name)));
   };
   return {

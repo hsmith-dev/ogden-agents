@@ -211,13 +211,16 @@ export interface Chat {
    * already queued, `SessionBusyError` while a failed turn is ending,
    * `DriverIsTerminalError` while the terminal drives the session (AD-6),
    * and `SessionNotIdleError` while it is switching drivers.
+   * `BuildSessionReadOnlyError` for a `build` session (story 5.2), unless `build` is set: only the
+   * builds use-case sends a build its prompt. `cancel`, `setPermissionMode` and `switchDriver` refuse a
+   * build session the same way.
    * With `delivery: 'now'` (send now or wait) a message sent while the agent
    * works goes ahead of the waiting ones at once: into the running turn when
    * its agent can take it there, else after the current step is stopped
    * (`session.turn_interrupted`); `AnswerFirstError` while a permission card
    * waits. Absent or `wait`: as before.
    */
-  sendMessage(workspaceId: WorkspaceId, sessionId: SessionId, text: string, options?: { delivery?: WhileWorking | undefined }): { messageId: string; queued: boolean };
+  sendMessage(workspaceId: WorkspaceId, sessionId: SessionId, text: string, options?: { delivery?: WhileWorking | undefined; build?: boolean | undefined }): { messageId: string; queued: boolean };
   /**
    * Send now or wait: changes one message waiting to be sent, its text or its
    * place (0 goes next), and appends `session.queue_changed`. Throws

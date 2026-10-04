@@ -46,6 +46,7 @@ export * from './onboarding.js';
 export * from './permissions.js';
 export * from './planning.js';
 export * from './planning-documents.js';
+export * from './repo-serialization.js';
 export * from './resume-prime.js';
 export * from './sandbox-port.js';
 export * from './secret-store-port.js';

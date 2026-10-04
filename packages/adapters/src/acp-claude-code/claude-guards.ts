@@ -23,38 +23,53 @@ export function claudeGuardSettings(paths: ProtectedPaths): { permissions: { ask
 }
 
 /**
- * Claude Code settings (its flag-settings tier, fixed for the session) for an
- * unattended build session (story 5.2, user decision 2026-10-04): Bash runs
- * in Claude Code's own sandbox, without asking, and never outside it
+ * Claude Code's managed (policy-tier) settings for an unattended build
+ * session (story 5.2, user decision 2026-10-04; review loop 1): only these
+ * permission rules, hooks and MCP servers count, so no user, project or
+ * local setting can widen what core's policy allows. Bash runs in Claude
+ * Code's own sandbox, without asking, and never outside it
  * (`allowUnsandboxedCommands: false`; `failIfUnavailable`, so a sandbox that
  * can't start stops the session rather than running unsandboxed); only the
- * run's writable roots are writable, its denied paths never; no network
- * (an empty domain allowlist, enforced strictly). Web tools are denied and
- * no Claude Code hook runs. Everything else the agent asks goes to core's
- * build permission policy.
+ * run's writable roots are writable and its denied paths never; Ogden Agents'
+ * data folder (but the worktree) and the user's credential folders can't be
+ * read; no network (an empty domain allowlist, managed only, strict). Web
+ * tools and every MCP tool are denied. Everything else the agent asks goes to
+ * core's build permission policy.
  */
 export function claudeSandboxSettings(sandbox: AgentSandbox): Record<string, unknown> {
   return {
+    allowManagedPermissionRulesOnly: true,
+    allowManagedHooksOnly: true,
+    allowManagedMcpServersOnly: true,
+    permissions: { deny: ['WebFetch', 'WebSearch', 'mcp__*'] },
     sandbox: {
       enabled: true,
       failIfUnavailable: true,
       autoAllowBashIfSandboxed: true,
       allowUnsandboxedCommands: false,
-      network: { allowedDomains: [], strictAllowlist: true },
-      filesystem: { allowWrite: [...sandbox.writableRoots], denyWrite: [...sandbox.deniedPaths] },
+      network: { allowedDomains: [], allowManagedDomainsOnly: true, strictAllowlist: true },
+      filesystem: {
+        allowWrite: [...sandbox.writableRoots],
+        denyWrite: [...sandbox.deniedPaths],
+        denyRead: [...sandbox.deniedReads],
+        allowRead: [...sandbox.allowedReads],
+      },
     },
-    permissions: { deny: ['WebFetch', 'WebSearch'] },
-    disableAllHooks: true,
   };
 }
 
-/** The flag settings a session starts with: the Auto guards, the build sandbox, both, or none (`undefined`). */
-export function claudeSessionSettings(protectedPaths: ProtectedPaths | undefined, sandbox: AgentSandbox | undefined): Record<string, unknown> | undefined {
+/**
+ * What a session starts with in `_meta.claudeCode.options` (claude-agent-acp
+ * 0.84 passes `settings`, `managedSettings`, `settingSources` and
+ * `strictMcpConfig` through): the Auto guards as flag settings; for a build
+ * session the managed lockdown, project settings only (its CLAUDE.md and
+ * skills load; user and local settings don't) and no MCP config but Ogden's
+ * (none). `undefined` for a session with neither.
+ */
+export function claudeSessionOptions(protectedPaths: ProtectedPaths | undefined, sandbox: AgentSandbox | undefined): Record<string, unknown> | undefined {
   if (protectedPaths === undefined && sandbox === undefined) return undefined;
-  const guards = protectedPaths === undefined ? undefined : claudeGuardSettings(protectedPaths);
-  const contained = sandbox === undefined ? undefined : claudeSandboxSettings(sandbox);
-  if (guards === undefined) return contained;
-  if (contained === undefined) return guards;
-  const permissions = { ...(contained.permissions as Record<string, unknown>), ...guards.permissions };
-  return { ...contained, permissions };
+  return {
+    ...(protectedPaths === undefined ? {} : { settings: claudeGuardSettings(protectedPaths) }),
+    ...(sandbox === undefined ? {} : { managedSettings: claudeSandboxSettings(sandbox), settingSources: ['project'], strictMcpConfig: true }),
+  };
 }

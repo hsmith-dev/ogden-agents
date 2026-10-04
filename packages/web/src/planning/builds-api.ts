@@ -41,9 +41,9 @@ export async function fetchReview(wsId: string, ref: string, auth: Auth = tabAut
   return ReviewResponse.parse(json);
 }
 
-/** `POST …/builds/:ref/approve`: merges the run locally with the ticket's `done` mark. */
-export async function approveBuild(wsId: string, ref: string, auth: Auth = tabAuth): Promise<ReviewResponse> {
-  const json = await call(auth, apiPath(API_ROUTES.workspaceBuildApprove, { wsId, ref }), { method: 'POST' }, APPROVE_FAILED);
+/** `POST …/builds/:ref/approve`: merges the reviewed `revision` locally with the ticket's `done` mark. */
+export async function approveBuild(wsId: string, ref: string, revision: string, auth: Auth = tabAuth): Promise<ReviewResponse> {
+  const json = await call(auth, apiPath(API_ROUTES.workspaceBuildApprove, { wsId, ref }), postJson({ revision }), APPROVE_FAILED);
   return ReviewResponse.parse(json);
 }
 
@@ -73,7 +73,8 @@ export function useReview(wsId: string, ref: string) {
 export function useReviewAction(wsId: string, ref: string, action: 'approve' | 'reject') {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => (action === 'approve' ? approveBuild(wsId, ref) : rejectBuild(wsId, ref)),
+    // Approve sends the branch revision the page showed (review loop 1): a build that moved since is refused.
+    mutationFn: (revision: string | null) => (action === 'approve' ? approveBuild(wsId, ref, revision ?? '') : rejectBuild(wsId, ref)),
     onSettled: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ['review', wsId, ref] }),

@@ -10,7 +10,7 @@
  * - an unmet prerequisite, no sandbox, an uncommitted plan and a ticket not
  *   ready are refused with their codes, writing nothing;
  * - Build: the worktree is under the data folder (none in the repo), on
- *   `ogden/1.1-build-the-thing`; the build session's write inside it is
+ *   `ogden/<run8>/1.1-build-the-thing`; the build session's write inside it is
  *   allowed and the one outside refused; the run ends `verified`; Approve is
  *   refused on a dirty checkout, not for changes under `_bmad-output/`, then
  *   leaves one merge commit with the change and the plan `done`, no hook
@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { createFixedSandbox } from '@ogden-agents/adapters';
 import type { TicketStorePort } from '@ogden-agents/core';
-import { API_ROUTES, ApiErrorBody, apiPath, BuildResponse, FEATURE_OFF_MESSAGE, MERGE_CONFLICT_MESSAGE, ReviewResponse, SessionRunResponse, WorkspaceResponse } from '@ogden-agents/shared';
+import { API_ROUTES, ApiErrorBody, apiPath, BuildResponse, FEATURE_OFF_MESSAGE, MERGE_CONFLICT_MESSAGE, ReviewResponse, RUN_REASON_NO_NETWORK, SessionRunResponse, WorkspaceResponse } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { createFakeBmadRepo, FAKE_BUILD_PLAN, FAKE_BUILD_TICKET_FILES, FAKE_BUILD_WAITING_PLAN, fixtureGit } from '../../../tests/fixtures/fake-bmad-repo.js';
 import { createPlanFileTicketStore } from '../../../tests/fixtures/plan-file-ticket-store.js';
@@ -124,7 +124,7 @@ describe('Unattended builds over REST (story 5.2)', () => {
     expect(started.status).toBe(201);
     const { run, session } = BuildResponse.parse(await started.json());
     expect(session.kind).toBe('build');
-    expect(run.branch).toBe('ogden/1.1-build-the-thing');
+    expect(run.branch).toMatch(/^ogden\/[a-z2-7]{8}\/1\.1-build-the-thing$/);
     expect(run.sandbox).toBe('test');
     const worktree = run.worktreePath!;
     const data = realpathSync.native(server.dataDir);
@@ -149,13 +149,13 @@ describe('Unattended builds over REST (story 5.2)', () => {
     // Dirty outside _bmad-output: refused, nothing merged.
     const head = fixtureGit(repo.path, 'rev-parse', 'HEAD').trim();
     writeFileSync(join(repo.path, 'notes.txt'), 'mine\n');
-    expect((await refusalOf(await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildApprove, { wsId, ref: '1.1' })))).code).toBe('checkout_dirty');
+    expect((await refusalOf(await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildApprove, { wsId, ref: '1.1' }), { revision: (await review('1.1')).headRevision }))).code).toBe('checkout_dirty');
     expect(fixtureGit(repo.path, 'rev-parse', 'HEAD').trim()).toBe(head);
     // Uncommitted changes under _bmad-output never block it.
     fixtureGit(repo.path, 'clean', '-fq', '--', 'notes.txt');
     writeFileSync(join(repo.path, '_bmad-output', 'scratch.md'), '# Mine\n');
 
-    const approved = await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildApprove, { wsId, ref: '1.1' }));
+    const approved = await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildApprove, { wsId, ref: '1.1' }), { revision: (await review('1.1')).headRevision });
     expect(approved.status).toBe(200);
     expect(ReviewResponse.parse(await approved.json()).merged).toBe(true);
     // One merge commit on the checked-out branch, with the change and the plan done.
@@ -171,13 +171,13 @@ describe('Unattended builds over REST (story 5.2)', () => {
     expect(readdirSync(markers)).toEqual([]);
     // The worktree is gone, the branch kept; a second Approve is refused.
     expect(existsSync(worktree)).toBe(false);
-    expect(branches(repo.path)).toEqual(['main', 'ogden/1.1-build-the-thing']);
+    expect(branches(repo.path)).toEqual(['main', run.branch]);
     expect((await review('1.1')).merged).toBe(true);
-    expect((await refusalOf(await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildApprove, { wsId, ref: '1.1' })))).code).toBe('checks_failed');
+    expect((await refusalOf(await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildApprove, { wsId, ref: '1.1' }), { revision: (await review('1.1')).headRevision }))).code).toBe('checks_failed');
   });
 
   it('a conflicting merge is aborted with the checkout unchanged and blocks the run; Reject keeps the branch and the ticket', async () => {
-    const { tab, server, wsId, build, settled, repo, store } = await setup();
+    const { tab, server, wsId, build, settled, review, repo, store } = await setup();
     const { run } = BuildResponse.parse(await (await build('1.1')).json());
     expect((await settled('1.1')).outcome).toBe('verified');
     // The checkout added the same file meanwhile, with other contents.
@@ -188,7 +188,7 @@ describe('Unattended builds over REST (story 5.2)', () => {
     fixtureGit(repo.path, 'commit', '--quiet', '--no-verify', '-m', 'Meanwhile');
     const head = fixtureGit(repo.path, 'rev-parse', 'HEAD').trim();
 
-    const refused = await refusalOf(await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildApprove, { wsId, ref: '1.1' })));
+    const refused = await refusalOf(await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildApprove, { wsId, ref: '1.1' }), { revision: (await review('1.1')).headRevision }));
     expect(refused).toEqual({ status: 409, code: 'merge_conflict', message: MERGE_CONFLICT_MESSAGE });
     expect(fixtureGit(repo.path, 'rev-parse', 'HEAD').trim()).toBe(head);
     expect(fixtureGit(repo.path, 'status', '--porcelain').trim()).toBe('');
@@ -200,7 +200,7 @@ describe('Unattended builds over REST (story 5.2)', () => {
     expect(rejected.status).toBe(200);
     expect(ReviewResponse.parse(await rejected.json()).outcome).toBe('stopped');
     expect(existsSync(run.worktreePath!)).toBe(false);
-    expect(branches(repo.path)).toEqual(['main', 'ogden/1.1-build-the-thing']);
+    expect(branches(repo.path)).toEqual(['main', run.branch]);
     expect(store.marks).toEqual([]);
     expect(readFileSync(join(repo.path, ...FAKE_BUILD_PLAN.split('/')), 'utf8')).toMatch(/^status: ready-for-dev$/m);
   });
@@ -219,7 +219,22 @@ describe('Unattended builds over REST (story 5.2)', () => {
     expect((await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId }), { ref: '1.1' })).status).toBe(201);
     let review: ReviewResponse | undefined;
     await waitFor(async () => (review = ReviewResponse.parse(await (await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceBuild, { wsId, ref: '1.1' }))).json())).outcome !== 'running', 'the run to end', 15_000);
-    expect(review).toMatchObject({ outcome: 'blocked', reason: 'The fake agent was told to block.' });
-    expect((await refusalOf(await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildApprove, { wsId, ref: '1.1' })))).code).toBe('checks_failed');
+    expect(review).toMatchObject({ outcome: 'blocked', reason: `The fake agent was told to block. ${RUN_REASON_NO_NETWORK}` });
+    expect((await refusalOf(await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildApprove, { wsId, ref: '1.1' }), { revision: review!.headRevision }))).code).toBe('checks_failed');
+  });
+
+  it('a run left running by a stopped server is blocked as interrupted at the next start, its worktree kept', async () => {
+    const { server, build } = await setup();
+    const dataDir = server.dataDir;
+    const { run } = BuildResponse.parse(await (await build('1.1')).json());
+    // As a crash leaves it: the row still running when the server starts again.
+    await server.close();
+    const { openCore } = await import('@ogden-agents/core');
+    const core = openCore(dataDir);
+    core.entities.setRunOutcome(run.id, 'running');
+    core.close();
+    const again = await startTestServer({ dataDir, sandbox: createFixedSandbox({ available: true, kind: 'test' }) });
+    expect(again.core.entities.getRun(run.id)).toMatchObject({ outcome: 'blocked', reason: 'interrupted' });
+    expect(existsSync(run.worktreePath!)).toBe(true);
   });
 });

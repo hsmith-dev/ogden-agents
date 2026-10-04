@@ -540,3 +540,18 @@ export class BuildRefusedError extends CoreError {
     this.code = code;
   }
 }
+
+/** What a read-only build session refuses (story 5.2): it runs on its own. */
+export const BUILD_SESSION_READ_ONLY_MESSAGE = 'An unattended build runs on its own: its session is read-only.';
+
+/**
+ * A user message, permission mode, driver change or Stop was asked of an
+ * unattended build's session (story 5.2 review loop 1): core refuses it,
+ * changing nothing. Only the builds use-case sends its first prompt.
+ */
+export class BuildSessionReadOnlyError extends CoreError {
+  override readonly name = 'BuildSessionReadOnlyError';
+  constructor() {
+    super('build_session_read_only', BUILD_SESSION_READ_ONLY_MESSAGE);
+  }
+}

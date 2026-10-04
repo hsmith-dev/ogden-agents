@@ -17,11 +17,14 @@
  * starting with `~` is refused), `..` resolved, symlinks resolved through the
  * deepest existing ancestor, compared case-insensitively where the
  * filesystem is, and on Windows a segment that may be an 8.3 short name
- * (`PROGRA~1`) refused. Pure: how paths resolve is injected
+ * (`PROGRA~1`) refused. A missing component that is in fact a link (a
+ * dangling symlink) is refused, and so is an existing file with more than one
+ * hard link (review loop 1). Decisions use the agent's raw paths
+ * (`rawPaths`), never the masked ones shown to the user. Pure: how paths resolve is injected
  * ({@link PathNormalizer}), so the unit tests can play symlinks,
  * case-insensitive filesystems and 8.3 names on any OS.
  */
-import { realpathSync } from 'node:fs';
+import { lstatSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, posix, win32 } from 'node:path';
 import type { AgentPermissionDecision, AgentPermissionRequest, ProtectedPaths } from './agent-port.js';
 import { isCaseInsensitivePath } from './entities.js';
@@ -38,6 +41,12 @@ export interface PathNormalizer {
   realpath(path: string): string | undefined;
   /** Whether paths under `root` compare case-insensitively. */
   caseInsensitive(root: string): boolean;
+  /**
+   * How many hard links the existing file at real path `path` has, or
+   * `undefined` when nothing is there yet (review loop 1: a write through a
+   * second hard link would change a file outside the worktree).
+   */
+  linkCount?(path: string): number | undefined;
 }
 
 /** What a run's agent may write. Every path is absolute and real (symlinks resolved). */
@@ -83,7 +92,8 @@ function within(root: string, target: string, p: typeof posix, folded: boolean, 
 /** Core's answer to one permission request of a build session (see the header). */
 export function decideBuildPermission(request: AgentPermissionRequest, scope: BuildPermissionScope, fs: PathNormalizer): AgentPermissionDecision {
   if (request.kind === undefined || !WRITE_KINDS.has(request.kind)) return deny();
-  const paths = request.paths ?? [];
+  // The raw paths: masking a secret-looking part could make an outside path look inside (review loop 1).
+  const paths = request.rawPaths ?? request.paths ?? [];
   if (paths.length === 0) return deny();
   const p = fs.platform === 'win32' ? win32 : posix;
   const protectedNames = new Set([...scope.protectedPaths.folders, ...scope.protectedPaths.files].map((name) => name.toLowerCase()));
@@ -97,6 +107,9 @@ export function decideBuildPermission(request: AgentPermissionRequest, scope: Bu
   for (const path of paths) {
     const target = normalizeBuildPath(path, worktree, fs);
     if (target === undefined) return deny();
+    // A second hard link to the file is a way out of the worktree.
+    const links = fs.linkCount?.(target);
+    if (links !== undefined && links > 1) return deny();
     const inWorktree = within(worktree, target, p, folded, true);
     if (inWorktree !== undefined) {
       // A protected name at any depth (`.git`, `_bmad`, `.claude`, `AGENTS.md`, …) is never written.
@@ -123,11 +136,26 @@ export function nodePathNormalizer(): PathNormalizer {
         } catch (error) {
           const code = (error as NodeJS.ErrnoException).code;
           if (code !== 'ENOENT' && code !== 'ENOTDIR') return undefined;
+          // Missing, unless it is a link to something missing (a dangling symlink): a write would follow it.
+          try {
+            lstatSync(current);
+            return undefined;
+          } catch {
+            // Truly not there yet.
+          }
           const parent = dirname(current);
           if (parent === current) return undefined;
           rest.push(basename(current));
           current = parent;
         }
+      }
+    },
+    linkCount(path) {
+      try {
+        const stat = lstatSync(path);
+        return stat.isFile() ? stat.nlink : 1;
+      } catch {
+        return undefined;
       }
     },
     caseInsensitive(root) {

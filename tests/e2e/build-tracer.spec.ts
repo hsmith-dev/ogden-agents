@@ -109,7 +109,7 @@ test('Build on a ready card builds it unattended, the session streams read-only,
       expect(fixtureGit(repo, 'show', `HEAD:${FAKE_BUILD_PLAN}`)).toMatch(/^status: done$/m);
       expect(fixtureGit(repo, 'status', '--porcelain').trim()).toBe('');
       expect(existsSync(join(realpathSync.native(dataDir), 'w', worktrees[0]!))).toBe(false);
-      expect(branches(repo)).toEqual(['main', 'ogden/1.1-build-the-thing']);
+      expect(branches(repo)).toEqual(['main', `ogden/${worktrees[0]}/1.1-build-the-thing`]);
 
       // The board shows it Done.
       await page.goto(`${server.url}/w/${wsId}/board`);

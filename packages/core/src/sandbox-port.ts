@@ -14,6 +14,10 @@ export interface AgentSandbox {
   writableRoots: readonly string[];
   /** Absolute paths inside those roots it may never write (protected paths, `.git/hooks`, `.git/config`). */
   deniedPaths: readonly string[];
+  /** Absolute paths it may never read (Ogden Agents' data folder, the user's credential folders; review loop 1). */
+  deniedReads: readonly string[];
+  /** Absolute paths inside {@link deniedReads} it may read again (the run's own worktree). */
+  allowedReads: readonly string[];
 }
 
 export type SandboxCheck = { available: true; kind: string } | { available: false; reason: string };

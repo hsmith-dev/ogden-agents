@@ -5,7 +5,7 @@
  * case-insensitive filesystems, Windows 8.3 names), plus one check on this
  * computer's real filesystem.
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -97,6 +97,13 @@ describe('decideBuildPermission (story 5.2)', () => {
     expect(decideBuildPermission(edit('C:\\Data\\w\\abcdefgh\\_bmad\\x'), scope, fs).outcome).toBe('deny');
   });
 
+  it('decides on the raw paths, never the masked ones shown to the user (review loop 1)', () => {
+    const fs = fakeFs();
+    const masked = { toolCallId: 't', title: 'Write', kind: 'edit', paths: ['/data/w/abcdefgh/[redacted]'], rawPaths: ['/etc/sk-secret'] };
+    expect(decideBuildPermission(masked, POSIX_SCOPE, fs).outcome).toBe('deny');
+    expect(decideBuildPermission({ ...masked, rawPaths: ['/data/w/abcdefgh/a.ts'] }, POSIX_SCOPE, fs).outcome).toBe('allow_once');
+  });
+
   it('denies everything that is not a file edit: commands, reads, fetches, MCP, unknown, and an edit naming no path', () => {
     const fs = fakeFs();
     for (const kind of ['execute', 'read', 'fetch', 'search', 'delete', 'move', 'switch_mode', 'other', 'think', undefined]) {
@@ -129,5 +136,27 @@ describe("decideBuildPermission on this computer's filesystem", () => {
     const fs = nodePathNormalizer();
     expect(decideBuildPermission(edit('link/x.txt'), scope, fs).outcome).toBe('deny');
     expect(decideBuildPermission(edit('new/deeper/x.txt'), scope, fs).outcome).toBe('allow_once');
+  });
+
+  it('refuses a dangling symlink (a write would follow it out) and a file with a second hard link (review loop 1)', () => {
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'ogden-agents-policy-')));
+    dirs.push(root);
+    const worktree = join(root, 'w', 'abcdefgh');
+    mkdirSync(worktree, { recursive: true });
+    const scope = { worktree, gitWritable: [], protectedPaths: PROTECTED_PATHS };
+    const fs = nodePathNormalizer();
+    writeFileSync(join(root, 'outside.txt'), 'x');
+    writeFileSync(join(worktree, 'mine.txt'), 'x');
+    expect(decideBuildPermission(edit('mine.txt'), scope, fs).outcome).toBe('allow_once');
+    linkSync(join(root, 'outside.txt'), join(worktree, 'linked.txt'));
+    expect(decideBuildPermission(edit('linked.txt'), scope, fs).outcome).toBe('deny');
+    try {
+      symlinkSync(join(root, 'not-yet'), join(worktree, 'dangling'), 'file');
+      symlinkSync(join(root, 'no-dir'), join(worktree, 'dangling-dir'), 'dir');
+    } catch {
+      return;
+    }
+    expect(decideBuildPermission(edit('dangling'), scope, fs).outcome).toBe('deny');
+    expect(decideBuildPermission(edit('dangling-dir/x.txt'), scope, fs).outcome).toBe('deny');
   });
 });

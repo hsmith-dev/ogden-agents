@@ -90,6 +90,12 @@ export interface AgentPermissionRequest {
    * file kinds match only when all of them lie inside the workspace.
    */
   paths?: readonly string[] | undefined;
+  /**
+   * The same paths as the agent gave them, not masked (story 5.2 review loop
+   * 1): only for decisions core makes itself (the build policy); never shown,
+   * stored or logged.
+   */
+  rawPaths?: readonly string[] | undefined;
 }
 
 /**

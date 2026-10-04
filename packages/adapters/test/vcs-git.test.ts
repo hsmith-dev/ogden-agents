@@ -73,8 +73,12 @@ describe('vcs-git (story 5.2)', () => {
     expect(readFileSync(join(path, 'src', 'a.ts'), 'utf8')).toBe('export const a = 1;\n');
     expect(git(path, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe('ogden/1.1-build-it');
     expect(readdirSync(repo).sort()).toEqual(['.git', 'README.md', 'src']);
-    const paths = await vcs.worktreeGitPaths(path);
+    const paths = await vcs.worktreeGitPaths(path, 'ogden/abcdefgh/1.1-build-it');
     expect(paths.commonDir).toBe(join(repo, '.git'));
+    // The run's own ref and reflog folders, made if missing (review loop 1).
+    expect(paths.branchRefDir).toBe(join(repo, '.git', 'refs', 'heads', 'ogden', 'abcdefgh'));
+    expect(paths.branchLogDir).toBe(join(repo, '.git', 'logs', 'refs', 'heads', 'ogden', 'abcdefgh'));
+    expect(existsSync(paths.branchRefDir) && existsSync(paths.branchLogDir)).toBe(true);
     expect(paths.gitDir).toBe(join(repo, '.git', 'worktrees', 'abcdefgh'));
     // A run folder that already exists is never reused.
     await expect(vcs.addWorktree(repo, { path, branch: 'ogden/other', base: head })).rejects.toBeInstanceOf(VcsError);
@@ -130,7 +134,9 @@ describe('vcs-git (story 5.2)', () => {
     expect((await vcs.diff(repo, head, 'ogden/1.1-x', { maxBytes: 10 })).truncated).toBe(true);
     expect(await vcs.isMerged(repo, 'ogden/1.1-x')).toBe(false);
 
-    expect(await vcs.merge(repo, 'ogden/1.1-x')).toBe('merged');
+    expect(await vcs.branchRevision(repo, 'ogden/1.1-x')).toBe(git(repo, 'rev-parse', 'ogden/1.1-x').trim());
+    expect(await vcs.branchRevision(repo, 'ogden/none')).toBeUndefined();
+    expect(await vcs.merge(repo, (await vcs.branchRevision(repo, 'ogden/1.1-x'))!)).toBe('merged');
     writeFileSync(join(repo, 'src', 'a.ts'), 'export const a = 3;\n');
     await vcs.add(repo, ['src/a.ts']);
     await vcs.commit(repo, 'Merge ogden/1.1-x: ticket 1.1 done');
@@ -156,7 +162,7 @@ describe('vcs-git (story 5.2)', () => {
     mkdirSync(join(repo, '_bmad-output'));
     writeFileSync(join(repo, '_bmad-output', 'notes.md'), 'mine\n');
 
-    expect(await vcs.merge(repo, 'ogden/1.2-y')).toBe('conflict');
+    expect(await vcs.merge(repo, git(repo, 'rev-parse', 'ogden/1.2-y').trim())).toBe('conflict');
     expect(git(repo, 'rev-parse', 'HEAD').trim()).toBe(before);
     expect(readFileSync(join(repo, 'src', 'a.ts'), 'utf8')).toBe('export const a = "main";\n');
     expect(await vcs.status(repo)).toEqual(['_bmad-output/notes.md']);
@@ -176,12 +182,68 @@ describe('vcs-git (story 5.2)', () => {
     writeFileSync(join(path, 'c.txt'), 'c\n');
     git(path, 'add', '-A');
     git(path, 'commit', '-q', '--no-verify', '-m', 'c');
-    expect(await vcs.merge(repo, 'ogden/1.3-z')).toBe('merged');
+    expect(await vcs.merge(repo, git(repo, 'rev-parse', 'ogden/1.3-z').trim())).toBe('merged');
     // The fallback identity applies only where git has none (no repo or global config here: HOME is the temp data folder).
     await vcs.commit(repo, 'merge');
     expect(execFileSync('git', ['log', '-1', '--format=%an <%ae>'], { cwd: repo, encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: data } }).trim()).toBe('Ogden Agents <ogden-agents@localhost>');
 
     writeFileSync(join(data, 'tools', 'git-hooks-none', 'pre-commit'), '#!/bin/sh\n');
     await expect(vcs.status(repo)).rejects.toBeInstanceOf(VcsError);
+  });
+
+  it("merges the reviewed revision only, never touches the user's merge in progress, and never overwrites an ignored file (review loop 1)", async () => {
+    const { repo, data, vcs, head } = setup();
+    mkdirSync(join(data, 'w'));
+    const path = join(data, 'w', 'run4');
+    await vcs.addWorktree(repo, { path, branch: 'ogden/1.4-r', base: head });
+    writeFileSync(join(path, 'b.txt'), 'reviewed\n');
+    git(path, 'add', '-A');
+    git(path, 'commit', '-q', '--no-verify', '-m', 'reviewed');
+    const reviewed = git(path, 'rev-parse', 'HEAD').trim();
+    writeFileSync(join(path, 'c.txt'), 'later\n');
+    git(path, 'add', '-A');
+    git(path, 'commit', '-q', '--no-verify', '-m', 'later');
+    expect(await vcs.merge(repo, reviewed)).toBe('merged');
+    expect(existsSync(join(repo, 'b.txt'))).toBe(true);
+    expect(existsSync(join(repo, 'c.txt'))).toBe(false);
+    await vcs.abortMerge(repo);
+
+    // The user's own merge in progress: refused, and left exactly as it was.
+    const other = join(data, 'w', 'run5');
+    await vcs.addWorktree(repo, { path: other, branch: 'ogden/1.5-u', base: head });
+    writeFileSync(join(other, 'src', 'a.ts'), 'export const a = "theirs";\n');
+    git(other, 'commit', '-q', '--no-verify', '-am', 'theirs');
+    writeFileSync(join(repo, 'src', 'a.ts'), 'export const a = "ours";\n');
+    git(repo, 'commit', '-q', '--no-verify', '-am', 'ours');
+    expect(() => git(repo, 'merge', 'ogden/1.5-u')).toThrow();
+    expect(await vcs.operationInProgress(repo)).toBe(true);
+    expect(await vcs.merge(repo, reviewed)).toBe('refused');
+    expect(existsSync(join(repo, '.git', 'MERGE_HEAD'))).toBe(true);
+    git(repo, 'merge', '--abort');
+    expect(await vcs.operationInProgress(repo)).toBe(false);
+
+    // An ignored file the branch would overwrite: refused, the file kept.
+    writeFileSync(join(repo, '.gitignore'), 'b.txt\n');
+    git(repo, 'add', '.gitignore');
+    git(repo, 'commit', '-q', '--no-verify', '-m', 'ignore');
+    writeFileSync(join(repo, 'b.txt'), 'mine, ignored\n');
+    expect(await vcs.merge(repo, reviewed)).toBe('refused');
+    expect(readFileSync(join(repo, 'b.txt'), 'utf8')).toBe('mine, ignored\n');
+    expect(await vcs.operationInProgress(repo)).toBe(false);
+  });
+
+  it('reports staged changes and the top folder, and restores a file from HEAD', async () => {
+    const { repo, vcs } = setup();
+    expect(await vcs.topLevel(repo)).toBe(repo);
+    mkdirSync(join(repo, 'sub'));
+    expect(await vcs.topLevel(join(repo, 'sub'))).toBe(repo);
+    expect(await vcs.topLevel(temp('ogden-agents-vcs-none-'))).toBeUndefined();
+    expect(await vcs.staged(repo)).toEqual([]);
+    writeFileSync(join(repo, 'src', 'a.ts'), 'changed\n');
+    git(repo, 'add', 'src/a.ts');
+    expect(await vcs.staged(repo)).toEqual(['src/a.ts']);
+    await vcs.restore(repo, ['src/a.ts']);
+    expect(readFileSync(join(repo, 'src', 'a.ts'), 'utf8')).toBe('export const a = 1;\n');
+    expect(await vcs.staged(repo)).toEqual([]);
   });
 });

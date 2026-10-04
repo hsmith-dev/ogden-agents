@@ -18,8 +18,8 @@
  * `GIT_TERMINAL_PROMPT=0` and a C locale for parseable output.
  */
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { isAbsolute, join, resolve } from 'node:path';
 import { VcsError, type VcsDiff, type VcsHead, type VcsPort, type VcsWorktreeGitPaths } from '@ogden-agents/core';
 
 export interface GitVcsOptions {
@@ -152,8 +152,49 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
     return paths;
   };
 
+  /** Whether git's own file `name` (`MERGE_HEAD`, `rebase-merge`, …) exists in the checkout's git folder. */
+  const gitPathExists = async (repoPath: string, name: string): Promise<boolean> => {
+    const out = await run(repoPath, ['rev-parse', '--path-format=absolute', '--git-path', name]);
+    return out.code === 0 && existsSync(out.stdout.trim());
+  };
+
   return {
     head,
+
+    async topLevel(repoPath) {
+      const out = await run(checkPath(repoPath), ['rev-parse', '--show-toplevel']);
+      if (out.code !== 0) return undefined;
+      const top = out.stdout.trim();
+      try {
+        return realpathSync.native(top);
+      } catch {
+        return undefined;
+      }
+    },
+
+    async branchRevision(repoPath, branch) {
+      const out = await run(checkPath(repoPath), ['rev-parse', '--verify', '--quiet', `refs/heads/${checkBranch(branch)}^{commit}`]);
+      const id = out.stdout.trim();
+      return out.code === 0 && REVISION.test(id) ? id : undefined;
+    },
+
+    async operationInProgress(repoPath) {
+      checkPath(repoPath);
+      for (const name of ['MERGE_HEAD', 'rebase-merge', 'rebase-apply', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']) {
+        if (await gitPathExists(repoPath, name)) return true;
+      }
+      return false;
+    },
+
+    async staged(repoPath) {
+      const out = await must(checkPath(repoPath), ['diff', '--cached', '--no-ext-diff', '--no-textconv', '--no-renames', '--name-only', '-z'], 'read the staged changes');
+      return out.split('\0').filter((name) => name !== '');
+    },
+
+    async restore(repoPath, paths) {
+      if (paths.length === 0) return;
+      await must(checkPath(repoPath), ['checkout', 'HEAD', '--', ...paths.map(checkRelative)], 'restore the plan');
+    },
 
     async addWorktree(repoPath, { path, branch, base }) {
       checkPath(repoPath);
@@ -162,11 +203,17 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
       await must(repoPath, ['worktree', 'add', '-b', checkBranch(branch), path, checkRevision(base)], 'add the worktree');
     },
 
-    async worktreeGitPaths(worktreePath): Promise<VcsWorktreeGitPaths> {
+    async worktreeGitPaths(worktreePath, branch): Promise<VcsWorktreeGitPaths> {
+      const folder = checkBranch(branch).split('/').slice(0, -1);
+      if (folder.length === 0) throw new VcsError('That is not a branch Ogden Agents can use.', { step: 'branch' });
       const out = await must(checkPath(worktreePath), ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'], 'read the worktree');
       const [gitDir, commonDir] = out.split(/\r?\n/).map((line) => line.trim());
       if (gitDir === undefined || commonDir === undefined || gitDir === '' || commonDir === '') throw new VcsError("git couldn't read the worktree.", { step: 'worktree' });
-      return { gitDir: resolve(worktreePath, gitDir), commonDir: resolve(worktreePath, commonDir) };
+      const common = resolve(worktreePath, commonDir);
+      const branchRefDir = join(common, 'refs', 'heads', ...folder);
+      const branchLogDir = join(common, 'logs', 'refs', 'heads', ...folder);
+      for (const dir of [branchRefDir, branchLogDir]) mkdirSync(dir, { recursive: true });
+      return { gitDir: resolve(worktreePath, gitDir), commonDir: common, branchRefDir, branchLogDir };
     },
 
     async removeWorktree(repoPath, path, removeOptions = {}) {
@@ -202,14 +249,31 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
       return result.code === 0;
     },
 
-    async merge(repoPath, branch) {
+    async merge(repoPath, revision) {
       checkPath(repoPath);
-      const result = await run(repoPath, ['merge', '--no-ff', '--no-commit', '--no-verify', `refs/heads/${checkBranch(branch)}`]);
+      const commit = checkRevision(revision);
+      // Never touch a merge (or rebase, …) the user has in progress: nothing to abort that Ogden didn't start.
+      for (const name of ['MERGE_HEAD', 'rebase-merge', 'rebase-apply', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']) {
+        if (await gitPathExists(repoPath, name)) return 'refused';
+      }
+      // A file the merge would add that is already on disk, untracked or ignored, is never overwritten: git's own
+      // `--no-overwrite-ignore` doesn't stop a three-way merge from writing over an ignored file (git 2.54).
+      const base = await run(repoPath, ['merge-base', 'HEAD', commit]);
+      if (base.code === 0) {
+        const added = await run(repoPath, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--name-only', '-z', '--diff-filter=A', base.stdout.trim(), commit, '--']);
+        const tracked = await run(repoPath, ['ls-files', '-z']);
+        const inHead = new Set(tracked.stdout.split('\0'));
+        if (added.code !== 0 || tracked.code !== 0) return 'refused';
+        if (added.stdout.split('\0').some((name) => name !== '' && !inHead.has(name) && existsSync(join(repoPath, ...name.split('/'))))) return 'refused';
+      }
+      const result = await run(repoPath, ['merge', '--no-ff', '--no-commit', '--no-verify', '--no-overwrite-ignore', commit]);
       if (result.code === 0) return 'merged';
-      // A conflict (or a merge git refused to start): the checkout goes back to how it was.
-      const inProgress = await run(repoPath, ['rev-parse', '-q', '--verify', 'MERGE_HEAD']);
-      if (inProgress.code === 0) await must(repoPath, ['merge', '--abort'], 'abort the merge');
-      return 'conflict';
+      // Only unmerged paths are a conflict; anything else git refused or failed at.
+      const unmerged = await run(repoPath, ['diff', '--name-only', '--diff-filter=U', '-z']);
+      const conflict = unmerged.code === 0 && unmerged.stdout.split('\0').some((name) => name !== '');
+      // This merge is Ogden's own (none was in progress before it): the checkout goes back to how it was.
+      if (await gitPathExists(repoPath, 'MERGE_HEAD')) await must(repoPath, ['merge', '--abort'], 'abort the merge');
+      return conflict ? 'conflict' : 'refused';
     },
 
     async abortMerge(repoPath) {

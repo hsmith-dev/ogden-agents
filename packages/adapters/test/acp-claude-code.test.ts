@@ -189,7 +189,7 @@ describe('permission requests', () => {
       onPermissionRequest: async (request) => (asked.push(request), { outcome: 'allow_once' }),
     });
     await session.prompt('permission');
-    expect(asked).toEqual([{ toolCallId: 'call-permission', title: 'Run npm test', kind: 'execute', command: 'npm test', paths: [] }]);
+    expect(asked).toEqual([{ toolCallId: 'call-permission', title: 'Run npm test', kind: 'execute', command: 'npm test', paths: [], rawPaths: [] }]);
     expect(replyText(events)).toBe('Ran npm test.');
     expect(events).toContainEqual(expect.objectContaining({ type: 'tool_call_update', toolCallId: 'call-permission', status: 'completed' }));
   });

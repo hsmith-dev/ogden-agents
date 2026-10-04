@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PROTECTED_PATHS, type AgentEvent, type AgentSession } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { claudeSandboxSettings, claudeSessionSettings } from '../src/acp-claude-code/claude-guards.js';
+import { claudeSandboxSettings, claudeSessionOptions } from '../src/acp-claude-code/claude-guards.js';
 import { BUILD_AUTO_SKILL, createAcpBuildRunner, createClaudeCodeAgent, createClaudeNativeSandbox, createFixedSandbox, NO_BUBBLEWRAP, NO_SANDBOX_ON_WINDOWS, NO_SEATBELT } from '../src/index.js';
 
 const FAKE_AGENT = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-acp-agent.mjs');
@@ -54,29 +54,37 @@ describe('sandbox-claude-native (story 5.2, fail closed)', () => {
   });
 });
 
-describe("a build session's sandbox in Claude Code's settings (story 5.2)", () => {
-  const sandbox = { kind: 'seatbelt', writableRoots: ['/data/w/abcdefgh', '/repo/.git/objects'], deniedPaths: ['/repo/.git/hooks', '/data/w/abcdefgh/_bmad'] };
+describe("a build session's lockdown in Claude Code's options (story 5.2, review loop 1)", () => {
+  const sandbox = {
+    kind: 'seatbelt',
+    writableRoots: ['/data/w/abcdefgh', '/repo/.git/objects'],
+    deniedPaths: ['/repo/.git/hooks', '/data/w/abcdefgh/_bmad'],
+    deniedReads: ['/data', '/home/u/.ssh'],
+    allowedReads: ['/data/w/abcdefgh'],
+  };
 
-  it('runs Bash sandboxed, without asking and never outside it, with only the writable roots and no network', () => {
+  it('managed settings only: no user, project or local rule, hook or MCP server counts; Bash sandboxed with no network; reads fenced', () => {
     expect(claudeSandboxSettings(sandbox)).toEqual({
+      allowManagedPermissionRulesOnly: true,
+      allowManagedHooksOnly: true,
+      allowManagedMcpServersOnly: true,
+      permissions: { deny: ['WebFetch', 'WebSearch', 'mcp__*'] },
       sandbox: {
         enabled: true,
         failIfUnavailable: true,
         autoAllowBashIfSandboxed: true,
         allowUnsandboxedCommands: false,
-        network: { allowedDomains: [], strictAllowlist: true },
-        filesystem: { allowWrite: sandbox.writableRoots, denyWrite: sandbox.deniedPaths },
+        network: { allowedDomains: [], allowManagedDomainsOnly: true, strictAllowlist: true },
+        filesystem: { allowWrite: sandbox.writableRoots, denyWrite: sandbox.deniedPaths, denyRead: sandbox.deniedReads, allowRead: sandbox.allowedReads },
       },
-      permissions: { deny: ['WebFetch', 'WebSearch'] },
-      disableAllHooks: true,
     });
-    expect(claudeSessionSettings(undefined, undefined)).toBeUndefined();
-    // With the Auto guards too, both rule lists hold.
-    expect((claudeSessionSettings(PROTECTED_PATHS, sandbox)?.permissions as { ask: string[]; deny: string[] }).deny).toEqual(['WebFetch', 'WebSearch']);
-    expect((claudeSessionSettings(PROTECTED_PATHS, sandbox)?.permissions as { ask: string[] }).ask).toContain('Edit(**/_bmad/**)');
+    expect(claudeSessionOptions(undefined, undefined)).toBeUndefined();
+    expect(claudeSessionOptions(undefined, sandbox)).toEqual({ managedSettings: claudeSandboxSettings(sandbox), settingSources: ['project'], strictMcpConfig: true });
+    // A chat in Auto keeps only its guards as flag settings.
+    expect(Object.keys(claudeSessionOptions(PROTECTED_PATHS, undefined)!)).toEqual(['settings']);
   });
 
-  it('reaches the agent in its session settings (`_meta.claudeCode.options.settings`)', async () => {
+  it('reaches the agent in its session options (`_meta.claudeCode.options`)', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'ogden-agents-build-acp-'));
     dirs.push(cwd);
     const agent = createClaudeCodeAgent({ adapterPath: FAKE_AGENT, claudeExecutable: null });
@@ -86,8 +94,8 @@ describe("a build session's sandbox in Claude Code's settings (story 5.2)", () =
     session.onEvent((event) => events.push(event));
     await session.prompt('session-start');
     const reply = events.flatMap((event) => (event.type === 'message_chunk' ? [event.text] : [])).join('');
-    const started = JSON.parse(reply) as { meta: { claudeCode: { options: { settings: unknown } } }; cwd: string };
+    const started = JSON.parse(reply) as { meta: { claudeCode: { options: Record<string, unknown> } }; cwd: string };
     expect(started.cwd).toBe(cwd);
-    expect(started.meta.claudeCode.options.settings).toEqual(claudeSandboxSettings(sandbox));
+    expect(started.meta.claudeCode.options).toEqual({ managedSettings: claudeSandboxSettings(sandbox), settingSources: ['project'], strictMcpConfig: true });
   });
 });

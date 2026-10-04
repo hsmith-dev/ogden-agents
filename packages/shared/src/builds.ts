@@ -41,8 +41,21 @@ export const ReviewResponse = z.object({
   truncated: z.boolean().default(false),
   files: z.array(z.string()),
   merged: z.boolean(),
+  /**
+   * The commit the run's branch points at now (review loop 1): Approve sends
+   * it back and merges exactly it. `null` when the branch is gone.
+   */
+  headRevision: z.string().nullable().default(null),
 });
 export type ReviewResponse = z.infer<typeof ReviewResponse>;
+
+/**
+ * `POST …/builds/:ref/approve` (review loop 1): the branch revision the user
+ * reviewed (`ReviewResponse.headRevision`). Approve merges exactly it, and
+ * only while the branch still points at it.
+ */
+export const ApproveBuildRequest = z.object({ revision: z.string().regex(/^[0-9a-f]{40}([0-9a-f]{24})?$/, 'That is not a commit.') }).strict();
+export type ApproveBuildRequest = z.infer<typeof ApproveBuildRequest>;
 
 /** The most diff text a review answers with, in bytes; longer is cut. */
 export const MAX_REVIEW_DIFF_BYTES = 512 * 1024;
@@ -61,6 +74,11 @@ export const MERGE_CONFLICT_MESSAGE = "The build's changes conflict with your pr
 export const CHECKS_FAILED_MESSAGE = "This run didn't pass its checks, so it can't be approved.";
 export const ALREADY_MERGED_MESSAGE = 'This run is already merged.';
 export const PLAN_UNCOMMITTED_MESSAGE = "This ticket's plan or tickets.toml has uncommitted changes. Commit them, then build again.";
+export const VCS_NOT_TOP_LEVEL_MESSAGE = "Builds need the project to be the top folder of its git repository, and this one is inside another.";
+export const BMAD_FILES_UNCOMMITTED_MESSAGE = "This project's BMad Method scripts aren't committed as you trusted them, so a build can't run them. Commit the _bmad folder, then build again.";
+export const REVIEW_STALE_MESSAGE = 'The build changed after you reviewed it. Review it again.';
+export const MERGE_REFUSED_MESSAGE = "Git couldn't merge the build into your project (it would overwrite files you have), so nothing was merged.";
+export const CHECKOUT_BUSY_MESSAGE = 'Your project has staged changes, changes to this ticket\'s plan, or a merge, rebase, cherry-pick or revert in progress. Finish or undo it, then approve again.';
 export const VCS_UNAVAILABLE_MESSAGE = 'Builds need this project to be a git repository with a branch checked out that has at least one commit.';
 
 /** A run's outcome as the review page and the session header say it. */
@@ -78,6 +96,10 @@ export const RUN_REASON_SCRIPTS_CHANGED = "The build changed this project's BMad
 export const RUN_REASON_NOT_BUILT = (status: string) => (status === '' ? 'The run ended without the plan saying built.' : `The run ended with the plan ${status}, not built.`);
 export const RUN_REASON_AGENT_ERROR = 'The agent stopped with an error before the plan said built.';
 export const RUN_REASON_UNREADABLE = "Ogden Agents couldn't read the plan's status in the run's worktree.";
+export const RUN_REASON_PROTECTED_DIFF = "The build changed files it may not change (protected files, BMad Method's own, tickets.toml, or another ticket's plan), so it can't be approved.";
+export const RUN_REASON_NO_NETWORK = 'Builds have no network, so installs such as npm install fail.';
+export const RUN_REASON_INTERRUPTED = 'interrupted';
+export const RUN_REASON_START_FAILED = "The build couldn't start its agent.";
 
 /** The web app's Build, review, approve and reject words. */
 export const BUILD_LABEL = 'Build';

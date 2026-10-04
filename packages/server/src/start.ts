@@ -19,7 +19,7 @@ import {
   type AgentPort,
   type Core,
 } from '@ogden-agents/core';
-import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM, type AgentId, type Session } from '@ogden-agents/shared';
+import { MAX_TERMINAL_INPUT_BYTES, RUN_REASON_INTERRUPTED, SERVER_STREAM, type AgentId, type Session } from '@ogden-agents/shared';
 import { WebSocketServer } from 'ws';
 import { checkAgentWiring } from './agent-wiring.js';
 import { createApp, type ServerControl } from './app.js';
@@ -253,6 +253,9 @@ async function listenAndAnnounce({
   // Their terminals are gone too (story 3.1 review F3): those chats drive again.
   const released = core.entities.releaseTerminalDrivers();
   if (released.length > 0) log.info('sessions a stopped server left in the terminal are back in the chat', { sessions: released.length });
+  // Unattended runs are not resumed (AD-3 note): a run left running by a stopped server is blocked, its worktree kept (story 5.2).
+  const interrupted = core.entities.settleInterruptedRuns(RUN_REASON_INTERRUPTED);
+  if (interrupted.length > 0) log.info('runs left running by a stopped server are blocked', { runs: interrupted.length });
   // No permission mode but Ask outlives the run it was chosen in (cause `restart`).
   const reset = core.entities.resetPermissionModes();
   if (reset.length > 0) log.info('chats in Auto or Skip all are back in Ask after the restart', { sessions: reset.length });

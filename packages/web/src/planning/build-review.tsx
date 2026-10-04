@@ -33,13 +33,13 @@ export function BuildReview({ wsId, ticketRef }: { wsId: string; ticketRef: stri
     }
     return <Skeleton className="h-20 max-w-(--space-chat-column) rounded-lg" />;
   }
-  const { run, outcome, reason, diff, truncated, files, merged } = review.data;
-  const canApprove = outcome === 'verified' && !merged;
+  const { run, outcome, reason, diff, truncated, files, merged, headRevision } = review.data;
+  const canApprove = outcome === 'verified' && !merged && headRevision !== null;
   const canReject = outcome !== 'running' && !(outcome === 'verified' && merged);
   const act = (action: typeof approve) => {
     if (acting) return;
     setFailure(undefined);
-    action.mutateAsync().catch((error: unknown) => setFailure(error instanceof Error ? error.message : String(error)));
+    action.mutateAsync(headRevision).catch((error: unknown) => setFailure(error instanceof Error ? error.message : String(error)));
   };
   return (
     <div className="flex max-w-(--space-content-max) min-w-0 flex-col gap-4" data-testid="review" data-outcome={outcome} data-merged={merged ? 'true' : 'false'}>

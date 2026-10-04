@@ -5,7 +5,9 @@
  * and core's builds use-cases over the chat and the ticket store.
  */
 import { join } from 'node:path';
-import { createAcpBuildRunner, createClaudeNativeSandbox, createFixedSandbox, createGitVcs, errorCode } from '@ogden-agents/adapters';
+import { homedir } from 'node:os';
+import { createAcpBuildRunner, createClaudeNativeSandbox, createFixedSandbox, createGitVcs, errorCode, maskSecrets, secretValues } from '@ogden-agents/adapters';
+import { redactApiKeys } from '@ogden-agents/shared';
 import { createBuilds, type BmadSourceUseCases, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
 import type { Logger } from './log.js';
 import { agentEnvironment, withoutAgentKeys } from './start-env.js';
@@ -38,7 +40,7 @@ export function createBuildsWiring({
 }): BuildsUseCases {
   // Git runs as the user, with the agents' allowlist and never an API key (AD-16).
   const vcs = options.vcs ?? createGitVcs({ hooksDir: gitHooksDir(dataDir), env: () => withoutAgentKeys(agentEnvironment()) });
-  const sandbox = options.sandbox ?? (hooks.sandbox === undefined ? createClaudeNativeSandbox() : createFixedSandbox(hooks.sandbox));
+  const sandbox = options.sandbox ?? (hooks.sandbox === undefined ? createClaudeNativeSandbox({ path: () => agentEnvironment().PATH ?? agentEnvironment().Path }) : createFixedSandbox(hooks.sandbox));
   return createBuilds({
     bmad: core.bmad,
     trust: core.bmadScriptTrust,
@@ -52,6 +54,9 @@ export function createBuildsWiring({
     chat,
     buildSessions: core.buildSessions,
     dataDir,
+    homeDir: homedir(),
+    // A reason the agent wrote is stored masked: no secret of the agents' environment, no Anthropic key (AD-16).
+    mask: (text) => redactApiKeys(maskSecrets(text, secretValues({ ...process.env, ...agentEnvironment() }))),
     // Codes only: never a path, git's output or the agent's.
     onError: (runId, step, error) => log.warn('build step failed', { runId, step, code: errorCode(error, 'unexpected') }),
   });

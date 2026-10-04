@@ -147,6 +147,11 @@ const EVENTS: Array<[type: string, valid: Record<string, unknown>, invalid: Reco
     { ...onSession, payload: { sessionId: sesId, mode: 'yolo', previous: 'ask', cause: 'user' } },
   ],
   [
+    'session.renamed',
+    { ...onSession, payload: { sessionId: sesId, title: 'Auth work', autoTitle: null, cause: 'user' } },
+    { ...onSession, payload: { sessionId: sesId, title: '', autoTitle: null, cause: 'user' } },
+  ],
+  [
     'settings.developer_mode_changed',
     { workspaceId: null, streamId: 'settings', payload: { developerMode: false, previous: true } },
     { workspaceId: wsId, streamId: 'settings', payload: { developerMode: false, previous: true } },

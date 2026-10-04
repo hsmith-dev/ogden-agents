@@ -138,8 +138,10 @@ export function createWorkspaceSettings({ db, events, isBmadPieceAvailable, isAg
         const unavailable = pieces.find((piece) => !previousBmadPieces.includes(piece) && !isBmadPieceAvailable(piece));
         if (unavailable !== undefined) throw new FeatureUnavailableError(unavailable);
         const bmadScriptsTrusted = readScriptsTrusted(orm, workspaceId) ?? false;
-        // Compared as read: a stored agent no longer registered already reads as the install's default.
-        const agentChanged = agent !== undefined && (agent ?? undefined) !== previousAgent;
+        // Compared as read (a stored agent no longer registered reads as the install's default), but a clear
+        // always clears what the row holds, so an agent registered again later never comes back by itself.
+        const stored = orm.select({ defaultAgentId: workspaces.defaultAgentId }).from(workspaces).where(eq(workspaces.id, workspaceId)).get()?.defaultAgentId ?? null;
+        const agentChanged = agent !== undefined && ((agent ?? undefined) !== previousAgent || (agent === null && stored !== null));
         const defaultAgentId = agentChanged ? (agent ?? undefined) : previousAgent;
         const settings = { cautionLevel: level, bmadPieces: pieces, bmadScriptsTrusted, ...(defaultAgentId === undefined ? {} : { defaultAgentId }) };
         if (level === previous && !piecesChanged && !agentChanged) return settings;

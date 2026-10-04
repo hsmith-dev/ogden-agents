@@ -471,7 +471,7 @@ async function listenAndAnnounce({
     dataDir,
     bmad: core.bmad,
     // Welcome's agent choice (epic 6, entry 6) names an agent this server registers.
-    isAgentRegistered: (agentId) => agents.get(agentId) !== undefined,
+    isAgentRegistered: registeredAgent(options),
     onError: (code) => log.warn('new project defaults unusable', { code }),
   });
   const app = createApp({

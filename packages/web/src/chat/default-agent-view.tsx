@@ -39,7 +39,8 @@ export function DefaultAgentView({ agents, value, onChange, saving, status, desc
           aria-describedby={`${testId}-description`}
           data-testid={testId}
           value={value}
-          disabled={saving}
+          // Not disabled while saving: arrow keys check a radio as they focus it, and a disabled group would drop focus.
+          aria-busy={saving || undefined}
           onValueChange={(next) => {
             if (next !== value && agents.some((agent) => agent.agentId === next)) onChange(next);
           }}

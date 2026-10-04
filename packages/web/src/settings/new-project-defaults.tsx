@@ -295,7 +295,7 @@ export function NewProjectsAgentSection() {
       value={value}
       onChange={onChange}
       saving={saving}
-      status={status}
+      status={status ?? (defaults.error instanceof Error ? { kind: 'error', text: defaults.error.message } : undefined)}
       testId="new-projects-agent"
       description="The agent a new project's chats start with. Projects you already have keep theirs."
     />

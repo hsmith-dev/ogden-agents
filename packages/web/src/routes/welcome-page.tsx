@@ -42,7 +42,7 @@ import { Skeleton } from '@/ui/skeleton';
 import { Text } from '@/ui/typography';
 import { AddProjectDialog } from '@/workspaces/add-project-dialog';
 import { useWorkspaces } from '@/workspaces/workspace-api';
-import { fetchWorkspaceSettings, useBmadPieces } from '@/workspaces/workspace-settings-api';
+import { createLatestGate, fetchWorkspaceSettings, useBmadPieces } from '@/workspaces/workspace-settings-api';
 
 /**
  * `/welcome`: the first-run Welcome (onboarding 9.5; EXPERIENCE.md Key Flow
@@ -137,13 +137,20 @@ function AgentStep({ onContinue, skip }: { onContinue(): void; skip: ReactNode }
   const [saveError, setSaveError] = useState<string | undefined>(undefined);
   const choosing = asksAgentChoice(query.data);
   const agent = selectedAgent(query.data, picked ?? defaults.data?.defaultAgentId);
+  // Only the latest choice's answer is kept: arrow keys choose as they move, and an earlier answer may land late.
+  const latest = useRef(createLatestGate()).current;
   const choose = (agentId: string) => {
+    const ticket = latest.next();
     setPicked(agentId);
     setSaveError(undefined);
     // The chosen agent becomes the default for new projects, beside the default pieces (10.4).
     updateNewProjectsAgent(agentId).then(
-      (saved) => queryClient.setQueryData(NEW_PROJECT_DEFAULTS_QUERY_KEY, saved),
-      (failure: unknown) => setSaveError(failure instanceof Error ? failure.message : "The agent couldn't be kept for new projects. Try again."),
+      (saved) => {
+        if (latest.isLatest(ticket)) queryClient.setQueryData(NEW_PROJECT_DEFAULTS_QUERY_KEY, saved);
+      },
+      (failure: unknown) => {
+        if (latest.isLatest(ticket)) setSaveError(failure instanceof Error ? failure.message : "The agent couldn't be kept for new projects. Try again.");
+      },
     );
   };
   const seen = agent !== undefined;
@@ -183,7 +190,7 @@ function AgentStep({ onContinue, skip }: { onContinue(): void; skip: ReactNode }
         )
       ) : choosing && agent !== undefined ? (
         <>
-          <RadioGroup aria-label="Agent" data-testid="welcome-agent-choice" value={agent.agentId} onValueChange={choose}>
+          <RadioGroup aria-label="Which agent should do the work?" data-testid="welcome-agent-choice" value={agent.agentId} onValueChange={choose}>
             {query.data.map((each) => (
               <RadioGroupOption key={each.agentId} id={`welcome-agent-${each.agentId}`} value={each.agentId} data-testid={`welcome-agent-${each.agentId}`} label={each.displayName} description={agentSetupWords(each)} />
             ))}

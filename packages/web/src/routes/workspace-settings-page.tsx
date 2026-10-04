@@ -201,7 +201,7 @@ function DefaultAgentSection({ wsId }: { wsId: string }) {
       value={value}
       onChange={onChange}
       saving={saving}
-      status={status}
+      status={status ?? (settings.error instanceof Error ? { kind: 'error', text: settings.error.message } : undefined)}
       testId="default-agent"
       description="The agent new chats in this project start with. You can still pick another for each new chat."
     />

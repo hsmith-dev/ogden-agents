@@ -3,7 +3,7 @@ title: 'Pick the agent per chat and the default per project'
 type: 'feature'
 ticket: '6'
 created: '2026-10-03'
-status: 'in-review'
+status: 'built'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
@@ -97,6 +97,30 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (quick lens twice: security + correctness, UX + accessibility): high 0, medium 6, low 13, false 0, maybe-false 0, rejected 3. Survivors routed patch.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---------|---------|-------|-------------------|
+| 1 | Clearing (`null`) a project default whose agent is unregistered wrote nothing, so it came back when the agent returned | medium | patch | `updateSettings` compared only the read value; now a clear also compares the raw row. Core test. |
+| 2 | A pieces-only save dropped a kept but unregistered default agent from `preferences.json` | low | patch | `set` keeps the agent the file holds (`storedAgent`). Core test. |
+| 3 | A damaged `defaultAgentId` in `preferences.json` discarded the 10.4 pieces | medium | patch | The agent is parsed on its own (`StoredRecord`). Core test. |
+| 4 | The sign-in code wasn't cleared on Cancel | low | patch | `setCode(undefined)` with the link. |
+| 5 | The sign-in code wasn't in a live region (both lenses) | low | patch | The instruction and the code share one `aria-live` container. |
+| 6 | A code the schema refuses made the sign-in answer 500 while the sign-in ran | low | patch | Core drops a code `SignInResponse.code` refuses. |
+| 7 | Two "registered" predicates; none when a caller supplies core (both lenses) | low | patch | Both use `registeredAgent(options)`. A supplied core (tests only) keeps the documented any-id default. |
+| 8 | Picker trigger showed a bare name (both lenses) | low | patch | Visible "Agent:" prefix. |
+| 9 | Default agent sections showed nothing on a load failure (both lenses) | medium | patch | The load error goes to the section's status, as the caution level does. |
+| 10 | No UI way back to the install's default | low | rejected | Choosing the install's agent gives the same chats; null stays an API path; adding an option is new surface. |
+| 11 | With Claude Code alone a signed-out agent blocked the page and told the user to choose an agent | medium | patch | `blocked` only with more than one agent. |
+| 12 | Composer's generic blocked caption; reason not tied to the field | medium | patch | Composer `describedBy` points at the reason; sending still reaches the server, which refuses with the reason; New chat says it as an alert. |
+| 13 | Status line mounted with its text, so not reliably announced | low | patch | Always-mounted `role="status"`. |
+| 14 | Default agent radio group disabled while saving dropped keyboard focus | medium | patch | `aria-busy` instead of `disabled`; the latest-request gate keeps the shown answer. |
+| 15 | Welcome radio group labelled "Agent", same as its region | low | patch | "Which agent should do the work?". |
+| 16 | Welcome choices had no latest-request gate | low | patch | `createLatestGate`. |
+| 17 | Welcome counts setup statuses, not chat agents | low | rejected | Welcome shows each agent's setup card, which needs a setup port; every shipped agent has one (only test fakes lack it). |
+| 18 | Link text repeated "Settings → Agents" after the reason | low | patch | Link reads "Open Settings → Agents". |
+| 19 | The picker's menu item plus link duplicated the same | low | rejected | Same fix as 18 covers it. |
 
 ## Design Notes
 

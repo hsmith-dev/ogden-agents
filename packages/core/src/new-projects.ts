@@ -16,6 +16,7 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  AgentId as AgentIdSchema,
   BMAD_PIECE_INFO,
   BmadPieceSet,
   canonicalBmadPieces,
@@ -38,6 +39,12 @@ export const PREFERENCES_FILE = 'preferences.json';
 /** The preferences record. Other install-level preferences can join it later. */
 const PreferencesRecord = z.object({ newProjects: NewProjectDefaultsSchema });
 type PreferencesRecord = z.infer<typeof PreferencesRecord>;
+/**
+ * How the file is read (epic 6, entry 6): the agent is read on its own, so a
+ * damaged `defaultAgentId` reads as the install's default and never costs
+ * the pieces (10.4).
+ */
+const StoredRecord = z.object({ newProjects: NewProjectDefaultsSchema.omit({ defaultAgentId: true }).extend({ defaultAgentId: z.unknown().optional() }) });
 
 export interface NewProjectDefaultsOptions {
   /** The Ogden Agents data folder. */
@@ -70,6 +77,8 @@ export interface NewProjectDefaultsStore {
 export function createNewProjectDefaults(options: NewProjectDefaultsOptions): NewProjectDefaultsStore {
   const file = join(options.dataDir, PREFERENCES_FILE);
   const isAgentRegistered = options.isAgentRegistered ?? (() => true);
+  /** The agent the file holds as last read, registered or not, so a save that leaves the agent out keeps it. */
+  let storedAgent: AgentId | undefined;
 
   const write = (record: PreferencesRecord) => {
     mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
@@ -103,12 +112,13 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
       return { bmadPieces: [...DEFAULT_NEW_PROJECT_DEFAULTS.bmadPieces] };
     }
     try {
-      const parsed = PreferencesRecord.safeParse(JSON.parse(text));
+      const parsed = StoredRecord.safeParse(JSON.parse(text));
       if (parsed.success) {
         reported = undefined;
-        const agent = parsed.data.newProjects.defaultAgentId;
-        // An agent this install no longer has reads as the install's default (the file keeps it).
-        return { bmadPieces: canonicalBmadPieces(parsed.data.newProjects.bmadPieces), ...(agent !== undefined && isAgentRegistered(agent) ? { defaultAgentId: agent } : {}) };
+        const agent = AgentIdSchema.safeParse(parsed.data.newProjects.defaultAgentId);
+        storedAgent = agent.success ? agent.data : undefined;
+        // An agent this install doesn't have now reads as the install's default; the file keeps it.
+        return { bmadPieces: canonicalBmadPieces(parsed.data.newProjects.bmadPieces), ...(agent.success && isAgentRegistered(agent.data) ? { defaultAgentId: agent.data } : {}) };
       }
     } catch {
       // Not JSON: as if there were no record.
@@ -127,6 +137,7 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
           { path: ['bmadPieces'], message: 'unknown or repeated piece, or dependency rule' },
         ]);
       }
+      storedAgent = undefined;
       const current = read();
       const kept = current.bmadPieces;
       const pieces = parsed.data.bmadPieces === undefined ? kept : canonicalBmadPieces(parsed.data.bmadPieces);
@@ -135,10 +146,10 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
       if (unavailable !== undefined) throw new FeatureUnavailableError(unavailable);
       const agent = parsed.data.defaultAgentId;
       if (agent !== undefined && agent !== null && !isAgentRegistered(agent)) throw new UnknownAgentError();
-      const defaultAgentId = agent === undefined ? current.defaultAgentId : (agent ?? undefined);
-      const defaults: NewProjectDefaults = { bmadPieces: pieces, ...(defaultAgentId === undefined ? {} : { defaultAgentId }) };
-      write({ newProjects: defaults });
-      return defaults;
+      const keptAgent = agent === undefined ? storedAgent : (agent ?? undefined);
+      write({ newProjects: { bmadPieces: pieces, ...(keptAgent === undefined ? {} : { defaultAgentId: keptAgent }) } });
+      const shown = keptAgent !== undefined && isAgentRegistered(keptAgent) ? keptAgent : undefined;
+      return { bmadPieces: pieces, ...(shown === undefined ? {} : { defaultAgentId: shown }) };
     },
   };
 }

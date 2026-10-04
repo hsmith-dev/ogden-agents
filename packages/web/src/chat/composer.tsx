@@ -14,6 +14,8 @@ export interface ComposerProps {
   hint?: string | undefined;
   /** Beside Send: the Stop button while the agent works (story 2.10). */
   action?: ReactNode;
+  /** The id of an element that says more about the field (the chosen agent can't start a chat now). */
+  describedBy?: string | undefined;
   /** At the start of the footer row: the agent picker, for a composer that starts a new chat (epic 6; DESIGN.md Composer). */
   footer?: ReactNode;
   /**
@@ -30,7 +32,7 @@ export interface ComposerProps {
  * `Shift+Enter` starts a new line. While the agent works, sending queues the
  * message (the page says so in `hint`). `Esc` does nothing here: it never stops the agent.
  */
-export function Composer({ label, blockedReason, hint, action, footer, restore, onSend }: ComposerProps) {
+export function Composer({ label, blockedReason, hint, action, footer, describedBy, restore, onSend }: ComposerProps) {
   const [text, setText] = useState('');
   const restoreKey = restore?.key;
   const restoreText = restore?.text;
@@ -78,6 +80,7 @@ export function Composer({ label, blockedReason, hint, action, footer, restore, 
       <ComposerFrame>
         <Textarea
           aria-label={label}
+          aria-describedby={describedBy}
           placeholder="Write a message"
           value={text}
           onChange={(event) => setText(event.target.value)}

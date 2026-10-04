@@ -213,4 +213,26 @@ describe("a project's default agent and the default for new projects (epic 6, en
     const later = openTestCore(dataDir, undefined, { isAgentRegistered: registered(['agent-a']) });
     expect(later.permissions.getSettings(workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [] });
   });
+
+  it('keeps an agent the install lacks now through a pieces-only save, and a damaged agent never costs the pieces (review)', () => {
+    const dataDir = tempDir();
+    createNewProjectDefaults({ dataDir, bmad: { isAvailable: () => true }, isAgentRegistered: registered(['agent-b']) }).set({ defaultAgentId: 'agent-b' });
+    const without = createNewProjectDefaults({ dataDir, bmad: { isAvailable: () => true }, isAgentRegistered: registered([]) });
+    expect(without.set({ bmadPieces: ['planning'] })).toEqual({ bmadPieces: ['planning'] });
+    expect(JSON.parse(readFileSync(join(dataDir, PREFERENCES_FILE), 'utf8'))).toEqual({ newProjects: { bmadPieces: ['planning'], defaultAgentId: 'agent-b' } });
+    writeFileSync(join(dataDir, PREFERENCES_FILE), JSON.stringify({ newProjects: { bmadPieces: ['planning'], defaultAgentId: 'Not An Id!' } }));
+    expect(createNewProjectDefaults({ dataDir, bmad: { isAvailable: () => true } }).get()).toEqual({ bmadPieces: ['planning'] });
+  });
+
+  it('clears a project default whose agent is gone, so it never comes back when the agent is registered again (review)', () => {
+    const dataDir = tempDir();
+    const core = openTestCore(dataDir, undefined, { isAgentRegistered: registered(['agent-b']) });
+    const workspace = adding(core).addProject(tempDir());
+    core.permissions.updateSettings(workspace.id, { defaultAgentId: 'agent-b' });
+    core.close();
+    const without = openTestCore(dataDir, undefined, { isAgentRegistered: registered([]) });
+    without.permissions.updateSettings(workspace.id, { defaultAgentId: null });
+    without.close();
+    expect(openTestCore(dataDir, undefined, { isAgentRegistered: registered(['agent-b']) }).permissions.getSettings(workspace.id).defaultAgentId).toBeUndefined();
+  });
 });

@@ -31,6 +31,7 @@
 import {
   AGENTS_STREAM,
   SignInCodeRequest,
+  SignInResponse,
   type AgentAuthMethodKind,
   type AgentAuthState,
   type AgentSetupStatus,
@@ -599,7 +600,9 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       flight.settle();
       follow(agentId, port, flight, handle);
       // A code the user types on the sign-in page (a device code), when the agent gives one: like the URL, only in this answer.
-      return { state: 'signing_in', url: handle.url, ...(handle.userCode === undefined ? {} : { code: handle.userCode }) };
+      // A code the answer's schema would refuse is dropped: the sign-in still goes on, with its URL.
+      const code = handle.userCode !== undefined && SignInResponse.shape.code.safeParse(handle.userCode).success ? handle.userCode : undefined;
+      return { state: 'signing_in', url: handle.url, ...(code === undefined ? {} : { code }) };
     },
 
     async submitCode(agentId, code) {

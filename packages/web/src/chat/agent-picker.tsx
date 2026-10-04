@@ -6,7 +6,7 @@ import { DropdownMenu, DropdownMenuChoiceItem, DropdownMenuContent, DropdownMenu
 import { agentAvailability } from './use-chat-agents';
 
 /** The link under the agents when one needs installing or signing in. */
-export const SET_UP_AGENTS = 'Set up agents in Settings → Agents';
+export const SET_UP_AGENTS = 'Open Settings → Agents';
 
 /**
  * The agent a new chat starts with (epic 6, E6-R1; EXPERIENCE.md Composer,
@@ -26,6 +26,7 @@ export function AgentPicker({ agents, value, onChange }: { agents: readonly Chat
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="sm" data-testid="agent-picker" data-agent={value} aria-label={`Agent for new chats: ${name}`}>
+          <span className="text-muted-foreground">Agent:</span>
           {name}
           <CaretDown aria-hidden />
         </Button>

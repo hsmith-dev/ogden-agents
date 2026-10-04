@@ -44,7 +44,8 @@ export function WorkspaceChatsPage() {
   const chosen = chatAgents.data?.agents.find((agent) => agent.agentId === agentId);
   /** Why a new chat with the chosen agent can't start now (not installed, signed out, needs trust), said before trying. */
   const unavailable = chosen === undefined ? undefined : agentAvailability(chosen);
-  const blocked = unavailable === undefined || unavailable.available ? undefined : unavailable;
+  // Only while there is a choice: with one agent the page is as before, and the server says why a chat can't start.
+  const blocked = !severalAgents || unavailable === undefined || unavailable.available ? undefined : unavailable;
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | undefined>(undefined);
   /** The chat the first message created: a retry after a failed send reuses it, never leaving an empty one behind (2.5 F6). */
@@ -66,7 +67,12 @@ export function WorkspaceChatsPage() {
   const openChat = (session: Session) => navigate({ to: '/w/$wsId/s/$sesId', params: { wsId, sesId: session.id } });
 
   const onNewChat = () => {
-    if (creating || blocked !== undefined) return;
+    if (creating) return;
+    if (blocked !== undefined) {
+      // Said where the click lands too (role="alert"), not only in the status line.
+      setCreateError(blocked.description);
+      return;
+    }
     setCreating(true);
     setCreateError(undefined);
     createChatSession(wsId, undefined, agentId).then(
@@ -120,21 +126,24 @@ export function WorkspaceChatsPage() {
               </Text>
             )}
             {/* Why the chosen agent can't start a chat now, and where to fix it (epic 6, entry 6). */}
-            {blocked === undefined ? null : (
-              <Text variant="caption" id="agent-unavailable" role="status" data-testid="agent-unavailable">
-                {blocked.description}
-                {blocked.setUp ? (
-                  <>
-                    {' '}
-                    <Button variant="link" size="sm" asChild>
-                      <Link to="/settings/agents" data-testid="agent-unavailable-link">
-                        {SET_UP_AGENTS}
-                      </Link>
-                    </Button>
-                  </>
-                ) : null}
-              </Text>
-            )}
+            {/* Always mounted, so a change (a pick, or the default changed in another tab) is announced. */}
+            <Text variant="caption" id="agent-unavailable" role="status" data-testid="agent-unavailable-status">
+              {blocked === undefined ? null : (
+                <span data-testid="agent-unavailable">
+                  {blocked.description}
+                  {blocked.setUp ? (
+                    <>
+                      {' '}
+                      <Button variant="link" size="sm" asChild>
+                        <Link to="/settings/agents" data-testid="agent-unavailable-link">
+                          {SET_UP_AGENTS}
+                        </Link>
+                      </Button>
+                    </>
+                  ) : null}
+                </span>
+              )}
+            </Text>
             {/* The "already uses BMad Method" offer (story 10.3): detected when this page opens, never when the project is added. */}
             {workspace.data === undefined ? null : <BmadOffer key={wsId} wsId={wsId} />}
             {createError === undefined ? null : (
@@ -161,7 +170,8 @@ export function WorkspaceChatsPage() {
                   label={`Message ${agentNameOf(chatAgents.data, agentId)}`}
                   // The agent picker sits in the composer footer (EXPERIENCE.md Empty chats, DESIGN.md Composer).
                   footer={chatAgents.data === undefined || agentId === undefined ? undefined : <AgentPicker agents={chatAgents.data.agents} value={agentId} onChange={onPick} />}
-                  blockedReason={blocked === undefined ? undefined : `Choose an agent that can start a chat.`}
+                  // The reason is the status line above, tied to the field; a send still goes to the server, which says why.
+                  describedBy={blocked === undefined ? undefined : 'agent-unavailable'}
                   onSend={async (text) => {
                     const session = firstChat.current ?? (await createChatSession(wsId, undefined, agentId));
                     firstChat.current = session;

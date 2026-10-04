@@ -26,18 +26,19 @@ export function SigningIn({ agentId, signIn }: { agentId: string; signIn: SignIn
   return (
     <>
       <StateGlyph state="working" label="Signing in" data-testid="agent-state" />
-      <Text variant="body" aria-live="polite">
-        Finish signing in in the tab that just opened.
-      </Text>
-      {signIn.code === undefined ? null : (
-        // A code the agent's sign-in gives, to type on its page (epic 6, entry 6): only in this tab's memory.
-        <Text variant="body" data-testid="agent-sign-in-user-code">
-          Enter this code on the sign-in page:{' '}
-          <Text as="code" variant="mono" className="select-all">
-            {signIn.code}
+      {/* One live region: the code, when the agent gives one, is read with the instruction (epic 6, entry 6). */}
+      <div aria-live="polite" className="flex flex-col gap-1">
+        <Text variant="body">Finish signing in in the tab that just opened.</Text>
+        {signIn.code === undefined ? null : (
+          // Only in this tab's memory, never stored or logged.
+          <Text variant="body" data-testid="agent-sign-in-user-code">
+            Enter this code on the sign-in page:{' '}
+            <Text as="code" variant="mono" className="select-all">
+              {signIn.code}
+            </Text>
           </Text>
-        </Text>
-      )}
+        )}
+      </div>
       {signIn.link === undefined ? null : (
         <Text variant="caption">
           No tab opened?{' '}

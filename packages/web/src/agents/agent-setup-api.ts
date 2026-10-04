@@ -149,6 +149,7 @@ export function useSignIn(agentId: string, auth: Auth = tabAuth): SignIn {
       () => {
         setBusy(false);
         setLink(undefined);
+        setCode(undefined);
         refresh();
       },
       (caught: unknown) => {

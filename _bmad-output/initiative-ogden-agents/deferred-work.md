@@ -631,3 +631,10 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-tracer-bullet-one-ticket-built-reviewed-and-approved-from-a-plan.md`
   summary: A build's sandbox can write the main repo's `.git/objects` (a commit needs it), so an agent could delete objects and damage unpushed history; a per-run object store (`GIT_OBJECT_DIRECTORY` with the repo's objects as an alternate, copied in at approve) would close it.
   evidence: 5.2 security review S3 (medium): `core/src/builds.ts` `sandboxFor`; refs and logs are narrowed to the run's own folder, objects can't be without a separate store (5.5).
+
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-contracts-and-stubs-for-epics-5-and-11-plan.md`
+  summary: Listing a webhook back by its full host can show part of its secret (some providers put the token in the host name); 11.4 should mask it (registrable domain only, or masked).
+  evidence: 5.3 security review S10; `WebhookTarget.host` in packages/shared/src/build-settings.ts; 11.4's own unknown is how a URL is listed back.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-contracts-and-stubs-for-epics-5-and-11-plan.md`
+  summary: Nothing checks a minimum git version, while builds rely on git 2.31+ (`rev-parse --path-format`) and `git apply`'s refusal to write beyond a symbolic link (fixed in 2.39.2, CVE-2023-23946); 5.5 should check the version and refuse older git with a plain reason.
+  evidence: 5.3 security review S15; `vcs-git` `applyPatch` and `worktreeGitPaths`.

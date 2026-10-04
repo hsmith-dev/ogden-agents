@@ -89,6 +89,8 @@ export const RunDecidedInput = z.object({
     decision: RunDecision,
     /** The merge commit, for `approved`. */
     mergeRevision: z.string().min(1).optional(),
+    /** The branch revision the user reviewed and approved (the merge commit's second parent). */
+    reviewedRevision: z.string().min(1).optional(),
   }),
 });
 /** The user approved (merged, the ticket `done`) or rejected a run on its review page (5.9). A note to the agent is never stored here. */

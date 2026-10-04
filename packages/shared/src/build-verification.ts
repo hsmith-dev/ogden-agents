@@ -5,7 +5,10 @@ import { IsoUtcTimestamp } from './time.js';
  * Verification of a build run (AD-17; story 5.3 freezes it, 5.8 runs all
  * three checks before a run shows as ready for review, user decision
  * 2026-10-01; 11.2 reports each check's detail and adds Check again and a
- * per-project test command). No UI text here holds an em or en dash.
+ * per-project test command). The re-run runs the project's own (and so the
+ * agent's) code, so it always runs inside the run's sandbox with no network,
+ * never on the server unsandboxed (E5-R9, security review). No UI text here
+ * holds an em or en dash.
  */
 
 /** The three checks, in the order the review page shows them. */

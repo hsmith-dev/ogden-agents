@@ -280,20 +280,23 @@ describe('vcs-git (story 5.3: diff stats, worktree lookup, rebase, patch)', () =
     const { repo, data, vcs, path } = await branched();
     expect(await vcs.worktreeExists(repo, path)).toBe(true);
     expect(await vcs.worktreeExists(repo, temp('ogden-agents-vcs-other-'))).toBe(false);
+    // The main checkout is never one of the runs' worktrees.
+    expect(await vcs.worktreeExists(repo, repo)).toBe(false);
     await vcs.removeWorktree(repo, path);
     expect(await vcs.worktreeExists(repo, path)).toBe(false);
     expect(await vcs.worktreeExists(repo, join(data, 'w', 'missing'))).toBe(false);
   });
 
   it('rebases the worktree onto a newer commit, and on a conflict leaves it as it was, running no hook', async () => {
-    const { repo, vcs, path, markers } = await branched();
+    const { repo, vcs, path, markers, branch } = await branched();
+    const at = { repoPath: repo, worktreePath: path, branch };
     writeFileSync(join(path, 'src', 'b.ts'), 'mine\n');
     git(path, 'add', '-A');
     git(path, 'commit', '-q', '--no-verify', '-m', 'run');
     writeFileSync(join(repo, 'README.md'), '# Repo, newer\n');
     git(repo, 'commit', '-q', '--no-verify', '-am', 'newer');
     const newer = git(repo, 'rev-parse', 'HEAD').trim();
-    expect(await vcs.rebase(path, newer)).toBe('rebased');
+    expect(await vcs.rebase({ ...at, onto: newer })).toBe('rebased');
     expect(git(path, 'merge-base', '--is-ancestor', newer, 'HEAD')).toBe('');
     expect(readFileSync(join(path, 'README.md'), 'utf8')).toBe('# Repo, newer\n');
 
@@ -301,26 +304,56 @@ describe('vcs-git (story 5.3: diff stats, worktree lookup, rebase, patch)', () =
     git(repo, 'add', '-A');
     git(repo, 'commit', '-q', '--no-verify', '-m', 'conflicting');
     const before = git(path, 'rev-parse', 'HEAD').trim();
-    expect(await vcs.rebase(path, git(repo, 'rev-parse', 'HEAD').trim())).toBe('conflict');
+    const latest = git(repo, 'rev-parse', 'HEAD').trim();
+    expect(await vcs.rebase({ ...at, onto: latest })).toBe('conflict');
     expect(git(path, 'rev-parse', 'HEAD').trim()).toBe(before);
     expect(git(path, 'status', '--porcelain').trim()).toBe('');
+    // Uncommitted changes: git won't start it.
+    writeFileSync(join(path, 'src', 'b.ts'), 'dirty\n');
+    expect(await vcs.rebase({ ...at, onto: latest })).toBe('refused');
+    git(path, 'checkout', '--', 'src/b.ts');
     expect(readdirSync(markers)).toEqual([]);
   });
 
-  it('applies a saved patch all or nothing, and refuses one that escapes the worktree or does not apply', async () => {
-    const { data, vcs, path } = await branched();
-    const patches = temp('ogden-agents-vcs-patches-');
+  it("refuses to run git in a worktree whose own git files (which the agent can write) no longer name its branch and repo, so main never moves", async () => {
+    const { repo, vcs, path, branch, head } = await branched();
+    const at = { repoPath: repo, worktreePath: path, branch };
+    const admin = join(repo, '.git', 'worktrees', 'abcdefgh');
+    writeFileSync(join(admin, 'HEAD'), 'ref: refs/heads/main\n');
+    await expect(vcs.rebase({ ...at, onto: head })).rejects.toBeInstanceOf(VcsError);
+    writeFileSync(join(admin, 'HEAD'), `ref: refs/heads/${branch}\n`);
+    const forged = temp('ogden-agents-vcs-forged-');
+    writeFileSync(join(admin, 'commondir'), forged);
+    await expect(vcs.applyPatch({ ...at, patchPath: join(path, 'x.patch') })).rejects.toBeInstanceOf(VcsError);
+    expect(git(repo, 'rev-parse', 'main').trim()).toBe(head);
+  });
+
+  it('applies a saved patch all or nothing, and refuses one that escapes the worktree, adds a link, touches a refused path, lives outside the worktree or does not apply', async () => {
+    const { repo, data, vcs, path, branch } = await branched();
+    const at = { repoPath: repo, worktreePath: path, branch };
+    const patches = join(path, '_bmad-output');
+    mkdirSync(patches);
     const good = join(patches, 'good.patch');
     writeFileSync(good, 'diff --git a/src/fix.txt b/src/fix.txt\nnew file mode 100644\n--- /dev/null\n+++ b/src/fix.txt\n@@ -0,0 +1 @@\n+fixed\n');
-    expect(await vcs.applyPatch(path, good)).toBe('applied');
+    // A path the caller refuses (the protected ones) stops it before anything is written.
+    expect(await vcs.applyPatch({ ...at, patchPath: good, refuse: (file) => file.startsWith('src/') })).toBe('refused');
+    expect(existsSync(join(path, 'src', 'fix.txt'))).toBe(false);
+    expect(await vcs.applyPatch({ ...at, patchPath: good })).toBe('applied');
     expect(readFileSync(join(path, 'src', 'fix.txt'), 'utf8')).toBe('fixed\n');
     // Applying it again doesn't apply cleanly: nothing changes.
-    expect(await vcs.applyPatch(path, good)).toBe('refused');
+    expect(await vcs.applyPatch({ ...at, patchPath: good })).toBe('refused');
+    const link = join(patches, 'link.patch');
+    writeFileSync(link, 'diff --git a/l b/l\nnew file mode 120000\n--- /dev/null\n+++ b/l\n@@ -0,0 +1 @@\n+/etc/passwd\n\\ No newline at end of file\n');
+    expect(await vcs.applyPatch({ ...at, patchPath: link })).toBe('refused');
+    expect(existsSync(join(path, 'l'))).toBe(false);
+    const outside = join(temp('ogden-agents-vcs-outside-'), 'good.patch');
+    writeFileSync(outside, readFileSync(good));
+    expect(await vcs.applyPatch({ ...at, patchPath: outside })).toBe('refused');
     const escape = join(patches, 'escape.patch');
     writeFileSync(escape, 'diff --git a/../escaped.txt b/../escaped.txt\nnew file mode 100644\n--- /dev/null\n+++ b/../escaped.txt\n@@ -0,0 +1 @@\n+out\n');
-    expect(await vcs.applyPatch(path, escape)).toBe('refused');
+    expect(await vcs.applyPatch({ ...at, patchPath: escape })).toBe('refused');
     expect(existsSync(join(data, 'w', 'escaped.txt'))).toBe(false);
-    await expect(vcs.applyPatch(path, 'relative.patch')).rejects.toBeInstanceOf(VcsError);
+    await expect(vcs.applyPatch({ ...at, patchPath: 'relative.patch' })).rejects.toBeInstanceOf(VcsError);
   });
 });
 

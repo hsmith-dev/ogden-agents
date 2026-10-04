@@ -175,11 +175,13 @@ export type RunQueueEntry = z.infer<typeof RunQueueEntry>;
 export const BUILD_RESULT_STATUSES = ['draft', 'ready-for-dev', 'in-progress', 'in-review', 'built', 'done', 'blocked'] as const;
 
 /**
- * The per-run JSON result the build session writes in the run's folder in
- * Ogden Agents' data folder (never in the repo) when it ends (5.4; read by
- * the runner, 5.7, cross-checked with the plan). `blockedCondition` is the
- * skill's own words and stays in the adapter's log; `blockedCode` and
- * `blockedReason` are what the run records. Never a secret.
+ * The per-run JSON result Ogden Agents' side of the build session (5.4,
+ * the server, never the sandboxed agent, which cannot reach the data
+ * folder) writes in the run's folder in the data folder when the session
+ * ends; the runner reads it (5.7), cross-checked with the run and the plan.
+ * `blockedCondition` is the skill's own words; the run's blocked code is
+ * only ever `BuildRunnerPort.blockedCode(blockedCondition)`, never a code a
+ * file names (AD-12, security review). Never a secret.
  */
 export const BUILD_RESULT_FILE = 'result.json';
 export const BUILD_ACTIVITY_FILE = 'activity.ndjson';
@@ -192,11 +194,15 @@ export const BuildRunResult = z.object({
   /** The branch's head commit when the session ended. */
   commit: z.string().regex(/^[0-9a-f]{40}([0-9a-f]{24})?$/).nullable(),
   baseRevision: z.string().regex(/^[0-9a-f]{40}([0-9a-f]{24})?$/).nullable(),
-  blockedCode: BlockedCode.nullable(),
   blockedCondition: z.string().max(2000).nullable(),
   blockedReason: z.string().max(2000).nullable(),
   /** The intent-gap patch beside the plan, repo-relative, for Apply the saved fix and retry (11.1). */
-  intentGapPatch: z.string().nullable(),
+  intentGapPatch: z
+    .string()
+    .max(1024)
+    .regex(/^_bmad-output\/(?:[^/\\\0]+\/)*[^/\\\0]+\.patch$/, 'The saved fix is a .patch file under _bmad-output.')
+    .refine((path) => !path.split('/').some((segment) => segment === '..' || segment === '.'), 'The saved fix is a .patch file under _bmad-output.')
+    .nullable(),
   /** Whether a command failed for want of network (builds have none; story 5.2 decision). */
   networkFailure: z.boolean().default(false),
   endedAt: IsoUtcTimestamp,

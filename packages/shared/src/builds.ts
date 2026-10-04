@@ -19,14 +19,16 @@ import { TICKET_REF_PATTERN } from './planning-board.js';
  * tickets until none is left or the user stops it; 5.8). `agent` defaults
  * to Claude Code, the only one in v1 (story 5.3).
  */
-export const StartOneBuildRequest = z
+export const UNKNOWN_BUILD_AGENT_MESSAGE = 'That agent cannot build here.';
+export const BUILD_TARGET_MESSAGE = 'Name one ticket to build, or ask for every ready one.';
+export const StartBuildRequest = z
   .object({
-    agent: BuildAgent.default(DEFAULT_BUILD_AGENT),
-    ref: z.string().regex(TICKET_REF_PATTERN, 'That is not a ticket reference.'),
+    agent: z.enum(BuildAgent.options, { error: UNKNOWN_BUILD_AGENT_MESSAGE }).default(DEFAULT_BUILD_AGENT),
+    ref: z.string().regex(TICKET_REF_PATTERN, 'That is not a ticket reference.').optional(),
+    all: z.literal(true, { error: BUILD_TARGET_MESSAGE }).optional(),
   })
-  .strict();
-export const StartAllReadyBuildsRequest = z.object({ agent: BuildAgent.default(DEFAULT_BUILD_AGENT), all: z.literal(true) }).strict();
-export const StartBuildRequest = z.union([StartOneBuildRequest, StartAllReadyBuildsRequest]);
+  .strict()
+  .refine((request) => (request.ref === undefined) !== (request.all === undefined), BUILD_TARGET_MESSAGE);
 export type StartBuildRequest = z.infer<typeof StartBuildRequest>;
 
 /** 202 for an all-ready {@link StartBuildRequest} (5.8): the runs it started and the queue now. */
@@ -163,7 +165,6 @@ export const CHECKOUT_BUSY_MESSAGE = 'Your project has staged changes, changes t
 export const VCS_UNAVAILABLE_MESSAGE = 'Builds need this project to be a git repository with a branch checked out that has at least one commit.';
 export const RUN_NOT_ACTIVE_MESSAGE = 'This run has already finished.';
 export const ALL_READY_NOT_AVAILABLE_MESSAGE = 'Building every ready story is not available yet.';
-export const UNKNOWN_BUILD_AGENT_MESSAGE = 'That agent cannot build here.';
 
 /** A run's outcome as the review page and the session header say it. */
 export const RUN_OUTCOME_LABELS: Readonly<Record<RunOutcome, string>> = {

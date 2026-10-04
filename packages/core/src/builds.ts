@@ -444,7 +444,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         throw new ValidationError(issue?.message ?? 'Name one ticket to build.', parsed.error.issues.map((each) => ({ path: each.path, message: each.message })));
       }
       // Every ready ticket is 5.8's dispatcher (story 5.3 froze the request).
-      if (!('ref' in parsed.data)) throw new NotImplementedError(ALL_READY_NOT_AVAILABLE_MESSAGE);
+      if (parsed.data.ref === undefined) throw new NotImplementedError(ALL_READY_NOT_AVAILABLE_MESSAGE);
       const ref = checkedRef(parsed.data.ref);
       // Each agent builds through its own runner (epic 6 adds runners, not core); v1 has Claude Code's.
       const agent = parsed.data.agent;
@@ -497,7 +497,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
           throw error;
         }
         const mergeRevision = (await vcs.head(repoPath).catch(() => undefined))?.revision;
-        entities.setRunDecision(run.id, 'approved', mergeRevision);
+        entities.setRunDecision(run.id, 'approved', mergeRevision, reviewed);
         await retire(repoPath, run).catch((error: unknown) => report(run.id, 'retire', error));
         return reviewOf(repoPath, entities.getRunBySession(run.sessionId) ?? run);
       });
@@ -513,6 +513,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         if (run.branch !== null && isBuildBranch(run.branch) && (await vcs.isMerged(repoPath, run.branch)) && run.outcome === 'verified') {
           throw new BuildRefusedError('checks_failed', ALREADY_MERGED_MESSAGE);
         }
+        // A run already rejected stays as it is: a repeat Reject writes nothing (review, story 5.3).
+        if (run.decision === 'rejected') return reviewOf(repoPath, run);
         await retire(repoPath, run);
         entities.setRunOutcome(run.id, 'stopped', run.reason);
         const rejected = entities.setRunDecision(run.id, 'rejected');

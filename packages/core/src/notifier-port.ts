@@ -16,7 +16,8 @@ export interface NotifierPort {
   /**
    * POSTs `payload` as JSON to `url`. Never throws: a timeout, a network
    * failure or a non-2xx status is a result with `ok: false`, in plain words
-   * that never contain the URL.
+   * that never contain the URL. A redirect is never followed (it is a
+   * failure): the URL the user saved is the only one ever sent to.
    */
   send(url: string, payload: WebhookPayload, options?: NotifierSendOptions): Promise<WebhookTestResult>;
 }

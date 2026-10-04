@@ -91,17 +91,24 @@ export interface VcsPort {
   /** Whether `path` is one of the repository's worktrees now (story 5.3; restart recovery and cleanup, 5.5 and 5.8). */
   worktreeExists(repoPath: string, path: string): Promise<boolean>;
   /**
-   * Rebases the worktree's branch onto commit `onto` (Update and retry after
-   * a merge conflict; 5.9). `conflict` leaves the worktree as it was (the
-   * rebase aborted); never forces anything outside the worktree's branch.
+   * Rebases the run's worktree (on `branch`) onto commit `onto` (Update and
+   * retry after a merge conflict; 5.9). Git runs with its folders set by
+   * Ogden, after checking the worktree's own (which the agent could write)
+   * still name the repo and `branch`; no signing program, no other ref
+   * moved. `conflict`: it stopped on conflicts and was aborted; `refused`:
+   * git wouldn't start it (say, uncommitted changes). Either way the
+   * worktree is as it was.
    */
-  rebase(worktreePath: string, onto: string): Promise<'rebased' | 'conflict'>;
+  rebase(input: { repoPath: string; worktreePath: string; branch: string; onto: string }): Promise<'rebased' | 'conflict' | 'refused'>;
   /**
-   * Applies the patch file `patchPath` (absolute; an intent gap's saved fix)
-   * to the worktree's files, all or nothing (11.1). `refused` when it doesn't
-   * apply cleanly or names a path outside the worktree; nothing changed then.
+   * Applies the patch file `patchPath` (absolute, a regular file inside the
+   * worktree: an intent gap's saved fix) to the worktree's files, all or
+   * nothing (11.1), with the same checks as {@link rebase}. `refused` when it
+   * doesn't apply cleanly, adds a symbolic link, names a path outside the
+   * worktree, or a path `refuse` refuses (core passes the protected paths,
+   * which the sandbox never let the agent write); nothing changed then.
    */
-  applyPatch(worktreePath: string, patchPath: string): Promise<'applied' | 'refused'>;
+  applyPatch(input: { repoPath: string; worktreePath: string; branch: string; patchPath: string; refuse?: (path: string) => boolean }): Promise<'applied' | 'refused'>;
 }
 
 /** A git operation failed; `message` is plain words, `details` are for the log and hold no secret. */

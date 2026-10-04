@@ -6,7 +6,7 @@
  * no skill and never reads a halt's words itself (AD-12); the
  * `buildrunner-acp` adapter is the only place that does.
  */
-import type { BlockedCode, BuildAgent, BuildRunResult } from '@ogden-agents/shared';
+import type { BlockedCode, BuildAgent, BuildRunResult, RunId } from '@ogden-agents/shared';
 
 export interface BuildInvocationOptions {
   /** The user's note to the agent (Reject and retry, Retry; 5.9), carried in the first message. */
@@ -28,8 +28,10 @@ export interface BuildRunnerPort {
   blockedCode(condition: string): BlockedCode;
   /**
    * The per-run JSON result in `runFolder` (the run's folder in Ogden
-   * Agents' data folder), or `undefined` when there is none or it doesn't
-   * parse as `BuildRunResult`. Never throws for a missing or bad file.
+   * Agents' data folder) for `expected`'s run and ticket, or `undefined`
+   * when there is none, it isn't a regular file of bounded size, it doesn't
+   * parse as `BuildRunResult`, or it names another run or ticket. Never
+   * throws for a missing or bad file.
    */
-  readResult(runFolder: string): Promise<BuildRunResult | undefined>;
+  readResult(runFolder: string, expected: { runId: RunId; ticketRef: string }): Promise<BuildRunResult | undefined>;
 }

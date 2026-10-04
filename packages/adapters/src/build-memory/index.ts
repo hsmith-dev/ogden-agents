@@ -32,6 +32,9 @@ export function createMemoryBuildRunner(options: { agent?: BuildAgent; prefix?: 
       return invocationOptions.note === undefined ? `${prefix} ${ref}` : `${prefix} ${ref}\n\n${invocationOptions.note}`;
     },
     blockedCode: (condition) => halts.get(condition) ?? 'other',
-    readResult: async (runFolder) => results.get(runFolder),
+    readResult: async (runFolder, expected) => {
+      const result = results.get(runFolder);
+      return result !== undefined && result.runId === expected.runId && result.ticketRef === expected.ticketRef ? result : undefined;
+    },
   };
 }

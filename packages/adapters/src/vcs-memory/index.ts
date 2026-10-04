@@ -181,16 +181,18 @@ export function createMemoryVcs(): MemoryVcs {
       calls.push(`worktreeExists ${repoPath} ${path}`);
       return worktrees.get(path)?.repoPath === repoPath;
     },
-    async rebase(worktreePath, onto) {
+    async rebase({ repoPath: given, worktreePath, branch: expected, onto }) {
       calls.push(`rebase ${worktreePath} ${onto}`);
       const { repoPath, branch } = worktree(worktreePath);
+      if (repoPath !== given || branch !== expected) throw new VcsError("The run's worktree isn't as Ogden Agents made it, so git didn't run there.", { step: 'worktree' });
       if (rebaseConflicts.has(worktreePath)) return 'conflict';
       repo(repoPath).branches.set(branch, nextRevision());
       return 'rebased';
     },
-    async applyPatch(worktreePath, patchPath) {
+    async applyPatch({ repoPath: given, worktreePath, branch: expected, patchPath }) {
       calls.push(`applyPatch ${worktreePath} ${patchPath}`);
-      worktree(worktreePath);
+      const { repoPath, branch } = worktree(worktreePath);
+      if (repoPath !== given || branch !== expected) throw new VcsError("The run's worktree isn't as Ogden Agents made it, so git didn't run there.", { step: 'worktree' });
       return badPatches.has(patchPath) ? 'refused' : 'applied';
     },
   };

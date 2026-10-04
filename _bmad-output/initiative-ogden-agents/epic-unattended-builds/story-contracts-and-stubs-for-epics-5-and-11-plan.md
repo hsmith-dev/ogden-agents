@@ -95,10 +95,34 @@ context:
 
 ## Review Triage Log
 
+- 2026-10-04, pass 1 (lenses quick, security): high 2, medium 9, low 6, false 0, maybe-false 0. Routed: patch 14, defer 2, reject 4. No intent_gap or bad_plan: every patched defect is local to a function this story added, and the port signature changes for `rebase`/`applyPatch` only add the inputs the safety checks need (no lane uses them yet).
+  - S1 `vcs-git` `rebase`/`applyPatch` ran git in the worktree, whose admin folder (`HEAD`, `commondir`) the sandboxed agent can write: a forged `HEAD` would move `main`, a forged `commondir` load the agent's config (filters, gpg) unsandboxed -- high, patch: `pinnedWorktree` checks `HEAD`, `commondir` and the `.git` link against the repo and runs git with `GIT_DIR`/`GIT_COMMON_DIR`/`GIT_WORK_TREE` set by Ogden, plus `commit.gpgsign=false`, `rebase.updateRefs=false`, `--no-update-refs`; port takes `{ repoPath, worktreePath, branch, … }`. Test: forged `HEAD` and `commondir` refused, `main` unmoved.
+  - S2 `applyPatch` applies an agent-written patch unsandboxed, reaching protected paths -- high, patch: patch must be a regular file inside the worktree; `--numstat --summary` first; any symlink (120000) or a path `refuse` (core's protected paths) refuses it. Tests added.
+  - S3 `BuildRunResult.intentGapPatch` unvalidated -- medium, patch: a `.patch` under `_bmad-output/`, no `..`, bounded.
+  - S4 the result file could name its own `blockedCode`; `runId` not cross-checked; who writes it unclear -- medium, patch: field removed (code only through `runner.blockedCode`), `readResult(folder, { runId, ticketRef })` checks both, doc says Ogden's side writes it (the agent can't reach the data folder).
+  - S5 / Q6 `readResult` read the whole file first and followed links -- medium, patch: `lstat`, regular file, size first. Test added.
+  - S6 rebase timeout never aborted; Q9 any failure reported as `conflict` -- medium, patch: abort on a thrown run; `refused` when git never started it. Test added.
+  - S7 `rebase.updateRefs` could move other branches -- medium, merged into S1's patch.
+  - S8 `worktreeExists` true for the main checkout -- medium, patch: first entry skipped. Q4 `-z` needs git 2.36 and a failure read as `false` -- medium, patch: no `-z`, a failure throws.
+  - S9 webhook redirects -- low, patch: `NotifierPort` says a redirect is never followed. Private-network https stays allowed (the user types the URL behind the gate).
+  - S10 a webhook's host can hold its token -- medium, defer (11.4's own unknown on how a URL is listed back).
+  - S11 the note to the agent appended raw -- low, patch: control characters stripped, fenced, no fence of its own; test added.
+  - S12 `run.decided` couldn't show the reviewed revision -- low, patch: `reviewedRevision` added (optional); server test checks it is the merge's second parent.
+  - S13 Reject's outcome and decision in two transactions -- low, reject: a crash between them shows `stopped`, and 0011's backfill and a repeat Reject don't depend on it.
+  - S14 the test re-run executes agent code -- medium, patch: the verification contract now says it always runs inside the run's sandbox with no network.
+  - S15 `git apply` symlink protection depends on git 2.39.2 -- medium, defer: no minimum git version is checked anywhere (5.5).
+  - Q1 an unknown agent got "Invalid input" -- medium, patch: one object schema with the agent's own message and a refine for exactly one of `ref`/`all`. Test checks the message.
+  - Q2 repeat Reject appended a duplicate `run.decided` -- medium, patch: `setRunDecision` is a no-op for the same decision and `reject` returns early. Tests added.
+  - Q3 5.2-era runs got no code or decision -- medium, patch: 0011 backfills `rejected` for `stopped`, `interrupted` and `merge_conflict` from their stored reasons.
+  - Q5 the unresolved-questions halt maps to `other` -- low, reject: the skill writes the questions themselves, which no prefix can name; the questions are the reason shown (Implementation Notes).
+  - Q7 `blocked plan supplied` can't fire through core -- low, reject: harmless, and start refuses a plan that isn't ready.
+  - Q8 `StartOptions.notifier` read by nothing -- low, reject: a declared slot for 11.4, documented so.
+  - Q10 fixture comment named a missing file -- low, patch.
+
 ## Design Notes
 
 - **States without changing AD-8:** `runPhase(run)`: `running`+`queuePosition` → `queued`; `running` → `running`; `blocked`+`checkpoint_*` → `checkpoint`; `blocked`+`interrupted` → `interrupted`; other `blocked` → `needs_you`; `verified` → `approved` if `decision` approved else `built`; `failed` → `failed`; `stopped` → `rejected` if `decision` rejected else `stopped`.
-- **Blocked codes** (Ogden's; halts → codes in `buildrunner-acp` only): `unclear_intent` (unclear intent, unresolved questions), `intent_gap`, `plan_not_ready` (plan failed RFD standard, matrix ambiguity, matrix test audit failed, handoff conflicts with plan), `verification_failed` (implementation / patch verification failed), `review_loop_exceeded`, `ticket_not_found` (ticket not resolved, missing plan_file, plan file disappeared), `blocked_plan`, `checkout_problem` (dirty tree, branch mismatch, metadata not writable, finalization left repository dirty), `no_subagents`, `merge_conflict`, `time_limit`, `interrupted`, `checkpoint_plan`, `checkpoint_done`, `agent_error`, `other`. Every halt in the skill maps (the entry's unknown).
+- **Blocked codes** (Ogden's; halts → codes in `buildrunner-acp` only): `unclear_intent` (unclear intent; the unresolved-questions halt writes the questions themselves, so it reads as `other` with them as the reason), `intent_gap`, `plan_not_ready` (plan failed RFD standard, matrix ambiguity, matrix test audit failed, handoff conflicts with plan), `verification_failed` (implementation / patch verification failed), `review_loop_exceeded`, `ticket_not_found` (ticket not resolved, missing plan_file, plan file disappeared), `blocked_plan`, `checkout_problem` (dirty tree, branch mismatch, metadata not writable, finalization left repository dirty), `no_subagents`, `merge_conflict`, `time_limit`, `interrupted`, `checkpoint_plan`, `checkpoint_done`, `agent_error`, `other`. Every halt in the skill maps (the entry's unknown).
 - **Run stream:** a build session's `session.*` and `run.*` events travel on the existing `/ws` workspace subscription (AD-5); no run socket exists, so nothing on `/ws` serves builds outside the guard.
 - **Routes** (all `…/workspaces/:wsId/`): `runs` GET, `runs/:runId` GET, `runs/:runId/stop|retry|check-again` POST, `build-settings` GET/PATCH. Install: `/api/v1/settings/run-limits` GET/PATCH, `/api/v1/settings/notifications` GET/PATCH, `…/notifications/webhooks` POST, `…/webhooks/:webhookId` PATCH/DELETE, `…/webhooks/:webhookId/test` POST.
 - Plan kept whole (~2,400 tokens): one contract surface; splitting would freeze half the shapes.

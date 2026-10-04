@@ -270,9 +270,10 @@ export interface Entities {
   /**
    * Records what the user decided on the review page (story 5.3): sets the
    * run's `decision` and appends `run.decided` (with the merge commit for
-   * `approved`). The outcome is set separately.
+   * `approved`, and the revision the user reviewed). The outcome is set
+   * separately. The same decision again changes nothing and appends nothing.
    */
-  setRunDecision(id: RunId, decision: RunDecision, mergeRevision?: string): Run;
+  setRunDecision(id: RunId, decision: RunDecision, mergeRevision?: string, reviewedRevision?: string): Run;
   /**
    * Sets every run still `running` to `blocked` with `reason` and the code
    * `interrupted` (story 5.2 review loop 1; 5.3): run at a server start,
@@ -833,18 +834,19 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
       });
     },
 
-    setRunDecision(id, decision, mergeRevision) {
+    setRunDecision(id, decision, mergeRevision, reviewedRevision) {
       check(RunDecisionSchema, decision, 'run decision');
       return log.transaction(() => {
         const run = getRun(id);
         if (run === undefined) throw new NotFoundError('run', id);
+        if (run.decision === decision) return run;
         const updated: Run = { ...run, decision, updatedAt: now() };
         orm.update(runs).set({ decision, updatedAt: updated.updatedAt }).where(eq(runs.id, id)).run();
         log.append({
           type: 'run.decided',
           workspaceId: run.workspaceId,
           streamId: run.sessionId,
-          payload: { runId: run.id, decision, ...(mergeRevision === undefined ? {} : { mergeRevision }) },
+          payload: { runId: run.id, decision, ...(mergeRevision === undefined ? {} : { mergeRevision }), ...(reviewedRevision === undefined ? {} : { reviewedRevision }) },
         });
         return updated;
       });

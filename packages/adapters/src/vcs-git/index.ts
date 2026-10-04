@@ -19,8 +19,8 @@
  * `GIT_TERMINAL_PROMPT=0` and a C locale for parseable output.
  */
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { VcsError, type VcsDiff, type VcsHead, type VcsPort, type VcsWorktreeGitPaths } from '@ogden-agents/core';
 
 export interface GitVcsOptions {
@@ -66,6 +66,24 @@ function checkRelative(path: string): string {
   return path;
 }
 
+/** Config git must not take from anywhere for a rebase or a patch: no signing program, no ref rewriting elsewhere. */
+const SAFE_CONFIG = ['-c', 'commit.gpgsign=false', '-c', 'rebase.updateRefs=false', '-c', 'core.sshCommand=false'];
+
+/** The real path of `dir`, or its resolved path when it doesn't exist. */
+function realOf(dir: string): string {
+  try {
+    return realpathSync.native(dir);
+  } catch {
+    return resolve(dir);
+  }
+}
+
+/** Whether `path` is `root` or inside it. */
+function isInside(root: string, path: string): boolean {
+  const rel = relative(root, path);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
 interface GitResult {
   code: number;
   stdout: string;
@@ -84,7 +102,7 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
   };
 
   /** Runs git in `cwd`; resolves with its exit code (a spawn failure rejects). */
-  const run = (cwd: string, args: readonly string[], maxBuffer = 16 * 1024 * 1024): Promise<GitResult> =>
+  const run = (cwd: string, args: readonly string[], maxBuffer = 16 * 1024 * 1024, extraEnv: Readonly<Record<string, string>> = {}): Promise<GitResult> =>
     new Promise((resolvePromise, reject) => {
       let hooks: string;
       try {
@@ -99,7 +117,7 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
         fullArgs,
         {
           cwd,
-          env: { ...options.env(), GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C', LANG: 'C' },
+          env: { ...options.env(), GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C', LANG: 'C', ...extraEnv },
           maxBuffer,
           timeout,
           windowsHide: true,
@@ -116,8 +134,8 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
     });
 
   /** Runs git and requires success. `details` never hold git's output (it can name the user's files). */
-  const must = async (cwd: string, args: readonly string[], step: string, maxBuffer?: number): Promise<string> => {
-    const result = await run(cwd, args, maxBuffer);
+  const must = async (cwd: string, args: readonly string[], step: string, maxBuffer?: number, extraEnv?: Readonly<Record<string, string>>): Promise<string> => {
+    const result = await run(cwd, args, maxBuffer, extraEnv);
     if (result.code !== 0) throw new VcsError(`git couldn't ${step}.`, { step, exitCode: result.code });
     return result.stdout;
   };
@@ -167,197 +185,47 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
     return paths;
   };
 
-  /** Whether git's own file `name` (`MERGE_HEAD`, `rebase-merge`, …) exists in the checkout's git folder. */
-  const gitPathExists = async (repoPath: string, name: string): Promise<boolean> => {
-    const out = await run(repoPath, ['rev-parse', '--path-format=absolute', '--git-path', name]);
-    return out.code === 0 && existsSync(out.stdout.trim());
-  };
-
-  return {
-    head,
-
-    async topLevel(repoPath) {
-      const out = await run(checkPath(repoPath), ['rev-parse', '--show-toplevel']);
-      if (out.code !== 0) return undefined;
-      const top = out.stdout.trim();
+      const pinned = await pinnedWorktree(repoPath, worktreePath, branch);
+      const args = [...SAFE_CONFIG, ...(await identity(repoPath)), 'rebase', '--no-autostash', '--no-update-refs', '--no-verify', commit];
+      let result: GitResult;
       try {
-        return realpathSync.native(top);
-      } catch {
-        return undefined;
+        result = await run(worktreePath, args, undefined, pinned);
+      } catch (error) {
+        // A timeout or a spawn failure: whatever git left, the worktree goes back to how it was.
+        await run(worktreePath, ['rebase', '--abort'], undefined, pinned).catch(() => undefined);
+        throw error;
       }
-    },
-
-    async branchRevision(repoPath, branch) {
-      const out = await run(checkPath(repoPath), ['rev-parse', '--verify', '--quiet', `refs/heads/${checkBranch(branch)}^{commit}`]);
-      const id = out.stdout.trim();
-      return out.code === 0 && REVISION.test(id) ? id : undefined;
-    },
-
-    async operationInProgress(repoPath) {
-      checkPath(repoPath);
-      for (const name of ['MERGE_HEAD', 'rebase-merge', 'rebase-apply', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']) {
-        if (await gitPathExists(repoPath, name)) return true;
-      }
-      return false;
-    },
-
-    async staged(repoPath) {
-      const out = await must(checkPath(repoPath), ['diff', '--cached', '--no-ext-diff', '--no-textconv', '--no-renames', '--name-only', '-z'], 'read the staged changes');
-      return out.split('\0').filter((name) => name !== '');
-    },
-
-    async restore(repoPath, paths) {
-      if (paths.length === 0) return;
-      await must(checkPath(repoPath), ['checkout', 'HEAD', '--', ...paths.map(checkRelative)], 'restore the plan');
-    },
-
-    async addWorktree(repoPath, { path, branch, base }) {
-      checkPath(repoPath);
-      checkPath(path);
-      if (existsSync(path)) throw new VcsError('The run folder already exists.', { step: 'worktree' });
-      await must(repoPath, ['worktree', 'add', '-b', checkBranch(branch), path, checkRevision(base)], 'add the worktree');
-    },
-
-    async worktreeGitPaths(worktreePath, branch): Promise<VcsWorktreeGitPaths> {
-      const folder = checkBranch(branch).split('/').slice(0, -1);
-      if (folder.length === 0) throw new VcsError('That is not a branch Ogden Agents can use.', { step: 'branch' });
-      const out = await must(checkPath(worktreePath), ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'], 'read the worktree');
-      const [gitDir, commonDir] = out.split(/\r?\n/).map((line) => line.trim());
-      if (gitDir === undefined || commonDir === undefined || gitDir === '' || commonDir === '') throw new VcsError("git couldn't read the worktree.", { step: 'worktree' });
-      const common = resolve(worktreePath, commonDir);
-      const branchRefDir = join(common, 'refs', 'heads', ...folder);
-      const branchLogDir = join(common, 'logs', 'refs', 'heads', ...folder);
-      for (const dir of [branchRefDir, branchLogDir]) mkdirSync(dir, { recursive: true });
-      return { gitDir: resolve(worktreePath, gitDir), commonDir: common, branchRefDir, branchLogDir };
-    },
-
-    async removeWorktree(repoPath, path, removeOptions = {}) {
-      checkPath(repoPath);
-      checkPath(path);
-      if (existsSync(path)) {
-        const removed = await run(repoPath, ['worktree', 'remove', '--force', '--force', path]);
-        if (removed.code !== 0 && existsSync(path)) rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      await run(repoPath, ['worktree', 'prune']);
-      if (removeOptions.deleteBranch !== undefined) await run(repoPath, ['branch', '-D', '--', checkBranch(removeOptions.deleteBranch)]);
-    },
-
-    status,
-
-    async diff(repoPath, base, branch, diffOptions = {}): Promise<VcsDiff> {
-      checkPath(repoPath);
-      const from = checkRevision(base);
-      const to = `refs/heads/${checkBranch(branch)}`;
-      const names = await must(repoPath, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--name-only', '-z', from, to, '--'], 'read the changes');
-      const files = names.split('\0').filter((name) => name !== '');
-      const maxBytes = diffOptions.maxBytes ?? 512 * 1024;
-      if (files.length === 0) return { diff: '', truncated: false, files };
-      const result = await run(repoPath, ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-renames', from, to, '--'], 256 * 1024 * 1024);
-      if (result.code !== 0) throw new VcsError("git couldn't read the changes.", { step: 'diff', exitCode: result.code });
-      const bytes = Buffer.from(result.stdout, 'utf8');
-      if (bytes.length <= maxBytes) return { diff: result.stdout, truncated: false, files };
-      return { diff: bytes.subarray(0, maxBytes).toString('utf8'), truncated: true, files };
-    },
-
-    async isMerged(repoPath, branch) {
-      const result = await run(checkPath(repoPath), ['merge-base', '--is-ancestor', `refs/heads/${checkBranch(branch)}`, 'HEAD']);
-      return result.code === 0;
-    },
-
-    async merge(repoPath, revision) {
-      checkPath(repoPath);
-      const commit = checkRevision(revision);
-      // Never touch a merge (or rebase, …) the user has in progress: nothing to abort that Ogden didn't start.
-      for (const name of ['MERGE_HEAD', 'rebase-merge', 'rebase-apply', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']) {
-        if (await gitPathExists(repoPath, name)) return 'refused';
-      }
-      // A file the merge would add that is already on disk, untracked or ignored, is never overwritten: git's own
-      // `--no-overwrite-ignore` doesn't stop a three-way merge from writing over an ignored file (git 2.54).
-      const base = await run(repoPath, ['merge-base', 'HEAD', commit]);
-      if (base.code === 0) {
-        const added = await run(repoPath, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--name-only', '-z', '--diff-filter=A', base.stdout.trim(), commit, '--']);
-        const tracked = await run(repoPath, ['ls-files', '-z']);
-        const inHead = new Set(tracked.stdout.split('\0'));
-        if (added.code !== 0 || tracked.code !== 0) return 'refused';
-        if (added.stdout.split('\0').some((name) => name !== '' && !inHead.has(name) && existsSync(join(repoPath, ...name.split('/'))))) return 'refused';
-      }
-      // git wants an identity for a merge even with `--no-commit` (a computer with none refuses it).
-      const result = await run(repoPath, [...(await identity(repoPath)), 'merge', '--no-ff', '--no-commit', '--no-verify', '--no-overwrite-ignore', commit]);
-      if (result.code === 0) return 'merged';
-      // Only unmerged paths are a conflict; anything else git refused or failed at.
-      const unmerged = await run(repoPath, ['diff', '--name-only', '--diff-filter=U', '-z']);
-      const conflict = unmerged.code === 0 && unmerged.stdout.split('\0').some((name) => name !== '');
-      // This merge is Ogden's own (none was in progress before it): the checkout goes back to how it was.
-      if (await gitPathExists(repoPath, 'MERGE_HEAD')) await must(repoPath, ['merge', '--abort'], 'abort the merge');
-      return conflict ? 'conflict' : 'refused';
-    },
-
-    async abortMerge(repoPath) {
-      const inProgress = await run(checkPath(repoPath), ['rev-parse', '-q', '--verify', 'MERGE_HEAD']);
-      if (inProgress.code === 0) await must(repoPath, ['merge', '--abort'], 'abort the merge');
-    },
-
-    async add(repoPath, paths) {
-      if (paths.length === 0) return;
-      await must(checkPath(repoPath), ['add', '--', ...paths.map(checkRelative)], 'stage the plan');
-    },
-
-    async commit(repoPath, message) {
-      checkPath(repoPath);
-      await must(repoPath, [...(await identity(repoPath)), 'commit', '--no-verify', '--no-edit', '-m', message], 'commit the merge');
-    },
-
-    async diffStats(repoPath, base, branch) {
-      checkPath(repoPath);
-      const out = await must(repoPath, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--numstat', '-z', checkRevision(base), `refs/heads/${checkBranch(branch)}`, '--'], 'read the changes');
-      let files = 0;
-      let insertions = 0;
-      let deletions = 0;
-      // `<added>\t<deleted>\t<path>` per file, NUL-terminated; a binary file counts `-` for both.
-      for (const entry of out.split('\0')) {
-        const match = /^(\d+|-)\t(\d+|-)\t/.exec(entry);
-        if (match === null) continue;
-        files++;
-        if (match[1] !== '-') insertions += Number(match[1]);
-        if (match[2] !== '-') deletions += Number(match[2]);
-      }
-      return { files, insertions, deletions };
-    },
-
-    async worktreeExists(repoPath, path) {
-      checkPath(repoPath);
-      checkPath(path);
-      if (!existsSync(path)) return false;
-      const out = await run(repoPath, ['worktree', 'list', '--porcelain', '-z']);
-      if (out.code !== 0) return false;
-      const real = (dir: string): string => {
-        try {
-          return realpathSync.native(dir);
-        } catch {
-          return resolve(dir);
-        }
-      };
-      const wanted = real(path);
-      return out.stdout.split('\0').some((line) => line.startsWith('worktree ') && real(line.slice('worktree '.length)) === wanted);
-    },
-
-    async rebase(worktreePath, onto) {
-      checkPath(worktreePath);
-      const commit = checkRevision(onto);
-      const result = await run(worktreePath, [...(await identity(worktreePath)), 'rebase', '--no-autostash', '--no-verify', commit]);
       if (result.code === 0) return 'rebased';
-      // Whatever stopped it, the worktree goes back to how it was before.
-      if ((await gitPathExists(worktreePath, 'rebase-merge')) || (await gitPathExists(worktreePath, 'rebase-apply'))) await must(worktreePath, ['rebase', '--abort'], 'abort the rebase');
-      return 'conflict';
+      // Stopped part-way (conflicts) is aborted; never started (uncommitted changes, …) is refused.
+      if ((await gitPathExists(worktreePath, 'rebase-merge', pinned)) || (await gitPathExists(worktreePath, 'rebase-apply', pinned))) {
+        await must(worktreePath, ['rebase', '--abort'], 'abort the rebase', undefined, pinned);
+        return 'conflict';
+      }
+      return 'refused';
     },
 
-    async applyPatch(worktreePath, patchPath) {
-      checkPath(worktreePath);
+    async applyPatch({ repoPath, worktreePath, branch, patchPath, refuse }) {
+      const pinned = await pinnedWorktree(repoPath, worktreePath, branch);
+      // The saved fix is a regular file inside the worktree, never a link to somewhere else.
       checkPath(patchPath);
+      try {
+        if (!lstatSync(patchPath).isFile() || !isInside(realOf(worktreePath), realOf(patchPath))) return 'refused';
+      } catch {
+        return 'refused';
+      }
+      const listed = await run(worktreePath, [...SAFE_CONFIG, 'apply', '--numstat', '--summary', '-z', patchPath], undefined, pinned);
+      if (listed.code !== 0) return 'refused';
+      // No symbolic link, and no path the caller refuses (the protected paths: the sandbox denies the agent those).
+      if (/\b120000\b/.test(listed.stdout)) return 'refused';
+      const paths = listed.stdout.split('\0').flatMap((entry) => {
+        const match = /^(?:\d+|-)\t(?:\d+|-)\t(.*)$/s.exec(entry.trim());
+        return match === null || match[1] === '' ? [] : [match[1]!];
+      });
+      if (refuse !== undefined && paths.some((path) => refuse(path))) return 'refused';
       // All or nothing, and never a path outside the worktree (git refuses those without --unsafe-paths).
-      const check = await run(worktreePath, ['apply', '--check', '--whitespace=nowarn', patchPath]);
+      const check = await run(worktreePath, [...SAFE_CONFIG, 'apply', '--check', '--whitespace=nowarn', patchPath], undefined, pinned);
       if (check.code !== 0) return 'refused';
-      const applied = await run(worktreePath, ['apply', '--whitespace=nowarn', patchPath]);
+      const applied = await run(worktreePath, [...SAFE_CONFIG, 'apply', '--whitespace=nowarn', patchPath], undefined, pinned);
       return applied.code === 0 ? 'applied' : 'refused';
     },
   };

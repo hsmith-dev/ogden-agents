@@ -110,7 +110,7 @@
 //                  a patch adding src/fix-<ref>.txt, and leaves no code
 //                  change); FAKE_ACP_BUILD_FAIL_TESTS=1 also writes
 //                  `.fake-tests-fail`, so the fixture's test command
-//                  (tests/fixtures/fake-test-command.mjs) fails 3 tests;
+//                  (FAKE_TEST_COMMAND_FILES in tests/fixtures/fake-bmad-repo.ts) fails 3 tests;
 //                  FAKE_ACP_BUILD_DELAY_MS=<n> waits n ms before finishing
 //                  (a time limit to hit).
 //   "plan-exit"    asks permission to leave plan mode with the real adapter's

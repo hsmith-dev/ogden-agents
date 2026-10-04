@@ -248,11 +248,15 @@ describe('runs', () => {
     // A code never outlives a blocked outcome.
     expect(core.entities.setRunOutcome(run.id, 'verified', null, { blockedCode: 'interrupted' }).blockedCode).toBeNull();
 
-    const decided = core.entities.setRunDecision(run.id, 'approved', 'c'.repeat(40));
+    const decided = core.entities.setRunDecision(run.id, 'approved', 'c'.repeat(40), 'd'.repeat(40));
     expect(decided).toMatchObject({ outcome: 'verified', decision: 'approved' });
     expect(core.entities.getRun(run.id)).toEqual(decided);
     const last = core.events.readAfter(0).at(-1)!;
-    expect([last.type, last.streamId, last.payload]).toEqual(['run.decided', session.id, { runId: run.id, decision: 'approved', mergeRevision: 'c'.repeat(40) }]);
+    expect([last.type, last.streamId, last.payload]).toEqual(['run.decided', session.id, { runId: run.id, decision: 'approved', mergeRevision: 'c'.repeat(40), reviewedRevision: 'd'.repeat(40) }]);
+    // The same decision again writes nothing.
+    const seq = core.events.lastSeq();
+    expect(core.entities.setRunDecision(run.id, 'approved')).toEqual(decided);
+    expect(core.events.lastSeq()).toBe(seq);
 
     // A server start settles a run left running as interrupted, with its code.
     const other = core.entities.createRun({ sessionId: core.entities.createSession({ workspaceId: workspace.id, kind: 'build' }).id, ticketRef: '1.2' });

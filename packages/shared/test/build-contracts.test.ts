@@ -44,6 +44,7 @@ import {
   testsFailedDetail,
   UpdateRunLimitSettingsRequest,
   UpdateWebhookRequest,
+  UNKNOWN_BUILD_AGENT_MESSAGE,
   UpdateWorkspaceBuildSettingsRequest,
   VERIFICATION_CHECKS,
   VerificationResult,
@@ -157,7 +158,6 @@ describe('runs (story 5.3)', () => {
       status: 'blocked',
       commit,
       baseRevision: commit,
-      blockedCode: 'intent_gap',
       blockedCondition: 'intent gap',
       blockedReason: 'What should it say?',
       intentGapPatch: '_bmad-output/x/story-plan.patch',
@@ -167,6 +167,12 @@ describe('runs (story 5.3)', () => {
     expect(BuildRunResult.parse(result)).toEqual(result);
     expect(BuildRunResult.safeParse({ ...result, status: 'finished' }).success).toBe(false);
     expect(BuildRunResult.safeParse({ ...result, version: 2 }).success).toBe(false);
+    // The saved fix is a .patch under _bmad-output, never a path that climbs out or is absolute.
+    for (const intentGapPatch of ['../../etc/passwd.patch', '/etc/x.patch', '_bmad-output/../x.patch', '_bmad-output/x.md', 'src/x.patch', '_bmad-output\\..\\x.patch']) {
+      expect(BuildRunResult.safeParse({ ...result, intentGapPatch }).success, intentGapPatch).toBe(false);
+    }
+    // A code the file names is never taken: only the runner maps a condition (AD-12).
+    expect(BuildRunResult.parse({ ...result, blockedCode: 'checkpoint_plan' })).not.toHaveProperty('blockedCode');
     const { endedAt: _, ...withoutEnd } = result;
     expect(BuildRunResult.safeParse(withoutEnd).success).toBe(false);
   });
@@ -176,7 +182,8 @@ describe('requests and responses (story 5.3)', () => {
   it('the build request: one ticket (agent defaults to Claude Code) or every ready one; nothing else', () => {
     expect(StartBuildRequest.parse({ ref: '1.1' })).toEqual({ agent: 'claude-code', ref: '1.1' });
     expect(StartBuildRequest.parse({ all: true })).toEqual({ agent: 'claude-code', all: true });
-    expect(StartBuildRequest.safeParse({ agent: 'codex', ref: '1.1' }).success).toBe(false);
+    const codex = StartBuildRequest.safeParse({ agent: 'codex', ref: '1.1' });
+    expect(codex.success ? '' : codex.error.issues[0]?.message).toBe(UNKNOWN_BUILD_AGENT_MESSAGE);
     expect(StartBuildRequest.safeParse({ ref: '1.1', all: true }).success).toBe(false);
     expect(StartBuildRequest.safeParse({ all: false }).success).toBe(false);
     expect(StartBuildRequest.safeParse({ ref: 'not a ref' }).success).toBe(false);
@@ -303,7 +310,7 @@ const EVENTS: Array<[string, Record<string, unknown>, Record<string, unknown>]> 
   ],
   ['run.queue_changed', { ...onWorkspace, payload: { queue: [{ runId, ticketRef: '1.2', position: 1 }] } }, { ...onSession, payload: { queue: [{ runId, ticketRef: '1.2', position: 1 }] } }],
   ['run.verification_completed', { ...onSession, payload: { runId, verification: verified } }, { ...onSession, payload: { runId, verification: { ...verified, outcome: 'failed' } } }],
-  ['run.decided', { ...onSession, payload: { runId, decision: 'approved', mergeRevision: commit } }, { ...onSession, payload: { runId, decision: 'merged' } }],
+  ['run.decided', { ...onSession, payload: { runId, decision: 'approved', mergeRevision: commit, reviewedRevision: commit } }, { ...onSession, payload: { runId, decision: 'merged' } }],
   [
     'workspace.build_settings_changed',
     { ...onWorkspace, payload: { settings: { maxConcurrentRuns: 1, testCommand: 'pnpm test' }, previous: { maxConcurrentRuns: 2, testCommand: null } } },

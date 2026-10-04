@@ -36,6 +36,7 @@ import {
   RUN_REASON_NO_NETWORK,
   runPhase,
   SessionRunResponse,
+  UNKNOWN_BUILD_AGENT_MESSAGE,
   WorkspaceResponse,
 } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
@@ -176,7 +177,7 @@ describe('Unattended builds over REST (story 5.2)', () => {
     expect(approvedReview.run).toMatchObject({ outcome: 'verified', decision: 'approved', agent: 'claude-code' });
     expect(runPhase(approvedReview.run)).toBe('approved');
     const decided = server.core.events.readAfter(0).find((event) => event.type === 'run.decided');
-    expect(decided?.type === 'run.decided' ? decided.payload : undefined).toEqual({ runId: run.id, decision: 'approved', mergeRevision: fixtureGit(repo.path, 'rev-parse', 'HEAD').trim() });
+    expect(decided?.type === 'run.decided' ? decided.payload : undefined).toEqual({ runId: run.id, decision: 'approved', mergeRevision: fixtureGit(repo.path, 'rev-parse', 'HEAD').trim(), reviewedRevision: fixtureGit(repo.path, 'rev-parse', 'HEAD^2').trim() });
     // One merge commit on the checked-out branch, with the change and the plan done.
     expect(fixtureGit(repo.path, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe('main');
     expect(fixtureGit(repo.path, 'rev-list', '--parents', '-n', '1', 'HEAD').trim().split(' ')).toHaveLength(3);
@@ -223,7 +224,11 @@ describe('Unattended builds over REST (story 5.2)', () => {
     // Story 5.3: Reject is recorded as the user's decision, so the run shows as rejected (not stopped).
     expect(rejectedReview.run).toMatchObject({ decision: 'rejected', blockedCode: null });
     expect(runPhase(rejectedReview.run)).toBe('rejected');
-    expect(server.core.events.readAfter(0).some((event) => event.type === 'run.decided' && event.payload.runId === run.id && event.payload.decision === 'rejected')).toBe(true);
+    const decisions = () => server.core.events.readAfter(0).filter((event) => event.type === 'run.decided' && event.payload.runId === run.id);
+    expect(decisions()).toHaveLength(1);
+    // A repeat Reject writes nothing.
+    expect((await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildReject, { wsId, ref: '1.1' }))).status).toBe(200);
+    expect(decisions()).toHaveLength(1);
     expect(existsSync(run.worktreePath!)).toBe(false);
     expect(branches(repo.path)).toEqual(['main', run.branch]);
     expect(store.marks).toEqual([]);
@@ -324,7 +329,7 @@ describe('Unattended builds over REST (story 5.2)', () => {
     }
     const all = await request(on.server, on.tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId: on.wsId }), { all: true });
     expect(await refusalOf(all)).toEqual({ status: 501, code: 'not_implemented', message: ALL_READY_NOT_AVAILABLE_MESSAGE });
-    expect((await refusalOf(await request(on.server, on.tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId: on.wsId }), { agent: 'codex', ref: '1.1' }))).code).toBe('invalid_request');
+    expect(await refusalOf(await request(on.server, on.tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId: on.wsId }), { agent: 'codex', ref: '1.1' }))).toEqual({ status: 400, code: 'invalid_request', message: UNKNOWN_BUILD_AGENT_MESSAGE });
     expect(on.server.core.entities.listSessions(on.wsId)).toEqual([]);
     expect(branches(on.repo.path)).toEqual(['main']);
   });

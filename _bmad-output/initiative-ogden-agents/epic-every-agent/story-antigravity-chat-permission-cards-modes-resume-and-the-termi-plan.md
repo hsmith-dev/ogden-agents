@@ -3,7 +3,7 @@ title: 'Antigravity chat: permission cards, modes, resume and the terminal toggl
 type: 'feature'
 ticket: '5'
 created: '2026-10-04'
-status: 'in-review'
+status: 'built'
 route: 'full'
 route_source: 'auto'
 review: 'quick'

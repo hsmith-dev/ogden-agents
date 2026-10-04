@@ -51,7 +51,7 @@ function secondAgent(quirks: Partial<AcpAgentQuirks> = {}, diagnostics: Array<[s
   return createAcpAgent(
     SECOND,
     {
-      launch: ({ env }) => ({ command: process.execPath, args: [FAKE_AGENT], env, logFields: { program: 'fake' } }),
+      launch: () => ({ command: process.execPath, args: [FAKE_AGENT], logFields: { program: 'fake' } }),
       toolInputPaths: { pathFields: ['target'], patternFields: [] },
       askingModeIds: ['careful'],
       ...quirks,
@@ -165,6 +165,27 @@ describe('the shared ACP client with a second agent (6.4)', () => {
       },
     });
     await expect(agent.startSession({ cwd: tempDir(), env: baseEnv() })).rejects.toMatchObject({ code: 'agent_unavailable', message: "Second Agent isn't set up for Ogden Agents on this computer yet." });
+  });
+
+  it('a launch that fails any other way is agent_unavailable too, its reason masked', async () => {
+    const agent = secondAgent({
+      launch: () => {
+        throw new Error('probe failed near sk-secret-value');
+      },
+    });
+    const failure = agent.startSession({ cwd: tempDir(), env: baseEnv({ SECOND_API_KEY: 'sk-secret-value' }) });
+    await expect(failure).rejects.toMatchObject({ code: 'agent_unavailable', message: "Second Agent couldn't start. Try again." });
+    await expect(failure.catch((error: AgentError) => JSON.stringify(error.details))).resolves.not.toContain('sk-secret-value');
+  });
+
+  it("a launch adds variables but never drops or changes core's", async () => {
+    const { session, events } = await start({
+      quirks: { launch: () => ({ command: process.execPath, args: [FAKE_AGENT], addEnv: { SECOND_ADDED: 'yes', FAKE_ACP_AGENT_NAME: 'overridden' } }) },
+    });
+    await session.prompt('session-start');
+    const { env } = JSON.parse(replyText(events)) as { env: Record<string, string> };
+    expect(env.SECOND_ADDED).toBe('yes');
+    expect(env.FAKE_ACP_AGENT_NAME).toBe('second-agent');
   });
 
   it('cancel ends a running prompt; close stops its whole process tree', async () => {

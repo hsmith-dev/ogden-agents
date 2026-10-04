@@ -220,7 +220,7 @@ export function findAcpBaseViolations(files: readonly SourceFile[]): string[] {
     for (const match of code.matchAll(AGENT_WORDS)) violations.push(`${path}: the shared ACP client names ${match[0]} (E6-R3: agents supply a descriptor and quirks)`);
     for (const name of AGENT_ENV_NAMES) if (new RegExp(`(?<![A-Za-z0-9_])${name}(?![A-Za-z0-9_])`).test(code)) violations.push(`${path}: the shared ACP client names the agent variable ${name}`);
     for (const match of source.matchAll(SPECIFIER)) {
-      if (/^\.\.\/(?:acp-(?!base\/)|setup-)/.test(match[2]!)) violations.push(`${path}: the shared ACP client imports ${match[2]} (an agent's own adapter)`);
+      if (/^(?:\.\.\/)+(?:acp-(?!base\/)|setup-|index\.js$)|^(?:\.\.\/)+src\/|^@ogden-agents\/adapters(?:\/|$)/.test(match[2]!)) violations.push(`${path}: the shared ACP client imports ${match[2]} (an agent's own adapter)`);
     }
   }
   return violations;
@@ -237,6 +237,7 @@ describe('E6-R3: the shared ACP client names no agent (6.4)', () => {
     const files: SourceFile[] = [
       { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/acp-base/a.ts', source: "const name = 'Claude Code';\n// like Antigravity\nconst key = env.GEMINI_API_KEY;" },
       { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/acp-base/b.ts', source: "import { x } from '../acp-claude-code/x.js';\nimport { y } from './mask.js';" },
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/acp-base/d.ts', source: "import { a } from '../index.js';\nimport { b } from '@ogden-agents/adapters';" },
       { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/acp-claude-code/c.ts', source: "const name = 'Claude Code';" },
     ];
     expect(findAcpBaseViolations(files)).toEqual([
@@ -245,6 +246,8 @@ describe('E6-R3: the shared ACP client names no agent (6.4)', () => {
       'packages/adapters/src/acp-base/a.ts: the shared ACP client names the agent variable GEMINI_API_KEY',
       'packages/adapters/src/acp-base/b.ts: the shared ACP client names claude (E6-R3: agents supply a descriptor and quirks)',
       'packages/adapters/src/acp-base/b.ts: the shared ACP client imports ../acp-claude-code/x.js (an agent\'s own adapter)',
+      'packages/adapters/src/acp-base/d.ts: the shared ACP client imports ../index.js (an agent\'s own adapter)',
+      'packages/adapters/src/acp-base/d.ts: the shared ACP client imports @ogden-agents/adapters (an agent\'s own adapter)',
     ]);
   });
 });

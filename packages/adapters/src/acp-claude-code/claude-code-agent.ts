@@ -116,16 +116,13 @@ export function createClaudeCodeAgent(options: ClaudeCodeAgentOptions = {}): Age
       if (adapterPath === undefined || !existsSync(adapterPath)) {
         throw new AgentError('agent_unavailable', acpReasons(CLAUDE_CODE).notSetUp, { details: { adapterPath: adapterPath ?? null } });
       }
-      const childEnv: Record<string, string> = { ...env };
-      if (childEnv.CLAUDE_CODE_EXECUTABLE === undefined) {
-        const claude = options.claudeExecutable === undefined ? findClaudeExecutable(childEnv) : options.claudeExecutable;
-        if (claude !== null && claude !== undefined) childEnv.CLAUDE_CODE_EXECUTABLE = claude;
-      }
+      // A `CLAUDE_CODE_EXECUTABLE` core passes wins (the base keeps core's variables over additions).
+      const claude = env.CLAUDE_CODE_EXECUTABLE ?? (options.claudeExecutable === undefined ? findClaudeExecutable(env) : options.claudeExecutable) ?? undefined;
       return {
         command: options.nodePath ?? process.execPath,
         args: [adapterPath],
-        env: childEnv,
-        logFields: { adapterPath, claudeExecutable: childEnv.CLAUDE_CODE_EXECUTABLE ?? 'bundled' },
+        addEnv: claude === undefined ? undefined : { CLAUDE_CODE_EXECUTABLE: claude },
+        logFields: { adapterPath, claudeExecutable: claude ?? 'bundled' },
       };
     },
     // claude-agent-acp 0.84 passes `_meta.claudeCode.options.settings` to the CLI as its flag settings; it can't be changed later.

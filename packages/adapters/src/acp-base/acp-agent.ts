@@ -86,8 +86,11 @@ export interface AcpLaunch {
   /** The program, by absolute path (never looked up on `PATH` by the client). */
   command: string;
   args: readonly string[];
-  /** The whole environment: core's, plus anything the agent's own launch adds. */
-  env: Readonly<Record<string, string>>;
+  /**
+   * Variables the agent's own launch adds to core's environment (AD-16). Core's
+   * own variables always win: a launch can add, never drop or change one.
+   */
+  addEnv?: Readonly<Record<string, string>> | undefined;
   /** What the "starting" log line says about it (paths, never the environment). */
   logFields?: Record<string, unknown> | undefined;
 }
@@ -104,7 +107,7 @@ export interface AcpAgentQuirks {
    * protected paths guarded for the session's life (Auto only). Without it
    * a session doesn't protect paths, and core keeps it out of Auto.
    */
-  sessionMeta?: ((protectedPaths: ProtectedPaths) => Record<string, unknown>) | undefined;
+  sessionMeta?: ((protectedPaths: ProtectedPaths) => Record<string, unknown> | undefined) | undefined;
   /** The raw-input fields of its tools that name paths. */
   toolInputPaths: AcpToolInputPaths;
   /** Its session modes that ask as much as Ask (or more); any other, known or not, asks less. */
@@ -170,8 +173,15 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
 
   /** Spawns the agent in `cwd` with core's environment (AD-16), in its own process group. */
   const spawnAgent = (cwd: string, env: Readonly<Record<string, string>>) => {
-    const launch = quirks.launch({ cwd, env });
-    const childEnv: Record<string, string> = { ...launch.env };
+    let launch: AcpLaunch;
+    try {
+      launch = quirks.launch({ cwd, env });
+    } catch (error) {
+      if (error instanceof AgentError) throw error;
+      throw new AgentError('agent_unavailable', reasons.couldNotStart, { details: { reason: maskSecrets(String(error), secretValues(env)) }, cause: error });
+    }
+    // Exactly core's environment, plus what the launch adds (AD-16).
+    const childEnv: Record<string, string> = { ...launch.addEnv, ...env };
     diagnostic(`starting the ${descriptor.displayName} adapter`, launch.logFields);
 
     let child: ChildProcessWithoutNullStreams;

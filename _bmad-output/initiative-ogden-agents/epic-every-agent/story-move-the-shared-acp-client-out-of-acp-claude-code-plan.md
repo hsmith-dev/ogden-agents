@@ -3,12 +3,12 @@ title: 'Move the shared ACP client out of acp-claude-code'
 type: 'refactor'
 ticket: '4'
 created: '2026-10-03'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
 review_loop_iteration: 0
 baseline_revision: 'affd36b02ff3a192abc89e6d88141f2158479287'
 context:
@@ -72,9 +72,24 @@ context:
 
 ## Implementation Notes
 
+- Implemented directly in this session (it held the investigation, as 6.2 and 6.3 did), not by a fresh subagent.
+- `git mv` kept `mask.ts`'s history; `acp-base/index.ts` exports it, so `@ogden-agents/adapters` still exports the same names. `START_TIMEOUT_MS`/`EXIT_GRACE_MS` now come from `acp-base` (re-exported by `claude-code-agent.ts`).
+- The base's port omits `terminalResume` when the agent has none (Claude Code's is unchanged).
+- The fake agent gained `permission-always-only`; the architecture test gained `findAcpBaseViolations` (agent words, agent variables and `../acp-*`/`../setup-*` imports in `acp-base` code).
+- No existing test changed.
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (quick lens, correctness + security): high 0, medium 2, low 2, false 0, maybe-false 0, rejected 0. All routed patch.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---------|---------|-------|-------------------|
+| 1 | The base spawned with whatever env the launch quirk returned, so AD-16 depended on each future quirk | medium | patch | `AcpLaunch.env` became `addEnv`; the base spawns `{ ...addEnv, ...coreEnv }` (core's variables always win). Claude's quirk adds only `CLAUDE_CODE_EXECUTABLE` (core's still wins, as before). Test: an added variable arrives, an override of core's does not. `logFields` stays the quirk's documented contract (paths only). |
+| 2 | A launch quirk throwing a non-`AgentError` reached core raw | medium | patch | Wrapped: becomes `agent_unavailable` with the plain "couldn't start" reason, details masked against core's secrets; test added. |
+| 3 | The acp-base import check missed `../index.js`, `@ogden-agents/adapters` and `../../src/…` | low | patch | Regex widened; planted cases added. |
+| 4 | `sessionMeta` type couldn't return `undefined` though the runtime and Design Notes allow it | low | patch | Return type is now `Record<string, unknown> \| undefined`. |
 
 ## Design Notes
 

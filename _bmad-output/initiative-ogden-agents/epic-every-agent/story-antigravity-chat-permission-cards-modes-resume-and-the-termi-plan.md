@@ -3,12 +3,12 @@ title: 'Antigravity chat: permission cards, modes, resume and the terminal toggl
 type: 'feature'
 ticket: '5'
 created: '2026-10-04'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
 review_loop_iteration: 0
 baseline_revision: 'a94a188dab4fbc0a87583bc03e053f190b77dfb3'
 context:
@@ -87,14 +87,43 @@ context:
 
 ## Implementation Notes
 
+- Implemented directly in this session (it held the investigation, as 6.2 to 6.4 did), not by a fresh subagent.
+- Plan size about 2,500 tokens, over the 1,600 target; kept whole (autonomous run, one cohesive goal).
+- acp-base gained two optional quirks, `authMethod` (an `authenticate` before any session) and `commandFields`; `commandOf` takes the field list. No existing behaviour changed.
+- `setup-antigravity`: `descriptor.ts`, `layout.ts` (`<dataDir>/agents/antigravity/<version>/<binary>`), `index.ts` (entry-5 port: detection only, `subscription: signed_out` when installed, install and Google sign-in refused in plain words, key check `AIza` + 35, verify `unchecked`). Pins in `pins/antigravity-acp.json`.
+- `acp-antigravity/antigravity-agent.ts`: 120 s start limit, `authMethod` = `gemini-api-key` when the key is in its environment.
+- Server: `antigravity-wiring.ts` builds the wiring (entry 7 edits only it and `setup-antigravity`); `StartOptions.antigravity` (`false` in the test helpers, so other tests see only the agents they name); `AGENT_ENV_KEYS` includes `GEMINI_API_KEY`.
+- Starting notice: `session.agent_starting` / `session.agent_started` (shared, contract samples), core's timer in `chat/agents.ts` (`AGENT_STARTING_NOTICE_MS` 3 s after review), web `view.starting` and a `Notice` "Starting {agent}...".
+- Redaction: `GOOGLE_API_KEY_PATTERNS`, `API_KEY_PATTERNS`, `redactApiKeys` (the log and Claude Code's terminal import use both); log field names `gemini_api_key`, `google_api_key`.
+- The architecture test exempts a dot-folder name (`.gemini` at a literal's start or after `/`) from the agent-id rule.
+- Fake agent: Antigravity personality (`FAKE_ACP_PERSONALITY`, `FAKE_ACP_REQUIRE_AUTH`, `FAKE_ACP_INIT_DELAY_MS`, `authenticate`, "auth", "trust", `CommandLine`, `yolo`) behind `tests/fixtures/fake-antigravity.mjs`.
+- `scripts/agent-pins.mjs --check --agent antigravity` (CI agent-pins job, three OSes) uses the download helper moved out of `check-uv-pins.mjs` into `scripts/download-sha256.mjs` (streamed, timed, retried). Run locally on macOS arm64: matches.
+- Changed existing tests: `permission-modes.test.ts` (protected folders list), `transcript.test.ts` (view shape gains `starting`), `permissions.test.ts` and `architecture.test.ts` (new cases).
+
 ## Plan Change Log
 
 ## Review Triage Log
 
+Pass 1 (quick lens, with the security focus): high 0, medium 4, low 4, false 2, maybe-false 1, rejected 3.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---------|---------|-------|-------------------|
+| 1 | `permission-modes.test.ts` still expects the old protected folders | false | — | Already fixed and committed (ced92c6) before the review's diff was read; the diff file was staged one commit early. |
+| 2 | `agent-pins.mjs` hand-rolled a third zip reader (AGENTS.md: reuse helpers) | low | patch | The zip-listing check is removed: the pinned SHA-256 already proves the archive. |
+| 3 | The CI download had no timeout or retry (AGENTS.md: shared helper with back-off) | medium | patch | `sha256Of`/`sha256WithRetry` moved from `check-uv-pins.mjs` to `scripts/download-sha256.mjs`, with progress lines; both scripts use it. |
+| 4 | The 1 s threshold shows "Starting Claude Code..." on ordinary Claude starts | medium | patch | `AGENT_STARTING_NOTICE_MS` 3 s; core tests get 20 s limits; e2e delay 6 s; Design Note corrected. |
+| 5 | No single test runs the wired server with a 17 s start | low | reject | Covered in parts: adapter test at 17 s (no timeout), core and e2e for the notice; a 17 s e2e adds little for its cost. |
+| 6 | `redactApiKeys` unused; a Gemini key in a Claude Code terminal turn is imported unmasked | medium | patch | `transcript.ts` uses `redactApiKeys`. |
+| 7 | The architecture lookbehind exempts any id after a dot (`x.antigravity`) | medium | patch | Exempt only a dot at a literal's start or after `/`; planted `x.antigravity` now fails, `x/.gemini/y` passes. |
+| 8 | `antigravity.test.ts` had its own cleanup hook (AGENTS.md) | low | patch | Uses `removeAfterTest` and `startTestServer`'s tracking. |
+| 9 | Helper processes (`uv --version`, kill helper, Windows shortcut) inherit the whole environment, keys included | low | defer | Pre-existing (same for the Anthropic key); deferred-work entry. |
+| 10 | `GEMINI.md` not protected | maybe-false | defer | Depends on whether Antigravity reads it (live check); deferred-work entry, medium if true. |
+| 11 | "Not yet" sign-in reason shows while a key is in use | false | reject | Core's `withApiKey` drops `reason` and reports `signed_in` via `api_key` when the subscription is signed out and a key is in use. |
+
 ## Design Notes
 
 - Built ahead of the recorded spike live-check result, as the dispatcher instructed: this PR's live checks double as 6.1's open ones; on a failed check it is dropped as on a no-go.
-- "Until the agent answers `initialize`" is implemented as "until the agent session is ready" (initialize + new/resume/load): core sees only the port's start. The notice appears only after 1 s, so Claude Code's quick starts add no events or flash.
+- "Until the agent answers `initialize`" is implemented as "until the agent session is ready" (initialize + new/resume/load): core sees only the port's start. The notice appears only after 3 s (raised from 1 s in review: a real Claude Code start, its sign-in check included, often passes 1 s), so usual starts add no events or flash.
 - Only three platforms are pinned (the spike's hashes); macOS x64, Linux arm64 and Windows arm64 read `not_installed` with a reason until a reviewed pin adds them.
 - Signed-out until entry 7: no Google sign-in path exists yet, so a key (saved or inherited) is the only way in; `subscription: signed_out` lets core's precedence rule inject it. The tool path field names and the trust prompt's option kinds are guesses from the spike's strings: live check.
 

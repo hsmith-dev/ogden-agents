@@ -18,23 +18,20 @@
  * `--agent antigravity` checks `packages/adapters/src/setup-antigravity/pins/antigravity-acp.json`
  * instead: every pin is well formed (an https URL on dl.google.com for the
  * pinned version, a SHA-256, the server's file name), then this OS's archive
- * is downloaded into a temp folder, its SHA-256 compared with the pin (the
- * bytes as received, after any transfer encoding, as spike 6.1 hashed them)
- * and the server's file name found in the zip's directory. A platform with no
+ * is downloaded (`download-sha256.mjs`: streamed, retried) and its SHA-256
+ * compared with the pin (the bytes as received, after any transfer encoding,
+ * as spike 6.1 hashed them). A platform with no
  * pin checks the file only. Its version is bumped by hand, in a pull request.
  *
  * npm is `npm-cli.js` beside this Node (`--npm <path>` or `$NPM_CLI_JS` to
  * name another). Exits 0 when it succeeds, 1 otherwise.
  */
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { closeSync, createWriteStream, fstatSync, openSync, readSync } from 'node:fs';
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sha256WithRetry } from './download-sha256.mjs';
 
 const ANTIGRAVITY_PINS = fileURLToPath(new URL('../packages/adapters/src/setup-antigravity/pins/antigravity-acp.json', import.meta.url));
 const PLATFORMS = ['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64', 'win32-x64', 'win32-arm64'];
@@ -211,30 +208,6 @@ function assertAntigravityPins(pins) {
   if (problems.length > 0) throw new Error(`antigravity pins: ${problems.join('; ')}`);
 }
 
-/**
- * Whether the zip at `file` lists `name` in its central directory (read from its last 8 MB).
- * @param {string} file
- * @param {string} name
- */
-function zipLists(file, name) {
-  const fd = openSync(file, 'r');
-  try {
-    const size = fstatSync(fd).size;
-    const length = Math.min(size, 8 * 1024 * 1024);
-    const tail = Buffer.alloc(length);
-    readSync(fd, tail, 0, length, size - length);
-    // A central directory file header (PK\x01\x02) whose name is `name`, at any depth.
-    for (let at = tail.indexOf('PK\x01\x02'); at !== -1; at = tail.indexOf('PK\x01\x02', at + 4)) {
-      const nameLength = tail.readUInt16LE(at + 28);
-      const entry = tail.subarray(at + 46, at + 46 + nameLength).toString('utf8');
-      if (entry === name || entry.endsWith(`/${name}`)) return true;
-    }
-    return false;
-  } finally {
-    closeSync(fd);
-  }
-}
-
 async function checkAntigravity() {
   const pins = JSON.parse(readFileSync(ANTIGRAVITY_PINS, 'utf8'));
   assertAntigravityPins(pins);
@@ -244,22 +217,10 @@ async function checkAntigravity() {
     console.log(`agent-pins: antigravity ${pins.version} pins are well formed; no archive is pinned for ${platform}`);
     return;
   }
-  const work = mkdtempSync(join(tmpdir(), 'ogden-agents-pins-'));
-  try {
-    const file = join(work, 'archive.zip');
-    const response = await fetch(pin.url);
-    if (!response.ok || response.body === null) throw new Error(`downloading ${pin.url} answered ${response.status}`);
-    const hash = createHash('sha256');
-    const body = Readable.fromWeb(response.body);
-    body.on('data', (chunk) => hash.update(chunk));
-    await pipeline(body, createWriteStream(file));
-    const sha256 = hash.digest('hex');
-    if (sha256 !== pin.sha256) throw new Error(`the ${platform} archive's SHA-256 is ${sha256}, pinned ${pin.sha256}`);
-    if (!zipLists(file, pin.binary)) throw new Error(`the ${platform} archive has no ${pin.binary}`);
-    console.log(`agent-pins: antigravity ${pins.version} archive for ${platform} matches its pin and holds ${pin.binary}`);
-  } finally {
-    rmSync(work, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-  }
+  // Hashed as it streams in, never written to disk; retried with back-off (the shared download).
+  const { sha256, size } = await sha256WithRetry(pin.url, `agent-pins: antigravity ${platform}`);
+  if (sha256 !== pin.sha256) throw new Error(`the ${platform} archive's SHA-256 is ${sha256}, pinned ${pin.sha256}`);
+  console.log(`agent-pins: antigravity ${pins.version} archive for ${platform} matches its pin (${Math.round(size / 1024 / 1024)} MB)`);
 }
 
 try {

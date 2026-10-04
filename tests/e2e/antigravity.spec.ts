@@ -103,7 +103,7 @@ test.describe('Antigravity chat (epic 6 entry 5)', () => {
           await expect(page.getByTestId('message-agent').last()).toContainText('Hello from the fake agent.', { timeout: 20_000 });
           await expect(starting).toHaveCount(0);
         },
-        { extra: { antigravity: { agent: antigravity.agent, setup: antigravity.setup }, extraAgentEnv: { GEMINI_API_KEY: FAKE_GEMINI_KEY, FAKE_ACP_INIT_DELAY_MS: '4000' } } },
+        { extra: { antigravity: { agent: antigravity.agent, setup: antigravity.setup }, extraAgentEnv: { GEMINI_API_KEY: FAKE_GEMINI_KEY, FAKE_ACP_INIT_DELAY_MS: '6000' } } },
       );
     } finally {
       removeDataDir(antigravity.dataDir);

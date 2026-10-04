@@ -83,7 +83,8 @@ export const PERMISSION_MODE_TIMEOUT_MS = 5_000;
 
 /**
  * How long an agent may take to start before core says so in the chat
- * (`session.agent_starting`, epic 6 entry 5): a quick start adds nothing; a
- * slow one (Antigravity takes about 17 s on Windows) shows as starting.
+ * (`session.agent_starting`, epic 6 entry 5): a usual start (Claude Code's
+ * takes a second or two, its sign-in check included) adds nothing; a slow
+ * one (Antigravity takes about 17 s on Windows) shows as starting.
  */
-export const AGENT_STARTING_NOTICE_MS = 1_000;
+export const AGENT_STARTING_NOTICE_MS = 3_000;

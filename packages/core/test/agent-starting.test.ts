@@ -79,7 +79,7 @@ const typesOf = (core: Core, sessionId: SessionId): string[] =>
     .filter((event: CoreEvent) => event.streamId === sessionId)
     .map((event) => event.type);
 
-const until = async (check: () => boolean, what: string, ms = 5_000) => {
+const until = async (check: () => boolean, what: string, ms = 10_000) => {
   const deadline = Date.now() + ms;
   while (!check()) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
@@ -88,7 +88,7 @@ const until = async (check: () => boolean, what: string, ms = 5_000) => {
 };
 
 describe('a slow agent start shows as starting (epic 6 entry 5)', () => {
-  it('announces a start still running after a moment, then that it started, before the reply', async () => {
+  it('announces a start still running after a moment, then that it started, before the reply', { timeout: 20_000 }, async () => {
     const { core, chat, workspace, agent } = setUp();
     const session = await chat.createChatSession(workspace.id);
     const sentAt = Date.now();
@@ -104,7 +104,7 @@ describe('a slow agent start shows as starting (epic 6 entry 5)', () => {
     expect(types.indexOf('session.message_completed', types.indexOf('session.agent_started'))).toBeGreaterThan(-1);
   });
 
-  it('adds nothing for a quick start', async () => {
+  it('adds nothing for a quick start', { timeout: 20_000 }, async () => {
     const { core, chat, workspace, agent } = setUp();
     agent.quick();
     const session = await chat.createChatSession(workspace.id);
@@ -114,7 +114,7 @@ describe('a slow agent start shows as starting (epic 6 entry 5)', () => {
     expect(typesOf(core, session.id).filter((type) => type.startsWith('session.agent_start'))).toEqual([]);
   });
 
-  it('ends the notice when the start fails too', async () => {
+  it('ends the notice when the start fails too', { timeout: 20_000 }, async () => {
     const { core, chat, workspace, agent } = setUp();
     const session = await chat.createChatSession(workspace.id);
     chat.sendMessage(workspace.id, session.id, 'hello');

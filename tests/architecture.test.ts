@@ -159,8 +159,8 @@ export function withoutComments(source: string): string {
 
 /** One message per string literal in core or shared code that names an agent id, and (6.3) per mention of an agent's own environment variable. */
 export function findAgentIdViolations(files: readonly SourceFile[], ids: readonly string[] = AGENT_IDS, envNames: readonly string[] = AGENT_ENV_NAMES): string[] {
-  // A dot-prefixed name (`.gemini`) is a config folder, not an agent id (the protected names, epic 6 entry 5).
-  const named = new RegExp(`(['"\`])[^'"\`\\n]*?(?<![a-z0-9.-])(${ids.join('|')})(?![a-z0-9-])[^'"\`\\n]*?\\1`, 'g');
+  // A dot-folder name (`.gemini` at a literal's start or after `/`) is a config folder, not an agent id (the protected names, epic 6 entry 5).
+  const named = new RegExp(`(['"\`])[^'"\`\\n]*?(?<![a-z0-9-])(?<!['"\`/]\\.)(${ids.join('|')})(?![a-z0-9-])[^'"\`\\n]*?\\1`, 'g');
   // Anywhere in the code, not only in strings: `process.env.X` or `{ X: … }` names it too.
   const env = new RegExp(`(?<![A-Za-z0-9_])(${envNames.join('|')})(?![A-Za-z0-9_])`, 'g');
   const violations: string[] = [];
@@ -185,12 +185,13 @@ describe('AD-1: core and shared name no agent (epic 6)', () => {
       { pkg: '@ogden-agents/core', path: 'core/a.ts', source: "const id = 'claude-code';\n// the default is 'codex'\n/** e.g. `grok` */" },
       { pkg: '@ogden-agents/shared', path: 'shared/b.ts', source: 'const label = `use antigravity here`;\nconst other = "claude-code-x";' },
       { pkg: '@ogden-agents/server', path: 'server/c.ts', source: "const id = 'claude-code';" },
-      { pkg: '@ogden-agents/core', path: 'core/d.ts', source: "const folders = ['.gemini', '.agents'];\nconst id = 'gemini';" },
+      { pkg: '@ogden-agents/core', path: 'core/d.ts', source: "const folders = ['.gemini', '.agents', 'x/.gemini/y'];\nconst id = 'gemini';\nconst other = 'x.antigravity';" },
     ];
     expect(findAgentIdViolations(files)).toEqual([
       'core/a.ts: @ogden-agents/core names the agent id claude-code (AD-1: only server wiring does)',
       'shared/b.ts: @ogden-agents/shared names the agent id antigravity (AD-1: only server wiring does)',
       'core/d.ts: @ogden-agents/core names the agent id gemini (AD-1: only server wiring does)',
+      'core/d.ts: @ogden-agents/core names the agent id antigravity (AD-1: only server wiring does)',
     ]);
   });
 

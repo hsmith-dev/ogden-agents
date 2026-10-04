@@ -23,7 +23,7 @@ import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { AgentError, type AgentTranscriptTurn } from '@ogden-agents/core';
-import { redactAnthropicKeys } from '@ogden-agents/shared';
+import { redactApiKeys } from '@ogden-agents/shared';
 import { maskSecrets, secretValues } from '../acp-base/mask.js';
 import { SESSION_ID } from './terminal-command.js';
 
@@ -227,7 +227,7 @@ export function parseClaudeTranscript(text: string, secrets: readonly string[]):
   }
   chain.reverse();
 
-  const mask = (value: string) => redactAnthropicKeys(maskSecrets(value, secrets));
+  const mask = (value: string) => redactApiKeys(maskSecrets(value, secrets));
   const turns: AgentTranscriptTurn[] = [];
   let exchange: string | undefined;
   let reply: string[] = [];

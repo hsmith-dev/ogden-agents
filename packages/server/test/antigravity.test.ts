@@ -5,31 +5,21 @@
  * its setup port the real one on a data folder where the pinned server is
  * planted. No test runs the real server, reads `~/.gemini` or reaches Google.
  */
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ANTIGRAVITY_PINS, createAntigravityAgent, createAntigravitySetup } from '@ogden-agents/adapters';
 import { API_ROUTES, ApiErrorBody, apiPath, ChatAgentsResponse, SessionResponse, WorkspaceResponse, type SessionId } from '@ogden-agents/shared';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { AntigravityPorts } from '../src/antigravity-wiring.js';
-import { signIn, startTestServer, tempDataDir, waitFor, type SignedIn, type TestServer } from './helpers.js';
+import { removeAfterTest, signIn, startTestServer, tempDataDir, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
 const FAKE_ANTIGRAVITY = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-antigravity.mjs');
 const KEY = `AIza${'S'.repeat(31)}4321`;
 const PINNED = ANTIGRAVITY_PINS.archives[`${process.platform}-${process.arch}` as keyof typeof ANTIGRAVITY_PINS.archives];
 
-const folders: string[] = [];
-const servers: TestServer[] = [];
-afterEach(async () => {
-  await Promise.all(servers.splice(0).map((server) => server.close()));
-  for (const dir of folders.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-});
-
-const temp = (prefix: string) => {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
-  folders.push(dir);
-  return dir;
-};
+// Servers (started through `startTestServer`) close, and folders go, in the shared afterEach (helpers.ts).
+const temp = (prefix: string) => removeAfterTest(mkdtempSync(join(tmpdir(), prefix)));
 
 /** Antigravity's own ports on a folder of their own, the pinned server planted there unless `installed: false`. */
 function antigravity(options: { installed?: boolean } = {}): AntigravityPorts {
@@ -61,7 +51,6 @@ async function setUp(options: { installed?: boolean; key?: boolean; dataDir?: st
     // A key in the server's own environment follows core's precedence rule, as a saved one does.
     extraAgentEnv: options.key === false ? {} : { GEMINI_API_KEY: KEY },
   });
-  servers.push(server);
   const tab = await signIn(server);
   const repo = options.repo ?? temp('ogden-agents-repo-');
   const wsId = WorkspaceResponse.parse(await (await request(server, tab, 'POST', API_ROUTES.workspaces, { path: repo })).json()).workspace.id;
@@ -192,8 +181,7 @@ describe.skipIf(PINNED === undefined)('Antigravity beside Claude Code (epic 6 en
 describe('the shipped wiring (epic 6 entry 5)', () => {
   it('registers Antigravity by default, not installed, with its home folder in the data folder', async () => {
     const server = await startTestServer({ antigravity: undefined });
-    servers.push(server);
-    const tab = await signIn(server);
+      const tab = await signIn(server);
     const { agents } = ChatAgentsResponse.parse(await (await request(server, tab, 'GET', API_ROUTES.chatAgents)).json());
     expect(agents.find((agent) => agent.agentId === 'antigravity')).toMatchObject({ install: 'not_installed', permissionModes: ['ask', 'skip_all'] });
     expect(existsSync(join(server.dataDir, 'agents', 'antigravity-home'))).toBe(true);

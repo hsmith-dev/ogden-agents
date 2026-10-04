@@ -119,6 +119,7 @@ Verdicts: high 1, medium 3, low 5, false 1, maybe-false 0 (quick Q1-Q9, security
 | Q7 | Two backfill quotes are generic (`` `tests/launcher.test.ts` ``, "Resolved (story 9.3):") and would close future entries | low | patch | Longer, specific quotes; provenance passes on both bases. |
 | Q8 | "the hook stays exercised" is untrue: `planning,board` are shipped | low | patch | Test 2 registers `builds` and checks its switch is enabled and not Coming soon. |
 | W1 | CI run 37179473869, windows-latest installed: the modes journey's `say` counted replies before the chat reloaded after Settings (expected 1, received 5) | medium | patch | Test race on a slow runner: `developerMode` now waits for the conversation's earlier replies before returning. Planning journey passed there (54 s). |
+| W2 | CI run 37180302703, windows-latest installed: the modes journey's send after Skip all waited over 15 s for the composer to clear (the message went through; the screenshot shows it working) | low | patch | Leaving Auto restarts the agent at the next message, which took over 15 s on the runner; the journey's `say` now allows 60 s for the send and the reply. No product change. |
 | Q9 | CI comment stale (says no uv download) and run on | low | patch | Rewritten. |
 
 After the patches (2026-10-03, macOS): `pnpm typecheck`; `pnpm test` 1781 passed, 4 skipped (after removing a stray `packages/node_modules` a local `npx vitest` left); `pnpm run pack && pnpm smoke` OK; `pnpm e2e:installed` 41 passed; provenance against `origin/main` and `origin/story/4.12-epic4-sweep`.

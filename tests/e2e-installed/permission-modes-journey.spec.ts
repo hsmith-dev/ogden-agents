@@ -21,7 +21,7 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 import { requestQuit } from '../support.js';
-import { send, startChat } from '../e2e/chat-server.js';
+import { composer, send, startChat } from '../e2e/chat-server.js';
 import { expectConnected, landConnected, storedToken } from '../e2e/tab.js';
 import { bmadServer, waitForExit, type BmadServer, type Launched } from './installed.js';
 
@@ -43,8 +43,12 @@ async function choose(page: Page, mode: 'ask' | 'auto' | 'skip_all') {
 /** Sends `text` and waits for the agent's reply to it. */
 async function say(page: Page, text: string) {
   const before = await replies(page).count();
-  await send(page, text);
-  await expect(replies(page)).toHaveCount(before + 1, { timeout: 30_000 });
+  // `send`'s own wait, with room for the restart a mode change into or out of Auto makes at the next message
+  // (the agent starts again; on a Windows runner that alone has taken over 15 s).
+  await composer(page).fill(text);
+  await composer(page).press('Enter');
+  await expect(composer(page)).toHaveValue('', { timeout: 60_000 });
+  await expect(replies(page)).toHaveCount(before + 1, { timeout: 60_000 });
 }
 
 /** Turns Developer mode on or off in Settings → Appearance, then returns to the chat. */

@@ -43,7 +43,8 @@ export type { AgentDescriptor, RegisteredAgent } from '@ogden-agents/core';
 export { agentHomeDir, type AgentWiring } from './agent-wiring.js';
 export { createMemoryAgentSetup } from '@ogden-agents/adapters';
 // Antigravity's adapters (epic 6 entry 5), so tests run the fake agent's Antigravity personality through them.
-export { ANTIGRAVITY_AGENT_ID, createAntigravityAgent, createAntigravitySetup } from '@ogden-agents/adapters';
+export { ANTIGRAVITY_AGENT_ID, createAntigravityAgent, createAntigravitySetup, currentPlatform as antigravityPlatform, pinnedServer as pinnedAntigravityServer } from '@ogden-agents/adapters';
+export type { AntigravityPins } from '@ogden-agents/adapters';
 export type { AntigravityPorts } from './antigravity-wiring.js';
 // The in-memory secret store, so tests never touch the real OS keychain (story 9.2).
 export { createMemorySecretStore } from '@ogden-agents/adapters';

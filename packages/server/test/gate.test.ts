@@ -602,6 +602,8 @@ const EXPECTED_API_ROUTES = [
   `DELETE ${API_ROUTES.appShortcutOffer}`,
   `GET ${API_ROUTES.agents}`,
   `POST ${API_ROUTES.agentInstall}`,
+  `DELETE ${API_ROUTES.agentInstall}`,
+  `POST ${API_ROUTES.agentSignOut}`,
   `POST ${API_ROUTES.agentSignIn}`,
   `DELETE ${API_ROUTES.agentSignIn}`,
   `POST ${API_ROUTES.agentSignInCode}`,

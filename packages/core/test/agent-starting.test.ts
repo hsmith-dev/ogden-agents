@@ -45,6 +45,7 @@ function slowAgent() {
         });
   const port: AgentPort = {
     displayName: 'Slow Agent',
+    skillInvocation: (skill) => `/${skill}`,
     listAuthMethods: async () => [],
     startSession: started,
     reopenSession: async () => ({ session: await started(), restored: 'resumed' }),

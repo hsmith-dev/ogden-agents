@@ -24,7 +24,7 @@
  *   toggle reports `agent_unsupported`.
  */
 import { AgentError, type AgentPort } from '@ogden-agents/core';
-import { acpReasons, createAcpAgent, type AcpAgentQuirks } from '../acp-base/acp-agent.js';
+import { acpReasons, createAcpAgent, slashSkillInvocation, type AcpAgentQuirks } from '../acp-base/acp-agent.js';
 import type { AcpToolInputPaths } from '../acp-base/tool-paths.js';
 import { ANTIGRAVITY_API_KEY_METHOD_ID, ANTIGRAVITY_DESCRIPTOR, ANTIGRAVITY_MODE_IDS, GEMINI_API_KEY_ENV } from '../setup-antigravity/descriptor.js';
 import { pinnedServer } from '../setup-antigravity/layout.js';
@@ -81,6 +81,9 @@ export function createAntigravityAgent(options: AntigravityAgentOptions): AgentP
     commandFields: COMMAND_FIELDS,
     // A key core put in its environment is chosen as its sign-in method; without one, its stored sign-in is used as it is.
     authMethod: ({ env }) => ((env[GEMINI_API_KEY_ENV] ?? '') === '' ? undefined : ANTIGRAVITY_API_KEY_METHOD_ID),
+    // Its skills live in `.agents/skills` and run as slash commands, as bmad-loop's `agy` profile sends them
+    // (entry 8); that its ACP server runs them is the user's live check 6 (spike 6.1).
+    skillInvocation: slashSkillInvocation,
   };
   return createAcpAgent(ANTIGRAVITY_DESCRIPTOR, quirks, {
     onDiagnostic: options.onDiagnostic,

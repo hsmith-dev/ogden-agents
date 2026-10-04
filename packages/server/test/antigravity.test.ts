@@ -136,6 +136,24 @@ describe.skipIf(PINNED === undefined)('Antigravity beside Claude Code (epic 6 en
     expect(await say(server, tab, wsId, session.id, 'permission npm test')).toBe('Ran npm test. chose=allow');
   });
 
+  it("keeps the protected paths behind a card in Ask, _bmad's included, where its caution level allows other edits (4.13 S1)", { timeout: 60_000 }, async () => {
+    const { server, tab, wsId, chatWith } = await setUp();
+    expect((await request(server, tab, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { cautionLevel: 'ask_risky_only' })).status).toBe(200);
+    const session = await chatWith('antigravity');
+    expect(await say(server, tab, wsId, session.id, 'permission-edit src/a.ts')).toBe('Edited src/a.ts.');
+    for (const path of ['_bmad/scripts/config_utils.py', '.agents/skills/x/SKILL.md', '.gemini/settings.json']) {
+      const before = server.core.events.readAfter(0).filter((event) => event.streamId === session.id && event.type === 'permission.requested').length;
+      await send(server, tab, wsId, session.id, `permission-edit ${path}`);
+      await waitFor(() => stateOf(server, session.id) === 'waiting', `the card for ${path}`, 15_000);
+      const requested = server.core.events.readAfter(0).flatMap((event) => (event.streamId === session.id && event.type === 'permission.requested' ? [event.payload] : []));
+      expect(requested).toHaveLength(before + 1);
+      const requestId = requested.at(-1)!.requestId;
+      expect((await request(server, tab, 'POST', apiPath(API_ROUTES.sessionPermission, { wsId, sesId: session.id, requestId }), { decision: 'deny' })).status).toBe(204);
+      await waitFor(() => stateOf(server, session.id) === 'idle', 'the reply', 15_000);
+      expect(replies(server, session.id).at(-1)).toBe(`Denied ${path}.`);
+    }
+  });
+
   it('refuses Auto, and Skip all runs a command without a card once Developer mode is on', async () => {
     const { server, tab, wsId, chatWith } = await setUp();
     const session = await chatWith('antigravity');

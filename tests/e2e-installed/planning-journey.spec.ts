@@ -42,7 +42,7 @@
  * Skipped outside CI when uv or its managed Python 3.12 is missing (CI
  * provisions both).
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { apiPath } from '../../packages/shared/src/api.ts';
@@ -81,6 +81,8 @@ const SCRIPTS_CHANGED_TITLE = "This project's BMad Method scripts changed. Run t
 /** Plan's reduced-mode notice when the project's skills have no plain labels (entry 4.11). */
 const PLAIN_LABELS_TEXT = "This project's BMad Method has actions Ogden Agents doesn't know";
 const IDEA = 'A shared todo list for my family';
+/** A new planning session starts its agent first: on a Windows runner that has taken over 15 s. */
+const AGENT_START = { timeout: 60_000 };
 const BRIEF = '_bmad-output/briefs/brief-todo.md';
 const SPEC = '_bmad-output/specs/spec-todo.md';
 const EPIC = '_bmad-output/initiative-todo/epic-todo';
@@ -231,8 +233,8 @@ test('from BMad off to a ticketed epic on a live board, on the installed package
     await input.fill(IDEA);
     await input.press('Enter');
     await expect(page).toHaveURL(new RegExp(`/w/${wsId}/s/ses_[0-9A-Z]+$`));
-    await expect(page.getByTestId('message-user').first()).toHaveText(`/bmad-product-brief ${IDEA}`);
-    await expect(page.getByTestId('message-agent').first()).toContainText(`command=/bmad-product-brief ${IDEA}`);
+    await expect(page.getByTestId('message-user').first()).toHaveText(`/bmad-product-brief ${IDEA}`, AGENT_START);
+    await expect(page.getByTestId('message-agent').first()).toContainText(`command=/bmad-product-brief ${IDEA}`, AGENT_START);
     await expect(state(page)).toHaveAttribute('data-state', 'idle');
   });
 
@@ -245,15 +247,15 @@ test('from BMad off to a ticketed epic on a live board, on the installed package
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await brief.getByRole('button', { name: 'Turn this brief into a spec' }).click();
-    await expect(page.getByTestId('message-user').first()).toHaveText(`/bmad-spec ${BRIEF}`);
+    await expect(page.getByTestId('message-user').first()).toHaveText(`/bmad-spec ${BRIEF}`, AGENT_START);
     await expect(state(page)).toHaveAttribute('data-state', 'idle');
 
     await say(page, `write-doc ${SPEC}`);
     const spec = page.getByRole('region', { name: 'Document spec-todo.md' });
     await expect(spec.getByRole('button', { name: 'Open' })).toBeVisible();
     await spec.getByRole('button', { name: 'Turn this spec into tickets' }).click();
-    await expect(page.getByTestId('message-user').first()).toHaveText(`/bmad-ticket ${SPEC}`);
-    await expect(page.getByTestId('message-agent').first()).toContainText(`command=/bmad-ticket ${SPEC}`);
+    await expect(page.getByTestId('message-user').first()).toHaveText(`/bmad-ticket ${SPEC}`, AGENT_START);
+    await expect(page.getByTestId('message-agent').first()).toContainText(`command=/bmad-ticket ${SPEC}`, AGENT_START);
     await expect(state(page)).toHaveAttribute('data-state', 'idle');
   });
 
@@ -306,6 +308,10 @@ test('from BMad off to a ticketed epic on a live board, on the installed package
     const script = join(empty.path, '_bmad', 'scripts', 'config_utils.py');
     // Appended: the real script starts with a `from __future__` import, which must stay first.
     writeFileSync(script, `${readFileSync(script, 'utf8')}\nopen(${JSON.stringify(marker)}, "w").write("ran")\n`);
+    // A watch read the last step's mark set off may have passed its check just before the plant and still be
+    // running (the check-then-run window, logged in deferred-work.md): let it end, then count only what follows.
+    await page.waitForTimeout(4_000);
+    rmSync(marker, { force: true });
     await page.goto(`${url}/w/${wsId}/board`);
     const prompt = page.getByTestId('script-trust-prompt');
     await expect(prompt).toHaveAttribute('data-changed', 'true');

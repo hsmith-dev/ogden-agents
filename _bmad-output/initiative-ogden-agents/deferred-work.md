@@ -58,6 +58,8 @@ Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim fr
 - Unowned (when next changed): rename `adapters/src/catalog-memory` to `bmad-catalog-memory`, beside `bmad-source-memory`. From 4.12. (log: "`adapters/src/catalog-memory` is the one memory adapter not named after its real one")
 - User decision (label trust and repo config): a verified skill still runs the repo's own `_bmad/scripts` and `_bmad/custom/<skill>.toml` activation steps under Ogden's label. From the 4.12 review S3. (log: "A verified skill still runs repo-controlled `_bmad/scripts` and `_bmad/custom/<skill>.toml` activation steps under Ogden's label")
 - Unowned (TOCTOU, needs a concurrent writer): labels are judged when the catalog is read, not when a skill starts. From the 4.12 review S4. (log: "Labels are judged when the catalog is read, not when a skill starts")
+- Unowned (a sweep, AD-16): `uv --version`, the kill helper and the Windows shortcut script still inherit the server's whole environment, agent keys included; pass `withoutAgentKeys(process.env)`. From the 6.5 review. (log: "A few helper processes still inherit the server's whole environment")
+- Epic 6 (live check): protect `GEMINI.md` too if Antigravity reads it as its instruction file. From the 6.5 review. (log: "may need to join the protected files, if Antigravity reads it as its instruction file")
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
 

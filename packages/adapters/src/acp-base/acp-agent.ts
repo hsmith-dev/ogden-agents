@@ -47,20 +47,20 @@ import {
   type AgentErrorCode,
   type AgentEvent,
   type AgentEventListener,
-  type AgentPermissionDecision,
-  type AgentPermissionRequest,
   type AgentPort,
   type AgentRestored,
   type AgentSession,
-  type AgentTerminalResume,
   type AgentToolCallDiff,
   type ProtectedPaths,
 } from '@ogden-agents/core';
-import { PERMISSION_MODES, type PermissionMode } from '@ogden-agents/shared';
+import type { PermissionMode } from '@ogden-agents/shared';
 import { killProcessTree } from '../process-tree.js';
 import { withTimeout } from '../with-timeout.js';
 import { createStreamMasker, maskSecrets, secretValues } from './mask.js';
-import { commandOf, toolCallPaths, type AcpToolInputPaths } from './tool-paths.js';
+import { answerPermissionRequest, type Diagnostic, type PermissionCallback } from './permission-request.js';
+import { acpAsksLessThanAsk, acpModeOf, acpReasons, type AcpAgentOptions, type AcpAgentQuirks, type AcpLaunch } from './quirks.js';
+
+export { acpAsksLessThanAsk, acpModeOf, acpReasons, slashSkillInvocation, type AcpAgentOptions, type AcpAgentQuirks, type AcpLaunch } from './quirks.js';
 
 /** How long the agent may take to start and answer `initialize` and `session/new`. */
 export const START_TIMEOUT_MS = 60_000;
@@ -69,95 +69,10 @@ export const EXIT_GRACE_MS = 2_000;
 /** How much of the agent's stderr is kept in memory (masked) for a failure shown to the user. */
 const OUTPUT_TAIL_CHARS = 2_000;
 
-/** The plain reasons the UI shows for an agent, by its product name. */
-export function acpReasons(displayName: string) {
-  return {
-    notSetUp: `${displayName} isn't set up for Ogden Agents on this computer yet.`,
-    couldNotStart: `${displayName} couldn't start. Try again.`,
-    stopped: `${displayName} stopped unexpectedly. Send your message again to restart it.`,
-    signIn: `${displayName} needs you to sign in again.`,
-    failed: `${displayName} stopped with an error. Try again.`,
-    noSuchMode: `${displayName} doesn't offer that permission mode here.`,
-    couldNotSwitchMode: `${displayName} couldn't switch its permission mode.`,
-  } as const;
-}
-
-/** How to start the agent's ACP process. */
-export interface AcpLaunch {
-  /** The program, by absolute path (never looked up on `PATH` by the client). */
-  command: string;
-  args: readonly string[];
-  /**
-   * Variables the agent's own launch adds to core's environment (AD-16). Core's
-   * own variables always win: a launch can add, never drop or change one.
-   */
-  addEnv?: Readonly<Record<string, string>> | undefined;
-  /** What the "starting" log line says about it (paths, never the environment). */
-  logFields?: Record<string, unknown> | undefined;
-}
-
-/** What is an agent's own, beside its descriptor (E6-R3). */
-export interface AcpAgentQuirks {
-  /**
-   * How to start it in `cwd` with core's environment (AD-16). Throws an
-   * {@link AgentError} (`agent_unavailable`) when it isn't set up.
-   */
-  launch(input: { cwd: string; env: Readonly<Record<string, string>> }): AcpLaunch;
-  /**
-   * The `_meta` its `session/new`, `resume` and `load` take to keep core's
-   * protected paths guarded for the session's life (Auto only). Without it
-   * a session doesn't protect paths, and core keeps it out of Auto.
-   */
-  sessionMeta?: ((protectedPaths: ProtectedPaths) => Record<string, unknown> | undefined) | undefined;
-  /** The raw-input fields of its tools that name paths. */
-  toolInputPaths: AcpToolInputPaths;
-  /** Its session modes that ask as much as Ask (or more); any other, known or not, asks less. */
-  askingModeIds: readonly string[];
-  /** Its own CLI on its sessions (CAP-5), when that CLI can resume them. */
-  terminalResume?: AgentTerminalResume | undefined;
-  /**
-   * The sign-in method to `authenticate` with once `initialize` answered and
-   * before any session is opened (an agent that refuses sessions until a
-   * client picks one, such as an API key method whose key is in `env`), or
-   * `undefined` to open sessions as they are. Never sees anything but core's
-   * environment; never logged.
-   */
-  authMethod?: ((input: { env: Readonly<Record<string, string>>; initialized: acp.InitializeResponse }) => string | undefined) | undefined;
-  /** The raw-input fields of its shell tools that hold the command a card shows, first found wins. Default `['command']`. */
-  commandFields?: readonly string[] | undefined;
-  /** How it is asked to run an installed skill (`AgentPort.skillInvocation`, story 4.1): its own command syntax; the shared client adds none. */
-  skillInvocation: (skill: string, idea?: string) => string;
-}
-
-/** A skill run as a slash command, the idea as its argument: `/name` or `/name idea` (an adapter's `skillInvocation`, stories 4.1, 4.2). */
-export function slashSkillInvocation(skill: string, idea?: string): string {
-  return idea === undefined || idea === '' ? `/${skill}` : `/${skill} ${idea}`;
-}
-
-export interface AcpAgentOptions {
-  /** Called with protocol notes, for the log. Never includes the environment, stderr or the agent's messages. */
-  onDiagnostic?: ((message: string, fields?: Record<string, unknown>) => void) | undefined;
-  /** Default {@link START_TIMEOUT_MS}. */
-  startTimeoutMs?: number | undefined;
-}
-
-/** The Ogden mode an agent's session mode is, or `other`. */
-export function acpModeOf(modeIds: AgentDescriptor['permissionModes'], modeId: string): PermissionMode | 'other' {
-  return PERMISSION_MODES.find((mode) => modeIds[mode] === modeId) ?? 'other';
-}
-
-/** Whether a session mode asks less than Ask (so core tells the agent Ask). An unknown one does, to be safe. */
-export function acpAsksLessThanAsk(askingModeIds: readonly string[], modeId: string): boolean {
-  return !askingModeIds.includes(modeId);
-}
-
 /** ACP's `-32000`: the agent needs the user to sign in again (9.4). */
 function isAuthRequired(error: unknown): boolean {
   return error instanceof acp.RequestError && error.code === -32000;
 }
-
-/** The permission option kinds ACP defines; anything else is logged as `unknown`. */
-const OPTION_KINDS: ReadonlySet<string> = new Set(['allow_once', 'allow_always', 'reject_once', 'reject_always']);
 
 /** An `AgentPort` for the ACP agent `descriptor` describes. */
 export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuirks, options: AcpAgentOptions = {}): AgentPort {
@@ -255,12 +170,8 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
   };
 }
 
-type PermissionCallback = (request: AgentPermissionRequest) => Promise<AgentPermissionDecision>;
-
 /** What the agent is started for: a new session, a session it had before, or only to ask what it offers (`initialize`). */
 type Opening = { kind: 'new' } | { kind: 'reopen'; agentSessionId: string } | { kind: 'probe' };
-
-type Diagnostic = (message: string, fields?: Record<string, unknown>) => void;
 
 interface StartContext {
   descriptor: AgentDescriptor;
@@ -430,53 +341,7 @@ async function startOnChild(
           break;
       }
     })
-    .onRequest('session/request_permission', async ({ params }): Promise<acp.RequestPermissionResponse> => {
-      const option = (kind: acp.PermissionOptionKind) => params.options.find((candidate) => candidate.kind === kind);
-      // A card only ever picks "once" options (6.4): with neither on offer there is nothing it may answer.
-      if (option('allow_once') === undefined && option('reject_once') === undefined) {
-        diagnostic('the agent offered neither allow_once nor reject_once; cancelling the request', {
-          optionKinds: params.options.map((candidate) => (OPTION_KINDS.has(candidate.kind) ? candidate.kind : 'unknown')),
-        });
-        return { outcome: { outcome: 'cancelled' } };
-      }
-      const select = (kind: acp.PermissionOptionKind): acp.RequestPermissionResponse => {
-        const chosen = option(kind);
-        if (chosen === undefined) {
-          diagnostic('the agent offered no option for the decision; cancelling the request', { option: kind });
-          return { outcome: { outcome: 'cancelled' } };
-        }
-        return { outcome: { outcome: 'selected', optionId: chosen.optionId } };
-      };
-      if (onPermissionRequest === undefined) {
-        diagnostic('declined a permission request (no one to ask)', { toolKind: params.toolCall.kind ?? null });
-        return select('reject_once');
-      }
-      try {
-        const command = commandOf(params.toolCall.rawInput, quirks.commandFields);
-        const decision: AgentPermissionDecision | null | undefined = await onPermissionRequest({
-          toolCallId: params.toolCall.toolCallId,
-          title: mask(params.toolCall.title ?? ''),
-          kind: params.toolCall.kind ?? undefined,
-          command: command === undefined ? undefined : mask(command),
-          paths: toolCallPaths(params.toolCall, cwd, quirks.toolInputPaths).map(mask),
-        });
-        switch (decision?.outcome) {
-          case 'allow_once':
-            return select('allow_once');
-          case 'deny':
-            return select('reject_once');
-          case 'cancelled':
-            return { outcome: { outcome: 'cancelled' } };
-          default:
-            // A missing or unknown decision never lets the tool call run.
-            diagnostic('the permission request got no known decision; declining it', { outcome: String((decision as { outcome?: unknown } | null | undefined)?.outcome ?? null) });
-            return select('reject_once');
-        }
-      } catch (error) {
-        diagnostic('the permission request could not be decided; declining it', { reason: mask(String(error)) });
-        return select('reject_once');
-      }
-    })
+    .onRequest('session/request_permission', ({ params }) => answerPermissionRequest(params, { cwd, quirks, mask, diagnostic, onPermissionRequest }))
     .connect(stream);
 
   const exitedPromise = new Promise<void>((resolve) => {

@@ -23,6 +23,7 @@ function secondAgent(): RegisteredAgent {
   const agent: AgentPort = {
     displayName: 'Fake Agent',
     permissionModes: ['ask', 'skip_all'],
+    skillInvocation: (skill, idea) => base.skillInvocation(skill, idea),
     startSession: (input) => base.startSession(named(input)),
     reopenSession: (input) => base.reopenSession(named(input)),
     listAuthMethods: (input) => base.listAuthMethods(input),

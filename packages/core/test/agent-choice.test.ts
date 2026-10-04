@@ -51,6 +51,7 @@ function namedAgent(name: string, declares?: readonly PermissionMode[]) {
   const port: AgentPort = {
     displayName: name,
     ...(declares === undefined ? {} : { permissionModes: declares }),
+    skillInvocation: (skill) => `/${skill}`,
     listAuthMethods: async () => [],
     startSession: async (input) => open(input.env, `${name}-${++opened}`),
     reopenSession: async (input) => ({ session: open(input.env, input.agentSessionId), restored: 'resumed' }),

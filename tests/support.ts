@@ -153,6 +153,31 @@ export async function stubSetupCatalog({
   };
 }
 
+/** The second agent's id and product name (epic 6): the fake ACP agent registered again, for tests only. */
+export const SECOND_AGENT = { agentId: 'fake-agent', displayName: 'Fake Agent' } as const;
+
+/**
+ * The fake ACP agent as a second agent (epic 6, `extraAgents`): its own id and
+ * name, Ask and Skip all only (as Antigravity will declare), no terminal, and
+ * `FAKE_ACP_AGENT_NAME` set so its `whoami` reply says which agent answered.
+ */
+export async function fakeSecondAgent(): Promise<NonNullable<NonNullable<StartOptions>['extraAgents']>[number]> {
+  const { createClaudeCodeAgent } = await serverModule();
+  const base = createClaudeCodeAgent({ adapterPath: FAKE_AGENT, claudeExecutable: null });
+  const named = <T extends { env: Readonly<Record<string, string>> }>(input: T): T => ({ ...input, env: { ...input.env, FAKE_ACP_AGENT_NAME: SECOND_AGENT.agentId } });
+  return {
+    agentId: SECOND_AGENT.agentId,
+    agent: {
+      displayName: SECOND_AGENT.displayName,
+      permissionModes: ['ask', 'skip_all'],
+      skillInvocation: (skill, idea) => base.skillInvocation(skill, idea),
+      startSession: (input) => base.startSession(named(input)),
+      reopenSession: (input) => base.reopenSession(named(input)),
+      listAuthMethods: (input) => base.listAuthMethods(input),
+    },
+  };
+}
+
 // Shared with the plain-Node install scripts: whether a process with a pid
 // exists, and the running server's port file (`server.json`) in a data folder.
 export { isAlive, readPortFile } from '../scripts/installed-package.mjs';

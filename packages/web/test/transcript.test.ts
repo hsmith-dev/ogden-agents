@@ -48,8 +48,22 @@ describe('sessionView', () => {
       queued: [],
       notSent: [],
       checkIn: undefined,
+      starting: false,
       lastUserText: undefined,
     });
+  });
+
+  it('epic 6 entry 5: shows a slow agent start as starting until it started, anything else happens, or the session stops working', () => {
+    const starting = event('session.agent_starting', { sessionId: 'ses_1' });
+    const begun = [created(), completed('u1', 'user', 'Hi'), stateChanged('working', 'idle'), starting];
+    expect(sessionView(begun, 'ses_1').starting).toBe(true);
+    // A message queued meanwhile leaves it standing.
+    expect(sessionView([...begun, event('session.message_queued', { sessionId: 'ses_1', messageId: 'u2', content: 'more' })], 'ses_1').starting).toBe(true);
+    expect(sessionView([...begun, event('session.agent_started', { sessionId: 'ses_1' })], 'ses_1').starting).toBe(false);
+    expect(sessionView([...begun, delta('a1', 'Hel')], 'ses_1').starting).toBe(false);
+    expect(sessionView([...begun, stateChanged('error', 'working', "Antigravity couldn't start. Try again.")], 'ses_1').starting).toBe(false);
+    // Another session's start is not this one's.
+    expect(sessionView([created(), stateChanged('working', 'idle'), event('session.agent_starting', { sessionId: 'ses_2' }, 'ses_2')], 'ses_1').starting).toBe(false);
   });
 });
 

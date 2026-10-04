@@ -165,7 +165,7 @@ jobs:
           # The compare lookups go through the GitHub API; the token lifts the anonymous rate limit.
           GITHUB_TOKEN: ${{ github.token }}
 
-  # The Claude Agent ACP adapter Ogden Agents may install (story 9.3): a real
+  # The agents Ogden Agents may install. The Claude Agent ACP adapter (story 9.3): a real
   # `npm ci` of the pins in packages/adapters/src/setup-claude-code/pins/ into
   # a temp folder, as the app runs it (--ignore-scripts, integrity checked),
   # without and with the Agent SDK's bundled claude, on each OS. The only job
@@ -190,6 +190,12 @@ jobs:
 
       - name: Install the pinned adapter with the bundled claude
         run: node scripts/agent-pins.mjs --check --with-binary
+
+      # Antigravity's pinned archive for this OS (epic 6 entry 5): downloaded
+      # into a temp folder, its SHA-256 checked against the pin and its server
+      # found in it. The only job that downloads it; no test runs it.
+      - name: Check the pinned Antigravity archive
+        run: node scripts/agent-pins.mjs --check --agent antigravity
 
   # UI layout in a real browser (architecture Conventions: jsdom doesn't
   # evaluate media queries): sidebar forms and overflow at 1440, 900 and 390

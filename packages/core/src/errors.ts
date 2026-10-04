@@ -514,3 +514,29 @@ export class TerminalHandoffError extends CoreError {
     this.elapsedMs = elapsedMs;
   }
 }
+
+/** Why a build use-case refused (story 5.2; 5.3 freezes them): each answers 409 with its code, and nothing was written. */
+export type BuildRefusalCode =
+  | 'prerequisite_unmet'
+  | 'not_ready'
+  | 'run_active'
+  | 'sandbox_unavailable'
+  | 'checkout_dirty'
+  | 'merge_conflict'
+  | 'checks_failed'
+  | 'plan_uncommitted'
+  | 'vcs_unavailable';
+
+/**
+ * A build, approve or reject was refused (story 5.2): `code` says why for
+ * the API, `message` in plain words for the user (a shared sentence; a
+ * `sandbox_unavailable` may carry the sandbox's own plain reason).
+ */
+export class BuildRefusedError extends CoreError {
+  override readonly name = 'BuildRefusedError';
+  override readonly code: BuildRefusalCode;
+  constructor(code: BuildRefusalCode, message: string) {
+    super(code, message);
+    this.code = code;
+  }
+}

@@ -325,6 +325,27 @@ export const API_ROUTES = {
    * (guarded, AD-22); runs none of the project's scripts, so no trust.
    */
   workspaceDocument: `${API_BASE}/workspaces/:wsId/documents`,
+  /**
+   * `POST StartBuildRequest` → 201 `BuildResponse` (story 5.2): builds one
+   * ticket unattended in its own worktree and `build` session. Serves the
+   * `builds` piece (guarded, trust). 409 `prerequisite_unmet`, `not_ready`,
+   * `run_active`, `sandbox_unavailable`, `plan_uncommitted`,
+   * `vcs_unavailable`; nothing is written then.
+   */
+  workspaceBuilds: `${API_BASE}/workspaces/:wsId/builds`,
+  /** `GET` → `ReviewResponse` (story 5.2): the ticket's latest run, for the review page; 404 without one. */
+  workspaceBuild: `${API_BASE}/workspaces/:wsId/builds/:ref`,
+  /**
+   * `POST` → `ReviewResponse` (story 5.2): Approve. Merges the run's branch
+   * locally with the ticket's `done` mark in the merge commit. 409
+   * `checks_failed`, `checkout_dirty`, `merge_conflict` (aborted; the
+   * checkout is unchanged).
+   */
+  workspaceBuildApprove: `${API_BASE}/workspaces/:wsId/builds/:ref/approve`,
+  /** `POST` → `ReviewResponse` (story 5.2): Reject. Removes the run's worktree (its branch stays) and stops it. */
+  workspaceBuildReject: `${API_BASE}/workspaces/:wsId/builds/:ref/reject`,
+  /** `GET` → `SessionRunResponse` (story 5.2): the run of a `build` session; 404 for one without a run. */
+  sessionRun: `${API_BASE}/workspaces/:wsId/sessions/:sesId/run`,
 } as const;
 
 /**

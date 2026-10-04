@@ -146,6 +146,25 @@ export const API_ERROR_CODES = [
   'answer_first',
   /** A waiting message was to be changed or sent right away, but it is no longer waiting (sent, removed, or the turn ended; 409). */
   'message_not_queued',
+  // Unattended builds (story 5.2's tracer; 5.3 freezes them). Each is a 409 and nothing was written.
+  /** A ticket another one waits for is not done or in review yet. */
+  'prerequisite_unmet',
+  /** The ticket is not ready to build (its plan is not `ready-for-dev`). */
+  'not_ready',
+  /** The ticket already has a run in progress. */
+  'run_active',
+  /** No sandbox can contain an unattended build on this computer (fail closed). */
+  'sandbox_unavailable',
+  /** Approve was refused: the project's checkout has uncommitted changes outside the BMad output folder. */
+  'checkout_dirty',
+  /** Approve's merge conflicted: it was aborted and the checkout is unchanged. */
+  'merge_conflict',
+  /** Approve was refused: the run did not pass its checks (not `verified`), or was already merged. */
+  'checks_failed',
+  /** Build was refused: the ticket's plan or `tickets.toml` has uncommitted changes in the checkout. */
+  'plan_uncommitted',
+  /** Build was refused: the project is not a git repository with a checked-out branch that has a commit. */
+  'vcs_unavailable',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

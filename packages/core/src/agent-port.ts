@@ -11,6 +11,7 @@
 import { AgentId as AgentIdSchema, type AgentId, type AgentModel, type PermissionMode } from '@ogden-agents/shared';
 import { agentDescriptorProblems, declaredModes, type AgentDescriptor } from './agent-descriptor.js';
 import { CoreError } from './errors.js';
+import type { AgentSandbox } from './sandbox-port.js';
 
 /** One file change a tool call reports (secrets masked). `oldText` is `null` for a new file. */
 export interface AgentToolCallDiff {
@@ -143,6 +144,13 @@ export interface StartAgentSession {
    * Absent: the agent's own choice.
    */
   model?: string | undefined;
+  /**
+   * An unattended build session's sandbox (story 5.2): the agent runs its
+   * commands in its own native sandbox with only these roots writable and
+   * no network, and may never run one outside it. Fixed for the session's
+   * life. Absent for every chat.
+   */
+  sandbox?: AgentSandbox | undefined;
 }
 
 /** How a reopened session got its context back: the agent resumed it, loaded it, or had to start a new one. */

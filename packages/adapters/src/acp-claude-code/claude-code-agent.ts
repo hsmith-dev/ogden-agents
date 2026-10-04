@@ -37,7 +37,7 @@ import type { PermissionMode } from '@ogden-agents/shared';
 import { acpAsksLessThanAsk, acpModeOf, acpReasons, createAcpAgent, slashSkillInvocation, type AcpAgentQuirks } from '../acp-base/acp-agent.js';
 import { toolCallPaths, type AcpToolInputPaths } from '../acp-base/tool-paths.js';
 import { CLAUDE_CODE_DESCRIPTOR } from '../setup-claude-code/descriptor.js';
-import { claudeGuardSettings } from './claude-guards.js';
+import { claudeSessionSettings } from './claude-guards.js';
 import { ACP_MODE_IDS, CLAUDE_AGENT_ACP_PACKAGE, CLAUDE_CODE } from './constants.js';
 import { findClaudeExecutable } from './detect.js';
 import { claudeTerminalCommand, locateClaudeTerminal } from './terminal-command.js';
@@ -126,7 +126,10 @@ export function createClaudeCodeAgent(options: ClaudeCodeAgentOptions = {}): Age
       };
     },
     // claude-agent-acp 0.84 passes `_meta.claudeCode.options.settings` to the CLI as its flag settings; it can't be changed later.
-    sessionMeta: (protectedPaths) => ({ claudeCode: { options: { settings: claudeGuardSettings(protectedPaths) } } }),
+    sessionMeta: (protectedPaths, sandbox) => {
+      const settings = claudeSessionSettings(protectedPaths, sandbox);
+      return settings === undefined ? undefined : { claudeCode: { options: { settings } } };
+    },
     toolInputPaths: TOOL_INPUT_PATHS,
     askingModeIds: ASKING_MODE_IDS,
     // `claude --resume <id>` (CAP-5), and its record read back (story 3.3).

@@ -10,6 +10,7 @@
  * both use it. Like the real thing, it is ordinary files on disk: the real
  * `bmad-catalog` adapter reads it exactly as it would a user's repo.
  */
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -32,6 +33,12 @@ export interface FakeBmadRepoOptions {
   prefix?: string;
   /** The folder the repo is created in. Default: the OS temp folder. A suite that sweeps its own folder passes it (story 10.8). */
   parent?: string;
+  /**
+   * Make it a git repository on branch `main` with everything committed
+   * (story 5.2: builds branch from it), with a local identity and no hook
+   * ever run by the commit. Default `false`.
+   */
+  git?: boolean;
 }
 
 export interface FakeBmadRepo {
@@ -116,14 +123,42 @@ function writeFiles(root: string, files: Readonly<Record<string, string>>): void
   }
 }
 
+/**
+ * A ready ticket to build (story 5.2): ticket `1.1` of `initiative-demo`'s
+ * first epic, its plan `ready-for-dev`, waiting for nothing; and `1.2`, ready
+ * too but waiting for `1.1`. With the config script `tickets.py` loads.
+ */
+export const FAKE_BUILD_PLAN = '_bmad-output/initiative-demo/epic-first/story-build-the-thing-plan.md';
+export const FAKE_BUILD_WAITING_PLAN = '_bmad-output/initiative-demo/epic-first/story-build-the-next-thing-plan.md';
+export const FAKE_BUILD_TICKET_FILES: Readonly<Record<string, string>> = {
+  '_bmad/scripts/config_utils.py': FAKE_TICKET_TREE_FILES['_bmad/scripts/config_utils.py']!,
+  '_bmad-output/initiative-demo/tickets.toml': '[[epic]]\nid = 1\nslug = "epic-first"\ntitle = "The first epic"\n',
+  '_bmad-output/initiative-demo/epic-first/tickets.toml':
+    '[[entry]]\nid = 1\ntype = "story"\ntitle = "Build the thing"\nafter = []\n\n[[entry]]\nid = 2\ntype = "story"\ntitle = "Build the next thing"\nafter = [1]\n',
+  [FAKE_BUILD_PLAN]: '---\ntitle: "Build the thing"\ntype: "feature"\nticket: 1\nstatus: ready-for-dev\n---\n\n# Build the thing\n',
+  [FAKE_BUILD_WAITING_PLAN]: '---\ntitle: "Build the next thing"\ntype: "feature"\nticket: 2\nstatus: ready-for-dev\n---\n\n# Build the next thing\n',
+};
+
+/** Runs git in `cwd` for the fixture: no hook, a local identity, no output. */
+export function fixtureGit(cwd: string, ...args: string[]): string {
+  return execFileSync('git', ['-c', `core.hooksPath=${join(cwd, '.no-hooks')}`, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.com', ...args], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
 /** Creates a fake repo in `parent` (the OS temp folder by default); the caller removes it (`remove()`). */
-export function createFakeBmadRepo({ bmad = true, output = false, tickets = false, files = {}, prefix = 'ogden-agents-bmad-repo-', parent = tmpdir() }: FakeBmadRepoOptions = {}): FakeBmadRepo {
+export function createFakeBmadRepo({ bmad = true, output = false, tickets = false, files = {}, prefix = 'ogden-agents-bmad-repo-', parent = tmpdir(), git = false }: FakeBmadRepoOptions = {}): FakeBmadRepo {
   const path = mkdtempSync(join(parent, prefix));
   writeFiles(path, { 'README.md': '# A project\n' });
   if (bmad) writeFiles(path, FAKE_BMAD_FILES);
   if (output) writeFiles(path, FAKE_BMAD_OUTPUT_FILES);
   if (tickets) writeFiles(path, FAKE_TICKET_TREE_FILES);
   writeFiles(path, files);
+  if (git) {
+    fixtureGit(path, 'init', '--quiet', '--initial-branch=main');
+    fixtureGit(path, 'config', 'user.name', 'Fixture');
+    fixtureGit(path, 'config', 'user.email', 'fixture@example.com');
+    fixtureGit(path, 'add', '-A');
+    fixtureGit(path, 'commit', '--quiet', '--no-verify', '-m', 'The fixture');
+  }
   return {
     path,
     hash: () => hashFileTree(path),

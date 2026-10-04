@@ -49,6 +49,10 @@
  *   ACP agent) is registered as one more agent, "Fake Agent", that needs a
  *   trusted project (epic 6 entry 10), so the suite proves core's agent
  *   trust gate on the installed package.
+ * - {@link SANDBOX_ENV} = `available` or `unavailable`: unattended builds
+ *   take this answer instead of probing Claude Code's native sandbox (story
+ *   5.2: CI's ubuntu runners have no working bwrap, spike 5.1), so the suites
+ *   can build with the fake agent, or see `sandbox_unavailable`, on any OS.
  *
  * {@link resolveTestHooks} reads them all for `start()`, and
  * {@link testHooksLogFields} is its "test hooks in use" line. Every
@@ -59,7 +63,7 @@ import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, relative } from 'node:path';
 import type { AdapterPins, AntigravityPins } from '@ogden-agents/adapters';
-import { clampCheckInDelay, type ApiKeyVerification } from '@ogden-agents/core';
+import { clampCheckInDelay, type ApiKeyVerification, type SandboxCheck } from '@ogden-agents/core';
 import { BmadLock, BmadPiece, type BmadPiece as BmadPieceName } from '@ogden-agents/shared';
 import type { StartOptions } from './start-types.js';
 
@@ -104,6 +108,27 @@ export const ANTIGRAVITY_SERVER_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_SERVER';
 export const ANTIGRAVITY_INSTALL_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_INSTALL';
 /** Absolute path to a Node script inside the temp folder, registered as a test agent that needs a trusted project (tests only; epic 6 entry 10). */
 export const TRUST_AGENT_ENV = 'OGDEN_AGENTS_TEST_TRUST_AGENT';
+/** `available` or `unavailable`: the sandbox check unattended builds get (tests only; story 5.2). */
+export const SANDBOX_ENV = 'OGDEN_AGENTS_TEST_SANDBOX';
+
+/** The kind a run records under {@link SANDBOX_ENV} = `available`. */
+export const TEST_SANDBOX_KIND = 'test';
+
+/** The reason a build is refused under {@link SANDBOX_ENV} = `unavailable`. */
+export const TEST_SANDBOX_UNAVAILABLE_REASON = 'The test sandbox is unavailable.';
+
+/**
+ * The sandbox check from {@link SANDBOX_ENV}, or `undefined` (the real
+ * probe): unset, hooks not allowed. Allowed but neither value throws, so the
+ * test fails loudly rather than probing the real sandbox.
+ */
+export function testSandbox(env: Env, dataDir: string, tmp: string = tmpdir()): SandboxCheck | undefined {
+  const value = env[SANDBOX_ENV];
+  if (value === undefined || value === '' || !testHooksAllowed(env, dataDir, tmp)) return undefined;
+  if (value === 'available') return { available: true, kind: TEST_SANDBOX_KIND };
+  if (value === 'unavailable') return { available: false, reason: TEST_SANDBOX_UNAVAILABLE_REASON };
+  throw new Error(`${SANDBOX_ENV}: must be available or unavailable`);
+}
 
 /** Test-only: shortens the quiet-agent check-in delay, in milliseconds (story 2.10). Honoured only when `testHooksAllowed`. */
 export const CHECK_IN_MS_ENV = 'OGDEN_AGENTS_TEST_CHECK_IN_MS';
@@ -401,7 +426,7 @@ export function checkInDelayFromEnv(env: Env, dataDir: string, tmp: string = tmp
 }
 
 /** The `start()` options that decide a hook themselves, and whether `start()` opens its own core. */
-export type TestHookOptions = Pick<StartOptions, 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'extraAgents'> & {
+export type TestHookOptions = Pick<StartOptions, 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'extraAgents' | 'sandbox'> & {
   /** `false` for a core passed in, which already holds its own BMad pieces: {@link BMAD_AVAILABLE_ENV} is not read. */
   ownsCore: boolean;
   tmp?: string;
@@ -420,6 +445,7 @@ export interface TestHooks {
   bmadSource: TestBmadSource | undefined;
   checkInMs: number | undefined;
   secretStore: 'memory' | undefined;
+  sandbox: SandboxCheck | undefined;
 }
 
 /**
@@ -446,6 +472,7 @@ export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOpt
     bmadSource: options.bmadSource === undefined && options.bmadFetch === undefined ? testBmadSource(env, dataDir, tmp) : undefined,
     checkInMs: options.checkInDelayMs === undefined ? checkInDelayFromEnv(env, dataDir, tmp) : undefined,
     secretStore: options.secrets === undefined ? testSecretStore(env, dataDir, tmp) : undefined,
+    sandbox: options.sandbox === undefined ? testSandbox(env, dataDir, tmp) : undefined,
   };
 }
 
@@ -465,7 +492,8 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     hooks.bmadProbe ||
     hooks.bmadAvailable.length > 0 ||
     hooks.bmadSource !== undefined ||
-    hooks.checkInMs !== undefined;
+    hooks.checkInMs !== undefined ||
+    hooks.sandbox !== undefined;
   if (!inUse) return undefined;
   return {
     claudeInstall: hooks.claudeInstall !== undefined,
@@ -477,6 +505,7 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     bmadProbe: hooks.bmadProbe,
     bmadAvailable: hooks.bmadAvailable.join(','),
     bmadSource: hooks.bmadSource !== undefined,
+    ...(hooks.sandbox === undefined ? {} : { sandbox: hooks.sandbox.available ? 'available' : 'unavailable' }),
     ...(hooks.checkInMs === undefined ? {} : { checkInMs: hooks.checkInMs }),
   };
 }

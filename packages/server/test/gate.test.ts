@@ -644,6 +644,12 @@ const EXPECTED_API_ROUTES = [
   `PUT ${API_ROUTES.workspaceBmadScriptTrust}`,
   // A document a planning session wrote (story 4.7), guarded.
   `GET ${API_ROUTES.workspaceDocument}`,
+  // Unattended builds (story 5.2), each through the guarded helper.
+  `POST ${API_ROUTES.workspaceBuilds}`,
+  `GET ${API_ROUTES.workspaceBuild}`,
+  `POST ${API_ROUTES.workspaceBuildApprove}`,
+  `POST ${API_ROUTES.workspaceBuildReject}`,
+  `GET ${API_ROUTES.sessionRun}`,
 ] as const;
 
 describe('gate placement', () => {
@@ -699,6 +705,11 @@ describe('gate placement', () => {
         `GET ${API_ROUTES.workspaceBmadSetup}`,
         `POST ${API_ROUTES.workspaceBmadSetup}`,
         `GET ${API_ROUTES.workspaceDocument}`,
+        `POST ${API_ROUTES.workspaceBuilds}`,
+        `GET ${API_ROUTES.workspaceBuild}`,
+        `POST ${API_ROUTES.workspaceBuildApprove}`,
+        `POST ${API_ROUTES.workspaceBuildReject}`,
+        `GET ${API_ROUTES.sessionRun}`,
       ];
       expect(guardedRouteKeys(app)).toEqual([...pieceRoutes, `GET ${TEST_ROUTES.bmadProbe}`].sort());
       for (const key of guardedRouteKeys(app)) expect(key.slice(key.indexOf(' ') + 1).startsWith(`${API_BASE}/workspaces/:wsId/`), key).toBe(true);

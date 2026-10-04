@@ -98,6 +98,8 @@ export const TicketDetail = TicketRow.extend({
   unknown: z.string(),
   /** Whether the ticket's plan file exists (a planned entry has none until it is marked). */
   hasPlan: z.boolean(),
+  /** The plan file's path relative to the repo, `/`-separated, when it exists inside it (story 5.2); else `null`. */
+  plan: z.string().min(1).nullable().default(null),
 });
 export type TicketDetail = z.infer<typeof TicketDetail>;
 

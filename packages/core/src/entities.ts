@@ -51,7 +51,7 @@ import {
   type Workspace,
   type WorkspaceId,
 } from '@ogden-agents/shared';
-import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Database } from './db/database.js';
 import { events, runs, sessions, workspaces } from './db/schema.js';
@@ -123,6 +123,10 @@ export interface NewRun {
   sandbox?: string | null;
   /** ISO 8601 UTC. */
   deadline?: string | null;
+  /** The run's own branch (story 5.2). */
+  branch?: string | null;
+  /** The commit its branch started from (story 5.2). */
+  baseRevision?: string | null;
 }
 
 export interface SessionStateDetail {
@@ -241,8 +245,17 @@ export interface Entities {
   /** Creates the run of a `build` session with outcome `running`, and appends `run.created`. */
   createRun(input: NewRun): Run;
   getRun(id: RunId): Run | undefined;
-  /** Sets the outcome (AD-8), appending `run.outcome_changed` if it changed. */
-  setRunOutcome(id: RunId, outcome: RunOutcome): Run;
+  /** The run of a `build` session (story 5.2), if it has one. */
+  getRunBySession(sessionId: SessionId): Run | undefined;
+  /** The workspace's latest run of ticket `ticketRef` (story 5.2), if any. */
+  latestRunForTicket(workspaceId: WorkspaceId, ticketRef: string): Run | undefined;
+  /** The workspace's run of ticket `ticketRef` still `running` (story 5.2), if any. */
+  activeRunForTicket(workspaceId: WorkspaceId, ticketRef: string): Run | undefined;
+  /**
+   * Sets the outcome (AD-8) and its plain `reason` (story 5.2: `null` when
+   * not given), appending `run.outcome_changed` if either changed.
+   */
+  setRunOutcome(id: RunId, outcome: RunOutcome, reason?: string | null): Run;
 }
 
 /** Parses `value`, throwing a {@link ValidationError} that names `what`. */
@@ -293,6 +306,9 @@ const toRun = (row: RunRow): Run => ({
   sandbox: row.sandbox,
   deadline: row.deadline,
   outcome: row.outcome,
+  branch: row.branch,
+  baseRevision: row.baseRevision,
+  reason: row.reason,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
 });
@@ -713,6 +729,9 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
           sandbox: input.sandbox ?? null,
           deadline,
           outcome: 'running',
+          branch: input.branch ?? null,
+          baseRevision: input.baseRevision ?? null,
+          reason: null,
           createdAt: at,
           updatedAt: at,
         };
@@ -724,19 +743,46 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
 
     getRun,
 
-    setRunOutcome(id, outcome) {
+    getRunBySession(sessionId) {
+      const row = orm.select().from(runs).where(eq(runs.sessionId, sessionId)).get();
+      return row === undefined ? undefined : toRun(row);
+    },
+
+    latestRunForTicket(workspaceId, ticketRef) {
+      const row = orm
+        .select()
+        .from(runs)
+        .where(and(eq(runs.workspaceId, workspaceId), eq(runs.ticketRef, ticketRef)))
+        .orderBy(desc(runs.createdAt), desc(runs.id))
+        .limit(1)
+        .get();
+      return row === undefined ? undefined : toRun(row);
+    },
+
+    activeRunForTicket(workspaceId, ticketRef) {
+      const row = orm
+        .select()
+        .from(runs)
+        .where(and(eq(runs.workspaceId, workspaceId), eq(runs.ticketRef, ticketRef), eq(runs.outcome, 'running')))
+        .limit(1)
+        .get();
+      return row === undefined ? undefined : toRun(row);
+    },
+
+    setRunOutcome(id, outcome, reason = null) {
       check(RunOutcomeSchema, outcome, 'run outcome');
+      const why = reason === null || reason.trim() === '' ? null : reason;
       return log.transaction(() => {
         const run = getRun(id);
         if (run === undefined) throw new NotFoundError('run', id);
-        if (run.outcome === outcome) return run;
-        const updated: Run = { ...run, outcome, updatedAt: now() };
-        orm.update(runs).set({ outcome, updatedAt: updated.updatedAt }).where(eq(runs.id, id)).run();
+        if (run.outcome === outcome && run.reason === why) return run;
+        const updated: Run = { ...run, outcome, reason: why, updatedAt: now() };
+        orm.update(runs).set({ outcome, reason: why, updatedAt: updated.updatedAt }).where(eq(runs.id, id)).run();
         log.append({
           type: 'run.outcome_changed',
           workspaceId: run.workspaceId,
           streamId: run.sessionId,
-          payload: { runId: run.id, outcome, previous: run.outcome },
+          payload: { runId: run.id, outcome, previous: run.outcome, ...(why === null ? {} : { reason: why }) },
         });
         return updated;
       });

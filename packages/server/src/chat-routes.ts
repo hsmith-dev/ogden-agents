@@ -60,7 +60,9 @@ import {
   SetSessionModelRequest,
   UpdateQueuedMessageRequest,
   MessageId,
+  type SessionId,
   type SessionTerminal,
+  type WorkspaceId,
   WorkspaceResponse,
   WorkspacesResponse,
 } from '@ogden-agents/shared';
@@ -105,6 +107,10 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     maxSize: MAX_BODY_BYTES,
     onError: (c) => apiError(c, 413, 'invalid_request', 'That message is too long.'),
   });
+
+  /** Whether the session is an unattended build's (story 5.2): it runs on its own, so nobody sends it messages, a mode or a driver. */
+  const isBuildSession = (workspaceId: WorkspaceId, sessionId: SessionId): boolean => chat.getSession(workspaceId, sessionId).kind === 'build';
+  const readOnlyBuild = (c: Context): Response => apiError(c, 409, 'session_busy', 'An unattended build runs on its own: its session is read-only.');
 
   /** Core's refusals as API errors; anything else is left for `onError` (500). */
   const refusal = (c: Context, error: unknown): Response => {
@@ -237,6 +243,7 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     const body = await readBody(c, SetPermissionModeRequest);
     if (!body.ok) return body.response;
     try {
+      if (isBuildSession(scope.workspaceId, scope.sessionId)) return readOnlyBuild(c);
       const before = chat.getSession(scope.workspaceId, scope.sessionId).permissionMode;
       const session = chat.setPermissionMode(scope.workspaceId, scope.sessionId, body.value.mode, { confirm: body.value.confirm });
       if (session.permissionMode !== before) log.info('chat permission mode changed', { workspaceId: scope.workspaceId, sessionId: scope.sessionId, mode: session.permissionMode, previous: before });
@@ -340,6 +347,7 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     const body = await readBody(c, SetDriverRequest);
     if (!body.ok) return body.response;
     try {
+      if (isBuildSession(scope.workspaceId, scope.sessionId)) return readOnlyBuild(c);
       const session = await chat.switchDriver(scope.workspaceId, scope.sessionId, body.value.driver);
       log.info('session driver switched', { workspaceId: scope.workspaceId, sessionId: scope.sessionId, driver: session.driver });
       return c.json(SessionResponse.parse({ session }));
@@ -354,6 +362,7 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     const body = await readBody(c, SendMessageRequest);
     if (!body.ok) return body.response;
     try {
+      if (isBuildSession(scope.workspaceId, scope.sessionId)) return readOnlyBuild(c);
       // The message itself is the user's content: never logged.
       const result = chat.sendMessage(scope.workspaceId, scope.sessionId, body.value.text, { delivery: body.value.delivery });
       return c.json(SendMessageResponse.parse(result), 202);

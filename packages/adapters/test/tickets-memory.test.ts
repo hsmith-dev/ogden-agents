@@ -58,6 +58,9 @@ describe('tickets-memory (story 4.2)', () => {
     store.emit('/repo', ['1.1']);
     expect(told).toHaveLength(3);
     expect(store.calls.map((call) => call[0])).toEqual(['watch', 'mark', 'tree', 'mark', 'tree', 'mark']);
+    // Only core's approve writes done (story 5.2).
+    expect(await store.mark('/repo', '1.2', 'done', { approve: true })).toEqual({ ref: '1.2', status: 'done' });
+    expect(boardColumnOf((await store.tree('/repo')).tickets[1]!)).toBe('done');
   });
 
   it('mark with an expected status that no longer matches is TicketChangedError and changes nothing (story 4.10)', async () => {

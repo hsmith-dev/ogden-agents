@@ -143,13 +143,13 @@ If a check fails, fix it on `main` and release `0.3.0-rc.2` the same way.
 
 As in the 0.2.0 checklist, step 6, with the version `0.3.0` and the tag `v0.3.0`. Then move `next` to it too: `npm dist-tag add ogden-agents@0.3.0 next`. Epic 3, Done when 6, is met once `npx ogden-agents` installs `0.3.0`.
 
-## Epic 10 release (0.4.0) checklist
+## 0.4.0 release checklist (epic 10, epic 4 and permission modes)
 
-`0.4.0` is epic 10: BMad Method optional per project (CAP-19). It goes out after `0.3.0`, in the same two steps, by tag: `0.4.0-rc.1` to `next`, checked live, then `0.4.0` to `latest`. `0.2.0` and `0.3.0` are unchanged. As before, the repository owner does every step by hand.
+`0.4.0` is one release of epic 10 (BMad Method optional per project, CAP-19), epic 4 (planning and the board, CAP-2, CAP-6, CAP-7, CAP-18) and the per-chat permission modes story (user decision 2026-10-02: epic 10 does not release on its own). It goes out after `0.3.0`, in the same two steps, by tag: `0.4.0-rc.1` to `next`, checked live, then `0.4.0` to `latest`. `0.2.0` and `0.3.0` are unchanged. As before, the repository owner does every step by hand.
 
 ### 1. Merge the stack to `main`
 
-After `0.3.0` is released, merge epic 10's story branches to `main` in stack order: 10.1, 10.2, 10.5, 10.3, 10.4, 10.6, 10.7, 10.8, then 10.9. 10.9 sets the version to `0.4.0-rc.1` and adds the 0.4.0 entry to `CHANGELOG.md`. Wait for CI on `main` to pass. That includes the installed-package end-to-end suite on macOS, Windows and Linux, with epic 10's BMad journey and the 0.2.0 upgrade.
+After `0.3.0` is released, merge to `main` in stack order: epic 10's 10.1, 10.2, 10.5, 10.3, 10.4, 10.6, 10.7 and 10.8; then epic 4's 4.1, 4.2, 4.14, 4.3, 4.5, 4.8, 4.4, 4.6, 4.9, 4.7, 4.10, 4.11, 4.12 and 4.13. 4.13 merges 10.9 (#59, `0.4.0-rc.1` and its installed BMad journey) and the permission modes story (#63) into the stack, so merging 4.13 brings both in: merge #59 and #63 first (4.13 then merges cleanly) or close them as merged through 4.13. 4.13 has the 0.4.0 entry in `CHANGELOG.md`. Wait for CI on `main` to pass. That includes the installed-package end-to-end suite on macOS, Windows and Linux with epic 10's BMad journey, epic 4's planning journey (BMad Method set up from a local fixture, never the network), the permission modes journey and the 0.2.0 upgrade, and the Provenance job.
 
 ### 2. Tag the release candidate
 
@@ -157,21 +157,37 @@ As in the 0.2.0 checklist, step 4, with the tag `v0.4.0-rc.1`. Then `npm view og
 
 ### 3. Live checks with Claude Code
 
-CI runs only a fake agent, so these checks need the real one. Run them with `npx ogden-agents@next` and a signed-in Claude Code, in a scratch repo made for it (never one you care about), once on macOS (or Linux) and once on Windows. Write each result under "Live check result" in story 10.9's plan (`_bmad-output/initiative-ogden-agents/epic-bmad-optional-per-project/story-end-to-end-suite-and-release-plan.md`) before the story moves to done.
+CI runs only a fake agent and a local BMad Method fixture, so these checks need the real ones. Run them with `npx ogden-agents@next` and a signed-in Claude Code, in scratch repos made for it (never one you care about), once on macOS (or Linux) and once on Windows. Write each result under "Live check result" in the plan named with each group before its story moves to done: story 4.13's (`_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-end-to-end-suite-and-release-plan.md`) for epic 4 and the permission modes, story 10.9's (`_bmad-output/initiative-ogden-agents/epic-bmad-optional-per-project/story-end-to-end-suite-and-release-plan.md`) for epic 10, and story 10.1's for its check.
 
-1. Epic 10, Done when 1: add the scratch repo (with a `.claude/skills` of its own) as a new project, with Settings > New projects left at Simple chats. Its header shows only Chats, and no BMad Method notice. Start two chats and talk to Claude Code in both at once. Nothing is written into the repo (`git status` is clean), and no `_bmad/` appears. Ask Claude Code what skills it has: only the repo's own and your own, nothing from Ogden Agents.
-2. Welcome's question: in a fresh data folder (set `OGDEN_AGENTS_DATA_DIR` to an empty folder for one run), Welcome asks "Simple chats or BMad Method?" once for the first project, with BMad Method greyed and marked Coming soon; Settings > Welcome never asks it again.
-3. Epic 10, Done when 3: a repo that already has `_bmad/` (a copy of one, or `npx bmad-method install` in a scratch repo) shows the offer on its chats page; **Not now** hides it for good, across a reload and a restart. `git status` in that repo is clean.
-4. Epic 10, Done when 4: start `0.4.0-rc.1` on a copy of a data folder `0.3.0` used (with projects, chats, a caution level and an Always allow rule). It opens on Projects, not Welcome; every project, chat, caution level and rule is there; every project is Simple chats; a project with `_bmad/` offers its features once.
-5. Epic 10, Done when 5: in a simple project, turn on Developer mode (Settings > Appearance); **Chat | Terminal** switches to Claude Code's own terminal and back as in epic 3.
+**Epic 4 (story 4.13's plan):**
 
-Epic 10, Done when 2 needs a piece that ships, so until epic 4 it is covered only in CI, with test-registered pieces: the installed suite's BMad journey turns a piece on and off with a second tab following and checks the `feature_off` refusal, and the dev suite (`tests/e2e/bmad-pieces.spec.ts`) checks the choice is kept across a restart. Done when 6 is CI plus step 4.
+1. BMad Method setup download on a real network, epic 4 Done when 1: in an empty scratch repo added as a project, turn on Planning. Setup downloads the pinned BMad Method from GitHub (the first time on this computer), shows its steps and ends with "Ready to plan."; `_bmad/` and `.claude/skills/` are in the repo. Settings > the project shows BMad Method as current. Then turn Planning off in another project and check that it shows no Plan or Board and has no `_bmad/`.
+2. The tracer, epic 4 Done when 2: on the Plan tab, **Start from an idea** with a one-line idea. Answer Claude Code in the planning session until it writes a brief; the document card's **Open** shows it, and its next step starts the spec session; go on until a spec, then **Turn this spec into tickets**, until Claude Code has written an epic with tickets. Use only the chat and the buttons.
+3. Epic 4 Done when 3: turn Board on (it asks to trust the project's scripts first). The board shows the new tickets. Ask Claude Code in a chat to set one ticket's status in its plan file (for example to in-progress): the card moves within seconds, highlighted. Move another ticket to Ready from its card's menu: its plan file now says `ready-for-dev`.
+4. Epic 4 Done when 4: with the server running, install another BMad Method module into the repo (for example with `npx bmad-method install`): it appears on the Plan tab, marked New, and one of its actions starts.
+5. Epic 4 Done when 5: a copy of a repo with an older or plain upstream BMad Method install opens with the reduced-mode notice on Plan (and on Board if its tickets can't be read); **Upgrade this project** ends with the notices gone.
+
+**Permission modes (story 4.13's plan), with real Claude Code:**
+
+6. A chat starts in **Ask**. Switch it to **Auto**: Claude Code edits an ordinary file without a card, and asking it to edit a protected path (for example `.git/config` or a file under `.claude/`) still shows a card.
+7. With Developer mode off, **Skip all** is not offered. Turn Developer mode on (Settings > Appearance): Skip all is offered behind a red warning; once on, the red banner stays in view while the conversation scrolls and at phone width, and Claude Code runs a command without a card. **Back to Ask** in the banner works. Turn Developer mode off: the chat is back in Ask.
+
+**Epic 10 (story 10.9's plan; story 10.1's for check 9):**
+
+8. Epic 10, Done when 1: add a scratch repo (with a `.claude/skills` of its own) as a new project, with Settings > New projects left at Simple chats. Its header shows only Chats, and no BMad Method notice. Start two chats and talk to Claude Code in both at once. Nothing is written into the repo (`git status` is clean), and no `_bmad/` appears. Ask Claude Code what skills it has: only the repo's own and your own, nothing from Ogden Agents.
+9. Story 10.1: in a project's settings, turn a BMad Method feature on and off with a second tab open on the same page: the second tab follows at once. Restart the server: the choice is kept.
+10. Welcome's question: in a fresh data folder (set `OGDEN_AGENTS_DATA_DIR` to an empty folder for one run), Welcome asks "Simple chats or BMad Method?" once for the first project, with BMad Method available; Settings > Welcome never asks it again.
+11. Epic 10, Done when 3: a repo that already has `_bmad/` shows the offer on its chats page; **Not now** hides it for good, across a reload and a restart. `git status` in that repo is clean.
+12. Epic 10, Done when 4: start `0.4.0-rc.1` on a copy of a data folder `0.3.0` used (with projects, chats, a caution level and an Always allow rule). It opens on Projects, not Welcome; every project, chat, caution level and rule is there; every project is Simple chats and every chat is in Ask; a project with `_bmad/` offers its features once.
+13. Epic 10, Done when 5: in a simple project, with Developer mode on, **Chat | Terminal** switches to Claude Code's own terminal and back as in epic 3.
+
+Epic 10, Done when 2 and 6 and epic 4, Done when 6 are CI (the installed suite on three OSes) plus these checks.
 
 If a check fails, fix it on `main` and release `0.4.0-rc.2` the same way.
 
 ### 4. Release 0.4.0
 
-As in the 0.2.0 checklist, step 6, with the version `0.4.0` and the tag `v0.4.0`. Then move `next` to it too: `npm dist-tag add ogden-agents@0.4.0 next`.
+As in the 0.2.0 checklist, step 6, with the version `0.4.0` and the tag `v0.4.0`. Then move `next` to it too: `npm dist-tag add ogden-agents@0.4.0 next`. Epic 4, Done when 6, is met once `npx ogden-agents` installs `0.4.0`.
 
 ## Later releases
 

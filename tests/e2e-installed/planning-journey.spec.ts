@@ -15,7 +15,7 @@
  * 2. Set up from the UI: Planning on in an empty repo sets BMad Method up with
  *    its steps, then "Ready to plan."; `_bmad/` and the skills are written.
  * 3. Trust: turning Board on asks to run the project's scripts; Cancel leaves
- *    it off, Allow turns it on (with the trust gate removed, this step fails).
+ *    it off, Allow turns it on.
  * 4. Plan: Start from an idea opens a planning session whose first message
  *    invokes the entry action with the idea.
  * 5. Document cards: the brief the agent writes shows a card with Open and
@@ -27,8 +27,10 @@
  * 7. Status from the board: Move to In progress lands in the plan file; a Done
  *    ticket moves out only after "Reopen this ticket?".
  * 8. A module copied in while the server runs shows on Plan, with New.
- * 9. Reduced mode: a plain upstream repo's Plan shows the notice, and
- *    Upgrade this project ends with it gone.
+ * 9. Reduced mode: a plain upstream repo with Board on but not trusted is
+ *    refused (409 `scripts_not_trusted`) and its Board asks for the trust
+ *    (with the trust gate removed, this step fails); trusted, its Plan shows
+ *    the notice, and Upgrade this project ends with it gone.
  * 10. Quit: the BMad-off repo is unchanged.
  *
  * Skipped outside CI when uv or its managed Python 3.12 is missing (CI
@@ -298,10 +300,16 @@ test('from BMad off to a ticketed epic on a live board, on the installed package
     await expect(page.locator('[data-skill="extra-helper"]').getByTestId('skill-new')).toHaveText('New');
   });
 
-  await test.step('reduced mode: a plain upstream repo shows the notice, and Upgrade this project ends with it gone', async () => {
+  await test.step('trust and reduced mode: an untrusted Board is refused and asks; a plain upstream repo shows the notice, and Upgrade ends with it gone', async () => {
     const plainId = await addProject(page, plain.path);
+    expect((await api(page, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId: plainId }), { bmadPieces: ['planning', 'board'] })).ok).toBe(true);
+    // Not trusted yet: the server refuses to run the project's scripts, and the Board asks (with the trust gate removed, this fails).
+    const refused = await api(page, 'GET', apiPath(API_ROUTES.workspaceTickets, { wsId: plainId }));
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { error: { code: string } }).error.code).toBe('scripts_not_trusted');
+    await page.goto(`${url}/w/${plainId}/board`);
+    await expect(page.getByTestId('script-trust-prompt')).toContainText(TRUST_TITLE);
     expect((await api(page, 'PUT', apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId: plainId }))).ok).toBe(true);
-    expect((await api(page, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId: plainId }), { bmadPieces: ['planning'] })).ok).toBe(true);
     await page.goto(`${url}/w/${plainId}/plan`);
     const notice = page.getByTestId('reduced-mode-notice');
     await expect(notice).toContainText(PLAIN_LABELS_TEXT);

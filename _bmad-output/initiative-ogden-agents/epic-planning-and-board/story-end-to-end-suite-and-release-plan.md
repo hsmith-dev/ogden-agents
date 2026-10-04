@@ -98,6 +98,7 @@ context:
 - Release: version stays `0.4.0-rc.1` (from 10.9); CHANGELOG has one 0.4.0 entry (epic 10, epic 4, permission modes; the bmad-loop mention dropped, 4.12 removed it); RELEASING's "0.4.0 release checklist" lists the merge order (#59 and #63 come in through 4.13) and 13 live checks on `npx ogden-agents@next`.
 - Proofs (2026-10-03, macOS, local, not committed; each file restored with `git checkout` and the tarball repacked): (a) AD-22 guard, `requireBmadFeature`'s check made a no-op: `--project bmad --project planning` fails at `bmad-journey.spec.ts:297` (expected 409 `feature_off` from the guarded probe, received 200). (b) Trust gate, `requireScriptsTrusted`'s check made a no-op: `--project planning` fails at `planning-journey.spec.ts:309` (expected `scripts_not_trusted`, received `reduced_mode`: the board route ran on). (c) The `ticket.changed` append in `core/src/ticket-watcher.ts` removed: `--project planning` fails at the live move (card 1.2 stays `draft`, expected `ready`).
 - Local runs (macOS): `pnpm typecheck`; `pnpm test` 137 files, 1781 passed, 4 skipped; `pnpm e2e` 103 passed; `pnpm run pack && pnpm smoke` OK; `pnpm e2e:installed` 41 passed (45 s); provenance both bases.
+- CI on #80: run 37181082438 (`dc14c14`) green on every job, the installed suite on macOS, Windows and Linux included (earlier runs failed on Windows only, at the two modes-journey test races W1 and W2).
 
 ## Plan Change Log
 

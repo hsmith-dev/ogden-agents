@@ -9,15 +9,21 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createClaudeCodeAgent } from '@ogden-agents/adapters';
-import type { AgentPort, RegisteredAgent } from '@ogden-agents/core';
+import { createMemoryAgentSetup } from '@ogden-agents/adapters';
+import type { AgentDescriptor, AgentPort } from '@ogden-agents/core';
+import type { AgentWiring } from '../src/agent-wiring.js';
 import { API_ROUTES, ApiErrorBody, apiPath, ChatAgentsResponse, SessionResponse, SessionsResponse, WorkspaceResponse, type SessionId } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
-import { signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
+import { signIn, startTestServer, testDescriptor, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
 const FAKE_AGENT = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-acp-agent.mjs');
 
-/** The fake ACP agent as a second agent: its own name and modes (Ask and Skip all), no terminal. */
-function secondAgent(): RegisteredAgent {
+/**
+ * The fake ACP agent as a second agent: its own name and modes (Ask and Skip
+ * all), no terminal; `setup` its setup port (none: always ready), and
+ * `descriptor` changes to its descriptor.
+ */
+function secondAgent(options: { setup?: AgentWiring['setup']; descriptor?: Partial<AgentDescriptor> } = {}): AgentWiring {
   const base = createClaudeCodeAgent({ adapterPath: FAKE_AGENT, claudeExecutable: null });
   const named = <T extends { env: Readonly<Record<string, string>> }>(input: T): T => ({ ...input, env: { ...input.env, FAKE_ACP_AGENT_NAME: 'fake-agent' } });
   const agent: AgentPort = {
@@ -28,7 +34,7 @@ function secondAgent(): RegisteredAgent {
     reopenSession: (input) => base.reopenSession(named(input)),
     listAuthMethods: (input) => base.listAuthMethods(input),
   };
-  return { agentId: 'fake-agent', agent };
+  return { descriptor: testDescriptor('fake-agent', agent, options.descriptor), agent, setup: options.setup };
 }
 
 const folders: string[] = [];
@@ -54,8 +60,8 @@ function request(server: TestServer, tab: SignedIn, method: string, path: string
   });
 }
 
-async function setUp() {
-  const server = await startTestServer({ extraAgents: [secondAgent()] });
+async function setUp(second: AgentWiring = secondAgent(), extra: Parameters<typeof startTestServer>[0] = {}) {
+  const server = await startTestServer({ extraAgents: [second], ...extra });
   servers.push(server);
   const tab = await signIn(server);
   const repo = temp('ogden-agents-repo-');
@@ -90,8 +96,36 @@ describe('two agents side by side in one project (epic 6, entry 2)', () => {
     expect(response.status).toBe(200);
     expect(ChatAgentsResponse.parse(await response.json())).toEqual({
       agents: [
-        { agentId: 'claude-code', displayName: 'Claude Code', permissionModes: ['ask', 'auto', 'skip_all'] },
-        { agentId: 'fake-agent', displayName: 'Fake Agent', permissionModes: ['ask', 'skip_all'] },
+        {
+          agentId: 'claude-code',
+          displayName: 'Claude Code',
+          provider: 'Anthropic',
+          signInMethods: [
+            { kind: 'subscription', label: 'Sign in with your Claude account' },
+            { kind: 'api_key', label: 'Use an Anthropic API key' },
+          ],
+          apiKeyFormat: 'Starts with sk-ant-',
+          install: 'installed',
+          auth: 'signed_in',
+          terminalResume: true,
+          needsProjectTrust: false,
+          permissionModes: ['ask', 'auto', 'skip_all'],
+        },
+        {
+          agentId: 'fake-agent',
+          displayName: 'Fake Agent',
+          provider: 'Fake Provider',
+          signInMethods: [
+            { kind: 'subscription', label: 'Sign in with your account' },
+            { kind: 'api_key', label: 'Use an API key' },
+          ],
+          apiKeyFormat: 'Starts with fake-',
+          install: 'installed',
+          auth: 'signed_in',
+          terminalResume: false,
+          needsProjectTrust: false,
+          permissionModes: ['ask', 'skip_all'],
+        },
       ],
       defaultAgentId: 'claude-code',
     });
@@ -153,5 +187,66 @@ describe('two agents side by side in one project (epic 6, entry 2)', () => {
     const got = SessionResponse.parse(await (await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceSession, { wsId, sesId: old.id }))).json());
     expect(got.session.agentId).toBe('claude-code');
     expect(await say(server, tab, wsId, old.id, 'whoami')).toBe('agent=default');
+  });
+});
+
+describe('a new chat only with an agent that can start it (epic 6, 6.3)', () => {
+  it('refuses a chat with an agent that is not installed, says why and what fixes it, and creates nothing', async () => {
+    const { server, wsId, newChat, tab } = await setUp(secondAgent({ setup: createMemoryAgentSetup({ agentId: 'fake-agent', displayName: 'Fake Agent', installed: false }) }));
+    const refused = await newChat({ agentId: 'fake-agent' });
+    expect(refused.status).toBe(409);
+    expect(ApiErrorBody.parse(await refused.json()).error).toEqual({
+      code: 'agent_not_installed',
+      message: "Fake Agent isn't installed. Install it in Settings → Agents.",
+      details: { agentId: 'fake-agent', action: 'install' },
+    });
+    expect(server.core.entities.listSessions(wsId as never)).toHaveLength(0);
+    const listed = ChatAgentsResponse.parse(await (await request(server, tab, 'GET', API_ROUTES.chatAgents)).json());
+    expect(listed.agents[1]).toMatchObject({ install: 'not_installed', unavailable: { code: 'agent_not_installed', action: 'install' } });
+  });
+
+  it('refuses a chat with an agent that is signed out, and starts one once it is signed in', async () => {
+    const setup = createMemoryAgentSetup({ agentId: 'fake-agent', displayName: 'Fake Agent', installed: true, auth: 'needs_sign_in' });
+    const { server, tab, wsId, newChat } = await setUp(secondAgent({ setup }), { subscriptionMaxAgeMs: 0 });
+    const refused = await newChat({ agentId: 'fake-agent' });
+    expect(refused.status).toBe(409);
+    expect(ApiErrorBody.parse(await refused.json()).error).toEqual({
+      code: 'agent_signed_out',
+      message: "Fake Agent isn't signed in. Sign in or add an API key in Settings → Agents.",
+      details: { agentId: 'fake-agent', action: 'sign_in' },
+    });
+    expect(server.core.entities.listSessions(wsId as never)).toHaveLength(0);
+    expect((await request(server, tab, 'POST', apiPath(API_ROUTES.agentSignIn, { agentId: 'fake-agent' }))).status).toBe(200);
+    setup.complete();
+    await waitFor(async () => (await newChat({ agentId: 'fake-agent' })).status === 201, 'a chat once signed in', 5_000);
+  });
+
+  it('refuses a chat with an agent that needs a trusted project, in a project nobody trusted', async () => {
+    const { server, wsId, newChat } = await setUp(secondAgent({ descriptor: { needsProjectTrust: true } }));
+    const refused = await newChat({ agentId: 'fake-agent' });
+    expect(refused.status).toBe(409);
+    expect(ApiErrorBody.parse(await refused.json()).error).toMatchObject({ code: 'project_not_trusted', details: { agentId: 'fake-agent', action: 'trust_project' } });
+    expect(server.core.entities.listSessions(wsId as never)).toHaveLength(0);
+  });
+
+  it('gives an agent with a home variable its own folder in the data folder, and no other agent its key', async () => {
+    const { server, tab, wsId, chatWith } = await setUp(secondAgent({ descriptor: { homeEnv: 'FAKE_AGENT_HOME' } }), {
+      extraAgentEnv: { ANTHROPIC_API_KEY: 'sk-ant-inherited-key-for-claude-only-0000', FAKE_AGENT_KEY: 'fake-inherited-key-0000' },
+    });
+    const fake = await chatWith('fake-agent');
+    const env = await say(server, tab, wsId, fake.id, 'echo-env');
+    expect(env).toContain(`FAKE_AGENT_HOME=${join(server.dataDir, 'agents', 'fake-agent-home')}`);
+    expect(existsSync(join(server.dataDir, 'agents', 'fake-agent-home'))).toBe(true);
+    // Every registered agent's key variable is kept out (derived from the descriptors), its own included while signed in.
+    expect(env).not.toMatch(/^(ANTHROPIC_API_KEY|FAKE_AGENT_KEY)=/m);
+    const claude = await chatWith('claude-code');
+    expect(await say(server, tab, wsId, claude.id, 'echo-env')).not.toMatch(/^(FAKE_AGENT_HOME|FAKE_AGENT_KEY|ANTHROPIC_API_KEY)=/m);
+  });
+
+  it("refuses a project's default agent until entry 6 keeps it (501), storing nothing", async () => {
+    const { server, tab, wsId } = await setUp();
+    const refused = await request(server, tab, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { defaultAgentId: 'fake-agent' });
+    expect(refused.status).toBe(501);
+    expect(ApiErrorBody.parse(await refused.json()).error.code).toBe('not_implemented');
   });
 });

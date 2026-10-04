@@ -76,10 +76,17 @@ export const FAKE_AGENT = join(ROOT, 'tests', 'fixtures', 'fake-acp-agent.mjs');
  * `extra` names a catalog, so turning Planning or Board on never runs uv or
  * reaches the network.
  */
-export async function startServer(dataDir: string, port = 0, { firstRun = false, ...extra }: StartOptions & { firstRun?: boolean } = {}): Promise<RunningServer> {
+export async function startServer(
+  dataDir: string,
+  port = 0,
+  { firstRun = false, extraAgentEnv, ...extra }: StartOptions & { firstRun?: boolean } = {},
+): Promise<RunningServer> {
   const { start, createLogger, createMemorySecretStore } = await serverModule();
   const bmadCatalog = extra.bmadCatalog ?? (await stubSetupCatalog(extra.bmadSource === undefined ? {} : { source: extra.bmadSource }));
   if (!firstRun) writeFileSync(join(dataDir, 'onboarding.json'), `${JSON.stringify({ welcomeCompleted: true })}\n`, { mode: 0o600 });
+  // Claude Code (the fake) is signed in unless the test says otherwise (6.3: a signed-out agent refuses a new chat).
+  const loginState = join(dataDir, 'test-login-state.json');
+  writeFileSync(loginState, `${JSON.stringify({ loggedIn: true })}\n`);
   return start({
     port,
     open: false,
@@ -89,6 +96,7 @@ export async function startServer(dataDir: string, port = 0, { firstRun = false,
     claudeAdapterPath: FAKE_AGENT,
     secrets: createMemorySecretStore(),
     verifyApiKey: async () => 'ok',
+    extraAgentEnv: { FAKE_LOGIN_STATE: loginState, ...extraAgentEnv },
     ...extra,
     bmadCatalog,
     launch: true,
@@ -166,7 +174,17 @@ export async function fakeSecondAgent(): Promise<NonNullable<NonNullable<StartOp
   const base = createClaudeCodeAgent({ adapterPath: FAKE_AGENT, claudeExecutable: null });
   const named = <T extends { env: Readonly<Record<string, string>> }>(input: T): T => ({ ...input, env: { ...input.env, FAKE_ACP_AGENT_NAME: SECOND_AGENT.agentId } });
   return {
-    agentId: SECOND_AGENT.agentId,
+    // What the fake agent is (6.3): agent-neutral data, as a later agent's adapter exports it.
+    descriptor: {
+      agentId: SECOND_AGENT.agentId,
+      displayName: SECOND_AGENT.displayName,
+      provider: 'Fake Provider',
+      install: { kind: 'npm', package: '@fake/agent', version: '1.0.0' },
+      signInMethods: [{ id: 'fake-login', kind: 'subscription', label: 'Sign in with your account' }],
+      permissionModes: { ask: 'default', skip_all: 'bypassPermissions' },
+      needsProjectTrust: false,
+      skillsFolder: '.fake/skills',
+    },
     agent: {
       displayName: SECOND_AGENT.displayName,
       permissionModes: ['ask', 'skip_all'],

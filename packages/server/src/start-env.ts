@@ -4,6 +4,9 @@
  * precedence rule reads (story 9.2). The test-only switches moved to
  * `test-hooks.ts` (story 10.8) and are re-exported here.
  */
+import { CLAUDE_CODE_DESCRIPTOR } from '@ogden-agents/adapters';
+import { agentEnvKeys } from '@ogden-agents/core';
+
 // The test-only switches live with every other test hook; re-exported so imports stay the same (story 10.8).
 export { CHECK_IN_MS_ENV, checkInDelayFromEnv, SECRET_STORE_ENV, testSecretStore } from './test-hooks.js';
 
@@ -19,25 +22,28 @@ const AGENT_ENV_ALLOWED = ['PATH', 'HOME', 'USERPROFILE', 'USER', 'USERNAME', 'L
 /** The same on Windows only, where a process can't start without them. */
 const AGENT_ENV_ALLOWED_WINDOWS = ['SystemRoot', 'ComSpec', 'PATHEXT'];
 /**
- * Agent credentials the user may set in this server's environment (AD-16).
- * They are not in the agent allowlist: core's precedence rule decides (story
- * 9.2), exactly as for a saved key, which comes first. A chat process gets
- * one only while the subscription is known to be signed out; sign-in and
- * `auth status` never do ({@link withoutAgentKeys}).
+ * Agent credentials the user may set in this server's environment (AD-16):
+ * every API key variable of each registered agent, from its descriptor
+ * (6.3; `agentEnvKeys`). They are not in the agent allowlist: core's
+ * precedence rule decides (story 9.2), exactly as for a saved key, which
+ * comes first. A chat process gets its own agent's only while the
+ * subscription is known to be signed out; sign-in and `auth status` never do
+ * ({@link withoutAgentKeys}). This is the shipped agents' list; `start()`
+ * derives its own from the agents it registers.
  */
-export const AGENT_ENV_KEYS = ['ANTHROPIC_API_KEY'];
+export const AGENT_ENV_KEYS: readonly string[] = agentEnvKeys([CLAUDE_CODE_DESCRIPTOR]);
 
-/** Only the {@link AGENT_ENV_KEYS} of `env`, whatever their case, for core's precedence rule. Never logged. */
-export function agentKeysOf(env: Readonly<Record<string, string | undefined>>): Record<string, string> {
-  const keys = new Set(AGENT_ENV_KEYS.map((name) => name.toUpperCase()));
+/** Only the `keys` (default {@link AGENT_ENV_KEYS}) of `env`, whatever their case, for core's precedence rule. Never logged. */
+export function agentKeysOf(env: Readonly<Record<string, string | undefined>>, names: readonly string[] = AGENT_ENV_KEYS): Record<string, string> {
+  const keys = new Set(names.map((name) => name.toUpperCase()));
   const out: Record<string, string> = {};
   for (const [name, value] of Object.entries(env)) if (value !== undefined && keys.has(name.toUpperCase())) out[name] = value;
   return out;
 }
 
-/** `env` without any {@link AGENT_ENV_KEYS}, whatever their case (Windows names are case-insensitive). */
-export function withoutAgentKeys(env: Readonly<Record<string, string>>): Record<string, string> {
-  const keys = new Set(AGENT_ENV_KEYS.map((name) => name.toUpperCase()));
+/** `env` without any of `keys` (default {@link AGENT_ENV_KEYS}), whatever their case (Windows names are case-insensitive). */
+export function withoutAgentKeys(env: Readonly<Record<string, string>>, names: readonly string[] = AGENT_ENV_KEYS): Record<string, string> {
+  const keys = new Set(names.map((name) => name.toUpperCase()));
   return Object.fromEntries(Object.entries(env).filter(([name]) => !keys.has(name.toUpperCase())));
 }
 

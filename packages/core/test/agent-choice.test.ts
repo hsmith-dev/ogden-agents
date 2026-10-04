@@ -18,7 +18,7 @@ import {
   type AgentSession,
   type Core,
 } from '../src/index.js';
-import { openTestCore, tempDir } from './helpers.js';
+import { openTestCore, registered, tempDir } from './helpers.js';
 
 /** An agent whose replies say who answered, and whose prompts end only when the test releases them. */
 function namedAgent(name: string, declares?: readonly PermissionMode[]) {
@@ -64,8 +64,8 @@ function setUp(core: Core = openTestCore()) {
   const second = namedAgent('Second Agent', ['ask', 'skip_all']);
   const agents = createAgentRegistry(
     [
-      { agentId: 'first-agent', agent: claude.port },
-      { agentId: 'second-agent', agent: second.port },
+      registered('first-agent', claude.port),
+      registered('second-agent', second.port),
     ],
     { legacyAgentId: 'first-agent' },
   );
@@ -96,8 +96,8 @@ describe('the agent registry', () => {
   it('lists its agents in order, defaults to the first, and refuses a wiring mistake', () => {
     const port = namedAgent('A').port;
     const registry = createAgentRegistry([
-      { agentId: 'a-agent', agent: port },
-      { agentId: 'b-agent', agent: port },
+      registered('a-agent', port),
+      registered('b-agent', port),
     ]);
     expect(registry.agentIds).toEqual(['a-agent', 'b-agent']);
     expect(registry.defaultAgentId).toBe('a-agent');
@@ -105,17 +105,17 @@ describe('the agent registry', () => {
     expect(registry.get('b-agent')).toBe(port);
     expect(registry.get('c-agent')).toBeUndefined();
     expect(() => createAgentRegistry([])).toThrow(/no agent/);
-    expect(() => createAgentRegistry([{ agentId: 'Not An Id', agent: port }])).toThrow(/not an agent id/);
-    expect(() => createAgentRegistry([{ agentId: 'a-agent', agent: port }, { agentId: 'a-agent', agent: port }])).toThrow(/twice/);
-    expect(() => createAgentRegistry([{ agentId: 'a-agent', agent: port }], { defaultAgentId: 'b-agent' })).toThrow(/not registered/);
+    expect(() => createAgentRegistry([registered('Not An Id', port)])).toThrow(/not an agent id/);
+    expect(() => createAgentRegistry([registered('a-agent', port), registered('a-agent', port)])).toThrow(/twice/);
+    expect(() => createAgentRegistry([registered('a-agent', port)], { defaultAgentId: 'b-agent' })).toThrow(/not registered/);
   });
 });
 
 describe('a chat has the agent it was started with (E6-R1)', () => {
-  it('stores the agent picked, in the row and in session.created; none picked is the default', () => {
+  it('stores the agent picked, in the row and in session.created; none picked is the default', async () => {
     const { core, chat, workspace } = setUp();
-    const picked = chat.createChatSession(workspace.id, { agentId: 'second-agent' });
-    const plain = chat.createChatSession(workspace.id);
+    const picked = await chat.createChatSession(workspace.id, { agentId: 'second-agent' });
+    const plain = await chat.createChatSession(workspace.id);
     expect(picked.agentId).toBe('second-agent');
     expect(plain.agentId).toBe('first-agent');
     expect(core.entities.getSession(picked.id)?.agentId).toBe('second-agent');
@@ -125,9 +125,9 @@ describe('a chat has the agent it was started with (E6-R1)', () => {
     expect(chat.listSessions(workspace.id).map((session) => session.agentId)).toEqual(['second-agent', 'first-agent']);
   });
 
-  it('refuses an agent that is not registered, creating nothing', () => {
+  it('refuses an agent that is not registered, creating nothing', async () => {
     const { core, chat, workspace } = setUp();
-    expect(() => chat.createChatSession(workspace.id, { agentId: 'missing-agent' })).toThrow(UnknownAgentError);
+    await expect(chat.createChatSession(workspace.id, { agentId: "missing-agent" })).rejects.toThrow(UnknownAgentError);
     expect(chat.listSessions(workspace.id)).toEqual([]);
     expect(core.events.readAfter(0).some((event) => event.type === 'session.created')).toBe(false);
   });
@@ -159,8 +159,8 @@ describe('a chat has the agent it was started with (E6-R1)', () => {
 
   it('two chats with two agents in one project work at once, each with its own agent and environment', async () => {
     const { core, chat, workspace, claude, second } = setUp();
-    const first = chat.createChatSession(workspace.id, { agentId: 'first-agent' });
-    const other = chat.createChatSession(workspace.id, { agentId: 'second-agent' });
+    const first = await chat.createChatSession(workspace.id, { agentId: 'first-agent' });
+    const other = await chat.createChatSession(workspace.id, { agentId: 'second-agent' });
     chat.sendMessage(workspace.id, first.id, 'one');
     chat.sendMessage(workspace.id, other.id, 'two');
     await until(() => claude.pending() === 1 && second.pending() === 1, 'both agents to be answering');
@@ -180,22 +180,21 @@ describe('a chat has the agent it was started with (E6-R1)', () => {
 });
 
 describe('each agent declares its permission modes (E6-R2)', () => {
-  it('lists the agents with the modes they declare, Ask always among them', () => {
+  it('lists the agents with the modes they declare, Ask always among them', async () => {
     const { chat } = setUp();
-    expect(chat.chatAgents()).toEqual({
-      agents: [
-        { agentId: 'first-agent', displayName: 'First Agent', permissionModes: ['ask', 'auto', 'skip_all'] },
-        { agentId: 'second-agent', displayName: 'Second Agent', permissionModes: ['ask', 'skip_all'] },
-      ],
-      defaultAgentId: 'first-agent',
-    });
+    const listed = await chat.chatAgents();
+    expect(listed.defaultAgentId).toBe('first-agent');
+    expect(listed.agents.map(({ agentId, displayName, permissionModes }) => ({ agentId, displayName, permissionModes }))).toEqual([
+      { agentId: 'first-agent', displayName: 'First Agent', permissionModes: ['ask', 'auto', 'skip_all'] },
+      { agentId: 'second-agent', displayName: 'Second Agent', permissionModes: ['ask', 'skip_all'] },
+    ]);
   });
 
-  it("offers a chat only its own agent's modes, and refuses the others", () => {
+  it("offers a chat only its own agent's modes, and refuses the others", async () => {
     const { core, chat, workspace } = setUp();
     core.installSettings.setDeveloperMode(true);
-    const first = chat.createChatSession(workspace.id, { agentId: 'first-agent' });
-    const other = chat.createChatSession(workspace.id, { agentId: 'second-agent' });
+    const first = await chat.createChatSession(workspace.id, { agentId: 'first-agent' });
+    const other = await chat.createChatSession(workspace.id, { agentId: 'second-agent' });
     expect(chat.permissionModeOptions(workspace.id, first.id).every((option) => option.available)).toBe(true);
     expect(chat.permissionModeOptions(workspace.id, other.id)).toEqual([
       { mode: 'ask', available: true },

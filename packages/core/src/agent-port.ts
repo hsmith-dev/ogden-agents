@@ -9,6 +9,7 @@
  * events and the session's normalized state (AD-4).
  */
 import { AgentId as AgentIdSchema, type AgentId, type PermissionMode } from '@ogden-agents/shared';
+import { agentDescriptorProblems, declaredModes, type AgentDescriptor } from './agent-descriptor.js';
 import { CoreError } from './errors.js';
 
 /** One file change a tool call reports (secrets masked). `oldText` is `null` for a new file. */
@@ -310,9 +311,12 @@ export class AgentError extends CoreError {
   }
 }
 
-/** One agent a chat can be started with, as server wiring registers it (epic 6). */
+/**
+ * One agent a chat can be started with, as server wiring registers it (epic
+ * 6): what it is (its descriptor, 6.3) and its chat port.
+ */
 export interface RegisteredAgent {
-  agentId: AgentId;
+  descriptor: AgentDescriptor;
   agent: AgentPort;
 }
 
@@ -326,6 +330,8 @@ export interface AgentRegistry {
   readonly agentIds: readonly AgentId[];
   /** The agent registered under `agentId`, if any. */
   get(agentId: AgentId): AgentPort | undefined;
+  /** What the agent registered under `agentId` is (6.3), if any. */
+  describe(agentId: AgentId): AgentDescriptor | undefined;
   /** The agent a new chat gets when none is picked. */
   readonly defaultAgentId: AgentId;
   /** The agent the sessions stored before agents could be chosen were started with (they have no `agentId`). */
@@ -334,20 +340,30 @@ export interface AgentRegistry {
 
 /**
  * A registry of `agents`, in order. `defaultAgentId` and `legacyAgentId`
- * default to the first agent; the default must be registered. Throws on an
- * empty list, an id that isn't kebab-case, or an id given twice (a wiring bug).
+ * default to the first agent; the default must be registered. Throws (a
+ * wiring bug) on an empty list, an id given twice, a descriptor with a
+ * problem ({@link agentDescriptorProblems}), or a port whose product name or
+ * declared permission modes differ from its descriptor's.
  */
 export function createAgentRegistry(
   agents: readonly RegisteredAgent[],
   options: { defaultAgentId?: AgentId | undefined; legacyAgentId?: AgentId | undefined } = {},
 ): AgentRegistry {
-  const byId = new Map<AgentId, AgentPort>();
-  for (const { agentId, agent } of agents) {
+  const byId = new Map<AgentId, RegisteredAgent>();
+  for (const registered of agents) {
+    const { descriptor, agent } = registered;
+    const agentId = descriptor.agentId;
     if (!AgentIdSchema.safeParse(agentId).success) throw new Error(`agent registry: ${JSON.stringify(agentId)} is not an agent id`);
     if (byId.has(agentId)) throw new Error(`agent registry: ${agentId} is registered twice`);
-    byId.set(agentId, agent);
+    const problems = agentDescriptorProblems(descriptor);
+    if (problems.length > 0) throw new Error(`agent registry: ${problems.join('; ')}`);
+    if (agent.displayName !== descriptor.displayName) throw new Error(`agent registry: ${agentId}'s port is named ${JSON.stringify(agent.displayName)}, its descriptor ${JSON.stringify(descriptor.displayName)}`);
+    const portModes = [...new Set(agent.permissionModes ?? ['ask'])].sort().join(',');
+    const described = declaredModes(descriptor).sort().join(',');
+    if (portModes !== described) throw new Error(`agent registry: ${agentId}'s port declares the modes ${portModes}, its descriptor ${described}`);
+    byId.set(agentId, registered);
   }
-  const first = agents[0]?.agentId;
+  const first = agents[0]?.descriptor.agentId;
   if (first === undefined) throw new Error('agent registry: no agent registered');
   const defaultAgentId = options.defaultAgentId ?? first;
   if (!byId.has(defaultAgentId)) throw new Error(`agent registry: the default agent ${defaultAgentId} is not registered`);
@@ -355,7 +371,8 @@ export function createAgentRegistry(
   if (!AgentIdSchema.safeParse(legacyAgentId).success) throw new Error(`agent registry: ${JSON.stringify(legacyAgentId)} is not an agent id`);
   return {
     agentIds: [...byId.keys()],
-    get: (agentId) => byId.get(agentId),
+    get: (agentId) => byId.get(agentId)?.agent,
+    describe: (agentId) => byId.get(agentId)?.descriptor,
     defaultAgentId,
     legacyAgentId,
   };

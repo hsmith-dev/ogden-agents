@@ -14,10 +14,20 @@ import { buildSidebar } from '../src/shell/sidebar-model';
 
 afterEach(cleanup);
 
+/** What every listed agent has besides its id, name and modes (6.3). */
+const READY = {
+  provider: 'Test Provider',
+  signInMethods: [{ kind: 'subscription' as const, label: 'Sign in with your account' }],
+  install: 'installed' as const,
+  auth: 'signed_in' as const,
+  terminalResume: false,
+  needsProjectTrust: false,
+};
+
 const LIST: ChatAgentsResponse = {
   agents: [
-    { agentId: 'claude-code', displayName: 'Claude Code', permissionModes: ['ask', 'auto', 'skip_all'] },
-    { agentId: 'fake-agent', displayName: 'Fake Agent', permissionModes: ['ask', 'skip_all'] },
+    { ...READY, agentId: 'claude-code', displayName: 'Claude Code', permissionModes: ['ask', 'auto', 'skip_all'] },
+    { ...READY, agentId: 'fake-agent', displayName: 'Fake Agent', permissionModes: ['ask', 'skip_all'] },
   ],
   defaultAgentId: 'claude-code',
 };

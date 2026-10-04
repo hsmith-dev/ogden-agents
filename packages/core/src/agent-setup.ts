@@ -43,7 +43,7 @@ import type { SecretStorePort } from './secret-store-port.js';
 import { PROGRESS_INTERVAL_MS } from './toolchain.js';
 
 // Not `Flight`, `newFlight` or `SavedKey`: they stay inside this use-case.
-export { AgentSetupError, LAST_KNOWN_AUTH_MAX_AGE_MS, SignInNotPendingError, apiKeySecretName, type AgentSetup, type AgentSetupOptions } from './agent-setup-types.js';
+export { AgentSetupError, LAST_KNOWN_AUTH_MAX_AGE_MS, SignInNotPendingError, apiKeySecretName, type AgentReadiness, type AgentSetup, type AgentSetupOptions } from './agent-setup-types.js';
 
 /** The subscription state a port reports, or the one derived from its status (see `AgentPortStatus`). */
 function subscriptionOf(status: AgentPortStatus): AgentSubscriptionState {
@@ -256,7 +256,20 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
   };
 
   /** One agent's setup as `list` shows it. */
+  /** Each agent's last status as {@link statusFor} read it, and when (6.3: a new chat's readiness). */
+  const lastStatus = new Map<string, { status: AgentSetupStatus; at: number; unread: boolean }>();
+  /** Agents whose port's status threw at the last read (shown as not installed, but nobody could tell). */
+  const unreadable = new Set<string>();
+
+  /** {@link readStatus}, kept as the agent's last status. */
   const statusFor = async (port: AgentSetupPort): Promise<AgentSetupStatus> => {
+    unreadable.delete(port.agentId);
+    const status = await readStatus(port);
+    lastStatus.set(port.agentId, { status, at: now(), unread: unreadable.has(port.agentId) });
+    return status;
+  };
+
+  const readStatus = async (port: AgentSetupPort): Promise<AgentSetupStatus> => {
     // A key write that failed (timed out) may have completed since: show what the store holds.
     if (resync.has(port.agentId)) await syncFromStore(port);
     let status: AgentSetupStatus;
@@ -267,6 +280,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       status = shown(reported);
     } catch (error) {
       report(port.agentId, 'status', error);
+      unreadable.add(port.agentId);
       setSubscription(port.agentId, 'unknown', startedAt);
       status = {
         agentId: port.agentId,
@@ -384,6 +398,24 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
 
     async list() {
       return Promise.all(ports.map(statusFor));
+    },
+
+    async readiness(agentId, maxAgeMs) {
+      const port = ports.find((candidate) => candidate.agentId === agentId);
+      // An agent with nothing to install or sign into (a test agent) is always ready.
+      if (port === undefined) return { install: 'installed', auth: 'signed_in' };
+      const last = lastStatus.get(agentId);
+      const age = last === undefined ? Number.POSITIVE_INFINITY : now() - last.at;
+      // A negative age (a clock that went backwards) counts as stale.
+      const reading = last !== undefined && age >= 0 && age < maxAgeMs ? last : (await statusFor(port), lastStatus.get(agentId)!);
+      const { status } = reading;
+      const shownState = { install: status.install, auth: status.auth };
+      // A status the port couldn't give is "can't tell": it never refuses a chat.
+      if (reading.unread) return shownState;
+      if (status.install !== 'installed') return { ...shownState, blocked: 'agent_not_installed' };
+      if (status.auth === 'signed_in') return shownState;
+      // Only a sign-out the agent confirmed refuses a chat: "can't tell" never does.
+      return subscriptionFor(agentId) === 'signed_out' ? { ...shownState, blocked: 'agent_signed_out' } : shownState;
     },
 
     async install(agentId) {

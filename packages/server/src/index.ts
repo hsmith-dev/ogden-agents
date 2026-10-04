@@ -38,7 +38,10 @@ export type { AgentSetupPort, AppShortcutPort, SecretStorePort } from '@ogden-ag
 export { TicketsUnavailableError, type TicketStorePort } from '@ogden-agents/core';
 // The Claude Code ACP adapter, so tests can run the fake ACP agent as a second agent (epic 6, `extraAgents`).
 export { createClaudeCodeAgent } from '@ogden-agents/adapters';
-export type { RegisteredAgent } from '@ogden-agents/core';
+export type { AgentDescriptor, RegisteredAgent } from '@ogden-agents/core';
+// How an agent is registered (6.3): its descriptor, chat port and optional setup port; tests register fake agents this way.
+export { agentHomeDir, type AgentWiring } from './agent-wiring.js';
+export { createMemoryAgentSetup } from '@ogden-agents/adapters';
 // The in-memory secret store, so tests never touch the real OS keychain (story 9.2).
 export { createMemorySecretStore } from '@ogden-agents/adapters';
 // BMad Method's catalog (story 4.3): the e2e suite keeps the real read-only parts and stubs setup, so no uv runs.

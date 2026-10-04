@@ -139,7 +139,7 @@ async function answeredOnce(terminal = handoffTerminal(), agent = handoffAgent()
     onInternalError: (_sessionId, error) => internal.push(error),
   });
   const workspace = chat.openWorkspace(tempDir('ogden-agents-repo-'));
-  const session = chat.createChatSession(workspace.id);
+  const session = await chat.createChatSession(workspace.id);
   agent.record.say('first question', 're: first question');
   chat.sendMessage(workspace.id, session.id, 'first question');
   await chat.settled();

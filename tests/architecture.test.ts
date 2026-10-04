@@ -127,7 +127,27 @@ export function findImportViolations(files: readonly SourceFile[]): string[] {
  * and the tests' second agent. AD-1 (epic 6 note): `packages/core` and
  * `packages/shared` name none of them outside tests; server wiring does.
  */
-export const AGENT_IDS = ['claude-code', 'antigravity', 'codex', 'grok', 'gemini-cli', 'copilot', 'fake-agent'] as const;
+export const AGENT_IDS = ['claude-code', 'antigravity', 'codex', 'grok', 'gemini', 'gemini-cli', 'copilot', 'fake-agent'] as const;
+
+/**
+ * The environment variables one agent reads (its API key, its home folder),
+ * for the agents above (spikes 6.1, 12.1, 12.2). AD-1 (6.3): they come from
+ * each agent's descriptor, so core and shared name none outside comments;
+ * `AGENT_ENV_KEYS` and home folders are derived, never listed in core.
+ */
+export const AGENT_ENV_NAMES = [
+  'ANTHROPIC_API_KEY',
+  'CLAUDE_CONFIG_DIR',
+  'CLAUDE_CODE_EXECUTABLE',
+  'OPENAI_API_KEY',
+  'CODEX_API_KEY',
+  'CODEX_HOME',
+  'XAI_API_KEY',
+  'GROK_CODE_XAI_API_KEY',
+  'GROK_HOME',
+  'GEMINI_API_KEY',
+  'GEMINI_HOME',
+] as const;
 
 /** The packages that must name no agent id. */
 const AGENT_NEUTRAL = new Set(['@ogden-agents/core', '@ogden-agents/shared']);
@@ -137,13 +157,17 @@ export function withoutComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/.*$/gm, '$1');
 }
 
-/** One message per string literal in core or shared code that names an agent id. */
-export function findAgentIdViolations(files: readonly SourceFile[], ids: readonly string[] = AGENT_IDS): string[] {
+/** One message per string literal in core or shared code that names an agent id, and (6.3) per mention of an agent's own environment variable. */
+export function findAgentIdViolations(files: readonly SourceFile[], ids: readonly string[] = AGENT_IDS, envNames: readonly string[] = AGENT_ENV_NAMES): string[] {
   const named = new RegExp(`(['"\`])[^'"\`\\n]*?(?<![a-z0-9-])(${ids.join('|')})(?![a-z0-9-])[^'"\`\\n]*?\\1`, 'g');
+  // Anywhere in the code, not only in strings: `process.env.X` or `{ X: … }` names it too.
+  const env = new RegExp(`(?<![A-Za-z0-9_])(${envNames.join('|')})(?![A-Za-z0-9_])`, 'g');
   const violations: string[] = [];
   for (const { pkg, path, source } of files) {
     if (!AGENT_NEUTRAL.has(pkg)) continue;
-    for (const match of withoutComments(source).matchAll(named)) violations.push(`${path}: ${pkg} names the agent id ${match[2]} (AD-1: only server wiring does)`);
+    const code = withoutComments(source);
+    for (const match of code.matchAll(named)) violations.push(`${path}: ${pkg} names the agent id ${match[2]} (AD-1: only server wiring does)`);
+    for (const match of code.matchAll(env)) violations.push(`${path}: ${pkg} names the agent variable ${match[1]} (AD-1: it comes from the agent's descriptor)`);
   }
   return violations;
 }
@@ -164,6 +188,19 @@ describe('AD-1: core and shared name no agent (epic 6)', () => {
     expect(findAgentIdViolations(files)).toEqual([
       'core/a.ts: @ogden-agents/core names the agent id claude-code (AD-1: only server wiring does)',
       'shared/b.ts: @ogden-agents/shared names the agent id antigravity (AD-1: only server wiring does)',
+    ]);
+  });
+
+  it("flags an agent's own environment variable in core or shared code (6.3), but not in a comment or another package", () => {
+    const files: SourceFile[] = [
+      { pkg: '@ogden-agents/core', path: 'core/a.ts', source: "const home = { CODEX_HOME: dir };\nconst keys = ['ANTHROPIC_API_KEY'];\n// GROK_HOME is set by wiring" },
+      { pkg: '@ogden-agents/shared', path: 'shared/b.ts', source: 'const hint = `set XAI_API_KEY first`;\nconst other = "MY_GEMINI_HOME_X";' },
+      { pkg: '@ogden-agents/adapters', path: 'adapters/c.ts', source: "const name = 'GEMINI_API_KEY';" },
+    ];
+    expect(findAgentIdViolations(files)).toEqual([
+      'core/a.ts: @ogden-agents/core names the agent variable CODEX_HOME (AD-1: it comes from the agent\'s descriptor)',
+      'core/a.ts: @ogden-agents/core names the agent variable ANTHROPIC_API_KEY (AD-1: it comes from the agent\'s descriptor)',
+      'shared/b.ts: @ogden-agents/shared names the agent variable XAI_API_KEY (AD-1: it comes from the agent\'s descriptor)',
     ]);
   });
 });

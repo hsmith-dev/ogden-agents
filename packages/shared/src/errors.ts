@@ -36,6 +36,19 @@ export const API_ERROR_CODES = [
   'mode_unavailable',
   /** A new chat named an agent this install doesn't have (400; epic 6): nothing created. */
   'agent_unknown',
+  /**
+   * A new chat named an agent that isn't installed (409; epic 6, 6.3): nothing
+   * created. `details.agentId`, and `details.action` (`install`) says what fixes it.
+   */
+  'agent_not_installed',
+  /** A new chat named an agent that isn't signed in (409; 6.3): nothing created. `details.action` is `sign_in`. */
+  'agent_signed_out',
+  /**
+   * A new chat named an agent that runs the project's own agent settings or
+   * hooks, in a project not trusted yet (409; 6.3): nothing created.
+   * `details.action` is `trust_project`.
+   */
+  'project_not_trusted',
   /** uv's status or install could not be read or started (500). */
   'toolchain_unavailable',
   /** A route or socket request whose lane has not shipped yet (501; the story 2.3 stubs). */

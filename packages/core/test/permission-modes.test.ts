@@ -30,7 +30,7 @@ import {
   type Core,
   type StartAgentSession,
 } from '../src/index.js';
-import { openTestCore, soleAgent, tempDir } from './helpers.js';
+import { openTestCore, soleAgent, tempDir, TEST_AGENT_ID } from './helpers.js';
 import { fakeTerminal } from './support/fake-terminal.js';
 
 interface ModedAgentOptions {
@@ -159,7 +159,7 @@ function setUp(agent = modedAgent(), core: Core = openTestCore(), timeoutMs?: nu
     ...(timeoutMs === undefined ? {} : { permissionModeTimeoutMs: timeoutMs }),
   });
   const workspace = chat.openWorkspace(tempDir('ogden-agents-repo-'));
-  const session = chat.createChatSession(workspace.id);
+  const session = core.entities.createSession({ workspaceId: workspace.id, kind: 'chat', agentId: TEST_AGENT_ID });
   return { core, chat, agent, workspace, session, internal, terminal };
 }
 
@@ -363,7 +363,7 @@ describe('telling the agent its mode safely (review)', () => {
     const { chat, workspace, session } = setUp(agent);
     chat.sendMessage(workspace.id, session.id, 'hello');
     await chat.settled();
-    const other = chat.createChatSession(workspace.id);
+    const other = await chat.createChatSession(workspace.id);
     expect(chat.permissionModeOptions(workspace.id, other.id).find((option) => option.mode === 'skip_all')).toMatchObject({ available: false });
     expect(() => chat.setPermissionMode(workspace.id, other.id, 'skip_all', { confirm: true })).toThrow();
   });
@@ -375,8 +375,8 @@ describe('Auto keeps protected files guarded (user decision 2026-10-02)', () => 
     const agent = modedAgent();
     const { chat, workspace, session } = setUp(agent, core);
     core.installSettings.setDeveloperMode(true);
-    const auto = chat.createChatSession(workspace.id);
-    const skip = chat.createChatSession(workspace.id);
+    const auto = await chat.createChatSession(workspace.id);
+    const skip = await chat.createChatSession(workspace.id);
     chat.setPermissionMode(workspace.id, auto.id, 'auto');
     chat.setPermissionMode(workspace.id, skip.id, 'skip_all', { confirm: true });
     for (const each of [session, auto, skip]) {
@@ -560,8 +560,8 @@ describe('turning Developer mode off drops every Skip-all chat to Ask (criterion
     const core = openTestCore();
     const one = setUp(modedAgent(), core);
     const workspace = one.workspace;
-    const two = one.chat.createChatSession(workspace.id);
-    const askChat = one.chat.createChatSession(workspace.id);
+    const two = await one.chat.createChatSession(workspace.id);
+    const askChat = await one.chat.createChatSession(workspace.id);
     core.installSettings.setDeveloperMode(true);
     for (const session of [one.session, two]) {
       one.chat.sendMessage(workspace.id, session.id, 'hello');

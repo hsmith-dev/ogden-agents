@@ -80,7 +80,7 @@ async function chatInTerminal() {
     onInternalError: (_sessionId, error) => internal.push(error),
   });
   const workspace = chat.openWorkspace(tempDir('ogden-agents-repo-'));
-  const session = chat.createChatSession(workspace.id);
+  const session = await chat.createChatSession(workspace.id);
   chat.sendMessage(workspace.id, session.id, 'first question');
   await chat.settled();
   expect((await chat.switchDriver(workspace.id, session.id, 'terminal')).driver).toBe('terminal');

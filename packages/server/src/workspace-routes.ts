@@ -113,6 +113,10 @@ export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptio
       if (scope === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
       const body = await readBody(c, UpdateWorkspaceSettingsRequest);
       if (!body.ok) return body.response;
+      // The project's default agent (epic 6 contract, 6.3) is kept from entry 6: refused whole until then, nothing stored.
+      if (body.value.defaultAgentId !== undefined) {
+        return apiError(c, 501, 'not_implemented', "Choosing a project's default agent isn't available in this version yet.");
+      }
       try {
         const settings = permissions.updateSettings(scope.workspaceId, body.value);
         log.info('workspace settings saved', { workspaceId: scope.workspaceId, cautionLevel: settings.cautionLevel, bmadPieces: settings.bmadPieces.join(',') });

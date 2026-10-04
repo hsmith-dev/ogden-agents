@@ -367,6 +367,28 @@ export class UnknownAgentError extends CoreError {
   }
 }
 
+/** Why a new chat with a registered agent is refused (6.3): it isn't installed, isn't signed in, or needs a trusted project. */
+export type AgentNotReadyCode = 'agent_not_installed' | 'agent_signed_out' | 'project_not_trusted';
+
+/**
+ * A new chat was refused because its agent can't start it now (epic 6, 6.3):
+ * nothing was created. `message` is plain words naming the agent; `action`
+ * is what fixes it. Never a path, a key or a URL.
+ */
+export class AgentNotReadyError extends CoreError {
+  override readonly name = 'AgentNotReadyError';
+  override readonly code: AgentNotReadyCode;
+  constructor(
+    code: AgentNotReadyCode,
+    message: string,
+    readonly agentId: string,
+    readonly action: 'install' | 'sign_in' | 'trust_project',
+  ) {
+    super(code, message);
+    this.code = code;
+  }
+}
+
 /** A session of the workspace is `working` or `waiting`, so its history was not deleted. */
 export class WorkspaceBusyError extends CoreError {
   override readonly name = 'WorkspaceBusyError';

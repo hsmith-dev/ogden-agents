@@ -62,7 +62,9 @@ export const API_ROUTES = {
    * `GET` → `{ sessions }` (`SessionsResponse`; 2.5): the Chats list.
    * `POST { kind?, agentId? }` → 201 `{ session }`: a new chat session in
    * the workspace, with the agent picked (epic 6); 400 `agent_unknown` for an
-   * agent this install doesn't have.
+   * agent this install doesn't have; 409 `agent_not_installed`,
+   * `agent_signed_out` or `project_not_trusted` (6.3) for one that can't
+   * start a chat now, with `details { agentId, action }`.
    */
   workspaceSessions: `${API_BASE}/workspaces/:wsId/sessions`,
   /**

@@ -42,7 +42,9 @@
 //   "quiet"        one chunk, then silence until cancelled (no tool call)
 //   "fail"         the prompt fails with a JSON-RPC internal error
 //   "whoami"       replies `agent=<FAKE_ACP_AGENT_NAME, or default>`: which
-//                  registered agent a chat reached (epic 6, two agents at once)
+//                  registered agent a chat reached (epic 6, two agents at once),
+//                  then ` home=<value>` when FAKE_ACP_HOME_ENV names the
+//                  variable its home folder is in (6.3)
 //   "env"          replies with the CLAUDE_CODE_EXECUTABLE it was given
 //   "echo-env"     replies with its whole environment, `NAME=value` per line,
 //                  each value split across two chunks, and writes it to stderr
@@ -128,6 +130,13 @@
 // 9.2): without it the prompt fails with ACP's auth-required error (-32000);
 // with it the reply is "key received …<last 4>" (never the whole value).
 //
+// A generic second agent (epic 6, 6.3), in place of Claude Code's shapes:
+// FAKE_ACP_MODES=`id:Name,…` lists exactly those session modes (start in
+// FAKE_ACP_START_MODE); FAKE_ACP_AUTH_METHODS=`id:Name,…` advertises those
+// agent-type sign-in methods; FAKE_ACP_API_KEY_ENV names the variable
+// FAKE_ACP_REQUIRE_API_KEY reads; FAKE_ACP_HOME_ENV names its home variable
+// (see "whoami").
+//
 // FAKE_ACP_REQUIRE_LOGIN=<state file> makes every prompt need a sign-in (story
 // 9.4): until `fake-claude-login.mjs` has written `{"loggedIn":true}` to that
 // file (its FAKE_LOGIN_STATE), the prompt fails with ACP's auth-required error
@@ -204,14 +213,32 @@ const RESUME = process.env.FAKE_ACP_RESUME ?? '';
 const REOPEN_FAIL = new Set((process.env.FAKE_ACP_REOPEN_FAIL ?? '').split(',').filter((method) => method !== ''));
 const NEW_MESSAGE = '[Ogden Agents] New message:\n';
 
-/** The session modes it lists, as claude-agent-acp 0.84 lists them. */
-const AVAILABLE_MODES = [
+/**
+ * `id:Name,id:Name` (FAKE_ACP_MODES, FAKE_ACP_AUTH_METHODS: a generic second
+ * agent's own mode or sign-in ids, 6.3) as `{ id, name }`s.
+ */
+const listOf = (value) =>
+  value
+    .split(',')
+    .filter((entry) => entry !== '')
+    .map((entry) => {
+      const [id, ...name] = entry.split(':');
+      return { id, name: name.join(':') || id };
+    });
+
+/**
+ * The session modes it lists: as claude-agent-acp 0.84 lists them, or (a
+ * generic agent, 6.3) exactly FAKE_ACP_MODES.
+ */
+const AVAILABLE_MODES = process.env.FAKE_ACP_MODES ? listOf(process.env.FAKE_ACP_MODES).map((mode) => ({ ...mode, description: mode.name })) : [
   { id: 'default', name: 'Manual', description: 'Always ask before making changes' },
   { id: 'acceptEdits', name: 'Accept edits', description: 'Automatically accept all file edits' },
   { id: 'plan', name: 'Plan', description: 'Create a plan before making changes' },
   ...(process.env.FAKE_ACP_NO_AUTO === '1' ? [] : [{ id: 'auto', name: 'Auto', description: 'Claude handles permission decisions' }]),
   ...(process.env.FAKE_ACP_NO_BYPASS === '1' ? [] : [{ id: 'bypassPermissions', name: 'Bypass permissions', description: 'Accepts all permissions' }]),
 ];
+/** The variable FAKE_ACP_REQUIRE_API_KEY reads its key from: FAKE_ACP_API_KEY_ENV (a generic agent's own, 6.3), else Claude Code's. */
+const API_KEY_ENV = process.env.FAKE_ACP_API_KEY_ENV || 'ANTHROPIC_API_KEY';
 const START_MODE = process.env.FAKE_ACP_START_MODE ?? 'default';
 /** Modes in which it edits files without asking (Claude Code's `acceptEdits`, `auto` and `bypassPermissions`). */
 const EDITS_WITHOUT_ASKING = new Set(['acceptEdits', 'auto', 'bypassPermissions']);
@@ -300,8 +327,10 @@ acp
         loadSession: RESUME === 'load' || RESUME === 'both',
         sessionCapabilities: { close: {}, ...(RESUME === 'resume' || RESUME === 'both' ? { resume: {} } : {}) },
       },
-      authMethods:
-        process.env.FAKE_ACP_AUTH === 'terminal' && terminalAuth
+      authMethods: process.env.FAKE_ACP_AUTH_METHODS
+        ? // A generic agent's own sign-in methods, done by the agent itself (6.3).
+          listOf(process.env.FAKE_ACP_AUTH_METHODS).map(({ id, name }) => ({ id, name, description: name }))
+        : process.env.FAKE_ACP_AUTH === 'terminal' && terminalAuth
           ? [{ type: 'terminal', id: 'fake-login', name: 'Log in with your account', description: 'Signs in with the fake agent', args: ['--login'], env: { FAKE_LOGIN: '1' } }]
           : process.env.FAKE_ACP_AUTH === 'claude-terminal' && terminalAuth
             ? [
@@ -362,8 +391,9 @@ acp
       throw acp.RequestError.authRequired(undefined, 'the fake agent needs a new sign-in');
     }
     if (process.env.FAKE_ACP_REQUIRE_API_KEY === '1') {
-      if (!process.env.ANTHROPIC_API_KEY) throw acp.RequestError.authRequired(undefined, 'the fake agent needs an API key');
-      await say(client, params.sessionId, `key received …${process.env.ANTHROPIC_API_KEY.slice(-4)}`);
+      const key = process.env[API_KEY_ENV];
+      if (!key) throw acp.RequestError.authRequired(undefined, 'the fake agent needs an API key');
+      await say(client, params.sessionId, `key received …${key.slice(-4)}`);
       return { stopReason: 'end_turn' };
     }
     if (text === 'crash') {
@@ -521,7 +551,9 @@ acp
       return { stopReason: 'end_turn' };
     }
     if (text === 'whoami') {
-      await say(client, params.sessionId, `agent=${process.env.FAKE_ACP_AGENT_NAME ?? 'default'}`);
+      const homeEnv = process.env.FAKE_ACP_HOME_ENV;
+      const home = homeEnv ? ` home=${process.env[homeEnv] ?? '(unset)'}` : '';
+      await say(client, params.sessionId, `agent=${process.env.FAKE_ACP_AGENT_NAME ?? 'default'}${home}`);
       return { stopReason: 'end_turn' };
     }
     if (text === 'env') {

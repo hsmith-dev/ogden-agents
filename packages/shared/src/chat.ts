@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import { BmadPieceSet } from './bmad.js';
-import { AgentId, AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, MessageId, PermissionDecision } from './events.js';
+import { AgentAuthMethodKind, AgentAuthState, AgentId, AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, MessageId, PermissionDecision } from './events.js';
 import { PermissionMode, Session, Workspace } from './entities.js';
 import { PermissionRuleId, WorkspaceId } from './ids.js';
+import { AgentInstallState } from './setup.js';
 import { SessionTerminal } from './terminal.js';
 import { IsoUtcTimestamp } from './time.js';
 
@@ -40,15 +41,53 @@ export const CreateSessionRequest = z.object({
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequest>;
 
 /**
- * One agent a chat can be started with (epic 6, E6-R2): agent-neutral data,
- * never a branch on an id. `permissionModes` are the modes it declares, Ask
- * always among them.
+ * One way an agent signs in, as the agent list names it (epic 6 contract,
+ * 6.3): the user's own account (`subscription`), or an API key. `label` is
+ * the agent's own words ("Sign in with your account").
+ */
+export const AgentSignInMethod = z.object({ kind: AgentAuthMethodKind, label: z.string().min(1) });
+export type AgentSignInMethod = z.infer<typeof AgentSignInMethod>;
+
+/**
+ * What the user does about an agent a new chat is refused for (6.3): install
+ * it or sign in to it (Settings → Agents), or trust the project.
+ */
+export const AGENT_ACTIONS = ['install', 'sign_in', 'trust_project'] as const;
+export const AgentAction = z.enum(AGENT_ACTIONS);
+export type AgentAction = z.infer<typeof AgentAction>;
+
+/** Why a new chat with an agent is refused on this install right now, in plain words, and what fixes it (6.3). */
+export const AgentUnavailable = z.object({
+  code: z.enum(['agent_not_installed', 'agent_signed_out']),
+  reason: z.string().min(1),
+  action: AgentAction,
+});
+export type AgentUnavailable = z.infer<typeof AgentUnavailable>;
+
+/**
+ * One agent a chat can be started with (epic 6, E6-R2; frozen in 6.3):
+ * agent-neutral data, never a branch on an id. `permissionModes` are the
+ * modes it declares, Ask always among them. `install` and `auth` are its
+ * setup as last read; `unavailable` says why a new chat with it is refused
+ * now (absent: it can be started). `terminalResume`: its own CLI can take a
+ * chat over (the driver toggle). `needsProjectTrust`: it runs the project's
+ * own agent settings or hooks, so a project must be trusted first.
  */
 export const ChatAgent = z.object({
   agentId: AgentId,
   /** The agent's product name, as the UI names it. */
   displayName: z.string().min(1),
+  /** Who makes it ("Anthropic"), for the agent card. */
+  provider: z.string().min(1),
+  signInMethods: z.array(AgentSignInMethod),
+  /** Plain words on what its API key looks like, when it takes one ("Starts with sk-ant-"). Never a key. */
+  apiKeyFormat: z.string().min(1).optional(),
+  install: AgentInstallState,
+  auth: AgentAuthState,
+  terminalResume: z.boolean(),
+  needsProjectTrust: z.boolean(),
   permissionModes: z.array(PermissionMode).min(1),
+  unavailable: AgentUnavailable.optional(),
 });
 export type ChatAgent = z.infer<typeof ChatAgent>;
 
@@ -164,13 +203,16 @@ export type HistoryDeletedResponse = z.infer<typeof HistoryDeletedResponse>;
 
 /**
  * A workspace's settings (Workspace settings page): its caution level, the
- * BMad pieces it has on (AD-22), and whether the user trusted the project's
- * own BMad Method scripts to run (story 4.2). `bmadScriptsTrusted` is
+ * BMad pieces it has on (AD-22), whether the user trusted the project's own
+ * BMad Method scripts to run (story 4.2), and (epic 6 contract, 6.3; kept
+ * from entry 6) the agent its new chats preselect. `bmadScriptsTrusted` is
  * optional when parsed (an older server's answer reads as not trusted) and
  * always present once parsed; core always sends it. It changes only through
  * `PUT …/bmad/script-trust`, never through `PATCH` settings.
+ * `defaultAgentId` absent: the install's default agent
+ * (`ChatAgentsResponse.defaultAgentId`).
  */
-export const WorkspaceSettings = z.object({ cautionLevel: CautionLevel, bmadPieces: BmadPieceSet, bmadScriptsTrusted: z.boolean().default(false) });
+export const WorkspaceSettings = z.object({ cautionLevel: CautionLevel, bmadPieces: BmadPieceSet, bmadScriptsTrusted: z.boolean().default(false), defaultAgentId: AgentId.optional() });
 export type WorkspaceSettings = z.infer<typeof WorkspaceSettings>;
 
 /** `GET` and `PATCH /api/v1/workspaces/:wsId/settings`. */
@@ -181,9 +223,13 @@ export type WorkspaceSettingsResponse = z.infer<typeof WorkspaceSettingsResponse
  * `PATCH /api/v1/workspaces/:wsId/settings`: the fields to change. The pieces
  * must satisfy the dependency rule (story 10.2); turning on a piece this
  * install doesn't ship is refused by core with `feature_unavailable`.
+ * `defaultAgentId` (epic 6 contract, 6.3) is answered `not_implemented` (501)
+ * until entry 6 keeps it; `null` would go back to the install's default.
  */
-export const UpdateWorkspaceSettingsRequest = z.object({ cautionLevel: CautionLevel.optional(), bmadPieces: BmadPieceSet.optional() }).refine(
-  (settings) => settings.cautionLevel !== undefined || settings.bmadPieces !== undefined,
+export const UpdateWorkspaceSettingsRequest = z
+  .object({ cautionLevel: CautionLevel.optional(), bmadPieces: BmadPieceSet.optional(), defaultAgentId: AgentId.nullable().optional() })
+  .refine(
+  (settings) => settings.cautionLevel !== undefined || settings.bmadPieces !== undefined || settings.defaultAgentId !== undefined,
   'Choose a setting to change.',
 );
 export type UpdateWorkspaceSettingsRequest = z.infer<typeof UpdateWorkspaceSettingsRequest>;

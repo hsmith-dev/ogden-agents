@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
 import {
   CLAUDE_CODE_AGENT_ID,
+  CLAUDE_CODE_DESCRIPTOR,
   createClaudeCodeAgent,
   createClaudeCodeSetup,
   createKeyringSecretStore,
@@ -18,6 +19,7 @@ import {
   type UvScriptRunner,
 } from '@ogden-agents/adapters';
 import {
+  agentEnvKeys,
   AgentSetupError,
   CoreError,
   createAgentSetup,
@@ -36,11 +38,11 @@ import {
   type AgentPort,
   type AgentTerminalResume,
   type Core,
-  type RegisteredAgent,
 } from '@ogden-agents/core';
 import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM, ServerMessage, type AgentId, type Session } from '@ogden-agents/shared';
 import openBrowser from 'open';
 import { WebSocketServer } from 'ws';
+import { agentHomeDir, describedLike, type AgentWiring } from './agent-wiring.js';
 import { createApp, type ServerControl } from './app.js';
 import { SHIPPED_BMAD_PIECES } from './bmad-pieces.js';
 import { chooseWebSocketProtocol, createLaunchCodes, createTabTokens, retireLegacyAuthKey } from './auth.js';
@@ -273,6 +275,11 @@ async function listenAndAnnounce({
       ...(options.claudeExecutable === undefined ? {} : { claudeExecutable: options.claudeExecutable }),
       onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields),
     });
+  // What Claude Code is (6.3); a chat port given in its place (tests) keeps its name and modes.
+  const claudeDescriptor = options.agent === undefined ? CLAUDE_CODE_DESCRIPTOR : describedLike(CLAUDE_CODE_DESCRIPTOR, agent);
+  const extraAgents = options.extraAgents ?? [];
+  // Every registered agent's API key variables (6.3): each is kept out of every process but its own agent's chat.
+  const envKeys = agentEnvKeys([claudeDescriptor, ...extraAgents.map((wiring) => wiring.descriptor)]);
   // Agents from before this start are gone with their processes (AD-3): their sessions can be resumed, not left working.
   const settled = core.entities.settleInterruptedSessions(RESTARTED_REASON);
   if (settled.length > 0) log.info('sessions left working by a stopped server are idle and resumable', { sessions: settled.length });
@@ -298,7 +305,7 @@ async function listenAndAnnounce({
           },
           ...(options.claudeExecutable === undefined ? {} : { claudeExecutable: options.claudeExecutable }),
           // Sign-in and `auth status` never see an API key (story 9.2).
-          env: () => withoutAgentKeys(agentEnv()),
+          env: () => withoutAgentKeys(agentEnv(), envKeys),
           ...(verifyApiKey === undefined ? {} : { apiKey: { verify: verifyApiKey } }),
           listAuthMethods: (env) => agent.listAuthMethods({ env }),
           ...(options.loadPty === undefined ? {} : { loadPty: options.loadPty }),
@@ -308,10 +315,12 @@ async function listenAndAnnounce({
         })
       : undefined;
   const secrets = options.secrets ?? (hooks.secretStore === 'memory' ? createMemorySecretStore() : createKeyringSecretStore());
-  const agentSetup = createAgentSetup(core.events, options.agentSetup ?? (claudeSetup === undefined ? [] : [claudeSetup]), {
+  // Claude Code's setup (or the ports given in its place), then each extra agent's own (6.3).
+  const setupPorts = [...(options.agentSetup ?? (claudeSetup === undefined ? [] : [claudeSetup])), ...extraAgents.flatMap((wiring) => (wiring.setup === undefined ? [] : [wiring.setup]))];
+  const agentSetup = createAgentSetup(core.events, setupPorts, {
     secrets,
     // A key in this server's own environment follows the same rule as a saved one (review F1).
-    inheritedEnv: () => agentKeysOf({ ...process.env, ...extraAgentEnv }),
+    inheritedEnv: () => agentKeysOf({ ...process.env, ...extraAgentEnv }, envKeys),
     // Codes and plain reasons only: never a URL, a code or a key.
     onFailure: (agentId, step, error) =>
       log.warn('agent setup step failed', {
@@ -327,6 +336,24 @@ async function listenAndAnnounce({
   const permissions = core.permissions;
   const configuredCheckIn = options.checkInDelayMs ?? hooks.checkInMs;
   const checkInDelayMs = configuredCheckIn === undefined ? undefined : clampCheckInDelay(configuredCheckIn);
+  const subscriptionMaxAgeMs = options.subscriptionMaxAgeMs ?? SUBSCRIPTION_MAX_AGE_MS;
+  // The agents a chat can be started with (epic 6): Claude Code first, the default and the agent of
+  // every session stored before agents could be chosen; then any a test registers (the fake second agent).
+  // A later agent is one more entry here (the wiring slot, 6.3).
+  const wirings: AgentWiring[] = [{ descriptor: claudeDescriptor, agent, setup: claudeSetup }, ...extraAgents];
+  /**
+   * Each agent's home variable (6.3), for an agent whose descriptor has one:
+   * its own folder in the data folder (made here, owner-only), so its
+   * settings, sessions and logs never land in the user's real profile.
+   */
+  const homeEnvs = new Map<AgentId, Record<string, string>>();
+  for (const { descriptor } of wirings) {
+    if (descriptor.homeEnv === undefined) continue;
+    const home = agentHomeDir(dataDir, descriptor.agentId);
+    mkdirSync(home, { recursive: true, mode: 0o700 });
+    homeEnvs.set(descriptor.agentId, { [descriptor.homeEnv]: home });
+  }
+  const homeEnvOf = (agentId: AgentId): Record<string, string> => homeEnvs.get(agentId) ?? {};
   /**
    * Each agent's chat environment (epic 6; AD-16 note): its own API key
    * (saved, else from this server's environment) joins only while its
@@ -334,11 +361,11 @@ async function listenAndAnnounce({
    * key reaches it. Every case variant of a key's name is removed first, so
    * Windows never sees two.
    */
-  const chatEnv = (agentId: AgentId) => ({ ...withoutAgentKeys(agentEnv()), ...agentSetup.agentEnv(agentId) });
+  const chatEnv = (agentId: AgentId) => ({ ...withoutAgentKeys(agentEnv(), envKeys), ...homeEnvOf(agentId), ...agentSetup.agentEnv(agentId) });
   /** The same, with the subscription state read again first when it is older than {@link SUBSCRIPTION_MAX_AGE_MS} (review F4). */
   const freshChatEnv = async (agentId: AgentId, env: Readonly<Record<string, string>>) => {
-    await agentSetup.refreshIfStale(agentId, options.subscriptionMaxAgeMs ?? SUBSCRIPTION_MAX_AGE_MS);
-    return { ...withoutAgentKeys(env), ...agentSetup.agentEnv(agentId) };
+    await agentSetup.refreshIfStale(agentId, subscriptionMaxAgeMs);
+    return { ...withoutAgentKeys(env, envKeys), ...homeEnvOf(agentId), ...agentSetup.agentEnv(agentId) };
   };
   /** The agent's terminal resume with {@link freshChatEnv} applied to each environment. */
   const withChatEnv = (agentId: AgentId, resume: AgentTerminalResume): AgentTerminalResume => {
@@ -366,12 +393,9 @@ async function listenAndAnnounce({
   });
   /** Claude Code as a chat runs it: the default agent, and the one Plan and the document cards use (stories 4.1, 4.7). */
   const chatAgent = forChat(CLAUDE_CODE_AGENT_ID, agent);
-  // The agents a chat can be started with (epic 6): Claude Code first, the default and the agent of
-  // every session stored before agents could be chosen; then any a test registers (the fake second agent).
-  const registered: RegisteredAgent[] = [{ agentId: CLAUDE_CODE_AGENT_ID, agent }, ...(options.extraAgents ?? [])];
-  const unwrapped = new Map(registered.map(({ agentId, agent: port }) => [agentId, port]));
+  const unwrapped = new Map(wirings.map(({ descriptor, agent: port }) => [descriptor.agentId, port]));
   const agents = createAgentRegistry(
-    registered.map(({ agentId, agent: port }) => ({ agentId, agent: agentId === CLAUDE_CODE_AGENT_ID ? chatAgent : forChat(agentId, port) })),
+    wirings.map(({ descriptor, agent: port }) => ({ descriptor, agent: descriptor.agentId === CLAUDE_CODE_AGENT_ID ? chatAgent : forChat(descriptor.agentId, port) })),
     { defaultAgentId: CLAUDE_CODE_AGENT_ID, legacyAgentId: CLAUDE_CODE_AGENT_ID },
   );
   /** A session's agent id: its own, else (stored before agents could be chosen) Claude Code's. */
@@ -387,6 +411,9 @@ async function listenAndAnnounce({
     agents,
     permissions,
     agentEnv: chatEnv,
+    // A new chat with an agent that isn't installed or signed in is refused (6.3); its status is read at most every 30 s.
+    agentReadiness: (agentId) => agentSetup.readiness(agentId, subscriptionMaxAgeMs),
+    // No project is trusted until the per-project trust gate ships (story 4.2): an agent that needs it is refused.
     terminal,
     // The chat follows the log (a mode changed by Developer mode reaches its agent) and gates Skip all on Developer mode.
     events: core.events,

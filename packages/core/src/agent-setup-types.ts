@@ -2,7 +2,7 @@
  * The agent setup use-case's errors, constants and interfaces (story 9.1),
  * split from `agent-setup.ts`, which re-exports them.
  */
-import type { AgentSetupStatus, SignInResponse } from '@ogden-agents/shared';
+import type { AgentAuthState, AgentInstallState, AgentSetupStatus, SignInResponse } from '@ogden-agents/shared';
 import type { AgentSignIn } from './agent-setup-port.js';
 import { CoreError } from './errors.js';
 import type { SecretStorePort } from './secret-store-port.js';
@@ -43,6 +43,17 @@ export class SignInNotPendingError extends CoreError {
   }
 }
 
+/**
+ * Whether a new chat can be started with an agent now (6.3): its install and
+ * sign-in state as last read, and, when it can't, why. `blocked` is set only
+ * on a state the agent confirmed: a status that couldn't be read never blocks.
+ */
+export interface AgentReadiness {
+  install: AgentInstallState;
+  auth: AgentAuthState;
+  blocked?: 'agent_not_installed' | 'agent_signed_out' | undefined;
+}
+
 export interface AgentSetup {
   /**
    * Reads each agent's saved API key from the secret store, and the
@@ -56,6 +67,13 @@ export interface AgentSetup {
    * (never the key). Refreshes the subscription state.
    */
   list(): Promise<AgentSetupStatus[]>;
+  /**
+   * Whether a new chat can be started with `agentId` (6.3), from its status
+   * as last read when that is under `maxAgeMs` old, else read now (bounded
+   * by the port's own status timeout). An agent with no setup port is ready.
+   * Never throws.
+   */
+  readiness(agentId: string, maxAgeMs: number): Promise<AgentReadiness>;
   /**
    * Checks `apiKey` with the agent's free verify call and stores it. Rejects
    * with `ValidationError` (a malformed key, or an agent that takes none),

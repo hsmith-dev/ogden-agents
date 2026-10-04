@@ -5,6 +5,7 @@
  */
 import type { AgentId, ChatAgent, PermissionMode, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, Workspace, WorkspaceId } from '@ogden-agents/shared';
 import type { AgentError, AgentRegistry, AgentSession } from '../agent-port.js';
+import type { AgentReadiness } from '../agent-setup-types.js';
 import type { Entities, NewWorkspaceOptions } from '../entities.js';
 import type { EventLog, HistoryDeleted } from '../event-log.js';
 import type { InstallSettings } from '../install-settings.js';
@@ -64,6 +65,18 @@ export interface ChatOptions {
   installSettings?: Pick<InstallSettings, 'developerMode'>;
   /** How long an agent may take to take a permission mode before it is dropped. Default `PERMISSION_MODE_TIMEOUT_MS`. */
   permissionModeTimeoutMs?: number;
+  /**
+   * Whether a new chat can be started with `agentId` now (6.3; server wiring:
+   * `AgentSetup.readiness`). Without it, every agent is ready. One that
+   * throws counts as ready: "can't tell" never refuses a chat.
+   */
+  agentReadiness?: (agentId: AgentId) => Promise<AgentReadiness>;
+  /**
+   * Whether the user trusted the project (6.3; the per-project trust gate,
+   * story 4.2). A chat with an agent whose descriptor `needsProjectTrust` is
+   * refused unless it says yes. Without it, no project is trusted.
+   */
+  projectTrusted?: (workspaceId: WorkspaceId) => boolean;
 }
 
 /** A terminal's size in character cells. */
@@ -140,13 +153,19 @@ export interface Chat {
    * A new session in the workspace, `idle`, with the agent `agentId` (the
    * registry's default when absent), fixed for its life (epic 6): a `chat`
    * by default, or a `planning` session (story 4.1), which is a chat whose
-   * first message the planning use-case sends. Throws `UnknownAgentError`
-   * for an agent that isn't registered and `NotFoundError` for an unknown
-   * workspace; nothing is created.
+   * first message the planning use-case sends. Rejects, creating nothing,
+   * with `NotFoundError` for an unknown workspace, `UnknownAgentError` for an
+   * agent that isn't registered, and `AgentNotReadyError` (6.3) for one that
+   * needs a project trust the project lacks, isn't installed, or isn't
+   * signed in.
    */
-  createChatSession(workspaceId: WorkspaceId, options?: { kind?: Exclude<SessionKind, 'build'> | undefined; agentId?: AgentId | undefined }): Session;
-  /** The agents a chat can be started with, in order, each with the permission modes it declares (epic 6). */
-  chatAgents(): { agents: ChatAgent[]; defaultAgentId: AgentId };
+  createChatSession(workspaceId: WorkspaceId, options?: { kind?: Exclude<SessionKind, 'build'> | undefined; agentId?: AgentId | undefined }): Promise<Session>;
+  /**
+   * The agents a chat can be started with, in order (epic 6; frozen in 6.3):
+   * what each is, the permission modes it declares, its setup, and why a new
+   * chat with it is refused now, if it is.
+   */
+  chatAgents(): Promise<{ agents: ChatAgent[]; defaultAgentId: AgentId }>;
   /** The session, which must belong to the workspace (`NotFoundError` otherwise). */
   getSession(workspaceId: WorkspaceId, sessionId: SessionId): Session;
   /**

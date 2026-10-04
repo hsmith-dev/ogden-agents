@@ -134,7 +134,7 @@ export function createChat(options: ChatOptions): Chat {
     getWorkspace: workspaces.getWorkspace,
     listSessions: (workspaceId) => workspaces.listSessions(workspaceId).map(withAgentId),
     deleteHistory: workspaces.deleteHistory,
-    createChatSession: (workspaceId, options) => withAgentId(workspaces.createChatSession(workspaceId, options)),
+    createChatSession: async (workspaceId, options) => withAgentId(await workspaces.createChatSession(workspaceId, options)),
     chatAgents: workspaces.chatAgents,
     getSession: (workspaceId, sessionId) => withAgentId(workspaces.getSession(workspaceId, sessionId)),
     sendMessage: turns.sendMessage,

@@ -176,6 +176,13 @@ const WorkspaceSettingsChangedInput = z.object({
      */
     bmadPieces: BmadPieces.optional(),
     previousBmadPieces: BmadPieces.optional(),
+    /**
+     * The project's default agent now and before (epic 6 contract, 6.3;
+     * appended from entry 6), present when it changed. `null`: the
+     * install's default. Optional, so every earlier event still parses.
+     */
+    defaultAgentId: AgentId.nullable().optional(),
+    previousDefaultAgentId: AgentId.nullable().optional(),
   }),
 });
 /**

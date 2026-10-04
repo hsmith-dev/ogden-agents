@@ -28,6 +28,7 @@ import { NewTabButton } from './new-tab-button';
 import { QuitButton } from './quit-button';
 import { ServerStatus } from './server-status';
 import { useSidebarData } from './sidebar-data';
+import { SidebarStartChat } from './sidebar-start-chat';
 import { holdOrder, relativeTime, type SidebarModel, type SidebarRow } from './sidebar-model';
 import { Wordmark } from './wordmark';
 import { WorkspaceSwitcher } from './workspace-switcher';
@@ -183,6 +184,8 @@ function StatusSidebarBody() {
               summary={group.summary}
             >
               {unloaded.has(group.wsId) ? <Skeleton data-testid="sidebar-loading" /> : null}
+              {/* A project with no chats offers to start one (EXPERIENCE.md Status sidebar). */}
+              {!unloaded.has(group.wsId) && group.rows.length === 0 && group.earlier.length === 0 ? <SidebarStartChat wsId={group.wsId} name={group.name} /> : null}
               <SessionRows rows={group.rows} now={now} />
               <SidebarEarlier count={group.earlier.length}>
                 <SessionRows rows={group.earlier} now={now} />

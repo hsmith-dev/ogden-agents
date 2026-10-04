@@ -43,7 +43,7 @@ Every status change goes through `tickets.py mark <ref> <status>`. Marking with 
 
 - `tickets.py … --json` for machine-readable output.
 - A per-run JSON result file for each build (Ogden's own since 2026-10-02, written in the run's folder in the data folder, epic 5 entry 4).
-- Running one named v7 ticket headless in a given worktree, with its run folder outside the repo and a machine-readable event stream (bmad-loop).
+- A setup wizard in the UI that replaces running `bmad` setup in a terminal (Ogden Agents's own UI over upstream's `setup.py`).
 - Running one named v7 ticket headless in a given worktree, with its run folder outside the repo and a machine-readable event stream: Ogden's headless ACP build session since 2026-10-02 (epic 5 entry 4); the bmad-loop patches for it are a v2 or upstream note in epic 5.
 - Plain-language labels and descriptions per skill ("Describe your idea", "Build next story"): kept in Ogden Agents's own mapping file keyed by skill name, with the `SKILL.md` description as fallback (AD-12).
 - Pause hooks for UI approval via `plan_checkpoint` and `done_checkpoint` in `tickets.toml` (Ogden's build session pauses and resumes, epic 5 entry 4).

@@ -619,3 +619,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-choose-whether-new-messages-wait-or-go-right-away-plan.md`
   summary: Editing a waiting message while the turn ends loses the draft silently when the old text is sent.
   evidence: queued-messages.tsx editor does not reserve the message; takeNext sends it and the row unmounts.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-tracer-bullet-one-ticket-built-reviewed-and-approved-from-a-plan.md`
+  summary: A network allowlist for an unattended build's sandboxed commands (package registries, so `npm install` or `uv sync` in a fresh worktree can work); until then a build's commands have no network and such a failure is named in the run's result.
+  evidence: User decision 2026-10-04 on 5.2's Q1 (deny-by-default policy, Bash sandboxed with no network; "an allowlist is a later story").

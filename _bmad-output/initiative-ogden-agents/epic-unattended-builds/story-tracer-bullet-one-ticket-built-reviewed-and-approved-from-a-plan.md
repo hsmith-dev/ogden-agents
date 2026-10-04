@@ -3,7 +3,7 @@ title: 'Tracer bullet: one ticket built, reviewed and approved from a bare page'
 type: 'feature'
 ticket: '2'
 created: '2026-10-04'
-status: 'draft'
+status: 'in-progress'
 baseline_revision: '7cb4f4721571886f48384a496b36e8fffc780f1f'
 route: 'full'
 route_source: 'auto'
@@ -51,19 +51,14 @@ context:
 | Merge conflict | branch conflicts | merge aborted, run `blocked` `merge_conflict` | main unchanged |
 | Reject | verified run | worktree removed, branch kept, run `stopped`, ticket untouched | — |
 
+## Decisions
+
+- 2026-10-04, user (Q1 = A, security): **the build session's permission policy is deny-by-default, enforced by core.** Core answers each `request_permission` of a `build` session by rule, with no card: `allow_once` for a file edit or write whose every path, normalized (absolute, `..` resolved, symlinks resolved through the deepest existing ancestor, compared case-insensitively where the filesystem is, Windows 8.3 short names expanded or refused), is inside the run's worktree and outside the protected paths (the shared 2.8 list, which includes `_bmad/`), or inside the git paths a commit in that worktree needs (the main `.git`'s `objects`, `refs`, `logs`, `worktrees/<id>`, never `hooks` or `config`); `reject_once` for everything else (paths outside, a path that can't be resolved, unsandboxed commands, web fetch, MCP, anything unknown). Bash runs in Claude Code's sandbox (`sandbox.enabled`, `autoAllowBashIfSandboxed`, `allowUnsandboxedCommands: false`) with the same writable roots and **no network**; a failure for want of network (such as `npm install`) is named plainly in the run's result. A network allowlist is a later story (deferred-work entry).
+- 2026-10-04, user (security, fail closed): where the native sandbox isn't available (Windows; macOS without `sandbox-exec`; Linux without `bwrap` and `socat`), an unattended build is refused with `sandbox_unavailable` and a clear reason; it never runs unsandboxed.
+- 2026-10-04, user (Q2 = A): Build is refused with a clear message (`plan_uncommitted`) when the ticket's `tickets.toml` or plan file has uncommitted changes in the main checkout; other uncommitted changes don't block dispatch. **Commit plan files** stays 5.5's.
+- 2026-10-04, user (Q3): keep the plan whole (about 2,600 tokens; the tracer crosses every layer by design).
+
 </frozen-after-approval>
-
-## Open Questions
-
-1. **(Security) Permission policy for the unattended build session.** Ask would block forever, and the epic leaves it open (5.4 defers to 5.6, which defines only the attended path). Claude Code's native sandbox (Seatbelt/bubblewrap) wraps **Bash only**; Edit/Write/Read and WebFetch run in the agent process and are governed by permissions, not the sandbox.
-   - **A (recommended): deny-by-default, enforced by core.** Session in `default` mode, flag settings `sandbox.enabled`, `autoAllowBashIfSandboxed`, `allowUnsandboxedCommands: false`; sandbox write roots = the worktree plus only the git paths a commit needs (`objects`, `refs`, `logs`, `worktrees/<id>` of the main `.git`, never `hooks` or `config`). Core answers each `request_permission` of a build session with no card: `allow_once` for file edits whose every path is inside the worktree and outside the 2.8 protected paths; `reject_once` for everything else (paths outside, unsandboxed commands, web fetch, MCP). Network for sandboxed Bash: none in the tracer (so `npm install` in a fresh worktree fails; a registry allowlist would be a later decision).
-   - **B: Skip all (`bypassPermissions`) + Bash sandbox.** Never blocks; but file tools are unchecked outside the worktree, and it bypasses AD-15's Developer-mode gate on Skip all.
-   - **C: Auto + Bash sandbox, any card auto-rejected.** The agent's classifier decides; not deterministic.
-2. **Dispatch and uncommitted plan files** (epic Open question, "to settle at the tracer's plan checkpoint"). A worktree branches from `HEAD`, so a ticket whose `tickets.toml` or plan is uncommitted is missing or stale there.
-   - **A (recommended):** dispatch ignores other uncommitted changes but refuses a ticket whose epic `tickets.toml` or plan file is uncommitted (`plan_uncommitted`, plain reason); **Commit plan files** action left to 5.5.
-   - **B:** copy those files' working copies into the worktree at dispatch.
-   - **C:** refuse dispatch on any dirty checkout.
-3. **Plan size.** About 2,600 tokens (target 900–1600) because the tracer crosses every layer by design; recommended **keep full plan** (splitting would break the tracer's purpose).
 
 ## Code Map
 
@@ -84,11 +79,11 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `packages/shared/src/builds.ts` (+ `api.ts`, `index.ts`, `errors.ts`) -- `StartBuildRequest {ref}`, `BuildResponse`, `ReviewResponse {run, outcome, reason, diff, files}`, error codes and sentences (`prerequisite_unmet`, `not_ready`, `run_active`, `sandbox_unavailable`, `checkout_dirty`, `merge_conflict`, `checks_failed`, `plan_uncommitted` per Q2), route paths -- minimal shapes 5.3 will freeze.
+- [ ] `packages/shared/src/builds.ts` (+ `api.ts`, `index.ts`, `errors.ts`) -- `StartBuildRequest {ref}`, `BuildResponse`, `ReviewResponse {run, outcome, reason, diff, files}`, error codes and sentences (`prerequisite_unmet`, `not_ready`, `run_active`, `sandbox_unavailable`, `checkout_dirty`, `merge_conflict`, `checks_failed`, `plan_uncommitted`), route paths -- minimal shapes 5.3 will freeze.
 - [ ] `packages/core/src/vcs-port.ts`, `sandbox-port.ts`, `build-runner-port.ts` -- minimal ports (`addWorktree`, `status`, `diff`, `merge`/`abort`/`commit`, `removeWorktree`; `sandbox.check()`→kind or unavailable + writable roots; `runner.invocation(ref)`).
 - [ ] `packages/adapters/src/vcs-git/` -- git through `execFile` with the Always flags; `packages/adapters/src/sandbox-claude-native/` -- macOS `sandbox-exec`, Linux `bwrap`+`socat`, else unavailable; `packages/adapters/src/buildrunner-acp/` -- `/bmad-build-auto ticket <ref>` (the only place naming the skill).
 - [ ] `packages/core/src/builds.ts` -- `start`, `review`, `approve`, `reject`, and the turn-end hook that reads plan status in the worktree (after the fingerprint check) and sets the outcome; registered in `core.ts`.
-- [ ] `packages/core/src/chat/agents.ts`, `agent-port.ts`, `claude-code-agent.ts` -- build sessions: worktree cwd, sandbox settings, and Q1's permission policy.
+- [ ] `packages/core/src/chat/agents.ts`, `agent-port.ts`, `claude-code-agent.ts` -- build sessions: worktree cwd, sandbox settings, and the Decisions' permission policy; the policy engine in `packages/core/src/build-permission-policy.ts` (pure, path normalization injected for tests: symlinks, `..`, case-insensitive FS, 8.3 names) with its own unit tests.
 - [ ] `packages/core/src/db/schema.ts`, migration, `entities.ts` -- run `branch`, `base_revision`, lookups.
 - [ ] `packages/server/src/build-routes.ts`, `bmad-pieces.ts`, `start*.ts`, `test-hooks.ts` -- routes via `bmadPieceRoutes('builds')`, wiring, `OGDEN_AGENTS_TEST_SANDBOX` hook.
 - [ ] `packages/web/src/planning/ticket-card.tsx`, `routes/session-page.tsx`, `routes/workspace-review-page.tsx`, `router.tsx`, `planning/builds-api.ts` -- Build, read-only build session, bare review page.

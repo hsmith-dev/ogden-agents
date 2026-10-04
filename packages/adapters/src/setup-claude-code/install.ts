@@ -24,6 +24,7 @@
  * or profile change, no admin rights.
  */
 import { spawn } from 'node:child_process';
+import { helperEnvironment, NPM_NETWORK } from '../child-env.js';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { AgentSetupError, type AgentInstallProgress } from '@ogden-agents/core';
@@ -228,10 +229,16 @@ function reasonFor(code: string | undefined): string {
   return FAILED;
 }
 
-/** This environment without inherited `npm_*` settings (any case), plus npm's cache in the temp folder. */
+/**
+ * npm's environment (AD-16): the base allowlist and what npm needs to reach
+ * its registry as the user set it up (proxies, certificate authorities, its
+ * config folders: `NPM_NETWORK`), never an agent key or any other variable
+ * of this server's; no inherited `npm_*` settings (any case), plus npm's
+ * cache in the temp folder.
+ */
 export function npmEnv(env: Readonly<Record<string, string | undefined>>, cache: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [name, value] of Object.entries(env)) if (value !== undefined && !name.toLowerCase().startsWith('npm_')) out[name] = value;
+  const out = helperEnvironment(NPM_NETWORK, env);
+  for (const name of Object.keys(out)) if (name.toLowerCase().startsWith('npm_')) delete out[name];
   out.npm_config_cache = cache;
   out.npm_config_update_notifier = 'false';
   return out;

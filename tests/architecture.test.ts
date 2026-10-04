@@ -294,6 +294,95 @@ describe('E6-R3: the shared ACP client names no agent (6.4)', () => {
   });
 });
 
+/**
+ * AD-16 (epic 6 entry 10): every child process Ogden Agents starts gets an
+ * explicit environment built from the allowlist (`adapters/src/child-env.ts`;
+ * an agent's own from its descriptor). A call to a `node:child_process`
+ * function, or to a loaded `node-pty`'s `spawn`, must pass `env`, and must not
+ * pass `process.env` (wholesale or spread). The `open` package starts its
+ * opener with the whole `process.env`, so only `open-url.ts` loads it, in a
+ * child of its own with the allowlist.
+ */
+const SPAWN_EXEMPT: Readonly<Record<string, string>> = {
+  // The launcher starts the server itself: Ogden, not a helper. A key exported in the user's
+  // shell is the server's documented "key in this server's environment" (story 9.2), which
+  // core's precedence rule hands only to that agent's own process.
+  'packages/server/src/launcher.ts:spawn': 'the background server is Ogden itself',
+};
+const CHILD_PROCESS_FUNCTIONS = new Set(['spawn', 'spawnSync', 'execFile', 'execFileSync', 'exec', 'execSync', 'fork']);
+
+/** The text of the call whose `(` is at `open` in `code`, to its matching `)`. */
+function callText(code: string, open: number): string {
+  let depth = 0;
+  for (let i = open; i < code.length; i += 1) {
+    if (code[i] === '(') depth += 1;
+    else if (code[i] === ')' && (depth -= 1) === 0) return code.slice(open, i + 1);
+  }
+  return code.slice(open);
+}
+
+/** One message per spawn without its own environment, or with `process.env`, and per `open` import outside `open-url.ts`. */
+export function findSpawnEnvViolations(files: readonly SourceFile[]): string[] {
+  const violations: string[] = [];
+  for (const { path, source } of files) {
+    const file = path.split('\\').join('/');
+    const code = withoutComments(source);
+    const names = new Set<string>();
+    for (const match of code.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"](?:node:)?child_process['"]/g)) {
+      for (const part of match[1]!.split(',')) {
+        const [imported, local] = part.replace(/\btype\s+/, '').trim().split(/\s+as\s+/);
+        if (imported !== undefined && CHILD_PROCESS_FUNCTIONS.has(imported)) names.add((local ?? imported).trim());
+      }
+    }
+    if (/from\s*['"](?:node:)?child_process['"]/.test(code) && /import\s+\*\s+as\s+(\w+)\s+from\s*['"](?:node:)?child_process['"]/.test(code)) {
+      violations.push(`${file}: imports node:child_process as a namespace; import its functions by name so the AD-16 check sees each spawn`);
+    }
+    const calls: { callee: string; at: number }[] = [];
+    for (const name of names) for (const match of code.matchAll(new RegExp(`(?<![\\w.])${name}\\s*\\(`, 'g'))) calls.push({ callee: name, at: match.index! + match[0].length - 1 });
+    // A loaded node-pty: `pty.spawn(` (terminal-pty).
+    for (const match of code.matchAll(/\bpty\.spawn\s*\(/g)) calls.push({ callee: 'pty.spawn', at: match.index! + match[0].length - 1 });
+    for (const { callee, at } of calls) {
+      if (SPAWN_EXEMPT[`${file}:${callee}`] !== undefined) continue;
+      const text = callText(code, at);
+      if (/process\.env\b/.test(text)) violations.push(`${file}: ${callee}(…) passes process.env (AD-16: build its environment from the allowlist)`);
+      else if (!/\benv\s*[:,}]/.test(text)) violations.push(`${file}: ${callee}(…) passes no env, so it inherits the whole process.env (AD-16)`);
+    }
+    if (!file.endsWith('packages/server/src/open-url.ts') && /(?:from\s*|import\s*\(\s*)['"]open['"]/.test(code)) {
+      violations.push(`${file}: loads the open package, which starts its opener with the whole process.env (AD-16: use openUrl)`);
+    }
+  }
+  return violations;
+}
+
+describe('AD-16: no child process inherits the whole server environment (epic 6 entry 10)', () => {
+  it('every spawn in packages/ passes its own env, never process.env', () => {
+    const files = loadWorkspaceSources();
+    expect(files.some((file) => file.path.split('\\').join('/').endsWith('adapters/src/process-tree.ts'))).toBe(true);
+    expect(findSpawnEnvViolations(files)).toEqual([]);
+  });
+
+  it('flags a spawn with process.env (wholesale or spread), with no env, a namespace import, and open outside open-url.ts; not a comment or the exemption', () => {
+    const files: SourceFile[] = [
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/a.ts', source: "import { spawn } from 'node:child_process';\nspawn('x', [], { env: process.env });" },
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/b.ts', source: "import { execFile as run, type ExecFileOptions } from 'child_process';\nrun('x', [], { env: { ...process.env, A: '1' } }, () => {});" },
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/c.ts', source: "import { spawnSync } from 'node:child_process';\nspawnSync('taskkill', ['/T'], { stdio: 'ignore' });" },
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/d.ts', source: "import * as cp from 'node:child_process';\ncp.spawn('x');" },
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/e.ts', source: "const t = pty.spawn(file, args, { cols: 80 });" },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/f.ts', source: "import open from 'open';\nawait open(url);" },
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/ok.ts', source: "import { spawn } from 'node:child_process';\n// spawn('x', [], { env: process.env })\nspawn('x', [], { env: helperEnvironment() });\nconst env = {};\nspawn('y', [], { env, cwd });" },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/launcher.ts', source: "import { spawn } from 'node:child_process';\nspawn(process.execPath, [], { env: { ...process.env } });" },
+    ];
+    expect(findSpawnEnvViolations(files)).toEqual([
+      'packages/adapters/src/a.ts: spawn(…) passes process.env (AD-16: build its environment from the allowlist)',
+      'packages/adapters/src/b.ts: run(…) passes process.env (AD-16: build its environment from the allowlist)',
+      'packages/adapters/src/c.ts: spawnSync(…) passes no env, so it inherits the whole process.env (AD-16)',
+      'packages/adapters/src/d.ts: imports node:child_process as a namespace; import its functions by name so the AD-16 check sees each spawn',
+      'packages/adapters/src/e.ts: pty.spawn(…) passes no env, so it inherits the whole process.env (AD-16)',
+      'packages/server/src/f.ts: loads the open package, which starts its opener with the whole process.env (AD-16: use openUrl)',
+    ]);
+  });
+});
+
 describe('AD-1 package dependency rules', () => {
   it('every workspace package follows the diagram', () => {
     const manifests = loadWorkspaceManifests();

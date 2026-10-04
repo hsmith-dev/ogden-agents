@@ -4,7 +4,7 @@
  * precedence rule reads (story 9.2). The test-only switches moved to
  * `test-hooks.ts` (story 10.8) and are re-exported here.
  */
-import { ANTIGRAVITY_DESCRIPTOR, CLAUDE_CODE_DESCRIPTOR } from '@ogden-agents/adapters';
+import { ANTIGRAVITY_DESCRIPTOR, baseEnvironment, CLAUDE_CODE_DESCRIPTOR } from '@ogden-agents/adapters';
 import { agentEnvKeys } from '@ogden-agents/core';
 
 // The test-only switches live with every other test hook; re-exported so imports stay the same (story 10.8).
@@ -17,10 +17,6 @@ export { CHECK_IN_MS_ENV, checkInDelayFromEnv, SECRET_STORE_ENV, testSecretStore
  */
 export const SUBSCRIPTION_MAX_AGE_MS = 30_000;
 
-/** What an agent process needs from this server's environment to run as the user (AD-16). */
-const AGENT_ENV_ALLOWED = ['PATH', 'HOME', 'USERPROFILE', 'USER', 'USERNAME', 'LANG', 'TERM', 'TMPDIR', 'TEMP', 'TMP', 'SHELL'];
-/** The same on Windows only, where a process can't start without them. */
-const AGENT_ENV_ALLOWED_WINDOWS = ['SystemRoot', 'ComSpec', 'PATHEXT'];
 /**
  * Agent credentials the user may set in this server's environment (AD-16):
  * every API key variable of each registered agent, from its descriptor
@@ -48,25 +44,16 @@ export function withoutAgentKeys(env: Readonly<Record<string, string>>, names: r
 }
 
 /**
- * The environment agent processes get (AD-16): an allowlist of what a CLI
- * needs to run as the user (`PATH`, home, user, locale, terminal, temp,
- * shell), and nothing else of this server's environment. Agent keys are
- * added only by core's precedence rule (story 9.2). Never logged.
+ * The environment agent processes get (AD-16): the base allowlist
+ * (`child-env.ts`: what a CLI needs to run as the user), and nothing else of
+ * this server's environment. Agent keys are added only by core's precedence
+ * rule (story 9.2), each to its own agent's process. Never logged.
  */
 export function agentEnvironment(
   source: Readonly<Record<string, string | undefined>> = process.env,
   platform: NodeJS.Platform = process.platform,
 ): Record<string, string> {
-  const allowed = new Set([...AGENT_ENV_ALLOWED, ...(platform === 'win32' ? AGENT_ENV_ALLOWED_WINDOWS : [])]);
-  // Windows variable names are case-insensitive (`Path`, `SYSTEMROOT`).
-  const fold = (name: string) => (platform === 'win32' ? name.toUpperCase() : name);
-  const allowedFolded = new Set([...allowed].map(fold));
-  const env: Record<string, string> = {};
-  for (const [name, value] of Object.entries(source)) {
-    if (value === undefined) continue;
-    if (allowedFolded.has(fold(name)) || name === 'LC_ALL' || name.startsWith('LC_')) env[name] = value;
-  }
-  return env;
+  return baseEnvironment(source, platform);
 }
 
 /**

@@ -34,6 +34,7 @@ import { randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AgentSetupError, type AgentPlatform, type AgentPortStatus, type AgentSetupPort } from '@ogden-agents/core';
+import { baseEnvironment } from '../child-env.js';
 import { renameWithRetry } from '../toolchain-uv/uv-toolchain.js';
 import { errorCode } from '../error-code.js';
 import { readServerVersion, SETUP_INITIALIZE, startSetupServer, withTimeout, type ServerCommand } from './acp-probe.js';
@@ -143,9 +144,8 @@ export interface AntigravitySetup extends AgentSetupPort {
   close(): void;
 }
 
-const DEFAULT_ENV_NAMES = ['PATH', 'Path', 'HOME', 'USERPROFILE', 'USER', 'USERNAME', 'LANG', 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'SYSTEMROOT', 'ComSpec', 'PATHEXT'];
-const defaultEnv = (): Record<string, string> =>
-  Object.fromEntries(DEFAULT_ENV_NAMES.flatMap((name) => (process.env[name] === undefined ? [] : [[name, process.env[name]!]])));
+/** The base allowlist (AD-16, `child-env.ts`); any Gemini or Google key is dropped again by {@link setupEnvOf}. */
+const defaultEnv = (): Record<string, string> => baseEnvironment();
 
 /** `env` without any Gemini or Google key, or a `GEMINI_HOME` of its own, whatever their case. */
 function setupEnvOf(env: Readonly<Record<string, string>>): Record<string, string> {

@@ -13,6 +13,7 @@ export { MAX_SKILL_FILE_BYTES, parseSkillFrontmatter, scanSkills, SKILL_FOLDERS 
 export * from './bmad-source/index.js';
 export * from './bmad-source-memory/index.js';
 export * from './catalog-memory/index.js';
+export * from './child-env.js';
 export { errorCode } from './error-code.js';
 export * from './secrets-keyring/index.js';
 export * from './secrets-memory/index.js';

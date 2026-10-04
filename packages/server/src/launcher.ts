@@ -361,7 +361,8 @@ export async function launch(options: LauncherOptions): Promise<LaunchResult> {
 
   if (options.open) {
     try {
-      const openBrowser = options.openBrowser ?? (async (target: string) => (await import('open')).default(target));
+      // The opener runs with the helper allowlist, never this shell's agent keys (AD-16).
+      const openBrowser = options.openBrowser ?? (async (target: string) => (await import('./open-url.js')).openUrl(target));
       await openBrowser(reply.launchUrl);
     } catch (error) {
       log.warn('could not open a browser', { reason: String(error) });

@@ -969,7 +969,7 @@ describe('uninstall and sign-out (epic 6 entry 7)', () => {
     const core = openTestCore();
     const { port } = removablePort();
     const stored = new Map<string, string>();
-    const secrets: SecretStorePort = { get: async (name) => stored.get(name), set: async (name, value) => void stored.set(name, value), delete: async (name) => void stored.delete(name) };
+    const secrets: SecretStorePort = { backend: 'memory', get: async (name) => stored.get(name), set: async (name, value) => void stored.set(name, value), delete: async (name) => void stored.delete(name) };
     const setup = createAgentSetup(core.events, [port], { secrets });
     await setup.load();
     await setup.list();

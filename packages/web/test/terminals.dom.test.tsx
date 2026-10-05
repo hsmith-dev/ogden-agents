@@ -17,7 +17,7 @@ const PANE = 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
 
 const fakes = vi.hoisted(() => ({
   connections: [] as Array<{ handlers: PaneSocketHandlers; closed: boolean; typed: string[] }>,
-  terminals: [] as Array<{ written: string[]; resets: number; options: Record<string, unknown>; unicode: { activeVersion: string } }>,
+  terminals: [] as Array<{ cols: number; rows: number; written: string[]; resets: number; options: Record<string, unknown>; unicode: { activeVersion: string } }>,
   requests: [] as Array<{ method: string; path: string; body?: string }>,
   panes: [] as unknown[],
   terminal: { available: true } as unknown,

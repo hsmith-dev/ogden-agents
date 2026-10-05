@@ -6,10 +6,18 @@
  * anything on the computer.
  */
 import type { SandboxCheck, SandboxCheckRequest, SandboxPort } from '@ogden-agents/core';
+import type { SandboxStatus } from '@ogden-agents/shared';
+
+/** The status a fixed `check` says (plain words from its own reason; the platform is not probed). */
+export function statusOf(check: SandboxCheck, platform: SandboxStatus['platform'] = 'other'): SandboxStatus {
+  return check.available
+    ? { platform, available: true, kind: check.kind, summary: `Builds run inside the ${check.kind} sandbox.`, probes: [], choices: [], installHint: null }
+    : { platform, available: false, kind: null, summary: check.reason, probes: [], choices: [...(check.choices ?? ['other_agent', 'install_docker', 'attended'])], installHint: null };
+}
 
 /** A sandbox port that always answers `check` (tests and the test hook). */
 export function createFixedSandbox(check: SandboxCheck): SandboxPort {
-  return { check: async () => check };
+  return { check: async () => check, status: async () => statusOf(check) };
 }
 
 export interface MemorySandbox extends SandboxPort {
@@ -28,6 +36,10 @@ export function createMemorySandbox(initial: SandboxCheck = { available: true, k
     async check(request = {}) {
       checks.push(request);
       return answer;
+    },
+    async status(request = {}) {
+      checks.push(request);
+      return statusOf(answer);
     },
   };
 }

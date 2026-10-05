@@ -20,6 +20,7 @@ import { expect, test } from '@playwright/test';
 // The shared routes' own file (it has no imports), as support.ts reads it.
 import { apiPath } from '../../packages/shared/src/api.ts';
 import { FAKE_BMAD_FILES, FAKE_BUILD_PLAN, FAKE_BUILD_TICKET_FILES, FAKE_BUILD_WAITING_PLAN, fixtureGit } from '../fixtures/fake-bmad-repo.ts';
+import { fixedSandbox } from '../fixtures/fixed-sandbox.ts';
 import { createPlanFileTicketStore } from '../fixtures/plan-file-ticket-store.ts';
 import { API_ROUTES, serverModule } from '../support.js';
 import { withChatServer } from './chat-server.js';
@@ -126,6 +127,6 @@ test('Build on a ready card builds it unattended, the session streams read-only,
       await page.goto(`${server.url}/w/${wsId}/board`);
       await expect(page.locator('[data-testid="ticket-card"][data-ref="1.1"]')).toHaveAttribute('data-column', 'done');
     },
-    { files: FILES, extra: { ticketStore: store as never, bmadSource, sandbox: { check: async () => ({ available: true, kind: 'test' }) } } },
+    { files: FILES, extra: { ticketStore: store as never, bmadSource, sandbox: fixedSandbox({ available: true, kind: 'test' }) } },
   );
 });

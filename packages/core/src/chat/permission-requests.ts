@@ -4,6 +4,7 @@
  */
 import { DEFAULT_CAUTION_LEVEL, type Session, type SessionId } from '@ogden-agents/shared';
 import type { AgentPermissionDecision, AgentPermissionRequest } from '../agent-port.js';
+import type { PermissionRequestOptions } from '../permissions.js';
 import type { CheckIn } from './check-in.js';
 import { deniedMessage } from './constants.js';
 import type { ChatContext } from './context.js';
@@ -40,7 +41,7 @@ export function createPermissionRequests(ctx: ChatContext, deps: Pick<Replies, '
   };
 
   /** The handler for the session's agent: what it asks goes to {@link Permissions}. */
-  const onPermissionRequestFor = (session: Session) => async (request: AgentPermissionRequest): Promise<AgentPermissionDecision> => {
+  const onPermissionRequestFor = (session: Session, options: PermissionRequestOptions = {}) => async (request: AgentPermissionRequest): Promise<AgentPermissionDecision> => {
     try {
       flushSession(session.id);
       if (busy.get(session.id)?.stopping === true) {
@@ -48,7 +49,7 @@ export function createPermissionRequests(ctx: ChatContext, deps: Pick<Replies, '
         recordStoppedRequest(session.id, request);
         return { outcome: 'cancelled' };
       }
-      const decision = await permissions.request(session.id, request);
+      const decision = await permissions.request(session.id, request, options);
       // The user answered (or a rule did): the quiet stretch starts again.
       armQuiet(session.id);
       const reason = decision.outcome === 'deny' ? decision.reason?.trim() : undefined;

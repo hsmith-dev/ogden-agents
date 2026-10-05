@@ -2,13 +2,16 @@ import {
   API_ROUTES,
   apiPath,
   APPROVE_FAILED,
+  BUILD_DIALOG_LOAD_FAILED,
   BUILD_FAILED,
+  type BuildMode,
   BuildResponse,
   COMMIT_PLAN_FILES_FAILED,
   CommitPlanFilesResponse,
   REJECT_FAILED,
   REVIEW_LOAD_FAILED,
   ReviewResponse,
+  SandboxStatusResponse,
   SessionRunResponse,
   type Run,
 } from '@ogden-agents/shared';
@@ -25,10 +28,20 @@ import { useSessionEvents } from '@/events/event-stream';
  * trigger a refetch (AD-7's pattern).
  */
 
-/** `POST /api/v1/workspaces/:wsId/builds`: builds ticket `ref` in its own worktree and `build` session. */
-export async function startBuild(wsId: string, ref: string, auth: Auth = tabAuth): Promise<BuildResponse> {
-  const json = await call(auth, apiPath(API_ROUTES.workspaceBuilds, { wsId }), postJson({ ref }), BUILD_FAILED);
+/**
+ * `POST /api/v1/workspaces/:wsId/builds`: builds ticket `ref` in its own
+ * worktree and `build` session. `mode: 'attended'` (story 5.6, the Build
+ * dialog's Build with me watching) builds with every tool call a card.
+ */
+export async function startBuild(wsId: string, ref: string, mode: BuildMode = 'unattended', auth: Auth = tabAuth): Promise<BuildResponse> {
+  const json = await call(auth, apiPath(API_ROUTES.workspaceBuilds, { wsId }), postJson(mode === 'attended' ? { ref, mode } : { ref }), BUILD_FAILED);
   return BuildResponse.parse(json);
+}
+
+/** `GET …/build-sandbox` (story 5.6): what a build's sandbox is here, in plain words, for the Build dialog. */
+export async function fetchBuildSandbox(wsId: string, auth: Auth = tabAuth) {
+  const json = await call(auth, apiPath(API_ROUTES.workspaceBuildSandbox, { wsId }), {}, BUILD_DIALOG_LOAD_FAILED);
+  return SandboxStatusResponse.parse(json).status;
 }
 
 /** `POST …/builds/:ref/commit-plan` (story 5.5): commits the ticket's uncommitted plan files, and only those. */

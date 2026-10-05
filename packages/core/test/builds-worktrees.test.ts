@@ -256,7 +256,8 @@ describe('the startup sweep (story 5.5)', () => {
     const h = await withRuns();
     rmSync(h.decided, { recursive: true, force: true });
     const calls: string[] = [];
-    const vcs: Pick<VcsPort, 'removeWorktree'> = {
+    const vcs: Pick<VcsPort, 'removeWorktree' | 'branchRevision'> = {
+      branchRevision: async () => undefined,
       async removeWorktree(_repo, path, options = {}) {
         calls.push(`${path} ${options.deleteBranch ?? ''}`);
       },

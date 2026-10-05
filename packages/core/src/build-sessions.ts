@@ -10,13 +10,28 @@ import type { SessionId } from '@ogden-agents/shared';
 import type { AgentPermissionDecision, AgentPermissionRequest } from './agent-port.js';
 import type { AgentSandbox } from './sandbox-port.js';
 
-export interface BuildSessionSetup {
+export interface UnattendedBuildSetup {
+  attended?: false;
   /** The run's worktree: the agent's folder. */
   cwd: string;
   sandbox: AgentSandbox;
+  /** Added to the agent's environment (story 5.6: the run's own git object store). */
+  env?: Readonly<Record<string, string>>;
   /** Core's answer to each permission request, by rule (never a card). */
   decide(request: AgentPermissionRequest): AgentPermissionDecision;
 }
+
+/**
+ * A build with the user watching (story 5.6): no sandbox, no policy, every
+ * tool call is a permission card at the `ask_every_time` level. It is only
+ * ever set for a run the user started with `mode: 'attended'`.
+ */
+export interface AttendedBuildSetup {
+  attended: true;
+  cwd: string;
+}
+
+export type BuildSessionSetup = UnattendedBuildSetup | AttendedBuildSetup;
 
 export interface BuildSessions {
   set(sessionId: SessionId, setup: BuildSessionSetup): void;

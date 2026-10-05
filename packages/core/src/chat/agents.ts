@@ -79,7 +79,10 @@ export function createAgents(
     // A `build` session (story 5.2) runs in its run's worktree, in its sandbox, and its permission
     // requests are answered by core's build policy, never a card. Without its setup it never starts.
     const build = session.kind === 'build' ? ctx.options.buildSessions?.get(session.id) : undefined;
-    const onPermissionRequest = build === undefined ? onPermissionRequestFor(session) : async (request: AgentPermissionRequest) => build.decide(request);
+    // An attended build (story 5.6) is the user's: every tool call is a card at the `ask_every_time` level, no rule allows one.
+    const unattended = build === undefined || build.attended === true ? undefined : build;
+    const onPermissionRequest =
+      build === undefined ? onPermissionRequestFor(session) : unattended === undefined ? onPermissionRequestFor(session, { attended: true }) : async (request: AgentPermissionRequest) => unattended.decide(request);
     // The agent the session was started with (epic 6), looked up for each start: never another one.
     const agent = agentOf(session.id);
     const agentId = agentIdOf(session);
@@ -89,11 +92,11 @@ export function createAgents(
     // The real-cased path: the case-folded key is for uniqueness only (AD-2).
     const input = {
       cwd: build?.cwd ?? workspace.realPath ?? workspace.path,
-      env: { ...agentEnv(session.id) },
+      env: { ...agentEnv(session.id), ...unattended?.env },
       onPermissionRequest,
       ...(entry.guardsRequested ? { protectedPaths: PROTECTED_PATHS } : {}),
       ...(startModel === null ? {} : { model: startModel }),
-      ...(build === undefined ? {} : { sandbox: build.sandbox }),
+      ...(unattended === undefined ? {} : { sandbox: unattended.sandbox }),
     };
     const previous = storedAgentSessionId(session.id);
     // A chat that reached an agent before, and has none now, reopens that agent's session (2.7).

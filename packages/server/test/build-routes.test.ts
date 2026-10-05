@@ -19,7 +19,7 @@
  *   run (`merge_conflict`); Reject removes the worktree, keeps the branch,
  *   stops the run and leaves the ticket untouched.
  */
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { createFixedSandbox } from '@ogden-agents/adapters';
@@ -35,6 +35,7 @@ import {
   ReviewResponse,
   RUN_REASON_NO_NETWORK,
   runPhase,
+  SandboxStatusResponse,
   SessionRunResponse,
   UNKNOWN_BUILD_AGENT_MESSAGE,
   WorkspaceResponse,
@@ -96,6 +97,19 @@ async function setup(options: { builds?: boolean; sandbox?: boolean } = {}) {
   return { repo, markers, store, server, tab, wsId, build, review, settled };
 }
 
+/** Every file under an object folder, relative and sorted. */
+function objectFiles(objectsDir: string): string[] {
+  const out: string[] = [];
+  const walk = (folder: string, prefix: string) => {
+    for (const entry of readdirSync(folder, { withFileTypes: true })) {
+      if (entry.isDirectory()) walk(join(folder, entry.name), `${prefix}${entry.name}/`);
+      else out.push(`${prefix}${entry.name}`);
+    }
+  };
+  walk(objectsDir, '');
+  return out.sort();
+}
+
 /** The repo's branches. */
 const branches = (repo: string) => fixtureGit(repo, 'branch', '--format=%(refname:short)').trim().split('\n').sort();
 
@@ -134,6 +148,8 @@ describe('Unattended builds over REST (story 5.2)', () => {
 
   it('builds in a worktree under the data folder, ends verified, and Approve merges once with the plan done and no hook run', async () => {
     const { server, tab, wsId, build, review, settled, repo, markers, store } = await setup();
+    const repoObjects = join(repo.path, '.git', 'objects');
+    const objectsBefore = objectFiles(repoObjects);
     const started = await build('1.1');
     expect(started.status).toBe(201);
     const { run, session } = BuildResponse.parse(await started.json());
@@ -154,6 +170,13 @@ describe('Unattended builds over REST (story 5.2)', () => {
     expect(ended.files).toEqual(expect.arrayContaining([FAKE_BUILD_PLAN, 'src/built-1.1.txt']));
     expect(ended.diff).toContain('Built 1.1 by the fake agent.');
     expect(ended.merged).toBe(false);
+    // Story 5.6: the agent's commit went to the run's own object store; the repo's objects are exactly as they were,
+    // and the commit the review shows is not in the repo yet.
+    const runStore = join(data, 'r', run.branch!.split('/')[1]!, 'objects');
+    expect(statSync(runStore).isDirectory()).toBe(true);
+    expect(objectFiles(runStore).length).toBeGreaterThan(0);
+    expect(objectFiles(repoObjects)).toEqual(objectsBefore);
+    expect(() => fixtureGit(repo.path, 'cat-file', '-e', ended.headRevision!)).toThrow();
     // The write inside the worktree was allowed; the one outside it refused.
     expect(existsSync(join(worktree, 'src', 'built-1.1.txt'))).toBe(true);
     expect(existsSync(join(data, 'w', 'escape-1.1.txt'))).toBe(false);
@@ -196,6 +219,10 @@ describe('Unattended builds over REST (story 5.2)', () => {
     expect(fixtureGit(repo.path, 'worktree', 'list', '--porcelain').split(/\r?\n/).filter((line) => line.startsWith('worktree '))).toHaveLength(1);
     expect((await review('1.1')).merged).toBe(true);
     expect((await refusalOf(await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildApprove, { wsId, ref: '1.1' }), { revision: reviewed }))).code).toBe('checks_failed');
+    // Story 5.6: approve imported the run's objects through git, the store went with the run, and the repo is sound.
+    expect(fixtureGit(repo.path, 'cat-file', '-t', reviewed!).trim()).toBe('commit');
+    expect(existsSync(runStore)).toBe(false);
+    expect(() => fixtureGit(repo.path, 'fsck', '--strict', '--no-dangling')).not.toThrow();
   });
 
   it('a conflicting merge is aborted with the checkout unchanged and blocks the run; Reject discards the worktree and branch, keeps the ticket', async () => {
@@ -284,7 +311,10 @@ describe('Unattended builds over REST (story 5.2)', () => {
     const wsId = WorkspaceResponse.parse(await (await request(server, tab, 'POST', API_ROUTES.workspaces, { path: repo.path })).json()).workspace.id;
     await request(server, tab, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: ['board', 'builds'] });
     await request(server, tab, 'PUT', apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId }));
-    const { run } = BuildResponse.parse(await (await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId }), { ref: '1.1' })).json());
+    const started = await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId }), { ref: '1.1' });
+    const startedBody: unknown = await started.json();
+    if (started.status !== 201) throw new Error(`build start answered ${started.status}: ${JSON.stringify(startedBody)}`);
+    const { run } = BuildResponse.parse(startedBody);
     let review: ReviewResponse | undefined;
     await waitFor(async () => (review = ReviewResponse.parse(await (await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceBuild, { wsId, ref: '1.1' }))).json())).outcome !== 'running', 'the run to end', 15_000);
     expect(review!.run).toMatchObject({ outcome: 'blocked', blockedCode: 'intent_gap' });
@@ -336,5 +366,52 @@ describe('Unattended builds over REST (story 5.2)', () => {
     expect(await refusalOf(await request(on.server, on.tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId: on.wsId }), { agent: 'codex', ref: '1.1' }))).toEqual({ status: 400, code: 'invalid_request', message: UNKNOWN_BUILD_AGENT_MESSAGE });
     expect(on.server.core.entities.listSessions(on.wsId)).toEqual([]);
     expect(branches(on.repo.path)).toEqual(['main']);
+  });
+});
+
+const answered = new Set<string>();
+
+describe('the sandbox status and attended builds over REST (story 5.6)', () => {
+  it('GET build-sandbox answers what the sandbox is in words, behind the builds piece', async () => {
+    const ready = await setup();
+    const status = SandboxStatusResponse.parse(await (await request(ready.server, ready.tab, 'GET', apiPath(API_ROUTES.workspaceBuildSandbox, { wsId: ready.wsId }))).json()).status;
+    expect(status).toMatchObject({ available: true, kind: 'test', choices: [] });
+
+    const closed = await setup({ sandbox: false });
+    const none = SandboxStatusResponse.parse(await (await request(closed.server, closed.tab, 'GET', apiPath(API_ROUTES.workspaceBuildSandbox, { wsId: closed.wsId }))).json()).status;
+    expect(none).toMatchObject({ available: false, kind: null, summary: 'none here', choices: ['other_agent', 'install_docker', 'attended'] });
+
+    const off = await setup({ builds: false });
+    expect((await refusalOf(await request(off.server, off.tab, 'GET', apiPath(API_ROUTES.workspaceBuildSandbox, { wsId: off.wsId })))).code).toBe('feature_off');
+  });
+
+  it('with no sandbox, only an explicit attended build starts: a card at ask_every_time for each tool call, no sandbox, the same review', async () => {
+    const { server, tab, wsId, build, settled, repo } = await setup({ sandbox: false });
+    // The default is unattended: refused, nothing made.
+    expect((await refusalOf(await build('1.1'))).code).toBe('sandbox_unavailable');
+    expect(existsSync(join(server.dataDir, 'w'))).toBe(false);
+
+    const started = await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId }), { ref: '1.1', mode: 'attended' });
+    expect(started.status).toBe(201);
+    const { run, session } = BuildResponse.parse(await started.json());
+    expect(run.sandbox).toBe('attended');
+    // Each tool call waits for the user as a card at the ask_every_time level (the fake agent asks twice).
+    const pendingCard = () => server.core.events.readAfter(0).find((event) => event.streamId === session.id && event.type === 'permission.requested' && !answered.has(event.payload.requestId));
+    for (let asked = 1; asked <= 2; asked++) {
+      await waitFor(() => pendingCard() !== undefined, 'a permission card', 15_000);
+      const card = pendingCard();
+      if (card?.type !== 'permission.requested') throw new Error('not a card');
+      expect(card.payload).toMatchObject({ cautionLevel: 'ask_every_time', alwaysAllowScope: null });
+      answered.add(card.payload.requestId);
+      // Allow the write in the worktree; deny the one outside it.
+      const decided = await request(server, tab, 'POST', apiPath(API_ROUTES.sessionPermission, { wsId, sesId: session.id, requestId: card.payload.requestId }), { decision: asked === 1 ? 'allow_once' : 'deny' });
+      expect(decided.status).toBe(204);
+    }
+    const ended = await settled('1.1');
+    expect(ended.outcome).toBe('verified');
+    expect(ended.run.sandbox).toBe('attended');
+    // No object store for an attended run: its git wrote to the repo's own objects.
+    expect(existsSync(join(realpathSync.native(server.dataDir), 'r', run.branch!.split('/')[1]!, 'objects'))).toBe(false);
+    expect(fixtureGit(repo.path, 'cat-file', '-t', ended.headRevision!).trim()).toBe('commit');
   });
 });

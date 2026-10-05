@@ -16,6 +16,8 @@
 import { lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statfsSync, unlinkSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import type { Run, WorkspaceId } from '@ogden-agents/shared';
+import { removeObjectStore } from './build-object-store.js';
+import { runShortOf } from './build-run-folder.js';
 import type { Entities } from './entities.js';
 import type { VcsPort } from './vcs-port.js';
 
@@ -111,7 +113,7 @@ export function freeBytesOf(dir: string): number | undefined {
 
 export interface RunCleanupDeps {
   dataDir: string;
-  vcs: Pick<VcsPort, 'removeWorktree'>;
+  vcs: Pick<VcsPort, 'removeWorktree' | 'branchRevision'>;
   /** Whether `branch` is one Ogden made (`ogden/<run8>/…`). */
   isBuildBranch: (branch: string) => boolean;
 }
@@ -125,6 +127,9 @@ export async function removeRunWorktree(deps: RunCleanupDeps, repoPath: string, 
   if (run.worktreePath === null || !isOwnWorktreePath(deps.dataDir, run.worktreePath)) return;
   const branch = run.branch !== null && deps.isBuildBranch(run.branch) ? run.branch : undefined;
   await deps.vcs.removeWorktree(repoPath, run.worktreePath, { deleteBranch: branch, mergedOnly: run.decision === 'approved' });
+  // The run's own object store (story 5.6) goes with its branch: only after the removal worked, so a retry still has what the branch names.
+  const short = runShortOf(run);
+  if (short !== undefined) removeObjectStore(deps.dataDir, short);
 }
 
 export interface SweepDeps extends RunCleanupDeps {
@@ -230,6 +235,31 @@ export async function sweepRunBranches(deps: SweepDeps, now: number = Date.now()
     } catch (error) {
       try {
         deps.onError?.('branch', error);
+      } catch {
+        // Logging never stops the sweep.
+      }
+    }
+  }
+}
+
+/**
+ * Removes the object store (story 5.6) of every decided run whose branch is
+ * gone (a removal that failed after its worktree went). A run whose branch
+ * still exists keeps it: the branch names objects only the store holds, and
+ * the branch sweep removes both together. Errors are reported.
+ */
+export async function sweepObjectStores(deps: SweepDeps): Promise<void> {
+  for (const run of deps.entities.listRunsWithWorktree()) {
+    if (worktreeDisposition(run) === 'keep' || run.branch === null || !deps.isBuildBranch(run.branch)) continue;
+    const short = runShortOf(run);
+    if (short === undefined) continue;
+    try {
+      const repoPath = deps.repoOf(run.workspaceId);
+      if (repoPath !== undefined && (await deps.vcs.branchRevision(repoPath, run.branch)) !== undefined) continue;
+      removeObjectStore(deps.dataDir, short);
+    } catch (error) {
+      try {
+        deps.onError?.('object store', error);
       } catch {
         // Logging never stops the sweep.
       }

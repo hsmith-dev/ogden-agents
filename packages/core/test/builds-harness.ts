@@ -5,8 +5,8 @@
  */
 import { existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { SessionId, TicketDetail, TicketStatus, WorkspaceId } from '@ogden-agents/shared';
-import { createBuilds, type BuildRunnerPort, type BuildsUseCases, type BuildRefusedError, type Core, type TicketStorePort, type VcsCheck, type VcsHead, type VcsPort } from '../src/index.js';
+import type { SandboxStatus, SessionId, TicketDetail, TicketStatus, WorkspaceId } from '@ogden-agents/shared';
+import { createBuilds, type BuildRunnerPort, type BuildSessionSetup, type BuildsUseCases, type BuildRefusedError, type Core, type SandboxCheck, type SandboxPort, type TicketStorePort, type UnattendedBuildSetup, type VcsCheck, type VcsHead, type VcsPort } from '../src/index.js';
 import { openTestCore, tempDir, unusedCatalogParts } from './helpers.js';
 
 export const PLAN = '_bmad-output/initiative-demo/epic-first/story-thing-plan.md';
@@ -19,6 +19,23 @@ export const testRunner: BuildRunnerPort = {
   readResult: async () => undefined,
 };
 export const REVISION = 'a'.repeat(40);
+
+/** A sandbox port answering `check` from `answer` (story 5.6: and a status that agrees). */
+export function fakeSandbox(answer: () => SandboxCheck): SandboxPort {
+  const status = (): SandboxStatus => {
+    const check = answer();
+    return check.available
+      ? { platform: 'other', available: true, kind: check.kind, summary: 'ok', probes: [], choices: [], installHint: null }
+      : { platform: 'other', available: false, kind: null, summary: check.reason, probes: [], choices: [...(check.choices ?? [])], installHint: null };
+  };
+  return { check: async () => answer(), status: async () => status() };
+}
+
+/** A session's setup, which must be an unattended one (story 5.6). */
+export function unattendedOf(setup: BuildSessionSetup | undefined): UnattendedBuildSetup {
+  if (setup === undefined || setup.attended === true) throw new Error('expected an unattended build setup');
+  return setup;
+}
 
 export interface Ticket {
   ref: string;
@@ -117,10 +134,17 @@ export function fakeVcs() {
     ancestor: true,
     committed: [] as string[][],
     removeFails: false,
+    importResult: 'nothing' as 'imported' | 'nothing' | 'refused',
+    /** Every `importObjects` call: the branch and its base. */
+    imports: [] as Array<[string, string]>,
   };
   const vcs: VcsPort = {
     check: async () => state.git,
     isAncestor: async () => state.ancestor,
+    async importObjects(_repo, branch, base) {
+      state.imports.push([branch, base]);
+      return state.importResult;
+    },
     async commitPaths(_repo, paths) {
       calls.push(`commit paths ${paths.join(',')}`);
       state.committed.push([...paths]);
@@ -234,7 +258,7 @@ export async function harness({ pieces = ['board', 'builds'] as const, trusted =
     events: core.events,
     tickets: tickets.store,
     vcs: git.vcs,
-    sandbox: { check: async () => (sandbox.available ? { available: true, kind: 'test' } : { available: false, reason: 'none' }) },
+    sandbox: fakeSandbox(() => (sandbox.available ? { available: true, kind: 'test' } : { available: false, reason: 'none' })),
     runner: testRunner,
     chat: {
       createChatSession: async (wsId, options) => core.entities.createSession({ workspaceId: wsId, kind: options?.kind ?? 'chat' }),

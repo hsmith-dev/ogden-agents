@@ -69,6 +69,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, posix, relative } from 'node:path';
 import {
+  ATTENDED_SANDBOX,
   ALL_READY_NOT_AVAILABLE_MESSAGE,
   ALREADY_MERGED_MESSAGE,
   ApproveBuildRequest,
@@ -107,6 +108,7 @@ import {
   RUN_REASON_SCRIPTS_CHANGED,
   RUN_REASON_START_FAILED,
   RUN_REASON_UNREADABLE,
+  OBJECTS_NOT_IMPORTED_MESSAGE,
   SANDBOX_UNAVAILABLE_MESSAGE,
   StartBuildRequest,
   TICKET_REF_PATTERN,
@@ -115,10 +117,12 @@ import {
   VCS_UNAVAILABLE_MESSAGE,
   type BlockedCode,
   type BuildAgent,
+  type BuildMode,
   type BuildRunResult,
   type CommitPlanFilesResponse,
   type ReviewResponse,
   type Run,
+  type SandboxStatus,
   type Session,
   type SessionId,
   type TicketDetail,
@@ -132,8 +136,9 @@ import type { BmadSourceUseCases } from './bmad-source-port.js';
 import { BUILD_PERMISSION_DENIED, decideBuildPermission, nodePathNormalizer, type PathNormalizer } from './build-permission-policy.js';
 import type { BuildRunnerPort } from './build-runner-port.js';
 import { createRunActivityRecorder, runFolderOf, runShortOf, writeRunResult } from './build-run-folder.js';
-import { ensureWorktreesRoot, freeBytesOf, removeRunWorktree, sweepRunBranches, sweepWorktrees } from './build-worktrees.js';
-import type { BuildSessions } from './build-sessions.js';
+import { createObjectStore, ObjectStoreError, objectStoreEnv, objectStoreOf, removeObjectStore } from './build-object-store.js';
+import { ensureWorktreesRoot, freeBytesOf, removeRunWorktree, sweepObjectStores, sweepRunBranches, sweepWorktrees } from './build-worktrees.js';
+import type { BuildSessionSetup, BuildSessions } from './build-sessions.js';
 import type { Chat } from './chat/types.js';
 import type { Entities } from './entities.js';
 import { BuildRefusedError, NotFoundError, NotImplementedError, ScriptsChangedError, ValidationError } from './errors.js';
@@ -166,6 +171,8 @@ const CREDENTIAL_FOLDERS = ['.ssh', '.aws', '.gnupg', join('.config', 'gh'), '.n
 export interface BuildsUseCases {
   /** Builds one ticket (see the header). Rejects as the header says; nothing is written then. */
   start(workspaceId: WorkspaceId, request: unknown): Promise<{ run: Run; session: Session }>;
+  /** What a build's sandbox is here, in plain words, for the Build dialog (story 5.6). Probes only. */
+  sandboxStatus(workspaceId: WorkspaceId): Promise<SandboxStatus>;
   /** The ticket's latest run for the review page. `NotFoundError` without one. */
   review(workspaceId: WorkspaceId, ref: string): Promise<ReviewResponse>;
   /** Approve (see the header): `request` is `ApproveBuildRequest`, the revision the user reviewed. */
@@ -415,13 +422,27 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
 
   const cleanupDeps = { dataDir, vcs, isBuildBranch };
 
-  /** What the run's agent may write: its worktree, the run's own git paths; never hooks, config, `objects/info` or another ref. */
-  const sandboxFor = async (kind: string, worktreePath: string, branch: string): Promise<{ sandbox: AgentSandbox; gitWritable: string[] }> => {
+  /**
+   * What the run's agent may write: its worktree, the run's own git paths and
+   * its own object store (story 5.6); never the repo's objects, hooks, config,
+   * `objects/info` or another ref. Its git writes objects to the store and
+   * reads the repo's as an alternate (`env`).
+   */
+  const sandboxFor = async (kind: string, worktreePath: string, branch: string, runShort: string): Promise<{ sandbox: AgentSandbox; gitWritable: string[]; env: Record<string, string> }> => {
     // Only the run's own branch's ref and reflog folders (`ogden/<run8>/`), never the user's refs.
     const git = await vcs.worktreeGitPaths(worktreePath, branch);
-    const gitWritable = [join(git.commonDir, 'objects'), git.branchRefDir, git.branchLogDir, git.gitDir];
+    let store: string;
+    let env: Record<string, string>;
+    try {
+      store = createObjectStore(dataDir, runShort);
+      env = objectStoreEnv(store, join(git.commonDir, 'objects'));
+    } catch (error) {
+      if (error instanceof ObjectStoreError) throw new BuildRefusedError('vcs_unavailable', error.message);
+      throw error;
+    }
+    const gitWritable = [store, git.branchRefDir, git.branchLogDir, git.gitDir];
     const deniedPaths = [
-      join(git.commonDir, 'objects', 'info'),
+      join(git.commonDir, 'objects'),
       join(git.commonDir, 'hooks'),
       join(git.commonDir, 'config'),
       ...PROTECTED_PATHS.folders.map((folder) => join(worktreePath, folder)),
@@ -429,13 +450,27 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     ];
     const home = deps.homeDir;
     const deniedReads = [paths.realpath(dataDir) ?? dataDir, ...(home === undefined ? [] : CREDENTIAL_FOLDERS.map((folder) => join(home, folder)))];
-    return { sandbox: { kind, writableRoots: [worktreePath, ...gitWritable], deniedPaths, deniedReads, allowedReads: [worktreePath] }, gitWritable };
+    return { sandbox: { kind, writableRoots: [worktreePath, ...gitWritable], deniedPaths, deniedReads, allowedReads: [worktreePath, store] }, gitWritable, env };
   };
 
-  const startLocked = async (workspaceId: WorkspaceId, repoPath: string, ref: string, agent: BuildAgent): Promise<{ run: Run; session: Session }> => {
-    // Fail closed: never an unsandboxed unattended run (user decision 2026-10-04); the sandbox says why.
+  /** The sandbox that holds an unattended run, or the refusal (fail closed: never an unsandboxed unattended run, user decision 2026-10-04). */
+  const requireSandbox = async (agent: BuildAgent): Promise<string> => {
     const check = await sandbox.check({ agent });
     if (!check.available) throw new BuildRefusedError('sandbox_unavailable', `${SANDBOX_UNAVAILABLE_MESSAGE} ${check.reason}`.trim());
+    return check.kind;
+  };
+
+  /** The session setup of a sandboxed run: its sandbox, its object store's environment and core's permission policy. */
+  const unattendedSetup = async (kind: string, worktreePath: string, branch: string, runShort: string): Promise<BuildSessionSetup> => {
+    const { sandbox: contained, gitWritable, env } = await sandboxFor(kind, worktreePath, branch, runShort);
+    const scope = { worktree: worktreePath, gitWritable, protectedPaths: PROTECTED_PATHS };
+    return { cwd: worktreePath, sandbox: contained, env, decide: (request) => decideBuildPermission(request, scope, paths) };
+  };
+
+  const startLocked = async (workspaceId: WorkspaceId, repoPath: string, ref: string, agent: BuildAgent, mode: BuildMode): Promise<{ run: Run; session: Session }> => {
+    // Fail closed: an unattended run needs a sandbox that says it is there; only the user's own `attended` mode runs without one (story 5.6).
+    const attended = mode === 'attended';
+    const sandboxKind = attended ? ATTENDED_SANDBOX : await requireSandbox(agent);
     await requireGit();
     if (entities.activeRunForTicket(workspaceId, ref) !== undefined) throw new BuildRefusedError('run_active', RUN_ACTIVE_MESSAGE);
     // A run paused at a checkpoint is still this ticket's build (story 5.4): resume or reject it first.
@@ -488,11 +523,11 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         throw error;
       }
       for (const folder of PRECREATED_FOLDERS) mkdirSync(join(real, folder), { recursive: true });
-      const { sandbox: contained, gitWritable } = await sandboxFor(check.kind, real, branch);
+      // An attended run has no sandbox, so no object store: the user answers every card. A sandboxed run's git writes its own store.
+      const setup = attended ? ({ attended: true, cwd: real } as const) : await unattendedSetup(sandboxKind, real, branch, runShort);
       session = await chat.createChatSession(workspaceId, { kind: 'build', agentId: runner.agent });
-      run = entities.createRun({ sessionId: session.id, ticketRef: ref, worktreePath: real, sandbox: check.kind, branch, baseRevision: head.revision, baseBranch: head.branch, agent });
-      const scope = { worktree: real, gitWritable, protectedPaths: PROTECTED_PATHS };
-      buildSessions.set(session.id, { cwd: real, sandbox: contained, decide: (request) => decideBuildPermission(request, scope, paths) });
+      run = entities.createRun({ sessionId: session.id, ticketRef: ref, worktreePath: real, sandbox: sandboxKind, branch, baseRevision: head.revision, baseBranch: head.branch, agent });
+      buildSessions.set(session.id, setup);
       if (ticket.plan_checkpoint === true) {
         // The plan checkpoint (story 5.4): paused before the prompt is sent; `resume` sends it.
         const reason = blockedSentence('checkpoint_plan');
@@ -506,7 +541,12 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       return { run, session };
     } catch (error) {
       if (session !== undefined) buildSessions.delete(session.id);
-      // Nothing of a run that didn't start is left behind: no worktree, and no branch unless a run names it.
+      // Nothing of a run that didn't start is left behind: no worktree, no object store, and no branch unless a run names it.
+      try {
+        removeObjectStore(dataDir, runShort);
+      } catch (cleanup) {
+        report(run?.id ?? 'none', 'cleanup', cleanup);
+      }
       await vcs.removeWorktree(repoPath, worktreePath, run === undefined ? { deleteBranch: branch } : {}).catch((cleanup: unknown) => report(run?.id ?? 'none', 'cleanup', cleanup));
       if (run !== undefined) {
         try {
@@ -612,17 +652,17 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     const run = entities.getRun(runId);
     if (run === undefined || run.workspaceId !== workspaceId) throw new NotFoundError('run', runId);
     if (!atCheckpoint(run) || run.worktreePath === null || run.branch === null || !isBuildBranch(run.branch)) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
-    // Fail closed, as at the start: never an unsandboxed unattended run.
-    const check = await sandbox.check({ agent: run.agent ?? runner.agent });
-    if (!check.available) throw new BuildRefusedError('sandbox_unavailable', `${SANDBOX_UNAVAILABLE_MESSAGE} ${check.reason}`.trim());
+    // Fail closed, as at the start: never an unsandboxed unattended run (a build the user watches is the one without).
+    const attended = run.sandbox === ATTENDED_SANDBOX;
+    const sandboxKind = attended ? ATTENDED_SANDBOX : await requireSandbox(run.agent ?? runner.agent);
     if (!(await vcs.worktreeExists(repoPath, run.worktreePath))) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
     // The worktree's scripts must still be the trusted ones before anything runs there.
     await trust.requireScriptsMatch(workspaceId, run.worktreePath);
     if (buildSessions.get(run.sessionId) === undefined) {
       // The server restarted since the pause: the session's setup is rebuilt from the run, so the next prompt starts a fresh agent there.
-      const { sandbox: contained, gitWritable } = await sandboxFor(check.kind, run.worktreePath, run.branch);
-      const scope = { worktree: run.worktreePath, gitWritable, protectedPaths: PROTECTED_PATHS };
-      buildSessions.set(run.sessionId, { cwd: run.worktreePath, sandbox: contained, decide: (request) => decideBuildPermission(request, scope, paths) });
+      const short = runShortOf(run);
+      if (short === undefined) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
+      buildSessions.set(run.sessionId, attended ? { attended: true, cwd: run.worktreePath } : await unattendedSetup(sandboxKind, run.worktreePath, run.branch, short));
     }
     const resumed = entities.setRunOutcome(run.id, 'running', null);
     if (run.blockedCode === 'checkpoint_plan') {
@@ -695,7 +735,12 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       // Each agent builds through its own runner (epic 6 adds runners, not core); v1 has Claude Code's.
       const agent = parsed.data.agent ?? runner.agent;
       if (agent !== runner.agent) throw new ValidationError(UNKNOWN_BUILD_AGENT_MESSAGE, [{ path: ['agent'], message: UNKNOWN_BUILD_AGENT_MESSAGE }]);
-      return serializedByRepo(repoPath, () => startLocked(workspaceId, repoPath, ref, agent));
+      return serializedByRepo(repoPath, () => startLocked(workspaceId, repoPath, ref, agent, parsed.data.mode));
+    },
+
+    async sandboxStatus(workspaceId) {
+      bmad.requireBmadFeature(workspaceId, 'builds');
+      return sandbox.status({ agent: runner.agent });
     },
 
     async review(workspaceId, ref) {
@@ -728,6 +773,13 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
           throw new BuildRefusedError('checkout_dirty', CHECKOUT_MOVED_MESSAGE);
         }
         await chat.releaseAgent(workspaceId, run.sessionId).catch((error: unknown) => report(run.id, 'release', error));
+        // A sandboxed run's objects live only in its store: without it nothing can be merged (review: never a confusing git error).
+        const short = runShortOf(run);
+        if (run.sandbox !== ATTENDED_SANDBOX && short !== undefined && !existsSync(objectStoreOf(dataDir, short))) throw new BuildRefusedError('checks_failed', OBJECTS_NOT_IMPORTED_MESSAGE);
+        // The run's own objects come into the repo through git's own strict unpacking, never as files the agent wrote (story 5.6).
+        if (run.baseRevision !== null && (await vcs.importObjects(repoPath, run.branch, run.baseRevision)) === 'refused') {
+          throw new BuildRefusedError('checks_failed', OBJECTS_NOT_IMPORTED_MESSAGE);
+        }
         const merged = await vcs.merge(repoPath, reviewed);
         if (merged === 'conflict') {
           entities.setRunOutcome(run.id, 'blocked', MERGE_CONFLICT_MESSAGE, { blockedCode: 'merge_conflict' });
@@ -814,6 +866,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       }
       // Awaited, so no git of the sweep outlives it or runs beside a served build (review).
       await sweepRunBranches(sweepDeps).catch((error: unknown) => report('none', 'sweep branch', error));
+      await sweepObjectStores(sweepDeps).catch((error: unknown) => report('none', 'sweep objects', error));
     },
 
     async runOfSession(workspaceId, sessionId) {

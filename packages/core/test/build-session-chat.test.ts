@@ -82,6 +82,38 @@ describe('a build session in the chat core (story 5.2)', () => {
     }
   });
 
+  it('an attended build (story 5.6) starts in the worktree with no sandbox, its requests are cards at ask_every_time', async () => {
+    const core = openTestCore();
+    const agent = askingAgent();
+    const buildSessions = createBuildSessions();
+    const chat = createChat({ dataDir: tempDir('ogden-agents-data-'), entities: core.entities, sessionEvents: core.sessionEvents, agents: soleAgent(agent.port), buildSessions, permissions: core.permissions });
+    try {
+      const workspace = chat.openWorkspace(tempDir('ogden-agents-repo-'));
+      const session = await chat.createChatSession(workspace.id, { kind: 'build' });
+      buildSessions.set(session.id, { attended: true, cwd: '/w/y' });
+      // The user does not type into a build session, attended or not.
+      expect(() => chat.sendMessage(workspace.id, session.id, 'hello')).toThrow(BuildSessionReadOnlyError);
+      expect(() => chat.setPermissionMode(workspace.id, session.id, 'skip_all', { confirm: true })).toThrow(BuildSessionReadOnlyError);
+
+      chat.sendMessage(workspace.id, session.id, '/build 1.1', { build: true });
+      for (let tries = 0; tries < 50 && agent.starts.length === 0; tries++) await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(agent.starts).toHaveLength(1);
+      expect(agent.starts[0]).toMatchObject({ cwd: '/w/y' });
+      expect(agent.starts[0]!.sandbox).toBeUndefined();
+      // The request waits for the user as a card, at the ask_every_time level.
+      const requested = () => core.events.readAfter(0).filter((event) => event.streamId === session.id && event.type === 'permission.requested');
+      for (let tries = 0; tries < 50 && requested().length === 0; tries++) await new Promise((resolve) => setTimeout(resolve, 10));
+      const [card] = requested();
+      expect(card?.payload).toMatchObject({ cautionLevel: 'ask_every_time', alwaysAllowScope: null });
+      expect(agent.decisions).toEqual([]);
+      core.permissions.decide(workspace.id, session.id, (card!.payload as { requestId: string }).requestId, { decision: 'allow_once' });
+      await chat.settled();
+      expect(agent.decisions).toEqual([{ outcome: 'allow_once' }]);
+    } finally {
+      await chat.close();
+    }
+  });
+
   it('a build session without its setup (after a restart) never starts an agent', async () => {
     const core = openTestCore();
     const agent = askingAgent();

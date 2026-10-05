@@ -17,6 +17,9 @@
  *   revision) → `ReviewResponse`; 400 without it, 409 `checks_failed`
  *   (also when the branch moved since), `checkout_dirty`, `merge_conflict`.
  * - `POST …/builds/:ref/reject` → `ReviewResponse`; 409 `run_active`, `checks_failed`.
+ * - `GET …/build-sandbox` (story 5.6) → 200 `SandboxStatusResponse`: what a
+ *   build's sandbox is on this computer, in plain words, and the Build dialog's
+ *   choices. Probes only.
  * - `POST …/builds/:ref/commit-plan` (story 5.5, no body) →
  *   `CommitPlanFilesResponse`: **Commit plan files**; 409 `checkout_dirty`,
  *   `vcs_unavailable`.
@@ -48,7 +51,7 @@ import {
   type BmadScriptTrust,
   type BuildsUseCases,
 } from '@ogden-agents/core';
-import { API_ROUTES, BMAD_NOT_DOWNLOADED_MESSAGE, BuildResponse, CommitPlanFilesResponse, ReviewResponse, RunResponse, SessionId, SessionRunResponse } from '@ogden-agents/shared';
+import { API_ROUTES, BMAD_NOT_DOWNLOADED_MESSAGE, BuildResponse, CommitPlanFilesResponse, ReviewResponse, RunResponse, SandboxStatusResponse, SessionId, SessionRunResponse } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { bmadPieceRoutes } from './bmad-pieces.js';
@@ -156,6 +159,16 @@ export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, log 
       const review = ReviewResponse.parse(await builds.reject(workspaceId, c.req.param('ref') ?? ''));
       log.info('build rejected', { workspaceId, runId: review.run.id, ref: review.run.ticketRef });
       return c.json(review);
+    } catch (error) {
+      return refused(c, workspaceId, error);
+    }
+  });
+
+  // Story 5.6: what a build's sandbox is here, in plain words (probes only; the Build dialog's text).
+  routes.get('builds', API_ROUTES.workspaceBuildSandbox, async (c, { workspaceId }) => {
+    if (builds === undefined) return notImplemented(c);
+    try {
+      return c.json(SandboxStatusResponse.parse({ status: await builds.sandboxStatus(workspaceId) }));
     } catch (error) {
       return refused(c, workspaceId, error);
     }

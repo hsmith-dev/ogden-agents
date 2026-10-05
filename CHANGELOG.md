@@ -2,6 +2,10 @@
 
 Every release of the `ogden-agents` npm package. Versions follow [semantic versioning](https://semver.org/); before 1.0.0, a minor version may change behavior. How a release is made is in [RELEASING.md](RELEASING.md).
 
+## Unreleased
+
+- **Continue a chat with another agent.** When a chat's agent runs out of usage (a plan or rate limit), the error says so and offers **Continue with another agent**; the chat's header menu offers it any time the chat is idle. Ogden Agents builds a summary of the chat itself (no model involved: the goal, the files changed, what was done, and the latest messages, with keys and tokens masked), shows which provider will receive it, and lets you edit it before anything is sent. The same chat then continues with the other agent behind a "Continued with" divider, keeping its permission mode when the new agent offers it (otherwise Ask). Switch back the same way later; the first agent picks up its own session.
+
 ## 0.5.0 — Antigravity beside Claude Code
 
 Published first as `0.5.0-rc.1` on the `next` dist-tag (`npx ogden-agents@next`), then as `0.5.0`. Each chat picks its agent: Claude Code, or Google's Antigravity, which Ogden Agents installs, signs into and runs for you. Both can chat at once, in any project.

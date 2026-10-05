@@ -125,6 +125,7 @@ graph LR
   - The live run view is the session view in read-only mode.
   - Ogden Agents records no cost or token usage.
   - Note (epic 6, user-approved 2026-10-02): a session carries `agentId`, set at creation and never changed (rows stored before read as `claude-code`), and a workspace carries a default agent. A run's agent is Claude Code in v1 (builds with other agents are v2, epic 8). No rule changes.
+  - Note (handoff, user decision 2026-10-04): a chat's `agentId` changes only when the user confirms continuing it with another agent, recorded as `session.agent_changed` (previous agent, the brief sent, whether the agent resumes its own session). Each agent's own session id stays an adapter ref (`agentSessionId@<agentId>`, AD-9). The brief is built by core from the session's events, masked with the shared secret patterns (AD-16), capped per agent's descriptor, and sent only after the user saw which provider receives it. No rule changes.
 
 ### AD-9 — Ogden Agents owns identity [ADOPTED]
 

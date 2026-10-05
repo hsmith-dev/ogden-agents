@@ -117,6 +117,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - 14.10 (proposed): An approved env or printenv card puts an endpoint's key into the harness's tool output and so into opencode.db. From 14.2 review. (log: "An approved env or printenv card puts an endpoint's key into the harness's tool output and so into opencode.db")
 - 14.10 (proposed): test-hooks.ts is over 600 lines after the Local model hooks. From 14.2 review. (log: "test-hooks.ts is over 600 lines after the Local model hooks")
 - 14.10 (proposed): CI never unpacks the real OpenCode archives with the app's extractors. From 14.2 review. (log: "CI never unpacks the real OpenCode archives with the app's extractors")
+- 14.10 (proposed): The harness's own chat requests may follow a redirect from a confirmed host to an unconfirmed one. From 14.3 review. (log: "The harness's own chat requests may follow a redirect from a confirmed host to an unconfirmed one")
+- 14.10 (proposed): Endpoint key and database steps are not one transaction (set, remove and remove key races leave an orphan keychain entry). From 14.3 review. (log: "Endpoint key and database steps are not one transaction (set, remove and remove key races leave an orphan keychain entry)")
+- 14.10 (proposed): shared/src/events.ts is over 600 lines and shared compiles with DOM types. From 14.3 review. (log: "shared/src/events.ts is over 600 lines and shared compiles with DOM types")
 
 ## Log
 
@@ -809,3 +812,12 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-tracer-bullet-one-local-model-chat-against-a-fake-server-end-to-end-plan.md`
   summary: CI never unpacks the real OpenCode archives with the app's extractors: `agent-pins --check --agent local` hashes the archive only; the per-file pins were checked by hand on this Mac and the Linux x64 tar header was read, but a pin bump should unpack with extractPinned and extractPinnedTarGz on each OS.
   evidence: 14.2 correctness review.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-epic-contracts-and-stubs-endpoint-localmodelport-no-account-descriptor-and-the-fake-server-plan.md`
+  summary: The harness's own chat requests may follow a redirect from a confirmed host to an unconfirmed one: Ogden's probe refuses redirects but OpenCode's own fetch makes the chat requests; whether it follows a 307 with the request body is a live check and the harness's fetch settings should be read on each pin bump.
+  evidence: 14.3 security review; unverified against OpenCode 1.18.34.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-epic-contracts-and-stubs-endpoint-localmodelport-no-account-descriptor-and-the-fake-server-plan.md`
+  summary: Endpoint key and database steps are not one transaction (set, remove and remove key races leave an orphan keychain entry): a crash or a concurrent remove can leave an orphan agent-endpoint-key entry that nothing reads; a startup sweep of unknown agent-endpoint-key names would need the keychain to be listable.
+  evidence: 14.3 reviews; the key never reaches the database or events either way.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-epic-contracts-and-stubs-endpoint-localmodelport-no-account-descriptor-and-the-fake-server-plan.md`
+  summary: shared/src/events.ts is over 600 lines and shared compiles with DOM types: events.ts grew from 615 to 621 lines with the endpoint event and shared's tsconfig gained the DOM lib only for URL; a narrower URL declaration and a split of events.ts are the sweep's.
+  evidence: 14.3 correctness review.

@@ -64,7 +64,7 @@ export interface LocalEndpoints {
   /** Adds one (`AddLocalEndpointRequest`). `ValidationError` for an unusable address, `EndpointConfirmationRequiredError` for another host without its `confirmHost`, `SecretsUnavailableError` when a key can't be kept. */
   add(request: unknown): Promise<LocalEndpointView>;
   /** Changes one (`UpdateLocalEndpointRequest`); a changed host drops the confirmation. */
-  update(id: LocalEndpointId, request: unknown): LocalEndpointView;
+  update(id: LocalEndpointId, request: unknown): Promise<LocalEndpointView>;
   /** Removes it and its key. */
   remove(id: LocalEndpointId): Promise<void>;
   setKey(id: LocalEndpointId, request: unknown): Promise<LocalEndpointView>;
@@ -99,8 +99,14 @@ export function createLocalEndpoints({ db, events, secrets, now = () => new Date
 
   const rowOf = (id: LocalEndpointId): LocalEndpoint => {
     const row = orm.select().from(localEndpoints).where(eq(localEndpoints.id, id)).get();
-    if (row === undefined) throw new NotFoundError('endpoint', id);
-    return LocalEndpointSchema.parse(row);
+    // A damaged row (a bad name or address) counts as not there, as it does in the list.
+    const parsed = row === undefined ? undefined : usable(row);
+    if (parsed === undefined) throw new NotFoundError('endpoint', id);
+    return parsed;
+  };
+  const usable = (row: unknown): LocalEndpoint | undefined => {
+    const parsed = LocalEndpointSchema.safeParse(row);
+    return parsed.success && readEndpointAddress(parsed.data.baseUrl).ok ? parsed.data : undefined;
   };
   const all = (): LocalEndpoint[] =>
     orm
@@ -110,8 +116,8 @@ export function createLocalEndpoints({ db, events, secrets, now = () => new Date
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
       .flatMap((row) => {
         // A damaged row is left out rather than failing the whole list.
-        const parsed = LocalEndpointSchema.safeParse(row);
-        return parsed.success ? [parsed.data] : [];
+        const parsed = usable(row);
+        return parsed === undefined ? [] : [parsed];
       });
   const defaultId = (): LocalEndpointId | null => {
     const stored = orm.select().from(localEndpointSettings).where(eq(localEndpointSettings.id, ROW_ID)).get()?.defaultEndpointId ?? null;
@@ -165,6 +171,7 @@ export function createLocalEndpoints({ db, events, secrets, now = () => new Date
       }
       try {
         return events.transaction(() => {
+          if (all().length >= MAX_LOCAL_ENDPOINTS) throw new ValidationError(`You can keep up to ${MAX_LOCAL_ENDPOINTS} servers. Remove one first.`, []);
           orm
             .insert(localEndpoints)
             .values({ id, label: input.label, preset: input.preset ?? null, baseUrl: address.url, auth: input.key === undefined ? 'none' : 'key', model: input.model ?? null, remoteConfirmedFor: confirmed, createdAt: now().toISOString() })
@@ -178,12 +185,13 @@ export function createLocalEndpoints({ db, events, secrets, now = () => new Date
       }
     },
 
-    update(id, request) {
+    async update(id, request) {
       const parsed = UpdateLocalEndpointRequest.safeParse(request);
       if (!parsed.success) return refuse(parsed.error, 'Choose something to change.');
       const input = parsed.data;
       const before = rowOf(id);
-      return events.transaction(() => {
+      const keyDropped = { value: false };
+      const view = events.transaction(() => {
         let baseUrl = before.baseUrl;
         let confirmed = before.remoteConfirmedFor;
         if (input.baseUrl !== undefined) {
@@ -195,16 +203,28 @@ export function createLocalEndpoints({ db, events, secrets, now = () => new Date
           confirmed = address.loopback ? null : input.confirmHost?.toLowerCase() === host ? host : before.remoteConfirmedFor === host ? host : null;
         } else if (input.confirmHost !== undefined) {
           const address = readEndpointAddress(before.baseUrl);
-          if (address.ok && !address.loopback && input.confirmHost.toLowerCase() === address.host) confirmed = address.host;
+          if (!address.ok || address.loopback) throw new ValidationError('This server runs on this computer, so there is nothing to confirm.', []);
+          if (input.confirmHost.toLowerCase() !== address.host) throw new EndpointConfirmationRequiredError(address.host);
+          confirmed = address.host;
         }
         orm
           .update(localEndpoints)
           .set({ label: input.label ?? before.label, baseUrl, model: input.model === undefined ? before.model : input.model, remoteConfirmedFor: confirmed })
           .where(eq(localEndpoints.id, id))
           .run();
+        // A key belongs to the server it was given for: a changed address (scheme, host or port) drops it,
+        // so it is never sent to somewhere else. The user enters it again for the new address.
+        const was = readEndpointAddress(before.baseUrl);
+        const now = readEndpointAddress(baseUrl);
+        if (before.auth === 'key' && was.ok && now.ok && was.host !== now.host) {
+          orm.update(localEndpoints).set({ auth: 'none' }).where(eq(localEndpoints.id, id)).run();
+          keyDropped.value = true;
+        }
         note(id, 'changed');
         return viewOf(rowOf(id));
       });
+      if (keyDropped.value) await secrets.delete(endpointKeyName(id)).catch(() => {});
+      return view;
     },
 
     async remove(id) {
@@ -216,26 +236,32 @@ export function createLocalEndpoints({ db, events, secrets, now = () => new Date
         }
         note(id, 'removed');
       });
-      if (before.auth === 'key') {
-        // The row is gone either way; a keychain that can't be reached leaves its entry, which nothing reads again.
-        await secrets.delete(endpointKeyName(id)).catch(() => {});
-      }
+      void before;
+      // The row is gone either way; a keychain that can't be reached leaves its entry, which nothing reads again.
+      // Tried whatever `auth` said, so a key left by a failed save is cleaned up too.
+      await secrets.delete(endpointKeyName(id)).catch(() => {});
     },
 
     async setKey(id, request) {
       const parsed = SetEndpointKeyRequest.safeParse(request);
       if (!parsed.success) return refuse(parsed.error, 'Enter the key.');
-      rowOf(id);
+      const before = rowOf(id);
       try {
         await secrets.set(endpointKeyName(id), parsed.data.key);
       } catch (error) {
         throw unavailable(error);
       }
-      return events.transaction(() => {
-        orm.update(localEndpoints).set({ auth: 'key' }).where(eq(localEndpoints.id, id)).run();
-        note(id, 'key_saved');
-        return viewOf(rowOf(id));
-      });
+      try {
+        return events.transaction(() => {
+          orm.update(localEndpoints).set({ auth: 'key' }).where(eq(localEndpoints.id, id)).run();
+          note(id, 'key_saved');
+          return viewOf(rowOf(id));
+        });
+      } catch (error) {
+        // Not recorded, so the key must not stay either.
+        if (before.auth !== 'key') await secrets.delete(endpointKeyName(id)).catch(() => {});
+        throw error;
+      }
     },
 
     async removeKey(id) {

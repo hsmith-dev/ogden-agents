@@ -95,7 +95,7 @@ export function registerLocalEndpointRoutes(app: Hono, { localEndpoints, log }: 
       return apiError(c, 400, 'invalid_request', 'The request body must be JSON.');
     }
     try {
-      return c.json(LocalEndpointResponse.parse({ endpoint: endpoints.update(id, body) }));
+      return c.json(LocalEndpointResponse.parse({ endpoint: await endpoints.update(id, body) }));
     } catch (error) {
       return refusal(c, error);
     }

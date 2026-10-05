@@ -9,8 +9,8 @@
  *
  * Every method takes the endpoint as a {@link LocalModelTarget}: where to
  * call and the key (in memory only, AD-16). The confirmation rule for a host
- * that is not this computer is enforced by `LocalModels` (core), the one
- * caller that turns an endpoint id into a target; an adapter never decides it.
+ * that is not this computer is enforced by `LocalEndpoints.target` (core), the one
+ * place that turns an endpoint id into a target (`LocalModels` calls only through it); an adapter never decides it.
  * Methods never throw: a failure is a value with a kind and plain words.
  */
 

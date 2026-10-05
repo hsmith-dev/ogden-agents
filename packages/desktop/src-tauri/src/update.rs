@@ -220,7 +220,7 @@ pub async fn check_for_user(app: AppHandle) {
 
 /// Windows: the installer ends this process, and it starts the app again only through its own `/R`
 /// flag (as the user, without this process's environment). A small helper outside this app's job
-/// waits until the installed program is the new version and, if nothing started it, starts it. Both
+/// waits until the installed program is the new version and the installer has finished, and, if nothing started it, starts it. Both
 /// ways at once are safe: a second start is handed to the first by the single-instance plugin.
 #[cfg(windows)]
 fn relaunch_after_install(version: &str) {
@@ -234,7 +234,8 @@ fn relaunch_after_install(version: &str) {
          for ($i = 0; $i -lt 300; $i++) {{ Start-Sleep -Seconds 1; try {{ $v = (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion }} catch {{ $v = '' }}; \
            if ($i % 5 -eq 0) {{ Note ('version ' + $v + '; ' + ((Get-Process | Where-Object {{ $_.Name -match 'ogden|setup|nsis|msiexec' }} | ForEach-Object {{ $_.Name }}) -join ',')) }}; \
            if ($v -like \"$target*\") {{ break }} }}; \
-         Start-Sleep -Seconds 4; \
+         for ($j = 0; $j -lt 120; $j++) {{ if (-not (Get-Process -Name 'ogden-agents-update-*' -ErrorAction SilentlyContinue)) {{ break }}; Start-Sleep -Seconds 1 }}; \
+         Start-Sleep -Seconds 3; \
          if (-not (Get-Process -Name 'ogden-agents' -ErrorAction SilentlyContinue)) {{ Note 'starting the app'; Start-Process -FilePath $exe }} else {{ Note 'the app is already running' }}",
         exe = exe.display().to_string().replace('\'', "''"),
         version = version.replace('\'', "''"),

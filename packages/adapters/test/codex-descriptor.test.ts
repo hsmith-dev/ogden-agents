@@ -75,12 +75,12 @@ describe("Codex's descriptor (epic 12 entry 4)", () => {
     }
   });
 
-  it('is not registered by a shipped install yet, and its stub is not set up', async () => {
-    expect(CODEX_SHIPPED).toBe(false);
+  it('is shipped, and refuses a chat as not set up until installed', async () => {
+    expect(CODEX_SHIPPED).toBe(true);
     expect(installedCodex('/nowhere')).toBeUndefined();
     const agent = createCodexAgent({ dataDir: '/nowhere' });
     await expect(agent.startSession({ cwd: process.cwd(), env: {}, permissionMode: 'ask' } as never)).rejects.toBeInstanceOf(AgentError);
-    expect(createCodexSetup().agentId).toBe('codex');
+    expect(createCodexSetup({ dataDir: '/nowhere' }).agentId).toBe('codex');
   });
 });
 

@@ -102,15 +102,16 @@ async function say(server: TestServer, tab: SignedIn, wsId: string, sesId: Sessi
   return replies(server, sesId).at(-1)!;
 }
 
-describe('the Codex slot (epic 12 entry 4)', () => {
-  it('is not registered by default, and a test registers it as its own agent after Claude Code', async () => {
+describe('the Codex slot (epic 12 entries 4 and 6)', () => {
+  it('is left out by `codex: false`, registered with ports by a test, and registered by default once shipped', async () => {
     const bare = await startTestServer();
-    const tab = await signIn(bare);
     const listed = async (server: TestServer, signed: SignedIn) =>
       ChatAgentsResponse.parse(await (await request(server, signed, 'GET', API_ROUTES.chatAgents)).json()).agents.map((agent) => agent.agentId);
-    expect(await listed(bare, tab)).toEqual(['claude-code']);
+    expect(await listed(bare, await signIn(bare))).toEqual(['claude-code']);
     const withCodex = await startTestServer({ codex: {} });
     expect(await listed(withCodex, await signIn(withCodex))).toEqual(['claude-code', 'codex']);
+    const shipped = await startTestServer({ codex: undefined });
+    expect(await listed(shipped, await signIn(shipped))).toEqual(['claude-code', 'codex']);
   });
 });
 

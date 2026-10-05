@@ -165,6 +165,15 @@ function InstallButton({ install, label }: { install: InstallAction; label: stri
 
 function AgentState({ agent, signIn, actions }: { agent: AgentSetupStatus; signIn: SignIn; actions: AgentActions }) {
   const start = () => signIn.start(agent.signInTab);
+  // An agent that takes only an API key (Codex; user decision, 2026-10-05) has no sign-in: ready with a key, else it needs one.
+  // Its notices (on the card) say why.
+  if (agent.apiKeyOnly === true) {
+    return agent.auth === 'signed_in' ? (
+      <StateGlyph state="done" label="Installed, using your API key" data-testid="agent-state" />
+    ) : (
+      <StateGlyph state="idle" label="Installed, needs an API key" data-testid="agent-state" />
+    );
+  }
   const note =
     agent.signInNote === undefined ? null : (
       <Text variant="caption" data-testid="agent-sign-in-note">
@@ -286,7 +295,7 @@ function ApiKeySection({ agent, saved, actions }: { agent: AgentSetupStatus; sav
           API key saved …{saved.lastFour}
           {saved.unchecked === true ? `. Ogden Agents couldn't check it with ${providerName(agent)}.` : null}
         </Text>
-        {agent.auth === 'signed_in' && agent.method === 'subscription' ? (
+        {agent.apiKeyOnly !== true && agent.auth === 'signed_in' && agent.method === 'subscription' ? (
           <Text variant="caption" data-testid="agent-api-key-note">
             Signed in with your account. Your API key is used when you're signed out.
           </Text>
@@ -303,7 +312,9 @@ function ApiKeySection({ agent, saved, actions }: { agent: AgentSetupStatus; sav
   const fromEnvironment =
     saved.fromEnvironment === true ? (
       <Text variant="caption" data-testid="agent-api-key-environment">
-        An API key from the environment Ogden Agents started in is used when you're signed out. A key you save here comes first.
+        {agent.apiKeyOnly === true
+          ? `An API key from the environment Ogden Agents started in is used by ${agent.displayName}. A key you save here comes first.`
+          : "An API key from the environment Ogden Agents started in is used when you're signed out. A key you save here comes first."}
       </Text>
     ) : null;
 
@@ -314,7 +325,7 @@ function ApiKeySection({ agent, saved, actions }: { agent: AgentSetupStatus; sav
         <div className="flex">
           <Button variant="ghost" onClick={() => setOpen(true)}>
             <Key aria-hidden />
-            Use an API key instead
+            {agent.apiKeyOnly === true ? 'Add an API key' : 'Use an API key instead'}
           </Button>
         </div>
       </div>

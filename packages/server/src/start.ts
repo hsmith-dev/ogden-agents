@@ -114,12 +114,12 @@ interface DescriptorsRef {
 
 /** Whether `agentId` is one this server registers (epic 6, entry 6): Claude Code, Antigravity unless left out (entry 5), then any extra agent a test wires. */
 const registeredAgent =
-  (options: Pick<StartOptions, 'extraAgents' | 'antigravity' | 'codex'>, hooks: Pick<TestHooks, 'codexServer'>) =>
+  (options: Pick<StartOptions, 'extraAgents' | 'antigravity' | 'codex'>, hooks: Pick<TestHooks, 'codexServer' | 'codexInstall'>) =>
   (agentId: string): boolean =>
     agentId === CLAUDE_CODE_AGENT_ID ||
     (options.antigravity !== false && agentId === ANTIGRAVITY_AGENT_ID) ||
     (options.codex !== undefined && options.codex !== false && agentId === CODEX_AGENT_ID) ||
-    (options.codex === undefined && (CODEX_SHIPPED || hooks.codexServer !== undefined) && agentId === CODEX_AGENT_ID) ||
+    (options.codex === undefined && (CODEX_SHIPPED || hooks.codexServer !== undefined || hooks.codexInstall !== undefined) && agentId === CODEX_AGENT_ID) ||
     (options.extraAgents ?? []).some((wiring) => wiring.descriptor.agentId === agentId);
 
 /**

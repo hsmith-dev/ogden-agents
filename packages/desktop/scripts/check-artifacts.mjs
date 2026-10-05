@@ -9,7 +9,9 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const { values } = parseArgs({ options: { target: { type: 'string' } }, strict: true });
+const { values } = parseArgs({ options: { target: { type: 'string' }, 'no-updater': { type: 'boolean', default: false } }, strict: true });
+/** A build with no updater key makes installers only: no `.app.tar.gz`, no `.sig`. */
+const updater = !values['no-updater'];
 const target = values.target ?? '';
 const bundle = resolve(here, '..', 'src-tauri', 'target', target, 'release', 'bundle');
 const problems = [];
@@ -20,8 +22,8 @@ if (target.includes('apple-darwin')) {
   const dmg = files(join(bundle, 'dmg')).filter((f) => f.endsWith('.dmg'));
   const tarball = files(join(bundle, 'macos')).filter((f) => f.endsWith('.app.tar.gz'));
   if (dmg.length !== 1) problems.push(`expected one .dmg, found ${dmg.length}`);
-  if (tarball.length !== 1) problems.push(`expected one .app.tar.gz, found ${tarball.length}`);
-  for (const f of tarball) if (!existsSync(join(bundle, 'macos', `${f}.sig`))) problems.push(`${f} has no .sig`);
+  if (updater && tarball.length !== 1) problems.push(`expected one .app.tar.gz, found ${tarball.length}`);
+  if (updater) for (const f of tarball) if (!existsSync(join(bundle, 'macos', `${f}.sig`))) problems.push(`${f} has no .sig`);
   const app = join(bundle, 'macos', 'Ogden Agents.app', 'Contents', 'MacOS');
   for (const name of ['ogden-agents', 'ogden-node']) {
     const archs = execFileSync('lipo', ['-archs', join(app, name)], { encoding: 'utf8' }).trim().split(/\s+/).sort();
@@ -33,7 +35,7 @@ if (target.includes('apple-darwin')) {
   const exe = files(join(bundle, 'nsis')).filter((f) => f.endsWith('.exe'));
   if (exe.length !== 1) problems.push(`expected one NSIS installer, found ${exe.length}`);
   for (const f of exe) {
-    if (!existsSync(join(bundle, 'nsis', `${f}.sig`))) problems.push(`${f} has no .sig`);
+    if (updater && !existsSync(join(bundle, 'nsis', `${f}.sig`))) problems.push(`${f} has no .sig`);
     console.log(`${f}: ${MB(statSync(join(bundle, 'nsis', f)).size)}`);
   }
   // One Windows installer only: the spike found the MSI and NSIS installers share one folder and remove each other.

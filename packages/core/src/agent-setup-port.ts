@@ -74,6 +74,11 @@ export interface AgentSetupPort {
   readonly agentId: string;
   /** The agent's product name for the UI. */
   readonly displayName: string;
+  /**
+   * `true` for an agent that takes only an API key, never an account sign-in (Codex, Grok; user decision, 2026-10-05):
+   * core's words about its keychain never tell the user to sign in with an account.
+   */
+  readonly apiKeyOnly?: boolean;
   /** Whether the agent is installed and signed in. Never throws for a missing agent: that is `not_installed`. */
   status(): Promise<AgentPortStatus>;
   /** Installs the agent, reporting each step. Rejects with plain words when it fails; nothing half-installed stays. */

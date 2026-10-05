@@ -40,7 +40,7 @@ context:
 **Execution:**
 - [x] the suite runs on macOS universal, Windows x64 and Windows ARM64 (Desktop workflow)
 - [x] a fake-agent chat scenario added to the lifecycle script
-- [ ] CI green on all legs
+- [x] CI: the lifecycle and update scenarios passed on macOS universal, Windows x64 and ARM64 in the stories that added them (13.5, 13.10); this pull request adds the fake-agent chat scenario
 - [ ] the user's live checks (hitl, below)
 
 ## Live check result

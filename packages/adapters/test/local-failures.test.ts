@@ -24,6 +24,12 @@ afterEach(async () => {
 });
 
 describe('the words for a failed turn', () => {
+  it('does not mistake an unrelated number or a plain word for a refused key or a timeout, and puts a refused key before the rest', () => {
+    expect(localFailureWords('Internal error at line 401 of the request')).toBeUndefined();
+    expect(localFailureWords('port 4010 had a timeout setting')).toBeUndefined();
+    expect(localFailureWords('HTTP status 401: invalid api key for model x not found in list')).toBe(FAILURE_WORDS.keyRefused);
+  });
+
   it.each([
     ['Cannot connect to API: Unable to connect. Is the computer able to access the url?', FAILURE_WORDS.notRunning],
     ['Session too large to compact - context exceeds model limit', FAILURE_WORDS.contextFull],
@@ -113,6 +119,42 @@ describe('a turn that fails, in plain words (each against a fake server mode)', 
     expect(errorOf(events)).toEqual([]);
   });
 
+  it('never cuts off a server that is busy and slow to answer the look, while it still answers the chat', { timeout: 20_000 }, async () => {
+    const { session, events } = await start({ serverOptions: { slowMs: 2_500, modelsDelayMs: 600 } });
+    // Each look takes 600 ms and the first token 2.5 s: slow, but running.
+    expect((await session.prompt('SLOW please')).stopReason).toBe('end_turn');
+    expect(errorOf(events)).toEqual([]);
+  });
+
+  it('a message sent right after a stopped-server error is its own turn: no late event from the old one disturbs it', async () => {
+    const { fake, session, events } = await start({ serverOptions: { slowMs: 30_000 }, env: { FAKE_OPENCODE_CONNECT_DELAY_MS: '60000' } });
+    const turn = session.prompt('SLOW please').catch((e: unknown) => e);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const port = fake.port;
+    await fake.close();
+    servers.splice(servers.indexOf(fake), 1);
+    expect(((await turn) as AgentError).message).toBe(FAILURE_WORDS.notRunning);
+    const back = await startFakeServer({ port });
+    servers.push(back);
+    events.length = 0;
+    expect((await session.prompt('hello')).stopReason).toBe('end_turn');
+    expect(events.filter((event) => event.type === 'message_chunk').map((event) => (event as { text: string }).text).join('')).toBe('Hello from the fake model.');
+    // After the new turn ended, nothing else arrives.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(events.at(-1)).toMatchObject({ type: 'state', state: 'idle' });
+  });
+
+  it('the wrapped session still lists its models and modes, switches models, cancels and closes', async () => {
+    const { session } = await start();
+    expect(session.permissionModes).toEqual(['ask']);
+    expect(session.fixedPermissionMode).toBe('ask');
+    expect(session.models?.available.map((model) => model.id)).toEqual(['ogden/fake-small']);
+    const turn = session.prompt('hello');
+    expect((await turn).stopReason).toBe('end_turn');
+    await session.cancel();
+    await session.close();
+  });
+
   it('does not look at the endpoint when no address was given (an old environment)', async () => {
     const { fake, agent, env, dataDir } = await start();
     const { OGDEN_ENDPOINT_URL: _url, ...bare } = env as Record<string, string>;
@@ -126,6 +168,8 @@ describe('a turn that fails, in plain words (each against a fake server mode)', 
   it('looks at the endpoint only while a turn runs, and stops when it ends', async () => {
     const { fake, session } = await start({ intervalMs: 50 });
     await session.prompt('hello');
+    // A look already on its way may still land: give it a moment, then nothing more may come.
+    await new Promise((resolve) => setTimeout(resolve, 200));
     const after = fake.log.length;
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(fake.log.length).toBe(after);

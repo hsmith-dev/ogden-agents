@@ -21,19 +21,28 @@ import { FAILURE_WORDS } from './failures.js';
 
 /** How often the endpoint is looked at while a message is being answered. */
 export const WATCH_INTERVAL_MS = 4_000;
-/** How many looks in a row must find it unreachable before the turn is ended. */
+/** How many looks in a row must find it unreachable (refused, not found) before the turn is ended. */
 export const WATCH_MISSES = 2;
+/** How many looks in a row may time out before the turn is ended: a server busy with a long prompt answers slowly, so this is much stricter. */
+export const WATCH_SLOW_MISSES = 5;
+/** How long a stopped turn is given to end by itself before its harness is closed. */
+export const WATCH_SETTLE_MS = 3_000;
 /** How long one look waits. */
 export const WATCH_TIMEOUT_MS = 2_000;
 
 export interface EndpointWatchOptions {
   intervalMs?: number | undefined;
   misses?: number | undefined;
+  slowMisses?: number | undefined;
+  settleMs?: number | undefined;
   fetch?: typeof fetch | undefined;
 }
 
-/** Whether a look found the server not there (anything else, even a refused key, means it is running). */
-const gone = (result: Awaited<ReturnType<typeof probeEndpoint>>) => !result.ok && (result.kind === 'unreachable' || result.kind === 'timeout' || result.kind === 'redirected');
+type Look = Awaited<ReturnType<typeof probeEndpoint>>;
+/** Whether a look found the server refusing connections or not there: only that counts as stopped (a refused key, a redirect or a slow answer means something is running). */
+const gone = (result: Look) => !result.ok && result.kind === 'unreachable';
+/** Whether a look timed out: a busy server, or one that is gone in a way that never answers. */
+const slow = (result: Look) => !result.ok && result.kind === 'timeout';
 
 function watched(session: AgentSession, env: Readonly<Record<string, string>>, options: EndpointWatchOptions): AgentSession {
   const baseUrl = env[ENDPOINT_URL_ENV];
@@ -45,29 +54,44 @@ function watched(session: AgentSession, env: Readonly<Record<string, string>>, o
       value: async (text: string) => {
         if (gone(await look())) throw new AgentError('agent_failed', FAILURE_WORDS.notRunning);
         let misses = 0;
+        let slowMisses = 0;
+        let over = false;
         let stop!: (error: AgentError) => void;
         const stopped = new Promise<never>((_, reject) => (stop = reject));
         stopped.catch(() => undefined);
         let looking = false;
         const timer = setInterval(() => {
-          if (looking) return;
+          if (looking || over) return;
           looking = true;
           void look()
             .then((result) => {
+              // A look that finishes after the turn is over changes nothing: it must never cancel a later turn.
+              if (over) return;
               misses = gone(result) ? misses + 1 : 0;
-              if (misses >= (options.misses ?? WATCH_MISSES)) {
+              slowMisses = slow(result) ? slowMisses + 1 : 0;
+              if (misses >= (options.misses ?? WATCH_MISSES) || slowMisses >= (options.slowMisses ?? WATCH_SLOW_MISSES)) {
                 // The harness would retry for a minute: end the turn now, and stop it.
                 stop(new AgentError('agent_failed', FAILURE_WORDS.notRunning));
-                void session.cancel().catch(() => undefined);
               }
             })
             .finally(() => {
               looking = false;
             });
         }, options.intervalMs ?? WATCH_INTERVAL_MS);
+        const inner = session.prompt(text);
+        inner.catch(() => undefined);
         try {
-          return await Promise.race([session.prompt(text), stopped]);
+          return await Promise.race([inner, stopped]);
+        } catch (error) {
+          if (!over && error instanceof AgentError && error.message === FAILURE_WORDS.notRunning) {
+            // Stop the harness's turn and wait (a moment) for it to end, so its late events never land on a message sent next.
+            void session.cancel().catch(() => undefined);
+            const ended = await Promise.race([inner.then(() => true, () => true), new Promise<false>((resolve) => setTimeout(() => resolve(false), options.settleMs ?? WATCH_SETTLE_MS))]);
+            if (!ended) await session.close().catch(() => undefined);
+          }
+          throw error;
         } finally {
+          over = true;
           clearInterval(timer);
         }
       },

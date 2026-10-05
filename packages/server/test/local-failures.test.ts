@@ -9,7 +9,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLocalAgent, createMemoryAgentSetup } from '@ogden-agents/adapters';
-import { API_ROUTES, apiPath, ChatAgentsResponse, LocalEndpointResponse, SessionResponse, WorkspaceResponse, type SessionId } from '@ogden-agents/shared';
+import { API_ROUTES, apiPath, ChatAgentsResponse, SessionResponse, WorkspaceResponse, type SessionId } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { startFakeServer, type FakeServer } from '../../../tests/fixtures/fake-openai-server.mjs';
 import { removeAfterTest, signIn, startTestServer, tempDataDir, waitFor, type SignedIn, type TestServer } from './helpers.js';
@@ -96,4 +96,3 @@ describe('a Local model chat when the server fails (epic 14 story 14.6)', () => 
   });
 });
 
-export type { LocalEndpointResponse };

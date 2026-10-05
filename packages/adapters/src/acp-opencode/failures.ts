@@ -22,8 +22,9 @@ export const FAILURE_WORDS = {
 export function localFailureWords(text: string): string | undefined {
   if (/Session too large to compact|context (?:length|window|size)|maximum context|context_length_exceeded|too many tokens/i.test(text)) return FAILURE_WORDS.contextFull;
   if (/Cannot connect to API|Unable to connect|ECONNREFUSED|ECONNRESET|fetch failed|socket hang up|EPIPE/i.test(text)) return FAILURE_WORDS.notRunning;
+  // A refused key comes before the rest: the other words never describe an error that says the key is wrong.
+  if (/\b(?:status|http|code)\b[ :=]{0,3}40[13]\b|invalid api key|incorrect api key|unauthorized|bad key/i.test(text)) return FAILURE_WORDS.keyRefused;
   if (/model[^\n]{0,80}not found|model_not_found|no such model|not loaded|unknown model/i.test(text)) return FAILURE_WORDS.modelGone;
-  if (/timed out|timeout|ETIMEDOUT|took too long/i.test(text)) return FAILURE_WORDS.timedOut;
-  if (/\b401\b|\b403\b|invalid api key|incorrect api key|unauthorized|bad key/i.test(text)) return FAILURE_WORDS.keyRefused;
+  if (/timed out|ETIMEDOUT|timeout (?:error|exceeded|reached)|took too long/i.test(text)) return FAILURE_WORDS.timedOut;
   return undefined;
 }

@@ -104,7 +104,7 @@ export async function updateAndRetryRun(wsId: string, runId: string, auth: Auth 
 /**
  * The newest `seq` among the events `matches` (0 for none). A query refetches when this changes, never when a
  * count does: the store trims a stream it does not keep whole, so an old event can leave as a new one arrives and
- * leave the count where it was (a blocked run stayed "Building" on a slow computer, story 11.5).
+ * leave the count where it was (a blocked run stayed "Building" on a slow computer, story 11.2).
  */
 export function latestSeq(events: readonly CoreEvent[], matches: (event: CoreEvent) => boolean): number {
   let latest = 0;

@@ -75,7 +75,7 @@ Built 2026-10-05 on `story/12.5-codex-chat` from `story/12.4-codex-stubs`. Real-
 
 ## Review Triage Log
 
-Pending.
+Security and correctness reviewers (2 lenses), no high. Patched: Codex refuses to start without its own home (medium: it would have used `~/.codex`); a linked or stale `config.toml` is replaced, never written through, and the home is made owner-only (low); the API key only wording needs at least one sign-in method (low); the test hook now has unit tests (medium gap); `INITIAL_AGENT_MODE=read-only` asserted in the child's environment; the `cancel` option kind confirmed from the 2.1.1 source (`reject_once`). Not changed: `config.toml` is written non-atomically (a concurrent start rewrites identical content, benign); a whitespace-only key counts as present (the right words follow). No intent_gap or bad_plan.
 
 ## Verification
 

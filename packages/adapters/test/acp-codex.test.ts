@@ -73,7 +73,9 @@ describe("Codex's chat port (epic 12 entry 5)", () => {
     await session.prompt('mode');
     expect(replyText(events)).toBe('mode=read-only');
     events.length = 0;
+    events.length = 0;
     await session.prompt('echo-env');
+    expect(replyText(events)).toContain('INITIAL_AGENT_MODE=read-only');
     expect(replyText(events)).not.toContain('CODEX_PATH=');
     expect(existsSync(join(env.CODEX_HOME!, 'auth.json'))).toBe(false);
   });

@@ -22,7 +22,7 @@
  *   (or to anything but `read-only`) drops the chat to Ask.
  * - Cards: Allow once picks the `allow_once` option. Deny picks `decline`,
  *   never `cancel`, `allow_always` or an amendment; a file change offers only
- *   `cancel` as its rejection, which Deny then picks (it ends the turn).
+ *   `cancel` (kind `reject_once` in 2.1.1's `fileChangeDecisionOptions`) as its rejection, which Deny then picks (it ends the turn).
  * - It reopens with `session/resume`, else `session/load`, else core's
  *   stored-transcript fallback. There is no terminal resume: whether
  *   `codex resume <id>` takes the ACP session id is a live check, so the

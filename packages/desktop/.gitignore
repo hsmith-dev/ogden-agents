@@ -1,0 +1,7 @@
+# Staged and generated files (see scripts/stage.mjs).
+stage/
+.node-cache/
+src-tauri/target/
+src-tauri/binaries/
+src-tauri/icons/
+src-tauri/gen/

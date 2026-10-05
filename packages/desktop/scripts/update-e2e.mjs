@@ -31,6 +31,8 @@ const repo = resolve(here, '..', '..', '..');
 const FAKE_AGENT = join(repo, 'tests', 'fixtures', 'fake-acp-agent-installed.mjs');
 const SERVER = join(repo, 'tests', 'fixtures', 'fake-release-server', 'serve.mjs');
 const exe = appExecutable(values.app);
+/** The app's own processes (Windows), by image name. */
+const listApp = () => spawnSync('tasklist', ['/FI', 'IMAGENAME eq ogden-agents.exe', '/FO', 'CSV', '/NH'], { encoding: 'utf8' }).stdout.split(/\r?\n/).filter((l) => l.toLowerCase().includes('ogden-agents.exe')).map((l) => ({ pid: Number(l.split('","')[1]) }));
 const nextVersion = values['version-next'];
 const before = new Set(listSidecars().map((p) => p.pid));
 const events = (ws, ev) => readReport(ws.report).filter((e) => e.ev === ev);
@@ -181,6 +183,19 @@ await scenario('S1. next channel: finds, verifies, waits for a running turn, res
 
   // The turn ends (at most 10 s), then the app installs and opens as the new version.
   await waitFor('the update to install', () => events(app.ws, 'update_installing').length > 0, 90_000);
+  if (IS_WIN) {
+    // The NSIS installer starts the app again as the user (`/R`), so it does not carry this test's
+    // environment: prove the relaunch by its process, then open the installed new version on the same
+    // data folder ourselves.
+    await waitFor('the installer to start the new version', () => listApp().some((p) => p.pid !== app.child.pid), 180_000);
+    spawnSync('taskkill', ['/IM', 'ogden-agents.exe', '/T', '/F']);
+    await waitFor('the relaunched app to stop', () => listApp().length === 0, 30_000);
+    killSidecars(before);
+    const version = spawnSync('powershell', ['-NoProfile', '-Command', `(Get-Item '${exe}').VersionInfo.ProductVersion`], { encoding: 'utf8' }).stdout.trim();
+    if (!version.startsWith(nextVersion)) throw new Error(`the installed app is ${version}, not ${nextVersion}`);
+    const reopened = launchApp(exe, app.ws, { NODE_ENV: 'test', OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', OGDEN_AGENTS_OFFLINE: '1', OGDEN_AGENTS_CLAUDE_ACP_PATH: agentWrapper(app.ws.root), OGDEN_DESKTOP_TEST_UPDATE_BASE: good.base });
+    cleanups.push(() => reopened.kill());
+  }
   await waitFor('the new version to start', () => readReport(app.ws.report).filter((e) => e.ev === 'shell_start' && e.data.version === nextVersion).length > 0, 180_000);
   await waitFor('the new version to show its page', () => readReport(app.ws.report).filter((e) => e.ev === 'page_finished').length >= 2, 120_000);
   const ready = events(app.ws, 'server_ready').at(-1).data;

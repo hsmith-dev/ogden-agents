@@ -66,9 +66,11 @@
  * off) reaches the live agent, and a terminal handed back by Developer mode
  * is stopped.
  *
- * Epic 6: each session carries the agent it was started with (`agentId`),
- * looked up in the agent registry the server wires; a session stored before
- * agents could be chosen is the registry's legacy agent.
+ * Epic 6: each session carries its agent (`agentId`), looked up in the agent
+ * registry the server wires; a session stored before agents could be chosen
+ * is the registry's legacy agent. Handoff (`chat/handoff.ts`): the user can
+ * continue a chat with another agent, which then reads a brief Ogden built
+ * from the chat's events.
  *
  * The agent itself sits behind `AgentPort` (AD-1); this file names none.
  */
@@ -77,6 +79,7 @@ import { createAgents } from './chat/agents.js';
 import { createCheckIn } from './chat/check-in.js';
 import { RESTARTED_REASON } from './chat/constants.js';
 import { createChatContext } from './chat/context.js';
+import { createHandoff } from './chat/handoff.js';
 import { createModeApplier, createPermissionModes } from './chat/permission-mode.js';
 import { createPermissionRequests } from './chat/permission-requests.js';
 import { createReplies } from './chat/replies.js';
@@ -115,6 +118,7 @@ export function createChat(options: ChatOptions): Chat {
   const terminal = createTerminal(ctx, { releaseAgent, storedAgentSessionId });
   const { stopTerminal, closeTerminals } = terminal;
   const workspaces = createWorkspaces(ctx, { drop, stopTerminal });
+  const handoff = createHandoff(ctx, { releaseAgent, storedAgentSessionId, sendMessage: turns.sendMessage });
   // A stop that couldn't import the terminal's turns (a crash): they come in now (story 3.4).
   terminal.importAfterRestart();
   // Changes of a chat's stored mode made elsewhere reach its agent or its terminal (permission modes).
@@ -143,6 +147,8 @@ export function createChat(options: ChatOptions): Chat {
     attachTerminal: terminal.attachTerminal,
     setPermissionMode: (workspaceId, sessionId, mode, options) => withAgentId(modes.setPermissionMode(workspaceId, sessionId, mode, options)),
     permissionModeOptions: modes.permissionModeOptions,
+    handoffPreview: handoff.handoffPreview,
+    handOff: handoff.handOff,
 
     async settled() {
       while (running.size > 0) await Promise.all([...running]);

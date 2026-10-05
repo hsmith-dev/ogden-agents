@@ -7,8 +7,8 @@
 import type { Session, SessionId, Workspace } from '@ogden-agents/shared';
 import { AgentError, type AgentEvent, type AgentRestored, type AgentSession } from '../agent-port.js';
 import { PROTECTED_PATHS } from '../permission-matching.js';
-import { primedPrompt } from '../resume-prime.js';
-import { AGENT_SESSION_REF, AGENT_STARTING_NOTICE_MS } from './constants.js';
+import { PRIME_NEW_MESSAGE, primedPrompt } from '../resume-prime.js';
+import { AGENT_SESSION_REF, AGENT_STARTING_NOTICE_MS, HANDOFF_PENDING_REF } from './constants.js';
 import type { ChatContext } from './context.js';
 import type { ModeApplier } from './permission-mode.js';
 import type { PermissionRequests } from './permission-requests.js';
@@ -161,17 +161,29 @@ export function createAgents(
     return entry;
   };
 
+  /** The brief of the chat's latest handoff while it is still to be sent (handoff), else `undefined`. */
+  const pendingBrief = (sessionId: SessionId): string | undefined => {
+    if (entities.getSession(sessionId)?.adapterRefs[HANDOFF_PENDING_REF] !== '1') return undefined;
+    const changed = entities.listSessionEvents(sessionId, ['session.agent_changed']).at(-1);
+    return changed?.type === 'session.agent_changed' && changed.payload.brief.trim() !== '' ? changed.payload.brief : undefined;
+  };
+
   /**
    * What the agent is sent for the user's `text`: the text itself, or, on a
    * session that replaced the chat's earlier one, the text after the chat's
-   * transcript up to (not including) this message. A slash command (`/…`)
-   * goes as it is, so the agent still reads it as a command, and the next
-   * ordinary message is primed instead (review F1). `primed` says which.
+   * transcript up to (not including) this message. After a handoff, the
+   * brief goes first (`handoff`), until a prompt with it succeeded. A slash
+   * command (`/…`) goes as it is, so the agent still reads it as a command,
+   * and the next ordinary message is primed instead (review F1). `primed`
+   * says which.
    */
-  const promptFor = (sessionId: SessionId, entry: Live, messageId: string, text: string): { prompt: string; primed: boolean } => {
-    if (!entry.prime || text.trimStart().startsWith('/')) return { prompt: text, primed: false };
+  const promptFor = (sessionId: SessionId, entry: Live, messageId: string, text: string): { prompt: string; primed: boolean; handoff: boolean } => {
+    if (text.trimStart().startsWith('/')) return { prompt: text, primed: false, handoff: false };
+    const brief = pendingBrief(sessionId);
+    const told = brief === undefined ? text : `${brief}\n${PRIME_NEW_MESSAGE}\n${text}`;
+    if (!entry.prime) return { prompt: told, primed: false, handoff: brief !== undefined };
     const earlier = entities.listCompletedMessages(sessionId).filter((message) => message.messageId !== messageId);
-    return { prompt: primedPrompt(earlier, text, agentOf(sessionId).displayName), primed: true };
+    return { prompt: primedPrompt(earlier, told, agentOf(sessionId).displayName), primed: true, handoff: brief !== undefined };
   };
 
   /** Releases the session's agent process and waits for it to exit, so the CLI never shares the session with it. */

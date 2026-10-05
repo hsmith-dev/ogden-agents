@@ -105,6 +105,17 @@ export const API_ROUTES = {
    */
   sessionPermissionMode: `${API_BASE}/workspaces/:wsId/sessions/:sesId/permission-mode`,
   /**
+   * Handoff (user decision 2026-10-04): `GET ?agentId=` →
+   * `HandoffPreviewResponse`, the brief and who receives it, nothing changed;
+   * `POST HandoffRequest` → 202 `HandoffResponse`: the chat continues with that
+   * agent (`session.agent_changed`) and the message is sent with the brief.
+   * Refused, appending nothing: while the terminal drives 409
+   * `driver_is_terminal`; while the agent works, waits or switches 409
+   * `session_not_idle`; an agent that can't start a chat now 409 with its
+   * code; the chat's own agent, an unknown one, or a brief over its budget 400.
+   */
+  sessionHandoff: `${API_BASE}/workspaces/:wsId/sessions/:sesId/handoff`,
+  /**
    * `POST PermissionDecisionRequest` → 204 (2.6): the user's answer on a
    * permission card. 409 `permission_not_pending` when it is no longer waiting.
    */

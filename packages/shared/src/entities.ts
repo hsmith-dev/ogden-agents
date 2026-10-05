@@ -87,10 +87,11 @@ export const Session = z.object({
    */
   permissionMode: PermissionMode.default('ask'),
   /**
-   * The agent the session was started with (epic 6, E6-R1): set at creation
-   * and never changed. Absent only in `session.created` events and rows from
-   * before agents could be chosen; those sessions are the install's original
-   * agent, which the server fills in every session it answers.
+   * The session's agent (epic 6, E6-R1): set at creation, and changed only
+   * when the user continues the chat with another agent (handoff,
+   * `session.agent_changed`). Absent only in `session.created` events and rows
+   * from before agents could be chosen; those sessions are the install's
+   * original agent, which the server fills in every session it answers.
    */
   agentId: AgentId.optional(),
   title: z.string().nullable(),

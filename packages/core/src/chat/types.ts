@@ -3,7 +3,7 @@
  * `ChatOptions`, `TerminalViewer` and `Chat`, and the state the chat modules
  * share by reference (`Live`, `Terminal`, `Turn`).
  */
-import type { AgentId, ChatAgent, PermissionMode, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import type { AgentId, ChatAgent, HandoffPreviewResponse, PermissionMode, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, Workspace, WorkspaceId } from '@ogden-agents/shared';
 import type { AgentError, AgentRegistry, AgentSession } from '../agent-port.js';
 import type { AgentReadiness } from '../agent-setup-types.js';
 import type { Entities, NewWorkspaceOptions } from '../entities.js';
@@ -216,6 +216,25 @@ export interface Chat {
   setPermissionMode(workspaceId: WorkspaceId, sessionId: SessionId, mode: PermissionMode, options?: { confirm?: boolean | undefined }): Session;
   /** Every permission mode, in order, and whether the session's agent (and its session, when it has one this run) offers it. */
   permissionModeOptions(workspaceId: WorkspaceId, sessionId: SessionId): SessionPermissionModeOption[];
+  /**
+   * What continuing the chat with `agentId` would send (handoff): the brief
+   * built from the chat's own events, secrets masked, at most the agent's
+   * budget; who receives it; and the chat's mode afterwards. Changes nothing.
+   * Refused as {@link handOff} is.
+   */
+  handoffPreview(workspaceId: WorkspaceId, sessionId: SessionId, agentId: AgentId): Promise<HandoffPreviewResponse>;
+  /**
+   * Continues the chat with `agentId` (handoff): its agent stops, the chat's
+   * mode carries over when the new agent declares it (else Ask, cause
+   * `handoff`), `session.agent_changed` records the switch with `brief`
+   * (masked again), and `message` is sent, with the brief before it. Refused,
+   * changing nothing: `DriverIsTerminalError` while the terminal drives,
+   * `SessionNotIdleError` while it works, waits or switches,
+   * `InvalidOperationError` for its own agent, a brief over the agent's
+   * budget or an empty message, `UnknownAgentError`, `AgentNotReadyError`
+   * (trust, install, sign-in), `NotFoundError`.
+   */
+  handOff(workspaceId: WorkspaceId, sessionId: SessionId, request: { agentId: AgentId; brief: string; message: string }): Promise<{ session: Session; messageId: string }>;
   /** Resolves once no agent turn is running (tests, shutdown). */
   settled(): Promise<void>;
   /**

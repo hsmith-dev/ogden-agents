@@ -26,4 +26,15 @@ export const CLAUDE_CODE_DESCRIPTOR: Readonly<AgentDescriptor> = Object.freeze<A
   permissionModes: { ask: ACP_MODE_IDS.ask, auto: ACP_MODE_IDS.auto, skip_all: ACP_MODE_IDS.skip_all },
   needsProjectTrust: false,
   skillsFolder: '.claude/skills',
+  // How Claude Code says a plan's or the API's limit was reached (its prompt fails with the text; handoff, 2026-10-04).
+  // Narrow on purpose: a miss is an ordinary error. The user's live check confirms them.
+  usageLimitPatterns: [
+    /usage limit (?:reached|exceeded)/i,
+    /\b(?:5-hour|five-hour|session|weekly|opus|sonnet) limit (?:reached|exceeded)/i,
+    /you(?:'|’)ve (?:hit|reached) your (?:usage |weekly |session )?limit/i,
+    /\brate_limit_error\b/,
+    /\bAPI Error: 429\b/i,
+  ],
+  // Its context holds about 200,000 tokens; the brief takes a modest share of it.
+  handoffBudgetChars: 100_000,
 });

@@ -34,3 +34,29 @@ export const API_KEY_PATTERNS: readonly RegExp[] = [...ANTHROPIC_KEY_PATTERNS, .
 export function redactApiKeys(text: string): string {
   return API_KEY_PATTERNS.reduce((out, pattern) => out.replace(pattern, REDACTED_SECRET), text);
 }
+
+/**
+ * Other secret-looking text a person may paste into a chat (handoff, user
+ * decision 2026-10-04): what Ogden masks, beside the API keys above, before a
+ * chat's conversation goes to another agent. Each pattern replaces the whole
+ * match, except the last, which keeps `NAME=` and masks the value.
+ */
+export const TOKEN_PATTERNS: readonly RegExp[] = [
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g,
+  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}/g,
+  /\bsk-[A-Za-z0-9_-]{20,}/g,
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,
+  /\bxox[abprs]-[A-Za-z0-9-]{10,}/g,
+  /\bBearer\s+[A-Za-z0-9._~+/-]{16,}=*/gi,
+];
+
+/** A `NAME=value` or `NAME: value` whose name says it is a secret: the value is masked. */
+const NAMED_SECRET = /\b([A-Za-z0-9_.-]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|ACCESS_?KEY)[A-Za-z0-9_.-]*["']?\s*[=:]\s*)(["']?)[^\s"',;]{6,}\2/gi;
+
+/** `text` with every API key ({@link redactApiKeys}), token and named secret value replaced by {@link REDACTED_SECRET}. */
+export function redactSecrets(text: string): string {
+  const keys = redactApiKeys(text);
+  const tokens = TOKEN_PATTERNS.reduce((out, pattern) => out.replace(pattern, REDACTED_SECRET), keys);
+  return tokens.replace(NAMED_SECRET, (_match, name: string) => `${name}${REDACTED_SECRET}`);
+}

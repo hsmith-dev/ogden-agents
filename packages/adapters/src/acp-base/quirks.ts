@@ -19,6 +19,7 @@ export function acpReasons(displayName: string) {
     failed: `${displayName} stopped with an error. Try again.`,
     noSuchMode: `${displayName} doesn't offer that permission mode here.`,
     couldNotSwitchMode: `${displayName} couldn't switch its permission mode.`,
+    usageLimit: `${displayName} has reached its usage limit. Continue this chat with another agent while it cools down, or try again later.`,
   } as const;
 }
 

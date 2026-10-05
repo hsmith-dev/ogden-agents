@@ -516,6 +516,18 @@ describe('sign-in methods', () => {
     expect(error).toMatchObject({ type: 'state', state: 'error' });
     expect(error).not.toHaveProperty('code');
   });
+
+  it('a prompt that fails with a usage-limit notice the descriptor names is usage_limit, and the session stays usable (handoff)', async () => {
+    const { session, events } = await startFake();
+    await expect(session.prompt('usage-limit')).rejects.toMatchObject({ code: 'usage_limit' });
+    expect(events.at(-1)).toEqual({
+      type: 'state',
+      state: 'error',
+      reason: 'Claude Code has reached its usage limit. Continue this chat with another agent while it cools down, or try again later.',
+      code: 'usage_limit',
+    });
+    await expect(session.prompt('hello')).resolves.toEqual({ stopReason: 'end_turn' });
+  });
 });
 
 describe('when the agent can’t be started', () => {

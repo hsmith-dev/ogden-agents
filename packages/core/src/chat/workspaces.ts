@@ -50,27 +50,42 @@ export function chatAgentOf(descriptor: AgentDescriptor, agent: AgentPort, readi
   };
 }
 
+/** The agent's readiness, or {@link READY} without a port or when it fails. */
+export async function agentReadiness(ctx: ChatContext, agentId: AgentId): Promise<AgentReadiness> {
+  try {
+    return (await ctx.options.agentReadiness?.(agentId)) ?? READY;
+  } catch {
+    return READY;
+  }
+}
+
+/** Whether the project is trusted now (story 4.2's gate); no port, a no, or a throw is untrusted. */
+export async function isProjectTrusted(ctx: ChatContext, workspaceId: WorkspaceId): Promise<boolean> {
+  try {
+    return (await ctx.options.projectTrusted?.(workspaceId)) === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Refuses, with `AgentNotReadyError`, an agent that can't take a chat in the
+ * workspace now (6.3): one that needs a trust the project lacks, isn't
+ * installed, or isn't signed in. A new chat and a handoff both pass here.
+ */
+export async function requireAgentReady(ctx: ChatContext, workspaceId: WorkspaceId, agentId: AgentId, descriptor: AgentDescriptor): Promise<void> {
+  // An agent that runs the project's own agent settings or hooks starts only in a trusted project (6.3).
+  if (descriptor.needsProjectTrust && !(await isProjectTrusted(ctx, workspaceId))) {
+    throw new AgentNotReadyError('project_not_trusted', projectNotTrustedReason(descriptor.displayName), agentId, 'trust_project');
+  }
+  const unavailable = unavailableReason(descriptor, await agentReadiness(ctx, agentId));
+  if (unavailable !== undefined) throw new AgentNotReadyError(unavailable.code, unavailable.reason, agentId, unavailable.action);
+}
+
 export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & { stopTerminal: (sessionId: SessionId) => Promise<void> }) {
   const { entities, agents, live, busy, dataHome, getWorkspace, getSession } = ctx;
   const { drop, stopTerminal } = deps;
-
-  /** The agent's readiness, or {@link READY} without a port or when it fails. */
-  const readiness = async (agentId: AgentId): Promise<AgentReadiness> => {
-    try {
-      return (await ctx.options.agentReadiness?.(agentId)) ?? READY;
-    } catch {
-      return READY;
-    }
-  };
-
-  /** Whether the project is trusted now (story 4.2's gate); no port, a no, or a throw is untrusted. */
-  const projectTrusted = async (workspaceId: WorkspaceId): Promise<boolean> => {
-    try {
-      return (await ctx.options.projectTrusted?.(workspaceId)) === true;
-    } catch {
-      return false;
-    }
-  };
+  const readiness = (agentId: AgentId) => agentReadiness(ctx, agentId);
 
   const methods: Pick<Chat, 'openWorkspace' | 'listWorkspaces' | 'getWorkspace' | 'listSessions' | 'deleteHistory' | 'createChatSession' | 'getSession' | 'chatAgents'> = {
     openWorkspace(input, options) {
@@ -122,12 +137,7 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
       const agentId = options.agentId ?? effectiveDefaultAgent(agents, projectDefault);
       const descriptor = agents.describe(agentId);
       if (agents.get(agentId) === undefined || descriptor === undefined) throw new UnknownAgentError();
-      // An agent that runs the project's own agent settings or hooks starts only in a trusted project (6.3).
-      if (descriptor.needsProjectTrust && !(await projectTrusted(workspaceId))) {
-        throw new AgentNotReadyError('project_not_trusted', projectNotTrustedReason(descriptor.displayName), agentId, 'trust_project');
-      }
-      const unavailable = unavailableReason(descriptor, await readiness(agentId));
-      if (unavailable !== undefined) throw new AgentNotReadyError(unavailable.code, unavailable.reason, agentId, unavailable.action);
+      await requireAgentReady(ctx, workspaceId, agentId, descriptor);
       // The workspace may have been removed while the readiness was read.
       getWorkspace(workspaceId);
       return entities.createSession({ workspaceId, kind: options.kind ?? 'chat', agentId });

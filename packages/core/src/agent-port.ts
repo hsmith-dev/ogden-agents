@@ -283,7 +283,8 @@ export interface AgentTerminalCommand {
   env: Readonly<Record<string, string>>;
 }
 
-export type AgentErrorCode = 'agent_unavailable' | 'agent_failed' | 'auth_required';
+/** `usage_limit`: the agent ran out of usage (its descriptor's patterns matched; handoff), its session is still usable. */
+export type AgentErrorCode = 'agent_unavailable' | 'agent_failed' | 'auth_required' | 'usage_limit';
 
 /**
  * An agent failure with a plain-language message for the UI. `details` are

@@ -18,6 +18,7 @@ export * from './data-dir.js';
 export { DATABASE_FILE, type OpenDatabaseOptions } from './db/database.js';
 export * from './entities.js';
 export * from './errors.js';
+export * from './handoff-brief.js';
 // Not `sessionAppender`: the raw session append stays inside core (E2-R7).
 export {
   DEFAULT_READ_LIMIT,

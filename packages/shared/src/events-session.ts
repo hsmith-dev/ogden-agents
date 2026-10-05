@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { PermissionMode, Session, SessionDriver, SessionState } from './entities.js';
-import { AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, PermissionDecision, PermissionRequestId, SessionErrorCode, ToolCallDiff, ToolCallStatus, ToolKind } from './events-common.js';
+import { AgentId, AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, PermissionDecision, PermissionRequestId, SessionErrorCode, ToolCallDiff, ToolCallStatus, ToolKind } from './events-common.js';
 import { assigned, onSessionStream } from './events-envelope.js';
 import { PermissionRuleId, SessionId } from './ids.js';
 import { CatalogNext, RepoRelativePath } from './planning.js';
@@ -61,9 +61,10 @@ export type SessionDriverChangedEvent = z.infer<typeof SessionDriverChangedEvent
  * Why a chat's permission mode changed: the user chose it (`user`), Developer
  * mode was turned off while it skipped checks (`developer_mode_off`), a server
  * start set it back to Ask (`restart`: no mode but Ask outlives the run it was
- * chosen in), or the agent reported a mode the chat didn't choose (`agent`).
+ * chosen in), the agent reported a mode the chat didn't choose (`agent`), or
+ * the chat was handed to an agent that doesn't offer its mode (`handoff`).
  */
-export const PERMISSION_MODE_CHANGE_CAUSES = ['user', 'developer_mode_off', 'restart', 'agent'] as const;
+export const PERMISSION_MODE_CHANGE_CAUSES = ['user', 'developer_mode_off', 'restart', 'agent', 'handoff'] as const;
 export const PermissionModeChangeCause = z.enum(PERMISSION_MODE_CHANGE_CAUSES);
 export type PermissionModeChangeCause = z.infer<typeof PermissionModeChangeCause>;
 
@@ -82,6 +83,35 @@ export const SessionPermissionModeChangedInput = z.object({
 /** A chat's permission mode changed (core is the only one that changes it). */
 export const SessionPermissionModeChangedEvent = SessionPermissionModeChangedInput.extend(assigned);
 export type SessionPermissionModeChangedEvent = z.infer<typeof SessionPermissionModeChangedEvent>;
+
+/** The most characters a handoff brief may hold, whatever the target agent's own budget. */
+export const MAX_HANDOFF_BRIEF_CHARS = 200_000;
+
+export const SessionAgentChangedInput = z.object({
+  type: z.literal('session.agent_changed'),
+  ...onSessionStream,
+  payload: z.object({
+    sessionId: SessionId,
+    agentId: AgentId,
+    previous: AgentId,
+    /**
+     * What the new agent is told first, as the user confirmed it (secrets
+     * masked, at most the agent's budget): built by Ogden from the chat's own
+     * events, never by a model. Sent with the user's next message.
+     */
+    brief: z.string().max(MAX_HANDOFF_BRIEF_CHARS),
+    /** Whether the new agent had a session in this chat before, which it reopens (switching back). */
+    resumes: z.boolean(),
+  }),
+});
+/**
+ * The user continued the chat with another agent (handoff, user decision
+ * 2026-10-04): the chat's agent is `agentId` from here on; the history stays
+ * and is shown with a "Continued with" divider. Sessions without one keep the
+ * agent they were started with.
+ */
+export const SessionAgentChangedEvent = SessionAgentChangedInput.extend(assigned);
+export type SessionAgentChangedEvent = z.infer<typeof SessionAgentChangedEvent>;
 
 /** Identifies one message within a session's stream. */
 export const MessageId = z.string().min(1);

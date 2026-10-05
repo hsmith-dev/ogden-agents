@@ -113,8 +113,12 @@ export type PermissionDecision = z.infer<typeof PermissionDecision>;
 /** Longest reason a Deny may send back to the agent, in characters. */
 export const MAX_DENY_REASON_LENGTH = 2000;
 
-/** Why a session went to `error`, when it is one the UI acts on (`auth_required`: Sign in again). */
-export const SESSION_ERROR_CODES = ['agent_unavailable', 'agent_failed', 'auth_required'] as const;
+/**
+ * Why a session went to `error`, when it is one the UI acts on
+ * (`auth_required`: Sign in again; `usage_limit`: the agent ran out of usage,
+ * so the chat offers to continue with another agent).
+ */
+export const SESSION_ERROR_CODES = ['agent_unavailable', 'agent_failed', 'auth_required', 'usage_limit'] as const;
 export const SessionErrorCode = z.enum(SESSION_ERROR_CODES);
 export type SessionErrorCode = z.infer<typeof SessionErrorCode>;
 

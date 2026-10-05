@@ -24,6 +24,9 @@ import {
   type AdapterRefs,
   type AgentId,
   type BmadPiece,
+  type CoreEvent,
+  type CoreEventType,
+  type SessionAgentChangedEvent,
   type DriverChangeCause,
   type MessageRole,
   type PermissionMode,
@@ -154,6 +157,16 @@ export interface Entities {
   setSessionAdapterRefs(id: SessionId, refs: AdapterRefs): Session;
   /** The session's completed messages (`session.message_completed`), oldest first. */
   listCompletedMessages(sessionId: SessionId): CompletedMessage[];
+  /** The session's events of `types`, oldest first (the handoff brief reads its history from them). */
+  listSessionEvents(sessionId: SessionId, types: readonly CoreEventType[]): CoreEvent[];
+  /**
+   * Hands the session to the agent `agentId` (handoff): sets its agent and
+   * merges `refs` into its adapter refs, appending `session.agent_changed`
+   * with the previous agent, `brief` and `resumes`, in one transaction.
+   * Checks nothing else: who may hand off when is the chat's to enforce.
+   * {@link NotFoundError} for an unknown session.
+   */
+  setSessionAgent(id: SessionId, change: { agentId: AgentId; previous: AgentId; brief: string; resumes: boolean; refs: AdapterRefs }): { session: Session; event: SessionAgentChangedEvent };
   /** Sets the driver (AD-6), appending `session.driver_changed` (with `cause`, if given) if it changed. */
   setSessionDriver(id: SessionId, driver: SessionDriver, cause?: DriverChangeCause): Session;
   /**
@@ -455,6 +468,37 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
           const { messageId, role, content } = payload as CompletedMessage;
           return { messageId, role, content };
         });
+    },
+
+    listSessionEvents(sessionId, types) {
+      if (types.length === 0) return [];
+      return orm
+        .select()
+        .from(events)
+        .where(and(eq(events.streamId, sessionId), inArray(events.type, [...types])))
+        .orderBy(asc(events.seq))
+        .all()
+        .map(
+          (row) =>
+            // Rows were validated on the way in; the stored JSON is the payload as parsed.
+            ({ id: row.id, seq: row.seq, workspaceId: row.workspaceId, streamId: row.streamId, type: row.type, at: row.at, payload: row.payload }) as CoreEvent,
+        );
+    },
+
+    setSessionAgent(id, { agentId, previous, brief, resumes, refs }) {
+      check(AgentIdSchema, agentId, 'agent id');
+      check(AgentIdSchema, previous, 'agent id');
+      check(AdapterRefsSchema, refs, 'adapter refs');
+      return log.transaction(() => {
+        const session = requireSession(id);
+        const updated: Session = { ...session, agentId, adapterRefs: { ...session.adapterRefs, ...refs }, updatedAt: now() };
+        orm.update(sessions).set({ agentId, adapterRefs: updated.adapterRefs, updatedAt: updated.updatedAt }).where(eq(sessions.id, id)).run();
+        const event = sessionEvents.appendSessionEvent(session.id, {
+          type: 'session.agent_changed',
+          payload: { sessionId: session.id, agentId, previous, brief, resumes },
+        }) as SessionAgentChangedEvent;
+        return { session: updated, event };
+      });
     },
 
     setSessionDriver(id, driver, cause) {

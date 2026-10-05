@@ -45,6 +45,8 @@ const TOOL_INPUT_PATHS: AcpToolInputPaths = { pathFields: ['filePath', 'path', '
 export interface LocalServerCommand {
   command: string;
   args: readonly string[];
+  /** Variables a test adds to the harness it runs in place (never the real one's). */
+  env?: Readonly<Record<string, string>> | undefined;
 }
 
 export interface LocalAgentOptions {
@@ -85,7 +87,7 @@ export function createLocalAgent(options: LocalAgentOptions): AgentPort {
         diagnostic('the Local model was not started: its folders are not set', { problems });
         throw new AgentError('agent_unavailable', reasons.couldNotStart);
       }
-      return { command: server.command, args: [...server.args], addEnv: { ...OPENCODE_SWITCHES }, logFields: { server: server.command } };
+      return { command: server.command, args: [...server.args], addEnv: { ...server.env, ...OPENCODE_SWITCHES }, logFields: { server: server.command } };
     },
     toolInputPaths: TOOL_INPUT_PATHS,
     // One mode: the session always runs as `build`, asking before every tool that runs or writes.

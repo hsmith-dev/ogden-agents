@@ -28,16 +28,17 @@
  * 6. With Retrospectives off again the board shows no action, offer or
  *    verdict, and the routes refuse with `feature_off`.
  * 7. A plain upstream repo (no ticket tree) with Retrospectives on is in
- *    reduced mode: the look-back is refused with `reduced_mode`.
+ *    reduced mode: the look-back is refused with `reduced_mode`, and its
+ *    board shows the reduced-mode notice with no Look back button (the
+ *    look-back's own sentence, for a board that loads, is in the DOM tests).
  * 8. Quit: the Simple project's repo is unchanged.
  *
  * Skipped outside CI when uv or its managed Python 3.12 is missing (CI
  * provisions both).
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { apiPath } from '../../packages/shared/src/api.ts';
 import { PLAIN_OLDER_FILES } from '../fixtures/bmad-plain/plain-repos.js';
@@ -135,7 +136,10 @@ test('from a finished epic to a lesson the next build carries, on the installed 
   const project = server.addRepo({ bmad: false, prefix: 'retro-repo-' });
   const plain = server.addRepo({ bmad: false, files: PLAIN_OLDER_FILES, prefix: 'plain-older-' });
   const simpleHash = simple.hash();
-  const git = (...args: string[]) => execFileSync('git', args, { cwd: project.path, encoding: 'utf8' });
+  // No hook of the machine's own git config runs, and no signing: only the fixture's own commits.
+  const noHooks = join(server.home, 'no-hooks');
+  mkdirSync(noHooks, { recursive: true });
+  const git = (...args: string[]) => execFileSync('git', ['-c', `core.hooksPath=${noHooks}`, '-c', 'commit.gpgsign=false', ...args], { cwd: project.path, encoding: 'utf8' });
 
   const launched = await server.launch();
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -177,7 +181,7 @@ test('from a finished epic to a lesson the next build carries, on the installed 
   await test.step('the finished epic is committed with an AGENTS.md', async () => {
     for (const [path, content] of Object.entries({ ...FINISHED, 'AGENTS.md': '# Project instructions\n\n- Keep it small.\n' })) {
       const file = join(project.path, ...path.split('/'));
-      execFileSync(process.execPath, ['-e', `require('node:fs').mkdirSync(require('node:path').dirname(process.argv[1]), { recursive: true })`, file]);
+      mkdirSync(dirname(file), { recursive: true });
       writeFileSync(file, content);
     }
     git('init', '--quiet', '--initial-branch=main');
@@ -197,7 +201,10 @@ test('from a finished epic to a lesson the next build carries, on the installed 
     await expect(offer).toContainText('Every ticket in this epic is done. Look back on it?');
     await page.getByTestId('board-look-back-dismiss').click();
     await expect(offer).toHaveCount(0);
+    // The offer waits for the server's answer, so wait for it before saying the offer stays hidden.
+    const offersRead = page.waitForResponse((response) => response.url().includes('/look-back-offers') && response.request().method() === 'GET');
     await page.reload();
+    await offersRead;
     await expect(page.getByTestId('board-look-back')).toHaveText('Look back on this epic');
     await expect(page.getByTestId('board-look-back-offer')).toHaveCount(0);
 
@@ -207,7 +214,7 @@ test('from a finished epic to a lesson the next build carries, on the installed 
     await expect(page.getByTestId('message-user').first()).toHaveText(`/bmad-retrospective ${EPIC}`, AGENT_START);
     const retro = page.getByTestId('document-card');
     await expect(retro).toHaveAttribute('data-path', RETRO, AGENT_START);
-    await expect(retro.getByTestId('retrospective-step')).toHaveText(['Add the lessons to AGENTS.md', 'Turn the action items into tickets']);
+    await expect(retro.getByTestId('retrospective-step')).toHaveText(['Add the lessons to AGENTS.md', 'Turn the action items into tickets'], AGENT_START);
     expect(existsSync(join(project.path, ...RETRO.split('/')))).toBe(true);
 
     await page.goto(`${url}/w/${wsId}/board`);
@@ -242,8 +249,13 @@ test('from a finished epic to a lesson the next build carries, on the installed 
     expect(git('rev-list', '--count', `${before}..HEAD`).trim()).toBe('1');
     expect(git('show', '--name-only', '--pretty=format:', 'HEAD').split('\n').filter(Boolean).sort()).toEqual(['AGENTS.md', RETRO].sort());
     // The agent's new ticket entry stays uncommitted: only the two paths were committed.
-    expect(git('status', '--porcelain').split('\n').filter(Boolean).map((line) => line.slice(3))).toEqual([`${EPIC}/tickets.toml`]);
-    const worktree = mkdtempSync(join(tmpdir(), 'ogden-agents-retro-wt-'));
+    const left = git('status', '--porcelain', '--untracked-files=all').split('\n').filter(Boolean).map((line) => line.slice(3));
+    expect(left).toContain(`${EPIC}/tickets.toml`);
+    expect(left).not.toContain('AGENTS.md');
+    expect(left).not.toContain(RETRO);
+    // The commit holds the pitfall, so a worktree made from it carries it (that Ogden's runner branches from the checkout's last commit, and that approve tolerates an unsaved AGENTS.md, are proved in the core tests of epic 5 and story 7.5; the real build is a live check).
+    // Under the server's own folder, which the suite's teardown removes.
+    const worktree = join(server.home, 'next-build-worktree');
     rmSync(worktree, { recursive: true, force: true });
     git('worktree', 'add', '-q', worktree, 'HEAD');
     try {
@@ -265,6 +277,8 @@ test('from a finished epic to a lesson the next build carries, on the installed 
     expect(await errorCode(await api(page, 'POST', lookBackPath(wsId)))).toBe('feature_off');
     expect(await errorCode(await api(page, 'POST', apiPath(API_ROUTES.workspaceRetrospectiveSave, { wsId, epic: 'epic-todo' })))).toBe('feature_off');
     expect(await errorCode(await api(page, 'GET', apiPath(API_ROUTES.workspaceLookBackOffers, { wsId })))).toBe('feature_off');
+    // Nothing was written for it: the checkout holds only the agent's own ticket entry.
+    expect(git('status', '--porcelain', '--untracked-files=all').split('\n').filter(Boolean).map((line) => line.slice(3))).toEqual([`${EPIC}/tickets.toml`]);
   });
 
   await test.step('a plain upstream repo (no ticket tree) is in reduced mode: the look-back is refused', async () => {

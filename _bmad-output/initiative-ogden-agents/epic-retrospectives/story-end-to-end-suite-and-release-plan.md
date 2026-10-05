@@ -3,13 +3,13 @@ title: 'End-to-end suite and release'
 type: 'chore'
 ticket: '7'
 created: '2026-10-05'
-status: 'in-review'
+status: 'built'
 baseline_revision: 'bfab2e8a1c0bb3dfc3df2eeb1025a37423c786d2'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-retrospectives/epic-retrospectives.md'
@@ -66,6 +66,17 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+- 2026-10-05, pass 1 (security and correctness lenses): high 0, medium 3, low 8. Routed: patch 9, reject 2. No intent_gap or bad_plan.
+  - "Not now kept across a reload" could pass before the offers answer was read -- medium, patch: the journey waits for the answer.
+  - The off step's absence checks were partly vacuous and wrote-nothing was unchecked -- medium, patch: it checks the checkout holds only the agent's own ticket entry.
+  - RELEASING check 8 described a notice the plain repo's board does not show -- medium, patch: reworded to the reduced-mode notice, and the look-back sentence is in the DOM tests.
+  - A claim that epic 6 was out as 0.5.0 and "exactly" two paths in the notes -- low, patch.
+  - The journey's own git ran with the machine's git config; its worktree was outside the suite's folder -- low, patch: no hooks, no signing, under the server's folder.
+  - A brittle exact status assertion and a short timeout -- low, patch.
+  - A stale "Coming soon" docblock -- low, patch.
+  - The journey makes its own worktree, not a dispatched Unattended build, so "the next build carries it" and "approve tolerates it" are not shown end to end -- medium, reject here: the runner branching from the checkout's last commit is epic 5's tested contract, approve's tolerance has its own core test (7.5), and the real build is a written live check.
+  - The ticket in the journey is written by a typed command, not an approved skill session -- low, reject: a fake cannot show the skill's own approval.
 
 ## Verification
 

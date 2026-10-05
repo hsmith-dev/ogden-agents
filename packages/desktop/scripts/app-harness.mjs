@@ -51,7 +51,9 @@ export function readReport(file) {
 
 /** Starts the app with the test hooks on and a private data folder. Returns the child. */
 export function launchApp(exe, ws, extraEnv = {}) {
-  const child = spawn(exe, [], {
+  // `OGDEN_DESKTOP_ARCH=x86_64` runs the Intel half of a universal macOS app under Rosetta.
+  const arch = IS_MAC ? process.env.OGDEN_DESKTOP_ARCH : undefined;
+  const child = spawn(arch === undefined ? exe : 'arch', arch === undefined ? [] : [`-${arch}`, exe], {
     stdio: 'ignore',
     windowsHide: false,
     env: {

@@ -88,16 +88,22 @@ jobs:
           if-no-files-found: warn
           path: packages/desktop/stage/stage-report.json
 
+  # Shell and packaging lanes (stories 13.2, 13.5, 13.8): build the unsigned app and its installer
+  # for each target, check the artifacts (an installer, a `.sig` for each updater artifact, both
+  # architectures in the universal macOS app), install it the way a user does (a mounted .dmg, a
+  # silent NSIS install) and run the smoke and lifecycle tests against it. Test builds are signed
+  # for the updater only with a throwaway key generated in the job, never a stored one.
   app:
     name: App (${{ matrix.leg }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { leg: macos-arm64, os: macos-latest, target: aarch64-apple-darwin, bundles: app }
-          - { leg: windows-x64, os: windows-latest, target: x86_64-pc-windows-msvc, bundles: nsis }
+          - { leg: macos-universal, os: macos-latest, target: universal-apple-darwin, rust: 'aarch64-apple-darwin,x86_64-apple-darwin', bundles: 'app,dmg' }
+          - { leg: windows-x64, os: windows-latest, target: x86_64-pc-windows-msvc, rust: x86_64-pc-windows-msvc, bundles: nsis }
+          - { leg: windows-arm64, os: windows-11-arm, target: aarch64-pc-windows-msvc, rust: aarch64-pc-windows-msvc, bundles: nsis }
     defaults:
       run:
         shell: bash
@@ -114,7 +120,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.rust }}
 
       - name: Build and pack Ogden Agents
         run: |
@@ -130,13 +136,24 @@ jobs:
         working-directory: packages/desktop
         run: npx --yes "$TAURI_CLI" icon stage/icon-source.png -o src-tauri/icons
 
-      - name: Build the app (unsigned)
-        working-directory: packages/desktop
-        run: npx --yes "$TAURI_CLI" build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+      # Never stored: a fresh key pair per run, its public key set for this build only.
+      - name: Throwaway updater key
+        run: node packages/desktop/scripts/test-updater-key.mjs "$RUNNER_TEMP/updater-key" >> "$GITHUB_ENV"
 
-      - name: Locate the app (macOS)
+      - name: Build the app and its installer (unsigned)
+        working-directory: packages/desktop
+        run: npx --yes "$TAURI_CLI" build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config "$RUNNER_TEMP/updater-key/config-override.json"
+
+      - name: Check the artifacts
+        run: node packages/desktop/scripts/check-artifacts.mjs --target ${{ matrix.target }}
+
+      - name: Mount the .dmg and run the app from it (macOS)
         if: runner.os == 'macOS'
-        run: echo "APP_PATH=$PWD/packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Ogden Agents.app" >> "$GITHUB_ENV"
+        run: |
+          dmg="$(ls packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg | head -1)"
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg" "$dmg"
+          ls "$RUNNER_TEMP/dmg"
+          echo "APP_PATH=$RUNNER_TEMP/dmg/Ogden Agents.app" >> "$GITHUB_ENV"
 
       - name: Install the app silently (Windows)
         if: runner.os == 'Windows'
@@ -148,11 +165,22 @@ jobs:
       - name: Smoke test
         run: node packages/desktop/scripts/smoke.mjs --app "$APP_PATH"
 
+      # The other half of a universal app: the Intel slice under Rosetta.
+      - name: Smoke test, Intel slice (macOS)
+        if: runner.os == 'macOS'
+        env:
+          OGDEN_DESKTOP_ARCH: x86_64
+        run: node packages/desktop/scripts/smoke.mjs --app "$APP_PATH"
+
       # A second launch, quit, an attached npm server, a busy quit, a killed shell (story 13.5).
       - name: Lifecycle test
         run: node packages/desktop/scripts/lifecycle.mjs --target ${{ matrix.target }} --app "$APP_PATH"
 
-      - name: Upload the test build (unsigned)
+      - name: Unmount the .dmg (macOS)
+        if: runner.os == 'macOS' && always()
+        run: hdiutil detach "$RUNNER_TEMP/dmg" || true
+
+      - name: Upload the unsigned installer and its update artifacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -160,6 +188,8 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
           path: |
-            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
             packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
-            packages/desktop/src-tauri/Cargo.lock
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe.sig

@@ -17,7 +17,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statS
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { deflateSync } from 'node:zlib';
+import { writeIconPng } from './icon.mjs';
 import { verifiedArchive } from './node-archive.mjs';
 
 const pins = JSON.parse(readFileSync(new URL('../desktop-node-pins.json', import.meta.url), 'utf8'));
@@ -126,53 +126,6 @@ function checkNatives(plat, nodeBin, label) {
   // Every native module the app needs must load, node-pty included (E13-R2).
   const failed = Object.entries(parsed).filter(([, v]) => typeof v === 'string' && (v.startsWith('FAIL') || v.startsWith('exit ')));
   if (parsed.error !== undefined || failed.length > 0) throw new Error(`native modules failed to load for ${label}: ${JSON.stringify(parsed)}`);
-}
-
-/** A 1024x1024 PNG (a plain mark) for `tauri icon`, so the repository holds no binary. */
-function writeIconPng(file) {
-  const size = 1024;
-  const raw = Buffer.alloc((size * 4 + 1) * size);
-  for (let y = 0; y < size; y++) {
-    raw[y * (size * 4 + 1)] = 0;
-    for (let x = 0; x < size; x++) {
-      const o = y * (size * 4 + 1) + 1 + x * 4;
-      const dx = x - size / 2;
-      const dy = y - size / 2;
-      const r = Math.sqrt(dx * dx + dy * dy);
-      const ring = r > 260 && r < 360;
-      raw[o] = ring ? 245 : 32;
-      raw[o + 1] = ring ? 240 : 37;
-      raw[o + 2] = ring ? 230 : 46;
-      raw[o + 3] = 255;
-    }
-  }
-  const crcTable = Array.from({ length: 256 }, (_, n) => {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    return c >>> 0;
-  });
-  const crc = (buf) => {
-    let c = 0xffffffff;
-    for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8);
-    return (c ^ 0xffffffff) >>> 0;
-  };
-  const chunk = (type, data) => {
-    const len = Buffer.alloc(4);
-    len.writeUInt32BE(data.length);
-    const td = Buffer.concat([Buffer.from(type), data]);
-    const c = Buffer.alloc(4);
-    c.writeUInt32BE(crc(td));
-    return Buffer.concat([len, td, c]);
-  };
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(size, 0);
-  ihdr.writeUInt32BE(size, 4);
-  ihdr[8] = 8;
-  ihdr[9] = 6;
-  writeFileSync(
-    file,
-    Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]),
-  );
 }
 
 /** Merges the x64 install into the arm64 one: lipo for Mach-O files in both, copy for x64-only files. */

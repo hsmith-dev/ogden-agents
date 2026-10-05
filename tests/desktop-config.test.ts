@@ -29,6 +29,18 @@ describe('the Tauri config', () => {
     expect(config.identifier).not.toBe('dev.ogden-agents.launcher');
   });
 
+  it('packages one universal-capable app per platform: ad-hoc signed, a Node-24-compatible macOS floor, the NSIS installer with the WebView2 bootstrapper, no updater artifacts until a key is given', () => {
+    expect(config.bundle.macOS.signingIdentity).toBe('-');
+    // Node 24 does not run below macOS 13.5.
+    expect(config.bundle.macOS.minimumSystemVersion).toBe('13.5');
+    expect(config.bundle.windows.webviewInstallMode).toEqual({ type: 'downloadBootstrapper' });
+    expect(config.bundle.windows.nsis.installMode).toBe('currentUser');
+    // The updater key is the user's (AD-23): the committed config builds no updater artifacts; CI test builds and releases switch them on.
+    expect(config.bundle.createUpdaterArtifacts).toBe(false);
+    expect(config.bundle.externalBin).toEqual(['binaries/ogden-node']);
+    expect(config.bundle.linux.deb.depends).toContain('libwebkit2gtk-4.1-0');
+  });
+
   it('has no window of its own, no global Tauri object and no remote IPC access', () => {
     expect(config.app.windows).toEqual([]);
     expect(config.app.withGlobalTauri).toBe(false);

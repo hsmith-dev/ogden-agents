@@ -80,9 +80,9 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
   for (const wiring of codex) checkAgentWiring(wiring);
   // Grok (epic 12 entry 4): the same, in its own folder's switch.
   const grok =
-    options.grok === false || (options.grok === undefined && !GROK_SHIPPED)
+    options.grok === false || (options.grok === undefined && !GROK_SHIPPED && hooks.grokServer === undefined)
       ? []
-      : [grokWiring({ dataDir, given: options.grok, onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
+      : [grokWiring({ dataDir, given: options.grok, serverScript: hooks.grokServer, onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
   for (const wiring of grok) checkAgentWiring(wiring);
   const extraAgents = [...antigravity, ...codex, ...grok, ...(options.extraAgents ?? testTrustAgentWiring(hooks, log))];
   // Every registered agent's API key variables (6.3): each is kept out of every process but its own agent's chat.

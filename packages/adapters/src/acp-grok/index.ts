@@ -17,7 +17,7 @@ export {
   GROK_MODE_IDS,
   GROK_PACKAGE,
 } from './constants.js';
-export { createGrokAgent, type GrokAgentOptions } from './grok-agent.js';
+export { createGrokAgent, GROK_ARGS, type GrokAgentOptions, type GrokServerCommand } from './grok-agent.js';
 
 /**
  * Whether a shipped install registers Grok. The slot's on switch lives here,

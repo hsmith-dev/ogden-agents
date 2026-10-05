@@ -554,7 +554,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     if (run === undefined || run.workspaceId !== workspaceId) throw new NotFoundError('run', runId);
     if (!atCheckpoint(run) || run.worktreePath === null || run.branch === null || !isBuildBranch(run.branch)) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
     // Fail closed, as at the start: never an unsandboxed unattended run.
-    const check = await sandbox.check({ agent: run.agent });
+    const check = await sandbox.check({ agent: run.agent ?? runner.agent });
     if (!check.available) throw new BuildRefusedError('sandbox_unavailable', `${SANDBOX_UNAVAILABLE_MESSAGE} ${check.reason}`.trim());
     if (!(await vcs.worktreeExists(repoPath, run.worktreePath))) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
     // The worktree's scripts must still be the trusted ones before anything runs there.

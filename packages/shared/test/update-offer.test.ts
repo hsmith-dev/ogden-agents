@@ -19,7 +19,9 @@ describe('decideUpdate', () => {
     ['not a version', { latest: '9.9.9' }, null],
     ['0.4.0', {}, null],
   ])('%s with %j offers %j', (current, tags, expected) => {
-    expect(decideUpdate(current, tags)).toEqual(expected);
+    expect(decideUpdate(current, tags)).toEqual(expected === null ? null : { ...expected, source: 'npm' });
+    // The source is only a label on the offer.
+    expect(decideUpdate(current, tags, 'github-releases')).toEqual(expected === null ? null : { ...expected, source: 'github-releases' });
   });
 
   it('names the channel', () => {

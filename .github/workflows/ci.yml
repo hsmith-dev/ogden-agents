@@ -101,6 +101,27 @@ jobs:
       - name: Smoke test without optional dependencies
         run: node scripts/smoke-installed.mjs --omit-optional
 
+  # Fails a pull request that adds something shaped like a real key or token
+  # (scripts/secret-scan.mjs, no third-party code, no network). Fake test values
+  # include TEST_ONLY. GitHub's own secret scanning and push protection are
+  # repository settings, turned on separately.
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Check the scanner itself
+        run: node scripts/secret-scan.mjs --self-test
+
+      - name: Scan tracked files
+        run: node scripts/secret-scan.mjs
+
   # The double-click start scripts in start/ (backlog story 2), each on its own
   # OS, run as a user runs them: check mode first, then a full start of the
   # packed tarball through the script (OGDEN_AGENTS_PACKAGE points npx at it;

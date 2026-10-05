@@ -1,0 +1,103 @@
+name: Desktop
+
+# The Ogden Agents desktop app (epic 13): a Tauri shell with a bundled Node. Builds the unsigned
+# macOS and Windows apps from the packed server and smoke-tests each one headlessly: it starts,
+# the window loads the server's page, the tab exchange happens, and quitting leaves no `ogden-node`
+# process. Test builds are workflow artifacts only: no secrets, no releases.
+# Linux is out of scope for now (the code stays portable; no Linux job runs).
+#
+# Runs on pull requests and pushes that touch the desktop app, and on demand. Test builds are
+# signed (for the updater) only with a throwaway key generated inside the job, never a stored one.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - packages/desktop/**
+      - .github/workflows/desktop.yml
+  pull_request:
+    paths:
+      - packages/desktop/**
+      - .github/workflows/desktop.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  TAURI_CLI: '@tauri-apps/cli@2.12.1'
+  # Matches packages/desktop/src-tauri/rust-toolchain.toml.
+  RUST_VERSION: 1.99.0
+
+jobs:
+  app:
+    name: App (${{ matrix.leg }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { leg: macos-arm64, os: macos-latest, target: aarch64-apple-darwin, bundles: app }
+          - { leg: windows-x64, os: windows-latest, target: x86_64-pc-windows-msvc, bundles: nsis }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: ${{ matrix.target }}
+
+      - name: Build and pack Ogden Agents
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+          pnpm pack
+          ls -l ogden-agents-*.tgz
+
+      - name: Stage the bundled Node, npm and the packed server
+        run: node packages/desktop/scripts/stage.mjs --target ${{ matrix.target }} --tgz "$(ls ogden-agents-*.tgz | head -1)"
+
+      - name: Icons
+        working-directory: packages/desktop
+        run: npx --yes "$TAURI_CLI" icon stage/icon-source.png -o src-tauri/icons
+
+      - name: Build the app (unsigned)
+        working-directory: packages/desktop
+        run: npx --yes "$TAURI_CLI" build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      - name: Smoke test (macOS)
+        if: runner.os == 'macOS'
+        run: node packages/desktop/scripts/smoke.mjs --app "packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Ogden Agents.app"
+
+      - name: Smoke test (Windows, installed silently)
+        if: runner.os == 'Windows'
+        run: |
+          installer="$(ls packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe | head -1)"
+          node packages/desktop/scripts/smoke.mjs --installer "$(cygpath -w "$installer")"
+
+      - name: Upload the test build (unsigned)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ogden-desktop-${{ matrix.leg }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            packages/desktop/src-tauri/Cargo.lock

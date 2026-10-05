@@ -1,0 +1,22 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Ogden Agents",
+  "mainBinaryName": "ogden-agents",
+  "version": "0.5.0-rc.1",
+  "identifier": "dev.ogden-agents.app",
+  "build": { "frontendDist": "../placeholder" },
+  "app": {
+    "windows": [],
+    "withGlobalTauri": false,
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "externalBin": ["binaries/ogden-node"],
+    "resources": { "../stage/app/": "app/", "../stage/npm/": "npm/" },
+    "macOS": { "signingIdentity": "-", "entitlements": "entitlements.plist", "minimumSystemVersion": "11.0" },
+    "windows": { "webviewInstallMode": { "type": "downloadBootstrapper" }, "nsis": { "installMode": "currentUser" } }
+  }
+}

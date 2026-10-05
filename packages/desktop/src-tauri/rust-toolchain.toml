@@ -1,0 +1,5 @@
+# Pinned so a desktop build is reproducible (E13 unknown, Rust MSRV on the Tauri 2.12.1 tag).
+# Spike 13.1's runs used 1.99.0. CI installs this same version.
+[toolchain]
+channel = "1.99.0"
+profile = "minimal"

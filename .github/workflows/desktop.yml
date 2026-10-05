@@ -6,6 +6,10 @@ name: Desktop
 # process. Test builds are workflow artifacts only: no secrets, no releases.
 # Linux is out of scope for now (the code stays portable; no Linux job runs).
 #
+# Lanes (story 13.3): the pinned Node check runs in ci.yml (job `Desktop Node pins`). The `app`
+# job below is the shell and runtime lane (stage, build, smoke). The upgrade lane (13.6) and the
+# packaging lane (13.8: dmg, NSIS) add their own named jobs here.
+#
 # Runs on pull requests and pushes that touch the desktop app, and on demand. Test builds are
 # signed (for the updater) only with a throwaway key generated inside the job, never a stored one.
 

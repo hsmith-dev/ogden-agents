@@ -193,6 +193,24 @@ jobs:
       - name: Check every pinned uv archive
         run: node scripts/check-uv-pins.mjs
 
+  # The desktop app's pinned Node (story 13.3, AD-23): each pinned archive hash in
+  # packages/desktop/desktop-node-pins.json must equal the one nodejs.org publishes for that
+  # file, so a wrong pin fails here and not in a user's build. The build itself also refuses a
+  # download that does not match (packages/desktop/scripts/stage.mjs).
+  desktop-pins:
+    name: Desktop Node pins
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Check every pinned Node archive hash
+        run: node scripts/desktop-pins.mjs --check
+
   # The pinned BMad Method (story 4.14, AD-13; since 2026-10-04 Ogden Agents'
   # fork hsmith-dev/BMAD-METHOD, docs/bmad-fork.md): each pinned commit's
   # tarball is downloaded and its content hash recomputed through the app's

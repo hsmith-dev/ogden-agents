@@ -1,4 +1,4 @@
-import type { UpdateNoticeResponse } from '@ogden-agents/shared';
+import type { DesktopUpdateView, UpdateChannel, UpdateNoticeResponse } from '@ogden-agents/shared';
 
 /**
  * The "newer version" notice's words and its dismissal (story 13.7). User text
@@ -53,3 +53,18 @@ function safeStorage(): Storage | undefined {
     return undefined;
   }
 }
+
+/**
+ * The desktop app's update, in words (story 13.3). Plain language, no dashes.
+ * The server decides when Restart may go ahead (the busy rule): the page only says so.
+ */
+export function appUpdateSentence(view: DesktopUpdateView): string {
+  const { update, blocked, restartRequested } = view;
+  if (!update.downloaded) return `Ogden ${update.version} is downloading.`;
+  if (restartRequested) return blocked ? `Ogden ${update.version} will install when your agents finish, then Ogden restarts.` : `Ogden ${update.version} is installing. Ogden restarts in a moment.`;
+  if (blocked) return `Update available. Ogden ${update.version} is ready, but agents are still working, so it cannot restart yet.`;
+  return `Update available. Ogden ${update.version} is ready. Restart to update.`;
+}
+
+/** The channel in words for the desktop app's setting. */
+export const updateChannelLabel = (channel: UpdateChannel): string => (channel === 'stable' ? 'Stable' : 'Preview');

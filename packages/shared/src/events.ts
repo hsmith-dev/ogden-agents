@@ -9,10 +9,14 @@ import {
   SettingsWhileWorkingChangedEvent,
   SettingsUpdateNoticeChangedEvent,
   SettingsUpdateNoticeChangedInput,
+  AppUpdateAvailableEvent,
+  AppUpdateAvailableInput,
+  AppUpdateRequestedEvent,
+  AppUpdateRequestedInput,
   SettingsWhileWorkingChangedInput,
 } from './events-settings.js';
 
-export { SettingsAgentDefaultModelChangedEvent, SettingsDeveloperModeChangedEvent, SettingsUpdateNoticeChangedEvent, SettingsWhileWorkingChangedEvent } from './events-settings.js';
+export { AppUpdateAvailableEvent, AppUpdateRequestedEvent, SettingsAgentDefaultModelChangedEvent, SettingsDeveloperModeChangedEvent, SettingsUpdateNoticeChangedEvent, SettingsWhileWorkingChangedEvent } from './events-settings.js';
 // Build run events and the builds and notification settings events (stories 5.2, 5.3).
 import * as runs from './events-runs.js';
 
@@ -361,6 +365,8 @@ export const CoreEvent = z.discriminatedUnion('type', [
   runs.SettingsRunLimitsChangedEvent,
   runs.SettingsNotificationsChangedEvent,
   SettingsUpdateNoticeChangedEvent,
+  AppUpdateAvailableEvent,
+  AppUpdateRequestedEvent,
 ]);
 export type CoreEvent = z.infer<typeof CoreEvent>;
 export type CoreEventType = CoreEvent['type'];
@@ -419,6 +425,8 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   runs.SettingsRunLimitsChangedInput,
   runs.SettingsNotificationsChangedInput,
   SettingsUpdateNoticeChangedInput,
+  AppUpdateAvailableInput,
+  AppUpdateRequestedInput,
 ]);
 export type NewCoreEvent = z.infer<typeof NewCoreEvent>;
 

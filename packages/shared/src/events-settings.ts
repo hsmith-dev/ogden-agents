@@ -58,3 +58,28 @@ export const SettingsUpdateNoticeChangedInput = z.object({
  */
 export const SettingsUpdateNoticeChangedEvent = SettingsUpdateNoticeChangedInput.extend(assigned);
 export type SettingsUpdateNoticeChangedEvent = z.infer<typeof SettingsUpdateNoticeChangedEvent>;
+
+export const AppUpdateAvailableInput = z.object({
+  type: z.literal('app.update_available'),
+  ...onSettingsStream,
+  payload: z.object({ version: z.string(), channel: z.enum(['stable', 'next']), downloaded: z.boolean() }),
+});
+/**
+ * The desktop app's shell reported an update (story 13.3, E13-R6): found, and
+ * downloaded and verified once `downloaded` is true. Every tab follows it by
+ * reading the update notice again.
+ */
+export const AppUpdateAvailableEvent = AppUpdateAvailableInput.extend(assigned);
+export type AppUpdateAvailableEvent = z.infer<typeof AppUpdateAvailableEvent>;
+
+export const AppUpdateRequestedInput = z.object({
+  type: z.literal('app.update_requested'),
+  ...onSettingsStream,
+  payload: z.object({ version: z.string(), whenIdle: z.boolean() }),
+});
+/**
+ * The user asked the desktop app to restart and install the update. `whenIdle`
+ * is true when it waits for running work to finish.
+ */
+export const AppUpdateRequestedEvent = AppUpdateRequestedInput.extend(assigned);
+export type AppUpdateRequestedEvent = z.infer<typeof AppUpdateRequestedEvent>;

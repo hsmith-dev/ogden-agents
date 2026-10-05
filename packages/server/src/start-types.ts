@@ -9,6 +9,7 @@ import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, Bm
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
 import type { Logger } from './log.js';
+import type { ShellMode } from './shell-mode.js';
 import type { UpdatesOption } from './update-check.js';
 
 export interface StartOptions {
@@ -186,6 +187,11 @@ export interface StartOptions {
    * a test run, which never makes a request.
    */
   updates?: UpdatesOption;
+  /**
+   * `desktop` when the desktop app started this server (story 13.3). Default:
+   * `OGDEN_AGENTS_SHELL=desktop` in the environment, which only the app sets.
+   */
+  shell?: ShellMode | null;
   /**
    * Called once the server has stopped by itself (Quit, or a restart the
    * launcher asked for) and everything is closed. A server process exits here.

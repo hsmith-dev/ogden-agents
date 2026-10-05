@@ -633,6 +633,8 @@ const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.updates}`,
   `PUT ${API_ROUTES.updates}`,
   `POST ${API_ROUTES.updatesCheck}`,
+  `POST ${API_ROUTES.updatesAppRestart}`,
+  `PUT ${API_ROUTES.updatesAppChannel}`,
   `GET ${API_ROUTES.workspaceBmadDetection}`,
   `DELETE ${API_ROUTES.workspaceBmadOffer}`,
   // Plan and Board (story 4.1), each through the guarded helper.

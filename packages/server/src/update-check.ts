@@ -14,7 +14,7 @@
  */
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { channelOf, decideUpdate, SETTINGS_STREAM, type InstallMethod, type UpdateCheckResponse, type UpdateNoticeResponse, type UpdateOffer } from '@ogden-agents/shared';
+import { channelOf, decideUpdate, SETTINGS_STREAM, type InstallMethod, type UpdateCheckOutcome, type UpdateNoticeResponse, type UpdateOffer } from '@ogden-agents/shared';
 import type { Core } from '@ogden-agents/core';
 import { z } from 'zod';
 import type { Logger } from './log.js';
@@ -58,6 +58,14 @@ export function isOffline(env: Readonly<Record<string, string | undefined>>): bo
   return value !== undefined && value !== '' && value !== '0' && value !== 'false';
 }
 
+/** The npm side of the notice; the route adds `shell` and the desktop app's `app` (story 13.3). */
+export type NpmNotice = Omit<UpdateNoticeResponse, 'shell' | 'appChannel' | 'app'>;
+/** What Check now answers with, before the route adds the desktop fields. */
+export interface NpmCheckResult {
+  outcome: UpdateCheckOutcome;
+  notice: NpmNotice;
+}
+
 export interface UpdateCheckOptions {
   dataDir: string;
   /** The running version. */
@@ -73,13 +81,13 @@ export interface UpdateCheckOptions {
 }
 
 export interface UpdateCheck {
-  notice(): UpdateNoticeResponse;
+  notice(): NpmNotice;
   /** Turns the start check on or off; appends the event when it changed. */
-  setEnabled(enabled: boolean): UpdateNoticeResponse;
+  setEnabled(enabled: boolean): NpmNotice;
   /** The once-per-start check: nothing when the switch is off, offline, or already run. Never throws. */
   runOnStart(): Promise<void>;
   /** Check now: the user asked, so it runs even with the switch off, but never offline. */
-  checkNow(): Promise<UpdateCheckResponse>;
+  checkNow(): Promise<NpmCheckResult>;
   /** Stops a check in flight (the server is closing). */
   close(): void;
 }
@@ -93,7 +101,7 @@ export function createUpdateCheck(options: UpdateCheckOptions): UpdateCheck {
   const abort = new AbortController();
   let offer: UpdateOffer | null = null;
   let started = false;
-  let inFlight: Promise<UpdateCheckResponse['outcome']> | undefined;
+  let inFlight: Promise<UpdateCheckOutcome> | undefined;
 
   const read = (): z.infer<typeof StoredState> => {
     try {
@@ -114,7 +122,7 @@ export function createUpdateCheck(options: UpdateCheckOptions): UpdateCheck {
     }
   };
 
-  const notice = (): UpdateNoticeResponse => {
+  const notice = (): NpmNotice => {
     const state = read();
     return { current: version, channel, installMethod, enabled: state.enabled !== false, offline, lastCheckedAt: state.lastCheckedAt ?? null, available: offer };
   };
@@ -148,7 +156,7 @@ export function createUpdateCheck(options: UpdateCheckOptions): UpdateCheck {
     return DistTags.parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));
   }
 
-  function run(): Promise<UpdateCheckResponse['outcome']> {
+  function run(): Promise<UpdateCheckOutcome> {
     inFlight ??= (async () => {
       try {
         const tags = await readTags();

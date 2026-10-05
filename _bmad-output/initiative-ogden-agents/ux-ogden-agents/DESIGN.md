@@ -403,6 +403,8 @@ Visual specs. Behavior lives in EXPERIENCE.md Component Patterns. Every shadcn c
 - **Blocked notice.** `{colors.state-error-subtle}` panel with the plain-language reason and **Retry** (primary). Error red is on the glyph only.
 - **Onboarding agent card.** `{colors.card}`, 1px border, `{rounded.lg}`; selected gets a 2px ink border. Agent name in `heading`, then one of: "Installed, signed in", "Installed, needs sign-in", "Not installed". No vendor gradient logos; a monochrome mark at 24px.
 - **Launch page.** Single centered column (the one centered layout in the product, because it is a single message): wordmark, `display` headline "Open Ogden Agents from your terminal", one sentence, the command `npx ogden-agents` in a `mono` block with a Copy button.
+- **Update banner** (desktop app and npm; stories 13.3 and 13.7). The Banner component: `{colors.muted}`, `label`, `{rounded.md}`, one sentence and up to two ghost text buttons at the end ("Restart to update", "Restart when they finish"; npm: "Dismiss"). A polite status region that is always mounted, never a modal, never red. A disabled button keeps its label and the sentence carries the reason.
+- **Update channel row** (Settings, About, desktop app only). Two outline buttons "Stable" and "Preview" as a labelled group with the pressed one marked, and a one-line description. The npm rows (Check now, the start-up switch) are replaced by it in the app.
 - **Kbd hint.** `{colors.muted}`, 1px border, `{rounded.sm}`, `mono-compact`. Visible only in Compact density or on hover in tooltips.
 
 → Visual reference: [`mockups/key-workspace.html`](mockups/key-workspace.html) (workspace view: status sidebar, chat, permission card; light Comfortable and dark Compact). Spines win on conflict.

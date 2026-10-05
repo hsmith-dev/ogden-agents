@@ -48,6 +48,8 @@ export { createMemoryAgentSetup } from '@ogden-agents/adapters';
 export { ANTIGRAVITY_AGENT_ID, createAntigravityAgent, createAntigravitySetup, currentPlatform as antigravityPlatform, pinnedServer as pinnedAntigravityServer } from '@ogden-agents/adapters';
 export type { AntigravityPins } from '@ogden-agents/adapters';
 export type { AntigravityPorts } from './antigravity-wiring.js';
+export { CODEX_AGENT_ID, createCodexAgent, createCodexSetup, installedCodex } from '@ogden-agents/adapters';
+export type { CodexPorts } from './codex-wiring.js';
 // The in-memory secret store, so tests never touch the real OS keychain (story 9.2).
 export { createMemorySecretStore } from '@ogden-agents/adapters';
 // BMad Method's catalog (story 4.3): the e2e suite keeps the real read-only parts and stubs setup, so no uv runs.

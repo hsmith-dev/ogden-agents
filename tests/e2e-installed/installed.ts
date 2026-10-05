@@ -4,7 +4,7 @@
  * the environment; `installed()` rebuilds the install around them, so a test
  * can run the installed launcher again (by its path in the npx install).
  */
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -13,7 +13,7 @@ import { createDataFolder020, type DataFolder020 } from '../fixtures/data-folder
 import { FIXTURE_TOP, fixtureSource, hasManagedPython, TEST_PYTHON } from '../fixtures/bmad-upstream-source.js';
 import { createFakeBmadRepo, type FakeBmadRepo, type FakeBmadRepoOptions } from '../fixtures/fake-bmad-repo.js';
 import { packFakeAdapter, testNpmCli } from '../fixtures/fake-adapter/pack.mjs';
-import { FAKE_ANTIGRAVITY, FAKE_GEMINI_KEY, isAlive, plantPinnedAntigravity, readPortFile, ROOT, waitUntil } from '../support.js';
+import { FAKE_ANTIGRAVITY, FAKE_CODEX, FAKE_GEMINI_KEY, isAlive, plantPinnedAntigravity, readPortFile, ROOT, waitUntil } from '../support.js';
 
 /**
  * Where the installed server looks for the Claude Agent ACP adapter
@@ -441,6 +441,10 @@ export const BMAD_PROBE_ENV = 'OGDEN_AGENTS_TEST_BMAD_PROBE';
 export const ANTIGRAVITY_SERVER_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_SERVER';
 /** The installed server's Antigravity install hook (epic 6 entry 10): its pins from a JSON file, every archive on 127.0.0.1. */
 export const ANTIGRAVITY_INSTALL_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_INSTALL';
+/** The installed server's Codex adapter hook (epic 12 entry 5): a Node script in the temp folder plays `codex-acp` (the fake's Codex personality). */
+export const CODEX_SERVER_ENV = 'OGDEN_AGENTS_TEST_CODEX_SERVER';
+/** A fake OpenAI key's shape, in the server's environment when Codex is on: only Codex's own process may receive it. */
+export const FAKE_OPENAI_KEY = `sk-proj-${'C'.repeat(40)}7777`;
 /** The installed server's trust-needing test agent (epic 6 entry 10): "Fake Agent", the fake agent, refused until the project is trusted. */
 export const TRUST_AGENT_ENV = 'OGDEN_AGENTS_TEST_TRUST_AGENT';
 
@@ -572,6 +576,8 @@ export interface BmadServerOptions {
   antigravityPins?: unknown;
   /** "Fake Agent", which needs a trusted project, registered too (epic 6 entry 10). */
   trustAgent?: boolean;
+  /** Codex installed (a planted pinned copy, never run) and played by the fake's Codex personality, with a fake OpenAI key in the server's environment (epic 12). */
+  codex?: boolean;
   /** A first run: Welcome not done. */
   firstRun?: boolean;
   /** More variables for the server's environment (planted secrets, say). */
@@ -580,7 +586,7 @@ export interface BmadServerOptions {
 
 export function bmadServer(
   name: string,
-  { available, probe = false, bmadSource = false, antigravity = false, antigravityPins, trustAgent = false, firstRun = false, env: extraEnv = {} }: BmadServerOptions = {},
+  { available, probe = false, bmadSource = false, antigravity = false, antigravityPins, trustAgent = false, codex = false, firstRun = false, env: extraEnv = {} }: BmadServerOptions = {},
 ): BmadServer {
   const dataDir = extraFolder(`${name}-data`);
   // The fixture BMad Method source (story 4.13), only when asked for: without it Set up would reach GitHub.
@@ -604,6 +610,18 @@ export function bmadServer(
     trustAgentScript = join(extraFolder(`${name}-trust-agent`), 'trust-agent.mjs');
     writeFileSync(trustAgentScript, `await import(${JSON.stringify(pathToFileURL(FAKE_AGENT).href)});\n`);
   }
+  let codexServer = '';
+  if (codex) {
+    // Installed as Install leaves it: the pinned adapter's entry script (empty, never run: the hook's script is).
+    const version = (JSON.parse(readFileSync(join(ROOT, 'packages', 'adapters', 'src', 'setup-codex', 'pins', 'package-lock.json'), 'utf8')) as { packages: Record<string, { version: string }> }).packages[
+      'node_modules/@agentclientprotocol/codex-acp'
+    ]!.version;
+    const entry = join(dataDir, 'agents', 'codex', `adapter-${version}`, 'node_modules', '@agentclientprotocol', 'codex-acp', 'dist');
+    mkdirSync(entry, { recursive: true });
+    writeFileSync(join(entry, 'index.js'), '');
+    codexServer = join(extraFolder(`${name}-codex`), 'codex-server.mjs');
+    writeFileSync(codexServer, `await import(${JSON.stringify(pathToFileURL(FAKE_CODEX).href)});\n`);
+  }
   const agyPinned = antigravityPins !== undefined || (antigravity && existsSync(join(dataDir, 'agents', 'antigravity')));
   const agyKey = antigravity && agyPinned;
   // Real paths: macOS temp folders are reached through /var, and Windows ones may be 8.3 short names.
@@ -622,6 +640,8 @@ export function bmadServer(
       [ANTIGRAVITY_SERVER_ENV]: agyPinned ? antigravityServer : '',
       [ANTIGRAVITY_INSTALL_ENV]: antigravityInstall,
       [TRUST_AGENT_ENV]: trustAgentScript,
+      [CODEX_SERVER_ENV]: codexServer,
+      CODEX_API_KEY: codex ? FAKE_OPENAI_KEY : '',
       GEMINI_API_KEY: agyKey ? FAKE_GEMINI_KEY : '',
       // The server passes ANTHROPIC_API_KEY on to agents, and `session-start` echoes the agent's whole environment into the page.
       ANTHROPIC_API_KEY: '',

@@ -245,6 +245,9 @@ export async function fakeFixedModeAgent(options: { agentId?: string; displayNam
   return { descriptor, agent };
 }
 
+/** The fake ACP agent as Codex's `codex-acp` adapter (`fake-codex.mjs`, epic 12 entry 4). */
+export const FAKE_CODEX = join(ROOT, 'tests', 'fixtures', 'fake-codex.mjs');
+
 /** The fake ACP agent as Antigravity's server (`fake-antigravity.mjs`, epic 6 entry 5). */
 export const FAKE_ANTIGRAVITY = join(ROOT, 'tests', 'fixtures', 'fake-antigravity.mjs');
 

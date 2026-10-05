@@ -59,6 +59,8 @@ export default defineConfig({
     { name: 'modes', testMatch: /(^|[\\/])permission-modes-journey\.spec\.ts$/, dependencies: ['planning'] },
     { name: 'upgrade', testMatch: /(^|[\\/])upgrade-journey\.spec\.ts$/, dependencies: ['modes'] },
     { name: 'agents', testMatch: /(^|[\\/])agents-journey\.spec\.ts$/, dependencies: ['upgrade'] },
-    { name: 'journey', testMatch: /(^|[\\/])journey\.spec\.ts$/, dependencies: ['agents'] },
+    // Epic 12's Codex journey (Codex beside Claude Code, API key only).
+    { name: 'codex', testMatch: /(^|[\\/])codex-journey\.spec\.ts$/, dependencies: ['agents'] },
+    { name: 'journey', testMatch: /(^|[\\/])journey\.spec\.ts$/, dependencies: ['codex'] },
   ],
 });

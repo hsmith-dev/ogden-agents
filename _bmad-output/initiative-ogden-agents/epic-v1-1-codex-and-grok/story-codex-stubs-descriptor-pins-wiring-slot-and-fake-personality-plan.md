@@ -76,7 +76,7 @@ Built 2026-10-05 on `story/12.4-codex-stubs` from `story/12.3-agent-contracts-v1
 
 ## Review Triage Log
 
-Pending.
+Security and correctness reviewers (2 lenses), no high or medium. Patched: key patterns anchored with a lookbehind so a key glued to a name is found and `task-` words are not (low), xAI keys allow `_` and `-` (low), `agent-pins` refuses a missing `--agent` value and uses an own-property check (low), an `installedCodex` ordering test. Not changed: `StartOptions.codex` is an injectable port like `antigravity` and `extraAgents` (never read from the environment; the env hook is gated) ; `AGENT_ENV_KEYS` keeps the OpenAI names even with Codex unregistered (conservative: the names are stripped from every other process); the duplicated registration condition in `start.ts` and `start-agents.ts` (small, tested together). Deferred: no fixture-lock install test for the Codex spec (the shared installer is covered by Claude Code's tests; the real pins by the CI `agent-pins` job on three OSes). No intent_gap or bad_plan.
 
 ## Verification
 

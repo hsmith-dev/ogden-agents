@@ -6,6 +6,8 @@
  * No test runs the real adapter, reads `~/.codex` or reaches the network.
  */
 import { spawn } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { agentDescriptorProblems, agentEnvKeys, AgentError, createAgentRegistry, declaredModes, protectedPathsWith } from '@ogden-agents/core';
 import { describe, expect, it } from 'vitest';
@@ -56,6 +58,21 @@ describe("Codex's descriptor (epic 12 entry 4)", () => {
       expect(packages[`node_modules/@openai/codex-${platform}`]?.optional).toBe(true);
     }
     for (const [path, entry] of Object.entries(packages)) if (path !== '') expect(entry.integrity, path).toMatch(/^sha512-/);
+  });
+
+  it('finds the installed adapter by its version folder, the pinned version first', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'ogden-agents-codexdir-'));
+    try {
+      expect(installedCodex(dataDir)).toBeUndefined();
+      for (const version of ['2.0.0', '2.1.1', '2.2.0']) {
+        const entry = join(dataDir, 'agents', 'codex', `adapter-${version}`, 'node_modules', '@agentclientprotocol', 'codex-acp', 'dist');
+        mkdirSync(entry, { recursive: true });
+        writeFileSync(join(entry, 'index.js'), '');
+      }
+      expect(installedCodex(dataDir)?.version).toBe('2.1.1');
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 
   it('is not registered by a shipped install yet, and its stub is not set up', async () => {

@@ -75,7 +75,12 @@ const valueOf = (/** @type {string} */ name) => {
   return index === -1 ? undefined : args[index + 1];
 };
 
-const agentId = valueOf('--agent') ?? 'claude-code';
+const agentArg = valueOf('--agent');
+if (flag('--agent') && (agentArg === undefined || agentArg.startsWith('--'))) {
+  console.error('agent-pins: --agent needs an agent id');
+  process.exit(1);
+}
+const agentId = agentArg ?? 'claude-code';
 /** The agent's pins (an unknown id is refused before any use, below). */
 const AGENT = /** @type {NonNullable<(typeof NPM_AGENTS)[string]>} */ (NPM_AGENTS[agentId] ?? NPM_AGENTS['claude-code']);
 const PINS_DIR = AGENT.pinsDir;
@@ -276,7 +281,7 @@ try {
     await checkAntigravity();
     process.exit(0);
   }
-  if (!(agentId in NPM_AGENTS)) throw new Error(`no pins for the agent ${agentId}`);
+  if (!Object.hasOwn(NPM_AGENTS, agentId)) throw new Error(`no pins for the agent ${agentId}`);
   const npmCli = findNpmCli();
   if (npmCli === undefined) throw new Error('npm-cli.js was not found beside this Node; pass --npm <path to npm-cli.js>');
   if (flag('--update')) update(npmCli, valueOf('--update'));

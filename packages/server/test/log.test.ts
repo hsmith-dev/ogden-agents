@@ -150,6 +150,9 @@ describe('redaction', () => {
     expect(out).not.toContain('HEAD_0123');
     expect(out).not.toContain('TAIL_4567');
     expect(out).toContain('failed with [redacted] and [redacted] inside');
+    // Ordinary words are left alone, and a key glued to a name is still found.
+    expect(JSON.stringify(redact({ note: 'a task-based desk-research plan' }))).toContain('task-based desk-research');
+    expect(JSON.stringify(redact({ note: `OPENAI_KEY_${openai}` }))).not.toContain('BACKSTOP');
   });
 
   it("a Google (Gemini) API key is redacted by field name and wherever it appears, wrapped too (epic 6 entry 5)", () => {

@@ -33,10 +33,10 @@ export const GOOGLE_API_KEY_PATTERNS: readonly RegExp[] = [/\bAIza[0-9A-Za-z_-]*
  * (`sk-ant`, matched above); also one wrapped onto the next lines (raw or as an
  * escaped `\n`).
  */
-export const OPENAI_KEY_PATTERNS: readonly RegExp[] = [/\bsk-(?!ant)[A-Za-z0-9_-]{16,}(?:(?:\r?\n|\\r|\\n)+[A-Za-z0-9_-]+)*/g];
+export const OPENAI_KEY_PATTERNS: readonly RegExp[] = [/(?<![A-Za-z0-9])sk-(?!ant)[A-Za-z0-9_-]{16,}(?:(?:\r?\n|\\r|\\n)+[A-Za-z0-9_-]+)*/g];
 
 /** An xAI API key (`xai-` and 20 or more characters), also wrapped onto the next lines. */
-export const XAI_KEY_PATTERNS: readonly RegExp[] = [/\bxai-[A-Za-z0-9]{20,}(?:(?:\r?\n|\\r|\\n)+[A-Za-z0-9]+)*/g];
+export const XAI_KEY_PATTERNS: readonly RegExp[] = [/(?<![A-Za-z0-9])xai-[A-Za-z0-9_-]{20,}(?:(?:\r?\n|\\r|\\n)+[A-Za-z0-9_-]+)*/g];
 
 /** Every key pattern above. */
 export const API_KEY_PATTERNS: readonly RegExp[] = [...ANTHROPIC_KEY_PATTERNS, ...GOOGLE_API_KEY_PATTERNS, ...OPENAI_KEY_PATTERNS, ...XAI_KEY_PATTERNS];

@@ -122,8 +122,7 @@ const registeredAgent =
     (options.codex === undefined && (CODEX_SHIPPED || hooks.codexServer !== undefined || hooks.codexInstall !== undefined) && agentId === CODEX_AGENT_ID) ||
     (options.grok !== undefined && options.grok !== false && agentId === GROK_AGENT_ID) ||
     (options.grok === undefined && (GROK_SHIPPED || hooks.grokServer !== undefined || hooks.grokInstall !== undefined) && agentId === GROK_AGENT_ID) ||
-    (options.local !== undefined && options.local !== false && agentId === LOCAL_AGENT_ID) ||
-    (options.local === undefined && (LOCAL_SHIPPED || hooks.localServer !== undefined || hooks.localEndpoint !== undefined) && agentId === LOCAL_AGENT_ID) ||
+    (agentId === LOCAL_AGENT_ID && (options.local === undefined ? LOCAL_SHIPPED || hooks.localServer !== undefined || hooks.localEndpoint !== undefined : options.local !== false)) ||
     (options.extraAgents ?? []).some((wiring) => wiring.descriptor.agentId === agentId);
 
 /**

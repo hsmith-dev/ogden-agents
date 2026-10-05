@@ -34,7 +34,7 @@ Today every chat is called "Chat" in the sidebar, the project's chat list and th
 
 3. **The user renames a chat from the sidebar and the chat list**
    **Given** a chat's row in the sidebar or in the project's chat list
-   **When** the user double clicks the row, presses F2 on it, or chooses Rename from the row's menu
+   **When** the user double clicks the sidebar row or presses F2 on it, or presses F2 on a chat list row or chooses Rename from its menu
    **Then** the row becomes a name field with the same Enter, Esc and announcement rules as criterion 2, and focus returns to the row afterwards
 
 4. **An empty name falls back**
@@ -79,4 +79,5 @@ Today every chat is called "Chat" in the sidebar, the project's chat list and th
 - Assumption: the automatic name is set once, from the first message, and never changes after; older chats get theirs from their first stored user message at server start.
 - Assumption: a chat with no name and no message is called "New chat" (was "Chat").
 - Assumption: Needs you rows name the chat after the project ("Project, Chat name: Claude Code wants to run npm test").
+- Decision (build, 2026-10-04): a double click doesn't rename in the chat list, because its first click opens the chat and leaves the list; the list has F2 and the row menu, the sidebar (which stays) has F2 and a double click.
 - Risk medium: the name is user input shown in several places and stored in the event log; the review's security lens checks criterion 5 against the server.

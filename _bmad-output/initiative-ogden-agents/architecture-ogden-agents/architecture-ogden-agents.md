@@ -95,6 +95,7 @@ graph LR
   - Every adapter that produces agent activity, whether an ACP chat or the bmad-loop build runner, emits the same `session.*` event types, so one session view renders both.
   - All events are retained, and history is deletable per workspace.
   - When a message completes, core appends a `session.message_completed` event carrying the full content. Its chunk events are pruned only after that, and the UI replaces chunks with the completed message.
+  - Note (chat names, backlog story 2, 2026-10-04): a session's name is two fields core keeps, the user's `title` and the automatic `autoTitle` (set once: a planning action's label, or the first user message that isn't a Deny reason, inside the same `completeMessage` transaction). Each change is a `session.renamed` carrying both. Names are normalized in `packages/shared` and never sent to an agent. No rule change.
 
 ### AD-6 — Terminal bytes use their own channel [ADOPTED]
 

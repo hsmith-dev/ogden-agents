@@ -215,6 +215,23 @@ describe('a Local model chat (epic 14 story 14.2)', () => {
     const claudeOptions = (await read(claude.id)).permissionModes!;
     expect(claudeOptions.find((option) => option.mode === 'skip_all')?.available).toBe(true);
     expect(claudeOptions.find((option) => option.mode === 'auto')?.available).toBe(true);
+    expect(JSON.stringify(claudeOptions)).not.toContain('Small local models');
+    // After the chat has started and answered the reason is the same, with its note, not only "sets its mode when a chat starts".
+    await say(server, tab, wsId, local.id, 'hello');
+    const started = (await read(local.id)).permissionModes!;
+    for (const mode of ['auto', 'skip_all']) {
+      const option = started.find((each) => each.mode === mode)!;
+      expect(option.available, mode).toBe(false);
+      expect(option.reason).toContain("Local model doesn't offer");
+      expect(option.reason).toContain('every command and file change asks first');
+    }
+    // A direct API call is still refused with the declared mode error, and the terminal is unsupported.
+    for (const mode of ['auto', 'skip_all']) {
+      const refused = await request(server, tab, 'PUT', apiPath(API_ROUTES.sessionPermissionMode, { wsId, sesId: local.id }), { mode, confirm: true });
+      expect(refused.status, mode).toBe(409);
+      expect(ApiErrorBody.parse(await refused.json()).error.code).toBe('mode_unavailable');
+    }
+    expect((await read(local.id)).terminal).toMatchObject({ available: false, code: 'agent_unsupported' });
   });
 
   it('continues a chat after a server restart by resuming its session from the data folder', async () => {

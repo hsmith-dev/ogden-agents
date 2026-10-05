@@ -63,6 +63,8 @@ Oneshot on 14.2's declared modes. The matrix row (a memlog proposal, merged with
 
 ## Review Triage Log
 
+Security and correctness reviewer (one pass each, in one session): no security finding (the note is a constant in a frozen descriptor). Patched: after a Local model chat had started, the picker said "sets its mode when a chat starts" and never gave the reason, now a mode the agent never offers says so (with its note) whether or not the chat started (high); the note's lookup used the default agent's id for a session with no agent, now the session's own agent and no note when absent (medium); the descriptor check refuses an empty note or one with a dash (low); tests now cover a started chat, a Claude Code reason without the note, the direct API refusal after the note, and the terminal (medium). No intent_gap or bad_plan.
+
 ## Verification
 
 **Commands:** `pnpm typecheck`, `pnpm test`.

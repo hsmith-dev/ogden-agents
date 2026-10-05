@@ -358,7 +358,7 @@ async function listenAndAnnounce({
   // Queued runs a stopped server left start where the limits allow (story 5.8).
   void builds.dispatchQueued().catch((error: unknown) => log.warn('starting queued builds failed', { reason: String(error) }));
   // Notifications for builds (story 11.4, `start-notifications.ts`): webhooks whose URLs live in the keychain.
-  const notifications = createNotificationsWiring({ options, core, log, secrets, ticketStore });
+  const notifications = createNotificationsWiring({ options, core, log, secrets, ticketStore, hooks });
   const appShortcut =
     options.appShortcut ??
     (options.launcherEntry === undefined

@@ -139,7 +139,7 @@ function finalizeFor(hashes: GrokBinaryHashes, probe: (binary: string) => Promis
 }
 
 /** What Install says when the unpacked Grok no longer takes an xAI API access token. */
-export const NO_TOKEN_METHOD = "This version of Grok doesn't accept an xAI API access token the way Ogden Agents needs, so nothing was installed.";
+export const NO_TOKEN_METHOD = "Grok didn't accept an xAI API access token the way Ogden Agents needs, or didn't answer in time, so nothing was installed. Try again.";
 
 /** Asks the checked binary whether it accepts a token (tests: a stub; the default spawns it, see `token-probe.ts`). */
 export type GrokTokenProbe = (binary: string) => Promise<boolean>;

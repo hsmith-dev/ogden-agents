@@ -14,6 +14,9 @@ import { join } from 'node:path';
 import { GROK_API_KEY_ENV, GROK_AUTH_METHOD_IDS, GROK_DISABLE_AUTOUPDATER_ENV, GROK_HOME_ENV } from '../acp-grok/constants.js';
 import { baseEnvironment } from '../child-env.js';
 
+/** The most output the probe reads without a line end before it gives up. */
+const MAX_PROBE_OUTPUT = 1024 * 1024;
+
 /** The longest the probe waits for the binary's two answers. */
 export const TOKEN_PROBE_TIMEOUT_MS = 20_000;
 
@@ -31,6 +34,9 @@ export async function grokAcceptsToken(binary: string, timeoutMs = TOKEN_PROBE_T
         try {
           child?.stdin?.end();
           child?.kill();
+          // A binary that ignores the first signal is stopped for good shortly after.
+          const target = child;
+          if (target !== undefined) setTimeout(() => target.kill('SIGKILL'), 2_000).unref();
         } catch {
           // Already gone.
         }
@@ -39,8 +45,17 @@ export async function grokAcceptsToken(binary: string, timeoutMs = TOKEN_PROBE_T
       const timer = setTimeout(() => finish(false), timeoutMs);
       try {
         child = spawn(binary, ['agent', '--no-leader', 'stdio'], {
-          cwd: home,
-          env: { ...baseEnvironment(), [GROK_HOME_ENV]: home, [GROK_DISABLE_AUTOUPDATER_ENV]: '1', [GROK_API_KEY_ENV]: `xai-${'0'.repeat(40)}` },
+          cwd: tmpdir(),
+          // Everything the binary could write to lives in the temp folder: not the user's home, config or cache folders.
+          env: {
+            ...baseEnvironment(),
+            HOME: home,
+            USERPROFILE: home,
+            XDG_CONFIG_HOME: home,
+            XDG_CACHE_HOME: home,
+            XDG_DATA_HOME: home,
+            ...(process.platform === 'win32' ? { APPDATA: home, LOCALAPPDATA: home } : {}),
+            [GROK_HOME_ENV]: home, [GROK_DISABLE_AUTOUPDATER_ENV]: '1', [GROK_API_KEY_ENV]: `xai-${'0'.repeat(40)}` },
           stdio: ['pipe', 'pipe', 'ignore'],
           windowsHide: true,
           shell: false,
@@ -54,6 +69,7 @@ export async function grokAcceptsToken(binary: string, timeoutMs = TOKEN_PROBE_T
       child.stdout?.setEncoding('utf8');
       child.stdout?.on('data', (chunk: string) => {
         buffer += chunk;
+        if (buffer.length > MAX_PROBE_OUTPUT) return finish(false);
         let at: number;
         while ((at = buffer.indexOf('\n')) >= 0) {
           const line = buffer.slice(0, at);
@@ -75,6 +91,10 @@ export async function grokAcceptsToken(binary: string, timeoutMs = TOKEN_PROBE_T
       child.stdin?.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 1, clientCapabilities: {} } })}\n`);
     });
   } finally {
-    rmSync(home, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    try {
+      rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch {
+      // A folder the stopped binary still holds (Windows) is left for the OS temp cleanup: never changes the answer.
+    }
   }
 }

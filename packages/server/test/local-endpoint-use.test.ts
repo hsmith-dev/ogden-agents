@@ -104,12 +104,12 @@ describe('presets, Test connection and Detect (epic 14 story 14.4)', () => {
       },
     });
     const tab = await signIn(server);
-    const added = LocalEndpointResponse.parse(await (await call(server, tab, 'POST', API_ROUTES.localEndpoints, { label: 'r', baseUrl: 'https://a.example.com/v1', confirmHost: 'a.example.com' })).json()).endpoint;
+    const added = LocalEndpointResponse.parse(await (await call(server, tab, 'POST', API_ROUTES.localEndpoints, { label: 'r', baseUrl: 'https://a.example.com/v1', confirmHost: 'https://a.example.com' })).json()).endpoint;
     expect((await call(server, tab, 'POST', apiPath(API_ROUTES.localEndpointTest, { endpointId: added.id }))).status).toBe(200);
     await call(server, tab, 'PATCH', apiPath(API_ROUTES.localEndpoint, { endpointId: added.id }), { baseUrl: 'https://b.example.com/v1' });
     const refused = await call(server, tab, 'POST', apiPath(API_ROUTES.localEndpointTest, { endpointId: added.id }));
     expect(refused.status).toBe(409);
-    expect(ApiErrorBody.parse(await refused.json()).error).toMatchObject({ code: 'endpoint_confirmation_required', details: { host: 'b.example.com' } });
+    expect(ApiErrorBody.parse(await refused.json()).error).toMatchObject({ code: 'endpoint_confirmation_required', details: { host: 'https://b.example.com' } });
     expect(calls).toEqual(['https://a.example.com/v1']);
     expect((await call(server, tab, 'POST', apiPath(API_ROUTES.localEndpointTest, { endpointId: 'lep_01J9Z3K4M5N6P7Q8R9S0T1V2W3' }))).status).toBe(404);
   });

@@ -62,8 +62,8 @@ describe('Test connection', () => {
     const core = openTestCore(tempDir());
     const endpoints = core.localEndpoints(secrets());
     const keyed = await endpoints.add({ label: 'k', baseUrl: 'http://localhost:1234/v1', key: 'secret' });
-    const remote = await endpoints.add({ label: 'r', baseUrl: 'https://a.example.com/v1', confirmHost: 'a.example.com' });
-    endpoints.update(remote.id, { baseUrl: 'https://b.example.com/v1' });
+    const remote = await endpoints.add({ label: 'r', baseUrl: 'https://a.example.com/v1', confirmHost: 'https://a.example.com' });
+    await endpoints.update(remote.id, { baseUrl: 'https://b.example.com/v1' });
     const { fake, calls } = port({ 'http://localhost:1234/v1': { models: ['m'], key: 'secret' }, 'https://b.example.com/v1': { models: ['m'] } });
     const models = createLocalModels({ endpoints, port: fake });
     expect((await models.test(keyed.id)).state).toBe('ready');

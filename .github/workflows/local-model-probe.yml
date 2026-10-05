@@ -30,7 +30,7 @@ jobs:
         route: [opencode, codex, goose, structured]
     env:
       PROBE_OUT: ${{ github.workspace }}/findings-${{ matrix.route }}-${{ matrix.os }}.json
-      PROBE_BIN_DIR: ${{ runner.temp }}/probe-bin
+      PROBE_BIN_DIR: ${{ github.workspace }}/probe-bin
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

@@ -6,6 +6,7 @@
 //   D. quit with a busy fake session asks first; "keep working" leaves everything running, and
 //      "quit anyway" stops the server AND the agent's own child (spike 13.1: a process-group kill
 //      left it behind on macOS)
+//   F. a chat with the fake agent completes a turn through the app (page, gate, server, agent, in one)
 //   E. killing the shell itself leaves nothing running (a Windows job object; elsewhere the server
 //      follows the closed pipe)
 //
@@ -162,6 +163,24 @@ await scenario('D2. "quit anyway" stops the server and the agent and its child',
   const exit = await Promise.race([app.child.exited, sleep(60_000).then(() => 'timeout')]);
   if (exit === 'timeout') throw new Error('the app did not quit after "quit anyway"');
   await waitFor('no ogden-node (server, agent or its child) after quit', noSidecars, 20_000);
+});
+
+await scenario('F. a chat with the fake agent completes a turn through the app', async () => {
+  const app = await startApp('chat');
+  const tab = await tabOf(app.ws, app.port);
+  const folder = mkdtempSync(join(tmpdir(), 'ogden-lifecycle-chat-'));
+  cleanups.push(() => rmSync(folder, { recursive: true, force: true }));
+  const wsId = (await (await tab.post('/api/v1/workspaces', { path: folder })).json()).workspace.id;
+  const sesId = (await (await tab.post(`/api/v1/workspaces/${wsId}/sessions`, {})).json()).session.id;
+  const sent = await tab.post(`/api/v1/workspaces/${wsId}/sessions/${sesId}/messages`, { text: 'hello' });
+  if (sent.status >= 300) throw new Error(`the message was refused (${sent.status})`);
+  // The turn ends back at idle, and the chat has been named from its first message.
+  await waitFor('the turn to finish', async () => {
+    const { session } = await tab.get(`/api/v1/workspaces/${wsId}/sessions/${sesId}`);
+    return session.state === 'idle' && Boolean(session.autoTitle);
+  }, 60_000);
+  writeQuit(app.ws);
+  await waitFor('no ogden-node after quit', noSidecars, 30_000);
 });
 
 await scenario('E. killing the shell leaves nothing running', async () => {

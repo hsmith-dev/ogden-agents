@@ -268,7 +268,7 @@ describe("a server's models (epic 14 story 14.5)", () => {
     section();
     fireEvent.click(screen.getByTestId('endpoint-show-models'));
     await waitFor(() => screen.getByTestId('endpoint-model-plain-one'));
-    fireEvent.click(screen.getAllByRole('button', { name: 'Use for new chats' })[1]!);
+    fireEvent.click(screen.getByRole('button', { name: 'Use plain-one for new chats' }));
     await waitFor(() => expect(api.choose).toHaveBeenCalledWith('lep_01J9Z3K4M5N6P7Q8R9S0T1V2W3', 'plain-one'));
   });
 

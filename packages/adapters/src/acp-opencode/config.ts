@@ -68,7 +68,7 @@ const ASKED = ['bash', 'edit', 'webfetch', 'websearch', 'codesearch', 'task', 'e
  * send it back in every request: such an id is never written. Real ids (`qwen2.5-coder:7b`,
  * `org/model-name`, `hf.co/x/y:Q4_K_M`) fit.
  */
-export const SAFE_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,299}$/;
+export const SAFE_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,189}$/;
 
 /** Whether `baseUrl` may be written to the config: http(s), no user or password, no query or fragment, no brace. */
 function safeBaseUrl(baseUrl: string): boolean {

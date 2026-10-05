@@ -328,7 +328,8 @@ export function sizeWords(bytes: number): string {
 
 /** `32k`, `128k`: a context length in plain words. */
 export function contextWords(tokens: number): string {
-  return tokens >= 1000 ? `${Math.round(tokens / 1024)}k` : String(tokens);
+  // Rounded down, so a context just under 16k never reads as 16k.
+  return tokens >= 1024 ? `${Math.floor(tokens / 1024)}k` : String(tokens);
 }
 
 /** The billions of parameters in a size such as `7B`, `8.0B` or `70B`; `undefined` when it isn't one. */

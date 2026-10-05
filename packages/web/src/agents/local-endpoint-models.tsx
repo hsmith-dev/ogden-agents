@@ -1,4 +1,4 @@
-import { contextWords, modelDescription, type LocalEndpointId, type LocalEndpointModelsResponse } from '@ogden-agents/shared';
+import { modelDescription, type LocalEndpointId, type LocalEndpointModelsResponse } from '@ogden-agents/shared';
 import { useState } from 'react';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
@@ -45,7 +45,7 @@ export function EndpointModels({ endpointId, chosen, guard }: { endpointId: Loca
         </Text>
       ) : null}
       {answer?.missing == null ? null : (
-        <Notice variant="blocked" glyphLabel="Model missing" data-testid="endpoint-model-missing" action={<Button variant="secondary" onClick={() => void choose(null)}>Use the first model instead</Button>}>
+        <Notice variant="blocked" glyphLabel="Model missing" data-testid="endpoint-model-missing" action={<Button variant="secondary" onClick={() => void choose(null)}>Clear my choice, use the first model</Button>}>
           The model {answer.missing} isn't on this server any more. Chats won't start until you choose another here. Ogden Agents never switches to a different model for you.
         </Notice>
       )}
@@ -64,7 +64,7 @@ export function EndpointModels({ endpointId, chosen, guard }: { endpointId: Loca
                   {isChosen ? (
                     <Text variant="caption">Used for new chats</Text>
                   ) : (
-                    <Button variant="ghost" onClick={() => void choose(model.id)}>
+                    <Button variant="ghost" aria-label={`Use ${model.id} for new chats`} onClick={() => void choose(model.id)}>
                       Use for new chats
                     </Button>
                   )}
@@ -77,7 +77,6 @@ export function EndpointModels({ endpointId, chosen, guard }: { endpointId: Loca
                     {caution}
                   </Text>
                 ))}
-                {model.contextTokens === undefined ? null : <span className="sr-only">Context {contextWords(model.contextTokens)}</span>}
               </li>
             );
           })}

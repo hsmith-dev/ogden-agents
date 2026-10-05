@@ -94,7 +94,9 @@ test('Codex beside Claude Code in a Simple project: own key only, a card that ho
 
   await test.step("Codex's process gets its own key and home only, and no other agent gets the key (AD-16)", async () => {
     const own = await agentEnv(page, 'Codex');
-    expect(own.CODEX_API_KEY).toBe(FAKE_OPENAI_KEY);
+    // Present in Codex's own process (the chat shows it masked, as every key is: AD-16).
+    expect(Object.keys(own)).toContain('CODEX_API_KEY');
+    expect(JSON.stringify(own)).not.toContain(FAKE_OPENAI_KEY);
     expect(Object.keys(own)).toContain('CODEX_HOME');
     expect(Object.keys(own)).not.toContain('CODEX_PATH');
     expect(Object.keys(own)).not.toContain(PROBE);

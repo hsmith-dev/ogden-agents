@@ -196,10 +196,10 @@ describe(`start scripts: ${OWN_SCRIPT.slice(START.length + 1)} on this OS`, () =
     expect(result.stdout).not.toContain('PLANTED');
   });
 
-  it.runIf(IS_WINDOWS)('refuses an argument that is not an --option, such as a dropped file, and runs nothing', () => {
+  it.runIf(IS_WINDOWS)('refuses a path argument, such as a dropped file, and runs nothing', () => {
     const result = runScript(['C:\\R^&D\\notes.txt'], { path: [fakeBin({ version: `v${enginesMinimum()}.1.0` })] });
     expect(result.status, output(result)).toBe(2);
-    expect(result.stdout).toContain('takes only options that begin with --');
+    expect(result.stdout).toContain('not files or folders');
     expect(result.stdout).not.toContain('ARGS:');
   });
 

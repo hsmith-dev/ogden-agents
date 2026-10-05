@@ -32,12 +32,14 @@ if defined OGDEN_AGENTS_PACKAGE set "OGDEN_PACKAGE=%OGDEN_AGENTS_PACKAGE%"
 set "OGDEN_CHECK=0"
 if /i "%~1"=="--check" set "OGDEN_CHECK=1"
 
-rem Only --options pass to Ogden Agents. Anything else (a file dropped on this
-rem script, say) is refused, so cmd.exe never re-reads it as part of a command.
+rem Options and their values pass to Ogden Agents. A path (a file dropped on
+rem this script, which may hold & unquoted) is refused, so cmd.exe never
+rem re-reads it as part of a command.
 :collect_args
 if "%~1"=="" goto :args_ok
 set "OGDEN_ARG=%~1"
-if not "%OGDEN_ARG:~0,2%"=="--" goto :bad_arg
+if not "%OGDEN_ARG:\=%"=="%OGDEN_ARG%" goto :bad_arg
+if not "%OGDEN_ARG::=%"=="%OGDEN_ARG%" goto :bad_arg
 shift
 goto :collect_args
 :args_ok
@@ -93,8 +95,8 @@ endlocal & endlocal & exit /b 0
 
 :bad_arg
 echo.
-echo Ogden Agents can't start: Start Ogden takes only options that begin with --,
-echo such as --check, --no-open or --port 5000. Start it without dropping files on it.
+echo Ogden Agents can't start: Start Ogden takes only options, such as --check,
+echo --no-open or --port 5000, not files or folders. Start it without dropping files on it.
 call :pause_on_error
 endlocal & exit /b 2
 

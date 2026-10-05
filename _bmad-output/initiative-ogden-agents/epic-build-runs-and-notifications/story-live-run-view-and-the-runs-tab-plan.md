@@ -3,13 +3,13 @@ title: 'Live run view and the Runs tab'
 type: 'feature'
 ticket: '1'
 created: '2026-10-05'
-status: 'in-progress'
-baseline_revision: ''
+status: 'in-review'
+baseline_revision: '73ec7a00b0ad0c9de387e6f32a11531de0a74da5'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-build-runs-and-notifications/epic-build-runs-and-notifications.md'
@@ -45,16 +45,16 @@ context:
 
 ## Code Map
 
-- `packages/core/src/builds.ts` (and the files 5.10 split from it) -- `retry` takes `apply_fix`.
+- `packages/core/src/builds.ts`, `build-dispatch.ts` (5.10's split) -- `retry` takes `apply_fix`.
 - `packages/shared/src/builds.ts` -- the new labels and sentences.
 - `packages/web/src/planning/build-run-header.tsx`, `build-run-panel.tsx` (new) -- the run view.
-- `packages/web/src/routes/workspace-runs-page.tsx` (new), `router.tsx`, `shell/workspace-tabs.tsx` -- the Runs tab.
+- `packages/web/src/routes/workspace-runs-page.tsx`, `planning/runs-list.tsx` (new), `router.tsx`, `shell/workspace-tabs.tsx` -- the Runs tab.
 - `packages/web/src/planning/builds-api.ts` -- Retry with a mode.
 
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] core: Apply the saved fix and retry; prune a run's folder with its worktree (deferred from 5.4 S6).
+- [ ] core: Apply the saved fix and retry (`apply_fix`).
 - [ ] shared, web: run panel, Runs page, tab slot, calls.
 - [ ] tests: core, server, DOM, e2e.
 

@@ -75,6 +75,9 @@ Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim fr
 - Send now or wait: an edit open on a waiting message is lost when the turn takes the message. From its review. (log: "Editing a waiting message while the turn ends loses the draft silently")
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
+- Epic 12 entry 5 or 7 (Codex or Grok chat): the shared client does not check that a fixed-at-start agent honoured the mode in its `_meta` on resume or load; the quirk should report a `current_mode_update`, which core already handles. From 12.3 review. (log: "the shared client does not check that a fixed-at-start agent honoured the mode")
+- Epic 12 entry 4 (Grok descriptor): an unreadable agent-files fingerprint (a symlinked `.claude` or `.mcp.json`) makes Trust loop for agents while the Board still works; say why in the prompt. From 12.3 review. (log: "an unreadable agent-files fingerprint makes Trust loop for agents")
+- Unowned: the project trust prompt's "changed" wording keys on the trusted flag only, and the terminal trust refusal uses code `agent_unsupported`. From 12.3 review. (log: "the project trust prompt's changed wording keys on the trusted flag only")
 
 ## Log
 
@@ -619,3 +622,12 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-choose-whether-new-messages-wait-or-go-right-away-plan.md`
   summary: Editing a waiting message while the turn ends loses the draft silently when the old text is sent.
   evidence: queued-messages.tsx editor does not reserve the message; takeNext sends it and the row unmounts.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-epic-contracts-shared-acp-hooks-sign-out-setup-notices-and-t-plan.md`
+  summary: The shared client does not check that a fixed-at-start agent honoured the mode.
+  evidence: 12.3 security and correctness review; see the plan's Review Triage Log.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-epic-contracts-shared-acp-hooks-sign-out-setup-notices-and-t-plan.md`
+  summary: An unreadable agent-files fingerprint makes Trust loop for agents.
+  evidence: 12.3 security and correctness review; see the plan's Review Triage Log.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-epic-contracts-shared-acp-hooks-sign-out-setup-notices-and-t-plan.md`
+  summary: The project trust prompt's changed wording keys on the trusted flag only.
+  evidence: 12.3 security and correctness review; see the plan's Review Triage Log.

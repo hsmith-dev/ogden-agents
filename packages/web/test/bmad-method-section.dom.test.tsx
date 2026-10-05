@@ -433,6 +433,26 @@ describe('BmadMethodSection: the script trust (story 4.2, DOM)', () => {
     expect(isOn('bmad-board')).toBe(true);
   });
 
+  it('after Allow, Board shows on at once but stays disabled until its save answers (the signal a test must wait for)', async () => {
+    // Leaving the page while the PATCH is in flight aborts it (Windows CI runs 37247766553 and 37247659244).
+    let answer!: () => void;
+    state.answer = (pieces) => new Promise((resolve) => (answer = () => resolve(settings(pieces))));
+    const { isOn, sw, click } = mount([], { trusted: false });
+    await click('bmad-board');
+    fireEvent.click(screen.getByTestId('script-trust-confirm'));
+    await settle();
+    expect(state.patches).toEqual([['board']]);
+    expect(isOn('bmad-board')).toBe(true);
+    expect(sw('bmad-board').hasAttribute('disabled')).toBe(true);
+    await act(async () => {
+      answer();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await settle();
+    expect(isOn('bmad-board')).toBe(true);
+    expect(sw('bmad-board').hasAttribute('disabled')).toBe(false);
+  });
+
   it('the main switch asks too (it turns on Board); a failed Allow says why and saves nothing', async () => {
     state.trustAnswer = () => Promise.reject(new Error('Ogden Agents could not reach the server.'));
     mount([], { trusted: false });

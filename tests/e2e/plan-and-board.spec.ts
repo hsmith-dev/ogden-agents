@@ -189,6 +189,8 @@ test('turning Board on in the settings asks for the trust first: Cancel changes 
       await page.getByTestId('script-trust-confirm').click();
       await expect(dialog).toHaveCount(0);
       await expect(board).toHaveAttribute('aria-checked', 'true');
+      // Shown at once; enabled again once the save landed (leaving before that aborts it).
+      await expect(board).toBeEnabled();
 
       // Trusted once for the project: the Board lists the tickets with no prompt.
       await page.goto(`${server.url}/w/${wsId}/board`);

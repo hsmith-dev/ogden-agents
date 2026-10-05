@@ -311,6 +311,7 @@ describe('review loop 1 hardening (story 5.2)', () => {
       throw new Error('the agent could not be told');
     });
     const failing = createBuilds({
+      settings: h.core.buildSettings,
       bmad: h.core.bmad,
       trust: h.core.bmadScriptTrust,
       source: { requireReady() {} },
@@ -511,7 +512,9 @@ describe('the run folder and checkpoint pauses (story 5.4)', () => {
     expect(h.released).toContain(session.id);
     expect(resultIn(h, run.id).status).toBe('built');
     // The end checks run on resume: here an empty diff fails it.
-    expect(await h.builds.resume(h.wsId, run.id)).toMatchObject({ outcome: 'failed', reason: RUN_REASON_EMPTY_DIFF });
+    expect(await h.builds.resume(h.wsId, run.id)).toMatchObject({ outcome: 'running' });
+    await h.builds.settled();
+    expect(h.core.entities.getRun(run.id)).toMatchObject({ outcome: 'failed', reason: RUN_REASON_EMPTY_DIFF });
     expect(h.sent).toHaveLength(1);
   });
 
@@ -525,7 +528,7 @@ describe('the run folder and checkpoint pauses (story 5.4)', () => {
     expect(h.core.entities.getRun(run.id)?.blockedCode).toBe('checkpoint_done');
   });
 
-  it('resume and Retry refuse a running run (run_not_active); Retry of another blocked run is 5.8s (501); a refused prompt keeps the pause', async () => {
+  it('resume and Retry refuse a running run (run_not_active); the other Retry modes are 5.9 and 11.1 (501); a refused prompt keeps the pause', async () => {
     const h = await harness();
     const running = await h.builds.start(h.wsId, { ref: '1.1' });
     expect(await codeOf(h.builds.resume(h.wsId, running.run.id))).toBe('run_not_active');
@@ -533,7 +536,7 @@ describe('the run folder and checkpoint pauses (story 5.4)', () => {
     h.tickets.set(running.run.worktreePath!, '1.1', 'blocked', 'unclear intent');
     await h.endTurn(running.session.id);
     expect(await codeOf(h.builds.resume(h.wsId, running.run.id))).toBe('run_not_active');
-    expect(((await refusal(h.builds.retry(h.wsId, running.run.id, {}))) as Error).name).toBe('NotImplementedError');
+    expect(((await refusal(h.builds.retry(h.wsId, running.run.id, { mode: 'rebase' }))) as Error).name).toBe('NotImplementedError');
 
     const paused = await harness();
     paused.tickets.checkpoint('1.1', { plan: true });

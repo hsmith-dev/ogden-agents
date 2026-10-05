@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUILD_RESULT_FILE, BuildRunResult, type SandboxStatus, type SessionId, type TicketDetail, type TicketStatus, type WorkspaceId } from '@ogden-agents/shared';
-import { createBuilds, type BuildRunnerPort, type BuildSessionSetup, type BuildsUseCases, type BuildRefusedError, type Core, type SandboxCheck, type SandboxPort, type TicketStorePort, type UnattendedBuildSetup, type VcsCheck, type VcsHead, type VcsPort } from '../src/index.js';
+import { createBuilds, type BuildRunnerPort, type BuildSessionSetup, type BuildsUseCases, type BuildRefusedError, type Core, type SandboxCheck, type SandboxPort, type SandboxRunRequest, type SandboxRunResult, type TicketStorePort, type UnattendedBuildSetup, type VcsCheck, type VcsHead, type VcsPort } from '../src/index.js';
 import { openTestCore, tempDir, unusedCatalogParts } from './helpers.js';
 
 export const PLAN = '_bmad-output/initiative-demo/epic-first/story-thing-plan.md';
@@ -28,15 +28,30 @@ export const testRunner: BuildRunnerPort = {
 };
 export const REVISION = 'a'.repeat(40);
 
+/** The commands a fake sandbox was asked to run, and what they answer (story 5.8). */
+export interface Rerun {
+  runs: SandboxRunRequest[];
+  result: SandboxRunResult | undefined;
+}
+export const newRerun = (): Rerun => ({ runs: [], result: { exitCode: 0, timedOut: false, output: 'Tests: 5 passed, 5 total\n' } });
+
 /** A sandbox port answering `check` from `answer` (story 5.6: and a status that agrees). */
-export function fakeSandbox(answer: () => SandboxCheck): SandboxPort {
+export function fakeSandbox(answer: () => SandboxCheck, rerun: Rerun = newRerun()): SandboxPort {
   const status = (): SandboxStatus => {
     const check = answer();
     return check.available
       ? { platform: 'other', available: true, kind: check.kind, summary: 'ok', probes: [], choices: [], installHint: null }
       : { platform: 'other', available: false, kind: null, summary: check.reason, probes: [], choices: [...(check.choices ?? [])], installHint: null };
   };
-  return { check: async () => answer(), status: async () => status() };
+  return {
+    check: async () => answer(),
+    status: async () => status(),
+    // The re-run of the project's tests: passes unless a test says otherwise (`runs` records each command).
+    run: async (request) => {
+      rerun.runs.push(request);
+      return rerun.result;
+    },
+  };
 }
 
 /** A session's setup, which must be an unattended one (story 5.6). */
@@ -57,8 +72,9 @@ export const TICKETS: Ticket[] = [
 export const STATE_OF: Record<string, string> = { 'ready-for-dev': 'backlog', 'in-review': 'review', built: 'review', done: 'done', blocked: 'in-progress', draft: 'backlog' };
 
 /** A ticket store whose statuses are kept per folder (the main checkout, or a worktree). */
-export function fakeTickets(repoPath: string) {
-  const statuses = new Map<string, Map<string, string>>([[repoPath, new Map([['1.1', 'ready-for-dev'], ['1.2', 'ready-for-dev']])]]);
+export function fakeTickets(repoPath: string, list: readonly Ticket[] = TICKETS) {
+  const statuses = new Map<string, Map<string, string>>([[repoPath, new Map(list.map((ticket) => [ticket.ref, 'ready-for-dev'] as const))]]);
+  const blockedAt = new Map<string, string>();
   const reasons = new Map<string, string>();
   const checkpoints = new Map<string, { plan?: boolean; done?: boolean }>();
   const calls: unknown[][] = [];
@@ -81,7 +97,7 @@ export function fakeTickets(repoPath: string) {
       covers: [],
       after: ticket.after,
       blocks: [],
-      blocked_at: '',
+      blocked_at: blockedAt.get(`${path}:${ticket.ref}`) ?? '',
       description: '',
       verify: '',
       references: [],
@@ -96,11 +112,11 @@ export function fakeTickets(repoPath: string) {
   const store: TicketStorePort = {
     async tree(path) {
       calls.push(['tree', path]);
-      return { tickets: TICKETS.map((ticket) => detail(path, ticket)), problems: [], folder: 'initiative-demo', epics: [] };
+      return { tickets: list.map((ticket) => detail(path, ticket)), problems: [], folder: 'initiative-demo', epics: [] };
     },
     async find(path, ref) {
       calls.push(['find', path, ref]);
-      return detail(path, TICKETS.find((ticket) => ticket.ref === ref)!);
+      return detail(path, list.find((ticket) => ticket.ref === ref)!);
     },
     async mark(path, ref, status, _guard, options = {}) {
       calls.push(['mark', path, ref, status, options.approve === true]);
@@ -112,9 +128,10 @@ export function fakeTickets(repoPath: string) {
   return {
     store,
     calls,
-    set: (path: string, ref: string, status: TicketStatus, reason?: string) => {
+    set: (path: string, ref: string, status: TicketStatus, reason?: string, at?: string) => {
       statusIn(path).set(ref, status);
       if (reason !== undefined) reasons.set(`${path}:${ref}`, reason);
+      if (at !== undefined) blockedAt.set(`${path}:${ref}`, at);
     },
     status: (path: string, ref: string) => statusIn(path).get(ref),
     /** The ticket's checkpoint flags everywhere, or only in the folder `path` (a worktree the agent edited). */
@@ -232,13 +249,17 @@ export interface Harness {
   fingerprints: Map<string, string>;
   worktreeFingerprint: { value: string };
   sandbox: { available: boolean };
+  /** The sandbox's test re-runs (story 5.8): each command asked, and what the next ones answer. */
+  rerun: Rerun;
+  /** The run time limits armed (story 5.8): `fire()` runs every one that is still armed. */
+  timers: { armed: Array<{ ms: number; run: () => void; cancelled: boolean }>; fire(): void };
   /** Makes the next build prompts fail to send (a chat that refuses them). */
   sendFails: { value: boolean };
   /** Ends the build session's turn (working, then `idle` or `error`) and waits for the outcome. */
   endTurn(sessionId: SessionId, state?: 'idle' | 'error'): Promise<void>;
 }
 
-export async function harness({ pieces = ['board', 'builds'] as const, trusted = true, freeBytes, runner = testRunner }: { pieces?: readonly string[]; trusted?: boolean; freeBytes?: (dir: string) => number | undefined; runner?: BuildRunnerPort } = {}): Promise<Harness> {
+export async function harness({ pieces = ['board', 'builds'] as const, trusted = true, freeBytes, runner = testRunner, ticketList }: { pieces?: readonly string[]; trusted?: boolean; freeBytes?: (dir: string) => number | undefined; runner?: BuildRunnerPort; ticketList?: readonly Ticket[] } = {}): Promise<Harness> {
   const dataDir = tempDir('ogden-agents-builds-data-');
   const repo = tempDir('ogden-agents-builds-repo-');
   const fingerprints = new Map<string, string>();
@@ -257,13 +278,24 @@ export async function harness({ pieces = ['board', 'builds'] as const, trusted =
   const workspace = core.entities.ensureWorkspace(repo);
   core.permissions.updateSettings(workspace.id, { bmadPieces: [...pieces] });
   if (trusted) await core.bmadScriptTrust.trustScripts(workspace.id);
-  const tickets = fakeTickets(workspace.realPath!);
+  const tickets = fakeTickets(workspace.realPath!, ticketList);
   const git = fakeVcs();
   const sent: Array<{ sessionId: SessionId; text: string }> = [];
   const released: SessionId[] = [];
   const sandbox = { available: true };
   const sendFails = { value: false };
+  const rerun = newRerun();
+  const timers = { armed: [] as Array<{ ms: number; run: () => void; cancelled: boolean }>, fire() { for (const timer of this.armed.filter((each) => !each.cancelled)) timer.run(); } };
+  // The project's own test command (story 5.8), so the re-run has one to run.
+  core.buildSettings.setWorkspaceSettings(workspace.id, { testCommand: 'run-tests' });
   const builds = createBuilds({
+    settings: core.buildSettings,
+    commandEnv: () => ({ PATH: '/bin' }),
+    setTimer: (run, ms) => {
+      const timer = { ms, run, cancelled: false };
+      timers.armed.push(timer);
+      return { cancel: () => void (timer.cancelled = true) };
+    },
     bmad: core.bmad,
     trust: core.bmadScriptTrust,
     source: { requireReady() {} },
@@ -271,7 +303,7 @@ export async function harness({ pieces = ['board', 'builds'] as const, trusted =
     events: core.events,
     tickets: tickets.store,
     vcs: git.vcs,
-    sandbox: fakeSandbox(() => (sandbox.available ? { available: true, kind: 'test' } : { available: false, reason: 'none' })),
+    sandbox: fakeSandbox(() => (sandbox.available ? { available: true, kind: 'test' } : { available: false, reason: 'none' }), rerun),
     runner,
     chat: {
       createChatSession: async (wsId, options) => core.entities.createSession({ workspaceId: wsId, kind: options?.kind ?? 'chat' }),
@@ -300,6 +332,8 @@ export async function harness({ pieces = ['board', 'builds'] as const, trusted =
     fingerprints,
     worktreeFingerprint,
     sandbox,
+    rerun,
+    timers,
     sendFails,
     async endTurn(sessionId, state = 'idle') {
       core.entities.setSessionState(sessionId, 'working');

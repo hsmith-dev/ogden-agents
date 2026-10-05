@@ -104,6 +104,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Epic 5 (5.9 or 11.1): while a build runs, its branch ref points at objects only the run's own store holds, so the user's own `git log --all`, `git fsck` or `git gc` in the repo reports a bad object for `ogden/<run8>/…` until approve imports it or the run is discarded. Keeping the run's refs out of `refs/heads` would close it. From 5.6. (log: "Known cost of the per-run object store")
 - Epic 5 (a later story): an attended build has no managed Claude Code settings, so the user's own settings can still skip a card. From 5.6. (log: "An attended build's session has no managed Claude Code settings")
 - Epic 5 (a later sandbox story): 5.6's low review findings (a compression-bomb object, an unremovable store, the bubblewrap probe, the docker lookup). From 5.6. (log: "Low findings of 5.6's review")
+- Epic 5 (5.10 or a later sandbox story): Stop and Quit do not stop a test re-run in progress, and the macOS Seatbelt profile is allow-default with only network and writes denied, so mach lookups and signals stay open. From 5.8 reviews. (log: "The test re-run is not stopped by Stop or Quit")
+- Epic 5 (a later sandbox story): the read fence uses unresolved credential folder paths and a short list, and macOS shares its temp folders between runs. From 5.8 security review. (log: "Read fences of the sandboxed re-run")
+- Epic 5 (5.9): queued runs start again only when another run ends, a limit changes or the server restarts, not when a turned-off piece is turned back on. From 5.8 review. (log: "Queued runs wait after a piece is turned back on")
 
 ## Log
 
@@ -753,3 +756,15 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-grok-install-and-xai-api-access-token-from-the-ui-plan.md`
   summary: Epic 12.8 review: other refusal words still say key for Grok, and the install-time token probe's premise that a dummy token sends nothing to xAI is checked on macOS only.
   evidence: `core/errors.ts` `ApiKeyRefusedError`, `web/agents/agent-setup-api.ts`, `setup-grok/token-probe.ts`; Windows and Linux are a live check.
+
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-dispatch-limits-stop-retry-and-quit-in-core-plan.md`
+  summary: The test re-run is not stopped by Stop or Quit, and macOS Seatbelt leaves mach lookups and signals open
+  evidence: 5.8 reviews: `decideOutcome` disarms the deadline before the re-run and `stop` finds the agent already released; `seatbeltProfile` is allow-default with only `network*` and `file-write*` denied.
+
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-dispatch-limits-stop-retry-and-quit-in-core-plan.md`
+  summary: Read fences of the sandboxed re-run use unresolved credential folder paths and a short list, and macOS shares its temp folders between runs
+  evidence: 5.8 security review: `CREDENTIAL_FOLDERS` joined to the home folder unresolved; `temporaryFolders` in `exec.ts`.
+
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-dispatch-limits-stop-retry-and-quit-in-core-plan.md`
+  summary: Queued runs wait after a piece is turned back on
+  evidence: 5.8 correctness review: `launchQueued` returns silently while the piece is off and only a run ending, a limit change or a start drains the queue.

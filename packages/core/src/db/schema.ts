@@ -276,3 +276,27 @@ export const chatSettings = sqliteTable('chat_settings', {
   /** `wait` | `now`. */
   whileWorking: text('while_working').notNull().default('wait'),
 });
+
+/**
+ * Unattended builds' install-wide limits (story 5.8; one row, `id = 1`,
+ * created on first write): runs at once in the install and the maximum run
+ * time. A missing row or value reads as the defaults.
+ */
+export const buildLimits = sqliteTable('build_limits', {
+  id: integer('id').primaryKey(),
+  maxConcurrentRunsPerInstall: integer('max_concurrent_runs_per_install'),
+  maxRunMinutes: integer('max_run_minutes'),
+});
+
+/**
+ * A project's build settings (story 5.8; a row on first write): its limit
+ * of runs at once and the test command the verification re-run uses instead
+ * of the detected one (11.2 edits it). `NULL` reads as the default.
+ */
+export const workspaceBuildSettings = sqliteTable('workspace_build_settings', {
+  workspaceId: text('workspace_id')
+    .primaryKey()
+    .references(() => workspaces.id),
+  maxConcurrentRuns: integer('max_concurrent_runs'),
+  testCommand: text('test_command'),
+});

@@ -23,6 +23,7 @@ import { posix, win32 } from 'node:path';
 import type { SandboxPort } from '@ogden-agents/core';
 import { SANDBOX_LABELS, type SandboxProbe } from '@ogden-agents/shared';
 import { createSandboxChain, type SandboxStep, type SandboxStepResult } from '../sandbox-chain/index.js';
+import { runInBubblewrap, runInSeatbelt } from './exec.js';
 
 /** Why there is no sandbox, in plain words (EXPERIENCE.md Sandbox unavailable). */
 export const NO_SANDBOX_ON_WINDOWS = "Claude Code has no sandbox of its own on Windows, so it can't build unattended here.";
@@ -99,6 +100,16 @@ export function createNativeSandboxStep(options: NativeSandboxOptions = {}): San
   const none = (reason: string, probes: SandboxProbe[], installHint: string | null): SandboxStepResult => ({ kind: undefined, probes, reason, installHint });
 
   return {
+    async run(request) {
+      // Only the kinds this step makes, and only on its own platform: never another sandbox's, never none.
+      if (request.sandbox.kind === 'seatbelt' && platform === 'darwin') return runInSeatbelt(request);
+      if (request.sandbox.kind === 'bubblewrap' && platform === 'linux') {
+        const bwrap = find('bwrap');
+        return bwrap === undefined ? undefined : runInBubblewrap(bwrap, request);
+      }
+      return undefined;
+    },
+
     async inspect(): Promise<SandboxStepResult> {
       try {
         if (platform === 'darwin') {

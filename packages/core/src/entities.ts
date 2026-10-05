@@ -45,6 +45,7 @@ import {
   type PermissionMode,
   type PermissionModeChangeCause,
   type Run,
+  type RunQueueEntry,
   type RunDecision,
   type RunId,
   type RunOutcome,
@@ -287,6 +288,28 @@ export interface Entities {
    * worktrees stay. Returns them.
    */
   settleInterruptedRuns(reason: string): Run[];
+  /** The workspace's runs, newest first, at most `limit` (default 200; story 5.8: the board and the session header). */
+  listRuns(workspaceId: WorkspaceId, limit?: number): Run[];
+  /** Every run `running` that left the queue (its agent is, or is about to be, working), oldest first (story 5.8: what the limits count). */
+  listRunningRuns(): Run[];
+  /** Every queued run (`queuePosition` set), oldest first across workspaces: the dispatcher's order (story 5.8). */
+  listQueuedRuns(): Run[];
+  /** The workspace's queue as `run.queue_changed` carries it, in order. */
+  queueOf(workspaceId: WorkspaceId): RunQueueEntry[];
+  /**
+   * Puts a `running` run in its workspace's queue (story 5.8: a retried run
+   * waiting for a slot), last in line, and appends `run.queue_changed`.
+   */
+  queueRun(id: RunId): Run;
+  /**
+   * A queued (or retried) run starts (story 5.8): its worktree, branch,
+   * base, sandbox and deadline are set, it leaves the queue and `running`
+   * is its outcome (blocked fields cleared), appending `run.dispatched`, the
+   * outcome change if there is one, and the queue's change.
+   */
+  dispatchRun(id: RunId, dispatch: { worktreePath: string; sandbox: string; branch: string; baseRevision: string; baseBranch: string | null; deadline: string }): Run;
+  /** Takes a queued run out of the queue without a dispatch (it was stopped, story 5.8) and appends the queue's change. */
+  leaveQueue(id: RunId): Run;
 }
 
 /** Parses `value`, throwing a {@link ValidationError} that names `what`. */
@@ -411,6 +434,25 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
     const row = orm.select().from(runs).where(eq(runs.id, id)).get();
     return row === undefined ? undefined : toRun(row);
   };
+
+  /** The workspace's queued runs in order (oldest first), positions as stored. */
+  const queueOf = (workspaceId: WorkspaceId): RunQueueEntry[] =>
+    orm
+      .select()
+      .from(runs)
+      .where(and(eq(runs.workspaceId, workspaceId), eq(runs.outcome, 'running'), isNotNull(runs.queuePosition)))
+      .orderBy(asc(runs.queuePosition), asc(runs.createdAt), asc(runs.id))
+      .all()
+      .map((row, index) => ({ runId: row.id as RunId, ticketRef: row.ticketRef, position: index + 1 }));
+
+  /** Renumbers the workspace's queue 1, 2, 3 and appends `run.queue_changed` when it differs from `before` (the queue before the change). */
+  const refreshQueue = (workspaceId: WorkspaceId, before: RunQueueEntry[]): void => {
+    const queue = queueOf(workspaceId);
+    for (const entry of queue) orm.update(runs).set({ queuePosition: entry.position }).where(eq(runs.id, entry.runId)).run();
+    const same = queue.length === before.length && queue.every((entry, index) => before[index]?.runId === entry.runId && before[index]?.position === entry.position);
+    if (!same) log.append({ type: 'run.queue_changed', workspaceId, streamId: workspaceId, payload: { queue } });
+  };
+
   const requireSession = (id: SessionId) => {
     const session = getSession(id);
     if (session === undefined) throw new NotFoundError('session', id);
@@ -778,9 +820,13 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
           createdAt: at,
           updatedAt: at,
         };
-        orm.insert(runs).values(run).run();
-        log.append({ type: 'run.created', workspaceId: run.workspaceId, streamId: session.id, payload: { run } });
-        return run;
+        // A queued run goes last in its workspace's line (the position asked for is only a flag).
+        const before = queueOf(session.workspaceId);
+        const queued: Run = queuePosition === null ? run : { ...run, queuePosition: before.length + 1 };
+        orm.insert(runs).values(queued).run();
+        log.append({ type: 'run.created', workspaceId: queued.workspaceId, streamId: session.id, payload: { run: queued } });
+        if (queuePosition !== null) refreshQueue(queued.workspaceId, before);
+        return queued;
       });
     },
 
@@ -824,11 +870,78 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
       return row === undefined ? undefined : toRun(row);
     },
 
+    listRuns(workspaceId, limit = 200) {
+      return orm.select().from(runs).where(eq(runs.workspaceId, workspaceId)).orderBy(desc(runs.createdAt), desc(runs.id)).limit(limit).all().map(toRun);
+    },
+
+    listRunningRuns() {
+      return orm.select().from(runs).where(and(eq(runs.outcome, 'running'), isNull(runs.queuePosition))).orderBy(asc(runs.createdAt), asc(runs.id)).all().map(toRun);
+    },
+
+    listQueuedRuns() {
+      return orm.select().from(runs).where(and(eq(runs.outcome, 'running'), isNotNull(runs.queuePosition))).orderBy(asc(runs.createdAt), asc(runs.id)).all().map(toRun);
+    },
+
+    queueOf: queueOf,
+
+    queueRun(id) {
+      return log.transaction(() => {
+        const run = getRun(id);
+        if (run === undefined) throw new NotFoundError('run', id);
+        if (run.outcome !== 'running') throw new InvalidOperationError(`run ${id} is not running, so it cannot be queued`);
+        const before = queueOf(run.workspaceId);
+        orm.update(runs).set({ queuePosition: before.length + 1, updatedAt: now() }).where(eq(runs.id, id)).run();
+        refreshQueue(run.workspaceId, before);
+        return getRun(id)!;
+      });
+    },
+
+    dispatchRun(id, dispatch) {
+      return log.transaction(() => {
+        const run = getRun(id);
+        if (run === undefined) throw new NotFoundError('run', id);
+        const at = now();
+        const deadline = check(IsoUtcTimestamp, dispatch.deadline, 'run deadline');
+        const before = queueOf(run.workspaceId);
+        orm
+          .update(runs)
+          .set({ worktreePath: dispatch.worktreePath, sandbox: dispatch.sandbox, branch: dispatch.branch, baseRevision: dispatch.baseRevision, baseBranch: dispatch.baseBranch, deadline, queuePosition: null, updatedAt: at })
+          .where(eq(runs.id, id))
+          .run();
+        log.append({
+          type: 'run.dispatched',
+          workspaceId: run.workspaceId,
+          streamId: run.sessionId,
+          payload: { runId: run.id, worktreePath: dispatch.worktreePath, branch: dispatch.branch, baseRevision: dispatch.baseRevision, sandbox: dispatch.sandbox, deadline },
+        });
+        // A retried run (blocked, failed or stopped) is running again, its blocked fields cleared.
+        if (run.outcome !== 'running') {
+          orm.update(runs).set({ outcome: 'running', reason: null, blockedCode: null }).where(eq(runs.id, id)).run();
+          log.append({ type: 'run.outcome_changed', workspaceId: run.workspaceId, streamId: run.sessionId, payload: { runId: run.id, outcome: 'running', previous: run.outcome } });
+        }
+        refreshQueue(run.workspaceId, before);
+        return getRun(id)!;
+      });
+    },
+
+    leaveQueue(id) {
+      return log.transaction(() => {
+        const run = getRun(id);
+        if (run === undefined) throw new NotFoundError('run', id);
+        if (run.queuePosition === null) return run;
+        const before = queueOf(run.workspaceId);
+        orm.update(runs).set({ queuePosition: null, updatedAt: now() }).where(eq(runs.id, id)).run();
+        refreshQueue(run.workspaceId, before);
+        return getRun(id)!;
+      });
+    },
+
     settleInterruptedRuns(reason) {
+      // A queued run has no agent to lose: it stays queued and is drained at the start (story 5.8).
       return orm
         .select({ id: runs.id })
         .from(runs)
-        .where(eq(runs.outcome, 'running'))
+        .where(and(eq(runs.outcome, 'running'), isNull(runs.queuePosition)))
         .all()
         .map((row) => this.setRunOutcome(row.id as RunId, 'blocked', reason, { blockedCode: 'interrupted' }));
     },

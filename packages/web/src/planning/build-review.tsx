@@ -1,4 +1,4 @@
-import { APPROVE_LABEL, REJECT_LABEL, REVIEW_MERGED_TEXT, REVIEW_NO_CHANGES_TEXT, RUN_OUTCOME_LABELS } from '@ogden-agents/shared';
+import { APPROVE_LABEL, REJECT_LABEL, REVIEW_MERGED_TEXT, REVIEW_NO_CHANGES_TEXT, RUN_PHASE_LABELS, runPhase } from '@ogden-agents/shared';
 import { CheckCircle, XCircle } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
@@ -46,7 +46,7 @@ export function BuildReview({ wsId, ticketRef }: { wsId: string; ticketRef: stri
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-mono text-mono-compact text-muted-foreground">{run.ticketRef}</span>
         <Badge variant="outline" data-testid="review-outcome">
-          {RUN_OUTCOME_LABELS[outcome]}
+          {RUN_PHASE_LABELS[runPhase(run)]}
         </Badge>
         {run.branch === null ? null : <span className="font-mono text-mono-compact text-muted-foreground">{run.branch}</span>}
         <Button variant="link" size="sm" asChild>

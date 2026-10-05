@@ -74,7 +74,7 @@ export function createPlanFileTicketStore(tickets: readonly PlanFileTicket[]) {
     async find(repoPath: string, ref: string) {
       return { ...read(repoPath, find(ref)), description: '', verify: '', references: [], notes: [], unknown: '' };
     },
-    async mark(repoPath: string, ref: string, status: string, options: { approve?: boolean } = {}) {
+    async mark(repoPath: string, ref: string, status: string, _guard: unknown, options: { approve?: boolean } = {}) {
       if (status === 'done' && options.approve !== true) throw new Error('only approve writes done');
       const ticket = find(ref);
       marks.push({ repoPath, ref, status, approve: options.approve === true });

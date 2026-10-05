@@ -3,13 +3,13 @@ title: 'The composer keeps unsent text per chat'
 type: 'feature'
 ticket: '6'
 created: '2026-10-04'
-status: 'in-progress'
+status: 'in-review'
 baseline_revision: '1319f26'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
 review_loop_iteration: 0
 context: []
 ---
@@ -72,13 +72,33 @@ context: []
 
 ## Implementation Notes
 
+- Implemented directly in this session (no separate coding subagent): small change, the session already held the investigation.
+- `drafts.ts` owns the policy (key `ogden-agents.draft.v1:<wsId>:<sesId|new>`, `{ text, savedAt }`, 7 days, 100 000 chars, 50 drafts); prune runs once per page load and when a new draft is added, never per keystroke over all entries.
+- `Composer`: text starts from the draft; a `draftKey` change swaps text during render (SessionPage stays mounted across chats); an effect saves; the accept path calls `clearDraftIfUnchanged` with the key captured at submit (works after unmount, the first-chat flow) and clears the field only if the page is still on that key.
+- Tests: `packages/web/test/drafts.test.ts`, `packages/web/test/composer-drafts.dom.test.tsx`, `tests/e2e/composer-drafts.spec.ts`. EXPERIENCE.md Composer row updated.
+
 ## Plan Change Log
 
 ## Review Triage Log
 
+Pass 1 (quick lens; UX and privacy focus). Verdicts: high 0, medium 3, low 5, false 0, maybe-false 0; 1 rejected low. No intent_gap, no bad_plan.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---------|---------|-------|-------------------|
+| 1 | Text typed during a first-chat send stays under `<ws>:new`, unseen until the project is empty again | low | defer | Real: `onlyFirstChat` is lost on remount. Before this change that text was lost outright; the fix needs a carry-over into the new chat's key. deferred-work.md |
+| 2 | Not-sent text prepended twice when the composer remounts (404 detour), and could land in another chat | medium | patch | Reproduced in a DOM test. The composer now skips a restore key already applied before mount. |
+| 3 | A refused send after moving chats shows its error under the other chat | medium | patch | Error cleared on key change, and a refusal for a left chat is not shown; the text stays in that chat's draft. DOM test. `sending` carry-over is pre-existing, left. |
+| 4 | The 7-day TTL is enforced only when Ogden loads again on the same origin | medium | patch | True (the port may change). Doc comment and Design Notes now say so; no code can clear another origin's storage. |
+| 5 | A future `savedAt` never expires and is never evicted | low | patch | Entries dated more than a day ahead now count as expired. Unit test. |
+| 6 | Deleting a chat or project leaves its draft until expiry | low | defer | Real; needs deletion events wired to drafts. deferred-work.md |
+| 7 | The cursor lands before a restored draft; there is no cue that the text was kept | low | patch (caret) | The e2e check reproduced the caret at 0. The cursor is now set after the text on mount and on a chat change. Adding a cue is not part of the intent: rejected. |
+| 8 | The e2e "leave and return" was a full load, not an in-app move | low | patch | Added an e2e test that moves between two chats through the sidebar links. |
+| 9 | The two plan ACs (no leak; two tabs) had no tests | low | patch | The e2e test checks that no request or console line carries the draft. A DOM test covers two composers on one key. |
+| 10 | Every keystroke parses and rewrites the whole draft | low | reject | Within the plan. This is a few ms at the 100 000-character cap, and debouncing risks losing text on unload. |
+
 ## Design Notes
 
-Why browser storage, not the server: a draft can hold a pasted secret; the server keeps an append-only event log and AGENTS.md says mask secrets in anything stored. `localStorage` is per origin (includes the port), plain text on the user's own disk, readable only by pages from this Ogden origin; the 7-day TTL bounds how long a secret lingers. Different port on next start → earlier drafts unseen; they expire.
+Why browser storage, not the server: a draft can hold a pasted secret; the server keeps an append-only event log and AGENTS.md says mask secrets in anything stored. `localStorage` is per origin (includes the port), plain text in the browser profile, readable only by pages from that origin. The 7-day TTL is enforced when Ogden next loads on the same origin; drafts on a port Ogden no longer uses (or never reopened) stay until the browser's site data is cleared (review finding 4).
 
 ## Verification
 

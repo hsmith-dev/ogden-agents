@@ -127,4 +127,36 @@ describe('composer drafts', () => {
     expect(input().value).toBe('');
     expect(window.localStorage.length).toBe(0);
   });
+
+  it('does not put Not-sent text back twice when the composer mounts again', () => {
+    const first = mount({ draftKey: 'ws:a' });
+    type('typed');
+    first.rerender({ restore: { key: 'msg_1', text: 'not sent' } });
+    first.unmount();
+    mount({ draftKey: 'ws:a', restore: { key: 'msg_1', text: 'not sent' } });
+    expect(input().value).toBe('not sent\n\ntyped');
+    expect(readDraft('ws:a')).toBe('not sent\n\ntyped');
+  });
+
+  it("does not show a chat's refused send under the chat the page moved to", async () => {
+    const send = deferred();
+    const view = mount({ draftKey: 'ws:a', onSend: () => send.promise });
+    type('for a');
+    fireEvent.keyDown(input(), { key: 'Enter' });
+    view.rerender({ draftKey: 'ws:b' });
+    await act(async () => send.reject(new Error('Not now.')));
+    expect(screen.queryByTestId('composer-error')).toBeNull();
+    expect(readDraft('ws:a')).toBe('for a');
+  });
+
+  it('two composers on one chat (two tabs): the last edit is stored, and neither changes the other', () => {
+    render(<Composer label="Tab one" draftKey="ws:a" onSend={async () => undefined} />);
+    render(<Composer label="Tab two" draftKey="ws:a" onSend={async () => undefined} />);
+    const one = screen.getByLabelText('Tab one') as HTMLTextAreaElement;
+    const two = screen.getByLabelText('Tab two') as HTMLTextAreaElement;
+    fireEvent.change(one, { target: { value: 'from one' } });
+    fireEvent.change(two, { target: { value: 'from two' } });
+    expect(one.value).toBe('from one');
+    expect(readDraft('ws:a')).toBe('from two');
+  });
 });

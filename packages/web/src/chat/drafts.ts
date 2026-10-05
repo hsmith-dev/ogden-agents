@@ -6,9 +6,12 @@
  * Privacy (a decision, 2026-10-04): drafts never go to the server, an event,
  * a URL or a log. A draft may hold a pasted secret, and the server keeps an
  * append-only event log. `localStorage` is per origin (the port included),
- * per browser profile, so only this Ogden page reads it; a draft expires after
- * `DRAFT_TTL_MS`. Several tabs on one chat: the last write wins, and a tab
- * never changes another tab's visible text.
+ * per browser profile, plain text in that profile. Expiry (`DRAFT_TTL_MS`) is
+ * enforced when an Ogden page next loads on the same origin: a draft left on
+ * another port (Ogden started on a different one), or never reopened, stays in
+ * the profile until the browser's site data is cleared, and a later page on
+ * that same port could read it. Several tabs on one chat: the last write
+ * wins, and a tab never changes another tab's visible text.
  *
  * Storage may throw (blocked site data, private windows) or hold anything:
  * every access is guarded, and then drafts are simply not kept.
@@ -22,6 +25,8 @@ export const DRAFT_MAX_CHARS = 100_000;
 export const DRAFT_MAX_COUNT = 50;
 
 const PREFIX = 'ogden-agents.draft.v1:';
+/** How far ahead of this clock a draft's time may be before it counts as expired. */
+const DRAFT_FUTURE_SLACK_MS = 24 * 60 * 60 * 1000;
 
 /** The storage and clock drafts use; tests pass their own. */
 export interface DraftEnv {
@@ -62,6 +67,9 @@ function parse(raw: string | null): Stored | undefined {
   }
 }
 
+/** Older than the TTL, or dated in the future (a clock put back, a hand-edited entry): never kept forever. */
+const expired = (draft: Stored, now: number): boolean => now - draft.savedAt > DRAFT_TTL_MS || draft.savedAt - now > DRAFT_FUTURE_SLACK_MS;
+
 let pruned = false;
 
 /** Removes expired, unreadable and over-count drafts; once per page load (or per call in tests). */
@@ -76,7 +84,7 @@ export function pruneDrafts(env: DraftEnv = browserEnv): void {
       const key = storage.key(i);
       if (key === null || !key.startsWith(PREFIX)) continue;
       const draft = parse(storage.getItem(key));
-      if (draft === undefined || draft.text === '' || now - draft.savedAt > DRAFT_TTL_MS) drop.push(key);
+      if (draft === undefined || draft.text === '' || expired(draft, now)) drop.push(key);
       else kept.push({ key, savedAt: draft.savedAt });
     }
     kept.sort((a, b) => b.savedAt - a.savedAt);
@@ -102,7 +110,7 @@ export function readDraft(key: string, env: DraftEnv = browserEnv): string {
     if (storage === undefined) return '';
     const draft = parse(storage.getItem(PREFIX + key));
     if (draft === undefined) return '';
-    if (env.now() - draft.savedAt > DRAFT_TTL_MS) {
+    if (expired(draft, env.now())) {
       storage.removeItem(PREFIX + key);
       return '';
     }

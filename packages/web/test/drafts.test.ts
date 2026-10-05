@@ -128,4 +128,13 @@ describe('composer drafts', () => {
       expect(() => pruneDrafts(env)).not.toThrow();
     }
   });
+
+  it('expires a draft dated more than a day ahead of the clock', () => {
+    const { env, map, clock } = memoryEnv();
+    map.set(`${PREFIX}future`, JSON.stringify({ text: 'later', savedAt: clock.now + 2 * 24 * 60 * 60 * 1000 }));
+    map.set(`${PREFIX}soon`, JSON.stringify({ text: 'soon', savedAt: clock.now + 60_000 }));
+    expect(readDraft('future', env)).toBe('');
+    expect(readDraft('soon', env)).toBe('soon');
+    expect(map.has(`${PREFIX}future`)).toBe(false);
+  });
 });

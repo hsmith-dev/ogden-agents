@@ -544,3 +544,11 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-every-agent/story-refactor-sweep-plan.md`
   summary: Resolved: node-pty's Windows "Cannot create process, error code: 87" is the same ConPTY race as "Invalid pty handle" (3.8): `PtyConnect` reads the new pseudo-console back from an unlocked list an exiting terminal's thread is editing, and a damaged entry's handle is refused by `CreateProcessW` (ERROR_INVALID_PARAMETER). `spawnWithRetry` now tries that exact error again too, at most `PTY_SPAWN_ATTEMPTS`; every other code still throws at once.
   evidence: CI run 37239378578 attempt 1 (6.7, windows-latest Node 24): `terminal-pty.test.ts` "a CLI that crashes on start" failed at `pty.spawn` right after the previous test's crashed CLI exited; node-pty 1.1.0 `src/win/conpty.cc` `get_pty_baton`/`remove_pty_baton`; tests in `adapters/test/terminal-pty.test.ts`.
+
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-the-composer-keeps-unsent-text-per-chat-plan.md`
+  summary: Text typed in a project's new-chat composer while its first message is on its way stays as the `<ws>:new` draft instead of following into the new chat.
+  evidence: The first-chat `onSend` resolves after navigating; `clearDraftIfUnchanged` keeps the edited text under the new-chat key, which is shown only while the project has no chats (review finding 1).
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-the-composer-keeps-unsent-text-per-chat-plan.md`
+  summary: Deleting a chat's or project's history does not remove its composer drafts from browser storage; they go only on expiry or eviction.
+  evidence: drafts.ts has no hook on deletion; Delete history and a 404 chat leave `ogden-agents.draft.v1:<ws>:*` keys (review finding 6).
+

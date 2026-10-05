@@ -1,5 +1,5 @@
 import { PaperPlaneRight } from '@phosphor-icons/react';
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { clearDraftIfUnchanged, readDraft, writeDraft } from '@/chat/drafts';
 import { Button } from '@/ui/button';
 import { ComposerFrame } from '@/ui/composer-frame';
@@ -41,25 +41,37 @@ export interface ComposerProps {
  */
 export function Composer({ label, blockedReason, hint, action, footer, describedBy, restore, draftKey, onSend }: ComposerProps) {
   const [text, setText] = useState(() => (draftKey === undefined ? '' : readDraft(draftKey)));
-  // The page may stay mounted from one chat to the next: show the new chat's own draft.
-  const [shownKey, setShownKey] = useState(draftKey);
-  if (shownKey !== draftKey) {
-    setShownKey(draftKey);
-    setText(draftKey === undefined ? '' : readDraft(draftKey));
-  }
   const currentKey = useRef(draftKey);
+  const field = useRef<HTMLTextAreaElement>(null);
+  // Kept text shown on opening a chat: the cursor goes after it, so typing carries on.
+  useLayoutEffect(() => {
+    const element = field.current;
+    if (element !== null && draftKey !== undefined) element.setSelectionRange(element.value.length, element.value.length);
+  }, [draftKey]);
   useEffect(() => {
     currentKey.current = draftKey;
     if (draftKey !== undefined) writeDraft(draftKey, text);
   }, [draftKey, text]);
   const restoreKey = restore?.key;
   const restoreText = restore?.text;
+  // A restore already given to an earlier mount is in the draft now: applying it again would double it.
+  const appliedRestore = useRef(draftKey === undefined ? undefined : restoreKey);
   useEffect(() => {
     if (restoreKey === undefined || restoreText === undefined || restoreText === '') return;
+    if (appliedRestore.current === restoreKey) return;
+    appliedRestore.current = restoreKey;
     setText((typed) => (typed.trim() === '' ? restoreText : `${restoreText}\n\n${typed}`));
   }, [restoreKey, restoreText]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  // The page may stay mounted from one chat to the next: show the new chat's own draft,
+  // and not the last chat's send error next to it.
+  const [shownKey, setShownKey] = useState(draftKey);
+  if (shownKey !== draftKey) {
+    setShownKey(draftKey);
+    setText(draftKey === undefined ? '' : readDraft(draftKey));
+    setError(undefined);
+  }
   const blocked = sending || blockedReason !== undefined;
 
   const submit = () => {
@@ -79,6 +91,8 @@ export function Composer({ label, blockedReason, hint, action, footer, described
       },
       (failure: unknown) => {
         setSending(false);
+        // A refusal for a chat the page has left stays in that chat's draft, not under this one.
+        if (currentKey.current !== sentKey) return;
         setError(failure instanceof Error ? failure.message : "Your message couldn't be sent. Try again.");
       },
     );
@@ -100,6 +114,7 @@ export function Composer({ label, blockedReason, hint, action, footer, described
     <form onSubmit={onSubmit} data-testid="composer" className="flex flex-col gap-2">
       <ComposerFrame>
         <Textarea
+          ref={field}
           aria-label={label}
           aria-describedby={describedBy}
           placeholder="Write a message"

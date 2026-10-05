@@ -23,8 +23,10 @@ export function nativeRoot(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
 }
 
-const num = (value: unknown): number | undefined => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined);
+const num = (value: unknown): number | undefined => (typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= Number.MAX_SAFE_INTEGER ? Math.floor(value) : undefined);
 const str = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' && value.length <= 40 ? value : undefined);
+/** A parameter count as servers write it (`7B`, `8.0B`, `70b`, `500M`): anything else is not shown. */
+const size = (value: unknown): string | undefined => (typeof value === 'string' && /^[0-9][0-9.]{0,7} ?[A-Za-z]{0,3}$/.test(value) ? value : undefined);
 const record = (value: unknown): Record<string, unknown> => (typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {});
 
 /** Whether a capability list says tools: `true`, `false` when it lists capabilities without it, `undefined` when it lists none. */
@@ -43,7 +45,7 @@ export async function ollamaInfo(call: EndpointCall, ids: readonly string[]): Pr
       const each = record(entry);
       const name = str(each.name) ?? str(each.model);
       if (name === undefined) continue;
-      out.set(name, { sizeBytes: num(each.size), parameterSize: str(record(each.details).parameter_size) });
+      out.set(name, { sizeBytes: num(each.size), parameterSize: size(record(each.details).parameter_size) });
     }
   } catch {
     // Sizes are only nice to have.
@@ -76,7 +78,8 @@ export async function lmStudioInfo(call: EndpointCall): Promise<Map<string, Part
       const each = record(entry);
       const id = str(each.id) ?? (typeof each.id === 'string' && each.id.length <= 300 ? each.id : undefined);
       if (id === undefined) continue;
-      out.set(id, { contextTokens: num(each.loaded_context_length) ?? num(each.max_context_length), toolCall: toolSupport(each.capabilities) });
+      out.set(id, { // Only the context it is loaded with: a model not loaded yet will load at the server's own default, which it doesn't say.
+      contextTokens: num(each.loaded_context_length), toolCall: toolSupport(each.capabilities) });
     }
   } catch {
     // Unknown stays unknown.

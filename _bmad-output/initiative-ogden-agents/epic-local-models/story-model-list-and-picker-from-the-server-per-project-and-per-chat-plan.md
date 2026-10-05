@@ -3,12 +3,12 @@ title: 'Model list and picker: from the server, per project and per chat (epic 1
 type: 'feature'
 ticket: '14.5'
 created: '2026-10-05'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['quick-security', 'quick-correctness']
 review_loop_iteration: 0
 baseline_revision: '8c10ab5a9ce73b942149a36360da42580e432477'
 context:
@@ -70,6 +70,8 @@ The picker's model ids are the harness's (`ogden/<id>`); the server writes the d
 ## Plan Change Log
 
 ## Review Triage Log
+
+Security and correctness reviewers (2 lenses), no critical findings. Patched: a huge number from a server broke the whole list (500), now capped (medium); the picker's ids and the harness's rule differed (\`[ ]\` and \`+\`), now one rule (medium); a parameter size or model id with control or direction characters could spoof text, now only plain forms are shown (medium); one read per endpoint at a time, so a repeated press shares it (low); a chosen model with an unusable name was reported as gone, now says its name can't be passed on (medium); the harness now gets the context length and tool support a server reported at the next chat start (medium); LM Studio's maximum context is no longer shown as the context in use (medium); 16000 tokens no longer reads as 16k (low); model buttons name their model (low); a stale-looking wording on the clear-choice button (low). Tests added for the ticket's verify text: a project default through the picker, a chat override, a model dropped by the server (the card and the chat name it), LM Studio's kind through the route, and the shared read. Not changed: a native read of a very large /api/show answer hits the 1 MiB cap and stays unknown (low, a live check), no overall deadline on one read (low), out of order responses on the card (low), core's existing fallback to the agent's default when a project default or chat model is dropped (named in a reason, not silent; an intent note for the user). No intent_gap or bad_plan.
 
 ## Verification
 

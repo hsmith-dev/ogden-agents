@@ -160,7 +160,7 @@ test('Show models lists what the server reports with its cautions, and Use for n
     await expect(small.getByTestId('endpoint-model-caution')).toHaveCount(3);
     const large = card(page).getByTestId('endpoint-model-fake-large');
     await expect(large).toContainText('32k context');
-    await large.getByRole('button', { name: 'Use for new chats' }).click();
+    await large.getByRole('button', { name: 'Use fake-large for new chats' }).click();
     await expect(card(page).getByTestId('endpoint-chosen-model')).toHaveText('New chats start on fake-large.');
     await expect(large).toContainText('Used for new chats');
   } finally {

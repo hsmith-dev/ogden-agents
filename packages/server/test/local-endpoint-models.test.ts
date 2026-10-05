@@ -95,6 +95,61 @@ describe('the model list (epic 14 story 14.5)', () => {
   });
 });
 
+describe("project default, chat override and a model the server drops (the ticket verify text)", () => {
+  it('chooses a model for the project through the picker, overrides it for one chat, then the server drops the chosen model and the card and the chat say so', async () => {
+    const list = ['fake-small', 'fake-large', 'fake-mid'];
+    const up = await fake({ models: list });
+    const ctx = await setUp();
+    const { server, tab, add, models } = ctx;
+    const endpoint = await add(`${up.url}/v1`, { preset: 'ollama', model: 'fake-large' });
+    await models(endpoint.id);
+    const repo = removeAfterTest(mkdtempSync(join(tmpdir(), 'ogden-agents-repo-')));
+    const wsId = WorkspaceResponse.parse(await (await call(server, tab, 'POST', API_ROUTES.workspaces, { path: repo })).json()).workspace.id;
+    // The project's default model for the Local model, from the picker's list.
+    expect((await call(server, tab, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { defaultModels: { local: 'ogden/fake-mid' } })).status).toBe(200);
+    const start = async () => SessionResponse.parse(await (await call(server, tab, 'POST', apiPath(API_ROUTES.workspaceSessions, { wsId }), { agentId: 'local' })).json()).session;
+    const first = await start();
+    expect(first.model).toBe('ogden/fake-mid');
+    // A different model for one chat.
+    const second = await start();
+    const changed = await call(server, tab, 'PUT', apiPath(API_ROUTES.sessionModel, { wsId, sesId: second.id }), { model: 'ogden/fake-small' });
+    expect(changed.status).toBe(200);
+    expect(SessionResponse.parse(await changed.json()).session.model).toBe('ogden/fake-small');
+    // A model the picker doesn't list is refused.
+    expect((await call(server, tab, 'PUT', apiPath(API_ROUTES.sessionModel, { wsId, sesId: second.id }), { model: 'ogden/not-there' })).status).toBe(409);
+    // The server drops the endpoint's chosen model: the card says so, naming it, and a new chat is refused naming it.
+    list.splice(list.indexOf('fake-large'), 1);
+    expect(LocalEndpointModelsResponse.parse(await (await models(endpoint.id)).json())).toMatchObject({ model: 'fake-large', missing: 'fake-large' });
+    const third = await start();
+    await call(server, tab, 'POST', apiPath(API_ROUTES.sessionMessages, { wsId, sesId: third.id }), { text: 'hello' });
+    await waitFor(() => server.core.entities.getSession(third.id)!.state === 'error', 'the refusal', 15_000);
+    expect(JSON.stringify(server.core.events.readAfter(0).filter((event) => event.streamId === third.id))).toContain("The model fake-large isn't on the server any more");
+    // The picker's list followed the server.
+    const agents = ChatAgentsResponse.parse(await (await call(server, tab, 'GET', API_ROUTES.chatAgents)).json()).agents;
+    expect(agents.find((agent) => agent.agentId === 'local')?.models?.map((model) => model.id)).toEqual(['ogden/fake-small', 'ogden/fake-mid']);
+  });
+
+  it('reads LM Studio\'s kind through the route: context only where the model is loaded', async () => {
+    const up = await fake({ models: ['fake-small', 'fake-large'] });
+    const { add, models } = await setUp();
+    const endpoint = await add(`${up.url}/v1`, { preset: 'lmstudio' });
+    const answer = LocalEndpointModelsResponse.parse(await (await models(endpoint.id)).json());
+    expect(answer.models.find((model) => model.id === 'fake-small')).toMatchObject({ contextTokens: 4096 });
+    expect(answer.models.find((model) => model.id === 'fake-large')).toMatchObject({ contextTokens: 32_768, toolCall: true });
+  });
+
+  it('shares one read between presses and never lets a hostile number or name break the list', async () => {
+    const odd = await fake({ models: ['ok-model'] });
+    const { add, models } = await setUp();
+    const endpoint = await add(`${odd.url}/v1`, { preset: 'ollama' });
+    const [a, b] = await Promise.all([models(endpoint.id), models(endpoint.id)]);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    // One read: one list call and one tags call, not two of each.
+    expect(odd.log.filter((entry) => entry.path === '/v1/models')).toHaveLength(1);
+  });
+});
+
 describe('the chat and its model picker', () => {
   async function chatOn(extra: Record<string, unknown> = {}) {
     const up = await fake({ models: ['fake-small', 'fake-large'] });

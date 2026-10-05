@@ -41,6 +41,8 @@ export interface LocalModels {
    * never swapped for another. Refuses an unconfirmed host before anything is called.
    */
   models(id: LocalEndpointId): Promise<LocalModelsAnswer>;
+  /** `models` itself, without the one-at-a-time sharing. */
+  readModels(id: LocalEndpointId): Promise<LocalModelsAnswer>;
   /** Detect itself, without the one-at-a-time guard. */
   detectNow(candidates: readonly DetectCandidate[]): Promise<DetectedEndpoint[]>;
 }
@@ -59,6 +61,7 @@ export function createLocalModels({
   onModels?: ((endpointId: LocalEndpointId, models: readonly LocalModelInfo[]) => void) | undefined;
 }): LocalModels {
   let running: Promise<DetectedEndpoint[]> | undefined;
+  const reading = new Map<LocalEndpointId, Promise<LocalModelsAnswer>>();
   return {
     async test(id) {
       const target = await endpoints.target(id);
@@ -79,7 +82,17 @@ export function createLocalModels({
       return { state, models, message };
     },
 
-    async models(id) {
+    models(id) {
+      // One read per endpoint at a time: a repeated press shares it (a read can make dozens of calls).
+      let pending = reading.get(id);
+      if (pending === undefined) {
+        pending = this.readModels(id).finally(() => reading.delete(id));
+        reading.set(id, pending);
+      }
+      return pending;
+    },
+
+    async readModels(id) {
       const target = await endpoints.target(id);
       if (target === undefined) throw new Error('unreachable: target() answered nothing for a named endpoint');
       const listed = await port.listModels({ baseUrl: target.baseUrl, key: target.key, preset: target.preset });

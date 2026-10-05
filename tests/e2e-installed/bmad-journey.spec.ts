@@ -179,8 +179,9 @@ async function sessionStart(page: Page, agentName = 'Claude Code'): Promise<Sess
     await composer.press('Enter');
     await expect(composer).toHaveValue('');
   }
-  await expect(replies(page)).toHaveCount(1);
-  await expect(state(page)).toHaveAttribute('data-state', 'idle');
+  // The agent process starts on this message: on a stalled Windows runner that took 16 s (run 37258187535, server log).
+  await expect(replies(page)).toHaveCount(1, { timeout: SECOND_TAB_MS });
+  await expect(state(page)).toHaveAttribute('data-state', 'idle', { timeout: SECOND_TAB_MS });
   await expect(replies(page).last()).toHaveAttribute('data-streaming', 'false');
   // The agent's message: its name, then its text.
   const text = await replies(page).last().locator('p').nth(1).textContent();

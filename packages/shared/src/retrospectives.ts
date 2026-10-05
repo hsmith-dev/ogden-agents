@@ -149,7 +149,11 @@ export const NOTHING_TO_SAVE_MESSAGE = 'There is nothing new to save: the lesson
 export const LESSONS_CHECKOUT_BUSY_MESSAGE = 'Finish or abort the merge or rebase in this project first, then save the lessons.';
 /** `agents_file_missing` (409): the project has no `AGENTS.md` (or git ignores it) to carry the lessons. */
 export const LESSONS_NO_AGENTS_FILE_MESSAGE = "This project has no AGENTS.md that git tracks, so the lessons can't be saved for later builds. Add the lessons to AGENTS.md first.";
+/** `vcs_unavailable` (409) from Save the lessons: the project is not a git repository on a branch with a commit. */
+export const LESSONS_NO_GIT_MESSAGE = 'Saving the lessons needs this project to be a git repository with a branch checked out that has at least one commit.';
 export const SAVE_LESSONS_LABEL = 'Save the lessons for later builds';
 export const SAVE_LESSONS_NOTE = 'Later builds will follow these lessons.';
+/** Said once the lessons are saved. */
+export const LESSONS_SAVED_TEXT = 'Saved. Later builds will follow these lessons.';
 export const SAVE_LESSONS_FAILED = "Ogden Agents couldn't save the lessons";
 export const ADD_LESSONS_FAILED = "Ogden Agents couldn't start that step";

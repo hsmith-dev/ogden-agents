@@ -22,6 +22,7 @@
  * guards have passed.
  */
 import {
+  BuildRefusedError,
   LessonsRefusedError,
   NotFoundError,
   NotImplementedError,
@@ -100,8 +101,8 @@ export function registerRetrospectiveRoutes(app: Hono, { bmad, scriptTrust, retr
   const stepRefusal = (c: Parameters<Parameters<typeof routes.post>[2]>[0], error: unknown): Response => {
     if (error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);
     if (error instanceof NotImplementedError) return apiError(c, 501, 'not_implemented', error.message);
-    if (error instanceof LessonsRefusedError) return apiError(c, 409, error.code, error.message);
-    // The epic, or a skill that is not one of the retrospective's next steps.
+    if (error instanceof LessonsRefusedError || error instanceof BuildRefusedError) return apiError(c, 409, error.code, error.message);
+    // The epic (or one with no retrospective yet), or a skill that is not one of the retrospective's next steps.
     if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', error.message.startsWith('skill ') ? LOOK_BACK_STEP_NOT_OFFERED_MESSAGE : LOOK_BACK_EPIC_NOT_FOUND_MESSAGE);
     throw error;
   };

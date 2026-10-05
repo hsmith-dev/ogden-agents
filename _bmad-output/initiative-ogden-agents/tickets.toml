@@ -95,3 +95,22 @@ slug = "epic-v2-developer-experience"
 title = "Developers review and navigate their project without leaving Ogden Agents (v2)"
 covers = []
 after = [{ epic = 5, needs = "the review page and approve (5.9)" }, { epic = 6, needs = "for its agent work (V4): the agent registry, acp-base, the agent list and the picker, built on a go or a no-go" }]
+
+# ---- v1.2 (planned; outside the v1 initiative's Done when) ----
+
+# Epic ids (2026-10-05): 14 is v1.2 local models, 15 is v2 LLM orchestration (envelope only). Drafted on docs/epic-local-models-inception for the user's approval; no other open branch uses 14 or 15.
+[[epic]]
+id = 14
+slug = "epic-local-models"
+title = "v1.2: Local and OpenAI-compatible models: Ollama, LM Studio or any endpoint"
+covers = ["CAP-15", "CAP-3", "CAP-4", "CAP-16", "CAP-19"]
+after = [{ epic = 12, needs = "the contracts with a mode fixed at start (12.3), the checked-binary installer and wiring (12.4), BMad skills for agents (12.9) and v1.1 released (12.11)" }, { epic = 6, needs = "the registry, acp-base and the picker (6.3, 6.4, 6.6)" }, { epic = 4, needs = "BMad setup (4.3) and planning sessions (4.6)" }, { epic = 10, needs = "the pieces guard and its simple-project test (10.2, 10.6)" }]
+
+# ---- v2 orchestration (envelope only; outside the v1 initiative's Done when) ----
+
+[[epic]]
+id = 15
+slug = "epic-llm-orchestration"
+title = "v2: A local model manages, and the other agents are told what to do"
+covers = []
+after = [{ epic = 14, needs = "LocalModelPort and the Test as a manager check (14.8)" }, { epic = 5, needs = "the Build dialog, dispatcher and review page (5.6, 5.8, 5.9)" }, { epic = 12, needs = "Codex and Grok chats as workers (12.11)" }]

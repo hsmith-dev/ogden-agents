@@ -252,7 +252,8 @@ describe("what the pane's program is given (E16-R2, AD-16)", () => {
       await waitFor(() => viewer.state.output.includes('secret-done'), 'the secret listing', 15_000);
       const { envNames, colorterm, term } = recordOf(setup);
       for (const name of Object.keys(sentinels)) expect(envNames, name).not.toContain(name);
-      expect(envNames).toEqual(expect.arrayContaining(['PATH', 'COLORTERM', 'TERM']));
+      // Windows spells it `Path`: names match without case there.
+      expect(envNames.map((name) => name.toUpperCase())).toEqual(expect.arrayContaining(['PATH', 'COLORTERM', 'TERM']));
       expect(colorterm).toBe('truecolor');
       expect(term).toBe('xterm-256color');
       expect(viewer.state.output).not.toContain('secret=');

@@ -110,6 +110,11 @@ async function scenario(name, fn) {
       const ps = (c) => spawnSync('powershell', ['-NoProfile', '-Command', c], { encoding: 'utf8' }).stdout.trim();
       console.error('installed version:', ps(`(Get-Item '${exe}').VersionInfo.ProductVersion`));
       console.error('processes:', ps("Get-Process | Where-Object { $_.Name -match 'ogden|setup|nsis|powershell|msiexec' } | ForEach-Object { $_.Name + ' ' + $_.Id + ' ' + $_.StartTime } | Out-String"));
+      try {
+        console.error('relaunch helper log:', readFileSync(`${current.report}.helper.log`, 'utf8'));
+      } catch {
+        console.error('relaunch helper log: none');
+      }
       console.error('install folder:', ps(`Get-ChildItem '${dirname(exe)}' | ForEach-Object { $_.Name + ' ' + $_.LastWriteTime } | Out-String`));
     }
     if (current) console.error('shell report:', JSON.stringify(readReport(current.report).map((e) => ({ ev: e.ev, ...e.data }))));

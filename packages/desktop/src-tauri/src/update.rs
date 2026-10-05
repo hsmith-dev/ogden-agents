@@ -222,11 +222,16 @@ pub async fn check_for_user(app: AppHandle) {
 fn relaunch_after_install(version: &str) {
     use std::os::windows::process::CommandExt;
     let Ok(exe) = std::env::current_exe() else { return };
+    // A test build (which reports to a file) also leaves a small log beside it, so a CI failure shows what the installer did.
     let script = format!(
-        "$exe = '{exe}'; $target = '{version}'; \
-         for ($i = 0; $i -lt 300; $i++) {{ Start-Sleep -Seconds 1; try {{ $v = (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion }} catch {{ $v = '' }}; if ($v -like \"$target*\") {{ break }} }}; \
+        "$exe = '{exe}'; $target = '{version}'; $log = $env:OGDEN_DESKTOP_TEST_REPORT; \
+         function Note($t) {{ if ($log) {{ Add-Content -LiteralPath ($log + '.helper.log') -Value ((Get-Date -Format o) + ' ' + $t) }} }}; \
+         Note 'helper started'; \
+         for ($i = 0; $i -lt 300; $i++) {{ Start-Sleep -Seconds 1; try {{ $v = (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion }} catch {{ $v = '' }}; \
+           if ($i % 5 -eq 0) {{ Note ('version ' + $v + '; ' + ((Get-Process | Where-Object {{ $_.Name -match 'ogden|setup|nsis|msiexec' }} | ForEach-Object {{ $_.Name }}) -join ',')) }}; \
+           if ($v -like \"$target*\") {{ break }} }}; \
          Start-Sleep -Seconds 4; \
-         if (-not (Get-Process -Name 'ogden-agents' -ErrorAction SilentlyContinue)) {{ Start-Process -FilePath $exe }}",
+         if (-not (Get-Process -Name 'ogden-agents' -ErrorAction SilentlyContinue)) {{ Note 'starting the app'; Start-Process -FilePath $exe }} else {{ Note 'the app is already running' }}",
         exe = exe.display().to_string().replace('\'', "''"),
         version = version.replace('\'', "''"),
     );

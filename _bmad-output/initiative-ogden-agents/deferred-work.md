@@ -60,6 +60,9 @@ Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim fr
 - Epic 6 (every agent): setup status reads `.claude/skills` only, so an agent folder that lacks the skills (Antigravity used after Set up) gets them only at the next Set up or Upgrade. From the 6.8 restack. (log: "Setup status reads the installed BMad Method version from `.claude/skills` only")
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
+- Unowned (security): redact more secret shapes than Anthropic and Google keys from a chat's automatic name. From backlog story 2's review. (log: "Redact more secret shapes (GitHub, AWS, OpenAI project keys")
+- Unowned (accessibility): name the chat in the waiting announcement, and share one live region for rename announcements. From backlog story 2's review. (log: "as Needs you rows now do, and share one live region for rename announcements")
+- Unowned: older planning chats are named from their skill invocation, not their action's label. From backlog story 2's review. (log: "Older planning chats are named from their stored skill invocation")
 
 ## Log
 

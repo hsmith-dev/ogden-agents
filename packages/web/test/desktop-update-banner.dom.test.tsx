@@ -33,7 +33,7 @@ const { UpdateBanner } = await import('../src/shell/update-banner');
 const { AboutPage } = await import('../src/routes/about-page');
 
 const update = { version: '0.6.0', notes: 'Faster starts.', channel: 'stable' as const, downloaded: true };
-const base: UpdateNoticeResponse = { current: '0.5.0', channel: 'stable', installMethod: 'other', enabled: true, offline: false, lastCheckedAt: null, available: null, shell: 'desktop', appChannel: 'stable', app: null };
+const base: UpdateNoticeResponse = { current: '0.5.0', channel: 'stable', installMethod: 'other', enabled: true, offline: false, sources: ['github-releases', 'npm'], lastCheckedAt: null, available: null, shell: 'desktop', appChannel: 'stable', app: null };
 const withApp = (app: Partial<NonNullable<UpdateNoticeResponse['app']>>): UpdateNoticeResponse => ({
   ...base,
   app: { update, blocked: false, busy: 0, restartRequested: false, ...app },
@@ -107,7 +107,7 @@ describe('the app update banner', () => {
   });
 
   it('keeps the npm notice for npm installs', async () => {
-    state.notice = { ...base, shell: null, appChannel: null, available: { version: '0.6.0', tag: 'latest' } };
+    state.notice = { ...base, shell: null, appChannel: null, available: { version: '0.6.0', tag: 'latest', source: 'npm' } };
     render(wrap(<UpdateBanner />));
     expect((await screen.findByTestId('update-banner')).textContent).toContain('Ogden 0.6.0 is available.');
     expect(screen.queryByTestId('app-update-banner')).toBeNull();

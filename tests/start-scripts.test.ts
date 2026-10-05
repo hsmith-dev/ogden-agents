@@ -46,15 +46,15 @@ function tempDir(): string {
   return dir;
 }
 
-/** A folder holding fake `node` (printing `version`) and, unless `npx` is false, a fake `npx` that prints its arguments and exits with `npxExit`. */
-function fakeBin({ version, npx = true, npxExit = 0 }: { version: string; npx?: boolean; npxExit?: number }): string {
+/** A folder holding fake `node` (printing `version`; with `nodeEchoesArgs`, any other call prints its arguments) and, unless `npx` is false, a fake `npx` that prints its arguments and exits with `npxExit`. */
+function fakeBin({ version, npx = true, npxExit = 0, nodeEchoesArgs = false }: { version: string; npx?: boolean; npxExit?: number; nodeEchoesArgs?: boolean }): string {
   const dir = join(tempDir(), 'bin');
   mkdirSync(dir);
   if (IS_WINDOWS) {
-    writeFileSync(join(dir, 'node.cmd'), `@echo ${version}\r\n`);
+    writeFileSync(join(dir, 'node.cmd'), nodeEchoesArgs ? `@if "%~1"=="--version" (echo ${version}) else (echo NODE_ARGS: %*)\r\n` : `@echo ${version}\r\n`);
     if (npx) writeFileSync(join(dir, 'npx.cmd'), `@echo ARGS: %*\r\n@echo DATA: %OGDEN_AGENTS_DATA_DIR%\r\n@exit /b ${npxExit}\r\n`);
   } else {
-    writeFileSync(join(dir, 'node'), `#!/bin/sh\necho ${version}\n`);
+    writeFileSync(join(dir, 'node'), nodeEchoesArgs ? `#!/bin/sh\nif [ "$1" = --version ]; then echo ${version}; else for a in "$@"; do echo "NODE_ARG<$a>"; done; fi\n` : `#!/bin/sh\necho ${version}\n`);
     chmodSync(join(dir, 'node'), 0o755);
     if (npx) {
       writeFileSync(join(dir, 'npx'), `#!/bin/sh\nfor a in "$@"; do echo "ARG<$a>"; done\necho "DATA: $OGDEN_AGENTS_DATA_DIR"\nexit ${npxExit}\n`);
@@ -73,7 +73,7 @@ const SYSTEM_PATH = IS_WINDOWS ? [join(process.env.SystemRoot ?? 'C:\\Windows', 
  */
 function runScript(args: string[], { path, env = {}, cwd = tempDir() }: { path?: string[]; env?: Record<string, string>; cwd?: string } = {}): SpawnSyncReturns<string> {
   const base: Record<string, string | undefined> = Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !/^(path|ogden_agents_package|ogden_agents_data_dir|ogden_start_no_pause)$/i.test(key)),
+    Object.entries(process.env).filter(([key]) => !/^(path|ogden_agents_package|ogden_agents_data_dir|ogden_start_no_pause|ogden_agents_source|ogden_agents_installer)$/i.test(key)),
   );
   const fullEnv = { ...base, PATH: path === undefined ? process.env.PATH : [...path, ...SYSTEM_PATH].join(IS_WINDOWS ? ';' : ':'), OGDEN_START_NO_PAUSE: '1', ...env };
   if (IS_WINDOWS) {
@@ -236,6 +236,65 @@ describe(`start scripts: ${OWN_SCRIPT.slice(START.length + 1)} on this OS`, () =
     const result = runScript([], { path: [fakeBin({ version: `v${enginesMinimum()}.1.0`, npxExit: 7 })] });
     expect(result.status, output(result)).toBe(7);
     expect(result.stdout).toContain('Ogden Agents did not start (exit code 7)');
+  });
+});
+
+describe(`start scripts: the GitHub source (${OWN_SCRIPT.slice(START.length + 1)})`, () => {
+  const validNode = () => `v${enginesMinimum()}.1.0`;
+  /** An installer file for the script to find: `node` is the real one in check mode, a fake otherwise. */
+  const installerFile = () => {
+    const file = join(tempDir(), 'ogden-install.mjs');
+    writeFileSync(file, "console.log('INSTALLER-STATUS ' + process.argv.slice(2).join(' '));\n");
+    return file;
+  };
+
+  it('--check --github reports the source and runs the installer in status mode, without the network', () => {
+    const result = runScript(['--check', '--github'], { env: { OGDEN_AGENTS_INSTALLER: installerFile() } });
+    expect(result.status, output(result)).toBe(0);
+    expect(result.stdout).toContain('Source: GitHub Releases');
+    expect(result.stdout).toContain('INSTALLER-STATUS status');
+    expect(result.stdout).not.toContain('Package: ogden-agents@latest');
+  });
+
+  it('OGDEN_AGENTS_SOURCE=github is the same as --github', () => {
+    const result = runScript(['--check'], { env: { OGDEN_AGENTS_SOURCE: 'github', OGDEN_AGENTS_INSTALLER: installerFile() } });
+    expect(result.status, output(result)).toBe(0);
+    expect(result.stdout).toContain('Source: GitHub Releases');
+  });
+
+  it('without the installer file next to it: says what to download, never fetches it, exits 1', () => {
+    const result = runScript(['--github'], { env: { OGDEN_AGENTS_INSTALLER: join(tempDir(), 'missing', 'ogden-install.mjs') } });
+    expect(result.status, output(result)).toBe(1);
+    expect(result.stdout).toContain('ogden-install.mjs is not next to this script');
+    expect(result.stdout).toContain('Nothing was installed or changed on your computer.');
+  });
+
+  it('starts through the installer with node (no npx needed), passing the launcher options and not its own flag', () => {
+    const installer = installerFile();
+    const result = runScript(['--github', '--no-open', '--port', '0'], {
+      path: [fakeBin({ version: validNode(), npx: false, nodeEchoesArgs: true })],
+      env: { OGDEN_AGENTS_INSTALLER: installer },
+    });
+    expect(result.status, output(result)).toBe(0);
+    if (IS_WINDOWS) {
+      expect(result.stdout).toContain(`NODE_ARGS: "${installer}" start --github --no-open --port 0`);
+    } else {
+      expect(result.stdout).toContain([installer, 'start', '--no-open', '--port', '0'].map((arg) => `NODE_ARG<${arg}>`).join('\n'));
+      expect(result.stdout).not.toContain('NODE_ARG<--github>');
+    }
+    expect(result.stdout).not.toContain('--package=');
+  });
+
+  it('rejects a source other than npm or github before doing anything', () => {
+    const result = runScript(['--check'], { env: { OGDEN_AGENTS_SOURCE: 'ftp' } });
+    expect(result.status, output(result)).toBe(2);
+    expect(result.stdout).toContain('must be npm or github');
+  });
+
+  it('the default stays npm: no installer is looked for', () => {
+    const result = runScript(['--check'], { env: { OGDEN_AGENTS_INSTALLER: join(tempDir(), 'missing.mjs') } });
+    expect(result.status, output(result)).toBe(0);
+    expect(result.stdout).toContain('Package: ogden-agents@latest');
   });
 });
 

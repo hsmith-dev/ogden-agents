@@ -8,29 +8,59 @@
 # for an administrator password, and never downloads and runs a script.
 #
 #   --check   Only report what was found (Node.js, npm, the package it would
-#             run) and exit: 0 when Ogden Agents can start. Opens nothing.
-#   Any other arguments go to Ogden Agents itself (for example --no-open,
-#   --port 5000).
+#             run) and exit: 0 when Ogden Agents can start. Opens nothing and
+#             never touches the network.
+#   --github  Install and update from this project's GitHub Releases instead
+#             of npm (same as OGDEN_AGENTS_SOURCE=github). Needs
+#             ogden-install.mjs in the same folder as this script; it
+#             downloads the release's tarball, checks it against
+#             SHA256SUMS.txt, installs it in your own user folder (never
+#             globally, no administrator rights) and starts it.
+#   --check and --github come first; any other arguments go to Ogden Agents
+#   itself (for example --no-open, --port 5000).
 #
 # Environment: OGDEN_AGENTS_DATA_DIR (where Ogden Agents keeps its data) is
 # passed through. OGDEN_AGENTS_PACKAGE overrides the package npx runs
 # (default ogden-agents@latest; for example ogden-agents@next).
-# OGDEN_START_NO_PAUSE=1 never waits for a key (for automation).
+# OGDEN_AGENTS_SOURCE is npm (the default) or github; with github,
+# OGDEN_AGENTS_REPO, OGDEN_AGENTS_CHANNEL (stable or next) and
+# OGDEN_AGENTS_GITHUB_TOKEN (private repositories) are read by the installer,
+# see RELEASING.md. OGDEN_START_NO_PAUSE=1 never waits for a key (for
+# automation).
 
 # The minimum Node.js major version: package.json "engines" (a test keeps them equal).
 MIN_NODE_MAJOR=24
 NODE_DOWNLOAD_URL="https://nodejs.org/en/download"
 PACKAGE="${OGDEN_AGENTS_PACKAGE:-ogden-agents@latest}"
 
+# Where this script sits, for the GitHub installer next to it (found before
+# the cd below; a bare "sh start-ogden.sh" means the current folder).
+case "$0" in
+  */*) SCRIPT_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)" || SCRIPT_DIR="" ;;
+  *) SCRIPT_DIR="$(pwd)" ;;
+esac
+INSTALLER="${OGDEN_AGENTS_INSTALLER:-$SCRIPT_DIR/ogden-install.mjs}"
+
 # Run from the home folder, as macOS does for a .command file: npx then reads
 # no project config (.npmrc) or packages from the folder the script sits in.
 cd "${HOME:-/}" 2>/dev/null || cd /
 
 CHECK=0
-if [ "${1:-}" = "--check" ]; then
-  CHECK=1
-  shift
-fi
+SOURCE="${OGDEN_AGENTS_SOURCE:-npm}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --check) CHECK=1; shift ;;
+    --github) SOURCE=github; shift ;;
+    *) break ;;
+  esac
+done
+case "$SOURCE" in
+  npm | github) ;;
+  *)
+    echo "OGDEN_AGENTS_SOURCE must be npm or github, not \"$SOURCE\"."
+    exit 2
+    ;;
+esac
 
 # Keeps a double-clicked window open so the message can be read.
 pause_on_error() {
@@ -87,22 +117,47 @@ if [ "$NODE_MAJOR" -lt "$MIN_NODE_MAJOR" ]; then
   need_node "the installed Node.js is $NODE_VERSION, which is too old."
 fi
 
-if ! command -v npx >/dev/null 2>&1; then
+# npx runs the npm package; the GitHub installer runs npm itself.
+if [ "$SOURCE" = npm ] && ! command -v npx >/dev/null 2>&1; then
   need_node "Node.js $NODE_VERSION is installed, but its npx command is missing. Reinstalling Node.js brings it back."
+fi
+
+# The GitHub source needs the installer file next to this script. The script
+# never downloads it: download it yourself, from the same release as this script.
+if [ "$SOURCE" = github ] && [ ! -f "$INSTALLER" ]; then
+  echo
+  echo "Ogden Agents can't start from GitHub yet: ogden-install.mjs is not next to this script."
+  echo
+  echo "Download ogden-install.mjs from the same GitHub Release as this script, put it in the"
+  echo "same folder, and start again. The release's SHA256SUMS.txt lists it."
+  echo
+  echo "Nothing was installed or changed on your computer."
+  pause_on_error
+  exit 1
 fi
 
 if [ "$CHECK" = 1 ]; then
   echo "Node.js: $NODE_VERSION ($(command -v node))"
   echo "npm: $(npm --version 2>/dev/null || echo 'not found')"
-  echo "npx: $(command -v npx)"
-  echo "Package: $PACKAGE"
+  if [ "$SOURCE" = github ]; then
+    echo "Source: GitHub Releases (installer: $INSTALLER)"
+    node "$INSTALLER" status
+  else
+    echo "npx: $(command -v npx)"
+    echo "Package: $PACKAGE"
+  fi
   echo "Data folder: ${OGDEN_AGENTS_DATA_DIR:-the default for this computer}"
   echo "Ready: Ogden Agents can start."
   exit 0
 fi
 
-echo "Starting Ogden Agents with Node.js $NODE_VERSION. The first start downloads it, which can take a minute."
-npx --yes "--package=$PACKAGE" ogden "$@"
+if [ "$SOURCE" = github ]; then
+  echo "Starting Ogden Agents from GitHub Releases with Node.js $NODE_VERSION. The first start downloads it, which can take a minute."
+  node "$INSTALLER" start "$@"
+else
+  echo "Starting Ogden Agents with Node.js $NODE_VERSION. The first start downloads it, which can take a minute."
+  npx --yes "--package=$PACKAGE" ogden "$@"
+fi
 STATUS=$?
 if [ "$STATUS" -ne 0 ]; then
   echo

@@ -98,7 +98,8 @@ test('a permission request makes one safe notification and one chime across two 
 
     await expect.poll(async () => (await shown(page)).length + (await shown(second)).length).toBe(1);
     const all = [...(await shown(page)), ...(await shown(second))];
-    expect(all[0]).toEqual({ title: 'Approval needed', body: `${basename(repo)}: Chat`, tag: expect.any(String) });
+    // The body names the project and the chat by its name (backlog story 12: named from its first message), never the request.
+    expect(all[0]).toEqual({ title: 'Approval needed', body: `${basename(repo)}: permission`, tag: expect.any(String) });
     expect(JSON.stringify(all)).not.toMatch(/npm|run /);
     await expect.poll(async () => (await chimes(page)) + (await chimes(second))).toBe(1);
 

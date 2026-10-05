@@ -90,7 +90,7 @@ describe('what the install ships (story 10.2)', () => {
       bmadPieces: [],
       bmadScriptsTrusted: false,
     });
-    // Every shipped piece turns on (Retrospectives needs Unattended builds until story 7.2 changes it to Board).
+    // Every shipped piece turns on (Retrospectives needs Board, story 7.2).
     const on = await request(server, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces: ['planning', 'board', 'builds', 'retrospectives'] });
     expect(WorkspaceSettingsResponse.parse(await on.json()).settings.bmadPieces).toEqual(['planning', 'board', 'builds', 'retrospectives']);
 

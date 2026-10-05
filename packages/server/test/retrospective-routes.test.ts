@@ -34,7 +34,7 @@ import {
 } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { createFakeBmadRepo } from '../../../tests/fixtures/fake-bmad-repo.js';
-import { createRetrospectiveRepo, RETRO_EPIC, RETRO_EPIC_FOLDER, RETRO_FILE, RETRO_PITFALL, retrospectiveText } from '../../../tests/fixtures/retrospective-repo.js';
+import { createRetrospectiveRepo, RETRO_EPIC, RETRO_EPIC_FOLDER, RETRO_FILE, RETRO_PITFALL } from '../../../tests/fixtures/retrospective-repo.js';
 import { removeAfterTest, signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
 const SKILL_FILE = '---\nname: bmad-retrospective\ndescription: Look back.\n---\n\n# bmad-retrospective\n';
@@ -210,6 +210,8 @@ describe('the rest of epic 7\'s routes (story 7.2)', () => {
     expect((await request(server, tab, 'POST', r.step('epic-one'), { skill: 'bmad-project-context' })).status).toBe(501);
     expect((await request(server, tab, 'POST', r.step('epic-one'), { skill: '../x' })).status).toBe(400);
     expect((await request(server, tab, 'POST', r.save('epic-one'))).status).toBe(501);
+    expect((await request(server, tab, 'POST', r.step('-x'), { skill: 'bmad-project-context' })).status).toBe(400);
+    expect((await request(server, tab, 'POST', r.save('-x'))).status).toBe(400);
     expect(server.core.entities.listSessions(workspace.id)).toEqual([]);
   });
 
@@ -247,6 +249,5 @@ describe('the rest of epic 7\'s routes (story 7.2)', () => {
     await waitFor(() => readFileSync(join(repo.path, 'AGENTS.md'), 'utf8').includes(RETRO_PITFALL), 'the pitfall in AGENTS.md');
     // Nothing committed, nothing else touched: exactly the two paths the lessons commit later.
     expect(repo.git('status', '--porcelain').split('\n').filter(Boolean).map((line) => line.slice(3)).sort()).toEqual(['AGENTS.md', RETRO_FILE].sort());
-    expect(retrospectiveText('accepted')).toContain('verdict: accepted');
   });
 });

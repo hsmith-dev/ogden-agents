@@ -117,6 +117,8 @@ export const CatalogSkill = z.object({
   nexts: z.array(CatalogNext).max(8).default([]),
 });
 export type CatalogSkill = z.infer<typeof CatalogSkill>;
+/** A skill as a producer may write it: the defaulted fields can be left out (story 7.2). */
+export type CatalogSkillInput = z.input<typeof CatalogSkill>;
 
 /** One installed agent persona (`roster.toml`). */
 export const CatalogAgent = z.object({

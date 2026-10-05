@@ -35,6 +35,7 @@ import {
   API_ROUTES,
   BMAD_NOT_DOWNLOADED_MESSAGE,
   LOOK_BACK_EPIC_NOT_FOUND_MESSAGE,
+  LOOK_BACK_STEP_NOT_OFFERED_MESSAGE,
   LOOK_BACK_UNAVAILABLE_MESSAGE,
   LookBackOffersResponse,
   SaveLessonsResponse,
@@ -101,7 +102,8 @@ export function registerRetrospectiveRoutes(app: Hono, { bmad, scriptTrust, retr
     if (error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);
     if (error instanceof NotImplementedError) return apiError(c, 501, 'not_implemented', error.message);
     if (error instanceof LessonsRefusedError) return apiError(c, 409, error.code, error.message);
-    if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', LOOK_BACK_EPIC_NOT_FOUND_MESSAGE);
+    // The epic, or a skill that is not one of the retrospective's next steps.
+    if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', error.message.startsWith('skill ') ? LOOK_BACK_STEP_NOT_OFFERED_MESSAGE : LOOK_BACK_EPIC_NOT_FOUND_MESSAGE);
     throw error;
   };
 

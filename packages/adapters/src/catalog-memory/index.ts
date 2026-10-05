@@ -15,13 +15,13 @@
  * only in a repo with `_bmad/` (or a status other than `not_set_up`), then
  * clears its missing capabilities and applies its `afterUpgrade` catalog.
  */
-import type { z } from 'zod';
 import { BmadAlreadySetUpError, BmadSetupError, type BmadCatalogPort, type BmadRepoDetection, type InstalledSkill } from '@ogden-agents/core';
 import {
   BMAD_CAPABILITIES,
   BMAD_SETUP_STEP_LABELS,
   BMAD_SETUP_STEPS,
   CatalogSkill,
+  type CatalogSkillInput,
   MAX_DOCUMENT_BYTES,
   type BmadCapabilities,
   type BmadCapability,
@@ -95,7 +95,7 @@ const notSetUp = (): BmadSetupStatus => ({
  */
 export function createMemoryBmadCatalog(
   repos: Readonly<Record<string, Partial<BmadRepoDetection>>> = {},
-  skills: Readonly<Record<string, readonly InstalledSkill[] | ReadonlyArray<z.input<typeof CatalogSkill>>>> = {},
+  skills: Readonly<Record<string, readonly InstalledSkill[] | readonly CatalogSkillInput[]>> = {},
   options: MemoryBmadCatalogOptions = {},
 ): MemoryBmadCatalog {
   const known = new Map(Object.entries(repos));

@@ -19,6 +19,7 @@ import {
   EPIC_SLUG_PATTERN,
   LOOK_BACK_LABEL,
   RepoRelativePath,
+  SKILL_NAME_PATTERN,
   type SaveLessonsResponse,
   type Session,
   type WorkspaceId,
@@ -99,13 +100,18 @@ function epicFolder(outputFolder: string | null, initiative: string | null, epic
   return path;
 }
 
+/** `epic` as a plain epic folder name, or {@link ValidationError}. */
+function checkedEpic(epic: unknown): asserts epic is string {
+  if (typeof epic !== 'string' || !EPIC_SLUG_PATTERN.test(epic)) {
+    throw new ValidationError('That is not the name of an epic.', [{ path: ['epic'], message: 'That is not the name of an epic.' }]);
+  }
+}
+
 export function createRetrospectives({ bmad, entities, board, catalog, chat, agent, agentOf, skill, offers }: RetrospectiveDeps): RetrospectiveUseCases {
   return {
     async lookBack(workspaceId, epic) {
       bmad.requireBmadFeature(workspaceId, 'retrospectives');
-      if (typeof epic !== 'string' || !EPIC_SLUG_PATTERN.test(epic)) {
-        throw new ValidationError('That is not the name of an epic.', [{ path: ['epic'], message: 'That is not the name of an epic.' }]);
-      }
+      checkedEpic(epic);
       // The board's guards run here (Board, the script trust, the pinned BMad Method, `_bmad/`): the tree names the epics.
       const tree = await board.tickets(workspaceId);
       if (!tree.epics.some((each) => each.slug === epic)) throw new NotFoundError('epic', epic);
@@ -125,13 +131,18 @@ export function createRetrospectives({ bmad, entities, board, catalog, chat, age
     dismissedOffers: (workspaceId) => offers.dismissed(workspaceId),
     dismissOffer: (workspaceId, epic) => offers.dismiss(workspaceId, epic),
 
-    async startStep(workspaceId) {
+    async startStep(workspaceId, epic, stepSkill) {
       bmad.requireBmadFeature(workspaceId, 'retrospectives');
+      checkedEpic(epic);
+      if (typeof stepSkill !== 'string' || !SKILL_NAME_PATTERN.test(stepSkill)) {
+        throw new ValidationError('That is not the name of a skill.', [{ path: ['skill'], message: 'That is not the name of a skill.' }]);
+      }
       throw new NotImplementedError('Starting a retrospective step arrives with story 7.5.');
     },
 
-    async saveLessons(workspaceId) {
+    async saveLessons(workspaceId, epic) {
       bmad.requireBmadFeature(workspaceId, 'retrospectives');
+      checkedEpic(epic);
       throw new NotImplementedError('Saving the lessons arrives with story 7.5.');
     },
   };

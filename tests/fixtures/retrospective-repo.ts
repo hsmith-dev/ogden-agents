@@ -1,7 +1,7 @@
 /**
  * Epic 7's fixture repo (story 7.2): a git project with a finished epic, as a
  * look-back reads it. `epic-demo` holds two stories whose plans say `done`
- * (their `baseline_revision`s are the repo's first commit), a `tickets.toml`
+ * (their `baseline_revision`s are `NO_VCS`: the fixture has one commit, so a look-back finds no per-story diff), a `tickets.toml`
  * that lists them, and an `AGENTS.md`; everything is committed on `main`, so a
  * build's worktree would carry what is committed. With `retrospective` set,
  * the epic folder also holds `epic-demo-retrospective.md` with that verdict

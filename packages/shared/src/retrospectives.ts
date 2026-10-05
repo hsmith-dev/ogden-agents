@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { RepoRelativePath } from './planning-setup.js';
 
 /**
  * Epic 7's contract (story 7.1, the tracer; story 7.2 freezes the rest):
@@ -33,6 +34,9 @@ export const LOOK_BACK_FAILED = "Ogden Agents couldn't start the look back";
 /** `not_found` (404) from the look-back route: the board has no such epic. */
 export const LOOK_BACK_EPIC_NOT_FOUND_MESSAGE = "That epic isn't on this project's board.";
 
+/** `not_found` (404) from the step route: that skill is not one of the retrospective's next steps. */
+export const LOOK_BACK_STEP_NOT_OFFERED_MESSAGE = "That step isn't offered for this retrospective.";
+
 /** `not_found` (404) from the look-back route: the project's BMad Method has no look-back step. */
 export const LOOK_BACK_UNAVAILABLE_MESSAGE = "This project's BMad Method has no step for looking back on an epic.";
 
@@ -66,10 +70,15 @@ export const RETROSPECTIVE_UNREADABLE_TEXT = "This epic's retrospective has no v
  * missing or unreadable, with `problem` then holding {@link RETROSPECTIVE_UNREADABLE_TEXT}.
  */
 export const EpicRetrospective = z.object({
-  path: z.string().min(1).max(512),
+  path: RepoRelativePath.max(512),
   verdict: RetrospectiveVerdict.nullable(),
   /** The frontmatter's `date` as written (a date or a date and time), at most 40 characters. */
-  date: z.string().min(1).max(40).nullable(),
+  date: z
+    .string()
+    .min(1)
+    .max(40)
+    .regex(/^[0-9TZtz:+\-. ]+$/, 'A date holds digits and date punctuation only.')
+    .nullable(),
   problem: z.string().max(200).nullable().default(null),
 });
 export type EpicRetrospective = z.infer<typeof EpicRetrospective>;
@@ -81,7 +90,7 @@ export type EpicRetrospective = z.infer<typeof EpicRetrospective>;
  * path: the shape has no field that could hold one.
  */
 export const EpicBuildSummary = z.object({
-  ticketRef: z.string().min(1).max(128),
+  ticketRef: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/),
   /** The run's outcome (`verified`, `failed`, `blocked`, `stopped`; a run still going is left out). */
   outcome: z.enum(['verified', 'failed', 'blocked', 'stopped']),
   /** `passed`, `failed`, or `not_checked` when no verification ran. */
@@ -131,7 +140,7 @@ export type StartRetrospectiveStepRequest = z.infer<typeof StartRetrospectiveSte
  * `revision` the new commit.
  */
 export const SaveLessonsResponse = z.object({
-  paths: z.array(z.string().min(1).max(512)).min(1).max(2),
+  paths: z.array(RepoRelativePath.max(512)).min(1).max(2),
   revision: z.string().regex(/^[0-9a-f]{40,64}$/),
 });
 export type SaveLessonsResponse = z.infer<typeof SaveLessonsResponse>;

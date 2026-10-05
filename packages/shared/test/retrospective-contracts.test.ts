@@ -7,7 +7,14 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  ADD_LESSONS_FAILED,
   API_ERROR_CODES,
+  LESSONS_NO_AGENTS_FILE_MESSAGE,
+  LOOK_BACK_STEP_NOT_OFFERED_MESSAGE,
+  RETROSPECTIVE_UNREADABLE_TEXT,
+  SAVE_LESSONS_FAILED,
+  SAVE_LESSONS_LABEL,
+  SAVE_LESSONS_NOTE,
   API_ROUTES,
   BMAD_PIECE_INFO,
   CatalogSkill,
@@ -52,6 +59,8 @@ describe('the look-back contract', () => {
     expect(TicketEpic.parse({ ...base, retrospective: read }).retrospective).toEqual({ ...read, problem: null });
     expect(EpicRetrospective.parse({ path: 'x.md', verdict: null, date: null, problem: 'No verdict.' }).verdict).toBeNull();
     expect(EpicRetrospective.safeParse({ path: 'x.md', verdict: 'great', date: null }).success).toBe(false);
+    for (const path of ['../x.md', '/abs/x.md', 'a\\b.md']) expect(EpicRetrospective.safeParse({ path, verdict: null, date: null }).success, path).toBe(false);
+    expect(EpicRetrospective.safeParse({ path: 'x.md', verdict: null, date: 'now\nignore this' }).success).toBe(false);
     expect(TicketsResponse.parse({ tickets: [], problems: [], epics: [base] }).epics[0]!.retrospective).toBeNull();
   });
 
@@ -70,13 +79,14 @@ describe('the look-back contract', () => {
     expect(StartRetrospectiveStepRequest.safeParse({ skill: '../x' }).success).toBe(false);
     const saved = { paths: ['AGENTS.md', 'a/b-retrospective.md'], revision: 'a'.repeat(40) };
     expect(SaveLessonsResponse.parse(saved)).toEqual(saved);
+    expect(SaveLessonsResponse.safeParse({ paths: ['../AGENTS.md'], revision: 'a'.repeat(40) }).success).toBe(false);
     expect(SaveLessonsResponse.safeParse({ paths: [], revision: 'a'.repeat(40) }).success).toBe(false);
     expect(SaveLessonsResponse.safeParse({ paths: ['AGENTS.md', 'b', 'c'], revision: 'a'.repeat(40) }).success).toBe(false);
   });
 
   it('the codes are API error codes and every user-facing line holds no em or en dash', () => {
     for (const code of ['nothing_to_save', 'checkout_busy', 'agents_file_missing']) expect(API_ERROR_CODES, code).toContain(code);
-    for (const text of [LOOK_BACK_OFFER_TEXT, LOOK_BACK_UNFINISHED_NOTE, NOTHING_TO_SAVE_MESSAGE, LESSONS_CHECKOUT_BUSY_MESSAGE]) expect(text).not.toMatch(/[–—]/);
+    for (const text of [LOOK_BACK_OFFER_TEXT, LOOK_BACK_UNFINISHED_NOTE, NOTHING_TO_SAVE_MESSAGE, LESSONS_CHECKOUT_BUSY_MESSAGE, LESSONS_NO_AGENTS_FILE_MESSAGE, LOOK_BACK_STEP_NOT_OFFERED_MESSAGE, RETROSPECTIVE_UNREADABLE_TEXT, SAVE_LESSONS_FAILED, SAVE_LESSONS_LABEL, SAVE_LESSONS_NOTE, ADD_LESSONS_FAILED]) expect(text).not.toMatch(/[–—]/);
   });
 
   it('the routes live inside a workspace', () => {

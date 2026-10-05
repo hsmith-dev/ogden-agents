@@ -3,13 +3,13 @@ title: 'Epic contracts and stubs'
 type: 'feature'
 ticket: '2'
 created: '2026-10-05'
-status: 'in-review'
+status: 'built'
 baseline_revision: '8b96c49870310adc6271605eb30de4d1d00a9ab2'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-retrospectives/epic-retrospectives.md'
@@ -73,6 +73,18 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+- 2026-10-05, pass 1 (security and correctness lenses): high 0, medium 3, low 8. Routed: patch 8, defer 1, reject 2. No intent_gap or bad_plan.
+  - A malformed epic on the step and save routes answered 501, not 400 -- medium, patch: both stubs validate the epic (and the skill) after the guard; route test.
+  - Shared paths (retrospective path, saved paths) were unconstrained strings that reach an agent argument and a commit -- medium, patch: \`RepoRelativePath\`; the date and the summary's ticket ref got patterns.
+  - A skill that is not a next step would answer the epic's 404 text -- medium, patch: its own shared message.
+  - \`tests/e2e-installed\` still assumed Retrospectives is coming soon (CI failure on PR 158) -- medium, patch (also applied to 7.1's branch).
+  - Undeclared \`zod\` type import in an adapter -- low, patch: \`CatalogSkillInput\` exported from shared.
+  - Over-long stored dismissal list would 500 the offers route -- low, patch: the parse keeps the newest 1000.
+  - Dashes test covered four strings; a test asserted the fixture helper; stale comments; fixture header said baselines were the first commit -- low, patch.
+  - A summary's \`blockedReason\` is agent-authored text that will reach a first message -- low, defer to 7.4, which builds the message (plain text, bounded, one line each).
+  - Re-dismissing an evicted epic after 1000 others appends another event -- low, reject: local and authenticated, the row stays bounded.
+  - Use-cases and routes of 7.4 and 7.5 share two files, and the build-summary port is not here -- low, reject: stories are built in order; the reader is entry 4's, over run records, no port needed.
 
 ## Verification
 

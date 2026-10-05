@@ -40,11 +40,11 @@ export interface LookBackOffersDeps {
   bmad: Pick<BmadFeatures, 'requireBmadFeature'>;
 }
 
-/** The stored list, or `undefined` for an unknown workspace; damaged text reads as none. */
+/** The stored list; damaged text reads as none, and an over-long one keeps the newest. */
 function parse(text: string): string[] {
   try {
     const value: unknown = JSON.parse(text);
-    return Array.isArray(value) ? value.filter((each): each is string => typeof each === 'string' && EPIC_SLUG_PATTERN.test(each)) : [];
+    return Array.isArray(value) ? value.filter((each): each is string => typeof each === 'string' && EPIC_SLUG_PATTERN.test(each)).slice(-MAX_DISMISSED_OFFERS) : [];
   } catch {
     return [];
   }

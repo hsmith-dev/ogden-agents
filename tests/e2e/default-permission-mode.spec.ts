@@ -45,11 +45,19 @@ test("new chats start in the project's default; Skip all only after Developer mo
     await expect(page.getByTestId('permission-mode-picker')).toHaveAttribute('data-mode', 'skip_all');
     const banner = page.getByTestId('skip-all-banner');
     await expect(banner).toBeVisible();
+    for (let i = 0; i < 6; i++) {
+      await send(page, `message ${i}`);
+      await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
+    }
     for (const size of [
       { width: 1440, height: 600 },
       { width: 390, height: 640 },
     ]) {
       await page.setViewportSize(size);
+      const body = page.locator('[data-slot="page-body"]').first();
+      await body.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
+      await expect(banner).toBeInViewport();
+      await body.evaluate((element) => element.scrollTo({ top: 0 }));
       await expect(banner).toBeInViewport();
     }
     await page.setViewportSize({ width: 1440, height: 900 });

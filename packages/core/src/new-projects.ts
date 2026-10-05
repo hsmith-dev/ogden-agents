@@ -182,7 +182,8 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
       const keptAgent = agent === undefined ? storedAgent : (agent ?? undefined);
       const mode = parsed.data.defaultPermissionMode;
       // The server is the gate: Skip all as the default needs Developer mode now and the user's confirmation.
-      if (mode === 'skip_all' && storedMode !== 'skip_all') {
+      // Every request for it, even when the file already holds it (it may be left from before Developer mode was turned off).
+      if (mode === 'skip_all') {
         if (!developerMode()) throw new DeveloperModeRequiredError(SKIP_ALL_DEFAULT_NEEDS_DEVELOPER_MODE);
         if (parsed.data.confirm !== true) throw new ConfirmationRequiredError(SKIP_ALL_DEFAULT_NEEDS_CONFIRMATION);
       }

@@ -25,6 +25,10 @@ export const DEFAULT_MODE_DESCRIPTIONS: Readonly<Record<PermissionMode, string>>
   skip_all: 'The agent runs everything without asking. Each such chat shows a red banner. Only in Developer mode.',
 };
 
+/** Skip all's red warning as the default for new projects: each still waits for its own confirmation. */
+export const SKIP_ALL_NEW_PROJECTS_WARNING =
+  'Projects you add from now on will offer to start their new chats in Skip all, where the agent runs commands, edits and deletes files, and uses the network without asking you. Each new project still asks you to confirm it once, and starts its chats in Ask until you do.';
+
 /** Skip all's red warning as a default: what it does, in plain words. */
 export const SKIP_ALL_DEFAULT_WARNING =
   'Every new chat here will run commands, edit and delete files, and use the network without asking you, anywhere it can reach on this computer. Only the agent’s own safety checks still ask. Each such chat shows a red banner, and you can switch it back to Ask.';
@@ -45,14 +49,29 @@ export interface DefaultPermissionModeViewProps {
   description: string;
   /** The warning's question, naming what it applies to. */
   confirmTitle: string;
+  /** The warning's words; default {@link SKIP_ALL_DEFAULT_WARNING} (a project's new chats). */
+  confirmWarning?: string | undefined;
 }
 
 /** Ask, Auto and (in Developer mode) Skip all as radios, Skip all behind its red warning, and the notice when there is one. */
-export function DefaultPermissionModeView({ value, notice, developerMode, onChange, saving, status, testId, title, description, confirmTitle }: DefaultPermissionModeViewProps) {
+export function DefaultPermissionModeView({
+  value,
+  notice,
+  developerMode,
+  onChange,
+  saving,
+  status,
+  testId,
+  title,
+  description,
+  confirmTitle,
+  confirmWarning = SKIP_ALL_DEFAULT_WARNING,
+}: DefaultPermissionModeViewProps) {
   const [confirming, setConfirming] = useState(false);
   const listed = PERMISSION_MODES.filter((mode) => mode !== 'skip_all' || developerMode || value === 'skip_all');
   const choose = (mode: PermissionMode) => {
-    if (saving || mode === value) return;
+    // The same mode again only when it clears a notice (the server clears it on the user's choice).
+    if (saving || (mode === value && notice === undefined)) return;
     if (mode === 'skip_all') setConfirming(true);
     else onChange(mode, false);
   };
@@ -66,11 +85,16 @@ export function DefaultPermissionModeView({ value, notice, developerMode, onChan
           role="status"
           data-testid={`${testId}-notice`}
           action={
-            notice === 'skip_all_unconfirmed' && developerMode ? (
-              <Button variant="outline" size="sm" data-testid={`${testId}-confirm-skip-all`} aria-disabled={saving || undefined} onClick={() => !saving && setConfirming(true)}>
-                Confirm Skip all
+            <span className="flex flex-wrap gap-2">
+              {notice === 'skip_all_unconfirmed' && developerMode ? (
+                <Button variant="outline" size="sm" data-testid={`${testId}-confirm-skip-all`} aria-disabled={saving || undefined} onClick={() => !saving && setConfirming(true)}>
+                  Confirm Skip all
+                </Button>
+              ) : null}
+              <Button variant="outline" size="sm" data-testid={`${testId}-keep-ask`} aria-disabled={saving || undefined} onClick={() => !saving && choose('ask')}>
+                {notice === 'skip_all_unconfirmed' ? 'Keep Ask' : 'Dismiss'}
               </Button>
-            ) : undefined
+            </span>
           }
         >
           {DEFAULT_MODE_NOTICE_TEXT[notice]}
@@ -102,7 +126,16 @@ export function DefaultPermissionModeView({ value, notice, developerMode, onChan
         </Notice>
       ) : null}
       <AlertDialog open={confirming} onOpenChange={setConfirming}>
-        <AlertDialogContent data-testid={`${testId}-skip-all-confirm`} title={confirmTitle} description={SKIP_ALL_DEFAULT_WARNING}>
+        <AlertDialogContent
+          data-testid={`${testId}-skip-all-confirm`}
+          title={confirmTitle}
+          description={confirmWarning}
+          // Opened from a radio or a notice button, not a trigger: focus goes back to the chosen option, never to the page.
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            document.getElementById(`${testId}-${value ?? 'ask'}`)?.focus();
+          }}
+        >
           <AlertDialogCancel data-testid={`${testId}-skip-all-cancel`}>Cancel</AlertDialogCancel>
           <AlertDialogConfirm
             data-testid={`${testId}-skip-all-confirm-button`}

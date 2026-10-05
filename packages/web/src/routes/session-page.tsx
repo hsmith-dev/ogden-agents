@@ -362,7 +362,7 @@ export function SessionPage() {
       </WorkspaceHeader>
       {/* A chat that skips its permission checks says so in red, above the conversation or the terminal, at any scroll position. */}
       {permissionMode === 'skip_all' ? <SkipAllBanner agentName={agentName} changing={modeChanging} onBackToAsk={() => changeMode('ask', false, terminalDrives)} /> : null}
-      <StartModeNote note={startModeNote} />
+      <StartModeNote key={sesId} note={startModeNote} />
       {driver === 'terminal' ? (
         <ReadOnlyBanner
           onSwitchToChat={() => switchTo('ui')}

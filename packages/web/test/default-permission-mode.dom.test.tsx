@@ -14,6 +14,7 @@ import { useEffect, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppearanceProvider, useAppearance } from '../src/appearance/appearance-provider';
 import { StartModeNote, useStartModeNote } from '../src/permissions/default-permission-mode';
+import { usePermissionMode } from '../src/permissions/permission-mode-picker';
 import { DefaultPermissionModeSection } from '../src/routes/workspace-settings-page';
 import { NEW_PROJECT_DEFAULTS_QUERY_KEY, NewProjectsPermissionModeSection } from '../src/settings/new-project-defaults';
 import { TooltipProvider } from '../src/ui/tooltip';
@@ -142,6 +143,14 @@ describe('Workspace settings → New chats start in', () => {
     expect(screen.queryByTestId('default-mode-notice')).toBeNull();
   });
 
+  it('Keep Ask clears the notice', async () => {
+    server.settings = { ...server.settings, defaultPermissionMode: 'ask', defaultPermissionModeNotice: 'skip_all_unconfirmed' };
+    show(<DefaultPermissionModeSection wsId={WS} />);
+    fireEvent.click(await screen.findByTestId('default-mode-keep-ask'));
+    await waitFor(() => expect(screen.queryByTestId('default-mode-notice')).toBeNull());
+    expect(server.bodies).toEqual([{ defaultPermissionMode: 'ask' }]);
+  });
+
   it('without Developer mode, says how to confirm instead of offering it', async () => {
     server.settings = { ...server.settings, defaultPermissionMode: 'ask', defaultPermissionModeNotice: 'skip_all_unconfirmed' };
     show(<DefaultPermissionModeSection wsId={WS} />);
@@ -182,5 +191,14 @@ describe("a new chat's note about the mode it started in", () => {
     expect(screen.getByTestId('start-mode-note').textContent).toContain(note);
     fireEvent.click(screen.getByTestId('start-mode-note-dismiss'));
     expect(screen.queryByTestId('start-mode-note')).toBeNull();
+  });
+});
+
+describe("a chat's mode before its session is read", () => {
+  it('is the mode it was created in, so a chat started in Skip all shows its banner at once', () => {
+    const created = { seq: 1, type: 'session.created', workspaceId: WS, streamId: 'ses_1', at: '2026-10-04T00:00:00.000Z', payload: { session: { permissionMode: 'skip_all' } } } as unknown as CoreEvent;
+    expect(renderHook(() => usePermissionMode([created], undefined)).result.current).toBe('skip_all');
+    expect(renderHook(() => usePermissionMode([created], 'ask')).result.current).toBe('ask');
+    expect(renderHook(() => usePermissionMode([], undefined)).result.current).toBe('ask');
   });
 });

@@ -159,6 +159,15 @@ describe('a new chat starts in its project default', () => {
   });
 });
 
+describe('unattended builds', () => {
+  it("don't use the project's default: a build session starts in Ask", () => {
+    const { core, workspace } = setUp();
+    core.installSettings.setDeveloperMode(true);
+    core.permissions.updateSettings(workspace.id, { defaultPermissionMode: 'skip_all', confirm: true });
+    expect(core.entities.createSession({ workspaceId: workspace.id, kind: 'build' }).permissionMode).toBe('ask');
+  });
+});
+
 describe('the starting mode', () => {
   const base = { agentName: 'First Agent', declared: ['ask', 'auto', 'skip_all'] as const, listed: undefined, developerMode: true };
   it("falls back to Ask when the agent's sessions on this computer left the mode out", () => {
@@ -227,5 +236,29 @@ describe('the app-wide default for new projects', () => {
     core.installSettings.setDeveloperMode(true);
     expect(defaults.get().defaultPermissionMode).toBe('ask');
     expect(defaults.dropSkipAll()).toBe(false);
+  });
+
+  it('refuses Skip all every time it is asked for, even when the file still holds it', () => {
+    const core = openTestCore();
+    const defaults = store(core);
+    core.installSettings.setDeveloperMode(true);
+    defaults.set({ defaultPermissionMode: 'skip_all', confirm: true });
+    core.installSettings.setDeveloperMode(false);
+    // The file still says Skip all (its rewrite is the route's, after core's transaction).
+    expect(() => defaults.set({ defaultPermissionMode: 'skip_all' })).toThrow(DeveloperModeRequiredError);
+    core.installSettings.setDeveloperMode(true);
+    expect(() => defaults.set({ defaultPermissionMode: 'skip_all' })).toThrow(ConfirmationRequiredError);
+  });
+
+  it('a project waiting for Skip all stops waiting when Developer mode is turned off', () => {
+    const { core, chat } = setUp();
+    const defaults = store(core);
+    core.installSettings.setDeveloperMode(true);
+    defaults.set({ defaultPermissionMode: 'skip_all', confirm: true });
+    const project = createAddProject({ chat, defaults }).addProject(tempDir('ogden-agents-repo-'));
+    expect(core.permissions.getSettings(project.id).defaultPermissionModeNotice).toBe('skip_all_unconfirmed');
+    core.installSettings.setDeveloperMode(false);
+    expect(core.permissions.getSettings(project.id).defaultPermissionModeNotice).toBeUndefined();
+    expect(settingsEvents(core, project.id).at(-1)?.payload).toMatchObject({ defaultPermissionModeCause: 'developer_mode_off' });
   });
 });

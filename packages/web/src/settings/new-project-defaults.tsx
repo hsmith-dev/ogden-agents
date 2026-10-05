@@ -31,7 +31,7 @@ import { tabAuth } from '@/auth/tab-token';
 import { DefaultAgentView, type DefaultAgentViewProps } from '@/chat/default-agent-view';
 import { projectDefaultAgent, useChatAgents } from '@/chat/use-chat-agents';
 import { bmadMethodPieces } from '@/onboarding/welcome-model';
-import { DefaultPermissionModeView, type DefaultPermissionModeViewProps } from '@/permissions/default-permission-mode';
+import { DefaultPermissionModeView, SKIP_ALL_NEW_PROJECTS_WARNING, type DefaultPermissionModeViewProps } from '@/permissions/default-permission-mode';
 import { CheckboxOption } from '@/ui/checkbox';
 import { Notice } from '@/ui/notice';
 import { PageSection } from '@/ui/page';
@@ -370,6 +370,7 @@ export function NewProjectsPermissionModeSection() {
       title="New chats start in"
       description="The permission mode a new project's chats start in. Projects you already have keep theirs. Skip all still asks you to confirm it once in each new project."
       confirmTitle="Start new projects' chats in Skip all?"
+      confirmWarning={SKIP_ALL_NEW_PROJECTS_WARNING}
     />
   );
 }

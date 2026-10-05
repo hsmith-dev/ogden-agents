@@ -111,6 +111,19 @@ export function dropSkipAllDefaults(orm: Orm, events: EventLog): number {
       },
     });
   }
+  // A Skip all waiting for confirmation can't be confirmed without Developer mode: the project stops waiting (stays Ask).
+  const waiting = orm.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.defaultPermissionModeNotice, 'skip_all_unconfirmed')).all();
+  for (const { id: raw } of waiting) {
+    const id = raw as WorkspaceId;
+    const level = readCautionLevel(orm, id) ?? DEFAULT_CAUTION_LEVEL;
+    orm.update(workspaces).set({ defaultPermissionModeNotice: null }).where(eq(workspaces.id, id)).run();
+    events.append({
+      type: 'workspace.settings_changed',
+      workspaceId: id,
+      streamId: id,
+      payload: { cautionLevel: level, previous: level, defaultPermissionMode: 'ask', previousDefaultPermissionMode: 'ask', defaultPermissionModeCause: 'developer_mode_off' },
+    });
+  }
   return rows.length;
 }
 

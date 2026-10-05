@@ -114,12 +114,12 @@ interface DescriptorsRef {
 
 /** Whether `agentId` is one this server registers (epic 6, entry 6): Claude Code, Antigravity unless left out (entry 5), then any extra agent a test wires. */
 const registeredAgent =
-  (options: Pick<StartOptions, 'extraAgents' | 'antigravity' | 'codex'>) =>
+  (options: Pick<StartOptions, 'extraAgents' | 'antigravity' | 'codex'>, hooks: Pick<TestHooks, 'codexServer'>) =>
   (agentId: string): boolean =>
     agentId === CLAUDE_CODE_AGENT_ID ||
     (options.antigravity !== false && agentId === ANTIGRAVITY_AGENT_ID) ||
     (options.codex !== undefined && options.codex !== false && agentId === CODEX_AGENT_ID) ||
-    (options.codex === undefined && CODEX_SHIPPED && agentId === CODEX_AGENT_ID) ||
+    (options.codex === undefined && (CODEX_SHIPPED || hooks.codexServer !== undefined) && agentId === CODEX_AGENT_ID) ||
     (options.extraAgents ?? []).some((wiring) => wiring.descriptor.agentId === agentId);
 
 /**
@@ -172,7 +172,7 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       // The request is declined all the same; the reason names no command.
       onPermissionError: (error) => log.warn('a permission request was declined after a failure', { reason: String(error) }),
       // A project's default agent (epic 6, entry 6) is one this server registers: Claude Code and any extra agent.
-      isAgentRegistered: registeredAgent(options),
+      isAgentRegistered: registeredAgent(options, hooks),
       agentConfigFolders: () => agentConfigFolders(descriptors.current),
       agentProjectFiles: () => agentProjectFiles(descriptors.current),
       projectFilesFingerprint,
@@ -366,7 +366,7 @@ async function listenAndAnnounce({
     dataDir,
     bmad: core.bmad,
     // Welcome's agent choice (epic 6, entry 6) names an agent this server registers.
-    isAgentRegistered: registeredAgent(options),
+    isAgentRegistered: registeredAgent(options, hooks),
     // Skip all as the default for new projects needs Developer mode (default permission mode).
     developerMode: core.installSettings.developerMode,
     onError: (code) => log.warn('new project defaults unusable', { code }),

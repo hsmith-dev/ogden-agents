@@ -18,13 +18,19 @@ export interface CodexPorts {
 
 export function codexWiring(input: {
   dataDir: string;
+  /** The adapter script a test runs in place of the pinned one (`OGDEN_AGENTS_TEST_CODEX_SERVER`), under this Node. */
+  serverScript?: string | undefined;
   given?: CodexPorts | undefined;
   /** Protocol notes for the log; never the environment, stderr or the agent's messages. */
   onDiagnostic?: (message: string, fields?: Record<string, unknown>) => void;
 }): AgentWiring {
   return {
     descriptor: CODEX_DESCRIPTOR,
-    agent: input.given?.agent ?? createCodexAgent({ dataDir: input.dataDir, onDiagnostic: input.onDiagnostic }),
+    agent: input.given?.agent ?? createCodexAgent({
+        dataDir: input.dataDir,
+        ...(input.serverScript === undefined ? {} : { server: () => ({ command: process.execPath, args: [input.serverScript!] }) }),
+        onDiagnostic: input.onDiagnostic,
+      }),
     setup: input.given?.setup ?? createCodexSetup(),
   };
 }

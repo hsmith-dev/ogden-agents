@@ -121,7 +121,8 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
     }
   };
   const startTimeoutMs = options.startTimeoutMs ?? START_TIMEOUT_MS;
-  const reasons = acpReasons(descriptor.displayName);
+  // An agent with only an API key method (Codex) says the key is the problem, never "sign in".
+  const reasons = acpReasons(descriptor.displayName, { apiKeyOnly: descriptor.signInMethods.length > 0 && descriptor.signInMethods.every((method) => method.kind === 'api_key') });
   checkFixedModeWiring(descriptor, quirks);
 
   /** Spawns the agent in `cwd` with core's environment (AD-16), in its own process group. */

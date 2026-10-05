@@ -54,6 +54,12 @@
  *   5.2: CI's ubuntu runners have no working bwrap, spike 5.1), so the suites
  *   can build with the fake agent, or see `sandbox_unavailable`, on any OS.
  *
+ * - {@link CODEX_SERVER_ENV}: a Node script inside the temp folder plays
+ *   Codex's `codex-acp` adapter (epic 12 entry 5), so a suite can chat with
+ *   Codex through the fake agent's Codex personality on every OS (the pinned
+ *   adapter and the real Codex are never run in a test). It also registers
+ *   Codex in a shipped-style server, which otherwise leaves it out.
+ *
  * {@link resolveTestHooks} reads them all for `start()`, and
  * {@link testHooksLogFields} is its "test hooks in use" line. Every
  * `OGDEN_AGENTS_TEST_*` name is declared here and read only beside a
@@ -106,6 +112,8 @@ export const BMAD_SOURCE_UV_ENV_NAMES: readonly string[] = [
 export const ANTIGRAVITY_SERVER_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_SERVER';
 /** Absolute path to a JSON file `{ "pins": AntigravityPins }` inside the temp folder, every archive on `http://127.0.0.1` (tests only; epic 6 entry 10). */
 export const ANTIGRAVITY_INSTALL_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_INSTALL';
+/** Absolute path to a Node script inside the temp folder, run under Node as Codex's `codex-acp` adapter (tests only; epic 12 entry 5). */
+export const CODEX_SERVER_ENV = 'OGDEN_AGENTS_TEST_CODEX_SERVER';
 /** Absolute path to a Node script inside the temp folder, registered as a test agent that needs a trusted project (tests only; epic 6 entry 10). */
 export const TRUST_AGENT_ENV = 'OGDEN_AGENTS_TEST_TRUST_AGENT';
 /** `available` or `unavailable`: the sandbox check unattended builds get (tests only; story 5.2). */
@@ -311,6 +319,11 @@ export function testAntigravityInstall(env: Env, dataDir: string, tmp: string = 
   return { pins: pins as AntigravityPins };
 }
 
+/** The Node script {@link CODEX_SERVER_ENV} names (see {@link testClaudeCli}), or `undefined` (Codex's pinned adapter); throws when allowed but unusable. */
+export function testCodexServer(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
+  return testNodeScript(CODEX_SERVER_ENV, env, dataDir, tmp);
+}
+
 /** The trust-needing test agent's script from {@link TRUST_AGENT_ENV} (see {@link testClaudeCli}), or `undefined`; throws when allowed but unusable. */
 export function testTrustAgent(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
   return testNodeScript(TRUST_AGENT_ENV, env, dataDir, tmp);
@@ -428,7 +441,7 @@ export function checkInDelayFromEnv(env: Env, dataDir: string, tmp: string = tmp
 }
 
 /** The `start()` options that decide a hook themselves, and whether `start()` opens its own core. */
-export type TestHookOptions = Pick<StartOptions, 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'extraAgents' | 'sandbox'> & {
+export type TestHookOptions = Pick<StartOptions, 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'codex' | 'extraAgents' | 'sandbox'> & {
   /** `false` for a core passed in, which already holds its own BMad pieces: {@link BMAD_AVAILABLE_ENV} is not read. */
   ownsCore: boolean;
   tmp?: string;
@@ -441,6 +454,7 @@ export interface TestHooks {
   claudeCli: string | undefined;
   antigravityServer: string | undefined;
   antigravityInstall: TestAntigravityInstall | undefined;
+  codexServer: string | undefined;
   trustAgent: string | undefined;
   bmadProbe: boolean;
   bmadAvailable: BmadPieceName[];
@@ -467,6 +481,8 @@ export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOpt
     // Antigravity's ports given (or left out) by a test decide it: the hook is not read.
     antigravityServer: options.antigravity === undefined ? testAntigravityServer(env, dataDir, tmp) : undefined,
     antigravityInstall: options.antigravity === undefined ? testAntigravityInstall(env, dataDir, tmp) : undefined,
+    // Codex's ports given (or left out) by a test decide it: the hook is not read.
+    codexServer: options.codex === undefined ? testCodexServer(env, dataDir, tmp) : undefined,
     // Agents a test registers decide it: the hook is not read.
     trustAgent: options.extraAgents === undefined ? testTrustAgent(env, dataDir, tmp) : undefined,
     bmadProbe: testBmadProbe(env, dataDir, tmp),
@@ -490,6 +506,7 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     hooks.claudeCli !== undefined ||
     hooks.antigravityServer !== undefined ||
     hooks.antigravityInstall !== undefined ||
+    hooks.codexServer !== undefined ||
     hooks.trustAgent !== undefined ||
     hooks.bmadProbe ||
     hooks.bmadAvailable.length > 0 ||
@@ -503,6 +520,7 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     claudeCli: hooks.claudeCli !== undefined,
     antigravityServer: hooks.antigravityServer !== undefined,
     antigravityInstall: hooks.antigravityInstall !== undefined,
+    codexServer: hooks.codexServer !== undefined,
     trustAgent: hooks.trustAgent !== undefined,
     bmadProbe: hooks.bmadProbe,
     bmadAvailable: hooks.bmadAvailable.join(','),

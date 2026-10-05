@@ -192,6 +192,22 @@ function npmCheck(paths, dir) {
   return out;
 }
 
+/** The three native modules, loaded by the installed sidecar from the installed resources (while the app runs, so an AppImage is mounted). */
+function nativesFromInstall(paths, prefix) {
+  if (!paths) return 'no paths event';
+  const pkg = dirname(dirname(paths.serve));
+  const js = `const r=require('node:module').createRequire(process.argv[1]+'/package.json');const o={arch:process.arch};
+for (const [n,f] of [['better-sqlite3',m=>{const d=new m(':memory:');d.close();}],['@napi-rs/keyring',m=>{if(typeof m.Entry!=='function')throw new Error('no Entry')}],['node-pty',m=>{if(typeof m.spawn!=='function')throw new Error('no spawn')}]])
+{try{f(r(n));o[n]='ok'}catch(e){o[n]='FAIL '+String(e.message).slice(0,200)}}console.log(JSON.stringify(o))`;
+  const [cmd, args] = prefix.length ? [prefix[0], [...prefix.slice(1), paths.node]] : [paths.node, []];
+  const r = spawnSync(cmd, [...args, '-e', js, pkg], { encoding: 'utf8' });
+  try {
+    return JSON.parse(r.stdout.trim().split('\n').pop());
+  } catch {
+    return `FAIL ${r.status} ${String(r.stderr).slice(0, 300)}`;
+  }
+}
+
 /**
  * One launch. mode: 'tree' | 'direct' | 'crash' | 'crash-nojob' | 'update'.
  * @returns the run's record.
@@ -232,6 +248,8 @@ async function launch(name, exe, { mode = 'tree', prefix = [], updateUrl, timeou
     }
     await sleep(5000);
   }
+  child.stdout.on('error', () => {});
+  child.stderr.on('error', () => {});
   child.stdout.on('data', (d) => appendFileSync(out, d));
   child.stderr.on('data', (d) => appendFileSync(out, d));
   let exited;
@@ -271,9 +289,15 @@ async function launch(name, exe, { mode = 'tree', prefix = [], updateUrl, timeou
     rec.grandchild = gc;
 
     if (mode === 'update') {
-      const done = await waitFor(reportFile, (e) => ['update_installed', 'update_error', 'update_none'].includes(e.ev), timeoutMs);
+      // Only the first app's outcome. On Windows the updater exits the app to run the installer
+      // inside download_and_install, so a relaunch (another pid) is the sign it installed.
+      const done = await waitFor(
+        reportFile,
+        (e) => (e.pid === shellPid && ['update_installed', 'update_error', 'update_none'].includes(e.ev)) || (e.pid !== shellPid && e.ev === 'app_info'),
+        timeoutMs,
+      );
       rec.update = done ?? 'no updater event';
-      if (done?.ev === 'update_installed') {
+      if (done?.ev === 'update_installed' || done?.ev === 'app_info') {
         const relaunched = await waitFor(reportFile, (e) => e.ev === 'app_info' && e.pid !== shellPid, 120_000);
         rec.relaunched = relaunched ? { version: relaunched.data.version, pid: relaunched.pid } : 'no relaunch within 120 s';
         const after = await waitFor(reportFile, (e) => (e.ev === 'update_none' || e.ev === 'update_error') && e.pid !== shellPid, 120_000);
@@ -293,7 +317,10 @@ async function launch(name, exe, { mode = 'tree', prefix = [], updateUrl, timeou
         .map((e) => `${e.ev}: ${e.data.url}`);
       await sleep(2000);
       rec.memory = memorySample(shellPid, serverPid);
-      if (name === 'A-tree') rec.npm = npmCheck(rec.paths, dir);
+      if (name === 'A-tree') {
+        rec.npm = npmCheck(rec.paths, dir);
+        rec.installedNatives = nativesFromInstall(rec.paths, prefix);
+      }
     }
 
     // Wait for the shell to go, then look for anything it left.
@@ -422,9 +449,12 @@ function serveDir(files, port) {
     if (body === undefined) return res.writeHead(404).end();
     if (typeof body === 'string' && !existsSync(body)) return res.writeHead(200, { 'content-type': 'application/json' }).end(body);
     res.writeHead(200, { 'content-length': statSync(body).size });
-    createReadStream(body).pipe(res);
+    createReadStream(body).on('error', () => res.destroy()).pipe(res);
   });
-  return new Promise((r) => server.listen(port, '127.0.0.1', () => r(server)));
+  return new Promise((r, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => r(server));
+  });
 }
 
 async function updaterDryRun(install, prefix) {

@@ -4,7 +4,14 @@
 import { spawn } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 
-const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1 << 30)'], { stdio: 'ignore', windowsHide: true });
+// Spawned the way the Claude Code adapter spawns an agent (claude-code-agent.ts: `detached` on
+// POSIX, so it leads its own process group), so the spike sees what Quit does to a real agent.
+const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1 << 30)'], {
+  stdio: 'ignore',
+  windowsHide: true,
+  detached: process.platform !== 'win32',
+});
+child.on('error', () => {});
 const file = process.env.OGDEN_SPIKE_GRANDCHILD_FILE;
 const record = (data) => {
   if (file) appendFileSync(file, `${JSON.stringify({ at: Date.now(), ...data })}\n`);

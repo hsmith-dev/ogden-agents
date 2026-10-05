@@ -114,7 +114,9 @@ fn start_server(app: &AppHandle) -> Result<Started, String> {
     let serve = pkg.join("dist").join("serve.js");
     let web = pkg.join("dist").join("web");
     let npm_cli = res.join("npm").join("bin").join("npm-cli.js");
-    let data_dir = match std::env::var_os("OGDEN_AGENTS_DATA_DIR") {
+    // Only spike runs take a data folder from the environment; a plain launch never touches
+    // the user's real Ogden data folder.
+    let data_dir = match std::env::var_os("OGDEN_AGENTS_DATA_DIR").filter(|_| spike()) {
         Some(d) => PathBuf::from(d),
         None => app.path().app_data_dir().map_err(|e| e.to_string())?.join("spike-data"),
     };
@@ -136,6 +138,8 @@ fn start_server(app: &AppHandle) -> Result<Started, String> {
         .env("OGDEN_AGENTS_DATA_DIR", &data_dir)
         // findNpmCli's second rule (`launcherNpm`, read at server start): the bundled npm.
         .env("npm_execpath", &npm_cli)
+        // As launcher.ts does: the server must not hold the install folder open as its cwd.
+        .current_dir(&data_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());

@@ -170,6 +170,19 @@ describe('Restart to update', () => {
     expect(await poll(server)).toBe(true);
   });
 
+  it('never restarts into an update that failed to verify or install', async () => {
+    const server = await startTestServer({ shell: 'desktop', updates: false });
+    const tab = await signIn(server);
+    const failed = JSON.stringify({ version: NEWER, notes: '', channel: 'stable', downloaded: false, failed: 'Its signature did not check out.' });
+    await send(server, LAUNCHER_APP_UPDATE, { method: 'POST', headers: json(launcher(server)), body: failed });
+    expect((await noticeOf(server, tab.headers)).app?.update.failed).toBe('Its signature did not check out.');
+    expect((await restart(server, tab.headers)).status).toBe(409);
+    expect(await poll(server)).toBe(false);
+    // Even a stale "downloaded" flag cannot make a failed update restartable.
+    await send(server, LAUNCHER_APP_UPDATE, { method: 'POST', headers: json(launcher(server)), body: JSON.stringify({ version: NEWER, notes: '', channel: 'stable', downloaded: true, failed: 'x' }) });
+    expect((await restart(server, tab.headers)).status).toBe(409);
+  });
+
   it('needs the tab token and a matching Origin', async () => {
     const server = await startTestServer({ shell: 'desktop', updates: false });
     const tab = await signIn(server);
@@ -232,5 +245,23 @@ describe('the shell\'s Quit (launcher token, shell mode only)', () => {
 
     const plain = await startTestServer({ shell: null, updates: false });
     expect((await send(plain, '/launcher/quit', { method: 'POST', headers: json(launcher(plain)), body: '{}' })).status).toBe(404);
+  });
+});
+
+describe('the app shortcut inside the desktop app (story 13.11)', () => {
+  it('is not offered, not supported and not added: the app is the shortcut', async () => {
+    const server = await startTestServer({ shell: 'desktop', updates: false });
+    const tab = await signIn(server);
+    const status = (await send(server, API_ROUTES.appShortcut, { headers: tab.headers })).json() as { supported: boolean; offerPending: boolean; installed: boolean };
+    expect(status).toMatchObject({ supported: false, offerPending: false, installed: false });
+    expect((await send(server, API_ROUTES.appShortcut, { method: 'POST', headers: json(tab.headers), body: '' })).status).toBe(422);
+  });
+
+  it('is unchanged on the npm route: supported where the OS can, offer pending', async () => {
+    const server = await startTestServer({ shell: null, updates: false });
+    const tab = await signIn(server);
+    const status = (await send(server, API_ROUTES.appShortcut, { headers: tab.headers })).json() as { supported: boolean; offerPending: boolean };
+    expect(status.supported).toBe(true);
+    expect(status.offerPending).toBe(true);
   });
 });

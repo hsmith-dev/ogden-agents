@@ -1,0 +1,127 @@
+{
+  "registry": "opencode",
+  "version": "1.18.34",
+  "archives": {
+    "darwin-arm64": {
+      "url": "https://github.com/anomalyco/opencode/releases/download/v1.18.34/opencode-darwin-arm64.zip",
+      "sha256": "8522b70f545184b3a8d97c5ca4f814093b2476d72aebfda8c48bcd072ec31d1b",
+      "size": 45538151,
+      "format": "zip",
+      "binary": "opencode",
+      "args": [
+        "acp"
+      ],
+      "files": {
+        "opencode": {
+          "size": 144257280,
+          "sha256": "7b63b34fafabded7d9231f6a9032755d0cdeaf8b9d2b70df8e25535471469eea"
+        }
+      }
+    },
+    "darwin-x64": {
+      "url": "https://github.com/anomalyco/opencode/releases/download/v1.18.34/opencode-darwin-x64.zip",
+      "sha256": "66bf0638cffad3b65bd6648cc3947619e1dd71f4bfeee0a81e087ac036bb1088",
+      "size": 49165415,
+      "format": "zip",
+      "binary": "opencode",
+      "args": [
+        "acp"
+      ],
+      "files": {
+        "opencode": {
+          "size": 151188432,
+          "sha256": "f97abb1fb2e701b4a4bcc06361e41c81d1837d9e60c3e7d65dfaca9827422ac3"
+        }
+      }
+    },
+    "linux-arm64": {
+      "url": "https://github.com/anomalyco/opencode/releases/download/v1.18.34/opencode-linux-arm64.tar.gz",
+      "sha256": "bbdb3f00c2c51e42e315525233151309724226a8776da8e9145e3b0fa3d5310f",
+      "size": 60479105,
+      "format": "tar.gz",
+      "binary": "opencode",
+      "args": [
+        "acp"
+      ],
+      "files": {
+        "opencode": {
+          "size": 185116816,
+          "sha256": "415487fcd9b3f06addd6877435783f3d5a236c029066b0dd6597d64980b15351"
+        }
+      }
+    },
+    "linux-x64": {
+      "url": "https://github.com/anomalyco/opencode/releases/download/v1.18.34/opencode-linux-x64.tar.gz",
+      "sha256": "0f22479647226d1d2dd99595d20082ee7bda3870b62dc6a90b41efc1a71d7e9a",
+      "size": 60665582,
+      "format": "tar.gz",
+      "binary": "opencode",
+      "args": [
+        "acp"
+      ],
+      "files": {
+        "opencode": {
+          "size": 185632896,
+          "sha256": "9ca0b9953d49997601655e54f846a3efa464f237e47c6f1b04716d0f2e64c4c2"
+        }
+      }
+    },
+    "win32-arm64": {
+      "url": "https://github.com/anomalyco/opencode/releases/download/v1.18.34/opencode-windows-arm64.zip",
+      "sha256": "b738ae4e823c862eaba6d6bd6e1d35e01b46851d7160882c7bdb189f33a16447",
+      "size": 60647128,
+      "format": "zip",
+      "binary": "opencode.exe",
+      "args": [
+        "acp"
+      ],
+      "files": {
+        "opencode.exe": {
+          "size": 176494984,
+          "sha256": "f229c557fa54e3b2c79d78e31dc14b4e1447047b04a339ec62353e3586a7ab0f"
+        }
+      }
+    },
+    "win32-x64": {
+      "url": "https://github.com/anomalyco/opencode/releases/download/v1.18.34/opencode-windows-x64.zip",
+      "sha256": "8ec42ed1ad8db108052394b83ab69d0331398f761fbfff5fe50f91d65bdd3548",
+      "size": 62158551,
+      "format": "zip",
+      "binary": "opencode.exe",
+      "args": [
+        "acp"
+      ],
+      "files": {
+        "opencode.exe": {
+          "size": 180599176,
+          "sha256": "5283c2cd5b4285855daa97e6f7d17bf48146227cdf2a940e79e0f2b7869fd06e"
+        }
+      }
+    }
+  },
+  "ripgrep": {
+    "version": "15.1.0",
+    "archives": {
+      "win32-x64": {
+        "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-pc-windows-msvc.zip",
+        "sha256": "124510b94b6baa3380d051fdf4650eaa80a302c876d611e9dba0b2e18d87493a",
+        "size": 1810687,
+        "member": "ripgrep-15.1.0-x86_64-pc-windows-msvc/rg.exe",
+        "file": {
+          "size": 4266496,
+          "sha256": "decdd4992f3f1b9a5ef9898f1b40ab16886d579d6516b4efd3d5eaa19364e408"
+        }
+      },
+      "win32-arm64": {
+        "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-aarch64-pc-windows-msvc.zip",
+        "sha256": "00d931fb5237c9696ca49308818edb76d8eb6fc132761cb2a1bd616b2df02f8e",
+        "size": 1675460,
+        "member": "ripgrep-15.1.0-aarch64-pc-windows-msvc/rg.exe",
+        "file": {
+          "size": 3930112,
+          "sha256": "f7799d737b520e00b10dfa72def23904fe66fb03315636a7b78549845ee9609c"
+        }
+      }
+    }
+  }
+}

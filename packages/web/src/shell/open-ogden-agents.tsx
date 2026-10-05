@@ -2,6 +2,7 @@ import { Copy } from '@phosphor-icons/react';
 import { useState } from 'react';
 import { Button } from '@/ui/button';
 import { EmptyState, PageBody } from '@/ui/page';
+import { isDesktopApp } from './desktop-app';
 import { LAUNCH_COMMAND } from './server-stopped';
 
 /**
@@ -24,6 +25,16 @@ export function OpenOgdenAgents() {
       setCopy('failed');
     }
   };
+  // In the app there is no command to run: the window is only unconnected if the app needs reopening (story 13.11).
+  if (isDesktopApp()) {
+    return (
+      <main data-testid="open-ogden-agents" className="flex min-h-dvh flex-col">
+        <PageBody>
+          <EmptyState title="Open Ogden Agents" description="This window isn't connected. Quit Ogden Agents and open it again." />
+        </PageBody>
+      </main>
+    );
+  }
   return (
     <main data-testid="open-ogden-agents" className="flex min-h-dvh flex-col">
       <PageBody>

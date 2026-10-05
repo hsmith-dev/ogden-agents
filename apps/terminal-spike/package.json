@@ -1,0 +1,10 @@
+{
+  "name": "terminal-spike",
+  "private": true,
+  "description": "SPIKE 16.1 (temporary): not part of the pnpm workspace. Installed by the spike job with npm.",
+  "dependencies": {
+    "@xterm/addon-serialize": "0.14.0",
+    "@xterm/headless": "6.0.0",
+    "@xterm/addon-unicode11": "0.9.0"
+  }
+}

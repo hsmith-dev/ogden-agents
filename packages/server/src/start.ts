@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, projectFilesFingerprint } from '@ogden-agents/adapters';
+import { ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, LOCAL_AGENT_ID, LOCAL_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, projectFilesFingerprint } from '@ogden-agents/adapters';
 import {
   agentConfigFolders,
   agentProjectFiles,
@@ -114,7 +114,7 @@ interface DescriptorsRef {
 
 /** Whether `agentId` is one this server registers (epic 6, entry 6): Claude Code, Antigravity unless left out (entry 5), then any extra agent a test wires. */
 const registeredAgent =
-  (options: Pick<StartOptions, 'extraAgents' | 'antigravity' | 'codex' | 'grok'>, hooks: Pick<TestHooks, 'codexServer' | 'codexInstall' | 'grokServer' | 'grokInstall'>) =>
+  (options: Pick<StartOptions, 'extraAgents' | 'antigravity' | 'codex' | 'grok' | 'local'>, hooks: Pick<TestHooks, 'codexServer' | 'codexInstall' | 'grokServer' | 'grokInstall' | 'localServer' | 'localEndpoint'>) =>
   (agentId: string): boolean =>
     agentId === CLAUDE_CODE_AGENT_ID ||
     (options.antigravity !== false && agentId === ANTIGRAVITY_AGENT_ID) ||
@@ -122,6 +122,8 @@ const registeredAgent =
     (options.codex === undefined && (CODEX_SHIPPED || hooks.codexServer !== undefined || hooks.codexInstall !== undefined) && agentId === CODEX_AGENT_ID) ||
     (options.grok !== undefined && options.grok !== false && agentId === GROK_AGENT_ID) ||
     (options.grok === undefined && (GROK_SHIPPED || hooks.grokServer !== undefined || hooks.grokInstall !== undefined) && agentId === GROK_AGENT_ID) ||
+    (options.local !== undefined && options.local !== false && agentId === LOCAL_AGENT_ID) ||
+    (options.local === undefined && (LOCAL_SHIPPED || hooks.localServer !== undefined || hooks.localEndpoint !== undefined) && agentId === LOCAL_AGENT_ID) ||
     (options.extraAgents ?? []).some((wiring) => wiring.descriptor.agentId === agentId);
 
 /**
@@ -350,6 +352,8 @@ async function listenAndAnnounce({
     uvToolchain,
     uvChildEnv,
   });
+  // Inside the desktop app (story 13.11) there is no shortcut to offer: the app is the shortcut.
+  const shell = options.shell === undefined ? shellModeOf() : options.shell;
   // Unattended builds (story 5.2, `start-builds.ts`): git, the sandbox check and the build runner.
   const builds = createBuildsWiring({ options, core, dataDir, log, chat, tickets: ticketStore, runAwareTickets: boardTickets, source: bmadSource, hooks });
   // Worktrees no run needs any more (a removal that failed, a start cut off) go before builds are served (story 5.5).
@@ -357,10 +361,12 @@ async function listenAndAnnounce({
   // Queued runs a stopped server left start where the limits allow (story 5.8).
   void builds.dispatchQueued().catch((error: unknown) => log.warn('starting queued builds failed', { reason: String(error) }));
   const appShortcut =
-    options.appShortcut ??
+    shell === 'desktop'
+      ? undefined
+      : (options.appShortcut ??
     (options.launcherEntry === undefined
       ? createMemoryAppShortcut({ platform: process.platform })
-      : createOsAppShortcut({ platform: process.platform, launcherEntry: options.launcherEntry, nodePath: process.execPath, stateDir: dataDir }));
+      : createOsAppShortcut({ platform: process.platform, launcherEntry: options.launcherEntry, nodePath: process.execPath, stateDir: dataDir })));
   // Whether Welcome is done (9.5): a data folder that already has projects counts it as done.
   const onboarding = createOnboarding({
     dataDir,
@@ -379,7 +385,6 @@ async function listenAndAnnounce({
   });
   // The "newer version" notice (story 13.7): checks once after the server is up, never on the start path.
   // Inside the desktop app (shell mode) the npm source never runs: the app finds updates through its own channel.
-  const shell = options.shell === undefined ? shellModeOf() : options.shell;
   const updates = wireUpdateCheck(shell === 'desktop' ? false : options.updates, { dataDir, version, installMethod: installMethodOf(options.launcherEntry), events: core.events, log });
   // The desktop app's update (story 13.3): only when the app started this server. One busy rule decides when a restart may go ahead.
   const busyRule = createBusyRule(() => countBusySessions(core));
@@ -568,7 +573,7 @@ async function listenAndAnnounce({
   };
 
   // Off the start path: a shortcut already there follows this install's Node and launcher (story 2.4).
-  void repointAppShortcut(appShortcut, log);
+  if (appShortcut !== undefined) void repointAppShortcut(appShortcut, log);
   void updates.runOnStart();
 
   if (options.open === true && launchUrl !== undefined) {

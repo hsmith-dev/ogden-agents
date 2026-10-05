@@ -23,6 +23,8 @@ For a project with the matching piece on (CAP-19): Ogden Agents reads none of th
 
 Every status change goes through `tickets.py mark <ref> <status>`. Marking with a resume status clears the blocked fields. Only a human approval sets `done`.
 
+On the user's request (**Save the lessons**), Ogden Agents commits the project's `AGENTS.md` and an epic's retrospective file to the checked-out branch, locally; it edits neither (CAP-13).
+
 ## Reuse first
 
 - Dispatch: Ogden Agents chooses each ticket and runs `bmad-build-auto` for that one ticket in an Ogden-managed headless ACP session in the run's worktree (user decision 2026-10-02, after spike 5.1 found bmad-loop 0.13.0 needs a user-installed multiplexer and reads no v7 ticket). bmad-loop is not used in v1; it stays an option for agents without ACP (v2).
@@ -42,6 +44,7 @@ Every status change goes through `tickets.py mark <ref> <status>`. Marking with 
 ## Upstream extensions
 
 - `tickets.py … --json` for machine-readable output.
+- Epic-scoped actions and next steps in skill metadata (the retrospective on an epic, its lessons and action items): kept in Ogden Agents's own mapping file until upstream accepts them (epic 7 entry 3, 2026-10-05; no fork carries them).
 - A per-run JSON result file for each build (Ogden's own since 2026-10-02, written in the run's folder in the data folder, epic 5 entry 4).
 - A setup wizard in the UI that replaces running `bmad` setup in a terminal (Ogden Agents's own UI over upstream's `setup.py`).
 - Running one named v7 ticket headless in a given worktree, with its run folder outside the repo and a machine-readable event stream: Ogden's headless ACP build session since 2026-10-02 (epic 5 entry 4); the bmad-loop patches for it are a v2 or upstream note in epic 5.

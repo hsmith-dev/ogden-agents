@@ -1,0 +1,100 @@
+# SPIKE 14.1 (TEMPORARY): which route drives an OpenAI-compatible endpoint over ACP, and does it
+# stay on the machine? A fake OpenAI-compatible server on loopback answers; no real model, no
+# secrets, no real agent account. Facts are printed in each job's `=== SUMMARY` block and kept as
+# findings-<route>-<os> artifacts.
+# Moved out of .github/workflows/ at the spike's final commit, so it no longer runs. Kept as
+# 14.2's recipe (see the spike plan for the last run). To run it again, copy it back to .github/workflows/.
+name: Local model probe (14.1, temporary)
+
+on:
+  push:
+    branches: [spike/14.1-openai-compatible-route]
+    paths:
+      - scripts/local-model-probe/**
+      - .github/workflows/local-model-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: ${{ matrix.route }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        route: [opencode, codex, goose, structured]
+    env:
+      PROBE_OUT: ${{ github.workspace }}/findings-${{ matrix.route }}-${{ matrix.os }}.json
+      PROBE_BIN_DIR: ${{ runner.temp }}/probe-bin
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Probe ${{ matrix.route }}
+        shell: bash
+        run: node scripts/local-model-probe/probe.mjs ${{ matrix.route }}
+
+      # Hard network layers for OpenCode, one per OS. Same functional flow under a denial, plus a record
+      # of every attempt. Best effort: a failure here is a finding, not a broken job.
+      - name: Linux, strace record of every network syscall
+        if: matrix.route == 'opencode' && runner.os == 'Linux'
+        continue-on-error: true
+        shell: bash
+        env:
+          PROBE_OUT: ${{ github.workspace }}/findings-opencode-strace-linux.json
+          PROBE_STRACE: '1'
+        run: |
+          sudo apt-get install -y strace >/dev/null 2>&1 || true
+          which strace || { echo "no strace"; exit 0; }
+          node scripts/local-model-probe/probe.mjs opencode --offline
+
+      - name: Linux, no network at all (empty network namespace, loopback only)
+        if: matrix.route == 'opencode' && runner.os == 'Linux'
+        continue-on-error: true
+        shell: bash
+        env:
+          PROBE_OUT: ${{ github.workspace }}/findings-opencode-netns-linux.json
+        run: |
+          sudo -E env "PATH=$PATH" unshare -n sh -c 'ip link set lo up; ip addr; exec node scripts/local-model-probe/probe.mjs opencode --offline'
+
+      - name: macOS, sandbox-exec denies all non-loopback network
+        if: matrix.route == 'opencode' && runner.os == 'macOS'
+        continue-on-error: true
+        shell: bash
+        env:
+          PROBE_OUT: ${{ github.workspace }}/findings-opencode-sandbox-macos.json
+          PROBE_SANDBOX: '1'
+        run: |
+          node scripts/local-model-probe/probe.mjs opencode --offline
+          echo "=== sandbox denials in the unified log"
+          log show --last 10m --style compact --predicate 'sender == "Sandbox" AND eventMessage CONTAINS "deny"' 2>/dev/null | grep -i network | head -40 || true
+
+      - name: Windows, firewall blocks opencode.exe outbound and logs drops
+        if: matrix.route == 'opencode' && runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        env:
+          PROBE_OUT: ${{ github.workspace }}/findings-opencode-firewall-windows.json
+        run: |
+          $exe = Join-Path $env:PROBE_BIN_DIR 'opencode.exe'
+          if (-not (Test-Path $exe)) { Write-Host "no $exe"; exit 0 }
+          netsh advfirewall firewall add rule name="ogden-probe-block" dir=out action=block program="$exe" enable=yes
+          netsh advfirewall set allprofiles logging droppedconnections enable
+          netsh advfirewall set allprofiles logging filename "$env:RUNNER_TEMP\pfirewall.log"
+          node scripts/local-model-probe/probe.mjs opencode --offline
+          Write-Host "=== firewall drops"
+          if (Test-Path "$env:RUNNER_TEMP\pfirewall.log") { Get-Content "$env:RUNNER_TEMP\pfirewall.log" | Select-String " DROP " | Select-Object -First 60 } else { Write-Host "no firewall log" }
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: findings-${{ matrix.route }}-${{ matrix.os }}
+          path: findings-*.json
+          if-no-files-found: ignore

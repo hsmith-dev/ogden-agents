@@ -255,9 +255,20 @@ function pruneForeign(nodeModules) {
   const keep = new Set(plats.map((p) => p.replace(/^win-/, 'win32-')));
   const removed = [];
   const before = du(nodeModules).bytes;
-  const prebuilds = join(nodeModules, 'node-pty', 'prebuilds');
-  if (existsSync(prebuilds)) {
-    for (const d of readdirSync(prebuilds)) if (!keep.has(d)) (rmSync(join(prebuilds, d), { recursive: true, force: true }), removed.push(`node-pty/prebuilds/${d}`));
+  // `prebuilds/<platform>-<arch>[.node]` in node-pty and better-sqlite3 (which ships every OS's binary).
+  const prunePrebuilds = (pkgDir) => {
+    const prebuilds = join(pkgDir, 'prebuilds');
+    if (!existsSync(prebuilds)) return;
+    for (const d of readdirSync(prebuilds)) {
+      if (keep.has(d.replace(/\.node$/, ''))) continue;
+      rmSync(join(prebuilds, d), { recursive: true, force: true });
+      removed.push(relative(nodeModules, join(prebuilds, d)));
+    }
+  };
+  for (const e of readdirSync(nodeModules, { withFileTypes: true })) {
+    if (!e.isDirectory()) continue;
+    if (e.name.startsWith('@')) for (const sub of readdirSync(join(nodeModules, e.name))) prunePrebuilds(join(nodeModules, e.name, sub));
+    else prunePrebuilds(join(nodeModules, e.name));
   }
   const walk = (dir, depth) => {
     for (const e of readdirSync(dir, { withFileTypes: true })) {

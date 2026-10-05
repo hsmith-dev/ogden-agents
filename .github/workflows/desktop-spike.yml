@@ -17,8 +17,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: desktop-spike-${{ github.ref }}
-  cancel-in-progress: true
+  group: desktop-spike-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   spike:

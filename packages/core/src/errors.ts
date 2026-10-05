@@ -526,6 +526,7 @@ export type BuildRefusalCode =
   | 'checks_failed'
   | 'plan_uncommitted'
   | 'vcs_unavailable'
+  | 'disk_space_low'
   | 'run_not_active';
 
 /**

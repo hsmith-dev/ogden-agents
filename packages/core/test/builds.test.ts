@@ -34,7 +34,7 @@ import {
   type WorkspaceId,
 } from '@ogden-agents/shared';
 import { describe, expect, it, vi } from 'vitest';
-import { BuildRefusedError, createBuilds, FeatureOffError, ScriptsChangedError, ScriptsNotTrustedError, type BuildRunnerPort, type BuildsUseCases, type Core, type TicketStorePort, type VcsHead, type VcsPort } from '../src/index.js';
+import { BuildRefusedError, createBuilds, FeatureOffError, ScriptsChangedError, ScriptsNotTrustedError, type BuildRunnerPort, type BuildsUseCases, type Core, type TicketStorePort, type VcsCheck, type VcsHead, type VcsPort } from '../src/index.js';
 import { openTestCore, tempDir, unusedCatalogParts } from './helpers.js';
 
 const PLAN = '_bmad-output/initiative-demo/epic-first/story-thing-plan.md';
@@ -141,8 +141,19 @@ function fakeVcs() {
     revisions: new Map<string, string>(),
     worktrees: new Set<string>(),
     branches: new Set<string>(['main']),
+    git: { ok: true, version: '2.45.0' } as VcsCheck,
+    ancestor: true,
+    committed: [] as string[][],
   };
   const vcs: VcsPort = {
+    check: async () => state.git,
+    isAncestor: async () => state.ancestor,
+    async commitPaths(_repo, paths) {
+      calls.push(`commit paths ${paths.join(',')}`);
+      state.committed.push([...paths]);
+      state.status = state.status.filter((path) => !paths.includes(path));
+      return 'c'.repeat(40);
+    },
     head: async () => state.head,
     topLevel: async (repo) => state.top ?? repo,
     branchRevision: async (_repo, branch) => (state.branches.has(branch) ? (state.revisions.get(branch) ?? 'b'.repeat(40)) : undefined),
@@ -164,7 +175,7 @@ function fakeVcs() {
       branchLogDir: `/repo/.git/logs/refs/heads/${branch.split('/').slice(0, -1).join('/')}`,
     }),
     async removeWorktree(_repo, path, options = {}) {
-      calls.push(`worktree remove${options.deleteBranch === undefined ? '' : ` and ${options.deleteBranch}`}`);
+      calls.push(`worktree remove${options.deleteBranch === undefined ? '' : ` and ${options.mergedOnly === true ? 'merged ' : ''}${options.deleteBranch}`}`);
       state.worktrees.delete(path);
       if (options.deleteBranch !== undefined) state.branches.delete(options.deleteBranch);
     },

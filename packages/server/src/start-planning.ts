@@ -13,6 +13,7 @@ import {
   createBmadSkillFolders,
   createBmadSource,
   createBoard,
+  createRunAwareTickets,
   createPlanning,
   createPlanningDocuments,
   createTicketWatcher,
@@ -172,7 +173,15 @@ export function createPlanAndBoard({
     });
   // Every board use-case checks the piece, then the project's script trust (story 4.2), then the pinned BMad
   // Method (story 4.14), before the store runs anything.
-  const board = createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: bmadSource, entities: core.entities, catalog: bmadCatalog, tickets: ticketStore });
+  // A ticket with an active build run is read and marked in its run's worktree (story 5.5, AD-10); the watch stays on the main checkout.
+  const boardTickets = createRunAwareTickets({
+    store: ticketStore,
+    entities: core.entities,
+    trust: core.bmadScriptTrust,
+    dataDir,
+    onError: (step, error) => log.info("a build's plan was read from the main checkout", { step, code: errorCode(error, 'unexpected') }),
+  });
+  const board = createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: bmadSource, entities: core.entities, catalog: bmadCatalog, tickets: boardTickets });
   // One watch per project with Board on, trusted and BMad Method set up (story 4.8; the setup status is entry 4.3's):
   // an agent's ticket write reaches the board as `ticket.changed`.
   const ticketWatcher = createTicketWatcher({

@@ -9,13 +9,17 @@
  * - `POST …/builds` `StartBuildRequest` → 201 `BuildResponse`; 400 for a
  *   malformed body or ref, 404 for an unknown ticket, 409 with the build
  *   refusal's code (`prerequisite_unmet`, `not_ready`, `run_active`,
- *   `sandbox_unavailable`, `plan_uncommitted`, `vcs_unavailable`), 409
+ *   `sandbox_unavailable`, `plan_uncommitted`, `vcs_unavailable`,
+ *   `disk_space_low`), 409
  *   `bmad_not_downloaded`, 503 `tickets_unavailable`.
  * - `GET …/builds/:ref` → `ReviewResponse`: the ticket's latest run; 404 without one.
  * - `POST …/builds/:ref/approve` `ApproveBuildRequest` (the reviewed
  *   revision) → `ReviewResponse`; 400 without it, 409 `checks_failed`
  *   (also when the branch moved since), `checkout_dirty`, `merge_conflict`.
  * - `POST …/builds/:ref/reject` → `ReviewResponse`; 409 `run_active`, `checks_failed`.
+ * - `POST …/builds/:ref/commit-plan` (story 5.5, no body) →
+ *   `CommitPlanFilesResponse`: **Commit plan files**; 409 `checkout_dirty`,
+ *   `vcs_unavailable`.
  * - `GET …/sessions/:sesId/run` → `SessionRunResponse`: a `build` session's run; 404 otherwise.
  * - `POST …/runs/:runId/retry` `RetryRunRequest` (story 5.4) → `RunResponse`
  *   for a run paused at a checkpoint (it resumes); 409 `run_not_active` for
@@ -44,7 +48,7 @@ import {
   type BmadScriptTrust,
   type BuildsUseCases,
 } from '@ogden-agents/core';
-import { API_ROUTES, BMAD_NOT_DOWNLOADED_MESSAGE, BuildResponse, ReviewResponse, RunResponse, SessionId, SessionRunResponse } from '@ogden-agents/shared';
+import { API_ROUTES, BMAD_NOT_DOWNLOADED_MESSAGE, BuildResponse, CommitPlanFilesResponse, ReviewResponse, RunResponse, SessionId, SessionRunResponse } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { bmadPieceRoutes } from './bmad-pieces.js';
@@ -152,6 +156,18 @@ export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, log 
       const review = ReviewResponse.parse(await builds.reject(workspaceId, c.req.param('ref') ?? ''));
       log.info('build rejected', { workspaceId, runId: review.run.id, ref: review.run.ticketRef });
       return c.json(review);
+    } catch (error) {
+      return refused(c, workspaceId, error);
+    }
+  });
+
+  // Story 5.5: Commit plan files (no body).
+  routes.post('builds', API_ROUTES.workspaceBuildCommitPlan, async (c, { workspaceId }) => {
+    if (builds === undefined) return notImplemented(c);
+    try {
+      const committed = CommitPlanFilesResponse.parse(await builds.commitPlanFiles(workspaceId, c.req.param('ref') ?? ''));
+      log.info('plan files committed', { workspaceId, files: committed.committed.length });
+      return c.json(committed);
     } catch (error) {
       return refused(c, workspaceId, error);
     }

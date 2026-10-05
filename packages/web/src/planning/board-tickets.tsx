@@ -11,6 +11,9 @@ import {
   boardMovedText,
   boardProblemsLine,
   boardStatusPlaceText,
+  COMMIT_PLAN_FILES_LABEL,
+  PLAN_FILES_COMMITTED_TEXT,
+  PLAN_UNCOMMITTED_MESSAGE,
   TICKET_SAVING_TEXT,
   type TicketsResponse,
 } from '@ogden-agents/shared';
@@ -26,7 +29,7 @@ import { Text } from '@/ui/typography';
 import { ScriptTrustPrompt } from '@/workspaces/script-trust-prompt';
 import { BmadDownloadPrompt } from './bmad-download-prompt';
 import { BoardEpic } from './board-epic';
-import { startBuild } from './builds-api';
+import { commitPlanFiles, startBuild } from './builds-api';
 import { cardStatusLine, groupBoard, indexTickets, unmetPrerequisites, type CardStatus } from './board-model';
 import { useBoardEvents, useMarkTicket, useTickets } from './planning-api';
 import { ReducedModeNotice } from './reduced-mode-notice';
@@ -180,14 +183,25 @@ function useBoardMarks(wsId: string, updatedAt: number, showDropped: boolean, dr
   return { onChoose, saving, announcement, failure };
 }
 
+/** A refused Build: its plain reason, and the ticket whose plan files Commit plan files would commit (story 5.5). */
+interface BuildFailure {
+  message: string;
+  commitRef?: string | undefined;
+}
+
 /**
  * Build on a Ready card (story 5.2, the tracer), offered only with
  * Unattended builds on: starts the ticket's build and opens its read-only
- * session; a refusal (`not_ready`, `sandbox_unavailable`, …) says why in an alert.
+ * session; a refusal (`not_ready`, `sandbox_unavailable`, …) says why in an
+ * alert. Story 5.5 (user decision 2026-10-04): a refusal for the ticket's
+ * uncommitted plan files offers **Commit plan files**, which commits exactly
+ * those, then says to build again.
  */
 function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
   const [building, setBuilding] = useState(false);
-  const [buildFailure, setBuildFailure] = useState<string | undefined>();
+  const [buildFailure, setBuildFailure] = useState<BuildFailure | undefined>();
+  const [committing, setCommitting] = useState(false);
+  const [committed, setCommitted] = useState(false);
   const pending = useRef(false);
   const started = useRef(builds?.onStarted);
   started.current = builds?.onStarted;
@@ -197,10 +211,16 @@ function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
       pending.current = true;
       setBuilding(true);
       setBuildFailure(undefined);
+      setCommitted(false);
       startBuild(wsId, ref)
         .then(
           ({ session }) => started.current?.(session.id),
-          (error: unknown) => setBuildFailure(error instanceof Error ? error.message : String(error)),
+          (error: unknown) =>
+            setBuildFailure({
+              message: error instanceof Error ? error.message : String(error),
+              // Only the plan files themselves: uncommitted BMad scripts share the code but are the user's to commit.
+              commitRef: isApiError(error, 'plan_uncommitted') && error.message === PLAN_UNCOMMITTED_MESSAGE ? ref : undefined,
+            }),
         )
         .finally(() => {
           pending.current = false;
@@ -209,7 +229,27 @@ function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
     },
     [wsId],
   );
-  return { onBuild: builds === undefined ? undefined : build, building, buildFailure };
+  const commit = useCallback(
+    (ref: string) => {
+      if (pending.current) return;
+      pending.current = true;
+      setCommitting(true);
+      commitPlanFiles(wsId, ref)
+        .then(
+          () => {
+            setBuildFailure(undefined);
+            setCommitted(true);
+          },
+          (error: unknown) => setBuildFailure({ message: error instanceof Error ? error.message : String(error), commitRef: ref }),
+        )
+        .finally(() => {
+          pending.current = false;
+          setCommitting(false);
+        });
+    },
+    [wsId],
+  );
+  return { onBuild: builds === undefined ? undefined : build, building, buildFailure, commit, committing, committed };
 }
 
 /** Build on the board (story 5.2): given only with Unattended builds on; `onStarted` opens the new build session. */
@@ -233,7 +273,8 @@ function Board({
   const [showDropped, setShowDropped] = useState(false);
   const droppedId = useId();
   const { onChoose, saving, announcement, failure } = useBoardMarks(wsId, updatedAt, showDropped, droppedId);
-  const { onBuild, building, buildFailure } = useBoardBuild(wsId, builds);
+  const { onBuild, building, buildFailure, commit, committing, committed } = useBoardBuild(wsId, builds);
+  const commitRef = buildFailure?.commitRef;
   const epics = useMemo(() => groupBoard(data, showDropped), [data, showDropped]);
   // One status per card, recomputed only when the tickets change, so a highlight re-renders one card.
   const statuses = useMemo(() => {
@@ -253,10 +294,26 @@ function Board({
         </Notice>
       )}
       {buildFailure === undefined ? null : (
-        <Notice variant="blocked" role="alert" data-testid="board-build-error">
-          {buildFailure}
+        <Notice
+          variant="blocked"
+          role="alert"
+          data-testid="board-build-error"
+          action={
+            commitRef === undefined ? undefined : (
+              <Button size="sm" variant="secondary" disabled={committing} data-testid="board-commit-plan" onClick={() => commit(commitRef)}>
+                {COMMIT_PLAN_FILES_LABEL}
+              </Button>
+            )
+          }
+        >
+          {buildFailure.message}
         </Notice>
       )}
+      {committed ? (
+        <Notice role="status" data-testid="board-plan-committed">
+          {PLAN_FILES_COMMITTED_TEXT}
+        </Notice>
+      ) : null}
       <div className="flex flex-col gap-2">
         {data.problems.length === 0 ? null : <BoardProblems problems={data.problems} />}
         <CheckboxOption

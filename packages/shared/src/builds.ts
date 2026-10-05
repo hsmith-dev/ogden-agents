@@ -39,6 +39,10 @@ export type AllReadyBuildsResponse = z.infer<typeof AllReadyBuildsResponse>;
 export const BuildResponse = z.object({ run: Run, session: Session });
 export type BuildResponse = z.infer<typeof BuildResponse>;
 
+/** `POST …/builds/:ref/commit-plan` (story 5.5): the files committed, repo-relative, and the commit. */
+export const CommitPlanFilesResponse = z.object({ committed: z.array(z.string()), revision: z.string() });
+export type CommitPlanFilesResponse = z.infer<typeof CommitPlanFilesResponse>;
+
 /** `GET …/sessions/:sesId/run`: the run of a `build` session (404 for a session without one). */
 export const SessionRunResponse = z.object({ run: Run });
 export type SessionRunResponse = z.infer<typeof SessionRunResponse>;
@@ -163,6 +167,18 @@ export const REVIEW_STALE_MESSAGE = 'The build changed after you reviewed it. Re
 export const MERGE_REFUSED_MESSAGE = "Git couldn't merge the build into your project (it would overwrite files you have), so nothing was merged.";
 export const CHECKOUT_BUSY_MESSAGE = 'Your project has staged changes, changes to this ticket\'s plan, or a merge, rebase, cherry-pick or revert in progress. Finish or undo it, then approve again.';
 export const VCS_UNAVAILABLE_MESSAGE = 'Builds need this project to be a git repository with a branch checked out that has at least one commit.';
+/** The oldest git builds work with (story 5.5): `rev-parse --path-format` (2.31) and `git apply`'s refusal to write beyond a symbolic link (2.39.2, CVE-2023-23946). */
+export const MIN_GIT_VERSION = '2.39.2';
+export const GIT_MISSING_MESSAGE = "Builds need git, and Ogden Agents couldn't find it on this computer. Install git, then build again.";
+export const gitTooOldMessage = (found: string) => `Builds need git ${MIN_GIT_VERSION} or newer, and this computer has git ${found}. Update git, then try again.`;
+/** The least free space the data folder's disk must have for a new worktree (story 5.5). */
+export const MIN_FREE_DISK_BYTES = 1024 * 1024 * 1024;
+export const DISK_SPACE_LOW_MESSAGE = 'Your disk has less than 1 GB free, so a build has no room for its own copy of the project. Free some space, then build again.';
+export const CHECKOUT_MOVED_MESSAGE = "Your project isn't on the branch this build started from (it switched branches, or none is checked out). Check that branch out, then approve again.";
+export const NO_PLAN_FILES_TO_COMMIT_MESSAGE = "This ticket's plan files have no uncommitted changes.";
+export const COMMIT_PLAN_FILES_LABEL = 'Commit plan files';
+export const COMMIT_PLAN_FILES_FAILED = "The plan files couldn't be committed. Try again.";
+export const PLAN_FILES_COMMITTED_TEXT = 'Plan files committed. Build again.';
 export const RUN_NOT_ACTIVE_MESSAGE = 'This run has already finished.';
 /** `POST …/runs/:runId/retry` for a run not paused at a checkpoint, until 5.8 builds Retry. */
 export const RETRY_NOT_AVAILABLE_MESSAGE = 'Retry for this run is not available yet.';

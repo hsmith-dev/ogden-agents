@@ -331,7 +331,7 @@ export const API_ROUTES = {
    * → 202 `AllReadyBuildsResponse` (5.8; 501 until then). Serves the
    * `builds` piece (guarded, trust). 409 `prerequisite_unmet`, `not_ready`,
    * `run_active`, `sandbox_unavailable`, `plan_uncommitted`,
-   * `vcs_unavailable`; nothing is written then.
+   * `vcs_unavailable`, `disk_space_low` (story 5.5); nothing is written then.
    */
   workspaceBuilds: `${API_BASE}/workspaces/:wsId/builds`,
   /** `GET` → `ReviewResponse` (story 5.2): the ticket's latest run, for the review page; 404 without one. */
@@ -343,8 +343,17 @@ export const API_ROUTES = {
    * checkout is unchanged).
    */
   workspaceBuildApprove: `${API_BASE}/workspaces/:wsId/builds/:ref/approve`,
-  /** `POST RejectBuildRequest` → `ReviewResponse` (story 5.2; 5.9 adds the note and the retry): Reject. Removes the run's worktree (its branch stays) and stops it. */
+  /** `POST RejectBuildRequest` → `ReviewResponse` (story 5.2; 5.9 adds the note and the retry): Reject. Removes the run's worktree and (story 5.5) its branch, and stops it. */
   workspaceBuildReject: `${API_BASE}/workspaces/:wsId/builds/:ref/reject`,
+  /**
+   * `POST` (no body) → `CommitPlanFilesResponse` (story 5.5, user decision
+   * 2026-10-04): **Commit plan files**. Commits exactly the ticket's plan and
+   * the `tickets.toml` files a `plan_uncommitted` refusal watches, when they
+   * have changes, in one commit of their own (other staged changes stay
+   * staged). 409 `plan_uncommitted` when none has changes, `checkout_dirty`
+   * during a merge, rebase, cherry-pick or revert.
+   */
+  workspaceBuildCommitPlan: `${API_BASE}/workspaces/:wsId/builds/:ref/commit-plan`,
   /** `GET` → `SessionRunResponse` (story 5.2): the run of a `build` session; 404 for one without a run. */
   sessionRun: `${API_BASE}/workspaces/:wsId/sessions/:sesId/run`,
   // Pre-registered by story 5.3 for epics 5 and 11: each serves `builds`

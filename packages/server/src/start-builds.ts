@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { createAcpBuildRunner, createClaudeNativeSandbox, createFixedSandbox, createGitVcs, errorCode, maskSecrets, secretValues } from '@ogden-agents/adapters';
 import { redactApiKeys } from '@ogden-agents/shared';
-import { createBuilds, type BmadSourceUseCases, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
+import { createBuilds, worktreesRootOf, type BmadSourceUseCases, type BuildsUseCases, type Chat, type Core, type TicketStorePort } from '@ogden-agents/core';
 import type { Logger } from './log.js';
 import { agentEnvironment, withoutAgentKeys } from './start-env.js';
 import type { StartOptions } from './start-types.js';
@@ -40,7 +40,8 @@ export function createBuildsWiring({
   hooks: Pick<TestHooks, 'sandbox'>;
 }): BuildsUseCases {
   // Git runs as the user, with the agents' allowlist and never an API key (AD-16).
-  const vcs = options.vcs ?? createGitVcs({ hooksDir: gitHooksDir(dataDir), env: () => withoutAgentKeys(agentEnvironment()) });
+  // Removals only ever in `<data>/w` (story 5.5).
+  const vcs = options.vcs ?? createGitVcs({ hooksDir: gitHooksDir(dataDir), env: () => withoutAgentKeys(agentEnvironment()), worktreesRoot: worktreesRootOf(dataDir) });
   const sandbox = options.sandbox ?? (hooks.sandbox === undefined ? createClaudeNativeSandbox({ path: () => agentEnvironment().PATH ?? agentEnvironment().Path }) : createFixedSandbox(hooks.sandbox));
   return createBuilds({
     bmad: core.bmad,

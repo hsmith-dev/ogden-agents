@@ -17,11 +17,18 @@
  * follow `--` or are absolute. No call pushes, fetches or forces a merge.
  * The environment is the caller's allowlist (AD-16), plus
  * `GIT_TERMINAL_PROMPT=0` and a C locale for parseable output.
+ *
+ * Story 5.5: `check` says whether git is there and at least
+ * `MIN_GIT_VERSION`; a worktree is removed only inside `worktreesRoot` (a
+ * real folder, never a link), by git's own `worktree remove` of that one
+ * path (never a `prune`, which would touch the user's other worktrees), and
+ * a branch is deleted only when it is one Ogden made (`ogden/…`).
  */
 import { execFile } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
-import { basename, isAbsolute, join, relative, resolve } from 'node:path';
-import { VcsError, type VcsDiff, type VcsHead, type VcsPort, type VcsWorktreeGitPaths } from '@ogden-agents/core';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, unlinkSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { VcsError, type VcsCheck, type VcsDiff, type VcsHead, type VcsPort, type VcsWorktreeGitPaths } from '@ogden-agents/core';
+import { BUILD_BRANCH_PREFIX, MIN_GIT_VERSION } from '@ogden-agents/shared';
 
 export interface GitVcsOptions {
   /**
@@ -36,6 +43,30 @@ export interface GitVcsOptions {
   git?: string;
   /** How long one git call may take. Default 120 s. */
   timeoutMs?: number;
+  /**
+   * The folder every run's worktree is made in (`<data>/w`; story 5.5): a
+   * removal outside it, or with it a link, is refused. Without it (tests of
+   * other methods), removal checks only that the path isn't the repo.
+   */
+  worktreesRoot?: string;
+}
+
+/** `major.minor.patch` of `git --version`'s answer (`git version 2.39.2.windows.1`), or `undefined`. */
+export function parseGitVersion(text: string): [number, number, number] | undefined {
+  const match = /git version (\d+)\.(\d+)(?:\.(\d+))?/.exec(text);
+  if (match === null) return undefined;
+  return [Number(match[1]), Number(match[2]), Number(match[3] ?? 0)];
+}
+
+/** Whether version `found` is at least `wanted` (both `major.minor.patch`). */
+export function gitVersionAtLeast(found: readonly [number, number, number], wanted: string): boolean {
+  const want = wanted.split('.').map(Number);
+  for (let index = 0; index < 3; index++) {
+    const have = found[index] ?? 0;
+    const need = want[index] ?? 0;
+    if (have !== need) return have > need;
+  }
+  return true;
 }
 
 /** A full commit id. */
@@ -75,6 +106,17 @@ function realOf(dir: string): string {
     return realpathSync.native(dir);
   } catch {
     return resolve(dir);
+  }
+}
+
+/** Removes the link (or Windows junction) `path` itself, never what it points at. */
+export function unlinkLink(path: string): void {
+  try {
+    unlinkSync(path);
+  } catch (error) {
+    // Windows: a directory link or junction is removed with `rmdir`, which never touches its target.
+    if ((error as NodeJS.ErrnoException).code !== 'EPERM' && (error as NodeJS.ErrnoException).code !== 'EISDIR') throw error;
+    rmdirSync(path);
   }
 }
 
@@ -218,8 +260,67 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
     return out.code === 0 && existsSync(out.stdout.trim());
   };
 
+  let checked: Promise<VcsCheck> | undefined;
+
+  /**
+   * Throws unless `path` may be removed as a run's worktree (story 5.5): a
+   * direct child of `worktreesRoot`, which is a real folder (not a link or a
+   * junction), and never the repo itself.
+   */
+  const requireOwnWorktree = (repoPath: string, path: string): void => {
+    const refuse = (): never => {
+      throw new VcsError("That folder isn't one of Ogden Agents' worktrees, so it wasn't removed.", { step: 'remove the worktree' });
+    };
+    // Never the repo, a folder holding it, or a folder inside it (AD-17: worktrees are never in the repo).
+    if (isInside(realOf(path), realOf(repoPath)) || isInside(realOf(repoPath), realOf(path))) refuse();
+    const root = options.worktreesRoot;
+    if (root === undefined) return;
+    try {
+      if (!lstatSync(root).isDirectory()) refuse();
+    } catch {
+      refuse();
+    }
+    if (realOf(dirname(path)) !== realOf(root) || basename(path) === '' || basename(path).startsWith('.')) refuse();
+  };
+
   return {
+    check() {
+      checked ??= new Promise<VcsCheck>((resolveCheck) => {
+        execFile(git, ['--version'], { env: { ...options.env(), LC_ALL: 'C', LANG: 'C' }, timeout: 30_000, windowsHide: true, encoding: 'utf8' }, (error, stdout) => {
+          if (error !== null) {
+            resolveCheck({ ok: false, reason: 'missing' });
+            return;
+          }
+          const found = parseGitVersion(stdout);
+          if (found === undefined) {
+            resolveCheck({ ok: false, reason: 'missing' });
+            return;
+          }
+          const version = found.join('.');
+          resolveCheck(gitVersionAtLeast(found, MIN_GIT_VERSION) ? { ok: true, version } : { ok: false, reason: 'too_old', version });
+        });
+      });
+      return checked;
+    },
+
     head,
+
+    async isAncestor(repoPath, revision) {
+      const result = await run(checkPath(repoPath), ['merge-base', '--is-ancestor', checkRevision(revision), 'HEAD']);
+      return result.code === 0;
+    },
+
+    async commitPaths(repoPath, paths, message) {
+      checkPath(repoPath);
+      if (paths.length === 0) throw new VcsError('There is nothing to commit.', { step: 'commit the plan files' });
+      const files = paths.map(checkRelative);
+      await must(repoPath, ['add', '--', ...files], 'stage the plan files');
+      // `--only`: exactly these paths, whatever else is staged stays staged and out of this commit.
+      await must(repoPath, [...(await identityFlags(repoPath)), 'commit', '--no-verify', '--only', '-m', message, '--', ...files], 'commit the plan files');
+      const revision = (await must(repoPath, ['rev-parse', '--verify', 'HEAD^{commit}'], 'read the commit')).trim();
+      if (!REVISION.test(revision)) throw new VcsError("git couldn't read the commit.", { step: 'commit the plan files' });
+      return revision;
+    },
 
     async topLevel(repoPath) {
       const out = await run(checkPath(repoPath), ['rev-parse', '--show-toplevel']);
@@ -279,12 +380,33 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
     async removeWorktree(repoPath, path, removeOptions = {}) {
       checkPath(repoPath);
       checkPath(path);
-      if (existsSync(path)) {
-        const removed = await run(repoPath, ['worktree', 'remove', '--force', '--force', path]);
-        if (removed.code !== 0 && existsSync(path)) rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      const branch = removeOptions.deleteBranch;
+      if (branch !== undefined && !checkBranch(branch).startsWith(BUILD_BRANCH_PREFIX)) throw new VcsError('That is not a branch Ogden Agents made, so it was kept.', { step: 'branch' });
+      requireOwnWorktree(repoPath, path);
+      let entry: ReturnType<typeof lstatSync> | undefined;
+      try {
+        entry = lstatSync(path);
+      } catch {
+        entry = undefined;
       }
-      await run(repoPath, ['worktree', 'prune']);
-      if (removeOptions.deleteBranch !== undefined) await run(repoPath, ['branch', '-D', '--', checkBranch(removeOptions.deleteBranch)]);
+      if (entry !== undefined && !entry.isDirectory()) {
+        // A link (or junction) or a file where a worktree was: only it goes, never what it points at.
+        unlinkLink(path);
+      }
+      // git's own removal of this one worktree and its metadata, also when the folder is already gone (never a prune).
+      const removed = await run(repoPath, ['worktree', 'remove', '--force', '--force', path]);
+      if (existsSync(path) && lstatSync(path).isDirectory()) {
+        // Not one of git's (or git failed): the folder still goes, inside Ogden's own folder only; links in it are unlinked, not followed.
+        try {
+          rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+        } catch {
+          throw new VcsError("Ogden Agents couldn't remove the run's worktree (a program may still have files open there).", { step: 'remove the worktree', exitCode: removed.code });
+        }
+      }
+      if (branch === undefined) return;
+      if ((await run(repoPath, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`])).code !== 0) return;
+      const deleted = await run(repoPath, ['branch', removeOptions.mergedOnly === true ? '-d' : '-D', '--', branch]);
+      if (deleted.code !== 0) throw new VcsError("git couldn't delete the run's branch.", { step: 'delete the branch', exitCode: deleted.code });
     },
 
     status,

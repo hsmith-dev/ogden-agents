@@ -20,6 +20,9 @@ export interface PlanFileTicket {
   plan: string;
   /** The tickets it waits for (sibling ids or full refs). */
   after?: Array<string | number>;
+  /** Its entry's checkpoint flags (story 5.4), as `tickets.toml` would hold them. */
+  planCheckpoint?: boolean;
+  doneCheckpoint?: boolean;
 }
 
 /** The state `tickets.py` derives from a plan status. */
@@ -72,7 +75,17 @@ export function createPlanFileTicketStore(tickets: readonly PlanFileTicket[]) {
       return { tickets: tickets.map((ticket) => read(repoPath, ticket)).map(({ hasPlan: _hasPlan, plan: _plan, ...row }) => row), problems: [], folder: 'initiative-demo', epics: [] };
     },
     async find(repoPath: string, ref: string) {
-      return { ...read(repoPath, find(ref)), description: '', verify: '', references: [], notes: [], unknown: '' };
+      const ticket = find(ref);
+      return {
+        ...read(repoPath, ticket),
+        description: '',
+        verify: '',
+        references: [],
+        notes: [],
+        unknown: '',
+        plan_checkpoint: ticket.planCheckpoint === true,
+        done_checkpoint: ticket.doneCheckpoint === true,
+      };
     },
     async mark(repoPath: string, ref: string, status: string, _guard: unknown, options: { approve?: boolean } = {}) {
       if (status === 'done' && options.approve !== true) throw new Error('only approve writes done');

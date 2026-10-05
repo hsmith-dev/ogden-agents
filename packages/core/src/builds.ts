@@ -44,16 +44,35 @@
  *   shared with the board's marks.
  * - `reject`: removes the worktree (the branch stays) and stops the run; the
  *   ticket is untouched.
+ * - Story 5.4: each run has a folder in the data folder (`<data>/r/<runId>`,
+ *   `build-run-folder.ts`) with its NDJSON activity and its per-run JSON
+ *   result, written each time the session stops. Checkpoint pauses are
+ *   Ogden's own (user decision 2026-10-04): with the ticket's
+ *   `plan_checkpoint` the run is `blocked` (`checkpoint_plan`) before its
+ *   prompt is sent; with `done_checkpoint` it is `blocked`
+ *   (`checkpoint_done`) when the plan ends `built`, before the end checks.
+ *   `resume` continues either (sends the prompt, or runs the end checks),
+ *   after the guards, a fresh sandbox check (fail closed) and the worktree's
+ *   scripts check; after a server restart it rebuilds the session's setup
+ *   from the run, so the next prompt starts a fresh agent there. A run at a
+ *   checkpoint counts as active: no second build of its ticket starts.
  *
  * Core names no skill, VCS, sandbox or agent (AD-1, AD-12).
  */
 import { randomBytes } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
-import { join, posix } from 'node:path';
+import { lstatSync, mkdirSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, posix, relative } from 'node:path';
 import {
   ALL_READY_NOT_AVAILABLE_MESSAGE,
   ALREADY_MERGED_MESSAGE,
   ApproveBuildRequest,
+  BUILD_RESULT_STATUSES,
+  blockedSentence,
+  CHECKPOINT_BLOCKED_CODES,
+  RetryRunRequest,
+  RETRY_NOT_AVAILABLE_MESSAGE,
+  RUN_NOT_ACTIVE_MESSAGE,
+  RunId,
   BMAD_FILES_UNCOMMITTED_MESSAGE,
   BUILD_BRANCH_PREFIX,
   CHECKOUT_BUSY_MESSAGE,
@@ -84,10 +103,12 @@ import {
   VCS_UNAVAILABLE_MESSAGE,
   type BlockedCode,
   type BuildAgent,
+  type BuildRunResult,
   type ReviewResponse,
   type Run,
   type Session,
   type SessionId,
+  type TicketDetail,
   type TicketRow,
   type TicketsResponse,
   type WorkspaceId,
@@ -97,6 +118,7 @@ import type { BmadScriptTrust } from './bmad-script-trust.js';
 import type { BmadSourceUseCases } from './bmad-source-port.js';
 import { BUILD_PERMISSION_DENIED, decideBuildPermission, nodePathNormalizer, type PathNormalizer } from './build-permission-policy.js';
 import type { BuildRunnerPort } from './build-runner-port.js';
+import { createRunActivityRecorder, runFolderOf, runShortOf, writeRunResult } from './build-run-folder.js';
 import type { BuildSessions } from './build-sessions.js';
 import type { Chat } from './chat/types.js';
 import type { Entities } from './entities.js';
@@ -140,6 +162,20 @@ export interface BuildsUseCases {
   reject(workspaceId: WorkspaceId, ref: string): Promise<ReviewResponse>;
   /** The run of `sessionId` (a `build` session of the workspace), behind the full guards. `NotFoundError` otherwise. */
   runOfSession(workspaceId: WorkspaceId, sessionId: SessionId): Promise<Run>;
+  /**
+   * Continues run `runId` paused at a checkpoint (story 5.4): sends its
+   * prompt (`checkpoint_plan`) or runs its end checks (`checkpoint_done`).
+   * `run_not_active` for a run not at a checkpoint; `sandbox_unavailable`
+   * without a sandbox. Returns the run as it then is.
+   */
+  resume(workspaceId: WorkspaceId, runId: unknown): Promise<Run>;
+  /**
+   * `POST …/runs/:runId/retry` (`RetryRunRequest`): a run at a checkpoint
+   * resumes (story 5.4); any other Retry is 5.8's (`NotImplementedError`).
+   */
+  retry(workspaceId: WorkspaceId, runId: unknown, request: unknown): Promise<Run>;
+  /** Resolves once every run's activity handed to the recorder is written (tests). */
+  recorded(): Promise<void>;
   /** Resolves once no outcome is being worked out (tests, shutdown). */
   settled(): Promise<void>;
   /** Stops following the event log. */
@@ -231,6 +267,46 @@ export function forbiddenChanges(files: readonly string[], ownPlan: string | nul
   });
 }
 
+/** A run id as core takes it, or {@link ValidationError}. */
+function checkedRunId(runId: unknown): RunId {
+  const parsed = RunId.safeParse(runId);
+  if (!parsed.success) throw new ValidationError('That is not a run.', [{ path: ['runId'], message: 'That is not a run.' }]);
+  return parsed.data;
+}
+
+/** Whether `run` is paused at a checkpoint (story 5.4). */
+export function atCheckpoint(run: Pick<Run, 'outcome' | 'blockedCode' | 'decision'>): boolean {
+  return run.outcome === 'blocked' && run.decision === null && run.blockedCode !== null && CHECKPOINT_BLOCKED_CODES.includes(run.blockedCode);
+}
+
+/**
+ * The intent-gap patch beside `plan` in `worktree` (the skill saves it named
+ * after the plan, `.patch` for `.md`), repo-relative, when it is a regular
+ * file whose real path is under the worktree's own `_bmad-output/` (never
+ * through a link out of it); else `null`.
+ */
+export function intentGapPatchOf(worktree: string, plan: string | null): string | null {
+  if (plan === null || !plan.startsWith(BMAD_OUTPUT_PREFIX) || !plan.endsWith('.md')) return null;
+  const patch = `${plan.slice(0, -'.md'.length)}.patch`;
+  if (patch.split('/').some((segment) => segment === '..' || segment === '.' || segment === '')) return null;
+  try {
+    const file = join(worktree, ...patch.split('/'));
+    if (!lstatSync(file).isFile()) return null;
+    const output = realpathSync.native(join(worktree, BMAD_OUTPUT_PREFIX));
+    const real = realpathSync.native(file);
+    const rel = relative(output, real);
+    return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel) && realpathSync.native(worktree) === dirname(output) ? patch : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The plan statuses a per-run result may name. */
+const RESULT_STATUSES: ReadonlySet<string> = new Set(BUILD_RESULT_STATUSES);
+
+/** At most this many characters of a reason go into a per-run result (its schema's bound). */
+const MAX_RESULT_TEXT = 2000;
+
 export function createBuilds(deps: BuildsDeps): BuildsUseCases {
   const { bmad, trust, source, entities, events, tickets, vcs, sandbox, runner, chat, buildSessions, dataDir } = deps;
   const paths = deps.paths ?? nodePathNormalizer();
@@ -240,6 +316,42 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       deps.onError?.(runId, step, error);
     } catch {
       // Logging must never break a run.
+    }
+  };
+
+  // Every build run's session stream, as NDJSON in its run folder (story 5.4).
+  const recorder = createRunActivityRecorder({ events, entities, dataDir, mask, onError: (runId, error) => report(runId, 'activity', error) });
+
+  /**
+   * Writes run `run`'s per-run JSON result (story 5.4) from the plan as
+   * `ticket` read it in the worktree (`undefined`: unreadable), the branch's
+   * head and `reason` (the run's reason when it is blocked). Never throws: a
+   * result that can't be written is reported, and the run goes on.
+   */
+  const writeResult = async (run: Run, repoPath: string, ticket: TicketDetail | undefined, reason: string | null, blocked: boolean): Promise<void> => {
+    const short = runShortOf(run);
+    if (short === undefined) return;
+    try {
+      await recorder.flushed(run.id);
+      const status = ticket?.status ?? null;
+      const known = status !== null && RESULT_STATUSES.has(status) ? (status as BuildRunResult['status']) : null;
+      const commit = run.branch !== null && isBuildBranch(run.branch) ? ((await vcs.branchRevision(repoPath, run.branch)) ?? null) : null;
+      const condition = known === 'blocked' && ticket !== undefined && (ticket.blocked_reason ?? '').trim() !== '' ? mask(ticket.blocked_reason ?? '').slice(0, MAX_RESULT_TEXT) : null;
+      await writeRunResult(runFolderOf(dataDir, short), {
+        version: 1,
+        runId: run.id,
+        ticketRef: run.ticketRef,
+        status: known,
+        commit,
+        baseRevision: run.baseRevision,
+        blockedCondition: condition,
+        blockedReason: blocked && reason !== null ? mask(reason).slice(0, MAX_RESULT_TEXT) : null,
+        intentGapPatch: known === 'blocked' && ticket !== undefined && run.worktreePath !== null ? intentGapPatchOf(run.worktreePath, ticket.plan) : null,
+        networkFailure: recorder.networkFailure(run.id),
+        endedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      report(run.id, 'result', error);
     }
   };
 
@@ -284,6 +396,9 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     const check = await sandbox.check({ agent });
     if (!check.available) throw new BuildRefusedError('sandbox_unavailable', `${SANDBOX_UNAVAILABLE_MESSAGE} ${check.reason}`.trim());
     if (entities.activeRunForTicket(workspaceId, ref) !== undefined) throw new BuildRefusedError('run_active', RUN_ACTIVE_MESSAGE);
+    // A run paused at a checkpoint is still this ticket's build (story 5.4): resume or reject it first.
+    const latest = entities.latestRunForTicket(workspaceId, ref);
+    if (latest !== undefined && atCheckpoint(latest)) throw new BuildRefusedError('run_active', RUN_ACTIVE_MESSAGE);
     const { guard } = await guarded(workspaceId);
     const ticket = await tickets.find(repoPath, ref, guard);
     if ((ticket.status ?? '') !== READY_STATUS) throw new BuildRefusedError('not_ready', NOT_READY_MESSAGE);
@@ -322,6 +437,13 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       run = entities.createRun({ sessionId: session.id, ticketRef: ref, worktreePath: real, sandbox: check.kind, branch, baseRevision: head.revision, agent });
       const scope = { worktree: real, gitWritable, protectedPaths: PROTECTED_PATHS };
       buildSessions.set(session.id, { cwd: real, sandbox: contained, decide: (request) => decideBuildPermission(request, scope, paths) });
+      if (ticket.plan_checkpoint === true) {
+        // The plan checkpoint (story 5.4): paused before the prompt is sent; `resume` sends it.
+        const reason = blockedSentence('checkpoint_plan');
+        run = entities.setRunOutcome(run.id, 'blocked', reason, { blockedCode: 'checkpoint_plan' });
+        await writeResult(run, repoPath, ticket, reason, true);
+        return { run, session };
+      }
       chat.sendMessage(workspaceId, session.id, runner.invocation(ref), { build: true });
       return { run, session };
     } catch (error) {
@@ -339,8 +461,19 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     }
   };
 
+  /**
+   * Whether the ticket of `run` has `done_checkpoint`, read in the main
+   * checkout (review): never in the worktree, whose `tickets.toml` the agent
+   * can edit without committing. The project's scripts must still be the
+   * trusted ones before `tickets.py` runs there.
+   */
+  const doneCheckpointOf = async (run: Run, repoPath: string): Promise<boolean> => {
+    const scripts = await trust.requireScriptsUnchanged(run.workspaceId);
+    return (await tickets.find(repoPath, run.ticketRef, { scripts })).done_checkpoint === true;
+  };
+
   /** Works out a finished turn's outcome (see the header). */
-  const decideOutcome = async (run: Run, ended: 'idle' | 'error'): Promise<void> => {
+  const decideOutcome = async (run: Run, ended: 'idle' | 'error', options: { passedDone?: boolean } = {}): Promise<void> => {
     if (run.worktreePath === null) return;
     let repoPath: string;
     try {
@@ -351,12 +484,18 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     let outcome: 'verified' | 'failed' | 'blocked';
     let reason: string | null = null;
     let blockedCode: BlockedCode | null = null;
+    let ticket: TicketDetail | undefined;
     try {
       // The agent may have edited the worktree's scripts: they must be the trusted ones before `tickets.py` runs there.
       const scripts = await trust.requireScriptsMatch(run.workspaceId, run.worktreePath);
-      const ticket = await tickets.find(run.worktreePath, run.ticketRef, { scripts });
+      ticket = await tickets.find(run.worktreePath, run.ticketRef, { scripts });
       const status = ticket.status ?? '';
-      if (status === 'built') {
+      if (status === 'built' && options.passedDone !== true && (await doneCheckpointOf(run, repoPath))) {
+        // The done checkpoint (story 5.4): paused before the end checks; `resume` runs them.
+        outcome = 'blocked';
+        blockedCode = 'checkpoint_done';
+        reason = blockedSentence('checkpoint_done');
+      } else if (status === 'built') {
         const changes = run.branch === null || run.baseRevision === null ? undefined : await vcs.diff(repoPath, run.baseRevision, run.branch, { maxBytes: 1 });
         if (changes === undefined || changes.files.length === 0) {
           outcome = 'failed';
@@ -384,10 +523,20 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     await chat.releaseAgent(run.workspaceId, run.sessionId).catch((error: unknown) => report(run.id, 'release', error));
     // Only a run still running gets an outcome here: a Reject meanwhile stands.
     if (entities.getRunBySession(run.sessionId)?.outcome !== 'running') return;
-    entities.setRunOutcome(run.id, outcome, reason === null ? null : mask(reason), { blockedCode });
+    const decided = entities.setRunOutcome(run.id, outcome, reason === null ? null : mask(reason), { blockedCode });
+    await writeResult(decided, repoPath, ticket, decided.reason, outcome === 'blocked');
   };
 
   const deciding = new Set<Promise<void>>();
+  /** Runs `work` as an outcome being worked out, so `settled` waits for it. */
+  const track = (runId: string, work: () => Promise<void>): Promise<void> => {
+    const pending: Promise<void> = Promise.resolve()
+      .then(work)
+      .catch((error: unknown) => report(runId, 'outcome', error))
+      .finally(() => deciding.delete(pending));
+    deciding.add(pending);
+    return pending;
+  };
   const unsubscribe = events.subscribe(events.lastSeq(), (event) => {
     if (event.type !== 'session.state_changed') return;
     const { sessionId, state, previous, resumable } = event.payload;
@@ -396,12 +545,41 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     if (resumable === true) return;
     const run = entities.getRunBySession(sessionId);
     if (run === undefined || run.outcome !== 'running') return;
-    const pending: Promise<void> = Promise.resolve()
-      .then(() => decideOutcome(run, state))
-      .catch((error: unknown) => report(run.id, 'outcome', error))
-      .finally(() => deciding.delete(pending));
-    deciding.add(pending);
+    void track(run.id, () => decideOutcome(run, state));
   });
+
+  /** Resume (see the header), inside the repo's serialization. */
+  const resumeLocked = async (workspaceId: WorkspaceId, repoPath: string, runId: RunId, note: string | undefined): Promise<Run> => {
+    await guarded(workspaceId);
+    const run = entities.getRun(runId);
+    if (run === undefined || run.workspaceId !== workspaceId) throw new NotFoundError('run', runId);
+    if (!atCheckpoint(run) || run.worktreePath === null || run.branch === null || !isBuildBranch(run.branch)) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
+    // Fail closed, as at the start: never an unsandboxed unattended run.
+    const check = await sandbox.check({ agent: run.agent ?? runner.agent });
+    if (!check.available) throw new BuildRefusedError('sandbox_unavailable', `${SANDBOX_UNAVAILABLE_MESSAGE} ${check.reason}`.trim());
+    if (!(await vcs.worktreeExists(repoPath, run.worktreePath))) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
+    // The worktree's scripts must still be the trusted ones before anything runs there.
+    await trust.requireScriptsMatch(workspaceId, run.worktreePath);
+    if (buildSessions.get(run.sessionId) === undefined) {
+      // The server restarted since the pause: the session's setup is rebuilt from the run, so the next prompt starts a fresh agent there.
+      const { sandbox: contained, gitWritable } = await sandboxFor(check.kind, run.worktreePath, run.branch);
+      const scope = { worktree: run.worktreePath, gitWritable, protectedPaths: PROTECTED_PATHS };
+      buildSessions.set(run.sessionId, { cwd: run.worktreePath, sandbox: contained, decide: (request) => decideBuildPermission(request, scope, paths) });
+    }
+    const resumed = entities.setRunOutcome(run.id, 'running', null);
+    if (run.blockedCode === 'checkpoint_plan') {
+      try {
+        chat.sendMessage(workspaceId, run.sessionId, runner.invocation(run.ticketRef, { note }), { build: true });
+      } catch (error) {
+        // Nothing was sent: the run stays paused at its checkpoint (review), never `running` with no agent.
+        entities.setRunOutcome(run.id, 'blocked', run.reason, { blockedCode: 'checkpoint_plan' });
+        throw error;
+      }
+      return resumed;
+    }
+    await track(run.id, () => decideOutcome(resumed, 'idle', { passedDone: true }));
+    return entities.getRun(run.id) ?? resumed;
+  };
 
   /** The workspace's latest run of `ref`, as the review page shows it. */
   const reviewOf = async (repoPath: string, run: Run): Promise<ReviewResponse> => {
@@ -532,10 +710,35 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       return run;
     },
 
+    async resume(workspaceId, runId) {
+      const { repoPath } = await guarded(workspaceId);
+      const checked = checkedRunId(runId);
+      return serializedByRepo(repoPath, () => resumeLocked(workspaceId, repoPath, checked, undefined));
+    },
+
+    async retry(workspaceId, runId, request) {
+      const { repoPath } = await guarded(workspaceId);
+      const checked = checkedRunId(runId);
+      const parsed = RetryRunRequest.safeParse(request ?? {});
+      if (!parsed.success) throw new ValidationError('That is not a retry request.', parsed.error.issues.map((each) => ({ path: each.path, message: each.message })));
+      const run = entities.getRun(checked);
+      if (run === undefined || run.workspaceId !== workspaceId) throw new NotFoundError('run', checked);
+      // Nothing to retry for a run still going, ready for review or decided (review: 409 as the route says).
+      if (run.outcome === 'running' || run.outcome === 'verified' || run.decision !== null) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
+      // A checkpoint pause resumes (story 5.4); every other Retry is 5.8's.
+      if (parsed.data.mode !== 'resume' || !atCheckpoint(run)) throw new NotImplementedError(RETRY_NOT_AVAILABLE_MESSAGE);
+      return serializedByRepo(repoPath, () => resumeLocked(workspaceId, repoPath, checked, parsed.data.note));
+    },
+
+    recorded: () => recorder.flushed(),
+
     async settled() {
       while (deciding.size > 0) await Promise.all([...deciding]);
     },
 
-    close: unsubscribe,
+    close() {
+      unsubscribe();
+      recorder.close();
+    },
   };
 }

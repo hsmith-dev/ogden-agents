@@ -79,6 +79,8 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Epic 5 (5.5): a build's sandbox can write the main repo's `.git/objects`; a per-run object store would close it. From 5.2 security review S3. (log: "A build's sandbox can write the main repo's `.git/objects`")
 - Epic 11 (11.4): mask a webhook's host when listing it back; some providers put the token in the host name. From 5.3 security review S10. (log: "Listing a webhook back by its full host can show part of its secret")
 - Epic 5 (5.5): check a minimum git version (2.31+ for `rev-parse --path-format`, 2.39.2 for `git apply`'s symlink fix) and refuse older git with a plain reason. From 5.3 security review S15. (log: "Nothing checks a minimum git version")
+- Epic 5 (5.10, or a later sandbox story): stop a build's commands that leave the agent's process group (`setsid`) or outlive their parent on Windows (cgroup, job object or sandbox-level kill). From 5.4 security review S4. (log: "Stopping a build kills the agent's process group")
+- Epic 5 (5.8) or epic 11 (11.1): prune a run's folder (`<data>/r/<run8>`) and the activity recorder's maps with the run's worktree. From 5.4 security review S6. (log: "Run folders (`<data>/r/<run8>`, up to 32 MiB")
 
 ## Log
 
@@ -641,3 +643,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-contracts-and-stubs-for-epics-5-and-11-plan.md`
   summary: Nothing checks a minimum git version, while builds rely on git 2.31+ (`rev-parse --path-format`) and `git apply`'s refusal to write beyond a symbolic link (fixed in 2.39.2, CVE-2023-23946); 5.5 should check the version and refuse older git with a plain reason.
   evidence: 5.3 security review S15; `vcs-git` `applyPatch` and `worktreeGitPaths`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-headless-build-session-over-acp-for-one-named-ticket-plan.md`
+  summary: Stopping a build kills the agent's process group (POSIX) or `taskkill /T` tree (Windows), so a build command that leaves its group (`setsid`, a daemonizing tool) or whose parent exited on Windows survives with the sandbox's write access to the worktree; a per-run cgroup, job object or sandbox-level kill would close it.
+  evidence: 5.4 security review S4 (medium): `packages/adapters/src/process-tree.ts` `killProcessTree`; 5.4's tests prove only same-group descendants stop.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-headless-build-session-over-acp-for-one-named-ticket-plan.md`
+  summary: Run folders (`<data>/r/<run8>`, up to 32 MiB of activity each) and the activity recorder's in-memory maps are never pruned; remove them with the run's worktree (5.8's cleanup or 11.1's Runs tab).
+  evidence: 5.4 security review S6 (low): `packages/core/src/build-run-folder.ts`.

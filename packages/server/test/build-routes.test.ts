@@ -325,7 +325,9 @@ describe('Unattended builds over REST (story 5.2)', () => {
 
     const on = await setup();
     for (const [method, path] of routes(on.wsId)) {
-      expect((await refusalOf(await request(on.server, on.tab, method, path, method === 'GET' ? undefined : {}))).status, `${method} ${path}`).toBe(501);
+      // Story 5.4 serves Retry for a run at a checkpoint: an unknown run is 404 (the rest of Retry stays 501, below).
+      const expected = path.endsWith('/retry') ? 404 : 501;
+      expect((await refusalOf(await request(on.server, on.tab, method, path, method === 'GET' ? undefined : {}))).status, `${method} ${path}`).toBe(expected);
     }
     const all = await request(on.server, on.tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId: on.wsId }), { all: true });
     expect(await refusalOf(all)).toEqual({ status: 501, code: 'not_implemented', message: ALL_READY_NOT_AVAILABLE_MESSAGE });

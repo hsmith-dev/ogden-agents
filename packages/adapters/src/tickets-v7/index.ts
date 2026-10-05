@@ -60,6 +60,7 @@
 import { existsSync } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { readTicketCheckpoints } from './checkpoints.js';
 import {
   NotFoundError,
   ScriptsChangedError,
@@ -291,6 +292,8 @@ export function createTicketsV7({ runner, script: scriptOf, snapshot, workDir, o
       unknown: body.unknown ?? '',
       hasPlan: existsInside(repoPath, body.plan),
       plan: existsInside(repoPath, body.plan) ? relative(repoPath, body.plan as string).split(sep).join('/') : null,
+      // Not in the script's output: read from the ticket's entry in its tickets.toml (story 5.4).
+      ...(await readTicketCheckpoints(repoPath, body.epic_file, body.id)),
     });
     if (!parsed.success) return fail(new TicketsUnavailableError('bad_output'));
     return parsed.data;

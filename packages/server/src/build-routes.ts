@@ -17,11 +17,16 @@
  *   (also when the branch moved since), `checkout_dirty`, `merge_conflict`.
  * - `POST …/builds/:ref/reject` → `ReviewResponse`; 409 `run_active`, `checks_failed`.
  * - `GET …/sessions/:sesId/run` → `SessionRunResponse`: a `build` session's run; 404 otherwise.
+ * - `POST …/runs/:runId/retry` `RetryRunRequest` (story 5.4) → `RunResponse`
+ *   for a run paused at a checkpoint (it resumes); 409 `run_not_active` for
+ *   a run running, ready for review or decided; 501 for any other run until
+ *   5.8; 400 for a malformed body or run id, 404 for another workspace's
+ *   run, 409 `sandbox_unavailable`.
  *
  * Story 5.3 pre-registers the rest of epics 5 and 11, each behind the same
  * guard and trust, answering 501 `not_implemented` (no body read) until its
  * lane: `GET …/runs` and `GET …/runs/:runId` (11.1), `POST …/runs/:runId/stop`
- * and `…/retry` (5.8, 5.9, 11.1), `…/check-again` (11.2), and `GET` and
+ * and the rest of `…/retry` (5.8, 5.9, 11.1), `…/check-again` (11.2), and `GET` and
  * `PATCH …/build-settings` (5.8, 11.2). `POST …/builds` with `{ all: true }`
  * answers 501 until 5.8. A build's live activity is its session's events on
  * the existing `/ws` workspace subscription: no run socket exists.
@@ -39,7 +44,7 @@ import {
   type BmadScriptTrust,
   type BuildsUseCases,
 } from '@ogden-agents/core';
-import { API_ROUTES, BMAD_NOT_DOWNLOADED_MESSAGE, BuildResponse, ReviewResponse, SessionId, SessionRunResponse } from '@ogden-agents/shared';
+import { API_ROUTES, BMAD_NOT_DOWNLOADED_MESSAGE, BuildResponse, ReviewResponse, RunResponse, SessionId, SessionRunResponse } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { bmadPieceRoutes } from './bmad-pieces.js';
@@ -48,6 +53,8 @@ import type { Logger } from './log.js';
 
 /** `{"ref": "<at most 128 characters>"}` with room to spare. */
 const MAX_BUILD_BODY_BYTES = 1024;
+/** `RetryRunRequest`: a note of up to `MAX_RUN_NOTE_LENGTH` characters, each up to 4 UTF-8 bytes, JSON-escaped, with room to spare. */
+const MAX_RETRY_BODY_BYTES = 64 * 1024;
 
 export interface BuildRoutesOptions {
   /** Core's guard (AD-22). */
@@ -83,6 +90,7 @@ export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, log 
   };
 
   const limit = bodyLimit({ maxSize: MAX_BUILD_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', 'That request is too large.') });
+  const retryLimit = bodyLimit({ maxSize: MAX_RETRY_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', 'That request is too large.') });
   routes.post('builds', API_ROUTES.workspaceBuilds, async (c, { workspaceId }) => {
     if (builds === undefined) return notImplemented(c);
     let response: Response | undefined;
@@ -154,7 +162,31 @@ export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, log 
   routes.get('builds', API_ROUTES.workspaceRuns, notYet);
   routes.get('builds', API_ROUTES.workspaceRun, notYet);
   routes.post('builds', API_ROUTES.runStop, notYet);
-  routes.post('builds', API_ROUTES.runRetry, notYet);
+  // Story 5.4: Retry resumes a run paused at a checkpoint; any other Retry answers 501 until 5.8.
+  routes.post('builds', API_ROUTES.runRetry, async (c, { workspaceId }) => {
+    if (builds === undefined) return notImplemented(c);
+    let response: Response | undefined;
+    const tooLarge = await retryLimit(c, async () => {
+      let body: unknown = {};
+      const text = await c.req.text();
+      if (text.trim() !== '') {
+        try {
+          body = JSON.parse(text);
+        } catch {
+          response = apiError(c, 400, 'invalid_request', 'The request body must be JSON.');
+          return;
+        }
+      }
+      try {
+        const run = await builds.retry(workspaceId, c.req.param('runId') ?? '', body);
+        log.info('build resumed', { workspaceId, runId: run.id, ref: run.ticketRef });
+        response = c.json(RunResponse.parse({ run }));
+      } catch (error) {
+        response = refused(c, workspaceId, error);
+      }
+    });
+    return response ?? tooLarge ?? apiError(c, 413, 'invalid_request', 'That request is too large.');
+  });
   routes.post('builds', API_ROUTES.runCheckAgain, notYet);
   routes.get('builds', API_ROUTES.workspaceBuildSettings, notYet);
   routes.patch('builds', API_ROUTES.workspaceBuildSettings, notYet);

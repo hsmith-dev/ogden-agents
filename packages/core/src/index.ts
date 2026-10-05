@@ -15,6 +15,7 @@ export * from './board.js';
 export * from './bmad-skill-folders.js';
 export * from './build-permission-policy.js';
 export * from './build-runner-port.js';
+export * from './build-run-folder.js';
 export * from './build-sessions.js';
 export * from './builds.js';
 export * from './chat.js';

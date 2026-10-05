@@ -119,6 +119,13 @@ describe('bmad-catalog catalog (story 4.4)', () => {
       expect(entry.installedAt, entry.name).toBeNull();
       expect(entry.next, entry.name).toEqual(mapped.next);
     }
+    // The look-back is epic-scoped with the next steps that are installed (epic 7), and no other skill has a scope.
+    const look = catalog.skills.find((entry) => entry.name === 'bmad-retrospective')!;
+    const installedNames = catalog.skills.map((entry) => entry.name);
+    expect(look.scope).toBe('epic');
+    expect(look.nexts.map((step) => step.skill)).toEqual(LABELS.skills.get('bmad-retrospective')!.nexts.map((step) => step.skill).filter((name) => installedNames.includes(name)));
+    expect(catalog.skills.filter((entry) => entry.scope === 'epic').map((entry) => entry.name)).toEqual(['bmad-retrospective']);
+    expect(await createBmadCatalog({ source: pinnedCopyOf(upstreamFiles()) }).missingCapabilities(r.path, ['look_back'])).toEqual([]);
     // An unlabelled skill keeps its SKILL.md description, with null metadata.
     expect(catalog.skills.find((entry) => entry.name === 'my-own')).toEqual({
       name: 'my-own',
@@ -144,7 +151,7 @@ describe('bmad-catalog catalog (story 4.4)', () => {
       expect(agent.description, agent.name).toBe(catalog.skills.find((entry) => entry.name === agent.name)!.description);
     }
     expect(catalog.entryAction).toBe('bmad-product-brief');
-    expect(catalog.capabilities).toEqual({ plain_labels: true, ticket_tree: true });
+    expect(catalog.capabilities).toEqual({ plain_labels: true, ticket_tree: true, look_back: true });
     expect(r.hash()).toBe(before);
   });
 
@@ -164,7 +171,7 @@ describe('bmad-catalog catalog (story 4.4)', () => {
       { name: 'demo-skill', label: 'demo-skill', description: 'demo-skill from SKILL.md.', module: 'demo' },
     ]);
     expect(catalog.entryAction).toBeNull();
-    expect(catalog.capabilities).toEqual({ plain_labels: false, ticket_tree: false });
+    expect(catalog.capabilities).toEqual({ plain_labels: false, ticket_tree: false, look_back: false });
   });
 
   it('a module copied in shows on the next read, with its skills', async () => {
@@ -319,7 +326,7 @@ describe('bmad-catalog catalog (story 4.4)', () => {
   });
 
   it('a missing, relative or linked repo root answers an empty catalog', async (ctx) => {
-    const empty = { modules: [], skills: [], agents: [], entryAction: null, capabilities: { plain_labels: false, ticket_tree: false } };
+    const empty = { modules: [], skills: [], agents: [], entryAction: null, capabilities: { plain_labels: false, ticket_tree: false, look_back: false } };
     for (const path of ['', 'relative/repo', '/no/such/repo']) expect(await createBmadCatalog().catalog(path), path).toEqual(empty);
     const target = repo(upstreamFiles());
     const holder = repo({});
@@ -366,6 +373,14 @@ describe('the label trust (entry 4.12)', () => {
     expect(catalog.capabilities.plain_labels).toBe(false);
     expect(await createBmadCatalog({ source: pinned() }).missingCapabilities(r.path, ['plain_labels'])).toEqual(['plain_labels']);
     expect(r.hash()).toBe(before);
+  });
+
+  it('a repo skill that only uses the look-back name has no epic scope, so look_back is missing (epic 7)', async () => {
+    const r = repo({ '.claude/skills/bmad-retrospective/SKILL.md': skill('bmad-retrospective', 'Run my own script.') });
+    const catalog = await createBmadCatalog({ source: pinned() }).catalog(r.path);
+    expect(catalog.skills.find((entry) => entry.name === 'bmad-retrospective')).toMatchObject({ label: null, scope: null, nexts: [] });
+    expect(catalog.capabilities.look_back).toBe(false);
+    expect(await createBmadCatalog({ source: pinned() }).missingCapabilities(r.path, ['look_back', 'plain_labels'])).toEqual(['plain_labels', 'look_back']);
   });
 
   it('not downloaded (no source, or a source not ready): nothing is labelled', async () => {

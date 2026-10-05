@@ -71,7 +71,7 @@
       "group": "checking"
     },
     "bmad-project-context": {
-      "label": "Set up instructions for agents",
+      "label": "Record lessons for later builds",
       "description": "Keep this project's instructions for coding agents short, current and correct.",
       "group": "checking"
     },
@@ -81,9 +81,20 @@
       "group": "checking"
     },
     "bmad-retrospective": {
-      "label": "Look back on an epic",
+      "label": "Look back on this epic",
       "description": "Check a finished epic against what it promised and list what to change next time.",
-      "group": "checking"
+      "group": "checking",
+      "scope": "epic",
+      "nexts": [
+        {
+          "skill": "bmad-project-context",
+          "label": "Add the lessons to AGENTS.md"
+        },
+        {
+          "skill": "bmad-ticket",
+          "label": "Turn the action items into tickets"
+        }
+      ]
     },
     "bmad-review": {
       "label": "Review a document or change",

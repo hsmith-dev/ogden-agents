@@ -18,6 +18,7 @@ import {
   DOCUMENT_INVALID_PATH_MESSAGE,
   PlanningIdea,
   SKILL_NAME_PATTERN,
+  type BmadPiece,
   type Catalog,
   type PlanningDocument,
   type Session,
@@ -29,13 +30,22 @@ import type { BmadFeatures } from './bmad-pieces.js';
 import type { BmadModulesSeen } from './bmad-modules-seen.js';
 import type { Chat } from './chat/types.js';
 import type { Entities } from './entities.js';
-import { NotFoundError, ValidationError } from './errors.js';
+import { FeatureOffError, NotFoundError, ValidationError } from './errors.js';
 import { DOCUMENT_PIECES, documentPath, insideOutputFolder } from './planning-documents.js';
+
+/** The pieces that read the catalog: Planning, and Retrospectives for the look-back's epic-scoped action (epic 7). */
+const CATALOG_PIECES: readonly BmadPiece[] = ['planning', 'retrospectives'];
+
+/** The catalog a Retrospectives-only project gets: its epic-scoped actions, no entry action, agents or other skills. */
+function epicActionsOnly(catalog: Catalog): Catalog {
+  return { ...catalog, skills: catalog.skills.filter((skill) => skill.scope === 'epic'), agents: [], entryAction: null };
+}
 
 export interface PlanningUseCases {
   /**
-   * The project's catalog. `FeatureOffError` with Planning off (nothing is
-   * scanned), `NotFoundError` for an unknown workspace.
+   * The project's catalog. `FeatureOffError` with Planning and Retrospectives
+   * both off (nothing is scanned); with only Retrospectives on, only the
+   * epic-scoped actions, `NotFoundError` for an unknown workspace.
    */
   catalog(workspaceId: WorkspaceId): Promise<Catalog>;
   /**
@@ -83,18 +93,30 @@ export function workspaceRepoPath(entities: Pick<Entities, 'getWorkspace'>, work
 }
 
 export function createPlanning({ bmad, entities, catalog, chat, agent, agentOf, modulesSeen }: PlanningDeps): PlanningUseCases {
+  /** Whether Planning is on now (the catalog is also read for Retrospectives alone). */
+  const planningOn = (workspaceId: WorkspaceId): boolean => {
+    try {
+      bmad.requireBmadFeature(workspaceId, 'planning');
+      return true;
+    } catch (error) {
+      if (error instanceof FeatureOffError) return false;
+      throw error;
+    }
+  };
   // Rebuilt from the repo on every read (story 4.4): a module copied in shows without a restart.
   const catalogOf = async (workspaceId: WorkspaceId): Promise<Catalog> => {
     const read = await catalog.catalog(workspaceRepoPath(entities, workspaceId));
     if (modulesSeen === undefined) return read;
-    // Checked again after the (async) scan: a Planning turned off meanwhile records nothing.
-    bmad.requireBmadFeature(workspaceId, 'planning');
+    // Checked again after the (async) scan: a piece turned off meanwhile records nothing.
+    bmad.requireAnyBmadFeature(workspaceId, CATALOG_PIECES);
     return modulesSeen.stamp(workspaceId, read);
   };
   return {
     async catalog(workspaceId) {
-      bmad.requireBmadFeature(workspaceId, 'planning');
-      return catalogOf(workspaceId);
+      // Planning, or Retrospectives (epic 7): with only Retrospectives on, only the epic-scoped actions are given.
+      bmad.requireAnyBmadFeature(workspaceId, CATALOG_PIECES);
+      const read = await catalogOf(workspaceId);
+      return planningOn(workspaceId) ? read : epicActionsOnly(read);
     },
 
     async start(workspaceId, skill, idea) {

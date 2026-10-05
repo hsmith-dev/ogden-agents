@@ -27,7 +27,7 @@ context:
 - The epic 12 inception docs were merged (`docs/epic-12-inception`, docs only; conflicts in the spec, architecture, matrix and notes resolved keeping both, epic 6's newer text winning where the two edited one line).
 - 4.2's trust store and 4.13's re-check are in this lineage. One trust (the workspace's `bmadScriptsTrusted` flag) covers the Board and agents that need project trust; for an agent it holds only while the project's `_bmad/scripts/` AND the agent files its descriptor names (`.claude/settings.json`, `.mcp.json`) are as the user allowed them. The agent files get their own stored fingerprint (new column), so editing them never re-asks the Board.
 - The trust is re-checked every time an agent process of a trust-needing agent is started (new chat, reopen after restart), not only when a chat is created.
-- Caller's decision 2026-10-04 (affects entries 4 and 7, not this one): Grok offers Sign in with Grok only; the unadvertised `xai.api_key` is dropped. Recorded here; the epic and ticket files are not edited.
+- Caller's decision 2026-10-04 (affects entries 4 and 7, not this one) was superseded on 2026-10-05 by the user: Grok authenticates only with the user's own xAI API access token (`xai.api_key`), with no account sign-in, off by default, and the UI says "Grok uses your own xAI API access token". See the epic's Decision of 2026-10-05. This story changes no code for it; the Grok stories after it keep the `xai.api_key` path.
 - Mode fixed at start: for such an agent core refuses a mid-chat mode change (plain reason, picker shows the mode as fixed) once the chat has an agent session; before the first start the mode can still be chosen.
 
 ## Boundaries & Constraints

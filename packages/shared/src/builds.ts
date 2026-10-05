@@ -1,22 +1,39 @@
 import { z } from 'zod';
+import { BuildAgent, RunQueueEntry } from './build-runs.js';
+import { VerificationResult } from './build-verification.js';
 import { Run, RunOutcome, Session } from './entities.js';
 import { TICKET_REF_PATTERN } from './planning-board.js';
 
 /**
- * Unattended builds (epic 5; story 5.2's tracer bullet, the minimal shapes
- * 5.3 will freeze): starting one ticket's build, reviewing its run, and
- * approving (a local merge with the `done` mark in the merge commit) or
- * rejecting it. Every route serves the `builds` piece (AD-22) and needs the
+ * Unattended builds (epic 5; story 5.2's tracer bullet, frozen by story 5.3
+ * for epics 5 and 11): starting a build (one ticket, or every ready one),
+ * a run and the workspace's runs, reviewing a run, approving (a local merge
+ * with the `done` mark in the merge commit), rejecting, retrying and
+ * stopping it. Every route serves the `builds` piece (AD-22) and needs the
  * project's script trust. No UI text here holds an em or en dash.
  */
 
-/** `POST /api/v1/workspaces/:wsId/builds`: build one named ticket. */
+/**
+ * `POST /api/v1/workspaces/:wsId/builds`: build one named ticket (`ref`),
+ * or every ready one (`all: true`, which keeps dispatching newly ready
+ * tickets until none is left or the user stops it; 5.8). `agent` defaults
+ * to the install's build runner's agent, Claude Code in v1 (story 5.3).
+ */
+export const UNKNOWN_BUILD_AGENT_MESSAGE = 'That agent cannot build here.';
+export const BUILD_TARGET_MESSAGE = 'Name one ticket to build, or ask for every ready one.';
 export const StartBuildRequest = z
   .object({
-    ref: z.string().regex(TICKET_REF_PATTERN, 'That is not a ticket reference.'),
+    agent: BuildAgent.optional(),
+    ref: z.string().regex(TICKET_REF_PATTERN, 'That is not a ticket reference.').optional(),
+    all: z.literal(true, { error: BUILD_TARGET_MESSAGE }).optional(),
   })
-  .strict();
+  .strict()
+  .refine((request) => (request.ref === undefined) !== (request.all === undefined), BUILD_TARGET_MESSAGE);
 export type StartBuildRequest = z.infer<typeof StartBuildRequest>;
+
+/** 202 for an all-ready {@link StartBuildRequest} (5.8): the runs it started and the queue now. */
+export const AllReadyBuildsResponse = z.object({ runs: z.array(Run), queue: z.array(RunQueueEntry) });
+export type AllReadyBuildsResponse = z.infer<typeof AllReadyBuildsResponse>;
 
 /** 201 for {@link StartBuildRequest}: the run and its `build` session, whose activity streams like a chat's. */
 export const BuildResponse = z.object({ run: Run, session: Session });
@@ -25,6 +42,23 @@ export type BuildResponse = z.infer<typeof BuildResponse>;
 /** `GET …/sessions/:sesId/run`: the run of a `build` session (404 for a session without one). */
 export const SessionRunResponse = z.object({ run: Run });
 export type SessionRunResponse = z.infer<typeof SessionRunResponse>;
+
+/** A branch's diff size against its base. */
+export const DiffStats = z.object({
+  files: z.number().int().nonnegative(),
+  insertions: z.number().int().nonnegative(),
+  deletions: z.number().int().nonnegative(),
+});
+export type DiffStats = z.infer<typeof DiffStats>;
+
+/** One review finding as the plan records it (its Review Triage Log or deferred list), in plain text. */
+export const REVIEW_FINDING_KINDS = ['finding', 'deferred'] as const;
+export const ReviewFinding = z.object({
+  kind: z.enum(REVIEW_FINDING_KINDS),
+  severity: z.enum(['high', 'medium', 'low']).nullable(),
+  text: z.string().min(1).max(2000),
+});
+export type ReviewFinding = z.infer<typeof ReviewFinding>;
 
 /**
  * `GET …/builds/:ref` (the review page), and the answer to Approve and
@@ -46,6 +80,14 @@ export const ReviewResponse = z.object({
    * it back and merges exactly it. `null` when the branch is gone.
    */
   headRevision: z.string().nullable().default(null),
+  /** A plain summary of what changed (5.9), `null` until there is one. */
+  summary: z.string().max(4000).nullable().default(null),
+  /** The run's verification (5.8 runs it; 11.2 adds detail), `null` until it ran. */
+  verification: VerificationResult.nullable().default(null),
+  /** The plan's review findings (its Review Triage Log and deferred list; 5.9). Ogden runs no review of its own. */
+  findings: z.array(ReviewFinding).default([]),
+  /** The diff's size (5.5's `diffStats`), `null` until known. */
+  diffStats: DiffStats.nullable().default(null),
 });
 export type ReviewResponse = z.infer<typeof ReviewResponse>;
 
@@ -57,10 +99,51 @@ export type ReviewResponse = z.infer<typeof ReviewResponse>;
 export const ApproveBuildRequest = z.object({ revision: z.string().regex(/^[0-9a-f]{40}([0-9a-f]{24})?$/, 'That is not a commit.') }).strict();
 export type ApproveBuildRequest = z.infer<typeof ApproveBuildRequest>;
 
+/** The most characters a note to the agent may have (Reject and retry, Retry). */
+export const MAX_RUN_NOTE_LENGTH = 4000;
+const runNote = z.string().trim().min(1).max(MAX_RUN_NOTE_LENGTH, `A note can be at most ${MAX_RUN_NOTE_LENGTH} characters.`);
+
+/**
+ * `POST …/builds/:ref/reject` (5.9): Reject and retry, with an optional
+ * note the next run's first message carries. An empty body is no note.
+ */
+export const RejectBuildRequest = z.object({ note: runNote.optional() }).strict();
+export type RejectBuildRequest = z.infer<typeof RejectBuildRequest>;
+
+/**
+ * How a blocked or failed run is run again: `resume` (Retry: mark the
+ * plan's resume status in the run's worktree and redispatch there, 5.8; a
+ * checkpoint pause resumes), `rebase` (Update and retry after a merge
+ * conflict, 5.9), `apply_fix` (Apply the saved fix and retry after an
+ * intent gap, 11.1).
+ */
+export const RETRY_MODES = ['resume', 'rebase', 'apply_fix'] as const;
+export const RetryMode = z.enum(RETRY_MODES);
+export type RetryMode = z.infer<typeof RetryMode>;
+
+/** `POST …/runs/:runId/retry` → `RunResponse` (the run that continues the work). */
+export const RetryRunRequest = z.object({ mode: RetryMode.default('resume'), note: runNote.optional() }).strict();
+export type RetryRunRequest = z.infer<typeof RetryRunRequest>;
+
+/** `POST …/runs/:runId/stop` (5.8): stops a running or queued run. No fields. */
+export const StopRunRequest = z.object({}).strict();
+export type StopRunRequest = z.infer<typeof StopRunRequest>;
+
+/** `GET …/runs/:runId` (the run view, 11.1), and the answer to Stop, Retry and Check again. */
+export const RunResponse = z.object({
+  run: Run,
+  verification: VerificationResult.nullable().default(null),
+});
+export type RunResponse = z.infer<typeof RunResponse>;
+
+/** `GET …/runs` (the Runs tab, 11.1): every run of the workspace, newest first, and its queue. */
+export const RunsResponse = z.object({ runs: z.array(Run), queue: z.array(RunQueueEntry) });
+export type RunsResponse = z.infer<typeof RunsResponse>;
+
 /** The most diff text a review answers with, in bytes; longer is cut. */
 export const MAX_REVIEW_DIFF_BYTES = 512 * 1024;
 
-/** The prefix of every run's branch (`ogden/<ref>-<slug>`). */
+/** The prefix of every run's branch (`ogden/<run8>/<ref>-<slug>`). */
 export const BUILD_BRANCH_PREFIX = 'ogden/';
 
 // ---- Plain sentences (EXPERIENCE.md Voice and Tone) ----
@@ -80,6 +163,8 @@ export const REVIEW_STALE_MESSAGE = 'The build changed after you reviewed it. Re
 export const MERGE_REFUSED_MESSAGE = "Git couldn't merge the build into your project (it would overwrite files you have), so nothing was merged.";
 export const CHECKOUT_BUSY_MESSAGE = 'Your project has staged changes, changes to this ticket\'s plan, or a merge, rebase, cherry-pick or revert in progress. Finish or undo it, then approve again.';
 export const VCS_UNAVAILABLE_MESSAGE = 'Builds need this project to be a git repository with a branch checked out that has at least one commit.';
+export const RUN_NOT_ACTIVE_MESSAGE = 'This run has already finished.';
+export const ALL_READY_NOT_AVAILABLE_MESSAGE = 'Building every ready story is not available yet.';
 
 /** A run's outcome as the review page and the session header say it. */
 export const RUN_OUTCOME_LABELS: Readonly<Record<RunOutcome, string>> = {

@@ -30,10 +30,18 @@ import {
   type WorkspaceId,
 } from '@ogden-agents/shared';
 import { describe, expect, it, vi } from 'vitest';
-import { BuildRefusedError, createBuilds, FeatureOffError, ScriptsChangedError, ScriptsNotTrustedError, type BuildsUseCases, type Core, type TicketStorePort, type VcsHead, type VcsPort } from '../src/index.js';
+import { BuildRefusedError, createBuilds, FeatureOffError, ScriptsChangedError, ScriptsNotTrustedError, type BuildRunnerPort, type BuildsUseCases, type Core, type TicketStorePort, type VcsHead, type VcsPort } from '../src/index.js';
 import { openTestCore, tempDir, unusedCatalogParts } from './helpers.js';
 
 const PLAN = '_bmad-output/initiative-demo/epic-first/story-thing-plan.md';
+
+/** A build runner for these tests: names no skill, maps the fake agent's halt to a code (story 5.3's port). */
+const testRunner: BuildRunnerPort = {
+  agent: 'claude-code',
+  invocation: (ref) => `/build ${ref}`,
+  blockedCode: (condition) => (condition === 'unclear intent' ? 'unclear_intent' : 'other'),
+  readResult: async () => undefined,
+};
 const REVISION = 'a'.repeat(40);
 
 interface Ticket {
@@ -169,6 +177,10 @@ function fakeVcs() {
       calls.push('commit');
       state.merged = true;
     },
+    diffStats: async () => ({ files: state.files.length, insertions: 1, deletions: 0 }),
+    worktreeExists: async (_repo, path) => state.worktrees.has(path),
+    rebase: async () => 'rebased',
+    applyPatch: async () => 'applied',
   };
   return { vcs, calls, state };
 }
@@ -223,7 +235,7 @@ async function harness({ pieces = ['board', 'builds'] as const, trusted = true }
     tickets: tickets.store,
     vcs: git.vcs,
     sandbox: { check: async () => (sandbox.available ? { available: true, kind: 'test' } : { available: false, reason: 'none' }) },
-    runner: { agentId: 'claude-code', invocation: (ref) => `/build ${ref}` },
+    runner: testRunner,
     chat: {
       createChatSession: async (wsId, options) => core.entities.createSession({ workspaceId: wsId, kind: options?.kind ?? 'chat' }),
       sendMessage: (_wsId, sessionId, text, options) => {
@@ -510,7 +522,7 @@ describe('review loop 1 hardening (story 5.2)', () => {
       tickets: h.tickets.store,
       vcs: h.git.vcs,
       sandbox: { check: async () => ({ available: true, kind: 'test' }) },
-      runner: { agentId: 'claude-code', invocation: (ref) => `/build ${ref}` },
+      runner: testRunner,
       chat: { createChatSession: async (wsId, options) => h.core.entities.createSession({ workspaceId: wsId, kind: options?.kind ?? 'chat' }), sendMessage, releaseAgent: async () => {} },
       buildSessions: h.core.buildSessions,
       dataDir: h.dataDir,

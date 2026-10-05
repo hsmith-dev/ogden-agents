@@ -1,6 +1,6 @@
 /**
- * The version control port (AD-1, AD-17; story 5.2's tracer, the minimal
- * shape 5.3 freezes): a run's own worktree on its own branch, created in
+ * The version control port (AD-1, AD-17; story 5.2's tracer, completed and
+ * frozen by story 5.3 for 5.5, 5.9 and 11.1): a run's own worktree on its own branch, created in
  * Ogden Agents' data folder (never in the repo), what changed in a checkout,
  * a branch's diff, and approve's local merge. Core names no VCS here; the
  * `vcs-git` adapter does. No operation ever pushes, forces or runs a repo's
@@ -10,6 +10,7 @@
  * revision and path passed is core's own (validated before use), never
  * request input.
  */
+import type { DiffStats } from '@ogden-agents/shared';
 import { CoreError } from './errors.js';
 
 /** The main checkout's current branch and its commit. */
@@ -85,6 +86,29 @@ export interface VcsPort {
   add(repoPath: string, paths: readonly string[]): Promise<void>;
   /** Commits what is staged (the merge in progress) with `message`. */
   commit(repoPath: string, message: string): Promise<void>;
+  /** `branch`'s diff size since `base` (story 5.3; the review page's "N files"). */
+  diffStats(repoPath: string, base: string, branch: string): Promise<DiffStats>;
+  /** Whether `path` is one of the repository's worktrees now (story 5.3; restart recovery and cleanup, 5.5 and 5.8). */
+  worktreeExists(repoPath: string, path: string): Promise<boolean>;
+  /**
+   * Rebases the run's worktree (on `branch`) onto commit `onto` (Update and
+   * retry after a merge conflict; 5.9). Git runs with its folders set by
+   * Ogden, after checking the worktree's own (which the agent could write)
+   * still name the repo and `branch`; no signing program, no other ref
+   * moved. `conflict`: it stopped on conflicts and was aborted; `refused`:
+   * git wouldn't start it (say, uncommitted changes). Either way the
+   * worktree is as it was.
+   */
+  rebase(input: { repoPath: string; worktreePath: string; branch: string; onto: string }): Promise<'rebased' | 'conflict' | 'refused'>;
+  /**
+   * Applies the patch file `patchPath` (absolute, a regular file inside the
+   * worktree: an intent gap's saved fix) to the worktree's files, all or
+   * nothing (11.1), with the same checks as {@link rebase}. `refused` when it
+   * doesn't apply cleanly, adds a symbolic link, names a path outside the
+   * worktree, or a path `refuse` refuses (core passes the protected paths,
+   * which the sandbox never let the agent write); nothing changed then.
+   */
+  applyPatch(input: { repoPath: string; worktreePath: string; branch: string; patchPath: string; refuse?: (path: string) => boolean }): Promise<'applied' | 'refused'>;
 }
 
 /** A git operation failed; `message` is plain words, `details` are for the log and hold no secret. */

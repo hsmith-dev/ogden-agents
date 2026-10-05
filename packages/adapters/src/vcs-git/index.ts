@@ -1,6 +1,7 @@
 /**
- * `vcs-git` (story 5.2's tracer, minimal; 5.5 completes it): core's
- * `VcsPort` on the user's own `git`.
+ * `vcs-git` (story 5.2's tracer; story 5.3 adds diff stats, worktree
+ * lookup, rebase and patch apply; 5.5 completes it): core's `VcsPort` on
+ * the user's own `git`.
  *
  * Every call runs `git` through `execFile` with an argument array (never a
  * shell), with:
@@ -18,8 +19,8 @@
  * `GIT_TERMINAL_PROMPT=0` and a C locale for parseable output.
  */
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { VcsError, type VcsDiff, type VcsHead, type VcsPort, type VcsWorktreeGitPaths } from '@ogden-agents/core';
 
 export interface GitVcsOptions {
@@ -65,6 +66,24 @@ function checkRelative(path: string): string {
   return path;
 }
 
+/** Config git must not take from anywhere for a rebase or a patch: no signing program, no ref rewriting elsewhere. */
+const SAFE_CONFIG = ['-c', 'commit.gpgsign=false', '-c', 'rebase.updateRefs=false', '-c', 'core.sshCommand=false'];
+
+/** The real path of `dir`, or its resolved path when it doesn't exist. */
+function realOf(dir: string): string {
+  try {
+    return realpathSync.native(dir);
+  } catch {
+    return resolve(dir);
+  }
+}
+
+/** Whether `path` is `root` or inside it. */
+function isInside(root: string, path: string): boolean {
+  const rel = relative(root, path);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
 interface GitResult {
   code: number;
   stdout: string;
@@ -83,7 +102,7 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
   };
 
   /** Runs git in `cwd`; resolves with its exit code (a spawn failure rejects). */
-  const run = (cwd: string, args: readonly string[], maxBuffer = 16 * 1024 * 1024): Promise<GitResult> =>
+  const run = (cwd: string, args: readonly string[], maxBuffer = 16 * 1024 * 1024, extraEnv: Readonly<Record<string, string>> = {}): Promise<GitResult> =>
     new Promise((resolvePromise, reject) => {
       let hooks: string;
       try {
@@ -98,7 +117,7 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
         fullArgs,
         {
           cwd,
-          env: { ...options.env(), GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C', LANG: 'C' },
+          env: { ...options.env(), GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C', LANG: 'C', ...extraEnv },
           maxBuffer,
           timeout,
           windowsHide: true,
@@ -115,24 +134,10 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
     });
 
   /** Runs git and requires success. `details` never hold git's output (it can name the user's files). */
-  const must = async (cwd: string, args: readonly string[], step: string, maxBuffer?: number): Promise<string> => {
-    const result = await run(cwd, args, maxBuffer);
+  const must = async (cwd: string, args: readonly string[], step: string, maxBuffer?: number, extraEnv?: Readonly<Record<string, string>>): Promise<string> => {
+    const result = await run(cwd, args, maxBuffer, extraEnv);
     if (result.code !== 0) throw new VcsError(`git couldn't ${step}.`, { step, exitCode: result.code });
     return result.stdout;
-  };
-
-  /**
-   * The identity a merge or its commit is made with: the user's own where git
-   * has one (repo or global config), else Ogden Agents' for the part missing,
-   * so a computer with no git identity still merges and commits.
-   */
-  const identity = async (repoPath: string): Promise<string[]> => {
-    const email = await run(repoPath, ['config', '--get', 'user.email']);
-    const name = await run(repoPath, ['config', '--get', 'user.name']);
-    return [
-      ...(name.code === 0 && name.stdout.trim() !== '' ? [] : ['-c', 'user.name=Ogden Agents']),
-      ...(email.code === 0 && email.stdout.trim() !== '' ? [] : ['-c', 'user.email=ogden-agents@localhost']),
-    ];
   };
 
   const head = async (repoPath: string): Promise<VcsHead | undefined> => {
@@ -166,9 +171,50 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
     return paths;
   };
 
+  /**
+   * The identity a merge, its commit or a rebase is made with: the user's own
+   * where git has one (repo or global config), else Ogden Agents' for the part
+   * missing, so a computer with no git identity still merges and commits.
+   */
+  const identityFlags = async (repoPath: string): Promise<string[]> => {
+    const email = await run(repoPath, ['config', '--get', 'user.email']);
+    const name = await run(repoPath, ['config', '--get', 'user.name']);
+    return [
+      ...(name.code === 0 && name.stdout.trim() !== '' ? [] : ['-c', 'user.name=Ogden Agents']),
+      ...(email.code === 0 && email.stdout.trim() !== '' ? [] : ['-c', 'user.email=ogden-agents@localhost']),
+    ];
+  };
+
+  /**
+   * Git's own folders for a run's worktree, checked against the repo before
+   * git runs there (security review, story 5.3): the agent can write the
+   * worktree's admin folder (`<common>/worktrees/<id>`), so its `HEAD` must
+   * still name `branch` and its `commondir` the repo's, and git is then run
+   * with `GIT_DIR`, `GIT_COMMON_DIR` and `GIT_WORK_TREE` set by Ogden, never
+   * read from files the agent wrote.
+   */
+  const pinnedWorktree = async (repoPath: string, worktreePath: string, branch: string): Promise<Record<string, string>> => {
+    checkPath(repoPath);
+    checkPath(worktreePath);
+    checkBranch(branch);
+    const common = realOf(resolve(repoPath, (await must(repoPath, ['rev-parse', '--path-format=absolute', '--git-common-dir'], 'read the repository')).trim()));
+    const gitDir = join(common, 'worktrees', basename(worktreePath));
+    try {
+      const head = readFileSync(join(gitDir, 'HEAD'), 'utf8');
+      const commondir = readFileSync(join(gitDir, 'commondir'), 'utf8').trim();
+      const link = readFileSync(join(worktreePath, '.git'), 'utf8').trim();
+      if (head.trim() !== `ref: refs/heads/${branch}`) throw new Error('head');
+      if (realOf(resolve(gitDir, commondir)) !== common) throw new Error('commondir');
+      if (!link.startsWith('gitdir: ') || realOf(resolve(worktreePath, link.slice('gitdir: '.length))) !== realOf(gitDir)) throw new Error('gitdir');
+    } catch {
+      throw new VcsError("The run's worktree isn't as Ogden Agents made it, so git didn't run there.", { step: 'worktree' });
+    }
+    return { GIT_DIR: gitDir, GIT_COMMON_DIR: common, GIT_WORK_TREE: worktreePath };
+  };
+
   /** Whether git's own file `name` (`MERGE_HEAD`, `rebase-merge`, …) exists in the checkout's git folder. */
-  const gitPathExists = async (repoPath: string, name: string): Promise<boolean> => {
-    const out = await run(repoPath, ['rev-parse', '--path-format=absolute', '--git-path', name]);
+  const gitPathExists = async (repoPath: string, name: string, extraEnv?: Readonly<Record<string, string>>): Promise<boolean> => {
+    const out = await run(repoPath, ['rev-parse', '--path-format=absolute', '--git-path', name], undefined, extraEnv);
     return out.code === 0 && existsSync(out.stdout.trim());
   };
 
@@ -281,7 +327,7 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
         if (added.stdout.split('\0').some((name) => name !== '' && !inHead.has(name) && existsSync(join(repoPath, ...name.split('/'))))) return 'refused';
       }
       // git wants an identity for a merge even with `--no-commit` (a computer with none refuses it).
-      const result = await run(repoPath, [...(await identity(repoPath)), 'merge', '--no-ff', '--no-commit', '--no-verify', '--no-overwrite-ignore', commit]);
+      const result = await run(repoPath, [...(await identityFlags(repoPath)), 'merge', '--no-ff', '--no-commit', '--no-verify', '--no-overwrite-ignore', commit]);
       if (result.code === 0) return 'merged';
       // Only unmerged paths are a conflict; anything else git refused or failed at.
       const unmerged = await run(repoPath, ['diff', '--name-only', '--diff-filter=U', '-z']);
@@ -303,7 +349,84 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
 
     async commit(repoPath, message) {
       checkPath(repoPath);
-      await must(repoPath, [...(await identity(repoPath)), 'commit', '--no-verify', '--no-edit', '-m', message], 'commit the merge');
+      // The user's own identity; a repo without one still gets its merge commit.
+      await must(repoPath, [...(await identityFlags(repoPath)), 'commit', '--no-verify', '--no-edit', '-m', message], 'commit the merge');
+    },
+
+    async diffStats(repoPath, base, branch) {
+      checkPath(repoPath);
+      const out = await must(repoPath, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--numstat', '-z', checkRevision(base), `refs/heads/${checkBranch(branch)}`, '--'], 'read the changes');
+      let files = 0;
+      let insertions = 0;
+      let deletions = 0;
+      // `<added>\t<deleted>\t<path>` per file, NUL-terminated; a binary file counts `-` for both.
+      for (const entry of out.split('\0')) {
+        const match = /^(\d+|-)\t(\d+|-)\t/.exec(entry);
+        if (match === null) continue;
+        files++;
+        if (match[1] !== '-') insertions += Number(match[1]);
+        if (match[2] !== '-') deletions += Number(match[2]);
+      }
+      return { files, insertions, deletions };
+    },
+
+    async worktreeExists(repoPath, path) {
+      checkPath(repoPath);
+      checkPath(path);
+      if (!existsSync(path)) return false;
+      // Without `-z` (git 2.36+ only): a worktree path in Ogden's data folder has no line break.
+      const out = await run(repoPath, ['worktree', 'list', '--porcelain']);
+      if (out.code !== 0) throw new VcsError("git couldn't list the worktrees.", { step: 'worktree list', exitCode: out.code });
+      const wanted = realOf(path);
+      // The first entry is the main checkout: never one of the runs' worktrees (review: a removal must never reach the repo).
+      const listed = out.stdout.split(/\r?\n/).filter((line) => line.startsWith('worktree ')).slice(1);
+      return listed.some((line) => realOf(line.slice('worktree '.length)) === wanted) && wanted !== realOf(repoPath);
+    },
+
+    async rebase({ repoPath, worktreePath, branch, onto }) {
+      const commit = checkRevision(onto);
+      const pinned = await pinnedWorktree(repoPath, worktreePath, branch);
+      const args = [...SAFE_CONFIG, ...(await identityFlags(repoPath)), 'rebase', '--no-autostash', '--no-update-refs', '--no-verify', commit];
+      let result: GitResult;
+      try {
+        result = await run(worktreePath, args, undefined, pinned);
+      } catch (error) {
+        // A timeout or a spawn failure: whatever git left, the worktree goes back to how it was.
+        await run(worktreePath, ['rebase', '--abort'], undefined, pinned).catch(() => undefined);
+        throw error;
+      }
+      if (result.code === 0) return 'rebased';
+      // Stopped part-way (conflicts) is aborted; never started (uncommitted changes, …) is refused.
+      if ((await gitPathExists(worktreePath, 'rebase-merge', pinned)) || (await gitPathExists(worktreePath, 'rebase-apply', pinned))) {
+        await must(worktreePath, ['rebase', '--abort'], 'abort the rebase', undefined, pinned);
+        return 'conflict';
+      }
+      return 'refused';
+    },
+
+    async applyPatch({ repoPath, worktreePath, branch, patchPath, refuse }) {
+      const pinned = await pinnedWorktree(repoPath, worktreePath, branch);
+      // The saved fix is a regular file inside the worktree, never a link to somewhere else.
+      checkPath(patchPath);
+      try {
+        if (!lstatSync(patchPath).isFile() || !isInside(realOf(worktreePath), realOf(patchPath))) return 'refused';
+      } catch {
+        return 'refused';
+      }
+      const listed = await run(worktreePath, [...SAFE_CONFIG, 'apply', '--numstat', '--summary', '-z', patchPath], undefined, pinned);
+      if (listed.code !== 0) return 'refused';
+      // No symbolic link, and no path the caller refuses (the protected paths: the sandbox denies the agent those).
+      if (/\b120000\b/.test(listed.stdout)) return 'refused';
+      const paths = listed.stdout.split('\0').flatMap((entry) => {
+        const match = /^(?:\d+|-)\t(?:\d+|-)\t(.*)$/s.exec(entry.trim());
+        return match === null || match[1] === '' ? [] : [match[1]!];
+      });
+      if (refuse !== undefined && paths.some((path) => refuse(path))) return 'refused';
+      // All or nothing, and never a path outside the worktree (git refuses those without --unsafe-paths).
+      const check = await run(worktreePath, [...SAFE_CONFIG, 'apply', '--check', '--whitespace=nowarn', patchPath], undefined, pinned);
+      if (check.code !== 0) return 'refused';
+      const applied = await run(worktreePath, [...SAFE_CONFIG, 'apply', '--whitespace=nowarn', patchPath], undefined, pinned);
+      return applied.code === 0 ? 'applied' : 'refused';
     },
   };
 }

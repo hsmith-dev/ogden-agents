@@ -124,9 +124,11 @@ function writeFiles(root: string, files: Readonly<Record<string, string>>): void
 }
 
 /**
- * A ready ticket to build (story 5.2): ticket `1.1` of `initiative-demo`'s
- * first epic, its plan `ready-for-dev`, waiting for nothing; and `1.2`, ready
- * too but waiting for `1.1`. With the config script `tickets.py` loads.
+ * A ready ticket to build (story 5.2; story 5.3 makes it both epics'
+ * fixture): ticket `1.1` of `initiative-demo`'s first epic, its plan
+ * `ready-for-dev`, waiting for nothing; and `1.2`, ready too but waiting for
+ * `1.1` (an unmet prerequisite). With the config script `tickets.py` loads.
+ * Add {@link FAKE_TEST_COMMAND_FILES} for a test command to re-run.
  */
 export const FAKE_BUILD_PLAN = '_bmad-output/initiative-demo/epic-first/story-build-the-thing-plan.md';
 export const FAKE_BUILD_WAITING_PLAN = '_bmad-output/initiative-demo/epic-first/story-build-the-next-thing-plan.md';
@@ -137,6 +139,30 @@ export const FAKE_BUILD_TICKET_FILES: Readonly<Record<string, string>> = {
     '[[entry]]\nid = 1\ntype = "story"\ntitle = "Build the thing"\nafter = []\n\n[[entry]]\nid = 2\ntype = "story"\ntitle = "Build the next thing"\nafter = [1]\n',
   [FAKE_BUILD_PLAN]: '---\ntitle: "Build the thing"\ntype: "feature"\nticket: 1\nstatus: ready-for-dev\n---\n\n# Build the thing\n',
   [FAKE_BUILD_WAITING_PLAN]: '---\ntitle: "Build the next thing"\ntype: "feature"\nticket: 2\nstatus: ready-for-dev\n---\n\n# Build the next thing\n',
+};
+
+/**
+ * A fake test command for verification's re-run (story 5.3; 5.8 and 11.2
+ * use it): `package.json`'s `test` script runs one plain Node process that
+ * never reads stdin, takes about 50 ms, prints a jest-like summary and
+ * passes, or, while `.fake-tests-fail` exists at the project's root (the
+ * fake agent writes it with `FAKE_ACP_BUILD_FAIL_TESTS=1`, a test can write
+ * it by hand), fails 3 of its 5 tests and exits 1. Removing the file makes
+ * it pass again (Check again).
+ */
+export const FAKE_TESTS_FAIL_MARKER = '.fake-tests-fail';
+export const FAKE_TEST_SCRIPT = 'scripts/fake-tests.mjs';
+export const FAKE_TEST_COMMAND_FILES: Readonly<Record<string, string>> = {
+  'package.json': `${JSON.stringify({ name: 'fake-project', private: true, type: 'module', scripts: { test: `node ${FAKE_TEST_SCRIPT}` } }, null, 2)}\n`,
+  [FAKE_TEST_SCRIPT]: [
+    "import { existsSync } from 'node:fs';",
+    "import { join } from 'node:path';",
+    'await new Promise((done) => setTimeout(done, 50));',
+    `const failing = existsSync(join(process.cwd(), '${FAKE_TESTS_FAIL_MARKER}'));`,
+    "process.stdout.write(failing ? 'Tests: 3 failed, 2 passed, 5 total\\n' : 'Tests: 5 passed, 5 total\\n');",
+    'process.exitCode = failing ? 1 : 0;',
+    '',
+  ].join('\n'),
 };
 
 /** Runs git in `cwd` for the fixture: no hook, a local identity, no output. */

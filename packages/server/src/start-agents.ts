@@ -235,6 +235,8 @@ function testTrustAgentWiring(hooks: TestHooks, log: Logger): AgentWiring[] {
         signInMethods: [{ id: 'fake-login', kind: 'subscription', label: 'Sign in with your account' }],
         permissionModes: { ask: 'default' },
         needsProjectTrust: true,
+        // The files it would run from the project: the trust is bound to them too (epic 12, 12.3).
+        projectFiles: ['.claude/settings.json', '.mcp.json'],
         skillsFolder: '.fake/skills',
       },
       agent: {

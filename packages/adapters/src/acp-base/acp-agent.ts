@@ -69,18 +69,8 @@ import { agentWords, modelOptionOf, modelsOf } from './models.js';
 import { answerPermissionRequest, type Diagnostic, type PermissionCallback } from './permission-request.js';
 import { acpAsksLessThanAsk, acpModeOf, acpReasons, type AcpAgentOptions, type AcpAgentQuirks, type AcpLaunch, type AcpLaunchInput } from './quirks.js';
 
-export {
-  acpAsksLessThanAsk,
-  acpModeOf,
-  acpReasons,
-  slashSkillInvocation,
-  type AcpAgentOptions,
-  type AcpAgentQuirks,
-  type AcpAuthChoice,
-  type AcpLaunch,
-  type AcpLaunchInput,
-  type AcpStartOptions,
-} from './quirks.js';
+export { acpAsksLessThanAsk, acpModeOf, acpReasons, slashSkillInvocation } from './quirks.js';
+export type { AcpAgentOptions, AcpAgentQuirks, AcpAuthChoice, AcpLaunch, AcpLaunchInput, AcpStartOptions } from './quirks.js';
 
 /** The ACP steering extension request (claude-agent-acp 0.84): a user message into the running turn. */
 const STEER_METHOD = '_session/steering';

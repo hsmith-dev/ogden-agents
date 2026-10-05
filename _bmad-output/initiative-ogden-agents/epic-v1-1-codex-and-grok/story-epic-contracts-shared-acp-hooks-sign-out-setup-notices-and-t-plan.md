@@ -81,6 +81,17 @@ context:
 
 ## Implementation Notes
 
+Built 2026-10-04 on `story/12.3-agent-contracts-v11` (from 6.10's branch, with the epic 12 inception docs merged, docs only).
+
+- Already in the epic 6 lineage, so only verified: the `authMethod` quirk, `AgentSetupPort.signOut` with its route and card button, `needsProjectTrust`, the picker's refusal and `ChatOptions.projectTrusted` (wired in `start.ts` to the scripts trust).
+- acp-base: `authMethod` may return `{methodId, meta}`; `rejectOptionIds`; `launch` gets `{permissionMode, protectedPaths}`; `startOptions` (new `acp-base/fixed-mode.ts`) for `modeFixedAtStart` agents; the session reports `fixedPermissionMode`. A fixed-mode session never sends `session/set_mode`.
+- core: the stored mode goes to every start and reopen (`StartAgentSession.permissionMode`); the fixed-mode applier (stricter runs and restarts, looser or unguarded Auto is stopped); a mid-chat change is refused once the chat has an agent session; `chatAgents(workspaceId?)` adds `project_not_trusted`; every start of a trust-needing agent (and its terminal) re-checks the trust.
+- Protected paths: descriptor `configFolders` join them through `protectedPathsWith` (permissions, Auto guards, terminal); core is opened before the registry, so they and the project files are late-bound getters filled once the agents are wired.
+- Trust: new column `agent_files_fingerprint` (migration 0012); `trustScripts` records both fingerprints; `trustedForAgents` = trusted, scripts unchanged and agent files unchanged; null (trusted before) asks once. `projectFilesFingerprint` in adapters, never following links.
+- Web: `useChatAgents(wsId)`, the picker's Trust item and the prompt worded for the agent (`PROJECT_TRUST_*`), the fixed-mode picker, card notices (`AgentSetupStatus.notices`).
+- Tests: acp-base hooks on a generic third agent (`FAKE_ACP_REJECT_OPTIONS`, `FAKE_ACP_FIXED_MODE`, auth `_meta`), core `agent-hooks.test.ts`, adapters fingerprint, server list and trust, web dom tests, Playwright `agent-trust-and-fixed-mode.spec.ts`, and the installed agents journey updated.
+- Not done here (by design): no Codex or Grok descriptor, adapter, pin or wiring (entries 4 to 8); CHANGELOG is the release entry's (12.11).
+
 ## Plan Change Log
 
 ## Review Triage Log

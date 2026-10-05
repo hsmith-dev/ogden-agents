@@ -38,6 +38,56 @@ env:
   RUST_VERSION: 1.99.0
 
 jobs:
+  # Runtime lane (story 13.4): the pinned, SHA-256-checked Node, its npm and the packed server with
+  # production dependencies, staged for each target on a native runner (native modules do not
+  # cross-build), then run with ONLY the staged Node on PATH: the server starts through the
+  # launcher's --json mode, serves the page, exchanges a launch code and quits, and the staged npm
+  # installs a fixture package. No Rust build here; the `app` job below builds the shell.
+  runtime:
+    name: Runtime (${{ matrix.leg }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { leg: macos-universal, os: macos-latest, target: universal-apple-darwin }
+          - { leg: windows-x64, os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { leg: windows-arm64, os: windows-11-arm, target: aarch64-pc-windows-msvc }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Build and pack Ogden Agents
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+          pnpm pack
+
+      - name: Stage the bundled Node, npm and the packed server
+        run: node packages/desktop/scripts/stage.mjs --target ${{ matrix.target }} --tgz "$(ls ogden-agents-*.tgz | head -1)"
+
+      - name: Run the staged server with only the staged Node on PATH
+        run: node packages/desktop/scripts/verify-stage.mjs --target ${{ matrix.target }}
+
+      - name: Upload the staging report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-stage-report-${{ matrix.leg }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: packages/desktop/stage/stage-report.json
+
   app:
     name: App (${{ matrix.leg }})
     runs-on: ${{ matrix.os }}

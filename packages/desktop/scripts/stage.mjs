@@ -12,17 +12,16 @@
 //    merges an arm64 and an x64 install with lipo.
 // 5. Prunes native binaries for other targets, checks that better-sqlite3, @napi-rs/keyring
 //    and node-pty load with the bundled Node, and writes `stage/stage-report.json`.
-import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, copyFileSync, chmodSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { deflateSync } from 'node:zlib';
+import { verifiedArchive } from './node-archive.mjs';
 
 const pins = JSON.parse(readFileSync(new URL('../desktop-node-pins.json', import.meta.url), 'utf8'));
 export const NODE_VERSION = pins.version;
-export const NODE_SHA256 = Object.fromEntries(Object.entries(pins.archives).map(([plat, { ext, sha256 }]) => [plat, [ext, sha256]]));
 const TRIPLES = {
   'aarch64-apple-darwin': ['darwin-arm64'],
   'x86_64-apple-darwin': ['darwin-x64'],
@@ -49,30 +48,9 @@ const tgz = resolve(values.tgz);
 const isWin = target.includes('windows');
 const report = { target, nodeVersion: NODE_VERSION, node: {}, checks: {}, sizes: {} };
 
-async function download(url, file) {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      writeFileSync(file, Buffer.from(await res.arrayBuffer()));
-      return;
-    } catch (error) {
-      if (attempt >= 4) throw error;
-      console.warn(`download ${url} failed (${error}); retrying`);
-      await new Promise((r) => setTimeout(r, 3000 * attempt));
-    }
-  }
-}
-
 /** Downloads, verifies and extracts one Node build; returns its folder. */
 async function fetchNode(plat) {
-  const [ext, sha] = NODE_SHA256[plat];
-  const name = `node-v${NODE_VERSION}-${plat}`;
-  const archive = join(cache, `${name}.${ext}`);
-  mkdirSync(cache, { recursive: true });
-  if (!existsSync(archive)) await download(`https://nodejs.org/dist/v${NODE_VERSION}/${name}.${ext}`, archive);
-  const actual = createHash('sha256').update(readFileSync(archive)).digest('hex');
-  if (actual !== sha) throw new Error(`SHA-256 mismatch for ${name}.${ext}: ${actual} != ${sha}`);
+  const { file: archive, name, ext, sha256: sha } = await verifiedArchive({ plat, cache, pins });
   const out = join(cache, name);
   // Windows' own bsdtar reads zip; Git Bash's GNU tar on PATH does not (and takes `D:` for a host).
   const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';

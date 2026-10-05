@@ -127,7 +127,7 @@ function TestCommandSetting({ wsId, value, onSaved }: { wsId: string; value: str
             setState('idle');
           }}
         />
-        <Button type="submit" variant="secondary" disabled={!valid || !dirty || state === 'saving'} data-testid="test-command-save">
+        <Button type="submit" variant="secondary" disabled={!valid || !dirty || state === 'saving'} aria-label="Save the test command" data-testid="test-command-save">
           Save
         </Button>
         {state === 'saved' ? (

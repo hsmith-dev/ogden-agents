@@ -3,7 +3,7 @@ title: 'Verification reporting'
 type: 'feature'
 ticket: '2'
 created: '2026-10-05'
-status: 'in-review'
+status: 'built'
 baseline_revision: '971970fd93cfee5156a64f976f198983cfcdef2d'
 route: 'full'
 route_source: 'auto'
@@ -67,6 +67,17 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+- 2026-10-05, pass 1 (security and correctness lenses): high 0, medium 3, low 9. Routed: patch 5, defer 4, reject 3. No intent_gap or bad_plan.
+  - The test command was kept and shown unmasked while its output was masked -- low, patch: masked in `verifyRun`.
+  - The review page kept the old verdict while a Check again ran (the run panel hid it) -- medium, patch: hidden while running.
+  - The card's accessible name left out the failing check -- low, patch.
+  - The test command's Save button shared its name with the other Save buttons -- low, patch.
+  - Stop does not stop a test re-run in progress, so Check again adds an entry to a known gap -- medium, defer: already open from 5.8 ("The test re-run is not stopped by Stop or Quit").
+  - A re-check that ends without a built plan or on a read failure appends no new verification, so the older checks stay shown beside the new reason -- medium, defer to 11.5 (the reason is correct; a fix needs a verification marker in the event, a shared shape 5.3 froze).
+  - Check again is offered in the UI for runs the server then refuses (not the latest, already merged, never reached the checks) and takes no run slot -- low, defer to 11.5 / reject for the slot (it mirrors Resume and Update and retry).
+  - Focus after Check again, and test gaps (TicketBuildSection, the settings field, a verified run failing on re-check, Stop during a re-check, route-level 409s) -- low, defer to 11.5; e2e covers the main paths.
+  - XSS, unsandboxed execution, guard bypass, other workspace's or decided runs -- none found.
 
 ## Verification
 

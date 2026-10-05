@@ -109,7 +109,7 @@ export function BuildReview({ wsId, ticketRef }: { wsId: string; ticketRef: stri
           {failure}
         </Notice>
       )}
-      {verification === null ? null : (
+      {verification === null || outcome === 'running' ? null : (
         <section aria-label={REVIEW_CHECKS_TITLE} className="flex flex-col gap-2">
           <Text as="h2" variant="heading">
             {REVIEW_CHECKS_TITLE}

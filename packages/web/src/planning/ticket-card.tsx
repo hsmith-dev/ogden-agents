@@ -53,7 +53,7 @@ export const TicketCard = memo(function TicketCard({ wsId, row, status, highligh
         data-ref={row.ref}
         data-column={column ?? 'dropped'}
         data-highlighted={highlighted ? 'true' : undefined}
-        aria-label={boardCardLabel(row.ref, row.title, status.text)}
+        aria-label={boardCardLabel(row.ref, row.title, buildFailure === undefined ? status.text : `${status.text}. ${buildFailedText(buildFailure)}`)}
         className={cn(
           'relative flex min-h-(--control-height) min-w-0 flex-col gap-1 overflow-hidden rounded-lg border border-border bg-card px-3 py-2 text-card-foreground',
           'transition-colors duration-(--motion-fast) ease-standard hover:bg-accent',

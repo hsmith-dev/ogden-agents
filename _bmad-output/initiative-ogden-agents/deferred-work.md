@@ -109,6 +109,7 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Epic 5 (5.9): queued runs start again only when another run ends, a limit changes or the server restarts, not when a turned-off piece is turned back on. From 5.8 review. (log: "Queued runs wait after a piece is turned back on")
 - Epic 5 (11.1): Update and retry takes no run-limit slot and arms no deadline, and every review read runs `tickets.py` once. From 5.9 reviews. (log: "Update and retry takes no run limit slot and arms no deadline")
 - Epic 11 (11.5, which also takes the run folder pruning above): Apply the saved fix leaves the patch applied with the run still blocked when the plan mark or the prompt fails afterwards; the saved patch is read by git three times and not previewed. From 11.1 reviews. (log: "Apply the saved fix after a late failure")
+- Epic 11 (11.5): a Check again that ends without a built plan or on a read failure leaves the older verification shown beside the new reason; Check again is offered for runs the server then refuses; tests for the settings field and the re-check edge cases. From 11.2 reviews. (log: "Check again edge cases after 11.2")
 
 ## Log
 
@@ -777,3 +778,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-build-runs-and-notifications/story-live-run-view-and-the-runs-tab-plan.md`
   summary: Apply the saved fix after a late failure: the patch stays applied while the run is still blocked when the plan mark or the prompt fails; the patch is read by git three times and is not previewed.
   evidence: 11.1 correctness and security reviews; Retry still works, and the agent is released while the run is blocked.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-build-runs-and-notifications/story-verification-reporting-plan.md`
+  summary: Check again edge cases after 11.2: a re-check that ends without a built plan or on a read failure leaves the older verification shown beside the new reason; the button is offered for runs the server then refuses; the settings field and the re-check edge cases have thin tests.
+  evidence: 11.2 correctness review; the reason is right, the checks list can be stale; a fix needs a marker on the verification event.

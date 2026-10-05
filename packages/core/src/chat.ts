@@ -173,6 +173,11 @@ export function createChat(options: ChatOptions): Chat {
     handoffPreview: handoff.handoffPreview,
     handOff: handoff.handOff,
 
+    async releaseAgent(workspaceId, sessionId) {
+      ctx.getSession(workspaceId, sessionId);
+      await releaseAgent(sessionId);
+    },
+
     async settled() {
       while (running.size > 0) await Promise.all([...running]);
     },

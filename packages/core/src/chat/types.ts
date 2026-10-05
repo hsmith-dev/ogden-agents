@@ -7,6 +7,7 @@ import type { AgentId, ChatAgent, HandoffPreviewResponse, PermissionMode, Sessio
 import type { AgentModels } from '../agent-models.js';
 import type { AgentError, AgentRegistry, AgentSession } from '../agent-port.js';
 import type { AgentReadiness } from '../agent-setup-types.js';
+import type { BuildSessions } from '../build-sessions.js';
 import type { Entities, NewWorkspaceOptions } from '../entities.js';
 import type { EventLog, HistoryDeleted } from '../event-log.js';
 import type { InstallSettings } from '../install-settings.js';
@@ -87,6 +88,12 @@ export interface ChatOptions {
    * one that throws counts as no. Without it, no project is trusted.
    */
   projectTrusted?: (workspaceId: WorkspaceId) => boolean | Promise<boolean>;
+  /**
+   * What each `build` session's agent starts with (story 5.2): the run's
+   * worktree, its sandbox and the build permission policy. Without it (or
+   * without an entry for the session) a `build` session never starts an agent.
+   */
+  buildSessions?: Pick<BuildSessions, 'get'>;
 }
 
 /** A terminal's size in character cells. */
@@ -163,7 +170,8 @@ export interface Chat {
    * A new session in the workspace, `idle`, with the agent `agentId` (the
    * registry's default when absent), fixed for its life (epic 6): a `chat`
    * by default, or a `planning` session (story 4.1), which is a chat whose
-   * first message the planning use-case sends. Rejects, creating nothing,
+   * first message the planning use-case sends, or a `build` session (story 5.2),
+   * which only the builds use-case creates, with its run. Rejects, creating nothing,
    * with `NotFoundError` for an unknown workspace, `UnknownAgentError` for an
    * agent that isn't registered, and `AgentNotReadyError` (6.3) for one that
    * needs a project trust the project lacks, isn't installed, or isn't
@@ -171,7 +179,7 @@ export interface Chat {
    */
   createChatSession(
     workspaceId: WorkspaceId,
-    options?: { kind?: Exclude<SessionKind, 'build'> | undefined; agentId?: AgentId | undefined; autoTitle?: string | undefined; model?: string | null | undefined },
+    options?: { kind?: SessionKind | undefined; agentId?: AgentId | undefined; autoTitle?: string | undefined; model?: string | null | undefined },
   ): Promise<Session>;
   /**
    * The agents a chat can be started with, in order (epic 6; frozen in 6.3):
@@ -179,6 +187,12 @@ export interface Chat {
    * chat with it is refused now, if it is.
    */
   chatAgents(): Promise<{ agents: ChatAgent[]; defaultAgentId: AgentId }>;
+  /**
+   * Stops the session's agent, if it has one, and waits for its process to
+   * exit (story 5.2: a run's agent before its worktree is removed). The
+   * session itself stays as it is. `NotFoundError` for an unknown session.
+   */
+  releaseAgent(workspaceId: WorkspaceId, sessionId: SessionId): Promise<void>;
   /** The session, which must belong to the workspace (`NotFoundError` otherwise). */
   getSession(workspaceId: WorkspaceId, sessionId: SessionId): Session;
   /**
@@ -197,13 +211,16 @@ export interface Chat {
    * already queued, `SessionBusyError` while a failed turn is ending,
    * `DriverIsTerminalError` while the terminal drives the session (AD-6),
    * and `SessionNotIdleError` while it is switching drivers.
+   * `BuildSessionReadOnlyError` for a `build` session (story 5.2), unless `build` is set: only the
+   * builds use-case sends a build its prompt. `cancel`, `setPermissionMode` and `switchDriver` refuse a
+   * build session the same way.
    * With `delivery: 'now'` (send now or wait) a message sent while the agent
    * works goes ahead of the waiting ones at once: into the running turn when
    * its agent can take it there, else after the current step is stopped
    * (`session.turn_interrupted`); `AnswerFirstError` while a permission card
    * waits. Absent or `wait`: as before.
    */
-  sendMessage(workspaceId: WorkspaceId, sessionId: SessionId, text: string, options?: { delivery?: WhileWorking | undefined }): { messageId: string; queued: boolean };
+  sendMessage(workspaceId: WorkspaceId, sessionId: SessionId, text: string, options?: { delivery?: WhileWorking | undefined; build?: boolean | undefined }): { messageId: string; queued: boolean };
   /**
    * Send now or wait: changes one message waiting to be sent, its text or its
    * place (0 goes next), and appends `session.queue_changed`. Throws

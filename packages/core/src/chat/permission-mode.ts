@@ -23,6 +23,7 @@
 import { PERMISSION_MODE_LABELS, PERMISSION_MODES, PermissionMode as PermissionModeSchema, type PermissionMode, type SessionId, type SessionPermissionModeOption } from '@ogden-agents/shared';
 import type { AgentEvent, AgentSession } from '../agent-port.js';
 import {
+  BuildSessionReadOnlyError,
   ConfirmationRequiredError,
   CoreError,
   DeveloperModeRequiredError,
@@ -233,6 +234,8 @@ export function createPermissionModes(ctx: ChatContext, deps: Pick<Agents, 'drop
     setPermissionMode(workspaceId, sessionId, mode, options = {}) {
       if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
       const session = getSession(workspaceId, sessionId);
+      // An unattended build's session keeps the mode it started in (story 5.2): Skip all would bypass the build policy.
+      if (session.kind === 'build') throw new BuildSessionReadOnlyError();
       const parsed = PermissionModeSchema.safeParse(mode);
       if (!parsed.success) throw new ValidationError('Choose Ask, Auto or Skip all.', [{ path: ['mode'], message: 'unknown mode' }]);
       if (session.driver === 'terminal') throw new DriverIsTerminalError('The terminal is driving this chat. Switch back to the chat to change its permission mode.');

@@ -9,6 +9,7 @@
 import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createFixedSandbox } from '@ogden-agents/adapters';
 import { BMAD_DOWNLOAD_INTEGRITY_MESSAGE } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -29,6 +30,10 @@ import {
   testClaudeCli,
   testClaudeInstall,
   testHooksAllowed,
+  SANDBOX_ENV,
+  testSandbox,
+  TEST_SANDBOX_KIND,
+  TEST_SANDBOX_UNAVAILABLE_REASON,
 } from '../src/test-hooks.js';
 import { createLogger } from '../src/log.js';
 import { createBmadSourceAndCatalog } from '../src/start-planning.js';
@@ -104,6 +109,21 @@ describe('testBmadProbe (story 10.1)', () => {
     expect(testBmadProbe({ NODE_ENV: 'test', [BMAD_PROBE_ENV]: '1' }, OUTSIDE)).toBe(false);
     expect(testBmadProbe({ NODE_ENV: 'test' }, dir)).toBe(false);
     expect(testBmadProbe({ NODE_ENV: 'test', [BMAD_PROBE_ENV]: 'true' }, dir)).toBe(false);
+  });
+});
+
+describe('testSandbox (story 5.2)', () => {
+  it('answers available or unavailable only for a test run on a temp data folder, else the real probe', () => {
+    const dir = tempDataDir();
+    expect(testSandbox({ NODE_ENV: 'test', [SANDBOX_ENV]: 'available' }, dir)).toEqual({ available: true, kind: TEST_SANDBOX_KIND });
+    expect(testSandbox({ VITEST: 'true', [SANDBOX_ENV]: 'unavailable' }, dir)).toEqual({ available: false, reason: TEST_SANDBOX_UNAVAILABLE_REASON });
+    expect(testSandbox({ VITEST: 'true', [SANDBOX_ENV]: 'unavailable-windows' }, dir)).toMatchObject({ available: false, choices: ['attended', 'install_docker', 'other_agent'] });
+    expect(testSandbox({ [SANDBOX_ENV]: 'available' }, dir)).toBeUndefined();
+    expect(testSandbox({ NODE_ENV: 'test', [SANDBOX_ENV]: 'available' }, OUTSIDE)).toBeUndefined();
+    expect(testSandbox({ NODE_ENV: 'test' }, dir)).toBeUndefined();
+    expect(() => testSandbox({ NODE_ENV: 'test', [SANDBOX_ENV]: 'yes' }, dir)).toThrow(SANDBOX_ENV);
+    // A sandbox given to start() decides it: the hook is not read.
+    expect(resolveTestHooks({ NODE_ENV: 'test', [SANDBOX_ENV]: 'nope' }, dir, { ownsCore: true, sandbox: createFixedSandbox({ available: false, reason: 'x' }) }).sandbox).toBeUndefined();
   });
 });
 

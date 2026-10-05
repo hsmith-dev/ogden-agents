@@ -62,18 +62,18 @@ test('flipping Planning in one tab shows in another without a reload, and surviv
   }, { extra: { availableBmadPieces: AVAILABLE } });
 });
 
-test('Unattended builds and Retrospectives are greyed, marked Coming soon and cannot be turned on; Planning and Board can (story 4.2)', async ({ page }) => {
+test('Retrospectives is greyed, marked Coming soon and cannot be turned on; Planning, Board (story 4.2) and Unattended builds (story 5.2) can', async ({ page }) => {
   await withChatServer(page, async ({ server, repo }) => {
     const { wsId } = await startChat(page, repo);
     await page.goto(`${server.url}/w/${wsId}/settings#${WORKSPACE_SETTINGS_BMAD_ANCHOR}`);
-    for (const piece of ['builds', 'retrospectives'] as const) {
+    for (const piece of ['retrospectives'] as const) {
       const control = page.getByRole('switch', { name: BMAD_PIECE_INFO[piece].label, exact: true });
       await expect(control).toHaveAttribute('aria-checked', 'false');
       await expect(control).toBeDisabled();
       await expect(page.getByTestId(`bmad-${piece}-coming-soon`)).toHaveText(BMAD_COMING_SOON_LABEL);
     }
-    // Epic 4 ships Planning and Board (story 4.2): neither is Coming soon, and the main switch works.
-    for (const piece of ['planning', 'board'] as const) {
+    // Epic 4 ships Planning and Board (story 4.2), epic 5 Unattended builds (story 5.2): none is Coming soon, and the main switch works.
+    for (const piece of ['planning', 'board', 'builds'] as const) {
       await expect(page.getByRole('switch', { name: BMAD_PIECE_INFO[piece].label, exact: true })).toBeEnabled();
       await expect(page.getByTestId(`bmad-${piece}-coming-soon`)).toHaveCount(0);
     }

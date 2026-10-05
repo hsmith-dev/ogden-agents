@@ -118,6 +118,24 @@ function openTestCore(): Core {
   return core;
 }
 
+/** Unattended builds' routes (story 5.2; story 5.3 adds epics 5 and 11's others): each serves `builds` and checks the script trust. */
+const BUILD_ROUTES: readonly string[] = [
+  `POST ${API_ROUTES.workspaceBuilds}`,
+  `GET ${API_ROUTES.workspaceBuild}`,
+  `POST ${API_ROUTES.workspaceBuildApprove}`,
+  `POST ${API_ROUTES.workspaceBuildReject}`,
+  `POST ${API_ROUTES.workspaceBuildCommitPlan}`,
+  `GET ${API_ROUTES.sessionRun}`,
+  `GET ${API_ROUTES.workspaceBuildSandbox}`,
+  `GET ${API_ROUTES.workspaceRuns}`,
+  `GET ${API_ROUTES.workspaceRun}`,
+  `POST ${API_ROUTES.runStop}`,
+  `POST ${API_ROUTES.runRetry}`,
+  `POST ${API_ROUTES.runCheckAgain}`,
+  `GET ${API_ROUTES.workspaceBuildSettings}`,
+  `PATCH ${API_ROUTES.workspaceBuildSettings}`,
+];
+
 /** The routes that serve a piece in the fully wired app (stories 4.1 and 4.2), sorted as `guardedRouteKeys` lists them. */
 const PIECE_ROUTES: readonly string[] = [
   `GET ${API_ROUTES.workspaceCatalog}`,
@@ -129,10 +147,12 @@ const PIECE_ROUTES: readonly string[] = [
   `POST ${API_ROUTES.workspaceBmadSetup}`,
   // A document a planning session wrote (story 4.7): no trust, it reads one file and runs nothing.
   `GET ${API_ROUTES.workspaceDocument}`,
+  // Unattended builds (story 5.2): every route with the trust.
+  ...BUILD_ROUTES,
 ].sort();
 
-/** The routes that run the project's own scripts, so they check its trust too (story 4.2): every `board` route, never setup. */
-const TRUSTED_ROUTES: readonly string[] = [`GET ${API_ROUTES.workspaceTickets}`, `GET ${API_ROUTES.workspaceTicket}`, `PUT ${API_ROUTES.workspaceTicketStatus}`].sort();
+/** The routes that run the project's own scripts, so they check its trust too (story 4.2): every `board` and `builds` route, never setup. */
+const TRUSTED_ROUTES: readonly string[] = [`GET ${API_ROUTES.workspaceTickets}`, `GET ${API_ROUTES.workspaceTicket}`, `PUT ${API_ROUTES.workspaceTicketStatus}`, ...BUILD_ROUTES].sort();
 
 const BOARD = `${API_BASE}/workspaces/:wsId/board`;
 const CATALOG = `${API_BASE}/bmad/catalog`;

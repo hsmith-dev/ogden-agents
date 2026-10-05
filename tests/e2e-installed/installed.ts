@@ -550,7 +550,7 @@ export interface BmadServer {
  * the guarded `probe` route, and `bmadSource` (story 4.13: the fixture BMad
  * Method source, so Set up and the Board run the real `setup.py` and
  * `tickets.py` through uv with no network). Without any it is what a user
- * runs: Planning and Board shipped, the rest Coming soon. Repos are fake repos
+ * runs: Planning, Board and Unattended builds shipped, Retrospectives Coming soon. Repos are fake repos
  * in a folder of its own. Nothing is installed again.
  *
  * With `antigravity` (epic 6 entry 8), Antigravity can chat too, where it

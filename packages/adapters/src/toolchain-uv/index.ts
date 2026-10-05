@@ -24,3 +24,16 @@ export {
   type UvToolchainOptions,
   type VersionRunner,
 } from './uv-toolchain.js';
+export { uvEnvironment } from './uv-environment.js';
+export {
+  createUvScriptRunner,
+  SCRIPT_MAX_OUTPUT_BYTES,
+  SCRIPT_TIMEOUT_MS,
+  ScriptRunError,
+  type ScriptRun,
+  type ScriptRunErrorCode,
+  type ScriptStream,
+  type UvCommand,
+  type UvScriptRunner,
+  type UvScriptRunnerOptions,
+} from './script-runner.js';

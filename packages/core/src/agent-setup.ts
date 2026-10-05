@@ -30,163 +30,21 @@
  */
 import {
   AGENTS_STREAM,
-  SignInCodeRequest,
   type AgentAuthMethodKind,
   type AgentAuthState,
   type AgentSetupStatus,
-  type SignInResponse,
 } from '@ogden-agents/shared';
-import type { AgentInstallProgress, AgentPortStatus, AgentSetupPort, AgentSignIn, AgentSubscriptionState, ApiKeyVerification } from './agent-setup-port.js';
-import { ApiKeyRefusedError, CoreError, NotFoundError, SecretsUnavailableError, ValidationError } from './errors.js';
+import type { AgentInstallProgress, AgentPortStatus, AgentSetupPort, AgentSubscriptionState, ApiKeyVerification } from './agent-setup-port.js';
+import { AgentBusyError, AgentSetupError, LAST_KNOWN_AUTH_MAX_AGE_MS, apiKeySecretName, type AgentSetup, type AgentSetupOptions, type Flight, type SavedKey } from './agent-setup-types.js';
+import { ApiKeyRefusedError, NotFoundError, SecretsUnavailableError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import type { SecretStorePort } from './secret-store-port.js';
+import { createSignIns, stopSignIn } from './agent-setup-sign-in.js';
+import { inheritedKeyOf, installingStatus, shown, subscriptionOf } from './agent-setup-status.js';
 import { PROGRESS_INTERVAL_MS } from './toolchain.js';
 
-/**
- * How long the last confirmed subscription state (`signed_in` or
- * `signed_out`, read from the agent's status or set by a sign-in finishing
- * in the app) stands in for a status check that is slow or fails. Older than
- * this, such a check means `unknown`, which never injects a key (user
- * decision, 2026-10-01).
- */
-// Accepted risk (user's trade-off, 2026-10-01): a sign-in made outside the app while checks fail leaves a recent confirmed signed_out in place, so the key is still used for up to 5 minutes.
-export const LAST_KNOWN_AUTH_MAX_AGE_MS = 5 * 60_000;
-
-/** The secret name an agent's API key is stored under. */
-export const apiKeySecretName = (agentId: string) => `agent-api-key/${agentId}`;
-
-/**
- * An agent setup step that failed, with plain words for the user in
- * `message` (never a secret). Adapters throw it when a sign-in can't start.
- */
-export class AgentSetupError extends CoreError {
-  override readonly name = 'AgentSetupError';
-  /** For the log only (an install's step and npm's error code, say); never a secret, a URL or the agent's output. */
-  readonly details: Readonly<Record<string, unknown>>;
-  constructor(message: string, options: { cause?: unknown; details?: Record<string, unknown> } = {}) {
-    super('agent_setup_failed', message);
-    this.details = options.details ?? {};
-    if (options.cause !== undefined) this.cause = options.cause;
-  }
-}
-
-/** A sign-in code was sent, but no sign-in that takes one is in progress for the agent. */
-export class SignInNotPendingError extends CoreError {
-  override readonly name = 'SignInNotPendingError';
-  constructor(agentId: string) {
-    super('sign_in_not_pending', `no sign-in is in progress for ${agentId}`);
-  }
-}
-
-export interface AgentSetup {
-  /**
-   * Reads each agent's saved API key from the secret store, and the
-   * subscription state of each agent that has one. Call once before serving.
-   * Never throws: an unreadable store means no key (the failure is reported).
-   */
-  load(): Promise<void>;
-  /**
-   * Every supported agent's setup, with a sign-in in progress or the last
-   * failure laid over what its port reports, and its API key's state
-   * (never the key). Refreshes the subscription state.
-   */
-  list(): Promise<AgentSetupStatus[]>;
-  /**
-   * Checks `apiKey` with the agent's free verify call and stores it. Rejects
-   * with `ValidationError` (a malformed key, or an agent that takes none),
-   * `ApiKeyRefusedError` (nothing stored) or `SecretsUnavailableError`
-   * (no keychain; nothing stored). A key that couldn't be checked is saved.
-   */
-  setApiKey(agentId: string, apiKey: string): Promise<void>;
-  /** Removes the agent's API key. Idempotent. Rejects with `SecretsUnavailableError` when the store can't be used. */
-  deleteApiKey(agentId: string): Promise<void>;
-  /**
-   * What the agent's chat process gets on top of its environment: the API
-   * key under the port's variable name, only while its subscription is known
-   * to be signed out; otherwise nothing. Never logged.
-   */
-  agentEnv(agentId: string): Record<string, string>;
-  /**
-   * Re-reads the agent's subscription state when it has a key (saved or from
-   * the environment) and the last reading is older than `maxAgeMs`, so a
-   * sign-in made outside the app stops the key being used before the next
-   * chat starts. Bounded by the port's own status timeout; a failure means
-   * `unknown` (no key). Never throws.
-   */
-  refreshIfStale(agentId: string, maxAgeMs: number): Promise<void>;
-  /**
-   * Starts signing in to `agentId`, cancelling a sign-in already running for
-   * it. Resolves with `signing_in` and the URL to open (a secret: only for a
-   * `no-store` response), or `failed` when it couldn't start (the reason is
-   * in the event and in {@link list}).
-   */
-  signIn(agentId: string): Promise<SignInResponse>;
-  /** Types a code the user pasted into the running sign-in. Never logged, evented or stored. */
-  submitCode(agentId: string, code: string): Promise<void>;
-  /** Stops the running sign-in, if there is one. Idempotent. */
-  cancelSignIn(agentId: string): Promise<void>;
-  /**
-   * Starts installing `agentId`, only when the user asks, unless it is
-   * already installed or an install is running (`started: false`, with its
-   * status). Returns at once; progress and the outcome arrive as
-   * `agent.install_*` events.
-   */
-  install(agentId: string): Promise<{ started: boolean; agent: AgentSetupStatus }>;
-  /** Resolves once no install is running (tests, shutdown). */
-  settled(): Promise<void>;
-  /** Stops every sign-in (server stop). Appends nothing. */
-  dispose(): Promise<void>;
-}
-
-export interface AgentSetupOptions {
-  /** Called with every failure, for the log. Never carries the URL, a code, a key or the agent's output. */
-  onFailure?: (agentId: string, step: string, error: unknown) => void;
-  /** Where API keys are kept (AD-16). Without it, saving a key is refused as {@link SecretsUnavailableError}. */
-  secrets?: SecretStorePort;
-  /**
-   * The server's own environment, read at each use: an agent's key variable
-   * set there (any case) is used under the same precedence rule as a saved
-   * key, which comes first. Never logged.
-   */
-  inheritedEnv?: () => Readonly<Record<string, string | undefined>>;
-  /** The clock for the subscription state's age and install progress throttling. Default `performance.now` (monotonic). */
-  now?: () => number;
-  /** Minimum time between two install progress events. Default {@link PROGRESS_INTERVAL_MS}. */
-  progressIntervalMs?: number;
-}
-
-/** A saved API key, in memory only. `unchecked`: the provider couldn't be asked when it was saved (not kept across a restart). */
-interface SavedKey {
-  value: string;
-  unchecked: boolean;
-}
-
-/** The subscription state a port reports, or the one derived from its status (see `AgentPortStatus`). */
-function subscriptionOf(status: AgentPortStatus): AgentSubscriptionState {
-  if (status.subscription !== undefined) return status.subscription;
-  if (status.auth === 'signed_in' && status.method !== 'api_key') return 'signed_in';
-  if (status.install === 'installed' && status.auth === 'needs_sign_in' && status.reason === undefined) return 'signed_out';
-  return 'unknown';
-}
-
-/** The port status as core shows it: no subscription state, which never leaves core. */
-function shown(reported: AgentPortStatus): AgentSetupStatus {
-  const { subscription: _subscription, ...rest } = reported;
-  return rest;
-}
-
-/** `status` while an install runs: its progress in place of a reason or a size. */
-function installingStatus(status: AgentSetupStatus, progress: AgentInstallProgress): AgentSetupStatus {
-  const { reason: _reason, installSize: _size, method: _method, ...rest } = status;
-  return { ...rest, install: 'installing', progress: { step: progress.step, percent: progress.percent } };
-}
-
-interface Flight {
-  /** Set once the port's `signIn` resolved. */
-  handle: AgentSignIn | undefined;
-  /** Cancelled (or superseded, or disposed) before or after the handle arrived. */
-  stopped: boolean;
-}
+// Not `Flight`, `newFlight` or `SavedKey`: they stay inside this use-case.
+export { AgentBusyError, AgentSetupError, LAST_KNOWN_AUTH_MAX_AGE_MS, SignInNotPendingError, apiKeySecretName, type AgentReadiness, type AgentSetup, type AgentSetupOptions } from './agent-setup-types.js';
 
 export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPort[], options: AgentSetupOptions = {}): AgentSetup {
   const byId = new Map(ports.map((port) => [port.agentId, port]));
@@ -197,6 +55,14 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
   const keys = new Map<string, SavedKey>();
   /** Each agent's subscription state, as last read; missing means `unknown`. */
   const subscriptions = new Map<string, AgentSubscriptionState>();
+  /**
+   * Each agent's last status as `statusFor` read it, and when (6.3: a new
+   * chat's readiness). Dropped whenever its sign-in, key or install changes,
+   * so a readiness never answers from a reading that is out of date.
+   */
+  const lastStatus = new Map<string, { status: AgentSetupStatus; at: number; unread: boolean }>();
+  /** Status reads under way for a readiness, by agent: concurrent ones share one. */
+  const readinessReads = new Map<string, Promise<unknown>>();
   /** When each agent's subscription state was last read. */
   const readAt = new Map<string, number>();
   /** Each agent's last confirmed subscription state (never `unknown`), and when it was confirmed. */
@@ -227,6 +93,10 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
   const progressInterval = options.progressIntervalMs ?? PROGRESS_INTERVAL_MS;
   /** Each running install's latest progress, and when it is done. */
   const installs = new Map<string, { progress: AgentInstallProgress; done: Promise<void> }>();
+  /** Agents being uninstalled (epic 6 entry 7): no install starts meanwhile. */
+  const uninstalling = new Set<string>();
+  /** Agents being signed out: no uninstall meanwhile, and the other way round. */
+  const signingOut = new Set<string>();
   /** The last failed install's plain reason, shown until the agent is found installed or another install starts. */
   const installFailure = new Map<string, string>();
   /** Aborted by `dispose`, so a verify call in flight stops with the server. */
@@ -239,8 +109,6 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
     return port;
   };
 
-  const failed = (port: AgentSetupPort) => `${port.displayName} couldn't finish signing in. Try again.`;
-
   const report = (agentId: string, step: string, error: unknown) => {
     try {
       options.onFailure?.(agentId, step, error);
@@ -250,6 +118,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
   };
 
   const announce = (agentId: string, state: AgentAuthState, extra: { method?: AgentAuthMethodKind; reason?: string } = {}) => {
+    lastStatus.delete(agentId);
     if (disposed) return;
     try {
       events.append({ type: 'agent.auth_changed', workspaceId: null, streamId: AGENTS_STREAM, payload: { agentId, state, ...extra } });
@@ -265,6 +134,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
    */
   const setSubscription = (agentId: string, state: AgentSubscriptionState, startedAt?: number) => {
     if (startedAt !== undefined && generationOf(agentId) !== startedAt) return;
+    lastStatus.delete(agentId);
     generations.set(agentId, generationOf(agentId) + 1);
     const at = now();
     subscriptions.set(agentId, state);
@@ -287,16 +157,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
     return age >= 0 && age < LAST_KNOWN_AUTH_MAX_AGE_MS ? last.state : 'unknown';
   };
 
-  /** The agent's key variable in the server's own environment, whatever its case; `undefined` when unset or empty. */
-  const inheritedKey = (port: AgentSetupPort): string | undefined => {
-    const name = port.apiKey?.envName;
-    if (name === undefined || options.inheritedEnv === undefined) return undefined;
-    const env = options.inheritedEnv();
-    const exact = env[name];
-    if (exact !== undefined && exact !== '') return exact;
-    for (const [key, value] of Object.entries(env)) if (key.toUpperCase() === name.toUpperCase() && value !== undefined && value !== '') return value;
-    return undefined;
-  };
+  const inheritedKey = (port: AgentSetupPort): string | undefined => inheritedKeyOf(port, options.inheritedEnv);
 
   /** The key the agent would use: the saved one, else the one from the environment. */
   const keyFor = (port: AgentSetupPort): string | undefined => keys.get(port.agentId)?.value ?? inheritedKey(port);
@@ -378,8 +239,18 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
     }
   };
 
-  /** One agent's setup as `list` shows it. */
+  /** {@link readStatus}, kept as the agent's last status unless something changed it meanwhile. */
   const statusFor = async (port: AgentSetupPort): Promise<AgentSetupStatus> => {
+    const mark = { unread: false };
+    const read = await readStatus(port, mark);
+    const provider = options.providerOf?.(port.agentId);
+    const status = provider === undefined ? read : { ...read, provider };
+    lastStatus.set(port.agentId, { status, at: now(), unread: mark.unread });
+    return status;
+  };
+
+  /** One agent's setup as `list` shows it. `mark.unread` is set when its port's status threw (nobody could tell). */
+  const readStatus = async (port: AgentSetupPort, mark: { unread: boolean }): Promise<AgentSetupStatus> => {
     // A key write that failed (timed out) may have completed since: show what the store holds.
     if (resync.has(port.agentId)) await syncFromStore(port);
     let status: AgentSetupStatus;
@@ -390,6 +261,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       status = shown(reported);
     } catch (error) {
       report(port.agentId, 'status', error);
+      mark.unread = true;
       setSubscription(port.agentId, 'unknown', startedAt);
       status = {
         agentId: port.agentId,
@@ -455,44 +327,21 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
     }
   };
 
-  const stop = async (flight: Flight) => {
-    flight.stopped = true;
-    try {
-      await flight.handle?.cancel();
-    } catch {
-      // Cancelling is best effort; the adapter's own timeout still stops it.
-    }
-  };
-
-  const follow = (agentId: string, port: AgentSetupPort, flight: Flight, handle: AgentSignIn) => {
-    handle.done.then(
-      (outcome) => {
-        if (flights.get(agentId) !== flight) return;
-        flights.delete(agentId);
-        if (outcome === 'signed_in') {
-          lastFailure.delete(agentId);
-          // The subscription now comes first: a saved key stops being used.
-          setSubscription(agentId, 'signed_in');
-          announce(agentId, 'signed_in', { method: 'subscription' });
-        } else if (outcome === 'failed') {
-          lastFailure.set(agentId, failed(port));
-          announce(agentId, 'failed', { reason: failed(port) });
-        } else {
-          announce(agentId, 'needs_sign_in');
-        }
-        if (outcome !== 'signed_in' && keyFor(port) !== undefined) void readSubscription(port);
-      },
-      (error: unknown) => {
-        report(agentId, 'sign_in', error);
-        if (flights.get(agentId) !== flight) return;
-        flights.delete(agentId);
-        lastFailure.set(agentId, failed(port));
-        announce(agentId, 'failed', { reason: failed(port) });
-      },
-    );
-  };
+  const signIns = createSignIns({
+    flights,
+    lastFailure,
+    portFor,
+    disposed: () => disposed,
+    report,
+    announce,
+    setSubscription: (agentId, state) => setSubscription(agentId, state),
+    keyFor,
+    readSubscription,
+  });
 
   return {
+    ...signIns,
+
     async load() {
       await Promise.all(
         ports.map(async (port) => {
@@ -508,14 +357,43 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       return Promise.all(ports.map(statusFor));
     },
 
+    async readiness(agentId, maxAgeMs) {
+      const port = ports.find((candidate) => candidate.agentId === agentId);
+      // An agent with nothing to install or sign into (a test agent) is always ready.
+      if (port === undefined) return { install: 'installed', auth: 'signed_in' };
+      const last = lastStatus.get(agentId);
+      const age = last === undefined ? Number.POSITIVE_INFINITY : now() - last.at;
+      // A negative age (a clock that went backwards) counts as stale.
+      let reading = last !== undefined && age >= 0 && age < maxAgeMs ? last : undefined;
+      if (reading === undefined) {
+        let read = readinessReads.get(agentId);
+        if (read === undefined) {
+          read = statusFor(port).finally(() => readinessReads.delete(agentId));
+          readinessReads.set(agentId, read);
+        }
+        const status = (await read) as AgentSetupStatus;
+        reading = lastStatus.get(agentId) ?? { status, at: now(), unread: false };
+      }
+      const { status } = reading;
+      const shownState = { install: status.install, auth: status.auth };
+      // A status the port couldn't give is "can't tell": it never refuses a chat.
+      if (reading.unread) return shownState;
+      if (status.install !== 'installed') return { ...shownState, blocked: 'agent_not_installed' };
+      if (status.auth === 'signed_in') return shownState;
+      // Only a sign-out the agent confirmed refuses a chat: "can't tell" never does.
+      return subscriptionFor(agentId) === 'signed_out' ? { ...shownState, blocked: 'agent_signed_out' } : shownState;
+    },
+
     async install(agentId) {
       const port = portFor(agentId);
       if (disposed) throw new AgentSetupError(`${port.displayName} couldn't be installed. Try again.`);
+      if (uninstalling.has(agentId)) throw new AgentBusyError(`${port.displayName} is being uninstalled. Try again when it finishes.`);
       if (installs.has(agentId)) return { started: false, agent: await statusFor(port) };
       // Claimed before any await, so two clicks start one install.
       const progress: AgentInstallProgress = { step: `Installing ${port.displayName}`, percent: 0 };
       let release!: () => void;
       installs.set(agentId, { progress, done: new Promise<void>((resolve) => (release = resolve)) });
+      lastStatus.delete(agentId);
       let detected: AgentPortStatus;
       try {
         detected = await port.status();
@@ -532,9 +410,70 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       appendInstall(agentId, { type: 'agent.install_started', workspaceId: null, streamId: AGENTS_STREAM, payload: { agentId } });
       void runInstall(port, progress).finally(() => {
         installs.delete(agentId);
+        lastStatus.delete(agentId);
         release();
       });
       return { started: true, agent: withApiKey(port, installingStatus(shown(detected), progress)) };
+    },
+
+    async uninstall(agentId) {
+      const port = portFor(agentId);
+      if (port.uninstall === undefined) throw new ValidationError(`${port.displayName} can't be uninstalled from Ogden Agents.`, []);
+      if (installs.has(agentId)) throw new AgentBusyError(`${port.displayName} is being installed. Try again when it finishes.`);
+      if (uninstalling.has(agentId)) throw new AgentBusyError(`${port.displayName} is already being uninstalled.`);
+      if (signingOut.has(agentId)) throw new AgentBusyError(`${port.displayName} is signing out. Try again when it finishes.`);
+      uninstalling.add(agentId);
+      try {
+        // A sign-in in progress runs the installed copy: stop it first.
+        const flight = flights.get(agentId);
+        if (flight !== undefined) {
+          flights.delete(agentId);
+          await stopSignIn(flight);
+          announce(agentId, 'needs_sign_in');
+        }
+        try {
+          await port.uninstall();
+        } catch (error) {
+          report(agentId, 'uninstall', error);
+          throw new AgentBusyError(error instanceof AgentSetupError ? error.message : `${port.displayName} couldn't be uninstalled. Try again.`, { cause: error });
+        }
+        installFailure.delete(agentId);
+        lastStatus.delete(agentId);
+        await readSubscription(port);
+        appendInstall(agentId, { type: 'agent.uninstalled', workspaceId: null, streamId: AGENTS_STREAM, payload: { agentId } });
+        return await statusFor(port);
+      } finally {
+        uninstalling.delete(agentId);
+      }
+    },
+
+    async signOut(agentId) {
+      const port = portFor(agentId);
+      if (port.signOut === undefined) throw new ValidationError(`${port.displayName} can't be signed out from Ogden Agents.`, []);
+      if (installs.has(agentId) || uninstalling.has(agentId)) throw new AgentBusyError(`${port.displayName} is being installed or uninstalled. Try again when it finishes.`);
+      if (signingOut.has(agentId)) throw new AgentBusyError(`${port.displayName} is already signing out.`);
+      signingOut.add(agentId);
+      try {
+        const flight = flights.get(agentId);
+        if (flight !== undefined) {
+          flights.delete(agentId);
+          await stopSignIn(flight);
+        }
+        try {
+          await port.signOut();
+        } catch (error) {
+          report(agentId, 'sign_out', error);
+          throw new AgentBusyError(error instanceof AgentSetupError ? error.message : `${port.displayName} couldn't sign out. Try again.`, { cause: error });
+        }
+      } finally {
+        signingOut.delete(agentId);
+      }
+      lastFailure.delete(agentId);
+      // Signed out: a key, saved or from the environment, takes over (story 9.2's rule).
+      setSubscription(agentId, 'signed_out');
+      if (keyFor(port) !== undefined) announce(agentId, 'signed_in', { method: 'api_key' });
+      else announce(agentId, 'needs_sign_in');
+      return statusFor(port);
     },
 
     async settled() {
@@ -579,6 +518,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
         }
         resync.delete(agentId);
         keys.set(agentId, { value, unchecked: verification === 'unchecked' });
+        lastStatus.delete(agentId);
         // Subscription first: the key is used only when the subscription is known to be signed out.
         await readSubscription(port);
         if (subscriptionFor(agentId) === 'signed_out' && !wasInUse) announce(agentId, 'signed_in', { method: 'api_key' });
@@ -604,6 +544,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
         resync.delete(agentId);
         // Re-read, so the card shows what the store holds now; unreadable counts as deleted.
         if (!(await syncFromStore(port))) keys.delete(agentId);
+        lastStatus.delete(agentId);
         await readSubscription(port);
         if (wasInUse && !keyInUse(port)) announce(agentId, 'needs_sign_in');
       });
@@ -635,69 +576,20 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       await running;
     },
 
-    async signIn(agentId) {
-      const port = portFor(agentId);
-      if (disposed) throw new AgentSetupError(failed(port));
-      const previous = flights.get(agentId);
-      const flight: Flight = { handle: undefined, stopped: false };
-      // Claimed before any await, so two clicks run one sign-in.
-      flights.set(agentId, flight);
-      lastFailure.delete(agentId);
-      if (previous !== undefined) await stop(previous);
-      announce(agentId, 'signing_in');
-
-      let handle: AgentSignIn;
-      try {
-        handle = await port.signIn();
-      } catch (error) {
-        report(agentId, 'start', error);
-        if (flights.get(agentId) !== flight) return { state: 'needs_sign_in', url: null };
-        flights.delete(agentId);
-        const reason = error instanceof AgentSetupError ? error.message : failed(port);
-        lastFailure.set(agentId, reason);
-        announce(agentId, 'failed', { reason });
-        return { state: 'failed', url: null };
-      }
-      if (flight.stopped || flights.get(agentId) !== flight) {
-        // Cancelled, superseded or disposed while it started.
-        await handle.cancel().catch(() => {});
-        return { state: 'needs_sign_in', url: null };
-      }
-      flight.handle = handle;
-      follow(agentId, port, flight, handle);
-      return { state: 'signing_in', url: handle.url };
-    },
-
-    async submitCode(agentId, code) {
-      portFor(agentId);
-      const parsed = SignInCodeRequest.safeParse({ code });
-      // The code is never echoed, not even in the error.
-      if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? 'That is not a sign-in code.', []);
-      const handle = flights.get(agentId)?.handle;
-      if (handle?.submitCode === undefined) throw new SignInNotPendingError(agentId);
-      try {
-        await handle.submitCode(parsed.data.code);
-      } catch (error) {
-        report(agentId, 'submit_code', error);
-        throw new SignInNotPendingError(agentId);
-      }
-    },
-
-    async cancelSignIn(agentId) {
-      portFor(agentId);
-      const flight = flights.get(agentId);
-      if (flight === undefined) return;
-      flights.delete(agentId);
-      await stop(flight);
-      announce(agentId, 'needs_sign_in');
-    },
-
     async dispose() {
       disposed = true;
       lifetime.abort();
       const running = [...flights.values()];
       flights.clear();
-      await Promise.all(running.map(stop));
+      await Promise.all(running.map(stopSignIn));
+      // Whatever a port still runs (an install, a sign-out) stops with the server (epic 6 entry 7).
+      for (const port of ports) {
+        try {
+          port.close?.();
+        } catch (error) {
+          report(port.agentId, 'close', error);
+        }
+      }
     },
   };
 }

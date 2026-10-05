@@ -41,20 +41,19 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      # Builds the bmad-loop wheel when checking the vendored forks.
+      # The real-uv tests run BMad Method's tickets.py (story 4.1).
       # No uv.lock here, so nothing to key a cache on.
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: false
 
-      # Re-derives vendor/ from forks.lock (fork tarballs at the locked commits,
-      # a rebuilt bmad-loop wheel) and fails naming any file that differs
-      # (AD-13). Hashes are LF-normalized, so it passes on Windows checkouts too.
-      - name: Check vendored forks
-        run: node scripts/vendor-forks.mjs --check
-        env:
-          # Tag lookups go through the GitHub API; the token lifts the anonymous rate limit.
-          GITHUB_TOKEN: ${{ github.token }}
+      # The uv-managed Python the real-uv tests run BMad Method's tickets.py
+      # with (story 4.1; TEST_PYTHON in packages/server/test/planning-routes.test.ts).
+      # The tests never download it and ignore any preinstalled Python, so this
+      # is the only download; it retries once.
+      - name: Provision the tests' uv-managed Python
+        shell: bash
+        run: uv python install 3.12 || (sleep 5 && uv python install 3.12)
 
       - name: Typecheck
         run: pnpm typecheck
@@ -102,6 +101,80 @@ jobs:
       - name: Smoke test without optional dependencies
         run: node scripts/smoke-installed.mjs --omit-optional
 
+  # The double-click start scripts in start/ (backlog story 2), each on its own
+  # OS, run as a user runs them: check mode first, then a full start of the
+  # packed tarball through the script (OGDEN_AGENTS_PACKAGE points npx at it;
+  # no registry spec), which must serve the page and send server.started, and
+  # then stop through Quit. Their Node detection without Node, with an old
+  # Node and without npx is in tests/start-scripts.test.ts (the test job).
+  start-scripts:
+    name: Start scripts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            script: start\Start Ogden.cmd
+          - os: macos-latest
+            script: start/Start Ogden.command
+          - os: ubuntu-latest
+            script: start/start-ogden.sh
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Pack
+        run: pnpm run pack
+
+      - name: Check mode (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: call "${{ matrix.script }}" --check
+
+      - name: Check mode
+        if: runner.os != 'Windows'
+        shell: bash
+        run: '"./${{ matrix.script }}" --check'
+
+      - name: Start the packed tarball through the script
+        run: node scripts/smoke-installed.mjs --start-script "${{ matrix.script }}"
+
+  # Planning provenance (story 10.8): every started plan's baseline_revision is
+  # an ancestor of HEAD, and every deferred-work Open items line matches a Log
+  # entry, names no resolved one, and (entry 4.12) every Log entry the pull
+  # request adds is indexed or resolved, compared with the base branch. Needs
+  # the full history, so the checkout is not shallow.
+  provenance:
+    name: Provenance
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Check plan baselines and the deferred-work index
+        run: node scripts/check-provenance.mjs
+        env:
+          # The pull request's base branch. On a push it is empty and the script falls back to the branch's
+          # upstream (origin/main on main, the pushed commit itself), so the new-entries rule passes trivially there.
+          PROVENANCE_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+
   # The uv archives Ogden Agents may install (story 1.8): re-download each one
   # pinned in packages/adapters/src/toolchain-uv/uv-release.json and check its
   # SHA-256, so a wrong pin fails here and not on a user's computer. The only
@@ -120,7 +193,49 @@ jobs:
       - name: Check every pinned uv archive
         run: node scripts/check-uv-pins.mjs
 
-  # The Claude Agent ACP adapter Ogden Agents may install (story 9.3): a real
+  # The desktop app's pinned Node (story 13.3, AD-23): each pinned archive hash in
+  # packages/desktop/desktop-node-pins.json must equal the one nodejs.org publishes for that
+  # file, so a wrong pin fails here and not in a user's build. The build itself also refuses a
+  # download that does not match (packages/desktop/scripts/stage.mjs).
+  desktop-pins:
+    name: Desktop Node pins
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Check every pinned Node archive hash
+        run: node scripts/desktop-pins.mjs --check
+
+  # The pinned BMad Method (story 4.14, AD-13; since 2026-10-04 Ogden Agents'
+  # fork hsmith-dev/BMAD-METHOD, docs/bmad-fork.md): each pinned commit's
+  # tarball is downloaded and its content hash recomputed through the app's
+  # own archive module; the commit must be in the history of the lock's ref
+  # (a fork tag), and its upstream base in bmad-code-org/BMAD-METHOD main's
+  # history and an ancestor of the commit. Read-only GitHub requests. The
+  # only job that downloads them; no test does.
+  bmad-pins:
+    name: BMad pins
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Check the pinned BMad Method fork and its upstream base
+        run: node scripts/bmad-lock.mjs --check
+        env:
+          # The compare lookups go through the GitHub API; the token lifts the anonymous rate limit.
+          GITHUB_TOKEN: ${{ github.token }}
+
+  # The agents Ogden Agents may install. The Claude Agent ACP adapter (story 9.3): a real
   # `npm ci` of the pins in packages/adapters/src/setup-claude-code/pins/ into
   # a temp folder, as the app runs it (--ignore-scripts, integrity checked),
   # without and with the Agent SDK's bundled claude, on each OS. The only job
@@ -145,6 +260,12 @@ jobs:
 
       - name: Install the pinned adapter with the bundled claude
         run: node scripts/agent-pins.mjs --check --with-binary
+
+      # Antigravity's pinned archive for this OS (epic 6 entry 5): downloaded
+      # into a temp folder, its SHA-256 checked against the pin and its server
+      # found in it. The only job that downloads it; no test runs it.
+      - name: Check the pinned Antigravity archive
+        run: node scripts/agent-pins.mjs --check --agent antigravity
 
   # UI layout in a real browser (architecture Conventions: jsdom doesn't
   # evaluate media queries): sidebar forms and overflow at 1440, 900 and 390
@@ -188,8 +309,10 @@ jobs:
   # folder and started by its own `ogden` launcher in background mode, plus the
   # security gate's negative checks and the proof that they fail without the
   # gate, and the permission hold and its proof. The agent is the repo's fake
-  # ACP agent (OGDEN_AGENTS_CLAUDE_ACP_PATH): no real agent, no agent or uv
-  # download. The suite quits every server it starts and leaves no process.
+  # ACP agent (OGDEN_AGENTS_CLAUDE_ACP_PATH): no real agent, and the product
+  # downloads no agent or uv. The job provisions uv and its managed Python
+  # (below) for epic 4's planning journey, whose BMad Method comes from a
+  # local fixture tarball (story 4.13). The suite quits every server it starts and leaves no process.
   e2e-installed:
     name: End-to-end, installed (${{ matrix.os }}, Chromium)
     runs-on: ${{ matrix.os }}
@@ -214,6 +337,18 @@ jobs:
       # Builds dist/, then writes ogden-agents-<version>.tgz, which the suite installs.
       - name: Pack
         run: pnpm run pack
+
+      # Epic 4's planning journey (story 4.13) sets BMad Method up and reads the
+      # board through the installed server's uv, from a local fixture tarball
+      # (OGDEN_AGENTS_TEST_BMAD_SOURCE): uv on PATH and its managed Python, which
+      # the suite never downloads (offline, UV_PYTHON_DOWNLOADS=never).
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: false
+
+      - name: Provision the suite's uv-managed Python
+        shell: bash
+        run: uv python install 3.12 || (sleep 5 && uv python install 3.12)
 
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium

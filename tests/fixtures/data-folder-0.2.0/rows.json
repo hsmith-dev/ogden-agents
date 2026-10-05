@@ -1,0 +1,707 @@
+{
+  "_comment": "Rows as Ogden Agents 0.2.0 (5765a09, migrations 0000-0003) wrote them, captured by running its own server with the fake ACP agent (story 10.7). Repo paths are placeholders: {{bmad|plain}.path} is the canonical workspace key, {{bmad|plain}.realPath} the real path. The one edit: the 'wait <flag file>' message reads 'wait for the build'.",
+  "onboarding": "{\"welcomeCompleted\":true}\n",
+  "tables": {
+    "workspaces": [
+      {
+        "id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "path": "{{bmad.path}}",
+        "created_at": "2026-10-02T02:29:00.659Z",
+        "real_path": "{{bmad.realPath}}",
+        "caution_level": "ask_for_commands"
+      },
+      {
+        "id": "ws_01M3X7333P03C02D7JE9RERKK5",
+        "path": "{{plain.path}}",
+        "created_at": "2026-10-02T02:29:00.662Z",
+        "real_path": "{{plain.realPath}}",
+        "caution_level": "ask_every_time"
+      }
+    ],
+    "sessions": [
+      {
+        "id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "kind": "chat",
+        "state": "idle",
+        "driver": "ui",
+        "title": null,
+        "adapter_refs": "{\"agentSessionId\":\"fake-session-1\"}",
+        "created_at": "2026-10-02T02:29:00.664Z",
+        "updated_at": "2026-10-02T02:29:01.246Z"
+      },
+      {
+        "id": "ses_01M3X733CPSN8F3KXE0PM7XVPQ",
+        "workspace_id": "ws_01M3X7333P03C02D7JE9RERKK5",
+        "kind": "chat",
+        "state": "idle",
+        "driver": "ui",
+        "title": null,
+        "adapter_refs": "{\"agentSessionId\":\"fake-session-1\"}",
+        "created_at": "2026-10-02T02:29:00.950Z",
+        "updated_at": "2026-10-02T02:29:01.100Z"
+      }
+    ],
+    "permission_rules": [
+      {
+        "id": "rule_01M3X7338M0B65WWK4CE9RJVZT",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "kind": "command_prefix",
+        "value": "npm install",
+        "label": "npm install",
+        "created_at": "2026-10-02T02:29:00.820Z"
+      }
+    ],
+    "runs": [],
+    "events": [
+      {
+        "seq": 1,
+        "id": "evt_01M3X73336R534GR1HY6C41Z6T",
+        "workspace_id": null,
+        "stream_id": "server",
+        "type": "server.started",
+        "at": "2026-10-02T02:29:00.646Z",
+        "payload": "{\"version\":\"0.2.0-rc.1\"}"
+      },
+      {
+        "seq": 2,
+        "id": "evt_01M3X7333MES1A8JMYRHGZT4GC",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "type": "workspace.created",
+        "at": "2026-10-02T02:29:00.660Z",
+        "payload": "{\"workspace\":{\"id\":\"ws_01M3X7333KQTTKZG3TGVP8KJA6\",\"path\":\"{{bmad.path}}\",\"realPath\":\"{{bmad.realPath}}\",\"createdAt\":\"2026-10-02T02:29:00.659Z\"}}"
+      },
+      {
+        "seq": 3,
+        "id": "evt_01M3X7333P03C02D7JE9RERKK6",
+        "workspace_id": "ws_01M3X7333P03C02D7JE9RERKK5",
+        "stream_id": "ws_01M3X7333P03C02D7JE9RERKK5",
+        "type": "workspace.created",
+        "at": "2026-10-02T02:29:00.662Z",
+        "payload": "{\"workspace\":{\"id\":\"ws_01M3X7333P03C02D7JE9RERKK5\",\"path\":\"{{plain.path}}\",\"realPath\":\"{{plain.realPath}}\",\"createdAt\":\"2026-10-02T02:29:00.662Z\"}}"
+      },
+      {
+        "seq": 4,
+        "id": "evt_01M3X7333QEM34CMFX0SNQP05Q",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "type": "workspace.settings_changed",
+        "at": "2026-10-02T02:29:00.663Z",
+        "payload": "{\"cautionLevel\":\"ask_for_commands\",\"previous\":\"ask_every_time\"}"
+      },
+      {
+        "seq": 5,
+        "id": "evt_01M3X7333S1RHQ0MRTTSF97E9J",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.created",
+        "at": "2026-10-02T02:29:00.665Z",
+        "payload": "{\"session\":{\"id\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"workspaceId\":\"ws_01M3X7333KQTTKZG3TGVP8KJA6\",\"kind\":\"chat\",\"state\":\"idle\",\"driver\":\"ui\",\"title\":null,\"adapterRefs\":{},\"createdAt\":\"2026-10-02T02:29:00.664Z\",\"updatedAt\":\"2026-10-02T02:29:00.664Z\"}}"
+      },
+      {
+        "seq": 6,
+        "id": "evt_01M3X7333VZ94KKFM9BSCW3JWE",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.message_completed",
+        "at": "2026-10-02T02:29:00.667Z",
+        "payload": "{\"messageId\":\"msg_01M3X7333V9V6J21M02EEEPD2C\",\"role\":\"user\",\"content\":\"Say hello\"}"
+      },
+      {
+        "seq": 7,
+        "id": "evt_01M3X7333W69NAGJ6JCA8DV6YH",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:00.668Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"state\":\"working\",\"previous\":\"idle\"}"
+      },
+      {
+        "seq": 10,
+        "id": "evt_01M3X7337RSHHNP6K964YRFY5Q",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.message_completed",
+        "at": "2026-10-02T02:29:00.792Z",
+        "payload": "{\"messageId\":\"msg_01M3X7335T5GHHZNM5RS2TZ5SF\",\"role\":\"agent\",\"content\":\"Hello from the fake agent.\"}"
+      },
+      {
+        "seq": 11,
+        "id": "evt_01M3X7337SSJX961SWV6A9Z4A7",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:00.793Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"state\":\"idle\",\"previous\":\"working\"}"
+      },
+      {
+        "seq": 12,
+        "id": "evt_01M3X7337T16K5GSW9PJXMQT5C",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.message_completed",
+        "at": "2026-10-02T02:29:00.794Z",
+        "payload": "{\"messageId\":\"msg_01M3X7337TBT55EP45EW3AWY8J\",\"role\":\"user\",\"content\":\"tool\"}"
+      },
+      {
+        "seq": 13,
+        "id": "evt_01M3X7337VSV0CF0ZM4GNQMC05",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:00.795Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"state\":\"working\",\"previous\":\"idle\"}"
+      },
+      {
+        "seq": 14,
+        "id": "evt_01M3X7337WS9TY0A22B5W55CVY",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.tool_call",
+        "at": "2026-10-02T02:29:00.796Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"toolCallId\":\"call-edit\",\"title\":\"Edit src/example.ts\",\"kind\":\"edit\",\"status\":\"in_progress\"}"
+      },
+      {
+        "seq": 15,
+        "id": "evt_01M3X7337XJDKA92H0DXDJP1FM",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.tool_call_updated",
+        "at": "2026-10-02T02:29:00.797Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"toolCallId\":\"call-edit\",\"title\":\"Edit src/example.ts\",\"kind\":\"edit\",\"status\":\"completed\",\"diffs\":[{\"path\":\"src/example.ts\",\"oldText\":\"const a = 1;\\n\",\"newText\":\"const a = 2;\\n\"}]}"
+      },
+      {
+        "seq": 17,
+        "id": "evt_01M3X7337XJDKA92H0DXDJP1FP",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.message_completed",
+        "at": "2026-10-02T02:29:00.797Z",
+        "payload": "{\"messageId\":\"msg_01M3X7337X508S3EB39GYFXHJZ\",\"role\":\"agent\",\"content\":\"Edited.\"}"
+      },
+      {
+        "seq": 18,
+        "id": "evt_01M3X7337YC4R8PZWBGZ4M52DZ",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:00.798Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"state\":\"idle\",\"previous\":\"working\"}"
+      },
+      {
+        "seq": 19,
+        "id": "evt_01M3X73387WXT4A6A9Z1Z139WX",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.message_completed",
+        "at": "2026-10-02T02:29:00.807Z",
+        "payload": "{\"messageId\":\"msg_01M3X7338735NR5C9BDBSXR9P9\",\"role\":\"user\",\"content\":\"permission npm install stripe\"}"
+      },
+      {
+        "seq": 20,
+        "id": "evt_01M3X73387WXT4A6A9Z1Z139WY",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:00.807Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"state\":\"working\",\"previous\":\"idle\"}"
+      },
+      {
+        "seq": 21,
+        "id": "evt_01M3X73388VSHR7W1A6VB5JDFP",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.tool_call",
+        "at": "2026-10-02T02:29:00.808Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"toolCallId\":\"call-permission\",\"title\":\"Run npm install stripe\",\"kind\":\"execute\",\"status\":\"pending\"}"
+      },
+      {
+        "seq": 22,
+        "id": "evt_01M3X733895MVPN84NGQRAGXYR",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "permission.requested",
+        "at": "2026-10-02T02:29:00.809Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"requestId\":\"preq_01M3X73389W6DAEJP7J1QQRA06\",\"toolCall\":{\"toolCallId\":\"call-permission\",\"title\":\"Run npm install stripe\",\"kind\":\"execute\",\"command\":\"npm install stripe\"},\"alwaysAllowScope\":{\"kind\":\"command_prefix\",\"value\":\"npm install\",\"label\":\"npm install\"},\"cautionLevel\":\"ask_for_commands\"}"
+      },
+      {
+        "seq": 23,
+        "id": "evt_01M3X733895MVPN84NGQRAGXYS",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:00.809Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"state\":\"waiting\",\"previous\":\"working\"}"
+      },
+      {
+        "seq": 24,
+        "id": "evt_01M3X7338M0B65WWK4CE9RJVZV",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "type": "workspace.permission_rule_added",
+        "at": "2026-10-02T02:29:00.820Z",
+        "payload": "{\"ruleId\":\"rule_01M3X7338M0B65WWK4CE9RJVZT\",\"scope\":{\"kind\":\"command_prefix\",\"value\":\"npm install\",\"label\":\"npm install\"}}"
+      },
+      {
+        "seq": 25,
+        "id": "evt_01M3X7338M0B65WWK4CE9RJVZW",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "permission.resolved",
+        "at": "2026-10-02T02:29:00.820Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"requestId\":\"preq_01M3X73389W6DAEJP7J1QQRA06\",\"decision\":\"allow_always\",\"by\":\"user\",\"ruleId\":\"rule_01M3X7338M0B65WWK4CE9RJVZT\"}"
+      },
+      {
+        "seq": 26,
+        "id": "evt_01M3X7338M0B65WWK4CE9RJVZX",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:00.820Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"state\":\"working\",\"previous\":\"waiting\"}"
+      },
+      {
+        "seq": 27,
+        "id": "evt_01M3X7338NMF11XX9BDKDRGQDP",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.tool_call_updated",
+        "at": "2026-10-02T02:29:00.821Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"toolCallId\":\"call-permission\",\"title\":\"Run npm install stripe\",\"kind\":\"execute\",\"status\":\"completed\"}"
+      },
+      {
+        "seq": 29,
+        "id": "evt_01M3X7338NMF11XX9BDKDRGQDR",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.message_completed",
+        "at": "2026-10-02T02:29:00.821Z",
+        "payload": "{\"messageId\":\"msg_01M3X7338NJX2B0TRT3Q2ST32C\",\"role\":\"agent\",\"content\":\"Ran npm install stripe.\"}"
+      },
+      {
+        "seq": 30,
+        "id": "evt_01M3X7338PAMVA9QBTE9GYJ69N",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:00.822Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"state\":\"idle\",\"previous\":\"working\"}"
+      },
+      {
+        "seq": 31,
+        "id": "evt_01M3X73391VVTREFCX00KKSEEE",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.message_completed",
+        "at": "2026-10-02T02:29:00.833Z",
+        "payload": "{\"messageId\":\"msg_01M3X73391495MPSFDQYKQ746J\",\"role\":\"user\",\"content\":\"permission git status --short\"}"
+      },
+      {
+        "seq": 32,
+        "id": "evt_01M3X73391VVTREFCX00KKSEEF",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:00.833Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"state\":\"working\",\"previous\":\"idle\"}"
+      },
+      {
+        "seq": 33,
+        "id": "evt_01M3X733928R58Z3T0BNHS7SH0",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.tool_call",
+        "at": "2026-10-02T02:29:00.834Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"toolCallId\":\"call-permission\",\"title\":\"Run git status --short\",\"kind\":\"execute\",\"status\":\"pending\"}"
+      },
+      {
+        "seq": 34,
+        "id": "evt_01M3X733928R58Z3T0BNHS7SH1",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "permission.requested",
+        "at": "2026-10-02T02:29:00.834Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"requestId\":\"preq_01M3X73392KF2CF2YDT1Q33F1D\",\"toolCall\":{\"toolCallId\":\"call-permission\",\"title\":\"Run git status --short\",\"kind\":\"execute\",\"command\":\"git status --short\"},\"alwaysAllowScope\":{\"kind\":\"command_prefix\",\"value\":\"git status\",\"label\":\"git status\"},\"cautionLevel\":\"ask_for_commands\"}"
+      },
+      {
+        "seq": 35,
+        "id": "evt_01M3X733928R58Z3T0BNHS7SH2",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:00.834Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"state\":\"waiting\",\"previous\":\"working\"}"
+      },
+      {
+        "seq": 36,
+        "id": "evt_01M3X7339D34X9MC5VXDPTGDD6",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "type": "workspace.permission_rule_added",
+        "at": "2026-10-02T02:29:00.845Z",
+        "payload": "{\"ruleId\":\"rule_01M3X7339D34X9MC5VXDPTGDD5\",\"scope\":{\"kind\":\"command_prefix\",\"value\":\"git status\",\"label\":\"git status\"}}"
+      },
+      {
+        "seq": 37,
+        "id": "evt_01M3X7339D34X9MC5VXDPTGDD7",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "permission.resolved",
+        "at": "2026-10-02T02:29:00.845Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"requestId\":\"preq_01M3X73392KF2CF2YDT1Q33F1D\",\"decision\":\"allow_always\",\"by\":\"user\",\"ruleId\":\"rule_01M3X7339D34X9MC5VXDPTGDD5\"}"
+      },
+      {
+        "seq": 38,
+        "id": "evt_01M3X7339E0JTJE46K0SYETJ1A",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:00.846Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"state\":\"working\",\"previous\":\"waiting\"}"
+      },
+      {
+        "seq": 39,
+        "id": "evt_01M3X7339E0JTJE46K0SYETJ1B",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.tool_call_updated",
+        "at": "2026-10-02T02:29:00.846Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"toolCallId\":\"call-permission\",\"title\":\"Run git status --short\",\"kind\":\"execute\",\"status\":\"completed\"}"
+      },
+      {
+        "seq": 41,
+        "id": "evt_01M3X7339E0JTJE46K0SYETJ1D",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.message_completed",
+        "at": "2026-10-02T02:29:00.846Z",
+        "payload": "{\"messageId\":\"msg_01M3X7339E414HPTN15HQT13BE\",\"role\":\"agent\",\"content\":\"Ran git status --short.\"}"
+      },
+      {
+        "seq": 42,
+        "id": "evt_01M3X7339F22YCARH3CHEEH8JK",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:00.847Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"state\":\"idle\",\"previous\":\"working\"}"
+      },
+      {
+        "seq": 43,
+        "id": "evt_01M3X7339VAD9D00YQQ1N40GMP",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "type": "workspace.permission_rule_removed",
+        "at": "2026-10-02T02:29:00.859Z",
+        "payload": "{\"ruleId\":\"rule_01M3X7339D34X9MC5VXDPTGDD5\"}"
+      },
+      {
+        "seq": 44,
+        "id": "evt_01M3X7339WV5Z8Z73X27YGDZA7",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.message_completed",
+        "at": "2026-10-02T02:29:00.860Z",
+        "payload": "{\"messageId\":\"msg_01M3X7339VV89NRFMVNHT031A0\",\"role\":\"user\",\"content\":\"permission npm install lodash\"}"
+      },
+      {
+        "seq": 45,
+        "id": "evt_01M3X7339WV5Z8Z73X27YGDZA8",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:00.860Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"state\":\"working\",\"previous\":\"idle\"}"
+      },
+      {
+        "seq": 46,
+        "id": "evt_01M3X7339WV5Z8Z73X27YGDZA9",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.tool_call",
+        "at": "2026-10-02T02:29:00.860Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"toolCallId\":\"call-permission\",\"title\":\"Run npm install lodash\",\"kind\":\"execute\",\"status\":\"pending\"}"
+      },
+      {
+        "seq": 47,
+        "id": "evt_01M3X7339X27PS2HZA5ZK3QVD9",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "permission.requested",
+        "at": "2026-10-02T02:29:00.861Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"requestId\":\"preq_01M3X7339X2XNZFGPT3CM1VEVM\",\"toolCall\":{\"toolCallId\":\"call-permission\",\"title\":\"Run npm install lodash\",\"kind\":\"execute\",\"command\":\"npm install lodash\"},\"alwaysAllowScope\":{\"kind\":\"command_prefix\",\"value\":\"npm install\",\"label\":\"npm install\"},\"cautionLevel\":\"ask_for_commands\"}"
+      },
+      {
+        "seq": 48,
+        "id": "evt_01M3X7339X27PS2HZA5ZK3QVDA",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "permission.resolved",
+        "at": "2026-10-02T02:29:00.861Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"requestId\":\"preq_01M3X7339X2XNZFGPT3CM1VEVM\",\"decision\":\"allow_once\",\"by\":\"rule\",\"ruleId\":\"rule_01M3X7338M0B65WWK4CE9RJVZT\"}"
+      },
+      {
+        "seq": 49,
+        "id": "evt_01M3X7339X27PS2HZA5ZK3QVDB",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.tool_call_updated",
+        "at": "2026-10-02T02:29:00.861Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"toolCallId\":\"call-permission\",\"title\":\"Run npm install lodash\",\"kind\":\"execute\",\"status\":\"completed\"}"
+      },
+      {
+        "seq": 51,
+        "id": "evt_01M3X7339YHX6VD8Q27CPMRPBQ",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.message_completed",
+        "at": "2026-10-02T02:29:00.862Z",
+        "payload": "{\"messageId\":\"msg_01M3X7339X1XZA0K9QCKEB9WXQ\",\"role\":\"agent\",\"content\":\"Ran npm install lodash.\"}"
+      },
+      {
+        "seq": 52,
+        "id": "evt_01M3X7339YHX6VD8Q27CPMRPBR",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:00.862Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"state\":\"idle\",\"previous\":\"working\"}"
+      },
+      {
+        "seq": 53,
+        "id": "evt_01M3X733A8WJHZNXT89TWS8EZF",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.message_completed",
+        "at": "2026-10-02T02:29:00.872Z",
+        "payload": "{\"messageId\":\"msg_01M3X733A85316CTRHAQP5HF25\",\"role\":\"user\",\"content\":\"permission\"}"
+      },
+      {
+        "seq": 54,
+        "id": "evt_01M3X733A8WJHZNXT89TWS8EZG",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:00.872Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"state\":\"working\",\"previous\":\"idle\"}"
+      },
+      {
+        "seq": 55,
+        "id": "evt_01M3X733A9CTG57JMQ6DPP3FF7",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.tool_call",
+        "at": "2026-10-02T02:29:00.873Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"toolCallId\":\"call-permission\",\"title\":\"Run npm test\",\"kind\":\"execute\",\"status\":\"pending\"}"
+      },
+      {
+        "seq": 56,
+        "id": "evt_01M3X733A9CTG57JMQ6DPP3FF8",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "permission.requested",
+        "at": "2026-10-02T02:29:00.873Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"requestId\":\"preq_01M3X733A9J7JVCA4TM941YDZ0\",\"toolCall\":{\"toolCallId\":\"call-permission\",\"title\":\"Run npm test\",\"kind\":\"execute\",\"command\":\"npm test\"},\"alwaysAllowScope\":{\"kind\":\"command_prefix\",\"value\":\"npm test\",\"label\":\"npm test\"},\"cautionLevel\":\"ask_for_commands\"}"
+      },
+      {
+        "seq": 57,
+        "id": "evt_01M3X733A9CTG57JMQ6DPP3FF9",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:00.873Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"state\":\"waiting\",\"previous\":\"working\"}"
+      },
+      {
+        "seq": 58,
+        "id": "evt_01M3X733AM822WVZQN854TXACF",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "permission.resolved",
+        "at": "2026-10-02T02:29:00.884Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"requestId\":\"preq_01M3X733A9J7JVCA4TM941YDZ0\",\"decision\":\"deny\",\"reason\":\"Not yet, please\",\"by\":\"user\"}"
+      },
+      {
+        "seq": 59,
+        "id": "evt_01M3X733AM822WVZQN854TXACG",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:00.884Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"state\":\"working\",\"previous\":\"waiting\"}"
+      },
+      {
+        "seq": 60,
+        "id": "evt_01M3X733AM822WVZQN854TXACH",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.tool_call_updated",
+        "at": "2026-10-02T02:29:00.884Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"toolCallId\":\"call-permission\",\"title\":\"Run npm test\",\"kind\":\"execute\",\"status\":\"failed\"}"
+      },
+      {
+        "seq": 62,
+        "id": "evt_01M3X733AN15H2PQ2YRJ90C1GM",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.message_completed",
+        "at": "2026-10-02T02:29:00.885Z",
+        "payload": "{\"messageId\":\"msg_01M3X733ANZG9XS1EQ0NFA52HB\",\"role\":\"agent\",\"content\":\"Denied npm test.\"}"
+      },
+      {
+        "seq": 63,
+        "id": "evt_01M3X733AN15H2PQ2YRJ90C1GN",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.message_completed",
+        "at": "2026-10-02T02:29:00.885Z",
+        "payload": "{\"messageId\":\"msg_01M3X733ANZG9XS1EQ0NFA52HC\",\"role\":\"user\",\"content\":\"I denied \\\"npm test\\\": Not yet, please\",\"origin\":\"deny_reason\"}"
+      },
+      {
+        "seq": 66,
+        "id": "evt_01M3X733CN42X4CVWMZXNXSTKW",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.message_completed",
+        "at": "2026-10-02T02:29:00.949Z",
+        "payload": "{\"messageId\":\"msg_01M3X733ANZG9XS1EQ0NFA52HD\",\"role\":\"agent\",\"content\":\"Hello from the fake agent.\"}"
+      },
+      {
+        "seq": 67,
+        "id": "evt_01M3X733CN42X4CVWMZXNXSTKX",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:00.949Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"state\":\"idle\",\"previous\":\"working\"}"
+      },
+      {
+        "seq": 68,
+        "id": "evt_01M3X733CPSN8F3KXE0PM7XVPR",
+        "workspace_id": "ws_01M3X7333P03C02D7JE9RERKK5",
+        "stream_id": "ses_01M3X733CPSN8F3KXE0PM7XVPQ",
+        "type": "session.created",
+        "at": "2026-10-02T02:29:00.950Z",
+        "payload": "{\"session\":{\"id\":\"ses_01M3X733CPSN8F3KXE0PM7XVPQ\",\"workspaceId\":\"ws_01M3X7333P03C02D7JE9RERKK5\",\"kind\":\"chat\",\"state\":\"idle\",\"driver\":\"ui\",\"title\":null,\"adapterRefs\":{},\"createdAt\":\"2026-10-02T02:29:00.950Z\",\"updatedAt\":\"2026-10-02T02:29:00.950Z\"}}"
+      },
+      {
+        "seq": 69,
+        "id": "evt_01M3X733CQMG587PCBT7DDGEVD",
+        "workspace_id": "ws_01M3X7333P03C02D7JE9RERKK5",
+        "stream_id": "ses_01M3X733CPSN8F3KXE0PM7XVPQ",
+        "type": "session.message_completed",
+        "at": "2026-10-02T02:29:00.951Z",
+        "payload": "{\"messageId\":\"msg_01M3X733CQPTMYHTXFT3DTZT4E\",\"role\":\"user\",\"content\":\"wait for the build\"}"
+      },
+      {
+        "seq": 70,
+        "id": "evt_01M3X733CQMG587PCBT7DDGEVE",
+        "workspace_id": "ws_01M3X7333P03C02D7JE9RERKK5",
+        "stream_id": "ses_01M3X733CPSN8F3KXE0PM7XVPQ",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:00.951Z",
+        "payload": "{\"sessionId\":\"ses_01M3X733CPSN8F3KXE0PM7XVPQ\",\"state\":\"working\",\"previous\":\"idle\"}"
+      },
+      {
+        "seq": 71,
+        "id": "evt_01M3X733CS4Y8CJ9ANQ64TVS7E",
+        "workspace_id": "ws_01M3X7333P03C02D7JE9RERKK5",
+        "stream_id": "ses_01M3X733CPSN8F3KXE0PM7XVPQ",
+        "type": "session.message_queued",
+        "at": "2026-10-02T02:29:00.953Z",
+        "payload": "{\"sessionId\":\"ses_01M3X733CPSN8F3KXE0PM7XVPQ\",\"messageId\":\"msg_01M3X733CSXY6C9AS79FFG3RZK\",\"content\":\"And add a footer\"}"
+      },
+      {
+        "seq": 74,
+        "id": "evt_01M3X733FC1MCGAE7QTA6DH0SP",
+        "workspace_id": "ws_01M3X7333P03C02D7JE9RERKK5",
+        "stream_id": "ses_01M3X733CPSN8F3KXE0PM7XVPQ",
+        "type": "session.message_completed",
+        "at": "2026-10-02T02:29:01.036Z",
+        "payload": "{\"messageId\":\"msg_01M3X733EHC1AE5FV65GEXKYW0\",\"role\":\"agent\",\"content\":\"Waiting, done.\"}"
+      },
+      {
+        "seq": 75,
+        "id": "evt_01M3X733FC1MCGAE7QTA6DH0SQ",
+        "workspace_id": "ws_01M3X7333P03C02D7JE9RERKK5",
+        "stream_id": "ses_01M3X733CPSN8F3KXE0PM7XVPQ",
+        "type": "session.message_completed",
+        "at": "2026-10-02T02:29:01.036Z",
+        "payload": "{\"messageId\":\"msg_01M3X733CSXY6C9AS79FFG3RZK\",\"role\":\"user\",\"content\":\"And add a footer\"}"
+      },
+      {
+        "seq": 78,
+        "id": "evt_01M3X733HB0FY5FA74VHYHX2VK",
+        "workspace_id": "ws_01M3X7333P03C02D7JE9RERKK5",
+        "stream_id": "ses_01M3X733CPSN8F3KXE0PM7XVPQ",
+        "type": "session.message_completed",
+        "at": "2026-10-02T02:29:01.099Z",
+        "payload": "{\"messageId\":\"msg_01M3X733FCQ67E6GNTBEVSJ6MP\",\"role\":\"agent\",\"content\":\"Hello from the fake agent.\"}"
+      },
+      {
+        "seq": 79,
+        "id": "evt_01M3X733HC93HCEBNHPMGV4PKN",
+        "workspace_id": "ws_01M3X7333P03C02D7JE9RERKK5",
+        "stream_id": "ses_01M3X733CPSN8F3KXE0PM7XVPQ",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:01.100Z",
+        "payload": "{\"sessionId\":\"ses_01M3X733CPSN8F3KXE0PM7XVPQ\",\"state\":\"idle\",\"previous\":\"working\"}"
+      },
+      {
+        "seq": 80,
+        "id": "evt_01M3X733J0RH3D4ANQTMSR0MKE",
+        "workspace_id": null,
+        "stream_id": "server",
+        "type": "server.started",
+        "at": "2026-10-02T02:29:01.120Z",
+        "payload": "{\"version\":\"0.2.0-rc.1\"}"
+      },
+      {
+        "seq": 81,
+        "id": "evt_01M3X733J4FN29K7X0NPMZWA8W",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.message_completed",
+        "at": "2026-10-02T02:29:01.124Z",
+        "payload": "{\"messageId\":\"msg_01M3X733J4928WM8XPABQTEYE4\",\"role\":\"user\",\"content\":\"Thanks, carry on\"}"
+      },
+      {
+        "seq": 82,
+        "id": "evt_01M3X733J4FN29K7X0NPMZWA8X",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:01.124Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"state\":\"working\",\"previous\":\"idle\"}"
+      },
+      {
+        "seq": 83,
+        "id": "evt_01M3X733KY79VJTV0423HBY5WT",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.resumed",
+        "at": "2026-10-02T02:29:01.182Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"via\":\"resumed\"}"
+      },
+      {
+        "seq": 86,
+        "id": "evt_01M3X733NXVNTSEVEENQGK78SJ",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.message_completed",
+        "at": "2026-10-02T02:29:01.245Z",
+        "payload": "{\"messageId\":\"msg_01M3X733KZNA6RYXY2VP1ZXRC9\",\"role\":\"agent\",\"content\":\"Hello from the fake agent.\"}"
+      },
+      {
+        "seq": 87,
+        "id": "evt_01M3X733NYBSV31XHPYGT3QAV1",
+        "workspace_id": "ws_01M3X7333KQTTKZG3TGVP8KJA6",
+        "stream_id": "ses_01M3X7333RGEN8V3MEDN0DAQBB",
+        "type": "session.state_changed",
+        "at": "2026-10-02T02:29:01.246Z",
+        "payload": "{\"sessionId\":\"ses_01M3X7333RGEN8V3MEDN0DAQBB\",\"state\":\"idle\",\"previous\":\"working\"}"
+      }
+    ]
+  }
+}

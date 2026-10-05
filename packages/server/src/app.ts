@@ -1,9 +1,33 @@
 import { serveStatic } from '@hono/node-server/serve-static';
-import type { AgentSetup, AppShortcutPort, BmadFeatures, Chat, EventLog, Onboarding, Permissions, Toolchain } from '@ogden-agents/core';
+import {
+  createAddProject,
+  type AgentSetup,
+  type AppShortcutPort,
+  type BmadDetectionUseCases,
+  type BmadFeatures,
+  type BmadScriptTrust,
+  type BmadSourceUseCases,
+  type BmadSetupUseCases,
+  type BoardUseCases,
+  type BuildsUseCases,
+  type Chat,
+  type EventLog,
+  type InstallSettings,
+  type NewProjectDefaultsStore,
+  type Onboarding,
+  type Permissions,
+  type PlanningUseCases,
+  type Toolchain,
+  type AgentModels,
+} from '@ogden-agents/core';
 import { API_ROUTES, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { registerAgentSetupRoutes } from './agent-setup-routes.js';
+import { registerBmadDetectionRoutes } from './bmad-detection-routes.js';
+import { registerBmadRoutes } from './bmad-routes.js';
+import { registerBmadSourceRoutes } from './bmad-source-routes.js';
+import { registerBmadTrustRoutes } from './bmad-trust-routes.js';
 import type { TabTokens } from './auth.js';
 import { registerChatRoutes } from './chat-routes.js';
 import { apiError } from './errors.js';
@@ -11,6 +35,15 @@ import { registerEventSocket } from './event-socket.js';
 import type { Logger } from './log.js';
 import { isServerPath } from './paths.js';
 import { registerPermissionRoutes } from './permission-routes.js';
+import { registerPlanningRoutes } from './planning-routes.js';
+import { registerBuildRoutes } from './build-routes.js';
+import { registerRunSettingsRoutes } from './run-settings-routes.js';
+import { registerUpdateRoutes } from './update-routes.js';
+import type { UpdateCheck } from './update-check.js';
+import type { ShellMode } from './shell-mode.js';
+import { registerLauncherUpdateRoutes } from './update-notice/routes.js';
+import type { DesktopUpdate } from './update-notice/desktop-update.js';
+import { registerSettingsRoutes } from './settings-routes.js';
 import { registerShortcutRoutes } from './shortcut-routes.js';
 import type { TerminalAvailabilityCheck } from './terminal-availability.js';
 import { registerTerminalSocket } from './terminal-socket.js';
@@ -68,14 +101,52 @@ export interface AppOptions {
   terminalAvailability?: TerminalAvailabilityCheck;
   /** Core's answers to permission requests, which the permission routes decide through (the declining stub until 2.6). */
   permissions?: Permissions;
-  /** Core's BMad pieces guard (AD-22, story 10.1). */
+  /** Core's BMad pieces (AD-22): the guard (10.1) and what this install ships (10.2); without it `GET` pieces answers 501. */
   bmad?: BmadFeatures;
   /** Registers the test-only BMad probe route (story 10.1); `start()` sets it only when its test hook is allowed. */
   bmadProbe?: boolean;
+  /** Core's read-only BMad detection and Not now on its offer (story 10.3); without it those routes answer 501. */
+  bmadDetection?: BmadDetectionUseCases;
+  /**
+   * Core's per-project script trust (story 4.2): its route, and the check
+   * every route of a piece that runs project scripts makes. Without it the
+   * trust route answers 501, and the Plan and Board routes are not
+   * registered (none may run unchecked).
+   */
+  bmadScriptTrust?: BmadScriptTrust;
+  /**
+   * The catalog and planning sessions (story 4.1), served behind the
+   * `planning` piece's guard; without it those routes answer 501 once the guard passes.
+   */
+  planning?: PlanningUseCases;
+  /** The project's tickets (story 4.1), behind the `board` piece's guard; without it that route answers 501 once the guard passes. */
+  board?: BoardUseCases;
+  /** Unattended builds (story 5.2), behind the `builds` piece's guard and the trust; without them those routes answer 501 once the guards pass. */
+  builds?: BuildsUseCases;
+  /** The pinned upstream BMad Method's status and its user-initiated download (story 4.14); without it those routes answer 501. */
+  bmadSource?: BmadSourceUseCases;
+  /** BMad Method's setup in a project (story 4.3), behind Planning or Board; without it those routes answer 501 once the guard passes. */
+  bmadSetup?: BmadSetupUseCases | undefined;
   /** Core's agent setup use-case: each agent's state and signing in (9.1); without it those routes answer 501. */
   agentSetup?: AgentSetup;
   /** Whether the first-run Welcome is done (9.5); without it those routes answer 501. */
   onboarding?: Onboarding;
+  /**
+   * The app-wide default for new projects (10.4): its routes, and the pieces a
+   * project added without its own starts with. Without it those routes answer
+   * 501 and new projects start Simple.
+   */
+  newProjectDefaults?: NewProjectDefaultsStore;
+  /** Developer mode, kept and enforced by core (permission modes); without it its routes answer 501. */
+  installSettings?: InstallSettings;
+  /** The "newer version" notice (story 13.7); without it its routes answer 501. */
+  updates?: UpdateCheck;
+  /** Inside the desktop app (`OGDEN_AGENTS_SHELL=desktop`, story 13.3): the update the shell reported, its channel and Restart. */
+  desktopUpdate?: DesktopUpdate;
+  /** `desktop` inside the app, so the page uses app wording. */
+  shell?: ShellMode | null;
+  /** Each agent's install-wide default model (story 11), and whether an agent is registered: `PUT` default model. */
+  agentDefaults?: { models: Pick<AgentModels, 'setDefaultModel'>; isAgentRegistered: (agentId: string) => boolean };
   /** The Ogden Agents app shortcut (E2-R10; the `shortcut-memory` stub until 2.4). */
   appShortcut?: AppShortcutPort;
   /**
@@ -85,7 +156,36 @@ export interface AppOptions {
   tabs?: TabTokens;
 }
 
-export function createApp({ events, webRoot, log, gate, control, toolchain, chat, terminalAvailability, permissions, bmad, bmadProbe, agentSetup, onboarding, appShortcut, tabs }: AppOptions): Hono {
+export function createApp({
+  events,
+  webRoot,
+  log,
+  gate,
+  control,
+  toolchain,
+  chat,
+  terminalAvailability,
+  permissions,
+  bmad,
+  bmadProbe,
+  bmadDetection,
+  bmadScriptTrust,
+  planning,
+  board,
+  builds,
+  bmadSource,
+  bmadSetup,
+  agentSetup,
+  onboarding,
+  newProjectDefaults,
+  installSettings,
+  updates,
+  desktopUpdate,
+  shell,
+  agentDefaults,
+  appShortcut,
+  tabs,
+}: AppOptions): Hono {
   const app = new Hono();
 
   // First, for every method and path: no route may be registered before this line.
@@ -103,6 +203,9 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, chat
       if (wantsLaunch) log.info('launch code issued for the launcher');
       return c.json(wantsLaunch ? { ...info, launchUrl: control.issueLaunchUrl() } : info);
     });
+
+    // The desktop shell's update calls (story 13.3), only in shell mode.
+    registerLauncherUpdateRoutes(app, { desktop: desktopUpdate });
 
     app.post('/launcher/restart-when-idle', (c) => {
       const result = control.restartWhenIdle();
@@ -164,11 +267,27 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, chat
 
   // One route file per lane (story 2.3): each fills only its own. Every route is in
   // `API_ROUTES` under `/api/v1`, registered after the gate.
-  if (chat !== undefined) registerChatRoutes(app, chat, log, { terminalAvailability });
+  if (chat !== undefined) {
+    const addProject = createAddProject({ chat, defaults: newProjectDefaults, bmad });
+    registerChatRoutes(app, chat, log, { terminalAvailability, addProject, agentDefaults });
+  }
   registerWorkspaceRoutes(app, { chat, permissions, bmad, bmadProbe, log });
   registerPermissionRoutes(app, { permissions, log });
   registerShortcutRoutes(app, { appShortcut, log });
   registerAgentSetupRoutes(app, { agentSetup, onboarding, log });
+  registerBmadRoutes(app, { bmad, newProjectDefaults, log });
+  // The pinned upstream BMad Method (story 4.14): install-level, not a piece's.
+  registerBmadSourceRoutes(app, { bmadSource, log });
+  registerBmadDetectionRoutes(app, { bmadDetection, log });
+  registerBmadTrustRoutes(app, { scriptTrust: bmadScriptTrust, permissions, log });
+  // Plan and Board (stories 4.1, 4.2): every route through `bmadPieceRoutes`, behind core's guard and the script trust (AD-22).
+  if (bmad !== undefined && bmadScriptTrust !== undefined) registerPlanningRoutes(app, { bmad, scriptTrust: bmadScriptTrust, planning, board, bmadSetup, log });
+  // Unattended builds (story 5.2): the same helper, guard and trust.
+  if (bmad !== undefined && bmadScriptTrust !== undefined) registerBuildRoutes(app, { bmad, scriptTrust: bmadScriptTrust, builds, log });
+  registerSettingsRoutes(app, { installSettings, newProjectDefaults, log });
+  // The install's run limits and notification settings (story 5.3; 5.8 and 11.4 fill them): the gate, never a piece's guard.
+  registerRunSettingsRoutes(app);
+  registerUpdateRoutes(app, { updates, desktop: desktopUpdate, shell });
 
   registerEventSocket(app, { events, log, tabs });
   // A session's terminal (story 3.1): behind the same gate as `/ws`.
@@ -181,12 +300,15 @@ export function createApp({ events, webRoot, log, gate, control, toolchain, chat
   // The UI's client-side routes (such as `/settings/appearance`) load the app,
   // so a reload or a bookmark lands on the same screen. Only extensionless GET
   // paths outside `/ws`, `/api` and `/launcher` (and below them; see
-  // `paths.ts`, which the gate shares); a missing asset stays a 404.
+  // `paths.ts`, which the gate shares); a missing asset stays a 404. A ticket's
+  // detail (`/w/:wsId/board/:ref`, story 4.9) and a build's review
+  // (`/w/:wsId/review/:ref`, story 5.2) are pages even though the ref (`1.2`)
+  // looks like an extension.
   app.get(
     '/*',
     async (c, next) => {
       const path = c.req.path;
-      if (isServerPath(path) || /\.[A-Za-z0-9]+$/.test(path)) {
+      if (isServerPath(path) || (/\.[A-Za-z0-9]+$/.test(path) && !/^\/w\/[^/]+\/(board|review)\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(path))) {
         return c.notFound();
       }
       await next();

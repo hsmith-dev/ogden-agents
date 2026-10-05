@@ -9,21 +9,36 @@
 import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createFixedSandbox } from '@ogden-agents/adapters';
+import { BMAD_DOWNLOAD_INTEGRITY_MESSAGE } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   API_KEY_CHECK_ENV,
+  BMAD_AVAILABLE_ENV,
   BMAD_PROBE_ENV,
+  BMAD_SOURCE_ENV,
+  resolveTestHooks,
   CLAUDE_CLI_ENV,
+  CHECK_IN_MS_ENV,
   CLAUDE_INSTALL_ENV,
   insideTemp,
   isTestRun,
   testApiKeyCheck,
+  testBmadAvailable,
   testBmadProbe,
+  testBmadSource,
   testClaudeCli,
   testClaudeInstall,
   testHooksAllowed,
+  SANDBOX_ENV,
+  testSandbox,
+  TEST_SANDBOX_KIND,
+  TEST_SANDBOX_UNAVAILABLE_REASON,
 } from '../src/test-hooks.js';
-import { startTestServer, tempDataDir } from './helpers.js';
+import { createLogger } from '../src/log.js';
+import { createBmadSourceAndCatalog } from '../src/start-planning.js';
+import { FIXTURE_TOP, fixtureSource } from '../../../tests/fixtures/bmad-upstream-source.js';
+import { fixtureUpstream, startTestServer, tempDataDir } from './helpers.js';
 
 const INTEGRITY = 'sha512-QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=';
 /** Not inside the temp folder: this repository's checkout (a user's data folder stands for it). */
@@ -94,6 +109,39 @@ describe('testBmadProbe (story 10.1)', () => {
     expect(testBmadProbe({ NODE_ENV: 'test', [BMAD_PROBE_ENV]: '1' }, OUTSIDE)).toBe(false);
     expect(testBmadProbe({ NODE_ENV: 'test' }, dir)).toBe(false);
     expect(testBmadProbe({ NODE_ENV: 'test', [BMAD_PROBE_ENV]: 'true' }, dir)).toBe(false);
+  });
+});
+
+describe('testSandbox (story 5.2)', () => {
+  it('answers available or unavailable only for a test run on a temp data folder, else the real probe', () => {
+    const dir = tempDataDir();
+    expect(testSandbox({ NODE_ENV: 'test', [SANDBOX_ENV]: 'available' }, dir)).toEqual({ available: true, kind: TEST_SANDBOX_KIND });
+    expect(testSandbox({ VITEST: 'true', [SANDBOX_ENV]: 'unavailable' }, dir)).toEqual({ available: false, reason: TEST_SANDBOX_UNAVAILABLE_REASON });
+    expect(testSandbox({ VITEST: 'true', [SANDBOX_ENV]: 'unavailable-windows' }, dir)).toMatchObject({ available: false, choices: ['attended', 'install_docker', 'other_agent'] });
+    expect(testSandbox({ [SANDBOX_ENV]: 'available' }, dir)).toBeUndefined();
+    expect(testSandbox({ NODE_ENV: 'test', [SANDBOX_ENV]: 'available' }, OUTSIDE)).toBeUndefined();
+    expect(testSandbox({ NODE_ENV: 'test' }, dir)).toBeUndefined();
+    expect(() => testSandbox({ NODE_ENV: 'test', [SANDBOX_ENV]: 'yes' }, dir)).toThrow(SANDBOX_ENV);
+    // A sandbox given to start() decides it: the hook is not read.
+    expect(resolveTestHooks({ NODE_ENV: 'test', [SANDBOX_ENV]: 'nope' }, dir, { ownsCore: true, sandbox: createFixedSandbox({ available: false, reason: 'x' }) }).sandbox).toBeUndefined();
+  });
+});
+
+describe('testBmadAvailable (story 10.2)', () => {
+  it('names pieces only for a test run on a temp data folder with its variable set', () => {
+    const dir = tempDataDir();
+    expect(testBmadAvailable({ NODE_ENV: 'test', [BMAD_AVAILABLE_ENV]: ' board, planning,board ' }, dir)).toEqual(['board', 'planning']);
+    expect(testBmadAvailable({ [BMAD_AVAILABLE_ENV]: 'planning' }, dir)).toEqual([]);
+    expect(testBmadAvailable({ NODE_ENV: 'production', VITEST: '', [BMAD_AVAILABLE_ENV]: 'planning' }, dir)).toEqual([]);
+    expect(testBmadAvailable({ NODE_ENV: 'test', [BMAD_AVAILABLE_ENV]: 'planning' }, OUTSIDE)).toEqual([]);
+    expect(testBmadAvailable({ NODE_ENV: 'test' }, dir)).toEqual([]);
+    expect(testBmadAvailable({ NODE_ENV: 'test', [BMAD_AVAILABLE_ENV]: '  ' }, dir)).toEqual([]);
+  });
+
+  it('throws on a name that is not a piece when hooks are allowed, and ignores it otherwise', () => {
+    const dir = tempDataDir();
+    expect(() => testBmadAvailable({ NODE_ENV: 'test', [BMAD_AVAILABLE_ENV]: 'planning,teleport' }, dir)).toThrow(/not a BMad piece/);
+    expect(testBmadAvailable({ [BMAD_AVAILABLE_ENV]: 'teleport' }, dir)).toEqual([]);
   });
 });
 
@@ -203,8 +251,84 @@ describe('testClaudeCli (story 3.10)', () => {
   });
 });
 
+describe('testBmadSource (story 4.13)', () => {
+  const run = { NODE_ENV: 'test' };
+  /** A fixture lock and its tarball written into a fresh temp folder, and the hook's JSON file beside them. */
+  const sourceFile = (body: Record<string, unknown> = {}) => {
+    const dir = tempDataDir();
+    const upstream = fixtureUpstream();
+    const tarball = join(dir, 'bmad.tar.gz');
+    writeFileSync(tarball, upstream.tarball);
+    const file = join(dir, 'bmad-source.json');
+    writeFileSync(file, JSON.stringify({ lock: upstream.lock, tarball, ...body }));
+    return { file, tarball, upstream };
+  };
+
+  it('gives the fixture lock, the tarball by its real path and only the allowlisted uv variables, when hooks are allowed', () => {
+    const { file, tarball, upstream } = sourceFile({ uvEnv: { UV_CACHE_DIR: '/tmp/c', UV_PYTHON_DOWNLOADS: 'never', HTTPS_PROXY: 'http://127.0.0.1:9', ANTHROPIC_API_KEY: 'sk-x', PATH: '/evil', UV_PYTHON: 3 } });
+    expect(testBmadSource({ ...run, [BMAD_SOURCE_ENV]: file }, tempDataDir())).toEqual({
+      lock: upstream.lock,
+      tarball: realpathSync.native(tarball),
+      uvEnv: { UV_CACHE_DIR: '/tmp/c', UV_PYTHON_DOWNLOADS: 'never', HTTPS_PROXY: 'http://127.0.0.1:9' },
+    });
+  });
+
+  it('is inert outside a test run, on a data folder outside the temp folder, or unset; the file is then never read', () => {
+    const missing = join(tempDataDir(), 'missing.json');
+    expect(testBmadSource({ [BMAD_SOURCE_ENV]: missing }, tempDataDir())).toBeUndefined();
+    expect(testBmadSource({ ...run, [BMAD_SOURCE_ENV]: missing }, OUTSIDE)).toBeUndefined();
+    expect(testBmadSource({ ...run }, tempDataDir())).toBeUndefined();
+    expect(testBmadSource({ ...run, [BMAD_SOURCE_ENV]: '' }, tempDataDir())).toBeUndefined();
+  });
+
+  it('ignores a file or a tarball outside the temp folder', () => {
+    expect(testBmadSource({ ...run, [BMAD_SOURCE_ENV]: join(OUTSIDE, 'package.json') }, tempDataDir())).toBeUndefined();
+    const { file } = sourceFile({ tarball: join(OUTSIDE, 'package.json') });
+    expect(testBmadSource({ ...run, [BMAD_SOURCE_ENV]: file }, tempDataDir())).toBeUndefined();
+  });
+
+  it('refuses a relative path, an unreadable or bad file, a lock the schema refuses, and a missing or relative tarball', () => {
+    expect(() => testBmadSource({ ...run, [BMAD_SOURCE_ENV]: 'bmad.json' }, tempDataDir())).toThrow(/must be an absolute path/);
+    expect(() => testBmadSource({ ...run, [BMAD_SOURCE_ENV]: join(tempDataDir(), 'missing.json') }, tempDataDir())).toThrow(/unreadable \(ENOENT\)/);
+    expect(() => testBmadSource({ ...run, [BMAD_SOURCE_ENV]: installFile('{') }, tempDataDir())).toThrow(/bad JSON/);
+    expect(() => testBmadSource({ ...run, [BMAD_SOURCE_ENV]: sourceFile({ lock: { sources: {} } }).file }, tempDataDir())).toThrow(/BmadLock schema/);
+    expect(() => testBmadSource({ ...run, [BMAD_SOURCE_ENV]: sourceFile({ tarball: 'bmad.tar.gz' }).file }, tempDataDir())).toThrow(/tarball must be an absolute path/);
+    expect(() => testBmadSource({ ...run, [BMAD_SOURCE_ENV]: sourceFile({ tarball: join(tempDataDir(), 'missing.tar.gz') }).file }, tempDataDir())).toThrow(/tarball unreadable \(ENOENT\)/);
+  });
+
+  it("is not read when the server's options give a BMad Method source or fetch", () => {
+    const env = { ...run, [BMAD_SOURCE_ENV]: join(tempDataDir(), 'missing.json') };
+    expect(resolveTestHooks(env, tempDataDir(), { ownsCore: true, bmadFetch: async () => new Response('') }).bmadSource).toBeUndefined();
+    expect(() => resolveTestHooks(env, tempDataDir(), { ownsCore: true })).toThrow(/unreadable/);
+  });
+
+  it("the server's source downloads the local tarball, checks it against the lock and is ready; a changed tarball is refused", async () => {
+    const run = sourceFile();
+    const hook = testBmadSource({ NODE_ENV: 'test', [BMAD_SOURCE_ENV]: run.file }, tempDataDir())!;
+    const dataDir = tempDataDir();
+    const { bmadSourcePort } = createBmadSourceAndCatalog({}, dataDir, createLogger(() => {}), hook);
+    expect(bmadSourcePort.status().state).toBe('missing');
+    expect((await bmadSourcePort.download()).state).toBe('ready');
+    expect(bmadSourcePort.file('bmad-ticket/scripts/tickets.py')).toBeDefined();
+
+    // A tarball that unpacks fine but holds one more file than the lock's hash covers: refused at the hash check.
+    const other = sourceFile();
+    writeFileSync(other.tarball, fixtureSource([{ name: `${FIXTURE_TOP}/skills/bmad/extra.md`, data: 'not pinned\n' }]).tarball);
+    const changed = testBmadSource({ NODE_ENV: 'test', [BMAD_SOURCE_ENV]: other.file }, tempDataDir())!;
+    const refused = createBmadSourceAndCatalog({}, tempDataDir(), createLogger(() => {}), changed).bmadSourcePort;
+    await expect(refused.download()).rejects.toMatchObject({
+      code: 'bmad_download_failed',
+      reason: 'integrity',
+      message: BMAD_DOWNLOAD_INTEGRITY_MESSAGE,
+      detail: expect.stringMatching(/^expected sha256:[0-9a-f]{64}, got sha256:[0-9a-f]{64}$/),
+    });
+    expect(refused.status().state).toBe('missing');
+  });
+});
+
 describe('the server and the hooks', () => {
-  const parsed = (lines: string[]) => lines.map((line) => JSON.parse(line) as { msg: string; claudeInstall?: boolean; apiKeyCheck?: boolean; claudeCli?: boolean; backend?: string });
+  const parsed = (lines: string[]) =>
+    lines.map((line) => JSON.parse(line) as { msg: string; claudeInstall?: boolean; apiKeyCheck?: boolean; claudeCli?: boolean; checkInMs?: number; backend?: string });
   const hooksLine = (lines: string[]) => parsed(lines).find((line) => line.msg === 'test hooks in use');
   const secretsBackend = (lines: string[]) => parsed(lines).find((line) => line.msg === 'secrets store')?.backend;
 
@@ -252,5 +376,23 @@ describe('the server and the hooks', () => {
     const lines: string[] = [];
     await startTestServer({ lines, claudeInstall: { pins: pins() as never } });
     expect(hooksLine(lines)).toBeUndefined();
+  });
+
+  it('in a test run, an honoured check-in delay is named in the line; one the options give, or none, is not (story 10.8)', async () => {
+    vi.stubEnv(CHECK_IN_MS_ENV, '5000');
+    const lines: string[] = [];
+    await startTestServer({ lines });
+    expect(hooksLine(lines)).toMatchObject({ checkInMs: 5000, claudeInstall: false, apiKeyCheck: false });
+    const own: string[] = [];
+    await startTestServer({ lines: own, checkInDelayMs: 5000 });
+    expect(hooksLine(own)).toBeUndefined();
+    vi.stubEnv(CHECK_IN_MS_ENV, '');
+    const file = join(tempDataDir(), 'claude.mjs');
+    writeFileSync(file, '');
+    vi.stubEnv(CLAUDE_CLI_ENV, file);
+    const without: string[] = [];
+    await startTestServer({ lines: without });
+    expect(hooksLine(without)).toMatchObject({ claudeCli: true });
+    expect(hooksLine(without)).not.toHaveProperty('checkInMs');
   });
 });

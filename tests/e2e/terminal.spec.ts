@@ -10,25 +10,12 @@
  * URL mirroring the driver, and the toggle's disabled reasons. Story 3.5: the
  * panel reconnects by itself after the connection drops.
  */
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { expect, test, type Page, type WebSocketRoute } from '@playwright/test';
-import { ROOT } from '../support.js';
-import { composer, send, startChat, withChatServer } from './chat-server.js';
+import { composer, ptyLoads, send, withTerminalChat } from './chat-server.js';
 
-/** The web app's appearance key (`APPEARANCE_STORAGE_KEY` in packages/shared). */
-const APPEARANCE_KEY = 'ogden-agents.appearance';
-const FAKE_CLI = join(ROOT, 'tests', 'fixtures', 'fake-claude-cli.mjs');
 const MARKER = 'e2e-terminal-marker-41c7';
 /** What zod's check for `eval` (made on every page, and caught) reports under `script-src 'self'`. */
 const ZOD_EVAL_PROBE = 'script-src eval';
-
-/** Whether node-pty loads here (the server's terminal needs it; AD-19). */
-const ptyLoads = () => import('node-pty').then(
-  () => true,
-  () => false,
-);
 
 /** Collects every CSP violation the page reports, from its first script on. */
 async function recordViolations(page: Page): Promise<() => Promise<string[]>> {
@@ -48,31 +35,6 @@ const stubTerminal = (page: Page, terminal: unknown) =>
     const json = (await response.json()) as Record<string, unknown>;
     await route.fulfill({ response, json: { ...json, terminal } });
   });
-
-/**
- * Runs `body` on a chat whose terminal runs the fake CLI. Claude Code's config
- * folder is a temp one (story 3.3 review F2): reading the session record back
- * never probes the user's own `~/.claude`.
- */
-const withTerminalChat = async (page: Page, developerMode: boolean, body: () => Promise<void>) => {
-  const claudeConfig = mkdtempSync(join(tmpdir(), 'ogden-agents-e2e-claude-'));
-  try {
-    await withChatServer(
-      page,
-      async ({ repo }) => {
-        await page.evaluate(({ key, on }) => localStorage.setItem(key, JSON.stringify({ theme: 'system', density: 'comfortable', developerMode: on })), {
-          key: APPEARANCE_KEY,
-          on: developerMode,
-        });
-        await startChat(page, repo);
-        await body();
-      },
-      { extra: { extraAgentEnv: { CLAUDE_CODE_EXECUTABLE: FAKE_CLI, FAKE_ACP_RESUME: 'resume', CLAUDE_CONFIG_DIR: claudeConfig } } },
-    );
-  } finally {
-    rmSync(claudeConfig, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-  }
-};
 
 test('in Developer mode a chat switches to its terminal, takes typing there, and switches back; the next message gets a reply', async ({ page }) => {
   test.skip(!process.env.CI && !(await ptyLoads()), 'node-pty cannot load on this computer');
@@ -116,6 +78,16 @@ test('in Developer mode a chat switches to its terminal, takes typing there, and
     await expect(readOnly).toBeVisible();
     await expect(readOnly).toContainText('Hello from the fake agent.');
     await expect(readOnly).not.toHaveAttribute('inert');
+    // Beside the terminal, top-aligned with it, and still a positioned scroll box: nothing hidden in it stretches the page (backlog 10).
+    const beside = await page.locator('[data-slot="page-body"]').boundingBox();
+    const terminalBox = await page.getByTestId('terminal-panel').boundingBox();
+    expect(beside !== null && terminalBox !== null && beside.x >= terminalBox.x + terminalBox.width && Math.abs(beside.y - terminalBox.y) < 16).toBe(true);
+    expect(
+      await page.evaluate(() => ({
+        position: getComputedStyle(document.querySelector('[data-slot="page-body"]')!).position,
+        documentExtra: document.documentElement.scrollHeight - window.innerHeight,
+      })),
+    ).toEqual({ position: 'relative', documentExtra: 0 });
     await peek.click();
     await expect(page.getByTestId('transcript')).toBeHidden();
 

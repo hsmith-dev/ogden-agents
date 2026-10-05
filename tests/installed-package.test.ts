@@ -3,9 +3,15 @@
  * its URLs within the timeout is stopped, its folders removed, and retried
  * once in a fresh install, with the RETRY log line; the second start's URLs
  * are the answer. Fake installs, no npm.
+ *
+ * `killProcessTree` (story 10.9, 3.10 F7): a parent and the grandchild it
+ * started in a process group of its own (as the server starts an agent) are
+ * both gone after one call. Real processes.
  */
+import { spawn } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { startWithRetry } from '../scripts/installed-package.mjs';
+import { isAlive, killProcessTree, startWithRetry } from '../scripts/installed-package.mjs';
+import { waitUntil } from './support.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -54,5 +60,60 @@ describe('startWithRetry (story 3.9)', () => {
     const started = startWithRetry({ start, timeoutMs: 1_000, what: 'urls', label: 'test' });
     await expect(started.ready).rejects.toThrow('exited before printing a URL');
     expect(start).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** A Node parent that starts a detached, long-lived grandchild and prints its pid, then waits. */
+const PARENT = `
+const { spawn } = require('node:child_process');
+const grandchild = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore', windowsHide: true });
+process.stdout.write(String(grandchild.pid) + '\\n');
+setInterval(() => {}, 1000);
+`;
+
+describe('killProcessTree (story 10.9, 3.10 F7)', () => {
+  it('kills the root and a grandchild in a process group of its own', async () => {
+    const parent = spawn(process.execPath, ['-e', PARENT], { stdio: ['ignore', 'pipe', 'inherit'], windowsHide: true });
+    const exited = new Promise<void>((resolve) => parent.once('exit', () => resolve()));
+    let grandchild: number | undefined;
+    try {
+      grandchild = await new Promise<number>((resolve, reject) => {
+        let out = '';
+        parent.stdout.on('data', (chunk) => {
+          out += String(chunk);
+          const pid = Number(out.trim().split(/\s+/)[0]);
+          if (out.includes('\n') && Number.isInteger(pid) && pid > 0) resolve(pid);
+        });
+        parent.once('exit', () => reject(new Error(`the parent exited first: ${out}`)));
+      });
+      expect(isAlive(parent.pid!)).toBe(true);
+      expect(isAlive(grandchild)).toBe(true);
+
+      killProcessTree(parent.pid!);
+
+      await exited;
+      await waitUntil(() => !isAlive(grandchild!), `grandchild ${grandchild} to exit`, 10_000);
+    } finally {
+      // Never leave either behind, whatever failed.
+      for (const pid of [parent.pid, grandchild]) {
+        if (pid === undefined) continue;
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // Gone.
+        }
+      }
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('never kills an ancestor of this process (a stale pid reused): this process stays alive', () => {
+    killProcessTree(process.ppid);
+    expect(isAlive(process.pid)).toBe(true);
+    expect(isAlive(process.ppid)).toBe(true);
+  });
+
+  it('does nothing for a bad pid or this process', () => {
+    for (const pid of [0, -1, Number.NaN, 1.5, process.pid]) killProcessTree(pid);
+    expect(isAlive(process.pid)).toBe(true);
   });
 });

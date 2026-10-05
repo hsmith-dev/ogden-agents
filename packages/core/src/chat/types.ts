@@ -3,10 +3,14 @@
  * `ChatOptions`, `TerminalViewer` and `Chat`, and the state the chat modules
  * share by reference (`Live`, `Terminal`, `Turn`).
  */
-import type { Session, SessionDriver, SessionId, ToolCallDiff, ToolCallStatus, ToolKind, Workspace, WorkspaceId } from '@ogden-agents/shared';
-import type { AgentError, AgentPort, AgentSession } from '../agent-port.js';
-import type { Entities } from '../entities.js';
-import type { HistoryDeleted } from '../event-log.js';
+import type { AgentId, ChatAgent, HandoffPreviewResponse, PermissionMode, SessionResponse, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, WhileWorking, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import type { AgentModels } from '../agent-models.js';
+import type { AgentError, AgentRegistry, AgentSession } from '../agent-port.js';
+import type { AgentReadiness } from '../agent-setup-types.js';
+import type { BuildSessions } from '../build-sessions.js';
+import type { Entities, NewWorkspaceOptions } from '../entities.js';
+import type { EventLog, HistoryDeleted } from '../event-log.js';
+import type { InstallSettings } from '../install-settings.js';
 import type { Permissions } from '../permissions.js';
 import type { SessionEvents } from '../session-events.js';
 import type { TerminalPort, TerminalProcess } from '../terminal-port.js';
@@ -19,19 +23,31 @@ export interface ChatOptions {
    */
   dataDir: string;
   sessionEvents: SessionEvents;
-  agent: AgentPort;
+  /**
+   * The agents chats can be started with (epic 6): each session's agent is
+   * looked up here by its `agentId` (sessions without one are the registry's
+   * `legacyAgentId`). Core names no agent.
+   */
+  agents: AgentRegistry;
   /**
    * Answers the agents' permission requests. Default: the declining stub
    * (`createDecliningPermissions`), which denies every request.
    */
   permissions?: Permissions;
   /**
-   * The environment each agent process gets (AD-16: API keys go here and
-   * nowhere else). Called for every agent start. Default: none.
+   * The environment the agent `agentId`'s processes get (AD-16: API keys go
+   * here and nowhere else, each agent's only to its own). Called for every
+   * agent start. Default: none.
    */
-  agentEnv?: () => Readonly<Record<string, string>>;
+  agentEnv?: (agentId: AgentId) => Readonly<Record<string, string>>;
   /** Called with every agent failure, for the log. Its `details` hold no secret. */
   onAgentError?: (sessionId: SessionId, error: AgentError) => void;
+  /**
+   * Called once when a tool call turns `completed` (story 4.7: core's
+   * document detection), after its event, with its diffs (each side capped).
+   * A throw is caught: it never changes the session.
+   */
+  onToolCallCompleted?: (sessionId: SessionId, toolCallId: string, diffs: readonly ToolCallDiff[] | undefined) => void;
   /** Called when applying an agent's event failed (such as a session deleted mid-reply), for the log. */
   onInternalError?: (sessionId: SessionId, error: unknown) => void;
   /** How long a `working` agent may be silent before core checks in, clamped by `clampCheckInDelay`. Default `DEFAULT_CHECK_IN_MS`. */
@@ -40,6 +56,45 @@ export interface ChatOptions {
   stopGraceMs?: number;
   /** Opens the agent's own CLI in a terminal (story 3.1). Without it, switching to the terminal is refused. */
   terminal?: TerminalPort;
+  /**
+   * The event log, which the chat follows (permission modes): each change of a
+   * chat's stored mode is pushed to its live agent (or its terminal is handed
+   * back when Developer mode was turned off). Without it, only the modes the
+   * chat itself sets reach its agents.
+   */
+  events?: Pick<EventLog, 'subscribe' | 'lastSeq'>;
+  /** Developer mode, which gates Skip all. Without it, Developer mode reads off. */
+  installSettings?: Pick<InstallSettings, 'developerMode'>;
+  /**
+   * Each agent's install-wide default model and last model list (story 11).
+   * Without it, new chats start on the project's default or the agent's own
+   * choice, and only this run's lists are known.
+   */
+  agentModels?: Pick<AgentModels, 'defaultModel' | 'lastModels' | 'rememberModels'>;
+  /** How long a handoff preview's token can be used. Default `HANDOFF_PREVIEW_TTL_MS`. */
+  handoffPreviewTtlMs?: number;
+  /** How long an agent may take to take a permission mode before it is dropped. Default `PERMISSION_MODE_TIMEOUT_MS`. */
+  permissionModeTimeoutMs?: number;
+  /**
+   * Whether a new chat can be started with `agentId` now (6.3; server wiring:
+   * `AgentSetup.readiness`). Without it, every agent is ready. One that
+   * throws counts as ready: "can't tell" never refuses a chat.
+   */
+  agentReadiness?: (agentId: AgentId) => Promise<AgentReadiness>;
+  /**
+   * Whether the user trusted the project (6.3; the per-project trust gate,
+   * story 4.2, bound to the project's scripts since 4.13 and, for an agent,
+   * to the agent files its descriptor names since 12.3). A chat with an
+   * agent whose descriptor `needsProjectTrust` is refused unless it says yes;
+   * one that throws counts as no. Without it, no project is trusted.
+   */
+  projectTrusted?: (workspaceId: WorkspaceId) => boolean | Promise<boolean>;
+  /**
+   * What each `build` session's agent starts with (story 5.2): the run's
+   * worktree, its sandbox and the build permission policy. Without it (or
+   * without an entry for the session) a `build` session never starts an agent.
+   */
+  buildSessions?: Pick<BuildSessions, 'get'>;
 }
 
 /** A terminal's size in character cells. */
@@ -94,8 +149,9 @@ export interface Chat {
    * be absolute (a leading `~` is the user's home). Throws
    * `InvalidOperationError` if it isn't, if it is not an existing
    * folder, or if it is, holds or sits inside Ogden Agents' data folder.
+   * `options` apply only when the workspace is created (story 10.4).
    */
-  openWorkspace(path: string): Workspace;
+  openWorkspace(path: string, options?: NewWorkspaceOptions): Workspace;
   /** Every workspace of this install, oldest first. */
   listWorkspaces(): Workspace[];
   /** The workspace (`NotFoundError` if there is none). */
@@ -111,10 +167,44 @@ export interface Chat {
    * idle agents are then stopped.
    */
   deleteHistory(workspaceId: WorkspaceId): Omit<HistoryDeleted, 'event'>;
-  /** A new chat session in the workspace, `idle`. */
-  createChatSession(workspaceId: WorkspaceId): Session;
+  /**
+   * A new session in the workspace, `idle`, with the agent `agentId` (the
+   * registry's default when absent), fixed for its life (epic 6): a `chat`
+   * by default, or a `planning` session (story 4.1), which is a chat whose
+   * first message the planning use-case sends, or a `build` session (story 5.2),
+   * which only the builds use-case creates, with its run. Rejects, creating nothing,
+   * with `NotFoundError` for an unknown workspace, `UnknownAgentError` for an
+   * agent that isn't registered, and `AgentNotReadyError` (6.3) for one that
+   * needs a project trust the project lacks, isn't installed, or isn't
+   * signed in.
+   */
+  createChatSession(
+    workspaceId: WorkspaceId,
+    options?: { kind?: SessionKind | undefined; agentId?: AgentId | undefined; autoTitle?: string | undefined; model?: string | null | undefined },
+  ): Promise<Session>;
+  /**
+   * The agents a chat can be started with, in order (epic 6; frozen in 6.3):
+   * what each is, the permission modes it declares, its setup, and why a new
+   * chat with it is refused now, if it is. With `workspaceId`, an agent that
+   * needs project trust is also refused (`project_not_trusted`, action
+   * `trust_project`) while that project isn't trusted for it (epic 12, 12.3).
+   */
+  chatAgents(workspaceId?: WorkspaceId): Promise<{ agents: ChatAgent[]; defaultAgentId: AgentId }>;
+  /**
+   * Stops the session's agent, if it has one, and waits for its process to
+   * exit (story 5.2: a run's agent before its worktree is removed). The
+   * session itself stays as it is. `NotFoundError` for an unknown session.
+   */
+  releaseAgent(workspaceId: WorkspaceId, sessionId: SessionId): Promise<void>;
   /** The session, which must belong to the workspace (`NotFoundError` otherwise). */
   getSession(workspaceId: WorkspaceId, sessionId: SessionId): Session;
+  /**
+   * Sets the user's name for the chat (backlog story 12), in any state and
+   * whoever drives; blank or `null` clears it. Appends `session.renamed`
+   * when it changed. Never told to the agent. `ValidationError` for a name
+   * too long (nothing stored), `NotFoundError` for an unknown session.
+   */
+  renameSession(workspaceId: WorkspaceId, sessionId: SessionId, title: string | null): Session;
   /**
    * Stores the user's message and hands it to the session's agent, starting
    * the agent first if needed. Returns once the message is stored; the reply
@@ -124,8 +214,32 @@ export interface Chat {
    * already queued, `SessionBusyError` while a failed turn is ending,
    * `DriverIsTerminalError` while the terminal drives the session (AD-6),
    * and `SessionNotIdleError` while it is switching drivers.
+   * `BuildSessionReadOnlyError` for a `build` session (story 5.2), unless `build` is set: only the
+   * builds use-case sends a build its prompt. `cancel`, `setPermissionMode` and `switchDriver` refuse a
+   * build session the same way.
+   * With `delivery: 'now'` (send now or wait) a message sent while the agent
+   * works goes ahead of the waiting ones at once: into the running turn when
+   * its agent can take it there, else after the current step is stopped
+   * (`session.turn_interrupted`); `AnswerFirstError` while a permission card
+   * waits. Absent or `wait`: as before.
    */
-  sendMessage(workspaceId: WorkspaceId, sessionId: SessionId, text: string): { messageId: string; queued: boolean };
+  sendMessage(workspaceId: WorkspaceId, sessionId: SessionId, text: string, options?: { delivery?: WhileWorking | undefined; build?: boolean | undefined }): { messageId: string; queued: boolean };
+  /**
+   * Send now or wait: changes one message waiting to be sent, its text or its
+   * place (0 goes next), and appends `session.queue_changed`. Throws
+   * `MessageNotQueuedError` when it is no longer waiting (or is being sent
+   * right away), `DriverIsTerminalError` / `SessionNotIdleError` as
+   * {@link sendMessage}.
+   */
+  updateQueuedMessage(workspaceId: WorkspaceId, sessionId: SessionId, messageId: string, change: { content?: string | undefined; position?: number | undefined }): void;
+  /** Removes one waiting message (appends `session.queue_changed`); refused as {@link updateQueuedMessage}. */
+  removeQueuedMessage(workspaceId: WorkspaceId, sessionId: SessionId, messageId: string): void;
+  /**
+   * Sends one waiting message right away, as `sendMessage` with `delivery:
+   * 'now'` does; refused as {@link updateQueuedMessage}, and with
+   * `AnswerFirstError` while a permission card waits.
+   */
+  sendQueuedMessageNow(workspaceId: WorkspaceId, sessionId: SessionId, messageId: string): void;
   /**
    * Stop: asks the agent to cancel its running prompt, declines the pending
    * permission requests (the session leaves `waiting` for `idle`) and drops
@@ -149,6 +263,57 @@ export interface Chat {
   switchDriver(workspaceId: WorkspaceId, sessionId: SessionId, driver: SessionDriver): Promise<Session>;
   /** A hold on the session's running terminal, or `undefined` when the terminal does not drive it. */
   attachTerminal(sessionId: SessionId): TerminalViewer | undefined;
+  /**
+   * Sets the chat's permission mode (the user chose it): appends
+   * `session.permission_mode_changed` (cause `user`) and tells its live
+   * agent. The same mode again changes nothing. Refused, changing nothing:
+   * `DriverIsTerminalError` while the terminal drives, `SessionNotIdleError`
+   * while it switches drivers, for `skip_all` `DeveloperModeRequiredError`
+   * (Developer mode off) and `ConfirmationRequiredError` (no `confirm`),
+   * `ModeUnavailableError` for a mode the agent or its session doesn't
+   * offer, `NotFoundError` for an unknown session.
+   */
+  setPermissionMode(workspaceId: WorkspaceId, sessionId: SessionId, mode: PermissionMode, options?: { confirm?: boolean | undefined }): Session;
+  /** Every permission mode, in order, and whether the session's agent (and its session, when it has one this run) offers it. */
+  permissionModeOptions(workspaceId: WorkspaceId, sessionId: SessionId): SessionPermissionModeOption[];
+  /**
+   * Sets the chat's model (story 11; `null`: the agent's own choice):
+   * appends `session.model_changed` (cause `user`); the agent's next turn
+   * runs on it (told live, or restarted at the next idle point). The same
+   * model again changes nothing. Refused, changing nothing:
+   * `ValidationError` for a value that isn't a model id,
+   * `DriverIsTerminalError` while the terminal drives,
+   * `SessionNotIdleError` while it switches drivers,
+   * `ModelUnavailableError` for a model the agent's session (or its last
+   * list) doesn't list, `NotFoundError` for an unknown session.
+   */
+  setModel(workspaceId: WorkspaceId, sessionId: SessionId, model: string | null): Session;
+  /** The models the chat's picker offers and the one its agent reported running on (story 11). */
+  modelOptions(workspaceId: WorkspaceId, sessionId: SessionId): NonNullable<SessionResponse['models']>;
+  /**
+   * What continuing the chat with `agentId` would send (handoff): the brief
+   * built from the chat's own events, secrets masked, at most the agent's
+   * budget; who receives it; and the chat's mode afterwards; with a
+   * single-use, short-lived token for exactly that (chat, agent, mode,
+   * masked brief). With `brief` (the user's edit), the same for it, refused
+   * over the budget. Changes nothing. Refused as {@link handOff} is.
+   */
+  handoffPreview(workspaceId: WorkspaceId, sessionId: SessionId, agentId: AgentId, brief?: string): Promise<HandoffPreviewResponse>;
+  /**
+   * Continues the chat with `agentId` (handoff): its agent stops, the chat's
+   * mode carries over when the new agent declares it (else Ask, cause
+   * `handoff`), `session.agent_changed` records the switch with `brief`
+   * (masked again), and `message` is sent, with the brief before it. Refused,
+   * changing nothing: `DriverIsTerminalError` while the terminal drives,
+   * `SessionNotIdleError` while it works, waits or switches,
+   * `InvalidOperationError` for its own agent, a brief over the agent's
+   * budget or an empty message, `HandoffNotPreviewedError` when
+   * `previewToken` isn't an unused, unexpired token of a preview of this
+   * exact chat, agent, mode and masked brief (it is used up either way),
+   * `UnknownAgentError`, `AgentNotReadyError` (trust, install, sign-in),
+   * `NotFoundError`.
+   */
+  handOff(workspaceId: WorkspaceId, sessionId: SessionId, request: { agentId: AgentId; brief: string; message: string; previewToken: string; model?: string | null | undefined }): Promise<{ session: Session; messageId: string }>;
   /** Resolves once no agent turn is running (tests, shutdown). */
   settled(): Promise<void>;
   /**
@@ -191,6 +356,18 @@ export interface Live {
   /** Resolves when the agent is dropped or closed: a prompt still running is abandoned. */
   gone: Promise<void>;
   markGone: () => void;
+  /** The permission mode changes being told to the agent, one after another (permission modes). */
+  modeSync: Promise<void>;
+  /** Whether it was started with the protected paths guarded (asked for in Auto only). */
+  guardsRequested: boolean;
+  /** Its guards don't fit the chat's mode any more: it is restarted at the next idle point (before the next prompt). */
+  restartPending: boolean;
+  /**
+   * The model core last put it on (story 11): the start's model for an agent
+   * that takes one only at start, `null` (its own choice) for one told live;
+   * `undefined` when not known (a switch timed out), so it is told again.
+   */
+  appliedModel: string | null | undefined;
 }
 
 /** A session's terminal and its viewers (story 3.1). Its output is never logged, evented or stored. */
@@ -218,10 +395,26 @@ export interface Terminal {
   exit: { exitCode: number | null } | undefined;
 }
 
+/** A message waiting to be sent (story 2.10; send now or wait). */
+export interface QueuedItem {
+  messageId: string;
+  text: string;
+  /** Sent right away: it goes ahead of every message that waits. */
+  now?: true | undefined;
+  /** Being put into the running turn right now: it can't be changed meanwhile. */
+  sending?: boolean | undefined;
+}
+
 /** A session whose agent is answering: from the first message until nothing is left to send. */
 export interface Turn {
-  /** Messages sent while the agent answered, oldest first. */
-  queue: Array<{ messageId: string; text: string }>;
+  /** Messages sent while the agent answered, in the order they will go. */
+  queue: QueuedItem[];
+  /** Messages being put into the running turn (send now or wait): the next one is picked only once they settled. */
+  steering?: Promise<void> | undefined;
+  /** Sends a message sent right away once the next prompt is out (it came while the agent was starting). */
+  whenPrompting?: (() => void) | undefined;
+  /** A prompt is out to the agent (its turn can be stopped or steered). */
+  prompting?: boolean | undefined;
   /** Deny reasons to send after the turn, ahead of the queue. */
   reasons: string[];
   /** Fires the check-in after a quiet stretch. */

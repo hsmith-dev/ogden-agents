@@ -4,7 +4,8 @@ import { start } from '../src/start.js';
 import { tempDataDir, trackServer } from './helpers.js';
 
 const openBrowser = vi.hoisted(() => vi.fn(async () => undefined));
-vi.mock('open', () => ({ default: openBrowser }));
+// The opener itself (AD-16: `open` runs in a child of its own, `open-url.test.ts`); no browser opens in a test.
+vi.mock('../src/open-url.js', () => ({ openUrl: openBrowser }));
 
 const quiet = createLogger(() => {});
 

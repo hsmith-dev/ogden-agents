@@ -1,27 +1,37 @@
-import { CAUTION_LEVELS, type BmadPiece, type CautionLevel, type PermissionRule } from '@ogden-agents/shared';
+import { CAUTION_LEVELS, PERMISSION_MODE_LABELS, type CautionLevel, type PermissionMode, type PermissionRule } from '@ogden-agents/shared';
 import { House, Trash } from '@phosphor-icons/react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
+import { useAppearance } from '@/appearance/appearance-provider';
+import { keepSaved } from '@/api/keep-saved';
 import { ChatApiError, removePermissionRule } from '@/chat/chat-api';
+import { DefaultAgentView, type DefaultAgentViewProps } from '@/chat/default-agent-view';
+import { appDefaultWords, DefaultModelsSection } from '@/chat/default-models';
+import { ProjectWhileWorkingSection } from '@/chat/while-working-section';
+import { projectDefaultAgent, useChatAgents } from '@/chat/use-chat-agents';
+import { DefaultPermissionModeView, type DefaultPermissionModeViewProps } from '@/permissions/default-permission-mode';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { AlertDialog, AlertDialogCancel, AlertDialogConfirm, AlertDialogContent, AlertDialogTrigger } from '@/ui/alert-dialog';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
-import { Field } from '@/ui/field';
 import { EmptyState, PageBody, PageSection } from '@/ui/page';
 import { RadioGroup, RadioGroupOption } from '@/ui/radio-group';
-import { Switch } from '@/ui/switch';
 import { Text } from '@/ui/typography';
 import { deleteHistory, fetchWorkspace, workspaceName } from '@/workspaces/workspace-api';
-import { createLatestGate, updateBmadPieces, updateCautionLevel, usePermissionRules, useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
+import { BmadMethodSection } from '@/workspaces/bmad-method-section';
+import { useBmadRepoNoteSlot, useNewProjectsDefaultSlot } from '@/workspaces/bmad-settings-slots';
+import { createLatestGate, updateCautionLevel, updateDefaultAgent, updateDefaultPermissionMode, updateProjectDefaultModel, usePermissionRules, useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
 
 /**
  * `/w/:wsId/settings`: the workspace's settings (story 2.5, then the
- * caution level in 2.8): caution level, history deletion, the BMad Method
- * switch (story 10.1's bare one; 10.5 designs the section), and later the
- * default agent. Story 2.3 registers the route; 2.5
- * and 2.8 fill this file.
+ * caution level in 2.8): caution level, the BMad Method section (story
+ * 10.5's, in `workspaces/bmad-method-section.tsx`, at `#bmad-method`, with
+ * story 10.7's slots), the
+ * Always allow rules, history deletion, and the default agent (epic 6,
+ * entry 6, shown only when the install has more than one), and the mode new
+ * chats start in (default permission mode). Story 2.3
+ * registers the route; 2.5 and 2.8 fill this file.
  */
 export function WorkspaceSettingsPage() {
   const { wsId } = useParams({ strict: false }) as { wsId: string };
@@ -47,7 +57,11 @@ export function WorkspaceSettingsPage() {
         ) : workspace.data === undefined ? null : (
           <>
             <CautionLevelSection wsId={wsId} />
-            <BmadMethodSection wsId={wsId} />
+            <DefaultPermissionModeSection wsId={wsId} />
+            <DefaultAgentSection wsId={wsId} />
+            <ProjectModelsSection wsId={wsId} />
+            <ProjectWhileWorkingSection wsId={wsId} />
+            <BmadSection wsId={wsId} />
             <AlwaysAllowRulesSection wsId={wsId} name={workspaceName(workspace.data)} />
             <DeleteHistorySection wsId={wsId} name={workspaceName(workspace.data)} />
           </>
@@ -55,6 +69,13 @@ export function WorkspaceSettingsPage() {
       </PageBody>
     </>
   );
+}
+
+/** The BMad Method section with its two slots: the repo note and the default for new projects (story 10.7). */
+function BmadSection({ wsId }: { wsId: string }) {
+  const offerSlot = useBmadRepoNoteSlot(wsId);
+  const defaultSlot = useNewProjectsDefaultSlot();
+  return <BmadMethodSection wsId={wsId} offerSlot={offerSlot} defaultSlot={defaultSlot} />;
 }
 
 /** The caution ladder in the user's words (EXPERIENCE.md Caution level), strictest first. */
@@ -112,7 +133,7 @@ export function CautionLevelView({ value, onChange, saving, status }: CautionLev
 }
 
 /** Loads the level and saves each change at once. */
-function CautionLevelSection({ wsId }: { wsId: string }) {
+export function CautionLevelSection({ wsId }: { wsId: string }) {
   const settings = useWorkspaceSettings(wsId);
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
@@ -127,11 +148,12 @@ function CautionLevelSection({ wsId }: { wsId: string }) {
     setChosen(level);
     setStatus(undefined);
     updateCautionLevel(wsId, level).then(
-      (saved) => {
+      async (saved) => {
+        if (!latest.isLatest(ticket)) return;
+        await keepSaved(queryClient, ['workspace-settings', wsId], saved);
         if (!latest.isLatest(ticket)) return;
         setSaving(false);
         setChosen(undefined);
-        queryClient.setQueryData(['workspace-settings', wsId], saved);
         setStatus({ kind: 'saved', text: `Saved: ${CAUTION_OPTIONS[saved.cautionLevel].label}.` });
       },
       (failure: unknown) => {
@@ -147,80 +169,130 @@ function CautionLevelSection({ wsId }: { wsId: string }) {
   return <CautionLevelView value={chosen ?? settings.data?.cautionLevel} onChange={onChange} saving={saving} status={status ?? loadError} />;
 }
 
-export interface BmadMethodViewProps {
-  /** Whether Planning is on; `undefined` while loading. */
-  planning: boolean | undefined;
-  onChange: (on: boolean) => void;
-  saving: boolean;
-  /** Why the change wasn't saved, or the settings couldn't load. */
-  error: string | undefined;
-}
-
-/**
- * Story 10.1's bare switch for one BMad piece, Planning (CAP-19, AD-22). It
- * only asks the server; core's guard decides what runs. Entry 10.5 replaces
- * it with the designed section.
- */
-export function BmadMethodView({ planning, onChange, saving, error }: BmadMethodViewProps) {
-  return (
-    <PageSection title="BMad Method" data-testid="bmad-section">
-      <Text>Projects start as simple chats. Turn on the BMad Method features this project uses. Your project's files are never changed by turning one off.</Text>
-      {planning === undefined ? null : (
-        <Field id="bmad-planning" layout="inline" label="Planning" description="Plan with BMad Method in this project.">
-          <Switch
-            id="bmad-planning"
-            data-testid="bmad-planning"
-            aria-describedby="bmad-planning-description"
-            checked={planning}
-            disabled={saving}
-            onCheckedChange={onChange}
-          />
-        </Field>
-      )}
-      {error === undefined ? null : (
-        <Notice variant="blocked" role="alert" data-testid="bmad-error">
-          {error}
-        </Notice>
-      )}
-    </PageSection>
-  );
-}
-
-/** Loads the pieces and saves each change at once; other tabs follow `workspace.settings_changed`. */
-function BmadMethodSection({ wsId }: { wsId: string }) {
+/** Loads the mode the project's new chats start in and saves each change at once (Skip all after its warning). */
+export function DefaultPermissionModeSection({ wsId }: { wsId: string }) {
   const settings = useWorkspaceSettings(wsId);
+  const { appearance } = useAppearance();
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | undefined>(undefined);
-  const [chosen, setChosen] = useState<boolean | undefined>(undefined);
+  const [status, setStatus] = useState<DefaultPermissionModeViewProps['status']>(undefined);
+  const [chosen, setChosen] = useState<PermissionMode | undefined>(undefined);
   const latest = useRef(createLatestGate()).current;
 
-  const onChange = (on: boolean) => {
-    const current = settings.data?.bmadPieces ?? [];
-    const next: BmadPiece[] = on ? [...current.filter((piece) => piece !== 'planning'), 'planning'] : current.filter((piece) => piece !== 'planning');
+  const onChange = (mode: PermissionMode, confirmed: boolean) => {
     const ticket = latest.next();
     setSaving(true);
-    setChosen(on);
-    setError(undefined);
-    updateBmadPieces(wsId, next).then(
-      (saved) => {
+    setChosen(mode);
+    setStatus(undefined);
+    updateDefaultPermissionMode(wsId, mode, confirmed).then(
+      async (saved) => {
+        if (!latest.isLatest(ticket)) return;
+        await keepSaved(queryClient, ['workspace-settings', wsId], saved);
         if (!latest.isLatest(ticket)) return;
         setSaving(false);
         setChosen(undefined);
-        queryClient.setQueryData(['workspace-settings', wsId], saved);
+        setStatus({ kind: 'saved', text: `Saved: new chats start in ${PERMISSION_MODE_LABELS[saved.defaultPermissionMode ?? 'ask']}.` });
       },
       (failure: unknown) => {
         if (!latest.isLatest(ticket)) return;
         setSaving(false);
         setChosen(undefined);
-        setError(failure instanceof Error ? failure.message : "The BMad Method setting couldn't be saved. Try again.");
+        setStatus({ kind: 'error', text: failure instanceof Error ? failure.message : "The default permission mode couldn't be saved. Try again." });
       },
     );
   };
 
-  const loadError = settings.error instanceof Error ? settings.error.message : undefined;
-  const planning = chosen ?? (settings.data === undefined ? undefined : settings.data.bmadPieces.includes('planning'));
-  return <BmadMethodView planning={planning} onChange={onChange} saving={saving} error={error ?? loadError} />;
+  const data = settings.data;
+  return (
+    <DefaultPermissionModeView
+      value={chosen ?? (data === undefined ? undefined : (data.defaultPermissionMode ?? 'ask'))}
+      notice={chosen === undefined ? data?.defaultPermissionModeNotice : undefined}
+      developerMode={appearance.developerMode}
+      onChange={onChange}
+      saving={saving}
+      status={status ?? (settings.error instanceof Error ? { kind: 'error', text: settings.error.message } : undefined)}
+      testId="default-mode"
+      title="New chats start in"
+      description="The permission mode new chats in this project start in. Each chat can still switch its own. Unattended builds keep their own rules."
+      confirmTitle="Start new chats in this project in Skip all?"
+    />
+  );
+}
+
+/** Loads the project's default agent and saves each change at once; another tab's change shows through the event stream. */
+export function DefaultAgentSection({ wsId }: { wsId: string }) {
+  const chatAgents = useChatAgents();
+  const settings = useWorkspaceSettings(wsId);
+  const queryClient = useQueryClient();
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<DefaultAgentViewProps['status']>(undefined);
+  const [chosen, setChosen] = useState<string | undefined>(undefined);
+  const latest = useRef(createLatestGate()).current;
+  const list = chatAgents.data;
+  if (list === undefined) return null;
+  const nameOf = (agentId: string) => list.agents.find((agent) => agent.agentId === agentId)?.displayName ?? agentId;
+
+  const onChange = (agentId: string) => {
+    const ticket = latest.next();
+    setSaving(true);
+    setChosen(agentId);
+    setStatus(undefined);
+    updateDefaultAgent(wsId, agentId).then(
+      async (saved) => {
+        if (!latest.isLatest(ticket)) return;
+        await keepSaved(queryClient, ['workspace-settings', wsId], saved);
+        if (!latest.isLatest(ticket)) return;
+        setSaving(false);
+        setChosen(undefined);
+        setStatus({ kind: 'saved', text: `Saved: new chats start with ${nameOf(projectDefaultAgent(list, saved.defaultAgentId))}.` });
+      },
+      (failure: unknown) => {
+        if (!latest.isLatest(ticket)) return;
+        setSaving(false);
+        setChosen(undefined);
+        setStatus({ kind: 'error', text: failure instanceof Error ? failure.message : "The default agent couldn't be saved. Try again." });
+      },
+    );
+  };
+
+  const value = chosen ?? (settings.data === undefined ? undefined : projectDefaultAgent(list, settings.data.defaultAgentId));
+  return (
+    <DefaultAgentView
+      agents={list.agents}
+      value={value}
+      onChange={onChange}
+      saving={saving}
+      status={status ?? (settings.error instanceof Error ? { kind: 'error', text: settings.error.message } : undefined)}
+      testId="default-agent"
+      description="The agent new chats in this project start with. You can still pick another for each new chat."
+    />
+  );
+}
+
+/**
+ * The project's own default model per agent (story 11): it wins over the
+ * app's (Settings → Agents) for new chats in this project.
+ */
+export function ProjectModelsSection({ wsId }: { wsId: string }) {
+  const chatAgents = useChatAgents();
+  const settings = useWorkspaceSettings(wsId);
+  const queryClient = useQueryClient();
+  const list = chatAgents.data;
+  if (list === undefined || settings.data === undefined) return null;
+  const saved = settings.data.defaultModels ?? {};
+  return (
+    <DefaultModelsSection
+      agents={list.agents}
+      testId="project-models"
+      description="The model new chats in this project start on, per agent. You can still switch each chat's model."
+      valueOf={(agent) => saved[agent.agentId] ?? null}
+      noneOf={(agent) => ({ label: `App default (${appDefaultWords(agent)})`, description: 'As set in Settings → Agents.' })}
+      onChoose={async (agent, model) => {
+        const next = await updateProjectDefaultModel(wsId, agent.agentId, model);
+        await keepSaved(queryClient, ['workspace-settings', wsId], next);
+      }}
+    />
+  );
 }
 
 export interface AlwaysAllowRulesViewProps {

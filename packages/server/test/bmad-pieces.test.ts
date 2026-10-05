@@ -8,7 +8,7 @@
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { API_ROUTES, ApiErrorBody, apiPath, TEST_ROUTES, WorkspaceResponse, WorkspaceSettingsResponse } from '@ogden-agents/shared';
+import { API_ROUTES, ApiErrorBody, apiPath, FEATURE_OFF_MESSAGE, TEST_ROUTES, WorkspaceResponse, WorkspaceSettingsResponse } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BMAD_PROBE_ENV } from '../src/test-hooks.js';
 import { send, signIn, startTestServer, tempDataDir, type SignedIn, type TestServer } from './helpers.js';
@@ -42,13 +42,13 @@ describe('BMad pieces over REST (story 10.1)', () => {
   it('PATCH turns planning on with one settings_changed, refuses a bad piece, and the state survives a restart', async () => {
     const dataDir = tempDataDir();
     const lines: string[] = [];
-    const first = await startTestServer({ dataDir, lines });
+    const first = await startTestServer({ dataDir, lines, availableBmadPieces: ['planning'] });
     const tab = await signIn(first);
     const workspace = await addProject(first, tab);
-    expect(await settingsOf(first, tab, workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [] });
+    expect(await settingsOf(first, tab, workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false });
 
     const before = first.core.events.lastSeq();
-    for (const body of [{ bmadPieces: ['board'] }, { bmadPieces: ['planning', 'planning'] }, { bmadPieces: 'planning' }]) {
+    for (const body of [{ bmadPieces: ['yolo'] }, { bmadPieces: ['planning', 'planning'] }, { bmadPieces: 'planning' }]) {
       const bad = await request(first, tab, 'PATCH', settingsPath(workspace.id), body);
       expect(bad.status, JSON.stringify(body)).toBe(400);
       expect(ApiErrorBody.parse(await bad.json()).error.code).toBe('invalid_request');
@@ -57,7 +57,7 @@ describe('BMad pieces over REST (story 10.1)', () => {
 
     const patched = await request(first, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces: ['planning'] });
     expect(patched.status).toBe(200);
-    expect(WorkspaceSettingsResponse.parse(await patched.json()).settings).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: ['planning'] });
+    expect(WorkspaceSettingsResponse.parse(await patched.json()).settings).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: ['planning'], bmadScriptsTrusted: false });
     const changed = first.core.events.readAfter(before);
     expect(changed).toHaveLength(1);
     expect(changed[0]).toMatchObject({
@@ -69,14 +69,14 @@ describe('BMad pieces over REST (story 10.1)', () => {
     expect(lines.join('')).not.toContain(workspace.realPath ?? workspace.path);
     await first.close();
 
-    const second = await startTestServer({ dataDir });
+    const second = await startTestServer({ dataDir, availableBmadPieces: ['planning'] });
     const again = await signIn(second);
-    expect(await settingsOf(second, again, workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: ['planning'] });
+    expect(await settingsOf(second, again, workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: ['planning'], bmadScriptsTrusted: false });
   });
 
   it('the probe route answers feature_off while planning is off and succeeds once it is on; it needs a token', async () => {
     vi.stubEnv(BMAD_PROBE_ENV, '1');
-    const server = await startTestServer();
+    const server = await startTestServer({ availableBmadPieces: ['planning'] });
     const tab = await signIn(server);
     const workspace = await addProject(server, tab);
 
@@ -84,7 +84,7 @@ describe('BMad pieces over REST (story 10.1)', () => {
     expect(off.status).toBe(409);
     const refused = ApiErrorBody.parse(await off.json()).error;
     expect(refused.code).toBe('feature_off');
-    expect(refused.message).toContain("project's settings");
+    expect(refused.message).toBe(FEATURE_OFF_MESSAGE);
 
     expect((await request(server, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces: ['planning'] })).status).toBe(200);
     const on = await request(server, tab, 'GET', probePath(workspace.id));
@@ -99,7 +99,7 @@ describe('BMad pieces over REST (story 10.1)', () => {
   });
 
   it('without its test hook the probe route is not registered', async () => {
-    const server = await startTestServer();
+    const server = await startTestServer({ availableBmadPieces: ['planning'] });
     const tab = await signIn(server);
     const workspace = await addProject(server, tab);
     expect((await request(server, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces: ['planning'] })).status).toBe(200);

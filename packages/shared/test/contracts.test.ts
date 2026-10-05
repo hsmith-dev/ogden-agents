@@ -14,11 +14,15 @@ import {
   ApiErrorBody,
   apiPath,
   AppShortcutStatus,
+  BMAD_PIECES,
+  BmadDetectionResponse,
+  BmadPiecesResponse,
   CaughtUpMessage,
   CautionLevel,
   ClientMessage,
   CoreEvent,
   CreateFolderRequest,
+  DeveloperModeResponse,
   DriverChangeCause,
   FolderListing,
   HistoryDeletedResponse,
@@ -28,9 +32,11 @@ import {
   MAX_TERMINAL_COLS,
   MAX_TERMINAL_ROWS,
   NewCoreEvent,
-  TEST_ROUTES,
+  NewProjectDefaultsResponse,
   OnboardingState,
+  PERMISSION_MODES,
   PermissionDecisionRequest,
+  PermissionModeChangeCause,
   PermissionRule,
   PermissionRuleId,
   PermissionRulesResponse,
@@ -41,6 +47,8 @@ import {
   SessionsResponse,
   SessionTerminal,
   SetApiKeyRequest,
+  SetDeveloperModeRequest,
+  SetPermissionModeRequest,
   SignInResponse,
   TERMINAL_CLOSE,
   TerminalAttachFrame,
@@ -50,6 +58,7 @@ import {
   TerminalUnavailableCode,
   ToolCallDiff,
   ToolKind,
+  UpdateNewProjectDefaultsRequest,
   UpdateWorkspaceSettingsRequest,
   WorkspaceSettingsResponse,
   WorkspacesResponse,
@@ -106,6 +115,21 @@ const EVENTS: Array<[type: string, valid: Record<string, unknown>, invalid: Reco
     { ...onSession, payload: { sessionId: sesId, waitingOn: '' } },
   ],
   [
+    'session.agent_starting',
+    { ...onSession, payload: { sessionId: sesId } },
+    { ...onSession, payload: {} },
+  ],
+  [
+    'session.agent_started',
+    { ...onSession, payload: { sessionId: sesId } },
+    { ...onSession, payload: { sessionId: '' } },
+  ],
+  [
+    'session.agent_changed',
+    { ...onSession, payload: { sessionId: sesId, agentId: 'second-agent', previous: 'first-agent', brief: 'Handoff', resumes: false } },
+    { ...onSession, payload: { sessionId: sesId, agentId: 'Second Agent', previous: 'first-agent', brief: 'Handoff', resumes: false } },
+  ],
+  [
     'permission.requested',
     {
       ...onSession,
@@ -123,6 +147,21 @@ const EVENTS: Array<[type: string, valid: Record<string, unknown>, invalid: Reco
     },
   ],
   [
+    'session.permission_mode_changed',
+    { ...onSession, payload: { sessionId: sesId, mode: 'ask', previous: 'auto', cause: 'agent', reason: 'Claude Code switched itself to Accept edits, so this chat is back in Ask.' } },
+    { ...onSession, payload: { sessionId: sesId, mode: 'yolo', previous: 'ask', cause: 'user' } },
+  ],
+  [
+    'session.renamed',
+    { ...onSession, payload: { sessionId: sesId, title: 'Auth work', autoTitle: null, cause: 'user' } },
+    { ...onSession, payload: { sessionId: sesId, title: '', autoTitle: null, cause: 'user' } },
+  ],
+  [
+    'settings.developer_mode_changed',
+    { workspaceId: null, streamId: 'settings', payload: { developerMode: false, previous: true } },
+    { workspaceId: wsId, streamId: 'settings', payload: { developerMode: false, previous: true } },
+  ],
+  [
     'permission.resolved',
     { ...onSession, payload: { sessionId: sesId, requestId: 'req-1', decision: 'allow_always', by: 'user', ruleId } },
     { ...onSession, payload: { sessionId: sesId, requestId: 'req-1', decision: 'deny', by: 'user', reason: 'x'.repeat(2001) } },
@@ -138,6 +177,7 @@ const EVENTS: Array<[type: string, valid: Record<string, unknown>, invalid: Reco
     { ...onWorkspace, payload: { cautionLevel: 'ask_for_commands', previous: 'ask_every_time' } },
     { ...onWorkspace, payload: { cautionLevel: 'ask_for_commands' } },
   ],
+  ['workspace.bmad_offer_dismissed', { ...onWorkspace, payload: {} }, { ...onAgents, payload: {} }],
   ['agent.install_started', { ...onAgents, payload: { agentId: 'claude-code' } }, { ...onAgents, payload: { agentId: 'Claude Code' } }],
   [
     'agent.install_progress',
@@ -150,6 +190,7 @@ const EVENTS: Array<[type: string, valid: Record<string, unknown>, invalid: Reco
     { workspaceId: wsId, streamId: 'agents', payload: { agentId: 'claude-code' } },
   ],
   ['agent.install_failed', { ...onAgents, payload: { agentId: 'codex', reason: 'No network.' } }, { ...onAgents, payload: { agentId: 'codex', reason: '' } }],
+  ['agent.uninstalled', { ...onAgents, payload: { agentId: 'antigravity' } }, { ...onAgents, payload: { agentId: 'Not An Id' } }],
   [
     'agent.auth_changed',
     { ...onAgents, payload: { agentId: 'claude-code', state: 'signed_in', method: 'subscription' } },
@@ -253,6 +294,11 @@ describe('REST shapes', () => {
     ['CreateFolderRequest', CreateFolderRequest, { parent: '/home/a', name: 'clay-and-kiln' }, { parent: '/home/a', name: '../escape' }],
     ['HistoryDeletedResponse', HistoryDeletedResponse, { deletedEvents: 3, deletedSessions: 1, deletedRuns: 0 }, { deletedEvents: -1, deletedSessions: 1, deletedRuns: 0 }],
     ['WorkspaceSettingsResponse', WorkspaceSettingsResponse, { settings: { cautionLevel: 'ask_every_time', bmadPieces: ['planning'] } }, { settings: { cautionLevel: 'ask_every_time' } }],
+    ['WorkspaceSettingsResponse (rule)', WorkspaceSettingsResponse, { settings: { cautionLevel: 'ask_every_time', bmadPieces: ['board', 'builds'] } }, { settings: { cautionLevel: 'ask_every_time', bmadPieces: ['builds'] } }],
+    ['BmadPiecesResponse', BmadPiecesResponse, { pieces: BMAD_PIECES.map((piece) => ({ piece, available: true })) }, { pieces: [] }],
+    ['NewProjectDefaultsResponse', NewProjectDefaultsResponse, { defaults: { bmadPieces: [] } }, { defaults: {} }],
+    ['UpdateNewProjectDefaultsRequest', UpdateNewProjectDefaultsRequest, { bmadPieces: ['board'] }, { bmadPieces: ['retrospectives'] }],
+    ['BmadDetectionResponse', BmadDetectionResponse, { detection: { hasBmad: false, hasOutput: false, offerDismissed: true } }, { detection: { hasBmad: 'no' } }],
     ['UpdateWorkspaceSettingsRequest', UpdateWorkspaceSettingsRequest, { cautionLevel: 'ask_risky_only' }, {}],
     ['PermissionDecisionRequest', PermissionDecisionRequest, { decision: 'deny', reason: 'Not in this repo.' }, { decision: 'deny', reason: 'x'.repeat(2001) }],
     ['PermissionRule', PermissionRule, { id: ruleId, workspaceId: wsId, scope, createdAt: at }, { id: ruleId, workspaceId: wsId, scope: { ...scope, kind: 'path' }, createdAt: at }],
@@ -275,35 +321,6 @@ describe('REST shapes', () => {
       expect(schema.safeParse(invalid).success).toBe(false);
     });
   }
-});
-
-describe('the BMad pieces (story 10.1)', () => {
-  const assignedTo = { ...onWorkspace, ...assigned };
-  it('a 0.2.0 workspace.settings_changed (caution level only) still parses; a pieces change parses with both lists', () => {
-    const old = { type: 'workspace.settings_changed', ...assignedTo, payload: { cautionLevel: 'ask_for_commands', previous: 'ask_every_time' } };
-    expect(CoreEvent.parse(old)).toEqual(old);
-    const pieces = {
-      type: 'workspace.settings_changed',
-      ...assignedTo,
-      payload: { cautionLevel: 'ask_every_time', previous: 'ask_every_time', bmadPieces: ['planning'], previousBmadPieces: [] },
-    };
-    expect(CoreEvent.parse(pieces)).toEqual(pieces);
-    expect(CoreEvent.safeParse({ ...pieces, payload: { ...pieces.payload, bmadPieces: ['yolo'] } }).success).toBe(false);
-  });
-
-  it('UpdateWorkspaceSettingsRequest takes the pieces alone or with a level, never an unknown or repeated piece or nothing', () => {
-    expect(UpdateWorkspaceSettingsRequest.parse({ bmadPieces: [] })).toEqual({ bmadPieces: [] });
-    expect(UpdateWorkspaceSettingsRequest.parse({ bmadPieces: ['planning'], cautionLevel: 'ask_for_commands' })).toEqual({ bmadPieces: ['planning'], cautionLevel: 'ask_for_commands' });
-    for (const bad of [{ bmadPieces: ['board'] }, { bmadPieces: ['planning', 'planning'] }, { bmadPieces: 'planning' }, { other: 1 }, {}]) {
-      expect(UpdateWorkspaceSettingsRequest.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
-    }
-  });
-
-  it('feature_off is an error code, and the test-only probe is under /api/v1 and outside API_ROUTES', () => {
-    expect(API_ERROR_CODES).toContain('feature_off');
-    expect(TEST_ROUTES.bmadProbe.startsWith(`${API_BASE}/`)).toBe(true);
-    expect(Object.values(API_ROUTES) as string[]).not.toContain(TEST_ROUTES.bmadProbe);
-  });
 });
 
 describe('API routes and error codes', () => {
@@ -336,8 +353,10 @@ describe('the terminal contracts (story 3.2)', () => {
   });
 
   it('SessionResponse carries terminal optionally', () => {
-    expect(SessionResponse.parse({ session })).toEqual({ session });
-    expect(SessionResponse.parse({ session, terminal: { available: true } })).toEqual({ session, terminal: { available: true } });
+    // A session from before permission modes reads as Ask.
+    const read = { ...session, permissionMode: 'ask' };
+    expect(SessionResponse.parse({ session })).toEqual({ session: read });
+    expect(SessionResponse.parse({ session, terminal: { available: true } })).toEqual({ session: read, terminal: { available: true } });
     expect(SessionResponse.safeParse({ session, terminal: { available: 'yes' } }).success).toBe(false);
   });
 
@@ -367,7 +386,7 @@ describe('the terminal contracts (story 3.2)', () => {
     for (const cause of DriverChangeCause.options) {
       expect(CoreEvent.parse({ ...base, ...assigned, payload: { ...base.payload, cause } })).toMatchObject({ payload: { cause } });
     }
-    expect(DriverChangeCause.options).toEqual(['user', 'cli_exited', 'server_stopped', 'server_restarted']);
+    expect(DriverChangeCause.options).toEqual(['user', 'cli_exited', 'server_stopped', 'server_restarted', 'developer_mode_off']);
     expect(NewCoreEvent.safeParse({ ...base, payload: { ...base.payload, cause: 'whim' } }).success).toBe(false);
   });
 
@@ -385,5 +404,49 @@ describe('the terminal contracts (story 3.2)', () => {
     for (const code of ['session_not_idle', 'terminal_unavailable', 'driver_is_terminal']) {
       expect(ApiErrorBody.parse({ error: { code, message: 'Plain words.', details: { terminal: { available: true } } } }).error.code).toBe(code);
     }
+  });
+});
+
+describe('the permission mode contracts (permission modes)', () => {
+  it('a session and a session.created event from before permission modes read as Ask; a new one carries its mode', () => {
+    expect(SessionsResponse.parse({ sessions: [session] }).sessions[0]?.permissionMode).toBe('ask');
+    const created = CoreEvent.parse({ type: 'session.created', ...onSession, ...assigned, payload: { session } });
+    expect(created).toMatchObject({ payload: { session: { permissionMode: 'ask' } } });
+    for (const mode of PERMISSION_MODES) {
+      expect(CoreEvent.parse({ type: 'session.created', ...onSession, ...assigned, payload: { session: { ...session, permissionMode: mode } } })).toMatchObject({
+        payload: { session: { permissionMode: mode } },
+      });
+    }
+    expect(PERMISSION_MODES).toEqual(['ask', 'auto', 'skip_all']);
+    expect(SessionsResponse.safeParse({ sessions: [{ ...session, permissionMode: 'bypass' }] }).success).toBe(false);
+  });
+
+  it('session.permission_mode_changed names the mode, the previous one and the cause; its reason is optional', () => {
+    expect(PermissionModeChangeCause.options).toEqual(['user', 'developer_mode_off', 'restart', 'agent', 'handoff']);
+    const base = { type: 'session.permission_mode_changed', ...onSession, ...assigned, payload: { sessionId: sesId, mode: 'auto', previous: 'ask', cause: 'user' } };
+    expect(CoreEvent.parse(base)).toMatchObject({ payload: { mode: 'auto', previous: 'ask', cause: 'user' } });
+    expect(CoreEvent.safeParse({ ...base, payload: { ...base.payload, cause: 'whim' } }).success).toBe(false);
+    expect(CoreEvent.safeParse({ ...base, payload: { ...base.payload, reason: '' } }).success).toBe(false);
+  });
+
+  it('permission.requested from before permission modes still parses; a new one carries the mode', () => {
+    const payload = { sessionId: sesId, requestId: 'req-1', toolCall: { toolCallId: 't1', title: 'Run npm test', kind: 'execute' }, alwaysAllowScope: null, cautionLevel: 'ask_every_time' };
+    expect(CoreEvent.safeParse({ type: 'permission.requested', ...onSession, ...assigned, payload }).success).toBe(true);
+    expect(CoreEvent.parse({ type: 'permission.requested', ...onSession, ...assigned, payload: { ...payload, permissionMode: 'skip_all' } })).toMatchObject({ payload: { permissionMode: 'skip_all' } });
+    expect(CoreEvent.safeParse({ type: 'permission.requested', ...onSession, ...assigned, payload: { ...payload, permissionMode: 'none' } }).success).toBe(false);
+  });
+
+  it('the requests: a mode, with an optional confirmation; Developer mode on or off', () => {
+    expect(SetPermissionModeRequest.parse({ mode: 'skip_all', confirm: true })).toEqual({ mode: 'skip_all', confirm: true });
+    expect(SetPermissionModeRequest.parse({ mode: 'auto' })).toEqual({ mode: 'auto' });
+    expect(SetPermissionModeRequest.safeParse({ mode: 'everything' }).success).toBe(false);
+    expect(SetDeveloperModeRequest.safeParse({ developerMode: 'yes' }).success).toBe(false);
+    expect(DeveloperModeResponse.parse({ developerMode: true })).toEqual({ developerMode: true });
+    expect(SessionResponse.parse({ session, permissionModes: [{ mode: 'skip_all', available: false, reason: 'Not here.' }] }).permissionModes).toEqual([
+      { mode: 'skip_all', available: false, reason: 'Not here.' },
+    ]);
+    for (const code of ['developer_mode_required', 'confirmation_required', 'mode_unavailable']) expect(API_ERROR_CODES).toContain(code);
+    expect(API_ROUTES.sessionPermissionMode).toBe(`${API_BASE}/workspaces/:wsId/sessions/:sesId/permission-mode`);
+    expect(API_ROUTES.developerMode).toBe(`${API_BASE}/settings/developer-mode`);
   });
 });

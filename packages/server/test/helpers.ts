@@ -7,10 +7,16 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { request, type IncomingHttpHeaders } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createMemorySecretStore } from '@ogden-agents/adapters';
+import { createMemoryAgentSetup, createMemoryAppShortcut, createMemoryBmadCatalog, createMemoryBmadSource, createMemorySecretStore, createMemoryTicketStore } from '@ogden-agents/adapters';
+import { createAgentRegistry, createAgentSetup, createBmadSource, createBoard, createChat, createNewProjectDefaults, createOnboarding, createPlanning, type AgentDescriptor, type AgentPort, type Core, type RegisteredAgent } from '@ogden-agents/core';
 import { API_ROUTES, webSocketProtocols } from '@ogden-agents/shared';
+import type { Hono } from 'hono';
 import { afterEach } from 'vitest';
+import { fixtureSource, TEST_PYTHON } from '../../../tests/fixtures/bmad-upstream-source.js';
 import type WebSocket from 'ws';
+import { createApp, type AppOptions } from '../src/app.js';
+import { createLaunchCodes, createTabTokens } from '../src/auth.js';
+import { createGate } from '../src/gate.js';
 import { createLogger } from '../src/log.js';
 import { start, type RunningServer, type StartOptions } from '../src/start.js';
 
@@ -74,6 +80,37 @@ export async function waitFor(predicate: () => boolean | Promise<boolean>, what:
   }
 }
 
+/**
+ * A test agent's descriptor (6.3): sound, named and moded as `agent` is, with
+ * a subscription sign-in and an API key in `FAKE_AGENT_KEY`; `overrides` change any field.
+ */
+export function testDescriptor(agentId: string, agent: Pick<AgentPort, 'displayName' | 'permissionModes'>, overrides: Partial<AgentDescriptor> = {}): AgentDescriptor {
+  const declared = agent.permissionModes ?? ['ask'];
+  return {
+    agentId,
+    displayName: agent.displayName,
+    provider: 'Fake Provider',
+    install: { kind: 'npm', package: '@fake/agent', version: '1.0.0' },
+    signInMethods: [
+      { id: 'fake-login', kind: 'subscription', label: 'Sign in with your account' },
+      { id: 'fake-key', kind: 'api_key', label: 'Use an API key', apiKey: { envNames: ['FAKE_AGENT_KEY'], format: 'Starts with fake-' } },
+    ],
+    permissionModes: {
+      ask: 'default',
+      ...(declared.includes('auto') ? { auto: 'auto' } : {}),
+      ...(declared.includes('skip_all') ? { skip_all: 'bypassPermissions' } : {}),
+    },
+    needsProjectTrust: false,
+    skillsFolder: '.fake/skills',
+    ...overrides,
+  };
+}
+
+/** `agent` registered as `agentId`, with {@link testDescriptor}. */
+export function registered(agentId: string, agent: AgentPort, overrides: Partial<AgentDescriptor> = {}): RegisteredAgent {
+  return { descriptor: testDescriptor(agentId, agent, overrides), agent };
+}
+
 /** A started test server; it has a launch link, since tests start it with `launch: true`. */
 export type TestServer = RunningServer & { launchUrl: string };
 
@@ -89,7 +126,7 @@ export const FAKE_AGENT = join(import.meta.dirname, '..', '..', '..', 'tests', '
  * the real keychain or reaches Anthropic (story 9.2).
  */
 export async function startTestServer(options: StartOptions & { lines?: string[] } = {}): Promise<TestServer> {
-  const { lines, ...rest } = options;
+  const { lines, extraAgentEnv, ...rest } = options;
   const server = await start({
     port: 0,
     open: false,
@@ -99,11 +136,28 @@ export async function startTestServer(options: StartOptions & { lines?: string[]
     claudeAdapterPath: FAKE_AGENT,
     secrets: createMemorySecretStore(),
     verifyApiKey: async () => 'ok',
+    // The pinned BMad Method as already downloaded (story 4.14), so no test reaches GitHub; a test of the
+    // download itself passes its own source, or `bmadFetch` for the real adapter.
+    ...(rest.bmadSource === undefined && rest.bmadFetch === undefined ? { bmadSource: createMemoryBmadSource({ ready: true }) } : {}),
+    // Claude Code (the fake) is signed in unless the test says otherwise (6.3: a signed-out agent refuses a new chat).
+    // Antigravity only where a test wires it (`fakeAntigravity`, epic 6 entry 5): the other tests see the agents they name.
+    antigravity: false,
+    extraAgentEnv: { FAKE_LOGIN_STATE: signedInLoginState(), ...extraAgentEnv },
     ...rest,
     launch: true,
   });
   servers.push(server);
   return server;
+}
+
+/**
+ * A fake login state file that says signed in (`FAKE_LOGIN_STATE`, read by
+ * the fake CLI's `auth status`), in a temp folder removed after the test.
+ */
+export function signedInLoginState(): string {
+  const file = join(tempDataDir(), 'login-state.json');
+  writeFileSync(file, `${JSON.stringify({ loggedIn: true })}\n`);
+  return file;
 }
 
 /** Closes `server` after the test (for one started some other way). Returns it. */
@@ -209,4 +263,92 @@ export function signIn(server: { url: string; launchUrl: string }): Promise<Sign
     signedIn.set(server, pending);
   }
   return pending;
+}
+
+/**
+ * The server app with every option set, so every route it can have is
+ * registered (the gate's route list, story 2.3; 10.6's guard-coverage
+ * test): control, toolchain, a chat whose agent always refuses, core's
+ * permissions and BMad pieces, the memory agent setup and shortcut,
+ * onboarding, tab tokens, the script trust (story 4.2), and Plan and Board on stubs (story 4.1). `extra` adds or overrides options, such as
+ * `bmadProbe: true`. Nothing is listened on and no agent ever runs.
+ */
+export function fullTestApp(core: Core, extra: Partial<AppOptions> = {}): Hono {
+  const log = createLogger(() => {});
+  const gate = createGate({ port: () => 1, codes: createLaunchCodes(), tabs: createTabTokens(), log });
+  const control = {
+    info: () => ({ version: '0', pid: 1, port: 1, busySessions: 0 }),
+    issueLaunchUrl: () => '',
+    restartWhenIdle: () => ({ restarting: false, busySessions: 0 }),
+    quit: () => ({ stopping: false, busySessions: 0 }),
+  };
+  const toolchain = {
+    status: async () => ({ state: 'missing' as const }),
+    installUv: async () => ({ started: false, uv: { state: 'missing' as const } }),
+    settled: async () => {},
+  };
+  const agent: AgentPort = {
+    displayName: 'Test Agent',
+    skillInvocation: (skill) => `/${skill}`,
+    startSession: () => Promise.reject(new Error('no agent in this test')),
+    reopenSession: () => Promise.reject(new Error('no agent in this test')),
+    listAuthMethods: () => Promise.reject(new Error('no agent in this test')),
+  };
+  const chat = createChat({
+    dataDir: tempDataDir(),
+    entities: core.entities,
+    sessionEvents: core.sessionEvents,
+    agents: createAgentRegistry([registered('test-agent', agent)]),
+    events: core.events,
+    installSettings: core.installSettings,
+  });
+  const bmadSource = createBmadSource(createMemoryBmadSource({ ready: true }));
+  return createApp({
+    events: core.events,
+    webRoot: tinyWebRoot(),
+    log,
+    gate,
+    control,
+    toolchain,
+    chat,
+    permissions: core.permissions,
+    bmad: core.bmad,
+    bmadDetection: core.bmadDetection,
+    bmadScriptTrust: core.bmadScriptTrust,
+    planning: createPlanning({ bmad: core.bmad, entities: core.entities, catalog: createMemoryBmadCatalog(), chat, agent }),
+    board: createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: bmadSource, entities: core.entities, catalog: createMemoryBmadCatalog(), tickets: createMemoryTicketStore() }),
+    bmadSource,
+    agentSetup: createAgentSetup(core.events, [createMemoryAgentSetup()]),
+    onboarding: createOnboarding({ dataDir: tempDataDir(), hasProjects: () => false }),
+    newProjectDefaults: createNewProjectDefaults({ dataDir: tempDataDir(), bmad: core.bmad }),
+    installSettings: core.installSettings,
+    appShortcut: createMemoryAppShortcut(),
+    tabs: createTabTokens(),
+    ...extra,
+  });
+}
+
+export { FIXTURE_COMMIT, hasManagedPython, realUvMissing, TEST_PYTHON, UPSTREAM_FIXTURE } from '../../../tests/fixtures/bmad-upstream-source.js';
+
+export const TEST_UV_PYTHON_ENV: Readonly<Record<string, string>> = {
+  UV_PYTHON: TEST_PYTHON,
+  UV_PYTHON_PREFERENCE: 'only-managed',
+  UV_PYTHON_DOWNLOADS: 'never',
+  // Where `uv python install` put it: setup-uv sets this in CI, and the server's uv allowlist doesn't carry it.
+  ...(process.env.UV_PYTHON_INSTALL_DIR ? { UV_PYTHON_INSTALL_DIR: process.env.UV_PYTHON_INSTALL_DIR } : {}),
+};
+
+/**
+ * The fixture as codeload would serve it, a lock that pins its content hash,
+ * and a `fetch` that answers the tarball and counts its calls: the real
+ * `bmad-source` adapter, without the network (story 4.14).
+ */
+export function fixtureUpstream() {
+  const { tarball, lock } = fixtureSource();
+  const fetched: string[] = [];
+  const fetch = async (url: string) => {
+    fetched.push(url);
+    return new Response(tarball);
+  };
+  return { lock, fetch, fetched, tarball };
 }

@@ -1,5 +1,7 @@
 import { Outlet, useRouterState } from '@tanstack/react-router';
+import { DeveloperModeSync } from '@/appearance/developer-mode';
 import { useEventStream } from '@/events/event-stream';
+import { AttentionNotifier } from '@/notifications/attention-notifier';
 import { SidebarInset, SidebarProvider } from '@/ui/sidebar';
 import { AppShortcutOffer } from './app-shortcut-offer';
 import { LiveAnnouncer } from './live-announcer';
@@ -7,6 +9,7 @@ import { OpenOgdenAgents } from './open-ogden-agents';
 import { ServerStopped } from './server-stopped';
 import { SidebarDataProvider } from './sidebar-data';
 import { StatusSidebar } from './status-sidebar';
+import { UpdateBanner } from './update-banner';
 import { VersionBanner } from './version-banner';
 
 /**
@@ -26,8 +29,13 @@ export function AppShell() {
       <SidebarProvider closeSheetOn={href}>
         <StatusSidebar />
         <LiveAnnouncer />
+        {/* A desktop notification and a sound for each new need (backlog story 8). */}
+        <AttentionNotifier />
+        {/* Developer mode is the server's (permission modes): this tab's copy follows it. */}
+        <DeveloperModeSync />
         <SidebarInset data-testid="workspace-area">
           <VersionBanner />
+          <UpdateBanner />
           <AppShortcutOffer />
           <Outlet />
         </SidebarInset>

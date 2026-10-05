@@ -80,10 +80,67 @@ describe('database', () => {
     // Core on the upgraded folder: the project is Simple, keeps its level, and the old event reads back.
     const core = openCore(dataDir);
     try {
-      expect(core.permissions.getSettings(WS)).toEqual({ cautionLevel: 'ask_for_commands', bmadPieces: [] });
+      expect(core.permissions.getSettings(WS)).toEqual({ cautionLevel: 'ask_for_commands', bmadPieces: [], bmadScriptsTrusted: false });
       expect(core.events.readAfter(0).filter((event) => event.type === 'workspace.settings_changed').map((event) => event.payload)).toEqual([
         { cautionLevel: 'ask_for_commands', previous: 'ask_every_time' },
       ]);
+    } finally {
+      core.close();
+    }
+  });
+
+  it('migration 0005 gives every workspace from before story 10.3 an offer not yet dismissed', async () => {
+    const drizzle = join(import.meta.dirname, '..', 'drizzle');
+    const old = join(tempDir(), 'drizzle');
+    mkdirSync(join(old, 'meta'), { recursive: true });
+    const journal = JSON.parse(JSON.stringify(readJournal(drizzle))) as { entries: Array<{ idx: number; tag: string }> };
+    journal.entries = journal.entries.filter((entry) => entry.idx <= 4);
+    for (const entry of journal.entries) cpSync(join(drizzle, `${entry.tag}.sql`), join(old, `${entry.tag}.sql`));
+    writeFileSync(join(old, 'meta', '_journal.json'), JSON.stringify(journal));
+
+    const dataDir = tempDir();
+    const before = openDatabase(dataDir, { migrationsFolder: old });
+    before.sqlite
+      .prepare(`INSERT INTO workspaces (id, path, real_path, created_at) VALUES ('${WS}', '/users/a/repo', '/Users/a/repo', '2026-09-30T00:00:00.000Z')`)
+      .run();
+    before.close();
+
+    const after = openDatabase(dataDir, { migrationsFolder: drizzle });
+    expect(after.sqlite.prepare('SELECT bmad_offer_dismissed FROM workspaces').all()).toEqual([{ bmad_offer_dismissed: 0 }]);
+    after.close();
+
+    const core = openCore(dataDir);
+    try {
+      expect(await core.bmadDetection.detect(WS)).toEqual({ hasBmad: false, hasOutput: false, offerDismissed: false });
+    } finally {
+      core.close();
+    }
+  });
+
+  it('migration 0006 gives every workspace from before story 4.2 scripts not yet trusted', () => {
+    const drizzle = join(import.meta.dirname, '..', 'drizzle');
+    const old = join(tempDir(), 'drizzle');
+    mkdirSync(join(old, 'meta'), { recursive: true });
+    const journal = JSON.parse(JSON.stringify(readJournal(drizzle))) as { entries: Array<{ idx: number; tag: string }> };
+    journal.entries = journal.entries.filter((entry) => entry.idx <= 5);
+    for (const entry of journal.entries) cpSync(join(drizzle, `${entry.tag}.sql`), join(old, `${entry.tag}.sql`));
+    writeFileSync(join(old, 'meta', '_journal.json'), JSON.stringify(journal));
+
+    const dataDir = tempDir();
+    const before = openDatabase(dataDir, { migrationsFolder: old });
+    before.sqlite
+      .prepare(`INSERT INTO workspaces (id, path, real_path, created_at) VALUES ('${WS}', '/users/a/repo', '/Users/a/repo', '2026-09-30T00:00:00.000Z')`)
+      .run();
+    before.close();
+
+    const after = openDatabase(dataDir, { migrationsFolder: drizzle });
+    expect(after.sqlite.prepare('SELECT bmad_scripts_trusted FROM workspaces').all()).toEqual([{ bmad_scripts_trusted: 0 }]);
+    after.close();
+
+    const core = openCore(dataDir);
+    try {
+      expect(core.bmadScriptTrust.scriptsTrusted(WS)).toBe(false);
+      expect(core.permissions.getSettings(WS).bmadScriptsTrusted).toBe(false);
     } finally {
       core.close();
     }

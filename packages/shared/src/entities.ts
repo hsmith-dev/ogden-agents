@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { AgentId } from './events-common.js';
+import { BlockedCode, BuildAgent, RunDecision } from './build-runs.js';
 import { RunId, SessionId, WorkspaceId } from './ids.js';
 import { IsoUtcTimestamp } from './time.js';
 
@@ -17,6 +19,68 @@ export type SessionState = z.infer<typeof SessionState>;
 export const SESSION_DRIVERS = ['ui', 'terminal'] as const;
 export const SessionDriver = z.enum(SESSION_DRIVERS);
 export type SessionDriver = z.infer<typeof SessionDriver>;
+
+/**
+ * A chat's permission mode (story: each chat has a permission mode). `ask`:
+ * every request the agent sends shows a card under the workspace's caution
+ * level and Always-allow rules (where every chat starts). `auto`: the agent's
+ * own auto mode approves what it judges safe and asks, through the cards,
+ * about the rest. `skip_all`: the agent skips its permission checks; only in
+ * Developer mode, after a confirmation. Changed only by core, each change a
+ * `session.permission_mode_changed` event. An agent declares which it offers.
+ */
+export const PERMISSION_MODES = ['ask', 'auto', 'skip_all'] as const;
+export const PermissionMode = z.enum(PERMISSION_MODES);
+export type PermissionMode = z.infer<typeof PermissionMode>;
+
+/**
+ * How much each mode asks, strictest first: a higher rank asks less. A move to
+ * a lower rank is a move to a stricter mode.
+ */
+export const PERMISSION_MODE_RANK: Readonly<Record<PermissionMode, number>> = { ask: 0, auto: 2, skip_all: 3 };
+
+/** The modes' names as the UI shows them. */
+export const PERMISSION_MODE_LABELS: Readonly<Record<PermissionMode, string>> = { ask: 'Ask', auto: 'Auto', skip_all: 'Skip all' };
+
+/**
+ * Why a project's default permission mode reads as it does (default
+ * permission mode): `developer_mode_off`, its Skip all default went back to
+ * Ask when Developer mode was turned off; `skip_all_unconfirmed`, the
+ * app-wide default for new projects is Skip all and this project waits for
+ * the user to confirm it (new chats start in Ask until then).
+ */
+export const DEFAULT_MODE_NOTICES = ['developer_mode_off', 'skip_all_unconfirmed'] as const;
+export const DefaultModeNotice = z.enum(DEFAULT_MODE_NOTICES);
+export type DefaultModeNotice = z.infer<typeof DefaultModeNotice>;
+
+/** The notices in the user's words. */
+export const DEFAULT_MODE_NOTICE_TEXT: Readonly<Record<DefaultModeNotice, string>> = {
+  developer_mode_off: 'Developer mode was turned off, so new chats in this project start in Ask instead of Skip all.',
+  skip_all_unconfirmed: 'New projects start in Skip all, but this project needs your confirmation first. Until then its new chats start in Ask.',
+};
+
+/**
+ * An agent's own id for one of its models (story 11: each chat runs on a
+ * model the user can switch), as the agent lists it (`opus`, `gemini-2.5-pro`,
+ * a provider ARN). Core and the UI never name one. It may become a CLI
+ * argument, so it never starts with `-` and holds no space or shell character.
+ */
+export const MAX_MODEL_ID_LENGTH = 200;
+export const ModelId = z
+  .string()
+  .min(1)
+  .max(MAX_MODEL_ID_LENGTH)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]*$/, 'not a model id');
+export type ModelId = z.infer<typeof ModelId>;
+
+/** One model an agent offers, by its own id and name (story 11). */
+export const AgentModel = z.object({
+  id: ModelId,
+  /** The agent's own name for it ("Opus", "Gemini 2.5 Pro"). */
+  name: z.string().min(1).max(200),
+  description: z.string().max(500).optional(),
+});
+export type AgentModel = z.infer<typeof AgentModel>;
 
 /** What a session is for (AD-8). */
 export const SESSION_KINDS = ['chat', 'planning', 'build'] as const;
@@ -58,7 +122,34 @@ export const Session = z.object({
   kind: SessionKind,
   state: SessionState,
   driver: SessionDriver,
+  /**
+   * The chat's permission mode. Absent in `session.created` events and rows
+   * from before it existed: they read as `ask`.
+   */
+  permissionMode: PermissionMode.default('ask'),
+  /**
+   * The session's agent (epic 6, E6-R1): set at creation, and changed only
+   * when the user continues the chat with another agent (handoff,
+   * `session.agent_changed`). Absent only in `session.created` events and rows
+   * from before agents could be chosen; those sessions are the install's
+   * original agent, which the server fills in every session it answers.
+   */
+  agentId: AgentId.optional(),
+  /**
+   * The model the chat runs on (story 11): the agent's own id for it.
+   * Absent: the agent's own choice (and every session from before models
+   * could be chosen). Changed only by core, each change a
+   * `session.model_changed` event.
+   */
+  model: ModelId.optional(),
+  /** The user's name for the chat (backlog story 12); `null` until they give one. */
   title: z.string().nullable(),
+  /**
+   * The name core gave the chat (the planning action's label, or its first
+   * message), set once. Absent in `session.created` events and rows from
+   * before chat names: they read as none.
+   */
+  autoTitle: z.string().nullish(),
   adapterRefs: AdapterRefs,
   createdAt: IsoUtcTimestamp,
   updatedAt: IsoUtcTimestamp,
@@ -70,10 +161,28 @@ export const Run = z.object({
   sessionId: SessionId,
   workspaceId: WorkspaceId,
   ticketRef: TicketRef,
+  /** The run's worktree, in Ogden Agents' data folder, never in the repo (AD-17). */
   worktreePath: z.string().nullable(),
+  /** The sandbox it ran in: a `SandboxKind`, `attended` for a build with the user watching (a test sandbox records `test`). */
   sandbox: z.string().nullable(),
   deadline: IsoUtcTimestamp.nullable(),
   outcome: RunOutcome,
+  /** The run's own branch (`ogden/<run8>/<ref>-<slug>`; story 5.2). `null` in runs from before it. */
+  branch: z.string().nullable().default(null),
+  /** The commit the run's branch started from (story 5.2): its diff is against it. `null` in runs from before it. */
+  baseRevision: z.string().nullable().default(null),
+  /** The branch the main checkout had checked out when the run started (story 5.5): approve merges only into it. `null` in runs from before it. */
+  baseBranch: z.string().nullable().default(null),
+  /** Why the run ended as it did, in plain words (a blocked or failed run's reason; story 5.2). Never a secret. */
+  reason: z.string().nullable().default(null),
+  /** The agent that builds (story 5.3): the build runner's agent, Claude Code only in v1. `null` in runs from before it. */
+  agent: BuildAgent.nullable().default(null),
+  /** Why a `blocked` run is blocked (story 5.3; Ogden Agents' code, its sentence from `blockedSentence`), else `null`. */
+  blockedCode: BlockedCode.nullable().default(null),
+  /** Where a waiting run is in its workspace's queue (1 is next; story 5.3, filled by 5.8), `null` once dispatched. */
+  queuePosition: z.number().int().positive().nullable().default(null),
+  /** What the user decided on the review page (story 5.3): `approved` (merged) or `rejected`, else `null`. */
+  decision: RunDecision.nullable().default(null),
   createdAt: IsoUtcTimestamp,
   updatedAt: IsoUtcTimestamp,
 });

@@ -43,6 +43,8 @@ vi.mock('@tanstack/react-router', () => ({
 }));
 vi.mock('@/shell/workspace-header', () => ({ WorkspaceHeader: ({ children }: { children?: ReactNode }) => <header>{children}</header> }));
 vi.mock('@/events/event-stream', () => ({
+  // The agent lists' invalidation (epic 6) reads the stream: nothing new arrives here.
+  useEventStream: () => ({ events: [] }),
   useSessionEvents: (_wsId: string, streamId: string) => (streamId === 'ses_1' ? fake.events : []),
   useCaughtUp: () => true,
   useEarlierHistory: () => ({ hasEarlier: false, loading: false, error: undefined, loadEarlier: () => undefined }),
@@ -51,8 +53,25 @@ vi.mock('@/appearance/appearance-provider', () => ({
   useAppearance: () => ({ appearance: { developerMode: true, density: 'comfortable', terminalScreenReader: false } }),
 }));
 vi.mock('@/workspaces/workspace-api', () => ({ fetchWorkspace: async () => ({ id: 'ws_1', path: '/repo' }), workspaceName: () => 'repo' }));
+vi.mock('@/agents/agent-setup-api', () => ({ useAgents: () => ({ data: [] }), useSignIn: () => ({}) }));
 vi.mock('@/chat/chat-api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/chat/chat-api')>()),
+  fetchChatAgents: async () => ({
+    agents: [
+      {
+        agentId: 'claude-code',
+        displayName: 'Claude Code',
+        provider: 'Anthropic',
+        signInMethods: [],
+        install: 'installed',
+        auth: 'signed_in',
+        terminalResume: true,
+        needsProjectTrust: false,
+        permissionModes: ['ask', 'auto', 'skip_all'],
+      },
+    ],
+    defaultAgentId: 'claude-code',
+  }),
   fetchSession: async (): Promise<SessionResponse> => {
     fake.fetches++;
     return {

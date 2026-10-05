@@ -5,19 +5,22 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { SignIn } from '../src/agents/agent-setup-api';
 import {
-  API_KEY_REFUSED,
+  apiKeyRefused,
   armTracker,
   disarmTracker,
   initialTracker,
   observeAuth,
   observeSignInStarts,
   startAnswered,
-  SIGN_IN_AGAIN,
+  signInAgainWords,
   SIGNED_IN_TRY_AGAIN,
   SignInAgainView,
   type SignInAgainViewProps,
   type SignInTracker,
 } from '../src/chat/sign-in-again';
+
+const SIGN_IN_AGAIN = signInAgainWords('Claude Code');
+const API_KEY_REFUSED = apiKeyRefused('Claude Code');
 import { TooltipProvider } from '../src/ui/tooltip';
 
 /** Renders `node` inside a router that knows Settings: Agents, so its link gets its href. */
@@ -44,6 +47,7 @@ const signIn = (extra: Partial<SignIn> = {}): SignIn => ({
   cancel: () => {},
   sendCode: async () => true,
   link: undefined,
+  code: undefined,
   busy: false,
   error: undefined,
   ...extra,
@@ -52,6 +56,8 @@ const signIn = (extra: Partial<SignIn> = {}): SignIn => ({
 const render = (props: Partial<SignInAgainViewProps>) =>
   renderInRouter(
     <SignInAgainView
+      agentId="claude-code"
+      agentName="Claude Code"
       agent={agent('needs_sign_in')}
       signedIn={false}
       signIn={signIn()}

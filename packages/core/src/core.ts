@@ -1,7 +1,16 @@
-import { createBmadFeatures, type BmadFeatures } from './bmad-features.js';
+import type { AgentId } from '@ogden-agents/shared';
+import type { BmadCatalogPort } from './bmad-catalog-port.js';
+import { createBmadDetection, type BmadDetectionUseCases } from './bmad-detection.js';
+import { createBmadFeatures, parseAvailableBmadPieces, type BmadFeatures, type BmadFeaturesOptions } from './bmad-pieces.js';
+import { createBmadModulesSeen, type BmadModulesSeen } from './bmad-modules-seen.js';
+import { createBmadScriptTrust, type BmadScriptTrust } from './bmad-script-trust.js';
+import { createBmadSetup, type BmadSetupUseCases } from './bmad-setup.js';
+import { createBuildSessions, type BuildSessions } from './build-sessions.js';
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
 import { createEntities, type Entities } from './entities.js';
 import { createEventLog, type EventLog, type EventLogOptions } from './event-log.js';
+import { createAgentModels, type AgentModels } from './agent-models.js';
+import { createInstallSettings, type InstallSettings } from './install-settings.js';
 import { createPermissions, type Permissions } from './permissions.js';
 import { createSessionEvents, type SessionEvents } from './session-events.js';
 
@@ -19,6 +28,23 @@ export interface Core {
   readonly permissions: Permissions;
   /** The BMad pieces guard (AD-22): every use-case serving a piece calls it first. */
   readonly bmad: BmadFeatures;
+  /** Whether a project's repo already uses BMad Method, and Not now on the offer (story 10.3). */
+  readonly bmadDetection: BmadDetectionUseCases;
+  /** The per-project script trust (story 4.2): checked with the pieces guard for every use of the project's own scripts. */
+  readonly bmadScriptTrust: BmadScriptTrust;
+  /** When each BMad Method module first appeared in a project (story 4.4): fills the catalog's `installedAt`. */
+  readonly bmadModulesSeen: BmadModulesSeen;
+  /** BMad Method's setup in a project (story 4.3); `undefined` without a catalog to set up with. */
+  readonly bmadSetup: BmadSetupUseCases | undefined;
+  /** Developer mode, which the server keeps and enforces (permission modes). */
+  readonly installSettings: InstallSettings;
+  /** Each agent's default model and last model list, install-wide (story 11). */
+  readonly agentModels: AgentModels;
+  /**
+   * What each unattended build session's agent starts with (story 5.2): the
+   * builds use-cases register it, the chat reads it. In memory only.
+   */
+  readonly buildSessions: BuildSessions;
   close(): void;
 }
 
@@ -26,19 +52,74 @@ export type OpenCoreOptions = OpenDatabaseOptions &
   EventLogOptions & {
     /** Called with a failure while deciding a permission request (it is declined all the same). */
     onPermissionError?: (error: unknown) => void;
-  };
+    /** The read-only BMad detection (story 10.3). Without it, every repo answers that it has no `_bmad/`. */
+    bmadCatalog?: BmadCatalogPort;
+    /** Told why a BMad Method setup failed (story 4.3), for the log. */
+    onBmadSetupFailure?: (workspaceId: string, error: unknown) => void;
+    /**
+     * Whether an agent is registered, so it may be a project's default (epic
+     * 6, entry 6). Read at each call: the server builds its agent registry
+     * after core. Absent: every well-formed id.
+     */
+    isAgentRegistered?: (agentId: AgentId) => boolean;
+    /** The registered agents' own config folders, which join the protected paths (epic 12, 12.3). Read at each call, as `isAgentRegistered`. */
+    agentConfigFolders?: () => readonly string[];
+    /**
+     * The repo-relative files the registered agents that need project trust
+     * run (their descriptors' `projectFiles`, epic 12, 12.3); the trust is
+     * bound to their contents. Read at each call. Absent: none.
+     */
+    agentProjectFiles?: () => readonly string[];
+    /**
+     * The fingerprint of `files` below a repo (adapters' `projectFilesFingerprint`);
+     * `undefined` when it can't be read, which counts as changed. Without it, no agent files are fingerprinted.
+     */
+    projectFilesFingerprint?: (repoPath: string, files: readonly string[]) => Promise<string | undefined>;
+  } & BmadFeaturesOptions;
 
 /** Opens (and migrates) the database in `dataDir` and builds core on it. */
 export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
+  // Checked before the database opens, so a wiring bug leaves nothing open.
+  const availableBmadPieces = [...parseAvailableBmadPieces(options.availableBmadPieces)];
   const db = openDatabase(dataDir, options);
   const events = createEventLog(db, options);
   const sessionEvents = createSessionEvents(db, events);
   const entities = createEntities(db, events, sessionEvents);
+  // Which pieces this install ships is the server wiring's list (story 10.2), never core's.
+  const bmad = createBmadFeatures(db, { availableBmadPieces });
+  const bmadDetection = createBmadDetection({ orm: db.orm, events, entities, catalog: options.bmadCatalog });
+  const catalog = options.bmadCatalog;
+  const bmadScriptTrust = createBmadScriptTrust({
+    orm: db.orm,
+    events,
+    entities,
+    fingerprint: catalog === undefined ? undefined : (repoPath) => catalog.scriptsFingerprint(repoPath),
+    agentFiles: options.agentProjectFiles,
+    filesFingerprint: options.projectFilesFingerprint,
+  });
+  const bmadModulesSeen = createBmadModulesSeen({ orm: db.orm, events });
+  const bmadSetup =
+    options.bmadCatalog === undefined
+      ? undefined
+      : createBmadSetup({
+          bmad,
+          entities,
+          catalog: options.bmadCatalog,
+          events,
+          trust: bmadScriptTrust,
+          ...(options.onBmadSetupFailure === undefined ? {} : { onFailure: options.onBmadSetupFailure }),
+        });
+  const installSettings = createInstallSettings({ db, events, entities });
+  const agentModels = createAgentModels({ db, events });
   const permissions = createPermissions({
     db,
     events,
     entities,
     sessionEvents,
+    isBmadPieceAvailable: bmad.isAvailable,
+    isAgentRegistered: options.isAgentRegistered,
+    developerMode: installSettings.developerMode,
+    agentConfigFolders: options.agentConfigFolders,
     ...(options.onPermissionError === undefined ? {} : { onError: options.onPermissionError }),
   });
   return {
@@ -46,7 +127,14 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     sessionEvents,
     entities,
     permissions,
-    bmad: createBmadFeatures(db),
+    bmad,
+    bmadDetection,
+    bmadScriptTrust,
+    bmadModulesSeen,
+    bmadSetup,
+    installSettings,
+    agentModels,
+    buildSessions: createBuildSessions(),
     close: () => {
       try {
         permissions.close();

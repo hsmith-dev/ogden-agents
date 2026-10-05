@@ -1,4 +1,4 @@
-import { API_ROUTES, OnboardingState } from '@ogden-agents/shared';
+import { API_ROUTES, OnboardingState, type FirstProjectChoice } from '@ogden-agents/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { call, type Auth } from '@/api/http';
 import { tabAuth } from '@/auth/tab-token';
@@ -32,11 +32,16 @@ export function useOnboarding() {
   return useQuery({ queryKey: ONBOARDING_QUERY_KEY, queryFn: () => fetchOnboarding(), retry: 1 });
 }
 
-/** Marks Welcome done for good (finished or skipped); `/` then shows Projects. */
+/**
+ * Marks Welcome done for good (finished or skipped); `/` then shows Projects.
+ * With `firstProjectChoice` (10.4) Welcome's answer for the first project is
+ * kept too, so it is never asked again; without it a kept answer stays.
+ */
 export function useCompleteWelcome() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => saveOnboarding({ welcomeCompleted: true }),
+    mutationFn: (firstProjectChoice?: FirstProjectChoice) =>
+      saveOnboarding(firstProjectChoice === undefined ? { welcomeCompleted: true } : { welcomeCompleted: true, firstProjectChoice }),
     onSuccess: (state) => queryClient.setQueryData(ONBOARDING_QUERY_KEY, state),
   });
 }

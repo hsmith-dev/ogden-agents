@@ -16,7 +16,7 @@ const pending = (overrides: Partial<TranscriptPermission> = {}): TranscriptPermi
 });
 
 const render = (permission: TranscriptPermission) =>
-  renderToStaticMarkup(<PermissionCard permission={permission} wsId="ws_1" sesId="ses_1" projectName="clay-and-kiln" />);
+  renderToStaticMarkup(<PermissionCard permission={permission} wsId="ws_1" sesId="ses_1" projectName="clay-and-kiln" agentName="Claude Code" />);
 
 describe('PermissionCard (DESIGN.md Permission card; EXPERIENCE.md Permission card)', () => {
   it('shows the headline, the command, the project and caution level, and three buttons, none focused by default', () => {

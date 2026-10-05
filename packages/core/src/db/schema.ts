@@ -7,7 +7,12 @@
  */
 import type {
   AdapterRefs,
+  AgentId,
+  BlockedCode,
+  BuildAgent,
   CautionLevel,
+  PermissionMode,
+  RunDecision,
   RunOutcome,
   SessionDriver,
   SessionKind,
@@ -35,6 +40,60 @@ export const workspaces = sqliteTable(
      * value reads as off rather than failing every workspace read.
      */
     bmadPieces: text('bmad_pieces').notNull().default('[]'),
+    /**
+     * Whether the user answered the "already uses BMad Method" offer with
+     * Not now (story 10.3): kept per project, so the offer never shows again
+     * for it. Changed only by `bmadDetection.dismissOffer`.
+     */
+    bmadOfferDismissed: integer('bmad_offer_dismissed', { mode: 'boolean' }).notNull().default(false),
+    /**
+     * Whether the user allowed Ogden Agents to run this project's own BMad
+     * Method scripts (story 4.2, AD-22 note 2026-10-02). Not trusted for new
+     * and upgraded workspaces; changed only by `bmadScriptTrust.trustScripts`,
+     * never revoked by turning pieces off.
+     */
+    bmadScriptsTrusted: integer('bmad_scripts_trusted', { mode: 'boolean' }).notNull().default(false),
+    /**
+     * The contents of the project's `_bmad/scripts/` when the user trusted
+     * them (story 4.13, user decision 2026-10-04): `BmadCatalogPort.scriptsFingerprint`.
+     * `null` when not trusted, or trusted before this column (read as changed: asked again).
+     */
+    bmadScriptsFingerprint: text('bmad_scripts_fingerprint'),
+    /**
+     * The contents of the files the agents that need project trust run
+     * (`.claude/settings.json` hooks, `.mcp.json`; epic 12, 12.3, user
+     * decision 2026-10-04) when the user trusted the project. The same trust
+     * as the scripts': recorded by the same `trustScripts`. `null` when not
+     * trusted, or trusted before this column (read as changed: asked again).
+     */
+    agentFilesFingerprint: text('agent_files_fingerprint'),
+    /**
+     * The agent this project's new chats preselect (epic 6, entry 6), or
+     * NULL for the install's default. No SQL default: core names no agent.
+     * Changed only through the workspace settings use-case.
+     */
+    defaultAgentId: text('default_agent_id'),
+    /**
+     * The permission mode new chats start in (default permission mode):
+     * `ask`, `auto` or `skip_all`; null (and anything unreadable) is Ask.
+     * Changed only through the workspace settings use-case, and set back to
+     * Ask from Skip all when Developer mode is turned off.
+     */
+    defaultPermissionMode: text('default_permission_mode'),
+    /** Why the default reads as it does (`DefaultModeNotice`), or null; cleared by the user's next choice. */
+    defaultPermissionModeNotice: text('default_permission_mode_notice'),
+    /**
+     * The project's own default model per agent (story 11), as a JSON object
+     * of agent id to the agent's model id. `{}` for new and upgraded
+     * workspaces. Read only through `readDefaultModels`, so a damaged value
+     * reads as none. Changed only through the workspace settings use-case.
+     */
+    defaultModels: text('default_models').notNull().default('{}'),
+    /**
+     * The project's own choice of what a message sent while the agent works
+     * does (`wait` | `now`; send now or wait), or NULL for the app-wide one.
+     */
+    whileWorking: text('while_working'),
     createdAt: text('created_at').notNull(),
   },
   (t) => [uniqueIndex('workspaces_path_unique').on(t.path)],
@@ -50,7 +109,26 @@ export const sessions = sqliteTable(
     kind: text('kind').$type<SessionKind>().notNull(),
     state: text('state').$type<SessionState>().notNull(),
     driver: text('driver').$type<SessionDriver>().notNull(),
+    /**
+     * The chat's permission mode (`ask`, `auto`, `skip_all`). Rows from
+     * before it read `ask`; a server start sets every other one back to `ask`.
+     */
+    permissionMode: text('permission_mode').$type<PermissionMode>().notNull().default('ask'),
+    /**
+     * The agent the session was started with (epic 6), never changed. `NULL`
+     * on rows from before agents could be chosen: they are the install's
+     * original agent, which the server wiring names (core names none, AD-1).
+     */
+    agentId: text('agent_id').$type<AgentId>(),
+    /**
+     * The model the chat runs on (story 11): the agent's own id, or `NULL`
+     * for the agent's own choice (and on rows from before it existed).
+     */
+    model: text('model'),
+    /** The user's name for the chat (backlog story 12); `NULL` until they give one. */
     title: text('title'),
+    /** The name core gave the chat (the planning action's label, or its first message), set once; `NULL` until then. */
+    autoTitle: text('auto_title'),
     /** Agent and CLI ids (AD-9), as a JSON object. Never keys. */
     adapterRefs: text('adapter_refs', { mode: 'json' }).$type<AdapterRefs>().notNull(),
     createdAt: text('created_at').notNull(),
@@ -73,6 +151,22 @@ export const runs = sqliteTable(
     sandbox: text('sandbox'),
     deadline: text('deadline'),
     outcome: text('outcome').$type<RunOutcome>().notNull(),
+    /** The run's own branch, `ogden/<ref>-<slug>` (story 5.2); `null` in runs from before it. */
+    branch: text('branch'),
+    /** The commit the run's branch started from (story 5.2): its diff is against it. */
+    baseRevision: text('base_revision'),
+    /** The branch the main checkout had checked out when the run started (story 5.5): approve merges only into it. */
+    baseBranch: text('base_branch'),
+    /** Why the run ended as it did, in plain words (story 5.2): a blocked or failed run's reason. */
+    reason: text('reason'),
+    /** The agent that builds (story 5.3); `null` in runs from before it, read as Claude Code. */
+    agent: text('agent').$type<BuildAgent>(),
+    /** Why a `blocked` run is blocked (story 5.3): Ogden Agents' code. */
+    blockedCode: text('blocked_code').$type<BlockedCode>(),
+    /** Where a waiting run is in its workspace's queue (story 5.3; 5.8 fills it). */
+    queuePosition: integer('queue_position'),
+    /** What the user decided on the review page (story 5.3): `approved` or `rejected`. */
+    decision: text('decision').$type<RunDecision>(),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
@@ -124,3 +218,61 @@ export const permissionRules = sqliteTable(
   },
   (t) => [uniqueIndex('permission_rules_scope_unique').on(t.workspaceId, t.kind, t.value)],
 );
+
+/**
+ * When each BMad Method module first appeared in a workspace's catalog
+ * (story 4.4), for the catalog's `installedAt` (the Plan page's New tag).
+ * The first catalog read that finds any module is the baseline: those
+ * modules are recorded with `installed_at` `null` (they were there before
+ * Ogden Agents looked); a module first seen later gets that time. Written
+ * only by `bmadModulesSeen.stamp`; a row stays when its module goes.
+ */
+export const bmadModulesSeen = sqliteTable(
+  'bmad_modules_seen',
+  {
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id),
+    /** The module's code (`[bmod] code`). */
+    code: text('code').notNull(),
+    /** When it was installed (first seen after the baseline), or `null` for a baseline module. */
+    installedAt: text('installed_at'),
+    /** When it was first seen. */
+    seenAt: text('seen_at').notNull(),
+  },
+  (t) => [uniqueIndex('bmad_modules_seen_unique').on(t.workspaceId, t.code)],
+);
+
+/**
+ * Install-wide settings the server enforces (one row, `id = 1`, created on
+ * first write): Developer mode, which gates a chat's Skip all.
+ */
+export const installSettings = sqliteTable('install_settings', {
+  id: integer('id').primaryKey(),
+  developerMode: integer('developer_mode', { mode: 'boolean' }).notNull().default(false),
+});
+
+/**
+ * Per agent, install-wide (story 11): the model new chats with it start on
+ * (`NULL`: its own choice; Settings → Agents) and the models it last listed
+ * (JSON array of `AgentModel`), so Settings and a chat's picker can offer
+ * them before the agent starts. A row per agent that ever had either; core
+ * names no agent.
+ */
+export const agentSettings = sqliteTable('agent_settings', {
+  agentId: text('agent_id').$type<AgentId>().primaryKey(),
+  defaultModel: text('default_model'),
+  models: text('models').notNull().default('[]'),
+});
+
+/**
+ * App-wide chat settings (one row, `id = 1`, created on first write; send
+ * now or wait): what a message sent while the agent works does. Kept apart
+ * from `install_settings`, whose row's existence says Developer mode was
+ * ever set.
+ */
+export const chatSettings = sqliteTable('chat_settings', {
+  id: integer('id').primaryKey(),
+  /** `wait` | `now`. */
+  whileWorking: text('while_working').notNull().default('wait'),
+});

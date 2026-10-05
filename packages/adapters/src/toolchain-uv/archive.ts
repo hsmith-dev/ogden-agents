@@ -7,7 +7,8 @@
  * archive has already matched its pinned SHA-256 before either runs; the
  * bounds checks guard against a truncated file, not a hostile one.
  */
-import { crc32, gunzipSync, inflateRawSync } from 'node:zlib';
+import { crc32, inflateRawSync } from 'node:zlib';
+import { ArchiveRefusedError, gunzipLimited, parseTar, type TarEntry } from '../archive/tar.js';
 
 /** Picks entries by their normalized path (forward slashes, no leading `./`); returns the key to store them under. */
 export type EntryPicker = (path: string) => string | undefined;
@@ -20,90 +21,28 @@ function normalize(path: string): string {
   return path.replaceAll('\\', '/').replace(/^(?:\.\/)+/, '');
 }
 
-const BLOCK = 512;
+/** The largest unpacked tar accepted (uv's archives unpack to well under this). */
+const MAX_UNPACKED_TAR_BYTES = 1024 * 1024 * 1024;
 
-function cString(buf: Buffer, start: number, length: number): string {
-  const slice = buf.subarray(start, start + length);
-  const end = slice.indexOf(0);
-  return slice.subarray(0, end === -1 ? slice.length : end).toString('utf8');
-}
-
-/** A tar numeric field: octal text, or big-endian base-256 when the high bit is set. */
-function tarNumber(buf: Buffer, start: number, length: number): number {
-  const field = buf.subarray(start, start + length);
-  if ((field[0]! & 0x80) !== 0) {
-    let value = field[0]! & 0x7f;
-    for (let i = 1; i < field.length; i++) value = value * 256 + field[i]!;
-    return value;
-  }
-  const text = cString(buf, start, length).trim();
-  if (text === '') return 0;
-  if (!/^[0-7]+$/.test(text)) throw new ArchiveError(`bad tar number "${text}"`);
-  return parseInt(text, 8);
-}
-
-/** The `path` record of a pax extended header, if any. */
-function paxPath(data: Buffer): string | undefined {
-  let offset = 0;
-  let path: string | undefined;
-  while (offset < data.length) {
-    const space = data.indexOf(0x20, offset);
-    if (space === -1) break;
-    const length = Number(data.subarray(offset, space).toString('ascii'));
-    if (!Number.isInteger(length) || length <= 0) break;
-    const record = data.subarray(space + 1, offset + length - 1).toString('utf8');
-    const eq = record.indexOf('=');
-    if (eq !== -1 && record.slice(0, eq) === 'path') path = record.slice(eq + 1);
-    offset += length;
-  }
-  return path;
-}
-
-/** Reads a gzip-compressed tar archive and returns the picked regular files. */
+/**
+ * Reads a gzip-compressed tar archive and returns the picked regular files.
+ * The tar itself is read by the one shared reader (`archive/tar.ts`
+ * `parseTar`); its refusals surface here as {@link ArchiveError}.
+ */
 export function readTarGz(archive: Buffer, pick: EntryPicker): Map<string, Buffer> {
-  let tar: Buffer;
+  let entries: TarEntry[];
   try {
-    tar = gunzipSync(archive);
+    entries = parseTar(gunzipLimited(archive, MAX_UNPACKED_TAR_BYTES));
   } catch (error) {
-    throw new ArchiveError(`not a gzip file: ${String(error)}`);
+    if (error instanceof ArchiveRefusedError) throw new ArchiveError(error.message);
+    throw error;
   }
   const found = new Map<string, Buffer>();
-  let offset = 0;
-  let longName: string | undefined;
-  while (offset + BLOCK <= tar.length) {
-    const header = tar.subarray(offset, offset + BLOCK);
-    if (header.every((byte) => byte === 0)) break;
-    const size = tarNumber(header, 124, 12);
-    const type = String.fromCharCode(header[156]!);
-    const dataStart = offset + BLOCK;
-    const dataEnd = dataStart + size;
-    if (dataEnd > tar.length) throw new ArchiveError('tar entry runs past the end of the archive');
-    const data = tar.subarray(dataStart, dataEnd);
-    offset = dataStart + Math.ceil(size / BLOCK) * BLOCK;
-
-    if (type === 'x') {
-      longName = paxPath(data) ?? longName;
-      continue;
-    }
-    if (type === 'L') {
-      longName = cString(data, 0, data.length);
-      continue;
-    }
-    if (type === 'g') continue;
-
-    let name = cString(header, 0, 100);
-    // POSIX ustar (`ustar\0`) has a name prefix; old GNU tar (`ustar  `) keeps other fields there.
-    if (header.subarray(257, 263).toString('latin1') === 'ustar\0') {
-      const prefix = cString(header, 345, 155);
-      if (prefix !== '') name = `${prefix}/${name}`;
-    }
-    if (longName !== undefined) name = longName;
-    longName = undefined;
-
-    // Regular files only: '0' or the old-style NUL. Links, devices and folders are skipped.
-    if (type !== '0' && type !== '\0') continue;
-    const key = pick(normalize(name));
-    if (key !== undefined) found.set(key, Buffer.from(data));
+  for (const entry of entries) {
+    // Regular files only. Links, devices and folders are skipped.
+    if (entry.type !== 'file') continue;
+    const key = pick(normalize(entry.path));
+    if (key !== undefined) found.set(key, Buffer.from(entry.data));
   }
   return found;
 }

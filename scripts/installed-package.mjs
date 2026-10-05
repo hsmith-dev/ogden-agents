@@ -107,6 +107,112 @@ export function isAlive(pid) {
   }
 }
 
+/** `taskkill.exe` by absolute path, so no `PATH` entry can stand in for it (as `packages/adapters/src/process-tree.ts`). */
+function taskkillPath() {
+  return join(process.env.SystemRoot || process.env.SYSTEMROOT || 'C:\\Windows', 'System32', 'taskkill.exe');
+}
+
+/**
+ * One `ps` listing as parent links: each pid's parent. POSIX only; empty when `ps` fails.
+ * @returns {Map<number, number>}
+ */
+function parentLinks() {
+  /** @type {Map<number, number>} */
+  const parents = new Map();
+  const listing = spawnSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8' });
+  if (listing.status !== 0 || typeof listing.stdout !== 'string') return parents;
+  for (const line of listing.stdout.split('\n')) {
+    const [child, parent] = line.trim().split(/\s+/).map(Number);
+    if (Number.isInteger(child) && Number.isInteger(parent)) parents.set(/** @type {number} */ (child), /** @type {number} */ (parent));
+  }
+  return parents;
+}
+
+/**
+ * Every descendant of `pid` (children, their children, and so on) in `parents`.
+ * @param {number} pid
+ * @param {Map<number, number>} parents
+ * @returns {number[]}
+ */
+function descendantsIn(pid, parents) {
+  /** @type {Map<number, number[]>} */
+  const children = new Map();
+  for (const [child, parent] of parents) children.set(parent, [...(children.get(parent) ?? []), child]);
+  /** @type {number[]} */
+  const found = [];
+  const queue = [pid];
+  while (queue.length > 0) {
+    for (const child of children.get(/** @type {number} */ (queue.shift())) ?? []) {
+      if (child === pid || found.includes(child)) continue;
+      found.push(child);
+      queue.push(child);
+    }
+  }
+  return found;
+}
+
+/**
+ * This process and its ancestors (up the parent chain) in `parents`.
+ * @param {Map<number, number>} parents
+ * @returns {Set<number>}
+ */
+function selfAndAncestorsIn(parents) {
+  const chain = new Set([process.pid]);
+  let current = process.ppid;
+  while (current > 0 && !chain.has(current)) {
+    chain.add(current);
+    current = parents.get(current) ?? 0;
+  }
+  return chain;
+}
+
+/**
+ * Every descendant of `pid` (children, their children, and so on), from one
+ * `ps` listing. POSIX only.
+ * @param {number} pid
+ * @returns {number[]}
+ */
+export function descendantsOf(pid) {
+  return descendantsIn(pid, parentLinks());
+}
+
+/**
+ * Kills `pid` and everything it started (3.10 F7): the installed server with
+ * its agents (each in a process group of its own) and its terminal's CLI (in
+ * a PTY's session). On Windows `taskkill /T /F` by absolute path. On POSIX
+ * every descendant is listed first (a killed parent's children are handed to
+ * init, and could no longer be found), then the root and each descendant are
+ * `SIGKILL`ed, with the process group each leads. Does nothing for a bad pid,
+ * this process or one of its ancestors (a stale pid reused), and never kills
+ * them as descendants either; a tree already gone is not an error.
+ * @param {number} pid
+ */
+export function killProcessTree(pid) {
+  if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return;
+  if (IS_WINDOWS) {
+    spawnSync(taskkillPath(), ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+    return;
+  }
+  const parents = parentLinks();
+  // A stale `server.json` pid reused by this process or one of its ancestors (the test runner, its shell): never kill those.
+  const self = selfAndAncestorsIn(parents);
+  if (self.has(pid)) return;
+  const descendants = descendantsIn(pid, parents).filter((each) => !self.has(each));
+  for (const each of [pid, ...descendants]) {
+    // Its group, if it leads one (an agent spawned detached, a PTY's shell): anything started since the listing goes too.
+    try {
+      process.kill(-each, 'SIGKILL');
+    } catch {
+      // It leads no group, or the group is gone.
+    }
+    try {
+      process.kill(each, 'SIGKILL');
+    } catch {
+      // Already gone.
+    }
+  }
+}
+
 /**
  * The running server's port file (`server.json`) in `dataDir`, or undefined.
  * @param {string} dataDir
@@ -139,7 +245,7 @@ export function readPortFile(dataDir) {
  * @property {(launcherArgs: string[], options?: { echo?: (chunk: string) => void }) => LauncherRun} runLauncher runs the launcher through npx, as a user does (installing it first if needed); `echo` receives its output (npm's progress included) as it arrives
  * @property {(launcherArgs: string[]) => LauncherRun} runInstalledLauncher runs the already installed `bin/ogden.js` by its absolute path, with this Node: no npx, so nothing is reinstalled under a running server
  * @property {() => { port: number, pid: number, version: string } | undefined} readPortFile the running server's `server.json`
- * @property {() => boolean} killBackgroundServer kills the background server if one is still running; true if it had to
+ * @property {() => boolean} killBackgroundServer kills the background server if one is still running, with every process it started (`killProcessTree`); true if it had to
  * @property {(name: string) => any} requireInstalled loads a dependency of the installed package (such as `ws`)
  * @property {() => void} checkNoAgentAdapter throws if the installed package declares or pulled in an agent adapter (story 2.2)
  * @property {() => void} removeFolders removes the work folder, the npm cache and the data folder (best effort)
@@ -172,11 +278,16 @@ const isAgentAdapter = (name) => AGENT_ADAPTER_PACKAGES.some((adapter) => name =
  * optional dependencies (`node-pty`, AD-19), as on a computer where they
  * can't build. `env` adds variables to every launcher run, after the ones set
  * here (the installed-package suite's fake agent, story 2.13).
- * @param {{ tarball?: string, registrySpec?: string, prefix?: string, reuse?: InstallFolders, omitOptional?: boolean, env?: Record<string, string> }} options
+ * `startScript` runs the launcher through one of the double-click start
+ * scripts in `start/` instead of npx directly, as a user who double-clicks it
+ * does: the script runs `npx --yes --package=<OGDEN_AGENTS_PACKAGE> ogden
+ * <args>`, and gets the tarball (or registry spec) through that variable.
+ * @param {{ tarball?: string, registrySpec?: string, prefix?: string, reuse?: InstallFolders, omitOptional?: boolean, env?: Record<string, string>, startScript?: string }} options
  * @returns {Install}
  */
-export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-smoke', reuse, omitOptional = false, env: extraEnv = {} }) {
+export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-smoke', reuse, omitOptional = false, env: extraEnv = {}, startScript }) {
   if ((tarball === undefined) === (registrySpec === undefined)) throw new Error('prepareInstall needs exactly one of tarball and registrySpec');
+  if (startScript !== undefined && !existsSync(startScript)) throw new Error(`the start script is missing: ${startScript}`);
   const workDir = reuse?.workDir ?? mkdtempSync(join(tmpdir(), `${prefix}-`));
   const cacheDir = reuse?.cacheDir ?? mkdtempSync(join(tmpdir(), `${prefix}-cache-`));
   const dataDir = reuse?.dataDir ?? mkdtempSync(join(tmpdir(), `${prefix}-data-`));
@@ -199,6 +310,8 @@ export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-s
   // (story 9.2). The server honours that only in a test run, hence NODE_ENV.
   env.OGDEN_AGENTS_TEST_SECRET_STORE = 'memory';
   env.NODE_ENV = 'test';
+  // The "newer version" check (story 13.7) never reaches npm from a test: belt and braces with NODE_ENV.
+  env.OGDEN_AGENTS_OFFLINE = '1';
   Object.assign(env, extraEnv);
 
   // A registry spec runs as a user types it: npx picks the package's only bin.
@@ -216,6 +329,7 @@ export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-s
    * @param {{ echo?: (chunk: string) => void }} [options]
    */
   function runLauncher(launcherArgs, { echo } = {}) {
+    if (startScript !== undefined) return track(spawnStartScript(launcherArgs), echo);
     const args = [...packageArgs, ...launcherArgs];
     return track(IS_WINDOWS ? spawnNode([npxCli, ...args]) : spawn('npx', args, { cwd: workDir, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] }), echo);
   }
@@ -225,6 +339,30 @@ export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-s
     const bin = join(installedDir('ogden-agents'), 'bin', 'ogden.js');
     if (!existsSync(bin)) throw new Error(`the installed launcher is missing: ${bin}`);
     return track(spawnNode([bin, ...launcherArgs]));
+  }
+
+  /**
+   * The start script with `launcherArgs`, never waiting for a key. On Windows
+   * through cmd.exe, which runs a batch file only through a shell: the script's
+   * path quoted (it has a space), `/s` stripping only the outer quotes. The
+   * arguments here are fixed launcher flags, never user input. On POSIX the file
+   * is executed itself, which proves its executable bit and shebang.
+   * @param {string[]} launcherArgs
+   */
+  function spawnStartScript(launcherArgs) {
+    const script = /** @type {string} */ (startScript);
+    const scriptEnv = { ...env, OGDEN_AGENTS_PACKAGE: registrySpec ?? /** @type {string} */ (tarball), OGDEN_START_NO_PAUSE: '1' };
+    if (IS_WINDOWS) {
+      const command = `""${script}" ${launcherArgs.join(' ')}"`;
+      return spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', command], {
+        cwd: workDir,
+        env: scriptEnv,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        windowsVerbatimArguments: true,
+      });
+    }
+    return spawn(script, launcherArgs, { cwd: workDir, env: scriptEnv, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   }
 
   /** @param {string[]} args */
@@ -302,11 +440,9 @@ export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-s
   function killBackgroundServer() {
     const record = readPortFile(dataDir);
     if (record === undefined || !isAlive(record.pid)) return false;
-    try {
-      process.kill(record.pid, 'SIGKILL');
-    } catch {
-      // Already gone.
-    }
+    // The whole tree (3.10 F7): agents run in process groups of their own and the terminal's CLI in a PTY,
+    // so killing the server alone could leave them holding the data and project folders (on Windows above all).
+    killProcessTree(record.pid);
     return true;
   }
 

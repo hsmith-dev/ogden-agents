@@ -172,7 +172,13 @@ describe('chat through the fake ACP agent', () => {
   it('an agent that can’t be spawned sends the session to error with a plain message; the server stays up', async () => {
     const lines: string[] = [];
     const { server, tab } = await startChatServer({ claudeAdapterPath: join(tmpdir(), 'no-such-adapter', 'index.js'), lines });
-    const { workspace, session } = await openChat(server, tab);
+    // A new chat is refused up front (6.3): the agent isn't installed.
+    const workspace = WorkspaceResponse.parse(await (await post(server, tab, API_ROUTES.workspaces, { path: repo() })).json()).workspace;
+    const refused = await post(server, tab, apiPath(API_ROUTES.workspaceSessions, { wsId: workspace.id }), {});
+    expect(refused.status).toBe(409);
+    expect(ApiErrorBody.parse(await refused.json()).error).toMatchObject({ code: 'agent_not_installed', details: { agentId: 'claude-code', action: 'install' } });
+    // A chat made before its agent went away (an install removed since) still fails plainly when it starts.
+    const session = server.core.entities.createSession({ workspaceId: workspace.id, kind: 'chat', agentId: 'claude-code' });
     expect((await send(server, tab, workspace.id, session.id, 'hello')).status).toBe(202);
     await waitFor(() => stateOf(server, session.id) === 'error', 'error', 10_000);
     const last = server.core.events.readAfter(0).filter((e) => e.streamId === session.id).at(-1);
@@ -206,7 +212,8 @@ describe('chat through the fake ACP agent', () => {
     process.env.ANTHROPIC_API_KEY = secret;
     process.env.OGDEN_TEST_UNLISTED_SECRET_TOKEN = 'unlisted-server-secret';
     try {
-      const { server, tab } = await startChatServer({ lines });
+      // Signed out (no login state), so the server's own key is the one in use.
+      const { server, tab } = await startChatServer({ lines, extraAgentEnv: { FAKE_LOGIN_STATE: join(tmpdir(), 'ogden-agents-no-login-state.json') } });
       const { workspace, session } = await openChat(server, tab);
       await send(server, tab, workspace.id, session.id, 'echo-env');
       await waitFor(() => stateOf(server, session.id) === 'idle', 'idle', 10_000);

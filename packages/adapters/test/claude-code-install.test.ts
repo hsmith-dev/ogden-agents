@@ -169,6 +169,14 @@ describe('finding npm', () => {
     expect(env).toEqual({ PATH: '/bin', HOME: '/h', npm_config_cache: '/work/cache', npm_config_update_notifier: 'false' });
   });
 
+  it("npm's environment is an allowlist (AD-16): its proxies and certificates pass, no agent key or other variable does", () => {
+    const env = npmEnv(
+      { PATH: '/bin', HTTPS_PROXY: 'http://proxy:8080', NODE_EXTRA_CA_CERTS: '/ca.pem', ANTHROPIC_API_KEY: 'sk-ant-x', GEMINI_API_KEY: 'AIza-x', GITHUB_TOKEN: 'ghp_x', OGDEN_AGENTS_TEST_CLAUDE_INSTALL: '/x', NODE_OPTIONS: '--require /evil.js' },
+      '/work/cache',
+    );
+    expect(env).toEqual({ PATH: '/bin', HTTPS_PROXY: 'http://proxy:8080', NODE_EXTRA_CA_CERTS: '/ca.pem', npm_config_cache: '/work/cache', npm_config_update_notifier: 'false' });
+  });
+
   it('counts the packages npm fetches: optional ones only with the binary, and only for this computer', () => {
     const pins = fakePins();
     expect(packagesToFetch(pins.lock, false)).toBe(3);

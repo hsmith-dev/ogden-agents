@@ -29,7 +29,7 @@ A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the str
   - **success:** The repo gains a working `_bmad` setup that reports current, with no terminal use.
 - **CAP-3**
   - **intent:** Users hold persistent browser chat sessions with whichever supported agent they select, listed and resumable. Agents that can't resume a session reopen from Ogden Agents's stored transcript.
-  - **success:** After a server restart, a reopened chat continues with its prior context. This is demonstrated with at least two different agents.
+  - **success:** After a server restart, a reopened chat continues with its prior context. This is demonstrated with at least two different agents (Claude Code and Antigravity; if epic 6's spike is a no-go, the several-agents part moves to v2, user 2026-10-02).
 - **CAP-4**
   - **intent:** Agent permission requests appear as allow-once / always-allow / deny cards in the UI, governed by a caution level set per project.
   - **success:** A requested shell command does not run until it is approved in the UI.
@@ -61,8 +61,10 @@ A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the str
   - **intent:** In a project with Unattended builds turned on (CAP-19), users are notified when a ticket is blocked or is ready for review.
   - **success:** Each of these events reaches a configured webhook.
 - **CAP-15**
-  - **intent:** Every agent BMAD supports can be selected: Claude Code, Codex, Gemini, Copilot, and Antigravity (bmad-loop's profiles). Chat covers every agent that speaks ACP; builds cover all of them.
-  - **success:** Each supported agent completes a `bmad-build-auto` run through the UI, and each agent that speaks ACP also completes a chat.
+  - **intent:** In v1, Claude Code is supported fully, for chat and builds. Antigravity joins it for chat, picked per chat with a default per project, if it proves possible (epic 6's spike decides). Codex, Gemini CLI and GitHub Copilot CLI, and builds with any agent but Claude Code, are v2 (epic 8); each further ACP agent is one adapter.
+  - **success:** Claude Code completes a chat and a `bmad-build-auto` run through the UI. If Antigravity is supported, an Antigravity chat and a Claude Code chat run at once in one project and both continue after a restart.
+  - **intent:** In v1, Claude Code is supported fully, for chat and builds. Antigravity joins it for chat, picked per chat with a default per project, if it proves possible (epic 6's spike decides). In v1.1 (epic 12, 2026-10-04), Codex and Grok join for chat, each only if its live checks pass on macOS, Windows and Linux; v1.1 ships with whichever passes. Gemini CLI and GitHub Copilot CLI, and builds with any agent but Claude Code, are v2 (epic 8); each further ACP agent is one adapter.
+  - **success:** Claude Code completes a chat and a `bmad-build-auto` run through the UI. If Antigravity is supported, an Antigravity chat and a Claude Code chat run at once in one project and both continue after a restart. In v1.1, the same holds for a Codex chat and a Grok chat beside a Claude Code chat.
 - **CAP-16**
   - **intent:** On first run, onboarding finds the installed agent CLIs, installs missing ones on request, and signs the user into their own account (subscription), or takes an API key instead, all from the UI.
   - **success:** On a fresh machine, a user installs Claude Code and signs into it from the UI, then chats, with no terminal. Another user completes a chat with only an API key.
@@ -75,6 +77,9 @@ A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the str
 - **CAP-19**
   - **intent:** Each project chooses whether to use BMad Method and which of its pieces (planning, board, unattended builds, retrospectives). A project without it is a plain multi-agent, multi-chat workspace over the user's agent. New projects start without it unless the user changes the default.
   - **success:** A new project holds chats with two agents in two chats with nothing written under `_bmad/` and no Plan or Board shown; turning on Planning in its settings sets BMad up and shows Plan, and turning BMad off hides Plan again and leaves every file in the repo.
+- **CAP-20**
+  - **intent:** A user downloads and opens Ogden Agents as an app on macOS, Windows or Linux, with nothing else to install, and it keeps itself up to date. The `npx ogden-agents` route (CAP-1) stays beside it, and both share one data folder.
+  - **success:** On a fresh machine with no Node, the downloaded app reaches a first chat with no terminal, and updates from N to N+1 without losing data or interrupting running work.
 
 CAP-11 (cost caps) is retired and its number is not reused.
 
@@ -83,16 +88,16 @@ CAP-11 (cost caps) is retired and its number is not reused.
 - It runs natively on macOS, Windows, and Linux, and needs no Docker to install or chat. It binds to `127.0.0.1` with a per-install access token and WebSocket origin checks, because the terminal is effectively a remote shell.
 - No standard flow may require the CLI. The CLI is reachable only through the advanced toggle.
 - It is a single Node process. Both frontend and backend are new builds, and no Ogden code is carried over.
-- Reuse BMAD before building: bmad-loop for dispatch and agent profiles, `tickets.py` for all ticket writes, BMAD's setup scripts for installing into a project.
+- Reuse BMAD before building: `bmad-build-auto` in an Ogden-managed ACP session for builds (bmad-loop only for agents without ACP, not in v1), `tickets.py` for all ticket writes, BMAD's setup scripts for installing into a project.
 - The BMAD v7 files in the repo are the source of truth for ticket and plan state. The database holds only workspaces, sessions, runs and events, and ticket references.
 - Only one side drives a session at a time. While the terminal drives, the chat view is read-only.
 - Guardrails are enforced in code, not in prompts. Ogden commit `b5af7c3` showed that prompted rules get skipped.
-- Unattended runs are always sandboxed: a per-ticket worktree plus the agent's own sandbox. If the agent has no sandbox on that OS, they use Docker if it's already installed. Otherwise unattended mode is off for that agent, and the UI offers another agent, installing Docker, or attended mode (see `agent-matrix.md`).
+- Unattended runs are always sandboxed: a per-ticket worktree plus the agent's own sandbox. If the agent has no sandbox on that OS, they use Docker if it's already installed. Otherwise unattended mode is off for that agent, and the UI offers installing Docker or attended mode, and in v2 another agent that can build (see `agent-matrix.md`).
 - `bmad-build-auto` stops at `built`. Only a human approval marks a ticket `done`.
 - Every unattended run has a maximum run time that stops hung or looping agents.
 - Ogden Agents does not reimplement agent coding. The selected agent does the work.
 - The UI is built with the `design-taste-frontend` skill: modern, and without the look of a generic Claude/AI app.
-- BMAD-METHOD and bmad-loop are forked. Every Ogden Agents change is carried in the forks and also opened as an upstream PR, and a patch is dropped once upstream accepts it.
+- BMAD-METHOD and bmad-loop are used as pinned upstream versions, checked against a content hash and downloaded only when the user sets up or updates. Ogden Agents carries no forks: a change it needs in BMad is opened as an upstream PR and used once merged (user decision 2026-10-02).
 - Interactive chat talks to every agent through ACP (Agent Client Protocol), so Ogden Agents needs no chat integration specific to each agent.
 - BMad Method is optional per project. Ogden Agents writes nothing BMad into a repo, and adds no BMad skill or prompt to a session, unless that project turned a BMad piece on. Turning it off never deletes files.
 
@@ -106,7 +111,8 @@ CAP-11 (cost caps) is retired and its number is not reused.
 - An MCP registry, memory/RAG, a semantic cache, and cross-project tickets.
 - Tracker stores (Jira, Linear, GitHub Issues, Notion, Trello) in v1. The board covers the repo store only.
 
-- Planned for v2, not v1 (epic 8): viewing the project's markdown files in the app, code-change review, and a VS Code extension.
+- Planned for v2, not v1 (epic 8): viewing the project's markdown files in the app, code-change review, a VS Code extension, the agents Codex, Gemini CLI and GitHub Copilot CLI, and builds with any agent but Claude Code.
+- Planned for v2, not v1 (epic 8): viewing the project's markdown files in the app, code-change review, a VS Code extension, the agents Gemini CLI and GitHub Copilot CLI, and builds with any agent but Claude Code. Codex and Grok chat are v1.1 (epic 12, 2026-10-04).
 
 ## Success signal
 
@@ -115,7 +121,7 @@ CAP-11 (cost caps) is retired and its number is not reused.
 
 ## Assumptions
 
-- The one install command (CAP-1) is the only CLI step and is exempt from the no-CLI constraint.
+- The one install command (CAP-1) is the only CLI step of the npm route and is exempt from the no-CLI constraint. The desktop app (CAP-20) needs no command at all, and "a single Node process" stays true inside it, since it bundles its own Node (epic 13, 2026-10-04).
 - Ogden Agents checks for `uv` and installs it if missing, because BMAD's scripts and bmad-loop are Python run through `uv`.
 - The BMad trademark permits the name "Ogden Agents" (the user's call).
 - A fresh UI is built with `design-taste-frontend` on bmad-method-ui's stack. bmad-method-ui and acp-ui (both MIT) are references to borrow from with attribution, not forks.
@@ -125,4 +131,4 @@ CAP-11 (cost caps) is retired and its number is not reused.
 These are to be verified during the build; none blocks starting.
 
 - Which ACP adapters give a session ID that the agent's own CLI can resume? This decides where the CAP-5 toggle appears. Check in phase 2.
-- When will Antigravity support ACP? Until it does, it is build-only.
+- Can Ogden Agents drive Antigravity through Google's own ACP server (`antigravity-acp`, in the ACP registry since 2026-08-20): does sign-in work without a terminal, and does it run on macOS, Linux and Windows (all three required)? Epic 6's spike answers and re-checks Google's terms, and the user decides go or no-go.

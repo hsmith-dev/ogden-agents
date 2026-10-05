@@ -12,8 +12,10 @@
  * has no launcher entry, so the app shortcut is the in-memory stub: nothing
  * is written on this computer. The home folder is a temp folder, so the
  * folder browser starts somewhere known. Each test runs its own server.
+ * Story 10.4 adds the first project's one question, Simple chats or BMad
+ * Method, which sets that project's pieces only.
  */
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
@@ -35,7 +37,7 @@ interface WelcomeServer {
  * swapped for the test and put back after; the server closes before any
  * folder is removed.
  */
-async function withWelcomeServer(page: Page, body: (welcome: WelcomeServer) => Promise<void>) {
+async function withWelcomeServer(page: Page, body: (welcome: WelcomeServer & { home: string }) => Promise<void>, extra: StartOptions = {}) {
   const dataDir = makeDataDir();
   const stateDir = mkdtempSync(join(tmpdir(), 'ogden-agents-e2e-login-'));
   const home = realpathSync.native(makeDataDir('ogden-agents-e2e-home-'));
@@ -45,6 +47,7 @@ async function withWelcomeServer(page: Page, body: (welcome: WelcomeServer) => P
     firstRun: true,
     claudeCliBrowser: 'true',
     extraAgentEnv: { FAKE_ACP_AUTH: 'claude-terminal', FAKE_LOGIN_STATE: join(stateDir, 'state.json') },
+    ...extra,
   };
   let server: RunningServer | undefined;
   try {
@@ -57,7 +60,7 @@ async function withWelcomeServer(page: Page, body: (welcome: WelcomeServer) => P
       server = await startServer(dataDir, 0, options);
       return server;
     };
-    await body({ server, dataDir, restart });
+    await body({ server, dataDir, restart, home });
   } finally {
     await server?.close();
     for (const [key, value] of Object.entries(saved)) {
@@ -90,7 +93,7 @@ const card = (page: Page) => page.getByTestId('agent-card-claude-code');
 const offerNotice = (page: Page) => page.getByTestId('app-shortcut-offer');
 
 /** From the agent step: signs in (which moves the step on by itself), then adds `alpha-repo` as the first project. */
-async function signInAndAddProject(page: Page, context: BrowserContext) {
+async function signInAndAddProject(page: Page, context: BrowserContext, beforeAdding?: () => Promise<void>) {
   const opened = context.waitForEvent('page');
   await card(page).getByRole('button', { name: 'Sign in with your account' }).click();
   const tab = await opened;
@@ -98,6 +101,12 @@ async function signInAndAddProject(page: Page, context: BrowserContext) {
   await expect(headline(page)).toHaveText('Add a project to get started.');
   await expect(headline(page)).toBeFocused();
   await tab.close();
+
+  // The first project's one question (10.4): asked on a first run, Simple chats preselected.
+  const question = page.getByTestId('first-project-question');
+  await expect(question).toContainText('Simple chats or BMad Method?');
+  await expect(question.getByRole('radio', { name: 'Simple chats' })).toHaveAttribute('aria-checked', 'true');
+  await beforeAdding?.();
 
   await page.getByTestId('welcome-page').getByRole('button', { name: 'Add project' }).click();
   const dialog = page.getByTestId('add-project-dialog');
@@ -115,7 +124,7 @@ async function openWelcomeFromSettings(page: Page) {
 
 test('a first run: Welcome, sign in, a project, the shortcut once, then Chats', async ({ page, context }) => {
   await routeSignInPage(context);
-  await withWelcomeServer(page, async ({ server, dataDir }) => {
+  await withWelcomeServer(page, async ({ server, dataDir, home }) => {
     await land(page, server.launchUrl, '/welcome');
     await expect(page.getByRole('heading', { name: 'Welcome', level: 1 })).toBeVisible();
     await expect(headline(page)).toHaveText('Pick the agent that will do the work.');
@@ -142,8 +151,12 @@ test('a first run: Welcome, sign in, a project, the shortcut once, then Chats', 
 
     // Done: kept in the data folder, readable only by the user.
     const file = join(dataDir, 'onboarding.json');
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ welcomeCompleted: true });
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ welcomeCompleted: true, firstProjectChoice: 'simple_chats' });
     if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600);
+    // Simple chats: every piece off, and nothing written in the project's folder (10.4).
+    const [project] = server.core.entities.listWorkspaces();
+    expect(server.core.bmad.pieces(project!.id)).toEqual([]);
+    expect(readdirSync(join(home, 'Documents', 'alpha-repo'))).toEqual([]);
 
     await page.goto(`${server.url}/`);
     await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible();
@@ -157,7 +170,9 @@ test('a first run: Welcome, sign in, a project, the shortcut once, then Chats', 
     await expect(headline(page)).toHaveText('Pick the agent that will do the work.');
     await page.getByRole('button', { name: 'Continue' }).click();
     await expect(headline(page)).toHaveText('Add a project to get started.');
-
+    // Answered once, and a project exists: the question isn't asked again (10.4).
+    await expect(page.getByTestId('welcome-page').getByRole('button', { name: 'Add project' })).toBeVisible();
+    await expect(page.getByTestId('first-project-question')).toHaveCount(0);
   });
 });
 
@@ -236,4 +251,33 @@ test("a failed answer to the shortcut offer from Welcome is sent again, and the 
     await expect(page.getByTestId('chats-empty')).toBeVisible();
     await expect(offerNotice(page)).toHaveCount(0);
   });
+});
+
+test("BMad Method in Welcome starts the first project with Planning and Board; the app-wide default stays Simple (10.4)", async ({ page, context }) => {
+  await routeSignInPage(context);
+  await withWelcomeServer(
+    page,
+    async ({ server, dataDir, home }) => {
+      await land(page, server.launchUrl, '/welcome');
+      await signInAndAddProject(page, context, async () => {
+        const bmad = page.getByTestId('first-project-question').getByRole('radio', { name: 'BMad Method' });
+        await expect(bmad).toBeEnabled();
+        await bmad.click();
+        await expect(bmad).toHaveAttribute('aria-checked', 'true');
+      });
+      await expect(headline(page)).toHaveText(/^Open Ogden Agents from .+ next time\.$/);
+      await page.getByTestId('welcome-shortcut').getByRole('button', { name: 'Not now' }).click();
+      // Added with Planning on, the project opens on its Plan (Flow 1 step 5, story 4.6).
+      await expect(page).toHaveURL(/\/w\/(ws_[0-9A-Z]{26})\/plan$/);
+      await expect(page.getByRole('heading', { name: 'Plan', level: 1 })).toBeVisible();
+
+      const [project] = server.core.entities.listWorkspaces();
+      expect(server.core.bmad.pieces(project!.id)).toEqual(['planning', 'board']);
+      expect(readdirSync(join(home, 'Documents', 'alpha-repo'))).toEqual([]);
+      expect(JSON.parse(readFileSync(join(dataDir, 'onboarding.json'), 'utf8'))).toEqual({ welcomeCompleted: true, firstProjectChoice: 'bmad_method' });
+      // Welcome never changes the default.
+      expect(existsSync(join(dataDir, 'preferences.json'))).toBe(false);
+    },
+    { availableBmadPieces: ['planning', 'board'] },
+  );
 });

@@ -8,11 +8,25 @@
  * state-changing, so the gate has checked its Origin. Without permissions
  * (an app wired without core) they answer 501 without reading the body.
  */
-import { FeatureOffError, NotFoundError, ValidationError, WorkspaceBusyError, type BmadFeatures, type Chat, type Permissions } from '@ogden-agents/core';
+import {
+  ConfirmationRequiredError,
+  DeveloperModeRequiredError,
+  FeatureOffError,
+  FeatureUnavailableError,
+  NotFoundError,
+  UnknownAgentError,
+  ValidationError,
+  WorkspaceBusyError,
+  type BmadFeatures,
+  type Chat,
+  type Permissions,
+} from '@ogden-agents/core';
 import {
   API_ROUTES,
   CreateFolderRequest,
   CreateFolderResponse,
+  FEATURE_OFF_MESSAGE,
+  FEATURE_UNAVAILABLE_MESSAGE,
   FolderListing,
   FolderListingQuery,
   HistoryDeletedResponse,
@@ -23,6 +37,7 @@ import {
 } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { bmadPieceRoutes } from './bmad-pieces.js';
 import { ids, readBody } from './request-input.js';
 import { apiError, notImplemented } from './errors.js';
 import { createFolder, FolderError, listFolder } from './folders.js';
@@ -38,7 +53,7 @@ export interface WorkspaceRoutesOptions {
   chat?: Chat | undefined;
   /** Core's permissions, which keep each workspace's caution level (2.8); without them the settings routes answer 501. */
   permissions?: Permissions | undefined;
-  /** Core's BMad pieces guard (AD-22), for the test-only probe route. */
+  /** Core's BMad pieces guard (AD-22), for the test-only probe route (registered through `bmadPieceRoutes`). */
   bmad?: BmadFeatures | undefined;
   /**
    * Registers `TEST_ROUTES.bmadProbe` (story 10.1). Only `start()` sets it,
@@ -58,9 +73,14 @@ export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptio
   /** Core's and the folder browser's refusals as API errors; anything else is left for `onError` (500). */
   const refusal = (c: Context, error: unknown): Response => {
     if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', NOT_FOUND);
-    if (error instanceof FeatureOffError) {
-      return apiError(c, 409, 'feature_off', "This BMad Method feature is off in this project. Turn it on in the project's settings to use it.");
-    }
+    if (error instanceof FeatureOffError) return apiError(c, 409, 'feature_off', FEATURE_OFF_MESSAGE);
+    // Turning on a piece this install doesn't ship yet (story 10.2): nothing was stored.
+    if (error instanceof FeatureUnavailableError) return apiError(c, 409, 'feature_unavailable', FEATURE_UNAVAILABLE_MESSAGE);
+    // A default agent this install doesn't have (epic 6, entry 6): nothing was stored.
+    if (error instanceof UnknownAgentError) return apiError(c, 400, 'agent_unknown', error.message);
+    // Skip all as the default (default permission mode): the server is the gate; nothing was stored.
+    if (error instanceof DeveloperModeRequiredError) return apiError(c, 403, 'developer_mode_required', error.message);
+    if (error instanceof ConfirmationRequiredError) return apiError(c, 400, 'confirmation_required', error.message);
     if (error instanceof WorkspaceBusyError) {
       return apiError(c, 409, 'sessions_busy', 'A chat in this project is still working or waiting for you. Let it finish, then delete the history.');
     }
@@ -112,7 +132,13 @@ export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptio
       if (!body.ok) return body.response;
       try {
         const settings = permissions.updateSettings(scope.workspaceId, body.value);
-        log.info('workspace settings saved', { workspaceId: scope.workspaceId, cautionLevel: settings.cautionLevel, bmadPieces: settings.bmadPieces.join(',') });
+        log.info('workspace settings saved', {
+          workspaceId: scope.workspaceId,
+          cautionLevel: settings.cautionLevel,
+          bmadPieces: settings.bmadPieces.join(','),
+          defaultAgentId: settings.defaultAgentId ?? 'install default',
+          defaultPermissionMode: settings.defaultPermissionMode ?? 'ask',
+        });
         return c.json(WorkspaceSettingsResponse.parse({ settings }));
       } catch (error) {
         return refusal(c, error);
@@ -120,19 +146,10 @@ export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptio
     });
   }
 
-  // Tests only (story 10.1): a route serving the `planning` piece. Core's guard
-  // is the check (AD-22); this route adds none of its own.
+  // Tests only (story 10.1): a route serving the `planning` piece, registered
+  // through the one helper (story 10.2), so core's guard is the check (AD-22).
   if (bmadProbe === true && bmad !== undefined) {
-    app.get(TEST_ROUTES.bmadProbe, (c) => {
-      const scope = ids(c);
-      if (scope === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
-      try {
-        bmad.requireBmadFeature(scope.workspaceId, 'planning');
-        return c.json({ piece: 'planning' });
-      } catch (error) {
-        return refusal(c, error);
-      }
-    });
+    bmadPieceRoutes(app, { bmad, log }).get('planning', TEST_ROUTES.bmadProbe, (c) => c.json({ piece: 'planning' }));
   }
 
   app.get(API_ROUTES.folders, async (c) => {

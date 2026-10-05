@@ -1,8 +1,8 @@
-import type { PermissionRule, PermissionRuleId, WorkspaceId } from '@ogden-agents/shared';
+import { type PermissionRule, type PermissionRuleId, type WorkspaceId } from '@ogden-agents/shared';
 import type { ReactElement } from 'react';
 import { renderToStaticMarkup as renderMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { AlwaysAllowRulesView, BmadMethodView, CAUTION_OPTIONS, CautionLevelView } from '../src/routes/workspace-settings-page';
+import { AlwaysAllowRulesView, CAUTION_OPTIONS, CautionLevelView } from '../src/routes/workspace-settings-page';
 import { TooltipProvider } from '../src/ui/tooltip';
 import { createLatestGate } from '../src/workspaces/workspace-settings-api';
 
@@ -63,19 +63,5 @@ describe('workspace settings page (story 2.8)', () => {
     const second = gate.next();
     expect(gate.isLatest(first)).toBe(false);
     expect(gate.isLatest(second)).toBe(true);
-  });
-});
-
-describe('the BMad Method switch (story 10.1)', () => {
-  it('shows Planning as a switch in its state, says files are never changed, and shows a save error', () => {
-    const off = renderToStaticMarkup(<BmadMethodView planning={false} onChange={() => {}} saving={false} error={undefined} />);
-    expect(off).toContain('>BMad Method<');
-    expect(off).toMatch(/role="switch"[^>]*aria-checked="false"/);
-    expect(off).toContain('>Planning<');
-    expect(off).toContain('never changed');
-    const on = renderToStaticMarkup(<BmadMethodView planning onChange={() => {}} saving={false} error="Nope." />);
-    expect(on).toMatch(/role="switch"[^>]*aria-checked="true"/);
-    expect(on).toMatch(/data-testid="bmad-error"[^>]*>.*Nope\./);
-    expect(renderToStaticMarkup(<BmadMethodView planning={undefined} onChange={() => {}} saving={false} error={undefined} />)).not.toContain('role="switch"');
   });
 });

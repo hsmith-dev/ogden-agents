@@ -41,12 +41,20 @@ title = "Plan with every BMAD skill and track it on a live board"
 covers = ["CAP-2", "CAP-6", "CAP-7", "CAP-18"]
 after = [{ epic = 1, needs = "the bundled forks and forks.lock" }, { epic = 2, needs = "chat sessions, which planning runs in" }, { epic = 10, needs = "the per-project BMad pieces contract, guard, route helper and BmadCatalogPort.detect (10.2)" }]
 
+# Epic 13 is built next, right after epic 4 (user, 2026-10-04); outside the v1 Done when. Epic id 13: 11 is 5b (docs/epic-5-inception) and 12 is v1.1 (docs/epic-12-inception); keep this table right after epic 4 when merging those branches.
+[[epic]]
+id = 13
+slug = "epic-desktop-app"
+title = "Ogden as its own desktop app on macOS, Windows and Linux"
+covers = ["CAP-20", "CAP-1", "CAP-16"]
+after = [{ epic = 4, needs = "its release (4.13), the latest release.yml and installed suite on main; through it, epic 1's launcher, handshake and npm release (1.7, 1.10), epic 2's per-tab token and app shortcut (2.1, 2.4) and epic 9's Welcome (9.5)" }]
+
 [[epic]]
 id = 5
 slug = "epic-unattended-builds"
 title = "One ticket builds safely, and you approve and merge it"
 covers = ["CAP-8", "CAP-9", "CAP-10", "CAP-12"]
-after = [{ epic = 1, needs = "the bundled bmad-loop fork (1.9) and the uv bootstrap (1.8)" }, { epic = 4, needs = "the board, ticket detail, TicketStorePort with mark and the live index, through its sweep (4.12); the release after 4.13" }, { epic = 10, needs = "the BMad pieces contract, requireBmadFeature, the piece route helper and piece registration (10.2), and 10.6's architecture test (5.3)" }]
+after = [{ epic = 1, needs = "the uv bootstrap (1.8) and the release workflow; no longer the bmad-loop fork (1.9), since builds run as ACP sessions (2026-10-02)" }, { epic = 4, needs = "the board, ticket detail, TicketStorePort with mark and the live index, through its sweep (4.12); the release after 4.13" }, { epic = 10, needs = "the BMad pieces contract, requireBmadFeature, the piece route helper and piece registration (10.2), and 10.6's architecture test (5.3)" }]
 
 [[epic]]
 id = 11
@@ -58,9 +66,9 @@ after = [{ epic = 5, needs = "its contracts, stubs and fixtures for both halves 
 [[epic]]
 id = 6
 slug = "epic-every-agent"
-title = "Every agent BMAD supports works for chat and builds"
-covers = ["CAP-15"]
-after = [{ epic = 2, needs = "the ACP client and session states" }, { epic = 9, needs = "the setup adapter and sign-in flow other agents reuse" }, { epic = 5, needs = "BuildRunnerPort, SandboxPort and the run's agent field (5.3), the sandbox chain (5.6) and the runner (5.7)" }]
+title = "Add Antigravity beside Claude Code, if possible"
+covers = ["CAP-15", "CAP-3", "CAP-5", "CAP-16"]
+after = [{ epic = 2, needs = "the AgentPort contract, chat use-cases, permission cards, resume and the status sidebar, through its release (2.13)" }, { epic = 9, needs = "AgentSetupPort, install from pins, sign-in, the API key path and Welcome, through its release (9.7)" }, { epic = 3, needs = "terminal availability per agent (3.7) and the Windows terminal work (3.8)" }, { epic = 10, needs = "the pieces guard and 10.6's simple-project test" }, { epic = 4, needs = "BMad setup (4.3) and planning sessions (4.6)" }]
 
 [[epic]]
 id = 7
@@ -69,6 +77,16 @@ title = "Each finished epic teaches the next one"
 covers = ["CAP-13"]
 after = [{ epic = 5, needs = "finished, approved and merged runs with build records (5.9)" }]
 
+# ---- v1.1 (planned; outside the v1 initiative's Done when) ----
+
+# Epic ids (2026-10-02): 11 is epic-build-runs-and-notifications (5b, on docs/epic-5-inception, assigned first); 12 is v1.1 Codex and Grok, renumbered from 11 to avoid the clash.
+[[epic]]
+id = 12
+slug = "epic-v1-1-codex-and-grok"
+title = "v1.1: Codex and Grok beside Claude Code"
+covers = ["CAP-15", "CAP-3", "CAP-5", "CAP-16"]
+after = [{ epic = 6, needs = "the agents-as-a-choice contracts (6.3), the shared ACP client in acp-base (6.4), the picker and default agent per project (6.6), its sweep (6.9) and v1 released (6.10)" }, { epic = 4, needs = "the per-project trust store (4.2), BMad setup (4.3), planning sessions (4.6) and its release (4.13)" }]
+
 # ---- v2 (planned; outside the v1 initiative's Done when) ----
 
 [[epic]]
@@ -76,4 +94,4 @@ id = 8
 slug = "epic-v2-developer-experience"
 title = "Developers review and navigate their project without leaving Ogden Agents (v2)"
 covers = []
-after = [{ epic = 2, needs = "sessions and the session view" }, { epic = 4, needs = "planning files and the board" }, { epic = 5, needs = "the review page and approve (5.9)" }]
+after = [{ epic = 5, needs = "the review page and approve (5.9)" }, { epic = 6, needs = "for its agent work (V4): the agent registry, acp-base, the agent list and the picker, built on a go or a no-go" }]

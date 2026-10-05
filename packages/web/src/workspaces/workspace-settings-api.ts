@@ -1,9 +1,20 @@
-import { API_ROUTES, apiPath, WorkspaceSettingsResponse, type BmadPiece, type CautionLevel, type WorkspaceSettings } from '@ogden-agents/shared';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef } from 'react';
+import {
+  API_ROUTES,
+  apiPath,
+  BmadPiecesResponse,
+  SCRIPT_TRUST_FAILED,
+  WorkspaceSettingsResponse,
+  type BmadPiece,
+  type BmadPieceAvailability,
+  type CautionLevel,
+  type PermissionMode,
+  type WhileWorking,
+  type WorkspaceSettings,
+} from '@ogden-agents/shared';
+import { useQuery } from '@tanstack/react-query';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
 import { call, fetchPermissionRules } from '@/chat/chat-api';
-import { useEventStream } from '@/events/event-stream';
+import { useEventInvalidation } from '@/events/use-event-invalidation';
 
 /**
  * The workspace settings REST calls (story 2.8), sent with this tab's token,
@@ -16,6 +27,68 @@ type Auth = Pick<TabAuth, 'fetch'>;
 /** `GET /api/v1/workspaces/:wsId/settings`. */
 export async function fetchWorkspaceSettings(wsId: string, auth: Auth = tabAuth): Promise<WorkspaceSettings> {
   const json = await call(auth, apiPath(API_ROUTES.workspaceSettings, { wsId }), {}, "Ogden Agents couldn't load this project's settings");
+  return WorkspaceSettingsResponse.parse(json).settings;
+}
+
+/**
+ * `PATCH /api/v1/workspaces/:wsId/settings`: the agent the project's new
+ * chats preselect (epic 6, entry 6), or `null` for the install's default.
+ */
+export async function updateDefaultAgent(wsId: string, defaultAgentId: string | null, auth: Auth = tabAuth): Promise<WorkspaceSettings> {
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.workspaceSettings, { wsId }),
+    { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ defaultAgentId }) },
+    "The default agent couldn't be saved",
+  );
+  return WorkspaceSettingsResponse.parse(json).settings;
+}
+
+/**
+ * `PATCH /api/v1/workspaces/:wsId/settings`: the mode the project's new
+ * chats start in (default permission mode). Skip all carries `confirm`, the
+ * user's answer to its red warning; the server refuses it without that or
+ * without Developer mode.
+ */
+export async function updateDefaultPermissionMode(wsId: string, defaultPermissionMode: PermissionMode, confirm: boolean, auth: Auth = tabAuth): Promise<WorkspaceSettings> {
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.workspaceSettings, { wsId }),
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ defaultPermissionMode, ...(confirm ? { confirm: true } : {}) }),
+    },
+    "The default permission mode couldn't be saved",
+  );
+  return WorkspaceSettingsResponse.parse(json).settings;
+}
+
+/**
+ * `PATCH /api/v1/workspaces/:wsId/settings` (story 11): an agent's default
+ * model in this project, or `null` to use the app's default for the agent.
+ */
+export async function updateProjectDefaultModel(wsId: string, agentId: string, model: string | null, auth: Auth = tabAuth): Promise<WorkspaceSettings> {
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.workspaceSettings, { wsId }),
+    { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ defaultModels: { [agentId]: model } }) },
+    "The default model couldn't be saved",
+  );
+  return WorkspaceSettingsResponse.parse(json).settings;
+}
+
+/**
+ * `PATCH /api/v1/workspaces/:wsId/settings`: what a message sent while the
+ * agent works does in this project (send now or wait), or `null` for the app's choice.
+ */
+export async function updateWhileWorking(wsId: string, whileWorking: WhileWorking | null, auth: Auth = tabAuth): Promise<WorkspaceSettings> {
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.workspaceSettings, { wsId }),
+    { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ whileWorking }) },
+    "That setting couldn't be saved",
+  );
   return WorkspaceSettingsResponse.parse(json).settings;
 }
 
@@ -44,6 +117,31 @@ export async function updateBmadPieces(wsId: string, bmadPieces: readonly BmadPi
   return WorkspaceSettingsResponse.parse(json).settings;
 }
 
+/**
+ * `PUT /api/v1/workspaces/:wsId/bmad/script-trust` (story 4.2): the user
+ * allows Ogden Agents to run this project's own BMad Method scripts, once
+ * for the project. Answers the settings, now trusted.
+ */
+export async function trustProjectScripts(wsId: string, auth: Auth = tabAuth): Promise<WorkspaceSettings> {
+  const json = await call(auth, apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId }), { method: 'PUT' }, SCRIPT_TRUST_FAILED);
+  return WorkspaceSettingsResponse.parse(json).settings;
+}
+
+/**
+ * `GET /api/v1/bmad/pieces` (story 10.2): every BMad Method piece, in order,
+ * each available on this install or coming soon. Install-wide, so it is the
+ * same for every project and never changes while the server runs.
+ */
+export async function fetchBmadPieces(auth: Auth = tabAuth): Promise<BmadPieceAvailability[]> {
+  const json = await call(auth, API_ROUTES.bmadPieces, {}, "Ogden Agents couldn't check which BMad Method features it has");
+  return BmadPiecesResponse.parse(json).pieces;
+}
+
+/** Which BMad Method pieces this install ships; fetched once per page load. */
+export function useBmadPieces() {
+  return useQuery({ queryKey: ['bmad-pieces'], queryFn: () => fetchBmadPieces(), retry: false, staleTime: Number.POSITIVE_INFINITY });
+}
+
 /** Numbers requests so only the latest one's answer is used; an earlier one's is stale. */
 export function createLatestGate() {
   let last = 0;
@@ -55,21 +153,13 @@ export function createLatestGate() {
 
 /** Invalidates this workspace's settings and rules on each new settings or rule event. */
 function useSettingsInvalidation(wsId: string): void {
-  const { events } = useEventStream();
-  const queryClient = useQueryClient();
-  const seen = useRef(events.at(-1)?.seq ?? 0);
-  useEffect(() => {
-    let settings = false;
-    let rules = false;
-    for (const event of events) {
-      if (event.seq <= seen.current || event.workspaceId !== wsId) continue;
-      if (event.type === 'workspace.settings_changed') settings = true;
-      else if (event.type === 'workspace.permission_rule_added' || event.type === 'workspace.permission_rule_removed') rules = true;
-    }
-    seen.current = Math.max(seen.current, events.at(-1)?.seq ?? 0);
-    if (settings) void queryClient.invalidateQueries({ queryKey: ['workspace-settings', wsId] });
-    if (rules) void queryClient.invalidateQueries({ queryKey: ['permission-rules', wsId] });
-  }, [events, queryClient, wsId]);
+  useEventInvalidation((event) => {
+    if (event.workspaceId !== wsId) return [];
+    // The script trust (story 4.2) is part of the settings: allowed in another tab, this one follows.
+    if (event.type === 'workspace.settings_changed' || event.type === 'workspace.bmad_scripts_trusted') return [['workspace-settings', wsId]];
+    if (event.type === 'workspace.permission_rule_added' || event.type === 'workspace.permission_rule_removed') return [['permission-rules', wsId]];
+    return [];
+  });
 }
 
 /** The workspace's settings, kept current from the event stream. */

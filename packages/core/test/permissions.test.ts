@@ -246,6 +246,36 @@ describe('leaving waiting', () => {
   });
 });
 
+describe('an attended build (story 5.6)', () => {
+  it('asks at the ask_every_time level whatever the project says, ignores stored rules, and offers no Always allow', async () => {
+    const core = openTestCore();
+    const { workspace, session } = workingSession(core);
+    // A rule the user made, and the loosest caution level: neither answers an attended request.
+    const first = track(core.permissions.request(session.id, npm('npm install stripe')));
+    core.permissions.decide(workspace.id, session.id, lastRequested(core, session.id).payload.requestId, { decision: 'allow_always' });
+    await flush();
+    expect(first.decision).toEqual({ outcome: 'allow_once' });
+    core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_risky_only' });
+
+    const asked = track(core.permissions.request(session.id, npm('npm install lodash'), { attended: true }));
+    await flush();
+    expect(asked.decision).toBeUndefined();
+    const { payload } = lastRequested(core, session.id);
+    expect(payload).toMatchObject({ cautionLevel: 'ask_every_time', alwaysAllowScope: null });
+    expect(() => core.permissions.decide(workspace.id, session.id, payload.requestId, { decision: 'allow_always' })).toThrow(ValidationError);
+    core.permissions.decide(workspace.id, session.id, payload.requestId, { decision: 'allow_once' });
+    await flush();
+    expect(asked.decision).toEqual({ outcome: 'allow_once' });
+
+    // An edit inside the project is answered by the level for an ordinary request, and asked here.
+    const edit = track(core.permissions.request(session.id, { toolCallId: 't-edit', title: 'Edit', kind: 'edit', paths: ['a.ts'] }, { attended: true }));
+    await flush();
+    expect(edit.decision).toBeUndefined();
+    core.permissions.decide(workspace.id, session.id, lastRequested(core, session.id).payload.requestId, { decision: 'deny' });
+    await flush();
+  });
+});
+
 describe('always-allow rules', () => {
   it('Always allow stores the rule with its event and tells the agent allow_once; a later request in scope runs without waiting', async () => {
     const core = openTestCore();
@@ -629,7 +659,7 @@ describe('caution level (story 2.8)', () => {
     const dataDir = tempDir();
     const core = openTestCore(dataDir);
     const { workspace } = workingSession(core);
-    expect(core.permissions.getSettings(workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [] });
+    expect(core.permissions.getSettings(workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false });
 
     const before = core.events.lastSeq();
     expect(() => core.permissions.updateSettings(workspace.id, { cautionLevel: 'yolo' })).toThrow(ValidationError);
@@ -639,7 +669,7 @@ describe('caution level (story 2.8)', () => {
     expect(() => core.permissions.getSettings(unknown)).toThrow(NotFoundError);
     expect(core.events.lastSeq()).toBe(before);
 
-    expect(core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_for_commands' })).toEqual({ cautionLevel: 'ask_for_commands', bmadPieces: [] });
+    expect(core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_for_commands' })).toEqual({ cautionLevel: 'ask_for_commands', bmadPieces: [], bmadScriptsTrusted: false });
     expect(core.events.readAfter(before)).toEqual([
       expect.objectContaining({
         type: 'workspace.settings_changed',
@@ -660,7 +690,7 @@ describe('caution level (story 2.8)', () => {
 
   it('the stub declines settings changes and reports the default', () => {
     const stub = createDecliningPermissions();
-    expect(stub.getSettings('ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3' as WorkspaceId)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [] });
+    expect(stub.getSettings('ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3' as WorkspaceId)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false });
     expect(() => stub.updateSettings('ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3' as WorkspaceId, { cautionLevel: 'ask_risky_only' })).toThrow(NotFoundError);
   });
 
@@ -814,11 +844,14 @@ describe('protected paths always ask (user decision 2026-09-30, 2.8 F1)', () => 
   }
 
   it('names protected folders and files at any depth, ignoring case', () => {
-    for (const name of ['.claude', '.git', '.vscode', '.idea', '.mcp.json', 'CLAUDE.md', 'AGENTS.md', '.envrc', '.CLAUDE', '.Git', 'claude.MD']) {
+    // `.gemini` and `.agents`: Antigravity's config and skill folders (epic 6 entry 5).
+    for (const name of ['.claude', '.git', '.vscode', '.idea', '.gemini', '.agents', '.Gemini', '.mcp.json', 'CLAUDE.md', 'AGENTS.md', '.envrc', '.CLAUDE', '.Git', 'claude.MD']) {
       expect(isProtectedSegment(name), name).toBe(true);
     }
     for (const name of ['package.json', 'src', '.claude-projects', 'CLAUDE.md.bak', '.github', '.env']) expect(isProtectedSegment(name), name).toBe(false);
     expect(commandNamesProtectedPath('cp x .git/hooks/pre-commit')).toBe(true);
+    expect(commandNamesProtectedPath('echo x > .gemini/settings.json')).toBe(true);
+    expect(commandNamesProtectedPath('cp skill.md .agents/skills/x/SKILL.md')).toBe(true);
     expect(commandNamesProtectedPath('cp x "pkg\\.vscode\\tasks.json"')).toBe(true);
     expect(commandNamesProtectedPath('git commit -m x')).toBe(false);
   });

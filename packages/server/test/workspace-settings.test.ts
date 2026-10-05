@@ -71,7 +71,7 @@ describe('workspace settings routes', () => {
 
     const got = await request(server, tab, 'GET', settingsPath(workspace.id));
     expect(got.status).toBe(200);
-    expect(WorkspaceSettingsResponse.parse(await got.json())).toEqual({ settings: { cautionLevel: 'ask_every_time', bmadPieces: [] } });
+    expect(WorkspaceSettingsResponse.parse(await got.json())).toEqual({ settings: { cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false } });
 
     const before = server.core.events.lastSeq();
     for (const body of [{ cautionLevel: 'yolo' }, {}, { cautionLevel: 1 }]) {

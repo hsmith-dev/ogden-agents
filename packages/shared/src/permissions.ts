@@ -61,3 +61,10 @@ export function alwaysAllowRefusal(command: string): string | undefined {
   }
   return undefined;
 }
+
+/**
+ * Why Always allow isn't offered on a card of a chat in Skip all (permission
+ * modes): such a chat never writes rules, and no rule or caution level
+ * answers its requests. Core refuses the scope with it; the card writes it.
+ */
+export const SKIP_ALL_REFUSAL = "Always allow isn't offered while this chat is in Skip all, so it never writes a rule.";

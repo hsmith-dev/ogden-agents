@@ -447,6 +447,19 @@ describe('the hooks epic 12 adds (12.3), on a generic third agent', () => {
       }
     });
 
+    it('a startOptions that throws is agent_unavailable and spawns nothing', async () => {
+      let spawned = 0;
+      const agent = createAcpAgent(FIXED, {
+        ...fixedQuirks(),
+        launch: () => (spawned++, { command: process.execPath, args: [FAKE_AGENT] }),
+        startOptions: () => {
+          throw new Error('boom');
+        },
+      });
+      await expect(agent.startSession({ cwd: tempDir(), env })).rejects.toMatchObject({ code: 'agent_unavailable' });
+      expect(spawned).toBe(0);
+    });
+
     it('is a wiring bug to say fixed without startOptions, or to give startOptions without saying so', () => {
       expect(() => createAcpAgent(FIXED, { ...fixedQuirks(), startOptions: undefined })).toThrow(/fixes its mode at start but gives no startOptions/);
       expect(() => createAcpAgent(SECOND, fixedQuirks())).toThrow(/gives startOptions but does not fix its mode/);

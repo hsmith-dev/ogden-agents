@@ -160,6 +160,14 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
     return { child, secrets: secretValues(childEnv) };
   };
 
+  const startFixedModeSafely = (permissionMode: PermissionMode, protectedPaths: ProtectedPaths | undefined): FixedModeStart | undefined => {
+    try {
+      return startFixedMode(descriptor, quirks, { permissionMode, protectedPaths }, reasons);
+    } catch (error) {
+      throw new AgentError('agent_unavailable', reasons.couldNotStart, { cause: error });
+    }
+  };
+
   const open = async (
     input: {
       cwd: string;
@@ -173,6 +181,8 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
   ) => {
     const startModel = descriptor.models?.list.some((each) => each.id === input.model) === true ? input.model : undefined;
     const permissionMode = input.permissionMode ?? 'ask';
+    // Before anything is spawned: a quirk that throws must not leave a process behind.
+    const fixed = startFixedModeSafely(permissionMode, input.protectedPaths);
     const { child, secrets } = spawnAgent({ cwd: input.cwd, env: input.env, permissionMode, protectedPaths: input.protectedPaths }, startModel);
     return startOnChild(
       child,
@@ -189,6 +199,7 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
         protectedPaths: input.protectedPaths,
         startModel,
         permissionMode,
+        fixed,
       },
       opening,
     );
@@ -247,6 +258,8 @@ interface StartContext {
   startModel: string | undefined;
   /** The chat's mode at start: given at start to an agent that fixes it (`startOptions`). */
   permissionMode: PermissionMode;
+  /** The fixed-mode start, computed before the process was spawned. */
+  fixed: FixedModeStart | undefined;
 }
 
 /** Stops `child` and everything it started: its process group on POSIX, its tree on Windows. */
@@ -256,7 +269,7 @@ function killTree(child: ChildProcessWithoutNullStreams): void {
 
 async function startOnChild(
   child: ChildProcessWithoutNullStreams,
-  { descriptor, quirks, reasons, cwd, env, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths, startModel, permissionMode }: StartContext,
+  { descriptor, quirks, reasons, cwd, env, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths, startModel, fixed }: StartContext,
   opening: Opening,
 ): Promise<{ init: acp.InitializeResponse; session: AgentSession | undefined; restored: AgentRestored }> {
   const { couldNotStart: COULD_NOT_START, stopped: STOPPED, failed: FAILED } = reasons;
@@ -265,7 +278,6 @@ async function startOnChild(
   const plainReason = (error: unknown, fallback: string) => (isAuthRequired(error) ? reasons.signIn : fallback);
   const listeners = new Set<AgentEventListener>();
   // An agent whose mode is given at start gets it, and the guards, in one `_meta` (epic 12, 12.3).
-  const fixed: FixedModeStart | undefined = startFixedMode(descriptor, quirks, { permissionMode, protectedPaths }, reasons);
   // The agent's own way to keep the protected paths guarded; it can't be changed later.
   const guards = fixed !== undefined ? undefined : protectedPaths === undefined || quirks.sessionMeta === undefined ? undefined : quirks.sessionMeta(protectedPaths);
   const sessionMeta = fixed !== undefined ? fixed.sessionMeta : guards === undefined ? {} : { _meta: guards };

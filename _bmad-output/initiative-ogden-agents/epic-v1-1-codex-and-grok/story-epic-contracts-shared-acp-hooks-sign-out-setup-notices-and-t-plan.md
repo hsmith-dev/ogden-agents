@@ -3,12 +3,12 @@ title: 'Epic contracts: shared ACP hooks, sign-out, setup notices and the projec
 type: 'feature'
 ticket: '3'
 created: '2026-10-04'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick-security', 'quick-correctness']
 review_loop_iteration: 0
 baseline_revision: '9aa0d6ee084cae902139047dfef8b630871b0822'
 context:
@@ -95,6 +95,8 @@ Built 2026-10-04 on `story/12.3-agent-contracts-v11` (from 6.10's branch, with t
 ## Plan Change Log
 
 ## Review Triage Log
+
+Security and correctness reviewers (2 lenses). Patched: a throwing `startOptions` leaked the spawned process (medium; now computed before spawn, test added); a refused new chat re-reads the agent list so a stale trust shows the prompt (medium). Deferred (not blocking, nothing intent-level): adapter does not verify the agent honoured the fixed mode on resume/load (maybe, a quirk can report `current_mode_update`, which core already handles); an unreadable agent-files fingerprint (symlinked `.claude`) makes Trust loop for agents while the Board still works; the prompt's "changed" wording keys on the trusted flag only; terminal trust refusal uses code `agent_unsupported`; invalid `?workspaceId=` is ignored; no reopen-path trust test; vacuous symlink test without privilege. No intent_gap or bad_plan.
 
 ## Design Notes
 

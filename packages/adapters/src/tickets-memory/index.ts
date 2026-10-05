@@ -26,7 +26,7 @@ const STATE_OF: Readonly<Record<TicketStatus, string>> = {
 };
 
 /** Extra text `find` answers for a ticket, by ref. */
-export type MemoryTicketText = Partial<Pick<TicketDetail, 'description' | 'verify' | 'references' | 'notes' | 'unknown'>>;
+export type MemoryTicketText = Partial<Pick<TicketDetail, 'description' | 'verify' | 'references' | 'notes' | 'unknown' | 'plan_checkpoint' | 'done_checkpoint'>>;
 
 export interface MemoryTicketStoreOptions {
   /** Each repo path's tree (rows may leave out story 4.2's defaulted fields). */
@@ -99,6 +99,8 @@ export function createMemoryTicketStore(options: MemoryTicketStoreOptions = {}):
         unknown: extra.unknown ?? '',
         hasPlan: row.status !== null && row.status !== '',
         plan: row.status !== null && row.status !== '' && row.file !== null ? row.file : null,
+        plan_checkpoint: extra.plan_checkpoint ?? false,
+        done_checkpoint: extra.done_checkpoint ?? false,
       };
     },
     async mark(repoPath, ref, status, markOptions = {}) {

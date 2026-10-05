@@ -164,6 +164,8 @@ export const MERGE_REFUSED_MESSAGE = "Git couldn't merge the build into your pro
 export const CHECKOUT_BUSY_MESSAGE = 'Your project has staged changes, changes to this ticket\'s plan, or a merge, rebase, cherry-pick or revert in progress. Finish or undo it, then approve again.';
 export const VCS_UNAVAILABLE_MESSAGE = 'Builds need this project to be a git repository with a branch checked out that has at least one commit.';
 export const RUN_NOT_ACTIVE_MESSAGE = 'This run has already finished.';
+/** `POST …/runs/:runId/retry` for a run not paused at a checkpoint, until 5.8 builds Retry. */
+export const RETRY_NOT_AVAILABLE_MESSAGE = 'Retry for this run is not available yet.';
 export const ALL_READY_NOT_AVAILABLE_MESSAGE = 'Building every ready story is not available yet.';
 
 /** A run's outcome as the review page and the session header say it. */

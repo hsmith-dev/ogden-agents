@@ -75,7 +75,7 @@ export function ModelMenu({ testId, title, ariaLabel, text, prefix, models, valu
   return (
     <DropdownMenu {...(open === undefined ? {} : { open })} {...(onOpenChange === undefined ? {} : { onOpenChange })}>
       <DropdownMenuTrigger asChild>
-        <Button variant={variant} size="sm" data-testid={testId} data-model={value ?? ''} aria-label={ariaLabel} aria-busy={busy || undefined} className="min-w-0 max-w-[55vw] shrink sm:max-w-xs">
+        <Button variant={variant} size="sm" data-testid={testId} data-model={value ?? ''} aria-label={ariaLabel} aria-busy={busy || undefined} className="min-w-0 max-w-48 shrink sm:max-w-xs">
           <Cpu aria-hidden />
           {prefix === undefined ? null : <span className="text-muted-foreground max-sm:sr-only">{prefix}</span>}
           <span className="truncate">{text}</span>

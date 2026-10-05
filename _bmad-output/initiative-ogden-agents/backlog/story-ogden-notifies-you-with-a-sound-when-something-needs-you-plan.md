@@ -3,13 +3,13 @@ title: 'Ogden notifies you, with a sound, when something needs you'
 type: 'feature'
 ticket: '8'
 created: '2026-10-04'
-status: 'in-progress'
+status: 'in-review'
 baseline_revision: '0d6255ad3da4197287744c7bc676bf794f6f6c04'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/backlog/story-ogden-notifies-you-with-a-sound-when-something-needs-you.md'

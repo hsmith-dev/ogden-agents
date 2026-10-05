@@ -35,6 +35,7 @@ Each epic is one user-facing outcome, built in the spec's delivery-phase order. 
 - Touch point: Docker, only where already installed (sandbox fallback); owner: epic-unattended-builds
 - Touch point: the npm registry (publishing); owner: epic-foundation-and-forks
 - Touch point: the upstream BMAD-METHOD and bmad-loop repos (PRs); owner: epic-foundation-and-forks sets up the process, and each epic sends its own patches
+- Touch point: GitHub Releases assets (desktop apps, `SHA256SUMS`, `latest.json`, the `desktop-channel-next` prerelease), nodejs.org downloads (pinned Node), the updater endpoints, the npm registry read for the newer-version notice, and the Apple and Windows signing services (slots only); owner: epic-desktop-app (13), outside the v1 Done when (drafted 2026-10-04, not yet approved)
 
 ## References
 
@@ -48,3 +49,4 @@ Each epic is one user-facing outcome, built in the spec's delivery-phase order. 
 - Decision: no cost or token tracking; CAP-11 retired (user, 2026-09-29).
 - Decision: the cross-epic decisions live in the architecture spine, not in hitl stories (user chose bmad-architecture, 2026-09-29).
 - Decision: epic 1 is built interactively with `bmad-build`; later epics may run unattended with `bmad-build-auto`, with checkpoints set at their inception (user, 2026-09-29).
+- Note (2026-10-04, draft for the user's approval): epic 13, epic-desktop-app, is incepted as a draft: Ogden as a Tauri v2 desktop app on macOS, Windows and Linux beside `npx ogden-agents`, with automatic updates. It sits outside the v1 Done when under its own heading in `tickets.toml`, and proposes a new CAP-20 (see its Notes, open questions 9 and 11).

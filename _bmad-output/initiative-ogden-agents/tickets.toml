@@ -62,6 +62,16 @@ title = "Each finished epic teaches the next one"
 covers = ["CAP-13"]
 after = [{ epic = 5, needs = "finished runs with build records" }]
 
+# ---- desktop app (planned; outside the v1 initiative's Done when) ----
+
+# Epic id 13 (2026-10-04): 11 is 5b (docs/epic-5-inception) and 12 is v1.1 (docs/epic-12-inception); keep this table under its own heading when merging those branches.
+[[epic]]
+id = 13
+slug = "epic-desktop-app"
+title = "Ogden as its own desktop app on macOS, Windows and Linux"
+covers = ["CAP-1", "CAP-16"]
+after = [{ epic = 4, needs = "its release (4.13), the latest release.yml and installed suite on main; through it, epic 1's launcher, handshake and npm release (1.7, 1.10), epic 2's per-tab token and app shortcut (2.1, 2.4) and epic 9's Welcome (9.5)" }]
+
 # ---- v2 (planned; outside the v1 initiative's Done when) ----
 
 [[epic]]

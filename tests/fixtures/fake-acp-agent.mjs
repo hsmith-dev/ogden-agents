@@ -115,7 +115,10 @@
 //                  (a time limit to hit); FAKE_ACP_BUILD_CHILD=<file> starts a
 //                  long-lived child process (a build's command still running)
 //                  and writes "<agent pid> <child pid>" to <file> (story 5.4:
-//                  stopping the session must stop both).
+//                  stopping the session must stop both). Story 5.7:
+//                  FAKE_ACP_BUILD_ENV_DUMP=<file> writes the agent's whole
+//                  environment there (`NAME=value` per line);
+//                  FAKE_ACP_BUILD_ECHO_KEY=1 says ANTHROPIC_API_KEY in a message.
 //   "plan-exit"    asks permission to leave plan mode with the real adapter's
 //                  options (mode-raising ones as `allow_always`, "manually
 //                  approve" as `allow_once`); replies `chose=<option id>`
@@ -775,6 +778,9 @@ async function runPrompt(params, client, session) {
         return allowed;
       };
       await say(client, params.sessionId, `Building ${ref}. `);
+      // Story 5.7: what the build's agent was started with, for the secrets and allowlist tests.
+      if (process.env.FAKE_ACP_BUILD_ENV_DUMP) writeFileSync(process.env.FAKE_ACP_BUILD_ENV_DUMP, Object.entries(process.env).map(([name, value]) => `${name}=${value}`).join('\n'));
+      if (process.env.FAKE_ACP_BUILD_ECHO_KEY === '1') await say(client, params.sessionId, `The key is ${process.env.ANTHROPIC_API_KEY ?? 'none'}. `);
       const childFile = process.env.FAKE_ACP_BUILD_CHILD;
       if (childFile) {
         // Not detached: it stays in the agent's process group (its tree on Windows), as a build's command does.

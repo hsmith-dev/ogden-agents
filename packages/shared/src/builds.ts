@@ -204,6 +204,7 @@ export const RUN_REASON_NOT_BUILT = (status: string) => (status === '' ? 'The ru
 export const RUN_REASON_AGENT_ERROR = 'The agent stopped with an error before the plan said built.';
 export const RUN_REASON_UNREADABLE = "Ogden Agents couldn't read the plan's status in the run's worktree.";
 export const RUN_REASON_PROTECTED_DIFF = "The build changed files it may not change (protected files, BMad Method's own, tickets.toml, or another ticket's plan), so it can't be approved.";
+export const RUN_REASON_RESULT_MISMATCH = 'The build changed, or its saved result could not be read back, while Ogden Agents was checking it, so it is not ready for review. Build it again.';
 export const RUN_REASON_NO_NETWORK = 'Builds have no network, so installs such as npm install fail.';
 export const RUN_REASON_INTERRUPTED = 'interrupted';
 export const RUN_REASON_START_FAILED = "The build couldn't start its agent.";

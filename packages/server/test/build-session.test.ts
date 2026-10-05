@@ -81,8 +81,9 @@ interface Setup {
   retry(runId: string, body?: unknown): Promise<Response>;
 }
 
-async function serve(options: { repo: string; ticketList: PlanFileTicket[]; env?: Record<string, string>; dataDir?: string; wsId?: string }): Promise<Setup> {
+async function serve(options: { repo: string; ticketList: PlanFileTicket[]; env?: Record<string, string>; dataDir?: string; wsId?: string; lines?: string[] }): Promise<Setup> {
   const server = await startTestServer({
+    ...(options.lines === undefined ? {} : { lines: options.lines }),
     ...(options.dataDir === undefined ? {} : { dataDir: options.dataDir }),
     ticketStore: createPlanFileTicketStore(options.ticketList) as unknown as TicketStorePort,
     sandbox: createFixedSandbox({ available: true, kind: 'test' }),
@@ -113,10 +114,10 @@ async function serve(options: { repo: string; ticketList: PlanFileTicket[]; env?
   };
 }
 
-async function setup(options: { ticketList?: PlanFileTicket[]; env?: Record<string, string> } = {}): Promise<Setup> {
+async function setup(options: { ticketList?: PlanFileTicket[]; env?: Record<string, string>; lines?: string[] } = {}): Promise<Setup> {
   const repo = createFakeBmadRepo({ git: true, files: FAKE_BUILD_TICKET_FILES, prefix: 'ogden-agents-session-repo-' });
   removeAfterTest(repo.path);
-  return serve({ repo: repo.path, ticketList: options.ticketList ?? tickets(), env: options.env });
+  return serve({ repo: repo.path, ticketList: options.ticketList ?? tickets(), env: options.env, lines: options.lines });
 }
 
 /** The run's folder in the server's data folder: `<data>/r/<run8>`, the run's 8-character id. */
@@ -169,6 +170,47 @@ describe('the headless build session (story 5.4)', () => {
     // The run's agent and the command it left running are gone once the run ended (its process tree stopped).
     const [agentPid, childPid] = readFileSync(pids, 'utf8').trim().split(' ').map(Number) as [number, number];
     await waitFor(async () => !alive(agentPid) && !alive(childPid), 'the agent and its child to be gone', 10_000);
+  });
+
+  it("story 5.7: the agent starts with the allowlist, the run's object store and only its own key; no event, file or log line holds the key", async () => {
+    const secret = 'sk-ant-api03-this-is-not-a-real-build-key';
+    const saved = { key: process.env.ANTHROPIC_API_KEY, other: process.env.OGDEN_TEST_UNLISTED_SECRET_TOKEN };
+    process.env.ANTHROPIC_API_KEY = secret;
+    process.env.OGDEN_TEST_UNLISTED_SECRET_TOKEN = 'unlisted-server-secret';
+    try {
+      const dump = join(removeAfterTest(mkdtempSync(join(tmpdir(), 'ogden-agents-env-'))), 'env.txt');
+      const lines: string[] = [];
+      // Signed out (no login state), so the server's own key is the one in use.
+      const s = await setup({ lines, env: { FAKE_LOGIN_STATE: join(tmpdir(), 'ogden-agents-no-login-state.json'), FAKE_ACP_BUILD_ENV_DUMP: dump, FAKE_ACP_BUILD_ECHO_KEY: '1' } });
+      const { run } = BuildResponse.parse(await (await s.build('1.1')).json());
+      const ended = await s.settled('1.1');
+      expect(ended.outcome).toBe('verified');
+      const names = readFileSync(dump, 'utf8').split('\n').map((line) => line.split('=')[0]!);
+      expect(names).toContain('ANTHROPIC_API_KEY');
+      expect(names).toContain('PATH');
+      expect(names).toContain('GIT_OBJECT_DIRECTORY');
+      expect(names).not.toContain('OGDEN_TEST_UNLISTED_SECRET_TOKEN');
+      expect(names).not.toContain('VITEST');
+      // Every name is the allowlist, the key, the run's object store, or a test switch of the fake agent: nothing else of the server's environment.
+      const allowed = /^(PATH|Path|HOME|USER|USERNAME|USERPROFILE|LANG|LC_.*|TERM|TMPDIR|TEMP|TMP|SHELL|SystemRoot|ComSpec|PATHEXT|ANTHROPIC_API_KEY|GIT_.*|CLAUDE_CODE_EXECUTABLE|FAKE_.*|PWD|SHLVL|_|OLDPWD|__CF_USER_TEXT_ENCODING)$/;
+      // (Windows adds its own variables to every process it starts, so the strict check is for the other systems.)
+      if (process.platform !== 'win32') expect(names.filter((name) => name !== '' && !allowed.test(name))).toEqual([]);
+      const folder = runFolder(s.server, run.id);
+      await waitFor(async () => readFileSync(join(folder, BUILD_ACTIVITY_FILE), 'utf8').includes('run.outcome_changed'), 'the outcome in the activity', 10_000);
+      const events = JSON.stringify(s.server.core.events.readAfter(0));
+      const keptFiles = [BUILD_ACTIVITY_FILE, BUILD_RESULT_FILE].map((file) => readFileSync(join(folder, file), 'utf8'));
+      // The agent said its key in a message: it reached no stored line unmasked.
+      expect(events).toContain('The key is');
+      await s.server.close();
+      for (const text of [events, ...keptFiles, JSON.stringify(ended), lines.join('')]) {
+        expect(text).not.toContain(secret);
+        expect(text).not.toContain('unlisted-server-secret');
+      }
+    } finally {
+      if (saved.key === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = saved.key;
+      delete process.env.OGDEN_TEST_UNLISTED_SECRET_TOKEN;
+    }
   });
 
   it("a halt's result names the skill's condition, the run's reason and the intent-gap patch", async () => {

@@ -5,7 +5,7 @@
  * Windows), and a build session's sandbox in Claude Code's flag settings
  * (`acp-claude-code`), seen by the fake ACP agent.
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PROTECTED_PATHS, type AgentEvent, type AgentSession } from '@ogden-agents/core';
@@ -27,6 +27,23 @@ describe('buildrunner-acp (story 5.2)', () => {
     expect(BUILD_AUTO_SKILL).toBe('bmad-build-auto');
     expect(() => createAcpBuildRunner().invocation('5.2 && rm -rf /')).toThrow();
     expect(() => createAcpBuildRunner().invocation('-x')).toThrow();
+  });
+
+  it('story 5.7: every halt the installed bmad-build-auto writes has an Ogden code other than other (drift check)', () => {
+    const skill = join(import.meta.dirname, '..', '..', '..', '.agents', 'skills', 'bmad-build-auto');
+    // The skill ships in the repo's own agent files; a checkout without it has nothing to check against.
+    if (!existsSync(skill)) return;
+    const files = (folder: string): string[] => readdirSync(folder, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? files(join(folder, entry.name)) : entry.name.endsWith('.md') ? [join(folder, entry.name)] : []));
+    const halts = new Set<string>();
+    for (const file of files(skill)) for (const found of readFileSync(file, 'utf8').matchAll(/blocking condition `([^`]+)`/g)) halts.add(found[1]!.replace(/\s*\(non-convergence\)$/, ''));
+    // The skill's own list is what this reads: if it ever stops naming halts this way, the test says so rather than passing empty.
+    expect(halts.size).toBeGreaterThanOrEqual(10);
+    const runner = createAcpBuildRunner();
+    const unmapped = [...halts].filter((condition) => runner.blockedCode(condition) === 'other');
+    expect(unmapped).toEqual([]);
+    // The skill adds detail after a condition, and says it in any case.
+    expect(runner.blockedCode('Intent Gap: the patch is saved beside the plan')).toBe('intent_gap');
+    expect(runner.blockedCode('something nobody listed')).toBe('other');
   });
 });
 

@@ -50,16 +50,19 @@ function walk(dir) {
  * Tauri name), its `.sig` beside it, and the name it gets in the release.
  * @param {string} inDir
  * @param {string} version
+ * @param {boolean} [updaterOnly]
  * @param {boolean} [unsigned] a build with no updater key makes no `.app.tar.gz`
  * @returns {Artifact[]}
  */
-export function collectArtifacts(inDir, version, unsigned = false) {
+export function collectArtifacts(inDir, version, updaterOnly = false, unsigned = false) {
   const files = walk(inDir);
   /** @type {Artifact[]} */
   const found = [];
   for (const rule of FILE_RULES) {
+    // An update test builds only the update artifacts (no .dmg).
+    if (updaterOnly && rule.platforms.length === 0) continue;
     const matches = files.filter((f) => rule.test(basename(f)));
-    if (unsigned && rule.onlyWithUpdater && matches.length === 0) continue;
+    if ((updaterOnly || (unsigned && rule.onlyWithUpdater)) && matches.length === 0) continue;
     if (matches.length !== 1) throw new Error(`expected exactly one file for ${rule.name(version)}, found ${matches.length}`);
     const source = /** @type {string} */ (matches[0]);
     const sig = `${source}.sig`;
@@ -96,7 +99,7 @@ export function sha256sums(files) {
 
 function main() {
   const { values } = parseArgs({
-    options: { in: { type: 'string' }, out: { type: 'string' }, version: { type: 'string' }, tag: { type: 'string' }, repo: { type: 'string' }, 'notes-file': { type: 'string' }, unsigned: { type: 'boolean', default: false } },
+    options: { in: { type: 'string' }, out: { type: 'string' }, version: { type: 'string' }, tag: { type: 'string' }, repo: { type: 'string' }, 'notes-file': { type: 'string' }, unsigned: { type: 'boolean', default: false }, 'updater-only': { type: 'boolean', default: false } },
     strict: true,
   });
   const { version, tag, repo } = values;
@@ -106,7 +109,7 @@ function main() {
   }
   const out = resolve(values.out);
   mkdirSync(out, { recursive: true });
-  const artifacts = collectArtifacts(resolve(values.in), version, values.unsigned);
+  const artifacts = collectArtifacts(resolve(values.in), version, values['updater-only'], values.unsigned);
   /** @type {Array<{ name: string, bytes: Buffer }>} */
   const attached = [];
   for (const artifact of artifacts) {

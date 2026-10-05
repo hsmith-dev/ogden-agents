@@ -1,3 +1,4 @@
+// @ts-nocheck
 // TEMPORARY (epic 14, spike 14.1), route 1: does codex-acp (the merged Codex adapter, pinned 2.1.1)
 // honour a local provider? Variants: a custom model provider in config.toml, the same as a
 // CODEX_CONFIG JSON merge, oss_provider alone, and the defaults (what does Codex call on its own).

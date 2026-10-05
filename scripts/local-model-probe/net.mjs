@@ -1,3 +1,4 @@
+// @ts-nocheck
 // TEMPORARY (epic 14, spike 14.1): records every outbound connection attempt a process tree makes.
 // Layers (each OS has the first two; extra layers are per OS, see probe.mjs):
 //  1. a recording HTTP proxy on loopback (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY point at it; it

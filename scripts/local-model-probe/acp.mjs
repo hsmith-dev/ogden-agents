@@ -1,3 +1,4 @@
+// @ts-nocheck
 // TEMPORARY (epic 14, spike 14.1): a minimal ACP client over newline-delimited JSON-RPC,
 // and process helpers. Grown from the epic 12 probe.
 import { spawn, spawnSync } from 'node:child_process';

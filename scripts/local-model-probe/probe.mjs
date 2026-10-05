@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-nocheck
 // TEMPORARY (epic 14, spike 14.1): which route drives an OpenAI-compatible endpoint over ACP,
 // and does it stay on the machine? Facts only. No real model, no real agent account, no
 // secrets: a fake OpenAI-compatible server on loopback answers, and a dummy key stands in.

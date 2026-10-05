@@ -3,7 +3,8 @@
 # secrets, no real agent account. Facts are printed in each job's `=== SUMMARY` block and kept as
 # findings-<route>-<os> artifacts.
 # Moved out of .github/workflows/ at the spike's final commit, so it no longer runs. Kept as
-# 14.2's recipe (see the spike plan for the last run). To run it again, copy it back to .github/workflows/.
+# 14.2's recipe (last runs 37361844000 and 37374770020, see the spike plan). To run it again, copy it
+# back to .github/workflows/ (it triggers on pushes to the branch below, or change the filter).
 name: Local model probe (14.1, temporary)
 
 on:

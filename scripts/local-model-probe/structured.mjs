@@ -1,3 +1,4 @@
+// @ts-nocheck
 // TEMPORARY (epic 14, spike 14.1): what a tool-free structured completion needs (epic 15's manager).
 // A plain fetch client (no harness, no tools, no files) asks the fake server for one JSON object
 // constrained by a JSON schema, checks it itself, and walks a ladder when a server refuses:

@@ -1,3 +1,4 @@
+// @ts-nocheck
 // TEMPORARY (epic 14, spike 14.1): a fake OpenAI-compatible server for the probe.
 // No real model, no network: it answers from rules. Records every request it gets
 // (path, method, whether a key came, tool names, stream, response_format) so the probe

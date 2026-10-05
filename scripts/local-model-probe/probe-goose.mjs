@@ -1,3 +1,4 @@
+// @ts-nocheck
 // TEMPORARY (epic 14, spike 14.1), route 3 (reserve): Goose over ACP against the fake server,
 // installed from the ACP registry's per-OS binary pin (sha256 checked).
 import { spawnSync } from 'node:child_process';

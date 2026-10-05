@@ -35,6 +35,11 @@ context:
 
 ## Review Triage Log
 
+- 2026-10-05, pass 1 (one reviewer ran the security and the correctness pass over this small diff): high 0, medium 0, low 2. Routed: reject 2. No intent_gap or bad_plan.
+  - A keychain write that hangs would hold up later adds, and the add lock covers one `Notifications` instance -- low, reject: the keyring adapter times out and the server makes one instance.
+  - The loosened deadline assertion could flake if the lookup stalled over a second -- low, reject: the fake resolver answers at once.
+  - The moves change no behavior, the serialisation cannot deadlock or lose an error, and no URL leaks -- none found.
+
 ## Verification
 
 **Commands:**

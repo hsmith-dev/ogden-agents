@@ -1,0 +1,130 @@
+# Epic 16 breakdown (a herdr-style native CLI terminal workspace). Table order is the build order; ids never change once written.
+# Drafted autonomously 2026-10-05; the epic was approved by the user the same day. Open questions (with recommended defaults as assumptions) are in the epic's Notes.
+# References to other epics use "<epic id>.<entry id>".
+# CI uses fake CLIs (small scripts that print prompts) in real PTYs on all three OSes; no real vendor CLI, no network, no sign-in. Live checks with real CLIs are the user's (hitl).
+# Lanes: 1 spike, 2 tracer; 3 freezes contracts; then 4 (layout) and 5 (launchers and detection) run in parallel; 6 to 9 follow.
+
+[[entry]]
+id = 1
+type = "spike"
+title = "Can many panes run real CLIs in PTYs on all three OSes without leaking secrets?"
+description = "Adds a temporary CI job on Windows, Linux and macOS that opens 4 PTYs at once through terminal-pty running fake CLIs (a prompt printer, a long-output script, a script that waits for input and prints a permission-style prompt, a script that exits), with the AD-16 allowlisted environment, and records: spawn time, memory per pane, resize and paste behaviour, ConPTY quirks and how 3.8's retry logic applies, stopping process trees, output volume and backpressure, how well output recency plus prompt patterns detect working, needs attention, idle and exited, whether a sentinel secret set in the server's environment ever reaches a pane child, and where each real CLI would be found per OS (claude, codex, grok, gemini or antigravity, copilot) from their docs; the hitl step is the user running the real CLIs by hand on a Mac and a Windows machine and reading the results, then saying go or no-go and confirming the launcher list."
+verify = "The probe's logs on all three OSes answer each question, no sentinel secret reaches a pane child, status detection accuracy on the fakes is recorded with its limits, the findings and a go or no-go are written into the plan with a proposed agent-matrix.md addition, the user's live checks are listed, the user's go or no-go and launcher list are recorded as a dated Decision in the epic's Notes, and the temporary job is removed."
+covers = ["CAP-5", "CAP-17"]
+after = ["3.8"]
+hitl = true
+risk = "high"
+unknown = "Each real CLI's executable name and Windows behaviour, how stable its prompt text is for status detection, and how many concurrent PTYs a modest machine handles."
+references = ["packages/adapters/src/terminal-pty/", "packages/adapters/src/child-env.ts"]
+
+[[entry]]
+id = 2
+type = "story"
+title = "Tracer bullet: one plain-shell pane in Developer mode, end to end"
+description = "Adds the thinnest path: with Developer mode on, a bare Terminals page opens one pane running the user's plain shell in the project folder through a new pane operation on core's TerminalPort, the terminal-pty adapter, a per-pane WebSocket behind the AD-15 gate, and xterm; typing works, closing the pane stops the process tree, and with Developer mode off the route is refused 403 developer_mode_required."
+verify = "On all three OSes a test opens a pane, types a command and sees its output, a socket without the tab token or with a foreign Origin is refused, Developer mode off refuses the route, and a sentinel secret in the server's environment is absent from the pane's child."
+covers = ["CAP-5"]
+after = [1, "3.1", "3.2"]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 3
+type = "story"
+title = "Epic contracts and stubs: panes, launchers, layout and pane events"
+description = "Freezes the shared contracts, naming no CLI: `Pane`, `PaneLauncher` (id, label, executable candidates per OS, default and user arguments, prompt patterns as data, resume hint, terms note such as interactive-only), `PaneLayout` (tabs, split tree, pane ids), `PaneStatus` (working, needs_attention, idle, exited), `terminal.pane_*` events carrying state only and never text, the pane operations on TerminalPort with a `terminal-memory` stub and a fake-CLI fixture, the settings for notifications and the pane caps, and an architecture test that core, shared and acp-base name no CLI."
+verify = "Unit and architecture tests: contracts compile in core, shared and web; core and shared name no CLI; the stub and the fake-CLI fixture satisfy the port's contract tests; event schemas have no text field; the existing chat toggle tests are unchanged."
+covers = ["CAP-5", "CAP-17"]
+after = [2]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 4
+type = "story"
+title = "Pane and layout model: tabs, splits, resize, keyboard focus"
+description = "Adds the layout model and its UI: tabs of split trees of panes, add, split horizontally or vertically, close, rename, resize with the mouse and keyboard, focus movement by keyboard, the terminal size following the viewing tab, the pane caps with a plain refusal, all through core use-cases that change the layout and emit events, rendered with the design system's terminal panel."
+verify = "In the browser a test splits a tab into three panes, resizes a split, moves focus by keyboard, closes a pane and renames a tab, and the layout in core matches; opening a pane beyond the cap is refused with its reason."
+covers = ["CAP-17"]
+after = [3]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 5
+type = "story"
+title = "CLI launcher and install detection: Claude Code, Codex, Grok, Antigravity, Copilot and a plain shell"
+description = "Adds the launcher list as descriptor data and Detect: for each launcher the executable is looked up on the user's PATH and well-known install folders per OS and probed with --version under the allowlist, shown as found, not found or found but failed, with the official install page link and a plain 'install it yourself, then press Detect' and nothing installed by Ogden; a pane starts the CLI exactly as the user would with only the arguments the user typed in the visible launcher field; no credential, key or token is passed; Copilot's launcher is marked interactive-only and excluded from any automation."
+verify = "With fake CLIs on PATH a test shows found, not found and failed states for each launcher on all three OSes, a missing CLI installs nothing and shows its link, a sentinel secret never reaches a launched pane, and no flag that skips a permission prompt is ever added by Ogden."
+covers = ["CAP-5"]
+after = [3]
+hitl = false
+risk = "medium"
+unknown = "Real executable names and Windows install locations; the entry uses the spike's record and the user's live checks."
+
+[[entry]]
+id = 6
+type = "story"
+title = "Status per pane: working, needs attention, idle, exited"
+description = "Adds in-memory status derivation from PTY activity recency and the launcher's prompt patterns, a status chip per pane and tab, `terminal.pane_status_changed` events carrying state only, the pane rows in the Needs you sidebar and tab-title count for needs attention, and a plain label that status is a guess; terminal bytes are used only in memory by the detector and never stored, logged or sent."
+verify = "With the fake CLIs a pane shows working while output flows, needs attention at the permission-style prompt, idle after quiet and exited on exit; Needs you and the tab title count it; a test proves no pane text appears in the event log, database or logs."
+covers = ["CAP-17"]
+after = [4, 5]
+hitl = false
+risk = "high"
+unknown = "Prompt-pattern stability per real CLI; patterns are data so a change needs no code release."
+
+[[entry]]
+id = 7
+type = "story"
+title = "Persistence: layouts survive a restart; stopped panes start on demand"
+description = "Stores layouts in SQLite through core (tabs, splits, launchers, titles, folders, no output) and restores them after a restart with every pane shown as stopped and a Start button, offering the CLI's own resume where the agent matrix says it has one; panes with no viewer keep running while the server runs and reattach with recent output; running processes end when the server stops and the plain note says so."
+verify = "A test builds a three-pane layout, restarts the server and sees the same layout with stopped panes, starts one and gets a fresh shell, and a pane left running with its tab closed reattaches with its recent output; the database holds no terminal output."
+covers = ["CAP-17"]
+after = [6]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 8
+type = "story"
+title = "Pane notifications through the existing notifier, opt-in"
+description = "Adds per-pane and per-launcher opt-in notifications for needs attention and exited, off by default, shown in the browser and sent through NotifierPort's webhooks from epic 11 with the pane label and state only, never terminal text, with the webhook URL kept as a secret (AD-16)."
+verify = "With a fake notifier a pane that opted in sends one state-only notification at needs attention, one that did not sends none, the payload has no pane text, and the webhook URL does not appear in logs."
+covers = ["CAP-17"]
+after = [6, "11.5"]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 9
+type = "story"
+title = "Developer-mode gating, Terminals settings and the per-chat toggle relationship"
+description = "Adds the Terminals settings (caps, per-launcher arguments and notifications, hide the surface), the server-enforced Developer mode gate on every pane route and socket with the plain behaviour when Developer mode is turned off (running panes: stop or keep in the background until the server stops), the UI hidden for simple users, the node-pty-failed state with its reason (AD-19), and the conflict note plus 'open this chat's session here' that uses epic 3's handoff so only one driver exists."
+verify = "With Developer mode off no Terminals surface shows and a direct pane request is refused 403; turning it off with a running pane asks what to do; with node-pty failing to load the surface shows why; opening a chat's session in a pane first switches the chat to terminal through the existing handoff, and a Claude Code chat's own toggle tests pass unchanged."
+covers = ["CAP-5", "CAP-17"]
+after = [7, 8]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 10
+type = "story"
+title = "Refactor sweep"
+description = "Reviews the epic's diff for duplication with epic 3's terminal code, dead code and boundary leaks, extracts what the chat toggle and the panes now share, checks the architecture tests and fixes small findings."
+verify = "The full unit, architecture and integration suites pass on all three OSes and each finding is fixed or recorded."
+covers = ["CAP-5"]
+after = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 11
+type = "story"
+title = "End-to-end suite and release; live checks with the real CLIs"
+description = "Adds the end-to-end suite on macOS, Windows and Linux with fake CLIs (Developer mode on, open panes in a split, detect, status, notifications opt-in, restart restores the layout, Developer mode off hides and refuses everything, no secret and no pane text anywhere stored), updates the README and Settings help, and releases a new `ogden-agents` version; the hitl step is the user's live checks on a Mac and on Windows with the real CLIs they have (sign in inside each themselves, a split layout, a pane needing attention noticed from another tab, a restart), listed in the epic's Notes."
+verify = "The suite passes on all three OSes in CI with no real CLI and no network, the release workflow publishes, and the user records each live check as a dated Decision in the epic's Notes."
+covers = ["CAP-5", "CAP-17"]
+after = [10]
+hitl = true
+risk = "medium"

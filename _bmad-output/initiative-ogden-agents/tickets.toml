@@ -114,3 +114,13 @@ slug = "epic-llm-orchestration"
 title = "v2: A local model manages, and the other agents are told what to do"
 covers = []
 after = [{ epic = 14, needs = "LocalModelPort and the Test as a manager check (14.8)" }, { epic = 5, needs = "the Build dialog, dispatcher and review page (5.6, 5.8, 5.9)" }, { epic = 12, needs = "Codex and Grok chats as workers (12.11)" }]
+
+# ---- native CLI terminal workspace (outside the v1 initiative's Done when) ----
+
+# Epic id 16 (2026-10-05): 14 is v1.2 local models, 15 is v2 orchestration; user-approved.
+[[epic]]
+id = 16
+slug = "epic-native-cli-terminal"
+title = "Advanced users run each agent's own CLI in a herdr-style terminal workspace"
+covers = ["CAP-5", "CAP-17"]
+after = [{ epic = 3, needs = "the terminal adapter, socket, Developer mode gate, Windows ConPTY work and per-agent availability, through its release (3.1 to 3.8, 3.10)" }, { epic = 11, needs = "Needs you and NotifierPort webhooks (11.5)" }, { epic = 2, needs = "the per-tab token gate and the status sidebar (2.1, 2.11)" }]

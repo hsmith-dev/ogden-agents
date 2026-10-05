@@ -43,6 +43,7 @@ describe("Codex's setup port (epic 12 entry 6)", () => {
     expect(await setup.install((progress) => steps.push(progress.step))).toEqual({ version: '2.1.1' });
     expect(steps.some((step) => step.startsWith('Downloading Codex'))).toBe(true);
     expect(await setup.status()).toMatchObject({ install: 'installed', version: '2.1.1', apiKeyOnly: true });
+    expect(setup.apiKeyOnly).toBe(true);
   });
 
   it('states the no sign-in reason without long dashes and without overclaiming', () => {

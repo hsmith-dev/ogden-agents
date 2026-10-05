@@ -74,6 +74,7 @@ export function createCodexSetup(options: CodexSetupOptions): CodexSetup {
   return {
     agentId: CODEX_AGENT_ID,
     displayName: CODEX,
+    apiKeyOnly: true,
     apiKey: createCodexApiKey({ ...options.apiKey, onDiagnostic: diagnostic }),
 
     // Always signed out as an account: only a key (core's rule) makes it ready.

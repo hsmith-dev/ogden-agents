@@ -441,6 +441,10 @@ export class WorkspaceBusyError extends CoreError {
 /** What {@link SecretsUnavailableError} says when nothing more specific applies (AD-16 as amended in story 9.2). */
 export const SECRETS_UNAVAILABLE_MESSAGE = "There's no keychain on this computer to keep an API key in. Sign in with your account instead.";
 
+/** What it says for an agent that takes only an API key and can't be signed in with an account (Codex, Grok). */
+export const secretsUnavailableKeyOnlyMessage = (agentName: string) =>
+  `There's no keychain on this computer to keep an API key in, so ${agentName} can't be used here.`;
+
 /** What {@link SecretsUnavailableError} says when the keychain is there but didn't answer: a timeout, a locked keychain or a dismissed prompt. */
 export const KEYCHAIN_NO_ANSWER_MESSAGE = "The keychain didn't answer. Check for a prompt from your computer and try again.";
 

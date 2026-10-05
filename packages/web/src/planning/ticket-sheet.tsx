@@ -139,7 +139,7 @@ function TicketBody({ wsId, detail }: { wsId: string; detail: TicketDetail }) {
           </Text>
         ) : null}
       </Section>
-      <TicketBuildSection wsId={wsId} ticketRef={detail.ref} ready={detail.status === 'ready-for-dev'} waits={prerequisites.some((each) => each.known && !each.met)} />
+      <TicketBuildSection wsId={wsId} ticketRef={detail.ref} ready={detail.status === 'ready-for-dev'} waits={prerequisites.some((each) => !each.known || !each.met)} />
       <Section heading={TICKET_SUMMARY_HEADING} testId="ticket-sheet-summary">
         <Text variant="body" className="break-words whitespace-pre-wrap" tone={detail.description === '' ? 'muted' : 'default'}>
           {detail.description === '' ? TICKET_NO_PLAN_TEXT : detail.description}

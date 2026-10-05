@@ -9,6 +9,8 @@ export interface BoardBuildActions {
   onBuild: (ref: string) => void;
   /** While a build is being started: every Build waits. */
   building: boolean;
+  /** Why the last start was refused, in plain words (the board's alert sits behind the sheet, so the sheet shows it too). */
+  failure?: string | undefined;
 }
 
 export const BoardBuildContext = createContext<BoardBuildActions | undefined>(undefined);

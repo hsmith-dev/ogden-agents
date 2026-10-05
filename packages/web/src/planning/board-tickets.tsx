@@ -92,7 +92,10 @@ function BoardTicketsBody({ wsId, sheet, tickets, builds }: { wsId: string; shee
   const highlighted = useBoardEvents(wsId);
   // The board's Build actions: owned here so the detail sheet over it can ask for a build too (story 11.3).
   const build = useBoardBuild(wsId, builds);
-  const actions = useMemo(() => (build.onBuild === undefined ? undefined : { onBuild: build.onBuild, building: build.building }), [build.onBuild, build.building]);
+  const actions = useMemo(
+    () => (build.onBuild === undefined ? undefined : { onBuild: build.onBuild, building: build.building, failure: build.buildFailure?.message }),
+    [build.onBuild, build.building, build.buildFailure?.message],
+  );
   if (isApiError(tickets.error, 'scripts_not_trusted')) return <ScriptTrustPrompt wsId={wsId} onTrusted={() => void tickets.refetch()} />;
   // Story 4.13: the scripts changed since the user allowed them; Allow allows them as they are now.
   if (isApiError(tickets.error, 'scripts_changed')) return <ScriptTrustPrompt wsId={wsId} changed onTrusted={() => void tickets.refetch()} />;
@@ -231,6 +234,7 @@ function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
       setBuilding(true);
       setBuildFailure(undefined);
       setCommitted(undefined);
+      setAllStarted(undefined);
       startBuild(wsId, ref)
         .then(
           ({ session }) => started.current?.(session.id),

@@ -67,6 +67,11 @@ export function TicketBuildSection({ wsId, ticketRef, ready, waits }: { wsId: st
       <Text as="h3" variant="label" tone="muted">
         {TICKET_BUILD_HEADING}
       </Text>
+      {actions?.failure === undefined ? null : (
+        <Text variant="caption" role="alert" className="text-state-error" data-testid="ticket-sheet-build-error">
+          {actions.failure}
+        </Text>
+      )}
       {buildable ? (
         <Button
           variant="outline"

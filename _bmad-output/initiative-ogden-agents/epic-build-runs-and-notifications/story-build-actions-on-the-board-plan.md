@@ -3,7 +3,7 @@ title: 'Build actions on the board'
 type: 'feature'
 ticket: '3'
 created: '2026-10-05'
-status: 'in-review'
+status: 'built'
 baseline_revision: 'b88651a9f03381067dcfd5d41784babb89ef454f'
 route: 'full'
 route_source: 'auto'
@@ -65,6 +65,16 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+- 2026-10-05, pass 1 (security and correctness lenses): high 0, medium 2, low 8. Routed: patch 3, defer 3, reject 4. No intent_gap or bad_plan.
+  - A refusal of the sheet's Build showed its alert in the board behind the modal sheet -- medium, patch: the sheet shows the same sentence.
+  - The sheet offered Build for a waiting ticket while its prerequisites were unresolved (opened from its URL) -- medium, patch: unresolved counts as waiting.
+  - A later single Build left the old "Started N builds." beside its own result -- low, patch.
+  - DOM tests for Build all ready's states and the sheet section, an e2e for refused Build all, a live-region announcement for "Started N builds.", and the nested dialog over the sheet's focus return -- low, defer to 11.5.
+  - Card and sheet Build do not exclude a ticket whose build is running (the server refuses it with a plain sentence), and Build all ready's count comes from the board's statuses -- low, reject: matches the plan (not queued) and the server decides.
+  - A stale board could make Build all ready start tickets the user did not see -- low, reject: its intent is the main checkout's statuses; the notice says how many started.
+  - Run order assumed newest first -- info, reject: core returns newest first (5.8).
+  - XSS, request bodies, builds-off bypass -- none found.
 
 ## Verification
 

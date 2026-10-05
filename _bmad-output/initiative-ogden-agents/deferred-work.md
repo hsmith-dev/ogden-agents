@@ -110,6 +110,7 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Epic 5 (11.1): Update and retry takes no run-limit slot and arms no deadline, and every review read runs `tickets.py` once. From 5.9 reviews. (log: "Update and retry takes no run limit slot and arms no deadline")
 - Epic 11 (11.5, which also takes the run folder pruning above): Apply the saved fix leaves the patch applied with the run still blocked when the plan mark or the prompt fails afterwards; the saved patch is read by git three times and not previewed. From 11.1 reviews. (log: "Apply the saved fix after a late failure")
 - Epic 11 (11.5): a Check again that ends without a built plan or on a read failure leaves the older verification shown beside the new reason; Check again is offered for runs the server then refuses; tests for the settings field and the re-check edge cases. From 11.2 reviews. (log: "Check again edge cases after 11.2")
+- Epic 11 (11.5): Build all ready and the detail sheet's build section have thin DOM tests, "Started N builds." is not announced through a live region that was already mounted, and the Build dialog over the sheet is an untested nested modal. From 11.3 reviews. (log: "Board build actions edge cases after 11.3")
 
 ## Log
 
@@ -781,3 +782,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-build-runs-and-notifications/story-verification-reporting-plan.md`
   summary: Check again edge cases after 11.2: a re-check that ends without a built plan or on a read failure leaves the older verification shown beside the new reason; the button is offered for runs the server then refuses; the settings field and the re-check edge cases have thin tests.
   evidence: 11.2 correctness review; the reason is right, the checks list can be stale; a fix needs a marker on the verification event.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-build-runs-and-notifications/story-build-actions-on-the-board-plan.md`
+  summary: Board build actions edge cases after 11.3: Build all ready and the sheet's build section have thin DOM tests, the started notice is not announced through an already mounted live region, and the Build dialog over the sheet is an untested nested modal.
+  evidence: 11.3 correctness review; the e2e covers the happy paths and the refused dialog.

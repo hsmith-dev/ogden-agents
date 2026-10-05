@@ -19,6 +19,7 @@ import {
   DriverIsTerminalError,
   ModeUnavailableError,
   FeatureUnavailableError,
+  HandoffNotPreviewedError,
   InvalidOperationError,
   NotFoundError,
   QueueFullError,
@@ -35,6 +36,7 @@ import {
 import {
   API_ROUTES,
   ChatAgentsResponse,
+  HandoffBriefPreviewRequest,
   HandoffPreviewQuery,
   HandoffPreviewResponse,
   HandoffRequest,
@@ -100,6 +102,8 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     if (error instanceof DeveloperModeRequiredError) return apiError(c, 403, 'developer_mode_required', error.message);
     if (error instanceof ConfirmationRequiredError) return apiError(c, 400, 'confirmation_required', error.message);
     if (error instanceof ModeUnavailableError) return apiError(c, 409, 'mode_unavailable', error.message);
+    // A handoff no preview covers (server-enforced disclosure): nothing changed.
+    if (error instanceof HandoffNotPreviewedError) return apiError(c, 409, 'handoff_not_previewed', error.message);
     if (error instanceof FeatureUnavailableError) return apiError(c, 409, 'feature_unavailable', FEATURE_UNAVAILABLE_MESSAGE);
     if (error instanceof SessionBusyError) {
       return apiError(c, 409, 'session_busy', 'The agent is still answering. Send your message when it is done.');
@@ -198,7 +202,21 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     }
   });
 
-  // The chat continues with another agent: core checks who drives, the state, the agent and the brief's size.
+  // The preview again for the brief as the user edited it, with a token for exactly it; nothing changes.
+  app.post(API_ROUTES.sessionHandoffPreview, limit, async (c) => {
+    const scope = ids(c);
+    if (scope?.sessionId === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+    const body = await readBody(c, HandoffBriefPreviewRequest);
+    if (!body.ok) return body.response;
+    try {
+      // The brief is the user's content: never logged.
+      return c.json(HandoffPreviewResponse.parse(await chat.handoffPreview(scope.workspaceId, scope.sessionId, body.value.agentId, body.value.brief)));
+    } catch (error) {
+      return refusal(c, error);
+    }
+  });
+
+  // The chat continues with another agent: core checks who drives, the state, the agent, the brief's size and its preview.
   app.post(API_ROUTES.sessionHandoff, limit, async (c) => {
     const scope = ids(c);
     if (scope?.sessionId === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);

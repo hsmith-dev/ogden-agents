@@ -83,13 +83,25 @@ describe('continuing a chat with another agent (handoff)', () => {
     expect(preview.brief).toContain('Original goal: hello');
     expect(preview.brief).toContain('until now this chat was with Claude Code');
 
-    const handed = await request(server, tab, 'POST', handoffPath, { agentId: 'fake-agent', brief: preview.brief, message: 'session-start' });
+    // Without a preview of this exact brief, nothing is sent (server-enforced disclosure).
+    const unseen = await request(server, tab, 'POST', handoffPath, { agentId: 'fake-agent', brief: preview.brief, message: 'session-start', previewToken: 'x'.repeat(43) });
+    expect(unseen.status).toBe(409);
+    expect(ApiErrorBody.parse(await unseen.json()).error.code).toBe('handoff_not_previewed');
+    const edited = await request(server, tab, 'POST', handoffPath, { agentId: 'fake-agent', brief: `${preview.brief}\nEdited`, message: 'session-start', previewToken: preview.previewToken });
+    expect(edited.status).toBe(409);
+    expect(stream().filter((event) => event.type === 'session.agent_changed')).toHaveLength(0);
+    // The edit previewed on its own: its token sends exactly it.
+    const reviewed = await request(server, tab, 'POST', `${handoffPath}/preview`, { agentId: 'fake-agent', brief: `${preview.brief}\nEdited` });
+    expect(reviewed.status).toBe(200);
+    const again = HandoffPreviewResponse.parse(await reviewed.json());
+    const handed = await request(server, tab, 'POST', handoffPath, { agentId: 'fake-agent', brief: again.brief, message: 'session-start', previewToken: again.previewToken });
     expect(handed.status).toBe(202);
     expect(HandoffResponse.parse(await handed.json()).session.agentId).toBe('fake-agent');
     await waitFor(() => state() === 'idle' && replies().length === 2, "the second agent's reply", 15_000);
     const started = JSON.parse(replies().at(-1)!) as { prompt: string; env: Record<string, string> };
     expect(started.prompt.startsWith('[Ogden Agents] Handoff:')).toBe(true);
     expect(started.prompt).toContain('User: hello');
+    expect(started.prompt).toContain('Edited');
     expect(started.env.FAKE_ACP_AGENT_NAME).toBe('fake-agent');
     expect(server.core.entities.getSession(sesId)?.agentId).toBe('fake-agent');
     expect(stream().filter((event) => event.type === 'session.agent_changed')).toHaveLength(1);
@@ -105,11 +117,11 @@ describe('continuing a chat with another agent (handoff)', () => {
       expect(response.status).toBe(status);
       expect(ApiErrorBody.parse(await response.json()).error.code).toBe(code);
     };
-    await refused('POST', handoffPath, { agentId: 'claude-code', brief: '', message: 'x' }, 400, 'invalid_request');
-    await refused('POST', handoffPath, { agentId: 'nope-agent', brief: '', message: 'x' }, 400, 'agent_unknown');
+    await refused('POST', handoffPath, { agentId: 'claude-code', brief: '', message: 'x', previewToken: 'unseen' }, 400, 'invalid_request');
+    await refused('POST', handoffPath, { agentId: 'nope-agent', brief: '', message: 'x', previewToken: 'unseen' }, 400, 'agent_unknown');
     await refused('GET', handoffPath, undefined, 400, 'invalid_request');
-    await refused('POST', handoffPath, { agentId: 'fake-agent', brief: '', message: 'x' }, 409, 'project_not_trusted');
-    await refused('POST', handoffPath, { agentId: 'fake-agent', brief: 'x'.repeat(200_001), message: 'x' }, 400, 'invalid_request');
+    await refused('POST', handoffPath, { agentId: 'fake-agent', brief: '', message: 'x', previewToken: 'unseen' }, 409, 'project_not_trusted');
+    await refused('POST', handoffPath, { agentId: 'fake-agent', brief: 'x'.repeat(200_001), message: 'x', previewToken: 'unseen' }, 400, 'invalid_request');
     expect(server.core.events.lastSeq()).toBe(before);
     server.core.entities.setSessionDriver(sesId, 'terminal');
     const driven = server.core.events.lastSeq();

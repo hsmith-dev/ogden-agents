@@ -351,6 +351,14 @@ export class ConfirmationRequiredError extends CoreError {
   }
 }
 
+/** A handoff whose brief, agent and chat no unused, unexpired preview token covers (handoff): nothing changed. */
+export class HandoffNotPreviewedError extends CoreError {
+  override readonly name = 'HandoffNotPreviewedError';
+  constructor(message = 'This summary wasn’t previewed for that agent, or its preview expired. Review it again, then continue.') {
+    super('handoff_not_previewed', message);
+  }
+}
+
 /** A permission mode the chat's agent, or its session, doesn't offer: nothing changed. */
 export class ModeUnavailableError extends CoreError {
   override readonly name = 'ModeUnavailableError';

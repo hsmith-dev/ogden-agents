@@ -1,6 +1,7 @@
 import { DEFAULT_HANDOFF_MESSAGE, PERMISSION_MODE_LABELS, type ChatAgent } from '@ogden-agents/shared';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useId, useState } from 'react';
+import { isApiError } from '@/api/http';
 import { Button } from '@/ui/button';
 import { Dialog, DialogClose, DialogContent } from '@/ui/dialog';
 import { Label } from '@/ui/label';
@@ -8,7 +9,7 @@ import { Notice } from '@/ui/notice';
 import { RadioGroup, RadioGroupOption } from '@/ui/radio-group';
 import { Skeleton } from '@/ui/skeleton';
 import { Text } from '@/ui/typography';
-import { fetchHandoffPreview, handOff } from './handoff-api';
+import { fetchHandoffPreview, handOff, previewEditedBrief } from './handoff-api';
 import { agentAvailability } from './use-chat-agents';
 
 /** A framed multi-line field for the brief and the message (the composer's own Textarea has no frame). */
@@ -91,7 +92,12 @@ export function HandoffDialog({ open, onOpenChange, wsId, sesId, currentAgentId,
     if (!canSend || agentId === undefined) return;
     setSending(true);
     setFailure(undefined);
-    handOff(wsId, sesId, { agentId, brief, message }).then(
+    // The server sends only a brief it previewed: an edited one is previewed (masked) first, for its own token.
+    const shown = preview.data!;
+    const previewed = brief === shown.brief ? Promise.resolve(shown) : previewEditedBrief(wsId, sesId, agentId, brief);
+    previewed
+      .then(({ previewToken, brief: told }) => handOff(wsId, sesId, { agentId, brief: told, message, previewToken }))
+      .then(
       () => {
         setSending(false);
         onOpenChange(false);
@@ -100,6 +106,8 @@ export function HandoffDialog({ open, onOpenChange, wsId, sesId, currentAgentId,
       (error: unknown) => {
         setSending(false);
         setFailure(error instanceof Error ? error.message : "Ogden Agents couldn't continue this chat with that agent. Try again.");
+        // The preview expired or the chat changed since: show a fresh one to review.
+        if (isApiError(error, 'handoff_not_previewed')) void preview.refetch();
       },
     );
   };

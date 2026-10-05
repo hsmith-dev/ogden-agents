@@ -80,6 +80,8 @@ context:
 
 ## Implementation Notes
 
+- Decision (user, 2026-10-04): short 429 rate limits stay ordinary errors (Try again); the usage-limit patterns are confirmed in the user's live check. Server-side preview enforcement built now, not deferred.
+
 - Implemented directly from the plan (no implementation subagent; the planning context was already loaded). Commits e36e5db (contract, detection, brief, core), the server routes, f07d12d (web, e2e), docs, then review fixes.
 - The handoff dialog asks for a first message (prefilled) and sends it with the brief at once; the brief stays pending (`handoffPending` ref) until a prompt carrying it succeeds, so a failure or restart re-sends it.
 - Each agent's own session is kept as `agentSessionId@<agentId>`; where it left as `handoffLeftAt@<agentId>` (written in the same transaction as the event).
@@ -109,8 +111,8 @@ Pass 1 (lenses quick, security): high 1, medium 9, low 8, false 0, maybe-false 0
 | 429/rate_limit patterns label short rate limits as usage limits | medium | patch | Removed from both descriptors; agent matrix updated |
 | Confirm disabled with no reason; over-limit alert repeats each keystroke | low | patch | Polite live reason tied to the button by aria-describedby; counter no longer an alert |
 | Session refetched on every load | low | patch | Refetch only on `session.agent_changed` |
-| Server hands off without a preview (UI-only disclosure) | low | defer | Behind AD-15 tab-token gate; recorded in deferred-work |
-| Preview/confirm drift; mode and agent change in two transactions; whole-prompt budget; disabled radios not focusable; dialog focus return from menu | low | defer | Recorded in deferred-work |
+| Server hands off without a preview (UI-only disclosure) | low | defer, then patch | Deferred first; then (user decision 2026-10-04, "enforce it server-side now") patched: single-use 10-minute preview token bound by SHA-256 to chat, agent, stated mode change and exact masked brief; edited briefs previewed again via `POST …/handoff/preview`; otherwise 409 `handoff_not_previewed`, nothing appended. Also closes the preview/confirm mode drift (F9). Tests in core and server |
+| Mode and agent change in two transactions; whole-prompt budget; disabled radios not focusable; dialog focus return from menu | low | defer | Recorded in deferred-work |
 | Missing unit tests for workspace-api fold and SessionMenu | low | reject | Covered by e2e (`handoff.spec.ts` menu reason, divider, agent labels); the fold is three lines |
 
 ## Design Notes

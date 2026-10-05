@@ -179,16 +179,36 @@ export const HandoffPreviewResponse = z.object({
   permissionMode: PermissionMode,
   modeNote: z.string().min(1).optional(),
   resumes: z.boolean(),
+  /**
+   * The server's proof that this exact brief was shown for this agent and
+   * chat: single-use, short-lived, and required by the handoff. An edited
+   * brief gets its own with `POST …/handoff/preview`.
+   */
+  previewToken: z.string().min(32).max(128),
 });
 export type HandoffPreviewResponse = z.infer<typeof HandoffPreviewResponse>;
 
 /**
+ * `POST …/handoff/preview`: the preview again for the brief as the user
+ * edited it (masked, refused over the agent's budget), with a token for it.
+ */
+export const HandoffBriefPreviewRequest = z.object({
+  agentId: AgentId,
+  brief: z.string().max(MAX_HANDOFF_BRIEF_CHARS, `A handoff brief can be at most ${MAX_HANDOFF_BRIEF_CHARS} characters.`),
+});
+export type HandoffBriefPreviewRequest = z.infer<typeof HandoffBriefPreviewRequest>;
+
+/**
  * `POST …/sessions/:sesId/handoff`: continue the chat with `agentId`, telling
  * it `brief` (as the user edited it; the server masks it again and refuses
- * one over the agent's budget) and then `message`.
+ * one over the agent's budget) and then `message`. `previewToken` must be the
+ * unused, unexpired token of a preview of this same masked brief, agent and
+ * chat, or it is refused (409 `handoff_not_previewed`).
  */
 export const HandoffRequest = z.object({
   agentId: AgentId,
+  /** The token of the preview that showed exactly this brief (masked) for this agent and chat. */
+  previewToken: z.string().min(1).max(128),
   brief: z.string().max(MAX_HANDOFF_BRIEF_CHARS, `A handoff brief can be at most ${MAX_HANDOFF_BRIEF_CHARS} characters.`),
   message: z
     .string()

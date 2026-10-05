@@ -34,6 +34,12 @@ export const API_ERROR_CODES = [
   'confirmation_required',
   /** A permission mode the chat's agent, or its session, doesn't offer (409): nothing changed. */
   'mode_unavailable',
+  /**
+   * A handoff with no matching preview (409; handoff): its preview token is
+   * missing, used, expired, or was issued for another brief, agent or chat.
+   * Nothing changed; preview again.
+   */
+  'handoff_not_previewed',
   /** A new chat named an agent this install doesn't have (400; epic 6): nothing created. */
   'agent_unknown',
   /**

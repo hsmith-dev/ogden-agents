@@ -21,6 +21,10 @@ vi.mock('@/auth/tab-token', () => ({
       const method = init.method ?? 'GET';
       state.requests.push({ path, method, body: init.body === undefined ? undefined : JSON.parse(String(init.body)) });
       if (method === 'GET') return new Response(JSON.stringify(state.preview), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (path.endsWith('/handoff/preview')) {
+        const edited = { ...state.preview, brief: (JSON.parse(String(init.body)) as { brief: string }).brief, previewToken: 'e'.repeat(43) };
+        return new Response(JSON.stringify(edited), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
       const session = { id: 'ses_01J9Z3K4M5N6P7Q8R9S0T1V2W3', workspaceId: 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3', kind: 'chat', state: 'working', driver: 'ui', permissionMode: 'ask', agentId: 'second-agent', title: null, adapterRefs: {}, createdAt: '2026-10-04T10:00:00.000Z', updatedAt: '2026-10-04T10:00:00.000Z' };
       return new Response(JSON.stringify({ session, messageId: 'msg_1' }), { status: 202, headers: { 'content-type': 'application/json' } });
     },
@@ -67,6 +71,7 @@ beforeEach(() => {
     permissionMode: 'ask',
     modeNote: "Second Agent doesn't offer Auto, so this chat will be in Ask.",
     resumes: false,
+    previewToken: 'p'.repeat(43),
   };
 });
 afterEach(cleanup);
@@ -98,7 +103,10 @@ describe('the handoff dialog', () => {
     fireEvent.click(screen.getByTestId('handoff-confirm'));
     await waitFor(() => expect(onHandedOff).toHaveBeenCalled());
     expect(onOpenChange).toHaveBeenCalledWith(false);
-    const posted = state.requests.find((request) => request.method === 'POST');
-    expect(posted?.body).toEqual({ agentId: 'second-agent', brief: 'My trimmed brief', message: 'Carry on, please' });
+    // The edit is previewed first (its own token), then sent with that token.
+    const posts = state.requests.filter((request) => request.method === 'POST');
+    expect(posts[0]?.path).toMatch(/\/handoff\/preview$/);
+    expect(posts[0]?.body).toEqual({ agentId: 'second-agent', brief: 'My trimmed brief' });
+    expect(posts[1]?.body).toEqual({ agentId: 'second-agent', brief: 'My trimmed brief', message: 'Carry on, please', previewToken: 'e'.repeat(43) });
   });
 });

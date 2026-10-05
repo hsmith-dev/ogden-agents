@@ -59,7 +59,6 @@ Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim fr
 - Epic 6 (every agent): setup status reads `.claude/skills` only, so an agent folder that lacks the skills (Antigravity used after Set up) gets them only at the next Set up or Upgrade. From the 6.8 restack. (log: "Setup status reads the installed BMad Method version from `.claude/skills` only")
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
-- Unowned (handoff follow-up): enforce provider disclosure on the server by binding a handoff to the preview the user saw. From story 2 (handoff) security review F8/F9. (log: "Bind a handoff POST to the preview the user saw")
 - Unowned (handoff follow-up): one transaction for mode fallback and agent change, a whole-prompt budget, focusable unavailable agents, focus return from the menu. From story 2 (handoff) review F12, F15, F19, F20. (log: "Handoff hardening: one transaction for the mode fallback and the agent change")
 
 ## Log
@@ -554,4 +553,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-continue-a-chat-with-another-agent-plan.md`
   summary: Handoff hardening: one transaction for the mode fallback and the agent change; budget the whole first prompt (brief + message + resume transcript), not only the brief; make unavailable agents in the dialog focusable with their reason; return focus to "Chat actions" when the dialog opened from the menu closes.
   evidence: Review F12, F15, F19, F20; all low and not reached in normal use (a session deleted mid-handoff, a resume fallback after switching back, keyboard-only browsing of unavailable agents).
-
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-continue-a-chat-with-another-agent-plan.md`
+  summary: Resolved: "Bind a handoff POST to the preview the user saw" (decided 2026-10-04: enforce it now). Every preview issues a single-use token (10 minutes, in memory) bound by SHA-256 to the chat, the target agent, the mode change it states and the exact masked brief; an edited brief is previewed again (`POST …/handoff/preview`) for its own token; a handoff without a matching token is refused with 409 `handoff_not_previewed`, appending nothing.
+  evidence: `packages/core/src/chat/handoff.ts` (`issue`, `redeem`); `packages/core/test/agent-handoff.test.ts` "refuses a handoff no preview covers", "a preview token expires"; `packages/server/test/handoff.test.ts`.

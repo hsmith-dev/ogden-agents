@@ -14,7 +14,7 @@
  * Only this one file is written, only into the home Ogden gave it, never
  * `~/.codex`.
  */
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /** What Ogden's `config.toml` says. */
@@ -34,6 +34,13 @@ export function ensureCodexConfig(home: string): void {
     // Not there yet.
   }
   mkdirSync(home, { recursive: true, mode: 0o700 });
+  if (process.platform !== 'win32') chmodSync(home, 0o700);
+  // A link (or anything but a plain file) in its place is removed, never written through.
+  try {
+    if (!lstatSync(file).isFile()) unlinkSync(file);
+  } catch {
+    // Not there.
+  }
   writeFileSync(file, CODEX_CONFIG_TOML, { mode: 0o600 });
   if (process.platform !== 'win32') chmodSync(file, 0o600);
 }

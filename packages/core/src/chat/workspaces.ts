@@ -37,7 +37,7 @@ export function unavailableReason(descriptor: AgentDescriptor, readiness: AgentR
   }
   if (readiness.blocked === 'agent_signed_out') {
     // An agent that takes only an API key (Codex, Grok) never says "sign in" (user decision, 2026-10-05).
-    if (descriptor.signInMethods.every((method) => method.kind === 'api_key')) {
+    if (descriptor.signInMethods.length > 0 && descriptor.signInMethods.every((method) => method.kind === 'api_key')) {
       return { code: 'agent_signed_out', reason: `${name} needs an API key. Add one in Settings → Agents.`, action: 'sign_in' };
     }
     const reason = apiKeyMethod(descriptor) === undefined ? `${name} isn't signed in. Sign in in Settings → Agents.` : `${name} isn't signed in. Sign in or add an API key in Settings → Agents.`;

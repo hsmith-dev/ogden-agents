@@ -4,12 +4,12 @@
  * methods, permission options and resume). No test runs the real adapter or
  * Codex, reads `~/.codex` or reaches the network.
  */
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AgentError, PROTECTED_PATHS, type AgentEvent, type AgentPermissionDecision, type AgentPermissionRequest, type AgentSession } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { acpReasons, CODEX_CONFIG_TOML, CODEX_DESCRIPTOR, createCodexAgent } from '../src/index.js';
+import { acpReasons, CODEX_CONFIG_TOML, CODEX_DESCRIPTOR, createCodexAgent, ensureCodexConfig } from '../src/index.js';
 
 const FAKE_CODEX = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-codex.mjs');
 const KEY = `sk-proj-${'K'.repeat(40)}4321`;
@@ -76,6 +76,16 @@ describe("Codex's chat port (epic 12 entry 5)", () => {
     await session.prompt('echo-env');
     expect(replyText(events)).not.toContain('CODEX_PATH=');
     expect(existsSync(join(env.CODEX_HOME!, 'auth.json'))).toBe(false);
+  });
+
+  it('does not start without its own home, and replaces a stale or linked config.toml', async () => {
+    const agent = agentOf();
+    const failure = await agent.startSession({ cwd: tempDir(), env: { PATH: process.env.PATH ?? '', CODEX_API_KEY: KEY } }).catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code: 'agent_unavailable', message: acpReasons('Codex').couldNotStart });
+    const home = tempDir();
+    writeFileSync(join(home, 'config.toml'), 'cli_auth_credentials_store = "file"\n');
+    ensureCodexConfig(home);
+    expect(readFileSync(join(home, 'config.toml'), 'utf8')).toBe(CODEX_CONFIG_TOML);
   });
 
   it('authenticates with its API key before the session (and only with it), never logging the key', async () => {

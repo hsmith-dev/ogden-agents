@@ -78,14 +78,14 @@ export function createCodexAgent(options: CodexAgentOptions): AgentPort {
         if (installed !== undefined) server = { command: process.execPath, args: [installed.path] };
       }
       if (server === undefined) throw new AgentError('agent_unavailable', reasons.notSetUp);
+      // Without its own home Codex would use `~/.codex`: keep the key in a file there and download plugins. Never started so.
       const home = env[CODEX_HOME_ENV];
-      if (home !== undefined && home !== '') {
-        try {
-          ensureCodexConfig(home);
-        } catch {
-          // Without its config Codex would keep the key in a file and download plugins: not started.
-          throw new AgentError('agent_unavailable', reasons.couldNotStart);
-        }
+      if (home === undefined || home === '') throw new AgentError('agent_unavailable', reasons.couldNotStart);
+      try {
+        ensureCodexConfig(home);
+      } catch {
+        // Without its config Codex would keep the key in a file and download plugins: not started.
+        throw new AgentError('agent_unavailable', reasons.couldNotStart);
       }
       return {
         command: server.command,

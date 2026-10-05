@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 // The shared routes' own file (it has no imports), as support.ts reads it.
 import { apiPath } from '../../packages/shared/src/api.ts';
-import { FAKE_BMAD_FILES, FAKE_BUILD_PLAN, FAKE_BUILD_TICKET_FILES, FAKE_BUILD_WAITING_PLAN, fixtureGit } from '../fixtures/fake-bmad-repo.ts';
+import { FAKE_BMAD_FILES, FAKE_BUILD_PLAN, FAKE_BUILD_REPO_FILES, FAKE_BUILD_WAITING_PLAN, fixtureGit } from '../fixtures/fake-bmad-repo.ts';
 import { fixedSandbox } from '../fixtures/fixed-sandbox.ts';
 import { createPlanFileTicketStore } from '../fixtures/plan-file-ticket-store.ts';
 import { API_ROUTES, serverModule } from '../support.js';
@@ -32,7 +32,7 @@ const TICKETS = [
 ];
 
 /** The fixture repo's files: BMad Method set up, the build's tickets and plans. */
-const FILES = { ...FAKE_BMAD_FILES, '_bmad/config.toml': '[core]\noutput_folder = "{project-root}/_bmad-output"\n', ...FAKE_BUILD_TICKET_FILES };
+const FILES = { ...FAKE_BMAD_FILES, '_bmad/config.toml': '[core]\noutput_folder = "{project-root}/_bmad-output"\n', ...FAKE_BUILD_REPO_FILES };
 
 const branches = (repo: string) => fixtureGit(repo, 'branch', '--format=%(refname:short)').trim().split('\n').sort();
 
@@ -106,6 +106,13 @@ test('Build on a ready card builds it unattended, the session streams read-only,
       await page.getByTestId('build-run-review').click();
       await expect(page).toHaveURL(new RegExp(`/w/${wsId}/review/1\\.1$`));
       await expect(page.getByTestId('review-outcome')).toHaveText('Ready for review');
+      // The designed page (story 5.9): the summary, the three checks, the findings, and the diff behind its summary line.
+      await expect(page.getByTestId('review-summary')).toContainText('changed 2 files');
+      await expect(page.getByTestId('review-check')).toHaveCount(3);
+      await expect(page.locator('[data-testid="review-check"][data-result="pass"]')).toHaveCount(3);
+      await expect(page.getByTestId('review-no-findings')).toBeVisible();
+      await expect(page.getByTestId('review-approve')).toBeEnabled();
+      await page.getByText('Show the code changes (2 files)').click();
       await expect(page.getByTestId('review-files')).toContainText('src/built-1.1.txt');
       await expect(page.getByTestId('review-diff')).toContainText('Built 1.1 by the fake agent.');
       const head = fixtureGit(repo, 'rev-parse', 'HEAD').trim();

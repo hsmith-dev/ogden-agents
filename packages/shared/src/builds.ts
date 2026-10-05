@@ -113,7 +113,7 @@ const runNote = z.string().trim().min(1).max(MAX_RUN_NOTE_LENGTH, `A note can be
  * `POST …/builds/:ref/reject` (5.9): Reject and retry, with an optional
  * note the next run's first message carries. An empty body is no note.
  */
-export const RejectBuildRequest = z.object({ note: runNote.optional() }).strict();
+export const RejectBuildRequest = z.object({ note: runNote.optional(), retry: z.boolean().default(false) }).strict();
 export type RejectBuildRequest = z.infer<typeof RejectBuildRequest>;
 
 /**
@@ -156,6 +156,15 @@ export const BUILD_BRANCH_PREFIX = 'ogden/';
 
 export const PREREQUISITE_UNMET_MESSAGE = 'This ticket waits for another one that is not done or in review yet.';
 export const NOT_READY_MESSAGE = 'This ticket is not ready to build. Move it to Ready first.';
+export const REBASE_CONFLICT_MESSAGE = "The build still conflicts with your project after updating it, so nothing changed. Reject it and build again.";
+export const REBASE_REFUSED_MESSAGE = "The build's copy of the project couldn't be updated, so nothing changed. Reject it and build again.";
+export const UPDATE_AND_RETRY_LABEL = 'Update and retry';
+export const REJECT_AND_RETRY_LABEL = 'Reject and retry';
+export const REVIEW_CHECKS_TITLE = 'Checks';
+export const REVIEW_FINDINGS_TITLE = 'What the review found';
+export const REVIEW_NO_FINDINGS_TEXT = 'The review recorded no findings.';
+export const REVIEW_SHOW_CHANGES_LABEL = (count: number) => `Show the code changes (${count} ${count === 1 ? 'file' : 'files'})`;
+export const REJECT_NOTE_LABEL = 'A note for the next try (optional)';
 export const RUN_ACTIVE_MESSAGE = 'This ticket is already being built.';
 export const SANDBOX_UNAVAILABLE_MESSAGE = "Unattended builds need a sandbox, and this computer doesn't have one Ogden Agents can use, so nothing was started.";
 export const CHECKOUT_DIRTY_MESSAGE = 'Your project has uncommitted changes outside the BMad output folder. Commit or stash them, then approve again.';
@@ -186,7 +195,7 @@ export const NO_PLAN_FILES_TO_COMMIT_TEXT = "This ticket's plan files have no un
 export const RUN_NOT_ACTIVE_MESSAGE = 'This run has already finished.';
 /** `POST …/runs/:runId/retry` for a run not paused at a checkpoint, until 5.8 builds Retry. */
 export const RETRY_NOT_AVAILABLE_MESSAGE = 'Retry for this run is not available yet.';
-export const ALL_READY_NOT_AVAILABLE_MESSAGE = 'Building every ready story is not available yet.';
+export const ALL_READY_ASK_MESSAGE = 'Ask for every ready ticket with all set to true and no ticket or watching mode.';
 
 /** A run's outcome as the review page and the session header say it. */
 export const RUN_OUTCOME_LABELS: Readonly<Record<RunOutcome, string>> = {
@@ -207,6 +216,7 @@ export const RUN_REASON_PROTECTED_DIFF = "The build changed files it may not cha
 export const RUN_REASON_RESULT_MISMATCH = 'The build changed, or its saved result could not be read back, while Ogden Agents was checking it, so it is not ready for review. Build it again.';
 export const RUN_REASON_NO_NETWORK = 'Builds have no network, so installs such as npm install fail.';
 export const RUN_REASON_INTERRUPTED = 'interrupted';
+export const RUN_REASON_STOPPED = 'You stopped this build.';
 export const RUN_REASON_START_FAILED = "The build couldn't start its agent.";
 
 /** The Build dialog's words (5.6): plain, no dashes. */

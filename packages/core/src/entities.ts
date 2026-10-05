@@ -10,20 +10,14 @@ import { resolve } from 'node:path';
 import {
   AdapterRefs as AdapterRefsSchema,
   AgentId as AgentIdSchema,
-  BlockedCode as BlockedCodeSchema,
-  BuildAgent as BuildAgentSchema,
   DriverChangeCause as DriverChangeCauseSchema,
-  IsoUtcTimestamp,
   ModelChangeCause as ModelChangeCauseSchema,
   ModelId as ModelIdSchema,
   PermissionMode as PermissionModeSchema,
   PermissionModeChangeCause as PermissionModeChangeCauseSchema,
-  RunDecision as RunDecisionSchema,
-  RunOutcome as RunOutcomeSchema,
   SessionDriver as SessionDriverSchema,
   SessionKind as SessionKindSchema,
   SessionState as SessionStateSchema,
-  TicketRef as TicketRefSchema,
   autoChatName,
   canonicalBmadPieces,
   CHAT_NAME_MAX,
@@ -45,6 +39,7 @@ import {
   type PermissionMode,
   type PermissionModeChangeCause,
   type Run,
+  type RunQueueEntry,
   type RunDecision,
   type RunId,
   type RunOutcome,
@@ -57,12 +52,13 @@ import {
   type Workspace,
   type WorkspaceId,
 } from '@ogden-agents/shared';
-import { and, asc, desc, eq, inArray, isNotNull, isNull, ne } from 'drizzle-orm';
-import { z } from 'zod';
+import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import type { Database } from './db/database.js';
 import { events, runs, sessions, workspaces } from './db/schema.js';
 import { InvalidOperationError, NotFoundError, ValidationError, WorkspaceBusyError } from './errors.js';
 import type { EventLog, HistoryDeleted } from './event-log.js';
+import { check } from './entity-check.js';
+import { createRunEntities } from './run-entities.js';
 import { newId } from './ids.js';
 import type { SessionEvents } from './session-events.js';
 
@@ -287,23 +283,34 @@ export interface Entities {
    * worktrees stay. Returns them.
    */
   settleInterruptedRuns(reason: string): Run[];
-}
-
-/** Parses `value`, throwing a {@link ValidationError} that names `what`. */
-function check<T>(schema: z.ZodType<T>, value: unknown, what: string): T {
-  const parsed = schema.safeParse(value);
-  if (!parsed.success) {
-    throw new ValidationError(
-      `invalid ${what}`,
-      parsed.error.issues.map((issue) => ({ path: issue.path, message: issue.message })),
-    );
-  }
-  return parsed.data;
+  /** The workspace's runs, newest first, at most `limit` (default 200; story 5.8: the board and the session header). */
+  listRuns(workspaceId: WorkspaceId, limit?: number): Run[];
+  /** Every run `running` that left the queue (its agent is, or is about to be, working), oldest first (story 5.8: what the limits count). */
+  listRunningRuns(): Run[];
+  /** Every queued run (`queuePosition` set), oldest first across workspaces: the dispatcher's order (story 5.8). */
+  listQueuedRuns(): Run[];
+  /** The workspace's queue as `run.queue_changed` carries it, in order. */
+  queueOf(workspaceId: WorkspaceId): RunQueueEntry[];
+  /**
+   * Puts a `running` run in its workspace's queue (story 5.8: a retried run
+   * waiting for a slot), last in line, and appends `run.queue_changed`.
+   */
+  queueRun(id: RunId): Run;
+  /**
+   * A queued (or retried) run starts (story 5.8): its worktree, branch,
+   * base, sandbox and deadline are set, it leaves the queue and `running`
+   * is its outcome (blocked fields cleared), appending `run.dispatched`, the
+   * outcome change if there is one, and the queue's change.
+   */
+  dispatchRun(id: RunId, dispatch: { worktreePath: string; sandbox: string; branch: string; baseRevision: string; baseBranch: string | null; deadline: string }): Run;
+  /** Sets the commit the run's branch is measured from (story 5.9: after Update and retry rebased it). */
+  setRunBase(id: RunId, baseRevision: string): Run;
+  /** Takes a queued run out of the queue without a dispatch (it was stopped, story 5.8) and appends the queue's change. */
+  leaveQueue(id: RunId): Run;
 }
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 type SessionRow = typeof sessions.$inferSelect;
-type RunRow = typeof runs.$inferSelect;
 
 const toWorkspace = (row: WorkspaceRow): Workspace => ({
   id: row.id as WorkspaceId,
@@ -328,26 +335,6 @@ const toSession = (row: SessionRow): Session => ({
   updatedAt: row.updatedAt,
 });
 
-const toRun = (row: RunRow): Run => ({
-  id: row.id as RunId,
-  sessionId: row.sessionId as SessionId,
-  workspaceId: row.workspaceId as WorkspaceId,
-  ticketRef: row.ticketRef,
-  worktreePath: row.worktreePath,
-  sandbox: row.sandbox,
-  deadline: row.deadline,
-  outcome: row.outcome,
-  branch: row.branch,
-  baseRevision: row.baseRevision,
-  baseBranch: row.baseBranch,
-  reason: row.reason,
-  agent: row.agent,
-  blockedCode: row.blockedCode,
-  queuePosition: row.queuePosition,
-  decision: row.decision,
-  createdAt: row.createdAt,
-  updatedAt: row.updatedAt,
-});
 
 /** Swaps the case of every letter, e.g. `/Users/a` -> `/uSERS/A`. */
 function swapCase(value: string): string {
@@ -407,15 +394,13 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
     const row = orm.select().from(sessions).where(eq(sessions.id, id)).get();
     return row === undefined ? undefined : toSession(row);
   };
-  const getRun = (id: RunId) => {
-    const row = orm.select().from(runs).where(eq(runs.id, id)).get();
-    return row === undefined ? undefined : toRun(row);
-  };
   const requireSession = (id: SessionId) => {
     const session = getSession(id);
     if (session === undefined) throw new NotFoundError('session', id);
     return session;
   };
+
+  const runEntities = createRunEntities({ orm, log, now, requireSession });
 
   return {
     ensureWorkspace(path, options = {}) {
@@ -745,131 +730,6 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
       });
     },
 
-    createRun(input) {
-      const ticketRef = check(TicketRefSchema, input.ticketRef, 'ticket ref');
-      const deadline = check(IsoUtcTimestamp.nullable(), input.deadline ?? null, 'run deadline');
-      const agent = check(BuildAgentSchema.nullable(), input.agent ?? null, 'build agent');
-      const queuePosition = check(z.number().int().positive().nullable(), input.queuePosition ?? null, 'queue position');
-      return log.transaction(() => {
-        const session = requireSession(input.sessionId);
-        if (session.kind !== 'build') {
-          throw new InvalidOperationError(`a run needs a build session; ${session.id} is a ${session.kind} session`);
-        }
-        const taken = orm.select({ id: runs.id }).from(runs).where(eq(runs.sessionId, session.id)).get();
-        if (taken !== undefined) throw new InvalidOperationError(`session ${session.id} already has run ${taken.id}`);
-        const at = now();
-        const run: Run = {
-          id: newId('run'),
-          sessionId: session.id,
-          workspaceId: session.workspaceId,
-          ticketRef,
-          worktreePath: input.worktreePath ?? null,
-          sandbox: input.sandbox ?? null,
-          deadline,
-          outcome: 'running',
-          branch: input.branch ?? null,
-          baseRevision: input.baseRevision ?? null,
-          baseBranch: input.baseBranch ?? null,
-          reason: null,
-          agent,
-          blockedCode: null,
-          queuePosition,
-          decision: null,
-          createdAt: at,
-          updatedAt: at,
-        };
-        orm.insert(runs).values(run).run();
-        log.append({ type: 'run.created', workspaceId: run.workspaceId, streamId: session.id, payload: { run } });
-        return run;
-      });
-    },
-
-    getRun,
-
-    getRunBySession(sessionId) {
-      const row = orm.select().from(runs).where(eq(runs.sessionId, sessionId)).get();
-      return row === undefined ? undefined : toRun(row);
-    },
-
-    latestRunForTicket(workspaceId, ticketRef) {
-      const row = orm
-        .select()
-        .from(runs)
-        .where(and(eq(runs.workspaceId, workspaceId), eq(runs.ticketRef, ticketRef)))
-        .orderBy(desc(runs.createdAt), desc(runs.id))
-        .limit(1)
-        .get();
-      return row === undefined ? undefined : toRun(row);
-    },
-
-    listRunsWithWorktree(workspaceIds) {
-      if (workspaceIds !== undefined && workspaceIds.length === 0) return [];
-      const withWorktree = isNotNull(runs.worktreePath);
-      return orm
-        .select()
-        .from(runs)
-        .where(workspaceIds === undefined ? withWorktree : and(withWorktree, inArray(runs.workspaceId, [...workspaceIds])))
-        .orderBy(asc(runs.createdAt), asc(runs.id))
-        .all()
-        .map(toRun);
-    },
-
-    activeRunForTicket(workspaceId, ticketRef) {
-      const row = orm
-        .select()
-        .from(runs)
-        .where(and(eq(runs.workspaceId, workspaceId), eq(runs.ticketRef, ticketRef), eq(runs.outcome, 'running')))
-        .limit(1)
-        .get();
-      return row === undefined ? undefined : toRun(row);
-    },
-
-    settleInterruptedRuns(reason) {
-      return orm
-        .select({ id: runs.id })
-        .from(runs)
-        .where(eq(runs.outcome, 'running'))
-        .all()
-        .map((row) => this.setRunOutcome(row.id as RunId, 'blocked', reason, { blockedCode: 'interrupted' }));
-    },
-
-    setRunOutcome(id, outcome, reason = null, options = {}) {
-      check(RunOutcomeSchema, outcome, 'run outcome');
-      const why = reason === null || reason.trim() === '' ? null : reason;
-      // A code only on a blocked run (story 5.3); any other outcome clears it.
-      const blockedCode = outcome === 'blocked' ? check(BlockedCodeSchema.nullable(), options.blockedCode ?? null, 'blocked code') : null;
-      return log.transaction(() => {
-        const run = getRun(id);
-        if (run === undefined) throw new NotFoundError('run', id);
-        if (run.outcome === outcome && run.reason === why && run.blockedCode === blockedCode) return run;
-        const updated: Run = { ...run, outcome, reason: why, blockedCode, updatedAt: now() };
-        orm.update(runs).set({ outcome, reason: why, blockedCode, updatedAt: updated.updatedAt }).where(eq(runs.id, id)).run();
-        log.append({
-          type: 'run.outcome_changed',
-          workspaceId: run.workspaceId,
-          streamId: run.sessionId,
-          payload: { runId: run.id, outcome, previous: run.outcome, ...(why === null ? {} : { reason: why }), ...(blockedCode === null ? {} : { blockedCode }) },
-        });
-        return updated;
-      });
-    },
-
-    setRunDecision(id, decision, mergeRevision, reviewedRevision) {
-      check(RunDecisionSchema, decision, 'run decision');
-      return log.transaction(() => {
-        const run = getRun(id);
-        if (run === undefined) throw new NotFoundError('run', id);
-        if (run.decision === decision) return run;
-        const updated: Run = { ...run, decision, updatedAt: now() };
-        orm.update(runs).set({ decision, updatedAt: updated.updatedAt }).where(eq(runs.id, id)).run();
-        log.append({
-          type: 'run.decided',
-          workspaceId: run.workspaceId,
-          streamId: run.sessionId,
-          payload: { runId: run.id, decision, ...(mergeRevision === undefined ? {} : { mergeRevision }), ...(reviewedRevision === undefined ? {} : { reviewedRevision }) },
-        });
-        return updated;
-      });
-    },
+    ...runEntities,
   };
 }

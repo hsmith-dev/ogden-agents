@@ -15,7 +15,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { apiPath } from '../../packages/shared/src/api.ts';
-import { FAKE_BMAD_FILES, FAKE_BUILD_PLAN, FAKE_BUILD_TICKET_FILES, FAKE_BUILD_WAITING_PLAN, fixtureGit } from '../fixtures/fake-bmad-repo.ts';
+import { FAKE_BMAD_FILES, FAKE_BUILD_PLAN, FAKE_BUILD_REPO_FILES, FAKE_BUILD_WAITING_PLAN, fixtureGit } from '../fixtures/fake-bmad-repo.ts';
 import { fixedSandbox } from '../fixtures/fixed-sandbox.ts';
 import { createPlanFileTicketStore } from '../fixtures/plan-file-ticket-store.ts';
 import { API_ROUTES, serverModule } from '../support.js';
@@ -26,7 +26,7 @@ const TICKETS = [
   { ref: '1.1', title: 'Build the thing', plan: FAKE_BUILD_PLAN },
   { ref: '1.2', title: 'Build the next thing', plan: FAKE_BUILD_WAITING_PLAN, after: [1] },
 ];
-const FILES = { ...FAKE_BMAD_FILES, '_bmad/config.toml': '[core]\noutput_folder = "{project-root}/_bmad-output"\n', ...FAKE_BUILD_TICKET_FILES };
+const FILES = { ...FAKE_BMAD_FILES, '_bmad/config.toml': '[core]\noutput_folder = "{project-root}/_bmad-output"\n', ...FAKE_BUILD_REPO_FILES };
 
 test('with no sandbox, Build opens the dialog with its three choices and Build with me watching runs an attended build through permission cards', async ({ page }) => {
   test.setTimeout(90_000);

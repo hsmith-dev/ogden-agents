@@ -336,7 +336,7 @@ async function listenAndAnnounce({
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
   // Plan and Board (story 4.1, `start-planning.ts`): planning sessions, the script runner, the tickets and their watch.
-  const { planning, scriptRunner, bmadSource, board, ticketWatcher, ticketStore } = createPlanAndBoard({
+  const { planning, scriptRunner, bmadSource, board, ticketWatcher, ticketStore, boardTickets } = createPlanAndBoard({
     options,
     core,
     dataDir,
@@ -351,9 +351,11 @@ async function listenAndAnnounce({
     uvChildEnv,
   });
   // Unattended builds (story 5.2, `start-builds.ts`): git, the sandbox check and the build runner.
-  const builds = createBuildsWiring({ options, core, dataDir, log, chat, tickets: ticketStore, source: bmadSource, hooks });
+  const builds = createBuildsWiring({ options, core, dataDir, log, chat, tickets: ticketStore, runAwareTickets: boardTickets, source: bmadSource, hooks });
   // Worktrees no run needs any more (a removal that failed, a start cut off) go before builds are served (story 5.5).
   await builds.sweep();
+  // Queued runs a stopped server left start where the limits allow (story 5.8).
+  void builds.dispatchQueued().catch((error: unknown) => log.warn('starting queued builds failed', { reason: String(error) }));
   const appShortcut =
     options.appShortcut ??
     (options.launcherEntry === undefined
@@ -408,6 +410,7 @@ async function listenAndAnnounce({
     planning,
     board,
     builds,
+    buildSettings: core.buildSettings,
     bmadSource,
     // Setup also places the skills in each other agent's folder the project uses (epic 6 entry 8).
     bmadSetup: withAgentSkillFolders(core.bmadSetup, { core, agents }),

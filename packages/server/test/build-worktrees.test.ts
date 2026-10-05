@@ -17,7 +17,7 @@ import { createFixedSandbox } from '@ogden-agents/adapters';
 import type { TicketStorePort } from '@ogden-agents/core';
 import { API_ROUTES, ApiErrorBody, apiPath, BuildResponse, CommitPlanFilesResponse, ReviewResponse, TicketsResponse, WorkspaceResponse } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
-import { createFakeBmadRepo, FAKE_BUILD_PLAN, FAKE_BUILD_TICKET_FILES, FAKE_BUILD_WAITING_PLAN, fixtureGit } from '../../../tests/fixtures/fake-bmad-repo.js';
+import { createFakeBmadRepo, FAKE_BUILD_PLAN, FAKE_BUILD_REPO_FILES, FAKE_BUILD_WAITING_PLAN, fixtureGit } from '../../../tests/fixtures/fake-bmad-repo.js';
 import { createPlanFileTicketStore } from '../../../tests/fixtures/plan-file-ticket-store.js';
 import { removeAfterTest, signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
@@ -35,7 +35,7 @@ const TICKETS = [
 ];
 
 async function setup(dataDir?: string) {
-  const repo = createFakeBmadRepo({ git: true, files: FAKE_BUILD_TICKET_FILES, prefix: 'ogden-agents-build-repo-' });
+  const repo = createFakeBmadRepo({ git: true, files: FAKE_BUILD_REPO_FILES, prefix: 'ogden-agents-build-repo-' });
   removeAfterTest(repo.path);
   const store = createPlanFileTicketStore(TICKETS);
   const server = await startTestServer({

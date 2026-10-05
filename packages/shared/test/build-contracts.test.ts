@@ -81,7 +81,7 @@ const run52 = {
 };
 
 const checks = (results: Array<'pass' | 'fail' | 'not_run'>) => VERIFICATION_CHECKS.map((id, index) => ({ id, result: results[index]!, detail: results[index] === 'fail' ? testsFailedDetail(3) : null }));
-const verified = { outcome: 'verified', checks: checks(['pass', 'pass', 'pass']), testCommand: 'npm test', testOutputTail: 'Tests: 5 passed', checkedAt: at };
+const verified = { outcome: 'verified', checks: checks(['pass', 'pass', 'pass']), testCommand: 'npm test', testOutputTail: 'Tests: 5 passed', attended: false, checkedAt: at };
 
 const DASHES = /[–—]/;
 
@@ -193,8 +193,8 @@ describe('requests and responses (story 5.3)', () => {
   it('approve, reject, retry, stop and check again', () => {
     expect(ApproveBuildRequest.safeParse({ revision: commit }).success).toBe(true);
     expect(ApproveBuildRequest.safeParse({ revision: 'HEAD' }).success).toBe(false);
-    expect(RejectBuildRequest.parse({})).toEqual({});
-    expect(RejectBuildRequest.parse({ note: '  Use the blue one.  ' })).toEqual({ note: 'Use the blue one.' });
+    expect(RejectBuildRequest.parse({})).toEqual({ retry: false });
+    expect(RejectBuildRequest.parse({ note: '  Use the blue one.  ' })).toEqual({ note: 'Use the blue one.', retry: false });
     expect(RejectBuildRequest.safeParse({ note: 'x'.repeat(4001) }).success).toBe(false);
     expect(RetryRunRequest.parse({})).toEqual({ mode: 'resume' });
     for (const mode of ['resume', 'rebase', 'apply_fix']) expect(RetryRunRequest.parse({ mode })).toEqual({ mode });
@@ -241,6 +241,11 @@ describe('requests and responses (story 5.3)', () => {
     expect(VerificationResult.safeParse({ ...verified, checks: [...verified.checks].reverse() }).success).toBe(false);
     expect(VerificationResult.safeParse({ ...verified, checks: verified.checks.slice(1) }).success).toBe(false);
     expect(VerificationResult.parse({ ...failed, checks: checks(['fail', 'not_run', 'not_run']) }).outcome).toBe('failed');
+    // A build the user watched had no sandbox: its tests check is not run, and the run may still be verified (story 5.8).
+    const watched = { ...verified, attended: true, checks: checks(['pass', 'not_run', 'pass']), testCommand: null, testOutputTail: null };
+    expect(VerificationResult.parse(watched).outcome).toBe('verified');
+    expect(VerificationResult.safeParse({ ...watched, attended: false }).success).toBe(false);
+    expect(VerificationResult.safeParse({ ...watched, checks: checks(['pass', 'pass', 'not_run']) }).success).toBe(false);
     expect(testsFailedDetail(1)).toBe('1 test failed when re-run');
   });
 

@@ -65,3 +65,6 @@ export * from './ticket-store-port.js';
 export * from './toolchain.js';
 export * from './ticket-watcher.js';
 export * from './vcs-port.js';
+export * from './build-verify.js';
+export * from './build-settings.js';
+export * from './build-findings.js';

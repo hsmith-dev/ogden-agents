@@ -15,6 +15,7 @@ import { WorkspaceHeader } from '@/shell/workspace-header';
 import { AlertDialog, AlertDialogCancel, AlertDialogConfirm, AlertDialogContent, AlertDialogTrigger } from '@/ui/alert-dialog';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
+import { ProjectBuildLimit } from '@/planning/build-limit-fields';
 import { EmptyState, PageBody, PageSection } from '@/ui/page';
 import { RadioGroup, RadioGroupOption } from '@/ui/radio-group';
 import { Text } from '@/ui/typography';
@@ -62,6 +63,7 @@ export function WorkspaceSettingsPage() {
             <ProjectModelsSection wsId={wsId} />
             <ProjectWhileWorkingSection wsId={wsId} />
             <BmadSection wsId={wsId} />
+            <BuildLimitSection wsId={wsId} />
             <AlwaysAllowRulesSection wsId={wsId} name={workspaceName(workspace.data)} />
             <DeleteHistorySection wsId={wsId} name={workspaceName(workspace.data)} />
           </>
@@ -72,6 +74,12 @@ export function WorkspaceSettingsPage() {
 }
 
 /** The BMad Method section with its two slots: the repo note and the default for new projects (story 10.7). */
+/** The project's builds at a time (story 5.8): only with Unattended builds on. */
+function BuildLimitSection({ wsId }: { wsId: string }) {
+  const settings = useWorkspaceSettings(wsId);
+  return settings.data?.bmadPieces.includes('builds') === true ? <ProjectBuildLimit wsId={wsId} /> : null;
+}
+
 function BmadSection({ wsId }: { wsId: string }) {
   const offerSlot = useBmadRepoNoteSlot(wsId);
   const defaultSlot = useNewProjectsDefaultSlot();

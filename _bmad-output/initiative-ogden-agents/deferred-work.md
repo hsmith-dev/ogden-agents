@@ -96,9 +96,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Epic 5 (a later story): a network allowlist (package registries) for a build's sandboxed commands; until then builds have no network. From 5.2's user decision. (log: "A network allowlist for an unattended build's sandboxed commands")
 - Epic 5 (5.6): core decides a build's file write before Claude Code's unsandboxed Edit/Write performs it, so a symlink swapped in after the decision can redirect it. From 5.2 security review S2. (log: "Core decides a build's file write before Claude Code's unsandboxed Edit/Write tool performs it")
 - Epic 11 (11.4): mask a webhook's host when listing it back; some providers put the token in the host name. From 5.3 security review S10. (log: "Listing a webhook back by its full host can show part of its secret")
-- Epic 5 (5.10, or a later sandbox story): stop a build's commands that leave the agent's process group (`setsid`) or outlive their parent on Windows (cgroup, job object or sandbox-level kill). From 5.4 security review S4. (log: "Stopping a build kills the agent's process group")
+- Epic 5 (a later sandbox story; 5.10's sweep left it, no behavior change): stop a build's commands that leave the agent's process group (`setsid`) or outlive their parent on Windows (cgroup, job object or sandbox-level kill). From 5.4 security review S4. (log: "Stopping a build kills the agent's process group")
 - Epic 5 (5.8) or epic 11 (11.1): prune a run's folder (`<data>/r/<run8>`) and the activity recorder's maps with the run's worktree. From 5.4 security review S6. (log: "Run folders (`<data>/r/<run8>`, up to 32 MiB")
-- Epic 5 (5.10, or a later sandbox story): the board and the run's end read a run's worktree with `tickets.py` while the agent may still be live (check-then-use on the worktree's scripts, which the sandbox denies the agent). From 5.5 security review S2. (log: "Board reads of an active run's worktree run `tickets.py` while its agent may be live")
+- Epic 5 (a later sandbox story; 5.10's sweep left it, no behavior change): the board and the run's end read a run's worktree with `tickets.py` while the agent may still be live (check-then-use on the worktree's scripts, which the sandbox denies the agent). From 5.5 security review S2. (log: "Board reads of an active run's worktree run `tickets.py` while its agent may be live")
 - Epic 5 (a later story, needs a user decision): run a build inside Docker when it is the only sandbox. Which image carries Claude Code, and how the agent reaches its model while its commands have no network, are undecided, so 5.6 detects Docker and describes it but never builds in it. From 5.6. (log: "Docker is detected and described")
 - Epic 5 (a later sandbox story): a Landlock-based sandbox for Linux machines where bubblewrap is blocked (spike 5.1 found Landlock available); Claude Code cannot use it, so it would be a launcher Ogden Agents owns. From 5.6. (log: "Landlock is shown, not selected")
 - Epic 5 (5.9 or 11.1): while a build runs, its branch ref points at objects only the run's own store holds, so the user's own `git log --all`, `git fsck` or `git gc` in the repo reports a bad object for `ogden/<run8>/…` until approve imports it or the run is discarded. Keeping the run's refs out of `refs/heads` would close it. From 5.6. (log: "Known cost of the per-run object store")
@@ -107,6 +107,10 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - 16.3 (proposed): pane children need a bigger secret free environment than `baseEnvironment()` (`COLORTERM`, Windows `APPDATA`, `LOCALAPPDATA`, `ProgramFiles` and more); add `paneEnvironment()` checked against `SECRET_NAME`, with a sentinel test per OS. From spike 16.1. (log: "Spike 16.1: pane children need a bigger secret free environment")
 - 16.2 (proposed): a server killed hard leaves a pane whose program ignores hangup running on macOS and Windows; record each pane's pid and start time and sweep only those on the next start. From spike 16.1. (log: "Spike 16.1: a server killed hard leaves a pane")
 - Unowned (when the chat terminal is next changed): the chat terminal panel does not load `@xterm/addon-unicode11`, so emoji are one cell wide and misalign a line; panes should load it. From spike 16.1. (log: "Spike 16.1: the chat terminal panel does not load")
+- Epic 5 (a later sandbox story): Stop and Quit do not stop a test re-run in progress, and the macOS Seatbelt profile is allow-default with only network and writes denied, so mach lookups and signals stay open. From 5.8 reviews. (log: "The test re-run is not stopped by Stop or Quit")
+- Epic 5 (a later sandbox story): the read fence uses unresolved credential folder paths and a short list, and macOS shares its temp folders between runs. From 5.8 security review. (log: "Read fences of the sandboxed re-run")
+- Epic 5 (5.9): queued runs start again only when another run ends, a limit changes or the server restarts, not when a turned-off piece is turned back on. From 5.8 review. (log: "Queued runs wait after a piece is turned back on")
+- Epic 5 (11.1): Update and retry takes no run-limit slot and arms no deadline, and every review read runs `tickets.py` once. From 5.9 reviews. (log: "Update and retry takes no run limit slot and arms no deadline")
 
 ## Log
 
@@ -765,3 +769,19 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/spike-can-many-panes-run-real-clis-in-ptys-on-all-three-oses-without-leaking-secrets-plan.md`
   summary: Spike 16.1: the chat terminal panel does not load `@xterm/addon-unicode11`, so emoji are one cell wide (width 1 by default, 2 with the addon) and misalign a line.
   evidence: spike plan finding 5 (`browser.probe.mjs`, `browser_unicode_cell_widths`); `packages/web/src/terminal/terminal-panel.tsx`.
+
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-dispatch-limits-stop-retry-and-quit-in-core-plan.md`
+  summary: The test re-run is not stopped by Stop or Quit, and macOS Seatbelt leaves mach lookups and signals open
+  evidence: 5.8 reviews: `decideOutcome` disarms the deadline before the re-run and `stop` finds the agent already released; `seatbeltProfile` is allow-default with only `network*` and `file-write*` denied.
+
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-dispatch-limits-stop-retry-and-quit-in-core-plan.md`
+  summary: Read fences of the sandboxed re-run use unresolved credential folder paths and a short list, and macOS shares its temp folders between runs
+  evidence: 5.8 security review: `CREDENTIAL_FOLDERS` joined to the home folder unresolved; `temporaryFolders` in `exec.ts`.
+
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-dispatch-limits-stop-retry-and-quit-in-core-plan.md`
+  summary: Queued runs wait after a piece is turned back on
+  evidence: 5.8 correctness review: `launchQueued` returns silently while the piece is off and only a run ending, a limit change or a start drains the queue.
+
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-review-approve-and-merge-reject-and-retry-plan.md`
+  summary: Update and retry takes no run limit slot and arms no deadline
+  evidence: 5.9 correctness review: `rebaseLocked` sets the run running without `hasCapacity` or `armDeadline`; `review()` calls `tickets.find` on each read.

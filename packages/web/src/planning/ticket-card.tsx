@@ -1,7 +1,8 @@
-import { boardCardLabel, boardColumnOf, BUILD_LABEL, type TicketRow } from '@ogden-agents/shared';
+import { boardCardLabel, boardColumnOf, BUILD_LABEL, RUN_PHASE_LABELS, type TicketRow } from '@ogden-agents/shared';
 import { Hammer, Lock, Prohibit } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
 import { memo } from 'react';
+import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
 import { cn } from '@/ui/utils';
 import type { CardStatus } from './board-model';
@@ -25,6 +26,8 @@ export interface TicketCardProps {
   onBuild?: ((ref: string) => void) | undefined;
   /** While a build is being started from the board: every Build waits. */
   building?: boolean;
+  /** Whether this ticket's build waits in the queue (story 5.8): the card says Queued in place of Build. */
+  queued?: boolean;
 }
 
 /**
@@ -36,9 +39,9 @@ export interface TicketCardProps {
  * right, always visible, beside the link (never inside it). Memoized: a
  * refetch re-renders only the cards whose props changed.
  */
-export const TicketCard = memo(function TicketCard({ wsId, row, status, highlighted, onChoose, busy = false, onBuild, building = false }: TicketCardProps) {
+export const TicketCard = memo(function TicketCard({ wsId, row, status, highlighted, onChoose, busy = false, onBuild, building = false, queued = false }: TicketCardProps) {
   const column = boardColumnOf(row);
-  const buildable = onBuild !== undefined && row.status === 'ready-for-dev';
+  const buildable = onBuild !== undefined && row.status === 'ready-for-dev' && !queued;
   return (
     <div className="relative min-w-0">
       <Link
@@ -54,7 +57,7 @@ export const TicketCard = memo(function TicketCard({ wsId, row, status, highligh
           'transition-colors duration-(--motion-fast) ease-standard hover:bg-accent',
           column === 'in_review' && 'before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-signal',
           onChoose !== undefined && 'pr-10',
-          buildable && 'pb-12',
+          (buildable || queued) && 'pb-12',
         )}
       >
         <span className="font-mono text-mono-compact text-muted-foreground">{row.ref}</span>
@@ -74,6 +77,11 @@ export const TicketCard = memo(function TicketCard({ wsId, row, status, highligh
         </span>
       </Link>
       {onChoose === undefined ? null : <TicketStatusMenu row={row} onChoose={onChoose} busy={busy} className="absolute top-1 right-1" />}
+      {queued ? (
+        <Badge variant="outline" className="absolute right-1 bottom-1" data-testid="ticket-queued">
+          {RUN_PHASE_LABELS.queued}
+        </Badge>
+      ) : null}
       {buildable ? (
         <Button
           type="button"

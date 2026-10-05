@@ -35,6 +35,28 @@ export interface SandboxCheckRequest {
   agent?: BuildAgent;
 }
 
+/** One command to run inside a run's sandbox (story 5.8: the verification's test re-run). */
+export interface SandboxRunRequest {
+  /** The run's sandbox: only its roots are writable, no network. Its `kind` says which sandbox runs it. */
+  sandbox: AgentSandbox;
+  /** The run's worktree: the command's folder. */
+  cwd: string;
+  /** One line, run by the shell. From the user's own project files, never from the worktree. */
+  command: string;
+  /** The environment the command gets and nothing else (the allowlist and the run's own git object store). */
+  env: Readonly<Record<string, string>>;
+  timeoutMs: number;
+  /** The most output kept, from the end. */
+  maxOutputBytes: number;
+}
+
+/** What the command did: its exit code (`null` when it timed out or could not start), whether it timed out, and the end of its output. */
+export interface SandboxRunResult {
+  exitCode: number | null;
+  timedOut: boolean;
+  output: string;
+}
+
 export interface SandboxPort {
   /** Whether a sandbox can contain `agent`'s build here now, and which. Never throws: a failed probe is unavailable. */
   check(request?: SandboxCheckRequest): Promise<SandboxCheck>;
@@ -44,4 +66,11 @@ export interface SandboxPort {
    * `available` always agrees with `check`. Never throws, never installs.
    */
   status(request?: SandboxCheckRequest): Promise<SandboxStatus>;
+  /**
+   * Runs one command inside `request.sandbox` (story 5.8), with no network
+   * and only its writable roots writable. `undefined` when no sandbox here
+   * can run a command of that kind (the run's sandbox is gone, or it is a
+   * kind this port does not run): never run unsandboxed instead. Never throws.
+   */
+  run(request: SandboxRunRequest): Promise<SandboxRunResult | undefined>;
 }

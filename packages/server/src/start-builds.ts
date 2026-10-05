@@ -27,6 +27,7 @@ export function createBuildsWiring({
   log,
   chat,
   tickets,
+  runAwareTickets,
   source,
   hooks,
 }: {
@@ -36,6 +37,8 @@ export function createBuildsWiring({
   log: Logger;
   chat: Pick<Chat, 'createChatSession' | 'sendMessage' | 'releaseAgent'>;
   tickets: TicketStorePort;
+  /** The board's store: a ticket with an active run is read and marked in its worktree (story 5.8: prerequisites, Retry's mark). */
+  runAwareTickets: TicketStorePort;
   source: Pick<BmadSourceUseCases, 'requireReady'>;
   hooks: Pick<TestHooks, 'sandbox'>;
 }): BuildsUseCases {
@@ -49,12 +52,16 @@ export function createBuildsWiring({
         })
       : createFixedSandbox(hooks.sandbox));
   return createBuilds({
+    settings: core.buildSettings,
+    // The re-run of a project's tests gets the agents' allowlist and never an API key (AD-16).
+    commandEnv: () => withoutAgentKeys(agentEnvironment()),
     bmad: core.bmad,
     trust: core.bmadScriptTrust,
     source,
     entities: core.entities,
     events: core.events,
     tickets,
+    runAwareTickets,
     vcs,
     sandbox,
     runner: options.buildRunner ?? createAcpBuildRunner(),

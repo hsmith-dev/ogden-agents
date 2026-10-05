@@ -50,10 +50,23 @@ export const VerificationResult = z
     testCommand: z.string().max(500).nullable(),
     /** The tail of the re-run's output (masked, at most {@link MAX_TEST_OUTPUT_TAIL_BYTES}), or `null`. */
     testOutputTail: z.string().max(MAX_TEST_OUTPUT_TAIL_BYTES).nullable(),
+    /**
+     * Whether the run was a build with the user watching (story 5.8): it had
+     * no sandbox, and the re-run executes the agent's code only inside one,
+     * so its `tests_pass` check is `not_run` and the run may still be
+     * `verified` on the other two (AD-17 is about unattended runs; the user
+     * saw every command).
+     */
+    attended: z.boolean().default(false),
     checkedAt: IsoUtcTimestamp,
   })
   .refine((result) => result.checks.every((check, index) => check.id === VERIFICATION_CHECKS[index]), 'The checks are plan_built, tests_pass and code_changed, in that order.')
-  .refine((result) => (result.outcome === 'verified') === result.checks.every((check) => check.result === 'pass'), 'A run is verified only when every check passes.');
+  .refine(
+    (result) =>
+      (result.outcome === 'verified') ===
+      result.checks.every((check) => check.result === 'pass' || (result.attended && check.id === 'tests_pass' && check.result === 'not_run')),
+    'A run is verified only when every check passes (an attended run needs no tests check).',
+  );
 export type VerificationResult = z.infer<typeof VerificationResult>;
 
 /** `POST …/runs/:runId/check-again` (11.2): re-runs 5.8's verification on the run's worktree. No fields. */
@@ -68,6 +81,8 @@ export function testsFailedDetail(failed: number): string {
 }
 export const TESTS_FAILED_DETAIL = 'The tests failed when re-run';
 export const NO_TEST_COMMAND_DETAIL = 'No test command found';
+export const ATTENDED_TESTS_NOT_RUN_DETAIL = 'Not re-run: this build had no sandbox, and you watched it';
+export const TESTS_NOT_RUNNABLE_DETAIL = "The tests couldn't be re-run in this build's sandbox";
 export const TESTS_TIMED_OUT_DETAIL = 'The tests took too long when re-run';
 export const PLAN_NOT_BUILT_DETAIL = "The plan doesn't say built";
 export const NO_CODE_CHANGES_DETAIL = 'The branch has no changes';

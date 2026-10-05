@@ -247,3 +247,21 @@ describe('the shell\'s Quit (launcher token, shell mode only)', () => {
     expect((await send(plain, '/launcher/quit', { method: 'POST', headers: json(launcher(plain)), body: '{}' })).status).toBe(404);
   });
 });
+
+describe('the app shortcut inside the desktop app (story 13.11)', () => {
+  it('is not offered, not supported and not added: the app is the shortcut', async () => {
+    const server = await startTestServer({ shell: 'desktop', updates: false });
+    const tab = await signIn(server);
+    const status = (await send(server, API_ROUTES.appShortcut, { headers: tab.headers })).json() as { supported: boolean; offerPending: boolean; installed: boolean };
+    expect(status).toMatchObject({ supported: false, offerPending: false, installed: false });
+    expect((await send(server, API_ROUTES.appShortcut, { method: 'POST', headers: json(tab.headers), body: '' })).status).toBe(422);
+  });
+
+  it('is unchanged on the npm route: supported where the OS can, offer pending', async () => {
+    const server = await startTestServer({ shell: null, updates: false });
+    const tab = await signIn(server);
+    const status = (await send(server, API_ROUTES.appShortcut, { headers: tab.headers })).json() as { supported: boolean; offerPending: boolean };
+    expect(status.supported).toBe(true);
+    expect(status.offerPending).toBe(true);
+  });
+});

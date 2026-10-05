@@ -5,13 +5,17 @@ import { quitServer } from '@/events/server-control';
 import { AlertDialog, AlertDialogCancel, AlertDialogConfirm, AlertDialogContent, AlertDialogTrigger } from '@/ui/alert-dialog';
 import { SidebarLabel, SidebarMenuButton } from '@/ui/sidebar';
 import { isBusy } from '@/workspaces/workspace-api';
+import { useUpdateNotice } from '@/updates/update-api';
+import { isDesktopApp } from './desktop-app';
 import { useSidebarData } from './sidebar-data';
 
 /** The consequence of quitting, in one sentence (EXPERIENCE.md Interaction Rules). */
-export function quitConsequence(busy: number): string {
-  if (busy === 0) return 'Ogden Agents stops on this computer until you run npx ogden-agents again.';
+export function quitConsequence(busy: number, app = false): string {
+  // In the desktop app the way back is the app itself (story 13.11): never "npx".
+  const again = app ? 'you open the app again' : 'you run npx ogden-agents again';
+  if (busy === 0) return `Ogden Agents stops on this computer until ${again}.`;
   const agents = busy === 1 ? '1 agent is still working and will stop' : `${busy} agents are still working and will stop`;
-  return `${agents}, and Ogden Agents stays off until you run npx ogden-agents again.`;
+  return `${agents}, and Ogden Agents stays off until ${again}.`;
 }
 
 /**
@@ -25,6 +29,7 @@ export function QuitButton() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const busy = useSidebarData().sessions.filter(isBusy).length;
+  const app = isDesktopApp() || useUpdateNotice().data?.shell === 'desktop';
 
   const onConfirm = () => {
     setPending(true);
@@ -52,7 +57,7 @@ export function QuitButton() {
           <SidebarLabel>Quit Ogden Agents</SidebarLabel>
         </SidebarMenuButton>
       </AlertDialogTrigger>
-      <AlertDialogContent data-testid="quit-confirm" title="Quit Ogden Agents?" description={quitConsequence(busy)} error={error}>
+      <AlertDialogContent data-testid="quit-confirm" title="Quit Ogden Agents?" description={quitConsequence(busy, app)} error={error}>
         <AlertDialogCancel>Cancel</AlertDialogCancel>
         <AlertDialogConfirm aria-disabled={pending} onClick={pending ? undefined : onConfirm}>
           {pending ? 'Quitting...' : 'Quit'}

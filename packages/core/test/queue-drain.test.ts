@@ -15,6 +15,7 @@ import {
   type AgentPort,
   type AgentSession,
   type Core,
+  PermissionNotPendingError,
   type Permissions,
   type StartAgentSession,
 } from '../src/index.js';
@@ -188,6 +189,9 @@ describe('a queued message is sent when the turn ends (backlog bug 16)', () => {
     await settle();
     expect(await abandoned).toEqual({ outcome: 'cancelled' });
     expect(sessionEvents(core, session.id).filter((e) => e.type === 'permission.resolved').map((e) => e.payload)).toMatchObject([{ decision: 'deny', by: 'cancelled' }]);
+    // An answer that comes after is refused: the card is closed, never allowed late.
+    const requestId = sessionEvents(core, session.id).find((e) => e.type === 'permission.requested')!.payload.requestId;
+    expect(() => core.permissions.decide(workspace.id, session.id, requestId, { decision: 'allow_once' })).toThrow(PermissionNotPendingError);
     expect(agent.prompts).toEqual(['first', 'queued while the card was up']);
     expect(stateOf(core, session.id)).toBe('working');
     await agent.end();
@@ -195,6 +199,34 @@ describe('a queued message is sent when the turn ends (backlog bug 16)', () => {
     expect(userMessages(core, session.id).map(([id]) => id)).toContain(queued.messageId);
     expect(stateOf(core, session.id)).toBe('idle');
     expect(internal).toEqual([]);
+    await chat.close();
+  });
+
+  it('a Deny reason still goes first when another card was left open, then the queue', async () => {
+    const core = openTestCore();
+    const agent = turnEndAgent();
+    const { chat, workspace, session } = setUp(core, agent, core.permissions);
+    chat.sendMessage(workspace.id, session.id, 'first');
+    await settle();
+    const denied = agent.ask({ toolCallId: 't1', title: 'Run rm -rf build', kind: 'execute', command: 'rm -rf build' });
+    const abandoned = agent.ask({ toolCallId: 't2', title: 'Run npm test', kind: 'execute', command: 'npm test' });
+    await settle();
+    const queued = chat.sendMessage(workspace.id, session.id, 'queued');
+    const first = sessionEvents(core, session.id).find((e) => e.type === 'permission.requested')!;
+    core.permissions.decide(workspace.id, session.id, first.payload.requestId, { decision: 'deny', reason: 'Use the clean script.' });
+    expect(await denied).toMatchObject({ outcome: 'deny' });
+
+    await agent.end();
+    await settle();
+    expect(await abandoned).toEqual({ outcome: 'cancelled' });
+    expect(agent.prompts).toEqual(['first', 'I denied "rm -rf build": Use the clean script.']);
+    await agent.end();
+    await settle();
+    await agent.end();
+    await chat.settled();
+    expect(agent.prompts).toEqual(['first', 'I denied "rm -rf build": Use the clean script.', 'queued']);
+    expect(userMessages(core, session.id).at(-1)).toEqual([queued.messageId, 'queued']);
+    expect(stateOf(core, session.id)).toBe('idle');
     await chat.close();
   });
 

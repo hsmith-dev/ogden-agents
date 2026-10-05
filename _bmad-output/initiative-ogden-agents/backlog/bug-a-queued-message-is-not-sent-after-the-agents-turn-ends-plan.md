@@ -3,12 +3,12 @@ title: "A queued message is not sent after the agent's turn ends"
 type: 'bugfix'
 ticket: '16'
 created: '2026-10-04'
-status: 'in-progress'
+status: 'built'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'auto'
+lenses_ran: ['correctness-races']
 review_loop_iteration: 0
 context: []
 ---
@@ -52,17 +52,29 @@ context: []
 **Execution:**
 - [x] `packages/core/test/queue-drain.test.ts` -- matrix above -- fails only on the leftover card
 - [x] `tests/fixtures/fake-acp-agent.mjs`, `tests/e2e/session-behaviour.spec.ts` -- reproduce with the real adapter -- fails on main
-- [ ] `packages/core/src/chat/turns.ts` -- in `drive`, a session still `waiting` once its turn ended leaves `waiting` for `working` (cancelling the leftover cards) before the next message is completed, instead of breaking -- the turn is over, the card is stale
-- [ ] `packages/core/test/chat.test.ts` -- adjust any test that pinned the old break
+- [x] `packages/core/src/chat/turns.ts` -- in `drive`, a session still `waiting` once its turn ended leaves `waiting` for `working` (cancelling the leftover cards) before the next message is completed, instead of breaking -- the turn is over, the card is stale
+- [x] `packages/core/test/chat.test.ts` -- no test pinned the old break; nothing to adjust
 
 **Acceptance Criteria:**
 - Given the ticket's criteria 1–4, when the suites run, then the new tests pass and the existing Stop/failure/close tests still pass
 
 ## Implementation Notes
 
+- Root cause confirmed in claude-agent-acp 0.84 (`requestPermissionFromClient`): a tool call's permission request carries the SDK's abort signal as a `cancellationSignal`; on abort it sends `$/cancel_request` and races locally, so Claude goes on and ends its turn whatever the client does. acp-base / the 0.4.0 adapter ignore the withdrawal, so the session is still `waiting` at turn end.
+- Where it starts: story 2.10 part A (424a1bc), carried through 3.11's split into `chat/turns.ts`; on main (0.4.0), the 6.x chain and story/send-now-or-wait alike.
+- Every stop reason already drained (core never reads `stopReason`); only the leftover-card ending failed.
+- Fix: one line in `drive` — leave `waiting` for `working` (Permissions cancels the leftover cards) instead of breaking.
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+- Pass 1 (correctness and races, one subagent): high 0, medium 0, low 5.
+  - low, patched: assert a late `decide()` on the cancelled card is refused (`PermissionNotPendingError`); add a Deny reason plus leftover card case.
+  - low, dismissed: `armQuiet` re-armed after the cancelled answer — harmless, the new turn re-arms anyway.
+  - low, dismissed: the stop-reason variants share one core path — kept as cheap regression cover for the reported endings.
+  - low, dismissed: e2e does not read the card's "cancelled" record line — the core test asserts `by: cancelled`.
+  - low, dismissed: fixture misses a Stop between its two waits — no test sends one there.
 
 ## Verification
 

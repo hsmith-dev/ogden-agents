@@ -25,7 +25,7 @@
  * a branch is deleted only when it is one Ogden made (`ogden/…`).
  */
 import { execFile, spawn } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, type Dirent } from 'node:fs';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { isRealFolder, removeLinkOnly, RUN_SHORT_ID as RUN_ID, VcsError, type VcsCheck, type VcsDiff, type VcsHead, type VcsPort, type VcsWorktreeGitPaths } from '@ogden-agents/core';
 import { BUILD_BRANCH_PREFIX, MIN_GIT_VERSION } from '@ogden-agents/shared';
@@ -157,13 +157,27 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
    */
   const storeIsPlain = (store: string): boolean => {
     try {
+      // The agent's git is writing here while this reads: a temporary object file renamed, or a folder gone, between the
+      // listing and the check is nothing to refuse (it is no longer there); only what is still there and not plain is.
+      const gone = (error: unknown): boolean => (error as NodeJS.ErrnoException).code === 'ENOENT';
       const walk = (folder: string, depth: number): boolean => {
         if (depth > 4) return false;
-        for (const entry of readdirSync(folder, { withFileTypes: true })) {
+        let entries: Dirent[];
+        try {
+          entries = readdirSync(folder, { withFileTypes: true });
+        } catch (error) {
+          if (gone(error)) return true;
+          throw error;
+        }
+        for (const entry of entries) {
           const full = join(folder, entry.name);
-          if (entry.isDirectory()) {
-            if (!lstatSync(full).isDirectory() || !walk(full, depth + 1)) return false;
-          } else if (!entry.isFile() || lstatSync(full).isSymbolicLink() || (depth === 1 && folder.endsWith('info'))) return false;
+          try {
+            if (entry.isDirectory()) {
+              if (!lstatSync(full).isDirectory() || !walk(full, depth + 1)) return false;
+            } else if (!entry.isFile() || lstatSync(full).isSymbolicLink() || (depth === 1 && folder.endsWith('info'))) return false;
+          } catch (error) {
+            if (!gone(error)) throw error;
+          }
         }
         return true;
       };

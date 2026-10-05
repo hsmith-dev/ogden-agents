@@ -22,6 +22,15 @@ import type { Logger } from './log.js';
 const MAX_BODY_BYTES = 8 * 1024;
 
 const noStore = (c: Context) => c.header('Cache-Control', 'no-store');
+const NOT_JSON = Symbol('not json');
+/** The request's JSON body, left for core to check, or {@link NOT_JSON}. */
+async function jsonBody(c: Context): Promise<unknown> {
+  try {
+    return JSON.parse(await c.req.text()) as unknown;
+  } catch {
+    return NOT_JSON;
+  }
+}
 const tooLarge = (c: Context) => apiError(c, 413, 'invalid_request', 'The request is too large.');
 
 export interface LocalEndpointRoutesOptions {
@@ -69,12 +78,8 @@ export function registerLocalEndpointRoutes(app: Hono, { localEndpoints, log }: 
   app.post(API_ROUTES.localEndpoints, limit, async (c) => {
     noStore(c);
     // The body is parsed by core, which owns the rules; the key in it is never read here.
-    let body: unknown;
-    try {
-      body = JSON.parse(await c.req.text());
-    } catch {
-      return apiError(c, 400, 'invalid_request', 'The request body must be JSON.');
-    }
+    const body = await jsonBody(c);
+    if (body === NOT_JSON) return apiError(c, 400, 'invalid_request', 'The request body must be JSON.');
     try {
       const endpoint = await endpoints.add(body);
       log.info('local endpoint added', { loopback: endpoint.loopback, hasKey: endpoint.keySaved });
@@ -88,12 +93,8 @@ export function registerLocalEndpointRoutes(app: Hono, { localEndpoints, log }: 
     noStore(c);
     const id = idOf(c);
     if (id === undefined) return apiError(c, 404, 'not_found', 'That server is not set up.');
-    let body: unknown;
-    try {
-      body = JSON.parse(await c.req.text());
-    } catch {
-      return apiError(c, 400, 'invalid_request', 'The request body must be JSON.');
-    }
+    const body = await jsonBody(c);
+    if (body === NOT_JSON) return apiError(c, 400, 'invalid_request', 'The request body must be JSON.');
     try {
       return c.json(LocalEndpointResponse.parse({ endpoint: await endpoints.update(id, body) }));
     } catch (error) {
@@ -117,12 +118,8 @@ export function registerLocalEndpointRoutes(app: Hono, { localEndpoints, log }: 
     noStore(c);
     const id = idOf(c);
     if (id === undefined) return apiError(c, 404, 'not_found', 'That server is not set up.');
-    let body: unknown;
-    try {
-      body = JSON.parse(await c.req.text());
-    } catch {
-      return apiError(c, 400, 'invalid_request', 'The request body must be JSON.');
-    }
+    const body = await jsonBody(c);
+    if (body === NOT_JSON) return apiError(c, 400, 'invalid_request', 'The request body must be JSON.');
     try {
       return c.json(LocalEndpointResponse.parse({ endpoint: await endpoints.setKey(id, body) }));
     } catch (error) {
@@ -145,12 +142,8 @@ export function registerLocalEndpointRoutes(app: Hono, { localEndpoints, log }: 
     noStore(c);
     const id = idOf(c);
     if (id === undefined) return apiError(c, 404, 'not_found', 'That server is not set up.');
-    let body: unknown;
-    try {
-      body = JSON.parse(await c.req.text());
-    } catch {
-      return apiError(c, 400, 'invalid_request', 'The request body must be JSON.');
-    }
+    const body = await jsonBody(c);
+    if (body === NOT_JSON) return apiError(c, 400, 'invalid_request', 'The request body must be JSON.');
     try {
       return c.json(LocalEndpointResponse.parse({ endpoint: endpoints.confirm(id, body) }));
     } catch (error) {
@@ -160,12 +153,8 @@ export function registerLocalEndpointRoutes(app: Hono, { localEndpoints, log }: 
 
   app.put(API_ROUTES.localEndpointDefault, limit, async (c) => {
     noStore(c);
-    let body: unknown;
-    try {
-      body = JSON.parse(await c.req.text());
-    } catch {
-      return apiError(c, 400, 'invalid_request', 'The request body must be JSON.');
-    }
+    const body = await jsonBody(c);
+    if (body === NOT_JSON) return apiError(c, 400, 'invalid_request', 'The request body must be JSON.');
     try {
       endpoints.setDefault(body);
       return c.json(list());

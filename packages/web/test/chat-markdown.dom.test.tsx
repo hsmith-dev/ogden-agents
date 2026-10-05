@@ -256,31 +256,36 @@ describe('agent replies as Markdown (chat variant)', () => {
     expect(root.lastElementChild?.textContent).toBe('Final.');
   });
 
-  it('a huge or hostile reply renders quickly; past the cap the rest is plain text', () => {
-    const timed = (source: string) => {
-      const started = performance.now();
-      const { root } = chat(source);
-      const took = performance.now() - started;
-      const text = root.textContent;
-      const rest = root.querySelector('[data-slot="markdown-rest"]');
-      cleanup();
-      return { took, text, rest };
-    };
-    const bound = process.platform === 'win32' ? 8_000 : 3_000;
-    // Every line differs, so no line is served from the render cache.
-    const lines = (count: number, line: (index: number) => string) => Array.from({ length: count }, (_, index) => line(index)).join('\n');
+  const timed = (source: string) => {
+    const started = performance.now();
+    const { root } = chat(source);
+    const took = performance.now() - started;
+    const text = root.textContent;
+    const rest = root.querySelector('[data-slot="markdown-rest"]');
+    cleanup();
+    return { took, text, rest };
+  };
+  const bound = process.platform === 'win32' ? 8_000 : 3_000;
+  // Every line differs, so no line is served from the render cache.
+  const lines = (count: number, line: (index: number) => string) => Array.from({ length: count }, (_, index) => line(index)).join('\n');
+
+  it('hostile lines render quickly: bracket runs, pipes, address runs, unclosed images, emphasis runs', () => {
     expect(timed(lines(50, (index) => `${index}${'['.repeat(3_990)}`)).took).toBeLessThan(bound);
     expect(timed(lines(25, (index) => `${index}${'|'.repeat(3_990)}\n${'|-'.repeat(1_995)}`)).took).toBeLessThan(bound);
     expect(timed(lines(50, (index) => `${index}${'https://a.b/'.repeat(330)}`)).took).toBeLessThan(bound);
     expect(timed(lines(50, (index) => `${index}${'![a](https://x/'.repeat(260)}`)).took).toBeLessThan(bound);
     expect(timed(lines(50, (index) => `${index}${'**a_b'.repeat(790)}`)).took).toBeLessThan(bound);
-    // 200,000 characters of distinct lines: only the first part is Markdown, the rest plain text.
+  });
+
+  it('a huge reply renders quickly; past 200,000 characters the rest is plain text', () => {
     const source = lines(4_000, (index) => `Line ${index} **bold** text, \`code\` and https://example.com/${index}.`);
     const huge = timed(source);
     expect(source.length).toBeGreaterThan(MAX_MARKDOWN_LENGTH);
     expect(huge.took).toBeLessThan(bound);
     expect(huge.rest?.textContent).toBe(source.slice(MAX_MARKDOWN_LENGTH));
-    // Thousands of tiny blocks: Markdown stops at 5,000 lines.
+  });
+
+  it('thousands of tiny blocks: Markdown stops at 5,000 lines and the rest is plain text', () => {
     const blocks = timed('```\n'.repeat(40_000));
     expect(blocks.took).toBeLessThan(bound);
     expect(blocks.rest?.textContent?.length).toBe(35_000 * 4);

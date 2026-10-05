@@ -86,6 +86,8 @@ Open question from the ticket (timeout): settled by running off the start path w
 
 ## Plan Change Log
 
+Follow-up (not built): the user prefers GitHub Releases. PR #110 (`@ogden-agents/shared/release-source`, `VersionSource`) is not on `main` yet, so this story stays npm only. Once #110 lands, add the GitHub latest release as a second source in `update-check.ts` (silent on failure, token only to api.github.com as #110 does).
+
 ## Review Triage Log
 
 Pass 1 (privacy, UX/a11y). Fixed: banner status region was mounted with its content (medium; now always mounted wrapper); comments over-claimed "nothing else" in the request (low; Node default headers and env proxy now stated); `offline` doc said no request at all (low; reworded). Real but accepted: no focus move after Dismiss (low); Check now result text can go stale (low); offline names the env var (low, users set it); no rate limit on the check route (low, token holders only, 5 s cap, concurrent calls coalesce); launcher tests rely on NODE_ENV only (low, safe); dismissal not synced across open tabs (low). False: label-in-name (met); no-dash text (commands excepted); gate on routes (gate test now lists them).

@@ -6,7 +6,7 @@
  * shape fits every agent the spikes probed (6.1, 12.1, 12.2) without a
  * branch on an id.
  */
-import { AgentId as AgentIdSchema, AgentModel as AgentModelSchema, PERMISSION_MODES, type AgentAuthMethodKind, type AgentId, type AgentModel, type PermissionMode } from '@ogden-agents/shared';
+import { AgentId as AgentIdSchema, AgentModel as AgentModelSchema, MAX_HANDOFF_BRIEF_CHARS, PERMISSION_MODES, type AgentAuthMethodKind, type AgentId, type AgentModel, type PermissionMode } from '@ogden-agents/shared';
 
 /** An OS and CPU an agent's pinned install is for, as Node names them (`process.platform`-`process.arch`). */
 export const AGENT_PLATFORMS = ['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64', 'win32-x64', 'win32-arm64'] as const;
@@ -79,6 +79,20 @@ export interface AgentDescriptor {
   /** Where in a project its skills go (repo-relative, `/`-separated), for BMad setup. */
   skillsFolder: string;
   /**
+   * How the agent says it ran out of usage (a rate limit, a quota, a plan's
+   * limit): patterns tested against its own error text when a prompt fails
+   * (handoff, user decision 2026-10-04). A match makes the failure
+   * `usage_limit`, and the chat offers to continue with another agent. Kept
+   * narrow: a miss is an ordinary error. No `g` or `y` flag (they keep state).
+   */
+  usageLimitPatterns?: readonly RegExp[] | undefined;
+  /**
+   * The most characters of a handoff brief this agent is sent, from what its
+   * context holds (default {@link DEFAULT_HANDOFF_BUDGET_CHARS}, at most
+   * `MAX_HANDOFF_BRIEF_CHARS`).
+   */
+  handoffBudgetChars?: number | undefined;
+  /**
    * For an agent whose sessions don't list their models over ACP (story 11):
    * the models it offers, and how its process is told one at start, a
    * variable or a command-line flag. Switching a chat's model then restarts
@@ -92,6 +106,20 @@ export interface AgentDescriptor {
 export interface AgentStaticModels {
   list: readonly AgentModel[];
   apply: { kind: 'env'; name: string } | { kind: 'arg'; flag: string };
+}
+
+/** A handoff brief's budget for an agent that names none. */
+export const DEFAULT_HANDOFF_BUDGET_CHARS = 60_000;
+
+/** The handoff brief budget of `descriptor`: its own, within the hard cap, else the default. */
+export function handoffBudget(descriptor: Pick<AgentDescriptor, 'handoffBudgetChars'>): number {
+  const own = descriptor.handoffBudgetChars;
+  return own === undefined ? DEFAULT_HANDOFF_BUDGET_CHARS : Math.min(MAX_HANDOFF_BRIEF_CHARS, own);
+}
+
+/** Whether `text` (an agent's own error text) says, by `descriptor`'s patterns, that it ran out of usage. */
+export function isUsageLimit(descriptor: Pick<AgentDescriptor, 'usageLimitPatterns'>, text: string): boolean {
+  return text !== '' && (descriptor.usageLimitPatterns ?? []).some((pattern) => pattern.test(text));
 }
 
 const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/;
@@ -156,6 +184,14 @@ export function agentDescriptorProblems(descriptor: AgentDescriptor): string[] {
     }
     if (apply.kind === 'env' && !ENV_NAME.test(apply.name)) at(`${apply.name} is not an environment variable name`);
     if (apply.kind === 'arg' && !/^--?[A-Za-z][A-Za-z0-9-]*$/.test(apply.flag)) at(`${apply.flag} is not a command-line flag`);
+  }
+  for (const pattern of descriptor.usageLimitPatterns ?? []) {
+    if (!(pattern instanceof RegExp)) at('a usage-limit pattern is not a regular expression');
+    else if (pattern.global || pattern.sticky) at(`the usage-limit pattern ${String(pattern)} has the g or y flag`);
+  }
+  const budget = descriptor.handoffBudgetChars;
+  if (budget !== undefined && (!Number.isInteger(budget) || budget < 1_000 || budget > MAX_HANDOFF_BRIEF_CHARS)) {
+    at(`the handoff budget ${String(budget)} is not a whole number from 1000 to ${MAX_HANDOFF_BRIEF_CHARS}`);
   }
   if (!isRelativeFolder(descriptor.skillsFolder)) at(`the skills folder ${JSON.stringify(descriptor.skillsFolder)} is not a plain repo-relative path`);
   return problems;

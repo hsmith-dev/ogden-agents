@@ -50,6 +50,7 @@ describe('sessionView', () => {
       checkIn: undefined,
       starting: false,
       lastUserText: undefined,
+      agentId: undefined,
     });
   });
 
@@ -371,5 +372,33 @@ describe('document cards in the transcript (story 4.7)', () => {
 
   it("ignores another session's documents", () => {
     expect(sessionView([created(), event('session.document_written', { path: 'x/a.md', toolCallId: null, next: null }, 'ses_2')], 'ses_1').items).toEqual([]);
+  });
+
+  it('handoff: a divider where the chat continued with another agent, each reply labelled by the agent that wrote it', () => {
+    const begun = event('session.created', { session: { id: 'ses_1', state: 'idle', agentId: 'first-agent' } });
+    const events = [
+      begun,
+      completed('u1', 'user', 'Build it'),
+      completed('a1', 'agent', 'Built half'),
+      stateChanged('error', 'working'),
+      event('session.agent_changed', { sessionId: 'ses_1', agentId: 'second-agent', previous: 'first-agent', brief: 'b', resumes: false }),
+      completed('u2', 'user', 'Please continue'),
+      delta('a2', 'Built the rest'),
+    ];
+    const view = sessionView(events, 'ses_1');
+    expect(view.agentId).toBe('second-agent');
+    expect(view.items.map((item) => item.type)).toEqual(['message', 'message', 'agent_changed', 'message', 'message']);
+    expect(view.items[2]).toMatchObject({ type: 'agent_changed', agentId: 'second-agent', previous: 'first-agent' });
+    expect(view.messages.find((message) => message.messageId === 'a1')?.agentId).toBe('first-agent');
+    expect(view.messages.find((message) => message.messageId === 'a2')?.agentId).toBe('second-agent');
+    expect(view.messages.find((message) => message.messageId === 'u2')?.agentId).toBeUndefined();
+  });
+
+  it('handoff: a chat stored before agents could be chosen labels its earlier replies with the agent that left', () => {
+    const view = sessionView(
+      [created(), completed('a1', 'agent', 'Old reply'), event('session.agent_changed', { sessionId: 'ses_1', agentId: 'second-agent', previous: 'first-agent', brief: '', resumes: false })],
+      'ses_1',
+    );
+    expect(view.messages[0]?.agentId).toBe('first-agent');
   });
 });

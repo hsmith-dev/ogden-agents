@@ -43,6 +43,9 @@
 //                  ("Run npm run build"), then silence until cancelled
 //   "quiet"        one chunk, then silence until cancelled (no tool call)
 //   "fail"         the prompt fails with a JSON-RPC internal error
+//   "usage-limit"  the prompt fails with a JSON-RPC internal error whose
+//                  message is a plan's usage-limit notice (handoff: the
+//                  agent ran out of usage)
 //   "whoami"       replies `agent=<FAKE_ACP_AGENT_NAME, or default>`: which
 //                  registered agent a chat reached (epic 6, two agents at once),
 //                  then ` home=<value>` when FAKE_ACP_HOME_ENV names the
@@ -546,6 +549,7 @@ acp
       process.exit(1);
     }
     if (text === 'fail') throw acp.RequestError.internalError(undefined, 'the fake agent failed on purpose');
+    if (text === 'usage-limit') throw acp.RequestError.internalError(undefined, 'Claude AI usage limit reached|1760000000');
     if (text === 'auth-expired') throw acp.RequestError.authRequired(undefined, 'the fake agent needs a new sign-in');
     if (text.startsWith('/')) {
       await say(client, params.sessionId, `command=${text} primed=${primed}`);

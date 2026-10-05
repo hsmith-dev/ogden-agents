@@ -21,6 +21,7 @@ export function acpReasons(displayName: string) {
     couldNotSwitchMode: `${displayName} couldn't switch its permission mode.`,
     noSuchModel: `${displayName} doesn't offer that model here.`,
     couldNotSwitchModel: `${displayName} couldn't switch its model.`,
+    usageLimit: `${displayName} has reached its usage limit. Continue this chat with another agent while it cools down, or try again later.`,
   } as const;
 }
 

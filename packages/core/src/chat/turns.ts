@@ -15,7 +15,7 @@ import {
 } from '../errors.js';
 import type { Agents } from './agents.js';
 import type { CheckIn } from './check-in.js';
-import { AGENT_SESSION_REF, DELTA_INTERVAL_MS, MAX_QUEUED_MESSAGES } from './constants.js';
+import { AGENT_SESSION_REF, DELTA_INTERVAL_MS, HANDOFF_PENDING_REF, MAX_QUEUED_MESSAGES } from './constants.js';
 import type { ChatContext } from './context.js';
 import type { Models } from './model.js';
 import type { PermissionModes } from './permission-mode.js';
@@ -72,7 +72,8 @@ export function createTurns(
       if (entry !== undefined) endTurn(sessionId, entry);
       entities.setSessionState(sessionId, 'error', {
         reason: error.message,
-        ...(error.code === 'auth_required' ? { errorCode: error.code } : {}),
+        // The UI acts on these: Sign in again (9.4), or continue with another agent (handoff).
+        ...(error.code === 'auth_required' || error.code === 'usage_limit' ? { errorCode: error.code } : {}),
       });
     } catch (caught) {
       internalError(sessionId, caught);
@@ -204,7 +205,7 @@ export function createTurns(
       if (!entry.restartPending || attempt >= 2) break;
     }
     try {
-      const { prompt, primed } = promptFor(session.id, entry, messageId, text);
+      const { prompt, primed, handoff } = promptFor(session.id, entry, messageId, text);
       const prompting = started.prompt(prompt);
       // Abandoned if the agent is dropped; its late rejection is not unhandled.
       prompting.catch(() => undefined);
@@ -218,6 +219,8 @@ export function createTurns(
           entry.unsavedRef = undefined;
         }
       }
+      // The new agent has its handoff brief now (handoff): later prompts go without it.
+      if (handoff && !turn.failed) entities.setSessionAdapterRefs(session.id, { [HANDOFF_PENDING_REF]: '' });
       // The adapter reports `idle` itself; this only covers one that didn't. An `error` it reported stays.
       if (!turn.failed) apply(session.id, entry, { type: 'state', state: 'idle' });
       // Its guards stopped fitting the mode during the turn: restarted now that the turn is over.

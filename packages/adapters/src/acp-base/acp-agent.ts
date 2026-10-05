@@ -48,6 +48,7 @@ import * as acp from '@agentclientprotocol/sdk';
 import {
   AgentError,
   declaredModes,
+  isUsageLimit,
   type AgentAuthMethod,
   type AgentDescriptor,
   type AgentErrorCode,
@@ -79,6 +80,23 @@ const OUTPUT_TAIL_CHARS = 2_000;
 /** ACP's `-32000`: the agent needs the user to sign in again (9.4). */
 function isAuthRequired(error: unknown): boolean {
   return error instanceof acp.RequestError && error.code === -32000;
+}
+
+/**
+ * The agent's own words for a failed request, for its descriptor's
+ * usage-limit patterns (handoff): the error's message and its data, as text.
+ * Read in memory only, never logged or shown.
+ */
+function errorText(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const data = error instanceof acp.RequestError ? error.data : undefined;
+  let extra = '';
+  try {
+    extra = data === undefined ? '' : typeof data === 'string' ? data : JSON.stringify(data);
+  } catch {
+    // Data that can't be read adds nothing.
+  }
+  return `${error.message}\n${extra}`;
 }
 
 /** An `AgentPort` for the ACP agent `descriptor` describes. */
@@ -629,16 +647,22 @@ async function startOnChild(
       } catch (error) {
         // A closed connection means the process went away (its stdout can end before its exit event).
         const processGone = exited || connection.signal.aborted;
+        // The agent said it ran out of usage (its descriptor's patterns; handoff): the session stays usable.
+        const limited = !processGone && !isAuthRequired(error) && !(error instanceof AgentError) && isUsageLimit(descriptor, errorText(error));
         const failure =
           error instanceof AgentError
             ? error
-            : new AgentError(!processGone && isAuthRequired(error) ? 'auth_required' : 'agent_failed', processGone ? STOPPED : plainReason(error, FAILED), {
-                details: { reason: mask(error instanceof Error ? error.message : String(error)) },
-                cause: error,
-                output: output(),
-              });
+            : new AgentError(
+                limited ? 'usage_limit' : !processGone && isAuthRequired(error) ? 'auth_required' : 'agent_failed',
+                processGone ? STOPPED : limited ? reasons.usageLimit : plainReason(error, FAILED),
+                {
+                  details: { reason: mask(error instanceof Error ? error.message : String(error)) },
+                  cause: error,
+                  output: output(),
+                },
+              );
         if (processGone) reportGone(failure.message);
-        else setState('error', failure.message, failure.code === 'auth_required' ? failure.code : undefined);
+        else setState('error', failure.message, failure.code === 'auth_required' || failure.code === 'usage_limit' ? failure.code : undefined);
         throw failure;
       }
     },

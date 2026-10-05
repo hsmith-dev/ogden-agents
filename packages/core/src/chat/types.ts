@@ -3,7 +3,7 @@
  * `ChatOptions`, `TerminalViewer` and `Chat`, and the state the chat modules
  * share by reference (`Live`, `Terminal`, `Turn`).
  */
-import type { AgentId, ChatAgent, PermissionMode, SessionResponse, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import type { AgentId, ChatAgent, HandoffPreviewResponse, PermissionMode, SessionResponse, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, Workspace, WorkspaceId } from '@ogden-agents/shared';
 import type { AgentModels } from '../agent-models.js';
 import type { AgentError, AgentRegistry, AgentSession } from '../agent-port.js';
 import type { AgentReadiness } from '../agent-setup-types.js';
@@ -70,6 +70,8 @@ export interface ChatOptions {
    * choice, and only this run's lists are known.
    */
   agentModels?: Pick<AgentModels, 'defaultModel' | 'lastModels' | 'rememberModels'>;
+  /** How long a handoff preview's token can be used. Default `HANDOFF_PREVIEW_TTL_MS`. */
+  handoffPreviewTtlMs?: number;
   /** How long an agent may take to take a permission mode before it is dropped. Default `PERMISSION_MODE_TIMEOUT_MS`. */
   permissionModeTimeoutMs?: number;
   /**
@@ -247,6 +249,30 @@ export interface Chat {
   setModel(workspaceId: WorkspaceId, sessionId: SessionId, model: string | null): Session;
   /** The models the chat's picker offers and the one its agent reported running on (story 11). */
   modelOptions(workspaceId: WorkspaceId, sessionId: SessionId): NonNullable<SessionResponse['models']>;
+  /**
+   * What continuing the chat with `agentId` would send (handoff): the brief
+   * built from the chat's own events, secrets masked, at most the agent's
+   * budget; who receives it; and the chat's mode afterwards; with a
+   * single-use, short-lived token for exactly that (chat, agent, mode,
+   * masked brief). With `brief` (the user's edit), the same for it, refused
+   * over the budget. Changes nothing. Refused as {@link handOff} is.
+   */
+  handoffPreview(workspaceId: WorkspaceId, sessionId: SessionId, agentId: AgentId, brief?: string): Promise<HandoffPreviewResponse>;
+  /**
+   * Continues the chat with `agentId` (handoff): its agent stops, the chat's
+   * mode carries over when the new agent declares it (else Ask, cause
+   * `handoff`), `session.agent_changed` records the switch with `brief`
+   * (masked again), and `message` is sent, with the brief before it. Refused,
+   * changing nothing: `DriverIsTerminalError` while the terminal drives,
+   * `SessionNotIdleError` while it works, waits or switches,
+   * `InvalidOperationError` for its own agent, a brief over the agent's
+   * budget or an empty message, `HandoffNotPreviewedError` when
+   * `previewToken` isn't an unused, unexpired token of a preview of this
+   * exact chat, agent, mode and masked brief (it is used up either way),
+   * `UnknownAgentError`, `AgentNotReadyError` (trust, install, sign-in),
+   * `NotFoundError`.
+   */
+  handOff(workspaceId: WorkspaceId, sessionId: SessionId, request: { agentId: AgentId; brief: string; message: string; previewToken: string; model?: string | null | undefined }): Promise<{ session: Session; messageId: string }>;
   /** Resolves once no agent turn is running (tests, shutdown). */
   settled(): Promise<void>;
   /**

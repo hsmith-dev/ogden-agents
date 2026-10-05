@@ -7,6 +7,24 @@ export const RESTARTED_REASON = 'Ogden Agents was restarted';
 export const AGENT_SESSION_REF = 'agentSessionId';
 
 /**
+ * The adapter ref that keeps `agentId`'s own agent session in this chat while
+ * another agent has it (handoff), so the chat reopens it when it comes back.
+ */
+export const agentSessionRefOf = (agentId: string): string => `${AGENT_SESSION_REF}@${agentId}`;
+
+/** The adapter ref with the seq of the `session.agent_changed` at which `agentId` left this chat: its brief on return starts after it. */
+export const handoffLeftRefOf = (agentId: string): string => `handoffLeftAt@${agentId}`;
+
+/** How long a handoff preview's token can be used (handoff): long enough to read and edit a summary. */
+export const HANDOFF_PREVIEW_TTL_MS = 10 * 60_000;
+
+/** The most handoff previews held unused at once; past it the oldest are forgotten. */
+export const MAX_HANDOFF_PREVIEWS = 200;
+
+/** The adapter ref that is `1` from a handoff until a prompt carrying its brief succeeded (else empty). */
+export const HANDOFF_PENDING_REF = 'handoffPending';
+
+/**
  * The adapter ref that marks where the CLI's record stood when the session's
  * terminal opened (story 3.3): its last turn's id, `start` when it had none,
  * or empty when it couldn't be read. Switching back imports the turns after it.

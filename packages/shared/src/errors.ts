@@ -36,6 +36,12 @@ export const API_ERROR_CODES = [
   'mode_unavailable',
   /** A model the chat's agent, or its session, doesn't list (409; story 11): nothing changed. */
   'model_unavailable',
+  /**
+   * A handoff with no matching preview (409; handoff): its preview token is
+   * missing, used, expired, or was issued for another brief, agent or chat.
+   * Nothing changed; preview again.
+   */
+  'handoff_not_previewed',
   /** A new chat named an agent this install doesn't have (400; epic 6): nothing created. */
   'agent_unknown',
   /**

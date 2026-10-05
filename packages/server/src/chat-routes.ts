@@ -9,7 +9,7 @@
  * driver switch; story 3.2 gives its refusals their own codes and adds the
  * session's `terminal` to `GET` session. Permission modes add the chat's
  * mode (`PUT`, core enforces who may choose which) and `permissionModes` on
- * `GET` session.
+ * `GET` session. Handoff adds the preview and the switch to another agent.
  */
 import {
   ConfirmationRequiredError,
@@ -20,6 +20,7 @@ import {
   ModeUnavailableError,
   ModelUnavailableError,
   FeatureUnavailableError,
+  HandoffNotPreviewedError,
   InvalidOperationError,
   NotFoundError,
   QueueFullError,
@@ -37,6 +38,11 @@ import {
 import {
   API_ROUTES,
   ChatAgentsResponse,
+  HandoffBriefPreviewRequest,
+  HandoffPreviewQuery,
+  HandoffPreviewResponse,
+  HandoffRequest,
+  HandoffResponse,
   CreateSessionRequest,
   CreateWorkspaceRequest,
   FEATURE_UNAVAILABLE_MESSAGE,
@@ -112,6 +118,8 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     if (error instanceof ConfirmationRequiredError) return apiError(c, 400, 'confirmation_required', error.message);
     if (error instanceof ModeUnavailableError) return apiError(c, 409, 'mode_unavailable', error.message);
     if (error instanceof ModelUnavailableError) return apiError(c, 409, 'model_unavailable', error.message);
+    // A handoff no preview covers (server-enforced disclosure): nothing changed.
+    if (error instanceof HandoffNotPreviewedError) return apiError(c, 409, 'handoff_not_previewed', error.message);
     if (error instanceof FeatureUnavailableError) return apiError(c, 409, 'feature_unavailable', FEATURE_UNAVAILABLE_MESSAGE);
     if (error instanceof SessionBusyError) {
       return apiError(c, 409, 'session_busy', 'The agent is still answering. Send your message when it is done.');
@@ -244,6 +252,51 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
       log.info('chat renamed', { workspaceId: scope.workspaceId, sessionId: scope.sessionId, named: session.title !== null });
       return c.json(SessionResponse.parse({ session }));
     } catch (error) {
+      return refusal(c, error);
+    }
+  });
+
+  // Handoff (user decision 2026-10-04): what continuing the chat with another agent would send; nothing changes.
+  app.get(API_ROUTES.sessionHandoff, async (c) => {
+    const scope = ids(c);
+    if (scope?.sessionId === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+    const query = HandoffPreviewQuery.safeParse({ agentId: c.req.query('agentId') });
+    if (!query.success) return apiError(c, 400, 'invalid_request', 'Pick the agent to continue with.');
+    try {
+      return c.json(HandoffPreviewResponse.parse(await chat.handoffPreview(scope.workspaceId, scope.sessionId, query.data.agentId)));
+    } catch (error) {
+      return refusal(c, error);
+    }
+  });
+
+  // The preview again for the brief as the user edited it, with a token for exactly it; nothing changes.
+  app.post(API_ROUTES.sessionHandoffPreview, limit, async (c) => {
+    const scope = ids(c);
+    if (scope?.sessionId === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+    const body = await readBody(c, HandoffBriefPreviewRequest);
+    if (!body.ok) return body.response;
+    try {
+      // The brief is the user's content: never logged.
+      return c.json(HandoffPreviewResponse.parse(await chat.handoffPreview(scope.workspaceId, scope.sessionId, body.value.agentId, body.value.brief)));
+    } catch (error) {
+      return refusal(c, error);
+    }
+  });
+
+  // The chat continues with another agent: core checks who drives, the state, the agent, the brief's size and its preview.
+  app.post(API_ROUTES.sessionHandoff, limit, async (c) => {
+    const scope = ids(c);
+    if (scope?.sessionId === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+    const body = await readBody(c, HandoffRequest);
+    if (!body.ok) return body.response;
+    try {
+      const before = chat.getSession(scope.workspaceId, scope.sessionId).agentId;
+      // The brief and the message are the user's content: never logged.
+      const result = await chat.handOff(scope.workspaceId, scope.sessionId, body.value);
+      log.info('chat continued with another agent', { workspaceId: scope.workspaceId, sessionId: scope.sessionId, agentId: result.session.agentId, previous: before });
+      return c.json(HandoffResponse.parse(result), 202);
+    } catch (error) {
+      if (error instanceof CoreError) log.info('chat handoff refused', { workspaceId: scope.workspaceId, sessionId: scope.sessionId, agentId: body.value.agentId, code: error.code });
       return refusal(c, error);
     }
   });

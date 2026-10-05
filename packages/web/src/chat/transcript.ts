@@ -34,6 +34,13 @@ export interface TranscriptMessage {
    * `deny_reason` was a Deny's reason core sent. Absent otherwise.
    */
   origin?: 'deny_reason' | 'terminal';
+  /**
+   * The agent that wrote an agent message, when the chat named it (handoff:
+   * a chat continued with another agent keeps each reply labelled by its
+   * own). Absent on user messages and in sessions from before agents could
+   * be chosen.
+   */
+  agentId?: string;
 }
 
 /** One tool call as it stands now (story 2.10): each event carries the whole call; diffs only when they changed. */
@@ -96,7 +103,9 @@ export type TranscriptItem =
    * A document the planning session wrote (story 4.7, `session.document_written`):
    * one per path, where its latest write happened.
    */
-  | { type: 'document'; path: string; next: CatalogNext | null; toolCallId: string | null; at: string };
+  | { type: 'document'; path: string; next: CatalogNext | null; toolCallId: string | null; at: string }
+  /** The user continued the chat with another agent here (handoff, `session.agent_changed`): the "Continued with" divider. */
+  | { type: 'agent_changed'; agentId: string; previous: string; at: string };
 
 export interface SessionView {
   /** Whether the event log has this session at all (its `session.created`). */
@@ -125,6 +134,8 @@ export interface SessionView {
   starting: boolean;
   /** The text of the latest user message that was sent, for Try again. */
   lastUserText: string | undefined;
+  /** The chat's agent as its events say: the latest `session.agent_changed`, else the one it was created with. */
+  agentId: string | undefined;
 }
 
 /**
@@ -151,6 +162,7 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
     checkIn: undefined,
     starting: false,
     lastUserText: undefined,
+    agentId: undefined,
   };
   const byId = new Map<string, TranscriptMessage>();
   const permissions = new Map<string, TranscriptPermission>();
@@ -160,7 +172,7 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
   const message = (messageId: string, role: MessageRole) => {
     let found = byId.get(messageId);
     if (found === undefined) {
-      found = { messageId, role, text: '', streaming: true };
+      found = { messageId, role, text: '', streaming: true, ...(role === 'agent' && view.agentId !== undefined ? { agentId: view.agentId } : {}) };
       byId.set(messageId, found);
       view.messages.push(found);
       view.items.push({ type: 'message', message: found });
@@ -202,6 +214,13 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
       case 'session.created':
         view.known = true;
         view.state = event.payload.session.state;
+        view.agentId = event.payload.session.agentId;
+        break;
+      case 'session.agent_changed':
+        // A session from before agents could be chosen names no agent: its earlier replies were the one that leaves.
+        for (const earlier of view.messages) if (earlier.role === 'agent' && earlier.agentId === undefined) earlier.agentId = event.payload.previous;
+        view.agentId = event.payload.agentId;
+        view.items.push({ type: 'agent_changed', agentId: event.payload.agentId, previous: event.payload.previous, at: event.at });
         break;
       case 'session.state_changed':
         view.state = event.payload.state;

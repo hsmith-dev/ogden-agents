@@ -70,6 +70,7 @@ Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim fr
 - Story 11 (models): no two-tab test for model and default-model changes. From the story 11 review. (log: "No two-tab test for model and default-model changes")
 - Story 11 (models): the refusal Notice mounts with its text, so some screen readers may miss it. From the story 11 review. (log: "The model refusal Notice mounts with its text")
 - Story 11 (models): Default models in Settings use a menu, not a labelled field, and vanish while loading or on failure. From the story 11 review. (log: "Default models in Settings use a menu rather than a labelled form field")
+- Unowned (handoff follow-up): one transaction for mode fallback and agent change, a whole-prompt budget, focusable unavailable agents, focus return from the menu. From story 15 (handoff) review F12, F15, F19, F20. (log: "Handoff hardening: one transaction for the mode fallback and the agent change")
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
 
@@ -601,3 +602,12 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-each-chat-runs-on-a-model-the-user-can-switch-plan.md`
   summary: Default models in Settings use a menu rather than a labelled form field, and vanish while the agent list loads or fails.
   evidence: DefaultModelsSection returns null without data and uses DropdownMenu checkbox items; the Default agent section uses a labelled RadioGroup.
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-continue-a-chat-with-another-agent-plan.md`
+  summary: Bind a handoff POST to the preview the user saw (preview token or matching agent/mode/resumes), so provider disclosure and the stated mode are enforced by the server, not only the dialog.
+  evidence: Security review F8/F9; today any tab-token holder can POST a handoff without a preview, and a mode changed in another tab between preview and confirm is not re-confirmed.
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-continue-a-chat-with-another-agent-plan.md`
+  summary: Handoff hardening: one transaction for the mode fallback and the agent change; budget the whole first prompt (brief + message + resume transcript), not only the brief; make unavailable agents in the dialog focusable with their reason; return focus to "Chat actions" when the dialog opened from the menu closes.
+  evidence: Review F12, F15, F19, F20; all low and not reached in normal use (a session deleted mid-handoff, a resume fallback after switching back, keyboard-only browsing of unavailable agents).
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-continue-a-chat-with-another-agent-plan.md`
+  summary: Resolved: "Bind a handoff POST to the preview the user saw" (decided 2026-10-04: enforce it now). Every preview issues a single-use token (10 minutes, in memory) bound by SHA-256 to the chat, the target agent, the mode change it states and the exact masked brief; an edited brief is previewed again (`POST …/handoff/preview`) for its own token; a handoff without a matching token is refused with 409 `handoff_not_previewed`, appending nothing.
+  evidence: `packages/core/src/chat/handoff.ts` (`issue`, `redeem`); `packages/core/test/agent-handoff.test.ts` "refuses a handoff no preview covers", "a preview token expires"; `packages/server/test/handoff.test.ts`.

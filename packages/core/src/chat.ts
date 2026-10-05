@@ -66,9 +66,11 @@
  * off) reaches the live agent, and a terminal handed back by Developer mode
  * is stopped.
  *
- * Epic 6: each session carries the agent it was started with (`agentId`),
- * looked up in the agent registry the server wires; a session stored before
- * agents could be chosen is the registry's legacy agent.
+ * Epic 6: each session carries its agent (`agentId`), looked up in the agent
+ * registry the server wires; a session stored before agents could be chosen
+ * is the registry's legacy agent. Handoff (`chat/handoff.ts`): the user can
+ * continue a chat with another agent, which then reads a brief Ogden built
+ * from the chat's events.
  *
  * Story 11: each chat has a model (`chat/model.ts`), the agent's own id or
  * `null` for its own choice, set at creation from the project's or the
@@ -82,6 +84,7 @@ import { createCheckIn } from './chat/check-in.js';
 import { RESTARTED_REASON } from './chat/constants.js';
 import { createChatContext } from './chat/context.js';
 import { createModels } from './chat/model.js';
+import { createHandoff } from './chat/handoff.js';
 import { createModeApplier, createPermissionModes } from './chat/permission-mode.js';
 import { createPermissionRequests } from './chat/permission-requests.js';
 import { createReplies } from './chat/replies.js';
@@ -130,6 +133,7 @@ export function createChat(options: ChatOptions): Chat {
   const terminal = createTerminal(ctx, { releaseAgent, storedAgentSessionId });
   const { stopTerminal, closeTerminals } = terminal;
   const workspaces = createWorkspaces(ctx, { drop, stopTerminal, initialModel: models.initialModel });
+  const handoff = createHandoff(ctx, { releaseAgent, storedAgentSessionId, sendMessage: turns.sendMessage, initialModel: models.initialModel });
   // A stop that couldn't import the terminal's turns (a crash): they come in now (story 3.4).
   terminal.importAfterRestart();
   // Changes of a chat's stored mode made elsewhere reach its agent or its terminal (permission modes).
@@ -161,6 +165,8 @@ export function createChat(options: ChatOptions): Chat {
     permissionModeOptions: modes.permissionModeOptions,
     setModel: (workspaceId, sessionId, model) => withAgentId(models.setModel(workspaceId, sessionId, model)),
     modelOptions: models.modelOptions,
+    handoffPreview: handoff.handoffPreview,
+    handOff: handoff.handOff,
 
     async settled() {
       while (running.size > 0) await Promise.all([...running]);

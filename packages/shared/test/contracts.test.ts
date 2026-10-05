@@ -125,6 +125,11 @@ const EVENTS: Array<[type: string, valid: Record<string, unknown>, invalid: Reco
     { ...onSession, payload: { sessionId: '' } },
   ],
   [
+    'session.agent_changed',
+    { ...onSession, payload: { sessionId: sesId, agentId: 'second-agent', previous: 'first-agent', brief: 'Handoff', resumes: false } },
+    { ...onSession, payload: { sessionId: sesId, agentId: 'Second Agent', previous: 'first-agent', brief: 'Handoff', resumes: false } },
+  ],
+  [
     'permission.requested',
     {
       ...onSession,
@@ -417,7 +422,7 @@ describe('the permission mode contracts (permission modes)', () => {
   });
 
   it('session.permission_mode_changed names the mode, the previous one and the cause; its reason is optional', () => {
-    expect(PermissionModeChangeCause.options).toEqual(['user', 'developer_mode_off', 'restart', 'agent']);
+    expect(PermissionModeChangeCause.options).toEqual(['user', 'developer_mode_off', 'restart', 'agent', 'handoff']);
     const base = { type: 'session.permission_mode_changed', ...onSession, ...assigned, payload: { sessionId: sesId, mode: 'auto', previous: 'ask', cause: 'user' } };
     expect(CoreEvent.parse(base)).toMatchObject({ payload: { mode: 'auto', previous: 'ask', cause: 'user' } });
     expect(CoreEvent.safeParse({ ...base, payload: { ...base.payload, cause: 'whim' } }).success).toBe(false);

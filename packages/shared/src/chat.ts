@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { BmadPieceSet } from './bmad.js';
-import { AgentAuthMethodKind, AgentAuthState, AgentId, AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, MessageId, PermissionDecision } from './events.js';
+import { AgentAuthMethodKind, AgentAuthState, AgentId, AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, MAX_HANDOFF_BRIEF_CHARS, MessageId, PermissionDecision } from './events.js';
 import { AgentModel, DefaultModeNotice, ModelId, PermissionMode, Session, Workspace } from './entities.js';
 import { PermissionRuleId, WorkspaceId } from './ids.js';
 import { AgentInstallState } from './setup.js';
@@ -172,6 +172,80 @@ export type SendMessageRequest = z.infer<typeof SendMessageRequest>;
  */
 export const SendMessageResponse = z.object({ messageId: MessageId, queued: z.boolean() });
 export type SendMessageResponse = z.infer<typeof SendMessageResponse>;
+
+// ---------------------------------------------------------------------------
+// Handoff: continuing a chat with another agent (user decision 2026-10-04).
+// ---------------------------------------------------------------------------
+
+/** The message the handoff dialog starts with, for the new agent. */
+export const DEFAULT_HANDOFF_MESSAGE = 'Please continue where we left off.';
+
+/** `GET …/sessions/:sesId/handoff?agentId=`: which agent the chat would go to. */
+export const HandoffPreviewQuery = z.object({ agentId: AgentId });
+export type HandoffPreviewQuery = z.infer<typeof HandoffPreviewQuery>;
+
+/**
+ * What continuing the chat with `agent` would send, before anything is sent:
+ * the brief Ogden built from the chat's own events (secrets masked, at most
+ * `maxChars`), who receives it (`provider`, named in the confirmation), the
+ * chat's permission mode afterwards and, when it falls back to Ask, why
+ * (`modeNote`), and whether the agent reopens a session it had in this chat
+ * (`resumes`: the brief then covers only what happened since it left).
+ */
+export const HandoffPreviewResponse = z.object({
+  agent: z.object({ agentId: AgentId, displayName: z.string().min(1), provider: z.string().min(1) }),
+  brief: z.string().max(MAX_HANDOFF_BRIEF_CHARS),
+  maxChars: z.number().int().positive().max(MAX_HANDOFF_BRIEF_CHARS),
+  permissionMode: PermissionMode,
+  modeNote: z.string().min(1).optional(),
+  resumes: z.boolean(),
+  /**
+   * The server's proof that this exact brief was shown for this agent and
+   * chat: single-use, short-lived, and required by the handoff. An edited
+   * brief gets its own with `POST …/handoff/preview`.
+   */
+  previewToken: z.string().min(32).max(128),
+});
+export type HandoffPreviewResponse = z.infer<typeof HandoffPreviewResponse>;
+
+/**
+ * `POST …/handoff/preview`: the preview again for the brief as the user
+ * edited it (masked, refused over the agent's budget), with a token for it.
+ */
+export const HandoffBriefPreviewRequest = z.object({
+  agentId: AgentId,
+  brief: z.string().max(MAX_HANDOFF_BRIEF_CHARS, `A handoff brief can be at most ${MAX_HANDOFF_BRIEF_CHARS} characters.`),
+});
+export type HandoffBriefPreviewRequest = z.infer<typeof HandoffBriefPreviewRequest>;
+
+/**
+ * `POST …/sessions/:sesId/handoff`: continue the chat with `agentId`, telling
+ * it `brief` (as the user edited it; the server masks it again and refuses
+ * one over the agent's budget) and then `message`. `previewToken` must be the
+ * unused, unexpired token of a preview of this same masked brief, agent and
+ * chat, or it is refused (409 `handoff_not_previewed`).
+ */
+export const HandoffRequest = z.object({
+  agentId: AgentId,
+  /** The token of the preview that showed exactly this brief (masked) for this agent and chat. */
+  previewToken: z.string().min(1).max(128),
+  brief: z.string().max(MAX_HANDOFF_BRIEF_CHARS, `A handoff brief can be at most ${MAX_HANDOFF_BRIEF_CHARS} characters.`),
+  message: z
+    .string()
+    .refine((text) => text.trim().length > 0, 'Write a message for the agent first.')
+    .pipe(z.string().max(MAX_MESSAGE_LENGTH, `A message can be at most ${MAX_MESSAGE_LENGTH} characters.`)),
+  /**
+   * The model the chat runs on with its new agent (story 11; `null`: the
+   * agent's own choice). Absent: the project's default for that agent, else
+   * the install's, else the agent's own choice.
+   */
+  model: ModelId.nullable().optional(),
+});
+export type HandoffRequest = z.infer<typeof HandoffRequest>;
+
+/** The chat with its new agent, and the user's message sent to it. */
+export const HandoffResponse = z.object({ session: Session, messageId: MessageId });
+export type HandoffResponse = z.infer<typeof HandoffResponse>;
 
 // ---------------------------------------------------------------------------
 // Workspaces and sessions (story 2.3 contracts; filled by 2.5, 2.8, 2.10).

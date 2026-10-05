@@ -74,4 +74,13 @@ export const ANTIGRAVITY_DESCRIPTOR: Readonly<AgentDescriptor> = Object.freeze<A
   // Its own workspace-trust question arrives as a permission card; Ogden's per-project trust (4.2) is not needed.
   needsProjectTrust: false,
   skillsFolder: '.agents/skills',
+  // How Antigravity (Gemini models) says a quota or rate limit was reached (handoff, 2026-10-04): Google's
+  // `RESOURCE_EXHAUSTED` and its quota wording. Narrow on purpose; the user's live check confirms them.
+  usageLimitPatterns: [
+    /\bRESOURCE_EXHAUSTED\b/,
+    /\bquota (?:exceeded|exhausted|has been exhausted)\b/i,
+    /exhausted your (?:capacity|quota)/i,
+  ],
+  // Gemini models hold far more context than a brief needs.
+  handoffBudgetChars: 150_000,
 });

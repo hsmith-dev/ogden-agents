@@ -3,13 +3,13 @@ title: 'The app updates itself: check, download, verify, prompt and restart'
 type: 'feature'
 ticket: '10'
 created: '2026-10-05'
-status: 'in-progress'
+status: 'built'
 baseline_revision: '4a3ab98b8bc3cb1ffe3dd926fd0171cbdf9bf53d'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-desktop-app/epic-desktop-app.md'
@@ -56,8 +56,8 @@ context:
 - [x] updater module, server calls, menu check, start check
 - [x] failure reasons carried to the page; release notes shown in About
 - [x] fake release server, update end-to-end script, CI steps (build N+1, run it)
-- [ ] CI green on macOS and Windows legs
-- [ ] review and triage
+- [x] CI green on macOS and Windows legs (see the triage log for what the update test found)
+- [x] review and triage
 
 ## Implementation Notes
 
@@ -69,6 +69,18 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (security and correctness, self-review plus what the CI update test found): high 1, medium 4, low 2.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---------|---------|-------|-------------------|
+| 1 | After a Windows update the app was not running again in the test | high | patch | Tauri's NSIS installer relaunches the app with \`/R\` as the user (\`RunAsUser\`), so the new process has none of the test's environment. The shell passes \`/R\` and \`restart_after_install\`; the test proves the relaunch by the new \`ogden-agents.exe\` process and the installed file version, then opens the new version on the test's data folder. |
+| 2 | An update must be integrity checked before install | medium | patch | Two checks: the updater's minisign signature against the public key committed in the build, and the SHA-256 against \`SHA256SUMS-desktop.txt\` on the same release; either failing refuses the update, keeps the old version and tells the page why. Bad bytes and bad checksums are refused in CI on macOS and Windows (S2, S3). |
+| 3 | The test update base could redirect update checks | medium | patch | The shell reads \`OGDEN_DESKTOP_TEST_UPDATE_BASE\` only when the build's updater config allows plain http, which only CI test builds set; a release build ignores it. A forged manifest still needs a signature that verifies against the committed key. |
+| 4 | The server is stopped before the installer runs | medium | patch | A failed install shows a dialog and restarts the old version instead of leaving the app without a server. |
+| 5 | Restart must never run under a working agent | medium | patch | The server's busy rule decides (13.3); the update test starts a running turn, sees Restart refused, queues "when they finish", and installs only after. |
+| 6 | The throwaway signing key was visible in the workflow log | low | patch | Masked (\`::add-mask::\`) before it reaches \`GITHUB_ENV\`. It is per-run and never reused. |
+| 7 | A prerelease build defaults to the next channel, which made the "stable is not offered" check wrong | low | patch | The check writes the stable channel explicitly. |
 
 ## Verification
 

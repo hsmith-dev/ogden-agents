@@ -103,8 +103,10 @@ pub async fn check(app: &AppHandle) -> Outcome {
         Err(e) => return Outcome::Failed(e.to_string()),
     };
     // Windows installs in the background and ends this process, so the installer starts the app again.
+    // The installer's own `/R` starts the app again as the user, with none of this process's environment;
+    // a CI test build (which reports to a file) leaves that to the relaunch helper below, which keeps it.
     #[cfg(windows)]
-    let builder = builder.restart_after_install(true).installer_args(["/R"]);
+    let builder = if std::env::var_os("OGDEN_DESKTOP_TEST_REPORT").is_some() { builder } else { builder.restart_after_install(true).installer_args(["/R"]) };
     let updater = match builder.build() {
         Ok(u) => u,
         Err(e) => return Outcome::Failed(e.to_string()),
@@ -178,6 +180,8 @@ fn install_now(app: &AppHandle) {
     crate::ui::begin_quit();
     // The server stops first (its agents with it); Windows' installer ends this process.
     server::quit(true);
+    #[cfg(windows)]
+    relaunch_after_install(&update.version);
     match update.install(&bytes) {
         Ok(()) => {
             app.restart();
@@ -208,4 +212,31 @@ pub async fn check_for_user(app: AppHandle) {
     std::thread::spawn(move || {
         app2.dialog().message(text).title("Check for Updates").kind(kind).blocking_show();
     });
+}
+
+/// Windows: the installer ends this process, and it starts the app again only through its own `/R`
+/// flag (as the user, without this process's environment). A small helper outside this app's job
+/// waits until the installed program is the new version and, if nothing started it, starts it. Both
+/// ways at once are safe: a second start is handed to the first by the single-instance plugin.
+#[cfg(windows)]
+fn relaunch_after_install(version: &str) {
+    use std::os::windows::process::CommandExt;
+    let Ok(exe) = std::env::current_exe() else { return };
+    let script = format!(
+        "$exe = '{exe}'; $target = '{version}'; \
+         for ($i = 0; $i -lt 300; $i++) {{ Start-Sleep -Seconds 1; try {{ $v = (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion }} catch {{ $v = '' }}; if ($v -like \"$target*\") {{ break }} }}; \
+         Start-Sleep -Seconds 4; \
+         if (-not (Get-Process -Name 'ogden-agents' -ErrorAction SilentlyContinue)) {{ Start-Process -FilePath $exe }}",
+        exe = exe.display().to_string().replace('\'', "''"),
+        version = version.replace('\'', "''"),
+    );
+    // CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB: the app's kill-on-close job would otherwise end it with the app.
+    let result = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &script])
+        .creation_flags(0x0800_0000 | 0x0100_0000)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    report("update_relaunch_helper", json!({ "started": result.is_ok() }));
 }

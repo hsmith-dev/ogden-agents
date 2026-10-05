@@ -17,7 +17,7 @@
  */
 import type { NewCoreEvent, Pane, PaneId, PaneLayout, PanePlacement, PaneState, TerminalUnavailableCode, WorkspaceId } from '@ogden-agents/shared';
 import { PaneTitle } from '@ogden-agents/shared';
-import { addTab, EMPTY_LAYOUT, isRearrangement, layoutPaneIds, removePane, splitPane } from './pane-layout.js';
+import { addTab, EMPTY_LAYOUT, layoutPaneIds, rearrangement, removePane, splitPane } from './pane-layout.js';
 import { MAX_PANES_PER_INSTALL, MAX_PANES_PER_PROJECT, MAX_TERMINAL_COLS, MAX_TERMINAL_ROWS } from '@ogden-agents/shared';
 import type { TerminalSize } from './chat/types.js';
 import type { Entities } from './entities.js';
@@ -306,6 +306,7 @@ export function createPanes(options: PanesOptions): Panes {
 
     async open(workspaceId, size, placement) {
       requireDeveloperMode();
+      if (disposed) throw new DeveloperModeRequiredError(PANES_NEED_DEVELOPER_MODE);
       const workspace = entities.getWorkspace(workspaceId);
       if (workspace === undefined) throw new NotFoundError('project', workspaceId);
       const pty = await available();
@@ -337,8 +338,8 @@ export function createPanes(options: PanesOptions): Panes {
       entry.announced = true;
       const current = layoutOf(workspaceId);
       const split = placement?.kind === 'split' ? splitPane(current, placement.paneId, entry.pane.id, placement.direction) : undefined;
-      setLayout(workspaceId, split ?? addTab(current, `t${newId('pan').slice(-8).toLowerCase()}`, entry.pane.title, entry.pane.id));
       emit({ type: 'terminal.pane_opened', workspaceId, streamId: workspaceId, payload: { paneId: entry.pane.id, launcherId: entry.pane.launcherId, title: entry.pane.title } });
+      setLayout(workspaceId, split ?? addTab(current, `t${newId('pan').slice(-8).toLowerCase()}`, entry.pane.title, entry.pane.id));
       return entry.pane;
     },
 
@@ -349,14 +350,18 @@ export function createPanes(options: PanesOptions): Panes {
 
     arrange(workspaceId, layout) {
       requireDeveloperMode();
-      if (!isRearrangement(layoutOf(workspaceId), layout)) throw new ValidationError('That layout is not the same terminals, each once.', [{ path: ['layout'], message: 'not a rearrangement' }]);
-      setLayout(workspaceId, layout);
-      return layout;
+      if (entities.getWorkspace(workspaceId) === undefined) throw new NotFoundError('project', workspaceId);
+      const next = rearrangement(layoutOf(workspaceId), layout);
+      if (next === undefined) throw new ValidationError('That layout is not the same terminals, each once.', [{ path: ['layout'], message: 'not a rearrangement' }]);
+      // Nothing changed: nothing is saved or announced (an arrow key at the end of a divider's range).
+      if (JSON.stringify(next) !== JSON.stringify(layoutOf(workspaceId))) setLayout(workspaceId, next);
+      return next;
     },
 
     rename(workspaceId, paneId, title) {
       requireDeveloperMode();
       const entry = find(workspaceId, paneId);
+      if (!entry.announced) throw new NotFoundError('pane', paneId);
       const parsed = PaneTitle.safeParse(title.trim());
       if (!parsed.success) throw new ValidationError('A terminal needs a name without control characters, up to 80 characters.', [{ path: ['title'], message: 'invalid name' }]);
       if (parsed.data !== entry.pane.title) {

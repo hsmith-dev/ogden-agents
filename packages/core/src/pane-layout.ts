@@ -53,7 +53,7 @@ function removeNode(node: PaneLayoutNode, target: PaneId): PaneLayoutNode | unde
   return { ...node, first, second };
 }
 
-/** `paneId` taken out; its sibling takes its place, and a tab left empty goes. The active tab moves to a neighbour when its own went. */
+/** `paneId` taken out; its sibling takes its place, and a tab left empty goes. The active tab moves to the last tab when its own went. */
 export function removePane(layout: PaneLayout, paneId: PaneId): PaneLayout {
   const tabs: PaneLayoutTab[] = [];
   for (const tab of layout.tabs) {
@@ -65,13 +65,17 @@ export function removePane(layout: PaneLayout, paneId: PaneId): PaneLayout {
 }
 
 /** Whether `proposed` is the same panes as `current`, each exactly once, in a valid shape: only the arrangement (ratios, tab names and order, the active tab, which pane sits where) may change. */
-export function isRearrangement(current: PaneLayout, proposed: unknown): proposed is PaneLayout {
+export function rearrangement(current: PaneLayout, proposed: unknown): PaneLayout | undefined {
   const parsed = PaneLayout.safeParse(proposed);
-  if (!parsed.success) return false;
+  if (!parsed.success) return undefined;
   const layout = parsed.data;
   const ids = layoutPaneIds(layout);
   const before = layoutPaneIds(current);
-  if (ids.length !== before.length || new Set(ids).size !== ids.length || !before.every((id) => ids.includes(id))) return false;
-  if (new Set(layout.tabs.map((tab) => tab.id)).size !== layout.tabs.length) return false;
-  return layout.activeTabId === null ? layout.tabs.length === 0 : layout.tabs.some((tab) => tab.id === layout.activeTabId);
+  if (ids.length !== before.length || new Set(ids).size !== ids.length || !before.every((id) => ids.includes(id))) return undefined;
+  if (new Set(layout.tabs.map((tab) => tab.id)).size !== layout.tabs.length) return undefined;
+  const active = layout.activeTabId === null ? layout.tabs.length === 0 : layout.tabs.some((tab) => tab.id === layout.activeTabId);
+  return active ? layout : undefined;
 }
+
+/** Whether `proposed` is a rearrangement of `current` (see {@link rearrangement}). */
+export const isRearrangement = (current: PaneLayout, proposed: unknown): boolean => rearrangement(current, proposed) !== undefined;

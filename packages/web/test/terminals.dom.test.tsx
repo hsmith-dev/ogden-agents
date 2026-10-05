@@ -17,7 +17,7 @@ const PANE = 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
 
 const fakes = vi.hoisted(() => ({
   connections: [] as Array<{ handlers: PaneSocketHandlers; closed: boolean; typed: string[] }>,
-  terminals: [] as Array<{ cols: number; rows: number; written: string[]; resets: number; options: Record<string, unknown>; unicode: { activeVersion: string } }>,
+  terminals: [] as Array<{ focused: number; cols: number; rows: number; written: string[]; resets: number; options: Record<string, unknown>; unicode: { activeVersion: string } }>,
   requests: [] as Array<{ method: string; path: string; body?: string }>,
   panes: [] as unknown[],
   /** The layout the server answers; by default one tab per pane. */
@@ -40,7 +40,10 @@ vi.mock('@xterm/xterm', () => ({
     }
     loadAddon() {}
     open() {}
-    focus() {}
+    focused = 0;
+    focus() {
+      this.focused++;
+    }
     dispose() {}
     write(bytes: Uint8Array) {
       this.written.push(new TextDecoder().decode(bytes));
@@ -87,7 +90,7 @@ vi.mock('@/auth/tab-token', () => ({
       if (method === 'POST' && path.endsWith('/restart')) return new Response(JSON.stringify({ pane: fakes.panes[0] }));
       if (method === 'POST') {
         const pane = { id: PANE, workspaceId: WS, launcherId: 'shell', title: 'Terminal 1', state: 'starting', exitCode: null };
-        fakes.panes = [pane];
+        if (fakes.panes.length === 0) fakes.panes = [pane];
         return new Response(JSON.stringify({ pane }), { status: 201 });
       }
       if (method === 'DELETE') {
@@ -196,18 +199,59 @@ describe('tabs, splits and the layout (story 16.4)', () => {
     two();
     await mount();
     expect(screen.getAllByTestId('pane')).toHaveLength(2);
+    // The other tab's pane is not connected.
     expect(fakes.connections).toHaveLength(2);
     expect(screen.getAllByTestId('terminal-tab').map((t) => t.textContent)).toEqual(['Main', 'Other']);
     expect(screen.getAllByTestId('layout-divider')).toHaveLength(1);
   });
 
-  it('switching tab saves the active tab and shows the other tab\'s pane', async () => {
+  it('switching tab saves the active tab, closes the old tab\'s sockets and shows the other tab\'s pane', async () => {
     two();
     await mount();
     fireEvent.click(screen.getAllByTestId('terminal-tab')[1]!);
     await settle();
     expect(puts().at(-1).activeTabId).toBe('tb');
     expect(screen.getAllByTestId('pane')).toHaveLength(1);
+    expect(fakes.connections.filter((c) => c.closed)).toHaveLength(2);
+  });
+
+  it('a split does not reconnect the pane that was already shown (panes stay mounted as the layout changes)', async () => {
+    const a = pane({ id: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2WA', title: 'Terminal 1', state: 'running' });
+    fakes.panes = [a];
+    await mount();
+    expect(fakes.connections).toHaveLength(1);
+    const b = pane({ id: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2WB', title: 'Terminal 2', state: 'running' });
+    fakes.panes = [a, b];
+    fakes.layout = { tabs: [{ id: 'ta', title: 'Main', root: { type: 'split', direction: 'row', ratio: 0.5, first: { type: 'pane', paneId: a.id }, second: { type: 'pane', paneId: b.id } } }], activeTabId: 'ta' };
+    fireEvent.click(screen.getByTestId('pane-split-row'));
+    await settle();
+    expect(screen.getAllByTestId('pane')).toHaveLength(2);
+    expect(fakes.connections).toHaveLength(2);
+    expect(fakes.connections[0]!.closed).toBe(false);
+  });
+
+  it('a drag of the divider saves its new ratio once, and a click without a move saves nothing', async () => {
+    two();
+    await mount();
+    const stage = screen.getByTestId('layout-stage');
+    stage.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 500, width: 1000, height: 500, x: 0, y: 0, toJSON() {} });
+    const divider = screen.getByTestId('layout-divider');
+    fireEvent.pointerDown(divider, { clientX: 500, clientY: 100, pointerId: 1 });
+    fireEvent.pointerUp(divider, { clientX: 500, clientY: 100, pointerId: 1 });
+    await settle();
+    expect(puts()).toHaveLength(0);
+    fireEvent.pointerDown(divider, { clientX: 500, clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(divider, { clientX: 300, clientY: 100, pointerId: 1 });
+    fireEvent.pointerUp(divider, { clientX: 300, clientY: 100, pointerId: 1 });
+    await settle();
+    expect(puts()).toHaveLength(1);
+    expect(puts()[0].tabs[0].root.ratio).toBeCloseTo(0.3);
+  });
+
+  it('only a pane the user just opened takes keyboard focus', async () => {
+    two();
+    await mount();
+    expect(fakes.terminals.every((t) => (t as { focused?: number }).focused === undefined || (t as { focused: number }).focused === 0)).toBe(true);
   });
 
   it('a divider moves with the arrow keys, 5 percent each, and is saved', async () => {
@@ -218,10 +262,17 @@ describe('tabs, splits and the layout (story 16.4)', () => {
     fireEvent.keyDown(divider, { key: 'ArrowRight' });
     await settle();
     expect(puts().at(-1).tabs[0].root.ratio).toBeCloseTo(0.55);
-    fireEvent.keyDown(screen.getByTestId('layout-divider'), { key: 'ArrowLeft' });
-    fireEvent.keyDown(screen.getByTestId('layout-divider'), { key: 'ArrowLeft' });
-    await settle();
-    expect(puts().at(-1).tabs[0].root.ratio).toBeGreaterThanOrEqual(0.1);
+    for (let i = 0; i < 2; i += 1) {
+      fireEvent.keyDown(screen.getByTestId('layout-divider'), { key: 'ArrowLeft' });
+      await settle();
+    }
+    expect(puts().at(-1).tabs[0].root.ratio).toBeCloseTo(0.45);
+    // At the end of its range a divider stops: 10 percent is the smallest.
+    for (let i = 0; i < 12; i += 1) {
+      fireEvent.keyDown(screen.getByTestId('layout-divider'), { key: 'ArrowLeft' });
+      await settle();
+    }
+    expect(puts().at(-1).tabs[0].root.ratio).toBeCloseTo(0.1);
   });
 
   it('Split right asks for a pane beside this one, and is refused in words at the limit', async () => {

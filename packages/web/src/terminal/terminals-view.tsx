@@ -1,4 +1,4 @@
-import type { Pane, PaneId, PaneLayout } from '@ogden-agents/shared';
+import type { Pane, PaneId, PaneLayout, PanePlacement } from '@ogden-agents/shared';
 import { useEffect, useRef, useState } from 'react';
 import { isApiError } from '@/api/http';
 import { Button } from '@/ui/button';
@@ -7,7 +7,7 @@ import { PageBody } from '@/ui/page';
 import { Text } from '@/ui/typography';
 import { cn } from '@/ui/utils';
 import { MAX_NAME_LENGTH, neighbour, withActiveTab, withRatio, withTabRoot, withTabTitle, type FocusDirection, type PaneBox } from './layout-edit';
-import { LayoutTree } from './layout-tree';
+import { LayoutStage } from './layout-tree';
 import { PaneView } from './pane-view';
 import { usePaneActions, usePanes } from './panes-api';
 
@@ -31,8 +31,10 @@ const FOCUS_KEYS: Readonly<Record<string, FocusDirection>> = { ArrowLeft: 'left'
  */
 export function TerminalsView({ wsId, developerMode, screenReaderMode }: { wsId: string; developerMode: boolean; screenReaderMode: boolean }) {
   const panes = usePanes(wsId, developerMode);
-  const { open, close, rename, arrange } = usePaneActions(wsId);
+  const { open, close, rename, arrange, error: mutationError } = usePaneActions(wsId);
   const [renamingTab, setRenamingTab] = useState<string | undefined>(undefined);
+  /** The pane that takes keyboard focus once it has loaded: only one the user just opened. */
+  const [focusId, setFocusId] = useState<string | undefined>(undefined);
   const stage = useRef<HTMLDivElement>(null);
 
   // A pane's state is learned over its own socket; the list is read again when the window is shown.
@@ -60,12 +62,12 @@ export function TerminalsView({ wsId, developerMode, screenReaderMode }: { wsId:
   const active = layout.tabs.find((tab) => tab.id === layout.activeTabId) ?? layout.tabs[0];
   const limit = panes.data?.limits.perProject ?? 8;
   const full = (panes.data?.panes.length ?? 0) >= limit;
-  const errorOf = (error: unknown) => (error instanceof Error ? error.message : undefined);
-  const mutationError = errorOf(open.error) ?? errorOf(close.error) ?? errorOf(rename.error) ?? errorOf(arrange.error);
+  const openPane = (placement?: PanePlacement) => open.mutate({ size: placement === undefined ? { cols: 100, rows: 30 } : { cols: 80, rows: 24 }, ...(placement === undefined ? {} : { placement }) }, { onSuccess: (pane) => setFocusId(pane.id) });
 
   const moveFocus = (event: React.KeyboardEvent) => {
     const direction = FOCUS_KEYS[event.key];
-    if (direction === undefined || !event.altKey || !event.shiftKey || event.ctrlKey || event.metaKey) return;
+    if (direction === undefined || !event.altKey || !event.shiftKey || event.ctrlKey || event.metaKey || event.nativeEvent.isComposing) return;
+    if ((event.target as HTMLElement).tagName === 'INPUT') return;
     const root = stage.current;
     const current = (document.activeElement as HTMLElement | null)?.closest('[data-pane-id]')?.getAttribute('data-pane-id');
     if (root === null || current === null || current === undefined) return;
@@ -75,10 +77,13 @@ export function TerminalsView({ wsId, developerMode, screenReaderMode }: { wsId:
       return { id: element.dataset.paneId ?? '', left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
     });
     const target = neighbour(boxes, current, direction);
+    // Only a key that moves focus is caught: at an edge, or alone, the program gets it as usual.
+    if (target === undefined) return;
+    const next = elements.find((element) => element.dataset.paneId === target)?.querySelector<HTMLElement>('textarea');
+    if (next === null || next === undefined) return;
     event.preventDefault();
     event.stopPropagation();
-    if (target === undefined) return;
-    elements.find((element) => element.dataset.paneId === target)?.querySelector<HTMLElement>('textarea')?.focus();
+    next.focus();
   };
 
   return (
@@ -121,7 +126,7 @@ export function TerminalsView({ wsId, developerMode, screenReaderMode }: { wsId:
             ),
           )}
         </div>
-        <Button onClick={() => open.mutate({ size: { cols: 100, rows: 30 } })} disabled={open.isPending || unavailable !== undefined || full} title={full ? PANE_LIMIT_REACHED(limit) : undefined} data-testid="terminals-new">
+        <Button onClick={() => openPane()} disabled={open.isPending || unavailable !== undefined || full} title={full ? PANE_LIMIT_REACHED(limit) : undefined} data-testid="terminals-new">
           New terminal
         </Button>
       </div>
@@ -148,9 +153,9 @@ export function TerminalsView({ wsId, developerMode, screenReaderMode }: { wsId:
       {active === undefined ? null : (
         // Alt+Shift+Arrow moves focus between panes, caught before xterm sends it to the program.
         <div ref={stage} className="flex min-h-0 flex-1" data-testid="terminal-stage" onKeyDownCapture={moveFocus}>
-          <LayoutTree
-            key={active.id}
+          <LayoutStage
             node={active.root}
+            paneIds={(panes.data?.panes ?? []).map((pane) => pane.id)}
             onRatio={(path, ratio) => arrange.mutate(withTabRoot(layout, active.id, withRatio(active.root, path, ratio)))}
             renderPane={(paneId) => {
               const pane = byId.get(paneId);
@@ -161,9 +166,10 @@ export function TerminalsView({ wsId, developerMode, screenReaderMode }: { wsId:
                   pane={pane}
                   screenReaderMode={screenReaderMode}
                   onClose={(id) => close.mutate(id)}
-                  onSplit={(id, direction) => open.mutate({ size: { cols: 80, rows: 24 }, placement: { kind: 'split', paneId: id as PaneId, direction } })}
+                  onSplit={(id, direction) => openPane({ kind: 'split', paneId: id as PaneId, direction })}
+                  focusOnOpen={pane.id === focusId}
                   onRename={(id, title) => rename.mutate({ paneId: id, title })}
-                  splitDisabledReason={full ? PANE_LIMIT_REACHED(limit) : undefined}
+                  splitDisabledReason={full ? PANE_LIMIT_REACHED(limit) : open.isPending ? 'Opening a terminal' : undefined}
                 />
               );
             }}

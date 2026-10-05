@@ -130,12 +130,13 @@ export type PaneLayoutNode = { type: 'pane'; paneId: PaneId } | { type: 'split';
 export const PaneLayoutNode: z.ZodType<PaneLayoutNode> = z.lazy(() =>
   z.discriminatedUnion('type', [
     z.object({ type: z.literal('pane'), paneId: PaneId }),
-    z.object({ type: z.literal('split'), direction: z.enum(['row', 'column']), ratio: z.number().min(0.05).max(0.95), first: PaneLayoutNode, second: PaneLayoutNode }),
+    z.object({ type: z.literal('split'), direction: z.enum(['row', 'column']), ratio: z.number().min(0.1).max(0.9), first: PaneLayoutNode, second: PaneLayoutNode }),
   ]),
 );
 
 /** A project's terminal workspace layout: tabs of split trees of panes. It holds ids, titles and shapes, never output or secrets (E16-R8). */
-export const PaneLayoutTab = z.object({ id: z.string().min(1).max(40), title: PaneTitle, root: PaneLayoutNode });
+const PaneTabId = z.string().min(1).max(40).regex(/^[A-Za-z0-9_-]+$/);
+export const PaneLayoutTab = z.object({ id: PaneTabId, title: PaneTitle.refine((title) => title.trim() !== '', 'a name'), root: PaneLayoutNode });
 export type PaneLayoutTab = z.infer<typeof PaneLayoutTab>;
 /** How many panes a tree holds, and how deep it goes. */
 function measure(node: PaneLayoutNode, depth = 1): { leaves: number; depth: number } {
@@ -145,7 +146,7 @@ function measure(node: PaneLayoutNode, depth = 1): { leaves: number; depth: numb
   return { leaves: a.leaves + b.leaves, depth: Math.max(a.depth, b.depth) };
 }
 export const PaneLayout = z
-  .object({ tabs: z.array(PaneLayoutTab).max(MAX_PANES_PER_PROJECT), activeTabId: z.string().min(1).max(40).nullable() })
+  .object({ tabs: z.array(PaneLayoutTab).max(MAX_PANES_PER_PROJECT), activeTabId: PaneTabId.nullable() })
   .refine((layout) => layout.tabs.reduce((sum, tab) => sum + measure(tab.root).leaves, 0) <= MAX_PANES_PER_PROJECT, 'more panes than a project may have')
   .refine((layout) => layout.tabs.every((tab) => measure(tab.root).depth <= 16), 'a layout nested too deep');
 export type PaneLayout = z.infer<typeof PaneLayout>;

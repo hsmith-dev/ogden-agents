@@ -105,6 +105,7 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Epic 5 (a later story): an attended build has no managed Claude Code settings, so the user's own settings can still skip a card. From 5.6. (log: "An attended build's session has no managed Claude Code settings")
 - Epic 5 (a later sandbox story): 5.6's low review findings (a compression-bomb object, an unremovable store, the bubblewrap probe, the docker lookup). From 5.6. (log: "Low findings of 5.6's review")
 - 16.4 (proposed): a stored layout must also refuse duplicate pane ids and an active tab that does not exist; the memory terminal stub's pane freezes its exit getters. From 16.3 reviews. (log: "16.3 review: layout duplicate ids and dangling active tab")
+- 16.9 (proposed): `PaneLayout` hard codes the cap of panes per project though core's limit is a constant it could change, and two windows arranging at once are last writer wins. From 16.4 reviews. (log: "16.4 review: the layout schema holds the pane cap")
 - 16.7 (proposed): closing a pane stops its process group only, so an interactive shell's background jobs (`cmd &`, stopped jobs) survive Close, Restart, Developer mode off and the server stopping; walk descendants or HUP the shell first. From 16.2 security review. (log: "16.2 review: a pane's POSIX tree kill signals only the shell's own process group")
 - 16.9 (proposed): a pane's pty is never paused under a flood, the screen mirror's memory grows with the terminal width, and a pane route's 403 comes after a bad id or body is refused. From 16.2 reviews. (log: "16.2 review: low findings, no pty backpressure")
 - 16.2 (proposed): a server killed hard leaves a pane whose program ignores hangup running on macOS and Windows; record each pane's pid and start time and sweep only those on the next start. From spike 16.1. (log: "Spike 16.1: a server killed hard leaves a pane")
@@ -779,6 +780,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/story-tracer-bullet-one-plain-shell-pane-in-developer-mode-end-to-end-plan.md`
   summary: 16.2 review: a pane's POSIX tree kill signals only the shell's own process group, so background jobs of an interactive shell outlive Close and Restart.
   evidence: security review; `process-tree.ts` `killGroup`, `terminal-pty/index.ts` `killTerminalTree`; the fixture's grandchild stays in the shell's group so no test covers it.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/story-pane-and-layout-model-tabs-splits-resize-keyboard-focus-plan.md`
+  summary: 16.4 review: the layout schema holds the pane cap, and two windows arranging at once are last writer wins.
+  evidence: `PaneLayout` refine in `shared/src/panes.ts`; `arrange` in `core/src/panes.ts`.
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/story-epic-contracts-and-stubs-panes-launchers-layout-and-pane-events-plan.md`
   summary: 16.3 review: layout duplicate ids and dangling active tab, and the memory stub's frozen exit getters.
   evidence: correctness review of 16.3; `PaneLayout` in `shared/src/panes.ts`, `terminal-memory` `openPane`.

@@ -33,6 +33,8 @@ export interface PaneViewProps {
   onSplit?: ((paneId: string, direction: 'row' | 'column') => void) | undefined;
   /** Rename this pane. Absent: the name is not editable. */
   onRename?: ((paneId: string, title: string) => void) | undefined;
+  /** Take keyboard focus when the terminal has loaded (a pane the user just opened). */
+  focusOnOpen?: boolean | undefined;
   /** Why a split is not offered now (the limit of panes), in plain words. */
   splitDisabledReason?: string | undefined;
   className?: string;
@@ -48,7 +50,9 @@ export interface PaneViewProps {
  * After an abnormal close it reconnects as the chat terminal does. Nothing
  * typed or printed is kept or logged here.
  */
-export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRename, splitDisabledReason, className }: PaneViewProps) {
+export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRename, splitDisabledReason, focusOnOpen = false, className }: PaneViewProps) {
+  const focusRef = useRef(focusOnOpen);
+  focusRef.current = focusOnOpen;
   const [renaming, setRenaming] = useState(false);
   const host = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | undefined>(undefined);
@@ -165,13 +169,22 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
       const resizing = term.onResize(({ cols, rows }) => {
         if (!following) connection?.resize(cols, rows);
       });
-      const observer = new ResizeObserver(() => fit.fit());
+      // One fit per frame: a divider drag changes the box many times a second, and each refit is a resize of the program.
+      let frame: number | undefined;
+      const observer = new ResizeObserver(() => {
+        if (frame !== undefined) return;
+        frame = requestAnimationFrame(() => {
+          frame = undefined;
+          if (!disposed) fit.fit();
+        });
+      });
       observer.observe(element);
-      term.focus();
+      if (focusRef.current) term.focus();
       cleanup = () => {
         clearTimeout(retry);
         clearTimeout(stable);
         observer.disconnect();
+        if (frame !== undefined) cancelAnimationFrame(frame);
         typing.dispose();
         resizing.dispose();
         connection?.close();
@@ -264,7 +277,7 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRen
           </Button>
         </span>
       </div>
-      <div ref={host} data-testid="pane-terminal" data-link={link} className="min-h-64 flex-1 bg-terminal font-mono text-terminal-foreground" />
+      <div ref={host} data-testid="pane-terminal" data-link={link} className="min-h-24 flex-1 bg-terminal font-mono text-terminal-foreground" />
       {words === undefined ? null : (
         <Text variant="caption" role="status" data-testid="pane-status" className="text-terminal-foreground">
           {words}

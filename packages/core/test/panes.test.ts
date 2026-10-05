@@ -231,8 +231,8 @@ describe('pane events: state only (story 16.3)', () => {
     fake.processes[0]!.exit(5);
     panes.close(workspace.id, pane.id);
     const events = paneEvents(core);
-    expect(events.map((e) => e.type)).toEqual(['terminal.layout_changed', 'terminal.pane_opened', 'terminal.pane_exited', 'terminal.layout_changed', 'terminal.pane_closed']);
-    expect(events[1]).toMatchObject({ workspaceId: workspace.id, streamId: workspace.id, payload: { paneId: pane.id, launcherId: 'shell', title: 'Terminal 1' } });
+    expect(events.map((e) => e.type)).toEqual(['terminal.pane_opened', 'terminal.layout_changed', 'terminal.pane_exited', 'terminal.layout_changed', 'terminal.pane_closed']);
+    expect(events[0]).toMatchObject({ workspaceId: workspace.id, streamId: workspace.id, payload: { paneId: pane.id, launcherId: 'shell', title: 'Terminal 1' } });
     expect(events[2]!.payload).toEqual({ paneId: pane.id, exitCode: 5 });
     expect(events[4]!.payload).toEqual({ paneId: pane.id, cause: 'user' });
     expect(JSON.stringify(events)).not.toContain('SECRET-OUTPUT-MARKER');
@@ -335,9 +335,52 @@ describe('the layout (story 16.4)', () => {
     expect(() => panes.rename(workspace.id, a.id, 'bad\u0007')).toThrow(ValidationError);
     expect(() => panes.rename(workspace.id, a.id, '   ')).toThrow(ValidationError);
     const events = core.events.readAfter(0).filter((e) => e.type.startsWith('terminal.'));
-    expect(events.map((e) => e.type)).toEqual(['terminal.layout_changed', 'terminal.pane_opened', 'terminal.pane_renamed']);
-    expect(events[0]!.payload).toEqual({ tabCount: 1, paneCount: 1 });
+    expect(events.map((e) => e.type)).toEqual(['terminal.pane_opened', 'terminal.layout_changed', 'terminal.pane_renamed']);
+    expect(events[1]!.payload).toEqual({ tabCount: 1, paneCount: 1 });
     expect(events[2]!.payload).toEqual({ paneId: a.id, title: 'Server' });
+  });
+});
+
+describe('layout review findings (16.4)', () => {
+  it('arrange refuses an unknown project and announces nothing when the layout did not change', async () => {
+    const { core, panes, workspace } = setup();
+    const pane = await panes.open(workspace.id, SIZE);
+    expect(() => panes.arrange('ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3', { tabs: [], activeTabId: null })).toThrow(NotFoundError);
+    const before = core.events.readAfter(0).length;
+    panes.arrange(workspace.id, panes.layout(workspace.id));
+    expect(core.events.readAfter(0).length).toBe(before);
+    expect(pane.id).toBeTruthy();
+  });
+
+  it('the layout is empty once Developer mode turned off the panes, and arrange needs Developer mode', async () => {
+    const { core, panes, workspace } = setup();
+    await panes.open(workspace.id, SIZE);
+    core.installSettings.setDeveloperMode(false);
+    expect(() => panes.arrange(workspace.id, { tabs: [], activeTabId: null })).toThrow(DeveloperModeRequiredError);
+    core.installSettings.setDeveloperMode(true);
+    expect(panes.layout(workspace.id)).toEqual({ tabs: [], activeTabId: null });
+  });
+
+  it('a split whose target closes while the new pane starts still gets a place, and nothing opens after dispose', async () => {
+    const { panes, workspace } = setup();
+    const a = await panes.open(workspace.id, SIZE);
+    panes.close(workspace.id, a.id);
+    await panes.open(workspace.id, SIZE, { kind: 'split', paneId: a.id, direction: 'row' });
+    expect(panes.layout(workspace.id).tabs).toHaveLength(1);
+    panes.dispose();
+    await expect(panes.open(workspace.id, SIZE)).rejects.toBeInstanceOf(DeveloperModeRequiredError);
+  });
+
+  it('a pane that is still starting can not be renamed (nothing announced it yet)', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { panes, workspace } = setup({ terminal: { opening: () => gate } });
+    const opening = panes.open(workspace.id, SIZE);
+    await new Promise((resolve) => setImmediate(resolve));
+    const id = panes.list(workspace.id)[0]!.id;
+    expect(() => panes.rename(workspace.id, id, 'x')).toThrow(NotFoundError);
+    release();
+    await opening;
   });
 });
 

@@ -1,5 +1,6 @@
 import { API_ROUTES, apiPath, PaneResponse, PanesResponse, type Pane, type PaneLayout, type PanePlacement } from '@ogden-agents/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import { call, callNoContent, postJson, type Auth } from '@/api/http';
 import { tabAuth } from '@/auth/tab-token';
 
@@ -51,15 +52,28 @@ export function usePanes(wsId: string, enabled: boolean, auth: Auth = tabAuth) {
 export function usePaneActions(wsId: string, auth: Auth = tabAuth) {
   const queryClient = useQueryClient();
   const refresh = () => queryClient.invalidateQueries({ queryKey: panesQueryKey(wsId) });
-  const open = useMutation({ mutationFn: (input: { size: { cols: number; rows: number }; placement?: PanePlacement }) => openPane(wsId, input.size, input.placement, auth), onSettled: refresh });
-  const close = useMutation({ mutationFn: (paneId: string) => closePane(wsId, paneId, auth), onSettled: refresh });
-  const rename = useMutation({ mutationFn: (input: { paneId: string; title: string }) => renamePane(wsId, input.paneId, input.title, auth), onSettled: refresh });
+  const [error, setError] = useState<string | undefined>(undefined);
+  const failed = (failure: unknown) => setError(failure instanceof Error ? failure.message : undefined);
+  const open = useMutation({ onMutate: () => setError(undefined), onError: failed, mutationFn: (input: { size: { cols: number; rows: number }; placement?: PanePlacement }) => openPane(wsId, input.size, input.placement, auth), onSettled: refresh });
+  const close = useMutation({ onMutate: () => setError(undefined), onError: failed, mutationFn: (paneId: string) => closePane(wsId, paneId, auth), onSettled: refresh });
+  const rename = useMutation({ onMutate: () => setError(undefined), onError: failed, mutationFn: (input: { paneId: string; title: string }) => renamePane(wsId, input.paneId, input.title, auth), onSettled: refresh });
+  const arrangeKey = ['pane-arrange', wsId] as const;
   const arrange = useMutation({
+    mutationKey: arrangeKey,
     mutationFn: (layout: PaneLayout) => arrangeLayout(wsId, layout, auth),
-    // The new arrangement shows at once; the server's answer replaces it.
-    onMutate: (layout) => queryClient.setQueryData<PanesResponse>(panesQueryKey(wsId), (old) => (old === undefined ? old : { ...old, layout })),
-    onSuccess: (response) => queryClient.setQueryData(panesQueryKey(wsId), response),
-    onError: refresh,
+    // The new arrangement shows at once; an older answer still on its way never replaces it.
+    onMutate: async (layout) => {
+      setError(undefined);
+      await queryClient.cancelQueries({ queryKey: panesQueryKey(wsId) });
+      queryClient.setQueryData<PanesResponse>(panesQueryKey(wsId), (old) => (old === undefined ? old : { ...old, layout }));
+    },
+    onSuccess: (response) => {
+      if (queryClient.isMutating({ mutationKey: arrangeKey }) <= 1) queryClient.setQueryData(panesQueryKey(wsId), response);
+    },
+    onError: (failure) => {
+      failed(failure);
+      refresh();
+    },
   });
-  return { open, close, rename, arrange };
+  return { open, close, rename, arrange, error };
 }

@@ -3,13 +3,13 @@ title: 'Pane and layout model: tabs, splits, resize, keyboard focus'
 type: 'feature'
 ticket: '4'
 created: '2026-10-05'
-status: 'in-review'
+status: 'built'
 baseline_revision: 'af0c44386ec22f48c89fd2e9fb8f8202c3f4326d'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/epic-native-cli-terminal.md'
@@ -67,3 +67,20 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+Two reviews ran (one security, one correctness).
+
+| Finding | Verdict | Route |
+|---|---|---|
+| A split or a close remounted the other panes and reconnected their sockets (C) | high, real | patch: panes are one flat keyed list placed by rectangle; test that a split keeps the first pane connected |
+| Every mount took keyboard focus, so the last to load stole it (C) | high, real | patch: only a pane the user just opened takes focus |
+| Optimistic arrange could be overwritten by an older answer or refetch (C) | medium | patch: queries cancelled, only the latest answer applied |
+| Drag: no cancel handlers, offset error, one frame snap back (C) | medium | patch: cancel and lost capture clear the drag; the ratio comes from the split's own rectangle; a click saves nothing |
+| Drag floods the program with resizes (C) | medium | patch: one fit per frame |
+| `min-h-64` overflow; errors shadow each other; split not disabled while opening (C) | low to medium | patch |
+| Alt+Shift+Arrow swallowed with nowhere to go, in an input or while composing (S, C) | low | patch: caught only when focus moves |
+| `arrange` for an unknown project and a no change both emitted events; stored the caller's object (S) | low | patch: NotFound, parsed copy, no event for no change |
+| Tab ids unrestricted; blank tab titles; ratio range 5 to 95 vs 10 to 90 (S, C) | low | patch |
+| `disposed` never read; `layout_changed` before `pane_opened`; rename of a starting pane; active tab comment (C, S) | low | patch |
+| Weak tests: ratio clamp, tab sockets, rename Escape, no drag test (C) | low | patch: added; jsdom has no layout, so focus movement by rectangles is in `layout-edit.test.ts` and the e2e |
+| Layout schema holds the install's cap although core's limit is configurable; concurrent arranges from two windows are last writer wins (C, S) | low | defer |

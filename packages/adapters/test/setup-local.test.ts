@@ -189,7 +189,7 @@ describe('the Local model install', () => {
     const status = await setup.status();
     expect(status.notices?.join(' ')).toMatch(/Nothing leaves this computer except to the server you set up/);
     expect(status.notices?.join(' ')).toMatch(/plain text/);
-    expect(status.notices?.join(' ')).toMatch(/skills are long/);
+    expect(status.notices?.join(' ')).toMatch(/skills \(where Planning is on\), know that they are long/);
     expect(status.notices?.join(' ')).toMatch(/30B or more/);
     expect(JSON.stringify(status)).not.toMatch(/—|–/);
   });

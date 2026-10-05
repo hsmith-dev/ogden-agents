@@ -58,7 +58,7 @@ async function setUp(pieces: BmadPiece[], { defaultAgent }: { defaultAgent?: str
   const tab = await signIn(server);
   const wsId = WorkspaceResponse.parse(await (await request(server, tab, 'POST', API_ROUTES.workspaces, { path: repo })).json()).workspace.id;
   expect((await request(server, tab, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: pieces, ...(defaultAgent === undefined ? {} : { defaultAgentId: defaultAgent }) })).status).toBe(200);
-  return { server, tab, wsId, bmadCatalog, repo, dataDir };
+  return { server, tab, wsId, bmadCatalog, repo, dataDir, fake };
 }
 
 const messagesOf = (server: TestServer, sessionId: SessionId, role: 'user' | 'agent') =>
@@ -72,14 +72,17 @@ async function setUpBmad(server: TestServer, tab: SignedIn, wsId: string, bmadCa
 
 describe('BMad Method with the Local model where Planning is on (epic 14 story 14.9)', () => {
   it("starts a planning session with the project's default agent, the Local model, in its own skill syntax, and it runs the skill end to end", async () => {
-    const { server, tab, wsId } = await setUp(['planning'], { defaultAgent: 'local' });
+    const { server, tab, wsId, repo } = await setUp(['planning'], { defaultAgent: 'local' });
+    // Set up has put the skill where the harness reads it.
+    mkdirSync(join(repo, '.agents', 'skills', 'bmad-spec'), { recursive: true });
     const started = await request(server, tab, 'POST', apiPath(API_ROUTES.workspacePlanningSessions, { wsId }), { skill: 'bmad-spec', idea: 'a habit tracker' });
     expect(started.status).toBe(201);
     const { session } = SessionResponse.parse(await started.json());
     expect(session).toMatchObject({ kind: 'planning', agentId: 'local' });
     expect(messagesOf(server, session.id, 'user')).toEqual(['/bmad-spec a habit tracker']);
     await waitFor(() => server.core.entities.getSession(session.id)!.state === 'idle' && messagesOf(server, session.id, 'agent').length > 0, "the Local model's reply", 15_000);
-    expect(messagesOf(server, session.id, 'agent')[0]).toMatch(/^command=\/bmad-spec a habit tracker/);
+    // The harness lists the skill as a command and ran it as one: found, not merely relayed.
+    expect(messagesOf(server, session.id, 'agent')[0]).toBe('command=/bmad-spec a habit tracker found=true');
   });
 
   it('Set up places the skills in .agents/skills too while the Local model is in use, by default or by a chat', async () => {
@@ -110,15 +113,22 @@ describe('BMad Method with the Local model where Planning is on (epic 14 story 1
   });
 
   it('a Simple project (every BMad piece off): a Local model chat gets no BMad text from Ogden, and the repo is untouched', async () => {
-    const { server, tab, wsId, repo } = await setUp([], { defaultAgent: 'local' });
+    const { server, tab, wsId, repo, fake, dataDir } = await setUp([], { defaultAgent: 'local' });
     const before = readdirSync(repo).sort();
     const { session } = SessionResponse.parse(await (await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceSessions, { wsId }), { agentId: 'local' })).json());
-    expect((await request(server, tab, 'POST', apiPath(API_ROUTES.sessionMessages, { wsId, sesId: session.id }), { text: 'hello' })).status).toBe(202);
+    // What the harness itself received: the whole first prompt and how its session was opened.
+    expect((await request(server, tab, 'POST', apiPath(API_ROUTES.sessionMessages, { wsId, sesId: session.id }), { text: 'session-start' })).status).toBe(202);
     await waitFor(() => messagesOf(server, session.id, 'agent').length > 0, "the Local model's reply", 15_000);
-    // Everything Ogden sent this chat, and everything the model was sent, holds no BMad text.
-    expect(messagesOf(server, session.id, 'user')).toEqual(['hello']);
-    const sent = JSON.stringify(servers[0]!.log);
-    expect(sent).not.toMatch(/bmad/i);
+    const started = messagesOf(server, session.id, 'agent')[0]!;
+    expect(started).toContain('meta=none');
+    expect(started).toContain('prompt="session-start"');
+    expect(started).not.toMatch(/bmad/i);
+    expect(messagesOf(server, session.id, 'user')).toEqual(['session-start']);
+    // It runs in the empty home inside the data folder, and nothing named BMad reached the model's server.
+    expect((await request(server, tab, 'POST', apiPath(API_ROUTES.sessionMessages, { wsId, sesId: session.id }), { text: 'env-report' })).status).toBe(202);
+    await waitFor(() => messagesOf(server, session.id, 'agent').length > 1, 'the environment report', 15_000);
+    expect((JSON.parse(messagesOf(server, session.id, 'agent')[1]!) as { folders: { HOME: string } }).folders.HOME).toBe(join(dataDir, 'agents', 'local-home', 'home'));
+    expect(JSON.stringify(fake.log)).not.toMatch(/bmad/i);
     expect(readdirSync(repo).sort()).toEqual(before);
     // Planning is refused while its piece is off.
     expect((await request(server, tab, 'POST', apiPath(API_ROUTES.workspacePlanningSessions, { wsId }), { skill: 'bmad-spec' })).status).toBeGreaterThanOrEqual(400);

@@ -1,32 +1,12 @@
-import { PencilSimple } from "@phosphor-icons/react";
-import {
-  API_ROUTES,
-  apiPath,
-  CHAT_NAME_MAX,
-  CHAT_NAME_TOO_LONG,
-  chatName,
-  chatNameFits,
-  normalizeChatName,
-  SessionResponse,
-  type CoreEvent,
-  type Session,
-} from "@ogden-agents/shared";
-import { useQueryClient } from "@tanstack/react-query";
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type ReactNode,
-} from "react";
-import { call } from "@/api/http";
-import { tabAuth, type TabAuth } from "@/auth/tab-token";
-import { Button } from "@/ui/button";
-import { Input } from "@/ui/input";
-import { cn } from "@/ui/utils";
+import { PencilSimple } from '@phosphor-icons/react';
+import { API_ROUTES, apiPath, CHAT_NAME_MAX, CHAT_NAME_TOO_LONG, chatName, chatNameFits, normalizeChatName, SessionResponse, type CoreEvent, type Session } from '@ogden-agents/shared';
+import { useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { call } from '@/api/http';
+import { tabAuth, type TabAuth } from '@/auth/tab-token';
+import { Button } from '@/ui/button';
+import { Input } from '@/ui/input';
+import { cn } from '@/ui/utils';
 
 /**
  * Chat names (backlog story 2): every chat shows its name (the user's, else
@@ -38,21 +18,16 @@ import { cn } from "@/ui/utils";
  */
 
 /** The Rename action's words, in the header button and the row menus. */
-export const RENAME_LABEL = "Rename";
+export const RENAME_LABEL = 'Rename';
 
 /** `PUT /api/v1/workspaces/:wsId/sessions/:sesId/title`: the user's name for the chat; `null` clears it. */
-export async function renameChat(
-  wsId: string,
-  sesId: string,
-  title: string | null,
-  auth: Pick<TabAuth, "fetch"> = tabAuth,
-): Promise<Session> {
+export async function renameChat(wsId: string, sesId: string, title: string | null, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<Session> {
   const json = await call(
     auth,
     apiPath(API_ROUTES.sessionTitle, { wsId, sesId }),
     {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ title }),
     },
     "Ogden Agents couldn't rename this chat",
@@ -61,15 +36,10 @@ export async function renameChat(
 }
 
 /** `sessions` with each one's latest `session.renamed` in `events` laid over it (events in log order). */
-export function withNames<
-  T extends Pick<Session, "id" | "title" | "autoTitle">,
->(sessions: readonly T[], events: readonly CoreEvent[]): T[] {
-  const names = new Map<
-    string,
-    { title: string | null; autoTitle: string | null }
-  >();
+export function withNames<T extends Pick<Session, 'id' | 'title' | 'autoTitle'>>(sessions: readonly T[], events: readonly CoreEvent[]): T[] {
+  const names = new Map<string, { title: string | null; autoTitle: string | null }>();
   for (const event of events)
-    if (event.type === "session.renamed")
+    if (event.type === 'session.renamed')
       names.set(event.payload.sessionId, {
         title: event.payload.title,
         autoTitle: event.payload.autoTitle,
@@ -77,36 +47,22 @@ export function withNames<
   if (names.size === 0) return [...sessions];
   return sessions.map((session) => {
     const named = names.get(session.id);
-    return named === undefined
-      ? session
-      : { ...session, title: named.title, autoTitle: named.autoTitle };
+    return named === undefined ? session : { ...session, title: named.title, autoTitle: named.autoTitle };
   });
 }
 
 /** One chat's shown name: its stream's latest `session.renamed`, else the session as read. */
-export function useChatName(
-  events: readonly CoreEvent[],
-  session: Pick<Session, "title" | "autoTitle"> | undefined,
-): { name: string; title: string | null } {
-  const latest = useMemo(
-    () => events.findLast((event) => event.type === "session.renamed"),
-    [events],
-  );
-  const names = latest?.type === "session.renamed" ? latest.payload : session;
+export function useChatName(events: readonly CoreEvent[], session: Pick<Session, 'title' | 'autoTitle'> | undefined): { name: string; title: string | null } {
+  const latest = useMemo(() => events.findLast((event) => event.type === 'session.renamed'), [events]);
+  const names = latest?.type === 'session.renamed' ? latest.payload : session;
   return {
-    name: names === undefined ? "" : chatName(names),
+    name: names === undefined ? '' : chatName(names),
     title: names?.title ?? null,
   };
 }
 
 /** What a screen reader hears once a rename is saved. */
-export const renamedAnnouncement = (
-  title: string | null,
-  shown: string,
-): string =>
-  title === null
-    ? `Chat name cleared, back to ${shown}`
-    : `Chat renamed to ${title}`;
+export const renamedAnnouncement = (title: string | null, shown: string): string => (title === null ? `Chat name cleared, back to ${shown}` : `Chat renamed to ${title}`);
 
 export interface ChatRename {
   editing: boolean;
@@ -122,29 +78,15 @@ export interface ChatRename {
  * Inline rename for one chat. `name` is what it shows now, `title` the
  * user's own name (`null` when it shows the automatic one).
  */
-export function useChatRename({
-  wsId,
-  sesId,
-  name,
-  title,
-  className,
-}: {
-  wsId: string;
-  sesId: string;
-  name: string;
-  title: string | null;
-  className?: string;
-}): ChatRename {
+export function useChatRename({ wsId, sesId, name, title, className }: { wsId: string; sesId: string; name: string; title: string | null; className?: string }): ChatRename {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState('');
   const [error, setError] = useState<string | undefined>(undefined);
   /** What the user typed, when a save failed: the field opens again with it, so nothing typed is lost. */
   const [draft, setDraft] = useState<string | undefined>(undefined);
   /** What gets focus back once the field closes: read then, since the row or button it names was remounted. */
-  const returnTo = useRef<(() => HTMLElement | null | undefined) | undefined>(
-    undefined,
-  );
+  const returnTo = useRef<(() => HTMLElement | null | undefined) | undefined>(undefined);
   const refocus = useRef(false);
 
   /** Closes the field; focus goes back to what opened it after Enter or Esc, never after a click elsewhere took it. */
@@ -176,16 +118,12 @@ export function useChatRename({
         (session) => {
           setMessage(renamedAnnouncement(session.title, chatName(session)));
           void queryClient.invalidateQueries({
-            queryKey: ["session", wsId, sesId],
+            queryKey: ['session', wsId, sesId],
           });
-          void queryClient.invalidateQueries({ queryKey: ["sessions", wsId] });
+          void queryClient.invalidateQueries({ queryKey: ['sessions', wsId] });
         },
         (failure: unknown) => {
-          setError(
-            failure instanceof Error
-              ? failure.message
-              : "Ogden Agents couldn't rename this chat. Try again.",
-          );
+          setError(failure instanceof Error ? failure.message : "Ogden Agents couldn't rename this chat. Try again.");
           setDraft(value);
         },
       );
@@ -218,19 +156,11 @@ export function useChatRename({
     ) : null,
     status: (
       <>
-        <span
-          role="status"
-          className="sr-only"
-          data-testid="chat-rename-status"
-        >
+        <span role="status" className="sr-only" data-testid="chat-rename-status">
           {message}
         </span>
         {error === undefined ? null : (
-          <span
-            role="alert"
-            className="text-caption text-destructive"
-            data-testid="chat-rename-error"
-          >
+          <span role="alert" className="text-caption text-destructive" data-testid="chat-rename-error">
             {error}
           </span>
         )}
@@ -240,17 +170,7 @@ export function useChatRename({
 }
 
 /** The inline name field: focused with its text selected; Enter or leaving it saves, Esc cancels. */
-function ChatNameField({
-  initial,
-  onSave,
-  onCancel,
-  className,
-}: {
-  initial: string;
-  onSave(value: string, giveFocusBack: boolean): void;
-  onCancel(): void;
-  className?: string | undefined;
-}) {
+function ChatNameField({ initial, onSave, onCancel, className }: { initial: string; onSave(value: string, giveFocusBack: boolean): void; onCancel(): void; className?: string | undefined }) {
   const [value, setValue] = useState(initial);
   const input = useRef<HTMLInputElement>(null);
   /** Set once the field has saved or cancelled, so the blur that follows does nothing. */
@@ -266,19 +186,14 @@ function ChatNameField({
   cancel.current = onCancel;
   useEffect(() => {
     const onEscape = (event: globalThis.KeyboardEvent) => {
-      if (
-        event.key !== "Escape" ||
-        event.target !== input.current ||
-        done.current
-      )
-        return;
+      if (event.key !== 'Escape' || event.target !== input.current || done.current) return;
       event.stopPropagation();
       event.preventDefault();
       done.current = true;
       cancel.current();
     };
-    window.addEventListener("keydown", onEscape, true);
-    return () => window.removeEventListener("keydown", onEscape, true);
+    window.addEventListener('keydown', onEscape, true);
+    return () => window.removeEventListener('keydown', onEscape, true);
   }, []);
   const finish = (save: boolean, byKey = true) => {
     if (done.current) return;
@@ -289,10 +204,10 @@ function ChatNameField({
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     // The field's keys are its own: never a row's, a sheet's or a page shortcut.
     event.stopPropagation();
-    if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+    if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
       event.preventDefault();
       finish(true);
-    } else if (event.key === "Escape") {
+    } else if (event.key === 'Escape') {
       event.preventDefault();
       finish(false);
     }
@@ -310,7 +225,7 @@ function ChatNameField({
         aria-label="Chat name"
         aria-describedby={hintId}
         data-testid="chat-name-input"
-        className={cn("h-8 min-w-40", className)}
+        className={cn('h-8 min-w-40', className)}
         onChange={(event) => setValue(event.target.value)}
         onKeyDown={onKeyDown}
         onBlur={() => finish(true, false)}
@@ -329,13 +244,7 @@ function ChatNameField({
  * Rename beside the chat's name in its header; while editing, the field in
  * its place (the header's title is then for screen readers only).
  */
-export function ChatHeaderRename({
-  rename,
-  name,
-}: {
-  rename: ChatRename;
-  name: string;
-}) {
+export function ChatHeaderRename({ rename, name }: { rename: ChatRename; name: string }) {
   const button = useRef<HTMLButtonElement>(null);
   return (
     <span className="flex min-w-0 items-center gap-1">

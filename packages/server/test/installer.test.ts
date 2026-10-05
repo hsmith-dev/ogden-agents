@@ -311,6 +311,9 @@ describe('channels', () => {
     expect(await run(['start'], bad.deps)).toBe(2);
     const repo = harness(undefined, { OGDEN_AGENTS_REPO: '../etc' });
     expect(await run(['start'], repo.deps)).toBe(2);
+    // The token goes to the API address, so it must be https (or loopback).
+    const api = harness(undefined, { OGDEN_AGENTS_GITHUB_API: 'http://evil.example' });
+    expect(await run(['start'], api.deps)).toBe(2);
   });
 });
 

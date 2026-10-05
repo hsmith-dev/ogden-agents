@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, w
 import { join } from 'node:path';
 import { parseSha256Sums, SUMS_NAME, tarballName, type ReleaseInfo } from '@ogden-agents/shared/release-source';
 import { downloadText, downloadToFile, type DownloadOptions } from './download.js';
-import { launcherPath, packageDir, pruneVersions, readState, versionDir, writeState } from './state.js';
+import { isSafeVersion, launcherPath, packageDir, pruneVersions, readState, versionDir, writeState } from './state.js';
 
 export class InstallError extends Error {
   constructor(message: string) {
@@ -33,6 +33,7 @@ const MAX_TARBALL_BYTES = 300 * 1024 * 1024;
 const MAX_SUMS_BYTES = 1024 * 1024;
 
 export async function installRelease(appDir: string, release: ReleaseInfo, deps: InstallDeps): Promise<void> {
+  if (!isSafeVersion(release.version)) throw new InstallError(`release ${release.tag} is not a plain version number, so it will not be installed`);
   const tarName = tarballName(release.version);
   const tarAsset = release.assets.find((asset) => asset.name === tarName);
   const sumsAsset = release.assets.find((asset) => asset.name === SUMS_NAME);

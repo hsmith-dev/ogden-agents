@@ -77,6 +77,12 @@ export async function run(argv: readonly string[], deps: CliDeps): Promise<numbe
   }
   const apiBase = env.OGDEN_AGENTS_GITHUB_API !== undefined && env.OGDEN_AGENTS_GITHUB_API !== '' ? env.OGDEN_AGENTS_GITHUB_API : DEFAULT_API_BASE;
 
+  // The API address is GitHub's unless a test (or GitHub Enterprise) says otherwise; the token goes to it, so it must be https, or this computer's own loopback.
+  if (!/^https:\/\/[^/]+/i.test(apiBase) && !/^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?(\/|$)/i.test(apiBase)) {
+    deps.err('OGDEN_AGENTS_GITHUB_API must be an https address.');
+    return 2;
+  }
+
   const state = readState(appDir);
 
   if (command === 'status') {

@@ -1,5 +1,6 @@
 import {
   APPROVE_LABEL,
+  MAX_RUN_NOTE_LENGTH,
   REJECT_AND_RETRY_LABEL,
   REJECT_NOTE_LABEL,
   REVIEW_CHECKS_TITLE,
@@ -191,7 +192,7 @@ export function BuildReview({ wsId, ticketRef }: { wsId: string; ticketRef: stri
             id="review-note"
             data-testid="review-note"
             className="min-h-20 w-full rounded-md border border-input bg-card p-2 text-body text-foreground"
-            maxLength={4000}
+            maxLength={MAX_RUN_NOTE_LENGTH}
             value={note}
             onChange={(event) => setNote(event.target.value)}
           />

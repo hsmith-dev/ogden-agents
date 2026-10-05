@@ -207,3 +207,23 @@ describe('the shipped wiring (epic 6 entry 5)', () => {
     expect(existsSync(join(server.dataDir, 'agents', 'antigravity-home'))).toBe(true);
   });
 });
+
+describe('send now or wait with Antigravity (no steering)', () => {
+  it('stops the current step and sends the message next, keeping what waited', async () => {
+    const { server, tab, wsId, chatWith } = await setUp();
+    const chat = await chatWith('antigravity');
+    await send(server, tab, wsId, chat.id, 'hold');
+    await waitFor(() => stateOf(server, chat.id) === 'working' && server.core.events.readAfter(0).some((e) => e.streamId === chat.id && e.type === 'session.message_delta'), 'the held turn', 15_000);
+    await send(server, tab, wsId, chat.id, 'whoami');
+    const now = await request(server, tab, 'POST', apiPath(API_ROUTES.sessionMessages, { wsId, sesId: chat.id }), { text: 'auth', delivery: 'now' });
+    expect(now.status).toBe(202);
+    await waitFor(() => replies(server, chat.id).length >= 3 && stateOf(server, chat.id) === 'idle', 'both messages answered', 20_000);
+    const events = server.core.events.readAfter(0).filter((e) => e.streamId === chat.id);
+    expect(events.some((e) => e.type === 'session.turn_interrupted')).toBe(true);
+    const users = events.flatMap((e) => (e.type === 'session.message_completed' && e.payload.role === 'user' ? [e.payload.content] : []));
+    // Sent right away first, then the one that waited; nothing "Not sent".
+    expect(users).toEqual(['hold', 'auth', 'whoami']);
+    expect(replies(server, chat.id)[1]).toBe('auth=gemini-api-key key=4321');
+    expect(replies(server, chat.id)[2]).toMatch(/^agent=antigravity/);
+  });
+});

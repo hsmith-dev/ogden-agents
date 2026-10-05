@@ -501,8 +501,9 @@ const agentBuilder = acp
     if ((session.turns ?? 0) === 0) return { outcome: 'promptRequired', reason: 'noRunningTurn' };
     const text = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('');
     session.steered.push(text);
-    // A turn waiting on something ("hold", "wait", "slow", "quiet") goes on with the message now.
-    session.cancel?.();
+    // A turn waiting on something ("hold", "wait", "slow", "quiet") goes on with the message, after
+    // this answer is out (as the real adapter answers before the model's next output).
+    setTimeout(() => session.cancel?.(), 20);
     return { outcome: 'injected' };
   });
 

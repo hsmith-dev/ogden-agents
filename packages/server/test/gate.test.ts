@@ -591,6 +591,9 @@ const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.workspaceSession}`,
   `POST ${API_ROUTES.sessionMessages}`,
   `POST ${API_ROUTES.sessionCancel}`,
+  `PATCH ${API_ROUTES.sessionQueuedMessage}`,
+  `DELETE ${API_ROUTES.sessionQueuedMessage}`,
+  `POST ${API_ROUTES.sessionQueuedMessageSendNow}`,
   `POST ${API_ROUTES.sessionDriver}`,
   `PUT ${API_ROUTES.sessionPermissionMode}`,
   `POST ${API_ROUTES.sessionPermission}`,
@@ -619,6 +622,8 @@ const EXPECTED_API_ROUTES = [
   `PATCH ${API_ROUTES.newProjectDefaults}`,
   `GET ${API_ROUTES.developerMode}`,
   `PUT ${API_ROUTES.developerMode}`,
+  `GET ${API_ROUTES.chatSettings}`,
+  `PUT ${API_ROUTES.chatSettings}`,
   `GET ${API_ROUTES.workspaceBmadDetection}`,
   `DELETE ${API_ROUTES.workspaceBmadOffer}`,
   // Plan and Board (story 4.1), each through the guarded helper.

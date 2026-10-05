@@ -371,3 +371,57 @@ describe('document cards in the transcript (story 4.7)', () => {
     expect(sessionView([created(), event('session.document_written', { path: 'x/a.md', toolCallId: null, next: null }, 'ses_2')], 'ses_1').items).toEqual([]);
   });
 });
+
+describe('sessionView: send now or wait', () => {
+  const queuedNow = (messageId: string, content: string) => event('session.message_queued', { sessionId: 'ses_1', messageId, content, now: true });
+  const queuedWait = (messageId: string, content: string) => event('session.message_queued', { sessionId: 'ses_1', messageId, content });
+  const begun = () => [created(), completed('u1', 'user', 'first'), stateChanged('working', 'idle')];
+
+  it('puts a message sent right away ahead of the waiting ones, after the others sent right away', () => {
+    const view = sessionView([...begun(), queuedWait('w1', 'later'), queuedNow('n1', 'urgent'), queuedNow('n2', 'also urgent')], 'ses_1');
+    expect(view.queued.map((message) => [message.messageId, message.now === true])).toEqual([
+      ['n1', true],
+      ['n2', true],
+      ['w1', false],
+    ]);
+  });
+
+  it('replaces what waits with each queue_changed: edited text, new order, removed ones gone (not "Not sent")', () => {
+    const view = sessionView(
+      [
+        ...begun(),
+        queuedWait('w1', 'a'),
+        queuedWait('w2', 'b'),
+        queuedWait('w3', 'c'),
+        event('session.queue_changed', { sessionId: 'ses_1', cause: 'removed', queue: [{ messageId: 'w3', content: 'c' }, { messageId: 'w1', content: 'a, edited', now: true }] }),
+        stateChanged('idle', 'working'),
+      ],
+      'ses_1',
+    );
+    expect(view.queued).toEqual([]);
+    expect(view.notSent.map((message) => [message.messageId, message.text])).toEqual([
+      ['w3', 'c'],
+      ['w1', 'a, edited'],
+    ]);
+    expect(view.notSent.every((message) => message.now === undefined)).toBe(true);
+  });
+
+  it('shows a message taken into the running turn where it went, marked, and the stop note where the step was stopped', () => {
+    const view = sessionView(
+      [
+        ...begun(),
+        delta('a1', 'Working'),
+        queuedNow('n1', 'urgent'),
+        completed('a1', 'agent', 'Working'),
+        event('session.message_completed', { messageId: 'n1', role: 'user', content: 'urgent', delivery: 'injected' }),
+        queuedNow('n2', 'stop and do this'),
+        event('session.turn_interrupted', { sessionId: 'ses_1', messageId: 'n2' }),
+      ],
+      'ses_1',
+    );
+    expect(view.items.map((item) => (item.type === 'message' ? item.message.messageId : item.type))).toEqual(['u1', 'a1', 'n1', 'interrupted']);
+    expect(view.messages.find((message) => message.messageId === 'n1')).toMatchObject({ delivery: 'injected' });
+    expect(view.messages.find((message) => message.messageId === 'n1')?.status).toBeUndefined();
+    expect(view.queued.map((message) => message.messageId)).toEqual(['n2']);
+  });
+});

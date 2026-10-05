@@ -85,6 +85,9 @@ export function createSendNow(ctx: ChatContext, deps: Turns & Pick<Replies, 'fin
           if (started?.steer === undefined) interrupt(sessionId, turn, item);
           return;
         }
+        // The reply so far is closed before the message goes: what the agent says next answers it.
+        const current = live.get(sessionId);
+        if (current !== undefined) finishReply(sessionId, current);
         let outcome: 'injected' | 'no_turn' | undefined;
         try {
           outcome = await Promise.race([started.steer(item.text), timeout(), entry!.gone.then(() => undefined)]);
@@ -95,9 +98,7 @@ export function createSendNow(ctx: ChatContext, deps: Turns & Pick<Replies, 'fin
         if (ctx.closing || busy.get(sessionId) !== turn || turn.failed || !turn.queue.includes(item)) return;
         if (outcome === 'injected') {
           turn.queue.splice(turn.queue.indexOf(item), 1);
-          // The reply so far is closed: what the agent says next answers this message.
-          const current = live.get(sessionId);
-          if (current !== undefined) finishReply(sessionId, current);
+          flushSession(sessionId);
           sessionEvents.completeMessage(sessionId, { messageId: item.messageId, role: 'user', content: item.text, delivery: 'injected' });
           return;
         }

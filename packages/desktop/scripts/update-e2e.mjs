@@ -36,6 +36,8 @@ const before = new Set(listSidecars().map((p) => p.pid));
 const events = (ws, ev) => readReport(ws.report).filter((e) => e.ev === ev);
 const cleanups = [];
 const results = [];
+/** The app of the scenario running, so a failure can show what the shell reported. */
+let current;
 
 // 1. The release folder the fake server serves: N+1's update artifacts, their sums and a manifest.
 const release = mkdtempSync(join(tmpdir(), 'ogden-fake-release-'));
@@ -76,6 +78,7 @@ async function startApp(name, { channel, base }) {
   const child = launchApp(exe, ws, { NODE_ENV: 'test', OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', OGDEN_AGENTS_OFFLINE: '1', OGDEN_AGENTS_CLAUDE_ACP_PATH: agentWrapper(ws.root), OGDEN_DESKTOP_TEST_UPDATE_BASE: base });
   cleanups.push(() => child.kill());
   await waitFor(`${name}: the page`, () => events(ws, 'page_finished').length > 0 || events(ws, 'server_error').length > 0, 120_000);
+  current = ws;
   return { ws, child, port: events(ws, 'server_ready')[0].data.port };
 }
 
@@ -100,6 +103,7 @@ async function scenario(name, fn) {
   } catch (error) {
     results.push({ name, ok: false, error: error.message });
     console.error(`FAIL ${name}: ${error.message}`);
+    if (current) console.error('shell report:', JSON.stringify(readReport(current.report).map((e) => ({ ev: e.ev, ...e.data }))));
   }
   killSidecars(before);
   await sleep(1000);

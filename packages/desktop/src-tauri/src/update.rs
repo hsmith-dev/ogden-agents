@@ -89,10 +89,11 @@ fn percent_decode(s: &str) -> String {
 pub async fn check(app: &AppHandle) -> Outcome {
     let config = plugin_config(app);
     if config["pubkey"].as_str().unwrap_or("").trim().is_empty() {
-        report("update_disabled", json!({}));
+        report("update_disabled", json!({ "pluginConfig": config.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()) }));
         return Outcome::Disabled;
     }
     let channel = server::update_channel();
+    report("update_check_start", json!({ "channel": channel }));
     let url = match endpoint(app, &channel) {
         Ok(u) => u,
         Err(e) => return Outcome::Failed(e),

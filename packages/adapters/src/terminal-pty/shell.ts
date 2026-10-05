@@ -7,6 +7,7 @@
  * the user's `PATH` is the one they know.
  */
 import { existsSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
 
 /** Shells that take `-l` for a login shell. */
@@ -30,7 +31,14 @@ const nodeSystem: PaneShellSystem = {
   get env() {
     return process.env;
   },
-  exists: (path) => existsSync(path),
+  // A file, not a folder: a bad SHELL falls back to the system's.
+  exists: (path) => {
+    try {
+      return existsSync(path) && statSync(path).isFile();
+    } catch {
+      return false;
+    }
+  },
 };
 
 /** The shell a plain pane runs. Always an absolute path: no shell found is `undefined`. */

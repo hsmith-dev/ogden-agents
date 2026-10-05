@@ -3,13 +3,13 @@ title: 'Tracer bullet: one plain-shell pane in Developer mode, end to end'
 type: 'feature'
 ticket: '2'
 created: '2026-10-05'
-status: 'in-review'
+status: 'built'
 baseline_revision: 'e6453545742935b05b812f3d83d8ae3a7ac7a5e1'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/epic-native-cli-terminal.md'
@@ -83,3 +83,24 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+Two reviews ran (one security, one correctness), each a context free subagent reading the diff.
+
+| Finding | Verdict | Route |
+|---|---|---|
+| Concurrent Restart orphans a PTY (S, C) | high, real | patch: the earlier program is killed when a later start lands; test added |
+| `mirror.write` can throw past 50 MB unparsed and crash the server (C) | high, real | patch: caught, the pane goes on |
+| Mirror lacks the Unicode 11 table the page uses (C) | medium, real | patch: `@xterm/addon-unicode11` pinned and loaded in the mirror |
+| Snapshot can trip the slow viewer close (S, C) | medium, real | patch: only live output counts |
+| Viewer write and resize skip the Developer mode check (S) | medium, real | patch: checked on each, pane stopped; test added |
+| `LC_*` prefix carries any value into the child (S) | medium, real | patch: explicit locale categories only |
+| `open` racing `dispose` (C) | medium, real | patch: `disposed` flag |
+| `shell()` outside the try gives 500, not 409 (C) | medium, real | patch |
+| Failed open leaves viewers unnotified; wrong error for a pane closed while starting; restart of a closed pane returns 200 (C) | low to medium, real | patch: `forget`, NotFound |
+| Restart size not told to viewers; mirror resize not ordered with the parser (C) | low, real | patch |
+| `SHELL` accepted if it exists (a folder passes); socket `onError` logs a message (S) | low, real | patch |
+| Test gaps: alternate screen state, late attach order, Windows folder removal (C) | low | patch: `?1049h` asserted, resize and snapshot test, Windows wait |
+| POSIX tree kill misses background jobs of an interactive shell (S) | medium, real, pre-existing mechanism | defer to 16.7 with the pid sweep |
+| No pty backpressure; mirror memory grows with width (S) | low, measured fine in the spike | defer |
+| 403 not first for a malformed id or body; GET for an unknown project answers an empty list (C) | low, nothing starts | defer |
+| Viewer limit checked after attach (C) | cosmetic | reject: attach and detach is harmless |

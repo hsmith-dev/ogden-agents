@@ -123,9 +123,11 @@ export function registerPaneSocket(app: Hono, { panes, log, tabs, now = Date.now
           }),
           target.onClose(() => close(ws, PANE_CLOSE.closed, 'closed')),
         );
-        const sendBytes = (data: string) => {
+        const sendBytes = (data: string, snapshot = false) => {
           if (closed || ws.readyState !== WS_OPEN) return;
           ws.send(encoder.encode(data));
+          // A snapshot of a deep scrollback can itself pass the limit: only live output counts as falling behind.
+          if (snapshot) return;
           const buffered = (ws.raw as { bufferedAmount?: number } | undefined)?.bufferedAmount ?? 0;
           if (buffered > MAX_VIEWER_BUFFERED_BYTES) {
             log.warn('terminal pane viewer fell behind; closing it', { paneId });
@@ -136,9 +138,9 @@ export function registerPaneSocket(app: Hono, { panes, log, tabs, now = Date.now
           (snapshot) => {
             // The viewer resets, then writes what follows: the screen as it is, then the live output.
             sendFrame(ws, { type: 'reset' });
-            if (snapshot !== '') sendBytes(snapshot);
+            if (snapshot !== '') sendBytes(snapshot, true);
           },
-          sendBytes,
+          (data) => sendBytes(data),
         );
       };
 
@@ -238,7 +240,7 @@ export function registerPaneSocket(app: Hono, { panes, log, tabs, now = Date.now
         },
 
         onError(event) {
-          log.warn('terminal pane websocket error', { paneId, error: String((event as Event & { error?: unknown }).error ?? event.type) });
+          log.warn('terminal pane websocket error', { paneId, error: (event as Event & { error?: unknown }).error instanceof Error ? ((event as Event & { error: Error }).error.name) : 'unknown' });
           end();
         },
       };

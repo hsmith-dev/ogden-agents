@@ -281,6 +281,8 @@ describe('refresh replays the screen from the server mirror (spike 16.1 finding 
     await second.opened;
     await waitFor(() => second.state.output.includes('screen-row-3'), 'the replayed screen', 15_000);
     expect(second.state.frames.map((f) => f.type)).toContain('reset');
+    // The alternate screen itself is replayed, not only its text.
+    expect(second.state.raw).toContain('?1049h');
     for (let row = 1; row <= 5; row += 1) expect(second.state.output).toContain(`screen-row-${row}`);
   }, 45_000);
 });

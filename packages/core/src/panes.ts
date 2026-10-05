@@ -126,9 +126,17 @@ export function createPanes(options: PanesOptions): Panes {
   const perInstall = options.limits?.perInstall ?? MAX_PANES_PER_INSTALL;
   const scrollback = options.scrollback ?? PANE_SCROLLBACK_LINES;
   const entries = new Map<PaneId, Entry>();
+  /** Set when the server stops: nothing opens after it. */
+  let disposed = false;
 
   const requireDeveloperMode = () => {
     if (!installSettings.developerMode()) throw new DeveloperModeRequiredError(PANES_NEED_DEVELOPER_MODE);
+  };
+  /** Developer mode checked again on what a live viewer does; off, the pane is stopped (never typed into). */
+  const developerModeOn = (entry: Entry): boolean => {
+    if (installSettings.developerMode()) return true;
+    forget(entry);
+    return false;
   };
   const safely = (fn: () => void) => {
     try {
@@ -164,9 +172,9 @@ export function createPanes(options: PanesOptions): Panes {
   /** Starts the pane's program at `size`; the pane is `starting` until it prints. */
   const start = async (entry: Entry, size: TerminalSize): Promise<void> => {
     if (terminal?.openPane === undefined) throw new TerminalUnavailableError('pty_unavailable', terminalUnavailableReason.noTerminalPort());
-    const command = options.shell();
     let process: PaneProcess;
     try {
+      const command = options.shell();
       process = await terminal.openPane({ file: command.file, args: command.args, cwd: entry.cwd, env: options.env(), cols: size.cols, rows: size.rows, scrollback });
     } catch (error) {
       // Plain words only: a spawn error can name a path.
@@ -177,7 +185,13 @@ export function createPanes(options: PanesOptions): Panes {
       process.kill();
       return;
     }
+    // A second Restart that started meanwhile: only one program per pane, the other stops.
+    entry.process?.kill();
     entry.process = process;
+    if (size.cols !== entry.size.cols || size.rows !== entry.size.rows) {
+      entry.size = size;
+      for (const viewer of entry.viewers) for (const listener of [...viewer.sized]) safely(() => listener(size));
+    }
     entry.size = size;
     setState(entry, 'starting');
     let printed = false;
@@ -262,12 +276,11 @@ export function createPanes(options: PanesOptions): Panes {
       try {
         await start(entry, entry.size);
       } catch (error) {
-        entries.delete(entry.pane.id);
-        entry.closed = true;
+        forget(entry);
         throw error;
       }
-      // Closed while it started (Developer mode turned off): nothing is left running.
-      if (entry.closed) throw new DeveloperModeRequiredError(PANES_NEED_DEVELOPER_MODE);
+      // Closed while it started (closed by the user, Developer mode turned off, the server stopping): nothing is left running.
+      if (entry.closed) throw new NotFoundError('pane', entry.pane.id);
       return entry.pane;
     },
 
@@ -291,9 +304,10 @@ export function createPanes(options: PanesOptions): Panes {
         await start(entry, { cols: clamp(size.cols, MAX_TERMINAL_COLS), rows: clamp(size.rows, MAX_TERMINAL_ROWS) });
       } catch (error) {
         // It could not start again: the pane stays, stopped, so Restart can be tried once more.
-        setState(entry, 'exited');
+        if (!entry.closed) setState(entry, 'exited');
         throw error;
       }
+      if (entry.closed) throw new NotFoundError('pane', paneId);
       return entry.pane;
     },
 
@@ -333,10 +347,12 @@ export function createPanes(options: PanesOptions): Panes {
           return () => void viewer.sized.delete(listener);
         },
         write(data) {
+          if (!developerModeOn(entry)) return;
           if (viewer.size !== undefined) applySize(viewer.size);
           entry.process?.write(data);
         },
         resize(cols, rows) {
+          if (!developerModeOn(entry)) return;
           if (!Number.isFinite(cols) || !Number.isFinite(rows)) return;
           const size = { cols: clamp(cols, MAX_TERMINAL_COLS), rows: clamp(rows, MAX_TERMINAL_ROWS) };
           viewer.size = size;
@@ -357,6 +373,7 @@ export function createPanes(options: PanesOptions): Panes {
     count: () => entries.size,
     closeAll,
     dispose() {
+      disposed = true;
       unfollow?.();
       unfollow = undefined;
       closeAll();

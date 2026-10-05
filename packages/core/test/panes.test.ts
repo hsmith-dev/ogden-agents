@@ -221,6 +221,28 @@ describe('a pane that closes or restarts', () => {
   });
 });
 
+describe('review findings (security review of 16.2)', () => {
+  it('two Restarts at once leave one program running, the other stopped', async () => {
+    const { panes, workspace, fake } = setup({ terminal: { opening: () => new Promise((resolve) => setTimeout(resolve, 5)) } });
+    const pane = await panes.open(workspace.id, SIZE);
+    await Promise.all([panes.restart(workspace.id, pane.id, SIZE), panes.restart(workspace.id, pane.id, SIZE)]);
+    const running = fake.processes.filter((p) => p.kills() === 0);
+    expect(running).toHaveLength(1);
+  });
+
+  it('a live viewer typing after Developer mode went off (no event) stops the pane instead of reaching the shell', async () => {
+    const { panes, workspace, fake, core } = setup();
+    const pane = await panes.open(workspace.id, SIZE);
+    const viewer = panes.attach(pane.id)!;
+    // Flipped without the event a listener would have heard.
+    core.installSettings.developerMode = () => false;
+    viewer.write('rm -rf x\r');
+    expect(fake.processes[0]!.writes).toEqual([]);
+    expect(fake.processes[0]!.kills()).toBe(1);
+    expect(panes.count()).toBe(0);
+  });
+});
+
 describe('viewers: the size follows whichever viewer last resized or typed', () => {
   it('gives the pane the resizing viewer\'s size, tells the others, and clamps', async () => {
     const { panes, workspace, fake } = setup();

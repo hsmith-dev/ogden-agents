@@ -30,6 +30,11 @@ const BASE_ALLOWED_WINDOWS = ['SystemRoot', 'ComSpec', 'PATHEXT'] as const;
  */
 export const SECRET_NAME = /(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)/i;
 
+/** The real locale categories: `LC_*` by prefix would carry any value through (as sshd's AcceptEnv), so only these pass. */
+const LOCALE_CATEGORIES: ReadonlySet<string> = new Set([
+  'LC_ALL', 'LC_CTYPE', 'LC_NUMERIC', 'LC_TIME', 'LC_COLLATE', 'LC_MONETARY', 'LC_MESSAGES', 'LC_PAPER', 'LC_NAME', 'LC_ADDRESS', 'LC_TELEPHONE', 'LC_MEASUREMENT', 'LC_IDENTIFICATION',
+]);
+
 /** Windows variable names are case-insensitive (`Path`, `SYSTEMROOT`). */
 const folder = (platform: NodeJS.Platform) => (name: string) => (platform === 'win32' ? name.toUpperCase() : name);
 
@@ -44,7 +49,7 @@ function pick(
   for (const [name, value] of Object.entries(source)) {
     if (value === undefined) continue;
     // Locale variables by prefix, but never one named like a credential (`LC_*` is a known way to carry values through, as sshd's AcceptEnv).
-    if (allowed.has(fold(name)) || name === 'LC_ALL' || (name.startsWith('LC_') && !SECRET_NAME.test(name))) env[name] = value;
+    if (allowed.has(fold(name)) || LOCALE_CATEGORIES.has(name)) env[name] = value;
   }
   return env;
 }

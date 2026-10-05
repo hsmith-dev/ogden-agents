@@ -149,11 +149,13 @@ describe('the screen mirror', () => {
   });
 });
 
-describe('a real pane (node-pty and the fake shell)', () => {
+describe('a real pane (node-pty and the fake shell)', { timeout: 30_000 }, () => {
   const dirs: string[] = [];
   const panes: PaneProcess[] = [];
-  afterEach(() => {
+  afterEach(async () => {
     for (const pane of panes.splice(0)) pane.kill();
+    // Windows keeps a folder a process still uses: give the programs a moment to be gone.
+    await new Promise((resolve) => setTimeout(resolve, process.platform === 'win32' ? 500 : 0));
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
@@ -223,7 +225,13 @@ describe('a real pane (node-pty and the fake shell)', () => {
     pane.onData((data) => (seen += data));
     await until(() => stripTerminalEscapes(seen).includes('fake-shell-ready'), 'the prompt');
     pane.resize(60, 20);
-    pane.write('size\r');
-    await until(() => stripTerminalEscapes(seen).includes('size=60x20'), 'the new size');
+    // The program learns of the new size by a signal that may land after the next line: ask until it has.
+    await until(() => {
+      pane.write('size\r');
+      return stripTerminalEscapes(seen).includes('size=60x20');
+    }, 'the new size');
+    let snapshot = '';
+    pane.attach((shown) => (snapshot = shown), () => {});
+    await until(() => snapshot !== '', 'a snapshot at the new size');
   });
 });

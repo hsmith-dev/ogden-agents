@@ -58,6 +58,8 @@ const WORKSPACE_ROUTES_WITHOUT_A_PIECE: readonly string[] = [
   `GET ${API_ROUTES.workspacePanes}`,
   `POST ${API_ROUTES.workspacePanes}`,
   `DELETE ${API_ROUTES.workspacePane}`,
+  `PUT ${API_ROUTES.workspacePaneLayout}`,
+  `PATCH ${API_ROUTES.workspacePane}`,
   `POST ${API_ROUTES.workspacePaneRestart}`,
 ];
 

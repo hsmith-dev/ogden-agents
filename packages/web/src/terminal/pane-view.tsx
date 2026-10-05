@@ -5,6 +5,7 @@ import { Button } from '@/ui/button';
 import { Text } from '@/ui/typography';
 import { tokenNumber } from '@/ui/tokens';
 import { cn } from '@/ui/utils';
+import { MAX_NAME_LENGTH } from './layout-edit';
 import { connectPane, type PaneConnection } from './pane-socket';
 import { restartPane } from './panes-api';
 import { RECONNECT_DELAYS_MS, STABLE_CONNECTION_MS } from './terminal-panel';
@@ -28,6 +29,12 @@ export interface PaneViewProps {
   screenReaderMode: boolean;
   /** Close the pane (the page asks the server and refreshes its list). */
   onClose: (paneId: string) => void;
+  /** Split this pane: a new one beside (`row`) or under (`column`) it. Absent: no split buttons. */
+  onSplit?: ((paneId: string, direction: 'row' | 'column') => void) | undefined;
+  /** Rename this pane. Absent: the name is not editable. */
+  onRename?: ((paneId: string, title: string) => void) | undefined;
+  /** Why a split is not offered now (the limit of panes), in plain words. */
+  splitDisabledReason?: string | undefined;
   className?: string;
 }
 
@@ -41,7 +48,8 @@ export interface PaneViewProps {
  * After an abnormal close it reconnects as the chat terminal does. Nothing
  * typed or printed is kept or logged here.
  */
-export function PaneView({ wsId, pane, screenReaderMode, onClose, className }: PaneViewProps) {
+export function PaneView({ wsId, pane, screenReaderMode, onClose, onSplit, onRename, splitDisabledReason, className }: PaneViewProps) {
+  const [renaming, setRenaming] = useState(false);
   const host = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | undefined>(undefined);
   const [link, setLink] = useState<Link>('loading');
@@ -207,10 +215,45 @@ export function PaneView({ wsId, pane, screenReaderMode, onClose, className }: P
       className={cn('flex min-h-0 min-w-0 flex-1 flex-col gap-2 rounded-lg border-t border-signal bg-terminal p-3', className)}
     >
       <div className="flex items-center justify-between gap-2 text-terminal-foreground">
-        <Text variant="label" data-testid="pane-title" className="truncate text-terminal-foreground">
-          {pane.title}
-        </Text>
+        {renaming && onRename !== undefined ? (
+          <input
+            autoFocus
+            defaultValue={pane.title}
+            aria-label="Terminal name"
+            data-testid="pane-title-input"
+            maxLength={MAX_NAME_LENGTH}
+            className="min-w-0 flex-1 rounded-md border border-border bg-transparent px-2 text-label text-terminal-foreground"
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                const title = event.currentTarget.value.trim();
+                setRenaming(false);
+                if (title !== '' && title !== pane.title) onRename(pane.id, title);
+              } else if (event.key === 'Escape') setRenaming(false);
+            }}
+            onBlur={() => setRenaming(false)}
+          />
+        ) : (
+          <button
+            type="button"
+            data-testid="pane-title"
+            title={onRename === undefined ? undefined : 'Rename'}
+            className="min-w-0 truncate text-left text-label text-terminal-foreground"
+            onClick={() => onRename !== undefined && setRenaming(true)}
+          >
+            {pane.title}
+          </button>
+        )}
         <span className="flex items-center gap-2">
+          {onSplit === undefined ? null : (
+            <>
+              <Button variant="outline" size="sm" onClick={() => onSplit(pane.id, 'row')} disabled={splitDisabledReason !== undefined} title={splitDisabledReason} data-testid="pane-split-row">
+                Split right
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => onSplit(pane.id, 'column')} disabled={splitDisabledReason !== undefined} title={splitDisabledReason} data-testid="pane-split-column">
+                Split down
+              </Button>
+            </>
+          )}
           {canRestart ? (
             <Button variant="outline" size="sm" onClick={restart} disabled={restarting} data-testid="pane-restart">
               Restart

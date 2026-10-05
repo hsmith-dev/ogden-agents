@@ -175,8 +175,15 @@ const size = {
   rows: z.number().int().min(1).max(500),
 };
 
-/** `POST` panes: the size the viewer's terminal has now, so the program starts at it. */
-export const OpenPaneRequest = z.object({ ...size });
+/** Where a new pane goes (story 16.4): in a tab of its own (the default), or split beside (`row`) or under (`column`) a pane of the project. */
+export const PanePlacement = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('tab') }),
+  z.object({ kind: z.literal('split'), paneId: PaneId, direction: z.enum(['row', 'column']) }),
+]);
+export type PanePlacement = z.infer<typeof PanePlacement>;
+
+/** `POST` panes: the size the viewer's terminal has now, so the program starts at it, and where the pane goes. */
+export const OpenPaneRequest = z.object({ ...size, placement: PanePlacement.optional() });
 export type OpenPaneRequest = z.infer<typeof OpenPaneRequest>;
 
 /** `POST` pane restart: the size to start at. */
@@ -189,10 +196,20 @@ export type PaneResponse = z.infer<typeof PaneResponse>;
 /** `GET` panes: the project's panes, oldest first, and whether a pane can open on this computer now. */
 export const PanesResponse = z.object({
   panes: z.array(Pane),
+  /** The project's layout: tabs of split trees of these panes (story 16.4). */
+  layout: PaneLayout,
   terminal: SessionTerminal,
   limits: z.object({ perProject: z.number().int(), perInstall: z.number().int() }),
 });
 export type PanesResponse = z.infer<typeof PanesResponse>;
+
+/** `PUT` layout (story 16.4): the arrangement only (ratios, tab names and order, the active tab, which pane sits where); the same panes, each once. */
+export const ArrangePanesRequest = z.object({ layout: PaneLayout });
+export type ArrangePanesRequest = z.infer<typeof ArrangePanesRequest>;
+
+/** `PATCH` pane (story 16.4): rename it. */
+export const RenamePaneRequest = z.object({ title: PaneTitle });
+export type RenamePaneRequest = z.infer<typeof RenamePaneRequest>;
 
 /** Server → client on the pane socket: the pane's state now (sent on attach and on every change). */
 export const PaneStateFrame = z.object({ type: z.literal('state'), state: PaneState });

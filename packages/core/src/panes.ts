@@ -15,11 +15,13 @@
  * - What a pane prints and what is typed into it is never logged, evented or
  *   stored here (AD-6, AD-16); only a pane's state changes and why.
  */
-import type { NewCoreEvent, Pane, PaneId, PaneState, TerminalUnavailableCode, WorkspaceId } from '@ogden-agents/shared';
+import type { NewCoreEvent, Pane, PaneId, PaneLayout, PanePlacement, PaneState, TerminalUnavailableCode, WorkspaceId } from '@ogden-agents/shared';
+import { PaneTitle } from '@ogden-agents/shared';
+import { addTab, EMPTY_LAYOUT, isRearrangement, layoutPaneIds, removePane, splitPane } from './pane-layout.js';
 import { MAX_PANES_PER_INSTALL, MAX_PANES_PER_PROJECT, MAX_TERMINAL_COLS, MAX_TERMINAL_ROWS } from '@ogden-agents/shared';
 import type { TerminalSize } from './chat/types.js';
 import type { Entities } from './entities.js';
-import { DeveloperModeRequiredError, NotFoundError, PANES_NEED_DEVELOPER_MODE, PaneLimitError, TerminalUnavailableError } from './errors.js';
+import { DeveloperModeRequiredError, NotFoundError, ValidationError, PANES_NEED_DEVELOPER_MODE, PaneLimitError, TerminalUnavailableError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import { newId } from './ids.js';
 import type { InstallSettings } from './install-settings.js';
@@ -67,7 +69,16 @@ export interface Panes {
    * `NotFoundError` (no such project), `PaneLimitError`, `TerminalUnavailableError`
    * when `node-pty` can't load or the program can't start (nothing is left open then).
    */
-  open(workspaceId: WorkspaceId, size: TerminalSize): Promise<Pane>;
+  open(workspaceId: WorkspaceId, size: TerminalSize, placement?: PanePlacement): Promise<Pane>;
+  /** The project's layout: tabs of split trees of its panes (story 16.4). Never refused for a project with no panes: it is empty then. */
+  layout(workspaceId: WorkspaceId): PaneLayout;
+  /**
+   * Changes the arrangement only (ratios, tab names and order, the active tab, which pane sits where) to `layout`;
+   * `ValidationError` unless it holds the same panes, each exactly once.
+   */
+  arrange(workspaceId: WorkspaceId, layout: unknown): PaneLayout;
+  /** Renames a pane; `ValidationError` for a name with control characters or no name. `NotFoundError` for an unknown pane. */
+  rename(workspaceId: WorkspaceId, paneId: PaneId, title: string): Pane;
   /** Stops the pane's program and everything it started, and forgets the pane. `NotFoundError` for an unknown or another project's pane. */
   close(workspaceId: WorkspaceId, paneId: PaneId): void;
   /** Restart pane: stops what is left of the pane's program and starts it again in the same pane (same id, same project folder). */
@@ -130,6 +141,9 @@ export function createPanes(options: PanesOptions): Panes {
   const perInstall = options.limits?.perInstall ?? MAX_PANES_PER_INSTALL;
   const scrollback = options.scrollback ?? PANE_SCROLLBACK_LINES;
   const entries = new Map<PaneId, Entry>();
+  /** Each project's layout (story 16.7 stores it). */
+  const layouts = new Map<WorkspaceId, PaneLayout>();
+  const layoutOf = (workspaceId: WorkspaceId): PaneLayout => layouts.get(workspaceId) ?? EMPTY_LAYOUT;
   /** Set when the server stops: nothing opens after it. */
   let disposed = false;
 
@@ -164,6 +178,11 @@ export function createPanes(options: PanesOptions): Panes {
       return;
     }
     safely(() => void events.append(event));
+  };
+  const setLayout = (workspaceId: WorkspaceId, layout: PaneLayout) => {
+    if (layout.tabs.length === 0) layouts.delete(workspaceId);
+    else layouts.set(workspaceId, layout);
+    emit({ type: 'terminal.layout_changed', workspaceId, streamId: workspaceId, payload: { tabCount: layout.tabs.length, paneCount: layoutPaneIds(layout).length } });
   };
   const setState = (entry: Entry, state: PaneState, exitCode: number | null = null) => {
     if (entry.pane.state === state && entry.pane.exitCode === exitCode) return;
@@ -236,6 +255,7 @@ export function createPanes(options: PanesOptions): Panes {
     if (entry.closed) return;
     entry.closed = true;
     entries.delete(entry.pane.id);
+    if (entry.announced) setLayout(entry.pane.workspaceId, removePane(layoutOf(entry.pane.workspaceId), entry.pane.id));
     if (entry.announced) emit({ type: 'terminal.pane_closed', workspaceId: entry.pane.workspaceId, streamId: entry.pane.workspaceId, payload: { paneId: entry.pane.id, cause } });
     const process = entry.process;
     entry.process = undefined;
@@ -284,7 +304,7 @@ export function createPanes(options: PanesOptions): Panes {
       return [...entries.values()].filter((e) => e.pane.workspaceId === workspaceId).map((e) => e.pane);
     },
 
-    async open(workspaceId, size) {
+    async open(workspaceId, size, placement) {
       requireDeveloperMode();
       const workspace = entities.getWorkspace(workspaceId);
       if (workspace === undefined) throw new NotFoundError('project', workspaceId);
@@ -315,7 +335,34 @@ export function createPanes(options: PanesOptions): Panes {
       // Closed while it started (closed by the user, Developer mode turned off, the server stopping): nothing is left running, and nothing was announced.
       if (entry.closed) throw new NotFoundError('pane', entry.pane.id);
       entry.announced = true;
+      const current = layoutOf(workspaceId);
+      const split = placement?.kind === 'split' ? splitPane(current, placement.paneId, entry.pane.id, placement.direction) : undefined;
+      setLayout(workspaceId, split ?? addTab(current, `t${newId('pan').slice(-8).toLowerCase()}`, entry.pane.title, entry.pane.id));
       emit({ type: 'terminal.pane_opened', workspaceId, streamId: workspaceId, payload: { paneId: entry.pane.id, launcherId: entry.pane.launcherId, title: entry.pane.title } });
+      return entry.pane;
+    },
+
+    layout(workspaceId) {
+      requireDeveloperMode();
+      return layoutOf(workspaceId);
+    },
+
+    arrange(workspaceId, layout) {
+      requireDeveloperMode();
+      if (!isRearrangement(layoutOf(workspaceId), layout)) throw new ValidationError('That layout is not the same terminals, each once.', [{ path: ['layout'], message: 'not a rearrangement' }]);
+      setLayout(workspaceId, layout);
+      return layout;
+    },
+
+    rename(workspaceId, paneId, title) {
+      requireDeveloperMode();
+      const entry = find(workspaceId, paneId);
+      const parsed = PaneTitle.safeParse(title.trim());
+      if (!parsed.success) throw new ValidationError('A terminal needs a name without control characters, up to 80 characters.', [{ path: ['title'], message: 'invalid name' }]);
+      if (parsed.data !== entry.pane.title) {
+        entry.pane = { ...entry.pane, title: parsed.data };
+        emit({ type: 'terminal.pane_renamed', workspaceId, streamId: workspaceId, payload: { paneId, title: parsed.data } });
+      }
       return entry.pane;
     },
 

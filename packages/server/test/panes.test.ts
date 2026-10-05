@@ -344,3 +344,41 @@ describe("what a pane prints is the user's own (AD-6, AD-16)", () => {
     for (const file of files(dataDir)) expect(readFileSync(file).includes(MARKER), file).toBe(false);
   }, 45_000);
 });
+
+describe('the layout over the API (story 16.4)', () => {
+  it('splits a pane beside another, resizes and renames through the API, refuses a layout that is not the same panes, and says when the cap is reached', async () => {
+    const setup = await startPaneServer();
+    const first = await openPane(setup);
+    const second = PaneResponse.parse(
+      await (await fetch(panesUrl(setup), { method: 'POST', headers: jsonHeaders(setup.tab), body: JSON.stringify({ cols: 80, rows: 24, placement: { kind: 'split', paneId: first.id, direction: 'row' } }) })).json(),
+    ).pane;
+    const listed = PanesResponse.parse(await (await fetch(panesUrl(setup), { headers: setup.tab.headers })).json());
+    expect(listed.layout.tabs).toHaveLength(1);
+    expect(listed.layout.tabs[0]!.root).toMatchObject({ type: 'split', first: { paneId: first.id }, second: { paneId: second.id } });
+
+    const tab = listed.layout.tabs[0]!;
+    const arranged = { layout: { ...listed.layout, tabs: [{ ...tab, title: 'Two', root: { ...tab.root, ratio: 0.3 } }] } };
+    const put = await fetch(`${setup.server.url}${apiPath(API_ROUTES.workspacePaneLayout, { wsId: setup.wsId })}`, { method: 'PUT', headers: jsonHeaders(setup.tab), body: JSON.stringify(arranged) });
+    expect(put.status).toBe(200);
+    expect(PanesResponse.parse(await put.json()).layout.tabs[0]).toMatchObject({ title: 'Two', root: { ratio: 0.3 } });
+    const bad = await fetch(`${setup.server.url}${apiPath(API_ROUTES.workspacePaneLayout, { wsId: setup.wsId })}`, { method: 'PUT', headers: jsonHeaders(setup.tab), body: JSON.stringify({ layout: { tabs: [], activeTabId: null } }) });
+    expect(bad.status).toBe(400);
+
+    const renamed = await fetch(paneUrl(setup, first.id), { method: 'PATCH', headers: jsonHeaders(setup.tab), body: JSON.stringify({ title: 'Build' }) });
+    expect(PaneResponse.parse(await renamed.json()).pane.title).toBe('Build');
+    expect((await fetch(paneUrl(setup, first.id), { method: 'PATCH', headers: jsonHeaders(setup.tab), body: JSON.stringify({ title: '' }) })).status).toBe(400);
+
+    // The cap of 8 per project is refused with its reason.
+    for (let i = 0; i < 6; i += 1) await openPane(setup);
+    const over = await fetch(panesUrl(setup), { method: 'POST', headers: jsonHeaders(setup.tab), body: JSON.stringify({ cols: 80, rows: 24 }) });
+    expect(over.status).toBe(409);
+    expect(ApiErrorBody.parse(await over.json()).error).toMatchObject({ code: 'pane_limit_reached', details: { scope: 'project', limit: 8 } });
+  }, 90_000);
+
+  it('refuses the layout routes without Developer mode', async () => {
+    const setup = await startPaneServer({ developerMode: false });
+    const put = await fetch(`${setup.server.url}${apiPath(API_ROUTES.workspacePaneLayout, { wsId: setup.wsId })}`, { method: 'PUT', headers: jsonHeaders(setup.tab), body: JSON.stringify({ layout: { tabs: [], activeTabId: null } }) });
+    expect(put.status).toBe(403);
+    expect((await fetch(paneUrl(setup, 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W3'), { method: 'PATCH', headers: jsonHeaders(setup.tab), body: JSON.stringify({ title: 'x' }) })).status).toBe(403);
+  }, 30_000);
+});

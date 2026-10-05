@@ -234,8 +234,10 @@ export function createTurns(
       const following = takeNext(turn);
       if (following === undefined) break;
       try {
-        // A leftover card is never answered by moving on: the turn is over.
-        if (entities.getSession(session.id)?.state === 'waiting') break;
+        // A card still open once the agent ended its turn is one it stopped waiting for (Claude Code
+        // withdraws a request when its SDK aborts the tool call). Leaving `waiting` declines it as
+        // cancelled, never allowed, and the queue goes on (backlog bug 16).
+        if (entities.getSession(session.id)?.state === 'waiting') entities.setSessionState(session.id, 'working');
         // A Stop ended the turn before; what was sent after it starts a new one.
         turn.stopping = false;
         clearTurnTimers(turn);

@@ -3,13 +3,13 @@ title: 'Choose whether new messages wait or go right away'
 type: 'feature'
 ticket: '2'
 created: '2026-10-04'
-status: 'in-progress'
+status: 'in-review'
 baseline_revision: '2e4d68f8befaae014c336abffc3e7f5b1fc7d984'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick', 'races-ux']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/backlog/story-choose-whether-new-messages-wait-or-go-right-away.md'
@@ -85,6 +85,15 @@ context:
 - Given Claude Code mid-turn, when sent right away, then no `session/cancel` is sent and the steered text reaches the agent.
 
 ## Implementation Notes
+
+- Implemented directly in this session (no implementation subagent: the session held the whole investigation; the user's brief asked for an autonomous run).
+- Core: `chat/send-now.ts` (new) wraps `sendMessage` for `delivery: 'now'` and owns the queue edits; `turns.ts` `cancel` became `stop(sessionId, turn, { keepQueue })`, `runTurn` marks `turn.prompting`, and `drive` waits for `turn.steering` before taking the next message. Steer timeout `STEER_TIMEOUT_MS` (10 s) then interrupt.
+- The reply so far is closed just before the steer goes (not on its answer): the agent's next output can arrive before the steer's answer, and must start a new reply. If it does, the user message can show just after that new reply's start (cosmetic, only when the agent answers before the ack).
+- A card that appears while a steer is in flight: no interrupt (the message waits first in line), so no card is ever answered for the user. Stop during a steer: the message is dropped from the queue like every queued one ("Not sent", back to the composer) even if the agent took it.
+- App setting lives in its own `chat_settings` table (not `install_settings`, whose row's existence means Developer mode was ever set). Migration 0012.
+- Fake agent: `_session/steering` (advertised unless Antigravity or generic personality); it answers before going on, as the real adapter does.
+- UI: the menu trigger is named "Choose when it goes" so the Send button stays the only control named Send. The hint names the shortcut (`⌘ Enter` on Apple, else `Ctrl+Enter`). Docs: EXPERIENCE.md Composer, agent matrix (Send now or wait), architecture memlog (AD-5/AD-1 notes).
+- CHANGELOG not touched (sibling stories edit it; the release owner writes the entry).
 
 ## Plan Change Log
 

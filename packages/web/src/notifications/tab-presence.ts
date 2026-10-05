@@ -23,8 +23,8 @@ export interface PresenceEnv {
   channel?: ((name: string) => Pick<BroadcastChannel, 'postMessage' | 'close' | 'addEventListener' | 'removeEventListener'>) | undefined;
   /** Whether this tab is visible and focused now. */
   focused(): boolean;
-  /** Calls back whenever this tab's focus may have changed; returns the unsubscribe. */
-  onFocusChange(callback: () => void): () => void;
+  /** Calls back whenever this tab's focus may have changed, with `leaving` when the page is going away; returns the unsubscribe. */
+  onFocusChange(callback: (leaving: boolean) => void): () => void;
 }
 
 /** The browser's environment for {@link createTabPresence}. */
@@ -34,12 +34,17 @@ export function browserPresenceEnv(): PresenceEnv {
     channel: typeof BroadcastChannel === 'undefined' ? undefined : (name) => new BroadcastChannel(name),
     focused: () => document.visibilityState === 'visible' && document.hasFocus(),
     onFocusChange(callback) {
-      const events = ['focus', 'blur', 'pagehide', 'pageshow'] as const;
-      for (const name of events) window.addEventListener(name, callback);
-      document.addEventListener('visibilitychange', callback);
+      const changed = () => callback(false);
+      // A reload or a navigation in this tab fires no blur: say it left, or the leader thinks it is still in front.
+      const leaving = () => callback(true);
+      const events = ['focus', 'blur', 'pageshow'] as const;
+      for (const name of events) window.addEventListener(name, changed);
+      window.addEventListener('pagehide', leaving);
+      document.addEventListener('visibilitychange', changed);
       return () => {
-        for (const name of events) window.removeEventListener(name, callback);
-        document.removeEventListener('visibilitychange', callback);
+        for (const name of events) window.removeEventListener(name, changed);
+        window.removeEventListener('pagehide', leaving);
+        document.removeEventListener('visibilitychange', changed);
       };
     },
   };
@@ -61,19 +66,22 @@ export function createTabPresence(env: PresenceEnv = browserPresenceEnv()): TabP
       // A closed channel: nothing to tell.
     }
   };
-  const report = () => {
-    if (!disposed) post({ type: 'focus', tabId, focused: env.focused() });
+  let left = false;
+  const report = (leaving = false) => {
+    if (leaving) left = true;
+    else if (left) left = false; // Back from the back/forward cache.
+    if (!disposed) post({ type: 'focus', tabId, focused: !left && env.focused() });
   };
   const onMessage = (event: Event) => {
     const message = (event as MessageEvent<PresenceMessage>).data;
-    if (message?.type === 'hello') report();
+    if (message?.type === 'hello') report(left);
     else if (message?.type === 'focus' && typeof message.tabId === 'string') {
       if (message.focused) others.set(message.tabId, true);
       else others.delete(message.tabId);
     }
   };
   channel?.addEventListener('message', onMessage);
-  const stopFocus = env.onFocusChange(report);
+  const stopFocus = env.onFocusChange((leaving) => report(leaving));
   report();
 
   if (env.locks !== undefined) {
@@ -81,7 +89,8 @@ export function createTabPresence(env: PresenceEnv = browserPresenceEnv()): TabP
       .request(LEADER_LOCK, () => {
         if (disposed) return undefined;
         leader = true;
-        // A new leader asks every tab where focus is.
+        // A new leader forgets what it heard (a tab may have gone without a word) and asks every tab where focus is.
+        others.clear();
         post({ type: 'hello' });
         return new Promise<void>((resolve) => {
           release = resolve;
@@ -95,7 +104,7 @@ export function createTabPresence(env: PresenceEnv = browserPresenceEnv()): TabP
 
   return {
     isLeader: () => leader && !disposed,
-    anyTabFocused: () => env.focused() || [...others.values()].some(Boolean),
+    anyTabFocused: () => (!left && env.focused()) || [...others.values()].some(Boolean),
     dispose() {
       if (disposed) return;
       post({ type: 'focus', tabId, focused: false });

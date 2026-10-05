@@ -18,7 +18,7 @@ const state = vi.hoisted(() => ({
   navigate: [] as unknown[],
 }));
 
-vi.mock('@/shell/sidebar-data', () => ({ useSidebarData: () => ({ model: { groups: [], needsYou: state.needs } }) }));
+vi.mock('@/shell/sidebar-data', () => ({ useSidebarData: () => ({ model: { groups: [{ wsId: 'ws_a', rows: [{ sesId: 'ses_a' }], earlier: [] }], needsYou: state.needs } }) }));
 vi.mock('@/events/event-stream', () => ({ useEventStream: () => ({ caughtUp: state.caughtUp }) }));
 vi.mock('@/shell/workspace-header', () => ({ WorkspaceHeader: ({ title }: { title: string }) => <h1>{title}</h1> }));
 vi.mock('@tanstack/react-router', async (importOriginal) => {
@@ -108,6 +108,8 @@ describe('Settings, Notifications', () => {
     expect(requests).toEqual([]);
     expect(desktop.getAttribute('aria-checked')).toBe('false');
     fireEvent.click(desktop);
+    // Keyboard focus stays on the switch while the browser asks.
+    expect(desktop.hasAttribute('disabled')).toBe(false);
     await settle();
     expect(requests).toHaveLength(1);
     expect(desktop.getAttribute('aria-checked')).toBe('true');
@@ -122,6 +124,9 @@ describe('Settings, Notifications', () => {
     await settle();
     expect(screen.getByRole('switch', { name: 'Desktop notifications' }).getAttribute('aria-checked')).toBe('false');
     expect(screen.getByTestId('desktop-notifications-blocked').textContent).toMatch(/blocking notifications/);
+    // Said in a live region that was already there, and named by the switch.
+    expect(screen.getByRole('status').contains(screen.getByTestId('desktop-notifications-blocked'))).toBe(true);
+    expect(screen.getByRole('switch', { name: 'Desktop notifications' }).getAttribute('aria-describedby')).toContain('desktop-notifications-blocked');
     fireEvent.click(screen.getByRole('button', { name: 'Test sound' }));
     expect(played.length).toBeGreaterThan(0);
   });

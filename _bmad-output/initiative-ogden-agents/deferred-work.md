@@ -544,3 +544,10 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-every-agent/story-refactor-sweep-plan.md`
   summary: Resolved: node-pty's Windows "Cannot create process, error code: 87" is the same ConPTY race as "Invalid pty handle" (3.8): `PtyConnect` reads the new pseudo-console back from an unlocked list an exiting terminal's thread is editing, and a damaged entry's handle is refused by `CreateProcessW` (ERROR_INVALID_PARAMETER). `spawnWithRetry` now tries that exact error again too, at most `PTY_SPAWN_ATTEMPTS`; every other code still throws at once.
   evidence: CI run 37239378578 attempt 1 (6.7, windows-latest Node 24): `terminal-pty.test.ts` "a CLI that crashes on start" failed at `pty.spawn` right after the previous test's crashed CLI exited; node-pty 1.1.0 `src/win/conpty.cc` `get_pty_baton`/`remove_pty_baton`; tests in `adapters/test/terminal-pty.test.ts`.
+
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-ogden-notifies-you-with-a-sound-when-something-needs-you-plan.md`
+  summary: Keep a session's latest `session.check_in` when the live event window is trimmed, so an "Agent is quiet" need does not drop from Needs you while the agent is still quiet.
+  evidence: `trimWorkspaces` in `packages/web/src/events/event-store.ts` keeps each session's latest state change and open permission requests but not its check-in; past 2000 events in the workspace the check-in is trimmed (review of backlog 8, finding 3).
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-ogden-notifies-you-with-a-sound-when-something-needs-you-plan.md`
+  summary: Play the attention chime from a tab that can play sound (has user activation) instead of whichever tab holds the leader lock.
+  evidence: browsers allow AudioContext only after a user gesture in that tab; a launcher-opened or reloaded leader stays silent (review of backlog 8, finding 11). The Settings copy now says so.

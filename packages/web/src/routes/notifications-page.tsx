@@ -38,7 +38,9 @@ export function permissionSentence(permission: DesktopPermission): string | unde
  */
 export function NotificationsPage() {
   const { settings, update } = useNotificationSettings();
-  const [permission, setPermission] = useState<DesktopPermission>(desktopPermission);
+  // Read on every render: another tab may have been granted it since (its settings change re-renders this one).
+  const [, setAnswered] = useState(0);
+  const permission = desktopPermission();
   const [asking, setAsking] = useState(false);
   const blocked = permissionSentence(permission);
   const desktopOn = settings.desktop && permission === 'granted';
@@ -48,13 +50,14 @@ export function NotificationsPage() {
       update({ desktop: false });
       return;
     }
+    if (asking) return;
     let now = desktopPermission();
     if (now === 'default') {
       setAsking(true);
       now = await requestDesktopPermission();
       setAsking(false);
     }
-    setPermission(now);
+    setAnswered((n) => n + 1);
     update({ desktop: now === 'granted' });
   };
 
@@ -72,23 +75,27 @@ export function NotificationsPage() {
             <Switch
               id="desktop-notifications"
               data-testid="desktop-notifications"
-              aria-describedby="desktop-notifications-description"
+              aria-describedby={blocked === undefined ? 'desktop-notifications-description' : 'desktop-notifications-description desktop-notifications-blocked'}
               checked={desktopOn}
-              disabled={permission === 'unsupported' || asking}
+              // Not disabled while the browser asks: that would drop keyboard focus to the page.
+              disabled={permission === 'unsupported'}
               aria-busy={asking || undefined}
               onCheckedChange={(on) => void setDesktop(on)}
             />
           </Field>
-          {blocked === undefined ? null : (
-            <Notice variant="info" infoGlyph role="status" data-testid="desktop-notifications-blocked">
-              {blocked}
-            </Notice>
-          )}
+          {/* The live region is always there, so a refusal's sentence is announced when it appears. */}
+          <div role="status">
+            {blocked === undefined ? null : (
+              <Notice variant="info" infoGlyph id="desktop-notifications-blocked" data-testid="desktop-notifications-blocked">
+                {blocked}
+              </Notice>
+            )}
+          </div>
           <Field
             id="notification-sound"
             layout="inline"
             label="Sound"
-            description="Plays a short chime when a chat needs you. Browsers play it only after you have clicked somewhere in Ogden Agents once."
+            description="Plays a short chime when a chat needs you. Browsers play sound only in a tab you have clicked in since it opened, so click in an Ogden Agents tab once after opening or reloading it."
           >
             <Switch
               id="notification-sound"

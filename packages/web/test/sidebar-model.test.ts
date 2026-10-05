@@ -87,7 +87,7 @@ describe('buildSidebar (EXPERIENCE.md Status sidebar)', () => {
 
   it('request outside the window: a waiting session still needs you, with the plain text', () => {
     const model = buildSidebar([B], [session('ses_b', 'ws_b', 'waiting', ago(3 * MINUTE))], emptyStore(), NOW, CLAUDE);
-    expect(model.needsYou).toEqual([{ id: 'ses_b', kind: 'waiting', chatTitle: 'Chat', wsId: 'ws_b', sesId: 'ses_b', workspaceName: 'Letterpress', text: 'Claude Code is waiting for you', agentName: 'Claude Code', at: ago(3 * MINUTE) }]);
+    expect(model.needsYou).toEqual([{ id: `waiting:ses_b:${ago(3 * MINUTE)}`, kind: 'waiting', chatTitle: 'Chat', wsId: 'ws_b', sesId: 'ses_b', workspaceName: 'Letterpress', text: 'Claude Code is waiting for you', agentName: 'Claude Code', at: ago(3 * MINUTE) }]);
   });
 
   it('a working agent that checked in needs you, without naming what it waits on, until anything else happens', () => {
@@ -101,6 +101,14 @@ describe('buildSidebar (EXPERIENCE.md Status sidebar)', () => {
     expect(buildSidebar([B], [titled], store(checkIn, delta), NOW, CLAUDE).needsYou).toEqual([]);
     // The session moved on (REST says idle): the check-in no longer stands.
     expect(buildSidebar([B], [session('ses_b', 'ws_b', 'idle')], store(checkIn), NOW, CLAUDE).needsYou).toEqual([]);
+  });
+
+  it('a new check-in in a chat already shown is said assertively, so sound is never the only signal', () => {
+    const titled = session('ses_b', 'ws_b', 'working');
+    const before = buildSidebar([B], [titled], emptyStore(), NOW, CLAUDE);
+    const checkIn = event('ws_b', 'ses_b', 'session.check_in', { sessionId: 'ses_b' });
+    const after = buildSidebar([B], [titled], store(checkIn), NOW, CLAUDE);
+    expect(diffForAnnouncements(before, after).assertive.map((a) => a.text)).toEqual(['Letterpress: Claude Code has been quiet for 10 minutes']);
   });
 
   it('a chat stopped until its agent signs in again needs you; another error does not', () => {

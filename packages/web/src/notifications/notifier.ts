@@ -45,9 +45,11 @@ export interface Notifier {
   /**
    * Called with every new Needs you list. Before the tab has caught up, and on
    * the call that catches up, it only records what is there: a need already
-   * waiting when the tab opened is not news.
+   * waiting when the tab opened is not news. `sessions` is every chat the
+   * sidebar has: a need in a chat it did not have on the last call is its
+   * list loading late, not news either.
    */
-  update(needs: readonly NeedsYouEntry[], settings: NotificationSettings, caughtUp: boolean): void;
+  update(needs: readonly NeedsYouEntry[], settings: NotificationSettings, caughtUp: boolean, sessions: ReadonlySet<string>): void;
   dispose(): void;
 }
 
@@ -55,8 +57,11 @@ export function createNotifier(deps: NotifierDeps): Notifier {
   const seen = new Set<string>();
   const shown = new Map<string, { close(): void }>();
   let started = false;
+  let knownSessions: ReadonlySet<string> = new Set();
   return {
-    update(needs, settings, caughtUp) {
+    update(needs, settings, caughtUp, sessions) {
+      const known = knownSessions;
+      knownSessions = sessions;
       const fresh = needs.filter((need) => !seen.has(need.id));
       for (const need of fresh) seen.add(need.id);
       // A need that left the list is answered: its notification goes too.
@@ -71,7 +76,7 @@ export function createNotifier(deps: NotifierDeps): Notifier {
         return;
       }
       if (!deps.isLeader()) return;
-      const due = fresh.filter((need) => settings.kinds[need.kind]);
+      const due = fresh.filter((need) => settings.kinds[need.kind] && known.has(need.sesId));
       if (due.length === 0) return;
       if (settings.onlyWhenAway && deps.anyTabFocused()) return;
       if (settings.desktop && deps.permission() === 'granted') {

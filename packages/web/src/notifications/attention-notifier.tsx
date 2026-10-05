@@ -1,5 +1,5 @@
 import { useRouter } from '@tanstack/react-router';
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useEventStream } from '@/events/event-stream';
 import { useSidebarData } from '@/shell/sidebar-data';
 import { playChime } from './chime';
@@ -54,9 +54,10 @@ export function AttentionNotifier() {
     };
   }, [router]);
 
+  const sessions = useMemo(() => new Set(model.groups.flatMap((group) => [...group.rows, ...group.earlier].map((row) => row.sesId))), [model.groups]);
   useEffect(() => {
-    notifier.current?.update(model.needsYou, settings, caughtUp);
-  }, [model.needsYou, settings, caughtUp]);
+    notifier.current?.update(model.needsYou, settings, caughtUp, sessions);
+  }, [model.needsYou, settings, caughtUp, sessions]);
 
   return null;
 }

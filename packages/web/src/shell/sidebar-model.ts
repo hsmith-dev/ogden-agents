@@ -107,21 +107,35 @@ interface FoldedStream {
 
 /** A session's window folded once per stream array; `undefined` when the window has nothing of it. */
 function foldStream(store: EventStoreState, session: Session): FoldedStream | undefined {
+  // Only the states Needs you reads: a working chat streaming deltas is not refolded on each one.
+  if (session.state !== 'waiting' && session.state !== 'working' && session.state !== 'error') return undefined;
   const events = streamEvents(store, session.workspaceId, session.id);
   if (events.length === 0) return undefined;
   let folded = foldedByStream.get(events);
   if (folded === undefined) {
-    const view = sessionView(events, session.id);
-    const requested = view.items.flatMap((item) => (item.type === 'permission' && item.permission.resolution === undefined ? [item.permission] : []));
+    let state: SessionState | undefined;
+    let requested: TranscriptPermission[] = [];
+    let errorCode: SessionErrorCode | undefined;
     let errorSeq: number | undefined;
-    for (let i = events.length - 1; i >= 0 && errorSeq === undefined; i--) {
-      const event = events[i]!;
-      if (event.streamId === session.id && event.type === 'session.state_changed' && event.payload.state === 'error') errorSeq = event.seq;
+    if (session.state === 'waiting') {
+      // The whole transcript only for a waiting chat: its open requests.
+      const view = sessionView(events, session.id);
+      state = view.state;
+      requested = view.items.flatMap((item) => (item.type === 'permission' && item.permission.resolution === undefined ? [item.permission] : []));
+    } else {
+      const lastState = events.findLast((event) => event.streamId === session.id && event.type === 'session.state_changed');
+      if (lastState?.type === 'session.state_changed') {
+        state = lastState.payload.state;
+        if (state === 'error') {
+          errorCode = lastState.payload.errorCode;
+          errorSeq = lastState.seq;
+        }
+      }
     }
-    // A check-in stands while it is the session's latest event (the view drops it when the window has no `working`).
+    // A check-in stands while it is the session's latest event.
     const last = events.findLast((event) => event.streamId === session.id);
     const checkIn = last?.type === 'session.check_in' ? { waitingOn: last.payload.waitingOn, at: last.at } : undefined;
-    folded = { state: view.state, requested, checkIn, errorCode: view.errorCode, errorSeq };
+    folded = { state, requested, checkIn, errorCode, errorSeq };
     foldedByStream.set(events, folded);
   }
   return folded;
@@ -197,7 +211,7 @@ export function buildSidebar(
       // `waiting` the window saw with no open request is a moment between events (the request
       // not yet arrived, or answered before `working`), not something to show.
       if (requests.length === 0 && session.state === 'waiting' && windowState === undefined) {
-        needsYou.push({ ...base, id: session.id, kind: 'waiting', text: waitingText(agent), at: session.updatedAt });
+        needsYou.push({ ...base, id: `waiting:${session.id}:${session.updatedAt}`, kind: 'waiting', text: waitingText(agent), at: session.updatedAt });
       }
       // A check-in stands while the window still has the session working and nothing after it.
       if (session.state === 'working' && folded?.checkIn !== undefined && (folded.state === undefined || folded.state === 'working')) {
@@ -288,11 +302,12 @@ export function diffForAnnouncements(previous: SidebarModel, next: SidebarModel)
   }
   const known = new Set(previous.needsYou.map((entry) => entry.id));
   // A request in a session the sidebar did not have yet is its list loading, not news.
-  const assertive = next.needsYou.flatMap((entry) =>
-    entry.request === undefined || known.has(entry.id) || !before.has(entry.sesId)
-      ? []
-      : [{ id: entry.id, sesId: entry.sesId, text: `${waitingText(entry.agentName)}: ${entry.request}` }],
-  );
+  // A quiet agent or a sign-in need changes no state worth a word on its own, so it is said here, never only by sound.
+  const assertive = next.needsYou.flatMap((entry) => {
+    if (known.has(entry.id) || !before.has(entry.sesId)) return [];
+    if (entry.kind === 'check_in' || entry.kind === 'sign_in') return [{ id: entry.id, sesId: entry.sesId, text: `${entry.workspaceName}: ${entry.text}` }];
+    return entry.request === undefined ? [] : [{ id: entry.id, sesId: entry.sesId, text: `${waitingText(entry.agentName)}: ${entry.request}` }];
+  });
   return { polite, assertive };
 }
 

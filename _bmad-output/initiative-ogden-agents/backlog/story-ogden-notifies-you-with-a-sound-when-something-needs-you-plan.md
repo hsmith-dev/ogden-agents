@@ -78,9 +78,33 @@ context:
 
 ## Implementation Notes
 
+- Implemented directly in the build session (it already held the investigation), not by a separate implementation subagent.
+- Needs you: `NeedsYouEntry` gained `kind` and `chatTitle`; `foldStream` replaces the permissions-only fold. A check-in stands while it is the session's latest event in the window and REST says `working` (sessionView drops `checkIn` when the window has no `working`). Sign in needed uses the `seq` of the latest move to `error` in its id, so a second expiry is a new need.
+- Files: `packages/web/src/notifications/` (notification-settings, notifier, tab-presence, chime, desktop, attention-notifier), `routes/notifications-page.tsx`, `ui/slider.tsx` (Radix slider), router, Settings menu (Bell), app shell mount, EXPERIENCE.md.
+- Surprise: the design-tokens test flags numeric JSX props (`min={0}`); the slider scale is a constant.
+- Privacy: chat titles are null unless set at creation (no title is derived from message text on this branch), so "<project>: <chat>" carries no agent output.
+- Tests: `packages/web/test/notifier.test.ts` (rules, privacy, settings parse, presence leader and focus, chime), `notifications.dom.test.tsx` (page, permission only from the switch, refusal, unsupported, cross-tab settings, click opens chat, quiet while in front), `sidebar-model.test.ts` (check-in and sign-in kinds), `tests/e2e/notifications.spec.ts` (two tabs, one notification and one chime, safe text, no repeat).
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (quick lens, UX/a11y and privacy focus): high 2, medium 5, low 4, false 0, maybe-false 0; privacy check clean.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---------|---------|-------|-------------------|
+| 1 | pagehide reports a reloading focused tab as still focused; leader suppresses forever | high | patch | pagehide now reports `focused: false`; a new leader clears its map before `hello`; unit test added |
+| 2 | needs in session lists that load after catch-up get notified | high | patch | notifier only notifies needs in chats the previous update already had (as `diffForAnnouncements`); unit test added |
+| 3 | check-in trimmed from the live window past 2000 events drops the need | medium | defer | needs `trimWorkspaces` to keep a session's latest check-in; event-store change outside this story |
+| 4 | `waiting` id is the bare session id, so a second wait is never notified | low | patch | id now `waiting:<sesId>:<updatedAt>` |
+| 5 | Needs you rows of new kinds don't name the chat | low | reject | existing rows never name the chat and every title is null on this branch; the chat names story sets titles |
+| 6 | every notification body says "Chat" | medium | reject | titles are null in core today (pre-existing); the body names the chat as soon as titles exist (chat names story) |
+| 7 | check-in and sign-in had no screen reader announcement; sound could be the only signal | medium | patch | `diffForAnnouncements` says new check-in and sign-in needs assertively; unit test added |
+| 8 | switch disabled while asking drops keyboard focus | medium | patch | no longer disabled while asking; presses ignored meanwhile; DOM assertion added |
+| 9 | refusal notice mounted with its live region, not announced | medium | patch | `role="status"` wrapper always present; switch `aria-describedby` names the notice |
+| 10 | page's permission state stale across tabs | low | patch | permission read on every render |
+| 11 | leader may lack sticky activation, so the chime is silent | medium | patch (copy) + defer | copy now says sound plays only in a tab clicked since it opened; choosing an activated leader deferred |
+| 12 | `sessionView` folded for every session on every delta | medium | patch | full fold only for waiting chats; working and error read the last events |
 
 ## Design Notes
 

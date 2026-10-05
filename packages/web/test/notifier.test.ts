@@ -25,6 +25,8 @@ const need = (id: string, kind: NeedKind = 'permission', extra: Partial<NeedsYou
   ...extra,
 });
 
+const SESSIONS = new Set(['ses_a']);
+
 const ON: NotificationSettings = { ...DEFAULT_NOTIFICATION_SETTINGS, desktop: true };
 
 function setup(overrides: Partial<NotifierDeps> = {}) {
@@ -60,46 +62,56 @@ describe('notificationText (privacy)', () => {
 describe('createNotifier', () => {
   it('needs already there when the tab caught up are never notified; a new one is, once', () => {
     const { notifier, shown, chimes } = setup();
-    notifier.update([need('old')], ON, false);
-    notifier.update([need('old')], ON, true);
+    notifier.update([need('old')], ON, false, SESSIONS);
+    notifier.update([need('old')], ON, true, SESSIONS);
     expect(shown).toEqual([]);
-    notifier.update([need('old'), need('new')], ON, true);
-    notifier.update([need('old'), need('new')], ON, true);
-    notifier.update([need('new'), need('old')], { ...ON }, true);
+    notifier.update([need('old'), need('new')], ON, true, SESSIONS);
+    notifier.update([need('old'), need('new')], ON, true, SESSIONS);
+    notifier.update([need('new'), need('old')], { ...ON }, true, SESSIONS);
     expect(shown.map((s) => s.id)).toEqual(['new']);
     expect(chimes).toEqual([ON.volume]);
   });
 
+  it('a need in a chat whose list arrived late is its list loading, not news', () => {
+    const { notifier, shown, chimes } = setup();
+    notifier.update([], ON, true, new Set());
+    notifier.update([need('late', 'permission', { sesId: 'ses_late' })], ON, true, new Set(['ses_late']));
+    expect(shown).toEqual([]);
+    expect(chimes).toEqual([]);
+    notifier.update([need('late', 'permission', { sesId: 'ses_late' }), need('next', 'permission', { sesId: 'ses_late' })], ON, true, new Set(['ses_late']));
+    expect(shown.map((s) => s.id)).toEqual(['next']);
+  });
+
   it('a need that leaves and comes back is not notified again', () => {
     const { notifier, shown } = setup();
-    notifier.update([], ON, true);
-    notifier.update([need('a')], ON, true);
-    notifier.update([], ON, true);
-    notifier.update([need('a')], ON, true);
+    notifier.update([], ON, true, SESSIONS);
+    notifier.update([need('a')], ON, true, SESSIONS);
+    notifier.update([], ON, true, SESSIONS);
+    notifier.update([need('a')], ON, true, SESSIONS);
     expect(shown.map((s) => s.id)).toEqual(['a']);
   });
 
   it('a tab that is not the leader stays silent, and never replays once it leads', () => {
     let leader = false;
     const { notifier, shown, chimes } = setup({ isLeader: () => leader });
-    notifier.update([], ON, true);
-    notifier.update([need('a')], ON, true);
+    notifier.update([], ON, true, SESSIONS);
+    notifier.update([need('a')], ON, true, SESSIONS);
     expect(shown).toEqual([]);
     expect(chimes).toEqual([]);
     leader = true;
-    notifier.update([need('a')], ON, true);
+    notifier.update([need('a')], ON, true, SESSIONS);
     expect(shown).toEqual([]);
-    notifier.update([need('a'), need('b')], ON, true);
+    notifier.update([need('a'), need('b')], ON, true, SESSIONS);
     expect(shown.map((s) => s.id)).toEqual(['b']);
   });
 
   it('only when away: an Ogden tab in front means no notification and no sound; off, both play', () => {
     const { notifier, shown, chimes } = setup({ anyTabFocused: () => true });
-    notifier.update([], ON, true);
-    notifier.update([need('a')], ON, true);
+    notifier.update([], ON, true, SESSIONS);
+    notifier.update([need('a')], ON, true, SESSIONS);
     expect(shown).toEqual([]);
     expect(chimes).toEqual([]);
-    notifier.update([need('a'), need('b')], { ...ON, onlyWhenAway: false }, true);
+    notifier.update([need('a'), need('b')], { ...ON, onlyWhenAway: false }, true, SESSIONS);
     expect(shown.map((s) => s.id)).toEqual(['b']);
     expect(chimes).toHaveLength(1);
   });
@@ -107,47 +119,47 @@ describe('createNotifier', () => {
   it('a kind turned off neither notifies nor plays', () => {
     const { notifier, shown, chimes } = setup();
     const settings = { ...ON, kinds: { ...ON.kinds, check_in: false } };
-    notifier.update([], settings, true);
-    notifier.update([need('c', 'check_in')], settings, true);
+    notifier.update([], settings, true, SESSIONS);
+    notifier.update([need('c', 'check_in')], settings, true, SESSIONS);
     expect(shown).toEqual([]);
     expect(chimes).toEqual([]);
-    notifier.update([need('c', 'check_in'), need('s', 'sign_in')], settings, true);
+    notifier.update([need('c', 'check_in'), need('s', 'sign_in')], settings, true, SESSIONS);
     expect(shown.map((s) => s.id)).toEqual(['s']);
   });
 
   it('without the browser permission, or with desktop off, the sound still plays alone; with sound off nothing plays', () => {
     const denied = setup({ permission: () => 'denied' });
-    denied.notifier.update([], ON, true);
-    denied.notifier.update([need('a')], ON, true);
+    denied.notifier.update([], ON, true, SESSIONS);
+    denied.notifier.update([need('a')], ON, true, SESSIONS);
     expect(denied.shown).toEqual([]);
     expect(denied.chimes).toEqual([ON.volume]);
 
     const off = setup();
-    off.notifier.update([], DEFAULT_NOTIFICATION_SETTINGS, true);
-    off.notifier.update([need('a')], DEFAULT_NOTIFICATION_SETTINGS, true);
+    off.notifier.update([], DEFAULT_NOTIFICATION_SETTINGS, true, SESSIONS);
+    off.notifier.update([need('a')], DEFAULT_NOTIFICATION_SETTINGS, true, SESSIONS);
     expect(off.shown).toEqual([]);
     expect(off.chimes).toHaveLength(1);
 
     const silent = setup();
-    silent.notifier.update([], { ...ON, sound: false }, true);
-    silent.notifier.update([need('a')], { ...ON, sound: false }, true);
+    silent.notifier.update([], { ...ON, sound: false }, true, SESSIONS);
+    silent.notifier.update([need('a')], { ...ON, sound: false }, true, SESSIONS);
     expect(silent.shown).toHaveLength(1);
     expect(silent.chimes).toEqual([]);
   });
 
   it('a burst of needs is one sound, one notification each', () => {
     const { notifier, shown, chimes } = setup();
-    notifier.update([], ON, true);
-    notifier.update([need('a'), need('b', 'waiting')], ON, true);
+    notifier.update([], ON, true, SESSIONS);
+    notifier.update([need('a'), need('b', 'waiting')], ON, true, SESSIONS);
     expect(shown.map((s) => s.id)).toEqual(['a', 'b']);
     expect(chimes).toHaveLength(1);
   });
 
   it('closes a notification once its need is answered, and all of them on dispose', () => {
     const { notifier, shown } = setup();
-    notifier.update([], ON, true);
-    notifier.update([need('a'), need('b')], ON, true);
-    notifier.update([need('b')], ON, true);
+    notifier.update([], ON, true, SESSIONS);
+    notifier.update([need('a'), need('b')], ON, true, SESSIONS);
+    notifier.update([need('b')], ON, true, SESSIONS);
     expect(shown.find((s) => s.id === 'a')!.closed).toBe(true);
     expect(shown.find((s) => s.id === 'b')!.closed).toBe(false);
     notifier.dispose();
@@ -212,9 +224,9 @@ describe('tab presence', () => {
   }
 
   const tab = (env: ReturnType<typeof browser>, focused: { value: boolean }) => {
-    let changed: () => void = () => undefined;
+    let changed: (leaving: boolean) => void = () => undefined;
     const presence = createTabPresence({ ...env, focused: () => focused.value, onFocusChange: (callback) => ((changed = callback), () => undefined) });
-    return { presence, focus: (value: boolean) => ((focused.value = value), changed()) };
+    return { presence, focus: (value: boolean) => ((focused.value = value), changed(false)), leave: () => changed(true) };
   };
 
   it('one tab leads; it knows when another Ogden tab is in front', async () => {
@@ -230,6 +242,17 @@ describe('tab presence', () => {
     expect(a.presence.anyTabFocused()).toBe(false);
     b.focus(true);
     b.presence.dispose();
+    expect(a.presence.anyTabFocused()).toBe(false);
+    a.presence.dispose();
+  });
+
+  it('a tab that reloads or navigates while in front says it left', async () => {
+    const env = browser();
+    const a = tab(env, { value: false });
+    const b = tab(env, { value: true });
+    await Promise.resolve();
+    expect(a.presence.anyTabFocused()).toBe(true);
+    b.leave();
     expect(a.presence.anyTabFocused()).toBe(false);
     a.presence.dispose();
   });

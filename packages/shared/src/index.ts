@@ -1,6 +1,7 @@
 export * from './api.js';
 export * from './appearance.js';
 export * from './bmad.js';
+export * from './builds.js';
 export * from './chat.js';
 export * from './chat-name.js';
 export * from './entities.js';

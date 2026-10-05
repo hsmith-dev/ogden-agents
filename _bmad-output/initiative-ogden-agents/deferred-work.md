@@ -74,6 +74,9 @@ Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim fr
 - Send now or wait: an edit open on a waiting message is lost when the turn takes the message. From its review. (log: "Editing a waiting message while the turn ends loses the draft silently")
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
+- Epic 5 (a later story): a network allowlist (package registries) for a build's sandboxed commands; until then builds have no network. From 5.2's user decision. (log: "A network allowlist for an unattended build's sandboxed commands")
+- Epic 5 (5.6): core decides a build's file write before Claude Code's unsandboxed Edit/Write performs it, so a symlink swapped in after the decision can redirect it. From 5.2 security review S2. (log: "Core decides a build's file write before Claude Code's unsandboxed Edit/Write tool performs it")
+- Epic 5 (5.5): a build's sandbox can write the main repo's `.git/objects`; a per-run object store would close it. From 5.2 security review S3. (log: "A build's sandbox can write the main repo's `.git/objects`")
 
 ## Log
 
@@ -618,6 +621,15 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-choose-whether-new-messages-wait-or-go-right-away-plan.md`
   summary: Editing a waiting message while the turn ends loses the draft silently when the old text is sent.
   evidence: queued-messages.tsx editor does not reserve the message; takeNext sends it and the row unmounts.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-tracer-bullet-one-ticket-built-reviewed-and-approved-from-a-plan.md`
+  summary: A network allowlist for an unattended build's sandboxed commands (package registries, so `npm install` or `uv sync` in a fresh worktree can work); until then a build's commands have no network and such a failure is named in the run's result.
+  evidence: User decision 2026-10-04 on 5.2's Q1 (deny-by-default policy, Bash sandboxed with no network; "an allowlist is a later story").
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-tracer-bullet-one-ticket-built-reviewed-and-approved-from-a-plan.md`
+  summary: Core decides a build's file write before Claude Code's unsandboxed Edit/Write tool performs it, so sandboxed Bash racing a swap of a checked folder for a symlink can still redirect that write outside the worktree.
+  evidence: 5.2 security review S2 (medium, unverified in practice): `core/src/build-permission-policy.ts` decides on the path at request time; dangling links and hard links are refused, but a swap after the decision isn't. Settled by running file tools inside the sandbox too, or by a write-through-fd check in the agent (5.6).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-tracer-bullet-one-ticket-built-reviewed-and-approved-from-a-plan.md`
+  summary: A build's sandbox can write the main repo's `.git/objects` (a commit needs it), so an agent could delete objects and damage unpushed history; a per-run object store (`GIT_OBJECT_DIRECTORY` with the repo's objects as an alternate, copied in at approve) would close it.
+  evidence: 5.2 security review S3 (medium): `core/src/builds.ts` `sandboxFor`; refs and logs are narrowed to the run's own folder, objects can't be without a separate store (5.5).
 - source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-bmad-method-comes-from-the-maintained-fork-plan.md`
   summary: Resolved: "between the content check and Python's import of `config_utils.py`" (4.13 S1 follow-up), by the user decision of 2026-10-04 to maintain a BMad Method fork. The fork's `tickets.py` takes `--config-utils PATH`; core hands the store the trusted fingerprint with each run, and `tickets-v7` reads `_bmad/scripts/` once, hashes those bytes by the trust's rule, refuses a mismatch with `scripts_changed`, and writes the same bytes into a fresh owner-only run folder under `<data>/tools/bmad-script-runs/` whose `config_utils.py` the run imports. A file swapped in after the check is never read; the folder is removed after the run.
   evidence: `adapters/src/bmad-catalog/scripts-snapshot.ts`, `scripts-fingerprint.ts` `readProjectScripts`, `bmad-source/folder-hash.ts` `readFolder`; `adapters/src/tickets-v7/index.ts` `run`; `core/src/ticket-store-port.ts` `TicketRunGuard`; `core/src/bmad-script-trust.ts` `requireScriptsUnchanged`; tests `adapters/test/bmad-catalog-scripts-snapshot.test.ts` ("a config_utils.py swapped in after the check never runs"), the real-uv board tests in `server/test/planning-routes.test.ts`; fork commit `642c4e5` (tag `ogden-agents/2026-10-04`).

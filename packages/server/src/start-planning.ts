@@ -197,7 +197,7 @@ export function createPlanAndBoard({
     // Codes only: never a path or the script's output.
     onError: (workspaceId, step, error) => log.warn('ticket watch failed', { workspaceId, step, code: errorCode(error, 'unexpected') }),
   });
-  return { planning, scriptRunner, bmadSource, board, ticketWatcher };
+  return { planning, scriptRunner, bmadSource, board, ticketWatcher, ticketStore };
 }
 
 /** How core's failed BMad Method setup is logged: codes only, since a setup's own error can name the user's paths. */

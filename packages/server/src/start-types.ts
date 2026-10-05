@@ -5,7 +5,7 @@
 import type { ClaudeCodeSetupOptions, FetchLike, PtyLoader } from '@ogden-agents/adapters';
 import type { AgentWiring } from './agent-wiring.js';
 import type { AntigravityPorts } from './antigravity-wiring.js';
-import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, Core, SecretStorePort, TicketStorePort, ToolchainPort } from '@ogden-agents/core';
+import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, Core, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort } from '@ogden-agents/core';
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
 import type { Logger } from './log.js';
@@ -161,6 +161,14 @@ export interface StartOptions {
    * Python with no download). The launcher never sets it.
    */
   extraUvEnv?: Readonly<Record<string, string>>;
+  /**
+   * Override the sandbox check unattended builds make (story 5.2; tests: a
+   * fixed answer). Default: the `sandbox-claude-native` adapter, or the
+   * `OGDEN_AGENTS_TEST_SANDBOX` hook's answer on a test run.
+   */
+  sandbox?: SandboxPort;
+  /** Override git for unattended builds (story 5.2; tests). Default: the `vcs-git` adapter on the user's `git`. */
+  vcs?: VcsPort;
   /**
    * The "newer version" check (story 13.7): `false` turns it off, a client
    * replaces the real npm one (tests: a fake, so none reaches the network).

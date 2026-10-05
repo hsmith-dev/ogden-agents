@@ -311,7 +311,7 @@ export type RunCreatedEvent = z.infer<typeof RunCreatedEvent>;
 const RunOutcomeChangedInput = z.object({
   type: z.literal('run.outcome_changed'),
   ...onSessionStream,
-  payload: z.object({ runId: RunId, outcome: RunOutcome, previous: RunOutcome }),
+  payload: z.object({ runId: RunId, outcome: RunOutcome, previous: RunOutcome, reason: z.string().min(1).optional() }),
 });
 export const RunOutcomeChangedEvent = RunOutcomeChangedInput.extend(assigned);
 export type RunOutcomeChangedEvent = z.infer<typeof RunOutcomeChangedEvent>;

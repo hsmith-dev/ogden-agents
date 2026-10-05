@@ -151,7 +151,7 @@ async function setup(
     find: async (repoPath, ref) => {
       read.push(repoPath);
       if (ref !== '1.1') throw new NotFoundError('ticket', ref);
-      return { ...TICKETS.tickets[0]!, description: '', verify: '', references: [], notes: [], unknown: '', hasPlan: false };
+      return { ...TICKETS.tickets[0]!, description: '', verify: '', references: [], notes: [], unknown: '', hasPlan: false, plan: null };
     },
     mark: async (repoPath, ref, status, _guard, options) => {
       marks.push([repoPath, ref, status, options]);

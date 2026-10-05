@@ -290,6 +290,7 @@ export function createTicketsV7({ runner, script: scriptOf, snapshot, workDir, o
       notes: body.notes ?? [],
       unknown: body.unknown ?? '',
       hasPlan: existsInside(repoPath, body.plan),
+      plan: existsInside(repoPath, body.plan) ? relative(repoPath, body.plan as string).split(sep).join('/') : null,
     });
     if (!parsed.success) return fail(new TicketsUnavailableError('bad_output'));
     return parsed.data;
@@ -310,8 +311,8 @@ export function createTicketsV7({ runner, script: scriptOf, snapshot, workDir, o
     find,
 
     async mark(repoPath, ref, status, guard, options = {}): Promise<MarkTicketResponse> {
-      // Only approve writes `done` (AD-10): refused here too, before anything runs.
-      if (status === 'done') throw new StatusNotAllowedError(status);
+      // Only approve writes `done` (AD-10): refused here too, before anything runs, unless core's approve asks (story 5.2).
+      if (status === 'done' && options.approve !== true) throw new StatusNotAllowedError(status);
       // Exactly this ticket, or nothing is written: the script would fall back to a title match.
       const picked = await find(repoPath, ref, guard);
       // A change the user hasn't seen (an agent's write, a `git pull`) is never overwritten (story 4.10).

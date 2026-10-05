@@ -140,6 +140,12 @@ export const runs = sqliteTable(
     sandbox: text('sandbox'),
     deadline: text('deadline'),
     outcome: text('outcome').$type<RunOutcome>().notNull(),
+    /** The run's own branch, `ogden/<ref>-<slug>` (story 5.2); `null` in runs from before it. */
+    branch: text('branch'),
+    /** The commit the run's branch started from (story 5.2): its diff is against it. */
+    baseRevision: text('base_revision'),
+    /** Why the run ended as it did, in plain words (story 5.2): a blocked or failed run's reason. */
+    reason: text('reason'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },

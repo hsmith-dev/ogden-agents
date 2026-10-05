@@ -9,6 +9,7 @@ import {
   type BmadSourceUseCases,
   type BmadSetupUseCases,
   type BoardUseCases,
+  type BuildsUseCases,
   type Chat,
   type EventLog,
   type InstallSettings,
@@ -35,6 +36,7 @@ import type { Logger } from './log.js';
 import { isServerPath } from './paths.js';
 import { registerPermissionRoutes } from './permission-routes.js';
 import { registerPlanningRoutes } from './planning-routes.js';
+import { registerBuildRoutes } from './build-routes.js';
 import { registerUpdateRoutes } from './update-routes.js';
 import type { UpdateCheck } from './update-check.js';
 import { registerSettingsRoutes } from './settings-routes.js';
@@ -115,6 +117,8 @@ export interface AppOptions {
   planning?: PlanningUseCases;
   /** The project's tickets (story 4.1), behind the `board` piece's guard; without it that route answers 501 once the guard passes. */
   board?: BoardUseCases;
+  /** Unattended builds (story 5.2), behind the `builds` piece's guard and the trust; without them those routes answer 501 once the guards pass. */
+  builds?: BuildsUseCases;
   /** The pinned upstream BMad Method's status and its user-initiated download (story 4.14); without it those routes answer 501. */
   bmadSource?: BmadSourceUseCases;
   /** BMad Method's setup in a project (story 4.3), behind Planning or Board; without it those routes answer 501 once the guard passes. */
@@ -160,6 +164,7 @@ export function createApp({
   bmadScriptTrust,
   planning,
   board,
+  builds,
   bmadSource,
   bmadSetup,
   agentSetup,
@@ -264,6 +269,8 @@ export function createApp({
   registerBmadTrustRoutes(app, { scriptTrust: bmadScriptTrust, permissions, log });
   // Plan and Board (stories 4.1, 4.2): every route through `bmadPieceRoutes`, behind core's guard and the script trust (AD-22).
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerPlanningRoutes(app, { bmad, scriptTrust: bmadScriptTrust, planning, board, bmadSetup, log });
+  // Unattended builds (story 5.2): the same helper, guard and trust.
+  if (bmad !== undefined && bmadScriptTrust !== undefined) registerBuildRoutes(app, { bmad, scriptTrust: bmadScriptTrust, builds, log });
   registerSettingsRoutes(app, { installSettings, newProjectDefaults, log });
   registerUpdateRoutes(app, { updates });
 
@@ -279,13 +286,14 @@ export function createApp({
   // so a reload or a bookmark lands on the same screen. Only extensionless GET
   // paths outside `/ws`, `/api` and `/launcher` (and below them; see
   // `paths.ts`, which the gate shares); a missing asset stays a 404. A ticket's
-  // detail (`/w/:wsId/board/:ref`, story 4.9) is a page even though its ref
-  // (`1.2`) looks like an extension.
+  // detail (`/w/:wsId/board/:ref`, story 4.9) and a build's review
+  // (`/w/:wsId/review/:ref`, story 5.2) are pages even though the ref (`1.2`)
+  // looks like an extension.
   app.get(
     '/*',
     async (c, next) => {
       const path = c.req.path;
-      if (isServerPath(path) || (/\.[A-Za-z0-9]+$/.test(path) && !/^\/w\/[^/]+\/board\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(path))) {
+      if (isServerPath(path) || (/\.[A-Za-z0-9]+$/.test(path) && !/^\/w\/[^/]+\/(board|review)\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(path))) {
         return c.notFound();
       }
       await next();

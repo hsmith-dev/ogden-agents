@@ -164,6 +164,12 @@ export const Run = z.object({
   sandbox: z.string().nullable(),
   deadline: IsoUtcTimestamp.nullable(),
   outcome: RunOutcome,
+  /** The run's own branch (`ogden/<ref>-<slug>`; story 5.2). `null` in runs from before it. */
+  branch: z.string().nullable().default(null),
+  /** The commit the run's branch started from (story 5.2): its diff is against it. `null` in runs from before it. */
+  baseRevision: z.string().nullable().default(null),
+  /** Why the run ended as it did, in plain words (a blocked or failed run's reason; story 5.2). Never a secret. */
+  reason: z.string().nullable().default(null),
   createdAt: IsoUtcTimestamp,
   updatedAt: IsoUtcTimestamp,
 });

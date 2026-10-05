@@ -89,6 +89,20 @@
 //   edits without asking unless one of those ask rules matches the path
 //   (`Edit(**/<folder>/**)` or `Edit(**/<file>)`), which still asks, as
 //   Claude Code's bypass-immune ask rules do.
+//   "/bmad-build-auto ticket <ref>"  build mode (story 5.2): plays one
+//                  unattended build in the session's cwd (the run's
+//                  worktree). It asks permission to write src/built-<ref>.txt
+//                  (an `edit` naming the absolute path) and writes it if
+//                  allowed; asks to write ../escape-<ref>.txt (outside the
+//                  worktree) and writes it only if allowed (the build policy
+//                  must refuse); sets the ticket's plan (the `.md` under
+//                  _bmad-output whose frontmatter says `ticket: <id>`) to
+//                  `status: built`, or with FAKE_ACP_BUILD_OUTCOME=blocked to
+//                  `blocked` with a reason; with FAKE_ACP_BUILD_HOOKS=<dir>
+//                  also writes executable `.husky/` hooks that would create
+//                  files in <dir> if git ever ran them; then commits it all on
+//                  the run's branch (its own commit runs no hook) and replies
+//                  "Built <ref>." (or "Blocked <ref>.").
 //   "plan-exit"    asks permission to leave plan mode with the real adapter's
 //                  options (mode-raising ones as `allow_always`, "manually
 //                  approve" as `allow_once`); replies `chose=<option id>`
@@ -223,9 +237,9 @@
 // 5 s limit), and a wrapper process plus a second Node start and the SDK's
 // load could pass that limit on a busy Windows runner, which reads as "can't
 // check the sign-in" and turns a saved API key off.
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { Readable, Writable } from 'node:stream';
@@ -604,7 +618,8 @@ async function runPrompt(params, client, session) {
     if (text === 'fail') throw acp.RequestError.internalError(undefined, 'the fake agent failed on purpose');
     if (text === 'usage-limit') throw acp.RequestError.internalError(undefined, 'Claude AI usage limit reached|1760000000');
     if (text === 'auth-expired') throw acp.RequestError.authRequired(undefined, 'the fake agent needs a new sign-in');
-    if (text.startsWith('/')) {
+    // Any slash command but the build (story 5.2), which is played below.
+    if (text.startsWith('/') && !text.startsWith('/bmad-build-auto ticket ')) {
       await say(client, params.sessionId, `command=${text} primed=${primed}`);
       return { stopReason: 'end_turn' };
     }
@@ -675,6 +690,68 @@ async function runPrompt(params, client, session) {
         ],
       });
       await say(client, params.sessionId, `trust=${answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'}`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text.startsWith('/bmad-build-auto ticket ')) {
+      const ref = text.slice('/bmad-build-auto ticket '.length).trim();
+      const cwd = session.opened.cwd ?? process.cwd();
+      const ask = async (toolCallId, path) => {
+        const toolCall = { toolCallId, title: `Write ${path}`, kind: 'edit', locations: [{ path }], rawInput: { file_path: path } };
+        await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
+        const answer = await client.request('session/request_permission', {
+          sessionId: params.sessionId,
+          toolCall,
+          options: [
+            { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
+            { optionId: 'reject', name: 'Deny', kind: 'reject_once' },
+          ],
+        });
+        const allowed = answer.outcome.outcome === 'selected' && answer.outcome.optionId === 'allow';
+        await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: allowed ? 'completed' : 'failed' });
+        return allowed;
+      };
+      await say(client, params.sessionId, `Building ${ref}. `);
+      const inside = join(cwd, 'src', `built-${ref}.txt`);
+      if (await ask('call-build-write', inside)) {
+        mkdirSync(dirname(inside), { recursive: true });
+        writeFileSync(inside, `Built ${ref} by the fake agent.\n`);
+      }
+      const outside = resolve(cwd, '..', `escape-${ref}.txt`);
+      if (await ask('call-build-escape', outside)) writeFileSync(outside, 'escaped\n');
+      // The plan: the Markdown file under _bmad-output whose frontmatter names this ticket's id.
+      const id = ref.slice(ref.lastIndexOf('.') + 1);
+      const plans = [];
+      const visit = (dir) => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) visit(full);
+          else if (entry.name.endsWith('.md') && new RegExp(`^ticket:\\s*['"]?${id}['"]?\\s*$`, 'm').test(readFileSync(full, 'utf8'))) plans.push(full);
+        }
+      };
+      if (existsSync(join(cwd, '_bmad-output'))) visit(join(cwd, '_bmad-output'));
+      const blocked = process.env.FAKE_ACP_BUILD_OUTCOME === 'blocked';
+      for (const plan of plans) {
+        const before = readFileSync(plan, 'utf8');
+        const status = blocked ? 'status: blocked\nblocked_reason: "The fake agent was told to block."' : 'status: built';
+        writeFileSync(plan, before.replace(/^status:.*$/m, status));
+      }
+      const hooks = process.env.FAKE_ACP_BUILD_HOOKS;
+      if (hooks) {
+        mkdirSync(join(cwd, '.husky'), { recursive: true });
+        for (const hook of ['pre-commit', 'commit-msg', 'post-merge', 'post-commit', 'post-checkout', 'pre-merge-commit']) {
+          const file = join(cwd, '.husky', hook);
+          writeFileSync(file, `#!/bin/sh\ntouch "${join(hooks, hook)}"\n`);
+          chmodSync(file, 0o755);
+        }
+      }
+      try {
+        const git = (...args) => execFileSync('git', ['-c', `core.hooksPath=${join(cwd, '.no-hooks')}`, '-c', 'user.name=Fake Agent', '-c', 'user.email=fake@example.com', ...args], { cwd, stdio: 'ignore' });
+        git('add', '-A');
+        git('commit', '--no-verify', '-m', `Build ${ref}`);
+      } catch {
+        await say(client, params.sessionId, 'The commit failed. ');
+      }
+      await say(client, params.sessionId, `${blocked ? 'Blocked' : 'Built'} ${ref}.`);
       return { stopReason: 'end_turn' };
     }
     if (text === 'context') {

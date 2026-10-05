@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { createAdaptorServer } from '@hono/node-server';
 import { createMemoryTerminalPort, loadPty, projectSlug, stripTerminalEscapes } from '@ogden-agents/adapters';
-import { AGENT_SESSION_REF, createChat, openCore, type AgentEvent, type AgentPort, type AgentSession } from '@ogden-agents/core';
+import { AGENT_SESSION_REF, createAgentRegistry, createChat, openCore, type AgentEvent, type AgentPort, type AgentSession } from '@ogden-agents/core';
 import { Hono } from 'hono';
 import {
   API_ROUTES,
@@ -40,7 +40,7 @@ import {
   registerTerminalSocket,
   TERMINAL_TOO_MANY_VIEWERS,
 } from '../src/terminal-socket.js';
-import { signIn, startTestServer, tempDataDir, trackSocket, waitFor, type SignedIn, type TestServer } from './helpers.js';
+import { signIn, startTestServer, tempDataDir, trackSocket, waitFor, type SignedIn, type TestServer, registered } from './helpers.js';
 
 const FIXTURES = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures');
 const FAKE_CLI = join(FIXTURES, 'fake-claude-cli.mjs');
@@ -279,13 +279,15 @@ describe('the terminal contract on the API (story 3.2)', () => {
         dataDir: tempDataDir(),
         entities: core.entities,
         sessionEvents: core.sessionEvents,
-        agent: {
-          displayName: 'Test Agent',
-          skillInvocation: (skill) => `/${skill}`,
-          startSession: () => Promise.reject(new Error('no agent in this test')),
-          reopenSession: () => Promise.reject(new Error('no agent in this test')),
-          listAuthMethods: () => Promise.reject(new Error('no agent in this test')),
-        },
+        agents: createAgentRegistry([
+          registered('test-agent', {
+              displayName: 'Test Agent',
+              skillInvocation: (skill) => `/${skill}`,
+              startSession: () => Promise.reject(new Error('no agent in this test')),
+              reopenSession: () => Promise.reject(new Error('no agent in this test')),
+              listAuthMethods: () => Promise.reject(new Error('no agent in this test')),
+            }),
+        ]),
       });
       const lines: string[] = [];
       const app = new Hono();
@@ -739,9 +741,9 @@ function resumingAgent(): AgentPort {
 async function socketOnMemoryTerminal(options: { now?: () => number; attachWaitMs?: number } = {}) {
   const core = openCore(tempDataDir());
   const terminal = createMemoryTerminalPort({ echo: false });
-  const chat = createChat({ dataDir: tempDataDir(), entities: core.entities, sessionEvents: core.sessionEvents, agent: resumingAgent(), terminal });
+  const chat = createChat({ dataDir: tempDataDir(), entities: core.entities, sessionEvents: core.sessionEvents, agents: createAgentRegistry([registered('test-agent', resumingAgent())]), terminal });
   const workspace = chat.openWorkspace(tempDir('ogden-agents-repo-'));
-  const session = chat.createChatSession(workspace.id);
+  const session = await chat.createChatSession(workspace.id);
   chat.sendMessage(workspace.id, session.id, 'first question');
   await chat.settled();
   expect((await chat.switchDriver(workspace.id, session.id, 'terminal')).driver).toBe('terminal');

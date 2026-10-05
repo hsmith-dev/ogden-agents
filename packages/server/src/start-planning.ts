@@ -10,16 +10,20 @@ import { join } from 'node:path';
 import { createBmadCatalog, createTicketsV7, createUpstreamBmadSource, createUvScriptRunner, createUvToolchain, errorCode, ScriptRunError, type UvScriptRunner } from '@ogden-agents/adapters';
 import {
   CoreError,
+  createBmadSkillFolders,
   createBmadSource,
   createBoard,
   createPlanning,
   createPlanningDocuments,
   createTicketWatcher,
   type AgentPort,
+  type AgentRegistry,
   type BmadCatalogPort,
+  type BmadSetupUseCases,
   type BmadSourcePort,
   type Core,
 } from '@ogden-agents/core';
+import type { Session } from '@ogden-agents/shared';
 import type { Logger } from './log.js';
 import type { StartOptions } from './start-types.js';
 import type { TestBmadSource } from './test-hooks.js';
@@ -101,12 +105,13 @@ export function createBmadSourceAndCatalog(options: StartOptions, dataDir: strin
  * output folder appends `session.document_written` with the next suggested
  * step. Codes only in the log: never a path.
  */
-export function createDocumentCards({ core, catalog, agent, log }: { core: Core; catalog: BmadCatalogPort; agent: AgentPort; log: Logger }) {
+export function createDocumentCards({ core, catalog, agent, agentOf, log }: { core: Core; catalog: BmadCatalogPort; agent: AgentPort; agentOf?: (session: Session) => AgentPort | undefined; log: Logger }) {
   return createPlanningDocuments({
     bmad: core.bmad,
     entities: core.entities,
     catalog,
     agent,
+    agentOf,
     sessionEvents: core.sessionEvents,
     onError: (sessionId, step, error) =>
       log.info('no document card for a planning write', { sessionId, step, ...(error === undefined ? {} : { code: errorCode(error, 'unexpected') }) }),
@@ -124,6 +129,7 @@ export function createPlanAndBoard({
   setupRunner,
   chat,
   agent,
+  agentOf,
   uvToolchain,
   uvChildEnv,
 }: {
@@ -136,10 +142,12 @@ export function createPlanAndBoard({
   setupRunner: { current?: UvScriptRunner };
   chat: Parameters<typeof createPlanning>[0]['chat'];
   agent: AgentPort;
+  /** The agent a session runs (epic 6 entry 8): a planning session's first message is in its syntax. */
+  agentOf?: (session: Session) => AgentPort | undefined;
   uvToolchain: Pick<ReturnType<typeof createUvToolchain>, 'locate'>;
   uvChildEnv: () => Record<string, string>;
 }) {
-  const planning = createPlanning({ bmad: core.bmad, entities: core.entities, catalog: bmadCatalog, chat, agent, modulesSeen: core.bmadModulesSeen });
+  const planning = createPlanning({ bmad: core.bmad, entities: core.entities, catalog: bmadCatalog, chat, agent, agentOf, modulesSeen: core.bmadModulesSeen });
   // The one runner of BMad Method's scripts (story 4.1); closed with the server, which kills any tree still running (story 4.2).
   const scriptRunner = createUvScriptRunner({
     uvCommand: async () => {
@@ -227,4 +235,39 @@ export async function stopBmadWork({
       await watching;
     }
   }
+}
+
+/**
+ * BMad Method's setup with each agent the project uses (epic 6 entry 8,
+ * AD-12 note): a start also places the skills in the other agents' skills
+ * folders (`.agents/skills` for Antigravity) by core's rule, which reads
+ * the project's default agent and its sessions' agents, and only where
+ * Planning is on (`feature_off` there: `.claude/skills` only, as before).
+ */
+export function withAgentSkillFolders(
+  bmadSetup: BmadSetupUseCases | undefined,
+  { core, agents }: { core: Core; agents: Pick<AgentRegistry, 'agentIds' | 'get' | 'describe' | 'defaultAgentId' | 'legacyAgentId'> },
+): BmadSetupUseCases | undefined {
+  if (bmadSetup === undefined) return undefined;
+  const folders = createBmadSkillFolders({
+    bmad: core.bmad,
+    entities: core.entities,
+    projectDefaultAgent: (workspaceId) => core.permissions.getSettings(workspaceId).defaultAgentId,
+    agents,
+  });
+  const otherAgentFolders = (workspaceId: Parameters<BmadSetupUseCases['start']>[0]): string[] => {
+    try {
+      // `.claude/skills` is always setup's own.
+      return folders.skillFolders(workspaceId).filter((folder) => folder !== '.claude/skills');
+    } catch (error) {
+      // Planning off (Board alone): the skills go where they always did. Anything else is the setup's to refuse.
+      if (error instanceof CoreError && error.code === 'feature_off') return [];
+      throw error;
+    }
+  };
+  return {
+    status: (workspaceId) => bmadSetup.status(workspaceId),
+    settled: () => bmadSetup.settled(),
+    start: async (workspaceId, options = {}) => bmadSetup.start(workspaceId, { ...options, skillFolders: otherAgentFolders(workspaceId) }),
+  };
 }

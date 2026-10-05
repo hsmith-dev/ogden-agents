@@ -12,31 +12,21 @@
  * `OGDEN_AGENTS_*` switch, never `NODE_OPTIONS` or `PYTHONPATH`. The
  * project's own BMad Method scripts run under it. Never logged.
  */
+import { helperEnvironment } from '../child-env.js';
 
-/** What a process needs to run as the user, on every OS (the agents' allowlist, without any agent key). */
-const UV_ENV_ALLOWED = ['PATH', 'HOME', 'USERPROFILE', 'USER', 'USERNAME', 'LANG', 'TERM', 'TMPDIR', 'TEMP', 'TMP', 'SHELL'];
-/** The same on Windows only, where a process can't start without them. */
-const UV_ENV_ALLOWED_WINDOWS = ['SystemRoot', 'ComSpec', 'PATHEXT'];
 /** Where uv keeps its cache and the Pythons it manages on each OS. */
 const UV_FOLDERS_ALLOWED = ['XDG_CACHE_HOME', 'XDG_DATA_HOME', 'LOCALAPPDATA', 'APPDATA'];
 
 /**
- * The environment of every `uv` child: {@link UV_ENV_ALLOWED} (and on
- * Windows its additions, names compared without case), `LC_ALL` and `LC_*`,
- * uv's folders, and `PYTHONUTF8=1`. Nothing else of `source`.
+ * The environment of every `uv` child: the base allowlist (`child-env.ts`,
+ * names compared without case on Windows), `LC_ALL` and `LC_*`, uv's
+ * folders, and `PYTHONUTF8=1`. Nothing else of `source`.
  */
 export function uvEnvironment(
   source: Readonly<Record<string, string | undefined>> = process.env,
   platform: NodeJS.Platform = process.platform,
 ): Record<string, string> {
-  // Windows variable names are case-insensitive (`Path`, `SYSTEMROOT`).
-  const fold = (name: string) => (platform === 'win32' ? name.toUpperCase() : name);
-  const allowed = new Set([...UV_ENV_ALLOWED, ...(platform === 'win32' ? UV_ENV_ALLOWED_WINDOWS : []), ...UV_FOLDERS_ALLOWED].map(fold));
-  const env: Record<string, string> = {};
-  for (const [name, value] of Object.entries(source)) {
-    if (value === undefined) continue;
-    if (allowed.has(fold(name)) || name === 'LC_ALL' || name.startsWith('LC_')) env[name] = value;
-  }
+  const env = helperEnvironment(UV_FOLDERS_ALLOWED, source, platform);
   // Set last, under its own name only: a `pythonutf8` from `source` was never allowed in.
   env.PYTHONUTF8 = '1';
   return env;

@@ -1,6 +1,7 @@
 import { z } from 'zod';
-import { PermissionMode, Session, SessionDriver, SessionState } from './entities.js';
-import { AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, PermissionDecision, PermissionRequestId, SessionErrorCode, ToolCallDiff, ToolCallStatus, ToolKind } from './events-common.js';
+import { SessionRenameCause } from './chat-name.js';
+import { ModelId, PermissionMode, Session, SessionDriver, SessionState } from './entities.js';
+import { AgentId, AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, PermissionDecision, PermissionRequestId, SessionErrorCode, ToolCallDiff, ToolCallStatus, ToolKind } from './events-common.js';
 import { assigned, onSessionStream } from './events-envelope.js';
 import { PermissionRuleId, SessionId } from './ids.js';
 import { CatalogNext, RepoRelativePath } from './planning.js';
@@ -15,7 +16,15 @@ import { DriverChangeCause } from './terminal.js';
 export const SessionCreatedInput = z.object({
   type: z.literal('session.created'),
   ...onSessionStream,
-  payload: z.object({ session: Session }),
+  payload: z.object({
+    session: Session,
+    /**
+     * Plain words about the mode the chat started in (default permission
+     * mode): it started in its project's default, or in Ask because its agent
+     * doesn't offer that default. Optional, so every earlier event still parses.
+     */
+    permissionModeNote: z.string().min(1).optional(),
+  }),
 });
 export const SessionCreatedEvent = SessionCreatedInput.extend(assigned);
 export type SessionCreatedEvent = z.infer<typeof SessionCreatedEvent>;
@@ -61,9 +70,10 @@ export type SessionDriverChangedEvent = z.infer<typeof SessionDriverChangedEvent
  * Why a chat's permission mode changed: the user chose it (`user`), Developer
  * mode was turned off while it skipped checks (`developer_mode_off`), a server
  * start set it back to Ask (`restart`: no mode but Ask outlives the run it was
- * chosen in), or the agent reported a mode the chat didn't choose (`agent`).
+ * chosen in), the agent reported a mode the chat didn't choose (`agent`), or
+ * the chat was handed to an agent that doesn't offer its mode (`handoff`).
  */
-export const PERMISSION_MODE_CHANGE_CAUSES = ['user', 'developer_mode_off', 'restart', 'agent'] as const;
+export const PERMISSION_MODE_CHANGE_CAUSES = ['user', 'developer_mode_off', 'restart', 'agent', 'handoff'] as const;
 export const PermissionModeChangeCause = z.enum(PERMISSION_MODE_CHANGE_CAUSES);
 export type PermissionModeChangeCause = z.infer<typeof PermissionModeChangeCause>;
 
@@ -82,6 +92,77 @@ export const SessionPermissionModeChangedInput = z.object({
 /** A chat's permission mode changed (core is the only one that changes it). */
 export const SessionPermissionModeChangedEvent = SessionPermissionModeChangedInput.extend(assigned);
 export type SessionPermissionModeChangedEvent = z.infer<typeof SessionPermissionModeChangedEvent>;
+
+export const SessionRenamedInput = z.object({
+  type: z.literal('session.renamed'),
+  ...onSessionStream,
+  payload: z.object({
+    sessionId: SessionId,
+    /** The user's name for the chat, or `null` (the automatic one shows). */
+    title: z.string().min(1).nullable(),
+    /** The name core gave the chat, or `null` while it has none. */
+    autoTitle: z.string().min(1).nullable(),
+    cause: SessionRenameCause,
+  }),
+});
+/** A chat's name changed (backlog story 12): the user renamed it, or core named it from its first message. */
+export const SessionRenamedEvent = SessionRenamedInput.extend(assigned);
+export type SessionRenamedEvent = z.infer<typeof SessionRenamedEvent>;
+
+/**
+ * Why a chat's model changed (story 11): the user chose it (`user`), or the
+ * agent refused it or switched itself to another (`agent`). A chat's first
+ * model is in its `session.created`.
+ */
+export const MODEL_CHANGE_CAUSES = ['user', 'agent'] as const;
+export const ModelChangeCause = z.enum(MODEL_CHANGE_CAUSES);
+export type ModelChangeCause = z.infer<typeof ModelChangeCause>;
+
+export const SessionModelChangedInput = z.object({
+  type: z.literal('session.model_changed'),
+  ...onSessionStream,
+  payload: z.object({
+    sessionId: SessionId,
+    /** The agent's own id for the model now; `null`: the agent's own choice. */
+    model: ModelId.nullable(),
+    previous: ModelId.nullable(),
+    cause: ModelChangeCause,
+    /** Why, in plain words for the user, when there is something to say (the agent's own reason, masked). Never a secret. */
+    reason: z.string().min(1).max(1000).optional(),
+  }),
+});
+/** A chat's model changed (core is the only one that changes it). */
+export const SessionModelChangedEvent = SessionModelChangedInput.extend(assigned);
+export type SessionModelChangedEvent = z.infer<typeof SessionModelChangedEvent>;
+
+/** The most characters a handoff brief may hold, whatever the target agent's own budget. */
+export const MAX_HANDOFF_BRIEF_CHARS = 200_000;
+
+export const SessionAgentChangedInput = z.object({
+  type: z.literal('session.agent_changed'),
+  ...onSessionStream,
+  payload: z.object({
+    sessionId: SessionId,
+    agentId: AgentId,
+    previous: AgentId,
+    /**
+     * What the new agent is told first, as the user confirmed it (secrets
+     * masked, at most the agent's budget): built by Ogden from the chat's own
+     * events, never by a model. Sent with the user's next message.
+     */
+    brief: z.string().max(MAX_HANDOFF_BRIEF_CHARS),
+    /** Whether the new agent had a session in this chat before, which it reopens (switching back). */
+    resumes: z.boolean(),
+  }),
+});
+/**
+ * The user continued the chat with another agent (handoff, user decision
+ * 2026-10-04): the chat's agent is `agentId` from here on; the history stays
+ * and is shown with a "Continued with" divider. Sessions without one keep the
+ * agent they were started with.
+ */
+export const SessionAgentChangedEvent = SessionAgentChangedInput.extend(assigned);
+export type SessionAgentChangedEvent = z.infer<typeof SessionAgentChangedEvent>;
 
 /** Identifies one message within a session's stream. */
 export const MessageId = z.string().min(1);
@@ -117,6 +198,12 @@ export const SessionMessageCompletedInput = z.object({
      * switching back (`terminal`, story 3.2; shown "from terminal").
      */
     origin: z.enum(['deny_reason', 'terminal']).optional(),
+    /**
+     * Set on a user message sent right away that the agent took into its
+     * running turn (`injected`; send now or wait): the turn went on with it.
+     * Absent on every other message, and on events from before.
+     */
+    delivery: z.literal('injected').optional(),
   }),
 });
 /** A finished message with its full content; it replaces that message's deltas. */
@@ -171,11 +258,59 @@ export type SessionResumedEvent = z.infer<typeof SessionResumedEvent>;
 export const SessionMessageQueuedInput = z.object({
   type: z.literal('session.message_queued'),
   ...onSessionStream,
-  payload: z.object({ sessionId: SessionId, messageId: MessageId, content: z.string() }),
+  payload: z.object({
+    sessionId: SessionId,
+    messageId: MessageId,
+    content: z.string(),
+    /**
+     * Sent right away (send now or wait): it goes ahead of every message
+     * still waiting, into the running turn or after the current step is
+     * stopped. Absent on a message that waits, and on events from before.
+     */
+    now: z.literal(true).optional(),
+  }),
 });
 /** A message sent while the agent works, held until it can take it (E2-R1: shown as "Queued"). */
 export const SessionMessageQueuedEvent = SessionMessageQueuedInput.extend(assigned);
 export type SessionMessageQueuedEvent = z.infer<typeof SessionMessageQueuedEvent>;
+
+/** One message still waiting to be sent, as `session.queue_changed` lists it. */
+export const QueuedMessage = z.object({ messageId: MessageId, content: z.string(), now: z.literal(true).optional() });
+export type QueuedMessage = z.infer<typeof QueuedMessage>;
+
+/** Why the waiting messages changed: the user edited, moved or removed one, or sent one right away. */
+export const QueueChangeCause = z.enum(['edited', 'moved', 'removed', 'sent_now']);
+export type QueueChangeCause = z.infer<typeof QueueChangeCause>;
+
+export const SessionQueueChangedInput = z.object({
+  type: z.literal('session.queue_changed'),
+  ...onSessionStream,
+  payload: z.object({ sessionId: SessionId, queue: z.array(QueuedMessage), cause: QueueChangeCause }),
+});
+/**
+ * The user changed the messages waiting to be sent (send now or wait):
+ * `queue` is every one still waiting, in the order they will go, and
+ * replaces what was waiting before. A message missing from it was removed.
+ */
+export const SessionQueueChangedEvent = SessionQueueChangedInput.extend(assigned);
+export type SessionQueueChangedEvent = z.infer<typeof SessionQueueChangedEvent>;
+
+export const SessionTurnInterruptedInput = z.object({
+  type: z.literal('session.turn_interrupted'),
+  ...onSessionStream,
+  payload: z.object({
+    sessionId: SessionId,
+    /** The message sent right away that the step was stopped for. */
+    messageId: MessageId,
+  }),
+});
+/**
+ * The agent's current step was stopped so a message sent right away goes at
+ * once (its agent can't take a message into a running turn): the chat says
+ * so where it happened, and the reply so far stays as it was.
+ */
+export const SessionTurnInterruptedEvent = SessionTurnInterruptedInput.extend(assigned);
+export type SessionTurnInterruptedEvent = z.infer<typeof SessionTurnInterruptedEvent>;
 
 export const SessionCheckInInput = z.object({
   type: z.literal('session.check_in'),
@@ -213,6 +348,30 @@ export const SessionDocumentWrittenInput = z.object({
  */
 export const SessionDocumentWrittenEvent = SessionDocumentWrittenInput.extend(assigned);
 export type SessionDocumentWrittenEvent = z.infer<typeof SessionDocumentWrittenEvent>;
+
+export const SessionAgentStartingInput = z.object({
+  type: z.literal('session.agent_starting'),
+  ...onSessionStream,
+  payload: z.object({ sessionId: SessionId }),
+});
+/**
+ * The session's agent is taking a while to start (epic 6 entry 5: an agent
+ * whose every start takes many seconds, such as Antigravity on Windows): the
+ * chat shows it as starting, not stuck, until `session.agent_started`, or
+ * until the session leaves `working`. Appended only after a start has run
+ * for a moment, so a quick start adds nothing.
+ */
+export const SessionAgentStartingEvent = SessionAgentStartingInput.extend(assigned);
+export type SessionAgentStartingEvent = z.infer<typeof SessionAgentStartingEvent>;
+
+export const SessionAgentStartedInput = z.object({
+  type: z.literal('session.agent_started'),
+  ...onSessionStream,
+  payload: z.object({ sessionId: SessionId }),
+});
+/** The agent a `session.agent_starting` announced is started (or its start ended): the starting notice goes. */
+export const SessionAgentStartedEvent = SessionAgentStartedInput.extend(assigned);
+export type SessionAgentStartedEvent = z.infer<typeof SessionAgentStartedEvent>;
 
 // Permission events live on the session's stream and, like session events,
 // are appended only through the session-event helper (E2-R7).

@@ -88,6 +88,11 @@ const AGENT_START = { timeout: 60_000 };
  * refetch. A loaded Windows runner once took over 15 s (CI run 37211439697; no read or watch failed).
  */
 const LIVE = { timeout: 45_000 };
+/**
+ * The board's own write reaching a card: no optimistic move, so `tickets.py mark` and then the tickets' refetch,
+ * two `uv` runs in a row. A loaded Windows runner took 7.9 s and 8.7 s for them (CI run 37247699282).
+ */
+const BOARD_WRITE = { timeout: 45_000 };
 const BRIEF = '_bmad-output/briefs/brief-todo.md';
 const SPEC = '_bmad-output/specs/spec-todo.md';
 const EPIC = '_bmad-output/initiative-todo/epic-todo';
@@ -228,6 +233,9 @@ test('from BMad off to a ticketed epic on a live board, on the installed package
     await page.getByTestId('script-trust-confirm').click();
     await expect(dialog).toHaveCount(0);
     await expect(board).toHaveAttribute('aria-checked', 'true');
+    // On is shown at once (optimistic); the switch is disabled until the save lands. Leaving the page before that
+    // aborts the PATCH (Windows CI runs 37247766553 and 37247659244: Plan then had no Board tab).
+    await expect(board).toBeEnabled();
   });
 
   await test.step('Plan: Start from an idea opens a planning session on the entry action', async () => {
@@ -285,7 +293,7 @@ test('from BMad off to a ticketed epic on a live board, on the installed package
   await test.step('status from the board: Move to In progress lands in the plan file; Done reopens only after confirming', async () => {
     await page.getByRole('button', { name: 'Change status of 1.2 Tick a todo off' }).click();
     await page.getByRole('menuitem', { name: 'Move to In progress' }).click();
-    await expect(card(page, '1.2')).toHaveAttribute('data-column', 'in_progress');
+    await expect(card(page, '1.2')).toHaveAttribute('data-column', 'in_progress', BOARD_WRITE);
     await expect.poll(() => planOf(empty.path, 2)).toMatch(/^status: "?in-progress"?$/m);
 
     // The agent marks 1.1 done (Ogden never offers Done).
@@ -304,7 +312,7 @@ test('from BMad off to a ticketed epic on a live board, on the installed package
     await page.getByRole('button', { name: 'Change status of 1.1 Add a todo' }).click();
     await page.getByRole('menuitem', { name: 'Move to Ready' }).click();
     await confirm.getByRole('button', { name: 'Reopen' }).click();
-    await expect(card(page, '1.1')).toHaveAttribute('data-column', 'ready');
+    await expect(card(page, '1.1')).toHaveAttribute('data-column', 'ready', BOARD_WRITE);
     await expect.poll(() => planOf(empty.path, 1)).toMatch(/^status: "?ready-for-dev"?$/m);
   });
 
@@ -324,7 +332,7 @@ test('from BMad off to a ticketed epic on a live board, on the installed package
     await expect(page.getByTestId('ticket-card')).toHaveCount(0);
     expect(existsSync(marker)).toBe(false);
     await page.getByTestId('script-trust-allow').click();
-    await expect(page.getByTestId('ticket-card')).toHaveCount(2);
+    await expect(page.getByTestId('ticket-card')).toHaveCount(2, BOARD_WRITE);
     expect(existsSync(marker)).toBe(true);
   });
 

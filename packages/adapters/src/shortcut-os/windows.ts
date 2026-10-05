@@ -13,6 +13,7 @@
  * should is not rewritten (the server re-points it at every start).
  */
 import { execFile } from 'node:child_process';
+import { helperEnvironment, WINDOWS_FOLDERS } from '../child-env.js';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -88,7 +89,8 @@ export function powerShellInvocation(env: NodeJS.ProcessEnv = process.env): { fi
 export const runPowerShell: PowerShellRunner = (script, env) =>
   new Promise((resolve, reject) => {
     const { file, args } = powerShellInvocation();
-    const child = execFile(file, args, { env: { ...process.env, ...env }, timeout: POWERSHELL_TIMEOUT_MS, windowsHide: true }, (error, stdout) =>
+    // The base allowlist and Windows' own folders (AD-16): never an agent key; then the script's own values.
+    const child = execFile(file, args, { env: { ...helperEnvironment(WINDOWS_FOLDERS), ...env }, timeout: POWERSHELL_TIMEOUT_MS, windowsHide: true }, (error, stdout) =>
       error === null ? resolve(String(stdout)) : reject(error),
     );
     // A failed start or early exit is reported through the callback; the pipe error adds nothing.

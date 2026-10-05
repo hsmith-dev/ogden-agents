@@ -34,6 +34,29 @@ export const API_ERROR_CODES = [
   'confirmation_required',
   /** A permission mode the chat's agent, or its session, doesn't offer (409): nothing changed. */
   'mode_unavailable',
+  /** A model the chat's agent, or its session, doesn't list (409; story 11): nothing changed. */
+  'model_unavailable',
+  /**
+   * A handoff with no matching preview (409; handoff): its preview token is
+   * missing, used, expired, or was issued for another brief, agent or chat.
+   * Nothing changed; preview again.
+   */
+  'handoff_not_previewed',
+  /** A new chat named an agent this install doesn't have (400; epic 6): nothing created. */
+  'agent_unknown',
+  /**
+   * A new chat named an agent that isn't installed (409; epic 6, 6.3): nothing
+   * created. `details.agentId`, and `details.action` (`install`) says what fixes it.
+   */
+  'agent_not_installed',
+  /** A new chat named an agent that isn't signed in (409; 6.3): nothing created. `details.action` is `sign_in`. */
+  'agent_signed_out',
+  /**
+   * A new chat named an agent that runs the project's own agent settings or
+   * hooks, in a project not trusted yet (409; 6.3): nothing created.
+   * `details.action` is `trust_project`.
+   */
+  'project_not_trusted',
   /** uv's status or install could not be read or started (500). */
   'toolchain_unavailable',
   /** A route or socket request whose lane has not shipped yet (501; the story 2.3 stubs). */
@@ -50,6 +73,8 @@ export const API_ERROR_CODES = [
   'api_key_refused',
   /** An agent's install, sign-in or API key could not be done (500). The message says why in plain words. */
   'agent_setup_failed',
+  /** An agent can't be uninstalled or signed out right now (installing, a file in use, a sign-out it refused; 409). The message says why. */
+  'agent_busy',
   /** A BMad Method piece this project has turned off was asked for (409; AD-22: core's guard refused it). */
   'feature_off',
   /**
@@ -114,6 +139,13 @@ export const API_ERROR_CODES = [
    * trust is bound to their contents). Nothing ran. The UI asks again.
    */
   'scripts_changed',
+  /**
+   * A message was to be sent right away while the agent waits for an answer
+   * on a permission card (409; send now or wait): nothing was sent. Waiting is still possible.
+   */
+  'answer_first',
+  /** A waiting message was to be changed or sent right away, but it is no longer waiting (sent, removed, or the turn ended; 409). */
+  'message_not_queued',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

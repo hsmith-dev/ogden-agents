@@ -28,6 +28,16 @@ export interface BmadSetupRunOptions {
    * folders. Without it, setup runs only in a project with no `_bmad` entry.
    */
   upgrade?: boolean;
+  /**
+   * The skills folders of the other agents the project uses (epic 6 entry 8,
+   * AD-12 note: `.agents/skills` for Antigravity), repo-relative and
+   * `/`-separated, from core's skill folders rule (Planning on only). Each
+   * pinned skill is copied into each of them as into `.claude/skills`: an
+   * existing skill folder is never touched, and a link or a file at any
+   * segment refuses the setup before anything is created. Without it, only
+   * `.claude/skills`.
+   */
+  skillFolders?: readonly string[];
 }
 
 export interface BmadCatalogPort {

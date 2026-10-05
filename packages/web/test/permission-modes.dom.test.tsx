@@ -13,21 +13,21 @@ import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@t
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { APPEARANCE_KEY } from '../src/appearance/appearance';
 import { AppearanceProvider, useAppearance } from '../src/appearance/appearance-provider';
-import { DEVELOPER_MODE_CARRIED_KEY, DeveloperModeSync } from '../src/appearance/developer-mode';
+import { DEVELOPER_MODE_CARRIED_KEY, DeveloperModeSync, useDeveloperModeSave } from '../src/appearance/developer-mode';
 import type { TranscriptPermission } from '../src/chat/transcript';
 import { PermissionCard } from '../src/permissions/permission-card';
 import {
-  PERMISSION_MODE_DESCRIPTIONS,
+  permissionModeDescriptions,
   PermissionModePicker,
-  SKIP_ALL_BANNER,
-  SKIP_ALL_WARNING,
+  skipAllBanner,
+  skipAllWarning,
   SkipAllBanner,
   TERMINAL_MODE_REASON,
   usePermissionMode,
 } from '../src/permissions/permission-mode-picker';
 import { TooltipProvider } from '../src/ui/tooltip';
 
-const server = vi.hoisted(() => ({ developerMode: false, everSet: false, puts: [] as boolean[] }));
+const server = vi.hoisted(() => ({ developerMode: false, everSet: false, puts: [] as boolean[], holdReads: false, heldReads: [] as (() => void)[], holdPuts: false, heldPuts: [] as (() => void)[] }));
 
 vi.mock('@/api/http', async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -35,10 +35,19 @@ vi.mock('@/api/http', async (importOriginal) => ({
     if (init.method === 'PUT') {
       const { developerMode } = JSON.parse(String(init.body)) as { developerMode: boolean };
       server.puts.push(developerMode);
-      server.developerMode = developerMode;
-      server.everSet = true;
+      const apply = () => {
+        server.developerMode = developerMode;
+        server.everSet = true;
+        return { developerMode: server.developerMode, everSet: server.everSet };
+      };
+      // A held save reaches the server, and answers, only when released.
+      if (server.holdPuts) return new Promise((resolve) => server.heldPuts.push(() => resolve(apply())));
+      apply();
     }
-    return { developerMode: server.developerMode, everSet: server.everSet };
+    const answer = { developerMode: server.developerMode, everSet: server.everSet };
+    // A held read answers later with the value it read when it was sent (a request held up behind others).
+    if (init.method !== 'PUT' && server.holdReads) return new Promise((resolve) => server.heldReads.push(() => resolve(answer)));
+    return answer;
   },
 }));
 vi.mock('@/events/use-event-invalidation', () => ({ useEventInvalidation: () => undefined }));
@@ -48,6 +57,10 @@ beforeEach(() => {
   server.developerMode = false;
   server.everSet = false;
   server.puts = [];
+  server.holdReads = false;
+  server.heldReads = [];
+  server.holdPuts = false;
+  server.heldPuts = [];
   localStorage.clear();
 });
 
@@ -57,7 +70,7 @@ function mountPicker(props: Partial<Parameters<typeof PermissionModePicker>[0]> 
   const onChoose = vi.fn();
   render(
     <TooltipProvider>
-      <PermissionModePicker mode="ask" options={allAvailable} developerMode={false} terminalDrives={false} changing={false} onChoose={onChoose} {...props} />
+      <PermissionModePicker agentName="Claude Code" mode="ask" options={allAvailable} developerMode={false} terminalDrives={false} changing={false} onChoose={onChoose} {...props} />
     </TooltipProvider>,
   );
   const open = async () => {
@@ -73,8 +86,8 @@ describe('the permission mode picker', () => {
     const { open } = mountPicker();
     expect(screen.getByTestId('permission-mode-picker').textContent).toContain('Ask');
     await open();
-    expect(screen.getByTestId('permission-mode-ask').textContent).toContain(PERMISSION_MODE_DESCRIPTIONS.ask);
-    expect(screen.getByTestId('permission-mode-auto').textContent).toContain(PERMISSION_MODE_DESCRIPTIONS.auto);
+    expect(screen.getByTestId('permission-mode-ask').textContent).toContain(permissionModeDescriptions('Claude Code').ask);
+    expect(screen.getByTestId('permission-mode-auto').textContent).toContain(permissionModeDescriptions('Claude Code').auto);
     expect(screen.queryByTestId('permission-mode-skip_all')).toBeNull();
     cleanup();
     await mountPicker({ developerMode: true }).open();
@@ -94,7 +107,7 @@ describe('the permission mode picker', () => {
     await open();
     fireEvent.click(screen.getByTestId('permission-mode-skip_all'));
     const dialog = await screen.findByTestId('skip-all-confirm');
-    expect(dialog.textContent).toContain(SKIP_ALL_WARNING);
+    expect(dialog.textContent).toContain(skipAllWarning('Claude Code'));
     expect(onChoose).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId('skip-all-cancel'));
     await waitFor(() => expect(screen.queryByTestId('skip-all-confirm')).toBeNull());
@@ -142,9 +155,9 @@ describe('the permission mode picker', () => {
 describe('the Skip-all banner', () => {
   it('names the mode in the destructive variant, with a way back to Ask', () => {
     const onBackToAsk = vi.fn();
-    render(<SkipAllBanner changing={false} onBackToAsk={onBackToAsk} />);
+    render(<SkipAllBanner agentName="Claude Code" changing={false} onBackToAsk={onBackToAsk} />);
     const banner = screen.getByTestId('skip-all-banner');
-    expect(banner.textContent).toContain(SKIP_ALL_BANNER);
+    expect(banner.textContent).toContain(skipAllBanner('Claude Code'));
     expect(banner.getAttribute('data-variant')).toBe('destructive');
     fireEvent.click(screen.getByTestId('skip-all-back-to-ask'));
     expect(onBackToAsk).toHaveBeenCalledTimes(1);
@@ -152,7 +165,7 @@ describe('the Skip-all banner', () => {
 
   it('ignores Back to Ask while a change is on its way', () => {
     const onBackToAsk = vi.fn();
-    render(<SkipAllBanner changing onBackToAsk={onBackToAsk} />);
+    render(<SkipAllBanner agentName="Claude Code" changing onBackToAsk={onBackToAsk} />);
     fireEvent.click(screen.getByTestId('skip-all-back-to-ask'));
     expect(onBackToAsk).not.toHaveBeenCalled();
   });
@@ -170,7 +183,7 @@ describe('a Skip-all permission card', () => {
       status: 'pending',
       resolution: undefined,
     } as TranscriptPermission;
-    render(<PermissionCard permission={permission} wsId="ws_1" sesId="ses_1" projectName="clay" />);
+    render(<PermissionCard permission={permission} wsId="ws_1" sesId="ses_1" projectName="clay" agentName="Claude Code" />);
     expect(screen.queryByRole('button', { name: 'Always allow' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Allow once' })).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Deny' })).not.toBeNull();
@@ -180,8 +193,7 @@ describe('a Skip-all permission card', () => {
 });
 
 describe('Developer mode follows the server', () => {
-  const mountSync = () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const mountSync = (client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) => {
     return renderHook(
       () => {
         const appearance = useAppearance();
@@ -208,6 +220,25 @@ describe('Developer mode follows the server', () => {
     expect(result.current.developerMode).toBe(true);
   });
 
+  it('a carried-over on stays on when a read sent before the carry-over answered lands after it with the old off (story 6.9)', async () => {
+    localStorage.setItem(APPEARANCE_KEY, JSON.stringify({ developerMode: true, density: 'compact' }));
+    server.holdPuts = true;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = mountSync(client);
+    await waitFor(() => expect(server.heldPuts).toHaveLength(1));
+    // A refetch (an event, say) goes out while the carry-over is on its way, and reads the old off.
+    server.holdReads = true;
+    void client.invalidateQueries({ queryKey: ['developer-mode'] });
+    await waitFor(() => expect(server.heldReads).toHaveLength(1));
+    await act(async () => server.heldPuts.shift()?.());
+    await waitFor(() => expect(localStorage.getItem(DEVELOPER_MODE_CARRIED_KEY)).toBe('1'));
+    await act(async () => server.heldReads.shift()?.());
+    await waitFor(() => expect(client.isFetching()).toBe(0));
+    await act(async () => {});
+    expect(client.getQueryData(['developer-mode'])).toEqual({ developerMode: true, everSet: true });
+    expect(result.current.developerMode).toBe(true);
+  });
+
   it('never carries an old "on" over to an install where Developer mode was already set (turned off elsewhere)', async () => {
     server.everSet = true;
     localStorage.setItem(APPEARANCE_KEY, JSON.stringify({ developerMode: true, density: 'compact' }));
@@ -224,6 +255,34 @@ describe('Developer mode follows the server', () => {
     await waitFor(() => expect(result.current.developerMode).toBe(false));
     expect(result.current.density).toBe('compact');
     expect(server.puts).toEqual([]);
+  });
+
+  it('a switch saved while the first read is still on its way stays on when that read answers with the old off', async () => {
+    // Seen on a Windows runner (story 6.7, CI run 37226493048): the page's first read was held up behind other
+    // requests, the switch was saved on, and the read's old "off" then landed and turned the switch back.
+    localStorage.setItem(DEVELOPER_MODE_CARRIED_KEY, '1');
+    server.holdReads = true;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => ({ appearance: useAppearance().appearance, ...useDeveloperModeSave() }), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>
+          <AppearanceProvider>
+            <DeveloperModeSync storage={localStorage} />
+            {children}
+          </AppearanceProvider>
+        </QueryClientProvider>
+      ),
+    });
+    await waitFor(() => expect(server.heldReads).toHaveLength(1));
+    act(() => result.current.save(true));
+    await waitFor(() => expect(result.current.saving).toBe(false));
+    expect(server.puts).toEqual([true]);
+    expect(result.current.appearance.developerMode).toBe(true);
+    await act(async () => server.heldReads.shift()?.());
+    await waitFor(() => expect(client.isFetching()).toBe(0));
+    await act(async () => {});
+    expect(client.getQueryData(['developer-mode'])).toEqual({ developerMode: true, everSet: true });
+    expect(result.current.appearance.developerMode).toBe(true);
   });
 
   it("a browser that had it off takes the server's on, and never carries an off over", async () => {

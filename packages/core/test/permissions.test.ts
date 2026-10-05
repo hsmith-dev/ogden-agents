@@ -814,11 +814,14 @@ describe('protected paths always ask (user decision 2026-09-30, 2.8 F1)', () => 
   }
 
   it('names protected folders and files at any depth, ignoring case', () => {
-    for (const name of ['.claude', '.git', '.vscode', '.idea', '.mcp.json', 'CLAUDE.md', 'AGENTS.md', '.envrc', '.CLAUDE', '.Git', 'claude.MD']) {
+    // `.gemini` and `.agents`: Antigravity's config and skill folders (epic 6 entry 5).
+    for (const name of ['.claude', '.git', '.vscode', '.idea', '.gemini', '.agents', '.Gemini', '.mcp.json', 'CLAUDE.md', 'AGENTS.md', '.envrc', '.CLAUDE', '.Git', 'claude.MD']) {
       expect(isProtectedSegment(name), name).toBe(true);
     }
     for (const name of ['package.json', 'src', '.claude-projects', 'CLAUDE.md.bak', '.github', '.env']) expect(isProtectedSegment(name), name).toBe(false);
     expect(commandNamesProtectedPath('cp x .git/hooks/pre-commit')).toBe(true);
+    expect(commandNamesProtectedPath('echo x > .gemini/settings.json')).toBe(true);
+    expect(commandNamesProtectedPath('cp skill.md .agents/skills/x/SKILL.md')).toBe(true);
     expect(commandNamesProtectedPath('cp x "pkg\\.vscode\\tasks.json"')).toBe(true);
     expect(commandNamesProtectedPath('git commit -m x')).toBe(false);
   });

@@ -115,6 +115,21 @@ const EVENTS: Array<[type: string, valid: Record<string, unknown>, invalid: Reco
     { ...onSession, payload: { sessionId: sesId, waitingOn: '' } },
   ],
   [
+    'session.agent_starting',
+    { ...onSession, payload: { sessionId: sesId } },
+    { ...onSession, payload: {} },
+  ],
+  [
+    'session.agent_started',
+    { ...onSession, payload: { sessionId: sesId } },
+    { ...onSession, payload: { sessionId: '' } },
+  ],
+  [
+    'session.agent_changed',
+    { ...onSession, payload: { sessionId: sesId, agentId: 'second-agent', previous: 'first-agent', brief: 'Handoff', resumes: false } },
+    { ...onSession, payload: { sessionId: sesId, agentId: 'Second Agent', previous: 'first-agent', brief: 'Handoff', resumes: false } },
+  ],
+  [
     'permission.requested',
     {
       ...onSession,
@@ -135,6 +150,11 @@ const EVENTS: Array<[type: string, valid: Record<string, unknown>, invalid: Reco
     'session.permission_mode_changed',
     { ...onSession, payload: { sessionId: sesId, mode: 'ask', previous: 'auto', cause: 'agent', reason: 'Claude Code switched itself to Accept edits, so this chat is back in Ask.' } },
     { ...onSession, payload: { sessionId: sesId, mode: 'yolo', previous: 'ask', cause: 'user' } },
+  ],
+  [
+    'session.renamed',
+    { ...onSession, payload: { sessionId: sesId, title: 'Auth work', autoTitle: null, cause: 'user' } },
+    { ...onSession, payload: { sessionId: sesId, title: '', autoTitle: null, cause: 'user' } },
   ],
   [
     'settings.developer_mode_changed',
@@ -170,6 +190,7 @@ const EVENTS: Array<[type: string, valid: Record<string, unknown>, invalid: Reco
     { workspaceId: wsId, streamId: 'agents', payload: { agentId: 'claude-code' } },
   ],
   ['agent.install_failed', { ...onAgents, payload: { agentId: 'codex', reason: 'No network.' } }, { ...onAgents, payload: { agentId: 'codex', reason: '' } }],
+  ['agent.uninstalled', { ...onAgents, payload: { agentId: 'antigravity' } }, { ...onAgents, payload: { agentId: 'Not An Id' } }],
   [
     'agent.auth_changed',
     { ...onAgents, payload: { agentId: 'claude-code', state: 'signed_in', method: 'subscription' } },
@@ -401,7 +422,7 @@ describe('the permission mode contracts (permission modes)', () => {
   });
 
   it('session.permission_mode_changed names the mode, the previous one and the cause; its reason is optional', () => {
-    expect(PermissionModeChangeCause.options).toEqual(['user', 'developer_mode_off', 'restart', 'agent']);
+    expect(PermissionModeChangeCause.options).toEqual(['user', 'developer_mode_off', 'restart', 'agent', 'handoff']);
     const base = { type: 'session.permission_mode_changed', ...onSession, ...assigned, payload: { sessionId: sesId, mode: 'auto', previous: 'ask', cause: 'user' } };
     expect(CoreEvent.parse(base)).toMatchObject({ payload: { mode: 'auto', previous: 'ask', cause: 'user' } });
     expect(CoreEvent.safeParse({ ...base, payload: { ...base.payload, cause: 'whim' } }).success).toBe(false);

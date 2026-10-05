@@ -53,6 +53,7 @@ graph LR
   - Adding an agent or sandbox means adding an adapter, never a change to core.
   - `packages/web` never imports `core`, `adapters` or `server`.
   - Note (story 2.3, 2026-09-30): two more core ports join the list: `AgentSetupPort` (installing and signing into an agent, onboarding epic) and `AppShortcutPort` (the OS app shortcut, E2-R10), because both are OS- or agent-specific. Until their adapters ship, the server wires in-memory stubs named `<port>-memory` (`setup-memory`, `secrets-memory`, `shortcut-memory`). No rule changes.
+  - Note (epic 6, user-approved 2026-10-02): server wiring holds a registry of `AgentPort` and `AgentSetupPort` by `AgentId`, and core looks up a session's agent through it; the agent list is agent-neutral data, and each agent declares the permission modes it supports. Core and shared name no agent id, and an architecture test enforces it. The shared ACP client lives in `packages/adapters/src/acp-base`; adapter naming stays `<port>-<variant>` (`acp-claude-code`, `acp-antigravity`, `setup-antigravity`). Built whatever epic 6's Antigravity spike decides; only `acp-antigravity` and `setup-antigravity` depend on a go (user, 2026-10-02). No rule changes.
 
 ### AD-2 — Workspace is the top-level scope
 
@@ -94,6 +95,7 @@ graph LR
   - Every adapter that produces agent activity, whether an ACP chat or the bmad-loop build runner, emits the same `session.*` event types, so one session view renders both.
   - All events are retained, and history is deletable per workspace.
   - When a message completes, core appends a `session.message_completed` event carrying the full content. Its chunk events are pruned only after that, and the UI replaces chunks with the completed message.
+  - Note (chat names, backlog story 12, 2026-10-04): a session's name is two fields core keeps, the user's `title` and the automatic `autoTitle` (set once: a planning action's label, or the first user message that isn't a Deny reason, inside the same `completeMessage` transaction). Each change is a `session.renamed` carrying both. Names are normalized in `packages/shared` and never sent to an agent. No rule change.
 
 ### AD-6 — Terminal bytes use their own channel [ADOPTED]
 
@@ -104,6 +106,7 @@ graph LR
   - Each session has one `driver` (`ui` or `terminal`), which only core changes, and each change emits `session.driver_changed`.
   - While `driver = terminal`, core rejects chat input for that session.
   - Note (permission modes, 2026-10-02, user decision): each chat also has a permission mode (`ask`, `auto`, `skip_all`) stored on its session and changed only by core, each change a `session.permission_mode_changed`. While `driver = terminal` core also rejects a mode change (`driver_is_terminal`); the CLI starts in the chat's mode (`--permission-mode default|auto`, or `--dangerously-skip-permissions`). Turning Developer mode off hands a Skip-all terminal back to the chat (`session.driver_changed`, cause `developer_mode_off`) before the chat moves to Ask. (decision by user, 2026-10-02) Auto keeps protected files guarded: in Auto the CLI also gets `--settings` with ask rules for the protected paths. No rule change.
+  - Note (default permission mode, 2026-10-04, user decision): a project can set the mode its new chats start in (`workspaces.default_permission_mode`, Ask when absent; the app-wide default for new projects is copied when a project is added). Core picks a new chat's starting mode in the same synchronous step that creates it: the project's default only when the chat's agent declares it, its sessions this run listed it, and, for Skip all, Developer mode is on; otherwise Ask with a note on `session.created` (`permissionModeNote`, optional). Restarts still put every existing chat back in Ask; a chat created after a restart starts in the default. Unattended builds don't use it. The terminal starts in the chat's mode as before. No rule change.
 
 ### AD-7 — Board data is fetched; ticket events only invalidate [ADOPTED]
 
@@ -123,6 +126,9 @@ graph LR
   - Session state, run outcome and ticket status are three separate things. Ticket status comes only from `TicketStorePort`, and the UI never works out one from another.
   - The live run view is the session view in read-only mode.
   - Ogden Agents records no cost or token usage.
+  - Note (epic 6, user-approved 2026-10-02): a session carries `agentId`, set at creation and never changed (rows stored before read as `claude-code`), and a workspace carries a default agent. A run's agent is Claude Code in v1 (builds with other agents are v2, epic 8). No rule changes.
+  - Note (story 11, user request 2026-10-04): a session carries an optional `model` (the agent's own model id; absent is the agent's own choice), set at creation from the project's default for its agent, else the install's, and changed only by core with `session.model_changed` {model, previous, cause user|agent}; per-agent install defaults and each agent's last model list live in `agent_settings`, per-project defaults in `workspaces.default_models` (carried by `workspace.settings_changed`), install changes as `settings.agent_default_model_changed`. Agents expose models agent-neutrally: an ACP session config option of category `model` (switched with `session/set_config_option` at the idle point before the next prompt), else a static descriptor list applied at spawn (restart to switch). Core and the UI name no model id. No rule changes.
+  - Note (handoff, user decision 2026-10-04): a chat's `agentId` changes only when the user confirms continuing it with another agent, recorded as `session.agent_changed` (previous agent, the brief sent, whether the agent resumes its own session). Each agent's own session id stays an adapter ref (`agentSessionId@<agentId>`, AD-9). The brief is built by core from the session's events, masked with the shared secret patterns (AD-16), capped per agent's descriptor, and sent only after the user saw which provider receives it. No rule changes.
 
 ### AD-9 — Ogden Agents owns identity [ADOPTED]
 
@@ -163,6 +169,7 @@ graph LR
   - Plain-language labels live in Ogden Agents's own mapping file, keyed by skill name, in the `bmad-catalog` adapter; a skill it doesn't name shows its `SKILL.md` description. (Amended, story 4.14, user decision 2026-10-02: was "in fork metadata".)
   - Note (epic 4, 2026-10-01): the `bmad-catalog` adapter may also name the `bmad` setup skill, because it runs that skill's `setup.py` to install BMAD into a project (CAP-2). No rule changes.
   - Note (epic 10, 2026-10-01): the catalog is built only for workspaces with Planning on (AD-22). AD-1's port list is unchanged: `BmadCatalogPort` gains a read-only `detect` (does the repo already have `_bmad/`). No rule changes.
+  - Note (epic 6, user-approved 2026-10-02): an agent adapter may name the skill invocation syntax for its agent, and BMad setup places skills in each in-use agent's skill folder (`.agents/skills` for Antigravity, beside `.claude/skills`), only where Planning is on. Skill names still appear only where this rule allows. No rule changes.
 
 ### AD-13 — Upstream BMad is pinned and verified [ADOPTED]
 
@@ -202,6 +209,7 @@ graph LR
   - The launcher finds the server through a port file in the user data directory, readable only by the user.
   - Note (story 1.7): the launcher token is 256 random bits the server writes to `launcher.token` in the data directory on each start (readable only by the user, removed on stop), sent in a request header and compared in constant time. It opens nothing but the handshake, and no tab token opens the handshake.
   - Note (permission modes, 2026-10-02, user decision): Skip all (an agent run with its permission checks skipped) is gated by the server, not by the agent's start options: a chat's mode can be `skip_all` only with the install's Developer mode on (kept by core in SQLite, `settings.developer_mode_changed`, no longer browser-only) and the request's `confirm: true`; a direct API call without them is refused (403 `developer_mode_required`, 400 `confirmation_required`) and records nothing. Turning Developer mode off drops every Skip-all chat to Ask in the same transaction, and a server start puts every chat back in Ask. Claude Code sessions start with bypass permitted (the adapter's default) so a chat can move to Skip all without a restart. (decision by user, 2026-10-02) Auto keeps protected files guarded: Ogden starts Auto sessions with ask rules for the protected paths, so those edits still reach a card; Skip all has none. The rules are fixed per agent session, so a move into or out of Auto puts the agent in Ask at once and restarts (resumes) it at the next idle point. No rule change.
+  - Note (default permission mode, 2026-10-04, user decision): Skip all as a project's default, or as the app-wide default for new projects, is gated by the server like a chat's: Developer mode on and `confirm: true`, else 403 `developer_mode_required` / 400 `confirmation_required` and nothing written. The confirmation is per project and on the record (`workspace.settings_changed` with `skipAllConfirmed: true`); an app-wide Skip all reaches a new project as Ask waiting for that confirmation (notice `skip_all_unconfirmed`). Turning Developer mode off sets every project's Skip all default back to Ask in the same transaction (`workspace.settings_changed`, cause `developer_mode_off`, notice in its settings) and the app-wide one to Ask (a file: it also reads as Ask while Developer mode is off). A chat created from a Skip all default shows the red banner like any other. No rule change.
   - Note (story 2.1, amending story 1.4's cookie): browsers send cookies for `127.0.0.1` to every port on it, so the session cookie and its signing key `auth.key` are retired; a leftover `auth.key` is deleted at start and old cookies are ignored. The page's boot script (a same-origin file, not inline) strips `#c=` from the URL with `history.replaceState`, exchanges the code, and keeps the token in memory and `sessionStorage`, so a reload keeps the tab connected, while a new tab or a bookmark has no token and shows the app's own "Open Ogden Agents" state. New tab in the sidebar footer asks `POST /api/launch-codes` (token and Origin required) for a fresh launch link.
   - Known limit: on a computer shared by several accounts, another local user can see the launch URL (with its single-use code) on the process command line while the browser opens it (macOS; Linux without `hidepid`) and race to redeem it. Mitigated by 60-second single-use codes; an install is for one user.
 
@@ -213,6 +221,8 @@ graph LR
   - Subscription logins stay in each agent's own CLI, and Ogden Agents never reads or stores them.
   - API keys go through `SecretStorePort`: the OS keychain (`@napi-rs/keyring`); where no keychain exists, saving a key is refused with a plain reason and subscription sign-in remains.
   - Adapters redact secrets before emitting events.
+  - Note (epic 6, user-approved 2026-10-02): each agent's API key is `agent-api-key/<agentId>` (Antigravity: `agent-api-key/antigravity`) and reaches only that agent's process; log redaction covers each supported provider's key format. Antigravity keeps its own sign-in under `~/.gemini/antigravity-acp/`, which Ogden never reads or writes. Ogden offers Antigravity's Google sign-in and the Gemini API key; the user accepted that Google's current terms call third-party use of Antigravity OAuth a breach (account risk; user, 2026-10-02). Antigravity is installed as a pinned copy in the data folder (registry archive checked against Ogden's SHA-256), an existing copy is used only when it matches the pin, and nothing is installed globally. No rule changes.
+  - Note (epic 6 entry 10, 2026-10-04, security; closes the 6.5 review's deferred item): every child process gets an explicit environment built from one allowlist (`packages/adapters/src/child-env.ts`). An agent's process gets the allowlist, its own home variable and only its own key, from its descriptor; helper processes (the kill helper, the Windows shortcut script, npm's install of Claude Code's adapter, uv and BMad Method's scripts, setup probes, the browser opener) get the allowlist plus named non-secret variables only, never a key. `tests/architecture.test.ts` fails when a spawn in `packages/` passes `process.env` or no `env`; the one exemption is the launcher starting the server itself, which is Ogden, not a helper. No rule changes.
 
 ### AD-17 — Unattended runs are contained
 
@@ -224,6 +234,7 @@ graph LR
   - Every run has a maximum wall-clock duration, after which core stops it and marks it blocked.
   - After a run, core runs verification before the UI may show `built`: plan status, an independent test re-run, and a non-empty diff.
   - Merging and `done` happen only through the approve action. If the merge conflicts, the run is blocked as needing a rebase. It is never force-merged.
+  - Note (epic 6, user-approved 2026-10-02): v1 builds run Claude Code only. Builds with Antigravity (bmad-loop's `agy` profile, whose `--dangerously-skip-permissions` bypasses its approvals and which has no native sandbox recorded), Codex, Gemini CLI and Copilot are v2 (epic 8). When they come, an agent profile that bypasses its own approvals runs only inside a sandbox `SandboxPort` started, and the sandbox chain is per agent and per OS. No rule changes.
 
 ### AD-18 — One design system [ADOPTED]
 
@@ -233,7 +244,7 @@ graph LR
   - shadcn/ui components live, owned and restyled, only in `packages/web/ui`. There is no second component library, and feature code does no ad hoc styling.
   - Color, type, spacing, radius and motion are CSS-variable tokens with light and dark sets, and components use tokens only.
   - The visual direction comes from the `design-taste-frontend` Design Read, recorded by `bmad-ux` as `DESIGN.md` and `EXPERIENCE.md` in epic 1.
-  - The status sidebar, workspace switcher and session view are built once and reused.
+  - The status sidebar (the one place to see, open, add and manage projects; note backlog story 13, 2026-10-04: the workspace switcher drop-down was removed) and session view are built once and reused.
 
 ### AD-19 — The terminal is optional to load [ADOPTED]
 
@@ -323,7 +334,7 @@ graph TB
     L[npx ogden-agents launcher] -- version handshake --> S
     S --> DB[(SQLite in user data dir)]
     S --> K[OS keychain]
-    S -- ACP --> A[Agent CLIs: Claude Code, Codex, Gemini, Copilot]
+    S -- ACP --> A[Agent CLIs: Claude Code; Antigravity chat if epic 6 is a go]
     S -- uv --> BL[bmad-loop, pinned upstream] --> A
     S -- tickets.py / file watch --> R[User repos: _bmad, _bmad-output, worktrees]
     S -. fallback sandbox .-> D[Docker if installed]
@@ -372,7 +383,7 @@ Delivery: GitHub Actions runs the tests on macOS, Windows and Linux for every ch
 | CAP-12 review and approve | core approve action, `vcs-git` | AD-10, AD-17 |
 | CAP-13 retrospectives | catalog-driven planning session | AD-12 |
 | CAP-14 notifications | `notify-*` | AD-1 |
-| CAP-15 every agent | `acp-*`, bmad-loop profiles | AD-1, AD-4 |
+| CAP-15 agent choice (v1: Claude Code; Antigravity chat if possible) | `acp-base`, `acp-*`, `setup-*`, server agent registry | AD-1, AD-4, AD-8, AD-12, AD-16 |
 | CAP-16 sign-in | `acp-*` authenticate, `secrets-keyring` | AD-16, AD-21 |
 | CAP-17 workspaces and status sidebar | core, shared UI patterns | AD-2, AD-3, AD-4, AD-18 |
 | CAP-18 every BMAD skill and module | `bmad-catalog` adapter | AD-12, AD-14 |
@@ -382,7 +393,7 @@ Delivery: GitHub Actions runs the tests on macOS, Windows and Linux for every ch
 
 - **Visual direction:** decided in epic 1 by `bmad-ux` with `design-taste-frontend`. AD-18 fixes only the mechanism.
 - **Default concurrency limits and maximum run time:** tuned in epic 5. AD-2 and AD-17 fix only that the limits exist and that core enforces them.
-- **Where the CAP-5 toggle appears for each agent:** measured in epic 3, recorded in the spec's `agent-matrix.md`.
+- **Where the CAP-5 toggle appears for each agent:** measured in epic 3, recorded in the spec's `agent-matrix.md`. Antigravity's is measured by epic 6's spike (2026-10-02); other agents' in v2.
 - **Notification transports beyond webhook:** decided in epic 5 behind `NotifierPort`.
 - **Start at login, a tray icon, or a desktop wrapper:** later, and neither breaks AD-3.
 - **Tracker stores, remote access, and several users per install:** out of scope (spec non-goals).

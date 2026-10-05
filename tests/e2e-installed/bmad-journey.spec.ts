@@ -16,7 +16,9 @@
  * - A simple project (a plain repo with its own `.claude/skills`): the header
  *   shows Chats only; two chats, each sent `session-start`, start with no MCP
  *   server, no `_meta`, exactly the user's text and nothing "bmad" in their
- *   environment.
+ *   environment; and so does a chat with the second agent, Antigravity (epic
+ *   6 entry 8, epic 10 retro A8), its server the fake agent's Antigravity
+ *   personality through the installed server's test hook.
  * - The offer on a repo with `_bmad/`: Not now hides it after a reload and
  *   after a server restart.
  * - Quit: no repo changed.
@@ -138,9 +140,19 @@ interface SessionStart {
   env: Record<string, string>;
 }
 
-/** Sends `session-start` in the open chat and reads the agent's one-line JSON reply. */
-async function sessionStart(page: Page): Promise<SessionStart> {
-  await send(page, 'session-start');
+/**
+ * Sends `session-start` in the open chat and reads the agent's one-line JSON
+ * reply. `agentName` is the chat's agent, which names the composer (`send`
+ * knows only Claude Code's).
+ */
+async function sessionStart(page: Page, agentName = 'Claude Code'): Promise<SessionStart> {
+  if (agentName === 'Claude Code') await send(page, 'session-start');
+  else {
+    const composer = page.getByRole('textbox', { name: `Message ${agentName}` });
+    await composer.fill('session-start');
+    await composer.press('Enter');
+    await expect(composer).toHaveValue('');
+  }
   await expect(replies(page)).toHaveCount(1);
   await expect(state(page)).toHaveAttribute('data-state', 'idle');
   await expect(replies(page).last()).toHaveAttribute('data-streaming', 'false');
@@ -171,8 +183,8 @@ async function quit(page: Page, launched: Launched) {
 test('what 0.4.0 ships, Board asking for trust, a simple project, and the offer, on the installed package', async ({ page }) => {
   // Two launches and two chats on a server of its own.
   test.setTimeout(240_000);
-  // No hook: what a user of this version sees (Planning and Board shipped, the rest Coming soon).
-  const server = bmadServer('journey-simple');
+  // No hook: what a user of this version sees (Planning and Board shipped, the rest Coming soon). Antigravity plays the second agent.
+  const server = bmadServer('journey-simple', { antigravity: true });
   servers.push(server);
   // No "bmad" in the simple repo's name, so the environment check can't match it by accident.
   const plain = server.addRepo({ bmad: false, files: { [OWN_SKILL]: OWN_SKILL_TEXT }, prefix: 'simple-repo-' });
@@ -243,6 +255,25 @@ test('what 0.4.0 ships, Board asking for trust, a simple project, and the offer,
     await expectChatsTabOnly(page);
     const second = await sessionStart(page);
     expectSimpleStart(second, cwd);
+    expect(await piecesOf(page, plainId)).toEqual([]);
+  });
+
+  await test.step('a simple project with the second agent: an Antigravity chat starts with nothing BMad either', async () => {
+    // Antigravity runs only where it has a pin for this platform (every OS CI runs on has one).
+    if (!server.antigravity) {
+      test.info().annotations.push({ type: 'skip', description: 'no Antigravity pin for this platform: the Antigravity step did not run' });
+      return;
+    }
+    const cwd = realpathSync.native(plain.path);
+    const response = await api(page, 'POST', apiPath(API_ROUTES.workspaceSessions, { wsId: plainId }), { kind: 'chat', agentId: 'antigravity' });
+    expect(response.status).toBe(201);
+    const { session } = (await response.json()) as { session: { id: string; agentId: string } };
+    expect(session.agentId).toBe('antigravity');
+    await page.goto(`${launched.url}/w/${plainId}/s/${session.id}`);
+    await expect(page.getByTestId('session-agent')).toHaveText('Antigravity');
+    await expectChatsTabOnly(page);
+    const start = await sessionStart(page, 'Antigravity');
+    expectSimpleStart(start, cwd);
     expect(await piecesOf(page, plainId)).toEqual([]);
   });
 

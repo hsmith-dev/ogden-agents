@@ -191,7 +191,8 @@ export function cautionAllows(level: CautionLevel, kind: ToolKind, pathsInside: 
  */
 export const PROTECTED_PATHS: ProtectedPaths = {
   // `_bmad`: BMad Method's own scripts and settings, which the Board runs (story 4.13, user decision 2026-10-04).
-  folders: ['.claude', '.git', '.vscode', '.idea', '_bmad'],
+  // `.gemini` and `.agents`: Antigravity's config and skill folders (epic 6 entry 5).
+  folders: ['.claude', '.git', '.vscode', '.idea', '_bmad', '.gemini', '.agents'],
   // As agents write them; the lowercase spellings too, for a case-insensitive filesystem.
   files: ['.mcp.json', 'CLAUDE.md', 'claude.md', 'AGENTS.md', 'agents.md', '.envrc'],
 };

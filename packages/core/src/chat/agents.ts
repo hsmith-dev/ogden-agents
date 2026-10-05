@@ -4,12 +4,13 @@
  * and dropping or releasing it. `apply` comes from the turn that starts the
  * agent, so this module never imports the turns.
  */
-import type { Session, SessionId, Workspace } from '@ogden-agents/shared';
+import { redactSecrets, type Session, type SessionId, type Workspace } from '@ogden-agents/shared';
 import { AgentError, type AgentEvent, type AgentRestored, type AgentSession } from '../agent-port.js';
 import { PROTECTED_PATHS } from '../permission-matching.js';
-import { primedPrompt } from '../resume-prime.js';
-import { AGENT_SESSION_REF } from './constants.js';
+import { PRIME_NEW_MESSAGE, primedPrompt } from '../resume-prime.js';
+import { AGENT_SESSION_REF, AGENT_STARTING_NOTICE_MS, HANDOFF_PENDING_REF } from './constants.js';
 import type { ChatContext } from './context.js';
+import type { Models } from './model.js';
 import type { ModeApplier } from './permission-mode.js';
 import type { PermissionRequests } from './permission-requests.js';
 import type { Replies } from './replies.js';
@@ -17,10 +18,10 @@ import type { Live } from './types.js';
 
 export function createAgents(
   ctx: ChatContext,
-  deps: Pick<Replies, 'stopDeltaTimer'> & Pick<PermissionRequests, 'onPermissionRequestFor'> & { applyMode: ModeApplier },
+  deps: Pick<Replies, 'stopDeltaTimer'> & Pick<PermissionRequests, 'onPermissionRequestFor'> & Pick<Models, 'noteStarted' | 'takesModelAtStart' | 'startModelFor'> & { applyMode: ModeApplier },
 ) {
-  const { entities, sessionEvents, agent, agentEnv, live, droppedAgents, internalError, sessionModes } = ctx;
-  const { stopDeltaTimer, onPermissionRequestFor, applyMode } = deps;
+  const { entities, sessionEvents, agentEnv, agentOf, agentIdOf, live, droppedAgents, internalError, sessionModes, later } = ctx;
+  const { stopDeltaTimer, onPermissionRequestFor, applyMode, noteStarted, takesModelAtStart, startModelFor } = deps;
 
   /** Ends the session's agent (it failed or went away); the next message starts a fresh one. */
   const drop = (sessionId: SessionId, entry: Live) => {
@@ -73,14 +74,22 @@ export function createAgents(
       // The protected paths stay guarded in Auto ("Keep protected files guarded", user decision 2026-10-02); fixed for the session's life.
       guardsRequested: entities.getSession(session.id)?.permissionMode === 'auto',
       restartPending: false,
+      appliedModel: null,
     };
     const onPermissionRequest = onPermissionRequestFor(session);
+    // The agent the session was started with (epic 6), looked up for each start: never another one.
+    const agent = agentOf(session.id);
+    const agentId = agentIdOf(session);
+    // An agent that takes its model only at start gets the chat's in its start (story 11); one told live starts on its own choice.
+    const startModel = takesModelAtStart(agentId) ? startModelFor(session.id, agentId) : null;
+    entry.appliedModel = startModel;
     // The real-cased path: the case-folded key is for uniqueness only (AD-2).
     const input = {
       cwd: workspace.realPath ?? workspace.path,
-      env: { ...agentEnv() },
+      env: { ...agentEnv(session.id) },
       onPermissionRequest,
       ...(entry.guardsRequested ? { protectedPaths: PROTECTED_PATHS } : {}),
+      ...(startModel === null ? {} : { model: startModel }),
     };
     const previous = storedAgentSessionId(session.id);
     // A chat that reached an agent before, and has none now, reopens that agent's session (2.7).
@@ -91,6 +100,26 @@ export function createAgents(
         : agent.reopenSession({ ...input, agentSessionId: previous });
     const dropped = droppedAgents.get(session.id);
     const opening = dropped === undefined ? begin() : dropped.then(begin);
+    // A start that takes a while shows as starting, not stuck (epic 6 entry 5); a quick one adds no event.
+    const announce = (type: 'session.agent_starting' | 'session.agent_started') => {
+      try {
+        sessionEvents.appendSessionEvent(session.id, { type, payload: { sessionId: session.id } });
+      } catch (error) {
+        internalError(session.id, error);
+      }
+    };
+    let starting: 'pending' | 'announced' | 'ended' = 'pending';
+    const startingTimer = later(AGENT_STARTING_NOTICE_MS, () => {
+      if (starting !== 'pending' || live.get(session.id) !== entry) return;
+      starting = 'announced';
+      announce('session.agent_starting');
+    });
+    const startEnded = () => {
+      clearTimeout(startingTimer);
+      if (starting === 'announced') announce('session.agent_started');
+      starting = 'ended';
+    };
+    opening.then(startEnded, startEnded);
     entry.agent = opening.then(async ({ session: started, restored }) => {
       if (live.get(session.id) !== entry) {
         // Closed (or dropped) while starting: stop it before anyone waiting on this
@@ -116,7 +145,9 @@ export function createAgents(
       entry.prime = restored === 'new';
       entry.off = started.onEvent((event) => apply(session.id, entry, event));
       sessionModes.set(session.id, started.permissionModes ?? ['ask']);
-      ctx.lastSessionModes.value = started.permissionModes ?? ['ask'];
+      ctx.lastSessionModes.set(agentId, started.permissionModes ?? ['ask']);
+      // What it lists (story 11): the chat's picker, and the agent's last list for Settings.
+      noteStarted(session.id, agentId, started);
       // The chat's stored mode before the first prompt, whatever the agent's own settings started it in
       // (a new chat, and every chat after a restart, in Ask). One it can't be put in, not even Ask, is stopped.
       const applied = await applyMode(session.id, started, entry.guardsRequested);
@@ -138,17 +169,31 @@ export function createAgents(
     return entry;
   };
 
+  /** The brief of the chat's latest handoff while it is still to be sent (handoff), else `undefined`. */
+  const pendingBrief = (sessionId: SessionId): string | undefined => {
+    if (entities.getSession(sessionId)?.adapterRefs[HANDOFF_PENDING_REF] !== '1') return undefined;
+    const changed = entities.listSessionEvents(sessionId, ['session.agent_changed']).at(-1);
+    return changed?.type === 'session.agent_changed' && changed.payload.brief.trim() !== '' ? changed.payload.brief : undefined;
+  };
+
   /**
    * What the agent is sent for the user's `text`: the text itself, or, on a
    * session that replaced the chat's earlier one, the text after the chat's
-   * transcript up to (not including) this message. A slash command (`/…`)
-   * goes as it is, so the agent still reads it as a command, and the next
-   * ordinary message is primed instead (review F1). `primed` says which.
+   * transcript up to (not including) this message. After a handoff, the
+   * brief goes first (`handoff`), until a prompt with it succeeded. A slash
+   * command (`/…`) goes as it is, so the agent still reads it as a command,
+   * and the next ordinary message is primed instead (review F1). `primed`
+   * says which.
    */
-  const promptFor = (sessionId: SessionId, entry: Live, messageId: string, text: string): { prompt: string; primed: boolean } => {
-    if (!entry.prime || text.trimStart().startsWith('/')) return { prompt: text, primed: false };
-    const earlier = entities.listCompletedMessages(sessionId).filter((message) => message.messageId !== messageId);
-    return { prompt: primedPrompt(earlier, text, agent.displayName), primed: true };
+  const promptFor = (sessionId: SessionId, entry: Live, messageId: string, text: string): { prompt: string; primed: boolean; handoff: boolean } => {
+    if (text.trimStart().startsWith('/')) return { prompt: text, primed: false, handoff: false };
+    const brief = pendingBrief(sessionId);
+    const told = brief === undefined ? text : `${brief}\n${PRIME_NEW_MESSAGE}\n${text}`;
+    if (!entry.prime) return { prompt: told, primed: false, handoff: brief !== undefined };
+    const stored = entities.listCompletedMessages(sessionId).filter((message) => message.messageId !== messageId);
+    // After a handoff the transcript may hold another provider's chat: masked like the brief (AD-16).
+    const earlier = brief === undefined ? stored : stored.map((message) => ({ ...message, content: redactSecrets(message.content) }));
+    return { prompt: primedPrompt(earlier, told, agentOf(sessionId).displayName), primed: true, handoff: brief !== undefined };
   };
 
   /** Releases the session's agent process and waits for it to exit, so the CLI never shares the session with it. */

@@ -4,9 +4,9 @@
  * instance each, never copied or spread: the modules' identity checks rely on
  * it) and `closing`, read as `ctx.closing` at each use, never copied.
  */
-import type { PermissionMode, Session, SessionId, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import type { AgentId, AgentModel, PermissionMode, Session, SessionId, Workspace, WorkspaceId } from '@ogden-agents/shared';
 import { monotonicFactory } from 'ulid';
-import { AgentError, type AgentPort } from '../agent-port.js';
+import { AgentError, unregisteredAgent, type AgentPort, type AgentRegistry, type AgentSessionModels } from '../agent-port.js';
 import { canonicalWorkspacePath, type Entities } from '../entities.js';
 import { NotFoundError } from '../errors.js';
 import { createDecliningPermissions, type Permissions } from '../permissions.js';
@@ -31,9 +31,16 @@ export interface ChatContext {
   readonly options: ChatOptions;
   readonly entities: Entities;
   readonly sessionEvents: SessionEvents;
-  readonly agent: AgentPort;
+  readonly agents: AgentRegistry;
+  /** The session's agent id: its own, or the registry's legacy agent for a session stored before agents could be chosen. */
+  readonly agentIdOf: (session: Pick<Session, 'agentId'>) => AgentId;
+  /** The session's agent; one not registered this run is a stand-in that can't start (`agent_unavailable`). */
+  readonly agentOf: (sessionId: SessionId) => AgentPort;
+  /** The session as the chat answers it: with its `agentId` filled in (epic 6). */
+  readonly withAgentId: (session: Session) => Session;
   readonly permissions: Permissions;
-  readonly agentEnv: () => Readonly<Record<string, string>>;
+  /** The environment the session's agent processes get (its own API key only). */
+  readonly agentEnv: (sessionId: SessionId) => Readonly<Record<string, string>>;
   readonly checkInDelayMs: number;
   readonly stopGraceMs: number;
   readonly live: Map<SessionId, Live>;
@@ -52,8 +59,14 @@ export interface ChatContext {
   readonly switching: Set<SessionId>;
   /** The permission modes each session's agent session offered when it last started this run (permission modes). */
   readonly sessionModes: Map<SessionId, readonly PermissionMode[]>;
-  /** The permission modes the agent session started last in this run offered (any chat): a chat whose own agent hasn't started yet. */
-  readonly lastSessionModes: { value: readonly PermissionMode[] | undefined };
+  /** The permission modes the agent session started last in this run offered, per agent (any chat of it): a chat whose own agent hasn't started yet. */
+  readonly lastSessionModes: Map<AgentId, readonly PermissionMode[]>;
+  /** The models each session's agent session listed, and runs on, as it last said this run (story 11). */
+  readonly sessionModels: Map<SessionId, AgentSessionModels>;
+  /** The models the agent last listed: this install's record, else this run's, else its descriptor's static list (story 11). */
+  readonly agentModelList: (agentId: AgentId) => readonly AgentModel[] | undefined;
+  /** Keeps the agent's model list (this run, and the install's record). */
+  readonly rememberModels: (agentId: AgentId, models: readonly AgentModel[]) => void;
   /** How long an agent may take to take a permission mode. */
   readonly permissionModeTimeoutMs: number;
   /** Whether Developer mode is on now. */
@@ -62,7 +75,7 @@ export interface ChatContext {
   closing: boolean;
   readonly dataHome: string;
   readonly internalError: (sessionId: SessionId, error: unknown) => void;
-  readonly toAgentError: (error: unknown) => AgentError;
+  readonly toAgentError: (sessionId: SessionId, error: unknown) => AgentError;
   readonly later: (ms: number, run: () => void) => Timer;
   readonly nextUlid: () => string;
   readonly newMessageId: () => string;
@@ -71,9 +84,19 @@ export interface ChatContext {
 }
 
 export function createChatContext(options: ChatOptions): ChatContext {
-  const { entities, sessionEvents, agent } = options;
+  const { entities, sessionEvents, agents } = options;
   const permissions = options.permissions ?? createDecliningPermissions();
-  const agentEnv = options.agentEnv ?? (() => ({}));
+  const agentIdOf = (session: Pick<Session, 'agentId'>): AgentId => session.agentId ?? agents.legacyAgentId;
+  const missing = unregisteredAgent();
+  const agentOf = (sessionId: SessionId): AgentPort => {
+    const session = entities.getSession(sessionId);
+    return (session === undefined ? undefined : agents.get(agentIdOf(session))) ?? missing;
+  };
+  const withAgentId = (session: Session): Session => (session.agentId === undefined ? { ...session, agentId: agents.legacyAgentId } : session);
+  const agentEnv = (sessionId: SessionId): Readonly<Record<string, string>> => {
+    const session = entities.getSession(sessionId);
+    return session === undefined ? {} : (options.agentEnv?.(agentIdOf(session)) ?? {});
+  };
   const checkInDelayMs = clampCheckInDelay(options.checkInDelayMs ?? DEFAULT_CHECK_IN_MS);
   const stopGraceMs = options.stopGraceMs ?? STOP_GRACE_MS;
   const live = new Map<SessionId, Live>();
@@ -84,6 +107,16 @@ export function createChatContext(options: ChatOptions): ChatContext {
   const switching = new Set<SessionId>();
   const sessionModes = new Map<SessionId, readonly PermissionMode[]>();
   const permissionModeTimeoutMs = options.permissionModeTimeoutMs ?? PERMISSION_MODE_TIMEOUT_MS;
+  const sessionModels = new Map<SessionId, AgentSessionModels>();
+  /** This run's lists, per agent, when no install record is kept. */
+  const runModels = new Map<AgentId, readonly AgentModel[]>();
+  const agentModelList = (agentId: AgentId): readonly AgentModel[] | undefined =>
+    options.agentModels?.lastModels(agentId) ?? runModels.get(agentId) ?? agents.describe(agentId)?.models?.list;
+  const rememberModels = (agentId: AgentId, models: readonly AgentModel[]) => {
+    if (models.length === 0) return;
+    runModels.set(agentId, models);
+    options.agentModels?.rememberModels(agentId, models);
+  };
   const developerMode = () => options.installSettings?.developerMode() === true;
   const dataHome = canonicalWorkspacePath(options.dataDir);
 
@@ -95,10 +128,10 @@ export function createChatContext(options: ChatOptions): ChatContext {
     }
   };
 
-  const toAgentError = (error: unknown): AgentError =>
+  const toAgentError = (sessionId: SessionId, error: unknown): AgentError =>
     error instanceof AgentError
       ? error
-      : new AgentError('agent_failed', `${agent.displayName} stopped with an error. Try again.`, {
+      : new AgentError('agent_failed', `${agentOf(sessionId).displayName} stopped with an error. Try again.`, {
           details: { reason: error instanceof Error ? error.message : String(error) },
           cause: error,
         });
@@ -120,7 +153,10 @@ export function createChatContext(options: ChatOptions): ChatContext {
     options,
     entities,
     sessionEvents,
-    agent,
+    agents,
+    agentIdOf,
+    agentOf,
+    withAgentId,
     permissions,
     agentEnv,
     checkInDelayMs,
@@ -132,7 +168,10 @@ export function createChatContext(options: ChatOptions): ChatContext {
     terminals,
     switching,
     sessionModes,
-    lastSessionModes: { value: undefined },
+    lastSessionModes: new Map(),
+    sessionModels,
+    agentModelList,
+    rememberModels,
     permissionModeTimeoutMs,
     developerMode,
     closing: false,

@@ -908,3 +908,101 @@ describe('agent setup: install (story 9.3)', () => {
     await expect(setup.install('claude-code')).rejects.toBeInstanceOf(AgentSetupError);
   });
 });
+
+describe('uninstall and sign-out (epic 6 entry 7)', () => {
+  /** An installed agent that can be uninstalled and signed out, with an API key option. */
+  function removablePort(options: { uninstall?: () => Promise<void>; signOut?: () => Promise<void> } = {}) {
+    const state = { installed: true, signedIn: true };
+    const port: AgentSetupPort = {
+      agentId: 'antigravity',
+      displayName: 'Antigravity',
+      status: async (): Promise<AgentPortStatus> =>
+        state.installed
+          ? state.signedIn
+            ? { agentId: 'antigravity', displayName: 'Antigravity', install: 'installed', version: '1.3.0', auth: 'signed_in', method: 'subscription', canSignOut: true, subscription: 'signed_in' }
+            : { agentId: 'antigravity', displayName: 'Antigravity', install: 'installed', version: '1.3.0', auth: 'needs_sign_in', subscription: 'signed_out' }
+          : { agentId: 'antigravity', displayName: 'Antigravity', install: 'not_installed', version: null, auth: 'needs_sign_in', subscription: 'unknown' },
+      install: async () => {
+        state.installed = true;
+        return { version: '1.3.0' };
+      },
+      signIn: async () => ({ url: null, done: new Promise(() => {}), cancel: async () => {} }),
+      uninstall:
+        options.uninstall ??
+        (async () => {
+          state.installed = false;
+        }),
+      signOut:
+        options.signOut ??
+        (async () => {
+          state.signedIn = false;
+        }),
+      apiKey: { envName: 'GEMINI_API_KEY', check: () => undefined, verify: async () => 'ok' },
+    };
+    return { port, state };
+  }
+
+  it('uninstall appends agent.uninstalled and answers not installed; the picker reads it not installed', async () => {
+    const core = openTestCore();
+    const { port } = removablePort();
+    const setup = createAgentSetup(core.events, [port]);
+    expect(await setup.uninstall('antigravity')).toMatchObject({ install: 'not_installed' });
+    expect(core.events.readAfter(0).map((event) => event.type)).toContain('agent.uninstalled');
+    expect(await setup.readiness('antigravity', 0)).toMatchObject({ blocked: 'agent_not_installed' });
+  });
+
+  it('a port that cannot uninstall now is agent_busy with its plain words; one without uninstall is refused', async () => {
+    const core = openTestCore();
+    const { port } = removablePort({
+      uninstall: async () => {
+        throw new AgentSetupError('Antigravity is still running. Close its chats, then try again.');
+      },
+    });
+    const setup = createAgentSetup(core.events, [port, fakePort().port]);
+    await expect(setup.uninstall('antigravity')).rejects.toMatchObject({ code: 'agent_busy', message: 'Antigravity is still running. Close its chats, then try again.' });
+    expect(core.events.readAfter(0).map((event) => event.type)).not.toContain('agent.uninstalled');
+    await expect(setup.uninstall('claude-code')).rejects.toBeInstanceOf(ValidationError);
+    await expect(setup.signOut('claude-code')).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('sign-out announces needs_sign_in, or the saved key taking over, and the chat then gets the key', async () => {
+    const core = openTestCore();
+    const { port } = removablePort();
+    const stored = new Map<string, string>();
+    const secrets: SecretStorePort = { backend: 'memory', get: async (name) => stored.get(name), set: async (name, value) => void stored.set(name, value), delete: async (name) => void stored.delete(name) };
+    const setup = createAgentSetup(core.events, [port], { secrets });
+    await setup.load();
+    await setup.list();
+    expect(await setup.signOut('antigravity')).toMatchObject({ auth: 'needs_sign_in' });
+    expect(authEvents(core.events.readAfter(0)).at(-1)!.payload).toEqual({ agentId: 'antigravity', state: 'needs_sign_in' });
+    expect(await setup.readiness('antigravity', 0)).toMatchObject({ blocked: 'agent_signed_out' });
+
+    await setup.setApiKey('antigravity', 'AIza-test-key');
+    expect(setup.agentEnv('antigravity')).toEqual({ GEMINI_API_KEY: 'AIza-test-key' });
+  });
+
+  it('a sign-out the agent refuses keeps it signed in', async () => {
+    const core = openTestCore();
+    const { port } = removablePort({
+      signOut: async () => {
+        throw new AgentSetupError("Antigravity couldn't sign out. Try again.");
+      },
+    });
+    const setup = createAgentSetup(core.events, [port]);
+    await expect(setup.signOut('antigravity')).rejects.toMatchObject({ code: 'agent_busy' });
+    expect((await setup.list())[0]).toMatchObject({ auth: 'signed_in', canSignOut: true });
+  });
+
+  it('install waits for an uninstall, and uninstall refuses while installing', async () => {
+    const core = openTestCore();
+    let release!: () => void;
+    const { port } = removablePort();
+    port.install = () => new Promise((resolve) => (release = () => resolve({ version: '1.3.0' })));
+    const setup = createAgentSetup(core.events, [port]);
+    await setup.uninstall('antigravity');
+    expect((await setup.install('antigravity')).started).toBe(true);
+    await expect(setup.uninstall('antigravity')).rejects.toMatchObject({ code: 'agent_busy' });
+    release();
+    await setup.settled();
+  });
+});

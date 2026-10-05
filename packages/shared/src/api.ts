@@ -60,7 +60,11 @@ export const API_ROUTES = {
   folders: `${API_BASE}/folders`,
   /**
    * `GET` → `{ sessions }` (`SessionsResponse`; 2.5): the Chats list.
-   * `POST { kind? }` → 201 `{ session }`: a new chat session in the workspace.
+   * `POST { kind?, agentId? }` → 201 `{ session }`: a new chat session in
+   * the workspace, with the agent picked (epic 6); 400 `agent_unknown` for an
+   * agent this install doesn't have; 409 `agent_not_installed`,
+   * `agent_signed_out` or `project_not_trusted` (6.3) for one that can't
+   * start a chat now, with `details { agentId, action }`.
    */
   workspaceSessions: `${API_BASE}/workspaces/:wsId/sessions`,
   /**
@@ -82,6 +86,20 @@ export const API_ROUTES = {
    */
   sessionCancel: `${API_BASE}/workspaces/:wsId/sessions/:sesId/cancel`,
   /**
+   * `PATCH UpdateQueuedMessageRequest` → 204, `DELETE` → 204 (send now or
+   * wait): edit, move or remove one message waiting to be sent; appends
+   * `session.queue_changed`. 409 `message_not_queued` when it is no longer
+   * waiting, `driver_is_terminal` while the terminal drives.
+   */
+  sessionQueuedMessage: `${API_BASE}/workspaces/:wsId/sessions/:sesId/queue/:messageId`,
+  /**
+   * `POST` → 204 (send now or wait): sends one waiting message right away,
+   * into the running turn when the agent can take it, else by stopping the
+   * current step (`session.turn_interrupted`). 409 `answer_first` while a
+   * permission card waits, `message_not_queued` when it is no longer waiting.
+   */
+  sessionQueuedMessageSendNow: `${API_BASE}/workspaces/:wsId/sessions/:sesId/queue/:messageId/send-now`,
+  /**
    * `POST SetDriverRequest` → `{ session }` (story 3.1, AD-6): hands the
    * session to its agent's own terminal (`terminal`) or back to the chat
    * (`ui`); appends `session.driver_changed`. When the switch can't happen
@@ -101,6 +119,43 @@ export const API_ROUTES = {
    */
   sessionPermissionMode: `${API_BASE}/workspaces/:wsId/sessions/:sesId/permission-mode`,
   /**
+   * `PUT RenameSessionRequest` → `SessionResponse` (backlog story 12): the
+   * user's name for the chat, normalized (control characters removed, white
+   * space collapsed); blank or `null` clears it. A change appends
+   * `session.renamed` (the same name again: 200, nothing appended). A name
+   * over 80 characters: 400 `invalid_request`, nothing appended. Allowed in
+   * any state, whoever drives.
+   */
+  sessionTitle: `${API_BASE}/workspaces/:wsId/sessions/:sesId/title`,
+  /**
+   * `PUT SetSessionModelRequest` → `SessionResponse` (story 11): the chat's
+   * model (`null`: the agent's own choice); a change appends
+   * `session.model_changed` (the same model again: 200, nothing appended)
+   * and applies to the next message. Refused, appending nothing: a model the
+   * chat's agent session (or the agent's last list) doesn't list 409
+   * `model_unavailable`; while the terminal drives 409 `driver_is_terminal`.
+   */
+  sessionModel: `${API_BASE}/workspaces/:wsId/sessions/:sesId/model`,
+  /**
+   * Handoff (user decision 2026-10-04): `GET ?agentId=` →
+   * `HandoffPreviewResponse`, the brief and who receives it, with a preview
+   * token, nothing changed; `POST HandoffRequest` (with that token, for that
+   * exact brief) → 202 `HandoffResponse`: the chat continues with that
+   * agent (`session.agent_changed`) and the message is sent with the brief.
+   * Refused, appending nothing: while the terminal drives 409
+   * `driver_is_terminal`; while the agent works, waits or switches 409
+   * `session_not_idle`; an agent that can't start a chat now 409 with its
+   * code; no matching preview 409 `handoff_not_previewed`; the chat's own
+   * agent, an unknown one, or a brief over its budget 400.
+   */
+  sessionHandoff: `${API_BASE}/workspaces/:wsId/sessions/:sesId/handoff`,
+  /**
+   * `POST HandoffBriefPreviewRequest` → `HandoffPreviewResponse`: the preview
+   * for a brief the user edited, with a preview token for exactly it. Nothing
+   * changes. Refused as the handoff is.
+   */
+  sessionHandoffPreview: `${API_BASE}/workspaces/:wsId/sessions/:sesId/handoff/preview`,
+  /**
    * `POST PermissionDecisionRequest` → 204 (2.6): the user's answer on a
    * permission card. 409 `permission_not_pending` when it is no longer waiting.
    */
@@ -117,11 +172,23 @@ export const API_ROUTES = {
   appShortcut: `${API_BASE}/app-shortcut`,
   /** `DELETE` → 204 (2.4): dismisses the first-run shortcut offer. */
   appShortcutOffer: `${API_BASE}/app-shortcut/offer`,
+  /** `GET` → `ChatAgentsResponse` (epic 6): the agents a chat can be started with, and the default one. */
+  chatAgents: `${API_BASE}/chat-agents`,
+  /**
+   * `PUT SetAgentDefaultModelRequest` → `ChatAgentsResponse` (story 11): the
+   * model new chats with the agent start on, install-wide (`null`: the
+   * agent's own choice); a change appends `settings.agent_default_model_changed`.
+   * 404 `agent_unknown` for an agent this install doesn't have.
+   */
+  chatAgentDefaultModel: `${API_BASE}/chat-agents/:agentId/default-model`,
   /** `GET` → `AgentsResponse` (9.1): every supported agent's install and sign-in state. */
   agents: `${API_BASE}/agents`,
   /**
    * `POST` → 202 `AgentSetupStatus` (9.3): installs the agent, only when the
    * user clicks Install. Progress arrives as `agent.install_*` events.
+   * `DELETE` → 200 `AgentSetupStatus` (epic 6 entry 7): uninstalls an agent
+   * whose status says `canUninstall`; 409 `agent_busy` while it installs or
+   * a file is in use, with plain words. `agent.uninstalled` follows.
    */
   agentInstall: `${API_BASE}/agents/:agentId/install`,
   /**
@@ -137,6 +204,12 @@ export const API_ROUTES = {
    * without one in progress. The code is never logged, evented or stored.
    */
   agentSignInCode: `${API_BASE}/agents/:agentId/sign-in/code`,
+  /**
+   * `POST` → 200 `AgentSetupStatus` (epic 6 entry 7): signs the agent out of
+   * the user's own account, for an agent whose status says `canSignOut`;
+   * `agent.auth_changed` follows. Reads no body.
+   */
+  agentSignOut: `${API_BASE}/agents/:agentId/sign-out`,
   /**
    * `PUT SetApiKeyRequest` → 204, sent `Cache-Control: no-store` (9.2):
    * checks the key with the agent's provider and stores it in the keychain
@@ -176,6 +249,13 @@ export const API_ROUTES = {
    * chat to Ask in the same transaction.
    */
   developerMode: `${API_BASE}/settings/developer-mode`,
+  /**
+   * `GET` → `ChatSettingsResponse`; `PUT SetChatSettingsRequest` →
+   * `ChatSettingsResponse` (send now or wait): the app-wide choice of what a
+   * message sent while the agent works does. A change appends
+   * `settings.while_working_changed`.
+   */
+  chatSettings: `${API_BASE}/settings/chat`,
   /**
    * `GET` → `BmadDetectionResponse` (story 10.2's contract; 10.3 serves it):
    * whether the project's repo already has `_bmad/`, read-only. Not guarded.

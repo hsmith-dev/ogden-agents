@@ -48,8 +48,25 @@ describe('sessionView', () => {
       queued: [],
       notSent: [],
       checkIn: undefined,
+      starting: false,
       lastUserText: undefined,
+      agentId: undefined,
     });
+  });
+
+  it('epic 6 entry 5: shows a slow agent start as starting until it started, anything else happens, or the session stops working', () => {
+    const starting = event('session.agent_starting', { sessionId: 'ses_1' });
+    const begun = [created(), completed('u1', 'user', 'Hi'), stateChanged('working', 'idle'), starting];
+    expect(sessionView(begun, 'ses_1').starting).toBe(true);
+    // A message queued meanwhile leaves it standing.
+    expect(sessionView([...begun, event('session.message_queued', { sessionId: 'ses_1', messageId: 'u2', content: 'more' })], 'ses_1').starting).toBe(true);
+    expect(sessionView([...begun, event('session.agent_started', { sessionId: 'ses_1' })], 'ses_1').starting).toBe(false);
+    // A rename (backlog story 12) is not something the session did.
+    expect(sessionView([...begun, event('session.renamed', { sessionId: 'ses_1', title: 'Mine', autoTitle: 'Hi', cause: 'user' })], 'ses_1').starting).toBe(true);
+    expect(sessionView([...begun, delta('a1', 'Hel')], 'ses_1').starting).toBe(false);
+    expect(sessionView([...begun, stateChanged('error', 'working', "Antigravity couldn't start. Try again.")], 'ses_1').starting).toBe(false);
+    // Another session's start is not this one's.
+    expect(sessionView([created(), stateChanged('working', 'idle'), event('session.agent_starting', { sessionId: 'ses_2' }, 'ses_2')], 'ses_1').starting).toBe(false);
   });
 });
 
@@ -355,5 +372,111 @@ describe('document cards in the transcript (story 4.7)', () => {
 
   it("ignores another session's documents", () => {
     expect(sessionView([created(), event('session.document_written', { path: 'x/a.md', toolCallId: null, next: null }, 'ses_2')], 'ses_1').items).toEqual([]);
+  });
+
+  it('handoff: a divider where the chat continued with another agent, each reply labelled by the agent that wrote it', () => {
+    const begun = event('session.created', { session: { id: 'ses_1', state: 'idle', agentId: 'first-agent' } });
+    const events = [
+      begun,
+      completed('u1', 'user', 'Build it'),
+      completed('a1', 'agent', 'Built half'),
+      stateChanged('error', 'working'),
+      event('session.agent_changed', { sessionId: 'ses_1', agentId: 'second-agent', previous: 'first-agent', brief: 'b', resumes: false }),
+      completed('u2', 'user', 'Please continue'),
+      delta('a2', 'Built the rest'),
+    ];
+    const view = sessionView(events, 'ses_1');
+    expect(view.agentId).toBe('second-agent');
+    expect(view.items.map((item) => item.type)).toEqual(['message', 'message', 'agent_changed', 'message', 'message']);
+    expect(view.items[2]).toMatchObject({ type: 'agent_changed', agentId: 'second-agent', previous: 'first-agent' });
+    expect(view.messages.find((message) => message.messageId === 'a1')?.agentId).toBe('first-agent');
+    expect(view.messages.find((message) => message.messageId === 'a2')?.agentId).toBe('second-agent');
+    expect(view.messages.find((message) => message.messageId === 'u2')?.agentId).toBeUndefined();
+  });
+
+  it('handoff: a chat stored before agents could be chosen labels its earlier replies with the agent that left', () => {
+    const view = sessionView(
+      [created(), completed('a1', 'agent', 'Old reply'), event('session.agent_changed', { sessionId: 'ses_1', agentId: 'second-agent', previous: 'first-agent', brief: '', resumes: false })],
+      'ses_1',
+    );
+    expect(view.messages[0]?.agentId).toBe('first-agent');
+  });
+});
+
+describe('sessionView: send now or wait', () => {
+  const queuedNow = (messageId: string, content: string) => event('session.message_queued', { sessionId: 'ses_1', messageId, content, now: true });
+  const queuedWait = (messageId: string, content: string) => event('session.message_queued', { sessionId: 'ses_1', messageId, content });
+  const begun = () => [created(), completed('u1', 'user', 'first'), stateChanged('working', 'idle')];
+
+  it('puts a message sent right away ahead of the waiting ones, after the others sent right away', () => {
+    const view = sessionView([...begun(), queuedWait('w1', 'later'), queuedNow('n1', 'urgent'), queuedNow('n2', 'also urgent')], 'ses_1');
+    expect(view.queued.map((message) => [message.messageId, message.now === true])).toEqual([
+      ['n1', true],
+      ['n2', true],
+      ['w1', false],
+    ]);
+  });
+
+  it('replaces what waits with each queue_changed: edited text, new order, removed ones gone (not "Not sent")', () => {
+    const view = sessionView(
+      [
+        ...begun(),
+        queuedWait('w1', 'a'),
+        queuedWait('w2', 'b'),
+        queuedWait('w3', 'c'),
+        event('session.queue_changed', { sessionId: 'ses_1', cause: 'removed', queue: [{ messageId: 'w3', content: 'c' }, { messageId: 'w1', content: 'a, edited', now: true }] }),
+        stateChanged('idle', 'working'),
+      ],
+      'ses_1',
+    );
+    expect(view.queued).toEqual([]);
+    expect(view.notSent.map((message) => [message.messageId, message.text])).toEqual([
+      ['w3', 'c'],
+      ['w1', 'a, edited'],
+    ]);
+    expect(view.notSent.every((message) => message.now === undefined)).toBe(true);
+  });
+
+  it('shows a message taken into the running turn where it went, marked, and the stop note where the step was stopped', () => {
+    const view = sessionView(
+      [
+        ...begun(),
+        delta('a1', 'Working'),
+        queuedNow('n1', 'urgent'),
+        completed('a1', 'agent', 'Working'),
+        event('session.message_completed', { messageId: 'n1', role: 'user', content: 'urgent', delivery: 'injected' }),
+        queuedNow('n2', 'stop and do this'),
+        event('session.turn_interrupted', { sessionId: 'ses_1', messageId: 'n2' }),
+      ],
+      'ses_1',
+    );
+    expect(view.items.map((item) => (item.type === 'message' ? item.message.messageId : item.type))).toEqual(['u1', 'a1', 'n1', 'interrupted']);
+    expect(view.messages.find((message) => message.messageId === 'n1')).toMatchObject({ delivery: 'injected' });
+    expect(view.messages.find((message) => message.messageId === 'n1')?.status).toBeUndefined();
+    expect(view.queued.map((message) => message.messageId)).toEqual(['n2']);
+  });
+
+  it('shows a message first marked "Not sent" as sent when the agent had taken it (a Stop during a send now)', () => {
+    const view = sessionView([...begun(), queuedNow('n1', 'urgent'), stateChanged('idle', 'working'), event('session.message_completed', { messageId: 'n1', role: 'user', content: 'urgent', delivery: 'injected' })], 'ses_1');
+    expect(view.notSent).toEqual([]);
+    expect(view.messages.filter((message) => message.messageId === 'n1')).toHaveLength(1);
+    expect(view.messages.find((message) => message.messageId === 'n1')).toMatchObject({ delivery: 'injected' });
+  });
+
+  it('says on the stop note when a request raised while the step was stopping was cancelled, and only then', () => {
+    const requested = event('permission.requested', {
+      sessionId: 'ses_1',
+      requestId: 'req_1',
+      toolCall: { toolCallId: 't1', title: 'Run npm test', kind: 'execute' },
+      alwaysAllowScope: null,
+      cautionLevel: 'ask_every_time',
+    });
+    const cancelled = event('permission.resolved', { sessionId: 'ses_1', requestId: 'req_1', decision: 'deny', by: 'cancelled' });
+    const interrupted = event('session.turn_interrupted', { sessionId: 'ses_1', messageId: 'n1' });
+    const note = (events: CoreEvent[]) => sessionView(events, 'ses_1').items.find((item) => item.type === 'interrupted');
+    expect(note([...begun(), queuedNow('n1', 'urgent'), interrupted, requested, cancelled])).toMatchObject({ cancelledRequest: true });
+    // A request cancelled after the message went belongs to a later turn.
+    const later = [...begun(), queuedNow('n1', 'urgent'), interrupted, completed('n1', 'user', 'urgent'), requested, cancelled];
+    expect(note(later)?.type === 'interrupted' && note(later)?.cancelledRequest).toBeFalsy();
   });
 });

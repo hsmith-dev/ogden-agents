@@ -6,13 +6,14 @@
  * Each change appends `settings.developer_mode_changed` (install-level), which
  * every tab follows.
  */
-import { SETTINGS_STREAM, type Session } from '@ogden-agents/shared';
+import { DEFAULT_WHILE_WORKING, SETTINGS_STREAM, WhileWorking as WhileWorkingSchema, type Session, type WhileWorking } from '@ogden-agents/shared';
 import { eq } from 'drizzle-orm';
 import type { Database } from './db/database.js';
-import { installSettings } from './db/schema.js';
+import { chatSettings, installSettings } from './db/schema.js';
 import type { Entities } from './entities.js';
 import { ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
+import { dropSkipAllDefaults } from './workspace-settings.js';
 
 /** The single settings row. */
 const ROW_ID = 1;
@@ -26,6 +27,8 @@ export interface DeveloperModeChange {
   changed: boolean;
   /** The chats moved from Skip all to Ask by turning it off, as they are now. */
   dropped: Session[];
+  /** How many projects' Skip all defaults went back to Ask by turning it off (default permission mode). */
+  defaultsDropped: number;
 }
 
 export interface InstallSettings {
@@ -38,11 +41,20 @@ export interface InstallSettings {
    * when it changed. Turning it off, in the same transaction, hands every
    * Skip-all chat the terminal drives back to the chat (`session.driver_changed`,
    * cause `developer_mode_off`) and then moves every Skip-all chat to Ask
-   * (`session.permission_mode_changed`, cause `developer_mode_off`). Telling
+   * (`session.permission_mode_changed`, cause `developer_mode_off`), after
+   * setting every project's Skip all default back to Ask with a notice
+   * (`workspace.settings_changed`, cause `developer_mode_off`). Telling
    * their agents, and stopping their terminals, is the chat's (it follows
    * those events). `ValidationError` for a value that is not a boolean.
    */
   setDeveloperMode(on: boolean): DeveloperModeChange;
+  /** What a message sent while the agent works does, app-wide (send now or wait; `wait` until the user changes it). */
+  whileWorking(): WhileWorking;
+  /**
+   * Sets it, appending `settings.while_working_changed` when it changed.
+   * `ValidationError` for anything but `wait` or `now`.
+   */
+  setWhileWorking(value: WhileWorking): { whileWorking: WhileWorking; changed: boolean };
 }
 
 export interface InstallSettingsOptions {
@@ -55,8 +67,28 @@ export function createInstallSettings({ db, events, entities }: InstallSettingsO
   const { orm } = db;
   const read = (): boolean => orm.select({ developerMode: installSettings.developerMode }).from(installSettings).where(eq(installSettings.id, ROW_ID)).get()?.developerMode === true;
 
+  const readWhileWorking = (): WhileWorking => {
+    const parsed = WhileWorkingSchema.safeParse(orm.select({ whileWorking: chatSettings.whileWorking }).from(chatSettings).where(eq(chatSettings.id, ROW_ID)).get()?.whileWorking);
+    return parsed.success ? parsed.data : DEFAULT_WHILE_WORKING;
+  };
+
   return {
     developerMode: read,
+
+    whileWorking: readWhileWorking,
+
+    setWhileWorking(value) {
+      const parsed = WhileWorkingSchema.safeParse(value);
+      if (!parsed.success) throw new ValidationError('Choose Wait until it finishes or Send right away.', [{ path: ['whileWorking'], message: 'unknown choice' }]);
+      const whileWorking = parsed.data;
+      return events.transaction(() => {
+        const previous = readWhileWorking();
+        if (previous === whileWorking) return { whileWorking, changed: false };
+        orm.insert(chatSettings).values({ id: ROW_ID, whileWorking }).onConflictDoUpdate({ target: chatSettings.id, set: { whileWorking } }).run();
+        events.append({ type: 'settings.while_working_changed', workspaceId: null, streamId: SETTINGS_STREAM, payload: { whileWorking, previous } });
+        return { whileWorking, changed: true };
+      });
+    },
 
     developerModeEverSet: () => orm.select({ id: installSettings.id }).from(installSettings).where(eq(installSettings.id, ROW_ID)).get() !== undefined,
 
@@ -67,17 +99,19 @@ export function createInstallSettings({ db, events, entities }: InstallSettingsO
         if (previous === on) {
           // Still recorded as set, so an old browser never carries its "on" over a choice made here.
           orm.insert(installSettings).values({ id: ROW_ID, developerMode: on }).onConflictDoNothing().run();
-          return { developerMode: on, changed: false, dropped: [] };
+          return { developerMode: on, changed: false, dropped: [], defaultsDropped: 0 };
         }
         orm.insert(installSettings).values({ id: ROW_ID, developerMode: on }).onConflictDoUpdate({ target: installSettings.id, set: { developerMode: on } }).run();
         events.append({ type: 'settings.developer_mode_changed', workspaceId: null, streamId: SETTINGS_STREAM, payload: { developerMode: on, previous } });
-        if (on) return { developerMode: on, changed: true, dropped: [] };
+        if (on) return { developerMode: on, changed: true, dropped: [], defaultsDropped: 0 };
+        // Projects whose new chats start in Skip all start them in Ask again, each with a notice (default permission mode).
+        const defaultsDropped = dropSkipAllDefaults(orm, events);
         const dropped = entities.listSessionsInPermissionMode('skip_all').map((session) => {
           // Back to the chat first, so the chat moves to Ask with no terminal skipping checks for it.
           if (session.driver === 'terminal') entities.setSessionDriver(session.id, 'ui', 'developer_mode_off');
           return entities.setSessionPermissionMode(session.id, 'ask', 'developer_mode_off', DEVELOPER_MODE_OFF_REASON);
         });
-        return { developerMode: on, changed: true, dropped };
+        return { developerMode: on, changed: true, dropped, defaultsDropped };
       });
     },
   };

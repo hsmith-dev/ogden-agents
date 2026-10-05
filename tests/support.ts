@@ -5,7 +5,7 @@
  * the launcher handshake, and connecting and quitting the way the page does.
  * Routes come from the shared `API_ROUTES`.
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -76,10 +76,18 @@ export const FAKE_AGENT = join(ROOT, 'tests', 'fixtures', 'fake-acp-agent.mjs');
  * `extra` names a catalog, so turning Planning or Board on never runs uv or
  * reaches the network.
  */
-export async function startServer(dataDir: string, port = 0, { firstRun = false, ...extra }: StartOptions & { firstRun?: boolean } = {}): Promise<RunningServer> {
+export async function startServer(
+  dataDir: string,
+  port = 0,
+  { firstRun = false, extraAgentEnv, ...extra }: StartOptions & { firstRun?: boolean } = {},
+): Promise<RunningServer> {
   const { start, createLogger, createMemorySecretStore } = await serverModule();
   const bmadCatalog = extra.bmadCatalog ?? (await stubSetupCatalog(extra.bmadSource === undefined ? {} : { source: extra.bmadSource }));
   if (!firstRun) writeFileSync(join(dataDir, 'onboarding.json'), `${JSON.stringify({ welcomeCompleted: true })}\n`, { mode: 0o600 });
+  // Claude Code (the fake) is signed in unless the test says otherwise (6.3: a signed-out agent refuses a new chat);
+  // a first run (the Welcome tests) starts signed out, as a fresh install does.
+  const loginState = join(dataDir, 'test-login-state.json');
+  if (!firstRun) writeFileSync(loginState, `${JSON.stringify({ loggedIn: true })}\n`);
   return start({
     port,
     open: false,
@@ -89,6 +97,9 @@ export async function startServer(dataDir: string, port = 0, { firstRun = false,
     claudeAdapterPath: FAKE_AGENT,
     secrets: createMemorySecretStore(),
     verifyApiKey: async () => 'ok',
+    // Antigravity only where a test wires it (`fakeAntigravity`, epic 6 entry 5): the other tests see the agents they name.
+    antigravity: false,
+    extraAgentEnv: { FAKE_LOGIN_STATE: loginState, ...extraAgentEnv },
     ...extra,
     bmadCatalog,
     launch: true,
@@ -151,6 +162,99 @@ export async function stubSetupCatalog({
       return status(true);
     },
   };
+}
+
+/** How a test registers an agent (`StartOptions.extraAgents`, 6.3). */
+type AgentWiringOf = NonNullable<NonNullable<StartOptions>['extraAgents']>[number];
+
+/** The second agent's id and product name (epic 6): the fake ACP agent registered again, for tests only. */
+export const SECOND_AGENT = { agentId: 'fake-agent', displayName: 'Fake Agent' } as const;
+
+/**
+ * The fake ACP agent as a second agent (epic 6, `extraAgents`): its own id and
+ * name, Ask and Skip all only (as Antigravity will declare), no terminal, and
+ * `FAKE_ACP_AGENT_NAME` set so its `whoami` reply says which agent answered.
+ */
+export async function fakeSecondAgent(
+  options: { setup?: AgentWiringOf['setup']; needsProjectTrust?: boolean; agentId?: string; displayName?: string } = {},
+): Promise<AgentWiringOf> {
+  const { createClaudeCodeAgent } = await serverModule();
+  const base = createClaudeCodeAgent({ adapterPath: FAKE_AGENT, claudeExecutable: null });
+  const agentId = options.agentId ?? SECOND_AGENT.agentId;
+  const displayName = options.displayName ?? SECOND_AGENT.displayName;
+  const named = <T extends { env: Readonly<Record<string, string>> }>(input: T): T => ({ ...input, env: { ...input.env, FAKE_ACP_AGENT_NAME: agentId } });
+  return {
+    // What the fake agent is (6.3): agent-neutral data, as a later agent's adapter exports it.
+    descriptor: {
+      agentId,
+      displayName,
+      provider: 'Fake Provider',
+      install: { kind: 'npm', package: '@fake/agent', version: '1.0.0' },
+      signInMethods: [{ id: 'fake-login', kind: 'subscription', label: 'Sign in with your account' }],
+      permissionModes: { ask: 'default', skip_all: 'bypassPermissions' },
+      needsProjectTrust: options.needsProjectTrust ?? false,
+      skillsFolder: '.fake/skills',
+    },
+    // Its setup port (6.3), when a test gives one: then a new chat with it is refused while it isn't installed or signed in.
+    ...(options.setup === undefined ? {} : { setup: options.setup }),
+    agent: {
+      displayName,
+      permissionModes: ['ask', 'skip_all'],
+      skillInvocation: (skill, idea) => base.skillInvocation(skill, idea),
+      startSession: (input) => base.startSession(named(input)),
+      reopenSession: (input) => base.reopenSession(named(input)),
+      listAuthMethods: (input) => base.listAuthMethods(input),
+    },
+  };
+}
+
+/** The fake ACP agent as Antigravity's server (`fake-antigravity.mjs`, epic 6 entry 5). */
+export const FAKE_ANTIGRAVITY = join(ROOT, 'tests', 'fixtures', 'fake-antigravity.mjs');
+
+/** A Gemini API key's shape (`AIza` and 35 more), for tests; never a real key. */
+export const FAKE_GEMINI_KEY = `AIza${'F'.repeat(31)}fake`;
+
+/**
+ * Antigravity's own adapters (`StartOptions.antigravity`, epic 6 entry 5)
+ * on a folder of their own (`dataDir`, which the caller removes), with the
+ * fake agent's Antigravity personality in place of its server. Its setup
+ * port is the real one, reading a pinned server planted for this platform
+ * (unless `installed: false`), so a chat needs a Gemini API key, as an
+ * install without Google sign-in does; or `setup` given in its place.
+ */
+export async function fakeAntigravity(options: { installed?: boolean; setup?: Awaited<ReturnType<typeof fakeAgentSetup>> } = {}) {
+  const { createAntigravityAgent, createAntigravitySetup } = await serverModule();
+  const dataDir = makeDataDir('ogden-agents-agy-');
+  if (options.installed !== false) plantPinnedAntigravity(dataDir);
+  const agent = createAntigravityAgent({ dataDir, server: () => ({ command: process.execPath, args: [FAKE_ANTIGRAVITY, '--uid='] }) });
+  // The key check never reaches Google in a test.
+  return { dataDir, agent, setup: options.setup ?? createAntigravitySetup({ dataDir, apiKey: { verify: async () => 'ok' } }) };
+}
+
+/**
+ * Empty files where Antigravity's pinned files for this platform are looked
+ * for, and the install record Install writes once it checked them (epic 6
+ * entry 7), so it reads as installed (the files are never run: the fake is).
+ */
+export function plantPinnedAntigravity(dataDir: string): void {
+  const pins = JSON.parse(readFileSync(join(ROOT, 'packages', 'adapters', 'src', 'setup-antigravity', 'pins', 'antigravity-acp.json'), 'utf8')) as {
+    version: string;
+    archives: Record<string, { binary: string; files: Record<string, unknown> } | undefined>;
+  };
+  const platform = `${process.platform}-${process.arch}`;
+  const pin = pins.archives[platform];
+  if (pin === undefined) return;
+  const folder = join(dataDir, 'agents', 'antigravity', pins.version);
+  mkdirSync(folder, { recursive: true });
+  for (const name of Object.keys(pin.files)) writeFileSync(join(folder, name), '');
+  const files = Object.fromEntries(Object.keys(pin.files).map((name) => [name, 0]));
+  writeFileSync(join(folder, '.ogden-install.json'), JSON.stringify({ version: pins.version, platform, reportedVersion: pins.version, files }));
+}
+
+/** An in-memory setup port for a fake agent (entry 6: readiness in the picker, Welcome's choice); it installs and signs into nothing. */
+export async function fakeAgentSetup(options: { agentId: string; displayName: string; installed?: boolean; auth?: 'signed_in' | 'needs_sign_in'; userCode?: string }) {
+  const { createMemoryAgentSetup } = await serverModule();
+  return createMemoryAgentSetup(options);
 }
 
 // Shared with the plain-Node install scripts: whether a process with a pid

@@ -1,14 +1,13 @@
 import type { SessionDriver } from '@ogden-agents/shared';
 import { ChatCircle, TerminalWindow } from '@phosphor-icons/react';
 import { useId, type ReactNode } from 'react';
-import { AGENT_NAME } from '@/chat/chat-api';
 import { ToggleGroup, ToggleGroupItem } from '@/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { Text } from '@/ui/typography';
 import { cn } from '@/ui/utils';
 
 /** Why the Terminal segment is disabled while the session is not idle (E3-R5; EXPERIENCE.md). */
-export const NOT_IDLE_REASON = `${AGENT_NAME} is busy. Switch when it is idle.`;
+export const notIdleReason = (agentName: string) => `${agentName} is busy. Switch when it is idle.`;
 
 /** What the header says between the switch request and `session.driver_changed`. */
 export const SWITCHING_WORDS = 'Switching...';
@@ -21,6 +20,8 @@ export const driverShortcutLabel = (platform: string = typeof navigator === 'und
 const ARIA_SHORTCUTS = 'Meta+. Control+.';
 
 export interface DriverToggleProps {
+  /** The chat's agent by its product name (epic 6), whose own terminal the toggle opens. */
+  agentName: string;
   /** Who drives the chat now (from `session.driver_changed`, never from the request). */
   driver: SessionDriver;
   /** The driver a switch was asked for, until `session.driver_changed` arrives. */
@@ -52,7 +53,7 @@ interface SegmentHelp {
  * tooltip opens). Choosing a segment only asks: the toggle shows
  * "Switching..." and the view flips when `session.driver_changed` arrives.
  */
-export function DriverToggle({ driver, switching, terminalBlockedReason, onSwitch, className }: DriverToggleProps) {
+export function DriverToggle({ agentName, driver, switching, terminalBlockedReason, onSwitch, className }: DriverToggleProps) {
   const shortcut = driverShortcutLabel();
   const terminalBlocked = driver === 'ui' && terminalBlockedReason !== undefined;
   const busy = switching !== undefined;
@@ -69,7 +70,7 @@ export function DriverToggle({ driver, switching, terminalBlockedReason, onSwitc
         ? terminalBlockedReason === null
           ? undefined
           : { text: terminalBlockedReason ?? '', shortcut: false }
-        : { text: `Open this chat in ${AGENT_NAME}'s own terminal`, shortcut: true };
+        : { text: `Open this chat in ${agentName}'s own terminal`, shortcut: true };
   return (
     <div className={cn('flex items-center gap-2', className)} data-testid="driver-toggle" data-driver={driver}>
       {busy ? (

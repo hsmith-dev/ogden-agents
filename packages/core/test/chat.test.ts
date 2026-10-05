@@ -52,7 +52,7 @@ import {
   type TerminalPort,
   type TerminalProcess,
 } from '../src/index.js';
-import { openTestCore, tempDir } from './helpers.js';
+import { openTestCore, soleAgent, tempDir, TEST_AGENT_ID } from './helpers.js';
 
 /**
  * An agent whose every prompt runs `script`, which reports through `emit`.
@@ -130,14 +130,14 @@ function setUp(core: Core, port: AgentPort, env: Record<string, string> = {}, da
     dataDir,
     entities: core.entities,
     sessionEvents: core.sessionEvents,
-    agent: port,
+    agents: soleAgent(port),
     ...(permissions === undefined ? {} : { permissions }),
     agentEnv: () => env,
     onAgentError: (sessionId, error) => errors.push([sessionId, error]),
   });
   const repo = tempDir('ogden-agents-repo-');
   const workspace = chat.openWorkspace(repo);
-  const session = chat.createChatSession(workspace.id);
+  const session = core.entities.createSession({ workspaceId: workspace.id, kind: 'chat', agentId: TEST_AGENT_ID });
   return { chat, workspace, session, errors, repo };
 }
 
@@ -164,6 +164,7 @@ describe('chat', () => {
     expect(mine.map((event) => event.type)).toEqual([
       'session.created',
       'session.message_completed', // the user's message
+      'session.renamed', // which names the chat (backlog story 12)
       'session.state_changed', // working
       'session.message_delta',
       'session.message_delta',
@@ -339,12 +340,12 @@ describe('chat', () => {
     expect(core.entities.getSession(session.id)!.state).toBe('idle');
   });
 
-  it('settles sessions a stopped server left working or waiting: idle, resumable (AD-3)', () => {
+  it('settles sessions a stopped server left working or waiting: idle, resumable (AD-3)', async () => {
     const core = openTestCore();
     const { chat, workspace } = setUp(core, hello.port);
-    const working = chat.createChatSession(workspace.id);
-    const waiting = chat.createChatSession(workspace.id);
-    const idle = chat.createChatSession(workspace.id);
+    const working = await chat.createChatSession(workspace.id);
+    const waiting = await chat.createChatSession(workspace.id);
+    const idle = await chat.createChatSession(workspace.id);
     core.entities.setSessionState(working.id, 'working');
     core.entities.setSessionState(waiting.id, 'waiting');
     const settled = core.entities.settleInterruptedSessions(RESTARTED_REASON);
@@ -542,7 +543,7 @@ describe('workspaces and history (story 2.5)', () => {
     chat.sendMessage(workspace.id, session.id, 'hi');
     await chat.settled();
     const other = chat.openWorkspace(tempDir('ogden-agents-repo-'));
-    const kept = chat.createChatSession(other.id);
+    const kept = await chat.createChatSession(other.id);
 
     const deleted = chat.deleteHistory(workspace.id);
     expect(deleted.deletedSessions).toBe(1);
@@ -592,7 +593,7 @@ describe('resuming a chat (story 2.7)', () => {
     first.chat.sendMessage(first.workspace.id, first.session.id, 'first question');
     await first.chat.settled();
     await first.chat.close();
-    const chat = createChat({ dataDir: tempDir('ogden-agents-data-'), entities: core.entities, sessionEvents: core.sessionEvents, agent: agent.port });
+    const chat = createChat({ dataDir: tempDir('ogden-agents-data-'), entities: core.entities, sessionEvents: core.sessionEvents, agents: soleAgent(agent.port)});
     return { core, agent, chat, workspace: first.workspace, session: first.session };
   };
 
@@ -1054,14 +1055,14 @@ function setUpHand(core: Core, agent: ReturnType<typeof handAgent>, permissions?
     dataDir: tempDir('ogden-agents-data-'),
     entities: core.entities,
     sessionEvents: core.sessionEvents,
-    agent: agent.port,
+    agents: soleAgent(agent.port),
     ...(permissions === undefined ? {} : { permissions }),
     checkInDelayMs: CHECK_IN_MS,
     onAgentError: (_sessionId, error) => errors.push(error),
     onInternalError: (_sessionId, error) => internal.push(error),
   });
   const workspace = chat.openWorkspace(tempDir('ogden-agents-repo-'));
-  const session = chat.createChatSession(workspace.id);
+  const session = core.entities.createSession({ workspaceId: workspace.id, kind: 'chat', agentId: TEST_AGENT_ID });
   return { chat, workspace, session, errors, internal };
 }
 
@@ -1562,13 +1563,13 @@ describe('the terminal (story 3.1)', () => {
       dataDir: tempDir('ogden-agents-data-'),
       entities: core.entities,
       sessionEvents: core.sessionEvents,
-      agent: port,
+      agents: soleAgent(port),
       agentEnv: () => ({ PATH: '/bin', CHAT_ONLY: 'yes' }),
       terminal: terminal.port,
       onInternalError: (_sessionId, error) => internal.push(error),
     });
     const workspace = chat.openWorkspace(repo);
-    const session = chat.createChatSession(workspace.id);
+    const session = await chat.createChatSession(workspace.id);
     chat.sendMessage(workspace.id, session.id, 'first question');
     await chat.settled();
     return { core, agent, chat, workspace, session, terminal, repo, internal };
@@ -1662,7 +1663,7 @@ describe('the terminal (story 3.1)', () => {
 
     // Never reached its agent: there is no session to resume.
     const fresh = await answeredOnce();
-    const other = fresh.chat.createChatSession(fresh.workspace.id);
+    const other = await fresh.chat.createChatSession(fresh.workspace.id);
     await refusedWith(fresh.chat.switchDriver(fresh.workspace.id, other.id, 'terminal'), unavailable('no_agent_session'), /Send Test Agent a message first/);
     await fresh.chat.close();
 
@@ -1736,11 +1737,11 @@ describe('the terminal (story 3.1)', () => {
       dataDir: tempDir('ogden-agents-data-'),
       entities: core.entities,
       sessionEvents: core.sessionEvents,
-      agent: { ...agent.port, terminalResume: cliResume() },
+      agents: soleAgent({ ...agent.port, terminalResume: cliResume() }),
       terminal: terminal.port,
     });
     const workspace = chat.openWorkspace(tempDir('ogden-agents-repo-'));
-    const session = chat.createChatSession(workspace.id);
+    const session = await chat.createChatSession(workspace.id);
     chat.sendMessage(workspace.id, session.id, 'one');
     await settle();
     agent.end();

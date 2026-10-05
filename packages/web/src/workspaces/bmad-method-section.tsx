@@ -30,6 +30,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouterState } from '@tanstack/react-router';
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { keepSaved } from '@/api/keep-saved';
 import { useBmadSetupStatus } from '@/planning/bmad-setup-api';
 import { BmadSetupView, useBmadSetup, type BmadSetupMode, type BmadSetupPhase } from '@/planning/bmad-setup-panel';
 import { ReducedModeNoticeView, UpgradeButton, UpgradeConfirmDialog } from '@/planning/reduced-mode-notice';
@@ -407,12 +408,13 @@ export function BmadMethodSection({ wsId, offerSlot, defaultSlot }: { wsId: stri
     setStatus(undefined);
     setError(undefined);
     updateBmadPieces(wsId, choice.pieces).then(
-      (saved) => {
+      async (saved) => {
+        if (!latest.isLatest(ticket)) return;
+        await keepSaved(queryClient, ['workspace-settings', wsId], saved);
         if (!latest.isLatest(ticket)) return;
         setSaving(false);
         setChosen(undefined);
         lastSaved.current = sameKey(saved.bmadPieces);
-        queryClient.setQueryData(['workspace-settings', wsId], saved);
         setStatus(choice.status === undefined ? undefined : { text: choice.status, key: sameKey(saved.bmadPieces) });
         // The first of Planning and Board turned on, in a project without `_bmad/`: set BMad Method up (story 4.3).
         if (!servesSetup(before) && servesSetup(saved.bmadPieces)) {
@@ -461,10 +463,10 @@ export function BmadMethodSection({ wsId, offerSlot, defaultSlot }: { wsId: stri
     setTrusting(true);
     setTrustError(undefined);
     trustProjectScripts(wsId).then(
-      (trusted) => {
+      async (trusted) => {
+        await keepSaved(queryClient, ['workspace-settings', wsId], trusted);
         setTrusting(false);
         setAwaitingTrust(undefined);
-        queryClient.setQueryData(['workspace-settings', wsId], trusted);
         save(choice);
       },
       (failure: unknown) => {

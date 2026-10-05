@@ -2,7 +2,7 @@ import { Check, ClockCounterClockwise, Prohibit, ShieldCheck } from '@phosphor-i
 import type { CautionLevel, PermissionDecision, ToolKind } from '@ogden-agents/shared';
 import { alwaysAllowRefusal, MAX_DENY_REASON_LENGTH, PERMISSION_MODE_LABELS, SKIP_ALL_REFUSAL } from '@ogden-agents/shared';
 import { useId, useState, type KeyboardEvent } from 'react';
-import { AGENT_NAME, ChatApiError, decidePermission, removePermissionRule } from '@/chat/chat-api';
+import { ChatApiError, decidePermission, removePermissionRule, UNKNOWN_AGENT_NAME } from '@/chat/chat-api';
 import { useReadOnlyConversation } from '@/chat/read-only';
 import type { TranscriptPermission } from '@/chat/transcript';
 import { Button } from '@/ui/button';
@@ -44,6 +44,8 @@ export interface PermissionCardProps {
   sesId: string;
   /** The project's name, for the caption and the Always allow scope. */
   projectName: string;
+  /** The chat's agent by its product name (epic 6); "The agent" when it isn't known. */
+  agentName?: string | undefined;
   /** Called once a decision was accepted, so focus can return to the composer. */
   onDecided?: () => void;
 }
@@ -58,7 +60,7 @@ export interface PermissionCardProps {
  * waited for) it is its one-line record, which opens a popover to undo an
  * Always allow.
  */
-export function PermissionCard({ permission, wsId, sesId, projectName, onDecided }: PermissionCardProps) {
+export function PermissionCard({ permission, wsId, sesId, projectName, agentName = UNKNOWN_AGENT_NAME, onDecided }: PermissionCardProps) {
   const id = useId();
   const [reason, setReason] = useState('');
   const [sending, setSending] = useState(false);
@@ -66,7 +68,7 @@ export function PermissionCard({ permission, wsId, sesId, projectName, onDecided
   // While the terminal drives, the card can be read but not answered (story 3.6 review F2).
   const readOnly = useReadOnlyConversation();
 
-  if (permission.status !== 'pending') return <PermissionRecordLine permission={permission} wsId={wsId} projectName={projectName} />;
+  if (permission.status !== 'pending') return <PermissionRecordLine permission={permission} wsId={wsId} projectName={projectName} agentName={agentName} />;
 
   const { scope } = permission;
   const target = permissionTarget(permission);
@@ -111,7 +113,7 @@ export function PermissionCard({ permission, wsId, sesId, projectName, onDecided
       className="flex flex-col gap-3 rounded-lg border border-border border-l-(length:--rail-signal) border-l-signal bg-card p-(--panel-padding) animate-in fade-in-0 slide-in-from-bottom-1 duration-(--motion-base) ease-standard"
     >
       <h2 id={`${id}-headline`} className="m-0 text-heading text-foreground">
-        {AGENT_NAME} {WANTS[permission.toolCall.kind]}
+        {agentName} {WANTS[permission.toolCall.kind]}
       </h2>
       {permission.toolCall.command !== undefined && permission.toolCall.title.trim() !== '' && permission.toolCall.title !== `Run ${permission.toolCall.command}` ? (
         <Text>{permission.toolCall.title}</Text>
@@ -120,11 +122,11 @@ export function PermissionCard({ permission, wsId, sesId, projectName, onDecided
         {target}
       </pre>
       <Text variant="caption" data-testid="permission-caption">
-        {projectName} · {skipAll ? `${PERMISSION_MODE_LABELS.skip_all}: one of ${AGENT_NAME}'s own safety checks` : CAUTION_WORDS[permission.cautionLevel]}
+        {projectName} · {skipAll ? `${PERMISSION_MODE_LABELS.skip_all}: one of ${agentName}'s own safety checks` : CAUTION_WORDS[permission.cautionLevel]}
       </Text>
       {permission.toolCall.protectedPath === true ? (
         <Text variant="caption" data-testid="permission-protected">
-          It touches a file that controls how {AGENT_NAME} or git runs, so Ogden Agents always asks.
+          It touches a file that controls how {agentName} or git runs, so Ogden Agents always asks.
         </Text>
       ) : null}
       <div className="flex flex-wrap items-start gap-2">
@@ -192,7 +194,7 @@ export function undoFailure(failure: unknown): { undone: true } | { error: strin
 }
 
 /** The card after its answer: one caption line with a glyph and the time. */
-function PermissionRecordLine({ permission, wsId, projectName }: { permission: TranscriptPermission; wsId: string; projectName: string }) {
+function PermissionRecordLine({ permission, wsId, projectName, agentName }: { permission: TranscriptPermission; wsId: string; projectName: string; agentName: string }) {
   const [error, setError] = useState<string | undefined>(undefined);
   const [open, setOpen] = useState(false);
   /** The rule was found already gone when this record tried to undo it. */
@@ -254,7 +256,7 @@ function PermissionRecordLine({ permission, wsId, projectName }: { permission: T
             <Text variant="label">
               {resolution?.by === 'rule'
                 ? `This ran without asking because of an Always allow rule in ${projectName}.`
-                : `${AGENT_NAME} can do this in ${projectName} without asking: ${permission.scope?.label ?? target}.`}
+                : `${agentName} can do this in ${projectName} without asking: ${permission.scope?.label ?? target}.`}
             </Text>
             <Button variant="outline" onClick={undo}>
               Undo Always allow

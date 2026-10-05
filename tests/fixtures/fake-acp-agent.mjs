@@ -15,6 +15,8 @@
 //   "permission"   an `execute` tool call (`npm test`), then asks permission
 //                  to run it; replies "Ran npm test." if allowed, else
 //                  "Denied npm test."
+//   "permission-hold"  as "permission", but once allowed the tool call stays
+//                  `in_progress` until the turn is cancelled (a long command)
 //   "permission <command>"  the same for <command> ("Ran <command>." or
 //                  "Denied <command>.")
 //   "permission-edit <path>[|<path>…]"  an `edit` tool call naming those
@@ -35,15 +37,30 @@
 //                  long as a test needs, then ends on its own
 //   "hold"         one chunk, then waits until cancelled (`cancelled`), with no
 //                  timer: the session stays `working` for as long as a test needs
+//   While any prompt runs, `_session/steering` (advertised as
+//                  `_meta.steering.supported` at `initialize`, not in the
+//                  Antigravity or generic personalities) injects a message:
+//                  a turn waiting ("hold", "wait", "slow", "quiet") goes on
+//                  at once, and the turn ends with "Steered: <text>." and
+//                  `end_turn`; with no turn running it answers
+//                  `promptRequired` (send now or wait)
 //   "tools"        reads three files (src/a.ts, src/b.ts, src/c.ts), then edits
 //                  src/a.ts with a diff; replies "Changed src/a.ts."
 //   "quiet-tool"   one chunk and an `execute` tool call left in progress
 //                  ("Run npm run build"), then silence until cancelled
 //   "quiet"        one chunk, then silence until cancelled (no tool call)
 //   "fail"         the prompt fails with a JSON-RPC internal error
+//   "usage-limit"  the prompt fails with a JSON-RPC internal error whose
+//                  message is a plan's usage-limit notice (handoff: the
+//                  agent ran out of usage)
+//   "whoami"       replies `agent=<FAKE_ACP_AGENT_NAME, or default>`: which
+//                  registered agent a chat reached (epic 6, two agents at once),
+//                  then ` home=<value>` when FAKE_ACP_HOME_ENV names the
+//                  variable its home folder is in (6.3)
 //   "env"          replies with the CLAUDE_CODE_EXECUTABLE it was given
 //   "echo-env"     replies with its whole environment, `NAME=value` per line,
 //                  each value split across two chunks, and writes it to stderr
+//   "cancels"      replies `cancels=<session/cancel notifications this session got>`
 //   "pids"         replies `pid=<its pid> grandchild=<pid or none>`
 //   "session-start"  replies one JSON line `{ via, cwd, mcpServers, meta,
 //                  prompt, env }`: how the session was opened (`new`,
@@ -75,6 +92,31 @@
 //   "plan-exit"    asks permission to leave plan mode with the real adapter's
 //                  options (mode-raising ones as `allow_always`, "manually
 //                  approve" as `allow_once`); replies `chose=<option id>`
+//   "permission-always-only"  asks permission with one `allow_always` option
+//                  only (no `allow_once`, no `reject_once`); replies
+//                  `chose=<option id>` or `chose=cancelled` (6.4)
+//   "permission-abandon <file>"  "Working" until <file> exists, then an
+//                  `execute` tool call (`npm test`) and its permission
+//                  request; once <file>.withdraw exists, it withdraws the
+//                  request (`$/cancel_request`) without waiting for the
+//                  answer, as Claude Code does when its SDK aborts a tool
+//                  call; the call fails, it replies "Gave up on npm test."
+//                  and ends its turn (`end_turn`). The test creates both files
+//
+//   "model"        replies `model=<the model its session runs on>` (story 11)
+//   "model-switch <model id>"  switches its own model, as an agent falling
+//                  back does, reports it (`config_option_update`), and replies
+//                  `model=<model id>`
+//
+// Models (story 11): `session/new`, `session/resume` and `session/load`
+// answer `configOptions` with a `model` select (category `model`, as
+// claude-agent-acp 0.84 and Antigravity list theirs): `fake-default`,
+// `fake-large`, `fake-small` and `fake-locked`, starting on
+// FAKE_ACP_START_MODEL, else the value after a `--model` argument, else
+// `fake-default`. `session/set_config_option` switches it; `fake-locked` is
+// refused with the agent's own words (a plan without it), an unlisted value
+// as Claude Code refuses one. FAKE_ACP_NO_MODELS=1 lists no models (an agent
+// that takes its model only at start: FAKE_ACP_START_MODEL or `--model`).
 //
 // Session modes (permission modes): `session/new`, `session/resume` and
 // `session/load` answer `modes` as claude-agent-acp 0.84 does (`default`,
@@ -126,6 +168,39 @@
 // 9.2): without it the prompt fails with ACP's auth-required error (-32000);
 // with it the reply is "key received …<last 4>" (never the whole value).
 //
+// A generic second agent (epic 6, 6.3), in place of Claude Code's shapes:
+// FAKE_ACP_MODES=`id:Name,…` lists exactly those session modes (start in
+// FAKE_ACP_START_MODE); FAKE_ACP_AUTH_METHODS=`id:Name,…` advertises those
+// agent-type sign-in methods; FAKE_ACP_API_KEY_ENV names the variable
+// FAKE_ACP_REQUIRE_API_KEY reads; FAKE_ACP_HOME_ENV names its home variable
+// (see "whoami").
+//
+// Antigravity's personality (epic 6 entry 5; spike 6.1's shapes), set by the
+// wrapper `fake-antigravity.mjs` (FAKE_ACP_PERSONALITY=antigravity): its
+// `agentInfo` (`antigravity-acp` 1.3.0), `session/list` beside resume and
+// load, "permission <command>" with its options (`allow` allow_once, `deny`
+// reject_once, `allow_always` "Allow Always") and the command in
+// `rawInput.CommandLine`, replying "Ran <command>. chose=<option id>" or
+// "Denied <command>. chose=<option id>"; `yolo` runs it without asking, as
+// `bypassPermissions` does; "trust" asks its workspace-trust question
+// (`trust` allow_once, `dont_trust` reject_once) and replies
+// `trust=<option id or cancelled>`.
+// FAKE_ACP_REQUIRE_AUTH=1 refuses `session/new`, `resume` and `load` with
+// ACP's auth-required error (-32000) until `authenticate` was called in this
+// process (as Antigravity does before a sign-in method is chosen); "auth"
+// replies `auth=<method id or none> key=<last 4 of its API key or none>`.
+// FAKE_ACP_INIT_DELAY_MS delays the `initialize` answer (Antigravity takes
+// about 17 s to start on Windows).
+// Its Google sign-in (epic 6 entry 7, spike 6.1's route): `authenticate
+// oauth-personal` prints "Open the following link to authenticate the ACP
+// server: <url>" on stderr (FAKE_ACP_OAUTH_URL, default a fake
+// accounts.google.com link), runs `$BROWSER <url>` when set (no shell), and
+// waits until the "browser" answers: a file `fake-google-consent` (signed in)
+// or `fake-google-deny` (refused) in its home ($GEMINI_HOME). Signed in, it
+// keeps `fake-google-signed-in` there, which a later process counts as a
+// sign-in (as its stored credentials would be); `logout` (advertised as
+// `auth.logout`) removes it.
+//
 // FAKE_ACP_REQUIRE_LOGIN=<state file> makes every prompt need a sign-in (story
 // 9.4): until `fake-claude-login.mjs` has written `{"loggedIn":true}` to that
 // file (its FAKE_LOGIN_STATE), the prompt fails with ACP's auth-required error
@@ -150,8 +225,7 @@
 // check the sign-in" and turns a saved API key off.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { Readable, Writable } from 'node:stream';
@@ -201,18 +275,59 @@ let nextSession = 1;
 const RESUME = process.env.FAKE_ACP_RESUME ?? '';
 const REOPEN_FAIL = new Set((process.env.FAKE_ACP_REOPEN_FAIL ?? '').split(',').filter((method) => method !== ''));
 const NEW_MESSAGE = '[Ogden Agents] New message:\n';
+/** Antigravity's personality (epic 6 entry 5), from `fake-antigravity.mjs`. */
+const ANTIGRAVITY = process.env.FAKE_ACP_PERSONALITY === 'antigravity';
 
-/** The session modes it lists, as claude-agent-acp 0.84 lists them. */
-const AVAILABLE_MODES = [
+/**
+ * Whether it offers the steering extension (send now or wait): as
+ * claude-agent-acp 0.84 does, advertised at `initialize`; Antigravity's
+ * personality and a generic agent (FAKE_ACP_MODES) don't.
+ */
+const STEERING = !ANTIGRAVITY && process.env.FAKE_ACP_MODES === undefined;
+const INIT_DELAY_MS = Number(process.env.FAKE_ACP_INIT_DELAY_MS ?? '0');
+/** The sign-in method `authenticate` chose in this process, if any. */
+let authenticatedWith;
+/** Antigravity's home, where its fake Google sign-in is kept (epic 6 entry 7). */
+const googleHome = () => process.env.GEMINI_HOME;
+const googleFile = (name) => (googleHome() === undefined ? undefined : join(googleHome(), name));
+const signedInWithGoogle = () => ANTIGRAVITY && googleFile('fake-google-signed-in') !== undefined && existsSync(googleFile('fake-google-signed-in'));
+const requireAuth = () => {
+  if (process.env.FAKE_ACP_REQUIRE_AUTH === '1' && authenticatedWith === undefined && !signedInWithGoogle()) {
+    throw acp.RequestError.authRequired({ message: 'Authentication required. Call authenticate first.' }, 'Authentication required');
+  }
+};
+
+/**
+ * `id:Name,id:Name` (FAKE_ACP_MODES, FAKE_ACP_AUTH_METHODS: a generic second
+ * agent's own mode or sign-in ids, 6.3) as `{ id, name }`s.
+ */
+const listOf = (value) =>
+  value
+    .split(',')
+    .filter((entry) => entry !== '')
+    .map((entry) => {
+      const [id, ...name] = entry.split(':');
+      return { id, name: name.join(':') || id };
+    });
+
+/**
+ * The session modes it lists: as claude-agent-acp 0.84 lists them, or (a
+ * generic agent, 6.3) exactly FAKE_ACP_MODES.
+ */
+const AVAILABLE_MODES = process.env.FAKE_ACP_MODES ? listOf(process.env.FAKE_ACP_MODES).map((mode) => ({ ...mode, description: mode.name })) : [
   { id: 'default', name: 'Manual', description: 'Always ask before making changes' },
   { id: 'acceptEdits', name: 'Accept edits', description: 'Automatically accept all file edits' },
   { id: 'plan', name: 'Plan', description: 'Create a plan before making changes' },
   ...(process.env.FAKE_ACP_NO_AUTO === '1' ? [] : [{ id: 'auto', name: 'Auto', description: 'Claude handles permission decisions' }]),
   ...(process.env.FAKE_ACP_NO_BYPASS === '1' ? [] : [{ id: 'bypassPermissions', name: 'Bypass permissions', description: 'Accepts all permissions' }]),
 ];
+/** The variable FAKE_ACP_REQUIRE_API_KEY reads its key from: FAKE_ACP_API_KEY_ENV (a generic agent's own, 6.3), else Claude Code's. */
+const API_KEY_ENV = process.env.FAKE_ACP_API_KEY_ENV || 'ANTHROPIC_API_KEY';
 const START_MODE = process.env.FAKE_ACP_START_MODE ?? 'default';
 /** Modes in which it edits files without asking (Claude Code's `acceptEdits`, `auto` and `bypassPermissions`). */
-const EDITS_WITHOUT_ASKING = new Set(['acceptEdits', 'auto', 'bypassPermissions']);
+const EDITS_WITHOUT_ASKING = new Set(['acceptEdits', 'auto', 'bypassPermissions', 'auto_edit', 'yolo']);
+/** Modes in which it runs commands without asking (Claude Code's `bypassPermissions`, Antigravity's `yolo`). */
+const RUNS_WITHOUT_ASKING = new Set(['bypassPermissions', 'yolo']);
 /** The `permissions.ask` rules its session was started with (`_meta.claudeCode.options.settings`, as claude-agent-acp 0.84 reads them). */
 const askRulesOf = (session) => session.opened?._meta?.claudeCode?.options?.settings?.permissions?.ask ?? [];
 // Whether an `Edit(**/<folder>/**)` or `Edit(**/<file>)` rule matches `path` (the two shapes Ogden sends).
@@ -225,6 +340,21 @@ const askRuleMatches = (rules, path) => {
     return file !== null && segments.at(-1) === file[1];
   });
 };
+/** The models it lists (story 11). */
+const MODELS = [
+  { value: 'fake-default', name: 'Fake Default', description: 'The fake agent picks this one itself' },
+  { value: 'fake-large', name: 'Fake Large' },
+  { value: 'fake-small', name: 'Fake Small' },
+  { value: 'fake-locked', name: 'Fake Locked', description: 'Not in your plan' },
+];
+const NO_MODELS = process.env.FAKE_ACP_NO_MODELS === '1';
+const argModel = process.argv.indexOf('--model') === -1 ? undefined : process.argv[process.argv.indexOf('--model') + 1];
+/** The model a session starts on: its start variable, else its `--model` argument, else its own choice. */
+const START_MODEL = process.env.FAKE_ACP_START_MODEL || argModel || (NO_MODELS ? 'none' : 'fake-default');
+/** The `configOptions` a session answer carries (none with FAKE_ACP_NO_MODELS). */
+const configOf = (session) =>
+  NO_MODELS ? [] : [{ id: 'model', name: 'Model', description: 'AI model to use', category: 'model', type: 'select', currentValue: session.model, options: MODELS }];
+
 /** The `modes` a session answer carries, for a session now in `currentModeId`. */
 const modesOf = (currentModeId) => ({ currentModeId, availableModes: AVAILABLE_MODES });
 
@@ -288,18 +418,22 @@ const say = (client, sessionId, text) =>
 
 const stream = acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin));
 
-acp
+const agentBuilder = acp
   .agent({ name: 'fake-acp-agent' })
-  .onRequest('initialize', ({ params }) => {
+  .onRequest('initialize', async ({ params }) => {
+    if (INIT_DELAY_MS > 0) await sleep(INIT_DELAY_MS);
     const terminalAuth = params.clientCapabilities?.auth?.terminal === true;
     return {
       protocolVersion: acp.PROTOCOL_VERSION,
       agentCapabilities: {
         loadSession: RESUME === 'load' || RESUME === 'both',
-        sessionCapabilities: { close: {}, ...(RESUME === 'resume' || RESUME === 'both' ? { resume: {} } : {}) },
+        sessionCapabilities: { ...(ANTIGRAVITY ? { list: {} } : { close: {} }), ...(RESUME === 'resume' || RESUME === 'both' ? { resume: {} } : {}) },
+        ...(ANTIGRAVITY ? { auth: { logout: {} } } : {}),
       },
-      authMethods:
-        process.env.FAKE_ACP_AUTH === 'terminal' && terminalAuth
+      authMethods: process.env.FAKE_ACP_AUTH_METHODS
+        ? // A generic agent's own sign-in methods, done by the agent itself (6.3).
+          listOf(process.env.FAKE_ACP_AUTH_METHODS).map(({ id, name }) => ({ id, name, description: name }))
+        : process.env.FAKE_ACP_AUTH === 'terminal' && terminalAuth
           ? [{ type: 'terminal', id: 'fake-login', name: 'Log in with your account', description: 'Signs in with the fake agent', args: ['--login'], env: { FAKE_LOGIN: '1' } }]
           : process.env.FAKE_ACP_AUTH === 'claude-terminal' && terminalAuth
             ? [
@@ -307,28 +441,71 @@ acp
                 { type: 'terminal', id: 'console-login', name: 'Anthropic Console', description: 'Use Anthropic Console (API usage billing)', args: ['--cli', 'auth', 'login', '--console'] },
               ]
             : [],
-      agentInfo: { name: 'fake-acp-agent', version: '1.0.0' },
+      agentInfo: ANTIGRAVITY ? { name: 'antigravity-acp', title: 'Google Antigravity', version: '1.3.0' } : { name: 'fake-acp-agent', version: '1.0.0' },
+      ...(STEERING ? { _meta: { steering: { supported: true } } } : {}),
     };
   })
+  .onRequest('authenticate', async ({ params }) => {
+    if (ANTIGRAVITY && params.methodId === 'oauth-personal' && !signedInWithGoogle()) {
+      const url = process.env.FAKE_ACP_OAUTH_URL ?? 'https://accounts.google.com/o/oauth2/v2/auth?client_id=fake-client&state=fake-state&redirect_uri=http%3A%2F%2F127.0.0.1%3A9%2F&scope=openid';
+      // What its sign-in process was given, for the tests: whether a key reached it, and its home.
+      writeFileSync(googleFile('fake-google-env'), `key=${process.env.GEMINI_API_KEY ? 'set' : 'none'}\n`);
+      process.stderr.write(`Open the following link to authenticate the ACP server: ${url}\n`);
+      if (process.env.BROWSER) {
+        try {
+          spawn(process.env.BROWSER, [url], { stdio: 'ignore' }).on('error', () => {});
+        } catch {
+          // As Python's webbrowser: a browser that can't start is skipped.
+        }
+      }
+      for (;;) {
+        const consent = googleFile('fake-google-consent');
+        const deny = googleFile('fake-google-deny');
+        if (deny !== undefined && existsSync(deny)) {
+          rmSync(deny, { force: true });
+          throw acp.RequestError.internalError(undefined, 'the fake Google sign-in was refused');
+        }
+        if (consent !== undefined && existsSync(consent)) {
+          rmSync(consent, { force: true });
+          writeFileSync(googleFile('fake-google-signed-in'), 'signed in\n');
+          break;
+        }
+        await sleep(50);
+      }
+    }
+    authenticatedWith = params.methodId;
+    return {};
+  })
+  .onRequest('logout', () => {
+    if (googleFile('fake-google-signed-in') !== undefined) rmSync(googleFile('fake-google-signed-in'), { force: true });
+    authenticatedWith = undefined;
+    return {};
+  })
   .onRequest('session/new', ({ params }) => {
+    requireAuth();
     const sessionId = `fake-session-${nextSession++}`;
-    sessions.set(sessionId, { via: 'new', opened: params, mode: START_MODE });
-    return { sessionId, modes: modesOf(START_MODE) };
+    const session = { via: 'new', opened: params, mode: START_MODE, model: START_MODEL };
+    sessions.set(sessionId, session);
+    return { sessionId, modes: modesOf(START_MODE), configOptions: configOf(session) };
   })
   .onRequest('session/resume', ({ params }) => {
     if (RESUME !== 'resume' && RESUME !== 'both') throw acp.RequestError.methodNotFound('session/resume');
+    requireAuth();
     if (REOPEN_FAIL.has('resume-auth')) throw acp.RequestError.authRequired(undefined, 'the fake agent needs a new sign-in');
     if (REOPEN_FAIL.has('resume')) throw acp.RequestError.resourceNotFound(params.sessionId);
-    sessions.set(params.sessionId, { via: 'resumed', opened: params, mode: START_MODE });
-    return { modes: modesOf(START_MODE) };
+    const session = { via: 'resumed', opened: params, mode: START_MODE, model: START_MODEL };
+    sessions.set(params.sessionId, session);
+    return { modes: modesOf(START_MODE), configOptions: configOf(session) };
   })
   .onRequest('session/load', async ({ params, client }) => {
     if (RESUME !== 'load' && RESUME !== 'both') throw acp.RequestError.methodNotFound('session/load');
+    requireAuth();
     // The history a load replays: the client already has it.
     await say(client, params.sessionId, 'Earlier reply.');
     if (REOPEN_FAIL.has('load')) throw acp.RequestError.resourceNotFound(params.sessionId);
-    sessions.set(params.sessionId, { via: 'loaded', opened: params, mode: START_MODE });
-    return { modes: modesOf(START_MODE) };
+    const session = { via: 'loaded', opened: params, mode: START_MODE, model: START_MODEL };
+    sessions.set(params.sessionId, session);
+    return { modes: modesOf(START_MODE), configOptions: configOf(session) };
   })
   .onRequest('session/set_mode', ({ params, client }) => {
     const session = sessions.get(params.sessionId);
@@ -347,21 +524,76 @@ acp
     }
     return {};
   })
+  .onRequest('session/set_config_option', ({ params }) => {
+    const session = sessions.get(params.sessionId);
+    if (session === undefined) throw acp.RequestError.invalidParams(undefined, `no session ${params.sessionId}`);
+    if (NO_MODELS || params.configId !== 'model') throw new Error(`Unknown config option: ${params.configId}`);
+    // As Claude Code: an unlisted value is refused; a listed one the user's plan lacks is refused in plain words.
+    if (!MODELS.some((model) => model.value === params.value)) throw new Error(`Invalid value for config option model: ${params.value}`);
+    if (params.value === 'fake-locked') throw new Error("Your plan doesn't include Fake Locked.");
+    session.model = params.value;
+    return { configOptions: configOf(session) };
+  })
   .onRequest('session/prompt', async ({ params, client }) => {
     const session = sessions.get(params.sessionId);
     if (session === undefined) throw acp.RequestError.invalidParams(undefined, `no session ${params.sessionId}`);
+    session.turns = (session.turns ?? 0) + 1;
+    session.steered = [];
+    try {
+      const result = await runPrompt(params, client, session);
+      // Messages steered into the turn are answered before it ends; a wait they ended is no cancel.
+      const steered = session.steered.splice(0);
+      for (const text of steered) await say(client, params.sessionId, `Steered: ${text}.`);
+      return steered.length > 0 ? { stopReason: 'end_turn' } : result;
+    } finally {
+      session.turns -= 1;
+    }
+  })
+  // The steering extension (claude-agent-acp 0.84, send now or wait): a message into the running turn.
+  .onRequest('_session/steering', { parse: (params) => params }, async ({ params }) => {
+    const session = sessions.get(params.sessionId);
+    if (session === undefined) throw acp.RequestError.invalidParams(undefined, `no session ${params.sessionId}`);
+    if (!STEERING) throw acp.RequestError.methodNotFound('_session/steering');
+    if ((session.turns ?? 0) === 0) return { outcome: 'promptRequired', reason: 'noRunningTurn' };
+    const text = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('');
+    session.steered.push(text);
+    // A turn waiting on something ("hold", "wait", "slow", "quiet") goes on with the message, after
+    // this answer is out (as the real adapter answers before the model's next output).
+    setTimeout(() => session.cancel?.(), 20);
+    return { outcome: 'injected' };
+  });
+
+/** One prompt's turn (the behaviors listed at the top). */
+async function runPrompt(params, client, session) {
+  {
+    // Kept as a block: the behaviors below were the prompt handler's body.
     const whole = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('');
     const primedAt = whole.lastIndexOf(NEW_MESSAGE);
     const primer = primedAt === -1 ? '' : whole.slice(0, primedAt);
-    const primed = primer.split('\n').filter((line) => line.startsWith('User: ') || line.startsWith('Claude Code: ')).length;
+    const primed = primer.split('\n').filter((line) => line.startsWith('User: ') || line.startsWith('Claude Code: ') || line.startsWith('Antigravity: ')).length;
     const text = (primedAt === -1 ? whole : whole.slice(primedAt + NEW_MESSAGE.length)).trim();
 
     if (process.env.FAKE_ACP_REQUIRE_LOGIN && !loggedIn(process.env.FAKE_ACP_REQUIRE_LOGIN)) {
       throw acp.RequestError.authRequired(undefined, 'the fake agent needs a new sign-in');
     }
     if (process.env.FAKE_ACP_REQUIRE_API_KEY === '1') {
-      if (!process.env.ANTHROPIC_API_KEY) throw acp.RequestError.authRequired(undefined, 'the fake agent needs an API key');
-      await say(client, params.sessionId, `key received …${process.env.ANTHROPIC_API_KEY.slice(-4)}`);
+      const key = process.env[API_KEY_ENV];
+      if (!key) throw acp.RequestError.authRequired(undefined, 'the fake agent needs an API key');
+      await say(client, params.sessionId, `key received …${key.slice(-4)}`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text === 'markdown') {
+      // A Markdown reply in chunks (backlog story 14): the code fence opens in one chunk and closes in a later one.
+      const chunks = [
+        '## Summary\n\nSome **bold** text, a [docs link](https://example.com/docs) and a [bad link](javascript:alert(1)).\n\n',
+        '- [x] tests\n- [ ] docs\n\n```ts\nconst answer = 42;\n',
+        'console.log("<b>" + answer);\n```\n\n| Name | Count |\n| --- | ---: |\n| apples | 3 |\n\n',
+        '<script>window.hacked = true</script> ![chart](https://example.com/chart.png)\n',
+      ];
+      for (const chunk of chunks) {
+        await say(client, params.sessionId, chunk);
+        await sleep(CHUNK_DELAY_MS);
+      }
       return { stopReason: 'end_turn' };
     }
     if (text === 'crash') {
@@ -370,6 +602,7 @@ acp
       process.exit(1);
     }
     if (text === 'fail') throw acp.RequestError.internalError(undefined, 'the fake agent failed on purpose');
+    if (text === 'usage-limit') throw acp.RequestError.internalError(undefined, 'Claude AI usage limit reached|1760000000');
     if (text === 'auth-expired') throw acp.RequestError.authRequired(undefined, 'the fake agent needs a new sign-in');
     if (text.startsWith('/')) {
       await say(client, params.sessionId, `command=${text} primed=${primed}`);
@@ -377,6 +610,16 @@ acp
     }
     if (text === 'mode') {
       await say(client, params.sessionId, `mode=${session.mode}`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text === 'model') {
+      await say(client, params.sessionId, `model=${session.model}`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text.startsWith('model-switch ')) {
+      session.model = text.slice('model-switch '.length).trim();
+      await update(client, params.sessionId, { sessionUpdate: 'config_option_update', configOptions: configOf(session) });
+      await say(client, params.sessionId, `model=${session.model}`);
       return { stopReason: 'end_turn' };
     }
     if (text.startsWith('mode-switch ')) {
@@ -401,6 +644,37 @@ acp
         ],
       });
       await say(client, params.sessionId, `chose=${answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'}`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text === 'permission-always-only') {
+      // A request a card may not answer (6.4): only a session-wide option is on offer.
+      const toolCall = { toolCallId: 'call-always-only', title: 'Run npm test', kind: 'execute', rawInput: { command: 'npm test' } };
+      await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
+      const answer = await client.request('session/request_permission', {
+        sessionId: params.sessionId,
+        toolCall,
+        options: [{ optionId: 'always', name: 'Always allow', kind: 'allow_always' }],
+      });
+      await say(client, params.sessionId, `chose=${answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'}`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text === 'auth') {
+      const key = process.env[API_KEY_ENV];
+      await say(client, params.sessionId, `auth=${authenticatedWith ?? 'none'} key=${key ? key.slice(-4) : 'none'}`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text === 'trust') {
+      // Antigravity's workspace-trust question (spike 6.1 saw `trust`/`dont_trust` in its binary).
+      const toolCall = { toolCallId: 'call-trust', title: 'Trust this workspace?', kind: 'other', rawInput: { Cwd: process.cwd() } };
+      const answer = await client.request('session/request_permission', {
+        sessionId: params.sessionId,
+        toolCall,
+        options: [
+          { optionId: 'trust', name: 'Trust', kind: 'allow_once' },
+          { optionId: 'dont_trust', name: "Don't trust", kind: 'reject_once' },
+        ],
+      });
+      await say(client, params.sessionId, `trust=${answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'}`);
       return { stopReason: 'end_turn' };
     }
     if (text === 'context') {
@@ -460,13 +734,15 @@ acp
       await say(client, params.sessionId, `${edited ? 'Edited' : 'Denied'} ${paths.join(', ')}.`);
       return { stopReason: 'end_turn' };
     }
-    if (text === 'permission' || text.startsWith('permission ') || text.startsWith('permission-safety ')) {
+    if (text === 'permission' || text === 'permission-hold' || text.startsWith('permission ') || text.startsWith('permission-safety ')) {
       const safety = text.startsWith('permission-safety ');
-      const command = text === 'permission' ? 'npm test' : text.slice(safety ? 'permission-safety '.length : 'permission '.length).trim();
-      const toolCall = { toolCallId: 'call-permission', title: `Run ${command}`, kind: 'execute', rawInput: { command } };
+      const holds = text === 'permission-hold';
+      const command = text === 'permission' || holds ? 'npm test' : text.slice(safety ? 'permission-safety '.length : 'permission '.length).trim();
+      // Antigravity names the command in `CommandLine` (6.5); Claude Code in `command`.
+      const toolCall = { toolCallId: 'call-permission', title: `Run ${command}`, kind: 'execute', rawInput: ANTIGRAVITY ? { CommandLine: command } : { command } };
       await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
-      // Skipping permission checks (`bypassPermissions`) runs it without asking, unless it is one of its own safety checks.
-      if (process.env.FAKE_ACP_SKIP_PERMISSION === '1' || (session.mode === 'bypassPermissions' && !safety)) {
+      // Skipping permission checks (`bypassPermissions`, `yolo`) runs it without asking, unless it is one of its own safety checks.
+      if (process.env.FAKE_ACP_SKIP_PERMISSION === '1' || (RUNS_WITHOUT_ASKING.has(session.mode) && !safety)) {
         await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: 'completed' });
         await say(client, params.sessionId, `Ran ${command}.`);
         return { stopReason: 'end_turn' };
@@ -474,16 +750,31 @@ acp
       const answer = await client.request('session/request_permission', {
         sessionId: params.sessionId,
         toolCall,
-        options: [
-          { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
-          { optionId: 'always', name: 'Always allow', kind: 'allow_always' },
-          { optionId: 'reject', name: 'Deny', kind: 'reject_once' },
-          { optionId: 'never', name: 'Always deny', kind: 'reject_always' },
-        ],
+        options: ANTIGRAVITY
+          ? [
+              { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+              { optionId: 'deny', name: 'Deny', kind: 'reject_once' },
+              { optionId: 'allow_always', name: 'Allow Always', kind: 'allow_always' },
+            ]
+          : [
+              { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
+              { optionId: 'always', name: 'Always allow', kind: 'allow_always' },
+              { optionId: 'reject', name: 'Deny', kind: 'reject_once' },
+              { optionId: 'never', name: 'Always deny', kind: 'reject_always' },
+            ],
       });
-      const ran = answer.outcome.outcome === 'selected' && (answer.outcome.optionId === 'allow' || answer.outcome.optionId === 'always');
+      const chosen = answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled';
+      const ran = chosen === 'allow' || chosen === 'always' || chosen === 'allow_always';
+      if (holds && ran) {
+        await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: 'in_progress' });
+        await new Promise((resolve) => {
+          session.cancel = () => resolve(undefined);
+        });
+        session.cancel = undefined;
+        return { stopReason: 'cancelled' };
+      }
       await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: ran ? 'completed' : 'failed' });
-      await say(client, params.sessionId, ran ? `Ran ${command}.` : `Denied ${command}.`);
+      await say(client, params.sessionId, `${ran ? 'Ran' : 'Denied'} ${command}.${ANTIGRAVITY ? ` chose=${chosen}` : ''}`);
       return { stopReason: 'end_turn' };
     }
     if (text === 'tool') {
@@ -518,6 +809,12 @@ acp
       await say(client, params.sessionId, `Wrote ${relpath}.`);
       return { stopReason: 'end_turn' };
     }
+    if (text === 'whoami') {
+      const homeEnv = process.env.FAKE_ACP_HOME_ENV;
+      const home = homeEnv ? ` home=${process.env[homeEnv] ?? '(unset)'}` : '';
+      await say(client, params.sessionId, `agent=${process.env.FAKE_ACP_AGENT_NAME ?? 'default'}${home}`);
+      return { stopReason: 'end_turn' };
+    }
     if (text === 'env') {
       await say(client, params.sessionId, `CLAUDE_CODE_EXECUTABLE=${process.env.CLAUDE_CODE_EXECUTABLE ?? '(unset)'}`);
       return { stopReason: 'end_turn' };
@@ -538,8 +835,55 @@ acp
       await say(client, params.sessionId, JSON.stringify(reply));
       return { stopReason: 'end_turn' };
     }
+    if (text === 'cancels') {
+      await say(client, params.sessionId, `cancels=${session.cancels ?? 0}`);
+      return { stopReason: 'end_turn' };
+    }
     if (text === 'pids') {
       await say(client, params.sessionId, `pid=${process.pid} grandchild=${grandchild?.pid ?? 'none'}`);
+      return { stopReason: 'end_turn' };
+    }
+    /** Waits until `path` exists (false) or the turn is cancelled (true). */
+    const waitForFile = (path) =>
+      new Promise((resolve) => {
+        const timer = setInterval(() => {
+          if (!existsSync(path)) return;
+          clearInterval(timer);
+          session.cancel = undefined;
+          resolve(false);
+        }, 25);
+        session.cancel = () => {
+          clearInterval(timer);
+          session.cancel = undefined;
+          resolve(true);
+        };
+      });
+    if (text.startsWith('permission-abandon ')) {
+      const file = text.slice('permission-abandon '.length).trim();
+      await say(client, params.sessionId, 'Working');
+      if (await waitForFile(file)) return { stopReason: 'cancelled' };
+      const toolCall = { toolCallId: 'call-abandon', title: 'Run npm test', kind: 'execute', rawInput: { command: 'npm test' } };
+      await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
+      const withdraw = new AbortController();
+      const asking = client.request(
+        'session/request_permission',
+        {
+          sessionId: params.sessionId,
+          toolCall,
+          options: [
+            { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
+            { optionId: 'reject', name: 'Deny', kind: 'reject_once' },
+          ],
+        },
+        { cancellationSignal: withdraw.signal },
+      );
+      // The answer, whenever it comes, is not waited for (claude-agent-acp's local abort race).
+      asking.catch(() => undefined);
+      const cancelled = await waitForFile(`${file}.withdraw`);
+      withdraw.abort();
+      if (cancelled) return { stopReason: 'cancelled' };
+      await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: 'failed' });
+      await say(client, params.sessionId, 'Gave up on npm test.');
       return { stopReason: 'end_turn' };
     }
     if (text.startsWith('wait ')) {
@@ -617,9 +961,14 @@ acp
       // The record is the test's to check; the chat answers either way (as the fake CLI does).
     }
     return { stopReason: 'end_turn' };
-  })
+  }
+}
+
+agentBuilder
   .onNotification('session/cancel', ({ params }) => {
-    sessions.get(params.sessionId)?.cancel?.();
+    const cancelled = sessions.get(params.sessionId);
+    if (cancelled !== undefined) cancelled.cancels = (cancelled.cancels ?? 0) + 1;
+    cancelled?.cancel?.();
   })
   .onRequest('session/close', ({ params }) => {
     sessions.delete(params.sessionId);

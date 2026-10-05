@@ -281,6 +281,31 @@ export class QueueFullError extends SessionBusyError {
   override readonly name = 'QueueFullError';
 }
 
+/** The plain reason a message can't go right away while a permission card waits (send now or wait). */
+export const ANSWER_FIRST_REASON = 'Answer the request above first, then send your message.';
+
+/**
+ * A message was to be sent right away while the agent waits for an answer on
+ * a permission card (send now or wait): nothing was sent or recorded.
+ */
+export class AnswerFirstError extends CoreError {
+  override readonly name = 'AnswerFirstError';
+  constructor() {
+    super('answer_first', ANSWER_FIRST_REASON);
+  }
+}
+
+/** The plain reason a waiting message can't be changed (send now or wait). */
+export const MESSAGE_NOT_QUEUED_REASON = 'That message is no longer waiting. It was sent, removed, or the agent stopped.';
+
+/** A waiting message was to be changed or sent right away, but it is no longer waiting (send now or wait): nothing changed. */
+export class MessageNotQueuedError extends CoreError {
+  override readonly name = 'MessageNotQueuedError';
+  constructor() {
+    super('message_not_queued', MESSAGE_NOT_QUEUED_REASON);
+  }
+}
+
 /** Stop was asked of a session whose agent is not answering (nothing to stop). */
 export class SessionNotBusyError extends CoreError {
   override readonly name = 'SessionNotBusyError';
@@ -351,11 +376,57 @@ export class ConfirmationRequiredError extends CoreError {
   }
 }
 
+/** A handoff whose brief, agent and chat no unused, unexpired preview token covers (handoff): nothing changed. */
+export class HandoffNotPreviewedError extends CoreError {
+  override readonly name = 'HandoffNotPreviewedError';
+  constructor(message = 'This summary wasn’t previewed for that agent, or its preview expired. Review it again, then continue.') {
+    super('handoff_not_previewed', message);
+  }
+}
+
 /** A permission mode the chat's agent, or its session, doesn't offer: nothing changed. */
 export class ModeUnavailableError extends CoreError {
   override readonly name = 'ModeUnavailableError';
   constructor(message: string) {
     super('mode_unavailable', message);
+  }
+}
+
+/** A chat was asked for a model its agent (or its session) doesn't list (story 11): nothing changed. */
+export class ModelUnavailableError extends CoreError {
+  override readonly name = 'ModelUnavailableError';
+  constructor(message: string) {
+    super('model_unavailable', message);
+  }
+}
+
+/** A new chat named an agent that isn't registered (epic 6): nothing was created. */
+export class UnknownAgentError extends CoreError {
+  override readonly name = 'UnknownAgentError';
+  constructor(message = "Ogden Agents doesn't have that agent on this computer. Pick another one.") {
+    super('agent_unknown', message);
+  }
+}
+
+/** Why a new chat with a registered agent is refused (6.3): it isn't installed, isn't signed in, or needs a trusted project. */
+export type AgentNotReadyCode = 'agent_not_installed' | 'agent_signed_out' | 'project_not_trusted';
+
+/**
+ * A new chat was refused because its agent can't start it now (epic 6, 6.3):
+ * nothing was created. `message` is plain words naming the agent; `action`
+ * is what fixes it. Never a path, a key or a URL.
+ */
+export class AgentNotReadyError extends CoreError {
+  override readonly name = 'AgentNotReadyError';
+  override readonly code: AgentNotReadyCode;
+  constructor(
+    code: AgentNotReadyCode,
+    message: string,
+    readonly agentId: string,
+    readonly action: 'install' | 'sign_in' | 'trust_project',
+  ) {
+    super(code, message);
+    this.code = code;
   }
 }
 

@@ -1,6 +1,7 @@
 import { SCRIPT_TRUST_ALLOW, SCRIPT_TRUST_CHANGED_TEXT, SCRIPT_TRUST_CHANGED_TITLE, SCRIPT_TRUST_FAILED, SCRIPT_TRUST_TEXT, SCRIPT_TRUST_TITLE } from '@ogden-agents/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { keepSaved } from '@/api/keep-saved';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
 import { Text } from '@/ui/typography';
@@ -27,9 +28,9 @@ export function ScriptTrustPrompt({ wsId, onTrusted, changed = false }: { wsId: 
     setBusy(true);
     setError(undefined);
     trustProjectScripts(wsId).then(
-      (settings) => {
+      async (settings) => {
+        await keepSaved(queryClient, ['workspace-settings', wsId], settings);
         setBusy(false);
-        queryClient.setQueryData(['workspace-settings', wsId], settings);
         onTrusted();
       },
       (failure: unknown) => {

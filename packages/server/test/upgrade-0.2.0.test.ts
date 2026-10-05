@@ -97,16 +97,19 @@ describe('starting on a 0.2.0 data folder (story 10.7)', () => {
     expect((await rulesOf(plain)).rules).toEqual([]);
 
     const sessionsOf = (wsId: WorkspaceId) => get(server, tab, apiPath(API_ROUTES.workspaceSessions, { wsId }), SessionsResponse);
-    expect((await sessionsOf(bmad)).sessions.map((session) => [session.id, session.kind, session.state, session.permissionMode])).toEqual([[data.sessionIds.bmad, 'chat', 'idle', 'ask']]);
-    expect((await sessionsOf(plain)).sessions.map((session) => [session.id, session.kind, session.state, session.permissionMode])).toEqual([[data.sessionIds.plain, 'chat', 'idle', 'ask']]);
+    expect((await sessionsOf(bmad)).sessions.map((session) => [session.id, session.kind, session.state, session.permissionMode, session.agentId])).toEqual([[data.sessionIds.bmad, 'chat', 'idle', 'ask', 'claude-code']]);
+    expect((await sessionsOf(plain)).sessions.map((session) => [session.id, session.kind, session.state, session.permissionMode, session.agentId])).toEqual([[data.sessionIds.plain, 'chat', 'idle', 'ask', 'claude-code']]);
+    // Rows from before agents could be chosen keep no agent id: they read as Claude Code (epic 6, migration 0007).
+    expect(server.core.entities.getSession(data.sessionIds.plain as never)?.agentId).toBeUndefined();
 
     const detectionOf = (wsId: WorkspaceId) => get(server, tab, apiPath(API_ROUTES.workspaceBmadDetection, { wsId }), BmadDetectionResponse);
     expect((await detectionOf(bmad)).detection).toEqual({ hasBmad: true, hasOutput: false, offerDismissed: false });
     expect((await detectionOf(plain)).detection).toEqual({ hasBmad: false, hasOutput: false, offerDismissed: false });
 
-    // Starting appended only its own `server.started` (every start does); browsing appended nothing.
+    // Starting appended its own `server.started` (every start does) and named each older chat from its
+    // first message (backlog story 12); browsing appended nothing.
     const appended = server.core.events.readAfter(data.events.at(-1)!.seq);
-    expect(appended.map((event) => event.type)).toEqual(['server.started']);
+    expect(appended.map((event) => event.type)).toEqual(['session.renamed', 'session.renamed', 'server.started']);
 
     await server.close();
     expect(oldColumns(data.dataDir)).toEqual(before);

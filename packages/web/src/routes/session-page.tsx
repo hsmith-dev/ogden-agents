@@ -1,18 +1,29 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
-import { ArrowClockwise, ArrowDown, ChatCircle, House, Stop } from '@phosphor-icons/react';
+import { ArrowClockwise, ArrowDown, ArrowsLeftRight, ChatCircle, House, Stop } from '@phosphor-icons/react';
 import type { PermissionMode } from '@ogden-agents/shared';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useAgents } from '@/agents/agent-setup-api';
 import { useAppearance } from '@/appearance/appearance-provider';
-import { AGENT_NAME, cancelSession, ChatApiError, fetchSession, sendMessage, setPermissionMode, switchDriver } from '@/chat/chat-api';
+import { agentNameOf, cancelSession, ChatApiError, UNKNOWN_AGENT_NAME, fetchSession, sendMessage, setPermissionMode, setSessionModel, switchDriver } from '@/chat/chat-api';
+import { ChatHeaderRename, useChatName, useChatRename } from '@/chat/chat-name';
+import { agentDefaultLabel, ModelPicker, modelLabel, useSessionModel } from '@/chat/model-picker';
+import { useChatAgents } from '@/chat/use-chat-agents';
 import { Composer } from '@/chat/composer';
+import { chatDraftKey } from '@/chat/drafts';
+import { HandoffDialog } from '@/chat/handoff-dialog';
+import { CONTINUE_WITH_ANOTHER_AGENT, SessionMenu } from '@/chat/session-menu';
 import { ReadOnlyConversation } from '@/chat/read-only';
 import { SignInAgain } from '@/chat/sign-in-again';
 import { ToolCalls } from '@/chat/tool-call-row';
-import { sessionView, type TranscriptCheckIn, type TranscriptItem, type TranscriptMessage } from '@/chat/transcript';
+import { sessionView, type TranscriptCheckIn, type TranscriptItem } from '@/chat/transcript';
+import { AgentChangedMarker, EarlierHistory, InterruptedNote, Message, ResumedMarker } from '@/chat/transcript-parts';
+import { QueuedMessages } from '@/chat/queued-messages';
+import { otherWayShortcutLabel, useWhileWorking } from '@/chat/send-mode';
 import { useCaughtUp, useEarlierHistory, useSessionEvents } from '@/events/event-stream';
 import { PermissionCard, permissionAnnouncement } from '@/permissions/permission-card';
 import { DocumentCard } from '@/planning/document-card';
+import { StartModeNote, useStartModeNote } from '@/permissions/default-permission-mode';
 import { PermissionModePicker, SkipAllBanner, usePermissionMode } from '@/permissions/permission-mode-picker';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { DriverToggle } from '@/terminal/driver-toggle';
@@ -22,16 +33,11 @@ import { conversationProps, TerminalPane } from '@/terminal/terminal-pane';
 import { focusComposer, useSessionDriver } from '@/terminal/use-session-driver';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
-import { Separator } from '@/ui/separator';
-import { AgentMessage, UserMessage } from '@/ui/message';
 import { EmptyState, PageBody, PageFooter } from '@/ui/page';
 import { Skeleton } from '@/ui/skeleton';
 import { StateGlyph } from '@/ui/state-glyph';
 import { Text } from '@/ui/typography';
 import { fetchWorkspace, workspaceName } from '@/workspaces/workspace-api';
-
-/** The marker at the break where a reopened chat continues (EXPERIENCE.md). */
-const RESUMED_FROM_HISTORY = 'Resumed from history';
 
 /** How close to the bottom (px) still counts as at the bottom, for auto-scroll. */
 const AT_BOTTOM_PX = 48;
@@ -46,14 +52,24 @@ const itemKey = (item: TranscriptItem, index: number): string =>
         ? `resumed-${item.at}-${index}`
         : item.type === 'document'
           ? `document-${item.path}`
-          : item.permission.requestId;
+          : item.type === 'agent_changed'
+            ? `agent-${item.at}-${index}`
+          : item.type === 'interrupted'
+            ? `interrupted-${item.messageId}`
+            : item.permission.requestId;
 
 /** What the composer says while the terminal drives (DESIGN.md Composer). */
 const TERMINAL_DRIVING_REASON = 'The terminal is driving this session';
 
+/** What the composer says while the agent works (send now or wait): what `Enter` does, and the other way. */
+const workingHint = (agentName: string, whileWorking: 'wait' | 'now') =>
+  whileWorking === 'now'
+    ? `${agentName} is working. While it works, your message goes right away. To send it after it finishes, press ${otherWayShortcutLabel()} or use the menu beside Send.`
+    : `${agentName} is working. While it works, your message waits its turn. To send it right away, press ${otherWayShortcutLabel()} or use the menu beside Send.`;
+
 /** What the quiet-agent status line says (user decision, story 2.10). */
-const checkInWords = (checkIn: TranscriptCheckIn) =>
-  checkIn.waitingOn === undefined ? `${AGENT_NAME} has been quiet for 10 minutes` : `${AGENT_NAME} is waiting on ${checkIn.waitingOn}`;
+const checkInWords = (checkIn: TranscriptCheckIn, agentName: string) =>
+  checkIn.waitingOn === undefined ? `${agentName} has been quiet for 10 minutes` : `${agentName} is waiting on ${checkIn.waitingOn}`;
 
 /**
  * `/w/:wsId/s/:sesId`: one chat (story 2.2). The transcript and the
@@ -94,6 +110,17 @@ export function SessionPage() {
   );
   const view = useMemo(() => sessionView(events, sesId, rulesRemoved), [events, sesId, rulesRemoved]);
   const session = useQuery({ queryKey: ['session', wsId, sesId], queryFn: () => fetchSession(wsId, sesId), retry: false });
+  // The chat's own agent, by its product name (epic 6, E6-R1).
+  const chatAgents = useChatAgents();
+  // Until the session has loaded its agent isn't known: no agent's name is guessed (review: a second agent's chat named Claude Code).
+  // A handoff (`session.agent_changed`) changes it live.
+  const agentId = view.agentId ?? (session.data === undefined ? undefined : (session.data.session.agentId ?? chatAgents.data?.defaultAgentId));
+  const agentName = agentId === undefined ? UNKNOWN_AGENT_NAME : agentNameOf(chatAgents.data, agentId);
+  const [handoffOpen, setHandoffOpen] = useState(false);
+  const severalAgents = (chatAgents.data?.agents.length ?? 0) > 1;
+  // Sign in again (9.4) signs in to the chat's own agent, when it has a setup (entry 6); otherwise the plain error notice.
+  const setups = useAgents();
+  const signsInHere = agentId !== undefined && setups.data?.some((setup) => setup.agentId === agentId) === true;
   const workspace = useQuery({ queryKey: ['workspace', wsId], queryFn: () => fetchWorkspace(wsId), retry: false });
   const end = useRef<HTMLDivElement>(null);
   const lastText = view.messages.at(-1)?.text.length ?? 0;
@@ -108,6 +135,8 @@ export function SessionPage() {
   const seenQueued = useRef(new Set<string>());
   const restored = useRef(new Set<string>());
   const [restore, setRestore] = useState<{ key: string; text: string } | undefined>(undefined);
+  // Send now or wait: the project's choice, else the app's.
+  const whileWorking = useWhileWorking(wsId);
 
   useEffect(() => {
     for (const message of view.queued) seenQueued.current.add(message.messageId);
@@ -187,8 +216,22 @@ export function SessionPage() {
   useEffect(() => {
     if (waitingFor === undefined || announced.current.has(waitingFor.requestId)) return;
     announced.current.add(waitingFor.requestId);
-    setAnnouncement(`${AGENT_NAME} is waiting for you: ${permissionAnnouncement(waitingFor)}`);
+    setAnnouncement(`${agentName} is waiting for you: ${permissionAnnouncement(waitingFor)}`);
   }, [waitingFor]);
+
+  // A step stopped so a message sent right away goes (send now or wait): said once, as it happens.
+  const lastInterrupted = view.items.findLast((item) => item.type === 'interrupted');
+  const interruptedKey = lastInterrupted?.type === 'interrupted' ? lastInterrupted.messageId : undefined;
+  const seenInterrupted = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!caughtUp) {
+      seenInterrupted.current = interruptedKey;
+      return;
+    }
+    if (interruptedKey === undefined || seenInterrupted.current === interruptedKey) return;
+    seenInterrupted.current = interruptedKey;
+    setAnnouncement('Stopped the current step to send your message.');
+  }, [interruptedKey, caughtUp]);
 
   const state = view.state ?? session.data?.session.state;
   // Who drives, and switching (stories 3.1, 3.6; the wiring is the hook's, story 3.9).
@@ -200,11 +243,19 @@ export function SessionPage() {
     state,
     queued: view.queued.length,
     developerMode: appearance.developerMode,
+    agentName,
     setActionError,
   });
 
+  // The chat's name (backlog story 12): the view follows `session.renamed`; Rename beside it in the header.
+  const { name: shownName, title: userTitle } = useChatName(events, session.data?.session);
+  const chatTitle = shownName === '' ? 'Chat' : shownName;
+  const rename = useChatRename({ wsId, sesId, name: chatTitle, title: userTitle, className: 'max-w-80' });
+
   // The chat's permission mode (permission modes): one change at a time; the view follows the event.
   const permissionMode = usePermissionMode(events, session.data?.session.permissionMode);
+  // The note about the mode the chat started in (default permission mode), until dismissed.
+  const startModeNote = useStartModeNote(events);
   const [modeChanging, setModeChanging] = useState(false);
   /** A change on its way (a ref, so a second click in the same render is ignored too). */
   const modeInFlight = useRef(false);
@@ -237,13 +288,47 @@ export function SessionPage() {
     [wsId, sesId, refetchSession],
   );
 
+  // The chat's model (story 11): one change at a time; the view follows the event, and it applies to the next message.
+  const { model, refusal } = useSessionModel(events, session.data?.session.model);
+  const sessionModels = session.data?.models;
+  const [modelChanging, setModelChanging] = useState(false);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  /** The refusal the user put away (its reason), so its notice doesn't follow every later message. */
+  const [dismissedRefusal, setDismissedRefusal] = useState<string | undefined>(undefined);
+  const modelInFlight = useRef(false);
+  const changeModel = useCallback(
+    (next: string | null) => {
+      if (modelInFlight.current) return;
+      modelInFlight.current = true;
+      setModelChanging(true);
+      setActionError(undefined);
+      setSessionModel(wsId, sesId, next).then(
+        () => {
+          modelInFlight.current = false;
+          setModelChanging(false);
+          void refetchSession();
+        },
+        (failure: unknown) => {
+          modelInFlight.current = false;
+          setModelChanging(false);
+          setActionError(failure instanceof Error ? failure.message : "Ogden Agents couldn't change this chat's model. Try again.");
+          void refetchSession();
+        },
+      );
+    },
+    [wsId, sesId, refetchSession],
+  );
+  const modelWords = model === null ? agentDefaultLabel(agentName) : modelLabel(sessionModels?.available, model);
+
   // The modes the picker offers depend on the agent session: read the session again when its agent
   // starts or reopens (working, or `session.resumed`); turning idle after it is read again by the driver hook.
   const resumedSeq = useMemo(() => events.findLast((event) => event.type === 'session.resumed')?.seq, [events]);
+  // And when the chat continues with another agent (handoff): its modes are the new agent's.
+  const agentChangedSeq = useMemo(() => events.findLast((event) => event.type === 'session.agent_changed')?.seq, [events]);
   const agentWorking = state === 'working';
   useEffect(() => {
-    if (agentWorking || resumedSeq !== undefined) void refetchSession();
-  }, [agentWorking, resumedSeq, refetchSession]);
+    if (agentWorking || resumedSeq !== undefined || agentChangedSeq !== undefined) void refetchSession();
+  }, [agentWorking, resumedSeq, agentChangedSeq, refetchSession]);
 
   // Whether the waiting card is out of view, for the "waiting for you" bar. Not while the terminal
   // drives: the conversation is read-only then, and nothing in it takes focus (3.6 review F2).
@@ -310,6 +395,20 @@ export function SessionPage() {
     );
   };
 
+  // Handoff: offered while the chat is idle or in error and the chat drives it.
+  const handoffBlocked = terminalDrives
+    ? 'Switch back to the chat first: the terminal is driving it.'
+    : switchingTo !== undefined
+      ? 'This chat is switching to or from the terminal.'
+      : state === 'waiting'
+        ? `${agentName} is waiting for your answer. Answer it or stop it first.`
+        : state === 'working'
+          ? `${agentName} is working. Stop it first.`
+          : state === 'done'
+            ? 'This chat is finished.'
+            : undefined;
+  const nameOf = (id: string | undefined) => (id === undefined ? agentName : agentNameOf(chatAgents.data, id));
+
   const tryAgain = () => {
     if (view.lastUserText === undefined) return;
     setActionError(undefined);
@@ -320,10 +419,29 @@ export function SessionPage() {
 
   return (
     <>
-      <WorkspaceHeader title="Chat" wsId={wsId} compactOnPhone={appearance.developerMode}>
+      <WorkspaceHeader
+        title={chatTitle}
+        wsId={wsId}
+        compactOnPhone={appearance.developerMode}
+        titleHidden={rename.editing}
+        titleAction={session.data === undefined ? undefined : <ChatHeaderRename rename={rename} name={chatTitle} />}
+      >
+        {/* The chat's agent (E6-R1), named in the header while the install has more than one. */}
+        {severalAgents && session.data !== undefined ? (
+          <Text as="span" variant="caption" data-testid="session-agent">
+            {agentName}
+          </Text>
+        ) : null}
+        {/* The model the chat runs on (story 11), beside its agent. */}
+        {session.data !== undefined ? (
+          <Text as="span" variant="caption" data-testid="session-model" data-model={model ?? ''} aria-label={`Model: ${modelWords}`} className="min-w-0 truncate max-sm:sr-only">
+            {modelWords}
+          </Text>
+        ) : null}
         {state === undefined ? null : <StateGlyph state={state} data-testid="session-state" className="ml-auto" />}
         <span className={state === undefined ? 'ml-auto' : undefined}>
           <PermissionModePicker
+            agentName={agentName}
             mode={permissionMode}
             options={session.data?.permissionModes}
             developerMode={appearance.developerMode}
@@ -334,15 +452,31 @@ export function SessionPage() {
         </span>
         {appearance.developerMode ? (
           <DriverToggle
+            agentName={agentName}
             driver={driver}
             switching={switchingTo}
             terminalBlockedReason={terminalBlockedReason}
             onSwitch={switchTo}
           />
         ) : null}
+        {severalAgents && session.data !== undefined ? <SessionMenu blockedReason={handoffBlocked} onContinue={() => setHandoffOpen(true)} /> : null}
       </WorkspaceHeader>
+      <HandoffDialog
+        open={handoffOpen}
+        onOpenChange={setHandoffOpen}
+        wsId={wsId}
+        sesId={sesId}
+        currentAgentId={agentId}
+        currentAgentName={agentName}
+        agents={chatAgents.data?.agents ?? []}
+        onHandedOff={() => {
+          void refetchSession();
+          focusComposer();
+        }}
+      />
       {/* A chat that skips its permission checks says so in red, above the conversation or the terminal, at any scroll position. */}
-      {permissionMode === 'skip_all' ? <SkipAllBanner changing={modeChanging} onBackToAsk={() => changeMode('ask', false, terminalDrives)} /> : null}
+      {permissionMode === 'skip_all' ? <SkipAllBanner agentName={agentName} changing={modeChanging} onBackToAsk={() => changeMode('ask', false, terminalDrives)} /> : null}
+      <StartModeNote key={sesId} note={startModeNote} />
       {driver === 'terminal' ? (
         <ReadOnlyBanner
           onSwitchToChat={() => switchTo('ui')}
@@ -354,7 +488,7 @@ export function SessionPage() {
       ) : null}
       {/* While the terminal drives it takes the main pane; at `xl` the read-only conversation can open beside it. */}
       <TerminalPane driving={driver === 'terminal'}>
-        {driver === 'terminal' ? <TerminalPanel sesId={sesId} screenReaderMode={appearance.terminalScreenReader} /> : null}
+        {driver === 'terminal' ? <TerminalPanel sesId={sesId} agentName={agentName} screenReaderMode={appearance.terminalScreenReader} /> : null}
         <PageBody
           id={peekId}
           {...conversationProps(driver === 'terminal', peekOpen)}
@@ -374,15 +508,19 @@ export function SessionPage() {
                   </span>
                 </>
               ) : view.items.length === 0 && !history.hasEarlier ? (
-                <Text variant="caption">Ask {AGENT_NAME} about this project.</Text>
+                <Text variant="caption">Ask {agentName} about this project.</Text>
               ) : (
                 view.items.map((item, index) =>
                   item.type === 'message' ? (
-                    <Message key={item.message.messageId} message={item.message} />
+                    <Message key={item.message.messageId} message={item.message} agentName={nameOf(item.message.agentId)} />
                   ) : item.type === 'tools' ? (
                     <ToolCalls key={`tools-${item.calls[0]?.toolCallId ?? index}`} calls={item.calls} density={appearance.density} />
                   ) : item.type === 'resumed' ? (
                     <ResumedMarker key={`resumed-${item.at}-${index}`} />
+                  ) : item.type === 'agent_changed' ? (
+                    <AgentChangedMarker key={`agent-${item.at}-${index}`} agentName={nameOf(item.agentId)} />
+                  ) : item.type === 'interrupted' ? (
+                    <InterruptedNote key={`interrupted-${item.messageId}`} cancelledRequest={item.cancelledRequest} />
                   ) : item.type === 'document' ? (
                     <DocumentCard
                       key={`document-${item.path}`}
@@ -398,14 +536,26 @@ export function SessionPage() {
                       wsId={wsId}
                       sesId={sesId}
                       projectName={projectName}
+                      agentName={agentName}
                       onDecided={focusComposer}
                     />
                   ),
                 )
               )}
-              {view.queued.map((message) => (
-                <Message key={message.messageId} message={message} />
-              ))}
+              <QueuedMessages
+                wsId={wsId}
+                sesId={sesId}
+                messages={view.queued}
+                readOnly={terminalDrives}
+                sendNowBlockedReason={state === 'waiting' ? 'Answer the request above first, then send your message.' : undefined}
+                onError={setActionError}
+              />
+              {state === 'working' && view.starting ? (
+                // A slow agent start (epic 6 entry 5: Antigravity takes about 17 s on Windows) reads as starting, not stuck.
+                <Notice data-testid="agent-starting" role="status">
+                  <StateGlyph state="working" label={`Starting ${agentName}...`} />
+                </Notice>
+              ) : null}
               {state === 'working' && view.checkIn !== undefined ? (
                 <Notice
                   data-testid="check-in"
@@ -420,13 +570,15 @@ export function SessionPage() {
                     ) : null
                   }
                 >
-                  <StateGlyph state="working" label={checkInWords(view.checkIn)} />
+                  <StateGlyph state="working" label={checkInWords(view.checkIn, agentName)} />
                 </Notice>
               ) : null}
-              {state === 'error' && view.errorCode === 'auth_required' && !terminalDrives ? (
+              {state === 'error' && view.errorCode === 'auth_required' && !terminalDrives && signsInHere && agentId !== undefined ? (
                 // Keyed per error (the message it failed on), so each one starts unarmed (9.4).
                 <SignInAgain
                   key={`${sesId}:${lastSentUserId ?? ''}`}
+                  agentId={agentId}
+                  agentName={agentName}
                   reason={view.errorReason}
                   canTryAgain={view.lastUserText !== undefined}
                   onTryAgain={tryAgain}
@@ -437,15 +589,45 @@ export function SessionPage() {
                   data-testid="session-error"
                   data-error-code={view.errorCode}
                   action={
-                    view.lastUserText === undefined || terminalDrives ? null : (
-                      <Button variant="outline" onClick={tryAgain} data-testid="try-again">
-                        <ArrowClockwise aria-hidden />
-                        Try again
-                      </Button>
+                    terminalDrives ? null : (
+                      <span className="flex flex-wrap gap-2">
+                        {/* Out of usage (handoff): the chat can go on with another agent while this one cools down. */}
+                        {view.errorCode === 'usage_limit' && severalAgents ? (
+                          <Button variant="outline" onClick={() => setHandoffOpen(true)} data-testid="error-continue-with-another">
+                            <ArrowsLeftRight aria-hidden />
+                            {CONTINUE_WITH_ANOTHER_AGENT}
+                          </Button>
+                        ) : null}
+                        {view.lastUserText === undefined ? null : (
+                          <Button variant="outline" onClick={tryAgain} data-testid="try-again">
+                            <ArrowClockwise aria-hidden />
+                            Try again
+                          </Button>
+                        )}
+                      </span>
                     )
                   }
                 >
-                  {view.errorReason ?? `${AGENT_NAME} stopped with an error. Try again.`}
+                  {view.errorReason ?? `${agentName} stopped with an error. Try again.`}
+                </Notice>
+              ) : null}
+              {refusal !== undefined && model === null && !terminalDrives && dismissedRefusal !== refusal.reason ? (
+                // The agent couldn't run the chosen model (story 11): its own words, and a way to pick another.
+                <Notice
+                  data-testid="model-refused"
+                  role="status"
+                  action={
+                    <span className="flex gap-2">
+                      <Button variant="outline" onClick={() => setModelMenuOpen(true)} data-testid="model-refused-choose">
+                        Choose another model
+                      </Button>
+                      <Button variant="ghost" onClick={() => setDismissedRefusal(refusal.reason)} data-testid="model-refused-dismiss">
+                        Keep the default
+                      </Button>
+                    </span>
+                  }
+                >
+                  {refusal.reason}
                 </Notice>
               ) : null}
               {actionError === undefined ? null : (
@@ -478,21 +660,37 @@ export function SessionPage() {
         {waitingFor !== undefined && cardOffscreen && !terminalDrives ? (
           <div className="pb-2">
             <Button variant="outline" className="w-full justify-start" data-testid="waiting-bar" onClick={showCard}>
-              <StateGlyph state="waiting" label={`${AGENT_NAME} is waiting for you`} />
+              <StateGlyph state="waiting" label={`${agentName} is waiting for you`} />
             </Button>
           </div>
         ) : null}
         <Composer
-          label={`Message ${AGENT_NAME}`}
+          label={`Message ${agentName}`}
           blockedReason={
             driver === 'terminal'
               ? TERMINAL_DRIVING_REASON
               : state === 'waiting'
-                ? `${AGENT_NAME} is waiting for your answer above.`
+                ? `${agentName} is waiting for your answer above.`
                 : undefined
           }
-          hint={state === 'working' ? `${AGENT_NAME} is working. A message you send now waits its turn.` : undefined}
+          hint={state === 'working' ? workingHint(agentName, whileWorking) : undefined}
+          whileWorking={whileWorking}
+          working={state === 'working'}
           restore={restore}
+          draftKey={chatDraftKey(wsId, sesId)}
+          footer={
+            <ModelPicker
+              agentName={agentName}
+              model={model}
+              models={sessionModels === undefined ? undefined : sessionModels.available}
+              current={sessionModels?.current}
+              terminalDrives={terminalDrives}
+              changing={modelChanging}
+              open={modelMenuOpen}
+              onOpenChange={setModelMenuOpen}
+              onChoose={changeModel}
+            />
+          }
           action={
             busy ? (
               <Button type="button" variant="outline" onClick={stop} aria-disabled={stopping} data-testid="stop">
@@ -512,94 +710,11 @@ export function SessionPage() {
               </Button>
             ) : null
           }
-          onSend={async (text) => {
-            await sendMessage(wsId, sesId, text);
+          onSend={async (text, delivery) => {
+            await sendMessage(wsId, sesId, text, undefined, delivery);
           }}
         />
       </PageFooter>
     </>
-  );
-}
-
-/**
- * "Show earlier" at the top of the transcript (EXPERIENCE.md: no infinite
- * scroll): one page per press, in place, with no reload. A page that fails or
- * times out says so inline, with Try again.
- */
-function EarlierHistory({ loading, error, onShow }: { loading: boolean; error: string | undefined; onShow: () => void }) {
-  if (error !== undefined && !loading) {
-    return (
-      <div data-testid="earlier-history-error" className="flex items-center justify-center gap-2" title={error}>
-        <Text as="span" variant="caption" role="alert">
-          Couldn't load.
-        </Text>
-        <Button variant="outline" onClick={onShow} data-testid="earlier-history-retry">
-          <ArrowClockwise aria-hidden />
-          Try again
-        </Button>
-      </div>
-    );
-  }
-  return (
-    <div className="flex justify-center">
-      <Button variant="ghost" onClick={onShow} aria-disabled={loading} aria-busy={loading} data-testid="show-earlier">
-        {loading ? 'Loading earlier messages' : 'Show earlier'}
-      </Button>
-    </div>
-  );
-}
-
-/**
- * Where a chat was reopened after its agent's process was gone (story 2.7):
- * the same words for every way it came back (EXPERIENCE.md, session `idle`).
- */
-function ResumedMarker() {
-  return (
-    <div role="separator" aria-label={RESUMED_FROM_HISTORY} data-testid="resumed-marker" className="flex items-center gap-3">
-      <Separator className="flex-1" />
-      <Text as="span" variant="caption" className="shrink-0">
-        {RESUMED_FROM_HISTORY}
-      </Text>
-      <Separator className="flex-1" />
-    </div>
-  );
-}
-
-/** What a message sent while the agent worked says under it (EXPERIENCE.md Composer). */
-const QUEUE_WORDS = { queued: 'Queued', not_sent: 'Not sent' } as const;
-
-/**
- * One message: the user's in a muted block on the right, the agent's as body
- * text under its name (DESIGN.md Message). A queued or unsent one says so under it.
- */
-function Message({ message }: { message: TranscriptMessage }) {
-  if (message.role === 'user' && message.status !== undefined) {
-    return (
-      <div className="flex max-w-[85%] flex-col items-end gap-1 self-end" data-testid="message-queued" data-status={message.status}>
-        <UserMessage className="max-w-full">{message.text}</UserMessage>
-        <Text variant="caption" data-testid="message-queue-status">
-          {QUEUE_WORDS[message.status]}
-        </Text>
-      </div>
-    );
-  }
-  if (message.role === 'user' && message.origin === 'terminal') {
-    // Typed in the agent's own terminal and brought back on switching (story 3.6; DESIGN.md Caption).
-    return (
-      <div className="flex max-w-[85%] flex-col items-end gap-1 self-end" data-testid="message-from-terminal">
-        <UserMessage className="max-w-full" data-testid="message-user">
-          {message.text}
-        </UserMessage>
-        <Text variant="caption" data-testid="message-origin">
-          from terminal
-        </Text>
-      </div>
-    );
-  }
-  if (message.role === 'user') return <UserMessage data-testid="message-user">{message.text}</UserMessage>;
-  return (
-    <AgentMessage name={AGENT_NAME} data-testid="message-agent" data-streaming={message.streaming} aria-busy={message.streaming}>
-      {message.text}
-    </AgentMessage>
   );
 }

@@ -1,8 +1,6 @@
 import { Desktop, Moon, Sun } from '@phosphor-icons/react';
-import { useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
 import { useAppearance } from '@/appearance/appearance-provider';
-import { DEVELOPER_MODE_QUERY_KEY, saveDeveloperMode } from '@/appearance/developer-mode';
+import { useDeveloperModeSave } from '@/appearance/developer-mode';
 import { AppShortcutSetting } from '@/appearance/app-shortcut-setting';
 import type { Density, ThemePreference } from '@/appearance/appearance';
 import { WorkspaceHeader } from '@/shell/workspace-header';
@@ -20,25 +18,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/ui/toggle-group';
  */
 export function AppearancePage() {
   const { appearance, update } = useAppearance();
-  const queryClient = useQueryClient();
-  const [developerSaving, setDeveloperSaving] = useState(false);
-  const [developerError, setDeveloperError] = useState<string | undefined>(undefined);
-  const setDeveloperMode = (on: boolean) => {
-    if (developerSaving) return;
-    setDeveloperSaving(true);
-    setDeveloperError(undefined);
-    saveDeveloperMode(on).then(
-      (saved) => {
-        setDeveloperSaving(false);
-        queryClient.setQueryData(DEVELOPER_MODE_QUERY_KEY, { developerMode: saved, everSet: true });
-        update({ developerMode: saved });
-      },
-      (failure: unknown) => {
-        setDeveloperSaving(false);
-        setDeveloperError(failure instanceof Error ? failure.message : "Ogden Agents couldn't save Developer mode. Try again.");
-      },
-    );
-  };
+  const { saving: developerSaving, error: developerError, save: setDeveloperMode } = useDeveloperModeSave();
   return (
     <>
       <WorkspaceHeader title="Appearance" />

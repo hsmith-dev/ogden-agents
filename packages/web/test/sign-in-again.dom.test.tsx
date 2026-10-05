@@ -40,7 +40,7 @@ vi.mock('@/agents/agent-setup-api', () => ({
   }),
   useSignIn: (_agentId: string, auth: typeof state.observer): SignIn => {
     state.observer = auth;
-    return { start: () => void state.starts++, cancel: () => {}, sendCode: async () => true, link: undefined, busy: false, error: undefined };
+    return { start: () => void state.starts++, cancel: () => {}, sendCode: async () => true, link: undefined, code: undefined, busy: false, error: undefined };
   },
 }));
 vi.mock('@/agents/signing-in', () => ({ SigningIn: () => <div data-testid="signing-in" /> }));
@@ -59,7 +59,7 @@ function mount() {
   const onTryAgain = vi.fn();
   const node = () => (
     <TooltipProvider>
-      <SignInAgain reason={undefined} canTryAgain onTryAgain={onTryAgain} />
+      <SignInAgain agentId="claude-code" agentName="Claude Code" reason={undefined} canTryAgain onTryAgain={onTryAgain} />
     </TooltipProvider>
   );
   const view = render(node());

@@ -117,6 +117,24 @@ describe('BMad Method setup in core (story 4.3)', () => {
     ]);
   });
 
+  it("passes the other agents' skills folders to the catalog's setup, with upgrade too, and nothing extra without them (epic 6 entry 8)", async () => {
+    const plain = setup(['planning']);
+    await plain.bmadSetup.start(plain.workspace.id, { skillFolders: [] });
+    plain.release();
+    await plain.bmadSetup.settled();
+    expect(plain.setupOptions).toEqual([]);
+    const agy = setup(['planning']);
+    await agy.bmadSetup.start(agy.workspace.id, { skillFolders: ['.agents/skills'] });
+    agy.release();
+    await agy.bmadSetup.settled();
+    expect(agy.setupOptions).toEqual([{ skillFolders: ['.agents/skills'] }]);
+    const upgrade = setup(['planning'], { hasBmad: true, state: 'current' });
+    await upgrade.bmadSetup.start(upgrade.workspace.id, { upgrade: true, skillFolders: ['.agents/skills'] });
+    upgrade.release();
+    await upgrade.bmadSetup.settled();
+    expect(upgrade.setupOptions).toEqual([{ upgrade: true, skillFolders: ['.agents/skills'] }]);
+  });
+
   it('a second start while one runs starts nothing (started: false)', async () => {
     const { workspace, bmadSetup, release, calls } = setup();
     const [first, second] = await Promise.all([bmadSetup.start(workspace.id), bmadSetup.start(workspace.id)]);

@@ -1,7 +1,8 @@
 import { API_ROUTES, DeveloperModeResponse, type CoreEvent, type DeveloperModeResponse as DeveloperModeState } from '@ogden-agents/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { call, type Auth } from '@/api/http';
+import { keepSaved } from '@/api/keep-saved';
 import { tabAuth } from '@/auth/tab-token';
 import { useEventInvalidation } from '@/events/use-event-invalidation';
 import { useAppearance } from './appearance-provider';
@@ -34,13 +35,42 @@ export async function saveDeveloperMode(developerMode: boolean, auth: Auth = tab
   return DeveloperModeResponse.parse(json).developerMode;
 }
 
-/** The server's Developer mode (`undefined` while it loads). */
-export function useServerDeveloperMode() {
-  return useQuery({ queryKey: DEVELOPER_MODE_QUERY_KEY, queryFn: () => fetchDeveloperMode(), retry: false });
+/** A saved Developer mode, as the server now reports it (kept through {@link keepSaved}: a read still on its way never turns the switch back). */
+const savedState = (developerMode: boolean): DeveloperModeState => ({ developerMode, everSet: true });
+
+/** The Developer mode switch's save (Settings > Appearance): one at a time, the saved value kept here and on the server. */
+export function useDeveloperModeSave(auth: Auth = tabAuth) {
+  const { update } = useAppearance();
+  const queryClient = useQueryClient();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const save = (on: boolean) => {
+    if (saving) return;
+    setSaving(true);
+    setError(undefined);
+    saveDeveloperMode(on, auth).then(
+      async (saved) => {
+        await keepSaved(queryClient, DEVELOPER_MODE_QUERY_KEY, savedState(saved));
+        update({ developerMode: saved });
+        setSaving(false);
+      },
+      (failure: unknown) => {
+        setSaving(false);
+        setError(failure instanceof Error ? failure.message : "Ogden Agents couldn't save Developer mode. Try again.");
+      },
+    );
+  };
+  return { saving, error, save };
 }
 
-/** The query keys a Developer mode change makes stale: its own, and every open chat (its mode and picker). */
-export const developerModeKeys = (event: CoreEvent) => (event.type === 'settings.developer_mode_changed' ? [DEVELOPER_MODE_QUERY_KEY, ['session']] : []);
+/**
+ * The query keys a Developer mode change makes stale: its own, every open
+ * chat (its mode and picker), and the default for new projects (its Skip all
+ * reads as Ask while Developer mode is off). Projects' defaults follow their
+ * own `workspace.settings_changed`.
+ */
+export const developerModeKeys = (event: CoreEvent) =>
+  event.type === 'settings.developer_mode_changed' ? [DEVELOPER_MODE_QUERY_KEY, ['session'], ['new-project-defaults']] : [];
 
 /** Whether this browser has carried its old Developer mode over; a blocked storage reads as done (nothing to carry). */
 function carried(storage: Pick<Storage, 'getItem'> | undefined): boolean {
@@ -95,10 +125,10 @@ export function DeveloperModeSync({ auth = tabAuth, storage = browserStorage() }
       if (local.current && !developerMode && everSet !== true && !carrying.current) {
         carrying.current = true;
         saveDeveloperMode(true, auth).then(
-          (saved) => {
+          async (saved) => {
             markCarried(storage);
+            await keepSaved(queryClient, DEVELOPER_MODE_QUERY_KEY, savedState(saved));
             carrying.current = false;
-            queryClient.setQueryData(DEVELOPER_MODE_QUERY_KEY, { developerMode: saved, everSet: true });
           },
           () => {
             // Not carried (the server refused or is gone): the server's value stands.

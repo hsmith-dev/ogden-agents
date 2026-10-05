@@ -36,7 +36,7 @@ import {
   type Core,
   type TicketStorePort,
 } from '../src/index.js';
-import { openTestCore, tempDir, unusedCatalogParts } from './helpers.js';
+import { openTestCore, soleAgent, tempDir, unusedCatalogParts } from './helpers.js';
 
 const UNKNOWN = 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3' as WorkspaceId;
 const SKILLS: CatalogSkill[] = [CatalogSkill.parse({ name: 'bmad-spec', description: 'Write a spec.' }), CatalogSkill.parse({ name: 'bmad-ticket', description: 'Make tickets.' })];
@@ -137,7 +137,7 @@ async function setup(
   if (trusted) await core.bmadScriptTrust.trustScripts(workspace.id);
   const catalog = fakeCatalog();
   const agent = promptRecorder();
-  const chat = createChat({ dataDir: tempDir(), entities: core.entities, sessionEvents: core.sessionEvents, agent });
+  const chat = createChat({ dataDir: tempDir(), entities: core.entities, sessionEvents: core.sessionEvents, agents: soleAgent(agent) });
   const planning = createPlanning({ bmad: core.bmad, entities: core.entities, catalog, chat, agent });
   const read: string[] = [];
   const marks: unknown[][] = [];
@@ -205,10 +205,12 @@ describe('planning (story 4.1)', () => {
     expect(session.kind).toBe('planning');
     expect(core.entities.getSession(session.id)?.kind).toBe('planning');
     expect(firstUserMessage(core, session.id)).toEqual(expect.objectContaining({ role: 'user', content: 'run-skill:bmad-spec' }));
+    // Named after the action as the Plan page shows it (its label, here none: its description), never after the skill invocation (backlog story 12).
+    expect(core.entities.getSession(session.id)?.autoTitle).toBe('Write a spec.');
     await chat.settled();
     expect(agent.prompts).toEqual(['run-skill:bmad-spec']);
     // A plain chat is still a chat.
-    expect(chat.createChatSession(workspace.id).kind).toBe('chat');
+    expect((await chat.createChatSession(workspace.id)).kind).toBe('chat');
     await chat.close();
   });
 

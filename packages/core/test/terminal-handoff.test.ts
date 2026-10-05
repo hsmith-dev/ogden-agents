@@ -29,7 +29,7 @@ import {
   type Core,
   type TerminalPort,
 } from '../src/index.js';
-import { openTestCore, tempDir } from './helpers.js';
+import { openTestCore, soleAgent, tempDir } from './helpers.js';
 import { fakeTerminal as handoffTerminal } from './support/fake-terminal.js';
 
 afterEach(() => {
@@ -134,12 +134,12 @@ async function answeredOnce(terminal = handoffTerminal(), agent = handoffAgent()
     dataDir: tempDir('ogden-agents-data-'),
     entities: core.entities,
     sessionEvents: core.sessionEvents,
-    agent: agent.port,
+    agents: soleAgent(agent.port),
     terminal: terminal.port,
     onInternalError: (_sessionId, error) => internal.push(error),
   });
   const workspace = chat.openWorkspace(tempDir('ogden-agents-repo-'));
-  const session = chat.createChatSession(workspace.id);
+  const session = await chat.createChatSession(workspace.id);
   agent.record.say('first question', 're: first question');
   chat.sendMessage(workspace.id, session.id, 'first question');
   await chat.settled();
@@ -591,7 +591,7 @@ describe('the handoff never leaves a session stuck (story 3.4)', () => {
       dataDir: tempDir('ogden-agents-data-'),
       entities: broken,
       sessionEvents: core.sessionEvents,
-      agent: handoffAgent().port,
+      agents: soleAgent(handoffAgent().port),
       terminal: handoffTerminal().port,
       onInternalError: (_sessionId, error) => internal.push(error),
     });
@@ -627,7 +627,7 @@ describe('the handoff never leaves a session stuck (story 3.4)', () => {
       dataDir: tempDir('ogden-agents-data-'),
       entities: core.entities,
       sessionEvents: core.sessionEvents,
-      agent: first.agent.port,
+      agents: soleAgent(first.agent.port),
       terminal: handoffTerminal().port,
       onInternalError: (_sessionId, error) => internal.push(error),
     });
@@ -646,7 +646,7 @@ describe('the handoff never leaves a session stuck (story 3.4)', () => {
     expect(messages(core, first.session.id).at(-1)).toEqual(['agent', 're: still there?', undefined]);
     // Once: another start imports nothing again.
     const count = messages(core, first.session.id).length;
-    const again = createChat({ dataDir: tempDir('ogden-agents-data-'), entities: core.entities, sessionEvents: core.sessionEvents, agent: first.agent.port });
+    const again = createChat({ dataDir: tempDir('ogden-agents-data-'), entities: core.entities, sessionEvents: core.sessionEvents, agents: soleAgent(first.agent.port)});
     await again.settled();
     expect(messages(core, first.session.id)).toHaveLength(count);
     expect(internal).toEqual([]);

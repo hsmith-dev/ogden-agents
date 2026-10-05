@@ -16,7 +16,7 @@
  * confined to the real folders).
  */
 import { relative, isAbsolute, posix, win32 } from 'node:path';
-import { RepoRelativePath, type CatalogNext, type Catalog, type SessionId, type WorkspaceId } from '@ogden-agents/shared';
+import { RepoRelativePath, type CatalogNext, type Catalog, type Session, type SessionId, type WorkspaceId } from '@ogden-agents/shared';
 import type { AgentPort } from './agent-port.js';
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
 import type { BmadFeatures } from './bmad-pieces.js';
@@ -110,6 +110,8 @@ export interface PlanningDocumentsDeps {
   entities: Pick<Entities, 'getWorkspace' | 'getSession' | 'listCompletedMessages'>;
   catalog: Pick<BmadCatalogPort, 'catalog' | 'setupStatus'>;
   agent: Pick<AgentPort, 'skillInvocation'>;
+  /** The agent a session runs (epic 6 entry 8), whose syntax its first message is in; `undefined`: {@link agent}. */
+  agentOf?: ((session: Session) => Pick<AgentPort, 'skillInvocation'> | undefined) | undefined;
   sessionEvents: Pick<SessionEvents, 'appendSessionEvent'>;
   /** Told why a write appended nothing (Planning off, no output folder, a failure), for the log. Never a path. */
   onError?: (sessionId: SessionId, step: PlanningDocumentsStep, error?: unknown) => void;
@@ -126,7 +128,7 @@ export interface PlanningDocuments {
   settled(): Promise<void>;
 }
 
-export function createPlanningDocuments({ bmad, entities, catalog, agent, sessionEvents, onError }: PlanningDocumentsDeps): PlanningDocuments {
+export function createPlanningDocuments({ bmad, entities, catalog, agent, agentOf, sessionEvents, onError }: PlanningDocumentsDeps): PlanningDocuments {
   const running = new Set<Promise<void>>();
   const tell = (sessionId: SessionId, step: PlanningDocumentsStep, error?: unknown) => {
     try {
@@ -166,7 +168,7 @@ export function createPlanningDocuments({ bmad, entities, catalog, agent, sessio
     if (documents.length === 0) return;
     const { skills } = await catalog.catalog(workspace.realPath);
     const first = entities.listCompletedMessages(sessionId).find((message) => message.role === 'user')?.content;
-    const named: CatalogNext | null = sessionSkill(first, skills, agent)?.next ?? null;
+    const named: CatalogNext | null = sessionSkill(first, skills, agentOf?.(session) ?? agent)?.next ?? null;
     // Only a next step whose skill is installed (the catalog already drops others; checked again here).
     const next = named !== null && skills.some((skill) => skill.name === named.skill) ? { skill: named.skill, label: named.label } : null;
     // Checked again after the (async) reads: a Planning turned off meanwhile appends nothing.

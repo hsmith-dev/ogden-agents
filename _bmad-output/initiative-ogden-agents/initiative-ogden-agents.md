@@ -22,7 +22,7 @@ A non-developer goes from an idea to approved, agent-built code without opening 
 
 1. On macOS, Windows and Linux, a non-developer completes the spec's success signal without opening a terminal.
 2. `npx ogden-agents` from the public npm registry installs and launches on all three.
-3. Every agent BMAD supports builds through the UI, and every agent that speaks ACP also chats.
+3. Claude Code chats and builds through the UI. If epic 6's spike is a go, Antigravity also chats (user, 2026-10-02; was "every agent BMAD supports").
 4. No unattended run executes unsandboxed, and no ticket reaches done without a person approving it.
 5. Every change carried in the BMAD-METHOD and bmad-loop forks has an upstream PR open or merged.
 
@@ -48,3 +48,5 @@ Each epic is one user-facing outcome, built in the spec's delivery-phase order. 
 - Decision: no cost or token tracking; CAP-11 retired (user, 2026-09-29).
 - Decision: the cross-epic decisions live in the architecture spine, not in hitl stories (user chose bmad-architecture, 2026-09-29).
 - Decision: epic 1 is built interactively with `bmad-build`; later epics may run unattended with `bmad-build-auto`, with checkpoints set at their inception (user, 2026-09-29).
+- Decision: v1 is Claude Code, fully: chat, planning and builds. Epic 6 becomes "Add Antigravity beside Claude Code, if possible", chat only, gated by a spike's go or no-go; builds with Antigravity, and Codex, Gemini CLI and GitHub Copilot CLI for chat and builds, move out of v1 to epic 8 (v2). Their research is kept in epic 6's Notes as v2 input (user, 2026-10-02).
+- Decision: epic 6's agent-choice groundwork (session agent, agent registry and list, shared ACP client, picker and default per project) is built whatever Antigravity's spike decides; a no-go drops only the Antigravity entries. v1.1 (Codex and Grok) builds on it (user, 2026-10-02).

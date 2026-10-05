@@ -12,6 +12,9 @@ import { defineConfig, devices } from '@playwright/test';
  * terminal on every OS, through another test hook. Epic 10's BMad journey
  * (story 10.9) runs with no BMad hook (every piece Coming soon, as a user
  * sees it), then with test-registered pieces and the guarded probe route.
+ * Epic 6's agents journey (entry 10) runs Claude Code and Antigravity (both
+ * the fake) side by side, Antigravity's fixture install, and the agent trust
+ * gate, through more test hooks.
  * Every server a spec starts is stopped with its whole process tree.
  *
  *   pnpm run pack && pnpm e2e:installed
@@ -43,8 +46,8 @@ export default defineConfig({
   // epic 3's terminal journey (story 3.10, with its install without
   // optional dependencies), epic 10's BMad journey (story 10.9), epic 4's
   // planning journey and the permission modes journey (story 4.13), and the
-  // 0.2.0 upgrade (story 10.7), each on a server of its own from the same
-  // install; then epic 1's journey on the first server, last since it quits it.
+  // 0.2.0 upgrade (story 10.7), and epic 6's agents journey (entry 10), each
+  // on a server of its own from the same install; then epic 1's journey on the first server, last since it quits it.
   projects: [
     { name: 'gate', testMatch: /(^|[\\/])(gate|bypass)\.spec\.ts$/ },
     { name: 'hold-proof', testMatch: /(^|[\\/])hold-proof\.spec\.ts$/, dependencies: ['gate'] },
@@ -55,6 +58,7 @@ export default defineConfig({
     { name: 'planning', testMatch: /(^|[\\/])planning-journey\.spec\.ts$/, dependencies: ['bmad'] },
     { name: 'modes', testMatch: /(^|[\\/])permission-modes-journey\.spec\.ts$/, dependencies: ['planning'] },
     { name: 'upgrade', testMatch: /(^|[\\/])upgrade-journey\.spec\.ts$/, dependencies: ['modes'] },
-    { name: 'journey', testMatch: /(^|[\\/])journey\.spec\.ts$/, dependencies: ['upgrade'] },
+    { name: 'agents', testMatch: /(^|[\\/])agents-journey\.spec\.ts$/, dependencies: ['upgrade'] },
+    { name: 'journey', testMatch: /(^|[\\/])journey\.spec\.ts$/, dependencies: ['agents'] },
   ],
 });

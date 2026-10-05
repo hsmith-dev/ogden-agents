@@ -2,7 +2,7 @@
  * The agent setup use-case's errors, constants and interfaces (story 9.1),
  * split from `agent-setup.ts`, which re-exports them.
  */
-import type { AgentSetupStatus, SignInResponse } from '@ogden-agents/shared';
+import type { AgentAuthState, AgentInstallState, AgentSetupStatus, SignInResponse } from '@ogden-agents/shared';
 import type { AgentSignIn } from './agent-setup-port.js';
 import { CoreError } from './errors.js';
 import type { SecretStorePort } from './secret-store-port.js';
@@ -43,6 +43,26 @@ export class SignInNotPendingError extends CoreError {
   }
 }
 
+/** An agent can't do that now (installing, a file in use, a sign-out that failed); `message` is plain words. */
+export class AgentBusyError extends CoreError {
+  override readonly name = 'AgentBusyError';
+  constructor(message: string, options: { cause?: unknown } = {}) {
+    super('agent_busy', message);
+    if (options.cause !== undefined) this.cause = options.cause;
+  }
+}
+
+/**
+ * Whether a new chat can be started with an agent now (6.3): its install and
+ * sign-in state as last read, and, when it can't, why. `blocked` is set only
+ * on a state the agent confirmed: a status that couldn't be read never blocks.
+ */
+export interface AgentReadiness {
+  install: AgentInstallState;
+  auth: AgentAuthState;
+  blocked?: 'agent_not_installed' | 'agent_signed_out' | undefined;
+}
+
 export interface AgentSetup {
   /**
    * Reads each agent's saved API key from the secret store, and the
@@ -56,6 +76,13 @@ export interface AgentSetup {
    * (never the key). Refreshes the subscription state.
    */
   list(): Promise<AgentSetupStatus[]>;
+  /**
+   * Whether a new chat can be started with `agentId` (6.3), from its status
+   * as last read when that is under `maxAgeMs` old, else read now (bounded
+   * by the port's own status timeout). An agent with no setup port is ready.
+   * Never throws.
+   */
+  readiness(agentId: string, maxAgeMs: number): Promise<AgentReadiness>;
   /**
    * Checks `apiKey` with the agent's free verify call and stores it. Rejects
    * with `ValidationError` (a malformed key, or an agent that takes none),
@@ -97,6 +124,21 @@ export interface AgentSetup {
    * `agent.install_*` events.
    */
   install(agentId: string): Promise<{ started: boolean; agent: AgentSetupStatus }>;
+  /**
+   * Uninstalls `agentId` (epic 6 entry 7), cancelling a sign-in in progress
+   * first, and resolves with its status after. Rejects with
+   * `AgentBusyError` while it installs or when the port couldn't (a file in
+   * use), `ValidationError` for an agent that can't be uninstalled here.
+   * Appends `agent.uninstalled`.
+   */
+  uninstall(agentId: string): Promise<AgentSetupStatus>;
+  /**
+   * Signs `agentId` out of the user's own account (epic 6 entry 7) and
+   * resolves with its status after: an API key, if any, takes over.
+   * Rejects with `AgentBusyError` when the port couldn't, `ValidationError`
+   * for an agent that can't be signed out here.
+   */
+  signOut(agentId: string): Promise<AgentSetupStatus>;
   /** Resolves once no install is running (tests, shutdown). */
   settled(): Promise<void>;
   /** Stops every sign-in (server stop). Appends nothing. */
@@ -104,6 +146,11 @@ export interface AgentSetup {
 }
 
 export interface AgentSetupOptions {
+  /**
+   * Who makes each agent ("Anthropic"), from its descriptor (epic 6, entry
+   * 6): added to its status as `provider`, so the agent card names it.
+   */
+  providerOf?: (agentId: string) => string | undefined;
   /** Called with every failure, for the log. Never carries the URL, a code, a key or the agent's output. */
   onFailure?: (agentId: string, step: string, error: unknown) => void;
   /** Where API keys are kept (AD-16). Without it, saving a key is refused as {@link SecretsUnavailableError}. */

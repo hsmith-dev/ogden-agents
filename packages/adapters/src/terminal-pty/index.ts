@@ -142,24 +142,35 @@ function killTerminalTree(terminal: PtyTerminal, platform: NodeJS.Platform): voi
 
 /** node-pty's Windows error when the pseudo-console it just made is missing from its own list (see {@link spawnWithRetry}). */
 export const INVALID_PTY_HANDLE = 'Invalid pty handle';
-/** How many times a spawn is tried when it fails with {@link INVALID_PTY_HANDLE}. */
+/**
+ * node-pty's Windows error when `CreateProcessW` refuses the pseudo-console it
+ * was handed (ERROR_INVALID_PARAMETER): the same lost-handle race, seen as a
+ * bad handle instead of a missing one (see {@link spawnWithRetry}).
+ */
+export const PTY_CREATE_PROCESS_INVALID_PARAMETER = 'Cannot create process, error code: 87';
+/** The spawn errors that are this race, and only these, tried again. */
+const LOST_PTY_ERRORS: ReadonlySet<string> = new Set([INVALID_PTY_HANDLE, PTY_CREATE_PROCESS_INVALID_PARAMETER]);
+/** How many times a spawn is tried when it fails with one of {@link LOST_PTY_ERRORS}. */
 export const PTY_SPAWN_ATTEMPTS = 3;
 
 /**
  * node-pty 1.1.0 (Windows, ConPTY) keeps its open pseudo-consoles in a list
  * with no lock: a terminal's exit removes its entry on a background thread
- * while a new spawn adds one on the main thread. When the two meet (a
- * terminal opened just as another is closed or exits) the new entry can be
- * lost, and the spawn throws "Invalid pty handle" before anything has run.
+ * while a new spawn adds one on the main thread, and the spawn then reads its
+ * entry back by id to start the program. When the two meet (a terminal opened
+ * just as another is closed or exits) the new entry can be lost, and the spawn
+ * throws "Invalid pty handle", or read back damaged, and `CreateProcessW`
+ * refuses its pseudo-console with error 87 (story 3.8; 6.9: CI run
+ * 37239378578, right after a crashed CLI's exit). Either way nothing has run.
  * That spawn is simply tried again, a bounded number of times; any other
- * error is thrown at once.
+ * error (another `CreateProcessW` code included) is thrown at once.
  */
 function spawnWithRetry(spawn: () => PtyTerminal): PtyTerminal {
   for (let attempt = 1; ; attempt += 1) {
     try {
       return spawn();
     } catch (error) {
-      const lost = error instanceof Error && error.message === INVALID_PTY_HANDLE;
+      const lost = error instanceof Error && LOST_PTY_ERRORS.has(error.message);
       if (!lost || attempt >= PTY_SPAWN_ATTEMPTS) throw error;
     }
   }

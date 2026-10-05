@@ -24,14 +24,20 @@
  * or profile change, no admin rights.
  */
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, posix, win32 } from 'node:path';
+import { helperEnvironment, NPM_NETWORK } from '../child-env.js';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { AgentSetupError, type AgentInstallProgress } from '@ogden-agents/core';
-import { CLAUDE_AGENT_ACP_PACKAGE, CLAUDE_CODE } from '../acp-claude-code/claude-code-agent.js';
+import { CLAUDE_AGENT_ACP_PACKAGE, CLAUDE_CODE } from '../acp-claude-code/constants.js';
 import { errorCode } from '../error-code.js';
 import { renameWithRetry } from '../toolchain-uv/uv-toolchain.js';
 import pinnedLock from './pins/package-lock.json' with { type: 'json' };
 import pinnedManifest from './pins/package.json' with { type: 'json' };
+
+import { findNpmCli, pathOf } from './npm-cli.js';
+
+// Moved out in story 6.9; still exported from here.
+export { findNpmCli, pathOf, type FindNpmOptions } from './npm-cli.js';
 
 /** `<dataDir>/agents/claude-code`: the installed adapters and the temp folders an install works in. */
 export const CLAUDE_CODE_DIR = join('agents', 'claude-code');
@@ -68,103 +74,6 @@ export function pinnedVersion(pins: AdapterPins = ADAPTER_PINS): string {
 
 /** The adapter's entry script inside an installed folder. */
 const entryIn = (folder: string) => join(folder, 'node_modules', ...CLAUDE_AGENT_ACP_PACKAGE.split('/'), 'dist', 'index.js');
-
-export interface FindNpmOptions {
-  /** Default `process.execPath`. */
-  execPath?: string;
-  /**
-   * `npm_execpath` as the server found it at start: the npm that launched
-   * Ogden Agents (`npx ogden-agents`). Used only when it is an absolute path
-   * to an existing `npm-cli.js` (or `npx-cli.js`, whose sibling `npm-cli.js` is used).
-   */
-  launcherNpm?: string | undefined;
-  /** The `PATH` to search for an `npm`; only absolute entries count. Default: none searched. */
-  pathEnv?: string | undefined;
-  /** Default `process.platform`. */
-  platform?: NodeJS.Platform;
-  /** Default: `existsSync`. */
-  exists?: (file: string) => boolean;
-  /** Default: `realpathSync`, or the path itself when it can't be resolved. */
-  realpath?: (file: string) => string;
-}
-
-const realpathOrSelf = (file: string) => {
-  try {
-    return realpathSync(file);
-  } catch {
-    return file;
-  }
-};
-
-/**
- * `npm-cli.js` to run with `process.execPath` (never a shell, never a
- * `.cmd`), in the order the user decided (2026-09-30):
- *
- * 1. beside this Node: `<bin>/node_modules/npm` (the Windows layout) or
- *    `<bin>/../lib/node_modules/npm` (POSIX), for `execPath` as given and as
- *    its real path (a symlinked `node`);
- * 2. the npm that launched Ogden Agents (`launcherNpm`, from `npm_execpath`),
- *    only when it is an absolute path to an existing `npm-cli.js` or `npx-cli.js`;
- * 3. an `npm` on an absolute `PATH` entry (relative entries, the current
- *    folder included, are skipped), resolved to its `npm-cli.js`.
- *
- * `undefined` when none is found.
- */
-export function findNpmCli(options: FindNpmOptions = {}): string | undefined {
-  const platform = options.platform ?? process.platform;
-  const paths = platform === 'win32' ? win32 : posix;
-  const exists = options.exists ?? existsSync;
-  const realpath = options.realpath ?? realpathOrSelf;
-  /** The npm-cli.js in an npm install whose `bin` folder is `bin`, or beside a Node in `bin`. */
-  const npmNear = (bin: string) => [
-    paths.join(bin, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-    paths.join(bin, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-  ];
-  const isNpmCli = (file: string) => paths.isAbsolute(file) && paths.basename(file) === 'npm-cli.js' && exists(file);
-
-  // 1. Beside this Node.
-  const execPath = options.execPath ?? process.execPath;
-  const execs = [execPath];
-  const realExec = realpath(execPath);
-  if (realExec !== execPath) execs.push(realExec);
-  for (const exec of execs) {
-    const found = npmNear(paths.dirname(exec)).find(isNpmCli);
-    if (found !== undefined) return found;
-  }
-
-  // 2. The npm that launched Ogden Agents.
-  const launcher = options.launcherNpm;
-  if (launcher !== undefined && launcher !== '' && paths.isAbsolute(launcher)) {
-    if (isNpmCli(launcher)) return launcher;
-    if (paths.basename(launcher) === 'npx-cli.js' && exists(launcher)) {
-      const sibling = paths.join(paths.dirname(launcher), 'npm-cli.js');
-      if (isNpmCli(sibling)) return sibling;
-    }
-  }
-
-  // 3. An `npm` on an absolute PATH entry.
-  const names = platform === 'win32' ? ['npm.cmd', 'npm'] : ['npm'];
-  for (const raw of (options.pathEnv ?? '').split(paths.delimiter)) {
-    const dir = platform === 'win32' ? raw.replace(/^"(.*)"$/, '$1') : raw;
-    if (dir === '' || !paths.isAbsolute(dir)) continue;
-    for (const name of names) {
-      const npm = paths.join(dir, name);
-      if (!exists(npm)) continue;
-      const real = realpath(npm);
-      // A symlink straight to npm-cli.js (Homebrew, most POSIX installs).
-      if (isNpmCli(real)) return real;
-      // Otherwise npm beside it, as a Node install lays it out.
-      const found = [...npmNear(paths.dirname(real)), ...npmNear(dir)].find(isNpmCli);
-      if (found !== undefined) return found;
-    }
-  }
-  return undefined;
-}
-
-/** `PATH` from an environment, whatever its case (Windows names are case-insensitive). */
-export function pathOf(env: Readonly<Record<string, string | undefined>>): string | undefined {
-  return env.PATH ?? Object.entries(env).find(([name]) => name.toUpperCase() === 'PATH')?.[1];
-}
 
 export interface InstalledAdapter {
   /** The entry script, `…/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js`. */
@@ -320,10 +229,16 @@ function reasonFor(code: string | undefined): string {
   return FAILED;
 }
 
-/** This environment without inherited `npm_*` settings (any case), plus npm's cache in the temp folder. */
+/**
+ * npm's environment (AD-16): the base allowlist and what npm needs to reach
+ * its registry as the user set it up (proxies, certificate authorities, its
+ * config folders: `NPM_NETWORK`), never an agent key or any other variable
+ * of this server's; no inherited `npm_*` settings (any case), plus npm's
+ * cache in the temp folder.
+ */
 export function npmEnv(env: Readonly<Record<string, string | undefined>>, cache: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [name, value] of Object.entries(env)) if (value !== undefined && !name.toLowerCase().startsWith('npm_')) out[name] = value;
+  const out = helperEnvironment(NPM_NETWORK, env);
+  for (const name of Object.keys(out)) if (name.toLowerCase().startsWith('npm_')) delete out[name];
   out.npm_config_cache = cache;
   out.npm_config_update_notifier = 'false';
   return out;

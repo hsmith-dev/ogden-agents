@@ -86,10 +86,10 @@ describe('a build session in the chat core (story 5.2)', () => {
     const core = openTestCore();
     const agent = askingAgent();
     const buildSessions = createBuildSessions();
-    const chat = createChat({ dataDir: tempDir('ogden-agents-data-'), entities: core.entities, sessionEvents: core.sessionEvents, agent: agent.port, buildSessions, permissions: core.permissions });
+    const chat = createChat({ dataDir: tempDir('ogden-agents-data-'), entities: core.entities, sessionEvents: core.sessionEvents, agents: soleAgent(agent.port), buildSessions, permissions: core.permissions });
     try {
       const workspace = chat.openWorkspace(tempDir('ogden-agents-repo-'));
-      const session = chat.createChatSession(workspace.id, 'build');
+      const session = await chat.createChatSession(workspace.id, { kind: 'build' });
       buildSessions.set(session.id, { attended: true, cwd: '/w/y' });
       // The user does not type into a build session, attended or not.
       expect(() => chat.sendMessage(workspace.id, session.id, 'hello')).toThrow(BuildSessionReadOnlyError);

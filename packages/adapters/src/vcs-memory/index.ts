@@ -165,6 +165,11 @@ export function createMemoryVcs(): MemoryVcs {
       const files = repo(repoPath).changes.get(branch) ?? [];
       return { files: files.length, insertions: files.length, deletions: 0 };
     },
+    async importObjects(repoPath, branch, base) {
+      calls.push(`importObjects ${repoPath} ${branch} ${base}`);
+      return 'nothing';
+    },
+
     async isMerged(repoPath, branch) {
       calls.push(`isMerged ${repoPath} ${branch}`);
       return repo(repoPath).merged.has(branch);

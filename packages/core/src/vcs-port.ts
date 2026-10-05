@@ -101,6 +101,16 @@ export interface VcsPort {
    * commit. No hook runs; the user's identity, else Ogden's.
    */
   commitPaths(repoPath: string, paths: readonly string[], message: string): Promise<string>;
+  /**
+   * Brings the objects a sandboxed run's own object store holds (story 5.6)
+   * into the repo, before approve merges: everything reachable from
+   * `branch` and not from `base`, packed and unpacked by git itself with
+   * `--strict`, so an object an agent wrote badly, or one that doesn't
+   * connect to the repo's history, is refused and nothing is imported.
+   * `nothing` when the run has no store (an attended run) or holds no new
+   * object; `refused` when git would not take them.
+   */
+  importObjects(repoPath: string, branch: string, base: string): Promise<'imported' | 'nothing' | 'refused'>;
   /** Whether `branch` is already merged into the checked-out branch. */
   isMerged(repoPath: string, branch: string): Promise<boolean>;
   /**

@@ -24,9 +24,9 @@
  * path (never a `prune`, which would touch the user's other worktrees), and
  * a branch is deleted only when it is one Ogden made (`ogden/…`).
  */
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { isRealFolder, removeLinkOnly, RUN_SHORT_ID as RUN_ID, VcsError, type VcsCheck, type VcsDiff, type VcsHead, type VcsPort, type VcsWorktreeGitPaths } from '@ogden-agents/core';
 import { BUILD_BRANCH_PREFIX, MIN_GIT_VERSION } from '@ogden-agents/shared';
 
@@ -49,6 +49,13 @@ export interface GitVcsOptions {
    * other methods), removal checks only that the path isn't the repo.
    */
   worktreesRoot?: string;
+  /**
+   * The folder of every run's folder (`<data>/r`; story 5.6). A run's own
+   * object store is `<runsRoot>/<run8>/objects`, found from its `ogden/<run8>/…`
+   * branch name: reads of that branch take it as an alternate, and a rebase
+   * or patch in its worktree writes there, never to the repo's objects.
+   */
+  runsRoot?: string;
 }
 
 /** `major.minor.patch` of `git --version`'s answer (`git version 2.39.2.windows.1`), or `undefined`. */
@@ -71,6 +78,10 @@ export function gitVersionAtLeast(found: readonly [number, number, number], want
 
 /** A full commit id. */
 const REVISION = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+/** A run's branch: `ogden/<run8>/…`. */
+const RUN_BRANCH = /^ogden\/([a-z2-7]{8})\//;
+/** The most bytes of new objects approve imports from one run (a pack held in memory). */
+const MAX_IMPORT_BYTES = 512 * 1024 * 1024;
 /** A branch name as Ogden makes them, and as git accepts them. */
 const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 
@@ -125,6 +136,33 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
   const git = options.git ?? 'git';
   const timeout = options.timeoutMs ?? 120_000;
 
+  /**
+   * The run's object store for a branch Ogden made (`ogden/<run8>/…`), when
+   * it exists as a real folder directly inside a real runs folder; else
+   * `undefined` (an attended run, or none).
+   */
+  const storeOf = (branch: string): string | undefined => {
+    const root = options.runsRoot;
+    const id = RUN_BRANCH.exec(branch)?.[1];
+    if (root === undefined || id === undefined || !isRealFolder(root)) return undefined;
+    const store = join(root, id, 'objects');
+    if (!isRealFolder(join(root, id)) || !isRealFolder(store) || store.includes(delimiter)) return undefined;
+    return store;
+  };
+
+  /** Env for a read of `branch`: the run's store as an alternate (the repo's own objects stay primary). */
+  const readEnv = (branch: string): Record<string, string> => {
+    const store = storeOf(branch);
+    return store === undefined ? {} : { GIT_ALTERNATE_OBJECT_DIRECTORIES: store };
+  };
+
+  /** Env for git that writes in the run's worktree: objects go to the run's store, the repo's are an alternate. */
+  const writeEnv = (branch: string, common: string): Record<string, string> => {
+    const store = storeOf(branch);
+    const repoObjects = join(common, 'objects');
+    return store === undefined || repoObjects.includes(delimiter) ? {} : { GIT_OBJECT_DIRECTORY: store, GIT_ALTERNATE_OBJECT_DIRECTORIES: repoObjects };
+  };
+
   /** The empty hooks folder, made sure of before every call. */
   const hooksDir = (): string => {
     mkdirSync(options.hooksDir, { recursive: true, mode: 0o700 });
@@ -170,6 +208,54 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
     if (result.code !== 0) throw new VcsError(`git couldn't ${step}.`, { step, exitCode: result.code });
     return result.stdout;
   };
+
+  /**
+   * Runs git with `input` on its stdin and keeps its stdout as bytes (at
+   * most {@link MAX_IMPORT_BYTES}); `undefined` when git can't run or the
+   * output is over the bound (the child is stopped).
+   */
+  const runBinary = (cwd: string, args: readonly string[], input: string | Buffer, extraEnv: Readonly<Record<string, string>>): Promise<{ code: number; stdout: Buffer } | undefined> =>
+    new Promise((resolvePromise) => {
+      let hooks: string;
+      try {
+        hooks = hooksDir();
+      } catch {
+        resolvePromise(undefined);
+        return;
+      }
+      const child = spawn(git, ['-c', 'core.longpaths=true', '-c', `core.hooksPath=${hooks}`, '-c', 'core.fsmonitor=false', ...args], {
+        cwd,
+        env: { ...options.env(), GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C', LANG: 'C', ...extraEnv },
+        stdio: ['pipe', 'pipe', 'ignore'],
+        windowsHide: true,
+      });
+      const chunks: Buffer[] = [];
+      let size = 0;
+      let settled = false;
+      const finish = (answer: { code: number; stdout: Buffer } | undefined) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolvePromise(answer);
+      };
+      const timer = setTimeout(() => {
+        child.kill();
+        finish(undefined);
+      }, Math.max(timeout, 600_000));
+      child.stdout.on('data', (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > MAX_IMPORT_BYTES) {
+          child.kill();
+          finish(undefined);
+          return;
+        }
+        chunks.push(chunk);
+      });
+      child.on('error', () => finish(undefined));
+      child.on('close', (code) => finish({ code: code ?? 1, stdout: Buffer.concat(chunks) }));
+      child.stdin.on('error', () => undefined);
+      child.stdin.end(input);
+    });
 
   const head = async (repoPath: string): Promise<VcsHead | undefined> => {
     const ref = await run(checkPath(repoPath), ['symbolic-ref', '--quiet', 'HEAD']);
@@ -240,7 +326,7 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
     } catch {
       throw new VcsError("The run's worktree isn't as Ogden Agents made it, so git didn't run there.", { step: 'worktree' });
     }
-    return { GIT_DIR: gitDir, GIT_COMMON_DIR: common, GIT_WORK_TREE: worktreePath };
+    return { GIT_DIR: gitDir, GIT_COMMON_DIR: common, GIT_WORK_TREE: worktreePath, ...writeEnv(branch, common) };
   };
 
   /** Whether git's own file `name` (`MERGE_HEAD`, `rebase-merge`, …) exists in the checkout's git folder. */
@@ -331,7 +417,7 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
     },
 
     async branchRevision(repoPath, branch) {
-      const out = await run(checkPath(repoPath), ['rev-parse', '--verify', '--quiet', `refs/heads/${checkBranch(branch)}^{commit}`]);
+      const out = await run(checkPath(repoPath), ['rev-parse', '--verify', '--quiet', `refs/heads/${checkBranch(branch)}^{commit}`], undefined, readEnv(branch));
       const id = out.stdout.trim();
       return out.code === 0 && REVISION.test(id) ? id : undefined;
     },
@@ -414,8 +500,8 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
         // Not empty, or not there.
       }
       if (branch === undefined) return;
-      if ((await run(repoPath, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`])).code !== 0) return;
-      const deleted = await run(repoPath, ['branch', removeOptions.mergedOnly === true ? '-d' : '-D', '--', branch]);
+      if ((await run(repoPath, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], undefined, readEnv(branch))).code !== 0) return;
+      const deleted = await run(repoPath, ['branch', removeOptions.mergedOnly === true ? '-d' : '-D', '--', branch], undefined, readEnv(branch));
       if (deleted.code !== 0) throw new VcsError("git couldn't delete the run's branch.", { step: 'delete the branch', exitCode: deleted.code });
     },
 
@@ -425,19 +511,42 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
       checkPath(repoPath);
       const from = checkRevision(base);
       const to = `refs/heads/${checkBranch(branch)}`;
-      const names = await must(repoPath, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--name-only', '-z', from, to, '--'], 'read the changes');
+      const env = readEnv(branch);
+      const names = await must(repoPath, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--name-only', '-z', from, to, '--'], 'read the changes', undefined, env);
       const files = names.split('\0').filter((name) => name !== '');
       const maxBytes = diffOptions.maxBytes ?? 512 * 1024;
       if (files.length === 0) return { diff: '', truncated: false, files };
-      const result = await run(repoPath, ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-renames', from, to, '--'], 256 * 1024 * 1024);
+      const result = await run(repoPath, ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-renames', from, to, '--'], 256 * 1024 * 1024, env);
       if (result.code !== 0) throw new VcsError("git couldn't read the changes.", { step: 'diff', exitCode: result.code });
       const bytes = Buffer.from(result.stdout, 'utf8');
       if (bytes.length <= maxBytes) return { diff: result.stdout, truncated: false, files };
       return { diff: bytes.subarray(0, maxBytes).toString('utf8'), truncated: true, files };
     },
 
+    async importObjects(repoPath, branch, base) {
+      checkPath(repoPath);
+      const store = storeOf(checkBranch(branch));
+      if (store === undefined) return 'nothing';
+      const from = checkRevision(base);
+      // What the branch has that its base doesn't, read with the run's store as an alternate; nothing the agent named is a path git opens.
+      const listed = await run(repoPath, ['rev-list', '--objects', `refs/heads/${branch}`, '--not', from], 256 * 1024 * 1024, readEnv(branch));
+      if (listed.code !== 0) return 'refused';
+      const ids = listed.stdout
+        .split(/\r?\n/)
+        .map((line) => line.split(' ')[0] ?? '')
+        .filter((id) => id !== '');
+      if (ids.some((id) => !REVISION.test(id))) return 'refused';
+      if (ids.length === 0) return 'nothing';
+      // git packs them (re-reading and re-compressing each object) and unpacks them with `--strict`, which hashes every
+      // object itself and refuses one whose references don't resolve: a forged or damaged file in the store is never copied.
+      const packed = await runBinary(repoPath, ['pack-objects', '--stdout', '--quiet'], `${ids.join('\n')}\n`, readEnv(branch));
+      if (packed === undefined || packed.code !== 0 || packed.stdout.length === 0) return 'refused';
+      const unpacked = await runBinary(repoPath, ['unpack-objects', '--strict', '-q'], packed.stdout, {});
+      return unpacked !== undefined && unpacked.code === 0 ? 'imported' : 'refused';
+    },
+
     async isMerged(repoPath, branch) {
-      const result = await run(checkPath(repoPath), ['merge-base', '--is-ancestor', `refs/heads/${checkBranch(branch)}`, 'HEAD']);
+      const result = await run(checkPath(repoPath), ['merge-base', '--is-ancestor', `refs/heads/${checkBranch(branch)}`, 'HEAD'], undefined, readEnv(branch));
       return result.code === 0;
     },
 
@@ -487,7 +596,7 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
 
     async diffStats(repoPath, base, branch) {
       checkPath(repoPath);
-      const out = await must(repoPath, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--numstat', '-z', checkRevision(base), `refs/heads/${checkBranch(branch)}`, '--'], 'read the changes');
+      const out = await must(repoPath, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--numstat', '-z', checkRevision(base), `refs/heads/${checkBranch(branch)}`, '--'], 'read the changes', undefined, readEnv(branch));
       let files = 0;
       let insertions = 0;
       let deletions = 0;

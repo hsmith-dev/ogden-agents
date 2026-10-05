@@ -7,7 +7,7 @@
  * (`sandbox_unavailable`) with the Build dialog's choices, never run
  * unsandboxed (user decision 2026-10-04, fail closed).
  */
-import type { BuildAgent, SandboxChoice } from '@ogden-agents/shared';
+import type { BuildAgent, SandboxChoice, SandboxStatus } from '@ogden-agents/shared';
 
 /** The sandbox a run gets: the agent's own, with only these roots writable and no network. */
 export interface AgentSandbox {
@@ -38,4 +38,10 @@ export interface SandboxCheckRequest {
 export interface SandboxPort {
   /** Whether a sandbox can contain `agent`'s build here now, and which. Never throws: a failed probe is unavailable. */
   check(request?: SandboxCheckRequest): Promise<SandboxCheck>;
+  /**
+   * The same answer in plain words for the Build dialog (story 5.6): what
+   * was probed, what is missing and what to install, as text. Its
+   * `available` always agrees with `check`. Never throws, never installs.
+   */
+  status(request?: SandboxCheckRequest): Promise<SandboxStatus>;
 }

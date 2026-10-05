@@ -332,8 +332,15 @@ export const API_ROUTES = {
    * `builds` piece (guarded, trust). 409 `prerequisite_unmet`, `not_ready`,
    * `run_active`, `sandbox_unavailable`, `plan_uncommitted`,
    * `vcs_unavailable`, `disk_space_low` (story 5.5); nothing is written then.
+   * `mode: 'attended'` (story 5.6) builds with the user watching, no sandbox.
    */
   workspaceBuilds: `${API_BASE}/workspaces/:wsId/builds`,
+  /**
+   * `GET` → `SandboxStatusResponse` (story 5.6): whether an unattended
+   * build can be contained here, in plain words, and the Build dialog's
+   * choices. Serves the `builds` piece (guarded, trust); probes only.
+   */
+  workspaceBuildSandbox: `${API_BASE}/workspaces/:wsId/build-sandbox`,
   /** `GET` → `ReviewResponse` (story 5.2): the ticket's latest run, for the review page; 404 without one. */
   workspaceBuild: `${API_BASE}/workspaces/:wsId/builds/:ref`,
   /**

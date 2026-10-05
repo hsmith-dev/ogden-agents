@@ -52,6 +52,47 @@ export const SANDBOX_CHOICE_LABELS: Readonly<Record<SandboxChoice, string>> = {
   attended: 'Build with me watching',
 };
 
+/** How a build starts (5.6): `unattended` needs a sandbox; `attended` is the user watching, every tool call a permission card. */
+export const BUILD_MODES = ['unattended', 'attended'] as const;
+export const BuildMode = z.enum(BUILD_MODES);
+export type BuildMode = z.infer<typeof BuildMode>;
+
+/** Where a person installs Docker (the Build dialog's link; Ogden Agents never installs it). */
+export const DOCKER_INSTALL_URL = 'https://docs.docker.com/get-started/get-docker/';
+
+/** What a sandbox probe found (5.6): `usable`, or why not. */
+export const SANDBOX_PROBE_KINDS = ['seatbelt', 'bubblewrap', 'landlock', 'docker'] as const;
+export const SANDBOX_PROBE_STATES = ['usable', 'detected', 'missing', 'blocked', 'unsupported'] as const;
+export const SandboxProbe = z.object({
+  kind: z.enum(SANDBOX_PROBE_KINDS),
+  /** `detected`: there, but this version of Ogden Agents cannot build with it (Landlock, Docker). */
+  state: z.enum(SANDBOX_PROBE_STATES),
+  /** One plain sentence. */
+  note: z.string().max(500),
+});
+export type SandboxProbe = z.infer<typeof SandboxProbe>;
+
+/**
+ * `GET /api/v1/workspaces/:wsId/build-sandbox` (5.6): whether an unattended
+ * build can be contained on this computer, in plain words, for the Build
+ * dialog. `choices` is empty when it can; else its order is the dialog's,
+ * and the first one that is not `other_agent` is its default (Windows: the
+ * attended build). `installHint` says what to install, as text only.
+ */
+export const SandboxStatus = z.object({
+  platform: z.enum(['macos', 'windows', 'linux', 'other']),
+  available: z.boolean(),
+  /** The sandbox that would hold a run (a `SandboxKind`; a test sandbox says `test`), `null` when none. */
+  kind: z.string().nullable(),
+  summary: z.string().max(1000),
+  probes: z.array(SandboxProbe).max(8),
+  choices: z.array(z.enum(['other_agent', 'install_docker', 'attended'])).max(3),
+  installHint: z.string().max(1000).nullable(),
+});
+export type SandboxStatus = z.infer<typeof SandboxStatus>;
+export const SandboxStatusResponse = z.object({ status: SandboxStatus });
+export type SandboxStatusResponse = z.infer<typeof SandboxStatusResponse>;
+
 /**
  * Why a run is `blocked` (story 5.3). Ogden Agents' own codes: the build
  * runner adapter maps each `bmad-build-auto` halt to one (AD-12); core sets

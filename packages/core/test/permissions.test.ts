@@ -246,6 +246,36 @@ describe('leaving waiting', () => {
   });
 });
 
+describe('an attended build (story 5.6)', () => {
+  it('asks at the ask_every_time level whatever the project says, ignores stored rules, and offers no Always allow', async () => {
+    const core = openTestCore();
+    const { workspace, session } = workingSession(core);
+    // A rule the user made, and the loosest caution level: neither answers an attended request.
+    const first = track(core.permissions.request(session.id, npm('npm install stripe')));
+    core.permissions.decide(workspace.id, session.id, lastRequested(core, session.id).payload.requestId, { decision: 'allow_always' });
+    await flush();
+    expect(first.decision).toEqual({ outcome: 'allow_once' });
+    core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_risky_only' });
+
+    const asked = track(core.permissions.request(session.id, npm('npm install lodash'), { attended: true }));
+    await flush();
+    expect(asked.decision).toBeUndefined();
+    const { payload } = lastRequested(core, session.id);
+    expect(payload).toMatchObject({ cautionLevel: 'ask_every_time', alwaysAllowScope: null });
+    expect(() => core.permissions.decide(workspace.id, session.id, payload.requestId, { decision: 'allow_always' })).toThrow(ValidationError);
+    core.permissions.decide(workspace.id, session.id, payload.requestId, { decision: 'allow_once' });
+    await flush();
+    expect(asked.decision).toEqual({ outcome: 'allow_once' });
+
+    // An edit inside the project is answered by the level for an ordinary request, and asked here.
+    const edit = track(core.permissions.request(session.id, { toolCallId: 't-edit', title: 'Edit', kind: 'edit', paths: ['a.ts'] }, { attended: true }));
+    await flush();
+    expect(edit.decision).toBeUndefined();
+    core.permissions.decide(workspace.id, session.id, lastRequested(core, session.id).payload.requestId, { decision: 'deny' });
+    await flush();
+  });
+});
+
 describe('always-allow rules', () => {
   it('Always allow stores the rule with its event and tells the agent allow_once; a later request in scope runs without waiting', async () => {
     const core = openTestCore();

@@ -9,7 +9,7 @@
  * merge conflict, scripts changed by the merge, the happy path) and Reject.
  */
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   BUILD_ACTIVITY_FILE,
   BUILD_RESULT_FILE,
@@ -35,7 +35,7 @@ import {
 } from '@ogden-agents/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { BuildRefusedError, createBuilds, FeatureOffError, ScriptsChangedError, ScriptsNotTrustedError, type BuildRunnerPort, type BuildsUseCases, type Core, type TicketStorePort, type VcsCheck, type VcsHead, type VcsPort } from '../src/index.js';
-import { codeOf, harness, PLAN, refusal, REVISION, testRunner, type Harness } from './builds-harness.js';
+import { codeOf, fakeSandbox, harness, PLAN, refusal, REVISION, testRunner, unattendedOf, type Harness } from './builds-harness.js';
 
 describe('starting a build (story 5.2)', () => {
   it('refuses with Unattended builds off (feature_off), untrusted (scripts_not_trusted) or changed scripts (scripts_changed), writing nothing', async () => {
@@ -95,13 +95,16 @@ describe('starting a build (story 5.2)', () => {
     // Empty protected folders in the worktree, so the sandbox's binds exist.
     for (const folder of ['.claude', '.vscode', '.idea', '_bmad']) expect(existsSync(join(run.worktreePath!, folder)), folder).toBe(true);
     expect(h.sent).toEqual([{ sessionId: session.id, text: '/build 1.1' }]);
-    const setup = h.core.buildSessions.get(session.id)!;
+    const setup = unattendedOf(h.core.buildSessions.get(session.id));
     expect(setup.cwd).toBe(run.worktreePath);
-    // Only the run's own git paths: never the user's refs, logs or objects/info.
-    expect(setup.sandbox.writableRoots).toEqual([run.worktreePath, join('/repo/.git', 'objects'), `/repo/.git/refs/heads/ogden/${runShort}`, `/repo/.git/logs/refs/heads/ogden/${runShort}`, '/repo/.git/worktrees/x']);
-    expect(setup.sandbox.deniedPaths).toContain(join('/repo/.git', 'objects', 'info'));
+    // Only the run's own git paths and its own object store: never the user's refs, logs or objects (story 5.6).
+    const store = join(realpathSync.native(h.dataDir), 'r', runShort, 'objects');
+    expect(setup.sandbox.writableRoots).toEqual([run.worktreePath, store, `/repo/.git/refs/heads/ogden/${runShort}`, `/repo/.git/logs/refs/heads/ogden/${runShort}`, '/repo/.git/worktrees/x']);
+    expect(setup.sandbox.writableRoots).not.toContain(join('/repo/.git', 'objects'));
+    expect(setup.sandbox.deniedPaths).toContain(join('/repo/.git', 'objects'));
+    expect(setup.env).toEqual({ GIT_OBJECT_DIRECTORY: store, GIT_ALTERNATE_OBJECT_DIRECTORIES: resolve('/repo/.git', 'objects') });
     expect(setup.sandbox.deniedReads).toContain(realpathSync.native(h.dataDir));
-    expect(setup.sandbox.allowedReads).toEqual([run.worktreePath]);
+    expect(setup.sandbox.allowedReads).toEqual([run.worktreePath, store]);
     expect(setup.decide({ toolCallId: 't', title: 'w', kind: 'edit', paths: ['/repo/.git/refs/heads/main'] }).outcome).toBe('deny');
     expect(setup.decide({ toolCallId: 't', title: 'w', kind: 'edit', paths: [`/repo/.git/refs/heads/ogden/${runShort}/x`] }).outcome).toBe('allow_once');
     expect(setup.sandbox.deniedPaths).toEqual(expect.arrayContaining([join('/repo/.git', 'hooks'), join('/repo/.git', 'config'), join(run.worktreePath!, '_bmad')]));
@@ -279,7 +282,7 @@ describe('review loop 1 hardening (story 5.2)', () => {
       events: h.core.events,
       tickets: h.tickets.store,
       vcs: h.git.vcs,
-      sandbox: { check: async () => ({ available: true, kind: 'test' }) },
+      sandbox: fakeSandbox(() => ({ available: true, kind: 'test' })),
       runner: testRunner,
       chat: { createChatSession: async (wsId, options) => h.core.entities.createSession({ workspaceId: wsId, kind: options?.kind ?? 'chat' }), sendMessage, releaseAgent: async () => {} },
       buildSessions: h.core.buildSessions,
@@ -454,7 +457,7 @@ describe('the run folder and checkpoint pauses (story 5.4)', () => {
     expect(h.sent).toEqual([]);
 
     await h.builds.retry(h.wsId, run.id, { mode: 'resume', note: 'Keep it short.' });
-    const setup = h.core.buildSessions.get(session.id)!;
+    const setup = unattendedOf(h.core.buildSessions.get(session.id));
     expect(setup.cwd).toBe(run.worktreePath);
     expect(setup.decide({ toolCallId: 't', title: 'w', kind: 'edit', paths: [join(h.repo, 'src', 'a.ts')] }).outcome).toBe('deny');
     expect(h.sent).toHaveLength(1);

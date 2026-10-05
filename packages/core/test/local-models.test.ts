@@ -41,7 +41,7 @@ describe('Test connection', () => {
     ['running with none', { models: [] }, 'no_models', 'Running, but no model is loaded yet. Load one in the server, then test again.'],
     ['not running', { fail: 'unreachable' as const }, 'not_running', 'Not running. Start the server, then test again.'],
     ['too slow', { fail: 'timeout' as const }, 'not_running', 'Not running. Start the server, then test again.'],
-    ['key refused', { models: ['a'], key: 'secret' }, 'key_refused', "The server didn't accept the key. Check it and save it again."],
+    ['key refused', { models: ['a'], key: 'secret' }, 'key_refused', "The server didn't accept the key. Add the right key, or check the one saved, then test again."],
   ])('%s', async (_name, entry, state, message) => {
     const core = openTestCore(tempDir());
     const endpoints = core.localEndpoints(secrets());

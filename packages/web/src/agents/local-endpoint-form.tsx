@@ -168,14 +168,23 @@ export function AddEndpoint({ onAdded }: { onAdded: () => void }) {
             <Button type="button" aria-disabled={!canAdd} onClick={canAdd ? () => void submit() : undefined} data-testid="endpoint-add-submit">
               {busy ? 'Adding...' : 'Add server'}
             </Button>
-            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                // Nothing typed stays behind, the key least of all.
+                setOpen(false);
+                setKey('');
+                setConfirmed(false);
+              }}
+            >
               Cancel
             </Button>
           </div>
         </div>
       ) : null}
       {error === undefined ? null : (
-        <Text variant="caption" role="alert" data-testid="endpoint-error">
+        <Text variant="caption" role="alert" data-testid="endpoint-form-error">
           {error}
         </Text>
       )}

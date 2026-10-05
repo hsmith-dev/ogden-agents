@@ -65,7 +65,7 @@ async function flush() {
 }
 
 async function mount() {
-  render(<TerminalPanel sesId="ses_1" screenReaderMode={false} />);
+  render(<TerminalPanel sesId="ses_1" agentName="Claude Code" screenReaderMode={false} />);
   await flush();
   expect(fakes.connections).toHaveLength(1);
 }

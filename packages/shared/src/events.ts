@@ -1,14 +1,27 @@
 import { z } from 'zod';
-import { AGENTS_STREAM, AgentAuthMethodKind, AgentAuthState, AgentId, AlwaysAllowScope, CautionLevel, MAX_PAGE_EVENTS, Seq, SERVER_STREAM, TOOLCHAIN_STREAM } from './events-common.js';
+import { AgentId, AlwaysAllowScope, CautionLevel, MAX_PAGE_EVENTS, Seq, SERVER_STREAM, WhileWorking } from './events-common.js';
 import { assigned, onSessionStream, onWorkspaceStream } from './events-envelope.js';
-import { SettingsDeveloperModeChangedEvent, SettingsDeveloperModeChangedInput } from './events-settings.js';
+import {
+  SettingsAgentDefaultModelChangedEvent,
+  SettingsAgentDefaultModelChangedInput,
+  SettingsDeveloperModeChangedEvent,
+  SettingsDeveloperModeChangedInput,
+  SettingsWhileWorkingChangedEvent,
+  SettingsWhileWorkingChangedInput,
+} from './events-settings.js';
 
-export { SettingsDeveloperModeChangedEvent } from './events-settings.js';
+export { SettingsAgentDefaultModelChangedEvent, SettingsDeveloperModeChangedEvent, SettingsWhileWorkingChangedEvent } from './events-settings.js';
 import {
   PermissionRequestedEvent,
   PermissionRequestedInput,
   PermissionResolvedEvent,
   PermissionResolvedInput,
+  SessionAgentChangedEvent,
+  SessionAgentChangedInput,
+  SessionAgentStartedEvent,
+  SessionAgentStartedInput,
+  SessionAgentStartingEvent,
+  SessionAgentStartingInput,
   SessionCheckInEvent,
   SessionCheckInInput,
   SessionDocumentWrittenEvent,
@@ -23,8 +36,16 @@ import {
   SessionMessageDeltaInput,
   SessionMessageQueuedEvent,
   SessionMessageQueuedInput,
+  SessionModelChangedEvent,
+  SessionModelChangedInput,
+  SessionQueueChangedEvent,
+  SessionQueueChangedInput,
+  SessionTurnInterruptedEvent,
+  SessionTurnInterruptedInput,
   SessionPermissionModeChangedEvent,
   SessionPermissionModeChangedInput,
+  SessionRenamedEvent,
+  SessionRenamedInput,
   SessionResumedEvent,
   SessionResumedInput,
   SessionStateChangedEvent,
@@ -34,7 +55,7 @@ import {
   SessionToolCallUpdatedEvent,
   SessionToolCallUpdatedInput,
 } from './events-session.js';
-import { Run, RunOutcome, Workspace } from './entities.js';
+import { ModelId, PermissionMode, Run, RunOutcome, Workspace } from './entities.js';
 import { BmadPieces } from './bmad.js';
 import {
   BmadSetupCompletedEvent,
@@ -50,10 +71,31 @@ import {
   WorkspaceBmadScriptsTrustedEvent,
   WorkspaceBmadScriptsTrustedInput,
 } from './events-planning.js';
+import {
+  AgentAuthChangedEvent,
+  AgentAuthChangedInput,
+  AgentInstallCompletedEvent,
+  AgentInstallCompletedInput,
+  AgentInstallFailedEvent,
+  AgentInstallFailedInput,
+  AgentInstallProgressEvent,
+  AgentInstallProgressInput,
+  AgentInstallStartedEvent,
+  AgentInstallStartedInput,
+  AgentUninstalledEvent,
+  AgentUninstalledInput,
+  ToolchainInstallCompletedEvent,
+  ToolchainInstallCompletedInput,
+  ToolchainInstallFailedEvent,
+  ToolchainInstallFailedInput,
+  ToolchainInstallProgressEvent,
+  ToolchainInstallProgressInput,
+  ToolchainInstallStartedEvent,
+  ToolchainInstallStartedInput,
+} from './events-install.js';
 import { ApiErrorCode } from './errors.js';
 import { PermissionRuleId, RunId, SessionId, WorkspaceId } from './ids.js';
 import { IsoUtcTimestamp } from './time.js';
-import { ToolchainErrorCode, ToolName, ToolSource } from './toolchain.js';
 
 /**
  * The event log contract (AD-5) and the wire contract for the events
@@ -86,11 +128,23 @@ export {
   ResumedVia,
   SessionResumedEvent,
   SessionMessageQueuedEvent,
+  QueuedMessage,
+  QueueChangeCause,
+  SessionQueueChangedEvent,
+  SessionTurnInterruptedEvent,
   SessionCheckInEvent,
   SessionDocumentWrittenEvent,
+  SessionAgentStartingEvent,
+  SessionAgentStartedEvent,
+  SessionAgentChangedEvent,
+  MAX_HANDOFF_BRIEF_CHARS,
   PERMISSION_MODE_CHANGE_CAUSES,
   PermissionModeChangeCause,
   SessionPermissionModeChangedEvent,
+  SessionRenamedEvent,
+  MODEL_CHANGE_CAUSES,
+  ModelChangeCause,
+  SessionModelChangedEvent,
   PermissionRequestedEvent,
   PermissionResolvedEvent,
 } from './events-session.js';
@@ -103,6 +157,20 @@ export {
   BmadSetupCompletedEvent,
   BmadSetupFailedEvent,
 } from './events-planning.js';
+
+// Install-level toolchain and agent setup events (story 6.9).
+export {
+  ToolchainInstallStartedEvent,
+  ToolchainInstallProgressEvent,
+  ToolchainInstallCompletedEvent,
+  ToolchainInstallFailedEvent,
+  AgentInstallStartedEvent,
+  AgentInstallProgressEvent,
+  AgentInstallCompletedEvent,
+  AgentInstallFailedEvent,
+  AgentUninstalledEvent,
+  AgentAuthChangedEvent,
+} from './events-install.js';
 
 // ---------------------------------------------------------------------------
 // Event types. Each is defined once without the core-assigned fields (what a
@@ -176,6 +244,38 @@ const WorkspaceSettingsChangedInput = z.object({
      */
     bmadPieces: BmadPieces.optional(),
     previousBmadPieces: BmadPieces.optional(),
+    /**
+     * The project's default agent now and before (epic 6 contract, 6.3;
+     * appended from entry 6), present when it changed. `null`: the
+     * install's default. Optional, so every earlier event still parses.
+     */
+    defaultAgentId: AgentId.nullable().optional(),
+    previousDefaultAgentId: AgentId.nullable().optional(),
+    /**
+     * The mode new chats start in, now and before (default permission mode),
+     * present when it changed; why (`user`, or `developer_mode_off`, which
+     * drops a Skip all default to Ask); and `skipAllConfirmed` when the user
+     * confirmed Skip all's warning for this project. All optional, so every
+     * earlier event still parses (AD-5).
+     */
+    defaultPermissionMode: PermissionMode.optional(),
+    previousDefaultPermissionMode: PermissionMode.optional(),
+    defaultPermissionModeCause: z.enum(['user', 'developer_mode_off']).optional(),
+    skipAllConfirmed: z.literal(true).optional(),
+    /**
+     * The project's default model per agent now and before (story 11),
+     * present when they changed. An agent missing from it uses the install's
+     * default for that agent. Optional, so every earlier event still parses.
+     */
+    defaultModels: z.record(AgentId, ModelId).optional(),
+    previousDefaultModels: z.record(AgentId, ModelId).optional(),
+    /**
+     * The project's own choice of what a message sent while the agent works
+     * does, now and before (send now or wait), present when it changed.
+     * `null`: the app-wide choice. Optional, so every earlier event still parses.
+     */
+    whileWorking: WhileWorking.nullable().optional(),
+    previousWhileWorking: WhileWorking.nullable().optional(),
   }),
 });
 /**
@@ -214,110 +314,6 @@ const RunOutcomeChangedInput = z.object({
 export const RunOutcomeChangedEvent = RunOutcomeChangedInput.extend(assigned);
 export type RunOutcomeChangedEvent = z.infer<typeof RunOutcomeChangedEvent>;
 
-const onToolchainStream = { workspaceId: z.null(), streamId: z.literal(TOOLCHAIN_STREAM) };
-
-const ToolchainInstallStartedInput = z.object({
-  type: z.literal('toolchain.install_started'),
-  ...onToolchainStream,
-  payload: z.object({ tool: ToolName, version: z.string().min(1) }),
-});
-/** The user clicked Install and the download began (story 1.8). */
-export const ToolchainInstallStartedEvent = ToolchainInstallStartedInput.extend(assigned);
-export type ToolchainInstallStartedEvent = z.infer<typeof ToolchainInstallStartedEvent>;
-
-const ToolchainInstallProgressInput = z.object({
-  type: z.literal('toolchain.install_progress'),
-  ...onToolchainStream,
-  payload: z.object({
-    tool: ToolName,
-    bytes: z.number().int().nonnegative(),
-    total: z.number().int().positive().nullable(),
-  }),
-});
-/** Bytes downloaded so far (throttled); `total` is `null` when the server did not say. */
-export const ToolchainInstallProgressEvent = ToolchainInstallProgressInput.extend(assigned);
-export type ToolchainInstallProgressEvent = z.infer<typeof ToolchainInstallProgressEvent>;
-
-const ToolchainInstallCompletedInput = z.object({
-  type: z.literal('toolchain.install_completed'),
-  ...onToolchainStream,
-  payload: z.object({ tool: ToolName, version: z.string().min(1), source: ToolSource }),
-});
-/** The private copy is verified, unpacked and ready. */
-export const ToolchainInstallCompletedEvent = ToolchainInstallCompletedInput.extend(assigned);
-export type ToolchainInstallCompletedEvent = z.infer<typeof ToolchainInstallCompletedEvent>;
-
-const ToolchainInstallFailedInput = z.object({
-  type: z.literal('toolchain.install_failed'),
-  ...onToolchainStream,
-  payload: z.object({
-    tool: ToolName,
-    code: ToolchainErrorCode,
-    reason: z.string().min(1),
-    canInstall: z.boolean(),
-  }),
-});
-/** The install failed; nothing half-installed is left behind. `reason` is plain words, no secrets. */
-export const ToolchainInstallFailedEvent = ToolchainInstallFailedInput.extend(assigned);
-export type ToolchainInstallFailedEvent = z.infer<typeof ToolchainInstallFailedEvent>;
-
-const onAgentsStream = { workspaceId: z.null(), streamId: z.literal(AGENTS_STREAM) };
-
-const AgentInstallStartedInput = z.object({
-  type: z.literal('agent.install_started'),
-  ...onAgentsStream,
-  payload: z.object({ agentId: AgentId }),
-});
-/** The user clicked Install for an agent (onboarding, AD-21). */
-export const AgentInstallStartedEvent = AgentInstallStartedInput.extend(assigned);
-export type AgentInstallStartedEvent = z.infer<typeof AgentInstallStartedEvent>;
-
-const AgentInstallProgressInput = z.object({
-  type: z.literal('agent.install_progress'),
-  ...onAgentsStream,
-  payload: z.object({
-    agentId: AgentId,
-    /** Plain words for the step under way ("Downloading Claude Code"). */
-    step: z.string().min(1),
-    /** 0 to 100, or `null` when the step can't tell. */
-    percent: z.number().min(0).max(100).nullable(),
-  }),
-});
-export const AgentInstallProgressEvent = AgentInstallProgressInput.extend(assigned);
-export type AgentInstallProgressEvent = z.infer<typeof AgentInstallProgressEvent>;
-
-const AgentInstallCompletedInput = z.object({
-  type: z.literal('agent.install_completed'),
-  ...onAgentsStream,
-  payload: z.object({ agentId: AgentId, version: z.string().min(1).optional() }),
-});
-export const AgentInstallCompletedEvent = AgentInstallCompletedInput.extend(assigned);
-export type AgentInstallCompletedEvent = z.infer<typeof AgentInstallCompletedEvent>;
-
-const AgentInstallFailedInput = z.object({
-  type: z.literal('agent.install_failed'),
-  ...onAgentsStream,
-  payload: z.object({ agentId: AgentId, reason: z.string().min(1) }),
-});
-/** The install failed. `reason` is plain words, no secrets. */
-export const AgentInstallFailedEvent = AgentInstallFailedInput.extend(assigned);
-export type AgentInstallFailedEvent = z.infer<typeof AgentInstallFailedEvent>;
-
-const AgentAuthChangedInput = z.object({
-  type: z.literal('agent.auth_changed'),
-  ...onAgentsStream,
-  payload: z.object({
-    agentId: AgentId,
-    state: AgentAuthState,
-    method: AgentAuthMethodKind.optional(),
-    /** Plain words, when there is something to say (a failed sign-in). Never a URL, a code or a key. */
-    reason: z.string().min(1).optional(),
-  }),
-});
-/** An agent's sign-in state changed. Carries no URL, code or key (AD-15, AD-16). */
-export const AgentAuthChangedEvent = AgentAuthChangedInput.extend(assigned);
-export type AgentAuthChangedEvent = z.infer<typeof AgentAuthChangedEvent>;
-
 /** Every event core may append (grows with later stories). Nothing unschematized is emitted. */
 export const CoreEvent = z.discriminatedUnion('type', [
   ServerStartedEvent,
@@ -337,14 +333,21 @@ export const CoreEvent = z.discriminatedUnion('type', [
   SessionStateChangedEvent,
   SessionDriverChangedEvent,
   SessionPermissionModeChangedEvent,
+  SessionRenamedEvent,
+  SessionModelChangedEvent,
   SessionMessageDeltaEvent,
   SessionMessageCompletedEvent,
   SessionToolCallEvent,
   SessionToolCallUpdatedEvent,
   SessionResumedEvent,
   SessionMessageQueuedEvent,
+  SessionQueueChangedEvent,
+  SessionTurnInterruptedEvent,
   SessionCheckInEvent,
   SessionDocumentWrittenEvent,
+  SessionAgentStartingEvent,
+  SessionAgentStartedEvent,
+  SessionAgentChangedEvent,
   PermissionRequestedEvent,
   PermissionResolvedEvent,
   RunCreatedEvent,
@@ -357,8 +360,11 @@ export const CoreEvent = z.discriminatedUnion('type', [
   AgentInstallProgressEvent,
   AgentInstallCompletedEvent,
   AgentInstallFailedEvent,
+  AgentUninstalledEvent,
   AgentAuthChangedEvent,
   SettingsDeveloperModeChangedEvent,
+  SettingsAgentDefaultModelChangedEvent,
+  SettingsWhileWorkingChangedEvent,
 ]);
 export type CoreEvent = z.infer<typeof CoreEvent>;
 export type CoreEventType = CoreEvent['type'];
@@ -382,14 +388,21 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   SessionStateChangedInput,
   SessionDriverChangedInput,
   SessionPermissionModeChangedInput,
+  SessionRenamedInput,
+  SessionModelChangedInput,
   SessionMessageDeltaInput,
   SessionMessageCompletedInput,
   SessionToolCallInput,
   SessionToolCallUpdatedInput,
   SessionResumedInput,
   SessionMessageQueuedInput,
+  SessionQueueChangedInput,
+  SessionTurnInterruptedInput,
   SessionCheckInInput,
   SessionDocumentWrittenInput,
+  SessionAgentStartingInput,
+  SessionAgentStartedInput,
+  SessionAgentChangedInput,
   PermissionRequestedInput,
   PermissionResolvedInput,
   RunCreatedInput,
@@ -402,8 +415,11 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   AgentInstallProgressInput,
   AgentInstallCompletedInput,
   AgentInstallFailedInput,
+  AgentUninstalledInput,
   AgentAuthChangedInput,
   SettingsDeveloperModeChangedInput,
+  SettingsAgentDefaultModelChangedInput,
+  SettingsWhileWorkingChangedInput,
 ]);
 export type NewCoreEvent = z.infer<typeof NewCoreEvent>;
 

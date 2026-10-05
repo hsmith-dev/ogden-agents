@@ -70,6 +70,9 @@ async function developerMode(page: Page, chatUrl: string, on: boolean) {
 async function quit(page: Page, launched: Launched) {
   const token = await storedToken(page);
   if (token === null) throw new Error('the page has no tab token');
+  // The last reply can show before its turn ends; a quit while a chat is busy is refused (409 sessions_busy),
+  // so wait for the chat to go idle first (seen on a Windows runner).
+  await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle', { timeout: 30_000 });
   expect((await requestQuit(launched.url, token)).status).toBe(202);
   await waitForExit(launched.pid);
 }

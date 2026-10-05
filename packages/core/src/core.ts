@@ -1,3 +1,4 @@
+import type { AgentId } from '@ogden-agents/shared';
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
 import { createBmadDetection, type BmadDetectionUseCases } from './bmad-detection.js';
 import { createBmadFeatures, parseAvailableBmadPieces, type BmadFeatures, type BmadFeaturesOptions } from './bmad-pieces.js';
@@ -7,6 +8,7 @@ import { createBmadSetup, type BmadSetupUseCases } from './bmad-setup.js';
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
 import { createEntities, type Entities } from './entities.js';
 import { createEventLog, type EventLog, type EventLogOptions } from './event-log.js';
+import { createAgentModels, type AgentModels } from './agent-models.js';
 import { createInstallSettings, type InstallSettings } from './install-settings.js';
 import { createPermissions, type Permissions } from './permissions.js';
 import { createSessionEvents, type SessionEvents } from './session-events.js';
@@ -35,6 +37,8 @@ export interface Core {
   readonly bmadSetup: BmadSetupUseCases | undefined;
   /** Developer mode, which the server keeps and enforces (permission modes). */
   readonly installSettings: InstallSettings;
+  /** Each agent's default model and last model list, install-wide (story 11). */
+  readonly agentModels: AgentModels;
   close(): void;
 }
 
@@ -46,6 +50,12 @@ export type OpenCoreOptions = OpenDatabaseOptions &
     bmadCatalog?: BmadCatalogPort;
     /** Told why a BMad Method setup failed (story 4.3), for the log. */
     onBmadSetupFailure?: (workspaceId: string, error: unknown) => void;
+    /**
+     * Whether an agent is registered, so it may be a project's default (epic
+     * 6, entry 6). Read at each call: the server builds its agent registry
+     * after core. Absent: every well-formed id.
+     */
+    isAgentRegistered?: (agentId: AgentId) => boolean;
   } & BmadFeaturesOptions;
 
 /** Opens (and migrates) the database in `dataDir` and builds core on it. */
@@ -79,12 +89,15 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
           ...(options.onBmadSetupFailure === undefined ? {} : { onFailure: options.onBmadSetupFailure }),
         });
   const installSettings = createInstallSettings({ db, events, entities });
+  const agentModels = createAgentModels({ db, events });
   const permissions = createPermissions({
     db,
     events,
     entities,
     sessionEvents,
     isBmadPieceAvailable: bmad.isAvailable,
+    isAgentRegistered: options.isAgentRegistered,
+    developerMode: installSettings.developerMode,
     ...(options.onPermissionError === undefined ? {} : { onError: options.onPermissionError }),
   });
   return {
@@ -98,6 +111,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     bmadModulesSeen,
     bmadSetup,
     installSettings,
+    agentModels,
     close: () => {
       try {
         permissions.close();

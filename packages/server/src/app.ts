@@ -17,6 +17,7 @@ import {
   type Permissions,
   type PlanningUseCases,
   type Toolchain,
+  type AgentModels,
 } from '@ogden-agents/core';
 import { API_ROUTES, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
 import { Hono, type MiddlewareHandler } from 'hono';
@@ -128,6 +129,8 @@ export interface AppOptions {
   newProjectDefaults?: NewProjectDefaultsStore;
   /** Developer mode, kept and enforced by core (permission modes); without it its routes answer 501. */
   installSettings?: InstallSettings;
+  /** Each agent's install-wide default model (story 11), and whether an agent is registered: `PUT` default model. */
+  agentDefaults?: { models: Pick<AgentModels, 'setDefaultModel'>; isAgentRegistered: (agentId: string) => boolean };
   /** The Ogden Agents app shortcut (E2-R10; the `shortcut-memory` stub until 2.4). */
   appShortcut?: AppShortcutPort;
   /**
@@ -159,6 +162,7 @@ export function createApp({
   onboarding,
   newProjectDefaults,
   installSettings,
+  agentDefaults,
   appShortcut,
   tabs,
 }: AppOptions): Hono {
@@ -242,7 +246,7 @@ export function createApp({
   // `API_ROUTES` under `/api/v1`, registered after the gate.
   if (chat !== undefined) {
     const addProject = createAddProject({ chat, defaults: newProjectDefaults, bmad });
-    registerChatRoutes(app, chat, log, { terminalAvailability, addProject });
+    registerChatRoutes(app, chat, log, { terminalAvailability, addProject, agentDefaults });
   }
   registerWorkspaceRoutes(app, { chat, permissions, bmad, bmadProbe, log });
   registerPermissionRoutes(app, { permissions, log });
@@ -255,7 +259,7 @@ export function createApp({
   registerBmadTrustRoutes(app, { scriptTrust: bmadScriptTrust, permissions, log });
   // Plan and Board (stories 4.1, 4.2): every route through `bmadPieceRoutes`, behind core's guard and the script trust (AD-22).
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerPlanningRoutes(app, { bmad, scriptTrust: bmadScriptTrust, planning, board, bmadSetup, log });
-  registerSettingsRoutes(app, { installSettings, log });
+  registerSettingsRoutes(app, { installSettings, newProjectDefaults, log });
 
   registerEventSocket(app, { events, log, tabs });
   // A session's terminal (story 3.1): behind the same gate as `/ws`.

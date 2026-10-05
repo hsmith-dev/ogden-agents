@@ -42,6 +42,13 @@ const agentsSettingsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/agents-settings-page'), 'AgentsSettingsPage'),
 });
 
+/** Desktop notifications and the sound for when a chat needs you (backlog story 8). */
+const notificationsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/notifications',
+  component: lazyRouteComponent(() => import('./routes/notifications-page'), 'NotificationsPage'),
+});
+
 /** The app-wide default for new projects (story 10.4). */
 const newProjectsRoute = createRoute({
   getParentRoute: () => settingsRoute,
@@ -113,7 +120,7 @@ const routeTree = rootRoute.addChildren([
   workspacePlanRoute,
   workspaceBoardRoute.addChildren([workspaceBoardTicketRoute]),
   sessionRoute,
-  settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute]),
+  settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute, notificationsRoute]),
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

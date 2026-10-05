@@ -8,7 +8,8 @@
  * through {@link AgentSession.onEvent}, and core turns that into session
  * events and the session's normalized state (AD-4).
  */
-import type { PermissionMode } from '@ogden-agents/shared';
+import { AgentId as AgentIdSchema, type AgentId, type AgentModel, type PermissionMode } from '@ogden-agents/shared';
+import { agentDescriptorProblems, declaredModes, type AgentDescriptor } from './agent-descriptor.js';
 import { CoreError } from './errors.js';
 
 /** One file change a tool call reports (secrets masked). `oldText` is `null` for a new file. */
@@ -50,6 +51,12 @@ export type AgentEvent =
    * only when the agent reports it too (core ignores that echo).
    */
   | { type: 'permission_mode'; mode: PermissionMode | 'other'; asksLess: boolean; label?: string | undefined }
+  /**
+   * The agent says it now runs on another model (story 11), by its own id,
+   * when it changed by itself (a fallback): never the echo of a model it was
+   * told to take. Core moves a chat that chose a model to the reported one.
+   */
+  | { type: 'model'; model: string }
   /**
    * The adapter's view of the session (AD-4): `working` while a prompt runs,
    * `idle` once it has ended, `error` when the agent failed or went away.
@@ -128,6 +135,14 @@ export interface StartAgentSession {
    * out of Auto gets a new agent session (resumed) at its next idle point.
    */
   protectedPaths?: ProtectedPaths | undefined;
+  /**
+   * The model to start on (story 11), for an agent that takes it only at
+   * start (its descriptor's static `models`): the adapter applies it to the
+   * process (a variable or an argument). Ignored by an agent whose session
+   * lists its models (core tells it with {@link AgentSession.setModel}).
+   * Absent: the agent's own choice.
+   */
+  model?: string | undefined;
 }
 
 /** How a reopened session got its context back: the agent resumed it, loaded it, or had to start a new one. */
@@ -164,6 +179,15 @@ export interface AgentSession {
   prompt(text: string): Promise<{ stopReason: string }>;
   /** Asks the agent to stop the running prompt; it ends with `idle`. */
   cancel(): Promise<void>;
+  /**
+   * Puts a user message into the running prompt's turn (send now or wait):
+   * `injected` when the agent took it (what it says next streams as part of
+   * the running prompt, which resolves only once it has answered it);
+   * `no_turn` when no turn was running, so nothing was sent. Rejects when
+   * the agent refused it. Absent when the agent (or this session of it)
+   * can't take a message mid-turn: core stops the step instead.
+   */
+  steer?(text: string): Promise<'injected' | 'no_turn'>;
   /** Ends the session and stops the agent's process. Safe to call more than once. */
   close(): Promise<void>;
   /** Calls `listener` with every event from now on. Returns the unsubscribe. */
@@ -181,6 +205,27 @@ export interface AgentSession {
    * only ever runs in Ask, and core never asks it for another mode.
    */
   setPermissionMode?(mode: PermissionMode): Promise<void>;
+  /**
+   * The models this session offers and the one it runs on now, as the agent
+   * last said (story 11); absent when it lists none.
+   */
+  readonly models?: AgentSessionModels | undefined;
+  /**
+   * Puts the running session on `model` (the agent's own id), or back on the
+   * model it chose itself when it started (`null`), for its next prompt.
+   * Resolves once the agent has taken it (at once when it runs on it);
+   * rejects with an {@link AgentError} whose message is the agent's own plain
+   * reason (masked) when it refuses. Absent: the agent takes a model only at
+   * start ({@link StartAgentSession.model}), so core restarts it to switch.
+   */
+  setModel?(model: string | null): Promise<void>;
+}
+
+/** The models an agent session offers (story 11). */
+export interface AgentSessionModels {
+  available: readonly AgentModel[];
+  /** The model it runs on now, when it said. */
+  current?: string | undefined;
 }
 
 /** One agent (Claude Code, Codex, …) behind the port. */
@@ -254,6 +299,8 @@ export interface AgentTerminalResume {
 /** How the agent's CLI is to start (permission modes). */
 export interface AgentTerminalOptions {
   permissionMode: PermissionMode;
+  /** The chat's model (story 11), the agent's own id; absent: the CLI's own choice. */
+  model?: string | undefined;
   /** Paths the CLI must still ask before writing (given in Auto only). */
   protectedPaths?: ProtectedPaths | undefined;
 }
@@ -282,7 +329,8 @@ export interface AgentTerminalCommand {
   env: Readonly<Record<string, string>>;
 }
 
-export type AgentErrorCode = 'agent_unavailable' | 'agent_failed' | 'auth_required';
+/** `usage_limit`: the agent ran out of usage (its descriptor's patterns matched; handoff), its session is still usable. */
+export type AgentErrorCode = 'agent_unavailable' | 'agent_failed' | 'auth_required' | 'usage_limit';
 
 /**
  * An agent failure with a plain-language message for the UI. `details` are
@@ -308,4 +356,100 @@ export class AgentError extends CoreError {
     this.output = options.output;
     if (options.cause !== undefined) this.cause = options.cause;
   }
+}
+
+/**
+ * One agent a chat can be started with, as server wiring registers it (epic
+ * 6): what it is (its descriptor, 6.3) and its chat port.
+ */
+export interface RegisteredAgent {
+  descriptor: AgentDescriptor;
+  agent: AgentPort;
+}
+
+/**
+ * The agents chats can be started with, by id (epic 6; AD-1 note): server
+ * wiring builds it, and core looks each session's agent up here, so core
+ * names no agent itself.
+ */
+export interface AgentRegistry {
+  /** Every registered agent's id, in the order the UI lists them. */
+  readonly agentIds: readonly AgentId[];
+  /** The agent registered under `agentId`, if any. */
+  get(agentId: AgentId): AgentPort | undefined;
+  /** What the agent registered under `agentId` is (6.3), if any. */
+  describe(agentId: AgentId): AgentDescriptor | undefined;
+  /** The agent a new chat gets when none is picked. */
+  readonly defaultAgentId: AgentId;
+  /** The agent the sessions stored before agents could be chosen were started with (they have no `agentId`). */
+  readonly legacyAgentId: AgentId;
+}
+
+/**
+ * The agent a new chat in a project gets when none is picked (epic 6, entry
+ * 6): the project's own default while it is still registered, else the
+ * install's. One rule for chat and for BMad's skill folders (entry 8).
+ */
+export function effectiveDefaultAgent(agents: Pick<AgentRegistry, 'get' | 'defaultAgentId'>, projectDefault: AgentId | undefined): AgentId {
+  return projectDefault !== undefined && agents.get(projectDefault) !== undefined ? projectDefault : agents.defaultAgentId;
+}
+
+/**
+ * A registry of `agents`, in order. `defaultAgentId` and `legacyAgentId`
+ * default to the first agent; the default must be registered. Throws (a
+ * wiring bug) on an empty list, an id given twice, a descriptor with a
+ * problem ({@link agentDescriptorProblems}), or a port whose product name or
+ * declared permission modes differ from its descriptor's.
+ */
+export function createAgentRegistry(
+  agents: readonly RegisteredAgent[],
+  options: { defaultAgentId?: AgentId | undefined; legacyAgentId?: AgentId | undefined } = {},
+): AgentRegistry {
+  const byId = new Map<AgentId, RegisteredAgent>();
+  for (const registered of agents) {
+    const { descriptor, agent } = registered;
+    const agentId = descriptor.agentId;
+    if (!AgentIdSchema.safeParse(agentId).success) throw new Error(`agent registry: ${JSON.stringify(agentId)} is not an agent id`);
+    if (byId.has(agentId)) throw new Error(`agent registry: ${agentId} is registered twice`);
+    const problems = agentDescriptorProblems(descriptor);
+    if (problems.length > 0) throw new Error(`agent registry: ${problems.join('; ')}`);
+    if (agent.displayName !== descriptor.displayName) throw new Error(`agent registry: ${agentId}'s port is named ${JSON.stringify(agent.displayName)}, its descriptor ${JSON.stringify(descriptor.displayName)}`);
+    const portModes = [...new Set(agent.permissionModes ?? ['ask'])].sort().join(',');
+    const described = declaredModes(descriptor).sort().join(',');
+    if (portModes !== described) throw new Error(`agent registry: ${agentId}'s port declares the modes ${portModes}, its descriptor ${described}`);
+    byId.set(agentId, registered);
+  }
+  const first = agents[0]?.descriptor.agentId;
+  if (first === undefined) throw new Error('agent registry: no agent registered');
+  const defaultAgentId = options.defaultAgentId ?? first;
+  if (!byId.has(defaultAgentId)) throw new Error(`agent registry: the default agent ${defaultAgentId} is not registered`);
+  const legacyAgentId = options.legacyAgentId ?? first;
+  if (!AgentIdSchema.safeParse(legacyAgentId).success) throw new Error(`agent registry: ${JSON.stringify(legacyAgentId)} is not an agent id`);
+  return {
+    agentIds: [...byId.keys()],
+    get: (agentId) => byId.get(agentId)?.agent,
+    describe: (agentId) => byId.get(agentId)?.descriptor,
+    defaultAgentId,
+    legacyAgentId,
+  };
+}
+
+/** The plain reason a chat whose agent this install no longer has can't reach it. */
+export const AGENT_NOT_REGISTERED_REASON = "This chat's agent isn't available in Ogden Agents on this computer.";
+
+/**
+ * Stands in for a session's agent that isn't registered this run (a test
+ * agent, or one removed): every start fails `agent_unavailable` with
+ * {@link AGENT_NOT_REGISTERED_REASON}, and it offers Ask only and no terminal.
+ */
+export function unregisteredAgent(): AgentPort {
+  const unavailable = () => Promise.reject(new AgentError('agent_unavailable', AGENT_NOT_REGISTERED_REASON));
+  return {
+    displayName: "This chat's agent",
+    permissionModes: ['ask'],
+    skillInvocation: (skill, idea) => (idea === undefined ? `/${skill}` : `/${skill} ${idea}`),
+    startSession: unavailable,
+    reopenSession: unavailable,
+    listAuthMethods: unavailable,
+  };
 }

@@ -12,13 +12,16 @@
  *   (`BmadSourcePort.status().version`): `update_available` or `current`.
  * - `setup` writes only into a project with no `_bmad` entry at all
  *   (`BmadAlreadySetUpError` otherwise, nothing written), and refuses a
- *   linked `.claude` or `.claude/skills` before creating anything. It is the
+ *   linked `.claude` or `.claude/skills` (or a link or a file at any segment
+ *   of another agent's skills folder it was given, epic 6 entry 8) before
+ *   creating anything. It is the
  *   user's explicit action, so it calls the server's one
  *   `BmadSourcePort.download()` (a ready copy is only re-checked), then
  *   copies each skill of the verified copy's `skills/` missing from
- *   `<repo>/.claude/skills/` (Claude Code only) file by file into a staging
- *   folder beside its target, renamed into place; an existing skill folder is
- *   never touched. Then it runs the verified `bmad/scripts/setup.py`
+ *   `<repo>/.claude/skills/`, and from each other skills folder of an agent
+ *   the project uses (`skillFolders`, epic 6 entry 8: `.agents/skills` for
+ *   Antigravity), file by file into a staging folder beside its target,
+ *   renamed into place; an existing skill folder is never touched. Then it runs the verified `bmad/scripts/setup.py`
  *   (`--list-config-questions`, then setup, answering any question with its
  *   default through a file in the work folder, never the repo) with
  *   `--skill` the verified copy's `bmad` folder and no `--root`, so the
@@ -33,7 +36,8 @@
  *   isn't repo-relative, can't be read here, or is reached through a link or
  *   a file. Then the same steps: each pinned skill the project lacks in
  *   either skills folder (`.agents/skills`, `.claude/skills`) is copied into
- *   `.claude/skills`, an existing one is never touched; and the same
+ *   `.claude/skills`, and each one another agent's folder lacks into that
+ *   folder; an existing one is never touched; and the same
  *   verified `setup.py` runs, whose own repair creates what is missing,
  *   repairs stale scripts, and keeps the config's values, `custom/` and
  *   leftovers.
@@ -49,7 +53,7 @@ import { randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import { copyFile, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { BmadAlreadySetUpError, BmadDownloadError, BmadSetupError, type BmadSourcePort } from '@ogden-agents/core';
+import { BmadAlreadySetUpError, BmadDownloadError, BmadSetupError, type BmadSetupRunOptions, type BmadSourcePort } from '@ogden-agents/core';
 import {
   BMAD_SETUP_NOT_A_FOLDER_TEXT,
   BMAD_SETUP_OUTPUT_FOLDER_PROBLEM,
@@ -188,7 +192,7 @@ const DEFAULT_OUTPUT_FOLDER = '_bmad-output';
 
 export interface BmadSetup {
   setupStatus(repoPath: string): Promise<BmadSetupStatus>;
-  setup(repoPath: string, onProgress: (progress: BmadSetupProgress) => void, options?: { upgrade?: boolean }): Promise<BmadSetupStatus>;
+  setup(repoPath: string, onProgress: (progress: BmadSetupProgress) => void, options?: BmadSetupRunOptions): Promise<BmadSetupStatus>;
 }
 
 /** Upgrade this project refused before anything was written (entry 4.11); `cause` is for the log only. */
@@ -325,6 +329,25 @@ async function checkUpgradeTarget(repoPath: string): Promise<void> {
   }
 }
 
+/**
+ * The skills folders setup copies into: `.claude/skills` first, then each
+ * other agent's (epic 6 entry 8), once each. A folder that isn't a plain
+ * repo-relative path (an empty, `.` or `..` segment, a drive or a backslash)
+ * fails the setup before anything is written: core passes only descriptors'
+ * checked folders, so it is a wiring bug.
+ */
+export function skillTargets(skillFolders: readonly string[] = []): (readonly string[])[] {
+  const targets: (readonly string[])[] = [SKILLS_PATH];
+  for (const folder of skillFolders) {
+    const segments = folder.split('/');
+    if (!RepoRelativePath.safeParse(folder).success || folder.includes('\\') || segments.some((part) => part === '' || part === '.' || part === '..' || WINDOWS_UNSAFE_SEGMENT.test(part))) {
+      throw new BmadSetupError('failed', { cause: 'bad_skills_folder' });
+    }
+    if (!targets.some((target) => target.join('/') === segments.join('/'))) targets.push(segments);
+  }
+  return targets;
+}
+
 export function createBmadSetup({ runner, workDir, source }: BmadSetupOptions): BmadSetup {
   /** The status from the files alone (S2): no process, no network. */
   const setupStatus = async (repoPath: string): Promise<BmadSetupStatus> => {
@@ -356,14 +379,20 @@ export function createBmadSetup({ runner, workDir, source }: BmadSetupOptions): 
     return { ...at, state: (compareVersions(installedVersion, pinned) ?? 0) < 0 ? 'update_available' : 'current', problems: [] };
   };
 
-  /** Refuses a link or a file at `.claude` or `.claude/skills`, before anything is created (review Q6); an upgrade says so (entry 4.11). */
-  const checkSkillsFolders = async (repoPath: string, upgrade = false): Promise<void> => {
-    let folder = repoPath;
-    for (const part of SKILLS_PATH) {
-      folder = join(folder, part);
-      const entry = await entryAt(folder);
-      if (entry === undefined) return;
-      if (entry.isSymbolicLink() || !entry.isDirectory()) throw upgrade ? refused('skills_not_a_folder') : new BmadSetupError('failed', { cause: 'not_a_real_folder' });
+  /**
+   * Refuses a link or a file at any segment of each target skills folder
+   * (`.claude`, `.claude/skills`, and each other agent's, epic 6 entry 8),
+   * before anything is created (review Q6); an upgrade says so (entry 4.11).
+   */
+  const checkSkillsFolders = async (repoPath: string, targets: readonly (readonly string[])[], upgrade = false): Promise<void> => {
+    for (const target of targets) {
+      let folder = repoPath;
+      for (const part of target) {
+        folder = join(folder, part);
+        const entry = await entryAt(folder);
+        if (entry === undefined) break;
+        if (entry.isSymbolicLink() || !entry.isDirectory()) throw upgrade ? refused('skills_not_a_folder') : new BmadSetupError('failed', { cause: 'not_a_real_folder' });
+      }
     }
   };
 
@@ -377,21 +406,35 @@ export function createBmadSetup({ runner, workDir, source }: BmadSetupOptions): 
     return false;
   };
 
-  /** Copies each verified skill missing from the repo's skills folder (with `upgrade`, from both): staging beside the target, then a rename. */
-  const copySkills = async (repoPath: string, skillsRoot: string, upgrade: boolean): Promise<void> => {
-    await checkSkillsFolders(repoPath, upgrade);
-    let folder = repoPath;
-    for (const part of SKILLS_PATH) {
-      folder = join(folder, part);
-      if ((await entryAt(folder)) === undefined) await mkdir(folder);
+  /**
+   * Copies each verified skill missing from each target skills folder: staging
+   * beside the target, then a rename. `.claude/skills` comes first; with
+   * `upgrade`, a skill the project has in another skills folder is not added
+   * there (entry 4.11). Another agent's folder (epic 6 entry 8) gets every
+   * skill it lacks.
+   */
+  const copySkills = async (repoPath: string, skillsRoot: string, targets: readonly (readonly string[])[], upgrade: boolean): Promise<void> => {
+    await checkSkillsFolders(repoPath, targets, upgrade);
+    for (const target of targets) {
+      let folder = repoPath;
+      for (const part of target) {
+        folder = join(folder, part);
+        if ((await entryAt(folder)) === undefined) await mkdir(folder);
+      }
+      // Checked again once created: a link swapped in meanwhile is never written through.
+      await checkSkillsFolders(repoPath, [target], upgrade);
+      await copySkillsInto(repoPath, skillsRoot, folder, upgrade && target === SKILLS_PATH);
     }
-    await checkSkillsFolders(repoPath, upgrade);
+  };
+
+  /** Copies each verified skill missing from `folder`; with `leaveElsewhere`, also one the project has in another skills folder (entry 4.11). */
+  const copySkillsInto = async (repoPath: string, skillsRoot: string, folder: string, leaveElsewhere: boolean): Promise<void> => {
     for (const skill of await readdir(skillsRoot, { withFileTypes: true })) {
       if (!skill.isDirectory() || SKIPPED_NAMES.has(skill.name) || skill.name.startsWith('.')) continue;
       const target = join(folder, skill.name);
       // An existing skill (or anything at its name) is the project's: left untouched.
       if ((await entryAt(target)) !== undefined) continue;
-      if (upgrade && (await elsewhere(repoPath, skill.name))) continue;
+      if (leaveElsewhere && (await elsewhere(repoPath, skill.name))) continue;
       const staging = join(folder, `.${skill.name}.ogden-setup-${randomBytes(6).toString('hex')}`);
       try {
         await copyTree(join(skillsRoot, skill.name), staging);
@@ -454,7 +497,8 @@ export function createBmadSetup({ runner, workDir, source }: BmadSetupOptions): 
           // Never written into: a project with any `_bmad` entry (a folder, a link, a file) gets status only.
           throw new BmadAlreadySetUpError();
         }
-        await checkSkillsFolders(repoPath, upgrade);
+        const targets = skillTargets(options.skillFolders);
+        await checkSkillsFolders(repoPath, targets, upgrade);
         // The user's Set up: the pinned copy is downloaded and verified now (S1), or only re-checked when ready.
         await source.download();
         const script = source.file(SETUP_SCRIPT);
@@ -463,7 +507,7 @@ export function createBmadSetup({ runner, workDir, source }: BmadSetupOptions): 
         const skillsRoot = dirname(bmadSkill);
 
         step('copying_skills');
-        await copySkills(repoPath, skillsRoot, upgrade);
+        await copySkills(repoPath, skillsRoot, targets, upgrade);
 
         step('writing_config');
         // `--skill` is the verified copy's `bmad`, with no `--root`: nothing the repo holds is the payload or a module record.

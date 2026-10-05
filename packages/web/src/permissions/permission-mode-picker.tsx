@@ -1,7 +1,6 @@
 import { PERMISSION_MODE_LABELS, PERMISSION_MODES, type CoreEvent, type PermissionMode, type SessionPermissionModeOption } from '@ogden-agents/shared';
 import { CaretDown, ShieldCheck, ShieldWarning } from '@phosphor-icons/react';
 import { useMemo, useState } from 'react';
-import { AGENT_NAME } from '@/chat/chat-api';
 import { AlertDialog, AlertDialogCancel, AlertDialogConfirm, AlertDialogContent } from '@/ui/alert-dialog';
 import { Banner } from '@/ui/banner';
 import { Button } from '@/ui/button';
@@ -15,29 +14,42 @@ import { DropdownMenu, DropdownMenuChoiceItem, DropdownMenuContent, DropdownMenu
  * `session.permission_mode_changed` (else the session as read).
  */
 
-/** What each mode does, in one sentence, as the picker says it. */
-export const PERMISSION_MODE_DESCRIPTIONS: Readonly<Record<PermissionMode, string>> = {
+/** What each mode does, in one sentence naming the chat's agent (epic 6), as the picker says it. */
+export const permissionModeDescriptions = (agentName: string): Readonly<Record<PermissionMode, string>> => ({
   ask: "Every request shows a card, under this project's caution level and Always-allow rules.",
-  auto: `${AGENT_NAME}'s auto mode approves what it judges safe and asks you about the rest, and always about editing files that control ${AGENT_NAME} or git. This project's caution level doesn't apply.`,
-  skip_all: `${AGENT_NAME} skips its permission checks and runs everything without asking.`,
-};
+  auto: `${agentName}'s auto mode approves what it judges safe and asks you about the rest, and always about editing files that control ${agentName} or git. This project's caution level doesn't apply.`,
+  skip_all: `${agentName} skips its permission checks and runs everything without asking.`,
+});
 
 /** Why no mode can be chosen while the terminal drives (the server refuses it too). */
 export const TERMINAL_MODE_REASON = 'Switch back to the chat to change its permission mode.';
 
 /** Skip all's red warning: what it does, in plain words. */
-export const SKIP_ALL_WARNING = `${AGENT_NAME} will run commands, edit and delete files, and use the network in this chat without asking you, anywhere it can reach on this computer. Only its own safety checks still ask. Choose it only for work you can afford to lose.`;
+export const skipAllWarning = (agentName: string) => `${agentName} will run commands, edit and delete files, and use the network in this chat without asking you, anywhere it can reach on this computer. Only its own safety checks still ask. Choose it only for work you can afford to lose.`;
 
 /** The red banner's words while a chat is in Skip all. */
-export const SKIP_ALL_BANNER = `Skip all is on: ${AGENT_NAME} runs everything in this chat without asking.`;
+export const skipAllBanner = (agentName: string) => `Skip all is on: ${agentName} runs everything in this chat without asking.`;
 
-/** The chat's mode: the latest `session.permission_mode_changed` of its stream, else the session as read, else Ask. */
+/**
+ * The chat's mode: the latest `session.permission_mode_changed` of its
+ * stream, else the session as read, else the mode it was created in (a chat
+ * can start in its project's default, Skip all included: its banner never
+ * waits on the REST read), else Ask.
+ */
 export function usePermissionMode(events: readonly CoreEvent[], read: PermissionMode | undefined): PermissionMode {
   const latest = useMemo(() => events.findLast((event) => event.type === 'session.permission_mode_changed'), [events]);
-  return (latest?.type === 'session.permission_mode_changed' ? latest.payload.mode : undefined) ?? read ?? 'ask';
+  const created = useMemo(() => events.find((event) => event.type === 'session.created'), [events]);
+  return (
+    (latest?.type === 'session.permission_mode_changed' ? latest.payload.mode : undefined) ??
+    read ??
+    (created?.type === 'session.created' ? created.payload.session.permissionMode : undefined) ??
+    'ask'
+  );
 }
 
 export interface PermissionModePickerProps {
+  /** The chat's agent by its product name (epic 6): what the descriptions and reasons name. */
+  agentName: string;
   mode: PermissionMode;
   /** Every mode and whether the session's agent offers it (`GET` session); `undefined` while it loads or from an older server. */
   options: readonly SessionPermissionModeOption[] | undefined;
@@ -58,13 +70,14 @@ export interface PermissionModePickerProps {
  * Choosing Skip all opens its red warning first; nothing changes unless the
  * user confirms it.
  */
-export function PermissionModePicker({ mode, options, developerMode, terminalDrives, changing, onChoose }: PermissionModePickerProps) {
+export function PermissionModePicker({ agentName, mode, options, developerMode, terminalDrives, changing, onChoose }: PermissionModePickerProps) {
   const [confirming, setConfirming] = useState(false);
+  const descriptions = permissionModeDescriptions(agentName);
   const listed = PERMISSION_MODES.filter((each) => each !== 'skip_all' || developerMode || mode === 'skip_all');
   const reasonFor = (each: PermissionMode): string | undefined => {
     if (terminalDrives) return TERMINAL_MODE_REASON;
     const option = options?.find((candidate) => candidate.mode === each);
-    return option === undefined || option.available ? undefined : (option.reason ?? `${AGENT_NAME} doesn't offer ${PERMISSION_MODE_LABELS[each]}.`);
+    return option === undefined || option.available ? undefined : (option.reason ?? `${agentName} doesn't offer ${PERMISSION_MODE_LABELS[each]}.`);
   };
   const choose = (each: PermissionMode) => {
     if (changing || each === mode || reasonFor(each) !== undefined) return;
@@ -100,7 +113,7 @@ export function PermissionModePicker({ mode, options, developerMode, terminalDri
                 checked={each === mode}
                 disabled={reason !== undefined && each !== mode}
                 label={PERMISSION_MODE_LABELS[each]}
-                description={reason !== undefined && each !== mode ? reason : PERMISSION_MODE_DESCRIPTIONS[each]}
+                description={reason !== undefined && each !== mode ? reason : descriptions[each]}
                 onSelect={() => choose(each)}
               />
             );
@@ -108,7 +121,7 @@ export function PermissionModePicker({ mode, options, developerMode, terminalDri
         </DropdownMenuContent>
       </DropdownMenu>
       <AlertDialog open={confirming} onOpenChange={setConfirming}>
-        <AlertDialogContent data-testid="skip-all-confirm" title="Skip all permission checks in this chat?" description={SKIP_ALL_WARNING}>
+        <AlertDialogContent data-testid="skip-all-confirm" title="Skip all permission checks in this chat?" description={skipAllWarning(agentName)}>
           <AlertDialogCancel data-testid="skip-all-cancel">Cancel</AlertDialogCancel>
           <AlertDialogConfirm
             data-testid="skip-all-confirm-button"
@@ -126,6 +139,8 @@ export function PermissionModePicker({ mode, options, developerMode, terminalDri
 }
 
 export interface SkipAllBannerProps {
+  /** The chat's agent by its product name (epic 6). */
+  agentName: string;
   /** Back to Ask (from the terminal: back to the chat first). */
   onBackToAsk(): void;
   /** A change is on its way: the button waits. */
@@ -138,7 +153,7 @@ export interface SkipAllBannerProps {
  * terminal, so it is in view at any scroll position and screen width, with a
  * way back to Ask.
  */
-export function SkipAllBanner({ onBackToAsk, changing }: SkipAllBannerProps) {
+export function SkipAllBanner({ agentName, onBackToAsk, changing }: SkipAllBannerProps) {
   return (
     <Banner
       variant="destructive"
@@ -160,7 +175,7 @@ export function SkipAllBanner({ onBackToAsk, changing }: SkipAllBannerProps) {
     >
       <span className="inline-flex items-center gap-1">
         <ShieldWarning aria-hidden />
-        {SKIP_ALL_BANNER}
+        {skipAllBanner(agentName)}
       </span>
     </Banner>
   );

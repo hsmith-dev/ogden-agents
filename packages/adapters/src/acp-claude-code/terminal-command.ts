@@ -17,7 +17,7 @@
  */
 import { createRequire } from 'node:module';
 import { AgentError, type AgentCliLocation, type AgentTerminalCommand, type ProtectedPaths } from '@ogden-agents/core';
-import type { PermissionMode } from '@ogden-agents/shared';
+import { ModelId, type PermissionMode } from '@ogden-agents/shared';
 import { claudeGuardSettings } from './claude-guards.js';
 import { findClaudeExecutable } from './detect.js';
 
@@ -35,6 +35,8 @@ export interface ClaudeTerminalOptions {
   permissionMode?: PermissionMode | undefined;
   /** Paths it must still ask before writing (Auto): passed as `--settings` with ask rules. */
   protectedPaths?: ProtectedPaths | undefined;
+  /** The chat's model (story 11), Claude Code's own id for it: passed as `--model`. Absent: its own choice. */
+  model?: string | undefined;
 }
 
 /** The CLI's arguments for each permission mode. */
@@ -104,6 +106,9 @@ export function claudeTerminalCommand(
   const claude = resolveClaudeExecutable(env, options);
   if (claude === undefined) throw new AgentError('agent_unavailable', CLAUDE_CLI_NOT_FOUND);
   const guard = options.protectedPaths === undefined ? [] : ['--settings', JSON.stringify(claudeGuardSettings(options.protectedPaths))];
-  const args = ['--resume', agentSessionId, ...CLAUDE_MODE_ARGS[options.permissionMode ?? 'ask'], ...guard];
+  // A model id never starts with `-` (shared `ModelId`): checked again here, so it can't read as a flag.
+  if (options.model !== undefined && !ModelId.safeParse(options.model).success) throw new AgentError('agent_unavailable', "This chat's model can't be passed to Claude Code's terminal.");
+  const model = options.model === undefined ? [] : ['--model', options.model];
+  const args = ['--resume', agentSessionId, ...CLAUDE_MODE_ARGS[options.permissionMode ?? 'ask'], ...guard, ...model];
   return /\.[cm]?js$/i.test(claude) ? { file: options.nodePath ?? process.execPath, args: [claude, ...args], env } : { file: claude, args, env };
 }

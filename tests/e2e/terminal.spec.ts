@@ -78,6 +78,16 @@ test('in Developer mode a chat switches to its terminal, takes typing there, and
     await expect(readOnly).toBeVisible();
     await expect(readOnly).toContainText('Hello from the fake agent.');
     await expect(readOnly).not.toHaveAttribute('inert');
+    // Beside the terminal, top-aligned with it, and still a positioned scroll box: nothing hidden in it stretches the page (backlog 10).
+    const beside = await page.locator('[data-slot="page-body"]').boundingBox();
+    const terminalBox = await page.getByTestId('terminal-panel').boundingBox();
+    expect(beside !== null && terminalBox !== null && beside.x >= terminalBox.x + terminalBox.width && Math.abs(beside.y - terminalBox.y) < 16).toBe(true);
+    expect(
+      await page.evaluate(() => ({
+        position: getComputedStyle(document.querySelector('[data-slot="page-body"]')!).position,
+        documentExtra: document.documentElement.scrollHeight - window.innerHeight,
+      })),
+    ).toEqual({ position: 'relative', documentExtra: 0 });
     await peek.click();
     await expect(page.getByTestId('transcript')).toBeHidden();
 

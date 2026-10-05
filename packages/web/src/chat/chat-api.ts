@@ -1,6 +1,7 @@
 import {
   API_ROUTES,
   apiPath,
+  ChatAgentsResponse,
   PermissionRulesResponse,
   SendMessageResponse,
   SessionResponse,
@@ -11,6 +12,7 @@ import {
   type PermissionRule,
   type Session,
   type SessionDriver,
+  type WhileWorking,
   type Workspace,
 } from '@ogden-agents/shared';
 import { call, callNoContent, ChatApiError, postJson } from '@/api/http';
@@ -20,12 +22,6 @@ import { tabAuth, type TabAuth } from '@/auth/tab-token';
  * The chat REST calls (story 2.2), sent with this tab's token. Replies and
  * session state never come back here: they arrive through the event log.
  */
-
-/** The only agent in this epic; the UI names it by its product name (EXPERIENCE.md Voice). */
-export const AGENT_NAME = 'Claude Code';
-
-/** That agent's id in the agent setup API (`/api/v1/agents/:agentId`), for Sign in again (9.4). */
-export const AGENT_ID = 'claude-code';
 
 // The shared fetch-error helper, re-exported for this module's importers.
 export { call, ChatApiError, postJson };
@@ -40,10 +36,38 @@ export async function openWorkspace(path: string, auth: Pick<TabAuth, 'fetch'> =
   return WorkspaceResponse.parse(json).workspace;
 }
 
-/** `POST /api/v1/workspaces/:wsId/sessions`: a new chat in the workspace. */
-export async function createChatSession(wsId: string, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<Session> {
-  const json = await call(auth, apiPath(API_ROUTES.workspaceSessions, { wsId }), postJson({ kind: 'chat' }), "Ogden Agents couldn't start a chat");
+/**
+ * `POST /api/v1/workspaces/:wsId/sessions`: a new chat in the workspace,
+ * with the agent `agentId` (epic 6), or the server's default one.
+ */
+export async function createChatSession(wsId: string, auth: Pick<TabAuth, 'fetch'> = tabAuth, agentId?: string, model?: string | null): Promise<Session> {
+  // `model` (story 11): the model it starts on, as an agent handoff passes the target's; omitted, the project's or app's default.
+  const body = { kind: 'chat', ...(agentId === undefined ? {} : { agentId }), ...(model === undefined ? {} : { model }) };
+  const json = await call(auth, apiPath(API_ROUTES.workspaceSessions, { wsId }), postJson(body), "Ogden Agents couldn't start a chat");
   return SessionResponse.parse(json).session;
+}
+
+/** `GET /api/v1/chat-agents` (epic 6): the agents a chat can be started with, and the default one. */
+export async function fetchChatAgents(auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<ChatAgentsResponse> {
+  const json = await call(auth, API_ROUTES.chatAgents, {}, "Ogden Agents couldn't list the agents");
+  return ChatAgentsResponse.parse(json);
+}
+
+/** The query key of {@link fetchChatAgents}: the list only changes when the server restarts. */
+export const CHAT_AGENTS_QUERY_KEY = ['chat-agents'] as const;
+
+/** A chat's agent before the agent list has loaded, or one it doesn't have (EXPERIENCE.md Voice). */
+export const UNKNOWN_AGENT_NAME = 'The agent';
+
+/**
+ * A chat's agent by its product name (epic 6), from the agent list. A
+ * session stored before agents could be chosen has no id: it is the
+ * install's default agent's. "The agent" while the list loads, or for an
+ * agent the list doesn't have.
+ */
+export function agentNameOf(list: ChatAgentsResponse | undefined, agentId: string | undefined): string {
+  const id = agentId ?? list?.defaultAgentId;
+  return list?.agents.find((agent) => agent.agentId === id)?.displayName ?? UNKNOWN_AGENT_NAME;
 }
 
 /**
@@ -56,8 +80,9 @@ export async function fetchSession(wsId: string, sesId: string, auth: Pick<TabAu
 }
 
 /** `POST /api/v1/workspaces/:wsId/sessions/:sesId/messages`. */
-export async function sendMessage(wsId: string, sesId: string, text: string, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<string> {
-  const json = await call(auth, apiPath(API_ROUTES.sessionMessages, { wsId, sesId }), postJson({ text }), "Your message couldn't be sent");
+export async function sendMessage(wsId: string, sesId: string, text: string, auth: Pick<TabAuth, 'fetch'> = tabAuth, delivery?: WhileWorking): Promise<string> {
+  // `delivery` (send now or wait): what it does if the agent is working; absent waits, as before.
+  const json = await call(auth, apiPath(API_ROUTES.sessionMessages, { wsId, sesId }), postJson(delivery === undefined ? { text } : { text, delivery }), "Your message couldn't be sent");
   return SendMessageResponse.parse(json).messageId;
 }
 
@@ -84,6 +109,33 @@ export async function setPermissionMode(wsId: string, sesId: string, mode: Permi
     "Ogden Agents couldn't change this chat's permission mode",
   );
   return SessionResponse.parse(json);
+}
+
+/**
+ * `PUT /api/v1/workspaces/:wsId/sessions/:sesId/model` (story 11): the
+ * chat's model, the agent's own id, or `null` for its own choice. It applies
+ * to the next message. 409 `model_unavailable` for one the agent doesn't
+ * list, and while the terminal drives.
+ */
+export async function setSessionModel(wsId: string, sesId: string, model: string | null, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<SessionResponse> {
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.sessionModel, { wsId, sesId }),
+    { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }) },
+    "Ogden Agents couldn't change this chat's model",
+  );
+  return SessionResponse.parse(json);
+}
+
+/** `PUT /api/v1/chat-agents/:agentId/default-model` (story 11): the model new chats with the agent start on, app-wide. */
+export async function setAgentDefaultModel(agentId: string, model: string | null, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<ChatAgentsResponse> {
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.chatAgentDefaultModel, { agentId }),
+    { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }) },
+    "The default model couldn't be saved",
+  );
+  return ChatAgentsResponse.parse(json);
 }
 
 // ---------------------------------------------------------------------------

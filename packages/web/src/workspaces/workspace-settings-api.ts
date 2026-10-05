@@ -7,6 +7,8 @@ import {
   type BmadPiece,
   type BmadPieceAvailability,
   type CautionLevel,
+  type PermissionMode,
+  type WhileWorking,
   type WorkspaceSettings,
 } from '@ogden-agents/shared';
 import { useQuery } from '@tanstack/react-query';
@@ -25,6 +27,68 @@ type Auth = Pick<TabAuth, 'fetch'>;
 /** `GET /api/v1/workspaces/:wsId/settings`. */
 export async function fetchWorkspaceSettings(wsId: string, auth: Auth = tabAuth): Promise<WorkspaceSettings> {
   const json = await call(auth, apiPath(API_ROUTES.workspaceSettings, { wsId }), {}, "Ogden Agents couldn't load this project's settings");
+  return WorkspaceSettingsResponse.parse(json).settings;
+}
+
+/**
+ * `PATCH /api/v1/workspaces/:wsId/settings`: the agent the project's new
+ * chats preselect (epic 6, entry 6), or `null` for the install's default.
+ */
+export async function updateDefaultAgent(wsId: string, defaultAgentId: string | null, auth: Auth = tabAuth): Promise<WorkspaceSettings> {
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.workspaceSettings, { wsId }),
+    { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ defaultAgentId }) },
+    "The default agent couldn't be saved",
+  );
+  return WorkspaceSettingsResponse.parse(json).settings;
+}
+
+/**
+ * `PATCH /api/v1/workspaces/:wsId/settings`: the mode the project's new
+ * chats start in (default permission mode). Skip all carries `confirm`, the
+ * user's answer to its red warning; the server refuses it without that or
+ * without Developer mode.
+ */
+export async function updateDefaultPermissionMode(wsId: string, defaultPermissionMode: PermissionMode, confirm: boolean, auth: Auth = tabAuth): Promise<WorkspaceSettings> {
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.workspaceSettings, { wsId }),
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ defaultPermissionMode, ...(confirm ? { confirm: true } : {}) }),
+    },
+    "The default permission mode couldn't be saved",
+  );
+  return WorkspaceSettingsResponse.parse(json).settings;
+}
+
+/**
+ * `PATCH /api/v1/workspaces/:wsId/settings` (story 11): an agent's default
+ * model in this project, or `null` to use the app's default for the agent.
+ */
+export async function updateProjectDefaultModel(wsId: string, agentId: string, model: string | null, auth: Auth = tabAuth): Promise<WorkspaceSettings> {
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.workspaceSettings, { wsId }),
+    { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ defaultModels: { [agentId]: model } }) },
+    "The default model couldn't be saved",
+  );
+  return WorkspaceSettingsResponse.parse(json).settings;
+}
+
+/**
+ * `PATCH /api/v1/workspaces/:wsId/settings`: what a message sent while the
+ * agent works does in this project (send now or wait), or `null` for the app's choice.
+ */
+export async function updateWhileWorking(wsId: string, whileWorking: WhileWorking | null, auth: Auth = tabAuth): Promise<WorkspaceSettings> {
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.workspaceSettings, { wsId }),
+    { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ whileWorking }) },
+    "That setting couldn't be saved",
+  );
   return WorkspaceSettingsResponse.parse(json).settings;
 }
 

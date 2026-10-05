@@ -516,6 +516,18 @@ describe('sign-in methods', () => {
     expect(error).toMatchObject({ type: 'state', state: 'error' });
     expect(error).not.toHaveProperty('code');
   });
+
+  it('a prompt that fails with a usage-limit notice the descriptor names is usage_limit, and the session stays usable (handoff)', async () => {
+    const { session, events } = await startFake();
+    await expect(session.prompt('usage-limit')).rejects.toMatchObject({ code: 'usage_limit' });
+    expect(events.at(-1)).toEqual({
+      type: 'state',
+      state: 'error',
+      reason: 'Claude Code has reached its usage limit. Continue this chat with another agent while it cools down, or try again later.',
+      code: 'usage_limit',
+    });
+    await expect(session.prompt('hello')).resolves.toEqual({ stopReason: 'end_turn' });
+  });
 });
 
 describe('when the agent can’t be started', () => {
@@ -672,5 +684,25 @@ describe('paths a search can reach (story 2.8 review F2)', () => {
     expect(search({ pattern: 'TODO', glob: '../secrets/*', path: 'src' })).toEqual(['src', join('src', '..', 'secrets', '*')]);
     expect(search({ pattern: '../x', path: '~/a' })).toEqual(['~/a']);
     expect(pathsOf({ toolCallId: 't', kind: 'read', rawInput: { file_path: 'a.ts' } }, cwd)).toEqual(['a.ts']);
+  });
+});
+
+describe('send now or wait: a message into the running turn (claude-agent-acp 0.84 `_session/steering`)', () => {
+  it('offers steer, puts the message into the running turn without a cancel, and the prompt ends answering it', async () => {
+    const { session, events } = await startFake();
+    expect(session.steer).toBeTypeOf('function');
+    const prompting = session.prompt('hold');
+    await until(() => events.some((event) => event.type === 'message_chunk' && event.text === 'Holding'), 'the turn to start');
+    expect(await session.steer!('use the other file')).toBe('injected');
+    expect(await prompting).toEqual({ stopReason: 'end_turn' });
+    const reply = events.flatMap((event) => (event.type === 'message_chunk' ? [event.text] : [])).join('');
+    expect(reply).toBe('HoldingSteered: use the other file.');
+  });
+
+  it('answers no_turn, starting nothing, when no turn runs', async () => {
+    const { session, events } = await startFake();
+    expect(await session.steer!('anyone there')).toBe('no_turn');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(events.filter((event) => event.type === 'state')).toEqual([]);
   });
 });

@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import { BmadPieceSet } from './bmad.js';
-import { AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, MessageId, PermissionDecision } from './events.js';
-import { PermissionMode, Session, Workspace } from './entities.js';
+import { AgentAuthMethodKind, AgentAuthState, AgentId, AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, MAX_HANDOFF_BRIEF_CHARS, MessageId, PermissionDecision, WhileWorking } from './events.js';
+import { AgentModel, DefaultModeNotice, ModelId, PermissionMode, Session, Workspace } from './entities.js';
 import { PermissionRuleId, WorkspaceId } from './ids.js';
+import { AgentInstallState } from './setup.js';
 import { SessionTerminal } from './terminal.js';
 import { IsoUtcTimestamp } from './time.js';
 
@@ -28,11 +29,99 @@ export type CreateWorkspaceRequest = z.infer<typeof CreateWorkspaceRequest>;
 export const WorkspaceResponse = z.object({ workspace: Workspace });
 export type WorkspaceResponse = z.infer<typeof WorkspaceResponse>;
 
-/** `POST /api/v1/workspaces/:wsId/sessions`. Only chat sessions are created this way so far. */
+/**
+ * `POST /api/v1/workspaces/:wsId/sessions`. Only chat sessions are created
+ * this way so far. `agentId` picks the chat's agent (epic 6); omitted, the
+ * install's default agent (`ChatAgentsResponse.defaultAgentId`).
+ */
 export const CreateSessionRequest = z.object({
   kind: z.literal('chat').default('chat'),
+  agentId: AgentId.optional(),
+  /**
+   * The model the chat starts on (story 11; an agent handoff passes the
+   * target's): the agent's own id, or `null` for its own choice. Omitted: the
+   * project's default for the agent, else the install's, else `null`.
+   */
+  model: ModelId.nullable().optional(),
 });
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequest>;
+
+/**
+ * One way an agent signs in, as the agent list names it (epic 6 contract,
+ * 6.3): the user's own account (`subscription`), or an API key. `label` is
+ * the agent's own words ("Sign in with your account").
+ */
+export const AgentSignInMethod = z.object({ kind: AgentAuthMethodKind, label: z.string().min(1) });
+export type AgentSignInMethod = z.infer<typeof AgentSignInMethod>;
+
+/**
+ * What the user does about an agent a new chat is refused for (6.3): install
+ * it or sign in to it (Settings → Agents), or trust the project.
+ */
+export const AGENT_ACTIONS = ['install', 'sign_in', 'trust_project'] as const;
+export const AgentAction = z.enum(AGENT_ACTIONS);
+export type AgentAction = z.infer<typeof AgentAction>;
+
+/** Why a new chat with an agent is refused on this install right now, in plain words, and what fixes it (6.3). */
+export const AgentUnavailable = z.object({
+  code: z.enum(['agent_not_installed', 'agent_signed_out']),
+  reason: z.string().min(1),
+  action: AgentAction,
+});
+export type AgentUnavailable = z.infer<typeof AgentUnavailable>;
+
+/**
+ * One agent a chat can be started with (epic 6, E6-R2; frozen in 6.3):
+ * agent-neutral data, never a branch on an id. `permissionModes` are the
+ * modes it declares, Ask always among them. `install` and `auth` are its
+ * setup as last read; `unavailable` says why a new chat with it is refused
+ * now (absent: it can be started). `terminalResume`: its own CLI can take a
+ * chat over (the driver toggle). `needsProjectTrust`: it runs the project's
+ * own agent settings or hooks, so a project must be trusted first.
+ */
+export const ChatAgent = z.object({
+  agentId: AgentId,
+  /** The agent's product name, as the UI names it. */
+  displayName: z.string().min(1),
+  /** Who makes it ("Anthropic"), for the agent card. */
+  provider: z.string().min(1),
+  signInMethods: z.array(AgentSignInMethod),
+  /** Plain words on what its API key looks like, when it takes one ("Starts with sk-ant-"). Never a key. */
+  apiKeyFormat: z.string().min(1).optional(),
+  install: AgentInstallState,
+  auth: AgentAuthState,
+  terminalResume: z.boolean(),
+  needsProjectTrust: z.boolean(),
+  permissionModes: z.array(PermissionMode).min(1),
+  unavailable: AgentUnavailable.optional(),
+  /**
+   * The models it offers (story 11), as it last listed them on this install,
+   * or as its descriptor declares them; absent until it has listed any.
+   */
+  models: z.array(AgentModel).optional(),
+  /** The model new chats with it start on, install-wide (Settings → Agents); absent: its own choice. */
+  defaultModel: ModelId.optional(),
+});
+export type ChatAgent = z.infer<typeof ChatAgent>;
+
+/**
+ * `GET /api/v1/chat-agents`: the agents a chat can be started with, in
+ * order, and the install's default agent: the one a new chat gets when none
+ * is picked in a project with no default of its own, and the agent of every
+ * session stored before agents could be chosen.
+ */
+export const ChatAgentsResponse = z.object({
+  agents: z.array(ChatAgent).min(1),
+  defaultAgentId: AgentId,
+});
+export type ChatAgentsResponse = z.infer<typeof ChatAgentsResponse>;
+
+/**
+ * The plain reason a chat with an agent that runs the project's own agent
+ * settings or hooks is refused in a project that isn't trusted (6.3's
+ * `project_not_trusted`), shared so the picker says what the server says.
+ */
+export const projectNotTrustedReason = (name: string) => `${name} uses this project's own agent settings, so trust the project before starting a ${name} chat.`;
 
 /**
  * One permission mode as the chat's mode picker offers it: whether the
@@ -54,19 +143,31 @@ export const SessionResponse = z.object({
   session: Session,
   terminal: SessionTerminal.optional(),
   permissionModes: z.array(SessionPermissionModeOption).optional(),
+  /**
+   * The models the chat's picker offers (story 11; `GET` only): its agent
+   * session's list when it started this run, else the agent's last list, else
+   * `null` (not known yet). `current` is the model the agent reported it runs
+   * on, when it said.
+   */
+  models: z.object({ available: z.array(AgentModel).nullable(), current: ModelId.optional() }).optional(),
 });
 export type SessionResponse = z.infer<typeof SessionResponse>;
 
 /** The longest message the composer may send, in characters. */
 export const MAX_MESSAGE_LENGTH = 100_000;
 
-/** `POST /api/v1/workspaces/:wsId/sessions/:sesId/messages`. */
-export const SendMessageRequest = z.object({
-  text: z
-    .string()
-    .refine((text) => text.trim().length > 0, 'Write a message first.')
-    .pipe(z.string().max(MAX_MESSAGE_LENGTH, `A message can be at most ${MAX_MESSAGE_LENGTH} characters.`)),
-});
+/** A message's text: not blank, at most `MAX_MESSAGE_LENGTH` characters. */
+const MessageText = z
+  .string()
+  .refine((text) => text.trim().length > 0, 'Write a message first.')
+  .pipe(z.string().max(MAX_MESSAGE_LENGTH, `A message can be at most ${MAX_MESSAGE_LENGTH} characters.`));
+
+/**
+ * `POST /api/v1/workspaces/:wsId/sessions/:sesId/messages`. `delivery` is
+ * what the message does if the agent is working (send now or wait): absent
+ * means `wait`, as before. The composer always says which the user chose.
+ */
+export const SendMessageRequest = z.object({ text: MessageText, delivery: WhileWorking.optional() });
 export type SendMessageRequest = z.infer<typeof SendMessageRequest>;
 
 /**
@@ -76,6 +177,80 @@ export type SendMessageRequest = z.infer<typeof SendMessageRequest>;
  */
 export const SendMessageResponse = z.object({ messageId: MessageId, queued: z.boolean() });
 export type SendMessageResponse = z.infer<typeof SendMessageResponse>;
+
+// ---------------------------------------------------------------------------
+// Handoff: continuing a chat with another agent (user decision 2026-10-04).
+// ---------------------------------------------------------------------------
+
+/** The message the handoff dialog starts with, for the new agent. */
+export const DEFAULT_HANDOFF_MESSAGE = 'Please continue where we left off.';
+
+/** `GET …/sessions/:sesId/handoff?agentId=`: which agent the chat would go to. */
+export const HandoffPreviewQuery = z.object({ agentId: AgentId });
+export type HandoffPreviewQuery = z.infer<typeof HandoffPreviewQuery>;
+
+/**
+ * What continuing the chat with `agent` would send, before anything is sent:
+ * the brief Ogden built from the chat's own events (secrets masked, at most
+ * `maxChars`), who receives it (`provider`, named in the confirmation), the
+ * chat's permission mode afterwards and, when it falls back to Ask, why
+ * (`modeNote`), and whether the agent reopens a session it had in this chat
+ * (`resumes`: the brief then covers only what happened since it left).
+ */
+export const HandoffPreviewResponse = z.object({
+  agent: z.object({ agentId: AgentId, displayName: z.string().min(1), provider: z.string().min(1) }),
+  brief: z.string().max(MAX_HANDOFF_BRIEF_CHARS),
+  maxChars: z.number().int().positive().max(MAX_HANDOFF_BRIEF_CHARS),
+  permissionMode: PermissionMode,
+  modeNote: z.string().min(1).optional(),
+  resumes: z.boolean(),
+  /**
+   * The server's proof that this exact brief was shown for this agent and
+   * chat: single-use, short-lived, and required by the handoff. An edited
+   * brief gets its own with `POST …/handoff/preview`.
+   */
+  previewToken: z.string().min(32).max(128),
+});
+export type HandoffPreviewResponse = z.infer<typeof HandoffPreviewResponse>;
+
+/**
+ * `POST …/handoff/preview`: the preview again for the brief as the user
+ * edited it (masked, refused over the agent's budget), with a token for it.
+ */
+export const HandoffBriefPreviewRequest = z.object({
+  agentId: AgentId,
+  brief: z.string().max(MAX_HANDOFF_BRIEF_CHARS, `A handoff brief can be at most ${MAX_HANDOFF_BRIEF_CHARS} characters.`),
+});
+export type HandoffBriefPreviewRequest = z.infer<typeof HandoffBriefPreviewRequest>;
+
+/**
+ * `POST …/sessions/:sesId/handoff`: continue the chat with `agentId`, telling
+ * it `brief` (as the user edited it; the server masks it again and refuses
+ * one over the agent's budget) and then `message`. `previewToken` must be the
+ * unused, unexpired token of a preview of this same masked brief, agent and
+ * chat, or it is refused (409 `handoff_not_previewed`).
+ */
+export const HandoffRequest = z.object({
+  agentId: AgentId,
+  /** The token of the preview that showed exactly this brief (masked) for this agent and chat. */
+  previewToken: z.string().min(1).max(128),
+  brief: z.string().max(MAX_HANDOFF_BRIEF_CHARS, `A handoff brief can be at most ${MAX_HANDOFF_BRIEF_CHARS} characters.`),
+  message: z
+    .string()
+    .refine((text) => text.trim().length > 0, 'Write a message for the agent first.')
+    .pipe(z.string().max(MAX_MESSAGE_LENGTH, `A message can be at most ${MAX_MESSAGE_LENGTH} characters.`)),
+  /**
+   * The model the chat runs on with its new agent (story 11; `null`: the
+   * agent's own choice). Absent: the project's default for that agent, else
+   * the install's, else the agent's own choice.
+   */
+  model: ModelId.nullable().optional(),
+});
+export type HandoffRequest = z.infer<typeof HandoffRequest>;
+
+/** The chat with its new agent, and the user's message sent to it. */
+export const HandoffResponse = z.object({ session: Session, messageId: MessageId });
+export type HandoffResponse = z.infer<typeof HandoffResponse>;
 
 // ---------------------------------------------------------------------------
 // Workspaces and sessions (story 2.3 contracts; filled by 2.5, 2.8, 2.10).
@@ -139,13 +314,36 @@ export type HistoryDeletedResponse = z.infer<typeof HistoryDeletedResponse>;
 
 /**
  * A workspace's settings (Workspace settings page): its caution level, the
- * BMad pieces it has on (AD-22), and whether the user trusted the project's
- * own BMad Method scripts to run (story 4.2). `bmadScriptsTrusted` is
+ * BMad pieces it has on (AD-22), whether the user trusted the project's own
+ * BMad Method scripts to run (story 4.2), and (epic 6 contract, 6.3; kept
+ * from entry 6) the agent its new chats preselect. `bmadScriptsTrusted` is
  * optional when parsed (an older server's answer reads as not trusted) and
  * always present once parsed; core always sends it. It changes only through
  * `PUT …/bmad/script-trust`, never through `PATCH` settings.
+ * `defaultAgentId` absent: the install's default agent
+ * (`ChatAgentsResponse.defaultAgentId`).
  */
-export const WorkspaceSettings = z.object({ cautionLevel: CautionLevel, bmadPieces: BmadPieceSet, bmadScriptsTrusted: z.boolean().default(false) });
+export const WorkspaceSettings = z.object({
+  cautionLevel: CautionLevel,
+  bmadPieces: BmadPieceSet,
+  bmadScriptsTrusted: z.boolean().default(false),
+  defaultAgentId: AgentId.optional(),
+  /**
+   * The mode new chats in this project start in (default permission mode).
+   * Absent: Ask (core leaves it out for plain Ask with no notice, and an
+   * older server never sends it).
+   */
+  defaultPermissionMode: PermissionMode.optional(),
+  /** Why the default reads as it does, when there is something to say (see {@link DEFAULT_MODE_NOTICES}). */
+  defaultPermissionModeNotice: DefaultModeNotice.optional(),
+  /**
+   * The project's own default model per agent (story 11); an agent missing
+   * from it uses the install's default. Absent: none (and from older servers).
+   */
+  defaultModels: z.record(AgentId, ModelId).optional(),
+  /** The project's own choice of what a message sent while the agent works does (send now or wait); absent: the app-wide one. */
+  whileWorking: WhileWorking.optional(),
+});
 export type WorkspaceSettings = z.infer<typeof WorkspaceSettings>;
 
 /** `GET` and `PATCH /api/v1/workspaces/:wsId/settings`. */
@@ -156,11 +354,37 @@ export type WorkspaceSettingsResponse = z.infer<typeof WorkspaceSettingsResponse
  * `PATCH /api/v1/workspaces/:wsId/settings`: the fields to change. The pieces
  * must satisfy the dependency rule (story 10.2); turning on a piece this
  * install doesn't ship is refused by core with `feature_unavailable`.
+ * `defaultAgentId` (epic 6, entry 6) is the agent new chats preselect;
+ * `null` goes back to the install's default, and an agent this install
+ * doesn't have is refused with `agent_unknown`.
  */
-export const UpdateWorkspaceSettingsRequest = z.object({ cautionLevel: CautionLevel.optional(), bmadPieces: BmadPieceSet.optional() }).refine(
-  (settings) => settings.cautionLevel !== undefined || settings.bmadPieces !== undefined,
-  'Choose a setting to change.',
-);
+export const UpdateWorkspaceSettingsRequest = z
+  .object({
+    cautionLevel: CautionLevel.optional(),
+    bmadPieces: BmadPieceSet.optional(),
+    defaultAgentId: AgentId.nullable().optional(),
+    /**
+     * The mode new chats start in (default permission mode). Skip all is
+     * refused without Developer mode (`developer_mode_required`) or without
+     * `confirm: true`, the user's answer to its red warning (`confirmation_required`).
+     */
+    defaultPermissionMode: PermissionMode.optional(),
+    confirm: z.boolean().optional(),
+    /** Per agent: its default model in this project, or `null` to use the install's (story 11). Agents left out keep theirs. */
+    defaultModels: z.record(AgentId, ModelId.nullable()).optional(),
+    /** `null` goes back to the app-wide choice (send now or wait). */
+    whileWorking: WhileWorking.nullable().optional(),
+  })
+  .refine(
+    (settings) =>
+      settings.cautionLevel !== undefined ||
+      settings.bmadPieces !== undefined ||
+      settings.defaultAgentId !== undefined ||
+      settings.defaultPermissionMode !== undefined ||
+      settings.defaultModels !== undefined ||
+      settings.whileWorking !== undefined,
+    'Choose a setting to change.',
+  );
 export type UpdateWorkspaceSettingsRequest = z.infer<typeof UpdateWorkspaceSettingsRequest>;
 
 // ---------------------------------------------------------------------------
@@ -203,6 +427,14 @@ export type PermissionRulesResponse = z.infer<typeof PermissionRulesResponse>;
 export const SetPermissionModeRequest = z.object({ mode: PermissionMode, confirm: z.boolean().optional() });
 export type SetPermissionModeRequest = z.infer<typeof SetPermissionModeRequest>;
 
+/** `PUT /api/v1/workspaces/:wsId/sessions/:sesId/model` (story 11): the agent's own model id, or `null` for its own choice. */
+export const SetSessionModelRequest = z.object({ model: ModelId.nullable() });
+export type SetSessionModelRequest = z.infer<typeof SetSessionModelRequest>;
+
+/** `PUT /api/v1/chat-agents/:agentId/default-model` (story 11): the install-wide default, or `null` for the agent's own choice. */
+export const SetAgentDefaultModelRequest = z.object({ model: ModelId.nullable() });
+export type SetAgentDefaultModelRequest = z.infer<typeof SetAgentDefaultModelRequest>;
+
 /**
  * `GET` and `PUT /api/v1/settings/developer-mode`. `everSet` says whether
  * Developer mode was ever turned on or off on this install (a browser carries
@@ -214,3 +446,24 @@ export type DeveloperModeResponse = z.infer<typeof DeveloperModeResponse>;
 /** `PUT /api/v1/settings/developer-mode`. */
 export const SetDeveloperModeRequest = z.object({ developerMode: z.boolean() });
 export type SetDeveloperModeRequest = z.infer<typeof SetDeveloperModeRequest>;
+
+// ---------------------------------------------------------------------------
+// Send now or wait (2026-10-04).
+// ---------------------------------------------------------------------------
+
+/** `GET` and `PUT /api/v1/settings/chat`: the app-wide choice of what a message sent while the agent works does. */
+export const ChatSettingsResponse = z.object({ whileWorking: WhileWorking });
+export type ChatSettingsResponse = z.infer<typeof ChatSettingsResponse>;
+
+/** `PUT /api/v1/settings/chat`. */
+export const SetChatSettingsRequest = z.object({ whileWorking: WhileWorking });
+export type SetChatSettingsRequest = z.infer<typeof SetChatSettingsRequest>;
+
+/**
+ * `PATCH /api/v1/workspaces/:wsId/sessions/:sesId/queue/:messageId`: change
+ * one waiting message: its text, or its place (`position`, 0 = goes next).
+ */
+export const UpdateQueuedMessageRequest = z
+  .object({ content: MessageText.optional(), position: z.number().int().min(0).optional() })
+  .refine((input) => input.content !== undefined || input.position !== undefined, 'Choose what to change.');
+export type UpdateQueuedMessageRequest = z.infer<typeof UpdateQueuedMessageRequest>;

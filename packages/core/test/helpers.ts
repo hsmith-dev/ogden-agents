@@ -2,7 +2,56 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach } from 'vitest';
-import { openCore, type BmadCatalogPort, type Core, type OpenCoreOptions } from '../src/index.js';
+import {
+  createAgentRegistry,
+  openCore,
+  type AgentDescriptor,
+  type AgentPort,
+  type AgentRegistry,
+  type BmadCatalogPort,
+  type Core,
+  type OpenCoreOptions,
+  type RegisteredAgent,
+} from '../src/index.js';
+
+/** The id the core tests register their one agent under. */
+export const TEST_AGENT_ID = 'test-agent';
+
+/**
+ * A test agent's descriptor (6.3): sound, named and moded as `agent` is, with
+ * a subscription sign-in and an API key in `TEST_AGENT_KEY`; `overrides` change any field.
+ */
+export function testDescriptor(agentId: string, agent: Pick<AgentPort, 'displayName' | 'permissionModes'>, overrides: Partial<AgentDescriptor> = {}): AgentDescriptor {
+  const declared = agent.permissionModes ?? ['ask'];
+  return {
+    agentId,
+    displayName: agent.displayName,
+    provider: 'Test Provider',
+    install: { kind: 'npm', package: '@test/agent', version: '1.0.0' },
+    signInMethods: [
+      { id: 'account', kind: 'subscription', label: 'Sign in with your account' },
+      { id: 'key', kind: 'api_key', label: 'Use an API key', apiKey: { envNames: ['TEST_AGENT_KEY'], format: 'Starts with test-' } },
+    ],
+    permissionModes: {
+      ask: 'asking',
+      ...(declared.includes('auto') ? { auto: 'auto-mode' } : {}),
+      ...(declared.includes('skip_all') ? { skip_all: 'yolo' } : {}),
+    },
+    needsProjectTrust: false,
+    skillsFolder: '.test/skills',
+    ...overrides,
+  };
+}
+
+/** `agent` registered as `agentId`, with {@link testDescriptor}. */
+export function registered(agentId: string, agent: AgentPort, overrides: Partial<AgentDescriptor> = {}): RegisteredAgent {
+  return { descriptor: testDescriptor(agentId, agent, overrides), agent };
+}
+
+/** A registry holding only `agent`, as {@link TEST_AGENT_ID} (default and legacy agent alike). */
+export function soleAgent(agent: AgentPort): AgentRegistry {
+  return createAgentRegistry([registered(TEST_AGENT_ID, agent)]);
+}
 
 const dirs: string[] = [];
 const opened: Core[] = [];

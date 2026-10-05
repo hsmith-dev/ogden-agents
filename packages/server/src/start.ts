@@ -1,26 +1,10 @@
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
+import { ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain } from '@ogden-agents/adapters';
 import {
-  CLAUDE_CODE_AGENT_ID,
-  createClaudeCodeAgent,
-  createClaudeCodeSetup,
-  createKeyringSecretStore,
-  createMemoryAppShortcut,
-  createMemorySecretStore,
-  createOsAppShortcut,
-  createPtyTerminalPort,
-  createUvToolchain,
-  errorCode,
-  locateClaudeAdapter,
-  resolveClaudeAgentAcp,
-  type UvScriptRunner,
-} from '@ogden-agents/adapters';
-import {
-  AgentSetupError,
-  CoreError,
-  createAgentSetup,
+  createAgentRegistry,
   createChat,
   createDataDir,
   createNewProjectDefaults,
@@ -31,13 +15,13 @@ import {
   ensureDataDir,
   openCore,
   PORT_FILE,
+  unregisteredAgent,
   type AgentPort,
-  type AgentTerminalResume,
   type Core,
 } from '@ogden-agents/core';
-import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM } from '@ogden-agents/shared';
-import openBrowser from 'open';
+import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM, type AgentId, type Session } from '@ogden-agents/shared';
 import { WebSocketServer } from 'ws';
+import { checkAgentWiring } from './agent-wiring.js';
 import { createApp, type ServerControl } from './app.js';
 import { SHIPPED_BMAD_PIECES } from './bmad-pieces.js';
 import { chooseWebSocketProtocol, createLaunchCodes, createTabTokens, retireLegacyAuthKey } from './auth.js';
@@ -47,12 +31,14 @@ import { createLauncherToken, type LauncherToken } from './launcher-token.js';
 import { createLogger, createRotatingFileWriter, LOG_DIR, teeWriters, type Logger } from './log.js';
 import { removePortFile, writePortFile } from './port-file.js';
 import { createTerminalAvailability } from './terminal-availability.js';
-import { resolveTestHooks, testHooksLogFields, type TestHooks } from './test-hooks.js';
+import { resolveTestHooks, type TestHooks } from './test-hooks.js';
 import { VERSION } from './version.js';
-import { agentEnvironment, agentKeysOf, SUBSCRIPTION_MAX_AGE_MS, uvEnvironment, withoutAgentKeys } from './start-env.js';
+import { wireAgents } from './start-agents.js';
+import { uvEnvironment } from './start-env.js';
 import { broadcast, closeServer, HOST, listen, repointAppShortcut } from './start-io.js';
-import { bmadSetupFailureLogger, uvPycacheDir, createBmadSourceAndCatalog, createDocumentCards, createPlanAndBoard, stopBmadWork, type BmadWiring } from './start-planning.js';
+import { bmadSetupFailureLogger, uvPycacheDir, createBmadSourceAndCatalog, createDocumentCards, createPlanAndBoard, stopBmadWork, withAgentSkillFolders, type BmadWiring } from './start-planning.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
+import { openUrl } from './open-url.js';
 
 // Moved out in story 3.9; still exported from here for the callers that import them from `start.ts`.
 export { AGENT_ENV_KEYS, agentEnvironment, agentKeysOf, CHECK_IN_MS_ENV, checkInDelayFromEnv, SECRET_STORE_ENV, SUBSCRIPTION_MAX_AGE_MS, testSecretStore, uvEnvironment, withoutAgentKeys } from './start-env.js';
@@ -61,6 +47,9 @@ export type { PortFile, RunningServer, StartOptions, StopReason } from './start-
 export { TICKETS_SCRIPT, uvWorkDir } from './start-planning.js';
 
 export { HOST } from './start-io.js';
+// Moved out in story 6.9; still exported from here.
+export { CLAUDE_ACP_PATH_ENV } from './start-agents.js';
+
 /** Fixed default so bookmarks usually keep working; falls back to the next free port. */
 export const DEFAULT_PORT = 4317;
 /** How many consecutive ports to try before giving up. */
@@ -83,13 +72,6 @@ function defaultWebRoot(): string {
   return WEB_ROOT_CANDIDATES.find((dir) => existsSync(dir)) ?? WEB_ROOT_CANDIDATES[1];
 }
 
-/**
- * The Claude Agent ACP adapter's entry script, for a server started without
- * `claudeAdapterPath` (`pnpm dev:chat` sets it). Without either, a dev
- * install's `node_modules` adapter is used, else the one Install put in the
- * data folder (story 9.3).
- */
-export const CLAUDE_ACP_PATH_ENV = 'OGDEN_AGENTS_CLAUDE_ACP_PATH';
 
 /** How long a stopping server waits for a killed install to remove its temp folder. */
 const INSTALL_STOP_MS = 10_000;
@@ -117,6 +99,14 @@ export const MAX_WS_PAYLOAD_BYTES = MAX_TERMINAL_INPUT_BYTES + 1024;
 /** How long a stop waits after answering Quit or restart, so the reply reaches the client first. */
 const STOP_AFTER_REPLY_MS = 50;
 
+/** Whether `agentId` is one this server registers (epic 6, entry 6): Claude Code, Antigravity unless left out (entry 5), then any extra agent a test wires. */
+const registeredAgent =
+  (options: Pick<StartOptions, 'extraAgents' | 'antigravity'>) =>
+  (agentId: string): boolean =>
+    agentId === CLAUDE_CODE_AGENT_ID ||
+    (options.antigravity !== false && agentId === ANTIGRAVITY_AGENT_ID) ||
+    (options.extraAgents ?? []).some((wiring) => wiring.descriptor.agentId === agentId);
+
 /**
  * Starts the server on the data folder. Only one server runs per data folder:
  * if another live one holds it, this throws `ServerAlreadyRunningError`
@@ -125,6 +115,8 @@ const STOP_AFTER_REPLY_MS = 50;
 export function start(options: StartOptions & ({ launch: true } | { open: true })): Promise<RunningServer & { launchUrl: string }>;
 export function start(options?: StartOptions): Promise<RunningServer>;
 export async function start(options: StartOptions = {}): Promise<RunningServer> {
+  // A wiring bug is refused before anything is opened (6.3).
+  for (const wiring of options.extraAgents ?? []) checkAgentWiring(wiring);
   const dataDir = options.dataDir === undefined ? ensureDataDir() : createDataDir(options.dataDir);
   const lock = acquireInstanceLock(dataDir);
   try {
@@ -161,6 +153,8 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       onListenerError: (error) => log.error('event subscriber failed', { reason: String(error) }),
       // The request is declined all the same; the reason names no command.
       onPermissionError: (error) => log.warn('a permission request was declined after a failure', { reason: String(error) }),
+      // A project's default agent (epic 6, entry 6) is one this server registers: Claude Code and any extra agent.
+      isAgentRegistered: registeredAgent(options),
     });
   try {
     return await listenAndAnnounce({ options, dataDir, log, core, ownsCore, lock, hooks, bmadWiring });
@@ -250,26 +244,8 @@ async function listenAndAnnounce({
     // The event carries the plain reason; the log also gets the target, URL and (on a mismatch) both hashes.
     onFailure: (error) => log.warn('uv install failed', { code: error.code, reason: error.message, ...error.details }),
   });
-  // Install's source: the option, else (a test run only) a local fixture from the environment, which also ignores a dev install's adapter (story 9.7).
-  const claudeInstallOption = options.claudeInstall ?? (hooks.claudeInstall === undefined ? undefined : { ...hooks.claudeInstall, devAdapter: false });
-  // The adapter given, else a dev install's; else (read at each use) the one Install put in the data folder (story 9.3).
-  const givenClaudeAdapter =
-    options.claudeAdapterPath ??
-    (process.env[CLAUDE_ACP_PATH_ENV] || undefined) ??
-    (claudeInstallOption?.devAdapter === false ? undefined : resolveClaudeAgentAcp());
-  const { devAdapter: _devAdapter, ...claudeInstall } = claudeInstallOption ?? {};
-  // The API key check: the option, else (a test run only) one that accepts without the network (story 9.7).
-  const verifyApiKey = options.verifyApiKey ?? hooks.apiKeyCheck;
-  const hooksInUse = testHooksLogFields(hooks);
-  if (hooksInUse !== undefined) log.info('test hooks in use', hooksInUse);
-  const claudeAdapter = () => locateClaudeAdapter({ adapterPath: givenClaudeAdapter, dataDir, pins: claudeInstall.pins })?.path;
-  const agent =
-    options.agent ??
-    createClaudeCodeAgent({
-      adapterPath: claudeAdapter,
-      ...(options.claudeExecutable === undefined ? {} : { claudeExecutable: options.claudeExecutable }),
-      onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields),
-    });
+  // Every agent is wired before the stored sessions are settled, as before story 6.9's split: a wiring error leaves the database untouched.
+  const { claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent } = wireAgents({ options, dataDir, log, hooks, core });
   // Agents from before this start are gone with their processes (AD-3): their sessions can be resumed, not left working.
   const settled = core.entities.settleInterruptedSessions(RESTARTED_REASON);
   if (settled.length > 0) log.info('sessions left working by a stopped server are idle and resumable', { sessions: settled.length });
@@ -279,101 +255,45 @@ async function listenAndAnnounce({
   // No permission mode but Ask outlives the run it was chosen in (cause `restart`).
   const reset = core.entities.resetPermissionModes();
   if (reset.length > 0) log.info('chats in Auto or Skip all are back in Ask after the restart', { sessions: reset.length });
-  // The terminal's `claude`: the option's, else (a test run only) a stand-in from the environment (story 3.10).
-  const extraAgentEnv = { ...(hooks.claudeCli === undefined ? {} : { CLAUDE_CODE_EXECUTABLE: hooks.claudeCli }), ...options.extraAgentEnv };
-  const agentEnv = () => ({ ...agentEnvironment(), ...extraAgentEnv });
-  const claudeSetup =
-    options.agentSetup === undefined
-      ? createClaudeCodeSetup({
-          adapterPath: givenClaudeAdapter,
-          dataDir,
-          install: {
-            // The npm that launched Ogden Agents (`npx ogden-agents`), read here before any child environment drops npm_* (story 9.3).
-            launcherNpm: process.env.npm_execpath,
-            ...claudeInstall,
-            onCleanupError: (error) => log.warn('could not remove Claude Code install temp files', { code: (error as NodeJS.ErrnoException).code ?? 'unknown' }),
-          },
-          ...(options.claudeExecutable === undefined ? {} : { claudeExecutable: options.claudeExecutable }),
-          // Sign-in and `auth status` never see an API key (story 9.2).
-          env: () => withoutAgentKeys(agentEnv()),
-          ...(verifyApiKey === undefined ? {} : { apiKey: { verify: verifyApiKey } }),
-          listAuthMethods: (env) => agent.listAuthMethods({ env }),
-          ...(options.loadPty === undefined ? {} : { loadPty: options.loadPty }),
-          ...(options.claudeCliBrowser === undefined ? {} : { cliBrowser: options.claudeCliBrowser }),
-          // Step names, exit codes and load failures only: never the terminal's output, the URL or a code (AD-16).
-          onDiagnostic: (message, fields) => log.info(`agent setup: ${message}`, fields),
-        })
-      : undefined;
-  const secrets = options.secrets ?? (hooks.secretStore === 'memory' ? createMemorySecretStore() : createKeyringSecretStore());
-  const agentSetup = createAgentSetup(core.events, options.agentSetup ?? (claudeSetup === undefined ? [] : [claudeSetup]), {
-    secrets,
-    // A key in this server's own environment follows the same rule as a saved one (review F1).
-    inheritedEnv: () => agentKeysOf({ ...process.env, ...extraAgentEnv }),
-    // Codes and plain reasons only: never a URL, a code or a key.
-    onFailure: (agentId, step, error) =>
-      log.warn('agent setup step failed', {
-        agentId,
-        step,
-        code: error instanceof CoreError ? error.code : 'unexpected',
-        ...(error instanceof CoreError ? { reason: error.message } : {}),
-        // An install's step and npm's error code only (story 9.3): never npm's output.
-        ...(error instanceof AgentSetupError ? error.details : {}),
-      }),
-  });
+  // Chats from before chat names get their automatic name from their first message (backlog story 12).
+  const named = core.entities.backfillAutoTitles();
+  if (named.length > 0) log.info('older chats were named from their first message', { sessions: named.length });
   // One instance for the chat that asks and the routes that answer: core's (story 2.6).
   const permissions = core.permissions;
   const configuredCheckIn = options.checkInDelayMs ?? hooks.checkInMs;
   const checkInDelayMs = configuredCheckIn === undefined ? undefined : clampCheckInDelay(configuredCheckIn);
-  /**
-   * The chat runs Claude Code: its API key (saved, else from this server's
-   * environment) joins only while its subscription is known to be signed out
-   * (story 9.2). Every case variant of the key's name is removed first, so
-   * Windows never sees two.
-   */
-  const chatEnv = () => ({ ...withoutAgentKeys(agentEnv()), ...agentSetup.agentEnv(CLAUDE_CODE_AGENT_ID) });
-  /** The same, with the subscription state read again first when it is older than {@link SUBSCRIPTION_MAX_AGE_MS} (review F4). */
-  const freshChatEnv = async (env: Readonly<Record<string, string>>) => {
-    await agentSetup.refreshIfStale(CLAUDE_CODE_AGENT_ID, options.subscriptionMaxAgeMs ?? SUBSCRIPTION_MAX_AGE_MS);
-    return { ...withoutAgentKeys(env), ...agentSetup.agentEnv(CLAUDE_CODE_AGENT_ID) };
-  };
-  /** The agent's terminal resume with {@link freshChatEnv} applied to each environment. */
-  const withChatEnv = (resume: AgentTerminalResume): AgentTerminalResume => {
-    const transcript = resume.transcript?.bind(resume);
-    return {
-      command: async (id, env, options) => resume.command(id, await freshChatEnv(env), options),
-      locate: async (env) => resume.locate(await freshChatEnv(env)),
-      ...(transcript === undefined ? {} : { transcript: async (input) => transcript({ ...input, env: await freshChatEnv(input.env) }) }),
-    };
-  };
-  const chatAgent: AgentPort = {
-    get displayName() {
-      return agent.displayName;
-    },
-    get permissionModes() {
-      return agent.permissionModes;
-    },
-    startSession: async (input) => agent.startSession({ ...input, env: await freshChatEnv(input.env) }),
-    reopenSession: async (input) => agent.reopenSession({ ...input, env: await freshChatEnv(input.env) }),
-    listAuthMethods: (input) => agent.listAuthMethods(input),
-    skillInvocation: (skill, idea) => agent.skillInvocation(skill, idea),
-    // The terminal runs, and its transcript is read, with the chat's environment rules, the API key's included (stories 3.1, 3.2).
-    ...(agent.terminalResume === undefined ? {} : { terminalResume: withChatEnv(agent.terminalResume) }),
-  };
+  const unwrapped = new Map(wirings.map(({ descriptor, agent: port }) => [descriptor.agentId, port]));
+  const agents = createAgentRegistry(
+    wirings.map(({ descriptor, agent: port }) => ({ descriptor, agent: descriptor.agentId === CLAUDE_CODE_AGENT_ID ? chatAgent : forChat(descriptor.agentId, port) })),
+    { defaultAgentId: CLAUDE_CODE_AGENT_ID, legacyAgentId: CLAUDE_CODE_AGENT_ID },
+  );
+  /** A session's agent id: its own, else (stored before agents could be chosen) Claude Code's. */
+  const agentIdOf = (session: Session): AgentId => session.agentId ?? agents.legacyAgentId;
+  /** A session's agent as a chat runs it (epic 6 entry 8: a planning session's first message is in its own syntax). */
+  const agentOf = (session: Session): AgentPort | undefined => agents.get(agentIdOf(session));
   // One terminal port for the chat and the toggle's availability check (story 3.7): they agree on node-pty.
   const terminal = createPtyTerminalPort(options.loadPty);
   // Document cards (story 4.7, `start-planning.ts`).
-  const planningDocuments = createDocumentCards({ core, catalog: bmadCatalog, agent: chatAgent, log });
+  const planningDocuments = createDocumentCards({ core, catalog: bmadCatalog, agent: chatAgent, agentOf, log });
   const chat = createChat({
     dataDir,
     entities: core.entities,
     sessionEvents: core.sessionEvents,
-    agent: chatAgent,
+    agents,
     permissions,
     agentEnv: chatEnv,
+    // A new chat with an agent that isn't installed or signed in is refused (6.3); its status is read at most every 30 s.
+    agentReadiness: (agentId) => agentSetup.readiness(agentId, subscriptionMaxAgeMs),
+    // The per-project trust (story 4.2), as it stands now: trusted, and its scripts the ones the user allowed (4.13).
+    // An agent that needs a trusted project is refused until then, and again once the scripts change.
+    // The ACP adapters never see trust (6.4): it is checked here, before a chat is created.
+    projectTrusted: (workspaceId) => core.bmadScriptTrust.scriptsUnchanged(workspaceId),
     terminal,
     // The chat follows the log (a mode changed by Developer mode reaches its agent) and gates Skip all on Developer mode.
     events: core.events,
     installSettings: core.installSettings,
+    // Each agent's install-wide default model and last model list (story 11).
+    agentModels: core.agentModels,
     // The event carries the plain reason; the log also gets the details (never the environment).
     onAgentError: (sessionId, error) => log.warn('agent failed', { sessionId, code: error.code, reason: error.message, ...error.details }),
     onInternalError: (sessionId, error) => log.error('applying an agent event failed', { sessionId, reason: String(error) }),
@@ -391,6 +311,7 @@ async function listenAndAnnounce({
     setupRunner,
     chat,
     agent: chatAgent,
+    agentOf,
     uvToolchain,
     uvChildEnv,
   });
@@ -409,6 +330,10 @@ async function listenAndAnnounce({
   const newProjectDefaults = createNewProjectDefaults({
     dataDir,
     bmad: core.bmad,
+    // Welcome's agent choice (epic 6, entry 6) names an agent this server registers.
+    isAgentRegistered: registeredAgent(options),
+    // Skip all as the default for new projects needs Developer mode (default permission mode).
+    developerMode: core.installSettings.developerMode,
     onError: (code) => log.warn('new project defaults unusable', { code }),
   });
   const app = createApp({
@@ -419,8 +344,12 @@ async function listenAndAnnounce({
     control,
     toolchain,
     chat,
-    // The unwrapped agent and `chatEnv`: core's checks, without reading sign-in again on every GET (story 3.7).
-    terminalAvailability: createTerminalAvailability({ agent, terminal, env: chatEnv }),
+    // The session's unwrapped agent and `chatEnv`: core's checks, without reading sign-in again on every GET (story 3.7).
+    terminalAvailability: createTerminalAvailability({
+      agent: (session) => unwrapped.get(agentIdOf(session)) ?? unregisteredAgent(),
+      terminal,
+      env: (session) => chatEnv(agentIdOf(session)),
+    }),
     permissions,
     bmad: core.bmad,
     // The test-only BMad probe route (story 10.1): a test run on a temp data folder, with its own variable set.
@@ -430,11 +359,13 @@ async function listenAndAnnounce({
     planning,
     board,
     bmadSource,
-    bmadSetup: core.bmadSetup,
+    // Setup also places the skills in each other agent's folder the project uses (epic 6 entry 8).
+    bmadSetup: withAgentSkillFolders(core.bmadSetup, { core, agents }),
     agentSetup,
     onboarding,
     newProjectDefaults,
     installSettings: core.installSettings,
+    agentDefaults: { models: core.agentModels, isAgentRegistered: (agentId) => agents.get(agentId) !== undefined },
     appShortcut,
     tabs,
   });
@@ -578,7 +509,7 @@ async function listenAndAnnounce({
 
   if (options.open === true && launchUrl !== undefined) {
     try {
-      await openBrowser(launchUrl);
+      await openUrl(launchUrl);
     } catch (error) {
       log.warn('could not open a browser', { url, reason: String(error) });
     }

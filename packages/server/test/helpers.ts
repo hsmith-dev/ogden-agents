@@ -8,7 +8,7 @@ import { request, type IncomingHttpHeaders } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createMemoryAgentSetup, createMemoryAppShortcut, createMemoryBmadCatalog, createMemoryBmadSource, createMemorySecretStore, createMemoryTicketStore } from '@ogden-agents/adapters';
-import { createAgentSetup, createBmadSource, createBoard, createChat, createNewProjectDefaults, createOnboarding, createPlanning, type AgentPort, type Core } from '@ogden-agents/core';
+import { createAgentRegistry, createAgentSetup, createBmadSource, createBoard, createChat, createNewProjectDefaults, createOnboarding, createPlanning, type AgentDescriptor, type AgentPort, type Core, type RegisteredAgent } from '@ogden-agents/core';
 import { API_ROUTES, webSocketProtocols } from '@ogden-agents/shared';
 import type { Hono } from 'hono';
 import { afterEach } from 'vitest';
@@ -80,6 +80,37 @@ export async function waitFor(predicate: () => boolean | Promise<boolean>, what:
   }
 }
 
+/**
+ * A test agent's descriptor (6.3): sound, named and moded as `agent` is, with
+ * a subscription sign-in and an API key in `FAKE_AGENT_KEY`; `overrides` change any field.
+ */
+export function testDescriptor(agentId: string, agent: Pick<AgentPort, 'displayName' | 'permissionModes'>, overrides: Partial<AgentDescriptor> = {}): AgentDescriptor {
+  const declared = agent.permissionModes ?? ['ask'];
+  return {
+    agentId,
+    displayName: agent.displayName,
+    provider: 'Fake Provider',
+    install: { kind: 'npm', package: '@fake/agent', version: '1.0.0' },
+    signInMethods: [
+      { id: 'fake-login', kind: 'subscription', label: 'Sign in with your account' },
+      { id: 'fake-key', kind: 'api_key', label: 'Use an API key', apiKey: { envNames: ['FAKE_AGENT_KEY'], format: 'Starts with fake-' } },
+    ],
+    permissionModes: {
+      ask: 'default',
+      ...(declared.includes('auto') ? { auto: 'auto' } : {}),
+      ...(declared.includes('skip_all') ? { skip_all: 'bypassPermissions' } : {}),
+    },
+    needsProjectTrust: false,
+    skillsFolder: '.fake/skills',
+    ...overrides,
+  };
+}
+
+/** `agent` registered as `agentId`, with {@link testDescriptor}. */
+export function registered(agentId: string, agent: AgentPort, overrides: Partial<AgentDescriptor> = {}): RegisteredAgent {
+  return { descriptor: testDescriptor(agentId, agent, overrides), agent };
+}
+
 /** A started test server; it has a launch link, since tests start it with `launch: true`. */
 export type TestServer = RunningServer & { launchUrl: string };
 
@@ -95,7 +126,7 @@ export const FAKE_AGENT = join(import.meta.dirname, '..', '..', '..', 'tests', '
  * the real keychain or reaches Anthropic (story 9.2).
  */
 export async function startTestServer(options: StartOptions & { lines?: string[] } = {}): Promise<TestServer> {
-  const { lines, ...rest } = options;
+  const { lines, extraAgentEnv, ...rest } = options;
   const server = await start({
     port: 0,
     open: false,
@@ -108,11 +139,25 @@ export async function startTestServer(options: StartOptions & { lines?: string[]
     // The pinned BMad Method as already downloaded (story 4.14), so no test reaches GitHub; a test of the
     // download itself passes its own source, or `bmadFetch` for the real adapter.
     ...(rest.bmadSource === undefined && rest.bmadFetch === undefined ? { bmadSource: createMemoryBmadSource({ ready: true }) } : {}),
+    // Claude Code (the fake) is signed in unless the test says otherwise (6.3: a signed-out agent refuses a new chat).
+    // Antigravity only where a test wires it (`fakeAntigravity`, epic 6 entry 5): the other tests see the agents they name.
+    antigravity: false,
+    extraAgentEnv: { FAKE_LOGIN_STATE: signedInLoginState(), ...extraAgentEnv },
     ...rest,
     launch: true,
   });
   servers.push(server);
   return server;
+}
+
+/**
+ * A fake login state file that says signed in (`FAKE_LOGIN_STATE`, read by
+ * the fake CLI's `auth status`), in a temp folder removed after the test.
+ */
+export function signedInLoginState(): string {
+  const file = join(tempDataDir(), 'login-state.json');
+  writeFileSync(file, `${JSON.stringify({ loggedIn: true })}\n`);
+  return file;
 }
 
 /** Closes `server` after the test (for one started some other way). Returns it. */
@@ -249,7 +294,14 @@ export function fullTestApp(core: Core, extra: Partial<AppOptions> = {}): Hono {
     reopenSession: () => Promise.reject(new Error('no agent in this test')),
     listAuthMethods: () => Promise.reject(new Error('no agent in this test')),
   };
-  const chat = createChat({ dataDir: tempDataDir(), entities: core.entities, sessionEvents: core.sessionEvents, agent, events: core.events, installSettings: core.installSettings });
+  const chat = createChat({
+    dataDir: tempDataDir(),
+    entities: core.entities,
+    sessionEvents: core.sessionEvents,
+    agents: createAgentRegistry([registered('test-agent', agent)]),
+    events: core.events,
+    installSettings: core.installSettings,
+  });
   const bmadSource = createBmadSource(createMemoryBmadSource({ ready: true }));
   return createApp({
     events: core.events,

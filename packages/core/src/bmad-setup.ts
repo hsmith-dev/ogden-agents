@@ -30,7 +30,8 @@
  */
 import { BMAD_SETUP_FAILURE_REASONS, bmadCapabilitiesFor, type BmadPiece, type BmadSetupStatus, type WorkspaceId } from '@ogden-agents/shared';
 import type { BmadScriptTrust } from './bmad-script-trust.js';
-import type { BmadCatalogPort } from './bmad-catalog-port.js';
+import type { BmadCatalogPort, BmadSetupRunOptions } from './bmad-catalog-port.js';
+import type { BmadSkillFolders } from './bmad-skill-folders.js';
 import type { BmadFeatures } from './bmad-pieces.js';
 import type { Entities } from './entities.js';
 import { BmadAlreadySetUpError, BmadNotSetUpError, BmadUpgradeRefusedError, CoreError } from './errors.js';
@@ -47,9 +48,12 @@ export interface BmadSetupUseCases {
    * Starts a setup unless one is running for the workspace (`started:
    * false`), and answers at once with the status now; progress follows as
    * events. Refuses as {@link status} does. With `upgrade` (entry 4.11) it
-   * is Upgrade this project, which needs a real `_bmad/` folder.
+   * is Upgrade this project, which needs a real `_bmad/` folder. With
+   * `skillFolders` (epic 6 entry 8: the other agents' skills folders the
+   * project uses, from {@link BmadSkillFolders}), the skills are placed there
+   * too ({@link BmadSetupRunOptions.skillFolders}).
    */
-  start(workspaceId: WorkspaceId, options?: { upgrade?: boolean }): Promise<{ started: boolean; setup: BmadSetupStatus }>;
+  start(workspaceId: WorkspaceId, options?: { upgrade?: boolean; skillFolders?: readonly string[] }): Promise<{ started: boolean; setup: BmadSetupStatus }>;
   /** Resolves once every setup in progress has ended (a stopping server waits for it). */
   settled(): Promise<void>;
 }
@@ -170,7 +174,11 @@ export function createBmadSetup({ bmad, entities, catalog, events, trust, onFail
       // Whether the trust still matched the project's scripts before setup wrote any (story 4.13).
       const keepTrust = trust === undefined ? Promise.resolve(false) : trust.scriptsUnchanged(workspaceId).catch(() => false);
       void keepTrust
-        .then(() => (upgrade ? catalog.setup(repoPath, onProgress, { upgrade: true }) : catalog.setup(repoPath, onProgress)))
+        .then(() => {
+          const skillFolders = options.skillFolders ?? [];
+          const runOptions = { ...(upgrade ? { upgrade: true } : {}), ...(skillFolders.length === 0 ? {} : { skillFolders: [...skillFolders] }) };
+          return Object.keys(runOptions).length === 0 ? catalog.setup(repoPath, onProgress) : catalog.setup(repoPath, onProgress, runOptions);
+        })
         .then(async (after) => {
           if (trust !== undefined && (await keepTrust)) {
             try {

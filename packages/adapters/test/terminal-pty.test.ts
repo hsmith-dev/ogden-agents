@@ -19,6 +19,7 @@ import {
   hiddenPtySpawner,
   INVALID_PTY_HANDLE,
   loadPty,
+  PTY_CREATE_PROCESS_INVALID_PARAMETER,
   PTY_SPAWN_ATTEMPTS,
   locateClaudeTerminal,
   resolveClaudeAgentAcp,
@@ -49,6 +50,9 @@ describe("the session's CLI command", () => {
     expect(claudeTerminalCommand(ID, env, { claudeExecutable: '/elsewhere/claude' })).toEqual({ file: '/opt/claude/bin/claude', args: ['--resume', ID, '--permission-mode', 'default'], env });
     // Then the one the adapter would find, as the chat's adapter does.
     expect(claudeTerminalCommand(ID, { PATH: '' }, { claudeExecutable: '/elsewhere/claude' }).file).toBe('/elsewhere/claude');
+    // Story 11: the chat's model, as `--model`; a value that could read as a flag never reaches it.
+    expect(claudeTerminalCommand(ID, env, { claudeExecutable: '/elsewhere/claude', model: 'opus[1m]' }).args).toEqual(['--resume', ID, '--permission-mode', 'default', '--model', 'opus[1m]']);
+    expect(() => claudeTerminalCommand(ID, env, { claudeExecutable: '/elsewhere/claude', model: '--dangerously-skip-permissions' })).toThrow(AgentError);
   });
 
   it('runs a script CLI under Node, as the Agent SDK does', () => {
@@ -141,6 +145,27 @@ describe('a spawn that loses its pseudo-console handle (story 3.8)', () => {
     const pty = flakyPty(1, 'File not found: ');
     expect(pty.open).toThrow('File not found');
     expect(pty.calls()).toBe(1);
+  });
+
+  // The same race read back as a damaged handle: CreateProcessW refuses it with 87 (story 6.9, CI run 37239378578).
+  it('a pseudo-console CreateProcessW refuses (error 87) is tried again, and opens', () => {
+    const pty = flakyPty(PTY_SPAWN_ATTEMPTS - 1, PTY_CREATE_PROCESS_INVALID_PARAMETER);
+    expect(pty.open().pid).toBe(7);
+    expect(pty.calls()).toBe(PTY_SPAWN_ATTEMPTS);
+  });
+
+  it('error 87 is tried a bounded number of times, then fails with it', () => {
+    const pty = flakyPty(PTY_SPAWN_ATTEMPTS, PTY_CREATE_PROCESS_INVALID_PARAMETER);
+    expect(pty.open).toThrow(PTY_CREATE_PROCESS_INVALID_PARAMETER);
+    expect(pty.calls()).toBe(PTY_SPAWN_ATTEMPTS);
+  });
+
+  it("CreateProcessW's other errors (a missing program, a missing folder, a longer code) are not retried", () => {
+    for (const code of [2, 267, 870]) {
+      const pty = flakyPty(1, `Cannot create process, error code: ${code}`);
+      expect(pty.open).toThrow(`error code: ${code}`);
+      expect(pty.calls()).toBe(1);
+    }
   });
 });
 

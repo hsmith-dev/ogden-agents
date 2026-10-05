@@ -189,6 +189,41 @@ If a check fails, fix it on `main` and release `0.4.0-rc.2` the same way.
 
 As in the 0.2.0 checklist, step 6, with the version `0.4.0` and the tag `v0.4.0`. Then move `next` to it too: `npm dist-tag add ogden-agents@0.4.0 next`. Epic 4, Done when 6, is met once `npx ogden-agents` installs `0.4.0`.
 
+## 0.5.0 release checklist (epic 6: Antigravity beside Claude Code)
+
+`0.5.0` is epic 6's release (CAP-15, CAP-3, CAP-5, CAP-16): the agent picker, a default agent per project, and Antigravity as a second chat agent. It goes out after `0.4.0`, in the same two steps, by tag: `0.5.0-rc.1` to `next`, checked live, then `0.5.0` to `latest`. Antigravity ships only if it passes on all three OSes (user, 2026-10-02): any check below failing on any OS is a no-go for Antigravity, and the release then waits for the user's decision (drop entries 5, 7 and 8, as the epic says). As before, the repository owner does every step by hand.
+
+### 1. Merge the stack to `main`
+
+After `0.4.0` is released, merge epic 6 to `main` in stack order: 6.2, 6.3, 6.4, 6.6, 6.5, 6.7, 6.8, 6.9 and 6.10 (spike 6.1, #73, is a findings branch: merge or close it on its own). 6.10 has the `0.5.0-rc.1` version and the 0.5.0 entry in `CHANGELOG.md`. Wait for CI on `main` to pass: that includes the installed-package end-to-end suite on macOS, Windows and Linux with epic 6's agents journey (`tests/e2e-installed/agents-journey.spec.ts`: Claude Code and Antigravity side by side, the picker and default, Antigravity's modes and protected paths, the agent trust gate, Antigravity's install from a local fixture archive, the unsupported message, and `.agents/skills`), and the Provenance job.
+
+### 2. Tag the release candidate
+
+As in the 0.2.0 checklist, step 4, with the tag `v0.5.0-rc.1`. Then `npm view ogden-agents dist-tags` shows `next: 0.5.0-rc.1`.
+
+### 3. Live checks with Antigravity and Claude Code
+
+CI runs only fakes (the fake agent as both agents, a fixture archive on 127.0.0.1), so these need the real ones. Run them with `npx ogden-agents@next`, in scratch repos made for it, **on macOS (Apple silicon), Windows (x64) and Linux (x64)**, each OS on its own. Use a Google account you accept the terms risk for (Google's terms say third-party use of Antigravity sign-in may suspend the account; user decision 2026-10-02) and a Gemini API key from Google AI Studio. Write each result, per OS, under "Live check result" in story 6.10's plan (`_bmad-output/initiative-ogden-agents/epic-every-agent/story-end-to-end-suite-and-release-plan.md`) before the story moves to done.
+
+1. Install, epic 6 Done when 4: Settings > Agents > Antigravity > **Install**. It downloads from Google into the data folder (about 110 to 340 MB) and ends "Installed, needs sign-in" with Version 1.3.0. Nothing appears outside Ogden Agents' data folder except `~/.gemini/antigravity/bin/webm_encoder` (the card says so). On Windows, note how long its first start takes.
+2. Google sign-in: **Sign in with your account** opens Google in a browser on that computer (on Linux, check it opens at all: the known Zed issue). The card ends "Installed, signed in". Start an Antigravity chat and get a reply.
+3. API key: **Sign out**, then save a Gemini API key on the card. A new Antigravity chat replies. Then check that the key appears nowhere: `grep -r "AIza" <data folder>` finds nothing in `ogden-agents.db`, the event log or `logs/`.
+4. Two agents at once, Done when 2: in one Simple project, start a Claude Code chat and an Antigravity chat from the picker, and ask each to run a shell command (for example `ls`). Each shows a permission card that holds the command until you click **Allow once**; both work at the same time. The sidebar names each chat's agent.
+5. Default agent: in the project's settings, set **Default agent** to Antigravity; the Chats page preselects it in another open tab without a reload, and **New chat** starts an Antigravity chat.
+6. Modes, Done when 3: in the Antigravity chat, the mode picker shows **Auto** unavailable with a reason; with Developer mode on, **Skip all** runs a command without a card, behind the red banner.
+7. Protected paths: at "Ask only for risky actions", ask Antigravity to edit an ordinary file (no card), then a file under `.gemini/`, `.agents/` and `_bmad/` (a card each). Also check whether Antigravity reads a `GEMINI.md` in the project root as its instructions (write one with an odd instruction and ask); if it does, say so in the plan (a deferred item).
+8. Restart: Quit Ogden Agents from the app, run `npx ogden-agents@next` again, and continue both chats: each remembers what was said before.
+9. Terminal toggle, Done when 5: with Developer mode on, the Claude Code chat's **Chat | Terminal** works as in 0.3.0; the Antigravity chat's toggle is disabled and says why.
+10. BMad with Antigravity, Done when 6: in a scratch repo whose default agent is Antigravity, turn Planning on. Setup ends "Ready to plan." and the repo has `.agents/skills/` as well as `.claude/skills/`. On Plan, **Start from an idea** in an Antigravity planning session: Antigravity runs the BMad skill (it asks about the idea, as Claude Code would). A Simple project that uses Antigravity gets no `.agents/skills` and no `_bmad/`.
+11. Welcome: with `OGDEN_AGENTS_DATA_DIR` set to an empty folder for one run, Welcome asks which agent; choose Antigravity, and the first project's chats start with it.
+12. Uninstall: Settings > Agents > Antigravity > **Uninstall**; the picker then shows Antigravity unavailable with a link to Settings > Agents.
+
+When every check has passed on all three OSes, write the final Antigravity row of `agent-matrix.md` from the spike and these results (through `bmad-spec`, leaving no "verify" cell), as epic 6's entry 10 says. If a check fails, fix it on `main` and release `0.5.0-rc.2` the same way.
+
+### 4. Release 0.5.0
+
+As in the 0.2.0 checklist, step 6, with the version `0.5.0` and the tag `v0.5.0`. Then move `next` to it too: `npm dist-tag add ogden-agents@0.5.0 next`. Epic 6, Done when 7, is met once `npx ogden-agents` installs `0.5.0`.
+
 ## Later releases
 
 1. On a branch, set the same new version in `package.json`, `packages/server/package.json` and `packages/web/package.json`, and add its entry to `CHANGELOG.md`. Merge to `main`.

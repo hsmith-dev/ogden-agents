@@ -247,6 +247,57 @@ describe('bmad-catalog setup (story 4.3)', () => {
   });
 });
 
+describe("bmad-catalog setup into each agent's skills folder (epic 6 entry 8)", () => {
+  it('copies the verified skills into .claude/skills and each other folder given, leaving an existing skill untouched', async () => {
+    const { catalog } = adapter();
+    const r = repo({ '.agents/skills/bmad-spec/SKILL.md': 'my own spec skill\n' });
+    await catalog.setup(r.path, () => {}, { skillFolders: ['.agents/skills', '.claude/skills'] });
+    expect(readdirSync(join(r.path, '.claude', 'skills')).sort()).toEqual(['bmad', 'bmad-spec', 'bmod-method']);
+    expect(readdirSync(join(r.path, '.agents', 'skills')).sort()).toEqual(['bmad', 'bmad-spec', 'bmod-method']);
+    expect(readFileSync(join(r.path, '.agents', 'skills', 'bmad-spec', 'SKILL.md'), 'utf8')).toBe('my own spec skill\n');
+    expect(existsSync(join(r.path, '.agents', 'skills', 'bmad', 'scripts', '__pycache__'))).toBe(false);
+    expect(stagingLeft(join(r.path, '.agents', 'skills'))).toEqual([]);
+  });
+
+  it('refuses a linked or file .agents or .agents/skills before creating anything: no copy, no run, no download', async () => {
+    const { catalog, runs, source } = adapter();
+    const elsewhere = tempFolder('ogden-agents-elsewhere-');
+    const linked = repo();
+    link(elsewhere, join(linked.path, '.agents'));
+    const before = linked.hash();
+    await expect(catalog.setup(linked.path, () => {}, { skillFolders: ['.agents/skills'] })).rejects.toBeInstanceOf(BmadSetupError);
+    expect(readdirSync(elsewhere)).toEqual([]);
+    expect(linked.hash()).toBe(before);
+    const file = repo({ '.agents/skills': 'not a folder\n' });
+    await expect(catalog.setup(file.path, () => {}, { skillFolders: ['.agents/skills'] })).rejects.toBeInstanceOf(BmadSetupError);
+    expect(existsSync(join(file.path, '.claude'))).toBe(false);
+    expect(runs()).toEqual([]);
+    expect(source.downloads).toBe(0);
+  });
+
+  it('refuses a folder that is not a plain repo-relative path, writing nothing', async () => {
+    const { catalog, runs } = adapter();
+    for (const folder of ['../outside/skills', '/abs/skills', '.agents//skills', './skills', 'C:/skills', '.agents\\skills']) {
+      const r = repo();
+      const before = r.hash();
+      await expect(catalog.setup(r.path, () => {}, { skillFolders: [folder] }), folder).rejects.toBeInstanceOf(BmadSetupError);
+      expect(r.hash()).toBe(before);
+    }
+    expect(runs()).toEqual([]);
+  });
+
+  it('Upgrade gives another agent\'s folder each skill it lacks; .claude/skills keeps the 4.11 rule', async () => {
+    const { catalog } = adapter();
+    const created = createPlainRepo('bmod');
+    cleanups.push(() => created.remove());
+    await catalog.setup(created.path, () => {}, { upgrade: true, skillFolders: ['.agents/skills'] });
+    // `bmad-spec` is the project's own in `.agents/skills`: untouched there, and not added to `.claude/skills`.
+    expect(readFileSync(join(created.path, '.agents', 'skills', 'bmad-spec', 'SKILL.md'), 'utf8')).toBe(PLAIN_BMOD_OWN_SKILL);
+    expect(readdirSync(join(created.path, '.claude', 'skills')).sort()).toEqual(['bmad', 'bmod-method']);
+    expect(readdirSync(join(created.path, '.agents', 'skills')).sort()).toEqual(['bmad', 'bmad-spec', 'bmod-method']);
+  });
+});
+
 describe('bmad-catalog setup status from files (story 4.3, S2)', () => {
   it('no _bmad is not_set_up; a linked _bmad is unusable; neither runs anything', async () => {
     const { catalog, runs } = adapter();

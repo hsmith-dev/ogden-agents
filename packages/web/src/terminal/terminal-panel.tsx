@@ -1,7 +1,6 @@
 import { TERMINAL_CLOSE } from '@ogden-agents/shared';
 import type { Terminal } from '@xterm/xterm';
 import { useEffect, useRef, useState } from 'react';
-import { AGENT_NAME } from '@/chat/chat-api';
 import { tokenNumber } from '@/ui/tokens';
 import { cn } from '@/ui/utils';
 import { Text } from '@/ui/typography';
@@ -10,14 +9,14 @@ import { connectTerminal, type TerminalConnection } from './terminal-socket';
 /** What the panel says under the terminal, if anything. */
 type PanelStatus = 'loading' | 'connected' | 'reconnecting' | 'ended' | 'disconnected' | 'tooMany' | 'failed';
 
-const STATUS_WORDS: Partial<Record<PanelStatus, string>> = {
+const statusWords = (agentName: string): Partial<Record<PanelStatus, string>> => ({
   loading: 'Opening the terminal',
   reconnecting: 'Reconnecting to the terminal',
-  ended: `${AGENT_NAME} left the terminal.`,
+  ended: `${agentName} left the terminal.`,
   disconnected: 'The terminal is not connected. Reload to reconnect.',
   tooMany: 'Too many open terminal views. Close one, then reload.',
   failed: "The terminal couldn't open. Reload to try again.",
-};
+});
 
 /**
  * The waits before each try to reconnect after an abnormal close (story 3.5,
@@ -41,6 +40,8 @@ export const TOO_MANY_VIEWERS = TERMINAL_CLOSE.tooManyViewers;
 
 export interface TerminalPanelProps {
   sesId: string;
+  /** The chat's agent by its product name (epic 6). */
+  agentName: string;
   /** xterm's screen-reader mode (Settings → Appearance, "Terminal screen-reader mode"; off by default). */
   screenReaderMode: boolean;
   className?: string;
@@ -60,7 +61,7 @@ export interface TerminalPanelProps {
  * reload. A close that says the terminal ended, or that it has too many
  * viewers, keeps what was shown and says why.
  */
-export function TerminalPanel({ sesId, screenReaderMode, className }: TerminalPanelProps) {
+export function TerminalPanel({ sesId, agentName, screenReaderMode, className }: TerminalPanelProps) {
   const host = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | undefined>(undefined);
   const [status, setStatus] = useState<PanelStatus>('loading');
@@ -201,10 +202,10 @@ export function TerminalPanel({ sesId, screenReaderMode, className }: TerminalPa
     if (terminal.current !== undefined) terminal.current.options.screenReaderMode = screenReaderMode;
   }, [screenReaderMode]);
 
-  const words = STATUS_WORDS[status];
+  const words = statusWords(agentName)[status];
   return (
     <section
-      aria-label={`${AGENT_NAME} terminal`}
+      aria-label={`${agentName} terminal`}
       data-testid="terminal-panel"
       className={cn('flex min-h-0 min-w-0 flex-1 flex-col gap-2 rounded-lg border-t border-signal bg-terminal p-3', className)}
     >

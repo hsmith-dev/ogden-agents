@@ -1,3 +1,5 @@
+export * from './agent-descriptor.js';
+export * from './agent-models.js';
 export * from './agent-port.js';
 export * from './agent-setup.js';
 export * from './agent-setup-port.js';
@@ -10,12 +12,14 @@ export * from './bmad-script-trust.js';
 export * from './bmad-setup.js';
 export * from './bmad-source-port.js';
 export * from './board.js';
+export * from './bmad-skill-folders.js';
 export * from './chat.js';
 export * from './core.js';
 export * from './data-dir.js';
 export { DATABASE_FILE, type OpenDatabaseOptions } from './db/database.js';
 export * from './entities.js';
 export * from './errors.js';
+export * from './handoff-brief.js';
 // Not `sessionAppender`: the raw session append stays inside core (E2-R7).
 export {
   DEFAULT_READ_LIMIT,

@@ -7,6 +7,7 @@
  */
 import type {
   AdapterRefs,
+  AgentId,
   CautionLevel,
   PermissionMode,
   RunOutcome,
@@ -55,6 +56,33 @@ export const workspaces = sqliteTable(
      * `null` when not trusted, or trusted before this column (read as changed: asked again).
      */
     bmadScriptsFingerprint: text('bmad_scripts_fingerprint'),
+    /**
+     * The agent this project's new chats preselect (epic 6, entry 6), or
+     * NULL for the install's default. No SQL default: core names no agent.
+     * Changed only through the workspace settings use-case.
+     */
+    defaultAgentId: text('default_agent_id'),
+    /**
+     * The permission mode new chats start in (default permission mode):
+     * `ask`, `auto` or `skip_all`; null (and anything unreadable) is Ask.
+     * Changed only through the workspace settings use-case, and set back to
+     * Ask from Skip all when Developer mode is turned off.
+     */
+    defaultPermissionMode: text('default_permission_mode'),
+    /** Why the default reads as it does (`DefaultModeNotice`), or null; cleared by the user's next choice. */
+    defaultPermissionModeNotice: text('default_permission_mode_notice'),
+    /**
+     * The project's own default model per agent (story 11), as a JSON object
+     * of agent id to the agent's model id. `{}` for new and upgraded
+     * workspaces. Read only through `readDefaultModels`, so a damaged value
+     * reads as none. Changed only through the workspace settings use-case.
+     */
+    defaultModels: text('default_models').notNull().default('{}'),
+    /**
+     * The project's own choice of what a message sent while the agent works
+     * does (`wait` | `now`; send now or wait), or NULL for the app-wide one.
+     */
+    whileWorking: text('while_working'),
     createdAt: text('created_at').notNull(),
   },
   (t) => [uniqueIndex('workspaces_path_unique').on(t.path)],
@@ -75,7 +103,21 @@ export const sessions = sqliteTable(
      * before it read `ask`; a server start sets every other one back to `ask`.
      */
     permissionMode: text('permission_mode').$type<PermissionMode>().notNull().default('ask'),
+    /**
+     * The agent the session was started with (epic 6), never changed. `NULL`
+     * on rows from before agents could be chosen: they are the install's
+     * original agent, which the server wiring names (core names none, AD-1).
+     */
+    agentId: text('agent_id').$type<AgentId>(),
+    /**
+     * The model the chat runs on (story 11): the agent's own id, or `NULL`
+     * for the agent's own choice (and on rows from before it existed).
+     */
+    model: text('model'),
+    /** The user's name for the chat (backlog story 12); `NULL` until they give one. */
     title: text('title'),
+    /** The name core gave the chat (the planning action's label, or its first message), set once; `NULL` until then. */
+    autoTitle: text('auto_title'),
     /** Agent and CLI ids (AD-9), as a JSON object. Never keys. */
     adapterRefs: text('adapter_refs', { mode: 'json' }).$type<AdapterRefs>().notNull(),
     createdAt: text('created_at').notNull(),
@@ -181,4 +223,29 @@ export const bmadModulesSeen = sqliteTable(
 export const installSettings = sqliteTable('install_settings', {
   id: integer('id').primaryKey(),
   developerMode: integer('developer_mode', { mode: 'boolean' }).notNull().default(false),
+});
+
+/**
+ * Per agent, install-wide (story 11): the model new chats with it start on
+ * (`NULL`: its own choice; Settings → Agents) and the models it last listed
+ * (JSON array of `AgentModel`), so Settings and a chat's picker can offer
+ * them before the agent starts. A row per agent that ever had either; core
+ * names no agent.
+ */
+export const agentSettings = sqliteTable('agent_settings', {
+  agentId: text('agent_id').$type<AgentId>().primaryKey(),
+  defaultModel: text('default_model'),
+  models: text('models').notNull().default('[]'),
+});
+
+/**
+ * App-wide chat settings (one row, `id = 1`, created on first write; send
+ * now or wait): what a message sent while the agent works does. Kept apart
+ * from `install_settings`, whose row's existence says Developer mode was
+ * ever set.
+ */
+export const chatSettings = sqliteTable('chat_settings', {
+  id: integer('id').primaryKey(),
+  /** `wait` | `now`. */
+  whileWorking: text('while_working').notNull().default('wait'),
 });

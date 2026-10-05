@@ -173,8 +173,10 @@ test('an expired sign-in: Sign in from the notice, and the same chat answers fro
 test('signed in but still refused: the one resend fails and nothing loops', async ({ page, context }) => {
   await routeSignInPage(context);
   // The agent reads a state file the login never writes: it refuses every prompt, signed in or not.
-  await withLoginServer(page, { signedIn: false, extra: { claudeCliBrowser: 'true' }, env: (login) => ({ FAKE_ACP_REQUIRE_LOGIN: `${login}.never` }) }, async (chat) => {
+  await withLoginServer(page, { extra: { claudeCliBrowser: 'true' }, env: (login) => ({ FAKE_ACP_REQUIRE_LOGIN: `${login}.never` }) }, async (chat, login) => {
+    // The chat starts signed in (a new chat needs it, 6.3), then the sign-in expires.
     await startChat(page, chat.repo);
+    login.expire();
     await send(page, 'context');
     await expect(state(page)).toHaveAttribute('data-state', 'error');
     await recordStates(page);

@@ -319,6 +319,45 @@ describe('BmadMethodSection (DOM)', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  it('a read still on its way when the save answers never turns the switches back (story 6.9)', async () => {
+    const { client, isOn, click } = mount([]);
+    // The page's read, held up behind other requests: it answers later with the pieces from before the save.
+    let answer: () => void = () => {};
+    const held = client
+      .fetchQuery({ queryKey: ['workspace-settings', WS], queryFn: () => new Promise<WorkspaceSettings>((resolve) => (answer = () => resolve(settings([])))), staleTime: 0 })
+      .catch(() => undefined);
+    await click('bmad-use');
+    expect(isOn('bmad-planning')).toBe(true);
+    await act(async () => {
+      answer();
+      await held;
+    });
+    expect(isOn('bmad-planning')).toBe(true);
+    expect(isOn('bmad-board')).toBe(true);
+    expect(client.getQueryData<WorkspaceSettings>(['workspace-settings', WS])?.bmadPieces).toEqual(['planning', 'board']);
+  });
+
+  it("a read on its way when the project's trust answers never undoes the trust, even when the save after it fails (story 6.9)", async () => {
+    state.answer = () => Promise.reject(new Error('Ogden Agents could not reach the server.'));
+    state.trustAnswer = () => Promise.resolve(settings([], true));
+    const { client, click } = mount([], { trusted: false });
+    let answer: () => void = () => {};
+    const held = client
+      .fetchQuery({ queryKey: ['workspace-settings', WS], queryFn: () => new Promise<WorkspaceSettings>((resolve) => (answer = () => resolve(settings([], false)))), staleTime: 0 })
+      .catch(() => undefined);
+    await click('bmad-board');
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('script-trust-confirm'));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(state.trusts).toBe(1);
+    await act(async () => {
+      answer();
+      await held;
+    });
+    expect(client.getQueryData<WorkspaceSettings>(['workspace-settings', WS])?.bmadScriptsTrusted).toBe(true);
+  });
+
   it('switches are disabled while a save is in flight', async () => {
     state.answer = () => new Promise(() => {});
     const { sw, click } = mount([]);
@@ -392,6 +431,26 @@ describe('BmadMethodSection: the script trust (story 4.2, DOM)', () => {
     expect(state.patches).toEqual([['board']]);
     expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(isOn('bmad-board')).toBe(true);
+  });
+
+  it('after Allow, Board shows on at once but stays disabled until its save answers (the signal a test must wait for)', async () => {
+    // Leaving the page while the PATCH is in flight aborts it (Windows CI runs 37247766553 and 37247659244).
+    let answer!: () => void;
+    state.answer = (pieces) => new Promise((resolve) => (answer = () => resolve(settings(pieces))));
+    const { isOn, sw, click } = mount([], { trusted: false });
+    await click('bmad-board');
+    fireEvent.click(screen.getByTestId('script-trust-confirm'));
+    await settle();
+    expect(state.patches).toEqual([['board']]);
+    expect(isOn('bmad-board')).toBe(true);
+    expect(sw('bmad-board').hasAttribute('disabled')).toBe(true);
+    await act(async () => {
+      answer();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await settle();
+    expect(isOn('bmad-board')).toBe(true);
+    expect(sw('bmad-board').hasAttribute('disabled')).toBe(false);
   });
 
   it('the main switch asks too (it turns on Board); a failed Allow says why and saves nothing', async () => {

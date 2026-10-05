@@ -20,6 +20,11 @@ export interface AgentInstallProgress {
  */
 export interface AgentSignIn {
   url: string | null;
+  /**
+   * A code the user types on the sign-in page (a device code), when the
+   * agent's sign-in gives one (epic 6, entry 6). Secret-like, as `url`.
+   */
+  userCode?: string;
   /** Resolves with the outcome once the agent reports signed in, or the sign-in failed or was cancelled. */
   done: Promise<'signed_in' | 'failed' | 'cancelled'>;
   /** Stops the sign-in; `done` resolves `cancelled`. Safe to call more than once. */
@@ -75,6 +80,25 @@ export interface AgentSetupPort {
   install(onProgress: (progress: AgentInstallProgress) => void): Promise<{ version: string | null }>;
   /** Starts signing in with the user's own account. */
   signIn(): Promise<AgentSignIn>;
+  /**
+   * Removes what Install put in the data folder (epic 6 entry 7), keeping the
+   * agent's own home (its chats and sign-in). Present only for an agent that
+   * can; rejects with plain words (`AgentSetupError`) when it can't now (a
+   * file in use).
+   */
+  uninstall?(): Promise<void>;
+  /**
+   * Signs the agent out of the user's own account (epic 6 entry 7). Present
+   * only for an agent that can; rejects with plain words when it couldn't,
+   * and then it is still signed in.
+   */
+  signOut?(): Promise<void>;
+  /**
+   * Stops whatever the port still runs (an install, a sign-in or sign-out
+   * server) when the server stops (epic 6 entry 7). Called by core's
+   * `dispose`; safe to call more than once.
+   */
+  close?(): void;
   /** Present when the agent can use an API key instead (story 9.2). */
   readonly apiKey?: AgentApiKeySupport;
 }

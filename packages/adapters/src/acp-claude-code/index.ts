@@ -6,8 +6,6 @@ export {
   CLAUDE_CODE,
   createClaudeCodeAgent,
   resolveClaudeAgentAcp,
-  EXIT_GRACE_MS,
-  START_TIMEOUT_MS,
   type ClaudeCodeAgentOptions,
 } from './claude-code-agent.js';
 export { claudeAskRules, claudeGuardSettings } from './claude-guards.js';
@@ -21,7 +19,6 @@ export {
   resolveClaudeExecutable,
   type ClaudeTerminalOptions,
 } from './terminal-command.js';
-export { createStreamMasker, maskSecrets, MASKED, secretValues, SECRET_ENV_NAME } from './mask.js';
 export {
   claudeConfigDir,
   MAX_TRANSCRIPT_BYTES,

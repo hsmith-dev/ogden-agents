@@ -24,7 +24,9 @@ export function PageTitle({ className, ...props }: ComponentProps<'h1'>) {
 
 export function PageBody({ className, ...props }: ComponentProps<'div'>) {
   return (
-    <div data-slot="page-body" className={cn('min-h-0 flex-1 overflow-y-auto', className)}>
+    // `relative`: the scroll box contains what is absolutely positioned in it (a hidden "In progress" label, any
+    // `sr-only` text), so nothing in it stretches the page past the window, where the wheel would scroll the whole app into blank space (backlog 10).
+    <div data-slot="page-body" className={cn('relative min-h-0 flex-1 overflow-y-auto', className)}>
       <div className="mx-auto flex w-full max-w-(--space-content-max) flex-col gap-6 p-(--panel-padding)" {...props} />
     </div>
   );

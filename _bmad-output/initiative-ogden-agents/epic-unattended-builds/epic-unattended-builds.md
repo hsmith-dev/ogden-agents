@@ -33,7 +33,7 @@ Completed at inception from the spec capabilities in `covers`.
 
 ## Boundaries
 
-Claude Code builds. Other agents come in epic 6. It owns bmad-loop's v7 `tickets.toml` patch and its upstream PR.
+Claude Code builds. Other agents' builds are v2 (epic 8; user, 2026-10-02). It owns bmad-loop's v7 `tickets.toml` patch and its upstream PR.
 
 ## References
 

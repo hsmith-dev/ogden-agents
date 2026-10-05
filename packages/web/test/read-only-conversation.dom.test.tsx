@@ -63,7 +63,7 @@ describe('the read-only conversation (review F2)', () => {
   });
 
   it("makes a waiting card's answers aria-disabled: a click or a number key sends nothing", () => {
-    conversation(true, <PermissionCard permission={pending()} wsId="ws_1" sesId="ses_1" projectName="clay" />);
+    conversation(true, <PermissionCard permission={pending()} wsId="ws_1" sesId="ses_1" projectName="clay" agentName="Claude Code" />);
     for (const name of ['Allow once', 'Always allow', 'Deny']) {
       const button = screen.getByRole('button', { name });
       expect(button.getAttribute('aria-disabled')).toBe('true');
@@ -77,14 +77,14 @@ describe('the read-only conversation (review F2)', () => {
   });
 
   it('offers no Undo Always allow on a record', () => {
-    conversation(true, <PermissionCard permission={alwaysAllowed()} wsId="ws_1" sesId="ses_1" projectName="clay" />);
+    conversation(true, <PermissionCard permission={alwaysAllowed()} wsId="ws_1" sesId="ses_1" projectName="clay" agentName="Claude Code" />);
     expect(screen.getByTestId('permission-record-text').tagName).toBe('SPAN');
     expect(screen.queryByRole('button')).toBeNull();
     expect(calls.remove).not.toHaveBeenCalled();
   });
 
   it('outside it, the same card still answers', () => {
-    conversation(false, <PermissionCard permission={pending()} wsId="ws_1" sesId="ses_1" projectName="clay" />);
+    conversation(false, <PermissionCard permission={pending()} wsId="ws_1" sesId="ses_1" projectName="clay" agentName="Claude Code" />);
     fireEvent.click(screen.getByRole('button', { name: 'Allow once' }));
     expect(calls.decide).toHaveBeenCalledWith('ws_1', 'ses_1', 'preq_1', { decision: 'allow_once' });
   });

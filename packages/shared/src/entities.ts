@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AgentId } from './events-common.js';
 import { RunId, SessionId, WorkspaceId } from './ids.js';
 import { IsoUtcTimestamp } from './time.js';
 
@@ -39,6 +40,46 @@ export const PERMISSION_MODE_RANK: Readonly<Record<PermissionMode, number>> = { 
 
 /** The modes' names as the UI shows them. */
 export const PERMISSION_MODE_LABELS: Readonly<Record<PermissionMode, string>> = { ask: 'Ask', auto: 'Auto', skip_all: 'Skip all' };
+
+/**
+ * Why a project's default permission mode reads as it does (default
+ * permission mode): `developer_mode_off`, its Skip all default went back to
+ * Ask when Developer mode was turned off; `skip_all_unconfirmed`, the
+ * app-wide default for new projects is Skip all and this project waits for
+ * the user to confirm it (new chats start in Ask until then).
+ */
+export const DEFAULT_MODE_NOTICES = ['developer_mode_off', 'skip_all_unconfirmed'] as const;
+export const DefaultModeNotice = z.enum(DEFAULT_MODE_NOTICES);
+export type DefaultModeNotice = z.infer<typeof DefaultModeNotice>;
+
+/** The notices in the user's words. */
+export const DEFAULT_MODE_NOTICE_TEXT: Readonly<Record<DefaultModeNotice, string>> = {
+  developer_mode_off: 'Developer mode was turned off, so new chats in this project start in Ask instead of Skip all.',
+  skip_all_unconfirmed: 'New projects start in Skip all, but this project needs your confirmation first. Until then its new chats start in Ask.',
+};
+
+/**
+ * An agent's own id for one of its models (story 11: each chat runs on a
+ * model the user can switch), as the agent lists it (`opus`, `gemini-2.5-pro`,
+ * a provider ARN). Core and the UI never name one. It may become a CLI
+ * argument, so it never starts with `-` and holds no space or shell character.
+ */
+export const MAX_MODEL_ID_LENGTH = 200;
+export const ModelId = z
+  .string()
+  .min(1)
+  .max(MAX_MODEL_ID_LENGTH)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]*$/, 'not a model id');
+export type ModelId = z.infer<typeof ModelId>;
+
+/** One model an agent offers, by its own id and name (story 11). */
+export const AgentModel = z.object({
+  id: ModelId,
+  /** The agent's own name for it ("Opus", "Gemini 2.5 Pro"). */
+  name: z.string().min(1).max(200),
+  description: z.string().max(500).optional(),
+});
+export type AgentModel = z.infer<typeof AgentModel>;
 
 /** What a session is for (AD-8). */
 export const SESSION_KINDS = ['chat', 'planning', 'build'] as const;
@@ -85,7 +126,29 @@ export const Session = z.object({
    * from before it existed: they read as `ask`.
    */
   permissionMode: PermissionMode.default('ask'),
+  /**
+   * The session's agent (epic 6, E6-R1): set at creation, and changed only
+   * when the user continues the chat with another agent (handoff,
+   * `session.agent_changed`). Absent only in `session.created` events and rows
+   * from before agents could be chosen; those sessions are the install's
+   * original agent, which the server fills in every session it answers.
+   */
+  agentId: AgentId.optional(),
+  /**
+   * The model the chat runs on (story 11): the agent's own id for it.
+   * Absent: the agent's own choice (and every session from before models
+   * could be chosen). Changed only by core, each change a
+   * `session.model_changed` event.
+   */
+  model: ModelId.optional(),
+  /** The user's name for the chat (backlog story 12); `null` until they give one. */
   title: z.string().nullable(),
+  /**
+   * The name core gave the chat (the planning action's label, or its first
+   * message), set once. Absent in `session.created` events and rows from
+   * before chat names: they read as none.
+   */
+  autoTitle: z.string().nullish(),
   adapterRefs: AdapterRefs,
   createdAt: IsoUtcTimestamp,
   updatedAt: IsoUtcTimestamp,

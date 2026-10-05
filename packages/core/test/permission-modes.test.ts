@@ -30,7 +30,7 @@ import {
   type Core,
   type StartAgentSession,
 } from '../src/index.js';
-import { openTestCore, tempDir } from './helpers.js';
+import { openTestCore, soleAgent, tempDir, TEST_AGENT_ID } from './helpers.js';
 import { fakeTerminal } from './support/fake-terminal.js';
 
 interface ModedAgentOptions {
@@ -150,7 +150,7 @@ function setUp(agent = modedAgent(), core: Core = openTestCore(), timeoutMs?: nu
     dataDir: tempDir('ogden-agents-data-'),
     entities: core.entities,
     sessionEvents: core.sessionEvents,
-    agent: agent.port,
+    agents: soleAgent(agent.port),
     permissions: core.permissions,
     events: core.events,
     installSettings: core.installSettings,
@@ -159,7 +159,7 @@ function setUp(agent = modedAgent(), core: Core = openTestCore(), timeoutMs?: nu
     ...(timeoutMs === undefined ? {} : { permissionModeTimeoutMs: timeoutMs }),
   });
   const workspace = chat.openWorkspace(tempDir('ogden-agents-repo-'));
-  const session = chat.createChatSession(workspace.id);
+  const session = core.entities.createSession({ workspaceId: workspace.id, kind: 'chat', agentId: TEST_AGENT_ID });
   return { core, chat, agent, workspace, session, internal, terminal };
 }
 
@@ -363,7 +363,7 @@ describe('telling the agent its mode safely (review)', () => {
     const { chat, workspace, session } = setUp(agent);
     chat.sendMessage(workspace.id, session.id, 'hello');
     await chat.settled();
-    const other = chat.createChatSession(workspace.id);
+    const other = await chat.createChatSession(workspace.id);
     expect(chat.permissionModeOptions(workspace.id, other.id).find((option) => option.mode === 'skip_all')).toMatchObject({ available: false });
     expect(() => chat.setPermissionMode(workspace.id, other.id, 'skip_all', { confirm: true })).toThrow();
   });
@@ -375,8 +375,8 @@ describe('Auto keeps protected files guarded (user decision 2026-10-02)', () => 
     const agent = modedAgent();
     const { chat, workspace, session } = setUp(agent, core);
     core.installSettings.setDeveloperMode(true);
-    const auto = chat.createChatSession(workspace.id);
-    const skip = chat.createChatSession(workspace.id);
+    const auto = await chat.createChatSession(workspace.id);
+    const skip = await chat.createChatSession(workspace.id);
     chat.setPermissionMode(workspace.id, auto.id, 'auto');
     chat.setPermissionMode(workspace.id, skip.id, 'skip_all', { confirm: true });
     for (const each of [session, auto, skip]) {
@@ -385,7 +385,7 @@ describe('Auto keeps protected files guarded (user decision 2026-10-02)', () => 
     }
     expect(agent.guarded).toEqual([false, true, false]);
     expect(agent.protectedPathsGiven[1]).toBe(PROTECTED_PATHS);
-    expect(PROTECTED_PATHS.folders).toEqual(['.claude', '.git', '.vscode', '.idea', '_bmad']);
+    expect(PROTECTED_PATHS.folders).toEqual(['.claude', '.git', '.vscode', '.idea', '_bmad', '.gemini', '.agents']);
     expect(PROTECTED_PATHS.files).toEqual(expect.arrayContaining(['.mcp.json', 'CLAUDE.md', 'AGENTS.md', '.envrc']));
   });
 
@@ -496,8 +496,8 @@ describe('Skip all needs Developer mode and a confirmation, enforced by core (cr
   it('Developer mode is off until turned on, each change is one install-level event, and the same value again appends nothing', () => {
     const core = openTestCore();
     expect(core.installSettings.developerMode()).toBe(false);
-    expect(core.installSettings.setDeveloperMode(true)).toEqual({ developerMode: true, changed: true, dropped: [] });
-    expect(core.installSettings.setDeveloperMode(true)).toEqual({ developerMode: true, changed: false, dropped: [] });
+    expect(core.installSettings.setDeveloperMode(true)).toEqual({ developerMode: true, changed: true, dropped: [], defaultsDropped: 0 });
+    expect(core.installSettings.setDeveloperMode(true)).toEqual({ developerMode: true, changed: false, dropped: [], defaultsDropped: 0 });
     expect(core.installSettings.developerMode()).toBe(true);
     const changes = core.events.readAfter(0).filter((event) => event.type === 'settings.developer_mode_changed');
     expect(changes).toEqual([expect.objectContaining({ workspaceId: null, streamId: 'settings', payload: { developerMode: true, previous: false } })]);
@@ -560,8 +560,8 @@ describe('turning Developer mode off drops every Skip-all chat to Ask (criterion
     const core = openTestCore();
     const one = setUp(modedAgent(), core);
     const workspace = one.workspace;
-    const two = one.chat.createChatSession(workspace.id);
-    const askChat = one.chat.createChatSession(workspace.id);
+    const two = await one.chat.createChatSession(workspace.id);
+    const askChat = await one.chat.createChatSession(workspace.id);
     core.installSettings.setDeveloperMode(true);
     for (const session of [one.session, two]) {
       one.chat.sendMessage(workspace.id, session.id, 'hello');

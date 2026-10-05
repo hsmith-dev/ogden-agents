@@ -26,7 +26,6 @@ import { checkTerminalReady, checkTerminalSupport } from '../terminal-checks.js'
 import { terminalUnavailableReason } from '../terminal-reasons.js';
 import type { Agents } from './agents.js';
 import {
-  TERMINAL_BACKLOG_CHARS,
   TERMINAL_CLOSE_WAIT_MS,
   TERMINAL_COLS,
   TERMINAL_EXIT_GRACE_MS,
@@ -38,61 +37,14 @@ import {
   terminalClosedNote,
 } from './constants.js';
 import type { ChatContext } from './context.js';
+import { trimBacklog } from './terminal-backlog.js';
 import type { Chat, Terminal, TerminalSize, TerminalViewerEntry, Timer } from './types.js';
 
-const ESC = '\x1b';
-const BEL = '\x07';
-
-/**
- * Where the escape sequence starting at `text[esc]` (an `ESC`) ends, one past
- * its last character, or `-1` when `text` ends before it does. A CSI
- * (`ESC [` … a final byte `@`–`~`); an OSC (`ESC ]`), or a DCS, SOS, PM or
- * APC string, up to BEL or ST (`ESC \\`); otherwise `ESC`, any intermediate
- * bytes (space–`/`), then one final character (`ESC 7`, `ESC ( B`).
- */
-function escapeEnd(text: string, esc: number): number {
-  const kind = text[esc + 1];
-  if (kind === undefined) return -1;
-  if (kind === '[') {
-    for (let i = esc + 2; i < text.length; i++) {
-      const code = text.charCodeAt(i);
-      if (code >= 0x40 && code <= 0x7e) return i + 1;
-    }
-    return -1;
-  }
-  if (kind === ']' || kind === 'P' || kind === 'X' || kind === '^' || kind === '_') {
-    for (let i = esc + 2; i < text.length; i++) {
-      if (text[i] === BEL) return i + 1;
-      if (text[i] === ESC) return text[i + 1] === '\\' ? i + 2 : text[i + 1] === undefined ? -1 : i;
-    }
-    return -1;
-  }
-  let i = esc + 1;
-  while (i < text.length && text.charCodeAt(i) >= 0x20 && text.charCodeAt(i) <= 0x2f) i++;
-  return i < text.length ? i + 1 : -1;
-}
-
-/**
- * Keeps the newest `max` characters of output, starting at a line where it
- * can (story 3.5), and never inside an escape sequence (story 3.9; 3.5 review
- * F5): a cut that falls inside one moves past its end, then on to the next
- * line break. A sequence still unterminated at the end is cut at a line
- * break, as before.
- */
-export function trimBacklog(text: string, max: number = TERMINAL_BACKLOG_CHARS): string {
-  if (text.length <= max) return text;
-  let start = text.length - max;
-  const esc = text.lastIndexOf(ESC, start - 1);
-  if (esc !== -1) {
-    const end = escapeEnd(text, esc);
-    if (end > start) start = end;
-  }
-  const line = text.indexOf('\n', start);
-  return line === -1 ? text.slice(start) : text.slice(line + 1);
-}
+// The backlog trim lives beside this module (story 6.9); its tests import it from here.
+export { trimBacklog };
 
 export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgent' | 'storedAgentSessionId'>) {
-  const { options, entities, sessionEvents, agent, agentEnv, busy, running, terminals, switching, internalError, later, newMessageId, getWorkspace, getSession } = ctx;
+  const { options, entities, sessionEvents, agentOf, agentEnv, busy, running, terminals, switching, internalError, later, newMessageId, getWorkspace, getSession } = ctx;
   const { releaseAgent, storedAgentSessionId } = deps;
 
   /** The driver changes in flight (each holding its session's `switching`): `close` waits for them. */
@@ -204,11 +156,11 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
 
   /** The CLI's record of the session's agent session (story 3.3), `undefined` when the agent can't read it back; rejects as the adapter's `transcript` does. */
   const readTranscript = async (session: Session, agentSessionId: string): Promise<AgentTranscriptTurn[] | undefined> => {
-    const resume = agent.terminalResume;
+    const resume = agentOf(session.id).terminalResume;
     if (resume?.transcript === undefined) return undefined;
     const workspace = getWorkspace(session.workspaceId);
     // Bounded (review F1): a read that hangs is an unreadable record; the switch goes on.
-    const read = await bounded(resume.transcript({ agentSessionId, cwd: workspace.realPath ?? workspace.path, env: { ...agentEnv() } }), TERMINAL_STEP_TIMEOUT_MS);
+    const read = await bounded(resume.transcript({ agentSessionId, cwd: workspace.realPath ?? workspace.path, env: { ...agentEnv(session.id) } }), TERMINAL_STEP_TIMEOUT_MS);
     if (read === TIMED_OUT) throw new TerminalHandoffError('terminal_read_timeout');
     return read;
   };
@@ -220,7 +172,7 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
    * and is logged as a code; the terminal opens either way.
    */
   const markTerminalImport = async (session: Session, agentSessionId: string): Promise<void> => {
-    if (agent.terminalResume?.transcript === undefined) return;
+    if (agentOf(session.id).terminalResume?.transcript === undefined) return;
     let mark = '';
     try {
       mark = (await readTranscript(session, agentSessionId))?.at(-1)?.id ?? START_MARK;
@@ -235,6 +187,8 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
   };
 
   const toTerminal = async (session: Session): Promise<Session> => {
+    // The session's own agent (epic 6): its CLI, its name.
+    const agent = agentOf(session.id);
     // The checks are shared with the server's availability check (story 3.9), the idle check between their stages.
     const support = checkTerminalSupport(agent, options.terminal);
     if ('available' in support) throw new TerminalUnavailableError(support.code, support.reason);
@@ -248,7 +202,7 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
       return new TerminalUnavailableError('pty_unavailable', terminalUnavailableReason.tooSlow(agent.displayName));
     };
     // The checks before the agent is released share one deadline (review F1): none can hold the lock.
-    const env = { ...agentEnv() };
+    const env = { ...agentEnv(session.id) };
     const deadline = startDeadline(TERMINAL_STEP_TIMEOUT_MS);
     const step = async <T>(promise: Promise<T>): Promise<T> => {
       const result = await deadline.step(promise);
@@ -259,6 +213,8 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     let command: Awaited<ReturnType<AgentTerminalResume['command']>>;
     // The CLI starts in the chat's permission mode (permission modes): asking, auto, or skipping its checks.
     const permissionMode = entities.getSession(session.id)?.permissionMode ?? 'ask';
+    // The CLI starts on the chat's model (story 11).
+    const model = entities.getSession(session.id)?.model ?? null;
     try {
       const sessionId = storedAgentSessionId(session.id);
       const unavailable = await checkTerminalReady({ agent, support, agentSessionId: sessionId, env: () => env, step });
@@ -266,7 +222,11 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
       agentSessionId = sessionId!;
       let built: typeof command | typeof TIMED_OUT;
       try {
-        built = await deadline.step(resume.command(agentSessionId, env, { permissionMode, ...(permissionMode === 'auto' ? { protectedPaths: PROTECTED_PATHS } : {}) }));
+        built = await deadline.step(resume.command(agentSessionId, env, {
+            permissionMode,
+            ...(permissionMode === 'auto' ? { protectedPaths: PROTECTED_PATHS } : {}),
+            ...(model === null ? {} : { model }),
+          }));
       } catch (error) {
         throw new TerminalUnavailableError('cli_not_found', terminalUnavailableReason.cliNotFound(agent.displayName, error instanceof AgentError ? error.message : ''));
       }
@@ -426,7 +386,7 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     if (session !== undefined) await importTerminalTurns(session);
     if (exitCode !== 0) {
       try {
-        sessionEvents.completeMessage(sessionId, { messageId: newMessageId(), role: 'agent', content: terminalClosedNote(agent.displayName, exitCode) });
+        sessionEvents.completeMessage(sessionId, { messageId: newMessageId(), role: 'agent', content: terminalClosedNote(agentOf(sessionId).displayName, exitCode) });
       } catch (error) {
         internalError(sessionId, error);
       }

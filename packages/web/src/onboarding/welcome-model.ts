@@ -31,9 +31,23 @@ export function advancesOnReady(previous: boolean | undefined, now: boolean): bo
   return previous === false && now;
 }
 
-/** The agent Welcome shows selected: the first supported one (there is one today). */
-export function selectedAgent(agents: readonly AgentSetupStatus[] | undefined): AgentSetupStatus | undefined {
-  return agents?.[0];
+/**
+ * The agent Welcome shows selected (epic 6, entry 6): the one chosen (the
+ * user's pick, else the kept default for new projects) while it is listed,
+ * else the first supported one.
+ */
+export function selectedAgent(agents: readonly AgentSetupStatus[] | undefined, chosen?: string | undefined): AgentSetupStatus | undefined {
+  return agents?.find((agent) => agent.agentId === chosen) ?? agents?.[0];
+}
+
+/** Whether Welcome asks which agent to use (epic 6, entry 6): only when there is more than one; Claude Code alone asks nothing. */
+export const asksAgentChoice = (agents: readonly AgentSetupStatus[] | undefined): boolean => (agents?.length ?? 0) > 1;
+
+/** One line under an agent in Welcome's choice: its setup, in the agent card's words. */
+export function agentSetupWords(agent: AgentSetupStatus): string {
+  if (agent.install === 'installing') return `Installing ${agent.displayName}`;
+  if (agent.install !== 'installed') return 'Not installed';
+  return agent.auth === 'signed_in' ? 'Installed, signed in' : agent.auth === 'signing_in' ? 'Signing in' : 'Installed, needs sign-in';
 }
 
 /** After a project is added: the shortcut step while the server still offers it, else finish. */

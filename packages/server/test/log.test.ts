@@ -140,6 +140,16 @@ describe('redaction', () => {
     expect(redact('a risk-free sketch of sk8 and ask-me')).toBe('a risk-free sketch of sk8 and ask-me');
   });
 
+  it("a Google (Gemini) API key is redacted by field name and wherever it appears, wrapped too (epic 6 entry 5)", () => {
+    const key = `AIza${'G'.repeat(27)}BACKSTOP`;
+    expect(redact({ GEMINI_API_KEY: key, google_api_key: key })).toEqual({ GEMINI_API_KEY: REDACTED, google_api_key: REDACTED });
+    const out = JSON.stringify(redact({ reason: `failed with ${key} inside`, wrapped: `key: AIzaHEAD_0123\nTAIL_4567` }));
+    expect(out).not.toContain('BACKSTOP');
+    expect(out).not.toContain('HEAD_0123');
+    expect(out).not.toContain('TAIL_4567');
+    expect(out).toContain('failed with [redacted] inside');
+  });
+
   it('leaves ordinary fields alone', () => {
     expect(redact({ port: 4317, msg: 'server listening', url: 'http://127.0.0.1:4317', code: 'EADDRINUSE' })).toEqual({
       port: 4317,

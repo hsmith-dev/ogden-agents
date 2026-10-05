@@ -8,7 +8,19 @@
  * state-changing, so the gate has checked its Origin. Without permissions
  * (an app wired without core) they answer 501 without reading the body.
  */
-import { FeatureOffError, FeatureUnavailableError, NotFoundError, ValidationError, WorkspaceBusyError, type BmadFeatures, type Chat, type Permissions } from '@ogden-agents/core';
+import {
+  ConfirmationRequiredError,
+  DeveloperModeRequiredError,
+  FeatureOffError,
+  FeatureUnavailableError,
+  NotFoundError,
+  UnknownAgentError,
+  ValidationError,
+  WorkspaceBusyError,
+  type BmadFeatures,
+  type Chat,
+  type Permissions,
+} from '@ogden-agents/core';
 import {
   API_ROUTES,
   CreateFolderRequest,
@@ -64,6 +76,11 @@ export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptio
     if (error instanceof FeatureOffError) return apiError(c, 409, 'feature_off', FEATURE_OFF_MESSAGE);
     // Turning on a piece this install doesn't ship yet (story 10.2): nothing was stored.
     if (error instanceof FeatureUnavailableError) return apiError(c, 409, 'feature_unavailable', FEATURE_UNAVAILABLE_MESSAGE);
+    // A default agent this install doesn't have (epic 6, entry 6): nothing was stored.
+    if (error instanceof UnknownAgentError) return apiError(c, 400, 'agent_unknown', error.message);
+    // Skip all as the default (default permission mode): the server is the gate; nothing was stored.
+    if (error instanceof DeveloperModeRequiredError) return apiError(c, 403, 'developer_mode_required', error.message);
+    if (error instanceof ConfirmationRequiredError) return apiError(c, 400, 'confirmation_required', error.message);
     if (error instanceof WorkspaceBusyError) {
       return apiError(c, 409, 'sessions_busy', 'A chat in this project is still working or waiting for you. Let it finish, then delete the history.');
     }
@@ -115,7 +132,13 @@ export function registerWorkspaceRoutes(app: Hono, options: WorkspaceRoutesOptio
       if (!body.ok) return body.response;
       try {
         const settings = permissions.updateSettings(scope.workspaceId, body.value);
-        log.info('workspace settings saved', { workspaceId: scope.workspaceId, cautionLevel: settings.cautionLevel, bmadPieces: settings.bmadPieces.join(',') });
+        log.info('workspace settings saved', {
+          workspaceId: scope.workspaceId,
+          cautionLevel: settings.cautionLevel,
+          bmadPieces: settings.bmadPieces.join(','),
+          defaultAgentId: settings.defaultAgentId ?? 'install default',
+          defaultPermissionMode: settings.defaultPermissionMode ?? 'ask',
+        });
         return c.json(WorkspaceSettingsResponse.parse({ settings }));
       } catch (error) {
         return refusal(c, error);

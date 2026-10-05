@@ -11,7 +11,9 @@
 import type { SessionDriver } from '@ogden-agents/shared';
 import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DriverToggle, driverShortcutLabel, NOT_IDLE_REASON, SWITCHING_WORDS } from '../src/terminal/driver-toggle';
+import { DriverToggle, driverShortcutLabel, notIdleReason, SWITCHING_WORDS } from '../src/terminal/driver-toggle';
+
+const NOT_IDLE_REASON = notIdleReason('Claude Code');
 import { conversationProps, READ_ONLY_CONVERSATION } from '../src/terminal/terminal-pane';
 import { SWITCH_UNCONFIRMED, useDriverSwitch } from '../src/terminal/use-driver-switch';
 import { useDriverShortcut } from '../src/terminal/use-driver-shortcut';
@@ -24,7 +26,7 @@ function mount(props: { driver?: SessionDriver; switching?: SessionDriver; reaso
   const onSwitch = vi.fn();
   render(
     <TooltipProvider delayDuration={0}>
-      <DriverToggle driver={props.driver ?? 'ui'} switching={props.switching} terminalBlockedReason={props.reason} onSwitch={onSwitch} />
+      <DriverToggle agentName="Claude Code" driver={props.driver ?? 'ui'} switching={props.switching} terminalBlockedReason={props.reason} onSwitch={onSwitch} />
     </TooltipProvider>,
   );
   return { onSwitch, terminal: screen.getByTestId('switch-to-terminal'), chat: screen.getByTestId('switch-to-chat') };
@@ -280,7 +282,7 @@ describe('conversationProps (review F2, F6)', () => {
       if (peekOpen) {
         // Below xl a sheet over the terminal; at xl beside it.
         expect(scroller.className).toContain('absolute');
-        expect(scroller.className).toContain('xl:static');
+        expect(scroller.className).toContain('xl:relative');
       }
       cleanup();
     }

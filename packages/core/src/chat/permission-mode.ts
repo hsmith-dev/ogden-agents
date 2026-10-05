@@ -58,7 +58,7 @@ const offeredBy = (session: Pick<AgentSession, 'permissionModes'>): readonly Per
  * them) is put in Ask and reported `restart`. Never rejects.
  */
 export function createModeApplier(ctx: ChatContext) {
-  const { entities, agent, internalError, later } = ctx;
+  const { entities, agentOf, internalError, later } = ctx;
 
   /** How `promise` settled within the bound: `ok`, `refused`, or `timeout` (the last two logged as a code). */
   const told = async (sessionId: SessionId, mode: PermissionMode, promise: Promise<void>): Promise<'ok' | 'refused' | 'timeout'> => {
@@ -110,7 +110,7 @@ export function createModeApplier(ctx: ChatContext) {
       try {
         // Only if the chat still says that mode: a newer choice is applied in its own turn.
         if (entities.getSession(sessionId)?.permissionMode === mode) {
-          entities.setSessionPermissionMode(sessionId, 'ask', 'agent', `${agent.displayName} couldn't switch to ${PERMISSION_MODE_LABELS[mode]}, so this chat is back in Ask.`);
+          entities.setSessionPermissionMode(sessionId, 'ask', 'agent', `${agentOf(sessionId).displayName} couldn't switch to ${PERMISSION_MODE_LABELS[mode]}, so this chat is back in Ask.`);
         }
       } catch (error) {
         internalError(sessionId, error);
@@ -131,7 +131,7 @@ export type ModeApplied = 'ok' | 'restart' | 'failed';
 export type ModeApplier = ReturnType<typeof createModeApplier>;
 
 export function createPermissionModes(ctx: ChatContext, deps: Pick<Agents, 'drop'> & Pick<Replies, 'finishReply'> & { applyMode: ModeApplier }) {
-  const { entities, agent, live, switching, internalError, getSession, sessionModes } = ctx;
+  const { entities, agentOf, agentIdOf, live, switching, internalError, getSession, sessionModes } = ctx;
   const { drop, finishReply, applyMode } = deps;
 
   /** The agent couldn't be told the chat's mode, not even Ask: it is stopped, and the chat can be resumed. */
@@ -147,7 +147,7 @@ export function createPermissionModes(ctx: ChatContext, deps: Pick<Agents, 'drop
       const state = entities.getSession(sessionId)?.state;
       if (state === 'working' || state === 'waiting') {
         entities.setSessionState(sessionId, 'idle', {
-          reason: `${agent.displayName} was stopped because it couldn't switch to this chat's permission mode. Send your message again to restart it.`,
+          reason: `${agentOf(sessionId).displayName} was stopped because it couldn't switch to this chat's permission mode. Send your message again to restart it.`,
           resumable: true,
         });
       }
@@ -209,7 +209,7 @@ export function createPermissionModes(ctx: ChatContext, deps: Pick<Agents, 'drop
     if (session === undefined || event.mode === session.permissionMode) return;
     if (session.permissionMode !== 'ask') {
       const label = event.label ?? (event.mode === 'other' ? 'another mode' : PERMISSION_MODE_LABELS[event.mode]);
-      entities.setSessionPermissionMode(sessionId, 'ask', 'agent', `${agent.displayName} switched itself to ${label}, so this chat is back in Ask.`);
+      entities.setSessionPermissionMode(sessionId, 'ask', 'agent', `${agentOf(sessionId).displayName} switched itself to ${label}, so this chat is back in Ask.`);
     }
     if (event.asksLess) followStoredMode(sessionId);
   };
@@ -219,9 +219,12 @@ export function createPermissionModes(ctx: ChatContext, deps: Pick<Agents, 'drop
     // Ask is every agent's: it is where every chat starts.
     if (mode === 'ask') return undefined;
     const label = PERMISSION_MODE_LABELS[mode];
+    // The chat's own agent (epic 6): each agent declares its modes, and a chat is offered only those.
+    const agent = agentOf(sessionId);
     if (!(agent.permissionModes ?? ['ask']).includes(mode)) return `${agent.displayName} doesn't offer ${label}.`;
-    // This chat's agent session when it started this run, else the one that started last in this run (any chat).
-    const listed = sessionModes.get(sessionId) ?? ctx.lastSessionModes.value;
+    // This chat's agent session when it started this run, else the one of the same agent that started last in this run (any chat).
+    const session = entities.getSession(sessionId);
+    const listed = sessionModes.get(sessionId) ?? (session === undefined ? undefined : ctx.lastSessionModes.get(agentIdOf(session)));
     if (listed !== undefined && !listed.includes(mode)) return `This chat's ${agent.displayName} session doesn't offer ${label} on this computer.`;
     return undefined;
   };

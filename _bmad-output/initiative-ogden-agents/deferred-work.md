@@ -112,6 +112,11 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Epic 5 (5.9): queued runs start again only when another run ends, a limit changes or the server restarts, not when a turned-off piece is turned back on. From 5.8 review. (log: "Queued runs wait after a piece is turned back on")
 - Epic 5 (11.1): Update and retry takes no run-limit slot and arms no deadline, and every review read runs `tickets.py` once. From 5.9 reviews. (log: "Update and retry takes no run limit slot and arms no deadline")
 - Epic 11 (11.5, which also takes the run folder pruning above): Apply the saved fix leaves the patch applied with the run still blocked when the plan mark or the prompt fails afterwards; the saved patch is read by git three times and not previewed. From 11.1 reviews. (log: "Apply the saved fix after a late failure")
+- 14.10 (proposed): Local model chat re-checks only file sizes of the installed harness at launch, not its SHA-256. From 14.2 review. (log: "Local model chat re-checks only file sizes of the installed harness at launch, not its SHA-256")
+- 14.10 (proposed): The harness's tool permissions list names each tool (bash, edit, webfetch, websearch, codesearch, task, external_directory, doom_loop) instead of a wildcard ask. From 14.2 review. (log: "The harness's tool permissions list names each tool (bash, edit, webfetch, websearch, codesearch, task, external_directory, doom_loop) instead of a wildcard ask")
+- 14.10 (proposed): An approved env or printenv card puts an endpoint's key into the harness's tool output and so into opencode.db. From 14.2 review. (log: "An approved env or printenv card puts an endpoint's key into the harness's tool output and so into opencode.db")
+- 14.10 (proposed): test-hooks.ts is over 600 lines after the Local model hooks. From 14.2 review. (log: "test-hooks.ts is over 600 lines after the Local model hooks")
+- 14.10 (proposed): CI never unpacks the real OpenCode archives with the app's extractors. From 14.2 review. (log: "CI never unpacks the real OpenCode archives with the app's extractors")
 
 ## Log
 
@@ -789,3 +794,18 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-build-runs-and-notifications/story-live-run-view-and-the-runs-tab-plan.md`
   summary: Apply the saved fix after a late failure: the patch stays applied while the run is still blocked when the plan mark or the prompt fails; the patch is read by git three times and is not previewed.
   evidence: 11.1 correctness and security reviews; Retry still works, and the agent is released while the run is blocked.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-tracer-bullet-one-local-model-chat-against-a-fake-server-end-to-end-plan.md`
+  summary: Local model chat re-checks only file sizes of the installed harness at launch, not its SHA-256: the install checks the SHA-256 of the binary and ripgrep, but a same-size replacement by anything running as the user would be run; re-hashing about 185 MB at every start costs a second or two. Decide when 14.10 sweeps.
+  evidence: 14.2 security review; data folder is owner-only.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-tracer-bullet-one-local-model-chat-against-a-fake-server-end-to-end-plan.md`
+  summary: The harness's tool permissions list names each tool (bash, edit, webfetch, websearch, codesearch, task, external_directory, doom_loop) instead of a wildcard ask: a tool added by a later OpenCode would default to allow; whether `"*": "ask"` is accepted by 1.18.34 and still lets reads through is a live check, and every pin bump re-reads OpenCode's tool list.
+  evidence: 14.2 security review; spike 14.1 only exercised the listed tools.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-tracer-bullet-one-local-model-chat-against-a-fake-server-end-to-end-plan.md`
+  summary: An approved env or printenv card puts an endpoint's key into the harness's tool output and so into opencode.db: the key is in the harness's environment, so a command the user approves can print it; the endpoint card (14.4) should say so next to the key box.
+  evidence: 14.2 security review; AD-16 note says the key is only in memory and the process environment.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-tracer-bullet-one-local-model-chat-against-a-fake-server-end-to-end-plan.md`
+  summary: test-hooks.ts is over 600 lines after the Local model hooks: the hook audit requires every OGDEN_AGENTS_TEST_* name in that one file, so splitting needs the audit changed first; 14.10 decides.
+  evidence: 14.2 correctness review: 586 lines became 638.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-tracer-bullet-one-local-model-chat-against-a-fake-server-end-to-end-plan.md`
+  summary: CI never unpacks the real OpenCode archives with the app's extractors: `agent-pins --check --agent local` hashes the archive only; the per-file pins were checked by hand on this Mac and the Linux x64 tar header was read, but a pin bump should unpack with extractPinned and extractPinnedTarGz on each OS.
+  evidence: 14.2 correctness review.

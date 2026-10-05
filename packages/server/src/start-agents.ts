@@ -12,6 +12,7 @@ import {
   ANTIGRAVITY_DESCRIPTOR,
   CODEX_SHIPPED,
   GROK_SHIPPED,
+  LOCAL_SHIPPED,
   createAntigravityAgent,
   createAntigravitySetup,
   currentPlatform,
@@ -29,6 +30,7 @@ import { agentHomeDir, checkAgentWiring, describedLike, type AgentWiring } from 
 import { antigravityWiring, type AntigravityPorts } from './antigravity-wiring.js';
 import { codexWiring } from './codex-wiring.js';
 import { grokWiring } from './grok-wiring.js';
+import { localWiring } from './local-wiring.js';
 import type { Logger } from './log.js';
 import { agentEnvironment, agentKeysOf, SUBSCRIPTION_MAX_AGE_MS, withoutAgentKeys } from './start-env.js';
 import type { StartOptions } from './start-types.js';
@@ -93,7 +95,13 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
                 : { pins: hooks.grokInstall.pins, tokenProbe: async () => true, ...(hooks.grokInstall.npmCli === undefined ? {} : { npmCli: hooks.grokInstall.npmCli }), ...(hooks.grokInstall.binarySha256 === undefined ? {} : { binarySha256: hooks.grokInstall.binarySha256 }) },
             onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
   for (const wiring of grok) checkAgentWiring(wiring);
-  const extraAgents = [...antigravity, ...codex, ...grok, ...(options.extraAgents ?? testTrustAgentWiring(hooks, log))];
+  // The Local model (epic 14 story 14.2): the same, in its own folder's switch.
+  const local =
+    options.local === false || (options.local === undefined && !LOCAL_SHIPPED && hooks.localServer === undefined && hooks.localEndpoint === undefined)
+      ? []
+      : [localWiring({ dataDir, given: options.local, serverScript: hooks.localServer, target: hooks.localEndpoint, onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
+  for (const wiring of local) checkAgentWiring(wiring);
+  const extraAgents = [...antigravity, ...codex, ...grok, ...local, ...(options.extraAgents ?? testTrustAgentWiring(hooks, log))];
   // Every registered agent's API key variables (6.3): each is kept out of every process but its own agent's chat.
   const envKeys = agentEnvKeys([claudeDescriptor, ...extraAgents.map((wiring) => wiring.descriptor)]);
   // The terminal's `claude`: the option's, else (a test run only) a stand-in from the environment (story 3.10).
@@ -183,6 +191,13 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
       ...(transcript === undefined ? {} : { transcript: async (input) => transcript({ ...input, env: await freshChatEnv(agentId, input.env) }) }),
     };
   };
+  /** The variables an agent's own wiring adds to each start (epic 14), over what core passes. */
+  const prepareOf = (agentId: AgentId) => wirings.find((wiring) => wiring.descriptor.agentId === agentId)?.prepareChat;
+  const preparedEnv = async (agentId: AgentId, env: Readonly<Record<string, string>>): Promise<Record<string, string>> => {
+    const fresh = await freshChatEnv(agentId, env);
+    const extra = await prepareOf(agentId)?.({ env: fresh });
+    return extra === undefined ? fresh : { ...fresh, ...extra };
+  };
   /** `agent` as a chat runs it: every start, and its terminal, with its own environment rules (stories 3.1, 3.2, 9.2). */
   const forChat = (agentId: AgentId, agent: AgentPort): AgentPort => ({
     get displayName() {
@@ -192,8 +207,8 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
       return agent.permissionModes;
     },
     ...(agent.modeFixedAtStart === true ? { modeFixedAtStart: true } : {}),
-    startSession: async (input) => agent.startSession({ ...input, env: await freshChatEnv(agentId, input.env) }),
-    reopenSession: async (input) => agent.reopenSession({ ...input, env: await freshChatEnv(agentId, input.env) }),
+    startSession: async (input) => agent.startSession({ ...input, env: await preparedEnv(agentId, input.env) }),
+    reopenSession: async (input) => agent.reopenSession({ ...input, env: await preparedEnv(agentId, input.env) }),
     listAuthMethods: (input) => agent.listAuthMethods(input),
     skillInvocation: (skill, idea) => agent.skillInvocation(skill, idea),
     // The terminal runs, and its transcript is read, with the chat's environment rules, the API key's included (stories 3.1, 3.2).

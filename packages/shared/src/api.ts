@@ -257,6 +257,15 @@ export const API_ROUTES = {
    */
   chatSettings: `${API_BASE}/settings/chat`,
   /**
+   * `GET` → `UpdateNoticeResponse`; `PUT SetUpdateCheckRequest` →
+   * `UpdateNoticeResponse` (story 13.7): the "a newer version is available"
+   * notice and the switch for the check when Ogden starts. A check finishing
+   * or the switch changing appends `settings.update_notice_changed`.
+   */
+  updates: `${API_BASE}/updates`,
+  /** `POST` → `UpdateCheckResponse` (story 13.7): Check now, the server asking npm for its public version list. */
+  updatesCheck: `${API_BASE}/updates/check`,
+  /**
    * `GET` → `BmadDetectionResponse` (story 10.2's contract; 10.3 serves it):
    * whether the project's repo already has `_bmad/`, read-only. Not guarded.
    */

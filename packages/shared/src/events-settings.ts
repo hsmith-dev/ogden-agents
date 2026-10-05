@@ -45,3 +45,16 @@ export const SettingsWhileWorkingChangedInput = z.object({
  */
 export const SettingsWhileWorkingChangedEvent = SettingsWhileWorkingChangedInput.extend(assigned);
 export type SettingsWhileWorkingChangedEvent = z.infer<typeof SettingsWhileWorkingChangedEvent>;
+
+export const SettingsUpdateNoticeChangedInput = z.object({
+  type: z.literal('settings.update_notice_changed'),
+  ...onSettingsStream,
+  payload: z.object({ available: z.string().nullable(), enabled: z.boolean() }),
+});
+/**
+ * The update notice changed (story 13.7): a check finished, or its switch was
+ * turned on or off. `available` is the newer version offered, if any. Every
+ * tab follows it by reading the notice again.
+ */
+export const SettingsUpdateNoticeChangedEvent = SettingsUpdateNoticeChangedInput.extend(assigned);
+export type SettingsUpdateNoticeChangedEvent = z.infer<typeof SettingsUpdateNoticeChangedEvent>;

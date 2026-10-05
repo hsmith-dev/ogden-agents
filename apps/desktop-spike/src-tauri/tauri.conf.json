@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Ogden Agents Spike",
+  "version": "0.0.1",
+  "identifier": "dev.ogden-agents.spike",
+  "build": { "frontendDist": "../placeholder" },
+  "app": {
+    "windows": [],
+    "withGlobalTauri": false,
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "externalBin": ["binaries/ogden-node"],
+    "resources": { "../stage/app/": "app/", "../stage/npm/": "npm/" },
+    "macOS": { "signingIdentity": "-", "entitlements": "entitlements.plist", "minimumSystemVersion": "11.0" },
+    "windows": { "webviewInstallMode": { "type": "downloadBootstrapper" }, "nsis": { "installMode": "currentUser" } }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACED-IN-CI-BY-A-THROWAWAY-KEY",
+      "endpoints": ["http://127.0.0.1:8765/latest.json"],
+      "dangerousInsecureTransportProtocol": true,
+      "windows": { "installMode": "passive" }
+    }
+  }
+}

@@ -11,8 +11,12 @@
 // normalized, sorted paths, and the same refusal of unsafe entries), and
 // compares it with the lock's `contentHash`. It also asks GitHub's compare
 // API whether the commit is in the history of the lock's `ref` (status
-// `identical` or `behind`); set GITHUB_TOKEN to avoid the anonymous rate
-// limit. Downloads retry with back-off.
+// `identical` or `behind`). A pin on Ogden Agents' maintained fork (user
+// decision 2026-10-04, docs/bmad-fork.md) names its upstream `base`: the
+// check also asks that the base is in the history of upstream's `ref` and an
+// ancestor of the pinned commit. Every request is a read (GET); nothing is
+// ever written to GitHub. Set GITHUB_TOKEN to avoid the anonymous rate limit.
+// Downloads retry with back-off.
 //
 // Needs the network. Only run by maintainers and CI: the app downloads a
 // pinned tarball only when the user asks, and no test reaches GitHub.
@@ -37,6 +41,7 @@ const ATTEMPTS = 4;
  * @property {string} repo
  * @property {string} ref
  * @property {string} commit
+ * @property {{ repo: string, ref: string, commit: string }} [base]
  * @property {string} version
  * @property {string} include
  * @property {string} contentHash
@@ -68,6 +73,25 @@ export async function checkHistory(/** @type {string} */ name, /** @type {Pin} *
   } catch (error) {
     return [`${name}: could not compare ${pin.ref}...${pin.commit} in ${pin.repo}: ${error instanceof Error ? error.message : String(error)}`];
   }
+}
+
+/**
+ * Messages unless the pin's upstream `base` (when it has one) is in the history of upstream's `ref`, and the pinned
+ * commit is built on it (compare `base...commit` in the pinned repo is `ahead` or `identical`).
+ */
+export async function checkBase(/** @type {string} */ name, /** @type {Pin} */ pin, /** @type {GetJson} */ getJson) {
+  const base = pin.base;
+  if (base === undefined) return [];
+  const problems = await checkHistory(`${name} base`, { ...pin, repo: base.repo, ref: base.ref, commit: base.commit }, getJson);
+  try {
+    const { status } = await getJson(`/repos/${pin.repo}/compare/${base.commit}...${pin.commit}`);
+    if (status !== 'ahead' && status !== 'identical') {
+      problems.push(`${name}: ${pin.repo}@${pin.commit} is not built on ${base.repo}@${base.commit} (compare status ${String(status)})`);
+    }
+  } catch (error) {
+    problems.push(`${name}: could not compare ${base.commit}...${pin.commit} in ${pin.repo}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return problems;
 }
 
 /** @type {GetJson} */
@@ -135,14 +159,14 @@ async function run(/** @type {'check' | 'print'} */ mode) {
       console.log(`${name}: ${pin.repo}@${pin.commit} include "${pin.include}": ${files} files, contentHash ${hash}`);
       continue;
     }
-    problems.push(...checkHash(name, pin, hash), ...(await checkHistory(name, pin, githubApi)));
+    problems.push(...checkHash(name, pin, hash), ...(await checkHistory(name, pin, githubApi)), ...(await checkBase(name, pin, githubApi)));
     console.log(`bmad-lock: ${name} ${pin.repo}@${pin.commit}: ${files} files, ${hash}`);
   }
   if (problems.length > 0) {
     console.error(`bmad-lock --check: bmad-lock.json does not hold:\n  ${problems.join('\n  ')}`);
     process.exit(1);
   }
-  if (mode === 'check') console.log('bmad-lock --check: every pin matches its upstream commit');
+  if (mode === 'check') console.log('bmad-lock --check: every pin matches its commit and upstream base');
 }
 
 /** True when this file is the script node was started with (not imported by a test). */

@@ -4,6 +4,7 @@
  * link, a file outside the repo, a file too large or no such entry reads
  * as no checkpoints.
  */
+import { fakeSnapshot, GUARD } from './snapshot-fake.js';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -88,11 +89,11 @@ describe("tickets-v7 find carries the entry's checkpoint flags (story 5.4)", () 
     mkdirSync(epic, { recursive: true });
     writeFileSync(join(epic, 'tickets.toml'), TOML);
     const runner: UvScriptRunner = {
-      run: async (input) => ({ ref: input.args[3], id: input.args[3] === '1.1' ? 1 : 2, epic: 'epic-one', title: 'One', type: 'story', status: 'ready-for-dev', state: 'planned', blocked_reason: '', file: null, plan: null, epic_file: join(epic, 'epic-one.md') }),
+      run: async (input) => ({ ref: input.args.find((arg) => /^1\.[12]$/.test(arg)), id: input.args.find((arg) => /^1\.[12]$/.test(arg)) === '1.1' ? 1 : 2, epic: 'epic-one', title: 'One', type: 'story', status: 'ready-for-dev', state: 'planned', blocked_reason: '', file: null, plan: null, epic_file: join(epic, 'epic-one.md') }),
       close: async () => {},
     };
-    const tickets = createTicketsV7({ runner, script: () => '/verified/tickets.py', workDir: temp() });
-    expect(await tickets.find(repo, '1.1')).toMatchObject({ plan_checkpoint: true, done_checkpoint: false });
-    expect(await tickets.find(repo, '1.2')).toMatchObject({ plan_checkpoint: false, done_checkpoint: true });
+    const tickets = createTicketsV7({ runner, snapshot: fakeSnapshot, script: () => '/verified/tickets.py', workDir: temp() });
+    expect(await tickets.find(repo, '1.1', GUARD)).toMatchObject({ plan_checkpoint: true, done_checkpoint: false });
+    expect(await tickets.find(repo, '1.2', GUARD)).toMatchObject({ plan_checkpoint: false, done_checkpoint: true });
   });
 });

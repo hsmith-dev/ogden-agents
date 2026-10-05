@@ -481,6 +481,20 @@ acp
       await say(client, params.sessionId, `key received …${key.slice(-4)}`);
       return { stopReason: 'end_turn' };
     }
+    if (text === 'markdown') {
+      // A Markdown reply in chunks (backlog story 2): the code fence opens in one chunk and closes in a later one.
+      const chunks = [
+        '## Summary\n\nSome **bold** text, a [docs link](https://example.com/docs) and a [bad link](javascript:alert(1)).\n\n',
+        '- [x] tests\n- [ ] docs\n\n```ts\nconst answer = 42;\n',
+        'console.log("<b>" + answer);\n```\n\n| Name | Count |\n| --- | ---: |\n| apples | 3 |\n\n',
+        '<script>window.hacked = true</script> ![chart](https://example.com/chart.png)\n',
+      ];
+      for (const chunk of chunks) {
+        await say(client, params.sessionId, chunk);
+        await sleep(CHUNK_DELAY_MS);
+      }
+      return { stopReason: 'end_turn' };
+    }
     if (text === 'crash') {
       await say(client, params.sessionId, 'About to ');
       await sleep(CHUNK_DELAY_MS);

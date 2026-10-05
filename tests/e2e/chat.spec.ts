@@ -73,3 +73,57 @@ test('an agent that crashes mid-reply leaves the session in error with a plain m
     await expect(page.locator('[data-testid="resumed-marker"] + [data-testid="message-user"]')).toHaveText('Still there?');
   });
 });
+
+test("an agent's Markdown reply renders formatted while it streams and after a reload; unsafe parts stay text", async ({ page }) => {
+  await withChat(page, async () => {
+    const composer = page.getByRole('textbox', { name: 'Message Claude Code' });
+    await composer.fill('markdown');
+    await composer.press('Enter');
+    const reply = page.getByTestId('message-agent');
+    // Mid-reply, the open fence already shows as code.
+    await expect(reply.locator('pre code')).toHaveText('const answer = 42;');
+    await expect(reply).toHaveAttribute('data-streaming', 'true');
+
+    const check = async () => {
+      await expect(reply.getByRole('heading', { name: 'Summary' })).toBeVisible();
+      await expect(reply.locator('strong')).toHaveText('bold');
+      await expect(reply.getByRole('checkbox')).toHaveCount(2);
+      await expect(reply.locator('pre code')).toHaveText('const answer = 42;\nconsole.log("<b>" + answer);');
+      await expect(reply.getByRole('cell', { name: 'apples' })).toBeVisible();
+      await expect(reply.locator('script, img')).toHaveCount(0);
+      await expect(reply).toContainText('<script>window.hacked = true</script>');
+      const docs = reply.getByRole('link', { name: 'docs link' });
+      await expect(docs).toHaveAttribute('href', 'https://example.com/docs');
+      await expect(docs).toHaveAttribute('target', '_blank');
+      await expect(docs).toHaveAttribute('rel', 'noopener noreferrer');
+      await expect(reply.getByRole('link', { name: 'bad link' })).toHaveCount(0);
+      await expect(reply.getByRole('link', { name: 'Image: chart' })).toHaveAttribute('href', 'https://example.com/chart.png');
+      // The full address shows on keyboard focus.
+      await docs.focus();
+      await page.keyboard.press('Shift+Tab');
+      await page.keyboard.press('Tab');
+      const address = page.locator(`[id="${await docs.getAttribute('aria-describedby')}"]`);
+      await expect(address).toBeVisible();
+      await expect(address).toHaveText('https://example.com/docs');
+      await expect(docs).toHaveAccessibleName('docs link');
+      await expect(docs).toHaveAccessibleDescription('https://example.com/docs');
+    };
+    await expect(reply).toHaveAttribute('data-streaming', 'false');
+    await check();
+    expect(await page.evaluate(() => (window as { hacked?: boolean }).hacked)).toBeUndefined();
+
+    // The code block's Copy is reached by keyboard and copies the code exactly.
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    const copy = reply.getByRole('button', { name: 'Copy ts code' });
+    await copy.focus();
+    await page.keyboard.press('Enter');
+    await expect(copy).toHaveText('Copied');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('const answer = 42;\nconsole.log("<b>" + answer);');
+    // A long line scrolls inside the block, never widening the chat.
+    const pre = reply.locator('pre');
+    await expect(pre).toHaveCSS('overflow-x', 'auto');
+
+    await page.reload();
+    await check();
+  });
+});

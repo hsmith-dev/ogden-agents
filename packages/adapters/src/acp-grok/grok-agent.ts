@@ -82,7 +82,7 @@ export interface GrokAgentOptions {
 const hasKey = (env: Readonly<Record<string, string>>) => (env[GROK_API_KEY_ENV] ?? '') !== '';
 
 export function createGrokAgent(options: GrokAgentOptions): AgentPort {
-  const reasons = acpReasons(GROK_DESCRIPTOR.displayName, { apiKeyOnly: true });
+  const reasons = acpReasons(GROK_DESCRIPTOR.displayName, { apiKeyOnly: true, keyName: 'xAI API access token' });
   const quirks: AcpAgentQuirks = {
     launch({ env }) {
       let server: GrokServerCommand | undefined;

@@ -46,7 +46,7 @@ export const GROK_DESCRIPTOR: Readonly<AgentDescriptor> = Object.freeze<AgentDes
   signInMethods: [
     // The only way in (user decision, 2026-10-05): an xAI API access token the user supplies, through the unadvertised
     // `xai.api_key` method. No account sign-in (`grok.com`, "Sign in with Grok"). Both names are kept out of every other process.
-    { id: GROK_AUTH_METHOD_IDS.apiKey, kind: 'api_key', label: 'Use an xAI API access token', apiKey: { envNames: [GROK_API_KEY_ENV, GROK_CODE_API_KEY_ENV], format: 'Starts with xai-' } },
+    { id: GROK_AUTH_METHOD_IDS.apiKey, kind: 'api_key', label: 'Use an xAI API access token', apiKey: { envNames: [GROK_API_KEY_ENV, GROK_CODE_API_KEY_ENV], format: 'Starts with xai-', label: 'xAI API access token' } },
   ],
   // Grok has no session modes: a mode is given once at chat start (`modeFixedAtStart`). Ask is the default and Skip all is
   // `yoloMode`. Auto (`autoMode`) is not offered: it asks only about calls Grok's classifier will not allow, and fails

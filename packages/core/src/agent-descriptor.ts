@@ -35,6 +35,8 @@ export type AgentInstallSource =
 export interface AgentApiKeyDescriptor {
   envNames: readonly [string, ...string[]];
   format?: string | undefined;
+  /** What the key is called in the UI's words when it is not "API key" (Grok: "xAI API access token"). */
+  label?: string | undefined;
 }
 
 /**

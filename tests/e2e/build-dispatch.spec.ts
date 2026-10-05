@@ -87,6 +87,8 @@ test('a build whose tests fail when re-run ends Failed with the count and cannot
       await expect(page.getByTestId('review-outcome')).toHaveText('Failed', { timeout: 60_000 });
       await expect(page.getByTestId('review-reason')).toContainText('3 tests failed when re-run');
       await expect(page.getByTestId('review-approve')).toHaveCount(0);
+      await expect(page.locator('[data-testid="review-check"][data-check="tests_pass"]')).toHaveAttribute('data-result', 'fail');
+      await expect(page.locator('[data-testid="review-check"][data-check="tests_pass"]')).toContainText('3 tests failed when re-run');
     },
     { files: FILES, extra: { ticketStore: store as never, bmadSource, sandbox: fixedSandbox({ available: true, kind: 'test' }), extraAgentEnv: { FAKE_ACP_BUILD_FAIL_TESTS: '1' } } },
   );
@@ -110,4 +112,33 @@ test('Settings, Builds saves how many builds run at once and the time limit', as
     await expect(page.getByTestId('run-limit-install')).toHaveValue('5');
     await expect(page.getByTestId('run-limit-minutes')).toHaveValue('90');
   });
+});
+
+test('Reject and retry with a note discards the build and builds the ticket again from a new worktree', async ({ page }) => {
+  test.setTimeout(120_000);
+  const store = createPlanFileTicketStore(TICKETS);
+  const bmadSource = (await serverModule()).createMemoryBmadSource({ ready: true });
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const { call, wsId } = await prepare(page, repo);
+      expect((await call('POST', apiPath(API_ROUTES.workspaceBuilds, { wsId }), { ref: '1.1' })).status).toBe(201);
+      await page.goto(`${server.url}/w/${wsId}/review/1.1`);
+      await expect(page.getByTestId('review-outcome')).toHaveText('Ready for review', { timeout: 60_000 });
+      const first = (await (await call('GET', apiPath(API_ROUTES.workspaceRuns, { wsId }))).json()) as { runs: Array<{ id: string }> };
+      await page.getByTestId('review-reject').click();
+      await page.getByTestId('review-note').fill('Use the blue one.');
+      await page.getByTestId('review-reject-confirm').click();
+      await expect.poll(async () => ((await (await call('GET', apiPath(API_ROUTES.workspaceRuns, { wsId }))).json()) as { runs: unknown[] }).runs.length, { timeout: 30_000 }).toBe(2);
+      const runs = (await (await call('GET', apiPath(API_ROUTES.workspaceRuns, { wsId }))).json()) as { runs: Array<{ id: string; outcome: string; decision: string | null }> };
+      expect(runs.runs.find((run) => run.id === first.runs[0]!.id)).toMatchObject({ outcome: 'stopped', decision: 'rejected' });
+      // The new run's first message carries the note, and it ends ready for review again.
+      await expect(page.getByTestId('review-outcome')).toHaveText('Ready for review', { timeout: 60_000 });
+      const newer = runs.runs.find((run) => run.id !== first.runs[0]!.id)!;
+      const session = (await (await call('GET', apiPath(API_ROUTES.workspaceSessions, { wsId }))).json()) as { sessions: Array<{ id: string }> };
+      expect(session.sessions.length).toBe(2);
+      void newer;
+    },
+    { files: FILES, extra: { ticketStore: store as never, bmadSource, sandbox: fixedSandbox({ available: true, kind: 'test' }) } },
+  );
 });

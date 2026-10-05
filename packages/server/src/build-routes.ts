@@ -165,13 +165,28 @@ export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, buil
 
   routes.post('builds', API_ROUTES.workspaceBuildReject, async (c, { workspaceId }) => {
     if (builds === undefined) return notImplemented(c);
-    try {
-      const review = ReviewResponse.parse(await builds.reject(workspaceId, c.req.param('ref') ?? ''));
-      log.info('build rejected', { workspaceId, runId: review.run.id, ref: review.run.ticketRef });
-      return c.json(review);
-    } catch (error) {
-      return refused(c, workspaceId, error);
-    }
+    let response: Response | undefined;
+    // An optional `{ note, retry }` (story 5.9): Reject and retry.
+    const tooLarge = await retryLimit(c, async () => {
+      let body: unknown = {};
+      const text = await c.req.text();
+      if (text.trim() !== '') {
+        try {
+          body = JSON.parse(text);
+        } catch {
+          response = apiError(c, 400, 'invalid_request', 'The request body must be JSON.');
+          return;
+        }
+      }
+      try {
+        const review = ReviewResponse.parse(await builds.reject(workspaceId, c.req.param('ref') ?? '', body));
+        log.info('build rejected', { workspaceId, runId: review.run.id, ref: review.run.ticketRef });
+        response = c.json(review);
+      } catch (error) {
+        response = refused(c, workspaceId, error);
+      }
+    });
+    return response ?? tooLarge ?? apiError(c, 413, 'invalid_request', 'That request is too large.');
   });
 
   // Story 5.6: what a build's sandbox is here, in plain words (probes only; the Build dialog's text).

@@ -106,6 +106,13 @@ test('Build on a ready card builds it unattended, the session streams read-only,
       await page.getByTestId('build-run-review').click();
       await expect(page).toHaveURL(new RegExp(`/w/${wsId}/review/1\\.1$`));
       await expect(page.getByTestId('review-outcome')).toHaveText('Ready for review');
+      // The designed page (story 5.9): the summary, the three checks, the findings, and the diff behind its summary line.
+      await expect(page.getByTestId('review-summary')).toContainText('changed 2 files');
+      await expect(page.getByTestId('review-check')).toHaveCount(3);
+      await expect(page.locator('[data-testid="review-check"][data-result="pass"]')).toHaveCount(3);
+      await expect(page.getByTestId('review-no-findings')).toBeVisible();
+      await expect(page.getByTestId('review-approve')).toBeEnabled();
+      await page.getByText('Show the code changes (2 files)').click();
       await expect(page.getByTestId('review-files')).toContainText('src/built-1.1.txt');
       await expect(page.getByTestId('review-diff')).toContainText('Built 1.1 by the fake agent.');
       const head = fixtureGit(repo, 'rev-parse', 'HEAD').trim();

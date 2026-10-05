@@ -308,6 +308,8 @@ export interface Entities {
    * outcome change if there is one, and the queue's change.
    */
   dispatchRun(id: RunId, dispatch: { worktreePath: string; sandbox: string; branch: string; baseRevision: string; baseBranch: string | null; deadline: string }): Run;
+  /** Sets the commit the run's branch is measured from (story 5.9: after Update and retry rebased it). */
+  setRunBase(id: RunId, baseRevision: string): Run;
   /** Takes a queued run out of the queue without a dispatch (it was stopped, story 5.8) and appends the queue's change. */
   leaveQueue(id: RunId): Run;
 }
@@ -922,6 +924,13 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         refreshQueue(run.workspaceId, before);
         return getRun(id)!;
       });
+    },
+
+    setRunBase(id, baseRevision) {
+      const run = getRun(id);
+      if (run === undefined) throw new NotFoundError('run', id);
+      orm.update(runs).set({ baseRevision, updatedAt: now() }).where(eq(runs.id, id)).run();
+      return getRun(id)!;
     },
 
     leaveQueue(id) {

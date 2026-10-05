@@ -107,6 +107,7 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Epic 5 (5.10 or a later sandbox story): Stop and Quit do not stop a test re-run in progress, and the macOS Seatbelt profile is allow-default with only network and writes denied, so mach lookups and signals stay open. From 5.8 reviews. (log: "The test re-run is not stopped by Stop or Quit")
 - Epic 5 (a later sandbox story): the read fence uses unresolved credential folder paths and a short list, and macOS shares its temp folders between runs. From 5.8 security review. (log: "Read fences of the sandboxed re-run")
 - Epic 5 (5.9): queued runs start again only when another run ends, a limit changes or the server restarts, not when a turned-off piece is turned back on. From 5.8 review. (log: "Queued runs wait after a piece is turned back on")
+- Epic 5 (5.10 or 11.1): Update and retry takes no run-limit slot and arms no deadline, and every review read runs `tickets.py` once. From 5.9 reviews. (log: "Update and retry takes no run limit slot and arms no deadline")
 
 ## Log
 
@@ -768,3 +769,7 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-dispatch-limits-stop-retry-and-quit-in-core-plan.md`
   summary: Queued runs wait after a piece is turned back on
   evidence: 5.8 correctness review: `launchQueued` returns silently while the piece is off and only a run ending, a limit change or a start drains the queue.
+
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-review-approve-and-merge-reject-and-retry-plan.md`
+  summary: Update and retry takes no run limit slot and arms no deadline
+  evidence: 5.9 correctness review: `rebaseLocked` sets the run running without `hasCapacity` or `armDeadline`; `review()` calls `tickets.find` on each read.

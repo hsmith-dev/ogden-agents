@@ -132,13 +132,18 @@ import {
   type WorkspaceId,
   ALL_READY_ASK_MESSAGE,
   RUN_REASON_STOPPED,
+  RejectBuildRequest,
+  REBASE_CONFLICT_MESSAGE,
+  REBASE_REFUSED_MESSAGE,
   type AllReadyBuildsResponse,
   type RunResponse,
+  type DiffStats,
   type RunsResponse,
   type TicketStatus,
 } from '@ogden-agents/shared';
 import type { BmadFeatures } from './bmad-pieces.js';
 import type { BuildSettings } from './build-settings.js';
+import { readPlanFindings } from './build-findings.js';
 import { detectTestCommand, verifyRun } from './build-verify.js';
 import type { BmadScriptTrust } from './bmad-script-trust.js';
 import type { BmadSourceUseCases } from './bmad-source-port.js';
@@ -186,8 +191,13 @@ export interface BuildsUseCases {
   review(workspaceId: WorkspaceId, ref: string): Promise<ReviewResponse>;
   /** Approve (see the header): `request` is `ApproveBuildRequest`, the revision the user reviewed. */
   approve(workspaceId: WorkspaceId, ref: string, request: unknown): Promise<ReviewResponse>;
-  /** Reject (see the header). */
-  reject(workspaceId: WorkspaceId, ref: string): Promise<ReviewResponse>;
+  /**
+   * Reject (see the header). With `retry: true` in `request` (Reject and
+   * retry, story 5.9) the ticket is built again at once, from a new worktree,
+   * with the optional `note` in the agent's first message; the answer is the
+   * review of that new run.
+   */
+  reject(workspaceId: WorkspaceId, ref: string, request?: unknown): Promise<ReviewResponse>;
   /**
    * **Commit plan files** (story 5.5, user decision 2026-10-04): commits the
    * ticket's plan and the `tickets.toml` files above it that have changes,
@@ -266,6 +276,7 @@ export interface BuildsDeps {
     | 'queueRun'
     | 'dispatchRun'
     | 'leaveQueue'
+    | 'setRunBase'
   >;
   events: Pick<EventLog, 'subscribe' | 'lastSeq' | 'append'>;
   /** The install's run limits and a project's build settings (story 5.8), read at each dispatch. */
@@ -585,9 +596,10 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
    * the run is last in its workspace's queue, and nothing is written in the
    * repo or the data folder yet (its worktree comes at dispatch).
    */
-  const enqueue = async (workspaceId: WorkspaceId, ref: string, agent: BuildAgent, plan: StartPlan): Promise<{ run: Run; session: Session }> => {
+  const enqueue = async (workspaceId: WorkspaceId, ref: string, agent: BuildAgent, plan: StartPlan, note?: string): Promise<{ run: Run; session: Session }> => {
     const session = await chat.createChatSession(workspaceId, { kind: 'build', agentId: runner.agent });
     const run = entities.createRun({ sessionId: session.id, ticketRef: ref, sandbox: plan.sandboxKind, agent, queuePosition: 1 });
+    if (note !== undefined) pendingNotes.set(run.id, { note, resume: false });
     return { run, session };
   };
 
@@ -598,7 +610,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
    * checkpoint's pause). Any failure after the worktree exists removes it
    * and ends the run `failed`.
    */
-  const begin = async (workspaceId: WorkspaceId, repoPath: string, ref: string, agent: BuildAgent, plan: StartPlan, queued: Run | undefined): Promise<{ run: Run; session: Session }> => {
+  const begin = async (workspaceId: WorkspaceId, repoPath: string, ref: string, agent: BuildAgent, plan: StartPlan, queued: Run | undefined, note?: string): Promise<{ run: Run; session: Session }> => {
     const { ticket, head, sandboxKind, attended, latest } = plan;
     // Room for the worktree (story 5.5): refused before anything is written when the disk is nearly full.
     const free = (deps.freeBytes ?? freeBytesOf)(dataDir);
@@ -653,7 +665,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         return { run, session };
       }
       armDeadline(run);
-      chat.sendMessage(workspaceId, session.id, runner.invocation(ref), { build: true });
+      chat.sendMessage(workspaceId, session.id, runner.invocation(ref, { note }), { build: true });
       // The ticket's previous run, undecided and not running, is superseded (story 5.5 review): no Retry or Reject reaches it now, so its worktree and branch go.
       if (latest !== undefined && latest.id !== run.id && latest.decision === null && latest.outcome !== 'running') await cleanUp(repoPath, latest);
       return { run, session };
@@ -682,10 +694,10 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
   };
 
   /** One start (see the header): to a slot now, or to the queue. */
-  const startLocked = async (workspaceId: WorkspaceId, repoPath: string, ref: string, agent: BuildAgent, mode: BuildMode): Promise<{ run: Run; session: Session }> => {
+  const startLocked = async (workspaceId: WorkspaceId, repoPath: string, ref: string, agent: BuildAgent, mode: BuildMode, note?: string): Promise<{ run: Run; session: Session }> => {
     const plan = await validateStart(workspaceId, repoPath, ref, agent, mode);
-    if (!hasCapacity(workspaceId)) return enqueue(workspaceId, ref, agent, plan);
-    return begin(workspaceId, repoPath, ref, agent, plan, undefined);
+    if (!hasCapacity(workspaceId)) return enqueue(workspaceId, ref, agent, plan, note);
+    return begin(workspaceId, repoPath, ref, agent, plan, undefined, note);
   };
 
   /**
@@ -987,6 +999,35 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     return resumed;
   };
 
+  /**
+   * Update and retry (story 5.9, AD-17): a run blocked `merge_conflict` is
+   * rebased in its worktree onto the commit the checkout is on now, its base
+   * moves with it, and the end checks run again (the plan is built; the tests
+   * are re-run in its sandbox). A rebase that conflicts again or can't run
+   * changes nothing and says so; no automatic conflict resolution.
+   */
+  const rebaseLocked = async (workspaceId: WorkspaceId, repoPath: string, runId: RunId): Promise<Run> => {
+    await guarded(workspaceId);
+    const run = entities.getRun(runId);
+    if (run === undefined || run.workspaceId !== workspaceId) throw new NotFoundError('run', runId);
+    if (run.outcome !== 'blocked' || run.blockedCode !== 'merge_conflict' || run.decision !== null || entities.latestRunForTicket(workspaceId, run.ticketRef)?.id !== run.id) {
+      throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
+    }
+    await requireGit();
+    await prepareContinue(workspaceId, repoPath, run);
+    const head = await vcs.head(repoPath);
+    if (head === undefined || (run.baseBranch !== null && head.branch !== run.baseBranch)) throw new BuildRefusedError('checkout_dirty', CHECKOUT_MOVED_MESSAGE);
+    const done = await vcs.rebase({ repoPath, worktreePath: run.worktreePath!, branch: run.branch!, onto: head.revision });
+    if (done === 'conflict') throw new BuildRefusedError('merge_conflict', REBASE_CONFLICT_MESSAGE);
+    if (done === 'refused') throw new BuildRefusedError('merge_conflict', REBASE_REFUSED_MESSAGE);
+    entities.setRunBase(run.id, head.revision);
+    bump(run.id);
+    const resumed = entities.setRunOutcome(run.id, 'running', null);
+    // The checks run on their own, so the repo's lock is free for Stop.
+    void track(run.id, () => decideOutcome(entities.getRun(run.id) ?? resumed, 'idle', { passedDone: true }));
+    return resumed;
+  };
+
   /** The plan statuses a blocked plan may be marked with to resume (its `blocked_at`, else ready for dev). */
   const RESUME_STATUSES: ReadonlySet<string> = new Set(['ready-for-dev', 'in-progress', 'in-review']);
 
@@ -1022,7 +1063,6 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       return;
     }
     const pending = pendingNotes.get(queued.id);
-    pendingNotes.delete(queued.id);
     try {
       await serializedByRepo(repoPath, async () => {
         const run = entities.getRun(queued.id);
@@ -1034,13 +1074,16 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         if (run.worktreePath !== null) {
           await prepareContinue(run.workspaceId, repoPath, run);
           dispatchAgain(run.workspaceId, run, { note: pending?.note, resume: pending?.resume ?? true });
+          pendingNotes.delete(queued.id);
           return;
         }
         const agent = run.agent ?? runner.agent;
         const plan = await validateStart(run.workspaceId, repoPath, run.ticketRef, agent, run.sandbox === ATTENDED_SANDBOX ? 'attended' : 'unattended', run.id);
-        await begin(run.workspaceId, repoPath, run.ticketRef, agent, plan, run);
+        await begin(run.workspaceId, repoPath, run.ticketRef, agent, plan, run, pending?.note);
+        pendingNotes.delete(queued.id);
       });
     } catch (error) {
+      pendingNotes.delete(queued.id);
       report(queued.id, 'dispatch', error);
       try {
         const run = entities.getRun(queued.id);
@@ -1111,16 +1154,27 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
   };
 
   /** The workspace's latest run of `ref`, as the review page shows it. */
-  const reviewOf = async (repoPath: string, run: Run): Promise<ReviewResponse> => {
-    // The summary, verification, findings and diff stats are 5.8's and 5.9's (story 5.3 froze them).
-    const base = { run, outcome: run.outcome, reason: run.reason, summary: null, verification: verificationOf(run) ?? null, findings: [], diffStats: null };
+  /** A plain summary of what a run changed and checked (story 5.9). */
+  const summaryOf = (run: Run, stats: DiffStats, verification: VerificationResult | undefined): string => {
+    const changed = `Ticket ${run.ticketRef} changed ${stats.files} ${stats.files === 1 ? 'file' : 'files'}, with ${stats.insertions} ${stats.insertions === 1 ? 'line' : 'lines'} added and ${stats.deletions} removed.`;
+    if (verification === undefined) return changed;
+    const tests = verification.attended ? 'You watched this build, so its tests were not re-run.' : verification.checks[1]?.result === 'pass' ? 'Its tests passed when Ogden Agents ran them again.' : '';
+    return tests === '' ? changed : `${changed} ${tests}`;
+  };
+
+  /** The workspace's latest run of `ref`, as the review page shows it. */
+  const reviewOf = async (repoPath: string, run: Run, plan: string | null = null): Promise<ReviewResponse> => {
+    const verification = verificationOf(run);
+    const findings = readPlanFindings(run.worktreePath, plan, mask);
+    const base = { run, outcome: run.outcome, reason: run.reason, summary: null as string | null, verification: verification ?? null, findings, diffStats: null as DiffStats | null };
     if (run.branch === null || run.baseRevision === null || !isBuildBranch(run.branch)) return { ...base, diff: '', truncated: false, files: [], merged: run.decision === 'approved', headRevision: null };
     const headRevision = (await vcs.branchRevision(repoPath, run.branch)) ?? null;
     // An approved run's branch is deleted with its worktree (story 5.5): it is merged.
     if (headRevision === null) return { ...base, diff: '', truncated: false, files: [], merged: run.decision === 'approved', headRevision };
     const changes = await vcs.diff(repoPath, run.baseRevision, run.branch, { maxBytes: MAX_REVIEW_DIFF_BYTES });
     const merged = changes.files.length > 0 && (await vcs.isMerged(repoPath, run.branch));
-    return { ...base, diff: changes.diff, truncated: changes.truncated, files: changes.files, merged, headRevision };
+    const diffStats = await vcs.diffStats(repoPath, run.baseRevision, run.branch).catch(() => null);
+    return { ...base, summary: diffStats === null ? null : summaryOf(run, diffStats, verification), diffStats, diff: changes.diff, truncated: changes.truncated, files: changes.files, merged, headRevision };
   };
 
   const latestRun = (workspaceId: WorkspaceId, ref: string): Run => {
@@ -1239,8 +1293,13 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     },
 
     async review(workspaceId, ref) {
-      const { repoPath } = await guarded(workspaceId);
-      return reviewOf(repoPath, latestRun(workspaceId, checkedRef(ref)));
+      const { repoPath, guard } = await guarded(workspaceId);
+      const checked = checkedRef(ref);
+      const run = latestRun(workspaceId, checked);
+      // The plan's path (the same in the main checkout and the worktree), for the findings in it.
+      // Not while the agent runs: its plan is being written, and nothing is reviewed yet.
+      const plan = run.worktreePath === null || run.outcome === 'running' ? null : await tickets.find(repoPath, checked, guard).then((ticket) => ticket.plan, () => null);
+      return reviewOf(repoPath, run, plan);
     },
 
     async approve(workspaceId, ref, request) {
@@ -1305,10 +1364,13 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       });
     },
 
-    async reject(workspaceId, ref) {
+    async reject(workspaceId, ref, request) {
       const { repoPath } = await guarded(workspaceId);
       const checked = checkedRef(ref);
-      return serializedByRepo(repoPath, async () => {
+      const parsed = RejectBuildRequest.safeParse(request ?? {});
+      if (!parsed.success) throw new ValidationError('That is not a reject request.', parsed.error.issues.map((each) => ({ path: each.path, message: each.message })));
+      let attended = false;
+      const rejected = await serializedByRepo(repoPath, async () => {
         await guarded(workspaceId);
         const run = latestRun(workspaceId, checked);
         if (run.outcome === 'running') throw new BuildRefusedError('run_active', RUN_ACTIVE_MESSAGE);
@@ -1317,15 +1379,28 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         if (run.branch !== null && isBuildBranch(run.branch) && (await vcs.isMerged(repoPath, run.branch)) && run.outcome === 'verified') {
           throw new BuildRefusedError('checks_failed', ALREADY_MERGED_MESSAGE);
         }
-        // A run already rejected stays as it is: a repeat Reject writes nothing (review, story 5.3).
-        if (run.decision === 'rejected') return reviewOf(repoPath, run);
+        // A run already rejected stays as it is: a repeat Reject writes nothing (review, story 5.3); with retry it builds the ticket again (a start that was refused the first time).
+        if (run.decision === 'rejected') {
+          attended = run.sandbox === ATTENDED_SANDBOX;
+          return { review: await reviewOf(repoPath, run), fresh: parsed.data.retry };
+        }
+        attended = run.sandbox === ATTENDED_SANDBOX;
         await release(run);
         entities.setRunOutcome(run.id, 'stopped', run.reason);
-        const rejected = entities.setRunDecision(run.id, 'rejected');
+        const decided = entities.setRunDecision(run.id, 'rejected');
         // A discard (story 5.5): the worktree and its branch go; a failure is swept at the next start.
-        await cleanUp(repoPath, rejected);
-        return reviewOf(repoPath, rejected);
+        await cleanUp(repoPath, decided);
+        return { review: await reviewOf(repoPath, decided), fresh: true };
       });
+      scheduleDrain();
+      if (!parsed.data.retry || !rejected.fresh) return rejected.review;
+      // Reject and retry (story 5.9): the same ticket, built again from a new worktree, the note in its first message.
+      return inDispatch(() =>
+        serializedByRepo(repoPath, async () => {
+          const started = await startLocked(workspaceId, repoPath, checked, runner.agent, attended ? 'attended' : 'unattended', parsed.data.note);
+          return reviewOf(repoPath, started.run);
+        }),
+      );
     },
 
     async commitPlanFiles(workspaceId, ref) {
@@ -1388,7 +1463,9 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       if (run === undefined || run.workspaceId !== workspaceId) throw new NotFoundError('run', checked);
       // Nothing to retry for a run still going (or queued), ready for review or decided (review: 409 as the route says).
       if (run.outcome === 'running' || run.outcome === 'verified' || run.decision !== null) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
-      // Update and retry (rebase, 5.9) and Apply the saved fix and retry (11.1) are theirs.
+      // Update and retry (story 5.9): rebase the run's branch onto the checked-out branch, then check it again.
+      if (parsed.data.mode === 'rebase') return inDispatch(() => serializedByRepo(repoPath, () => rebaseLocked(workspaceId, repoPath, checked)));
+      // Apply the saved fix and retry (11.1) is theirs.
       if (parsed.data.mode !== 'resume') throw new NotImplementedError(RETRY_NOT_AVAILABLE_MESSAGE);
       // A checkpoint pause resumes (story 5.4).
       if (atCheckpoint(run)) return inDispatch(() => serializedByRepo(repoPath, () => resumeLocked(workspaceId, repoPath, checked, parsed.data.note)));

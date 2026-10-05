@@ -760,7 +760,7 @@ async function runPrompt(params, client, session) {
       return { stopReason: 'end_turn' };
     }
     if (text.startsWith('/bmad-build-auto ticket ')) {
-      const ref = text.slice('/bmad-build-auto ticket '.length).trim();
+      const ref = text.slice('/bmad-build-auto ticket '.length).trim().split(/\s/)[0];
       const cwd = session.opened.cwd ?? process.cwd();
       const ask = async (toolCallId, path) => {
         const toolCall = { toolCallId, title: `Write ${path}`, kind: 'edit', locations: [{ path }], rawInput: { file_path: path } };

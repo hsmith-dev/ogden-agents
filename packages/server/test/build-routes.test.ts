@@ -31,6 +31,7 @@ import {
   BuildResponse,
   FEATURE_OFF_MESSAGE,
   MERGE_CONFLICT_MESSAGE,
+  REBASE_CONFLICT_MESSAGE,
   ReviewResponse,
   RUN_REASON_NO_NETWORK,
   runPhase,
@@ -252,6 +253,13 @@ describe('Unattended builds over REST (story 5.2)', () => {
     expect(server.core.entities.getRun(run.id)).toMatchObject({ outcome: 'blocked', reason: MERGE_CONFLICT_MESSAGE, blockedCode: 'merge_conflict' });
     expect(runPhase(server.core.entities.getRun(run.id)!)).toBe('needs_you');
     expect(store.marks).toEqual([]);
+
+    // Update and retry (story 5.9): the same file changed on both sides, so the rebase conflicts again, is undone, and says so.
+    const updated = await refusalOf(await request(server, tab, 'POST', apiPath(API_ROUTES.runRetry, { wsId, runId: run.id }), { mode: 'rebase' }));
+    expect(updated).toMatchObject({ status: 409, code: 'merge_conflict', message: REBASE_CONFLICT_MESSAGE });
+    expect(server.core.entities.getRun(run.id)).toMatchObject({ outcome: 'blocked', blockedCode: 'merge_conflict', baseRevision: run.baseRevision });
+    expect(fixtureGit(run.worktreePath!, 'status', '--porcelain').trim()).toBe('');
+    expect(fixtureGit(repo.path, 'rev-parse', 'HEAD').trim()).toBe(head);
 
     const rejected = await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildReject, { wsId, ref: '1.1' }));
     expect(rejected.status).toBe(200);

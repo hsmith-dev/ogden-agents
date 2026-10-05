@@ -76,10 +76,18 @@ export async function approveBuild(wsId: string, ref: string, revision: string, 
   return ReviewResponse.parse(json);
 }
 
-/** `POST …/builds/:ref/reject`: removes the run's worktree and stops it. */
-export async function rejectBuild(wsId: string, ref: string, auth: Auth = tabAuth): Promise<ReviewResponse> {
-  const json = await call(auth, apiPath(API_ROUTES.workspaceBuildReject, { wsId, ref }), { method: 'POST' }, REJECT_FAILED);
+/** `POST …/builds/:ref/reject`: removes the run's worktree and stops it; with `retry`, builds the ticket again with the optional `note` (Reject and retry, story 5.9). */
+export async function rejectBuild(wsId: string, ref: string, options: { retry?: boolean; note?: string } = {}, auth: Auth = tabAuth): Promise<ReviewResponse> {
+  const note = options.note?.trim();
+  const body = { ...(options.retry === true ? { retry: true } : {}), ...(note === undefined || note === '' ? {} : { note }) };
+  const json = await call(auth, apiPath(API_ROUTES.workspaceBuildReject, { wsId, ref }), postJson(body), REJECT_FAILED);
   return ReviewResponse.parse(json);
+}
+
+/** `POST …/runs/:runId/retry` with `mode: 'rebase'` (Update and retry, story 5.9): the blocked run's branch is updated and checked again. */
+export async function updateAndRetryRun(wsId: string, runId: string, auth: Auth = tabAuth): Promise<Run> {
+  const json = await call(auth, apiPath(API_ROUTES.runRetry, { wsId, runId }), postJson({ mode: 'rebase' }), RETRY_FAILED);
+  return RunResponse.parse(json).run;
 }
 
 /** A `build` session's run, refetched whenever the session's stream says its run changed. */
@@ -105,17 +113,27 @@ export function useReview(wsId: string, ref: string) {
   return useQuery({ queryKey: ['review', wsId, ref], queryFn: () => fetchReview(wsId, ref), retry: false });
 }
 
-/** Approve or Reject: once settled, the review, the board's tickets and the run refetch. */
-export function useReviewAction(wsId: string, ref: string, action: 'approve' | 'reject') {
+/**
+ * Approve, Reject and retry, or Update and retry: once settled, the review,
+ * the board's tickets and the runs refetch. A Reject and retry answers with
+ * the new run's review, which is the ticket's latest.
+ */
+export function useReviewAction(wsId: string, ref: string, action: 'approve' | 'reject' | 'update') {
   const queryClient = useQueryClient();
   return useMutation({
     // Approve sends the branch revision the page showed (review loop 1): a build that moved since is refused.
-    mutationFn: (revision: string | null) => (action === 'approve' ? approveBuild(wsId, ref, revision ?? '') : rejectBuild(wsId, ref)),
+    mutationFn: (input: { revision?: string | null; note?: string; runId?: string }): Promise<unknown> =>
+      action === 'approve'
+        ? approveBuild(wsId, ref, input.revision ?? '')
+        : action === 'reject'
+          ? rejectBuild(wsId, ref, { retry: true, ...(input.note === undefined ? {} : { note: input.note }) })
+          : updateAndRetryRun(wsId, input.runId ?? ''),
     onSettled: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ['review', wsId, ref] }),
         queryClient.invalidateQueries({ queryKey: ['tickets', wsId] }),
         queryClient.invalidateQueries({ queryKey: ['session-run', wsId] }),
+        queryClient.invalidateQueries({ queryKey: ['runs', wsId] }),
       ]),
   });
 }

@@ -48,6 +48,10 @@ chmod +x start-ogden.sh
 - `OGDEN_AGENTS_DATA_DIR` keeps working (see Run). `OGDEN_AGENTS_PACKAGE` picks another package version, such as `ogden-agents@next`.
 - **From GitHub Releases instead of npm.** `--github` (first option, or `OGDEN_AGENTS_SOURCE=github`) installs and updates from this project's [GitHub Releases](https://github.com/hsmith-dev/ogden-agents/releases): the script runs `ogden-install.mjs`, which must sit in the same folder as the script (the macOS zip already has it; download it from the same release for the others). It downloads `ogden-agents-<version>.tgz`, refuses to install it unless it matches `SHA256SUMS.txt`, installs it under your own user folder (never globally, no administrator rights), keeps the previous version for rollback, and updates on later starts. It works for a public repository; for a private one it needs `gh auth login` or `OGDEN_AGENTS_GITHUB_TOKEN`, and says so when it can't see the release. Details, channels and rollback: [RELEASING.md](RELEASING.md#installing-and-updating-from-github-releases).
 
+## Agents and how they sign in
+
+Each chat uses one coding agent: Claude Code, Google's Antigravity, or OpenAI's Codex. Claude Code and Antigravity can sign in with your own subscription account. Codex uses your own OpenAI API key only. Signing in with a ChatGPT account isn't supported, because OpenAI's terms don't allow other apps to use subscription sign in. A key is kept in your computer's keychain and goes only to its own agent's process. Settings > Agents installs an agent into Ogden Agents' data folder and takes its key.
+
 ## Requirements
 
 - Node.js 24 or later

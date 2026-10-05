@@ -101,6 +101,8 @@ export async function startServer(
     antigravity: false,
     // Codex likewise (epic 12): only where a test wires it.
     codex: false,
+    // Grok likewise (epic 12): only where a test wires it.
+    grok: false,
     // The "newer version" check (story 13.7) never reaches npm from a test: a test that wants it passes a fake registry.
     updates: false,
     extraAgentEnv: { FAKE_LOGIN_STATE: loginState, ...extraAgentEnv },
@@ -247,6 +249,8 @@ export async function fakeFixedModeAgent(options: { agentId?: string; displayNam
 
 /** The fake ACP agent as Codex's `codex-acp` adapter (`fake-codex.mjs`, epic 12 entry 4). */
 export const FAKE_CODEX = join(ROOT, 'tests', 'fixtures', 'fake-codex.mjs');
+/** The fake ACP agent as Grok's `grok agent stdio` (`fake-grok.mjs`, epic 12 entry 4). */
+export const FAKE_GROK = join(ROOT, 'tests', 'fixtures', 'fake-grok.mjs');
 
 /** The fake ACP agent as Antigravity's server (`fake-antigravity.mjs`, epic 6 entry 5). */
 export const FAKE_ANTIGRAVITY = join(ROOT, 'tests', 'fixtures', 'fake-antigravity.mjs');

@@ -227,7 +227,7 @@ export function SignInAgainView({ agentId, agentName, agent, signedIn, signIn, r
     kind === 'signed_in'
       ? SIGNED_IN_TRY_AGAIN
       : kind === 'api_key_only'
-        ? (reason ?? `${agentName} needs a valid API key.`)
+        ? (reason ?? `${agentName} needs a valid ${agent?.apiKeyName ?? 'API key'}.`)
         : kind === 'api_key'
           ? apiKeyRefused(agentName)
         : kind === 'failed'

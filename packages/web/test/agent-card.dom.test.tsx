@@ -122,3 +122,27 @@ describe('an API key only agent (Codex; user decision, 2026-10-05)', () => {
     expect(screen.getByTestId('agent-notice').textContent).toBe(NOTICE);
   });
 });
+
+describe('Grok, an xAI API access token only agent (user decision, 2026-10-05)', () => {
+  const NOTICE = "Grok works with your own xAI API access token only. Signing in with an account isn't supported here.";
+  const grok: Partial<AgentSetupStatus> = { agentId: 'grok', displayName: 'Grok', provider: 'xAI', version: '1.0.49', apiKeyOnly: true, apiKeyName: 'xAI API access token', notices: [NOTICE], apiKey: { saved: false } };
+
+  it('says why there is no sign in in every state, offers no Sign in, and asks for the token', () => {
+    card({ ...grok, install: 'not_installed', version: null, apiKey: undefined });
+    expect(screen.getByTestId('agent-notice').textContent).toBe(NOTICE);
+    cleanup();
+    card(grok);
+    expect(screen.getByTestId('agent-notice').textContent).toBe(NOTICE);
+    expect(screen.getByTestId('agent-state').textContent).toContain('needs an xAI API access token');
+    expect(screen.queryByRole('button', { name: /Sign in/ })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Add an xAI API access token' })).toBeTruthy();
+  });
+
+  it('says the token is in use once saved, with Remove token, and still the reason', () => {
+    card({ ...grok, auth: 'signed_in', method: 'api_key', apiKey: { saved: true, lastFour: '2468' } });
+    expect(screen.getByTestId('agent-state').textContent).toContain('using your xAI API access token');
+    expect(screen.getByTestId('agent-api-key-saved').textContent).toBe('xAI API access token saved …2468');
+    expect(screen.getByRole('button', { name: 'Remove token' })).toBeTruthy();
+    expect(screen.getByTestId('agent-notice').textContent).toBe(NOTICE);
+  });
+});

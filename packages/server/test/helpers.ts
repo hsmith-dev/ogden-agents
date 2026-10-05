@@ -144,6 +144,8 @@ export async function startTestServer(options: StartOptions & { lines?: string[]
     antigravity: false,
     // Codex likewise (epic 12): only where a test wires it.
     codex: false,
+    // Grok likewise (epic 12): only where a test wires it.
+    grok: false,
     extraAgentEnv: { FAKE_LOGIN_STATE: signedInLoginState(), ...extraAgentEnv },
     ...rest,
     launch: true,

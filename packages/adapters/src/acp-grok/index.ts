@@ -22,7 +22,7 @@ export { createGrokAgent, GROK_ARGS, type GrokAgentOptions, type GrokServerComma
 /**
  * Whether a shipped install registers Grok. The slot's on switch lives here,
  * in Grok's own folder, so the shared wiring list never changes (entry 4).
- * Off until entry 8 puts Install and the token in the UI; a test registers
- * Grok through `StartOptions.grok`.
+ * On since entry 8 put Install and the token in the UI; tests leave Grok out
+ * (`grok: false`, the helper's default) or register it through their own options and hooks.
  */
-export const GROK_SHIPPED = false;
+export const GROK_SHIPPED = true;

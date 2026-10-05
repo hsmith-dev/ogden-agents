@@ -311,7 +311,10 @@ describe('Unattended builds over REST (story 5.2)', () => {
     const wsId = WorkspaceResponse.parse(await (await request(server, tab, 'POST', API_ROUTES.workspaces, { path: repo.path })).json()).workspace.id;
     await request(server, tab, 'PATCH', apiPath(API_ROUTES.workspaceSettings, { wsId }), { bmadPieces: ['board', 'builds'] });
     await request(server, tab, 'PUT', apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId }));
-    const { run } = BuildResponse.parse(await (await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId }), { ref: '1.1' })).json());
+    const started = await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId }), { ref: '1.1' });
+    const startedBody: unknown = await started.json();
+    if (started.status !== 201) throw new Error(`build start answered ${started.status}: ${JSON.stringify(startedBody)}`);
+    const { run } = BuildResponse.parse(startedBody);
     let review: ReviewResponse | undefined;
     await waitFor(async () => (review = ReviewResponse.parse(await (await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceBuild, { wsId, ref: '1.1' }))).json())).outcome !== 'running', 'the run to end', 15_000);
     expect(review!.run).toMatchObject({ outcome: 'blocked', blockedCode: 'intent_gap' });

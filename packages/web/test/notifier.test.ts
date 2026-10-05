@@ -56,6 +56,8 @@ describe('notificationText (privacy)', () => {
     expect(notificationText(need('x', 'waiting')).title).toBe('Waiting for your answer');
     expect(notificationText(need('x', 'check_in')).title).toBe('Agent is quiet');
     expect(notificationText(need('x', 'sign_in')).title).toBe('Sign in needed');
+    // An agent with only an API key has no sign in: its key was rejected.
+    expect(notificationText(need('x', 'sign_in', { keyRejected: true })).title).toBe('API key rejected');
   });
 });
 

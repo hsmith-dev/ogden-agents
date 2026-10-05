@@ -205,15 +205,6 @@ async function labelledOf(repoReal: string, options: LabelOptions) {
   return labelledSkills(repoReal, recordFolders, options);
 }
 
-/** Whether an installed verified skill (not a module record) has a label: the `plain_labels` capability. */
-async function hasPlainLabels(repoReal: string, options: LabelOptions): Promise<boolean> {
-  return (await labelledOf(repoReal, options)).labelled;
-}
-
-/** Whether an installed verified skill has an epic scope in the mapping: the `look_back` capability (epic 7). */
-async function hasLookBack(repoReal: string, options: LabelOptions): Promise<boolean> {
-  return (await labelledOf(repoReal, options)).skills.some((skill) => skill.scope === 'epic');
-}
 
 /**
  * Which of `wanted` the repo at `repoPath` lacks (entry 4.11, AD-14; see the
@@ -226,6 +217,10 @@ export async function missingCapabilities(repoPath: string, wanted: readonly Bma
   if (asked.length === 0) return [];
   const repoReal = await realRepoRoot(repoPath);
   if (repoReal === undefined) return asked;
-  const has = await Promise.all(asked.map((capability) => (capability === 'ticket_tree' ? hasTicketTree(repoReal) : capability === 'look_back' ? hasLookBack(repoReal, options) : hasPlainLabels(repoReal, options))));
+  // The skills are read once for the capabilities that need them, so both answers come from the same read.
+  const labelled = asked.some((capability) => capability !== 'ticket_tree') ? await labelledOf(repoReal, options) : undefined;
+  const has = await Promise.all(
+    asked.map(async (capability) => (capability === 'ticket_tree' ? hasTicketTree(repoReal) : capability === 'look_back' ? labelled!.skills.some((skill) => skill.scope === 'epic') : labelled!.labelled)),
+  );
   return asked.filter((_capability, index) => !has[index]);
 }

@@ -3,13 +3,13 @@ title: "Look-back and lessons actions in Ogden's label mapping"
 type: 'feature'
 ticket: '3'
 created: '2026-10-05'
-status: 'in-review'
+status: 'built'
 baseline_revision: '1aff8fc0f439e0236dd9a96e6c24dac01f4cad4e'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-retrospectives/epic-retrospectives.md'
@@ -69,6 +69,18 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+- 2026-10-05, pass 1 (security and correctness lenses): high 0, medium 4, low 5. Routed: patch 8, reject 3. No intent_gap or bad_plan.
+  - A Retrospectives-only catalog still returned modules and stamped the module baseline while Planning was off -- medium, patch: narrowed before anything else, no modules, no stamp; test.
+  - Starting the look-back from Plan with Planning on gave a session with no epic folder -- medium, patch: an epic-scoped skill is not found by \`start\`; test.
+  - Plan home showed no empty state when only the look-back is installed -- medium, patch: the empty check ignores epic-scoped skills.
+  - \`nexts\` kept duplicates and the skill itself, against "each once" -- medium, patch; test.
+  - \`missingCapabilities\` scanned twice for two capabilities -- low, patch: one read.
+  - The next-steps test compared the code with itself -- low, patch: the explicit steps.
+  - A split JSDoc paragraph -- low, patch.
+  - The memory catalog does not derive \`look_back\` from an epic-scoped skill -- low, reject: a test double that defaults to present, as for the other capabilities.
+  - No web test with \`look_back: false\` -- low, reject: Plan home never reads it, and the notice text is covered by the shared test; entry 4 adds the board's.
+  - Duplicate-free labels are uncapped in length -- low, reject: the mapping is shipped, not repo input.
 
 ## Verification
 

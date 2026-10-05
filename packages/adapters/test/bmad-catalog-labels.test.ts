@@ -93,6 +93,7 @@ describe('epic scope and further next steps (story 7.3)', () => {
     const { labels, problems } = readModuleLabels({
       skills: {
         one: { label: 'One', scope: 'initiative' },
+        dup: { label: 'Dup', nexts: [{ skill: 'a', label: 'A' }, { skill: 'a', label: 'Again' }, { skill: 'dup', label: 'Itself' }] },
         two: { label: 'Two', nexts: 'x' },
         three: { label: 'Three', nexts: [{ skill: '../x', label: 'Go' }, { skill: 'ok', label: 'Fine', lable: 'x' }, 5] },
         four: { label: 'Four', nexts: many },
@@ -100,6 +101,7 @@ describe('epic scope and further next steps (story 7.3)', () => {
     });
     expect(labels.skills.get('one')?.scope).toBeNull();
     expect(labels.skills.get('two')?.nexts).toEqual([]);
+    expect(labels.skills.get('dup')?.nexts).toEqual([{ skill: 'a', label: 'A' }]);
     expect(labels.skills.get('three')?.nexts).toEqual([{ skill: 'ok', label: 'Fine' }]);
     expect(labels.skills.get('four')?.nexts).toHaveLength(8);
     expect(problems).toEqual([

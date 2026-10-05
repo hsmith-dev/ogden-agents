@@ -66,7 +66,6 @@ export interface CatalogSkillGroup {
  * The catalog's skills in the Plan page's groups (story 4.6): in
  * {@link catalogGroupRank} order, each group once, a group with no skill
  * left out, and an unknown or missing group together last as
-
  * {@link CATALOG_OTHER_GROUP_LABEL}. Stable: skills keep their order within a group.
  * An epic-scoped skill (epic 7's look-back) is left out: it shows on the
  * board's epic header, never in Plan home.

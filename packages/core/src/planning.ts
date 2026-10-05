@@ -36,9 +36,9 @@ import { DOCUMENT_PIECES, documentPath, insideOutputFolder } from './planning-do
 /** The pieces that read the catalog: Planning, and Retrospectives for the look-back's epic-scoped action (epic 7). */
 const CATALOG_PIECES: readonly BmadPiece[] = ['planning', 'retrospectives'];
 
-/** The catalog a Retrospectives-only project gets: its epic-scoped actions, no entry action, agents or other skills. */
+/** The catalog a Retrospectives-only project gets: its epic-scoped actions alone, no modules, entry action, agents or other skills. */
 function epicActionsOnly(catalog: Catalog): Catalog {
-  return { ...catalog, skills: catalog.skills.filter((skill) => skill.scope === 'epic'), agents: [], entryAction: null };
+  return { ...catalog, modules: [], skills: catalog.skills.filter((skill) => skill.scope === 'epic').map((skill) => ({ ...skill, module: null, installedAt: null })), agents: [], entryAction: null };
 }
 
 export interface PlanningUseCases {
@@ -107,16 +107,19 @@ export function createPlanning({ bmad, entities, catalog, chat, agent, agentOf, 
   const catalogOf = async (workspaceId: WorkspaceId): Promise<Catalog> => {
     const read = await catalog.catalog(workspaceRepoPath(entities, workspaceId));
     if (modulesSeen === undefined) return read;
-    // Checked again after the (async) scan: a piece turned off meanwhile records nothing.
-    bmad.requireAnyBmadFeature(workspaceId, CATALOG_PIECES);
+    // Checked again after the (async) scan: a Planning turned off meanwhile records nothing.
+    bmad.requireBmadFeature(workspaceId, 'planning');
     return modulesSeen.stamp(workspaceId, read);
   };
   return {
     async catalog(workspaceId) {
       // Planning, or Retrospectives (epic 7): with only Retrospectives on, only the epic-scoped actions are given.
       bmad.requireAnyBmadFeature(workspaceId, CATALOG_PIECES);
-      const read = await catalogOf(workspaceId);
-      return planningOn(workspaceId) ? read : epicActionsOnly(read);
+      if (planningOn(workspaceId)) return catalogOf(workspaceId);
+      // Retrospectives alone: narrowed before anything else, and no module baseline is recorded for a Planning that is off.
+      const read = epicActionsOnly(await catalog.catalog(workspaceRepoPath(entities, workspaceId)));
+      bmad.requireAnyBmadFeature(workspaceId, CATALOG_PIECES);
+      return read;
     },
 
     async start(workspaceId, skill, idea) {
@@ -135,7 +138,8 @@ export function createPlanning({ bmad, entities, catalog, chat, agent, agentOf, 
       }
       const { skills } = await catalogOf(workspaceId);
       const entry = skills.find((candidate) => candidate.name === skill);
-      if (entry === undefined) throw new NotFoundError('skill', skill);
+      // An epic-scoped action needs an epic's folder: it starts from the board, never from here (epic 7).
+      if (entry === undefined || entry.scope === 'epic') throw new NotFoundError('skill', skill);
       // Checked again after the (async) scan: a piece turned off meanwhile starts nothing.
       bmad.requireBmadFeature(workspaceId, 'planning');
       // The chat is named after the action as the Plan page shows it (backlog story 12: its label, else its description), not its skill invocation.

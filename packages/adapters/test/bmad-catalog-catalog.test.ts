@@ -123,7 +123,12 @@ describe('bmad-catalog catalog (story 4.4)', () => {
     const look = catalog.skills.find((entry) => entry.name === 'bmad-retrospective')!;
     const installedNames = catalog.skills.map((entry) => entry.name);
     expect(look.scope).toBe('epic');
-    expect(look.nexts.map((step) => step.skill)).toEqual(LABELS.skills.get('bmad-retrospective')!.nexts.map((step) => step.skill).filter((name) => installedNames.includes(name)));
+    // The steps are the mapping's, each only where its skill is installed.
+    const wanted = LABELS.skills.get('bmad-retrospective')!.nexts.map((step) => step.skill);
+    expect(wanted).toEqual(['bmad-project-context', 'bmad-ticket']);
+    expect(look.nexts.map((step) => step.skill)).toEqual(wanted.filter((name) => installedNames.includes(name)));
+    expect(installedNames).toContain('bmad-ticket');
+    expect(look.nexts.length).toBeGreaterThan(0);
     expect(catalog.skills.filter((entry) => entry.scope === 'epic').map((entry) => entry.name)).toEqual(['bmad-retrospective']);
     expect(await createBmadCatalog({ source: pinnedCopyOf(upstreamFiles()) }).missingCapabilities(r.path, ['look_back'])).toEqual([]);
     // An unlabelled skill keeps its SKILL.md description, with null metadata.

@@ -130,7 +130,10 @@ export function readModuleLabels(raw: unknown): { labels: LabelMap; problems: st
         for (const [index, each] of value.nexts.slice(0, MAX_NEXTS).entries()) {
           if (isTable(each)) unknownKeys(each, NEXT_KEYS, `skills.${name}.nexts[${index}]`);
           const nextLabel = isTable(each) ? text(each.label) : undefined;
-          if (isTable(each) && isSkillName(each.skill) && nextLabel !== undefined) nexts.push({ skill: each.skill, label: nextLabel });
+          if (isTable(each) && isSkillName(each.skill) && nextLabel !== undefined) {
+            // Each step once, and never the skill itself.
+            if (each.skill !== name && !nexts.some((have) => have.skill === each.skill)) nexts.push({ skill: each.skill, label: nextLabel });
+          }
           else problems.push(`skills.${name}.nexts[${index}] needs a skill name and a label`);
         }
         if (value.nexts.length > MAX_NEXTS) problems.push(`skills.${name}.nexts has more than ${MAX_NEXTS} steps`);

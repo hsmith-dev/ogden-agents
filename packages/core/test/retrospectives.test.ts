@@ -205,7 +205,9 @@ describe('the catalog for Retrospectives alone (story 7.3)', () => {
   function planningFor(pieces: BmadPiece[]) {
     const { core, workspace, chat, agent } = setup(pieces);
     const catalog = { catalog: async () => FULL, setupStatus: async () => SET_UP, readDocument: async () => null };
-    return { workspace, planning: createPlanning({ bmad: core.bmad, entities: core.entities, catalog, chat, agent }) };
+    const stamped: WorkspaceId[] = [];
+    const modulesSeen = { stamp: async (workspaceId: WorkspaceId, read: Catalog) => (stamped.push(workspaceId), read) };
+    return { workspace, stamped, planning: createPlanning({ bmad: core.bmad, entities: core.entities, catalog, chat, agent, modulesSeen: modulesSeen as never }) };
   }
 
   it('with Planning on gives the whole catalog, with only Retrospectives on its epic-scoped actions alone', async () => {
@@ -218,6 +220,15 @@ describe('the catalog for Retrospectives alone (story 7.3)', () => {
     expect(read.skills.map((skill) => [skill.name, skill.scope, skill.nexts.length])).toEqual([[SKILL, 'epic', 1]]);
     expect(read.agents).toEqual([]);
     expect(read.entryAction).toBeNull();
+    expect(read.modules).toEqual([]);
+    // No module baseline is recorded for a Planning that is off.
+    expect(retro.stamped).toEqual([]);
+    expect(both.stamped).toHaveLength(1);
+  });
+
+  it('an epic-scoped action cannot be started from Plan, even with Planning on', async () => {
+    const both = planningFor(['planning', 'board', 'builds', 'retrospectives']);
+    await expect(both.planning.start(both.workspace.id, SKILL)).rejects.toThrow(NotFoundError);
   });
 
   it('with neither piece on, refuses with feature_off and starting a session still needs Planning', async () => {

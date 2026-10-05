@@ -3,7 +3,7 @@ title: 'Choose whether new messages wait or go right away'
 type: 'feature'
 ticket: '2'
 created: '2026-10-04'
-status: 'in-review'
+status: 'built'
 baseline_revision: '2e4d68f8befaae014c336abffc3e7f5b1fc7d984'
 route: 'full'
 route_source: 'auto'
@@ -98,6 +98,29 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (lenses quick, races-ux): high 3, medium 9, low 6, false 0. All patch unless noted.
+| Finding | Verdict | Route | Evidence / action |
+|---|---|---|---|
+| Stop during an interrupt ignored, queue still sent (both lenses) | high | patch | `stop` returned on `stopping`; now a Stop always clears queue and reasons and declines a card. Test added. |
+| Steer timeout then interrupt can deliver twice (both) | high | patch | steering request can't be withdrawn; an unanswered steer now leaves the message first in line, no stop. Test changed. |
+| Stop during an in-flight steer that was injected: shown Not sent though delivered | high | patch | `injected` is now always recorded; the transcript turns that Not sent into sent. Tests added. |
+| No re-check after awaiting the agent before steering | medium | patch | guard on stopping, failed, still queued. |
+| Send now while the agent starts waits the whole turn (both) | medium | patch | `turn.whenPrompting` retries once the prompt is out. Test added. |
+| Reply closed before steer splits a reply on fallback / misorders on inject (both) | medium | patch | reply now closed only once injected. |
+| `queued()` refused edits during an interrupt with a false message (both) | medium | patch | no longer refuses on `stopping`. |
+| UI froze every `now` message | medium | patch | only Send now is disabled for them; the server refuses one being sent. |
+| Queue buttons share bare names | medium | patch | names carry the position ("Edit message 2"). |
+| Focus lost after queue actions; no Escape | medium | patch | focus returns to the composer; Escape cancels the edit. |
+| No announcements for queue changes or the interrupt | medium | patch | polite region in the list; the page announces the stop note. |
+| Menu opened empty; focus not back to the field | low | patch | controlled open; focus back to the field. |
+| Hint "send now" wording clash; no touch path | low | patch | reworded, names the menu. |
+| Project option "Now:" | low | patch | "The app setting is …". |
+| Test never proves no session/cancel | low | patch | fake counts cancels; route test asserts `cancels=0`. |
+| Orphaned Turn doc comment | low | patch | moved back. |
+| Menu name "Choose when it goes" vague | low | reject | a name without "send" keeps Send the only control named Send for assistive tech and tests. |
+| Default `wait` before settings load | low | reject | only the first instant after opening; same result as today's behaviour. |
+| Two send now with mixed outcomes; edit racing the drive loop; requests during an interrupt cancelled | medium | defer | deferred-work.md entries; the last recorded as a decision (it is Stop's cancel). |
 
 ## Design Notes
 

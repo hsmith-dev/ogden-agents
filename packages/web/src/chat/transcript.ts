@@ -257,6 +257,14 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
       case 'session.message_completed': {
         // A queued message is sent now: it takes its place here.
         queued.delete(event.payload.messageId);
+        // One shown "Not sent" that the agent had taken after all (a Stop during a send now): sent, where it is.
+        const unsent = view.notSent.findIndex((m) => m.messageId === event.payload.messageId);
+        if (unsent !== -1) {
+          const [taken] = view.notSent.splice(unsent, 1);
+          delete taken!.status;
+          byId.set(taken!.messageId, taken!);
+          view.messages.push(taken!);
+        }
         const done = message(event.payload.messageId, event.payload.role);
         done.text = event.payload.content;
         done.streaming = false;

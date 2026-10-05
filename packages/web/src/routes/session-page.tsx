@@ -56,8 +56,8 @@ const TERMINAL_DRIVING_REASON = 'The terminal is driving this session';
 /** What the composer says while the agent works (send now or wait): what `Enter` does, and the other way. */
 const workingHint = (agentName: string, whileWorking: 'wait' | 'now') =>
   whileWorking === 'now'
-    ? `${agentName} is working. A message you send now goes right away. Press ${otherWayShortcutLabel()} to send it after it finishes.`
-    : `${agentName} is working. A message you send now waits its turn. Press ${otherWayShortcutLabel()} to send it right away.`;
+    ? `${agentName} is working. While it works, your message goes right away. To send it after it finishes, press ${otherWayShortcutLabel()} or use the menu beside Send.`
+    : `${agentName} is working. While it works, your message waits its turn. To send it right away, press ${otherWayShortcutLabel()} or use the menu beside Send.`;
 
 /** What the quiet-agent status line says (user decision, story 2.10). */
 const checkInWords = (checkIn: TranscriptCheckIn, agentName: string) =>
@@ -208,6 +208,20 @@ export function SessionPage() {
     announced.current.add(waitingFor.requestId);
     setAnnouncement(`${agentName} is waiting for you: ${permissionAnnouncement(waitingFor)}`);
   }, [waitingFor]);
+
+  // A step stopped so a message sent right away goes (send now or wait): said once, as it happens.
+  const lastInterrupted = view.items.findLast((item) => item.type === 'interrupted');
+  const interruptedKey = lastInterrupted?.type === 'interrupted' ? lastInterrupted.messageId : undefined;
+  const seenInterrupted = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!caughtUp) {
+      seenInterrupted.current = interruptedKey;
+      return;
+    }
+    if (interruptedKey === undefined || seenInterrupted.current === interruptedKey) return;
+    seenInterrupted.current = interruptedKey;
+    setAnnouncement('Stopped the current step to send your message.');
+  }, [interruptedKey, caughtUp]);
 
   const state = view.state ?? session.data?.session.state;
   // Who drives, and switching (stories 3.1, 3.6; the wiring is the hook's, story 3.9).

@@ -222,30 +222,84 @@ describe('send now or wait', () => {
     await chat.close();
   });
 
-  it('falls back to stopping the step when the agent refuses the message, and when it never answers', async () => {
-    for (const steer of ['fail', 'hang'] as const) {
-      if (steer === 'hang') vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-      const core = openTestCore();
-      const agent = handAgent({ steer });
-      const { chat, workspace, session } = setUp(core, agent);
-      chat.sendMessage(workspace.id, session.id, 'first');
-      await settle();
-      chat.sendMessage(workspace.id, session.id, 'urgent', { delivery: 'now' });
-      await settle();
-      if (steer === 'hang') {
-        expect(agent.cancels()).toBe(0);
-        await vi.advanceTimersByTimeAsync(STEER_TIMEOUT_MS);
-        await settle();
-      }
-      expect(agent.cancels()).toBe(1);
-      expect(typesOf(core, session.id)).toContain('session.turn_interrupted');
-      await settle();
-      expect(agent.prompts).toEqual(['first', 'urgent']);
-      agent.end();
-      await chat.settled();
-      await chat.close();
-      vi.useRealTimers();
-    }
+  it('falls back to stopping the step when the agent refuses the message', async () => {
+    const core = openTestCore();
+    const agent = handAgent({ steer: 'fail' });
+    const { chat, workspace, session } = setUp(core, agent);
+    chat.sendMessage(workspace.id, session.id, 'first');
+    await settle();
+    chat.sendMessage(workspace.id, session.id, 'urgent', { delivery: 'now' });
+    await settle();
+    expect(agent.cancels()).toBe(1);
+    expect(typesOf(core, session.id)).toContain('session.turn_interrupted');
+    await settle();
+    expect(agent.prompts).toEqual(['first', 'urgent']);
+    agent.end();
+    await chat.settled();
+    await chat.close();
+  });
+
+  it('never stops the step for a message the agent did not answer in time (it could arrive twice): it goes first after the turn', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const core = openTestCore();
+    const agent = handAgent({ steer: 'hang' });
+    const { chat, workspace, session } = setUp(core, agent);
+    chat.sendMessage(workspace.id, session.id, 'first');
+    await settle();
+    chat.sendMessage(workspace.id, session.id, 'waiting');
+    chat.sendMessage(workspace.id, session.id, 'urgent', { delivery: 'now' });
+    await settle();
+    await vi.advanceTimersByTimeAsync(STEER_TIMEOUT_MS);
+    await settle();
+    expect(agent.cancels()).toBe(0);
+    expect(typesOf(core, session.id)).not.toContain('session.turn_interrupted');
+    agent.end();
+    await settle();
+    expect(agent.prompts).toEqual(['first', 'urgent']);
+    agent.end();
+    await settle();
+    agent.end();
+    await chat.settled();
+    await chat.close();
+  });
+
+  it('a Stop during a stop for a message sent right away still drops everything that waits', async () => {
+    const core = openTestCore();
+    const agent = handAgent({ steer: 'none', ignoreCancel: true });
+    const { chat, workspace, session } = setUp(core, agent);
+    chat.sendMessage(workspace.id, session.id, 'first');
+    await settle();
+    chat.sendMessage(workspace.id, session.id, 'waiting');
+    chat.sendMessage(workspace.id, session.id, 'urgent', { delivery: 'now' });
+    await settle();
+    expect(typesOf(core, session.id)).toContain('session.turn_interrupted');
+    chat.cancel(workspace.id, session.id);
+    agent.end('cancelled');
+    await chat.settled();
+    expect(agent.prompts).toEqual(['first']);
+    expect(stateOf(core, session.id)).toBe('idle');
+    await chat.close();
+  });
+
+  it('sends a message sent right away while the agent is starting as soon as its prompt is out', async () => {
+    const core = openTestCore();
+    const agent = handAgent({ steer: 'inject' });
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => (release = resolve));
+    const slow: AgentPort = { ...agent.port, startSession: async (input) => (await started, agent.port.startSession(input)) };
+    const { chat, workspace, session } = setUp(core, { ...agent, port: slow });
+    chat.sendMessage(workspace.id, session.id, 'first');
+    await settle();
+    chat.sendMessage(workspace.id, session.id, 'urgent', { delivery: 'now' });
+    await settle();
+    expect(agent.steered).toEqual([]);
+    release();
+    await settle();
+    expect(agent.steered).toEqual(['urgent']);
+    agent.end();
+    await chat.settled();
+    expect(agent.prompts).toEqual(['first']);
+    await chat.close();
   });
 
   it('sends it next with no stop when the turn had just ended', async () => {
@@ -374,7 +428,7 @@ describe('send now or wait', () => {
     await chat.close();
   });
 
-  it('a Stop while a message is on its way into the turn leaves it unsent, as every queued message', async () => {
+  it('a Stop while a message is on its way into the turn: one the agent took is still shown sent, never lost', async () => {
     const core = openTestCore();
     const agent = handAgent({ steer: 'manual' });
     const { chat, workspace, session } = setUp(core, agent);
@@ -385,7 +439,7 @@ describe('send now or wait', () => {
     chat.cancel(workspace.id, session.id);
     agent.answerSteer('injected');
     await chat.settled();
-    expect(completedUser(core, session.id).map((m) => m.messageId)).not.toContain(urgent.messageId);
+    expect(completedUser(core, session.id).find((m) => m.messageId === urgent.messageId)).toMatchObject({ delivery: 'injected' });
     expect(stateOf(core, session.id)).toBe('idle');
     await chat.close();
   });

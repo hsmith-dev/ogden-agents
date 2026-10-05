@@ -104,7 +104,7 @@ export function ProjectWhileWorkingSection({ wsId }: { wsId: string }) {
   const [status, setStatus] = useState<WhileWorkingViewProps['status']>(undefined);
   const appWords = app.data === undefined ? 'the app setting' : WHILE_WORKING_OPTIONS[app.data].label;
   const options = [
-    { value: 'app', label: 'Use the app setting', description: `Now: ${appWords}. Change it in Settings, Agents.` },
+    { value: 'app', label: 'Use the app setting', description: `The app setting is ${appWords}. Change it in Settings, Agents.` },
     ...APP_OPTIONS,
   ];
   const value: ProjectChoice | undefined = settings.data === undefined ? undefined : (settings.data.whileWorking ?? 'app');

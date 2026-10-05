@@ -424,4 +424,11 @@ describe('sessionView: send now or wait', () => {
     expect(view.messages.find((message) => message.messageId === 'n1')?.status).toBeUndefined();
     expect(view.queued.map((message) => message.messageId)).toEqual(['n2']);
   });
+
+  it('shows a message first marked "Not sent" as sent when the agent had taken it (a Stop during a send now)', () => {
+    const view = sessionView([...begun(), queuedNow('n1', 'urgent'), stateChanged('idle', 'working'), event('session.message_completed', { messageId: 'n1', role: 'user', content: 'urgent', delivery: 'injected' })], 'ses_1');
+    expect(view.notSent).toEqual([]);
+    expect(view.messages.filter((message) => message.messageId === 'n1')).toHaveLength(1);
+    expect(view.messages.find((message) => message.messageId === 'n1')).toMatchObject({ delivery: 'injected' });
+  });
 });

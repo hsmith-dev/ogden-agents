@@ -48,11 +48,11 @@ test('the waiting messages can be moved, removed and sent right away from the li
     }
     const list = page.getByRole('list', { name: 'Messages waiting to be sent' });
     await expect(list.getByRole('listitem')).toHaveCount(2);
-    await list.getByRole('listitem').nth(1).getByRole('button', { name: 'Move up' }).click();
+    await list.getByRole('listitem').nth(1).getByRole('button', { name: 'Move message 2 up' }).click();
     await expect(list.getByRole('listitem').first()).toContainText('second waiting');
-    await list.getByRole('listitem').nth(1).getByRole('button', { name: 'Remove' }).click();
+    await list.getByRole('listitem').nth(1).getByRole('button', { name: 'Remove message 2' }).click();
     await expect(list.getByRole('listitem')).toHaveCount(1);
-    await list.getByRole('listitem').first().getByRole('button', { name: 'Send now' }).click();
+    await list.getByRole('listitem').first().getByRole('button', { name: 'Send message 1 now' }).click();
     await expect(page.getByTestId('message-sent-now')).toContainText('second waiting');
     await expect(state(page)).toHaveAttribute('data-state', 'idle');
     // The removed one was never sent, and nothing reads "Not sent".

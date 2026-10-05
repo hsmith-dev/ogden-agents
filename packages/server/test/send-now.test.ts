@@ -67,6 +67,13 @@ describe('send now or wait (routes)', () => {
     const agentReplies = events.flatMap((e) => (e.type === 'session.message_completed' && e.payload.role === 'agent' ? [e.payload.content] : []));
     expect(agentReplies).toEqual(['Holding', 'Steered: use the other file.']);
     expect(lines.join('\n')).not.toContain('use the other file');
+    // No session/cancel reached the agent: the message went into the turn.
+    expect((await send('cancels')).status).toBe(202);
+    await waitFor(
+      () => eventsOf(server, sesId).some((e) => e.type === 'session.message_completed' && e.payload.role === 'agent' && e.payload.content === 'cancels=0'),
+      'the cancel count',
+      15_000,
+    );
   });
 
   it('refuses to send right away while a card waits (409 answer_first), recording nothing', async () => {

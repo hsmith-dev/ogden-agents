@@ -55,6 +55,7 @@
 //   "env"          replies with the CLAUDE_CODE_EXECUTABLE it was given
 //   "echo-env"     replies with its whole environment, `NAME=value` per line,
 //                  each value split across two chunks, and writes it to stderr
+//   "cancels"      replies `cancels=<session/cancel notifications this session got>`
 //   "pids"         replies `pid=<its pid> grandchild=<pid or none>`
 //   "session-start"  replies one JSON line `{ via, cwd, mcpServers, meta,
 //                  prompt, env }`: how the session was opened (`new`,
@@ -745,6 +746,10 @@ async function runPrompt(params, client, session) {
       await say(client, params.sessionId, JSON.stringify(reply));
       return { stopReason: 'end_turn' };
     }
+    if (text === 'cancels') {
+      await say(client, params.sessionId, `cancels=${session.cancels ?? 0}`);
+      return { stopReason: 'end_turn' };
+    }
     if (text === 'pids') {
       await say(client, params.sessionId, `pid=${process.pid} grandchild=${grandchild?.pid ?? 'none'}`);
       return { stopReason: 'end_turn' };
@@ -829,7 +834,9 @@ async function runPrompt(params, client, session) {
 
 agentBuilder
   .onNotification('session/cancel', ({ params }) => {
-    sessions.get(params.sessionId)?.cancel?.();
+    const cancelled = sessions.get(params.sessionId);
+    if (cancelled !== undefined) cancelled.cancels = (cancelled.cancels ?? 0) + 1;
+    cancelled?.cancel?.();
   })
   .onRequest('session/close', ({ params }) => {
     sessions.delete(params.sessionId);

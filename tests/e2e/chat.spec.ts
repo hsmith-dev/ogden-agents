@@ -38,7 +38,7 @@ test('a message sent from the session view streams its reply while the session g
     await expect(reply).toHaveAttribute('data-streaming', 'true');
     await expect(reply).toContainText('Hello');
     // While it works, a message can still be sent (it waits its turn), and Stop is there (story 2.10).
-    await expect(page.getByTestId('composer-hint')).toContainText('Claude Code is working. A message you send now waits its turn. Press');
+    await expect(page.getByTestId('composer-hint')).toContainText('Claude Code is working. While it works, your message waits its turn. To send it right away, press');
     await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
 
     await expect(reply).toContainText('Hello from the fake agent.');

@@ -78,32 +78,41 @@ export function createSendNow(ctx: ChatContext, deps: Turns & Pick<Replies, 'fin
     const attempt = (async () => {
       try {
         const started = entry === undefined ? undefined : await entry.agent.catch(() => undefined);
-        if (ctx.closing || busy.get(sessionId) !== turn) return;
-        // No prompt out (the agent is still starting, or between turns): it goes next anyway.
-        if (turn.prompting !== true) return;
-        if (started?.steer === undefined || waiting(sessionId)) {
-          if (started?.steer === undefined) interrupt(sessionId, turn, item);
+        // Stopped, taken by the next turn, or removed meanwhile: nothing more to do here.
+        if (ctx.closing || busy.get(sessionId) !== turn || turn.failed || turn.stopping || !turn.queue.includes(item)) return;
+        // No prompt out yet (the agent is still starting, or between turns): tried again once it is (review).
+        if (turn.prompting !== true) {
+          turn.whenPrompting = () => deliver(sessionId, turn, item);
           return;
         }
-        // The reply so far is closed before the message goes: what the agent says next answers it.
-        const current = live.get(sessionId);
-        if (current !== undefined) finishReply(sessionId, current);
-        let outcome: 'injected' | 'no_turn' | undefined;
-        try {
-          outcome = await Promise.race([started.steer(item.text), timeout(), entry!.gone.then(() => undefined)]);
-        } catch {
-          outcome = undefined;
+        // A card waits: it is never answered for the user; the message goes first after the turn.
+        if (waiting(sessionId)) return;
+        if (started?.steer === undefined) {
+          interrupt(sessionId, turn, item);
+          return;
         }
-        // Stopped, removed or failed meanwhile: what the turn did with it is the Stop's ("Not sent").
-        if (ctx.closing || busy.get(sessionId) !== turn || turn.failed || !turn.queue.includes(item)) return;
+        let outcome: 'injected' | 'no_turn' | 'refused' | 'unanswered';
+        try {
+          outcome = (await Promise.race([started.steer(item.text), timeout(), entry!.gone.then(() => undefined)])) ?? 'unanswered';
+        } catch {
+          outcome = 'refused';
+        }
+        if (ctx.closing) return;
         if (outcome === 'injected') {
-          turn.queue.splice(turn.queue.indexOf(item), 1);
+          // The agent has it, whatever happened meanwhile (a Stop included): the transcript says so (review).
+          const at = turn.queue.indexOf(item);
+          if (at !== -1) turn.queue.splice(at, 1);
+          // The reply so far is closed: what the agent says next answers this message.
+          const current = live.get(sessionId);
+          if (current !== undefined) finishReply(sessionId, current);
           flushSession(sessionId);
           sessionEvents.completeMessage(sessionId, { messageId: item.messageId, role: 'user', content: item.text, delivery: 'injected' });
           return;
         }
-        // The turn had just ended: it goes next.
-        if (outcome === 'no_turn') return;
+        if (busy.get(sessionId) !== turn || turn.failed || !turn.queue.includes(item)) return;
+        // The turn had just ended: it goes next. Not answered in time: the request can't be withdrawn,
+        // so stopping the step could deliver it twice; it goes first after the turn instead (review).
+        if (outcome === 'no_turn' || outcome === 'unanswered') return;
         interrupt(sessionId, turn, item);
       } finally {
         item.sending = false;
@@ -118,7 +127,7 @@ export function createSendNow(ctx: ChatContext, deps: Turns & Pick<Replies, 'fin
     chatDrives(workspaceId, sessionId);
     const turn = busy.get(sessionId);
     const item = turn?.queue.find((candidate) => candidate.messageId === messageId);
-    if (turn === undefined || turn.failed || turn.stopping || item === undefined || item.sending === true) throw new MessageNotQueuedError();
+    if (turn === undefined || turn.failed || item === undefined || item.sending === true) throw new MessageNotQueuedError();
     return { turn, item };
   };
 

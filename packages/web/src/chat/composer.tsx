@@ -1,6 +1,6 @@
 import { CaretDown, PaperPlaneRight } from '@phosphor-icons/react';
 import type { WhileWorking } from '@ogden-agents/shared';
-import { useEffect, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { otherWay, otherWayShortcutLabel, SEND_WORDS } from '@/chat/send-mode';
 import { Button } from '@/ui/button';
 import { ComposerFrame } from '@/ui/composer-frame';
@@ -56,6 +56,8 @@ export function Composer({ label, blockedReason, hint, action, footer, described
     setText((typed) => (typed.trim() === '' ? restoreText : `${restoreText}\n\n${typed}`));
   }, [restoreKey, restoreText]);
   const [sending, setSending] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const field = useRef<HTMLTextAreaElement>(null);
   const [error, setError] = useState<string | undefined>(undefined);
   const blocked = sending || blockedReason !== undefined;
 
@@ -102,6 +104,7 @@ export function Composer({ label, blockedReason, hint, action, footer, described
     <form onSubmit={onSubmit} data-testid="composer" className="flex flex-col gap-2">
       <ComposerFrame>
         <Textarea
+          ref={field}
           aria-label={label}
           aria-describedby={describedBy}
           placeholder="Write a message"
@@ -122,14 +125,21 @@ export function Composer({ label, blockedReason, hint, action, footer, described
                   {SEND_WORDS[whileWorking]} <Kbd>Enter</Kbd>. {SEND_WORDS[otherWay(whileWorking)]} <Kbd>{otherWayShortcutLabel()}</Kbd>.
                 </TooltipContent>
               </Tooltip>
-              <DropdownMenu>
+              {/* Opens only with something to send; closing puts the cursor back in the field. */}
+              <DropdownMenu open={menuOpen && !emptyOrBlocked} onOpenChange={(open) => setMenuOpen(open && !emptyOrBlocked)}>
                 <DropdownMenuTrigger asChild>
                   {/* No "send" in its name: the Send button stays the only one named so. */}
                   <Button type="button" variant="outline" size="icon" aria-label="Choose when it goes" aria-disabled={emptyOrBlocked} data-testid="send-menu">
                     <CaretDown aria-hidden />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
+                <DropdownMenuContent
+                  align="end"
+                  onCloseAutoFocus={(event) => {
+                    event.preventDefault();
+                    field.current?.focus();
+                  }}
+                >
                   {(['now', 'wait'] as const).map((way) => (
                     <DropdownMenuItem key={way} disabled={emptyOrBlocked} data-testid={`send-${way}`} onSelect={() => submit(way)}>
                       {SEND_WORDS[way]}

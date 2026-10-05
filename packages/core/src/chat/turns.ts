@@ -198,6 +198,10 @@ export function createTurns(
       prompting.catch(() => undefined);
       // While it is out, a message sent right away can go into the turn or stop it (send now or wait).
       turn.prompting = true;
+      // A message sent right away while the agent was starting goes now (send now or wait).
+      const pending = turn.whenPrompting;
+      turn.whenPrompting = undefined;
+      pending?.();
       const result = await Promise.race([prompting, entry.gone.then(() => undefined)]).finally(() => {
         turn.prompting = false;
       });
@@ -332,12 +336,23 @@ export function createTurns(
    */
   function stop(sessionId: SessionId, turn: Turn, { keepQueue }: { keepQueue: boolean }): void {
     {
-      if (turn.stopping) return;
-      turn.stopping = true;
+      // Stop during a stop for a message sent right away still drops what waits (review), and declines a card.
       if (!keepQueue) {
         turn.queue = [];
         turn.reasons = [];
+        turn.whenPrompting = undefined;
       }
+      if (turn.stopping) {
+        if (!keepQueue && entities.getSession(sessionId)?.state === 'waiting') {
+          try {
+            entities.setSessionState(sessionId, 'idle');
+          } catch (error) {
+            internalError(sessionId, error);
+          }
+        }
+        return;
+      }
+      turn.stopping = true;
       clearQuiet(turn);
       const entry = live.get(sessionId);
       try {

@@ -63,6 +63,9 @@ describe('the composer while the agent works', () => {
   it('offers both ways in a menu beside Send, whose trigger is not named Send', async () => {
     const { sent, type } = composer({ whileWorking: 'now', working: true });
     expect(screen.getAllByRole('button', { name: /send/i }).map((button) => button.getAttribute('aria-label'))).toEqual(['Send']);
+    // Nothing to send: the menu stays shut.
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Choose when it goes' }), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    expect(screen.queryByRole('menuitem')).toBeNull();
     type('after it finishes');
     const trigger = screen.getByRole('button', { name: 'Choose when it goes' });
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
@@ -96,13 +99,13 @@ describe('the messages that wait', () => {
     expect(screen.getByRole('list', { name: 'Messages waiting to be sent' })).toBeTruthy();
     const items = screen.getAllByRole('listitem');
     expect(items).toHaveLength(2);
-    fireEvent.click(screen.getAllByRole('button', { name: 'Move down' })[0]!);
+    fireEvent.click(screen.getByRole('button', { name: 'Move message 1 down' }));
     await flush();
-    fireEvent.click(screen.getAllByRole('button', { name: 'Send now' })[1]!);
+    fireEvent.click(screen.getByRole('button', { name: 'Send message 2 now' }));
     await flush();
-    fireEvent.click(screen.getAllByRole('button', { name: 'Remove' })[0]!);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove message 1' }));
     await flush();
-    fireEvent.click(screen.getAllByRole('button', { name: 'Edit' })[1]!);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit message 2' }));
     const field = screen.getByRole('textbox', { name: 'Edit waiting message' });
     fireEvent.change(field, { target: { value: 'second, edited' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -117,7 +120,7 @@ describe('the messages that wait', () => {
 
   it('says why a message can not go right away while a card waits, and changes nothing', async () => {
     const { errors } = list([waiting('m1', 'first')], { blocked: 'Answer the request above first, then send your message.' });
-    fireEvent.click(screen.getByRole('button', { name: 'Send now' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send message 1 now' }));
     await flush();
     expect(calls.list).toEqual([]);
     expect(errors.at(-1)).toBe('Answer the request above first, then send your message.');

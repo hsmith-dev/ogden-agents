@@ -546,3 +546,13 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-every-agent/story-end-to-end-suite-and-release-plan.md`
   summary: Resolved: "A few helper processes still inherit the server's whole environment" (6.5 review, AD-16). Every child process now gets an explicit allowlisted environment: agents their own key only, helpers none (the kill helper, the Windows shortcut script, npm's adapter install and the browser opener were the ones still inheriting; `uv --version` already used `uvEnvironment`).
   evidence: `adapters/src/child-env.ts` (`baseEnvironment`, `helperEnvironment`), `process-tree.ts`, `shortcut-os/windows.ts`, `setup-claude-code/install.ts` `npmEnv`, `server/src/open-url.ts`; tests `adapters/test/child-env.test.ts`, `server/test/open-url.test.ts`, `claude-code-install.test.ts`, `tests/architecture.test.ts` (AD-16 spawn rule), installed `agents-journey.spec.ts` (each agent's environment).
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-choose-whether-new-messages-wait-or-go-right-away-plan.md`
+  summary: Two messages sent right away at once with different outcomes (one injected, one refused) can cut off the injected one's answer, or show them out of order.
+  evidence: send-now.ts deliver runs per message; a refused second steer interrupts the turn that took the first. Rare now that an unanswered steer no longer interrupts.
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-choose-whether-new-messages-wait-or-go-right-away-plan.md`
+  summary: Editing a waiting message while the turn ends loses the draft silently when the old text is sent.
+  evidence: queued-messages.tsx editor does not reserve the message; takeNext sends it and the row unmounts.
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-choose-whether-new-messages-wait-or-go-right-away-plan.md`
+  summary: A permission request the agent raises between an interrupt's cancel and its turn ending is cancelled without a card (as during Stop).
+  evidence: permission-requests.ts declines while `turn.stopping`; decide whether the interrupted note should say so.
+

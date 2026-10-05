@@ -312,7 +312,6 @@ export interface Terminal {
   exit: { exitCode: number | null } | undefined;
 }
 
-/** A session whose agent is answering: from the first message until nothing is left to send. */
 /** A message waiting to be sent (story 2.10; send now or wait). */
 export interface QueuedItem {
   messageId: string;
@@ -323,11 +322,14 @@ export interface QueuedItem {
   sending?: boolean | undefined;
 }
 
+/** A session whose agent is answering: from the first message until nothing is left to send. */
 export interface Turn {
   /** Messages sent while the agent answered, in the order they will go. */
   queue: QueuedItem[];
   /** Messages being put into the running turn (send now or wait): the next one is picked only once they settled. */
   steering?: Promise<void> | undefined;
+  /** Sends a message sent right away once the next prompt is out (it came while the agent was starting). */
+  whenPrompting?: (() => void) | undefined;
   /** A prompt is out to the agent (its turn can be stopped or steered). */
   prompting?: boolean | undefined;
   /** Deny reasons to send after the turn, ahead of the queue. */

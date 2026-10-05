@@ -3,13 +3,13 @@ title: 'Epic contracts and stubs: panes, launchers, layout and pane events'
 type: 'feature'
 ticket: '3'
 created: '2026-10-05'
-status: 'in-review'
+status: 'built'
 baseline_revision: '4f0e48606793a40cceed401c70d86f16b20621da'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/epic-native-cli-terminal.md'
@@ -64,3 +64,16 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+| Finding | Verdict | Route |
+|---|---|---|
+| A nested append inside the Developer mode listener makes later subscribers drop the settings event (S) | high, real | patch: the pane events wait until the delivery is done; test with a later subscriber |
+| `pane_closed` for a pane closed while starting, then `pane_opened` (C) | high, real | patch: `announced` flag; nothing is announced for such a pane |
+| Pane title free text in stored events (S) | medium | patch: `PaneTitle` without control characters; never taken from terminal output |
+| Launcher `defaultArgs` could smuggle flags; executables could be relative or odd (S) | medium | patch: plain arguments only, program names or absolute paths, bounded arrays |
+| Prompt patterns could be invalid or runaway (S, C) | medium | patch: must compile, no repeated repeated groups, at most 20 |
+| `installUrl` accepts `javascript:` (C) | medium | patch: https only |
+| Layout has no leaf or depth bound (C); `launcherArgs` control characters (S) | low | patch |
+| Failed Restart emits no exit event (C) | low | patch: `pane_exited` with no code; doc says a working Restart is told by 16.6 |
+| Architecture test lets hyphenated program names through (C) | low | patch |
+| Duplicate pane ids and a dangling active tab in a layout; the memory stub's frozen getters; `proxies` and SSH agent forwarding guard; `server_stopped` event after teardown (S, C) | low or info | defer to 16.4, 16.7, 16.9 where they are built |

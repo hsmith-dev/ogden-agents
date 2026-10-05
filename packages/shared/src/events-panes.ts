@@ -9,12 +9,12 @@
 import { z } from 'zod';
 import { assigned, onWorkspaceStream } from './events-envelope.js';
 import { PaneId } from './ids.js';
-import { PaneLauncherId, PaneStatus } from './panes.js';
+import { PaneLauncherId, PaneStatus, PaneTitle } from './panes.js';
 
 export const TerminalPaneOpenedInput = z.object({
   type: z.literal('terminal.pane_opened'),
   ...onWorkspaceStream,
-  payload: z.object({ paneId: PaneId, launcherId: PaneLauncherId, title: z.string().min(1).max(80) }),
+  payload: z.object({ paneId: PaneId, launcherId: PaneLauncherId, title: PaneTitle }),
 });
 /** A pane was opened in the project. */
 export const TerminalPaneOpenedEvent = TerminalPaneOpenedInput.extend(assigned);
@@ -34,7 +34,7 @@ export const TerminalPaneExitedInput = z.object({
   ...onWorkspaceStream,
   payload: z.object({ paneId: PaneId, exitCode: z.number().int().nullable() }),
 });
-/** A pane's program ended (`exitCode` is its own; `null` when it was stopped). The pane stays, startable again. */
+/** A pane's program ended (`exitCode` is its own; `null` when it did not report one, such as a Restart pane that could not start). The pane stays, startable again. A Restart pane that works emits nothing here: story 16.6's `pane_status_changed` tells it is working again. */
 export const TerminalPaneExitedEvent = TerminalPaneExitedInput.extend(assigned);
 export type TerminalPaneExitedEvent = z.infer<typeof TerminalPaneExitedEvent>;
 
@@ -50,7 +50,7 @@ export type TerminalPaneClosedEvent = z.infer<typeof TerminalPaneClosedEvent>;
 export const TerminalPaneRenamedInput = z.object({
   type: z.literal('terminal.pane_renamed'),
   ...onWorkspaceStream,
-  payload: z.object({ paneId: PaneId, title: z.string().min(1).max(80) }),
+  payload: z.object({ paneId: PaneId, title: PaneTitle }),
 });
 /** A pane was renamed (story 16.4). */
 export const TerminalPaneRenamedEvent = TerminalPaneRenamedInput.extend(assigned);

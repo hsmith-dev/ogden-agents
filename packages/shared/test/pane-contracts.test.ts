@@ -44,6 +44,30 @@ describe('launchers are data', () => {
   });
 });
 
+describe('launcher data is checked (security review of 16.3)', () => {
+  const ok = { id: 'example', label: 'Example', kind: 'cli', executables: {} };
+  it('refuses flags that are not plain, relative or odd executables, a bad link and a pattern that does not compile or runs away', () => {
+    expect(PaneLauncher.safeParse({ ...ok, defaultArgs: ['--model=big', '-p'] }).success).toBe(true);
+    expect(PaneLauncher.safeParse({ ...ok, defaultArgs: ['--x; rm -rf /'] }).success).toBe(false);
+    expect(PaneLauncher.safeParse({ ...ok, executables: { darwin: ['example', '~/.local/bin/example', '/usr/local/bin/example'], win32: ['%LOCALAPPDATA%\\x\\x.exe', 'C:\\x\\x.exe'] } }).success).toBe(true);
+    for (const bad of ['./example', '../example', 'a/b', '%EVIL%\\x', 'x\u0000y']) expect(PaneLauncher.safeParse({ ...ok, executables: { linux: [bad] } }).success, bad).toBe(false);
+    expect(PaneLauncher.safeParse({ ...ok, installUrl: 'https://example.com/install' }).success).toBe(true);
+    expect(PaneLauncher.safeParse({ ...ok, installUrl: 'javascript:alert(1)' }).success).toBe(false);
+    expect(PaneLauncher.safeParse({ ...ok, installUrl: 'http://example.com' }).success).toBe(false);
+    expect(PaneLauncher.safeParse({ ...ok, promptPatterns: [{ name: 'q', pattern: '(', depth: 1 }] }).success).toBe(false);
+    expect(PaneLauncher.safeParse({ ...ok, promptPatterns: [{ name: 'q', pattern: '(a+)+$', depth: 1 }] }).success).toBe(false);
+    expect(PaneLauncher.safeParse({ ...ok, promptPatterns: [{ name: 'q', pattern: 'do you want to (proceed|continue)', depth: 5 }] }).success).toBe(true);
+  });
+
+  it('a pane title has no control characters, and a layout has at most a project\'s panes and a bounded depth', () => {
+    expect(PaneLayout.safeParse({ tabs: [{ id: 't', title: 'Bell\u0007', root: { type: 'pane', paneId: PAN } }], activeTabId: null }).success).toBe(false);
+    const leaf = (n: number) => ({ type: 'pane' as const, paneId: `pan_01J9Z3K4M5N6P7Q8R9S0T1V2W${n}` });
+    let tree: unknown = leaf(1);
+    for (let i = 0; i < MAX_PANES_PER_PROJECT; i += 1) tree = { type: 'split', direction: 'row', ratio: 0.5, first: tree, second: leaf(2) };
+    expect(PaneLayout.safeParse({ tabs: [{ id: 't', title: 'x', root: tree }], activeTabId: null }).success).toBe(false);
+  });
+});
+
 describe('the layout tree', () => {
   const split = { type: 'split', direction: 'row', ratio: 0.5, first: { type: 'pane', paneId: PAN }, second: { type: 'pane', paneId: PAN2 } };
 

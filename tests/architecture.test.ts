@@ -473,7 +473,7 @@ const PANE_PROGRAM_NAMES = ['claude', 'codex', 'grok', 'gemini', 'agy', 'copilot
 
 /** One message per mention of a program name in code (comments allowed to give examples) of a neutral pane file, or of `acp-base`. */
 export function findPaneProgramViolations(files: readonly SourceFile[]): string[] {
-  const named = new RegExp(`(?<![A-Za-z0-9_-])(${PANE_PROGRAM_NAMES.join('|')})(?![A-Za-z0-9_-])`, 'gi');
+  const named = new RegExp(`(?<![A-Za-z0-9])(${PANE_PROGRAM_NAMES.join('|')})(?![A-Za-z0-9])`, 'gi');
   const violations: string[] = [];
   for (const { pkg, path, source } of files) {
     const neutral = ((pkg === '@ogden-agents/core' || pkg === '@ogden-agents/shared') && /(^|[\\/])(panes?|events-panes|terminal-port)\.ts$/.test(path)) || /[\\/]acp-base[\\/]/.test(path);
@@ -492,7 +492,7 @@ describe('epic 16: core, shared and acp-base name no pane program', () => {
 
   it('flags a program name in code, but not in a comment or a longer word', () => {
     const files: SourceFile[] = [
-      { pkg: '@ogden-agents/core', path: 'core/src/panes.ts', source: "const file = 'claude';\n// codex is only an example\nconst x = 'codex-like';" },
+      { pkg: '@ogden-agents/core', path: 'core/src/panes.ts', source: "const file = 'claude';\n// codex is only an example\nconst x = 'codexes';" },
       { pkg: '@ogden-agents/shared', path: 'shared/src/panes.ts', source: 'const a = `run grok`;' },
       { pkg: '@ogden-agents/adapters', path: 'adapters/src/pane-launchers/index.ts', source: "const id = 'claude';" },
     ];

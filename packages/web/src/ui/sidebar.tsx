@@ -413,6 +413,8 @@ export interface SidebarStatusRowProps extends Omit<SidebarMenuButtonProps, 'asC
   title: string;
   /** Under the title: the agent and the state word ("Claude Code, working"). */
   caption: string;
+  /** More for the tooltip only, after the state word (the chat's model, story 11). */
+  detail?: string | undefined;
   /** The relative time shown right-aligned ("5m"), and the moment it stands for. */
   time?: { label: string; dateTime: string } | undefined;
   /** The link the row is (a router Link with no children); the row fills it. */
@@ -425,12 +427,12 @@ export interface SidebarStatusRowProps extends Omit<SidebarMenuButtonProps, 'asC
  * signal rail on the left. In the rail only the glyph shows; the title and
  * state word are the accessible name and the tooltip.
  */
-export function SidebarStatusRow({ state, title, caption, time, className, children, ...props }: SidebarStatusRowProps) {
+export function SidebarStatusRow({ state, title, caption, detail, time, className, children, ...props }: SidebarStatusRowProps) {
   const word = STATE_WORDS[state];
   return (
     <SidebarMenuButton
       asChild
-      tooltip={`${title}: ${word}`}
+      tooltip={detail === undefined ? `${title}: ${word}` : `${title}: ${word}, ${detail}`}
       // Not `data-state`: the tooltip trigger sets that one.
       data-session-state={state}
       aria-label={`${title}, ${caption}`}

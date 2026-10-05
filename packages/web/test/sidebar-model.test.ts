@@ -203,3 +203,15 @@ describe('relativeTime', () => {
     expect(relativeTime(ago(-MINUTE), NOW)).toBe('now');
   });
 });
+
+describe("a row's model (story 11)", () => {
+  it("names the chat's model by the agent's name for it, and none for the agent's own choice", () => {
+    const ws = workspace('ws_a', 'Atlas', ago(10 * MINUTE));
+    const chosen = { ...session('ses_a', 'ws_a', 'idle'), model: 'opus' } as Session;
+    const own = session('ses_b', 'ws_a', 'idle');
+    const model = buildSidebar([ws], [chosen, own], emptyStore(), NOW, CLAUDE, (_agentId, id) => (id === 'opus' ? 'Opus' : id));
+    const rows = model.groups[0]!.rows;
+    expect(rows.find((row) => row.sesId === 'ses_a')?.model).toBe('Opus');
+    expect(rows.find((row) => row.sesId === 'ses_b')?.model).toBeUndefined();
+  });
+});

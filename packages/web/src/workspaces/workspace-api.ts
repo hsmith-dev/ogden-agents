@@ -162,6 +162,13 @@ export function useAllSessionsStatus(): AllSessions {
       } else if (event.type === 'session.state_changed') {
         const session = byId.get(event.payload.sessionId);
         if (session !== undefined) byId.set(session.id, { ...session, state: event.payload.state, updatedAt: event.at > session.updatedAt ? event.at : session.updatedAt });
+      } else if (event.type === 'session.model_changed') {
+        // Story 11: the row's tooltip names the chat's model.
+        const session = byId.get(event.payload.sessionId);
+        if (session !== undefined) {
+          const { model: _previous, ...rest } = session;
+          byId.set(session.id, event.payload.model === null ? rest : { ...rest, model: event.payload.model });
+        }
       } else if (event.type === 'workspace.history_deleted') {
         for (const [id, session] of byId) if (session.workspaceId === event.workspaceId) byId.delete(id);
       }

@@ -39,8 +39,9 @@ export async function openWorkspace(path: string, auth: Pick<TabAuth, 'fetch'> =
  * `POST /api/v1/workspaces/:wsId/sessions`: a new chat in the workspace,
  * with the agent `agentId` (epic 6), or the server's default one.
  */
-export async function createChatSession(wsId: string, auth: Pick<TabAuth, 'fetch'> = tabAuth, agentId?: string): Promise<Session> {
-  const body = agentId === undefined ? { kind: 'chat' } : { kind: 'chat', agentId };
+export async function createChatSession(wsId: string, auth: Pick<TabAuth, 'fetch'> = tabAuth, agentId?: string, model?: string | null): Promise<Session> {
+  // `model` (story 11): the model it starts on, as an agent handoff passes the target's; omitted, the project's or app's default.
+  const body = { kind: 'chat', ...(agentId === undefined ? {} : { agentId }), ...(model === undefined ? {} : { model }) };
   const json = await call(auth, apiPath(API_ROUTES.workspaceSessions, { wsId }), postJson(body), "Ogden Agents couldn't start a chat");
   return SessionResponse.parse(json).session;
 }
@@ -106,6 +107,33 @@ export async function setPermissionMode(wsId: string, sesId: string, mode: Permi
     "Ogden Agents couldn't change this chat's permission mode",
   );
   return SessionResponse.parse(json);
+}
+
+/**
+ * `PUT /api/v1/workspaces/:wsId/sessions/:sesId/model` (story 11): the
+ * chat's model, the agent's own id, or `null` for its own choice. It applies
+ * to the next message. 409 `model_unavailable` for one the agent doesn't
+ * list, and while the terminal drives.
+ */
+export async function setSessionModel(wsId: string, sesId: string, model: string | null, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<SessionResponse> {
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.sessionModel, { wsId, sesId }),
+    { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }) },
+    "Ogden Agents couldn't change this chat's model",
+  );
+  return SessionResponse.parse(json);
+}
+
+/** `PUT /api/v1/chat-agents/:agentId/default-model` (story 11): the model new chats with the agent start on, app-wide. */
+export async function setAgentDefaultModel(agentId: string, model: string | null, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<ChatAgentsResponse> {
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.chatAgentDefaultModel, { agentId }),
+    { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }) },
+    "The default model couldn't be saved",
+  );
+  return ChatAgentsResponse.parse(json);
 }
 
 // ---------------------------------------------------------------------------

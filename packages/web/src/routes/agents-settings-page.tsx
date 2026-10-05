@@ -1,5 +1,10 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { AgentCard } from '@/agents/agent-card';
 import { useAgents } from '@/agents/agent-setup-api';
+import { CHAT_AGENTS_QUERY_KEY, setAgentDefaultModel } from '@/chat/chat-api';
+import { DefaultModelsSection } from '@/chat/default-models';
+import { agentDefaultLabel } from '@/chat/model-picker';
+import { useChatAgents } from '@/chat/use-chat-agents';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
@@ -43,7 +48,27 @@ export function AgentsSettingsPage() {
             query.data.map((agent) => <AgentCard key={agent.agentId} agent={agent} />)
           )}
         </PageSection>
+        <AppModelsSection />
       </PageBody>
     </>
+  );
+}
+
+/** Each agent's app-wide default model (story 11): new chats start on it unless their project sets its own. */
+function AppModelsSection() {
+  const chatAgents = useChatAgents();
+  const queryClient = useQueryClient();
+  if (chatAgents.data === undefined) return null;
+  return (
+    <DefaultModelsSection
+      agents={chatAgents.data.agents}
+      testId="app-models"
+      description="The model new chats start on, per agent, unless a project sets its own. You can still switch each chat's model."
+      valueOf={(agent) => agent.defaultModel ?? null}
+      noneOf={(agent) => ({ label: agentDefaultLabel(agent.displayName), description: `${agent.displayName} picks the model itself.` })}
+      onChoose={async (agent, model) => {
+        queryClient.setQueryData(CHAT_AGENTS_QUERY_KEY, await setAgentDefaultModel(agent.agentId, model));
+      }}
+    />
   );
 }

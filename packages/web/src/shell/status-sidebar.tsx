@@ -237,6 +237,7 @@ function SessionRows({ rows, now }: { rows: readonly SidebarRow[]; now: number }
           title={row.title}
           updatedAt={row.updatedAt}
           agentName={row.agentName}
+          model={row.model}
           time={relativeTime(row.updatedAt, now)}
           active={params.sesId === row.sesId}
         />
@@ -253,9 +254,10 @@ const SessionRow = memo(function SessionRow({
   title,
   updatedAt,
   agentName,
+  model,
   time,
   active,
-}: Pick<SidebarRow, 'wsId' | 'sesId' | 'state' | 'title' | 'updatedAt' | 'agentName'> & { time: string; active: boolean }) {
+}: Pick<SidebarRow, 'wsId' | 'sesId' | 'state' | 'title' | 'updatedAt' | 'agentName' | 'model'> & { time: string; active: boolean }) {
   return (
     <SidebarMenuItem>
       <SidebarStatusRow
@@ -263,6 +265,7 @@ const SessionRow = memo(function SessionRow({
         state={state}
         title={title}
         caption={`${agentName}, ${STATE_WORDS[state].toLowerCase()}`}
+        detail={model === undefined ? undefined : `${agentName} on ${model}`}
         time={{ label: time, dateTime: updatedAt }}
         isActive={active}
       >

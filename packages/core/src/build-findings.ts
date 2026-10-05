@@ -31,11 +31,15 @@ export function parseTriageLog(markdown: string, mask: (text: string) => string 
   // The log groups findings under a pass heading (a top-level bullet); when there are nested bullets, those are the findings.
   const nested = bullets.some((bullet) => bullet.indent > 0);
   const chosen = nested ? bullets.filter((bullet) => bullet.indent > 0) : bullets;
-  return chosen.slice(0, MAX_FINDINGS).map((bullet): ReviewFinding => {
+  return chosen
+    .map((bullet): ReviewFinding => {
     const text = mask(bullet.text.replace(/`/g, '')).slice(0, MAX_FINDING_CHARS);
     const severity = /\b(high|medium|low)\b/i.exec(text)?.[1]?.toLowerCase() as ReviewFinding['severity'] | undefined;
-    return { kind: /\bdefer(?:red)?\b/i.test(text) ? 'deferred' : 'finding', severity: severity ?? null, text };
-  });
+    return { kind: /\bdefer(?:red|ral)?\b/i.test(text) ? 'deferred' : 'finding', severity: severity ?? null, text };
+    })
+    // A bullet that is nothing once masked and stripped is no finding (the response's own schema needs text).
+    .filter((finding) => finding.text.trim() !== '')
+    .slice(0, MAX_FINDINGS);
 }
 
 /** The findings of the plan `plan` (repo-relative) in `worktree`; empty when it isn't a plain file there. Never throws. */

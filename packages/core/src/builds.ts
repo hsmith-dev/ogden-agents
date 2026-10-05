@@ -1021,6 +1021,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     if (done === 'conflict') throw new BuildRefusedError('merge_conflict', REBASE_CONFLICT_MESSAGE);
     if (done === 'refused') throw new BuildRefusedError('merge_conflict', REBASE_REFUSED_MESSAGE);
     entities.setRunBase(run.id, head.revision);
+    bump(run.id);
     const resumed = entities.setRunOutcome(run.id, 'running', null);
     // The checks run on their own, so the repo's lock is free for Stop.
     void track(run.id, () => decideOutcome(entities.getRun(run.id) ?? resumed, 'idle', { passedDone: true }));
@@ -1062,7 +1063,6 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       return;
     }
     const pending = pendingNotes.get(queued.id);
-    pendingNotes.delete(queued.id);
     try {
       await serializedByRepo(repoPath, async () => {
         const run = entities.getRun(queued.id);
@@ -1074,13 +1074,16 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         if (run.worktreePath !== null) {
           await prepareContinue(run.workspaceId, repoPath, run);
           dispatchAgain(run.workspaceId, run, { note: pending?.note, resume: pending?.resume ?? true });
+          pendingNotes.delete(queued.id);
           return;
         }
         const agent = run.agent ?? runner.agent;
         const plan = await validateStart(run.workspaceId, repoPath, run.ticketRef, agent, run.sandbox === ATTENDED_SANDBOX ? 'attended' : 'unattended', run.id);
         await begin(run.workspaceId, repoPath, run.ticketRef, agent, plan, run, pending?.note);
+        pendingNotes.delete(queued.id);
       });
     } catch (error) {
+      pendingNotes.delete(queued.id);
       report(queued.id, 'dispatch', error);
       try {
         const run = entities.getRun(queued.id);
@@ -1376,8 +1379,11 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         if (run.branch !== null && isBuildBranch(run.branch) && (await vcs.isMerged(repoPath, run.branch)) && run.outcome === 'verified') {
           throw new BuildRefusedError('checks_failed', ALREADY_MERGED_MESSAGE);
         }
-        // A run already rejected stays as it is: a repeat Reject writes nothing (review, story 5.3).
-        if (run.decision === 'rejected') return { review: await reviewOf(repoPath, run), fresh: false };
+        // A run already rejected stays as it is: a repeat Reject writes nothing (review, story 5.3); with retry it builds the ticket again (a start that was refused the first time).
+        if (run.decision === 'rejected') {
+          attended = run.sandbox === ATTENDED_SANDBOX;
+          return { review: await reviewOf(repoPath, run), fresh: parsed.data.retry };
+        }
         attended = run.sandbox === ATTENDED_SANDBOX;
         await release(run);
         entities.setRunOutcome(run.id, 'stopped', run.reason);

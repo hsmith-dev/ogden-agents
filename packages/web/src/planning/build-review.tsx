@@ -144,7 +144,9 @@ export function BuildReview({ wsId, ticketRef }: { wsId: string; ticketRef: stri
           {REVIEW_FINDINGS_TITLE}
         </Text>
         <Text variant="caption">Written by the agent in its plan, not checked by Ogden Agents.</Text>
-        {findings.length === 0 ? (
+        {findings.length === 0 && run.worktreePath === null ? (
+          <Text variant="caption">The plan's findings are only read while the build's folder exists.</Text>
+        ) : findings.length === 0 ? (
           <Text variant="caption" data-testid="review-no-findings">
             {REVIEW_NO_FINDINGS_TEXT}
           </Text>

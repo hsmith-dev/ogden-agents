@@ -3,13 +3,13 @@ title: 'Review, approve and merge, reject and retry'
 type: 'feature'
 ticket: '9'
 created: '2026-10-05'
-status: 'in-review'
+status: 'built'
 baseline_revision: '1b4ef0144c2f23c46e82ab53823553626bab65b1'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-unattended-builds/epic-unattended-builds.md'
@@ -40,7 +40,7 @@ context:
 | Conflict | merge conflict blocked the run | Update and retry shown | rebase conflicts again: 409 with its sentence, unchanged |
 | Update and retry | conflicted run, clean rebase | base moved, checks run again, run ready for review | checkout on another branch: `checkout_dirty` |
 | Reject and retry | optional note | old worktree gone, new run built from a new worktree, note in its first message | over a limit: queued with its note |
-| Repeat Reject | already rejected | nothing written, no new build | none |
+| Repeat Reject | already rejected | without retry nothing is written; with retry the ticket is built again (a start refused the first time) | none |
 
 </frozen-after-approval>
 
@@ -71,6 +71,18 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+- 2026-10-05, pass 1 (security and correctness lenses): high 0, medium 3, low 12. Routed: patch 8, defer 2, reject 5. No intent_gap or bad_plan.
+  - A plan bullet that is empty once stripped made the review response invalid (500) -- medium, patch: empty findings dropped; test.
+  - Reject and retry could not be redone after its start was refused (the discard had happened) -- medium, patch: a repeat Reject with retry builds the ticket again; matrix row reworded; test.
+  - A queued run's note was lost when the slot was taken again -- medium, patch: kept until the dispatch happens; test with a real queue (the first test never queued).
+  - Findings read had a check-then-use gap (a swapped-in FIFO or link) -- low to medium, patch: open without following or blocking, judge the opened file, bounded read; not read while the run is running.
+  - "No findings" said where the plan was never read, and agent-written findings looked like a review -- low, patch: says so when the folder is gone; labelled as written by the agent.
+  - Update and retry took no generation bump -- low, patch.
+  - Update and retry checks no run limit and arms no deadline; the tests re-run is long; review runs tickets.py on every read -- low, defer to 5.10 or 11.1 (the re-check is one bounded run).
+  - Only-path-to-done test is textual; the stores' own refusal is the real guard; the agent can write `done` in its own plan, which the merge would carry -- low, reject: approve marks done itself and `forbiddenChanges`-style checks read the plan status at review; stated in the test name.
+  - Parser edge cases (mixed nesting, first severity word, numbered lists) -- low, reject: plain best effort over a free-form log; empty and size cases are handled.
+  - Weak tests (e2e note, real-git successful rebase) -- low, defer: the note reaches the first message in the core test; a real-git clean rebase needs a non-conflicting meanwhile change that approve cannot hit.
 
 ## Design Notes
 

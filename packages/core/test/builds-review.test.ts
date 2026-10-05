@@ -39,6 +39,8 @@ describe('the review findings (story 5.9)', () => {
     // Without nesting, every bullet is a finding; no log, no findings.
     expect(parseTriageLog('## Review Triage Log\n- one low thing\n- two')).toHaveLength(2);
     expect(parseTriageLog('# Plan\nnothing')).toEqual([]);
+    // A bullet that is nothing once stripped is no finding.
+    expect(parseTriageLog('## Review Triage Log\n- ```\n- real one')).toEqual([{ kind: 'finding', severity: null, text: 'real one' }]);
   });
 
   it('is read only from a plain plan file inside the worktree: a link, a missing file or a missing worktree has none', () => {
@@ -142,21 +144,27 @@ describe('Reject and retry (story 5.9)', () => {
     await expect(h.builds.reject(h.wsId, '1.1', { other: 1 })).rejects.toThrow();
     await h.builds.reject(h.wsId, '1.1');
     expect(h.core.entities.listRuns(h.wsId)).toHaveLength(1);
+    // A repeat Reject without retry writes nothing; with retry it builds the ticket again (a start refused the first time).
     await h.builds.reject(h.wsId, '1.1', { retry: true });
-    expect(h.core.entities.listRuns(h.wsId)).toHaveLength(1);
+    expect(h.core.entities.listRuns(h.wsId)).toHaveLength(2);
+    expect(h.core.entities.latestRunForTicket(h.wsId, '1.1')).toMatchObject({ outcome: 'running', decision: null });
     void PLAN;
   });
 
-  it('a retry over the limit waits in the queue with its note', async () => {
-    const h = await harness({ runner: { ...testRunner, invocation: (ref, options) => `/build ${ref}${options?.note === undefined ? '' : ` NOTE:${options.note}`}` } });
+  it('a retry over the limit waits in the queue with its note, and keeps it until it starts', async () => {
+    const h = await harness({ ticketList: [{ ref: '1.1', title: 'First', after: [] }, { ref: '1.2', title: 'Second', after: [] }], runner: { ...testRunner, invocation: (ref, options) => `/build ${ref}${options?.note === undefined ? '' : ` NOTE:${options.note}`}` } });
     h.core.buildSettings.setWorkspaceSettings(h.wsId, { maxConcurrentRuns: 1 });
     const first = await h.builds.start(h.wsId, { ref: '1.1' });
     h.tickets.set(first.run.worktreePath!, '1.1', 'built');
     await h.endTurn(first.session.id);
-    const other = await h.builds.start(h.wsId, { ref: '1.2' }).catch(() => undefined);
-    void other;
+    // Another ticket takes the only slot, so the retry waits.
+    const other = await h.builds.start(h.wsId, { ref: '1.2' });
+    expect(other.run.queuePosition).toBeNull();
     const review = await h.builds.reject(h.wsId, '1.1', { retry: true, note: 'Again.' });
-    expect(review.run.ticketRef).toBe('1.1');
+    expect(review.run).toMatchObject({ ticketRef: '1.1', queuePosition: 1, worktreePath: null });
+    expect(h.sent.map((sent) => sent.text)).not.toContain('/build 1.1 NOTE:Again.');
+    h.tickets.set(other.run.worktreePath!, '1.2', 'built');
+    await h.endTurn(other.session.id);
     await h.builds.settled();
     expect(h.sent.map((sent) => sent.text)).toContain('/build 1.1 NOTE:Again.');
   });

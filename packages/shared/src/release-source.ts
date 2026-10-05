@@ -209,7 +209,7 @@ export function toRelease(raw: unknown): ReleaseInfo | undefined {
   const r = raw as Record<string, unknown>;
   if (r.draft === true || typeof r.tag_name !== 'string') return undefined;
   const version = r.tag_name.replace(/^v/, '');
-  if (compareVersions(version, version) === undefined) return undefined;
+  if (compareVersions(version, version) === undefined || version.includes('+')) return undefined;
   const assets: ReleaseAsset[] = [];
   if (Array.isArray(r.assets)) {
     for (const asset of r.assets) {

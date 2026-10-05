@@ -138,7 +138,8 @@ export async function run(argv: readonly string[], deps: CliDeps): Promise<numbe
       latest = await source().latest(channel);
     } catch (error) {
       if (token === undefined && error instanceof ReleaseSourceError && (error.kind === 'not-found' || error.kind === 'unauthorized')) {
-        token = await deps.ghToken();
+        // The GitHub CLI's sign-in is broad, so it is used only for GitHub's own API, never a custom address.
+        token = apiBase === DEFAULT_API_BASE ? await deps.ghToken() : undefined;
         if (token === undefined) throw error;
         deps.out('GitHub could not find it without signing in; using your GitHub CLI sign-in.');
         latest = await source().latest(channel);

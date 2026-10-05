@@ -3,7 +3,7 @@ title: 'Install and update from GitHub Releases'
 type: 'feature'
 ticket: '3'
 created: '2026-10-04'
-status: 'in-progress'
+status: 'built'
 baseline_revision: '0cacfc1'
 route: 'full'
 route_source: 'auto'
@@ -49,6 +49,7 @@ context:
 ## Triage log
 
 - Review (security lens, own pass): fixed — a version with build metadata or odd characters is refused before it names a folder (`isSafeVersion`); `OGDEN_AGENTS_GITHUB_API` must be https or loopback because the token goes there. Accepted — `gh` is found by Node's normal executable search (cwd-first on Windows; the scripts run from the user's home folder).
+- Review (independent security agent): fixed — token stripped from npm and launcher child environments; `gh auth token` only for the default API address; `+build` versions rejected; prune skips in-progress installs; tarball opened `wx`. Declined — `--ignore-scripts` (better-sqlite3 needs its install script). Left to the owner — a protected environment for the GitHub Release job and tag protection for `v*` (a tag now makes the release that installed copies update to); `publish` and `assets` run in parallel; `--clobber` on re-run.
 - Decision: npm publish is opt-in through the `NPM_PUBLISH` repository variable (default off). A tag then always makes a GitHub Release; the owner sets the variable once to resume npm releases.
 - Decision: `ogden-install.mjs` is a release asset (and in the macOS zip), never fetched by the scripts; Windows and Linux users keep it beside their script.
 - 13.7 coordination: import `@ogden-agents/shared/release-source`; implement `VersionSource` for the npm registry (assets empty) and optionally reuse `createGitHubReleasesSource`. Channel semantics: stable = `latest` (no prerelease), next = highest of all releases. This story edits none of 13.7's files.

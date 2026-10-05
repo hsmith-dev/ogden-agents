@@ -5,6 +5,13 @@ import { findNpmCli } from './npm.js';
 import { maskSecrets } from '@ogden-agents/shared/release-source';
 import { run, type CliDeps } from './cli.js';
 
+/** The environment for child processes: the GitHub token is for asking GitHub only, so npm, its scripts and the launcher never see it. */
+function childEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (/^(OGDEN_AGENTS_GITHUB_TOKEN|GITHUB_TOKEN|GH_TOKEN)$/i.test(key)) delete env[key];
+  return env;
+}
+
 const deps: CliDeps = {
   fetch: (url, init) => fetch(url, init),
   env: process.env,
@@ -32,7 +39,7 @@ const deps: CliDeps = {
       const child = spawn(
         process.execPath,
         [cli, 'install', tarball, '--prefix', prefix, '--no-audit', '--no-fund', '--no-update-notifier', '--no-save', '--loglevel=error', '--install-links=false'],
-        { cwd: prefix, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, npm_config_update_notifier: 'false' } },
+        { cwd: prefix, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...childEnv(), npm_config_update_notifier: 'false' } },
       );
       let output = '';
       for (const stream of [child.stdout, child.stderr]) stream.on('data', (chunk: Buffer) => (output = (output + chunk.toString()).slice(-4000)));
@@ -41,7 +48,7 @@ const deps: CliDeps = {
     }),
   startLauncher: (launcher, args) =>
     new Promise((resolve) => {
-      const child = spawn(process.execPath, [launcher, ...args], { stdio: 'inherit', windowsHide: false });
+      const child = spawn(process.execPath, [launcher, ...args], { stdio: 'inherit', windowsHide: false, env: childEnv() });
       child.on('error', () => resolve(1));
       child.on('close', (code) => resolve(code ?? 1));
     }),

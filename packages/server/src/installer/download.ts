@@ -82,7 +82,7 @@ export async function downloadToFile(options: DownloadOptions, file: string): Pr
   }
   if (response.body === null) throw new DownloadError('http', 'GitHub sent an empty answer');
   const hash = createHash('sha256');
-  const handle = await open(file, 'w', 0o600);
+  const handle = await open(file, 'wx', 0o600);
   let bytes = 0;
   try {
     for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {

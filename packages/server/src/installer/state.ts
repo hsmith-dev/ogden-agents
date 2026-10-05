@@ -65,6 +65,6 @@ export function pruneVersions(appDir: string, keep: ReadonlySet<string>, list: (
   const dir = join(appDir, 'versions');
   if (!existsSync(dir)) return;
   for (const name of list(dir)) {
-    if (!keep.has(name)) rmSync(join(dir, name), { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
+    if (!keep.has(name) && !name.startsWith('.installing-')) rmSync(join(dir, name), { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
   }
 }

@@ -63,8 +63,14 @@ export function useDeveloperModeSave(auth: Auth = tabAuth) {
   return { saving, error, save };
 }
 
-/** The query keys a Developer mode change makes stale: its own, and every open chat (its mode and picker). */
-export const developerModeKeys = (event: CoreEvent) => (event.type === 'settings.developer_mode_changed' ? [DEVELOPER_MODE_QUERY_KEY, ['session']] : []);
+/**
+ * The query keys a Developer mode change makes stale: its own, every open
+ * chat (its mode and picker), and the default for new projects (its Skip all
+ * reads as Ask while Developer mode is off). Projects' defaults follow their
+ * own `workspace.settings_changed`.
+ */
+export const developerModeKeys = (event: CoreEvent) =>
+  event.type === 'settings.developer_mode_changed' ? [DEVELOPER_MODE_QUERY_KEY, ['session'], ['new-project-defaults']] : [];
 
 /** Whether this browser has carried its old Developer mode over; a blocked storage reads as done (nothing to carry). */
 function carried(storage: Pick<Storage, 'getItem'> | undefined): boolean {

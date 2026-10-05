@@ -16,6 +16,7 @@ import { EarlierHistory, Message, ResumedMarker } from '@/chat/transcript-parts'
 import { useCaughtUp, useEarlierHistory, useSessionEvents } from '@/events/event-stream';
 import { PermissionCard, permissionAnnouncement } from '@/permissions/permission-card';
 import { DocumentCard } from '@/planning/document-card';
+import { StartModeNote, useStartModeNote } from '@/permissions/default-permission-mode';
 import { PermissionModePicker, SkipAllBanner, usePermissionMode } from '@/permissions/permission-mode-picker';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { DriverToggle } from '@/terminal/driver-toggle';
@@ -213,6 +214,8 @@ export function SessionPage() {
 
   // The chat's permission mode (permission modes): one change at a time; the view follows the event.
   const permissionMode = usePermissionMode(events, session.data?.session.permissionMode);
+  // The note about the mode the chat started in (default permission mode), until dismissed.
+  const startModeNote = useStartModeNote(events);
   const [modeChanging, setModeChanging] = useState(false);
   /** A change on its way (a ref, so a second click in the same render is ignored too). */
   const modeInFlight = useRef(false);
@@ -359,6 +362,7 @@ export function SessionPage() {
       </WorkspaceHeader>
       {/* A chat that skips its permission checks says so in red, above the conversation or the terminal, at any scroll position. */}
       {permissionMode === 'skip_all' ? <SkipAllBanner agentName={agentName} changing={modeChanging} onBackToAsk={() => changeMode('ask', false, terminalDrives)} /> : null}
+      <StartModeNote note={startModeNote} />
       {driver === 'terminal' ? (
         <ReadOnlyBanner
           onSwitchToChat={() => switchTo('ui')}

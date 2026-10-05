@@ -1,5 +1,5 @@
 import { NEW_PROJECTS_SETTINGS_LABEL } from '@ogden-agents/shared';
-import { NewProjectDefaultsSection, NewProjectsAgentSection } from '@/settings/new-project-defaults';
+import { NewProjectDefaultsSection, NewProjectsAgentSection, NewProjectsPermissionModeSection } from '@/settings/new-project-defaults';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { PageBody } from '@/ui/page';
 
@@ -11,6 +11,7 @@ export function NewProjectsPage() {
       <PageBody data-testid="new-projects-page">
         <NewProjectDefaultsSection />
         <NewProjectsAgentSection />
+        <NewProjectsPermissionModeSection />
       </PageBody>
     </>
   );

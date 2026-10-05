@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { appExecutable, installNsis, IS_WIN, killSidecars, launchApp, listSidecars, newWorkspace, readReport, sleep, waitFor, writeQuit } from './app-harness.mjs';
+import { appExecutable, installNsis, IS_WIN, killApps, killSidecars, launchApp, listApps, listSidecars, newWorkspace, readReport, sleep, waitFor, writeQuit } from './app-harness.mjs';
 
 const { values } = parseArgs({ options: { app: { type: 'string' }, installer: { type: 'string' }, target: { type: 'string' } }, strict: true });
 if ((!values.app && !values.installer) || !values.target) {
@@ -41,6 +41,7 @@ if (values.installer) {
 } else exe = appExecutable(values.app);
 
 const before = new Set(listSidecars().map((p) => p.pid));
+const appsBefore = new Set(listApps().map((p) => p.pid));
 const cleanups = [];
 const results = [];
 const events = (ws, ev) => readReport(ws.report).filter((e) => e.ev === ev);
@@ -115,7 +116,10 @@ async function scenario(name, fn) {
       }
     }
     killSidecars(before);
-    await sleep(500);
+    killApps(appsBefore);
+    // The single-instance lock is held until the old app is really gone: wait for it before the next scenario starts one.
+    await waitFor('the last scenario\'s app to be gone', () => listApps(appsBefore).length === 0, 20_000).catch(() => {});
+    await sleep(1500);
   }
 }
 

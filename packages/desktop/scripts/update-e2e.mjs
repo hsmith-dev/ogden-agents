@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { appExecutable, IS_WIN, killSidecars, launchApp, listSidecars, newWorkspace, readReport, sleep, waitFor, writeQuit } from './app-harness.mjs';
+import { appExecutable, IS_WIN, killApps, killSidecars, launchApp, listApps, listSidecars, newWorkspace, readReport, sleep, waitFor, writeQuit } from './app-harness.mjs';
 
 const { values } = parseArgs({ options: { app: { type: 'string' }, bundle: { type: 'string' }, 'version-next': { type: 'string' }, target: { type: 'string' } }, strict: true });
 for (const k of ['app', 'bundle', 'version-next', 'target']) {
@@ -33,6 +33,7 @@ const SERVER = join(repo, 'tests', 'fixtures', 'fake-release-server', 'serve.mjs
 const exe = appExecutable(values.app);
 const nextVersion = values['version-next'];
 const before = new Set(listSidecars().map((p) => p.pid));
+const appsBefore = new Set(listApps().map((p) => p.pid));
 const events = (ws, ev) => readReport(ws.report).filter((e) => e.ev === ev);
 const cleanups = [];
 /** Fake release servers: kept for the whole run (an app is stopped after each scenario, a server is not). */
@@ -122,6 +123,8 @@ async function scenario(name, fn) {
     }
   }
   killSidecars(before);
+  killApps(appsBefore);
+  await waitFor('the last scenario\'s app to be gone', () => listApps(appsBefore).length === 0, 20_000).catch(() => {});
   await sleep(1500);
 }
 

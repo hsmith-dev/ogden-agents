@@ -84,6 +84,8 @@ export interface RunActivityRecorderDeps {
   /** Masks secrets in each line (AGENTS.md). */
   mask: (text: string) => string;
   onError?: (runId: string, error: unknown) => void;
+  /** The activity file's bound (tests). Default {@link MAX_ACTIVITY_BYTES}. */
+  maxBytes?: number;
 }
 
 interface RunLog {
@@ -126,7 +128,7 @@ export function createRunActivityRecorder(deps: RunActivityRecorderDeps): RunAct
     const file = join(log.folder, BUILD_ACTIVITY_FILE);
     if (log.bytes === undefined) log.bytes = await stat(file).then((info) => info.size, () => 0);
     const size = Buffer.byteLength(line);
-    if (log.bytes + size > MAX_ACTIVITY_BYTES) {
+    if (log.bytes + size > (deps.maxBytes ?? MAX_ACTIVITY_BYTES)) {
       log.truncated = true;
       await appendFile(file, `${JSON.stringify({ type: 'activity.truncated' })}\n`, { mode: 0o600 });
       return;

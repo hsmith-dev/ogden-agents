@@ -112,7 +112,10 @@
 //                  `.fake-tests-fail`, so the fixture's test command
 //                  (FAKE_TEST_COMMAND_FILES in tests/fixtures/fake-bmad-repo.ts) fails 3 tests;
 //                  FAKE_ACP_BUILD_DELAY_MS=<n> waits n ms before finishing
-//                  (a time limit to hit).
+//                  (a time limit to hit); FAKE_ACP_BUILD_CHILD=<file> starts a
+//                  long-lived child process (a build's command still running)
+//                  and writes "<agent pid> <child pid>" to <file> (story 5.4:
+//                  stopping the session must stop both).
 //   "plan-exit"    asks permission to leave plan mode with the real adapter's
 //                  options (mode-raising ones as `allow_always`, "manually
 //                  approve" as `allow_once`); replies `chose=<option id>`
@@ -721,6 +724,12 @@ async function runPrompt(params, client, session) {
         return allowed;
       };
       await say(client, params.sessionId, `Building ${ref}. `);
+      const childFile = process.env.FAKE_ACP_BUILD_CHILD;
+      if (childFile) {
+        // Not detached: it stays in the agent's process group (its tree on Windows), as a build's command does.
+        const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true });
+        writeFileSync(childFile, `${process.pid} ${child.pid}\n`);
+      }
       const inside = join(cwd, 'src', `built-${ref}.txt`);
       if (await ask('call-build-write', inside)) {
         mkdirSync(dirname(inside), { recursive: true });

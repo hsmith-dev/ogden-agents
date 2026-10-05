@@ -8,9 +8,13 @@
  * edited by the agent); Approve (dirty checkout, `_bmad-output` exception,
  * merge conflict, scripts changed by the merge, the happy path) and Reject.
  */
-import { existsSync, mkdirSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  BUILD_ACTIVITY_FILE,
+  BUILD_RESULT_FILE,
+  BuildRunResult,
+  blockedSentence,
   CHECKOUT_DIRTY_MESSAGE,
   MERGE_CONFLICT_MESSAGE,
   RUN_REASON_EMPTY_DIFF,
@@ -59,6 +63,7 @@ const STATE_OF: Record<string, string> = { 'ready-for-dev': 'backlog', 'in-revie
 function fakeTickets(repoPath: string) {
   const statuses = new Map<string, Map<string, string>>([[repoPath, new Map([['1.1', 'ready-for-dev'], ['1.2', 'ready-for-dev']])]]);
   const reasons = new Map<string, string>();
+  const checkpoints = new Map<string, { plan?: boolean; done?: boolean }>();
   const calls: unknown[][] = [];
   const statusIn = (path: string) => statuses.get(path) ?? statuses.set(path, new Map()).get(path)!;
   const detail = (path: string, ticket: Ticket): TicketDetail => {
@@ -87,6 +92,8 @@ function fakeTickets(repoPath: string) {
       unknown: '',
       hasPlan: status !== '',
       plan: status === '' ? null : PLAN,
+      plan_checkpoint: checkpoints.get(ticket.ref)?.plan === true,
+      done_checkpoint: checkpoints.get(ticket.ref)?.done === true,
     };
   };
   const store: TicketStorePort = {
@@ -113,6 +120,7 @@ function fakeTickets(repoPath: string) {
       if (reason !== undefined) reasons.set(`${path}:${ref}`, reason);
     },
     status: (path: string, ref: string) => statusIn(path).get(ref),
+    checkpoint: (ref: string, which: { plan?: boolean; done?: boolean }) => void checkpoints.set(ref, which),
   };
 }
 
@@ -178,7 +186,8 @@ function fakeVcs() {
       state.merged = true;
     },
     diffStats: async () => ({ files: state.files.length, insertions: 1, deletions: 0 }),
-    worktreeExists: async (_repo, path) => state.worktrees.has(path),
+    // The run stores the worktree's real path (macOS: `/private/var/…`).
+    worktreeExists: async (_repo, path) => [...state.worktrees].some((each) => each === path || (existsSync(each) && realpathSync.native(each) === path)),
     rebase: async () => 'rebased',
     applyPatch: async () => 'applied',
   };
@@ -616,3 +625,103 @@ describe('review loop 1 hardening (story 5.2)', () => {
     expect(h.git.calls.some((call) => call.startsWith('worktree remove'))).toBe(false);
   });
 });
+
+describe('the run folder and checkpoint pauses (story 5.4)', () => {
+  const resultIn = (h: Harness, runId: string) => BuildRunResult.parse(JSON.parse(readFileSync(join(h.dataDir, 'r', runId, BUILD_RESULT_FILE), 'utf8')));
+
+  it("writes the per-run result when the run ends: the plan's status, the branch head, the base; null for an unreadable plan", async () => {
+    const h = await harness();
+    const { run, session } = await h.builds.start(h.wsId, { ref: '1.1' });
+    h.tickets.set(run.worktreePath!, '1.1', 'built');
+    await h.endTurn(session.id);
+    expect(resultIn(h, run.id)).toMatchObject({ version: 1, runId: run.id, ticketRef: '1.1', status: 'built', commit: 'b'.repeat(40), baseRevision: REVISION, blockedCondition: null, blockedReason: null, intentGapPatch: null });
+    await h.builds.recorded();
+    const activity = readFileSync(join(h.dataDir, 'r', run.id, BUILD_ACTIVITY_FILE), 'utf8');
+    expect(activity).toContain('"type":"run.outcome_changed"');
+    expect(statSync(join(h.dataDir, 'r', run.id, BUILD_RESULT_FILE)).isFile()).toBe(true);
+
+    const unreadable = await harness();
+    const two = await unreadable.builds.start(unreadable.wsId, { ref: '1.1' });
+    unreadable.fingerprints.set(two.run.worktreePath!, 'edited by the agent');
+    await unreadable.endTurn(two.session.id);
+    expect(resultIn(unreadable, two.run.id).status).toBeNull();
+  });
+
+  it("a blocked run's result names the skill's condition (masked) and the run's reason", async () => {
+    const h = await harness();
+    const { run, session } = await h.builds.start(h.wsId, { ref: '1.1' });
+    h.tickets.set(run.worktreePath!, '1.1', 'blocked', 'unclear intent: key sk-ant-api03-abcdefghijklmnopqrstuvwxyz');
+    await h.endTurn(session.id);
+    const result = resultIn(h, run.id);
+    expect(result.status).toBe('blocked');
+    expect(result.blockedCondition).toMatch(/^unclear intent/);
+    expect(result.blockedCondition).not.toContain('sk-ant-api03-abcdefghijklmnopqrstuvwxyz');
+    expect(result.blockedReason).toContain('unclear intent');
+  });
+
+  it('plan_checkpoint: paused before the prompt is sent; a second Build is refused; resume sends it', async () => {
+    const h = await harness();
+    h.tickets.checkpoint('1.1', { plan: true });
+    const { run, session } = await h.builds.start(h.wsId, { ref: '1.1' });
+    expect(run).toMatchObject({ outcome: 'blocked', blockedCode: 'checkpoint_plan', reason: blockedSentence('checkpoint_plan') });
+    expect(h.sent).toEqual([]);
+    expect(resultIn(h, run.id)).toMatchObject({ status: 'ready-for-dev', blockedReason: blockedSentence('checkpoint_plan') });
+    expect(await codeOf(h.builds.start(h.wsId, { ref: '1.1' }))).toBe('run_active');
+
+    const resumed = await h.builds.resume(h.wsId, run.id);
+    expect(resumed).toMatchObject({ outcome: 'running', blockedCode: null });
+    expect(h.sent).toEqual([{ sessionId: session.id, text: '/build 1.1' }]);
+    h.tickets.set(run.worktreePath!, '1.1', 'built');
+    await h.endTurn(session.id);
+    expect(h.core.entities.getRun(run.id)?.outcome).toBe('verified');
+    // Not at a checkpoint any more: resume refuses, Retry is 5.8's.
+    expect(await codeOf(h.builds.resume(h.wsId, run.id))).toBe('run_not_active');
+    expect(((await refusal(h.builds.retry(h.wsId, run.id, {}))) as Error).name).toBe('NotImplementedError');
+  });
+
+  it("resume after a restart rebuilds the session's setup; it fails closed without a sandbox or worktree, and takes the guards", async () => {
+    const h = await harness();
+    h.tickets.checkpoint('1.1', { plan: true });
+    const { run, session } = await h.builds.start(h.wsId, { ref: '1.1' });
+    // As after a restart: the in-memory setup is gone.
+    h.core.buildSessions.delete(session.id);
+    h.sandbox.available = false;
+    expect(await codeOf(h.builds.resume(h.wsId, run.id))).toBe('sandbox_unavailable');
+    h.sandbox.available = true;
+    const worktrees = [...h.git.state.worktrees];
+    h.git.state.worktrees.clear();
+    expect(await codeOf(h.builds.resume(h.wsId, run.id))).toBe('run_not_active');
+    for (const each of worktrees) h.git.state.worktrees.add(each);
+    h.fingerprints.set(run.worktreePath!, 'edited');
+    expect(await refusal(h.builds.resume(h.wsId, run.id))).toBeInstanceOf(ScriptsChangedError);
+    h.fingerprints.delete(run.worktreePath!);
+    h.core.permissions.updateSettings(h.wsId, { bmadPieces: ['board'] });
+    expect(await refusal(h.builds.resume(h.wsId, run.id))).toBeInstanceOf(FeatureOffError);
+    h.core.permissions.updateSettings(h.wsId, { bmadPieces: ['board', 'builds'] });
+    expect(h.core.entities.getRun(run.id)?.blockedCode).toBe('checkpoint_plan');
+    expect(h.sent).toEqual([]);
+
+    await h.builds.retry(h.wsId, run.id, { mode: 'resume', note: 'Keep it short.' });
+    const setup = h.core.buildSessions.get(session.id)!;
+    expect(setup.cwd).toBe(run.worktreePath);
+    expect(setup.decide({ toolCallId: 't', title: 'w', kind: 'edit', paths: [join(h.repo, 'src', 'a.ts')] }).outcome).toBe('deny');
+    expect(h.sent).toHaveLength(1);
+    expect(((await refusal(h.builds.resume(h.wsId, 'nope'))) as Error).name).toBe('ValidationError');
+  });
+
+  it('done_checkpoint: paused when the plan is built, before the end checks; resume runs them', async () => {
+    const h = await harness();
+    h.tickets.checkpoint('1.1', { done: true });
+    const { run, session } = await h.builds.start(h.wsId, { ref: '1.1' });
+    h.tickets.set(run.worktreePath!, '1.1', 'built');
+    h.git.state.files = [];
+    await h.endTurn(session.id);
+    expect(h.core.entities.getRun(run.id)).toMatchObject({ outcome: 'blocked', blockedCode: 'checkpoint_done' });
+    expect(h.released).toContain(session.id);
+    expect(resultIn(h, run.id).status).toBe('built');
+    // The end checks run on resume: here an empty diff fails it.
+    expect(await h.builds.resume(h.wsId, run.id)).toMatchObject({ outcome: 'failed', reason: RUN_REASON_EMPTY_DIFF });
+    expect(h.sent).toHaveLength(1);
+  });
+});
+

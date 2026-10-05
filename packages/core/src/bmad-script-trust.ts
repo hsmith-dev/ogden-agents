@@ -45,9 +45,10 @@ export interface BmadScriptTrust {
    * as they are now must be the ones the user allowed, else
    * {@link ScriptsChangedError} (`scripts_changed`). Called right before
    * every run of the project's scripts. A fingerprint that can't be read
-   * counts as changed.
+   * counts as changed. Resolves to the trusted fingerprint, which the run
+   * re-checks against the bytes it uses (the maintained-fork story).
    */
-  requireScriptsUnchanged(workspaceId: WorkspaceId): Promise<void>;
+  requireScriptsUnchanged(workspaceId: WorkspaceId): Promise<string>;
   /**
    * The user allows the project's scripts to run, as they are now: stores
    * the trust with their fingerprint and appends one
@@ -93,12 +94,14 @@ export function createBmadScriptTrust({ orm, events, entities, fingerprint }: Bm
   const trusted = (workspaceId: string): boolean => row(workspaceId).trusted;
   const current = async (workspaceId: WorkspaceId): Promise<string | undefined> =>
     fingerprint === undefined ? 'none' : fingerprint(workspaceRepoPath(entities, workspaceId));
-  const unchanged = async (workspaceId: WorkspaceId): Promise<boolean> => {
+  /** The trusted fingerprint when the scripts as they are now still match it, else `undefined`. */
+  const matched = async (workspaceId: WorkspaceId): Promise<string | undefined> => {
     const stored = row(workspaceId);
-    if (!stored.trusted || stored.fingerprint === null) return false;
+    if (!stored.trusted || stored.fingerprint === null) return undefined;
     const now = await current(workspaceId);
-    return now !== undefined && now === stored.fingerprint;
+    return now !== undefined && now === stored.fingerprint ? stored.fingerprint : undefined;
   };
+  const unchanged = async (workspaceId: WorkspaceId): Promise<boolean> => (await matched(workspaceId)) !== undefined;
   return {
     scriptsTrusted: trusted,
     requireScriptsTrusted(workspaceId) {
@@ -106,7 +109,9 @@ export function createBmadScriptTrust({ orm, events, entities, fingerprint }: Bm
     },
     async requireScriptsUnchanged(workspaceId) {
       if (!trusted(workspaceId)) throw new ScriptsNotTrustedError();
-      if (!(await unchanged(workspaceId))) throw new ScriptsChangedError();
+      const fingerprint = await matched(workspaceId);
+      if (fingerprint === undefined) throw new ScriptsChangedError();
+      return fingerprint;
     },
     scriptsUnchanged: unchanged,
     async trustScripts(workspaceId) {

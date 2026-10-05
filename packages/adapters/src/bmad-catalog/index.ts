@@ -34,6 +34,8 @@ import { createSkillVerifier, type VerifiedSource } from './verified.js';
 
 export type { BmadSetupOptions } from './setup.js';
 export type { VerifiedSource } from './verified.js';
+export { createScriptsSnapshotter, SNAPSHOT_CONFIG_UTILS, type ScriptsSnapshot, type SnapshotScripts } from './scripts-snapshot.js';
+export { readProjectScripts, type ProjectScripts } from './scripts-fingerprint.js';
 
 /** The catalog without setup: only the pinned source its labels are verified against (entry 4.12). */
 export interface BmadCatalogReadOptions {

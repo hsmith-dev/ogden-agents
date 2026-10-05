@@ -286,5 +286,5 @@ export function createUpstreamBmadSource({ lock, ...options }: UpstreamBmadSourc
 }
 
 export { BMAD_LOCK, type BmadSourceName } from './lock.js';
-export { FOLDER_HASH_MAX_BYTES, FOLDER_HASH_MAX_ENTRIES, hashFolder, hashFolderWithCounts, type FolderHash, type FolderHashLimits } from './folder-hash.js';
+export { FOLDER_HASH_MAX_BYTES, FOLDER_HASH_MAX_ENTRIES, hashFolder, hashFolderWithCounts, readFolder, type FolderHash, type FolderHashLimits, type FolderRead } from './folder-hash.js';
 export { ArchiveRefusedError, extractTo, tarballUrl, gunzipLimited, hashEntries, normalizeText, parseTar, selectVerified, type Entries, type TarEntry } from './archive.js';

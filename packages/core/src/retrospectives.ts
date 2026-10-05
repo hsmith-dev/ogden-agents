@@ -19,6 +19,7 @@ import {
   EPIC_SLUG_PATTERN,
   LOOK_BACK_LABEL,
   RepoRelativePath,
+  type SaveLessonsResponse,
   type Session,
   type WorkspaceId,
 } from '@ogden-agents/shared';
@@ -28,7 +29,8 @@ import type { BmadFeatures } from './bmad-pieces.js';
 import type { BoardUseCases } from './board.js';
 import type { Chat } from './chat/types.js';
 import type { Entities } from './entities.js';
-import { NotFoundError, ValidationError } from './errors.js';
+import { NotFoundError, NotImplementedError, ValidationError } from './errors.js';
+import type { LookBackOffers } from './look-back-offers.js';
 import { insideOutputFolder } from './planning-documents.js';
 import { workspaceRepoPath } from './planning.js';
 
@@ -44,6 +46,26 @@ export interface RetrospectiveUseCases {
    * through. Nothing is created in each case.
    */
   lookBack(workspaceId: WorkspaceId, epic: string): Promise<Session>;
+  /**
+   * The epics whose finished-epic offer was dismissed (story 7.2). `FeatureOffError`
+   * with Retrospectives off, `NotFoundError` for an unknown workspace.
+   */
+  dismissedOffers(workspaceId: WorkspaceId): string[];
+  /** Not now for `epic`'s offer (story 7.2): as {@link LookBackOffers.dismiss}. */
+  dismissOffer(workspaceId: WorkspaceId, epic: string): void;
+  /**
+   * Starts a planning session on one of the retrospective's next steps, with
+   * the epic's retrospective file as its argument (story 7.5; frozen by 7.2).
+   * Until 7.5, `NotImplementedError` (501), after the piece guard.
+   */
+  startStep(workspaceId: WorkspaceId, epic: string, skill: string): Promise<Session>;
+  /**
+   * **Save the lessons for later builds** (story 7.5; frozen by 7.2): commits
+   * exactly `AGENTS.md` and the epic's retrospective file, locally, never
+   * pushed. `LessonsRefusedError` (`nothing_to_save`, `checkout_busy`,
+   * `agents_file_missing`) with nothing committed. Until 7.5, `NotImplementedError` (501), after the piece guard.
+   */
+  saveLessons(workspaceId: WorkspaceId, epic: string): Promise<SaveLessonsResponse>;
 }
 
 export interface RetrospectiveDeps {
@@ -59,6 +81,8 @@ export interface RetrospectiveDeps {
   agentOf?: ((session: Session) => Pick<AgentPort, 'skillInvocation'> | undefined) | undefined;
   /** The retrospective skill's name (the bmad-catalog adapter's data, never core's: AD-12). */
   skill: string;
+  /** The finished-epic offer's Not now (story 7.2). */
+  offers: Pick<LookBackOffers, 'dismissed' | 'dismiss'>;
 }
 
 /** One part of the output folder: plain name characters, a leading underscore allowed (`_bmad-output`), never a space, control character or leading dash. */
@@ -75,7 +99,7 @@ function epicFolder(outputFolder: string | null, initiative: string | null, epic
   return path;
 }
 
-export function createRetrospectives({ bmad, entities, board, catalog, chat, agent, agentOf, skill }: RetrospectiveDeps): RetrospectiveUseCases {
+export function createRetrospectives({ bmad, entities, board, catalog, chat, agent, agentOf, skill, offers }: RetrospectiveDeps): RetrospectiveUseCases {
   return {
     async lookBack(workspaceId, epic) {
       bmad.requireBmadFeature(workspaceId, 'retrospectives');
@@ -96,6 +120,19 @@ export function createRetrospectives({ bmad, entities, board, catalog, chat, age
       const session = await chat.createChatSession(workspaceId, { kind: 'planning', autoTitle: `${LOOK_BACK_LABEL}, ${epic}` });
       chat.sendMessage(workspaceId, session.id, (agentOf?.(session) ?? agent).skillInvocation(skill, folder));
       return session;
+    },
+
+    dismissedOffers: (workspaceId) => offers.dismissed(workspaceId),
+    dismissOffer: (workspaceId, epic) => offers.dismiss(workspaceId, epic),
+
+    async startStep(workspaceId) {
+      bmad.requireBmadFeature(workspaceId, 'retrospectives');
+      throw new NotImplementedError('Starting a retrospective step arrives with story 7.5.');
+    },
+
+    async saveLessons(workspaceId) {
+      bmad.requireBmadFeature(workspaceId, 'retrospectives');
+      throw new NotImplementedError('Saving the lessons arrives with story 7.5.');
     },
   };
 }

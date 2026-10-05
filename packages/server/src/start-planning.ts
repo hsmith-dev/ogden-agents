@@ -196,7 +196,7 @@ export function createPlanAndBoard({
   });
   const board = createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: bmadSource, entities: core.entities, catalog: bmadCatalog, tickets: boardTickets });
   // Looking back on an epic (story 7.1): a planning session on the retrospective skill, behind the Retrospectives piece; it reads the board's tree.
-  const retrospectives = createRetrospectives({ bmad: core.bmad, entities: core.entities, board, catalog: bmadCatalog, chat, agent, agentOf, skill: LOOK_BACK_SKILL });
+  const retrospectives = createRetrospectives({ bmad: core.bmad, entities: core.entities, board, catalog: bmadCatalog, chat, agent, agentOf, skill: LOOK_BACK_SKILL, offers: core.lookBackOffers });
   // One watch per project with Board on, trusted and BMad Method set up (story 4.8; the setup status is entry 4.3's):
   // an agent's ticket write reaches the board as `ticket.changed`.
   const ticketWatcher = createTicketWatcher({

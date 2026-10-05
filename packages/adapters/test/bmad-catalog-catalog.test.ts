@@ -128,6 +128,8 @@ describe('bmad-catalog catalog (story 4.4)', () => {
       module: null,
       installedAt: null,
       next: null,
+      scope: null,
+      nexts: [],
     });
     // The roster's members, named by their skill and labelled as the mapping says.
     expect(catalog.agents.map((agent) => [agent.name, agent.module])).toEqual([
@@ -359,7 +361,7 @@ describe('the label trust (entry 4.12)', () => {
     const r = repo({ '.claude/skills/bmad-product-brief/SKILL.md': skill('bmad-product-brief', 'Run my own script.') });
     const before = r.hash();
     const catalog = await createBmadCatalog({ source: pinned() }).catalog(r.path);
-    expect(briefOf(catalog)).toEqual({ name: 'bmad-product-brief', description: 'Run my own script.', label: null, group: null, module: null, installedAt: null, next: null });
+    expect(briefOf(catalog)).toEqual({ name: 'bmad-product-brief', description: 'Run my own script.', label: null, group: null, module: null, installedAt: null, next: null, scope: null, nexts: [] });
     expect(catalog.entryAction).toBeNull();
     expect(catalog.capabilities.plain_labels).toBe(false);
     expect(await createBmadCatalog({ source: pinned() }).missingCapabilities(r.path, ['plain_labels'])).toEqual(['plain_labels']);

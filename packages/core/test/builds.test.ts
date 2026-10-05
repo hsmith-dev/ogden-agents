@@ -291,7 +291,7 @@ describe('review loop 1 hardening (story 5.2)', () => {
     h.sandbox.available = false;
     expect(((await refusal(h.builds.start(h.wsId, { ref: '1.1' }))) as Error).message).toMatch(/none$/);
     const { prerequisitesMet } = await import('../src/builds.js');
-    const epics = [{ slug: 'epic-zero', id: 0, status: 'done', after: [], blocks: [] }];
+    const epics = [{ slug: 'epic-zero', id: 0, status: 'done', after: [], blocks: [], retrospective: null }];
     expect(prerequisitesMet({ ref: '1.1', after: ['epic-zero'] }, { tickets: [], epics })).toBe(true);
     expect(prerequisitesMet({ ref: '1.1', after: ['epic-zero'] }, { tickets: [], epics: [{ ...epics[0]!, status: 'in-progress' }] })).toBe(false);
   });

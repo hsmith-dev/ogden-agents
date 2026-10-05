@@ -15,6 +15,7 @@ import {
   createRetrospectives,
   FeatureOffError,
   NotFoundError,
+  NotImplementedError,
   ScriptsNotTrustedError,
   ValidationError,
   type AgentPort,
@@ -89,7 +90,7 @@ function setup(pieces: BmadPiece[] = PIECES) {
   };
   const agent = promptRecorder();
   const chat = createChat({ dataDir: tempDir(), entities: core.entities, sessionEvents: core.sessionEvents, agents: soleAgent(agent) });
-  const retrospectives = createRetrospectives({ bmad: core.bmad, entities: core.entities, board, catalog, chat, agent, skill: SKILL });
+  const retrospectives = createRetrospectives({ bmad: core.bmad, entities: core.entities, board, catalog, chat, agent, skill: SKILL, offers: core.lookBackOffers });
   return { core, workspace, retrospectives, state, reads, chat, agent };
 }
 
@@ -179,5 +180,19 @@ describe('look back on an epic (story 7.1)', () => {
     state.onCatalogRead = () => core.permissions.updateSettings(workspace.id, { bmadPieces: ['board'] });
     await expect(retrospectives.lookBack(workspace.id, 'epic-one')).rejects.toThrow(FeatureOffError);
     expect(core.entities.listSessions(workspace.id)).toEqual([]);
+  });
+});
+
+describe('the rest of the use-cases (story 7.2)', () => {
+  it('Not now goes through the guard, and the step and Save the lessons are behind it, not yet served', async () => {
+    const { retrospectives, workspace } = setup();
+    retrospectives.dismissOffer(workspace.id, 'epic-one');
+    expect(retrospectives.dismissedOffers(workspace.id)).toEqual(['epic-one']);
+    await expect(retrospectives.startStep(workspace.id, 'epic-one', 'bmad-project-context')).rejects.toThrow(NotImplementedError);
+    await expect(retrospectives.saveLessons(workspace.id, 'epic-one')).rejects.toThrow(NotImplementedError);
+    const off = setup(['board']);
+    expect(() => off.retrospectives.dismissOffer(off.workspace.id, 'epic-one')).toThrow(FeatureOffError);
+    await expect(off.retrospectives.startStep(off.workspace.id, 'epic-one', 'bmad-project-context')).rejects.toThrow(FeatureOffError);
+    await expect(off.retrospectives.saveLessons(off.workspace.id, 'epic-one')).rejects.toThrow(FeatureOffError);
   });
 });

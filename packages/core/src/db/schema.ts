@@ -47,6 +47,13 @@ export const workspaces = sqliteTable(
      */
     bmadOfferDismissed: integer('bmad_offer_dismissed', { mode: 'boolean' }).notNull().default(false),
     /**
+     * The epics whose "Look back on it?" offer the user answered with Not now
+     * (epic 7, story 7.2), as JSON array text of epic names, `[]` for new and
+     * upgraded workspaces. Changed only by `lookBackOffers.dismiss`; parsed
+     * only there, so a damaged value reads as none dismissed.
+     */
+    lookBackDismissed: text('look_back_dismissed').notNull().default('[]'),
+    /**
      * Whether the user allowed Ogden Agents to run this project's own BMad
      * Method scripts (story 4.2, AD-22 note 2026-10-02). Not trusted for new
      * and upgraded workspaces; changed only by `bmadScriptTrust.trustScripts`,

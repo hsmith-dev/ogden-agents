@@ -38,7 +38,7 @@ describe('catalog-memory: the catalog and setup (story 4.2)', () => {
     );
     const answer = Catalog.parse(await catalog.catalog('/repo'));
     expect(answer.skills.map((skill) => skill.name)).toEqual(['bmad-spec', 'bmad-ticket']);
-    expect(answer.skills[0]).toEqual({ name: 'bmad-spec', description: 'Spec.', label: null, group: null, module: null, installedAt: null, next: null });
+    expect(answer.skills[0]).toEqual({ name: 'bmad-spec', description: 'Spec.', label: null, group: null, module: null, installedAt: null, next: null, scope: null, nexts: [] });
     expect(answer.entryAction).toBe('bmad-spec');
     expect(answer.capabilities).toEqual({ plain_labels: true, ticket_tree: true });
     // Entry 4.11: a repo lacks no capability unless told (so every board and catalog works).

@@ -127,7 +127,7 @@ describe('what the install ships (story 10.2)', () => {
     const tab = await signIn(server);
     const workspace = await addProject(server, tab);
     const before = server.core.events.lastSeq();
-    for (const bmadPieces of [['builds'], ['retrospectives'], ['board', 'retrospectives']]) {
+    for (const bmadPieces of [['builds'], ['retrospectives'], ['planning', 'retrospectives']]) {
       const refused = await refusalOf(await request(server, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces }));
       expect(refused.status, JSON.stringify(bmadPieces)).toBe(400);
       expect(refused.code).toBe('invalid_request');

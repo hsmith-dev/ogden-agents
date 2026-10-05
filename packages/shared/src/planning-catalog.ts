@@ -108,6 +108,13 @@ export const CatalogSkill = z.object({
   installedAt: IsoUtcTimestamp.nullable().default(null),
   /** The next suggested step after it. */
   next: CatalogNext.nullable().default(null),
+  /**
+   * `epic` for a skill that takes an epic's folder and shows on the board's
+   * epic header, not in Plan home (epic 7, the look-back); `null` for every other.
+   */
+  scope: z.literal('epic').nullable().default(null),
+  /** Further next steps beside {@link next} (the look-back's lessons and action items); empty for most skills. */
+  nexts: z.array(CatalogNext).max(8).default([]),
 });
 export type CatalogSkill = z.infer<typeof CatalogSkill>;
 

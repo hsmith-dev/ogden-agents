@@ -55,14 +55,15 @@ export interface BmadPieceInfo {
 /**
  * Each piece's label, sentence and direct needs. The dependency rule:
  * `builds` needs `board` (dispatch reads the ticket tree and Build sits on
- * the board), `retrospectives` needs `builds` (a retrospective reads finished
- * runs); `planning` and `board` are independent.
+ * the board), `retrospectives` needs `board` (a look-back reads the ticket
+ * tree, not Ogden's runs; user decision 2026-10-02, story 7.2); `planning`
+ * and `board` are independent.
  */
 export const BMAD_PIECE_INFO: Readonly<Record<BmadPiece, BmadPieceInfo>> = {
   planning: { label: 'Planning', sentence: 'Turn an idea into a plan, a spec and tickets with guided steps.', needs: [], runsProjectScripts: false },
   board: { label: 'Board', sentence: "See this project's tickets on a board and move them along.", needs: [], runsProjectScripts: true },
   builds: { label: 'Unattended builds', sentence: 'Let an agent build tickets on its own, then review and approve the work.', needs: ['board'], runsProjectScripts: true },
-  retrospectives: { label: 'Retrospectives', sentence: 'Look back on finished work and record what to change next time.', needs: ['builds'], runsProjectScripts: true },
+  retrospectives: { label: 'Retrospectives', sentence: 'Look back on finished work and record what to change next time.', needs: ['board'], runsProjectScripts: true },
 };
 
 /** Whether any of `pieces` runs the project's own BMad Method scripts (so turning it on asks for the project's trust first). */
@@ -114,7 +115,7 @@ export interface BmadPieceChange {
  *
  * ```ts
  * applyBmadPieceChoice(['board'], 'builds', true)  // { pieces: ['board','builds'], turnedOn: [], turnedOff: [] }
- * applyBmadPieceChoice([], 'retrospectives', true) // { pieces: ['board','builds','retrospectives'], turnedOn: ['board','builds'], turnedOff: [] }
+ * applyBmadPieceChoice([], 'retrospectives', true) // { pieces: ['board','retrospectives'], turnedOn: ['board'], turnedOff: [] }
  * applyBmadPieceChoice(['board','builds','retrospectives'], 'board', false) // { pieces: [], turnedOn: [], turnedOff: ['builds','retrospectives'] }
  * ```
  */

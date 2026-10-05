@@ -25,6 +25,7 @@ import {
   ReviewResponse,
   SandboxStatusResponse,
   SessionRunResponse,
+  type CoreEvent,
   type Run,
 } from '@ogden-agents/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -100,11 +101,22 @@ export async function updateAndRetryRun(wsId: string, runId: string, auth: Auth 
   return RunResponse.parse(json).run;
 }
 
+/**
+ * The newest `seq` among the events `matches` (0 for none). A query refetches when this changes, never when a
+ * count does: the store trims a stream it does not keep whole, so an old event can leave as a new one arrives and
+ * leave the count where it was (a blocked run stayed "Building" on a slow computer, story 11.5).
+ */
+export function latestSeq(events: readonly CoreEvent[], matches: (event: CoreEvent) => boolean): number {
+  let latest = 0;
+  for (const event of events) if (matches(event) && event.seq > latest) latest = event.seq;
+  return latest;
+}
+
 /** A `build` session's run, refetched whenever the session's stream says its run changed. */
 export function useSessionRun(wsId: string, sesId: string, enabled: boolean) {
   const queryClient = useQueryClient();
   const events = useSessionEvents(wsId, sesId);
-  const runEvents = events.filter((event) => event.type === 'run.created' || event.type === 'run.dispatched' || event.type === 'run.outcome_changed').length;
+  const runEvents = latestSeq(events, (event) => event.type === 'run.created' || event.type === 'run.dispatched' || event.type === 'run.outcome_changed');
   useEffect(() => {
     if (runEvents > 0) void queryClient.invalidateQueries({ queryKey: ['session-run', wsId, sesId] });
   }, [runEvents, queryClient, wsId, sesId]);
@@ -116,7 +128,7 @@ export function useReview(wsId: string, ref: string) {
   const queryClient = useQueryClient();
   const { events } = useEventStream();
   // A run of this workspace changed (a build ending, a verification): the page reads again.
-  const relevant = events.filter((event) => event.workspaceId === wsId && event.type.startsWith('run.')).length;
+  const relevant = latestSeq(events, (event) => event.workspaceId === wsId && event.type.startsWith('run.'));
   useEffect(() => {
     if (relevant > 0) void queryClient.invalidateQueries({ queryKey: ['review', wsId, ref], exact: true });
   }, [relevant, queryClient, wsId, ref]);
@@ -189,7 +201,7 @@ export async function fetchRun(wsId: string, runId: string, auth: Auth = tabAuth
 export function useRunDetail(wsId: string, runId: string | undefined) {
   const queryClient = useQueryClient();
   const { events } = useEventStream();
-  const relevant = events.filter((event) => event.workspaceId === wsId && event.type.startsWith('run.')).length;
+  const relevant = latestSeq(events, (event) => event.workspaceId === wsId && event.type.startsWith('run.'));
   useEffect(() => {
     if (relevant > 0) void queryClient.invalidateQueries({ queryKey: ['run', wsId, runId], exact: true });
   }, [relevant, queryClient, wsId, runId]);
@@ -222,7 +234,7 @@ export async function saveBuildSettings(wsId: string, request: UpdateWorkspaceBu
 export function useWorkspaceRuns(wsId: string, enabled: boolean) {
   const queryClient = useQueryClient();
   const { events } = useEventStream();
-  const relevant = events.filter((event) => event.workspaceId === wsId && event.type.startsWith('run.')).length;
+  const relevant = latestSeq(events, (event) => event.workspaceId === wsId && event.type.startsWith('run.'));
   useEffect(() => {
     if (relevant > 0) void queryClient.invalidateQueries({ queryKey: ['runs', wsId], exact: true });
   }, [relevant, queryClient, wsId]);

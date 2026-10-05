@@ -3,13 +3,13 @@ title: 'Worktrees in the data folder'
 type: 'feature'
 ticket: '5'
 created: '2026-10-04'
-status: 'in-progress'
+status: 'in-review'
 baseline_revision: '2f3754286d2e84b2d3a1e57be79e9ed36ae464da'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick', 'security']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-unattended-builds/epic-unattended-builds.md'

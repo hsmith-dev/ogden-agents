@@ -120,7 +120,7 @@ export function createDecliningPermissions(): Permissions {
     removeRule: (_workspaceId, ruleId) => {
       throw new NotFoundError('permission rule', ruleId);
     },
-    getSettings: () => ({ cautionLevel: DEFAULT_CAUTION_LEVEL, bmadPieces: [], bmadScriptsTrusted: false, defaultModels: {} }),
+    getSettings: () => ({ cautionLevel: DEFAULT_CAUTION_LEVEL, bmadPieces: [], bmadScriptsTrusted: false }),
     updateSettings: (workspaceId) => {
       throw new NotFoundError('workspace', workspaceId);
     },

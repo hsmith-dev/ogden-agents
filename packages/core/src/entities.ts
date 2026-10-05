@@ -221,7 +221,7 @@ const toSession = (row: SessionRow): Session => ({
   driver: row.driver,
   permissionMode: row.permissionMode,
   ...(row.agentId === null ? {} : { agentId: row.agentId }),
-  model: row.model,
+  ...(row.model === null ? {} : { model: row.model }),
   title: row.title,
   adapterRefs: row.adapterRefs,
   createdAt: row.createdAt,
@@ -378,7 +378,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         // Every chat starts in Ask, whatever the agent's own settings say.
         permissionMode: 'ask',
         ...(input.agentId === undefined ? {} : { agentId: check(AgentIdSchema, input.agentId, 'agent id') }),
-        model: input.model === undefined || input.model === null ? null : check(ModelIdSchema, input.model, 'model'),
+        ...(input.model === undefined || input.model === null ? {} : { model: check(ModelIdSchema, input.model, 'model') }),
         title: input.title ?? null,
         adapterRefs: check(AdapterRefsSchema, input.adapterRefs ?? {}, 'adapter refs'),
         createdAt: at,
@@ -514,12 +514,14 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
       check(ModelChangeCauseSchema, cause, 'model change cause');
       return log.transaction(() => {
         const session = requireSession(id);
-        if (session.model === next) return session;
-        const updated: Session = { ...session, model: next, updatedAt: now() };
+        const previous = session.model ?? null;
+        if (previous === next) return session;
+        const { model: _old, ...rest } = session;
+        const updated: Session = { ...rest, ...(next === null ? {} : { model: next }), updatedAt: now() };
         orm.update(sessions).set({ model: next, updatedAt: updated.updatedAt }).where(eq(sessions.id, id)).run();
         sessionEvents.appendSessionEvent(session.id, {
           type: 'session.model_changed',
-          payload: { sessionId: session.id, model: next, previous: session.model, cause, ...(reason === undefined || reason === '' ? {} : { reason }) },
+          payload: { sessionId: session.id, model: next, previous, cause, ...(reason === undefined || reason === '' ? {} : { reason }) },
         });
         return updated;
       });

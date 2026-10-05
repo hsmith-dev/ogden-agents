@@ -117,12 +117,12 @@ export const Session = z.object({
    */
   agentId: AgentId.optional(),
   /**
-   * The model the chat runs on (story 11): the agent's own id for it, or
-   * `null` for the agent's own choice. Absent in `session.created` events and
-   * rows from before it existed: they read as `null`. Changed only by core,
-   * each change a `session.model_changed` event.
+   * The model the chat runs on (story 11): the agent's own id for it.
+   * Absent: the agent's own choice (and every session from before models
+   * could be chosen). Changed only by core, each change a
+   * `session.model_changed` event.
    */
-  model: ModelId.nullable().default(null),
+  model: ModelId.optional(),
   title: z.string().nullable(),
   adapterRefs: AdapterRefs,
   createdAt: IsoUtcTimestamp,

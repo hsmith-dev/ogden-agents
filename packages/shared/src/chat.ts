@@ -249,8 +249,11 @@ export const WorkspaceSettings = z.object({
   bmadPieces: BmadPieceSet,
   bmadScriptsTrusted: z.boolean().default(false),
   defaultAgentId: AgentId.optional(),
-  /** The project's own default model per agent (story 11); an agent missing from it uses the install's default. */
-  defaultModels: z.record(AgentId, ModelId).default({}),
+  /**
+   * The project's own default model per agent (story 11); an agent missing
+   * from it uses the install's default. Absent: none (and from older servers).
+   */
+  defaultModels: z.record(AgentId, ModelId).optional(),
 });
 export type WorkspaceSettings = z.infer<typeof WorkspaceSettings>;
 

@@ -85,7 +85,7 @@ export function createModels(ctx: ChatContext) {
     for (let attempt = 0; attempt < 2; attempt++) {
       const session = entities.getSession(sessionId);
       if (session === undefined) return 'ok';
-      const want = session.model;
+      const want = session.model ?? null;
       if (want === entry.appliedModel) return 'ok';
       if (started.setModel === undefined) {
         if (takesModelAtStart(agentIdOf(session))) return 'restart';
@@ -112,7 +112,7 @@ export function createModels(ctx: ChatContext) {
       }
       try {
         // Only if the chat still says that model: a newer choice is applied in its own turn.
-        if (entities.getSession(sessionId)?.model === want) {
+        if ((entities.getSession(sessionId)?.model ?? null) === want) {
           const name = agentOf(sessionId).displayName;
           const why = refusal(result.error);
           const label = modelName(listFor(sessionId), want);
@@ -137,7 +137,7 @@ export function createModels(ctx: ChatContext) {
     if (session === undefined) return;
     const current = sessionModels.get(sessionId);
     if (current !== undefined) sessionModels.set(sessionId, { ...current, current: event.model });
-    if (session.model === null || session.model === event.model) return;
+    if (session.model === undefined || session.model === event.model) return;
     const parsed = ModelIdSchema.safeParse(event.model);
     const next = parsed.success ? parsed.data : null;
     entry.appliedModel = next;
@@ -168,7 +168,7 @@ export function createModels(ctx: ChatContext) {
       if (!parsed.success) throw new ValidationError("Choose a model the agent offers, or the agent's default.", [{ path: ['model'], message: 'not a model id' }]);
       if (session.driver === 'terminal') throw new DriverIsTerminalError('The terminal is driving this chat. Switch back to the chat to change its model.');
       if (switching.has(sessionId)) throw new SessionNotIdleError('This chat is switching to or from the terminal. Try again in a moment.');
-      if (session.model === parsed.data) return session;
+      if ((session.model ?? null) === parsed.data) return session;
       const list = listFor(sessionId);
       if (parsed.data !== null && list !== undefined && !list.some((each) => each.id === parsed.data)) {
         throw new ModelUnavailableError(`${agentOf(sessionId).displayName} doesn't offer that model here. Choose one from the list.`);

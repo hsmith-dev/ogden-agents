@@ -183,10 +183,10 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     const body = await readBody(c, SetSessionModelRequest);
     if (!body.ok) return body.response;
     try {
-      const before = chat.getSession(scope.workspaceId, scope.sessionId).model;
+      const before = chat.getSession(scope.workspaceId, scope.sessionId).model ?? null;
       const session = chat.setModel(scope.workspaceId, scope.sessionId, body.value.model);
       // The model id is the agent's own name for a model, never a secret.
-      if (session.model !== before) log.info('chat model changed', { workspaceId: scope.workspaceId, sessionId: scope.sessionId, model: session.model, previous: before });
+      if ((session.model ?? null) !== before) log.info('chat model changed', { workspaceId: scope.workspaceId, sessionId: scope.sessionId, model: session.model ?? null, previous: before });
       return c.json(SessionResponse.parse({ session, models: chat.modelOptions(scope.workspaceId, scope.sessionId) }));
     } catch (error) {
       if (error instanceof CoreError) log.info('chat model refused', { workspaceId: scope.workspaceId, sessionId: scope.sessionId, code: error.code });

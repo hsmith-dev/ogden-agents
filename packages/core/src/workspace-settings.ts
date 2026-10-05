@@ -86,6 +86,9 @@ export function readDefaultModels(orm: Orm, workspaceId: string): Record<AgentId
   return models;
 }
 
+/** The settings' `defaultModels`, present only when the project has one. */
+const modelsField = (models: Record<AgentId, string>) => (Object.keys(models).length === 0 ? {} : { defaultModels: models });
+
 /** Whether two default-model maps say the same. */
 const sameModels = (a: Readonly<Record<string, string>>, b: Readonly<Record<string, string>>) =>
   Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([agentId, model]) => b[agentId] === model);
@@ -123,7 +126,7 @@ export function createWorkspaceSettings({ db, events, isBmadPieceAvailable, isAg
       if (cautionLevel === undefined || bmadPieces === undefined || bmadScriptsTrusted === undefined || defaultAgentId === null || defaultModels === null) {
         throw new NotFoundError('workspace', workspaceId);
       }
-      return { cautionLevel, bmadPieces, bmadScriptsTrusted, ...(defaultAgentId === undefined ? {} : { defaultAgentId }), defaultModels };
+      return { cautionLevel, bmadPieces, bmadScriptsTrusted, ...(defaultAgentId === undefined ? {} : { defaultAgentId }), ...modelsField(defaultModels) };
     },
 
     updateSettings(workspaceId, input) {
@@ -190,7 +193,7 @@ export function createWorkspaceSettings({ db, events, isBmadPieceAvailable, isAg
           else defaultModels[agentId] = model;
         }
         const modelsChanged = !sameModels(defaultModels, previousModels);
-        const settings = { cautionLevel: level, bmadPieces: pieces, bmadScriptsTrusted, ...(defaultAgentId === undefined ? {} : { defaultAgentId }), defaultModels };
+        const settings = { cautionLevel: level, bmadPieces: pieces, bmadScriptsTrusted, ...(defaultAgentId === undefined ? {} : { defaultAgentId }), ...modelsField(defaultModels) };
         if (level === previous && !piecesChanged && !agentChanged && !modelsChanged) return settings;
         orm
           .update(workspaces)

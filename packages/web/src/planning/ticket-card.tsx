@@ -1,4 +1,4 @@
-import { boardCardLabel, boardColumnOf, BUILD_LABEL, buildFailedText, RUN_PHASE_LABELS, type TicketRow } from '@ogden-agents/shared';
+import { boardCardLabel, boardColumnOf, BUILD_THIS_STORY_LABEL, buildFailedText, RUN_PHASE_LABELS, type TicketRow } from '@ogden-agents/shared';
 import { Hammer, Lock, Prohibit, XCircle } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
 import { memo } from 'react';
@@ -43,7 +43,8 @@ export interface TicketCardProps {
  */
 export const TicketCard = memo(function TicketCard({ wsId, row, status, highlighted, onChoose, busy = false, onBuild, building = false, queued = false, buildFailure }: TicketCardProps) {
   const column = boardColumnOf(row);
-  const buildable = onBuild !== undefined && row.status === 'ready-for-dev' && !queued;
+  // Never on a ticket with an unmet prerequisite (it keeps "Waits for 1.2", story 11.3).
+  const buildable = onBuild !== undefined && row.status === 'ready-for-dev' && !queued && status.kind !== 'waits';
   return (
     <div className="relative min-w-0">
       <Link
@@ -97,14 +98,14 @@ export const TicketCard = memo(function TicketCard({ wsId, row, status, highligh
           size="sm"
           className="absolute right-1 bottom-1"
           data-testid="ticket-build"
-          aria-label={`${BUILD_LABEL} ${row.ref}`}
+          aria-label={`${BUILD_THIS_STORY_LABEL} ${row.ref}`}
           aria-disabled={building || undefined}
           onClick={() => {
             if (!building) onBuild(row.ref);
           }}
         >
           <Hammer aria-hidden />
-          {BUILD_LABEL}
+          {BUILD_THIS_STORY_LABEL}
         </Button>
       ) : null}
     </div>

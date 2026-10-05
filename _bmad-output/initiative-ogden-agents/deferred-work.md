@@ -62,6 +62,8 @@ Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim fr
 - Unowned (security): redact more secret shapes than Anthropic and Google keys from a chat's automatic name. From backlog story 2's review. (log: "Redact more secret shapes (GitHub, AWS, OpenAI project keys")
 - Unowned (accessibility): name the chat in the waiting announcement, and share one live region for rename announcements. From backlog story 2's review. (log: "as Needs you rows now do, and share one live region for rename announcements")
 - Unowned: older planning chats are named from their skill invocation, not their action's label. From backlog story 2's review. (log: "Older planning chats are named from their stored skill invocation")
+- Event store (not yet ticketed): keep a session's latest check-in when the live window is trimmed. From backlog 8 review. (log: "Keep a session's latest `session.check_in` when the live event window is trimmed")
+- Notifications follow-up (not yet ticketed): play the chime from a tab with user activation. From backlog 8 review. (log: "Play the attention chime from a tab that can play sound")
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
 
@@ -568,3 +570,10 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-each-chat-has-a-name-the-user-can-change-plan.md`
   summary: Older planning chats are named from their stored skill invocation, not their action's label.
   evidence: Review of chat names; the backfill has only the first message to go on.
+
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-ogden-notifies-you-with-a-sound-when-something-needs-you-plan.md`
+  summary: Keep a session's latest `session.check_in` when the live event window is trimmed, so an "Agent is quiet" need does not drop from Needs you while the agent is still quiet.
+  evidence: `trimWorkspaces` in `packages/web/src/events/event-store.ts` keeps each session's latest state change and open permission requests but not its check-in; past 2000 events in the workspace the check-in is trimmed (review of backlog 8, finding 3).
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-ogden-notifies-you-with-a-sound-when-something-needs-you-plan.md`
+  summary: Play the attention chime from a tab that can play sound (has user activation) instead of whichever tab holds the leader lock.
+  evidence: browsers allow AudioContext only after a user gesture in that tab; a launcher-opened or reloaded leader stays silent (review of backlog 8, finding 11). The Settings copy now says so.

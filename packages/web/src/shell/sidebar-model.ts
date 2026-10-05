@@ -1,6 +1,6 @@
-import { chatName, NEW_CHAT_NAME, type CoreEvent, type Session, type SessionState, type Workspace } from '@ogden-agents/shared';
+import { chatName, NEW_CHAT_NAME, type CoreEvent, type Session, type SessionErrorCode, type SessionState, type Workspace } from '@ogden-agents/shared';
 import { UNKNOWN_AGENT_NAME } from '@/chat/chat-api';
-import { sessionView, type TranscriptPermission } from '@/chat/transcript';
+import { sessionView, type TranscriptCheckIn, type TranscriptPermission } from '@/chat/transcript';
 import { streamEvents, type EventStoreState } from '@/events/event-store';
 import { permissionAnnouncement } from '@/permissions/permission-card';
 import { workspaceName } from '@/workspaces/workspace-api';
@@ -36,14 +36,23 @@ export interface SidebarWorkspace {
   summary: { state: SessionState; count: number }[];
 }
 
-/** One thing waiting on the user: a permission request, or a waiting session whose request is older than the window. */
+/**
+ * What kind of thing waits on the user: a permission request, a waiting
+ * session whose request is older than the window, a working agent that went
+ * quiet (`session.check_in`, story 2.10), or a chat stopped until its agent
+ * is signed in again (`auth_required`, 9.4). Build checkpoints join later.
+ */
+export type NeedKind = 'permission' | 'waiting' | 'check_in' | 'sign_in';
+
+/** One thing waiting on the user, of one {@link NeedKind}. */
 export interface NeedsYouEntry {
-  /** The request id, or the session id when the request is not in the window. */
+  /** Unique per need: a new need of the same chat gets a new id, so it is notified once. */
   id: string;
+  kind: NeedKind;
   wsId: string;
   sesId: string;
   workspaceName: string;
-  /** The chat it waits in, by its name (backlog story 2). */
+  /** The chat it waits in, by its name (backlog story 12): the only chat detail a notification shows. */
   chatName: string;
   text: string;
   /** The product name of the session's agent (epic 6), for its announcement. */
@@ -71,6 +80,12 @@ export const UNTITLED = NEW_CHAT_NAME;
 /** The Needs you text for a waiting session whose request is older than the window, naming its agent (epic 6). */
 export const waitingText = (agentName: string) => `${agentName} is waiting for you`;
 
+/** The Needs you text for an agent that has been quiet (session-page.tsx's check-in words, never the tool call it waits on). */
+export const checkInText = (agentName: string) => `${agentName} has been quiet for 10 minutes`;
+
+/** The Needs you text for a chat stopped until its agent is signed in again. */
+export const signInText = (agentName: string) => `${agentName} needs you to sign in again`;
+
 const rank = (state: SessionState) => STATE_ORDER.indexOf(state);
 const time = (iso: string) => Date.parse(iso) || 0;
 
@@ -80,7 +95,53 @@ function compareRows(a: SidebarRow, b: SidebarRow): number {
 }
 
 /** A session's stream folded once per stream array: the array keeps its identity until the session's next event. */
-const permissionsByStream = new WeakMap<readonly CoreEvent[], { state: SessionState | undefined; requested: TranscriptPermission[] }>();
+const foldedByStream = new WeakMap<readonly CoreEvent[], FoldedStream>();
+
+/** What Needs you reads from a session's event window. */
+interface FoldedStream {
+  state: SessionState | undefined;
+  requested: TranscriptPermission[];
+  checkIn: TranscriptCheckIn | undefined;
+  errorCode: SessionErrorCode | undefined;
+  /** The `seq` of the latest move to `error` in the window: a later sign-in need is a new one. */
+  errorSeq: number | undefined;
+}
+
+/** A session's window folded once per stream array; `undefined` when the window has nothing of it. */
+function foldStream(store: EventStoreState, session: Session): FoldedStream | undefined {
+  // Only the states Needs you reads: a working chat streaming deltas is not refolded on each one.
+  if (session.state !== 'waiting' && session.state !== 'working' && session.state !== 'error') return undefined;
+  const events = streamEvents(store, session.workspaceId, session.id);
+  if (events.length === 0) return undefined;
+  let folded = foldedByStream.get(events);
+  if (folded === undefined) {
+    let state: SessionState | undefined;
+    let requested: TranscriptPermission[] = [];
+    let errorCode: SessionErrorCode | undefined;
+    let errorSeq: number | undefined;
+    if (session.state === 'waiting') {
+      // The whole transcript only for a waiting chat: its open requests.
+      const view = sessionView(events, session.id);
+      state = view.state;
+      requested = view.items.flatMap((item) => (item.type === 'permission' && item.permission.resolution === undefined ? [item.permission] : []));
+    } else {
+      const lastState = events.findLast((event) => event.streamId === session.id && event.type === 'session.state_changed');
+      if (lastState?.type === 'session.state_changed') {
+        state = lastState.payload.state;
+        if (state === 'error') {
+          errorCode = lastState.payload.errorCode;
+          errorSeq = lastState.seq;
+        }
+      }
+    }
+    // A check-in stands while it is the session's latest event.
+    const last = events.findLast((event) => event.streamId === session.id);
+    const checkIn = last?.type === 'session.check_in' ? { waitingOn: last.payload.waitingOn, at: last.at } : undefined;
+    folded = { state, requested, checkIn, errorCode, errorSeq };
+    foldedByStream.set(events, folded);
+  }
+  return folded;
+}
 
 /**
  * A waiting session's requests still waiting for an answer, and the state
@@ -88,17 +149,8 @@ const permissionsByStream = new WeakMap<readonly CoreEvent[], { state: SessionSt
  * it). When the window holds the request but not the `waiting` state change
  * (the state comes from REST), its requests with no answer still count.
  */
-function pendingRequests(store: EventStoreState, session: Session): { requests: TranscriptPermission[]; windowState: SessionState | undefined } {
-  if (session.state !== 'waiting') return { requests: [], windowState: undefined };
-  const events = streamEvents(store, session.workspaceId, session.id);
-  if (events.length === 0) return { requests: [], windowState: undefined };
-  let folded = permissionsByStream.get(events);
-  if (folded === undefined) {
-    const view = sessionView(events, session.id);
-    const requested = view.items.flatMap((item) => (item.type === 'permission' && item.permission.resolution === undefined ? [item.permission] : []));
-    folded = { state: view.state, requested };
-    permissionsByStream.set(events, folded);
-  }
+function pendingRequests(folded: FoldedStream | undefined, session: Session): { requests: TranscriptPermission[]; windowState: SessionState | undefined } {
+  if (session.state !== 'waiting' || folded === undefined) return { requests: [], windowState: undefined };
   // The stream saw the session move on from waiting since: its requests were let go.
   if (folded.state !== undefined && folded.state !== 'waiting') return { requests: [], windowState: folded.state };
   return { requests: folded.requested, windowState: folded.state };
@@ -137,11 +189,15 @@ export function buildSidebar(
       else rows.push(row);
       counts.set(session.state, (counts.get(session.state) ?? 0) + 1);
 
-      const { requests, windowState } = pendingRequests(store, session);
+      const folded = foldStream(store, session);
+      const { requests, windowState } = pendingRequests(folded, session);
+      const agent = agentName(session.agentId);
+      const base = { wsId: workspace.id, sesId: session.id, workspaceName: name, chatName: row.title, agentName: agent };
       for (const request of requests) {
         const announcement = permissionAnnouncement(request);
         needsYou.push({
           id: request.requestId,
+          kind: 'permission',
           wsId: workspace.id,
           sesId: session.id,
           workspaceName: name,
@@ -156,7 +212,14 @@ export function buildSidebar(
       // `waiting` the window saw with no open request is a moment between events (the request
       // not yet arrived, or answered before `working`), not something to show.
       if (requests.length === 0 && session.state === 'waiting' && windowState === undefined) {
-        needsYou.push({ id: session.id, wsId: workspace.id, sesId: session.id, workspaceName: name, chatName: row.title, text: waitingText(agentName(session.agentId)), agentName: agentName(session.agentId), at: session.updatedAt });
+        needsYou.push({ ...base, id: `waiting:${session.id}:${session.updatedAt}`, kind: 'waiting', text: waitingText(agent), at: session.updatedAt });
+      }
+      // A check-in stands while the window still has the session working and nothing after it.
+      if (session.state === 'working' && folded?.checkIn !== undefined && (folded.state === undefined || folded.state === 'working')) {
+        needsYou.push({ ...base, id: `check_in:${session.id}:${folded.checkIn.at}`, kind: 'check_in', text: checkInText(agent), at: folded.checkIn.at });
+      }
+      if (session.state === 'error' && folded?.errorCode === 'auth_required' && (folded.state === undefined || folded.state === 'error')) {
+        needsYou.push({ ...base, id: `sign_in:${session.id}:${folded.errorSeq ?? session.updatedAt}`, kind: 'sign_in', text: signInText(agent), at: session.updatedAt });
       }
     }
     rows.sort(compareRows);
@@ -240,11 +303,12 @@ export function diffForAnnouncements(previous: SidebarModel, next: SidebarModel)
   }
   const known = new Set(previous.needsYou.map((entry) => entry.id));
   // A request in a session the sidebar did not have yet is its list loading, not news.
-  const assertive = next.needsYou.flatMap((entry) =>
-    entry.request === undefined || known.has(entry.id) || !before.has(entry.sesId)
-      ? []
-      : [{ id: entry.id, sesId: entry.sesId, text: `${waitingText(entry.agentName)}: ${entry.request}` }],
-  );
+  // A quiet agent or a sign-in need changes no state worth a word on its own, so it is said here, never only by sound.
+  const assertive = next.needsYou.flatMap((entry) => {
+    if (known.has(entry.id) || !before.has(entry.sesId)) return [];
+    if (entry.kind === 'check_in' || entry.kind === 'sign_in') return [{ id: entry.id, sesId: entry.sesId, text: `${entry.workspaceName}: ${entry.text}` }];
+    return entry.request === undefined ? [] : [{ id: entry.id, sesId: entry.sesId, text: `${waitingText(entry.agentName)}: ${entry.request}` }];
+  });
   return { polite, assertive };
 }
 

@@ -1,4 +1,4 @@
-import { FolderSimplePlus, GearSix, HandWaving, PaintBrush, Plus, Robot, Wrench } from '@phosphor-icons/react';
+import { Bell, FolderSimplePlus, GearSix, HandWaving, PaintBrush, Plus, Robot, Wrench } from '@phosphor-icons/react';
 import { NEW_PROJECTS_SETTINGS_LABEL } from '@ogden-agents/shared';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { memo, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -317,7 +317,7 @@ const SessionRow = memo(function SessionRow({
   );
 });
 
-/** Settings sections: Agents (9.1), Appearance, New projects (10.4) and Tools (Notifications arrives with a later epic), and Welcome again (9.5). */
+/** Settings sections: Agents (9.1), Appearance, New projects (10.4), Notifications (backlog story 8; webhooks join it with builds) and Tools, and Welcome again (9.5). */
 function SettingsMenu() {
   const { setSheetOpen } = useSidebar();
   return (
@@ -346,6 +346,12 @@ function SettingsMenu() {
           <Link to="/settings/new-projects">
             <FolderSimplePlus aria-hidden />
             {NEW_PROJECTS_SETTINGS_LABEL}
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
+          <Link to="/settings/notifications">
+            <Bell aria-hidden />
+            Notifications
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>

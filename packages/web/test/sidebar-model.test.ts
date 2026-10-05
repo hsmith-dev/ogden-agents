@@ -47,7 +47,7 @@ describe('buildSidebar (EXPERIENCE.md Status sidebar)', () => {
     // A chat with no name and no message yet (backlog story 2).
     expect(model.groups[1]!.rows[0]!.title).toBe('New chat');
     expect(model.needsYou).toEqual([
-      { id: 'req_1', wsId: 'ws_b', sesId: 'ses_b', workspaceName: 'Letterpress', chatName: 'New chat', text: 'Claude Code wants to run npm test', agentName: 'Claude Code', at: expect.any(String), request: 'run npm test' },
+      { id: 'req_1', kind: 'permission', chatName: 'New chat', wsId: 'ws_b', sesId: 'ses_b', workspaceName: 'Letterpress', text: 'Claude Code wants to run npm test', agentName: 'Claude Code', at: expect.any(String), request: 'run npm test' },
     ]);
   });
 
@@ -97,7 +97,37 @@ describe('buildSidebar (EXPERIENCE.md Status sidebar)', () => {
 
   it('request outside the window: a waiting session still needs you, with the plain text', () => {
     const model = buildSidebar([B], [session('ses_b', 'ws_b', 'waiting', ago(3 * MINUTE))], emptyStore(), NOW, CLAUDE);
-    expect(model.needsYou).toEqual([{ id: 'ses_b', wsId: 'ws_b', sesId: 'ses_b', workspaceName: 'Letterpress', chatName: 'New chat', text: 'Claude Code is waiting for you', agentName: 'Claude Code', at: ago(3 * MINUTE) }]);
+    expect(model.needsYou).toEqual([{ id: `waiting:ses_b:${ago(3 * MINUTE)}`, kind: 'waiting', chatName: 'New chat', wsId: 'ws_b', sesId: 'ses_b', workspaceName: 'Letterpress', text: 'Claude Code is waiting for you', agentName: 'Claude Code', at: ago(3 * MINUTE) }]);
+  });
+
+  it('a working agent that checked in needs you, without naming what it waits on, until anything else happens', () => {
+    const checkIn = event('ws_b', 'ses_b', 'session.check_in', { sessionId: 'ses_b', waitingOn: 'Run cat ~/.ssh/id_rsa' }, ago(2 * MINUTE));
+    const titled = session('ses_b', 'ws_b', 'working', ago(MINUTE), 'Refunds');
+    const model = buildSidebar([B], [titled], store(checkIn), NOW, CLAUDE);
+    expect(model.needsYou).toEqual([
+      { id: `check_in:ses_b:${ago(2 * MINUTE)}`, kind: 'check_in', chatName: 'Refunds', wsId: 'ws_b', sesId: 'ses_b', workspaceName: 'Letterpress', text: 'Claude Code has been quiet for 10 minutes', agentName: 'Claude Code', at: ago(2 * MINUTE) },
+    ]);
+    const delta = event('ws_b', 'ses_b', 'session.message_delta', { messageId: 'm1', role: 'agent', text: 'back' });
+    expect(buildSidebar([B], [titled], store(checkIn, delta), NOW, CLAUDE).needsYou).toEqual([]);
+    // The session moved on (REST says idle): the check-in no longer stands.
+    expect(buildSidebar([B], [session('ses_b', 'ws_b', 'idle')], store(checkIn), NOW, CLAUDE).needsYou).toEqual([]);
+  });
+
+  it('a new check-in in a chat already shown is said assertively, so sound is never the only signal', () => {
+    const titled = session('ses_b', 'ws_b', 'working');
+    const before = buildSidebar([B], [titled], emptyStore(), NOW, CLAUDE);
+    const checkIn = event('ws_b', 'ses_b', 'session.check_in', { sessionId: 'ses_b' });
+    const after = buildSidebar([B], [titled], store(checkIn), NOW, CLAUDE);
+    expect(diffForAnnouncements(before, after).assertive.map((a) => a.text)).toEqual(['Letterpress: Claude Code has been quiet for 10 minutes']);
+  });
+
+  it('a chat stopped until its agent signs in again needs you; another error does not', () => {
+    const signIn = event('ws_b', 'ses_b', 'session.state_changed', { sessionId: 'ses_b', state: 'error', previous: 'working', reason: 'Sign in again', errorCode: 'auth_required' });
+    const model = buildSidebar([B], [session('ses_b', 'ws_b', 'error')], store(signIn), NOW, CLAUDE);
+    expect(model.needsYou).toMatchObject([{ id: `sign_in:ses_b:${signIn.seq}`, kind: 'sign_in', text: 'Claude Code needs you to sign in again' }]);
+    const failed = event('ws_b', 'ses_b', 'session.state_changed', { sessionId: 'ses_b', state: 'error', previous: 'working', reason: 'It failed', errorCode: 'agent_failed' });
+    expect(buildSidebar([B], [session('ses_b', 'ws_b', 'error')], store(failed), NOW, CLAUDE).needsYou).toEqual([]);
+    expect(buildSidebar([B], [session('ses_b', 'ws_b', 'idle')], store(signIn), NOW, CLAUDE).needsYou).toEqual([]);
   });
 
   it('the window has the session but no state for it: a waiting session still gets the plain row', () => {

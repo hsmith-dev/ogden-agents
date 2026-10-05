@@ -51,15 +51,23 @@ export interface PaneMirrorOptions {
   scrollback: number;
 }
 
+/**
+ * The packages' names, in variables so TypeScript does not resolve their types here: xterm's typings pull
+ * the DOM library into this package (as `node-pty`'s name is kept, AD-19), and this uses a small part of them.
+ */
+const HEADLESS = '@xterm/headless';
+const SERIALIZE = '@xterm/addon-serialize';
+const UNICODE11 = '@xterm/addon-unicode11';
+
 type Loaded = { Terminal?: unknown; default?: { Terminal?: unknown; SerializeAddon?: unknown; Unicode11Addon?: unknown }; SerializeAddon?: unknown; Unicode11Addon?: unknown };
 
 /** Both packages are CommonJS: their classes are named exports or on `default`, whichever the loader gives. */
 async function loadModules(): Promise<MirrorModules> {
-  const headless = (await import('@xterm/headless')) as unknown as Loaded;
-  const serialize = (await import('@xterm/addon-serialize')) as unknown as Loaded;
+  const headless = (await import(HEADLESS)) as unknown as Loaded;
+  const serialize = (await import(SERIALIZE)) as unknown as Loaded;
   const Terminal = headless.Terminal ?? headless.default?.Terminal;
   const SerializeAddon = serialize.SerializeAddon ?? serialize.default?.SerializeAddon;
-  const unicode = (await import('@xterm/addon-unicode11')) as unknown as Loaded;
+  const unicode = (await import(UNICODE11)) as unknown as Loaded;
   const Unicode11Addon = unicode.Unicode11Addon ?? unicode.default?.Unicode11Addon;
   if (typeof Terminal !== 'function' || typeof SerializeAddon !== 'function') throw new Error('the terminal mirror could not be loaded');
   return { Terminal, SerializeAddon, Unicode11Addon } as MirrorModules;

@@ -34,6 +34,8 @@ import type { AcpToolInputPaths } from '../acp-base/tool-paths.js';
 import { LOCAL_DESCRIPTOR } from '../setup-local/descriptor.js';
 import { installedOpenCode } from '../setup-local/layout.js';
 import { opencodeEnvProblems } from './config.js';
+import { localFailureWords } from './failures.js';
+import { withEndpointWatch, type EndpointWatchOptions } from './watch.js';
 import { LOCAL, LOCAL_MODE_IDS, OPENCODE_SWITCHES } from './constants.js';
 
 /** Input fields that name a path in its tools (spike 14.1: `filePath` for read, edit and write; `path` for a search's folder). */
@@ -53,6 +55,8 @@ export interface LocalAgentOptions {
    * binary in {@link dataDir} with `acp`; `undefined` from it means not installed.
    */
   server?: (() => LocalServerCommand | undefined) | undefined;
+  /** How often and how strictly Ogden looks at the endpoint during a turn (tests: faster). */
+  watch?: EndpointWatchOptions | undefined;
   /** Called with protocol notes, for the log. Never includes the environment. */
   onDiagnostic?: ((message: string, fields?: Record<string, unknown>) => void) | undefined;
 }
@@ -90,8 +94,10 @@ export function createLocalAgent(options: LocalAgentOptions): AgentPort {
     authMethod: () => undefined,
     // The chat's mode, once: Ask is all it has, so there is nothing to send.
     startOptions: () => ({ guardsPaths: false }),
+    failureReason: localFailureWords,
     commandFields: ['command'],
     skillInvocation: slashSkillInvocation,
   };
-  return createAcpAgent(LOCAL_DESCRIPTOR, quirks, { onDiagnostic: options.onDiagnostic });
+  // Ogden looks at the endpoint itself, so a server that stopped is said at once and never waited out (story 14.6).
+  return withEndpointWatch(createAcpAgent(LOCAL_DESCRIPTOR, quirks, { onDiagnostic: options.onDiagnostic }), options.watch);
 }

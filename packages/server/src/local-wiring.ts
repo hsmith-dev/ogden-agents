@@ -103,7 +103,7 @@ export function localWiring(input: {
       input.onDiagnostic?.('the Local model could not be prepared', { code: (error as NodeJS.ErrnoException).code ?? 'unknown' });
       throw new AgentError('agent_unavailable', "The Local model couldn't be prepared. Check that Ogden Agents' data folder has free space and can be written to, then try again.");
     }
-    return opencodeChatEnv({ dataDir: input.dataDir, configFile, key: target.key });
+    return opencodeChatEnv({ dataDir: input.dataDir, configFile, key: target.key, baseUrl: target.baseUrl });
   };
   return {
     descriptor: LOCAL_DESCRIPTOR,

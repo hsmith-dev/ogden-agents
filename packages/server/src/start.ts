@@ -321,11 +321,15 @@ async function listenAndAnnounce({
     uvToolchain,
     uvChildEnv,
   });
+  // Inside the desktop app (story 13.11) there is no shortcut to offer: the app is the shortcut.
+  const shell = options.shell === undefined ? shellModeOf() : options.shell;
   const appShortcut =
-    options.appShortcut ??
+    shell === 'desktop'
+      ? undefined
+      : (options.appShortcut ??
     (options.launcherEntry === undefined
       ? createMemoryAppShortcut({ platform: process.platform })
-      : createOsAppShortcut({ platform: process.platform, launcherEntry: options.launcherEntry, nodePath: process.execPath, stateDir: dataDir }));
+      : createOsAppShortcut({ platform: process.platform, launcherEntry: options.launcherEntry, nodePath: process.execPath, stateDir: dataDir })));
   // Whether Welcome is done (9.5): a data folder that already has projects counts it as done.
   const onboarding = createOnboarding({
     dataDir,
@@ -344,7 +348,6 @@ async function listenAndAnnounce({
   });
   // The "newer version" notice (story 13.7): checks once after the server is up, never on the start path.
   // Inside the desktop app (shell mode) the npm source never runs: the app finds updates through its own channel.
-  const shell = options.shell === undefined ? shellModeOf() : options.shell;
   const updates = wireUpdateCheck(shell === 'desktop' ? false : options.updates, { dataDir, version, installMethod: installMethodOf(options.launcherEntry), events: core.events, log });
   // The desktop app's update (story 13.3): only when the app started this server. One busy rule decides when a restart may go ahead.
   const busyRule = createBusyRule(() => countBusySessions(core));
@@ -525,7 +528,7 @@ async function listenAndAnnounce({
   };
 
   // Off the start path: a shortcut already there follows this install's Node and launcher (story 2.4).
-  void repointAppShortcut(appShortcut, log);
+  if (appShortcut !== undefined) void repointAppShortcut(appShortcut, log);
   void updates.runOnStart();
 
   if (options.open === true && launchUrl !== undefined) {

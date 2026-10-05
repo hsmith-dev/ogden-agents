@@ -3,8 +3,8 @@
 //   node packages/desktop/scripts/test-updater-key.mjs <folder>  >> "$GITHUB_ENV"
 //
 // Generates a fresh minisign key pair in <folder> with a random password (never committed, never
-// kept past the job), writes <folder>/config-override.json that turns on updater artifacts and sets
-// THAT public key for this build only, and prints the two environment lines `tauri build` needs to
+// kept past the job), writes <folder>/config-override.json that turns on updater artifacts, sets
+// THAT public key for this build only and lets this TEST build read a plain-http fake release server, and prints the two environment lines `tauri build` needs to
 // sign them. Releases never use this: they use the user's own key from a GitHub secret (AD-23).
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -28,7 +28,7 @@ if (made.status !== 0) {
   process.exit(1);
 }
 const pubkey = readFileSync(`${keyFile}.pub`, 'utf8').trim();
-writeFileSync(join(folder, 'config-override.json'), JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey } } }));
+writeFileSync(join(folder, 'config-override.json'), JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey, dangerousInsecureTransportProtocol: true, windows: { installMode: 'passive' } } } }));
 const privateKey = readFileSync(keyFile, 'utf8').trim();
 if (privateKey.includes('\n')) throw new Error('the private key is not one line');
 console.log(`TAURI_SIGNING_PRIVATE_KEY=${privateKey}`);

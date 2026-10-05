@@ -22,6 +22,10 @@ const base = {
   deadline: null,
   outcome: 'running',
   reason: null,
+  blockedCode: null,
+  queuePosition: null,
+  decision: null,
+  agent: null,
   createdAt: '2026-10-05T00:00:00.000Z',
   updatedAt: '2026-10-05T00:00:00.000Z',
 };
@@ -65,6 +69,7 @@ vi.mock('@/auth/tab-token', () => ({
 }));
 
 const { BuildRunHeader } = await import('../src/planning/build-run-header');
+const { BuildRunPanel } = await import('../src/planning/build-run-panel');
 const { InstallBuildLimits, ProjectBuildLimit } = await import('../src/planning/build-limit-fields');
 const { BoardTickets } = await import('../src/planning/board-tickets');
 const { TooltipProvider } = await import('../src/ui/tooltip');
@@ -111,33 +116,72 @@ describe("a build session's header (story 5.8)", () => {
   });
 
   it('a blocked run shows its plain reason and Retry, which calls the run', async () => {
-    mount(<BuildRunHeader wsId={WS} run={run({ outcome: 'blocked', blockedCode: 'time_limit', reason: 'Stopped after 45 minutes without finishing.' })} />);
-    expect(screen.getByTestId('build-run-outcome').textContent).toBe('Blocked');
+    mount(<BuildRunPanel wsId={WS} run={run({ outcome: 'blocked', blockedCode: 'time_limit', reason: 'Stopped after 45 minutes without finishing.' })} />);
     expect(screen.getByTestId('build-run-reason').textContent).toBe('Stopped after 45 minutes without finishing.');
-    expect(screen.queryByTestId('build-run-stop')).toBeNull();
     fireEvent.click(screen.getByTestId('build-run-retry'));
     await settle();
     expect(state.calls).toContain(`POST /api/v1/workspaces/${WS}/runs/${base.id}/retry`);
   });
 
   it('failed and stopped runs offer Retry; a checkpoint pause offers Continue the build; a run for review offers neither; a merge conflict is the review page\'s', () => {
-    mount(<BuildRunHeader wsId={WS} run={run({ outcome: 'failed', reason: '3 tests failed when re-run' })} />);
+    mount(<BuildRunPanel wsId={WS} run={run({ outcome: 'failed', reason: '3 tests failed when re-run' })} />);
     expect(screen.getByTestId('build-run-retry').textContent).toBe('Retry');
     cleanup();
-    mount(<BuildRunHeader wsId={WS} run={run({ outcome: 'stopped', reason: 'You stopped this build.' })} />);
-    expect(screen.getByTestId('build-run-outcome').textContent).toBe('Stopped');
+    mount(<BuildRunPanel wsId={WS} run={run({ outcome: 'stopped', reason: 'You stopped this build.' })} />);
     expect(screen.getByTestId('build-run-retry')).toBeTruthy();
     cleanup();
-    mount(<BuildRunHeader wsId={WS} run={run({ outcome: 'blocked', blockedCode: 'checkpoint_plan', reason: 'The plan is ready. Check it, then continue the build.' })} />);
+    mount(<BuildRunPanel wsId={WS} run={run({ outcome: 'blocked', blockedCode: 'checkpoint_plan', reason: 'The plan is ready. Check it, then continue the build.' })} />);
     expect(screen.getByTestId('build-run-retry').textContent).toBe('Continue the build');
+    cleanup();
+    mount(<BuildRunHeader wsId={WS} run={run({ outcome: 'blocked', blockedCode: 'checkpoint_plan', reason: 'x' })} />);
     expect(screen.queryByTestId('build-run-review')).toBeNull();
     cleanup();
-    mount(<BuildRunHeader wsId={WS} run={run({ outcome: 'verified' })} />);
+    cleanup();
+    mount(<BuildRunPanel wsId={WS} run={run({ outcome: 'verified' })} />);
     expect(screen.queryByTestId('build-run-retry')).toBeNull();
+    cleanup();
+    mount(<BuildRunHeader wsId={WS} run={run({ outcome: 'verified' })} />);
     expect(screen.getByTestId('build-run-review')).toBeTruthy();
     cleanup();
-    mount(<BuildRunHeader wsId={WS} run={run({ outcome: 'blocked', blockedCode: 'merge_conflict', reason: 'x' })} />);
+    mount(<BuildRunPanel wsId={WS} run={run({ outcome: 'blocked', blockedCode: 'merge_conflict', reason: 'x' })} />);
     expect(screen.queryByTestId('build-run-retry')).toBeNull();
+  });
+});
+
+describe('the run view (story 11.1)', () => {
+  it('names the agent, the sandbox used and the time left while it runs', () => {
+    const deadline = new Date(Date.now() + 12 * 60_000 + 5_000).toISOString();
+    mount(<BuildRunPanel wsId={WS} run={run({ outcome: 'running', deadline, agent: 'claude-code' })} />);
+    expect(screen.getByTestId('build-run-sandbox').textContent).toBe("Claude Code's sandbox (macOS)");
+    expect(screen.getByTestId('build-run-time-left').textContent).toBe('13 minutes left');
+    expect(screen.queryByTestId('build-run-notice')).toBeNull();
+  });
+
+  it('a blocked run keeps its raw code behind Show details, open in Developer mode', () => {
+    mount(<BuildRunPanel wsId={WS} run={run({ outcome: 'blocked', blockedCode: 'other', reason: 'The agent said no.' })} />);
+    expect(screen.getByTestId('build-run-reason').textContent).toBe('The build stopped. Show details says why.');
+    expect(screen.queryByTestId('build-run-code')).toBeNull();
+    fireEvent.click(screen.getByTestId('build-run-details-toggle'));
+    expect(screen.getByTestId('build-run-code').textContent).toBe('other');
+    expect(screen.getByTestId('build-run-raw-reason').textContent).toBe('The agent said no.');
+    expect(screen.getByTestId('build-run-details-toggle').textContent).toBe('Hide details');
+  });
+
+  it('an intent gap offers Apply the saved fix and retry, which asks for the apply_fix mode; no other run does', async () => {
+    mount(<BuildRunPanel wsId={WS} run={run({ outcome: 'blocked', blockedCode: 'intent_gap', reason: 'x' })} />);
+    expect(screen.getByTestId('build-run-reason').textContent).toContain('A fix was saved');
+    fireEvent.click(screen.getByTestId('build-run-apply-fix'));
+    await settle();
+    expect(state.calls).toContain(`POST /api/v1/workspaces/${WS}/runs/${base.id}/retry`);
+    expect(state.bodies).toContainEqual({ mode: 'apply_fix' });
+    cleanup();
+    mount(<BuildRunPanel wsId={WS} run={run({ outcome: 'blocked', blockedCode: 'other', reason: 'x' })} />);
+    expect(screen.queryByTestId('build-run-apply-fix')).toBeNull();
+  });
+
+  it('a queued run says its place', () => {
+    mount(<BuildRunPanel wsId={WS} run={run({ outcome: 'running', queuePosition: 2, worktreePath: null })} />);
+    expect(screen.getByTestId('build-run-queue-position').textContent).toContain('2');
   });
 });
 

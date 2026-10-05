@@ -18,6 +18,7 @@
 mod report;
 mod server;
 mod ui;
+mod update;
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -35,6 +36,8 @@ fn join_kill_on_close_job() {
         let job = win32job::Job::create()?;
         let mut info = job.query_extended_limit_info()?;
         info.limit_kill_on_job_close();
+        // The updater's relaunch helper (update.rs) must outlive this process.
+        info.limit_breakaway_ok();
         job.set_extended_limit_info(&info)?;
         job.assign_current_process()?;
         // Kept open for the life of this process.
@@ -55,6 +58,7 @@ fn main() {
             ui::show_main(app);
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .on_menu_event(|app, event| ui::on_menu(app, event.id().as_ref()))
         .setup(|app| {
             let handle = app.handle().clone();
@@ -73,9 +77,16 @@ fn main() {
                     std::thread::sleep(Duration::from_millis(250));
                 });
             }
+            let check_handle = handle.clone();
             std::thread::spawn(move || match server::start(&handle) {
                 Ok(info) => match ui::open_window(&handle, info.port, &info.launch_url) {
-                    Ok(()) => report("window_created", json!({})),
+                    Ok(()) => {
+                        report("window_created", json!({}));
+                        // Once, on start: never periodically (user, 2026-10-04).
+                        tauri::async_runtime::spawn(async move {
+                            let _ = update::check(&check_handle).await;
+                        });
+                    }
                     Err(e) => ui::fail_start(&handle, &e),
                 },
                 Err(e) => ui::fail_start(&handle, &e),

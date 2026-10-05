@@ -1,6 +1,30 @@
 # Contributing
 
-Development setup, commands and CI are in the README's [Develop](README.md#develop) section. This file covers how Ogden Agents uses BMad Method.
+Thanks for looking. Ogden Agents is a small open source project (MIT) run by one maintainer, so please keep changes small and focused. By taking part you agree to the [Code of Conduct](CODE_OF_CONDUCT.md). To report a security problem, follow [SECURITY.md](SECURITY.md) and not a public issue.
+
+## Setup and checks
+
+- Use **pnpm** (never npm or yarn) and Node.js 24 or later. `pnpm install`, then `pnpm typecheck` and `pnpm test`. The README's [Develop](README.md#develop) section lists the rest, including `pnpm e2e`.
+- Run the full `pnpm test` before you push a code change. CI runs it on macOS, Windows and Linux and decides whether a PR can merge.
+- **Tests never use a real agent, the real keychain, the real network or your real `~/.claude`.** Use the fakes and injected clients the existing tests use. A test that needs one of those is a bug in the test.
+- Keep user-facing copy in plain language, and don't use dashes in it.
+- Never put a real key or token in code, tests or docs. Test fixtures use obviously fake values such as `sk-ant-api03-..._TEST_ONLY_...`; CI's secret scan fails on anything that looks real.
+
+## How work is planned: BMad
+
+This project is built with the BMad Method. Work is tracked as epics and stories under `_bmad-output/`, and each story has a plan file, a review, and a triage log. For anything bigger than a small fix, open an issue first so the change can be agreed before you write it. Maintainers follow the same flow with the BMad skills. [AGENTS.md](AGENTS.md) has the conventions and known pitfalls; coding agents and people should read it first.
+
+## Branches, pull requests and provenance
+
+- Branch from `main`, one branch per change, with a short name such as `fix/...`, `docs/...` or `story/<id>-...`. Do not push to `main`.
+- One focused pull request per change. Fill in the pull request template. CI must be green.
+- Plans carry a `baseline_revision`, and `_bmad-output/` keeps an index of deferred work. If you touch either, run `PROVENANCE_BASE=origin/main pnpm provenance` and fix what it reports. CI runs the same check.
+- Maintainers merge with a **merge commit** (`gh pr merge N --merge`), not squash or rebase, so each branch's history stays readable. Use `--force-with-lease`, and only on your own branch.
+- Never push to, open a pull request against, or comment on `bmad-code-org/BMAD-METHOD`. Changes to BMad go to this project's fork, [`hsmith-dev/BMAD-METHOD`](https://github.com/hsmith-dev/BMAD-METHOD), as described in [docs/bmad-fork.md](docs/bmad-fork.md).
+
+## Using BMad Method inside Ogden Agents
+
+The rest of this file covers how Ogden Agents uses BMad Method.
 
 ## Pinned BMad Method, from Ogden Agents' fork
 

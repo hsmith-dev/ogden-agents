@@ -46,6 +46,14 @@ describe('release notes from CHANGELOG.md', () => {
     expect(releaseNotes(CHANGELOG, '0.5.0-rc.1', 'o/r')).toContain('prerelease');
   });
 
+  it('names the desktop app files, links the README download steps, and has no dashes in its words (story 13.9)', () => {
+    const notes = releaseNotes(CHANGELOG, '0.4.0', 'o/r');
+    for (const file of ['Ogden-Agents_0.4.0_universal.dmg', 'Ogden-Agents_0.4.0_x64-setup.exe', 'Ogden-Agents_0.4.0_arm64-setup.exe', 'SHA256SUMS-desktop.txt']) expect(notes).toContain(file);
+    expect(notes).toContain('https://github.com/o/r/blob/main/README.md#download');
+    const paragraph = notes.split('\n').find((line) => line.startsWith('**The desktop app.**'))!;
+    expect(paragraph.replaceAll(/`[^`]*`/g, '')).not.toMatch(/[–—]/);
+  });
+
   it('the script prints the notes for this repository\'s own changelog', () => {
     const script = fileURLToPath(new URL('../scripts/release-notes.mjs', import.meta.url));
     const run = spawnSync(process.execPath, [script, '0.4.0'], { encoding: 'utf8' });

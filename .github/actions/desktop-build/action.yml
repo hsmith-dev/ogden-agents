@@ -1,0 +1,109 @@
+name: Build the desktop app
+description: >
+  Stages the bundled Node, npm and the packed server for one target, builds the unsigned Ogden
+  Agents app and its installer with Tauri, and checks the artifacts (story 13.9). The repository
+  must already be checked out. `signing` says which updater key signs the update artifacts: `test`
+  (a throwaway key generated here, never stored), `release` (the user's key from the environment:
+  TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD, set by the calling job) or
+  `none` (installers only). Apple and Windows code signing are slots that turn on only when the
+  calling job's environment holds their secrets (APPLE_CERTIFICATE and the others, or
+  WINDOWS_CERTIFICATE); without them the build stays unsigned and says so.
+
+inputs:
+  target:
+    description: The Rust target triple (universal-apple-darwin, x86_64-pc-windows-msvc, aarch64-pc-windows-msvc).
+    required: true
+  rust:
+    description: Rust targets to install, comma separated.
+    required: true
+  bundles:
+    description: The Tauri bundles to build (app,dmg or nsis).
+    required: true
+  signing:
+    description: test, release or none.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v6
+
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 24
+        cache: pnpm
+
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        # Matches packages/desktop/src-tauri/rust-toolchain.toml.
+        toolchain: 1.99.0
+        targets: ${{ inputs.rust }}
+
+    - name: Build and pack Ogden Agents
+      shell: bash
+      run: |
+        pnpm install --frozen-lockfile
+        pnpm run build
+        pnpm pack
+        ls -l ogden-agents-*.tgz
+
+    - name: Stage the bundled Node, npm and the packed server
+      shell: bash
+      run: node packages/desktop/scripts/stage.mjs --target ${{ inputs.target }} --tgz "$(ls ogden-agents-*.tgz | head -1)"
+
+    - name: Icons
+      shell: bash
+      working-directory: packages/desktop
+      run: npx --yes @tauri-apps/cli@2.12.1 icon stage/icon-source.png -o src-tauri/icons
+
+    # Never stored: a fresh key pair per run, its public key set for this build only.
+    - name: Throwaway updater key (test builds)
+      if: inputs.signing == 'test'
+      shell: bash
+      run: node packages/desktop/scripts/test-updater-key.mjs "$RUNNER_TEMP/updater-key" >> "$GITHUB_ENV"
+
+    - name: Apple signing and notarization (slot)
+      id: apple
+      shell: bash
+      run: |
+        if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_SIGNING_IDENTITY" ] && [ "$RUNNER_OS" = "macOS" ]; then
+          echo "identity=$APPLE_SIGNING_IDENTITY" >> "$GITHUB_OUTPUT"
+          echo "Apple signing is on: the app is signed with the Developer ID and notarized with the APPLE_* secrets."
+        else
+          echo "identity=" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Apple signing skipped::No Apple signing secrets in this job's environment (APPLE_CERTIFICATE and APPLE_SIGNING_IDENTITY), so the macOS app stays unsigned (ad-hoc)."
+        fi
+
+    - name: Windows signing (slot)
+      id: windows
+      shell: bash
+      run: |
+        if [ -n "$WINDOWS_CERTIFICATE" ] && [ "$RUNNER_OS" = "Windows" ]; then
+          # The certificate is a base64 .pfx; import it for the current user and sign by its thumbprint.
+          printf '%s' "$WINDOWS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/windows-cert.pfx"
+          thumbprint="$(powershell -NoProfile -Command "\$p = ConvertTo-SecureString -String \$env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText; (Import-PfxCertificate -FilePath '$(cygpath -w "$RUNNER_TEMP/windows-cert.pfx")' -CertStoreLocation Cert:\\CurrentUser\\My -Password \$p).Thumbprint")"
+          rm -f "$RUNNER_TEMP/windows-cert.pfx"
+          echo "thumbprint=$thumbprint" >> "$GITHUB_OUTPUT"
+          echo "Windows signing is on."
+        else
+          echo "thumbprint=" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Windows signing skipped::No WINDOWS_CERTIFICATE in this job's environment, so the Windows installer stays unsigned (SmartScreen will warn)."
+        fi
+
+    - name: Per-build config
+      shell: bash
+      run: |
+        args=(--mode ${{ inputs.signing }} --out "$RUNNER_TEMP/build-config.json")
+        if [ "${{ inputs.signing }}" = "test" ]; then args+=(--base "$RUNNER_TEMP/updater-key/config-override.json"); fi
+        if [ -n "${{ steps.apple.outputs.identity }}" ]; then args+=(--apple-identity "${{ steps.apple.outputs.identity }}"); fi
+        if [ -n "${{ steps.windows.outputs.thumbprint }}" ]; then args+=(--windows-thumbprint "${{ steps.windows.outputs.thumbprint }}"); fi
+        node packages/desktop/scripts/make-build-config.mjs "${args[@]}"
+
+    - name: Build the app and its installer
+      shell: bash
+      working-directory: packages/desktop
+      run: npx --yes @tauri-apps/cli@2.12.1 build --target ${{ inputs.target }} --bundles ${{ inputs.bundles }} --config "$RUNNER_TEMP/build-config.json"
+
+    - name: Check the artifacts
+      shell: bash
+      run: node packages/desktop/scripts/check-artifacts.mjs --target ${{ inputs.target }} ${{ inputs.signing == 'none' && '--no-updater' || '' }}

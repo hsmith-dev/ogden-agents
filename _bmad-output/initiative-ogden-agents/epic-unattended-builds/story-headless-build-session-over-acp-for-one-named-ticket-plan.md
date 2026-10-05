@@ -3,13 +3,13 @@ title: 'Headless build session over ACP for one named ticket'
 type: 'feature'
 ticket: '4'
 created: '2026-10-04'
-status: 'in-progress'
+status: 'in-review'
 baseline_revision: '8299f735f29b7f7fef415234253dd1c2805eeea5'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick', 'security']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-unattended-builds/epic-unattended-builds.md'
@@ -68,16 +68,30 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `packages/shared/src/planning-board.ts` -- `plan_checkpoint`, `done_checkpoint` on `TicketDetail` (default false).
-- [ ] `packages/adapters/src/tickets-v7/index.ts`, `tickets-memory` -- read them.
-- [ ] `packages/core/src/build-run-folder.ts` (new) -- run folder path, activity recorder (event-log subscriber, per-run serialized appends, cap), `writeRunResult` (validate, mask, atomic).
-- [ ] `packages/core/src/builds.ts` -- result at every turn end; checkpoint pauses; `resume(ws, runId)`; checkpoint run blocks `start`.
-- [ ] `packages/server/src/build-routes.ts` -- retry route resumes a checkpoint run.
-- [ ] Fixtures and tests per the matrix, plus a process-tree test with the fake agent's grandchild.
+- [x] `packages/shared/src/planning-board.ts` -- `plan_checkpoint`, `done_checkpoint` on `TicketDetail` (default false).
+- [x] `packages/adapters/src/tickets-v7/index.ts`, `tickets-memory` -- read them.
+- [x] `packages/core/src/build-run-folder.ts` (new) -- run folder path, activity recorder (event-log subscriber, per-run serialized appends, cap), `writeRunResult` (validate, mask, atomic).
+- [x] `packages/core/src/builds.ts` -- result at every turn end; checkpoint pauses; `resume(ws, runId)`; checkpoint run blocks `start`.
+- [x] `packages/server/src/build-routes.ts` -- retry route resumes a checkpoint run.
+- [x] Fixtures and tests per the matrix, plus a process-tree test with the fake agent's grandchild.
 
 **Acceptance Criteria:**
 - Given a finished build, when the repo is listed, then it has no new file and the run's two files are in the data folder.
 - Given a build released mid-turn, then the agent's pid and its grandchild's pid are gone.
+
+## Implementation Notes
+
+- 2026-10-04 (build): implemented directly by the build session from this plan (no implementation subagent: the plan's context was already loaded, and 5.3's subagent attempt stalled), in local milestone commits.
+- The run folder is `<data>/r/<runId>` (the run's id, validated as a `RunId`, rather than the worktree's 8-character id): unique, never derived from a path, still short for Windows. `build-run-folder.ts` holds `runFolderOf`, `writeRunResult` (parsed with `BuildRunResult`, temp file `wx` then rename, folder `0o700`, file `0o600`) and the activity recorder (an event-log subscriber from `lastSeq`; a stream is a build run's when its session is `build` and has a run; lines masked again with the builds `mask`; `session.message_delta` skipped; per-run serialized appends; bound injectable for tests).
+- `TicketDetail` gained optional `plan_checkpoint`/`done_checkpoint` (absent means false, so 4.x fixtures stay valid); `tickets-v7` reads them in `checkpoints.ts` from `<dirname(epic_file)>/tickets.toml` (regular file, real path inside the repo, at most 1 MiB, only `key = true` lines in the `[[entry]]` whose `id` matches). `tickets-memory` and the plan-file fixture store take them too.
+- Core: the result is written at every stop (plan pause, done pause, end of run), never failing the run; `networkFailure` is set when the run's recorded activity holds a no-network error (ENOTFOUND, EAI_AGAIN, getaddrinfo, could not resolve host, …); `blockedCondition` is the plan's `blocked_reason` masked, `blockedReason` the run's own reason. `resume` and `retry` are on `BuildsUseCases`; Retry with `mode: resume` on a checkpoint run resumes (its note reaches the plan-checkpoint prompt through `runner.invocation`); every other Retry is `NotImplementedError` (501) until 5.8. `RETRY_NOT_AVAILABLE_MESSAGE` added to shared.
+- A plan-checkpoint pause never started the agent, so a resume after a restart needs no agent-session reset: rebuilding the in-memory setup is enough, and the prompt starts a fresh agent session in the worktree.
+- The fake ACP agent's `FAKE_ACP_BUILD_CHILD=<file>` leaves a command running; the server test checks the agent and that child are gone once the run ends (`releaseAgent` → `killProcessTree`).
+- Not here: the attended build (permission cards for every tool call) has no start path until 5.6, so `BuildSessionSetup` still always carries the deny-by-default policy. Follow-up when the lines meet: move the build session onto epic 6's `acp-base` client and `adapters/src/child-env.ts` (neither is on this lineage; the existing Claude Code adapter and env allowlist are kept).
+
+## Plan Change Log
+
+## Review Triage Log
 
 ## Design Notes
 

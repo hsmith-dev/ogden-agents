@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { appExecutable, IS_WIN, killSidecars, launchApp, listSidecars, newWorkspace, readReport, sleep, waitFor, writeQuit } from './app-harness.mjs';
+import { appExecutable, IS_WIN, killApps, killSidecars, launchApp, listApps, listSidecars, newWorkspace, readReport, sleep, waitFor, writeQuit } from './app-harness.mjs';
 
 const { values } = parseArgs({ options: { app: { type: 'string' }, bundle: { type: 'string' }, 'version-next': { type: 'string' }, target: { type: 'string' } }, strict: true });
 for (const k of ['app', 'bundle', 'version-next', 'target']) {
@@ -33,13 +33,17 @@ const SERVER = join(repo, 'tests', 'fixtures', 'fake-release-server', 'serve.mjs
 const exe = appExecutable(values.app);
 const nextVersion = values['version-next'];
 const before = new Set(listSidecars().map((p) => p.pid));
+const appsBefore = new Set(listApps().map((p) => p.pid));
 const events = (ws, ev) => readReport(ws.report).filter((e) => e.ev === ev);
 const cleanups = [];
+/** Fake release servers: kept for the whole run (an app is stopped after each scenario, a server is not). */
+const servers = [];
 const results = [];
+/** The app of the scenario running, so a failure can show what the shell reported. */
+let current;
 
 // 1. The release folder the fake server serves: N+1's update artifacts, their sums and a manifest.
 const release = mkdtempSync(join(tmpdir(), 'ogden-fake-release-'));
-cleanups.push(() => rmSync(release, { recursive: true, force: true }));
 const made = spawnSync(process.execPath, [join(here, 'release-manifest.mjs'), '--in', resolve(values.bundle), '--out', join(release, 'files'), '--version', nextVersion, '--tag', `v${nextVersion}`, '--repo', 'fake/release', '--updater-only'], { encoding: 'utf8' });
 if (made.status !== 0) {
   console.error(made.stdout, made.stderr);
@@ -51,7 +55,7 @@ writeFileSync(join(release, 'next.json'), manifestJson);
 
 function fakeServer(tamper) {
   const child = spawn(process.execPath, [SERVER, '--dir', release, ...(tamper ? ['--tamper', tamper] : [])], { stdio: ['ignore', 'pipe', 'inherit'] });
-  cleanups.push(() => child.kill());
+  servers.push(child);
   return new Promise((ok, fail) => {
     let out = '';
     child.stdout.on('data', (c) => {
@@ -72,10 +76,12 @@ function agentWrapper(dir) {
 /** A copy of the installed app for one scenario, so a replaced app never carries into the next. */
 async function startApp(name, { channel, base }) {
   const ws = newWorkspace(`ogden-update-${name}-`);
-  if (channel === 'next') writeFileSync(join(ws.data, 'desktop-update.json'), '{"channel":"next"}\n');
+  // A prerelease build defaults to the next channel, so the stable channel is chosen explicitly.
+  writeFileSync(join(ws.data, 'desktop-update.json'), `{"channel":"${channel}"}\n`);
   const child = launchApp(exe, ws, { NODE_ENV: 'test', OGDEN_AGENTS_TEST_SECRET_STORE: 'memory', OGDEN_AGENTS_OFFLINE: '1', OGDEN_AGENTS_CLAUDE_ACP_PATH: agentWrapper(ws.root), OGDEN_DESKTOP_TEST_UPDATE_BASE: base });
   cleanups.push(() => child.kill());
   await waitFor(`${name}: the page`, () => events(ws, 'page_finished').length > 0 || events(ws, 'server_error').length > 0, 120_000);
+  current = ws;
   return { ws, child, port: events(ws, 'server_ready')[0].data.port };
 }
 
@@ -100,9 +106,31 @@ async function scenario(name, fn) {
   } catch (error) {
     results.push({ name, ok: false, error: error.message });
     console.error(`FAIL ${name}: ${error.message}`);
+    if (process.platform === 'win32') {
+      const ps = (c) => spawnSync('powershell', ['-NoProfile', '-Command', c], { encoding: 'utf8' }).stdout.trim();
+      console.error('installed version:', ps(`(Get-Item '${exe}').VersionInfo.ProductVersion`));
+      console.error('processes:', ps("Get-Process | Where-Object { $_.Name -match 'ogden|setup|nsis|powershell|msiexec' } | ForEach-Object { $_.Name + ' ' + $_.Id + ' ' + $_.StartTime } | Out-String"));
+      try {
+        console.error('relaunch helper log:', readFileSync(`${current.report}.helper.log`, 'utf8'));
+      } catch {
+        console.error('relaunch helper log: none');
+      }
+      console.error('install folder:', ps(`Get-ChildItem '${dirname(exe)}' | ForEach-Object { $_.Name + ' ' + $_.LastWriteTime } | Out-String`));
+    }
+    if (current) console.error('shell report:', JSON.stringify(readReport(current.report).map((e) => ({ ev: e.ev, ...e.data }))));
+  }
+  // Whatever the scenario left running (a failed one never reached its quit): stop it, so the next one starts clean.
+  for (const fn of cleanups.splice(0)) {
+    try {
+      fn();
+    } catch {
+      // Already gone.
+    }
   }
   killSidecars(before);
-  await sleep(1000);
+  killApps(appsBefore);
+  await waitFor('the last scenario\'s app to be gone', () => listApps(appsBefore).length === 0, 20_000).catch(() => {});
+  await sleep(1500);
 }
 
 async function quitAndClean(ws) {
@@ -176,13 +204,8 @@ await scenario('S1. next channel: finds, verifies, waits for a running turn, res
   await quitAndClean(app.ws);
 });
 
-for (const fn of cleanups.splice(0)) {
-  try {
-    fn();
-  } catch {
-    // Already gone.
-  }
-}
+for (const child of servers) child.kill();
+rmSync(release, { recursive: true, force: true });
 killSidecars(before);
 console.log(JSON.stringify(results, null, 1));
 process.exit(results.some((r) => !r.ok) ? 1 : 0);

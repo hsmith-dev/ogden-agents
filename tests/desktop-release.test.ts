@@ -51,6 +51,17 @@ describe('release artifacts', () => {
     for (const artifact of artifacts) expect(artifact.name).not.toMatch(/\s/);
   });
 
+  it('an unsigned build has no .app.tar.gz and still collects (a release without the updater key)', () => {
+    const root = downloaded({ signed: false });
+    rmSync(join(root, 'ogden-desktop-macos-universal', 'release', 'bundle', 'macos'), { recursive: true });
+    expect(() => collectArtifacts(root, VERSION)).toThrow(/universal\.app\.tar\.gz, found 0/);
+    expect(collectArtifacts(root, VERSION, false, true).map((a) => a.name)).toEqual([
+      `Ogden-Agents_${VERSION}_universal.dmg`,
+      `Ogden-Agents_${VERSION}_x64-setup.exe`,
+      `Ogden-Agents_${VERSION}_arm64-setup.exe`,
+    ]);
+  });
+
   it('fail loudly when a leg is missing or doubled', () => {
     const root = downloaded();
     rmSync(join(root, 'ogden-desktop-windows-arm64'), { recursive: true });

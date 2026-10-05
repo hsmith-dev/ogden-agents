@@ -101,6 +101,27 @@ jobs:
       - name: Smoke test without optional dependencies
         run: node scripts/smoke-installed.mjs --omit-optional
 
+  # Fails a pull request that adds something shaped like a real key or token
+  # (scripts/secret-scan.mjs, no third-party code, no network). Fake test values
+  # include TEST_ONLY. GitHub's own secret scanning and push protection are
+  # repository settings, turned on separately.
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Check the scanner itself
+        run: node scripts/secret-scan.mjs --self-test
+
+      - name: Scan tracked files
+        run: node scripts/secret-scan.mjs
+
   # The double-click start scripts in start/ (backlog story 2), each on its own
   # OS, run as a user runs them: check mode first, then a full start of the
   # packed tarball through the script (OGDEN_AGENTS_PACKAGE points npx at it;
@@ -266,6 +287,17 @@ jobs:
       # found in it. The only job that downloads it; no test runs it.
       - name: Check the pinned Antigravity archive
         run: node scripts/agent-pins.mjs --check --agent antigravity
+
+      # Codex's adapter and the Codex CLI it bundles (epic 12 entry 4): `npm ci` of
+      # packages/adapters/src/setup-codex/pins/ with the platform binary package.
+      - name: Install the pinned Codex adapter with its bundled Codex CLI
+        run: node scripts/agent-pins.mjs --agent codex --check --with-binary
+
+      # Grok Build and its platform packages (epic 12 entry 4): `npm ci` of
+      # packages/adapters/src/setup-grok/pins/, then this OS's binary decompressed
+      # and its SHA-256 compared with the pin in acp-grok/constants.ts.
+      - name: Install the pinned Grok package and check its binary's SHA-256
+        run: node scripts/agent-pins.mjs --agent grok --check --with-binary
 
   # UI layout in a real browser (architecture Conventions: jsdom doesn't
   # evaluate media queries): sidebar forms and overflow at 1440, 900 and 390

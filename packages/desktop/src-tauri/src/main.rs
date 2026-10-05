@@ -36,6 +36,8 @@ fn join_kill_on_close_job() {
         let job = win32job::Job::create()?;
         let mut info = job.query_extended_limit_info()?;
         info.limit_kill_on_job_close();
+        // The updater's relaunch helper (update.rs) must outlive this process.
+        info.limit_breakaway_ok();
         job.set_extended_limit_info(&info)?;
         job.assign_current_process()?;
         // Kept open for the life of this process.

@@ -51,6 +51,11 @@ export function SidebarDataProvider({ children }: { children: ReactNode }) {
         (agentId) => agentNameOf(chatAgents.data, agentId),
         // Story 11: the chat's model by its agent's name for it, in the row's tooltip.
         (agentId, model) => modelLabel(chatAgents.data?.agents.find((agent) => agent.agentId === (agentId ?? chatAgents.data?.defaultAgentId))?.models, model),
+        // An agent with only API key methods (Codex, Grok): its sign in need says the key was rejected.
+        (agentId) => {
+          const methods = chatAgents.data?.agents.find((agent) => agent.agentId === (agentId ?? chatAgents.data?.defaultAgentId))?.signInMethods ?? [];
+          return methods.length > 0 && methods.every((method) => method.kind === 'api_key');
+        },
       ),
     [workspaces.data, sessions, store, now, chatAgents.data],
   );

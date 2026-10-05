@@ -130,6 +130,13 @@ describe('buildSidebar (EXPERIENCE.md Status sidebar)', () => {
     expect(buildSidebar([B], [session('ses_b', 'ws_b', 'idle')], store(signIn), NOW, CLAUDE).needsYou).toEqual([]);
   });
 
+  it('a chat of an agent that takes only an API key says the key was rejected, never to sign in', () => {
+    const rejected = event('ws_b', 'ses_b', 'session.state_changed', { sessionId: 'ses_b', state: 'error', previous: 'working', reason: 'Codex needs a valid API key.', errorCode: 'auth_required' });
+    const model = buildSidebar([B], [session('ses_b', 'ws_b', 'error')], store(rejected), NOW, () => 'Codex', undefined, () => true);
+    expect(model.needsYou).toMatchObject([{ kind: 'sign_in', text: "Codex's API key was rejected", keyRejected: true }]);
+    expect(JSON.stringify(model.needsYou)).not.toMatch(/sign in/i);
+  });
+
   it('the window has the session but no state for it: a waiting session still gets the plain row', () => {
     const delta = event('ws_b', 'ses_b', 'session.message_delta', { messageId: 'm1', role: 'agent', text: 'x' });
     const model = buildSidebar([B], [session('ses_b', 'ws_b', 'waiting')], store(delta), NOW, CLAUDE);

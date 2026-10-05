@@ -1,5 +1,5 @@
 import type { ChatAgent } from '@ogden-agents/shared';
-import { CaretDown, GearSix } from '@phosphor-icons/react';
+import { CaretDown, GearSix, ShieldCheck } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
 import { Button } from '@/ui/button';
 import { DropdownMenu, DropdownMenuChoiceItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/ui/dropdown-menu';
@@ -22,6 +22,8 @@ export function AgentPicker({ agents, value, onChange }: { agents: readonly Chat
   const current = agents.find((agent) => agent.agentId === value);
   const name = current?.displayName ?? 'Choose an agent';
   const needsSetUp = agents.some((agent) => agentAvailability(agent).setUp);
+  // Agents that need this project trusted (epic 12, 12.3): choosing one shows the trust prompt, which allows it.
+  const needsTrust = agents.filter((agent) => agentAvailability(agent).trust);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -43,12 +45,13 @@ export function AgentPicker({ agents, value, onChange }: { agents: readonly Chat
               data-agent={agent.agentId}
               checked={agent.agentId === value}
               // Unavailable but focusable: the keyboard and a screen reader still reach its reason.
-              aria-disabled={unavailable || undefined}
-              data-disabled={unavailable ? '' : undefined}
+              aria-disabled={(unavailable && !availability.trust) || undefined}
+              data-disabled={unavailable && !availability.trust ? '' : undefined}
               label={agent.displayName}
               description={availability.description}
               onSelect={(event) => {
-                if (unavailable) {
+                // Needing the project trusted is fixed by choosing it: the trust prompt then shows.
+                if (unavailable && !availability.trust) {
                   event.preventDefault();
                   return;
                 }
@@ -57,6 +60,17 @@ export function AgentPicker({ agents, value, onChange }: { agents: readonly Chat
             />
           );
         })}
+        {needsTrust.length === 0 ? null : (
+          <>
+            <DropdownMenuSeparator />
+            {needsTrust.map((agent) => (
+              <DropdownMenuItem key={agent.agentId} data-testid="agent-trust-project" data-agent={agent.agentId} onSelect={() => onChange(agent.agentId)}>
+                <ShieldCheck aria-hidden />
+                {`Trust this project for ${agent.displayName}`}
+              </DropdownMenuItem>
+            ))}
+          </>
+        )}
         {needsSetUp ? (
           <>
             <DropdownMenuSeparator />

@@ -1,0 +1,9 @@
+{
+  "name": "ogden-agents-codex",
+  "private": true,
+  "description": "The Codex ACP adapter and the Codex CLI it bundles, which Ogden Agents installs (scripts/agent-pins.mjs --agent codex).",
+  "dependencies": {
+    "@agentclientprotocol/codex-acp": "2.1.1",
+    "@openai/codex": "0.159.3"
+  }
+}

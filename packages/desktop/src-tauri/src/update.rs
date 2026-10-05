@@ -89,10 +89,11 @@ fn percent_decode(s: &str) -> String {
 pub async fn check(app: &AppHandle) -> Outcome {
     let config = plugin_config(app);
     if config["pubkey"].as_str().unwrap_or("").trim().is_empty() {
-        report("update_disabled", json!({}));
+        report("update_disabled", json!({ "pluginConfig": config.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()) }));
         return Outcome::Disabled;
     }
     let channel = server::update_channel();
+    report("update_check_start", json!({ "channel": channel }));
     let url = match endpoint(app, &channel) {
         Ok(u) => u,
         Err(e) => return Outcome::Failed(e),
@@ -102,8 +103,10 @@ pub async fn check(app: &AppHandle) -> Outcome {
         Err(e) => return Outcome::Failed(e.to_string()),
     };
     // Windows installs in the background and ends this process, so the installer starts the app again.
+    // The installer's own `/R` starts the app again as the user, with none of this process's environment;
+    // a CI test build (which reports to a file) leaves that to the relaunch helper below, which keeps it.
     #[cfg(windows)]
-    let builder = builder.restart_after_install(true).installer_args(["/R"]);
+    let builder = if std::env::var_os("OGDEN_DESKTOP_TEST_REPORT").is_some() { builder } else { builder.restart_after_install(true).installer_args(["/R"]) };
     let updater = match builder.build() {
         Ok(u) => u,
         Err(e) => return Outcome::Failed(e.to_string()),
@@ -177,12 +180,18 @@ fn install_now(app: &AppHandle) {
     crate::ui::begin_quit();
     // The server stops first (its agents with it); Windows' installer ends this process.
     server::quit(true);
-    match update.install(&bytes) {
+    #[cfg(windows)]
+    relaunch_after_install(&update.version);
+    #[cfg(windows)]
+    let installed = run_installer(&bytes, &update.version);
+    #[cfg(not(windows))]
+    let installed = update.install(&bytes).map_err(|e| e.to_string());
+    match installed {
         Ok(()) => {
             app.restart();
         }
         Err(e) => {
-            report("update_install_failed", json!({ "error": e.to_string() }));
+            report("update_install_failed", json!({ "error": e }));
             let app2 = app.clone();
             app.dialog()
                 .message("Ogden Agents could not install the update. The version you have is opened again.")
@@ -207,4 +216,64 @@ pub async fn check_for_user(app: AppHandle) {
     std::thread::spawn(move || {
         app2.dialog().message(text).title("Check for Updates").kind(kind).blocking_show();
     });
+}
+
+/// Windows: the installer ends this process, and it starts the app again only through its own `/R`
+/// flag (as the user, without this process's environment). A small helper outside this app's job
+/// waits until the installed program is the new version and the installer has finished, and, if nothing started it, starts it. Both
+/// ways at once are safe: a second start is handed to the first by the single-instance plugin.
+#[cfg(windows)]
+fn relaunch_after_install(version: &str) {
+    use std::os::windows::process::CommandExt;
+    let Ok(exe) = std::env::current_exe() else { return };
+    // A test build (which reports to a file) also leaves a small log beside it, so a CI failure shows what the installer did.
+    let script = format!(
+        "$exe = '{exe}'; $target = '{version}'; $log = $env:OGDEN_DESKTOP_TEST_REPORT; \
+         function Note($t) {{ if ($log) {{ Add-Content -LiteralPath ($log + '.helper.log') -Value ((Get-Date -Format o) + ' ' + $t) }} }}; \
+         Note 'helper started'; \
+         for ($i = 0; $i -lt 300; $i++) {{ Start-Sleep -Seconds 1; try {{ $v = (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion }} catch {{ $v = '' }}; \
+           if ($i % 5 -eq 0) {{ Note ('version ' + $v + '; ' + ((Get-Process | Where-Object {{ $_.Name -match 'ogden|setup|nsis|msiexec' }} | ForEach-Object {{ $_.Name }}) -join ',')) }}; \
+           if ($v -like \"$target*\") {{ break }} }}; \
+         for ($j = 0; $j -lt 120; $j++) {{ if (-not (Get-Process -Name 'ogden-agents-update-*' -ErrorAction SilentlyContinue)) {{ break }}; Start-Sleep -Seconds 1 }}; \
+         Start-Sleep -Seconds 3; \
+         if (-not (Get-Process -Name 'ogden-agents' -ErrorAction SilentlyContinue)) {{ Note 'starting the app'; Start-Process -FilePath $exe }} else {{ Note 'the app is already running' }}",
+        exe = exe.display().to_string().replace('\'', "''"),
+        version = version.replace('\'', "''"),
+    );
+    // CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB: the app's kill-on-close job would otherwise end it with the app.
+    let result = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &script])
+        .creation_flags(0x0800_0000 | 0x0100_0000)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    report("update_relaunch_helper", json!({ "started": result.is_ok() }));
+}
+
+/// Windows: runs the downloaded installer (already checked against the signature and the checksum)
+/// silently over the current install, as a first install runs, then ends this process so the installer
+/// can replace its files. The updater plugin's own passive launch left the installer not running in CI
+/// (spike 13.1 saw no relaunch either), and a silent install has no window that can wait for a person.
+#[cfg(windows)]
+fn run_installer(bytes: &[u8], version: &str) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let dir = exe.parent().ok_or("no install folder")?.to_path_buf();
+    let installer = std::env::temp_dir().join(format!("ogden-agents-update-{}-setup.exe", version.replace(|c: char| !(c.is_ascii_alphanumeric() || c == '.' || c == '-'), "_")));
+    std::fs::write(&installer, bytes).map_err(|e| format!("could not save the installer: {e}"))?;
+    let mut cmd = std::process::Command::new(&installer);
+    // `/D=` must be last and is never quoted (NSIS).
+    cmd.args(["/S", "/UPDATE"]);
+    // The installer's own `/R` starts the new version as the user; a test build leaves that to the relaunch helper, which keeps the test's environment.
+    if std::env::var_os("OGDEN_DESKTOP_TEST_REPORT").is_none() {
+        cmd.arg("/R");
+    }
+    cmd.raw_arg(format!("/D={}", dir.display()));
+    // CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB: the installer must outlive this app and its job.
+    cmd.creation_flags(0x0800_0000 | 0x0100_0000).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    cmd.spawn().map_err(|e| format!("could not start the installer: {e}"))?;
+    report("update_installer_started", json!({}));
+    // The installer replaces this program's files: leave now.
+    std::process::exit(0);
 }

@@ -42,6 +42,13 @@ const agentsSettingsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/agents-settings-page'), 'AgentsSettingsPage'),
 });
 
+/** How many builds run at once, and the time limit of one (story 5.8). */
+const buildsSettingsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/builds',
+  component: lazyRouteComponent(() => import('./routes/builds-settings-page'), 'BuildsSettingsPage'),
+});
+
 /** Desktop notifications and the sound for when a chat needs you (backlog story 8). */
 const notificationsRoute = createRoute({
   getParentRoute: () => settingsRoute,
@@ -105,6 +112,20 @@ const workspaceBoardTicketRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/workspace-board-ticket'), 'WorkspaceBoardTicket'),
 });
 
+/** A project's Runs page (story 11.1): every build run and the queue. */
+const workspaceRunsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$wsId/runs',
+  component: lazyRouteComponent(() => import('./routes/workspace-runs-page'), 'WorkspaceRunsPage'),
+});
+
+/** A ticket's build review (story 5.2, the tracer), `/w/:wsId/review/:ref`. */
+const workspaceReviewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$wsId/review/$ref',
+  component: lazyRouteComponent(() => import('./routes/workspace-review-page'), 'WorkspaceReviewPage'),
+});
+
 /** The session view's search: `?driver=terminal` mirrors who drives the chat (story 3.6); it never switches by itself. */
 export interface SessionSearch {
   driver?: 'terminal';
@@ -126,8 +147,10 @@ const routeTree = rootRoute.addChildren([
   workspaceSettingsRoute,
   workspacePlanRoute,
   workspaceBoardRoute.addChildren([workspaceBoardTicketRoute]),
+  workspaceReviewRoute,
+  workspaceRunsRoute,
   sessionRoute,
-  settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute, notificationsRoute, aboutRoute]),
+  settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute, buildsSettingsRoute, notificationsRoute, aboutRoute]),
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

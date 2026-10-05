@@ -2,7 +2,7 @@
 
 ## Open items
 
-Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 2 retrospective, action A7); updated 2026-10-01 by the epic 9 and epic 3 retrospectives, 2026-10-03 by the epic 4 sweep (4.12), 2026-10-04 by the epic 6 sweep (6.9), and 2026-10-04 by the maintained-fork story. Every entry stays in the log below for history, resolved ones included; an entry that starts with "Resolved:" closes an earlier one. When you add or resolve an entry, update this index too.
+Still-open entries, one line each (owner, then summary), as of 2026-09-30 (epic 2 retrospective, action A7); updated 2026-10-01 by the epic 9 and epic 3 retrospectives, 2026-10-03 by the epic 4 sweep (4.12), 2026-10-04 by the epic 6 sweep (6.9), 2026-10-04 by the maintained-fork story, and 2026-10-02 by the epic 10 retrospective. Every entry stays in the log below for history, resolved ones included; an entry that starts with "Resolved:" closes an earlier one. When you add or resolve an entry, update this index too.
 
 Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim from its Log entry's summary (story 10.8). Log entries are append-only, so the phrase never goes stale; `node scripts/check-provenance.mjs` (CI job Provenance) fails on a line whose phrase is missing or matches no summary, on a line whose phrase a `Resolved:` summary contains (the entry is closed, so the line is stale), and (entry 4.12) on a Log entry added since the base branch that isn't `Resolved:`, contains no index line's phrase, and isn't quoted (`"<part of its summary>"`) by a `Resolved:` summary. A partial close starts `Resolved (…):` and leaves its index line in place.
 
@@ -25,6 +25,11 @@ Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim fr
 - Unowned (a sweep): `trimBacklog` treats `ESC` + a control character as a two-byte sequence, dropping one extra line from the replay. From 3.9 review F2. (log: "`escapeEnd` treats `ESC` followed by a control character")
 - Unowned (a sweep): with no line break after the cut, the backlog replay can start with a lone low surrogate (one replacement character). From 3.9 review F3. (log: "with no line break after the cut, `trimBacklog` slices at a UTF-16 index")
 - Unowned (log only): the `terminal_release_late` line can arrive after `chat.close()` returned. From 3.9 review F5. (log: "the `terminal_release_late` log line can arrive after `chat.close()` has returned")
+- Unowned (next installed-suite story, 4.13 proposed): the installed suite's cleanup kills a server's process tree only while its pid is alive, so an agent or CLI orphaned by a server that already died is neither killed nor reported. From 10.9 review F5. (log: "kills a server's whole process tree only while the server's pid is alive")
+- Orchestrator at the epic 4 restack, verified by 4.13 (proposed): 10.9's installed BMad journey and onboarding journey assert Planning and Board are Coming soon, which 4.2 ships; move those checks to Unattended builds and Retrospectives and add the script-trust prompt. From the epic 10 retro A3. (log: "assert that Planning and Board are Coming soon")
+- 4.12 (proposed): reproduce the `sign-in-again.spec.ts:143` failure seen in 4.14's run with `--repeat-each=20 --retries=0` before calling it a flake. From the epic 10 retro A4. (log: "a second failure in `tests/e2e/sign-in-again.spec.ts`")
+- 4.12 (proposed): make the provenance check fail on an index line whose work has a "Resolved:" entry, and on a new Log entry with no index line. From the epic 10 retro A5. (log: "checks only one direction between the Open items index and the Log")
+- 4.13 (proposed): after 0.2.0 is tagged, re-capture the upgrade fixture rows from the tag and diff them against `rows.json`. From the epic 10 retro A9. (log: "re-capture the 0.2.0 upgrade fixture from the released tag")
 - Unowned (re-check on an adapter pin bump): an ACP session that returns no `modes` is treated as already in Ask, so a user or project `permissions.defaultMode` could stand unnoticed. From the permission modes review S5. (log: "An ACP session that returns no `modes` is treated as already in Ask")
 - Unowned (permission modes): before any agent has started in a server run, a mode the session won't list (Skip all as root) is accepted, then dropped to Ask at start instead of refused. From the permission modes review Q2. (log: "Before any agent has started in a server run, a mode the session won't list")
 - Unowned (installed suite): the teardown kills a server's process tree only while the server's pid is alive, so an agent or CLI orphaned by a server that already died is neither killed nor reported. From 10.9 review F5. (log: "orphaned by a server that already exited or crashed")
@@ -74,6 +79,36 @@ Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim fr
 - Send now or wait: an edit open on a waiting message is lost when the turn takes the message. From its review. (log: "Editing a waiting message while the turn ends loses the draft silently")
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
+- Epic 12 entry 5 (Codex chat): a file change offers only `cancel` as its `reject_once`, which cancels the turn; Deny picks `decline` when offered, else `cancel`, so denying an edit may end the turn. From 12.4 (pinned 2.1.1 source). (log: "Codex file-change approvals offer only a cancel reject option")
+- Epic 12 entry 6 follow-up (Codex): the sidebar and notification text still says "needs you to sign in again" for a Codex chat whose API key was rejected; word it for an API key only agent. From 12.6. (log: "the sidebar and notification text still says sign in again for an API key only agent")
+- Epic 12 follow-up (Codex): the shared keychain-unavailable message ends "Sign in with your account instead", which Codex (API key only) cannot do; word it per agent. From 12.6 review. (log: "the keychain unavailable message still tells an API key only agent to sign in")
+- Epic 12 entry 8 (Grok): the checked Grok binary is hashed at install only, not at each spawn; re-check at start if the cost is acceptable. From 12.4 review. (log: "the checked Grok binary is hashed at install only")
+- Epic 12.11 live check (Grok): confirm a trusted project's own per-tool `allow` rules in `.claude/settings.json` cannot loosen Ask now that Grok's own folder trust is off (`GROK_FOLDER_TRUST=0`); the probe covered only the always-approve flag. From 12.7 review. (log: "Grok's own per-tool allow rules in a trusted project")
+- User check (xAI terms): the Grok card says only that Grok works with an xAI API access token and that account sign in isn't supported, because xAI's terms pages refuse automated reading (HTTP 403); read the current terms and, if they forbid other apps using subscription sign in, say so on the card as Codex's does. From 12.8. (log: "the Grok card says only that Grok works with an xAI API access token")
+- Epic 12.11 live check (Grok): `GET https://api.x.ai/v1/api-key` and its refused statuses (400, 401, 403) are unverified against a real token; confirm or change `api-key.ts`. From 12.8. (log: "the xAI token check endpoint and its refused statuses")
+- Unowned (copy): the chat picker's one line state for Grok still says "API key" because a ChatAgent carries no key name; carry the descriptor's key label to it. From 12.8. (log: "the chat picker state for Grok still says API key")
+- Unowned (copy): other refusal words still say "key" for Grok (the key was refused, the sidebar and notification text, the card's save and remove failures); pass `apiKeyName` through. From 12.8 review. (log: "other refusal words still say key for Grok")
+- Epic 12 entry 8 (Grok): the checked Grok binary is hashed at install only, not at each spawn; re-check at start if the cost is acceptable. From 12.4 review. (log: "the checked Grok binary is hashed at install only")
+- Epic 12.11 live check (Grok): confirm a trusted project's own per-tool `allow` rules in `.claude/settings.json` cannot loosen Ask now that Grok's own folder trust is off (`GROK_FOLDER_TRUST=0`); the probe covered only the always-approve flag. From 12.7 review. (log: "Grok's own per-tool allow rules in a trusted project")
+- Epic 12 entry 5 or 7 (Codex or Grok chat): the shared client does not check that a fixed-at-start agent honoured the mode in its `_meta` on resume or load; the quirk should report a `current_mode_update`, which core already handles. From 12.3 review. (log: "the shared client does not check that a fixed-at-start agent honoured the mode")
+- Epic 12 entry 4 (Grok descriptor): an unreadable agent-files fingerprint (a symlinked `.claude` or `.mcp.json`) makes Trust loop for agents while the Board still works; say why in the prompt. From 12.3 review. (log: "an unreadable agent-files fingerprint makes Trust loop for agents")
+- Unowned: the project trust prompt's "changed" wording keys on the trusted flag only, and the terminal trust refusal uses code `agent_unsupported`. From 12.3 review. (log: "the project trust prompt's changed wording keys on the trusted flag only")
+- Epic 5 (a later story): a network allowlist (package registries) for a build's sandboxed commands; until then builds have no network. From 5.2's user decision. (log: "A network allowlist for an unattended build's sandboxed commands")
+- Epic 5 (5.6): core decides a build's file write before Claude Code's unsandboxed Edit/Write performs it, so a symlink swapped in after the decision can redirect it. From 5.2 security review S2. (log: "Core decides a build's file write before Claude Code's unsandboxed Edit/Write tool performs it")
+- Epic 11 (11.4): mask a webhook's host when listing it back; some providers put the token in the host name. From 5.3 security review S10. (log: "Listing a webhook back by its full host can show part of its secret")
+- Epic 5 (a later sandbox story; 5.10's sweep left it, no behavior change): stop a build's commands that leave the agent's process group (`setsid`) or outlive their parent on Windows (cgroup, job object or sandbox-level kill). From 5.4 security review S4. (log: "Stopping a build kills the agent's process group")
+- Epic 5 (5.8) or epic 11 (11.1): prune a run's folder (`<data>/r/<run8>`) and the activity recorder's maps with the run's worktree. From 5.4 security review S6. (log: "Run folders (`<data>/r/<run8>`, up to 32 MiB")
+- Epic 5 (a later sandbox story; 5.10's sweep left it, no behavior change): the board and the run's end read a run's worktree with `tickets.py` while the agent may still be live (check-then-use on the worktree's scripts, which the sandbox denies the agent). From 5.5 security review S2. (log: "Board reads of an active run's worktree run `tickets.py` while its agent may be live")
+- Epic 5 (a later story, needs a user decision): run a build inside Docker when it is the only sandbox. Which image carries Claude Code, and how the agent reaches its model while its commands have no network, are undecided, so 5.6 detects Docker and describes it but never builds in it. From 5.6. (log: "Docker is detected and described")
+- Epic 5 (a later sandbox story): a Landlock-based sandbox for Linux machines where bubblewrap is blocked (spike 5.1 found Landlock available); Claude Code cannot use it, so it would be a launcher Ogden Agents owns. From 5.6. (log: "Landlock is shown, not selected")
+- Epic 5 (5.9 or 11.1): while a build runs, its branch ref points at objects only the run's own store holds, so the user's own `git log --all`, `git fsck` or `git gc` in the repo reports a bad object for `ogden/<run8>/…` until approve imports it or the run is discarded. Keeping the run's refs out of `refs/heads` would close it. From 5.6. (log: "Known cost of the per-run object store")
+- Epic 5 (a later story): an attended build has no managed Claude Code settings, so the user's own settings can still skip a card. From 5.6. (log: "An attended build's session has no managed Claude Code settings")
+- Epic 5 (a later sandbox story): 5.6's low review findings (a compression-bomb object, an unremovable store, the bubblewrap probe, the docker lookup). From 5.6. (log: "Low findings of 5.6's review")
+- Epic 5 (a later sandbox story): Stop and Quit do not stop a test re-run in progress, and the macOS Seatbelt profile is allow-default with only network and writes denied, so mach lookups and signals stay open. From 5.8 reviews. (log: "The test re-run is not stopped by Stop or Quit")
+- Epic 5 (a later sandbox story): the read fence uses unresolved credential folder paths and a short list, and macOS shares its temp folders between runs. From 5.8 security review. (log: "Read fences of the sandboxed re-run")
+- Epic 5 (5.9): queued runs start again only when another run ends, a limit changes or the server restarts, not when a turned-off piece is turned back on. From 5.8 review. (log: "Queued runs wait after a piece is turned back on")
+- Epic 5 (11.1): Update and retry takes no run-limit slot and arms no deadline, and every review read runs `tickets.py` once. From 5.9 reviews. (log: "Update and retry takes no run limit slot and arms no deadline")
+- Epic 11 (11.5, which also takes the run folder pruning above): Apply the saved fix leaves the patch applied with the run still blocked when the plan mark or the prompt fails afterwards; the saved patch is read by git three times and not previewed. From 11.1 reviews. (log: "Apply the saved fix after a late failure")
 
 ## Log
 
@@ -516,6 +551,21 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-bmad-optional-per-project/story-end-to-end-suite-and-release-plan.md`
   summary: The installed suite's cleanup kills a server's whole process tree only while the server's pid is alive, so an agent or CLI orphaned by a server that already exited or crashed is neither killed nor reported by the teardown.
   evidence: `killBackgroundServer` and `killExtraServers` return early when `server.json` is gone or its pid is dead (story 10.9 review F5); a teardown check for leftover processes whose cwd or arguments point into the extra folder would close it.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-bmad-optional-per-project/epic-bmad-optional-per-project-retrospective.md`
+  summary: Resolved: "Installed-suite specs that start their own server" (3.10 review F7, the entry above). Story 10.9's `killProcessTree` stops a failed own-server spec's server together with every descendant (agents and the terminal CLI included), and skips the test runner and its ancestors.
+  evidence: `scripts/installed-package.mjs` `killProcessTree`, `descendantsOf`, `killBackgroundServer`; `tests/installed-package.test.ts` (a detached grandchild is gone after one call); 10.9 Implementation Notes and review F2. The orphan-of-a-dead-server gap stays open (10.9 review F5 entry above).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-bmad-optional-per-project/epic-bmad-optional-per-project-retrospective.md`
+  summary: 10.9's installed suite (`bmad-journey.spec.ts` "nothing shipped" step and `onboarding-journey.spec.ts`'s greyed BMad Method check) assert that Planning and Board are Coming soon. Story 4.2 ships both (`SHIPPED_BMAD_PIECES`), and epic 4 is stacked on 10.8, so no epic 4 branch runs these tests yet. The first restack onto 10.9 or `main` turns the installed suite red on all three OSes.
+  evidence: `tests/e2e-installed/bmad-journey.spec.ts:179-194`; `tests/e2e-installed/onboarding-journey.spec.ts` header; `packages/server/src/bmad-pieces.ts:45` on `story/4.2-planning-contracts`; 4.2 plan ("coming-soon tests moved to builds/retrospectives" in the dev suite); epic 10 retro R1, A3.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-bmad-optional-per-project/epic-bmad-optional-per-project-retrospective.md`
+  summary: After 10.8 fixed the sign-in code race behind the `sign-in-again.spec.ts:212` failure (100 of 100 repeats), story 4.14's local `pnpm e2e` hit a second failure in `tests/e2e/sign-in-again.spec.ts` (`:143`, the "signed in: resends once" path), which passed on rerun and was not investigated.
+  evidence: 4.14 plan Verification and PR #64; 10.8 Implementation Notes; epic 10 retro R2, A4; epic 9 retro L1.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-bmad-optional-per-project/epic-bmad-optional-per-project-retrospective.md`
+  summary: `scripts/check-provenance.mjs` checks only one direction between the Open items index and the Log (each index phrase exists in a summary), so 10.9 closed 3.10 F7 with no "Resolved:" entry and the index kept listing it, and 10.9 F5 was logged with no index line, while the check passed.
+  evidence: `node scripts/check-provenance.mjs` exit 0 at `a41f72b`; the 3.10 F7 index line and the 10.9 F5 Log entry before this retro's fix; epic 10 retro P6, A5.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-bmad-optional-per-project/epic-bmad-optional-per-project-retrospective.md`
+  summary: After 0.2.0 is tagged, re-capture the 0.2.0 upgrade fixture from the released tag with 10.7's method and diff it against `tests/fixtures/data-folder-0.2.0/rows.json`; the rows were captured from `5765a09` (stamped `0.2.0-rc.1`), before 9.7's later fixes. A 0.3.0 data folder is checked live only (same schema; epic 3 added no migration).
+  evidence: 10.7 Implementation Notes ("Rows were captured, not hand-written"); RELEASING.md epic 10 step 3.4; epic 10 retro P5, A9.
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-end-to-end-suite-and-release-plan.md`
   summary: Resolved: "Installed-suite specs that start their own server" (3.10 review F7). 10.9's `killProcessTree` (merged into this chain by 4.13) kills the server and every descendant on Windows (`taskkill /T`) and POSIX (descendants collected first, then each killed with its group); `stopOwnServer`, every own server's `remove()` and the teardown use it.
   evidence: `scripts/installed-package.mjs` `killProcessTree`, `killBackgroundServer`; `tests/installed-package.test.ts` (a parent with a detached grandchild, both gone); commit `1d845c2`.
@@ -618,6 +668,112 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-choose-whether-new-messages-wait-or-go-right-away-plan.md`
   summary: Editing a waiting message while the turn ends loses the draft silently when the old text is sent.
   evidence: queued-messages.tsx editor does not reserve the message; takeNext sends it and the row unmounts.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-epic-contracts-shared-acp-hooks-sign-out-setup-notices-and-t-plan.md`
+  summary: Epic 12.3 review: the shared client does not check that a fixed-at-start agent honoured the mode.
+  evidence: 12.3 security and correctness review; see the plan's Review Triage Log.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-epic-contracts-shared-acp-hooks-sign-out-setup-notices-and-t-plan.md`
+  summary: Epic 12.3 review: an unreadable agent-files fingerprint makes Trust loop for agents.
+  evidence: 12.3 security and correctness review; see the plan's Review Triage Log.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-epic-contracts-shared-acp-hooks-sign-out-setup-notices-and-t-plan.md`
+  summary: Epic 12.3 review: the project trust prompt's changed wording keys on the trusted flag only.
+  evidence: 12.3 security and correctness review; see the plan's Review Triage Log.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-tracer-bullet-one-ticket-built-reviewed-and-approved-from-a-plan.md`
+  summary: A network allowlist for an unattended build's sandboxed commands (package registries, so `npm install` or `uv sync` in a fresh worktree can work); until then a build's commands have no network and such a failure is named in the run's result.
+  evidence: User decision 2026-10-04 on 5.2's Q1 (deny-by-default policy, Bash sandboxed with no network; "an allowlist is a later story").
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-tracer-bullet-one-ticket-built-reviewed-and-approved-from-a-plan.md`
+  summary: Core decides a build's file write before Claude Code's unsandboxed Edit/Write tool performs it, so sandboxed Bash racing a swap of a checked folder for a symlink can still redirect that write outside the worktree.
+  evidence: 5.2 security review S2 (medium, unverified in practice): `core/src/build-permission-policy.ts` decides on the path at request time; dangling links and hard links are refused, but a swap after the decision isn't. Settled by running file tools inside the sandbox too, or by a write-through-fd check in the agent (5.6).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-tracer-bullet-one-ticket-built-reviewed-and-approved-from-a-plan.md`
+  summary: A build's sandbox can write the main repo's `.git/objects` (a commit needs it), so an agent could delete objects and damage unpushed history; a per-run object store (`GIT_OBJECT_DIRECTORY` with the repo's objects as an alternate, copied in at approve) would close it.
+  evidence: 5.2 security review S3 (medium): `core/src/builds.ts` `sandboxFor`; refs and logs are narrowed to the run's own folder, objects can't be without a separate store (5.5).
 - source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-bmad-method-comes-from-the-maintained-fork-plan.md`
   summary: Resolved: "between the content check and Python's import of `config_utils.py`" (4.13 S1 follow-up), by the user decision of 2026-10-04 to maintain a BMad Method fork. The fork's `tickets.py` takes `--config-utils PATH`; core hands the store the trusted fingerprint with each run, and `tickets-v7` reads `_bmad/scripts/` once, hashes those bytes by the trust's rule, refuses a mismatch with `scripts_changed`, and writes the same bytes into a fresh owner-only run folder under `<data>/tools/bmad-script-runs/` whose `config_utils.py` the run imports. A file swapped in after the check is never read; the folder is removed after the run.
   evidence: `adapters/src/bmad-catalog/scripts-snapshot.ts`, `scripts-fingerprint.ts` `readProjectScripts`, `bmad-source/folder-hash.ts` `readFolder`; `adapters/src/tickets-v7/index.ts` `run`; `core/src/ticket-store-port.ts` `TicketRunGuard`; `core/src/bmad-script-trust.ts` `requireScriptsUnchanged`; tests `adapters/test/bmad-catalog-scripts-snapshot.test.ts` ("a config_utils.py swapped in after the check never runs"), the real-uv board tests in `server/test/planning-routes.test.ts`; fork commit `642c4e5` (tag `ogden-agents/2026-10-04`).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-contracts-and-stubs-for-epics-5-and-11-plan.md`
+  summary: Listing a webhook back by its full host can show part of its secret (some providers put the token in the host name); 11.4 should mask it (registrable domain only, or masked).
+  evidence: 5.3 security review S10; `WebhookTarget.host` in packages/shared/src/build-settings.ts; 11.4's own unknown is how a URL is listed back.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-contracts-and-stubs-for-epics-5-and-11-plan.md`
+  summary: Nothing checks a minimum git version, while builds rely on git 2.31+ (`rev-parse --path-format`) and `git apply`'s refusal to write beyond a symbolic link (fixed in 2.39.2, CVE-2023-23946); 5.5 should check the version and refuse older git with a plain reason.
+  evidence: 5.3 security review S15; `vcs-git` `applyPatch` and `worktreeGitPaths`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-headless-build-session-over-acp-for-one-named-ticket-plan.md`
+  summary: Stopping a build kills the agent's process group (POSIX) or `taskkill /T` tree (Windows), so a build command that leaves its group (`setsid`, a daemonizing tool) or whose parent exited on Windows survives with the sandbox's write access to the worktree; a per-run cgroup, job object or sandbox-level kill would close it.
+  evidence: 5.4 security review S4 (medium): `packages/adapters/src/process-tree.ts` `killProcessTree`; 5.4's tests prove only same-group descendants stop.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-headless-build-session-over-acp-for-one-named-ticket-plan.md`
+  summary: Run folders (`<data>/r/<run8>`, up to 32 MiB of activity each) and the activity recorder's in-memory maps are never pruned; remove them with the run's worktree (5.8's cleanup or 11.1's Runs tab).
+  evidence: 5.4 security review S6 (low): `packages/core/src/build-run-folder.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-worktrees-in-the-data-folder-plan.md`
+  summary: Resolved: "Nothing checks a minimum git version" (5.3 entry above) is closed: Build, approve and Commit plan files refuse git older than 2.39.2, or none, with a plain reason (`vcs_unavailable`).
+  evidence: `packages/adapters/src/vcs-git/index.ts` `check`, `packages/core/src/builds.ts` `requireGit`; tests in `vcs-git-worktrees.test.ts` and `builds-worktrees.test.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-worktrees-in-the-data-folder-plan.md`
+  summary: Board reads of an active run's worktree run `tickets.py` while its agent may be live: the scripts' fingerprint is checked, then the script runs (check-then-use), held only by the sandbox's deny of `_bmad/` (case variants on case-insensitive filesystems not verified).
+  evidence: 5.5 security review S2 (medium): `packages/core/src/run-aware-tickets.ts` `fromWorktree`; same class as 5.2's `decideOutcome` read and the 4.13 entry. Marks are refused while the agent runs, and plans reached through links are never used.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-the-sandbox-chain-and-the-build-dialog-plan.md`
+  summary: Resolved: "A build's sandbox can write the main repo's `.git/objects`" (5.2 security review S3) is closed. A sandboxed run's git writes to its own object store (`<data>/r/<run8>/objects`, `GIT_OBJECT_DIRECTORY`) with the repo's objects as a read-only alternate; approve imports the branch's new objects through `rev-list`, `pack-objects` and `unpack-objects --strict`, and refuses (merging nothing) what git won't take.
+  evidence: `packages/core/src/build-object-store.ts`, `builds.ts` `sandboxFor` and approve, `packages/adapters/src/vcs-git/index.ts` `importObjects`; tests `vcs-git-object-store.test.ts`, `builds-attended.test.ts` and `build-routes.test.ts` (a build's commit is not in the repo until approve, which leaves `git fsck --strict` clean).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-the-sandbox-chain-and-the-build-dialog-plan.md`
+  summary: Resolved: the 2.6 item "the inside-the-project check for file-kind rules runs before the agent acts (check-then-use)" is closed for what the native sandbox enforces: a sandboxed run's commands can write only its worktree, its own git paths and its object store, whatever they do after a check. It stays open for Claude Code's own Edit and Write tools, which are not sandboxed (5.2 security review S2, above).
+  evidence: `packages/core/src/builds.ts` `sandboxFor` (writable roots), `packages/adapters/src/acp-claude-code/claude-guards.ts` `claudeSandboxSettings` (`failIfUnavailable`, no unsandboxed commands).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-the-sandbox-chain-and-the-build-dialog-plan.md`
+  summary: Docker is detected and described (installed, running, Linux containers) but a run is never launched inside it: no document says which image carries Claude Code or how the agent reaches its model while its commands have no network, so the chain keeps Docker as `detected` and the Build dialog shows it as ready but not usable yet. Needs a user decision on the image and a network allowlist or proxy.
+  evidence: `packages/adapters/src/sandbox-docker/index.ts`; agent-matrix.md "Unattended builds" and AD-17 name Docker as a fallback without mechanics; 5.6 plan Design Notes.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-the-sandbox-chain-and-the-build-dialog-plan.md`
+  summary: Landlock is shown, not selected: spike 5.1 found it available on Linux runners where bubblewrap is blocked by AppArmor, but Claude Code cannot use it, so a Landlock sandbox would be a launcher Ogden Agents owns (a new security surface).
+  evidence: `packages/adapters/src/sandbox-claude-native/index.ts` (`LANDLOCK_NOTE`); 5.6 plan Design Notes.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-the-sandbox-chain-and-the-build-dialog-plan.md`
+  summary: Known cost of the per-run object store: from the agent's first commit, the run's branch ref (`refs/heads/ogden/<run8>/…`) names a commit only the store holds, so the user's own `git log --all`, `git fsck` or `git gc` in the repo reports a bad object until approve imports it or the run is discarded (Ogden Agents' own reads take the store as an alternate). Keeping the run's refs out of `refs/heads`, or importing the objects when the run ends, would close it.
+  evidence: `packages/adapters/test/vcs-git-object-store.test.ts` (fsck reports the dangling ref before import, clean after); `vcs-git/index.ts` `storeOf` and `readEnv`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-the-sandbox-chain-and-the-build-dialog-plan.md`
+  summary: An attended build's session has no managed Claude Code settings, so the user's or project's own `.claude/settings*.json` (an allow rule, `bypassPermissions`, a hook) can still skip a card; "every tool call is a card" holds for every request Claude raises, not for what its own settings allow. Passing managed settings (managed rules, hooks and MCP only, bypass disabled) for attended sessions would close it.
+  evidence: 5.6 security review (medium): `packages/adapters/src/acp-claude-code/claude-guards.ts` `claudeSessionOptions`, `packages/core/src/chat/agents.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-the-sandbox-chain-and-the-build-dialog-plan.md`
+  summary: Low findings of 5.6's review: a compression-bomb object in a run's store can fill the disk at approve (the 512 MiB bound is on the pack); an agent can `chmod 000` its store so removal fails and is retried forever; the bubblewrap probe omits `--unshare-net` and `--proc /proc`; `docker` is looked up by `execFile` (Windows searches the working folder first) and the status route spawns up to three probes per call with no cache.
+  evidence: `vcs-git/index.ts` `importObjects`, `build-object-store.ts` `removeObjectStore`, `sandbox-claude-native/index.ts`, `sandbox-docker/index.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-codex-stubs-descriptor-pins-wiring-slot-and-fake-personality-plan.md`
+  summary: Epic 12.4: Codex file-change approvals offer only a cancel reject option.
+  evidence: the pinned codex-acp 2.1.1 source (`fileChangeDecisionOptions`); see the plan's Implementation Notes.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-codex-install-and-openai-api-key-from-the-ui-plan.md`
+  summary: Epic 12.6: the sidebar and notification text still says sign in again for an API key only agent.
+  evidence: `sidebar-model.ts` `signInText`; see the plan's Implementation Notes.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-codex-install-and-openai-api-key-from-the-ui-plan.md`
+  summary: Epic 12.6 review: the keychain unavailable message still tells an API key only agent to sign in.
+  evidence: `SECRETS_UNAVAILABLE_MESSAGE` in `packages/core/src/errors.ts`; see the plan's Review Triage Log.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-grok-stubs-descriptor-pins-checked-binary-installer-wiring-slot-and-fake-personality-plan.md`
+  summary: Epic 12.4 (Grok): the checked Grok binary is hashed at install only, not at each spawn.
+  evidence: `installedGrok` checks existence; see the plan's Review Triage Log.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-grok-chat-per-chat-modes-the-trust-gate-resume-and-the-terminal-toggle-plan.md`
+  summary: Epic 12.7 review: Grok's own per-tool allow rules in a trusted project's settings load with its folder trust off; the probe covered only the always-approve flag.
+  evidence: `grok-agent.ts` (`GROK_FOLDER_TRUST=0`); see the plan's Review Triage Log and Decisions.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-codex-install-and-openai-api-key-from-the-ui-plan.md`
+  summary: Resolved: the sidebar and notification text for an API key only agent (Codex, Grok) says its key was rejected ("Codex's API key was rejected", title "API key rejected"), never to sign in again; and the keychain unavailable message for such an agent says it can't be used here, never to sign in with an account (`AgentSetupPort.apiKeyOnly`, `secretsUnavailableKeyOnlyMessage`).
+  evidence: branch `fix/key-only-wording`; `sidebar-model.ts`, `notifier.ts`, `agent-setup.ts`; tests `sidebar-model.test.ts`, `notifier.test.ts`, `agent-setup.test.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-grok-install-and-xai-api-access-token-from-the-ui-plan.md`
+  summary: Epic 12.8: the Grok card says only that Grok works with an xAI API access token and that account sign in isn't supported, because xAI's terms pages refuse automated reading; the user should read them.
+  evidence: `GROK_NO_SIGN_IN_NOTICE` in `setup-grok/index.ts`; the plan's Decisions.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-grok-install-and-xai-api-access-token-from-the-ui-plan.md`
+  summary: Epic 12.8: the xAI token check endpoint and its refused statuses are unverified against a real token.
+  evidence: `setup-grok/api-key.ts`; needs a real xAI token (a user account step).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-grok-install-and-xai-api-access-token-from-the-ui-plan.md`
+  summary: Epic 12.8: the chat picker state for Grok still says API key rather than xAI API access token.
+  evidence: `use-chat-agents.ts` `agentAvailability`; a ChatAgent carries no key name.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-grok-install-and-xai-api-access-token-from-the-ui-plan.md`
+  summary: Epic 12.8 review: other refusal words still say key for Grok, and the install-time token probe's premise that a dummy token sends nothing to xAI is checked on macOS only.
+  evidence: `core/errors.ts` `ApiKeyRefusedError`, `web/agents/agent-setup-api.ts`, `setup-grok/token-probe.ts`; Windows and Linux are a live check.
+
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-dispatch-limits-stop-retry-and-quit-in-core-plan.md`
+  summary: The test re-run is not stopped by Stop or Quit, and macOS Seatbelt leaves mach lookups and signals open
+  evidence: 5.8 reviews: `decideOutcome` disarms the deadline before the re-run and `stop` finds the agent already released; `seatbeltProfile` is allow-default with only `network*` and `file-write*` denied.
+
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-dispatch-limits-stop-retry-and-quit-in-core-plan.md`
+  summary: Read fences of the sandboxed re-run use unresolved credential folder paths and a short list, and macOS shares its temp folders between runs
+  evidence: 5.8 security review: `CREDENTIAL_FOLDERS` joined to the home folder unresolved; `temporaryFolders` in `exec.ts`.
+
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-dispatch-limits-stop-retry-and-quit-in-core-plan.md`
+  summary: Queued runs wait after a piece is turned back on
+  evidence: 5.8 correctness review: `launchQueued` returns silently while the piece is off and only a run ending, a limit change or a start drains the queue.
+
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-review-approve-and-merge-reject-and-retry-plan.md`
+  summary: Update and retry takes no run limit slot and arms no deadline
+  evidence: 5.9 correctness review: `rebaseLocked` sets the run running without `hasCapacity` or `armDeadline`; `review()` calls `tickets.find` on each read.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-build-runs-and-notifications/story-live-run-view-and-the-runs-tab-plan.md`
+  summary: Apply the saved fix after a late failure: the patch stays applied while the run is still blocked when the plan mark or the prompt fails; the patch is read by git three times and is not previewed.
+  evidence: 11.1 correctness and security reviews; Retry still works, and the agent is released while the run is blocked.

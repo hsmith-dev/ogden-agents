@@ -63,6 +63,8 @@ export interface NeedsYouEntry {
   at: string;
   /** The announcement for a new request ("run npm test"); absent for a waiting session with no request in view. */
   request?: string;
+  /** Set on a sign in need of an agent that takes only an API key: its key was rejected, there is no sign in. */
+  keyRejected?: true;
 }
 
 export interface SidebarModel {
@@ -87,6 +89,9 @@ export const checkInText = (agentName: string) => `${agentName} has been quiet f
 
 /** The Needs you text for a chat stopped until its agent is signed in again. */
 export const signInText = (agentName: string) => `${agentName} needs you to sign in again`;
+
+/** The same for an agent that takes only an API key (Codex, Grok): there is no sign in, the key was rejected. */
+export const keyRejectedText = (agentName: string) => `${agentName}'s API key was rejected`;
 
 const rank = (state: SessionState) => STATE_ORDER.indexOf(state);
 const time = (iso: string) => Date.parse(iso) || 0;
@@ -172,6 +177,8 @@ export function buildSidebar(
   agentName: (agentId: string | undefined) => string = () => UNKNOWN_AGENT_NAME,
   /** A chat's model by the agent's name for it (story 11); default: its id. */
   modelName: (agentId: string | undefined, model: string) => string = (_agentId, model) => model,
+  /** Whether a chat's agent takes only an API key, never an account sign in (Codex, Grok): its sign in need says the key was rejected. */
+  keyOnly: (agentId: string | undefined) => boolean = () => false,
 ): SidebarModel {
   const byWorkspace = new Map<string, Session[]>();
   for (const session of sessions) {
@@ -223,7 +230,15 @@ export function buildSidebar(
         needsYou.push({ ...base, id: `check_in:${session.id}:${folded.checkIn.at}`, kind: 'check_in', text: checkInText(agent), at: folded.checkIn.at });
       }
       if (session.state === 'error' && folded?.errorCode === 'auth_required' && (folded.state === undefined || folded.state === 'error')) {
-        needsYou.push({ ...base, id: `sign_in:${session.id}:${folded.errorSeq ?? session.updatedAt}`, kind: 'sign_in', text: signInText(agent), at: session.updatedAt });
+        const rejected = keyOnly(session.agentId);
+        needsYou.push({
+          ...base,
+          id: `sign_in:${session.id}:${folded.errorSeq ?? session.updatedAt}`,
+          kind: 'sign_in',
+          text: rejected ? keyRejectedText(agent) : signInText(agent),
+          at: session.updatedAt,
+          ...(rejected ? { keyRejected: true as const } : {}),
+        });
       }
     }
     rows.sort(compareRows);

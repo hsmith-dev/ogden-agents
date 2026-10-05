@@ -248,6 +248,7 @@ export function agentDescriptorProblems(descriptor: AgentDescriptor): string[] {
     at(`the handoff budget ${String(budget)} is not a whole number from 1000 to ${MAX_HANDOFF_BRIEF_CHARS}`);
   }
   if (descriptor.sendNow !== undefined && !(SEND_NOW_STYLES as readonly string[]).includes(descriptor.sendNow)) at(`${String(descriptor.sendNow)} is not a send now style`);
+  if (descriptor.modesNote !== undefined && (descriptor.modesNote.trim() === '' || /[\u2013\u2014]/.test(descriptor.modesNote))) at('the modes note is empty or has a dash');
   if (!isRelativeFolder(descriptor.skillsFolder)) at(`the skills folder ${JSON.stringify(descriptor.skillsFolder)} is not a plain repo-relative path`);
   return problems;
 }

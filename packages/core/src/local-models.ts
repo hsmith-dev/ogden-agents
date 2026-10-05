@@ -63,6 +63,8 @@ export interface LocalModels {
    * exists yet; this is the fitness check epic 15 builds on. Refuses an unconfirmed host before anything is called.
    */
   managerTest(id: LocalEndpointId, model: string): Promise<ManagerTestAnswer>;
+  /** `managerTest` itself, without the one-at-a-time sharing. */
+  runManagerTest(id: LocalEndpointId, model: string): Promise<ManagerTestAnswer>;
   /** Test connection for `id`: its state in plain words, and the models it serves. Never throws for an endpoint's own failure. */
   test(id: LocalEndpointId): Promise<LocalEndpointTestResponse>;
   /**
@@ -97,6 +99,7 @@ export function createLocalModels({
 }): LocalModels {
   let running: Promise<DetectedEndpoint[]> | undefined;
   const reading = new Map<LocalEndpointId, Promise<LocalModelsAnswer>>();
+  const testing = new Map<string, Promise<ManagerTestAnswer>>();
   return {
     async test(id) {
       const target = await endpoints.target(id);
@@ -117,7 +120,18 @@ export function createLocalModels({
       return { state, models, message };
     },
 
-    async managerTest(id, model) {
+    managerTest(id, model) {
+      // One test per endpoint and model at a time (a test can make up to four requests): a repeated press shares it.
+      const key = `${id}\u0000${model}`;
+      let pending = testing.get(key);
+      if (pending === undefined) {
+        pending = this.runManagerTest(id, model).finally(() => testing.delete(key));
+        testing.set(key, pending);
+      }
+      return pending;
+    },
+
+    async runManagerTest(id, model) {
       const target = await endpoints.target(id);
       if (target === undefined) throw new Error('unreachable: target() answered nothing for a named endpoint');
       const started = Date.now();
@@ -139,9 +153,13 @@ export function createLocalModels({
             : result.kind === 'model_not_found'
               ? "The server doesn't have that model right now."
               : result.kind === 'bad_answer'
-                ? result.reason.includes('not JSON')
+                ? result.detail === 'not_json'
                   ? "The model's answer was not valid JSON, even when asked again."
-                  : 'The model answered with JSON, but ignored the shape it was asked for, even when asked again.'
+                  : result.detail === 'bad_schema'
+                    ? "The test's own shape could not be used. Please report this."
+                    : result.detail === 'no_way_to_ask'
+                      ? "The server didn't accept any way of asking for a structured answer."
+                      : 'The model answered with JSON, but ignored the shape it was asked for, even when asked again.'
                 : result.reason;
       return { pass: false, mode: null, ms, message };
     },

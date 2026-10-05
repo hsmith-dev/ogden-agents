@@ -166,13 +166,36 @@ describe('Test as a manager (epic 14 story 14.8)', () => {
     [{ ok: false, kind: 'timeout', reason: 'x' }, 'Too slow: no answer in 60 seconds.'],
     [{ ok: false, kind: 'context_full', reason: 'x' }, "The model's context is too small for this test. Load it with a larger context in the server."],
     [{ ok: false, kind: 'model_not_found', reason: 'x' }, "The server doesn't have that model right now."],
-    [{ ok: false, kind: 'bad_answer', reason: 'The model answered, but not in the shape asked for (the answer is not JSON).' }, "The model's answer was not valid JSON, even when asked again."],
-    [{ ok: false, kind: 'bad_answer', reason: 'The model answered, but not in the shape asked for ($.tasks: missing).' }, 'The model answered with JSON, but ignored the shape it was asked for, even when asked again.'],
+    [{ ok: false, kind: 'bad_answer', reason: 'x', detail: 'not_json' }, "The model's answer was not valid JSON, even when asked again."],
+    [{ ok: false, kind: 'bad_answer', reason: 'x $.tasks: not JSON', detail: 'off_shape' }, 'The model answered with JSON, but ignored the shape it was asked for, even when asked again.'],
+    [{ ok: false, kind: 'bad_answer', reason: 'x', detail: 'no_way_to_ask' }, "The server didn't accept any way of asking for a structured answer."],
+    [{ ok: false, kind: 'bad_answer', reason: 'x', detail: 'bad_schema' }, "The test's own shape could not be used. Please report this."],
     [{ ok: false, kind: 'key_refused', reason: "The server at h didn't accept the key." }, "The server at h didn't accept the key."],
   ] as const)('fails in plain words: %j', async (result, message) => {
     const { answer } = await run(result as never);
     expect(answer).toEqual({ pass: false, mode: null, ms: expect.any(Number), message });
     expect(answer.message).not.toMatch(/—|–/);
+  });
+
+  it('shares one test between presses of the same model, and runs another model on its own', async () => {
+    const core = openTestCore(tempDir());
+    const endpoints = core.localEndpoints(secrets());
+    const added = await endpoints.add({ label: 'x', baseUrl: 'http://localhost:1234/v1' });
+    let calls = 0;
+    const slow: LocalModelPort = {
+      async probe() { return { ok: true, models: [] }; },
+      async listModels() { return { ok: true, models: [] }; },
+      async structuredComplete() {
+        calls++;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return { ok: true, value: {}, mode: 'json_schema' };
+      },
+    };
+    const models = createLocalModels({ endpoints, port: slow });
+    await Promise.all([models.managerTest(added.id, 'a'), models.managerTest(added.id, 'a')]);
+    expect(calls).toBe(1);
+    await Promise.all([models.managerTest(added.id, 'a'), models.managerTest(added.id, 'b')]);
+    expect(calls).toBe(3);
   });
 
   it('refuses a host nobody confirmed before anything is called', async () => {

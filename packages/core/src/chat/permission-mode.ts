@@ -256,18 +256,21 @@ export function createPermissionModes(ctx: ChatContext, deps: Pick<Agents, 'drop
   const unavailableReason = (sessionId: SessionId, mode: PermissionMode): string | undefined => {
     const agent = agentOf(sessionId);
     const current = entities.getSession(sessionId)?.permissionMode ?? 'ask';
+    const label = PERMISSION_MODE_LABELS[mode];
+    /** A mode the agent doesn't declare at all, with its own plain reason when its descriptor gives one (epic 14: why a small local model is Ask only). */
+    const notOffered = () => {
+      const session = entities.getSession(sessionId);
+      const note = session === undefined ? undefined : ctx.agents.describe(agentIdOf(session))?.modesNote;
+      return `${agent.displayName} doesn't offer ${label}.${note === undefined ? '' : ` ${note}`}`;
+    };
+    // The chat's own agent (epic 6): each agent declares its modes, and a chat is offered only those. A mode it never offers says so
+    // whether or not the chat has started.
+    if (mode !== 'ask' && !(agent.permissionModes ?? ['ask']).includes(mode)) return notOffered();
     if (mode !== current && modeFixed(sessionId)) {
       return `${agent.displayName} sets its permission mode when a chat starts, so this chat stays in ${PERMISSION_MODE_LABELS[current]}. Start a new chat to use ${PERMISSION_MODE_LABELS[mode]}.`;
     }
     // Ask is every agent's: it is where every chat starts.
     if (mode === 'ask') return undefined;
-    const label = PERMISSION_MODE_LABELS[mode];
-    // The chat's own agent (epic 6): each agent declares its modes, and a chat is offered only those.
-    if (!(agent.permissionModes ?? ['ask']).includes(mode)) {
-      // The agent's own plain reason, when its descriptor gives one (epic 14: why a small local model is Ask only).
-      const note = ctx.agents.describe(entities.getSession(sessionId)?.agentId ?? ctx.agents.defaultAgentId)?.modesNote;
-      return `${agent.displayName} doesn't offer ${label}.${note === undefined ? '' : ` ${note}`}`;
-    }
     // This chat's agent session when it started this run, else the one of the same agent that started last in this run (any chat).
     const session = entities.getSession(sessionId);
     const listed = sessionModes.get(sessionId) ?? (session === undefined ? undefined : ctx.lastSessionModes.get(agentIdOf(session)));

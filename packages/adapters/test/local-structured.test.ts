@@ -168,3 +168,128 @@ describe('the stub answers the same contract', () => {
     expect(await stub.structuredComplete({ baseUrl: 'http://y/v1' }, { model: 'm', prompt: 'p', schema: SCHEMA })).toMatchObject({ ok: false, kind: 'unreachable' });
   });
 });
+
+describe('hostile and odd answers (review fixes)', () => {
+  it('never lets a __proto__ or constructor key count as present or allowed', () => {
+    const hostile = JSON.parse('{"__proto__":{"x":1},"verdict":"fit","reason":"r"}') as unknown;
+    expect(schemaProblems(hostile, SCHEMA)).toEqual(['$.__proto__: not allowed']);
+    expect(schemaProblems({}, { type: 'object', required: ['constructor'] })).toEqual(['$.constructor: missing']);
+    expect(schemaProblems({ toString: 1 }, { type: 'object', additionalProperties: false, properties: {} })).toEqual(['$.toString: not allowed']);
+  });
+
+  it('collects at most twenty problems and never throws on a huge wrong answer, and names a long key shortened', () => {
+    const many = Array.from({ length: 150_000 }, () => 'x');
+    const problems = schemaProblems(many, { type: 'array', items: { type: 'integer' } });
+    expect(problems).toHaveLength(20);
+    const key = 'k'.repeat(5_000);
+    const named = schemaProblems({ [key]: 1 }, { type: 'object', additionalProperties: false, properties: {} })[0]!;
+    expect(named.length).toBeLessThan(80);
+  });
+
+  it('refuses a schema that uses a rule it cannot check, or nests too deep, up front and calls nothing', async () => {
+    const { unsupportedRule } = await import('../src/index.js');
+    expect(unsupportedRule({ type: 'object', properties: { a: { anyOf: [] } } })).toBe('anyOf');
+    expect(unsupportedRule({ $ref: '#/x' })).toBe('$ref');
+    expect(unsupportedRule({ type: 'string', pattern: '^a' })).toBe('pattern');
+    expect(unsupportedRule(SCHEMA)).toBeUndefined();
+    let deep: Record<string, unknown> = { type: 'string' };
+    for (let i = 0; i < 30; i++) deep = { type: 'object', properties: { a: deep } };
+    expect(unsupportedRule(deep)).toBe('nested too deeply');
+    const server = await fake();
+    expect(await ask(server, 'fake-small', 'x', { schema: { type: 'string', pattern: 'a' } })).toMatchObject({ ok: false, kind: 'bad_answer', detail: 'bad_schema' });
+    expect(server.log).toEqual([]);
+  });
+
+  it('parses JSON after prose or a reasoning block, a fence with a backtick string inside bare JSON, and is linear on a hostile text', () => {
+    expect(parseModelJson('Here is the plan: {"a":1} Hope that helps')).toEqual({ json: { a: 1 } });
+    expect(parseModelJson('<think>maybe {"a":2}</think>\n{"a":1}')).toEqual({ json: { a: 1 } });
+    expect(parseModelJson('{"a":"```not a fence```"}')).toEqual({ json: { a: '```not a fence```' } });
+    expect(parseModelJson('```json\n{"a":1}\n```')).toEqual({ json: { a: 1 } });
+    const started = Date.now();
+    expect(parseModelJson(`\`\`\`${' '.repeat(250_000)}`)).toBeUndefined();
+    expect(parseModelJson('['.repeat(100_000))).toBeUndefined();
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it('compares enum values whatever their key order', () => {
+    expect(schemaProblems({ a: 1, b: 2 }, { enum: [{ b: 2, a: 1 }] })).toEqual([]);
+  });
+
+  it('refuses a call that is already stopped without sending anything', async () => {
+    const server = await fake();
+    const controller = new AbortController();
+    controller.abort();
+    expect(await ask(server, 'fake-small', 'x MANAGER_TEST', { signal: controller.signal })).toMatchObject({ ok: false });
+    expect(server.log).toEqual([]);
+  });
+
+  it('keeps one deadline for the whole call, not one per request', async () => {
+    // Every rung is refused slowly (a server that takes a moment to say no), so the ladder would run long without one deadline.
+    const server = await fake({ slowMs: 400 });
+    const started = Date.now();
+    const result = await ask(server, 'fake-small', 'SLOW MANAGER_TEST MALFORMED', { timeoutMs: 700 });
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(result).toMatchObject({ ok: false });
+  });
+
+  it('reads a list of content parts, and treats an empty or null answer as an answer that is not JSON, not as a broken server', async () => {
+    const { createServer } = await import('node:http');
+    const answers: unknown[] = [[{ type: 'text', text: '{"verdict":"fit","reason":"ok"}' }], null, ''];
+    let index = 0;
+    const odd = createServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        const content = answers[Math.min(index++, answers.length - 1)];
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { role: 'assistant', content } }] }));
+      });
+    });
+    await new Promise<void>((resolve) => odd.listen(0, '127.0.0.1', resolve));
+    const port = (odd.address() as import('node:net').AddressInfo).port;
+    try {
+      const target = { baseUrl: `http://127.0.0.1:${port}/v1` };
+      const model = createOpenAiLocalModel();
+      expect(await model.structuredComplete(target, { model: 'm', prompt: 'p', schema: SCHEMA })).toMatchObject({ ok: true, mode: 'json_schema' });
+      expect(await model.structuredComplete(target, { model: 'm', prompt: 'p', schema: SCHEMA })).toMatchObject({ ok: false, kind: 'bad_answer', detail: 'not_json' });
+    } finally {
+      odd.closeAllConnections();
+      await new Promise((resolve) => odd.close(resolve));
+    }
+  });
+
+  it('tells a full context from a refused ask by the server\'s code, type or words, and walks on for a 500 on a response_format rung', async () => {
+    const { createServer } = await import('node:http');
+    let reply: { status: number; body: unknown } = { status: 400, body: {} };
+    let calls = 0;
+    const odd = createServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        calls++;
+        res.writeHead(reply.status, { 'content-type': 'application/json' }).end(JSON.stringify(reply.body));
+      });
+    });
+    await new Promise<void>((resolve) => odd.listen(0, '127.0.0.1', resolve));
+    const target = { baseUrl: `http://127.0.0.1:${(odd.address() as import('node:net').AddressInfo).port}/v1` };
+    const model = createOpenAiLocalModel();
+    const run = () => model.structuredComplete(target, { model: 'm', prompt: 'p', schema: SCHEMA });
+    try {
+      for (const body of [
+        { error: { message: 'x', type: 'exceed_context_size_error', code: 400 } },
+        { error: { message: "This model's maximum context length is 4096 tokens", type: 'BadRequestError' } },
+        { error: 'Trying to keep the first 4000 tokens when context window is 2048' },
+      ]) {
+        reply = { status: 400, body };
+        calls = 0;
+        expect(await run(), JSON.stringify(body)).toMatchObject({ ok: false, kind: 'context_full' });
+        expect(calls).toBe(1);
+      }
+      // A 500 for an unsupported response_format moves down the ladder (three rungs), and the last rung's 500 ends it.
+      reply = { status: 500, body: { error: 'boom' } };
+      calls = 0;
+      expect(await run()).toMatchObject({ ok: false, kind: 'http', status: 500 });
+      expect(calls).toBe(3);
+    } finally {
+      odd.closeAllConnections();
+      await new Promise((resolve) => odd.close(resolve));
+    }
+  });
+});

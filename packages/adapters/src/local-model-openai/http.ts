@@ -68,6 +68,7 @@ const codeOf = (error: unknown): string => {
  */
 export async function callEndpoint(call: EndpointCall, path: string, init: { method?: 'GET' | 'POST'; body?: unknown } = {}): Promise<unknown> {
   const fetchImpl = call.fetch ?? globalThis.fetch;
+  if (call.signal?.aborted) throw new EndpointError('unreachable', { code: 'aborted' });
   const controller = new AbortController();
   const onAbort = () => controller.abort();
   call.signal?.addEventListener('abort', onAbort);
@@ -125,16 +126,25 @@ export async function callEndpoint(call: EndpointCall, path: string, init: { met
   }
 }
 
-/** The `error.code` (or `error.type`) of a failed answer when it is a short token; the answer is read to at most 8 KB. */
+/** Whether a server's error text or type says the request was longer than the model's context. */
+const CONTEXT_ERROR = /context[ _-]?(?:length|window|size)|maximum context|too many tokens|exceed[_ ]context|input is too long|prompt is too long/i;
+
+/**
+ * The server's own error code (a short token such as `model_not_found`), read to tell a missing model or a full context
+ * from other errors; the answer is read to at most 8 KB. A context error is recognised by its code, type or words
+ * (servers differ: a code, a type, a plain string). Its message is never kept or shown.
+ */
 async function errorCodeOf(response: Response): Promise<string | undefined> {
   try {
     const text = await readLimited(response, 8 * 1024);
-    const body = JSON.parse(text) as { error?: { code?: unknown; type?: unknown; message?: unknown } };
-    const code = typeof body.error?.code === 'string' ? body.error.code : typeof body.error?.type === 'string' ? body.error.type : undefined;
-    if (code !== undefined && /^[A-Za-z0-9_.-]{1,60}$/.test(code)) return code;
-    // Some servers give only a message: a context error is recognised by it, never kept.
-    const message = typeof body.error?.message === 'string' ? body.error.message : '';
-    return /context length|context_length|maximum context|too many tokens/i.test(message) ? 'context_length_exceeded' : undefined;
+    const body = JSON.parse(text) as { error?: unknown };
+    const error = body.error;
+    const message = typeof error === 'string' ? error : typeof (error as { message?: unknown } | null)?.message === 'string' ? (error as { message: string }).message : '';
+    const type = typeof (error as { type?: unknown } | null)?.type === 'string' ? (error as { type: string }).type : '';
+    const code = typeof (error as { code?: unknown } | null)?.code === 'string' ? (error as { code: string }).code : '';
+    if (CONTEXT_ERROR.test(code) || CONTEXT_ERROR.test(type) || CONTEXT_ERROR.test(message)) return 'context_length_exceeded';
+    const token = code !== '' ? code : type;
+    return /^[A-Za-z0-9_.-]{1,60}$/.test(token) ? token : /model[^\n]{0,60}not found/i.test(message) ? 'model_not_found' : undefined;
   } catch {
     return undefined;
   }

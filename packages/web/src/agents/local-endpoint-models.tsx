@@ -29,12 +29,15 @@ export function EndpointModels({ endpointId, chosen, guard }: { endpointId: Loca
   };
   const load = async () => {
     setLoading(true);
+    // What each earlier test said is out of date once the list is read again.
+    setManagers({});
     await guard(async () => setAnswer(await fetchEndpointModels(endpointId)));
     setLoading(false);
   };
   const choose = (model: string | null) =>
     guard(async () => {
       await chooseEndpointModel(endpointId, model);
+      setManagers({});
       setAnswer(await fetchEndpointModels(endpointId));
     });
   return (
@@ -86,7 +89,7 @@ export function EndpointModels({ endpointId, chosen, guard }: { endpointId: Loca
                   <Button variant="outline" aria-label={`Test ${model.id} as a manager`} aria-disabled={managers[model.id] === 'running'} onClick={managers[model.id] === 'running' ? undefined : () => void runManager(model.id)} data-testid="endpoint-manager-test">
                     {managers[model.id] === 'running' ? 'Testing...' : 'Test as a manager'}
                   </Button>
-                  <span role="status" aria-live="polite">
+                  <span role="status">
                     {typeof managers[model.id] === 'object' ? (
                       <Text variant="caption" data-testid="endpoint-manager-result" data-pass={(managers[model.id] as ManagerTestResponse).pass ? 'true' : 'false'}>
                         {(managers[model.id] as ManagerTestResponse).message}

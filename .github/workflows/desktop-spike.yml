@@ -119,7 +119,9 @@ jobs:
         env:
           SPIKE_WORK: ${{ runner.temp }}/spike-work
         run: |
-          node apps/desktop-spike/scripts/harness.mjs --leg ${{ matrix.leg }} --target ${{ matrix.target }} \
+          # Linux: a session D-Bus as a desktop has one (without it GTK waits 25 s for one at start).
+          wrap=""; if [ "$RUNNER_OS" = "Linux" ]; then wrap="dbus-run-session --"; fi
+          $wrap node apps/desktop-spike/scripts/harness.mjs --leg ${{ matrix.leg }} --target ${{ matrix.target }} \
             --bundle "$RUNNER_TEMP/bundle-n" --bundle-next "$RUNNER_TEMP/bundle-n1" \
             --stage apps/desktop-spike/stage --out "$RUNNER_TEMP/findings-${{ matrix.leg }}.json"
           cp apps/desktop-spike/stage/stage-report.json "$RUNNER_TEMP/stage-report-${{ matrix.leg }}.json"

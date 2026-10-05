@@ -1,4 +1,4 @@
-import type { CoreEvent, Session, SessionState, Workspace } from '@ogden-agents/shared';
+import { chatName, NEW_CHAT_NAME, type CoreEvent, type Session, type SessionState, type Workspace } from '@ogden-agents/shared';
 import { UNKNOWN_AGENT_NAME } from '@/chat/chat-api';
 import { sessionView, type TranscriptPermission } from '@/chat/transcript';
 import { streamEvents, type EventStoreState } from '@/events/event-store';
@@ -15,8 +15,10 @@ import { workspaceName } from '@/workspaces/workspace-api';
 export interface SidebarRow {
   sesId: string;
   wsId: string;
-  /** The session's title, or "Chat". */
+  /** The chat's name (backlog story 2): the user's, else the automatic one, else "New chat". */
   title: string;
+  /** The user's own name for it, `null` when it shows the automatic one. */
+  userTitle: string | null;
   state: SessionState;
   /** When its state last changed (ISO), for the relative time. */
   updatedAt: string;
@@ -41,6 +43,8 @@ export interface NeedsYouEntry {
   wsId: string;
   sesId: string;
   workspaceName: string;
+  /** The chat it waits in, by its name (backlog story 2). */
+  chatName: string;
   text: string;
   /** The product name of the session's agent (epic 6), for its announcement. */
   agentName: string;
@@ -61,8 +65,8 @@ export const STATE_ORDER: readonly SessionState[] = ['working', 'waiting', 'erro
 /** A done session moves under "Earlier" after this long (EXPERIENCE.md State Patterns). */
 export const EARLIER_AFTER_MS = 24 * 60 * 60 * 1000;
 
-/** What a session with no title is called. */
-export const UNTITLED = 'Chat';
+/** What a chat with no name yet is called (backlog story 2). */
+export const UNTITLED = NEW_CHAT_NAME;
 
 /** The Needs you text for a waiting session whose request is older than the window, naming its agent (epic 6). */
 export const waitingText = (agentName: string) => `${agentName} is waiting for you`;
@@ -128,7 +132,7 @@ export function buildSidebar(
     const earlier: SidebarRow[] = [];
     const counts = new Map<SessionState, number>();
     for (const session of byWorkspace.get(workspace.id) ?? []) {
-      const row: SidebarRow = { sesId: session.id, wsId: workspace.id, title: session.title ?? UNTITLED, state: session.state, updatedAt: session.updatedAt, agentName: agentName(session.agentId) };
+      const row: SidebarRow = { sesId: session.id, wsId: workspace.id, title: chatName(session), userTitle: session.title, state: session.state, updatedAt: session.updatedAt, agentName: agentName(session.agentId) };
       if (session.state === 'done' && now - time(session.updatedAt) > EARLIER_AFTER_MS) earlier.push(row);
       else rows.push(row);
       counts.set(session.state, (counts.get(session.state) ?? 0) + 1);
@@ -141,6 +145,7 @@ export function buildSidebar(
           wsId: workspace.id,
           sesId: session.id,
           workspaceName: name,
+          chatName: row.title,
           text: `${agentName(session.agentId)} wants to ${announcement}`,
           agentName: agentName(session.agentId),
           at: request.requestedAt,
@@ -151,7 +156,7 @@ export function buildSidebar(
       // `waiting` the window saw with no open request is a moment between events (the request
       // not yet arrived, or answered before `working`), not something to show.
       if (requests.length === 0 && session.state === 'waiting' && windowState === undefined) {
-        needsYou.push({ id: session.id, wsId: workspace.id, sesId: session.id, workspaceName: name, text: waitingText(agentName(session.agentId)), agentName: agentName(session.agentId), at: session.updatedAt });
+        needsYou.push({ id: session.id, wsId: workspace.id, sesId: session.id, workspaceName: name, chatName: row.title, text: waitingText(agentName(session.agentId)), agentName: agentName(session.agentId), at: session.updatedAt });
       }
     }
     rows.sort(compareRows);

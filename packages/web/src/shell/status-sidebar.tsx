@@ -2,6 +2,7 @@ import { FolderSimplePlus, GearSix, HandWaving, PaintBrush, Plus, Robot, Wrench 
 import { NEW_PROJECTS_SETTINGS_LABEL } from '@ogden-agents/shared';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { memo, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useChatRename } from '@/chat/chat-name';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/ui/dropdown-menu';
 import {
   Sidebar,
@@ -235,6 +236,7 @@ function SessionRows({ rows, now }: { rows: readonly SidebarRow[]; now: number }
           sesId={row.sesId}
           state={row.state}
           title={row.title}
+          userTitle={row.userTitle}
           updatedAt={row.updatedAt}
           agentName={row.agentName}
           time={relativeTime(row.updatedAt, now)}
@@ -251,23 +253,40 @@ const SessionRow = memo(function SessionRow({
   sesId,
   state,
   title,
+  userTitle,
   updatedAt,
   agentName,
   time,
   active,
-}: Pick<SidebarRow, 'wsId' | 'sesId' | 'state' | 'title' | 'updatedAt' | 'agentName'> & { time: string; active: boolean }) {
+}: Pick<SidebarRow, 'wsId' | 'sesId' | 'state' | 'title' | 'userTitle' | 'updatedAt' | 'agentName'> & { time: string; active: boolean }) {
+  // Rename in place (backlog story 2): double click the row or press F2 on it.
+  const rename = useChatRename({ wsId, sesId, name: title, title: userTitle });
+  const item = useRef<HTMLLIElement>(null);
+  const row = () => item.current?.querySelector<HTMLElement>('[data-testid="status-row"]');
   return (
-    <SidebarMenuItem>
-      <SidebarStatusRow
-        data-testid="status-row"
-        state={state}
-        title={title}
-        caption={`${agentName}, ${STATE_WORDS[state].toLowerCase()}`}
-        time={{ label: time, dateTime: updatedAt }}
-        isActive={active}
-      >
-        <Link to="/w/$wsId/s/$sesId" params={{ wsId, sesId }} />
-      </SidebarStatusRow>
+    <SidebarMenuItem ref={item}>
+      {rename.editing ? (
+        <div className="px-1 py-1">{rename.field}</div>
+      ) : (
+        <SidebarStatusRow
+          data-testid="status-row"
+          state={state}
+          title={title}
+          caption={`${agentName}, ${STATE_WORDS[state].toLowerCase()}`}
+          time={{ label: time, dateTime: updatedAt }}
+          isActive={active}
+          aria-keyshortcuts="F2"
+          onDoubleClick={() => rename.start(row)}
+          onKeyDown={(event) => {
+            if (event.key !== 'F2') return;
+            event.preventDefault();
+            rename.start(row);
+          }}
+        >
+          <Link to="/w/$wsId/s/$sesId" params={{ wsId, sesId }} />
+        </SidebarStatusRow>
+      )}
+      {rename.status}
     </SidebarMenuItem>
   );
 });

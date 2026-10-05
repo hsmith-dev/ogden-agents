@@ -6,6 +6,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useAgents } from '@/agents/agent-setup-api';
 import { useAppearance } from '@/appearance/appearance-provider';
 import { agentNameOf, cancelSession, ChatApiError, UNKNOWN_AGENT_NAME, fetchSession, sendMessage, setPermissionMode, switchDriver } from '@/chat/chat-api';
+import { ChatHeaderRename, useChatName, useChatRename } from '@/chat/chat-name';
 import { useChatAgents } from '@/chat/use-chat-agents';
 import { Composer } from '@/chat/composer';
 import { ReadOnlyConversation } from '@/chat/read-only';
@@ -211,6 +212,11 @@ export function SessionPage() {
     setActionError,
   });
 
+  // The chat's name (backlog story 2): the view follows `session.renamed`; Rename beside it in the header.
+  const { name: shownName, title: userTitle } = useChatName(events, session.data?.session);
+  const chatTitle = shownName === '' ? 'Chat' : shownName;
+  const rename = useChatRename({ wsId, sesId, name: chatTitle, title: userTitle, className: 'max-w-80' });
+
   // The chat's permission mode (permission modes): one change at a time; the view follows the event.
   const permissionMode = usePermissionMode(events, session.data?.session.permissionMode);
   const [modeChanging, setModeChanging] = useState(false);
@@ -328,7 +334,13 @@ export function SessionPage() {
 
   return (
     <>
-      <WorkspaceHeader title="Chat" wsId={wsId} compactOnPhone={appearance.developerMode}>
+      <WorkspaceHeader
+        title={chatTitle}
+        wsId={wsId}
+        compactOnPhone={appearance.developerMode}
+        titleHidden={rename.editing}
+        titleAction={session.data === undefined ? undefined : <ChatHeaderRename rename={rename} name={chatTitle} />}
+      >
         {/* The chat's agent (E6-R1), named in the header while the install has more than one. */}
         {severalAgents && session.data !== undefined ? (
           <Text as="span" variant="caption" data-testid="session-agent">

@@ -184,6 +184,7 @@ export const WEBHOOK_TIMEOUT_MESSAGE = "The webhook didn't answer in time.";
 export const WEBHOOK_NETWORK_MESSAGE = "Ogden Agents couldn't reach the webhook.";
 export const WEBHOOK_REFUSED_MESSAGE = "Ogden Agents won't send to that address.";
 export const WEBHOOK_SECRETS_UNAVAILABLE_MESSAGE = "Ogden Agents can't keep a webhook address safely here: this computer has no usable keychain, so nothing was saved.";
+export const WEBHOOK_KEYCHAIN_NO_READ_MESSAGE = "Ogden Agents couldn't read the saved address from your keychain, so nothing was sent.";
 export const webhookHttpMessage = (status: number) => `The webhook answered with HTTP ${status}.`;
 export const WEBHOOK_URL_HIDDEN = 'The address is kept in your keychain and not shown.';
 export const RUN_LIMITS_LABEL = 'Builds at a time';

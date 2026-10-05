@@ -1,7 +1,9 @@
 /** Story 11.4: the webhook notifier with a fake resolver and a fake transport. Nothing here touches the network. */
 import { WEBHOOK_TIMEOUT_MS, type WebhookPayload } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
-import { createWebhookNotifier, isBlockedAddress, MAX_WEBHOOK_RESPONSE_BYTES, type WebhookRequest } from '../src/notify-webhook/index.js';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { createWebhookNotifier, isBlockedAddress, MAX_WEBHOOK_RESPONSE_BYTES, nodeTransport, type WebhookRequest } from '../src/notify-webhook/index.js';
 
 const payload: WebhookPayload = {
   version: 1,
@@ -33,13 +35,13 @@ function fakes(options: { addresses?: Array<{ address: string; family: 4 | 6 }>;
 
 describe('the blocked addresses', () => {
   it('refuses link-local, metadata, this-network, multicast and reserved ranges, and the same inside an IPv6 mapping', () => {
-    for (const address of ['169.254.169.254', '169.254.0.1', '0.0.0.0', '0.1.2.3', '224.0.0.1', '255.255.255.255', '240.0.0.1', '100.100.100.200', 'fe80::1', 'febf::1', 'ff02::1', 'fd00:ec2::254', '::', '::ffff:169.254.169.254', '::ffff:a9fe:a9fe', 'not an address']) {
+    for (const address of ['169.254.169.254', '169.254.0.1', '0.0.0.0', '0.1.2.3', '224.0.0.1', '255.255.255.255', '240.0.0.1', '100.100.100.200', 'fe80::1', 'febf::1', '64:ff9b::a9fe:a9fe', '2002:a9fe:a9fe::', '::ffff:0:a9fe:a9fe', '64:ff9b:1::1', '2001:0:4136:e378:8000:63bf:3fff:fdd2', 'ff02::1', 'fd00:ec2::254', '::', '::ffff:169.254.169.254', '::ffff:a9fe:a9fe', 'not an address']) {
       expect(isBlockedAddress(address), address).toBe(true);
     }
   });
 
   it('allows public, private and loopback addresses', () => {
-    for (const address of ['93.184.216.34', '10.0.0.5', '192.168.1.20', '172.16.0.9', '127.0.0.1', '::1', '2606:4700:4700::1111', '::ffff:93.184.216.34', '100.64.0.1']) {
+    for (const address of ['93.184.216.34', '10.0.0.5', '192.168.1.20', '172.16.0.9', '127.0.0.1', '::1', '2606:4700:4700::1111', '::ffff:93.184.216.34', '100.64.0.1', '64:ff9b::5db8:d822', '2002:5db8:d822::']) {
       expect(isBlockedAddress(address), address).toBe(false);
     }
   });
@@ -101,5 +103,45 @@ describe('sending a webhook', () => {
     expect(await failing.send('https://hooks.example.com/x', payload)).toMatchObject({ failure: 'network' });
     const hanging = createWebhookNotifier({ lookup: () => new Promise(() => undefined), transport: async () => ({ status: 204 }) });
     expect(await hanging.send('https://hooks.example.com/x', payload, { timeoutMs: 20 })).toMatchObject({ failure: 'timeout' });
+  });
+});
+
+describe('plain http and the real transport', () => {
+  it('http is only for a name that resolves to this computer', async () => {
+    const f = fakes({ addresses: [{ address: '10.0.0.5', family: 4 }] });
+    expect(await f.notifier.send('http://localhost:8080/hook', payload)).toMatchObject({ failure: 'refused' });
+    expect(f.requests).toEqual([]);
+  });
+
+  // The one test of the built-in transport: a listener on this computer's loopback only, reached through a host name so the pinned lookup is used the way Node 20 and later calls it (with `all`). Nothing leaves the machine.
+  it('the built-in transport reaches the pinned address by host name, reads the status and follows no redirect', async () => {
+    const seen: Array<{ method: string; url: string; body: string; host: string | undefined }> = [];
+    const server = createServer((request, response) => {
+      let body = '';
+      request.on('data', (chunk) => (body += chunk));
+      request.on('end', () => {
+        seen.push({ method: request.method ?? '', url: request.url ?? '', body, host: request.headers.host });
+        if (request.url === '/redirect') {
+          response.writeHead(302, { location: 'http://127.0.0.1:1/never' });
+          response.end();
+        } else {
+          response.writeHead(204);
+          response.end();
+        }
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const base = { address: { address: '127.0.0.1', family: 4 as const }, body: '{"a":1}', timeoutMs: 3000, maxResponseBytes: 1024 };
+      const ok = await nodeTransport({ ...base, url: new URL(`http://localhost:${port}/hook?x=1`) });
+      expect(ok.status).toBe(204);
+      expect(seen[0]).toMatchObject({ method: 'POST', url: '/hook?x=1', body: '{"a":1}', host: `localhost:${port}` });
+      const redirected = await nodeTransport({ ...base, url: new URL(`http://localhost:${port}/redirect`) });
+      expect(redirected.status).toBe(302);
+      expect(seen).toHaveLength(2);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });

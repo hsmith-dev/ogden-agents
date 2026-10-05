@@ -17,8 +17,10 @@ import { createTabPresence, type TabPresence } from './tab-presence';
  * group and the tab title are the visual signal.
  */
 export function AttentionNotifier() {
-  const { model } = useSidebarData();
-  const { caughtUp } = useEventStream();
+  const { model, runsSettled } = useSidebarData();
+  const { caughtUp: streamCaughtUp } = useEventStream();
+  // Run needs are read over REST after the stream: what they hold at first is not news either (story 11.4).
+  const caughtUp = streamCaughtUp && runsSettled;
   const { settings } = useNotificationSettings();
   const router = useRouter();
   const notifier = useRef<Notifier | undefined>(undefined);

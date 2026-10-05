@@ -11,7 +11,7 @@ import { fetchRuns } from '@/planning/builds-api';
  * notification for it, E11-R1). Shares the Runs tab's query and is read
  * again whenever a `run.*` event of that project arrives (AD-7's pattern).
  */
-export function useRunsByWorkspace(workspaces: readonly Workspace[]): ReadonlyMap<string, readonly Run[]> {
+export function useRunsByWorkspace(workspaces: readonly Workspace[]): { runs: ReadonlyMap<string, readonly Run[]>; settled: boolean } {
   useEventInvalidation((event) => (event.type.startsWith('run.') && event.workspaceId !== null ? [['runs', event.workspaceId]] : []));
   const results = useQueries({
     queries: workspaces.map((workspace) => ({
@@ -24,6 +24,13 @@ export function useRunsByWorkspace(workspaces: readonly Workspace[]): ReadonlyMa
     })),
   });
   // Each result's data changes identity only when it is fetched again.
-  const signature = results.map((result) => result.dataUpdatedAt).join(',');
-  return useMemo(() => new Map(workspaces.map((workspace, index) => [workspace.id, results[index]?.data?.runs ?? []] as const)), [workspaces, signature]); // eslint-disable-line react-hooks/exhaustive-deps
+  const signature = results.map((result) => `${result.dataUpdatedAt}:${result.isError ? 'e' : 'o'}`).join(',');
+  // A project whose last answer was a refusal (builds turned off) has no needs, whatever an earlier answer said.
+  const runs = useMemo(
+    () => new Map(workspaces.map((workspace, index) => [workspace.id, results[index]?.isError === true ? [] : (results[index]?.data?.runs ?? [])] as const)),
+    [workspaces, signature], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  // Every project has answered (or refused) once: what was already waiting when the tab opened is then recorded, not announced.
+  const settled = results.every((result) => !result.isPending);
+  return { runs, settled };
 }

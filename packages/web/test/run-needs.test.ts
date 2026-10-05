@@ -75,3 +75,24 @@ describe('blocked runs and runs ready for review in Needs you (story 11.4)', () 
     expect(diffForAnnouncements(before, after).polite).toEqual([{ sesId: entries[0]!.sesId, text: 'Letterpress: Build 1.1 is blocked' }]);
   });
 });
+
+describe('a build need in the notifier (story 11.4)', () => {
+  it('is news once, and again when it leaves the list and comes back', async () => {
+    const { createNotifier } = await import('../src/notifications/notifier');
+    const { DEFAULT_NOTIFICATION_SETTINGS } = await import('../src/notifications/notification-settings');
+    const shown: string[] = [];
+    const notifier = createNotifier({ isLeader: () => true, anyTabFocused: () => false, permission: () => 'granted', show: (need) => (shown.push(need.id), undefined), chime: () => undefined });
+    const settings = { ...DEFAULT_NOTIFICATION_SETTINGS, desktop: true };
+    const sessions = new Set(['ses_01J9Z3K4M5N6P7Q8R9S0T1V2W1']);
+    const need = buildRunNeeds([workspace], new Map([[WS, [run('1.1', { outcome: 'blocked', blockedCode: 'other' })]]]));
+    const entry = { ...need[0]!, sesId: 'ses_01J9Z3K4M5N6P7Q8R9S0T1V2W1' };
+    notifier.update([], settings, true, sessions);
+    notifier.update([entry], settings, true, sessions);
+    notifier.update([{ ...entry, at: '2030-01-01T00:00:00.000Z' }], settings, true, sessions);
+    expect(shown).toEqual([entry.id]);
+    // Retried (gone from the list), then blocked again.
+    notifier.update([], settings, true, sessions);
+    notifier.update([entry], settings, true, sessions);
+    expect(shown).toEqual([entry.id, entry.id]);
+  });
+});

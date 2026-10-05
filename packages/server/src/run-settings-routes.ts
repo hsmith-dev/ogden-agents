@@ -24,7 +24,7 @@
  * Nothing logs or answers a webhook URL (AD-16).
  */
 import { CoreError, NotFoundError, SecretsUnavailableError, ValidationError, type BuildSettings, type BuildsUseCases, type Notifications } from '@ogden-agents/core';
-import { API_ROUTES, NotificationSettingsResponse, WebhookTestResult, WEBHOOK_SECRETS_UNAVAILABLE_MESSAGE } from '@ogden-agents/shared';
+import { API_ROUTES, NotificationSettingsResponse, WebhookTestResult, WEBHOOK_KEYCHAIN_NO_READ_MESSAGE, WEBHOOK_SECRETS_UNAVAILABLE_MESSAGE } from '@ogden-agents/shared';
 import { RunLimitSettingsResponse } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -81,12 +81,12 @@ export function registerRunSettingsRoutes(app: Hono, { buildSettings, builds, no
     app.post(API_ROUTES.notificationWebhookTest, notImplemented);
     return;
   }
-  const refusal = (c: Context, error: unknown): Response => {
+  const refusal = (c: Context, error: unknown, what: 'add' | 'other' = 'other'): Response => {
     if (error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);
     if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', 'There is no such webhook.');
     if (error instanceof SecretsUnavailableError) {
       log.warn('the keychain is unavailable', { code: typeof error.cause === 'string' ? error.cause : 'unknown' });
-      return apiError(c, 503, 'secrets_unavailable', error.message === '' ? WEBHOOK_SECRETS_UNAVAILABLE_MESSAGE : WEBHOOK_SECRETS_UNAVAILABLE_MESSAGE);
+      return apiError(c, 503, 'secrets_unavailable', what === 'add' ? WEBHOOK_SECRETS_UNAVAILABLE_MESSAGE : WEBHOOK_KEYCHAIN_NO_READ_MESSAGE);
     }
     log.error('a notification setting failed', { code: error instanceof CoreError ? error.code : 'unexpected' });
     return apiError(c, 500, 'internal_error', "Ogden Agents couldn't save that setting. Try again.");
@@ -117,7 +117,7 @@ export function registerRunSettingsRoutes(app: Hono, { buildSettings, builds, no
       log.info('a webhook was added', { webhooks: settings.webhooks.length });
       return c.json(NotificationSettingsResponse.parse({ settings }), 201);
     } catch (error) {
-      return refusal(c, error);
+      return refusal(c, error, 'add');
     }
   });
   app.patch(API_ROUTES.notificationWebhook, limit, async (c) => {

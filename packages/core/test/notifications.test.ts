@@ -55,6 +55,8 @@ describe('the masked host', () => {
   it('shows only the registrable domain, and says what an address or this computer is', () => {
     expect(maskedHost('hooks.slack.com')).toBe('slack.com');
     expect(maskedHost('abc123.token.example.co.uk')).toBe('example.co.uk');
+    // A short label that is not a known second level may be a token: not shown.
+    expect(maskedHost('T0K.me.io')).toBe('me.io');
     expect(maskedHost('example.com')).toBe('example.com');
     expect(maskedHost('localhost')).toBe('this computer');
     expect(maskedHost('127.0.0.1')).toBe('this computer');

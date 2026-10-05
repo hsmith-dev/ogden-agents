@@ -92,7 +92,8 @@ export function buildRunNeeds(workspaces: readonly Workspace[], runsByWorkspace:
       if (phase !== 'needs_you' && phase !== 'checkpoint' && phase !== 'built') continue;
       const blocked = phase !== 'built';
       entries.push({
-        id: `${blocked ? 'run_blocked' : 'run_review'}:${run.id}:${run.updatedAt}`,
+        // Stable while the run stays in this state, so a changed reason says nothing twice; a run that leaves it and comes back is new news (the notifier forgets it meanwhile).
+        id: `${blocked ? 'run_blocked' : 'run_review'}:${run.id}`,
         kind: blocked ? 'run_blocked' : 'run_review',
         wsId: workspace.id,
         sesId: run.sessionId,

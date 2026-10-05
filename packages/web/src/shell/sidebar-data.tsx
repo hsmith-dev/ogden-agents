@@ -24,6 +24,8 @@ export interface SidebarData {
   unloaded: ReadonlySet<string>;
   /** The current time, moving on once a minute. */
   now: number;
+  /** Whether every project's runs have been read once (story 11.4): needs already waiting when the tab opened are recorded, not announced. */
+  runsSettled: boolean;
 }
 
 const SidebarDataContext = createContext<SidebarData | null>(null);
@@ -46,7 +48,7 @@ export function SidebarDataProvider({ children }: { children: ReactNode }) {
   // Each row and Needs you entry names its chat's agent (epic 6, E6-R1).
   const chatAgents = useChatAgents();
   // Blocked runs and runs ready for review join Needs you (story 11.4).
-  const runsByWorkspace = useRunsByWorkspace(workspaces.data ?? NO_WORKSPACES);
+  const { runs: runsByWorkspace, settled: runsSettled } = useRunsByWorkspace(workspaces.data ?? NO_WORKSPACES);
   const model = useMemo(
     () =>
       buildSidebar(
@@ -66,7 +68,7 @@ export function SidebarDataProvider({ children }: { children: ReactNode }) {
       ),
     [workspaces.data, sessions, store, now, chatAgents.data, runsByWorkspace],
   );
-  const value = useMemo(() => ({ model, sessions, loading, unloaded, now }), [model, sessions, loading, unloaded, now]);
+  const value = useMemo(() => ({ model, sessions, loading, unloaded, now, runsSettled }), [model, sessions, loading, unloaded, now, runsSettled]);
   return <SidebarDataContext.Provider value={value}>{children}</SidebarDataContext.Provider>;
 }
 

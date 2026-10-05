@@ -47,6 +47,8 @@ const ROW_ID = 1;
 /** The name a webhook's secret is kept under. */
 const secretName = (id: string) => `webhook:${id}`;
 
+const SECOND_LEVELS: ReadonlySet<string> = new Set(['co', 'com', 'org', 'net', 'gov', 'edu', 'ac', 'or', 'ne', 'go']);
+
 /**
  * A host as it may be listed back: some providers put the token in the host
  * name, so only the registrable domain shows ("hooks.slack.com" shows as
@@ -60,8 +62,8 @@ export function maskedHost(hostname: string): string {
   const labels = host.split('.').filter((label) => label !== '');
   if (labels.length <= 2) return labels.join('.') || 'a web address';
   const [second, tld] = [labels.at(-2)!, labels.at(-1)!];
-  // A short second level under a country code (co.uk, com.au) is part of the suffix.
-  const keep = tld.length === 2 && second.length <= 3 ? 3 : 2;
+  // A well known second level under a country code (co.uk, com.au) is part of the suffix; any other short label may be a token.
+  const keep = tld.length === 2 && SECOND_LEVELS.has(second) ? 3 : 2;
   return labels.slice(-keep).join('.');
 }
 

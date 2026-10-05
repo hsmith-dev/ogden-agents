@@ -110,6 +110,7 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Epic 11 (11.5, which also takes the run folder pruning above): Apply the saved fix leaves the patch applied with the run still blocked when the plan mark or the prompt fails afterwards; the saved patch is read by git three times and not previewed. From 11.1 reviews. (log: "Apply the saved fix after a late failure")
 - Epic 11 (11.5): a Check again that ends without a built plan or on a read failure leaves the older verification shown beside the new reason; Check again is offered for runs the server then refuses; tests for the settings field and the re-check edge cases. From 11.2 reviews. (log: "Check again edge cases after 11.2")
 - Epic 11 (11.5): Build all ready and the detail sheet's build section have thin DOM tests, "Started N builds." is not announced through a live region that was already mounted, and the Build dialog over the sheet is an untested nested modal. From 11.3 reviews. (log: "Board build actions edge cases after 11.3")
+- Epic 11 (11.5): webhook edges: concurrent adds can pass the cap, Remove with an unreachable keychain orphans the saved address, focus after Remove or add, the add form while the list failed to load, and a minute of stale build needs after a socket gap. From 11.4 reviews. (log: "Webhook edges after 11.4")
 
 ## Log
 
@@ -787,3 +788,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-build-runs-and-notifications/story-needs-you-and-webhook-notifications-plan.md`
   summary: Resolved: "Listing a webhook back by its full host can show part of its secret" (5.3 security review S10), by 11.4: a webhook is listed back by its registrable domain only (`maskedHost` in core), "this computer" or "an IP address" for those, and its URL lives only in the keychain.
   evidence: `core/src/notifications.ts` `maskedHost` and `addWebhook`; tests `core/test/notifications.test.ts` and `server/test/notification-routes.test.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-build-runs-and-notifications/story-needs-you-and-webhook-notifications-plan.md`
+  summary: Webhook edges after 11.4: concurrent adds can pass the cap of 10, Remove with an unreachable keychain orphans the saved address, focus is not managed after Remove or add, the add form shows while the list failed to load, and a socket gap leaves build needs stale for up to a minute.
+  evidence: 11.4 reviews; each is low and none leaks a URL.

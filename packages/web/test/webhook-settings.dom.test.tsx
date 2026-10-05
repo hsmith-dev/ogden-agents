@@ -95,7 +95,7 @@ describe('webhooks in Settings, Notifications (story 11.4)', () => {
     await mount();
     fireEvent.click(screen.getByTestId('webhook-test'));
     await settle();
-    expect(screen.getByTestId('webhook-test-result').textContent).toBe('Test sent. The webhook answered with HTTP 204. (HTTP 204)');
+    expect(screen.getByTestId('webhook-test-result').textContent).toBe('Test sent. The webhook answered with HTTP 204.');
     state.test = { ok: false, status: 500, failure: 'http', message: 'The webhook answered with HTTP 500.' };
     fireEvent.click(screen.getByTestId('webhook-test'));
     await settle();

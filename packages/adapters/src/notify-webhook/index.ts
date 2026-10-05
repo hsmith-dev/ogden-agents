@@ -108,6 +108,13 @@ export function isBlockedAddress(address: string): boolean {
   if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && (g5 === 0xffff || g5 === 0) && !(g5 === 0 && g6 === 0 && g7 <= 1)) {
     return isBlockedAddress(`${g6 >> 8}.${g6 & 255}.${g7 >> 8}.${g7 & 255}`);
   }
+  const embedded = (hi: number, lo: number) => isBlockedAddress(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+  // NAT64 (`64:ff9b::/96`), 6to4 (`2002:v4::`) and SIIT (`::ffff:0:v4`) carry an IPv4 address: judged by it. Teredo (`2001::/32`) and the local NAT64 range are refused whole.
+  if (g0 === 0x64 && g1 === 0xff9b && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0) return embedded(g6, g7);
+  if (g0 === 0x64 && g1 === 0xff9b && g2 === 1) return true;
+  if (g0 === 0x2002) return embedded(g1, g2);
+  if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0xffff && g5 === 0) return embedded(g6, g7);
+  if (g0 === 0x2001 && g1 === 0) return true;
   if ((g0 & 0xffc0) === 0xfe80) return true;
   if ((g0 & 0xff00) === 0xff00) return true;
   // AWS's IPv6 metadata address.
@@ -130,7 +137,12 @@ export const nodeTransport: WebhookTransport = ({ url, address, body, timeoutMs,
         path: `${url.pathname}${url.search}`,
         headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body), 'user-agent': 'ogden-agents-webhook' },
         // The one lookup there is: the address that was checked.
-        lookup: (_host, _options, callback) => (callback as (error: Error | null, address: string, family: number) => void)(null, address.address, address.family),
+        // Node 20 and later asks with `all: true` (it tries each family) and expects a list; older callers expect one address.
+        lookup: (_host, lookupOptions, callback) => {
+          const answer = callback as unknown as (error: Error | null, address: unknown, family?: number) => void;
+          if ((lookupOptions as { all?: boolean } | undefined)?.all === true) answer(null, [{ address: address.address, family: address.family }]);
+          else answer(null, address.address, address.family);
+        },
         agent: false,
         timeout: timeoutMs,
       },
@@ -171,17 +183,21 @@ export function createWebhookNotifier(options: WebhookNotifierOptions = {}): Not
         return refused();
       }
       const host = url.hostname.replace(/^\[|\]$/g, '');
-      const timeoutMs = sendOptions.timeoutMs ?? WEBHOOK_TIMEOUT_MS;
+      const startedAt = Date.now();
+      const limitMs = sendOptions.timeoutMs ?? WEBHOOK_TIMEOUT_MS;
+      const timeoutMs = limitMs;
       let addresses: ResolvedAddress[];
       try {
-        addresses = isIP(host) === 0 ? await withTimeout(lookup(host), timeoutMs) : [{ address: host, family: isIP(host) === 6 ? 6 : 4 }];
+        addresses = isIP(host) === 0 ? await withTimeout(lookup(host), limitMs) : [{ address: host, family: isIP(host) === 6 ? 6 : 4 }];
       } catch (error) {
         return (error as { code?: string }).code === 'timeout' ? { ok: false, status: null, failure: 'timeout', message: WEBHOOK_TIMEOUT_MESSAGE } : { ok: false, status: null, failure: 'network', message: WEBHOOK_NETWORK_MESSAGE };
       }
       // Every address it has, so a name with one good and one bad address is refused, never half trusted.
       if (addresses.length === 0 || addresses.some((entry) => isBlockedAddress(entry.address))) return refused();
+      // Plain `http:` only ever reaches this computer, whatever the name resolves to.
+      if (url.protocol === 'http:' && !addresses.every((entry) => entry.address === '::1' || entry.address.startsWith('127.'))) return refused();
       try {
-        const answer = await transport({ url, address: addresses[0]!, body: JSON.stringify(parsedPayload.data), timeoutMs, maxResponseBytes: MAX_WEBHOOK_RESPONSE_BYTES });
+        const answer = await transport({ url, address: addresses[0]!, body: JSON.stringify(parsedPayload.data), timeoutMs: Math.max(1, limitMs - (Date.now() - startedAt)), maxResponseBytes: MAX_WEBHOOK_RESPONSE_BYTES });
         // A redirect is a failure: the URL the user saved is the only one ever sent to.
         if (answer.status >= 200 && answer.status < 300) return { ok: true, status: answer.status, failure: null, message: webhookHttpMessage(answer.status) };
         return { ok: false, status: answer.status >= 100 && answer.status <= 599 ? answer.status : null, failure: 'http', message: webhookHttpMessage(answer.status) };

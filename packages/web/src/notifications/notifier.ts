@@ -70,6 +70,8 @@ export function createNotifier(deps: NotifierDeps): Notifier {
       for (const need of fresh) seen.add(need.id);
       // A need that left the list is answered: its notification goes too.
       const current = new Set(needs.map((need) => need.id));
+      // A build need that left the list (retried, decided) is news again if it comes back.
+      for (const id of seen) if (!current.has(id) && (id.startsWith('run_blocked:') || id.startsWith('run_review:'))) seen.delete(id);
       for (const [id, notification] of shown) {
         if (current.has(id)) continue;
         notification.close();

@@ -25,9 +25,9 @@ const EVENT_DESCRIPTIONS: Record<NotificationEvent, string> = {
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** The events as a checkbox group; `onChange` gets the new list (at least one stays on). */
-function EventChoices({ idPrefix, events, onChange, disabled = false }: { idPrefix: string; events: readonly NotificationEvent[]; onChange: (events: NotificationEvent[]) => void; disabled?: boolean }) {
+function EventChoices({ idPrefix, label = 'Send when', events, onChange, disabled = false }: { idPrefix: string; label?: string; events: readonly NotificationEvent[]; onChange: (events: NotificationEvent[]) => void; disabled?: boolean }) {
   return (
-    <div role="group" aria-label="Send when" className="flex flex-col">
+    <div role="group" aria-label={label} className="flex flex-col">
       {NOTIFICATION_EVENTS.map((event) => (
         <CheckboxOption
           key={event}
@@ -66,6 +66,7 @@ function WebhookRow({ target }: { target: WebhookTarget }) {
       <Text variant="caption">{WEBHOOK_URL_HIDDEN}</Text>
       <EventChoices
         idPrefix={`webhook-${target.id}`}
+        label={`Send to ${target.host} when`}
         events={target.events}
         disabled={busy !== undefined}
         onChange={(events) => {
@@ -79,6 +80,7 @@ function WebhookRow({ target }: { target: WebhookTarget }) {
           variant="outline"
           size="sm"
           data-testid="webhook-test"
+          aria-label={`Send test to ${target.host}`}
           aria-disabled={busy !== undefined || undefined}
           onClick={() =>
             run('test', async () => {
@@ -97,6 +99,7 @@ function WebhookRow({ target }: { target: WebhookTarget }) {
           variant="outline"
           size="sm"
           data-testid="webhook-remove"
+          aria-label={`Remove the webhook to ${target.host}`}
           aria-disabled={busy !== undefined || undefined}
           onClick={() => run('remove', async () => setSettings(await removeAndRead(target.id)))}
         >
@@ -108,7 +111,6 @@ function WebhookRow({ target }: { target: WebhookTarget }) {
         {result === undefined ? null : (
           <Text variant="caption" data-testid="webhook-test-result" data-ok={'error' in result ? 'false' : String(result.ok)}>
             {'error' in result ? result.error : result.ok ? `Test sent. ${result.message}` : `The test failed. ${result.message}`}
-            {'error' in result || result.status === null ? '' : ` (HTTP ${result.status})`}
           </Text>
         )}
       </div>

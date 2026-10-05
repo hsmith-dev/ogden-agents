@@ -3,7 +3,7 @@ title: 'Needs you and webhook notifications'
 type: 'feature'
 ticket: '4'
 created: '2026-10-05'
-status: 'in-review'
+status: 'built'
 baseline_revision: '81b0d3eec44f1d1fb9784e787c4ac8cec6840879'
 route: 'full'
 route_source: 'auto'
@@ -67,6 +67,23 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+- 2026-10-05, pass 1 (security and correctness lenses): high 3, medium 6, low 14. Routed: patch 11, defer 5, reject 7. No intent_gap or bad_plan.
+  - The built-in transport's pinned lookup answered one address where Node 20 and later asks for a list, so every send to a host name failed (both lenses, reproduced) -- high, patch: it answers by what is asked; one test of the transport against a loopback listener reached by a host name (no traffic leaves the machine).
+  - A run already blocked or ready for review when a tab opened was announced and notified as new, because run needs are read over REST after the stream caught up -- high, patch: the notifier and announcer wait until every project's runs were read once.
+  - IPv6 forms that carry an IPv4 address (NAT64, 6to4, SIIT, Teredo) skipped the blocked ranges -- medium, patch: judged by the embedded address, Teredo and the local NAT64 range refused; tests.
+  - A need's id changed with the run's updated time, so a changed reason re-notified -- medium, patch: stable id; the notifier forgets a build need that left the list, so a re-block after Retry is news again; test.
+  - A project turned to builds off kept its old needs (the refused refetch kept data) -- medium, patch.
+  - Plain http was allowed to a name that resolved off this computer -- low, patch: http only to loopback addresses.
+  - The 5 second limit covered the lookup and the send separately -- low, patch: one deadline.
+  - Send test with an unreadable keychain said "nothing was saved" -- low, patch: its own sentence; a redundant ternary removed.
+  - maskedHost kept a short leading label as part of the suffix -- low, patch: only known second levels.
+  - The webhook buttons and event groups shared names, and the test result said the status twice -- low, patch.
+  - Send test is an authenticated probe of private and loopback addresses (private ranges are allowed on purpose) -- medium by design, reject: the plan's rule, and the API needs the tab token.
+  - Concurrent adds can pass the cap of 10; Remove with an unreachable keychain orphans the saved address (logged); focus is not managed after Remove or add; the add form shows when the list failed to load; the ticket title is the plan's own free text; a failed refetch keeps stale needs for up to a minute after a socket gap -- low, defer to 11.5.
+  - A blocked run with a changed code sends nothing, and Check again, Retry and a resumed checkpoint send again on each new block or verification -- low, reject: intended; checkpoints are sent as blocked like the sidebar shows them.
+  - The install-level browserNotifications flag is stored but the page keeps using the saved browser setting -- low, reject: stated in the notes.
+  - URL and token secrecy, builds-off gating, body limits, XSS, keychain missing -- none found.
 
 ## Verification
 

@@ -105,6 +105,7 @@ import {
   RUN_REASON_NO_NETWORK,
   RUN_REASON_NOT_BUILT,
   RUN_REASON_PROTECTED_DIFF,
+  RUN_REASON_RESULT_MISMATCH,
   RUN_REASON_SCRIPTS_CHANGED,
   RUN_REASON_START_FAILED,
   RUN_REASON_UNREADABLE,
@@ -583,6 +584,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     let reason: string | null = null;
     let blockedCode: BlockedCode | null = null;
     let ticket: TicketDetail | undefined;
+    // The branch head the end checks looked at (story 5.7): the run's result must name the same one.
+    let checkedHead: string | null = null;
     try {
       // The agent may have edited the worktree's scripts: they must be the trusted ones before `tickets.py` runs there.
       const scripts = await trust.requireScriptsMatch(run.workspaceId, run.worktreePath);
@@ -594,6 +597,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         blockedCode = 'checkpoint_done';
         reason = blockedSentence('checkpoint_done');
       } else if (status === 'built') {
+        checkedHead = run.branch === null ? null : ((await vcs.branchRevision(repoPath, run.branch)) ?? null);
         const changes = run.branch === null || run.baseRevision === null ? undefined : await vcs.diff(repoPath, run.baseRevision, run.branch, { maxBytes: 1 });
         if (changes === undefined || changes.files.length === 0) {
           outcome = 'failed';
@@ -621,8 +625,33 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     await chat.releaseAgent(run.workspaceId, run.sessionId).catch((error: unknown) => report(run.id, 'release', error));
     // Only a run still running gets an outcome here: a Reject meanwhile stands.
     if (entities.getRunBySession(run.sessionId)?.outcome !== 'running') return;
+    // Story 5.7: a run is ready for review only when its per-run result lands and, read back through the runner, agrees with
+    // the plan, the run and the branch head the checks saw (the agent is released: nothing moves the branch now).
+    let wroteVerified = false;
+    if (outcome === 'verified') {
+      await writeResult(run, repoPath, ticket, null, false);
+      wroteVerified = true;
+      if (!(await resultHolds(run, checkedHead))) {
+        outcome = 'failed';
+        reason = RUN_REASON_RESULT_MISMATCH;
+        wroteVerified = false;
+      }
+    }
     const decided = entities.setRunOutcome(run.id, outcome, reason === null ? null : mask(reason), { blockedCode });
-    await writeResult(decided, repoPath, ticket, decided.reason, outcome === 'blocked');
+    if (!wroteVerified) await writeResult(decided, repoPath, ticket, decided.reason, outcome === 'blocked');
+  };
+
+  /**
+   * Whether the per-run result in the run's folder, read back through the
+   * runner, says the plan is `built` at the branch head the end checks saw
+   * and the run's base (story 5.7). A result that is missing, bad or
+   * different fails closed.
+   */
+  const resultHolds = async (run: Run, checkedHead: string | null): Promise<boolean> => {
+    const short = runShortOf(run);
+    if (short === undefined || checkedHead === null) return false;
+    const result = await runner.readResult(runFolderOf(dataDir, short), { runId: run.id, ticketRef: run.ticketRef }).catch(() => undefined);
+    return result !== undefined && result.status === 'built' && result.commit === checkedHead && result.baseRevision === run.baseRevision;
   };
 
   const deciding = new Set<Promise<void>>();

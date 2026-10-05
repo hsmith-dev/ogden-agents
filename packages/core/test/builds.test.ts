@@ -21,6 +21,7 @@ import {
   RUN_REASON_INTERRUPTED,
   RUN_REASON_NO_NETWORK,
   RUN_REASON_PROTECTED_DIFF,
+  RUN_REASON_RESULT_MISMATCH,
   RUN_REASON_START_FAILED,
   REVIEW_STALE_MESSAGE,
   BMAD_FILES_UNCOMMITTED_MESSAGE,
@@ -124,6 +125,36 @@ describe("a build's outcome when its turn ends (story 5.2)", () => {
     await h.endTurn(session.id);
     expect(h.core.entities.getRun(run.id)).toMatchObject({ outcome: 'verified', reason: null });
     expect(h.tickets.calls).toContainEqual(['find', run.worktreePath, '1.1']);
+  });
+
+  it("story 5.7: reads the run's result back, and a branch that moved after the end checks, or a result that did not land, fails the run", async () => {
+    const ok = await harness();
+    const first = await ok.builds.start(ok.wsId, { ref: '1.1' });
+    ok.tickets.set(first.run.worktreePath!, '1.1', 'built');
+    await ok.endTurn(first.session.id);
+    const result = BuildRunResult.parse(JSON.parse(readFileSync(join(ok.dataDir, 'r', first.run.branch!.split('/')[1]!, BUILD_RESULT_FILE), 'utf8')));
+    expect(result).toMatchObject({ status: 'built', commit: 'b'.repeat(40), baseRevision: REVISION });
+    expect(ok.core.entities.getRun(first.run.id)?.outcome).toBe('verified');
+
+    // A command the agent left running commits after the checks looked at the branch.
+    const moved = await harness();
+    const second = await moved.builds.start(moved.wsId, { ref: '1.1' });
+    moved.tickets.set(second.run.worktreePath!, '1.1', 'built');
+    moved.git.state.onDiff = () => moved.git.state.revisions.set(second.run.branch!, 'd'.repeat(40));
+    await moved.endTurn(second.session.id);
+    expect(moved.core.entities.getRun(second.run.id)).toMatchObject({ outcome: 'failed', reason: RUN_REASON_RESULT_MISMATCH });
+
+    // A result that reads back as another run's is not this run's.
+    const lost = await harness({ runner: { ...testRunner, readResult: async () => undefined } });
+    const third = await lost.builds.start(lost.wsId, { ref: '1.1' });
+    lost.tickets.set(third.run.worktreePath!, '1.1', 'built');
+    await lost.endTurn(third.session.id);
+    expect(lost.core.entities.getRun(third.run.id)).toMatchObject({ outcome: 'failed', reason: RUN_REASON_RESULT_MISMATCH });
+    const wrongBase = await harness({ runner: { ...testRunner, readResult: async (folder, expected) => (await testRunner.readResult(folder, expected).then((read) => (read === undefined ? undefined : { ...read, baseRevision: 'e'.repeat(40) }))) } });
+    const fourth = await wrongBase.builds.start(wrongBase.wsId, { ref: '1.1' });
+    wrongBase.tickets.set(fourth.run.worktreePath!, '1.1', 'built');
+    await wrongBase.endTurn(fourth.session.id);
+    expect(wrongBase.core.entities.getRun(fourth.run.id)).toMatchObject({ outcome: 'failed', reason: RUN_REASON_RESULT_MISMATCH });
   });
 
   it('blocked with the plan reason; failed for any other status, an agent error, or an empty diff', async () => {

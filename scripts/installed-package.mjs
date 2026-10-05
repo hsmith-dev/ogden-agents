@@ -278,11 +278,16 @@ const isAgentAdapter = (name) => AGENT_ADAPTER_PACKAGES.some((adapter) => name =
  * optional dependencies (`node-pty`, AD-19), as on a computer where they
  * can't build. `env` adds variables to every launcher run, after the ones set
  * here (the installed-package suite's fake agent, story 2.13).
- * @param {{ tarball?: string, registrySpec?: string, prefix?: string, reuse?: InstallFolders, omitOptional?: boolean, env?: Record<string, string> }} options
+ * `startScript` runs the launcher through one of the double-click start
+ * scripts in `start/` instead of npx directly, as a user who double-clicks it
+ * does: the script runs `npx --yes --package=<OGDEN_AGENTS_PACKAGE> ogden
+ * <args>`, and gets the tarball (or registry spec) through that variable.
+ * @param {{ tarball?: string, registrySpec?: string, prefix?: string, reuse?: InstallFolders, omitOptional?: boolean, env?: Record<string, string>, startScript?: string }} options
  * @returns {Install}
  */
-export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-smoke', reuse, omitOptional = false, env: extraEnv = {} }) {
+export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-smoke', reuse, omitOptional = false, env: extraEnv = {}, startScript }) {
   if ((tarball === undefined) === (registrySpec === undefined)) throw new Error('prepareInstall needs exactly one of tarball and registrySpec');
+  if (startScript !== undefined && !existsSync(startScript)) throw new Error(`the start script is missing: ${startScript}`);
   const workDir = reuse?.workDir ?? mkdtempSync(join(tmpdir(), `${prefix}-`));
   const cacheDir = reuse?.cacheDir ?? mkdtempSync(join(tmpdir(), `${prefix}-cache-`));
   const dataDir = reuse?.dataDir ?? mkdtempSync(join(tmpdir(), `${prefix}-data-`));
@@ -322,6 +327,7 @@ export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-s
    * @param {{ echo?: (chunk: string) => void }} [options]
    */
   function runLauncher(launcherArgs, { echo } = {}) {
+    if (startScript !== undefined) return track(spawnStartScript(launcherArgs), echo);
     const args = [...packageArgs, ...launcherArgs];
     return track(IS_WINDOWS ? spawnNode([npxCli, ...args]) : spawn('npx', args, { cwd: workDir, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] }), echo);
   }
@@ -331,6 +337,30 @@ export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-s
     const bin = join(installedDir('ogden-agents'), 'bin', 'ogden.js');
     if (!existsSync(bin)) throw new Error(`the installed launcher is missing: ${bin}`);
     return track(spawnNode([bin, ...launcherArgs]));
+  }
+
+  /**
+   * The start script with `launcherArgs`, never waiting for a key. On Windows
+   * through cmd.exe, which runs a batch file only through a shell: the script's
+   * path quoted (it has a space), `/s` stripping only the outer quotes. The
+   * arguments here are fixed launcher flags, never user input. On POSIX the file
+   * is executed itself, which proves its executable bit and shebang.
+   * @param {string[]} launcherArgs
+   */
+  function spawnStartScript(launcherArgs) {
+    const script = /** @type {string} */ (startScript);
+    const scriptEnv = { ...env, OGDEN_AGENTS_PACKAGE: registrySpec ?? /** @type {string} */ (tarball), OGDEN_START_NO_PAUSE: '1' };
+    if (IS_WINDOWS) {
+      const command = `""${script}" ${launcherArgs.join(' ')}"`;
+      return spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', command], {
+        cwd: workDir,
+        env: scriptEnv,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        windowsVerbatimArguments: true,
+      });
+    }
+    return spawn(script, launcherArgs, { cwd: workDir, env: scriptEnv, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   }
 
   /** @param {string[]} args */

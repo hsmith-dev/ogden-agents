@@ -60,6 +60,8 @@ Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim fr
 - Epic 6 (every agent): setup status reads `.claude/skills` only, so an agent folder that lacks the skills (Antigravity used after Set up) gets them only at the next Set up or Upgrade. From the 6.8 restack. (log: "Setup status reads the installed BMad Method version from `.claude/skills` only")
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
+- Event store (not yet ticketed): keep a session's latest check-in when the live window is trimmed. From backlog 8 review. (log: "Keep a session's latest `session.check_in` when the live event window is trimmed")
+- Notifications follow-up (not yet ticketed): play the chime from a tab with user activation. From backlog 8 review. (log: "Play the attention chime from a tab that can play sound")
 
 ## Log
 

@@ -31,7 +31,7 @@ test('the banner names the newer version, Dismiss keeps it hidden after a reload
     const banner = page.getByTestId('update-banner');
     await expect(banner).toContainText('Ogden 99.0.0 is available.');
     await expect(banner).toContainText('npx ogden-agents@latest');
-    await expect(banner).toHaveAttribute('role', 'status');
+    await expect(page.getByTestId('update-status')).toHaveAttribute('role', 'status');
     expect(registry.requests).toEqual(['https://registry.npmjs.org/-/package/ogden-agents/dist-tags']);
 
     await banner.getByRole('button', { name: 'Dismiss the notice about Ogden 99.0.0' }).click();

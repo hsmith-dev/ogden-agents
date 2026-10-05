@@ -3,9 +3,9 @@
  * core with fake ports (an in-memory VCS, sandbox, build runner, ticket
  * store and chat).
  */
-import { existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { SandboxStatus, SessionId, TicketDetail, TicketStatus, WorkspaceId } from '@ogden-agents/shared';
+import { BUILD_RESULT_FILE, BuildRunResult, type SandboxStatus, type SessionId, type TicketDetail, type TicketStatus, type WorkspaceId } from '@ogden-agents/shared';
 import { createBuilds, type BuildRunnerPort, type BuildSessionSetup, type BuildsUseCases, type BuildRefusedError, type Core, type SandboxCheck, type SandboxPort, type TicketStorePort, type UnattendedBuildSetup, type VcsCheck, type VcsHead, type VcsPort } from '../src/index.js';
 import { openTestCore, tempDir, unusedCatalogParts } from './helpers.js';
 
@@ -16,7 +16,15 @@ export const testRunner: BuildRunnerPort = {
   agent: 'claude-code',
   invocation: (ref) => `/build ${ref}`,
   blockedCode: (condition) => (condition === 'unclear intent' ? 'unclear_intent' : 'other'),
-  readResult: async () => undefined,
+  // The real adapter's read, in short: the file core wrote in the run's folder, parsed, for this run and ticket.
+  readResult: async (folder, expected) => {
+    try {
+      const parsed = BuildRunResult.safeParse(JSON.parse(readFileSync(join(folder, BUILD_RESULT_FILE), 'utf8')));
+      return parsed.success && parsed.data.runId === expected.runId && parsed.data.ticketRef === expected.ticketRef ? parsed.data : undefined;
+    } catch {
+      return undefined;
+    }
+  },
 };
 export const REVISION = 'a'.repeat(40);
 
@@ -124,6 +132,8 @@ export function fakeVcs() {
     merged: false,
     merge: 'merged' as 'merged' | 'conflict' | 'refused',
     onMerge: () => {},
+    /** Runs when the diff is read (a command moving the branch under the end checks, story 5.7). */
+    onDiff: () => {},
     top: undefined as string | undefined,
     staged: [] as string[],
     inProgress: false,
@@ -180,7 +190,10 @@ export function fakeVcs() {
       if (options.deleteBranch !== undefined) state.branches.delete(options.deleteBranch);
     },
     status: async () => state.status,
-    diff: async () => ({ diff: state.files.length === 0 ? '' : 'diff --git a/src/thing.ts b/src/thing.ts\n', truncated: false, files: state.files }),
+    diff: async () => {
+      state.onDiff();
+      return { diff: state.files.length === 0 ? '' : 'diff --git a/src/thing.ts b/src/thing.ts\n', truncated: false, files: state.files };
+    },
     isMerged: async () => state.merged,
     async merge(_repo, revision) {
       calls.push(`merge ${revision.slice(0, 4)}`);
@@ -225,7 +238,7 @@ export interface Harness {
   endTurn(sessionId: SessionId, state?: 'idle' | 'error'): Promise<void>;
 }
 
-export async function harness({ pieces = ['board', 'builds'] as const, trusted = true, freeBytes }: { pieces?: readonly string[]; trusted?: boolean; freeBytes?: (dir: string) => number | undefined } = {}): Promise<Harness> {
+export async function harness({ pieces = ['board', 'builds'] as const, trusted = true, freeBytes, runner = testRunner }: { pieces?: readonly string[]; trusted?: boolean; freeBytes?: (dir: string) => number | undefined; runner?: BuildRunnerPort } = {}): Promise<Harness> {
   const dataDir = tempDir('ogden-agents-builds-data-');
   const repo = tempDir('ogden-agents-builds-repo-');
   const fingerprints = new Map<string, string>();
@@ -259,7 +272,7 @@ export async function harness({ pieces = ['board', 'builds'] as const, trusted =
     tickets: tickets.store,
     vcs: git.vcs,
     sandbox: fakeSandbox(() => (sandbox.available ? { available: true, kind: 'test' } : { available: false, reason: 'none' })),
-    runner: testRunner,
+    runner,
     chat: {
       createChatSession: async (wsId, options) => core.entities.createSession({ workspaceId: wsId, kind: options?.kind ?? 'chat' }),
       sendMessage: (_wsId, sessionId, text, options) => {

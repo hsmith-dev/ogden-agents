@@ -144,10 +144,13 @@ jobs:
       - name: Check every pinned uv archive
         run: node scripts/check-uv-pins.mjs
 
-  # The pinned upstream BMad Method (story 4.14, AD-13): each
-  # pinned commit's tarball is downloaded and its content hash recomputed
-  # through the app's own archive module, and the commit must be in the
-  # history of the lock's ref. The only job that downloads them; no test does.
+  # The pinned BMad Method (story 4.14, AD-13; since 2026-10-04 Ogden Agents'
+  # fork hsmith-dev/BMAD-METHOD, docs/bmad-fork.md): each pinned commit's
+  # tarball is downloaded and its content hash recomputed through the app's
+  # own archive module; the commit must be in the history of the lock's ref
+  # (a fork tag), and its upstream base in bmad-code-org/BMAD-METHOD main's
+  # history and an ancestor of the commit. Read-only GitHub requests. The
+  # only job that downloads them; no test does.
   bmad-pins:
     name: BMad pins
     runs-on: ubuntu-latest
@@ -159,7 +162,7 @@ jobs:
         with:
           node-version: 24
 
-      - name: Check the pinned upstream BMad sources
+      - name: Check the pinned BMad Method fork and its upstream base
         run: node scripts/bmad-lock.mjs --check
         env:
           # The compare lookups go through the GitHub API; the token lifts the anonymous rate limit.

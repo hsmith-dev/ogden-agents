@@ -156,7 +156,7 @@ export function createTicketWatcher({ events, entities, bmad, trust, catalog, ti
         // Every read reruns the project's own scripts: only while they are the ones the user allowed (story 4.13).
         beforeRun: async () => {
           try {
-            await trust.requireScriptsUnchanged(workspaceId);
+            return { scripts: await trust.requireScriptsUnchanged(workspaceId) };
           } catch (error) {
             report(workspaceId, 'scripts_changed', error);
             throw error;

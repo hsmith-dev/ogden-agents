@@ -29,7 +29,7 @@ import type { BmadSourceUseCases } from './bmad-source-port.js';
 import type { Entities } from './entities.js';
 import { BmadNotSetUpError, ReducedModeError, ReopenNotConfirmedError, StatusNotAllowedError, ValidationError } from './errors.js';
 import { workspaceRepoPath } from './planning.js';
-import type { TicketStorePort } from './ticket-store-port.js';
+import type { TicketRunGuard, TicketStorePort } from './ticket-store-port.js';
 
 export interface BoardUseCases {
   /**
@@ -107,8 +107,11 @@ export function createBoard({ bmad, trust, source, entities, catalog, tickets }:
     });
     return result;
   };
-  /** The guards in order (the piece, the trust, the pinned BMad Method, `_bmad/`, the ticket tree, then the scripts' contents), then the repo. */
-  const guarded = async (workspaceId: WorkspaceId): Promise<string> => {
+  /**
+   * The guards in order (the piece, the trust, the pinned BMad Method, `_bmad/`, the ticket tree, then the scripts'
+   * contents), then the repo and the trusted fingerprint the store's run checks again (the maintained-fork story).
+   */
+  const guarded = async (workspaceId: WorkspaceId): Promise<{ repoPath: string; guard: TicketRunGuard }> => {
     bmad.requireBmadFeature(workspaceId, 'board');
     trust.requireScriptsTrusted(workspaceId);
     source.requireReady();
@@ -118,21 +121,22 @@ export function createBoard({ bmad, trust, source, entities, catalog, tickets }:
     const missing = await catalog.missingCapabilities(repoPath, BOARD_CAPABILITIES);
     if (missing.length > 0) throw new ReducedModeError(missing[0]!);
     // Last, right before the store runs them: the project's scripts are still the ones the user allowed (story 4.13).
-    await trust.requireScriptsUnchanged(workspaceId);
-    return repoPath;
+    const scripts = await trust.requireScriptsUnchanged(workspaceId);
+    return { repoPath, guard: { scripts } };
   };
   return {
     async tickets(workspaceId) {
-      return tickets.tree(await guarded(workspaceId));
+      const { repoPath, guard } = await guarded(workspaceId);
+      return tickets.tree(repoPath, guard);
     },
 
     async ticket(workspaceId, ref) {
-      const repoPath = await guarded(workspaceId);
-      return tickets.find(repoPath, checkedRef(ref));
+      const { repoPath, guard } = await guarded(workspaceId);
+      return tickets.find(repoPath, checkedRef(ref), guard);
     },
 
     async mark(workspaceId, ref, request) {
-      const repoPath = await guarded(workspaceId);
+      const { repoPath } = await guarded(workspaceId);
       const checked = checkedRef(ref);
       const parsed = MarkTicketRequest.safeParse(request);
       if (!parsed.success) {
@@ -145,7 +149,10 @@ export function createBoard({ bmad, trust, source, entities, catalog, tickets }:
       // Out of Done only once the user confirmed the reopen (user decision 2026-10-02); nothing runs otherwise.
       if (expectedStatus === 'done' && reopen !== true) throw new ReopenNotConfirmedError(checked);
       // The guards again once it's this mark's turn: Board, the trust or the download may be gone meanwhile.
-      return serialized(repoPath, async () => tickets.mark(await guarded(workspaceId), checked, status, { blockedReason, expectedStatus }));
+      return serialized(repoPath, async () => {
+        const now = await guarded(workspaceId);
+        return tickets.mark(now.repoPath, checked, status, now.guard, { blockedReason, expectedStatus });
+      });
     },
   };
 }

@@ -33,7 +33,7 @@ export function fixtureSource(extra: readonly TarEntry[] = []) {
   const contentHash = hashEntries(selectVerified(parseTar(gunzipLimited(tarball, 64 * 1024 * 1024)), 'skills/'));
   const lock = {
     sources: {
-      'bmad-method': { repo: 'bmad-code-org/BMAD-METHOD', ref: 'main', commit: FIXTURE_COMMIT, version: '6.13.0-fixture', include: 'skills/', contentHash },
+      'bmad-method': { repo: 'hsmith-dev/BMAD-METHOD', ref: 'ogden-agents/fixture', commit: FIXTURE_COMMIT, version: '6.13.0-fixture', include: 'skills/', contentHash },
     },
   };
   return { tarball, lock };

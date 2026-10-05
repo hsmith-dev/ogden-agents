@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import {
   BMAD_LOCK,
   createMemoryBmadSource,
+  createScriptsSnapshotter,
   createTicketsV7,
   createUpstreamBmadSource,
   gunzipLimited,
@@ -170,7 +171,7 @@ describe('the pinned upstream BMad Method routes (story 4.14)', () => {
       close: async () => {},
     };
     const source = createMemoryBmadSource({ ready: false });
-    const ticketStore = createTicketsV7({ runner, script: () => source.file('bmad-ticket/scripts/tickets.py'), workDir: tempDataDir() });
+    const ticketStore = createTicketsV7({ runner, snapshot: createScriptsSnapshotter(tempDataDir()), script: () => source.file('bmad-ticket/scripts/tickets.py'), workDir: tempDataDir() });
     const server = await startTestServer({ bmadSource: source, ticketStore });
     const tab = await signIn(server);
     const workspace = await boardProject(server, tab);
@@ -196,7 +197,7 @@ describe('the pinned upstream BMad Method routes (story 4.14)', () => {
     };
     // Ready, but with no files: `file()` answers nothing, as for a damaged copy.
     const source = createMemoryBmadSource({ ready: true });
-    const ticketStore = createTicketsV7({ runner, script: () => source.file('bmad-ticket/scripts/tickets.py'), workDir: tempDataDir() });
+    const ticketStore = createTicketsV7({ runner, snapshot: createScriptsSnapshotter(tempDataDir()), script: () => source.file('bmad-ticket/scripts/tickets.py'), workDir: tempDataDir() });
     const server = await startTestServer({ bmadSource: source, ticketStore });
     const tab = await signIn(server);
     const workspace = await boardProject(server, tab);

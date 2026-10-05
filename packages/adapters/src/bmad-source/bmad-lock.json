@@ -1,12 +1,17 @@
 {
   "sources": {
     "bmad-method": {
-      "repo": "bmad-code-org/BMAD-METHOD",
-      "ref": "main",
-      "commit": "1cbcfa272fe65787c06a1fa164a901f46117cca7",
+      "repo": "hsmith-dev/BMAD-METHOD",
+      "ref": "ogden-agents/2026-10-04",
+      "commit": "642c4e5452d8c83d6c4016429459c7c3cde8c6fd",
+      "base": {
+        "repo": "bmad-code-org/BMAD-METHOD",
+        "ref": "main",
+        "commit": "1cbcfa272fe65787c06a1fa164a901f46117cca7"
+      },
       "version": "6.13.0-next",
       "include": "skills/",
-      "contentHash": "sha256:6a4471ad7c8861b47a881ca35e0b598b9d32aed10c1e19a78e559d005f2c3c7b"
+      "contentHash": "sha256:b069f69b9e1d86f063be3f6a538ea6a12adfd17add6ec4adaa534e91c9d0e79a"
     }
   }
 }

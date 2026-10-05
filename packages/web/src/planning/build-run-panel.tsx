@@ -116,9 +116,9 @@ export function BuildRunPanel({ wsId, run }: { wsId: string; run: Run | undefine
           data-testid="build-run-notice"
           action={
             <span className="flex flex-wrap items-center gap-2">
-              {hasDetails ? (
-                <Button variant="outline" size="sm" data-testid="build-run-details-toggle" aria-expanded={showDetails} onClick={() => setOpen((current) => !current)}>
-                  {showDetails && !appearance.developerMode ? HIDE_DETAILS_LABEL : SHOW_DETAILS_LABEL}
+              {hasDetails && !appearance.developerMode ? (
+                <Button variant="outline" size="sm" data-testid="build-run-details-toggle" aria-expanded={showDetails} aria-controls="build-run-details" onClick={() => setOpen((current) => !current)}>
+                  {showDetails ? HIDE_DETAILS_LABEL : SHOW_DETAILS_LABEL}
                 </Button>
               ) : null}
               {fixable ? (
@@ -138,7 +138,7 @@ export function BuildRunPanel({ wsId, run }: { wsId: string; run: Run | undefine
         </Notice>
       )}
       {showDetails ? (
-        <dl className="m-0 flex flex-col gap-1 rounded-md border border-border bg-muted p-3 text-caption" data-testid="build-run-details">
+        <dl className="m-0 flex flex-col gap-1 rounded-md border border-border bg-muted p-3 text-caption" id="build-run-details" data-testid="build-run-details">
           <div className="flex gap-1">
             <dt className="text-muted-foreground">Code:</dt>
             <dd className="m-0 font-mono text-mono-compact" data-testid="build-run-code">

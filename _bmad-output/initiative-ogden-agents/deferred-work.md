@@ -108,6 +108,7 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Epic 5 (a later sandbox story): the read fence uses unresolved credential folder paths and a short list, and macOS shares its temp folders between runs. From 5.8 security review. (log: "Read fences of the sandboxed re-run")
 - Epic 5 (5.9): queued runs start again only when another run ends, a limit changes or the server restarts, not when a turned-off piece is turned back on. From 5.8 review. (log: "Queued runs wait after a piece is turned back on")
 - Epic 5 (11.1): Update and retry takes no run-limit slot and arms no deadline, and every review read runs `tickets.py` once. From 5.9 reviews. (log: "Update and retry takes no run limit slot and arms no deadline")
+- Epic 11 (11.5, which also takes the run folder pruning above): Apply the saved fix leaves the patch applied with the run still blocked when the plan mark or the prompt fails afterwards; the saved patch is read by git three times and not previewed. From 11.1 reviews. (log: "Apply the saved fix after a late failure")
 
 ## Log
 
@@ -773,3 +774,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-review-approve-and-merge-reject-and-retry-plan.md`
   summary: Update and retry takes no run limit slot and arms no deadline
   evidence: 5.9 correctness review: `rebaseLocked` sets the run running without `hasCapacity` or `armDeadline`; `review()` calls `tickets.find` on each read.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-build-runs-and-notifications/story-live-run-view-and-the-runs-tab-plan.md`
+  summary: Apply the saved fix after a late failure: the patch stays applied while the run is still blocked when the plan mark or the prompt fails; the patch is read by git three times and is not previewed.
+  evidence: 11.1 correctness and security reviews; Retry still works, and the agent is released while the run is blocked.

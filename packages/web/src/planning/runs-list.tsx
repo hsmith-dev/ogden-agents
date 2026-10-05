@@ -70,12 +70,26 @@ export function RunsList({ wsId }: { wsId: string }) {
       {queue.length === 0 ? null : (
         <PageSection title={RUNS_QUEUE_TITLE} data-testid="runs-queue">
           <RowList>
-            {queue.map((entry) => (
-              <li key={entry.runId} className="text-label text-foreground" data-testid="runs-queue-entry" data-ref={entry.ticketRef}>
-                <span className="font-mono text-mono-compact text-muted-foreground">{entry.ticketRef}</span> {titles.get(entry.ticketRef) ?? ''}
-                <span className="text-caption text-muted-foreground"> (number {entry.position})</span>
-              </li>
-            ))}
+            {queue.map((entry) => {
+              const queued = all.find((run) => run.id === entry.runId);
+              const label = (
+                <>
+                  <span className="font-mono text-mono-compact text-muted-foreground">{entry.ticketRef}</span> {titles.get(entry.ticketRef) ?? ''}
+                  <span className="text-caption text-muted-foreground"> (number {entry.position})</span>
+                </>
+              );
+              return (
+                <li key={entry.runId} className="text-label text-foreground" data-testid="runs-queue-entry" data-ref={entry.ticketRef}>
+                  {queued === undefined ? (
+                    label
+                  ) : (
+                    <Link to="/w/$wsId/s/$sesId" params={{ wsId, sesId: queued.sessionId }} data-testid="runs-queue-open">
+                      {label}
+                    </Link>
+                  )}
+                </li>
+              );
+            })}
           </RowList>
         </PageSection>
       )}

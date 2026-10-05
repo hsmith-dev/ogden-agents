@@ -3,7 +3,7 @@ title: 'Live run view and the Runs tab'
 type: 'feature'
 ticket: '1'
 created: '2026-10-05'
-status: 'in-review'
+status: 'built'
 baseline_revision: '73ec7a00b0ad0c9de387e6f32a11531de0a74da5'
 route: 'full'
 route_source: 'auto'
@@ -67,6 +67,18 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+- 2026-10-05, pass 1 (security and correctness lenses): high 1, medium 2, low 9. Routed: patch 4, defer 4, reject 4. No intent_gap or bad_plan.
+  - A saved patch that renames or copies a protected file, or deletes one, passed the refuse check (git lists only the destination) -- high, patch: the adapter also reads every path the patch headers name; real git test.
+  - Show details was a no-op button in Developer mode -- medium, patch: no button there, label follows the state, aria-controls added.
+  - A queued run's entry did not open its run view -- low, patch: links to it.
+  - The route header comment was stale -- low, patch.
+  - A failure after the patch applied (mark or send) leaves the patch applied with the run still blocked, so a second Apply says it does not apply -- medium, defer to 11.5: Retry still works and the message says nothing changed (known cost).
+  - The saved patch is read by git three times (check-then-use) and its content is not previewed -- low, defer to 11.5: the agent is released while blocked; a preview of the fix is a later design.
+  - Plan marked through the checkout path -- low, reject: run-aware tickets writes in the worktree for a run with one (as Retry's mark does); the test harness store is not run-aware.
+  - "A fix was saved" shown with no patch -- low, reject: the 409 sentence says so; the run shape has no flag (5.3 froze it).
+  - No server test of apply_fix, the queued apply_fix path, a failed run's details, header time left, titles with the board off -- low, defer: core and e2e cover the use-case; noted for 11.5.
+  - XSS, secrets in the UI, piece guard and script trust -- none found.
 
 ## Verification
 

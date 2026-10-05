@@ -15,7 +15,7 @@
 //   otherwise                    -> text "Hello from the fake model."
 import http from 'node:http';
 
-export function startFakeServer({ port = 0, host = '127.0.0.1', requireKey = null, slowMs = 4000, models = ['fake-small', 'fake-large', 'fake-nojson', 'fake-noformat'] } = {}) {
+export function startFakeServer({ port = 0, host = '127.0.0.1', requireKey = null, slowMs = 4000, modelsDelayMs = 0, models = ['fake-small', 'fake-large', 'fake-nojson', 'fake-noformat'] } = {}) {
   const log = [];
   const sockets = new Set();
   const lastText = (messages) => {
@@ -80,7 +80,10 @@ export function startFakeServer({ port = 0, host = '127.0.0.1', requireKey = nul
       if (req.url === '/__log') return send(200, log);
       if (requireKey && auth !== `Bearer ${requireKey}`) return send(401, { error: { message: 'bad key', type: 'invalid_request_error', code: 'invalid_api_key' } });
       const p = entry.path;
-      if (req.method === 'GET' && (p === '/v1/models' || p === '/models')) return send(200, { object: 'list', data: models.map((id) => ({ id, object: 'model', created: 1, owned_by: 'fake' })) });
+      if (req.method === 'GET' && (p === '/v1/models' || p === '/models')) {
+        if (modelsDelayMs > 0) await new Promise((r) => setTimeout(r, modelsDelayMs));
+        return send(200, { object: 'list', data: models.map((id) => ({ id, object: 'model', created: 1, owned_by: 'fake' })) });
+      }
       if (req.method === 'GET' && p === '/api/tags') return send(200, { models: models.map((name) => ({ name, model: name, size: 4_000_000_000, details: { parameter_size: '7B', family: 'fake' } })) });
       // The two native shapes Ogden reads for sizes, context length and tool support (story 14.5). `fake-small` is small, `fake-large` is big with tools.
       const context = (name) => (name === 'fake-small' ? 4096 : name === 'fake-large' ? 32768 : 8192);

@@ -107,7 +107,7 @@ export interface AcpAgentQuirks {
   /**
    * Plain words for a failed prompt, from the agent's own error text (read in memory only, never logged or shown),
    * or `undefined` to say nothing more than the generic reason (epic 14: a model server that stopped, a full context).
-   * Never used for a sign in or usage limit failure, which have their own.
+   * Not used for a sign in (`-32000`) or usage limit failure, which have their own.
    */
   failureReason?: ((text: string) => string | undefined) | undefined;
   /** The raw-input fields of its shell tools that hold the command a card shows, first found wins. Default `['command']`. */

@@ -40,6 +40,7 @@ import { createBuildsWiring } from './start-builds.js';
 import { bmadSetupFailureLogger, uvPycacheDir, createBmadSourceAndCatalog, createDocumentCards, createPlanAndBoard, stopBmadWork, withAgentSkillFolders, type BmadWiring } from './start-planning.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
 import { openUrl } from './open-url.js';
+import { installMethodOf, wireUpdateCheck } from './update-check.js';
 
 // Moved out in story 3.9; still exported from here for the callers that import them from `start.ts`.
 export { AGENT_ENV_KEYS, agentEnvironment, agentKeysOf, CHECK_IN_MS_ENV, checkInDelayFromEnv, SECRET_STORE_ENV, SUBSCRIPTION_MAX_AGE_MS, testSecretStore, uvEnvironment, withoutAgentKeys } from './start-env.js';
@@ -344,6 +345,8 @@ async function listenAndAnnounce({
     developerMode: core.installSettings.developerMode,
     onError: (code) => log.warn('new project defaults unusable', { code }),
   });
+  // The "newer version" notice (story 13.7): checks once after the server is up, never on the start path.
+  const updates = wireUpdateCheck(options.updates, { dataDir, version, installMethod: installMethodOf(options.launcherEntry), events: core.events, log });
   const app = createApp({
     events: core.events,
     webRoot: options.webRoot ?? defaultWebRoot(),
@@ -374,6 +377,7 @@ async function listenAndAnnounce({
     onboarding,
     newProjectDefaults,
     installSettings: core.installSettings,
+    updates,
     agentDefaults: { models: core.agentModels, isAgentRegistered: (agentId) => agents.get(agentId) !== undefined },
     appShortcut,
     tabs,
@@ -456,6 +460,7 @@ async function listenAndAnnounce({
       // The server owns agent processes (AD-3): none outlives it, a hidden sign-in terminal included.
       .finally(async () => {
         // Kills a running npm too; its temp folder goes once it has exited.
+        updates.close();
         claudeSetup?.close();
         await agentSetup.dispose().catch((error: unknown) => log.warn('stopping sign-ins failed', { reason: String(error) }));
         await Promise.race([agentSetup.settled(), new Promise((resolve) => setTimeout(resolve, INSTALL_STOP_MS).unref())]);
@@ -521,6 +526,7 @@ async function listenAndAnnounce({
 
   // Off the start path: a shortcut already there follows this install's Node and launcher (story 2.4).
   void repointAppShortcut(appShortcut, log);
+  void updates.runOnStart();
 
   if (options.open === true && launchUrl !== undefined) {
     try {

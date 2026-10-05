@@ -260,13 +260,15 @@ describe('the memory source (tests)', () => {
 });
 
 describe('the shipped files', () => {
-  it('the lock pins upstream BMad Method to a full commit with a content hash, and nothing else (entry 4.12 removed bmad-loop)', () => {
+  it("the lock pins Ogden Agents' BMad Method fork to a full commit with a content hash, on an upstream base, and nothing else (entry 4.12 removed bmad-loop; maintained-fork story)", () => {
     expect(BmadLock.parse(BMAD_LOCK)).toEqual(BMAD_LOCK);
     expect(BMAD_LOCK.sources['bmad-method']).toMatchObject({
-      repo: 'bmad-code-org/BMAD-METHOD',
-      commit: '1cbcfa272fe65787c06a1fa164a901f46117cca7',
+      repo: 'hsmith-dev/BMAD-METHOD',
+      ref: 'ogden-agents/2026-10-04',
+      commit: '642c4e5452d8c83d6c4016429459c7c3cde8c6fd',
+      base: { repo: 'bmad-code-org/BMAD-METHOD', ref: 'main', commit: '1cbcfa272fe65787c06a1fa164a901f46117cca7' },
       include: 'skills/',
-      contentHash: 'sha256:6a4471ad7c8861b47a881ca35e0b598b9d32aed10c1e19a78e559d005f2c3c7b',
+      contentHash: 'sha256:b069f69b9e1d86f063be3f6a538ea6a12adfd17add6ec4adaa534e91c9d0e79a',
     });
     expect(Object.keys(BMAD_LOCK.sources)).toEqual(['bmad-method']);
   });

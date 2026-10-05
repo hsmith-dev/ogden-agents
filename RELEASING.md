@@ -4,13 +4,44 @@ Ogden Agents ships as one npm package, `ogden-agents`. Releases are published on
 
 ## What the release workflow does
 
+Every version tag creates a **GitHub Release**, with or without npm. Publishing to npm is a separate path that is **opt-in**: it runs only when the repository variable `NPM_PUBLISH` is `true` (Settings → Secrets and variables → Actions → Variables). Without it, the `Publish to npm` job (and the registry checks after it) is skipped, so a tag never names the `npm-release` environment unless you set npm up; this also means that **once you want npm releases, set `NPM_PUBLISH=true` first** (step 3 below).
+
 On a pushed tag `vX.Y.Z`:
 
 1. **Guard.** Fails unless the tagged commit is on `main`'s own (first-parent) history, not a feature-branch commit merged into it, and the version in `package.json`, `packages/server/package.json` and `packages/web/package.json` equals `X.Y.Z`. `tests/packaging.test.ts` keeps those three equal.
 2. **CI.** Reruns the full CI workflow (`ci.yml`) for the tagged commit: tests and a clean-install smoke test on macOS, Windows and Linux for Node 24 and 26, and the browser tests. If anything fails, nothing is published.
-3. **Publish** (Linux, environment `npm-release`). Builds and packs the tarball (recording the commit as `gitHead`), smoke-tests that exact tarball, then runs `npm publish ogden-agents-X.Y.Z.tgz --access public --tag <dist-tag>` with npm 11.5.1 or later. A stable version goes to the `latest` dist-tag. A prerelease such as `v0.2.0-rc.1` goes to `next`, so `npx ogden-agents` keeps installing the last stable version and the prerelease is installed with `npx ogden-agents@next`. Publishing is idempotent: if `X.Y.Z` is already on npm from this same commit, the job skips publishing and succeeds, so a re-run carries on to verify; if it is on npm from a different commit, the job fails.
-4. **Registry and provenance.** Waits for `X.Y.Z` to show on npm, then checks provenance. From a public repository npm adds a provenance attestation automatically; the job fails if a public-repository release has none, and only warns if the repository is private. Verify doesn't depend on this job.
-5. **Verify.** On macOS, Windows and Linux, Node 24 and 26, runs `npx --yes ogden-agents@X.Y.Z` in an empty directory with an empty npm cache, reaches the page and `server.started`, then quits the server (`node scripts/smoke-installed.mjs --registry-spec ogden-agents@X.Y.Z`).
+3. **Release assets** (Linux, read-only). Builds the packed tarball once (recording the commit as `gitHead`), smoke-tests that exact tarball, and collects what the release carries: `ogden-agents-X.Y.Z.tgz`, `ogden-install.mjs` (the install helper), the start scripts (`Start-Ogden-macOS.zip`, holding `Start Ogden.command` and the helper and zipped so the script stays executable; `Start-Ogden.cmd`; `start-ogden.sh`), and `SHA256SUMS.txt` with the SHA-256 of every one of them. Asset names have no spaces because GitHub turns them into dots. The release notes are the matching section of `CHANGELOG.md` (`scripts/release-notes.mjs`; a stable version with no section fails, a prerelease falls back to its release's section, then to Unreleased) plus how to install and verify. Everything is kept as the workflow artifact `release-assets`.
+4. **Publish to npm** (only with `NPM_PUBLISH=true`; Linux, environment `npm-release`). Builds and packs the tarball (recording the commit as `gitHead`), smoke-tests that exact tarball, then runs `npm publish ogden-agents-X.Y.Z.tgz --access public --tag <dist-tag>` with npm 11.5.1 or later. A stable version goes to the `latest` dist-tag. A prerelease such as `v0.2.0-rc.1` goes to `next`, so `npx ogden-agents` keeps installing the last stable version and the prerelease is installed with `npx ogden-agents@next`. Publishing is idempotent: if `X.Y.Z` is already on npm from this same commit, the job skips publishing and succeeds, so a re-run carries on to verify; if it is on npm from a different commit, the job fails. This job and its environment protections are unchanged by the GitHub Release path.
+5. **Registry and provenance** (with npm). Waits for `X.Y.Z` to show on npm, then checks provenance. From a public repository npm adds a provenance attestation automatically; the job fails if a public-repository release has none, and only warns if the repository is private. Verify doesn't depend on this job.
+6. **Verify** (with npm). On macOS, Windows and Linux, Node 24 and 26, runs `npx --yes ogden-agents@X.Y.Z` in an empty directory with an empty npm cache, reaches the page and `server.started`, then quits the server (`node scripts/smoke-installed.mjs --registry-spec ogden-agents@X.Y.Z`).
+7. **GitHub Release.** Creates the release for the tag as a draft (marked as a prerelease for a `next` version, so it is never "latest"), checks `SHA256SUMS.txt` against the files, attaches the assets, and only then publishes it, so nobody sees it half-attached. With npm on it waits for verify, because the start scripts' default is `npx ogden-agents@latest`; with npm off it needs only CI and the assets. A re-run replaces the assets. This is the only job with write access to the repository (`contents: write`).
+
+### Dry run
+
+**Actions → Release → Run workflow** (`workflow_dispatch`, or `gh workflow run release.yml --ref <branch>`) runs the guard (versions agree; the tag checks are skipped) and the asset build, and keeps everything as the `release-assets` artifact. It skips CI, publishes nothing and creates no release or tag. Download the artifact to look at the assets and the notes.
+
+## Installing and updating from GitHub Releases
+
+A release is installable without npm having the `ogden-agents` package. The start scripts take a source:
+
+- default `npm`: `npx ogden-agents@latest`, unchanged;
+- `--github` (first option) or `OGDEN_AGENTS_SOURCE=github`: the script runs `ogden-install.mjs`, which has to be **in the same folder as the script** (download it from the same release; the macOS zip already holds it). The script never downloads it.
+
+`ogden-install.mjs start` looks up the newest release of `hsmith-dev/ogden-agents` (`OGDEN_AGENTS_REPO=owner/name` for another), downloads `ogden-agents-<version>.tgz` and `SHA256SUMS.txt`, and **refuses to install** unless the tarball's SHA-256 is on its line in the list (a missing list, a missing line or a different hash all stop it; there is no flag to skip this). It then runs npm on the file (`npm install <file.tgz>` into a version folder; npm extracts it, the installer has no archive code of its own), checks the installed package is the release's version, and starts it. Everything lives under your own user folder, never globally and never with administrator rights: `~/Library/Application Support/ogden-agents-install` (macOS), `%LOCALAPPDATA%\ogden-agents-install` (Windows) or `~/.local/share/ogden-agents-install` (Linux), or `OGDEN_AGENTS_APP_DIR`.
+
+- **Updates.** Each start looks for a newer release; if the check fails (offline) it starts the installed version. The **stable** channel follows `releases/latest` (never a prerelease); the **next** channel follows the highest version of all published releases. The channel follows the installed version (a prerelease follows `next`) unless `OGDEN_AGENTS_CHANNEL=stable|next` says otherwise. Until a stable release exists, set `OGDEN_AGENTS_CHANNEL=next` for the first install. It never downgrades.
+- **Rollback.** The previous version stays installed (older ones are removed). `node ogden-install.mjs rollback` switches back, and the next start does not install the version you rolled back from; `node ogden-install.mjs update` does.
+- **Other commands.** `update` installs without starting; `status` shows what is installed, offline. `--check` on a start script reports the source and runs `status`, and never touches the network.
+- **The registry is still used for dependencies.** The release tarball is the `ogden-agents` package itself; its dependencies (`better-sqlite3`, `hono`, ...) come from npm as in any install.
+- **What the checksum proves.** `SHA256SUMS.txt` comes from the same release as the tarball, so it catches a corrupted, truncated or swapped single file, not a compromised release or account. The release assets are only as trustworthy as the repository's owner; that is also true of the npm package.
+
+### Private repositories
+
+Release files of a **private** repository need authentication; without it GitHub answers **404** (it does not say "private"). It works out of the box for a **public** repository. For a private one the installer uses a token from `OGDEN_AGENTS_GITHUB_TOKEN`, else `GITHUB_TOKEN`, else the GitHub CLI's sign-in (`gh auth token`, asked for only after GitHub says it cannot find the repository). The token needs read access to the repository's contents. It is sent **only** to `api.github.com` (never to the download host GitHub redirects to), is never written to disk by the installer, and is masked in every message. Without a token it says plainly what to do: run `gh auth login`, or set `OGDEN_AGENTS_GITHUB_TOKEN`. This repository's visibility is not changed by any of this; make it public (step 2 below) so everyone can install without a token.
+
+### Reading releases from code
+
+`@ogden-agents/shared/release-source` holds the one definition of "what is the newest version": `VersionSource` (`latest(channel)`), `createGitHubReleasesSource`, `pickRelease`, `isNewer`, `parseSha256Sums`. The installer uses it, and so can the web UI's "a newer version is available" notice (story 13.7: its npm registry source implements the same interface; this GitHub source can sit beside it). Epic 13's desktop updater will add its signed `latest.json` and installers to this same release, so there remains one pipeline.
 
 A failed publish publishes nothing, since `npm publish` is all or nothing. A failed verify means the release is already public: fix it forward (below).
 
@@ -32,7 +63,7 @@ npm only records provenance for packages published from a public repository. The
 
 ### 3. Configure the npm trusted publisher
 
-**First, create the GitHub environment** (required, before any tag is pushed): GitHub → `hsmith-dev/ogden-agents` → Settings → Environments → New environment → `npm-release`. In it:
+**First set the repository variable `NPM_PUBLISH` to `true`** (Settings → Secrets and variables → Actions → Variables; without it the npm publish is skipped and a tag only creates the GitHub Release). **Then create the GitHub environment** (required, before any tag with `NPM_PUBLISH` set is pushed): GitHub → `hsmith-dev/ogden-agents` → Settings → Environments → New environment → `npm-release`. In it:
 
 - Deployment branches and tags → Selected branches and tags → add a **tag** rule `v*.*.*` (and no branch rule), so only a version tag can publish.
 - Required reviewers → add yourself, so each publish waits for your approval.
@@ -228,6 +259,7 @@ As in the 0.2.0 checklist, step 6, with the version `0.5.0` and the tag `v0.5.0`
 
 1. On a branch, set the same new version in `package.json`, `packages/server/package.json` and `packages/web/package.json`, and add its entry to `CHANGELOG.md`. Merge to `main`.
 2. Tag that `main` commit `v<version>` and push the tag, as in step 4.
+3. Optionally dry-run first (see Dry run above) to look at the assets and the notes.
 
 For a prerelease, use a version such as `0.2.0-rc.1` and the tag `v0.2.0-rc.1`. It is published to the `next` dist-tag, not `latest`.
 

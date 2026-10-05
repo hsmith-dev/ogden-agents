@@ -286,7 +286,7 @@ describe('setup and the trust bound to the scripts (story 4.13)', () => {
     await core.bmadSetup!.start(workspace.id, { upgrade: true });
     release();
     await core.bmadSetup!.settled();
-    await expect(core.bmadScriptTrust.requireScriptsUnchanged(workspace.id)).resolves.toBeUndefined();
+    await expect(core.bmadScriptTrust.requireScriptsUnchanged(workspace.id)).resolves.toBe('sha256:written-by-setup');
   });
 
   it('scripts changed before the setup stay refused after it: the setup never blesses them', async () => {

@@ -630,6 +630,9 @@ const EXPECTED_API_ROUTES = [
   `PUT ${API_ROUTES.developerMode}`,
   `GET ${API_ROUTES.chatSettings}`,
   `PUT ${API_ROUTES.chatSettings}`,
+  `GET ${API_ROUTES.updates}`,
+  `PUT ${API_ROUTES.updates}`,
+  `POST ${API_ROUTES.updatesCheck}`,
   `GET ${API_ROUTES.workspaceBmadDetection}`,
   `DELETE ${API_ROUTES.workspaceBmadOffer}`,
   // Plan and Board (story 4.1), each through the guarded helper.

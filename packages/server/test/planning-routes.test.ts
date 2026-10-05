@@ -47,10 +47,12 @@ import {
   createMemoryBmadCatalog,
   createMemoryBmadSource,
   createMemoryTicketStore,
+  createScriptsSnapshotter,
   createTicketsV7,
   createUpstreamBmadSource,
   createUvScriptRunner,
   defaultWatchDir,
+  readProjectScripts,
   uvEnvironment,
   type MemoryTicketStore,
   type UvScriptRunner,
@@ -93,6 +95,9 @@ import { describe, expect, it } from 'vitest';
 import { createFakeBmadRepo, type FakeBmadRepo } from '../../../tests/fixtures/fake-bmad-repo.js';
 import { writePinnedCopy } from '../../../tests/fixtures/pinned-copy.js';
 import { FIXTURE_COMMIT, fixtureUpstream, realUvMissing, removeAfterTest, signIn, startTestServer, tempDataDir, TEST_UV_PYTHON_ENV, UPSTREAM_FIXTURE, waitFor, type SignedIn, type TestServer } from './helpers.js';
+
+/** The memory store ignores the run guard (only `tickets-v7` runs scripts). */
+const MEMORY_GUARD = { scripts: 'none' };
 
 const SKILL = (name: string, description: string) => `---\nname: ${name}\ndescription: '${description}'\n---\n\n# ${name}\n`;
 const SKILL_FILES = {
@@ -244,7 +249,7 @@ describe('Plan and Board routes (story 4.1)', () => {
       },
       close: async () => {},
     };
-    const ticketStore = createTicketsV7({ runner, script: () => '/verified/tickets.py', workDir: tempDataDir() });
+    const ticketStore = createTicketsV7({ runner, snapshot: createScriptsSnapshotter(tempDataDir()), script: () => '/verified/tickets.py', workDir: tempDataDir() });
     const server = await startTestServer({ ticketStore });
     const tab = await signIn(server);
     const workspace = await project(server, tab, fixtureRepo(), ['board']);
@@ -535,12 +540,12 @@ describe('changing a ticket status (story 4.10)', () => {
     expect(intoDone.status).toBe(409);
     expect(ApiErrorBody.parse(await intoDone.json()).error.code).toBe('status_not_allowed');
     expect(marksOf(store)).toEqual([]);
-    expect((await store.tree(repoPath)).tickets[2]!.status).toBe('done');
+    expect((await store.tree(repoPath, MEMORY_GUARD)).tickets[2]!.status).toBe('done');
 
     const reopened = await put('1.3', { status: 'ready-for-dev', expectedStatus: 'done', reopen: true });
     expect(reopened.status).toBe(200);
     expect(MarkTicketResponse.parse(await reopened.json())).toEqual({ ref: '1.3', status: 'ready-for-dev' });
-    expect((await store.tree(repoPath)).tickets[2]!.status).toBe('ready-for-dev');
+    expect((await store.tree(repoPath, MEMORY_GUARD)).tickets[2]!.status).toBe('ready-for-dev');
   });
 
   it('a stale expected status is 409 ticket_changed and nothing changes', async () => {
@@ -548,7 +553,7 @@ describe('changing a ticket status (story 4.10)', () => {
     const response = await put('1.1', { status: 'draft', expectedStatus: '' });
     expect(response.status).toBe(409);
     expect(ApiErrorBody.parse(await response.json()).error).toEqual({ code: 'ticket_changed', message: TICKET_CHANGED_MESSAGE });
-    expect((await store.tree(repoPath)).tickets[0]!.status).toBe('in-review');
+    expect((await store.tree(repoPath, MEMORY_GUARD)).tickets[0]!.status).toBe('in-review');
   });
 
   it('a bad body or ref is 400, an unknown ticket 404, and none of them marks', async () => {
@@ -567,7 +572,7 @@ describe('changing a ticket status (story 4.10)', () => {
     expect(ApiErrorBody.parse(await unknown.json()).error.code).toBe('not_found');
     // Core checks the ref and the body before the store; only the unknown ref reaches it (and changes nothing).
     expect(marksOf(store).map((call) => call[2])).toEqual(['9.9']);
-    expect((await store.tree(repoPath)).tickets.map((row) => row.status)).toEqual(['in-review', '']);
+    expect((await store.tree(repoPath, MEMORY_GUARD)).tickets.map((row) => row.status)).toEqual(['in-review', '']);
   });
 
   it('a store that fails is 503 with its plain message; a tracker store says so', async () => {
@@ -639,7 +644,7 @@ describe.skipIf(uvMissing)('the board through real uv and the verified pinned ti
     const downloaded = await request(server, tab, 'POST', API_ROUTES.bmadSource);
     expect(downloaded.status).toBe(200);
     expect(await downloaded.json()).toEqual({ state: 'ready', version: '6.13.0-fixture', commit: FIXTURE_COMMIT });
-    expect(upstream.fetched).toEqual([`https://codeload.github.com/bmad-code-org/BMAD-METHOD/tar.gz/${FIXTURE_COMMIT}`]);
+    expect(upstream.fetched).toEqual([`https://codeload.github.com/hsmith-dev/BMAD-METHOD/tar.gz/${FIXTURE_COMMIT}`]);
     const response = await request(server, tab, 'GET', paths(workspace.id).tickets);
     const text = await response.text();
     expect(response.status, text).toBe(200);
@@ -746,11 +751,12 @@ describe.skipIf(uvMissing)('tickets-v7 find through real uv and the pinned ticke
       env: () => ({ ...uvEnvironment(), UV_CACHE_DIR: uvCache, ...TEST_UV_PYTHON_ENV }),
     });
     try {
-      const store = createTicketsV7({ runner, script: () => FIXTURE_TICKETS, workDir: tempDataDir() });
+      const store = createTicketsV7({ runner, snapshot: createScriptsSnapshotter(tempDataDir()), script: () => FIXTURE_TICKETS, workDir: tempDataDir() });
       const repoPath = realPathOf(repo);
-      expect(await store.find(repoPath, '1.3')).toMatchObject({ ref: '1.3', status: 'blocked', blocked_at: '2026-10-01', hasPlan: true, description: '' });
-      expect((await store.find(repoPath, '1.2')).hasPlan).toBe(false);
-      await expect(store.find(repoPath, '9.9')).rejects.toThrow(/does not exist/);
+      const guard = { scripts: (await readProjectScripts(repoPath))!.fingerprint };
+      expect(await store.find(repoPath, '1.3', guard)).toMatchObject({ ref: '1.3', status: 'blocked', blocked_at: '2026-10-01', hasPlan: true, description: '' });
+      expect((await store.find(repoPath, '1.2', guard)).hasPlan).toBe(false);
+      await expect(store.find(repoPath, '9.9', guard)).rejects.toThrow(/does not exist/);
       expect(repo.hash()).toBe(before);
     } finally {
       await runner.close();
@@ -797,7 +803,7 @@ describe.skipIf(uvMissing)('the live ticket index through real uv and the verifi
         on: (event, handler) => watcher.on(event, handler),
       };
     };
-    const store = createTicketsV7({ runner: counted, script: () => bmadSource.file('bmad-ticket/scripts/tickets.py'), workDir: tempDataDir(), watchDir });
+    const store = createTicketsV7({ runner: counted, snapshot: createScriptsSnapshotter(tempDataDir()), script: () => bmadSource.file('bmad-ticket/scripts/tickets.py'), workDir: tempDataDir(), watchDir });
     let watchesOpened = 0;
     const ticketStore: TicketStorePort = {
       ...store,
@@ -986,7 +992,7 @@ describe.skipIf(uvMissing)('changing a status through real uv and the verified p
       uvCommand: async () => ({ file: 'uv' }),
       env: () => ({ ...uvEnvironment(), UV_CACHE_DIR: uvCache, ...TEST_UV_PYTHON_ENV }),
     });
-    const store = createTicketsV7({ runner, script: () => bmadSource.file('bmad-ticket/scripts/tickets.py'), workDir: tempDataDir() });
+    const store = createTicketsV7({ runner, snapshot: createScriptsSnapshotter(tempDataDir()), script: () => bmadSource.file('bmad-ticket/scripts/tickets.py'), workDir: tempDataDir() });
     let watchesOpened = 0;
     const ticketStore: TicketStorePort = {
       ...store,

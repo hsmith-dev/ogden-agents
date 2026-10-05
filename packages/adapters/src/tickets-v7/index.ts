@@ -42,8 +42,15 @@
  * never pick a ticket. `mark` runs only after such a `find`.
  *
  * The script itself writes nothing but the plan on `mark`, but it imports and
- * runs the repo's own BMad config code (`_bmad/scripts/config_utils.py`), so
- * core calls this only for a trusted project (story 4.2). The repo is the
+ * runs the repo's BMad config code (`_bmad/scripts/config_utils.py`), so
+ * core calls this only for a trusted project (story 4.2), with the
+ * fingerprint of the scripts the user trusted (`TicketRunGuard`). Every run
+ * imports a private snapshot of them instead of the repo's files (the
+ * maintained-fork story: `--config-utils`, a patch on Ogden Agents' BMad
+ * Method fork): the scripts are read once, checked against that fingerprint
+ * and written from the checked bytes into a fresh owner-only folder, so a
+ * change landing after the check never runs (`ScriptsChangedError` when they
+ * no longer match, and nothing runs). The repo is the
  * workspace's stored real path, never request input, and every ref passed
  * matches `TICKET_REF_PATTERN` (never an option). Any other failure (no uv,
  * no active initiative, a malformed tree, a timeout, output that isn't the
@@ -53,7 +60,16 @@
 import { existsSync } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
-import { NotFoundError, StatusNotAllowedError, TicketChangedError, TicketsUnavailableError, type TicketStorePort, type TicketsUnavailableReason } from '@ogden-agents/core';
+import {
+  NotFoundError,
+  ScriptsChangedError,
+  StatusNotAllowedError,
+  TicketChangedError,
+  TicketsUnavailableError,
+  type TicketRunGuard,
+  type TicketStorePort,
+  type TicketsUnavailableReason,
+} from '@ogden-agents/core';
 import {
   TICKET_REF_PATTERN,
   TicketDetail,
@@ -63,6 +79,7 @@ import {
   type MarkTicketResponse,
   type TicketsResponse,
 } from '@ogden-agents/shared';
+import type { SnapshotScripts } from '../bmad-catalog/scripts-snapshot.js';
 import { codeOf } from '../fs-safe.js';
 import { ScriptRunError, type UvScriptRunner } from '../toolchain-uv/script-runner.js';
 import { startFolderWatch, type FolderWatch, type FolderWatchTiming, type WatchDir } from './folder-watch.js';
@@ -77,6 +94,12 @@ export interface TicketsV7Options {
    * pinned BMad Method isn't downloaded.
    */
   script: () => string | undefined;
+  /**
+   * Snapshots the trusted project's `_bmad/scripts/` for one run
+   * (`createScriptsSnapshotter`), or rejects with `ScriptsChangedError` when
+   * they no longer match the guard's fingerprint.
+   */
+  snapshot: SnapshotScripts;
   /**
    * The working folder of every run: an existing folder that is never a
    * project's (the server's `<dataDir>/tools/uv-work`), so uv finds no
@@ -183,7 +206,7 @@ interface OpenWatch {
   folder: FolderWatch | undefined;
 }
 
-export function createTicketsV7({ runner, script: scriptOf, workDir, onFailure, watchTiming, watchDir, onWatchFallback }: TicketsV7Options): TicketStorePort {
+export function createTicketsV7({ runner, script: scriptOf, snapshot, workDir, onFailure, watchTiming, watchDir, onWatchFallback }: TicketsV7Options): TicketStorePort {
   const fail = (error: ScriptRunError | TicketsUnavailableError): never => {
     try {
       onFailure?.(error);
@@ -196,20 +219,32 @@ export function createTicketsV7({ runner, script: scriptOf, workDir, onFailure, 
     throw new TicketsUnavailableError(reasonOf(error));
   };
 
-  /** Runs `tickets.py --project-root <repo> <args…>` in the repo; a "no ticket matches" refusal is `NotFoundError` for `ref`. */
-  const run = async (repoPath: string, args: readonly string[], ref?: string): Promise<unknown> => {
+  /**
+   * Runs `tickets.py --project-root <repo> --config-utils <snapshot> <args…>`; a "no ticket matches" refusal is
+   * `NotFoundError` for `ref`, scripts that no longer match the guard `ScriptsChangedError`.
+   */
+  const run = async (repoPath: string, guard: TicketRunGuard, args: readonly string[], ref?: string): Promise<unknown> => {
     const script = scriptOf();
     if (script === undefined) return fail(new TicketsUnavailableError('not_downloaded'));
+    let taken: Awaited<ReturnType<SnapshotScripts>>;
     try {
-      // `--project-root`: the repo itself, never a `_bmad/` found above it. The working folder is never the
-      // repo, so uv runs no `.venv` the repo ships (see the header).
-      return await runner.run({ script, args: ['--project-root', repoPath, ...args], cwd: workDir });
+      taken = await snapshot(repoPath, guard.scripts);
+    } catch (error) {
+      if (error instanceof ScriptsChangedError) throw error;
+      return fail(new ScriptRunError('failed', { cause: error }));
+    }
+    try {
+      // `--project-root`: the repo itself, never a `_bmad/` found above it. `--config-utils`: the checked snapshot,
+      // never the repo's file. The working folder is never the repo, so uv runs no `.venv` the repo ships (see the header).
+      return await runner.run({ script, args: ['--project-root', repoPath, '--config-utils', taken.configUtils, ...args], cwd: workDir });
     } catch (error) {
       const runError = error instanceof ScriptRunError ? error : new ScriptRunError('failed', { cause: error });
       if (ref !== undefined && runError.code === 'failed' && runError.exitCode === 1 && NO_MATCH.test(runError.scriptError ?? '')) {
         throw new NotFoundError('ticket', ref);
       }
       return fail(runError);
+    } finally {
+      await taken.dispose();
     }
   };
 
@@ -218,8 +253,8 @@ export function createTicketsV7({ runner, script: scriptOf, workDir, onFailure, 
     if (!TICKET_REF_PATTERN.test(ref)) throw new NotFoundError('ticket', ref);
   };
 
-  const read = async (repoPath: string): Promise<TicketsResponse> => {
-    const body = (await run(repoPath, ['status'])) as { tickets?: unknown; problems?: unknown; folder?: unknown; epics?: unknown } | null;
+  const read = async (repoPath: string, guard: TicketRunGuard): Promise<TicketsResponse> => {
+    const body = (await run(repoPath, guard, ['status'])) as { tickets?: unknown; problems?: unknown; folder?: unknown; epics?: unknown } | null;
     if (body === null || typeof body !== 'object' || !Array.isArray(body.tickets)) return fail(new TicketsUnavailableError('bad_output'));
     const tickets: TicketRow[] = [];
     for (const value of body.tickets) {
@@ -241,9 +276,9 @@ export function createTicketsV7({ runner, script: scriptOf, workDir, onFailure, 
   };
 
   /** The ticket `ref` names exactly; `NotFoundError` when the script resolved it to another (a tracker id or title match). */
-  const find = async (repoPath: string, ref: string) => {
+  const find = async (repoPath: string, ref: string, guard: TicketRunGuard) => {
     checkRef(ref);
-    const body = (await run(repoPath, ['find', ref], ref)) as Record<string, unknown> | null;
+    const body = (await run(repoPath, guard, ['find', ref], ref)) as Record<string, unknown> | null;
     const picked = pickRow(body);
     if (picked === undefined || body === null) return fail(new TicketsUnavailableError('bad_output'));
     if (picked.ref !== ref) throw new NotFoundError('ticket', ref);
@@ -261,29 +296,30 @@ export function createTicketsV7({ runner, script: scriptOf, workDir, onFailure, 
     return parsed.data;
   };
 
-  /** One run in flight per repo: requests that arrive meanwhile share it; cleared once it settles. */
+  /** One run in flight per repo and trusted scripts: requests that arrive meanwhile share it; cleared once it settles. */
   const inFlight = new Map<string, Promise<TicketsResponse>>();
   return {
-    tree(repoPath) {
-      const pending = inFlight.get(repoPath);
+    tree(repoPath, guard) {
+      const key = `${repoPath}\0${guard.scripts}`;
+      const pending = inFlight.get(key);
       if (pending !== undefined) return pending;
-      const pendingRead = read(repoPath).finally(() => inFlight.delete(repoPath));
-      inFlight.set(repoPath, pendingRead);
+      const pendingRead = read(repoPath, guard).finally(() => inFlight.delete(key));
+      inFlight.set(key, pendingRead);
       return pendingRead;
     },
 
     find,
 
-    async mark(repoPath, ref, status, options = {}): Promise<MarkTicketResponse> {
+    async mark(repoPath, ref, status, guard, options = {}): Promise<MarkTicketResponse> {
       // Only approve writes `done` (AD-10): refused here too, before anything runs, unless core's approve asks (story 5.2).
       if (status === 'done' && options.approve !== true) throw new StatusNotAllowedError(status);
       // Exactly this ticket, or nothing is written: the script would fall back to a title match.
-      const picked = await find(repoPath, ref);
+      const picked = await find(repoPath, ref, guard);
       // A change the user hasn't seen (an agent's write, a `git pull`) is never overwritten (story 4.10).
       const current = picked.status ?? '';
       if (options.expectedStatus !== undefined && options.expectedStatus !== current) throw new TicketChangedError(ref, options.expectedStatus, current);
       const blocked = options.blockedReason === undefined ? [] : [`--blocked=${options.blockedReason}`];
-      const body = (await run(repoPath, ['mark', ref, status, ...blocked], ref)) as { status?: unknown } | null;
+      const body = (await run(repoPath, guard, ['mark', ref, status, ...blocked], ref)) as { status?: unknown } | null;
       if (body === null || typeof body !== 'object') return fail(new TicketsUnavailableError('bad_output'));
       const written = TicketStatus.safeParse(body.status);
       return { ref, status: written.success ? written.data : status };
@@ -308,10 +344,12 @@ export function createTicketsV7({ runner, script: scriptOf, workDir, onFailure, 
             if (open.closed) return;
             let next: TicketsResponse;
             try {
-              // The caller's check before each read (story 4.13: the project's scripts are still the ones allowed).
-              await options?.beforeRun?.();
+              // The caller's check before each read (story 4.13: the project's scripts are still the ones allowed);
+              // the read runs under the guard it answers. Without one the watch never reads.
+              if (options?.beforeRun === undefined) return;
+              const guard = await options.beforeRun();
               if (open.closed) return;
-              next = await read(repoPath);
+              next = await read(repoPath, guard);
             } catch {
               // Logged by `onFailure`: keep the last tree, tell nothing, retry on the next change.
               continue;

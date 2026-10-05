@@ -9,6 +9,7 @@
 import { NotFoundError, StatusNotAllowedError, TicketChangedError, TicketsUnavailableError } from '@ogden-agents/core';
 import { describe, expect, it } from 'vitest';
 import { createTicketsV7, ScriptRunError, type UvScriptRunner } from '../src/index.js';
+import { FAKE_CONFIG_UTILS, fakeSnapshot, GUARD } from './snapshot-fake.js';
 
 const REPO = '/repo';
 const SCRIPT = '/verified/tickets.py';
@@ -20,13 +21,13 @@ function fakeRunner(found: { ref: string; status: string }, { markExit }: { mark
   const runner: UvScriptRunner = {
     run: async (input) => {
       runs.push({ script: input.script, args: input.args, cwd: input.cwd });
-      const command = input.args[2];
+      const command = input.args[4];
       if (command === 'find') {
         return { ref: found.ref, id: 2, epic: 'epic-a', title: 'Two', type: 'story', status: found.status, state: 'planned', blocked_reason: '', file: null, plan: null };
       }
       if (command === 'mark') {
         if (markExit !== undefined) throw new ScriptRunError('failed', { exitCode: markExit });
-        return { ref: input.args[3], status: input.args[4] };
+        return { ref: input.args[5], status: input.args[6] };
       }
       throw new Error(`unexpected ${String(command)}`);
     },
@@ -35,44 +36,44 @@ function fakeRunner(found: { ref: string; status: string }, { markExit }: { mark
   return { runs, runner };
 }
 
-const store = (runner: UvScriptRunner) => createTicketsV7({ runner, script: () => SCRIPT, workDir: WORK });
+const store = (runner: UvScriptRunner) => createTicketsV7({ runner, snapshot: fakeSnapshot, script: () => SCRIPT, workDir: WORK });
 
 describe('tickets-v7 mark (story 4.10)', () => {
   it('finds the exact ticket, then marks it with argv only; the blocked reason is one element', async () => {
     const { runs, runner } = fakeRunner({ ref: '1.2', status: '' });
     const reason = 'Needs the API key\nstatus: done';
-    expect(await store(runner).mark(REPO, '1.2', 'blocked', { blockedReason: reason, expectedStatus: '' })).toEqual({ ref: '1.2', status: 'blocked' });
+    expect(await store(runner).mark(REPO, '1.2', 'blocked', GUARD, { blockedReason: reason, expectedStatus: '' })).toEqual({ ref: '1.2', status: 'blocked' });
     expect(runs.map((run) => run.args)).toEqual([
-      ['--project-root', REPO, 'find', '1.2'],
-      ['--project-root', REPO, 'mark', '1.2', 'blocked', `--blocked=${reason}`],
+      ['--project-root', REPO, '--config-utils', FAKE_CONFIG_UTILS, 'find', '1.2'],
+      ['--project-root', REPO, '--config-utils', FAKE_CONFIG_UTILS, 'mark', '1.2', 'blocked', `--blocked=${reason}`],
     ]);
     expect(runs.every((run) => run.script === SCRIPT && run.cwd === WORK)).toBe(true);
   });
 
   it('without a reason, mark gets no --blocked', async () => {
     const { runs, runner } = fakeRunner({ ref: '1.2', status: '' });
-    await store(runner).mark(REPO, '1.2', 'ready-for-dev');
-    expect(runs.at(-1)!.args).toEqual(['--project-root', REPO, 'mark', '1.2', 'ready-for-dev']);
+    await store(runner).mark(REPO, '1.2', 'ready-for-dev', GUARD);
+    expect(runs.at(-1)!.args).toEqual(['--project-root', REPO, '--config-utils', FAKE_CONFIG_UTILS, 'mark', '1.2', 'ready-for-dev']);
   });
 
   it('an expected status that no longer matches is TicketChangedError and no mark runs', async () => {
     const { runs, runner } = fakeRunner({ ref: '1.2', status: 'in-progress' });
     const error = await store(runner)
-      .mark(REPO, '1.2', 'ready-for-dev', { expectedStatus: '' })
+      .mark(REPO, '1.2', 'ready-for-dev', GUARD, { expectedStatus: '' })
       .catch((failure: unknown) => failure);
     expect(error).toBeInstanceOf(TicketChangedError);
-    expect(runs.map((run) => run.args[2])).toEqual(['find']);
+    expect(runs.map((run) => run.args[4])).toEqual(['find']);
     // The status the plan has matches: it marks.
-    await store(runner).mark(REPO, '1.2', 'ready-for-dev', { expectedStatus: 'in-progress' });
-    expect(runs.map((run) => run.args[2])).toEqual(['find', 'find', 'mark']);
+    await store(runner).mark(REPO, '1.2', 'ready-for-dev', GUARD, { expectedStatus: 'in-progress' });
+    expect(runs.map((run) => run.args[4])).toEqual(['find', 'find', 'mark']);
   });
 
   it('a ref the script resolves to another ticket (a title word) never marks; a malformed ref runs nothing', async () => {
     const { runs, runner } = fakeRunner({ ref: '1.3', status: '' });
-    await expect(store(runner).mark(REPO, '1.2', 'ready-for-dev')).rejects.toThrow(NotFoundError);
-    await expect(store(runner).mark(REPO, 'Two', 'ready-for-dev')).rejects.toThrow(NotFoundError);
-    await expect(store(runner).mark(REPO, '-h', 'ready-for-dev')).rejects.toThrow(NotFoundError);
-    expect(runs.map((run) => run.args.slice(2))).toEqual([
+    await expect(store(runner).mark(REPO, '1.2', 'ready-for-dev', GUARD)).rejects.toThrow(NotFoundError);
+    await expect(store(runner).mark(REPO, 'Two', 'ready-for-dev', GUARD)).rejects.toThrow(NotFoundError);
+    await expect(store(runner).mark(REPO, '-h', 'ready-for-dev', GUARD)).rejects.toThrow(NotFoundError);
+    expect(runs.map((run) => run.args.slice(4))).toEqual([
       ['find', '1.2'],
       ['find', 'Two'],
     ]);
@@ -80,14 +81,14 @@ describe('tickets-v7 mark (story 4.10)', () => {
 
   it('done is refused before anything runs', async () => {
     const { runs, runner } = fakeRunner({ ref: '1.2', status: '' });
-    await expect(store(runner).mark(REPO, '1.2', 'done')).rejects.toThrow(StatusNotAllowedError);
+    await expect(store(runner).mark(REPO, '1.2', 'done', GUARD)).rejects.toThrow(StatusNotAllowedError);
     expect(runs).toEqual([]);
   });
 
   it('a tracker store (exit 2) is store_refused', async () => {
     const { runner } = fakeRunner({ ref: '1.2', status: '' }, { markExit: 2 });
     const error = await store(runner)
-      .mark(REPO, '1.2', 'ready-for-dev')
+      .mark(REPO, '1.2', 'ready-for-dev', GUARD)
       .catch((failure: unknown) => failure);
     expect(error).toBeInstanceOf(TicketsUnavailableError);
     expect((error as TicketsUnavailableError).reason).toBe('store_refused');

@@ -384,6 +384,16 @@ export const API_ROUTES = {
    * `vcs_unavailable` without a branch or a usable git.
    */
   workspaceBuildCommitPlan: `${API_BASE}/workspaces/:wsId/builds/:ref/commit-plan`,
+  /**
+   * `POST` (no body) → 201 `SessionResponse` (story 7.1's tracer): looks back
+   * on the epic whose folder name is `:epic` (an epic of the board's initiative):
+   * a session of kind `planning` whose first message invokes the project's
+   * retrospective skill on the epic's folder. Serves the `retrospectives`
+   * piece and needs the project's script trust (it reads the board). 400 for
+   * a malformed `:epic`, 404 for an epic not on the board or a project whose
+   * BMad Method has no such skill.
+   */
+  workspaceEpicLookBack: `${API_BASE}/workspaces/:wsId/epics/:epic/look-back`,
   /** `GET` → `SessionRunResponse` (story 5.2): the run of a `build` session; 404 for one without a run. */
   sessionRun: `${API_BASE}/workspaces/:wsId/sessions/:sesId/run`,
   // Pre-registered by story 5.3 for epics 5 and 11: each serves `builds`

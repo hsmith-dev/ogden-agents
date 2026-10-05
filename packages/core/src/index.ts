@@ -52,6 +52,7 @@ export * from './permissions.js';
 export * from './planning.js';
 export * from './planning-documents.js';
 export * from './repo-serialization.js';
+export * from './retrospectives.js';
 export * from './resume-prime.js';
 export * from './notifier-port.js';
 export * from './sandbox-port.js';

@@ -336,7 +336,7 @@ async function listenAndAnnounce({
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
   // Plan and Board (story 4.1, `start-planning.ts`): planning sessions, the script runner, the tickets and their watch.
-  const { planning, scriptRunner, bmadSource, board, ticketWatcher, ticketStore, boardTickets } = createPlanAndBoard({
+  const { planning, scriptRunner, bmadSource, board, retrospectives, ticketWatcher, ticketStore, boardTickets } = createPlanAndBoard({
     options,
     core,
     dataDir,
@@ -409,6 +409,7 @@ async function listenAndAnnounce({
     bmadScriptTrust: core.bmadScriptTrust,
     planning,
     board,
+    retrospectives,
     builds,
     buildSettings: core.buildSettings,
     bmadSource,

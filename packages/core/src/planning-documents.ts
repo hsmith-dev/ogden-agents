@@ -10,13 +10,13 @@
  * `AgentPort.skillInvocation(name)` the session's first user message equals
  * or starts with plus a space (the longest such match), read from the stored
  * messages, so it survives a restart. Only while Planning is on (core's
- * guard, checked before and after the reads); a refusal or failure appends
+ * guard, checked before and after the reads: Planning or Retrospectives on, story 7.1); a refusal or failure appends
  * nothing and is told to `onError`, for the log. The checks here are
  * lexical: core reads no file (the document route's read is the adapter's,
  * confined to the real folders).
  */
 import { relative, isAbsolute, posix, win32 } from 'node:path';
-import { RepoRelativePath, type CatalogNext, type Catalog, type Session, type SessionId, type WorkspaceId } from '@ogden-agents/shared';
+import { RepoRelativePath, type BmadPiece, type CatalogNext, type Catalog, type Session, type SessionId, type WorkspaceId } from '@ogden-agents/shared';
 import type { AgentPort } from './agent-port.js';
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
 import type { BmadFeatures } from './bmad-pieces.js';
@@ -25,6 +25,9 @@ import type { SessionEvents } from './session-events.js';
 
 /** The file ending a document must have. */
 export const DOCUMENT_EXTENSION = '.md';
+
+/** The pieces whose sessions write document cards: Planning, and Retrospectives (a look-back's retrospective, story 7.1). */
+const DOCUMENT_PIECES: readonly BmadPiece[] = ['planning', 'retrospectives'];
 
 /** The longest document path taken, in characters: the path reaches the card and the next session's prompt. */
 export const MAX_DOCUMENT_PATH_LENGTH = 512;
@@ -106,7 +109,7 @@ export function sessionSkill(firstMessage: string | undefined, skills: Catalog['
 export type PlanningDocumentsStep = 'feature_off' | 'no_output_folder' | 'failed';
 
 export interface PlanningDocumentsDeps {
-  bmad: Pick<BmadFeatures, 'requireBmadFeature'>;
+  bmad: Pick<BmadFeatures, 'requireAnyBmadFeature'>;
   entities: Pick<Entities, 'getWorkspace' | 'getSession' | 'listCompletedMessages'>;
   catalog: Pick<BmadCatalogPort, 'catalog' | 'setupStatus'>;
   agent: Pick<AgentPort, 'skillInvocation'>;
@@ -137,10 +140,14 @@ export function createPlanningDocuments({ bmad, entities, catalog, agent, agentO
       // Logging never changes the outcome.
     }
   };
-  /** The guard, as a step: `false` (told) when Planning is off or unavailable. */
+  /**
+   * The guard, as a step: `false` (told) when neither Planning nor
+   * Retrospectives is on (story 7.1: a look-back is a planning session
+   * whose retrospective is a document card too, in a project with Planning off).
+   */
   const planningOn = (sessionId: SessionId, workspaceId: WorkspaceId): boolean => {
     try {
-      bmad.requireBmadFeature(workspaceId, 'planning');
+      bmad.requireAnyBmadFeature(workspaceId, DOCUMENT_PIECES);
       return true;
     } catch (error) {
       tell(sessionId, 'feature_off', error);

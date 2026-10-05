@@ -18,6 +18,7 @@ import {
   DOCUMENT_INVALID_PATH_MESSAGE,
   PlanningIdea,
   SKILL_NAME_PATTERN,
+  type BmadPiece,
   type Catalog,
   type PlanningDocument,
   type Session,
@@ -31,6 +32,9 @@ import type { Chat } from './chat/types.js';
 import type { Entities } from './entities.js';
 import { NotFoundError, ValidationError } from './errors.js';
 import { documentPath, insideOutputFolder } from './planning-documents.js';
+
+/** The pieces whose sessions' documents open: Planning, and Retrospectives (story 7.1). */
+const DOCUMENT_PIECES: readonly BmadPiece[] = ['planning', 'retrospectives'];
 
 export interface PlanningUseCases {
   /**
@@ -49,7 +53,7 @@ export interface PlanningUseCases {
   /**
    * A Markdown document a planning session wrote (story 4.7), read-only
    * through the catalog port, confined to the project's output folder.
-   * `FeatureOffError` with Planning off, `ValidationError` for a path that
+   * `FeatureOffError` with Planning and Retrospectives both off, `ValidationError` for a path that
    * isn't a repo-relative `.md` path inside the output folder (or a project
    * with no output folder), `NotFoundError` when the file is missing or its
    * real path leaves the folder, or for an unknown workspace.
@@ -58,7 +62,7 @@ export interface PlanningUseCases {
 }
 
 export interface PlanningDeps {
-  bmad: Pick<BmadFeatures, 'requireBmadFeature'>;
+  bmad: Pick<BmadFeatures, 'requireBmadFeature' | 'requireAnyBmadFeature'>;
   entities: Pick<Entities, 'getWorkspace'>;
   catalog: Pick<BmadCatalogPort, 'catalog' | 'setupStatus' | 'readDocument'>;
   chat: Pick<Chat, 'createChatSession' | 'sendMessage'>;
@@ -123,7 +127,8 @@ export function createPlanning({ bmad, entities, catalog, chat, agent, agentOf, 
     },
 
     async document(workspaceId, path) {
-      bmad.requireBmadFeature(workspaceId, 'planning');
+      // Planning, or Retrospectives (story 7.1): a look-back's retrospective opens from its document card too.
+      bmad.requireAnyBmadFeature(workspaceId, DOCUMENT_PIECES);
       const refuse = () => new ValidationError(DOCUMENT_INVALID_PATH_MESSAGE, [{ path: ['path'], message: DOCUMENT_INVALID_PATH_MESSAGE }]);
       const checked = documentPath(path);
       if (checked === undefined) throw refuse();
@@ -131,7 +136,7 @@ export function createPlanning({ bmad, entities, catalog, chat, agent, agentOf, 
       const { outputFolder } = await catalog.setupStatus(repoPath);
       if (outputFolder === null || !insideOutputFolder(checked, outputFolder)) throw refuse();
       // Checked again after the (async) read of the status: a piece turned off meanwhile reads nothing.
-      bmad.requireBmadFeature(workspaceId, 'planning');
+      bmad.requireAnyBmadFeature(workspaceId, DOCUMENT_PIECES);
       const read = await catalog.readDocument(repoPath, outputFolder, checked);
       if (read === null) throw new NotFoundError('document', checked);
       return { path: checked, content: read.content, truncated: read.truncated };

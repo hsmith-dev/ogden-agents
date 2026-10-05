@@ -171,7 +171,7 @@ describe('continuing a chat with another agent', () => {
     const session = await limitedChat(setup);
     chat.setPermissionMode(workspace.id, session.id, 'auto');
     const preview = await chat.handoffPreview(workspace.id, session.id, 'second-agent');
-    expect(preview).toMatchObject({ permissionMode: 'ask', modeNote: "Second Agent doesn't offer Auto, so this chat will be in Ask." });
+    expect(preview).toMatchObject({ permissionMode: 'ask', modeNote: "Second Agent doesn't offer Auto here, so this chat will be in Ask." });
     await chat.handOff(workspace.id, session.id, { agentId: 'second-agent', brief: preview.brief, message: 'Go on' });
     await chat.settled();
     expect(chat.getSession(workspace.id, session.id).permissionMode).toBe('ask');
@@ -197,6 +197,15 @@ describe('continuing a chat with another agent', () => {
     core.entities.setSessionDriver(session.id, 'ui');
     expect(core.events.readAfter(before).filter((event) => event.seq !== driverSeq && event.type !== 'session.driver_changed')).toEqual([]);
     expect(chat.getSession(workspace.id, session.id).agentId).toBe('first-agent');
+  });
+
+  it('masks secrets in the first message too, as it goes to another provider', async () => {
+    const setup = setUp();
+    const { chat, workspace, second } = setup;
+    const session = await limitedChat(setup);
+    await chat.handOff(workspace.id, session.id, { agentId: 'second-agent', brief: '', message: `use ghp_${'z'.repeat(36)}` });
+    await chat.settled();
+    expect(second.prompts.at(-1)).toBe('use [redacted]');
   });
 
   it('refuses while the agent works', async () => {

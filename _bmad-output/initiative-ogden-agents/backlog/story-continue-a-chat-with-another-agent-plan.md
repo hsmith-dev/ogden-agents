@@ -3,13 +3,13 @@ title: 'A chat continues with another agent when its agent hits a usage limit'
 type: 'feature'
 ticket: '2'
 created: '2026-10-04'
-status: 'in-progress'
+status: 'in-review'
 baseline_revision: '2e4d68f8befaae014c336abffc3e7f5b1fc7d984'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick', 'security']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/backlog/story-continue-a-chat-with-another-agent.md'

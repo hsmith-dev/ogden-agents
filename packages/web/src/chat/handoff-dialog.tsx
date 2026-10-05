@@ -1,4 +1,4 @@
-import { DEFAULT_HANDOFF_MESSAGE, type ChatAgent } from '@ogden-agents/shared';
+import { DEFAULT_HANDOFF_MESSAGE, PERMISSION_MODE_LABELS, type ChatAgent } from '@ogden-agents/shared';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useId, useState } from 'react';
 import { Button } from '@/ui/button';
@@ -43,18 +43,22 @@ export function HandoffDialog({ open, onOpenChange, wsId, sesId, currentAgentId,
   const [message, setMessage] = useState(DEFAULT_HANDOFF_MESSAGE);
   const [sending, setSending] = useState(false);
   const [failure, setFailure] = useState<string | undefined>(undefined);
+  /** Counts openings: each one reads a fresh preview, never an earlier one or its edits. */
+  const [opening, setOpening] = useState(0);
 
   // Each opening starts afresh: the first ready agent, the default message, no error.
   useEffect(() => {
     if (!open) return;
     setAgentId(firstReady);
+    setBrief('');
+    setOpening((count) => count + 1);
     setMessage(DEFAULT_HANDOFF_MESSAGE);
     setFailure(undefined);
     // Only on opening (`firstReady` left out on purpose): a list refreshed meanwhile keeps the user's choice.
   }, [open]);
 
   const preview = useQuery({
-    queryKey: ['handoff-preview', wsId, sesId, agentId],
+    queryKey: ['handoff-preview', wsId, sesId, agentId, opening],
     queryFn: () => fetchHandoffPreview(wsId, sesId, agentId!),
     enabled: open && agentId !== undefined,
     retry: false,
@@ -134,7 +138,9 @@ export function HandoffDialog({ open, onOpenChange, wsId, sesId, currentAgentId,
             <Notice infoGlyph data-testid="handoff-disclosure">
               This sends this chat's conversation to {target.provider} ({target.displayName}).
               {preview.data?.resumes ? ` ${target.displayName} picks up its own earlier session here and gets what happened since.` : ''}
-              {preview.data?.modeNote === undefined ? '' : ` ${preview.data.modeNote}`}
+              {preview.data?.modeNote === undefined
+                ? ` This chat stays in ${PERMISSION_MODE_LABELS[preview.data?.permissionMode ?? 'ask']}${preview.data?.permissionMode === 'skip_all' ? `: ${target.displayName} will run without asking permission` : ''}.`
+                : ` ${preview.data.modeNote}`}
             </Notice>
             <div className="flex flex-col gap-1">
               <Label htmlFor={`${ids}-brief`}>Summary for {target.displayName}</Label>

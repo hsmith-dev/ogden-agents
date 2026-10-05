@@ -162,11 +162,15 @@ export interface Entities {
   /**
    * Hands the session to the agent `agentId` (handoff): sets its agent and
    * merges `refs` into its adapter refs, appending `session.agent_changed`
-   * with the previous agent, `brief` and `resumes`, in one transaction.
+   * with the previous agent, `brief` and `resumes`, in one transaction;
+   * `leftAtRef`, when given, is set to that event's seq in it too.
    * Checks nothing else: who may hand off when is the chat's to enforce.
    * {@link NotFoundError} for an unknown session.
    */
-  setSessionAgent(id: SessionId, change: { agentId: AgentId; previous: AgentId; brief: string; resumes: boolean; refs: AdapterRefs }): { session: Session; event: SessionAgentChangedEvent };
+  setSessionAgent(
+    id: SessionId,
+    change: { agentId: AgentId; previous: AgentId; brief: string; resumes: boolean; refs: AdapterRefs; leftAtRef?: string | undefined },
+  ): { session: Session; event: SessionAgentChangedEvent };
   /** Sets the driver (AD-6), appending `session.driver_changed` (with `cause`, if given) if it changed. */
   setSessionDriver(id: SessionId, driver: SessionDriver, cause?: DriverChangeCause): Session;
   /**
@@ -485,7 +489,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         );
     },
 
-    setSessionAgent(id, { agentId, previous, brief, resumes, refs }) {
+    setSessionAgent(id, { agentId, previous, brief, resumes, refs, leftAtRef }) {
       check(AgentIdSchema, agentId, 'agent id');
       check(AgentIdSchema, previous, 'agent id');
       check(AdapterRefsSchema, refs, 'adapter refs');
@@ -497,7 +501,11 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
           type: 'session.agent_changed',
           payload: { sessionId: session.id, agentId, previous, brief, resumes },
         }) as SessionAgentChangedEvent;
-        return { session: updated, event };
+        if (leftAtRef === undefined) return { session: updated, event };
+        // The event's own seq, as an adapter ref (no event of its own).
+        const adapterRefs = { ...updated.adapterRefs, [leftAtRef]: String(event.seq) };
+        orm.update(sessions).set({ adapterRefs }).where(eq(sessions.id, id)).run();
+        return { session: { ...updated, adapterRefs }, event };
       });
     },
 

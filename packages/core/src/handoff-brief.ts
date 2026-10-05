@@ -6,7 +6,7 @@
  *
  * It holds the project folder, the original goal (the chat's first user
  * message), the files changed (paths only, never contents), the actions
- * taken (tool-call titles), and the conversation: newest messages whole
+ * taken (completed tool-call titles), and the conversation: newest messages whole
  * within the budget, older ones cut to their first line, then only counted.
  * Permission requests are left out: one still waiting was the earlier
  * agent's and is dropped with it. Every part is masked (`redactSecrets`) and
@@ -102,9 +102,10 @@ export function buildHandoffBrief(input: HandoffBriefInput): string {
     }
   }
 
-  const done = [...calls.values()].filter((call) => call.status === 'completed' || call.status === 'failed');
-  const files = [...new Set(done.filter((call) => call.status === 'completed').flatMap((call) => call.paths.map((path) => projectRelative(path, projectPath))))];
-  const actions = done.filter((call) => call.title.trim() !== '').map((call) => cut(call.title.trim(), MAX_ACTION_CHARS) + (call.status === 'failed' ? ' (failed)' : ''));
+  // Completed tool calls only: one still running or that failed changed nothing to carry over.
+  const done = [...calls.values()].filter((call) => call.status === 'completed');
+  const files = [...new Set(done.flatMap((call) => call.paths.map((path) => projectRelative(path, projectPath))))];
+  const actions = done.filter((call) => call.title.trim() !== '').map((call) => cut(call.title.trim(), MAX_ACTION_CHARS));
 
   const head: string[] = [
     sinceSeq === undefined

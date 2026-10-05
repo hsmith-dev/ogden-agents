@@ -48,7 +48,8 @@ describe('the handoff brief', () => {
     expect(text).toContain('Project folder: /repo');
     expect(text).toContain('Original goal: Add a booking form to the app.');
     expect(text).toContain('Files changed: src/form.ts');
-    expect(text).toContain('Actions taken: Edit src/form.ts; Run npm test (failed)');
+    expect(text).toContain('Actions taken: Edit src/form.ts');
+    expect(text).not.toContain('Run npm test');
     expect(text).toContain('User: Add a booking form to the app.\nFirst Agent: I added the form; the tests fail.');
     // Names only: never a file's contents.
     expect(text).not.toContain('secret contents');

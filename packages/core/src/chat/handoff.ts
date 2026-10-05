@@ -52,19 +52,27 @@ export function createHandoff(ctx: ChatContext, deps: Pick<Agents, 'releaseAgent
     if (session.driver === 'terminal') {
       throw new DriverIsTerminalError('The terminal is driving this chat. Switch back to the chat before continuing with another agent.');
     }
-    if (busy.has(sessionId) || session.state === 'working' || session.state === 'waiting') {
+    if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
+    if (session.state === 'waiting') throw new SessionNotIdleError(`${nameOf(current)} is waiting for your answer in this chat. Answer it or stop it first.`);
+    if (busy.has(sessionId) || session.state === 'working') {
       throw new SessionNotIdleError(`${nameOf(current)} is still working in this chat. Stop it first, then continue with another agent.`);
     }
+    if (session.state !== 'idle' && session.state !== 'error') throw new SessionNotIdleError('This chat is finished, so it can’t continue with another agent.');
     if (agents.get(agentId) === undefined || agents.describe(agentId) === undefined) throw new UnknownAgentError();
     if (agentId === current) throw new InvalidOperationError(`This chat is already with ${nameOf(current)}.`);
     return { session, current };
   };
 
-  /** The chat's mode with `descriptor`'s agent: its own when declared, else Ask, with why. */
-  const modeWith = (mode: PermissionMode, descriptor: AgentDescriptor): { permissionMode: PermissionMode; modeNote?: string } =>
-    declaredModes(descriptor).includes(mode)
-      ? { permissionMode: mode }
-      : { permissionMode: 'ask', modeNote: `${descriptor.displayName} doesn't offer ${PERMISSION_MODE_LABELS[mode]}, so this chat will be in Ask.` };
+  /**
+   * The chat's mode with `descriptor`'s agent: its own when the agent declares
+   * it (and, once one of its sessions started this run, that session offered
+   * it too, as the mode picker judges), else Ask, with why.
+   */
+  const modeWith = (mode: PermissionMode, descriptor: AgentDescriptor): { permissionMode: PermissionMode; modeNote?: string } => {
+    const seen = ctx.lastSessionModes.get(descriptor.agentId);
+    const offered = declaredModes(descriptor).includes(mode) && (seen === undefined || seen.includes(mode));
+    return offered ? { permissionMode: mode } : { permissionMode: 'ask', modeNote: `${descriptor.displayName} doesn't offer ${PERMISSION_MODE_LABELS[mode]} here, so this chat will be in Ask.` };
+  };
 
   /** Everything a handoff to `agentId` would send, once the checks passed. */
   const prepare = async (workspaceId: WorkspaceId, sessionId: SessionId, agentId: AgentId) => {
@@ -117,7 +125,7 @@ export function createHandoff(ctx: ChatContext, deps: Pick<Agents, 'releaseAgent
         sessionModes.delete(sessionId);
         const leaving = storedAgentSessionId(sessionId) ?? '';
         if (permissionMode !== prepared.session.permissionMode) entities.setSessionPermissionMode(sessionId, permissionMode, 'handoff', modeNote);
-        const { event } = entities.setSessionAgent(sessionId, {
+        entities.setSessionAgent(sessionId, {
           agentId,
           previous: current,
           brief: told,
@@ -128,12 +136,14 @@ export function createHandoff(ctx: ChatContext, deps: Pick<Agents, 'releaseAgent
             [AGENT_SESSION_REF]: ownSession,
             [HANDOFF_PENDING_REF]: told === '' ? '' : '1',
           },
+          // Where the leaving agent left, in the same transaction: its brief on return starts after it.
+          leftAtRef: handoffLeftRefOf(current),
         });
-        entities.setSessionAdapterRefs(sessionId, { [handoffLeftRefOf(current)]: String(event.seq) });
       } finally {
         switching.delete(sessionId);
       }
-      const { messageId } = sendMessage(workspaceId, sessionId, message);
+      // The first message goes to the new provider too: masked like the brief.
+      const { messageId } = sendMessage(workspaceId, sessionId, redactSecrets(message));
       return { session: ctx.withAgentId(getSession(workspaceId, sessionId)), messageId };
     },
   };

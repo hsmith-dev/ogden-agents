@@ -325,7 +325,17 @@ export function SessionPage() {
   };
 
   // Handoff: offered while the chat is idle or in error and the chat drives it.
-  const handoffBlocked = terminalDrives ? 'Switch back to the chat first: the terminal is driving it.' : busy ? `${agentName} is working. Stop it first.` : undefined;
+  const handoffBlocked = terminalDrives
+    ? 'Switch back to the chat first: the terminal is driving it.'
+    : switchingTo !== undefined
+      ? 'This chat is switching to or from the terminal.'
+      : state === 'waiting'
+        ? `${agentName} is waiting for your answer. Answer it or stop it first.`
+        : state === 'working'
+          ? `${agentName} is working. Stop it first.`
+          : state === 'done'
+            ? 'This chat is finished.'
+            : undefined;
   const nameOf = (id: string | undefined) => (id === undefined ? agentName : agentNameOf(chatAgents.data, id));
 
   const tryAgain = () => {

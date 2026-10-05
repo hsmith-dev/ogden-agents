@@ -20,6 +20,7 @@ import {
   LOOK_BACK_LABEL,
   LESSONS_CHECKOUT_BUSY_MESSAGE,
   LESSONS_NO_GIT_MESSAGE,
+  VCS_NOT_TOP_LEVEL_MESSAGE,
   LESSONS_NO_AGENTS_FILE_MESSAGE,
   NOTHING_TO_SAVE_MESSAGE,
   RepoRelativePath,
@@ -100,7 +101,7 @@ export interface RetrospectiveDeps {
   /** The finished-epic offer's Not now (story 7.2). */
   offers: Pick<LookBackOffers, 'dismissed' | 'dismiss'>;
   /** Git, for Save the lessons (story 7.5): one local commit of exactly two paths, never a push. Without it saving answers `vcs_unavailable`. */
-  vcs?: Pick<VcsPort, 'head' | 'operationInProgress' | 'status' | 'commitPaths'> | undefined;
+  vcs?: Pick<VcsPort, 'head' | 'topLevel' | 'operationInProgress' | 'status' | 'commitPaths'> | undefined;
 }
 
 /** One part of the output folder: plain name characters, a leading underscore allowed (`_bmad-output`), never a space, control character or leading dash. */
@@ -128,8 +129,11 @@ export function createRetrospectives({ bmad, entities, board, catalog, chat, age
   /** The epic's row and retrospective from the board's tree (its guards run), and the repo; `NotFoundError` for an epic the board lacks or one with no retrospective yet. */
   const retrospectiveOf = async (workspaceId: WorkspaceId, epic: string) => {
     const tree = await board.tickets(workspaceId);
-    const retrospective = tree.epics.find((each) => each.slug === epic)?.retrospective ?? null;
-    if (retrospective === null) throw new NotFoundError('epic', epic);
+    const row = tree.epics.find((each) => each.slug === epic);
+    if (row === undefined) throw new NotFoundError('epic', epic);
+    const retrospective = row.retrospective;
+    // The epic is on the board but has no retrospective yet; its file name must be one plain name too (it reaches an agent's message and a commit).
+    if (retrospective === null || !retrospective.path.split('/').every((segment) => OUTPUT_SEGMENT_PATTERN.test(segment))) throw new NotFoundError('retrospective', epic);
     return { tree, retrospective, repoPath: workspaceRepoPath(entities, workspaceId) };
   };
 
@@ -190,12 +194,14 @@ export function createRetrospectives({ bmad, entities, board, catalog, chat, age
       return serializedByRepo(repoPath, async () => {
         bmad.requireBmadFeature(workspaceId, 'retrospectives');
         if ((await vcs.head(repoPath)) === undefined) throw new BuildRefusedError('vcs_unavailable', LESSONS_NO_GIT_MESSAGE);
+        // The project must be the top folder of its repository: git reports and takes paths from there (as builds require).
+        if ((await vcs.topLevel(repoPath)) !== repoPath) throw new BuildRefusedError('vcs_unavailable', VCS_NOT_TOP_LEVEL_MESSAGE);
         if (await vcs.operationInProgress(repoPath)) throw new LessonsRefusedError('checkout_busy', LESSONS_CHECKOUT_BUSY_MESSAGE);
         const changed = new Set(await vcs.status(repoPath));
-        // The lessons live in the root AGENTS.md: without one there is nothing for a later build to follow.
-        if (!changed.has(AGENTS_FILE) && !existsSync(join(repoPath, AGENTS_FILE))) throw new LessonsRefusedError('agents_file_missing', LESSONS_NO_AGENTS_FILE_MESSAGE);
+        // The lessons live in the root AGENTS.md: without one on disk there is nothing for a later build to follow (a deleted one is not a lesson).
+        if (!existsSync(join(repoPath, AGENTS_FILE))) throw new LessonsRefusedError('agents_file_missing', LESSONS_NO_AGENTS_FILE_MESSAGE);
         // Exactly these two paths, only those with a change, and nothing else the user has changed.
-        const paths = [AGENTS_FILE, retrospective.path].filter((path) => changed.has(path));
+        const paths = [AGENTS_FILE, retrospective.path].filter((path) => changed.has(path) && existsSync(join(repoPath, path)));
         if (paths.length === 0) throw new LessonsRefusedError('nothing_to_save', NOTHING_TO_SAVE_MESSAGE);
         const revision = await vcs.commitPaths(repoPath, paths, `Lessons from the retrospective of ${epic}\n\nSaved in Ogden Agents so later builds follow them.`);
         return { paths, revision };

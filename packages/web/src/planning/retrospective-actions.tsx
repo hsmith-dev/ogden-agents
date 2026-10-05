@@ -1,4 +1,4 @@
-import { EPIC_SLUG_PATTERN, LESSONS_SAVED_TEXT, RETROSPECTIVE_FILE_SUFFIX, SAVE_LESSONS_LABEL, SAVE_LESSONS_NOTE, type Session } from '@ogden-agents/shared';
+import { ADD_LESSONS_FAILED, EPIC_SLUG_PATTERN, LESSONS_SAVED_TEXT, SAVE_LESSONS_FAILED, RETROSPECTIVE_FILE_SUFFIX, SAVE_LESSONS_LABEL, SAVE_LESSONS_NOTE, type Session } from '@ogden-agents/shared';
 import { useQuery } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { Button } from '@/ui/button';
@@ -46,7 +46,7 @@ export function RetrospectiveActions({ wsId, epic, onStarted }: { wsId: string; 
     setError(undefined);
     setSaved(false);
     work()
-      .catch((failure: unknown) => setError(failure instanceof Error && failure.message !== '' ? failure.message : undefined))
+      .catch((failure: unknown) => setError(failure instanceof Error && failure.message !== '' ? failure.message : `${kind === 'save' ? SAVE_LESSONS_FAILED : ADD_LESSONS_FAILED}. Try again.`))
       .finally(() => {
         pending.current = false;
         setBusy(undefined);
@@ -85,7 +85,7 @@ export function RetrospectiveActions({ wsId, epic, onStarted }: { wsId: string; 
           {SAVE_LESSONS_LABEL}
         </Button>
       </div>
-      <Text variant="caption" tone="muted" data-testid="retrospective-save-note">
+      <Text variant="caption" tone="muted" role="status" data-testid="retrospective-save-note">
         {saved ? LESSONS_SAVED_TEXT : SAVE_LESSONS_NOTE}
       </Text>
       {error === undefined ? null : (

@@ -20,6 +20,7 @@ import {
   FEATURE_OFF_MESSAGE,
   LESSONS_CHECKOUT_BUSY_MESSAGE,
   LESSONS_NO_AGENTS_FILE_MESSAGE,
+  LOOK_BACK_NO_RETROSPECTIVE_MESSAGE,
   LOOK_BACK_STEP_NOT_OFFERED_MESSAGE,
   NOTHING_TO_SAVE_MESSAGE,
   SaveLessonsResponse,
@@ -43,7 +44,7 @@ const errorOf = async (reply: Response) => ApiErrorBody.parse(await reply.json()
 const userMessagesOf = (server: TestServer, sessionId: SessionId) =>
   server.core.events.readAfter(0).flatMap((e) => (e.streamId === sessionId && e.type === 'session.message_completed' && e.payload.role === 'user' ? [e.payload.content] : []));
 
-async function setup({ pieces = ['board', 'retrospectives'], trust = true, agentsFile = true }: { pieces?: BmadPiece[]; trust?: boolean; agentsFile?: boolean } = {}) {
+async function setup({ pieces = ['board', 'retrospectives'], trust = true, agentsFile = true, retrospective = true }: { pieces?: BmadPiece[]; trust?: boolean; agentsFile?: boolean; retrospective?: boolean } = {}) {
   const repo = createRetrospectiveRepo({ agentsFile });
   removeAfterTest(repo.path);
   const real = realpathSync.native(repo.path);
@@ -60,7 +61,7 @@ async function setup({ pieces = ['board', 'retrospectives'], trust = true, agent
     {
       setup: { [real]: { state: 'current', outputFolder: '_bmad-output', bundledVersion: '7.0.0', installedVersion: '7.0.0', problems: [] } },
       // The board reads the retrospective through the catalog: it is there once the look-back wrote it (the file itself is the repo's).
-      documents: { [real]: { [RETRO_FILE]: retrospectiveText('accepted-with-open-items') } },
+      documents: { [real]: retrospective ? { [RETRO_FILE]: retrospectiveText('accepted-with-open-items') } : {} },
     },
   );
   const server = await startTestServer({ ticketStore, bmadCatalog });
@@ -176,7 +177,12 @@ describe('Save the lessons for later builds over REST (story 7.5)', () => {
     expect(off.repo.git('rev-parse', 'HEAD').trim()).toBe(before);
   });
 
-  it('an epic with no retrospective is not found; a malformed one is 400', async () => {
+  it('an epic with no retrospective yet says so (404), an epic the board lacks is not found, and a malformed one is 400', async () => {
+    const none = await setup({ retrospective: false });
+    const noRetro = await none.save();
+    expect(noRetro.status).toBe(404);
+    expect(await errorOf(noRetro)).toEqual({ code: 'not_found', message: LOOK_BACK_NO_RETROSPECTIVE_MESSAGE });
+    expect((await none.step('bmad-project-context')).status).toBe(404);
     const t = await setup();
     expect((await t.save('epic-nine')).status).toBe(404);
     expect((await t.save('-x')).status).toBe(400);

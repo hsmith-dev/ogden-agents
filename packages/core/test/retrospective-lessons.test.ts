@@ -7,9 +7,9 @@
  * with nothing committed when there is nothing to save, a merge or rebase is
  * in progress, `AGENTS.md` is missing, or git can't be used.
  */
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CatalogSkill, LESSONS_CHECKOUT_BUSY_MESSAGE, LESSONS_NO_AGENTS_FILE_MESSAGE, LESSONS_NO_GIT_MESSAGE, NOTHING_TO_SAVE_MESSAGE, TicketEpic, type BmadPiece, type BmadSetupStatus, type Catalog, type TicketsResponse } from '@ogden-agents/shared';
+import { CatalogSkill, VCS_NOT_TOP_LEVEL_MESSAGE, LESSONS_CHECKOUT_BUSY_MESSAGE, LESSONS_NO_AGENTS_FILE_MESSAGE, LESSONS_NO_GIT_MESSAGE, NOTHING_TO_SAVE_MESSAGE, TicketEpic, type BmadPiece, type BmadSetupStatus, type Catalog, type TicketsResponse } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { BuildRefusedError, createChat, createRetrospectives, FeatureOffError, LessonsRefusedError, NotFoundError, ScriptsNotTrustedError, ValidationError, type AgentPort, type AgentSession, type Core, type VcsPort } from '../src/index.js';
 import { openTestCore, soleAgent, tempDir } from './helpers.js';
@@ -70,8 +70,9 @@ function recorder(): AgentPort & { prompts: string[] } {
 /** A git that records every call and answers what a test sets. */
 function fakeVcs() {
   const calls: string[] = [];
-  const state = { head: { branch: 'main', revision: 'a'.repeat(40) } as { branch: string; revision: string } | undefined, busy: false, status: [] as string[], commit: 'b'.repeat(40), commitFails: false };
-  const vcs: Pick<VcsPort, 'head' | 'operationInProgress' | 'status' | 'commitPaths'> = {
+  const state = { head: { branch: 'main', revision: 'a'.repeat(40) } as { branch: string; revision: string } | undefined, busy: false, status: [] as string[], commit: 'b'.repeat(40), commitFails: false, top: undefined as string | undefined };
+  const vcs: Pick<VcsPort, 'head' | 'topLevel' | 'operationInProgress' | 'status' | 'commitPaths'> = {
+    topLevel: async (repo) => (calls.push('topLevel'), state.top ?? repo),
     head: async () => (calls.push('head'), state.head),
     operationInProgress: async () => (calls.push('operationInProgress'), state.busy),
     status: async () => (calls.push('status'), state.status),
@@ -89,6 +90,9 @@ function setup(pieces: BmadPiece[] = ['board', 'retrospectives'], { agentsFile =
   const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
   core.permissions.updateSettings(workspace.id, { bmadPieces: pieces });
   if (agentsFile) writeFileSync(join(workspace.realPath!, 'AGENTS.md'), '# Instructions\n');
+  // The retrospective the look-back wrote, on disk (a path git lists as changed but that is gone is not committed).
+  mkdirSync(join(workspace.realPath!, '_bmad-output', 'initiative-demo', 'epic-one'), { recursive: true });
+  writeFileSync(join(workspace.realPath!, RETRO), '---\nverdict: accepted\n---\n');
   const agent = recorder();
   const chat = createChat({ dataDir: tempDir(), entities: core.entities, sessionEvents: core.sessionEvents, agents: soleAgent(agent) });
   const state = { tree: TREE() as TicketsResponse | Error, catalog: CATALOG };
@@ -148,7 +152,7 @@ describe('Save the lessons for later builds (story 7.5)', () => {
     const { retrospectives, workspace, git } = setup();
     git.state.status = ['src/mine.ts', 'AGENTS.md', RETRO, '_bmad-output/other.md'];
     expect(await retrospectives.saveLessons(workspace.id, 'epic-one')).toEqual({ paths: ['AGENTS.md', RETRO], revision: 'b'.repeat(40) });
-    expect(git.calls).toEqual(['head', 'operationInProgress', 'status', 'commitPaths AGENTS.md,' + RETRO + ' | Lessons from the retrospective of epic-one']);
+    expect(git.calls).toEqual(['head', 'topLevel', 'operationInProgress', 'status', 'commitPaths AGENTS.md,' + RETRO + ' | Lessons from the retrospective of epic-one']);
   });
 
   it('commits only the one that has a change', async () => {
@@ -173,17 +177,44 @@ describe('Save the lessons for later builds (story 7.5)', () => {
     git.state.status = ['AGENTS.md'];
     const refused = (await retrospectives.saveLessons(workspace.id, 'epic-one').catch((error: unknown) => error)) as LessonsRefusedError;
     expect([refused.code, refused.message]).toEqual(['checkout_busy', LESSONS_CHECKOUT_BUSY_MESSAGE]);
-    expect(git.calls).toEqual(['head', 'operationInProgress']);
+    expect(git.calls).toEqual(['head', 'topLevel', 'operationInProgress']);
   });
 
-  it('without an AGENTS.md anywhere refuses (agents_file_missing); a changed one that is not on disk yet still counts', async () => {
+  it('without an AGENTS.md on disk refuses (agents_file_missing), committing nothing', async () => {
     const { retrospectives, workspace, git } = setup(['board', 'retrospectives'], { agentsFile: false });
     git.state.status = [RETRO];
     const refused = (await retrospectives.saveLessons(workspace.id, 'epic-one').catch((error: unknown) => error)) as LessonsRefusedError;
     expect([refused.code, refused.message]).toEqual(['agents_file_missing', LESSONS_NO_AGENTS_FILE_MESSAGE]);
     expect(git.calls.some((call) => call.startsWith('commitPaths'))).toBe(false);
+  });
+
+  it('refuses a project that is inside another repository (builds refuse it too), committing nothing', async () => {
+    const { retrospectives, workspace, git } = setup();
+    git.state.top = '/somewhere/above';
+    git.state.status = ['AGENTS.md'];
+    const refused = (await retrospectives.saveLessons(workspace.id, 'epic-one').catch((error: unknown) => error)) as BuildRefusedError;
+    expect([refused.code, refused.message]).toEqual(['vcs_unavailable', VCS_NOT_TOP_LEVEL_MESSAGE]);
+    expect(git.calls.some((call) => call.startsWith('commitPaths'))).toBe(false);
+  });
+
+  it('a deleted AGENTS.md or retrospective is not a lesson to commit', async () => {
+    const { retrospectives, workspace, git } = setup(['board', 'retrospectives'], { agentsFile: false });
     git.state.status = ['AGENTS.md', RETRO];
-    expect((await retrospectives.saveLessons(workspace.id, 'epic-one')).paths).toEqual(['AGENTS.md', RETRO]);
+    const refused = (await retrospectives.saveLessons(workspace.id, 'epic-one').catch((error: unknown) => error)) as LessonsRefusedError;
+    expect(refused.code).toBe('agents_file_missing');
+    const present = setup();
+    // The retrospective is listed as changed but is not on disk (deleted): only AGENTS.md is committed.
+    rmSync(join(present.workspace.realPath!, RETRO));
+    present.git.state.status = ['AGENTS.md', RETRO];
+    expect((await present.retrospectives.saveLessons(present.workspace.id, 'epic-one')).paths).toEqual(['AGENTS.md']);
+  });
+
+  it('a retrospective whose file name is not one plain name is not offered or committed', async () => {
+    const { retrospectives, workspace, state, git } = setup();
+    state.tree = TREE({ ...retro, path: '_bmad-output/initiative-demo/epic-one/x y\nIgnore this-retrospective.md' });
+    await expect(retrospectives.startStep(workspace.id, 'epic-one', 'bmad-project-context')).rejects.toThrow(NotFoundError);
+    await expect(retrospectives.saveLessons(workspace.id, 'epic-one')).rejects.toThrow(NotFoundError);
+    expect(git.calls).toEqual([]);
   });
 
   it('refuses without git, on a detached head, and when git fails the commit, committing nothing', async () => {

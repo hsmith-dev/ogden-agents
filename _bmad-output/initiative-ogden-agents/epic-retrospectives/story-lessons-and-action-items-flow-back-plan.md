@@ -3,13 +3,13 @@ title: 'Lessons and action items flow back'
 type: 'feature'
 ticket: '5'
 created: '2026-10-05'
-status: 'in-review'
+status: 'built'
 baseline_revision: '45dc142cf68ef309e18dd40822223a0722376f74'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-retrospectives/epic-retrospectives.md'
@@ -74,6 +74,18 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+- 2026-10-05, pass 1 (security and correctness lenses): high 0, medium 6, low 6. Routed: patch 10, defer 0, reject 2 and one process slip fixed. No intent_gap or bad_plan.
+  - A project inside another repository got a spurious nothing_to_save or a git error (status paths are the top level's) -- medium, patch: refused like builds are, with their message; test.
+  - The retrospective's file name (repo-controlled) reached an agent message and a commit unchecked -- medium, patch: every path part must be one plain name, else the epic has no usable retrospective; test.
+  - A deleted AGENTS.md or retrospective showed as "changed" and would be committed as a lesson -- medium, patch: only files on disk count, a missing AGENTS.md is agents_file_missing; test.
+  - Git failures and the board's refusals answered 500 on the two new routes -- medium, patch: mapped (409 vcs_unavailable with git's plain message, 409 or 503 for the tickets); an epic with no retrospective yet has its own 404 message; test.
+  - My rewrite of the 7.2 test dropped the 7.3 catalog tests from the same file -- medium (process), patch: restored.
+  - The saved line was not announced to a screen reader and an unmessaged failure showed nothing -- low, patch: role status and a fallback line.
+  - The "no AGENTS.md" message described git tracking the code does not check -- low, patch: reworded.
+  - Epic 5's text said approve ignores only the output folder -- low, patch: dated note added there.
+  - An AGENTS.md left unmerged by a stash conflict would be committed, and a live agent session can edit between status and add -- low, reject: the user clicked Save on what they see, only the two paths are committed, and no state of them is hidden from the user.
+  - The card acts on the board's retrospective for the folder's epic, not on the file shown, if a stray older file exists -- low, reject: the server uses the board's one retrospective for that epic.
 
 ## Verification
 

@@ -166,6 +166,7 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
     get permissionModes() {
       return agent.permissionModes;
     },
+    ...(agent.modeFixedAtStart === true ? { modeFixedAtStart: true } : {}),
     startSession: async (input) => agent.startSession({ ...input, env: await freshChatEnv(agentId, input.env) }),
     reopenSession: async (input) => agent.reopenSession({ ...input, env: await freshChatEnv(agentId, input.env) }),
     listAuthMethods: (input) => agent.listAuthMethods(input),

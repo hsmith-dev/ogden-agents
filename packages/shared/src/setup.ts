@@ -73,6 +73,12 @@ export const AgentSetupStatus = z.object({
   signInTakesCode: z.boolean().optional(),
   /** Plain words about what Install puts where, shown beside Install and Uninstall (epic 6 entry 7). Never a secret. */
   installNote: z.string().min(1).optional(),
+  /**
+   * Plain-words notices the agent card shows (epic 12, 12.3): known
+   * limitations and network use ("Codex keeps its sign-in in a file in
+   * Ogden Agents' data folder"). Never a secret or a path.
+   */
+  notices: z.array(z.string().min(1)).max(8).optional(),
   /** Plain words to read before signing in (terms, where to finish; epic 6 entry 7). Never a secret. */
   signInNote: z.string().min(1).optional(),
   /** The step under way and how far it is (0 to 100, or `null` when it can't tell), while `install` is `installing` (9.3). */

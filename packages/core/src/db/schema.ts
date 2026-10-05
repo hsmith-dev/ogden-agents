@@ -57,6 +57,14 @@ export const workspaces = sqliteTable(
      */
     bmadScriptsFingerprint: text('bmad_scripts_fingerprint'),
     /**
+     * The contents of the files the agents that need project trust run
+     * (`.claude/settings.json` hooks, `.mcp.json`; epic 12, 12.3, user
+     * decision 2026-10-04) when the user trusted the project. The same trust
+     * as the scripts': recorded by the same `trustScripts`. `null` when not
+     * trusted, or trusted before this column (read as changed: asked again).
+     */
+    agentFilesFingerprint: text('agent_files_fingerprint'),
+    /**
      * The agent this project's new chats preselect (epic 6, entry 6), or
      * NULL for the install's default. No SQL default: core names no agent.
      * Changed only through the workspace settings use-case.

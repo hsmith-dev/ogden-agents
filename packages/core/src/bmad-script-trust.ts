@@ -16,6 +16,14 @@
  * again. Ogden Agents' own setup or Upgrade, which writes them only from the
  * verified pinned copy, keeps a trust that still matched just before it.
  *
+ * One trust for the agents too (epic 12, 12.3, user decision 2026-10-04):
+ * an agent that runs the project's own settings, hooks and MCP servers
+ * (descriptor `needsProjectTrust`) starts only in a project the user
+ * trusted, with its scripts and the files its descriptor names
+ * (`projectFiles`) as the user allowed them. Those files have their own
+ * stored fingerprint, so changing them asks again before the agent's next
+ * start ({@link BmadScriptTrust.trustedForAgents}) and never stops the Board.
+ *
  * The check sits with the pieces guard: the server's route helper calls
  * {@link BmadScriptTrust.requireScriptsTrusted} after the piece guard for
  * every route of a piece that runs project scripts, and each core use-case
@@ -59,6 +67,14 @@ export interface BmadScriptTrust {
   /** Whether the project is trusted and its scripts are the ones the user allowed (read now). */
   scriptsUnchanged(workspaceId: WorkspaceId): Promise<boolean>;
   /**
+   * Whether an agent that needs project trust may start here (epic 12,
+   * 12.3): the project is trusted, its scripts are the ones the user
+   * allowed, and so are the agent files (`.claude/settings.json`,
+   * `.mcp.json`, …) as they are now. A fingerprint that can't be read, or
+   * none stored (trusted before it existed), is a no.
+   */
+  trustedForAgents(workspaceId: WorkspaceId): Promise<boolean>;
+  /**
    * After Ogden Agents' own setup or Upgrade (which writes `_bmad/scripts/`
    * only from the verified pinned copy) of a project whose scripts were
    * unchanged just before it: the trust follows the scripts setup wrote.
@@ -78,12 +94,16 @@ export interface BmadScriptTrustDeps {
   entities: Pick<Entities, 'getWorkspace'>;
   /** The project's scripts as they are now (`BmadCatalogPort.scriptsFingerprint`); without a catalog, none. */
   fingerprint?: ((repoPath: string) => Promise<string | undefined>) | undefined;
+  /** The files agents that need project trust run, repo-relative (descriptors' `projectFiles`), read at each call. */
+  agentFiles?: (() => readonly string[]) | undefined;
+  /** The contents of `files` below a repo; `undefined` when unreadable. Without it, no agent file is bound. */
+  filesFingerprint?: ((repoPath: string, files: readonly string[]) => Promise<string | undefined>) | undefined;
 }
 
-export function createBmadScriptTrust({ orm, events, entities, fingerprint }: BmadScriptTrustDeps): BmadScriptTrust {
+export function createBmadScriptTrust({ orm, events, entities, fingerprint, agentFiles, filesFingerprint }: BmadScriptTrustDeps): BmadScriptTrust {
   const row = (workspaceId: string) => {
     const stored = orm
-      .select({ trusted: workspaces.bmadScriptsTrusted, fingerprint: workspaces.bmadScriptsFingerprint })
+      .select({ trusted: workspaces.bmadScriptsTrusted, fingerprint: workspaces.bmadScriptsFingerprint, agentFiles: workspaces.agentFilesFingerprint })
       .from(workspaces)
       .where(eq(workspaces.id, workspaceId))
       .get();
@@ -93,6 +113,8 @@ export function createBmadScriptTrust({ orm, events, entities, fingerprint }: Bm
   const trusted = (workspaceId: string): boolean => row(workspaceId).trusted;
   const current = async (workspaceId: WorkspaceId): Promise<string | undefined> =>
     fingerprint === undefined ? 'none' : fingerprint(workspaceRepoPath(entities, workspaceId));
+  const currentAgentFiles = async (workspaceId: WorkspaceId): Promise<string | undefined> =>
+    filesFingerprint === undefined ? 'none' : filesFingerprint(workspaceRepoPath(entities, workspaceId), agentFiles?.() ?? []);
   const unchanged = async (workspaceId: WorkspaceId): Promise<boolean> => {
     const stored = row(workspaceId);
     if (!stored.trusted || stored.fingerprint === null) return false;
@@ -109,15 +131,23 @@ export function createBmadScriptTrust({ orm, events, entities, fingerprint }: Bm
       if (!(await unchanged(workspaceId))) throw new ScriptsChangedError();
     },
     scriptsUnchanged: unchanged,
+    async trustedForAgents(workspaceId) {
+      if (!(await unchanged(workspaceId))) return false;
+      const stored = row(workspaceId).agentFiles;
+      if (stored === null) return false;
+      const now = await currentAgentFiles(workspaceId);
+      return now !== undefined && now === stored;
+    },
     async trustScripts(workspaceId) {
       row(workspaceId);
       const now = await current(workspaceId);
+      const nowAgentFiles = await currentAgentFiles(workspaceId);
       events.transaction(() => {
         const stored = row(workspaceId);
-        if (stored.trusted && stored.fingerprint !== null && stored.fingerprint === (now ?? null)) return;
+        if (stored.trusted && stored.fingerprint !== null && stored.fingerprint === (now ?? null) && stored.agentFiles !== null && stored.agentFiles === (nowAgentFiles ?? null)) return;
         orm
           .update(workspaces)
-          .set({ bmadScriptsTrusted: true, bmadScriptsFingerprint: now ?? null })
+          .set({ bmadScriptsTrusted: true, bmadScriptsFingerprint: now ?? null, agentFilesFingerprint: nowAgentFiles ?? null })
           .where(eq(workspaces.id, workspaceId))
           .run();
         events.append({ type: 'workspace.bmad_scripts_trusted', workspaceId, streamId: workspaceId, payload: {} });

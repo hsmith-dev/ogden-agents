@@ -82,7 +82,8 @@ export interface ChatOptions {
   agentReadiness?: (agentId: AgentId) => Promise<AgentReadiness>;
   /**
    * Whether the user trusted the project (6.3; the per-project trust gate,
-   * story 4.2, bound to the project's scripts since 4.13). A chat with an
+   * story 4.2, bound to the project's scripts since 4.13 and, for an agent,
+   * to the agent files its descriptor names since 12.3). A chat with an
    * agent whose descriptor `needsProjectTrust` is refused unless it says yes;
    * one that throws counts as no. Without it, no project is trusted.
    */
@@ -176,9 +177,11 @@ export interface Chat {
   /**
    * The agents a chat can be started with, in order (epic 6; frozen in 6.3):
    * what each is, the permission modes it declares, its setup, and why a new
-   * chat with it is refused now, if it is.
+   * chat with it is refused now, if it is. With `workspaceId`, an agent that
+   * needs project trust is also refused (`project_not_trusted`, action
+   * `trust_project`) while that project isn't trusted for it (epic 12, 12.3).
    */
-  chatAgents(): Promise<{ agents: ChatAgent[]; defaultAgentId: AgentId }>;
+  chatAgents(workspaceId?: WorkspaceId): Promise<{ agents: ChatAgent[]; defaultAgentId: AgentId }>;
   /** The session, which must belong to the workspace (`NotFoundError` otherwise). */
   getSession(workspaceId: WorkspaceId, sessionId: SessionId): Session;
   /**

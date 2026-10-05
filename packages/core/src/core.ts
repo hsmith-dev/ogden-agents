@@ -56,6 +56,19 @@ export type OpenCoreOptions = OpenDatabaseOptions &
      * after core. Absent: every well-formed id.
      */
     isAgentRegistered?: (agentId: AgentId) => boolean;
+    /** The registered agents' own config folders, which join the protected paths (epic 12, 12.3). Read at each call, as `isAgentRegistered`. */
+    agentConfigFolders?: () => readonly string[];
+    /**
+     * The repo-relative files the registered agents that need project trust
+     * run (their descriptors' `projectFiles`, epic 12, 12.3); the trust is
+     * bound to their contents. Read at each call. Absent: none.
+     */
+    agentProjectFiles?: () => readonly string[];
+    /**
+     * The fingerprint of `files` below a repo (adapters' `projectFilesFingerprint`);
+     * `undefined` when it can't be read, which counts as changed. Without it, no agent files are fingerprinted.
+     */
+    projectFilesFingerprint?: (repoPath: string, files: readonly string[]) => Promise<string | undefined>;
   } & BmadFeaturesOptions;
 
 /** Opens (and migrates) the database in `dataDir` and builds core on it. */
@@ -75,6 +88,8 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     events,
     entities,
     fingerprint: catalog === undefined ? undefined : (repoPath) => catalog.scriptsFingerprint(repoPath),
+    agentFiles: options.agentProjectFiles,
+    filesFingerprint: options.projectFilesFingerprint,
   });
   const bmadModulesSeen = createBmadModulesSeen({ orm: db.orm, events });
   const bmadSetup =
@@ -98,6 +113,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     isBmadPieceAvailable: bmad.isAvailable,
     isAgentRegistered: options.isAgentRegistered,
     developerMode: installSettings.developerMode,
+    agentConfigFolders: options.agentConfigFolders,
     ...(options.onPermissionError === undefined ? {} : { onError: options.onPermissionError }),
   });
   return {

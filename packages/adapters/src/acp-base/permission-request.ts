@@ -22,7 +22,7 @@ const OPTION_KINDS: ReadonlySet<string> = new Set(['allow_once', 'allow_always',
 export interface PermissionRequestContext {
   /** The session's folder, for the paths a card names. */
   cwd: string;
-  quirks: Pick<AcpAgentQuirks, 'commandFields' | 'toolInputPaths'>;
+  quirks: Pick<AcpAgentQuirks, 'commandFields' | 'toolInputPaths' | 'rejectOptionIds'>;
   /** Masks the agent's secret-looking values. */
   mask: (text: string) => string;
   diagnostic: Diagnostic;
@@ -42,8 +42,17 @@ export async function answerPermissionRequest(
     });
     return { outcome: { outcome: 'cancelled' } };
   }
+  /** Deny's option: a preferred id among the `reject_once` ones (epic 12, 12.3), else the first. */
+  const rejectOption = () => {
+    const rejects = params.options.filter((candidate) => candidate.kind === 'reject_once');
+    for (const id of quirks.rejectOptionIds ?? []) {
+      const preferred = rejects.find((candidate) => candidate.optionId === id);
+      if (preferred !== undefined) return preferred;
+    }
+    return rejects[0];
+  };
   const select = (kind: acp.PermissionOptionKind): acp.RequestPermissionResponse => {
-    const chosen = option(kind);
+    const chosen = kind === 'reject_once' ? rejectOption() : option(kind);
     if (chosen === undefined) {
       diagnostic('the agent offered no option for the decision; cancelling the request', { option: kind });
       return { outcome: { outcome: 'cancelled' } };

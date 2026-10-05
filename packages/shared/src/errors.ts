@@ -34,6 +34,8 @@ export const API_ERROR_CODES = [
   'confirmation_required',
   /** A permission mode the chat's agent, or its session, doesn't offer (409): nothing changed. */
   'mode_unavailable',
+  /** A model the chat's agent, or its session, doesn't list (409; story 11): nothing changed. */
+  'model_unavailable',
   /** A new chat named an agent this install doesn't have (400; epic 6): nothing created. */
   'agent_unknown',
   /**

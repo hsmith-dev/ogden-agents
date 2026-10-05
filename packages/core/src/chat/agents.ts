@@ -10,6 +10,7 @@ import { PROTECTED_PATHS } from '../permission-matching.js';
 import { primedPrompt } from '../resume-prime.js';
 import { AGENT_SESSION_REF, AGENT_STARTING_NOTICE_MS } from './constants.js';
 import type { ChatContext } from './context.js';
+import type { Models } from './model.js';
 import type { ModeApplier } from './permission-mode.js';
 import type { PermissionRequests } from './permission-requests.js';
 import type { Replies } from './replies.js';
@@ -17,10 +18,10 @@ import type { Live } from './types.js';
 
 export function createAgents(
   ctx: ChatContext,
-  deps: Pick<Replies, 'stopDeltaTimer'> & Pick<PermissionRequests, 'onPermissionRequestFor'> & { applyMode: ModeApplier },
+  deps: Pick<Replies, 'stopDeltaTimer'> & Pick<PermissionRequests, 'onPermissionRequestFor'> & Pick<Models, 'noteStarted' | 'takesModelAtStart' | 'startModelFor'> & { applyMode: ModeApplier },
 ) {
   const { entities, sessionEvents, agentEnv, agentOf, agentIdOf, live, droppedAgents, internalError, sessionModes, later } = ctx;
-  const { stopDeltaTimer, onPermissionRequestFor, applyMode } = deps;
+  const { stopDeltaTimer, onPermissionRequestFor, applyMode, noteStarted, takesModelAtStart, startModelFor } = deps;
 
   /** Ends the session's agent (it failed or went away); the next message starts a fresh one. */
   const drop = (sessionId: SessionId, entry: Live) => {
@@ -73,17 +74,22 @@ export function createAgents(
       // The protected paths stay guarded in Auto ("Keep protected files guarded", user decision 2026-10-02); fixed for the session's life.
       guardsRequested: entities.getSession(session.id)?.permissionMode === 'auto',
       restartPending: false,
+      appliedModel: null,
     };
     const onPermissionRequest = onPermissionRequestFor(session);
     // The agent the session was started with (epic 6), looked up for each start: never another one.
     const agent = agentOf(session.id);
     const agentId = agentIdOf(session);
+    // An agent that takes its model only at start gets the chat's in its start (story 11); one told live starts on its own choice.
+    const startModel = takesModelAtStart(agentId) ? startModelFor(session.id, agentId) : null;
+    entry.appliedModel = startModel;
     // The real-cased path: the case-folded key is for uniqueness only (AD-2).
     const input = {
       cwd: workspace.realPath ?? workspace.path,
       env: { ...agentEnv(session.id) },
       onPermissionRequest,
       ...(entry.guardsRequested ? { protectedPaths: PROTECTED_PATHS } : {}),
+      ...(startModel === null ? {} : { model: startModel }),
     };
     const previous = storedAgentSessionId(session.id);
     // A chat that reached an agent before, and has none now, reopens that agent's session (2.7).
@@ -140,6 +146,8 @@ export function createAgents(
       entry.off = started.onEvent((event) => apply(session.id, entry, event));
       sessionModes.set(session.id, started.permissionModes ?? ['ask']);
       ctx.lastSessionModes.set(agentId, started.permissionModes ?? ['ask']);
+      // What it lists (story 11): the chat's picker, and the agent's last list for Settings.
+      noteStarted(session.id, agentId, started);
       // The chat's stored mode before the first prompt, whatever the agent's own settings started it in
       // (a new chat, and every chat after a restart, in Ask). One it can't be put in, not even Ask, is stopped.
       const applied = await applyMode(session.id, started, entry.guardsRequested);

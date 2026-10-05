@@ -215,3 +215,80 @@ describe('skill invocation (story 4.1 on the shared client)', () => {
     expect(secondAgent({ skillInvocation: (skill) => `run ${skill}` }).skillInvocation('bmad-prd')).toBe('run bmad-prd');
   });
 });
+
+describe('models over ACP (story 11)', () => {
+  it('lists the session model config option and switches it live before a prompt, and back to its own pick', async () => {
+    const { session, events } = await start();
+    expect(session.models).toEqual({
+      available: [
+        { id: 'fake-default', name: 'Fake Default', description: 'The fake agent picks this one itself' },
+        { id: 'fake-large', name: 'Fake Large' },
+        { id: 'fake-small', name: 'Fake Small' },
+        { id: 'fake-locked', name: 'Fake Locked', description: 'Not in your plan' },
+      ],
+      current: 'fake-default',
+    });
+    await session.setModel!('fake-large');
+    expect(session.models?.current).toBe('fake-large');
+    await session.prompt('model');
+    expect(replyText(events)).toBe('model=fake-large');
+    await session.setModel!(null);
+    expect(session.models?.current).toBe('fake-default');
+    // Its own switch echoes nothing.
+    expect(events.some((event) => event.type === 'model')).toBe(false);
+  });
+
+  it('a refusal carries the agent words, and an unlisted model is refused before asking', async () => {
+    const { session } = await start();
+    await expect(session.setModel!('fake-locked')).rejects.toThrow("Your plan doesn't include Fake Locked.");
+    await expect(session.setModel!('fake-huge')).rejects.toThrow(acpReasons('Second Agent').noSuchModel);
+    expect(session.models?.current).toBe('fake-default');
+  });
+
+  it('a model the agent switches to by itself is a model event', async () => {
+    const { session, events } = await start();
+    await session.prompt('model-switch fake-small');
+    expect(events.filter((event) => event.type === 'model')).toEqual([{ type: 'model', model: 'fake-small' }]);
+    expect(session.models?.current).toBe('fake-small');
+  });
+
+  it('an agent listing no models has none and no live switch', async () => {
+    const { session } = await start({ env: { FAKE_ACP_NO_MODELS: '1' } });
+    expect(session.models).toBeUndefined();
+    expect(session.setModel).toBeUndefined();
+  });
+
+  it('a static descriptor list is applied at spawn, as a variable or a flag, and only for a listed model', async () => {
+    const list = [
+      { id: 'static-a', name: 'Static A' },
+      { id: 'static-b', name: 'Static B' },
+    ];
+    for (const apply of [{ kind: 'env', name: 'FAKE_ACP_START_MODEL' } as const, { kind: 'arg', flag: '--model' } as const]) {
+      const agent = createAcpAgent(
+        { ...SECOND, models: { list, apply } },
+        {
+          launch: () => ({ command: process.execPath, args: [FAKE_AGENT], logFields: {} }),
+          toolInputPaths: { pathFields: [], patternFields: [] },
+          askingModeIds: ['careful'],
+          skillInvocation: slashSkillInvocation,
+        },
+      );
+      const env = baseEnv({ FAKE_ACP_NO_MODELS: '1' });
+      const session = await agent.startSession({ cwd: tempDir(), env, model: 'static-b' });
+      sessions.push(session);
+      const events: AgentEvent[] = [];
+      session.onEvent((event) => events.push(event));
+      expect(session.models).toEqual({ available: list, current: 'static-b' });
+      expect(session.setModel).toBeUndefined();
+      await session.prompt('model');
+      expect(replyText(events)).toBe('model=static-b');
+      // A model it doesn't list never reaches its process.
+      const other = await agent.startSession({ cwd: tempDir(), env, model: 'not-listed' });
+      sessions.push(other);
+      const otherEvents: AgentEvent[] = [];
+      other.onEvent((event) => otherEvents.push(event));
+      await other.prompt('model');
+      expect(replyText(otherEvents)).toBe('model=none');
+    }
+  });
+});

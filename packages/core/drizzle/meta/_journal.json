@@ -99,6 +99,13 @@
       "when": 1791165205478,
       "tag": "0013_workspace_default_permission_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1791165317648,
+      "tag": "0014_agent_models",
+      "breakpoints": true
     }
   ]
 }

@@ -71,6 +71,13 @@ export const workspaces = sqliteTable(
     defaultPermissionMode: text('default_permission_mode'),
     /** Why the default reads as it does (`DefaultModeNotice`), or null; cleared by the user's next choice. */
     defaultPermissionModeNotice: text('default_permission_mode_notice'),
+    /**
+     * The project's own default model per agent (story 11), as a JSON object
+     * of agent id to the agent's model id. `{}` for new and upgraded
+     * workspaces. Read only through `readDefaultModels`, so a damaged value
+     * reads as none. Changed only through the workspace settings use-case.
+     */
+    defaultModels: text('default_models').notNull().default('{}'),
     createdAt: text('created_at').notNull(),
   },
   (t) => [uniqueIndex('workspaces_path_unique').on(t.path)],
@@ -97,6 +104,11 @@ export const sessions = sqliteTable(
      * original agent, which the server wiring names (core names none, AD-1).
      */
     agentId: text('agent_id').$type<AgentId>(),
+    /**
+     * The model the chat runs on (story 11): the agent's own id, or `NULL`
+     * for the agent's own choice (and on rows from before it existed).
+     */
+    model: text('model'),
     /** The user's name for the chat (backlog story 12); `NULL` until they give one. */
     title: text('title'),
     /** The name core gave the chat (the planning action's label, or its first message), set once; `NULL` until then. */
@@ -206,4 +218,17 @@ export const bmadModulesSeen = sqliteTable(
 export const installSettings = sqliteTable('install_settings', {
   id: integer('id').primaryKey(),
   developerMode: integer('developer_mode', { mode: 'boolean' }).notNull().default(false),
+});
+
+/**
+ * Per agent, install-wide (story 11): the model new chats with it start on
+ * (`NULL`: its own choice; Settings → Agents) and the models it last listed
+ * (JSON array of `AgentModel`), so Settings and a chat's picker can offer
+ * them before the agent starts. A row per agent that ever had either; core
+ * names no agent.
+ */
+export const agentSettings = sqliteTable('agent_settings', {
+  agentId: text('agent_id').$type<AgentId>().primaryKey(),
+  defaultModel: text('default_model'),
+  models: text('models').notNull().default('[]'),
 });

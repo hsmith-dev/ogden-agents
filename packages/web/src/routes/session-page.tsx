@@ -5,8 +5,9 @@ import type { PermissionMode } from '@ogden-agents/shared';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAgents } from '@/agents/agent-setup-api';
 import { useAppearance } from '@/appearance/appearance-provider';
-import { agentNameOf, cancelSession, ChatApiError, UNKNOWN_AGENT_NAME, fetchSession, sendMessage, setPermissionMode, switchDriver } from '@/chat/chat-api';
+import { agentNameOf, cancelSession, ChatApiError, UNKNOWN_AGENT_NAME, fetchSession, sendMessage, setPermissionMode, setSessionModel, switchDriver } from '@/chat/chat-api';
 import { ChatHeaderRename, useChatName, useChatRename } from '@/chat/chat-name';
+import { agentDefaultLabel, ModelPicker, modelLabel, useSessionModel } from '@/chat/model-picker';
 import { useChatAgents } from '@/chat/use-chat-agents';
 import { Composer } from '@/chat/composer';
 import { chatDraftKey } from '@/chat/drafts';
@@ -255,6 +256,38 @@ export function SessionPage() {
     [wsId, sesId, refetchSession],
   );
 
+  // The chat's model (story 11): one change at a time; the view follows the event, and it applies to the next message.
+  const { model, refusal } = useSessionModel(events, session.data?.session.model);
+  const sessionModels = session.data?.models;
+  const [modelChanging, setModelChanging] = useState(false);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  /** The refusal the user put away (its reason), so its notice doesn't follow every later message. */
+  const [dismissedRefusal, setDismissedRefusal] = useState<string | undefined>(undefined);
+  const modelInFlight = useRef(false);
+  const changeModel = useCallback(
+    (next: string | null) => {
+      if (modelInFlight.current) return;
+      modelInFlight.current = true;
+      setModelChanging(true);
+      setActionError(undefined);
+      setSessionModel(wsId, sesId, next).then(
+        () => {
+          modelInFlight.current = false;
+          setModelChanging(false);
+          void refetchSession();
+        },
+        (failure: unknown) => {
+          modelInFlight.current = false;
+          setModelChanging(false);
+          setActionError(failure instanceof Error ? failure.message : "Ogden Agents couldn't change this chat's model. Try again.");
+          void refetchSession();
+        },
+      );
+    },
+    [wsId, sesId, refetchSession],
+  );
+  const modelWords = model === null ? agentDefaultLabel(agentName) : modelLabel(sessionModels?.available, model);
+
   // The modes the picker offers depend on the agent session: read the session again when its agent
   // starts or reopens (working, or `session.resumed`); turning idle after it is read again by the driver hook.
   const resumedSeq = useMemo(() => events.findLast((event) => event.type === 'session.resumed')?.seq, [events]);
@@ -349,6 +382,12 @@ export function SessionPage() {
         {severalAgents && session.data !== undefined ? (
           <Text as="span" variant="caption" data-testid="session-agent">
             {agentName}
+          </Text>
+        ) : null}
+        {/* The model the chat runs on (story 11), beside its agent. */}
+        {session.data !== undefined ? (
+          <Text as="span" variant="caption" data-testid="session-model" data-model={model ?? ''} aria-label={`Model: ${modelWords}`} className="min-w-0 truncate max-sm:sr-only">
+            {modelWords}
           </Text>
         ) : null}
         {state === undefined ? null : <StateGlyph state={state} data-testid="session-state" className="ml-auto" />}
@@ -490,6 +529,25 @@ export function SessionPage() {
                   {view.errorReason ?? `${agentName} stopped with an error. Try again.`}
                 </Notice>
               ) : null}
+              {refusal !== undefined && model === null && !terminalDrives && dismissedRefusal !== refusal.reason ? (
+                // The agent couldn't run the chosen model (story 11): its own words, and a way to pick another.
+                <Notice
+                  data-testid="model-refused"
+                  role="status"
+                  action={
+                    <span className="flex gap-2">
+                      <Button variant="outline" onClick={() => setModelMenuOpen(true)} data-testid="model-refused-choose">
+                        Choose another model
+                      </Button>
+                      <Button variant="ghost" onClick={() => setDismissedRefusal(refusal.reason)} data-testid="model-refused-dismiss">
+                        Keep the default
+                      </Button>
+                    </span>
+                  }
+                >
+                  {refusal.reason}
+                </Notice>
+              ) : null}
               {actionError === undefined ? null : (
                 <Text variant="caption" role="alert" data-testid="session-action-error">
                   {actionError}
@@ -536,6 +594,19 @@ export function SessionPage() {
           hint={state === 'working' ? `${agentName} is working. A message you send now waits its turn.` : undefined}
           restore={restore}
           draftKey={chatDraftKey(wsId, sesId)}
+          footer={
+            <ModelPicker
+              agentName={agentName}
+              model={model}
+              models={sessionModels === undefined ? undefined : sessionModels.available}
+              current={sessionModels?.current}
+              terminalDrives={terminalDrives}
+              changing={modelChanging}
+              open={modelMenuOpen}
+              onOpenChange={setModelMenuOpen}
+              onChoose={changeModel}
+            />
+          }
           action={
             busy ? (
               <Button type="button" variant="outline" onClick={stop} aria-disabled={stopping} data-testid="stop">

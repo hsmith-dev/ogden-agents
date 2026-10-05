@@ -18,6 +18,7 @@ import {
   DeveloperModeRequiredError,
   DriverIsTerminalError,
   ModeUnavailableError,
+  ModelUnavailableError,
   FeatureUnavailableError,
   InvalidOperationError,
   NotFoundError,
@@ -30,6 +31,7 @@ import {
   UnknownAgentError,
   ValidationError,
   type AddProject,
+  type AgentModels,
   type Chat,
 } from '@ogden-agents/core';
 import {
@@ -45,7 +47,9 @@ import {
   SessionResponse,
   SessionsResponse,
   SetDriverRequest,
+  SetAgentDefaultModelRequest,
   SetPermissionModeRequest,
+  SetSessionModelRequest,
   type SessionTerminal,
   WorkspaceResponse,
   WorkspacesResponse,
@@ -76,9 +80,14 @@ export interface ChatRouteOptions {
    * given pieces are refused as unavailable.
    */
   addProject?: AddProject | undefined;
+  /**
+   * Each agent's install-wide default model (story 11; Settings → Agents),
+   * and whether an agent is registered. Without it, `PUT` default model is 404.
+   */
+  agentDefaults?: { models: Pick<AgentModels, 'setDefaultModel'>; isAgentRegistered: (agentId: string) => boolean } | undefined;
 }
 
-export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { terminalAvailability, addProject }: ChatRouteOptions = {}): void {
+export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { terminalAvailability, addProject, agentDefaults }: ChatRouteOptions = {}): void {
   const projects = addProject ?? createAddProject({ chat });
   // A rename is a few hundred bytes at most (a 2000 character name, JSON escaped, fits well inside).
   const renameLimit = bodyLimit({ maxSize: MAX_RENAME_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', CHAT_NAME_TOO_LONG) });
@@ -102,6 +111,7 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     if (error instanceof DeveloperModeRequiredError) return apiError(c, 403, 'developer_mode_required', error.message);
     if (error instanceof ConfirmationRequiredError) return apiError(c, 400, 'confirmation_required', error.message);
     if (error instanceof ModeUnavailableError) return apiError(c, 409, 'mode_unavailable', error.message);
+    if (error instanceof ModelUnavailableError) return apiError(c, 409, 'model_unavailable', error.message);
     if (error instanceof FeatureUnavailableError) return apiError(c, 409, 'feature_unavailable', FEATURE_UNAVAILABLE_MESSAGE);
     if (error instanceof SessionBusyError) {
       return apiError(c, 409, 'session_busy', 'The agent is still answering. Send your message when it is done.');
@@ -137,7 +147,8 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     if (!body.ok) return body.response;
     try {
       // The agent picked (epic 6), or the default one; an id this install doesn't have is refused by core.
-      const session = await chat.createChatSession(scope.workspaceId, { agentId: body.value?.agentId });
+      // Its model (story 11): the one given (an agent handoff's), else the project's or install's default for the agent.
+      const session = await chat.createChatSession(scope.workspaceId, { agentId: body.value?.agentId, model: body.value?.model });
       log.info('chat session created', { workspaceId: scope.workspaceId, sessionId: session.id, agentId: session.agentId });
       return c.json(SessionResponse.parse({ session }), 201);
     } catch (error) {
@@ -155,7 +166,8 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
       return refusal(c, error);
     }
     const permissionModes = chat.permissionModeOptions(scope.workspaceId, scope.sessionId);
-    if (terminalAvailability === undefined) return c.json(SessionResponse.parse({ session, permissionModes }));
+    const models = chat.modelOptions(scope.workspaceId, scope.sessionId);
+    if (terminalAvailability === undefined) return c.json(SessionResponse.parse({ session, permissionModes, models }));
     let terminal: SessionTerminal;
     try {
       terminal = await terminalAvailability(session);
@@ -167,7 +179,40 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
       });
       terminal = { available: false, code: 'pty_unavailable', reason: TERMINAL_CHECK_FAILED };
     }
-    return c.json(SessionResponse.parse({ session, terminal, permissionModes }));
+    return c.json(SessionResponse.parse({ session, terminal, permissionModes, models }));
+  });
+
+  // The chat's model (story 11): core decides (a model the agent lists, who drives); it applies to the next message.
+  app.put(API_ROUTES.sessionModel, limit, async (c) => {
+    const scope = ids(c);
+    if (scope?.sessionId === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+    const body = await readBody(c, SetSessionModelRequest);
+    if (!body.ok) return body.response;
+    try {
+      const before = chat.getSession(scope.workspaceId, scope.sessionId).model ?? null;
+      const session = chat.setModel(scope.workspaceId, scope.sessionId, body.value.model);
+      // The model id is the agent's own name for a model, never a secret.
+      if ((session.model ?? null) !== before) log.info('chat model changed', { workspaceId: scope.workspaceId, sessionId: scope.sessionId, model: session.model ?? null, previous: before });
+      return c.json(SessionResponse.parse({ session, models: chat.modelOptions(scope.workspaceId, scope.sessionId) }));
+    } catch (error) {
+      if (error instanceof CoreError) log.info('chat model refused', { workspaceId: scope.workspaceId, sessionId: scope.sessionId, code: error.code });
+      return refusal(c, error);
+    }
+  });
+
+  // An agent's install-wide default model (story 11; Settings → Agents): new chats only.
+  app.put(API_ROUTES.chatAgentDefaultModel, limit, async (c) => {
+    const agentId = c.req.param('agentId');
+    if (agentDefaults === undefined || agentId === undefined || !agentDefaults.isAgentRegistered(agentId)) return apiError(c, 404, 'agent_unknown', "This agent isn't available in Ogden Agents on this computer.");
+    const body = await readBody(c, SetAgentDefaultModelRequest);
+    if (!body.ok) return body.response;
+    try {
+      const { changed, model } = agentDefaults.models.setDefaultModel(agentId, body.value.model);
+      if (changed) log.info('agent default model changed', { agentId, model });
+      return c.json(ChatAgentsResponse.parse(await chat.chatAgents()));
+    } catch (error) {
+      return refusal(c, error);
+    }
   });
 
   // The chat's permission mode: core decides (Developer mode, confirmation, what the agent offers, who drives).

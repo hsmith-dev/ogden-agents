@@ -17,6 +17,7 @@ import type { Agents } from './agents.js';
 import type { CheckIn } from './check-in.js';
 import { AGENT_SESSION_REF, DELTA_INTERVAL_MS, MAX_QUEUED_MESSAGES } from './constants.js';
 import type { ChatContext } from './context.js';
+import type { Models } from './model.js';
 import type { PermissionModes } from './permission-mode.js';
 import type { Replies } from './replies.js';
 import { capDiffs, sameDiffs, toolCallPayload, toolKind, toolStatus } from './tool-calls.js';
@@ -27,10 +28,11 @@ export function createTurns(
   deps: Pick<Replies, 'flushDelta' | 'tickDelta' | 'flushSession' | 'finishReply'> &
     Pick<CheckIn, 'clearQuiet' | 'clearTurnTimers' | 'armQuiet'> &
     Pick<Agents, 'drop' | 'agentFor' | 'promptFor'> &
-    Pick<PermissionModes, 'onReportedMode'>,
+    Pick<PermissionModes, 'onReportedMode'> &
+    Pick<Models, 'syncModel' | 'onReportedModel'>,
 ) {
   const { options, entities, sessionEvents, agentOf, stopGraceMs, live, busy, running, switching, internalError, toAgentError, later, newMessageId, getWorkspace, getSession } = ctx;
-  const { flushDelta, tickDelta, flushSession, finishReply, clearQuiet, clearTurnTimers, armQuiet, drop, agentFor, promptFor, onReportedMode } = deps;
+  const { flushDelta, tickDelta, flushSession, finishReply, clearQuiet, clearTurnTimers, armQuiet, drop, agentFor, promptFor, onReportedMode, syncModel, onReportedModel } = deps;
 
   /** Whether the session has a Deny reason or a queued message to send once this turn ends. */
   const hasNext = (sessionId: SessionId) => {
@@ -129,6 +131,10 @@ export function createTurns(
           // A mode the chat didn't choose never sticks (permission modes).
           onReportedMode(sessionId, event);
           return;
+        case 'model':
+          // The agent switched itself (story 11): a chat that chose a model follows it.
+          onReportedModel(sessionId, entry, event);
+          return;
         case 'tool_call': {
           const call: ToolCallState = {
             title: event.title,
@@ -189,6 +195,12 @@ export function createTurns(
       if (started === undefined || turn.stopping) return;
       // A mode change still being told goes first: the prompt never runs in a looser mode than the chat's.
       if ((await Promise.race([entry.modeSync.then(() => true), entry.gone.then(() => false)])) === false || turn.stopping || live.get(session.id) !== entry) return;
+      // The chat's model, at this idle point (story 11): told live, or the agent restarts with it.
+      if (!entry.restartPending) {
+        const model = await Promise.race([syncModel(session.id, entry, started), entry.gone.then(() => undefined)]);
+        if (model === undefined || turn.stopping || live.get(session.id) !== entry) return;
+        if (model === 'restart') entry.restartPending = true;
+      }
       if (!entry.restartPending || attempt >= 2) break;
     }
     try {

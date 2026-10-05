@@ -50,6 +50,9 @@ describe("the session's CLI command", () => {
     expect(claudeTerminalCommand(ID, env, { claudeExecutable: '/elsewhere/claude' })).toEqual({ file: '/opt/claude/bin/claude', args: ['--resume', ID, '--permission-mode', 'default'], env });
     // Then the one the adapter would find, as the chat's adapter does.
     expect(claudeTerminalCommand(ID, { PATH: '' }, { claudeExecutable: '/elsewhere/claude' }).file).toBe('/elsewhere/claude');
+    // Story 11: the chat's model, as `--model`; a value that could read as a flag never reaches it.
+    expect(claudeTerminalCommand(ID, env, { claudeExecutable: '/elsewhere/claude', model: 'opus[1m]' }).args).toEqual(['--resume', ID, '--permission-mode', 'default', '--model', 'opus[1m]']);
+    expect(() => claudeTerminalCommand(ID, env, { claudeExecutable: '/elsewhere/claude', model: '--dangerously-skip-permissions' })).toThrow(AgentError);
   });
 
   it('runs a script CLI under Node, as the Agent SDK does', () => {

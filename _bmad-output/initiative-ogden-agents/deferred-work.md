@@ -66,6 +66,10 @@ Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim fr
 - Notifications follow-up (not yet ticketed): play the chime from a tab with user activation. From backlog 8 review. (log: "Play the attention chime from a tab that can play sound")
 - Unowned (a sweep, with the caution level): arrow keys in the "New chats start in" and caution-level radio groups save every option they pass. From the default permission mode review. (log: "caution-level radio groups save every option they pass")
 - Empty-project start chat story: the empty-project composer and planning sessions send the first prompt to a chat that may start in Skip all before its red banner shows. From the default permission mode security review. (log: "send the first prompt to a chat that may start in Skip all")
+- Story 11 (models): after a reopen, "Agent's default" means the resumed session's model. From the story 11 review. (log: "is the model the resumed session had, not the agent's own default")
+- Story 11 (models): no two-tab test for model and default-model changes. From the story 11 review. (log: "No two-tab test for model and default-model changes")
+- Story 11 (models): the refusal Notice mounts with its text, so some screen readers may miss it. From the story 11 review. (log: "The model refusal Notice mounts with its text")
+- Story 11 (models): Default models in Settings use a menu, not a labelled field, and vanish while loading or on failure. From the story 11 review. (log: "Default models in Settings use a menu rather than a labelled form field")
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
 
@@ -585,3 +589,15 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-new-chats-start-in-the-projects-permission-mode-plan.md`
   summary: The empty-project composer (`workspace-chats-page.tsx`) and planning sessions send the first prompt to a chat that may start in Skip all before the chat page and its red banner show.
   evidence: Security review S2. `onSend` creates, sends, then opens; `planning.ts` sends at once. Showing the project's starting mode beside that composer belongs with the empty-project story's page.
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-each-chat-runs-on-a-model-the-user-can-switch-plan.md`
+  summary: A reopened ACP session's "Agent's default" is the model the resumed session had, not the agent's own default.
+  evidence: claude-agent-acp restores a resumed session's model; the adapter's remembered initial model is that value, so clearing a chat's model after a restart may keep the earlier choice. Needs an agent-declared default id or a fresh-session probe.
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-each-chat-runs-on-a-model-the-user-can-switch-plan.md`
+  summary: No two-tab test for model and default-model changes.
+  evidence: Wiring uses useEventInvalidation on settings.agent_default_model_changed / workspace.settings_changed and session.model_changed; a dom or e2e test with a second tab would settle it.
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-each-chat-runs-on-a-model-the-user-can-switch-plan.md`
+  summary: The model refusal Notice mounts with its text, so some screen readers may not announce it.
+  evidence: role=status regions are more reliable when mounted empty; shared Notice pattern elsewhere does the same.
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-each-chat-runs-on-a-model-the-user-can-switch-plan.md`
+  summary: Default models in Settings use a menu rather than a labelled form field, and vanish while the agent list loads or fails.
+  evidence: DefaultModelsSection returns null without data and uses DropdownMenu checkbox items; the Default agent section uses a labelled RadioGroup.

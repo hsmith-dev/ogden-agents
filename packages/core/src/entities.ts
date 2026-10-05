@@ -12,6 +12,8 @@ import {
   AgentId as AgentIdSchema,
   DriverChangeCause as DriverChangeCauseSchema,
   IsoUtcTimestamp,
+  ModelChangeCause as ModelChangeCauseSchema,
+  ModelId as ModelIdSchema,
   PermissionMode as PermissionModeSchema,
   PermissionModeChangeCause as PermissionModeChangeCauseSchema,
   RunOutcome as RunOutcomeSchema,
@@ -31,6 +33,7 @@ import {
   type BmadPiece,
   type DriverChangeCause,
   type MessageRole,
+  type ModelChangeCause,
   type PermissionMode,
   type PermissionModeChangeCause,
   type Run,
@@ -80,6 +83,8 @@ export interface NewSession {
   permissionMode?: PermissionMode;
   /** Plain words about that starting mode, carried on `session.created`. */
   permissionModeNote?: string;
+  /** The model it starts on (story 11): the agent's own id; absent or `null`, the agent's own choice. */
+  model?: string | null;
 }
 
 /** What a newly created workspace starts with (story 10.4). Ignored when the workspace already exists. */
@@ -186,6 +191,13 @@ export interface Entities {
    * `setPermissionMode`, Developer mode). {@link NotFoundError} for an unknown session.
    */
   setSessionPermissionMode(id: SessionId, mode: PermissionMode, cause: PermissionModeChangeCause, reason?: string): Session;
+  /**
+   * Sets the chat's model (story 11; `null`: the agent's own choice),
+   * appending `session.model_changed` with `cause` (and `reason`) if it
+   * changed. Checks only that it is a model id: whether the agent offers it is
+   * the caller's. {@link NotFoundError} for an unknown session.
+   */
+  setSessionModel(id: SessionId, model: string | null, cause: ModelChangeCause, reason?: string): Session;
   /** Every session in `mode`, oldest first, across workspaces. */
   listSessionsInPermissionMode(mode: PermissionMode): Session[];
   /**
@@ -247,6 +259,7 @@ const toSession = (row: SessionRow): Session => ({
   driver: row.driver,
   permissionMode: row.permissionMode,
   ...(row.agentId === null ? {} : { agentId: row.agentId }),
+  ...(row.model === null ? {} : { model: row.model }),
   title: row.title,
   ...(row.autoTitle === null ? {} : { autoTitle: row.autoTitle }),
   adapterRefs: row.adapterRefs,
@@ -418,6 +431,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         // Ask unless the caller chose its project's default; never the agent's own settings.
         permissionMode: check(PermissionModeSchema, input.permissionMode ?? 'ask', 'permission mode'),
         ...(input.agentId === undefined ? {} : { agentId: check(AgentIdSchema, input.agentId, 'agent id') }),
+        ...(input.model === undefined || input.model === null ? {} : { model: check(ModelIdSchema, input.model, 'model') }),
         title: input.title ?? null,
         ...(autoTitle === null ? {} : { autoTitle }),
         adapterRefs: check(AdapterRefsSchema, input.adapterRefs ?? {}, 'adapter refs'),
@@ -547,6 +561,24 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
             cause,
             ...(reason === undefined || reason === '' ? {} : { reason }),
           },
+        });
+        return updated;
+      });
+    },
+
+    setSessionModel(id, model, cause, reason) {
+      const next = model === null ? null : check(ModelIdSchema, model, 'model');
+      check(ModelChangeCauseSchema, cause, 'model change cause');
+      return log.transaction(() => {
+        const session = requireSession(id);
+        const previous = session.model ?? null;
+        if (previous === next) return session;
+        const { model: _old, ...rest } = session;
+        const updated: Session = { ...rest, ...(next === null ? {} : { model: next }), updatedAt: now() };
+        orm.update(sessions).set({ model: next, updatedAt: updated.updatedAt }).where(eq(sessions.id, id)).run();
+        sessionEvents.appendSessionEvent(session.id, {
+          type: 'session.model_changed',
+          payload: { sessionId: session.id, model: next, previous, cause, ...(reason === undefined || reason === '' ? {} : { reason }) },
         });
         return updated;
       });

@@ -4,9 +4,9 @@
  * instance each, never copied or spread: the modules' identity checks rely on
  * it) and `closing`, read as `ctx.closing` at each use, never copied.
  */
-import type { AgentId, PermissionMode, Session, SessionId, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import type { AgentId, AgentModel, PermissionMode, Session, SessionId, Workspace, WorkspaceId } from '@ogden-agents/shared';
 import { monotonicFactory } from 'ulid';
-import { AgentError, unregisteredAgent, type AgentPort, type AgentRegistry } from '../agent-port.js';
+import { AgentError, unregisteredAgent, type AgentPort, type AgentRegistry, type AgentSessionModels } from '../agent-port.js';
 import { canonicalWorkspacePath, type Entities } from '../entities.js';
 import { NotFoundError } from '../errors.js';
 import { createDecliningPermissions, type Permissions } from '../permissions.js';
@@ -61,6 +61,12 @@ export interface ChatContext {
   readonly sessionModes: Map<SessionId, readonly PermissionMode[]>;
   /** The permission modes the agent session started last in this run offered, per agent (any chat of it): a chat whose own agent hasn't started yet. */
   readonly lastSessionModes: Map<AgentId, readonly PermissionMode[]>;
+  /** The models each session's agent session listed, and runs on, as it last said this run (story 11). */
+  readonly sessionModels: Map<SessionId, AgentSessionModels>;
+  /** The models the agent last listed: this install's record, else this run's, else its descriptor's static list (story 11). */
+  readonly agentModelList: (agentId: AgentId) => readonly AgentModel[] | undefined;
+  /** Keeps the agent's model list (this run, and the install's record). */
+  readonly rememberModels: (agentId: AgentId, models: readonly AgentModel[]) => void;
   /** How long an agent may take to take a permission mode. */
   readonly permissionModeTimeoutMs: number;
   /** Whether Developer mode is on now. */
@@ -101,6 +107,16 @@ export function createChatContext(options: ChatOptions): ChatContext {
   const switching = new Set<SessionId>();
   const sessionModes = new Map<SessionId, readonly PermissionMode[]>();
   const permissionModeTimeoutMs = options.permissionModeTimeoutMs ?? PERMISSION_MODE_TIMEOUT_MS;
+  const sessionModels = new Map<SessionId, AgentSessionModels>();
+  /** This run's lists, per agent, when no install record is kept. */
+  const runModels = new Map<AgentId, readonly AgentModel[]>();
+  const agentModelList = (agentId: AgentId): readonly AgentModel[] | undefined =>
+    options.agentModels?.lastModels(agentId) ?? runModels.get(agentId) ?? agents.describe(agentId)?.models?.list;
+  const rememberModels = (agentId: AgentId, models: readonly AgentModel[]) => {
+    if (models.length === 0) return;
+    runModels.set(agentId, models);
+    options.agentModels?.rememberModels(agentId, models);
+  };
   const developerMode = () => options.installSettings?.developerMode() === true;
   const dataHome = canonicalWorkspacePath(options.dataDir);
 
@@ -153,6 +169,9 @@ export function createChatContext(options: ChatOptions): ChatContext {
     switching,
     sessionModes,
     lastSessionModes: new Map(),
+    sessionModels,
+    agentModelList,
+    rememberModels,
     permissionModeTimeoutMs,
     developerMode,
     closing: false,

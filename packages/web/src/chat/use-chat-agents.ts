@@ -10,7 +10,8 @@ import { CHAT_AGENTS_QUERY_KEY, fetchChatAgents } from './chat-api';
  * without a reload.
  */
 export function useChatAgents() {
-  useEventInvalidation((event) => (event.type.startsWith('agent.') ? [CHAT_AGENTS_QUERY_KEY] : []));
+  // Story 11: an agent's default model, set in any tab.
+  useEventInvalidation((event) => (event.type.startsWith('agent.') || event.type === 'settings.agent_default_model_changed' ? [CHAT_AGENTS_QUERY_KEY] : []));
   return useQuery({ queryKey: CHAT_AGENTS_QUERY_KEY, queryFn: () => fetchChatAgents(), staleTime: 30_000, retry: 1 });
 }
 

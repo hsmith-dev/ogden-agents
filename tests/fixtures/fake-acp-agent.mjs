@@ -85,6 +85,21 @@
 //                  only (no `allow_once`, no `reject_once`); replies
 //                  `chose=<option id>` or `chose=cancelled` (6.4)
 //
+//   "model"        replies `model=<the model its session runs on>` (story 11)
+//   "model-switch <model id>"  switches its own model, as an agent falling
+//                  back does, reports it (`config_option_update`), and replies
+//                  `model=<model id>`
+//
+// Models (story 11): `session/new`, `session/resume` and `session/load`
+// answer `configOptions` with a `model` select (category `model`, as
+// claude-agent-acp 0.84 and Antigravity list theirs): `fake-default`,
+// `fake-large`, `fake-small` and `fake-locked`, starting on
+// FAKE_ACP_START_MODEL, else the value after a `--model` argument, else
+// `fake-default`. `session/set_config_option` switches it; `fake-locked` is
+// refused with the agent's own words (a plan without it), an unlisted value
+// as Claude Code refuses one. FAKE_ACP_NO_MODELS=1 lists no models (an agent
+// that takes its model only at start: FAKE_ACP_START_MODEL or `--model`).
+//
 // Session modes (permission modes): `session/new`, `session/resume` and
 // `session/load` answer `modes` as claude-agent-acp 0.84 does (`default`,
 // `acceptEdits`, `plan`, `auto`, `bypassPermissions`), starting in
@@ -300,6 +315,21 @@ const askRuleMatches = (rules, path) => {
     return file !== null && segments.at(-1) === file[1];
   });
 };
+/** The models it lists (story 11). */
+const MODELS = [
+  { value: 'fake-default', name: 'Fake Default', description: 'The fake agent picks this one itself' },
+  { value: 'fake-large', name: 'Fake Large' },
+  { value: 'fake-small', name: 'Fake Small' },
+  { value: 'fake-locked', name: 'Fake Locked', description: 'Not in your plan' },
+];
+const NO_MODELS = process.env.FAKE_ACP_NO_MODELS === '1';
+const argModel = process.argv.indexOf('--model') === -1 ? undefined : process.argv[process.argv.indexOf('--model') + 1];
+/** The model a session starts on: its start variable, else its `--model` argument, else its own choice. */
+const START_MODEL = process.env.FAKE_ACP_START_MODEL || argModel || (NO_MODELS ? 'none' : 'fake-default');
+/** The `configOptions` a session answer carries (none with FAKE_ACP_NO_MODELS). */
+const configOf = (session) =>
+  NO_MODELS ? [] : [{ id: 'model', name: 'Model', description: 'AI model to use', category: 'model', type: 'select', currentValue: session.model, options: MODELS }];
+
 /** The `modes` a session answer carries, for a session now in `currentModeId`. */
 const modesOf = (currentModeId) => ({ currentModeId, availableModes: AVAILABLE_MODES });
 
@@ -428,16 +458,18 @@ acp
   .onRequest('session/new', ({ params }) => {
     requireAuth();
     const sessionId = `fake-session-${nextSession++}`;
-    sessions.set(sessionId, { via: 'new', opened: params, mode: START_MODE });
-    return { sessionId, modes: modesOf(START_MODE) };
+    const session = { via: 'new', opened: params, mode: START_MODE, model: START_MODEL };
+    sessions.set(sessionId, session);
+    return { sessionId, modes: modesOf(START_MODE), configOptions: configOf(session) };
   })
   .onRequest('session/resume', ({ params }) => {
     if (RESUME !== 'resume' && RESUME !== 'both') throw acp.RequestError.methodNotFound('session/resume');
     requireAuth();
     if (REOPEN_FAIL.has('resume-auth')) throw acp.RequestError.authRequired(undefined, 'the fake agent needs a new sign-in');
     if (REOPEN_FAIL.has('resume')) throw acp.RequestError.resourceNotFound(params.sessionId);
-    sessions.set(params.sessionId, { via: 'resumed', opened: params, mode: START_MODE });
-    return { modes: modesOf(START_MODE) };
+    const session = { via: 'resumed', opened: params, mode: START_MODE, model: START_MODEL };
+    sessions.set(params.sessionId, session);
+    return { modes: modesOf(START_MODE), configOptions: configOf(session) };
   })
   .onRequest('session/load', async ({ params, client }) => {
     if (RESUME !== 'load' && RESUME !== 'both') throw acp.RequestError.methodNotFound('session/load');
@@ -445,8 +477,9 @@ acp
     // The history a load replays: the client already has it.
     await say(client, params.sessionId, 'Earlier reply.');
     if (REOPEN_FAIL.has('load')) throw acp.RequestError.resourceNotFound(params.sessionId);
-    sessions.set(params.sessionId, { via: 'loaded', opened: params, mode: START_MODE });
-    return { modes: modesOf(START_MODE) };
+    const session = { via: 'loaded', opened: params, mode: START_MODE, model: START_MODEL };
+    sessions.set(params.sessionId, session);
+    return { modes: modesOf(START_MODE), configOptions: configOf(session) };
   })
   .onRequest('session/set_mode', ({ params, client }) => {
     const session = sessions.get(params.sessionId);
@@ -464,6 +497,16 @@ acp
       }, 20);
     }
     return {};
+  })
+  .onRequest('session/set_config_option', ({ params }) => {
+    const session = sessions.get(params.sessionId);
+    if (session === undefined) throw acp.RequestError.invalidParams(undefined, `no session ${params.sessionId}`);
+    if (NO_MODELS || params.configId !== 'model') throw new Error(`Unknown config option: ${params.configId}`);
+    // As Claude Code: an unlisted value is refused; a listed one the user's plan lacks is refused in plain words.
+    if (!MODELS.some((model) => model.value === params.value)) throw new Error(`Invalid value for config option model: ${params.value}`);
+    if (params.value === 'fake-locked') throw new Error("Your plan doesn't include Fake Locked.");
+    session.model = params.value;
+    return { configOptions: configOf(session) };
   })
   .onRequest('session/prompt', async ({ params, client }) => {
     const session = sessions.get(params.sessionId);
@@ -510,6 +553,16 @@ acp
     }
     if (text === 'mode') {
       await say(client, params.sessionId, `mode=${session.mode}`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text === 'model') {
+      await say(client, params.sessionId, `model=${session.model}`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text.startsWith('model-switch ')) {
+      session.model = text.slice('model-switch '.length).trim();
+      await update(client, params.sessionId, { sessionUpdate: 'config_option_update', configOptions: configOf(session) });
+      await say(client, params.sessionId, `model=${session.model}`);
       return { stopReason: 'end_turn' };
     }
     if (text.startsWith('mode-switch ')) {

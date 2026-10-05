@@ -24,6 +24,8 @@ export interface SidebarRow {
   updatedAt: string;
   /** The product name of the agent the chat was started with (epic 6). */
   agentName: string;
+  /** The model the chat runs on, by the agent's name for it (story 11); absent: the agent's own choice. */
+  model?: string | undefined;
 }
 
 /** One workspace's group: its rows, the done ones older than a day under "Earlier", and a count per state. */
@@ -168,6 +170,8 @@ export function buildSidebar(
   now: number,
   /** A chat's agent by its product name (epic 6); default: "The agent", for a list not loaded. */
   agentName: (agentId: string | undefined) => string = () => UNKNOWN_AGENT_NAME,
+  /** A chat's model by the agent's name for it (story 11); default: its id. */
+  modelName: (agentId: string | undefined, model: string) => string = (_agentId, model) => model,
 ): SidebarModel {
   const byWorkspace = new Map<string, Session[]>();
   for (const session of sessions) {
@@ -184,7 +188,7 @@ export function buildSidebar(
     const earlier: SidebarRow[] = [];
     const counts = new Map<SessionState, number>();
     for (const session of byWorkspace.get(workspace.id) ?? []) {
-      const row: SidebarRow = { sesId: session.id, wsId: workspace.id, title: chatName(session), userTitle: session.title, state: session.state, updatedAt: session.updatedAt, agentName: agentName(session.agentId) };
+      const row: SidebarRow = { sesId: session.id, wsId: workspace.id, title: chatName(session), userTitle: session.title, state: session.state, updatedAt: session.updatedAt, agentName: agentName(session.agentId), ...(session.model === undefined ? {} : { model: modelName(session.agentId, session.model) }) };
       if (session.state === 'done' && now - time(session.updatedAt) > EARLIER_AFTER_MS) earlier.push(row);
       else rows.push(row);
       counts.set(session.state, (counts.get(session.state) ?? 0) + 1);

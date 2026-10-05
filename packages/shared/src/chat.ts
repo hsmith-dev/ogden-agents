@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { BmadPieceSet } from './bmad.js';
 import { AgentAuthMethodKind, AgentAuthState, AgentId, AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, MessageId, PermissionDecision } from './events.js';
-import { DefaultModeNotice, PermissionMode, Session, Workspace } from './entities.js';
+import { AgentModel, DefaultModeNotice, ModelId, PermissionMode, Session, Workspace } from './entities.js';
 import { PermissionRuleId, WorkspaceId } from './ids.js';
 import { AgentInstallState } from './setup.js';
 import { SessionTerminal } from './terminal.js';
@@ -37,6 +37,12 @@ export type WorkspaceResponse = z.infer<typeof WorkspaceResponse>;
 export const CreateSessionRequest = z.object({
   kind: z.literal('chat').default('chat'),
   agentId: AgentId.optional(),
+  /**
+   * The model the chat starts on (story 11; an agent handoff passes the
+   * target's): the agent's own id, or `null` for its own choice. Omitted: the
+   * project's default for the agent, else the install's, else `null`.
+   */
+  model: ModelId.nullable().optional(),
 });
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequest>;
 
@@ -88,6 +94,13 @@ export const ChatAgent = z.object({
   needsProjectTrust: z.boolean(),
   permissionModes: z.array(PermissionMode).min(1),
   unavailable: AgentUnavailable.optional(),
+  /**
+   * The models it offers (story 11), as it last listed them on this install,
+   * or as its descriptor declares them; absent until it has listed any.
+   */
+  models: z.array(AgentModel).optional(),
+  /** The model new chats with it start on, install-wide (Settings → Agents); absent: its own choice. */
+  defaultModel: ModelId.optional(),
 });
 export type ChatAgent = z.infer<typeof ChatAgent>;
 
@@ -130,6 +143,13 @@ export const SessionResponse = z.object({
   session: Session,
   terminal: SessionTerminal.optional(),
   permissionModes: z.array(SessionPermissionModeOption).optional(),
+  /**
+   * The models the chat's picker offers (story 11; `GET` only): its agent
+   * session's list when it started this run, else the agent's last list, else
+   * `null` (not known yet). `current` is the model the agent reported it runs
+   * on, when it said.
+   */
+  models: z.object({ available: z.array(AgentModel).nullable(), current: ModelId.optional() }).optional(),
 });
 export type SessionResponse = z.infer<typeof SessionResponse>;
 
@@ -237,6 +257,11 @@ export const WorkspaceSettings = z.object({
   defaultPermissionMode: PermissionMode.optional(),
   /** Why the default reads as it does, when there is something to say (see {@link DEFAULT_MODE_NOTICES}). */
   defaultPermissionModeNotice: DefaultModeNotice.optional(),
+  /**
+   * The project's own default model per agent (story 11); an agent missing
+   * from it uses the install's default. Absent: none (and from older servers).
+   */
+  defaultModels: z.record(AgentId, ModelId).optional(),
 });
 export type WorkspaceSettings = z.infer<typeof WorkspaceSettings>;
 
@@ -264,10 +289,16 @@ export const UpdateWorkspaceSettingsRequest = z
      */
     defaultPermissionMode: PermissionMode.optional(),
     confirm: z.boolean().optional(),
+    /** Per agent: its default model in this project, or `null` to use the install's (story 11). Agents left out keep theirs. */
+    defaultModels: z.record(AgentId, ModelId.nullable()).optional(),
   })
   .refine(
     (settings) =>
-      settings.cautionLevel !== undefined || settings.bmadPieces !== undefined || settings.defaultAgentId !== undefined || settings.defaultPermissionMode !== undefined,
+      settings.cautionLevel !== undefined ||
+      settings.bmadPieces !== undefined ||
+      settings.defaultAgentId !== undefined ||
+      settings.defaultPermissionMode !== undefined ||
+      settings.defaultModels !== undefined,
     'Choose a setting to change.',
   );
 export type UpdateWorkspaceSettingsRequest = z.infer<typeof UpdateWorkspaceSettingsRequest>;
@@ -311,6 +342,14 @@ export type PermissionRulesResponse = z.infer<typeof PermissionRulesResponse>;
  */
 export const SetPermissionModeRequest = z.object({ mode: PermissionMode, confirm: z.boolean().optional() });
 export type SetPermissionModeRequest = z.infer<typeof SetPermissionModeRequest>;
+
+/** `PUT /api/v1/workspaces/:wsId/sessions/:sesId/model` (story 11): the agent's own model id, or `null` for its own choice. */
+export const SetSessionModelRequest = z.object({ model: ModelId.nullable() });
+export type SetSessionModelRequest = z.infer<typeof SetSessionModelRequest>;
+
+/** `PUT /api/v1/chat-agents/:agentId/default-model` (story 11): the install-wide default, or `null` for the agent's own choice. */
+export const SetAgentDefaultModelRequest = z.object({ model: ModelId.nullable() });
+export type SetAgentDefaultModelRequest = z.infer<typeof SetAgentDefaultModelRequest>;
 
 /**
  * `GET` and `PUT /api/v1/settings/developer-mode`. `everSet` says whether

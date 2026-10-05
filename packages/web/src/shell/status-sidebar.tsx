@@ -258,6 +258,7 @@ function SessionRows({ rows, now }: { rows: readonly SidebarRow[]; now: number }
           userTitle={row.userTitle}
           updatedAt={row.updatedAt}
           agentName={row.agentName}
+          model={row.model}
           time={relativeTime(row.updatedAt, now)}
           active={params.sesId === row.sesId}
         />
@@ -275,9 +276,10 @@ const SessionRow = memo(function SessionRow({
   userTitle,
   updatedAt,
   agentName,
+  model,
   time,
   active,
-}: Pick<SidebarRow, 'wsId' | 'sesId' | 'state' | 'title' | 'userTitle' | 'updatedAt' | 'agentName'> & { time: string; active: boolean }) {
+}: Pick<SidebarRow, 'wsId' | 'sesId' | 'state' | 'title' | 'userTitle' | 'updatedAt' | 'agentName' | 'model'> & { time: string; active: boolean }) {
   // Rename in place (backlog story 12): double click the row or press F2 on it.
   const rename = useChatRename({ wsId, sesId, name: title, title: userTitle });
   const item = useRef<HTMLLIElement>(null);
@@ -299,6 +301,7 @@ const SessionRow = memo(function SessionRow({
           state={state}
           title={title}
           caption={`${agentName}, ${STATE_WORDS[state].toLowerCase()}`}
+          detail={model === undefined ? undefined : `${agentName} on ${model}`}
           time={{ label: time, dateTime: updatedAt }}
           isActive={active}
           aria-keyshortcuts="F2"

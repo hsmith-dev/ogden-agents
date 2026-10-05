@@ -213,6 +213,8 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     let command: Awaited<ReturnType<AgentTerminalResume['command']>>;
     // The CLI starts in the chat's permission mode (permission modes): asking, auto, or skipping its checks.
     const permissionMode = entities.getSession(session.id)?.permissionMode ?? 'ask';
+    // The CLI starts on the chat's model (story 11).
+    const model = entities.getSession(session.id)?.model ?? null;
     try {
       const sessionId = storedAgentSessionId(session.id);
       const unavailable = await checkTerminalReady({ agent, support, agentSessionId: sessionId, env: () => env, step });
@@ -220,7 +222,11 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
       agentSessionId = sessionId!;
       let built: typeof command | typeof TIMED_OUT;
       try {
-        built = await deadline.step(resume.command(agentSessionId, env, { permissionMode, ...(permissionMode === 'auto' ? { protectedPaths: PROTECTED_PATHS } : {}) }));
+        built = await deadline.step(resume.command(agentSessionId, env, {
+            permissionMode,
+            ...(permissionMode === 'auto' ? { protectedPaths: PROTECTED_PATHS } : {}),
+            ...(model === null ? {} : { model }),
+          }));
       } catch (error) {
         throw new TerminalUnavailableError('cli_not_found', terminalUnavailableReason.cliNotFound(agent.displayName, error instanceof AgentError ? error.message : ''));
       }

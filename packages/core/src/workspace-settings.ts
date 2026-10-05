@@ -13,6 +13,7 @@ import {
   DEFAULT_CAUTION_LEVEL,
   DefaultModeNotice as DefaultModeNoticeSchema,
   PermissionMode as PermissionModeSchema,
+  ModelId as ModelIdSchema,
   type AgentId,
   type BmadPiece,
   type CautionLevel,
@@ -22,6 +23,7 @@ import {
   type WorkspaceSettings,
 } from '@ogden-agents/shared';
 import { eq } from 'drizzle-orm';
+import { z } from 'zod';
 import { readBmadPieces } from './bmad-pieces.js';
 import { readScriptsTrusted } from './bmad-script-trust.js';
 import type { Database, Orm } from './db/database.js';
@@ -52,7 +54,7 @@ export interface WorkspaceSettingsAccess {
    */
   updateSettings(
     workspaceId: WorkspaceId,
-    input: { cautionLevel?: unknown; bmadPieces?: unknown; defaultAgentId?: unknown; defaultPermissionMode?: unknown; confirm?: unknown },
+    input: { cautionLevel?: unknown; bmadPieces?: unknown; defaultAgentId?: unknown; defaultPermissionMode?: unknown; confirm?: unknown; defaultModels?: unknown },
   ): WorkspaceSettings;
 }
 
@@ -139,6 +141,36 @@ export function readDefaultAgent(orm: Orm, workspaceId: string, isAgentRegistere
   return parsed.success && isAgentRegistered(parsed.data) ? parsed.data : undefined;
 }
 
+/**
+ * The workspace's own default model per agent (story 11), as stored: entries
+ * that aren't an agent id and a model id are left out (a damaged value reads
+ * as none); `null` for an unknown workspace. Agents no longer registered keep
+ * their entry (it applies again if the agent comes back).
+ */
+export function readDefaultModels(orm: Orm, workspaceId: string): Record<AgentId, string> | null {
+  const row = orm.select({ defaultModels: workspaces.defaultModels }).from(workspaces).where(eq(workspaces.id, workspaceId)).get();
+  if (row === undefined) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(row.defaultModels);
+  } catch {
+    return {};
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+  const models: Record<AgentId, string> = {};
+  for (const [agentId, model] of Object.entries(parsed)) {
+    if (AgentIdSchema.safeParse(agentId).success && ModelIdSchema.safeParse(model).success) models[agentId] = model as string;
+  }
+  return models;
+}
+
+/** The settings' `defaultModels`, present only when the project has one. */
+const modelsField = (models: Record<AgentId, string>) => (Object.keys(models).length === 0 ? {} : { defaultModels: models });
+
+/** Whether two default-model maps say the same. */
+const sameModels = (a: Readonly<Record<string, string>>, b: Readonly<Record<string, string>>) =>
+  Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([agentId, model]) => b[agentId] === model);
+
 /** The workspace's stored level; the strictest one when it can't be read; `undefined` for an unknown workspace. */
 export function readCautionLevel(orm: Orm, workspaceId: string): CautionLevel | undefined {
   const row = orm.select({ cautionLevel: workspaces.cautionLevel }).from(workspaces).where(eq(workspaces.id, workspaceId)).get();
@@ -180,10 +212,11 @@ export function createWorkspaceSettings({
       const bmadScriptsTrusted = readScriptsTrusted(orm, workspaceId);
       const defaultAgentId = readDefaultAgent(orm, workspaceId, isAgentRegistered);
       const mode = readDefaultPermissionMode(orm, workspaceId);
-      if (cautionLevel === undefined || bmadPieces === undefined || bmadScriptsTrusted === undefined || defaultAgentId === null || mode === undefined) {
+      const defaultModels = readDefaultModels(orm, workspaceId);
+      if (cautionLevel === undefined || bmadPieces === undefined || bmadScriptsTrusted === undefined || defaultAgentId === null || mode === undefined || defaultModels === null) {
         throw new NotFoundError('workspace', workspaceId);
       }
-      return { cautionLevel, bmadPieces, bmadScriptsTrusted, ...(defaultAgentId === undefined ? {} : { defaultAgentId }), ...modeFields(mode) };
+      return { cautionLevel, bmadPieces, bmadScriptsTrusted, ...(defaultAgentId === undefined ? {} : { defaultAgentId }), ...modeFields(mode), ...modelsField(defaultModels) };
     },
 
     updateSettings(workspaceId, input) {
@@ -220,7 +253,15 @@ export function createWorkspaceSettings({
         if (!parsed.success) throw new ValidationError('Choose Ask, Auto or Skip all.', [{ path: ['defaultPermissionMode'], message: 'unknown mode' }]);
         permissionMode = parsed.data;
       }
-      if (cautionLevel === undefined && bmadPieces === undefined && agent === undefined && permissionMode === undefined) {
+      // Per agent (story 11): its default model in this project, or null to use the install's. Agents left out keep theirs.
+      let modelChanges: Record<AgentId, string | null> | undefined;
+      if (input.defaultModels !== undefined) {
+        const parsed = z.record(AgentIdSchema, ModelIdSchema.nullable()).safeParse(input.defaultModels);
+        if (!parsed.success) throw new ValidationError("Choose a model the agent offers, or the agent's default.", [{ path: ['defaultModels'], message: 'not a model per agent' }]);
+        for (const agentId of Object.keys(parsed.data)) if (!isAgentRegistered(agentId)) throw new UnknownAgentError();
+        modelChanges = parsed.data;
+      }
+      if (cautionLevel === undefined && bmadPieces === undefined && agent === undefined && permissionMode === undefined && modelChanges === undefined) {
         throw new ValidationError('Choose a setting to change.', [{ path: [], message: 'nothing to change' }]);
       }
       return events.transaction(() => {
@@ -251,8 +292,15 @@ export function createWorkspaceSettings({
         // The user's choice always clears a notice, even when the mode is the same.
         const modeChanged = permissionMode !== undefined && (permissionMode !== previousMode.mode || previousMode.notice !== undefined);
         const mode: DefaultModeSetting = modeChanged ? { mode: permissionMode! } : previousMode;
-        const settings = { cautionLevel: level, bmadPieces: pieces, bmadScriptsTrusted, ...(defaultAgentId === undefined ? {} : { defaultAgentId }), ...modeFields(mode) };
-        if (level === previous && !piecesChanged && !agentChanged && !modeChanged) return settings;
+        const previousModels = readDefaultModels(orm, workspaceId) ?? {};
+        const defaultModels: Record<AgentId, string> = { ...previousModels };
+        for (const [agentId, model] of Object.entries(modelChanges ?? {})) {
+          if (model === null) delete defaultModels[agentId];
+          else defaultModels[agentId] = model;
+        }
+        const modelsChanged = !sameModels(defaultModels, previousModels);
+        const settings = { cautionLevel: level, bmadPieces: pieces, bmadScriptsTrusted, ...(defaultAgentId === undefined ? {} : { defaultAgentId }), ...modeFields(mode), ...modelsField(defaultModels) };
+        if (level === previous && !piecesChanged && !agentChanged && !modeChanged && !modelsChanged) return settings;
         orm
           .update(workspaces)
           .set({
@@ -260,6 +308,7 @@ export function createWorkspaceSettings({
             bmadPieces: JSON.stringify(pieces),
             ...(agentChanged ? { defaultAgentId: agent ?? null } : {}),
             ...(modeChanged ? { defaultPermissionMode: mode.mode, defaultPermissionModeNotice: null } : {}),
+            ...(modelsChanged ? { defaultModels: JSON.stringify(defaultModels) } : {}),
           })
           .where(eq(workspaces.id, workspaceId))
           .run();
@@ -281,6 +330,7 @@ export function createWorkspaceSettings({
                   ...(mode.mode === 'skip_all' ? { skipAllConfirmed: true as const } : {}),
                 }
               : {}),
+            ...(modelsChanged ? { defaultModels, previousDefaultModels: previousModels } : {}),
           },
         });
         return settings;

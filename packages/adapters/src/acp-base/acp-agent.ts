@@ -26,6 +26,12 @@
  * `allow_always` or session-wide one (agent-matrix "Permission cards"); a
  * request that offers neither is cancelled and logged without asking (6.4).
  *
+ * Models (story 11): an agent that lists its models as a session config
+ * option (category `model`) is switched live with `session/set_config_option`;
+ * one whose descriptor declares a static list gets the chat's model in its
+ * process (a variable or a flag) at spawn. A model change the agent reports
+ * by itself (`config_option_update`) is a `model` event.
+ *
  * Permission modes: the descriptor names the agent's own session mode for
  * each Ogden mode it declares. Core sets the chat's mode with
  * `session/set_mode` on every start and reopen, and each
@@ -57,6 +63,7 @@ import type { PermissionMode } from '@ogden-agents/shared';
 import { killProcessTree } from '../process-tree.js';
 import { withTimeout } from '../with-timeout.js';
 import { createStreamMasker, maskSecrets, secretValues } from './mask.js';
+import { agentWords, modelOptionOf, modelsOf } from './models.js';
 import { answerPermissionRequest, type Diagnostic, type PermissionCallback } from './permission-request.js';
 import { acpAsksLessThanAsk, acpModeOf, acpReasons, type AcpAgentOptions, type AcpAgentQuirks, type AcpLaunch } from './quirks.js';
 
@@ -87,7 +94,7 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
   const reasons = acpReasons(descriptor.displayName);
 
   /** Spawns the agent in `cwd` with core's environment (AD-16), in its own process group. */
-  const spawnAgent = (cwd: string, env: Readonly<Record<string, string>>) => {
+  const spawnAgent = (cwd: string, env: Readonly<Record<string, string>>, model: string | undefined) => {
     let launch: AcpLaunch;
     try {
       launch = quirks.launch({ cwd, env });
@@ -97,11 +104,18 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
     }
     // Exactly core's environment, plus what the launch adds (AD-16).
     const childEnv: Record<string, string> = { ...launch.addEnv, ...env };
+    // A static-list agent takes the chat's model at start (story 11): only a model it lists.
+    const staticModels = descriptor.models;
+    const args = [...launch.args];
+    if (staticModels !== undefined && model !== undefined && staticModels.list.some((each) => each.id === model)) {
+      if (staticModels.apply.kind === 'env') childEnv[staticModels.apply.name] = model;
+      else args.push(staticModels.apply.flag, model);
+    }
     diagnostic(`starting the ${descriptor.displayName} adapter`, launch.logFields);
 
     let child: ChildProcessWithoutNullStreams;
     try {
-      child = spawn(launch.command, [...launch.args], {
+      child = spawn(launch.command, args, {
         cwd,
         env: childEnv,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -116,10 +130,17 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
   };
 
   const open = async (
-    input: { cwd: string; env: Readonly<Record<string, string>>; onPermissionRequest?: PermissionCallback | undefined; protectedPaths?: ProtectedPaths | undefined },
+    input: {
+      cwd: string;
+      env: Readonly<Record<string, string>>;
+      onPermissionRequest?: PermissionCallback | undefined;
+      protectedPaths?: ProtectedPaths | undefined;
+      model?: string | undefined;
+    },
     opening: Opening,
   ) => {
-    const { child, secrets } = spawnAgent(input.cwd, input.env);
+    const startModel = descriptor.models?.list.some((each) => each.id === input.model) === true ? input.model : undefined;
+    const { child, secrets } = spawnAgent(input.cwd, input.env, startModel);
     return startOnChild(
       child,
       {
@@ -133,6 +154,7 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
         startTimeoutMs,
         onPermissionRequest: input.onPermissionRequest,
         protectedPaths: input.protectedPaths,
+        startModel,
       },
       opening,
     );
@@ -186,6 +208,8 @@ interface StartContext {
   onPermissionRequest: PermissionCallback | undefined;
   /** Kept guarded for the session's life, through the agent's `sessionMeta` quirk (Auto only). */
   protectedPaths: ProtectedPaths | undefined;
+  /** The static-list model the process was started on (story 11), if any. */
+  startModel: string | undefined;
 }
 
 /** Stops `child` and everything it started: its process group on POSIX, its tree on Windows. */
@@ -195,7 +219,7 @@ function killTree(child: ChildProcessWithoutNullStreams): void {
 
 async function startOnChild(
   child: ChildProcessWithoutNullStreams,
-  { descriptor, quirks, reasons, cwd, env, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths }: StartContext,
+  { descriptor, quirks, reasons, cwd, env, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths, startModel }: StartContext,
   opening: Opening,
 ): Promise<{ init: acp.InitializeResponse; session: AgentSession | undefined; restored: AgentRestored }> {
   const { couldNotStart: COULD_NOT_START, stopped: STOPPED, failed: FAILED } = reasons;
@@ -221,6 +245,23 @@ async function startOnChild(
   let modeSetsInFlight = 0;
   /** A `session/set_mode` failed (or is still unanswered): the current mode is not known until one succeeds or the agent reports it. */
   let modeUnknown = false;
+  /** The session's config options as the agent last said (story 11: its model option); `undefined` when it lists none. */
+  let config: acp.SessionConfigOption[] | undefined;
+  /** The model the session started on, as the agent chose it: what `setModel(null)` goes back to. */
+  let initialModel: string | undefined;
+  /** `session/set_config_option` requests for the model not answered yet: a model update meanwhile is their echo, not the agent's own. */
+  let modelSetsInFlight = 0;
+  /** The model value the agent last reported, to tell a change from a repeat. */
+  let reportedModel: string | undefined;
+  const noteConfig = (options: acp.SessionConfigOption[] | null | undefined) => {
+    if (options == null) return;
+    config = options;
+    const current = modelOptionOf(config)?.currentValue;
+    if (typeof current === 'string') {
+      initialModel ??= current;
+      reportedModel = current;
+    }
+  };
   const mask = (text: string) => maskSecrets(text, secrets);
   let reply = createStreamMasker(secrets);
   /** A tool call's file changes, secrets masked; `undefined` when it reports none. */
@@ -324,6 +365,19 @@ async function startOnChild(
             diffs: diffsOf(update.content),
           });
           break;
+        case 'config_option_update': {
+          const before = reportedModel;
+          // An update without the model option keeps the one the agent last listed.
+          const kept = modelOptionOf(config);
+          config = modelOptionOf(update.configOptions) === undefined && kept !== undefined ? [...update.configOptions, kept] : update.configOptions;
+          const current = modelOptionOf(config)?.currentValue;
+          if (typeof current === 'string') {
+            reportedModel = current;
+            // Its own switch (a fallback), not the echo of one Ogden asked for.
+            if (modelSetsInFlight === 0 && before !== undefined && current !== before) emit({ type: 'model', model: current });
+          }
+          break;
+        }
         case 'current_mode_update': {
           modeUpdates++;
           if (modes !== undefined) modes = { ...modes, currentModeId: update.currentModeId };
@@ -391,9 +445,14 @@ async function startOnChild(
      */
     const reopen = async (initialized: acp.InitializeResponse, sessionId: string): Promise<AgentRestored | undefined> => {
       const capabilities = initialized.agentCapabilities;
-      const attempt = async (method: 'session/resume' | 'session/load', request: () => Promise<{ modes?: acp.SessionModeState | null }>): Promise<boolean> => {
+      const attempt = async (
+        method: 'session/resume' | 'session/load',
+        request: () => Promise<{ modes?: acp.SessionModeState | null; configOptions?: acp.SessionConfigOption[] | null }>,
+      ): Promise<boolean> => {
         try {
-          modes = (await request()).modes ?? undefined;
+          const answered = await request();
+          modes = answered.modes ?? undefined;
+          noteConfig(answered.configOptions);
           return true;
         } catch (error) {
           if (!(error instanceof acp.RequestError) || error.code === -32000) throw error;
@@ -438,6 +497,7 @@ async function startOnChild(
       }
       const created = await connection.agent.request('session/new', { cwd, mcpServers: [], ...sessionMeta });
       modes = created.modes ?? undefined;
+      noteConfig(created.configOptions);
       return { initialized, sessionId: created.sessionId, restored: 'new' as const };
     })();
     const result = await withTimeout(
@@ -470,9 +530,50 @@ async function startOnChild(
   diagnostic('agent session started', { protocolVersion: init.protocolVersion, restored });
 
   let closed: Promise<void> | undefined;
+  /** Puts the running session on `model`, or back on the one it started on (`null`), through its model config option. */
+  const setModel = async (model: string | null): Promise<void> => {
+    if (exited || closing) throw new AgentError('agent_failed', STOPPED);
+    const option = modelOptionOf(config);
+    if (option === undefined) throw new AgentError('agent_failed', reasons.noSuchModel);
+    const target = model ?? initialModel;
+    if (target === undefined || option.currentValue === target) return;
+    const offered = modelsOf(option, mask).some((each) => each.id === target) || target === initialModel;
+    if (!offered) throw new AgentError('agent_failed', reasons.noSuchModel);
+    modelSetsInFlight++;
+    try {
+      const answered = await Promise.race([connection.agent.request('session/set_config_option', { sessionId, configId: option.id, value: target }), gone]);
+      // An answer without the options leaves what the agent last said, now on the model asked for.
+      if (modelOptionOf(answered.configOptions) !== undefined) config = answered.configOptions;
+      else config = (config ?? []).map((each) => (each.id === option.id && each.type === 'select' ? { ...each, currentValue: target } : each));
+      const current = modelOptionOf(config)?.currentValue;
+      reportedModel = typeof current === 'string' ? current : target;
+    } catch (error) {
+      diagnostic('session/set_config_option failed', { code: error instanceof acp.RequestError ? error.code : null });
+      if (error instanceof AgentError) throw error;
+      const words = agentWords(error);
+      throw new AgentError('agent_failed', words === undefined ? reasons.couldNotSwitchModel : mask(words), { cause: error });
+    } finally {
+      modelSetsInFlight--;
+    }
+  };
+  const listsModels = modelOptionOf(config) !== undefined;
   const session: AgentSession = {
     agentSessionId: sessionId,
     protectsPaths: guards !== undefined,
+
+    get models() {
+      const option = modelOptionOf(config);
+      if (option !== undefined) {
+        const current = option.currentValue;
+        return { available: modelsOf(option, mask), ...(typeof current === 'string' ? { current } : {}) };
+      }
+      // A static-list agent (story 11): its descriptor's list, on the model it started with.
+      if (descriptor.models !== undefined) return { available: [...descriptor.models.list], ...(startModel === undefined ? {} : { current: startModel }) };
+      return undefined;
+    },
+
+    // Only a session that lists its models switches live; a static-list one is restarted by core.
+    ...(listsModels ? { setModel } : {}),
 
     get permissionModes(): PermissionMode[] {
       // A session that lists no modes runs as it is: Ask only.

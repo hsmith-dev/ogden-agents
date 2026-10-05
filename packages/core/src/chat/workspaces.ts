@@ -3,10 +3,12 @@ import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
 import {
   DEFAULT_MODE_NOTICE_TEXT,
+  ModelId as ModelIdSchema,
   PERMISSION_MODE_LABELS,
   PERMISSION_MODES,
   projectNotTrustedReason,
   type AgentId,
+  type AgentModel,
   type ChatAgent,
   type PermissionMode,
   type SessionId,
@@ -16,8 +18,9 @@ import { apiKeyMethod, type AgentDescriptor } from '../agent-descriptor.js';
 import { effectiveDefaultAgent, type AgentPort } from '../agent-port.js';
 import type { AgentReadiness } from '../agent-setup-types.js';
 import { canonicalWorkspacePath } from '../entities.js';
-import { AgentNotReadyError, CoreError, InvalidOperationError, UnknownAgentError, WorkspaceBusyError } from '../errors.js';
+import { AgentNotReadyError, CoreError, InvalidOperationError, UnknownAgentError, ValidationError, WorkspaceBusyError } from '../errors.js';
 import type { Agents } from './agents.js';
+import type { Models } from './model.js';
 import type { ChatContext } from './context.js';
 import type { Chat } from './types.js';
 
@@ -40,7 +43,12 @@ export function unavailableReason(descriptor: AgentDescriptor, readiness: AgentR
 }
 
 /** One agent as the agent list shows it (6.3): agent-neutral data from its descriptor, its port and its readiness. */
-export function chatAgentOf(descriptor: AgentDescriptor, agent: AgentPort, readiness: AgentReadiness): ChatAgent {
+export function chatAgentOf(
+  descriptor: AgentDescriptor,
+  agent: AgentPort,
+  readiness: AgentReadiness,
+  models: { list?: readonly AgentModel[] | undefined; defaultModel?: string | undefined } = {},
+): ChatAgent {
   const declared = agent.permissionModes ?? [];
   const key = apiKeyMethod(descriptor)?.apiKey;
   const unavailable = unavailableReason(descriptor, readiness);
@@ -57,6 +65,9 @@ export function chatAgentOf(descriptor: AgentDescriptor, agent: AgentPort, readi
     // Ask is every agent's (where every chat starts); the rest only as it declares them.
     permissionModes: PERMISSION_MODES.filter((mode) => mode === 'ask' || declared.includes(mode)),
     ...(unavailable === undefined ? {} : { unavailable }),
+    // Story 11: what it last listed (or its static list), and the install's default for its new chats.
+    ...(models.list === undefined || models.list.length === 0 ? {} : { models: [...models.list] }),
+    ...(models.defaultModel === undefined ? {} : { defaultModel: models.defaultModel }),
   };
 }
 
@@ -95,9 +106,9 @@ export function startingMode(input: {
   return { mode, note: `This chat started in ${label}, this project's default.` };
 }
 
-export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & { stopTerminal: (sessionId: SessionId) => Promise<void> }) {
+export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & Pick<Models, 'initialModel'> & { stopTerminal: (sessionId: SessionId) => Promise<void> }) {
   const { entities, agents, live, busy, dataHome, getWorkspace, getSession } = ctx;
-  const { drop, stopTerminal } = deps;
+  const { drop, stopTerminal, initialModel } = deps;
 
   /** The agent's readiness, or {@link READY} without a port or when it fails. */
   const readiness = async (agentId: AgentId): Promise<AgentReadiness> => {
@@ -161,6 +172,10 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
 
     async createChatSession(workspaceId, options = {}) {
       getWorkspace(workspaceId);
+      // A model given (an agent handoff's target, story 11) must be a model id; whether the agent offers it is the agent's to say.
+      if (options.model !== undefined && options.model !== null && !ModelIdSchema.safeParse(options.model).success) {
+        throw new ValidationError("Choose a model the agent offers, or the agent's default.", [{ path: ['model'], message: 'not a model id' }]);
+      }
       // Picked by data, never by a branch on an id (E6-R2); fixed for the session's life (E6-R1).
       // None picked: the project's default (entry 6), when it is still registered, else the install's.
       const projectDefault = options.agentId === undefined ? ctx.permissions.getSettings(workspaceId).defaultAgentId : undefined;
@@ -175,6 +190,8 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
       if (unavailable !== undefined) throw new AgentNotReadyError(unavailable.code, unavailable.reason, agentId, unavailable.action);
       // The workspace may have been removed while the readiness was read.
       getWorkspace(workspaceId);
+      // Its model (story 11): the one given, else the project's default for the agent, else the install's, else its own choice.
+      const model = options.model !== undefined ? options.model : initialModel(workspaceId, agentId);
       // From here to the insert nothing awaits: the default, Developer mode and the agent's modes are read
       // in the same step that creates the session (default permission mode).
       const settings = ctx.permissions.getSettings(workspaceId);
@@ -190,6 +207,7 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
         workspaceId,
         kind: options.kind ?? 'chat',
         agentId,
+        model,
         permissionMode: start.mode,
         ...(start.note === undefined ? {} : { permissionModeNote: start.note }),
         ...(options.autoTitle === undefined ? {} : { autoTitle: options.autoTitle }),
@@ -201,7 +219,14 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
         agents.agentIds.map(async (agentId) => {
           const agent = agents.get(agentId);
           const descriptor = agents.describe(agentId);
-          return agent === undefined || descriptor === undefined ? [] : [chatAgentOf(descriptor, agent, await readiness(agentId))];
+          if (agent === undefined || descriptor === undefined) return [];
+          let defaultModel: string | undefined;
+          try {
+            defaultModel = ctx.options.agentModels?.defaultModel(agentId);
+          } catch {
+            defaultModel = undefined;
+          }
+          return [chatAgentOf(descriptor, agent, await readiness(agentId), { list: ctx.agentModelList(agentId), defaultModel })];
         }),
       );
       return { agents: listed.flat(), defaultAgentId: agents.defaultAgentId };

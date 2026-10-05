@@ -8,7 +8,7 @@
  * through {@link AgentSession.onEvent}, and core turns that into session
  * events and the session's normalized state (AD-4).
  */
-import { AgentId as AgentIdSchema, type AgentId, type PermissionMode } from '@ogden-agents/shared';
+import { AgentId as AgentIdSchema, type AgentId, type AgentModel, type PermissionMode } from '@ogden-agents/shared';
 import { agentDescriptorProblems, declaredModes, type AgentDescriptor } from './agent-descriptor.js';
 import { CoreError } from './errors.js';
 
@@ -51,6 +51,12 @@ export type AgentEvent =
    * only when the agent reports it too (core ignores that echo).
    */
   | { type: 'permission_mode'; mode: PermissionMode | 'other'; asksLess: boolean; label?: string | undefined }
+  /**
+   * The agent says it now runs on another model (story 11), by its own id,
+   * when it changed by itself (a fallback): never the echo of a model it was
+   * told to take. Core moves a chat that chose a model to the reported one.
+   */
+  | { type: 'model'; model: string }
   /**
    * The adapter's view of the session (AD-4): `working` while a prompt runs,
    * `idle` once it has ended, `error` when the agent failed or went away.
@@ -129,6 +135,14 @@ export interface StartAgentSession {
    * out of Auto gets a new agent session (resumed) at its next idle point.
    */
   protectedPaths?: ProtectedPaths | undefined;
+  /**
+   * The model to start on (story 11), for an agent that takes it only at
+   * start (its descriptor's static `models`): the adapter applies it to the
+   * process (a variable or an argument). Ignored by an agent whose session
+   * lists its models (core tells it with {@link AgentSession.setModel}).
+   * Absent: the agent's own choice.
+   */
+  model?: string | undefined;
 }
 
 /** How a reopened session got its context back: the agent resumed it, loaded it, or had to start a new one. */
@@ -182,6 +196,27 @@ export interface AgentSession {
    * only ever runs in Ask, and core never asks it for another mode.
    */
   setPermissionMode?(mode: PermissionMode): Promise<void>;
+  /**
+   * The models this session offers and the one it runs on now, as the agent
+   * last said (story 11); absent when it lists none.
+   */
+  readonly models?: AgentSessionModels | undefined;
+  /**
+   * Puts the running session on `model` (the agent's own id), or back on the
+   * model it chose itself when it started (`null`), for its next prompt.
+   * Resolves once the agent has taken it (at once when it runs on it);
+   * rejects with an {@link AgentError} whose message is the agent's own plain
+   * reason (masked) when it refuses. Absent: the agent takes a model only at
+   * start ({@link StartAgentSession.model}), so core restarts it to switch.
+   */
+  setModel?(model: string | null): Promise<void>;
+}
+
+/** The models an agent session offers (story 11). */
+export interface AgentSessionModels {
+  available: readonly AgentModel[];
+  /** The model it runs on now, when it said. */
+  current?: string | undefined;
 }
 
 /** One agent (Claude Code, Codex, …) behind the port. */
@@ -255,6 +290,8 @@ export interface AgentTerminalResume {
 /** How the agent's CLI is to start (permission modes). */
 export interface AgentTerminalOptions {
   permissionMode: PermissionMode;
+  /** The chat's model (story 11), the agent's own id; absent: the CLI's own choice. */
+  model?: string | undefined;
   /** Paths the CLI must still ask before writing (given in Auto only). */
   protectedPaths?: ProtectedPaths | undefined;
 }

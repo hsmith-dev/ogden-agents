@@ -114,6 +114,15 @@ export const API_ROUTES = {
    */
   sessionTitle: `${API_BASE}/workspaces/:wsId/sessions/:sesId/title`,
   /**
+   * `PUT SetSessionModelRequest` → `SessionResponse` (story 11): the chat's
+   * model (`null`: the agent's own choice); a change appends
+   * `session.model_changed` (the same model again: 200, nothing appended)
+   * and applies to the next message. Refused, appending nothing: a model the
+   * chat's agent session (or the agent's last list) doesn't list 409
+   * `model_unavailable`; while the terminal drives 409 `driver_is_terminal`.
+   */
+  sessionModel: `${API_BASE}/workspaces/:wsId/sessions/:sesId/model`,
+  /**
    * `POST PermissionDecisionRequest` → 204 (2.6): the user's answer on a
    * permission card. 409 `permission_not_pending` when it is no longer waiting.
    */
@@ -132,6 +141,13 @@ export const API_ROUTES = {
   appShortcutOffer: `${API_BASE}/app-shortcut/offer`,
   /** `GET` → `ChatAgentsResponse` (epic 6): the agents a chat can be started with, and the default one. */
   chatAgents: `${API_BASE}/chat-agents`,
+  /**
+   * `PUT SetAgentDefaultModelRequest` → `ChatAgentsResponse` (story 11): the
+   * model new chats with the agent start on, install-wide (`null`: the
+   * agent's own choice); a change appends `settings.agent_default_model_changed`.
+   * 404 `agent_unknown` for an agent this install doesn't have.
+   */
+  chatAgentDefaultModel: `${API_BASE}/chat-agents/:agentId/default-model`,
   /** `GET` → `AgentsResponse` (9.1): every supported agent's install and sign-in state. */
   agents: `${API_BASE}/agents`,
   /**

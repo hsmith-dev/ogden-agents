@@ -63,6 +63,20 @@ export async function updateDefaultPermissionMode(wsId: string, defaultPermissio
   return WorkspaceSettingsResponse.parse(json).settings;
 }
 
+/**
+ * `PATCH /api/v1/workspaces/:wsId/settings` (story 11): an agent's default
+ * model in this project, or `null` to use the app's default for the agent.
+ */
+export async function updateProjectDefaultModel(wsId: string, agentId: string, model: string | null, auth: Auth = tabAuth): Promise<WorkspaceSettings> {
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.workspaceSettings, { wsId }),
+    { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ defaultModels: { [agentId]: model } }) },
+    "The default model couldn't be saved",
+  );
+  return WorkspaceSettingsResponse.parse(json).settings;
+}
+
 /** `PATCH /api/v1/workspaces/:wsId/settings`: the new caution level, for requests not yet shown. */
 export async function updateCautionLevel(wsId: string, cautionLevel: CautionLevel, auth: Auth = tabAuth): Promise<WorkspaceSettings> {
   const json = await call(

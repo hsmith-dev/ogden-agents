@@ -133,7 +133,7 @@ export function createClaudeCodeAgent(options: ClaudeCodeAgentOptions = {}): Age
     terminalResume: {
       transcript: readClaudeTranscript,
       command: async (agentSessionId, env, terminal) =>
-        claudeTerminalCommand(agentSessionId, env, { ...options, adapterPath: currentAdapterPath(), permissionMode: terminal?.permissionMode ?? 'ask', protectedPaths: terminal?.protectedPaths }),
+        claudeTerminalCommand(agentSessionId, env, { ...options, adapterPath: currentAdapterPath(), permissionMode: terminal?.permissionMode ?? 'ask', protectedPaths: terminal?.protectedPaths, model: terminal?.model }),
       locate: async (env) => locateClaudeTerminal(env, { ...options, adapterPath: currentAdapterPath() }),
     },
     // Claude Code's ACP adapter hands the text to the SDK, which runs `/name` as the installed skill; it loads the

@@ -7,6 +7,7 @@ import { useAppearance } from '@/appearance/appearance-provider';
 import { keepSaved } from '@/api/keep-saved';
 import { ChatApiError, removePermissionRule } from '@/chat/chat-api';
 import { DefaultAgentView, type DefaultAgentViewProps } from '@/chat/default-agent-view';
+import { appDefaultWords, DefaultModelsSection } from '@/chat/default-models';
 import { projectDefaultAgent, useChatAgents } from '@/chat/use-chat-agents';
 import { DefaultPermissionModeView, type DefaultPermissionModeViewProps } from '@/permissions/default-permission-mode';
 import { WorkspaceHeader } from '@/shell/workspace-header';
@@ -19,7 +20,7 @@ import { Text } from '@/ui/typography';
 import { deleteHistory, fetchWorkspace, workspaceName } from '@/workspaces/workspace-api';
 import { BmadMethodSection } from '@/workspaces/bmad-method-section';
 import { useBmadRepoNoteSlot, useNewProjectsDefaultSlot } from '@/workspaces/bmad-settings-slots';
-import { createLatestGate, updateCautionLevel, updateDefaultAgent, updateDefaultPermissionMode, usePermissionRules, useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
+import { createLatestGate, updateCautionLevel, updateDefaultAgent, updateDefaultPermissionMode, updateProjectDefaultModel, usePermissionRules, useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
 
 /**
  * `/w/:wsId/settings`: the workspace's settings (story 2.5, then the
@@ -57,6 +58,7 @@ export function WorkspaceSettingsPage() {
             <CautionLevelSection wsId={wsId} />
             <DefaultPermissionModeSection wsId={wsId} />
             <DefaultAgentSection wsId={wsId} />
+            <ProjectModelsSection wsId={wsId} />
             <BmadSection wsId={wsId} />
             <AlwaysAllowRulesSection wsId={wsId} name={workspaceName(workspace.data)} />
             <DeleteHistorySection wsId={wsId} name={workspaceName(workspace.data)} />
@@ -261,6 +263,32 @@ export function DefaultAgentSection({ wsId }: { wsId: string }) {
       status={status ?? (settings.error instanceof Error ? { kind: 'error', text: settings.error.message } : undefined)}
       testId="default-agent"
       description="The agent new chats in this project start with. You can still pick another for each new chat."
+    />
+  );
+}
+
+/**
+ * The project's own default model per agent (story 11): it wins over the
+ * app's (Settings → Agents) for new chats in this project.
+ */
+export function ProjectModelsSection({ wsId }: { wsId: string }) {
+  const chatAgents = useChatAgents();
+  const settings = useWorkspaceSettings(wsId);
+  const queryClient = useQueryClient();
+  const list = chatAgents.data;
+  if (list === undefined || settings.data === undefined) return null;
+  const saved = settings.data.defaultModels ?? {};
+  return (
+    <DefaultModelsSection
+      agents={list.agents}
+      testId="project-models"
+      description="The model new chats in this project start on, per agent. You can still switch each chat's model."
+      valueOf={(agent) => saved[agent.agentId] ?? null}
+      noneOf={(agent) => ({ label: `App default (${appDefaultWords(agent)})`, description: 'As set in Settings → Agents.' })}
+      onChoose={async (agent, model) => {
+        const next = await updateProjectDefaultModel(wsId, agent.agentId, model);
+        await keepSaved(queryClient, ['workspace-settings', wsId], next);
+      }}
     />
   );
 }

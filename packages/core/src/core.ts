@@ -8,6 +8,7 @@ import { createBmadSetup, type BmadSetupUseCases } from './bmad-setup.js';
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
 import { createEntities, type Entities } from './entities.js';
 import { createEventLog, type EventLog, type EventLogOptions } from './event-log.js';
+import { createAgentModels, type AgentModels } from './agent-models.js';
 import { createInstallSettings, type InstallSettings } from './install-settings.js';
 import { createPermissions, type Permissions } from './permissions.js';
 import { createSessionEvents, type SessionEvents } from './session-events.js';
@@ -36,6 +37,8 @@ export interface Core {
   readonly bmadSetup: BmadSetupUseCases | undefined;
   /** Developer mode, which the server keeps and enforces (permission modes). */
   readonly installSettings: InstallSettings;
+  /** Each agent's default model and last model list, install-wide (story 11). */
+  readonly agentModels: AgentModels;
   close(): void;
 }
 
@@ -86,6 +89,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
           ...(options.onBmadSetupFailure === undefined ? {} : { onFailure: options.onBmadSetupFailure }),
         });
   const installSettings = createInstallSettings({ db, events, entities });
+  const agentModels = createAgentModels({ db, events });
   const permissions = createPermissions({
     db,
     events,
@@ -107,6 +111,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     bmadModulesSeen,
     bmadSetup,
     installSettings,
+    agentModels,
     close: () => {
       try {
         permissions.close();

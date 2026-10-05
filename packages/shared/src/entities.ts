@@ -58,6 +58,29 @@ export const DEFAULT_MODE_NOTICE_TEXT: Readonly<Record<DefaultModeNotice, string
   skip_all_unconfirmed: 'New projects start in Skip all, but this project needs your confirmation first. Until then its new chats start in Ask.',
 };
 
+/**
+ * An agent's own id for one of its models (story 11: each chat runs on a
+ * model the user can switch), as the agent lists it (`opus`, `gemini-2.5-pro`,
+ * a provider ARN). Core and the UI never name one. It may become a CLI
+ * argument, so it never starts with `-` and holds no space or shell character.
+ */
+export const MAX_MODEL_ID_LENGTH = 200;
+export const ModelId = z
+  .string()
+  .min(1)
+  .max(MAX_MODEL_ID_LENGTH)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]*$/, 'not a model id');
+export type ModelId = z.infer<typeof ModelId>;
+
+/** One model an agent offers, by its own id and name (story 11). */
+export const AgentModel = z.object({
+  id: ModelId,
+  /** The agent's own name for it ("Opus", "Gemini 2.5 Pro"). */
+  name: z.string().min(1).max(200),
+  description: z.string().max(500).optional(),
+});
+export type AgentModel = z.infer<typeof AgentModel>;
+
 /** What a session is for (AD-8). */
 export const SESSION_KINDS = ['chat', 'planning', 'build'] as const;
 export const SessionKind = z.enum(SESSION_KINDS);
@@ -110,6 +133,13 @@ export const Session = z.object({
    * agent, which the server fills in every session it answers.
    */
   agentId: AgentId.optional(),
+  /**
+   * The model the chat runs on (story 11): the agent's own id for it.
+   * Absent: the agent's own choice (and every session from before models
+   * could be chosen). Changed only by core, each change a
+   * `session.model_changed` event.
+   */
+  model: ModelId.optional(),
   /** The user's name for the chat (backlog story 12); `null` until they give one. */
   title: z.string().nullable(),
   /**

@@ -1,5 +1,7 @@
 import type { ChatAgent } from '@ogden-agents/shared';
-import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { CHAT_AGENTS_QUERY_KEY } from './chat-api';
 import { Notice } from '@/ui/notice';
 import { PageSection } from '@/ui/page';
 import { Text } from '@/ui/typography';
@@ -26,6 +28,11 @@ export interface DefaultModelsSectionProps {
  * It applies to new chats only.
  */
 export function DefaultModelsSection({ agents, description, testId, valueOf, noneOf, onChoose }: DefaultModelsSectionProps) {
+  const queryClient = useQueryClient();
+  // The models each agent lists change as its chats start: read them again when the section opens.
+  useEffect(() => {
+    void queryClient.invalidateQueries({ queryKey: CHAT_AGENTS_QUERY_KEY });
+  }, [queryClient]);
   const [saving, setSaving] = useState<string | undefined>(undefined);
   const [status, setStatus] = useState<{ kind: 'saved' | 'error'; text: string } | undefined>(undefined);
   const choose = (agent: ChatAgent, model: string | null) => {

@@ -125,6 +125,7 @@ graph LR
   - The live run view is the session view in read-only mode.
   - Ogden Agents records no cost or token usage.
   - Note (epic 6, user-approved 2026-10-02): a session carries `agentId`, set at creation and never changed (rows stored before read as `claude-code`), and a workspace carries a default agent. A run's agent is Claude Code in v1 (builds with other agents are v2, epic 8). No rule changes.
+  - Note (story 11, user request 2026-10-04): a session carries an optional `model` (the agent's own model id; absent is the agent's own choice), set at creation from the project's default for its agent, else the install's, and changed only by core with `session.model_changed` {model, previous, cause user|agent}; per-agent install defaults and each agent's last model list live in `agent_settings`, per-project defaults in `workspaces.default_models` (carried by `workspace.settings_changed`), install changes as `settings.agent_default_model_changed`. Agents expose models agent-neutrally: an ACP session config option of category `model` (switched with `session/set_config_option` at the idle point before the next prompt), else a static descriptor list applied at spawn (restart to switch). Core and the UI name no model id. No rule changes.
 
 ### AD-9 — Ogden Agents owns identity [ADOPTED]
 

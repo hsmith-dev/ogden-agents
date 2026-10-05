@@ -623,11 +623,11 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
   summary: Editing a waiting message while the turn ends loses the draft silently when the old text is sent.
   evidence: queued-messages.tsx editor does not reserve the message; takeNext sends it and the row unmounts.
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-epic-contracts-shared-acp-hooks-sign-out-setup-notices-and-t-plan.md`
-  summary: The shared client does not check that a fixed-at-start agent honoured the mode.
+  summary: Epic 12.3 review: the shared client does not check that a fixed-at-start agent honoured the mode.
   evidence: 12.3 security and correctness review; see the plan's Review Triage Log.
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-epic-contracts-shared-acp-hooks-sign-out-setup-notices-and-t-plan.md`
-  summary: An unreadable agent-files fingerprint makes Trust loop for agents.
+  summary: Epic 12.3 review: an unreadable agent-files fingerprint makes Trust loop for agents.
   evidence: 12.3 security and correctness review; see the plan's Review Triage Log.
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-epic-contracts-shared-acp-hooks-sign-out-setup-notices-and-t-plan.md`
-  summary: The project trust prompt's changed wording keys on the trusted flag only.
+  summary: Epic 12.3 review: the project trust prompt's changed wording keys on the trusted flag only.
   evidence: 12.3 security and correctness review; see the plan's Review Triage Log.

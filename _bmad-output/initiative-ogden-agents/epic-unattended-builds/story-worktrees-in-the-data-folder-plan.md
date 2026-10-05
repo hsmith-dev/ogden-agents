@@ -3,7 +3,7 @@ title: 'Worktrees in the data folder'
 type: 'feature'
 ticket: '5'
 created: '2026-10-04'
-status: 'in-review'
+status: 'built'
 baseline_revision: '2f3754286d2e84b2d3a1e57be79e9ed36ae464da'
 route: 'full'
 route_source: 'auto'
@@ -90,6 +90,7 @@ context:
 - Ports and adapters: `VcsPort.check`, `isAncestor` and `commitPaths`, and `removeWorktree(…, { deleteBranch, mergedOnly })`. `vcs-git` gains `worktreesRoot`, `parseGitVersion` and `gitVersionAtLeast`. `vcs-memory` follows.
 - Shared and server: the `disk_space_low` code, the sentences, `CommitPlanFilesResponse`, the `workspaceBuildCommitPlan` route and the server routes. Its route-list tests are updated. The server awaits `builds.sweep()` before it listens. The board's store is the run-aware one, and the watcher keeps the raw store.
 - Web: **Commit plan files** shows on a `plan_uncommitted` refusal whose message is `PLAN_UNCOMMITTED_MESSAGE`; uncommitted BMad scripts get no button. After it runs, a notice says to build again.
+- Verified after the review patches: `pnpm typecheck` clean; `pnpm test` 1946 passed, 4 skipped (after the contract test learned `baseBranch`); `pnpm e2e` 104 passed; `pnpm run pack && pnpm smoke` OK; provenance OK.
 - Verified (before the review patches): `pnpm typecheck` clean; `pnpm test` 1937 passed, 4 skipped; `pnpm e2e` 104 passed; `pnpm run pack && pnpm smoke` OK; provenance OK.
 
 ## Plan Change Log

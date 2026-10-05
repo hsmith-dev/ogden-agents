@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { AgentId } from './events-common.js';
-import { BlockedCode, BuildAgent, DEFAULT_BUILD_AGENT, RunDecision } from './build-runs.js';
+import { BlockedCode, BuildAgent, RunDecision } from './build-runs.js';
 import { RunId, SessionId, WorkspaceId } from './ids.js';
 import { IsoUtcTimestamp } from './time.js';
 
@@ -173,8 +173,8 @@ export const Run = z.object({
   baseRevision: z.string().nullable().default(null),
   /** Why the run ended as it did, in plain words (a blocked or failed run's reason; story 5.2). Never a secret. */
   reason: z.string().nullable().default(null),
-  /** The agent that builds (story 5.3): Claude Code only in v1, so epic 6 adds adapters only. Runs from before it read as Claude Code. */
-  agent: BuildAgent.default(DEFAULT_BUILD_AGENT),
+  /** The agent that builds (story 5.3): the build runner's agent, Claude Code only in v1. `null` in runs from before it. */
+  agent: BuildAgent.nullable().default(null),
   /** Why a `blocked` run is blocked (story 5.3; Ogden Agents' code, its sentence from `blockedSentence`), else `null`. */
   blockedCode: BlockedCode.nullable().default(null),
   /** Where a waiting run is in its workspace's queue (1 is next; story 5.3, filled by 5.8), `null` once dispatched. */

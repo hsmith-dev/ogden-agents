@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { BuildAgent, DEFAULT_BUILD_AGENT, RunQueueEntry } from './build-runs.js';
+import { BuildAgent, RunQueueEntry } from './build-runs.js';
 import { VerificationResult } from './build-verification.js';
 import { Run, RunOutcome, Session } from './entities.js';
 import { TICKET_REF_PATTERN } from './planning-board.js';
@@ -17,13 +17,13 @@ import { TICKET_REF_PATTERN } from './planning-board.js';
  * `POST /api/v1/workspaces/:wsId/builds`: build one named ticket (`ref`),
  * or every ready one (`all: true`, which keeps dispatching newly ready
  * tickets until none is left or the user stops it; 5.8). `agent` defaults
- * to Claude Code, the only one in v1 (story 5.3).
+ * to the install's build runner's agent, Claude Code in v1 (story 5.3).
  */
 export const UNKNOWN_BUILD_AGENT_MESSAGE = 'That agent cannot build here.';
 export const BUILD_TARGET_MESSAGE = 'Name one ticket to build, or ask for every ready one.';
 export const StartBuildRequest = z
   .object({
-    agent: z.enum(BuildAgent.options, { error: UNKNOWN_BUILD_AGENT_MESSAGE }).default(DEFAULT_BUILD_AGENT),
+    agent: BuildAgent.optional(),
     ref: z.string().regex(TICKET_REF_PATTERN, 'That is not a ticket reference.').optional(),
     all: z.literal(true, { error: BUILD_TARGET_MESSAGE }).optional(),
   })

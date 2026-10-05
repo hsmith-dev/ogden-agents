@@ -17,7 +17,6 @@ import {
   BLOCKED_CODES,
   BLOCKED_SENTENCES,
   blockedSentence,
-  BUILD_AGENTS,
   BuildRunResult,
   CheckAgainRequest,
   CoreEvent,
@@ -44,7 +43,6 @@ import {
   testsFailedDetail,
   UpdateRunLimitSettingsRequest,
   UpdateWebhookRequest,
-  UNKNOWN_BUILD_AGENT_MESSAGE,
   UpdateWorkspaceBuildSettingsRequest,
   VERIFICATION_CHECKS,
   VerificationResult,
@@ -88,15 +86,14 @@ const verified = { outcome: 'verified', checks: checks(['pass', 'pass', 'pass'])
 const DASHES = /[–—]/;
 
 describe('runs (story 5.3)', () => {
-  it("a run 5.2 stored parses, reading as Claude Code with no code, queue position or decision; a new run's fields parse and refuse bad values", () => {
-    expect(Run.parse(run52)).toMatchObject({ agent: 'claude-code', blockedCode: null, queuePosition: null, decision: null });
+  it("a run 5.2 stored parses, with no agent, code, queue position or decision; a new run's fields parse and refuse bad values", () => {
+    expect(Run.parse(run52)).toMatchObject({ agent: null, blockedCode: null, queuePosition: null, decision: null });
     const full = { ...run52, agent: 'claude-code', blockedCode: 'interrupted', queuePosition: null, decision: null };
     expect(Run.parse(full)).toEqual(full);
-    expect(Run.safeParse({ ...full, agent: 'codex' }).success).toBe(false);
+    expect(Run.safeParse({ ...full, agent: 'Not An Id' }).success).toBe(false);
     expect(Run.safeParse({ ...full, blockedCode: 'tired' }).success).toBe(false);
     expect(Run.safeParse({ ...full, queuePosition: 0 }).success).toBe(false);
     expect(Run.safeParse({ ...full, decision: 'maybe' }).success).toBe(false);
-    expect(BUILD_AGENTS).toEqual(['claude-code']);
   });
 
   it('every blocked code has one plain sentence with no em or en dash; the time limit names its minutes', () => {
@@ -179,11 +176,11 @@ describe('runs (story 5.3)', () => {
 });
 
 describe('requests and responses (story 5.3)', () => {
-  it('the build request: one ticket (agent defaults to Claude Code) or every ready one; nothing else', () => {
-    expect(StartBuildRequest.parse({ ref: '1.1' })).toEqual({ agent: 'claude-code', ref: '1.1' });
-    expect(StartBuildRequest.parse({ all: true })).toEqual({ agent: 'claude-code', all: true });
-    const codex = StartBuildRequest.safeParse({ agent: 'codex', ref: '1.1' });
-    expect(codex.success ? '' : codex.error.issues[0]?.message).toBe(UNKNOWN_BUILD_AGENT_MESSAGE);
+  it('the build request: one ticket (agent left to the build runner) or every ready one; nothing else', () => {
+    expect(StartBuildRequest.parse({ ref: '1.1' })).toEqual({ ref: '1.1' });
+    expect(StartBuildRequest.parse({ all: true })).toEqual({ all: true });
+    expect(StartBuildRequest.parse({ agent: 'codex', ref: '1.1' })).toEqual({ agent: 'codex', ref: '1.1' });
+    expect(StartBuildRequest.safeParse({ agent: 'Not An Id', ref: '1.1' }).success).toBe(false);
     expect(StartBuildRequest.safeParse({ ref: '1.1', all: true }).success).toBe(false);
     expect(StartBuildRequest.safeParse({ all: false }).success).toBe(false);
     expect(StartBuildRequest.safeParse({ ref: 'not a ref' }).success).toBe(false);
@@ -297,7 +294,7 @@ describe('requests and responses (story 5.3)', () => {
 
 /** Story 5.3's events: a valid sample and an invalid one each. */
 const EVENTS: Array<[string, Record<string, unknown>, Record<string, unknown>]> = [
-  ['run.created', { ...onSession, payload: { run: run52 } }, { ...onSession, payload: { run: { ...run52, agent: 'codex' } } }],
+  ['run.created', { ...onSession, payload: { run: run52 } }, { ...onSession, payload: { run: { ...run52, agent: 'Not An Id' } } }],
   [
     'run.outcome_changed',
     { ...onSession, payload: { runId, outcome: 'blocked', previous: 'running', reason: 'It stopped.', blockedCode: 'time_limit' } },
@@ -335,7 +332,7 @@ describe('run events (story 5.3)', () => {
   }
 
   it('the run events 5.2 stored still parse: run.created without the new fields, run.outcome_changed without a code', () => {
-    expect(CoreEvent.parse({ type: 'run.created', ...onSession, ...assigned, payload: { run: run52 } })).toMatchObject({ payload: { run: { agent: 'claude-code', decision: null } } });
+    expect(CoreEvent.parse({ type: 'run.created', ...onSession, ...assigned, payload: { run: run52 } })).toMatchObject({ payload: { run: { agent: null, decision: null } } });
     const changed = CoreEvent.parse({ type: 'run.outcome_changed', ...onSession, ...assigned, payload: { runId, outcome: 'blocked', previous: 'running', reason: 'interrupted' } });
     expect(changed.type === 'run.outcome_changed' ? changed.payload.blockedCode : 'missing').toBeUndefined();
   });

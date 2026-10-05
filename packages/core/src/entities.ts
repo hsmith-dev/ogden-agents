@@ -12,7 +12,6 @@ import {
   AgentId as AgentIdSchema,
   BlockedCode as BlockedCodeSchema,
   BuildAgent as BuildAgentSchema,
-  DEFAULT_BUILD_AGENT,
   DriverChangeCause as DriverChangeCauseSchema,
   IsoUtcTimestamp,
   ModelChangeCause as ModelChangeCauseSchema,
@@ -334,7 +333,7 @@ const toRun = (row: RunRow): Run => ({
   branch: row.branch,
   baseRevision: row.baseRevision,
   reason: row.reason,
-  agent: row.agent ?? DEFAULT_BUILD_AGENT,
+  agent: row.agent,
   blockedCode: row.blockedCode,
   queuePosition: row.queuePosition,
   decision: row.decision,
@@ -741,7 +740,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
     createRun(input) {
       const ticketRef = check(TicketRefSchema, input.ticketRef, 'ticket ref');
       const deadline = check(IsoUtcTimestamp.nullable(), input.deadline ?? null, 'run deadline');
-      const agent = check(BuildAgentSchema, input.agent ?? DEFAULT_BUILD_AGENT, 'build agent');
+      const agent = check(BuildAgentSchema.nullable(), input.agent ?? null, 'build agent');
       const queuePosition = check(z.number().int().positive().nullable(), input.queuePosition ?? null, 'queue position');
       return log.transaction(() => {
         const session = requireSession(input.sessionId);

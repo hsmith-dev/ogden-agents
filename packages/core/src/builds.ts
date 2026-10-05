@@ -447,7 +447,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       if (parsed.data.ref === undefined) throw new NotImplementedError(ALL_READY_NOT_AVAILABLE_MESSAGE);
       const ref = checkedRef(parsed.data.ref);
       // Each agent builds through its own runner (epic 6 adds runners, not core); v1 has Claude Code's.
-      const agent = parsed.data.agent;
+      const agent = parsed.data.agent ?? runner.agent;
       if (agent !== runner.agent) throw new ValidationError(UNKNOWN_BUILD_AGENT_MESSAGE, [{ path: ['agent'], message: UNKNOWN_BUILD_AGENT_MESSAGE }]);
       return serializedByRepo(repoPath, () => startLocked(workspaceId, repoPath, ref, agent));
     },

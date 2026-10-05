@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RunOutcome } from './entities.js';
+import { AgentId } from './events-common.js';
 import { RunId } from './ids.js';
 import { TICKET_REF_PATTERN } from './planning-board.js';
 import { IsoUtcTimestamp } from './time.js';
@@ -18,11 +19,12 @@ import { IsoUtcTimestamp } from './time.js';
  * em or en dash.
  */
 
-/** The agents that can build a ticket. Claude Code only in v1; epic 6 adds adapters, not core (E5-R5). */
-export const BUILD_AGENTS = ['claude-code'] as const;
-export const BuildAgent = z.enum(BUILD_AGENTS);
-export type BuildAgent = z.infer<typeof BuildAgent>;
-export const DEFAULT_BUILD_AGENT: BuildAgent = 'claude-code';
+/**
+ * The agent that builds a ticket: a registered agent's id (E6-R2: shared names
+ * none; the install's build runner says which, Claude Code in v1).
+ */
+export const BuildAgent = AgentId;
+export type BuildAgent = AgentId;
 
 /** The sandboxes `SandboxPort` can give an unattended run (AD-17): the agent's own on macOS and Linux, then Docker. */
 export const SANDBOX_KINDS = ['seatbelt', 'bubblewrap', 'docker'] as const;

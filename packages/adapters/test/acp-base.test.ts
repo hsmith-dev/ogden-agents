@@ -123,7 +123,7 @@ describe('the shared ACP client with a second agent (6.4)', () => {
     const asked: AgentPermissionRequest[] = [];
     const { session, events } = await start({ onPermissionRequest: async (request) => (asked.push(request), { outcome: 'allow_once' }) });
     await session.prompt('permission');
-    expect(asked).toEqual([{ toolCallId: 'call-permission', title: 'Run npm test', kind: 'execute', command: 'npm test', paths: [] }]);
+    expect(asked).toEqual([{ toolCallId: 'call-permission', title: 'Run npm test', kind: 'execute', command: 'npm test', paths: [], rawPaths: [] }]);
     expect(replyText(events)).toBe('Ran npm test.');
   });
 
@@ -144,10 +144,22 @@ describe('the shared ACP client with a second agent (6.4)', () => {
   });
 
   it('with one, its sessions carry the quirk’s _meta and protect paths', async () => {
-    const { session, events } = await start({ quirks: { sessionMeta: (paths) => ({ secondAgent: { guarded: paths.folders.length } }) } });
+    const { session, events } = await start({ quirks: { sessionMeta: (paths) => ({ secondAgent: { guarded: paths?.folders.length } }) } });
     expect(session.protectsPaths).toBe(true);
     await session.prompt('session-start');
     expect(JSON.parse(replyText(events)).meta).toEqual({ secondAgent: { guarded: PROTECTED_PATHS.folders.length } });
+  });
+
+  it('a build sandbox reaches the quirk as session _meta, and an agent without the quirk refuses to start one (story 5.2, fail closed)', async () => {
+    const sandbox = { kind: 'test', writableRoots: ['/work'], deniedPaths: ['/work/.git/hooks'], deniedReads: [], allowedReads: ['/work'] };
+    const withQuirk = secondAgent({ sessionMeta: (_paths, box) => ({ secondAgent: { roots: box?.writableRoots } }) });
+    const opened = await withQuirk.startSession({ cwd: tempDir(), env: baseEnv(), sandbox });
+    sessions.push(opened);
+    const events: AgentEvent[] = [];
+    opened.onEvent((event) => events.push(event));
+    await opened.prompt('session-start');
+    expect(JSON.parse(replyText(events)).meta).toEqual({ secondAgent: { roots: ['/work'] } });
+    await expect(secondAgent().startSession({ cwd: tempDir(), env: baseEnv(), sandbox })).rejects.toMatchObject({ code: 'agent_unavailable' });
   });
 
   it('reopens by resume, then load, then new', async () => {

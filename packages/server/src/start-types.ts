@@ -5,10 +5,11 @@
 import type { ClaudeCodeSetupOptions, FetchLike, PtyLoader } from '@ogden-agents/adapters';
 import type { AgentWiring } from './agent-wiring.js';
 import type { AntigravityPorts } from './antigravity-wiring.js';
-import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, Core, SecretStorePort, TicketStorePort, ToolchainPort } from '@ogden-agents/core';
+import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, NotifierPort, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort } from '@ogden-agents/core';
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
 import type { Logger } from './log.js';
+import type { UpdatesOption } from './update-check.js';
 
 export interface StartOptions {
   /** Port to try first. `0` asks the OS for any free port. Default `DEFAULT_PORT` (4317). */
@@ -160,6 +161,31 @@ export interface StartOptions {
    * Python with no download). The launcher never sets it.
    */
   extraUvEnv?: Readonly<Record<string, string>>;
+  /**
+   * Override the sandbox check unattended builds make (story 5.2; tests: a
+   * fixed answer). Default: the `sandbox-claude-native` adapter, or the
+   * `OGDEN_AGENTS_TEST_SANDBOX` hook's answer on a test run.
+   */
+  sandbox?: SandboxPort;
+  /** Override git for unattended builds (story 5.2; tests). Default: the `vcs-git` adapter on the user's `git`. */
+  vcs?: VcsPort;
+  /**
+   * Override the build runner (story 5.3's wiring slot; tests: `build-memory`).
+   * Default: the `buildrunner-acp` adapter (5.4 and 5.7 complete it).
+   */
+  buildRunner?: BuildRunnerPort;
+  /**
+   * Override how notifications are sent (story 5.3's wiring slot; 11.4 wires
+   * `notify-webhook` as the default and reads it; tests: `notify-memory`).
+   */
+  notifier?: NotifierPort;
+  /**
+   * The "newer version" check (story 13.7): `false` turns it off, a client
+   * replaces the real npm one (tests: a fake, so none reaches the network).
+   * Default: the real `fetch`, except `OGDEN_AGENTS_OFFLINE` is set or this is
+   * a test run, which never makes a request.
+   */
+  updates?: UpdatesOption;
   /**
    * Called once the server has stopped by itself (Quit, or a restart the
    * launcher asked for) and everything is closed. A server process exits here.

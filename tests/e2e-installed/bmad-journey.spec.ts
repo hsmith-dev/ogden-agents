@@ -8,9 +8,10 @@
  * is hashed before and after.
  *
  * Test 1, no BMad hook (what a user of this version sees):
- * - What 0.4.0 ships (epic 10 retro A3): Planning and Board can be turned
- *   on and the main switch works; Unattended builds and Retrospectives are
- *   greyed, Coming soon; Settings → New projects' BMad Method can be picked.
+ * - What this version ships (epic 10 retro A3; story 5.2 adds Unattended
+ *   builds): Planning, Board and Unattended builds can be turned on and the
+ *   main switch works; only Retrospectives is greyed, Coming soon; Settings →
+ *   New projects' BMad Method can be picked.
  *   Turning Board on asks to trust the project's scripts; Cancel leaves it
  *   off.
  * - A simple project (a plain repo with its own `.claude/skills`): the header
@@ -23,7 +24,7 @@
  *   after a server restart.
  * - Quit: no repo changed.
  *
- * Test 2, with `builds` registered as available (its switch can be turned on)
+ * Test 2, with `retrospectives` registered as available (its switch can be turned on)
  * and the guarded probe route (`OGDEN_AGENTS_TEST_BMAD_AVAILABLE`,
  * `OGDEN_AGENTS_TEST_BMAD_PROBE`):
  * - Planning on and off in one tab shows in a second browser context; the
@@ -37,7 +38,8 @@
  * No real agent, account, keychain or network. Each server is quit at the end
  * of its test, and its folders removed.
  */
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import {
   BMAD_COMING_SOON_LABEL,
@@ -57,16 +59,41 @@ import { expectConnected, landConnected, sidebarOf, storedToken } from '../e2e/t
 import { bmadServer, waitForExit, type BmadServer, type Launched } from './installed.js';
 
 const servers: BmadServer[] = [];
+/** How many servers the earlier tests started: a failed test attaches only its own servers' logs. */
+let serversBefore = 0;
+
+test.beforeEach(() => {
+  serversBefore = servers.length;
+});
+
+test.afterEach(async ({}, testInfo) => {
+  // A failed journey keeps its servers' logs (requests and agent starts, with times) in the report.
+  if (testInfo.status === testInfo.expectedStatus) return;
+  for (const [index, server] of servers.slice(serversBefore).entries()) {
+    const log = join(server.install.dataDir, 'logs', 'server.log');
+    if (existsSync(log)) await testInfo.attach(`server-${index + 1}.log`, { path: log, contentType: 'text/plain' }).catch(() => undefined);
+  }
+});
 
 test.afterAll(async () => {
   for (const server of servers) await server.remove();
 });
 
+/**
+ * How long the second tab may take to show the settings page and to follow
+ * the first one. A Windows runner has stalled for 35-40 s at this point
+ * (runs 37247659244 attempt 2 and 37255268977 attempt 1): the server, Chromium
+ * and the Playwright worker all slowed together, every request of the second
+ * tab's first load took 10-26 s, and the page showed the switch once its
+ * answers arrived. The 15 s default is shorter than that stall.
+ */
+const SECOND_TAB_MS = 60_000;
+
 /** The trust dialog's title (`SCRIPT_TRUST_TITLE`; `planning-setup.ts` has imports this runner can't load). */
 const SCRIPT_TRUST_TITLE = "Run this project's BMad Method scripts?";
 
-/** The pieces 0.4.0 ships (`SHIPPED_BMAD_PIECES` in the server; epic 4). */
-const SHIPPED: readonly string[] = ['planning', 'board'];
+/** The pieces this version ships (`SHIPPED_BMAD_PIECES` in the server; epic 4, and Unattended builds since story 5.2). */
+const SHIPPED: readonly string[] = ['planning', 'board', 'builds'];
 
 const OWN_SKILL = '.claude/skills/x/SKILL.md';
 const OWN_SKILL_TEXT = "---\nname: x\ndescription: The repo's own skill.\n---\n\nDo the thing.\n";
@@ -153,8 +180,9 @@ async function sessionStart(page: Page, agentName = 'Claude Code'): Promise<Sess
     await composer.press('Enter');
     await expect(composer).toHaveValue('');
   }
-  await expect(replies(page)).toHaveCount(1);
-  await expect(state(page)).toHaveAttribute('data-state', 'idle');
+  // The agent process starts on this message: on a stalled Windows runner that took 16 s (run 37258187535, server log).
+  await expect(replies(page)).toHaveCount(1, { timeout: SECOND_TAB_MS });
+  await expect(state(page)).toHaveAttribute('data-state', 'idle', { timeout: SECOND_TAB_MS });
   await expect(replies(page).last()).toHaveAttribute('data-streaming', 'false');
   // The agent's message: its name, then its text.
   const text = await replies(page).last().locator('p').nth(1).textContent();
@@ -183,7 +211,7 @@ async function quit(page: Page, launched: Launched) {
 test('what 0.4.0 ships, Board asking for trust, a simple project, and the offer, on the installed package', async ({ page }) => {
   // Two launches and two chats on a server of its own.
   test.setTimeout(240_000);
-  // No hook: what a user of this version sees (Planning and Board shipped, the rest Coming soon). Antigravity plays the second agent.
+  // No hook: what a user of this version sees (Planning, Board and Unattended builds shipped, Retrospectives Coming soon). Antigravity plays the second agent.
   const server = bmadServer('journey-simple', { antigravity: true });
   servers.push(server);
   // No "bmad" in the simple repo's name, so the environment check can't match it by accident.
@@ -198,7 +226,7 @@ test('what 0.4.0 ships, Board asking for trust, a simple project, and the offer,
   const plainId = await addProject(page, plain.path);
   const withBmadId = await addProject(page, withBmad.path);
 
-  await test.step('what 0.4.0 ships: Planning and Board can be turned on, the other pieces are Coming soon; New projects too', async () => {
+  await test.step('what this version ships: Planning, Board and Unattended builds can be turned on, Retrospectives is Coming soon; New projects too', async () => {
     expect(await piecesOf(page, plainId)).toEqual([]);
     await page.goto(`${launched.url}/w/${plainId}/settings#${WORKSPACE_SETTINGS_BMAD_ANCHOR}`);
     for (const piece of BMAD_PIECES) {
@@ -309,9 +337,8 @@ test('what 0.4.0 ships, Board asking for trust, a simple project, and the offer,
 
 test('a piece on and off with a second tab following, the guard, and the default for new projects, on the installed package', async ({ page, browser }) => {
   test.setTimeout(180_000);
-  // Unattended builds registered as available (0.4.0 ships Planning and Board; the hook adds a piece no release
-  // ships yet), and the route guarded by Planning.
-  const server = bmadServer('journey-pieces', { available: ['builds'], probe: true });
+  // Retrospectives registered as available (the hook adds a piece no release ships yet), and the route guarded by Planning.
+  const server = bmadServer('journey-pieces', { available: ['retrospectives'], probe: true });
   servers.push(server);
   const earlier = server.addRepo({ prefix: 'earlier-repo-' });
   const later = server.addRepo({ bmad: false, prefix: 'later-repo-' });
@@ -333,10 +360,10 @@ test('a piece on and off with a second tab following, the guard, and the default
     const planning = switchIn(page, BMAD_PIECE_INFO.planning.label);
     await expect(planning).toHaveAttribute('aria-checked', 'false');
     await expect(planning).toBeEnabled();
-    // Registered by the hook: Unattended builds can be turned on. Not registered: Retrospectives is still Coming soon.
+    // Registered by the hook: Retrospectives can be turned on; Unattended builds ships (story 5.2). None is Coming soon.
+    await expect(switchIn(page, BMAD_PIECE_INFO.retrospectives.label)).toBeEnabled();
+    await expect(page.getByTestId('bmad-retrospectives-coming-soon')).toHaveCount(0);
     await expect(switchIn(page, BMAD_PIECE_INFO.builds.label)).toBeEnabled();
-    await expect(page.getByTestId('bmad-builds-coming-soon')).toHaveCount(0);
-    await expect(switchIn(page, BMAD_PIECE_INFO.retrospectives.label)).toBeDisabled();
 
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     try {
@@ -344,17 +371,17 @@ test('a piece on and off with a second tab following, the guard, and the default
       await landConnected(other, await launchLink(launched.url, server.install.dataDir));
       await other.goto(`${launched.url}${settings}`);
       const otherPlanning = switchIn(other, BMAD_PIECE_INFO.planning.label);
-      await expect(otherPlanning).toHaveAttribute('aria-checked', 'false');
+      await expect(otherPlanning).toHaveAttribute('aria-checked', 'false', { timeout: SECOND_TAB_MS });
 
       await planning.click();
       await expect(planning).toHaveAttribute('aria-checked', 'true');
-      await expect(otherPlanning).toHaveAttribute('aria-checked', 'true');
+      await expect(otherPlanning).toHaveAttribute('aria-checked', 'true', { timeout: SECOND_TAB_MS });
       expect(await piecesOf(page, earlierId)).toEqual(['planning']);
       expect(await probe(page, earlierId)).toEqual({ status: 200, body: { piece: 'planning' } });
 
       await planning.click();
       await expect(planning).toHaveAttribute('aria-checked', 'false');
-      await expect(otherPlanning).toHaveAttribute('aria-checked', 'false');
+      await expect(otherPlanning).toHaveAttribute('aria-checked', 'false', { timeout: SECOND_TAB_MS });
       expect(await piecesOf(page, earlierId)).toEqual([]);
       expect(await probe(page, earlierId)).toMatchObject({ status: 409, body: { error: { code: 'feature_off' } } });
     } finally {

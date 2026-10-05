@@ -31,10 +31,11 @@ A non-developer goes from an idea to approved, agent-built code without opening 
 Each epic is one user-facing outcome, built in the spec's delivery-phase order. Everything else is out of scope; see the spec's non-goals. Tracer path: `npx ogden-agents`, then sign in, then chat with Claude Code in a workspace; later epics add plan, build and approve.
 
 - Touch point: the user's agent CLIs and ACP adapters (consumed); owner: epic-chat-and-workspaces, then epic-every-agent
-- Touch point: the user's repos (`_bmad/` and worktrees written); owner: epic-planning-and-board, then epic-unattended-builds
+- Touch point: the user's repos (`_bmad/` written, plus run branches and git worktree metadata; worktrees live in the data folder, AD-17); owner: epic-planning-and-board, then epic-unattended-builds
 - Touch point: Docker, only where already installed (sandbox fallback); owner: epic-unattended-builds
 - Touch point: the npm registry (publishing); owner: epic-foundation-and-forks
 - Touch point: the upstream BMAD-METHOD and bmad-loop repos (PRs); owner: epic-foundation-and-forks sets up the process, and each epic sends its own patches
+- Touch point: GitHub Releases assets (desktop apps, `SHA256SUMS`, `latest.json`, the `desktop-channel-next` prerelease), nodejs.org downloads (pinned Node), the updater endpoints, the npm registry read for the newer-version notice, and the Apple and Windows signing services (slots only); owner: epic-desktop-app (13), outside the v1 Done when (approved 2026-10-04)
 
 ## References
 
@@ -52,3 +53,6 @@ Each epic is one user-facing outcome, built in the spec's delivery-phase order. 
 - Decision: epic 6's agent-choice groundwork (session agent, agent registry and list, shared ACP client, picker and default per project) is built whatever Antigravity's spike decides; a no-go drops only the Antigravity entries. v1.1 (Codex and Grok) builds on it (user, 2026-10-02).
 - Decision: epic ids 11 and 12: 11 is epic-build-runs-and-notifications (epic 5b, assigned first on `docs/epic-5-inception`) and 12 is epic-v1-1-codex-and-grok (v1.1, Codex and Grok), renumbered from 11 to avoid the clash (2026-10-02).
 - Decision: v1.1 (epic 12, user-approved inception 2026-10-04) adds Codex and Grok as chat agents beside Claude Code, each shipping only if its live checks pass on all three OSes; v1.1 ships with whichever passes and the other follows later. Gemini CLI, GitHub Copilot CLI and builds with any agent but Claude Code stay v2 (epic 8). CAP-15, the Non-goals, agent-matrix.md, the AD-1, AD-16, AD-21 and AD-22 notes and EXPERIENCE.md are updated through their memlogs (2026-10-04).
+- Decision: epic 5 (Unattended builds) is split in two at its inception: epic 5 builds one ticket for the user to approve and merge, and epic 11 (`epic-build-runs-and-notifications`) adds the run view, Runs tab, Build all ready, verification's test re-run and notifications; each ships on its own (user, 2026-10-01). Later the same day the user moved the test re-run into epic 5, so AD-17 holds from its release, and epic 11 adds richer verification reporting (user, 2026-10-01). Costs and budgets stay out (reaffirmed, 2026-10-01).
+- Note (2026-10-04, draft for the user's approval): epic 13, epic-desktop-app, is incepted as a draft: Ogden as a Tauri v2 desktop app on macOS, Windows and Linux beside `npx ogden-agents`, with automatic updates. It sits outside the v1 Done when under its own heading in `tickets.toml`, and proposes a new CAP-20 (see its Notes, open questions 9 and 11).
+- Decision (2026-10-04, user): epic 13 is approved and built next, after the current feedback round and ahead of the rest of epics 5, 11, 12 and 7. Its deltas are applied: spec CAP-20, AD-23, and notes on AD-3, AD-5, AD-15, AD-20 and AD-21. It stays outside the v1 Done when.

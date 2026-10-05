@@ -71,6 +71,8 @@ export async function answerPermissionRequest(
       kind: params.toolCall.kind ?? undefined,
       command: command === undefined ? undefined : mask(command),
       paths: toolCallPaths(params.toolCall, cwd, quirks.toolInputPaths).map(mask),
+      // Unmasked, for core's own decisions only (the build policy): never shown or stored.
+      rawPaths: toolCallPaths(params.toolCall, cwd, quirks.toolInputPaths),
     });
     switch (decision?.outcome) {
       case 'allow_once':

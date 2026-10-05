@@ -5,7 +5,7 @@
  * `acp-agent.ts`.
  */
 import type * as acp from '@agentclientprotocol/sdk';
-import type { AgentDescriptor, AgentTerminalResume, ProtectedPaths } from '@ogden-agents/core';
+import type { AgentDescriptor, AgentSandbox, AgentTerminalResume, ProtectedPaths } from '@ogden-agents/core';
 import { PERMISSION_MODES, type PermissionMode } from '@ogden-agents/shared';
 import type { AcpToolInputPaths } from './tool-paths.js';
 
@@ -72,10 +72,12 @@ export interface AcpAgentQuirks {
   launch(input: AcpLaunchInput): AcpLaunch;
   /**
    * The `_meta` its `session/new`, `resume` and `load` take to keep core's
-   * protected paths guarded for the session's life (Auto only). Without it
-   * a session doesn't protect paths, and core keeps it out of Auto.
+   * protected paths guarded for the session's life (Auto only), and an
+   * unattended build session's sandbox (story 5.2; never both absent).
+   * Without it a session doesn't protect paths, and core keeps it out of
+   * Auto; an agent without it can't run a build session.
    */
-  sessionMeta?: ((protectedPaths: ProtectedPaths) => Record<string, unknown> | undefined) | undefined;
+  sessionMeta?: ((protectedPaths: ProtectedPaths | undefined, sandbox?: AgentSandbox | undefined) => Record<string, unknown> | undefined) | undefined;
   /** The raw-input fields of its tools that name paths. */
   toolInputPaths: AcpToolInputPaths;
   /** Its session modes that ask as much as Ask (or more); any other, known or not, asks less. */

@@ -153,14 +153,25 @@ export type BmadSourceStatus = z.infer<typeof BmadSourceStatus>;
 export const BmadSourceResponse = BmadSourceStatus;
 export type BmadSourceResponse = BmadSourceStatus;
 
-/** One upstream source in the lock (`bmad-lock.json`): repo, the ref its commit is reachable from, and the content hash of `include`. */
+/** A GitHub `owner/name`. */
+const GitHubRepo = z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/);
+/** A full commit SHA. */
+const CommitSha = z.string().regex(/^[0-9a-f]{40}$/);
+
+/**
+ * One pinned source in the lock (`bmad-lock.json`): repo, the ref its commit is reachable from, and the content hash
+ * of `include`. Since the maintained-fork story (user decision 2026-10-04) the repo is Ogden Agents' fork, and `base`
+ * names the upstream commit the fork's commit is built on (CI checks both).
+ */
 export const BmadLockSource = z.object({
   /** GitHub `owner/name`. */
-  repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
-  /** The upstream branch or tag the commit must be in the history of (CI checks it). */
+  repo: GitHubRepo,
+  /** The branch or tag the commit must be in the history of (CI checks it); for the fork, a tag that never moves. */
   ref: z.string().min(1),
   /** The full commit SHA. */
-  commit: z.string().regex(/^[0-9a-f]{40}$/),
+  commit: CommitSha,
+  /** The upstream commit the pinned commit is built on: in `ref`'s history of `repo` upstream, and an ancestor of `commit` (CI checks both). */
+  base: z.object({ repo: GitHubRepo, ref: z.string().min(1), commit: CommitSha }).optional(),
   /** The version as upstream names it at that commit. */
   version: z.string().min(1),
   /** The folder of the tree that is used, ending in `/`, or `''` for the whole tree. */

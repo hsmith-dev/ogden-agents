@@ -22,7 +22,7 @@ import {
   type AgentPort,
   type Core,
 } from '@ogden-agents/core';
-import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM, type AgentId, type Session } from '@ogden-agents/shared';
+import { MAX_TERMINAL_INPUT_BYTES, RUN_REASON_INTERRUPTED, SERVER_STREAM, type AgentId, type Session } from '@ogden-agents/shared';
 import { WebSocketServer } from 'ws';
 import { checkAgentWiring } from './agent-wiring.js';
 import { createApp, type ServerControl } from './app.js';
@@ -39,9 +39,11 @@ import { VERSION } from './version.js';
 import { wireAgents } from './start-agents.js';
 import { uvEnvironment } from './start-env.js';
 import { broadcast, closeServer, HOST, listen, repointAppShortcut } from './start-io.js';
+import { createBuildsWiring } from './start-builds.js';
 import { bmadSetupFailureLogger, uvPycacheDir, createBmadSourceAndCatalog, createDocumentCards, createPlanAndBoard, stopBmadWork, withAgentSkillFolders, type BmadWiring } from './start-planning.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
 import { openUrl } from './open-url.js';
+import { installMethodOf, wireUpdateCheck } from './update-check.js';
 
 // Moved out in story 3.9; still exported from here for the callers that import them from `start.ts`.
 export { AGENT_ENV_KEYS, agentEnvironment, agentKeysOf, CHECK_IN_MS_ENV, checkInDelayFromEnv, SECRET_STORE_ENV, SUBSCRIPTION_MAX_AGE_MS, testSecretStore, uvEnvironment, withoutAgentKeys } from './start-env.js';
@@ -270,6 +272,9 @@ async function listenAndAnnounce({
   // Their terminals are gone too (story 3.1 review F3): those chats drive again.
   const released = core.entities.releaseTerminalDrivers();
   if (released.length > 0) log.info('sessions a stopped server left in the terminal are back in the chat', { sessions: released.length });
+  // Unattended runs are not resumed (AD-3 note): a run left running by a stopped server is blocked, its worktree kept (story 5.2).
+  const interrupted = core.entities.settleInterruptedRuns(RUN_REASON_INTERRUPTED);
+  if (interrupted.length > 0) log.info('runs left running by a stopped server are blocked', { runs: interrupted.length });
   // No permission mode but Ask outlives the run it was chosen in (cause `restart`).
   const reset = core.entities.resetPermissionModes();
   if (reset.length > 0) log.info('chats in Auto or Skip all are back in Ask after the restart', { sessions: reset.length });
@@ -317,10 +322,12 @@ async function listenAndAnnounce({
     onAgentError: (sessionId, error) => log.warn('agent failed', { sessionId, code: error.code, reason: error.message, ...error.details }),
     onInternalError: (sessionId, error) => log.error('applying an agent event failed', { sessionId, reason: String(error) }),
     onToolCallCompleted: (sessionId, toolCallId, diffs) => planningDocuments.toolCallCompleted(sessionId, toolCallId, diffs),
+    // Unattended build sessions (story 5.2): their worktree, sandbox and permission policy, registered by the builds use-cases.
+    buildSessions: core.buildSessions,
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
   // Plan and Board (story 4.1, `start-planning.ts`): planning sessions, the script runner, the tickets and their watch.
-  const { planning, scriptRunner, bmadSource, board, ticketWatcher } = createPlanAndBoard({
+  const { planning, scriptRunner, bmadSource, board, ticketWatcher, ticketStore } = createPlanAndBoard({
     options,
     core,
     dataDir,
@@ -334,6 +341,10 @@ async function listenAndAnnounce({
     uvToolchain,
     uvChildEnv,
   });
+  // Unattended builds (story 5.2, `start-builds.ts`): git, the sandbox check and the build runner.
+  const builds = createBuildsWiring({ options, core, dataDir, log, chat, tickets: ticketStore, source: bmadSource, hooks });
+  // Worktrees no run needs any more (a removal that failed, a start cut off) go before builds are served (story 5.5).
+  await builds.sweep();
   const appShortcut =
     options.appShortcut ??
     (options.launcherEntry === undefined
@@ -355,6 +366,8 @@ async function listenAndAnnounce({
     developerMode: core.installSettings.developerMode,
     onError: (code) => log.warn('new project defaults unusable', { code }),
   });
+  // The "newer version" notice (story 13.7): checks once after the server is up, never on the start path.
+  const updates = wireUpdateCheck(options.updates, { dataDir, version, installMethod: installMethodOf(options.launcherEntry), events: core.events, log });
   const app = createApp({
     events: core.events,
     webRoot: options.webRoot ?? defaultWebRoot(),
@@ -377,6 +390,7 @@ async function listenAndAnnounce({
     bmadScriptTrust: core.bmadScriptTrust,
     planning,
     board,
+    builds,
     bmadSource,
     // Setup also places the skills in each other agent's folder the project uses (epic 6 entry 8).
     bmadSetup: withAgentSkillFolders(core.bmadSetup, { core, agents }),
@@ -384,6 +398,7 @@ async function listenAndAnnounce({
     onboarding,
     newProjectDefaults,
     installSettings: core.installSettings,
+    updates,
     agentDefaults: { models: core.agentModels, isAgentRegistered: (agentId) => agents.get(agentId) !== undefined },
     appShortcut,
     tabs,
@@ -440,6 +455,7 @@ async function listenAndAnnounce({
   } catch (error) {
     // As on stop: the runner's close kills any run a watch waits on.
     const watching = ticketWatcher.close();
+    builds.close();
     await scriptRunner.close().catch(() => {});
     await watching;
     // Nothing may stay listening on a server that failed to start.
@@ -465,11 +481,17 @@ async function listenAndAnnounce({
       // The server owns agent processes (AD-3): none outlives it, a hidden sign-in terminal included.
       .finally(async () => {
         // Kills a running npm too; its temp folder goes once it has exited.
+        updates.close();
         claudeSetup?.close();
         await agentSetup.dispose().catch((error: unknown) => log.warn('stopping sign-ins failed', { reason: String(error) }));
         await Promise.race([agentSetup.settled(), new Promise((resolve) => setTimeout(resolve, INSTALL_STOP_MS).unref())]);
       })
       .finally(() => chat.close().catch((error: unknown) => log.warn('stopping agents failed', { reason: String(error) })))
+      // An outcome being worked out finishes (bounded by its own reads), then the builds stop following the log.
+      .finally(async () => {
+        await builds.settled().catch(() => undefined);
+        builds.close();
+      })
       // Document detection, a setup in progress, the ticket watches and every BMad Method script (`start-planning.ts`).
       .finally(() => stopBmadWork({ planningDocuments, bmadSetup: core.bmadSetup, ticketWatcher, scriptRunner, log }))
       .finally(() => {
@@ -525,6 +547,7 @@ async function listenAndAnnounce({
 
   // Off the start path: a shortcut already there follows this install's Node and launcher (story 2.4).
   void repointAppShortcut(appShortcut, log);
+  void updates.runOnStart();
 
   if (options.open === true && launchUrl !== undefined) {
     try {

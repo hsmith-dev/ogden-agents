@@ -13,6 +13,8 @@
  */
 import {
   AnswerFirstError,
+  BUILD_SESSION_READ_ONLY_MESSAGE,
+  BuildSessionReadOnlyError,
   ConfirmationRequiredError,
   CoreError,
   createAddProject,
@@ -60,6 +62,7 @@ import {
   SetSessionModelRequest,
   UpdateQueuedMessageRequest,
   MessageId,
+  type SessionId,
   type SessionTerminal,
   WorkspaceId,
   WorkspaceResponse,
@@ -107,9 +110,14 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     onError: (c) => apiError(c, 413, 'invalid_request', 'That message is too long.'),
   });
 
+  /** Whether the session is an unattended build's (story 5.2): it runs on its own, so nobody sends it messages, a mode or a driver. */
+  const isBuildSession = (workspaceId: WorkspaceId, sessionId: SessionId): boolean => chat.getSession(workspaceId, sessionId).kind === 'build';
+  const readOnlyBuild = (c: Context): Response => apiError(c, 409, 'session_busy', BUILD_SESSION_READ_ONLY_MESSAGE);
+
   /** Core's refusals as API errors; anything else is left for `onError` (500). */
   const refusal = (c: Context, error: unknown): Response => {
     if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', NOT_FOUND);
+    if (error instanceof BuildSessionReadOnlyError) return readOnlyBuild(c);
     if (error instanceof QueueFullError) {
       return apiError(c, 409, 'session_busy', 'Too many messages are waiting. Send this one when the agent has caught up.');
     }
@@ -243,6 +251,7 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     const body = await readBody(c, SetPermissionModeRequest);
     if (!body.ok) return body.response;
     try {
+      if (isBuildSession(scope.workspaceId, scope.sessionId)) return readOnlyBuild(c);
       const before = chat.getSession(scope.workspaceId, scope.sessionId).permissionMode;
       const session = chat.setPermissionMode(scope.workspaceId, scope.sessionId, body.value.mode, { confirm: body.value.confirm });
       if (session.permissionMode !== before) log.info('chat permission mode changed', { workspaceId: scope.workspaceId, sessionId: scope.sessionId, mode: session.permissionMode, previous: before });
@@ -346,6 +355,7 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     const body = await readBody(c, SetDriverRequest);
     if (!body.ok) return body.response;
     try {
+      if (isBuildSession(scope.workspaceId, scope.sessionId)) return readOnlyBuild(c);
       const session = await chat.switchDriver(scope.workspaceId, scope.sessionId, body.value.driver);
       log.info('session driver switched', { workspaceId: scope.workspaceId, sessionId: scope.sessionId, driver: session.driver });
       return c.json(SessionResponse.parse({ session }));
@@ -360,6 +370,7 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     const body = await readBody(c, SendMessageRequest);
     if (!body.ok) return body.response;
     try {
+      if (isBuildSession(scope.workspaceId, scope.sessionId)) return readOnlyBuild(c);
       // The message itself is the user's content: never logged.
       const result = chat.sendMessage(scope.workspaceId, scope.sessionId, body.value.text, { delivery: body.value.delivery });
       return c.json(SendMessageResponse.parse(result), 202);

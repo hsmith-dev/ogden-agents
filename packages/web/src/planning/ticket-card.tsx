@@ -1,7 +1,8 @@
-import { boardCardLabel, boardColumnOf, type TicketRow } from '@ogden-agents/shared';
-import { Lock, Prohibit } from '@phosphor-icons/react';
+import { boardCardLabel, boardColumnOf, BUILD_LABEL, type TicketRow } from '@ogden-agents/shared';
+import { Hammer, Lock, Prohibit } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
 import { memo } from 'react';
+import { Button } from '@/ui/button';
 import { cn } from '@/ui/utils';
 import type { CardStatus } from './board-model';
 import { TicketStatusMenu, type TicketStatusChoice } from './ticket-status-menu';
@@ -16,6 +17,14 @@ export interface TicketCardProps {
   onChoose?: ((choice: TicketStatusChoice) => void) | undefined;
   /** While this ticket's status change is saved. */
   busy?: boolean;
+  /**
+   * Build (story 5.2, the tracer): with Unattended builds on, a Ready card
+   * (plan `ready-for-dev`) shows Build, which builds this one ticket. Stable
+   * across renders.
+   */
+  onBuild?: ((ref: string) => void) | undefined;
+  /** While a build is being started from the board: every Build waits. */
+  building?: boolean;
 }
 
 /**
@@ -27,8 +36,9 @@ export interface TicketCardProps {
  * right, always visible, beside the link (never inside it). Memoized: a
  * refetch re-renders only the cards whose props changed.
  */
-export const TicketCard = memo(function TicketCard({ wsId, row, status, highlighted, onChoose, busy = false }: TicketCardProps) {
+export const TicketCard = memo(function TicketCard({ wsId, row, status, highlighted, onChoose, busy = false, onBuild, building = false }: TicketCardProps) {
   const column = boardColumnOf(row);
+  const buildable = onBuild !== undefined && row.status === 'ready-for-dev';
   return (
     <div className="relative min-w-0">
       <Link
@@ -44,6 +54,7 @@ export const TicketCard = memo(function TicketCard({ wsId, row, status, highligh
           'transition-colors duration-(--motion-fast) ease-standard hover:bg-accent',
           column === 'in_review' && 'before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-signal',
           onChoose !== undefined && 'pr-10',
+          buildable && 'pb-12',
         )}
       >
         <span className="font-mono text-mono-compact text-muted-foreground">{row.ref}</span>
@@ -63,6 +74,23 @@ export const TicketCard = memo(function TicketCard({ wsId, row, status, highligh
         </span>
       </Link>
       {onChoose === undefined ? null : <TicketStatusMenu row={row} onChoose={onChoose} busy={busy} className="absolute top-1 right-1" />}
+      {buildable ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="absolute right-1 bottom-1"
+          data-testid="ticket-build"
+          aria-label={`${BUILD_LABEL} ${row.ref}`}
+          aria-disabled={building || undefined}
+          onClick={() => {
+            if (!building) onBuild(row.ref);
+          }}
+        >
+          <Hammer aria-hidden />
+          {BUILD_LABEL}
+        </Button>
+      ) : null}
     </div>
   );
 });

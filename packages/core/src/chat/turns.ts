@@ -6,6 +6,7 @@
 import type { Session, SessionId, Workspace } from '@ogden-agents/shared';
 import { AgentError, type AgentEvent, type AgentSession } from '../agent-port.js';
 import {
+  BuildSessionReadOnlyError,
   DriverIsTerminalError,
   InvalidOperationError,
   QueueFullError,
@@ -302,9 +303,11 @@ export function createTurns(
   };
 
   const methods: Pick<Chat, 'sendMessage' | 'cancel'> = {
-    sendMessage(workspaceId, sessionId, text) {
+    sendMessage(workspaceId, sessionId, text, sendOptions = {}) {
       if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
       const session = getSession(workspaceId, sessionId);
+      // An unattended build's session takes only the builds use-case's own prompt (story 5.2).
+      if (session.kind === 'build' && sendOptions.build !== true) throw new BuildSessionReadOnlyError();
       const workspace = getWorkspace(workspaceId);
       // Between drivers first: a switch back (or a CLI's exit) still reads `terminal` until it is done (story 3.4).
       if (switching.has(sessionId)) throw new SessionNotIdleError('This chat is switching to or from the terminal. Try again in a moment.');
@@ -338,7 +341,8 @@ export function createTurns(
 
     cancel(workspaceId, sessionId) {
       if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
-      getSession(workspaceId, sessionId);
+      // Stopping a build is 5.x's (Stop, with the run marked): not a chat's Stop (story 5.2).
+      if (getSession(workspaceId, sessionId).kind === 'build') throw new BuildSessionReadOnlyError();
       const turn = busy.get(sessionId);
       if (turn === undefined || turn.failed) throw new SessionNotBusyError(sessionId);
       stop(sessionId, turn, { keepQueue: false });

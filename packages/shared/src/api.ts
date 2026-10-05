@@ -257,6 +257,15 @@ export const API_ROUTES = {
    */
   chatSettings: `${API_BASE}/settings/chat`,
   /**
+   * `GET` → `UpdateNoticeResponse`; `PUT SetUpdateCheckRequest` →
+   * `UpdateNoticeResponse` (story 13.7): the "a newer version is available"
+   * notice and the switch for the check when Ogden starts. A check finishing
+   * or the switch changing appends `settings.update_notice_changed`.
+   */
+  updates: `${API_BASE}/updates`,
+  /** `POST` → `UpdateCheckResponse` (story 13.7): Check now, the server asking npm for its public version list. */
+  updatesCheck: `${API_BASE}/updates/check`,
+  /**
    * `GET` → `BmadDetectionResponse` (story 10.2's contract; 10.3 serves it):
    * whether the project's repo already has `_bmad/`, read-only. Not guarded.
    */
@@ -325,6 +334,85 @@ export const API_ROUTES = {
    * (guarded, AD-22); runs none of the project's scripts, so no trust.
    */
   workspaceDocument: `${API_BASE}/workspaces/:wsId/documents`,
+  /**
+   * `POST StartBuildRequest` → 201 `BuildResponse` (story 5.2): builds one
+   * ticket unattended in its own worktree and `build` session; `{ all: true }`
+   * → 202 `AllReadyBuildsResponse` (5.8; 501 until then). Serves the
+   * `builds` piece (guarded, trust). 409 `prerequisite_unmet`, `not_ready`,
+   * `run_active`, `sandbox_unavailable`, `plan_uncommitted`,
+   * `vcs_unavailable`, `disk_space_low` (story 5.5); nothing is written then.
+   * `mode: 'attended'` (story 5.6) builds with the user watching, no sandbox.
+   */
+  workspaceBuilds: `${API_BASE}/workspaces/:wsId/builds`,
+  /**
+   * `GET` → `SandboxStatusResponse` (story 5.6): whether an unattended
+   * build can be contained here, in plain words, and the Build dialog's
+   * choices. Serves the `builds` piece (guarded, trust); probes only.
+   */
+  workspaceBuildSandbox: `${API_BASE}/workspaces/:wsId/build-sandbox`,
+  /** `GET` → `ReviewResponse` (story 5.2): the ticket's latest run, for the review page; 404 without one. */
+  workspaceBuild: `${API_BASE}/workspaces/:wsId/builds/:ref`,
+  /**
+   * `POST` → `ReviewResponse` (story 5.2): Approve. Merges the run's branch
+   * locally with the ticket's `done` mark in the merge commit. 409
+   * `checks_failed`, `checkout_dirty`, `merge_conflict` (aborted; the
+   * checkout is unchanged).
+   */
+  workspaceBuildApprove: `${API_BASE}/workspaces/:wsId/builds/:ref/approve`,
+  /** `POST RejectBuildRequest` → `ReviewResponse` (story 5.2; 5.9 adds the note and the retry): Reject. Removes the run's worktree and (story 5.5) its branch, and stops it. */
+  workspaceBuildReject: `${API_BASE}/workspaces/:wsId/builds/:ref/reject`,
+  /**
+   * `POST` (no body) → `CommitPlanFilesResponse` (story 5.5, user decision
+   * 2026-10-04): **Commit plan files**. Commits exactly the ticket's plan and
+   * the `tickets.toml` files a `plan_uncommitted` refusal watches, when they
+   * have changes, in one commit of their own (other staged changes stay
+   * staged). With none changed, nothing is committed (`committed: []`).
+   * 409 `checkout_dirty` during a merge, rebase, cherry-pick or revert,
+   * `vcs_unavailable` without a branch or a usable git.
+   */
+  workspaceBuildCommitPlan: `${API_BASE}/workspaces/:wsId/builds/:ref/commit-plan`,
+  /** `GET` → `SessionRunResponse` (story 5.2): the run of a `build` session; 404 for one without a run. */
+  sessionRun: `${API_BASE}/workspaces/:wsId/sessions/:sesId/run`,
+  // Pre-registered by story 5.3 for epics 5 and 11: each serves `builds`
+  // (guarded, trust) and answers 501 `not_implemented` until its lane.
+  /** `GET` → `RunsResponse` (11.1, the Runs tab): every run of the workspace and its queue. */
+  workspaceRuns: `${API_BASE}/workspaces/:wsId/runs`,
+  /** `GET` → `RunResponse` (11.1, the run view); 404 for another workspace's run. */
+  workspaceRun: `${API_BASE}/workspaces/:wsId/runs/:runId`,
+  /** `POST StopRunRequest` → `RunResponse` (5.8): Stop. 409 `run_not_active`. */
+  runStop: `${API_BASE}/workspaces/:wsId/runs/:runId/stop`,
+  /**
+   * `POST RetryRunRequest` → `RunResponse` (5.8 `resume`, 5.9 `rebase`, 11.1
+   * `apply_fix`): runs a blocked or failed run's ticket again in its
+   * worktree. 409 `run_active`, `run_not_active`.
+   */
+  runRetry: `${API_BASE}/workspaces/:wsId/runs/:runId/retry`,
+  /** `POST CheckAgainRequest` → `RunResponse` (11.2): re-runs the run's verification. 409 `run_active`. */
+  runCheckAgain: `${API_BASE}/workspaces/:wsId/runs/:runId/check-again`,
+  /**
+   * `GET` → `WorkspaceBuildSettingsResponse`; `PATCH
+   * UpdateWorkspaceBuildSettingsRequest` (5.8 the limit, 11.2 the test
+   * command): the project's build settings, behind the `builds` piece.
+   */
+  workspaceBuildSettings: `${API_BASE}/workspaces/:wsId/build-settings`,
+  /**
+   * `GET` → `RunLimitSettingsResponse`; `PATCH UpdateRunLimitSettingsRequest`
+   * (5.8): the install's limits (builds at a time, time limit). Install-level,
+   * not a piece's (no workspace); 501 until 5.8.
+   */
+  runLimits: `${API_BASE}/settings/run-limits`,
+  /**
+   * `GET` → `NotificationSettingsResponse`; `PATCH
+   * UpdateNotificationSettingsRequest` (11.4): app-wide, never piece-guarded
+   * (E11-R1). A webhook's URL is never answered, only its host.
+   */
+  notificationSettings: `${API_BASE}/settings/notifications`,
+  /** `POST AddWebhookRequest` → 201 `NotificationSettingsResponse` (11.4): the URL goes to `SecretStorePort` (AD-16). */
+  notificationWebhooks: `${API_BASE}/settings/notifications/webhooks`,
+  /** `PATCH UpdateWebhookRequest` → `NotificationSettingsResponse`; `DELETE` → 204 (11.4). */
+  notificationWebhook: `${API_BASE}/settings/notifications/webhooks/:webhookId`,
+  /** `POST` → `WebhookTestResult` (11.4): Send test, with the HTTP result inline. */
+  notificationWebhookTest: `${API_BASE}/settings/notifications/webhooks/:webhookId/test`,
 } as const;
 
 /**

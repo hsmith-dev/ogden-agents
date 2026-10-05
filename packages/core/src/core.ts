@@ -5,6 +5,7 @@ import { createBmadFeatures, parseAvailableBmadPieces, type BmadFeatures, type B
 import { createBmadModulesSeen, type BmadModulesSeen } from './bmad-modules-seen.js';
 import { createBmadScriptTrust, type BmadScriptTrust } from './bmad-script-trust.js';
 import { createBmadSetup, type BmadSetupUseCases } from './bmad-setup.js';
+import { createBuildSessions, type BuildSessions } from './build-sessions.js';
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
 import { createEntities, type Entities } from './entities.js';
 import { createEventLog, type EventLog, type EventLogOptions } from './event-log.js';
@@ -39,6 +40,11 @@ export interface Core {
   readonly installSettings: InstallSettings;
   /** Each agent's default model and last model list, install-wide (story 11). */
   readonly agentModels: AgentModels;
+  /**
+   * What each unattended build session's agent starts with (story 5.2): the
+   * builds use-cases register it, the chat reads it. In memory only.
+   */
+  readonly buildSessions: BuildSessions;
   close(): void;
 }
 
@@ -128,6 +134,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     bmadSetup,
     installSettings,
     agentModels,
+    buildSessions: createBuildSessions(),
     close: () => {
       try {
         permissions.close();

@@ -5,7 +5,7 @@
  * agent, so this module never imports the turns.
  */
 import { projectNotTrustedReason, redactSecrets, type Session, type SessionId, type Workspace } from '@ogden-agents/shared';
-import { AgentError, type AgentEvent, type AgentRestored, type AgentSession } from '../agent-port.js';
+import { AgentError, type AgentEvent, type AgentPermissionRequest, type AgentRestored, type AgentSession } from '../agent-port.js';
 import { PRIME_NEW_MESSAGE, primedPrompt } from '../resume-prime.js';
 import { AGENT_SESSION_REF, AGENT_STARTING_NOTICE_MS, HANDOFF_PENDING_REF } from './constants.js';
 import type { ChatContext } from './context.js';
@@ -77,7 +77,13 @@ export function createAgents(
       restartPending: false,
       appliedModel: null,
     };
-    const onPermissionRequest = onPermissionRequestFor(session);
+    // A `build` session (story 5.2) runs in its run's worktree, in its sandbox, and its permission
+    // requests are answered by core's build policy, never a card. Without its setup it never starts.
+    const build = session.kind === 'build' ? ctx.options.buildSessions?.get(session.id) : undefined;
+    // An attended build (story 5.6) is the user's: every tool call is a card at the `ask_every_time` level, no rule allows one.
+    const unattended = build === undefined || build.attended === true ? undefined : build;
+    const onPermissionRequest =
+      build === undefined ? onPermissionRequestFor(session) : unattended === undefined ? onPermissionRequestFor(session, { attended: true }) : async (request: AgentPermissionRequest) => unattended.decide(request);
     // The agent the session was started with (epic 6), looked up for each start: never another one.
     const agent = agentOf(session.id);
     const agentId = agentIdOf(session);
@@ -86,12 +92,13 @@ export function createAgents(
     entry.appliedModel = startModel;
     // The real-cased path: the case-folded key is for uniqueness only (AD-2).
     const input = {
-      cwd: workspace.realPath ?? workspace.path,
-      env: { ...agentEnv(session.id) },
+      cwd: build?.cwd ?? workspace.realPath ?? workspace.path,
+      env: { ...agentEnv(session.id), ...unattended?.env },
       onPermissionRequest,
       permissionMode: startMode,
       ...(entry.guardsRequested ? { protectedPaths: ctx.protectedPaths() } : {}),
       ...(startModel === null ? {} : { model: startModel }),
+      ...(unattended === undefined ? {} : { sandbox: unattended.sandbox }),
     };
     const previous = storedAgentSessionId(session.id);
     // A chat that reached an agent before, and has none now, reopens that agent's session (2.7).
@@ -101,6 +108,9 @@ export function createAgents(
       // An agent that runs the project's own settings and hooks starts only in a project trusted as it is now: asked at every
       // start, not only when the chat was made, so a changed `.mcp.json` asks again before the next start (epic 12, 12.3).
       if (needsTrust && !(await ctx.projectTrusted(workspace.id))) throw new AgentError('agent_unavailable', projectNotTrustedReason(agent.displayName));
+      if (session.kind === 'build' && build === undefined) {
+        throw new AgentError('agent_unavailable', `${agent.displayName} can't run this build any more. Build the ticket again from the board.`);
+      }
       return previous === undefined
         ? agent.startSession(input).then((started) => ({ session: started, restored: undefined }))
         : agent.reopenSession({ ...input, agentSessionId: previous });

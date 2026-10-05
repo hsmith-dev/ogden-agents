@@ -7,12 +7,13 @@
  */
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createBmadCatalog, createTicketsV7, createUpstreamBmadSource, createUvScriptRunner, createUvToolchain, errorCode, ScriptRunError, type UvScriptRunner } from '@ogden-agents/adapters';
+import { createBmadCatalog, createScriptsSnapshotter, createTicketsV7, createUpstreamBmadSource, createUvScriptRunner, createUvToolchain, errorCode, ScriptRunError, type UvScriptRunner } from '@ogden-agents/adapters';
 import {
   CoreError,
   createBmadSkillFolders,
   createBmadSource,
   createBoard,
+  createRunAwareTickets,
   createPlanning,
   createPlanningDocuments,
   createTicketWatcher,
@@ -43,6 +44,15 @@ export function uvWorkDir(dataDir: string): string {
   const dir = join(dataDir, 'tools', 'uv-work');
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
+}
+
+/**
+ * Where each `tickets.py` run's snapshot of the trusted project's
+ * `_bmad/scripts/` is written (the maintained-fork story): Ogden Agents' own
+ * folder, owner-only, cleared by the first snapshot of each server.
+ */
+export function bmadScriptRunsDir(dataDir: string): string {
+  return join(dataDir, 'tools', 'bmad-script-runs');
 }
 
 /**
@@ -164,6 +174,9 @@ export function createPlanAndBoard({
       runner: scriptRunner,
       // Only the verified copy, read at each run; never the project's own `tickets.py`.
       script: () => bmadSourcePort.file(TICKETS_SCRIPT),
+      // Each run imports a private snapshot of the trusted project's scripts, written from the checked bytes
+      // (the maintained-fork story), never the repo's own `config_utils.py`.
+      snapshot: createScriptsSnapshotter(bmadScriptRunsDir(dataDir)),
       // Never the repo: uv would run a `.venv` the project ships (story 4.2 review).
       workDir: uvWorkDir(dataDir),
       // Codes only: the script's own error text can name the user's paths.
@@ -172,7 +185,15 @@ export function createPlanAndBoard({
     });
   // Every board use-case checks the piece, then the project's script trust (story 4.2), then the pinned BMad
   // Method (story 4.14), before the store runs anything.
-  const board = createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: bmadSource, entities: core.entities, catalog: bmadCatalog, tickets: ticketStore });
+  // A ticket with an active build run is read and marked in its run's worktree (story 5.5, AD-10); the watch stays on the main checkout.
+  const boardTickets = createRunAwareTickets({
+    store: ticketStore,
+    entities: core.entities,
+    trust: core.bmadScriptTrust,
+    dataDir,
+    onError: (step, error) => log.info("a build's plan was read from the main checkout", { step, code: errorCode(error, 'unexpected') }),
+  });
+  const board = createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: bmadSource, entities: core.entities, catalog: bmadCatalog, tickets: boardTickets });
   // One watch per project with Board on, trusted and BMad Method set up (story 4.8; the setup status is entry 4.3's):
   // an agent's ticket write reaches the board as `ticket.changed`.
   const ticketWatcher = createTicketWatcher({
@@ -185,7 +206,7 @@ export function createPlanAndBoard({
     // Codes only: never a path or the script's output.
     onError: (workspaceId, step, error) => log.warn('ticket watch failed', { workspaceId, step, code: errorCode(error, 'unexpected') }),
   });
-  return { planning, scriptRunner, bmadSource, board, ticketWatcher };
+  return { planning, scriptRunner, bmadSource, board, ticketWatcher, ticketStore };
 }
 
 /** How core's failed BMad Method setup is logged: codes only, since a setup's own error can name the user's paths. */

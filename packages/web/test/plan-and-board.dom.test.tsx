@@ -32,6 +32,11 @@
 import {
   API_ROUTES,
   apiPath,
+  BMAD_FILES_UNCOMMITTED_MESSAGE,
+  COMMIT_PLAN_FILES_LABEL,
+  NO_PLAN_FILES_TO_COMMIT_TEXT,
+  PLAN_FILES_COMMITTED_TEXT,
+  PLAN_UNCOMMITTED_MESSAGE,
   BMAD_DOWNLOAD_INTEGRITY_MESSAGE,
   BMAD_DOWNLOAD_LABEL,
   BMAD_NOT_DOWNLOADED_MESSAGE,
@@ -92,6 +97,9 @@ const state = vi.hoisted(() => ({
   ticket: undefined as unknown,
   /** The status change's answer, or a function of its body (story 4.10). */
   mark: undefined as unknown,
+  /** Build's answer and Commit plan files' answer (story 5.5). */
+  build: undefined as unknown,
+  commitPlan: undefined as unknown,
 }));
 
 /** The event stream's stand-in: `push` appends events and re-renders what reads them. */
@@ -162,6 +170,8 @@ vi.mock('@/auth/tab-token', () => ({
         return reply(typeof state.mark === 'function' ? (state.mark as (body: unknown) => unknown)(body) : state.mark);
       }
       if (/\/tickets\/[^/]+$/.test(path)) return reply(state.ticket);
+      if (method === 'POST' && path.endsWith('/commit-plan')) return reply(state.commitPlan);
+      if (method === 'POST' && path.endsWith('/builds')) return reply(state.build);
       return new Response('{}', { status: 404 });
     },
   },
@@ -216,6 +226,8 @@ beforeEach(() => {
   state.source = undefined;
   state.ticket = undefined;
   state.mark = undefined;
+  state.build = undefined;
+  state.commitPlan = undefined;
   stream.events = [];
   stream.caughtUp = true;
 });
@@ -1093,5 +1105,50 @@ describe('Changing a status from the board (story 4.10)', () => {
     fireEvent.click(screen.getAllByTestId('ticket-status-item')[0]!);
     await settle();
     expect(screen.getByTestId('ticket-sheet-mark-error').textContent).toBe("Couldn't change 1.3's status. Only approving the work marks a ticket done.");
+  });
+});
+
+describe('Commit plan files on the board (story 5.5)', () => {
+  const READY: TicketsResponse = TicketsResponse.parse({
+    tickets: [{ ref: '1.1', id: 1, epic: 'epic-first', title: 'Build the first thing', type: 'story', status: 'ready-for-dev', state: 'backlog', blocked_reason: '' }],
+    problems: [],
+  });
+
+  it('a Build refused for uncommitted plan files offers Commit plan files, which commits them and says to build again', async () => {
+    state.tickets = READY;
+    state.build = { status: 409, code: 'plan_uncommitted', message: PLAN_UNCOMMITTED_MESSAGE };
+    state.commitPlan = { committed: ['_bmad-output/plan.md'], revision: 'a'.repeat(40) };
+    mount(<BoardTickets wsId={WS} builds={{ onStarted: () => {} }} />);
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Build 1.1' }));
+    await settle();
+    expect(screen.getByTestId('board-build-error').textContent).toContain(PLAN_UNCOMMITTED_MESSAGE);
+    fireEvent.click(screen.getByRole('button', { name: COMMIT_PLAN_FILES_LABEL }));
+    await settle();
+    expect(state.calls).toContain(`POST ${apiPath(API_ROUTES.workspaceBuildCommitPlan, { wsId: WS, ref: '1.1' })}`);
+    expect(screen.queryByTestId('board-build-error')).toBeNull();
+    expect(screen.getByTestId('board-plan-committed').textContent).toBe(PLAN_FILES_COMMITTED_TEXT);
+  });
+
+  it('offers no Commit plan files for another refusal, and says so when nothing needed committing', async () => {
+    state.tickets = READY;
+    state.build = { status: 409, code: 'plan_uncommitted', message: BMAD_FILES_UNCOMMITTED_MESSAGE };
+    mount(<BoardTickets wsId={WS} builds={{ onStarted: () => {} }} />);
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Build 1.1' }));
+    await settle();
+    expect(screen.getByTestId('board-build-error').textContent).toContain(BMAD_FILES_UNCOMMITTED_MESSAGE);
+    expect(screen.queryByRole('button', { name: COMMIT_PLAN_FILES_LABEL })).toBeNull();
+    cleanup();
+
+    state.build = { status: 409, code: 'plan_uncommitted', message: PLAN_UNCOMMITTED_MESSAGE };
+    state.commitPlan = { committed: [], revision: 'a'.repeat(40) };
+    mount(<BoardTickets wsId={WS} builds={{ onStarted: () => {} }} />);
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Build 1.1' }));
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: COMMIT_PLAN_FILES_LABEL }));
+    await settle();
+    expect(screen.getByTestId('board-plan-committed').textContent).toBe(NO_PLAN_FILES_TO_COMMIT_TEXT);
   });
 });

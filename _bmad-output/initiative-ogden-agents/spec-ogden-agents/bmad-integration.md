@@ -25,7 +25,7 @@ Every status change goes through `tickets.py mark <ref> <status>`. Marking with 
 
 ## Reuse first
 
-- Dispatch and agent profiles: bmad-loop at its pinned upstream commit. v7 `tickets.toml` support is opened as an upstream PR and used once merged and pinned.
+- Dispatch: Ogden Agents chooses each ticket and runs `bmad-build-auto` for that one ticket in an Ogden-managed headless ACP session in the run's worktree (user decision 2026-10-02, after spike 5.1 found bmad-loop 0.13.0 needs a user-installed multiplexer and reads no v7 ticket). bmad-loop is not used in v1; it stays an option for agents without ACP (v2).
 - Ticket writes: `tickets.py`.
 - Installing into a project: BMAD's `bmad` setup scripts, run from the UI wizard.
 - All of these run through `uv`, which Ogden Agents installs if it is missing, from the verified copy of the pinned upstream BMad in Ogden Agents's data folder, never from a project's own copy (architecture AD-13).
@@ -41,12 +41,12 @@ Every status change goes through `tickets.py mark <ref> <status>`. Marking with 
 
 ## Upstream extensions
 
-- `tickets.py … --json` for machine-readable output (not needed: `tickets.py` already prints JSON).
-- A per-run JSON result file beside each plan.
+- `tickets.py … --json` for machine-readable output.
+- A per-run JSON result file for each build (Ogden's own since 2026-10-02, written in the run's folder in the data folder, epic 5 entry 4).
 - A setup wizard in the UI that replaces running `bmad` setup in a terminal (Ogden Agents's own UI over upstream's `setup.py`).
-- v7 `tickets.toml` dispatch in bmad-loop.
+- Running one named v7 ticket headless in a given worktree, with its run folder outside the repo and a machine-readable event stream: Ogden's headless ACP build session since 2026-10-02 (epic 5 entry 4); the bmad-loop patches for it are a v2 or upstream note in epic 5.
 - Plain-language labels and descriptions per skill ("Describe your idea", "Build next story"): kept in Ogden Agents's own mapping file keyed by skill name, with the `SKILL.md` description as fallback (AD-12).
-- Pause hooks for UI approval via `plan_checkpoint` and `done_checkpoint` in `tickets.toml`.
+- Pause hooks for UI approval via `plan_checkpoint` and `done_checkpoint` in `tickets.toml` (Ogden's build session pauses and resumes, epic 5 entry 4).
 
 Ogden Agents carries no forks (user decision 2026-10-02, story 4.14). Each extension BMad itself must provide is opened as an upstream PR and used once upstream merges it and Ogden Agents's pin moves to a commit that has it; until then the feature works without it or stays on Ogden Agents's side. Was "Fork extensions", carried in forks of BMAD-METHOD and bmad-loop.
 

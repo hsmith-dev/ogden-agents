@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7dad9918-4c85-42a5-904d-87f0d9ff253d",
+  "id": "42644bc5-a9a3-4f79-af9d-fa31e34bf3bf",
   "prevId": "7422e302-e848-4724-b33d-49b62b416f2d",
   "tables": {
     "agent_settings": {
@@ -378,6 +378,27 @@
           "notNull": true,
           "autoincrement": false
         },
+        "branch": {
+          "name": "branch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "base_revision": {
+          "name": "base_revision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -624,13 +645,6 @@
         },
         "bmad_scripts_fingerprint": {
           "name": "bmad_scripts_fingerprint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "agent_files_fingerprint": {
-          "name": "agent_files_fingerprint",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

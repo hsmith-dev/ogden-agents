@@ -49,6 +49,13 @@ const notificationsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/notifications-page'), 'NotificationsPage'),
 });
 
+/** The version, its channel and the check for newer ones (story 13.7). */
+const aboutRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/about',
+  component: lazyRouteComponent(() => import('./routes/about-page'), 'AboutPage'),
+});
+
 /** The app-wide default for new projects (story 10.4). */
 const newProjectsRoute = createRoute({
   getParentRoute: () => settingsRoute,
@@ -98,6 +105,13 @@ const workspaceBoardTicketRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/workspace-board-ticket'), 'WorkspaceBoardTicket'),
 });
 
+/** A ticket's build review (story 5.2, the tracer), `/w/:wsId/review/:ref`. */
+const workspaceReviewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$wsId/review/$ref',
+  component: lazyRouteComponent(() => import('./routes/workspace-review-page'), 'WorkspaceReviewPage'),
+});
+
 /** The session view's search: `?driver=terminal` mirrors who drives the chat (story 3.6); it never switches by itself. */
 export interface SessionSearch {
   driver?: 'terminal';
@@ -119,8 +133,9 @@ const routeTree = rootRoute.addChildren([
   workspaceSettingsRoute,
   workspacePlanRoute,
   workspaceBoardRoute.addChildren([workspaceBoardTicketRoute]),
+  workspaceReviewRoute,
   sessionRoute,
-  settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute, notificationsRoute]),
+  settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute, notificationsRoute, aboutRoute]),
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

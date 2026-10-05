@@ -58,6 +58,7 @@ import {
   type AgentRestored,
   type AgentSession,
   type AgentToolCallDiff,
+  type AgentSandbox,
   type ProtectedPaths,
 } from '@ogden-agents/core';
 import type { PermissionMode } from '@ogden-agents/shared';
@@ -174,15 +175,22 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
       env: Readonly<Record<string, string>>;
       onPermissionRequest?: PermissionCallback | undefined;
       protectedPaths?: ProtectedPaths | undefined;
+      sandbox?: AgentSandbox | undefined;
       model?: string | undefined;
       permissionMode?: PermissionMode | undefined;
     },
     opening: Opening,
   ) => {
+    // Fail closed: an agent with no way to take the sandbox never runs a build session without one (story 5.2).
+    if (input.sandbox !== undefined && quirks.sessionMeta === undefined) {
+      throw new AgentError('agent_unavailable', `${descriptor.displayName} can't run a sandboxed build.`);
+    }
     const startModel = descriptor.models?.list.some((each) => each.id === input.model) === true ? input.model : undefined;
     const permissionMode = input.permissionMode ?? 'ask';
     // Before anything is spawned: a quirk that throws must not leave a process behind.
     const fixed = startFixedModeSafely(permissionMode, input.protectedPaths);
+    // Fail closed: a fixed-mode start has no place for the sandbox, so a build session never runs without it (story 5.2, epic 12).
+    if (input.sandbox !== undefined && fixed !== undefined) throw new AgentError('agent_unavailable', `${descriptor.displayName} can't run a sandboxed build.`);
     const { child, secrets } = spawnAgent({ cwd: input.cwd, env: input.env, permissionMode, protectedPaths: input.protectedPaths }, startModel);
     return startOnChild(
       child,
@@ -197,6 +205,7 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
         startTimeoutMs,
         onPermissionRequest: input.onPermissionRequest,
         protectedPaths: input.protectedPaths,
+        sandbox: input.sandbox,
         startModel,
         permissionMode,
         fixed,
@@ -254,6 +263,8 @@ interface StartContext {
   onPermissionRequest: PermissionCallback | undefined;
   /** Kept guarded for the session's life, through the agent's `sessionMeta` quirk (Auto only). */
   protectedPaths: ProtectedPaths | undefined;
+  /** An unattended build session's sandbox (story 5.2), in the same `sessionMeta` quirk. */
+  sandbox: AgentSandbox | undefined;
   /** The static-list model the process was started on (story 11), if any. */
   startModel: string | undefined;
   /** The chat's mode at start: given at start to an agent that fixes it (`startOptions`). */
@@ -269,7 +280,7 @@ function killTree(child: ChildProcessWithoutNullStreams): void {
 
 async function startOnChild(
   child: ChildProcessWithoutNullStreams,
-  { descriptor, quirks, reasons, cwd, env, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths, startModel, fixed }: StartContext,
+  { descriptor, quirks, reasons, cwd, env, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths, sandbox, startModel, fixed }: StartContext,
   opening: Opening,
 ): Promise<{ init: acp.InitializeResponse; session: AgentSession | undefined; restored: AgentRestored }> {
   const { couldNotStart: COULD_NOT_START, stopped: STOPPED, failed: FAILED } = reasons;
@@ -279,7 +290,10 @@ async function startOnChild(
   const listeners = new Set<AgentEventListener>();
   // An agent whose mode is given at start gets it, and the guards, in one `_meta` (epic 12, 12.3).
   // The agent's own way to keep the protected paths guarded; it can't be changed later.
-  const guards = fixed !== undefined ? undefined : protectedPaths === undefined || quirks.sessionMeta === undefined ? undefined : quirks.sessionMeta(protectedPaths);
+  const guards =
+    fixed !== undefined || ((protectedPaths === undefined && sandbox === undefined) || quirks.sessionMeta === undefined)
+      ? undefined
+      : quirks.sessionMeta(protectedPaths, sandbox);
   const sessionMeta = fixed !== undefined ? fixed.sessionMeta : guards === undefined ? {} : { _meta: guards };
   /** While `session/load` replays history the chat already has: those updates are swallowed. */
   let replaying = false;

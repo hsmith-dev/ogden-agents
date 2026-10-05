@@ -1294,7 +1294,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       const checked = checkedRef(ref);
       const run = latestRun(workspaceId, checked);
       // The plan's path (the same in the main checkout and the worktree), for the findings in it.
-      const plan = run.worktreePath === null ? null : await tickets.find(repoPath, checked, guard).then((ticket) => ticket.plan, () => null);
+      // Not while the agent runs: its plan is being written, and nothing is reviewed yet.
+      const plan = run.worktreePath === null || run.outcome === 'running' ? null : await tickets.find(repoPath, checked, guard).then((ticket) => ticket.plan, () => null);
       return reviewOf(repoPath, run, plan);
     },
 

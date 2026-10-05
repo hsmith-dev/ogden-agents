@@ -6,7 +6,7 @@
  * board uses), at most {@link MAX_PLAN_BYTES}; each finding is masked and
  * cut. A plan with no log, or one that can't be read, has no findings.
  */
-import { lstatSync, readFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ReviewFinding } from '@ogden-agents/shared';
 import { planConfined } from './run-aware-tickets.js';
@@ -41,11 +41,23 @@ export function parseTriageLog(markdown: string, mask: (text: string) => string 
 /** The findings of the plan `plan` (repo-relative) in `worktree`; empty when it isn't a plain file there. Never throws. */
 export function readPlanFindings(worktree: string | null, plan: string | null, mask?: (text: string) => string): ReviewFinding[] {
   if (worktree === null || plan === null || !planConfined(worktree, plan)) return [];
+  let fd: number | undefined;
   try {
-    const file = join(worktree, ...plan.split('/'));
-    if (lstatSync(file).size > MAX_PLAN_BYTES) return [];
-    return parseTriageLog(readFileSync(file, 'utf8'), mask);
+    // Opened without following a link and without blocking (a swapped-in FIFO), then judged on the opened file itself and read bounded.
+    fd = openSync(join(worktree, ...plan.split('/')), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const info = fstatSync(fd);
+    if (!info.isFile() || info.size > MAX_PLAN_BYTES) return [];
+    const buffer = Buffer.alloc(info.size);
+    let read = 0;
+    while (read < buffer.length) {
+      const got = readSync(fd, buffer, read, buffer.length - read, read);
+      if (got === 0) break;
+      read += got;
+    }
+    return parseTriageLog(buffer.subarray(0, read).toString('utf8'), mask);
   } catch {
     return [];
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }

@@ -143,6 +143,7 @@ export function BuildReview({ wsId, ticketRef }: { wsId: string; ticketRef: stri
         <Text as="h2" variant="heading">
           {REVIEW_FINDINGS_TITLE}
         </Text>
+        <Text variant="caption">Written by the agent in its plan, not checked by Ogden Agents.</Text>
         {findings.length === 0 ? (
           <Text variant="caption" data-testid="review-no-findings">
             {REVIEW_NO_FINDINGS_TEXT}

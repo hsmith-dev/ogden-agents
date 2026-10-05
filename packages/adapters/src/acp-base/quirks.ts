@@ -5,17 +5,17 @@
  * `acp-agent.ts`.
  */
 import type * as acp from '@agentclientprotocol/sdk';
-import type { AgentDescriptor, AgentTerminalResume, ProtectedPaths } from '@ogden-agents/core';
+import type { AgentDescriptor, AgentSandbox, AgentTerminalResume, ProtectedPaths } from '@ogden-agents/core';
 import { PERMISSION_MODES, type PermissionMode } from '@ogden-agents/shared';
 import type { AcpToolInputPaths } from './tool-paths.js';
 
 /** The plain reasons the UI shows for an agent, by its product name. */
-export function acpReasons(displayName: string) {
+export function acpReasons(displayName: string, options: { apiKeyOnly?: boolean } = {}) {
   return {
     notSetUp: `${displayName} isn't set up for Ogden Agents on this computer yet.`,
     couldNotStart: `${displayName} couldn't start. Try again.`,
     stopped: `${displayName} stopped unexpectedly. Send your message again to restart it.`,
-    signIn: `${displayName} needs you to sign in again.`,
+    signIn: options.apiKeyOnly === true ? `${displayName} needs a valid API key. Check it in Settings → Agents.` : `${displayName} needs you to sign in again.`,
     failed: `${displayName} stopped with an error. Try again.`,
     noSuchMode: `${displayName} doesn't offer that permission mode here.`,
     couldNotSwitchMode: `${displayName} couldn't switch its permission mode.`,
@@ -39,19 +39,45 @@ export interface AcpLaunch {
   logFields?: Record<string, unknown> | undefined;
 }
 
+/**
+ * What `launch` is given (epic 12, 12.3): core's environment, and the chat's
+ * permission mode and protected paths for an agent that takes them only at
+ * start (a flag or an environment variable of its process). `protectedPaths`
+ * is set only for a chat in Auto, as core passes it.
+ */
+export interface AcpLaunchInput {
+  cwd: string;
+  env: Readonly<Record<string, string>>;
+  permissionMode: PermissionMode;
+  protectedPaths?: ProtectedPaths | undefined;
+}
+
+/** What an agent's `authMethod` picks: the method id, optionally with the `_meta` its `authenticate` takes (never logged). */
+export type AcpAuthChoice = string | { methodId: string; meta?: Record<string, unknown> | undefined };
+
+/** How an agent whose mode is fixed at chat start takes it (`AgentDescriptor.modeFixedAtStart`). */
+export interface AcpStartOptions {
+  /** The `_meta` of its `session/new`, `resume` and `load`, with the chat's mode (and the protected paths in Auto, if it can guard them). */
+  meta?: Record<string, unknown> | undefined;
+  /** Whether the session keeps `protectedPaths` guarded (core puts only such a session in Auto). */
+  guardsPaths: boolean;
+}
+
 /** What is an agent's own, beside its descriptor (E6-R3). */
 export interface AcpAgentQuirks {
   /**
    * How to start it in `cwd` with core's environment (AD-16). Throws an
    * {@link AgentError} (`agent_unavailable`) when it isn't set up.
    */
-  launch(input: { cwd: string; env: Readonly<Record<string, string>> }): AcpLaunch;
+  launch(input: AcpLaunchInput): AcpLaunch;
   /**
    * The `_meta` its `session/new`, `resume` and `load` take to keep core's
-   * protected paths guarded for the session's life (Auto only). Without it
-   * a session doesn't protect paths, and core keeps it out of Auto.
+   * protected paths guarded for the session's life (Auto only), and an
+   * unattended build session's sandbox (story 5.2; never both absent).
+   * Without it a session doesn't protect paths, and core keeps it out of
+   * Auto; an agent without it can't run a build session.
    */
-  sessionMeta?: ((protectedPaths: ProtectedPaths) => Record<string, unknown> | undefined) | undefined;
+  sessionMeta?: ((protectedPaths: ProtectedPaths | undefined, sandbox?: AgentSandbox | undefined) => Record<string, unknown> | undefined) | undefined;
   /** The raw-input fields of its tools that name paths. */
   toolInputPaths: AcpToolInputPaths;
   /** Its session modes that ask as much as Ask (or more); any other, known or not, asks less. */
@@ -65,7 +91,19 @@ export interface AcpAgentQuirks {
    * `undefined` to open sessions as they are. Never sees anything but core's
    * environment; never logged.
    */
-  authMethod?: ((input: { env: Readonly<Record<string, string>>; initialized: acp.InitializeResponse }) => string | undefined) | undefined;
+  authMethod?: ((input: { env: Readonly<Record<string, string>>; initialized: acp.InitializeResponse }) => AcpAuthChoice | undefined) | undefined;
+  /**
+   * Option ids Deny prefers, first found wins, when the request offers more
+   * than one `reject_once` option (a decline and a cancel, say); otherwise
+   * the first `reject_once` one. Never any other kind (epic 12, 12.3).
+   */
+  rejectOptionIds?: readonly string[] | undefined;
+  /**
+   * For an agent whose descriptor says `modeFixedAtStart`: how the chat's
+   * mode (and the protected paths in Auto) reach it at start. Required then,
+   * and only then; `sessionMeta` is not used.
+   */
+  startOptions?: ((input: { permissionMode: PermissionMode; protectedPaths?: ProtectedPaths | undefined }) => AcpStartOptions) | undefined;
   /** The raw-input fields of its shell tools that hold the command a card shows, first found wins. Default `['command']`. */
   commandFields?: readonly string[] | undefined;
   /** How it is asked to run an installed skill (`AgentPort.skillInvocation`, story 4.1): its own command syntax; the shared client adds none. */

@@ -152,8 +152,10 @@ test('two agents at once in a Simple project: picker, own keys only, Antigravity
     await expect(options.nth(0)).toContainText('Claude Code');
     await expect(options.nth(1)).toContainText('Antigravity');
     const untrusted = options.filter({ hasText: 'Fake Agent' });
-    await expect(untrusted).toHaveAttribute('aria-disabled', 'true');
+    // Needing the project trusted is fixed in place (epic 12, 12.3): choosable, with its reason and a Trust item.
+    await expect(untrusted).not.toHaveAttribute('aria-disabled', 'true');
     await expect(untrusted).toContainText("Fake Agent uses this project's own agent settings, so trust the project before starting a Fake Agent chat.");
+    await expect(page.getByTestId('agent-trust-project')).toContainText('Trust this project for Fake Agent');
     await options.nth(1).click();
     await expect(picker).toHaveAttribute('data-agent', 'antigravity');
     await page.getByTestId('new-chat').click();
@@ -267,6 +269,22 @@ test('two agents at once in a Simple project: picker, own keys only, Antigravity
     const again = await newChat(page, trustedId, 'fake-agent');
     expect(again.status).toBe(409);
     expect(((await again.json()) as { error: { code: string } }).error.code).toBe('project_not_trusted');
+    // The same trust is bound to the files the agent runs (epic 12, 12.3): trusted again, a changed `.mcp.json` asks again.
+    expect((await api(page, 'PUT', apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId: trustedId }))).status).toBe(200);
+    expect((await newChat(page, trustedId, 'fake-agent')).status).toBe(201);
+    writeFileSync(join(bmadRepo.path, '.mcp.json'), '{"mcpServers":{"planted":{"command":"node"}}}\n');
+    const mcp = await newChat(page, trustedId, 'fake-agent');
+    expect(mcp.status).toBe(409);
+    expect(((await mcp.json()) as { error: { code: string } }).error.code).toBe('project_not_trusted');
+    // The picker for that project offers Trust, and the prompt allows it as the files are now.
+    await page.goto(`${launched.url}/w/${trustedId}`);
+    await page.getByTestId('agent-picker').click();
+    await page.getByTestId('agent-trust-project').click();
+    await expect(page.getByTestId('script-trust-prompt')).toBeVisible();
+    await expect(page.getByTestId('script-trust-prompt')).toHaveAttribute('data-changed', 'true');
+    await page.getByTestId('script-trust-allow').click();
+    await expect(page.getByTestId('script-trust-prompt')).toBeHidden();
+    expect((await newChat(page, trustedId, 'fake-agent')).status).toBe(201);
   });
 
   await test.step('after a restart, both chats continue their sessions', async () => {

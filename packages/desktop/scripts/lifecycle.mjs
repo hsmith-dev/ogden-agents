@@ -121,6 +121,8 @@ async function scenario(name, fn) {
 
 await scenario('A. a second launch focuses the first window and starts no second server', async () => {
   const app = await startApp('second');
+  // Short-lived helpers (the server's start-up probes) come and go for a few seconds; compare once they have.
+  await sleep(6000);
   const pids = listSidecars(before).map((p) => p.pid).sort();
   const second = spawn(exe, [], { stdio: 'ignore', env: { ...process.env, OGDEN_AGENTS_DATA_DIR: app.ws.data, OGDEN_DESKTOP_TEST_REPORT: app.ws.report } });
   const exit = await Promise.race([new Promise((r) => second.once('exit', r)), sleep(30_000).then(() => 'timeout')]);

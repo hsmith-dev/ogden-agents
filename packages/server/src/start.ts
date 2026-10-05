@@ -2,8 +2,10 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain } from '@ogden-agents/adapters';
+import { ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, projectFilesFingerprint } from '@ogden-agents/adapters';
 import {
+  agentConfigFolders,
+  agentProjectFiles,
   createAgentRegistry,
   createChat,
   createDataDir,
@@ -16,10 +18,11 @@ import {
   openCore,
   PORT_FILE,
   unregisteredAgent,
+  type AgentDescriptor,
   type AgentPort,
   type Core,
 } from '@ogden-agents/core';
-import { channelOf, compareVersions, MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM, type AgentId, type Session } from '@ogden-agents/shared';
+import { channelOf, compareVersions, MAX_TERMINAL_INPUT_BYTES, RUN_REASON_INTERRUPTED, SERVER_STREAM, type AgentId, type Session } from '@ogden-agents/shared';
 import { WebSocketServer } from 'ws';
 import { checkAgentWiring } from './agent-wiring.js';
 import { createApp, type ServerControl } from './app.js';
@@ -36,6 +39,7 @@ import { VERSION } from './version.js';
 import { wireAgents } from './start-agents.js';
 import { uvEnvironment } from './start-env.js';
 import { broadcast, closeServer, HOST, listen, repointAppShortcut } from './start-io.js';
+import { createBuildsWiring } from './start-builds.js';
 import { bmadSetupFailureLogger, uvPycacheDir, createBmadSourceAndCatalog, createDocumentCards, createPlanAndBoard, stopBmadWork, withAgentSkillFolders, type BmadWiring } from './start-planning.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
 import { openUrl } from './open-url.js';
@@ -103,12 +107,19 @@ export const MAX_WS_PAYLOAD_BYTES = MAX_TERMINAL_INPUT_BYTES + 1024;
 /** How long a stop waits after answering Quit or restart, so the reply reaches the client first. */
 const STOP_AFTER_REPLY_MS = 50;
 
+/** The agents' descriptors, set once they are wired. */
+interface DescriptorsRef {
+  current: readonly AgentDescriptor[];
+}
+
 /** Whether `agentId` is one this server registers (epic 6, entry 6): Claude Code, Antigravity unless left out (entry 5), then any extra agent a test wires. */
 const registeredAgent =
-  (options: Pick<StartOptions, 'extraAgents' | 'antigravity'>) =>
+  (options: Pick<StartOptions, 'extraAgents' | 'antigravity' | 'codex'>, hooks: Pick<TestHooks, 'codexServer'>) =>
   (agentId: string): boolean =>
     agentId === CLAUDE_CODE_AGENT_ID ||
     (options.antigravity !== false && agentId === ANTIGRAVITY_AGENT_ID) ||
+    (options.codex !== undefined && options.codex !== false && agentId === CODEX_AGENT_ID) ||
+    (options.codex === undefined && (CODEX_SHIPPED || hooks.codexServer !== undefined) && agentId === CODEX_AGENT_ID) ||
     (options.extraAgents ?? []).some((wiring) => wiring.descriptor.agentId === agentId);
 
 /**
@@ -141,6 +152,9 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       ),
     );
   const ownsCore = options.core === undefined;
+  // The registered agents' descriptors, set once they are wired (core is opened first): their own config folders
+  // join the protected paths, and the project files they run bind the project trust (epic 12, 12.3).
+  const descriptors: DescriptorsRef = { current: [] };
   // Every environment hook, on a test run only; one the options already decide is not read (story 10.8).
   const hooks = resolveTestHooks(process.env, dataDir, { ...options, ownsCore });
   // What this install ships, plus a test's own (story 10.2): the option, and the environment hook.
@@ -160,10 +174,13 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       // The request is declined all the same; the reason names no command.
       onPermissionError: (error) => log.warn('a permission request was declined after a failure', { reason: String(error) }),
       // A project's default agent (epic 6, entry 6) is one this server registers: Claude Code and any extra agent.
-      isAgentRegistered: registeredAgent(options),
+      isAgentRegistered: registeredAgent(options, hooks),
+      agentConfigFolders: () => agentConfigFolders(descriptors.current),
+      agentProjectFiles: () => agentProjectFiles(descriptors.current),
+      projectFilesFingerprint,
     });
   try {
-    return await listenAndAnnounce({ options, dataDir, log, core, ownsCore, lock, hooks, bmadWiring });
+    return await listenAndAnnounce({ options, dataDir, log, core, ownsCore, lock, hooks, bmadWiring, descriptors });
   } catch (error) {
     if (ownsCore) core.close();
     throw error;
@@ -179,6 +196,7 @@ async function listenAndAnnounce({
   lock,
   hooks,
   bmadWiring,
+  descriptors,
 }: {
   options: StartOptions;
   dataDir: string;
@@ -190,6 +208,8 @@ async function listenAndAnnounce({
   hooks: TestHooks;
   /** The server's one pinned BMad Method source (story 4.14), the catalog over it (story 4.1) and setup's runner holder (story 4.3). */
   bmadWiring: BmadWiring;
+  /** Filled with the registered agents' descriptors once they are wired. */
+  descriptors: DescriptorsRef;
 }): Promise<RunningServer> {
   const { bmadCatalog, bmadSourcePort, setupRunner } = bmadWiring;
   const requested = options.port ?? DEFAULT_PORT;
@@ -252,12 +272,16 @@ async function listenAndAnnounce({
   });
   // Every agent is wired before the stored sessions are settled, as before story 6.9's split: a wiring error leaves the database untouched.
   const { claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent } = wireAgents({ options, dataDir, log, hooks, core });
+  descriptors.current = wirings.map((wiring) => wiring.descriptor);
   // Agents from before this start are gone with their processes (AD-3): their sessions can be resumed, not left working.
   const settled = core.entities.settleInterruptedSessions(RESTARTED_REASON);
   if (settled.length > 0) log.info('sessions left working by a stopped server are idle and resumable', { sessions: settled.length });
   // Their terminals are gone too (story 3.1 review F3): those chats drive again.
   const released = core.entities.releaseTerminalDrivers();
   if (released.length > 0) log.info('sessions a stopped server left in the terminal are back in the chat', { sessions: released.length });
+  // Unattended runs are not resumed (AD-3 note): a run left running by a stopped server is blocked, its worktree kept (story 5.2).
+  const interrupted = core.entities.settleInterruptedRuns(RUN_REASON_INTERRUPTED);
+  if (interrupted.length > 0) log.info('runs left running by a stopped server are blocked', { runs: interrupted.length });
   // No permission mode but Ask outlives the run it was chosen in (cause `restart`).
   const reset = core.entities.resetPermissionModes();
   if (reset.length > 0) log.info('chats in Auto or Skip all are back in Ask after the restart', { sessions: reset.length });
@@ -293,7 +317,8 @@ async function listenAndAnnounce({
     // The per-project trust (story 4.2), as it stands now: trusted, and its scripts the ones the user allowed (4.13).
     // An agent that needs a trusted project is refused until then, and again once the scripts change.
     // The ACP adapters never see trust (6.4): it is checked here, before a chat is created.
-    projectTrusted: (workspaceId) => core.bmadScriptTrust.scriptsUnchanged(workspaceId),
+    // With the files an agent runs (`.claude/settings.json`, `.mcp.json`, from its descriptor), since epic 12 (12.3).
+    projectTrusted: (workspaceId) => core.bmadScriptTrust.trustedForAgents(workspaceId),
     terminal,
     // The chat follows the log (a mode changed by Developer mode reaches its agent) and gates Skip all on Developer mode.
     events: core.events,
@@ -304,10 +329,12 @@ async function listenAndAnnounce({
     onAgentError: (sessionId, error) => log.warn('agent failed', { sessionId, code: error.code, reason: error.message, ...error.details }),
     onInternalError: (sessionId, error) => log.error('applying an agent event failed', { sessionId, reason: String(error) }),
     onToolCallCompleted: (sessionId, toolCallId, diffs) => planningDocuments.toolCallCompleted(sessionId, toolCallId, diffs),
+    // Unattended build sessions (story 5.2): their worktree, sandbox and permission policy, registered by the builds use-cases.
+    buildSessions: core.buildSessions,
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
   // Plan and Board (story 4.1, `start-planning.ts`): planning sessions, the script runner, the tickets and their watch.
-  const { planning, scriptRunner, bmadSource, board, ticketWatcher } = createPlanAndBoard({
+  const { planning, scriptRunner, bmadSource, board, ticketWatcher, ticketStore } = createPlanAndBoard({
     options,
     core,
     dataDir,
@@ -321,6 +348,10 @@ async function listenAndAnnounce({
     uvToolchain,
     uvChildEnv,
   });
+  // Unattended builds (story 5.2, `start-builds.ts`): git, the sandbox check and the build runner.
+  const builds = createBuildsWiring({ options, core, dataDir, log, chat, tickets: ticketStore, source: bmadSource, hooks });
+  // Worktrees no run needs any more (a removal that failed, a start cut off) go before builds are served (story 5.5).
+  await builds.sweep();
   const appShortcut =
     options.appShortcut ??
     (options.launcherEntry === undefined
@@ -337,7 +368,7 @@ async function listenAndAnnounce({
     dataDir,
     bmad: core.bmad,
     // Welcome's agent choice (epic 6, entry 6) names an agent this server registers.
-    isAgentRegistered: registeredAgent(options),
+    isAgentRegistered: registeredAgent(options, hooks),
     // Skip all as the default for new projects needs Developer mode (default permission mode).
     developerMode: core.installSettings.developerMode,
     onError: (code) => log.warn('new project defaults unusable', { code }),
@@ -374,6 +405,7 @@ async function listenAndAnnounce({
     bmadScriptTrust: core.bmadScriptTrust,
     planning,
     board,
+    builds,
     bmadSource,
     // Setup also places the skills in each other agent's folder the project uses (epic 6 entry 8).
     bmadSetup: withAgentSkillFolders(core.bmadSetup, { core, agents }),
@@ -440,6 +472,7 @@ async function listenAndAnnounce({
   } catch (error) {
     // As on stop: the runner's close kills any run a watch waits on.
     const watching = ticketWatcher.close();
+    builds.close();
     await scriptRunner.close().catch(() => {});
     await watching;
     // Nothing may stay listening on a server that failed to start.
@@ -471,6 +504,11 @@ async function listenAndAnnounce({
         await Promise.race([agentSetup.settled(), new Promise((resolve) => setTimeout(resolve, INSTALL_STOP_MS).unref())]);
       })
       .finally(() => chat.close().catch((error: unknown) => log.warn('stopping agents failed', { reason: String(error) })))
+      // An outcome being worked out finishes (bounded by its own reads), then the builds stop following the log.
+      .finally(async () => {
+        await builds.settled().catch(() => undefined);
+        builds.close();
+      })
       // Document detection, a setup in progress, the ticket watches and every BMad Method script (`start-planning.ts`).
       .finally(() => stopBmadWork({ planningDocuments, bmadSetup: core.bmadSetup, ticketWatcher, scriptRunner, log }))
       .finally(() => {

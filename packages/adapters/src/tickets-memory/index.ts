@@ -5,7 +5,7 @@
  * given (any other path rejects as `tickets.py` does without an active
  * initiative); `find` answers a row with its entry's text; `mark` changes the
  * row in memory as `tickets.py mark` would change the plan (it refuses
- * `done`, which only approve writes, AD-10, and a stale `expectedStatus`
+ * `done` unless core's approve asks, AD-10 and story 5.2, and a stale `expectedStatus`
  * with `TicketChangedError`, story 4.10) and tells each watch of the repo;
  * `watch` records its callback until closed, and `emit` fires it as an
  * agent's write would (entry 4.8's watcher).
@@ -26,7 +26,7 @@ const STATE_OF: Readonly<Record<TicketStatus, string>> = {
 };
 
 /** Extra text `find` answers for a ticket, by ref. */
-export type MemoryTicketText = Partial<Pick<TicketDetail, 'description' | 'verify' | 'references' | 'notes' | 'unknown'>>;
+export type MemoryTicketText = Partial<Pick<TicketDetail, 'description' | 'verify' | 'references' | 'notes' | 'unknown' | 'plan_checkpoint' | 'done_checkpoint'>>;
 
 export interface MemoryTicketStoreOptions {
   /** Each repo path's tree (rows may leave out story 4.2's defaulted fields). */
@@ -98,11 +98,14 @@ export function createMemoryTicketStore(options: MemoryTicketStoreOptions = {}):
         notes: [...(extra.notes ?? [])],
         unknown: extra.unknown ?? '',
         hasPlan: row.status !== null && row.status !== '',
+        plan: row.status !== null && row.status !== '' && row.file !== null ? row.file : null,
+        plan_checkpoint: extra.plan_checkpoint ?? false,
+        done_checkpoint: extra.done_checkpoint ?? false,
       };
     },
     async mark(repoPath, ref, status, _guard, markOptions = {}) {
       calls.push(['mark', repoPath, ref, status, markOptions.blockedReason]);
-      if (status === 'done') throw new StatusNotAllowedError(status);
+      if (status === 'done' && markOptions.approve !== true) throw new StatusNotAllowedError(status);
       const row = rowOf(repoPath, ref);
       const current = row.status ?? '';
       if (markOptions.expectedStatus !== undefined && markOptions.expectedStatus !== current) throw new TicketChangedError(ref, markOptions.expectedStatus, current);

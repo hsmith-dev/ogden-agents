@@ -114,6 +114,17 @@ export const SCRIPT_TRUST_CHANGED_TITLE = "This project's BMad Method scripts ch
 /** The trust prompt's sentence when the scripts changed. */
 export const SCRIPT_TRUST_CHANGED_TEXT =
   "The BMad Method scripts in this project's folder aren't the ones you allowed: something changed them since. Board runs them on your computer, without your API keys or tokens. Allow this only if you know why they changed.";
+/**
+ * The trust prompt where an agent asks for it (epic 12, 12.3; EXPERIENCE.md
+ * "Agent needs a trusted project"): worded for the project's own scripts,
+ * agent settings, hooks and MCP servers, naming the agent. One trust covers
+ * the Board and such agents.
+ */
+export const PROJECT_TRUST_TITLE = (agentName: string) => `Trust this project for ${agentName}?`;
+export const PROJECT_TRUST_TEXT = (agentName: string) =>
+  `${agentName} runs this project's own agent settings, hooks and MCP servers, and Board runs its BMad Method scripts, all on your computer. Trusting covers all of them as they are now; if any of those files change, you'll be asked again. Trust only a project you know.`;
+export const PROJECT_TRUST_CHANGED_TITLE = (agentName: string) => `This project's files changed. Trust it again for ${agentName}?`;
+export const PROJECT_TRUST_ALLOW = 'Trust project';
 /** The fallback when allowing couldn't be saved. */
 export const SCRIPT_TRUST_FAILED = "Ogden Agents couldn't save your answer. Try again.";
 

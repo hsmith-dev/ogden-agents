@@ -20,9 +20,10 @@
  *   confirmation, only a mode the agent and its session offer, never while
  *   the terminal drives.
  */
-import { PERMISSION_MODE_LABELS, PERMISSION_MODES, PermissionMode as PermissionModeSchema, type PermissionMode, type SessionId, type SessionPermissionModeOption } from '@ogden-agents/shared';
+import { PERMISSION_MODE_LABELS, PERMISSION_MODE_RANK, PERMISSION_MODES, PermissionMode as PermissionModeSchema, type PermissionMode, type SessionId, type SessionPermissionModeOption } from '@ogden-agents/shared';
 import type { AgentEvent, AgentSession } from '../agent-port.js';
 import {
+  BuildSessionReadOnlyError,
   ConfirmationRequiredError,
   CoreError,
   DeveloperModeRequiredError,
@@ -32,6 +33,7 @@ import {
   SessionNotIdleError,
   ValidationError,
 } from '../errors.js';
+import { AGENT_SESSION_REF } from './constants.js';
 import type { Agents } from './agents.js';
 import type { ChatContext } from './context.js';
 import type { Replies } from './replies.js';
@@ -78,7 +80,32 @@ export function createModeApplier(ctx: ChatContext) {
     }
   };
 
+  /**
+   * A session whose mode was given at start and can't change (epic 12, 12.3):
+   * nothing is told to it. It runs as started when that is the chat's mode;
+   * a stricter one runs and restarts at the next idle point, a looser one is
+   * stopped (never kept), and Auto without the guards never runs.
+   */
+  const applyFixed = (sessionId: SessionId, started: AgentSession & { fixedPermissionMode: PermissionMode }): ModeApplied => {
+    const stored = entities.getSession(sessionId)?.permissionMode ?? 'ask';
+    const fixed = started.fixedPermissionMode;
+    if (fixed === 'auto' && started.protectsPaths !== true) {
+      internalError(sessionId, new PermissionModeError('permission_mode_unguarded', fixed));
+      if (stored === 'auto') {
+        try {
+          entities.setSessionPermissionMode(sessionId, 'ask', 'agent', `${agentOf(sessionId).displayName} couldn't keep protected files guarded, so this chat is back in Ask.`);
+        } catch (error) {
+          internalError(sessionId, error);
+        }
+      }
+      return 'failed';
+    }
+    if (fixed === stored) return 'ok';
+    return PERMISSION_MODE_RANK[fixed] > PERMISSION_MODE_RANK[stored] ? 'failed' : 'restart';
+  };
+
   return async (sessionId: SessionId, started: AgentSession, guardsRequested: boolean): Promise<ModeApplied> => {
+    if (started.fixedPermissionMode !== undefined) return applyFixed(sessionId, started as AgentSession & { fixedPermissionMode: PermissionMode });
     // At most twice: the stored mode, then Ask.
     for (let attempt = 0; attempt < 2; attempt++) {
       const mode = entities.getSession(sessionId)?.permissionMode ?? 'ask';
@@ -214,13 +241,28 @@ export function createPermissionModes(ctx: ChatContext, deps: Pick<Agents, 'drop
     if (event.asksLess) followStoredMode(sessionId);
   };
 
+  /**
+   * Whether the chat's mode can no longer change: its agent takes a mode only
+   * when a chat starts (the descriptor's `modeFixedAtStart`, epic 12, 12.3)
+   * and this chat has an agent session (live, or one stored to reopen).
+   */
+  const modeFixed = (sessionId: SessionId): boolean => {
+    if (agentOf(sessionId).modeFixedAtStart !== true) return false;
+    const ref = entities.getSession(sessionId)?.adapterRefs[AGENT_SESSION_REF];
+    return live.has(sessionId) || (ref !== undefined && ref !== '');
+  };
+
   /** Plain words for a mode the agent, or its session, doesn't offer; `undefined` when it does. */
   const unavailableReason = (sessionId: SessionId, mode: PermissionMode): string | undefined => {
+    const agent = agentOf(sessionId);
+    const current = entities.getSession(sessionId)?.permissionMode ?? 'ask';
+    if (mode !== current && modeFixed(sessionId)) {
+      return `${agent.displayName} sets its permission mode when a chat starts, so this chat stays in ${PERMISSION_MODE_LABELS[current]}. Start a new chat to use ${PERMISSION_MODE_LABELS[mode]}.`;
+    }
     // Ask is every agent's: it is where every chat starts.
     if (mode === 'ask') return undefined;
     const label = PERMISSION_MODE_LABELS[mode];
     // The chat's own agent (epic 6): each agent declares its modes, and a chat is offered only those.
-    const agent = agentOf(sessionId);
     if (!(agent.permissionModes ?? ['ask']).includes(mode)) return `${agent.displayName} doesn't offer ${label}.`;
     // This chat's agent session when it started this run, else the one of the same agent that started last in this run (any chat).
     const session = entities.getSession(sessionId);
@@ -233,6 +275,8 @@ export function createPermissionModes(ctx: ChatContext, deps: Pick<Agents, 'drop
     setPermissionMode(workspaceId, sessionId, mode, options = {}) {
       if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
       const session = getSession(workspaceId, sessionId);
+      // An unattended build's session keeps the mode it started in (story 5.2): Skip all would bypass the build policy.
+      if (session.kind === 'build') throw new BuildSessionReadOnlyError();
       const parsed = PermissionModeSchema.safeParse(mode);
       if (!parsed.success) throw new ValidationError('Choose Ask, Auto or Skip all.', [{ path: ['mode'], message: 'unknown mode' }]);
       if (session.driver === 'terminal') throw new DriverIsTerminalError('The terminal is driving this chat. Switch back to the chat to change its permission mode.');
@@ -252,10 +296,12 @@ export function createPermissionModes(ctx: ChatContext, deps: Pick<Agents, 'drop
     },
 
     permissionModeOptions(workspaceId, sessionId) {
-      getSession(workspaceId, sessionId);
+      const session = getSession(workspaceId, sessionId);
+      const fixed = modeFixed(sessionId);
       return PERMISSION_MODES.map((mode): SessionPermissionModeOption => {
         const reason = unavailableReason(sessionId, mode);
-        return reason === undefined ? { mode, available: true } : { mode, available: false, reason };
+        if (reason !== undefined) return { mode, available: false, reason };
+        return fixed && mode === session.permissionMode ? { mode, available: true, fixed: true } : { mode, available: true };
       });
     },
   };

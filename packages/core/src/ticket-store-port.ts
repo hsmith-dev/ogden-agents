@@ -65,8 +65,8 @@ export interface TicketStorePort {
   /**
    * Sets the ticket's status in its plan file (creating the plan for a
    * planned entry), with `blockedReason` for `blocked`. The only write the
-   * store does (AD-10). Core never asks it for `done` (only approve writes
-   * it). With `expectedStatus` (story 4.10; `''` for a ticket with no plan
+   * store does (AD-10). Core asks it for `done` only from approve, with
+   * `approve: true` (story 5.2). With `expectedStatus` (story 4.10; `''` for a ticket with no plan
    * status), it first compares the ticket's current status and, when it
    * differs, rejects with core's `TicketChangedError` and writes nothing.
    * Rejects with `NotFoundError` when no ticket matches, else with
@@ -78,7 +78,16 @@ export interface TicketStorePort {
     ref: string,
     status: TicketStatus,
     guard: TicketRunGuard,
-    options?: { blockedReason?: string | undefined; expectedStatus?: TicketStatus | '' | undefined },
+    options?: {
+      blockedReason?: string | undefined;
+      expectedStatus?: TicketStatus | '' | undefined;
+      /**
+       * Set only by core's approve (story 5.2, AD-10: the only path to
+       * `done`): without it a mark to `done` is refused with
+       * `StatusNotAllowedError` and nothing runs.
+       */
+      approve?: boolean | undefined;
+    },
   ): Promise<MarkTicketResponse>;
   /**
    * Watches the repo's output folder (`outputFolder`, relative to the repo,

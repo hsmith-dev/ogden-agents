@@ -85,9 +85,19 @@ export interface PermissionDecisionInput {
   reason?: string | undefined;
 }
 
+/** How one request is decided (story 5.6). */
+export interface PermissionRequestOptions {
+  /**
+   * A build with the user watching: the level is `ask_every_time`, no stored
+   * rule allows it and no Always allow is offered, whatever the project's
+   * own settings say. Only a card (or a Stop) answers.
+   */
+  attended?: boolean | undefined;
+}
+
 export interface Permissions extends WorkspaceSettingsAccess {
   /** Decides one request from the session's agent. Never rejects: a failure is a deny. */
-  request(sessionId: SessionId, request: AgentPermissionRequest): Promise<AgentPermissionDecision>;
+  request(sessionId: SessionId, request: AgentPermissionRequest, options?: PermissionRequestOptions): Promise<AgentPermissionDecision>;
   /**
    * The user's answer to a pending request of this session in this
    * workspace. Throws {@link PermissionNotPendingError} when it is not
@@ -145,6 +155,8 @@ export interface PermissionsOptions {
   isAgentRegistered?: ((agentId: AgentId) => boolean) | undefined;
   /** Whether Developer mode is on now (core's install settings): Skip all as a project's default needs it. Absent: off. */
   developerMode?: (() => boolean) | undefined;
+  /** The agents' own config folders, which join the protected paths (their descriptors', epic 12, 12.3). Read at each request. Default: none. */
+  agentConfigFolders?: (() => readonly string[]) | undefined;
 }
 
 interface Pending {
@@ -169,7 +181,7 @@ const toRule = (row: RuleRow): PermissionRule => ({
   createdAt: row.createdAt,
 });
 
-export function createPermissions({ db, events, entities, sessionEvents, onError, isBmadPieceAvailable = () => false, isAgentRegistered, developerMode }: PermissionsOptions): Permissions {
+export function createPermissions({ db, events, entities, sessionEvents, onError, isBmadPieceAvailable = () => false, isAgentRegistered, developerMode, agentConfigFolders }: PermissionsOptions): Permissions {
   const { orm } = db;
   /** Requests waiting for the user, by request id. */
   const pending = new Map<string, Pending>();
@@ -230,7 +242,8 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
     // The caution level and BMad pieces (moved to `workspace-settings.ts`, story 10.8).
     ...createWorkspaceSettings({ db, events, isBmadPieceAvailable, isAgentRegistered, developerMode }),
 
-    async request(sessionId, request) {
+    async request(sessionId, request, requestOptions = {}) {
+      const attended = requestOptions.attended === true;
       try {
         if (closed) return { outcome: 'cancelled' };
         const parsedKind = ToolKindSchema.safeParse(request.kind);
@@ -246,9 +259,10 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
         // needs no path, but any path it names must be inside too.
         const named = Array.isArray(request.paths) ? request.paths : [];
         // A write to a protected path, or a command naming one, always shows a card (F1).
+        const extraFolders = agentConfigFolders?.() ?? [];
         const protectedPath =
-          (WRITE_KINDS.has(kind) && (workspace === undefined || touchesProtectedPath(workspace, request.paths))) ||
-          (command !== undefined && commandNamesProtectedPath(command));
+          (WRITE_KINDS.has(kind) && (workspace === undefined || touchesProtectedPath(workspace, request.paths, extraFolders))) ||
+          (command !== undefined && commandNamesProtectedPath(command, extraFolders));
         const cautionPathsInside = PATH_KINDS.has(kind)
           ? pathsInside
           : workspace !== undefined && (named.length === 0 || pathsInsideWorkspace(workspace, named));
@@ -256,11 +270,11 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
         const outcome = events.transaction(() => {
           const session = entities.getSession(sessionId);
           if (session === undefined) throw new NotFoundError('session', sessionId);
-          const cautionLevel = readCautionLevel(orm, session.workspaceId) ?? DEFAULT_CAUTION_LEVEL;
+          const cautionLevel = attended ? 'ask_every_time' : (readCautionLevel(orm, session.workspaceId) ?? DEFAULT_CAUTION_LEVEL);
           const permissionMode = session.permissionMode;
           // Skip all: no caution level, no rule, and no Always allow (it never writes a rule).
           const skipAll = permissionMode === 'skip_all';
-          const offered = skipAll ? null : scope;
+          const offered = skipAll || attended ? null : scope;
           sessionEvents.appendSessionEvent(sessionId, {
             type: 'permission.requested',
             payload: {
@@ -287,14 +301,14 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
             return { type: 'cancelled' as const };
           }
           // A request that names a command never runs on the level: a command is asked or ruled (2.6).
-          if (!skipAll && !protectedPath && command === undefined && session.workspaceId === workspace?.id && cautionAllows(cautionLevel, kind, cautionPathsInside)) {
+          if (!attended && !skipAll && !protectedPath && command === undefined && session.workspaceId === workspace?.id && cautionAllows(cautionLevel, kind, cautionPathsInside)) {
             sessionEvents.appendSessionEvent(sessionId, {
               type: 'permission.resolved',
               payload: { sessionId, requestId, decision: 'allow_once', by: 'caution' },
             });
             return { type: 'caution' as const };
           }
-          const rule = protectedPath || skipAll ? undefined : findRule(session.workspaceId, kind, command, pathsInside && session.workspaceId === workspace?.id);
+          const rule = protectedPath || skipAll || attended ? undefined : findRule(session.workspaceId, kind, command, pathsInside && session.workspaceId === workspace?.id);
           if (rule !== undefined) {
             sessionEvents.appendSessionEvent(sessionId, {
               type: 'permission.resolved',

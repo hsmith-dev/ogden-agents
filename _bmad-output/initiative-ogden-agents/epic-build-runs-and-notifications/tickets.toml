@@ -1,0 +1,85 @@
+# Epic 11 (5b) breakdown (approved by the user 2026-10-01 as the second half of epic 5's split; drafted by autonomous inception). Table order is the build order; ids never change once approved.
+# Epic 11 builds on epic 5 (5a): its contracts, stubs and fixtures (5.3), worktrees (5.5), the Build dialog (5.6), the dispatcher (5.8) and the review page (5.9); its entries start after 5a's refactor sweep (5.10) and its release waits on 5a's (5.11). References to other epics use "<epic id>.<entry id>".
+# Live checks use the developer's existing Claude Code login or an API key saved through 9.2, in a scratch repo, never Ogden Agents's own repo.
+
+[[entry]]
+id = 1
+type = "story"
+title = "Live run view and the Runs tab"
+description = "Replaces 5.8's minimal build session header with the full run view: the session view read-only with the run header (ticket, agent, sandbox used, time left, outcome) and Stop while running, the blocked notice with the plain reason, Show details with the raw code (always in Developer mode) and Retry through 5.8, and for an intent-gap halt Apply the saved fix and retry (a core use-case guarded by builds that applies the patch in the worktree through VcsPort, marks in-review in the worktree and redispatches through 5.8); adds the Runs tab and g r in 10.6's slot only with builds on, listing every run with its outcome and the queue, and a sidebar row per build session; the run views and run list that 11.2 and 11.3 extend and link to live here."
+verify = "Playwright against the fake runner shows the header counting down, Stop ending the run as stopped, a blocked run's sentence with its code under Show details, Retry starting a new run, Apply the saved fix and retry applying the fixture patch and redispatching, the Runs tab with outcomes and the queue, and neither the tab nor g r with builds off."
+covers = ["E11-R1", "E11-R2"]
+after = ["5.10", "10.6"]
+hitl = false
+risk = "medium"
+references = [
+  "_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#component-patterns",
+  "_bmad-output/initiative-ogden-agents/ux-ogden-agents/DESIGN.md#components",
+]
+
+[[entry]]
+id = 2
+type = "story"
+title = "Verification reporting"
+description = "Adds richer verification reporting on top of 5.8's verification, which already runs the three checks (plan status built, the test re-run in the worktree inside the sandbox, a non-empty diff) before approve is offered (user decision 2026-10-01): shows each check's detail and the tail of the test output under Show details in 11.1's run view, a failed outcome with the failing check named in the Runs tab, on the board card and in the detail sheet, and the same detail on 5.9's review page; adds Check again, a core use-case guarded by builds that re-runs 5.8's verification on the run's worktree through 5.3's check-again request, and a per-project test command in Workspace settings (5.3's override) that 5.8's re-run uses instead of the detected one; it runs no checks of its own."
+verify = "Against the fake runner and 5.3's failing fake test command, a failed run shows 3 tests failed when re-run with the output tail under Show details in the run view and as failed in the Runs tab, card and detail sheet; Check again after fixing the fixture turns it verified and enables approve; a set test command is the one the re-run uses; and Check again returns feature_off with builds off."
+covers = ["E11-R1", "E11-R4"]
+after = [1]
+hitl = false
+risk = "high"
+unknown = "How much of the test output to keep and show without storing large logs; the build record notes what the fixture and the scratch repo needed."
+references = ["_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-17--unattended-runs-are-contained"]
+
+[[entry]]
+id = 3
+type = "story"
+title = "Build actions on the board"
+description = "Replaces the tracer's bare Build button with Build this story on ticket cards and the detail sheet and Build all ready in the board header (5.8's all-ready request), only with builds on and never on a ticket with an unmet prerequisite (which keeps 4.9's Waits for), opens 5.6's Build dialog when the sandbox is unavailable, lists the ticket's runs in the detail sheet with links to 11.1's run view and 5.9's review, and keeps 4.11's reduced-mode gating."
+verify = "Playwright against tickets-memory and the fake runner shows Build this story on a ready card and none on a waiting card, Build all ready dispatching the ready tickets, the Build dialog on a refused build, the runs list in the detail sheet linking to the run view and the review, and no Build action with builds off."
+covers = ["E11-R3"]
+after = [2]
+hitl = false
+risk = "medium"
+references = ["_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#component-patterns"]
+
+[[entry]]
+id = 4
+type = "story"
+title = "Needs you and webhook notifications"
+description = "Adds blocked runs and tickets ready for review (on 5.8's verification event) to the Needs you group across workspaces with the tab-title count and a polite announcement, completes 5.3's NotifierPort with notify-webhook (POSTs 5.3's payload with the workspace name, ticket ref and title and the event, no code, diff or secret, with a short timeout and the HTTP result recorded), keeps each webhook URL through SecretStorePort and redacts it in logs and events, and adds the app-wide Settings: Notifications (add a URL, choose Blocked and Ready for review, Send test with the result inline) and an opt-in browser notification toggle; the settings are install-level and not piece-guarded, and notifications go out only for events from workspaces with builds on."
+verify = "Against a local test HTTP server, a blocked run and a verified run each POST one payload to a webhook subscribed to them and none to one that is not, nothing is sent for a workspace with builds off, Send test shows the HTTP status, a failing webhook shows its plain error, the URL never appears in a log line or event, and Playwright shows both rows in Needs you with the count in the tab title."
+covers = ["E11-R1", "E11-R5"]
+after = [2]
+hitl = false
+risk = "medium"
+unknown = "How a webhook URL is listed back to the user once it lives in the keychain (masked, with only its host shown, is assumed)."
+references = [
+  "packages/web/src/shell/needs-you-group.tsx",
+  "_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#component-patterns",
+]
+
+[[entry]]
+id = 5
+type = "story"
+title = "Refactor sweep"
+description = "Cleans up code across the epic, scoped when it starts from the build records and the review findings deferred during the epic, with no behavior change; also runs the provenance check from 10.8 and splits any file the epic grew past 600 lines."
+verify = "All tests pass and no behavior changes."
+covers = []
+after = [1, 2, 3, 4]
+hitl = false
+risk = "low"
+references = ["_bmad-output/initiative-ogden-agents/deferred-work.md"]
+
+[[entry]]
+id = 6
+type = "story"
+title = "End-to-end suite and release"
+description = "Extends the end-to-end suite, run in CI on macOS, Windows and Linux against the packed package with the fake runner, to follow a run in the run view and the Runs tab, apply a saved fix and retry, use Build all ready from the board, see a run whose tests fail show its failing check and test output in the run view, Runs tab and card, check it again after a fix, receive the blocked and ready-for-review webhooks, see both in Needs you, and find no Runs tab, Build action or notification for a workspace with builds off; then the user runs Flow 1 steps 8 to 11 live with Claude Code on macOS and tags the release after epic 5's through the epic 1 release workflow."
+verify = "The suite passes on all three OSes and fails when the run view's verification detail is removed, and the tagged ogden-agents version from npm passes the epic's live Done when checks on the user's machines; each live check's result is written into the plan before the ticket moves to done."
+covers = ["E11-R1", "E11-R2", "E11-R3", "E11-R4", "E11-R5", "E11-R6"]
+after = [5, "5.11"]
+hitl = true
+risk = "medium"
+plan_checkpoint = true
+done_checkpoint = true
+unknown = "The version number, after epic 5's release, confirmed by the user here."

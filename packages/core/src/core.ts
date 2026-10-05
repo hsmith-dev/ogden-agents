@@ -93,6 +93,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     sessionEvents,
     isBmadPieceAvailable: bmad.isAvailable,
     isAgentRegistered: options.isAgentRegistered,
+    developerMode: installSettings.developerMode,
     ...(options.onPermissionError === undefined ? {} : { onError: options.onPermissionError }),
   });
   return {

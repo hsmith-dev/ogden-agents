@@ -15,7 +15,15 @@ import { DriverChangeCause } from './terminal.js';
 export const SessionCreatedInput = z.object({
   type: z.literal('session.created'),
   ...onSessionStream,
-  payload: z.object({ session: Session }),
+  payload: z.object({
+    session: Session,
+    /**
+     * Plain words about the mode the chat started in (default permission
+     * mode): it started in its project's default, or in Ask because its agent
+     * doesn't offer that default. Optional, so every earlier event still parses.
+     */
+    permissionModeNote: z.string().min(1).optional(),
+  }),
 });
 export const SessionCreatedEvent = SessionCreatedInput.extend(assigned);
 export type SessionCreatedEvent = z.infer<typeof SessionCreatedEvent>;

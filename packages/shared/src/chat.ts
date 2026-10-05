@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { BmadPieceSet } from './bmad.js';
 import { AgentAuthMethodKind, AgentAuthState, AgentId, AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, MessageId, PermissionDecision } from './events.js';
-import { PermissionMode, Session, Workspace } from './entities.js';
+import { DefaultModeNotice, PermissionMode, Session, Workspace } from './entities.js';
 import { PermissionRuleId, WorkspaceId } from './ids.js';
 import { AgentInstallState } from './setup.js';
 import { SessionTerminal } from './terminal.js';
@@ -224,7 +224,20 @@ export type HistoryDeletedResponse = z.infer<typeof HistoryDeletedResponse>;
  * `defaultAgentId` absent: the install's default agent
  * (`ChatAgentsResponse.defaultAgentId`).
  */
-export const WorkspaceSettings = z.object({ cautionLevel: CautionLevel, bmadPieces: BmadPieceSet, bmadScriptsTrusted: z.boolean().default(false), defaultAgentId: AgentId.optional() });
+export const WorkspaceSettings = z.object({
+  cautionLevel: CautionLevel,
+  bmadPieces: BmadPieceSet,
+  bmadScriptsTrusted: z.boolean().default(false),
+  defaultAgentId: AgentId.optional(),
+  /**
+   * The mode new chats in this project start in (default permission mode).
+   * Absent (an older server's answer): Ask, where every chat started then.
+   * Core always sends it.
+   */
+  defaultPermissionMode: PermissionMode.optional(),
+  /** Why the default reads as it does, when there is something to say (see {@link DEFAULT_MODE_NOTICES}). */
+  defaultPermissionModeNotice: DefaultModeNotice.optional(),
+});
 export type WorkspaceSettings = z.infer<typeof WorkspaceSettings>;
 
 /** `GET` and `PATCH /api/v1/workspaces/:wsId/settings`. */
@@ -240,9 +253,21 @@ export type WorkspaceSettingsResponse = z.infer<typeof WorkspaceSettingsResponse
  * doesn't have is refused with `agent_unknown`.
  */
 export const UpdateWorkspaceSettingsRequest = z
-  .object({ cautionLevel: CautionLevel.optional(), bmadPieces: BmadPieceSet.optional(), defaultAgentId: AgentId.nullable().optional() })
+  .object({
+    cautionLevel: CautionLevel.optional(),
+    bmadPieces: BmadPieceSet.optional(),
+    defaultAgentId: AgentId.nullable().optional(),
+    /**
+     * The mode new chats start in (default permission mode). Skip all is
+     * refused without Developer mode (`developer_mode_required`) or without
+     * `confirm: true`, the user's answer to its red warning (`confirmation_required`).
+     */
+    defaultPermissionMode: PermissionMode.optional(),
+    confirm: z.boolean().optional(),
+  })
   .refine(
-    (settings) => settings.cautionLevel !== undefined || settings.bmadPieces !== undefined || settings.defaultAgentId !== undefined,
+    (settings) =>
+      settings.cautionLevel !== undefined || settings.bmadPieces !== undefined || settings.defaultAgentId !== undefined || settings.defaultPermissionMode !== undefined,
     'Choose a setting to change.',
   );
 export type UpdateWorkspaceSettingsRequest = z.infer<typeof UpdateWorkspaceSettingsRequest>;

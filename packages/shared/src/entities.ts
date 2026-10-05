@@ -41,6 +41,23 @@ export const PERMISSION_MODE_RANK: Readonly<Record<PermissionMode, number>> = { 
 /** The modes' names as the UI shows them. */
 export const PERMISSION_MODE_LABELS: Readonly<Record<PermissionMode, string>> = { ask: 'Ask', auto: 'Auto', skip_all: 'Skip all' };
 
+/**
+ * Why a project's default permission mode reads as it does (default
+ * permission mode): `developer_mode_off`, its Skip all default went back to
+ * Ask when Developer mode was turned off; `skip_all_unconfirmed`, the
+ * app-wide default for new projects is Skip all and this project waits for
+ * the user to confirm it (new chats start in Ask until then).
+ */
+export const DEFAULT_MODE_NOTICES = ['developer_mode_off', 'skip_all_unconfirmed'] as const;
+export const DefaultModeNotice = z.enum(DEFAULT_MODE_NOTICES);
+export type DefaultModeNotice = z.infer<typeof DefaultModeNotice>;
+
+/** The notices in the user's words. */
+export const DEFAULT_MODE_NOTICE_TEXT: Readonly<Record<DefaultModeNotice, string>> = {
+  developer_mode_off: 'Developer mode was turned off, so new chats in this project start in Ask instead of Skip all.',
+  skip_all_unconfirmed: 'New projects start in Skip all, but this project needs your confirmation first. Until then its new chats start in Ask.',
+};
+
 /** What a session is for (AD-8). */
 export const SESSION_KINDS = ['chat', 'planning', 'build'] as const;
 export const SessionKind = z.enum(SESSION_KINDS);

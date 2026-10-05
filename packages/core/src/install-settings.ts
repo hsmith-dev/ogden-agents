@@ -13,6 +13,7 @@ import { installSettings } from './db/schema.js';
 import type { Entities } from './entities.js';
 import { ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
+import { dropSkipAllDefaults } from './workspace-settings.js';
 
 /** The single settings row. */
 const ROW_ID = 1;
@@ -26,6 +27,8 @@ export interface DeveloperModeChange {
   changed: boolean;
   /** The chats moved from Skip all to Ask by turning it off, as they are now. */
   dropped: Session[];
+  /** How many projects' Skip all defaults went back to Ask by turning it off (default permission mode). */
+  defaultsDropped: number;
 }
 
 export interface InstallSettings {
@@ -38,7 +41,9 @@ export interface InstallSettings {
    * when it changed. Turning it off, in the same transaction, hands every
    * Skip-all chat the terminal drives back to the chat (`session.driver_changed`,
    * cause `developer_mode_off`) and then moves every Skip-all chat to Ask
-   * (`session.permission_mode_changed`, cause `developer_mode_off`). Telling
+   * (`session.permission_mode_changed`, cause `developer_mode_off`), after
+   * setting every project's Skip all default back to Ask with a notice
+   * (`workspace.settings_changed`, cause `developer_mode_off`). Telling
    * their agents, and stopping their terminals, is the chat's (it follows
    * those events). `ValidationError` for a value that is not a boolean.
    */
@@ -67,17 +72,19 @@ export function createInstallSettings({ db, events, entities }: InstallSettingsO
         if (previous === on) {
           // Still recorded as set, so an old browser never carries its "on" over a choice made here.
           orm.insert(installSettings).values({ id: ROW_ID, developerMode: on }).onConflictDoNothing().run();
-          return { developerMode: on, changed: false, dropped: [] };
+          return { developerMode: on, changed: false, dropped: [], defaultsDropped: 0 };
         }
         orm.insert(installSettings).values({ id: ROW_ID, developerMode: on }).onConflictDoUpdate({ target: installSettings.id, set: { developerMode: on } }).run();
         events.append({ type: 'settings.developer_mode_changed', workspaceId: null, streamId: SETTINGS_STREAM, payload: { developerMode: on, previous } });
-        if (on) return { developerMode: on, changed: true, dropped: [] };
+        if (on) return { developerMode: on, changed: true, dropped: [], defaultsDropped: 0 };
+        // Projects whose new chats start in Skip all start them in Ask again, each with a notice (default permission mode).
+        const defaultsDropped = dropSkipAllDefaults(orm, events);
         const dropped = entities.listSessionsInPermissionMode('skip_all').map((session) => {
           // Back to the chat first, so the chat moves to Ask with no terminal skipping checks for it.
           if (session.driver === 'terminal') entities.setSessionDriver(session.id, 'ui', 'developer_mode_off');
           return entities.setSessionPermissionMode(session.id, 'ask', 'developer_mode_off', DEVELOPER_MODE_OFF_REASON);
         });
-        return { developerMode: on, changed: true, dropped };
+        return { developerMode: on, changed: true, dropped, defaultsDropped };
       });
     },
   };

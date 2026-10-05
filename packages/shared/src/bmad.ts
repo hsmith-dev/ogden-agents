@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AgentId } from './events-common.js';
+import { PermissionMode } from './entities.js';
 
 /**
  * The per-project BMad Method pieces contract (CAP-19, AD-22; frozen by story
@@ -259,6 +260,12 @@ export const NewProjectDefaults = z.object({
    * when it is added; projects that exist already never change with it.
    */
   defaultAgentId: AgentId.optional(),
+  /**
+   * The mode new projects' chats start in (default permission mode). Absent:
+   * Ask. Copied to a project when it is added; Skip all reaches it as Ask
+   * waiting for the user's confirmation for that project.
+   */
+  defaultPermissionMode: PermissionMode.optional(),
 });
 export type NewProjectDefaults = z.infer<typeof NewProjectDefaults>;
 /** The app-wide default before the user changes it: Simple (every piece off). */
@@ -273,8 +280,14 @@ export type NewProjectDefaultsResponse = z.infer<typeof NewProjectDefaultsRespon
  * this install doesn't have is refused with `agent_unknown`). At least one.
  */
 export const UpdateNewProjectDefaultsRequest = z
-  .object({ bmadPieces: BmadPieceSet.optional(), defaultAgentId: AgentId.nullable().optional() })
-  .refine((input) => input.bmadPieces !== undefined || input.defaultAgentId !== undefined, 'Choose a setting to change.');
+  .object({
+    bmadPieces: BmadPieceSet.optional(),
+    defaultAgentId: AgentId.nullable().optional(),
+    /** Skip all needs Developer mode and `confirm: true`, as a project's default does. */
+    defaultPermissionMode: PermissionMode.optional(),
+    confirm: z.boolean().optional(),
+  })
+  .refine((input) => input.bmadPieces !== undefined || input.defaultAgentId !== undefined || input.defaultPermissionMode !== undefined, 'Choose a setting to change.');
 export type UpdateNewProjectDefaultsRequest = z.infer<typeof UpdateNewProjectDefaultsRequest>;
 
 // ---- Welcome's first-project answer ----

@@ -55,7 +55,7 @@ context:
 
 ## Implementation Notes
 
-Dispositions of the epic's open items (all recorded in deferred-work.md, owner 14.10 or 14.11): launch time re-hash of the installed binary (open: costs one to two seconds per start and the data folder is owner only; decide with the user's live checks), the harness's tool permissions by name and not by a wildcard (open: a live check on 1.18.34), the key visible to an approved env command (open: the card words it in 14.4's key note is not yet written; recorded), test-hooks.ts length (open: the hook audit needs one file), CI unpacking the real archives (open), keychain and database not atomic (open), events.ts length and shared's DOM lib (open), the harness's own redirect behaviour (live check), the real harness's `.opencode/skills` (live check).
+Dispositions of the epic's open items (all recorded in deferred-work.md, owner 14.10 or 14.11): launch time re-hash of the installed binary (open: costs one to two seconds per start and the data folder is owner only; decide with the user's live checks), the harness's tool permissions by name and not by a wildcard (open: a live check on 1.18.34), the key visible to an approved env command (mitigated: the Add form's key note now says a command you approved could print it; the harness's own database is the rest), test-hooks.ts length (open: the hook audit needs one file), CI unpacking the real archives (open), keychain and database not atomic (open), events.ts length and shared's DOM lib (open), the harness's own redirect behaviour (live check), the real harness's `.opencode/skills` (live check).
 
 ## Plan Change Log
 

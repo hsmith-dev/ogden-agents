@@ -124,6 +124,8 @@ Behavioral. Visual specs live in `DESIGN.md` Components.
 |---|---|---|
 | First launch, no agents found | Welcome | `display`: "Pick the agent that will do the work." Cards for each supported agent marked "Not installed" with **Install**. Progress and errors stream inline under the card (AD-21). |
 | Agent installed, not signed in | Welcome, Settings: Agents | Card says "Installed, needs sign-in" with **Sign in with your account** (opens the agent's own login) and **Use an API key instead**. |
+| Agent card notices and sign-out (epic 12, 2026-10-04) | Settings: Agents | A card shows the agent's plain notices (Codex: "Codex keeps its sign-in in a file in Ogden Agents' data folder" when the keychain can't be used) and **Sign out**. Before Codex's first start: "Codex downloads OpenAI's plugins list when it starts. Allow?" asked once, changeable on the card. |
+| Agent needs a trusted project (epic 12, 2026-10-04) | Composer agent picker | The agent shows "Needs you to trust this project" with **Trust project**, which opens the trust prompt worded for the project's own scripts, agent settings, hooks and MCP servers; it asks again when those files change. A chat whose agent fixes its mode at start (Grok) shows its mode as fixed for that chat. |
 | Sign-in in progress | Welcome | "Finish signing in in the tab that just opened." Returns automatically when the agent reports signed in. Cancel available. |
 | Sign-in expired | Session view, Settings | Session goes to `error`; notice "Claude Code needs you to sign in again." with **Sign in**. Session resumes after. |
 | No workspaces | Workspace area | `display`: "Add a project to get started." **Add project** (pick a folder) and **Start a new project folder**. |
@@ -227,6 +229,8 @@ Rosa wants students to book wheel-throwing classes and pay a deposit online. She
 Failure: on her Windows laptop Claude Code has no native sandbox and Docker is not installed. **Build all ready** opens the dialog: "Claude Code can't build unattended on this computer yet." Choices: **Use Codex instead**, **Install Docker**, **Build with me watching** (attended). She picks attended; each command then asks her through permission cards.
 
 ### Flow 2: Developer mode and the terminal toggle (Tomasz Wierzbicki, backend engineer, Tuesday night on his own ledger-api project)
+
+Note (epic 12, 2026-10-04): Codex is a v1.1 chat agent; the terminal toggle in this flow applies once its live check shows `codex resume` resumes the ACP session.
 
 1. Tomasz opens Settings: Appearance and turns on **Developer mode**. The app tightens to Compact density: 30px sidebar rows, 13px transcript, tool calls listed individually, `kbd` hints in tooltips, skill names in mono beside plain labels on Plan.
 2. `⌘K`, "ledger", `Enter`: the `ledger-api` workspace. He starts a chat with Codex: "Split the reconciliation job into a producer and a consumer; keep the current tests green."

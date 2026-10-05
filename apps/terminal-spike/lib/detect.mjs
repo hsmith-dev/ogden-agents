@@ -57,7 +57,8 @@ export function probeVersion(path, { env, timeoutMs = 5000, platform = process.p
     const isShim = win && /\.(cmd|bat)$/i.test(path);
     // Node refuses to run a .cmd or .bat without a shell (CVE-2024-27980 fix); a shim is run through cmd.exe, quoted.
     const file = isShim ? (env.ComSpec ?? 'cmd.exe') : path;
-    const args = isShim ? ['/d', '/s', '/c', `"${path}" --version`] : ['--version'];
+    // cmd /s strips the outer pair of quotes, so the whole command is wrapped in one more pair.
+    const args = isShim ? ['/d', '/s', '/c', `""${path}" --version"`] : ['--version'];
     execFile(file, args, { env, timeout: timeoutMs, windowsHide: true, windowsVerbatimArguments: isShim }, (error, stdout) => {
       if (error) resolve({ ok: false, code: error.code ?? error.signal ?? 'error' });
       else resolve({ ok: true, version: String(stdout).trim().split(/\r?\n/)[0].slice(0, 80) });

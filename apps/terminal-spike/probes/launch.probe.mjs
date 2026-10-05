@@ -82,7 +82,7 @@ describe('install detection', () => {
     const tries = IS_WIN
       ? {
           'cmd shim, direct file': [paths.claude, []],
-          'cmd shim, via cmd.exe /d /s /c': [env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `"${paths.claude}"`]],
+          'cmd shim, via cmd.exe /d /s /c': [env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `""${paths.claude}""`]],
           'native exe, direct file': [paths.grok, [FAKE, 'prompt']],
           'bare name on the pane PATH': ['claude', []],
           'bare name with extension on the pane PATH': ['claude.cmd', []],
@@ -119,27 +119,31 @@ describe('plain shell', () => {
     const outcomes = {};
     for (const [file, args] of candidates) {
       const name = file.split(/[\\/]/).pop();
+      const isCmd = name.toLowerCase().startsWith('cmd');
       const t0 = now();
       const pane = await openPane({ file, args, env: paneEnv(), cols: 90, rows: 28 });
+      // A real terminal answers ConPTY's cursor position request; this one has to, or Windows shells wait.
+      let dsr = 0;
+      pane.listeners.add((d) => { const n = (d.match(/\x1b\[6n/g) ?? []).length; for (let i = 0; i < n; i += 1) { dsr += 1; pane.write('\x1b[1;1R'); } });
       let quietFor = 0;
       let last = 0;
-      while (quietFor < 400 && now() - t0 < 15_000) {
+      while ((quietFor < 1200 || pane.text.length === 0) && now() - t0 < 20_000) {
         await sleep(50);
         if (pane.text.length !== last) { last = pane.text.length; quietFor = 0; } else quietFor += 50;
       }
-      const promptMs = Math.round(now() - t0 - 400);
-      const sizeCmd = IS_WIN ? (name.startsWith('cmd') ? 'mode con' : '$Host.UI.RawUI.WindowSize.Width') : 'stty size';
-      pane.write(IS_WIN ? (name.startsWith('cmd') ? 'echo shell-%OS%-ok\r' : 'Write-Output ("shell-" + (20+22))\r') : 'echo shell-$((20+22))\r');
-      const ran = await pane.waitFor(IS_WIN ? (name.startsWith('cmd') ? 'shell-Windows_NT-ok' : /shell-42/) : 'shell-42', 8000).then(() => true, () => false);
+      const promptMs = Math.round(now() - t0 - 1200);
+      const sizeCmd = IS_WIN ? (isCmd ? 'mode con' : '$Host.UI.RawUI.WindowSize.Width') : 'stty size';
+      pane.write(IS_WIN ? (isCmd ? 'set /a 20+22\r' : 'Write-Output ("shell-" + (20+22))\r') : 'echo shell-$((20+22))\r');
+      const ran = await pane.waitFor(IS_WIN ? (isCmd ? /\n42\r?\n/ : /shell-42/) : 'shell-42', 10_000, pane.text.length).then(() => true, () => false);
       pane.resize(120, 33);
       await sleep(400);
       const from = pane.text.length;
       pane.write(`${sizeCmd}\r`);
-      await sleep(1200);
+      await sleep(1500);
       const sizeText = stripAnsi(pane.text.slice(from)).replace(/\s+/g, ' ').slice(0, 160);
       pane.write('exit\r');
       const exit = await Promise.race([pane.exited, sleep(8000).then(() => undefined)]);
-      outcomes[name] = { promptMs, ranCommand: ran, afterResize120x33: sizeText, exitCode: exit?.exitCode ?? 'did not exit' };
+      outcomes[name] = { promptMs, cursorPositionRequestsAnswered: dsr, ranCommand: ran, afterResize120x33: sizeText, exitCode: exit?.exitCode ?? 'did not exit' };
       if (!exit) pane.kill();
     }
     rec.set('plain_shell', outcomes);

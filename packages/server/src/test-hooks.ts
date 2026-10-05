@@ -49,7 +49,7 @@
  *   ACP agent) is registered as one more agent, "Fake Agent", that needs a
  *   trusted project (epic 6 entry 10), so the suite proves core's agent
  *   trust gate on the installed package.
- * - {@link SANDBOX_ENV} = `available` or `unavailable`: unattended builds
+ * - {@link SANDBOX_ENV} = `available`, `unavailable` or `unavailable-windows`: unattended builds
  *   take this answer instead of probing Claude Code's native sandbox (story
  *   5.2: CI's ubuntu runners have no working bwrap, spike 5.1), so the suites
  *   can build with the fake agent, or see `sandbox_unavailable`, on any OS.
@@ -127,7 +127,9 @@ export function testSandbox(env: Env, dataDir: string, tmp: string = tmpdir()): 
   if (value === undefined || value === '' || !testHooksAllowed(env, dataDir, tmp)) return undefined;
   if (value === 'available') return { available: true, kind: TEST_SANDBOX_KIND };
   if (value === 'unavailable') return { available: false, reason: TEST_SANDBOX_UNAVAILABLE_REASON };
-  throw new Error(`${SANDBOX_ENV}: must be available or unavailable`);
+  // As Windows answers (story 5.6): building with you watching first.
+  if (value === 'unavailable-windows') return { available: false, reason: TEST_SANDBOX_UNAVAILABLE_REASON, choices: ['attended', 'install_docker', 'other_agent'] };
+  throw new Error(`${SANDBOX_ENV}: must be available, unavailable or unavailable-windows`);
 }
 
 /** Test-only: shortens the quiet-agent check-in delay, in milliseconds (story 2.10). Honoured only when `testHooksAllowed`. */

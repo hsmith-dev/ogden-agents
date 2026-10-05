@@ -30,6 +30,7 @@ import { Text } from '@/ui/typography';
 import { ScriptTrustPrompt } from '@/workspaces/script-trust-prompt';
 import { BmadDownloadPrompt } from './bmad-download-prompt';
 import { BoardEpic } from './board-epic';
+import { BuildDialog } from './build-dialog';
 import { commitPlanFiles, startBuild } from './builds-api';
 import { cardStatusLine, groupBoard, indexTickets, unmetPrerequisites, type CardStatus } from './board-model';
 import { useBoardEvents, useMarkTicket, useTickets } from './planning-api';
@@ -203,6 +204,8 @@ function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
   const [buildFailure, setBuildFailure] = useState<BuildFailure | undefined>();
   const [committing, setCommitting] = useState(false);
   const [committed, setCommitted] = useState<'committed' | 'nothing' | undefined>();
+  // The ticket whose Build was refused for want of a sandbox: the Build dialog is open for it (story 5.6).
+  const [dialogRef, setDialogRef] = useState<string | undefined>();
   const pending = useRef(false);
   const started = useRef(builds?.onStarted);
   started.current = builds?.onStarted;
@@ -216,12 +219,18 @@ function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
       startBuild(wsId, ref)
         .then(
           ({ session }) => started.current?.(session.id),
-          (error: unknown) =>
+          (error: unknown) => {
+            // No sandbox (story 5.6): the Build dialog says why and offers the choices, instead of an alert.
+            if (isApiError(error, 'sandbox_unavailable')) {
+              setDialogRef(ref);
+              return;
+            }
             setBuildFailure({
               message: error instanceof Error ? error.message : String(error),
               // Only the plan files themselves: uncommitted BMad scripts share the code but are the user's to commit.
               commitRef: isApiError(error, 'plan_uncommitted') && error.message === PLAN_UNCOMMITTED_MESSAGE ? ref : undefined,
-            }),
+            });
+          },
         )
         .finally(() => {
           pending.current = false;
@@ -250,7 +259,9 @@ function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
     },
     [wsId],
   );
-  return { onBuild: builds === undefined ? undefined : build, building, buildFailure, commit, committing, committed };
+  const closeDialog = useCallback(() => setDialogRef(undefined), []);
+  const onAttendedStarted = useCallback((sessionId: string) => started.current?.(sessionId), []);
+  return { onBuild: builds === undefined ? undefined : build, building, buildFailure, commit, committing, committed, dialogRef, closeDialog, onAttendedStarted };
 }
 
 /** Build on the board (story 5.2): given only with Unattended builds on; `onStarted` opens the new build session. */
@@ -274,7 +285,7 @@ function Board({
   const [showDropped, setShowDropped] = useState(false);
   const droppedId = useId();
   const { onChoose, saving, announcement, failure } = useBoardMarks(wsId, updatedAt, showDropped, droppedId);
-  const { onBuild, building, buildFailure, commit, committing, committed } = useBoardBuild(wsId, builds);
+  const { onBuild, building, buildFailure, commit, committing, committed, dialogRef, closeDialog, onAttendedStarted } = useBoardBuild(wsId, builds);
   const commitRef = buildFailure?.commitRef;
   const epics = useMemo(() => groupBoard(data, showDropped), [data, showDropped]);
   // One status per card, recomputed only when the tickets change, so a highlight re-renders one card.
@@ -310,6 +321,7 @@ function Board({
           {buildFailure.message}
         </Notice>
       )}
+      {dialogRef === undefined ? null : <BuildDialog wsId={wsId} ticketRef={dialogRef} onClose={closeDialog} onStarted={onAttendedStarted} />}
       {committed === undefined ? null : (
         <Notice role="status" data-testid="board-plan-committed" data-committed={committed}>
           {committed === 'nothing' ? NO_PLAN_FILES_TO_COMMIT_TEXT : PLAN_FILES_COMMITTED_TEXT}

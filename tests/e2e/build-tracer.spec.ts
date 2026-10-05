@@ -25,6 +25,15 @@ import { API_ROUTES, serverModule } from '../support.js';
 import { withChatServer } from './chat-server.js';
 import { storedToken } from './tab.js';
 
+/** A fixed sandbox answer with the status that agrees (story 5.6). */
+type Choice = 'other_agent' | 'install_docker' | 'attended';
+export const fixedSandbox = (check: { available: true; kind: string } | { available: false; reason: string; choices?: Choice[] }) => ({
+  check: async () => check,
+  status: async () => (check.available
+    ? { platform: 'other' as const, available: true, kind: check.kind, summary: 'ok', probes: [], choices: [], installHint: null }
+    : { platform: 'other' as const, available: false, kind: null, summary: check.reason, probes: [], choices: check.choices ?? ['other_agent', 'install_docker', 'attended'], installHint: null }),
+});
+
 const TICKETS = [
   { ref: '1.1', title: 'Build the thing', plan: FAKE_BUILD_PLAN },
   { ref: '1.2', title: 'Build the next thing', plan: FAKE_BUILD_WAITING_PLAN, after: [1] },
@@ -126,6 +135,6 @@ test('Build on a ready card builds it unattended, the session streams read-only,
       await page.goto(`${server.url}/w/${wsId}/board`);
       await expect(page.locator('[data-testid="ticket-card"][data-ref="1.1"]')).toHaveAttribute('data-column', 'done');
     },
-    { files: FILES, extra: { ticketStore: store as never, bmadSource, sandbox: { check: async () => ({ available: true, kind: 'test' }) } } },
+    { files: FILES, extra: { ticketStore: store as never, bmadSource, sandbox: fixedSandbox({ available: true, kind: 'test' }) } },
   );
 });

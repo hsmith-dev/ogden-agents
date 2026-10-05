@@ -59,6 +59,8 @@ Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim fr
 - Epic 6 (every agent): setup status reads `.claude/skills` only, so an agent folder that lacks the skills (Antigravity used after Set up) gets them only at the next Set up or Upgrade. From the 6.8 restack. (log: "Setup status reads the installed BMad Method version from `.claude/skills` only")
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
+- Unowned (handoff follow-up): enforce provider disclosure on the server by binding a handoff to the preview the user saw. From story 2 (handoff) security review F8/F9. (log: "Bind a handoff POST to the preview the user saw")
+- Unowned (handoff follow-up): one transaction for mode fallback and agent change, a whole-prompt budget, focusable unavailable agents, focus return from the menu. From story 2 (handoff) review F12, F15, F19, F20. (log: "Handoff hardening: one transaction for the mode fallback and the agent change")
 
 ## Log
 

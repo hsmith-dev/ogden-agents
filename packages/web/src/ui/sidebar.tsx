@@ -38,6 +38,10 @@ interface SidebarContextValue {
   setSheetOpen: (open: boolean) => void;
   /** The sidebar column; while it is displayed (md and up) the sheet has no place. */
   columnRef: RefObject<HTMLElement | null>;
+  /** The header's menu button that opens the sheet: focus goes back to it when the sheet is dismissed. */
+  triggerRef: RefObject<HTMLButtonElement | null>;
+  /** Set when the sheet closes because the user went somewhere: the new page decides focus then. */
+  navigatingRef: RefObject<boolean>;
 }
 
 const SidebarContext = createContext<SidebarContextValue | null>(null);
@@ -57,8 +61,11 @@ export interface SidebarProviderProps extends ComponentProps<'div'> {
 export function SidebarProvider({ closeSheetOn, className, children, ...props }: SidebarProviderProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const columnRef = useRef<HTMLElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const navigatingRef = useRef(false);
 
   useEffect(() => {
+    navigatingRef.current = true;
     setSheetOpen(false);
   }, [closeSheetOn]);
 
@@ -72,7 +79,7 @@ export function SidebarProvider({ closeSheetOn, className, children, ...props }:
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  const value = useMemo(() => ({ sheetOpen, setSheetOpen, columnRef }), [sheetOpen]);
+  const value = useMemo(() => ({ sheetOpen, setSheetOpen, columnRef, triggerRef, navigatingRef }), [sheetOpen]);
   return (
     <SidebarContext.Provider value={value}>
       <div
@@ -93,7 +100,7 @@ export interface SidebarProps extends ComponentProps<'aside'> {
 
 /** The sidebar column (md and up) plus its sheet form (below md), with the same content. */
 export function Sidebar({ label, className, children, ...props }: SidebarProps) {
-  const { sheetOpen, setSheetOpen, columnRef } = useSidebar();
+  const { sheetOpen, setSheetOpen, columnRef, triggerRef, navigatingRef } = useSidebar();
   return (
     <>
       <aside
@@ -119,8 +126,16 @@ export function Sidebar({ label, className, children, ...props }: SidebarProps) 
           // Focus the sheet itself, so opening it doesn't pop a row's tooltip
           // and the first Esc closes it.
           onOpenAutoFocus={(event) => {
+            navigatingRef.current = false;
             event.preventDefault();
             (event.currentTarget as HTMLElement | null)?.focus();
+          }}
+          // The menu button is not the dialog's own trigger, so give focus back to it by hand when
+          // the sheet is dismissed (Esc, the close button, the overlay). After a link, the new page decides.
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            if (!navigatingRef.current) triggerRef.current?.focus();
+            navigatingRef.current = false;
           }}
         >
           <nav
@@ -128,7 +143,9 @@ export function Sidebar({ label, className, children, ...props }: SidebarProps) 
             className="flex h-full min-h-0 flex-col"
             // Following any link from the sheet closes it, even to the page already shown.
             onClickCapture={(event) => {
-              if ((event.target as Element).closest('a[href]') !== null) setSheetOpen(false);
+              if ((event.target as Element).closest('a[href]') === null) return;
+              navigatingRef.current = true;
+              setSheetOpen(false);
             }}
           >
             {children}
@@ -141,9 +158,10 @@ export function Sidebar({ label, className, children, ...props }: SidebarProps) 
 
 /** Opens the sidebar as a drawer (a sheet); shown only below md, in every page header. */
 export function SidebarTrigger({ className, ...props }: ComponentProps<typeof Button>) {
-  const { sheetOpen, setSheetOpen } = useSidebar();
+  const { sheetOpen, setSheetOpen, triggerRef } = useSidebar();
   return (
     <Button
+      ref={triggerRef}
       data-slot="sidebar-trigger"
       variant="ghost"
       size="icon"

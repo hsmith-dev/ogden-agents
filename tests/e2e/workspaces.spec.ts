@@ -2,7 +2,7 @@
 /**
  * Projects in a real browser (story 2.5): a project added through the folder
  * browser and another started as a new folder, the same folder opening the
- * same project, switching between them in the sidebar's switcher, and Delete
+ * same project, switching between them in the sidebar, and Delete
  * history, refused while a chat works and then deleting only that project's
  * chats. A second tab follows every change from the event stream without a
  * reload. Each test runs its own server with its own home folder, so the
@@ -117,7 +117,7 @@ test('Add project, then New chat: the app opens the new chat with the composer f
   });
 });
 
-test('the switcher moves between projects, and Delete history is refused while a chat works, then deletes only that project’s chats', async ({ page, browser }) => {
+test('the sidebar moves between projects, and Delete history is refused while a chat works, then deletes only that project’s chats', async ({ page, browser }) => {
   await withServer(page, async (server, home, dataDir) => {
     const alpha = await addAlpha(page);
     mkdirSync(join(home, 'beta-repo'));
@@ -127,16 +127,19 @@ test('the switcher moves between projects, and Delete history is refused while a
     await expect(page.getByTestId('workspace-name')).toHaveText('beta-repo');
     const beta = WORKSPACE_URL.exec(page.url())![1]!;
 
-    // Switch: the current project is checked; choosing the other opens its Chats list.
-    const switcher = sidebarOf(page).getByTestId('workspace-switcher');
-    await expect(switcher).toHaveText('beta-repo');
-    await switcher.click();
-    const items = page.getByTestId('workspace-switcher-item');
-    await expect(items).toHaveText(['alpha-repo', 'beta-repo']);
-    await expect(items.nth(1)).toHaveAttribute('aria-checked', 'true');
-    await items.nth(0).click();
+    // Switch (backlog story 2: no drop-down, the sidebar is the one place): the current project is
+    // marked; the other's name opens its Chats list, though it has no chats yet.
+    const sidebar = sidebarOf(page);
+    await expect(page.getByTestId('workspace-switcher')).toHaveCount(0);
+    const names = sidebar.getByTestId('workspace-link');
+    await expect(names).toHaveText(['alpha-repo', 'beta-repo']);
+    const projectLink = (name: string) => sidebar.getByRole('group', { name }).getByRole('link', { name, exact: true });
+    await expect(projectLink('beta-repo')).toHaveAttribute('aria-current', /^(page|true)$/);
+    await expect(projectLink('alpha-repo')).not.toHaveAttribute('aria-current');
+    await projectLink('alpha-repo').click();
     await expect(page).toHaveURL(new RegExp(`/w/${alpha}$`));
-    await expect(switcher).toHaveText('alpha-repo');
+    await expect(projectLink('alpha-repo')).toHaveAttribute('aria-current', /^(page|true)$/);
+    await expect(projectLink('beta-repo')).not.toHaveAttribute('aria-current');
 
     // A second tab on alpha's Chats list follows along without a reload.
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -151,15 +154,18 @@ test('the switcher moves between projects, and Delete history is refused while a
       await expect(other.getByTestId('chat-row')).toHaveCount(1);
 
       // One chat in beta too, which Delete history on alpha must keep.
-      await switcher.click();
-      await page.getByTestId('workspace-switcher-item').filter({ hasText: 'beta-repo' }).click();
+      // Keyboard: Tab to the name, Enter opens it.
+      await projectLink('beta-repo').focus();
+      await page.keyboard.press('Enter');
       await expect(page).toHaveURL(new RegExp(`/w/${beta}$`));
       await page.getByTestId('new-chat').click();
       await expect(page).toHaveURL(new RegExp(`/w/${beta}/s/`));
 
       // Delete history on alpha, while its chat is working: refused, shown in the dialog.
-      await page.goto(`${server.url}/w/${alpha}`);
-      await page.getByTestId('workspace-settings-link').click();
+      // The gear beside alpha's name opens its settings, from beta's page.
+      await sidebar.getByRole('link', { name: 'alpha-repo settings' }).click();
+      await expect(page).toHaveURL(new RegExp(`/w/${alpha}/settings$`));
+      await expect(projectLink('alpha-repo')).toHaveAttribute('aria-current', 'true');
       await expect(page.getByRole('heading', { name: 'Workspace settings', level: 1 })).toBeVisible();
       server.core.entities.setSessionState(sesId as never, 'working');
       await page.getByTestId('delete-history').click();

@@ -1,6 +1,6 @@
 /**
  * The Grok server test hook (epic 12 entry 7): a Node script inside the temp
- * folder plays Grok's `codex-acp` adapter, only under a test run on a data
+ * folder plays Grok's `grok agent stdio`, only under a test run on a data
  * folder inside the temp folder; for anyone else the pinned adapter runs as
  * shipped. Nothing here starts a server or an agent.
  */

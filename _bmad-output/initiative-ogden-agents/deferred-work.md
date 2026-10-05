@@ -83,6 +83,7 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Epic 12 entry 6 follow-up (Codex): the sidebar and notification text still says "needs you to sign in again" for a Codex chat whose API key was rejected; word it for an API key only agent. From 12.6. (log: "the sidebar and notification text still says sign in again for an API key only agent")
 - Epic 12 follow-up (Codex): the shared keychain-unavailable message ends "Sign in with your account instead", which Codex (API key only) cannot do; word it per agent. From 12.6 review. (log: "the keychain unavailable message still tells an API key only agent to sign in")
 - Epic 12 entry 8 (Grok): the checked Grok binary is hashed at install only, not at each spawn; re-check at start if the cost is acceptable. From 12.4 review. (log: "the checked Grok binary is hashed at install only")
+- Epic 12.11 live check (Grok): confirm a trusted project's own per-tool `allow` rules in `.claude/settings.json` cannot loosen Ask now that Grok's own folder trust is off (`GROK_FOLDER_TRUST=0`); the probe covered only the always-approve flag. From 12.7 review. (log: "Grok's own per-tool allow rules in a trusted project")
 - Epic 12 entry 5 or 7 (Codex or Grok chat): the shared client does not check that a fixed-at-start agent honoured the mode in its `_meta` on resume or load; the quirk should report a `current_mode_update`, which core already handles. From 12.3 review. (log: "the shared client does not check that a fixed-at-start agent honoured the mode")
 - Epic 12 entry 4 (Grok descriptor): an unreadable agent-files fingerprint (a symlinked `.claude` or `.mcp.json`) makes Trust loop for agents while the Board still works; say why in the prompt. From 12.3 review. (log: "an unreadable agent-files fingerprint makes Trust loop for agents")
 - Unowned: the project trust prompt's "changed" wording keys on the trusted flag only, and the terminal trust refusal uses code `agent_unsupported`. From 12.3 review. (log: "the project trust prompt's changed wording keys on the trusted flag only")
@@ -728,3 +729,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-grok-stubs-descriptor-pins-checked-binary-installer-wiring-slot-and-fake-personality-plan.md`
   summary: Epic 12.4 (Grok): the checked Grok binary is hashed at install only, not at each spawn.
   evidence: `installedGrok` checks existence; see the plan's Review Triage Log.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-grok-chat-per-chat-modes-the-trust-gate-resume-and-the-terminal-toggle-plan.md`
+  summary: Epic 12.7 review: Grok's own per-tool allow rules in a trusted project's settings load with its folder trust off; the probe covered only the always-approve flag.
+  evidence: `grok-agent.ts` (`GROK_FOLDER_TRUST=0`); see the plan's Review Triage Log and Decisions.

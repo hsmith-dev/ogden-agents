@@ -8,7 +8,7 @@ route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['quick-security', 'quick-correctness']
 review_loop_iteration: 0
 baseline_revision: '2f4a017ec791dc97e42538941521de76673ec957'
 context:
@@ -75,6 +75,8 @@ Built 2026-10-05 on `story/12.7-grok-chat` from `story/12.4-grok-stubs`.
 - 2026-10-05: entry 7's "live check first" is built ahead (caller's instruction); the live checks move to RELEASING.md.
 
 ## Review Triage Log
+
+Security and correctness reviewers (2 lenses), no high or medium. Patched: the explicit Ask `_meta` is now proven (the fake echoes the `_meta` its session opened with, asserted for new, resume and load) and the card options chosen are asserted (`allow_once`, `reject_once`); core's environment winning over `launch`'s additions and the real argument list are asserted; the token check reads `XAI_API_KEY` only; the project files Grok's trust is bound to now include `.claude/hooks`, `.claude/commands` and `.claude/agents` (scripts a hook points to); a descriptor comment no longer claims a card in Skip all; a copy-paste slip in a test header. Not changed, logged: Grok's own per-tool `allow` rules in a trusted project's settings load with its folder trust off, and the live check confirms they cannot loosen Ask (security low 3); `.claude/skills`, `CLAUDE.md` and `AGENTS.md` are not in the trust-bound files (BMad setup writes skills; instructions are prompts, not code). No intent_gap or bad_plan.
 
 ## Verification
 

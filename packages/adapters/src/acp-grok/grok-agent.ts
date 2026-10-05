@@ -46,7 +46,6 @@ import { installedGrok } from '../setup-grok/install.js';
 import {
   GROK_API_KEY_ENV,
   GROK_AUTH_METHOD_IDS,
-  GROK_CODE_API_KEY_ENV,
   GROK_DISABLE_AUTOUPDATER_ENV,
   GROK_FOLDER_TRUST_ENV,
   GROK_HOME_ENV,
@@ -79,7 +78,8 @@ export interface GrokAgentOptions {
   onDiagnostic?: (message: string, fields?: Record<string, unknown>) => void;
 }
 
-const hasKey = (env: Readonly<Record<string, string>>) => [GROK_API_KEY_ENV, GROK_CODE_API_KEY_ENV].some((name) => (env[name] ?? '') !== '');
+// `xai.api_key` reads `XAI_API_KEY` (core sets only that one); the other name is kept out of every process.
+const hasKey = (env: Readonly<Record<string, string>>) => (env[GROK_API_KEY_ENV] ?? '') !== '';
 
 export function createGrokAgent(options: GrokAgentOptions): AgentPort {
   const reasons = acpReasons(GROK_DESCRIPTOR.displayName, { apiKeyOnly: true });

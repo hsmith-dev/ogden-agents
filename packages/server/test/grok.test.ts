@@ -141,8 +141,8 @@ describe('Grok beside Claude Code (epic 12 entry 7)', () => {
     await trust();
     const session = await chatWith('grok');
     expect(await say(server, tab, wsId, session.id, 'mode')).toBe('mode=ask');
-    expect(await answerCard(server, tab, wsId, session.id, 'permission rm -rf build', 'deny')).toBe('Denied rm -rf build.');
-    expect(await answerCard(server, tab, wsId, session.id, 'permission npm test', 'allow_once')).toBe('Ran npm test.');
+    expect(await answerCard(server, tab, wsId, session.id, 'permission rm -rf build', 'deny')).toBe('Denied rm -rf build. chose=reject_once');
+    expect(await answerCard(server, tab, wsId, session.id, 'permission npm test', 'allow_once')).toBe('Ran npm test. chose=allow_once');
   });
 
   it('refuses Auto, takes Skip all at chat start only under Developer mode, and refuses a change once the chat has started', async () => {

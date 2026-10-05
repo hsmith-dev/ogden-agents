@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { AgentError, PROTECTED_PATHS, type AgentEvent, type AgentPermissionDecision, type AgentPermissionRequest, type AgentSession } from '@ogden-agents/core';
 import type { PermissionMode } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
-import { acpReasons, createGrokAgent } from '../src/index.js';
+import { acpReasons, createGrokAgent, GROK_ARGS } from '../src/index.js';
 
 const FAKE_GROK = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-grok.mjs');
 const KEY = `xai-${'K'.repeat(60)}4321`;
@@ -117,8 +117,10 @@ describe("Grok's chat port (epic 12 entry 7)", () => {
         return { outcome: 'deny' };
       },
     });
-    expect(await say(session, events, 'permission npm test')).toBe('Denied npm test.');
+    expect(await say(session, events, 'permission npm test')).toBe('Denied npm test. chose=reject_once');
     expect(asked).toHaveLength(1);
+    // The explicit Ask is what reaches Grok, so no project setting can loosen it.
+    expect(await say(session, events, 'meta')).toBe('meta={"yoloMode":false,"autoMode":false}');
   });
 
   it('holds a shell command for its card, Allow once and Deny pick the once and reject_once options, never an always one', async () => {
@@ -130,10 +132,10 @@ describe("Grok's chat port (epic 12 entry 7)", () => {
         return answer;
       },
     });
-    expect(await say(session, events, 'permission npm test')).toBe('Ran npm test.');
+    expect(await say(session, events, 'permission npm test')).toBe('Ran npm test. chose=allow_once');
     expect(asked[0]).toMatchObject({ kind: 'execute', command: 'npm test', title: 'Run npm test' });
     answer = { outcome: 'deny' };
-    expect(await say(session, events, 'permission rm -rf build')).toBe('Denied rm -rf build.');
+    expect(await say(session, events, 'permission rm -rf build')).toBe('Denied rm -rf build. chose=reject_once');
   });
 
   it('reopens in a new process with resume, else load, else a new one, with the mode in _meta each time', async () => {
@@ -146,11 +148,17 @@ describe("Grok's chat port (epic 12 entry 7)", () => {
       sessions.push(reopened.session);
       const events: AgentEvent[] = [];
       reopened.session.onEvent((event) => events.push(event));
-      return { restored: reopened.restored, mode: await say(reopened.session, events, 'mode') };
+      return { restored: reopened.restored, mode: await say(reopened.session, events, 'mode'), meta: await say(reopened.session, events, 'meta') };
     };
-    expect(await reopen({})).toEqual({ restored: 'resumed', mode: 'mode=ask' });
-    expect(await reopen({ FAKE_ACP_REOPEN_FAIL: 'resume' }, 'skip_all')).toEqual({ restored: 'loaded', mode: 'mode=skip_all' });
+    expect(await reopen({})).toEqual({ restored: 'resumed', mode: 'mode=ask', meta: 'meta={"yoloMode":false,"autoMode":false}' });
+    expect(await reopen({ FAKE_ACP_REOPEN_FAIL: 'resume' }, 'skip_all')).toEqual({ restored: 'loaded', mode: 'mode=skip_all', meta: 'meta={"yoloMode":true}' });
     expect((await reopen({ FAKE_ACP_REOPEN_FAIL: 'resume,load' })).restored).toBe('new');
+  });
+
+  it("core's environment wins over what launch adds, and the real binary runs as agent --no-leader stdio", async () => {
+    const { session, events } = await start({ env: { GROK_FOLDER_TRUST: '1' } });
+    expect(await say(session, events, 'env')).toContain('GROK_FOLDER_TRUST=1');
+    expect(GROK_ARGS).toEqual(['agent', '--no-leader', 'stdio']);
   });
 
   it('sees BMad skills in .claude/skills only because its own folder trust is off', async () => {

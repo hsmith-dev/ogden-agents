@@ -3,7 +3,8 @@
 # launches it, and records the answers (findings-<leg> artifacts and the job summary).
 # Test builds are uploaded as workflow artifacts only: no secrets, no releases, no publishing.
 # The updater dry run signs with a throwaway key generated inside the job.
-# Removed from .github/workflows/ before the spike's final commit.
+# Moved out of .github/workflows/ at the spike's final commit, so it no longer runs. Kept as
+# 13.2's recipe (run 37262481915 is its last run). To run it again, copy it back to .github/workflows/.
 name: Desktop spike (13.1, temporary)
 
 on:

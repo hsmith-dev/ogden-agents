@@ -218,3 +218,56 @@ pub fn on_exit() {
         cleanup_leftovers(pid, &noted);
     }
 }
+
+/// The launcher token and port of the running server, for the shell's own `/launcher/*` calls.
+fn launcher_call_target() -> Option<(u16, String)> {
+    let (_, port, _, data_dir) = INFO.lock().ok()?.clone()?;
+    let token = std::fs::read_to_string(data_dir.join("launcher.token")).ok()?.trim().to_string();
+    Some((port, token))
+}
+
+/// The update channel the user chose (`stable` or `next`), kept by the server.
+pub fn update_channel() -> String {
+    let Some((port, token)) = launcher_call_target() else { return "stable".into() };
+    ureq::get(&format!("http://127.0.0.1:{port}/launcher/update-channel"))
+        .set("x-ogden-launcher-token", &token)
+        .timeout(Duration::from_secs(5))
+        .call()
+        .ok()
+        .and_then(|r| r.into_string().ok())
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v["channel"].as_str().map(|c| c.to_string()))
+        .filter(|c| c == "next")
+        .unwrap_or_else(|| "stable".into())
+}
+
+/// Tells the server about an update (found, downloaded and verified, or failed with a plain reason).
+pub fn report_update(version: &str, notes: &str, channel: &str, downloaded: bool, failed: Option<&str>) {
+    let Some((port, token)) = launcher_call_target() else { return };
+    let mut body = json!({ "version": version, "notes": notes.chars().take(4000).collect::<String>(), "channel": channel, "downloaded": downloaded });
+    if let Some(why) = failed {
+        body["failed"] = json!(why.chars().take(300).collect::<String>());
+    }
+    let result = ureq::post(&format!("http://127.0.0.1:{port}/launcher/app-update"))
+        .set("x-ogden-launcher-token", &token)
+        .set("content-type", "application/json")
+        .timeout(Duration::from_secs(5))
+        .send_string(&body.to_string());
+    if let Err(e) = result {
+        report("update_report_failed", json!({ "error": e.to_string() }));
+    }
+}
+
+/// Whether the user asked to restart and nothing is busy (the server's one busy rule decides).
+pub fn restart_go_ahead() -> bool {
+    let Some((port, token)) = launcher_call_target() else { return false };
+    ureq::get(&format!("http://127.0.0.1:{port}/launcher/app-update"))
+        .set("x-ogden-launcher-token", &token)
+        .timeout(Duration::from_secs(5))
+        .call()
+        .ok()
+        .and_then(|r| r.into_string().ok())
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .map(|v| v["restart"].as_bool() == Some(true))
+        .unwrap_or(false)
+}

@@ -18,6 +18,11 @@ use crate::server::{self, QuitAnswer};
 /// Set once the quit has begun, so a second request (menu, window, Dock) does nothing.
 static QUITTING: AtomicBool = AtomicBool::new(false);
 
+/// The quit has begun (an update is about to restart the app): ignore further quit requests.
+pub fn begin_quit() {
+    QUITTING.store(true, Ordering::SeqCst);
+}
+
 pub fn quitting() -> bool {
     QUITTING.load(Ordering::SeqCst)
 }
@@ -122,15 +127,7 @@ pub fn on_menu(app: &AppHandle, id: &str) {
             });
         }
         "check_updates" => {
-            // A stub until story 13.10 (the updater): say so plainly.
-            let app = app.clone();
-            std::thread::spawn(move || {
-                app.dialog()
-                    .message("Ogden Agents looks for updates each time it starts. Checking from this menu is coming in a later version.")
-                    .title("Check for Updates")
-                    .kind(MessageDialogKind::Info)
-                    .blocking_show();
-            });
+            tauri::async_runtime::spawn(crate::update::check_for_user(app.clone()));
         }
         _ => {}
     }

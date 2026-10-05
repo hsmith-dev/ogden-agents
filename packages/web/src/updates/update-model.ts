@@ -60,6 +60,7 @@ function safeStorage(): Storage | undefined {
  */
 export function appUpdateSentence(view: DesktopUpdateView): string {
   const { update, blocked, restartRequested } = view;
+  if (update.failed !== undefined) return `Ogden ${update.version} could not be installed: ${update.failed} The version you have keeps working.`;
   if (!update.downloaded) return `Ogden ${update.version} is downloading.`;
   if (restartRequested) return blocked ? `Ogden ${update.version} will install when your agents finish, then Ogden restarts.` : `Ogden ${update.version} is installing. Ogden restarts in a moment.`;
   if (blocked) return `Update available. Ogden ${update.version} is ready, but agents are still working, so it cannot restart yet.`;

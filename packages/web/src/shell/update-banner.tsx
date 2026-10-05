@@ -28,7 +28,7 @@ export function UpdateBanner() {
           data-testid="app-update-banner"
           role={undefined}
           action={
-            app.update.downloaded && !app.restartRequested ? (
+            app.update.downloaded && app.update.failed === undefined && !app.restartRequested ? (
               <span className="flex flex-wrap gap-2">
                 <Button variant="ghost" size="sm" disabled={app.blocked || restart.isPending} onClick={() => restart.mutate(false)}>
                   Restart to update

@@ -92,13 +92,18 @@ export function createDesktopUpdate(options: DesktopUpdateOptions): DesktopUpdat
         requested = null;
         handedOff = false;
       }
+      // A failed update can never be restarted into.
+      if (report.failed !== undefined) {
+        requested = null;
+        handedOff = false;
+      }
       update = report;
       append({ type: 'app.update_available', workspaceId: null, streamId: SETTINGS_STREAM, payload: { version: report.version, channel: report.channel, downloaded: report.downloaded } });
       return true;
     },
     requestRestart(whenIdle) {
       if (update === null) return 'no_update';
-      if (!update.downloaded) return 'not_downloaded';
+      if (!update.downloaded || update.failed !== undefined) return 'not_downloaded';
       const now = busy();
       if (now.busy && !whenIdle) return { requested: false, blocked: true, busy: now.total };
       if (requested === null) {
@@ -109,7 +114,7 @@ export function createDesktopUpdate(options: DesktopUpdateOptions): DesktopUpdat
       return { requested: true, blocked: now.busy, busy: now.total };
     },
     pollRestart() {
-      if (update === null || requested === null || handedOff) return false;
+      if (update === null || requested === null || handedOff || update.failed !== undefined) return false;
       if (busy().busy) return false;
       handedOff = true;
       return true;

@@ -73,8 +73,9 @@ export function safeHref(destination: string): string | null {
 
 /**
  * A followable link: opens in a new tab with no access to this page, and
- * shows its full address under it on hover and on keyboard focus (also its
- * accessible description).
+ * shows its full address under its line on hover and on keyboard focus (also
+ * its accessible description). The address is placed against the whole
+ * Markdown block (`relative` there), so it never runs past the message.
  */
 function SafeLink({ href, children }: { href: string; children: ReactNode }) {
   const hint = useId();
@@ -85,13 +86,13 @@ function SafeLink({ href, children }: { href: string; children: ReactNode }) {
       rel="noopener noreferrer"
       aria-describedby={hint}
       data-slot="markdown-link"
-      className="group/link relative break-words text-foreground underline decoration-muted-foreground underline-offset-2 hover:decoration-foreground"
+      className="group/link break-words text-foreground underline decoration-muted-foreground underline-offset-2 hover:decoration-foreground"
     >
       {children}
       <span
         id={hint}
         data-slot="markdown-link-address"
-        className="pointer-events-none absolute top-full left-0 z-10 mt-1 hidden w-max max-w-[min(32rem,80vw)] rounded-sm border border-border bg-popover px-2 py-1 font-mono text-mono-compact break-all text-popover-foreground no-underline group-hover/link:block group-focus-visible/link:block"
+        className="pointer-events-none absolute left-0 z-10 mt-1 hidden w-max max-w-full rounded-sm border border-border bg-popover px-2 py-1 font-mono text-mono-compact break-all text-popover-foreground no-underline group-hover/link:block group-focus-visible/link:block"
       >
         {href}
       </span>

@@ -173,7 +173,7 @@ export function Markdown({ source, variant = 'document', streaming = false, clas
   const blocks = useMemo(() => parseBlocks(withoutFrontmatter(head).split(/\r?\n/)), [head]);
   const rendered = useMemo(() => renderBlocks(blocks, context), [blocks, context]);
   return (
-    <div data-slot="markdown" data-variant={variant} className={cn('flex min-w-0 flex-col gap-3 text-body text-foreground', className)} {...props}>
+    <div data-slot="markdown" data-variant={variant} className={cn('relative flex min-w-0 flex-col gap-3 text-body text-foreground', className)} {...props}>
       {rendered}
       {rest === '' ? null : (
         <p data-slot="markdown-rest" className="m-0 break-words whitespace-pre-wrap">

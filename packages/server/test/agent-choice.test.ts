@@ -102,6 +102,18 @@ async function say(server: TestServer, tab: SignedIn, wsId: string, sesId: Sessi
   return replies(server, sesId).at(-1)!;
 }
 
+describe('the Codex slot (epic 12 entry 4)', () => {
+  it('is not registered by default, and a test registers it as its own agent after Claude Code', async () => {
+    const bare = await startTestServer();
+    const tab = await signIn(bare);
+    const listed = async (server: TestServer, signed: SignedIn) =>
+      ChatAgentsResponse.parse(await (await request(server, signed, 'GET', API_ROUTES.chatAgents)).json()).agents.map((agent) => agent.agentId);
+    expect(await listed(bare, tab)).toEqual(['claude-code']);
+    const withCodex = await startTestServer({ codex: {} });
+    expect(await listed(withCodex, await signIn(withCodex))).toEqual(['claude-code', 'codex']);
+  });
+});
+
 describe('two agents side by side in one project (epic 6, entry 2)', () => {
   it('lists the agents a chat can start with, Claude Code first and the default', async () => {
     const { server, tab } = await setUp();

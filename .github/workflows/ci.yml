@@ -267,6 +267,11 @@ jobs:
       - name: Check the pinned Antigravity archive
         run: node scripts/agent-pins.mjs --check --agent antigravity
 
+      # Codex's adapter and the Codex CLI it bundles (epic 12 entry 4): `npm ci` of
+      # packages/adapters/src/setup-codex/pins/ with the platform binary package.
+      - name: Install the pinned Codex adapter with its bundled Codex CLI
+        run: node scripts/agent-pins.mjs --agent codex --check --with-binary
+
   # UI layout in a real browser (architecture Conventions: jsdom doesn't
   # evaluate media queries): sidebar forms and overflow at 1440, 900 and 390
   # px, theme and density switching, and the signed-out launch page.

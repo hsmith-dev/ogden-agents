@@ -27,10 +27,21 @@ export const ANTHROPIC_KEY_PATTERNS: readonly RegExp[] = [
  */
 export const GOOGLE_API_KEY_PATTERNS: readonly RegExp[] = [/\bAIza[0-9A-Za-z_-]*(?:(?:\r?\n|\\r|\\n)+[0-9A-Za-z_-]+)*/g];
 
-/** Every key pattern above. */
-export const API_KEY_PATTERNS: readonly RegExp[] = [...ANTHROPIC_KEY_PATTERNS, ...GOOGLE_API_KEY_PATTERNS];
+/**
+ * An OpenAI API key (Codex's, epic 12 entry 4): `sk-` and 16 or more more
+ * characters (`sk-proj-...`, `sk-svcacct-...`), never an Anthropic key
+ * (`sk-ant`, matched above); also one wrapped onto the next lines (raw or as an
+ * escaped `\n`).
+ */
+export const OPENAI_KEY_PATTERNS: readonly RegExp[] = [/\bsk-(?!ant)[A-Za-z0-9_-]{16,}(?:(?:\r?\n|\\r|\\n)+[A-Za-z0-9_-]+)*/g];
 
-/** `text` with every API key in it (Anthropic's and Google's) replaced by {@link REDACTED_SECRET}. */
+/** An xAI API key (`xai-` and 20 or more characters), also wrapped onto the next lines. */
+export const XAI_KEY_PATTERNS: readonly RegExp[] = [/\bxai-[A-Za-z0-9]{20,}(?:(?:\r?\n|\\r|\\n)+[A-Za-z0-9]+)*/g];
+
+/** Every key pattern above. */
+export const API_KEY_PATTERNS: readonly RegExp[] = [...ANTHROPIC_KEY_PATTERNS, ...GOOGLE_API_KEY_PATTERNS, ...OPENAI_KEY_PATTERNS, ...XAI_KEY_PATTERNS];
+
+/** `text` with every API key in it (Anthropic's, Google's, OpenAI's and xAI's) replaced by {@link REDACTED_SECRET}. */
 export function redactApiKeys(text: string): string {
   return API_KEY_PATTERNS.reduce((out, pattern) => out.replace(pattern, REDACTED_SECRET), text);
 }

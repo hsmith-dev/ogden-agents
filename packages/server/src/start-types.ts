@@ -5,6 +5,7 @@
 import type { ClaudeCodeSetupOptions, FetchLike, PtyLoader } from '@ogden-agents/adapters';
 import type { AgentWiring } from './agent-wiring.js';
 import type { AntigravityPorts } from './antigravity-wiring.js';
+import type { CodexPorts } from './codex-wiring.js';
 import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, NotifierPort, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort } from '@ogden-agents/core';
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
@@ -61,6 +62,13 @@ export interface StartOptions {
    * Antigravity personality), or `false` to leave it out.
    */
   antigravity?: false | AntigravityPorts;
+  /**
+   * Codex (epic 12 entry 4), registered after Antigravity: a shipped install
+   * registers it only when `CODEX_SHIPPED` (its own adapter folder) is on; a
+   * test registers it with ports (the fake agent's Codex personality, a
+   * memory setup), or `false` to leave it out.
+   */
+  codex?: false | CodexPorts;
   /**
    * The Claude Agent ACP adapter's entry script (or, in tests, any script
    * that speaks ACP over stdio, such as the fake agent). Default:

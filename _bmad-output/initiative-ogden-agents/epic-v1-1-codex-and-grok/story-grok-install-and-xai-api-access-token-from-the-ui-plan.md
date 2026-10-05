@@ -8,7 +8,7 @@ route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['quick-security', 'quick-correctness']
 review_loop_iteration: 0
 baseline_revision: '0d373b9999ce9bd6899b8a71af8efb8ac727cb9d'
 context:
@@ -77,6 +77,8 @@ Built 2026-10-05 on `story/12.8-grok-setup` from `story/12.7-grok-chat` (with th
 - 2026-10-05: entry 8 rewritten (see the epic's Decision of that date and `tickets.toml`).
 
 ## Review Triage Log
+
+Security and correctness reviewers (2 lenses), no high or medium. Patched: the install-time probe runs with the user's home, config and cache variables pointed at its temp folder (medium-low: the base environment carries \`HOME\`), runs from the OS temp folder, never lets a failed temp cleanup change its answer, escalates to a hard kill, and caps what it reads; the refusal wording now also covers "didn't answer in time" so a slow first launch is not read as the version refusing tokens. Not changed, logged: the probe's premise that \`authenticate\` with a dummy token sends nothing to xAI is from spike 12.2 and the macOS probe of entry 7 (a live check confirms on Windows and Linux); other refusal words still say "key" for Grok (the key was refused, the sidebar and notification, the card's save failure); the real probe is tested only with the fake's yes and an exit or a missing binary as no; the Codex card's environment caption now reads "One you save here comes first." No intent_gap or bad_plan.
 
 ## Verification
 

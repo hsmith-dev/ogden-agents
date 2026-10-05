@@ -68,16 +68,29 @@ function walkFiles(dir) {
 /** @returns {{pid:number, ppid:number, rssKB:number, name:string}[]} */
 function listProcs() {
   if (OS === 'win') {
-    const r = spawnSync(
-      'powershell',
-      ['-NoProfile', '-Command', 'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,WorkingSetSize,Name | ConvertTo-Json -Compress'],
-      { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
-    );
-    try {
-      return JSON.parse(r.stdout).map((p) => ({ pid: p.ProcessId, ppid: p.ParentProcessId, rssKB: Math.round(Number(p.WorkingSetSize) / 1024), name: p.Name }));
-    } catch {
-      return [];
+    const errors = [];
+    for (const shell of ['pwsh', 'powershell']) {
+      const r = spawnSync(
+        shell,
+        ['-NoProfile', '-Command', 'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,WorkingSetSize,Name | ConvertTo-Json -Compress'],
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+      );
+      try {
+        const list = JSON.parse(r.stdout).map((p) => ({ pid: p.ProcessId, ppid: p.ParentProcessId, rssKB: Math.round(Number(p.WorkingSetSize) / 1024), name: p.Name }));
+        if (list.length > 0) return list;
+      } catch {
+        errors.push(`${shell}: ${r.error ?? ''} ${String(r.stderr).slice(0, 200)}`);
+      }
     }
+    // No ppid here, but enough for "is it alive".
+    const t = spawnSync('tasklist', ['/FO', 'CSV', '/NH'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const list = t.stdout
+      .split('\n')
+      .map((l) => l.match(/^"([^"]*)","(\d+)"/))
+      .filter(Boolean)
+      .map((m) => ({ pid: Number(m[2]), ppid: -1, rssKB: 0, name: m[1] }));
+    if (!findings.processListFallback) findings.processListFallback = { used: 'tasklist', errors };
+    return list;
   }
   const r = spawnSync('ps', ['-axo', 'pid=,ppid=,rss=,comm='], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   return r.stdout

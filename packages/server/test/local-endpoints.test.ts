@@ -56,22 +56,22 @@ describe('the endpoint routes (epic 14 story 14.3)', () => {
     const { server, tab, add, endpointOf } = await setUp();
     const refused = await add({ label: 'Gateway', baseUrl: 'http://192.168.1.20:8000/v1' });
     expect(refused.status).toBe(409);
-    expect(ApiErrorBody.parse(await refused.json()).error).toMatchObject({ code: 'endpoint_confirmation_required', details: { host: '192.168.1.20:8000' } });
-    const created = await endpointOf(await add({ label: 'Gateway', baseUrl: 'http://192.168.1.20:8000/v1', confirmHost: '192.168.1.20:8000' }));
+    expect(ApiErrorBody.parse(await refused.json()).error).toMatchObject({ code: 'endpoint_confirmation_required', details: { host: 'http://192.168.1.20:8000' } });
+    const created = await endpointOf(await add({ label: 'Gateway', baseUrl: 'http://192.168.1.20:8000/v1', confirmHost: 'http://192.168.1.20:8000' }));
     expect(created).toMatchObject({ needsConfirmation: false, insecureRemote: true, loopback: false });
     // A changed host asks again, and the confirmation route binds to the host shown.
     const moved = await endpointOf(await call(server, tab, 'PATCH', apiPath(API_ROUTES.localEndpoint, { endpointId: created.id }), { baseUrl: 'https://gw.example.com/v1' }));
-    expect(moved).toMatchObject({ needsConfirmation: true, host: 'gw.example.com' });
-    const wrong = await call(server, tab, 'POST', apiPath(API_ROUTES.localEndpointConfirm, { endpointId: created.id }), { host: '192.168.1.20:8000' });
+    expect(moved).toMatchObject({ needsConfirmation: true, host: 'https://gw.example.com' });
+    const wrong = await call(server, tab, 'POST', apiPath(API_ROUTES.localEndpointConfirm, { endpointId: created.id }), { host: 'http://192.168.1.20:8000' });
     expect(wrong.status).toBe(409);
-    const confirmed = await endpointOf(await call(server, tab, 'POST', apiPath(API_ROUTES.localEndpointConfirm, { endpointId: created.id }), { host: 'gw.example.com' }));
+    const confirmed = await endpointOf(await call(server, tab, 'POST', apiPath(API_ROUTES.localEndpointConfirm, { endpointId: created.id }), { host: 'https://gw.example.com' }));
     expect(confirmed).toMatchObject({ needsConfirmation: false, insecureRemote: false });
   });
 
   it('keeps a key in the keychain and returns it nowhere: not in an answer, an event, the log or the database', async () => {
     const secrets = createMemorySecretStore();
     const { server, tab, add, endpointOf } = await setUp({ secrets });
-    const created = await add({ label: 'Keyed', baseUrl: 'https://api.example.com/v1', confirmHost: 'api.example.com', key: KEY });
+    const created = await add({ label: 'Keyed', baseUrl: 'https://api.example.com/v1', confirmHost: 'https://api.example.com', key: KEY });
     const text = await created.text();
     expect(text).not.toContain(KEY);
     expect(created.headers.get('cache-control')).toBe('no-store');
@@ -84,7 +84,7 @@ describe('the endpoint routes (epic 14 story 14.3)', () => {
     expect(await endpointOf(removed)).toMatchObject({ keySaved: false });
     expect(await secrets.get(`agent-endpoint-key/${endpoint.id}`)).toBeUndefined();
     expect(JSON.stringify(server.core.events.readAfter(0))).not.toContain(KEY);
-    // The log and the database hold neither the key nor the address.
+    // The log and the database hold no key (the database does hold the address).
     await server.close();
     const files = readdirSync(server.dataDir, { recursive: true, encoding: 'utf8' }).filter((name) => /(\.db(-wal|-shm)?|\.log)$/.test(name));
     expect(files.length).toBeGreaterThan(0);
@@ -153,7 +153,7 @@ describe('a chat reaches only a confirmed endpoint, with its key', () => {
     const calls = fake.log.length;
     const second = await newSession();
     await sendTo(second, 'hello');
-    expect(JSON.stringify(server.core.events.readAfter(0).filter((e) => e.streamId === second.id))).toContain('Confirm that your messages and project text may be sent to elsewhere.example.com');
+    expect(JSON.stringify(server.core.events.readAfter(0).filter((e) => e.streamId === second.id))).toContain('Confirm that your messages and project text may be sent to https://elsewhere.example.com');
     expect(fake.log.length).toBe(calls);
     expect(JSON.stringify(server.core.events.readAfter(0))).not.toContain(KEY);
   });

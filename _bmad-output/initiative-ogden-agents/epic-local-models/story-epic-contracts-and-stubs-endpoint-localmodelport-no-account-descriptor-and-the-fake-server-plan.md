@@ -3,12 +3,12 @@ title: 'Epic contracts and stubs: endpoint, LocalModelPort, no-account descripto
 type: 'feature'
 ticket: '14.3'
 created: '2026-10-05'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['quick-security', 'quick-correctness']
 review_loop_iteration: 0
 baseline_revision: '37280d41b7be27c00556922350560ec47a4250f4'
 context:
@@ -74,6 +74,8 @@ Stacked on 14.2 (branch from `story/14.2-local-model-tracer`). `core.localEndpoi
 ## Plan Change Log
 
 ## Review Triage Log
+
+Security and correctness reviewers (2 lenses), no critical findings. Patched: a confirmation was bound to the host name only, so https then http on the same name kept it, now bound to scheme, host and port (high); a saved key stayed attached after the address changed, now dropped from the keychain when the scheme, host or port changes (high); a key with a line break or hidden character is refused and the ends trimmed (medium); `localhost.` with a trailing dot now asks like any other name (low); a damaged row was listed nowhere but reachable by id, now not found everywhere (medium); a stale confirm sent with a change was ignored, now refused (medium); the endpoint cap is re-checked inside the transaction and a key left by a failed save is cleaned (medium); wrong error codes and paths in route comments fixed (low); the web is checked for the string 'local' as an agent id (low). Deferred and indexed: the harness's own redirect behaviour, keychain and database steps not atomic, events.ts length and the DOM lib in shared. Not changed: noStore on a 413 (no secret), a flaky-port fixture test (low), vacuous timeout wording in the port test header (low). No intent_gap or bad_plan.
 
 ## Verification
 

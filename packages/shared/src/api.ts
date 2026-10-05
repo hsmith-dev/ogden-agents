@@ -184,8 +184,8 @@ export const API_ROUTES = {
   /**
    * `GET` → `LocalEndpointsResponse` (epic 14 story 14.3): the OpenAI-compatible
    * endpoints the Local model talks to. `POST AddLocalEndpointRequest` → 201
-   * `LocalEndpointResponse`; 400 `validation_failed` for an address that can't be
-   * used, 409 `secrets_unavailable` when a key is given and the keychain can't hold it,
+   * `LocalEndpointResponse`; 400 `invalid_request` for an address that can't be
+   * used, 503 `secrets_unavailable` when a key is given and the keychain can't hold it,
    * 409 `endpoint_confirmation_required` when the host is not this computer and
    * `confirmHost` does not match it. Never carries a key (AD-16).
    */
@@ -193,14 +193,14 @@ export const API_ROUTES = {
   /**
    * `PATCH UpdateLocalEndpointRequest` → `LocalEndpointResponse`; `DELETE` → 204
    * (also removes its key). A changed host drops its confirmation (epic 14
-   * story 14.3). 404 `endpoint_not_found`.
+   * story 14.3). 404 `not_found`.
    */
   localEndpoint: `${API_BASE}/local-endpoints/:endpointId`,
   /**
    * `PUT SetEndpointKeyRequest` → `LocalEndpointResponse`; `DELETE` →
    * `LocalEndpointResponse`: saves or removes the endpoint's key in the keychain
    * (`agent-endpoint-key/<id>`). Sent `no-store`; the key is never answered,
-   * logged or evented (AD-16). 409 `secrets_unavailable` with plain words.
+   * logged or evented (AD-16). 503 `secrets_unavailable` with plain words.
    */
   localEndpointKey: `${API_BASE}/local-endpoints/:endpointId/key`,
   /**

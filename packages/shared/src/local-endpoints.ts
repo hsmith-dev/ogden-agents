@@ -50,7 +50,11 @@ export type EndpointAddress =
       /** The address cleaned up: lower-case host, no trailing slash. */
       url: string;
       scheme: 'http' | 'https';
-      /** The host and port as written (`localhost:1234`), what a confirmation is bound to. */
+      /**
+       * The scheme, host and port (`http://localhost:1234`, `https://api.example.com`), what a confirmation is bound
+       * to: a changed scheme or port is another service and asks again (default ports are kept out of the URL's own
+       * host, so the scheme is part of this).
+       */
       host: string;
       /** This computer: `localhost`, `127.x.x.x` or `::1`. Anything else, even a name that points here, is not. */
       loopback: boolean;
@@ -85,11 +89,12 @@ export function readEndpointAddress(input: string): EndpointAddress {
   if (url.username !== '' || url.password !== '') return fail('credentials');
   if (url.search !== '' || url.hash !== '' || text.includes('?') || text.includes('#')) return fail('extras');
   const hostname = url.hostname.toLowerCase().replace(/\.$/, '');
-  const loopback = hostname === 'localhost' || IPV4_LOOPBACK.test(hostname) || hostname === '[::1]';
+  // `localhost.` (a trailing dot) is not trusted to be pinned by every resolver, so it asks like any other name.
+  const loopback = url.hostname.toLowerCase() === 'localhost' || IPV4_LOOPBACK.test(hostname) || hostname === '[::1]';
   const scheme = url.protocol === 'https:' ? 'https' : 'http';
   const path = url.pathname.replace(/\/+$/, '');
   const clean = `${scheme}://${url.host.toLowerCase()}${path}`;
-  return { ok: true, url: clean, scheme, host: url.host.toLowerCase(), loopback, insecureRemote: scheme === 'http' && !loopback };
+  return { ok: true, url: clean, scheme, host: `${scheme}://${url.host.toLowerCase()}`, loopback, insecureRemote: scheme === 'http' && !loopback };
 }
 
 /** A label for an endpoint, trimmed. */
@@ -111,7 +116,13 @@ const Preset = z
   .nullable();
 
 /** A key as typed: never trimmed away to nothing, never echoed back. */
-const EndpointKey = z.string().min(1, 'Enter the key.').max(MAX_ENDPOINT_KEY, 'That is too long to be a key.');
+const EndpointKey = z
+  .string()
+  .trim()
+  .min(1, 'Enter the key.')
+  .max(MAX_ENDPOINT_KEY, 'That is too long to be a key.')
+  // A pasted line break or other control character can never be part of a key (it would break the request).
+  .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), 'That key has a line break or a hidden character in it. Paste it again.');
 
 /** One endpoint as stored: no key, only whether one is saved (`auth`). */
 export const LocalEndpoint = z.object({
@@ -196,7 +207,7 @@ export type SetEndpointKeyRequest = z.infer<typeof SetEndpointKeyRequest>;
 export const ConfirmRemoteRequest = z.object({ host: z.string().min(1).max(300) }).strict();
 export type ConfirmRemoteRequest = z.infer<typeof ConfirmRemoteRequest>;
 
-/** `PUT /api/v1/local-endpoints/default`: which endpoint new chats use (`null`: the first). */
+/** `PUT /api/v1/local-endpoints-default`: which endpoint new chats use (`null`: the first). */
 export const SetDefaultEndpointRequest = z.object({ endpointId: LocalEndpointId.nullable() }).strict();
 export type SetDefaultEndpointRequest = z.infer<typeof SetDefaultEndpointRequest>;
 

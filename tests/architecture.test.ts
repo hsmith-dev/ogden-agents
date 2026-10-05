@@ -178,8 +178,8 @@ export function findAgentIdViolations(files: readonly SourceFile[], ids: readonl
 }
 
 describe('AD-1: core and shared name no agent (epic 6)', () => {
-  it("core and shared never use the string 'local' as an agent id (epic 14; a longer name such as local_endpoints is not one)", () => {
-    const violations = loadWorkspaceSources().filter((file) => AGENT_NEUTRAL.has(file.pkg) && /(['"`])local\1/.test(withoutComments(file.source))).map((file) => file.path);
+  it("core, shared and the web never use the string 'local' as an agent id (epic 14; a longer name such as local_endpoints is not one)", () => {
+    const violations = loadWorkspaceSources().filter((file) => (AGENT_NEUTRAL.has(file.pkg) || WEB_SOURCE.test(file.path)) && /(['"`])local\1/.test(withoutComments(file.source))).map((file) => file.path);
     expect(violations).toEqual([]);
   });
 

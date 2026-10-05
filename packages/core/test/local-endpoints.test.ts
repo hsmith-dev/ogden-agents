@@ -59,13 +59,13 @@ describe('adding an endpoint', () => {
     // A confirmation for another host does not count.
     await expect(endpoints.add({ label: 'Gateway', baseUrl: 'http://192.168.1.20:8000/v1', confirmHost: 'evil.example.com' })).rejects.toBeInstanceOf(EndpointConfirmationRequiredError);
     expect(endpoints.list()).toEqual([]);
-    const added = await endpoints.add({ label: 'Gateway', baseUrl: 'http://192.168.1.20:8000/v1', confirmHost: '192.168.1.20:8000' });
-    expect(added).toMatchObject({ loopback: false, needsConfirmation: false, insecureRemote: true, remoteConfirmedFor: '192.168.1.20:8000' });
+    const added = await endpoints.add({ label: 'Gateway', baseUrl: 'http://192.168.1.20:8000/v1', confirmHost: 'http://192.168.1.20:8000' });
+    expect(added).toMatchObject({ loopback: false, needsConfirmation: false, insecureRemote: true, remoteConfirmedFor: 'http://192.168.1.20:8000' });
   });
 
   it('keeps the key in the keychain under the endpoint id and never in the database or an event', async () => {
     const { core, endpoints, secrets, dataDir } = setUp();
-    const added = await endpoints.add({ label: 'Keyed', baseUrl: 'https://api.example.com/v1', confirmHost: 'api.example.com', key: KEY });
+    const added = await endpoints.add({ label: 'Keyed', baseUrl: 'https://api.example.com/v1', confirmHost: 'https://api.example.com', key: KEY });
     expect(added).toMatchObject({ auth: 'key', keySaved: true, insecureRemote: false });
     expect((secrets as ReturnType<typeof memorySecrets>).values.get(endpointKeyName(added.id))).toBe(KEY);
     expect(JSON.stringify(added)).not.toContain(KEY);
@@ -100,27 +100,58 @@ describe('adding an endpoint', () => {
 describe('a changed host asks again', () => {
   it('drops the confirmation when the host changes, keeps it when only the path or name changes, and takes a new one given with the change', async () => {
     const { endpoints } = setUp();
-    const added = await endpoints.add({ label: 'Gateway', baseUrl: 'https://a.example.com/v1', confirmHost: 'a.example.com' });
-    expect(endpoints.update(added.id, { label: 'Renamed' })).toMatchObject({ needsConfirmation: false });
-    expect(endpoints.update(added.id, { baseUrl: 'https://a.example.com/openai/v1' })).toMatchObject({ needsConfirmation: false, remoteConfirmedFor: 'a.example.com' });
-    const moved = endpoints.update(added.id, { baseUrl: 'https://b.example.com/v1' });
-    expect(moved).toMatchObject({ needsConfirmation: true, remoteConfirmedFor: null, host: 'b.example.com' });
+    const added = await endpoints.add({ label: 'Gateway', baseUrl: 'https://a.example.com/v1', confirmHost: 'https://a.example.com' });
+    expect(await endpoints.update(added.id, { label: 'Renamed' })).toMatchObject({ needsConfirmation: false });
+    expect(await endpoints.update(added.id, { baseUrl: 'https://a.example.com/openai/v1' })).toMatchObject({ needsConfirmation: false, remoteConfirmedFor: 'https://a.example.com' });
+    const moved = await endpoints.update(added.id, { baseUrl: 'https://b.example.com/v1' });
+    expect(moved).toMatchObject({ needsConfirmation: true, remoteConfirmedFor: null, host: 'https://b.example.com' });
     // A new port is a new host too.
-    expect(endpoints.update(added.id, { baseUrl: 'https://b.example.com:8443/v1', confirmHost: 'b.example.com:8443' })).toMatchObject({ needsConfirmation: false });
-    expect(endpoints.update(added.id, { baseUrl: 'https://b.example.com:9443/v1' })).toMatchObject({ needsConfirmation: true });
+    expect(await endpoints.update(added.id, { baseUrl: 'https://b.example.com:8443/v1', confirmHost: 'https://b.example.com:8443' })).toMatchObject({ needsConfirmation: false });
+    expect(await endpoints.update(added.id, { baseUrl: 'https://b.example.com:9443/v1' })).toMatchObject({ needsConfirmation: true });
     // Moving to this computer needs none, and moving back asks again.
-    expect(endpoints.update(added.id, { baseUrl: 'http://localhost:1234/v1' })).toMatchObject({ loopback: true, needsConfirmation: false });
-    expect(endpoints.update(added.id, { baseUrl: 'https://b.example.com/v1' })).toMatchObject({ needsConfirmation: true });
+    expect(await endpoints.update(added.id, { baseUrl: 'http://localhost:1234/v1' })).toMatchObject({ loopback: true, needsConfirmation: false });
+    expect(await endpoints.update(added.id, { baseUrl: 'https://b.example.com/v1' })).toMatchObject({ needsConfirmation: true });
   });
 
   it('confirms only the host the user was shown, and says there is nothing to confirm on this computer', async () => {
     const { endpoints } = setUp();
-    const other = await endpoints.add({ label: 'x', baseUrl: 'http://10.0.0.5:8000/v1', confirmHost: '10.0.0.5:8000' });
-    endpoints.update(other.id, { baseUrl: 'http://10.0.0.6:8000/v1' });
-    expect(() => endpoints.confirm(other.id, { host: '10.0.0.5:8000' })).toThrow(EndpointConfirmationRequiredError);
-    expect(endpoints.confirm(other.id, { host: '10.0.0.6:8000' })).toMatchObject({ needsConfirmation: false });
+    const other = await endpoints.add({ label: 'x', baseUrl: 'http://10.0.0.5:8000/v1', confirmHost: 'http://10.0.0.5:8000' });
+    await endpoints.update(other.id, { baseUrl: 'http://10.0.0.6:8000/v1' });
+    expect(() => endpoints.confirm(other.id, { host: 'http://10.0.0.5:8000' })).toThrow(EndpointConfirmationRequiredError);
+    expect(endpoints.confirm(other.id, { host: 'http://10.0.0.6:8000' })).toMatchObject({ needsConfirmation: false });
     const local = await endpoints.add({ label: 'l', baseUrl: 'http://localhost:1234/v1' });
     expect(() => endpoints.confirm(local.id, { host: 'localhost:1234' })).toThrow(ValidationError);
+  });
+});
+
+describe('a key belongs to its server', () => {
+  it('is dropped, from the keychain too, when the address changes to another scheme, host or port, and kept for a new path or name', async () => {
+    const { endpoints, secrets, core } = setUp();
+    const added = await endpoints.add({ label: 'x', baseUrl: 'https://a.example.com/v1', confirmHost: 'https://a.example.com', key: KEY });
+    expect(await endpoints.update(added.id, { label: 'y', baseUrl: 'https://a.example.com/other/v1' })).toMatchObject({ keySaved: true });
+    expect(await secrets.get(endpointKeyName(added.id))).toBe(KEY);
+    const moved = await endpoints.update(added.id, { baseUrl: 'http://127.0.0.1:9999/v1' });
+    expect(moved).toMatchObject({ keySaved: false, auth: 'none' });
+    expect(await secrets.get(endpointKeyName(added.id))).toBeUndefined();
+    expect((await endpoints.target(added.id))?.key).toBeUndefined();
+    expect(JSON.stringify(core.events.readAfter(0))).not.toContain(KEY);
+    // Over http instead of https on the same name is another service too.
+    const second = await endpoints.add({ label: 's', baseUrl: 'https://b.example.com/v1', confirmHost: 'https://b.example.com', key: KEY });
+    expect(await endpoints.update(second.id, { baseUrl: 'http://b.example.com/v1' })).toMatchObject({ keySaved: false, needsConfirmation: true });
+  });
+
+  it('never keeps a confirmation across the scheme', async () => {
+    const { endpoints } = setUp();
+    const added = await endpoints.add({ label: 'x', baseUrl: 'https://a.example.com/v1', confirmHost: 'https://a.example.com' });
+    expect(await endpoints.update(added.id, { baseUrl: 'http://a.example.com/v1' })).toMatchObject({ needsConfirmation: true, insecureRemote: true });
+  });
+
+  it('refuses a confirmation sent with a change when it does not match the host', async () => {
+    const { endpoints } = setUp();
+    const added = await endpoints.add({ label: 'x', baseUrl: 'http://localhost:1/v1' });
+    await expect(endpoints.update(added.id, { confirmHost: 'http://localhost:1' })).rejects.toBeInstanceOf(ValidationError);
+    const far = await endpoints.add({ label: 'f', baseUrl: 'https://a.example.com/v1', confirmHost: 'https://a.example.com' });
+    await expect(endpoints.update(far.id, { confirmHost: 'https://other.example.com' })).rejects.toBeInstanceOf(EndpointConfirmationRequiredError);
   });
 });
 
@@ -129,7 +160,7 @@ describe('what a chat or a call may reach (target)', () => {
     const { endpoints } = setUp();
     expect(await endpoints.target()).toBeUndefined();
     const first = await endpoints.add({ label: 'first', baseUrl: 'http://localhost:1/v1' });
-    const second = await endpoints.add({ label: 'second', baseUrl: 'https://s.example.com/v1', confirmHost: 's.example.com', key: KEY, model: 'm1' });
+    const second = await endpoints.add({ label: 'second', baseUrl: 'https://s.example.com/v1', confirmHost: 'https://s.example.com', key: KEY, model: 'm1' });
     expect((await endpoints.target())?.endpointId).toBe(first.id);
     endpoints.setDefault({ endpointId: second.id });
     expect(endpoints.defaultEndpointId()).toBe(second.id);
@@ -140,8 +171,8 @@ describe('what a chat or a call may reach (target)', () => {
 
   it('refuses an unconfirmed host, so no call can reach it', async () => {
     const { endpoints } = setUp();
-    const added = await endpoints.add({ label: 'x', baseUrl: 'https://a.example.com/v1', confirmHost: 'a.example.com' });
-    endpoints.update(added.id, { baseUrl: 'https://elsewhere.example.com/v1' });
+    const added = await endpoints.add({ label: 'x', baseUrl: 'https://a.example.com/v1', confirmHost: 'https://a.example.com' });
+    await endpoints.update(added.id, { baseUrl: 'https://elsewhere.example.com/v1' });
     await expect(endpoints.target(added.id)).rejects.toBeInstanceOf(EndpointConfirmationRequiredError);
     await expect(endpoints.target()).rejects.toBeInstanceOf(EndpointConfirmationRequiredError);
   });
@@ -184,7 +215,7 @@ describe('keys, defaults and removal', () => {
     const secrets = memorySecrets();
     const first = openTestCore(dataDir);
     const endpoints = first.localEndpoints(secrets);
-    const added = await endpoints.add({ label: 'x', baseUrl: 'https://a.example.com/v1', confirmHost: 'a.example.com', key: KEY });
+    const added = await endpoints.add({ label: 'x', baseUrl: 'https://a.example.com/v1', confirmHost: 'https://a.example.com', key: KEY });
     endpoints.setDefault({ endpointId: added.id });
     first.close();
     const second = openTestCore(dataDir).localEndpoints(secrets);

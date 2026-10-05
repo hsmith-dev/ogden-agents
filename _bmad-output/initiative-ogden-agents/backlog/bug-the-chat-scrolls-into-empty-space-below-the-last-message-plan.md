@@ -3,13 +3,13 @@ title: 'The chat scrolls into empty space below the last message'
 type: 'bugfix'
 ticket: '10'
 created: '2026-10-04'
-status: 'in-progress'
+status: 'built'
 baseline_revision: '56883363a54bcfb42b8ae698522dd02e34af5ef2'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['quick', 'ux']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/backlog/bug-the-chat-scrolls-into-empty-space-below-the-last-message.md'
@@ -51,18 +51,36 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `tests/e2e/chat-scroll.spec.ts` -- new: long chat + waiting card + running tool, wheel past the end; assert window.scrollY 0, document height = viewport, conversation scroll range = content; answer the card; repeat; second test: answered from another tab while a tool keeps running, at 390 px -- fails on the defect first
-- [ ] `packages/web/src/ui/page.tsx` -- add `relative` to `PageBody`'s scroll box -- contains absolutely positioned descendants
-- [ ] `packages/web/src/ui/page.test.tsx` (or the existing UI test file) -- unit: the scroll box is positioned, and the terminal peek's `absolute` still replaces it -- guards the class merge
+- [x] `tests/e2e/chat-scroll.spec.ts` -- new: long chat + waiting card + running tool, wheel past the end; assert window.scrollY 0, document height = viewport, conversation scroll range = content; answer the card; repeat; second test: answered from another tab while a tool keeps running, at 390 px -- fails on the defect first
+- [x] `packages/web/src/ui/page.tsx` -- add `relative` to `PageBody`'s scroll box -- contains absolutely positioned descendants
+- [x] `packages/web/src/ui/page.test.tsx` (or the existing UI test file) -- unit: the scroll box is positioned, and the terminal peek's `absolute` still replaces it -- guards the class merge
 
 **Acceptance Criteria:**
 - Given the ticket's reproduction, when it runs on the fix, then the window never scrolls and the conversation ends at its last item at 1440 and 390 px.
 
 ## Implementation Notes
 
+- Reproduced in Playwright on the baseline (`56883363`): 1440×700, six messages, `permission`, wheel past the end → `window.scrollY` 286, document 986 px; the only element past the window was the running tool row's `span.sr-only` "In progress" (`position: absolute`, no positioned ancestor). Screenshot showed the whole shell shifted up over blank space.
+- Not a virtualizer, spacer, stick-to-bottom or waiting-bar issue: the transcript is not virtualized and the conversation's own `scrollHeight` matched its content throughout.
+- Fix: `relative` on `PageBody`'s scroll box (`ui/page.tsx`). The terminal peek's `absolute` still wins below `xl` (tailwind-merge); at `xl` it was `xl:static`, which re-opened the leak, so it is now `xl:relative xl:inset-auto` (`terminal/terminal-pane.tsx`).
+- New fake-agent prompt `permission-hold` (`tests/fixtures/fake-acp-agent.mjs`): once allowed, the tool call stays `in_progress` until cancelled, the state in the user's report.
+- Red run on the baseline: `chat-scroll.spec.ts` fails (`documentExtra` 286 / 187) at waiting, and at answered-with-tool-running; the terminal spec's new `xl` peek check fails (`position: static`). All pass on the fix.
+- Related cases: answered in another tab (covered, 390 px), terminal peek at `xl` and below (covered), a "Not sent" message returning to the composer and a tool output collapsing only change heights inside or beside the scroll box (no absolutely positioned content added; unchanged). Reduced motion and the screen-reader setting are untouched: `sr-only` text stays in the accessibility tree.
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (quick + UX lens, one reviewer): high 0, medium 2, low 2, false 0, maybe-false 0.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---|---|---|---|
+| 1 | Terminal peek at `xl`: `xl:static` overrides the new `relative`, scroll box uncontained again | medium | patch | Confirmed by red e2e (`position: static`). `xl:relative xl:inset-auto` in `conversationProps`; unit + `terminal.spec.ts` assert position, top alignment and no document overflow |
+| 2 | e2e did not cover "answered while the tool keeps running" (fake `permission` completes the tool on answer) | medium | patch | Added `permission-hold` fixture prompt; both tests now answer (one from another tab) and check while the tool is `in_progress` |
+| 3 | No record of the red run | low | patch | Recorded in Implementation Notes |
+| 4 | Gap check measured the end sentinel, not the last item | low | patch | Now measures the sentinel's previous sibling |
+
+Shared `PageBody` UX: reviewer found no regressions on the other 13 pages (no sticky/fixed, overlays portalled, no `offsetParent` reads).
 
 ## Verification
 

@@ -282,7 +282,7 @@ describe('conversationProps (review F2, F6)', () => {
       if (peekOpen) {
         // Below xl a sheet over the terminal; at xl beside it.
         expect(scroller.className).toContain('absolute');
-        expect(scroller.className).toContain('xl:static');
+        expect(scroller.className).toContain('xl:relative');
       }
       cleanup();
     }

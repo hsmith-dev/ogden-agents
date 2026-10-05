@@ -36,7 +36,8 @@ async function expectEndsAtLastItem(page: Page) {
   // The last thing in the conversation sits right above the composer, not above empty space.
   const gap = await page.evaluate(() => {
     const scroller = document.querySelector<HTMLElement>('[data-slot="page-body"]')!;
-    const last = document.querySelector<HTMLElement>('[data-testid="transcript"]')!.lastElementChild as HTMLElement;
+    // The transcript's last child is its empty end marker (stick to bottom); the item is the one before it.
+    const last = document.querySelector<HTMLElement>('[data-testid="transcript"]')!.lastElementChild!.previousElementSibling as HTMLElement;
     return Math.round(scroller.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom);
   });
   expect(gap).toBeLessThan(64);
@@ -67,9 +68,13 @@ test('around a permission card, with its tool running, scrolling past the end ne
     await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
     await expectEndsAtLastItem(page);
 
-    // A tool that keeps running after the answer (as a real agent's does).
-    await send(page, 'quiet-tool');
+    // Answered, and the approved tool keeps running (as a real agent's long command does): the user's report.
+    await send(page, 'permission-hold');
+    await expect(page.getByTestId('permission-card')).toBeVisible();
+    await page.getByTestId('permission-card').getByRole('button', { name: 'Allow once' }).click();
+    await expect(page.getByTestId('permission-card')).toHaveCount(0);
     await expect(page.getByTestId('tool-call-row').last()).toHaveAttribute('data-status', 'in_progress');
+    await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'working');
     await expectEndsAtLastItem(page);
   });
 });
@@ -79,7 +84,7 @@ test('a card answered in another tab, on a phone, leaves no empty space to scrol
     const chat = await startChat(page, repo);
     await page.setViewportSize({ width: 390, height: 844 });
     await fillChat(page, 6);
-    await send(page, 'permission');
+    await send(page, 'permission-hold');
     await expect(page.getByTestId('permission-card')).toBeVisible();
     await expectEndsAtLastItem(page);
 
@@ -87,16 +92,14 @@ test('a card answered in another tab, on a phone, leaves no empty space to scrol
     try {
       const other = await context.newPage();
       await openConnected(other, `/w/${chat.wsId}/s/${chat.sesId}`, await launchLink(server.url, dataDir));
-      await other.getByTestId('permission-card').getByRole('button', { name: 'Deny' }).click();
-      await expect(page.getByTestId('permission-record')).toContainText('Denied: npm test');
-      await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'idle');
+      await other.getByTestId('permission-card').getByRole('button', { name: 'Allow once' }).click();
+      // This tab follows: the card collapses to its record while the approved tool keeps running.
+      await expect(page.getByTestId('permission-record')).toContainText('Allowed once: npm test');
+      await expect(page.getByTestId('tool-call-row').last()).toHaveAttribute('data-status', 'in_progress');
+      await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'working');
       await expectEndsAtLastItem(page);
     } finally {
       await context.close();
     }
-
-    await send(page, 'quiet-tool');
-    await expect(page.getByTestId('tool-call-row').last()).toHaveAttribute('data-status', 'in_progress');
-    await expectEndsAtLastItem(page);
   });
 });

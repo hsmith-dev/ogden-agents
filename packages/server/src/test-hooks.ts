@@ -381,12 +381,15 @@ export function testLocalServer(env: Env, dataDir: string, tmp: string = tmpdir(
   return testNodeScript(LOCAL_SERVER_ENV, env, dataDir, tmp);
 }
 
+/** What a Local model chat asks at each start for the endpoint to talk to. */
+export type TestLocalEndpoint = () => Promise<{ baseUrl: string; key?: string; model?: string }>;
+
 /**
  * The endpoint {@link LOCAL_ENDPOINT_ENV} names, as the source a Local model chat asks at each start, or
  * `undefined` (the user's own endpoints): unset or hooks not allowed. Allowed but unusable (bad JSON, a base URL
  * that is not `http://127.0.0.1` or `http://localhost`) throws, so a test fails loudly rather than reaching anywhere else.
  */
-export function testLocalEndpoint(env: Env, dataDir: string, tmp: string = tmpdir()): (() => Promise<{ baseUrl: string; key?: string; model?: string }>) | undefined {
+export function testLocalEndpoint(env: Env, dataDir: string, tmp: string = tmpdir()): TestLocalEndpoint | undefined {
   const raw = env[LOCAL_ENDPOINT_ENV];
   if (raw === undefined || raw === '' || !testHooksAllowed(env, dataDir, tmp)) return undefined;
   let parsed: { baseUrl?: unknown; key?: unknown; model?: unknown };
@@ -541,7 +544,7 @@ export interface TestHooks {
   grokServer: string | undefined;
   grokInstall: TestClaudeInstall | undefined;
   localServer: string | undefined;
-  localEndpoint: ReturnType<typeof testLocalEndpoint>;
+  localEndpoint: TestLocalEndpoint | undefined;
   trustAgent: string | undefined;
   bmadProbe: boolean;
   bmadAvailable: BmadPieceName[];

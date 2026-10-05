@@ -341,10 +341,10 @@ function assertLocalPins(pins) {
       if (typeof file.sha256 !== 'string' || !sha.test(file.sha256)) problems.push(`${platform}: ${name}'s SHA-256 is not 64 lower-case hex digits`);
     }
   }
-  const rg = pins.ripgrep;
-  if (typeof rg?.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(rg.version)) problems.push('ripgrep: version is not an exact x.y.z');
+  const rg = pins.ripgrep ?? { version: undefined, archives: {} };
+  if (typeof rg.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(rg.version)) problems.push('ripgrep: version is not an exact x.y.z');
   for (const platform of ['win32-x64', 'win32-arm64']) {
-    const pin = rg?.archives?.[platform];
+    const pin = rg.archives?.[platform];
     if (pin === undefined) {
       problems.push(`ripgrep: ${platform} has no pin`);
       continue;
@@ -354,7 +354,7 @@ function assertLocalPins(pins) {
     if (!Number.isSafeInteger(pin.size) || !Number.isSafeInteger(pin.file?.size)) problems.push(`ripgrep ${platform}: a size is not a whole number`);
     if (typeof pin.member !== 'string' || !pin.member.endsWith('/rg.exe')) problems.push(`ripgrep ${platform}: the member is not .../rg.exe`);
   }
-  if (Object.keys(rg?.archives ?? {}).some((platform) => !platform.startsWith('win32'))) problems.push('ripgrep is pinned for Windows only');
+  if (Object.keys(rg.archives ?? {}).some((platform) => !platform.startsWith('win32'))) problems.push('ripgrep is pinned for Windows only');
   if (problems.length > 0) throw new Error(`local pins: ${problems.join('; ')}`);
 }
 
@@ -364,15 +364,16 @@ async function checkLocal() {
   // The ACP registry's own record of OpenCode: every pinned URL and SHA-256 must be what it says (a bump is a reviewed change).
   const registryUrl = 'https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json';
   const registry = await (await fetch(registryUrl, { signal: AbortSignal.timeout(60_000) })).json();
-  const entry = registry.agents?.find((agent) => agent.id === 'opencode');
+  const entry = registry.agents?.find((/** @type {{ id?: string }} */ agent) => agent.id === 'opencode');
   if (entry === undefined) throw new Error('the ACP registry no longer lists opencode');
   if (entry.version !== pins.version) {
     // The registry moved on: the pins are still checked against their own release, and the drift is only reported.
     console.log(`agent-pins: the ACP registry lists opencode ${entry.version}; Ogden Agents pins ${pins.version} (a bump is a reviewed change)`);
   } else {
+    /** @type {Record<string, string>} */
     const names = { 'darwin-arm64': 'darwin-aarch64', 'darwin-x64': 'darwin-x86_64', 'linux-arm64': 'linux-aarch64', 'linux-x64': 'linux-x86_64', 'win32-arm64': 'windows-aarch64', 'win32-x64': 'windows-x86_64' };
     for (const [platform, pin] of Object.entries(pins.archives)) {
-      const listed = entry.distribution?.binary?.[names[platform]];
+      const listed = entry.distribution?.binary?.[names[platform] ?? ''];
       if (listed === undefined || listed.archive !== pin.url || listed.sha256 !== pin.sha256) throw new Error(`${platform}: the pin is not the ACP registry's (${listed?.sha256 ?? 'none'})`);
     }
   }

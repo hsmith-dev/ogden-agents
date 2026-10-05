@@ -101,6 +101,55 @@ jobs:
       - name: Smoke test without optional dependencies
         run: node scripts/smoke-installed.mjs --omit-optional
 
+  # The double-click start scripts in start/ (backlog story 2), each on its own
+  # OS, run as a user runs them: check mode first, then a full start of the
+  # packed tarball through the script (OGDEN_AGENTS_PACKAGE points npx at it;
+  # no registry spec), which must serve the page and send server.started, and
+  # then stop through Quit. Their Node detection without Node, with an old
+  # Node and without npx is in tests/start-scripts.test.ts (the test job).
+  start-scripts:
+    name: Start scripts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            script: start\Start Ogden.cmd
+          - os: macos-latest
+            script: start/Start Ogden.command
+          - os: ubuntu-latest
+            script: start/start-ogden.sh
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Pack
+        run: pnpm run pack
+
+      - name: Check mode (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: call "${{ matrix.script }}" --check
+
+      - name: Check mode
+        if: runner.os != 'Windows'
+        shell: bash
+        run: '"./${{ matrix.script }}" --check'
+
+      - name: Start the packed tarball through the script
+        run: node scripts/smoke-installed.mjs --start-script "${{ matrix.script }}"
+
   # Planning provenance (story 10.8): every started plan's baseline_revision is
   # an ancestor of HEAD, and every deferred-work Open items line matches a Log
   # entry, names no resolved one, and (entry 4.12) every Log entry the pull

@@ -4,8 +4,8 @@ name: Release
 # (see RELEASING.md). Order: guard (tag on main, versions match the tag), the
 # full CI matrix for the tagged commit, publish from Linux through npm trusted
 # publishing (GitHub OIDC, no stored npm token), then `npx ogden-agents@<version>`
-# from the registry on macOS, Windows and Linux, and a registry and provenance
-# check. Publishing is idempotent: re-running a release whose version is already
+# from the registry on macOS, Windows and Linux, a registry and provenance
+# check, and the double-click start scripts attached to the GitHub Release. Publishing is idempotent: re-running a release whose version is already
 # on npm from this same commit skips the publish and goes on to verify.
 #
 # The trusted publisher on npmjs.com names this repository, this file
@@ -171,6 +171,54 @@ jobs:
             echo "::error title=npm publish failed::npm rejected ogden-agents@$VERSION, so nothing was published. ENEEDAUTH, E401, E403 or E404: the npm trusted publisher is missing or doesn't match this workflow; set it up as in https://github.com/${{ github.repository }}/blob/main/RELEASING.md#3-configure-the-npm-trusted-publisher. E422: npm's provenance check failed, usually because package.json's repository.url is not exactly git+https://github.com/${{ github.repository }}.git; fix it on main and release a new tag. Then re-run this job."
             exit 1
           fi
+
+  # The double-click start scripts (start/, README "Start Ogden") attached to
+  # the GitHub Release for this tag, created here if it doesn't exist (a
+  # prerelease for a `next` version). Only after publish: the scripts run
+  # `npx ogden-agents@latest`, so they go up once the package is on npm. The
+  # macOS script goes in a zip, since a browser download drops its executable
+  # bit and Archive Utility keeps it; GitHub turns spaces in asset names into
+  # dots, so the assets are named without them. Idempotent: a re-run replaces
+  # the assets. The only job with write access to the repository.
+  start-scripts:
+    name: Attach start scripts to the GitHub Release
+    needs: [guard, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      DIST_TAG: ${{ needs.guard.outputs.dist-tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the assets
+        run: |
+          mkdir -p "$RUNNER_TEMP/assets"
+          (cd start && zip -X "$RUNNER_TEMP/assets/Start-Ogden-macOS.zip" "Start Ogden.command")
+          unzip -Z "$RUNNER_TEMP/assets/Start-Ogden-macOS.zip" | grep -q '^-rwxr-xr-x' || { echo "::error::the zipped Start Ogden.command is not executable"; exit 1; }
+          cp "start/Start Ogden.cmd" "$RUNNER_TEMP/assets/Start-Ogden.cmd"
+          cp start/start-ogden.sh "$RUNNER_TEMP/assets/start-ogden.sh"
+          ls -l "$RUNNER_TEMP/assets"
+
+      - name: Create the release if needed and attach the assets
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            prerelease=""
+            if [ "$DIST_TAG" = "next" ]; then prerelease="--prerelease"; fi
+            gh release create "$TAG" --verify-tag --title "$TAG" $prerelease \
+              --notes "Release notes: [CHANGELOG.md](https://github.com/$GH_REPO/blob/main/CHANGELOG.md). To start Ogden Agents without a terminal, download the start script for your computer below and see [Start Ogden](https://github.com/$GH_REPO/blob/main/README.md#start-ogden)."
+          fi
+          for attempt in 1 2 3; do
+            if gh release upload "$TAG" --clobber "$RUNNER_TEMP"/assets/*; then exit 0; fi
+            echo "upload failed (attempt $attempt); retrying"
+            sleep 10
+          done
+          echo "::error::could not attach the start scripts to release $TAG; re-run this job"
+          exit 1
 
   # Separate from publish so a slow registry or a missing attestation never
   # blocks verify, and verify never waits on it.

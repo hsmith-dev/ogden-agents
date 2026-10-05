@@ -7,6 +7,7 @@ import {
   Sidebar,
   SidebarContent,
   SidebarEarlier,
+  SidebarFilter,
   SidebarFooter,
   SidebarGroup,
   SidebarGroupLabel,
@@ -20,8 +21,6 @@ import {
   SidebarWorkspaceGroup,
   useSidebar,
 } from '@/ui/sidebar';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
 import { Skeleton } from '@/ui/skeleton';
 import { STATE_WORDS } from '@/ui/state-glyph';
 import { AddProjectDialog } from '@/workspaces/add-project-dialog';
@@ -180,28 +179,9 @@ function StatusSidebarBody() {
           {!loading && model.groups.length === 0 ? <SidebarText data-testid="no-projects">No projects yet</SidebarText> : null}
           {loading ? <Skeleton data-testid="sidebar-loading" /> : null}
           {filtering ? (
-            // The rail has no room for it; every project is an icon there.
-            <div data-testid="project-filter" className="flex flex-col gap-1 px-2 pb-1 md:max-lg:hidden">
-              <Label htmlFor={filterId} className="text-caption text-muted-foreground">
-                Filter projects
-              </Label>
-              <Input
-                id={filterId}
-                type="search"
-                autoComplete="off"
-                value={filter}
-                onChange={(event) => setFilter(event.target.value)}
-                onKeyDown={(event) => {
-                  // The first Esc clears the field; with it empty, Esc goes on to close the drawer.
-                  if (event.key === 'Escape' && filter !== '') {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    setFilter('');
-                  }
-                }}
-              />
+            <SidebarFilter id={filterId} label="Filter projects" value={filter} onValueChange={setFilter} data-testid="project-filter">
               {groups.length === 0 ? <SidebarText data-testid="no-project-matches">No projects match</SidebarText> : null}
-            </div>
+            </SidebarFilter>
           ) : null}
           {groups.map((group) => (
             <SidebarWorkspaceGroup

@@ -18,6 +18,8 @@ import {
 } from 'react';
 import { Badge } from './badge';
 import { Button } from './button';
+import { Input } from './input';
+import { Label } from './label';
 import { ScrollArea } from './scroll-area';
 import { Sheet, SheetContent } from './sheet';
 import { STATE_WORDS, StateGlyph } from './state-glyph';
@@ -129,6 +131,11 @@ export function Sidebar({ label, className, children, ...props }: SidebarProps) 
             navigatingRef.current = false;
             event.preventDefault();
             (event.currentTarget as HTMLElement | null)?.focus();
+          }}
+          // Esc in a filter with text clears the text (SidebarFilter) and leaves the drawer open.
+          onEscapeKeyDown={(event) => {
+            const target = event.target;
+            if (target instanceof HTMLInputElement && target.value !== '' && target.closest('[data-slot="sidebar-filter"]') !== null) event.preventDefault();
           }}
           // The menu button is not the dialog's own trigger, so give focus back to it by hand when
           // the sheet is dismissed (Esc, the close button, the overlay). After a link, the new page decides.
@@ -458,6 +465,46 @@ export function SidebarWorkspaceGroup({ name, collapsed, onCollapsedChange, summ
       <div id={listId} className={cn('flex min-w-0 flex-col gap-0.5', collapsed && 'hidden md:max-lg:flex')}>
         {children}
       </div>
+    </div>
+  );
+}
+
+export interface SidebarFilterProps extends Omit<ComponentProps<'div'>, 'onChange'> {
+  /** The field's id (the label's `for`); from useId, since the sidebar can be mounted twice. */
+  id: string;
+  /** The visible label above the field (Accessibility Floor). */
+  label: string;
+  value: string;
+  onValueChange: (value: string) => void;
+}
+
+/**
+ * A filter field for a sidebar list, with its visible label above it; any
+ * children (a "nothing matches" line) go under it. The first Esc clears a
+ * non-empty field; with it empty, Esc goes on to close the drawer. The rail
+ * has no room for it.
+ */
+export function SidebarFilter({ id, label, value, onValueChange, className, children, ...props }: SidebarFilterProps) {
+  return (
+    <div data-slot="sidebar-filter" className={cn('flex min-w-0 flex-col gap-1 px-2 pb-1 md:max-lg:hidden', className)} {...props}>
+      <Label htmlFor={id} className="text-caption text-muted-foreground">
+        {label}
+      </Label>
+      <Input
+        id={id}
+        type="search"
+        autoComplete="off"
+        value={value}
+        onChange={(event) => onValueChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape' && value !== '') {
+            event.preventDefault();
+            event.stopPropagation();
+            onValueChange('');
+          }
+        }}
+      />
+      {children}
     </div>
   );
 }

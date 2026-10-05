@@ -8,7 +8,7 @@
  * sidebar data, the router and the footer's own controls are stand-ins.
  */
 import type { Workspace, WorkspaceId } from '@ogden-agents/shared';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SidebarModel, SidebarWorkspace } from '../src/shell/sidebar-model';
@@ -37,7 +37,7 @@ vi.mock('../src/shell/quit-button', () => ({ QuitButton: () => null }));
 vi.mock('../src/shell/server-status', () => ({ ServerStatus: () => null }));
 
 const { StatusSidebar, COLLAPSED_KEY } = await import('../src/shell/status-sidebar');
-const { SidebarProvider } = await import('../src/ui/sidebar');
+const { SidebarProvider, SidebarTrigger } = await import('../src/ui/sidebar');
 const { TooltipProvider } = await import('../src/ui/tooltip');
 const { filterProjects, PROJECT_FILTER_MIN, showsProjectFilter } = await import('../src/shell/project-filter');
 const { workspaceName } = await import('../src/workspaces/workspace-api');
@@ -55,6 +55,7 @@ function mount(groups: readonly SidebarWorkspace[], wsId?: string) {
     <TooltipProvider>
       <SidebarProvider>
         <StatusSidebar />
+        <SidebarTrigger data-testid="sidebar-trigger" />
       </SidebarProvider>
     </TooltipProvider>,
   );
@@ -153,5 +154,22 @@ describe('the sidebar is the one place for projects (backlog story 2)', () => {
     fireEvent.keyDown(field, { key: 'Escape' });
     expect((field as HTMLInputElement).value).toBe('');
     expect(projectNames()).toHaveLength(NAMES.length);
+  });
+
+  it('in the drawer, the first Escape clears the filter and keeps the drawer open; the next closes it and focus returns to the menu button', async () => {
+    mount(NAMES.map((name, n) => group(n, name)));
+    const trigger = screen.getByRole('button', { name: 'Open projects and sessions' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const drawer = await screen.findByRole('dialog', { name: 'Projects and sessions' });
+    const field = within(drawer).getByLabelText('Filter projects');
+    field.focus();
+    fireEvent.change(field, { target: { value: 'kiln' } });
+    fireEvent.keyDown(field, { key: 'Escape' });
+    expect((field as HTMLInputElement).value).toBe('');
+    expect(screen.getByRole('dialog', { name: 'Projects and sessions' })).toBe(drawer);
+    fireEvent.keyDown(field, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Projects and sessions' })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 });

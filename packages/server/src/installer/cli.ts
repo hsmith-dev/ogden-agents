@@ -61,6 +61,8 @@ function parseChannel(value: string | undefined): Channel | undefined | 'invalid
 
 export async function run(argv: readonly string[], deps: CliDeps): Promise<number> {
   const [command = 'start', ...rest] = argv;
+  // The start scripts' own flags are theirs, not the launcher's.
+  const launcherArgs = rest.filter((arg) => arg !== '--github' && arg !== '--check');
   const env = deps.env;
   const appDir = defaultAppDir(env, deps.platform, deps.home);
   const repo = env.OGDEN_AGENTS_REPO !== undefined && env.OGDEN_AGENTS_REPO !== '' ? env.OGDEN_AGENTS_REPO : DEFAULT_REPO;
@@ -120,7 +122,7 @@ export async function run(argv: readonly string[], deps: CliDeps): Promise<numbe
       return 1;
     }
     deps.out(`Starting Ogden Agents ${current}.`);
-    return deps.startLauncher(launcherPath(appDir, current), command === 'start' ? [...rest] : []);
+    return deps.startLauncher(launcherPath(appDir, current), command === 'start' ? launcherArgs : []);
   };
 
   let latest: ReleaseInfo | undefined;

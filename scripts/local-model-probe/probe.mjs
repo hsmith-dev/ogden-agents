@@ -32,7 +32,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const mb = (n) => `${(n / 1024 / 1024).toFixed(1)} MB`;
 const trim = (v, n = 4000) => { const s = JSON.stringify(v); return s && s.length > n ? `${s.slice(0, n)}...(${s.length} chars)` : v; };
 const results = { route: ROUTE, os: `${process.platform}-${process.arch}`, node: process.version, offlineMode: OFFLINE };
-const log = (title, value) => { console.log(`\n=== ${title}`); console.log(typeof value === 'string' ? value : JSON.stringify(value, null, 2)); };
+const save = () => { if (process.env.PROBE_OUT) { try { writeFileSync(process.env.PROBE_OUT, JSON.stringify(results, null, 2)); } catch {} } };
+const log = (title, value) => {
+  save();
+  console.log(`[${new Date().toISOString().slice(11, 19)}]`); console.log(`\n=== ${title}`); console.log(typeof value === 'string' ? value : JSON.stringify(value, null, 2)); };
 function duBytes(p) {
   const st = lstatSync(p);
   if (st.isSymbolicLink()) return 0;
@@ -289,9 +292,9 @@ async function opencodeProbe() {
         const url = 'https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-pc-windows-msvc.zip';
         const rgDir = join(dataDir, 'rg');
         mkdirSync(rgDir, { recursive: true });
-        const b = Buffer.from(await (await fetch(url, { redirect: 'follow' })).arrayBuffer());
+        const b = Buffer.from(await (await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(90_000) })).arrayBuffer());
         writeFileSync(join(rgDir, 'rg.zip'), b);
-        spawnSync(process.env.SystemRoot + '\\System32\\tar.exe', ['-xf', 'rg.zip'], { cwd: rgDir });
+        spawnSync(process.env.SystemRoot + '\\System32\\tar.exe', ['-xf', 'rg.zip'], { cwd: rgDir, timeout: 60_000 });
         const found = listTree(rgDir).find((f) => f.endsWith('rg.exe'));
         rgSeed = { url, sha256: createHash('sha256').update(b).digest('hex'), bytes: b.length, exe: found ? join(rgDir, ...found.split('/')) : null };
         results.ripgrepSeed = { ...rgSeed, exe: found };
@@ -302,6 +305,7 @@ async function opencodeProbe() {
       const cfg = writeConfig(`sw-${name}`, { baseURL: `${fake.url}/v1`, hardened });
       const xdg = join(dataDir, 'sw', name);
       if (seed && rgSeed?.exe) { const bin = join(xdg, 'cache', 'opencode', 'bin'); mkdirSync(bin, { recursive: true }); cpSync(rgSeed.exe, join(bin, 'rg.exe')); }
+      console.log(`[progress] variant ${name}`);
       const before = proxy.hits.length;
       const d = new Driver(name, fake, { cmd: bin, args: ['acp'], wrap, env: baseEnv({ OPENCODE_CONFIG: cfg.path, OGDEN_ENDPOINT_KEY: KEY, OPENCODE_LOG_LEVEL: 'DEBUG', ...proxy.env, ...envX }, xdg) }, proxy);
       await d.start();

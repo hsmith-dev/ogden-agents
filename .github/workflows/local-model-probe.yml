@@ -21,7 +21,7 @@ jobs:
   probe:
     name: ${{ matrix.route }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    timeout-minutes: 60
     continue-on-error: true
     strategy:
       fail-fast: false

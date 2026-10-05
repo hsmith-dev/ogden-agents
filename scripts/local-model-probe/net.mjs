@@ -64,9 +64,12 @@ function snapshot(pids) {
 export function startWatcher(rootPid, intervalMs = IS_WIN ? 500 : 150) {
   const seen = new Map();
   let stopped = false;
+  let pids = [rootPid];
+  let pidsAt = 0;
   const tick = () => {
     if (stopped) return;
-    const pids = [rootPid, ...descendants(rootPid).map((p) => p.pid)];
+    // listing the process table is slow on Windows (PowerShell): refresh it every 3 s there
+    if (!IS_WIN || Date.now() - pidsAt > 3000) { pids = [rootPid, ...descendants(rootPid).map((p) => p.pid)]; pidsAt = Date.now(); }
     for (const s of snapshot(pids)) {
       if (!s.remote || /^(\*|0\.0\.0\.0|\[::\]|::):?(\*|0)$/.test(s.remote) || s.remote === '*:*') continue;
       const key = `${s.proto} ${s.remote}`;

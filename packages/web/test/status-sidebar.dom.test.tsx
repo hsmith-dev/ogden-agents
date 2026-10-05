@@ -48,7 +48,7 @@ const NAMES = ['clay-and-kiln', 'Letterpress', 'apps', 'ledger-api', 'rota', 'ne
 function mount(groups: readonly SidebarWorkspace[], wsId?: string) {
   fake.model = {
     groups: [...groups],
-    needsYou: [{ id: 'req_1', wsId: 'ws_0', sesId: 'ses_1', workspaceName: groups[0]?.name ?? 'x', text: 'Claude Code wants to run npm test', agentName: 'Claude Code', at: '2026-10-04T11:59:00.000Z', request: 'run npm test' }],
+    needsYou: [{ id: 'req_1', kind: 'permission', chatName: 'New chat', wsId: 'ws_0', sesId: 'ses_1', workspaceName: groups[0]?.name ?? 'x', text: 'Claude Code wants to run npm test', agentName: 'Claude Code', at: '2026-10-04T11:59:00.000Z', request: 'run npm test' }],
   };
   fake.wsId = wsId;
   return render(

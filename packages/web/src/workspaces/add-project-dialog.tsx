@@ -28,7 +28,7 @@ export interface AddProjectDialogProps {
 }
 
 /**
- * Add project (EXPERIENCE.md Workspace switcher; CAP-17): a folder browser
+ * Add project (EXPERIENCE.md Project heading; CAP-17): a folder browser
  * the server reads for the page, starting at the home folder. The user opens
  * the folder shown, or starts a new project folder inside it; either way the
  * project opens at `/w/:wsId`. The same folder always opens the same project

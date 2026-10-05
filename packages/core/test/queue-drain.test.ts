@@ -187,6 +187,7 @@ describe('a queued message is sent when the turn ends (backlog bug 16)', () => {
     await agent.end('end_turn');
     await settle();
     expect(await abandoned).toEqual({ outcome: 'cancelled' });
+    expect(sessionEvents(core, session.id).filter((e) => e.type === 'permission.resolved').map((e) => e.payload)).toMatchObject([{ decision: 'deny', by: 'cancelled' }]);
     expect(agent.prompts).toEqual(['first', 'queued while the card was up']);
     expect(stateOf(core, session.id)).toBe('working');
     await agent.end();

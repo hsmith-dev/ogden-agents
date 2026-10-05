@@ -16,10 +16,9 @@
  * others are told. A viewer that detaches leaves the terminal running, with or
  * without viewers, until it is switched back or the server stops.
  */
-import { MAX_TERMINAL_COLS, MAX_TERMINAL_ROWS, PERMISSION_MODE_RANK, type Session, type SessionId } from '@ogden-agents/shared';
+import { MAX_TERMINAL_COLS, MAX_TERMINAL_ROWS, PERMISSION_MODE_RANK, projectNotTrustedReason, type Session, type SessionId } from '@ogden-agents/shared';
 import { AgentError, type AgentTerminalResume, type AgentTranscriptTurn } from '../agent-port.js';
 import { BuildSessionReadOnlyError, InvalidOperationError, SessionNotIdleError, TerminalHandoffError, TerminalImportError, TerminalUnavailableError } from '../errors.js';
-import { PROTECTED_PATHS } from '../permission-matching.js';
 import { omittedNote, START_MARK, turnsToImport } from '../terminal-import.js';
 import type { TerminalProcess } from '../terminal-port.js';
 import { checkTerminalReady, checkTerminalSupport } from '../terminal-checks.js';
@@ -193,6 +192,10 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
     const support = checkTerminalSupport(agent, options.terminal);
     if ('available' in support) throw new TerminalUnavailableError(support.code, support.reason);
     const { resume, terminal } = support;
+    // The agent's own CLI runs the project's settings and hooks too: only in a trusted project (epic 12, 12.3).
+    if (ctx.agents.describe(ctx.agentIdOf(session))?.needsProjectTrust === true && !(await ctx.projectTrusted(session.workspaceId))) {
+      throw new TerminalUnavailableError('agent_unsupported', projectNotTrustedReason(agent.displayName));
+    }
     if (busy.has(session.id) || session.state !== 'idle') {
       throw new SessionNotIdleError(`${agent.displayName} is busy. Switch to the terminal when it is idle.`);
     }
@@ -224,7 +227,7 @@ export function createTerminal(ctx: ChatContext, deps: Pick<Agents, 'releaseAgen
       try {
         built = await deadline.step(resume.command(agentSessionId, env, {
             permissionMode,
-            ...(permissionMode === 'auto' ? { protectedPaths: PROTECTED_PATHS } : {}),
+            ...(permissionMode === 'auto' ? { protectedPaths: ctx.protectedPaths() } : {}),
             ...(model === null ? {} : { model }),
           }));
       } catch (error) {

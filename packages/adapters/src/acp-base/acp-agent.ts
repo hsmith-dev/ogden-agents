@@ -64,12 +64,14 @@ import {
 import type { PermissionMode } from '@ogden-agents/shared';
 import { killProcessTree } from '../process-tree.js';
 import { withTimeout } from '../with-timeout.js';
+import { checkFixedModeWiring, startFixedMode, type FixedModeStart } from './fixed-mode.js';
 import { createStreamMasker, maskSecrets, secretValues } from './mask.js';
 import { agentWords, modelOptionOf, modelsOf } from './models.js';
 import { answerPermissionRequest, type Diagnostic, type PermissionCallback } from './permission-request.js';
-import { acpAsksLessThanAsk, acpModeOf, acpReasons, type AcpAgentOptions, type AcpAgentQuirks, type AcpLaunch } from './quirks.js';
+import { acpAsksLessThanAsk, acpModeOf, acpReasons, type AcpAgentOptions, type AcpAgentQuirks, type AcpLaunch, type AcpLaunchInput } from './quirks.js';
 
-export { acpAsksLessThanAsk, acpModeOf, acpReasons, slashSkillInvocation, type AcpAgentOptions, type AcpAgentQuirks, type AcpLaunch } from './quirks.js';
+export { acpAsksLessThanAsk, acpModeOf, acpReasons, slashSkillInvocation } from './quirks.js';
+export type { AcpAgentOptions, AcpAgentQuirks, AcpAuthChoice, AcpLaunch, AcpLaunchInput, AcpStartOptions } from './quirks.js';
 
 /** The ACP steering extension request (claude-agent-acp 0.84): a user message into the running turn. */
 const STEER_METHOD = '_session/steering';
@@ -120,12 +122,14 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
   };
   const startTimeoutMs = options.startTimeoutMs ?? START_TIMEOUT_MS;
   const reasons = acpReasons(descriptor.displayName);
+  checkFixedModeWiring(descriptor, quirks);
 
   /** Spawns the agent in `cwd` with core's environment (AD-16), in its own process group. */
-  const spawnAgent = (cwd: string, env: Readonly<Record<string, string>>, model: string | undefined) => {
+  const spawnAgent = (launchInput: AcpLaunchInput, model: string | undefined) => {
+    const { cwd, env } = launchInput;
     let launch: AcpLaunch;
     try {
-      launch = quirks.launch({ cwd, env });
+      launch = quirks.launch(launchInput);
     } catch (error) {
       if (error instanceof AgentError) throw error;
       throw new AgentError('agent_unavailable', reasons.couldNotStart, { details: { reason: maskSecrets(String(error), secretValues(env)) }, cause: error });
@@ -157,6 +161,14 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
     return { child, secrets: secretValues(childEnv) };
   };
 
+  const startFixedModeSafely = (permissionMode: PermissionMode, protectedPaths: ProtectedPaths | undefined): FixedModeStart | undefined => {
+    try {
+      return startFixedMode(descriptor, quirks, { permissionMode, protectedPaths }, reasons);
+    } catch (error) {
+      throw new AgentError('agent_unavailable', reasons.couldNotStart, { cause: error });
+    }
+  };
+
   const open = async (
     input: {
       cwd: string;
@@ -165,6 +177,7 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
       protectedPaths?: ProtectedPaths | undefined;
       sandbox?: AgentSandbox | undefined;
       model?: string | undefined;
+      permissionMode?: PermissionMode | undefined;
     },
     opening: Opening,
   ) => {
@@ -173,7 +186,12 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
       throw new AgentError('agent_unavailable', `${descriptor.displayName} can't run a sandboxed build.`);
     }
     const startModel = descriptor.models?.list.some((each) => each.id === input.model) === true ? input.model : undefined;
-    const { child, secrets } = spawnAgent(input.cwd, input.env, startModel);
+    const permissionMode = input.permissionMode ?? 'ask';
+    // Before anything is spawned: a quirk that throws must not leave a process behind.
+    const fixed = startFixedModeSafely(permissionMode, input.protectedPaths);
+    // Fail closed: a fixed-mode start has no place for the sandbox, so a build session never runs without it (story 5.2, epic 12).
+    if (input.sandbox !== undefined && fixed !== undefined) throw new AgentError('agent_unavailable', `${descriptor.displayName} can't run a sandboxed build.`);
+    const { child, secrets } = spawnAgent({ cwd: input.cwd, env: input.env, permissionMode, protectedPaths: input.protectedPaths }, startModel);
     return startOnChild(
       child,
       {
@@ -189,6 +207,8 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
         protectedPaths: input.protectedPaths,
         sandbox: input.sandbox,
         startModel,
+        permissionMode,
+        fixed,
       },
       opening,
     );
@@ -197,6 +217,7 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
   return {
     displayName: descriptor.displayName,
     permissionModes: declaredModes(descriptor),
+    ...(descriptor.modeFixedAtStart === true ? { modeFixedAtStart: true } : {}),
 
     async startSession(input) {
       const opened = await open(input, { kind: 'new' });
@@ -246,6 +267,10 @@ interface StartContext {
   sandbox: AgentSandbox | undefined;
   /** The static-list model the process was started on (story 11), if any. */
   startModel: string | undefined;
+  /** The chat's mode at start: given at start to an agent that fixes it (`startOptions`). */
+  permissionMode: PermissionMode;
+  /** The fixed-mode start, computed before the process was spawned. */
+  fixed: FixedModeStart | undefined;
 }
 
 /** Stops `child` and everything it started: its process group on POSIX, its tree on Windows. */
@@ -255,7 +280,7 @@ function killTree(child: ChildProcessWithoutNullStreams): void {
 
 async function startOnChild(
   child: ChildProcessWithoutNullStreams,
-  { descriptor, quirks, reasons, cwd, env, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths, sandbox, startModel }: StartContext,
+  { descriptor, quirks, reasons, cwd, env, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths, sandbox, startModel, fixed }: StartContext,
   opening: Opening,
 ): Promise<{ init: acp.InitializeResponse; session: AgentSession | undefined; restored: AgentRestored }> {
   const { couldNotStart: COULD_NOT_START, stopped: STOPPED, failed: FAILED } = reasons;
@@ -263,9 +288,13 @@ async function startOnChild(
   /** A plain reason for a failed ACP request, for the UI; the raw error goes to the log. */
   const plainReason = (error: unknown, fallback: string) => (isAuthRequired(error) ? reasons.signIn : fallback);
   const listeners = new Set<AgentEventListener>();
+  // An agent whose mode is given at start gets it, and the guards, in one `_meta` (epic 12, 12.3).
   // The agent's own way to keep the protected paths guarded; it can't be changed later.
-  const guards = (protectedPaths === undefined && sandbox === undefined) || quirks.sessionMeta === undefined ? undefined : quirks.sessionMeta(protectedPaths, sandbox);
-  const sessionMeta = guards === undefined ? {} : { _meta: guards };
+  const guards =
+    fixed !== undefined || ((protectedPaths === undefined && sandbox === undefined) || quirks.sessionMeta === undefined)
+      ? undefined
+      : quirks.sessionMeta(protectedPaths, sandbox);
+  const sessionMeta = fixed !== undefined ? fixed.sessionMeta : guards === undefined ? {} : { _meta: guards };
   /** While `session/load` replays history the chat already has: those updates are swallowed. */
   let replaying = false;
   let state: 'idle' | 'working' | 'error' = 'idle';
@@ -522,9 +551,12 @@ async function startOnChild(
       });
       if (opening.kind === 'probe') return { initialized, sessionId: undefined, restored: 'new' as const };
       // The agent's own sign-in step before any session (6.5): a refusal (`-32000`) fails the start as auth_required.
-      const methodId = quirks.authMethod?.({ env, initialized });
-      if (methodId !== undefined) {
-        await connection.agent.request('authenticate', { methodId });
+      const choice = quirks.authMethod?.({ env, initialized });
+      if (choice !== undefined) {
+        const methodId = typeof choice === 'string' ? choice : choice.methodId;
+        const meta = typeof choice === 'string' ? undefined : choice.meta;
+        // The `_meta` may carry a credential: it is sent, never logged.
+        await connection.agent.request('authenticate', { methodId, ...(meta === undefined ? {} : { _meta: meta }) });
         diagnostic('authenticated with the agent', { methodId });
       }
       if (opening.kind === 'reopen') {
@@ -595,7 +627,7 @@ async function startOnChild(
   const listsModels = modelOptionOf(config) !== undefined;
   const session: AgentSession = {
     agentSessionId: sessionId,
-    protectsPaths: guards !== undefined,
+    protectsPaths: fixed !== undefined ? fixed.guardsPaths : guards !== undefined,
 
     get models() {
       const option = modelOptionOf(config);
@@ -684,6 +716,8 @@ async function startOnChild(
         throw failure;
       }
     },
+
+    ...(fixed === undefined ? {} : fixed.session),
 
     async cancel() {
       if (exited || closing) return;

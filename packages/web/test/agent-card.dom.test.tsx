@@ -62,6 +62,20 @@ describe('the agent card (epic 6 entry 7)', () => {
     expect(actions.uninstall).toHaveBeenCalledOnce();
   });
 
+  it("shows the agent's plain-words notices (epic 12, 12.3), whatever its state, and nothing when it has none", () => {
+    card({ auth: 'signed_in', method: 'subscription', canSignOut: true, notices: ["Codex keeps its sign-in in a file in Ogden Agents' data folder.", 'Codex downloads OpenAI’s plugins list when it starts.'] });
+    expect(screen.getAllByTestId('agent-notice').map((notice) => notice.textContent)).toEqual([
+      "Codex keeps its sign-in in a file in Ogden Agents' data folder.",
+      'Codex downloads OpenAI’s plugins list when it starts.',
+    ]);
+    cleanup();
+    card({ install: 'not_installed', version: null, notices: ['It uses the network.'] });
+    expect(screen.getByTestId('agent-notice').textContent).toBe('It uses the network.');
+    cleanup();
+    card({ auth: 'signed_in' });
+    expect(screen.queryByTestId('agent-notices')).toBeNull();
+  });
+
   it('signed in with an account it can sign out of: Sign out', () => {
     card({ auth: 'signed_in', method: 'subscription', canSignOut: true });
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));

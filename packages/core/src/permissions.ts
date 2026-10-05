@@ -155,6 +155,8 @@ export interface PermissionsOptions {
   isAgentRegistered?: ((agentId: AgentId) => boolean) | undefined;
   /** Whether Developer mode is on now (core's install settings): Skip all as a project's default needs it. Absent: off. */
   developerMode?: (() => boolean) | undefined;
+  /** The agents' own config folders, which join the protected paths (their descriptors', epic 12, 12.3). Read at each request. Default: none. */
+  agentConfigFolders?: (() => readonly string[]) | undefined;
 }
 
 interface Pending {
@@ -179,7 +181,7 @@ const toRule = (row: RuleRow): PermissionRule => ({
   createdAt: row.createdAt,
 });
 
-export function createPermissions({ db, events, entities, sessionEvents, onError, isBmadPieceAvailable = () => false, isAgentRegistered, developerMode }: PermissionsOptions): Permissions {
+export function createPermissions({ db, events, entities, sessionEvents, onError, isBmadPieceAvailable = () => false, isAgentRegistered, developerMode, agentConfigFolders }: PermissionsOptions): Permissions {
   const { orm } = db;
   /** Requests waiting for the user, by request id. */
   const pending = new Map<string, Pending>();
@@ -257,9 +259,10 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
         // needs no path, but any path it names must be inside too.
         const named = Array.isArray(request.paths) ? request.paths : [];
         // A write to a protected path, or a command naming one, always shows a card (F1).
+        const extraFolders = agentConfigFolders?.() ?? [];
         const protectedPath =
-          (WRITE_KINDS.has(kind) && (workspace === undefined || touchesProtectedPath(workspace, request.paths))) ||
-          (command !== undefined && commandNamesProtectedPath(command));
+          (WRITE_KINDS.has(kind) && (workspace === undefined || touchesProtectedPath(workspace, request.paths, extraFolders))) ||
+          (command !== undefined && commandNamesProtectedPath(command, extraFolders));
         const cautionPathsInside = PATH_KINDS.has(kind)
           ? pathsInside
           : workspace !== undefined && (named.length === 0 || pathsInsideWorkspace(workspace, named));

@@ -63,6 +63,8 @@ A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the str
 - **CAP-15**
   - **intent:** In v1, Claude Code is supported fully, for chat and builds. Antigravity joins it for chat, picked per chat with a default per project, if it proves possible (epic 6's spike decides). Codex, Gemini CLI and GitHub Copilot CLI, and builds with any agent but Claude Code, are v2 (epic 8); each further ACP agent is one adapter.
   - **success:** Claude Code completes a chat and a `bmad-build-auto` run through the UI. If Antigravity is supported, an Antigravity chat and a Claude Code chat run at once in one project and both continue after a restart.
+  - **intent:** In v1, Claude Code is supported fully, for chat and builds. Antigravity joins it for chat, picked per chat with a default per project, if it proves possible (epic 6's spike decides). In v1.1 (epic 12, 2026-10-04), Codex and Grok join for chat, each only if its live checks pass on macOS, Windows and Linux; v1.1 ships with whichever passes. Gemini CLI and GitHub Copilot CLI, and builds with any agent but Claude Code, are v2 (epic 8); each further ACP agent is one adapter.
+  - **success:** Claude Code completes a chat and a `bmad-build-auto` run through the UI. If Antigravity is supported, an Antigravity chat and a Claude Code chat run at once in one project and both continue after a restart. In v1.1, the same holds for a Codex chat and a Grok chat beside a Claude Code chat.
 - **CAP-16**
   - **intent:** On first run, onboarding finds the installed agent CLIs, installs missing ones on request, and signs the user into their own account (subscription), or takes an API key instead, all from the UI.
   - **success:** On a fresh machine, a user installs Claude Code and signs into it from the UI, then chats, with no terminal. Another user completes a chat with only an API key.
@@ -110,6 +112,7 @@ CAP-11 (cost caps) is retired and its number is not reused.
 - Tracker stores (Jira, Linear, GitHub Issues, Notion, Trello) in v1. The board covers the repo store only.
 
 - Planned for v2, not v1 (epic 8): viewing the project's markdown files in the app, code-change review, a VS Code extension, the agents Codex, Gemini CLI and GitHub Copilot CLI, and builds with any agent but Claude Code.
+- Planned for v2, not v1 (epic 8): viewing the project's markdown files in the app, code-change review, a VS Code extension, the agents Gemini CLI and GitHub Copilot CLI, and builds with any agent but Claude Code. Codex and Grok chat are v1.1 (epic 12, 2026-10-04).
 
 ## Success signal
 

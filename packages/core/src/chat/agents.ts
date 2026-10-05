@@ -4,9 +4,8 @@
  * and dropping or releasing it. `apply` comes from the turn that starts the
  * agent, so this module never imports the turns.
  */
-import { redactSecrets, type Session, type SessionId, type Workspace } from '@ogden-agents/shared';
+import { projectNotTrustedReason, redactSecrets, type Session, type SessionId, type Workspace } from '@ogden-agents/shared';
 import { AgentError, type AgentEvent, type AgentPermissionRequest, type AgentRestored, type AgentSession } from '../agent-port.js';
-import { PROTECTED_PATHS } from '../permission-matching.js';
 import { PRIME_NEW_MESSAGE, primedPrompt } from '../resume-prime.js';
 import { AGENT_SESSION_REF, AGENT_STARTING_NOTICE_MS, HANDOFF_PENDING_REF } from './constants.js';
 import type { ChatContext } from './context.js';
@@ -57,6 +56,8 @@ export function createAgents(
     // Called before each prompt, an idle point: an agent whose guards no longer fit the chat's mode restarts here.
     if (existing !== undefined && existing.restartPending) drop(session.id, existing);
     else if (existing !== undefined) return existing;
+    // The chat's mode as this start reads it: agents that fix their mode at start get it now (epic 12, 12.3).
+    const startMode = entities.getSession(session.id)?.permissionMode ?? 'ask';
     let markGone!: () => void;
     const gone = new Promise<void>((resolve) => (markGone = resolve));
     const entry: Live = {
@@ -72,7 +73,7 @@ export function createAgents(
       markGone,
       modeSync: Promise.resolve(),
       // The protected paths stay guarded in Auto ("Keep protected files guarded", user decision 2026-10-02); fixed for the session's life.
-      guardsRequested: entities.getSession(session.id)?.permissionMode === 'auto',
+      guardsRequested: startMode === 'auto',
       restartPending: false,
       appliedModel: null,
     };
@@ -94,19 +95,26 @@ export function createAgents(
       cwd: build?.cwd ?? workspace.realPath ?? workspace.path,
       env: { ...agentEnv(session.id), ...unattended?.env },
       onPermissionRequest,
-      ...(entry.guardsRequested ? { protectedPaths: PROTECTED_PATHS } : {}),
+      permissionMode: startMode,
+      ...(entry.guardsRequested ? { protectedPaths: ctx.protectedPaths() } : {}),
       ...(startModel === null ? {} : { model: startModel }),
       ...(unattended === undefined ? {} : { sandbox: unattended.sandbox }),
     };
     const previous = storedAgentSessionId(session.id);
     // A chat that reached an agent before, and has none now, reopens that agent's session (2.7).
     // A dropped agent of this session stops first: never two of its processes at once.
-    const begin = (): Promise<{ session: AgentSession; restored: AgentRestored | undefined }> =>
-      session.kind === 'build' && build === undefined
-        ? Promise.reject(new AgentError('agent_unavailable', `${agent.displayName} can't run this build any more. Build the ticket again from the board.`))
-        : previous === undefined
-          ? agent.startSession(input).then((started) => ({ session: started, restored: undefined }))
-          : agent.reopenSession({ ...input, agentSessionId: previous });
+    const needsTrust = ctx.agents.describe(agentId)?.needsProjectTrust === true;
+    const begin = async (): Promise<{ session: AgentSession; restored: AgentRestored | undefined }> => {
+      // An agent that runs the project's own settings and hooks starts only in a project trusted as it is now: asked at every
+      // start, not only when the chat was made, so a changed `.mcp.json` asks again before the next start (epic 12, 12.3).
+      if (needsTrust && !(await ctx.projectTrusted(workspace.id))) throw new AgentError('agent_unavailable', projectNotTrustedReason(agent.displayName));
+      if (session.kind === 'build' && build === undefined) {
+        throw new AgentError('agent_unavailable', `${agent.displayName} can't run this build any more. Build the ticket again from the board.`);
+      }
+      return previous === undefined
+        ? agent.startSession(input).then((started) => ({ session: started, restored: undefined }))
+        : agent.reopenSession({ ...input, agentSessionId: previous });
+    };
     const dropped = droppedAgents.get(session.id);
     const opening = dropped === undefined ? begin() : dropped.then(begin);
     // A start that takes a while shows as starting, not stuck (epic 6 entry 5); a quick one adds no event.

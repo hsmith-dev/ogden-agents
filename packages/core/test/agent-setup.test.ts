@@ -981,6 +981,17 @@ describe('uninstall and sign-out (epic 6 entry 7)', () => {
     expect(setup.agentEnv('antigravity')).toEqual({ GEMINI_API_KEY: 'AIza-test-key' });
   });
 
+  it("an agent's plain-words notices reach the status the card shows (epic 12, 12.3), and an agent without any has none", async () => {
+    const core = openTestCore();
+    const { port } = removablePort();
+    const status = port.status.bind(port);
+    port.status = async () => ({ ...(await status()), notices: ["This agent keeps its sign-in in a file in Ogden Agents' data folder."] });
+    const setup = createAgentSetup(core.events, [port, fakePort().port]);
+    const listed = await setup.list();
+    expect(listed.find((agent) => agent.agentId === 'antigravity')?.notices).toEqual(["This agent keeps its sign-in in a file in Ogden Agents' data folder."]);
+    expect(listed.find((agent) => agent.agentId !== 'antigravity')?.notices).toBeUndefined();
+  });
+
   it('a sign-out the agent refuses keeps it signed in', async () => {
     const core = openTestCore();
     const { port } = removablePort({

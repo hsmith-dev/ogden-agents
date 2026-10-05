@@ -64,7 +64,7 @@ import {
   MessageId,
   type SessionId,
   type SessionTerminal,
-  type WorkspaceId,
+  WorkspaceId,
   WorkspaceResponse,
   WorkspacesResponse,
 } from '@ogden-agents/shared';
@@ -162,7 +162,12 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
   });
 
   // The agents a chat can be started with (epic 6): agent-neutral data the picker reads.
-  app.get(API_ROUTES.chatAgents, async (c) => c.json(ChatAgentsResponse.parse(await chat.chatAgents())));
+  app.get(API_ROUTES.chatAgents, async (c) => {
+    // `?workspaceId=` makes an agent that needs project trust say so while the project isn't trusted for it (epic 12, 12.3).
+    const workspaceId = c.req.query('workspaceId');
+    const parsed = workspaceId === undefined ? undefined : WorkspaceId.safeParse(workspaceId);
+    return c.json(ChatAgentsResponse.parse(await chat.chatAgents(parsed?.success === true ? parsed.data : undefined)));
+  });
 
   app.post(API_ROUTES.workspaceSessions, limit, async (c) => {
     const scope = ids(c);

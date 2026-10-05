@@ -210,6 +210,39 @@ export async function fakeSecondAgent(
   };
 }
 
+/**
+ * A generic agent that takes its permission mode only when a chat starts and
+ * needs the project trusted (epic 12, 12.3), built as a later agent's adapter
+ * is: a descriptor and quirks on the shared ACP client, the fake ACP agent
+ * (`FAKE_ACP_FIXED_MODE`) as its process. Its mode reaches it in `_meta`
+ * (`mode`), and it runs the project's `.mcp.json`, so the trust binds it.
+ */
+export async function fakeFixedModeAgent(options: { agentId?: string; displayName?: string; needsProjectTrust?: boolean } = {}): Promise<AgentWiringOf> {
+  const { createAcpAgent, slashSkillInvocation } = await serverModule();
+  const agentId = options.agentId ?? 'fixed-agent';
+  const displayName = options.displayName ?? 'Fixed Agent';
+  const descriptor = {
+    agentId,
+    displayName,
+    provider: 'Fake Provider',
+    install: { kind: 'npm' as const, package: '@fake/fixed-agent', version: '1.0.0' },
+    signInMethods: [{ id: 'fake-login', kind: 'subscription' as const, label: 'Sign in with your account' }],
+    permissionModes: { ask: 'ask', auto: 'auto', skip_all: 'skip_all' },
+    needsProjectTrust: options.needsProjectTrust ?? true,
+    projectFiles: ['.mcp.json'],
+    modeFixedAtStart: true,
+    skillsFolder: '.fixed/skills',
+  };
+  const agent = createAcpAgent(descriptor, {
+    launch: () => ({ command: process.execPath, args: [FAKE_AGENT], addEnv: { FAKE_ACP_FIXED_MODE: '1', FAKE_ACP_AGENT_NAME: agentId } }),
+    toolInputPaths: { pathFields: [], patternFields: [] },
+    askingModeIds: [],
+    skillInvocation: slashSkillInvocation,
+    startOptions: ({ permissionMode, protectedPaths }) => ({ meta: { mode: permissionMode }, guardsPaths: protectedPaths !== undefined }),
+  });
+  return { descriptor, agent };
+}
+
 /** The fake ACP agent as Antigravity's server (`fake-antigravity.mjs`, epic 6 entry 5). */
 export const FAKE_ANTIGRAVITY = join(ROOT, 'tests', 'fixtures', 'fake-antigravity.mjs');
 

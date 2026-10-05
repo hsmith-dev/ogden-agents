@@ -124,6 +124,13 @@ export interface StartAgentSession {
   /** The folder the agent works in: the workspace's repo root. */
   cwd: string;
   /**
+   * The chat's permission mode when the agent starts (epic 12, 12.3): for an
+   * agent whose mode is fixed at start (`AgentPort.modeFixedAtStart`) it is
+   * the mode the session runs in for life; the others are told it after
+   * they started (`setPermissionMode`) and may ignore this.
+   */
+  permissionMode?: PermissionMode | undefined;
+  /**
    * The child process environment, as core passes it (AD-16: API keys go
    * here, never on a command line or in an event). The adapter may add its
    * own agent-specific variables but must not log it.
@@ -214,6 +221,13 @@ export interface AgentSession {
   /** Whether the session was started with `protectedPaths` in effect. Core puts only such a session in Auto. */
   readonly protectsPaths?: boolean | undefined;
   /**
+   * For an agent whose mode is fixed at start: the mode this session was
+   * started in and stays in (epic 12, 12.3). Core checks it against the
+   * chat's mode; a looser one is stopped, never kept. Absent: the mode is
+   * changed with `setPermissionMode`.
+   */
+  readonly fixedPermissionMode?: PermissionMode | undefined;
+  /**
    * Puts the session in `mode`. Resolves once the agent has taken it (at once
    * when it already runs in it); rejects when it can't. Absent: the session
    * only ever runs in Ask, and core never asks it for another mode.
@@ -252,6 +266,8 @@ export interface AgentPort {
    * Ask only. Core starts every session in Ask and offers only these.
    */
   readonly permissionModes?: readonly PermissionMode[] | undefined;
+  /** The agent takes its permission mode only when a chat starts (the descriptor's `modeFixedAtStart`, epic 12). */
+  readonly modeFixedAtStart?: boolean | undefined;
   /**
    * Starts the agent and a new session in `cwd`. Rejects with an
    * {@link AgentError} (code `agent_unavailable` when it can't be started).
@@ -431,6 +447,7 @@ export function createAgentRegistry(
     const portModes = [...new Set(agent.permissionModes ?? ['ask'])].sort().join(',');
     const described = declaredModes(descriptor).sort().join(',');
     if (portModes !== described) throw new Error(`agent registry: ${agentId}'s port declares the modes ${portModes}, its descriptor ${described}`);
+    if ((agent.modeFixedAtStart ?? false) !== (descriptor.modeFixedAtStart ?? false)) throw new Error(`agent registry: ${agentId}'s port and descriptor disagree on whether its mode is fixed at start`);
     byId.set(agentId, registered);
   }
   const first = agents[0]?.descriptor.agentId;

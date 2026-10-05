@@ -2,8 +2,10 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain } from '@ogden-agents/adapters';
+import { ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, projectFilesFingerprint } from '@ogden-agents/adapters';
 import {
+  agentConfigFolders,
+  agentProjectFiles,
   createAgentRegistry,
   createChat,
   createDataDir,
@@ -16,6 +18,7 @@ import {
   openCore,
   PORT_FILE,
   unregisteredAgent,
+  type AgentDescriptor,
   type AgentPort,
   type Core,
 } from '@ogden-agents/core';
@@ -104,6 +107,11 @@ export const MAX_WS_PAYLOAD_BYTES = MAX_TERMINAL_INPUT_BYTES + 1024;
 /** How long a stop waits after answering Quit or restart, so the reply reaches the client first. */
 const STOP_AFTER_REPLY_MS = 50;
 
+/** The agents' descriptors, set once they are wired. */
+interface DescriptorsRef {
+  current: readonly AgentDescriptor[];
+}
+
 /** Whether `agentId` is one this server registers (epic 6, entry 6): Claude Code, Antigravity unless left out (entry 5), then any extra agent a test wires. */
 const registeredAgent =
   (options: Pick<StartOptions, 'extraAgents' | 'antigravity'>) =>
@@ -142,6 +150,9 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       ),
     );
   const ownsCore = options.core === undefined;
+  // The registered agents' descriptors, set once they are wired (core is opened first): their own config folders
+  // join the protected paths, and the project files they run bind the project trust (epic 12, 12.3).
+  const descriptors: DescriptorsRef = { current: [] };
   // Every environment hook, on a test run only; one the options already decide is not read (story 10.8).
   const hooks = resolveTestHooks(process.env, dataDir, { ...options, ownsCore });
   // What this install ships, plus a test's own (story 10.2): the option, and the environment hook.
@@ -160,9 +171,12 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
       onPermissionError: (error) => log.warn('a permission request was declined after a failure', { reason: String(error) }),
       // A project's default agent (epic 6, entry 6) is one this server registers: Claude Code and any extra agent.
       isAgentRegistered: registeredAgent(options),
+      agentConfigFolders: () => agentConfigFolders(descriptors.current),
+      agentProjectFiles: () => agentProjectFiles(descriptors.current),
+      projectFilesFingerprint,
     });
   try {
-    return await listenAndAnnounce({ options, dataDir, log, core, ownsCore, lock, hooks, bmadWiring });
+    return await listenAndAnnounce({ options, dataDir, log, core, ownsCore, lock, hooks, bmadWiring, descriptors });
   } catch (error) {
     if (ownsCore) core.close();
     throw error;
@@ -178,6 +192,7 @@ async function listenAndAnnounce({
   lock,
   hooks,
   bmadWiring,
+  descriptors,
 }: {
   options: StartOptions;
   dataDir: string;
@@ -189,6 +204,8 @@ async function listenAndAnnounce({
   hooks: TestHooks;
   /** The server's one pinned BMad Method source (story 4.14), the catalog over it (story 4.1) and setup's runner holder (story 4.3). */
   bmadWiring: BmadWiring;
+  /** Filled with the registered agents' descriptors once they are wired. */
+  descriptors: DescriptorsRef;
 }): Promise<RunningServer> {
   const { bmadCatalog, bmadSourcePort, setupRunner } = bmadWiring;
   const requested = options.port ?? DEFAULT_PORT;
@@ -251,6 +268,7 @@ async function listenAndAnnounce({
   });
   // Every agent is wired before the stored sessions are settled, as before story 6.9's split: a wiring error leaves the database untouched.
   const { claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent } = wireAgents({ options, dataDir, log, hooks, core });
+  descriptors.current = wirings.map((wiring) => wiring.descriptor);
   // Agents from before this start are gone with their processes (AD-3): their sessions can be resumed, not left working.
   const settled = core.entities.settleInterruptedSessions(RESTARTED_REASON);
   if (settled.length > 0) log.info('sessions left working by a stopped server are idle and resumable', { sessions: settled.length });
@@ -295,7 +313,8 @@ async function listenAndAnnounce({
     // The per-project trust (story 4.2), as it stands now: trusted, and its scripts the ones the user allowed (4.13).
     // An agent that needs a trusted project is refused until then, and again once the scripts change.
     // The ACP adapters never see trust (6.4): it is checked here, before a chat is created.
-    projectTrusted: (workspaceId) => core.bmadScriptTrust.scriptsUnchanged(workspaceId),
+    // With the files an agent runs (`.claude/settings.json`, `.mcp.json`, from its descriptor), since epic 12 (12.3).
+    projectTrusted: (workspaceId) => core.bmadScriptTrust.trustedForAgents(workspaceId),
     terminal,
     // The chat follows the log (a mode changed by Developer mode reaches its agent) and gates Skip all on Developer mode.
     events: core.events,

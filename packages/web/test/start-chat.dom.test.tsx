@@ -9,6 +9,7 @@
  */
 import type { ChatAgentsResponse, Session } from '@ogden-agents/shared';
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from '@tanstack/react-router';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentAvailability } from '../src/chat/use-chat-agents';
@@ -60,7 +61,11 @@ function renderHarness(props: Parameters<typeof Harness>[0]) {
   const chat = createRoute({ getParentRoute: () => root, path: '/w/$wsId/s/$sesId', component: () => <p data-testid="chat-open">open</p> });
   const agents = createRoute({ getParentRoute: () => root, path: '/settings/agents' });
   const router = createRouter({ routeTree: root.addChildren([page, chat, agents]), history: createMemoryHistory({ initialEntries: ['/w/ws_a'] }) });
-  render(<RouterProvider router={router} />);
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
   return router;
 }
 
@@ -100,7 +105,7 @@ describe('Start a chat', () => {
   });
 
   it("says why before trying when the default can't start a chat, tied to the button, and starts nothing", async () => {
-    const blocked = { available: false, description: SIGNED_OUT_REASON, setUp: true };
+    const blocked = { available: false, description: SIGNED_OUT_REASON, setUp: true, trust: false };
     renderHarness({ agents: LIST.agents, agentId: 'third-agent', blocked });
     const button = await screen.findByTestId('start-chat');
     expect(button.getAttribute('aria-disabled')).toBe('true');

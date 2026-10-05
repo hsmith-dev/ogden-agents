@@ -142,6 +142,7 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
   const { entities, agents, live, busy, dataHome, getWorkspace, getSession } = ctx;
   const { drop, stopTerminal, initialModel } = deps;
   const readiness = (agentId: AgentId) => agentReadiness(ctx, agentId);
+  const { projectTrusted } = ctx;
 
   const methods: Pick<Chat, 'openWorkspace' | 'listWorkspaces' | 'getWorkspace' | 'listSessions' | 'deleteHistory' | 'createChatSession' | 'getSession' | 'chatAgents'> = {
     openWorkspace(input, options) {
@@ -224,7 +225,9 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
       });
     },
 
-    async chatAgents() {
+    async chatAgents(workspaceId) {
+      // Whether the project is trusted is asked once, and only for an agent that needs it.
+      const trusted = workspaceId === undefined || !agents.agentIds.some((agentId) => agents.describe(agentId)?.needsProjectTrust === true) ? undefined : await projectTrusted(workspaceId);
       const listed = await Promise.all(
         agents.agentIds.map(async (agentId) => {
           const agent = agents.get(agentId);
@@ -236,7 +239,12 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
           } catch {
             defaultModel = undefined;
           }
-          return [chatAgentOf(descriptor, agent, await readiness(agentId), { list: ctx.agentModelList(agentId), defaultModel })];
+          const listedAgent = chatAgentOf(descriptor, agent, await readiness(agentId), { list: ctx.agentModelList(agentId), defaultModel });
+          // Install and sign-in come first: trusting a project can't fix those.
+          if (descriptor.needsProjectTrust && trusted === false && listedAgent.unavailable === undefined) {
+            return [{ ...listedAgent, unavailable: { code: 'project_not_trusted' as const, reason: projectNotTrustedReason(descriptor.displayName), action: 'trust_project' as const } }];
+          }
+          return [listedAgent];
         }),
       );
       return { agents: listed.flat(), defaultAgentId: agents.defaultAgentId };

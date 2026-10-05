@@ -77,6 +77,16 @@ title = "Each finished epic teaches the next one"
 covers = ["CAP-13"]
 after = [{ epic = 5, needs = "finished, approved and merged runs with build records (5.9)" }]
 
+# ---- v1.1 (planned; outside the v1 initiative's Done when) ----
+
+# Epic ids (2026-10-02): 11 is epic-build-runs-and-notifications (5b, on docs/epic-5-inception, assigned first); 12 is v1.1 Codex and Grok, renumbered from 11 to avoid the clash.
+[[epic]]
+id = 12
+slug = "epic-v1-1-codex-and-grok"
+title = "v1.1: Codex and Grok beside Claude Code"
+covers = ["CAP-15", "CAP-3", "CAP-5", "CAP-16"]
+after = [{ epic = 6, needs = "the agents-as-a-choice contracts (6.3), the shared ACP client in acp-base (6.4), the picker and default agent per project (6.6), its sweep (6.9) and v1 released (6.10)" }, { epic = 4, needs = "the per-project trust store (4.2), BMad setup (4.3), planning sessions (4.6) and its release (4.13)" }]
+
 # ---- v2 (planned; outside the v1 initiative's Done when) ----
 
 [[epic]]

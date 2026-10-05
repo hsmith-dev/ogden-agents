@@ -53,6 +53,14 @@ function request(server: TestServer, tab: SignedIn, method: string, path: string
   });
 }
 
+/** The review a GET answers, or an error naming what the server answered instead (a CI-only flake's evidence). */
+async function reviewOf(server: Parameters<typeof request>[0], tab: Parameters<typeof request>[1], wsId: string): Promise<ReviewResponse> {
+  const reply = await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceBuild, { wsId, ref: '1.1' }));
+  const body: unknown = await reply.json();
+  if (reply.status !== 200) throw new Error(`review answered ${reply.status}: ${JSON.stringify(body)}`);
+  return ReviewResponse.parse(body);
+}
+
 async function refusalOf(reply: Response) {
   return { status: reply.status, ...ApiErrorBody.parse(await reply.json()).error };
 }
@@ -277,7 +285,7 @@ describe('Unattended builds over REST (story 5.2)', () => {
     await request(server, tab, 'PUT', apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId }));
     expect((await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId }), { ref: '1.1' })).status).toBe(201);
     let review: ReviewResponse | undefined;
-    await waitFor(async () => (review = ReviewResponse.parse(await (await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceBuild, { wsId, ref: '1.1' }))).json())).outcome !== 'running', 'the run to end', 15_000);
+    await waitFor(async () => (review = await reviewOf(server, tab, wsId)).outcome !== 'running', 'the run to end', 15_000);
     expect(review).toMatchObject({ outcome: 'blocked', reason: `The fake agent was told to block. ${RUN_REASON_NO_NETWORK}` });
     // A halt no code names is `other` (the runner's mapping, story 5.3).
     expect(review!.run.blockedCode).toBe('other');
@@ -316,7 +324,7 @@ describe('Unattended builds over REST (story 5.2)', () => {
     if (started.status !== 201) throw new Error(`build start answered ${started.status}: ${JSON.stringify(startedBody)}`);
     const { run } = BuildResponse.parse(startedBody);
     let review: ReviewResponse | undefined;
-    await waitFor(async () => (review = ReviewResponse.parse(await (await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceBuild, { wsId, ref: '1.1' }))).json())).outcome !== 'running', 'the run to end', 15_000);
+    await waitFor(async () => (review = await reviewOf(server, tab, wsId)).outcome !== 'running', 'the run to end', 15_000);
     expect(review!.run).toMatchObject({ outcome: 'blocked', blockedCode: 'intent_gap' });
     expect(runPhase(review!.run)).toBe('needs_you');
     const outcome = server.core.events.readAfter(0).find((event) => event.type === 'run.outcome_changed' && event.payload.runId === run.id);

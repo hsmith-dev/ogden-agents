@@ -282,9 +282,26 @@ async function opencodeProbe() {
       ['all-plus-DISABLE_EXTERNAL_SKILLS', { ...OC_LOCK, OPENCODE_DISABLE_EXTERNAL_SKILLS: '1' }, true],
       ['all-plus-DISABLE_CLAUDE_CODE_SKILLS', { ...OC_LOCK, OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: '1' }, true],
     ];
-    for (const [name, envX, hardened] of variants) {
+    // Windows downloads ripgrep from GitHub on first use. Try seeding the cache folder instead.
+    let rgSeed = null;
+    if (IS_WIN) {
+      try {
+        const url = 'https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-pc-windows-msvc.zip';
+        const rgDir = join(dataDir, 'rg');
+        mkdirSync(rgDir, { recursive: true });
+        const b = Buffer.from(await (await fetch(url, { redirect: 'follow' })).arrayBuffer());
+        writeFileSync(join(rgDir, 'rg.zip'), b);
+        spawnSync(process.env.SystemRoot + '\\System32\\tar.exe', ['-xf', 'rg.zip'], { cwd: rgDir });
+        const found = listTree(rgDir).find((f) => f.endsWith('rg.exe'));
+        rgSeed = { url, sha256: createHash('sha256').update(b).digest('hex'), bytes: b.length, exe: found ? join(rgDir, ...found.split('/')) : null };
+        results.ripgrepSeed = { ...rgSeed, exe: found };
+      } catch (e) { results.ripgrepSeed = { error: String(e) }; }
+      variants.push(['all-env-and-config-rg-seeded', OC_LOCK, true, true]);
+    }
+    for (const [name, envX, hardened, seed] of variants) {
       const cfg = writeConfig(`sw-${name}`, { baseURL: `${fake.url}/v1`, hardened });
       const xdg = join(dataDir, 'sw', name);
+      if (seed && rgSeed?.exe) { const bin = join(xdg, 'cache', 'opencode', 'bin'); mkdirSync(bin, { recursive: true }); cpSync(rgSeed.exe, join(bin, 'rg.exe')); }
       const before = proxy.hits.length;
       const d = new Driver(name, fake, { cmd: bin, args: ['acp'], wrap, env: baseEnv({ OPENCODE_CONFIG: cfg.path, OGDEN_ENDPOINT_KEY: KEY, OPENCODE_LOG_LEVEL: 'DEBUG', ...proxy.env, ...envX }, xdg) }, proxy);
       await d.start();

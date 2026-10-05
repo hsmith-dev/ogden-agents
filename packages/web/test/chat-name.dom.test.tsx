@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * Chat names in a DOM (backlog story 2): the header's Rename opens a field
+ * Chat names in a DOM (backlog story 12): the header's Rename opens a field
  * with the shown name; Enter or leaving it saves (normalized), Esc cancels
  * without a request and focus goes back to Rename; an unchanged automatic
  * name sends nothing; a saved rename is announced; a refusal is said; and

@@ -1,5 +1,5 @@
 /**
- * Chat names (backlog story 2) through the API: a real server with the fake
+ * Chat names (backlog story 12) through the API: a real server with the fake
  * ACP agent. The first message names the chat; `PUT .../title` renames it,
  * normalized and capped by the server whatever the UI sends; a refusal
  * records no event; renaming works while the terminal drives; a start names

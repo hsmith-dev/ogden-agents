@@ -15,7 +15,7 @@ import { workspaceName } from '@/workspaces/workspace-api';
 export interface SidebarRow {
   sesId: string;
   wsId: string;
-  /** The chat's name (backlog story 2): the user's, else the automatic one, else "New chat". */
+  /** The chat's name (backlog story 12): the user's, else the automatic one, else "New chat". */
   title: string;
   /** The user's own name for it, `null` when it shows the automatic one. */
   userTitle: string | null;
@@ -74,7 +74,7 @@ export const STATE_ORDER: readonly SessionState[] = ['working', 'waiting', 'erro
 /** A done session moves under "Earlier" after this long (EXPERIENCE.md State Patterns). */
 export const EARLIER_AFTER_MS = 24 * 60 * 60 * 1000;
 
-/** What a chat with no name yet is called (backlog story 2). */
+/** What a chat with no name yet is called (backlog story 12). */
 export const UNTITLED = NEW_CHAT_NAME;
 
 /** The Needs you text for a waiting session whose request is older than the window, naming its agent (epic 6). */

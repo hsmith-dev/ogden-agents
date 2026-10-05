@@ -1,5 +1,5 @@
 /**
- * Chat names (backlog story 2): the first user message that isn't a Deny
+ * Chat names (backlog story 12): the first user message that isn't a Deny
  * reason names a chat once, whoever sent it; the user's name is normalized,
  * capped, and cleared by a blank one; each change is one `session.renamed`;
  * a rename never moves a chat; older chats are named from their first

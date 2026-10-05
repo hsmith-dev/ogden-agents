@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /**
- * Chat names (backlog story 2): every chat has a name. The user's own name
+ * Chat names (backlog story 12): every chat has a name. The user's own name
  * (`Session.title`) wins; else the automatic one core set once (`autoTitle`:
  * the planning action's label, or the first message); else "New chat".
  * Names are plain text: these rules run on the server for every name it

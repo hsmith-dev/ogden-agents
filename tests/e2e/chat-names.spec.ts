@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 /**
- * Chat names in a real browser (backlog story 2), with the fake agent: the
+ * Chat names in a real browser (backlog story 12), with the fake agent: the
  * first message names a chat; Rename in the header, F2 or a double click in
  * the sidebar, and Rename in the chat list's row menu rename it in place;
  * Enter saves, Esc cancels, an empty name puts the automatic one back; a

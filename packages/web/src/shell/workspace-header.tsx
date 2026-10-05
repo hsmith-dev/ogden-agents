@@ -20,7 +20,7 @@ export function WorkspaceHeader({
   title: string;
   /** The title for screen readers only (while a field stands in for it: a chat's rename). */
   titleHidden?: boolean;
-  /** Right after the title (a chat's Rename, backlog story 2). */
+  /** Right after the title (a chat's Rename, backlog story 12). */
   titleAction?: ReactNode;
   wsId?: string;
   tab?: WorkspaceTabId;

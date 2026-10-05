@@ -111,7 +111,7 @@ test('a 0.2.0 data folder: everything kept, every project Simple, no Welcome que
       await openSettings(page, origin, bmad);
       await expect(page.getByTestId('bmad-offer-slot')).toHaveText(BMAD_REPO_HAS_BMAD_TEXT);
 
-      // Starting appended its `server.started` and named each older chat from its first message (backlog story 2);
+      // Starting appended its `server.started` and named each older chat from its first message (backlog story 12);
       // browsing appended nothing but the Not now.
       expect(server.core.events.readAfter(lastSeq).map((event) => event.type)).toEqual(['session.renamed', 'session.renamed', 'server.started', 'workspace.bmad_offer_dismissed']);
 

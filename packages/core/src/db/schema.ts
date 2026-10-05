@@ -88,7 +88,7 @@ export const sessions = sqliteTable(
      * original agent, which the server wiring names (core names none, AD-1).
      */
     agentId: text('agent_id').$type<AgentId>(),
-    /** The user's name for the chat (backlog story 2); `NULL` until they give one. */
+    /** The user's name for the chat (backlog story 12); `NULL` until they give one. */
     title: text('title'),
     /** The name core gave the chat (the planning action's label, or its first message), set once; `NULL` until then. */
     autoTitle: text('auto_title'),

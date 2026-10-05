@@ -93,7 +93,7 @@ export const Session = z.object({
    * agent, which the server fills in every session it answers.
    */
   agentId: AgentId.optional(),
-  /** The user's name for the chat (backlog story 2); `null` until they give one. */
+  /** The user's name for the chat (backlog story 12); `null` until they give one. */
   title: z.string().nullable(),
   /**
    * The name core gave the chat (the planning action's label, or its first

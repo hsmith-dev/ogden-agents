@@ -10,7 +10,7 @@ import { RENAME_LABEL, useChatRename } from './chat-name';
 
 /**
  * One chat in the project's Chats list (story 2.5): its state, its name and
- * what `meta` adds, opening the chat. Renamed in place (backlog story 2)
+ * what `meta` adds, opening the chat. Renamed in place (backlog story 12)
  * with Rename in the row's menu or F2 on the row (a click opens the chat, so
  * a double click can't rename here; it does in the sidebar, which stays).
  */

@@ -105,7 +105,7 @@ export const API_ROUTES = {
    */
   sessionPermissionMode: `${API_BASE}/workspaces/:wsId/sessions/:sesId/permission-mode`,
   /**
-   * `PUT RenameSessionRequest` → `SessionResponse` (backlog story 2): the
+   * `PUT RenameSessionRequest` → `SessionResponse` (backlog story 12): the
    * user's name for the chat, normalized (control characters removed, white
    * space collapsed); blank or `null` clears it. A change appends
    * `session.renamed` (the same name again: 200, nothing appended). A name

@@ -179,7 +179,7 @@ export interface Entities {
    */
   resetPermissionModes(): Session[];
   /**
-   * Sets the user's name for the chat (backlog story 2), normalized:
+   * Sets the user's name for the chat (backlog story 12), normalized:
    * control characters removed, white space collapsed; blank or `null`
    * clears it. Appends `session.renamed` (cause `user`) if it changed, and
    * leaves `updatedAt` alone. {@link ValidationError} (nothing stored) for a

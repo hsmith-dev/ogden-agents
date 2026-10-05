@@ -1,7 +1,7 @@
 ---
 title: 'Agent replies in chat render as Markdown'
 type: 'feature'
-ticket: '2'
+ticket: '14'
 created: '2026-10-04'
 status: 'built'
 baseline_revision: 'e5f633143cc06406aa9df32ccf3d13302d0b3cb6'

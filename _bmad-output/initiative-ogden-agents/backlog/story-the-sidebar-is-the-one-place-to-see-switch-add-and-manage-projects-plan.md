@@ -1,7 +1,7 @@
 ---
 title: 'The sidebar is the one place to see, switch, add and manage projects'
 type: 'feature'
-ticket: '2'
+ticket: '13'
 created: '2026-10-04'
 status: 'built'
 baseline_revision: '485ac934afda671f1561fdaaf947ef1ae102b694'

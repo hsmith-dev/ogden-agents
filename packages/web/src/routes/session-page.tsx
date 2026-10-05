@@ -213,7 +213,7 @@ export function SessionPage() {
     setActionError,
   });
 
-  // The chat's name (backlog story 2): the view follows `session.renamed`; Rename beside it in the header.
+  // The chat's name (backlog story 12): the view follows `session.renamed`; Rename beside it in the header.
   const { name: shownName, title: userTitle } = useChatName(events, session.data?.session);
   const chatTitle = shownName === '' ? 'Chat' : shownName;
   const rename = useChatRename({ wsId, sesId, name: chatTitle, title: userTitle, className: 'max-w-80' });

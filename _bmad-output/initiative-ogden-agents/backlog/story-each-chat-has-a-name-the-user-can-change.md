@@ -1,5 +1,5 @@
 ---
-id: 2
+id: 12
 type: story
 title: "Each chat has a name the user can change"
 parent: none

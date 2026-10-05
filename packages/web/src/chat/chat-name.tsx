@@ -9,7 +9,7 @@ import { Input } from '@/ui/input';
 import { cn } from '@/ui/utils';
 
 /**
- * Chat names (backlog story 2): every chat shows its name (the user's, else
+ * Chat names (backlog story 12): every chat shows its name (the user's, else
  * the automatic one, else "New chat"), and the user renames it inline from
  * the chat's header, the sidebar and the chat list. Enter or leaving the
  * field saves, Esc cancels; a blank name puts the automatic one back. The

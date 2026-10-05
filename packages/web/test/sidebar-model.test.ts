@@ -44,7 +44,7 @@ describe('buildSidebar (EXPERIENCE.md Status sidebar)', () => {
     expect(model.groups.map((g) => g.name)).toEqual(['Clay-and-kiln', 'Letterpress']);
     expect(rows(model, 'ws_a')).toEqual(['ses_a:working']);
     expect(rows(model, 'ws_b')).toEqual(['ses_b:waiting']);
-    // A chat with no name and no message yet (backlog story 2).
+    // A chat with no name and no message yet (backlog story 12).
     expect(model.groups[1]!.rows[0]!.title).toBe('New chat');
     expect(model.needsYou).toEqual([
       { id: 'req_1', kind: 'permission', chatName: 'New chat', wsId: 'ws_b', sesId: 'ses_b', workspaceName: 'Letterpress', text: 'Claude Code wants to run npm test', agentName: 'Claude Code', at: expect.any(String), request: 'run npm test' },
@@ -74,7 +74,7 @@ describe('buildSidebar (EXPERIENCE.md Status sidebar)', () => {
     ]);
   });
 
-  it('a chat shows the user’s name, else its automatic name, and Needs you names it (backlog story 2)', () => {
+  it('a chat shows the user’s name, else its automatic name, and Needs you names it (backlog story 12)', () => {
     const named = { ...session('ses_b', 'ws_b', 'waiting', ago(3 * MINUTE)), autoTitle: 'Fix the login bug' } as Session;
     const model = buildSidebar([B], [named], emptyStore(), NOW, CLAUDE);
     expect(model.groups[0]!.rows[0]).toMatchObject({ title: 'Fix the login bug', userTitle: null });

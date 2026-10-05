@@ -1,7 +1,7 @@
 ---
 title: 'Each chat has a name the user can change'
 type: 'feature'
-ticket: '2'
+ticket: '12'
 created: '2026-10-04'
 status: 'built'
 baseline_revision: '56883363a54bcfb42b8ae698522dd02e34af5ef2'

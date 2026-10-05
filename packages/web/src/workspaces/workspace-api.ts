@@ -104,7 +104,7 @@ export function useSessions(wsId: string) {
       if (event.workspaceId !== wsId) continue;
       if (event.type === 'session.state_changed') states.set(event.payload.sessionId, event.payload.state);
     }
-    // Names follow `session.renamed` (backlog story 2), so a rename in any tab shows without a refetch.
+    // Names follow `session.renamed` (backlog story 12), so a rename in any tab shows without a refetch.
     return withNames(query.data, events)
       .map((session) => ({ ...session, state: states.get(session.id) ?? session.state }))
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : a.id < b.id ? 1 : -1));

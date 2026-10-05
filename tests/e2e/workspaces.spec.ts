@@ -127,7 +127,7 @@ test('the sidebar moves between projects, and Delete history is refused while a 
     await expect(page.getByTestId('workspace-name')).toHaveText('beta-repo');
     const beta = WORKSPACE_URL.exec(page.url())![1]!;
 
-    // Switch (backlog story 2: no drop-down, the sidebar is the one place): the current project is
+    // Switch (backlog story 13: no drop-down, the sidebar is the one place): the current project is
     // marked; the other's name opens its Chats list, though it has no chats yet.
     const sidebar = sidebarOf(page);
     await expect(page.getByTestId('workspace-switcher')).toHaveCount(0);

@@ -8,7 +8,7 @@ export interface NeedsYouItem {
   wsId: string;
   sesId: string;
   workspaceName: string;
-  /** The chat it waits in, by its name (backlog story 2). */
+  /** The chat it waits in, by its name (backlog story 12). */
   chatName?: string;
   text: string;
 }

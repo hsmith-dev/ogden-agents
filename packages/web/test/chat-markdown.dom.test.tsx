@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * Agent replies in the chat render as Markdown (backlog story 2), in a DOM:
+ * Agent replies in the chat render as Markdown (backlog story 14), in a DOM:
  * the shared renderer's `chat` variant shows headings, lists, task lists,
  * tables, code with its language and Copy, quotes and rules as elements;
  * raw HTML stays text; only http, https and mailto links are followable,

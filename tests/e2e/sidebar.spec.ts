@@ -50,7 +50,7 @@ test('two busy projects: both groups show their states, Needs you names the requ
     await expect(groupOf(tab, working).getByTestId('status-row')).toHaveAccessibleName('hold, Claude Code, working');
     await expect(groupOf(tab, asking).getByTestId('status-row')).toHaveAttribute('data-session-state', 'waiting');
     const needsYou = sidebarOf(tab).getByTestId('needs-you');
-    // The chat is named after its first message (backlog story 2).
+    // The chat is named after its first message (backlog story 12).
     await expect(needsYou.getByTestId('needs-you-item')).toHaveText(`Waiting for you${basename(asking)}, permission: Claude Code wants to run npm test`);
     await expect(tab).toHaveTitle('(1) Ogden Agents');
     await expect(needsYou.getByTestId('needs-you-item')).toHaveAttribute('href', /\/w\/ws_[0-9A-Z]{26}\/s\/ses_[0-9A-Z]{26}$/);
@@ -103,7 +103,7 @@ test('a request in another project is announced once, and the rail shows it as a
     await expect(rail).toBeVisible();
     await expect(rail).toHaveAccessibleName('Needs you, 1');
     await expect(groupOf(page, asking).getByRole('link', { name: 'hello, Claude Code, waiting for you' })).toBeVisible();
-    // Each project is a folder icon in the rail, named and opening it (backlog story 2: the drop-down never showed in the rail).
+    // Each project is a folder icon in the rail, named and opening it (backlog story 13: the drop-down never showed in the rail).
     const railProject = groupOf(page, other).getByRole('link', { name: basename(other), exact: true });
     await expect(railProject).toBeVisible();
     expect((await railProject.boundingBox())!.width).toBeLessThanOrEqual(56);
@@ -134,7 +134,7 @@ test('below md, a row in the sheet opens its session and closes the sheet', asyn
     await expect(sheet).toBeHidden();
     expect(await sameDocument()).toBe(true);
 
-    // Backlog story 2: the drawer is the way to projects below md. A clear menu button opens it from
+    // Backlog story 13: the drawer is the way to projects below md. A clear menu button opens it from
     // the keyboard; focus goes into it; Escape closes it and gives focus back to the button.
     const trigger = page.getByRole('button', { name: 'Open projects and sessions' });
     await expect(trigger).toHaveAttribute('aria-haspopup', 'dialog');

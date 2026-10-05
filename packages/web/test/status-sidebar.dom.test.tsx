@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * The sidebar is the one place for projects (backlog story 2): no drop-down
+ * The sidebar is the one place for projects (backlog story 13): no drop-down
  * in its header; each project's name opens it and is marked when the user is
  * inside it; a chevron collapses it without opening it; a gear opens its
  * settings; Add project stays; from eight projects a labelled filter narrows
@@ -102,7 +102,7 @@ describe('project filter (pure)', () => {
   });
 });
 
-describe('the sidebar is the one place for projects (backlog story 2)', () => {
+describe('the sidebar is the one place for projects (backlog story 13)', () => {
   it('has no project drop-down: the header shows the wordmark only', () => {
     mount([group(0, 'clay-and-kiln'), group(1, 'Letterpress')]);
     expect(screen.queryByTestId('workspace-switcher')).toBeNull();

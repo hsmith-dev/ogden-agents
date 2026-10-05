@@ -103,7 +103,7 @@ describe('workspace groups and status rows (DESIGN.md Workspace group and Status
     expect(html).toMatch(/class="[^"]*\bhidden md:max-lg:flex\b/);
   });
 
-  it('the name opens the project, the gear its settings; neither is the disclosure (backlog story 2)', async () => {
+  it('the name opens the project, the gear its settings; neither is the disclosure (backlog story 13)', async () => {
     const html = await group(false);
     const name = /<a[^>]*data-slot="sidebar-workspace-link"[^>]*>([\s\S]*?)<\/a>/.exec(html)!;
     expect(name[0]).toContain('href="/w/ws_b"');

@@ -173,7 +173,7 @@ export interface Chat {
   /** The session, which must belong to the workspace (`NotFoundError` otherwise). */
   getSession(workspaceId: WorkspaceId, sessionId: SessionId): Session;
   /**
-   * Sets the user's name for the chat (backlog story 2), in any state and
+   * Sets the user's name for the chat (backlog story 12), in any state and
    * whoever drives; blank or `null` clears it. Appends `session.renamed`
    * when it changed. Never told to the agent. `ValidationError` for a name
    * too long (nothing stored), `NotFoundError` for an unknown session.

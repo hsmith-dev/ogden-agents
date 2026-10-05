@@ -59,7 +59,7 @@ import type { TerminalAvailabilityCheck } from './terminal-availability.js';
 
 /** Largest request body these routes read (a message is at most 100,000 characters). */
 const MAX_BODY_BYTES = 1024 * 1024;
-/** A rename's body bound (backlog story 2). */
+/** A rename's body bound (backlog story 12). */
 const MAX_RENAME_BODY_BYTES = 16 * 1024;
 
 const NOT_FOUND = 'There is no such project or chat.';
@@ -187,7 +187,7 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     }
   });
 
-  // The chat's name (backlog story 2): core normalizes it and refuses one too long; never sent to the agent.
+  // The chat's name (backlog story 12): core normalizes it and refuses one too long; never sent to the agent.
   app.put(API_ROUTES.sessionTitle, renameLimit, async (c) => {
     const scope = ids(c);
     if (scope?.sessionId === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);

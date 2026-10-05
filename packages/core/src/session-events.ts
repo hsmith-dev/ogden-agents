@@ -52,7 +52,7 @@ export interface SessionEvents {
     payload: NewEventOf<'session.message_completed'>['payload'],
   ): SessionMessageCompletedEvent;
   /**
-   * Gives the chat its automatic name from `text` (backlog story 2), only
+   * Gives the chat its automatic name from `text` (backlog story 12), only
    * when it has none yet, appending `session.renamed` (cause `auto`).
    * Whether it named the chat. {@link completeMessage} calls it for every
    * user message that isn't a Deny reason, so the first one names the chat

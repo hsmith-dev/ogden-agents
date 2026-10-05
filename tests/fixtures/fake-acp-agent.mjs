@@ -484,7 +484,7 @@ acp
       return { stopReason: 'end_turn' };
     }
     if (text === 'markdown') {
-      // A Markdown reply in chunks (backlog story 2): the code fence opens in one chunk and closes in a later one.
+      // A Markdown reply in chunks (backlog story 14): the code fence opens in one chunk and closes in a later one.
       const chunks = [
         '## Summary\n\nSome **bold** text, a [docs link](https://example.com/docs) and a [bad link](javascript:alert(1)).\n\n',
         '- [x] tests\n- [ ] docs\n\n```ts\nconst answer = 42;\n',

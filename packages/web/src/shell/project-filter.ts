@@ -1,5 +1,5 @@
 /**
- * The sidebar's project filter (backlog story 2): with many projects, a
+ * The sidebar's project filter (backlog story 13): with many projects, a
  * field above the list narrows it by name. Needs you is never filtered.
  */
 

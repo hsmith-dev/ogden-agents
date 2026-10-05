@@ -37,7 +37,7 @@ import { filterProjects, showsProjectFilter } from './project-filter';
 
 /**
  * The status sidebar (EXPERIENCE.md Information Architecture): the one place
- * to see, open, add and manage projects (backlog story 2). Needs you on top,
+ * to see, open, add and manage projects (backlog story 13). Needs you on top,
  * then each workspace (its name opens it, a gear its settings) with its
  * session rows (story 2.11), a filter when there are many, and Add project,
  * then the footer with Settings, New tab, Quit Ogden Agents and the server status.
@@ -278,7 +278,7 @@ const SessionRow = memo(function SessionRow({
   time,
   active,
 }: Pick<SidebarRow, 'wsId' | 'sesId' | 'state' | 'title' | 'userTitle' | 'updatedAt' | 'agentName'> & { time: string; active: boolean }) {
-  // Rename in place (backlog story 2): double click the row or press F2 on it.
+  // Rename in place (backlog story 12): double click the row or press F2 on it.
   const rename = useChatRename({ wsId, sesId, name: title, title: userTitle });
   const item = useRef<HTMLLIElement>(null);
   const row = () => item.current?.querySelector<HTMLElement>('[data-testid="status-row"]');

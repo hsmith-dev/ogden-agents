@@ -96,7 +96,7 @@ export const SessionRenamedInput = z.object({
     cause: SessionRenameCause,
   }),
 });
-/** A chat's name changed (backlog story 2): the user renamed it, or core named it from its first message. */
+/** A chat's name changed (backlog story 12): the user renamed it, or core named it from its first message. */
 export const SessionRenamedEvent = SessionRenamedInput.extend(assigned);
 export type SessionRenamedEvent = z.infer<typeof SessionRenamedEvent>;
 

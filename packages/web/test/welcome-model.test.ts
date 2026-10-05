@@ -2,6 +2,7 @@ import { BMAD_COMING_SOON_REASON, BMAD_PIECES, type AgentSetupStatus, type BmadP
 import { describe, expect, it } from 'vitest';
 import {
   advancesOnReady,
+  agentSetupWords,
   agentReady,
   asksFirstProjectChoice,
   bmadMethodPieces,
@@ -107,5 +108,13 @@ describe("Welcome's first-project question (story 10.4)", () => {
     expect(firstProjectPieces('bmad_method', all([]))).toEqual([]);
     expect(firstProjectPieces('bmad_method', undefined)).toEqual([]);
     expect(bmadMethodPieces(all(['builds', 'retrospectives']))).toEqual([]);
+  });
+});
+
+describe('agentSetupWords for an API key only agent (Codex)', () => {
+  it('says the key, never a sign in', () => {
+    expect(agentSetupWords(agent({ apiKeyOnly: true, auth: 'needs_sign_in' }))).toBe('Installed, needs an API key');
+    expect(agentSetupWords(agent({ apiKeyOnly: true, auth: 'signed_in' }))).toBe('Installed, using your API key');
+    expect(agentSetupWords(agent({ auth: 'needs_sign_in' }))).toBe('Installed, needs sign-in');
   });
 });

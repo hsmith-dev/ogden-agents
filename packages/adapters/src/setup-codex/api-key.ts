@@ -34,7 +34,10 @@ export interface CodexApiKeyOptions {
   onDiagnostic?: (message: string, fields?: Record<string, unknown>) => void;
 }
 
-/** Codex's {@link AgentApiKeySupport}. */
+/**
+ * Codex's {@link AgentApiKeySupport}. The key comes from `CODEX_API_KEY` in the server's environment (or a saved key);
+ * `OPENAI_API_KEY` is only kept out of every process, never used, so another tool's key is never picked up by surprise.
+ */
 export function createCodexApiKey(options: CodexApiKeyOptions = {}): AgentApiKeySupport {
   const timeoutMs = options.timeoutMs ?? OPENAI_VERIFY_TIMEOUT_MS;
   const diagnostic = (message: string, fields?: Record<string, unknown>) => {

@@ -75,7 +75,7 @@ Built 2026-10-05 on `story/12.6-codex-setup` from `story/12.5-codex-chat`. `star
 
 ## Review Triage Log
 
-Pending.
+Security and correctness reviewers (2 lenses), no critical. Patched: the installed journey's picker count (4 agents now, high, found by reading); Welcome's and the picker's words for an API key only agent (medium, low); the environment key text on the card (medium). Kept as is, by decision: a 403 from OpenAI counts as refused, as Claude Code's check does (low); `OPENAI_API_KEY` in the server's environment is kept out of every process but is not used as Codex's key, so another tool's key is never picked up by surprise (commented in `api-key.ts`); the test API key hook is read from the process environment like Antigravity's. Deferred: the keychain unavailable message still ends "Sign in with your account instead" for Codex (shared message in core's `errors.ts`; logged below). No intent_gap or bad_plan.
 
 ## Verification
 

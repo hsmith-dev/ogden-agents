@@ -47,6 +47,8 @@ export const asksAgentChoice = (agents: readonly AgentSetupStatus[] | undefined)
 export function agentSetupWords(agent: AgentSetupStatus): string {
   if (agent.install === 'installing') return `Installing ${agent.displayName}`;
   if (agent.install !== 'installed') return 'Not installed';
+  // An agent with only an API key has no sign in (Codex; user decision, 2026-10-05).
+  if (agent.apiKeyOnly === true) return agent.auth === 'signed_in' ? 'Installed, using your API key' : 'Installed, needs an API key';
   return agent.auth === 'signed_in' ? 'Installed, signed in' : agent.auth === 'signing_in' ? 'Signing in' : 'Installed, needs sign-in';
 }
 

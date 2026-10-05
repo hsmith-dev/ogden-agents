@@ -312,7 +312,9 @@ function ApiKeySection({ agent, saved, actions }: { agent: AgentSetupStatus; sav
   const fromEnvironment =
     saved.fromEnvironment === true ? (
       <Text variant="caption" data-testid="agent-api-key-environment">
-        An API key from the environment Ogden Agents started in is used when you're signed out. A key you save here comes first.
+        {agent.apiKeyOnly === true
+          ? `An API key from the environment Ogden Agents started in is used by ${agent.displayName}. A key you save here comes first.`
+          : "An API key from the environment Ogden Agents started in is used when you're signed out. A key you save here comes first."}
       </Text>
     ) : null;
 

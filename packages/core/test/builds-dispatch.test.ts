@@ -234,7 +234,7 @@ describe('the time limit, Stop and Retry (story 5.8)', () => {
     const stopped = await h.builds.stop(h.wsId, first.run.id);
     const second = await h.builds.start(h.wsId, { ref: '1.2' });
     expect(second.run.queuePosition).toBeNull();
-    expect(((await refusal(h.builds.retry(h.wsId, stopped.id, { mode: 'apply_fix' }))) as Error).name).toBe('NotImplementedError');
+    expect(((await refusal(h.builds.retry(h.wsId, stopped.id, { mode: 'apply_fix' }))) as Error).name).toBe('BuildRefusedError');
     const retried = await h.builds.retry(h.wsId, stopped.id, {});
     expect(retried).toMatchObject({ outcome: 'running', queuePosition: 1, worktreePath: stopped.worktreePath });
     expect(h.tickets.calls.filter((call) => call[0] === 'mark')).toEqual([]);

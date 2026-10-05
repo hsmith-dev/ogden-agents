@@ -37,6 +37,9 @@ describe('the Tauri config', () => {
     expect(config.bundle.windows.nsis.installMode).toBe('currentUser');
     // The updater key is the user's (AD-23): the committed config builds no updater artifacts; CI test builds and releases switch them on.
     expect(config.bundle.createUpdaterArtifacts).toBe(false);
+    // Plain http for the updater is for CI test builds only (their override file), never the committed config or a release.
+    expect(JSON.stringify(config)).not.toContain('dangerousInsecureTransportProtocol');
+    expect(config.plugins.updater.windows.installMode).toBe('passive');
     expect(config.bundle.externalBin).toEqual(['binaries/ogden-node']);
     expect(config.bundle.linux.deb.depends).toContain('libwebkit2gtk-4.1-0');
   });

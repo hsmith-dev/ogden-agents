@@ -37,7 +37,7 @@ const render = (path: string, pieces: readonly BmadPiece[] | undefined, availabl
 const tabLabels = (html: string) => [...html.matchAll(/data-testid="workspace-tab-([a-z]+)"/g)].map((match) => match[1]);
 
 describe('workspace tabs (E10-R6, story 10.6)', () => {
-  it('has the slots Chats, Plan, Board, Runs in order; Chats, Plan and Board have pages (story 4.1)', () => {
+  it('has the slots Chats, Plan, Board, Runs in order; every slot has a page (stories 4.1 and 11.1)', () => {
     expect(WORKSPACE_TAB_SLOTS.map((slot) => [slot.id, slot.piece])).toEqual([
       ['chats', undefined],
       ['plan', 'planning'],
@@ -50,6 +50,7 @@ describe('workspace tabs (E10-R6, story 10.6)', () => {
       ['chats', '/w/$wsId'],
       ['plan', '/w/$wsId/plan'],
       ['board', '/w/$wsId/board'],
+      ['runs', '/w/$wsId/runs'],
     ]);
   });
 

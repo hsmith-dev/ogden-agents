@@ -78,6 +78,12 @@ export function AboutPage() {
                   </div>
                 </Field>
               ) : null}
+              {data.shell === 'desktop' && data.app !== null && data.app.update.notes !== '' ? (
+                <div data-testid="about-update-notes">
+                  <Text variant="label" tone="muted">What is new in {data.app.update.version}</Text>
+                  <Text as="p" variant="label" className="whitespace-pre-wrap">{data.app.update.notes}</Text>
+                </div>
+              ) : null}
               {data.shell === 'desktop' || data.available === null ? null : (
                 <Notice data-testid="about-available">
                   {availableSentence(data.available)} <UpdateHowTo notice={data} available={data.available} />

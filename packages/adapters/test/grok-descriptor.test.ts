@@ -12,11 +12,14 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { brotliCompressSync } from 'node:zlib';
 import { agentDescriptorProblems, agentEnvKeys, AgentError, AgentSetupError, AGENT_PLATFORMS, createAgentRegistry, declaredModes, protectedPathsWith } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   decompressBinary,
+  grokAcceptsToken,
+  NO_TOKEN_METHOD,
   GROK_BINARY_SHA256,
   GROK_DESCRIPTOR,
   GROK_MODE_IDS,
@@ -84,12 +87,12 @@ describe("Grok's descriptor (epic 12 entry 4)", () => {
     expect(GROK_DESCRIPTOR.install).toMatchObject({ binarySha256: GROK_BINARY_SHA256 });
   });
 
-  it('is not registered by a shipped install yet, and its stub is not set up', async () => {
-    expect(GROK_SHIPPED).toBe(false);
+  it('is registered by a shipped install, and is not set up until it is installed', async () => {
+    expect(GROK_SHIPPED).toBe(true);
     expect(installedGrok('/nowhere')).toBeUndefined();
     const agent = createGrokAgent({ dataDir: '/nowhere' });
     await expect(agent.startSession({ cwd: process.cwd(), env: {}, permissionMode: 'ask' } as never)).rejects.toBeInstanceOf(AgentError);
-    expect(createGrokSetup().agentId).toBe('grok');
+    expect(createGrokSetup({ dataDir: '/nowhere' }).agentId).toBe('grok');
   });
 });
 
@@ -132,6 +135,7 @@ describe("Grok's checked binary install (epic 12 entry 4)", () => {
       npmCli: FAKE_GROK,
       onProgress: () => {},
       binarySha256: { [PLATFORM]: sha256(binary) },
+      tokenProbe: async () => true,
     });
     expect(installed.version).toBe('1.0.49');
     expect(installed.path).toContain(join('agents', 'grok', 'grok-1.0.49', 'bin-checked'));
@@ -152,6 +156,7 @@ describe("Grok's checked binary install (epic 12 entry 4)", () => {
       npmCli: FAKE_GROK,
       onProgress: () => {},
       binarySha256: { [PLATFORM]: sha256('the real one') },
+      tokenProbe: async () => true,
     });
     await expect(result).rejects.toBeInstanceOf(AgentSetupError);
     await expect(result).rejects.toMatchObject({ message: "The download didn't match the expected files, so nothing was installed. Try again." });
@@ -160,10 +165,39 @@ describe("Grok's checked binary install (epic 12 entry 4)", () => {
     expect(leftover).toEqual([]);
   });
 
+  it('refuses a version that no longer takes an xAI API access token, and leaves nothing installed', async () => {
+    const dataDir = tempDir('ogden-agents-grokdir-');
+    const binary = 'x';
+    const probed: string[] = [];
+    const result = installGrok({
+      dataDir,
+      pins: FIXTURE_PINS,
+      runNpm: fakeNpm(binary),
+      npmCli: FAKE_GROK,
+      onProgress: () => {},
+      binarySha256: { [PLATFORM]: sha256(binary) },
+      tokenProbe: async (path) => (probed.push(path), false),
+    });
+    await expect(result).rejects.toMatchObject({ message: NO_TOKEN_METHOD });
+    expect(probed).toHaveLength(1);
+    expect(installedGrok(dataDir, FIXTURE_PINS)).toBeUndefined();
+  });
+
+  it.skipIf(process.platform === 'win32')('the real probe asks a binary for initialize then authenticate xai.api_key, with a dummy token and an empty home', async () => {
+    const dir = tempDir('ogden-agents-grokprobe-');
+    const binary = join(dir, 'grok');
+    writeFileSync(binary, `#!${process.execPath}\nawait import(${JSON.stringify(pathToFileURL(FAKE_GROK).href)});\n`, { mode: 0o755 });
+    expect(await grokAcceptsToken(binary)).toBe(true);
+    // A binary that exits at once, or is not there, is a no.
+    writeFileSync(join(dir, 'bad'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    expect(await grokAcceptsToken(join(dir, 'bad'), 5_000)).toBe(false);
+    expect(await grokAcceptsToken(join(dir, 'missing'), 5_000)).toBe(false);
+  });
+
   it('refuses a computer with no pinned binary', async () => {
     const dataDir = tempDir('ogden-agents-grokdir-');
     await expect(
-      installGrok({ dataDir, pins: FIXTURE_PINS, runNpm: fakeNpm('x'), npmCli: FAKE_GROK, onProgress: () => {}, binarySha256: {} }),
+      installGrok({ dataDir, pins: FIXTURE_PINS, runNpm: fakeNpm('x'), npmCli: FAKE_GROK, onProgress: () => {}, binarySha256: {}, tokenProbe: async () => true }),
     ).rejects.toMatchObject({ message: expect.stringContaining('has no build for this computer') });
   });
 

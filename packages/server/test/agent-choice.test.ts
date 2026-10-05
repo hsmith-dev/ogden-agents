@@ -115,14 +115,16 @@ describe('the Codex slot (epic 12 entries 4 and 6)', () => {
   });
 });
 
-describe('the Grok slot (epic 12 entry 4)', () => {
-  it('is not registered by default, and a test registers it as its own agent after Claude Code and Codex', async () => {
+describe('the Grok slot (epic 12 entries 4 and 8)', () => {
+  it('is left out by `grok: false`, registered once shipped, and a test registers it as its own agent after Claude Code and Codex', async () => {
     const bare = await startTestServer();
     const listed = async (server: TestServer, signed: SignedIn) =>
       ChatAgentsResponse.parse(await (await request(server, signed, 'GET', API_ROUTES.chatAgents)).json()).agents.map((agent) => agent.agentId);
     expect(await listed(bare, await signIn(bare))).toEqual(['claude-code']);
     const withGrok = await startTestServer({ codex: {}, grok: {} });
     expect(await listed(withGrok, await signIn(withGrok))).toEqual(['claude-code', 'codex', 'grok']);
+    const shipped = await startTestServer({ grok: undefined });
+    expect(await listed(shipped, await signIn(shipped))).toEqual(['claude-code', 'grok']);
     const grokOnly = await startTestServer({ grok: {} });
     const tab = await signIn(grokOnly);
     const grok = ChatAgentsResponse.parse(await (await request(grokOnly, tab, 'GET', API_ROUTES.chatAgents)).json()).agents.find((agent) => agent.agentId === 'grok');

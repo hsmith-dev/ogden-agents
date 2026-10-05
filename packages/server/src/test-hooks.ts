@@ -65,6 +65,9 @@
  *   through the fake agent's Grok personality (the real Grok is never run in a
  *   test). It also registers Grok in a shipped-style server, which otherwise leaves it out.
  *
+ * - {@link GROK_INSTALL_ENV}: Grok's Install takes its pins, npm and binary hashes from a
+ *   local fixture lock (and never runs the unpacked fixture binary), so a suite can install Grok.
+ *
  * - {@link CODEX_INSTALL_ENV}: Codex's Install takes its pins (and npm) from a
  *   JSON file inside the temp folder, as {@link CLAUDE_INSTALL_ENV} does for
  *   Claude Code, so a suite can install Codex from a local fixture lock.
@@ -123,6 +126,8 @@ export const ANTIGRAVITY_SERVER_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_SERVER';
 export const ANTIGRAVITY_INSTALL_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_INSTALL';
 /** Path to a JSON file `{ "pins": { "packageJson", "lock" }, "npmCli"?: "<abs>/npm-cli.js" }` for Codex's install, local `file:` fixtures only (tests only; epic 12 entry 6). */
 export const CODEX_INSTALL_ENV = 'OGDEN_AGENTS_TEST_CODEX_INSTALL';
+/** Path to a JSON file `{ "pins": { "packageJson", "lock" }, "npmCli"?, "binarySha256"?: { "<platform>": "<hex>" } }` for Grok's install, local `file:` fixtures only; its binary is never run (tests only; epic 12 entry 8). */
+export const GROK_INSTALL_ENV = 'OGDEN_AGENTS_TEST_GROK_INSTALL';
 /** Absolute path to a Node script inside the temp folder, run under Node in place of Grok's checked binary (tests only; epic 12 entry 7). */
 export const GROK_SERVER_ENV = 'OGDEN_AGENTS_TEST_GROK_SERVER';
 /** Absolute path to a Node script inside the temp folder, run under Node as Codex's `codex-acp` adapter (tests only; epic 12 entry 5). */
@@ -201,6 +206,8 @@ export function testHooksAllowed(env: Env, dataDir: string, tmp: string = tmpdir
 export interface TestClaudeInstall {
   pins: AdapterPins;
   npmCli?: string;
+  /** Grok's fixture binary hashes by platform (its install checks the binary against them); only Grok's hook reads it. */
+  binarySha256?: Record<string, string>;
 }
 
 const INTEGRITY = /^sha512-[A-Za-z0-9+/]+=*$/;
@@ -241,7 +248,7 @@ function testNpmInstall(name: string, env: Env, dataDir: string, tmp: string): T
   } catch {
     fail('unreadable (bad JSON)');
   }
-  const { pins, npmCli } = (parsed ?? {}) as { pins?: Partial<AdapterPins>; npmCli?: unknown };
+  const { pins, npmCli, binarySha256 } = (parsed ?? {}) as { pins?: Partial<AdapterPins>; npmCli?: unknown; binarySha256?: unknown };
   const lock = pins?.lock;
   if (pins?.packageJson === undefined || lock === undefined || lock.lockfileVersion !== 3 || typeof lock.packages !== 'object' || lock.packages === null) {
     fail('needs pins with a package.json and a v3 lockfile');
@@ -252,7 +259,10 @@ function testNpmInstall(name: string, env: Env, dataDir: string, tmp: string): T
   if (entries.some(([, entry]) => typeof entry.resolved !== 'string' || !entry.resolved.startsWith('file:'))) return undefined;
   for (const [path, entry] of entries) if (typeof entry.integrity !== 'string' || !INTEGRITY.test(entry.integrity)) fail(`${path} has no sha512 integrity`);
   if (npmCli !== undefined && (typeof npmCli !== 'string' || !isAbsolute(npmCli) || basename(npmCli) !== 'npm-cli.js')) fail('npmCli must be an absolute path to npm-cli.js');
-  return { pins: pins as AdapterPins, ...(npmCli === undefined ? {} : { npmCli: npmCli as string }) };
+  if (binarySha256 !== undefined && (typeof binarySha256 !== 'object' || binarySha256 === null || Object.values(binarySha256).some((hash) => typeof hash !== 'string' || !/^[0-9a-f]{64}$/.test(hash)))) {
+    fail('binarySha256 must map platforms to 64 lower-case hex digits');
+  }
+  return { pins: pins as AdapterPins, ...(npmCli === undefined ? {} : { npmCli: npmCli as string }), ...(binarySha256 === undefined ? {} : { binarySha256: binarySha256 as Record<string, string> }) };
 }
 
 /** The API key check from {@link API_KEY_CHECK_ENV}: one that accepts every key, or `undefined` (the real check). */
@@ -344,6 +354,11 @@ export function testAntigravityInstall(env: Env, dataDir: string, tmp: string = 
 /** The Node script {@link CODEX_SERVER_ENV} names (see {@link testClaudeCli}), or `undefined` (Codex's pinned adapter); throws when allowed but unusable. */
 export function testCodexServer(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
   return testNodeScript(CODEX_SERVER_ENV, env, dataDir, tmp);
+}
+
+/** Grok's test install source from {@link GROK_INSTALL_ENV}, checked as {@link testClaudeInstall}'s is (epic 12 entry 8). */
+export function testGrokInstall(env: Env, dataDir: string, tmp: string = tmpdir()): TestClaudeInstall | undefined {
+  return testNpmInstall(GROK_INSTALL_ENV, env, dataDir, tmp);
 }
 
 /** The Node script {@link GROK_SERVER_ENV} names (see {@link testClaudeCli}), or `undefined` (Grok's checked binary); throws when allowed but unusable. */
@@ -484,6 +499,7 @@ export interface TestHooks {
   codexServer: string | undefined;
   codexInstall: TestClaudeInstall | undefined;
   grokServer: string | undefined;
+  grokInstall: TestClaudeInstall | undefined;
   trustAgent: string | undefined;
   bmadProbe: boolean;
   bmadAvailable: BmadPieceName[];
@@ -515,6 +531,7 @@ export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOpt
     codexInstall: options.codex === undefined ? testCodexInstall(env, dataDir, tmp) : undefined,
     // Grok's ports given (or left out) by a test decide it: the hook is not read.
     grokServer: options.grok === undefined ? testGrokServer(env, dataDir, tmp) : undefined,
+    grokInstall: options.grok === undefined ? testGrokInstall(env, dataDir, tmp) : undefined,
     // Agents a test registers decide it: the hook is not read.
     trustAgent: options.extraAgents === undefined ? testTrustAgent(env, dataDir, tmp) : undefined,
     bmadProbe: testBmadProbe(env, dataDir, tmp),
@@ -541,6 +558,7 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     hooks.codexServer !== undefined ||
     hooks.codexInstall !== undefined ||
     hooks.grokServer !== undefined ||
+    hooks.grokInstall !== undefined ||
     hooks.trustAgent !== undefined ||
     hooks.bmadProbe ||
     hooks.bmadAvailable.length > 0 ||
@@ -557,6 +575,7 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     codexServer: hooks.codexServer !== undefined,
     codexInstall: hooks.codexInstall !== undefined,
     grokServer: hooks.grokServer !== undefined,
+    grokInstall: hooks.grokInstall !== undefined,
     trustAgent: hooks.trustAgent !== undefined,
     bmadProbe: hooks.bmadProbe,
     bmadAvailable: hooks.bmadAvailable.join(','),

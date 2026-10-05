@@ -169,9 +169,9 @@ function AgentState({ agent, signIn, actions }: { agent: AgentSetupStatus; signI
   // Its notices (on the card) say why.
   if (agent.apiKeyOnly === true) {
     return agent.auth === 'signed_in' ? (
-      <StateGlyph state="done" label="Installed, using your API key" data-testid="agent-state" />
+      <StateGlyph state="done" label={`Installed, using your ${agent.apiKeyName ?? 'API key'}`} data-testid="agent-state" />
     ) : (
-      <StateGlyph state="idle" label="Installed, needs an API key" data-testid="agent-state" />
+      <StateGlyph state="idle" label={`Installed, needs ${agent.apiKeyName === undefined ? 'an API key' : `an ${agent.apiKeyName}`}`} data-testid="agent-state" />
     );
   }
   const note =
@@ -292,7 +292,7 @@ function ApiKeySection({ agent, saved, actions }: { agent: AgentSetupStatus; sav
     return (
       <div className="flex flex-col gap-2" data-testid="agent-api-key">
         <Text variant="body" data-testid="agent-api-key-saved">
-          API key saved …{saved.lastFour}
+          {agent.apiKeyName ?? 'API key'} saved …{saved.lastFour}
           {saved.unchecked === true ? `. Ogden Agents couldn't check it with ${providerName(agent)}.` : null}
         </Text>
         {agent.apiKeyOnly !== true && agent.auth === 'signed_in' && agent.method === 'subscription' ? (
@@ -302,7 +302,7 @@ function ApiKeySection({ agent, saved, actions }: { agent: AgentSetupStatus; sav
         ) : null}
         <div className="flex">
           <Button variant="outline" aria-disabled={actions.busy} onClick={actions.busy ? undefined : actions.remove}>
-            Remove key
+            Remove {agent.apiKeyOnly === true && agent.apiKeyName !== undefined ? 'token' : 'key'}
           </Button>
         </div>
       </div>
@@ -313,7 +313,7 @@ function ApiKeySection({ agent, saved, actions }: { agent: AgentSetupStatus; sav
     saved.fromEnvironment === true ? (
       <Text variant="caption" data-testid="agent-api-key-environment">
         {agent.apiKeyOnly === true
-          ? `An API key from the environment Ogden Agents started in is used by ${agent.displayName}. A key you save here comes first.`
+          ? `${agent.apiKeyName === undefined ? 'An API key' : `An ${agent.apiKeyName}`} from the environment Ogden Agents started in is used by ${agent.displayName}. One you save here comes first.`
           : "An API key from the environment Ogden Agents started in is used when you're signed out. A key you save here comes first."}
       </Text>
     ) : null;
@@ -325,7 +325,7 @@ function ApiKeySection({ agent, saved, actions }: { agent: AgentSetupStatus; sav
         <div className="flex">
           <Button variant="ghost" onClick={() => setOpen(true)}>
             <Key aria-hidden />
-            {agent.apiKeyOnly === true ? 'Add an API key' : 'Use an API key instead'}
+            {agent.apiKeyOnly === true ? `Add ${agent.apiKeyName === undefined ? 'an API key' : `an ${agent.apiKeyName}`}` : 'Use an API key instead'}
           </Button>
         </div>
       </div>
@@ -351,7 +351,7 @@ function ApiKeySection({ agent, saved, actions }: { agent: AgentSetupStatus; sav
   return (
     <div className="flex flex-col gap-1" data-testid="agent-api-key">
       {fromEnvironment}
-      <Label htmlFor={fieldId}>API key</Label>
+      <Label htmlFor={fieldId}>{agent.apiKeyName ?? 'API key'}</Label>
       <Text variant="caption" id={`${fieldId}-description`}>
         Kept in this computer's keychain. Ogden Agents checks it with {providerName(agent)} first.
       </Text>

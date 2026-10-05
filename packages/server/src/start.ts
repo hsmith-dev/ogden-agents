@@ -114,14 +114,14 @@ interface DescriptorsRef {
 
 /** Whether `agentId` is one this server registers (epic 6, entry 6): Claude Code, Antigravity unless left out (entry 5), then any extra agent a test wires. */
 const registeredAgent =
-  (options: Pick<StartOptions, 'extraAgents' | 'antigravity' | 'codex' | 'grok'>, hooks: Pick<TestHooks, 'codexServer' | 'codexInstall' | 'grokServer'>) =>
+  (options: Pick<StartOptions, 'extraAgents' | 'antigravity' | 'codex' | 'grok'>, hooks: Pick<TestHooks, 'codexServer' | 'codexInstall' | 'grokServer' | 'grokInstall'>) =>
   (agentId: string): boolean =>
     agentId === CLAUDE_CODE_AGENT_ID ||
     (options.antigravity !== false && agentId === ANTIGRAVITY_AGENT_ID) ||
     (options.codex !== undefined && options.codex !== false && agentId === CODEX_AGENT_ID) ||
     (options.codex === undefined && (CODEX_SHIPPED || hooks.codexServer !== undefined || hooks.codexInstall !== undefined) && agentId === CODEX_AGENT_ID) ||
     (options.grok !== undefined && options.grok !== false && agentId === GROK_AGENT_ID) ||
-    (options.grok === undefined && (GROK_SHIPPED || hooks.grokServer !== undefined) && agentId === GROK_AGENT_ID) ||
+    (options.grok === undefined && (GROK_SHIPPED || hooks.grokServer !== undefined || hooks.grokInstall !== undefined) && agentId === GROK_AGENT_ID) ||
     (options.extraAgents ?? []).some((wiring) => wiring.descriptor.agentId === agentId);
 
 /**

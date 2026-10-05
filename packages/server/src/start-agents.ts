@@ -80,9 +80,18 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
   for (const wiring of codex) checkAgentWiring(wiring);
   // Grok (epic 12 entry 4): the same, in its own folder's switch.
   const grok =
-    options.grok === false || (options.grok === undefined && !GROK_SHIPPED && hooks.grokServer === undefined)
+    options.grok === false || (options.grok === undefined && !GROK_SHIPPED && hooks.grokServer === undefined && hooks.grokInstall === undefined)
       ? []
-      : [grokWiring({ dataDir, given: options.grok, serverScript: hooks.grokServer, onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
+      : [grokWiring({
+            dataDir,
+            given: options.grok,
+            serverScript: hooks.grokServer,
+            // A fixture install never runs its unpacked binary: the token probe is a stub there.
+            install:
+              hooks.grokInstall === undefined
+                ? undefined
+                : { pins: hooks.grokInstall.pins, tokenProbe: async () => true, ...(hooks.grokInstall.npmCli === undefined ? {} : { npmCli: hooks.grokInstall.npmCli }), ...(hooks.grokInstall.binarySha256 === undefined ? {} : { binarySha256: hooks.grokInstall.binarySha256 }) },
+            onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
   for (const wiring of grok) checkAgentWiring(wiring);
   const extraAgents = [...antigravity, ...codex, ...grok, ...(options.extraAgents ?? testTrustAgentWiring(hooks, log))];
   // Every registered agent's API key variables (6.3): each is kept out of every process but its own agent's chat.

@@ -25,7 +25,9 @@ export type EndpointFailureKind =
   /** An HTTP error other than a refused key. */
   | 'http'
   /** The answer was larger than allowed. */
-  | 'too_large';
+  | 'too_large'
+  /** It answered with a redirect, which is never followed (a key could be carried to another host). */
+  | 'redirected';
 
 export class EndpointError extends Error {
   override readonly name = 'EndpointError';
@@ -85,13 +87,17 @@ export async function callEndpoint(call: EndpointCall, path: string, init: { met
           ...(call.key === undefined || call.key === '' ? {} : { authorization: `Bearer ${call.key}` }),
         },
         ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
-        redirect: 'error',
+        redirect: 'manual',
         signal: controller.signal,
       });
     } catch (error) {
       if (timedOut) throw new EndpointError('timeout');
       if (call.signal?.aborted) throw new EndpointError('unreachable', { code: 'aborted' });
       throw new EndpointError('unreachable', { code: codeOf(error) });
+    }
+    if (response.status >= 300 && response.status < 400) {
+      void response.body?.cancel().catch(() => {});
+      throw new EndpointError('redirected', { status: response.status });
     }
     if (response.status === 401 || response.status === 403) {
       void response.body?.cancel().catch(() => {});

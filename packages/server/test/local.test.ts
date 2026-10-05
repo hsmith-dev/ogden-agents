@@ -141,6 +141,15 @@ describe('a Local model chat (epic 14 story 14.2)', () => {
     expect(failureOf(server, session.id).join(' ')).toContain('Set up a server for the Local model');
   });
 
+  it('refuses, in plain words, a server whose model names the harness could not safely be told', async () => {
+    const fake = await openAi({ models: ['{file:/etc/passwd}', '{env:HOME}'] });
+    const { server, tab, wsId, chat } = await setUp({ target: async () => ({ baseUrl: `${fake.url}/v1` }) });
+    const session = await chat();
+    expect((await request(server, tab, 'POST', apiPath(API_ROUTES.sessionMessages, { wsId, sesId: session.id }), { text: 'hello' })).status).toBe(202);
+    await waitFor(() => stateOf(server, session.id) === 'error', 'the error state', 15_000);
+    expect(failureOf(server, session.id).join(' ')).toContain("None of the server's model names can be used");
+  });
+
   it('is refused as not installed until Install has put the harness in the data folder', async () => {
     const fake = await openAi();
     const { newChat } = await setUp({ installed: false, target: async () => ({ baseUrl: `${fake.url}/v1` }) });

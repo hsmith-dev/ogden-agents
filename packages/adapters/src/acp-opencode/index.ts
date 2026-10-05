@@ -11,6 +11,7 @@ export {
   opencodeChatEnv,
   opencodeConfig,
   opencodeEnvProblems,
+  SAFE_MODEL_ID,
   writeOpenCodeConfig,
   type LocalHome,
   type LocalModel,

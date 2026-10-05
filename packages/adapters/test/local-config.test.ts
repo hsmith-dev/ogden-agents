@@ -40,7 +40,7 @@ describe('the generated config', () => {
     expect(config.enabled_providers).toEqual(['ogden']);
     expect(config.provider.ogden).toMatchObject({ npm: '@ai-sdk/openai-compatible', options: { baseURL: 'http://localhost:1234/v1' } });
     expect(config.provider.ogden.models.small).toEqual({ name: 'small', limit: { context: DEFAULT_CONTEXT_TOKENS, output: 4096 }, tool_call: true });
-    expect(config.provider.ogden.models.big).toEqual({ name: 'Big one', limit: { context: 65_536, output: 8_192 }, tool_call: false });
+    expect(config.provider.ogden.models.big).toEqual({ name: 'big', limit: { context: 65_536, output: 8_192 }, tool_call: false });
   });
 
   it('never gives a model an answer limit above its context', () => {
@@ -50,7 +50,7 @@ describe('the generated config', () => {
 
   it('makes every tool that runs, writes or reaches out ask, and switches off updates, sharing, language servers, plugins and title requests', () => {
     const config = opencodeConfig(input) as Record<string, any>;
-    expect(config.permission).toEqual({ bash: 'ask', edit: 'ask', webfetch: 'ask', external_directory: 'ask', doom_loop: 'ask' });
+    expect(config.permission).toEqual(Object.fromEntries(['bash', 'edit', 'webfetch', 'websearch', 'codesearch', 'task', 'external_directory', 'doom_loop'].map((tool) => [tool, 'ask'])));
     expect(config).toMatchObject({ autoupdate: false, share: 'disabled', plugin: [], lsp: false, formatter: false, agent: { title: { disable: true } } });
   });
 
@@ -60,6 +60,19 @@ describe('the generated config', () => {
     const keyed = opencodeConfig({ ...input, hasKey: true }) as Record<string, any>;
     expect(keyed.provider.ogden.options.apiKey).toBe('{env:OGDEN_ENDPOINT_KEY}');
     expect(JSON.stringify(keyed)).not.toMatch(/sk-/);
+  });
+
+  it('never writes a model id with a brace, quote or path token (the harness substitutes {env:} and {file:} in its config)', () => {
+    const config = opencodeConfig({ ...input, models: [{ id: 'good:7b' }, { id: '{file:/Users/x/.ssh/id_ed25519}' }, { id: '{env:PATH}' }, { id: 'a"b' }, { id: 'org/Model-1.5_x' }, { id: 'hf.co/x/y:Q4_K_M' }], model: 'good:7b' }) as Record<string, any>;
+    expect(Object.keys(config.provider.ogden.models)).toEqual(['good:7b', 'org/Model-1.5_x', 'hf.co/x/y:Q4_K_M']);
+    expect(JSON.stringify(config)).not.toMatch(/\{file:|\{env:PATH/);
+    expect(() => opencodeConfig({ ...input, models: [{ id: '{env:PATH}' }], model: '{env:PATH}' })).toThrow();
+  });
+
+  it('refuses an address that is not plain http or https, or has a user, query or brace', () => {
+    for (const baseUrl of ['http://user:pw@localhost:1234/v1', 'http://localhost:1234/v1?api_key=x', 'http://localhost/{env:HOME}', 'file:///etc/passwd', 'nonsense', 'http://localhost:1234/v1#x']) {
+      expect(() => opencodeConfig({ ...input, baseUrl }), baseUrl).toThrow(/cannot be written/);
+    }
   });
 
   it('refuses no models, and a model that is not in the list', () => {
@@ -82,6 +95,10 @@ describe('the config file', () => {
     const other = writeOpenCodeConfig(dataDir, opencodeConfig({ ...input, baseUrl: 'http://localhost:11434/v1' }));
     expect(other).not.toBe(file);
     expect(readdirSync(localHome(dataDir).configDir).filter((name) => name.endsWith('.json'))).toHaveLength(2);
+    // Written once: the same content is not written again.
+    const before = statSync(file).mtimeMs;
+    writeOpenCodeConfig(dataDir, opencodeConfig({ ...input, hasKey: true }));
+    expect(statSync(file).mtimeMs).toBe(before);
   });
 
   it('makes the empty home and the four XDG folders, owner-only', () => {

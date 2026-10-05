@@ -18,7 +18,7 @@
  * prompt and reply in plain text; the privacy statement says so.
  */
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ENDPOINT_KEY_ENV,
@@ -59,13 +59,34 @@ export interface OpenCodeConfigInput {
   hasKey: boolean;
 }
 
-/** The permissions the config sets to `ask`: every tool that runs, writes or reaches out (spike 14.1). */
-const ASKED = ['bash', 'edit', 'webfetch', 'external_directory', 'doom_loop'] as const;
+/** The permissions the config sets to `ask`: every tool that runs, writes or reaches out (spike 14.1, and the other tools that can). */
+const ASKED = ['bash', 'edit', 'webfetch', 'websearch', 'codesearch', 'task', 'external_directory', 'doom_loop'] as const;
+
+/**
+ * A model id the harness may be told. The harness replaces `{env:NAME}` and `{file:PATH}` in its config text,
+ * so an id from a server (which may not be trusted) with a brace in it could read a file or a variable and
+ * send it back in every request: such an id is never written. Real ids (`qwen2.5-coder:7b`,
+ * `org/model-name`, `hf.co/x/y:Q4_K_M`) fit.
+ */
+export const SAFE_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,299}$/;
+
+/** Whether `baseUrl` may be written to the config: http(s), no user or password, no query or fragment, no brace. */
+function safeBaseUrl(baseUrl: string): boolean {
+  if (/[{}\s]/.test(baseUrl)) return false;
+  try {
+    const url = new URL(baseUrl);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && url.username === '' && url.password === '' && url.search === '' && url.hash === '' && !baseUrl.includes('?') && !baseUrl.includes('#');
+  } catch {
+    return false;
+  }
+}
 
 /** The generated config, as a plain object. Holds no key. */
 export function opencodeConfig(input: OpenCodeConfigInput): Record<string, unknown> {
-  if (input.models.length === 0) throw new Error('opencodeConfig: no models');
-  if (!input.models.some((model) => model.id === input.model)) throw new Error('opencodeConfig: the model is not in the list');
+  if (!safeBaseUrl(input.baseUrl)) throw new Error('opencodeConfig: the address cannot be written to the config');
+  const models = input.models.filter((model) => SAFE_MODEL_ID.test(model.id));
+  if (models.length === 0) throw new Error('opencodeConfig: no usable models');
+  if (!models.some((model) => model.id === input.model)) throw new Error('opencodeConfig: the model is not in the list');
   return {
     $schema: 'https://opencode.ai/config.json',
     autoupdate: false,
@@ -84,10 +105,10 @@ export function opencodeConfig(input: OpenCodeConfigInput): Record<string, unkno
         name: 'Local model',
         options: { baseURL: input.baseUrl, ...(input.hasKey ? { apiKey: ENDPOINT_KEY_REFERENCE } : {}) },
         models: Object.fromEntries(
-          input.models.map((model) => [
+          models.map((model) => [
             model.id,
             {
-              name: model.name ?? model.id,
+              name: model.id,
               limit: { context: model.contextTokens ?? DEFAULT_CONTEXT_TOKENS, output: Math.min(model.outputTokens ?? DEFAULT_OUTPUT_TOKENS, model.contextTokens ?? DEFAULT_CONTEXT_TOKENS) },
               tool_call: model.toolCall !== false,
             },
@@ -138,12 +159,21 @@ export function writeOpenCodeConfig(dataDir: string, config: Record<string, unkn
   }
   const text = `${JSON.stringify(config, null, 2)}\n`;
   const file = join(home.configDir, `opencode-${createHash('sha256').update(text).digest('hex').slice(0, 16)}.json`);
-  const temp = `${file}.${process.pid}.tmp`;
-  writeFileSync(temp, text, { mode: 0o600 });
-  renameSync(temp, file);
+  // The same content is the same file: it is not written again, so a harness holding it open is never disturbed (Windows refuses a rename over one).
+  let current: string | undefined;
+  try {
+    current = readFileSync(file, 'utf8');
+  } catch {
+    current = undefined;
+  }
+  if (current !== text) {
+    const temp = `${file}.${process.pid}.tmp`;
+    writeFileSync(temp, text, { mode: 0o600 });
+    renameSync(temp, file);
+  }
   const now = Date.now();
   for (const name of readdirSync(home.configDir)) {
-    if (!/^opencode-[0-9a-f]{16}\.json$/.test(name) || join(home.configDir, name) === file) continue;
+    if (!/^opencode-[0-9a-f]{16}\.json(?:\.\d+\.tmp)?$/.test(name) || join(home.configDir, name) === file) continue;
     try {
       if (now - statSync(join(home.configDir, name)).mtimeMs > CONFIG_KEEP_MS) rmSync(join(home.configDir, name), { force: true });
     } catch {

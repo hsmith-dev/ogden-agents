@@ -22,6 +22,7 @@ import {
   opencodeChatEnv,
   opencodeConfig,
   probeEndpoint,
+  SAFE_MODEL_ID,
   seedRipgrep,
   writeOpenCodeConfig,
   type LocalModel,
@@ -76,12 +77,21 @@ export function localWiring(input: {
       input.onDiagnostic?.('the Local model endpoint is not usable', { kind: probe.kind, ...(probe.status === undefined ? {} : { status: probe.status }) });
       throw new AgentError('agent_unavailable', endpointFailureWords(probe.kind, target.baseUrl, probe.status), { details: { kind: probe.kind } });
     }
-    const models: LocalModel[] = target.models !== undefined && target.models.length > 0 ? [...target.models] : probe.models.map((id) => ({ id }));
-    const model = target.model !== undefined && models.some((each) => each.id === target.model) ? target.model : models[0]?.id;
-    if (model === undefined) throw new AgentError('agent_unavailable', 'The server has no models yet. Load one in the server, then try again.');
-    const configFile = writeOpenCodeConfig(input.dataDir, opencodeConfig({ baseUrl: target.baseUrl, models, model, hasKey: target.key !== undefined && target.key !== '' }));
-    const installed = installedOpenCode(input.dataDir);
-    if (installed !== undefined) seedRipgrep(input.dataDir, installed);
+    const listed: LocalModel[] = target.models !== undefined && target.models.length > 0 ? [...target.models] : probe.models.map((id) => ({ id }));
+    // Only ids the harness can safely be told (a brace or path token in an id from a server is never written).
+    const models = listed.filter((each) => SAFE_MODEL_ID.test(each.id));
+    if (listed.length === 0) throw new AgentError('agent_unavailable', 'The server has no models yet. Load one in the server, then try again.');
+    if (models.length === 0) throw new AgentError('agent_unavailable', "None of the server's model names can be used. Names use letters, digits and . _ : / @ + - only.");
+    const model = target.model !== undefined && models.some((each) => each.id === target.model) ? target.model : models[0]!.id;
+    let configFile: string;
+    try {
+      configFile = writeOpenCodeConfig(input.dataDir, opencodeConfig({ baseUrl: target.baseUrl, models, model, hasKey: target.key !== undefined && target.key !== '' }));
+      const installed = installedOpenCode(input.dataDir);
+      if (installed !== undefined) seedRipgrep(input.dataDir, installed);
+    } catch (error) {
+      input.onDiagnostic?.('the Local model could not be prepared', { code: (error as NodeJS.ErrnoException).code ?? 'unknown' });
+      throw new AgentError('agent_unavailable', "The Local model couldn't be prepared. Check that Ogden Agents' data folder has free space and can be written to, then try again.");
+    }
     return opencodeChatEnv({ dataDir: input.dataDir, configFile, key: target.key });
   };
   return {

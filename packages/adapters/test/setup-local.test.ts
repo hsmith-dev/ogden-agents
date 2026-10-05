@@ -6,7 +6,7 @@
  * Windows gets its pinned ripgrep beside it, and nothing is left half installed.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AgentSetupError, type AgentPlatform } from '@ogden-agents/core';
@@ -221,6 +221,22 @@ describe("Windows' ripgrep (spike 14.1: the harness would download it from GitHu
     expect(statSync(target).mtimeMs).toBe(before);
   });
 
+  it.skipIf(process.platform === 'win32')('never follows a link the harness planted where rg.exe goes: it replaces the link, not the file it points at', async () => {
+    const dataDir = tempDir();
+    const f = fixture('win32-x64');
+    await setupOf(dataDir, f).install(() => {});
+    const installed = installedOpenCode(dataDir, 'win32-x64', f.pins)!;
+    const target = ripgrepCacheFile(dataDir);
+    mkdirSync(join(target, '..'), { recursive: true });
+    const victim = join(tempDir(), 'important.txt');
+    writeFileSync(victim, 'keep me');
+    symlinkSync(victim, target);
+    seedRipgrep(dataDir, installed);
+    expect(readFileSync(victim, 'utf8')).toBe('keep me');
+    expect(lstatSync(target).isSymbolicLink()).toBe(false);
+    expect(readFileSync(target).equals(RIPGREP)).toBe(true);
+  });
+
   it('is nothing to do where there is no ripgrep to place', () => {
     const dataDir = tempDir();
     seedRipgrep(dataDir, {});
@@ -264,7 +280,7 @@ describe('unpacking a pinned tar.gz', () => {
   });
 
   it('refuses something that is not gzip', async () => {
-    await expect(unpack(Buffer.from('not an archive'))).rejects.toThrow();
+    await expect(unpack(Buffer.from('not an archive'))).rejects.toBeInstanceOf(UnsafeArchiveError);
   });
 
   it('refuses an archive that unpacks to far more than the pin says', async () => {
@@ -273,6 +289,6 @@ describe('unpacking a pinned tar.gz', () => {
 
   it('refuses a truncated archive', async () => {
     const whole = tarGz([{ name: 'opencode', data: BINARY }]);
-    await expect(unpack(whole.subarray(0, Math.floor(whole.length / 2)))).rejects.toThrow();
+    await expect(unpack(whole.subarray(0, Math.floor(whole.length / 2)))).rejects.toBeInstanceOf(UnsafeArchiveError);
   });
 });

@@ -27,6 +27,8 @@ export function endpointFailureWords(kind: EndpointFailureKind, baseUrl: string,
       return `The server at ${host} didn't accept the key for it. Check the key in Settings, Agents.`;
     case 'not_openai':
       return `The server at ${host} didn't answer the way an OpenAI compatible server does. Check its address in Settings, Agents.`;
+    case 'redirected':
+      return `The server at ${host} sent us somewhere else, which Ogden Agents never follows. Check its address in Settings, Agents (it may need https).`;
     case 'too_large':
       return `The server at ${host} sent back more than Ogden Agents expected.`;
     case 'http':

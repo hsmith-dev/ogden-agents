@@ -5,7 +5,7 @@
  * harness; this copies it into `<XDG_CACHE_HOME>/opencode/bin/` before a
  * chat starts, so the harness never reaches out.
  */
-import { copyFileSync, mkdirSync, statSync } from 'node:fs';
+import { copyFileSync, lstatSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { localHome } from '../acp-opencode/config.js';
 import { RIPGREP_FILE, type InstalledOpenCode } from './layout.js';
@@ -19,11 +19,18 @@ export function ripgrepCacheFile(dataDir: string): string {
 export function seedRipgrep(dataDir: string, installed: Pick<InstalledOpenCode, 'ripgrep'>): void {
   if (installed.ripgrep === undefined) return;
   const target = ripgrepCacheFile(dataDir);
+  const wanted = statSync(installed.ripgrep).size;
   try {
-    if (statSync(target).size === statSync(installed.ripgrep).size) return;
+    // A link is never followed: the harness can write in this folder, so only a plain file of the right size is left alone.
+    const found = lstatSync(target);
+    if (found.isFile() && found.size === wanted) return;
   } catch {
     // Not there yet.
   }
   mkdirSync(join(target, '..'), { recursive: true, mode: 0o700 });
-  copyFileSync(installed.ripgrep, target);
+  // Written beside it and renamed over it: a rename replaces a link itself, never what it points at.
+  const temp = `${target}.${process.pid}.tmp`;
+  rmSync(temp, { force: true });
+  copyFileSync(installed.ripgrep, temp);
+  renameSync(temp, target);
 }

@@ -3,12 +3,12 @@ title: 'Tracer bullet: one Local model chat against a fake server, end to end (e
 type: 'feature'
 ticket: '14.2'
 created: '2026-10-05'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['quick-security', 'quick-correctness']
 review_loop_iteration: 0
 baseline_revision: '4aee74088aba73c7dee5d131a197f7c2266ad7ed'
 context:
@@ -84,6 +84,8 @@ Built 2026-10-05 on `story/14.2-local-model-tracer` from `origin/main`.
 ## Plan Change Log
 
 ## Review Triage Log
+
+Security and correctness reviewers (2 lenses), no critical findings. Patched (high or medium): model ids or an address with a brace could make OpenCode substitute `{file:}` or `{env:}` in its config, so unsafe ids are never written and the address is checked (high); `rg.exe` seeding followed links and could overwrite a file, now lstat, temp file and rename (medium); the tar extractor could crash or hang on a read or write error (medium); `prepareChat` threw raw errors for unsafe model ids and file errors, now plain `AgentError`s (medium); the config is not rewritten when identical, and stale temp files are cleaned (medium); a redirect was reported as "isn't answering", now its own kind (low); a locked install folder said "free space" (low); more tools (websearch, codesearch, task) now ask (medium). Deferred and indexed: size-only re-check at launch, no wildcard permission, key visible to an approved env command, test-hooks.ts over 600 lines, CI does not unpack real archives. Not changed: per-switch tests assert the constant plus one process-level equality (low), the fake store is not locked (low). No intent_gap or bad_plan.
 
 ## Verification
 

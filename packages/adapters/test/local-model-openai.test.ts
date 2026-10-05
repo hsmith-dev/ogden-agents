@@ -77,7 +77,7 @@ describe('probing an endpoint', () => {
     const other = await fake({ requireKey: 'dummy-key' });
     const redirecting = await raw((_req, res) => res.writeHead(302, { location: `${other.url}/v1/models` }).end());
     const result = await probeEndpoint({ baseUrl: `${redirecting}/v1`, key: 'dummy-key' });
-    expect(result.ok).toBe(false);
+    expect(result).toEqual({ ok: false, kind: 'redirected', status: 302 });
     expect(other.log).toEqual([]);
   });
 
@@ -119,7 +119,7 @@ describe('what a failure says', () => {
   it('names only the host, never the path, credentials or key, and no dash', () => {
     const base = 'https://user:secret@example.com:8443/private/v1?token=abc';
     expect(hostOf(base)).toBe('example.com:8443');
-    for (const kind of ['unreachable', 'timeout', 'key_refused', 'not_openai', 'too_large', 'http'] as const) {
+    for (const kind of ['unreachable', 'timeout', 'key_refused', 'not_openai', 'too_large', 'http', 'redirected'] as const) {
       const words = endpointFailureWords(kind, base, 500);
       expect(words).toContain('example.com:8443');
       expect(words).not.toMatch(/secret|private|token|abc/);

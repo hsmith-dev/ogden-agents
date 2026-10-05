@@ -38,6 +38,7 @@ const MISMATCH = "The download didn't match the expected file, so nothing was in
 const NOT_FINISHED = "The download didn't finish. Check your internet connection and try again; it picks up where it stopped.";
 const NO_SPACE = `${LOCAL} couldn't be saved in Ogden Agents' data folder. Check there is free space, then try again.`;
 const NOT_EXPECTED = `The download wasn't the expected ${OPENCODE} files, so nothing was installed. Try again.`;
+const IN_USE = `${LOCAL} is in use. Close its chats, then try again.`;
 const STOPPED = `The ${LOCAL} install was stopped.`;
 
 export interface InstallLocalOptions {
@@ -191,7 +192,8 @@ export async function installLocal(options: InstallLocalOptions): Promise<Instal
       await renameWithRetry(staging, versionDir);
     } catch (error) {
       if (had) await renameWithRetry(aside, versionDir).catch(onCleanupError);
-      throw new AgentSetupError(NO_SPACE, { cause: error, details: { step: 'move', code: errorCode(error, 'unknown') } });
+      const code = errorCode(error, 'unknown');
+      throw new AgentSetupError(code === 'EBUSY' || code === 'EPERM' || code === 'EACCES' ? IN_USE : NO_SPACE, { cause: error, details: { step: 'move', code } });
     }
     staging = undefined;
     if (had) removeQuietly(aside, onCleanupError);

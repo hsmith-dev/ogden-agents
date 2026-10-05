@@ -50,6 +50,8 @@ export async function extractPinnedTarGz(archive: string, dir: string, files: Re
   /** The entry being written, if any. */
   let current: { name: string; remaining: number; padding: number; pin: LocalFilePin; hash: ReturnType<typeof createHash>; out: ReturnType<typeof createWriteStream>; written: number } | undefined;
   let skipping = 0;
+  /** A write that failed after the file was opened (no space, say): it ends the unpack instead of hanging it. */
+  let writeError: Error | undefined;
 
   const finishEntry = async () => {
     const entry = current!;
@@ -73,7 +75,14 @@ export async function extractPinnedTarGz(archive: string, dir: string, files: Re
           current.remaining -= take;
           current.written += take;
           current.hash.update(part);
-          if (!current.out.write(part)) await new Promise<void>((resolve) => current!.out.once('drain', resolve));
+          if (writeError !== undefined) throw writeError;
+          if (!current.out.write(part)) {
+            const out = current.out;
+            await new Promise<void>((resolve, reject) => {
+              out.once('drain', resolve);
+              out.once('error', reject);
+            });
+          }
           if (current.remaining > 0) return;
         }
         // Padding to the next block.
@@ -106,6 +115,9 @@ export async function extractPinnedTarGz(archive: string, dir: string, files: Re
       seen.add(name);
       // The pinned name, never the archive's path: nothing can land outside `dir`.
       const out = createWriteStream(join(dir, name), { flags: 'wx', mode: 0o755 });
+      out.on('error', (error) => {
+        writeError ??= error;
+      });
       await new Promise<void>((resolve, reject) => out.once('open', () => resolve()).once('error', reject));
       current = { name, remaining: size, padding: (BLOCK - (size % BLOCK)) % BLOCK, pin, hash: createHash('sha256'), out, written: 0 };
       if (size === 0) {
@@ -115,7 +127,9 @@ export async function extractPinnedTarGz(archive: string, dir: string, files: Re
     }
   };
 
-  const source = createReadStream(archive).pipe(createGunzip());
+  const gunzip = createGunzip();
+  // A read failure (the file vanished, a bad disk) ends the unpack instead of crashing the server.
+  const source = createReadStream(archive).on('error', (error) => gunzip.destroy(error)).pipe(gunzip);
   // A source failure ends the loop below through the iterator.
   try {
     for await (const chunk of source as AsyncIterable<Buffer>) await feed(chunk);

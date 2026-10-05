@@ -172,7 +172,7 @@ async function installOpencode() {
   results.install = { url, bytes: buf.length, sha256: sha, expected: pin.sha256, match: sha === pin.sha256, downloadSeconds: (Date.now() - t0) / 1000 };
   if (sha !== pin.sha256) throw new Error(`sha256 mismatch: ${sha}`);
   writeFileSync(archive, buf);
-  const x = spawnSync('tar', ['-xf', archive, '-C', dir], { encoding: 'utf8' });
+  const x = spawnSync(IS_WIN ? (process.env.SystemRoot + '\\System32\\tar.exe') : 'tar', ['-xf', pin.url], { encoding: 'utf8', cwd: dir });
   if (x.status !== 0) throw new Error(`extract failed: ${x.stderr}`);
   const bin = join(dir, pin.exe);
   if (!existsSync(bin)) throw new Error(`no ${pin.exe} in ${dir}: ${listTree(dir)}`);

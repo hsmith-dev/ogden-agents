@@ -31,7 +31,7 @@ export async function run({ ctx }) {
   if (sha !== pin[1]) throw new Error(`sha256 mismatch ${sha}`);
   const archive = join(dir, pin[0]);
   writeFileSync(archive, buf);
-  const x = spawnSync('tar', [pin[0].endsWith('.zip') ? '-xf' : '-xjf', archive, '-C', dir], { encoding: 'utf8' });
+  const x = spawnSync(IS_WIN ? (process.env.SystemRoot + '\\System32\\tar.exe') : 'tar', [pin[0].endsWith('.zip') ? '-xf' : '-xjf', pin[0]], { encoding: 'utf8', cwd: dir });
   if (x.status !== 0) throw new Error(`extract: ${x.stderr}`);
   const bin = join(dir, ...pin[2].split('/'));
   if (!existsSync(bin)) throw new Error(`no binary at ${bin}: ${listTree(dir).slice(0, 20)}`);

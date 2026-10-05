@@ -60,6 +60,13 @@ export interface BmadScriptTrust {
   /** Whether the project is trusted and its scripts are the ones the user allowed (read now). */
   scriptsUnchanged(workspaceId: WorkspaceId): Promise<boolean>;
   /**
+   * As {@link requireScriptsUnchanged}, for a copy of the project at `path`
+   * (story 5.2: a run's worktree, whose `_bmad/scripts/` the agent may have
+   * edited): its scripts must be the ones the user trusted, else
+   * {@link ScriptsChangedError}. Called right before `tickets.py` runs against it.
+   */
+  requireScriptsMatch(workspaceId: WorkspaceId, path: string): Promise<string>;
+  /**
    * After Ogden Agents' own setup or Upgrade (which writes `_bmad/scripts/`
    * only from the verified pinned copy) of a project whose scripts were
    * unchanged just before it: the trust follows the scripts setup wrote.
@@ -114,6 +121,13 @@ export function createBmadScriptTrust({ orm, events, entities, fingerprint }: Bm
       return fingerprint;
     },
     scriptsUnchanged: unchanged,
+    async requireScriptsMatch(workspaceId, path) {
+      const stored = row(workspaceId);
+      if (!stored.trusted) throw new ScriptsNotTrustedError();
+      const now = fingerprint === undefined ? 'none' : await fingerprint(path);
+      if (stored.fingerprint === null || now === undefined || now !== stored.fingerprint) throw new ScriptsChangedError();
+      return stored.fingerprint;
+    },
     async trustScripts(workspaceId) {
       row(workspaceId);
       const now = await current(workspaceId);

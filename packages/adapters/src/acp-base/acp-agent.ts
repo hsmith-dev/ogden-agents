@@ -58,6 +58,7 @@ import {
   type AgentRestored,
   type AgentSession,
   type AgentToolCallDiff,
+  type AgentSandbox,
   type ProtectedPaths,
 } from '@ogden-agents/core';
 import type { PermissionMode } from '@ogden-agents/shared';
@@ -162,10 +163,15 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
       env: Readonly<Record<string, string>>;
       onPermissionRequest?: PermissionCallback | undefined;
       protectedPaths?: ProtectedPaths | undefined;
+      sandbox?: AgentSandbox | undefined;
       model?: string | undefined;
     },
     opening: Opening,
   ) => {
+    // Fail closed: an agent with no way to take the sandbox never runs a build session without one (story 5.2).
+    if (input.sandbox !== undefined && quirks.sessionMeta === undefined) {
+      throw new AgentError('agent_unavailable', `${descriptor.displayName} can't run a sandboxed build.`);
+    }
     const startModel = descriptor.models?.list.some((each) => each.id === input.model) === true ? input.model : undefined;
     const { child, secrets } = spawnAgent(input.cwd, input.env, startModel);
     return startOnChild(
@@ -181,6 +187,7 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
         startTimeoutMs,
         onPermissionRequest: input.onPermissionRequest,
         protectedPaths: input.protectedPaths,
+        sandbox: input.sandbox,
         startModel,
       },
       opening,
@@ -235,6 +242,8 @@ interface StartContext {
   onPermissionRequest: PermissionCallback | undefined;
   /** Kept guarded for the session's life, through the agent's `sessionMeta` quirk (Auto only). */
   protectedPaths: ProtectedPaths | undefined;
+  /** An unattended build session's sandbox (story 5.2), in the same `sessionMeta` quirk. */
+  sandbox: AgentSandbox | undefined;
   /** The static-list model the process was started on (story 11), if any. */
   startModel: string | undefined;
 }
@@ -246,7 +255,7 @@ function killTree(child: ChildProcessWithoutNullStreams): void {
 
 async function startOnChild(
   child: ChildProcessWithoutNullStreams,
-  { descriptor, quirks, reasons, cwd, env, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths, startModel }: StartContext,
+  { descriptor, quirks, reasons, cwd, env, secrets, diagnostic, startTimeoutMs, onPermissionRequest, protectedPaths, sandbox, startModel }: StartContext,
   opening: Opening,
 ): Promise<{ init: acp.InitializeResponse; session: AgentSession | undefined; restored: AgentRestored }> {
   const { couldNotStart: COULD_NOT_START, stopped: STOPPED, failed: FAILED } = reasons;
@@ -255,7 +264,7 @@ async function startOnChild(
   const plainReason = (error: unknown, fallback: string) => (isAuthRequired(error) ? reasons.signIn : fallback);
   const listeners = new Set<AgentEventListener>();
   // The agent's own way to keep the protected paths guarded; it can't be changed later.
-  const guards = protectedPaths === undefined || quirks.sessionMeta === undefined ? undefined : quirks.sessionMeta(protectedPaths);
+  const guards = (protectedPaths === undefined && sandbox === undefined) || quirks.sessionMeta === undefined ? undefined : quirks.sessionMeta(protectedPaths, sandbox);
   const sessionMeta = guards === undefined ? {} : { _meta: guards };
   /** While `session/load` replays history the chat already has: those updates are swallowed. */
   let replaying = false;

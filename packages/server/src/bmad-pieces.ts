@@ -40,11 +40,12 @@ import { ids } from './request-input.js';
 
 /**
  * The pieces this install ships: epic 4 (story 4.2) ships Planning and
- * Board, whose routes are registered through {@link bmadPieceRoutes} with
- * the script trust. Unattended builds and Retrospectives stay coming soon
- * until epics 5 and 7 append theirs.
+ * Board, and epic 5 (story 5.2, so the tracer's live check can turn it on)
+ * Unattended builds, whose routes are registered through
+ * {@link bmadPieceRoutes} with the script trust. Retrospectives stays coming
+ * soon until epic 7 appends it.
  */
-export const SHIPPED_BMAD_PIECES: readonly BmadPiece[] = ['planning', 'board'];
+export const SHIPPED_BMAD_PIECES: readonly BmadPiece[] = ['planning', 'board', 'builds'];
 
 /** What a guarded handler is given besides the request: the workspace, already checked to have the piece on (and trusted, when it runs scripts). */
 export interface BmadPieceScope {

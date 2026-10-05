@@ -8,8 +8,11 @@
 import type {
   AdapterRefs,
   AgentId,
+  BlockedCode,
+  BuildAgent,
   CautionLevel,
   PermissionMode,
+  RunDecision,
   RunOutcome,
   SessionDriver,
   SessionKind,
@@ -140,6 +143,22 @@ export const runs = sqliteTable(
     sandbox: text('sandbox'),
     deadline: text('deadline'),
     outcome: text('outcome').$type<RunOutcome>().notNull(),
+    /** The run's own branch, `ogden/<ref>-<slug>` (story 5.2); `null` in runs from before it. */
+    branch: text('branch'),
+    /** The commit the run's branch started from (story 5.2): its diff is against it. */
+    baseRevision: text('base_revision'),
+    /** The branch the main checkout had checked out when the run started (story 5.5): approve merges only into it. */
+    baseBranch: text('base_branch'),
+    /** Why the run ended as it did, in plain words (story 5.2): a blocked or failed run's reason. */
+    reason: text('reason'),
+    /** The agent that builds (story 5.3); `null` in runs from before it, read as Claude Code. */
+    agent: text('agent').$type<BuildAgent>(),
+    /** Why a `blocked` run is blocked (story 5.3): Ogden Agents' code. */
+    blockedCode: text('blocked_code').$type<BlockedCode>(),
+    /** Where a waiting run is in its workspace's queue (story 5.3; 5.8 fills it). */
+    queuePosition: integer('queue_position'),
+    /** What the user decided on the review page (story 5.3): `approved` or `rejected`. */
+    decision: text('decision').$type<RunDecision>(),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },

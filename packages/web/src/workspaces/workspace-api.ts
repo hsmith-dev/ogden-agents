@@ -99,12 +99,15 @@ export function useSessions(wsId: string) {
   const sessions = useMemo(() => {
     if (query.data === undefined) return undefined;
     const states = new Map<string, SessionState>();
+    const agentIds = new Map<string, string>();
     for (const event of events) {
       if (event.workspaceId !== wsId) continue;
       if (event.type === 'session.state_changed') states.set(event.payload.sessionId, event.payload.state);
+      // Continued with another agent (handoff): the row names its new agent.
+      else if (event.type === 'session.agent_changed') agentIds.set(event.payload.sessionId, event.payload.agentId);
     }
     return [...query.data]
-      .map((session) => ({ ...session, state: states.get(session.id) ?? session.state }))
+      .map((session) => ({ ...session, state: states.get(session.id) ?? session.state, agentId: agentIds.get(session.id) ?? session.agentId }))
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : a.id < b.id ? 1 : -1));
   }, [query.data, events, wsId]);
   return { ...query, sessions };
@@ -162,6 +165,10 @@ export function useAllSessionsStatus(): AllSessions {
       } else if (event.type === 'session.state_changed') {
         const session = byId.get(event.payload.sessionId);
         if (session !== undefined) byId.set(session.id, { ...session, state: event.payload.state, updatedAt: event.at > session.updatedAt ? event.at : session.updatedAt });
+      } else if (event.type === 'session.agent_changed') {
+        // Continued with another agent (handoff): the row names its new agent.
+        const session = byId.get(event.payload.sessionId);
+        if (session !== undefined) byId.set(session.id, { ...session, agentId: event.payload.agentId });
       } else if (event.type === 'workspace.history_deleted') {
         for (const [id, session] of byId) if (session.workspaceId === event.workspaceId) byId.delete(id);
       }

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
-import { ArrowClockwise, ArrowDown, ChatCircle, House, Stop } from '@phosphor-icons/react';
+import { ArrowClockwise, ArrowDown, ArrowsLeftRight, ChatCircle, House, Stop } from '@phosphor-icons/react';
 import type { PermissionMode } from '@ogden-agents/shared';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAgents } from '@/agents/agent-setup-api';
@@ -8,11 +8,13 @@ import { useAppearance } from '@/appearance/appearance-provider';
 import { agentNameOf, cancelSession, ChatApiError, UNKNOWN_AGENT_NAME, fetchSession, sendMessage, setPermissionMode, switchDriver } from '@/chat/chat-api';
 import { useChatAgents } from '@/chat/use-chat-agents';
 import { Composer } from '@/chat/composer';
+import { HandoffDialog } from '@/chat/handoff-dialog';
+import { CONTINUE_WITH_ANOTHER_AGENT, SessionMenu } from '@/chat/session-menu';
 import { ReadOnlyConversation } from '@/chat/read-only';
 import { SignInAgain } from '@/chat/sign-in-again';
 import { ToolCalls } from '@/chat/tool-call-row';
 import { sessionView, type TranscriptCheckIn, type TranscriptItem } from '@/chat/transcript';
-import { EarlierHistory, Message, ResumedMarker } from '@/chat/transcript-parts';
+import { AgentChangedMarker, EarlierHistory, Message, ResumedMarker } from '@/chat/transcript-parts';
 import { useCaughtUp, useEarlierHistory, useSessionEvents } from '@/events/event-stream';
 import { PermissionCard, permissionAnnouncement } from '@/permissions/permission-card';
 import { DocumentCard } from '@/planning/document-card';
@@ -44,7 +46,9 @@ const itemKey = (item: TranscriptItem, index: number): string =>
         ? `resumed-${item.at}-${index}`
         : item.type === 'document'
           ? `document-${item.path}`
-          : item.permission.requestId;
+          : item.type === 'agent_changed'
+            ? `agent-${item.at}-${index}`
+            : item.permission.requestId;
 
 /** What the composer says while the terminal drives (DESIGN.md Composer). */
 const TERMINAL_DRIVING_REASON = 'The terminal is driving this session';
@@ -95,8 +99,10 @@ export function SessionPage() {
   // The chat's own agent, by its product name (epic 6, E6-R1).
   const chatAgents = useChatAgents();
   // Until the session has loaded its agent isn't known: no agent's name is guessed (review: a second agent's chat named Claude Code).
-  const agentName = session.data === undefined ? UNKNOWN_AGENT_NAME : agentNameOf(chatAgents.data, session.data.session.agentId);
-  const agentId = session.data === undefined ? undefined : (session.data.session.agentId ?? chatAgents.data?.defaultAgentId);
+  // A handoff (`session.agent_changed`) changes it live.
+  const agentId = view.agentId ?? (session.data === undefined ? undefined : (session.data.session.agentId ?? chatAgents.data?.defaultAgentId));
+  const agentName = agentId === undefined ? UNKNOWN_AGENT_NAME : agentNameOf(chatAgents.data, agentId);
+  const [handoffOpen, setHandoffOpen] = useState(false);
   const severalAgents = (chatAgents.data?.agents.length ?? 0) > 1;
   // Sign in again (9.4) signs in to the chat's own agent, when it has a setup (entry 6); otherwise the plain error notice.
   const setups = useAgents();
@@ -250,8 +256,8 @@ export function SessionPage() {
   const resumedSeq = useMemo(() => events.findLast((event) => event.type === 'session.resumed')?.seq, [events]);
   const agentWorking = state === 'working';
   useEffect(() => {
-    if (agentWorking || resumedSeq !== undefined) void refetchSession();
-  }, [agentWorking, resumedSeq, refetchSession]);
+    if (agentWorking || resumedSeq !== undefined || view.agentId !== undefined) void refetchSession();
+  }, [agentWorking, resumedSeq, view.agentId, refetchSession]);
 
   // Whether the waiting card is out of view, for the "waiting for you" bar. Not while the terminal
   // drives: the conversation is read-only then, and nothing in it takes focus (3.6 review F2).
@@ -318,6 +324,10 @@ export function SessionPage() {
     );
   };
 
+  // Handoff: offered while the chat is idle or in error and the chat drives it.
+  const handoffBlocked = terminalDrives ? 'Switch back to the chat first: the terminal is driving it.' : busy ? `${agentName} is working. Stop it first.` : undefined;
+  const nameOf = (id: string | undefined) => (id === undefined ? agentName : agentNameOf(chatAgents.data, id));
+
   const tryAgain = () => {
     if (view.lastUserText === undefined) return;
     setActionError(undefined);
@@ -356,7 +366,21 @@ export function SessionPage() {
             onSwitch={switchTo}
           />
         ) : null}
+        {severalAgents && session.data !== undefined ? <SessionMenu blockedReason={handoffBlocked} onContinue={() => setHandoffOpen(true)} /> : null}
       </WorkspaceHeader>
+      <HandoffDialog
+        open={handoffOpen}
+        onOpenChange={setHandoffOpen}
+        wsId={wsId}
+        sesId={sesId}
+        currentAgentId={agentId}
+        currentAgentName={agentName}
+        agents={chatAgents.data?.agents ?? []}
+        onHandedOff={() => {
+          void refetchSession();
+          focusComposer();
+        }}
+      />
       {/* A chat that skips its permission checks says so in red, above the conversation or the terminal, at any scroll position. */}
       {permissionMode === 'skip_all' ? <SkipAllBanner agentName={agentName} changing={modeChanging} onBackToAsk={() => changeMode('ask', false, terminalDrives)} /> : null}
       {driver === 'terminal' ? (
@@ -394,11 +418,13 @@ export function SessionPage() {
               ) : (
                 view.items.map((item, index) =>
                   item.type === 'message' ? (
-                    <Message key={item.message.messageId} message={item.message} agentName={agentName} />
+                    <Message key={item.message.messageId} message={item.message} agentName={nameOf(item.message.agentId)} />
                   ) : item.type === 'tools' ? (
                     <ToolCalls key={`tools-${item.calls[0]?.toolCallId ?? index}`} calls={item.calls} density={appearance.density} />
                   ) : item.type === 'resumed' ? (
                     <ResumedMarker key={`resumed-${item.at}-${index}`} />
+                  ) : item.type === 'agent_changed' ? (
+                    <AgentChangedMarker key={`agent-${item.at}-${index}`} agentName={nameOf(item.agentId)} />
                   ) : item.type === 'document' ? (
                     <DocumentCard
                       key={`document-${item.path}`}
@@ -462,11 +488,22 @@ export function SessionPage() {
                   data-testid="session-error"
                   data-error-code={view.errorCode}
                   action={
-                    view.lastUserText === undefined || terminalDrives ? null : (
-                      <Button variant="outline" onClick={tryAgain} data-testid="try-again">
-                        <ArrowClockwise aria-hidden />
-                        Try again
-                      </Button>
+                    terminalDrives ? null : (
+                      <span className="flex flex-wrap gap-2">
+                        {/* Out of usage (handoff): the chat can go on with another agent while this one cools down. */}
+                        {view.errorCode === 'usage_limit' && severalAgents ? (
+                          <Button variant="outline" onClick={() => setHandoffOpen(true)} data-testid="error-continue-with-another">
+                            <ArrowsLeftRight aria-hidden />
+                            {CONTINUE_WITH_ANOTHER_AGENT}
+                          </Button>
+                        ) : null}
+                        {view.lastUserText === undefined ? null : (
+                          <Button variant="outline" onClick={tryAgain} data-testid="try-again">
+                            <ArrowClockwise aria-hidden />
+                            Try again
+                          </Button>
+                        )}
+                      </span>
                     )
                   }
                 >

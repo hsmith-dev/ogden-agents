@@ -1,7 +1,7 @@
 /**
  * Parts of the session page's transcript (moved out of
  * `routes/session-page.tsx` by story 6.9 to keep it under 600 lines): Show
- * earlier, the resumed marker, and one message.
+ * earlier, the resumed marker, the handoff divider, and one message.
  */
 import { ArrowClockwise } from '@phosphor-icons/react';
 import type { TranscriptMessage } from '@/chat/transcript';
@@ -51,6 +51,23 @@ export function ResumedMarker() {
       <Separator className="flex-1" />
       <Text as="span" variant="caption" className="shrink-0">
         {RESUMED_FROM_HISTORY}
+      </Text>
+      <Separator className="flex-1" />
+    </div>
+  );
+}
+
+/**
+ * Where the user continued the chat with another agent (handoff): the history
+ * above stays, and from here the chat is with `agentName`.
+ */
+export function AgentChangedMarker({ agentName }: { agentName: string }) {
+  const words = `Continued with ${agentName}`;
+  return (
+    <div role="separator" aria-label={words} data-testid="agent-changed-marker" className="flex items-center gap-3">
+      <Separator className="flex-1" />
+      <Text as="span" variant="caption" className="shrink-0">
+        {words}
       </Text>
       <Separator className="flex-1" />
     </div>

@@ -93,6 +93,33 @@ test('a message sent while the agent works shows Queued, then is sent after the 
   });
 });
 
+test('a queued message is sent when the agent withdraws its card and ends its turn (backlog bug 16)', async ({ page }) => {
+  await withChatServer(page, async ({ repo, tempFolder }) => {
+    await startChat(page, repo);
+    // As Claude Code does when its SDK aborts a tool call: the card's request is withdrawn
+    // without waiting for the answer, and the turn ends with the final reply.
+    const release = join(tempFolder('ogden-agents-e2e-release-'), 'release');
+    const first = `permission-abandon ${release}`;
+    await send(page, first);
+    await expect(page.getByTestId('message-agent')).toContainText('Working');
+    await send(page, 'And then this');
+    const queued = page.getByTestId('message-queued');
+    await expect(queued).toHaveAttribute('data-status', 'queued');
+
+    // The agent asks, then gives up on its own before the card is answered.
+    writeFileSync(release, '');
+    await expect(page.getByTestId('permission-card')).toBeVisible();
+    await expect(queued).toHaveAttribute('data-status', 'queued');
+    writeFileSync(`${release}.withdraw`, '');
+    await expect(page.getByTestId('message-agent').first()).toContainText('Gave up on npm test.');
+    await expect(page.getByTestId('message-user')).toHaveText([first, 'And then this']);
+    await expect(queued).toHaveCount(0);
+    await expect(page.getByTestId('message-agent').nth(1)).toContainText('Hello from the fake agent.');
+    await expect(state(page)).toHaveAttribute('data-state', 'idle');
+    await expect(page.getByTestId('permission-card')).toHaveCount(0);
+  });
+});
+
 test('text typed while a message is still on its way stays in the composer, and is sent next', async ({ page }) => {
   await withChat(page, async () => {
     // Hold the first send's answer until the page shows the agent working, as a slow

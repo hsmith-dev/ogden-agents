@@ -153,6 +153,22 @@ export function createTicketWatcher({ events, entities, bmad, trust, catalog, ti
           }
         }
       }, {
+        // Epic 7: an epic's retrospective file changed (no ticket row did): only with Retrospectives on, for the same watch.
+        onRetrospectiveChange: (epics) => {
+          if (!current.open || watches.get(workspaceId) !== watch || !wanted(workspaceId)) return;
+          try {
+            if (!bmad.pieces(workspaceId).includes('retrospectives')) return;
+          } catch {
+            return;
+          }
+          for (const epic of epics) {
+            try {
+              events.append({ type: 'retrospective.changed', workspaceId, streamId: workspaceId, payload: { epic } });
+            } catch (error) {
+              report(workspaceId, 'append', error);
+            }
+          }
+        },
         // Every read reruns the project's own scripts: only while they are the ones the user allowed (story 4.13).
         beforeRun: async () => {
           try {

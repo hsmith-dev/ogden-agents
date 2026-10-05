@@ -51,6 +51,10 @@ import {
   FEATURE_OFF_MESSAGE,
   LOOK_BACK_EPIC_NOT_FOUND_MESSAGE,
   LOOK_BACK_LABEL,
+  LOOK_BACK_OFFER_TEXT,
+  LOOK_BACK_UNFINISHED_NOTE,
+  BMAD_CAPABILITY_REDUCED_TEXT,
+  RETROSPECTIVE_UNREADABLE_TEXT,
   BMAD_UPGRADE_LABEL,
   PLAN_EMPTY_TITLE,
   PLAN_ENTRY_REDUCED_TEXT,
@@ -104,6 +108,8 @@ const state = vi.hoisted(() => ({
   commitPlan: undefined as unknown,
   /** Look back's answer (story 7.1). */
   lookBack: undefined as unknown,
+  /** The epics whose finished-epic offer was answered with Not now (story 7.4). */
+  dismissed: [] as string[],
 }));
 
 /** The event stream's stand-in: `push` appends events and re-renders what reads them. */
@@ -177,6 +183,11 @@ vi.mock('@/auth/tab-token', () => ({
       if (method === 'POST' && path.endsWith('/commit-plan')) return reply(state.commitPlan);
       if (method === 'POST' && path.endsWith('/builds')) return reply(state.build);
       if (method === 'POST' && path.endsWith('/look-back')) return reply(state.lookBack);
+      if (path.endsWith('/look-back-offers')) return reply({ dismissed: state.dismissed });
+      if (method === 'DELETE' && path.endsWith('/look-back-offer')) {
+        state.dismissed.push(path.split('/').at(-2)!);
+        return new Response(null, { status: 204 });
+      }
       return new Response('{}', { status: 404 });
     },
   },
@@ -234,6 +245,7 @@ beforeEach(() => {
   state.build = undefined;
   state.commitPlan = undefined;
   state.lookBack = undefined;
+  state.dismissed = [];
   stream.events = [];
   stream.caughtUp = true;
 });
@@ -1159,11 +1171,25 @@ describe('Commit plan files on the board (story 5.5)', () => {
   });
 });
 
-describe('Look back on an epic on the board (story 7.1)', () => {
-  it('shows Look back on this epic on each epic header only with Retrospectives on', async () => {
+
+describe('Look back on an epic on the board (stories 7.1 and 7.4)', () => {
+  const LOOK = CatalogSkill.parse({ name: 'bmad-retrospective', description: 'Look back.', label: LOOK_BACK_LABEL, scope: 'epic' });
+  const epicRows = (state_: 'done' | 'review', epic = 'epic-first') => [
+    { ref: '1.1', id: 1, epic, title: 'First', type: 'story', status: state_ === 'done' ? 'done' : 'in-review', state: state_, blocked_reason: '' },
+    { ref: '1.2', id: 2, epic, title: 'Second', type: 'story', status: 'dropped', state: 'dropped', blocked_reason: '' },
+  ];
+  const board = (rows: unknown[], retrospective: unknown = null) =>
+    TicketsResponse.parse({ tickets: rows, problems: [], folder: 'initiative-demo', epics: [{ slug: 'epic-first', id: 1, status: 'active', after: [], blocks: [], retrospective }] });
+  const withLookBack = () => {
+    state.catalog = [LOOK];
+  };
+
+  it('shows the catalog\'s epic action on each epic header only with Retrospectives on', async () => {
+    withLookBack();
     mount(<BoardTickets wsId={WS} />);
     await settle();
-    expect(screen.queryByRole('button', { name: LOOK_BACK_LABEL })).toBeNull();
+    expect(screen.queryByTestId('board-look-back')).toBeNull();
+    expect(state.calls.some((call) => call.endsWith('/catalog'))).toBe(false);
     cleanup();
     mount(<BoardTickets wsId={WS} lookBack={{ onStarted: () => {} }} />);
     await settle();
@@ -1174,6 +1200,7 @@ describe('Look back on an epic on the board (story 7.1)', () => {
   });
 
   it('posts for that epic and hands the new session on', async () => {
+    withLookBack();
     state.lookBack = { session: SESSION };
     const started = vi.fn();
     mount(<BoardTickets wsId={WS} lookBack={{ onStarted: started }} />);
@@ -1186,6 +1213,7 @@ describe('Look back on an epic on the board (story 7.1)', () => {
   });
 
   it('says why in an alert when it is refused, and starts nothing', async () => {
+    withLookBack();
     state.lookBack = { status: 404, code: 'not_found', message: LOOK_BACK_EPIC_NOT_FOUND_MESSAGE };
     const started = vi.fn();
     mount(<BoardTickets wsId={WS} lookBack={{ onStarted: started }} />);
@@ -1194,5 +1222,97 @@ describe('Look back on an epic on the board (story 7.1)', () => {
     await settle();
     expect(screen.getByTestId('board-look-back-error').textContent).toContain(LOOK_BACK_EPIC_NOT_FOUND_MESSAGE);
     expect(started).not.toHaveBeenCalled();
+  });
+
+  it('an epic with tickets not finished says the look back will record it as not accepted, and offers nothing by itself', async () => {
+    withLookBack();
+    state.tickets = board(epicRows('review'));
+    mount(<BoardTickets wsId={WS} lookBack={{ onStarted: () => {} }} />);
+    await settle();
+    expect(screen.getByTestId('board-look-back-note').textContent).toBe(LOOK_BACK_UNFINISHED_NOTE);
+    expect(screen.queryByTestId('board-look-back-offer')).toBeNull();
+  });
+
+  it('a finished epic (every ticket done or dropped) offers Look back and Not now once, and never starts by itself', async () => {
+    withLookBack();
+    state.tickets = board(epicRows('done'));
+    state.lookBack = { session: SESSION };
+    const started = vi.fn();
+    mount(<BoardTickets wsId={WS} lookBack={{ onStarted: started }} />);
+    await settle();
+    expect(screen.getByTestId('board-look-back-offer').textContent).toContain(LOOK_BACK_OFFER_TEXT);
+    expect(screen.queryByTestId('board-look-back-note')).toBeNull();
+    expect(started).not.toHaveBeenCalled();
+    expect(state.calls.some((call) => call.includes('/look-back') && call.startsWith('POST'))).toBe(false);
+    // Not now hides it, kept by the server: a fresh mount still hides it.
+    fireEvent.click(screen.getByTestId('board-look-back-dismiss'));
+    await settle();
+    expect(state.calls).toContain(`DELETE ${apiPath(API_ROUTES.workspaceEpicLookBackOffer, { wsId: WS, epic: 'epic-first' })}`);
+    expect(screen.queryByTestId('board-look-back-offer')).toBeNull();
+    cleanup();
+    mount(<BoardTickets wsId={WS} lookBack={{ onStarted: started }} />);
+    await settle();
+    expect(screen.queryByTestId('board-look-back-offer')).toBeNull();
+    expect(screen.getByTestId('board-look-back')).toBeTruthy();
+  });
+
+  it('the offer\'s Look back starts the look-back', async () => {
+    withLookBack();
+    state.tickets = board(epicRows('done'));
+    state.lookBack = { session: SESSION };
+    const started = vi.fn();
+    mount(<BoardTickets wsId={WS} lookBack={{ onStarted: started }} />);
+    await settle();
+    fireEvent.click(screen.getByTestId('board-look-back-accept'));
+    await settle();
+    expect(started).toHaveBeenCalledWith(SESSION.id);
+  });
+
+  it('an epic that already has its retrospective shows its verdict and date, and no offer', async () => {
+    withLookBack();
+    state.tickets = board(epicRows('done'), { path: '_bmad-output/i/epic-first/epic-first-retrospective.md', verdict: 'accepted-with-open-items', date: '2026-10-05T12:00:00-0600', problem: null });
+    mount(<BoardTickets wsId={WS} lookBack={{ onStarted: () => {} }} />);
+    await settle();
+    const chip = screen.getByTestId('board-retrospective-verdict');
+    expect(chip.textContent).toBe('Accepted with open items, 2026-10-05');
+    expect(chip.getAttribute('data-verdict')).toBe('accepted-with-open-items');
+    expect(screen.queryByTestId('board-look-back-offer')).toBeNull();
+  });
+
+  it('an unreadable verdict shows the one notice line and no chip; with Retrospectives off nothing shows', async () => {
+    withLookBack();
+    state.tickets = board(epicRows('done'), { path: '_bmad-output/i/epic-first/epic-first-retrospective.md', verdict: null, date: null, problem: RETROSPECTIVE_UNREADABLE_TEXT });
+    mount(<BoardTickets wsId={WS} lookBack={{ onStarted: () => {} }} />);
+    await settle();
+    expect(screen.queryByTestId('board-retrospective-verdict')).toBeNull();
+    expect(screen.getByTestId('board-retrospective-problem').textContent).toBe(RETROSPECTIVE_UNREADABLE_TEXT);
+    cleanup();
+    state.calls = [];
+    mount(<BoardTickets wsId={WS} />);
+    await settle();
+    expect(screen.queryByTestId('board-look-back')).toBeNull();
+    expect(screen.queryByTestId('board-look-back-offer')).toBeNull();
+    expect(state.calls.some((call) => call.endsWith('/look-back-offers'))).toBe(false);
+  });
+
+  it('a project whose BMad Method has no look-back step shows the reduced-mode sentence in place of the action', async () => {
+    state.catalog = SKILLS;
+    mount(<BoardTickets wsId={WS} lookBack={{ onStarted: () => {} }} />);
+    await settle();
+    expect(screen.queryByTestId('board-look-back')).toBeNull();
+    expect(screen.getByText(BMAD_CAPABILITY_REDUCED_TEXT.look_back)).toBeTruthy();
+  });
+
+  it('a retrospective.changed event fetches the tickets again, highlighting nothing', async () => {
+    withLookBack();
+    mount(<BoardTickets wsId={WS} lookBack={{ onStarted: () => {} }} />);
+    await settle();
+    const before = state.calls.filter((call) => call === `GET ${apiPath(API_ROUTES.workspaceTickets, { wsId: WS })}`).length;
+    await act(async () => {
+      stream.push({ type: 'retrospective.changed', workspaceId: WS, streamId: WS, seq: 999, id: 'evt_x', at: '2026-10-05T00:00:00.000Z', payload: { epic: 'epic-first' } });
+    });
+    await settle();
+    expect(state.calls.filter((call) => call === `GET ${apiPath(API_ROUTES.workspaceTickets, { wsId: WS })}`).length).toBe(before + 1);
+    expect(document.querySelector('[data-highlighted="true"]')).toBeNull();
   });
 });

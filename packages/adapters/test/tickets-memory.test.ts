@@ -42,6 +42,17 @@ describe('tickets-memory (story 4.2)', () => {
     ]);
   });
 
+  it('emitRetrospective tells each open watch\'s retrospective listener, until it closes (story 7.4)', async () => {
+    const store = createMemoryTicketStore({ repos: { '/repo': tree } });
+    const heard: string[][] = [];
+    const watch = await store.watch('/repo', '_bmad-output', () => {}, { onRetrospectiveChange: (epics) => heard.push(epics) });
+    store.emitRetrospective(['epic-a']);
+    expect(heard).toEqual([['epic-a']]);
+    watch.close();
+    store.emitRetrospective(['epic-b']);
+    expect(heard).toEqual([['epic-a']]);
+  });
+
   it('find answers a ticket with its text, and a missing one is NotFoundError', async () => {
     const store = createMemoryTicketStore({ repos: { '/repo': tree }, text: { '1.2': { description: 'Do two.' } } });
     expect(await store.find('/repo', '1.2', GUARD)).toMatchObject({ ref: '1.2', description: 'Do two.', verify: '', references: [], hasPlan: false });

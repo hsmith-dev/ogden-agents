@@ -47,6 +47,7 @@ const row = (ref: string, status: string) => ({ ref, id: Number(ref.split('.')[1
 function fakeRunner() {
   const state = {
     tickets: [row('1.1', 'draft'), row('1.2', '')],
+    epics: ['epic-a'] as string[],
     fail: false,
     runs: 0,
     inFlight: 0,
@@ -62,7 +63,7 @@ function fakeRunner() {
         if (state.gate !== undefined) await state.gate;
         await sleep(5);
         if (state.fail) throw new ScriptRunError('failed', { exitCode: 1 });
-        return { tickets: state.tickets.map((each) => ({ ...each })), problems: [], folder: 'initiative-demo', epics: [] };
+        return { tickets: state.tickets.map((each) => ({ ...each })), problems: [], folder: 'initiative-demo', epics: state.epics.map((slug) => ({ slug, id: null, status: 'active', after: [], blocks: [] })) };
       } finally {
         state.inFlight--;
       }
@@ -82,6 +83,32 @@ async function watched(repo: string, store: ReturnType<typeof createTicketsV7>, 
 }
 
 const touch = (repo: string, content: string) => writeFileSync(join(repo, '_bmad-output', 'epic-a', 'plan.md'), content);
+
+describe('tickets-v7 watch: retrospective files (epic 7, story 7.4)', () => {
+  it('reports the epic whose retrospective file appeared, changed or went, with no ticket change, and not for the first read', async () => {
+    const repo = tempRepo();
+    const epicFolder = join(repo, '_bmad-output', 'initiative-demo', 'epic-a');
+    mkdirSync(epicFolder, { recursive: true });
+    writeFileSync(join(epicFolder, 'epic-a-retrospective.md'), '---\nverdict: accepted\n---\n');
+    const { state, runner } = fakeRunner();
+    const store = createTicketsV7({ runner, snapshot: fakeSnapshot, script: () => '/x/tickets.py', workDir: repo, watchTiming: TIMING });
+    const refs: string[][] = [];
+    const epics: string[][] = [];
+    const watch = await store.watch(repo, '_bmad-output', (changed) => refs.push(changed), { ...WATCH_GUARD, onRetrospectiveChange: (changed) => epics.push(changed) });
+    watches.push(watch);
+    // The file that was there at the start is the baseline, not a change.
+    expect(epics).toEqual([]);
+    writeFileSync(join(epicFolder, 'epic-a-retrospective.md'), '---\nverdict: rejected\n---\nmore text\n');
+    await waitFor(() => epics.length === 1, 'the retrospective change');
+    expect(epics).toEqual([['epic-a']]);
+    expect(refs).toEqual([]);
+    const runs = state.runs;
+    touch(repo, 'unrelated\n');
+    await waitFor(() => state.runs > runs, 'a rerun');
+    await sleep(100);
+    expect(epics).toHaveLength(1);
+  });
+});
 
 describe('tickets-v7 watch (story 4.8)', () => {
   it('reports only the changed refs; an identical rerun reports nothing; tree always runs', async () => {

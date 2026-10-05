@@ -23,10 +23,10 @@
  */
 import { lstat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
-import type { BmadCatalogPort, BmadRepoDetection } from '@ogden-agents/core';
+import { MAX_RETROSPECTIVE_BYTES, type BmadCatalogPort, type BmadRepoDetection } from '@ogden-agents/core';
 import type { Catalog } from '@ogden-agents/shared';
 import { buildCatalog, missingCapabilities } from './catalog.js';
-import { readDocument } from './document.js';
+import { readDocument, readRetrospective } from './document.js';
 import { scriptsFingerprint } from './scripts-fingerprint.js';
 import { createBmadSetup, type BmadSetupOptions } from './setup.js';
 import { scanSkills } from './skills.js';
@@ -94,6 +94,7 @@ export function createBmadCatalog(options?: BmadSetupOptions | BmadCatalogReadOp
     skills: scanSkills,
     // A document a planning session wrote (story 4.7): confined to the real repo and output folder (`document.ts`).
     readDocument: (repoPath, outputFolder, path) => readDocument(repoPath, outputFolder, path),
+    readRetrospective: (repoPath, outputFolder, epicFolder) => readRetrospective(repoPath, outputFolder, epicFolder, MAX_RETROSPECTIVE_BYTES),
     // The project's own scripts, for the trust bound to their contents (story 4.13).
     scriptsFingerprint,
   };

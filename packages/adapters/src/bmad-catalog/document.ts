@@ -19,9 +19,9 @@
  * `null`. Nothing is written.
  */
 import { constants as fsConstants } from 'node:fs';
-import { open, realpath, stat } from 'node:fs/promises';
+import { lstat, open, readdir, realpath, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { MAX_DOCUMENT_BYTES, RepoRelativePath } from '@ogden-agents/shared';
+import { MAX_DOCUMENT_BYTES, RETROSPECTIVE_FILE_SUFFIX, RepoRelativePath } from '@ogden-agents/shared';
 import { NON_BLOCK, NO_FOLLOW } from '../fs-safe.js';
 import { inside, realRepoRoot } from './skills.js';
 
@@ -127,4 +127,39 @@ export async function readDocument(
     }
   };
   return readCapped(fileReal, limit, stillThere);
+}
+
+/** The most files looked at in one epic folder, so a folder of thousands is not walked. */
+const MAX_EPIC_FOLDER_ENTRIES = 2000;
+
+/**
+ * An epic's retrospective (epic 7): the last file by name ending
+ * `-retrospective.md` directly inside `epicFolder`, which must be a real
+ * folder (not a link) inside `outputFolder`, read as {@link readDocument}
+ * reads (confined, a regular file, capped at `limit`); `null` otherwise.
+ */
+export async function readRetrospective(
+  repoPath: string,
+  outputFolder: string,
+  epicFolder: string,
+  limit: number,
+): Promise<{ path: string; content: string } | null> {
+  const folderParts = segmentsOf(epicFolder);
+  if (folderParts === undefined || segmentsOf(outputFolder) === undefined) return null;
+  const repoReal = await realRepoRoot(repoPath);
+  if (repoReal === undefined) return null;
+  const folder = join(repoReal, ...folderParts);
+  let names: string[];
+  try {
+    // The epic folder itself is never a link, so the listing is the epic's own.
+    if (!(await lstat(folder)).isDirectory()) return null;
+    names = (await readdir(folder)).slice(0, MAX_EPIC_FOLDER_ENTRIES);
+  } catch {
+    return null;
+  }
+  const found = names.filter((name) => name.endsWith(RETROSPECTIVE_FILE_SUFFIX) && name.length > RETROSPECTIVE_FILE_SUFFIX.length).sort().at(-1);
+  if (found === undefined) return null;
+  const path = `${folderParts.join('/')}/${found}`;
+  const read = await readDocument(repoPath, outputFolder, path, limit);
+  return read === null ? null : { path, content: read.content };
 }

@@ -213,3 +213,24 @@ describe('shell mode and the npm check', () => {
     expect((await noticeOf(server, tab.headers)).available).toBeNull();
   });
 });
+
+describe('the shell\'s Quit (launcher token, shell mode only)', () => {
+  it('asks first when sessions are busy, stops when forced, and exists only in shell mode', async () => {
+    const server = await startTestServer({ shell: 'desktop', updates: false });
+    const workspace = server.core.entities.ensureWorkspace(tempDataDir());
+    server.core.entities.createSession({ workspaceId: workspace.id, kind: 'chat', state: 'working' });
+    const tab = await signIn(server);
+
+    expect((await send(server, '/launcher/quit', { method: 'POST', body: '{}' })).status).toBe(401);
+    expect((await send(server, '/launcher/quit', { method: 'POST', headers: json(tab.headers), body: '{}' })).status).toBe(401);
+    const busy = await send(server, '/launcher/quit', { method: 'POST', headers: json(launcher(server)), body: '{}' });
+    expect(busy.status).toBe(409);
+    expect(busy.json()).toMatchObject({ error: { code: 'sessions_busy', details: { busySessions: 1 } } });
+    const forced = await send(server, '/launcher/quit', { method: 'POST', headers: json(launcher(server)), body: '{"force":true}' });
+    expect(forced.status).toBe(202);
+    await server.stopped;
+
+    const plain = await startTestServer({ shell: null, updates: false });
+    expect((await send(plain, '/launcher/quit', { method: 'POST', headers: json(launcher(plain)), body: '{}' })).status).toBe(404);
+  });
+});

@@ -13,6 +13,8 @@ export const NEED_KIND_LABELS: Record<NeedKind, string> = {
   waiting: 'Waiting for your answer',
   check_in: 'Agent is quiet',
   sign_in: 'Sign in needed',
+  run_blocked: 'Build blocked',
+  run_review: 'Ready for review',
 };
 
 export interface NotificationText {

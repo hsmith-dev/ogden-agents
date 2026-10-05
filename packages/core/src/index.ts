@@ -46,6 +46,7 @@ export {
 } from './event-log.js';
 export { newId } from './ids.js';
 export * from './install-settings.js';
+export * from './notifications.js';
 export * from './new-projects.js';
 export * from './onboarding.js';
 export * from './permissions.js';

@@ -178,7 +178,7 @@ describe('notification settings', () => {
   it('keeps valid saved fields and drops the rest', () => {
     expect(parseNotificationSettings('{not json')).toEqual(DEFAULT_NOTIFICATION_SETTINGS);
     const parsed = parseNotificationSettings(JSON.stringify({ desktop: true, sound: 'yes', volume: 7, kinds: { waiting: false, bogus: true }, onlyWhenAway: false }));
-    expect(parsed).toEqual({ desktop: true, sound: true, volume: 1, kinds: { permission: true, waiting: false, check_in: true, sign_in: true }, onlyWhenAway: false });
+    expect(parsed).toEqual({ desktop: true, sound: true, volume: 1, kinds: { permission: true, waiting: false, check_in: true, sign_in: true, run_blocked: true, run_review: true }, onlyWhenAway: false });
   });
 });
 

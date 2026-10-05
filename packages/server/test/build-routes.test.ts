@@ -357,17 +357,7 @@ describe('Unattended builds over REST (story 5.2)', () => {
       expect(await refusalOf(await request(off.server, off.tab, method, path, method === 'GET' ? undefined : {})), `${method} ${path}`).toEqual({ status: 409, code: 'feature_off', message: FEATURE_OFF_MESSAGE });
     }
     // The install's run limits and notifications are not a piece's: 501 with builds off too.
-    for (const [method, path] of [
-      ['GET', API_ROUTES.notificationSettings],
-      ['PATCH', API_ROUTES.notificationSettings],
-      ['POST', API_ROUTES.notificationWebhooks],
-      ['PATCH', apiPath(API_ROUTES.notificationWebhook, { webhookId: 'hook_01J9Z3K4M5N6P7Q8R9S0T1V2W3' })],
-      ['DELETE', apiPath(API_ROUTES.notificationWebhook, { webhookId: 'hook_01J9Z3K4M5N6P7Q8R9S0T1V2W3' })],
-      ['POST', apiPath(API_ROUTES.notificationWebhookTest, { webhookId: 'hook_01J9Z3K4M5N6P7Q8R9S0T1V2W3' })],
-    ] as Array<[string, string]>) {
-      expect((await refusalOf(await request(off.server, off.tab, method, path, method === 'GET' ? undefined : {}))).code, `${method} ${path}`).toBe('not_implemented');
-    }
-
+    // The notification routes are served since 11.4 (notification-routes.test.ts).
     const on = await setup();
     for (const [method, path] of routes(on.wsId)) {
       // Stories 5.4 and 5.8 serve Retry and Stop: an unknown run is 404; 5.8 serves the project's build settings.

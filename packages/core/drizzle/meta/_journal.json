@@ -148,6 +148,13 @@
       "when": 1791222417133,
       "tag": "0020_build_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1791229812612,
+      "tag": "0021_notifications",
+      "breakpoints": true
     }
   ]
 }

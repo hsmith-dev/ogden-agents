@@ -10,6 +10,7 @@ import {
   type BmadSetupUseCases,
   type BoardUseCases,
   type BuildSettings,
+  type Notifications,
   type BuildsUseCases,
   type Chat,
   type EventLog,
@@ -126,6 +127,8 @@ export interface AppOptions {
   builds?: BuildsUseCases;
   /** The install's run limits and a project's build settings (story 5.8). */
   buildSettings?: BuildSettings;
+  /** Notification settings and webhooks (story 11.4). */
+  notifications?: Notifications;
   /** The pinned upstream BMad Method's status and its user-initiated download (story 4.14); without it those routes answer 501. */
   bmadSource?: BmadSourceUseCases;
   /** BMad Method's setup in a project (story 4.3), behind Planning or Board; without it those routes answer 501 once the guard passes. */
@@ -177,6 +180,7 @@ export function createApp({
   board,
   builds,
   buildSettings,
+  notifications,
   bmadSource,
   bmadSetup,
   agentSetup,
@@ -294,7 +298,7 @@ export function createApp({
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerBuildRoutes(app, { bmad, scriptTrust: bmadScriptTrust, builds, buildSettings, log });
   registerSettingsRoutes(app, { installSettings, newProjectDefaults, log });
   // The install's run limits and notification settings (story 5.3; 5.8 and 11.4 fill them): the gate, never a piece's guard.
-  registerRunSettingsRoutes(app, { buildSettings, builds, log });
+  registerRunSettingsRoutes(app, { buildSettings, builds, notifications, log });
   registerUpdateRoutes(app, { updates, desktop: desktopUpdate, shell });
 
   registerEventSocket(app, { events, log, tabs });

@@ -7,6 +7,7 @@ import { createBmadScriptTrust, type BmadScriptTrust } from './bmad-script-trust
 import { createBmadSetup, type BmadSetupUseCases } from './bmad-setup.js';
 import { createBuildSessions, type BuildSessions } from './build-sessions.js';
 import { createBuildSettings, type BuildSettings } from './build-settings.js';
+import { createNotifications, type Notifications, type NotificationsPorts } from './notifications.js';
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
 import { createEntities, type Entities } from './entities.js';
 import { createEventLog, type EventLog, type EventLogOptions } from './event-log.js';
@@ -48,6 +49,8 @@ export interface Core {
   readonly buildSessions: BuildSessions;
   /** Unattended builds' limits and a project's build settings (story 5.8). */
   readonly buildSettings: BuildSettings;
+  /** Notifications for builds (story 11.4): webhooks and what is sent to them, over the server's keychain and sender. Call once. */
+  readonly createNotifications: (ports: NotificationsPorts) => Notifications;
   close(): void;
 }
 
@@ -139,6 +142,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     agentModels,
     buildSessions: createBuildSessions(),
     buildSettings: createBuildSettings({ db, events, entities }),
+    createNotifications: (ports) => createNotifications({ ...ports, db, events, entities, bmad }),
     close: () => {
       try {
         permissions.close();

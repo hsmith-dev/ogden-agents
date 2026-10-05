@@ -37,7 +37,9 @@ export function AttentionNotifier() {
           const notification = new Notification(text.title, { body: text.body, tag: need.id });
           notification.onclick = () => {
             window.focus();
-            void router.navigate({ to: '/w/$wsId/s/$sesId', params: { wsId: need.wsId, sesId: need.sesId } });
+            void (need.reviewRef === undefined
+              ? router.navigate({ to: '/w/$wsId/s/$sesId', params: { wsId: need.wsId, sesId: need.sesId } })
+              : router.navigate({ to: '/w/$wsId/review/$ref', params: { wsId: need.wsId, ref: need.reviewRef } }));
             notification.close();
           };
           return notification;

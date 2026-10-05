@@ -40,3 +40,14 @@ export function createDataDir(dir: string): string {
 export function ensureDataDir(env: NodeJS.ProcessEnv = process.env): string {
   return createDataDir(dataDirPath(env));
 }
+
+/**
+ * Shown when this version meets a database a newer version already migrated
+ * (story 13.6, E13-R5; AD-5). Plain words, no dashes. Kept here, with no
+ * database driver import, so the launcher can show it without loading one.
+ */
+export const DATABASE_NEWER_MESSAGE =
+  'This data folder was last used by a newer version of Ogden Agents, so this older version will not open it. Update Ogden Agents, then open it again. Nothing was changed.';
+
+/** The background server's exit code when it refused a newer database; the launcher then shows {@link DATABASE_NEWER_MESSAGE}. */
+export const EXIT_DATABASE_NEWER = 4;

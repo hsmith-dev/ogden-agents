@@ -5,6 +5,7 @@ import Sqlite from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import * as schema from './schema.js';
+import { guardBeforeMigrating, writeLastVersion } from './upgrade-guard.js';
 
 /** The database file's name inside the data folder. */
 export const DATABASE_FILE = 'ogden-agents.db';
@@ -28,6 +29,12 @@ export interface Database {
 export interface OpenDatabaseOptions {
   /** Override where the SQL migrations are read from (tests). */
   migrationsFolder?: string;
+  /**
+   * The running version (story 13.6). With it, a database a newer version
+   * migrated is refused and an upgrade is backed up first; without it
+   * (tests) a newer database is still refused, and nothing is backed up.
+   */
+  appVersion?: string;
 }
 
 /**
@@ -54,6 +61,9 @@ export function defaultMigrationsFolder(): string {
  */
 export function openDatabase(dataDir: string, options: OpenDatabaseOptions = {}): Database {
   const file = join(dataDir, DATABASE_FILE);
+  const migrationsFolder = options.migrationsFolder ?? defaultMigrationsFolder();
+  // Before anything writes: refuse a newer database, back up before an upgrade (story 13.6).
+  guardBeforeMigrating({ dataDir, file, migrationsFolder, version: options.appVersion });
   const sqlite = new Sqlite(file);
   try {
     if (process.platform !== 'win32') chmodSync(file, 0o600);
@@ -62,7 +72,8 @@ export function openDatabase(dataDir: string, options: OpenDatabaseOptions = {})
     sqlite.pragma('foreign_keys = ON');
     sqlite.pragma('busy_timeout = 5000');
     const orm = drizzle({ client: sqlite, schema });
-    migrate(orm, { migrationsFolder: options.migrationsFolder ?? defaultMigrationsFolder() });
+    migrate(orm, { migrationsFolder });
+    if (options.appVersion !== undefined) writeLastVersion(dataDir, options.appVersion);
     return {
       sqlite,
       orm,

@@ -60,8 +60,8 @@
  * Core names no skill, VCS, sandbox or agent (AD-1, AD-12).
  */
 import { randomBytes } from 'node:crypto';
-import { lstatSync, mkdirSync } from 'node:fs';
-import { join, posix } from 'node:path';
+import { lstatSync, mkdirSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, posix, relative } from 'node:path';
 import {
   ALL_READY_NOT_AVAILABLE_MESSAGE,
   ALREADY_MERGED_MESSAGE,
@@ -118,7 +118,7 @@ import type { BmadScriptTrust } from './bmad-script-trust.js';
 import type { BmadSourceUseCases } from './bmad-source-port.js';
 import { BUILD_PERMISSION_DENIED, decideBuildPermission, nodePathNormalizer, type PathNormalizer } from './build-permission-policy.js';
 import type { BuildRunnerPort } from './build-runner-port.js';
-import { createRunActivityRecorder, runFolderOf, writeRunResult } from './build-run-folder.js';
+import { createRunActivityRecorder, runFolderOf, runShortOf, writeRunResult } from './build-run-folder.js';
 import type { BuildSessions } from './build-sessions.js';
 import type { Chat } from './chat/types.js';
 import type { Entities } from './entities.js';
@@ -282,14 +282,20 @@ export function atCheckpoint(run: Pick<Run, 'outcome' | 'blockedCode' | 'decisio
 /**
  * The intent-gap patch beside `plan` in `worktree` (the skill saves it named
  * after the plan, `.patch` for `.md`), repo-relative, when it is a regular
- * file under `_bmad-output/`; else `null`.
+ * file whose real path is under the worktree's own `_bmad-output/` (never
+ * through a link out of it); else `null`.
  */
 export function intentGapPatchOf(worktree: string, plan: string | null): string | null {
   if (plan === null || !plan.startsWith(BMAD_OUTPUT_PREFIX) || !plan.endsWith('.md')) return null;
   const patch = `${plan.slice(0, -'.md'.length)}.patch`;
   if (patch.split('/').some((segment) => segment === '..' || segment === '.' || segment === '')) return null;
   try {
-    return lstatSync(join(worktree, ...patch.split('/'))).isFile() ? patch : null;
+    const file = join(worktree, ...patch.split('/'));
+    if (!lstatSync(file).isFile()) return null;
+    const output = realpathSync.native(join(worktree, BMAD_OUTPUT_PREFIX));
+    const real = realpathSync.native(file);
+    const rel = relative(output, real);
+    return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel) && realpathSync.native(worktree) === dirname(output) ? patch : null;
   } catch {
     return null;
   }
@@ -323,13 +329,15 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
    * result that can't be written is reported, and the run goes on.
    */
   const writeResult = async (run: Run, repoPath: string, ticket: TicketDetail | undefined, reason: string | null, blocked: boolean): Promise<void> => {
+    const short = runShortOf(run);
+    if (short === undefined) return;
     try {
       await recorder.flushed(run.id);
       const status = ticket?.status ?? null;
       const known = status !== null && RESULT_STATUSES.has(status) ? (status as BuildRunResult['status']) : null;
       const commit = run.branch !== null && isBuildBranch(run.branch) ? ((await vcs.branchRevision(repoPath, run.branch)) ?? null) : null;
       const condition = known === 'blocked' && ticket !== undefined && (ticket.blocked_reason ?? '').trim() !== '' ? mask(ticket.blocked_reason ?? '').slice(0, MAX_RESULT_TEXT) : null;
-      await writeRunResult(runFolderOf(dataDir, run.id), {
+      await writeRunResult(runFolderOf(dataDir, short), {
         version: 1,
         runId: run.id,
         ticketRef: run.ticketRef,
@@ -452,6 +460,17 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     }
   };
 
+  /**
+   * Whether the ticket of `run` has `done_checkpoint`, read in the main
+   * checkout (review): never in the worktree, whose `tickets.toml` the agent
+   * can edit without committing. The project's scripts must still be the
+   * trusted ones before `tickets.py` runs there.
+   */
+  const doneCheckpointOf = async (run: Run, repoPath: string): Promise<boolean> => {
+    await trust.requireScriptsUnchanged(run.workspaceId);
+    return (await tickets.find(repoPath, run.ticketRef)).done_checkpoint === true;
+  };
+
   /** Works out a finished turn's outcome (see the header). */
   const decideOutcome = async (run: Run, ended: 'idle' | 'error', options: { passedDone?: boolean } = {}): Promise<void> => {
     if (run.worktreePath === null) return;
@@ -470,7 +489,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       await trust.requireScriptsMatch(run.workspaceId, run.worktreePath);
       ticket = await tickets.find(run.worktreePath, run.ticketRef);
       const status = ticket.status ?? '';
-      if (status === 'built' && ticket.done_checkpoint === true && options.passedDone !== true) {
+      if (status === 'built' && options.passedDone !== true && (await doneCheckpointOf(run, repoPath))) {
         // The done checkpoint (story 5.4): paused before the end checks; `resume` runs them.
         outcome = 'blocked';
         blockedCode = 'checkpoint_done';
@@ -548,7 +567,13 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     }
     const resumed = entities.setRunOutcome(run.id, 'running', null);
     if (run.blockedCode === 'checkpoint_plan') {
-      chat.sendMessage(workspaceId, run.sessionId, runner.invocation(run.ticketRef, { note }), { build: true });
+      try {
+        chat.sendMessage(workspaceId, run.sessionId, runner.invocation(run.ticketRef, { note }), { build: true });
+      } catch (error) {
+        // Nothing was sent: the run stays paused at its checkpoint (review), never `running` with no agent.
+        entities.setRunOutcome(run.id, 'blocked', run.reason, { blockedCode: 'checkpoint_plan' });
+        throw error;
+      }
       return resumed;
     }
     await track(run.id, () => decideOutcome(resumed, 'idle', { passedDone: true }));
@@ -697,6 +722,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       if (!parsed.success) throw new ValidationError('That is not a retry request.', parsed.error.issues.map((each) => ({ path: each.path, message: each.message })));
       const run = entities.getRun(checked);
       if (run === undefined || run.workspaceId !== workspaceId) throw new NotFoundError('run', checked);
+      // Nothing to retry for a run still going, ready for review or decided (review: 409 as the route says).
+      if (run.outcome === 'running' || run.outcome === 'verified' || run.decision !== null) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
       // A checkpoint pause resumes (story 5.4); every other Retry is 5.8's.
       if (parsed.data.mode !== 'resume' || !atCheckpoint(run)) throw new NotImplementedError(RETRY_NOT_AVAILABLE_MESSAGE);
       return serializedByRepo(repoPath, () => resumeLocked(workspaceId, repoPath, checked, parsed.data.note));

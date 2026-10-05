@@ -103,10 +103,10 @@ export const TicketDetail = TicketRow.extend({
   /**
    * Whether a build of this ticket pauses before its prompt is sent, and
    * after the plan is `built` (story 5.4; read from the entry in
-   * `tickets.toml`, which `tickets.py find` doesn't report). Absent means `false`.
+   * `tickets.toml`, which `tickets.py find` doesn't report). Default `false`.
    */
-  plan_checkpoint: z.boolean().optional(),
-  done_checkpoint: z.boolean().optional(),
+  plan_checkpoint: z.boolean().default(false),
+  done_checkpoint: z.boolean().default(false),
 });
 export type TicketDetail = z.infer<typeof TicketDetail>;
 

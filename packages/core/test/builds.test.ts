@@ -92,8 +92,8 @@ function fakeTickets(repoPath: string) {
       unknown: '',
       hasPlan: status !== '',
       plan: status === '' ? null : PLAN,
-      plan_checkpoint: checkpoints.get(ticket.ref)?.plan === true,
-      done_checkpoint: checkpoints.get(ticket.ref)?.done === true,
+      plan_checkpoint: (checkpoints.get(`${path}:${ticket.ref}`) ?? checkpoints.get(ticket.ref))?.plan === true,
+      done_checkpoint: (checkpoints.get(`${path}:${ticket.ref}`) ?? checkpoints.get(ticket.ref))?.done === true,
     };
   };
   const store: TicketStorePort = {
@@ -120,7 +120,8 @@ function fakeTickets(repoPath: string) {
       if (reason !== undefined) reasons.set(`${path}:${ref}`, reason);
     },
     status: (path: string, ref: string) => statusIn(path).get(ref),
-    checkpoint: (ref: string, which: { plan?: boolean; done?: boolean }) => void checkpoints.set(ref, which),
+    /** The ticket's checkpoint flags everywhere, or only in the folder `path` (a worktree the agent edited). */
+    checkpoint: (ref: string, which: { plan?: boolean; done?: boolean }, path?: string) => void checkpoints.set(path === undefined ? ref : `${path}:${ref}`, which),
   };
 }
 
@@ -207,6 +208,8 @@ interface Harness {
   fingerprints: Map<string, string>;
   worktreeFingerprint: { value: string };
   sandbox: { available: boolean };
+  /** Makes the next build prompts fail to send (a chat that refuses them). */
+  sendFails: { value: boolean };
   /** Ends the build session's turn (working, then `idle` or `error`) and waits for the outcome. */
   endTurn(sessionId: SessionId, state?: 'idle' | 'error'): Promise<void>;
 }
@@ -235,6 +238,7 @@ async function harness({ pieces = ['board', 'builds'] as const, trusted = true }
   const sent: Array<{ sessionId: SessionId; text: string }> = [];
   const released: SessionId[] = [];
   const sandbox = { available: true };
+  const sendFails = { value: false };
   const builds = createBuilds({
     bmad: core.bmad,
     trust: core.bmadScriptTrust,
@@ -249,6 +253,7 @@ async function harness({ pieces = ['board', 'builds'] as const, trusted = true }
       createChatSession: async (wsId, options) => core.entities.createSession({ workspaceId: wsId, kind: options?.kind ?? 'chat' }),
       sendMessage: (_wsId, sessionId, text, options) => {
         if (options?.build !== true) throw new Error('a build session takes only the build prompt');
+        if (sendFails.value) throw new Error('the chat refused it');
         sent.push({ sessionId, text });
         return { messageId: 'msg_1', queued: false };
       },
@@ -270,6 +275,7 @@ async function harness({ pieces = ['board', 'builds'] as const, trusted = true }
     fingerprints,
     worktreeFingerprint,
     sandbox,
+    sendFails,
     async endTurn(sessionId, state = 'idle') {
       core.entities.setSessionState(sessionId, 'working');
       core.entities.setSessionState(sessionId, state, state === 'error' ? { reason: 'It broke.' } : {});
@@ -627,7 +633,9 @@ describe('review loop 1 hardening (story 5.2)', () => {
 });
 
 describe('the run folder and checkpoint pauses (story 5.4)', () => {
-  const resultIn = (h: Harness, runId: string) => BuildRunResult.parse(JSON.parse(readFileSync(join(h.dataDir, 'r', runId, BUILD_RESULT_FILE), 'utf8')));
+  /** The run's folder: `<data>/r/<run8>`, the run's 8-character id. */
+  const folderOf = (h: Harness, runId: string) => join(h.dataDir, 'r', h.core.entities.getRun(runId as never)!.branch!.split('/')[1]!);
+  const resultIn = (h: Harness, runId: string) => BuildRunResult.parse(JSON.parse(readFileSync(join(folderOf(h, runId), BUILD_RESULT_FILE), 'utf8')));
 
   it("writes the per-run result when the run ends: the plan's status, the branch head, the base; null for an unreadable plan", async () => {
     const h = await harness();
@@ -636,9 +644,10 @@ describe('the run folder and checkpoint pauses (story 5.4)', () => {
     await h.endTurn(session.id);
     expect(resultIn(h, run.id)).toMatchObject({ version: 1, runId: run.id, ticketRef: '1.1', status: 'built', commit: 'b'.repeat(40), baseRevision: REVISION, blockedCondition: null, blockedReason: null, intentGapPatch: null });
     await h.builds.recorded();
-    const activity = readFileSync(join(h.dataDir, 'r', run.id, BUILD_ACTIVITY_FILE), 'utf8');
+    const activity = readFileSync(join(folderOf(h, run.id), BUILD_ACTIVITY_FILE), 'utf8');
     expect(activity).toContain('"type":"run.outcome_changed"');
-    expect(statSync(join(h.dataDir, 'r', run.id, BUILD_RESULT_FILE)).isFile()).toBe(true);
+    expect(statSync(join(folderOf(h, run.id), BUILD_RESULT_FILE)).isFile()).toBe(true);
+    expect(folderOf(h, run.id)).toBe(join(h.dataDir, 'r', run.worktreePath!.split(/[\\/]/).at(-1)!));
 
     const unreadable = await harness();
     const two = await unreadable.builds.start(unreadable.wsId, { ref: '1.1' });
@@ -674,9 +683,9 @@ describe('the run folder and checkpoint pauses (story 5.4)', () => {
     h.tickets.set(run.worktreePath!, '1.1', 'built');
     await h.endTurn(session.id);
     expect(h.core.entities.getRun(run.id)?.outcome).toBe('verified');
-    // Not at a checkpoint any more: resume refuses, Retry is 5.8's.
+    // Not at a checkpoint any more: resume and Retry refuse a run ready for review.
     expect(await codeOf(h.builds.resume(h.wsId, run.id))).toBe('run_not_active');
-    expect(((await refusal(h.builds.retry(h.wsId, run.id, {}))) as Error).name).toBe('NotImplementedError');
+    expect(await codeOf(h.builds.retry(h.wsId, run.id, {}))).toBe('run_not_active');
   });
 
   it("resume after a restart rebuilds the session's setup; it fails closed without a sandbox or worktree, and takes the guards", async () => {
@@ -723,5 +732,32 @@ describe('the run folder and checkpoint pauses (story 5.4)', () => {
     expect(await h.builds.resume(h.wsId, run.id)).toMatchObject({ outcome: 'failed', reason: RUN_REASON_EMPTY_DIFF });
     expect(h.sent).toHaveLength(1);
   });
-});
 
+  it("done_checkpoint is read in the main checkout, never the worktree's tickets.toml the agent can edit", async () => {
+    const h = await harness();
+    h.tickets.checkpoint('1.1', { done: true });
+    const { run, session } = await h.builds.start(h.wsId, { ref: '1.1' });
+    h.tickets.checkpoint('1.1', { done: false }, run.worktreePath!);
+    h.tickets.set(run.worktreePath!, '1.1', 'built');
+    await h.endTurn(session.id);
+    expect(h.core.entities.getRun(run.id)?.blockedCode).toBe('checkpoint_done');
+  });
+
+  it('resume and Retry refuse a running run (run_not_active); Retry of another blocked run is 5.8s (501); a refused prompt keeps the pause', async () => {
+    const h = await harness();
+    const running = await h.builds.start(h.wsId, { ref: '1.1' });
+    expect(await codeOf(h.builds.resume(h.wsId, running.run.id))).toBe('run_not_active');
+    expect(await codeOf(h.builds.retry(h.wsId, running.run.id, {}))).toBe('run_not_active');
+    h.tickets.set(running.run.worktreePath!, '1.1', 'blocked', 'unclear intent');
+    await h.endTurn(running.session.id);
+    expect(await codeOf(h.builds.resume(h.wsId, running.run.id))).toBe('run_not_active');
+    expect(((await refusal(h.builds.retry(h.wsId, running.run.id, {}))) as Error).name).toBe('NotImplementedError');
+
+    const paused = await harness();
+    paused.tickets.checkpoint('1.1', { plan: true });
+    const { run } = await paused.builds.start(paused.wsId, { ref: '1.1' });
+    paused.sendFails.value = true;
+    expect(((await refusal(paused.builds.resume(paused.wsId, run.id))) as Error).message).toBe('the chat refused it');
+    expect(paused.core.entities.getRun(run.id)).toMatchObject({ outcome: 'blocked', blockedCode: 'checkpoint_plan' });
+  });
+});

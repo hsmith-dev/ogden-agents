@@ -48,6 +48,10 @@ describe('checkpoint flags from tickets.toml (story 5.4)', () => {
     expect(checkpointsFromToml(TOML, 'leaf')).toEqual({ plan_checkpoint: true, done_checkpoint: false });
     expect(checkpointsFromToml(TOML, 9)).toEqual({ plan_checkpoint: false, done_checkpoint: false });
     expect(checkpointsFromToml('plan_checkpoint = true\n', 1)).toEqual({ plan_checkpoint: false, done_checkpoint: false });
+    // A multi-line string's lines are never keys or headers; a nested array's line is not a header.
+    const multi = `[[entry]]\nid = 3\ndescription = \"\"\"\n[a link](x)\nplan_checkpoint = true\n\"\"\"\nmatrix = [\n  [\"a\"],\n]\ndone_checkpoint = true\n`;
+    expect(checkpointsFromToml(multi, 3)).toEqual({ plan_checkpoint: false, done_checkpoint: true });
+    expect(checkpointsFromToml(`[[entry]]\nid = 4\nnote = '''one line'''\nplan_checkpoint = true\n`, 4)).toEqual({ plan_checkpoint: true, done_checkpoint: false });
   });
 
   it('reads the file beside the epic file inside the repo; never a link, a file outside it or one too large', async () => {

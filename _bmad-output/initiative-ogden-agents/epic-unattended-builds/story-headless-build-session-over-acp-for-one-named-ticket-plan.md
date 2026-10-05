@@ -82,9 +82,9 @@ context:
 ## Implementation Notes
 
 - 2026-10-04 (build): implemented directly by the build session from this plan (no implementation subagent: the plan's context was already loaded, and 5.3's subagent attempt stalled), in local milestone commits.
-- The run folder is `<data>/r/<runId>` (the run's id, validated as a `RunId`, rather than the worktree's 8-character id): unique, never derived from a path, still short for Windows. `build-run-folder.ts` holds `runFolderOf`, `writeRunResult` (parsed with `BuildRunResult`, temp file `wx` then rename, folder `0o700`, file `0o600`) and the activity recorder (an event-log subscriber from `lastSeq`; a stream is a build run's when its session is `build` and has a run; lines masked again with the builds `mask`; `session.message_delta` skipped; per-run serialized appends; bound injectable for tests).
+- The run folder is `<data>/r/<run8>` (review: first built as `<data>/r/<runId>`, a deviation from the Intent; now the run's 8-character id from its branch, validated as `[a-z2-7]{8}`). `build-run-folder.ts` holds `runFolderOf`, `writeRunResult` (parsed with `BuildRunResult`, temp file `wx` then rename, folder `0o700`, file `0o600`) and the activity recorder (an event-log subscriber from `lastSeq`; a stream is a build run's when its session is `build` and has a run; lines masked again with the builds `mask`; `session.message_delta` skipped; per-run serialized appends; bound injectable for tests).
 - `TicketDetail` gained optional `plan_checkpoint`/`done_checkpoint` (absent means false, so 4.x fixtures stay valid); `tickets-v7` reads them in `checkpoints.ts` from `<dirname(epic_file)>/tickets.toml` (regular file, real path inside the repo, at most 1 MiB, only `key = true` lines in the `[[entry]]` whose `id` matches). `tickets-memory` and the plan-file fixture store take them too.
-- Core: the result is written at every stop (plan pause, done pause, end of run), never failing the run; `networkFailure` is set when the run's recorded activity holds a no-network error (ENOTFOUND, EAI_AGAIN, getaddrinfo, could not resolve host, …); `blockedCondition` is the plan's `blocked_reason` masked, `blockedReason` the run's own reason. `resume` and `retry` are on `BuildsUseCases`; Retry with `mode: resume` on a checkpoint run resumes (its note reaches the plan-checkpoint prompt through `runner.invocation`); every other Retry is `NotImplementedError` (501) until 5.8. `RETRY_NOT_AVAILABLE_MESSAGE` added to shared.
+- Core: the result is written at every stop (plan pause, done pause, end of run), never failing the run; `networkFailure` is set when the agent's own message or a tool call title in the run holds a no-network error (ENOTFOUND, EAI_AGAIN, getaddrinfo, could not resolve host, …; events carry no tool output); `blockedCondition` is the plan's `blocked_reason` masked, `blockedReason` the run's own reason. `resume` and `retry` are on `BuildsUseCases`; Retry with `mode: resume` on a checkpoint run resumes (its note reaches the plan-checkpoint prompt through `runner.invocation`); Retry of a run running, ready for review or decided is 409 `run_not_active`; every other Retry is `NotImplementedError` (501) until 5.8. `RETRY_NOT_AVAILABLE_MESSAGE` added to shared.
 - A plan-checkpoint pause never started the agent, so a resume after a restart needs no agent-session reset: rebuilding the in-memory setup is enough, and the prompt starts a fresh agent session in the worktree.
 - The fake ACP agent's `FAKE_ACP_BUILD_CHILD=<file>` leaves a command running; the server test checks the agent and that child are gone once the run ends (`releaseAgent` → `killProcessTree`).
 - Not here: the attended build (permission cards for every tool call) has no start path until 5.6, so `BuildSessionSetup` still always carries the deny-by-default policy. Follow-up when the lines meet: move the build session onto epic 6's `acp-base` client and `adapters/src/child-env.ts` (neither is on this lineage; the existing Claude Code adapter and env allowlist are kept).
@@ -93,11 +93,34 @@ context:
 
 ## Review Triage Log
 
+- 2026-10-04, pass 1 (lenses quick, security): high 1, medium 7, low 9, false 0, maybe-false 0. Routed: patch 12, defer 2, reject 6. No intent_gap or bad_plan: each patched defect is local to a function this story added.
+  - Q1 / S1 the agent can switch off `done_checkpoint` by editing the worktree's `tickets.toml` uncommitted -- high, patch: read in the main checkout after `requireScriptsUnchanged`; test.
+  - Q2 Retry of a running or verified run answered 501, the route doc says 409 -- medium, patch: `run_not_active` for running, verified or decided runs; other blocked runs stay 501 (5.8); tests for running, other blocked, verified.
+  - Q3 / S8 Retry's body limit (1 KiB) smaller than its 4,000-character note -- medium, patch: own 64 KiB limit; test with the longest note.
+  - Q4 / S7 a resume whose prompt can't be sent left the run `running` forever -- medium, patch: the pause is restored and the error thrown; test.
+  - Q5 Retry's note dropped on the done checkpoint -- low, reject: no prompt follows a done pause; harmless.
+  - Q6 run folder `<data>/r/<runId>` against the Intent's `<run8>` -- medium, patch: `runFolderOf(dataDir, run8)` from the run's branch.
+  - Q7 / S6b `networkFailure` set by any text, the user's included -- medium, patch: only the agent's messages and tool call titles; test with a user message. That the agent can set it in its own words is by design (no tool output in events): reject that part.
+  - Q8 `networkFailure` lost across a restart -- low, reject: a done pause resumed after a restart only; fix would read the old result back.
+  - Q9 / S6a truncation not kept across a restart -- low, patch: a file ending in the marker, or at its bound, stays truncated; test.
+  - Q10 `session.created` before the run exists is not in the activity -- low, reject: the activity starts at the run; nothing the run view needs is lost.
+  - Q11 mid-turn release not tested -- medium, patch: server test stops the server mid-turn and checks the agent and its child are gone.
+  - Q12 checkpoint flags optional, not defaulted -- low, patch: `.default(false)`.
+  - Q13 / S2 the checkpoint reader misread multi-line strings and nested-array lines (fail open, shadow entries) -- medium, patch: multi-line strings skipped, only real table headers end an entry; tests. `bmad-catalog/toml.ts` keeps no booleans, so it can't be reused.
+  - Q14 intent-gap patch path through a symlinked folder -- low, patch: real path must be inside the worktree's own `_bmad-output/`.
+  - Q15 fixture child without an `error` handler -- low, patch.
+  - S3 FIFO or link swapped in between the reader's checks and its open -- medium, patch: `O_NOFOLLOW | O_NONBLOCK` and `fstat` on the opened handle.
+  - S4 a descendant that leaves the process group (`setsid`) or whose parent exited on Windows survives `killProcessTree` -- medium, defer: pre-existing (9.6's `process-tree.ts`); the sandbox still holds it.
+  - S5 the second mask ran on JSON-escaped text -- low, patch: every string masked before encoding; test with a quote.
+  - S6c run folders and in-memory maps are never pruned -- low, defer: retention belongs with run cleanup (5.8, 11.1).
+  - S7b resume doesn't re-check the ticket's status or a newer run -- low, reject: start refuses while the latest run is paused, and the plan's status is read when the turn ends.
+
 ## Design Notes
 
 - One run folder per run, `<data>/r/<run8>` (the worktree's short id), short for Windows paths.
 - NDJSON lines are the stored events (`seq`, `at`, `type`, `payload`) of the run's session stream, so they match the session view (AD-5).
-- `networkFailure` is set when a tool call's recorded output in the run matches common no-network errors (`ENOTFOUND`, `EAI_AGAIN`, `getaddrinfo`, `Could not resolve host`).
+- `networkFailure` is set when the agent's own messages or tool call titles in the run match common no-network errors (`ENOTFOUND`, `EAI_AGAIN`, `getaddrinfo`, `Could not resolve host`): the events carry no tool output.
+- `done_checkpoint` is read in the main checkout at the turn's end (after the scripts check), never in the worktree, whose `tickets.toml` the agent can edit.
 - Follow-ups: move the build session onto epic 6's `acp-base` client and `child-env.ts` when the lines meet.
 
 ## Verification

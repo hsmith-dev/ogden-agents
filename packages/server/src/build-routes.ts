@@ -18,9 +18,10 @@
  * - `POST …/builds/:ref/reject` → `ReviewResponse`; 409 `run_active`, `checks_failed`.
  * - `GET …/sessions/:sesId/run` → `SessionRunResponse`: a `build` session's run; 404 otherwise.
  * - `POST …/runs/:runId/retry` `RetryRunRequest` (story 5.4) → `RunResponse`
- *   for a run paused at a checkpoint (it resumes); 501 for any other run
- *   until 5.8; 400 for a malformed body or run id, 404 for another
- *   workspace's run, 409 `run_not_active`, `sandbox_unavailable`.
+ *   for a run paused at a checkpoint (it resumes); 409 `run_not_active` for
+ *   a run running, ready for review or decided; 501 for any other run until
+ *   5.8; 400 for a malformed body or run id, 404 for another workspace's
+ *   run, 409 `sandbox_unavailable`.
  *
  * Story 5.3 pre-registers the rest of epics 5 and 11, each behind the same
  * guard and trust, answering 501 `not_implemented` (no body read) until its
@@ -52,6 +53,8 @@ import type { Logger } from './log.js';
 
 /** `{"ref": "<at most 128 characters>"}` with room to spare. */
 const MAX_BUILD_BODY_BYTES = 1024;
+/** `RetryRunRequest`: a note of up to `MAX_RUN_NOTE_LENGTH` characters, each up to 4 UTF-8 bytes, JSON-escaped, with room to spare. */
+const MAX_RETRY_BODY_BYTES = 64 * 1024;
 
 export interface BuildRoutesOptions {
   /** Core's guard (AD-22). */
@@ -87,6 +90,7 @@ export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, log 
   };
 
   const limit = bodyLimit({ maxSize: MAX_BUILD_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', 'That request is too large.') });
+  const retryLimit = bodyLimit({ maxSize: MAX_RETRY_BODY_BYTES, onError: (c) => apiError(c, 413, 'invalid_request', 'That request is too large.') });
   routes.post('builds', API_ROUTES.workspaceBuilds, async (c, { workspaceId }) => {
     if (builds === undefined) return notImplemented(c);
     let response: Response | undefined;
@@ -162,7 +166,7 @@ export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, log 
   routes.post('builds', API_ROUTES.runRetry, async (c, { workspaceId }) => {
     if (builds === undefined) return notImplemented(c);
     let response: Response | undefined;
-    const tooLarge = await limit(c, async () => {
+    const tooLarge = await retryLimit(c, async () => {
       let body: unknown = {};
       const text = await c.req.text();
       if (text.trim() !== '') {

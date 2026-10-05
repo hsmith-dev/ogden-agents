@@ -1,6 +1,8 @@
 /**
  * A build run's folder in Ogden Agents' data folder (story 5.4; AD-17,
- * bmad-integration.md Upstream extensions): `<data>/r/<runId>`, never in the
+ * bmad-integration.md Upstream extensions): `<data>/r/<run8>` (the run's
+ * 8-character id, as its worktree `<data>/w/<run8>` and branch
+ * `ogden/<run8>/…` have it; short for Windows), never in the
  * repo or the run's worktree, which the sandboxed agent can't read (its
  * sandbox denies the data folder). It holds:
  *
@@ -19,13 +21,13 @@
  * agent or skill here (AD-1, AD-12).
  */
 import { randomBytes } from 'node:crypto';
-import { appendFile, lstat, mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, lstat, mkdir, open, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { BUILD_ACTIVITY_FILE, BUILD_RESULT_FILE, BuildRunResult, RunId, type CoreEvent, type SessionId } from '@ogden-agents/shared';
+import { BUILD_ACTIVITY_FILE, BUILD_RESULT_FILE, BuildRunResult, type CoreEvent, type SessionId } from '@ogden-agents/shared';
 import type { Entities } from './entities.js';
 import type { EventLog } from './event-log.js';
 
-/** The folder of every run's folder, inside Ogden Agents' data folder: `<data>/r/<runId>`. */
+/** The folder of every run's folder, inside Ogden Agents' data folder: `<data>/r/<run8>`. */
 export const RUNS_DIR = 'r';
 
 /** The most bytes of a run's activity file; past it, one `activity.truncated` line and nothing more. */
@@ -35,12 +37,53 @@ export const MAX_ACTIVITY_BYTES = 32 * 1024 * 1024;
 const RECORDED = /^(session|permission|run)\./;
 const SKIPPED: ReadonlySet<string> = new Set(['session.message_delta']);
 
-/** Words in a run's activity that say a command failed for want of network (builds have none; story 5.2 decision). */
+/**
+ * Words in the agent's own messages or tool calls that say a command failed
+ * for want of network (builds have none; story 5.2 decision). Never read in
+ * a user's message, a permission event or a run event.
+ */
 export const NO_NETWORK_PATTERN = /\b(ENOTFOUND|EAI_AGAIN|getaddrinfo|could not resolve host|network is unreachable|temporary failure in name resolution)\b/i;
 
-/** Run `runId`'s folder in `dataDir`. Throws for anything that isn't a run id (never a path from elsewhere). */
-export function runFolderOf(dataDir: string, runId: string): string {
-  return join(dataDir, RUNS_DIR, RunId.parse(runId));
+/** The run's 8-character id from its branch (`ogden/<run8>/…`), or `undefined` for a run without one. */
+export function runShortOf(run: { branch: string | null }): string | undefined {
+  return run.branch === null ? undefined : /^ogden\/([a-z2-7]{8})\//.exec(run.branch)?.[1];
+}
+
+/** The folder of the run whose 8-character id is `runShort` in `dataDir`. Throws for anything else (never a path from elsewhere). */
+export function runFolderOf(dataDir: string, runShort: string): string {
+  if (!/^[a-z2-7]{8}$/.test(runShort)) throw new Error('not a run id');
+  return join(dataDir, RUNS_DIR, runShort);
+}
+
+/** `value` with every string in it masked. */
+function maskStrings(value: unknown, mask: (text: string) => string): unknown {
+  if (typeof value === 'string') return mask(value);
+  if (Array.isArray(value)) return value.map((each) => maskStrings(each, mask));
+  if (value !== null && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, each]) => [key, maskStrings(each, mask)]));
+  return value;
+}
+
+/** The line that ends a run's activity at its bound. */
+const TRUNCATED_LINE = `${JSON.stringify({ type: 'activity.truncated' })}\n`;
+
+/** The last `count` bytes of `file`, as text. */
+async function lastBytes(file: string, count: number): Promise<string> {
+  const handle = await open(file, 'r');
+  try {
+    const { size } = await handle.stat();
+    const buffer = Buffer.alloc(Math.min(count, size));
+    await handle.read(buffer, 0, buffer.length, size - buffer.length);
+    return buffer.toString('utf8');
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Whether `event` is the agent's own message or tool call naming a no-network failure. */
+function saysNoNetwork(event: CoreEvent): boolean {
+  if (event.type === 'session.message_completed') return event.payload.role === 'agent' && NO_NETWORK_PATTERN.test(event.payload.content);
+  if (event.type === 'session.tool_call' || event.type === 'session.tool_call_updated') return NO_NETWORK_PATTERN.test(event.payload.title);
+  return false;
 }
 
 /** Makes `folder` (`0o700`), refusing one that is a link. */
@@ -100,11 +143,11 @@ interface RunLog {
 /** Follows the event log from now on and appends each build run's session events to its activity file. */
 export function createRunActivityRecorder(deps: RunActivityRecorderDeps): RunActivityRecorder {
   const { events, entities, dataDir, mask } = deps;
-  /** Each session stream's run, or `null` for a stream that is not a build's (looked up once). */
-  const streams = new Map<string, string | null>();
+  /** Each session stream's run (its id and folder), or `null` for a stream that is not a build's (looked up once). */
+  const streams = new Map<string, { runId: string; folder: string } | null>();
   const logs = new Map<string, RunLog>();
 
-  const runOfStream = (streamId: string): string | undefined => {
+  const runOfStream = (streamId: string): { runId: string; folder: string } | undefined => {
     const known = streams.get(streamId);
     if (known !== undefined) return known ?? undefined;
     if (!streamId.startsWith('ses_')) {
@@ -118,19 +161,30 @@ export function createRunActivityRecorder(deps: RunActivityRecorderDeps): RunAct
     }
     // A build session before its run exists (its `session.created`) is looked up again next time.
     const run = entities.getRunBySession(streamId as SessionId);
-    if (run !== undefined) streams.set(streamId, run.id);
-    return run?.id;
+    if (run === undefined) return undefined;
+    const short = runShortOf(run);
+    const found = short === undefined ? null : { runId: run.id, folder: runFolderOf(dataDir, short) };
+    streams.set(streamId, found);
+    return found ?? undefined;
   };
 
+  const max = deps.maxBytes ?? MAX_ACTIVITY_BYTES;
   const write = async (log: RunLog, line: string): Promise<void> => {
     if (log.truncated) return;
     await ensureFolder(log.folder);
     const file = join(log.folder, BUILD_ACTIVITY_FILE);
-    if (log.bytes === undefined) log.bytes = await stat(file).then((info) => info.size, () => 0);
+    if (log.bytes === undefined) {
+      log.bytes = await stat(file).then((info) => info.size, () => 0);
+      // Truncated before a restart (its last line is the marker, or it is at its bound): it stays so.
+      if (log.bytes >= max || (log.bytes >= TRUNCATED_LINE.length && (await lastBytes(file, TRUNCATED_LINE.length)) === TRUNCATED_LINE)) {
+        log.truncated = true;
+        return;
+      }
+    }
     const size = Buffer.byteLength(line);
-    if (log.bytes + size > (deps.maxBytes ?? MAX_ACTIVITY_BYTES)) {
+    if (log.bytes + size > max) {
       log.truncated = true;
-      await appendFile(file, `${JSON.stringify({ type: 'activity.truncated' })}\n`, { mode: 0o600 });
+      await appendFile(file, TRUNCATED_LINE, { mode: 0o600 });
       return;
     }
     log.bytes += size;
@@ -139,15 +193,17 @@ export function createRunActivityRecorder(deps: RunActivityRecorderDeps): RunAct
 
   const record = (event: CoreEvent) => {
     if (!RECORDED.test(event.type) || SKIPPED.has(event.type)) return;
-    const runId = runOfStream(event.streamId);
-    if (runId === undefined) return;
+    const found = runOfStream(event.streamId);
+    if (found === undefined) return;
+    const { runId } = found;
     let log = logs.get(runId);
     if (log === undefined) {
-      log = { folder: runFolderOf(dataDir, runId), bytes: undefined, truncated: false, network: false, queue: Promise.resolve() };
+      log = { folder: found.folder, bytes: undefined, truncated: false, network: false, queue: Promise.resolve() };
       logs.set(runId, log);
     }
-    const line = `${mask(JSON.stringify({ seq: event.seq, at: event.at, type: event.type, payload: event.payload }))}\n`;
-    if (NO_NETWORK_PATTERN.test(line)) log.network = true;
+    // Each string masked before it is encoded (review: a secret holding a quote or newline would be escaped past the mask).
+    const line = `${JSON.stringify({ seq: event.seq, at: event.at, type: event.type, payload: maskStrings(event.payload, mask) })}\n`;
+    if (saysNoNetwork(event)) log.network = true;
     const current = log;
     current.queue = current.queue.then(() => write(current, line)).catch((error: unknown) => {
       try {

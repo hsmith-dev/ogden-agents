@@ -13,8 +13,9 @@
  *   resumes it (also after a server restart, in a fresh agent session);
  *   `done_checkpoint` pauses it once the plan is `built`, before the end
  *   checks; a paused run blocks a second Build of its ticket;
- * - Retry of a run not at a checkpoint is 501 (5.8);
- * - the run's agent and a command it left running are gone once the run ends.
+ * - Retry of a run ready for review is 409 `run_not_active`;
+ * - the run's agent and a command it left running are gone once the run
+ *   ends, and when the server stops it mid-turn.
  */
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -118,8 +119,8 @@ async function setup(options: { ticketList?: PlanFileTicket[]; env?: Record<stri
   return serve({ repo: repo.path, ticketList: options.ticketList ?? tickets(), env: options.env });
 }
 
-/** The run's folder in the server's data folder. */
-const runFolder = (server: TestServer, runId: string) => join(realpathSync.native(server.dataDir), 'r', runId);
+/** The run's folder in the server's data folder: `<data>/r/<run8>`, the run's 8-character id. */
+const runFolder = (server: TestServer, runId: string) => join(realpathSync.native(server.dataDir), 'r', server.core.entities.getRun(runId as RunId)!.branch!.split('/')[1]!);
 
 async function resultOf(server: TestServer, runId: string, ref: string) {
   const read = await createAcpBuildRunner().readResult(runFolder(server, runId), { runId: runId as RunId, ticketRef: ref });
@@ -200,8 +201,10 @@ describe('the headless build session (story 5.4)', () => {
     const ended = await s.settled('1.1');
     expect(ended.outcome).toBe('verified');
     await waitFor(async () => (await resultOf(s.server, run.id, '1.1')).status === 'built', 'the final result', 10_000);
-    // Resuming a finished run: Retry is 5.8's (501); resume itself says it isn't at a checkpoint.
-    expect((await refusalOf(await s.retry(run.id))).status).toBe(501);
+    // Retry of a run ready for review: nothing to resume.
+    expect(await refusalOf(await s.retry(run.id))).toMatchObject({ status: 409, code: 'run_not_active' });
+    // A note of the longest length a Retry takes is read, not refused for its size.
+    expect((await s.retry(run.id, { mode: 'resume', note: 'é'.repeat(4000) })).status).toBe(409);
     expect((await refusalOf(await s.retry('not-a-run'))).status).toBe(400);
   });
 
@@ -232,5 +235,16 @@ describe('the headless build session (story 5.4)', () => {
     const resumed = await s.retry(run.id);
     expect(resumed.status).toBe(200);
     expect(RunResponse.parse(await resumed.json()).run.outcome).toBe('verified');
+  });
+
+  it('stopping the server mid-turn stops the agent and the command it left running', async () => {
+    const pids = join(removeAfterTest(mkdtempSync(join(tmpdir(), 'ogden-agents-pids-'))), 'pids.txt');
+    const s = await setup({ env: { FAKE_ACP_BUILD_CHILD: pids, FAKE_ACP_BUILD_DELAY_MS: '60000' } });
+    expect((await s.build('1.1')).status).toBe(201);
+    await waitFor(async () => existsSync(pids) && readFileSync(pids, 'utf8').trim().split(' ').length === 2, 'the agent to start its command', 15_000);
+    const [agentPid, childPid] = readFileSync(pids, 'utf8').trim().split(' ').map(Number) as [number, number];
+    expect(alive(agentPid) && alive(childPid)).toBe(true);
+    await s.server.close();
+    await waitFor(async () => !alive(agentPid) && !alive(childPid), 'the agent and its child to be gone', 10_000);
   });
 });

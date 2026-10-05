@@ -728,6 +728,7 @@ async function runPrompt(params, client, session) {
       if (childFile) {
         // Not detached: it stays in the agent's process group (its tree on Windows), as a build's command does.
         const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true });
+        child.on('error', () => undefined);
         writeFileSync(childFile, `${process.pid} ${child.pid}\n`);
       }
       const inside = join(cwd, 'src', `built-${ref}.txt`);

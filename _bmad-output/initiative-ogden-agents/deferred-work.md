@@ -640,3 +640,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-contracts-and-stubs-for-epics-5-and-11-plan.md`
   summary: Nothing checks a minimum git version, while builds rely on git 2.31+ (`rev-parse --path-format`) and `git apply`'s refusal to write beyond a symbolic link (fixed in 2.39.2, CVE-2023-23946); 5.5 should check the version and refuse older git with a plain reason.
   evidence: 5.3 security review S15; `vcs-git` `applyPatch` and `worktreeGitPaths`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-headless-build-session-over-acp-for-one-named-ticket-plan.md`
+  summary: Stopping a build kills the agent's process group (POSIX) or `taskkill /T` tree (Windows), so a build command that leaves its group (`setsid`, a daemonizing tool) or whose parent exited on Windows survives with the sandbox's write access to the worktree; a per-run cgroup, job object or sandbox-level kill would close it.
+  evidence: 5.4 security review S4 (medium): `packages/adapters/src/process-tree.ts` `killProcessTree`; 5.4's tests prove only same-group descendants stop.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-headless-build-session-over-acp-for-one-named-ticket-plan.md`
+  summary: Run folders (`<data>/r/<run8>`, up to 32 MiB of activity each) and the activity recorder's in-memory maps are never pruned; remove them with the run's worktree (5.8's cleanup or 11.1's Runs tab).
+  evidence: 5.4 security review S6 (low): `packages/core/src/build-run-folder.ts`.

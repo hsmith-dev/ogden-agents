@@ -58,9 +58,9 @@ describe('AD-16: the environment of a pane child', () => {
       const shell = posix ? (process.env.SHELL ?? '/bin/sh') : 'powershell.exe';
       const args = posix ? ['-i'] : ['-NoLogo'];
       const pane = await openPane({ file: shell, args, env: paneEnv() });
-      await sleep(1500);
-      pane.write(posix ? 'env; echo SHELL-ENV-END\r' : 'Get-ChildItem Env: | Out-String; Write-Output SHELL-ENV-END\r');
-      await pane.waitFor(/SHELL-ENV-END\s*[\s\S]*SHELL-ENV-END/, 20_000).catch(() => {});
+      await sleep(posix ? 1500 : 6000);
+      pane.write(posix ? 'env; echo SHELL-ENV-END\r' : 'Get-ChildItem Env: | ForEach-Object { $_.Name + "=" + $_.Value }; Write-Output SHELL-ENV-END\r');
+      await pane.waitFor(/SHELL-ENV-END[\s\S]*SHELL-ENV-END/, 45_000).catch(() => {});
       await sleep(500);
       const text = stripAnsi(pane.text);
       const leaked = Object.keys(SECRETS).filter((k) => new RegExp(`^${k}\\b`, 'm').test(text) || text.includes(SECRETS[k]));

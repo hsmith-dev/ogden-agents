@@ -196,6 +196,17 @@ describe('Unicode and colours', () => {
     expect(alt).toBe(true);
   });
 
+  it('Unicode on the wire: what a pty layer does to a few characters (code points in, code points out)', async () => {
+    const pane = await open('cjk', 3);
+    await pane.waitFor('CJK-DONE', 20_000);
+    const cp = (text) => [...text].map((c) => c.codePointAt(0).toString(16)).join(' ');
+    const raw = pane.text;
+    const start = raw.indexOf('\u65e5');
+    const stripped = stripAnsi(raw);
+    rec.set('unicode_wire_sample', { sent: cp('日本語😀é\u0301ｗ '), receivedStripped: cp(stripped.slice(stripped.indexOf('\u65e5'), stripped.indexOf('\u65e5') + 24)), rawAroundFirst: JSON.stringify(raw.slice(Math.max(0, start - 20), start + 60)) });
+    pane.kill();
+  });
+
   it('a big Unicode stream arrives with no broken character at a read boundary', async () => {
     const pane = await open('cjk', 40000);
     await pane.waitFor('CJK-DONE', 60_000);

@@ -37,8 +37,9 @@ export function useStartChat(wsId: string, onOpened?: () => void) {
       };
       createChatSession(wsId, undefined, agentId).then(
         (session) => {
+          // Still starting until the chat replaces this action: the sidebar row stays until the chat's event arrives, and a click then must not start a second chat.
           onOpened?.();
-          void navigate({ to: '/w/$wsId/s/$sesId', params: { wsId, sesId: session.id } }).finally(done);
+          void navigate({ to: '/w/$wsId/s/$sesId', params: { wsId, sesId: session.id } }).catch(done);
         },
         (failure: unknown) => {
           done();
@@ -113,7 +114,7 @@ export function StartChatActions({ agents, agentId, blocked, describedBy, starti
                   // Unavailable but focusable: the keyboard and a screen reader still reach its reason.
                   aria-disabled={unavailable || undefined}
                   data-disabled={unavailable ? '' : undefined}
-                  className="flex-col items-start gap-0.5 data-[disabled]:pointer-events-none"
+                  className="min-h-(--row-height) flex-col items-start gap-0.5 py-1.5"
                   onSelect={(event) => {
                     if (unavailable || starting) {
                       event.preventDefault();
@@ -122,7 +123,7 @@ export function StartChatActions({ agents, agentId, blocked, describedBy, starti
                     onStart(agent.agentId);
                   }}
                 >
-                  <span className={unavailable ? 'text-label opacity-50' : 'text-label'}>{agent.displayName}</span>
+                  <span className="text-label">{agent.displayName}</span>
                   <span className="max-w-72 text-caption text-muted-foreground">{availability.description}</span>
                 </DropdownMenuItem>
               );

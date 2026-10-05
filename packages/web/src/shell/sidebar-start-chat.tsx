@@ -24,8 +24,8 @@ export function SidebarStartChat({ wsId, name }: { wsId: string; name: string })
   const list = chatAgents.data;
   const agentId = list === undefined || !settingsKnown ? undefined : projectDefaultAgent(list, settings.data?.defaultAgentId);
   const chosen = list?.agents.find((agent) => agent.agentId === agentId);
-  // As on the Chats page (6.6): a reason before trying only while there is a choice of agents.
-  const blocked = list !== undefined && list.agents.length > 1 && chosen !== undefined && !agentAvailability(chosen).available;
+  // A default that can't start a chat: its Chats page says why (with one agent too, the server's reason on Start a chat).
+  const blocked = chosen !== undefined && !agentAvailability(chosen).available;
   const label = `${START_A_CHAT} in ${name}`;
   return (
     <SidebarMenu>
@@ -52,6 +52,9 @@ export function SidebarStartChat({ wsId, name }: { wsId: string; name: string })
           <ChatCircle aria-hidden />
           <SidebarLabel>{START_A_CHAT}</SidebarLabel>
         </SidebarMenuButton>
+        <span role="status" className="sr-only">
+          {starting ? 'Starting a chat' : ''}
+        </span>
         {error === undefined ? null : (
           <SidebarText role="alert" data-testid="sidebar-start-chat-error" className="md:max-lg:sr-only md:max-lg:block">
             {error}

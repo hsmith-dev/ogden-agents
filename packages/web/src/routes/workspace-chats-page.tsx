@@ -32,6 +32,11 @@ const started = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeSt
  */
 export function WorkspaceChatsPage() {
   const { wsId } = useParams({ strict: false }) as { wsId: string };
+  // One page per project: the router reuses this component from /w/A to /w/B, and a pick, a first chat or an error is that project's.
+  return <ChatsPage key={wsId} wsId={wsId} />;
+}
+
+function ChatsPage({ wsId }: { wsId: string }) {
   const navigate = useNavigate();
   const workspace = useQuery({ queryKey: ['workspace', wsId], queryFn: () => fetchWorkspace(wsId), retry: false });
   const { sessions, error } = useSessions(wsId);
@@ -59,6 +64,8 @@ export function WorkspaceChatsPage() {
 
   /** The chats list is empty (or holds only the chat a failed first send made): the composer starts the chat. */
   const listEmpty = sessions === undefined || sessions.length === 0 || onlyFirstChat;
+  /** The empty state's Start a chat is shown: the list is empty and the agent it uses is known. */
+  const startShown = sessions !== undefined && listEmpty && chatAgents.data !== undefined && agentId !== undefined;
 
   const onPick = (next: string) => {
     setPickedAgent(next);
@@ -92,7 +99,7 @@ export function WorkspaceChatsPage() {
             </Button>
             {/* While the list is empty, Start a chat in the page is the one primary action. */}
             <Button
-              variant={listEmpty && sessions !== undefined ? 'outline' : 'primary'}
+              variant={startShown ? 'outline' : 'primary'}
               onClick={onNewChat}
               aria-disabled={creating || blocked !== undefined} aria-describedby={blocked === undefined ? undefined : 'agent-unavailable'} data-testid="new-chat">
               <ChatCircle aria-hidden />
@@ -171,7 +178,7 @@ export function WorkspaceChatsPage() {
                       : `Start a chat with ${agentNameOf(chatAgents.data, agentId)} to work on this project, or write your first message below.`
                   }
                   actions={
-                    chatAgents.data === undefined ? undefined : (
+                    !startShown || chatAgents.data === undefined ? undefined : (
                       <StartChatActions
                         agents={chatAgents.data.agents}
                         agentId={agentId}

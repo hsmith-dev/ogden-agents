@@ -66,7 +66,9 @@ test('the sidebar offers Start a chat for a project with no chats, at desktop wi
     await expect(entry).toHaveAccessibleName(`Start a chat in ${basename(first)}`);
     await expect(groupOf(page, second).getByTestId('sidebar-start-chat')).toHaveAccessibleName(`Start a chat in ${basename(second)}`);
 
-    await entry.click();
+    // By keyboard.
+    await entry.focus();
+    await page.keyboard.press('Enter');
     await expect(page).toHaveURL(new RegExp(`/w/${firstId}/s/ses_[0-9A-Z]{26}$`));
     await expect(page.getByTestId('permission-mode-picker')).toHaveAttribute('data-mode', 'ask');
     await expect(groupOf(page, first).getByTestId('sidebar-start-chat')).toHaveCount(0);

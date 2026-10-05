@@ -33,12 +33,12 @@ export interface WorkspaceTabSlot {
   to?: string;
 }
 
-/** Every slot, in order. Story 4.1 sets Plan's and Board's `to` (their bare pages), epic 5 Runs'. */
+/** Every slot, in order. Story 4.1 sets Plan's and Board's `to` (their bare pages), 11.1 Runs'. */
 export const WORKSPACE_TAB_SLOTS: readonly WorkspaceTabSlot[] = [
   { id: 'chats', label: 'Chats', key: 'c', to: '/w/$wsId' },
   { id: 'plan', label: 'Plan', key: 'p', piece: 'planning', to: '/w/$wsId/plan' },
   { id: 'board', label: 'Board', key: 'b', piece: 'board', to: '/w/$wsId/board' },
-  { id: 'runs', label: 'Runs', key: 'r', piece: 'builds' },
+  { id: 'runs', label: 'Runs', key: 'r', piece: 'builds', to: '/w/$wsId/runs' },
 ];
 
 /** A slot that can be shown: it has a page to link to. */

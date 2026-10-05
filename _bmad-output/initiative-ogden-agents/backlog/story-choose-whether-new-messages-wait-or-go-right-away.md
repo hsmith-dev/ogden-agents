@@ -1,5 +1,5 @@
 ---
-id: 16
+id: 17
 type: story
 title: "Choose whether new messages wait or go right away"
 parent: none

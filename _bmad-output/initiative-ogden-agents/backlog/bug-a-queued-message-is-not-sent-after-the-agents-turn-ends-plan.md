@@ -3,7 +3,7 @@ title: "A queued message is not sent after the agent's turn ends"
 type: 'bugfix'
 ticket: '16'
 created: '2026-10-04'
-baseline_revision: 'a6e6c12a6636d9957fa134320be5cd8a4bfd670c'
+baseline_revision: '0a8c7bee1862c0fa6cd6c8bbcd15e103c507fdd5'
 status: 'built'
 route: 'full'
 route_source: 'auto'

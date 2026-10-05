@@ -19,7 +19,7 @@ import {
   type Permissions,
   type StartAgentSession,
 } from '../src/index.js';
-import { openTestCore, tempDir } from './helpers.js';
+import { openTestCore, soleAgent, tempDir, TEST_AGENT_ID } from './helpers.js';
 
 type Idle = 'before' | 'none' | 'twice';
 
@@ -98,12 +98,12 @@ function setUp(core: Core, agent: ReturnType<typeof turnEndAgent>, permissions?:
     dataDir: tempDir('ogden-agents-data-'),
     entities: core.entities,
     sessionEvents: core.sessionEvents,
-    agent: agent.port,
+    agents: soleAgent(agent.port),
     ...(permissions === undefined ? {} : { permissions }),
     onInternalError: (_sessionId, error) => internal.push(error),
   });
   const workspace = chat.openWorkspace(tempDir('ogden-agents-repo-'));
-  const session = chat.createChatSession(workspace.id);
+  const session = core.entities.createSession({ workspaceId: workspace.id, kind: 'chat', agentId: TEST_AGENT_ID });
   return { chat, workspace, session, internal };
 }
 

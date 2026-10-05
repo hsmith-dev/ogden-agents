@@ -1,7 +1,7 @@
 ---
 title: 'Choose whether new messages wait or go right away'
 type: 'feature'
-ticket: '16'
+ticket: '17'
 created: '2026-10-04'
 status: 'built'
 baseline_revision: '2e4d68f8befaae014c336abffc3e7f5b1fc7d984'

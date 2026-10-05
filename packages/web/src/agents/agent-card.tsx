@@ -58,6 +58,18 @@ export function AgentCard({ agent, selected = false }: { agent: AgentSetupStatus
         </Text>
       ) : null}
       {agent.install === 'installed' ? <AgentState agent={agent} signIn={signIn} actions={actions} /> : <InstallState agent={agent} install={install} />}
+      {/* The agent's plain-words notices (epic 12, 12.3): known limitations, network use. */}
+      {agent.notices === undefined || agent.notices.length === 0 ? null : (
+        <ul className="flex flex-col gap-1" data-testid="agent-notices">
+          {agent.notices.map((notice) => (
+            <li key={notice}>
+              <Text variant="caption" data-testid="agent-notice">
+                {notice}
+              </Text>
+            </li>
+          ))}
+        </ul>
+      )}
       {agent.install === 'installed' && agent.apiKey !== undefined && agent.auth !== 'signing_in' ? (
         <ApiKeySection agent={agent} saved={agent.apiKey} actions={apiKey} />
       ) : null}

@@ -73,6 +73,8 @@ export interface PermissionModePickerProps {
 export function PermissionModePicker({ agentName, mode, options, developerMode, terminalDrives, changing, onChoose }: PermissionModePickerProps) {
   const [confirming, setConfirming] = useState(false);
   const descriptions = permissionModeDescriptions(agentName);
+  // The agent takes its mode only when a chat starts, and this chat has started (epic 12, 12.3).
+  const fixed = options?.some((option) => option.fixed === true) === true;
   const listed = PERMISSION_MODES.filter((each) => each !== 'skip_all' || developerMode || mode === 'skip_all');
   const reasonFor = (each: PermissionMode): string | undefined => {
     if (terminalDrives) return TERMINAL_MODE_REASON;
@@ -93,7 +95,8 @@ export function PermissionModePicker({ agentName, mode, options, developerMode, 
             size="sm"
             data-testid="permission-mode-picker"
             data-mode={mode}
-            aria-label={`Permission mode: ${PERMISSION_MODE_LABELS[mode]}`}
+            data-fixed={fixed ? 'true' : undefined}
+            aria-label={`Permission mode: ${PERMISSION_MODE_LABELS[mode]}${fixed ? ', fixed for this chat' : ''}`}
             aria-busy={changing || undefined}
           >
             {mode === 'skip_all' ? <ShieldWarning aria-hidden /> : <ShieldCheck aria-hidden />}
@@ -103,7 +106,7 @@ export function PermissionModePicker({ agentName, mode, options, developerMode, 
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" data-testid="permission-mode-menu">
-          <DropdownMenuLabel>Permission mode</DropdownMenuLabel>
+          <DropdownMenuLabel>{fixed ? 'Permission mode (fixed for this chat)' : 'Permission mode'}</DropdownMenuLabel>
           {listed.map((each) => {
             const reason = reasonFor(each);
             return (

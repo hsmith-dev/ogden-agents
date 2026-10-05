@@ -175,6 +175,17 @@
 // FAKE_ACP_REQUIRE_API_KEY reads; FAKE_ACP_HOME_ENV names its home variable
 // (see "whoami").
 //
+// A generic third agent's hooks (epic 12, 12.3), beside the above, all
+// agent-neutral: `authenticate`'s `_meta` is kept ("auth" replies `meta=<JSON>`
+// when it carried one); FAKE_ACP_REJECT_OPTIONS=`id:Name,…` replaces the
+// `reject_once` option of "permission <command>" with those (all of kind
+// `reject_once`, in that order) and the reply gets ` chose=<option id>`;
+// FAKE_ACP_FIXED_MODE=1 is an agent that takes its mode only when a session
+// opens: no session modes are listed, `session/set_mode` is refused, and the
+// mode is the `_meta.mode` (`ask`, `auto` or `skip_all`) of `session/new`,
+// `resume` or `load` (default `ask`): "mode" replies `mode=<it>`, and in
+// `skip_all` "permission <command>" runs without asking.
+//
 // Antigravity's personality (epic 6 entry 5; spike 6.1's shapes), set by the
 // wrapper `fake-antigravity.mjs` (FAKE_ACP_PERSONALITY=antigravity): its
 // `agentInfo` (`antigravity-acp` 1.3.0), `session/list` beside resume and
@@ -285,8 +296,9 @@ const ANTIGRAVITY = process.env.FAKE_ACP_PERSONALITY === 'antigravity';
  */
 const STEERING = !ANTIGRAVITY && process.env.FAKE_ACP_MODES === undefined;
 const INIT_DELAY_MS = Number(process.env.FAKE_ACP_INIT_DELAY_MS ?? '0');
-/** The sign-in method `authenticate` chose in this process, if any. */
+/** The sign-in method `authenticate` chose in this process, if any, and the `_meta` it carried. */
 let authenticatedWith;
+let authenticatedMeta;
 /** Antigravity's home, where its fake Google sign-in is kept (epic 6 entry 7). */
 const googleHome = () => process.env.GEMINI_HOME;
 const googleFile = (name) => (googleHome() === undefined ? undefined : join(googleHome(), name));
@@ -325,9 +337,9 @@ const AVAILABLE_MODES = process.env.FAKE_ACP_MODES ? listOf(process.env.FAKE_ACP
 const API_KEY_ENV = process.env.FAKE_ACP_API_KEY_ENV || 'ANTHROPIC_API_KEY';
 const START_MODE = process.env.FAKE_ACP_START_MODE ?? 'default';
 /** Modes in which it edits files without asking (Claude Code's `acceptEdits`, `auto` and `bypassPermissions`). */
-const EDITS_WITHOUT_ASKING = new Set(['acceptEdits', 'auto', 'bypassPermissions', 'auto_edit', 'yolo']);
+const EDITS_WITHOUT_ASKING = new Set(['acceptEdits', 'auto', 'bypassPermissions', 'auto_edit', 'yolo', 'skip_all']);
 /** Modes in which it runs commands without asking (Claude Code's `bypassPermissions`, Antigravity's `yolo`). */
-const RUNS_WITHOUT_ASKING = new Set(['bypassPermissions', 'yolo']);
+const RUNS_WITHOUT_ASKING = new Set(['bypassPermissions', 'yolo', 'skip_all']);
 /** The `permissions.ask` rules its session was started with (`_meta.claudeCode.options.settings`, as claude-agent-acp 0.84 reads them). */
 const askRulesOf = (session) => session.opened?._meta?.claudeCode?.options?.settings?.permissions?.ask ?? [];
 // Whether an `Edit(**/<folder>/**)` or `Edit(**/<file>)` rule matches `path` (the two shapes Ogden sends).
@@ -356,7 +368,11 @@ const configOf = (session) =>
   NO_MODELS ? [] : [{ id: 'model', name: 'Model', description: 'AI model to use', category: 'model', type: 'select', currentValue: session.model, options: MODELS }];
 
 /** The `modes` a session answer carries, for a session now in `currentModeId`. */
-const modesOf = (currentModeId) => ({ currentModeId, availableModes: AVAILABLE_MODES });
+const FIXED_MODE = process.env.FAKE_ACP_FIXED_MODE === '1';
+const modesOf = (currentModeId) => (FIXED_MODE ? undefined : { currentModeId, availableModes: AVAILABLE_MODES });
+/** The mode of an agent that fixes it when a session opens: its `_meta.mode`, default `ask`. */
+const fixedModeOf = (opened) => opened?._meta?.mode ?? 'ask';
+const REJECT_OPTIONS = process.env.FAKE_ACP_REJECT_OPTIONS ? listOf(process.env.FAKE_ACP_REJECT_OPTIONS) : undefined;
 
 /** Appends `text` and `reply` to the session's Claude Code record (FAKE_ACP_CLAUDE_RECORD), chained after its last main-chain record. */
 const recordExchange = (sessionId, text, reply) => {
@@ -474,6 +490,7 @@ const agentBuilder = acp
       }
     }
     authenticatedWith = params.methodId;
+    authenticatedMeta = params._meta;
     return {};
   })
   .onRequest('logout', () => {
@@ -484,7 +501,7 @@ const agentBuilder = acp
   .onRequest('session/new', ({ params }) => {
     requireAuth();
     const sessionId = `fake-session-${nextSession++}`;
-    const session = { via: 'new', opened: params, mode: START_MODE, model: START_MODEL };
+    const session = { via: 'new', opened: params, mode: FIXED_MODE ? fixedModeOf(params) : START_MODE, model: START_MODEL };
     sessions.set(sessionId, session);
     return { sessionId, modes: modesOf(START_MODE), configOptions: configOf(session) };
   })
@@ -493,7 +510,7 @@ const agentBuilder = acp
     requireAuth();
     if (REOPEN_FAIL.has('resume-auth')) throw acp.RequestError.authRequired(undefined, 'the fake agent needs a new sign-in');
     if (REOPEN_FAIL.has('resume')) throw acp.RequestError.resourceNotFound(params.sessionId);
-    const session = { via: 'resumed', opened: params, mode: START_MODE, model: START_MODEL };
+    const session = { via: 'resumed', opened: params, mode: FIXED_MODE ? fixedModeOf(params) : START_MODE, model: START_MODEL };
     sessions.set(params.sessionId, session);
     return { modes: modesOf(START_MODE), configOptions: configOf(session) };
   })
@@ -503,11 +520,12 @@ const agentBuilder = acp
     // The history a load replays: the client already has it.
     await say(client, params.sessionId, 'Earlier reply.');
     if (REOPEN_FAIL.has('load')) throw acp.RequestError.resourceNotFound(params.sessionId);
-    const session = { via: 'loaded', opened: params, mode: START_MODE, model: START_MODEL };
+    const session = { via: 'loaded', opened: params, mode: FIXED_MODE ? fixedModeOf(params) : START_MODE, model: START_MODEL };
     sessions.set(params.sessionId, session);
     return { modes: modesOf(START_MODE), configOptions: configOf(session) };
   })
   .onRequest('session/set_mode', ({ params, client }) => {
+    if (FIXED_MODE) throw acp.RequestError.methodNotFound('session/set_mode');
     const session = sessions.get(params.sessionId);
     if (session === undefined) throw acp.RequestError.invalidParams(undefined, `no session ${params.sessionId}`);
     if (!AVAILABLE_MODES.some((mode) => mode.id === params.modeId)) throw acp.RequestError.invalidParams(undefined, `Mode ${params.modeId} is not available`);
@@ -660,7 +678,7 @@ async function runPrompt(params, client, session) {
     }
     if (text === 'auth') {
       const key = process.env[API_KEY_ENV];
-      await say(client, params.sessionId, `auth=${authenticatedWith ?? 'none'} key=${key ? key.slice(-4) : 'none'}`);
+      await say(client, params.sessionId, `auth=${authenticatedWith ?? 'none'} key=${key ? key.slice(-4) : 'none'}${authenticatedMeta === undefined ? '' : ` meta=${JSON.stringify(authenticatedMeta)}`}`);
       return { stopReason: 'end_turn' };
     }
     if (text === 'trust') {
@@ -759,7 +777,7 @@ async function runPrompt(params, client, session) {
           : [
               { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
               { optionId: 'always', name: 'Always allow', kind: 'allow_always' },
-              { optionId: 'reject', name: 'Deny', kind: 'reject_once' },
+              ...(REJECT_OPTIONS ?? [{ id: 'reject', name: 'Deny' }]).map(({ id, name }) => ({ optionId: id, name, kind: 'reject_once' })),
               { optionId: 'never', name: 'Always deny', kind: 'reject_always' },
             ],
       });
@@ -774,7 +792,7 @@ async function runPrompt(params, client, session) {
         return { stopReason: 'cancelled' };
       }
       await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: ran ? 'completed' : 'failed' });
-      await say(client, params.sessionId, `${ran ? 'Ran' : 'Denied'} ${command}.${ANTIGRAVITY ? ` chose=${chosen}` : ''}`);
+      await say(client, params.sessionId, `${ran ? 'Ran' : 'Denied'} ${command}.${ANTIGRAVITY || REJECT_OPTIONS ? ` chose=${chosen}` : ''}`);
       return { stopReason: 'end_turn' };
     }
     if (text === 'tool') {

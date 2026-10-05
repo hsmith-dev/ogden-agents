@@ -1,10 +1,10 @@
 import { ChatCircle, GearSix, House } from '@phosphor-icons/react';
 import type { Session } from '@ogden-agents/shared';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
 import { AgentPicker, SET_UP_AGENTS } from '@/chat/agent-picker';
-import { agentNameOf, ChatApiError, createChatSession, sendMessage } from '@/chat/chat-api';
+import { agentNameOf, CHAT_AGENTS_QUERY_KEY, ChatApiError, createChatSession, sendMessage } from '@/chat/chat-api';
 import { ChatListRow } from '@/chat/chat-row';
 import { Composer } from '@/chat/composer';
 import { StartChatActions, useStartChat } from '@/chat/start-chat';
@@ -17,6 +17,7 @@ import { RowList, RowMeta } from '@/ui/row-list';
 import { Skeleton } from '@/ui/skeleton';
 import { Text } from '@/ui/typography';
 import { BmadOffer } from '@/workspaces/bmad-offer';
+import { ScriptTrustPrompt } from '@/workspaces/script-trust-prompt';
 import { fetchWorkspace, useSessions, workspaceName } from '@/workspaces/workspace-api';
 import { useWorkspaceSettings } from '@/workspaces/workspace-settings-api';
 
@@ -43,7 +44,9 @@ function ChatsPage({ wsId }: { wsId: string }) {
   const { sessions, error } = useSessions(wsId);
   // The agent a new chat starts with (epic 6): the project's default (entry 6), which follows a change made
   // in another tab, until the user picks another here. Unknown until both the list and the settings are in.
-  const chatAgents = useChatAgents();
+  // Read for this project: an agent that needs it trusted says so (epic 12, 12.3), and the trust prompt fixes it.
+  const chatAgents = useChatAgents(wsId);
+  const queryClient = useQueryClient();
   const settings = useWorkspaceSettings(wsId);
   const [pickedAgent, setPickedAgent] = useState<string | undefined>(undefined);
   const settingsKnown = settings.data !== undefined || settings.isError;
@@ -150,6 +153,15 @@ function ChatsPage({ wsId }: { wsId: string }) {
                 </span>
               )}
             </Text>
+            {/* The chosen agent runs the project's own settings and hooks: one trust covers it and Board's scripts (epic 12, 12.3). */}
+            {blocked?.trust !== true || chosen === undefined ? null : (
+              <ScriptTrustPrompt
+                wsId={wsId}
+                agentName={chosen.displayName}
+                changed={settings.data?.bmadScriptsTrusted === true}
+                onTrusted={() => void queryClient.invalidateQueries({ queryKey: CHAT_AGENTS_QUERY_KEY })}
+              />
+            )}
             {/* The "already uses BMad Method" offer (story 10.3): detected when this page opens, never when the project is added. */}
             {workspace.data === undefined ? null : <BmadOffer key={wsId} wsId={wsId} />}
             {createError === undefined ? null : (

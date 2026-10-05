@@ -292,3 +292,164 @@ describe('models over ACP (story 11)', () => {
     }
   });
 });
+
+describe('the hooks epic 12 adds (12.3), on a generic third agent', () => {
+  it('authenticates with the method the quirk picks, and its _meta, before any session; the _meta is never logged', async () => {
+    const diagnostics: Array<[string, Record<string, unknown> | undefined]> = [];
+    const agent = secondAgent(
+      {
+        authMethod: ({ env }) => (env.SECOND_API_KEY === undefined ? undefined : { methodId: 'second-key', meta: { 'api-key': env.SECOND_API_KEY } }),
+      },
+      diagnostics,
+    );
+    const session = await agent.startSession({
+      cwd: tempDir(),
+      env: baseEnv({ FAKE_ACP_REQUIRE_AUTH: '1', FAKE_ACP_API_KEY_ENV: 'SECOND_API_KEY', SECOND_API_KEY: 'sk-second-1234' }),
+    });
+    sessions.push(session);
+    const events: AgentEvent[] = [];
+    session.onEvent((event) => events.push(event));
+    await session.prompt('auth');
+    // The agent received the key in `_meta` (it echoes it); the client masks the secret in what the agent says.
+    expect(replyText(events)).toBe('auth=second-key key=1234 meta={"api-key":"[redacted]"}');
+    expect(JSON.stringify(diagnostics)).not.toContain('sk-second-1234');
+    expect(diagnostics).toContainEqual(['authenticated with the agent', { methodId: 'second-key' }]);
+  });
+
+  it('a method id alone sends no _meta, and no choice sends no authenticate (the agent then refuses its session)', async () => {
+    const plain = secondAgent({ authMethod: () => 'second-login' });
+    const session = await plain.startSession({ cwd: tempDir(), env: baseEnv({ FAKE_ACP_REQUIRE_AUTH: '1' }) });
+    sessions.push(session);
+    const events: AgentEvent[] = [];
+    session.onEvent((event) => events.push(event));
+    await session.prompt('auth');
+    expect(replyText(events)).toBe('auth=second-login key=none');
+    await expect(secondAgent().startSession({ cwd: tempDir(), env: baseEnv({ FAKE_ACP_REQUIRE_AUTH: '1' }) })).rejects.toMatchObject({ code: 'auth_required' });
+  });
+
+  describe('Deny picks a reject_once option by id', () => {
+    const denyWith = async (preferred: readonly string[] | undefined) => {
+      const { session, events } = await start({
+        quirks: { rejectOptionIds: preferred },
+        env: { FAKE_ACP_REJECT_OPTIONS: 'cancel:Cancel,decline:Decline' },
+        onPermissionRequest: async () => ({ outcome: 'deny' }),
+      });
+      await session.prompt('permission');
+      return replyText(events);
+    };
+
+    it('the preferred id when it is on offer', async () => {
+      expect(await denyWith(['decline'])).toBe('Denied npm test. chose=decline');
+    });
+    it('the first preferred id found, in order of preference', async () => {
+      expect(await denyWith(['missing', 'cancel', 'decline'])).toBe('Denied npm test. chose=cancel');
+    });
+    it('the first reject_once option when none is preferred or none matches, never another kind', async () => {
+      expect(await denyWith(undefined)).toBe('Denied npm test. chose=cancel');
+      expect(await denyWith(['always', 'never'])).toBe('Denied npm test. chose=cancel');
+    });
+  });
+
+  it('launch is given the chat’s mode and protected paths, and an agent that gets none is started in Ask', async () => {
+    const seen: Array<{ permissionMode: string; paths: number | undefined }> = [];
+    const agent = secondAgent({
+      launch: ({ permissionMode, protectedPaths }) => {
+        seen.push({ permissionMode, paths: protectedPaths?.folders.length });
+        return { command: process.execPath, args: [FAKE_AGENT] };
+      },
+    });
+    for (const input of [
+      { permissionMode: 'skip_all' as const },
+      { permissionMode: 'auto' as const, protectedPaths: PROTECTED_PATHS },
+      {},
+    ]) sessions.push(await agent.startSession({ cwd: tempDir(), env: baseEnv(), ...input }));
+    expect(seen).toEqual([
+      { permissionMode: 'skip_all', paths: undefined },
+      { permissionMode: 'auto', paths: PROTECTED_PATHS.folders.length },
+      { permissionMode: 'ask', paths: undefined },
+    ]);
+  });
+
+  describe('an agent whose mode is fixed at chat start', () => {
+    const FIXED: AgentDescriptor = { ...SECOND, agentId: 'fixed-agent', displayName: 'Fixed Agent', modeFixedAtStart: true, permissionModes: { ask: 'ask', auto: 'auto', skip_all: 'skip_all' } };
+    const fixedQuirks = (): AcpAgentQuirks => ({
+      launch: () => ({ command: process.execPath, args: [FAKE_AGENT] }),
+      toolInputPaths: { pathFields: ['target'], patternFields: [] },
+      askingModeIds: [],
+      skillInvocation: slashSkillInvocation,
+      // Its mode, and in Auto the guards, in one `_meta`.
+      startOptions: ({ permissionMode, protectedPaths }) => ({
+        meta: { mode: permissionMode, ...(protectedPaths === undefined ? {} : { guarded: protectedPaths.folders.length }) },
+        guardsPaths: protectedPaths !== undefined,
+      }),
+    });
+    const fixedAgent = () => createAcpAgent(FIXED, fixedQuirks());
+    const env = baseEnv({ FAKE_ACP_FIXED_MODE: '1', FAKE_ACP_AGENT_NAME: 'fixed-agent' });
+    const run = async (input: { permissionMode?: 'ask' | 'auto' | 'skip_all'; protectedPaths?: typeof PROTECTED_PATHS }) => {
+      const session = await fixedAgent().startSession({ cwd: tempDir(), env, ...input });
+      sessions.push(session);
+      const events: AgentEvent[] = [];
+      session.onEvent((event) => events.push(event));
+      return { session, events };
+    };
+
+    it('says so on the port, and the session is fixed in the mode it started in, offering every declared mode', async () => {
+      expect(fixedAgent().modeFixedAtStart).toBe(true);
+      expect(secondAgent().modeFixedAtStart).toBeUndefined();
+      const { session } = await run({ permissionMode: 'skip_all' });
+      expect(session.fixedPermissionMode).toBe('skip_all');
+      expect(session.permissionModes).toEqual(['ask', 'auto', 'skip_all']);
+      expect(session.protectsPaths).toBe(false);
+    });
+
+    it('gives the mode in the _meta of session/new and never sends set_mode', async () => {
+      const { session, events } = await run({ permissionMode: 'skip_all' });
+      await session.prompt('session-start');
+      expect(JSON.parse(replyText(events)).meta).toEqual({ mode: 'skip_all' });
+      events.length = 0;
+      await session.prompt('mode');
+      expect(replyText(events)).toBe('mode=skip_all');
+      // Taking the mode it has is a no-op; any other is refused without a request.
+      await expect(session.setPermissionMode!('skip_all')).resolves.toBeUndefined();
+      await expect(session.setPermissionMode!('ask')).rejects.toThrow(acpReasons('Fixed Agent').couldNotSwitchMode);
+    });
+
+    it('in Auto the _meta carries the guards and the session protects paths', async () => {
+      const { session, events } = await run({ permissionMode: 'auto', protectedPaths: PROTECTED_PATHS });
+      expect(session.protectsPaths).toBe(true);
+      await session.prompt('session-start');
+      expect(JSON.parse(replyText(events)).meta).toEqual({ mode: 'auto', guarded: PROTECTED_PATHS.folders.length });
+    });
+
+    it('a chat in Skip all runs a command without a card; in Ask it asks', async () => {
+      const asked: AgentPermissionRequest[] = [];
+      const onPermissionRequest = async (request: AgentPermissionRequest) => (asked.push(request), { outcome: 'allow_once' as const });
+      for (const mode of ['skip_all', 'ask'] as const) {
+        const session = await fixedAgent().startSession({ cwd: tempDir(), env, permissionMode: mode, onPermissionRequest });
+        sessions.push(session);
+        const events: AgentEvent[] = [];
+        session.onEvent((event) => events.push(event));
+        await session.prompt('permission');
+        expect(replyText(events)).toBe('Ran npm test.');
+      }
+      expect(asked).toHaveLength(1);
+    });
+
+    it('gives the same _meta when it resumes and loads a session', async () => {
+      for (const resume of ['resume', 'load'] as const) {
+        const opened = await fixedAgent().reopenSession({ cwd: tempDir(), env: { ...env, FAKE_ACP_RESUME: resume }, agentSessionId: 'fake-session-earlier', permissionMode: 'skip_all' });
+        sessions.push(opened.session);
+        const events: AgentEvent[] = [];
+        opened.session.onEvent((event) => events.push(event));
+        await opened.session.prompt('session-start');
+        const started = JSON.parse(replyText(events)) as { via: string; meta: unknown };
+        expect(started).toMatchObject({ via: resume === 'resume' ? 'resumed' : 'loaded', meta: { mode: 'skip_all' } });
+      }
+    });
+
+    it('is a wiring bug to say fixed without startOptions, or to give startOptions without saying so', () => {
+      expect(() => createAcpAgent(FIXED, { ...fixedQuirks(), startOptions: undefined })).toThrow(/fixes its mode at start but gives no startOptions/);
+      expect(() => createAcpAgent(SECOND, fixedQuirks())).toThrow(/gives startOptions but does not fix its mode/);
+    });
+  });
+});

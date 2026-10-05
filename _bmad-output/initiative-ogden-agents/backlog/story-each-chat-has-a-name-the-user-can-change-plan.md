@@ -3,13 +3,13 @@ title: 'Each chat has a name the user can change'
 type: 'feature'
 ticket: '2'
 created: '2026-10-04'
-status: 'in-progress'
-baseline_revision: '5688336'
+status: 'in-review'
+baseline_revision: '56883363a54bcfb42b8ae698522dd02e34af5ef2'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick', 'security-ux']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/backlog/story-each-chat-has-a-name-the-user-can-change.md'

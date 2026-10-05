@@ -63,6 +63,12 @@ describe('automatic names (criterion 1)', () => {
     expect(renames().map((event) => CoreEvent.parse(event).payload)).toEqual([{ sessionId: session.id, title: null, autoTitle: 'Fix the login bug', cause: 'auto' }]);
   });
 
+  it('an API key in the first message is redacted from the name', () => {
+    const { core, session, say } = setup();
+    say('Use sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789 for this');
+    expect(core.entities.getSession(session.id)?.autoTitle).toBe('Use [redacted] for this');
+  });
+
   it('a Deny reason never names a chat; a message from the terminal does', () => {
     const { core, session, say } = setup();
     say('Not that file', 'deny_reason');

@@ -8,7 +8,7 @@
  * An event that already names a workspace, stream or session other than its
  * session's is refused with {@link SessionEventScopeError}; nothing is stored.
  */
-import { autoChatName, type CoreEvent, type CoreEventType, type NewEventOf, type SessionId, type SessionMessageCompletedEvent } from '@ogden-agents/shared';
+import { autoChatName, redactApiKeys, type CoreEvent, type CoreEventType, type NewEventOf, type SessionId, type SessionMessageCompletedEvent } from '@ogden-agents/shared';
 import { eq } from 'drizzle-orm';
 import type { Database } from './db/database.js';
 import { sessions } from './db/schema.js';
@@ -109,7 +109,8 @@ export function createSessionEvents(db: Database, log: EventLog): SessionEvents 
       const row = db.orm.select({ title: sessions.title, autoTitle: sessions.autoTitle }).from(sessions).where(eq(sessions.id, sessionId)).get();
       if (row === undefined) throw new NotFoundError('session', sessionId);
       if (row.autoTitle !== null) return false;
-      const autoTitle = autoChatName(text);
+      // A key pasted into the first message never becomes the chat's name, shown in every sidebar.
+      const autoTitle = autoChatName(redactApiKeys(text));
       if (autoTitle === null) return false;
       // `updatedAt` is left alone: a name never moves a chat in the sidebar.
       db.orm.update(sessions).set({ autoTitle }).where(eq(sessions.id, sessionId)).run();

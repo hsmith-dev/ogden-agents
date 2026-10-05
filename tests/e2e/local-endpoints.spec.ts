@@ -138,3 +138,34 @@ test('Detect with nothing running says so and links the official download pages'
     removeDataDir(dataDir);
   }
 });
+
+test('Show models lists what the server reports with its cautions, and Use for new chats chooses one', async ({ page }) => {
+  const fake = await startFakeServer({ models: ['fake-small', 'fake-large'] });
+  const dataDir = makeDataDir();
+  const setup = await fakeAgentSetup({ agentId: 'local', displayName: 'Local model', installed: true, auth: 'signed_in' });
+  const server = await startServer(dataDir, 0, {
+    local: { setup: { ...setup, status: async () => ({ ...(await setup.status()), noAccount: true }) } },
+    // The preset id is what makes the server read the sizes and context from the native API.
+    endpointPresets: [{ id: 'ollama', label: 'Preset One', baseUrl: `http://localhost:${fake.port}/v1`, downloadUrl: 'https://example.com/one' }],
+  });
+  try {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openConnected(page, '/settings/agents', server.launchUrl);
+    await card(page).getByTestId('endpoint-preset-ollama').click();
+    await card(page).getByTestId('endpoint-add-submit').click();
+    await expect(card(page).getByTestId('endpoint-label')).toHaveText('Preset One');
+    await card(page).getByTestId('endpoint-show-models').click();
+    const small = card(page).getByTestId('endpoint-model-fake-small');
+    await expect(small).toContainText('fake-small (7B, 4 GB, 4k context)');
+    await expect(small.getByTestId('endpoint-model-caution')).toHaveCount(3);
+    const large = card(page).getByTestId('endpoint-model-fake-large');
+    await expect(large).toContainText('32k context');
+    await large.getByRole('button', { name: 'Use for new chats' }).click();
+    await expect(card(page).getByTestId('endpoint-chosen-model')).toHaveText('New chats start on fake-large.');
+    await expect(large).toContainText('Used for new chats');
+  } finally {
+    await server.close();
+    await fake.close();
+    removeDataDir(dataDir);
+  }
+});

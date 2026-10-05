@@ -41,6 +41,7 @@ import { registerPermissionRoutes } from './permission-routes.js';
 import { registerPlanningRoutes } from './planning-routes.js';
 import { registerBuildRoutes } from './build-routes.js';
 import { registerLocalEndpointRoutes } from './local-endpoint-routes.js';
+import { registerLocalEndpointModelsRoute } from './local-endpoint-models-route.js';
 import { registerLocalEndpointUseRoutes, type EndpointPresetData } from './local-endpoint-use-routes.js';
 import { registerRunSettingsRoutes } from './run-settings-routes.js';
 import { registerUpdateRoutes } from './update-routes.js';
@@ -311,6 +312,7 @@ export function createApp({
   // The Local model's endpoints (epic 14 story 14.3): app-wide, behind the gate, never a piece's guard; a key never leaves.
   registerLocalEndpointRoutes(app, { localEndpoints, log });
   registerLocalEndpointUseRoutes(app, { localModels, presets: endpointPresets ?? [], log });
+  registerLocalEndpointModelsRoute(app, { localModels, log });
   registerUpdateRoutes(app, { updates, desktop: desktopUpdate, shell });
 
   registerEventSocket(app, { events, log, tabs });

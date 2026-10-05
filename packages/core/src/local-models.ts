@@ -8,13 +8,23 @@
  */
 import { endpointStateWords, MAX_TEST_MODELS, readEndpointAddress, type DetectedEndpoint, type LocalEndpointId, type LocalEndpointState, type LocalEndpointTestResponse } from '@ogden-agents/shared';
 import type { LocalEndpoints } from './local-endpoints.js';
-import type { LocalModelPort } from './local-model-port.js';
+import type { LocalModelInfo, LocalModelPort } from './local-model-port.js';
 
 /** A place Detect may look: a preset's label and its address (which must be loopback to be probed). */
 export interface DetectCandidate {
   id: string;
   label: string;
   baseUrl: string;
+}
+
+export interface LocalModelsAnswer {
+  state: LocalEndpointState;
+  message: string;
+  models: LocalModelInfo[];
+  /** The chosen model, or `null` when none is chosen. */
+  model: string | null;
+  /** The chosen model when the server no longer lists it. */
+  missing: string | null;
 }
 
 export interface LocalModels {
@@ -25,12 +35,29 @@ export interface LocalModels {
    * the two that answers counts. A candidate that is not loopback is skipped.
    */
   detect(candidates: readonly DetectCandidate[]): Promise<DetectedEndpoint[]>;
+  /**
+   * The models endpoint `id` serves, with what the server reports of each, its state in plain words, the model
+   * chosen for its chats and, when the server no longer lists that one, which it is (`missing`): shown as missing,
+   * never swapped for another. Refuses an unconfirmed host before anything is called.
+   */
+  models(id: LocalEndpointId): Promise<LocalModelsAnswer>;
   /** Detect itself, without the one-at-a-time guard. */
   detectNow(candidates: readonly DetectCandidate[]): Promise<DetectedEndpoint[]>;
 }
 
 /** `detectPort` is the port Detect uses, with a short timeout of its own (default: `port`). */
-export function createLocalModels({ endpoints, port, detectPort = port }: { endpoints: LocalEndpoints; port: LocalModelPort; detectPort?: LocalModelPort }): LocalModels {
+export function createLocalModels({
+  endpoints,
+  port,
+  detectPort = port,
+  onModels,
+}: {
+  endpoints: LocalEndpoints;
+  port: LocalModelPort;
+  detectPort?: LocalModelPort;
+  /** Told each time an endpoint's models were read (the server keeps them for the chat model picker). */
+  onModels?: ((endpointId: LocalEndpointId, models: readonly LocalModelInfo[]) => void) | undefined;
+}): LocalModels {
   let running: Promise<DetectedEndpoint[]> | undefined;
   return {
     async test(id) {
@@ -50,6 +77,32 @@ export function createLocalModels({ endpoints, port, detectPort = port }: { endp
       // `other` carries the adapter's own plain reason (it names the host, never a key or path).
       const message = state === 'other' && !probed.ok ? probed.reason : endpointStateWords(state, count);
       return { state, models, message };
+    },
+
+    async models(id) {
+      const target = await endpoints.target(id);
+      if (target === undefined) throw new Error('unreachable: target() answered nothing for a named endpoint');
+      const listed = await port.listModels({ baseUrl: target.baseUrl, key: target.key, preset: target.preset });
+      const chosen = target.model ?? null;
+      if (!listed.ok) {
+        const state: LocalEndpointState = listed.kind === 'unreachable' || listed.kind === 'timeout' ? 'not_running' : listed.kind === 'key_refused' ? 'key_refused' : 'other';
+        return { state, message: state === 'other' ? listed.reason : endpointStateWords(state, 0), models: [], model: chosen, missing: null };
+      }
+      const infos = listed.models.slice(0, MAX_TEST_MODELS);
+      try {
+        onModels?.(id, infos);
+      } catch {
+        // Keeping the list for the picker never fails the answer.
+      }
+      const state: LocalEndpointState = listed.models.length > 0 ? 'ready' : 'no_models';
+      return {
+        state,
+        message: endpointStateWords(state, listed.models.length),
+        models: infos,
+        model: chosen,
+        // A chosen model the server doesn't list is missing, whatever else it lists.
+        missing: chosen !== null && !listed.models.some((each) => each.id === chosen) ? chosen : null,
+      };
     },
 
     detect(candidates) {

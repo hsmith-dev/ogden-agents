@@ -110,3 +110,39 @@ describe('structuredComplete before story 14.8', () => {
     expect(JSON.stringify(port.calls)).not.toContain(KEY);
   });
 });
+
+describe('what a local server reports of its models (epic 14 story 14.5)', () => {
+  it('reads sizes, context length and tool support from the preset server\'s own API, and only what it says', async () => {
+    const server = await startFakeServer({ models: ['fake-small', 'fake-large'] });
+    closers.push(() => server.close());
+    const port = createOpenAiLocalModel();
+    const base = `${server.url}/v1`;
+    const ollama = await port.listModels({ baseUrl: base, preset: 'ollama' });
+    expect(ollama).toEqual({
+      ok: true,
+      models: [
+        { id: 'fake-small', sizeBytes: 4_000_000_000, parameterSize: '7B', contextTokens: 4096, toolCall: false },
+        { id: 'fake-large', sizeBytes: 4_000_000_000, parameterSize: '7B', contextTokens: 32_768, toolCall: true },
+      ],
+    });
+    const lmstudio = await port.listModels({ baseUrl: base, preset: 'lmstudio' });
+    expect(lmstudio).toEqual({ ok: true, models: [{ id: 'fake-small', contextTokens: 4096 }, { id: 'fake-large', contextTokens: 32_768, toolCall: true }] });
+    // Another kind of server: only the ids, nothing guessed, and no native call made.
+    const before = server.log.length;
+    expect(await port.listModels({ baseUrl: base })).toEqual({ ok: true, models: [{ id: 'fake-small' }, { id: 'fake-large' }] });
+    expect(server.log.slice(before).map((entry) => entry.path)).toEqual(['/v1/models']);
+  });
+
+  it('keeps the ids when the native API is not there', async () => {
+    const odd = createServer((req, res) => {
+      if (req.url === '/v1/models') res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: [{ id: 'a' }] }));
+      else res.writeHead(404).end();
+    });
+    await new Promise<void>((resolve) => odd.listen(0, '127.0.0.1', resolve));
+    closers.push(() => new Promise<void>((resolve) => { odd.closeAllConnections(); odd.close(() => resolve()); }));
+    const base = `http://127.0.0.1:${(odd.address() as AddressInfo).port}/v1`;
+    const port = createOpenAiLocalModel();
+    expect(await port.listModels({ baseUrl: base, preset: 'ollama' })).toEqual({ ok: true, models: [{ id: 'a' }] });
+    expect(await port.listModels({ baseUrl: base, preset: 'lmstudio' })).toEqual({ ok: true, models: [{ id: 'a' }] });
+  });
+});

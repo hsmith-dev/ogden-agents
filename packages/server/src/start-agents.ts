@@ -20,14 +20,16 @@ import {
   createClaudeCodeAgent,
   createClaudeCodeSetup,
   createKeyringSecretStore,
+  localModelId,
+  LOCAL_AGENT_ID,
   createOpenAiLocalModel,
   DETECT_PROBE_TIMEOUT_MS,
   createMemorySecretStore,
   locateClaudeAdapter,
   resolveClaudeAgentAcp,
 } from '@ogden-agents/adapters';
-import { agentEnvKeys, AgentSetupError, CoreError, createAgentSetup, createLocalModels, type AgentPort, type AgentTerminalResume, type Core, type LocalEndpoints } from '@ogden-agents/core';
-import type { AgentId } from '@ogden-agents/shared';
+import { agentEnvKeys, AgentSetupError, CoreError, createAgentSetup, createLocalModels, type AgentPort, type AgentTerminalResume, type Core, type LocalEndpoints, type LocalModelInfo } from '@ogden-agents/core';
+import { modelDescription, type AgentId } from '@ogden-agents/shared';
 import { agentHomeDir, checkAgentWiring, describedLike, type AgentWiring } from './agent-wiring.js';
 import { antigravityWiring, type AntigravityPorts } from './antigravity-wiring.js';
 import { codexWiring } from './codex-wiring.js';
@@ -222,7 +224,16 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
   /** Claude Code as a chat runs it: the default agent, and the one Plan and the document cards fall back to (stories 4.1, 4.7). */
   const chatAgent = forChat(CLAUDE_CODE_AGENT_ID, agent);
   const localModelPort = options.localModelPort ?? createOpenAiLocalModel();
-  const localModels = createLocalModels({ endpoints: localEndpoints(), port: localModelPort, detectPort: options.localModelPort ?? createOpenAiLocalModel({ timeoutMs: DETECT_PROBE_TIMEOUT_MS }) });
+  // The chat's model picker offers the default endpoint's models, under the ids the harness lists them by (epic 14 story 14.5).
+  const rememberLocalModels = (endpointId: string, models: readonly LocalModelInfo[]) => {
+    const target = localEndpoints().defaultEndpointId() ?? localEndpoints().list()[0]?.id;
+    if (target !== endpointId) return;
+    core.agentModels.rememberModels(
+      LOCAL_AGENT_ID,
+      models.map((model) => ({ id: localModelId(model.id), name: model.id, ...(modelDescription(model) === undefined ? {} : { description: modelDescription(model)! }) })),
+    );
+  };
+  const localModels = createLocalModels({ onModels: rememberLocalModels, endpoints: localEndpoints(), port: localModelPort, detectPort: options.localModelPort ?? createOpenAiLocalModel({ timeoutMs: DETECT_PROBE_TIMEOUT_MS }) });
   return { localModels, localEndpoints: localEndpoints(), claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent };
 }
 

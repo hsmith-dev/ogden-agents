@@ -89,14 +89,21 @@ describe('AgentPicker', () => {
   it('keeps an agent that can\'t start a chat in the menu, unavailable but focusable, with its reason and a link to Settings → Agents', async () => {
     const onChange = vi.fn();
     const signedOut = { ...LIST.agents[1]!, auth: 'needs_sign_in' as const, unavailable: { code: 'agent_signed_out' as const, reason: "Fake Agent isn't signed in. Sign in in Settings → Agents.", action: 'sign_in' as const } };
-    const trusting = { ...LIST.agents[1]!, agentId: 'trust-agent', displayName: 'Trust Agent', needsProjectTrust: true };
+    // Read for a project that isn't trusted for it (epic 12, 12.3): choosing it shows the trust prompt, so it is not disabled.
+    const trusting = {
+      ...LIST.agents[1]!,
+      agentId: 'trust-agent',
+      displayName: 'Trust Agent',
+      needsProjectTrust: true,
+      unavailable: { code: 'project_not_trusted' as const, reason: projectNotTrustedReason('Trust Agent'), action: 'trust_project' as const },
+    };
     renderInRouter(<AgentPicker agents={[LIST.agents[0]!, signedOut, trusting]} value="claude-code" onChange={onChange} />);
     openMenu(await screen.findByTestId('agent-picker'));
     const [, out, trust] = screen.getAllByTestId('agent-option');
     expect(out!.getAttribute('aria-disabled')).toBe('true');
     expect(out!.hasAttribute('data-disabled')).toBe(true);
     expect(out!.textContent).toContain("Fake Agent isn't signed in.");
-    expect(trust!.getAttribute('aria-disabled')).toBe('true');
+    expect(trust!.getAttribute('aria-disabled')).toBeNull();
     expect(trust!.textContent).toContain(projectNotTrustedReason('Trust Agent'));
     // Reachable by keyboard: a disabled menu item would be skipped, and its reason never read.
     expect(out!.getAttribute('tabindex')).not.toBeNull();
@@ -104,15 +111,24 @@ describe('AgentPicker', () => {
     fireEvent.keyDown(out!, { key: 'Enter' });
     expect(onChange).not.toHaveBeenCalled();
     expect(screen.getByTestId('agent-set-up-link').getAttribute('href')).toBe('/settings/agents');
+    // The trust agent is offered a Trust item, which chooses it (the page then shows the trust prompt).
+    const item = screen.getByTestId('agent-trust-project');
+    expect(item.textContent).toBe('Trust this project for Trust Agent');
+    fireEvent.click(item);
+    expect(onChange).toHaveBeenCalledWith('trust-agent');
   });
 });
 
 describe('agentAvailability and projectDefaultAgent (entry 6)', () => {
-  it('reads readiness from the list, trust as unavailable with no fix here', () => {
-    expect(agentAvailability(LIST.agents[0]!)).toEqual({ available: true, description: 'Installed, signed in', setUp: false });
+  it('reads readiness from the list; trust is fixed by the trust prompt, not by Settings', () => {
+    expect(agentAvailability(LIST.agents[0]!)).toEqual({ available: true, description: 'Installed, signed in', setUp: false, trust: false });
     const notInstalled = { ...LIST.agents[1]!, install: 'not_installed' as const, unavailable: { code: 'agent_not_installed' as const, reason: 'Not here.', action: 'install' as const } };
-    expect(agentAvailability(notInstalled)).toEqual({ available: false, description: 'Not here.', setUp: true });
-    expect(agentAvailability({ ...LIST.agents[1]!, needsProjectTrust: true }).setUp).toBe(false);
+    expect(agentAvailability(notInstalled)).toEqual({ available: false, description: 'Not here.', setUp: true, trust: false });
+    // Read for a project: it says it needs that project trusted; the trust prompt fixes it.
+    const untrusted = { ...LIST.agents[1]!, needsProjectTrust: true, unavailable: { code: 'project_not_trusted' as const, reason: projectNotTrustedReason('Fake Agent'), action: 'trust_project' as const } };
+    expect(agentAvailability(untrusted)).toEqual({ available: false, description: projectNotTrustedReason('Fake Agent'), setUp: false, trust: true });
+    // Read for no project: each project asks for its own trust, so the agent can be the default.
+    expect(agentAvailability({ ...LIST.agents[1]!, needsProjectTrust: true })).toEqual({ available: true, description: 'Installed, signed in. Asks you to trust each project first.', setUp: false, trust: false });
   });
 
   it("preselects the project's default while the install has it, else the install's", () => {

@@ -49,6 +49,20 @@
  *   ACP agent) is registered as one more agent, "Fake Agent", that needs a
  *   trusted project (epic 6 entry 10), so the suite proves core's agent
  *   trust gate on the installed package.
+ * - {@link SANDBOX_ENV} = `available`, `unavailable` or `unavailable-windows`: unattended builds
+ *   take this answer instead of probing Claude Code's native sandbox (story
+ *   5.2: CI's ubuntu runners have no working bwrap, spike 5.1), so the suites
+ *   can build with the fake agent, or see `sandbox_unavailable`, on any OS.
+ *
+ * - {@link CODEX_SERVER_ENV}: a Node script inside the temp folder plays
+ *   Codex's `codex-acp` adapter (epic 12 entry 5), so a suite can chat with
+ *   Codex through the fake agent's Codex personality on every OS (the pinned
+ *   adapter and the real Codex are never run in a test). It also registers
+ *   Codex in a shipped-style server, which otherwise leaves it out.
+ *
+ * - {@link CODEX_INSTALL_ENV}: Codex's Install takes its pins (and npm) from a
+ *   JSON file inside the temp folder, as {@link CLAUDE_INSTALL_ENV} does for
+ *   Claude Code, so a suite can install Codex from a local fixture lock.
  *
  * {@link resolveTestHooks} reads them all for `start()`, and
  * {@link testHooksLogFields} is its "test hooks in use" line. Every
@@ -59,7 +73,7 @@ import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, relative } from 'node:path';
 import type { AdapterPins, AntigravityPins } from '@ogden-agents/adapters';
-import { clampCheckInDelay, type ApiKeyVerification } from '@ogden-agents/core';
+import { clampCheckInDelay, type ApiKeyVerification, type SandboxCheck } from '@ogden-agents/core';
 import { BmadLock, BmadPiece, type BmadPiece as BmadPieceName } from '@ogden-agents/shared';
 import type { StartOptions } from './start-types.js';
 
@@ -102,8 +116,35 @@ export const BMAD_SOURCE_UV_ENV_NAMES: readonly string[] = [
 export const ANTIGRAVITY_SERVER_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_SERVER';
 /** Absolute path to a JSON file `{ "pins": AntigravityPins }` inside the temp folder, every archive on `http://127.0.0.1` (tests only; epic 6 entry 10). */
 export const ANTIGRAVITY_INSTALL_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_INSTALL';
+/** Path to a JSON file `{ "pins": { "packageJson", "lock" }, "npmCli"?: "<abs>/npm-cli.js" }` for Codex's install, local `file:` fixtures only (tests only; epic 12 entry 6). */
+export const CODEX_INSTALL_ENV = 'OGDEN_AGENTS_TEST_CODEX_INSTALL';
+/** Absolute path to a Node script inside the temp folder, run under Node as Codex's `codex-acp` adapter (tests only; epic 12 entry 5). */
+export const CODEX_SERVER_ENV = 'OGDEN_AGENTS_TEST_CODEX_SERVER';
 /** Absolute path to a Node script inside the temp folder, registered as a test agent that needs a trusted project (tests only; epic 6 entry 10). */
 export const TRUST_AGENT_ENV = 'OGDEN_AGENTS_TEST_TRUST_AGENT';
+/** `available` or `unavailable`: the sandbox check unattended builds get (tests only; story 5.2). */
+export const SANDBOX_ENV = 'OGDEN_AGENTS_TEST_SANDBOX';
+
+/** The kind a run records under {@link SANDBOX_ENV} = `available`. */
+export const TEST_SANDBOX_KIND = 'test';
+
+/** The reason a build is refused under {@link SANDBOX_ENV} = `unavailable`. */
+export const TEST_SANDBOX_UNAVAILABLE_REASON = 'The test sandbox is unavailable.';
+
+/**
+ * The sandbox check from {@link SANDBOX_ENV}, or `undefined` (the real
+ * probe): unset, hooks not allowed. Allowed but neither value throws, so the
+ * test fails loudly rather than probing the real sandbox.
+ */
+export function testSandbox(env: Env, dataDir: string, tmp: string = tmpdir()): SandboxCheck | undefined {
+  const value = env[SANDBOX_ENV];
+  if (value === undefined || value === '' || !testHooksAllowed(env, dataDir, tmp)) return undefined;
+  if (value === 'available') return { available: true, kind: TEST_SANDBOX_KIND };
+  if (value === 'unavailable') return { available: false, reason: TEST_SANDBOX_UNAVAILABLE_REASON };
+  // As Windows answers (story 5.6): building with you watching first.
+  if (value === 'unavailable-windows') return { available: false, reason: TEST_SANDBOX_UNAVAILABLE_REASON, choices: ['attended', 'install_docker', 'other_agent'] };
+  throw new Error(`${SANDBOX_ENV}: must be available, unavailable or unavailable-windows`);
+}
 
 /** Test-only: shortens the quiet-agent check-in delay, in milliseconds (story 2.10). Honoured only when `testHooksAllowed`. */
 export const CHECK_IN_MS_ENV = 'OGDEN_AGENTS_TEST_CHECK_IN_MS';
@@ -165,10 +206,19 @@ const INTEGRITY = /^sha512-[A-Za-z0-9+/]+=*$/;
  * fails loudly rather than reaching the registry.
  */
 export function testClaudeInstall(env: Env, dataDir: string, tmp: string = tmpdir()): TestClaudeInstall | undefined {
-  const file = env[CLAUDE_INSTALL_ENV];
+  return testNpmInstall(CLAUDE_INSTALL_ENV, env, dataDir, tmp);
+}
+
+/** Codex's test install source from {@link CODEX_INSTALL_ENV}, checked as {@link testClaudeInstall}'s is (epic 12 entry 6). */
+export function testCodexInstall(env: Env, dataDir: string, tmp: string = tmpdir()): TestClaudeInstall | undefined {
+  return testNpmInstall(CODEX_INSTALL_ENV, env, dataDir, tmp);
+}
+
+function testNpmInstall(name: string, env: Env, dataDir: string, tmp: string): TestClaudeInstall | undefined {
+  const file = env[name];
   if (file === undefined || file === '' || !testHooksAllowed(env, dataDir, tmp)) return undefined;
   const fail = (why: string): never => {
-    throw new Error(`${CLAUDE_INSTALL_ENV}: ${why}`);
+    throw new Error(`${name}: ${why}`);
   };
   if (!isAbsolute(file)) fail('must be an absolute path');
   let text = '';
@@ -282,6 +332,11 @@ export function testAntigravityInstall(env: Env, dataDir: string, tmp: string = 
   // Its installed server is the fake: without the server hook the shipped server would run.
   if (env[ANTIGRAVITY_SERVER_ENV] === undefined || env[ANTIGRAVITY_SERVER_ENV] === '') fail(`needs ${ANTIGRAVITY_SERVER_ENV} too`);
   return { pins: pins as AntigravityPins };
+}
+
+/** The Node script {@link CODEX_SERVER_ENV} names (see {@link testClaudeCli}), or `undefined` (Codex's pinned adapter); throws when allowed but unusable. */
+export function testCodexServer(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
+  return testNodeScript(CODEX_SERVER_ENV, env, dataDir, tmp);
 }
 
 /** The trust-needing test agent's script from {@link TRUST_AGENT_ENV} (see {@link testClaudeCli}), or `undefined`; throws when allowed but unusable. */
@@ -401,7 +456,7 @@ export function checkInDelayFromEnv(env: Env, dataDir: string, tmp: string = tmp
 }
 
 /** The `start()` options that decide a hook themselves, and whether `start()` opens its own core. */
-export type TestHookOptions = Pick<StartOptions, 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'extraAgents'> & {
+export type TestHookOptions = Pick<StartOptions, 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'codex' | 'extraAgents' | 'sandbox'> & {
   /** `false` for a core passed in, which already holds its own BMad pieces: {@link BMAD_AVAILABLE_ENV} is not read. */
   ownsCore: boolean;
   tmp?: string;
@@ -414,12 +469,15 @@ export interface TestHooks {
   claudeCli: string | undefined;
   antigravityServer: string | undefined;
   antigravityInstall: TestAntigravityInstall | undefined;
+  codexServer: string | undefined;
+  codexInstall: TestClaudeInstall | undefined;
   trustAgent: string | undefined;
   bmadProbe: boolean;
   bmadAvailable: BmadPieceName[];
   bmadSource: TestBmadSource | undefined;
   checkInMs: number | undefined;
   secretStore: 'memory' | undefined;
+  sandbox: SandboxCheck | undefined;
 }
 
 /**
@@ -439,6 +497,9 @@ export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOpt
     // Antigravity's ports given (or left out) by a test decide it: the hook is not read.
     antigravityServer: options.antigravity === undefined ? testAntigravityServer(env, dataDir, tmp) : undefined,
     antigravityInstall: options.antigravity === undefined ? testAntigravityInstall(env, dataDir, tmp) : undefined,
+    // Codex's ports given (or left out) by a test decide it: the hook is not read.
+    codexServer: options.codex === undefined ? testCodexServer(env, dataDir, tmp) : undefined,
+    codexInstall: options.codex === undefined ? testCodexInstall(env, dataDir, tmp) : undefined,
     // Agents a test registers decide it: the hook is not read.
     trustAgent: options.extraAgents === undefined ? testTrustAgent(env, dataDir, tmp) : undefined,
     bmadProbe: testBmadProbe(env, dataDir, tmp),
@@ -446,6 +507,7 @@ export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOpt
     bmadSource: options.bmadSource === undefined && options.bmadFetch === undefined ? testBmadSource(env, dataDir, tmp) : undefined,
     checkInMs: options.checkInDelayMs === undefined ? checkInDelayFromEnv(env, dataDir, tmp) : undefined,
     secretStore: options.secrets === undefined ? testSecretStore(env, dataDir, tmp) : undefined,
+    sandbox: options.sandbox === undefined ? testSandbox(env, dataDir, tmp) : undefined,
   };
 }
 
@@ -461,11 +523,14 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     hooks.claudeCli !== undefined ||
     hooks.antigravityServer !== undefined ||
     hooks.antigravityInstall !== undefined ||
+    hooks.codexServer !== undefined ||
+    hooks.codexInstall !== undefined ||
     hooks.trustAgent !== undefined ||
     hooks.bmadProbe ||
     hooks.bmadAvailable.length > 0 ||
     hooks.bmadSource !== undefined ||
-    hooks.checkInMs !== undefined;
+    hooks.checkInMs !== undefined ||
+    hooks.sandbox !== undefined;
   if (!inUse) return undefined;
   return {
     claudeInstall: hooks.claudeInstall !== undefined,
@@ -473,10 +538,13 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     claudeCli: hooks.claudeCli !== undefined,
     antigravityServer: hooks.antigravityServer !== undefined,
     antigravityInstall: hooks.antigravityInstall !== undefined,
+    codexServer: hooks.codexServer !== undefined,
+    codexInstall: hooks.codexInstall !== undefined,
     trustAgent: hooks.trustAgent !== undefined,
     bmadProbe: hooks.bmadProbe,
     bmadAvailable: hooks.bmadAvailable.join(','),
     bmadSource: hooks.bmadSource !== undefined,
+    ...(hooks.sandbox === undefined ? {} : { sandbox: hooks.sandbox.available ? 'available' : 'unavailable' }),
     ...(hooks.checkInMs === undefined ? {} : { checkInMs: hooks.checkInMs }),
   };
 }

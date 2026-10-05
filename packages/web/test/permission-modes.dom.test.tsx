@@ -135,6 +135,32 @@ describe('the permission mode picker', () => {
     expect(onChoose).not.toHaveBeenCalled();
   });
 
+  it('a chat whose agent fixes its mode at start shows it as fixed for this chat, and no other mode can be chosen (epic 12, 12.3)', async () => {
+    const options: SessionPermissionModeOption[] = [
+      { mode: 'ask', available: false, reason: 'Grok sets its permission mode when a chat starts, so this chat stays in Auto. Start a new chat to use Ask.' },
+      { mode: 'auto', available: true, fixed: true },
+      { mode: 'skip_all', available: false, reason: 'Grok sets its permission mode when a chat starts, so this chat stays in Auto. Start a new chat to use Skip all.' },
+    ];
+    const { onChoose, open } = mountPicker({ agentName: 'Grok', options, mode: 'auto', developerMode: true });
+    const trigger = screen.getByTestId('permission-mode-picker');
+    expect(trigger.getAttribute('data-fixed')).toBe('true');
+    expect(trigger.getAttribute('aria-label')).toBe('Permission mode: Auto, fixed for this chat');
+    const menu = await open();
+    expect(menu.textContent).toContain('Permission mode (fixed for this chat)');
+    const ask = screen.getByTestId('permission-mode-ask');
+    expect(ask.hasAttribute('data-disabled')).toBe(true);
+    expect(ask.textContent).toContain('Start a new chat to use Ask.');
+    fireEvent.click(ask);
+    fireEvent.click(screen.getByTestId('permission-mode-skip_all'));
+    expect(onChoose).not.toHaveBeenCalled();
+  });
+
+  it('an agent that changes its mode has no fixed marker', async () => {
+    mountPicker();
+    expect(screen.getByTestId('permission-mode-picker').hasAttribute('data-fixed')).toBe(false);
+    expect(screen.getByTestId('permission-mode-picker').getAttribute('aria-label')).toBe('Permission mode: Ask');
+  });
+
   it('while the terminal drives, nothing can be chosen, and each mode says to switch back first', async () => {
     const { onChoose, open } = mountPicker({ terminalDrives: true, mode: 'auto' });
     await open();

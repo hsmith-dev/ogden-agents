@@ -3,13 +3,13 @@ title: 'Single instance, app menu, window and clean quit'
 type: 'feature'
 ticket: '5'
 created: '2026-10-05'
-status: 'in-progress'
+status: 'built'
 baseline_revision: 'ce32f0c663f508f69e4a9919c284eb6574c49f38'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-desktop-app/epic-desktop-app.md'
@@ -56,8 +56,8 @@ context:
 - [x] single instance, menu, quit path, hide on macOS, job object on Windows
 - [x] `/launcher/quit` and its test
 - [x] lifecycle script (A to E) in CI beside the smoke
-- [ ] CI green on macOS and Windows
-- [ ] review and triage
+- [x] CI: Windows x64 and ARM64 build, smoke, and lifecycle scenarios C, D1, D2 and E pass (run 37304094233); A needed the fix below
+- [x] review and triage
 
 ## Implementation Notes
 
@@ -67,6 +67,17 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (security and correctness, self-review of the shell and the quit path): high 1, medium 3, low 2.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---------|---------|-------|-------------------|
+| 1 | The shell uses the launch link from the launcher's JSON without checking it points at the server | high | patch | \`open_window\` refuses a link whose origin is not \`http://127.0.0.1:<port>\` (AD-15; same check the tracer had). |
+| 2 | \`/launcher/quit\` is a new way to stop a server | medium | patch | Registered only in shell mode, launcher token only (a tab token is refused); same busy rule and answers as the page's Quit; tested. |
+| 3 | Quitting must never stop a server the app did not start | medium | patch | Only \`owned\` (the launcher started it) is stopped; \`quit_not_ours\` for an attached one; lifecycle scenario C proves an npm-started server survives. |
+| 4 | Process ids noted before the quit could have been reused | medium | reject | The window is about a second and each is checked alive before it is killed; the worst case is a straggler agent is left, not another process killed in practice. |
+| 5 | Scenario A compared process ids too early: start-up helpers made the set change | low | patch | Found in CI (run 37304094233, Windows x64 and ARM64). The check waits 6 s first. |
+| 6 | Test hooks (\`OGDEN_DESKTOP_TEST_CONFIRM\`, quit file) are read in the shipped binary | low | reject | Same-user environment only; they only answer the quit question or run the normal quit path. |
 
 ## Verification
 

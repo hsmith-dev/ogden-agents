@@ -76,6 +76,27 @@ export interface AgentDescriptor {
    * it starts only in a project the user trusted.
    */
   needsProjectTrust: boolean;
+  /**
+   * The repo-relative files and folders (`/`-separated) it runs from the
+   * project when `needsProjectTrust` (its settings, hooks, MCP servers). The
+   * user's trust of the project is bound to their contents, so a change asks
+   * again before the agent's next start (epic 12, 12.3). Only with
+   * `needsProjectTrust`.
+   */
+  projectFiles?: readonly string[] | undefined;
+  /**
+   * Its permission mode is given once, when a chat starts, and can't be
+   * changed after (the agent has no way to switch it): core refuses a change
+   * for a chat that has started, and the adapter gives the chat's mode at
+   * every start, reopen and load (epic 12, 12.3).
+   */
+  modeFixedAtStart?: boolean | undefined;
+  /**
+   * Names of the agent's own config folders (a single folder name each, at any
+   * depth) that join the protected paths, so an agent edit there is always a
+   * card in Ask and Auto and Auto's guards cover them (epic 12, 12.3).
+   */
+  configFolders?: readonly string[] | undefined;
   /** Where in a project its skills go (repo-relative, `/`-separated), for BMad setup. */
   skillsFolder: string;
   /**
@@ -184,6 +205,13 @@ export function agentDescriptorProblems(descriptor: AgentDescriptor): string[] {
     if (typeof nativeId !== 'string' || nativeId.trim() === '') at(`the ${mode} mode has no native id`);
   }
   if (typeof descriptor.permissionModes.ask !== 'string') at('the agent does not declare Ask');
+  for (const folder of descriptor.configFolders ?? []) {
+    if (!isRelativeFolder(folder) || folder.includes('/')) at(`the config folder ${JSON.stringify(folder)} is not a single folder name`);
+  }
+  if (descriptor.projectFiles !== undefined) {
+    if (!descriptor.needsProjectTrust) at('it lists project files but does not need project trust');
+    for (const file of descriptor.projectFiles) if (!isRelativeFolder(file)) at(`the project file ${JSON.stringify(file)} is not a plain repo-relative path`);
+  }
   if (descriptor.models !== undefined) {
     const { list, apply } = descriptor.models;
     if (list.length === 0) at('the static model list is empty');
@@ -226,4 +254,14 @@ export function apiKeyMethod(descriptor: AgentDescriptor): (AgentSignInMethodDes
 export function agentEnvKeys(descriptors: readonly AgentDescriptor[]): string[] {
   const names = descriptors.flatMap((descriptor) => descriptor.signInMethods.flatMap((method) => method.apiKey?.envNames ?? []));
   return [...new Set(names)];
+}
+
+/** Every config folder name of `descriptors`, each once (they join the protected paths). */
+export function agentConfigFolders(descriptors: readonly AgentDescriptor[]): string[] {
+  return [...new Set(descriptors.flatMap((descriptor) => descriptor.configFolders ?? []))];
+}
+
+/** Every project file the agents that need project trust run, each once, sorted: what the trust is bound to. */
+export function agentProjectFiles(descriptors: readonly AgentDescriptor[]): string[] {
+  return [...new Set(descriptors.flatMap((descriptor) => (descriptor.needsProjectTrust ? (descriptor.projectFiles ?? []) : [])))].sort();
 }

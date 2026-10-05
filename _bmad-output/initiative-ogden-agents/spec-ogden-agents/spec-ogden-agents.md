@@ -46,13 +46,13 @@ A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the str
   - **intent:** In a project with Unattended builds turned on (CAP-19), unattended builds dispatch `bmad-build-auto` per ticket in isolation, respecting prerequisites and a concurrency limit, either for one ticket or autonomously.
   - **success:** Two ready, independent tickets build in parallel without touching each other's files, and a ticket with an unmet prerequisite is not dispatched.
 - **CAP-9**
-  - **intent:** Each run streams live: activity, tool calls, final status, and a plain-language reason if blocked, with a Retry action.
+  - **intent:** In a project with Unattended builds turned on (CAP-19), each run streams live: activity, tool calls, final status, and a plain-language reason if blocked, with a Retry action.
   - **success:** A blocked run shows its reason, and Retry resumes it from the correct status.
 - **CAP-10**
-  - **intent:** After every run, the system itself verifies the outcome: the plan status, an independent re-run of the tests, and a non-empty diff.
+  - **intent:** In a project with Unattended builds turned on (CAP-19), after every run, the system itself verifies the outcome: the plan status, an independent re-run of the tests, and a non-empty diff.
   - **success:** A run that claims success but whose tests fail is shown as failed.
 - **CAP-12**
-  - **intent:** A user reviews a diff and its review findings, then approves (merge and mark done) or rejects and retries.
+  - **intent:** In a project with Unattended builds turned on (CAP-19), a user reviews a diff and its review findings, then approves (merge and mark done) or rejects and retries.
   - **success:** Approving a built ticket merges its branch and marks it done, and no ticket reaches done without approval.
 - **CAP-13**
   - **intent:** In a project with Retrospectives turned on (CAP-19), when an epic completes, a retrospective records evidence-based findings and adds recurring pitfalls to the project's `AGENTS.md`.
@@ -63,6 +63,8 @@ A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the str
 - **CAP-15**
   - **intent:** In v1, Claude Code is supported fully, for chat and builds. Antigravity joins it for chat, picked per chat with a default per project, if it proves possible (epic 6's spike decides). Codex, Gemini CLI and GitHub Copilot CLI, and builds with any agent but Claude Code, are v2 (epic 8); each further ACP agent is one adapter.
   - **success:** Claude Code completes a chat and a `bmad-build-auto` run through the UI. If Antigravity is supported, an Antigravity chat and a Claude Code chat run at once in one project and both continue after a restart.
+  - **intent:** In v1, Claude Code is supported fully, for chat and builds. Antigravity joins it for chat, picked per chat with a default per project, if it proves possible (epic 6's spike decides). In v1.1 (epic 12, 2026-10-04), Codex and Grok join for chat, each only if its live checks pass on macOS, Windows and Linux; v1.1 ships with whichever passes. Gemini CLI and GitHub Copilot CLI, and builds with any agent but Claude Code, are v2 (epic 8); each further ACP agent is one adapter.
+  - **success:** Claude Code completes a chat and a `bmad-build-auto` run through the UI. If Antigravity is supported, an Antigravity chat and a Claude Code chat run at once in one project and both continue after a restart. In v1.1, the same holds for a Codex chat and a Grok chat beside a Claude Code chat.
 - **CAP-16**
   - **intent:** On first run, onboarding finds the installed agent CLIs, installs missing ones on request, and signs the user into their own account (subscription), or takes an API key instead, all from the UI.
   - **success:** On a fresh machine, a user installs Claude Code and signs into it from the UI, then chats, with no terminal. Another user completes a chat with only an API key.
@@ -86,7 +88,7 @@ CAP-11 (cost caps) is retired and its number is not reused.
 - It runs natively on macOS, Windows, and Linux, and needs no Docker to install or chat. It binds to `127.0.0.1` with a per-install access token and WebSocket origin checks, because the terminal is effectively a remote shell.
 - No standard flow may require the CLI. The CLI is reachable only through the advanced toggle.
 - It is a single Node process. Both frontend and backend are new builds, and no Ogden code is carried over.
-- Reuse BMAD before building: bmad-loop for dispatch and agent profiles, `tickets.py` for all ticket writes, BMAD's setup scripts for installing into a project.
+- Reuse BMAD before building: `bmad-build-auto` in an Ogden-managed ACP session for builds (bmad-loop only for agents without ACP, not in v1), `tickets.py` for all ticket writes, BMAD's setup scripts for installing into a project.
 - The BMAD v7 files in the repo are the source of truth for ticket and plan state. The database holds only workspaces, sessions, runs and events, and ticket references.
 - Only one side drives a session at a time. While the terminal drives, the chat view is read-only.
 - Guardrails are enforced in code, not in prompts. Ogden commit `b5af7c3` showed that prompted rules get skipped.
@@ -110,6 +112,7 @@ CAP-11 (cost caps) is retired and its number is not reused.
 - Tracker stores (Jira, Linear, GitHub Issues, Notion, Trello) in v1. The board covers the repo store only.
 
 - Planned for v2, not v1 (epic 8): viewing the project's markdown files in the app, code-change review, a VS Code extension, the agents Codex, Gemini CLI and GitHub Copilot CLI, and builds with any agent but Claude Code.
+- Planned for v2, not v1 (epic 8): viewing the project's markdown files in the app, code-change review, a VS Code extension, the agents Gemini CLI and GitHub Copilot CLI, and builds with any agent but Claude Code. Codex and Grok chat are v1.1 (epic 12, 2026-10-04).
 
 ## Success signal
 

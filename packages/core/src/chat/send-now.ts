@@ -133,7 +133,7 @@ export function createSendNow(ctx: ChatContext, deps: Turns & Pick<Replies, 'fin
 
   const methods: Pick<Chat, 'sendMessage' | 'updateQueuedMessage' | 'removeQueuedMessage' | 'sendQueuedMessageNow'> = {
     sendMessage(workspaceId, sessionId, text, options) {
-      if (options?.delivery !== 'now') return deps.sendMessage(workspaceId, sessionId, text);
+      if (options?.delivery !== 'now') return deps.sendMessage(workspaceId, sessionId, text, options);
       chatDrives(workspaceId, sessionId);
       const turn = busy.get(sessionId);
       // Nothing running: it is sent at once either way.

@@ -1,4 +1,15 @@
-import { SCRIPT_TRUST_ALLOW, SCRIPT_TRUST_CHANGED_TEXT, SCRIPT_TRUST_CHANGED_TITLE, SCRIPT_TRUST_FAILED, SCRIPT_TRUST_TEXT, SCRIPT_TRUST_TITLE } from '@ogden-agents/shared';
+import {
+  PROJECT_TRUST_ALLOW,
+  PROJECT_TRUST_CHANGED_TITLE,
+  PROJECT_TRUST_TEXT,
+  PROJECT_TRUST_TITLE,
+  SCRIPT_TRUST_ALLOW,
+  SCRIPT_TRUST_CHANGED_TEXT,
+  SCRIPT_TRUST_CHANGED_TITLE,
+  SCRIPT_TRUST_FAILED,
+  SCRIPT_TRUST_TEXT,
+  SCRIPT_TRUST_TITLE,
+} from '@ogden-agents/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { keepSaved } from '@/api/keep-saved';
@@ -18,8 +29,13 @@ import { trustProjectScripts } from '@/workspaces/workspace-settings-api';
  * leaves the prompt. With `changed` (story 4.13, `scripts_changed`: the
  * project's scripts aren't the ones the user allowed) it says so, and Allow
  * allows them as they are now.
+ *
+ * With `agentName` (epic 12, 12.3: an agent that runs the project's own
+ * settings, hooks and MCP servers is refused until the project is trusted)
+ * it is worded for that agent and the scripts together: one trust covers the
+ * Board and such agents.
  */
-export function ScriptTrustPrompt({ wsId, onTrusted, changed = false }: { wsId: string; onTrusted: () => void; changed?: boolean }) {
+export function ScriptTrustPrompt({ wsId, onTrusted, changed = false, agentName }: { wsId: string; onTrusted: () => void; changed?: boolean; agentName?: string }) {
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -45,13 +61,23 @@ export function ScriptTrustPrompt({ wsId, onTrusted, changed = false }: { wsId: 
         aria-labelledby="script-trust-title"
         action={
           <Button data-testid="script-trust-allow" aria-disabled={busy} onClick={allow}>
-            {SCRIPT_TRUST_ALLOW}
+            {agentName === undefined ? SCRIPT_TRUST_ALLOW : PROJECT_TRUST_ALLOW}
           </Button>
         }
       >
         <span className="flex flex-col gap-1">
-          <span id="script-trust-title">{changed ? SCRIPT_TRUST_CHANGED_TITLE : SCRIPT_TRUST_TITLE}</span>
-          <span className="text-caption text-muted-foreground">{changed ? SCRIPT_TRUST_CHANGED_TEXT : SCRIPT_TRUST_TEXT}</span>
+          <span id="script-trust-title">
+            {agentName !== undefined
+              ? changed
+                ? PROJECT_TRUST_CHANGED_TITLE(agentName)
+                : PROJECT_TRUST_TITLE(agentName)
+              : changed
+                ? SCRIPT_TRUST_CHANGED_TITLE
+                : SCRIPT_TRUST_TITLE}
+          </span>
+          <span className="text-caption text-muted-foreground">
+            {agentName !== undefined ? PROJECT_TRUST_TEXT(agentName) : changed ? SCRIPT_TRUST_CHANGED_TEXT : SCRIPT_TRUST_TEXT}
+          </span>
         </span>
       </Notice>
       {error === undefined ? null : (

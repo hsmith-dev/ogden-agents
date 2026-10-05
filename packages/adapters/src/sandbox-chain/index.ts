@@ -10,7 +10,7 @@
  * `check` and `status` are one inspection, so what the dialog says is what
  * the next Build does.
  */
-import type { SandboxCheck, SandboxPort } from '@ogden-agents/core';
+import type { SandboxCheck, SandboxPort, SandboxRunRequest, SandboxRunResult } from '@ogden-agents/core';
 import { DOCKER_INSTALL_URL, SANDBOX_LABELS, type SandboxChoice, type SandboxProbe, type SandboxStatus } from '@ogden-agents/shared';
 
 /** What one step found. */
@@ -28,6 +28,8 @@ export interface SandboxStepResult {
 /** One sandbox in the chain. `inspect` never throws: a failed probe is "can't". */
 export interface SandboxStep {
   inspect(): Promise<SandboxStepResult>;
+  /** Runs one command in this step's sandbox (story 5.8); `undefined` when the request's sandbox kind is not this step's. */
+  run?(request: SandboxRunRequest): Promise<SandboxRunResult | undefined>;
 }
 
 /** The Build dialog's choices without a sandbox: macOS and Linux (the entry's order), then Windows' with building with you watching first (user decision 2026-10-01). */
@@ -93,6 +95,17 @@ export function createSandboxChain(options: SandboxChainOptions): SandboxPort {
     },
     async status() {
       return (await inspect()).status;
+    },
+    async run(request) {
+      for (const step of options.steps) {
+        try {
+          const result = await step.run?.(request);
+          if (result !== undefined) return result;
+        } catch {
+          // A step that fails to run it did not run it: the next, or none.
+        }
+      }
+      return undefined;
     },
   };
 }

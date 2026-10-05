@@ -467,7 +467,28 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     return { cwd: worktreePath, sandbox: contained, env, decide: (request) => decideBuildPermission(request, scope, paths) };
   };
 
-  const startLocked = async (workspaceId: WorkspaceId, repoPath: string, ref: string, agent: BuildAgent, mode: BuildMode): Promise<{ run: Run; session: Session }> => {
+  /** What a start checked about the ticket and the checkout, for the run it makes or the queued run it dispatches. */
+  interface StartPlan {
+    ticket: TicketDetail;
+    head: VcsHead;
+    sandboxKind: string;
+    attended: boolean;
+    latest: Run | undefined;
+  }
+
+  /** The limits at this moment: a project's, the install's (read at each dispatch, so a change applies to the next). */
+  const hasCapacity = (workspaceId: WorkspaceId): boolean => {
+    const running = entities.listRunningRuns();
+    const install = settings.runLimits().maxConcurrentRunsPerInstall;
+    const project = settings.workspaceSettings(workspaceId).maxConcurrentRuns;
+    return running.length < install && running.filter((each) => each.workspaceId === workspaceId).length < project;
+  };
+
+  /** The run's deadline from now (the install's maximum run time). */
+  const deadlineFromNow = (): string => new Date(Date.now() + settings.runLimits().maxRunMinutes * 60_000).toISOString();
+
+  /** Everything a start refuses for before it writes anything (see the header); the guards run last, right before the first write. */
+  const validateStart = async (workspaceId: WorkspaceId, repoPath: string, ref: string, agent: BuildAgent, mode: BuildMode): Promise<StartPlan> => {
     // Fail closed: an unattended run needs a sandbox that says it is there; only the user's own `attended` mode runs without one (story 5.6).
     const attended = mode === 'attended';
     const sandboxKind = attended ? ATTENDED_SANDBOX : await requireSandbox(agent);
@@ -489,7 +510,29 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     await requirePlanCommitted(repoPath, ticket.plan);
     // The guards once more, right before anything is written: a piece turned off meanwhile writes nothing.
     await guarded(workspaceId);
+    return { ticket, head, sandboxKind, attended, latest };
+  };
 
+  /**
+   * A run waiting for a slot (story 5.8): its build session and run exist,
+   * the run is last in its workspace's queue, and nothing is written in the
+   * repo or the data folder yet (its worktree comes at dispatch).
+   */
+  const enqueue = async (workspaceId: WorkspaceId, ref: string, agent: BuildAgent, plan: StartPlan): Promise<{ run: Run; session: Session }> => {
+    const session = await chat.createChatSession(workspaceId, { kind: 'build', agentId: runner.agent });
+    const run = entities.createRun({ sessionId: session.id, ticketRef: ref, sandbox: plan.sandboxKind, agent, queuePosition: 1 });
+    return { run, session };
+  };
+
+  /**
+   * Gives the run its worktree and starts it (a new run, or a queued one
+   * leaving the queue): the worktree and branch from the checked-out branch,
+   * its object store, its session's setup, then the prompt (or the plan
+   * checkpoint's pause). Any failure after the worktree exists removes it
+   * and ends the run `failed`.
+   */
+  const begin = async (workspaceId: WorkspaceId, repoPath: string, ref: string, agent: BuildAgent, plan: StartPlan, queued: Run | undefined): Promise<{ run: Run; session: Session }> => {
+    const { ticket, head, sandboxKind, attended, latest } = plan;
     // Room for the worktree (story 5.5): refused before anything is written when the disk is nearly full.
     const free = (deps.freeBytes ?? freeBytesOf)(dataDir);
     if (free !== undefined && free < MIN_FREE_DISK_BYTES) throw new BuildRefusedError('disk_space_low', DISK_SPACE_LOW_MESSAGE);
@@ -511,7 +554,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     if (!isBuildBranch(branch)) throw new ValidationError('That ticket reference makes no usable branch name.', [{ path: ['ref'], message: 'unusable branch name' }]);
     const worktreePath = join(parent, runShort);
     await vcs.addWorktree(repoPath, { path: worktreePath, branch, base: head.revision });
-    let run: Run | undefined;
+    let run: Run | undefined = queued;
     let session: Session | undefined;
     try {
       const real = paths.realpath(worktreePath) ?? worktreePath;
@@ -525,8 +568,15 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       for (const folder of PRECREATED_FOLDERS) mkdirSync(join(real, folder), { recursive: true });
       // An attended run has no sandbox, so no object store: the user answers every card. A sandboxed run's git writes its own store.
       const setup = attended ? ({ attended: true, cwd: real } as const) : await unattendedSetup(sandboxKind, real, branch, runShort);
-      session = await chat.createChatSession(workspaceId, { kind: 'build', agentId: runner.agent });
-      run = entities.createRun({ sessionId: session.id, ticketRef: ref, worktreePath: real, sandbox: sandboxKind, branch, baseRevision: head.revision, baseBranch: head.branch, agent });
+      const deadline = deadlineFromNow();
+      if (queued === undefined) {
+        session = await chat.createChatSession(workspaceId, { kind: 'build', agentId: runner.agent });
+        run = entities.createRun({ sessionId: session.id, ticketRef: ref, worktreePath: real, sandbox: sandboxKind, branch, baseRevision: head.revision, baseBranch: head.branch, agent, deadline });
+      } else {
+        session = entities.getSession(queued.sessionId);
+        if (session === undefined) throw new NotFoundError('session', queued.sessionId);
+        run = entities.dispatchRun(queued.id, { worktreePath: real, sandbox: sandboxKind, branch, baseRevision: head.revision, baseBranch: head.branch, deadline });
+      }
       buildSessions.set(session.id, setup);
       if (ticket.plan_checkpoint === true) {
         // The plan checkpoint (story 5.4): paused before the prompt is sent; `resume` sends it.
@@ -535,11 +585,13 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         await writeResult(run, repoPath, ticket, reason, true);
         return { run, session };
       }
+      armDeadline(run);
       chat.sendMessage(workspaceId, session.id, runner.invocation(ref), { build: true });
       // The ticket's previous run, undecided and not running, is superseded (story 5.5 review): no Retry or Reject reaches it now, so its worktree and branch go.
-      if (latest !== undefined && latest.decision === null && latest.outcome !== 'running') await cleanUp(repoPath, latest);
+      if (latest !== undefined && latest.id !== run.id && latest.decision === null && latest.outcome !== 'running') await cleanUp(repoPath, latest);
       return { run, session };
     } catch (error) {
+      if (run !== undefined) disarmDeadline(run.id);
       if (session !== undefined) buildSessions.delete(session.id);
       // Nothing of a run that didn't start is left behind: no worktree, no object store, and no branch unless a run names it.
       try {
@@ -547,9 +599,11 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       } catch (cleanup) {
         report(run?.id ?? 'none', 'cleanup', cleanup);
       }
-      await vcs.removeWorktree(repoPath, worktreePath, run === undefined ? { deleteBranch: branch } : {}).catch((cleanup: unknown) => report(run?.id ?? 'none', 'cleanup', cleanup));
+      await vcs.removeWorktree(repoPath, worktreePath, run === undefined || queued !== undefined ? { deleteBranch: branch } : {}).catch((cleanup: unknown) => report(run?.id ?? 'none', 'cleanup', cleanup));
       if (run !== undefined) {
         try {
+          // A queued run that could not leave the queue leaves it failed.
+          if (queued !== undefined) entities.leaveQueue(run.id);
           entities.setRunOutcome(run.id, 'failed', RUN_REASON_START_FAILED);
         } catch (outcome) {
           report(run.id, 'outcome', outcome);
@@ -557,6 +611,13 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       }
       throw error;
     }
+  };
+
+  /** One start (see the header): to a slot now, or to the queue. */
+  const startLocked = async (workspaceId: WorkspaceId, repoPath: string, ref: string, agent: BuildAgent, mode: BuildMode): Promise<{ run: Run; session: Session }> => {
+    const plan = await validateStart(workspaceId, repoPath, ref, agent, mode);
+    if (!hasCapacity(workspaceId)) return enqueue(workspaceId, ref, agent, plan);
+    return begin(workspaceId, repoPath, ref, agent, plan, undefined);
   };
 
   /**

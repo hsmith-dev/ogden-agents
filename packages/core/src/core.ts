@@ -6,6 +6,7 @@ import { createBmadModulesSeen, type BmadModulesSeen } from './bmad-modules-seen
 import { createBmadScriptTrust, type BmadScriptTrust } from './bmad-script-trust.js';
 import { createBmadSetup, type BmadSetupUseCases } from './bmad-setup.js';
 import { createBuildSessions, type BuildSessions } from './build-sessions.js';
+import { createBuildSettings, type BuildSettings } from './build-settings.js';
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
 import { createEntities, type Entities } from './entities.js';
 import { createEventLog, type EventLog, type EventLogOptions } from './event-log.js';
@@ -45,6 +46,8 @@ export interface Core {
    * builds use-cases register it, the chat reads it. In memory only.
    */
   readonly buildSessions: BuildSessions;
+  /** Unattended builds' limits and a project's build settings (story 5.8). */
+  readonly buildSettings: BuildSettings;
   close(): void;
 }
 
@@ -135,6 +138,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     installSettings,
     agentModels,
     buildSessions: createBuildSessions(),
+    buildSettings: createBuildSettings({ db, events, entities }),
     close: () => {
       try {
         permissions.close();

@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { AgentId } from './events-common.js';
+import { PermissionMode } from './entities.js';
 
 /**
  * The per-project BMad Method pieces contract (CAP-19, AD-22; frozen by story
@@ -40,6 +42,14 @@ export interface BmadPieceInfo {
   readonly sentence: string;
   /** The pieces this one needs on (directly; {@link applyBmadPieceChoice} follows them transitively). */
   readonly needs: readonly BmadPiece[];
+  /**
+   * Whether serving the piece runs the project's own BMad Method scripts
+   * (Board through `tickets.py`, which executes the repo's
+   * `_bmad/scripts/config_utils.py`; story 4.2, AD-22 note 2026-10-02). Its
+   * routes and use-cases then also need the user's one-time trust for the
+   * project (`scripts_not_trusted` until given).
+   */
+  readonly runsProjectScripts: boolean;
 }
 
 /**
@@ -49,11 +59,17 @@ export interface BmadPieceInfo {
  * runs); `planning` and `board` are independent.
  */
 export const BMAD_PIECE_INFO: Readonly<Record<BmadPiece, BmadPieceInfo>> = {
-  planning: { label: 'Planning', sentence: 'Turn an idea into a plan, a spec and tickets with guided steps.', needs: [] },
-  board: { label: 'Board', sentence: "See this project's tickets on a board and move them along.", needs: [] },
-  builds: { label: 'Unattended builds', sentence: 'Let an agent build tickets on its own, then review and approve the work.', needs: ['board'] },
-  retrospectives: { label: 'Retrospectives', sentence: 'Look back on finished work and record what to change next time.', needs: ['builds'] },
+  planning: { label: 'Planning', sentence: 'Turn an idea into a plan, a spec and tickets with guided steps.', needs: [], runsProjectScripts: false },
+  board: { label: 'Board', sentence: "See this project's tickets on a board and move them along.", needs: [], runsProjectScripts: true },
+  builds: { label: 'Unattended builds', sentence: 'Let an agent build tickets on its own, then review and approve the work.', needs: ['board'], runsProjectScripts: true },
+  retrospectives: { label: 'Retrospectives', sentence: 'Look back on finished work and record what to change next time.', needs: ['builds'], runsProjectScripts: true },
 };
+
+/** Whether any of `pieces` runs the project's own BMad Method scripts (so turning it on asks for the project's trust first). */
+export function bmadPiecesRunProjectScripts(pieces: Iterable<BmadPiece>): boolean {
+  for (const piece of pieces) if (BMAD_PIECE_INFO[piece].runsProjectScripts) return true;
+  return false;
+}
 
 /** `pieces` without repeats, in the canonical {@link BMAD_PIECES} order. */
 export function canonicalBmadPieces(pieces: Iterable<BmadPiece>): BmadPiece[] {
@@ -235,15 +251,43 @@ export type BmadPiecesResponse = z.infer<typeof BmadPiecesResponse>;
 // ---- The app-wide default for new projects ----
 
 /** The pieces a newly added project starts with (an install-level preference kept by core; entry 10.4). */
-export const NewProjectDefaults = z.object({ bmadPieces: BmadPieceSet });
+export const NewProjectDefaults = z.object({
+  bmadPieces: BmadPieceSet,
+  /**
+   * The agent new projects get as their default (epic 6, entry 6): Welcome's
+   * agent choice, or Settings → New projects. Absent: the install's default
+   * agent (`ChatAgentsResponse.defaultAgentId`). Written on a project's row
+   * when it is added; projects that exist already never change with it.
+   */
+  defaultAgentId: AgentId.optional(),
+  /**
+   * The mode new projects' chats start in (default permission mode). Absent:
+   * Ask. Copied to a project when it is added; Skip all reaches it as Ask
+   * waiting for the user's confirmation for that project.
+   */
+  defaultPermissionMode: PermissionMode.optional(),
+});
 export type NewProjectDefaults = z.infer<typeof NewProjectDefaults>;
 /** The app-wide default before the user changes it: Simple (every piece off). */
 export const DEFAULT_NEW_PROJECT_DEFAULTS: NewProjectDefaults = { bmadPieces: [] };
 /** `GET` and `PATCH /api/v1/settings/new-projects`. */
 export const NewProjectDefaultsResponse = z.object({ defaults: NewProjectDefaults });
 export type NewProjectDefaultsResponse = z.infer<typeof NewProjectDefaultsResponse>;
-/** `PATCH /api/v1/settings/new-projects`: the new default pieces (a newly-on unavailable piece is refused with `feature_unavailable`). */
-export const UpdateNewProjectDefaultsRequest = z.object({ bmadPieces: BmadPieceSet });
+/**
+ * `PATCH /api/v1/settings/new-projects`: the new default pieces (a newly-on
+ * unavailable piece is refused with `feature_unavailable`) and/or the new
+ * default agent (epic 6: `null` goes back to the install's default; an agent
+ * this install doesn't have is refused with `agent_unknown`). At least one.
+ */
+export const UpdateNewProjectDefaultsRequest = z
+  .object({
+    bmadPieces: BmadPieceSet.optional(),
+    defaultAgentId: AgentId.nullable().optional(),
+    /** Skip all needs Developer mode and `confirm: true`, as a project's default does. */
+    defaultPermissionMode: PermissionMode.optional(),
+    confirm: z.boolean().optional(),
+  })
+  .refine((input) => input.bmadPieces !== undefined || input.defaultAgentId !== undefined || input.defaultPermissionMode !== undefined, 'Choose a setting to change.');
 export type UpdateNewProjectDefaultsRequest = z.infer<typeof UpdateNewProjectDefaultsRequest>;
 
 // ---- Welcome's first-project answer ----

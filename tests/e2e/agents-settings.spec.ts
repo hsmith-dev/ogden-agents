@@ -14,7 +14,7 @@
  * time from a local tarball pinned by integrity (`tests/fixtures/fake-adapter`),
  * offline, into the test's data folder; its `dist/index.js` runs the fake agent.
  */
-import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
@@ -23,7 +23,7 @@ import { makeDataDir, removeDataDir, serverModule, startServer, type RunningServ
 import { send, startChat } from './chat-server.js';
 import { openConnected } from './tab.js';
 
-async function withAgentsServer(page: Page, env: Record<string, string>, extra: StartOptions, body: (server: RunningServer) => Promise<void>) {
+async function withAgentsServer(page: Page, env: Record<string, string>, extra: StartOptions, body: (server: RunningServer, loginState: string) => Promise<void>) {
   const dataDir = makeDataDir();
   const stateDir = mkdtempSync(join(tmpdir(), 'ogden-agents-e2e-login-'));
   const server = await startServer(dataDir, 0, {
@@ -33,7 +33,7 @@ async function withAgentsServer(page: Page, env: Record<string, string>, extra: 
   try {
     await page.setViewportSize({ width: 1440, height: 900 });
     await openConnected(page, '/settings/agents', server.launchUrl);
-    await body(server);
+    await body(server, join(stateDir, 'state.json'));
   } finally {
     await server.close();
     removeDataDir(dataDir);
@@ -238,7 +238,7 @@ test('not installed, Install shows its size, then its progress, then Installed, 
       claudeInstall: { devAdapter: false, pins, npmCli, runNpm: heldNpm, env: { ...process.env, HOME: home, USERPROFILE: home } },
       log: createLogger((line) => lines.push(line)),
     };
-    await withAgentsServer(page, {}, extra, async () => {
+    await withAgentsServer(page, {}, { ...extra, subscriptionMaxAgeMs: 0 }, async (_server, loginState) => {
       await expect(card(page)).toHaveAttribute('data-install', 'not_installed');
       await expect(card(page).getByTestId('agent-state')).toContainText('Not installed');
       // No claude on this computer: the adapter comes with the SDK's own.
@@ -253,7 +253,8 @@ test('not installed, Install shows its size, then its progress, then Installed, 
       await expect(card(page)).toHaveAttribute('data-install', 'installed');
       await expect(card(page).getByTestId('agent-install-size')).toHaveCount(0);
 
-      // A chat runs through the adapter just installed in the data folder, without a restart.
+      // Signed in (a new chat needs it, 6.3), a chat runs through the adapter just installed in the data folder, without a restart.
+      writeFileSync(loginState, JSON.stringify({ loggedIn: true }));
       await startChat(page, repo);
       await send(page, 'hello');
       await expect(page.getByTestId('message-agent')).toContainText('Hello from the fake agent.');

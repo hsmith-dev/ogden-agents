@@ -8,7 +8,7 @@
  * An event that already names a workspace, stream or session other than its
  * session's is refused with {@link SessionEventScopeError}; nothing is stored.
  */
-import type { CoreEvent, CoreEventType, NewEventOf, SessionId, SessionMessageCompletedEvent } from '@ogden-agents/shared';
+import { autoChatName, normalizeChatName, redactApiKeys, type CoreEvent, type CoreEventType, type NewEventOf, type SessionId, type SessionMessageCompletedEvent } from '@ogden-agents/shared';
 import { eq } from 'drizzle-orm';
 import type { Database } from './db/database.js';
 import { sessions } from './db/schema.js';
@@ -51,6 +51,14 @@ export interface SessionEvents {
     sessionId: SessionId,
     payload: NewEventOf<'session.message_completed'>['payload'],
   ): SessionMessageCompletedEvent;
+  /**
+   * Gives the chat its automatic name from `text` (backlog story 12), only
+   * when it has none yet, appending `session.renamed` (cause `auto`).
+   * Whether it named the chat. {@link completeMessage} calls it for every
+   * user message that isn't a Deny reason, so the first one names the chat
+   * whoever sent it (the composer, a planning action, the terminal).
+   */
+  nameChat(sessionId: SessionId, text: string): boolean;
 }
 
 export function createSessionEvents(db: Database, log: EventLog): SessionEvents {
@@ -96,6 +104,21 @@ export function createSessionEvents(db: Database, log: EventLog): SessionEvents 
     return { ...event, workspaceId: session.workspaceId, streamId: session.id };
   };
 
+  const nameChat = (sessionId: SessionId, text: string): boolean =>
+    log.transaction(() => {
+      const row = db.orm.select({ title: sessions.title, autoTitle: sessions.autoTitle }).from(sessions).where(eq(sessions.id, sessionId)).get();
+      if (row === undefined) throw new NotFoundError('session', sessionId);
+      if (row.autoTitle !== null) return false;
+      // A key pasted into the first message never becomes the chat's name, shown in every sidebar.
+      // Normalized first, so a key split by an invisible character is whole again when it is redacted.
+      const autoTitle = autoChatName(redactApiKeys(normalizeChatName(text) ?? ''));
+      if (autoTitle === null) return false;
+      // `updatedAt` is left alone: a name never moves a chat in the sidebar.
+      db.orm.update(sessions).set({ autoTitle }).where(eq(sessions.id, sessionId)).run();
+      raw.append(scoped(sessionId, { type: 'session.renamed', payload: { sessionId, title: row.title, autoTitle, cause: 'auto' } }) as never);
+      return true;
+    });
+
   return {
     appendSessionEvent(sessionId, event) {
       return log.transaction(() => raw.append(scoped(sessionId, event) as never)) as never;
@@ -104,8 +127,13 @@ export function createSessionEvents(db: Database, log: EventLog): SessionEvents 
     completeMessage(sessionId, payload) {
       return log.transaction(() => {
         const event = scoped(sessionId, { type: 'session.message_completed', payload });
-        return raw.completeMessage(event as NewEventOf<'session.message_completed'>);
+        const completed = raw.completeMessage(event as NewEventOf<'session.message_completed'>);
+        // The first user message names the chat; a Deny reason is not what the chat is about.
+        if (payload.role === 'user' && payload.origin !== 'deny_reason') nameChat(sessionId, payload.content);
+        return completed;
       });
     },
+
+    nameChat,
   };
 }

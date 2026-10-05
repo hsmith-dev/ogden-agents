@@ -12,18 +12,23 @@ import {
 } from '@ogden-agents/shared';
 import { ArrowRight, FolderPlus, Plus } from '@phosphor-icons/react';
 import { useNavigate } from '@tanstack/react-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { keepSaved } from '@/api/keep-saved';
 import { AgentCard } from '@/agents/agent-card';
 import { useAgents } from '@/agents/agent-setup-api';
 import { shortcutLocation, useAppShortcut, useAppShortcutActions } from '@/appearance/app-shortcut-api';
 import { useCompleteWelcome, useOnboarding } from '@/onboarding/onboarding-api';
+import { NEW_PROJECT_DEFAULTS_QUERY_KEY, updateNewProjectsAgent, useNewProjectDefaults } from '@/settings/new-project-defaults';
 import {
   advancesOnReady,
   agentReady,
+  agentSetupWords,
+  asksAgentChoice,
   asksFirstProjectChoice,
   bmadMethodPieces,
-  exitTarget,
   firstProjectPieces,
+  resolveExitTarget,
   selectedAgent,
   stepAfterProject,
   type WelcomeStep,
@@ -38,14 +43,15 @@ import { Skeleton } from '@/ui/skeleton';
 import { Text } from '@/ui/typography';
 import { AddProjectDialog } from '@/workspaces/add-project-dialog';
 import { useWorkspaces } from '@/workspaces/workspace-api';
-import { useBmadPieces } from '@/workspaces/workspace-settings-api';
+import { createLatestGate, fetchWorkspaceSettings, useBmadPieces } from '@/workspaces/workspace-settings-api';
 
 /**
  * `/welcome`: the first-run Welcome (onboarding 9.5; EXPERIENCE.md Key Flow
  * 1): pick the agent (install it, sign in or use an API key, through the same
  * card and hooks as Settings: Agents), add a first project, and, while the
  * server still offers it, the app shortcut. Finishing marks Welcome done and
- * opens the new project's Chats. The steps are this page's state, not
+ * opens the new project's Chats (its Plan when it was added with Planning
+ * on, story 4.6). The steps are this page's state, not
  * routes. **Skip for now** on every step marks it done too; Settings →
  * Welcome brings it back.
  *
@@ -63,10 +69,12 @@ export function WelcomePage() {
   /** The first-project answer the added project was created with (10.4), kept when Welcome is done. */
   const [answered, setAnswered] = useState<FirstProjectChoice | undefined>(undefined);
 
-  /** Marks Welcome done, then leaves for the project's Chats (or Projects). A failure stays here, said in place. */
+  /** Marks Welcome done, then leaves for the project's Plan or Chats (or Projects). A failure stays here, said in place. */
   const exit = (opened: Workspace | undefined = workspace, choice: FirstProjectChoice | undefined = answered) => {
     if (complete.isPending) return;
-    complete.mutate(choice, { onSuccess: () => void navigate(exitTarget(opened?.id)) });
+    // The pieces the project actually got (Welcome's answer, or the New-project defaults): with Planning, its Plan (story 4.6).
+    const leave = async () => navigate(await resolveExitTarget(opened?.id, async (wsId) => (await fetchWorkspaceSettings(wsId)).bmadPieces));
+    complete.mutate(choice, { onSuccess: () => void leave() });
   };
 
   const toProject = useCallback(() => setStep('project'), []);
@@ -117,19 +125,46 @@ function Actions({ children }: { children: ReactNode }) {
   return <div className="flex flex-wrap items-center gap-2">{children}</div>;
 }
 
-/** Pick the agent: its card, and on the change to ready the step moves on by itself. */
-function AgentStep({ onContinue, skip }: { onContinue(): void; skip: ReactNode }) {
+/**
+ * Pick the agent: with more than one, which one (epic 6, entry 6: kept as
+ * the default for new projects); then its card, and on the change to ready
+ * the step moves on by itself.
+ */
+export function AgentStep({ onContinue, skip }: { onContinue(): void; skip: ReactNode }) {
   const query = useAgents();
-  const agent = selectedAgent(query.data);
+  const defaults = useNewProjectDefaults();
+  const queryClient = useQueryClient();
+  const [picked, setPicked] = useState<string | undefined>(undefined);
+  const [saveError, setSaveError] = useState<string | undefined>(undefined);
+  const choosing = asksAgentChoice(query.data);
+  const agent = selectedAgent(query.data, picked ?? defaults.data?.defaultAgentId);
+  // Only the latest choice's answer is kept: arrow keys choose as they move, and an earlier answer may land late.
+  const latest = useRef(createLatestGate()).current;
+  const choose = (agentId: string) => {
+    const ticket = latest.next();
+    setPicked(agentId);
+    setSaveError(undefined);
+    // The chosen agent becomes the default for new projects, beside the default pieces (10.4).
+    updateNewProjectsAgent(agentId).then(
+      async (saved) => {
+        if (latest.isLatest(ticket)) await keepSaved(queryClient, NEW_PROJECT_DEFAULTS_QUERY_KEY, saved);
+      },
+      (failure: unknown) => {
+        if (latest.isLatest(ticket)) setSaveError(failure instanceof Error ? failure.message : "The agent couldn't be kept for new projects. Try again.");
+      },
+    );
+  };
   const seen = agent !== undefined;
   const ready = agentReady(agent);
-  const previous = useRef<boolean | undefined>(undefined);
+  const agentId = agent?.agentId;
+  // Per agent: choosing another agent that is ready already is not a sign-in finishing, so it never moves on.
+  const previous = useRef<{ agentId: string | undefined; ready: boolean | undefined }>({ agentId: undefined, ready: undefined });
   useEffect(() => {
     if (!seen) return;
-    const was = previous.current;
-    previous.current = ready;
+    const was = previous.current.agentId === agentId ? previous.current.ready : undefined;
+    previous.current = { agentId, ready };
     if (advancesOnReady(was, ready)) onContinue();
-  }, [seen, ready, onContinue]);
+  }, [seen, ready, agentId, onContinue]);
 
   return (
     <section aria-label="Agent" className="flex max-w-(--space-chat-column) flex-col gap-4">
@@ -154,6 +189,20 @@ function AgentStep({ onContinue, skip }: { onContinue(): void; skip: ReactNode }
             </span>
           </>
         )
+      ) : choosing && agent !== undefined ? (
+        <>
+          <RadioGroup aria-label="Which agent should do the work?" data-testid="welcome-agent-choice" value={agent.agentId} onValueChange={choose}>
+            {query.data.map((each) => (
+              <RadioGroupOption key={each.agentId} id={`welcome-agent-${each.agentId}`} value={each.agentId} data-testid={`welcome-agent-${each.agentId}`} label={each.displayName} description={agentSetupWords(each)} />
+            ))}
+          </RadioGroup>
+          {saveError === undefined ? null : (
+            <Text variant="caption" role="alert" data-testid="welcome-agent-error">
+              {saveError}
+            </Text>
+          )}
+          <AgentCard key={agent.agentId} agent={agent} selected />
+        </>
       ) : (
         query.data.map((each) => <AgentCard key={each.agentId} agent={each} selected={each.agentId === agent?.agentId} />)
       )}

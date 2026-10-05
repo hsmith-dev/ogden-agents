@@ -1,47 +1,59 @@
 # Contributing
 
-Development setup, commands and CI are in the README's [Develop](README.md#develop) section. This file covers the two forks Ogden Agents ships.
+Thanks for looking. Ogden Agents is a small open source project (MIT) run by one maintainer, so please keep changes small and focused. By taking part you agree to the [Code of Conduct](CODE_OF_CONDUCT.md). To report a security problem, follow [SECURITY.md](SECURITY.md) and not a public issue.
 
-## Bundled forks
+## Setup and checks
 
-Ogden Agents works with BMad Method. Each release ships its own pinned copies of two forks inside the npm package (architecture AD-13), so every machine and every epic runs the same versions and nothing is fetched at install or run time:
+- Use **pnpm** (never npm or yarn) and Node.js 24 or later. `pnpm install`, then `pnpm typecheck` and `pnpm test`. The README's [Develop](README.md#develop) section lists the rest, including `pnpm e2e`.
+- Run the full `pnpm test` before you push a code change. CI runs it on macOS, Windows and Linux and decides whether a PR can merge.
+- **Tests never use a real agent, the real keychain, the real network or your real `~/.claude`.** Use the fakes and injected clients the existing tests use. A test that needs one of those is a bug in the test.
+- Keep user-facing copy in plain language, and don't use dashes in it.
+- Never put a real key or token in code, tests or docs. Test fixtures use obviously fake values such as `sk-ant-api03-..._TEST_ONLY_...`; CI's secret scan fails on anything that looks real.
 
-| Fork | Upstream | Vendored as |
-| --- | --- | --- |
-| [`hsmith-dev/BMAD-METHOD`](https://github.com/hsmith-dev/BMAD-METHOD) | [`bmad-code-org/BMAD-METHOD`](https://github.com/bmad-code-org/BMAD-METHOD) | `vendor/bmad-method/skills/`, a copy of the fork's `skills/` |
-| [`hsmith-dev/bmad-loop`](https://github.com/hsmith-dev/bmad-loop) | [`bmad-code-org/bmad-loop`](https://github.com/bmad-code-org/bmad-loop) | `vendor/bmad-loop/bmad_loop-<version>-py3-none-any.whl`, built with `uv build --wheel` |
+## How work is planned: BMad
 
-`forks.lock` records, for each fork, the GitHub repo, its upstream, the tag, the full commit SHA, the vendored path and a content hash of the vendored files. For bmad-loop it also pins the wheel's build backend (`buildConstraints`), so a rebuild produces the same files. `vendor/` and `forks.lock` are committed, and `vendor/` ships in the package.
+This project is built with the BMad Method. Work is tracked as epics and stories under `_bmad-output/`, and each story has a plan file, a review, and a triage log. For anything bigger than a small fix, open an issue first so the change can be agreed before you write it. Maintainers follow the same flow with the BMad skills. [AGENTS.md](AGENTS.md) has the conventions and known pitfalls; coding agents and people should read it first.
 
-CI runs `node scripts/vendor-forks.mjs --check` on every OS. It downloads each fork at its locked commit, re-derives the skills and rebuilds the wheel, and fails, naming the file, if anything in `vendor/` differs (contents, or a skill's executable bit outside Windows) or a hash doesn't match the lock. It also fails if a fork's `tag` no longer points at the locked `commit`. Only files git tracks or would track count, so ignored files such as `.DS_Store` don't. Skill hashes normalize CRLF to LF, so a Windows checkout passes. The wheel is compared by its file list and each file's contents, not its archive bytes, because wheels embed timestamps.
+## Branches, pull requests and provenance
 
-### Branches and tags
+- Branch from `main`, one branch per change, with a short name such as `fix/...`, `docs/...` or `story/<id>-...`. Do not push to `main`.
+- One focused pull request per change. Fill in the pull request template. CI must be green.
+- Plans carry a `baseline_revision`, and `_bmad-output/` keeps an index of deferred work. If you touch either, run `PROVENANCE_BASE=origin/main pnpm provenance` and fix what it reports. CI runs the same check.
+- Maintainers merge with a **merge commit** (`gh pr merge N --merge`), not squash or rebase, so each branch's history stays readable. Use `--force-with-lease`, and only on your own branch.
+- Never push to, open a pull request against, or comment on `bmad-code-org/BMAD-METHOD`. Changes to BMad go to this project's fork, [`hsmith-dev/BMAD-METHOD`](https://github.com/hsmith-dev/BMAD-METHOD), as described in [docs/bmad-fork.md](docs/bmad-fork.md).
 
-Each fork has two branches besides its default `main`:
+## Using BMad Method inside Ogden Agents
 
-- **`upstream`** mirrors upstream's branch exactly. It never carries our commits.
-- **`ogden-agents`** is `upstream` plus one commit per patch, and each patch is also opened as a pull request upstream. There are no patches yet.
+The rest of this file covers how Ogden Agents uses BMad Method.
 
-Releases of a fork are tags on `ogden-agents`, named `v<upstream version>-ogden-agents.<n>`, for example `v6.13.0-next-ogden-agents.0` or `v0.13.0-ogden-agents.0`. `<n>` starts at 0 for each upstream version and goes up by one for each new tag on it.
+## Pinned BMad Method, from Ogden Agents' fork
 
-### Adding a patch
+Ogden Agents works with BMad Method from its own maintained fork, and the npm package ships no BMad files (architecture AD-13). Each release pins the fork to one commit and a content hash in `packages/adapters/src/bmad-source/bmad-lock.json` (bundled into the server):
 
-1. Branch from `upstream`, make the change, and open a pull request against upstream.
-2. Cherry-pick the same single commit onto `ogden-agents`, and keep it as one commit (squash any follow-ups into it) so each patch maps to one upstream pull request. Name the pull request in the commit message.
-3. Tag `ogden-agents` with the next `v<upstream version>-ogden-agents.<n>` and bump the pin below.
+| Source | Repo | Built on | What is used |
+| --- | --- | --- | --- |
+| `bmad-method` | [`hsmith-dev/BMAD-METHOD`](https://github.com/hsmith-dev/BMAD-METHOD), tag `ogden-agents/<date>` | upstream [`bmad-code-org/BMAD-METHOD`](https://github.com/bmad-code-org/BMAD-METHOD) | the commit's `skills/` folder (`include: "skills/"`) |
 
-### Syncing with upstream
+How the fork is kept in step with upstream, and why nothing is ever pushed upstream, is in [docs/bmad-fork.md](docs/bmad-fork.md).
 
-1. Fast-forward `upstream` to upstream's branch.
-2. Rebase `ogden-agents` onto `upstream`. Drop any patch upstream has merged: once upstream has the change, the fork no longer carries it.
-3. Tag the result (`<n>` restarts at 0 on a new upstream version) and bump the pin.
+The entry records the repo, the `ref` (for the fork, a tag that never moves) the commit must be in the history of, the full `commit`, the upstream `base` it is built on (`repo`, `ref`, `commit`), the `version` upstream gives it, the `include` folder and the `contentHash`: sha256 over every selected file's path and contents, in sorted path order, with text normalized from CRLF to LF. The hash is over contents, not archive bytes, because GitHub's tarball bytes aren't stable.
+
+At run time Ogden Agents downloads a pinned tarball only when the user asks (Download BMad Method on the Board, and later Set up and Update), never on startup or a page load. It verifies the content hash in memory, refuses a mismatch or any unsafe entry (links, paths outside the folder), and writes only the verified regular files into `<data folder>/bmad/<source>/<commit>/`. BMad's scripts Ogden Agents runs itself (`tickets.py`, `setup.py`) run only from there, never from a project's own copy. After an upgrade that moves a pin, the user downloads again.
+
+The hashing, tar reading and safe selection live in one module, `packages/adapters/src/bmad-source/archive.ts`, used by both the app and the CI check.
+
+CI's `bmad-pins` job runs `node scripts/bmad-lock.mjs --check`: it downloads each pinned commit's tarball, recomputes the content hash through `archive.ts`, and fails if it doesn't match the lock, if GitHub's compare API says the commit is not in the history of the lock's `ref`, or if the `base` is not in upstream's history or not an ancestor of the commit. It only reads from GitHub. No test touches the network.
+
+### Changes Ogden Agents needs in BMad
+
+Make them as commits on the fork's `ogden-agents` branch, with a test in upstream's own suite, then tag and move the pin (docs/bmad-fork.md). Never open them upstream. A piece that needn't live in BMad stays on Ogden Agents' side (such as the plain-language skill labels, in `packages/adapters/src/bmad-catalog/skill-labels.json`, keyed by skill name).
 
 ### Bumping a pin
 
-Needs the network and [`uv`](https://docs.astral.sh/uv/).
+Needs the network.
 
-1. In `forks.lock`, set the fork's `tag` and its full `commit` SHA (`git rev-parse <tag>^{commit}` in the fork).
-2. Run `node scripts/vendor-forks.mjs`. It rewrites `vendor/` from the locked commits and updates each `contentHash` (and the bmad-loop `vendored` path if the version changed).
-3. Run `node scripts/vendor-forks.mjs --check`, then commit `forks.lock` and `vendor/` together.
-
-To change the bmad-loop build backend, edit `buildConstraints` and re-run the script. Changing the lock's commit without re-vendoring fails `--check` with a hash mismatch.
+1. In `bmad-lock.json`, set the source's full `commit` SHA, its `ref` (the fork's new tag) and `base`, and `version` if it changed (`node scripts/bmad-fork-sync.mjs` prints the entry).
+2. Run `node scripts/bmad-lock.mjs --print` and copy each printed `contentHash` into the lock.
+3. Run `node scripts/bmad-lock.mjs --check`.
+4. When the BMad Method commit changes, copy `skills/bmad-ticket/scripts/tickets.py` and the other fixture folders from it into `tests/fixtures/bmad-upstream/` (the real-`uv` board and setup tests run them), and run `pnpm test`.
+5. Note the new versions in `CHANGELOG.md`: users download the new pin once after upgrading.

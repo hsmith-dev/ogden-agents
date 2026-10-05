@@ -4,14 +4,16 @@
  * the environment; `installed()` rebuilds the install around them, so a test
  * can run the installed launcher again (by its path in the npx install).
  */
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { echoLines, killProcessTree, prepareInstall, startWithRetry, withTimeout, type Install, type LauncherRun } from '../../scripts/installed-package.mjs';
 import { createDataFolder020, type DataFolder020 } from '../fixtures/data-folder-0.2.0.js';
+import { FIXTURE_TOP, fixtureSource, hasManagedPython, TEST_PYTHON } from '../fixtures/bmad-upstream-source.js';
 import { createFakeBmadRepo, type FakeBmadRepo, type FakeBmadRepoOptions } from '../fixtures/fake-bmad-repo.js';
 import { packFakeAdapter, testNpmCli } from '../fixtures/fake-adapter/pack.mjs';
-import { isAlive, readPortFile, ROOT, waitUntil } from '../support.js';
+import { FAKE_ANTIGRAVITY, FAKE_CODEX, FAKE_GEMINI_KEY, FAKE_GROK, isAlive, plantPinnedAntigravity, readPortFile, ROOT, waitUntil } from '../support.js';
 
 /**
  * Where the installed server looks for the Claude Agent ACP adapter
@@ -34,6 +36,8 @@ export const CLAUDE_INSTALL_ENV = 'OGDEN_AGENTS_TEST_CLAUDE_INSTALL';
 export const API_KEY_CHECK_ENV = 'OGDEN_AGENTS_TEST_API_KEY_CHECK';
 /** The fake agent itself, which the onboarding and terminal wrappers run. */
 const FAKE_AGENT_CORE = join(ROOT, 'tests', 'fixtures', 'fake-acp-agent.mjs');
+/** A fake login state that says signed in (`FAKE_LOGIN_STATE`). */
+const SIGNED_IN_LOGIN = join(ROOT, 'tests', 'fixtures', 'fake-login-signed-in.json');
 /** The fake `claude` CLI, which the terminal wrapper runs (story 3.10). */
 const FAKE_CLI = join(ROOT, 'tests', 'fixtures', 'fake-claude-cli.mjs');
 /**
@@ -351,7 +355,8 @@ export function terminalServer(name: string, { omitOptional = false }: { omitOpt
   const home = realpathSync.native(extraFolder(`${name}-home`));
   const project = realpathSync.native(extraFolder(`${name}-repo`));
   const claudeConfig = join(home, '.claude');
-  const agent = wrapper(join(work, 'agent.mjs'), { FAKE_ACP_RESUME: 'resume', FAKE_ACP_CLAUDE_RECORD: '1', CLAUDE_CONFIG_DIR: claudeConfig }, FAKE_AGENT_CORE);
+  // Signed in (6.3: a new chat with a signed-out agent is refused).
+  const agent = wrapper(join(work, 'agent.mjs'), { FAKE_ACP_RESUME: 'resume', FAKE_ACP_CLAUDE_RECORD: '1', CLAUDE_CONFIG_DIR: claudeConfig, FAKE_LOGIN_STATE: SIGNED_IN_LOGIN }, FAKE_AGENT_CORE);
   const cli = wrapper(join(work, 'claude.mjs'), { CLAUDE_CONFIG_DIR: claudeConfig }, FAKE_CLI);
   const serverEnv = {
     [CLAUDE_ACP_PATH_ENV]: agent,
@@ -432,12 +437,110 @@ export function terminalServer(name: string, { omitOptional = false }: { omitOpt
  */
 export const BMAD_AVAILABLE_ENV = 'OGDEN_AGENTS_TEST_BMAD_AVAILABLE';
 export const BMAD_PROBE_ENV = 'OGDEN_AGENTS_TEST_BMAD_PROBE';
+/** The installed server's Antigravity server hook (epic 6 entry 8): a Node script in the temp folder plays its ACP server. */
+export const ANTIGRAVITY_SERVER_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_SERVER';
+/** The installed server's Antigravity install hook (epic 6 entry 10): its pins from a JSON file, every archive on 127.0.0.1. */
+export const ANTIGRAVITY_INSTALL_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_INSTALL';
+/** The installed server's Codex adapter hook (epic 12 entry 5): a Node script in the temp folder plays `codex-acp` (the fake's Codex personality). */
+export const CODEX_SERVER_ENV = 'OGDEN_AGENTS_TEST_CODEX_SERVER';
+/** A fake OpenAI key's shape, in the server's environment when Codex is on: only Codex's own process may receive it. */
+export const FAKE_OPENAI_KEY = `sk-proj-${'C'.repeat(40)}7777`;
+/** The installed server's Grok hook (epic 12 entry 7): a Node script in the temp folder plays `grok agent stdio` (the fake's Grok personality). */
+export const GROK_SERVER_ENV = 'OGDEN_AGENTS_TEST_GROK_SERVER';
+/** A fake xAI token's shape, in the server's environment when Grok is on: only Grok's own process may receive it. */
+export const FAKE_XAI_KEY = `xai-${'G'.repeat(60)}7777`;
+/** The installed server's trust-needing test agent (epic 6 entry 10): "Fake Agent", the fake agent, refused until the project is trusted. */
+export const TRUST_AGENT_ENV = 'OGDEN_AGENTS_TEST_TRUST_AGENT';
+
+/**
+ * The installed server's BMad Method source hook (`BMAD_SOURCE_ENV` in
+ * packages/server/src/test-hooks.ts, story 4.13): a fixture lock and a local
+ * tarball in place of GitHub's, and uv kept off the network.
+ */
+export const BMAD_SOURCE_ENV = 'OGDEN_AGENTS_TEST_BMAD_SOURCE';
+
+
+/**
+ * Skill files added to the fixture tarball (test-only, not upstream's): the
+ * spec skill, and a `SKILL.md` for the ticket skill (the fixture carries only
+ * its `tickets.py`). Their label mapping links them (spec, then tickets), so a
+ * spec's document card offers "Turn this spec into tickets". Being in the
+ * tarball, they are part of the verified copy, so they get their labels.
+ */
+export const FIXTURE_SKILL_FILES: Readonly<Record<string, string>> = {
+  'bmad-spec/SKILL.md': "---\nname: bmad-spec\ndescription: 'Condense any input into a short spec.'\n---\n\n# bmad-spec\n\nA test-only stand-in for the spec skill.\n",
+  'bmad-ticket/SKILL.md': "---\nname: bmad-ticket\ndescription: 'Create and manage tickets.'\n---\n\n# bmad-ticket\n\nA test-only stand-in for the ticket skill's instructions.\n",
+};
+
+/** Where uv keeps its managed Pythons for this run: `UV_PYTHON_INSTALL_DIR` (setup-uv sets it in CI), else `uv python dir`. */
+function uvPythonDir(): string | undefined {
+  if (process.env.UV_PYTHON_INSTALL_DIR) return process.env.UV_PYTHON_INSTALL_DIR;
+  try {
+    // `--color never`: under Playwright FORCE_COLOR is set, and uv would wrap the path in colour codes.
+    return execFileSync('uv', ['python', 'dir', '--color', 'never'], { encoding: 'utf8', windowsHide: true })
+      .replace(/\u001b\[[0-9;]*m/g, '')
+      .trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether the BMad Method steps can run: `uv` on PATH with the uv-managed
+ * Python {@link TEST_PYTHON} installed (no download). Always true in CI, which
+ * provisions both, so a missing one fails there instead of skipping.
+ */
+export function uvReady(): boolean {
+  return process.env.CI !== undefined || hasManagedPython();
+}
+
+/**
+ * Writes the hook's files into `dir`: the upstream fixture (plus
+ * {@link FIXTURE_SKILL_FILES}) as codeload would serve it, a lock pinning its
+ * content hash, and uv's variables: its own cache, the provisioned Python
+ * only, no Python download, offline, and every proxy at a closed port. The
+ * hook file's path.
+ */
+function writeFixtureBmadSource(dir: string): string {
+  const { tarball, lock } = fixtureSource([
+    { name: `${FIXTURE_TOP}/skills/bmad-spec/`, type: 'dir' },
+    ...Object.entries(FIXTURE_SKILL_FILES).map(([path, data]) => ({ name: `${FIXTURE_TOP}/skills/${path}`, data })),
+  ]);
+  const tarballPath = join(dir, 'bmad-method.tar.gz');
+  writeFileSync(tarballPath, tarball);
+  const cache = join(dir, 'uv-cache');
+  mkdirSync(cache, { recursive: true });
+  // Port 9 (discard) on loopback: nothing answers, so anything uv tried to fetch would fail at once.
+  const proxy = 'http://127.0.0.1:9';
+  const pythonDir = uvPythonDir();
+  const uvEnv = {
+    UV_CACHE_DIR: cache,
+    UV_PYTHON: TEST_PYTHON,
+    UV_PYTHON_PREFERENCE: 'only-managed',
+    UV_PYTHON_DOWNLOADS: 'never',
+    UV_OFFLINE: '1',
+    ...(pythonDir === undefined ? {} : { UV_PYTHON_INSTALL_DIR: pythonDir }),
+    HTTP_PROXY: proxy,
+    HTTPS_PROXY: proxy,
+    http_proxy: proxy,
+    https_proxy: proxy,
+    NO_PROXY: '',
+    no_proxy: '',
+  };
+  const file = join(dir, 'bmad-source.json');
+  writeFileSync(file, JSON.stringify({ lock, tarball: tarballPath, uvEnv }));
+  return file;
+}
 
 export interface BmadServer {
   /** The install, set up for this server: its own data folder (Welcome done), home folder and the fake agent. */
   install: Install;
   /** The server's home folder (HOME, USERPROFILE, APPDATA, LOCALAPPDATA, XDG_* under it): nothing reads the user's own `~/.claude`. */
   home: string;
+  /** Whether Antigravity can chat here: asked for, and pinned for this platform (its server is the fake's Antigravity personality). */
+  antigravity: boolean;
+  /** Antigravity's home folder in the data folder (its `GEMINI_HOME`): where the fake's Google sign-in looks for the stand-in consent. */
+  antigravityHome: string;
   /** Starts the server in the background with the installed launcher, as a user does. */
   launch(): Promise<Launched>;
   /** Kills the server if it still runs (with its children), then starts it again on the same data folder. Quit it first for a clean restart. */
@@ -451,14 +554,94 @@ export interface BmadServer {
 /**
  * A server of the installed package for the BMad journey (story 10.9): its
  * own data folder (Welcome done), a home folder of its own, the fake agent
- * (`FAKE_AGENT`), and the BMad hooks only when given: `available` pieces and
- * the guarded `probe` route. Without either it is what a user runs: every
- * piece Coming soon. Repos are fake repos in a folder of its own. Nothing is
- * installed again.
+ * (`FAKE_AGENT`), and the BMad hooks only when given: `available` pieces,
+ * the guarded `probe` route, and `bmadSource` (story 4.13: the fixture BMad
+ * Method source, so Set up and the Board run the real `setup.py` and
+ * `tickets.py` through uv with no network). Without any it is what a user
+ * runs: Planning, Board and Unattended builds shipped, Retrospectives Coming soon. Repos are fake repos
+ * in a folder of its own. Nothing is installed again.
+ *
+ * With `antigravity` (epic 6 entry 8), Antigravity can chat too, where it
+ * has a pin for this platform: its pinned server is planted (an empty file,
+ * never run), the hook's script starts the fake agent's Antigravity
+ * personality in its place, and a fake Gemini key is in the server's
+ * environment. No real Antigravity server, `~/.gemini` or Google.
  */
-export function bmadServer(name: string, { available, probe = false }: { available?: string[]; probe?: boolean } = {}): BmadServer {
+export interface BmadServerOptions {
+  available?: string[];
+  probe?: boolean;
+  bmadSource?: boolean;
+  /** Antigravity installed (a planted pinned copy) with a fake Gemini key in the server's environment. */
+  antigravity?: boolean;
+  /**
+   * Antigravity not installed, its setup on these pins (epic 6 entry 10): Install fetches the archive from
+   * 127.0.0.1 and checks it; its installed server is the fake. No key. Excludes `antigravity`.
+   */
+  antigravityPins?: unknown;
+  /** "Fake Agent", which needs a trusted project, registered too (epic 6 entry 10). */
+  trustAgent?: boolean;
+  /** Codex installed (a planted pinned copy, never run) and played by the fake's Codex personality, with a fake OpenAI key in the server's environment (epic 12). */
+  codex?: boolean;
+  /** Grok installed (a planted checked binary, never run) and played by the fake's Grok personality, with a fake xAI token in the server's environment (epic 12). */
+  grok?: boolean;
+  /** A first run: Welcome not done. */
+  firstRun?: boolean;
+  /** More variables for the server's environment (planted secrets, say). */
+  env?: Record<string, string>;
+}
+
+export function bmadServer(
+  name: string,
+  { available, probe = false, bmadSource = false, antigravity = false, antigravityPins, trustAgent = false, codex = false, grok = false, firstRun = false, env: extraEnv = {} }: BmadServerOptions = {},
+): BmadServer {
   const dataDir = extraFolder(`${name}-data`);
-  writeFileSync(join(dataDir, 'onboarding.json'), `${JSON.stringify({ welcomeCompleted: true })}\n`, { mode: 0o600 });
+  // The fixture BMad Method source (story 4.13), only when asked for: without it Set up would reach GitHub.
+  const sourceFile = bmadSource ? writeFixtureBmadSource(realpathSync.native(extraFolder(`${name}-bmad-source`))) : '';
+  if (!firstRun) writeFileSync(join(dataDir, 'onboarding.json'), `${JSON.stringify({ welcomeCompleted: true })}\n`, { mode: 0o600 });
+  let antigravityServer = '';
+  let antigravityInstall = '';
+  if (antigravity || antigravityPins !== undefined) {
+    if (antigravityPins === undefined) plantPinnedAntigravity(dataDir);
+    const dir = extraFolder(`${name}-agy`);
+    const script = join(dir, 'antigravity-server.mjs');
+    writeFileSync(script, `await import(${JSON.stringify(pathToFileURL(FAKE_ANTIGRAVITY).href)});\n`);
+    antigravityServer = script;
+    if (antigravityPins !== undefined) {
+      antigravityInstall = join(dir, 'antigravity-install.json');
+      writeFileSync(antigravityInstall, JSON.stringify({ pins: antigravityPins }));
+    }
+  }
+  let trustAgentScript = '';
+  if (trustAgent) {
+    trustAgentScript = join(extraFolder(`${name}-trust-agent`), 'trust-agent.mjs');
+    writeFileSync(trustAgentScript, `await import(${JSON.stringify(pathToFileURL(FAKE_AGENT).href)});\n`);
+  }
+  let codexServer = '';
+  if (codex) {
+    // Installed as Install leaves it: the pinned adapter's entry script (empty, never run: the hook's script is).
+    const version = (JSON.parse(readFileSync(join(ROOT, 'packages', 'adapters', 'src', 'setup-codex', 'pins', 'package-lock.json'), 'utf8')) as { packages: Record<string, { version: string }> }).packages[
+      'node_modules/@agentclientprotocol/codex-acp'
+    ]!.version;
+    const entry = join(dataDir, 'agents', 'codex', `adapter-${version}`, 'node_modules', '@agentclientprotocol', 'codex-acp', 'dist');
+    mkdirSync(entry, { recursive: true });
+    writeFileSync(join(entry, 'index.js'), '');
+    codexServer = join(extraFolder(`${name}-codex`), 'codex-server.mjs');
+    writeFileSync(codexServer, `await import(${JSON.stringify(pathToFileURL(FAKE_CODEX).href)});\n`);
+  }
+  let grokServer = '';
+  if (grok) {
+    // Installed as Install leaves it: the checked binary (empty, never run: the hook's script is).
+    const version = (JSON.parse(readFileSync(join(ROOT, 'packages', 'adapters', 'src', 'setup-grok', 'pins', 'package-lock.json'), 'utf8')) as { packages: Record<string, { version: string }> }).packages[
+      'node_modules/@xai-official/grok'
+    ]!.version;
+    const checked = join(dataDir, 'agents', 'grok', `grok-${version}`, 'bin-checked');
+    mkdirSync(checked, { recursive: true });
+    writeFileSync(join(checked, process.platform === 'win32' ? 'grok.exe' : 'grok'), '');
+    grokServer = join(extraFolder(`${name}-grok`), 'grok-server.mjs');
+    writeFileSync(grokServer, `await import(${JSON.stringify(pathToFileURL(FAKE_GROK).href)});\n`);
+  }
+  const agyPinned = antigravityPins !== undefined || (antigravity && existsSync(join(dataDir, 'agents', 'antigravity')));
+  const agyKey = antigravity && agyPinned;
   // Real paths: macOS temp folders are reached through /var, and Windows ones may be 8.3 short names.
   const home = realpathSync.native(extraFolder(`${name}-home`));
   const reposDir = realpathSync.native(extraFolder(`${name}-repos`));
@@ -471,6 +654,15 @@ export function bmadServer(name: string, { available, probe = false }: { availab
       // Empty when not asked for, so nothing in the runner's environment turns a hook on.
       [BMAD_AVAILABLE_ENV]: available === undefined ? '' : available.join(','),
       [BMAD_PROBE_ENV]: probe ? '1' : '',
+      [BMAD_SOURCE_ENV]: sourceFile,
+      [ANTIGRAVITY_SERVER_ENV]: agyPinned ? antigravityServer : '',
+      [ANTIGRAVITY_INSTALL_ENV]: antigravityInstall,
+      [TRUST_AGENT_ENV]: trustAgentScript,
+      [CODEX_SERVER_ENV]: codexServer,
+      CODEX_API_KEY: codex ? FAKE_OPENAI_KEY : '',
+      [GROK_SERVER_ENV]: grokServer,
+      XAI_API_KEY: grok ? FAKE_XAI_KEY : '',
+      GEMINI_API_KEY: agyKey ? FAKE_GEMINI_KEY : '',
       // The server passes ANTHROPIC_API_KEY on to agents, and `session-start` echoes the agent's whole environment into the page.
       ANTHROPIC_API_KEY: '',
       HOME: home,
@@ -479,6 +671,7 @@ export function bmadServer(name: string, { available, probe = false }: { availab
       LOCALAPPDATA: join(home, 'AppData', 'Local'),
       XDG_DATA_HOME: join(home, '.local', 'share'),
       XDG_CONFIG_HOME: join(home, '.config'),
+      ...extraEnv,
     },
   });
   const repos: FakeBmadRepo[] = [];
@@ -504,5 +697,5 @@ export function bmadServer(name: string, { available, probe = false }: { availab
       }
     }
   };
-  return { install, home, launch: () => launch(install), restart, addRepo, remove };
+  return { install, home, antigravity: agyPinned, antigravityHome: join(dataDir, 'agents', 'antigravity-home'), launch: () => launch(install), restart, addRepo, remove };
 }

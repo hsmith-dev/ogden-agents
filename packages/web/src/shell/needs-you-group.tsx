@@ -8,6 +8,8 @@ export interface NeedsYouItem {
   wsId: string;
   sesId: string;
   workspaceName: string;
+  /** The chat it waits in, by its name (backlog story 12). */
+  chatName?: string;
   text: string;
 }
 
@@ -16,7 +18,7 @@ const TITLE = 'Needs you';
 /**
  * Pinned at the top of the sidebar; hidden entirely when empty, with no
  * "All caught up" filler (DESIGN.md Needs you group). Each row names its
- * workspace and opens the session it waits in. In the rail it is a counted
+ * workspace and its chat and opens the session it waits in. In the rail it is a counted
  * button that opens the first item.
  */
 export function NeedsYouGroup({ items, onOpenFirst }: { items: readonly NeedsYouItem[]; onOpenFirst?: () => void }) {
@@ -32,7 +34,14 @@ export function NeedsYouGroup({ items, onOpenFirst }: { items: readonly NeedsYou
                 <Link to="/w/$wsId/s/$sesId" params={{ wsId: item.wsId, sesId: item.sesId }}>
                   <StateGlyph state="waiting" labelMode="hidden" />
                   <SidebarLabel>
-                    {item.workspaceName}: {item.text}
+                    {item.workspaceName}
+                    {/* The chat's name is the user's text: isolated, so a right to left name can't reorder the request beside it. */}
+                    {item.chatName === undefined ? null : (
+                      <>
+                        , <bdi>{item.chatName}</bdi>
+                      </>
+                    )}
+                    : {item.text}
                   </SidebarLabel>
                 </Link>
               </SidebarMenuButton>

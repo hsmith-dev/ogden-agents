@@ -8,18 +8,25 @@
  * is hashed before and after.
  *
  * Test 1, no BMad hook (what a user of this version sees):
- * - Nothing shipped: every piece and the main switch greyed, Coming soon;
- *   Settings → New projects' BMad Method disabled, Coming soon.
+ * - What this version ships (epic 10 retro A3; story 5.2 adds Unattended
+ *   builds): Planning, Board and Unattended builds can be turned on and the
+ *   main switch works; only Retrospectives is greyed, Coming soon; Settings →
+ *   New projects' BMad Method can be picked.
+ *   Turning Board on asks to trust the project's scripts; Cancel leaves it
+ *   off.
  * - A simple project (a plain repo with its own `.claude/skills`): the header
  *   shows Chats only; two chats, each sent `session-start`, start with no MCP
  *   server, no `_meta`, exactly the user's text and nothing "bmad" in their
- *   environment.
+ *   environment; and so does a chat with the second agent, Antigravity (epic
+ *   6 entry 8, epic 10 retro A8), its server the fake agent's Antigravity
+ *   personality through the installed server's test hook.
  * - The offer on a repo with `_bmad/`: Not now hides it after a reload and
  *   after a server restart.
  * - Quit: no repo changed.
  *
- * Test 2, with `planning,board` registered as available and the guarded probe
- * route (`OGDEN_AGENTS_TEST_BMAD_AVAILABLE`, `OGDEN_AGENTS_TEST_BMAD_PROBE`):
+ * Test 2, with `retrospectives` registered as available (its switch can be turned on)
+ * and the guarded probe route (`OGDEN_AGENTS_TEST_BMAD_AVAILABLE`,
+ * `OGDEN_AGENTS_TEST_BMAD_PROBE`):
  * - Planning on and off in one tab shows in a second browser context; the
  *   probe is refused with 409 `feature_off` while it is off, served once on.
  *   With `requireBmadFeature`'s check removed, this test fails at the first
@@ -31,7 +38,8 @@
  * No real agent, account, keychain or network. Each server is quit at the end
  * of its test, and its folders removed.
  */
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import {
   BMAD_COMING_SOON_LABEL,
@@ -51,10 +59,41 @@ import { expectConnected, landConnected, sidebarOf, storedToken } from '../e2e/t
 import { bmadServer, waitForExit, type BmadServer, type Launched } from './installed.js';
 
 const servers: BmadServer[] = [];
+/** How many servers the earlier tests started: a failed test attaches only its own servers' logs. */
+let serversBefore = 0;
+
+test.beforeEach(() => {
+  serversBefore = servers.length;
+});
+
+test.afterEach(async ({}, testInfo) => {
+  // A failed journey keeps its servers' logs (requests and agent starts, with times) in the report.
+  if (testInfo.status === testInfo.expectedStatus) return;
+  for (const [index, server] of servers.slice(serversBefore).entries()) {
+    const log = join(server.install.dataDir, 'logs', 'server.log');
+    if (existsSync(log)) await testInfo.attach(`server-${index + 1}.log`, { path: log, contentType: 'text/plain' }).catch(() => undefined);
+  }
+});
 
 test.afterAll(async () => {
   for (const server of servers) await server.remove();
 });
+
+/**
+ * How long the second tab may take to show the settings page and to follow
+ * the first one. A Windows runner has stalled for 35-40 s at this point
+ * (runs 37247659244 attempt 2 and 37255268977 attempt 1): the server, Chromium
+ * and the Playwright worker all slowed together, every request of the second
+ * tab's first load took 10-26 s, and the page showed the switch once its
+ * answers arrived. The 15 s default is shorter than that stall.
+ */
+const SECOND_TAB_MS = 60_000;
+
+/** The trust dialog's title (`SCRIPT_TRUST_TITLE`; `planning-setup.ts` has imports this runner can't load). */
+const SCRIPT_TRUST_TITLE = "Run this project's BMad Method scripts?";
+
+/** The pieces this version ships (`SHIPPED_BMAD_PIECES` in the server; epic 4, and Unattended builds since story 5.2). */
+const SHIPPED: readonly string[] = ['planning', 'board', 'builds'];
 
 const OWN_SKILL = '.claude/skills/x/SKILL.md';
 const OWN_SKILL_TEXT = "---\nname: x\ndescription: The repo's own skill.\n---\n\nDo the thing.\n";
@@ -128,11 +167,22 @@ interface SessionStart {
   env: Record<string, string>;
 }
 
-/** Sends `session-start` in the open chat and reads the agent's one-line JSON reply. */
-async function sessionStart(page: Page): Promise<SessionStart> {
-  await send(page, 'session-start');
-  await expect(replies(page)).toHaveCount(1);
-  await expect(state(page)).toHaveAttribute('data-state', 'idle');
+/**
+ * Sends `session-start` in the open chat and reads the agent's one-line JSON
+ * reply. `agentName` is the chat's agent, which names the composer (`send`
+ * knows only Claude Code's).
+ */
+async function sessionStart(page: Page, agentName = 'Claude Code'): Promise<SessionStart> {
+  if (agentName === 'Claude Code') await send(page, 'session-start');
+  else {
+    const composer = page.getByRole('textbox', { name: `Message ${agentName}` });
+    await composer.fill('session-start');
+    await composer.press('Enter');
+    await expect(composer).toHaveValue('');
+  }
+  // The agent process starts on this message: on a stalled Windows runner that took 16 s (run 37258187535, server log).
+  await expect(replies(page)).toHaveCount(1, { timeout: SECOND_TAB_MS });
+  await expect(state(page)).toHaveAttribute('data-state', 'idle', { timeout: SECOND_TAB_MS });
   await expect(replies(page).last()).toHaveAttribute('data-streaming', 'false');
   // The agent's message: its name, then its text.
   const text = await replies(page).last().locator('p').nth(1).textContent();
@@ -158,11 +208,11 @@ async function quit(page: Page, launched: Launched) {
   await waitForExit(launched.pid);
 }
 
-test('nothing shipped, a simple project, and the offer, on the installed package', async ({ page }) => {
+test('what 0.4.0 ships, Board asking for trust, a simple project, and the offer, on the installed package', async ({ page }) => {
   // Two launches and two chats on a server of its own.
   test.setTimeout(240_000);
-  // No hook: every piece is Coming soon, as for a user of this version.
-  const server = bmadServer('journey-simple');
+  // No hook: what a user of this version sees (Planning, Board and Unattended builds shipped, Retrospectives Coming soon). Antigravity plays the second agent.
+  const server = bmadServer('journey-simple', { antigravity: true });
   servers.push(server);
   // No "bmad" in the simple repo's name, so the environment check can't match it by accident.
   const plain = server.addRepo({ bmad: false, files: { [OWN_SKILL]: OWN_SKILL_TEXT }, prefix: 'simple-repo-' });
@@ -176,22 +226,39 @@ test('nothing shipped, a simple project, and the offer, on the installed package
   const plainId = await addProject(page, plain.path);
   const withBmadId = await addProject(page, withBmad.path);
 
-  await test.step('nothing shipped: every piece and the main switch Coming soon; New projects too', async () => {
+  await test.step('what this version ships: Planning, Board and Unattended builds can be turned on, Retrospectives is Coming soon; New projects too', async () => {
     expect(await piecesOf(page, plainId)).toEqual([]);
     await page.goto(`${launched.url}/w/${plainId}/settings#${WORKSPACE_SETTINGS_BMAD_ANCHOR}`);
     for (const piece of BMAD_PIECES) {
-      await expect(switchIn(page, BMAD_PIECE_INFO[piece].label)).toHaveAttribute('aria-checked', 'false');
-      await expect(switchIn(page, BMAD_PIECE_INFO[piece].label)).toBeDisabled();
-      await expect(page.getByTestId(`bmad-${piece}-coming-soon`)).toHaveText(BMAD_COMING_SOON_LABEL);
+      const control = switchIn(page, BMAD_PIECE_INFO[piece].label);
+      await expect(control).toHaveAttribute('aria-checked', 'false');
+      if (SHIPPED.includes(piece)) {
+        await expect(control).toBeEnabled();
+        await expect(page.getByTestId(`bmad-${piece}-coming-soon`)).toHaveCount(0);
+      } else {
+        await expect(control).toBeDisabled();
+        await expect(page.getByTestId(`bmad-${piece}-coming-soon`)).toHaveText(BMAD_COMING_SOON_LABEL);
+      }
     }
-    await expect(switchIn(page, BMAD_USE_LABEL)).toBeDisabled();
-    await expect(page.getByTestId('bmad-use-coming-soon')).toHaveText(BMAD_COMING_SOON_LABEL);
+    await expect(switchIn(page, BMAD_USE_LABEL)).toBeEnabled();
+    await expect(page.getByTestId('bmad-use-coming-soon')).toHaveCount(0);
+
+    // Board runs the project's own BMad Method scripts, so turning it on asks first (epic 10 retro A3, story 4.2).
+    // Cancel leaves it off; the planning journey allows it on a repo set up from a local fixture.
+    const board = switchIn(page, BMAD_PIECE_INFO.board.label);
+    await board.click();
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toContainText(SCRIPT_TRUST_TITLE);
+    await page.getByTestId('script-trust-cancel').click();
+    await expect(dialog).toHaveCount(0);
+    await expect(board).toHaveAttribute('aria-checked', 'false');
+    expect(await piecesOf(page, plainId)).toEqual([]);
 
     await openNewProjects(page);
     const section = page.getByTestId('new-projects-section');
     await expect(section.getByRole('radio', { name: 'Simple chats' })).toHaveAttribute('aria-checked', 'true');
-    await expect(section.getByRole('radio', { name: 'BMad Method' })).toBeDisabled();
-    await expect(page.getByTestId('new-projects-bmad-coming-soon')).toHaveText(BMAD_COMING_SOON_LABEL);
+    await expect(section.getByRole('radio', { name: 'BMad Method' })).toBeEnabled();
+    await expect(page.getByTestId('new-projects-bmad-coming-soon')).toHaveCount(0);
   });
 
   await test.step('a simple project: Chats only, and two chats start with nothing BMad', async () => {
@@ -216,6 +283,25 @@ test('nothing shipped, a simple project, and the offer, on the installed package
     await expectChatsTabOnly(page);
     const second = await sessionStart(page);
     expectSimpleStart(second, cwd);
+    expect(await piecesOf(page, plainId)).toEqual([]);
+  });
+
+  await test.step('a simple project with the second agent: an Antigravity chat starts with nothing BMad either', async () => {
+    // Antigravity runs only where it has a pin for this platform (every OS CI runs on has one).
+    if (!server.antigravity) {
+      test.info().annotations.push({ type: 'skip', description: 'no Antigravity pin for this platform: the Antigravity step did not run' });
+      return;
+    }
+    const cwd = realpathSync.native(plain.path);
+    const response = await api(page, 'POST', apiPath(API_ROUTES.workspaceSessions, { wsId: plainId }), { kind: 'chat', agentId: 'antigravity' });
+    expect(response.status).toBe(201);
+    const { session } = (await response.json()) as { session: { id: string; agentId: string } };
+    expect(session.agentId).toBe('antigravity');
+    await page.goto(`${launched.url}/w/${plainId}/s/${session.id}`);
+    await expect(page.getByTestId('session-agent')).toHaveText('Antigravity');
+    await expectChatsTabOnly(page);
+    const start = await sessionStart(page, 'Antigravity');
+    expectSimpleStart(start, cwd);
     expect(await piecesOf(page, plainId)).toEqual([]);
   });
 
@@ -251,8 +337,8 @@ test('nothing shipped, a simple project, and the offer, on the installed package
 
 test('a piece on and off with a second tab following, the guard, and the default for new projects, on the installed package', async ({ page, browser }) => {
   test.setTimeout(180_000);
-  // Planning and Board registered as available (no real piece ships until epic 4), and the route guarded by Planning.
-  const server = bmadServer('journey-pieces', { available: ['planning', 'board'], probe: true });
+  // Retrospectives registered as available (the hook adds a piece no release ships yet), and the route guarded by Planning.
+  const server = bmadServer('journey-pieces', { available: ['retrospectives'], probe: true });
   servers.push(server);
   const earlier = server.addRepo({ prefix: 'earlier-repo-' });
   const later = server.addRepo({ bmad: false, prefix: 'later-repo-' });
@@ -274,8 +360,10 @@ test('a piece on and off with a second tab following, the guard, and the default
     const planning = switchIn(page, BMAD_PIECE_INFO.planning.label);
     await expect(planning).toHaveAttribute('aria-checked', 'false');
     await expect(planning).toBeEnabled();
-    // Not registered: still Coming soon.
-    await expect(switchIn(page, BMAD_PIECE_INFO.retrospectives.label)).toBeDisabled();
+    // Registered by the hook: Retrospectives can be turned on; Unattended builds ships (story 5.2). None is Coming soon.
+    await expect(switchIn(page, BMAD_PIECE_INFO.retrospectives.label)).toBeEnabled();
+    await expect(page.getByTestId('bmad-retrospectives-coming-soon')).toHaveCount(0);
+    await expect(switchIn(page, BMAD_PIECE_INFO.builds.label)).toBeEnabled();
 
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     try {
@@ -283,17 +371,17 @@ test('a piece on and off with a second tab following, the guard, and the default
       await landConnected(other, await launchLink(launched.url, server.install.dataDir));
       await other.goto(`${launched.url}${settings}`);
       const otherPlanning = switchIn(other, BMAD_PIECE_INFO.planning.label);
-      await expect(otherPlanning).toHaveAttribute('aria-checked', 'false');
+      await expect(otherPlanning).toHaveAttribute('aria-checked', 'false', { timeout: SECOND_TAB_MS });
 
       await planning.click();
       await expect(planning).toHaveAttribute('aria-checked', 'true');
-      await expect(otherPlanning).toHaveAttribute('aria-checked', 'true');
+      await expect(otherPlanning).toHaveAttribute('aria-checked', 'true', { timeout: SECOND_TAB_MS });
       expect(await piecesOf(page, earlierId)).toEqual(['planning']);
       expect(await probe(page, earlierId)).toEqual({ status: 200, body: { piece: 'planning' } });
 
       await planning.click();
       await expect(planning).toHaveAttribute('aria-checked', 'false');
-      await expect(otherPlanning).toHaveAttribute('aria-checked', 'false');
+      await expect(otherPlanning).toHaveAttribute('aria-checked', 'false', { timeout: SECOND_TAB_MS });
       expect(await piecesOf(page, earlierId)).toEqual([]);
       expect(await probe(page, earlierId)).toMatchObject({ status: 409, body: { error: { code: 'feature_off' } } });
     } finally {
@@ -302,7 +390,10 @@ test('a piece on and off with a second tab following, the guard, and the default
   });
 
   await test.step('New projects → BMad Method, Planning only: the next project starts with Planning, the earlier one unchanged', async () => {
+    // The page refetches the default as it opens: let that answer arrive before choosing.
+    const loaded = page.waitForResponse((response) => response.url().endsWith(API_ROUTES.newProjectDefaults) && response.request().method() === 'GET');
     await openNewProjects(page);
+    await loaded;
     const section = page.getByTestId('new-projects-section');
     await expect(section.getByRole('radio', { name: 'Simple chats' })).toHaveAttribute('aria-checked', 'true');
     await section.getByRole('radio', { name: 'BMad Method' }).click();

@@ -6,6 +6,7 @@
 import type { Session, SessionId, Workspace } from '@ogden-agents/shared';
 import { AgentError, type AgentEvent, type AgentSession } from '../agent-port.js';
 import {
+  BuildSessionReadOnlyError,
   DriverIsTerminalError,
   InvalidOperationError,
   QueueFullError,
@@ -15,8 +16,10 @@ import {
 } from '../errors.js';
 import type { Agents } from './agents.js';
 import type { CheckIn } from './check-in.js';
-import { AGENT_SESSION_REF, DELTA_INTERVAL_MS, MAX_QUEUED_MESSAGES } from './constants.js';
+import { AGENT_SESSION_REF, DELTA_INTERVAL_MS, HANDOFF_PENDING_REF, MAX_QUEUED_MESSAGES } from './constants.js';
 import type { ChatContext } from './context.js';
+import type { Models } from './model.js';
+import type { PermissionModes } from './permission-mode.js';
 import type { Replies } from './replies.js';
 import { capDiffs, sameDiffs, toolCallPayload, toolKind, toolStatus } from './tool-calls.js';
 import type { Chat, Live, ToolCallState, Turn } from './types.js';
@@ -25,10 +28,12 @@ export function createTurns(
   ctx: ChatContext,
   deps: Pick<Replies, 'flushDelta' | 'tickDelta' | 'flushSession' | 'finishReply'> &
     Pick<CheckIn, 'clearQuiet' | 'clearTurnTimers' | 'armQuiet'> &
-    Pick<Agents, 'drop' | 'agentFor' | 'promptFor'>,
+    Pick<Agents, 'drop' | 'agentFor' | 'promptFor'> &
+    Pick<PermissionModes, 'onReportedMode'> &
+    Pick<Models, 'syncModel' | 'onReportedModel'>,
 ) {
-  const { options, entities, sessionEvents, agent, stopGraceMs, live, busy, running, switching, internalError, toAgentError, later, newMessageId, getWorkspace, getSession } = ctx;
-  const { flushDelta, tickDelta, flushSession, finishReply, clearQuiet, clearTurnTimers, armQuiet, drop, agentFor, promptFor } = deps;
+  const { options, entities, sessionEvents, agentOf, stopGraceMs, live, busy, running, switching, internalError, toAgentError, later, newMessageId, getWorkspace, getSession } = ctx;
+  const { flushDelta, tickDelta, flushSession, finishReply, clearQuiet, clearTurnTimers, armQuiet, drop, agentFor, promptFor, onReportedMode, syncModel, onReportedModel } = deps;
 
   /** Whether the session has a Deny reason or a queued message to send once this turn ends. */
   const hasNext = (sessionId: SessionId) => {
@@ -68,12 +73,22 @@ export function createTurns(
       if (entry !== undefined) endTurn(sessionId, entry);
       entities.setSessionState(sessionId, 'error', {
         reason: error.message,
-        ...(error.code === 'auth_required' ? { errorCode: error.code } : {}),
+        // The UI acts on these: Sign in again (9.4), or continue with another agent (handoff).
+        ...(error.code === 'auth_required' || error.code === 'usage_limit' ? { errorCode: error.code } : {}),
       });
     } catch (caught) {
       internalError(sessionId, caught);
     }
     if (entry !== undefined && (dropAgent || error.code === 'auth_required')) drop(sessionId, entry);
+  };
+
+  /** A tool call turned `completed`: told once, after its event (story 4.7). */
+  const completed = (sessionId: SessionId, toolCallId: string, call: ToolCallState) => {
+    try {
+      options.onToolCallCompleted?.(sessionId, toolCallId, call.diffs);
+    } catch (error) {
+      internalError(sessionId, error);
+    }
   };
 
   /** Applies one adapter event to the session (AD-4, AD-5). */
@@ -109,10 +124,18 @@ export function createTurns(
             fail(
               sessionId,
               entry,
-              new AgentError(event.code ?? 'agent_failed', event.reason ?? `${agent.displayName} stopped unexpectedly.`),
+              new AgentError(event.code ?? 'agent_failed', event.reason ?? `${agentOf(sessionId).displayName} stopped unexpectedly.`),
               event.fatal === true,
             );
           }
+          return;
+        case 'permission_mode':
+          // A mode the chat didn't choose never sticks (permission modes).
+          onReportedMode(sessionId, event);
+          return;
+        case 'model':
+          // The agent switched itself (story 11): a chat that chose a model follows it.
+          onReportedModel(sessionId, entry, event);
           return;
         case 'tool_call': {
           const call: ToolCallState = {
@@ -121,11 +144,13 @@ export function createTurns(
             status: toolStatus(event.status) ?? 'pending',
             diffs: capDiffs(event.diffs),
           };
+          const before = entry.toolCalls.get(event.toolCallId);
           entry.toolCalls.set(event.toolCallId, call);
           sessionEvents.appendSessionEvent(sessionId, {
             type: 'session.tool_call',
             payload: toolCallPayload(sessionId, event.toolCallId, call),
           });
+          if (call.status === 'completed' && before?.status !== 'completed') completed(sessionId, event.toolCallId, call);
           return;
         }
         case 'tool_call_update': {
@@ -145,6 +170,7 @@ export function createTurns(
             type: 'session.tool_call_updated',
             payload: toolCallPayload(sessionId, event.toolCallId, call, diffsChanged),
           });
+          if (call.status === 'completed' && known.status !== 'completed') completed(sessionId, event.toolCallId, call);
           return;
         }
       }
@@ -155,23 +181,44 @@ export function createTurns(
 
   /** One prompt and its turn. Ends when the agent ended it, failed, or was dropped (a Stop past its grace, a close). */
   const runTurn = async (session: Session, workspace: Workspace, turn: Turn, messageId: string, text: string): Promise<void> => {
-    const entry = agentFor(session, workspace, apply);
-    armQuiet(session.id);
+    let entry!: Live;
     let started: AgentSession | undefined;
-    try {
-      started = await Promise.race([entry.agent, entry.gone.then(() => undefined)]);
-    } catch (error) {
-      fail(session.id, entry, toAgentError(error), true);
-      return;
+    // An agent whose guards stop fitting the chat's mode before the prompt goes out restarts first (at most twice).
+    for (let attempt = 0; ; attempt++) {
+      entry = agentFor(session, workspace, apply);
+      armQuiet(session.id);
+      try {
+        started = await Promise.race([entry.agent, entry.gone.then(() => undefined)]);
+      } catch (error) {
+        fail(session.id, entry, toAgentError(session.id, error), true);
+        return;
+      }
+      // Stopped (or dropped) before the prompt went out: nothing is sent.
+      if (started === undefined || turn.stopping) return;
+      // A mode change still being told goes first: the prompt never runs in a looser mode than the chat's.
+      if ((await Promise.race([entry.modeSync.then(() => true), entry.gone.then(() => false)])) === false || turn.stopping || live.get(session.id) !== entry) return;
+      // The chat's model, at this idle point (story 11): told live, or the agent restarts with it.
+      if (!entry.restartPending) {
+        const model = await Promise.race([syncModel(session.id, entry, started), entry.gone.then(() => undefined)]);
+        if (model === undefined || turn.stopping || live.get(session.id) !== entry) return;
+        if (model === 'restart') entry.restartPending = true;
+      }
+      if (!entry.restartPending || attempt >= 2) break;
     }
-    // Stopped (or dropped) before the prompt went out: nothing is sent.
-    if (started === undefined || turn.stopping) return;
     try {
-      const { prompt, primed } = promptFor(session.id, entry, messageId, text);
+      const { prompt, primed, handoff } = promptFor(session.id, entry, messageId, text);
       const prompting = started.prompt(prompt);
       // Abandoned if the agent is dropped; its late rejection is not unhandled.
       prompting.catch(() => undefined);
-      const result = await Promise.race([prompting, entry.gone.then(() => undefined)]);
+      // While it is out, a message sent right away can go into the turn or stop it (send now or wait).
+      turn.prompting = true;
+      // A message sent right away while the agent was starting goes now (send now or wait).
+      const pending = turn.whenPrompting;
+      turn.whenPrompting = undefined;
+      pending?.();
+      const result = await Promise.race([prompting, entry.gone.then(() => undefined)]).finally(() => {
+        turn.prompting = false;
+      });
       if (result === undefined) return;
       if (primed) {
         // Primed once: the agent has the transcript now, and its session is the chat's (2.7 F4).
@@ -181,12 +228,16 @@ export function createTurns(
           entry.unsavedRef = undefined;
         }
       }
+      // The new agent has its handoff brief now (handoff): later prompts go without it.
+      if (handoff && !turn.failed) entities.setSessionAdapterRefs(session.id, { [HANDOFF_PENDING_REF]: '' });
       // The adapter reports `idle` itself; this only covers one that didn't. An `error` it reported stays.
       if (!turn.failed) apply(session.id, entry, { type: 'state', state: 'idle' });
+      // Its guards stopped fitting the mode during the turn: restarted now that the turn is over.
+      if (entry.restartPending && live.get(session.id) === entry) drop(session.id, entry);
     } catch (error) {
       // The adapter has usually reported `error` already; this covers one that didn't.
       // A process that is gone reports `fatal` itself, which drops the agent.
-      if (live.get(session.id) === entry) fail(session.id, entry, toAgentError(error), false);
+      if (live.get(session.id) === entry) fail(session.id, entry, toAgentError(session.id, error), false);
     }
   };
 
@@ -195,7 +246,16 @@ export function createTurns(
     const reason = turn.reasons.shift();
     if (reason !== undefined) return { messageId: newMessageId(), text: reason, queued: false };
     const queued = turn.queue.shift();
-    return queued === undefined ? undefined : { ...queued, queued: true };
+    return queued === undefined ? undefined : { messageId: queued.messageId, text: queued.text, queued: true };
+  };
+
+  /** Waits until no message sent right away is still on its way into the turn (send now or wait). */
+  const steered = async (turn: Turn): Promise<void> => {
+    while (turn.steering !== undefined) {
+      const steering = turn.steering;
+      await steering;
+      if (turn.steering === steering) turn.steering = undefined;
+    }
   };
 
   /** Runs turns until nothing is left to send, then leaves the session settled: never `working` or `waiting`. */
@@ -203,12 +263,16 @@ export function createTurns(
     let next = first;
     for (;;) {
       await runTurn(session, workspace, turn, next.messageId, next.text);
+      // A message sent right away whose answer is still coming is taken in, or goes next, before anything else.
+      await steered(turn);
       if (ctx.closing || turn.failed) break;
       const following = takeNext(turn);
       if (following === undefined) break;
       try {
-        // A leftover card is never answered by moving on: the turn is over.
-        if (entities.getSession(session.id)?.state === 'waiting') break;
+        // A card still open once the agent ended its turn is one it stopped waiting for (Claude Code
+        // withdraws a request when its SDK aborts the tool call). Leaving `waiting` declines it as
+        // cancelled, never allowed, and the queue goes on (backlog bug 16).
+        if (entities.getSession(session.id)?.state === 'waiting') entities.setSessionState(session.id, 'working');
         // A Stop ended the turn before; what was sent after it starts a new one.
         turn.stopping = false;
         clearTurnTimers(turn);
@@ -239,9 +303,11 @@ export function createTurns(
   };
 
   const methods: Pick<Chat, 'sendMessage' | 'cancel'> = {
-    sendMessage(workspaceId, sessionId, text) {
+    sendMessage(workspaceId, sessionId, text, sendOptions = {}) {
       if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
       const session = getSession(workspaceId, sessionId);
+      // An unattended build's session takes only the builds use-case's own prompt (story 5.2).
+      if (session.kind === 'build' && sendOptions.build !== true) throw new BuildSessionReadOnlyError();
       const workspace = getWorkspace(workspaceId);
       // Between drivers first: a switch back (or a CLI's exit) still reads `terminal` until it is done (story 3.4).
       if (switching.has(sessionId)) throw new SessionNotIdleError('This chat is switching to or from the terminal. Try again in a moment.');
@@ -275,14 +341,39 @@ export function createTurns(
 
     cancel(workspaceId, sessionId) {
       if (ctx.closing) throw new InvalidOperationError('Ogden Agents is stopping.');
-      getSession(workspaceId, sessionId);
+      // Stopping a build is 5.x's (Stop, with the run marked): not a chat's Stop (story 5.2).
+      if (getSession(workspaceId, sessionId).kind === 'build') throw new BuildSessionReadOnlyError();
       const turn = busy.get(sessionId);
       if (turn === undefined || turn.failed) throw new SessionNotBusyError(sessionId);
-      if (turn.stopping) return;
+      stop(sessionId, turn, { keepQueue: false });
+    },
+  };
+
+  /**
+   * Stops the running turn: Stop (`keepQueue: false`: what was queued, and any
+   * Deny reason, stays unsent, shown "Not sent"), or a message sent right
+   * away to an agent that can't take it mid-turn (`keepQueue: true`: the
+   * queue, that message first, goes on after the turn ends; send now or wait).
+   */
+  function stop(sessionId: SessionId, turn: Turn, { keepQueue }: { keepQueue: boolean }): void {
+    {
+      // Stop during a stop for a message sent right away still drops what waits (review), and declines a card.
+      if (!keepQueue) {
+        turn.queue = [];
+        turn.reasons = [];
+        turn.whenPrompting = undefined;
+      }
+      if (turn.stopping) {
+        if (!keepQueue && entities.getSession(sessionId)?.state === 'waiting') {
+          try {
+            entities.setSessionState(sessionId, 'idle');
+          } catch (error) {
+            internalError(sessionId, error);
+          }
+        }
+        return;
+      }
       turn.stopping = true;
-      // What was queued, and any Deny reason, stays unsent: the UI shows it "Not sent".
-      turn.queue = [];
-      turn.reasons = [];
       clearQuiet(turn);
       const entry = live.get(sessionId);
       try {
@@ -317,8 +408,8 @@ export function createTurns(
           internalError(sessionId, error);
         }
       });
-    },
-  };
+    }
+  }
 
-  return { hasNext, endTurn, fail, apply, runTurn, takeNext, drive, ...methods };
+  return { hasNext, endTurn, fail, apply, runTurn, takeNext, drive, stop, ...methods };
 }

@@ -9,12 +9,11 @@ import { useEventStream } from '@/events/event-stream';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
 import { Text } from '@/ui/typography';
-import { AGENT_ID, AGENT_NAME } from './chat-api';
 
-/** What the notice says when the agent needs a new sign-in (EXPERIENCE.md State Patterns: Sign-in expired). */
-export const SIGN_IN_AGAIN = `${AGENT_NAME} needs you to sign in again.`;
+/** What the notice says when the chat's agent needs a new sign-in (EXPERIENCE.md State Patterns: Sign-in expired). */
+export const signInAgainWords = (agentName: string) => `${agentName} needs you to sign in again.`;
 export const SIGNED_IN_TRY_AGAIN = 'Signed in. Try again to continue.';
-export const API_KEY_REFUSED = `${AGENT_NAME} refused your API key.`;
+export const apiKeyRefused = (agentName: string) => `${agentName} refused your API key.`;
 
 /**
  * What one Sign in again notice has seen of the agent's sign-in (9.4): the
@@ -89,6 +88,10 @@ const newestSeq = (events: readonly CoreEvent[]) => events.at(-1)?.seq ?? 0;
 export const disarmTracker = (tracker: SignInTracker): SignInTracker => ({ ...tracker, armed: false });
 
 export interface SignInAgainProps {
+  /** The chat's agent (epic 6, entry 6): the one Sign in signs in to. */
+  agentId: string;
+  /** Its product name. */
+  agentName: string;
   /** The plain reason the session's `error` gave. */
   reason: string | undefined;
   /** Try again is offered (there is a message to resend). */
@@ -105,15 +108,15 @@ export interface SignInAgainProps {
  * the key is changed in Settings: Agents. Mount it with a key per error, so
  * each error starts unarmed.
  */
-export function SignInAgain({ reason, canTryAgain, onTryAgain }: SignInAgainProps) {
+export function SignInAgain({ agentId, agentName, reason, canTryAgain, onTryAgain }: SignInAgainProps) {
   const agents = useAgents();
-  const agent = agents.data?.find((candidate) => candidate.agentId === AGENT_ID);
+  const agent = agents.data?.find((candidate) => candidate.agentId === agentId);
   const tracker = useRef(initialTracker);
   const { events } = useEventStream();
   // 9.1's sign-in, unchanged, sent through this tab's token; the notice only
   // reads the start request's outcome (its `state`, never the URL) to disarm.
   const observed = useMemo(() => {
-    const startPath = apiPath(API_ROUTES.agentSignIn, { agentId: AGENT_ID });
+    const startPath = apiPath(API_ROUTES.agentSignIn, { agentId });
     const answered = (answer: AgentAuthState | 'request_failed') => (tracker.current = startAnswered(tracker.current, answer));
     return {
       async fetch(path: string, init?: RequestInit): Promise<Response> {
@@ -140,8 +143,8 @@ export function SignInAgain({ reason, canTryAgain, onTryAgain }: SignInAgainProp
         return response;
       },
     };
-  }, []);
-  const signIn = useSignIn(AGENT_ID, observed);
+  }, [agentId]);
+  const signIn = useSignIn(agentId, observed);
   const [signedIn, setSignedIn] = useState(false);
   const tryAgainRef = useRef(onTryAgain);
   tryAgainRef.current = onTryAgain;
@@ -155,8 +158,8 @@ export function SignInAgain({ reason, canTryAgain, onTryAgain }: SignInAgainProp
   }, [auth]);
 
   useEffect(() => {
-    tracker.current = observeSignInStarts(tracker.current, events, AGENT_ID);
-  }, [events]);
+    tracker.current = observeSignInStarts(tracker.current, events, agentId);
+  }, [events, agentId]);
 
   const startSignIn = () => {
     tracker.current = armTracker(tracker.current, newestSeq(events));
@@ -170,6 +173,8 @@ export function SignInAgain({ reason, canTryAgain, onTryAgain }: SignInAgainProp
 
   return (
     <SignInAgainView
+      agentId={agentId}
+      agentName={agentName}
       agent={agent}
       signedIn={signedIn}
       signIn={signIn}
@@ -182,6 +187,9 @@ export function SignInAgain({ reason, canTryAgain, onTryAgain }: SignInAgainProp
 }
 
 export interface SignInAgainViewProps {
+  /** The chat's agent and its product name (epic 6, entry 6). */
+  agentId: string;
+  agentName: string;
   /** The agent's setup, from the agents query; `undefined` until it loads. */
   agent: AgentSetupStatus | undefined;
   /** A sign-in finished while the notice was open. */
@@ -194,7 +202,7 @@ export interface SignInAgainViewProps {
 }
 
 /** The notice itself, for each row of the 9.4 matrix. */
-export function SignInAgainView({ agent, signedIn, signIn, reason, canTryAgain, onSignIn, onTryAgain }: SignInAgainViewProps) {
+export function SignInAgainView({ agentId, agentName, agent, signedIn, signIn, reason, canTryAgain, onSignIn, onTryAgain }: SignInAgainViewProps) {
   const signingIn = agent?.auth === 'signing_in';
   const apiKey = !signingIn && !signedIn && agent?.auth === 'signed_in' && agent.method === 'api_key';
   const failed = !signingIn && !signedIn && !apiKey && agent?.auth === 'failed';
@@ -212,15 +220,19 @@ export function SignInAgainView({ agent, signedIn, signIn, reason, canTryAgain, 
     </Button>
   );
 
-  const kind = signingIn ? 'signing_in' : signedIn ? 'signed_in' : apiKey ? 'api_key' : failed ? 'failed' : 'needs_sign_in';
+  // An agent that takes only an API key (Codex) has no sign-in to offer: the key is changed in Settings: Agents.
+  const keyOnly = agent?.apiKeyOnly === true && agent.auth !== 'signed_in';
+  const kind = keyOnly ? 'api_key_only' : signingIn ? 'signing_in' : signedIn ? 'signed_in' : apiKey ? 'api_key' : failed ? 'failed' : 'needs_sign_in';
   const words =
     kind === 'signed_in'
       ? SIGNED_IN_TRY_AGAIN
-      : kind === 'api_key'
-        ? API_KEY_REFUSED
+      : kind === 'api_key_only'
+        ? (reason ?? `${agentName} needs a valid ${agent?.apiKeyName ?? 'API key'}.`)
+        : kind === 'api_key'
+          ? apiKeyRefused(agentName)
         : kind === 'failed'
-          ? (agent?.reason ?? `${AGENT_NAME} couldn't finish signing in. Try again.`)
-          : (reason ?? SIGN_IN_AGAIN);
+          ? (agent?.reason ?? `${agentName} couldn't finish signing in. Try again.`)
+          : (reason ?? signInAgainWords(agentName));
 
   return (
     <div className="flex flex-col gap-3" data-testid="sign-in-again-notice" data-sign-in={kind} data-auth={agent?.auth}>
@@ -236,7 +248,7 @@ export function SignInAgainView({ agent, signedIn, signIn, reason, canTryAgain, 
         }
       >
         {words}
-        {kind === 'api_key' ? (
+        {kind === 'api_key' || kind === 'api_key_only' ? (
           <>
             {' '}
             <Link to="/settings/agents" className="text-foreground underline underline-offset-4" data-testid="agent-settings-link">
@@ -247,7 +259,7 @@ export function SignInAgainView({ agent, signedIn, signIn, reason, canTryAgain, 
       </Notice>
       {kind === 'signing_in' ? (
         <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-(--panel-padding)" data-testid="sign-in-again-signing-in">
-          <SigningIn agentId={AGENT_ID} signIn={signIn} />
+          <SigningIn agentId={agentId} signIn={signIn} takesCode={agent?.signInTakesCode !== false} />
         </div>
       ) : null}
       {signIn.error === undefined ? null : (

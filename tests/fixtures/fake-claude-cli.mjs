@@ -49,7 +49,7 @@
 // recording), printing nothing: a CLI that crashes on start (story 3.4).
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const args = process.argv.slice(2);
@@ -70,8 +70,11 @@ if (process.env.FAKE_CLAUDE_GRANDCHILD === '1') {
   child.stdout.destroy();
 }
 if (process.env.FAKE_CLAUDE_RECORD) {
+  // Written whole, then renamed into place: a test waiting for the file to
+  // exist must never read it empty or half-written (Windows CI, PR #63).
+  const recordTemp = `${process.env.FAKE_CLAUDE_RECORD}.${process.pid}.tmp`;
   writeFileSync(
-    process.env.FAKE_CLAUDE_RECORD,
+    recordTemp,
     JSON.stringify({
       argv: args,
       cwd: process.cwd(),
@@ -81,6 +84,7 @@ if (process.env.FAKE_CLAUDE_RECORD) {
       envNames: Object.keys(process.env).sort(),
     }),
   );
+  renameSync(recordTemp, process.env.FAKE_CLAUDE_RECORD);
 }
 
 if (process.env.FAKE_CLAUDE_CRASH_ON_START === '1') process.exit(70);

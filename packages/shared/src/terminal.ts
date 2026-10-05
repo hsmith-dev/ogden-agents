@@ -54,10 +54,12 @@ export type SessionTerminal = z.infer<typeof SessionTerminal>;
 /**
  * Why `session.driver_changed` happened: the user switched (`user`), the CLI
  * exited by itself (`cli_exited`: `/exit`, a crash), the server stopped with
- * the terminal driving (`server_stopped`), or a server start found a session
- * a stopped server had left in the terminal (`server_restarted`).
+ * the terminal driving (`server_stopped`), a server start found a session
+ * a stopped server had left in the terminal (`server_restarted`), or
+ * Developer mode was turned off while the terminal skipped permission checks
+ * (`developer_mode_off`: the chat drives again, in Ask).
  */
-export const DriverChangeCause = z.enum(['user', 'cli_exited', 'server_stopped', 'server_restarted']);
+export const DriverChangeCause = z.enum(['user', 'cli_exited', 'server_stopped', 'server_restarted', 'developer_mode_off']);
 export type DriverChangeCause = z.infer<typeof DriverChangeCause>;
 
 const terminalSize = {

@@ -1,9 +1,10 @@
 /**
  * The per-project BMad pieces contract over REST (CAP-19, AD-22; story 10.2):
- * what the install ships (`GET` pieces, nothing by default, a test's own by
- * option or hook), core refusing to turn on an unavailable piece and a
- * broken dependency rule, the one route helper that applies core's guard,
- * and the pre-registered 501 stubs that never read the body.
+ * what the install ships (`GET` pieces: Planning and Board since story 4.2,
+ * a test's own by option or hook), core refusing to turn on an unavailable
+ * piece and a broken dependency rule, the one route helper that applies
+ * core's guard and, for a route running project scripts, the script trust
+ * (story 4.2), and the pre-registered 501 stubs that never read the body.
  */
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -19,12 +20,13 @@ import {
   BmadPiecesResponse,
   FEATURE_OFF_MESSAGE,
   FEATURE_UNAVAILABLE_MESSAGE,
+  SCRIPTS_NOT_TRUSTED_MESSAGE,
   WorkspaceResponse,
   WorkspaceSettingsResponse,
 } from '@ogden-agents/shared';
 import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { bmadPieceRoutes, guardedRouteKeys, SHIPPED_BMAD_PIECES } from '../src/bmad-pieces.js';
+import { bmadPieceRoutes, guardedRouteKeys, SHIPPED_BMAD_PIECES, trustedRouteKeys } from '../src/bmad-pieces.js';
 import { registerBmadRoutes } from '../src/bmad-routes.js';
 import { createLogger } from '../src/log.js';
 import { BMAD_AVAILABLE_ENV } from '../src/test-hooks.js';
@@ -71,15 +73,20 @@ async function refusalOf(reply: Response) {
 }
 
 describe('what the install ships (story 10.2)', () => {
-  it('ships no piece yet: all four are coming soon, and no PATCH can turn one on', async () => {
-    expect(SHIPPED_BMAD_PIECES).toEqual([]);
+  it('ships Planning, Board (story 4.2) and Unattended builds (story 5.2): Retrospectives is coming soon, and no PATCH can turn it on', async () => {
+    expect(SHIPPED_BMAD_PIECES).toEqual(['planning', 'board', 'builds']);
     const server = await startTestServer();
     const tab = await signIn(server);
-    expect(await piecesOf(server, tab)).toEqual(BMAD_PIECES.map((piece) => ({ piece, available: false, reason: BMAD_COMING_SOON_REASON })));
+    expect(await piecesOf(server, tab)).toEqual([
+      { piece: 'planning', available: true },
+      { piece: 'board', available: true },
+      { piece: 'builds', available: true },
+      { piece: 'retrospectives', available: false, reason: BMAD_COMING_SOON_REASON },
+    ]);
 
     const workspace = await addProject(server, tab);
     const before = server.core.events.lastSeq();
-    for (const bmadPieces of [['planning'], ['board'], ['board', 'builds'], ['planning', 'board', 'builds', 'retrospectives']]) {
+    for (const bmadPieces of [['board', 'builds', 'retrospectives'], ['planning', 'board', 'builds', 'retrospectives']]) {
       const refused = await refusalOf(await request(server, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces, cautionLevel: 'ask_for_commands' }));
       expect(refused, JSON.stringify(bmadPieces)).toEqual({ status: 409, code: 'feature_unavailable', message: FEATURE_UNAVAILABLE_MESSAGE });
     }
@@ -87,24 +94,28 @@ describe('what the install ships (story 10.2)', () => {
     expect(WorkspaceSettingsResponse.parse(await (await request(server, tab, 'GET', settingsPath(workspace.id))).json()).settings).toEqual({
       cautionLevel: 'ask_every_time',
       bmadPieces: [],
+      bmadScriptsTrusted: false,
     });
+    // Planning, Board and Unattended builds turn on.
+    const on = await request(server, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces: ['planning', 'board', 'builds'] });
+    expect(WorkspaceSettingsResponse.parse(await on.json()).settings.bmadPieces).toEqual(['planning', 'board', 'builds']);
     // Behind the gate like every API route.
     expect((await send(server, API_ROUTES.bmadPieces)).status).toBe(401);
   });
 
   it('a test-registered piece, by start() option or by its test hook, is available with no reason, and the hook is logged', async () => {
-    const byOption = await startTestServer({ availableBmadPieces: ['planning'] });
+    const byOption = await startTestServer({ availableBmadPieces: ['retrospectives'] });
     const pieces = await piecesOf(byOption, await signIn(byOption));
-    expect(pieces[0]).toEqual({ piece: 'planning', available: true });
-    expect(pieces.slice(1).map((entry) => entry.available)).toEqual([false, false, false]);
+    expect(pieces[3]).toEqual({ piece: 'retrospectives', available: true });
+    expect(pieces.map((entry) => entry.available)).toEqual([true, true, true, true]);
     await byOption.close();
 
-    vi.stubEnv(BMAD_AVAILABLE_ENV, 'board, planning');
+    vi.stubEnv(BMAD_AVAILABLE_ENV, 'retrospectives, builds');
     const lines: string[] = [];
     const byHook = await startTestServer({ lines });
-    expect((await piecesOf(byHook, await signIn(byHook))).map((entry) => entry.available)).toEqual([true, true, false, false]);
+    expect((await piecesOf(byHook, await signIn(byHook))).map((entry) => entry.available)).toEqual([true, true, true, true]);
     const hooks = lines.map((line) => JSON.parse(line) as { msg: string; bmadAvailable?: string }).find((line) => line.msg === 'test hooks in use');
-    expect(hooks?.bmadAvailable).toBe('board,planning');
+    expect(hooks?.bmadAvailable).toBe('retrospectives,builds');
   });
 
   it('refuses a broken dependency rule with invalid_request even when every piece is available, storing nothing', async () => {
@@ -125,32 +136,34 @@ describe('what the install ships (story 10.2)', () => {
 
   it('keeps a stored piece that is no longer available when only the caution level changes, and lets it be turned off', async () => {
     const dataDir = tempDataDir();
-    const first = await startTestServer({ dataDir, availableBmadPieces: ['planning'] });
+    const first = await startTestServer({ dataDir, availableBmadPieces: ['retrospectives'] });
     const firstTab = await signIn(first);
     const workspace = await addProject(first, firstTab);
-    expect((await request(first, firstTab, 'PATCH', settingsPath(workspace.id), { bmadPieces: ['planning'] })).status).toBe(200);
+    expect((await request(first, firstTab, 'PATCH', settingsPath(workspace.id), { bmadPieces: ['board', 'builds', 'retrospectives'] })).status).toBe(200);
     await first.close();
 
     const second = await startTestServer({ dataDir });
     const tab = await signIn(second);
     const caution = await request(second, tab, 'PATCH', settingsPath(workspace.id), { cautionLevel: 'ask_for_commands' });
     expect(caution.status).toBe(200);
-    expect(WorkspaceSettingsResponse.parse(await caution.json()).settings).toEqual({ cautionLevel: 'ask_for_commands', bmadPieces: ['planning'] });
-    const off = await request(second, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces: [] });
-    expect(WorkspaceSettingsResponse.parse(await off.json()).settings.bmadPieces).toEqual([]);
-    expect((await refusalOf(await request(second, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces: ['planning'] }))).code).toBe('feature_unavailable');
+    expect(WorkspaceSettingsResponse.parse(await caution.json()).settings).toEqual({ cautionLevel: 'ask_for_commands', bmadPieces: ['board', 'builds', 'retrospectives'], bmadScriptsTrusted: false });
+    const off = await request(second, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces: ['board', 'builds'] });
+    expect(WorkspaceSettingsResponse.parse(await off.json()).settings.bmadPieces).toEqual(['board', 'builds']);
+    expect((await refusalOf(await request(second, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces: ['board', 'builds', 'retrospectives'] }))).code).toBe('feature_unavailable');
   });
 });
 
 describe('bmadPieceRoutes, the one helper (story 10.2)', () => {
   /** A bare app on a core with every piece available, a workspace in it, and guarded routes that record their runs. */
-  function guardedApp() {
+  async function guardedApp() {
     const core = openCore(tempDataDir(), { availableBmadPieces: BMAD_PIECES });
     cores.push(core);
     const workspace = core.entities.ensureWorkspace(tempRepo());
+    // Board runs the project's scripts: these routes check the trust too (story 4.2), which this workspace has.
+    await core.bmadScriptTrust.trustScripts(workspace.id);
     const app = new Hono();
     const runs: string[] = [];
-    const routes = bmadPieceRoutes(app, { bmad: core.bmad, log: createLogger(() => {}) });
+    const routes = bmadPieceRoutes(app, { bmad: core.bmad, scriptTrust: core.bmadScriptTrust, log: createLogger(() => {}) });
     const path = `${API_BASE}/workspaces/:wsId/test/board`;
     routes.get('board', path, (c, { workspaceId }) => {
       runs.push(`GET ${workspaceId}`);
@@ -168,7 +181,7 @@ describe('bmadPieceRoutes, the one helper (story 10.2)', () => {
   }
 
   it('refuses with feature_off while the piece is off, without running the handler or reading the body; runs it once on', async () => {
-    const { core, workspace, app, runs, url } = guardedApp();
+    const { core, workspace, app, runs, url } = await guardedApp();
     const off = await app.request(url(workspace.id), { method: 'POST', body: 'secret-body' });
     expect(await refusalOf(off)).toEqual({ status: 409, code: 'feature_off', message: FEATURE_OFF_MESSAGE });
     expect(runs).toEqual([]);
@@ -187,7 +200,7 @@ describe('bmadPieceRoutes, the one helper (story 10.2)', () => {
   });
 
   it('answers not_found for an unknown or malformed workspace without running the handler', async () => {
-    const { app, runs, url } = guardedApp();
+    const { app, runs, url } = await guardedApp();
     for (const wsId of [UNKNOWN, 'not-a-workspace', 'ws_bad']) {
       expect(await refusalOf(await app.request(url(wsId))), wsId).toMatchObject({ status: 404, code: 'not_found' });
     }
@@ -195,14 +208,14 @@ describe('bmadPieceRoutes, the one helper (story 10.2)', () => {
   });
 
   it("maps a handler's own core refusals the same way", async () => {
-    const { core, workspace, app, url } = guardedApp();
+    const { core, workspace, app, url } = await guardedApp();
     core.permissions.updateSettings(workspace.id, { bmadPieces: ['planning'] });
     expect(await refusalOf(await app.request(url(workspace.id), { method: 'PUT' }))).toMatchObject({ status: 409, code: 'feature_off' });
   });
 
-  it('throws at registration for a path outside a workspace, and lists what it registered', () => {
-    const { core, app } = guardedApp();
-    const routes = bmadPieceRoutes(app, { bmad: core.bmad, log: createLogger(() => {}) });
+  it('throws at registration for a path outside a workspace, and lists what it registered', async () => {
+    const { core, app } = await guardedApp();
+    const routes = bmadPieceRoutes(app, { bmad: core.bmad, scriptTrust: core.bmadScriptTrust, log: createLogger(() => {}) });
     for (const path of [`${API_BASE}/bmad/thing`, '/workspaces/:wsId/thing', `${API_BASE}/workspaces/:id/thing`, `${API_BASE}/workspaces/:wsId`]) {
       expect(() => routes.get('board', path, (c) => c.body(null, 204)), path).toThrow(/inside a workspace/);
     }
@@ -214,6 +227,71 @@ describe('bmadPieceRoutes, the one helper (story 10.2)', () => {
       `PUT ${API_BASE}/workspaces/:wsId/test/board`,
     ]);
     expect(guardedRouteKeys(new Hono())).toEqual([]);
+    // Board and Retrospectives run the project's scripts; Planning doesn't (story 4.2).
+    expect(trustedRouteKeys(app)).toEqual([
+      `DELETE ${API_BASE}/workspaces/:wsId/test/retro`,
+      `GET ${API_BASE}/workspaces/:wsId/test/board`,
+      `POST ${API_BASE}/workspaces/:wsId/test/board`,
+    ]);
+  });
+});
+
+describe('bmadPieceRoutes and the script trust (story 4.2)', () => {
+  /** A bare app on a core with Planning and Board, an untrusted workspace with Board on, and routes that record their runs. */
+  function trustApp() {
+    const core = openCore(tempDataDir(), { availableBmadPieces: BMAD_PIECES });
+    cores.push(core);
+    const workspace = core.entities.ensureWorkspace(tempRepo());
+    core.permissions.updateSettings(workspace.id, { bmadPieces: ['board'] });
+    const app = new Hono();
+    const runs: string[] = [];
+    const routes = bmadPieceRoutes(app, { bmad: core.bmad, scriptTrust: core.bmadScriptTrust, log: createLogger(() => {}) });
+    const scripts = `${API_BASE}/workspaces/:wsId/test/scripts`;
+    const either = `${API_BASE}/workspaces/:wsId/test/either`;
+    routes.post('board', scripts, async (c) => {
+      runs.push(`scripts ${await c.req.text()}`);
+      return c.body(null, 204);
+    });
+    routes.get(['planning', 'board'], either, (c) => {
+      runs.push('either');
+      return c.body(null, 204);
+    }, { projectScripts: false });
+    return { core, workspace, app, runs, scripts: (wsId: string) => apiPath(scripts, { wsId }), either: (wsId: string) => apiPath(either, { wsId }) };
+  }
+
+  it('refuses scripts_not_trusted after the piece guard, without running the handler or reading the body; runs once trusted', async () => {
+    const { core, workspace, app, runs, scripts } = trustApp();
+    const refused = await app.request(scripts(workspace.id), { method: 'POST', body: 'secret-body' });
+    expect(await refusalOf(refused)).toEqual({ status: 409, code: 'scripts_not_trusted', message: SCRIPTS_NOT_TRUSTED_MESSAGE });
+    expect(runs).toEqual([]);
+    // The piece guard comes first: Board off is feature_off, trusted or not.
+    core.permissions.updateSettings(workspace.id, { bmadPieces: [] });
+    expect((await refusalOf(await app.request(scripts(workspace.id), { method: 'POST' }))).code).toBe('feature_off');
+    core.permissions.updateSettings(workspace.id, { bmadPieces: ['board'] });
+    await core.bmadScriptTrust.trustScripts(workspace.id);
+    expect((await app.request(scripts(workspace.id), { method: 'POST', body: 'hello' })).status).toBe(204);
+    expect(runs).toEqual(['scripts hello']);
+  });
+
+  it('a route serving several pieces answers while any is on, and one running no project script needs no trust', async () => {
+    const { core, workspace, app, runs, either } = trustApp();
+    expect((await app.request(either(workspace.id))).status).toBe(204);
+    core.permissions.updateSettings(workspace.id, { bmadPieces: ['planning'] });
+    expect((await app.request(either(workspace.id))).status).toBe(204);
+    core.permissions.updateSettings(workspace.id, { bmadPieces: [] });
+    expect((await refusalOf(await app.request(either(workspace.id)))).code).toBe('feature_off');
+    expect(runs).toEqual(['either', 'either']);
+  });
+
+  it('refuses to register a script-running route without the trust, and an empty piece list', () => {
+    const core = openCore(tempDataDir(), { availableBmadPieces: BMAD_PIECES });
+    cores.push(core);
+    const routes = bmadPieceRoutes(new Hono(), { bmad: core.bmad, log: createLogger(() => {}) });
+    expect(() => routes.get('board', `${API_BASE}/workspaces/:wsId/test/x`, (c) => c.body(null, 204))).toThrow(/script trust/);
+    expect(() => routes.get(['planning', 'board'], `${API_BASE}/workspaces/:wsId/test/x`, (c) => c.body(null, 204))).toThrow(/script trust/);
+    expect(() => routes.get([], `${API_BASE}/workspaces/:wsId/test/x`, (c) => c.body(null, 204))).toThrow(/serve a piece/);
+    // Planning runs none: no trust needed.
+    routes.get('planning', `${API_BASE}/workspaces/:wsId/test/x`, (c) => c.body(null, 204));
   });
 });
 

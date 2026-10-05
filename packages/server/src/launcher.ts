@@ -18,13 +18,15 @@ import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 // The data-folder module alone, not core's index: the launcher must not load
 // the database driver (`better-sqlite3`) just to find or start a server.
-import { ensureDataDir, DATA_DIR_ENV, PORT_FILE } from '@ogden-agents/core/data-dir';
+import { ensureDataDir, DATA_DIR_ENV, DATABASE_NEWER_MESSAGE, EXIT_DATABASE_NEWER, PORT_FILE } from '@ogden-agents/core/data-dir';
 // The process-tree helper alone, not the adapters index (same reason).
 import { killProcessTree } from '@ogden-agents/adapters/process-tree';
 import { EXIT_ALREADY_RUNNING, isPidAlive } from './instance-lock.js';
 import { LAUNCHER_TOKEN_FILE, LAUNCHER_TOKEN_HEADER, readLauncherToken } from './launcher-token.js';
 import { createLogger, createRotatingFileWriter, LOG_DIR, type Logger } from './log.js';
+import { shellModeOf } from './shell-mode.js';
 import { VERSION } from './version.js';
+import { compareVersions } from '@ogden-agents/shared/semver';
 
 /** The launcher's own version: the version it would start. */
 export const LAUNCHER_VERSION: string = VERSION;
@@ -56,6 +58,14 @@ export interface LauncherOptions {
   openBrowser?: (url: string) => Promise<unknown>;
   startTimeoutMs?: number;
   restartTimeoutMs?: number;
+  /**
+   * Keep a server this launcher starts tied to this process by a pipe on its
+   * standard input, so it exits when this process does (story 13.3: the desktop
+   * app's shell runs the launcher and keeps it alive). Default: on in shell
+   * mode (`OGDEN_AGENTS_SHELL=desktop`), off otherwise: an `npx` server runs on
+   * after the terminal closes.
+   */
+  holdServer?: boolean;
 }
 
 export type LaunchAction = 'started' | 'attached' | 'updated' | 'kept-older';
@@ -68,6 +78,10 @@ export interface LaunchResult {
   version: string;
   pid: number;
   port: number;
+  /** The data folder the server uses (the shell reads the launcher token from it). */
+  dataDir: string;
+  /** Set only when this launcher started the server and holds its stdin pipe (`holdServer`). The caller keeps running. */
+  held?: ChildProcess;
 }
 
 /** A failure to show the user as it is, without a stack. */
@@ -94,44 +108,8 @@ interface PortRecord {
 // Versions.
 // ---------------------------------------------------------------------------
 
-const SEMVER = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
-
-/**
- * Compares two semver versions: negative if `a < b`, 0 if equal, positive if
- * `a > b`, `undefined` if either doesn't parse. A pre-release is lower than
- * its release; build metadata is ignored.
- */
-export function compareVersions(a: string, b: string): number | undefined {
-  const pa = SEMVER.exec(a.trim());
-  const pb = SEMVER.exec(b.trim());
-  if (pa === null || pb === null) return undefined;
-  for (let i = 1; i <= 3; i++) {
-    const diff = Number(pa[i]) - Number(pb[i]);
-    if (diff !== 0) return Math.sign(diff);
-  }
-  const preA = pa[4];
-  const preB = pb[4];
-  if (preA === undefined || preB === undefined) return preA === preB ? 0 : preA === undefined ? 1 : -1;
-  const idsA = preA.split('.');
-  const idsB = preB.split('.');
-  for (let i = 0; i < Math.max(idsA.length, idsB.length); i++) {
-    const x = idsA[i];
-    const y = idsB[i];
-    if (x === undefined) return -1;
-    if (y === undefined) return 1;
-    const nx = /^\d+$/.test(x);
-    const ny = /^\d+$/.test(y);
-    if (nx && ny) {
-      const diff = Number(x) - Number(y);
-      if (diff !== 0) return Math.sign(diff);
-    } else if (nx !== ny) {
-      return nx ? -1 : 1;
-    } else if (x !== y) {
-      return x < y ? -1 : 1;
-    }
-  }
-  return 0;
-}
+// The one semver order (story 4.3 review Q5), re-exported for the launcher's callers and tests.
+export { compareVersions };
 
 // ---------------------------------------------------------------------------
 // Finding and talking to a running server.
@@ -251,16 +229,18 @@ async function startServer(
   options: LauncherOptions,
   dataDir: string,
   log: Logger,
-): Promise<{ hello: Hello & { launchUrl: string } }> {
+): Promise<{ hello: Hello & { launchUrl: string }; held?: ChildProcess }> {
   const args = [options.serveEntry];
   if (options.port !== undefined) args.push('--port', String(options.port));
   if (options.webRoot !== undefined) args.push('--web-root', options.webRoot);
   // Detached: on POSIX a new process group (no SIGHUP when the terminal
   // closes); on Windows its own hidden console. No stdio, so nothing ties it
   // to this terminal; it logs to the data folder.
+  const hold = options.holdServer ?? shellModeOf() === 'desktop';
   const child = spawn(process.execPath, args, {
     detached: true,
-    stdio: 'ignore',
+    // Held (desktop app): the server's stdin is a pipe this process keeps open and never writes to.
+    stdio: hold ? ['pipe', 'ignore', 'ignore'] : 'ignore',
     windowsHide: true,
     // Not the launcher's folder: the server must not hold it open or depend on it.
     cwd: dataDir,
@@ -268,17 +248,21 @@ async function startServer(
   });
   let exit: string | undefined;
   let lostTheLock = false;
+  let databaseNewer = false;
   child.once('exit', (code, signal) => {
     if (code === EXIT_ALREADY_RUNNING) lostTheLock = true;
+    else if (code === EXIT_DATABASE_NEWER) databaseNewer = true;
     else exit = signal === null ? `exit code ${code}` : `signal ${signal}`;
   });
   child.once('error', (error) => (exit = error.message));
-  child.unref();
+  if (!hold) child.unref();
   log.info('started a background server', { pid: child.pid });
 
   const logPath = join(dataDir, LOG_DIR, 'server.log');
   const deadline = Date.now() + (options.startTimeoutMs ?? START_TIMEOUT_MS);
   while (Date.now() < deadline) {
+    // A newer version already migrated this data folder: say so as it is, nothing was changed (story 13.6).
+    if (databaseNewer) throw new LauncherError(DATABASE_NEWER_MESSAGE);
     if (exit !== undefined) {
       throw new LauncherError(`Ogden Agents stopped while starting (${exit}). See the log: ${logPath}`);
     }
@@ -289,7 +273,7 @@ async function startServer(
       const reply = await hello(record.port, token, true);
       if (reply?.launchUrl !== undefined && reply.pid === record.pid) {
         if (lostTheLock) log.info('another server started first; attaching to it', { pid: reply.pid });
-        return { hello: reply as Hello & { launchUrl: string } };
+        return { hello: reply as Hello & { launchUrl: string }, ...(hold && !lostTheLock ? { held: child } : {}) };
       }
     }
     await sleep(POLL_MS);
@@ -325,6 +309,7 @@ export async function launch(options: LauncherOptions): Promise<LaunchResult> {
 
   let action: LaunchAction;
   let reply: Hello & { launchUrl: string };
+  let held: ChildProcess | undefined;
 
   const found = await findRunning(dataDir, log);
   const attach = async (f: Found): Promise<Hello & { launchUrl: string }> => {
@@ -335,7 +320,9 @@ export async function launch(options: LauncherOptions): Promise<LaunchResult> {
 
   if (found === undefined) {
     print('Starting Ogden Agents in the background...');
-    reply = (await startServer(options, dataDir, log)).hello;
+    const started = await startServer(options, dataDir, log);
+    reply = started.hello;
+    held = started.held;
     action = 'started';
   } else {
     const order = compareVersions(found.hello.version, version);
@@ -359,7 +346,9 @@ export async function launch(options: LauncherOptions): Promise<LaunchResult> {
         print(`Updating Ogden Agents from ${found.hello.version} to ${version}...`);
         log.info('older server is stopping for the update', { pid: found.hello.pid });
         if (await waitForExit(found.hello.pid, options.restartTimeoutMs ?? RESTART_TIMEOUT_MS)) {
-          reply = (await startServer(options, dataDir, log)).hello;
+          const started = await startServer(options, dataDir, log);
+          reply = started.hello;
+          held = started.held;
           action = 'updated';
         } else {
           // It aborted the restart: a session became busy just before it stopped.
@@ -396,7 +385,8 @@ export async function launch(options: LauncherOptions): Promise<LaunchResult> {
 
   if (options.open) {
     try {
-      const openBrowser = options.openBrowser ?? (async (target: string) => (await import('open')).default(target));
+      // The opener runs with the helper allowlist, never this shell's agent keys (AD-16).
+      const openBrowser = options.openBrowser ?? (async (target: string) => (await import('./open-url.js')).openUrl(target));
       await openBrowser(reply.launchUrl);
     } catch (error) {
       log.warn('could not open a browser', { reason: String(error) });
@@ -404,5 +394,5 @@ export async function launch(options: LauncherOptions): Promise<LaunchResult> {
     }
   }
 
-  return { action, url, launchUrl: reply.launchUrl, version: reply.version, pid: reply.pid, port: reply.port };
+  return { action, url, launchUrl: reply.launchUrl, version: reply.version, pid: reply.pid, port: reply.port, dataDir, ...(held === undefined ? {} : { held }) };
 }

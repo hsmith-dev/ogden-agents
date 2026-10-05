@@ -2,24 +2,69 @@
 
 [![CI](https://github.com/hsmith-dev/ogden-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/hsmith-dev/ogden-agents/actions/workflows/ci.yml)
 
-A local browser UI for running BMAD with coding agents. Early development: the current build is the tracer bullet from launcher to live page.
+Ogden Agents is a local app, opened in your browser, for working with several AI coding agents at once without living in a terminal. In the spirit of herdr, it keeps many projects and many chats in one place and shows which are working, waiting for you or idle. It is made for simple users: each agent asks before it runs a command or edits a file, and you answer with a card. It wraps Claude Code, Antigravity, Codex and Grok through the Agent Client Protocol (ACP). It is open source (MIT) and free.
 
-## Install
+![Ogden Agents: a chat with a formatted reply and a permission card](docs/share/screenshots/03-chat-permission-light-desktop.png)
 
-Ogden Agents runs with one command and needs no checkout:
+## Status
 
-```sh
-npx ogden-agents
-```
+Early development, and honest about it:
 
-Installed globally (`npm install -g ogden-agents`), the command is `ogden`.
-
-To run it from a checkout instead, see below. Release notes are in [CHANGELOG.md](https://github.com/hsmith-dev/ogden-agents/blob/main/CHANGELOG.md).
+- **There is no npm release yet.** The `ogden-agents` name on npm is only a placeholder, so `npx ogden-agents` does not give you the app today. Run it from a checkout (see [Requirements](#requirements) and [Run](#run)), or with the start scripts below once a release exists.
+- **GitHub Releases come when a version tag exists.** Until then there is no release to download. Releases will be listed on the [releases page](https://github.com/hsmith-dev/ogden-agents/releases); how they are made is in [RELEASING.md](RELEASING.md).
+- It has not had an outside security audit. One user on one computer is the design.
+- Release notes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Requirements
 
 - Node.js 24 or later
 - pnpm 12
+- At least one agent you can sign in to (Ogden can install them for you from Settings > Agents)
+
+## Start Ogden
+
+These scripts need a published release. Until there is one, run from a checkout (see Run below). No terminal needed once there is one: download the start script for your computer, double-click it, and Ogden Agents opens in your browser. Download the scripts only from this project's [releases page](https://github.com/hsmith-dev/ogden-agents/releases/latest), where each release also lists their SHA-256 in `SHA256SUMS.txt`; they are also in this repository's [`start/`](start/) folder. The steps below tell your computer to run a script it can't verify, so never follow them for a "Start Ogden" file someone sent you.
+
+First install **Node.js 24 or later** from [nodejs.org/en/download](https://nodejs.org/en/download) (the LTS version is fine). If it's missing or too old, the script tells you so, opens that page, and stops; it never installs anything itself and never asks for an administrator password.
+
+**macOS.** Download `Start-Ogden-macOS.zip` and open it (Safari usually unzips it for you), then double-click **Start Ogden.command**. The script isn't signed by Apple, so the first time macOS refuses it ("unidentified developer", or "Apple could not verify…"):
+
+- macOS 14 Sonoma and earlier: right-click (or Control-click) **Start Ogden.command**, choose **Open**, then **Open** again.
+- macOS 15 Sequoia and later: click **Done**, open **System Settings > Privacy & Security**, scroll down to the message about Start Ogden.command, and click **Open Anyway**.
+
+macOS remembers your answer. A Terminal window shows what's happening; you can close it once the browser opens.
+
+**Windows.** Download `Start-Ogden.cmd` and double-click it. It needs no administrator rights and no PowerShell. If Windows shows "Windows protected your PC", click **More info**, then **Run anyway**. The window closes by itself once Ogden Agents opens.
+
+**Linux.** Download `start-ogden.sh`, make it executable once, and run it in a terminal (if your file manager offers **Run in Terminal**, that works too; plain **Run** shows no window, so you wouldn't see an error):
+
+```sh
+chmod +x start-ogden.sh
+./start-ogden.sh
+```
+
+`bash start-ogden.sh` works without the `chmod` too.
+
+**What the script does.** It checks for Node.js, then runs `npx --yes ogden-agents@latest`: the first start downloads Ogden Agents (about a minute), and later starts check for a newer version. Ogden Agents keeps running in the background after the window closes; stop it with **Quit Ogden Agents** in the app, and double-click the script again to reopen it. If something fails, the window stays open with the reason. Options:
+
+- Options after the script name go to Ogden Agents (for example `./start-ogden.sh --port 5000`). The Windows script refuses files and folders (a file dropped on it).
+- `--check`, as the first option, only reports the Node.js, npm and package it found, and opens nothing.
+- The script runs from your home folder, so npx never picks up settings or packages from the folder you downloaded it to.
+- `OGDEN_AGENTS_DATA_DIR` keeps working (see Run). `OGDEN_AGENTS_PACKAGE` picks another package version, such as `ogden-agents@next`.
+- **From GitHub Releases instead of npm.** `--github` (first option, or `OGDEN_AGENTS_SOURCE=github`) installs and updates from this project's [GitHub Releases](https://github.com/hsmith-dev/ogden-agents/releases): the script runs `ogden-install.mjs`, which must sit in the same folder as the script (the macOS zip already has it; download it from the same release for the others). It downloads `ogden-agents-<version>.tgz`, refuses to install it unless it matches `SHA256SUMS.txt`, installs it under your own user folder (never globally, no administrator rights), keeps the previous version for rollback, and updates on later starts. It works for a public repository; for a private one it needs `gh auth login` or `OGDEN_AGENTS_GITHUB_TOKEN`, and says so when it can't see the release. Details, channels and rollback: [RELEASING.md](RELEASING.md#installing-and-updating-from-github-releases).
+
+## Agents and how they sign in
+
+Each chat uses one coding agent: Claude Code, Google's Antigravity, OpenAI's Codex or xAI's Grok. **Claude Code and Antigravity can sign in with your own subscription account.** **Codex and Grok are API-key only.** Codex uses your own OpenAI API key; signing in with a ChatGPT account isn't supported, because OpenAI's terms don't allow other apps to use subscription sign in. Grok uses your own xAI API access token; signing in with an account isn't supported here. A key or token is kept in your computer's keychain and goes only to its own agent's process. Settings > Agents installs an agent into Ogden Agents' data folder and takes its key or token. Grok runs a project's own settings, hooks and MCP servers, so a Grok chat starts only in a project you trusted.
+
+| Agent | Sign in | Modes | Needs the project trusted |
+| --- | --- | --- | --- |
+| Claude Code | Your account, or an Anthropic API key | Ask, Auto, Skip all | No |
+| Antigravity | Your Google account, or a Gemini API key | Ask, Skip all | No |
+| Codex | An OpenAI API key only | Ask, Skip all | No |
+| Grok | An xAI API access token only | Ask, Skip all (fixed when the chat starts) | Yes |
+
+Skip all is behind Developer mode.
 
 ## Run
 
@@ -48,6 +93,8 @@ The server binds only to `127.0.0.1`. It tries port 4317 first and moves to the 
 
 ## Security
 
+To report a vulnerability, see [SECURITY.md](SECURITY.md). For a plain-language tour of what the app can do to your computer, see [docs/share/security-and-privacy.md](docs/share/security-and-privacy.md). No telemetry or analytics code was found in the source (the method is on that page).
+
 Ogden Agents is for one user on one machine, and it keeps other web pages and local processes out:
 
 - **Loopback only.** The server listens only on `127.0.0.1`; there is no remote access and no HTTPS. It answers only requests addressed to `127.0.0.1:<port>` or `localhost:<port>`, which blocks DNS rebinding.
@@ -64,6 +111,11 @@ Ogden Agents is for one user on one machine, and it keeps other web pages and lo
 Launch codes, tab tokens and the launcher token never appear in the logs or the event log; the `Authorization` and `Sec-WebSocket-Protocol` headers are redacted.
 
 **Known limit.** On a computer shared by several accounts, another local user can see the launch link (with its one-time code) on the process command line while your browser opens it (macOS, and Linux without `hidepid`), and could race to use it first. The code works once and only for 60 seconds; Ogden Agents is meant for one user per install.
+
+## More
+
+- [docs/share](docs/share/README.md): a plain-language kit for sharing Ogden Agents with coworkers (what it is, a FAQ, a one-page summary, a demo script).
+- [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) if you want to help.
 
 ## Develop
 

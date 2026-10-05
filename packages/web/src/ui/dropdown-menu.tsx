@@ -80,3 +80,36 @@ export function DropdownMenuLabel({ className, ...props }: ComponentProps<typeof
 export function DropdownMenuSeparator({ className, ...props }: ComponentProps<typeof DropdownMenuPrimitive.Separator>) {
   return <DropdownMenuPrimitive.Separator data-slot="dropdown-menu-separator" className={cn('-mx-1 my-1 border-t border-border', className)} {...props} />;
 }
+
+/**
+ * A choice in a menu with a line of description under its label (such as a
+ * chat's permission mode): checked when it is the current one, and when
+ * disabled its description says why, in one sentence.
+ */
+export function DropdownMenuChoiceItem({
+  className,
+  label,
+  description,
+  ...props
+}: Omit<ComponentProps<typeof DropdownMenuPrimitive.CheckboxItem>, 'children'> & { label: string; description: string }) {
+  return (
+    <DropdownMenuPrimitive.CheckboxItem
+      data-slot="dropdown-menu-choice-item"
+      className={cn(
+        'group relative flex min-h-(--row-height) cursor-default select-none flex-col items-start gap-0.5 rounded-md py-1.5 pr-2 pl-8 outline-none',
+        'focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none',
+        '[&_svg]:pointer-events-none [&_svg]:size-(--icon) [&_svg]:shrink-0',
+        className,
+      )}
+      {...props}
+    >
+      <span className="absolute top-2 left-2 inline-flex items-center justify-center">
+        <DropdownMenuPrimitive.ItemIndicator>
+          <Check aria-hidden />
+        </DropdownMenuPrimitive.ItemIndicator>
+      </span>
+      <span className="text-label group-data-[disabled]:opacity-50">{label}</span>
+      <span className="max-w-72 text-caption text-muted-foreground">{description}</span>
+    </DropdownMenuPrimitive.CheckboxItem>
+  );
+}

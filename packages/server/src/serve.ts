@@ -13,9 +13,10 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { ensureDataDir } from '@ogden-agents/core';
+import { DatabaseNewerError, EXIT_DATABASE_NEWER, ensureDataDir } from '@ogden-agents/core';
 import { createLogger, createRotatingFileWriter, LOG_DIR, redact, type Logger, type LogWriter } from './log.js';
 import { EXIT_ALREADY_RUNNING, ServerAlreadyRunningError } from './instance-lock.js';
+import { shellModeOf, watchParent } from './shell-mode.js';
 import { start, type RunningServer } from './start.js';
 
 /**
@@ -103,6 +104,11 @@ async function main(): Promise<void> {
       log.info('another server already runs on this data folder; exiting', { pid: error.pid });
       process.exit(EXIT_ALREADY_RUNNING);
     }
+    if (error instanceof DatabaseNewerError) {
+      // A newer version migrated this data folder: nothing was changed, and the launcher tells the user why (story 13.6).
+      log.warn('this data folder was last used by a newer version; not opening it');
+      process.exit(EXIT_DATABASE_NEWER);
+    }
     fail('server failed to start', error);
     return;
   }
@@ -113,6 +119,8 @@ async function main(): Promise<void> {
   };
   process.once('SIGINT', () => stop('SIGINT'));
   process.once('SIGTERM', () => stop('SIGTERM'));
+  // Inside the desktop app (story 13.3): exit when the pipe from the app closes, however the app ended.
+  if (shellModeOf() === 'desktop') watchParent(process.stdin, () => stop('parent gone'));
 }
 
 void main();

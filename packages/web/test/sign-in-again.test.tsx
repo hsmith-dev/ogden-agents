@@ -5,19 +5,22 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { SignIn } from '../src/agents/agent-setup-api';
 import {
-  API_KEY_REFUSED,
+  apiKeyRefused,
   armTracker,
   disarmTracker,
   initialTracker,
   observeAuth,
   observeSignInStarts,
   startAnswered,
-  SIGN_IN_AGAIN,
+  signInAgainWords,
   SIGNED_IN_TRY_AGAIN,
   SignInAgainView,
   type SignInAgainViewProps,
   type SignInTracker,
 } from '../src/chat/sign-in-again';
+
+const SIGN_IN_AGAIN = signInAgainWords('Claude Code');
+const API_KEY_REFUSED = apiKeyRefused('Claude Code');
 import { TooltipProvider } from '../src/ui/tooltip';
 
 /** Renders `node` inside a router that knows Settings: Agents, so its link gets its href. */
@@ -44,6 +47,7 @@ const signIn = (extra: Partial<SignIn> = {}): SignIn => ({
   cancel: () => {},
   sendCode: async () => true,
   link: undefined,
+  code: undefined,
   busy: false,
   error: undefined,
   ...extra,
@@ -52,6 +56,8 @@ const signIn = (extra: Partial<SignIn> = {}): SignIn => ({
 const render = (props: Partial<SignInAgainViewProps>) =>
   renderInRouter(
     <SignInAgainView
+      agentId="claude-code"
+      agentName="Claude Code"
       agent={agent('needs_sign_in')}
       signedIn={false}
       signIn={signIn()}
@@ -221,5 +227,25 @@ describe('Sign in again resends by itself exactly once (user decision B)', () =>
   it('a fresh notice (a new error, or the chat opened again) starts unarmed', () => {
     expect(initialTracker).toEqual({ last: undefined, armed: false, signedIn: false });
     expect(run(['signing_in', 'signed_in']).resends).toBe(0);
+  });
+});
+
+describe('an API key only agent (Codex; user decision, 2026-10-05)', () => {
+  const words = 'Codex needs a valid API key. Check it in Settings → Agents.';
+  const codex = (auth: AgentAuthState) => agent(auth, { agentId: 'codex', displayName: 'Codex', apiKeyOnly: true, ...(auth === 'signed_in' ? { method: 'api_key' as const } : {}) });
+
+  it('with no key it says the key is needed, with a link to Settings and never a Sign in', async () => {
+    const html = await render({ agentId: 'codex', agentName: 'Codex', agent: codex('needs_sign_in'), reason: words });
+    expect(html).toContain('data-sign-in="api_key_only"');
+    expect(html).toContain(words);
+    expect(html).toContain('data-testid="agent-settings-link"');
+    expect(html).not.toContain('data-testid="sign-in-again"');
+  });
+
+  it('with a saved key that was refused it says so, with the link and no Sign in', async () => {
+    const html = await render({ agentId: 'codex', agentName: 'Codex', agent: codex('signed_in'), reason: words });
+    expect(html).toContain('data-sign-in="api_key"');
+    expect(html).toContain('Codex refused your API key.');
+    expect(html).not.toContain('data-testid="sign-in-again"');
   });
 });

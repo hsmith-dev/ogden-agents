@@ -1,0 +1,189 @@
+{
+  "entry": "bmad-product-brief",
+  "skills": {
+    "bmad-architecture": {
+      "label": "Decide the technical design",
+      "description": "Record the technical decisions that keep separately built parts working together.",
+      "group": "planning",
+      "next": {
+        "skill": "bmad-spec",
+        "label": "Add these decisions to the spec"
+      }
+    },
+    "bmad-prd": {
+      "label": "Write the requirements",
+      "description": "Work out in detail what the product must do, for whom, and how you will know it works.",
+      "group": "planning",
+      "next": {
+        "skill": "bmad-spec",
+        "label": "Turn these requirements into a spec"
+      }
+    },
+    "bmad-product-brief": {
+      "label": "Describe your idea",
+      "description": "Write down who it is for, the problem it solves and why it matters, in a short brief.",
+      "group": "planning",
+      "next": {
+        "skill": "bmad-spec",
+        "label": "Turn this brief into a spec"
+      }
+    },
+    "bmad-spec": {
+      "label": "Write the spec",
+      "description": "Condense your idea, notes or documents into a short spec that every build reads.",
+      "group": "planning",
+      "next": {
+        "skill": "bmad-ticket",
+        "label": "Turn this spec into tickets"
+      }
+    },
+    "bmad-ticket": {
+      "label": "Plan the work in tickets",
+      "description": "Split the work into epics and stories, and keep track of where each one stands.",
+      "group": "planning",
+      "next": {
+        "skill": "bmad-build",
+        "label": "Build a story"
+      }
+    },
+    "bmad-ux": {
+      "label": "Design how it looks and works",
+      "description": "Describe the look, the screens and the flows people will use.",
+      "group": "planning",
+      "next": {
+        "skill": "bmad-spec",
+        "label": "Turn this design into a spec"
+      }
+    },
+    "bmad-build": {
+      "label": "Build a change with you",
+      "description": "Plan, build, review and check one story, fix or feature, with you deciding along the way.",
+      "group": "building"
+    },
+    "bmad-build-auto": {
+      "label": "Build next story",
+      "description": "Build one ready story on its own, with nobody watching, and stop for review.",
+      "group": "building"
+    },
+    "bmad-code-review": {
+      "label": "Review code changes",
+      "description": "Have several reviewers check a change, then sort what they found.",
+      "group": "checking"
+    },
+    "bmad-project-context": {
+      "label": "Set up instructions for agents",
+      "description": "Keep this project's instructions for coding agents short, current and correct.",
+      "group": "checking"
+    },
+    "bmad-qa-generate-e2e-tests": {
+      "label": "Add end-to-end tests",
+      "description": "Write automated tests that check a finished feature works from start to finish.",
+      "group": "checking"
+    },
+    "bmad-retrospective": {
+      "label": "Look back on an epic",
+      "description": "Check a finished epic against what it promised and list what to change next time.",
+      "group": "checking"
+    },
+    "bmad-review": {
+      "label": "Review a document or change",
+      "description": "Check a diff or a document for problems through one or more review lenses.",
+      "group": "checking"
+    },
+    "bmad-walkthrough": {
+      "label": "Walk through a change",
+      "description": "Go through a commit, pull request or folder together, one piece at a time.",
+      "group": "checking"
+    },
+    "bmad-advanced-elicitation": {
+      "label": "Push the last answer further",
+      "description": "Ask the agent to rethink and improve what it just wrote.",
+      "group": "research"
+    },
+    "bmad-brainstorming": {
+      "label": "Brainstorm ideas",
+      "description": "Come up with ideas using a range of creative techniques.",
+      "group": "research",
+      "next": {
+        "skill": "bmad-product-brief",
+        "label": "Describe the idea you picked"
+      }
+    },
+    "bmad-deep-recon": {
+      "label": "Research a topic",
+      "description": "Gather sources and a short summary with citations to help you decide.",
+      "group": "research"
+    },
+    "bmad-forge-idea": {
+      "label": "Pressure-test an idea",
+      "description": "Question a half-formed idea from several angles until you can act on it or drop it.",
+      "group": "research",
+      "next": {
+        "skill": "bmad-product-brief",
+        "label": "Describe this idea"
+      }
+    },
+    "bmad-prfaq": {
+      "label": "Test whether it is worth building",
+      "description": "Write the announcement first, then answer the hard questions customers and your team would ask.",
+      "group": "research",
+      "next": {
+        "skill": "bmad-spec",
+        "label": "Turn this into a spec"
+      }
+    },
+    "bmad-agent-analyst": {
+      "label": "Talk to the business analyst",
+      "description": "Think through markets, competitors and requirements with an analyst.",
+      "group": "agents"
+    },
+    "bmad-agent-architect": {
+      "label": "Talk to the architect",
+      "description": "Weigh technical choices and their trade-offs with a system architect.",
+      "group": "agents"
+    },
+    "bmad-agent-dev": {
+      "label": "Talk to the developer",
+      "description": "Plan and build code changes with a senior engineer.",
+      "group": "agents"
+    },
+    "bmad-agent-pm": {
+      "label": "Talk to the product manager",
+      "description": "Work out what to build and why with a product manager.",
+      "group": "agents"
+    },
+    "bmad-agent-ux-designer": {
+      "label": "Talk to the UX designer",
+      "description": "Think through screens, flows and the people using them with a designer.",
+      "group": "agents"
+    },
+    "bmad-party-mode": {
+      "label": "Talk to a group of agents",
+      "description": "Hear several agents discuss your question together.",
+      "group": "agents"
+    },
+    "bmad": {
+      "label": "Ask for help or set up",
+      "description": "Ask what to do next, or set up and update BMad Method in this project.",
+      "group": "setup"
+    },
+    "bmad-correct-course": {
+      "label": "Change course",
+      "description": "Work out what a big change in the middle of the work means for the plans, and propose the update.",
+      "group": "setup"
+    },
+    "bmad-customize": {
+      "label": "Customize a skill",
+      "description": "Change how an installed skill or agent behaves in this project.",
+      "group": "setup"
+    }
+  },
+  "modules": {
+    "core-tools": {
+      "label": "Core tools"
+    },
+    "method": {
+      "label": "BMad Method"
+    }
+  }
+}

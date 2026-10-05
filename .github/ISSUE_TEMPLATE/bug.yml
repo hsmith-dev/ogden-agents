@@ -1,0 +1,48 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please do not paste API keys, tokens or private code. For a security problem, use the private form linked on the previous page instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Click ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Ogden Agents version
+      description: Shown in Settings > About, or the commit if you run from a checkout.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [macOS, Windows, Linux]
+    validations:
+      required: true
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent in use
+      options: [Claude Code, Antigravity, Codex, Grok, Not agent related]
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: "`logs/server.log` is in your data folder. Remove anything private first."

@@ -7,6 +7,24 @@ export const RESTARTED_REASON = 'Ogden Agents was restarted';
 export const AGENT_SESSION_REF = 'agentSessionId';
 
 /**
+ * The adapter ref that keeps `agentId`'s own agent session in this chat while
+ * another agent has it (handoff), so the chat reopens it when it comes back.
+ */
+export const agentSessionRefOf = (agentId: string): string => `${AGENT_SESSION_REF}@${agentId}`;
+
+/** The adapter ref with the seq of the `session.agent_changed` at which `agentId` left this chat: its brief on return starts after it. */
+export const handoffLeftRefOf = (agentId: string): string => `handoffLeftAt@${agentId}`;
+
+/** How long a handoff preview's token can be used (handoff): long enough to read and edit a summary. */
+export const HANDOFF_PREVIEW_TTL_MS = 10 * 60_000;
+
+/** The most handoff previews held unused at once; past it the oldest are forgotten. */
+export const MAX_HANDOFF_PREVIEWS = 200;
+
+/** The adapter ref that is `1` from a handoff until a prompt carrying its brief succeeded (else empty). */
+export const HANDOFF_PENDING_REF = 'handoffPending';
+
+/**
  * The adapter ref that marks where the CLI's record stood when the session's
  * terminal opened (story 3.3): its last turn's id, `start` when it had none,
  * or empty when it couldn't be read. Switching back imports the turns after it.
@@ -50,6 +68,12 @@ export const DELTA_INTERVAL_MS = 50;
 /** How long Stop waits for the agent to end its turn before it drops the agent. */
 export const STOP_GRACE_MS = 5_000;
 
+/**
+ * How long an agent may take to answer a message sent right away into its
+ * running turn (send now or wait) before core stops the step instead.
+ */
+export const STEER_TIMEOUT_MS = 10_000;
+
 /** The most recent terminal output core keeps (in memory only) for a viewer that attaches. */
 export const TERMINAL_BACKLOG_CHARS = 64 * 1024;
 
@@ -77,3 +101,14 @@ export const terminalClosedNote = (agentName: string, exitCode: number | null): 
 /** The size a terminal opens at, until its viewer resizes it. */
 export const TERMINAL_COLS = 80;
 export const TERMINAL_ROWS = 24;
+
+/** How long an agent may take to take a permission mode before it is dropped (permission modes). */
+export const PERMISSION_MODE_TIMEOUT_MS = 5_000;
+
+/**
+ * How long an agent may take to start before core says so in the chat
+ * (`session.agent_starting`, epic 6 entry 5): a usual start (Claude Code's
+ * takes a second or two, its sign-in check included) adds nothing; a slow
+ * one (Antigravity takes about 17 s on Windows) shows as starting.
+ */
+export const AGENT_STARTING_NOTICE_MS = 3_000;

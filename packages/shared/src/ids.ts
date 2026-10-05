@@ -13,6 +13,8 @@ export const ID_PREFIXES = {
   event: 'evt',
   /** An always-allow permission rule, scoped to one workspace (story 2.3; stored by 2.6). */
   permissionRule: 'rule',
+  /** A notification webhook target (story 5.3 contract; stored by 11.4). */
+  webhook: 'hook',
 } as const;
 export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];
 
@@ -42,3 +44,7 @@ export type EventId = z.infer<typeof EventId>;
 /** An always-allow permission rule (E2-R3): stored and enforced in core, scoped to one workspace. */
 export const PermissionRuleId = prefixedUlid('rule');
 export type PermissionRuleId = z.infer<typeof PermissionRuleId>;
+
+/** A notification webhook target (story 5.3; 11.4 stores it, its URL through `SecretStorePort`). */
+export const WebhookId = prefixedUlid('hook');
+export type WebhookId = z.infer<typeof WebhookId>;

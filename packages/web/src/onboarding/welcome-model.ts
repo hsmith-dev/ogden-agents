@@ -31,9 +31,25 @@ export function advancesOnReady(previous: boolean | undefined, now: boolean): bo
   return previous === false && now;
 }
 
-/** The agent Welcome shows selected: the first supported one (there is one today). */
-export function selectedAgent(agents: readonly AgentSetupStatus[] | undefined): AgentSetupStatus | undefined {
-  return agents?.[0];
+/**
+ * The agent Welcome shows selected (epic 6, entry 6): the one chosen (the
+ * user's pick, else the kept default for new projects) while it is listed,
+ * else the first supported one.
+ */
+export function selectedAgent(agents: readonly AgentSetupStatus[] | undefined, chosen?: string | undefined): AgentSetupStatus | undefined {
+  return agents?.find((agent) => agent.agentId === chosen) ?? agents?.[0];
+}
+
+/** Whether Welcome asks which agent to use (epic 6, entry 6): only when there is more than one; Claude Code alone asks nothing. */
+export const asksAgentChoice = (agents: readonly AgentSetupStatus[] | undefined): boolean => (agents?.length ?? 0) > 1;
+
+/** One line under an agent in Welcome's choice: its setup, in the agent card's words. */
+export function agentSetupWords(agent: AgentSetupStatus): string {
+  if (agent.install === 'installing') return `Installing ${agent.displayName}`;
+  if (agent.install !== 'installed') return 'Not installed';
+  // An agent with only an API key has no sign in (Codex; user decision, 2026-10-05).
+  if (agent.apiKeyOnly === true) return agent.auth === 'signed_in' ? `Installed, using your ${agent.apiKeyName ?? 'API key'}` : `Installed, needs ${agent.apiKeyName === undefined ? 'an API key' : `an ${agent.apiKeyName}`}`;
+  return agent.auth === 'signed_in' ? 'Installed, signed in' : agent.auth === 'signing_in' ? 'Signing in' : 'Installed, needs sign-in';
 }
 
 /** After a project is added: the shortcut step while the server still offers it, else finish. */
@@ -41,9 +57,32 @@ export function stepAfterProject(offerPending: boolean | undefined): WelcomeStep
   return offerPending === true ? 'shortcut' : 'finish';
 }
 
-/** Where finishing or skipping goes: the new project's Chats, or Projects when none was added. */
-export function exitTarget(workspaceId: string | undefined): { to: '/w/$wsId'; params: { wsId: string } } | { to: '/' } {
-  return workspaceId === undefined ? { to: '/' } : { to: '/w/$wsId', params: { wsId: workspaceId } };
+/**
+ * Where finishing or skipping goes: the new project's Plan when it was added
+ * with Planning on (Flow 1 step 5, story 4.6), else its Chats, or Projects
+ * when none was added.
+ */
+export function exitTarget(
+  workspaceId: string | undefined,
+  pieces: readonly BmadPiece[] | undefined = undefined,
+): { to: '/w/$wsId' | '/w/$wsId/plan'; params: { wsId: string } } | { to: '/' } {
+  if (workspaceId === undefined) return { to: '/' };
+  return { to: pieces?.includes('planning') === true ? '/w/$wsId/plan' : '/w/$wsId', params: { wsId: workspaceId } };
+}
+
+/**
+ * Where finishing goes, from the pieces the added project actually has
+ * (story 4.6 review): Welcome's answer or, when it wasn't asked, the
+ * New-project defaults the server applied. `loadPieces` reads them (the
+ * project's settings); if it fails, the project's Chats.
+ */
+export async function resolveExitTarget(
+  workspaceId: string | undefined,
+  loadPieces: (workspaceId: string) => Promise<readonly BmadPiece[]>,
+): Promise<ReturnType<typeof exitTarget>> {
+  if (workspaceId === undefined) return exitTarget(undefined);
+  const pieces = await loadPieces(workspaceId).catch(() => undefined);
+  return exitTarget(workspaceId, pieces);
 }
 
 /** Whether `/` sends this tab to Welcome: only once onboarding has loaded as not done (never while loading or on an error). */

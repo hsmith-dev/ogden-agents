@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./process-tree": "./src/process-tree.ts"
+    "./process-tree": "./src/process-tree.ts",
+    "./child-env": "./src/child-env.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"

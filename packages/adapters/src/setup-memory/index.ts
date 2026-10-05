@@ -13,6 +13,8 @@ export interface MemoryAgentSetupOptions {
   displayName?: string;
   installed?: boolean;
   auth?: AgentAuthState;
+  /** A code its sign-in gives, to type on the sign-in page (a device code; epic 6, entry 6). */
+  userCode?: string;
 }
 
 /** The placeholder a memory sign-in returns; it names no real service. */
@@ -64,6 +66,7 @@ export function createMemoryAgentSetup(options: MemoryAgentSetupOptions = {}): M
       });
       return {
         url: MEMORY_SIGN_IN_URL,
+        ...(options.userCode === undefined ? {} : { userCode: options.userCode }),
         done,
         cancel: async () => finish?.('cancelled'),
       };

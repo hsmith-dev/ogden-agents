@@ -4,11 +4,11 @@ type: architecture-spine
 purpose: build-substrate
 altitude: initiative
 paradigm: 'hexagonal (ports and adapters) with an append-only event log'
-scope: 'Ogden Agents as a whole: launcher, local server, browser UI, agent/tool adapters, and its BMAD-METHOD and bmad-loop forks'
+scope: 'Ogden Agents as a whole: launcher, local server, browser UI, agent/tool adapters, and the pinned upstream BMAD-METHOD and bmad-loop it uses'
 status: final
 created: '2026-09-29'
-updated: '2026-10-02'
-binds: [CAP-1, CAP-2, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-12, CAP-13, CAP-14, CAP-15, CAP-16, CAP-17, CAP-18, CAP-19]
+updated: '2026-10-04'
+binds: [CAP-1, CAP-2, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-12, CAP-13, CAP-14, CAP-15, CAP-16, CAP-17, CAP-18, CAP-19, CAP-20]
 sources: ['../spec-ogden-agents/spec-ogden-agents.md']
 companions: []
 ---
@@ -22,7 +22,7 @@ The architecture is hexagonal. `packages/core` holds the domain: workspaces, ses
 | Layer | Package | Holds |
 |---|---|---|
 | Domain | `packages/core` | Entities, ports, event log, session and run state machines, verification rules |
-| Adapters | `packages/adapters` | `acp-*`, `buildrunner-bmad-loop`, `tickets-v7`, `bmad-catalog`, `sandbox-*`, `vcs-git`, `terminal-pty`, `secrets-keyring`, `notify-*` |
+| Adapters | `packages/adapters` | `acp-*`, `buildrunner-acp`, `tickets-v7`, `bmad-catalog`, `sandbox-*`, `vcs-git`, `terminal-pty`, `secrets-keyring`, `notify-*` |
 | Delivery | `packages/server` | HTTP and WebSocket, the security gate, wiring, the launcher handshake |
 | UI | `packages/web` | React app; `packages/web/ui` is the design system |
 | Contract | `packages/shared` | Zod schemas and TypeScript types for every event, API shape and ID |
@@ -53,6 +53,8 @@ graph LR
   - Adding an agent or sandbox means adding an adapter, never a change to core.
   - `packages/web` never imports `core`, `adapters` or `server`.
   - Note (story 2.3, 2026-09-30): two more core ports join the list: `AgentSetupPort` (installing and signing into an agent, onboarding epic) and `AppShortcutPort` (the OS app shortcut, E2-R10), because both are OS- or agent-specific. Until their adapters ship, the server wires in-memory stubs named `<port>-memory` (`setup-memory`, `secrets-memory`, `shortcut-memory`). No rule changes.
+  - Note (epic 6, user-approved 2026-10-02): server wiring holds a registry of `AgentPort` and `AgentSetupPort` by `AgentId`, and core looks up a session's agent through it; the agent list is agent-neutral data, and each agent declares the permission modes it supports. Core and shared name no agent id, and an architecture test enforces it. The shared ACP client lives in `packages/adapters/src/acp-base`; adapter naming stays `<port>-<variant>` (`acp-claude-code`, `acp-antigravity`, `setup-antigravity`). Built whatever epic 6's Antigravity spike decides; only `acp-antigravity` and `setup-antigravity` depend on a go (user, 2026-10-02). No rule changes.
+  - Note (epic 12, user-approved 2026-10-04): Codex (`acp-codex`, `setup-codex`) and Grok (`acp-grok`, `setup-grok`) are v1.1 chat agents, each a descriptor plus quirks on `acp-base`. The quirks gain, agent-neutrally: `authenticate` at start, Deny chosen by option id when several are `reject_once`, a permission mode fixed at chat start and given in `_meta`, and a launch that receives the chat's mode and protected paths. An agent's own config folders come from its descriptor, so core still names no agent. No rule changes.
 
 ### AD-2 — Workspace is the top-level scope
 
@@ -64,6 +66,7 @@ graph LR
   - Any number of workspaces may be active at once.
   - The unattended-run concurrency limit applies per workspace and globally, and both are enforced in core.
   - Note (epic 10, 2026-10-01): a workspace also carries its BMad pieces (AD-22). No rule changes.
+  - Note (epic 5, 2026-10-01): the default limits are 2 runs per workspace and 3 per install, kept in `packages/shared`, editable in settings and enforced in core. No rule changes.
 
 ### AD-3 — The server owns agent processes
 
@@ -73,6 +76,8 @@ graph LR
   - Only the server spawns and stops agent processes. The UI attaches and detaches through the event log and never controls a process directly.
   - `npx ogden-agents` starts a detached server if none is running. The server runs until Quit in the UI, or a reboot.
   - When the server starts, any session whose process is gone becomes `idle` and is marked resumable.
+  - Note (epic 5, 2026-10-01): an unattended run is not resumed. Quit with active runs (after one confirmation), a crash or a reboot leaves each run `blocked` with the reason `interrupted`, its worktree kept, and the user retries it by hand. No rule changes.
+  - Note (epic 13, 2026-10-04, user decision): in the desktop app (CAP-20) the Tauri shell starts the server as its sidecar and owns its life. Quitting the app stops a server and agents the app started, under Quit's busy rule; it never stops a server started by `npx ogden-agents` that the app attached to. A server the app started exits when its parent shell is gone. The npm route is unchanged. No tray icon in v1.
 
 ### AD-4 — One normalized session state
 
@@ -92,8 +97,12 @@ graph LR
   - The UI holds one WebSocket; it subscribes to install-level events after seq N and to each workspace's recent window, pages older history on demand, and reconnects per scope after its last seq.
   - Every event type has a Zod schema in `packages/shared`, and nothing unschematized is emitted.
   - Every adapter that produces agent activity, whether an ACP chat or the bmad-loop build runner, emits the same `session.*` event types, so one session view renders both.
+  - Note (epic 5, 2026-10-01): the `buildrunner-bmad-loop` adapter maps bmad-loop's events and the agent's transcript to `session.*` events; where the agent's activity is not available as structured events, the run view shows bmad-loop's activity lines as messages. No rule changes.
+  - Note (epic 5, 2026-10-02, user, ACP fallback after spike 5.1): v1 builds run as Ogden-managed headless ACP sessions (`buildrunner-acp`), so a build emits `session.*` events exactly as a chat does; the previous note no longer applies in v1. No rule changes.
   - All events are retained, and history is deletable per workspace.
   - When a message completes, core appends a `session.message_completed` event carrying the full content. Its chunk events are pruned only after that, and the UI replaces chunks with the completed message.
+  - Note (chat names, backlog story 12, 2026-10-04): a session's name is two fields core keeps, the user's `title` and the automatic `autoTitle` (set once: a planning action's label, or the first user message that isn't a Deny reason, inside the same `completeMessage` transaction). Each change is a `session.renamed` carrying both. Names are normalized in `packages/shared` and never sent to an agent. No rule change.
+  - Note (epic 13, 2026-10-04, user decision): on a version change the database is copied to `<dataDir>/backups/` before migrations run, and a database newer than the running server is refused with a plain message. This applies to every later migration.
 
 ### AD-6 — Terminal bytes use their own channel [ADOPTED]
 
@@ -103,6 +112,8 @@ graph LR
   - Terminal I/O streams over a separate WebSocket per session and is never logged.
   - Each session has one `driver` (`ui` or `terminal`), which only core changes, and each change emits `session.driver_changed`.
   - While `driver = terminal`, core rejects chat input for that session.
+  - Note (permission modes, 2026-10-02, user decision): each chat also has a permission mode (`ask`, `auto`, `skip_all`) stored on its session and changed only by core, each change a `session.permission_mode_changed`. While `driver = terminal` core also rejects a mode change (`driver_is_terminal`); the CLI starts in the chat's mode (`--permission-mode default|auto`, or `--dangerously-skip-permissions`). Turning Developer mode off hands a Skip-all terminal back to the chat (`session.driver_changed`, cause `developer_mode_off`) before the chat moves to Ask. (decision by user, 2026-10-02) Auto keeps protected files guarded: in Auto the CLI also gets `--settings` with ask rules for the protected paths. No rule change.
+  - Note (default permission mode, 2026-10-04, user decision): a project can set the mode its new chats start in (`workspaces.default_permission_mode`, Ask when absent; the app-wide default for new projects is copied when a project is added). Core picks a new chat's starting mode in the same synchronous step that creates it: the project's default only when the chat's agent declares it, its sessions this run listed it, and, for Skip all, Developer mode is on; otherwise Ask with a note on `session.created` (`permissionModeNote`, optional). Restarts still put every existing chat back in Ask; a chat created after a restart starts in the default. Unattended builds don't use it. The terminal starts in the chat's mode as before. No rule change.
 
 ### AD-7 — Board data is fetched; ticket events only invalidate [ADOPTED]
 
@@ -122,6 +133,9 @@ graph LR
   - Session state, run outcome and ticket status are three separate things. Ticket status comes only from `TicketStorePort`, and the UI never works out one from another.
   - The live run view is the session view in read-only mode.
   - Ogden Agents records no cost or token usage.
+  - Note (epic 6, user-approved 2026-10-02): a session carries `agentId`, set at creation and never changed (rows stored before read as `claude-code`), and a workspace carries a default agent. A run's agent is Claude Code in v1 (builds with other agents are v2, epic 8). No rule changes.
+  - Note (story 11, user request 2026-10-04): a session carries an optional `model` (the agent's own model id; absent is the agent's own choice), set at creation from the project's default for its agent, else the install's, and changed only by core with `session.model_changed` {model, previous, cause user|agent}; per-agent install defaults and each agent's last model list live in `agent_settings`, per-project defaults in `workspaces.default_models` (carried by `workspace.settings_changed`), install changes as `settings.agent_default_model_changed`. Agents expose models agent-neutrally: an ACP session config option of category `model` (switched with `session/set_config_option` at the idle point before the next prompt), else a static descriptor list applied at spawn (restart to switch). Core and the UI name no model id. No rule changes.
+  - Note (handoff, user decision 2026-10-04): a chat's `agentId` changes only when the user confirms continuing it with another agent, recorded as `session.agent_changed` (previous agent, the brief sent, whether the agent resumes its own session). Each agent's own session id stays an adapter ref (`agentSessionId@<agentId>`, AD-9). The brief is built by core from the session's events, masked with the shared secret patterns (AD-16), capped per agent's descriptor, and sent only after the user saw which provider receives it. No rule changes.
 
 ### AD-9 — Ogden Agents owns identity [ADOPTED]
 
@@ -158,21 +172,27 @@ graph LR
 - **Rule:**
   - `BmadCatalogPort` builds the catalog of modules, skills, agents and help from installed metadata (`bmod.toml`, `SKILL.md` frontmatter, `roster.toml`, help files).
   - The UI renders every action from that catalog.
-  - Skill names appear only inside the adapters that must invoke a specific skill (`buildrunner-bmad-loop` for `bmad-build-auto`, `tickets-v7` for `tickets.py`).
-  - Plain-language labels live in fork metadata.
+  - Skill names appear only inside the adapters that must invoke a specific skill (the build runner adapter, `buildrunner-acp`, for `bmad-build-auto`; `tickets-v7` for `tickets.py`).
+  - Note (epic 5, 2026-10-02, user): the build runner adapter is `buildrunner-acp`, not `buildrunner-bmad-loop` (ACP fallback after spike 5.1). No rule changes.
+  - Plain-language labels live in Ogden Agents's own mapping file, keyed by skill name, in the `bmad-catalog` adapter; a skill it doesn't name shows its `SKILL.md` description. (Amended, story 4.14, user decision 2026-10-02: was "in fork metadata".)
   - Note (epic 4, 2026-10-01): the `bmad-catalog` adapter may also name the `bmad` setup skill, because it runs that skill's `setup.py` to install BMAD into a project (CAP-2). No rule changes.
   - Note (epic 10, 2026-10-01): the catalog is built only for workspaces with Planning on (AD-22). AD-1's port list is unchanged: `BmadCatalogPort` gains a read-only `detect` (does the repo already have `_bmad/`). No rule changes.
   - Note (epic 7, 2026-10-02): the catalog is built for workspaces with Planning or Retrospectives on; with only Retrospectives on, the UI shows only epic-scoped actions, on the board. A catalog action may be epic-scoped and carry more than one next step, read from fork metadata. No rule changes.
+  - Note (epic 6, user-approved 2026-10-02): an agent adapter may name the skill invocation syntax for its agent, and BMad setup places skills in each in-use agent's skill folder (`.agents/skills` for Antigravity, beside `.claude/skills`), only where Planning is on. Skill names still appear only where this rule allows. No rule changes.
 
-### AD-13 — Forks are bundled and locked [ADOPTED]
+### AD-13 — BMad Method is pinned from Ogden Agents' fork and verified [ADOPTED]
 
 - **Binds:** CAP-2, CAP-8
-- **Prevents:** epics 4 and 5 running against different fork versions.
+- **Prevents:** epics 4 and 5 running against different BMad versions, Ogden Agents running BMad files nobody checked, and Ogden Agents waiting on upstream for a change it needs.
 - **Rule:**
-  - Each Ogden Agents release bundles its BMAD-METHOD and bmad-loop forks inside the npm package. Skills are copied into repos from the package, and bmad-loop is installed by `uv` from a bundled wheel.
-  - `forks.lock` names the fork tags, and CI fails if the bundled files differ from it.
-  - Each fork keeps an `upstream` mirror branch and an `ogden-agents` branch made of upstream plus one patch per upstream PR, tagged `v<upstream>-ogden-agents.<n>`.
-  - A patch is removed once upstream merges it.
+  - Each Ogden Agents release pins BMad Method from Ogden Agents' maintained fork `hsmith-dev/BMAD-METHOD` (upstream `bmad-code-org/BMAD-METHOD` plus Ogden Agents' patches, on the fork's `ogden-agents` branch) to one commit, reachable from a fork tag that never moves, with a sha256 content hash and the upstream `base` commit it is built on, in a lock file in the package (`bmad-lock.json`). bmad-loop (epic 5) is pinned the same way. The package ships no BMad files.
+  - Ogden Agents downloads a pinned tarball only when the user asks (Set up, Update, or a Download button), never on startup or a page load; offline is a plain error. It verifies the content hash in memory, refuses a mismatch, and writes only the verified regular files (no links, no path outside the target) into a fresh folder in its data folder.
+  - BMad's scripts that Ogden Agents runs itself (`setup.py`, `tickets.py`) run only from that verified copy, never from a project's own copy. Skills are copied into repos from it, and bmad-loop is installed by `uv` from it into a virtual environment in the data folder. The one piece of a project's code `tickets.py` runs, its BMad config script, comes only from a private snapshot: the trusted project's `_bmad/scripts/` is read once, checked against the trusted fingerprint (AD-22), and those same bytes are written into a fresh owner-only run folder in the data folder that `tickets.py --config-utils` imports, so a change after the check never runs.
+  - CI fails if a pinned commit's content no longer matches the lock's hash, the commit is not in the history of its fork tag, or its `base` is not in upstream `main`'s history or not an ancestor of the commit. CI only reads from GitHub.
+  - Upstream is fetch-only: Ogden Agents never pushes, opens pull requests or issues, or comments on `bmad-code-org` repositories, and never opens a pull request from the fork to upstream. A change Ogden Agents needs in BMad is a commit on the fork's `ogden-agents` branch with a test in upstream's suite; syncing (fetch upstream, move the fork's `upstream` branch, rebase `ogden-agents`, run upstream's checks, tag, move the pin) follows `docs/bmad-fork.md` and `scripts/bmad-fork-sync.mjs`, which pushes only to the fork. A piece that needn't live in BMad stays on Ogden Agents' side (such as the plain-language labels, AD-12).
+  - Amended (epic 4 story 4.14, user decision 2026-10-02, "pinned upstream, verified"): replaces "Forks are bundled and locked" (bundled forks in `vendor/`, `forks.lock`, fork branches and tags).
+  - Note (epic 5, 2026-10-02, user): bmad-loop is no longer used by v1. Spike 5.1 found bmad-loop 0.13.0 needs a user-installed multiplexer on every OS and reads no v7 ticket, so builds run as Ogden-managed ACP sessions (`buildrunner-acp`). Where 4.14 pins bmad-loop (its `bmad-lock.json` entry and `createBmadLoopResolver`), that pin and resolver become unused; remove them in 4.12 (epic 4's sweep), else 5.10. The seven patches bmad-loop would need are kept as a v2 or upstream note in epic 5. No rule changes.
+  - Amended (maintained-fork story, user decision 2026-10-04: "We should only be forking BMad and maintaining it with changes from BMad, we do not want to push anything to upstream."): was "Upstream BMad is pinned and verified", which pinned `bmad-code-org/BMAD-METHOD` directly, carried no forks and took changes only through upstream pull requests. The download and verification are unchanged. The first pin is tag `ogden-agents/2026-10-04` on upstream `1cbcfa2` (Ogden Agents' pin before, kept to avoid unrelated changes) plus the `--config-utils` patch.
 
 ### AD-14 — Reduced mode on upstream BMAD [ADOPTED]
 
@@ -180,7 +200,9 @@ graph LR
 - **Prevents:** Ogden Agents breaking repos that already have plain upstream BMAD.
 - **Rule:**
   - Features are gated on capabilities detected from installed metadata, not on version strings.
-  - A feature whose fork capability is missing is shown as unavailable, with an upgrade offer. It never fails silently.
+  - A feature whose capability is missing from the project's installed BMad is shown as unavailable, with an upgrade offer that sets the project up from the pinned upstream version (AD-13). It never fails silently.
+  - Note (story 4.14, user decision 2026-10-02): capabilities are judged against the pinned upstream commit, not a fork; plain labels come from Ogden Agents's mapping file (AD-12), so they are not a project capability.
+  - Note (maintained-fork story, user decision 2026-10-04): the pinned commit is now Ogden Agents' fork (AD-13), upstream plus patches that change no capability a project's installed BMad is judged on (the first adds a `tickets.py` option), so a plain upstream install at the same base still has every capability. No rule changes.
 
 ### AD-15 — One security gate [ADOPTED]
 
@@ -198,7 +220,10 @@ graph LR
   - No route is registered outside the gate. Tokens and codes never appear in logs or events, and the `Sec-WebSocket-Protocol` and `Authorization` headers are redacted. The app sends a Content-Security-Policy that allows only its own scripts: no inline script and no third-party origins.
   - The launcher finds the server through a port file in the user data directory, readable only by the user.
   - Note (story 1.7): the launcher token is 256 random bits the server writes to `launcher.token` in the data directory on each start (readable only by the user, removed on stop), sent in a request header and compared in constant time. It opens nothing but the handshake, and no tab token opens the handshake.
+  - Note (permission modes, 2026-10-02, user decision): Skip all (an agent run with its permission checks skipped) is gated by the server, not by the agent's start options: a chat's mode can be `skip_all` only with the install's Developer mode on (kept by core in SQLite, `settings.developer_mode_changed`, no longer browser-only) and the request's `confirm: true`; a direct API call without them is refused (403 `developer_mode_required`, 400 `confirmation_required`) and records nothing. Turning Developer mode off drops every Skip-all chat to Ask in the same transaction, and a server start puts every chat back in Ask. Claude Code sessions start with bypass permitted (the adapter's default) so a chat can move to Skip all without a restart. (decision by user, 2026-10-02) Auto keeps protected files guarded: Ogden starts Auto sessions with ask rules for the protected paths, so those edits still reach a card; Skip all has none. The rules are fixed per agent session, so a move into or out of Auto puts the agent in Ask at once and restarts (resumes) it at the next idle point. No rule change.
+  - Note (default permission mode, 2026-10-04, user decision): Skip all as a project's default, or as the app-wide default for new projects, is gated by the server like a chat's: Developer mode on and `confirm: true`, else 403 `developer_mode_required` / 400 `confirmation_required` and nothing written. The confirmation is per project and on the record (`workspace.settings_changed` with `skipAllConfirmed: true`); an app-wide Skip all reaches a new project as Ask waiting for that confirmation (notice `skip_all_unconfirmed`). Turning Developer mode off sets every project's Skip all default back to Ask in the same transaction (`workspace.settings_changed`, cause `developer_mode_off`, notice in its settings) and the app-wide one to Ask (a file: it also reads as Ask while Developer mode is off). A chat created from a Skip all default shows the red banner like any other. No rule change.
   - Note (story 2.1, amending story 1.4's cookie): browsers send cookies for `127.0.0.1` to every port on it, so the session cookie and its signing key `auth.key` are retired; a leftover `auth.key` is deleted at start and old cookies are ignored. The page's boot script (a same-origin file, not inline) strips `#c=` from the URL with `history.replaceState`, exchanges the code, and keeps the token in memory and `sessionStorage`, so a reload keeps the tab connected, while a new tab or a bookmark has no token and shows the app's own "Open Ogden Agents" state. New tab in the sidebar footer asks `POST /api/launch-codes` (token and Origin required) for a fresh launch link.
+  - Note (epic 13, 2026-10-04, user decision): AD-15 in a webview. The desktop shell gets a launch URL through the launcher (find, attach, handshake) with the launcher token and opens its window on `/#c=<code>`. The webview's origin is the server's own and gets no Tauri IPC or capability; navigation is locked to that origin and external links open in the system browser. The server's CSP is kept and no remote content loads. The known limit of the launch URL on a process command line does not apply to the app. No rule change.
   - Known limit: on a computer shared by several accounts, another local user can see the launch URL (with its single-use code) on the process command line while the browser opens it (macOS; Linux without `hidepid`) and race to redeem it. Mitigated by 60-second single-use codes; an install is for one user.
 
 ### AD-16 — Secrets [ADOPTED]
@@ -209,6 +234,10 @@ graph LR
   - Subscription logins stay in each agent's own CLI, and Ogden Agents never reads or stores them.
   - API keys go through `SecretStorePort`: the OS keychain (`@napi-rs/keyring`); where no keychain exists, saving a key is refused with a plain reason and subscription sign-in remains.
   - Adapters redact secrets before emitting events.
+  - Note (epic 6, user-approved 2026-10-02): each agent's API key is `agent-api-key/<agentId>` (Antigravity: `agent-api-key/antigravity`) and reaches only that agent's process; log redaction covers each supported provider's key format. Antigravity keeps its own sign-in under `~/.gemini/antigravity-acp/`, which Ogden never reads or writes. Ogden offers Antigravity's Google sign-in and the Gemini API key; the user accepted that Google's current terms call third-party use of Antigravity OAuth a breach (account risk; user, 2026-10-02). Antigravity is installed as a pinned copy in the data folder (registry archive checked against Ogden's SHA-256), an existing copy is used only when it matches the pin, and nothing is installed globally. No rule changes.
+  - Note (epic 6 entry 10, 2026-10-04, security; closes the 6.5 review's deferred item): every child process gets an explicit environment built from one allowlist (`packages/adapters/src/child-env.ts`). An agent's process gets the allowlist, its own home variable and only its own key, from its descriptor; helper processes (the kill helper, the Windows shortcut script, npm's install of Claude Code's adapter, uv and BMad Method's scripts, setup probes, the browser opener) get the allowlist plus named non-secret variables only, never a key. `tests/architecture.test.ts` fails when a spawn in `packages/` passes `process.env` or no `env`; the one exemption is the launcher starting the server itself, which is Ogden, not a helper. No rule changes.
+  - Note (epic 12, user-approved 2026-10-04): Codex keeps its sign-in in the OS keychain where Codex supports it, else in a plain `auth.json` in `CODEX_HOME` inside the data folder, shown to the user as a known limitation and removed on sign-out; Grok's token lives in `GROK_HOME` inside the data folder. Ogden never reads either. Keys: `agent-api-key/codex`, `agent-api-key/grok`. No rule changes.
+  - Note (epic 5, 2026-10-01): webhook URLs are secrets: stored through `SecretStorePort` and redacted in logs and events (epic 11). No rule changes.
 
 ### AD-17 — Unattended runs are contained
 
@@ -221,6 +250,13 @@ graph LR
   - After a run, core runs verification before the UI may show `built`: plan status, an independent test re-run, and a non-empty diff.
   - Merging and `done` happen only through the approve action. If the merge conflicts, the run is blocked as needing a rebase. It is never force-merged.
   - Note (epic 7, 2026-10-02): besides approve's merge, Ogden's only commit is **Save the lessons**, made only when the user clicks it: exactly `AGENTS.md` and one retrospective file, on the branch the main checkout has checked out, locally, never pushed; refused while a merge or rebase is in progress. No rule changes.
+  - Note (epic 6, user-approved 2026-10-02): v1 builds run Claude Code only. Builds with Antigravity (bmad-loop's `agy` profile, whose `--dangerously-skip-permissions` bypasses its approvals and which has no native sandbox recorded), Codex, Gemini CLI and Copilot are v2 (epic 8). When they come, an agent profile that bypasses its own approvals runs only inside a sandbox `SandboxPort` started, and the sandbox chain is per agent and per OS. No rule changes.
+  - Note (epic 5, 2026-10-01): `VcsPort` creates the worktree; the build runner runs in it and never creates its own, and bmad-loop's run folder also lives in the data directory. No rule changes.
+  - Note (epic 5, 2026-10-01): approve merges locally into the branch the main checkout has checked out, with a merge commit, and never pushes; it is refused while that checkout has uncommitted changes outside the BMad output folder (`_bmad-output`), which do not block it, and it commits its own `done` mark together with the merge, in the merge commit (user, 2026-10-01). **Update and retry** rebases the run's branch in its worktree and runs it again; there is no automatic conflict resolution in v1. No rule changes.
+  - Note (epic 5, 2026-10-01): verification, including the independent test re-run in the run's worktree, ships in epic 5 before approve is offered, so this rule holds from its release; epic 11 adds richer reporting (user). No rule changes.
+  - Note (epic 5, 2026-10-02, user, ACP fallback after spike 5.1): the build runner is an Ogden-managed headless ACP session in the run's worktree; there is no bmad-loop run folder. The run's folder in the data directory holds the session's NDJSON activity and its per-run JSON result (status, blocked code and reason, intent-gap patch path), and checkpoint pauses are Ogden's (5.4). On Windows, every git call uses `core.longpaths=true` with a short worktree layout (spike 5.1). No rule changes.
+  - Note (epic 5, 2026-10-04, user, security; story 5.2): an unattended build session never asks a person: core answers each permission request by a deny-by-default rule (a file write only inside the run's worktree, outside the protected paths, or in the git paths a commit there needs, never `.git/hooks` or `.git/config`, every path normalized for `..`, symlinks, case and Windows 8.3 names; everything else rejected); Bash runs in the agent's native sandbox with the same writable roots and no network. Without a native sandbox (or Docker, 5.6) the run is refused with `sandbox_unavailable`, never run unsandboxed. Dispatch refuses a ticket whose `tickets.toml` or plan is uncommitted (`plan_uncommitted`). Ogden's git calls run with the repo's hooks off. No rule changes.
+  - Note (epic 5, 2026-10-01): "attended", the third choice when no sandbox exists, is not an unattended run: every tool call goes through permission cards. Windows defaults to it, and Docker Desktop is optional there. The maximum run time defaults to 45 minutes, editable in settings. No rule changes.
 
 ### AD-18 — One design system [ADOPTED]
 
@@ -230,7 +266,7 @@ graph LR
   - shadcn/ui components live, owned and restyled, only in `packages/web/ui`. There is no second component library, and feature code does no ad hoc styling.
   - Color, type, spacing, radius and motion are CSS-variable tokens with light and dark sets, and components use tokens only.
   - The visual direction comes from the `design-taste-frontend` Design Read, recorded by `bmad-ux` as `DESIGN.md` and `EXPERIENCE.md` in epic 1.
-  - The status sidebar, workspace switcher and session view are built once and reused.
+  - The status sidebar (the one place to see, open, add and manage projects; note backlog story 13, 2026-10-04: the workspace switcher drop-down was removed) and session view are built once and reused.
 
 ### AD-19 — The terminal is optional to load [ADOPTED]
 
@@ -249,6 +285,7 @@ graph LR
   - If the server is older and idle (no active runs or sessions), the launcher asks it to restart and it restarts automatically, then the launcher starts the new version. If any session is busy, the older server keeps running and is opened as it is; the launcher never stops running sessions itself.
   - If an open tab's UI is older than the server it talks to (a newer server was found by an older open tab), the page shows a non-blocking reload banner. The server does not reject UI assets from another version.
   - Note (epic 1 retrospective, 2026-09-30): amended in place to match what story 1.7 built; the earlier text said the launcher *offers* a restart and the server rejects UI assets from another version.
+  - Note (epic 13, 2026-10-04, user decision): updates. The desktop app checks its channel's signed `latest.json` only on start, never periodically. A found update is downloaded and verified, then reported to the server, and the UI shows "Update available — Restart to update". The restart never happens while an agent turn or a build runs; one busy rule decides it, and epic 5 registers runs in it. The stable and next channels match npm's `latest` and `next`. Downgrades are refused. npm installs show a newer-version notice from an npm registry read on start, on by default and switchable off in Settings.
 
 ### AD-21 — No standard flow requires a terminal
 
@@ -258,6 +295,10 @@ graph LR
   - Every CLI step a standard flow needs, including installing `uv`, installing or signing into agent CLIs, running BMAD setup, and applying a saved patch, is run by the server and shown in the UI with progress and errors.
   - The terminal toggle (AD-6) is only for advanced users and is never required.
   - Note (epic 10, 2026-10-01): a project with BMad off needs no `uv`; turning on a piece that needs BMad installed runs setup through the server (epic 4). No rule changes.
+  - Note (epic 12, user-approved 2026-10-04): Grok is installed by downloading the pinned npm package and decompressing and SHA-256-checking its binary in the data folder; npm's launcher and postinstall never run. Codex's plugins download at start is asked once per install and changeable in Settings. No rule changes.
+  - Note (epic 5, 2026-10-01): bmad-loop's process hosting needs no multiplexer the user installs; if it needs one, the server installs it like `uv`. No rule changes.
+  - Note (epic 5, 2026-10-02, user): moot in v1; builds run as ACP sessions with the agent as a direct child, and bmad-loop is not used. No rule changes.
+  - Note (epic 13, 2026-10-04, user decision): Ogden Agents has two distribution routes, `npx ogden-agents` and the desktop app (CAP-20). The app bundles a pinned Node with npm and node-pty and needs no install step.
 
 ### AD-22 — BMad Method is opt-in per workspace
 
@@ -272,6 +313,24 @@ graph LR
   - The install reports which pieces it ships; a piece is turned on only when available, and one not yet shipped is shown disabled as coming soon. AD-22 (the user's choice) and AD-14 (the project's installed capabilities) both gate a surface: it shows only when its piece is on, and then shows the reduced-mode notice if a capability is missing.
   - Developer mode and the terminal toggle (AD-6) are independent of the pieces.
   - Note (epic 7, 2026-10-02): epic 7 registers `retrospectives`, which needs `board` (not `builds`; user decision). Ogden never starts a retrospective on its own: it starts only from the user's click on the board or the finished-epic offer, and the offer and the verdict read do no work for a workspace with the piece off. The look-back is given short build summaries of the epic's runs, never full transcripts. No rule changes.
+  - Note (epic 4, 2026-10-02, user decision, security): a piece that runs the project's own BMad scripts (Board through `tickets.py`, which executes the repo's `_bmad/scripts/config_utils.py`; later Unattended builds and Retrospectives) also needs the user's one-time trust for that project, kept by core on the workspace row with a `workspace.bmad_scripts_trusted` event. The same guard path checks it: the route helper after the piece guard (409 `scripts_not_trusted`), and each core use-case that runs project scripts. Turning a piece on is not refused; its script-running routes and watchers wait for the trust. Project scripts and every `uv` process run with one minimal allowlisted environment, never an API key, token or other secret (AD-16).
+  - Note (story 4.13, 2026-10-04, user decision, security): the trust is bound to the contents of the project scripts Ogden Agents runs. Trusting records a fingerprint of the repo's `_bmad/scripts/` (`BmadCatalogPort.scriptsFingerprint`: regular files, no links, `__pycache__` left out, since every script run keeps Python's bytecode cache in Ogden Agents' own folder); every run re-checks it right before the scripts run (the board use-cases and each ticket-watch read), and scripts changed since are refused with 409 `scripts_changed` and the UI asks again ("This project's BMad Method scripts changed. Run them?"). Ogden Agents' own setup or Upgrade, which writes them only from the verified pinned copy, keeps a trust that still matched just before it. Alongside, `_bmad/` joins the protected paths (the 2.8 rule's one list, which Auto's ask rules use), so an agent's edit there always comes as a card in Ask and Auto; Skip all is unchanged by design.
+  - Note (epic 12, user-approved 2026-10-04): the per-project trust (4.2) also gates agents that run the project's own settings, hooks and MCP servers (Grok, descriptor `needsProjectTrust`). One trust covers the board's scripts and such agents; as 4.13 does for scripts, it is bound to the trusted files' contents and asked again when they change. No rule changes.
+  - Note (epic 5, 2026-10-04, user, security; story 5.2): Unattended builds runs project scripts, so every builds route needs the trust, and `tickets.py` runs against a run's worktree only after that worktree's `_bmad/scripts/` fingerprint matches the trusted one (the agent may have edited them); approve re-checks the main checkout's scripts after the merge and before marking `done`, and aborts the merge on a change. No rule changes.
+  - Note (epic 5, 2026-10-01): epic 5 registers `builds` as available. Turning `builds` (or `board`) off lets active runs finish and dispatches nothing new. No rule changes.
+  - Note (maintained-fork story, 2026-10-04, user decision, security): the run itself now verifies what it imports. Core hands the store the trusted fingerprint with each run (`TicketRunGuard`); `tickets-v7` reads `_bmad/scripts/` once, hashes those bytes by the trust's rule, refuses a mismatch with `scripts_changed`, and runs `tickets.py --config-utils` on a snapshot written from the checked bytes (AD-13). The check-then-use window of the 4.13 note is closed for Board's runs.
+
+### AD-23 — Distribution and update signing
+
+- **Binds:** CAP-1, CAP-20
+- **Prevents:** an app built or signed outside the release workflow, an unpinned runtime in the app, and an update signed by a key the user does not own.
+- **Rule:**
+  - Desktop apps are built only by the release workflow from a version tag, beside the npm publish of the same version.
+  - Each app bundles an official Node binary pinned by version and SHA-256 per OS and architecture, checked at build; a mismatch fails the build.
+  - Apps are published as GitHub Release assets with `SHA256SUMS` and a signed `latest.json` per channel (stable and next). macOS ships one universal `.dmg`.
+  - Release updates are signed with the user's own minisign key, kept only as a GitHub Actions environment secret. No agent generates, sees or stores it. CI test builds use a throwaway key generated per run, never the user's.
+  - Code signing and notarization are optional pipeline slots fed by the user's own secrets; without them the apps ship unsigned with "how to open" steps.
+  - Note (epic 13, 2026-10-04, user decision): added with epic 13's approval.
 
 ## Consistency Conventions
 
@@ -284,7 +343,7 @@ graph LR
 | Errors | `{ "error": { "code": "snake_case", "message": "…", "details"?: {} } }`; codes live in `packages/shared` |
 | Adapter naming | `<port>-<variant>`: `acp-claude-code`, `sandbox-seatbelt`, `notify-webhook` |
 | Files | kebab-case; one exported React component per file, except shadcn-style compound components in `packages/web/src/ui` (for example `sidebar.tsx` exporting `Sidebar`, `SidebarGroup`, …), which keep their parts together |
-| Config and data | The OS per-user data directory `ogden-agents/` holds the SQLite database, logs and the encrypted-secrets fallback. Nothing is written to user repos except BMAD's own files (only in projects that turned a BMad piece on, AD-22; note epic 10, 2026-10-01) and worktrees |
+| Config and data | The OS per-user data directory `ogden-agents/` holds the SQLite database, logs and the encrypted-secrets fallback. Nothing is written to user repos except BMAD's own files (only in projects that turned a BMad piece on, AD-22; note epic 10, 2026-10-01), and for builds only run branches and git's worktree metadata; the worktrees themselves live in the data directory (AD-17; note epic 5, 2026-10-01) |
 | Logging | Structured JSON lines to the data directory; secrets redacted (AD-16) |
 | Tests | Every ticket ships its tests; UI layout is checked in a real browser with Playwright, since jsdom doesn't evaluate media queries |
 
@@ -309,6 +368,9 @@ graph LR
 | shadcn (CLI) | 4.21 |
 | Vitest / @playwright/test | 5.0 / 1.63 |
 | uv (BMAD Python tooling) | ≥ 0.12, installed by Ogden Agents if missing |
+| Tauri (desktop app, Rust) + @tauri-apps/cli | 2.12 |
+| tauri-plugin-updater / -single-instance / -shell | 2.12 / 2.4 / 2.3 |
+| tauri-apps/tauri-action | v1 |
 
 ## Structural Seed
 
@@ -319,8 +381,8 @@ graph TB
     L[npx ogden-agents launcher] -- version handshake --> S
     S --> DB[(SQLite in user data dir)]
     S --> K[OS keychain]
-    S -- ACP --> A[Agent CLIs: Claude Code, Codex, Gemini, Copilot]
-    S -- uv --> BL[bmad-loop fork] --> A
+    S -- ACP --> A[Agent CLIs: Claude Code; Antigravity chat if epic 6 is a go]
+    S -- "ACP (headless build session)" --> A
     S -- tickets.py / file watch --> R[User repos: _bmad, _bmad-output, worktrees]
     S -. fallback sandbox .-> D[Docker if installed]
   end
@@ -342,11 +404,9 @@ ogden-agents/
   bin/ogden-agents            # launcher: start or attach server, open browser, handshake
   packages/shared/        # Zod schemas: events, API, ids, error codes
   packages/core/          # domain, ports, event log, state machines, verification
-  packages/adapters/      # acp-*, buildrunner-bmad-loop, tickets-v7, bmad-catalog, sandbox-*, vcs-git, terminal-pty, secrets-keyring, notify-*
+  packages/adapters/      # acp-*, buildrunner-acp, tickets-v7, bmad-catalog, sandbox-*, vcs-git, terminal-pty, secrets-keyring, notify-*
   packages/server/        # Hono app, security gate, WS channels, wiring
   packages/web/           # React app; ui/ = design system
-  vendor/                 # bundled forks per forks.lock
-  forks.lock
   _bmad-output/           # Ogden Agents's own spec, architecture, tickets
 ```
 
@@ -363,26 +423,26 @@ Delivery: GitHub Actions runs the tests on macOS, Windows and Linux for every ch
 | CAP-5 terminal toggle | `terminal-pty`, core driver lock | AD-6, AD-19 |
 | CAP-6 guided planning | catalog-driven UI, planning sessions | AD-12, AD-18 |
 | CAP-7 board | `tickets-v7`, TanStack Query | AD-7, AD-10 |
-| CAP-8 unattended builds | `buildrunner-bmad-loop`, `vcs-git`, `sandbox-*` | AD-2, AD-17 |
+| CAP-8 unattended builds | `buildrunner-acp`, `vcs-git`, `sandbox-*` | AD-2, AD-17 |
 | CAP-9 live run view | session view (read-only) | AD-5, AD-8 |
 | CAP-10 verification | core | AD-17 |
 | CAP-11 | retired (no cost tracking) | AD-8 |
 | CAP-12 review and approve | core approve action, `vcs-git` | AD-10, AD-17 |
 | CAP-13 retrospectives | catalog-driven planning session; board epic header; `tickets-v7` verdict read; `vcs-git` lessons commit | AD-12, AD-17, AD-22 |
 | CAP-14 notifications | `notify-*` | AD-1 |
-| CAP-15 every agent | `acp-*`, bmad-loop profiles | AD-1, AD-4 |
+| CAP-15 agent choice (v1: Claude Code; Antigravity chat if possible) | `acp-base`, `acp-*`, `setup-*`, server agent registry | AD-1, AD-4, AD-8, AD-12, AD-16 |
 | CAP-16 sign-in | `acp-*` authenticate, `secrets-keyring` | AD-16, AD-21 |
 | CAP-17 workspaces and status sidebar | core, shared UI patterns | AD-2, AD-3, AD-4, AD-18 |
 | CAP-18 every BMAD skill and module | `bmad-catalog` adapter | AD-12, AD-14 |
 | CAP-19 BMad optional per project | core workspace settings, `bmad-catalog` detect, shared piece list | AD-2, AD-11, AD-22 |
+| CAP-20 desktop app | `packages/desktop` (Tauri shell), launcher, server update notice | AD-3, AD-15, AD-20, AD-21, AD-23 |
 
 ## Deferred
 
 - **Visual direction:** decided in epic 1 by `bmad-ux` with `design-taste-frontend`. AD-18 fixes only the mechanism.
-- **Default concurrency limits and maximum run time:** tuned in epic 5. AD-2 and AD-17 fix only that the limits exist and that core enforces them.
-- **Where the CAP-5 toggle appears for each agent:** measured in epic 3, recorded in the spec's `agent-matrix.md`.
-- **Notification transports beyond webhook:** decided in epic 5 behind `NotifierPort`.
-- **Start at login, a tray icon, or a desktop wrapper:** later, and neither breaks AD-3.
+- **Where the CAP-5 toggle appears for each agent:** measured in epic 3, recorded in the spec's `agent-matrix.md`. Antigravity's is measured by epic 6's spike (2026-10-02); other agents' in v2.
+- **Notification transports beyond webhook and opt-in browser notifications:** later, behind `NotifierPort` (v1 transports decided in epic 5, built in epic 11).
+- **Start at login or a tray icon:** later, and neither breaks AD-3. The desktop app itself is CAP-20 (epic 13, AD-23).
 - **Tracker stores, remote access, and several users per install:** out of scope (spec non-goals).
 - **Logging library and Drizzle migration tooling:** epic 1, within the Conventions.
-- **Merge-conflict handling beyond blocking as needing a rebase:** epic 5.
+- **Merge-conflict handling beyond Update and retry (a rebase in the run's worktree):** later; see the AD-17 note.

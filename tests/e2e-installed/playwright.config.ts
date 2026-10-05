@@ -12,6 +12,9 @@ import { defineConfig, devices } from '@playwright/test';
  * terminal on every OS, through another test hook. Epic 10's BMad journey
  * (story 10.9) runs with no BMad hook (every piece Coming soon, as a user
  * sees it), then with test-registered pieces and the guarded probe route.
+ * Epic 6's agents journey (entry 10) runs Claude Code and Antigravity (both
+ * the fake) side by side, Antigravity's fixture install, and the agent trust
+ * gate, through more test hooks.
  * Every server a spec starts is stopped with its whole process tree.
  *
  *   pnpm run pack && pnpm e2e:installed
@@ -41,9 +44,10 @@ export default defineConfig({
   // In order: the gate checks and their proof; the hold proof, epic 2's
   // chat journey (story 2.13), epic 9's first-run journey (story 9.7),
   // epic 3's terminal journey (story 3.10, with its install without
-  // optional dependencies), epic 10's BMad journey (story 10.9) and the
-  // 0.2.0 upgrade (story 10.7), each on a server of its own from the same
-  // install; then epic 1's journey on the first server, last since it quits it.
+  // optional dependencies), epic 10's BMad journey (story 10.9), epic 4's
+  // planning journey and the permission modes journey (story 4.13), and the
+  // 0.2.0 upgrade (story 10.7), and epic 6's agents journey (entry 10), each
+  // on a server of its own from the same install; then epic 1's journey on the first server, last since it quits it.
   projects: [
     { name: 'gate', testMatch: /(^|[\\/])(gate|bypass)\.spec\.ts$/ },
     { name: 'hold-proof', testMatch: /(^|[\\/])hold-proof\.spec\.ts$/, dependencies: ['gate'] },
@@ -51,7 +55,14 @@ export default defineConfig({
     { name: 'onboarding', testMatch: /(^|[\\/])onboarding-journey\.spec\.ts$/, dependencies: ['chat'] },
     { name: 'terminal', testMatch: /(^|[\\/])terminal-journey\.spec\.ts$/, dependencies: ['onboarding'] },
     { name: 'bmad', testMatch: /(^|[\\/])bmad-journey\.spec\.ts$/, dependencies: ['terminal'] },
-    { name: 'upgrade', testMatch: /(^|[\\/])upgrade-journey\.spec\.ts$/, dependencies: ['bmad'] },
-    { name: 'journey', testMatch: /(^|[\\/])journey\.spec\.ts$/, dependencies: ['upgrade'] },
+    { name: 'planning', testMatch: /(^|[\\/])planning-journey\.spec\.ts$/, dependencies: ['bmad'] },
+    { name: 'modes', testMatch: /(^|[\\/])permission-modes-journey\.spec\.ts$/, dependencies: ['planning'] },
+    { name: 'upgrade', testMatch: /(^|[\\/])upgrade-journey\.spec\.ts$/, dependencies: ['modes'] },
+    { name: 'agents', testMatch: /(^|[\\/])agents-journey\.spec\.ts$/, dependencies: ['upgrade'] },
+    // Epic 12's Codex journey (Codex beside Claude Code, API key only).
+    { name: 'codex', testMatch: /(^|[\\/])codex-journey\.spec\.ts$/, dependencies: ['agents'] },
+    // Epic 12's Grok journey (Grok beside Claude Code, an xAI API access token only, trusted project).
+    { name: 'grok', testMatch: /(^|[\\/])grok-journey\.spec\.ts$/, dependencies: ['codex'] },
+    { name: 'journey', testMatch: /(^|[\\/])journey\.spec\.ts$/, dependencies: ['grok'] },
   ],
 });

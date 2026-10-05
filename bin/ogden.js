@@ -17,7 +17,7 @@ const SERVE_BUNDLE = new URL('../dist/serve.js', import.meta.url);
 const SERVE_ENTRY = fileURLToPath(SERVE_BUNDLE);
 const WEB_ROOT = fileURLToPath(new URL('../dist/web', import.meta.url));
 
-const USAGE = `Usage: ogden [--port <number>] [--no-open] [--foreground]
+const USAGE = `Usage: ogden [--port <number>] [--no-open] [--foreground] [--json]
 
 Starts Ogden Agents in the background (or finds the one already running) and
 opens it in your browser. It keeps running after this terminal closes; stop it
@@ -26,15 +26,17 @@ with Quit Ogden Agents in the app.
   --port <number>  Port a new server tries first (default 4317; falls back to the next free port)
   --no-open        Do not open a browser; just print the URL and one-time link
   --foreground     Run the server in this terminal instead of the background (Ctrl+C stops it)
+  --json           For the desktop app: print one JSON line (port, one-time link, ...) and nothing else
   -h, --help       Show this help`;
 
-/** @returns {{ port: number | undefined, open: boolean, foreground: boolean }} */
+/** @returns {{ port: number | undefined, open: boolean, foreground: boolean, json: boolean }} */
 function parseCli() {
   const { values } = parseArgs({
     options: {
       port: { type: 'string' },
       open: { type: 'boolean', default: true },
       foreground: { type: 'boolean', default: false },
+      json: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
     },
     allowNegative: true,
@@ -53,7 +55,7 @@ function parseCli() {
       throw new Error(`--port must be an integer from 0 to 65535, got "${values.port}"`);
     }
   }
-  return { port, open: values.open, foreground: values.foreground };
+  return { port, open: values.open, foreground: values.foreground, json: values.json };
 }
 
 /**
@@ -87,6 +89,11 @@ async function runForeground(cli) {
       );
       process.exit(1);
     }
+    // A newer version already migrated this data folder (story 13.6): the message says what to do, and nothing was changed.
+    if (error instanceof Error && error.name === 'DatabaseNewerError') {
+      console.error(error.message);
+      process.exit(1);
+    }
     throw error;
   }
   console.log(`Ogden Agents is running at ${server.url}`);
@@ -102,17 +109,24 @@ async function runForeground(cli) {
 }
 
 /**
- * Finds or starts the background server, then exits.
- * @param {{ port: number | undefined, open: boolean }} cli
+ * Finds or starts the background server, then exits. With `--json` (the desktop
+ * app's shell runs this on its bundled Node) it prints one line,
+ * `{action, owned, port, pid, version, url, launchUrl, dataDir}`, and nothing
+ * else. When it started the server it stays alive, holding the server's stdin
+ * pipe, until the server exits or its own stdin closes (the shell is gone), so
+ * the server never outlives the app.
+ * @param {{ port: number | undefined, open: boolean, json: boolean }} cli
  */
 async function runBackground(cli) {
   /** @type {typeof import('../packages/server/src/launcher.ts')} */
   const { launch, LauncherError } = await import(LAUNCHER_BUNDLE.href);
+  let result;
   try {
-    await launch({
+    result = await launch({
       serveEntry: SERVE_ENTRY,
       webRoot: WEB_ROOT,
       open: cli.open,
+      ...(cli.json ? { print: () => {} } : {}),
       ...(cli.port === undefined ? {} : { port: cli.port }),
     });
   } catch (error) {
@@ -121,6 +135,19 @@ async function runBackground(cli) {
       process.exit(1);
     }
     throw error;
+  }
+  if (cli.json) {
+    const { held, ...rest } = result;
+    console.log(JSON.stringify({ ...rest, owned: held !== undefined }));
+    if (held !== undefined) {
+      const end = () => process.exit(0);
+      held.once('exit', end);
+      // The shell closed (or died): ending this process closes the server's stdin pipe, and the server exits.
+      process.stdin.once('end', end);
+      process.stdin.once('close', end);
+      process.stdin.resume();
+      return;
+    }
   }
   process.exit(0);
 }

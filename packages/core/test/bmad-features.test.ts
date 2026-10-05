@@ -35,7 +35,7 @@ describe('BMad pieces (story 10.1)', () => {
     const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
 
     const before = core.events.lastSeq();
-    expect(core.permissions.updateSettings(workspace.id, { bmadPieces: ['planning'] })).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: ['planning'] });
+    expect(core.permissions.updateSettings(workspace.id, { bmadPieces: ['planning'] })).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: ['planning'], bmadScriptsTrusted: false });
     expect(core.events.readAfter(before)).toEqual([
       expect.objectContaining({
         type: 'workspace.settings_changed',
@@ -56,7 +56,7 @@ describe('BMad pieces (story 10.1)', () => {
 
     // Both at once: one transaction, one event.
     const both = core.events.lastSeq();
-    expect(core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_every_time', bmadPieces: [] })).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [] });
+    expect(core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_every_time', bmadPieces: [] })).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false });
     expect(core.events.readAfter(both).map((event) => event.payload)).toEqual([
       { cautionLevel: 'ask_every_time', previous: 'ask_for_commands', bmadPieces: [], previousBmadPieces: ['planning'] },
     ]);
@@ -79,7 +79,7 @@ describe('BMad pieces (story 10.1)', () => {
     }
     expect(() => core.permissions.updateSettings(UNKNOWN, { bmadPieces: ['planning'] })).toThrow(NotFoundError);
     expect(core.events.lastSeq()).toBe(before);
-    expect(core.permissions.getSettings(workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [] });
+    expect(core.permissions.getSettings(workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false });
   });
 
   it('a stored piece this version does not know, or a damaged value, reads as off', () => {
@@ -122,7 +122,7 @@ describe('availability and the dependency rule (story 10.2)', () => {
     }
     // Nothing written: not the pieces, not the level sent with them, no event.
     expect(core.events.lastSeq()).toBe(before);
-    expect(core.permissions.getSettings(workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [] });
+    expect(core.permissions.getSettings(workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false });
     expect(core.bmad.pieces(workspace.id)).toEqual([]);
   });
 
@@ -164,7 +164,7 @@ describe('availability and the dependency rule (story 10.2)', () => {
     const core = openTestCore(dataDir);
     expect(core.bmad.isAvailable('planning')).toBe(false);
     // A caution change alone keeps the pieces; re-sending the same pieces is no change, so allowed too.
-    expect(core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_for_commands' })).toEqual({ cautionLevel: 'ask_for_commands', bmadPieces: ['planning'] });
+    expect(core.permissions.updateSettings(workspace.id, { cautionLevel: 'ask_for_commands' })).toEqual({ cautionLevel: 'ask_for_commands', bmadPieces: ['planning'], bmadScriptsTrusted: false });
     expect(core.permissions.updateSettings(workspace.id, { bmadPieces: ['planning'] }).bmadPieces).toEqual(['planning']);
     expect(() => core.bmad.requireBmadFeature(workspace.id, 'planning')).not.toThrow();
     expect(core.permissions.updateSettings(workspace.id, { bmadPieces: [] }).bmadPieces).toEqual([]);

@@ -4,7 +4,8 @@
  * `/launcher`) is classified, by default-deny: a route inside a workspace (`/api/v1/workspaces/:wsId/…`)
  * serves a piece unless it is listed below as one that serves projects with
  * BMad off, and a server route anywhere whose path names BMad or a piece serves one
- * unless it is one of the four routes that serve projects with BMad off. Each
+ * unless it is one of the routes listed as unguarded by design (they serve
+ * projects with BMad off, or the whole install). Each
  * route that serves a piece must have been registered through
  * `bmadPieceRoutes` (`guardedRouteKeys`), or this test fails naming it.
  *
@@ -14,7 +15,7 @@ import { openCore, type Core } from '@ogden-agents/core';
 import { API_BASE, API_ROUTES, TEST_ROUTES } from '@ogden-agents/shared';
 import type { Hono } from 'hono';
 import { afterEach, describe, expect, it } from 'vitest';
-import { bmadPieceRoutes, guardedRouteKeys } from '../src/bmad-pieces.js';
+import { bmadPieceRoutes, guardedRouteKeys, trustedRouteKeys } from '../src/bmad-pieces.js';
 import { createLogger } from '../src/log.js';
 import { isServerPath } from '../src/paths.js';
 import { fullTestApp, tempDataDir } from './helpers.js';
@@ -36,21 +37,36 @@ const WORKSPACE_ROUTES_WITHOUT_A_PIECE: readonly string[] = [
   `GET ${API_ROUTES.workspaceSession}`,
   `POST ${API_ROUTES.sessionMessages}`,
   `POST ${API_ROUTES.sessionCancel}`,
+  `PATCH ${API_ROUTES.sessionQueuedMessage}`,
+  `DELETE ${API_ROUTES.sessionQueuedMessage}`,
+  `POST ${API_ROUTES.sessionQueuedMessageSendNow}`,
   `POST ${API_ROUTES.sessionDriver}`,
+  `PUT ${API_ROUTES.sessionPermissionMode}`,
+  `PUT ${API_ROUTES.sessionTitle}`,
+  `PUT ${API_ROUTES.sessionModel}`,
+  `GET ${API_ROUTES.sessionHandoff}`,
+  `POST ${API_ROUTES.sessionHandoff}`,
+  `POST ${API_ROUTES.sessionHandoffPreview}`,
   `POST ${API_ROUTES.sessionPermission}`,
   `GET ${API_ROUTES.permissionRules}`,
   `DELETE ${API_ROUTES.permissionRule}`,
   `GET ${API_ROUTES.workspaceBmadDetection}`,
   `DELETE ${API_ROUTES.workspaceBmadOffer}`,
+  // The script trust (story 4.2): asked before or right after a script-running piece is turned on, never revoked by turning one off.
+  `PUT ${API_ROUTES.workspaceBmadScriptTrust}`,
 ];
 
-/** The BMad-named routes that serve projects with BMad off (story 10.2): never guarded, by design. */
+/** The BMad-named routes that serve projects with BMad off (story 10.2) or the whole install (story 4.14): never guarded, by design. */
 const UNGUARDED_BY_DESIGN: readonly string[] = [
   `GET ${API_ROUTES.bmadPieces}`,
+  // The pinned upstream BMad Method's status and download (story 4.14): one for the install, never a workspace's piece.
+  `GET ${API_ROUTES.bmadSource}`,
+  `POST ${API_ROUTES.bmadSource}`,
   `GET ${API_ROUTES.newProjectDefaults}`,
   `PATCH ${API_ROUTES.newProjectDefaults}`,
   `GET ${API_ROUTES.workspaceBmadDetection}`,
   `DELETE ${API_ROUTES.workspaceBmadOffer}`,
+  `PUT ${API_ROUTES.workspaceBmadScriptTrust}`,
 ];
 
 /** Path segments that name BMad Method or one of its pieces. */
@@ -102,6 +118,42 @@ function openTestCore(): Core {
   return core;
 }
 
+/** Unattended builds' routes (story 5.2; story 5.3 adds epics 5 and 11's others): each serves `builds` and checks the script trust. */
+const BUILD_ROUTES: readonly string[] = [
+  `POST ${API_ROUTES.workspaceBuilds}`,
+  `GET ${API_ROUTES.workspaceBuild}`,
+  `POST ${API_ROUTES.workspaceBuildApprove}`,
+  `POST ${API_ROUTES.workspaceBuildReject}`,
+  `POST ${API_ROUTES.workspaceBuildCommitPlan}`,
+  `GET ${API_ROUTES.sessionRun}`,
+  `GET ${API_ROUTES.workspaceBuildSandbox}`,
+  `GET ${API_ROUTES.workspaceRuns}`,
+  `GET ${API_ROUTES.workspaceRun}`,
+  `POST ${API_ROUTES.runStop}`,
+  `POST ${API_ROUTES.runRetry}`,
+  `POST ${API_ROUTES.runCheckAgain}`,
+  `GET ${API_ROUTES.workspaceBuildSettings}`,
+  `PATCH ${API_ROUTES.workspaceBuildSettings}`,
+];
+
+/** The routes that serve a piece in the fully wired app (stories 4.1 and 4.2), sorted as `guardedRouteKeys` lists them. */
+const PIECE_ROUTES: readonly string[] = [
+  `GET ${API_ROUTES.workspaceCatalog}`,
+  `POST ${API_ROUTES.workspacePlanningSessions}`,
+  `GET ${API_ROUTES.workspaceTickets}`,
+  `GET ${API_ROUTES.workspaceTicket}`,
+  `PUT ${API_ROUTES.workspaceTicketStatus}`,
+  `GET ${API_ROUTES.workspaceBmadSetup}`,
+  `POST ${API_ROUTES.workspaceBmadSetup}`,
+  // A document a planning session wrote (story 4.7): no trust, it reads one file and runs nothing.
+  `GET ${API_ROUTES.workspaceDocument}`,
+  // Unattended builds (story 5.2): every route with the trust.
+  ...BUILD_ROUTES,
+].sort();
+
+/** The routes that run the project's own scripts, so they check its trust too (story 4.2): every `board` and `builds` route, never setup. */
+const TRUSTED_ROUTES: readonly string[] = [`GET ${API_ROUTES.workspaceTickets}`, `GET ${API_ROUTES.workspaceTicket}`, `PUT ${API_ROUTES.workspaceTicketStatus}`, ...BUILD_ROUTES].sort();
+
 const BOARD = `${API_BASE}/workspaces/:wsId/board`;
 const CATALOG = `${API_BASE}/bmad/catalog`;
 const ok = (c: { json: (body: unknown) => Response }) => c.json({ ok: true });
@@ -110,8 +162,34 @@ describe('every route serving a BMad piece is guarded (AD-22, story 10.6)', () =
   it('the fully wired app, with the probe, has none unguarded, and the probe counts as one and is guarded', () => {
     const app = fullTestApp(openTestCore(), { bmadProbe: true });
     expect(findUnguardedBmadRoutes(app), HOW_TO_FIX).toEqual([]);
-    expect(bmadRouteKeys(app)).toEqual([`GET ${TEST_ROUTES.bmadProbe}`]);
+    expect(bmadRouteKeys(app)).toEqual(PIECE_ROUTES.concat(`GET ${TEST_ROUTES.bmadProbe}`).sort());
     expect(guardedRouteKeys(app)).toContain(`GET ${TEST_ROUTES.bmadProbe}`);
+  });
+
+  it("epic 4's Plan and Board routes (stories 4.1 and 4.2) are registered through bmadPieceRoutes", () => {
+    const app = fullTestApp(openTestCore());
+    expect(guardedRouteKeys(app)).toEqual(PIECE_ROUTES);
+    expect(findUnguardedBmadRoutes(app), HOW_TO_FIX).toEqual([]);
+  });
+
+  it('every route that runs tickets.py checks the script trust, and setup does not (story 4.2)', () => {
+    const app = fullTestApp(openTestCore(), { bmadProbe: true });
+    expect(trustedRouteKeys(app)).toEqual(TRUSTED_ROUTES);
+    expect(trustedRouteKeys(app)).not.toContain(`GET ${API_ROUTES.workspaceBmadSetup}`);
+    expect(trustedRouteKeys(app)).not.toContain(`POST ${API_ROUTES.workspaceBmadSetup}`);
+    expect(trustedRouteKeys(app)).not.toContain(`GET ${API_ROUTES.workspaceDocument}`);
+    // The probe serves Planning, which runs no project script.
+    expect(trustedRouteKeys(app)).not.toContain(`GET ${TEST_ROUTES.bmadProbe}`);
+  });
+
+  it('a board route registered without the script trust fails at registration (story 4.2)', () => {
+    const core = openTestCore();
+    const app = fullTestApp(core);
+    const log = createLogger(() => {});
+    expect(() => bmadPieceRoutes(app, { bmad: core.bmad, log }).get('board', BOARD, ok)).toThrow(/script trust/);
+    // A route explicitly running no project script needs none.
+    bmadPieceRoutes(app, { bmad: core.bmad, log }).get('board', BOARD, ok, { projectScripts: false });
+    expect(trustedRouteKeys(app)).toEqual(TRUSTED_ROUTES);
   });
 
   it('every listed piece-less and by-design route is a route the app has (the lists stay current)', () => {
@@ -146,8 +224,8 @@ describe('every route serving a BMad piece is guarded (AD-22, story 10.6)', () =
   it('the same workspace route registered through bmadPieceRoutes passes', () => {
     const core = openTestCore();
     const app = fullTestApp(core);
-    bmadPieceRoutes(app, { bmad: core.bmad, log: createLogger(() => {}) }).get('board', BOARD, (c) => c.json({ ok: true }));
-    expect(bmadRouteKeys(app)).toEqual([`GET ${BOARD}`]);
+    bmadPieceRoutes(app, { bmad: core.bmad, scriptTrust: core.bmadScriptTrust, log: createLogger(() => {}) }).get('board', BOARD, (c) => c.json({ ok: true }));
+    expect(bmadRouteKeys(app)).toEqual(PIECE_ROUTES.concat(`GET ${BOARD}`).sort());
     expect(findUnguardedBmadRoutes(app), HOW_TO_FIX).toEqual([]);
   });
 });

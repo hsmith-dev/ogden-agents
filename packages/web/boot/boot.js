@@ -4,7 +4,9 @@
  * only the app's own files; AD-15). It does two things:
  *
  * 1. Applies the saved appearance before first paint, so there is no flash of
- *    the wrong theme or density.
+ *    the wrong theme or density. Developer mode here is only this browser's
+ *    copy of the server's setting (permission modes), used until the app
+ *    has read the server's.
  * 2. Connects this tab. The launcher opens `/#c=<launch code>`; this strips
  *    the fragment from the address bar at once (history.replaceState) and
  *    sends the single-use code in a same-origin POST. The response body

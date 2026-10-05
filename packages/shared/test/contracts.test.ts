@@ -22,6 +22,7 @@ import {
   ClientMessage,
   CoreEvent,
   CreateFolderRequest,
+  DeveloperModeResponse,
   DriverChangeCause,
   FolderListing,
   HistoryDeletedResponse,
@@ -33,7 +34,9 @@ import {
   NewCoreEvent,
   NewProjectDefaultsResponse,
   OnboardingState,
+  PERMISSION_MODES,
   PermissionDecisionRequest,
+  PermissionModeChangeCause,
   PermissionRule,
   PermissionRuleId,
   PermissionRulesResponse,
@@ -44,6 +47,8 @@ import {
   SessionsResponse,
   SessionTerminal,
   SetApiKeyRequest,
+  SetDeveloperModeRequest,
+  SetPermissionModeRequest,
   SignInResponse,
   TERMINAL_CLOSE,
   TerminalAttachFrame,
@@ -110,6 +115,21 @@ const EVENTS: Array<[type: string, valid: Record<string, unknown>, invalid: Reco
     { ...onSession, payload: { sessionId: sesId, waitingOn: '' } },
   ],
   [
+    'session.agent_starting',
+    { ...onSession, payload: { sessionId: sesId } },
+    { ...onSession, payload: {} },
+  ],
+  [
+    'session.agent_started',
+    { ...onSession, payload: { sessionId: sesId } },
+    { ...onSession, payload: { sessionId: '' } },
+  ],
+  [
+    'session.agent_changed',
+    { ...onSession, payload: { sessionId: sesId, agentId: 'second-agent', previous: 'first-agent', brief: 'Handoff', resumes: false } },
+    { ...onSession, payload: { sessionId: sesId, agentId: 'Second Agent', previous: 'first-agent', brief: 'Handoff', resumes: false } },
+  ],
+  [
     'permission.requested',
     {
       ...onSession,
@@ -125,6 +145,21 @@ const EVENTS: Array<[type: string, valid: Record<string, unknown>, invalid: Reco
       ...onSession,
       payload: { sessionId: sesId, requestId: 'req-1', toolCall: { toolCallId: 't1', title: 'x', kind: 'execute' }, alwaysAllowScope: null, cautionLevel: 'never' },
     },
+  ],
+  [
+    'session.permission_mode_changed',
+    { ...onSession, payload: { sessionId: sesId, mode: 'ask', previous: 'auto', cause: 'agent', reason: 'Claude Code switched itself to Accept edits, so this chat is back in Ask.' } },
+    { ...onSession, payload: { sessionId: sesId, mode: 'yolo', previous: 'ask', cause: 'user' } },
+  ],
+  [
+    'session.renamed',
+    { ...onSession, payload: { sessionId: sesId, title: 'Auth work', autoTitle: null, cause: 'user' } },
+    { ...onSession, payload: { sessionId: sesId, title: '', autoTitle: null, cause: 'user' } },
+  ],
+  [
+    'settings.developer_mode_changed',
+    { workspaceId: null, streamId: 'settings', payload: { developerMode: false, previous: true } },
+    { workspaceId: wsId, streamId: 'settings', payload: { developerMode: false, previous: true } },
   ],
   [
     'permission.resolved',
@@ -155,6 +190,7 @@ const EVENTS: Array<[type: string, valid: Record<string, unknown>, invalid: Reco
     { workspaceId: wsId, streamId: 'agents', payload: { agentId: 'claude-code' } },
   ],
   ['agent.install_failed', { ...onAgents, payload: { agentId: 'codex', reason: 'No network.' } }, { ...onAgents, payload: { agentId: 'codex', reason: '' } }],
+  ['agent.uninstalled', { ...onAgents, payload: { agentId: 'antigravity' } }, { ...onAgents, payload: { agentId: 'Not An Id' } }],
   [
     'agent.auth_changed',
     { ...onAgents, payload: { agentId: 'claude-code', state: 'signed_in', method: 'subscription' } },
@@ -317,8 +353,10 @@ describe('the terminal contracts (story 3.2)', () => {
   });
 
   it('SessionResponse carries terminal optionally', () => {
-    expect(SessionResponse.parse({ session })).toEqual({ session });
-    expect(SessionResponse.parse({ session, terminal: { available: true } })).toEqual({ session, terminal: { available: true } });
+    // A session from before permission modes reads as Ask.
+    const read = { ...session, permissionMode: 'ask' };
+    expect(SessionResponse.parse({ session })).toEqual({ session: read });
+    expect(SessionResponse.parse({ session, terminal: { available: true } })).toEqual({ session: read, terminal: { available: true } });
     expect(SessionResponse.safeParse({ session, terminal: { available: 'yes' } }).success).toBe(false);
   });
 
@@ -348,7 +386,7 @@ describe('the terminal contracts (story 3.2)', () => {
     for (const cause of DriverChangeCause.options) {
       expect(CoreEvent.parse({ ...base, ...assigned, payload: { ...base.payload, cause } })).toMatchObject({ payload: { cause } });
     }
-    expect(DriverChangeCause.options).toEqual(['user', 'cli_exited', 'server_stopped', 'server_restarted']);
+    expect(DriverChangeCause.options).toEqual(['user', 'cli_exited', 'server_stopped', 'server_restarted', 'developer_mode_off']);
     expect(NewCoreEvent.safeParse({ ...base, payload: { ...base.payload, cause: 'whim' } }).success).toBe(false);
   });
 
@@ -366,5 +404,49 @@ describe('the terminal contracts (story 3.2)', () => {
     for (const code of ['session_not_idle', 'terminal_unavailable', 'driver_is_terminal']) {
       expect(ApiErrorBody.parse({ error: { code, message: 'Plain words.', details: { terminal: { available: true } } } }).error.code).toBe(code);
     }
+  });
+});
+
+describe('the permission mode contracts (permission modes)', () => {
+  it('a session and a session.created event from before permission modes read as Ask; a new one carries its mode', () => {
+    expect(SessionsResponse.parse({ sessions: [session] }).sessions[0]?.permissionMode).toBe('ask');
+    const created = CoreEvent.parse({ type: 'session.created', ...onSession, ...assigned, payload: { session } });
+    expect(created).toMatchObject({ payload: { session: { permissionMode: 'ask' } } });
+    for (const mode of PERMISSION_MODES) {
+      expect(CoreEvent.parse({ type: 'session.created', ...onSession, ...assigned, payload: { session: { ...session, permissionMode: mode } } })).toMatchObject({
+        payload: { session: { permissionMode: mode } },
+      });
+    }
+    expect(PERMISSION_MODES).toEqual(['ask', 'auto', 'skip_all']);
+    expect(SessionsResponse.safeParse({ sessions: [{ ...session, permissionMode: 'bypass' }] }).success).toBe(false);
+  });
+
+  it('session.permission_mode_changed names the mode, the previous one and the cause; its reason is optional', () => {
+    expect(PermissionModeChangeCause.options).toEqual(['user', 'developer_mode_off', 'restart', 'agent', 'handoff']);
+    const base = { type: 'session.permission_mode_changed', ...onSession, ...assigned, payload: { sessionId: sesId, mode: 'auto', previous: 'ask', cause: 'user' } };
+    expect(CoreEvent.parse(base)).toMatchObject({ payload: { mode: 'auto', previous: 'ask', cause: 'user' } });
+    expect(CoreEvent.safeParse({ ...base, payload: { ...base.payload, cause: 'whim' } }).success).toBe(false);
+    expect(CoreEvent.safeParse({ ...base, payload: { ...base.payload, reason: '' } }).success).toBe(false);
+  });
+
+  it('permission.requested from before permission modes still parses; a new one carries the mode', () => {
+    const payload = { sessionId: sesId, requestId: 'req-1', toolCall: { toolCallId: 't1', title: 'Run npm test', kind: 'execute' }, alwaysAllowScope: null, cautionLevel: 'ask_every_time' };
+    expect(CoreEvent.safeParse({ type: 'permission.requested', ...onSession, ...assigned, payload }).success).toBe(true);
+    expect(CoreEvent.parse({ type: 'permission.requested', ...onSession, ...assigned, payload: { ...payload, permissionMode: 'skip_all' } })).toMatchObject({ payload: { permissionMode: 'skip_all' } });
+    expect(CoreEvent.safeParse({ type: 'permission.requested', ...onSession, ...assigned, payload: { ...payload, permissionMode: 'none' } }).success).toBe(false);
+  });
+
+  it('the requests: a mode, with an optional confirmation; Developer mode on or off', () => {
+    expect(SetPermissionModeRequest.parse({ mode: 'skip_all', confirm: true })).toEqual({ mode: 'skip_all', confirm: true });
+    expect(SetPermissionModeRequest.parse({ mode: 'auto' })).toEqual({ mode: 'auto' });
+    expect(SetPermissionModeRequest.safeParse({ mode: 'everything' }).success).toBe(false);
+    expect(SetDeveloperModeRequest.safeParse({ developerMode: 'yes' }).success).toBe(false);
+    expect(DeveloperModeResponse.parse({ developerMode: true })).toEqual({ developerMode: true });
+    expect(SessionResponse.parse({ session, permissionModes: [{ mode: 'skip_all', available: false, reason: 'Not here.' }] }).permissionModes).toEqual([
+      { mode: 'skip_all', available: false, reason: 'Not here.' },
+    ]);
+    for (const code of ['developer_mode_required', 'confirmation_required', 'mode_unavailable']) expect(API_ERROR_CODES).toContain(code);
+    expect(API_ROUTES.sessionPermissionMode).toBe(`${API_BASE}/workspaces/:wsId/sessions/:sesId/permission-mode`);
+    expect(API_ROUTES.developerMode).toBe(`${API_BASE}/settings/developer-mode`);
   });
 });

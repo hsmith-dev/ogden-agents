@@ -19,6 +19,8 @@ import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { ToolchainError, type DetectedToolStatus, type ToolchainPort, type ToolProgress } from '@ogden-agents/core';
 import { ArchiveError, readTarGz, readZip } from './archive.js';
+import type { UvCommand } from './script-runner.js';
+import { uvEnvironment } from './uv-environment.js';
 import {
   archiveUrl,
   compareVersions,
@@ -50,12 +52,16 @@ const MISMATCH = "The download didn't match the expected file, so nothing was in
 /** How long `uv --version` may take. */
 const VERSION_TIMEOUT_MS = 10_000;
 
-/** Runs `<file> --version` and resolves with its stdout, or `null` if it can't run. */
-export type VersionRunner = (file: string) => Promise<string | null>;
+/**
+ * Runs `<file> <args…> --version` with exactly `env` (the same allowlist
+ * every `uv` child gets, story 4.2) and resolves with its stdout, or `null`
+ * if it can't run.
+ */
+export type VersionRunner = (command: UvCommand, env: Readonly<Record<string, string>>) => Promise<string | null>;
 
-export const runVersion: VersionRunner = (file) =>
+export const runVersion: VersionRunner = ({ file, args = [] }, env) =>
   new Promise((resolve) => {
-    execFile(file, ['--version'], { timeout: VERSION_TIMEOUT_MS, windowsHide: true }, (error, stdout) => {
+    execFile(file, [...args, '--version'], { timeout: VERSION_TIMEOUT_MS, windowsHide: true, shell: false, env: { ...env } }, (error, stdout) => {
       resolve(error === null ? String(stdout) : null);
     });
   });
@@ -79,6 +85,13 @@ export interface UvToolchainOptions {
   fetch?: typeof fetch;
   /** Default {@link runVersion}. */
   runVersion?: VersionRunner;
+  /**
+   * The whole environment of every `uv --version` probe, read at each probe
+   * (story 4.2): the server passes the same function its script runner
+   * gets, so every `uv` child has one allowlist. Default
+   * {@link uvEnvironment} of {@link env}.
+   */
+  childEnv?: () => Readonly<Record<string, string>>;
   /** uv's standard install folders, searched after `PATH`. Default: per OS, see {@link standardUvDirs}. */
   standardDirs?: readonly string[];
   /** Default {@link DOWNLOAD_IDLE_TIMEOUT_MS}. */
@@ -109,12 +122,20 @@ interface Found {
 export function createUvToolchain(options: UvToolchainOptions): ToolchainPort & {
   /** The folder the private copy is installed in. */
   readonly privateDir: string;
+  /**
+   * The `uv` to run BMad Method's scripts with (story 4.1), found as
+   * {@link ToolchainPort.status} finds it: the first usable one on `PATH` or
+   * in uv's standard folders, else the private copy; `undefined` when there
+   * is none.
+   */
+  locate(): Promise<string | undefined>;
 } {
   const env = options.env ?? process.env;
   const platform = options.platform ?? process.platform;
   const release = options.release ?? UV_RELEASE;
   const fetchImpl = options.fetch ?? fetch;
   const run = options.runVersion ?? runVersion;
+  const childEnv = options.childEnv ?? (() => uvEnvironment(env, platform as NodeJS.Platform));
   const idleTimeoutMs = options.idleTimeoutMs ?? DOWNLOAD_IDLE_TIMEOUT_MS;
   const onCleanupError = options.onCleanupError ?? (() => {});
   const exe = platform === 'win32' ? '.exe' : '';
@@ -127,7 +148,7 @@ export function createUvToolchain(options: UvToolchainOptions): ToolchainPort & 
     selectTarget({ os: platform, cpu: options.arch ?? process.arch, libc: () => (libc ??= detectLibc()) });
 
   const versionOf = async (file: string): Promise<[number, number, number] | undefined> => {
-    const output = await run(file);
+    const output = await run({ file }, childEnv());
     return output === null ? undefined : parseVersion(output);
   };
 
@@ -157,6 +178,22 @@ export function createUvToolchain(options: UvToolchainOptions): ToolchainPort & 
     return found;
   };
 
+  /** The private copy's path, when it runs and reports the pinned version. */
+  const usablePrivate = async (): Promise<string | undefined> => {
+    const privateUv = join(privateDir, `uv${exe}`);
+    if (!existsSync(privateUv)) return undefined;
+    const version = await versionOf(privateUv);
+    return version !== undefined && version.join('.') === release.version ? privateUv : undefined;
+  };
+
+  const locate = async (): Promise<string | undefined> => {
+    if (env[UV_IGNORE_SYSTEM_ENV] !== '1') {
+      const usable = (await systemCandidates()).find((candidate) => compareVersions(candidate.version, minimum) >= 0);
+      if (usable !== undefined) return usable.path;
+    }
+    return usablePrivate();
+  };
+
   const status = async (): Promise<DetectedToolStatus> => {
     let tooOld: Found | undefined;
     if (env[UV_IGNORE_SYSTEM_ENV] !== '1') {
@@ -167,13 +204,7 @@ export function createUvToolchain(options: UvToolchainOptions): ToolchainPort & 
         if (tooOld === undefined || compareVersions(candidate.version, tooOld.version) > 0) tooOld = candidate;
       }
     }
-    const privateUv = join(privateDir, `uv${exe}`);
-    if (existsSync(privateUv)) {
-      const version = await versionOf(privateUv);
-      if (version !== undefined && version.join('.') === release.version) {
-        return { state: 'ready', version: release.version, source: 'private' };
-      }
-    }
+    if ((await usablePrivate()) !== undefined) return { state: 'ready', version: release.version, source: 'private' };
     // No download for this OS or CPU: Install can't help, whatever else is found.
     const selected = target();
     if ('unsupported' in selected) return { state: 'failed', reason: selected.unsupported, canInstall: false };
@@ -369,7 +400,7 @@ export function createUvToolchain(options: UvToolchainOptions): ToolchainPort & 
     }
   };
 
-  return { uvVersion: release.version, privateDir, status, installUv };
+  return { uvVersion: release.version, privateDir, locate, status, installUv };
 }
 
 /** Removes temp folders a crashed or killed install left behind, best effort. */

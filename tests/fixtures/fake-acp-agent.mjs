@@ -90,6 +90,13 @@
 //   "permission-always-only"  asks permission with one `allow_always` option
 //                  only (no `allow_once`, no `reject_once`); replies
 //                  `chose=<option id>` or `chose=cancelled` (6.4)
+//   "permission-abandon <file>"  "Working" until <file> exists, then an
+//                  `execute` tool call (`npm test`) and its permission
+//                  request; once <file>.withdraw exists, it withdraws the
+//                  request (`$/cancel_request`) without waiting for the
+//                  answer, as Claude Code does when its SDK aborts a tool
+//                  call; the call fails, it replies "Gave up on npm test."
+//                  and ends its turn (`end_turn`). The test creates both files
 //
 // Session modes (permission modes): `session/new`, `session/resume` and
 // `session/load` answer `modes` as claude-agent-acp 0.84 does (`default`,
@@ -752,6 +759,49 @@ async function runPrompt(params, client, session) {
     }
     if (text === 'pids') {
       await say(client, params.sessionId, `pid=${process.pid} grandchild=${grandchild?.pid ?? 'none'}`);
+      return { stopReason: 'end_turn' };
+    }
+    /** Waits until `path` exists (false) or the turn is cancelled (true). */
+    const waitForFile = (path) =>
+      new Promise((resolve) => {
+        const timer = setInterval(() => {
+          if (!existsSync(path)) return;
+          clearInterval(timer);
+          session.cancel = undefined;
+          resolve(false);
+        }, 25);
+        session.cancel = () => {
+          clearInterval(timer);
+          session.cancel = undefined;
+          resolve(true);
+        };
+      });
+    if (text.startsWith('permission-abandon ')) {
+      const file = text.slice('permission-abandon '.length).trim();
+      await say(client, params.sessionId, 'Working');
+      if (await waitForFile(file)) return { stopReason: 'cancelled' };
+      const toolCall = { toolCallId: 'call-abandon', title: 'Run npm test', kind: 'execute', rawInput: { command: 'npm test' } };
+      await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
+      const withdraw = new AbortController();
+      const asking = client.request(
+        'session/request_permission',
+        {
+          sessionId: params.sessionId,
+          toolCall,
+          options: [
+            { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
+            { optionId: 'reject', name: 'Deny', kind: 'reject_once' },
+          ],
+        },
+        { cancellationSignal: withdraw.signal },
+      );
+      // The answer, whenever it comes, is not waited for (claude-agent-acp's local abort race).
+      asking.catch(() => undefined);
+      const cancelled = await waitForFile(`${file}.withdraw`);
+      withdraw.abort();
+      if (cancelled) return { stopReason: 'cancelled' };
+      await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: 'failed' });
+      await say(client, params.sessionId, 'Gave up on npm test.');
       return { stopReason: 'end_turn' };
     }
     if (text.startsWith('wait ')) {

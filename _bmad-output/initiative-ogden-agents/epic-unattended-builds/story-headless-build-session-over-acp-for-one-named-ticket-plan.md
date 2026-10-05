@@ -3,7 +3,7 @@ title: 'Headless build session over ACP for one named ticket'
 type: 'feature'
 ticket: '4'
 created: '2026-10-04'
-status: 'in-review'
+status: 'built'
 baseline_revision: '8299f735f29b7f7fef415234253dd1c2805eeea5'
 route: 'full'
 route_source: 'auto'
@@ -88,6 +88,7 @@ context:
 - A plan-checkpoint pause never started the agent, so a resume after a restart needs no agent-session reset: rebuilding the in-memory setup is enough, and the prompt starts a fresh agent session in the worktree.
 - The fake ACP agent's `FAKE_ACP_BUILD_CHILD=<file>` leaves a command running; the server test checks the agent and that child are gone once the run ends (`releaseAgent` → `killProcessTree`).
 - Not here: the attended build (permission cards for every tool call) has no start path until 5.6, so `BuildSessionSetup` still always carries the deny-by-default policy. Follow-up when the lines meet: move the build session onto epic 6's `acp-base` client and `adapters/src/child-env.ts` (neither is on this lineage; the existing Claude Code adapter and env allowlist are kept).
+- Verified after the review patches: `pnpm typecheck` clean; `pnpm test` 1910 passed, 4 skipped; `pnpm e2e` 104 passed; `pnpm run pack && pnpm smoke` OK.
 
 ## Plan Change Log
 

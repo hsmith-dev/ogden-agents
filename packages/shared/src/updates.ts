@@ -1,13 +1,17 @@
 /**
- * The "a newer version is available" notice (story 13.7, E13-R7): what the
- * server reports about npm's newer versions, and the switch for the check.
+ * The "a newer version is available" notice (story 13.7, E13-R7, and story
+ * 13.14 for GitHub Releases): what the server reports about newer versions, and the switch for the check.
  */
 import { z } from 'zod';
 import { DesktopUpdateView, UpdateChannel } from './desktop-update.js';
 
-/** How this install was started, so the notice shows the right command. */
-export const InstallMethod = z.enum(['npx', 'global', 'other']);
+/** How this install was started, so the notice shows the right command. `github` is an install made by the GitHub Releases helper. */
+export const InstallMethod = z.enum(['npx', 'global', 'github', 'other']);
 export type InstallMethod = z.infer<typeof InstallMethod>;
+
+/** Where a newer version can be found: the GitHub Releases of this project, or npm's dist-tags. */
+export const UpdateSourceName = z.enum(['github-releases', 'npm']);
+export type UpdateSourceName = z.infer<typeof UpdateSourceName>;
 
 /** What Check now found. */
 export const UpdateCheckOutcome = z.enum(['newer', 'current', 'failed', 'offline']);
@@ -22,9 +26,11 @@ export const UpdateNoticeResponse = z.object({
   enabled: z.boolean(),
   /** `OGDEN_AGENTS_OFFLINE` is set: Ogden makes no update check. */
   offline: z.boolean(),
-  /** ISO 8601 UTC of the last check that reached npm, or `null`. */
+  /** The sources the check asks: GitHub Releases always, and npm too unless this install came from GitHub Releases. */
+  sources: z.array(UpdateSourceName),
+  /** ISO 8601 UTC of the last check that reached a source, or `null`. */
   lastCheckedAt: z.string().nullable(),
-  available: z.object({ version: z.string(), tag: z.enum(['latest', 'next']) }).nullable(),
+  available: z.object({ version: z.string(), tag: z.enum(['latest', 'next']), source: UpdateSourceName }).nullable(),
   /** `desktop` when the server runs inside the desktop app (`OGDEN_AGENTS_SHELL=desktop`, set only by the app), else `null`. */
   shell: z.literal('desktop').nullable(),
   /** The desktop app's chosen update channel; `null` outside the app. */

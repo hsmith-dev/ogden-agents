@@ -10,7 +10,7 @@ import type { UpdateNoticeResponse } from '@ogden-agents/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { UPDATE_DISMISSED_KEY, readDismissed, updateCommand, writeDismissed } from '../src/updates/update-model';
+import { UPDATE_DISMISSED_KEY, readDismissed, sourcesLabel, updateCommand, updateSteps, writeDismissed } from '../src/updates/update-model';
 
 const state = vi.hoisted(() => ({
   notice: undefined as unknown as UpdateNoticeResponse,
@@ -37,7 +37,7 @@ vi.mock('@/api/http', () => ({
 const { UpdateBanner } = await import('../src/shell/update-banner');
 const { AboutPage } = await import('../src/routes/about-page');
 
-const base: UpdateNoticeResponse = { current: '0.4.0', channel: 'stable', installMethod: 'npx', enabled: true, offline: false, lastCheckedAt: null, available: null, shell: null, appChannel: null, app: null };
+const base: UpdateNoticeResponse = { current: '0.4.0', channel: 'stable', installMethod: 'npx', enabled: true, offline: false, sources: ['github-releases', 'npm'], lastCheckedAt: null, available: null, shell: null, appChannel: null, app: null };
 const wrap = (node: React.ReactNode) => <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{node}</QueryClientProvider>;
 const settle = () => act(async () => await new Promise((resolve) => setTimeout(resolve, 0)));
 
@@ -57,7 +57,7 @@ describe('the update banner', () => {
   });
 
   it('says which version, how to update for npx, and is a polite status', async () => {
-    state.notice = { ...base, available: { version: '0.5.0', tag: 'latest' } };
+    state.notice = { ...base, available: { version: '0.5.0', tag: 'latest', source: 'npm' } };
     render(wrap(<UpdateBanner />));
     const banner = await screen.findByTestId('update-banner');
     expect(screen.getByTestId('update-status').getAttribute('role')).toBe('status');
@@ -67,14 +67,14 @@ describe('the update banner', () => {
   });
 
   it('shows the global install command, never running it', async () => {
-    state.notice = { ...base, installMethod: 'global', available: { version: '0.5.0-rc.2', tag: 'next' } };
+    state.notice = { ...base, installMethod: 'global', available: { version: '0.5.0-rc.2', tag: 'next', source: 'npm' } };
     render(wrap(<UpdateBanner />));
     expect((await screen.findByTestId('update-banner')).textContent).toContain('npm install -g ogden-agents@next');
     expect(state.calls.every((call) => call.method === 'GET')).toBe(true);
   });
 
   it('Dismiss hides that version after a reload, and a newer version shows it again', async () => {
-    state.notice = { ...base, available: { version: '0.5.0', tag: 'latest' } };
+    state.notice = { ...base, available: { version: '0.5.0', tag: 'latest', source: 'npm' } };
     const first = render(wrap(<UpdateBanner />));
     fireEvent.click(await screen.findByRole('button', { name: 'Dismiss the notice about Ogden 0.5.0' }));
     expect(screen.queryByTestId('update-banner')).toBeNull();
@@ -84,7 +84,7 @@ describe('the update banner', () => {
     await settle();
     expect(screen.queryByTestId('update-banner')).toBeNull();
     cleanup();
-    state.notice = { ...base, available: { version: '0.5.1', tag: 'latest' } };
+    state.notice = { ...base, available: { version: '0.5.1', tag: 'latest', source: 'npm' } };
     render(wrap(<UpdateBanner />));
     expect((await screen.findByTestId('update-banner')).textContent).toContain('Ogden 0.5.1 is available.');
   });
@@ -97,7 +97,7 @@ describe('the update banner', () => {
       throw new Error('blocked');
     });
     try {
-      state.notice = { ...base, available: { version: '0.5.0', tag: 'latest' } };
+      state.notice = { ...base, available: { version: '0.5.0', tag: 'latest', source: 'npm' } };
       render(wrap(<UpdateBanner />));
       fireEvent.click(await screen.findByRole('button', { name: /Dismiss/ }));
       expect(screen.queryByTestId('update-banner')).toBeNull();
@@ -108,11 +108,33 @@ describe('the update banner', () => {
   });
 });
 
+describe('an update found on GitHub Releases', () => {
+  it('tells a GitHub install to start Ogden again, with no command', async () => {
+    state.notice = { ...base, installMethod: 'github', sources: ['github-releases'], available: { version: '0.5.0', tag: 'latest', source: 'github-releases' } };
+    render(wrap(<UpdateBanner />));
+    const banner = await screen.findByTestId('update-banner');
+    expect(banner.textContent).toBe('Ogden 0.5.0 is available. To update, start Ogden again with its start script. It updates itself.Dismiss');
+  });
+
+  it('points any other install at the releases page', async () => {
+    state.notice = { ...base, installMethod: 'npx', available: { version: '0.5.0', tag: 'latest', source: 'github-releases' } };
+    render(wrap(<UpdateBanner />));
+    expect((await screen.findByTestId('update-banner')).textContent).toBe('Ogden 0.5.0 is available. To update, see github.com/hsmith-dev/ogden-agents/releases.Dismiss');
+  });
+
+  it('chooses the words by where the update was found', () => {
+    expect(updateSteps({ installMethod: 'npx' }, { version: '1.0.0', tag: 'latest', source: 'npm' })).toEqual({ lead: 'To update, run', code: 'npx ogden-agents@latest', tail: 'in a terminal.' });
+    expect(updateSteps({ installMethod: 'github' }, { version: '1.0.0', tag: 'latest', source: 'github-releases' }).code).toBeNull();
+    expect(sourcesLabel(['github-releases'])).toBe('GitHub Releases');
+    expect(sourcesLabel(['github-releases', 'npm'])).toBe('GitHub Releases and npm');
+  });
+});
+
 describe('the update model', () => {
   it('chooses the command by install method and tag', () => {
-    expect(updateCommand({ installMethod: 'npx' }, { version: '1.0.0', tag: 'latest' })).toBe('npx ogden-agents@latest');
-    expect(updateCommand({ installMethod: 'other' }, { version: '1.0.0-rc.1', tag: 'next' })).toBe('npx ogden-agents@next');
-    expect(updateCommand({ installMethod: 'global' }, { version: '1.0.0', tag: 'latest' })).toBe('npm install -g ogden-agents@latest');
+    expect(updateCommand({ installMethod: 'npx' }, { version: '1.0.0', tag: 'latest', source: 'npm' })).toBe('npx ogden-agents@latest');
+    expect(updateCommand({ installMethod: 'other' }, { version: '1.0.0-rc.1', tag: 'next', source: 'npm' })).toBe('npx ogden-agents@next');
+    expect(updateCommand({ installMethod: 'global' }, { version: '1.0.0', tag: 'latest', source: 'npm' })).toBe('npm install -g ogden-agents@latest');
   });
 
   it('keeps the latest dismissed versions and reads damaged storage as none', () => {
@@ -133,6 +155,19 @@ describe('Settings, About', () => {
     expect(screen.getByTestId('about-last-checked').textContent).not.toBe('Not yet');
   });
 
+  it('shows which sources it checks', async () => {
+    render(wrap(<AboutPage />));
+    expect((await screen.findByTestId('about-sources')).textContent).toBe('GitHub Releases and npm');
+    cleanup();
+    state.notice = { ...base, installMethod: 'github', sources: ['github-releases'] };
+    render(wrap(<AboutPage />));
+    expect((await screen.findByTestId('about-sources')).textContent).toBe('GitHub Releases');
+    cleanup();
+    state.notice = { ...base, offline: true };
+    render(wrap(<AboutPage />));
+    expect((await screen.findByTestId('about-sources')).textContent).toBe('Nothing (Ogden is set to stay offline)');
+  });
+
   it('Check now announces the answer politely, and a newer version shows its command', async () => {
     render(wrap(<AboutPage />));
     await screen.findByTestId('check-now');
@@ -144,20 +179,20 @@ describe('Settings, About', () => {
     expect(state.calls.at(-1)).toMatchObject({ method: 'POST' });
 
     state.checkOutcome = 'newer';
-    state.notice = { ...state.notice, available: { version: '0.5.0', tag: 'latest' } };
+    state.notice = { ...state.notice, available: { version: '0.5.0', tag: 'latest', source: 'npm' } };
     fireEvent.click(screen.getByTestId('check-now'));
     await settle();
     expect(screen.getByTestId('check-result').textContent).toBe('Ogden 0.5.0 is available.');
     expect(screen.getByTestId('about-available').textContent).toContain('npx ogden-agents@latest');
   });
 
-  it('says plainly when npm could not be reached', async () => {
+  it('says plainly when the sources could not be reached', async () => {
     state.checkOutcome = 'failed';
     render(wrap(<AboutPage />));
     await screen.findByTestId('check-now');
     fireEvent.click(screen.getByTestId('check-now'));
     await settle();
-    expect(screen.getByTestId('check-result').textContent).toBe('Ogden could not reach npm. Try again later.');
+    expect(screen.getByTestId('check-result').textContent).toBe('Ogden could not reach GitHub Releases and npm. Try again later.');
   });
 
   it('has the switch on by default and saves a change to the server', async () => {
@@ -177,6 +212,6 @@ describe('Settings, About', () => {
     cleanup();
     state.notice = { ...base };
     render(wrap(<AboutPage />));
-    expect((await screen.findByText(/Nothing about you or your projects is sent/)).textContent).toContain('public list of versions');
+    expect((await screen.findByText(/Nothing about you or your projects is sent/)).textContent).toContain('GitHub Releases and npm for the newest published version');
   });
 });

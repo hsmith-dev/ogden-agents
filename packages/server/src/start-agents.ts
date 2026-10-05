@@ -166,6 +166,7 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
     get permissionModes() {
       return agent.permissionModes;
     },
+    ...(agent.modeFixedAtStart === true ? { modeFixedAtStart: true } : {}),
     startSession: async (input) => agent.startSession({ ...input, env: await freshChatEnv(agentId, input.env) }),
     reopenSession: async (input) => agent.reopenSession({ ...input, env: await freshChatEnv(agentId, input.env) }),
     listAuthMethods: (input) => agent.listAuthMethods(input),
@@ -234,6 +235,8 @@ function testTrustAgentWiring(hooks: TestHooks, log: Logger): AgentWiring[] {
         signInMethods: [{ id: 'fake-login', kind: 'subscription', label: 'Sign in with your account' }],
         permissionModes: { ask: 'default' },
         needsProjectTrust: true,
+        // The files it would run from the project: the trust is bound to them too (epic 12, 12.3).
+        projectFiles: ['.claude/settings.json', '.mcp.json'],
         skillsFolder: '.fake/skills',
       },
       agent: {

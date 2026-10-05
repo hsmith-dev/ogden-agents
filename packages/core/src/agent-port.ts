@@ -11,6 +11,7 @@
 import { AgentId as AgentIdSchema, type AgentId, type AgentModel, type PermissionMode } from '@ogden-agents/shared';
 import { agentDescriptorProblems, declaredModes, type AgentDescriptor } from './agent-descriptor.js';
 import { CoreError } from './errors.js';
+import type { AgentSandbox } from './sandbox-port.js';
 
 /** One file change a tool call reports (secrets masked). `oldText` is `null` for a new file. */
 export interface AgentToolCallDiff {
@@ -89,6 +90,12 @@ export interface AgentPermissionRequest {
    * file kinds match only when all of them lie inside the workspace.
    */
   paths?: readonly string[] | undefined;
+  /**
+   * The same paths as the agent gave them, not masked (story 5.2 review loop
+   * 1): only for decisions core makes itself (the build policy); never shown,
+   * stored or logged.
+   */
+  rawPaths?: readonly string[] | undefined;
 }
 
 /**
@@ -117,6 +124,13 @@ export interface StartAgentSession {
   /** The folder the agent works in: the workspace's repo root. */
   cwd: string;
   /**
+   * The chat's permission mode when the agent starts (epic 12, 12.3): for an
+   * agent whose mode is fixed at start (`AgentPort.modeFixedAtStart`) it is
+   * the mode the session runs in for life; the others are told it after
+   * they started (`setPermissionMode`) and may ignore this.
+   */
+  permissionMode?: PermissionMode | undefined;
+  /**
    * The child process environment, as core passes it (AD-16: API keys go
    * here, never on a command line or in an event). The adapter may add its
    * own agent-specific variables but must not log it.
@@ -143,6 +157,13 @@ export interface StartAgentSession {
    * Absent: the agent's own choice.
    */
   model?: string | undefined;
+  /**
+   * An unattended build session's sandbox (story 5.2): the agent runs its
+   * commands in its own native sandbox with only these roots writable and
+   * no network, and may never run one outside it. Fixed for the session's
+   * life. Absent for every chat.
+   */
+  sandbox?: AgentSandbox | undefined;
 }
 
 /** How a reopened session got its context back: the agent resumed it, loaded it, or had to start a new one. */
@@ -200,6 +221,13 @@ export interface AgentSession {
   /** Whether the session was started with `protectedPaths` in effect. Core puts only such a session in Auto. */
   readonly protectsPaths?: boolean | undefined;
   /**
+   * For an agent whose mode is fixed at start: the mode this session was
+   * started in and stays in (epic 12, 12.3). Core checks it against the
+   * chat's mode; a looser one is stopped, never kept. Absent: the mode is
+   * changed with `setPermissionMode`.
+   */
+  readonly fixedPermissionMode?: PermissionMode | undefined;
+  /**
    * Puts the session in `mode`. Resolves once the agent has taken it (at once
    * when it already runs in it); rejects when it can't. Absent: the session
    * only ever runs in Ask, and core never asks it for another mode.
@@ -238,6 +266,8 @@ export interface AgentPort {
    * Ask only. Core starts every session in Ask and offers only these.
    */
   readonly permissionModes?: readonly PermissionMode[] | undefined;
+  /** The agent takes its permission mode only when a chat starts (the descriptor's `modeFixedAtStart`, epic 12). */
+  readonly modeFixedAtStart?: boolean | undefined;
   /**
    * Starts the agent and a new session in `cwd`. Rejects with an
    * {@link AgentError} (code `agent_unavailable` when it can't be started).
@@ -417,6 +447,7 @@ export function createAgentRegistry(
     const portModes = [...new Set(agent.permissionModes ?? ['ask'])].sort().join(',');
     const described = declaredModes(descriptor).sort().join(',');
     if (portModes !== described) throw new Error(`agent registry: ${agentId}'s port declares the modes ${portModes}, its descriptor ${described}`);
+    if ((agent.modeFixedAtStart ?? false) !== (descriptor.modeFixedAtStart ?? false)) throw new Error(`agent registry: ${agentId}'s port and descriptor disagree on whether its mode is fixed at start`);
     byId.set(agentId, registered);
   }
   const first = agents[0]?.descriptor.agentId;

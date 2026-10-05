@@ -12,7 +12,10 @@ export {
   START_TIMEOUT_MS,
   type AcpAgentOptions,
   type AcpAgentQuirks,
+  type AcpAuthChoice,
   type AcpLaunch,
+  type AcpLaunchInput,
+  type AcpStartOptions,
 } from './acp-agent.js';
 export { createStreamMasker, maskSecrets, MASKED, secretValues, SECRET_ENV_NAME } from './mask.js';
 export { commandOf, toolCallPaths, type AcpToolInputPaths } from './tool-paths.js';

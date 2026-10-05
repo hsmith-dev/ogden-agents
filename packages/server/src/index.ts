@@ -38,6 +38,8 @@ export type { AgentSetupPort, AppShortcutPort, SecretStorePort } from '@ogden-ag
 export { TicketsUnavailableError, type TicketStorePort } from '@ogden-agents/core';
 // The Claude Code ACP adapter, so tests can run the fake ACP agent as a second agent (epic 6, `extraAgents`).
 export { createClaudeCodeAgent } from '@ogden-agents/adapters';
+// The shared ACP client (epic 12, 12.3): tests register a generic agent that fixes its mode at start through it.
+export { createAcpAgent, slashSkillInvocation } from '@ogden-agents/adapters';
 export type { AgentDescriptor, RegisteredAgent } from '@ogden-agents/core';
 // How an agent is registered (6.3): its descriptor, chat port and optional setup port; tests register fake agents this way.
 export { agentHomeDir, type AgentWiring } from './agent-wiring.js';

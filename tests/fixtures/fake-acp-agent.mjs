@@ -89,6 +89,33 @@
 //   edits without asking unless one of those ask rules matches the path
 //   (`Edit(**/<folder>/**)` or `Edit(**/<file>)`), which still asks, as
 //   Claude Code's bypass-immune ask rules do.
+//   "/bmad-build-auto ticket <ref>"  build mode (story 5.2): plays one
+//                  unattended build in the session's cwd (the run's
+//                  worktree). It asks permission to write src/built-<ref>.txt
+//                  (an `edit` naming the absolute path) and writes it if
+//                  allowed; asks to write ../escape-<ref>.txt (outside the
+//                  worktree) and writes it only if allowed (the build policy
+//                  must refuse); sets the ticket's plan (the `.md` under
+//                  _bmad-output whose frontmatter says `ticket: <id>`) to
+//                  `status: built`, or with FAKE_ACP_BUILD_OUTCOME=blocked to
+//                  `blocked` with a reason; with FAKE_ACP_BUILD_HOOKS=<dir>
+//                  also writes executable `.husky/` hooks that would create
+//                  files in <dir> if git ever ran them; then commits it all on
+//                  the run's branch (its own commit runs no hook) and replies
+//                  "Built <ref>." (or "Blocked <ref>.").
+//                  Story 5.3's switches for epics 5 and 11's lanes:
+//                  FAKE_ACP_BUILD_HALT=<blocking condition> blocks the plan
+//                  with that `blocked_reason`, as the skill's HALT writes it
+//                  (an `intent gap` also saves `<plan>.patch` beside the plan,
+//                  a patch adding src/fix-<ref>.txt, and leaves no code
+//                  change); FAKE_ACP_BUILD_FAIL_TESTS=1 also writes
+//                  `.fake-tests-fail`, so the fixture's test command
+//                  (FAKE_TEST_COMMAND_FILES in tests/fixtures/fake-bmad-repo.ts) fails 3 tests;
+//                  FAKE_ACP_BUILD_DELAY_MS=<n> waits n ms before finishing
+//                  (a time limit to hit); FAKE_ACP_BUILD_CHILD=<file> starts a
+//                  long-lived child process (a build's command still running)
+//                  and writes "<agent pid> <child pid>" to <file> (story 5.4:
+//                  stopping the session must stop both).
 //   "plan-exit"    asks permission to leave plan mode with the real adapter's
 //                  options (mode-raising ones as `allow_always`, "manually
 //                  approve" as `allow_once`); replies `chose=<option id>`
@@ -175,6 +202,17 @@
 // FAKE_ACP_REQUIRE_API_KEY reads; FAKE_ACP_HOME_ENV names its home variable
 // (see "whoami").
 //
+// A generic third agent's hooks (epic 12, 12.3), beside the above, all
+// agent-neutral: `authenticate`'s `_meta` is kept ("auth" replies `meta=<JSON>`
+// when it carried one); FAKE_ACP_REJECT_OPTIONS=`id:Name,…` replaces the
+// `reject_once` option of "permission <command>" with those (all of kind
+// `reject_once`, in that order) and the reply gets ` chose=<option id>`;
+// FAKE_ACP_FIXED_MODE=1 is an agent that takes its mode only when a session
+// opens: no session modes are listed, `session/set_mode` is refused, and the
+// mode is the `_meta.mode` (`ask`, `auto` or `skip_all`) of `session/new`,
+// `resume` or `load` (default `ask`): "mode" replies `mode=<it>`, and in
+// `skip_all` "permission <command>" runs without asking.
+//
 // Antigravity's personality (epic 6 entry 5; spike 6.1's shapes), set by the
 // wrapper `fake-antigravity.mjs` (FAKE_ACP_PERSONALITY=antigravity): its
 // `agentInfo` (`antigravity-acp` 1.3.0), `session/list` beside resume and
@@ -223,9 +261,9 @@
 // 5 s limit), and a wrapper process plus a second Node start and the SDK's
 // load could pass that limit on a busy Windows runner, which reads as "can't
 // check the sign-in" and turns a saved API key off.
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { Readable, Writable } from 'node:stream';
@@ -285,8 +323,9 @@ const ANTIGRAVITY = process.env.FAKE_ACP_PERSONALITY === 'antigravity';
  */
 const STEERING = !ANTIGRAVITY && process.env.FAKE_ACP_MODES === undefined;
 const INIT_DELAY_MS = Number(process.env.FAKE_ACP_INIT_DELAY_MS ?? '0');
-/** The sign-in method `authenticate` chose in this process, if any. */
+/** The sign-in method `authenticate` chose in this process, if any, and the `_meta` it carried. */
 let authenticatedWith;
+let authenticatedMeta;
 /** Antigravity's home, where its fake Google sign-in is kept (epic 6 entry 7). */
 const googleHome = () => process.env.GEMINI_HOME;
 const googleFile = (name) => (googleHome() === undefined ? undefined : join(googleHome(), name));
@@ -325,9 +364,9 @@ const AVAILABLE_MODES = process.env.FAKE_ACP_MODES ? listOf(process.env.FAKE_ACP
 const API_KEY_ENV = process.env.FAKE_ACP_API_KEY_ENV || 'ANTHROPIC_API_KEY';
 const START_MODE = process.env.FAKE_ACP_START_MODE ?? 'default';
 /** Modes in which it edits files without asking (Claude Code's `acceptEdits`, `auto` and `bypassPermissions`). */
-const EDITS_WITHOUT_ASKING = new Set(['acceptEdits', 'auto', 'bypassPermissions', 'auto_edit', 'yolo']);
+const EDITS_WITHOUT_ASKING = new Set(['acceptEdits', 'auto', 'bypassPermissions', 'auto_edit', 'yolo', 'skip_all']);
 /** Modes in which it runs commands without asking (Claude Code's `bypassPermissions`, Antigravity's `yolo`). */
-const RUNS_WITHOUT_ASKING = new Set(['bypassPermissions', 'yolo']);
+const RUNS_WITHOUT_ASKING = new Set(['bypassPermissions', 'yolo', 'skip_all']);
 /** The `permissions.ask` rules its session was started with (`_meta.claudeCode.options.settings`, as claude-agent-acp 0.84 reads them). */
 const askRulesOf = (session) => session.opened?._meta?.claudeCode?.options?.settings?.permissions?.ask ?? [];
 // Whether an `Edit(**/<folder>/**)` or `Edit(**/<file>)` rule matches `path` (the two shapes Ogden sends).
@@ -356,7 +395,11 @@ const configOf = (session) =>
   NO_MODELS ? [] : [{ id: 'model', name: 'Model', description: 'AI model to use', category: 'model', type: 'select', currentValue: session.model, options: MODELS }];
 
 /** The `modes` a session answer carries, for a session now in `currentModeId`. */
-const modesOf = (currentModeId) => ({ currentModeId, availableModes: AVAILABLE_MODES });
+const FIXED_MODE = process.env.FAKE_ACP_FIXED_MODE === '1';
+const modesOf = (currentModeId) => (FIXED_MODE ? undefined : { currentModeId, availableModes: AVAILABLE_MODES });
+/** The mode of an agent that fixes it when a session opens: its `_meta.mode`, default `ask`. */
+const fixedModeOf = (opened) => opened?._meta?.mode ?? 'ask';
+const REJECT_OPTIONS = process.env.FAKE_ACP_REJECT_OPTIONS ? listOf(process.env.FAKE_ACP_REJECT_OPTIONS) : undefined;
 
 /** Appends `text` and `reply` to the session's Claude Code record (FAKE_ACP_CLAUDE_RECORD), chained after its last main-chain record. */
 const recordExchange = (sessionId, text, reply) => {
@@ -474,6 +517,7 @@ const agentBuilder = acp
       }
     }
     authenticatedWith = params.methodId;
+    authenticatedMeta = params._meta;
     return {};
   })
   .onRequest('logout', () => {
@@ -484,7 +528,7 @@ const agentBuilder = acp
   .onRequest('session/new', ({ params }) => {
     requireAuth();
     const sessionId = `fake-session-${nextSession++}`;
-    const session = { via: 'new', opened: params, mode: START_MODE, model: START_MODEL };
+    const session = { via: 'new', opened: params, mode: FIXED_MODE ? fixedModeOf(params) : START_MODE, model: START_MODEL };
     sessions.set(sessionId, session);
     return { sessionId, modes: modesOf(START_MODE), configOptions: configOf(session) };
   })
@@ -493,7 +537,7 @@ const agentBuilder = acp
     requireAuth();
     if (REOPEN_FAIL.has('resume-auth')) throw acp.RequestError.authRequired(undefined, 'the fake agent needs a new sign-in');
     if (REOPEN_FAIL.has('resume')) throw acp.RequestError.resourceNotFound(params.sessionId);
-    const session = { via: 'resumed', opened: params, mode: START_MODE, model: START_MODEL };
+    const session = { via: 'resumed', opened: params, mode: FIXED_MODE ? fixedModeOf(params) : START_MODE, model: START_MODEL };
     sessions.set(params.sessionId, session);
     return { modes: modesOf(START_MODE), configOptions: configOf(session) };
   })
@@ -503,11 +547,12 @@ const agentBuilder = acp
     // The history a load replays: the client already has it.
     await say(client, params.sessionId, 'Earlier reply.');
     if (REOPEN_FAIL.has('load')) throw acp.RequestError.resourceNotFound(params.sessionId);
-    const session = { via: 'loaded', opened: params, mode: START_MODE, model: START_MODEL };
+    const session = { via: 'loaded', opened: params, mode: FIXED_MODE ? fixedModeOf(params) : START_MODE, model: START_MODEL };
     sessions.set(params.sessionId, session);
     return { modes: modesOf(START_MODE), configOptions: configOf(session) };
   })
   .onRequest('session/set_mode', ({ params, client }) => {
+    if (FIXED_MODE) throw acp.RequestError.methodNotFound('session/set_mode');
     const session = sessions.get(params.sessionId);
     if (session === undefined) throw acp.RequestError.invalidParams(undefined, `no session ${params.sessionId}`);
     if (!AVAILABLE_MODES.some((mode) => mode.id === params.modeId)) throw acp.RequestError.invalidParams(undefined, `Mode ${params.modeId} is not available`);
@@ -604,7 +649,8 @@ async function runPrompt(params, client, session) {
     if (text === 'fail') throw acp.RequestError.internalError(undefined, 'the fake agent failed on purpose');
     if (text === 'usage-limit') throw acp.RequestError.internalError(undefined, 'Claude AI usage limit reached|1760000000');
     if (text === 'auth-expired') throw acp.RequestError.authRequired(undefined, 'the fake agent needs a new sign-in');
-    if (text.startsWith('/')) {
+    // Any slash command but the build (story 5.2), which is played below.
+    if (text.startsWith('/') && !text.startsWith('/bmad-build-auto ticket ')) {
       await say(client, params.sessionId, `command=${text} primed=${primed}`);
       return { stopReason: 'end_turn' };
     }
@@ -660,7 +706,7 @@ async function runPrompt(params, client, session) {
     }
     if (text === 'auth') {
       const key = process.env[API_KEY_ENV];
-      await say(client, params.sessionId, `auth=${authenticatedWith ?? 'none'} key=${key ? key.slice(-4) : 'none'}`);
+      await say(client, params.sessionId, `auth=${authenticatedWith ?? 'none'} key=${key ? key.slice(-4) : 'none'}${authenticatedMeta === undefined ? '' : ` meta=${JSON.stringify(authenticatedMeta)}`}`);
       return { stopReason: 'end_turn' };
     }
     if (text === 'trust') {
@@ -675,6 +721,86 @@ async function runPrompt(params, client, session) {
         ],
       });
       await say(client, params.sessionId, `trust=${answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'}`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text.startsWith('/bmad-build-auto ticket ')) {
+      const ref = text.slice('/bmad-build-auto ticket '.length).trim();
+      const cwd = session.opened.cwd ?? process.cwd();
+      const ask = async (toolCallId, path) => {
+        const toolCall = { toolCallId, title: `Write ${path}`, kind: 'edit', locations: [{ path }], rawInput: { file_path: path } };
+        await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
+        const answer = await client.request('session/request_permission', {
+          sessionId: params.sessionId,
+          toolCall,
+          options: [
+            { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
+            { optionId: 'reject', name: 'Deny', kind: 'reject_once' },
+          ],
+        });
+        const allowed = answer.outcome.outcome === 'selected' && answer.outcome.optionId === 'allow';
+        await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: allowed ? 'completed' : 'failed' });
+        return allowed;
+      };
+      await say(client, params.sessionId, `Building ${ref}. `);
+      const childFile = process.env.FAKE_ACP_BUILD_CHILD;
+      if (childFile) {
+        // Not detached: it stays in the agent's process group (its tree on Windows), as a build's command does.
+        const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true });
+        child.on('error', () => undefined);
+        writeFileSync(childFile, `${process.pid} ${child.pid}\n`);
+      }
+      const inside = join(cwd, 'src', `built-${ref}.txt`);
+      if (await ask('call-build-write', inside)) {
+        mkdirSync(dirname(inside), { recursive: true });
+        writeFileSync(inside, `Built ${ref} by the fake agent.\n`);
+      }
+      const outside = resolve(cwd, '..', `escape-${ref}.txt`);
+      if (await ask('call-build-escape', outside)) writeFileSync(outside, 'escaped\n');
+      // The plan: the Markdown file under _bmad-output whose frontmatter names this ticket's id.
+      const id = ref.slice(ref.lastIndexOf('.') + 1);
+      const plans = [];
+      const visit = (dir) => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) visit(full);
+          else if (entry.name.endsWith('.md') && new RegExp(`^ticket:\\s*['"]?${id}['"]?\\s*$`, 'm').test(readFileSync(full, 'utf8'))) plans.push(full);
+        }
+      };
+      if (existsSync(join(cwd, '_bmad-output'))) visit(join(cwd, '_bmad-output'));
+      const halt = process.env.FAKE_ACP_BUILD_HALT;
+      const blocked = process.env.FAKE_ACP_BUILD_OUTCOME === 'blocked' || (halt !== undefined && halt !== '');
+      const reason = halt !== undefined && halt !== '' ? halt : 'The fake agent was told to block.';
+      const delay = Number(process.env.FAKE_ACP_BUILD_DELAY_MS ?? '0');
+      if (delay > 0) await new Promise((done) => setTimeout(done, delay));
+      if (process.env.FAKE_ACP_BUILD_FAIL_TESTS === '1') writeFileSync(join(cwd, '.fake-tests-fail'), 'fail\n');
+      for (const plan of plans) {
+        const before = readFileSync(plan, 'utf8');
+        const status = blocked ? `status: blocked\nblocked_reason: ${JSON.stringify(reason)}` : 'status: built';
+        writeFileSync(plan, before.replace(/^status:.*$/m, status));
+        if (blocked && reason.startsWith('intent gap')) {
+          // As the skill's intent-gap HALT: the attempted change saved as a patch beside the plan, the code reverted.
+          rmSync(inside, { force: true });
+          const file = `src/fix-${ref}.txt`;
+          writeFileSync(plan.replace(/\.md$/, '.patch'), `diff --git a/${file} b/${file}\nnew file mode 100644\n--- /dev/null\n+++ b/${file}\n@@ -0,0 +1 @@\n+Fixed ${ref} by the saved patch.\n`);
+        }
+      }
+      const hooks = process.env.FAKE_ACP_BUILD_HOOKS;
+      if (hooks) {
+        mkdirSync(join(cwd, '.husky'), { recursive: true });
+        for (const hook of ['pre-commit', 'commit-msg', 'post-merge', 'post-commit', 'post-checkout', 'pre-merge-commit']) {
+          const file = join(cwd, '.husky', hook);
+          writeFileSync(file, `#!/bin/sh\ntouch "${join(hooks, hook)}"\n`);
+          chmodSync(file, 0o755);
+        }
+      }
+      try {
+        const git = (...args) => execFileSync('git', ['-c', `core.hooksPath=${join(cwd, '.no-hooks')}`, '-c', 'user.name=Fake Agent', '-c', 'user.email=fake@example.com', ...args], { cwd, stdio: 'ignore' });
+        git('add', '-A');
+        git('commit', '--no-verify', '-m', `Build ${ref}`);
+      } catch {
+        await say(client, params.sessionId, 'The commit failed. ');
+      }
+      await say(client, params.sessionId, `${blocked ? 'Blocked' : 'Built'} ${ref}.`);
       return { stopReason: 'end_turn' };
     }
     if (text === 'context') {
@@ -759,7 +885,7 @@ async function runPrompt(params, client, session) {
           : [
               { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
               { optionId: 'always', name: 'Always allow', kind: 'allow_always' },
-              { optionId: 'reject', name: 'Deny', kind: 'reject_once' },
+              ...(REJECT_OPTIONS ?? [{ id: 'reject', name: 'Deny' }]).map(({ id, name }) => ({ optionId: id, name, kind: 'reject_once' })),
               { optionId: 'never', name: 'Always deny', kind: 'reject_always' },
             ],
       });
@@ -774,7 +900,7 @@ async function runPrompt(params, client, session) {
         return { stopReason: 'cancelled' };
       }
       await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: ran ? 'completed' : 'failed' });
-      await say(client, params.sessionId, `${ran ? 'Ran' : 'Denied'} ${command}.${ANTIGRAVITY ? ` chose=${chosen}` : ''}`);
+      await say(client, params.sessionId, `${ran ? 'Ran' : 'Denied'} ${command}.${ANTIGRAVITY || REJECT_OPTIONS ? ` chose=${chosen}` : ''}`);
       return { stopReason: 'end_turn' };
     }
     if (text === 'tool') {

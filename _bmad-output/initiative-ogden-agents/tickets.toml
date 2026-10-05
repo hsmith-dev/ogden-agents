@@ -75,7 +75,7 @@ id = 7
 slug = "epic-retrospectives"
 title = "Each finished epic teaches the next one"
 covers = ["CAP-13"]
-after = [{ epic = 5, needs = "finished, approved and merged runs with build records (5.9)" }]
+after = [{ epic = 4, needs = "the trust gate and TicketEpic (4.2), the catalog and label patch (4.4, 4.5), document cards (4.7), the ticket watcher and board (4.8, 4.9) and the reduced-mode notice (4.11)" }, { epic = 5, needs = "approved, merged runs with build records (the source of the look-back's build summaries), VcsPort and vcs-git, the runner loading AGENTS.md and approve's clean-checkout rule (5.9); the release after 5.11" }, { epic = 10, needs = "the BMad pieces contract, requireBmadFeature, bmadPieceRoutes and SHIPPED_BMAD_PIECES (10.2) and the guard-coverage test (10.6)" }, { epic = 6, needs = "its release first (build order); none of its code" }]
 
 # ---- v1.1 (planned; outside the v1 initiative's Done when) ----
 

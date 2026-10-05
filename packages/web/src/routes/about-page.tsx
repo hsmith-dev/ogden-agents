@@ -8,6 +8,7 @@ import { Field } from '@/ui/field';
 import { Notice } from '@/ui/notice';
 import { PageBody, PageSection } from '@/ui/page';
 import { Switch } from '@/ui/switch';
+import { Text } from '@/ui/typography';
 
 /** What Check now found, in plain words (the newer version has its own sentence). */
 const OUTCOME_WORDS: Record<Exclude<UpdateCheckOutcome, 'newer'>, string> = {
@@ -44,28 +45,28 @@ export function AboutPage() {
       <PageBody>
         <PageSection aria-label="About Ogden Agents">
           {data === undefined ? (
-            <p className="m-0 text-label text-muted-foreground" role={isError ? 'alert' : undefined}>
+            <Text variant="label" tone="muted" role={isError ? 'alert' : undefined}>
               {isError ? "Ogden couldn't read its version." : 'Loading.'}
-            </p>
+            </Text>
           ) : (
             <>
-              <dl className="m-0 grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-label" data-testid="about-details">
-                <dt className="text-muted-foreground">Version</dt>
+              <Text as="dl" variant="label" className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2" data-testid="about-details">
+                <Text as="dt" variant="label" tone="muted">Version</Text>
                 <dd className="m-0" data-testid="about-version">
                   {data.current}
                 </dd>
-                <dt className="text-muted-foreground">Channel</dt>
+                <Text as="dt" variant="label" tone="muted">Channel</Text>
                 <dd className="m-0" data-testid="about-channel">
                   {channelLabel(data.channel)}
                 </dd>
-                <dt className="text-muted-foreground">Last checked</dt>
+                <Text as="dt" variant="label" tone="muted">Last checked</Text>
                 <dd className="m-0" data-testid="about-last-checked">
                   {lastCheckedText(data.lastCheckedAt)}
                 </dd>
-              </dl>
+              </Text>
               {data.available === null ? null : (
                 <Notice data-testid="about-available">
-                  {availableSentence(data.available)} {HOW_TO_UPDATE} <code className="font-mono">{updateCommand(data, data.available)}</code> in a terminal.
+                  {availableSentence(data.available)} {HOW_TO_UPDATE} <Text as="code" variant="mono">{updateCommand(data, data.available)}</Text> in a terminal.
                 </Notice>
               )}
               <div className="flex flex-wrap items-center gap-3">
@@ -73,9 +74,9 @@ export function AboutPage() {
                   Check now
                 </Button>
                 {/* Announced politely when the answer arrives; empty (but present) before. */}
-                <p className="m-0 text-label text-muted-foreground" role="status" data-testid="check-result">
+                <Text variant="label" tone="muted" role="status" data-testid="check-result">
                   {check.isPending ? 'Checking.' : check.isError ? check.error.message : outcome === undefined ? '' : outcome === 'newer' ? (data.available === null ? '' : availableSentence(data.available)) : OUTCOME_WORDS[outcome]}
-                </p>
+                </Text>
               </div>
               <Field
                 id="check-updates-on-start"

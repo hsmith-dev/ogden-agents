@@ -6,7 +6,7 @@
  *
  * Privacy (AD-15, AD-16): the whole request is one `GET` of
  * {@link DIST_TAGS_URL} asking for JSON. No version, id, account, project or
- * path goes in it, redirects are refused, it times out after
+ * path goes in it (Node's own default headers apply, and a proxy set in the environment sees it), redirects are refused, it times out after
  * {@link CHECK_TIMEOUT_MS} and its body is capped. The only things kept are
  * the switch and the time of the last check, in `<dataDir>/update-check.json`.
  * A failed check is silent (one log line with a code only); Check now says so.
@@ -29,7 +29,7 @@ export const MAX_BODY_BYTES = 16 * 1024;
 /** `<dataDir>/<this>`: `{ "enabled": true, "lastCheckedAt": "…" }`. */
 export const UPDATE_CHECK_FILE = 'update-check.json';
 
-/** The request the check makes: a `GET` with these and nothing else. */
+/** The request the check makes: a `GET` with these options. Node's fetch adds its own defaults (such as `user-agent: node`); nothing of Ogden's goes in it. */
 export interface UpdateRequestInit {
   signal: AbortSignal;
   redirect: 'error';

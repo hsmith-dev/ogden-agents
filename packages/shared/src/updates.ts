@@ -19,7 +19,7 @@ export const UpdateNoticeResponse = z.object({
   installMethod: InstallMethod,
   /** Whether the check runs when Ogden starts. */
   enabled: z.boolean(),
-  /** `OGDEN_AGENTS_OFFLINE` is set: Ogden makes no request at all. */
+  /** `OGDEN_AGENTS_OFFLINE` is set: Ogden makes no update check. */
   offline: z.boolean(),
   /** ISO 8601 UTC of the last check that reached npm, or `null`. */
   lastCheckedAt: z.string().nullable(),

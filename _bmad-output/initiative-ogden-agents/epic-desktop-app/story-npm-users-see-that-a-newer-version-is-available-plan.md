@@ -3,12 +3,12 @@ title: 'npm users see that a newer version is available'
 type: 'feature'
 ticket: '7'
 created: '2026-10-04'
-status: 'ready-for-dev'
+status: 'built'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['privacy', 'ux-a11y']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-desktop-app/epic-desktop-app.md'
@@ -86,6 +86,8 @@ Open question from the ticket (timeout): settled by running off the start path w
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (privacy, UX/a11y). Fixed: banner status region was mounted with its content (medium; now always mounted wrapper); comments over-claimed "nothing else" in the request (low; Node default headers and env proxy now stated); `offline` doc said no request at all (low; reworded). Real but accepted: no focus move after Dismiss (low); Check now result text can go stale (low); offline names the env var (low, users set it); no rate limit on the check route (low, token holders only, 5 s cap, concurrent calls coalesce); launcher tests rely on NODE_ENV only (low, safe); dismissal not synced across open tabs (low). False: label-in-name (met); no-dash text (commands excepted); gate on routes (gate test now lists them).
 
 ## Verification
 

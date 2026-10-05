@@ -60,9 +60,10 @@ describe('the update banner', () => {
     state.notice = { ...base, available: { version: '0.5.0', tag: 'latest' } };
     render(wrap(<UpdateBanner />));
     const banner = await screen.findByTestId('update-banner');
-    expect(banner.getAttribute('role')).toBe('status');
+    expect(screen.getByTestId('update-status').getAttribute('role')).toBe('status');
+    expect(screen.getByTestId('update-status').contains(banner)).toBe(true);
     expect(banner.textContent).toBe('Ogden 0.5.0 is available. To update, run npx ogden-agents@latest in a terminal.Dismiss');
-    expect(banner.textContent).not.toMatch(/[-–—]\s|\s[-–—]/);
+    expect(banner.textContent).not.toMatch(/[–—]|\s-\s/);
   });
 
   it('shows the global install command, never running it', async () => {

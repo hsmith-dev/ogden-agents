@@ -3,13 +3,13 @@ title: 'The sidebar is the one place to see, switch, add and manage projects'
 type: 'feature'
 ticket: '2'
 created: '2026-10-04'
-status: 'in-progress'
+status: 'built'
 baseline_revision: '485ac934afda671f1561fdaaf947ef1ae102b694'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/backlog/story-the-sidebar-is-the-one-place-to-see-switch-add-and-manage-projects.md'
@@ -79,9 +79,32 @@ context:
 
 ## Implementation Notes
 
+- Implemented in this session directly (the plan's investigation was already in context), not through a separate implementation subagent.
+- `SidebarWorkspaceGroup` now takes `link`, `settingsLink`, `current`, `filteredOut`; the heading is chevron (aria-label "Chats in X" + `aria-expanded`), name link (folder icon in the rail), gear link. The router's Link sets `aria-current="page"` on the project's own Chats list; elsewhere inside it the group passes `true`.
+- The filter is a `ui/` `SidebarFilter` (AD-18: feature code may not style), with a visible label and an sr-only `role="status"` ("2 of 9 projects", "No projects match"). Left-out groups stay mounted and hide only in the full form, so the rail (no field) shows every project.
+- Drawer focus: the menu button is not Radix's own trigger, so `onCloseAutoFocus` gives focus back to it by hand after Esc, the close button, the overlay, a link to the page already shown, or a modifier-click; a link that changes the page leaves focus to the new page.
+- Found and fixed a pre-existing bug on the base: the drawer closed itself in the click's capture phase, which React flushes before the bubble phase, so the drawer unmounted before the router's Link handled the click and every drawer link loaded the whole page again. It now decides the focus rule in capture and closes in bubble; the 390 px e2e asserts the page is never reloaded.
+- Chevron label kept as "Chats in X" with `aria-expanded` (not "Show/Hide chats in X"): a label that flips with the state would announce the state twice.
+- Rail and drawer e2e checks went into `tests/e2e/sidebar.spec.ts` (which already has the server fixtures for projects with chats); the pure filter cases live in `packages/web/test/status-sidebar.dom.test.tsx`.
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (quick lens, UX/a11y focus): high 0, medium 3, low 4, false 3, maybe-false 0.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---|---|---|---|
+| 1 | Filter still applies in the rail, where the field is hidden | medium | patch | Real: one mounted column changes form by CSS. Left-out groups now stay mounted with `hidden md:max-lg:flex`; DOM test asserts it. |
+| 2 | No screen-reader status for the filter result | medium | patch | Real (plan task named it). Added sr-only `role="status"` in `SidebarFilter`; DOM test asserts both texts. |
+| 3 | Current-marker unit test drops `at`, and expects `true` where the router gives `page` | medium | patch | Real. `at` now reaches the router; the test expects `page` on `/w/ws_b`, `true` inside a chat. |
+| 4 | Drawer link to the page already shown (or modifier-click) leaves focus on `<body>` | medium | patch | Real (reproduced in e2e). Decision made at click time from the link's href and modifiers; e2e asserts focus returns to the menu button. Investigating it exposed the pre-existing full-reload bug (Implementation Notes), also fixed. |
+| 5 | Chevron label differs from the plan's "Show/Hide chats in X" | false | reject | AC4 is met; a flipping label plus `aria-expanded` would announce state twice. Recorded in Implementation Notes. |
+| 6 | Gear tooltip "Project settings" doesn't name the project | low | patch | Tooltip now `${name} settings`, matching the accessible name. |
+| 7 | Planned `project-filter.test.ts` not created; `workspaceName('/')` case dropped | low | patch | Cases live in the sidebar DOM test; the `/` case is added back. |
+| 8 | Rail e2e in `sidebar.spec.ts`, not `layout.spec.ts` | false | reject | Coverage exists and runs; the file choice causes no harm. |
+| 9 | DOM test `afterEach` doesn't reset the module-cached collapsed store | low | reject | Test-only; no assertion depends on it; fixing needs a test hook into module state. |
+| 10 | Drawer closing on resize focuses a hidden button | false | reject | Same outcome as before this change (focus to `<body>`); not caused by it. |
 
 ## Design Notes
 

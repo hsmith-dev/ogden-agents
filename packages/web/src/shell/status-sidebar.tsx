@@ -153,7 +153,9 @@ function StatusSidebarBody() {
   const navigate = useNavigate();
   const first = model.needsYou[0];
   const filtering = showsProjectFilter(model.groups.length);
-  const groups = filtering ? filterProjects(model.groups, filter) : model.groups;
+  // Filtered-out groups stay mounted and only hide in the full form: the rail has no field, so it shows them all.
+  const matching = new Set((filtering ? filterProjects(model.groups, filter) : model.groups).map((group) => group.wsId));
+  const filterStatus = !filtering || filter.trim() === '' ? '' : matching.size === 0 ? 'No projects match' : `${matching.size} of ${model.groups.length} projects`;
   return (
     <>
       <SidebarHeader>
@@ -179,15 +181,16 @@ function StatusSidebarBody() {
           {!loading && model.groups.length === 0 ? <SidebarText data-testid="no-projects">No projects yet</SidebarText> : null}
           {loading ? <Skeleton data-testid="sidebar-loading" /> : null}
           {filtering ? (
-            <SidebarFilter id={filterId} label="Filter projects" value={filter} onValueChange={setFilter} data-testid="project-filter">
-              {groups.length === 0 ? <SidebarText data-testid="no-project-matches">No projects match</SidebarText> : null}
+            <SidebarFilter id={filterId} label="Filter projects" value={filter} onValueChange={setFilter} status={filterStatus} data-testid="project-filter">
+              {matching.size === 0 ? <SidebarText data-testid="no-project-matches">No projects match</SidebarText> : null}
             </SidebarFilter>
           ) : null}
-          {groups.map((group) => (
+          {model.groups.map((group) => (
             <SidebarWorkspaceGroup
               key={group.wsId}
               data-testid="workspace-group"
               name={group.name}
+              filteredOut={!matching.has(group.wsId)}
               current={group.wsId === currentWsId}
               link={<Link to="/w/$wsId" params={{ wsId: group.wsId }} activeOptions={{ exact: true, includeSearch: false }} data-testid="workspace-link" />}
               settingsLink={<Link to="/w/$wsId/settings" params={{ wsId: group.wsId }} data-testid="workspace-settings" />}

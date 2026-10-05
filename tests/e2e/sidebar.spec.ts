@@ -122,11 +122,16 @@ test('below md, a row in the sheet opens its session and closes the sheet', asyn
     await page.goto(`${server.url}/`);
 
     await page.setViewportSize({ width: 390, height: 844 });
+    // A drawer link moves within the app; the page is never loaded again (a mark on the window survives).
+    const markWindow = () => page.evaluate(() => Object.assign(window, { sameDocument: true }));
+    const sameDocument = () => page.evaluate(() => (window as unknown as { sameDocument?: boolean }).sameDocument === true);
+    await markWindow();
     await page.getByTestId('sidebar-trigger').click();
     const sheet = page.getByRole('dialog', { name: 'Projects and sessions' });
     await sheet.getByRole('group', { name: basename(repo) }).getByTestId('status-row').click();
     await expect(page).toHaveURL(chat);
     await expect(sheet).toBeHidden();
+    expect(await sameDocument()).toBe(true);
 
     // Backlog story 2: the drawer is the way to projects below md. A clear menu button opens it from
     // the keyboard; focus goes into it; Escape closes it and gives focus back to the button.
@@ -145,9 +150,15 @@ test('below md, a row in the sheet opens its session and closes the sheet', asyn
     const project = sheet.getByRole('group', { name: basename(repo) }).getByRole('link', { name: basename(repo), exact: true });
     await project.click();
     await expect(page).toHaveURL(/\/w\/ws_[0-9A-Z]{26}$/);
+    expect(await sameDocument()).toBe(true);
     await expect(sheet).toBeHidden();
     await trigger.click();
-    await expect(project).toHaveAttribute('aria-current', /^(page|true)$/);
+    await expect(project).toHaveAttribute('aria-current', 'page');
+    // A link to the page already shown closes the drawer too, and focus comes back to the menu button, not to nothing.
+    await project.click();
+    await expect(sheet).toBeHidden();
+    await expect(trigger).toBeFocused();
+    await trigger.click();
     // Its settings, from the gear beside the name.
     await sheet.getByRole('link', { name: `${basename(repo)} settings` }).click();
     await expect(page).toHaveURL(/\/w\/ws_[0-9A-Z]{26}\/settings$/);

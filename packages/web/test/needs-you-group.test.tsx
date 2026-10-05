@@ -80,6 +80,7 @@ describe('workspace groups and status rows (DESIGN.md Workspace group and Status
           <Link to="/w/$wsId/s/$sesId" params={{ wsId: 'ws_b', sesId: 'ses_b' }} />
         </SidebarStatusRow>
       </SidebarWorkspaceGroup>,
+      at,
     );
 
   it('a group is named by its workspace, with a disclosure that says whether it is open', async () => {
@@ -118,9 +119,9 @@ describe('workspace groups and status rows (DESIGN.md Workspace group and Status
     expect(gear).toMatch(/md:max-lg:hidden/);
   });
 
-  it('the current project is marked on any page inside it, its Chats list included', async () => {
+  it('the current project is marked: `page` on its own Chats list, `true` anywhere else inside it', async () => {
     const onChats = await group(false, { current: true, at: '/w/ws_b' });
-    expect(/<a[^>]*data-slot="sidebar-workspace-link"[^>]*>/.exec(onChats)![0]).toContain('aria-current="true"');
+    expect(/<a[^>]*data-slot="sidebar-workspace-link"[^>]*>/.exec(onChats)![0]).toContain('aria-current="page"');
     const inChat = await group(false, { current: true, at: '/w/ws_b/s/ses_b' });
     const link = /<a[^>]*data-slot="sidebar-workspace-link"[^>]*>/.exec(inChat)![0];
     expect(link).toContain('aria-current="true"');

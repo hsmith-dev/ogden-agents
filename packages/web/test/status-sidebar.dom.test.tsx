@@ -62,7 +62,12 @@ function mount(groups: readonly SidebarWorkspace[], wsId?: string) {
 }
 
 const sidebar = () => screen.getByRole('complementary', { name: 'Projects and sessions' });
-const projectNames = () => within(sidebar()).queryAllByTestId('workspace-link').map((link) => link.textContent);
+/** The projects shown in the full sidebar: a group the filter left out is hidden there (but not in the rail). */
+const projectNames = () =>
+  within(sidebar())
+    .queryAllByTestId('workspace-group')
+    .filter((group) => group.dataset['filteredOut'] === undefined)
+    .map((group) => within(group).getByTestId('workspace-link').textContent);
 
 afterEach(() => {
   cleanup();
@@ -93,6 +98,7 @@ describe('project filter (pure)', () => {
     expect(workspaceName(ws('/Users/sam/clay-and-kiln'))).toBe('clay-and-kiln');
     expect(workspaceName(ws('C:\\Users\\sam\\Letterpress'))).toBe('Letterpress');
     expect(workspaceName(ws('/Users/sam/apps/'))).toBe('apps');
+    expect(workspaceName(ws('/'))).toBe('/');
   });
 });
 
@@ -145,10 +151,16 @@ describe('the sidebar is the one place for projects (backlog story 2)', () => {
     fireEvent.change(field, { target: { value: 'Kiln' } });
     expect(projectNames()).toEqual(['clay-and-kiln', 'kiln-notes']);
     expect(within(sidebar()).getByTestId('needs-you-item')).toBeTruthy();
+    expect(within(sidebar()).getByTestId('project-filter').querySelector('[role="status"]')!.textContent).toBe(`2 of ${NAMES.length} projects`);
+    // The rail has no field, so it still shows every project: a left-out group hides only in the full form.
+    const leftOut = within(sidebar()).getByRole('group', { name: 'zines' });
+    expect(leftOut.className).toMatch(/(^|\s)hidden md:max-lg:flex(\s|$)/);
+    expect(within(sidebar()).getAllByTestId('workspace-group')).toHaveLength(NAMES.length);
 
     fireEvent.change(field, { target: { value: 'qqq' } });
     expect(projectNames()).toEqual([]);
     expect(within(sidebar()).getByTestId('no-project-matches').textContent).toBe('No projects match');
+    expect(within(sidebar()).getByTestId('project-filter').querySelector('[role="status"]')!.textContent).toBe('No projects match');
     expect(within(sidebar()).getByRole('button', { name: 'Add project' })).toBeTruthy();
 
     fireEvent.keyDown(field, { key: 'Escape' });

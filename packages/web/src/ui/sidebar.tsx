@@ -148,11 +148,21 @@ export function Sidebar({ label, className, children, ...props }: SidebarProps) 
           <nav
             aria-label={label}
             className="flex h-full min-h-0 flex-col"
-            // Following any link from the sheet closes it, even to the page already shown.
+            // Following any link from the sheet closes it, even to the page already shown. Only a link
+            // that changes this tab's page hands focus to the new page; one to the page already shown,
+            // or opened elsewhere (a modifier key), gives it back to the menu button. Decided in the
+            // capture phase, before the router moves the location.
             onClickCapture={(event) => {
-              if ((event.target as Element).closest('a[href]') === null) return;
-              navigatingRef.current = true;
-              setSheetOpen(false);
+              const link = (event.target as Element).closest('a[href]');
+              if (link === null) return;
+              const elsewhere = event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
+              navigatingRef.current = !elsewhere && (link as HTMLAnchorElement).href !== window.location.href;
+            }}
+            // Closed in the bubble phase, after the link's own handler: closing in the capture phase
+            // unmounts the sheet before the router's Link sees the click, and the browser then loads
+            // the whole page again.
+            onClick={(event) => {
+              if ((event.target as Element).closest('a[href]') !== null) setSheetOpen(false);
             }}
           >
             {children}
@@ -392,6 +402,8 @@ export interface SidebarWorkspaceGroupProps extends Omit<ComponentProps<'div'>, 
   settingsLink?: ReactElement<{ children?: ReactNode }> | undefined;
   /** The user is inside this workspace: its name is marked current. */
   current?: boolean;
+  /** A sidebar filter left it out: hidden in the full form and the drawer, still shown in the rail (which has no filter). */
+  filteredOut?: boolean;
 }
 
 /**
@@ -402,7 +414,7 @@ export interface SidebarWorkspaceGroupProps extends Omit<ComponentProps<'div'>, 
  * no room for the name, so there the link is a folder icon with the name as
  * tooltip, and every group shows its rows' glyphs, collapsed or not.
  */
-export function SidebarWorkspaceGroup({ name, collapsed, onCollapsedChange, summary, link, settingsLink, current = false, className, children, ...props }: SidebarWorkspaceGroupProps) {
+export function SidebarWorkspaceGroup({ name, collapsed, onCollapsedChange, summary, link, settingsLink, current = false, filteredOut = false, className, children, ...props }: SidebarWorkspaceGroupProps) {
   const listId = useId();
   return (
     <div
@@ -411,7 +423,8 @@ export function SidebarWorkspaceGroup({ name, collapsed, onCollapsedChange, summ
       data-slot="sidebar-workspace-group"
       data-collapsed={collapsed || undefined}
       data-current={current || undefined}
-      className={cn('flex min-w-0 flex-col gap-0.5 md:max-lg:border-t md:max-lg:border-border md:max-lg:pt-1', className)}
+      data-filtered-out={filteredOut || undefined}
+      className={cn('flex min-w-0 flex-col gap-0.5 md:max-lg:border-t md:max-lg:border-border md:max-lg:pt-1', filteredOut && 'hidden md:max-lg:flex', className)}
       {...props}
     >
       <div data-slot="sidebar-workspace-heading" className="flex min-w-0 items-center gap-0.5">
@@ -458,7 +471,7 @@ export function SidebarWorkspaceGroup({ name, collapsed, onCollapsedChange, summ
                 <GearSix aria-hidden />,
               )}
             </TooltipTrigger>
-            <TooltipContent side="right">Project settings</TooltipContent>
+            <TooltipContent side="right">{`${name} settings`}</TooltipContent>
           </Tooltip>
         )}
       </div>
@@ -476,6 +489,8 @@ export interface SidebarFilterProps extends Omit<ComponentProps<'div'>, 'onChang
   label: string;
   value: string;
   onValueChange: (value: string) => void;
+  /** What the filter leaves, for screen readers ("2 of 9 projects"); empty while nothing is typed. */
+  status?: string;
 }
 
 /**
@@ -484,7 +499,7 @@ export interface SidebarFilterProps extends Omit<ComponentProps<'div'>, 'onChang
  * non-empty field; with it empty, Esc goes on to close the drawer. The rail
  * has no room for it.
  */
-export function SidebarFilter({ id, label, value, onValueChange, className, children, ...props }: SidebarFilterProps) {
+export function SidebarFilter({ id, label, value, onValueChange, status = '', className, children, ...props }: SidebarFilterProps) {
   return (
     <div data-slot="sidebar-filter" className={cn('flex min-w-0 flex-col gap-1 px-2 pb-1 md:max-lg:hidden', className)} {...props}>
       <Label htmlFor={id} className="text-caption text-muted-foreground">
@@ -504,6 +519,9 @@ export function SidebarFilter({ id, label, value, onValueChange, className, chil
           }
         }}
       />
+      <span role="status" className="sr-only">
+        {status}
+      </span>
       {children}
     </div>
   );

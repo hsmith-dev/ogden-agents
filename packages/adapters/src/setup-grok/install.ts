@@ -15,7 +15,8 @@
  * pin is Ogden's own, recorded from the real packages), and refuses the
  * whole install when it does not match. The chat adapter spawns only that file.
  */
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, chmodSync } from 'node:fs';
+import { renameWithRetry } from '../toolchain-uv/uv-toolchain.js';
+import { createReadStream, createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, chmodSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { Transform } from 'node:stream';
@@ -69,7 +70,7 @@ export type GrokBinaryHashes = Readonly<Partial<Record<AgentPlatform, string>>>;
  * Decompresses `source` (a brotli file) to `target`, hashing as it goes and refusing more than
  * {@link GROK_MAX_BINARY_BYTES}; resolves with the SHA-256 of what was written. Nothing is kept on failure.
  */
-export async function decompressBinary(source: string, target: string, maxBytes = GROK_MAX_BINARY_BYTES): Promise<string> {
+export async function decompressBinary(source: string, target: string, maxBytes = GROK_MAX_BINARY_BYTES, signal?: AbortSignal): Promise<string> {
   const hash = createHash('sha256');
   let bytes = 0;
   const watch = new Transform({
@@ -81,7 +82,7 @@ export async function decompressBinary(source: string, target: string, maxBytes 
     },
   });
   try {
-    await pipeline(createReadStream(source), createBrotliDecompress(), watch, createWriteStream(target, { mode: 0o700 }));
+    await pipeline(createReadStream(source), createBrotliDecompress(), watch, createWriteStream(target, { mode: 0o700, flags: 'wx' }), signal === undefined ? {} : { signal });
   } catch (error) {
     rmSync(target, { force: true });
     throw error;
@@ -95,26 +96,41 @@ function finalizeFor(hashes: GrokBinaryHashes) {
     const platform = `${process.platform}-${process.arch}` as AgentPlatform;
     const pinned = hashes[platform];
     if (pinned === undefined) throw new AgentSetupError(words.noBinary, { details: { step: 'binary', platform: process.platform, arch: process.arch } });
-    if (options.signal?.aborted === true) throw new AgentSetupError(words.stopped, { details: { step: 'binary', stopped: true } });
+    const aborted = () => options.signal?.aborted === true;
+    if (aborted()) throw new AgentSetupError(words.stopped, { details: { step: 'binary', stopped: true } });
     options.onProgress({ step: words.checking, percent: 96 });
     const compressed = join(project, 'node_modules', ...platformPackage(platform).split('/'), 'bin', `${binaryName(platform)}.br`);
-    if (!existsSync(compressed)) throw new AgentSetupError(words.notRight, { details: { step: 'binary', missing: true } });
+    // Only a plain file the package carries: a link in its place is never followed.
+    let plain = false;
+    try {
+      plain = lstatSync(compressed).isFile();
+    } catch {
+      plain = false;
+    }
+    if (!plain) throw new AgentSetupError(words.notRight, { details: { step: 'binary', missing: true } });
     const dir = join(project, GROK_CHECKED_DIR);
     mkdirSync(dir, { recursive: true });
     const unchecked = join(dir, `${binaryName(platform)}.part`);
     const target = join(dir, binaryName(platform));
     let sha256: string;
     try {
-      sha256 = await decompressBinary(compressed, unchecked);
+      sha256 = await decompressBinary(compressed, unchecked, GROK_MAX_BINARY_BYTES, options.signal);
     } catch (error) {
-      throw new AgentSetupError(words.notRight, { details: { step: 'binary', code: (error as NodeJS.ErrnoException).code ?? (error as Error).message ?? 'unknown' }, cause: error });
+      if (aborted()) throw new AgentSetupError(words.stopped, { details: { step: 'binary', stopped: true } });
+      throw new AgentSetupError(words.notRight, { details: { step: 'binary', code: (error as Error).message === 'too_large' ? 'too_large' : String((error as NodeJS.ErrnoException).code ?? 'unknown').slice(0, 40) }, cause: error });
     }
     if (sha256 !== pinned) {
       rmSync(unchecked, { force: true });
       throw new AgentSetupError(words.mismatch, { details: { step: 'binary', mismatch: true } });
     }
-    renameSync(unchecked, target);
-    if (process.platform !== 'win32') chmodSync(target, 0o755);
+    try {
+      // A freshly written binary can be held by an antivirus scan on Windows: retried as the folder swap is.
+      await renameWithRetry(unchecked, target, 10);
+      if (process.platform !== 'win32') chmodSync(target, 0o755);
+    } catch (error) {
+      rmSync(unchecked, { force: true });
+      throw new AgentSetupError(words.couldNotPlace, { details: { step: 'binary', code: String((error as NodeJS.ErrnoException).code ?? 'unknown').slice(0, 40) }, cause: error });
+    }
     options.onProgress({ step: words.checking, percent: 98 });
   };
 }

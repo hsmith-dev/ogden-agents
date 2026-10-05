@@ -3,12 +3,12 @@ title: 'Grok stubs: descriptor, pins, checked-binary installer, wiring slot and 
 type: 'feature'
 ticket: 'grok-12.4'
 created: '2026-10-05'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['quick-security', 'quick-correctness']
 review_loop_iteration: 0
 baseline_revision: '200f9fac80224527dd171dc28dd36aecf418c4eb'
 context:
@@ -77,6 +77,8 @@ Built 2026-10-05 on `story/12.4-grok-stubs` from `origin/main`. Probes of the pi
 ## Plan Change Log
 
 ## Review Triage Log
+
+Security and correctness reviewers (2 lenses), no critical or high. Patched: the checked binary's rename retries like the folder swap and fails in plain words (medium); the unpack honours Stop (low); the `.br` must be a plain file, never a link, and the temp file is opened exclusively (low); error codes in details are whitelisted (low); `agent-pins` bounds the decompressed size (low); the fake Grok personality now offers its four ids (medium). Not changed: the personality's `authenticate`, `_meta` mode, `env` and `skills` behaviour is exercised end to end by 12.7's chat tests rather than here (medium, accepted); the binary is not re-hashed at each spawn (low: the data folder is owner-only; a re-check costs about a second of 175 MB; logged); a prerelease outranks its release in `installedGrok`'s fallback ordering (low, test fixtures only); a decompress failure says "didn't look right" even when the disk is full (low). No intent_gap or bad_plan.
 
 ## Verification
 

@@ -217,7 +217,7 @@ function checkGrokBinary(project) {
   const name = process.platform === 'win32' ? 'grok.exe.br' : 'grok.br';
   const compressed = join(project, 'node_modules', '@xai-official', `grok-${platform}`, 'bin', name);
   const hash = createHash('sha256');
-  hash.update(brotliDecompressSync(readFileSync(compressed)));
+  hash.update(brotliDecompressSync(readFileSync(compressed), { maxOutputLength: 400 * 1024 * 1024 }));
   const actual = hash.digest('hex');
   if (actual !== pinned) throw new Error(`the ${platform} binary's SHA-256 is ${actual}, pinned ${pinned}`);
   console.log(`agent-pins: the ${platform} binary matches its pinned SHA-256`);

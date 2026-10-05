@@ -915,7 +915,14 @@ async function runPrompt(params, client, session) {
               { optionId: 'deny', name: 'Deny', kind: 'reject_once' },
               { optionId: 'allow_always', name: 'Allow Always', kind: 'allow_always' },
             ]
-          : [
+          : GROK
+            ? [
+                { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
+                { optionId: 'allow_always', name: 'Always allow', kind: 'allow_always' },
+                { optionId: 'reject_once', name: 'Deny', kind: 'reject_once' },
+                { optionId: 'reject_always', name: 'Always deny', kind: 'reject_always' },
+              ]
+            : [
               // Codex's own ids (codex-acp 2.1.1): Allow once `allow_once`, its session-wide `allow_for_session`.
               { optionId: CODEX ? 'allow_once' : 'allow', name: 'Allow once', kind: 'allow_once' },
               { optionId: CODEX ? 'allow_for_session' : 'always', name: 'Always allow', kind: 'allow_always' },

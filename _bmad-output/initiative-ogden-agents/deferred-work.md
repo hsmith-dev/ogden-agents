@@ -724,3 +724,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-codex-install-and-openai-api-key-from-the-ui-plan.md`
   summary: Epic 12.6 review: the keychain unavailable message still tells an API key only agent to sign in.
   evidence: `SECRETS_UNAVAILABLE_MESSAGE` in `packages/core/src/errors.ts`; see the plan's Review Triage Log.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-grok-stubs-descriptor-pins-checked-binary-installer-wiring-slot-and-fake-personality-plan.md`
+  summary: Epic 12.4 (Grok): the checked Grok binary is hashed at install only, not at each spawn.
+  evidence: `installedGrok` checks existence; see the plan's Review Triage Log.

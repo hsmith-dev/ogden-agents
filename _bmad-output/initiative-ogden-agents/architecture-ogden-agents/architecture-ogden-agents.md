@@ -7,8 +7,8 @@ paradigm: 'hexagonal (ports and adapters) with an append-only event log'
 scope: 'Ogden Agents as a whole: launcher, local server, browser UI, agent/tool adapters, and the pinned upstream BMAD-METHOD and bmad-loop it uses'
 status: final
 created: '2026-09-29'
-updated: '2026-10-02'
-binds: [CAP-1, CAP-2, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-12, CAP-13, CAP-14, CAP-15, CAP-16, CAP-17, CAP-18, CAP-19]
+updated: '2026-10-04'
+binds: [CAP-1, CAP-2, CAP-3, CAP-4, CAP-5, CAP-6, CAP-7, CAP-8, CAP-9, CAP-10, CAP-12, CAP-13, CAP-14, CAP-15, CAP-16, CAP-17, CAP-18, CAP-19, CAP-20]
 sources: ['../spec-ogden-agents/spec-ogden-agents.md']
 companions: []
 ---
@@ -73,6 +73,7 @@ graph LR
   - Only the server spawns and stops agent processes. The UI attaches and detaches through the event log and never controls a process directly.
   - `npx ogden-agents` starts a detached server if none is running. The server runs until Quit in the UI, or a reboot.
   - When the server starts, any session whose process is gone becomes `idle` and is marked resumable.
+  - Note (epic 13, 2026-10-04, user decision): in the desktop app (CAP-20) the Tauri shell starts the server as its sidecar and owns its life. Quitting the app stops a server and agents the app started, under Quit's busy rule; it never stops a server started by `npx ogden-agents` that the app attached to. A server the app started exits when its parent shell is gone. The npm route is unchanged. No tray icon in v1.
 
 ### AD-4 — One normalized session state
 
@@ -94,6 +95,7 @@ graph LR
   - Every adapter that produces agent activity, whether an ACP chat or the bmad-loop build runner, emits the same `session.*` event types, so one session view renders both.
   - All events are retained, and history is deletable per workspace.
   - When a message completes, core appends a `session.message_completed` event carrying the full content. Its chunk events are pruned only after that, and the UI replaces chunks with the completed message.
+  - Note (epic 13, 2026-10-04, user decision): on a version change the database is copied to `<dataDir>/backups/` before migrations run, and a database newer than the running server is refused with a plain message. This applies to every later migration.
 
 ### AD-6 — Terminal bytes use their own channel [ADOPTED]
 
@@ -203,6 +205,7 @@ graph LR
   - Note (story 1.7): the launcher token is 256 random bits the server writes to `launcher.token` in the data directory on each start (readable only by the user, removed on stop), sent in a request header and compared in constant time. It opens nothing but the handshake, and no tab token opens the handshake.
   - Note (permission modes, 2026-10-02, user decision): Skip all (an agent run with its permission checks skipped) is gated by the server, not by the agent's start options: a chat's mode can be `skip_all` only with the install's Developer mode on (kept by core in SQLite, `settings.developer_mode_changed`, no longer browser-only) and the request's `confirm: true`; a direct API call without them is refused (403 `developer_mode_required`, 400 `confirmation_required`) and records nothing. Turning Developer mode off drops every Skip-all chat to Ask in the same transaction, and a server start puts every chat back in Ask. Claude Code sessions start with bypass permitted (the adapter's default) so a chat can move to Skip all without a restart. (decision by user, 2026-10-02) Auto keeps protected files guarded: Ogden starts Auto sessions with ask rules for the protected paths, so those edits still reach a card; Skip all has none. The rules are fixed per agent session, so a move into or out of Auto puts the agent in Ask at once and restarts (resumes) it at the next idle point. No rule change.
   - Note (story 2.1, amending story 1.4's cookie): browsers send cookies for `127.0.0.1` to every port on it, so the session cookie and its signing key `auth.key` are retired; a leftover `auth.key` is deleted at start and old cookies are ignored. The page's boot script (a same-origin file, not inline) strips `#c=` from the URL with `history.replaceState`, exchanges the code, and keeps the token in memory and `sessionStorage`, so a reload keeps the tab connected, while a new tab or a bookmark has no token and shows the app's own "Open Ogden Agents" state. New tab in the sidebar footer asks `POST /api/launch-codes` (token and Origin required) for a fresh launch link.
+  - Note (epic 13, 2026-10-04, user decision): AD-15 in a webview. The desktop shell gets a launch URL through the launcher (find, attach, handshake) with the launcher token and opens its window on `/#c=<code>`. The webview's origin is the server's own and gets no Tauri IPC or capability; navigation is locked to that origin and external links open in the system browser. The server's CSP is kept and no remote content loads. The known limit of the launch URL on a process command line does not apply to the app. No rule change.
   - Known limit: on a computer shared by several accounts, another local user can see the launch URL (with its single-use code) on the process command line while the browser opens it (macOS; Linux without `hidepid`) and race to redeem it. Mitigated by 60-second single-use codes; an install is for one user.
 
 ### AD-16 — Secrets [ADOPTED]
@@ -252,6 +255,7 @@ graph LR
   - If the server is older and idle (no active runs or sessions), the launcher asks it to restart and it restarts automatically, then the launcher starts the new version. If any session is busy, the older server keeps running and is opened as it is; the launcher never stops running sessions itself.
   - If an open tab's UI is older than the server it talks to (a newer server was found by an older open tab), the page shows a non-blocking reload banner. The server does not reject UI assets from another version.
   - Note (epic 1 retrospective, 2026-09-30): amended in place to match what story 1.7 built; the earlier text said the launcher *offers* a restart and the server rejects UI assets from another version.
+  - Note (epic 13, 2026-10-04, user decision): updates. The desktop app checks its channel's signed `latest.json` only on start, never periodically. A found update is downloaded and verified, then reported to the server, and the UI shows "Update available — Restart to update". The restart never happens while an agent turn or a build runs; one busy rule decides it, and epic 5 registers runs in it. The stable and next channels match npm's `latest` and `next`. Downgrades are refused. npm installs show a newer-version notice from an npm registry read on start, on by default and switchable off in Settings.
 
 ### AD-21 — No standard flow requires a terminal
 
@@ -261,6 +265,7 @@ graph LR
   - Every CLI step a standard flow needs, including installing `uv`, installing or signing into agent CLIs, running BMAD setup, and applying a saved patch, is run by the server and shown in the UI with progress and errors.
   - The terminal toggle (AD-6) is only for advanced users and is never required.
   - Note (epic 10, 2026-10-01): a project with BMad off needs no `uv`; turning on a piece that needs BMad installed runs setup through the server (epic 4). No rule changes.
+  - Note (epic 13, 2026-10-04, user decision): Ogden Agents has two distribution routes, `npx ogden-agents` and the desktop app (CAP-20). The app bundles a pinned Node with npm and node-pty and needs no install step.
 
 ### AD-22 — BMad Method is opt-in per workspace
 
@@ -276,6 +281,18 @@ graph LR
   - Developer mode and the terminal toggle (AD-6) are independent of the pieces.
   - Note (epic 4, 2026-10-02, user decision, security): a piece that runs the project's own BMad scripts (Board through `tickets.py`, which executes the repo's `_bmad/scripts/config_utils.py`; later Unattended builds and Retrospectives) also needs the user's one-time trust for that project, kept by core on the workspace row with a `workspace.bmad_scripts_trusted` event. The same guard path checks it: the route helper after the piece guard (409 `scripts_not_trusted`), and each core use-case that runs project scripts. Turning a piece on is not refused; its script-running routes and watchers wait for the trust. Project scripts and every `uv` process run with one minimal allowlisted environment, never an API key, token or other secret (AD-16).
   - Note (story 4.13, 2026-10-04, user decision, security): the trust is bound to the contents of the project scripts Ogden Agents runs. Trusting records a fingerprint of the repo's `_bmad/scripts/` (`BmadCatalogPort.scriptsFingerprint`: regular files, no links, `__pycache__` left out, since every script run keeps Python's bytecode cache in Ogden Agents' own folder); every run re-checks it right before the scripts run (the board use-cases and each ticket-watch read), and scripts changed since are refused with 409 `scripts_changed` and the UI asks again ("This project's BMad Method scripts changed. Run them?"). Ogden Agents' own setup or Upgrade, which writes them only from the verified pinned copy, keeps a trust that still matched just before it. Alongside, `_bmad/` joins the protected paths (the 2.8 rule's one list, which Auto's ask rules use), so an agent's edit there always comes as a card in Ask and Auto; Skip all is unchanged by design.
+
+### AD-23 — Distribution and update signing
+
+- **Binds:** CAP-1, CAP-20
+- **Prevents:** an app built or signed outside the release workflow, an unpinned runtime in the app, and an update signed by a key the user does not own.
+- **Rule:**
+  - Desktop apps are built only by the release workflow from a version tag, beside the npm publish of the same version.
+  - Each app bundles an official Node binary pinned by version and SHA-256 per OS and architecture, checked at build; a mismatch fails the build.
+  - Apps are published as GitHub Release assets with `SHA256SUMS` and a signed `latest.json` per channel (stable and next). macOS ships one universal `.dmg`.
+  - Release updates are signed with the user's own minisign key, kept only as a GitHub Actions environment secret. No agent generates, sees or stores it. CI test builds use a throwaway key generated per run, never the user's.
+  - Code signing and notarization are optional pipeline slots fed by the user's own secrets; without them the apps ship unsigned with "how to open" steps.
+  - Note (epic 13, 2026-10-04, user decision): added with epic 13's approval.
 
 ## Consistency Conventions
 
@@ -313,6 +330,9 @@ graph LR
 | shadcn (CLI) | 4.21 |
 | Vitest / @playwright/test | 5.0 / 1.63 |
 | uv (BMAD Python tooling) | ≥ 0.12, installed by Ogden Agents if missing |
+| Tauri (desktop app, Rust) + @tauri-apps/cli | 2.12 |
+| tauri-plugin-updater / -single-instance / -shell | 2.12 / 2.4 / 2.3 |
+| tauri-apps/tauri-action | v1 |
 
 ## Structural Seed
 
@@ -377,6 +397,7 @@ Delivery: GitHub Actions runs the tests on macOS, Windows and Linux for every ch
 | CAP-17 workspaces and status sidebar | core, shared UI patterns | AD-2, AD-3, AD-4, AD-18 |
 | CAP-18 every BMAD skill and module | `bmad-catalog` adapter | AD-12, AD-14 |
 | CAP-19 BMad optional per project | core workspace settings, `bmad-catalog` detect, shared piece list | AD-2, AD-11, AD-22 |
+| CAP-20 desktop app | `packages/desktop` (Tauri shell), launcher, server update notice | AD-3, AD-15, AD-20, AD-21, AD-23 |
 
 ## Deferred
 
@@ -384,7 +405,7 @@ Delivery: GitHub Actions runs the tests on macOS, Windows and Linux for every ch
 - **Default concurrency limits and maximum run time:** tuned in epic 5. AD-2 and AD-17 fix only that the limits exist and that core enforces them.
 - **Where the CAP-5 toggle appears for each agent:** measured in epic 3, recorded in the spec's `agent-matrix.md`.
 - **Notification transports beyond webhook:** decided in epic 5 behind `NotifierPort`.
-- **Start at login, a tray icon, or a desktop wrapper:** later, and neither breaks AD-3.
+- **Start at login or a tray icon:** later, and neither breaks AD-3. The desktop app itself is CAP-20 (epic 13, AD-23).
 - **Tracker stores, remote access, and several users per install:** out of scope (spec non-goals).
 - **Logging library and Drizzle migration tooling:** epic 1, within the Conventions.
 - **Merge-conflict handling beyond blocking as needing a rebase:** epic 5.

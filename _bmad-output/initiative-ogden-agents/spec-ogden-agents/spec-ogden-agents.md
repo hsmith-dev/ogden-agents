@@ -75,6 +75,9 @@ A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the str
 - **CAP-19**
   - **intent:** Each project chooses whether to use BMad Method and which of its pieces (planning, board, unattended builds, retrospectives). A project without it is a plain multi-agent, multi-chat workspace over the user's agent. New projects start without it unless the user changes the default.
   - **success:** A new project holds chats with two agents in two chats with nothing written under `_bmad/` and no Plan or Board shown; turning on Planning in its settings sets BMad up and shows Plan, and turning BMad off hides Plan again and leaves every file in the repo.
+- **CAP-20**
+  - **intent:** A user downloads and opens Ogden Agents as an app on macOS, Windows or Linux, with nothing else to install, and it keeps itself up to date. The `npx ogden-agents` route (CAP-1) stays beside it, and both share one data folder.
+  - **success:** On a fresh machine with no Node, the downloaded app reaches a first chat with no terminal, and updates from N to N+1 without losing data or interrupting running work.
 
 CAP-11 (cost caps) is retired and its number is not reused.
 
@@ -115,7 +118,7 @@ CAP-11 (cost caps) is retired and its number is not reused.
 
 ## Assumptions
 
-- The one install command (CAP-1) is the only CLI step and is exempt from the no-CLI constraint.
+- The one install command (CAP-1) is the only CLI step of the npm route and is exempt from the no-CLI constraint. The desktop app (CAP-20) needs no command at all, and "a single Node process" stays true inside it, since it bundles its own Node (epic 13, 2026-10-04).
 - Ogden Agents checks for `uv` and installs it if missing, because BMAD's scripts and bmad-loop are Python run through `uv`.
 - The BMad trademark permits the name "Ogden Agents" (the user's call).
 - A fresh UI is built with `design-taste-frontend` on bmad-method-ui's stack. bmad-method-ui and acp-ui (both MIT) are references to borrow from with attribution, not forks.

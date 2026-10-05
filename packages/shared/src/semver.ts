@@ -41,3 +41,36 @@ export function compareVersions(a: string, b: string): number | undefined {
   }
   return 0;
 }
+
+/** `stable` for a release, `preview` for a pre-release (rc, next); `undefined` when it doesn't parse. */
+export function channelOf(version: string): 'stable' | 'preview' | undefined {
+  const parsed = SEMVER.exec(version.trim());
+  if (parsed === null) return undefined;
+  return parsed[4] === undefined ? 'stable' : 'preview';
+}
+
+/** The npm dist-tags the update notice reads, and the version a tag offers. */
+export interface UpdateOffer {
+  version: string;
+  tag: 'latest' | 'next';
+}
+
+/**
+ * The newer version `current` is told about, or `null` (story 13.7). A stable
+ * version hears only of a newer stable, the `latest` tag. A pre-release hears
+ * of the highest newer version among `latest` and `next`. A tag that doesn't
+ * parse, or an unparsable `current`, offers nothing.
+ */
+export function decideUpdate(current: string, tags: Readonly<Record<string, string>>): UpdateOffer | null {
+  const channel = channelOf(current);
+  if (channel === undefined) return null;
+  let best: UpdateOffer | null = null;
+  for (const tag of channel === 'stable' ? (['latest'] as const) : (['latest', 'next'] as const)) {
+    const version = tags[tag];
+    if (typeof version !== 'string') continue;
+    if (channel === 'stable' && channelOf(version) !== 'stable') continue;
+    if ((compareVersions(version, current) ?? 0) <= 0) continue;
+    if (best === null || (compareVersions(version, best.version) ?? 0) > 0) best = { version: version.trim().replace(/^v/, ''), tag };
+  }
+  return best;
+}

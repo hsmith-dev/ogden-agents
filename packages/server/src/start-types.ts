@@ -9,6 +9,7 @@ import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, Bm
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
 import type { Logger } from './log.js';
+import type { UpdatesOption } from './update-check.js';
 
 export interface StartOptions {
   /** Port to try first. `0` asks the OS for any free port. Default `DEFAULT_PORT` (4317). */
@@ -178,6 +179,13 @@ export interface StartOptions {
    * `notify-webhook` as the default and reads it; tests: `notify-memory`).
    */
   notifier?: NotifierPort;
+  /**
+   * The "newer version" check (story 13.7): `false` turns it off, a client
+   * replaces the real npm one (tests: a fake, so none reaches the network).
+   * Default: the real `fetch`, except `OGDEN_AGENTS_OFFLINE` is set or this is
+   * a test run, which never makes a request.
+   */
+  updates?: UpdatesOption;
   /**
    * Called once the server has stopped by itself (Quit, or a restart the
    * launcher asked for) and everything is closed. A server process exits here.

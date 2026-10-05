@@ -33,6 +33,8 @@ async function verified(options: Parameters<typeof harness>[0] = {}) {
   return { ...h, ...started };
 }
 
+const GUARD = { scripts: 'trusted' };
+
 describe('Build: git and disk guards (story 5.5)', () => {
   it('refuses git that is missing or too old (vcs_unavailable, plain words) and a nearly full disk (disk_space_low), writing nothing', async () => {
     const h = await harness();
@@ -278,27 +280,27 @@ describe('the run-aware ticket store (story 5.5, AD-10)', () => {
     mkdirSync(join(run.worktreePath!, ...PLAN.split('/').slice(0, -1)), { recursive: true });
     writeFileSync(join(run.worktreePath!, ...PLAN.split('/')), 'status: in-progress\n');
     h.tickets.set(run.worktreePath!, '1.1', 'in-progress');
-    expect((await store.find(h.repo, '1.1')).status).toBe('in-progress');
-    const tree = await store.tree(h.repo);
+    expect((await store.find(h.repo, '1.1', GUARD)).status).toBe('in-progress');
+    const tree = await store.tree(h.repo, GUARD);
     expect(tree.tickets.find((row) => row.ref === '1.1')?.status).toBe('in-progress');
     expect(tree.tickets.find((row) => row.ref === '1.2')?.status).toBe('ready-for-dev');
     // The main checkout itself is unchanged.
     expect(h.tickets.status(h.repo, '1.1')).toBe('ready-for-dev');
     // Never a mark while the agent runs (review).
-    expect(await codeOf(store.mark(h.repo, '1.1', 'blocked', { blockedReason: 'Retry me' }))).toBe('run_active');
+    expect(await codeOf(store.mark(h.repo, '1.1', 'blocked', GUARD, { blockedReason: 'Retry me' }))).toBe('run_active');
     h.tickets.set(run.worktreePath!, '1.1', 'blocked', 'Needs you');
     await h.endTurn(session.id);
     expect(h.core.entities.getRun(run.id)?.outcome).toBe('blocked');
-    await store.mark(h.repo, '1.1', 'blocked', { blockedReason: 'Retry me' });
+    await store.mark(h.repo, '1.1', 'blocked', GUARD, { blockedReason: 'Retry me' });
     expect(h.tickets.status(run.worktreePath!, '1.1')).toBe('blocked');
     expect(h.tickets.status(h.repo, '1.1')).toBe('ready-for-dev');
-    await store.mark(h.repo, '1.2', 'draft');
+    await store.mark(h.repo, '1.2', 'draft', GUARD);
     expect(h.tickets.status(h.repo, '1.2')).toBe('draft');
 
     // The agent edited the worktree's scripts: reads come from the main checkout and a mark is refused.
     h.worktreeFingerprint.value = 'edited';
-    expect((await store.find(h.repo, '1.1')).status).toBe('ready-for-dev');
-    await expect(store.mark(h.repo, '1.1', 'in-progress')).rejects.toBeInstanceOf(ScriptsChangedError);
+    expect((await store.find(h.repo, '1.1', GUARD)).status).toBe('ready-for-dev');
+    await expect(store.mark(h.repo, '1.1', 'in-progress', GUARD)).rejects.toBeInstanceOf(ScriptsChangedError);
     h.worktreeFingerprint.value = 'trusted';
 
     // A plan reached through a link the agent planted: never read or written (review).
@@ -308,12 +310,12 @@ describe('the run-aware ticket store (story 5.5, AD-10)', () => {
     mkdirSync(join(outside, 'epic'), { recursive: true });
     writeFileSync(join(outside, 'epic', PLAN.split('/').pop()!), 'status: blocked\n');
     link(join(outside, 'epic'), epicFolder);
-    expect((await store.find(h.repo, '1.1')).status).toBe('ready-for-dev');
-    expect(await codeOf(store.mark(h.repo, '1.1', 'in-progress'))).toBe('checks_failed');
+    expect((await store.find(h.repo, '1.1', GUARD)).status).toBe('ready-for-dev');
+    expect(await codeOf(store.mark(h.repo, '1.1', 'in-progress', GUARD))).toBe('checks_failed');
 
     // Once decided (rejected), the main checkout answers again.
     await h.builds.reject(h.wsId, '1.1');
-    expect((await store.find(h.repo, '1.1')).status).toBe('ready-for-dev');
+    expect((await store.find(h.repo, '1.1', GUARD)).status).toBe('ready-for-dev');
     // The watch is the main checkout's.
     const watched: string[] = [];
     const inner = h.tickets.store.watch;

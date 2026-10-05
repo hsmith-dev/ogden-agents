@@ -65,8 +65,28 @@ export interface FolderHash {
   readonly bytes: number;
 }
 
+/** A folder as read for its hash: the files it hashed (LF-normalized, by `/`-separated path), with the counts. */
+export interface FolderRead {
+  readonly files: Entries;
+  /** Files and folders below the folder. */
+  readonly entries: number;
+  /** Bytes of the files as read (before LF normalization). */
+  readonly bytes: number;
+}
+
 /** {@link hashFolder}, with the entry and byte counts it took; `undefined` as {@link hashFolder}. */
 export async function hashFolderWithCounts(dir: string, limits: FolderHashLimits = {}): Promise<FolderHash | undefined> {
+  const read = await readFolder(dir, limits);
+  return read === undefined ? undefined : { hash: hashEntries(read.files), entries: read.entries, bytes: read.bytes };
+}
+
+/**
+ * Reads the files below `dir` once, by {@link hashFolder}'s rule and bounds,
+ * and answers them as hashed: `hashEntries(files)` is the folder's hash, so
+ * a caller can check the hash and then use exactly those bytes (the
+ * script snapshot, maintained-fork story). `undefined` as {@link hashFolder}.
+ */
+export async function readFolder(dir: string, limits: FolderHashLimits = {}): Promise<FolderRead | undefined> {
   const maxEntries = limits.maxEntries ?? FOLDER_HASH_MAX_ENTRIES;
   const maxBytes = limits.maxBytes ?? FOLDER_HASH_MAX_BYTES;
   let bytes = 0;
@@ -99,7 +119,7 @@ export async function hashFolderWithCounts(dir: string, limits: FolderHashLimits
   } catch {
     return undefined;
   }
-  return { hash: hashEntries(entries), entries: count, bytes };
+  return { files: entries, entries: count, bytes };
 }
 
 /**

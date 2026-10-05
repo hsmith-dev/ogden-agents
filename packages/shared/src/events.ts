@@ -7,10 +7,12 @@ import {
   SettingsDeveloperModeChangedEvent,
   SettingsDeveloperModeChangedInput,
   SettingsWhileWorkingChangedEvent,
+  SettingsUpdateNoticeChangedEvent,
+  SettingsUpdateNoticeChangedInput,
   SettingsWhileWorkingChangedInput,
 } from './events-settings.js';
 
-export { SettingsAgentDefaultModelChangedEvent, SettingsDeveloperModeChangedEvent, SettingsWhileWorkingChangedEvent } from './events-settings.js';
+export { SettingsAgentDefaultModelChangedEvent, SettingsDeveloperModeChangedEvent, SettingsUpdateNoticeChangedEvent, SettingsWhileWorkingChangedEvent } from './events-settings.js';
 // Build run events and the builds and notification settings events (stories 5.2, 5.3).
 import * as runs from './events-runs.js';
 
@@ -358,6 +360,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   SettingsWhileWorkingChangedEvent,
   runs.SettingsRunLimitsChangedEvent,
   runs.SettingsNotificationsChangedEvent,
+  SettingsUpdateNoticeChangedEvent,
 ]);
 export type CoreEvent = z.infer<typeof CoreEvent>;
 export type CoreEventType = CoreEvent['type'];
@@ -415,6 +418,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   SettingsWhileWorkingChangedInput,
   runs.SettingsRunLimitsChangedInput,
   runs.SettingsNotificationsChangedInput,
+  SettingsUpdateNoticeChangedInput,
 ]);
 export type NewCoreEvent = z.infer<typeof NewCoreEvent>;
 

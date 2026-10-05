@@ -58,8 +58,9 @@ the project root.
 With no `<dir>`, next, status, find, and mark run on the active initiative, `{output_folder}/{active_initiative}`.
 The project root is `--project-root`, else the first folder at or above the working directory that
 holds `_bmad/`. `active_initiative` and `output_folder` (`[core]`) come from the
-BMad config, merged by the project's `_bmad/scripts/config_utils.py`. `{project-root}` is
-substituted, and a relative path is taken from the project root.
+BMad config, merged by the project's `_bmad/scripts/config_utils.py`, or by the file
+`--config-utils` names. `{project-root}` is substituted, and a relative path is taken from the
+project root.
 
 Output is one JSON object on stdout. Exit 0 on success, 1 on a malformed tree, 2 when
 the store forbids the operation.
@@ -666,9 +667,9 @@ def store_name(project_root: Path | None) -> str:
     return store_config(project_root).get("store", "repo")
 
 
-def central_config(project_root: Path) -> dict:
-    """The BMad config with its layers merged by the project's own `config_utils.py`."""
-    path = project_root / "_bmad" / "scripts" / "config_utils.py"
+def central_config(project_root: Path, config_utils: str | None = None) -> dict:
+    """The BMad config with its layers merged by `config_utils`, else the project's own `config_utils.py`."""
+    path = Path(config_utils).resolve() if config_utils else project_root / "_bmad" / "scripts" / "config_utils.py"
     if not path.is_file():
         raise TicketError(f"cannot read the BMad config: {path} is missing")
     spec = importlib.util.spec_from_file_location("bmad_config_utils", path)
@@ -689,9 +690,9 @@ def tickets_root(project_root: Path, config: dict | None = None) -> Path:
     return project_root / output
 
 
-def active_initiative(project_root: Path) -> Path:
+def active_initiative(project_root: Path, config: dict | None = None) -> Path:
     """`{output_folder}/{active_initiative}` for the project."""
-    config = central_config(project_root)
+    config = central_config(project_root) if config is None else config
     core = config.get("core", {})
     name = core.get("active_initiative") if isinstance(core, dict) else None
     if not isinstance(name, str) or not name.strip():
@@ -714,12 +715,13 @@ def _folder(args) -> Path:
             raise TicketError("no project root found: no _bmad/ at or above the working directory; pass --project-root")
         # The store is then read from this project even when output_folder lies outside it.
         args.project_root = str(root)
-        return active_initiative(root)
+        return active_initiative(root, central_config(root, args.config_utils))
     folder = Path(args.dir).resolve()
     root = None if folder.is_dir() or Path(args.dir).is_absolute() else project_root_for(args, Path.cwd())
     if root is not None:
         try:
-            bases = [tickets_root(root), root]
+            config = central_config(root, args.config_utils)
+            bases = [tickets_root(root, config), root]
         except TicketError:  # no BMad config to name the store: the project root alone
             bases = [root]
         for base in bases:
@@ -969,6 +971,11 @@ def main() -> int:
     parser.add_argument(
         "--project-root",
         help="project holding _bmad/; default: walk up from the ticket folder, or the working directory with no folder",
+    )
+    parser.add_argument(
+        "--config-utils",
+        metavar="PATH",
+        help="config_utils.py that merges the BMad config; default: the project's _bmad/scripts/config_utils.py",
     )
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("next", help="tickets whose prerequisites are done or in review, by state")

@@ -1,5 +1,5 @@
 import type { SessionState } from '@ogden-agents/shared';
-import { Bell, CaretRight, List } from '@phosphor-icons/react';
+import { Bell, CaretRight, FolderSimple, GearSix, List } from '@phosphor-icons/react';
 import { Slot } from 'radix-ui';
 import {
   cloneElement,
@@ -18,6 +18,8 @@ import {
 } from 'react';
 import { Badge } from './badge';
 import { Button } from './button';
+import { Input } from './input';
+import { Label } from './label';
 import { ScrollArea } from './scroll-area';
 import { Sheet, SheetContent } from './sheet';
 import { STATE_WORDS, StateGlyph } from './state-glyph';
@@ -38,6 +40,10 @@ interface SidebarContextValue {
   setSheetOpen: (open: boolean) => void;
   /** The sidebar column; while it is displayed (md and up) the sheet has no place. */
   columnRef: RefObject<HTMLElement | null>;
+  /** The header's menu button that opens the sheet: focus goes back to it when the sheet is dismissed. */
+  triggerRef: RefObject<HTMLButtonElement | null>;
+  /** Set when the sheet closes because the user went somewhere: the new page decides focus then. */
+  navigatingRef: RefObject<boolean>;
 }
 
 const SidebarContext = createContext<SidebarContextValue | null>(null);
@@ -57,8 +63,11 @@ export interface SidebarProviderProps extends ComponentProps<'div'> {
 export function SidebarProvider({ closeSheetOn, className, children, ...props }: SidebarProviderProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const columnRef = useRef<HTMLElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const navigatingRef = useRef(false);
 
   useEffect(() => {
+    navigatingRef.current = true;
     setSheetOpen(false);
   }, [closeSheetOn]);
 
@@ -72,7 +81,7 @@ export function SidebarProvider({ closeSheetOn, className, children, ...props }:
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  const value = useMemo(() => ({ sheetOpen, setSheetOpen, columnRef }), [sheetOpen]);
+  const value = useMemo(() => ({ sheetOpen, setSheetOpen, columnRef, triggerRef, navigatingRef }), [sheetOpen]);
   return (
     <SidebarContext.Provider value={value}>
       <div
@@ -93,7 +102,7 @@ export interface SidebarProps extends ComponentProps<'aside'> {
 
 /** The sidebar column (md and up) plus its sheet form (below md), with the same content. */
 export function Sidebar({ label, className, children, ...props }: SidebarProps) {
-  const { sheetOpen, setSheetOpen, columnRef } = useSidebar();
+  const { sheetOpen, setSheetOpen, columnRef, triggerRef, navigatingRef } = useSidebar();
   return (
     <>
       <aside
@@ -119,15 +128,40 @@ export function Sidebar({ label, className, children, ...props }: SidebarProps) 
           // Focus the sheet itself, so opening it doesn't pop a row's tooltip
           // and the first Esc closes it.
           onOpenAutoFocus={(event) => {
+            navigatingRef.current = false;
             event.preventDefault();
             (event.currentTarget as HTMLElement | null)?.focus();
+          }}
+          // Esc in a filter with text clears the text (SidebarFilter) and leaves the drawer open.
+          onEscapeKeyDown={(event) => {
+            const target = event.target;
+            if (target instanceof HTMLInputElement && target.value !== '' && target.closest('[data-slot="sidebar-filter"]') !== null) event.preventDefault();
+          }}
+          // The menu button is not the dialog's own trigger, so give focus back to it by hand when
+          // the sheet is dismissed (Esc, the close button, the overlay). After a link, the new page decides.
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            if (!navigatingRef.current) triggerRef.current?.focus();
+            navigatingRef.current = false;
           }}
         >
           <nav
             aria-label={label}
             className="flex h-full min-h-0 flex-col"
-            // Following any link from the sheet closes it, even to the page already shown.
+            // Following any link from the sheet closes it, even to the page already shown. Only a link
+            // that changes this tab's page hands focus to the new page; one to the page already shown,
+            // or opened elsewhere (a modifier key), gives it back to the menu button. Decided in the
+            // capture phase, before the router moves the location.
             onClickCapture={(event) => {
+              const link = (event.target as Element).closest('a[href]');
+              if (link === null) return;
+              const elsewhere = event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
+              navigatingRef.current = !elsewhere && (link as HTMLAnchorElement).href !== window.location.href;
+            }}
+            // Closed in the bubble phase, after the link's own handler: closing in the capture phase
+            // unmounts the sheet before the router's Link sees the click, and the browser then loads
+            // the whole page again.
+            onClick={(event) => {
               if ((event.target as Element).closest('a[href]') !== null) setSheetOpen(false);
             }}
           >
@@ -139,15 +173,17 @@ export function Sidebar({ label, className, children, ...props }: SidebarProps) 
   );
 }
 
-/** Opens the sidebar sheet; shown only below md, in the workspace header. */
+/** Opens the sidebar as a drawer (a sheet); shown only below md, in every page header. */
 export function SidebarTrigger({ className, ...props }: ComponentProps<typeof Button>) {
-  const { sheetOpen, setSheetOpen } = useSidebar();
+  const { sheetOpen, setSheetOpen, triggerRef } = useSidebar();
   return (
     <Button
+      ref={triggerRef}
       data-slot="sidebar-trigger"
       variant="ghost"
       size="icon"
-      aria-label="Open sidebar"
+      aria-label="Open projects and sessions"
+      aria-haspopup="dialog"
       aria-expanded={sheetOpen}
       className={cn('md:hidden', className)}
       onClick={() => setSheetOpen(!sheetOpen)}
@@ -354,21 +390,31 @@ export function SidebarStateSummary({ summary, className, ...props }: ComponentP
 }
 
 export interface SidebarWorkspaceGroupProps extends Omit<ComponentProps<'div'>, 'title'> {
-  /** The workspace's name: the disclosure's label and the group's accessible name. */
+  /** The workspace's name: the group's accessible name and the text of its link. */
   name: string;
   collapsed: boolean;
   onCollapsedChange: (collapsed: boolean) => void;
   /** Shown beside the name while collapsed. */
   summary: readonly { state: SessionState; count: number }[];
+  /** The link that opens the workspace (a router Link with no children); the name fills it. */
+  link: ReactElement<{ children?: ReactNode }>;
+  /** The link to the workspace's settings (a router Link with no children), shown as a gear after the name. */
+  settingsLink?: ReactElement<{ children?: ReactNode }> | undefined;
+  /** The user is inside this workspace: its name is marked current. */
+  current?: boolean;
+  /** A sidebar filter left it out: hidden in the full form and the drawer, still shown in the rail (which has no filter). */
+  filteredOut?: boolean;
 }
 
 /**
- * A workspace in the sidebar (DESIGN.md Workspace group): its name in label
- * 600 with a disclosure chevron, then its session rows. Collapsed, it shows
- * one glyph and count per non-zero state. The rail has no room for the
- * name, so there every group shows its rows' glyphs, collapsed or not.
+ * A workspace in the sidebar (DESIGN.md Workspace group): a chevron that
+ * collapses its chats, its name in label 600 as the link that opens it
+ * (marked when current), a gear to its settings, then its session rows.
+ * Collapsed, it shows one glyph and count per non-zero state. The rail has
+ * no room for the name, so there the link is a folder icon with the name as
+ * tooltip, and every group shows its rows' glyphs, collapsed or not.
  */
-export function SidebarWorkspaceGroup({ name, collapsed, onCollapsedChange, summary, className, children, ...props }: SidebarWorkspaceGroupProps) {
+export function SidebarWorkspaceGroup({ name, collapsed, onCollapsedChange, summary, link, settingsLink, current = false, filteredOut = false, className, children, ...props }: SidebarWorkspaceGroupProps) {
   const listId = useId();
   return (
     <div
@@ -376,16 +422,107 @@ export function SidebarWorkspaceGroup({ name, collapsed, onCollapsedChange, summ
       aria-label={name}
       data-slot="sidebar-workspace-group"
       data-collapsed={collapsed || undefined}
-      className={cn('flex min-w-0 flex-col gap-0.5 md:max-lg:border-t md:max-lg:border-border md:max-lg:pt-1', className)}
+      data-current={current || undefined}
+      data-filtered-out={filteredOut || undefined}
+      className={cn('flex min-w-0 flex-col gap-0.5 md:max-lg:border-t md:max-lg:border-border md:max-lg:pt-1', filteredOut && 'hidden md:max-lg:flex', className)}
       {...props}
     >
-      <DisclosureButton expanded={!collapsed} aria-controls={listId} className="font-semibold md:max-lg:hidden" onClick={() => onCollapsedChange(!collapsed)}>
-        <span className="min-w-0 flex-1 truncate text-left">{name}</span>
-        {collapsed && summary.length > 0 ? <SidebarStateSummary summary={summary} /> : null}
-      </DisclosureButton>
+      <div data-slot="sidebar-workspace-heading" className="flex min-w-0 items-center gap-0.5">
+        <DisclosureButton
+          expanded={!collapsed}
+          aria-controls={listId}
+          aria-label={`Chats in ${name}`}
+          data-slot="sidebar-workspace-toggle"
+          className="w-(--control-height) shrink-0 justify-center px-0 md:max-lg:hidden"
+          onClick={() => onCollapsedChange(!collapsed)}
+        />
+        <SidebarMenuButton
+          asChild
+          isActive={current}
+          tooltip={name}
+          // Inside the project, on any of its pages: `true` (it marks where the user is, not the exact page).
+          aria-current={current ? 'true' : undefined}
+          data-slot="sidebar-workspace-link"
+          className="flex-1 font-semibold"
+        >
+          {cloneElement(
+            link,
+            undefined,
+            <>
+              <FolderSimple aria-hidden className="hidden md:max-lg:block" />
+              <SidebarLabel>{name}</SidebarLabel>
+            </>,
+          )}
+        </SidebarMenuButton>
+        {collapsed && summary.length > 0 ? <SidebarStateSummary summary={summary} className="md:max-lg:hidden" /> : null}
+        {settingsLink === undefined ? null : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              {cloneElement(
+                settingsLink,
+                {
+                  'aria-label': `${name} settings`,
+                  'data-slot': 'sidebar-workspace-settings',
+                  className: cn(
+                    'inline-flex size-(--control-height) shrink-0 items-center justify-center rounded-md text-muted-foreground md:max-lg:hidden',
+                    'transition-colors duration-(--motion-fast) ease-standard hover:bg-accent hover:text-foreground [&>svg]:size-(--icon)',
+                  ),
+                } as Partial<{ children?: ReactNode }>,
+                <GearSix aria-hidden />,
+              )}
+            </TooltipTrigger>
+            <TooltipContent side="right">{`${name} settings`}</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
       <div id={listId} className={cn('flex min-w-0 flex-col gap-0.5', collapsed && 'hidden md:max-lg:flex')}>
         {children}
       </div>
+    </div>
+  );
+}
+
+export interface SidebarFilterProps extends Omit<ComponentProps<'div'>, 'onChange'> {
+  /** The field's id (the label's `for`); from useId, since the sidebar can be mounted twice. */
+  id: string;
+  /** The visible label above the field (Accessibility Floor). */
+  label: string;
+  value: string;
+  onValueChange: (value: string) => void;
+  /** What the filter leaves, for screen readers ("2 of 9 projects"); empty while nothing is typed. */
+  status?: string;
+}
+
+/**
+ * A filter field for a sidebar list, with its visible label above it; any
+ * children (a "nothing matches" line) go under it. The first Esc clears a
+ * non-empty field; with it empty, Esc goes on to close the drawer. The rail
+ * has no room for it.
+ */
+export function SidebarFilter({ id, label, value, onValueChange, status = '', className, children, ...props }: SidebarFilterProps) {
+  return (
+    <div data-slot="sidebar-filter" className={cn('flex min-w-0 flex-col gap-1 px-2 pb-1 md:max-lg:hidden', className)} {...props}>
+      <Label htmlFor={id} className="text-caption text-muted-foreground">
+        {label}
+      </Label>
+      <Input
+        id={id}
+        type="search"
+        autoComplete="off"
+        value={value}
+        onChange={(event) => onValueChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape' && value !== '') {
+            event.preventDefault();
+            event.stopPropagation();
+            onValueChange('');
+          }
+        }}
+      />
+      <span role="status" className="sr-only">
+        {status}
+      </span>
+      {children}
     </div>
   );
 }

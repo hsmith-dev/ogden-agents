@@ -1,6 +1,6 @@
 ---
 status: final
-updated: 2026-10-01
+updated: 2026-10-04
 name: Ogden Agents
 sources:
   - ../spec-ogden-agents/spec-ogden-agents.md
@@ -32,14 +32,14 @@ Ground truths this spine inherits from the architecture and never restates diffe
 
 ## Information Architecture
 
-The shell is always the same: the **status sidebar** on the left, the **workspace area** on the right. The status sidebar, workspace switcher and session view are built once and reused everywhere (AD-18).
+The shell is always the same: the **status sidebar** on the left, the **workspace area** on the right. The status sidebar and session view are built once and reused everywhere (AD-18). The sidebar is the one place to see, open, add and manage projects; there is no separate project drop-down (note 2026-10-04, below).
 
 | Surface | Reached from | Purpose | Route |
 |---|---|---|---|
 | Launch state ("Open Ogden Agents") | Any tab without a tab token: a bookmark, a new tab, after a restart | The app's own not-connected state: tells the user to open Ogden Agents from its shortcut or run `npx ogden-agents` (AD-15, per-tab token). It shows no data. | any route (shown in place) |
 | Welcome (onboarding) | First run after launch | Pick an agent, install it, sign in or paste an API key, add a first project and answer once "Simple chats or BMad Method?" for it (CAP-16, CAP-19; note epic 10, 2026-10-01) | `/welcome/*` |
-| Status sidebar | Always visible | Every session in every workspace with its state; "Needs you" group on top; workspace switcher and Add project (CAP-17) | shell |
-| Workspace: Chats | Sidebar workspace row, or `g c` | Session list for this project and the session view | `/w/:wsId/s/:sesId` |
+| Status sidebar | Always visible (a drawer below `md`) | Every project and its sessions with their state; "Needs you" group on top; each project opens from its name and reaches its settings from a gear; Add project at the end of the list (CAP-17) | shell |
+| Workspace: Chats | Sidebar project name, or `g c` | Session list for this project and the session view | `/w/:wsId/s/:sesId` |
 | Session view | Sidebar row, Chats list, run row | Chat or planning transcript with permission cards and composer; build sessions render read-only as the live run view (AD-8) | `/w/:wsId/s/:sesId` |
 | Terminal mode | Driver toggle in session header (Developer mode, supported agents) | The agent's real CLI on the same session (CAP-5) | same route, `?driver=terminal` |
 | Workspace: Plan | Workspace tab, or `g p` | Guided planning: plain-language actions from the discovered catalog, grouped, plus "Start from an idea" (CAP-6, CAP-18) | `/w/:wsId/plan` |
@@ -47,7 +47,7 @@ The shell is always the same: the **status sidebar** on the left, the **workspac
 | Ticket detail | Ticket card | Side sheet: plan summary, status, prerequisites, runs, Build / Review actions | `/w/:wsId/board/:ref` |
 | Workspace: Runs | Workspace tab, or `g r` | Every build run with outcome; opens the live run view (CAP-9) | `/w/:wsId/runs` |
 | Review | Needs you row, ticket card, run row, notification link | Verification checks, findings, diff, Approve and merge / Reject and retry (CAP-10, CAP-12) | `/w/:wsId/review/:ref` |
-| Workspace settings | Workspace header menu | Caution level, default agent, concurrency limit, history deletion, BMad Method pieces (all four listed; ones not yet built greyed as coming soon; note epic 10, 2026-10-01), BMad Method setup status and upgrade | `/w/:wsId/settings` |
+| Workspace settings | Gear beside the project's name in the sidebar, or the Chats list header | Caution level, default agent, concurrency limit, history deletion, BMad Method pieces (all four listed; ones not yet built greyed as coming soon; note epic 10, 2026-10-01), BMad Method setup status and upgrade | `/w/:wsId/settings` |
 | Settings: Agents | Sidebar footer menu | Installed agents, sign-in state, API keys, install more (CAP-15, CAP-16) | `/settings/agents` |
 | Settings: Notifications | Sidebar footer menu | Webhook targets and which events send (blocked, ready for review) with a Send test (CAP-14) | `/settings/notifications` |
 | Settings: Appearance | Sidebar footer menu | Theme, density, Developer mode (kept by the server) | `/settings/appearance` |
@@ -58,6 +58,7 @@ Navigation rules:
 
 - Workspace tabs, in this order: **Chats**, **Plan**, **Board**, **Runs**. Review is not a tab; it is reached from what needs reviewing. Chats is always shown; Plan, Board and Runs appear only when their BMad piece is on (note epic 10, 2026-10-01).
 - The sidebar footer holds Settings, the server status ("Running on this computer"), and **Quit Ogden Agents** (AD-3).
+- One place for projects (note 2026-10-04, user: "We don't need two things for projects a drop down and a side bar, I prefer the side bar."): the sidebar header carries only the wordmark. Each project group's heading is a chevron (collapses its chats, never opens the project), the project's name (opens its Chats list, marked current on any page inside the project), and a gear (its settings), always shown, not on hover. In the rail each project is a folder icon with its name as tooltip. From eight projects a labelled **Filter projects** field sits above the list; it matches names ignoring case, says "No projects match" when nothing does, `Esc` clears it, and it never filters Needs you. Projects keep their creation order.
 - Modals stack one level deep. Ticket detail is a sheet, not a dialog, so it never stacks under a confirmation.
 
 → Composition reference: [`mockups/key-workspace.html`](mockups/key-workspace.html). Spine wins on conflict.
@@ -91,7 +92,7 @@ Behavioral. Visual specs live in `DESIGN.md` Components.
 |---|---|---|
 | Status sidebar | Always | Lists every workspace and its sessions, active first (working, waiting, error), then idle, then done collapsed under "Earlier". State changes arrive from the event log and update in place without reordering the row under the pointer. Click a row opens that session. A project with no chats shows one row, **Start a chat** (named "Start a chat in <project>" for screen readers), which starts a chat with its default agent and opens it, or opens its Chats page when the default can't start one. Workspace groups remember collapsed state per browser. |
 | Needs you group | Top of sidebar | Aggregates across all workspaces: permission requests, agent questions, tickets ready for review, blocked runs. Each row names its workspace and its chat ("Letterpress, Fix the login bug: Claude Code wants to run npm test"). Click jumps straight to the card, review or blocked notice. Hidden when empty. The browser tab title prefixes the count: "(2) Ogden Agents". |
-| Workspace switcher | Sidebar header | Lists workspaces, Add project (pick a folder, or create a new project folder). A workspace is one repo root; adding the same folder twice opens the existing workspace (AD-2). |
+| Project heading | Each workspace group in the sidebar | Chevron, name, gear, as in the navigation rules (it replaced the workspace switcher drop-down, note 2026-10-04). **Add project** at the end of the list picks a folder or creates a new project folder; a workspace is one repo root, and adding the same folder twice opens the existing workspace (AD-2). |
 | Session view | Chats, run view | Transcript, then any pending permission card, then the composer. Auto-scrolls while the user is at the bottom; if they scrolled up, it stops and shows a "Jump to latest" button with a count of new items. Build sessions render read-only with no composer (AD-8). |
 | Tool-call row | Transcript | Collapsed by default in Comfortable (grouped: "Read 4 files, edited 2"); listed individually in Compact. Click or `Enter` expands in place. Edit rows expand to their diff hunk. |
 | Permission card | Transcript, Needs you | Appears inline where the agent asked, and the session moves to `waiting`. If the card is off-screen, a sticky "Claude Code is waiting for you" bar sits above the composer and scrolls to it. Buttons: **Allow once**, **Always allow** (scope written under it: the command prefix or tool in this project), **Deny** (optional reason field sent back to the agent). No default-focused button, so a stray `Enter` never allows anything. After a decision the card collapses to its record line; the record opens a popover to undo an "Always allow". The command never runs until a decision (CAP-4). |
@@ -152,7 +153,8 @@ Behavioral. Visual specs live in `DESIGN.md` Components.
 - `⌘K` / `Ctrl+K`: command palette (workspaces, sessions, tickets, actions).
 - `g c` / `g p` / `g b` / `g r`: Chats, Plan, Board, Runs in the current workspace.
 - `g n`: jump to the first item in Needs you.
-- `[` / `]`: previous / next workspace.
+- `[` / `]`: previous / next workspace (not built yet).
+- Projects without a shortcut: `Tab` reaches each project's chevron, name and gear in order; `Enter` on a name opens the project, `Enter` or `Space` on a chevron collapses or expands it. Below `md`, the header's menu button opens the drawer from the keyboard too.
 - `⌘.` / `Ctrl+.`: toggle Chat and Terminal driver (Developer mode, supported agents).
 - Permission card focused: `1` Allow once, `2` Always allow, `3` Deny. Numbers, not `Enter`, so a habit keypress never allows.
 - `Esc`: close sheet, dialog or palette; never cancels a running agent.
@@ -185,7 +187,7 @@ Behavioral. Visual contrast lives in `DESIGN.md` Colors.
 | `≥ xl` (1280px+) | Full sidebar, workspace area, optional right peek (transcript beside terminal, ticket sheet beside board). |
 | `lg` (1024 to 1279px) | Full sidebar; sheets overlay rather than sit beside. |
 | `md` (768 to 1023px) | Sidebar collapses to the 56px rail of state glyphs (`{spacing.sidebar-rail}`); Needs you becomes a counted button at the top of the rail. |
-| `< md` | Sidebar opens as a sheet from the header. Board epics stack as lists instead of columns. Permission cards and Approve still work fully. |
+| `< md` | Sidebar opens as a drawer (a sheet from the left) from the menu button at the start of every page header ("Open projects and sessions"), with everything the column has: projects, Add project, settings, Needs you. Focus moves into the drawer and stays there; `Esc`, the close button or the overlay closes it and returns focus to the menu button; following a project, chat or settings link closes it and the new page decides focus. Board epics stack as lists instead of columns. Permission cards and Approve still work fully. |
 
 Local only: the server binds to `127.0.0.1` (AD-15), so there is no phone access; narrow widths exist for side-by-side windows on the same computer. Evergreen Chrome, Edge, Firefox and Safari on macOS, Windows and Linux. Layout is verified in a real browser with Playwright (architecture Conventions). No offline mode beyond reconnect and catch-up.
 

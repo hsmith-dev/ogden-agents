@@ -240,7 +240,7 @@ graph LR
   - shadcn/ui components live, owned and restyled, only in `packages/web/ui`. There is no second component library, and feature code does no ad hoc styling.
   - Color, type, spacing, radius and motion are CSS-variable tokens with light and dark sets, and components use tokens only.
   - The visual direction comes from the `design-taste-frontend` Design Read, recorded by `bmad-ux` as `DESIGN.md` and `EXPERIENCE.md` in epic 1.
-  - The status sidebar, workspace switcher and session view are built once and reused.
+  - The status sidebar (the one place to see, open, add and manage projects; note backlog story 2, 2026-10-04: the workspace switcher drop-down was removed) and session view are built once and reused.
 
 ### AD-19 — The terminal is optional to load [ADOPTED]
 

@@ -247,6 +247,30 @@ function mergeUniversal(armRoot, x64Root) {
   report.checks.universalMerge = { lipoMerged: merged, copiedFromX64: copied };
 }
 
+/**
+ * Removes native binaries for other targets: node-pty's prebuilds for other OSes, and musl
+ * packages on Linux (linuxdeploy fails on `libc.musl-*.so.1`). A first cut of 13.4's pruning.
+ */
+function pruneForeign(nodeModules) {
+  const keep = new Set(plats.map((p) => p.replace(/^win-/, 'win32-')));
+  const removed = [];
+  const before = du(nodeModules).bytes;
+  const prebuilds = join(nodeModules, 'node-pty', 'prebuilds');
+  if (existsSync(prebuilds)) {
+    for (const d of readdirSync(prebuilds)) if (!keep.has(d)) (rmSync(join(prebuilds, d), { recursive: true, force: true }), removed.push(`node-pty/prebuilds/${d}`));
+  }
+  const walk = (dir, depth) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue;
+      const p = join(dir, e.name);
+      if (/-musl(eabihf)?$/.test(e.name)) (rmSync(p, { recursive: true, force: true }), removed.push(relative(nodeModules, p)));
+      else if (depth < 1 && e.name.startsWith('@')) walk(p, depth + 1);
+    }
+  };
+  walk(nodeModules, 0);
+  report.checks.pruned = { removed, savedBytes: before - du(nodeModules).bytes };
+}
+
 async function main() {
   rmSync(stage, { recursive: true, force: true });
   mkdirSync(stage, { recursive: true });
@@ -281,6 +305,8 @@ async function main() {
     mergeUniversal(join(stage, 'app'), x64);
     rmSync(x64, { recursive: true, force: true });
   }
+
+  pruneForeign(join(stage, 'app', 'node_modules'));
 
   // Native modules with the bundled Node (and the Intel slice under Rosetta).
   checkNatives(plats[0], sidecar, plats[0]);

@@ -184,8 +184,23 @@ async function launch(name, exe, { mode = 'tree', prefix = [], updateUrl, timeou
   const rec = { mode, exe };
   const out = join(dir, 'stdio.log');
   const [cmd, cmdArgs] = prefix.length ? [prefix[0], [...prefix.slice(1), exe]] : [exe, []];
-  const t0 = Date.now();
-  const child = spawn(cmd, cmdArgs, { env, stdio: ['ignore', 'pipe', 'pipe'], detached: OS !== 'win' });
+  let t0 = Date.now();
+  let child;
+  for (let attempt = 1; ; attempt++) {
+    t0 = Date.now();
+    child = spawn(cmd, cmdArgs, { env, stdio: ['ignore', 'pipe', 'pipe'], detached: OS !== 'win' });
+    const spawnError = await new Promise((r) => {
+      child.once('spawn', () => r(undefined));
+      child.once('error', (e) => r(e));
+    });
+    if (!spawnError) break;
+    rec.spawnErrors = [...(rec.spawnErrors ?? []), `${spawnError.code ?? spawnError} (exists: ${existsSync(exe)})`];
+    if (attempt >= 3) {
+      rec.error = `could not start ${exe}`;
+      return rec;
+    }
+    await sleep(5000);
+  }
   child.stdout.on('data', (d) => appendFileSync(out, d));
   child.stderr.on('data', (d) => appendFileSync(out, d));
   let exited;
@@ -300,6 +315,9 @@ function installWin(bundleDir) {
   if (!nsis) throw new Error('no NSIS installer');
   const r = spawnSync(nsis.path, ['/S'], { stdio: 'inherit' });
   const dir = join(process.env.LOCALAPPDATA ?? '', 'Ogden Agents Spike');
+  // The installer may hand off to a second copy of itself; wait until no setup process is left.
+  for (let i = 0; i < 60 && listProcs().some((p) => /setup/i.test(p.name) && /Ogden/i.test(p.name)); i++) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},1000)']);
+  findings.nsisInstall = { exit: r.status, files: existsSync(dir) ? readdirSync(dir).map((n) => `${n} ${statSync(join(dir, n)).size}`) : [] };
   const exe = existsSync(dir) ? readdirSync(dir).find((n) => n.endsWith('.exe') && !n.startsWith('ogden-node') && !/uninstall/i.test(n)) : undefined;
   if (!exe) throw new Error(`NSIS install (exit ${r.status}) left no app exe in ${dir}`);
   return { exe: join(dir, exe), installedBytes: du(dir), dir };

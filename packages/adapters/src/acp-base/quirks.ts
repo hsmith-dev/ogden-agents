@@ -10,12 +10,12 @@ import { PERMISSION_MODES, type PermissionMode } from '@ogden-agents/shared';
 import type { AcpToolInputPaths } from './tool-paths.js';
 
 /** The plain reasons the UI shows for an agent, by its product name. */
-export function acpReasons(displayName: string) {
+export function acpReasons(displayName: string, options: { apiKeyOnly?: boolean } = {}) {
   return {
     notSetUp: `${displayName} isn't set up for Ogden Agents on this computer yet.`,
     couldNotStart: `${displayName} couldn't start. Try again.`,
     stopped: `${displayName} stopped unexpectedly. Send your message again to restart it.`,
-    signIn: `${displayName} needs you to sign in again.`,
+    signIn: options.apiKeyOnly === true ? `${displayName} needs a valid API key. Check it in Settings → Agents.` : `${displayName} needs you to sign in again.`,
     failed: `${displayName} stopped with an error. Try again.`,
     noSuchMode: `${displayName} doesn't offer that permission mode here.`,
     couldNotSwitchMode: `${displayName} couldn't switch its permission mode.`,

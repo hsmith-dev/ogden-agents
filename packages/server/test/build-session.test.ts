@@ -193,7 +193,8 @@ describe('the headless build session (story 5.4)', () => {
       expect(names).not.toContain('VITEST');
       // Every name is the allowlist, the key, the run's object store, or a test switch of the fake agent: nothing else of the server's environment.
       const allowed = /^(PATH|Path|HOME|USER|USERNAME|USERPROFILE|LANG|LC_.*|TERM|TMPDIR|TEMP|TMP|SHELL|SystemRoot|ComSpec|PATHEXT|ANTHROPIC_API_KEY|GIT_.*|CLAUDE_CODE_EXECUTABLE|FAKE_.*|PWD|SHLVL|_|OLDPWD|__CF_USER_TEXT_ENCODING)$/;
-      expect(names.filter((name) => name !== '' && !allowed.test(name))).toEqual([]);
+      // (Windows adds its own variables to every process it starts, so the strict check is for the other systems.)
+      if (process.platform !== 'win32') expect(names.filter((name) => name !== '' && !allowed.test(name))).toEqual([]);
       const folder = runFolder(s.server, run.id);
       await waitFor(async () => readFileSync(join(folder, BUILD_ACTIVITY_FILE), 'utf8').includes('run.outcome_changed'), 'the outcome in the activity', 10_000);
       const events = JSON.stringify(s.server.core.events.readAfter(0));

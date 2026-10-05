@@ -1,12 +1,21 @@
 name: Release
 
-# Publishes the root `ogden-agents` package to npm when a version tag is pushed
-# (see RELEASING.md). Order: guard (tag on main, versions match the tag), the
-# full CI matrix for the tagged commit, publish from Linux through npm trusted
+# One release pipeline (see RELEASING.md). A version tag builds the release
+# assets once (the packed tarball the smoke test installs, the start scripts,
+# the install helper, SHA256SUMS.txt, notes from CHANGELOG.md) and creates the
+# GitHub Release from them: this works with no npm setup at all, and people can
+# install and update from it (`--github` on the start scripts). Publishing the
+# same package to npm is a separate, gated path that runs only when the
+# repository variable NPM_PUBLISH is `true`: guard (tag on main, versions match
+# the tag), the full CI matrix, publish from Linux through npm trusted
 # publishing (GitHub OIDC, no stored npm token), then `npx ogden-agents@<version>`
-# from the registry on macOS, Windows and Linux, a registry and provenance
-# check, and the double-click start scripts attached to the GitHub Release. Publishing is idempotent: re-running a release whose version is already
-# on npm from this same commit skips the publish and goes on to verify.
+# from the registry on macOS, Windows and Linux, and a registry and provenance
+# check. With npm on, the GitHub Release is created only after verify. Publishing
+# is idempotent: re-running a release whose version is already on npm from this
+# same commit skips the publish and goes on to verify.
+#
+# `workflow_dispatch` is a dry run: it builds every release asset and keeps them
+# as workflow artifacts, and creates no release, tag or npm publish.
 #
 # The trusted publisher on npmjs.com names this repository, this file
 # (`release.yml`) and the environment `npm-release`; renaming the file or the
@@ -15,6 +24,8 @@ name: Release
 on:
   push:
     tags: ['v*.*.*']
+  # Dry run: builds the release assets as workflow artifacts; no release, no npm.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -32,6 +43,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
       dist-tag: ${{ steps.version.outputs.dist-tag }}
     steps:
       - uses: actions/checkout@v7
@@ -43,6 +55,7 @@ jobs:
       # First-parent history only: a commit made on a feature branch and later
       # merged into main is reachable from main but was never main itself.
       - name: Tagged commit is on main
+        if: github.ref_type == 'tag'
         run: |
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
           if ! git rev-list --first-parent origin/main | grep -qx "$GITHUB_SHA"; then
@@ -55,12 +68,15 @@ jobs:
       # (tests/packaging.test.ts keeps them equal) must equal the tag without its `v`.
       - name: Versions match the tag
         id: version
+        env:
+          # Empty on a dry run (workflow_dispatch): the version is then the packages' own.
+          TAG_NAME: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: |
           node --input-type=module -e '
             import { readFileSync, appendFileSync } from "node:fs";
-            const tag = process.env.GITHUB_REF_NAME;
-            const expected = tag.replace(/^v/, "");
             const files = ["package.json", "packages/server/package.json", "packages/web/package.json"];
+            const tag = process.env.TAG_NAME || `v${JSON.parse(readFileSync(files[0], "utf8")).version}`;
+            const expected = tag.replace(/^v/, "");
             const mismatches = files
               .map((file) => ({ file, version: JSON.parse(readFileSync(file, "utf8")).version }))
               .filter(({ version }) => version !== expected);
@@ -71,20 +87,99 @@ jobs:
             }
             // A prerelease (0.2.0-rc.1) goes to the `next` dist-tag so `npx ogden-agents` keeps the last stable version.
             const distTag = expected.includes("-") ? "next" : "latest";
-            appendFileSync(process.env.GITHUB_OUTPUT, `version=${expected}\ndist-tag=${distTag}\n`);
+            appendFileSync(process.env.GITHUB_OUTPUT, `version=${expected}\ndist-tag=${distTag}\ntag=${tag}\n`);
             console.log(`Tag ${tag} matches version ${expected} in ${files.join(", ")}; npm dist-tag ${distTag}`);
           '
 
   ci:
     name: CI
     needs: guard
+    # Not on a dry run: it only builds the assets.
+    if: github.event_name == 'push'
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
 
+  # The release assets, built once from the tagged commit (or, on a dry run, from
+  # the branch): the packed tarball (the very file the smoke test installs and
+  # people install from the release), the start scripts, the install helper, the
+  # SHA-256 of all of them, and the release notes. Kept as a workflow artifact;
+  # the GitHub Release job attaches them. Read-only: nothing here can publish.
+  assets:
+    name: Build the release assets
+    needs: [guard, ci]
+    # A dry run skips ci, which must not skip this.
+    if: ${{ !cancelled() && needs.guard.result == 'success' && (needs.ci.result == 'success' || needs.ci.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.guard.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # `pnpm build` also bundles the install helper (dist-installer/). The
+      # tarball records the commit as `gitHead`, as the npm publish does.
+      - name: Build and pack
+        run: |
+          pnpm build
+          npm pkg set gitHead="$GITHUB_SHA"
+          pnpm pack
+          test -f "ogden-agents-$VERSION.tgz"
+          test -f packages/server/dist-installer/ogden-install.mjs
+
+      # The exact tarball the release will carry, installed with npx in an empty
+      # directory, must serve the page.
+      - name: Smoke test the tarball
+        run: node scripts/smoke-installed.mjs "ogden-agents-$VERSION.tgz"
+
+      # Asset names have no spaces because GitHub turns them into dots. The
+      # macOS script goes in a zip with the install helper beside it, since a
+      # browser download drops an executable bit and Archive Utility keeps it.
+      - name: Collect the assets and checksums
+        run: |
+          out="$RUNNER_TEMP/release"
+          mkdir -p "$out/assets"
+          cp "ogden-agents-$VERSION.tgz" "$out/assets/"
+          cp packages/server/dist-installer/ogden-install.mjs "$out/assets/"
+          cp "start/Start Ogden.cmd" "$out/assets/Start-Ogden.cmd"
+          cp start/start-ogden.sh "$out/assets/start-ogden.sh"
+          cp packages/server/dist-installer/ogden-install.mjs start/
+          (cd start && zip -X "$out/assets/Start-Ogden-macOS.zip" "Start Ogden.command" ogden-install.mjs)
+          rm start/ogden-install.mjs
+          unzip -Z "$out/assets/Start-Ogden-macOS.zip" | grep -q '^-rwxr-xr-x.* Start Ogden.command' || { echo "::error::the zipped Start Ogden.command is not executable"; exit 1; }
+          (cd "$out/assets" && sha256sum * > "$RUNNER_TEMP/SHA256SUMS.txt" && mv "$RUNNER_TEMP/SHA256SUMS.txt" . && cat SHA256SUMS.txt)
+          node scripts/release-notes.mjs "$VERSION" --repo "$GITHUB_REPOSITORY" > "$out/notes.md"
+          cat "$out/notes.md"
+          ls -l "$out/assets"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-assets
+          path: ${{ runner.temp }}/release
+          if-no-files-found: error
+          retention-days: 14
+
   publish:
     name: Publish to npm
     needs: [guard, ci]
+    # Opt-in: only when the repository variable NPM_PUBLISH is `true`, so a tag
+    # never names the `npm-release` environment unless npm publishing is set up
+    # (RELEASING.md). Skipped, the GitHub Release is still created.
+    if: ${{ github.event_name == 'push' && vars.NPM_PUBLISH == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: npm-release
@@ -172,18 +267,19 @@ jobs:
             exit 1
           fi
 
-  # The double-click start scripts (start/, README "Start Ogden") attached to
-  # the GitHub Release for this tag, created here if it doesn't exist (a
-  # prerelease for a `next` version). Only after verify: the scripts run
-  # `npx ogden-agents@latest`, so they go up once the package is on npm and
-  # starts from the registry on every OS. SHA256SUMS.txt lists each asset. The
-  # macOS script goes in a zip, since a browser download drops its executable
-  # bit and Archive Utility keeps it; GitHub turns spaces in asset names into
-  # dots, so the assets are named without them. Idempotent: a re-run replaces
-  # the assets. The only job with write access to the repository.
-  start-scripts:
-    name: Attach start scripts to the GitHub Release
-    needs: [guard, verify]
+  # The GitHub Release for this tag, from the assets job's files: the tarball,
+  # the start scripts, the install helper, SHA256SUMS.txt and the notes. It is
+  # created as a draft, gets every asset, and is published last, so nobody sees
+  # a release half-attached. A prerelease version (`-rc`, `-next`) is marked as
+  # one, so it is never the "latest" release. With npm publishing on, it waits
+  # for verify (the start scripts run `npx ogden-agents@latest`, so they go up
+  # only once the package is on npm and starts on every OS); with it off
+  # (NPM_PUBLISH unset) it needs only CI and the assets. Idempotent: a re-run
+  # replaces the assets. The only job with write access to the repository.
+  github-release:
+    name: Create the GitHub Release
+    needs: [guard, assets, publish, verify]
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.assets.result == 'success' && (vars.NPM_PUBLISH != 'true' || needs.verify.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -194,36 +290,33 @@ jobs:
       TAG: ${{ github.ref_name }}
       DIST_TAG: ${{ needs.guard.outputs.dist-tag }}
     steps:
-      # Only start/ is used; the write-scoped token isn't kept in .git/config.
-      - uses: actions/checkout@v7
+      # No checkout: only the assets artifact is used, and the write-scoped
+      # token is never written to a .git/config.
+      - uses: actions/download-artifact@v8
         with:
-          persist-credentials: false
+          name: release-assets
+          path: release
 
-      - name: Build the assets
-        run: |
-          mkdir -p "$RUNNER_TEMP/assets"
-          (cd start && zip -X "$RUNNER_TEMP/assets/Start-Ogden-macOS.zip" "Start Ogden.command")
-          unzip -Z "$RUNNER_TEMP/assets/Start-Ogden-macOS.zip" | grep -q '^-rwxr-xr-x' || { echo "::error::the zipped Start Ogden.command is not executable"; exit 1; }
-          cp "start/Start Ogden.cmd" "$RUNNER_TEMP/assets/Start-Ogden.cmd"
-          cp start/start-ogden.sh "$RUNNER_TEMP/assets/start-ogden.sh"
-          (cd "$RUNNER_TEMP/assets" && sha256sum Start-Ogden-macOS.zip Start-Ogden.cmd start-ogden.sh > SHA256SUMS.txt && cat SHA256SUMS.txt)
-          ls -l "$RUNNER_TEMP/assets"
+      - name: Checksums still match
+        run: (cd release/assets && sha256sum --check SHA256SUMS.txt)
 
       - name: Create the release if needed and attach the assets
         run: |
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             prerelease=""
             if [ "$DIST_TAG" = "next" ]; then prerelease="--prerelease"; fi
-            gh release create "$TAG" --verify-tag --title "$TAG" $prerelease \
-              --notes "Release notes: [CHANGELOG.md](https://github.com/$GH_REPO/blob/main/CHANGELOG.md). To start Ogden Agents without a terminal, download the start script for your computer below and see [Start Ogden](https://github.com/$GH_REPO/blob/main/README.md#start-ogden)."
+            gh release create "$TAG" --verify-tag --draft --title "$TAG" $prerelease --notes-file release/notes.md
           fi
           for attempt in 1 2 3; do
-            if gh release upload "$TAG" --clobber "$RUNNER_TEMP"/assets/*; then exit 0; fi
+            if gh release upload "$TAG" --clobber release/assets/*; then break; fi
+            if [ "$attempt" = 3 ]; then echo "::error::could not attach the assets to release $TAG; re-run this job"; exit 1; fi
             echo "upload failed (attempt $attempt); retrying"
             sleep 10
           done
-          echo "::error::could not attach the start scripts to release $TAG; re-run this job"
-          exit 1
+          if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = "true" ]; then
+            gh release edit "$TAG" --draft=false
+          fi
+          gh release view "$TAG" --json assets --jq '.assets[].name'
 
   # Separate from publish so a slow registry or a missing attestation never
   # blocks verify, and verify never waits on it.

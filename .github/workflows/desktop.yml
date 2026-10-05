@@ -19,10 +19,12 @@ on:
     paths:
       - packages/desktop/**
       - .github/workflows/desktop.yml
+      - .github/actions/desktop-build/**
   pull_request:
     paths:
       - packages/desktop/**
       - .github/workflows/desktop.yml
+      - .github/actions/desktop-build/**
   workflow_dispatch:
 
 permissions:
@@ -31,11 +33,6 @@ permissions:
 concurrency:
   group: desktop-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
-
-env:
-  TAURI_CLI: '@tauri-apps/cli@2.12.1'
-  # Matches packages/desktop/src-tauri/rust-toolchain.toml.
-  RUST_VERSION: 1.99.0
 
 jobs:
   # Runtime lane (story 13.4): the pinned, SHA-256-checked Node, its npm and the packed server with
@@ -110,42 +107,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
+      # Stage, build, sign with a throwaway key and check the artifacts: the same steps a release
+      # runs (story 13.9), with `signing: test`.
+      - uses: ./.github/actions/desktop-build
         with:
-          node-version: 24
-          cache: pnpm
-
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          targets: ${{ matrix.rust }}
-
-      - name: Build and pack Ogden Agents
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm run build
-          pnpm pack
-          ls -l ogden-agents-*.tgz
-
-      - name: Stage the bundled Node, npm and the packed server
-        run: node packages/desktop/scripts/stage.mjs --target ${{ matrix.target }} --tgz "$(ls ogden-agents-*.tgz | head -1)"
-
-      - name: Icons
-        working-directory: packages/desktop
-        run: npx --yes "$TAURI_CLI" icon stage/icon-source.png -o src-tauri/icons
-
-      # Never stored: a fresh key pair per run, its public key set for this build only.
-      - name: Throwaway updater key
-        run: node packages/desktop/scripts/test-updater-key.mjs "$RUNNER_TEMP/updater-key" >> "$GITHUB_ENV"
-
-      - name: Build the app and its installer (unsigned)
-        working-directory: packages/desktop
-        run: npx --yes "$TAURI_CLI" build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config "$RUNNER_TEMP/updater-key/config-override.json"
-
-      - name: Check the artifacts
-        run: node packages/desktop/scripts/check-artifacts.mjs --target ${{ matrix.target }}
+          target: ${{ matrix.target }}
+          rust: ${{ matrix.rust }}
+          bundles: ${{ matrix.bundles }}
+          signing: test
 
       - name: Mount the .dmg and run the app from it (macOS)
         if: runner.os == 'macOS'

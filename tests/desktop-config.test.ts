@@ -10,7 +10,9 @@ import { describe, expect, it } from 'vitest';
 
 const TAURI = join(import.meta.dirname, '..', 'packages', 'desktop', 'src-tauri');
 const config = JSON.parse(readFileSync(join(TAURI, 'tauri.conf.json'), 'utf8')) as Record<string, any>;
-const main = readFileSync(join(TAURI, 'src', 'main.rs'), 'utf8');
+const sources = Object.fromEntries(readdirSync(join(TAURI, 'src')).filter((name) => name.endsWith('.rs')).map((name) => [name, readFileSync(join(TAURI, 'src', name), 'utf8')]));
+/** Every Rust source of the shell, as one text. */
+const main = Object.values(sources).join('\n');
 
 describe('the app version', () => {
   it('is the package version in the Tauri config and the crate, so a release builds the version it names', () => {
@@ -59,6 +61,18 @@ describe('the shell source', () => {
     expect(main).not.toMatch(/(?:println|eprintln|report)!?\([^;]*launch_url/);
     // The launcher token is read from the data folder and sent only to the loopback handshake.
     expect(main).not.toMatch(/report\([^;]*token/);
+  });
+
+  it('registers the single-instance plugin first, so a second launch hands over before anything else starts', () => {
+    const builder = sources['main.rs']!;
+    const first = builder.indexOf('.plugin(');
+    expect(builder.slice(first, first + 80)).toContain('tauri_plugin_single_instance');
+  });
+
+  it('quits a server only through the one quit path, which leaves a server the app only attached to running', () => {
+    expect(sources['ui.rs']).toContain('pub fn request_quit');
+    expect(sources['server.rs']).toContain('if !owned');
+    expect(sources['server.rs']).toContain("report(\"quit_not_ours\"");
   });
 
   it('adds no Tauri plugin that gives the web page IPC (the updater, menu and single-instance run in Rust only)', () => {

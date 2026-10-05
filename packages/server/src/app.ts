@@ -20,7 +20,7 @@ import {
   type AgentModels,
 } from '@ogden-agents/core';
 import { API_ROUTES, ToolchainInstallResponse, ToolchainResponse } from '@ogden-agents/shared';
-import { Hono, type MiddlewareHandler } from 'hono';
+import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { registerAgentSetupRoutes } from './agent-setup-routes.js';
 import { registerBmadDetectionRoutes } from './bmad-detection-routes.js';
@@ -216,7 +216,7 @@ export function createApp({
     });
 
     // Quit (EXPERIENCE.md sidebar footer). A state-changing POST, so the gate checks its Origin.
-    app.post(API_ROUTES.serverQuit, async (c) => {
+    const quit = async (c: Context) => {
       let force = false;
       try {
         const body = (await c.req.json()) as { force?: unknown } | null;
@@ -231,7 +231,11 @@ export function createApp({
         });
       }
       return c.json(result, 202);
-    });
+    };
+    app.post(API_ROUTES.serverQuit, quit);
+    // The desktop app's own Quit (story 13.5): the same rule and answers, for the shell, which holds the launcher token and no tab.
+    // Only the app starts a server in shell mode, and only the server it started is quit this way.
+    if (shell === 'desktop') app.post('/launcher/quit', quit);
   }
 
   if (toolchain !== undefined) {

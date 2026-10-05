@@ -41,6 +41,9 @@ const SECRET_FIELDS = new Set([
   'anthropic_api_key',
   'gemini_api_key',
   'google_api_key',
+  'codex_api_key',
+  'openai_api_key',
+  'xai_api_key',
 ]);
 
 /** Field names whose value is a credential when it is a string (a boolean such as "was a token found" is not). */

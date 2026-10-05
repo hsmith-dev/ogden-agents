@@ -213,6 +213,15 @@
 // `resume` or `load` (default `ask`): "mode" replies `mode=<it>`, and in
 // `skip_all` "permission <command>" runs without asking.
 //
+// Codex's personality (epic 12 entry 4; spike 12.1's shapes), set by the wrapper
+// `fake-codex.mjs` (FAKE_ACP_PERSONALITY=codex): `session/list` beside resume and
+// load, the four session modes (`read-only`, `workspace-write`, `agent`,
+// `agent-full-access`), starting in `INITIAL_AGENT_MODE` (default `agent`),
+// sign-in methods `chat-gpt` and `api-key` (the key from CODEX_API_KEY), no
+// session before `authenticate`, and "permission <command>" with Codex's
+// options (`allow_once`, `allow_for_session`, and two reject_once: `decline`
+// and `cancel`). `agent-full-access` runs commands without asking.
+//
 // Antigravity's personality (epic 6 entry 5; spike 6.1's shapes), set by the
 // wrapper `fake-antigravity.mjs` (FAKE_ACP_PERSONALITY=antigravity): its
 // `agentInfo` (`antigravity-acp` 1.3.0), `session/list` beside resume and
@@ -315,6 +324,8 @@ const REOPEN_FAIL = new Set((process.env.FAKE_ACP_REOPEN_FAIL ?? '').split(',').
 const NEW_MESSAGE = '[Ogden Agents] New message:\n';
 /** Antigravity's personality (epic 6 entry 5), from `fake-antigravity.mjs`. */
 const ANTIGRAVITY = process.env.FAKE_ACP_PERSONALITY === 'antigravity';
+/** Codex's personality (epic 12 entry 4), from `fake-codex.mjs`. */
+const CODEX = process.env.FAKE_ACP_PERSONALITY === 'codex';
 
 /**
  * Whether it offers the steering extension (send now or wait): as
@@ -362,11 +373,12 @@ const AVAILABLE_MODES = process.env.FAKE_ACP_MODES ? listOf(process.env.FAKE_ACP
 ];
 /** The variable FAKE_ACP_REQUIRE_API_KEY reads its key from: FAKE_ACP_API_KEY_ENV (a generic agent's own, 6.3), else Claude Code's. */
 const API_KEY_ENV = process.env.FAKE_ACP_API_KEY_ENV || 'ANTHROPIC_API_KEY';
-const START_MODE = process.env.FAKE_ACP_START_MODE ?? 'default';
+// Codex starts in the mode `INITIAL_AGENT_MODE` names, else its own default, Auto review (`agent`).
+const START_MODE = process.env.FAKE_ACP_START_MODE ?? (CODEX ? (process.env.INITIAL_AGENT_MODE ?? 'agent') : 'default');
 /** Modes in which it edits files without asking (Claude Code's `acceptEdits`, `auto` and `bypassPermissions`). */
-const EDITS_WITHOUT_ASKING = new Set(['acceptEdits', 'auto', 'bypassPermissions', 'auto_edit', 'yolo', 'skip_all']);
+const EDITS_WITHOUT_ASKING = new Set(['acceptEdits', 'auto', 'bypassPermissions', 'auto_edit', 'yolo', 'skip_all', 'agent-full-access']);
 /** Modes in which it runs commands without asking (Claude Code's `bypassPermissions`, Antigravity's `yolo`). */
-const RUNS_WITHOUT_ASKING = new Set(['bypassPermissions', 'yolo', 'skip_all']);
+const RUNS_WITHOUT_ASKING = new Set(['bypassPermissions', 'yolo', 'skip_all', 'agent-full-access']);
 /** The `permissions.ask` rules its session was started with (`_meta.claudeCode.options.settings`, as claude-agent-acp 0.84 reads them). */
 const askRulesOf = (session) => session.opened?._meta?.claudeCode?.options?.settings?.permissions?.ask ?? [];
 // Whether an `Edit(**/<folder>/**)` or `Edit(**/<file>)` rule matches `path` (the two shapes Ogden sends).
@@ -470,7 +482,7 @@ const agentBuilder = acp
       protocolVersion: acp.PROTOCOL_VERSION,
       agentCapabilities: {
         loadSession: RESUME === 'load' || RESUME === 'both',
-        sessionCapabilities: { ...(ANTIGRAVITY ? { list: {} } : { close: {} }), ...(RESUME === 'resume' || RESUME === 'both' ? { resume: {} } : {}) },
+        sessionCapabilities: { ...(ANTIGRAVITY || CODEX ? { list: {} } : { close: {} }), ...(RESUME === 'resume' || RESUME === 'both' ? { resume: {} } : {}) },
         ...(ANTIGRAVITY ? { auth: { logout: {} } } : {}),
       },
       authMethods: process.env.FAKE_ACP_AUTH_METHODS
@@ -484,7 +496,7 @@ const agentBuilder = acp
                 { type: 'terminal', id: 'console-login', name: 'Anthropic Console', description: 'Use Anthropic Console (API usage billing)', args: ['--cli', 'auth', 'login', '--console'] },
               ]
             : [],
-      agentInfo: ANTIGRAVITY ? { name: 'antigravity-acp', title: 'Google Antigravity', version: '1.3.0' } : { name: 'fake-acp-agent', version: '1.0.0' },
+      agentInfo: ANTIGRAVITY ? { name: 'antigravity-acp', title: 'Google Antigravity', version: '1.3.0' } : CODEX ? { name: '@agentclientprotocol/codex-acp', title: 'Codex', version: '2.1.1' } : { name: 'fake-acp-agent', version: '1.0.0' },
       ...(STEERING ? { _meta: { steering: { supported: true } } } : {}),
     };
   })
@@ -883,14 +895,15 @@ async function runPrompt(params, client, session) {
               { optionId: 'allow_always', name: 'Allow Always', kind: 'allow_always' },
             ]
           : [
-              { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
-              { optionId: 'always', name: 'Always allow', kind: 'allow_always' },
+              // Codex's own ids (codex-acp 2.1.1): Allow once `allow_once`, its session-wide `allow_for_session`.
+              { optionId: CODEX ? 'allow_once' : 'allow', name: 'Allow once', kind: 'allow_once' },
+              { optionId: CODEX ? 'allow_for_session' : 'always', name: 'Always allow', kind: 'allow_always' },
               ...(REJECT_OPTIONS ?? [{ id: 'reject', name: 'Deny' }]).map(({ id, name }) => ({ optionId: id, name, kind: 'reject_once' })),
               { optionId: 'never', name: 'Always deny', kind: 'reject_always' },
             ],
       });
       const chosen = answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled';
-      const ran = chosen === 'allow' || chosen === 'always' || chosen === 'allow_always';
+      const ran = ['allow', 'always', 'allow_always', 'allow_once', 'allow_for_session'].includes(chosen);
       if (holds && ran) {
         await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: 'in_progress' });
         await new Promise((resolve) => {

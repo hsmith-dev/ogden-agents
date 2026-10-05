@@ -140,6 +140,21 @@ describe('redaction', () => {
     expect(redact('a risk-free sketch of sk8 and ask-me')).toBe('a risk-free sketch of sk8 and ask-me');
   });
 
+  it('an OpenAI or xAI API key is redacted by field name and wherever it appears, wrapped too (epic 12 entry 4)', () => {
+    const openai = `sk-proj-${'O'.repeat(30)}BACKSTOP`;
+    const xai = `xai-${'X'.repeat(30)}XAITAIL`;
+    expect(redact({ CODEX_API_KEY: openai, OPENAI_API_KEY: openai, XAI_API_KEY: xai })).toEqual({ CODEX_API_KEY: REDACTED, OPENAI_API_KEY: REDACTED, XAI_API_KEY: REDACTED });
+    const out = JSON.stringify(redact({ reason: `failed with ${openai} and ${xai} inside`, wrapped: `key: sk-proj-HEAD_0123456789\nTAIL_4567` }));
+    expect(out).not.toContain('BACKSTOP');
+    expect(out).not.toContain('XAITAIL');
+    expect(out).not.toContain('HEAD_0123');
+    expect(out).not.toContain('TAIL_4567');
+    expect(out).toContain('failed with [redacted] and [redacted] inside');
+    // Ordinary words are left alone, and a key glued to a name is still found.
+    expect(JSON.stringify(redact({ note: 'a task-based desk-research plan' }))).toContain('task-based desk-research');
+    expect(JSON.stringify(redact({ note: `OPENAI_KEY_${openai}` }))).not.toContain('BACKSTOP');
+  });
+
   it("a Google (Gemini) API key is redacted by field name and wherever it appears, wrapped too (epic 6 entry 5)", () => {
     const key = `AIza${'G'.repeat(27)}BACKSTOP`;
     expect(redact({ GEMINI_API_KEY: key, google_api_key: key })).toEqual({ GEMINI_API_KEY: REDACTED, google_api_key: REDACTED });

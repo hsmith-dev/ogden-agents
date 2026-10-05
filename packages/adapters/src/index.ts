@@ -7,6 +7,7 @@
 export * from './acp-antigravity/index.js';
 export * from './acp-base/index.js';
 export * from './acp-claude-code/index.js';
+export * from './acp-codex/index.js';
 export * from './bmad-catalog/index.js';
 export * from './bmad-catalog/skill-labels.js';
 export { MAX_SKILL_FILE_BYTES, parseSkillFrontmatter, scanSkills, SKILL_FOLDERS } from './bmad-catalog/skills.js';
@@ -27,6 +28,7 @@ export * from './sandbox-memory/index.js';
 export * from './secrets-memory/index.js';
 export * from './setup-antigravity/index.js';
 export * from './setup-claude-code/index.js';
+export * from './setup-codex/index.js';
 export * from './setup-memory/index.js';
 export * from './shortcut-memory/index.js';
 export * from './shortcut-os/index.js';

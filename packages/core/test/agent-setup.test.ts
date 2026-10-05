@@ -380,6 +380,12 @@ describe('agent setup: API keys (story 9.2)', () => {
     expect(error).toBeInstanceOf(SecretsUnavailableError);
     expect((error as Error).message).toBe("There's no keychain on this computer to keep an API key in. Sign in with your account instead.");
     expect(setup.agentEnv('claude-code')).toEqual({});
+    // An agent that takes only an API key is never told to sign in with an account instead.
+    const keyOnly = createAgentSetup(core.events, [{ ...port, apiKeyOnly: true }], { secrets: secrets.store });
+    const keyOnlyError = await keyOnly.setApiKey('claude-code', API_KEY).catch((caught: unknown) => caught);
+    expect((keyOnlyError as Error).message).toBe("There's no keychain on this computer to keep an API key in, so Claude Code can't be used here.");
+    const keyOnlyWithoutStore = await createAgentSetup(core.events, [{ ...port, apiKeyOnly: true }]).setApiKey('claude-code', API_KEY).catch((caught: unknown) => caught);
+    expect((keyOnlyWithoutStore as Error).message).not.toMatch(/sign in/i);
     // No store at all is the same refusal.
     const without = createAgentSetup(core.events, [keyPort().port]);
     await expect(without.setApiKey('claude-code', API_KEY)).rejects.toBeInstanceOf(SecretsUnavailableError);

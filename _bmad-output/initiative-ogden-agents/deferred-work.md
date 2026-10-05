@@ -732,3 +732,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-grok-chat-per-chat-modes-the-trust-gate-resume-and-the-terminal-toggle-plan.md`
   summary: Epic 12.7 review: Grok's own per-tool allow rules in a trusted project's settings load with its folder trust off; the probe covered only the always-approve flag.
   evidence: `grok-agent.ts` (`GROK_FOLDER_TRUST=0`); see the plan's Review Triage Log and Decisions.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-codex-install-and-openai-api-key-from-the-ui-plan.md`
+  summary: Resolved: the sidebar and notification text for an API key only agent (Codex, Grok) says its key was rejected ("Codex's API key was rejected", title "API key rejected"), never to sign in again; and the keychain unavailable message for such an agent says it can't be used here, never to sign in with an account (`AgentSetupPort.apiKeyOnly`, `secretsUnavailableKeyOnlyMessage`).
+  evidence: branch `fix/key-only-wording`; `sidebar-model.ts`, `notifier.ts`, `agent-setup.ts`; tests `sidebar-model.test.ts`, `notifier.test.ts`, `agent-setup.test.ts`.

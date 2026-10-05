@@ -1,9 +1,10 @@
 import { modelDescription, type LocalEndpointId, type LocalEndpointModelsResponse } from '@ogden-agents/shared';
 import { useState } from 'react';
+import type { ManagerTestResponse } from '@ogden-agents/shared';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
 import { Text } from '@/ui/typography';
-import { chooseEndpointModel, fetchEndpointModels } from './local-endpoints-api';
+import { chooseEndpointModel, fetchEndpointModels, testAsManager } from './local-endpoints-api';
 
 /**
  * A server's models (epic 14 story 14.5; E14-R3, E14-R7): what it serves with
@@ -17,6 +18,15 @@ import { chooseEndpointModel, fetchEndpointModels } from './local-endpoints-api'
 export function EndpointModels({ endpointId, chosen, guard }: { endpointId: LocalEndpointId; chosen: string | null; guard: (work: () => Promise<unknown>) => Promise<void> }) {
   const [answer, setAnswer] = useState<LocalEndpointModelsResponse | undefined>(undefined);
   const [loading, setLoading] = useState(false);
+  const [managers, setManagers] = useState<Record<string, ManagerTestResponse | 'running'>>({});
+  const runManager = async (model: string) => {
+    setManagers((now) => ({ ...now, [model]: 'running' }));
+    await guard(async () => {
+      const result = await testAsManager(endpointId, model);
+      setManagers((now) => ({ ...now, [model]: result }));
+    });
+    setManagers((now) => (now[model] === 'running' ? Object.fromEntries(Object.entries(now).filter(([key]) => key !== model)) : now));
+  };
   const load = async () => {
     setLoading(true);
     await guard(async () => setAnswer(await fetchEndpointModels(endpointId)));
@@ -72,6 +82,18 @@ export function EndpointModels({ endpointId, chosen, guard }: { endpointId: Loca
                 {model.contextTokens === undefined && model.toolCall === undefined && model.sizeBytes === undefined ? (
                   <Text variant="caption">The server doesn't say how big this model is or what it can do.</Text>
                 ) : null}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button variant="outline" aria-label={`Test ${model.id} as a manager`} aria-disabled={managers[model.id] === 'running'} onClick={managers[model.id] === 'running' ? undefined : () => void runManager(model.id)} data-testid="endpoint-manager-test">
+                    {managers[model.id] === 'running' ? 'Testing...' : 'Test as a manager'}
+                  </Button>
+                  <span role="status" aria-live="polite">
+                    {typeof managers[model.id] === 'object' ? (
+                      <Text variant="caption" data-testid="endpoint-manager-result" data-pass={(managers[model.id] as ManagerTestResponse).pass ? 'true' : 'false'}>
+                        {(managers[model.id] as ManagerTestResponse).message}
+                      </Text>
+                    ) : null}
+                  </span>
+                </div>
                 {model.cautions.map((caution) => (
                   <Text key={caution} variant="caption" data-testid="endpoint-model-caution">
                     {caution}

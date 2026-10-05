@@ -688,6 +688,7 @@ const EXPECTED_API_ROUTES = [
   `POST ${API_ROUTES.localEndpointTest}`,
   `POST ${API_ROUTES.localEndpointDetect}`,
   `GET ${API_ROUTES.localEndpointModels}`,
+  `POST ${API_ROUTES.localEndpointManagerTest}`,
 ] as const;
 
 describe('gate placement', () => {

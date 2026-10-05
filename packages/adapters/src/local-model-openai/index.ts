@@ -8,3 +8,5 @@ export { modelIdsOf, probeEndpoint, type EndpointProbe } from './probe.js';
 export { endpointFailureWords, hostOf } from './reasons.js';
 export { createOpenAiLocalModel, failureOf, type OpenAiLocalModelOptions } from './port.js';
 export { DETECT_PROBE_TIMEOUT_MS, ENDPOINT_PRESETS, type EndpointPreset } from './presets.js';
+export { schemaProblems, parseModelJson } from './json-schema.js';
+export { structuredComplete, MAX_SCHEMA_CHARS, STRUCTURED_DEFAULT_TIMEOUT_MS, STRUCTURED_MAX_BYTES, STRUCTURED_MAX_TIMEOUT_MS } from './structured.js';

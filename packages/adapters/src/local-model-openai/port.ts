@@ -7,6 +7,7 @@
 import type { LocalFailure, LocalModelPort, LocalModelsResult, LocalModelTarget, LocalProbeResult, StructuredResult } from '@ogden-agents/core';
 import { EndpointError, callEndpoint, type EndpointFailureKind } from './http.js';
 import { enrich } from './native.js';
+import { structuredComplete } from './structured.js';
 import { modelIdsOf } from './probe.js';
 import { endpointFailureWords } from './reasons.js';
 
@@ -41,8 +42,8 @@ export function createOpenAiLocalModel(options: OpenAiLocalModelOptions = {}): L
       const listed = await listIds(target, signal);
       return listed.ok ? { ok: true, models: await enrich(target, call(target, signal), listed.ids) } : listed;
     },
-    async structuredComplete(): Promise<StructuredResult> {
-      return { ok: false, kind: 'unsupported', reason: 'Asking this model for a structured answer is not available yet.' };
+    async structuredComplete(target, request): Promise<StructuredResult> {
+      return structuredComplete({ fetch: options.fetch }, target, request);
     },
   };
 }

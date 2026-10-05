@@ -91,10 +91,10 @@ describe.each([
   });
 });
 
-describe('structuredComplete before story 14.8', () => {
-  it('is unsupported in the real adapter, in plain words', async () => {
-    const result = await createOpenAiLocalModel().structuredComplete({ baseUrl: 'http://localhost:1/v1' }, { model: 'm', prompt: 'p', schema: {} });
-    expect(result).toMatchObject({ ok: false, kind: 'unsupported' });
+describe('structuredComplete', () => {
+  it('is answered by the real adapter now (story 14.8; its ladder and failures are in local-structured.test.ts)', async () => {
+    const result = await createOpenAiLocalModel().structuredComplete({ baseUrl: 'http://127.0.0.1:1/v1' }, { model: 'm', prompt: 'p', schema: { type: 'object' } });
+    expect(result).toMatchObject({ ok: false, kind: 'unreachable' });
   });
 
   it('answers what the stub was given, and model_not_found for another model', async () => {

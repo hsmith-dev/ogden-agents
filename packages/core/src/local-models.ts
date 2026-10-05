@@ -27,7 +27,42 @@ export interface LocalModelsAnswer {
   missing: string | null;
 }
 
+/** How long an answer may take and still pass the manager test. */
+export const MANAGER_TEST_SLOW_MS = 45_000;
+/** The hard limit on the one request. */
+export const MANAGER_TEST_TIMEOUT_MS = 60_000;
+
+/** The fixed, small, plan shaped request of Test as a manager (the schema is what epic 15's manager would ask for). */
+export const MANAGER_TEST_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['summary', 'tasks'],
+  properties: {
+    summary: { type: 'string', minLength: 1, maxLength: 300 },
+    tasks: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 5,
+      items: { type: 'object', additionalProperties: false, required: ['title', 'role'], properties: { title: { type: 'string', minLength: 1, maxLength: 120 }, role: { enum: ['planner', 'worker', 'reviewer'] } } },
+    },
+  },
+} as const;
+export const MANAGER_TEST_PROMPT = 'A user wants a small website to show a bakery\'s opening hours. Plan the work as a summary and one to four tasks, each with a short title and the role that should do it: planner, worker or reviewer.';
+
+export interface ManagerTestAnswer {
+  pass: boolean;
+  mode: 'json_schema' | 'json_object' | 'prompt' | null;
+  ms: number;
+  message: string;
+}
+
 export interface LocalModels {
+  /**
+   * Test as a manager: one fixed small plan shaped request to `model` on endpoint `id` (no tools, no files), validated by
+   * Ogden, with the result in plain words (malformed JSON, ignored schema, too slow, context too small). No manager
+   * exists yet; this is the fitness check epic 15 builds on. Refuses an unconfirmed host before anything is called.
+   */
+  managerTest(id: LocalEndpointId, model: string): Promise<ManagerTestAnswer>;
   /** Test connection for `id`: its state in plain words, and the models it serves. Never throws for an endpoint's own failure. */
   test(id: LocalEndpointId): Promise<LocalEndpointTestResponse>;
   /**
@@ -80,6 +115,35 @@ export function createLocalModels({
       // `other` carries the adapter's own plain reason (it names the host, never a key or path).
       const message = state === 'other' && !probed.ok ? probed.reason : endpointStateWords(state, count);
       return { state, models, message };
+    },
+
+    async managerTest(id, model) {
+      const target = await endpoints.target(id);
+      if (target === undefined) throw new Error('unreachable: target() answered nothing for a named endpoint');
+      const started = Date.now();
+      const result = await port.structuredComplete(
+        { baseUrl: target.baseUrl, key: target.key, preset: target.preset },
+        { model, prompt: MANAGER_TEST_PROMPT, schema: MANAGER_TEST_SCHEMA, schemaName: 'plan', system: 'You plan software work. Answer with one JSON value only.', maxTokens: 512, timeoutMs: MANAGER_TEST_TIMEOUT_MS },
+      );
+      const ms = Date.now() - started;
+      if (result.ok) {
+        if (ms > MANAGER_TEST_SLOW_MS) return { pass: false, mode: result.mode, ms, message: `Too slow: it answered in the right shape, but took ${Math.round(ms / 1000)} seconds. A manager needs an answer in under ${Math.round(MANAGER_TEST_SLOW_MS / 1000)} seconds.` };
+        const how = result.mode === 'json_schema' ? 'with the server enforcing the shape' : result.mode === 'json_object' ? 'when told the shape in the request' : 'when asked for the shape in plain words';
+        return { pass: true, mode: result.mode, ms, message: `Passed. The model answered in the shape a manager needs, ${how}.` };
+      }
+      const message =
+        result.kind === 'timeout'
+          ? `Too slow: no answer in ${Math.round(MANAGER_TEST_TIMEOUT_MS / 1000)} seconds.`
+          : result.kind === 'context_full'
+            ? "The model's context is too small for this test. Load it with a larger context in the server."
+            : result.kind === 'model_not_found'
+              ? "The server doesn't have that model right now."
+              : result.kind === 'bad_answer'
+                ? result.reason.includes('not JSON')
+                  ? "The model's answer was not valid JSON, even when asked again."
+                  : 'The model answered with JSON, but ignored the shape it was asked for, even when asked again.'
+                : result.reason;
+      return { pass: false, mode: null, ms, message };
     },
 
     models(id) {

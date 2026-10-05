@@ -74,6 +74,11 @@ function modelAgent(options: ModelAgentOptions = {}) {
         prompts++;
         emit({ type: 'state', state: 'working' });
         if (text === 'wait') await held;
+        if (text.startsWith('wait-then-fallback ')) {
+          await held;
+          current = text.slice('wait-then-fallback '.length);
+          emit({ type: 'model', model: current });
+        }
         if (text === 'model') emit({ type: 'message_chunk', text: `model=${current}` });
         else if (text.startsWith('fallback ')) {
           current = text.slice('fallback '.length);
@@ -377,5 +382,55 @@ describe('defaults are kept per agent and per project (criterion 5)', () => {
       previousDefaultModels: { [TEST_AGENT_ID]: 'large', 'other-agent': 'x' },
     });
     expect(() => core.permissions.updateSettings(workspace.id, { defaultModels: { [TEST_AGENT_ID]: '' } })).toThrow(ValidationError);
+  });
+});
+
+describe('review fixes (story 11)', () => {
+  it('after a restart, a reopened chat runs its next prompt on its model', async () => {
+    const core = openTestCore();
+    const first = setUp(modelAgent(), core);
+    const session = await first.chat.createChatSession(first.workspace.id, { agentId: TEST_AGENT_ID, model: 'small' });
+    first.chat.sendMessage(first.workspace.id, session.id, 'hello');
+    await first.chat.settled();
+    await first.chat.close();
+    const agent = modelAgent();
+    const second = createChat({
+      dataDir: tempDir('ogden-agents-data-'),
+      entities: core.entities,
+      sessionEvents: core.sessionEvents,
+      agents: createAgentRegistry([registered(TEST_AGENT_ID, agent.port)]),
+      permissions: core.permissions,
+      agentModels: core.agentModels,
+    });
+    second.sendMessage(first.workspace.id, session.id, 'model');
+    await second.settled();
+    expect(agent.sets).toEqual([{ model: 'small', beforePrompts: 0 }]);
+    expect(replies(core, session.id).at(-1)).toBe('model=small');
+    await second.close();
+  });
+
+  it("a model the agent switches to mid-turn doesn't replace the user's pending choice", async () => {
+    const { core, chat, agent, workspace } = setUp();
+    const session = await chat.createChatSession(workspace.id, { agentId: TEST_AGENT_ID, model: 'large' });
+    chat.sendMessage(workspace.id, session.id, 'hello');
+    await chat.settled();
+    chat.sendMessage(workspace.id, session.id, 'wait-then-fallback own-pick');
+    const deadline = Date.now() + 2_000;
+    while (agent.prompts() < 2 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5));
+    chat.setModel(workspace.id, session.id, 'small');
+    agent.release();
+    await chat.settled();
+    expect(core.entities.getSession(session.id)?.model).toBe('small');
+    expect(modelChanges(core, session.id).map((change) => change.cause)).toEqual(['user']);
+  });
+
+  it('an agent taking its model at start, given one it does not list, starts on its default and says so', async () => {
+    const { core, chat, agent, workspace } = setUp(modelAgent({ kind: 'start' }));
+    const session = await chat.createChatSession(workspace.id, { agentId: TEST_AGENT_ID, model: 'unlisted' });
+    chat.sendMessage(workspace.id, session.id, 'model');
+    await chat.settled();
+    expect(agent.starts).toEqual([undefined]);
+    expect(core.entities.getSession(session.id)?.model).toBeUndefined();
+    expect(modelChanges(core, session.id)).toEqual([{ model: null, previous: 'unlisted', cause: 'agent', reason: "Test Agent doesn't offer unlisted, so this chat uses Test Agent's default." }]);
   });
 });

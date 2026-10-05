@@ -95,13 +95,16 @@ export function createModels(ctx: ChatContext) {
       }
       const result = await bounded(Promise.resolve().then(() => started.setModel!(want)));
       if (result === 'timeout') {
-        // Not known which model it runs on: told again before the next prompt.
+        // It may still switch mid-turn: never prompted like this. Restarted (resumed) first, and told again.
         internalError(sessionId, new AgentError('agent_failed', 'model_timeout'));
         entry.appliedModel = undefined;
-        return 'ok';
+        return 'restart';
       }
       if (result.ok) {
         entry.appliedModel = want;
+        const now = started.models?.current;
+        const known = sessionModels.get(sessionId);
+        if (known !== undefined && now !== undefined) sessionModels.set(sessionId, { ...known, current: now });
         return 'ok';
       }
       internalError(sessionId, result.error);
@@ -137,12 +140,34 @@ export function createModels(ctx: ChatContext) {
     if (session === undefined) return;
     const current = sessionModels.get(sessionId);
     if (current !== undefined) sessionModels.set(sessionId, { ...current, current: event.model });
-    if (session.model === undefined || session.model === event.model) return;
     const parsed = ModelIdSchema.safeParse(event.model);
-    const next = parsed.success ? parsed.data : null;
-    entry.appliedModel = next;
+    if (!parsed.success) return;
+    const stored = session.model ?? null;
+    // A choice the user made since the agent was last told waits for the next idle point: the report doesn't replace it.
+    const pending = stored !== entry.appliedModel;
+    entry.appliedModel = parsed.data;
+    if (stored === null || stored === parsed.data || pending) return;
     const name = agentOf(sessionId).displayName;
-    entities.setSessionModel(sessionId, next, 'agent', next === null ? `${name} switched itself to another model.` : `${name} switched itself to ${modelName(listFor(sessionId), next)}.`);
+    entities.setSessionModel(sessionId, parsed.data, 'agent', `${name} switched itself to ${modelName(listFor(sessionId), parsed.data)}.`);
+  };
+
+  /**
+   * The model an agent that takes one only at start is started on: the
+   * chat's, when its descriptor lists it; one it doesn't list moves the chat
+   * to its default (cause `agent`) with a plain reason, so the chat never
+   * shows a model the agent isn't running.
+   */
+  const startModelFor = (sessionId: SessionId, agentId: AgentId): string | null => {
+    const want = entities.getSession(sessionId)?.model ?? null;
+    const list = agents.describe(agentId)?.models?.list;
+    if (want === null || list === undefined || list.some((each) => each.id === want)) return want;
+    try {
+      const name = agentOf(sessionId).displayName;
+      entities.setSessionModel(sessionId, null, 'agent', `${name} doesn't offer ${want}, so this chat uses ${name}'s default.`);
+    } catch (error) {
+      internalError(sessionId, error);
+    }
+    return null;
   };
 
   /** Records what a started agent session lists (this run, and the agent's last list). */
@@ -185,7 +210,7 @@ export function createModels(ctx: ChatContext) {
     },
   };
 
-  return { initialModel, syncModel, onReportedModel, noteStarted, takesModelAtStart, ...methods };
+  return { initialModel, syncModel, onReportedModel, noteStarted, takesModelAtStart, startModelFor, ...methods };
 }
 
 export type Models = ReturnType<typeof createModels>;

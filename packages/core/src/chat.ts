@@ -109,6 +109,7 @@ export function createChat(options: ChatOptions): Chat {
     applyMode,
     noteStarted: models.noteStarted,
     takesModelAtStart: models.takesModelAtStart,
+    startModelFor: models.startModelFor,
   });
   const modes = createPermissionModes(ctx, { drop, finishReply, applyMode });
   const turns = createTurns(ctx, {

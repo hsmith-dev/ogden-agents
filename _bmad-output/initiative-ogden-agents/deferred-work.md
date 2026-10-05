@@ -546,3 +546,15 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-every-agent/story-end-to-end-suite-and-release-plan.md`
   summary: Resolved: "A few helper processes still inherit the server's whole environment" (6.5 review, AD-16). Every child process now gets an explicit allowlisted environment: agents their own key only, helpers none (the kill helper, the Windows shortcut script, npm's adapter install and the browser opener were the ones still inheriting; `uv --version` already used `uvEnvironment`).
   evidence: `adapters/src/child-env.ts` (`baseEnvironment`, `helperEnvironment`), `process-tree.ts`, `shortcut-os/windows.ts`, `setup-claude-code/install.ts` `npmEnv`, `server/src/open-url.ts`; tests `adapters/test/child-env.test.ts`, `server/test/open-url.test.ts`, `claude-code-install.test.ts`, `tests/architecture.test.ts` (AD-16 spawn rule), installed `agents-journey.spec.ts` (each agent's environment).
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-each-chat-runs-on-a-model-the-user-can-switch-plan.md`
+  summary: A reopened ACP session's "Agent's default" is the model the resumed session had, not the agent's own default.
+  evidence: claude-agent-acp restores a resumed session's model; the adapter's remembered initial model is that value, so clearing a chat's model after a restart may keep the earlier choice. Needs an agent-declared default id or a fresh-session probe.
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-each-chat-runs-on-a-model-the-user-can-switch-plan.md`
+  summary: No two-tab test for model and default-model changes.
+  evidence: Wiring uses useEventInvalidation on settings.agent_default_model_changed / workspace.settings_changed and session.model_changed; a dom or e2e test with a second tab would settle it.
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-each-chat-runs-on-a-model-the-user-can-switch-plan.md`
+  summary: The model refusal Notice mounts with its text, so some screen readers may not announce it.
+  evidence: role=status regions are more reliable when mounted empty; shared Notice pattern elsewhere does the same.
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-each-chat-runs-on-a-model-the-user-can-switch-plan.md`
+  summary: Default models in Settings use a menu rather than a labelled form field, and vanish while the agent list loads or fails.
+  evidence: DefaultModelsSection returns null without data and uses DropdownMenu checkbox items; the Default agent section uses a labelled RadioGroup.

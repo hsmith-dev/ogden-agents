@@ -251,6 +251,8 @@ export function SessionPage() {
   const sessionModels = session.data?.models;
   const [modelChanging, setModelChanging] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  /** The refusal the user put away (its reason), so its notice doesn't follow every later message. */
+  const [dismissedRefusal, setDismissedRefusal] = useState<string | undefined>(undefined);
   const modelInFlight = useRef(false);
   const changeModel = useCallback(
     (next: string | null) => {
@@ -368,7 +370,7 @@ export function SessionPage() {
         ) : null}
         {/* The model the chat runs on (story 11), beside its agent. */}
         {session.data !== undefined ? (
-          <Text as="span" variant="caption" data-testid="session-model" data-model={model ?? ''} className="truncate max-sm:sr-only">
+          <Text as="span" variant="caption" data-testid="session-model" data-model={model ?? ''} aria-label={`Model: ${modelWords}`} className="min-w-0 truncate max-sm:sr-only">
             {modelWords}
           </Text>
         ) : null}
@@ -510,15 +512,20 @@ export function SessionPage() {
                   {view.errorReason ?? `${agentName} stopped with an error. Try again.`}
                 </Notice>
               ) : null}
-              {refusal !== undefined && model === null && !terminalDrives ? (
+              {refusal !== undefined && model === null && !terminalDrives && dismissedRefusal !== refusal.reason ? (
                 // The agent couldn't run the chosen model (story 11): its own words, and a way to pick another.
                 <Notice
                   data-testid="model-refused"
                   role="status"
                   action={
-                    <Button variant="outline" onClick={() => setModelMenuOpen(true)} data-testid="model-refused-choose">
-                      Choose another model
-                    </Button>
+                    <span className="flex gap-2">
+                      <Button variant="outline" onClick={() => setModelMenuOpen(true)} data-testid="model-refused-choose">
+                        Choose another model
+                      </Button>
+                      <Button variant="ghost" onClick={() => setDismissedRefusal(refusal.reason)} data-testid="model-refused-dismiss">
+                        Keep the default
+                      </Button>
+                    </span>
                   }
                 >
                   {refusal.reason}

@@ -7,6 +7,7 @@
  * a default-model section saving per agent.
  */
 import type { AgentModel, ChatAgent, CoreEvent } from '@ogden-agents/shared';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DefaultModelsSection } from '../src/chat/default-models';
@@ -40,7 +41,7 @@ const options = () => screen.getAllByTestId('model-picker-option').map((option) 
 describe('the chat model picker', () => {
   it("names the agent's own pick, lists its models with the current one checked, and asks for a switch", async () => {
     const { onChoose } = mountPicker();
-    expect(screen.getByTestId('model-picker').getAttribute('aria-label')).toBe("Model: Claude Code's default (Opus)");
+    expect(screen.getByTestId('model-picker').getAttribute('aria-label')).toBe("Model: Claude Code's default");
     await open('model-picker');
     expect(options()).toEqual([
       ['', 'true'],
@@ -120,6 +121,7 @@ describe('a default models section', () => {
   it('saves the chosen model per agent and says so; a failure is shown', async () => {
     const onChoose = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("The default model couldn't be saved"));
     render(
+      <QueryClientProvider client={new QueryClient()}>
       <TooltipProvider>
         <DefaultModelsSection
           agents={[agent()]}
@@ -129,7 +131,8 @@ describe('a default models section', () => {
           noneOf={() => ({ label: "Claude Code's default", description: 'It picks.' })}
           onChoose={onChoose}
         />
-      </TooltipProvider>,
+      </TooltipProvider>
+      </QueryClientProvider>,
     );
     await open('app-models-claude-code');
     fireEvent.click(screen.getAllByTestId('app-models-claude-code-option')[1]!);

@@ -75,14 +75,14 @@ export function ModelMenu({ testId, title, ariaLabel, text, prefix, models, valu
   return (
     <DropdownMenu {...(open === undefined ? {} : { open })} {...(onOpenChange === undefined ? {} : { onOpenChange })}>
       <DropdownMenuTrigger asChild>
-        <Button variant={variant} size="sm" data-testid={testId} data-model={value ?? ''} aria-label={ariaLabel} aria-busy={busy || undefined} className="min-w-0">
+        <Button variant={variant} size="sm" data-testid={testId} data-model={value ?? ''} aria-label={ariaLabel} aria-busy={busy || undefined} className="min-w-0 max-w-[55vw] shrink sm:max-w-xs">
           <Cpu aria-hidden />
           {prefix === undefined ? null : <span className="text-muted-foreground max-sm:sr-only">{prefix}</span>}
           <span className="truncate">{text}</span>
           <CaretDown aria-hidden />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" data-testid={`${testId}-menu`} className="max-h-96 overflow-y-auto">
+      <DropdownMenuContent align="start" data-testid={`${testId}-menu`} className="max-h-(--radix-dropdown-menu-content-available-height) overflow-y-auto">
         <DropdownMenuLabel>{title}</DropdownMenuLabel>
         <DropdownMenuChoiceItem
           data-testid={`${testId}-option`}
@@ -107,7 +107,7 @@ export function ModelMenu({ testId, title, ariaLabel, text, prefix, models, valu
             aria-disabled={disabledReason !== undefined || undefined}
             data-disabled={disabledReason !== undefined ? '' : undefined}
             label={model.name}
-            description={disabledReason ?? model.description ?? model.id}
+            description={disabledReason ?? model.description ?? ''}
             onSelect={(event) => {
               if (disabledReason !== undefined) event.preventDefault();
               choose(model.id);
@@ -115,7 +115,13 @@ export function ModelMenu({ testId, title, ariaLabel, text, prefix, models, valu
           />
         ))}
         {models === null || models.length === 0 ? (
-          <DropdownMenuItem disabled data-testid={`${testId}-empty`} className="text-caption text-muted-foreground">
+          // Focusable (not `disabled`), so the keyboard and a screen reader reach it; it does nothing.
+          <DropdownMenuItem
+            aria-disabled
+            data-testid={`${testId}-empty`}
+            className="h-auto max-w-72 whitespace-normal py-1.5 text-caption text-muted-foreground"
+            onSelect={(event) => event.preventDefault()}
+          >
             {emptyText}
           </DropdownMenuItem>
         ) : null}
@@ -149,7 +155,7 @@ export interface ModelPickerProps {
  */
 export function ModelPicker({ agentName, model, models, current, terminalDrives, changing, open, onOpenChange, onChoose }: ModelPickerProps) {
   const fallback = agentDefaultLabel(agentName);
-  const text = model === null ? (current === undefined ? fallback : `${fallback} (${modelLabel(models, current)})`) : modelLabel(models, model);
+  const text = model === null ? fallback : modelLabel(models, model);
   return (
     <ModelMenu
       testId="model-picker"
@@ -159,8 +165,8 @@ export function ModelPicker({ agentName, model, models, current, terminalDrives,
       text={text}
       models={models ?? null}
       value={model}
-      none={{ label: fallback, description: `${agentName} picks the model itself.` }}
-      emptyText={`${agentName}'s models appear here once it has started in a chat.`}
+      none={{ label: fallback, description: current === undefined ? `${agentName} picks the model itself.` : `${agentName} picks the model itself; now ${modelLabel(models, current)}.` }}
+      emptyText={models === undefined ? 'Loading the models…' : `${agentName}'s models appear here once it has started in a chat.`}
       disabledReason={terminalDrives ? TERMINAL_MODEL_REASON : undefined}
       busy={changing}
       open={open}

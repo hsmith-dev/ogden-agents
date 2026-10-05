@@ -367,7 +367,9 @@ async function startOnChild(
           break;
         case 'config_option_update': {
           const before = reportedModel;
-          config = update.configOptions;
+          // An update without the model option keeps the one the agent last listed.
+          const kept = modelOptionOf(config);
+          config = modelOptionOf(update.configOptions) === undefined && kept !== undefined ? [...update.configOptions, kept] : update.configOptions;
           const current = modelOptionOf(config)?.currentValue;
           if (typeof current === 'string') {
             reportedModel = current;
@@ -540,7 +542,9 @@ async function startOnChild(
     modelSetsInFlight++;
     try {
       const answered = await Promise.race([connection.agent.request('session/set_config_option', { sessionId, configId: option.id, value: target }), gone]);
-      config = answered.configOptions;
+      // An answer without the options leaves what the agent last said, now on the model asked for.
+      if (modelOptionOf(answered.configOptions) !== undefined) config = answered.configOptions;
+      else config = (config ?? []).map((each) => (each.id === option.id && each.type === 'select' ? { ...each, currentValue: target } : each));
       const current = modelOptionOf(config)?.currentValue;
       reportedModel = typeof current === 'string' ? current : target;
     } catch (error) {

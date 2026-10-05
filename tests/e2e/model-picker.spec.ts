@@ -27,7 +27,7 @@ test("a chat switches its model for the next message, keeps it on reload, and a 
 
     await send(page, 'model');
     await expect(page.getByTestId('message-agent').last()).toContainText('model=fake-default');
-    await expect(picker(page)).toContainText('Fake Default');
+    await expect(picker(page)).toContainText("default");
 
     await choose(page, 'fake-large');
     await expect(picker(page)).toHaveAttribute('data-model', 'fake-large');

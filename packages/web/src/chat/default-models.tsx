@@ -33,20 +33,22 @@ export function DefaultModelsSection({ agents, description, testId, valueOf, non
   useEffect(() => {
     void queryClient.invalidateQueries({ queryKey: CHAT_AGENTS_QUERY_KEY });
   }, [queryClient]);
-  const [saving, setSaving] = useState<string | undefined>(undefined);
+  /** The agents whose default is on its way: each agent saves on its own. */
+  const [saving, setSaving] = useState<ReadonlySet<string>>(new Set());
   const [status, setStatus] = useState<{ kind: 'saved' | 'error'; text: string } | undefined>(undefined);
   const choose = (agent: ChatAgent, model: string | null) => {
-    if (saving !== undefined) return;
-    setSaving(agent.agentId);
+    if (saving.has(agent.agentId)) return;
+    const done = () => setSaving((now) => new Set([...now].filter((id) => id !== agent.agentId)));
+    setSaving((now) => new Set([...now, agent.agentId]));
     setStatus(undefined);
     onChoose(agent, model).then(
       () => {
-        setSaving(undefined);
+        done();
         const words = model === null ? noneOf(agent).label : modelLabel(agent.models, model);
         setStatus({ kind: 'saved', text: `Saved: new ${agent.displayName} chats start on ${words}.` });
       },
       (failure: unknown) => {
-        setSaving(undefined);
+        done();
         setStatus({ kind: 'error', text: failure instanceof Error ? failure.message : "The default model couldn't be saved. Try again." });
       },
     );
@@ -74,7 +76,7 @@ export function DefaultModelsSection({ agents, description, testId, valueOf, non
                 value={value}
                 none={none}
                 emptyText={`${agent.displayName}'s models appear here once it has started in a chat.`}
-                busy={saving === agent.agentId}
+                busy={saving.has(agent.agentId)}
                 onChoose={(model) => choose(agent, model)}
               />
             </li>

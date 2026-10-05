@@ -3,13 +3,13 @@ title: 'Each chat runs on a model the user can switch'
 type: 'feature'
 ticket: '11'
 created: '2026-10-04'
-status: 'in-progress'
+status: 'in-review'
 baseline_revision: '5c2aa5d38265a8a61ef0f3a568e2ced34269fa61'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick', 'ux-a11y']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/backlog/story-each-chat-runs-on-a-model-the-user-can-switch.md'
@@ -88,9 +88,49 @@ context:
 
 ## Implementation Notes
 
+- Implemented directly from the plan (no implementation subagent; the investigation was already in hand).
+- Decision: `Session.model` and `WorkspaceSettings.defaultModels` are optional (absent = the agent's own choice / none) rather than `nullable().default(null)`, so every existing parse, row and test reads unchanged; core reads absent as `null` everywhere. Same back-compat outcome as the frozen matrix ("reads as Agent's default").
+- Decision: "Agent's default" on a live ACP session is the model that session started on (the adapter remembers it); `setModel(null)` returns to it.
+- Settings model lists come from the agent's last listed models (`agent_settings.models`), refreshed when a Settings section opens.
+- Files: shared (entities, chat, api, errors, events*), core (agent-port, agent-descriptor, agent-models, entities, workspace-settings, chat/model.ts + wiring, migration 0012), adapters (acp-base models.ts + acp-agent, Claude `--model`), server (chat-routes, app, start), web (model-picker, default-models, session page, settings pages, sidebar), fake agent, tests (core, adapters, server, web dom, e2e).
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (lenses quick, ux-a11y): high 0, medium 9, low 10, false 2, maybe-false 0.
+
+| Finding | Verdict | Route | Evidence / action |
+|---|---|---|---|
+| Agent's mid-turn model report overwrote a pending user switch (model.ts onReportedModel) | medium | patch | Report now only updates `appliedModel` while a user choice is pending; test added |
+| syncModel timeout sent the prompt while set_config_option still pending | medium | patch | Timeout now restarts (resumed) before the prompt, as permission modes do |
+| setModel/config_option_update replaced config without a model option | medium | patch | Keeps the last model option; guarded |
+| Static-list agent given an unlisted model ran on its default silently | medium | patch | `startModelFor` moves the chat to default with a reason; test added |
+| "Agent's default" after a reopen means the resumed session's model | medium | defer | Needs an agent-specific notion of its default; recorded in deferred-work |
+| `current` stale after live switches | low | patch | Updated from the session after each successful switch |
+| Invalid-id agent report shown as a refusal | low | patch | Invalid ids are ignored |
+| No restart/reopen test | medium | patch | Core test: chat closed and reopened, next prompt on the model |
+| No two-tab test | low | defer | Wiring uses the existing event invalidation; recorded |
+| Session.model optional vs plan's nullable default | low | reject | Same back-compat outcome; recorded as a decision above |
+| Composer chip can't shrink at phone width | medium | patch | shrink + max width + footer overflow hidden |
+| Chip text "default (Default (recommended))" | low | patch | Chip shows "<Agent>'s default"; current model in the choice's description |
+| Raw model ids as menu descriptions | low | patch | Description only when the agent gives one |
+| Empty-list text unreachable by keyboard / screen reader | medium | patch | Focusable aria-disabled item, wraps |
+| Loading looks like "not listed yet" | low | patch | "Loading the models…" while the session loads |
+| Refusal notice text lacks what happened | false | reject | Core's reason already says which model failed and that the chat uses the default |
+| Refusal notice can't be dismissed | low | patch | "Keep the default" dismisses it |
+| Refusal notice may not be announced (mounted with content) | low | defer | Shared Notice pattern elsewhere; recorded |
+| Focus after "Choose another model" returns to the chip | low | reject | Radix returns focus to the trigger by design; acceptable |
+| No "applies to next message" feedback | low | reject | EXPERIENCE row states it; chip updates at once |
+| Header label lacks context/min-w-0 | low | patch | aria-label "Model: …", min-w-0 |
+| Header vs sidebar may name a model differently | low | reject | Both fall back to the id only when no list is known |
+| Sidebar model not in accessible name | medium | patch | Detail appended to the row's aria-label |
+| Terminal-drives behaviour differs from permission picker | low | reject | Model picker follows the agent picker's focusable-disabled pattern deliberately |
+| Concurrent default saves dropped | low | patch | Saving tracked per agent |
+| Settings menu instead of labelled field | low | defer | Recorded |
+| Settings sections vanish on load error | low | defer | Recorded |
+| Menu height fixed | low | patch | Uses Radix available height |
+| DESIGN.md / composer comment not updated | low | patch | Updated |
 
 ## Design Notes
 

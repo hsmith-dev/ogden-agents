@@ -18,10 +18,10 @@ import type { Live } from './types.js';
 
 export function createAgents(
   ctx: ChatContext,
-  deps: Pick<Replies, 'stopDeltaTimer'> & Pick<PermissionRequests, 'onPermissionRequestFor'> & Pick<Models, 'noteStarted' | 'takesModelAtStart'> & { applyMode: ModeApplier },
+  deps: Pick<Replies, 'stopDeltaTimer'> & Pick<PermissionRequests, 'onPermissionRequestFor'> & Pick<Models, 'noteStarted' | 'takesModelAtStart' | 'startModelFor'> & { applyMode: ModeApplier },
 ) {
   const { entities, sessionEvents, agentEnv, agentOf, agentIdOf, live, droppedAgents, internalError, sessionModes, later } = ctx;
-  const { stopDeltaTimer, onPermissionRequestFor, applyMode, noteStarted, takesModelAtStart } = deps;
+  const { stopDeltaTimer, onPermissionRequestFor, applyMode, noteStarted, takesModelAtStart, startModelFor } = deps;
 
   /** Ends the session's agent (it failed or went away); the next message starts a fresh one. */
   const drop = (sessionId: SessionId, entry: Live) => {
@@ -81,7 +81,7 @@ export function createAgents(
     const agent = agentOf(session.id);
     const agentId = agentIdOf(session);
     // An agent that takes its model only at start gets the chat's in its start (story 11); one told live starts on its own choice.
-    const startModel = takesModelAtStart(agentId) ? (entities.getSession(session.id)?.model ?? null) : null;
+    const startModel = takesModelAtStart(agentId) ? startModelFor(session.id, agentId) : null;
     entry.appliedModel = startModel;
     // The real-cased path: the case-folded key is for uniqueness only (AD-2).
     const input = {

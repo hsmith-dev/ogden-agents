@@ -435,7 +435,7 @@ export function SidebarStatusRow({ state, title, caption, detail, time, classNam
       tooltip={detail === undefined ? `${title}: ${word}` : `${title}: ${word}, ${detail}`}
       // Not `data-state`: the tooltip trigger sets that one.
       data-session-state={state}
-      aria-label={`${title}, ${caption}`}
+      aria-label={detail === undefined ? `${title}, ${caption}` : `${title}, ${caption}, ${detail}`}
       className={cn(
         'h-auto min-h-(--row-height) py-1',
         state === 'waiting' && 'border-l-(length:--rail-row) border-l-signal',

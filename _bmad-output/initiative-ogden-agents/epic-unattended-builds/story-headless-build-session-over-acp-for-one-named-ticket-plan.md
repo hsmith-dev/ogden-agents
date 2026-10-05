@@ -3,7 +3,7 @@ title: 'Headless build session over ACP for one named ticket'
 type: 'feature'
 ticket: '4'
 created: '2026-10-04'
-status: 'draft'
+status: 'ready-for-dev'
 baseline_revision: '8299f735f29b7f7fef415234253dd1c2805eeea5'
 route: 'full'
 route_source: 'auto'
@@ -45,14 +45,11 @@ context:
 | Unreadable plan | plan missing at turn end | result `status: null`, run `failed` as today | — |
 | Stop | release a running build | agent and its child processes gone | — |
 
+## Decisions
+
+- 2026-10-04, user (Q1 = A): **checkpoint pauses are Ogden's own.** `bmad-build-auto` stops after planning only when told "Halt after planning." and has no stop after `built`, and Build accepts only a `ready-for-dev` plan (5.2's rule, unchanged). So with `plan_checkpoint` the run pauses (`blocked`, `checkpoint_plan`) right after its worktree and session exist and before the build prompt is sent; with `done_checkpoint` it pauses (`checkpoint_done`) when the plan ends `built`, before Ogden's end checks. Resume continues either way: it sends the prompt, or runs the end checks. The `tickets-v7` adapter reads `plan_checkpoint`/`done_checkpoint` from the entry in `tickets.toml`, read-only (`tickets.py find` doesn't report them).
+
 </frozen-after-approval>
-
-## Open Questions
-
-1. **What a checkpoint pause is, given Build only accepts a `ready-for-dev` plan.** Investigation: `bmad-build-auto` stops after planning only when its prompt says "Halt after planning." (it HALTs with status `ready-for-dev`), and it has no stop of its own after `built` (its run ends there). 5.2 refuses Build unless the plan is already `ready-for-dev` (`not_ready`), and the skill takes such a plan straight to implementation, so a skill-side plan stop can never happen in a build today. Also `tickets.py find` doesn't report `plan_checkpoint`/`done_checkpoint`; the `tickets-v7` adapter would read them from the entry in `tickets.toml`.
-   - **A (recommended): Ogden-side pauses.** `plan_checkpoint`: the run pauses right after its worktree and session exist and before the build prompt is sent (the user checks the committed plan; resume sends the prompt). `done_checkpoint`: when the skill ends `built`, the run pauses before Ogden's end checks; resume runs them. No skill words needed, works with today's dispatch.
-   - **B: Build may plan.** Build also accepts a ticket with no plan or a `draft` plan (prerequisites met); with `plan_checkpoint` the runner's prompt adds "Halt after planning." and the run pauses at `ready-for-dev`; resume sends the command again. Changes 5.2's `not_ready` rule and the card's Build (overlaps 5.8 and 11.3).
-   - **C: Mechanism only.** Build B's halt-after-planning pause, dormant until a later story widens dispatch; `done_checkpoint` as in A.
 
 ## Code Map
 
@@ -70,7 +67,7 @@ context:
 
 ## Tasks & Acceptance
 
-**Execution:** (final form depends on Open Question 1)
+**Execution:**
 - [ ] `packages/shared/src/planning-board.ts` -- `plan_checkpoint`, `done_checkpoint` on `TicketDetail` (default false).
 - [ ] `packages/adapters/src/tickets-v7/index.ts`, `tickets-memory` -- read them.
 - [ ] `packages/core/src/build-run-folder.ts` (new) -- run folder path, activity recorder (event-log subscriber, per-run serialized appends, cap), `writeRunResult` (validate, mask, atomic).

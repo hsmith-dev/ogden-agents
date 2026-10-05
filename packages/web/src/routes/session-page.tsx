@@ -23,6 +23,7 @@ import { otherWayShortcutLabel, useWhileWorking } from '@/chat/send-mode';
 import { useCaughtUp, useEarlierHistory, useSessionEvents } from '@/events/event-stream';
 import { PermissionCard, permissionAnnouncement } from '@/permissions/permission-card';
 import { BuildRunHeader } from '@/planning/build-run-header';
+import { BuildRunPanel } from '@/planning/build-run-panel';
 import { useSessionRun } from '@/planning/builds-api';
 import { DocumentCard } from '@/planning/document-card';
 import { StartModeNote, useStartModeNote } from '@/permissions/default-permission-mode';
@@ -484,6 +485,7 @@ export function SessionPage() {
       />
       {/* A chat that skips its permission checks says so in red, above the conversation or the terminal, at any scroll position. */}
       {permissionMode === 'skip_all' ? <SkipAllBanner agentName={agentName} changing={modeChanging} onBackToAsk={() => changeMode('ask', false, terminalDrives)} /> : null}
+      {isBuild ? <BuildRunPanel wsId={wsId} run={buildRun.data} /> : null}
       <StartModeNote key={sesId} note={startModeNote} />
       {driver === 'terminal' ? (
         <ReadOnlyBanner

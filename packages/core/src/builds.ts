@@ -98,7 +98,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
   } = ctx;
   const { startLocked } = start;
   const { deciding, unsubscribe } = outcome;
-  const { resumeLocked, rebaseLocked, retryLocked, extendAll, drainQueue, scheduleDrain } = dispatch;
+  const { resumeLocked, rebaseLocked, applyFixLocked, retryLocked, extendAll, drainQueue, scheduleDrain } = dispatch;
   const { reviewOf } = reviewer;
 
   return {
@@ -360,8 +360,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       if (run.outcome === 'running' || run.outcome === 'verified' || run.decision !== null) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
       // Update and retry (story 5.9): rebase the run's branch onto the checked-out branch, then check it again.
       if (parsed.data.mode === 'rebase') return inDispatch(() => serializedByRepo(repoPath, () => rebaseLocked(workspaceId, repoPath, checked)));
-      // Apply the saved fix and retry (11.1) is theirs.
-      if (parsed.data.mode !== 'resume') throw new NotImplementedError(RETRY_NOT_AVAILABLE_MESSAGE);
+      // Apply the saved fix and retry (story 11.1): an intent gap's patch is applied in the worktree, then the build goes on.
+      if (parsed.data.mode === 'apply_fix') return inDispatch(() => serializedByRepo(repoPath, () => applyFixLocked(workspaceId, repoPath, checked, parsed.data.note)));
       // A checkpoint pause resumes (story 5.4).
       if (atCheckpoint(run)) return inDispatch(() => serializedByRepo(repoPath, () => resumeLocked(workspaceId, repoPath, checked, parsed.data.note)));
       // A conflicting merge needs its rebase first (5.9), not another run of the agent.

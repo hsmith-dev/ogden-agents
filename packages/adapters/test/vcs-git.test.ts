@@ -356,5 +356,23 @@ describe('vcs-git (story 5.3: diff stats, worktree lookup, rebase, patch)', () =
     expect(existsSync(join(data, 'w', 'escaped.txt'))).toBe(false);
     await expect(vcs.applyPatch({ ...at, patchPath: 'relative.patch' })).rejects.toBeInstanceOf(VcsError);
   });
+
+  it('refuses a rename or copy whose source is a refused path (git lists only the destination), and a deletion of one', async () => {
+    const { repo, vcs, path, branch } = await branched();
+    const at = { repoPath: repo, worktreePath: path, branch };
+    mkdirSync(join(path, '.claude'));
+    writeFileSync(join(path, '.claude', 'settings.json'), '{}\n');
+    const patches = join(path, '_bmad-output');
+    mkdirSync(patches);
+    const rename = join(patches, 'rename.patch');
+    writeFileSync(rename, 'diff --git a/.claude/settings.json b/moved.json\nsimilarity index 100%\nrename from .claude/settings.json\nrename to moved.json\n');
+    const refuse = (file: string) => file.startsWith('.claude');
+    expect(await vcs.applyPatch({ ...at, patchPath: rename, refuse })).toBe('refused');
+    expect(existsSync(join(path, '.claude', 'settings.json'))).toBe(true);
+    const del = join(patches, 'delete.patch');
+    writeFileSync(del, 'diff --git a/.claude/settings.json b/.claude/settings.json\ndeleted file mode 100644\n--- a/.claude/settings.json\n+++ /dev/null\n@@ -1 +0,0 @@\n-{}\n');
+    expect(await vcs.applyPatch({ ...at, patchPath: del, refuse })).toBe('refused');
+    expect(existsSync(join(path, '.claude', 'settings.json'))).toBe(true);
+  });
 });
 

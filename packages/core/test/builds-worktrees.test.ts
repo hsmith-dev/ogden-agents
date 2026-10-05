@@ -185,6 +185,22 @@ describe('the startup sweep (story 5.5)', () => {
     expect(h.git.calls).toContain(`worktree remove and ${h.decidedBranch}`);
   });
 
+  it("never removes a decided run's worktree whose stored path isn't one of Ogden's own folders", async () => {
+    const h = await harness();
+    const outside = tempDir('ogden-agents-forged-');
+    writeFileSync(join(outside, 'keep.txt'), 'keep\n');
+    mkdirSync(join(h.dataDir, 'w'), { recursive: true });
+    for (const [index, path] of [outside, join(h.dataDir, 'w', '..', 'abcdefgh'), join(h.dataDir, 'w', 'not-a-run-id')].entries()) {
+      const session = h.core.entities.createSession({ workspaceId: h.wsId, kind: 'build' });
+      const run = h.core.entities.createRun({ sessionId: session.id, ticketRef: `1.${index + 5}`, worktreePath: path, branch: `ogden/abcdefg${index + 2}/1.${index + 5}-x` });
+      h.core.entities.setRunOutcome(run.id, 'stopped', null);
+      h.core.entities.setRunDecision(run.id, 'rejected');
+    }
+    await h.builds.sweep();
+    expect(readdirSync(outside)).toEqual(['keep.txt']);
+    expect(h.git.calls.filter((call) => call.startsWith('worktree remove'))).toEqual([]);
+  });
+
   it('unlinks a worktrees folder that is a link, and sweeps nothing where it points', async () => {
     const h = await harness();
     const elsewhere = tempDir('ogden-agents-elsewhere-');

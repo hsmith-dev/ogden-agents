@@ -359,6 +359,14 @@ export class ModeUnavailableError extends CoreError {
   }
 }
 
+/** A chat was asked for a model its agent (or its session) doesn't list (story 11): nothing changed. */
+export class ModelUnavailableError extends CoreError {
+  override readonly name = 'ModelUnavailableError';
+  constructor(message: string) {
+    super('model_unavailable', message);
+  }
+}
+
 /** A new chat named an agent that isn't registered (epic 6): nothing was created. */
 export class UnknownAgentError extends CoreError {
   override readonly name = 'UnknownAgentError';

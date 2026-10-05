@@ -3,7 +3,8 @@
  * `ChatOptions`, `TerminalViewer` and `Chat`, and the state the chat modules
  * share by reference (`Live`, `Terminal`, `Turn`).
  */
-import type { AgentId, ChatAgent, PermissionMode, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import type { AgentId, ChatAgent, PermissionMode, SessionResponse, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import type { AgentModels } from '../agent-models.js';
 import type { AgentError, AgentRegistry, AgentSession } from '../agent-port.js';
 import type { AgentReadiness } from '../agent-setup-types.js';
 import type { Entities, NewWorkspaceOptions } from '../entities.js';
@@ -63,6 +64,12 @@ export interface ChatOptions {
   events?: Pick<EventLog, 'subscribe' | 'lastSeq'>;
   /** Developer mode, which gates Skip all. Without it, Developer mode reads off. */
   installSettings?: Pick<InstallSettings, 'developerMode'>;
+  /**
+   * Each agent's install-wide default model and last model list (story 11).
+   * Without it, new chats start on the project's default or the agent's own
+   * choice, and only this run's lists are known.
+   */
+  agentModels?: Pick<AgentModels, 'defaultModel' | 'lastModels' | 'rememberModels'>;
   /** How long an agent may take to take a permission mode before it is dropped. Default `PERMISSION_MODE_TIMEOUT_MS`. */
   permissionModeTimeoutMs?: number;
   /**
@@ -160,7 +167,10 @@ export interface Chat {
    * needs a project trust the project lacks, isn't installed, or isn't
    * signed in.
    */
-  createChatSession(workspaceId: WorkspaceId, options?: { kind?: Exclude<SessionKind, 'build'> | undefined; agentId?: AgentId | undefined }): Promise<Session>;
+  createChatSession(
+    workspaceId: WorkspaceId,
+    options?: { kind?: Exclude<SessionKind, 'build'> | undefined; agentId?: AgentId | undefined; model?: string | null | undefined },
+  ): Promise<Session>;
   /**
    * The agents a chat can be started with, in order (epic 6; frozen in 6.3):
    * what each is, the permission modes it declares, its setup, and why a new
@@ -216,6 +226,20 @@ export interface Chat {
   setPermissionMode(workspaceId: WorkspaceId, sessionId: SessionId, mode: PermissionMode, options?: { confirm?: boolean | undefined }): Session;
   /** Every permission mode, in order, and whether the session's agent (and its session, when it has one this run) offers it. */
   permissionModeOptions(workspaceId: WorkspaceId, sessionId: SessionId): SessionPermissionModeOption[];
+  /**
+   * Sets the chat's model (story 11; `null`: the agent's own choice):
+   * appends `session.model_changed` (cause `user`); the agent's next turn
+   * runs on it (told live, or restarted at the next idle point). The same
+   * model again changes nothing. Refused, changing nothing:
+   * `ValidationError` for a value that isn't a model id,
+   * `DriverIsTerminalError` while the terminal drives,
+   * `SessionNotIdleError` while it switches drivers,
+   * `ModelUnavailableError` for a model the agent's session (or its last
+   * list) doesn't list, `NotFoundError` for an unknown session.
+   */
+  setModel(workspaceId: WorkspaceId, sessionId: SessionId, model: string | null): Session;
+  /** The models the chat's picker offers and the one its agent reported running on (story 11). */
+  modelOptions(workspaceId: WorkspaceId, sessionId: SessionId): NonNullable<SessionResponse['models']>;
   /** Resolves once no agent turn is running (tests, shutdown). */
   settled(): Promise<void>;
   /**
@@ -264,6 +288,12 @@ export interface Live {
   guardsRequested: boolean;
   /** Its guards don't fit the chat's mode any more: it is restarted at the next idle point (before the next prompt). */
   restartPending: boolean;
+  /**
+   * The model core last put it on (story 11): the start's model for an agent
+   * that takes one only at start, `null` (its own choice) for one told live;
+   * `undefined` when not known (a switch timed out), so it is told again.
+   */
+  appliedModel: string | null | undefined;
 }
 
 /** A session's terminal and its viewers (story 3.1). Its output is never logged, evented or stored. */

@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { AgentId, AlwaysAllowScope, CautionLevel, MAX_PAGE_EVENTS, Seq, SERVER_STREAM } from './events-common.js';
 import { assigned, onSessionStream, onWorkspaceStream } from './events-envelope.js';
-import { SettingsDeveloperModeChangedEvent, SettingsDeveloperModeChangedInput } from './events-settings.js';
+import { SettingsAgentDefaultModelChangedEvent, SettingsAgentDefaultModelChangedInput, SettingsDeveloperModeChangedEvent, SettingsDeveloperModeChangedInput } from './events-settings.js';
 
-export { SettingsDeveloperModeChangedEvent } from './events-settings.js';
+export { SettingsAgentDefaultModelChangedEvent, SettingsDeveloperModeChangedEvent } from './events-settings.js';
 import {
   PermissionRequestedEvent,
   PermissionRequestedInput,
@@ -27,6 +27,8 @@ import {
   SessionMessageDeltaInput,
   SessionMessageQueuedEvent,
   SessionMessageQueuedInput,
+  SessionModelChangedEvent,
+  SessionModelChangedInput,
   SessionPermissionModeChangedEvent,
   SessionPermissionModeChangedInput,
   SessionResumedEvent,
@@ -38,7 +40,7 @@ import {
   SessionToolCallUpdatedEvent,
   SessionToolCallUpdatedInput,
 } from './events-session.js';
-import { Run, RunOutcome, Workspace } from './entities.js';
+import { ModelId, Run, RunOutcome, Workspace } from './entities.js';
 import { BmadPieces } from './bmad.js';
 import {
   BmadSetupCompletedEvent,
@@ -118,6 +120,9 @@ export {
   PERMISSION_MODE_CHANGE_CAUSES,
   PermissionModeChangeCause,
   SessionPermissionModeChangedEvent,
+  MODEL_CHANGE_CAUSES,
+  ModelChangeCause,
+  SessionModelChangedEvent,
   PermissionRequestedEvent,
   PermissionResolvedEvent,
 } from './events-session.js';
@@ -224,6 +229,13 @@ const WorkspaceSettingsChangedInput = z.object({
      */
     defaultAgentId: AgentId.nullable().optional(),
     previousDefaultAgentId: AgentId.nullable().optional(),
+    /**
+     * The project's default model per agent now and before (story 11),
+     * present when they changed. An agent missing from it uses the install's
+     * default for that agent. Optional, so every earlier event still parses.
+     */
+    defaultModels: z.record(AgentId, ModelId).optional(),
+    previousDefaultModels: z.record(AgentId, ModelId).optional(),
   }),
 });
 /**
@@ -281,6 +293,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   SessionStateChangedEvent,
   SessionDriverChangedEvent,
   SessionPermissionModeChangedEvent,
+  SessionModelChangedEvent,
   SessionMessageDeltaEvent,
   SessionMessageCompletedEvent,
   SessionToolCallEvent,
@@ -306,6 +319,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   AgentUninstalledEvent,
   AgentAuthChangedEvent,
   SettingsDeveloperModeChangedEvent,
+  SettingsAgentDefaultModelChangedEvent,
 ]);
 export type CoreEvent = z.infer<typeof CoreEvent>;
 export type CoreEventType = CoreEvent['type'];
@@ -329,6 +343,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   SessionStateChangedInput,
   SessionDriverChangedInput,
   SessionPermissionModeChangedInput,
+  SessionModelChangedInput,
   SessionMessageDeltaInput,
   SessionMessageCompletedInput,
   SessionToolCallInput,
@@ -354,6 +369,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   AgentUninstalledInput,
   AgentAuthChangedInput,
   SettingsDeveloperModeChangedInput,
+  SettingsAgentDefaultModelChangedInput,
 ]);
 export type NewCoreEvent = z.infer<typeof NewCoreEvent>;
 

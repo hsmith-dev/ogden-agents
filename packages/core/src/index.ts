@@ -1,4 +1,5 @@
 export * from './agent-descriptor.js';
+export * from './agent-models.js';
 export * from './agent-port.js';
 export * from './agent-setup.js';
 export * from './agent-setup-port.js';

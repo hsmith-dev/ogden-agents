@@ -12,6 +12,8 @@ import {
   AgentId as AgentIdSchema,
   DriverChangeCause as DriverChangeCauseSchema,
   IsoUtcTimestamp,
+  ModelChangeCause as ModelChangeCauseSchema,
+  ModelId as ModelIdSchema,
   PermissionMode as PermissionModeSchema,
   PermissionModeChangeCause as PermissionModeChangeCauseSchema,
   RunOutcome as RunOutcomeSchema,
@@ -26,6 +28,7 @@ import {
   type BmadPiece,
   type DriverChangeCause,
   type MessageRole,
+  type ModelChangeCause,
   type PermissionMode,
   type PermissionModeChangeCause,
   type Run,
@@ -64,6 +67,8 @@ export interface NewSession {
   adapterRefs?: AdapterRefs;
   /** The agent it is started with (epic 6), never changed. */
   agentId?: AgentId;
+  /** The model it starts on (story 11): the agent's own id; absent or `null`, the agent's own choice. */
+  model?: string | null;
 }
 
 /** What a newly created workspace starts with (story 10.4). Ignored when the workspace already exists. */
@@ -163,6 +168,13 @@ export interface Entities {
    * `setPermissionMode`, Developer mode). {@link NotFoundError} for an unknown session.
    */
   setSessionPermissionMode(id: SessionId, mode: PermissionMode, cause: PermissionModeChangeCause, reason?: string): Session;
+  /**
+   * Sets the chat's model (story 11; `null`: the agent's own choice),
+   * appending `session.model_changed` with `cause` (and `reason`) if it
+   * changed. Checks only that it is a model id: whether the agent offers it is
+   * the caller's. {@link NotFoundError} for an unknown session.
+   */
+  setSessionModel(id: SessionId, model: string | null, cause: ModelChangeCause, reason?: string): Session;
   /** Every session in `mode`, oldest first, across workspaces. */
   listSessionsInPermissionMode(mode: PermissionMode): Session[];
   /**
@@ -209,6 +221,7 @@ const toSession = (row: SessionRow): Session => ({
   driver: row.driver,
   permissionMode: row.permissionMode,
   ...(row.agentId === null ? {} : { agentId: row.agentId }),
+  model: row.model,
   title: row.title,
   adapterRefs: row.adapterRefs,
   createdAt: row.createdAt,
@@ -365,6 +378,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         // Every chat starts in Ask, whatever the agent's own settings say.
         permissionMode: 'ask',
         ...(input.agentId === undefined ? {} : { agentId: check(AgentIdSchema, input.agentId, 'agent id') }),
+        model: input.model === undefined || input.model === null ? null : check(ModelIdSchema, input.model, 'model'),
         title: input.title ?? null,
         adapterRefs: check(AdapterRefsSchema, input.adapterRefs ?? {}, 'adapter refs'),
         createdAt: at,
@@ -490,6 +504,22 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
             cause,
             ...(reason === undefined || reason === '' ? {} : { reason }),
           },
+        });
+        return updated;
+      });
+    },
+
+    setSessionModel(id, model, cause, reason) {
+      const next = model === null ? null : check(ModelIdSchema, model, 'model');
+      check(ModelChangeCauseSchema, cause, 'model change cause');
+      return log.transaction(() => {
+        const session = requireSession(id);
+        if (session.model === next) return session;
+        const updated: Session = { ...session, model: next, updatedAt: now() };
+        orm.update(sessions).set({ model: next, updatedAt: updated.updatedAt }).where(eq(sessions.id, id)).run();
+        sessionEvents.appendSessionEvent(session.id, {
+          type: 'session.model_changed',
+          payload: { sessionId: session.id, model: next, previous: session.model, cause, ...(reason === undefined || reason === '' ? {} : { reason }) },
         });
         return updated;
       });

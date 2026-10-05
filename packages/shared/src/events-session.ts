@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PermissionMode, Session, SessionDriver, SessionState } from './entities.js';
+import { ModelId, PermissionMode, Session, SessionDriver, SessionState } from './entities.js';
 import { AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, PermissionDecision, PermissionRequestId, SessionErrorCode, ToolCallDiff, ToolCallStatus, ToolKind } from './events-common.js';
 import { assigned, onSessionStream } from './events-envelope.js';
 import { PermissionRuleId, SessionId } from './ids.js';
@@ -82,6 +82,32 @@ export const SessionPermissionModeChangedInput = z.object({
 /** A chat's permission mode changed (core is the only one that changes it). */
 export const SessionPermissionModeChangedEvent = SessionPermissionModeChangedInput.extend(assigned);
 export type SessionPermissionModeChangedEvent = z.infer<typeof SessionPermissionModeChangedEvent>;
+
+/**
+ * Why a chat's model changed (story 11): the user chose it (`user`), or the
+ * agent refused it or switched itself to another (`agent`). A chat's first
+ * model is in its `session.created`.
+ */
+export const MODEL_CHANGE_CAUSES = ['user', 'agent'] as const;
+export const ModelChangeCause = z.enum(MODEL_CHANGE_CAUSES);
+export type ModelChangeCause = z.infer<typeof ModelChangeCause>;
+
+export const SessionModelChangedInput = z.object({
+  type: z.literal('session.model_changed'),
+  ...onSessionStream,
+  payload: z.object({
+    sessionId: SessionId,
+    /** The agent's own id for the model now; `null`: the agent's own choice. */
+    model: ModelId.nullable(),
+    previous: ModelId.nullable(),
+    cause: ModelChangeCause,
+    /** Why, in plain words for the user, when there is something to say (the agent's own reason, masked). Never a secret. */
+    reason: z.string().min(1).max(1000).optional(),
+  }),
+});
+/** A chat's model changed (core is the only one that changes it). */
+export const SessionModelChangedEvent = SessionModelChangedInput.extend(assigned);
+export type SessionModelChangedEvent = z.infer<typeof SessionModelChangedEvent>;
 
 /** Identifies one message within a session's stream. */
 export const MessageId = z.string().min(1);

@@ -289,6 +289,8 @@ async function listenAndAnnounce({
     // The chat follows the log (a mode changed by Developer mode reaches its agent) and gates Skip all on Developer mode.
     events: core.events,
     installSettings: core.installSettings,
+    // Each agent's install-wide default model and last model list (story 11).
+    agentModels: core.agentModels,
     // The event carries the plain reason; the log also gets the details (never the environment).
     onAgentError: (sessionId, error) => log.warn('agent failed', { sessionId, code: error.code, reason: error.message, ...error.details }),
     onInternalError: (sessionId, error) => log.error('applying an agent event failed', { sessionId, reason: String(error) }),
@@ -358,6 +360,7 @@ async function listenAndAnnounce({
     onboarding,
     newProjectDefaults,
     installSettings: core.installSettings,
+    agentDefaults: { models: core.agentModels, isAgentRegistered: (agentId) => agents.get(agentId) !== undefined },
     appShortcut,
     tabs,
   });

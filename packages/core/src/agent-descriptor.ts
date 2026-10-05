@@ -6,7 +6,7 @@
  * shape fits every agent the spikes probed (6.1, 12.1, 12.2) without a
  * branch on an id.
  */
-import { AgentId as AgentIdSchema, PERMISSION_MODES, type AgentAuthMethodKind, type AgentId, type PermissionMode } from '@ogden-agents/shared';
+import { AgentId as AgentIdSchema, AgentModel as AgentModelSchema, PERMISSION_MODES, type AgentAuthMethodKind, type AgentId, type AgentModel, type PermissionMode } from '@ogden-agents/shared';
 
 /** An OS and CPU an agent's pinned install is for, as Node names them (`process.platform`-`process.arch`). */
 export const AGENT_PLATFORMS = ['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64', 'win32-x64', 'win32-arm64'] as const;
@@ -78,6 +78,20 @@ export interface AgentDescriptor {
   needsProjectTrust: boolean;
   /** Where in a project its skills go (repo-relative, `/`-separated), for BMad setup. */
   skillsFolder: string;
+  /**
+   * For an agent whose sessions don't list their models over ACP (story 11):
+   * the models it offers, and how its process is told one at start, a
+   * variable or a command-line flag. Switching a chat's model then restarts
+   * its agent (resumed) at the next idle point. Absent: the agent lists its
+   * models itself (ACP session config option of category `model`), or offers none.
+   */
+  models?: AgentStaticModels | undefined;
+}
+
+/** A static model list and how a process is started on one of them (story 11). */
+export interface AgentStaticModels {
+  list: readonly AgentModel[];
+  apply: { kind: 'env'; name: string } | { kind: 'arg'; flag: string };
 }
 
 const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/;
@@ -131,6 +145,18 @@ export function agentDescriptorProblems(descriptor: AgentDescriptor): string[] {
     if (typeof nativeId !== 'string' || nativeId.trim() === '') at(`the ${mode} mode has no native id`);
   }
   if (typeof descriptor.permissionModes.ask !== 'string') at('the agent does not declare Ask');
+  if (descriptor.models !== undefined) {
+    const { list, apply } = descriptor.models;
+    if (list.length === 0) at('the static model list is empty');
+    const ids = new Set<string>();
+    for (const model of list) {
+      if (!AgentModelSchema.safeParse(model).success) at(`${JSON.stringify(model.id)} is not a model`);
+      if (ids.has(model.id)) at(`the model ${model.id} is listed twice`);
+      ids.add(model.id);
+    }
+    if (apply.kind === 'env' && !ENV_NAME.test(apply.name)) at(`${apply.name} is not an environment variable name`);
+    if (apply.kind === 'arg' && !/^--?[A-Za-z][A-Za-z0-9-]*$/.test(apply.flag)) at(`${apply.flag} is not a command-line flag`);
+  }
   if (!isRelativeFolder(descriptor.skillsFolder)) at(`the skills folder ${JSON.stringify(descriptor.skillsFolder)} is not a plain repo-relative path`);
   return problems;
 }

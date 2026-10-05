@@ -3,7 +3,7 @@ title: "New chats start in the project's permission mode"
 type: 'feature'
 ticket: '9'
 created: '2026-10-04'
-status: 'in-review'
+status: 'built'
 baseline_revision: '56883363a54bcfb42b8ae698522dd02e34af5ef2'
 route: 'full'
 route_source: 'auto'

@@ -1,6 +1,7 @@
 import {
   ATTENDED_EXPLAINED_TEXT,
   BUILD_DIALOG_LOAD_FAILED,
+  BUILD_DIALOG_READY_TEXT,
   BUILD_DIALOG_TITLE,
   DOCKER_INSTALL_URL,
   DOCKER_READY_BUT_UNSUPPORTED_TEXT,
@@ -62,7 +63,8 @@ export function BuildDialog({ wsId, ticketRef, onClose, onStarted }: BuildDialog
   const [failure, setFailure] = useState<string | undefined>();
   const status: SandboxStatus | undefined = sandbox.data;
   // Until the server answers (or when it cannot), the entry's own order; a failed read never blocks building with you watching.
-  const choices: readonly SandboxChoice[] = status === undefined || status.choices.length === 0 ? SANDBOX_CHOICES : status.choices;
+  const ready = status?.available === true;
+  const choices: readonly SandboxChoice[] = ready ? [] : status === undefined || status.choices.length === 0 ? SANDBOX_CHOICES : status.choices;
   const dockerReady = status?.probes.some((probe) => probe.kind === 'docker' && probe.state === 'detected') === true;
 
   const buildAttended = () => {
@@ -154,6 +156,7 @@ export function BuildDialog({ wsId, ticketRef, onClose, onStarted }: BuildDialog
             {failure}
           </Notice>
         )}
+        {ready ? <Text variant="body" data-testid="build-dialog-ready">{BUILD_DIALOG_READY_TEXT}</Text> : null}
         <ul className="m-0 flex list-none flex-col gap-3 p-0" aria-label="Choices" data-testid="build-dialog-choices">
           {choices.map(choice)}
         </ul>

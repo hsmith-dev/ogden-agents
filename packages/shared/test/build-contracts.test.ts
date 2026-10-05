@@ -178,9 +178,11 @@ describe('runs (story 5.3)', () => {
 
 describe('requests and responses (story 5.3)', () => {
   it('the build request: one ticket (agent left to the build runner) or every ready one; nothing else', () => {
-    expect(StartBuildRequest.parse({ ref: '1.1' })).toEqual({ ref: '1.1' });
-    expect(StartBuildRequest.parse({ all: true })).toEqual({ all: true });
-    expect(StartBuildRequest.parse({ agent: 'codex', ref: '1.1' })).toEqual({ agent: 'codex', ref: '1.1' });
+    expect(StartBuildRequest.parse({ ref: '1.1' })).toEqual({ mode: 'unattended', ref: '1.1' });
+    expect(StartBuildRequest.parse({ ref: '1.1', mode: 'attended' }).mode).toBe('attended');
+    expect(StartBuildRequest.safeParse({ ref: '1.1', mode: 'sandboxless' }).success).toBe(false);
+    expect(StartBuildRequest.parse({ all: true })).toEqual({ mode: 'unattended', all: true });
+    expect(StartBuildRequest.parse({ agent: 'codex', ref: '1.1' })).toEqual({ agent: 'codex', mode: 'unattended', ref: '1.1' });
     expect(StartBuildRequest.safeParse({ agent: 'Not An Id', ref: '1.1' }).success).toBe(false);
     expect(StartBuildRequest.safeParse({ ref: '1.1', all: true }).success).toBe(false);
     expect(StartBuildRequest.safeParse({ all: false }).success).toBe(false);

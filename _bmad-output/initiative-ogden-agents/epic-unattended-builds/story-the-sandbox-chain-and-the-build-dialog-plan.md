@@ -3,13 +3,13 @@ title: 'The sandbox chain and the Build dialog'
 type: 'feature'
 ticket: '6'
 created: '2026-10-04'
-status: 'ready-for-dev'
+status: 'built'
 baseline_revision: '74aec501d0362fcc171ec7acd776d1e8792f2874'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-unattended-builds/epic-unattended-builds.md'
@@ -83,9 +83,20 @@ context:
 
 ## Implementation Notes
 
+- 2026-10-04 (build): implemented directly from this plan in local milestone commits. Shared: `mode`, `SandboxStatus`, the `…/build-sandbox` route, sentences. Core: attended setup (`BuildSessionSetup` union), `permissions.request(…, { attended })`, `build-object-store.ts`, `builds.ts` (`requireSandbox`, `unattendedSetup`, approve import, `sandboxStatus`), `VcsPort.importObjects`. Adapters: `sandbox-chain`, `sandbox-docker`, probing `sandbox-claude-native`, store-aware `vcs-git`. Web: `build-dialog.tsx`. Tests: adapters, core, server (real git through the fake agent, store, import, fsck), DOM, e2e `build-sandbox.spec.ts`.
+- Scope calls: limits (2/3/45) are 5.8's (5.3 froze the split; defaults already in `shared/build-settings.ts`), so none built; Docker and Landlock are detected and shown, never selected (Design Notes); the Install Docker choice is a link, disabled with the reason when Docker already runs.
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+- 2026-10-04, pass 1 (security, one reviewer). Counts: high 0, medium 2, low 7. Routes: patch 4, defer 4, reject 1. No intent_gap.
+  - M1 an agent-planted `info/alternates`, link or FIFO in the run store is followed by host git: patch (`storeIsPlain`: reads go without the store, import refuses). Test added.
+  - M2 attended sessions have no managed Claude settings, so the user's own settings can skip a card: defer (deferred-work.md); spec wording holds for every request Claude raises.
+  - L3 a path with a line break makes approve refuse: patch (ids matched by pattern).
+  - L6 approve with a sandboxed run's store missing: patch (refused with the plain message before merging).
+  - L9 dialog offered attended when a sandbox became available: patch (says to build again).
+  - L4 compression bomb, L5 unremovable store, L7 weaker bwrap probe, L8 docker lookup and probe cost: defer (deferred-work.md).
 
 ## Design Notes
 

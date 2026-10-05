@@ -136,7 +136,7 @@ import type { BmadSourceUseCases } from './bmad-source-port.js';
 import { BUILD_PERMISSION_DENIED, decideBuildPermission, nodePathNormalizer, type PathNormalizer } from './build-permission-policy.js';
 import type { BuildRunnerPort } from './build-runner-port.js';
 import { createRunActivityRecorder, runFolderOf, runShortOf, writeRunResult } from './build-run-folder.js';
-import { createObjectStore, ObjectStoreError, objectStoreEnv, removeObjectStore } from './build-object-store.js';
+import { createObjectStore, ObjectStoreError, objectStoreEnv, objectStoreOf, removeObjectStore } from './build-object-store.js';
 import { ensureWorktreesRoot, freeBytesOf, removeRunWorktree, sweepObjectStores, sweepRunBranches, sweepWorktrees } from './build-worktrees.js';
 import type { BuildSessionSetup, BuildSessions } from './build-sessions.js';
 import type { Chat } from './chat/types.js';
@@ -772,6 +772,9 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
           throw new BuildRefusedError('checkout_dirty', CHECKOUT_MOVED_MESSAGE);
         }
         await chat.releaseAgent(workspaceId, run.sessionId).catch((error: unknown) => report(run.id, 'release', error));
+        // A sandboxed run's objects live only in its store: without it nothing can be merged (review: never a confusing git error).
+        const short = runShortOf(run);
+        if (run.sandbox !== ATTENDED_SANDBOX && short !== undefined && !existsSync(objectStoreOf(dataDir, short))) throw new BuildRefusedError('checks_failed', OBJECTS_NOT_IMPORTED_MESSAGE);
         // The run's own objects come into the repo through git's own strict unpacking, never as files the agent wrote (story 5.6).
         if (run.baseRevision !== null && (await vcs.importObjects(repoPath, run.branch, run.baseRevision)) === 'refused') {
           throw new BuildRefusedError('checks_failed', OBJECTS_NOT_IMPORTED_MESSAGE);

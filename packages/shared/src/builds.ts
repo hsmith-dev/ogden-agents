@@ -211,6 +211,7 @@ export const RUN_REASON_START_FAILED = "The build couldn't start its agent.";
 /** The Build dialog's words (5.6): plain, no dashes. */
 export const BUILD_DIALOG_TITLE = "Claude Code can't build unattended on this computer yet.";
 export const BUILD_DIALOG_LOAD_FAILED = "Ogden Agents couldn't check what this computer can use. You can still build with you watching.";
+export const BUILD_DIALOG_READY_TEXT = 'A sandbox is ready now. Close this and press Build again.';
 export const OTHER_AGENT_DISABLED_TEXT = 'Other agents arrive in a later version.';
 export const DOCKER_READY_BUT_UNSUPPORTED_TEXT = "Docker is running here, but this version of Ogden Agents can't build inside it yet.";
 export const ATTENDED_EXPLAINED_TEXT = 'Each command Claude Code wants to run asks you first, in the build session.';

@@ -187,6 +187,16 @@ describe('a run object store (story 5.6)', () => {
     expect(hasObject(s.repo, rebased!)).toBe(true);
   });
 
+  it('refuses a store holding an alternates list or a link, and never reads through it', async () => {
+    const s = await withRun();
+    s.work({ 'src/a.ts': 'export const a = 1;\n' });
+    mkdirSync(join(s.store, 'info'), { recursive: true });
+    writeFileSync(join(s.store, 'info', 'alternates'), '/etc\n');
+    expect(await s.vcs.importObjects(s.repo, BRANCH, s.base)).toBe('refused');
+    // Reads go without the store: the run's commit isn't visible any more.
+    expect(await s.vcs.branchRevision(s.repo, BRANCH)).toBeUndefined();
+  });
+
   it('an attended run has no store, so there is nothing to import, and a linked store is never used', async () => {
     const s = setup();
     rmSync(s.store, { recursive: true, force: true });

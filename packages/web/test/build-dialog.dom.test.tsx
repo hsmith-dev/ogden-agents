@@ -57,6 +57,7 @@ const state = vi.hoisted(() => ({
   calls: [] as string[],
   bodies: [] as unknown[],
   attended: undefined as unknown,
+  tickets: undefined as unknown,
 }));
 
 vi.mock('@/events/event-stream', () => ({ useEventStream: () => ({ events: [], caughtUp: true }) }));

@@ -207,6 +207,8 @@ describe('vcs-memory (story 5.3): every VcsPort method', () => {
     vcs.gitCheck = { ok: false, reason: 'too_old', version: '2.30.0' };
     expect(await port.check()).toEqual({ ok: false, reason: 'too_old', version: '2.30.0' });
     expect(await port.isAncestor(repo, (await port.head(repo))!.revision)).toBe(true);
+    // Story 5.6: a run with no object store has nothing to import.
+    expect(await port.importObjects(repo, branch, (await port.head(repo))!.revision)).toBe('nothing');
     vcs.repo(repo).status = ['plan.md', 'other.ts'];
     const committed = await port.commitPaths(repo, ['plan.md'], 'Plan files');
     expect((await port.head(repo))!.revision).toBe(committed);

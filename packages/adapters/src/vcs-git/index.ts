@@ -150,17 +150,40 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
     return store;
   };
 
+  /**
+   * Whether the store holds only plain files and folders and no alternates
+   * list: the agent writes it, and git would follow `info/alternates` to any
+   * folder, or hang on a FIFO. Anything else and the store is not used.
+   */
+  const storeIsPlain = (store: string): boolean => {
+    try {
+      const walk = (folder: string, depth: number): boolean => {
+        if (depth > 4) return false;
+        for (const entry of readdirSync(folder, { withFileTypes: true })) {
+          const full = join(folder, entry.name);
+          if (entry.isDirectory()) {
+            if (!lstatSync(full).isDirectory() || !walk(full, depth + 1)) return false;
+          } else if (!entry.isFile() || lstatSync(full).isSymbolicLink() || (depth === 1 && folder.endsWith('info'))) return false;
+        }
+        return true;
+      };
+      return !existsSync(join(store, 'info', 'alternates')) && !existsSync(join(store, 'info', 'http-alternates')) && walk(store, 0);
+    } catch {
+      return false;
+    }
+  };
+
   /** Env for a read of `branch`: the run's store as an alternate (the repo's own objects stay primary). */
   const readEnv = (branch: string): Record<string, string> => {
     const store = storeOf(branch);
-    return store === undefined ? {} : { GIT_ALTERNATE_OBJECT_DIRECTORIES: store };
+    return store === undefined || !storeIsPlain(store) ? {} : { GIT_ALTERNATE_OBJECT_DIRECTORIES: store };
   };
 
   /** Env for git that writes in the run's worktree: objects go to the run's store, the repo's are an alternate. */
   const writeEnv = (branch: string, common: string): Record<string, string> => {
     const store = storeOf(branch);
     const repoObjects = join(common, 'objects');
-    return store === undefined || repoObjects.includes(delimiter) ? {} : { GIT_OBJECT_DIRECTORY: store, GIT_ALTERNATE_OBJECT_DIRECTORIES: repoObjects };
+    return store === undefined || repoObjects.includes(delimiter) || !storeIsPlain(store) ? {} : { GIT_OBJECT_DIRECTORY: store, GIT_ALTERNATE_OBJECT_DIRECTORIES: repoObjects };
   };
 
   /** The empty hooks folder, made sure of before every call. */
@@ -527,15 +550,16 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
       checkPath(repoPath);
       const store = storeOf(checkBranch(branch));
       if (store === undefined) return 'nothing';
+      if (!storeIsPlain(store)) return 'refused';
       const from = checkRevision(base);
       // What the branch has that its base doesn't, read with the run's store as an alternate; nothing the agent named is a path git opens.
       const listed = await run(repoPath, ['rev-list', '--objects', `refs/heads/${branch}`, '--not', from], 256 * 1024 * 1024, readEnv(branch));
       if (listed.code !== 0) return 'refused';
       const ids = listed.stdout
         .split(/\r?\n/)
-        .map((line) => line.split(' ')[0] ?? '')
+        // `<id> <path>`: a path with a line break makes a second line that is no id, and is ignored, never trusted.
+        .map((line) => /^([0-9a-f]{40}(?:[0-9a-f]{24})?)(?: |$)/.exec(line)?.[1] ?? '')
         .filter((id) => id !== '');
-      if (ids.some((id) => !REVISION.test(id))) return 'refused';
       if (ids.length === 0) return 'nothing';
       // git packs them (re-reading and re-compressing each object) and unpacks them with `--strict`, which hashes every
       // object itself and refuses one whose references don't resolve: a forged or damaged file in the store is never copied.

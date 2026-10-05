@@ -80,7 +80,9 @@ async function fetchNode(plat) {
   const actual = createHash('sha256').update(readFileSync(archive)).digest('hex');
   if (actual !== sha) throw new Error(`SHA-256 mismatch for ${name}.${ext}: ${actual} != ${sha}`);
   const out = join(cache, name);
-  if (!existsSync(out)) execFileSync('tar', ['-xf', archive, '-C', cache], { stdio: 'inherit' });
+  // Windows' own bsdtar reads zip; Git Bash's GNU tar on PATH does not (and takes `D:` for a host).
+  const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
+  if (!existsSync(out)) execFileSync(tar, ['-xf', archive, '-C', cache], { stdio: 'inherit' });
   const bin = plat.startsWith('win') ? join(out, 'node.exe') : join(out, 'bin', 'node');
   const npm = plat.startsWith('win') ? join(out, 'node_modules', 'npm') : join(out, 'lib', 'node_modules', 'npm');
   report.node[plat] = { archive: `${name}.${ext}`, sha256: sha, archiveBytes: statSync(archive).size, binaryBytes: statSync(bin).size };
@@ -259,6 +261,9 @@ async function main() {
   const sidecar = join(binDir, `ogden-node-${target}${isWin ? '.exe' : ''}`);
   if (target === 'universal-apple-darwin') {
     execFileSync('lipo', ['-create', nodes['darwin-arm64'].bin, nodes['darwin-x64'].bin, '-output', sidecar]);
+    // tauri-build checks the per-architecture sidecars too when it compiles each half.
+    copyFileSync(nodes['darwin-arm64'].bin, join(binDir, 'ogden-node-aarch64-apple-darwin'));
+    copyFileSync(nodes['darwin-x64'].bin, join(binDir, 'ogden-node-x86_64-apple-darwin'));
   } else copyFileSync(first.bin, sidecar);
   if (!isWin) chmodSync(sidecar, 0o755);
   report.sizes.sidecarBytes = statSync(sidecar).size;

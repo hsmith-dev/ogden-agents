@@ -57,7 +57,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev patchelf xvfb libfuse2 file build-essential
           Xvfb :99 -screen 0 1280x1024x24 >/dev/null 2>&1 &
-          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+          {
+            echo "DISPLAY=:99"
+            # linuxdeploy is itself an AppImage; its strip fails on some ELF files (.relr.dyn).
+            echo "APPIMAGE_EXTRACT_AND_RUN=1"
+            echo "NO_STRIP=true"
+          } >> "$GITHUB_ENV"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -95,7 +100,7 @@ jobs:
         working-directory: apps/desktop-spike
         run: |
           start=$(date +%s)
-          npx --yes "$TAURI_CLI" build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config "$RUNNER_TEMP/spike-0.0.1.json"
+          npx --yes "$TAURI_CLI" build --verbose --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config "$RUNNER_TEMP/spike-0.0.1.json"
           echo "build N took $(( $(date +%s) - start )) s"
           rm -rf "$RUNNER_TEMP/bundle-n" && cp -R src-tauri/target/${{ matrix.target }}/release/bundle "$RUNNER_TEMP/bundle-n"
           find "$RUNNER_TEMP/bundle-n" -maxdepth 2 -exec ls -ld {} \;

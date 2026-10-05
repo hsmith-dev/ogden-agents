@@ -65,7 +65,12 @@ if (mode === 'prompt') {
   const size = () => `SIZE:${process.stdout.columns}x${process.stdout.rows}\r\n`;
   out(`READY ${size()}`);
   process.stdout.on('resize', () => out(size()));
+  let total = 0;
   process.stdin.on('data', (chunk) => {
+    total += chunk.length;
+    // A side channel for the probes: how much input arrived, whatever the terminal does with the output.
+    if (process.env.FAKE_COUNT) writeFileSync(process.env.FAKE_COUNT, String(total));
+    if (process.env.FAKE_QUIET) return;
     const hex = Buffer.from(chunk).toString('hex');
     out(`GOT:${chunk.length}:${hex}\r\n`);
     if (chunk.toString() === 'q') process.exit(0);

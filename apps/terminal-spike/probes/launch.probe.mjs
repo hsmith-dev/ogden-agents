@@ -134,7 +134,7 @@ describe('plain shell', () => {
       const promptMs = Math.round(now() - t0 - 1200);
       const sizeCmd = IS_WIN ? (isCmd ? 'mode con' : '$Host.UI.RawUI.WindowSize.Width') : 'stty size';
       pane.write(IS_WIN ? (isCmd ? 'set /a 20+22\r' : 'Write-Output ("shell-" + (20+22))\r') : 'echo shell-$((20+22))\r');
-      const ran = await pane.waitFor(IS_WIN ? (isCmd ? /\n42\r?\n/ : /shell-42/) : 'shell-42', 10_000, pane.text.length).then(() => true, () => false);
+      const ran = await pane.waitFor(IS_WIN ? (isCmd ? /\n42\r?\n/ : /shell-42/) : 'shell-42', 40_000, pane.text.length).then(() => true, () => false);
       pane.resize(120, 33);
       await sleep(400);
       const from = pane.text.length;

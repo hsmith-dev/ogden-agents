@@ -73,7 +73,7 @@ jobs:
       - name: Probes
         run: |
           status=0
-          for probe in pty-core safety launch status gate browser conpty; do
+          for probe in pty-core conpty-quirks safety launch status gate browser conpty; do
             echo "::group::probe $probe"
             pnpm exec vitest run --config apps/terminal-spike/vitest.config.mjs "apps/terminal-spike/probes/$probe.probe.mjs" || { echo "::error::probe $probe failed"; echo "- probe \`$probe\` FAILED" >> "$GITHUB_STEP_SUMMARY"; status=1; }
             echo "::endgroup::"

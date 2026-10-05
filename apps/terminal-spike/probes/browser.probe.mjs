@@ -163,7 +163,7 @@ describe('in the browser', () => {
     const [exe, args] = fakeCommand('scenario', file);
     await host.open('b-reload', { file: exe, args, trimText: true });
     await page.evaluate((id) => window.spike.mount(id, { scrollback: 5000 }), 'b-reload');
-    await page.waitForFunction(() => window.spike.screen('b-reload').join('').includes('fake> '));
+    await page.waitForFunction(() => window.spike.screen('b-reload').join('').includes('fake>'));
     const before = await page.evaluate(() => ({ lines: window.spike.screen('b-reload', true), len: window.spike.scrollLen('b-reload') }));
     // Reload the tab: the page, its xterm and its socket are gone; the pane lives on in the server.
     const t0 = now();

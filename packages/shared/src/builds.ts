@@ -195,6 +195,31 @@ export const NO_PLAN_FILES_TO_COMMIT_TEXT = "This ticket's plan files have no un
 export const RUN_NOT_ACTIVE_MESSAGE = 'This run has already finished.';
 /** `POST …/runs/:runId/retry` for a run not paused at a checkpoint, until 5.8 builds Retry. */
 export const RETRY_NOT_AVAILABLE_MESSAGE = 'Retry for this run is not available yet.';
+/** The run view's words (11.1): plain, no dashes. */
+export const APPLY_FIX_LABEL = 'Apply the saved fix and retry';
+export const APPLY_FIX_FAILED = "The saved fix couldn't be applied. Try again.";
+export const NO_SAVED_FIX_MESSAGE = 'This run has no saved fix to apply. Add detail to the story and retry.';
+export const APPLY_FIX_REFUSED_MESSAGE = "The saved fix doesn't apply to the build, so nothing changed. Add detail to the story and retry, or reject the build.";
+export const SHOW_DETAILS_LABEL = 'Show details';
+export const HIDE_DETAILS_LABEL = 'Hide details';
+export const RUNS_PAGE_TITLE = 'Runs';
+export const RUNS_EMPTY_TEXT = 'No builds yet. Build a ready story from the board.';
+export const RUNS_QUEUE_TITLE = 'Waiting to start';
+export const RUNS_LOAD_FAILED = "The runs couldn't be loaded. Try again.";
+export const RUN_VIEW_LINK_LABEL = 'Open the build';
+export const RUN_TIME_LEFT_LABEL = 'Time left';
+export const RUN_AGENT_LABEL = 'Agent';
+export const RUN_SANDBOX_LABEL = 'Sandbox';
+
+/** The time left before a run's limit in plain words ("12 minutes left", "Under a minute left"), `null` once it has passed or without a deadline. */
+export function timeLeftWords(deadline: string | null, now: number): string | null {
+  if (deadline === null) return null;
+  const ms = Date.parse(deadline) - now;
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const minutes = Math.ceil(ms / 60_000);
+  if (ms < 60_000) return 'Under a minute left';
+  return minutes === 1 ? '1 minute left' : `${minutes} minutes left`;
+}
 export const ALL_READY_ASK_MESSAGE = 'Ask for every ready ticket with all set to true and no ticket or watching mode.';
 
 /** A run's outcome as the review page and the session header say it. */

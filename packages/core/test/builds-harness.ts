@@ -161,7 +161,10 @@ export function fakeVcs() {
     ancestor: true,
     committed: [] as string[][],
     removeFails: false,
+    applyPatch: 'applied' as 'applied' | 'refused',
     rebase: 'rebased' as 'rebased' | 'conflict' | 'refused',
+    /** The files an applied patch was asked to refuse (the protected check, story 11.1). */
+    refused: [] as boolean[],
     importResult: 'nothing' as 'imported' | 'nothing' | 'refused',
     /** Every `importObjects` call: the branch and its base. */
     imports: [] as Array<[string, string]>,
@@ -235,7 +238,11 @@ export function fakeVcs() {
       calls.push(`rebase ${input.onto.slice(0, 4)}`);
       return state.rebase;
     },
-    applyPatch: async () => 'applied',
+    applyPatch: async ({ patchPath, refuse }) => {
+      calls.push(`applyPatch ${patchPath}`);
+      state.refused = ['.claude/settings.json', '_bmad/scripts/tickets.py', '_bmad-output/a/tickets.toml', 'src/ok.ts'].map((file) => refuse?.(file) === true);
+      return state.applyPatch;
+    },
   };
   return { vcs, calls, state };
 }

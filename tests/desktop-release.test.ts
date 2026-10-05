@@ -55,7 +55,7 @@ describe('release artifacts', () => {
     const root = downloaded({ signed: false });
     rmSync(join(root, 'ogden-desktop-macos-universal', 'release', 'bundle', 'macos'), { recursive: true });
     expect(() => collectArtifacts(root, VERSION)).toThrow(/universal\.app\.tar\.gz, found 0/);
-    expect(collectArtifacts(root, VERSION, true).map((a) => a.name)).toEqual([
+    expect(collectArtifacts(root, VERSION, false, true).map((a) => a.name)).toEqual([
       `Ogden-Agents_${VERSION}_universal.dmg`,
       `Ogden-Agents_${VERSION}_x64-setup.exe`,
       `Ogden-Agents_${VERSION}_arm64-setup.exe`,

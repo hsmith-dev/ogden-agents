@@ -536,7 +536,7 @@ describe('the run folder and checkpoint pauses (story 5.4)', () => {
     h.tickets.set(running.run.worktreePath!, '1.1', 'blocked', 'unclear intent');
     await h.endTurn(running.session.id);
     expect(await codeOf(h.builds.resume(h.wsId, running.run.id))).toBe('run_not_active');
-    expect(((await refusal(h.builds.retry(h.wsId, running.run.id, { mode: 'rebase' }))) as Error).name).toBe('NotImplementedError');
+    expect(((await refusal(h.builds.retry(h.wsId, running.run.id, { mode: 'apply_fix' }))) as Error).name).toBe('NotImplementedError');
 
     const paused = await harness();
     paused.tickets.checkpoint('1.1', { plan: true });

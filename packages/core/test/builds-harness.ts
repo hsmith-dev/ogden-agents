@@ -161,6 +161,7 @@ export function fakeVcs() {
     ancestor: true,
     committed: [] as string[][],
     removeFails: false,
+    rebase: 'rebased' as 'rebased' | 'conflict' | 'refused',
     importResult: 'nothing' as 'imported' | 'nothing' | 'refused',
     /** Every `importObjects` call: the branch and its base. */
     imports: [] as Array<[string, string]>,
@@ -230,7 +231,10 @@ export function fakeVcs() {
     diffStats: async () => ({ files: state.files.length, insertions: 1, deletions: 0 }),
     // The run stores the worktree's real path (macOS: `/private/var/…`).
     worktreeExists: async (_repo, path) => [...state.worktrees].some((each) => each === path || (existsSync(each) && realpathSync.native(each) === path)),
-    rebase: async () => 'rebased',
+    rebase: async (input) => {
+      calls.push(`rebase ${input.onto.slice(0, 4)}`);
+      return state.rebase;
+    },
     applyPatch: async () => 'applied',
   };
   return { vcs, calls, state };

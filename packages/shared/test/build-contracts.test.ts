@@ -193,8 +193,8 @@ describe('requests and responses (story 5.3)', () => {
   it('approve, reject, retry, stop and check again', () => {
     expect(ApproveBuildRequest.safeParse({ revision: commit }).success).toBe(true);
     expect(ApproveBuildRequest.safeParse({ revision: 'HEAD' }).success).toBe(false);
-    expect(RejectBuildRequest.parse({})).toEqual({});
-    expect(RejectBuildRequest.parse({ note: '  Use the blue one.  ' })).toEqual({ note: 'Use the blue one.' });
+    expect(RejectBuildRequest.parse({})).toEqual({ retry: false });
+    expect(RejectBuildRequest.parse({ note: '  Use the blue one.  ' })).toEqual({ note: 'Use the blue one.', retry: false });
     expect(RejectBuildRequest.safeParse({ note: 'x'.repeat(4001) }).success).toBe(false);
     expect(RetryRunRequest.parse({})).toEqual({ mode: 'resume' });
     for (const mode of ['resume', 'rebase', 'apply_fix']) expect(RetryRunRequest.parse({ mode })).toEqual({ mode });

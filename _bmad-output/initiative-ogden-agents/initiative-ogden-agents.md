@@ -35,6 +35,7 @@ Each epic is one user-facing outcome, built in the spec's delivery-phase order. 
 - Touch point: Docker, only where already installed (sandbox fallback); owner: epic-unattended-builds
 - Touch point: the npm registry (publishing); owner: epic-foundation-and-forks
 - Touch point: the upstream BMAD-METHOD and bmad-loop repos (PRs); owner: epic-foundation-and-forks sets up the process, and each epic sends its own patches
+- Touch point: GitHub Releases assets (desktop apps, `SHA256SUMS`, `latest.json`, the `desktop-channel-next` prerelease), nodejs.org downloads (pinned Node), the updater endpoints, the npm registry read for the newer-version notice, and the Apple and Windows signing services (slots only); owner: epic-desktop-app (13), outside the v1 Done when (approved 2026-10-04)
 
 ## References
 
@@ -50,3 +51,5 @@ Each epic is one user-facing outcome, built in the spec's delivery-phase order. 
 - Decision: epic 1 is built interactively with `bmad-build`; later epics may run unattended with `bmad-build-auto`, with checkpoints set at their inception (user, 2026-09-29).
 - Decision: v1 is Claude Code, fully: chat, planning and builds. Epic 6 becomes "Add Antigravity beside Claude Code, if possible", chat only, gated by a spike's go or no-go; builds with Antigravity, and Codex, Gemini CLI and GitHub Copilot CLI for chat and builds, move out of v1 to epic 8 (v2). Their research is kept in epic 6's Notes as v2 input (user, 2026-10-02).
 - Decision: epic 6's agent-choice groundwork (session agent, agent registry and list, shared ACP client, picker and default per project) is built whatever Antigravity's spike decides; a no-go drops only the Antigravity entries. v1.1 (Codex and Grok) builds on it (user, 2026-10-02).
+- Note (2026-10-04, draft for the user's approval): epic 13, epic-desktop-app, is incepted as a draft: Ogden as a Tauri v2 desktop app on macOS, Windows and Linux beside `npx ogden-agents`, with automatic updates. It sits outside the v1 Done when under its own heading in `tickets.toml`, and proposes a new CAP-20 (see its Notes, open questions 9 and 11).
+- Decision (2026-10-04, user): epic 13 is approved and built next, after the current feedback round and ahead of the rest of epics 5, 11, 12 and 7. Its deltas are applied: spec CAP-20, AD-23, and notes on AD-3, AD-5, AD-15, AD-20 and AD-21. It stays outside the v1 Done when.

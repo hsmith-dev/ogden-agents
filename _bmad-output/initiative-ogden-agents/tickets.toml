@@ -41,6 +41,14 @@ title = "Plan with every BMAD skill and track it on a live board"
 covers = ["CAP-2", "CAP-6", "CAP-7", "CAP-18"]
 after = [{ epic = 1, needs = "the bundled forks and forks.lock" }, { epic = 2, needs = "chat sessions, which planning runs in" }, { epic = 10, needs = "the per-project BMad pieces contract, guard, route helper and BmadCatalogPort.detect (10.2)" }]
 
+# Epic 13 is built next, right after epic 4 (user, 2026-10-04); outside the v1 Done when. Epic id 13: 11 is 5b (docs/epic-5-inception) and 12 is v1.1 (docs/epic-12-inception); keep this table right after epic 4 when merging those branches.
+[[epic]]
+id = 13
+slug = "epic-desktop-app"
+title = "Ogden as its own desktop app on macOS, Windows and Linux"
+covers = ["CAP-20", "CAP-1", "CAP-16"]
+after = [{ epic = 4, needs = "its release (4.13), the latest release.yml and installed suite on main; through it, epic 1's launcher, handshake and npm release (1.7, 1.10), epic 2's per-tab token and app shortcut (2.1, 2.4) and epic 9's Welcome (9.5)" }]
+
 [[epic]]
 id = 5
 slug = "epic-unattended-builds"

@@ -49,6 +49,13 @@ const notificationsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/notifications-page'), 'NotificationsPage'),
 });
 
+/** The version, its channel and the check for newer ones (story 13.7). */
+const aboutRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/about',
+  component: lazyRouteComponent(() => import('./routes/about-page'), 'AboutPage'),
+});
+
 /** The app-wide default for new projects (story 10.4). */
 const newProjectsRoute = createRoute({
   getParentRoute: () => settingsRoute,
@@ -120,7 +127,7 @@ const routeTree = rootRoute.addChildren([
   workspacePlanRoute,
   workspaceBoardRoute.addChildren([workspaceBoardTicketRoute]),
   sessionRoute,
-  settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute, notificationsRoute]),
+  settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute, notificationsRoute, aboutRoute]),
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

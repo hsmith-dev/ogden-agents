@@ -310,6 +310,8 @@ export function prepareInstall({ tarball, registrySpec, prefix = 'ogden-agents-s
   // (story 9.2). The server honours that only in a test run, hence NODE_ENV.
   env.OGDEN_AGENTS_TEST_SECRET_STORE = 'memory';
   env.NODE_ENV = 'test';
+  // The "newer version" check (story 13.7) never reaches npm from a test: belt and braces with NODE_ENV.
+  env.OGDEN_AGENTS_OFFLINE = '1';
   Object.assign(env, extraEnv);
 
   // A registry spec runs as a user types it: npx picks the package's only bin.

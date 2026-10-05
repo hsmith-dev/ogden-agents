@@ -37,7 +37,8 @@
  * No real agent, account, keychain or network. Each server is quit at the end
  * of its test, and its folders removed.
  */
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import {
   BMAD_COMING_SOON_LABEL,
@@ -57,10 +58,35 @@ import { expectConnected, landConnected, sidebarOf, storedToken } from '../e2e/t
 import { bmadServer, waitForExit, type BmadServer, type Launched } from './installed.js';
 
 const servers: BmadServer[] = [];
+/** How many servers the earlier tests started: a failed test attaches only its own servers' logs. */
+let serversBefore = 0;
+
+test.beforeEach(() => {
+  serversBefore = servers.length;
+});
+
+test.afterEach(async ({}, testInfo) => {
+  // A failed journey keeps its servers' logs (requests and agent starts, with times) in the report.
+  if (testInfo.status === testInfo.expectedStatus) return;
+  for (const [index, server] of servers.slice(serversBefore).entries()) {
+    const log = join(server.install.dataDir, 'logs', 'server.log');
+    if (existsSync(log)) await testInfo.attach(`server-${index + 1}.log`, { path: log, contentType: 'text/plain' }).catch(() => undefined);
+  }
+});
 
 test.afterAll(async () => {
   for (const server of servers) await server.remove();
 });
+
+/**
+ * How long the second tab may take to show the settings page and to follow
+ * the first one. A Windows runner has stalled for 35-40 s at this point
+ * (runs 37247659244 attempt 2 and 37255268977 attempt 1): the server, Chromium
+ * and the Playwright worker all slowed together, every request of the second
+ * tab's first load took 10-26 s, and the page showed the switch once its
+ * answers arrived. The 15 s default is shorter than that stall.
+ */
+const SECOND_TAB_MS = 60_000;
 
 /** The trust dialog's title (`SCRIPT_TRUST_TITLE`; `planning-setup.ts` has imports this runner can't load). */
 const SCRIPT_TRUST_TITLE = "Run this project's BMad Method scripts?";
@@ -344,17 +370,17 @@ test('a piece on and off with a second tab following, the guard, and the default
       await landConnected(other, await launchLink(launched.url, server.install.dataDir));
       await other.goto(`${launched.url}${settings}`);
       const otherPlanning = switchIn(other, BMAD_PIECE_INFO.planning.label);
-      await expect(otherPlanning).toHaveAttribute('aria-checked', 'false');
+      await expect(otherPlanning).toHaveAttribute('aria-checked', 'false', { timeout: SECOND_TAB_MS });
 
       await planning.click();
       await expect(planning).toHaveAttribute('aria-checked', 'true');
-      await expect(otherPlanning).toHaveAttribute('aria-checked', 'true');
+      await expect(otherPlanning).toHaveAttribute('aria-checked', 'true', { timeout: SECOND_TAB_MS });
       expect(await piecesOf(page, earlierId)).toEqual(['planning']);
       expect(await probe(page, earlierId)).toEqual({ status: 200, body: { piece: 'planning' } });
 
       await planning.click();
       await expect(planning).toHaveAttribute('aria-checked', 'false');
-      await expect(otherPlanning).toHaveAttribute('aria-checked', 'false');
+      await expect(otherPlanning).toHaveAttribute('aria-checked', 'false', { timeout: SECOND_TAB_MS });
       expect(await piecesOf(page, earlierId)).toEqual([]);
       expect(await probe(page, earlierId)).toMatchObject({ status: 409, body: { error: { code: 'feature_off' } } });
     } finally {

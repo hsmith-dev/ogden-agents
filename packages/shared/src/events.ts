@@ -7,10 +7,12 @@ import {
   SettingsDeveloperModeChangedEvent,
   SettingsDeveloperModeChangedInput,
   SettingsWhileWorkingChangedEvent,
+  SettingsUpdateNoticeChangedEvent,
+  SettingsUpdateNoticeChangedInput,
   SettingsWhileWorkingChangedInput,
 } from './events-settings.js';
 
-export { SettingsAgentDefaultModelChangedEvent, SettingsDeveloperModeChangedEvent, SettingsWhileWorkingChangedEvent } from './events-settings.js';
+export { SettingsAgentDefaultModelChangedEvent, SettingsDeveloperModeChangedEvent, SettingsUpdateNoticeChangedEvent, SettingsWhileWorkingChangedEvent } from './events-settings.js';
 import {
   PermissionRequestedEvent,
   PermissionRequestedInput,
@@ -365,6 +367,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   SettingsDeveloperModeChangedEvent,
   SettingsAgentDefaultModelChangedEvent,
   SettingsWhileWorkingChangedEvent,
+  SettingsUpdateNoticeChangedEvent,
 ]);
 export type CoreEvent = z.infer<typeof CoreEvent>;
 export type CoreEventType = CoreEvent['type'];
@@ -420,6 +423,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   SettingsDeveloperModeChangedInput,
   SettingsAgentDefaultModelChangedInput,
   SettingsWhileWorkingChangedInput,
+  SettingsUpdateNoticeChangedInput,
 ]);
 export type NewCoreEvent = z.infer<typeof NewCoreEvent>;
 

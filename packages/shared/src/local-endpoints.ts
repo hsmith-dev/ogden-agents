@@ -214,3 +214,65 @@ export function remoteConfirmationWords(host: string, insecure: boolean): string
 
 /** The statement for a server on this computer (E14-R6). */
 export const LOOPBACK_PRIVACY_WORDS = 'This server runs on this computer. Nothing leaves it except to this server.';
+
+/** A one-click preset the server offers (epic 14 story 14.4): a label, an address and where to get the server. Data from the server, never named in shared. */
+export const LocalEndpointPreset = z.object({
+  id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/),
+  label: z.string().min(1).max(MAX_ENDPOINT_LABEL),
+  baseUrl: z.string().min(1).max(MAX_ENDPOINT_URL),
+  /** The official page to get it from, linked when none is found. */
+  downloadUrl: z.url(),
+});
+export type LocalEndpointPreset = z.infer<typeof LocalEndpointPreset>;
+
+/** `GET /api/v1/local-endpoint-presets`. */
+export const LocalEndpointPresetsResponse = z.object({ presets: z.array(LocalEndpointPreset) });
+export type LocalEndpointPresetsResponse = z.infer<typeof LocalEndpointPresetsResponse>;
+
+/** How an endpoint is, in the card's plain words. */
+export const LOCAL_ENDPOINT_STATES = ['ready', 'no_models', 'not_running', 'key_refused', 'other'] as const;
+export const LocalEndpointState = z.enum(LOCAL_ENDPOINT_STATES);
+export type LocalEndpointState = z.infer<typeof LocalEndpointState>;
+
+/** The most model ids a test answers (the full list is story 14.5's). */
+export const MAX_TEST_MODELS = 500;
+
+/** `POST /api/v1/local-endpoints/:endpointId/test`: Test connection. The server (never the page) calls the endpoint. */
+export const LocalEndpointTestResponse = z.object({
+  state: LocalEndpointState,
+  /** The model ids the endpoint serves, when ready. */
+  models: z.array(z.string().min(1).max(300)).max(MAX_TEST_MODELS),
+  /** Plain words for the state. Never the address or a key. */
+  message: z.string().min(1),
+});
+export type LocalEndpointTestResponse = z.infer<typeof LocalEndpointTestResponse>;
+
+/** One server Detect found on this computer. */
+export const DetectedEndpoint = z.object({
+  presetId: z.string(),
+  label: z.string().min(1),
+  baseUrl: z.string().min(1),
+  /** How many models it serves now (0: running with none loaded). */
+  models: z.number().int().nonnegative(),
+});
+export type DetectedEndpoint = z.infer<typeof DetectedEndpoint>;
+
+/** `POST /api/v1/local-endpoints-detect`: probes only 127.0.0.1 and localhost on the presets' ports, once, on a button press; never a scan. */
+export const LocalEndpointDetectResponse = z.object({ found: z.array(DetectedEndpoint) });
+export type LocalEndpointDetectResponse = z.infer<typeof LocalEndpointDetectResponse>;
+
+/** The card's words for an endpoint's state. */
+export function endpointStateWords(state: LocalEndpointState, models: number): string {
+  switch (state) {
+    case 'ready':
+      return models === 1 ? 'Ready. 1 model is available.' : `Ready. ${models} models are available.`;
+    case 'no_models':
+      return 'Running, but no model is loaded yet. Load one in the server, then test again.';
+    case 'not_running':
+      return 'Not running. Start the server, then test again.';
+    case 'key_refused':
+      return "The server didn't accept the key. Check it and save it again.";
+    case 'other':
+      return "The server answered, but not in a way Ogden Agents can use. Check its address.";
+  }
+}

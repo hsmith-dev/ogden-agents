@@ -683,6 +683,10 @@ const EXPECTED_API_ROUTES = [
   `DELETE ${API_ROUTES.localEndpointKey}`,
   `POST ${API_ROUTES.localEndpointConfirm}`,
   `PUT ${API_ROUTES.localEndpointDefault}`,
+  // Using them (story 14.4): the presets, Test connection and Detect, behind the gate only.
+  `GET ${API_ROUTES.localEndpointPresets}`,
+  `POST ${API_ROUTES.localEndpointTest}`,
+  `POST ${API_ROUTES.localEndpointDetect}`,
 ] as const;
 
 describe('gate placement', () => {

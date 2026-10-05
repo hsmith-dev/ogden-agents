@@ -69,4 +69,5 @@ export * from './build-verify.js';
 export * from './build-settings.js';
 export * from './local-endpoints.js';
 export * from './local-model-port.js';
+export * from './local-models.js';
 export * from './build-findings.js';

@@ -167,8 +167,9 @@ interface SessionStart {
 /** Sends `session-start` in the open chat and reads the agent's one-line JSON reply. */
 async function sessionStart(page: Page): Promise<SessionStart> {
   await send(page, 'session-start');
-  await expect(replies(page)).toHaveCount(1);
-  await expect(state(page)).toHaveAttribute('data-state', 'idle');
+  // The agent process starts on this message: on a stalled Windows runner that took 16 s (run 37258187535, server log).
+  await expect(replies(page)).toHaveCount(1, { timeout: SECOND_TAB_MS });
+  await expect(state(page)).toHaveAttribute('data-state', 'idle', { timeout: SECOND_TAB_MS });
   await expect(replies(page).last()).toHaveAttribute('data-streaming', 'false');
   // The agent's message: its name, then its text.
   const text = await replies(page).last().locator('p').nth(1).textContent();

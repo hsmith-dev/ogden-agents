@@ -9,6 +9,7 @@ import { OpenOgdenAgents } from './open-ogden-agents';
 import { ServerStopped } from './server-stopped';
 import { SidebarDataProvider } from './sidebar-data';
 import { StatusSidebar } from './status-sidebar';
+import { UpdateBanner } from './update-banner';
 import { VersionBanner } from './version-banner';
 
 /**
@@ -34,6 +35,7 @@ export function AppShell() {
         <DeveloperModeSync />
         <SidebarInset data-testid="workspace-area">
           <VersionBanner />
+          <UpdateBanner />
           <AppShortcutOffer />
           <Outlet />
         </SidebarInset>

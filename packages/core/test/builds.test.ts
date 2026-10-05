@@ -512,7 +512,9 @@ describe('the run folder and checkpoint pauses (story 5.4)', () => {
     expect(h.released).toContain(session.id);
     expect(resultIn(h, run.id).status).toBe('built');
     // The end checks run on resume: here an empty diff fails it.
-    expect(await h.builds.resume(h.wsId, run.id)).toMatchObject({ outcome: 'failed', reason: RUN_REASON_EMPTY_DIFF });
+    expect(await h.builds.resume(h.wsId, run.id)).toMatchObject({ outcome: 'running' });
+    await h.builds.settled();
+    expect(h.core.entities.getRun(run.id)).toMatchObject({ outcome: 'failed', reason: RUN_REASON_EMPTY_DIFF });
     expect(h.sent).toHaveLength(1);
   });
 

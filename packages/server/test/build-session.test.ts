@@ -275,7 +275,8 @@ describe('the headless build session (story 5.4)', () => {
     expect((await resultOf(s.server, run.id, '1.1')).status).toBe('built');
     const resumed = await s.retry(run.id);
     expect(resumed.status).toBe(200);
-    expect(RunResponse.parse(await resumed.json()).run.outcome).toBe('verified');
+    expect(RunResponse.parse(await resumed.json()).run.outcome).toBe('running');
+    expect((await s.settled('1.1')).outcome).toBe('verified');
   });
 
   it('stopping the server mid-turn stops the agent and the command it left running', async () => {

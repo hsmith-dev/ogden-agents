@@ -104,9 +104,10 @@ describe('limits and the queue (story 5.8)', () => {
     expect(all.queue).toEqual([{ runId: all.runs[2]!.id, ticketRef: '1.3', position: 1 }]);
     expect(running(h).map((run) => run.ticketRef)).toEqual(['1.1', '1.2']);
     expect(h.core.entities.latestRunForTicket(h.wsId, '1.4')).toBeUndefined();
-    // 1.1 is built (in review), so 1.4 is ready now and the all-ready request picks it up.
     await finish(h, '1.1');
-    // The board's store reads a run's worktree while it is active; this fake reads the checkout, so say it there too.
+    // A prerequisite counts only as the main checkout has it (merged), never on the agent's own word in a worktree.
+    await h.builds.dispatchQueued();
+    expect(h.core.entities.latestRunForTicket(h.wsId, '1.4')).toBeUndefined();
     h.tickets.set(h.repo, '1.1', 'built');
     await h.builds.dispatchQueued();
     await h.builds.settled();

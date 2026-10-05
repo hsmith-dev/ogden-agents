@@ -25,7 +25,7 @@ export function BuildRunHeader({ wsId, run }: { wsId: string; run: Run | undefin
   if (run === undefined) return null;
   const phase = runPhase(run);
   const paused = run.blockedCode !== null && CHECKPOINT_BLOCKED_CODES.includes(run.blockedCode);
-  const retryable = (run.decision ?? null) === null && (run.outcome === 'failed' || run.outcome === 'stopped' || (run.outcome === 'blocked' && run.blockedCode !== 'merge_conflict'));
+  const retryable = run.worktreePath !== null && (run.decision ?? null) === null && (run.outcome === 'failed' || run.outcome === 'stopped' || (run.outcome === 'blocked' && run.blockedCode !== 'merge_conflict'));
   const acting = stop.isPending || retry.isPending;
   const act = (action: typeof stop) => {
     if (acting) return;

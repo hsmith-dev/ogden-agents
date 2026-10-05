@@ -86,7 +86,9 @@ export function detectTestCommand(repoPath: string, override: string | null): st
 
 /** How many tests a runner's output says failed (`3 failed`, `Tests: 3 failed`, `failures: 3`), or `undefined`. */
 export function failedTestCount(output: string): number | undefined {
-  const found = /(\d+)\s+(?:tests?\s+)?(?:failed|failing|failures?)/i.exec(output) ?? /(?:failed|failures?)\s*[:=]?\s*(\d+)/i.exec(output);
+  // A runner's own tests line first (`Tests  3 failed`, not vitest's `Test Files  1 failed` or jest's `Test Suites: 1 failed` above it).
+  const line = output.split(/\r?\n/).find((each) => /^\s*(?:tests?)\b(?!\s*(?:files?|suites?))/i.test(each) && /\d+\s+failed/i.test(each));
+  const found = /(\d+)\s+failed/i.exec(line ?? '') ?? /(\d+)\s+(?:tests?\s+)?(?:failed|failing|failures?)/i.exec(output) ?? /(?:failed|failures?)\s*[:=]?\s*(\d+)/i.exec(output);
   const count = found === null ? NaN : Number(found[1]);
   return Number.isInteger(count) && count > 0 ? count : undefined;
 }

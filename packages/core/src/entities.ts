@@ -451,7 +451,9 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
     for (const entry of queue) orm.update(runs).set({ queuePosition: entry.position }).where(eq(runs.id, entry.runId)).run();
     const same = queue.length === before.length && queue.every((entry, index) => before[index]?.runId === entry.runId && before[index]?.position === entry.position);
     if (!same) log.append({ type: 'run.queue_changed', workspaceId, streamId: workspaceId, payload: { queue } });
-  };  const requireSession = (id: SessionId) => {
+  };
+
+  const requireSession = (id: SessionId) => {
     const session = getSession(id);
     if (session === undefined) throw new NotFoundError('session', id);
     return session;

@@ -50,6 +50,9 @@ describe('failedTestCount (story 5.8)', () => {
     expect(failedTestCount('Tests  3 failed | 2 passed (5)')).toBe(3);
     expect(failedTestCount('=== 4 failed, 10 passed in 1.2s ===')).toBe(4);
     expect(failedTestCount('failures: 2')).toBe(2);
+    // Vitest and jest print a files or suites line first.
+    expect(failedTestCount(' Test Files  1 failed (1)\n      Tests  3 failed | 5 passed (8)')).toBe(3);
+    expect(failedTestCount('Test Suites: 1 failed, 1 total\nTests:       4 failed, 6 passed, 10 total')).toBe(4);
     expect(failedTestCount('Tests: 5 passed, 5 total')).toBeUndefined();
     expect(failedTestCount('0 failed')).toBeUndefined();
     expect(failedTestCount('')).toBeUndefined();

@@ -104,7 +104,7 @@ describe('Stop, Retry and Build all ready (story 5.8)', () => {
     expect((await s.settled('1.1')).outcome).toBe('verified');
   });
 
-  it('Build all ready starts the ready ticket (202 with the runs and the queue) and the one waiting for it once it is built', async () => {
+  it('Build all ready starts the ready ticket (202 with the runs and the queue), never the one waiting for it', async () => {
     const s = await setup();
     const reply = await s.build({ all: true });
     expect(reply.status).toBe(202);
@@ -112,9 +112,8 @@ describe('Stop, Retry and Build all ready (story 5.8)', () => {
     expect(all.runs.map((run) => run.ticketRef)).toEqual(['1.1']);
     expect(all.queue).toEqual([]);
     expect((await s.settled('1.1')).outcome).toBe('verified');
-    // 1.1 is built (in review), so 1.2 is ready: Build all ready keeps going.
-    await waitFor(async () => (await request(s.server, s.tab, 'GET', apiPath(API_ROUTES.workspaceBuild, { wsId: s.wsId, ref: '1.2' }))).status === 200, 'the second ticket to start', 20_000);
-    expect((await s.settled('1.2')).outcome).toBe('verified');
+    // 1.2 waits for 1.1 to be merged: a build is the agent's own word until then, so nothing more starts.
+    expect((await refusalOf(await request(s.server, s.tab, 'GET', apiPath(API_ROUTES.workspaceBuild, { wsId: s.wsId, ref: '1.2' })))).status).toBe(404);
     expect(await refusalOf(await s.build({ all: true, ref: '1.1' }))).toMatchObject({ status: 400 });
   }, 40_000);
 });

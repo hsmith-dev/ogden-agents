@@ -53,7 +53,7 @@ export function seatbeltProfile(sandbox: AgentSandbox, temporary: readonly strin
 
 /** The bubblewrap arguments (before the program and its command) for `sandbox` running in `cwd`. */
 export function bubblewrapArgs(sandbox: AgentSandbox, cwd: string, exists: (path: string) => 'dir' | 'file' | undefined = kindOf): string[] {
-  const args = ['--unshare-all', '--die-with-parent', '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--tmpfs', '/tmp'];
+  const args = ['--unshare-all', '--die-with-parent', '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--tmpfs', '/tmp', '--tmpfs', '/run'];
   // Denied reads first: an empty folder over a folder, nothing over a file; the allowed reads and roots are bound back after.
   for (const path of sandbox.deniedReads) {
     const kind = exists(path);
@@ -108,6 +108,8 @@ export function runBounded(file: string, args: readonly string[], request: Pick<
       killProcessTree(child.pid);
     }, request.timeoutMs);
     child.on('error', () => done(null));
+    // A process that left the group may hold the pipes open for ever: after the child itself exits, wait only a moment for them.
+    child.on('exit', (code) => setTimeout(() => done(timedOut ? null : code), 2000).unref());
     child.on('close', (code) => {
       output = output.slice(-request.maxOutputBytes);
       done(timedOut ? null : code);

@@ -201,8 +201,11 @@ await scenario('E. killing the shell leaves nothing running', async () => {
   const app = await startApp('crash');
   await startBusyTurn(app);
   await waitFor('the agent and its child', () => listSidecars(before).length >= 3, 30_000);
-  if (IS_WIN) spawnSync('taskkill', ['/pid', String(app.child.pid), '/F']);
-  else process.kill(app.child.pid, 'SIGKILL');
+  // The shell itself, found by its program name (an AppImage's launcher is a different process that forks it).
+  for (const { pid } of listApps(appsBefore)) {
+    if (IS_WIN) spawnSync('taskkill', ['/pid', String(pid), '/F']);
+    else process.kill(pid, 'SIGKILL');
+  }
   await waitFor('no ogden-node after the shell was killed', noSidecars, 45_000);
 });
 

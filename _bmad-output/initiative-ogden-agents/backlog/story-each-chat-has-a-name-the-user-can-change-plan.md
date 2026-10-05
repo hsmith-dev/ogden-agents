@@ -79,9 +79,42 @@ context:
 
 ## Implementation Notes
 
+- Implemented directly (no implementation subagent); review lenses ran as subagents. Double click renames only in the sidebar (the chat list's first click leaves the list); the list has F2 and a row menu. API keys are redacted from automatic names. The rail (md to lg) doesn't open the field; the header's Rename works there.
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (lenses quick, security-ux): high 0, medium 9, low 12, false 0, maybe-false 0.
+
+| Finding | Verdict | Route | Evidence / action |
+|---|---|---|---|
+| Secret in first message becomes the name | medium | patch | `redactApiKeys` in `nameChat`, now after normalizing (split keys) |
+| Route and event-order tests not updated | medium | patch | gate, guard coverage, chat test updated |
+| Planning chat without label named by skill name | medium | patch | label, else description, else name, as plan-home shows it |
+| Blur save pulls focus back | medium | patch | focus returned only after Enter or Esc |
+| `session.renamed` clears Starting and check-in | medium | patch | fold skips it; transcript test added |
+| Over 2000 chars gets Zod wording | low | patch | schema message is `CHAT_NAME_TOO_LONG`; rename body limit 16 KiB |
+| maxLength counts code units | low | patch | maxLength 160, cap checked on save with a plain message |
+| Header Rename hidden on phone in Developer mode | medium | patch | wrapper removed; field min width |
+| Backfill stops at a blank first message | low | patch | tries later messages |
+| Backfill duplicates `listCompletedMessages` | low | reject | that helper drops `origin`, and the terminal import depends on its shape |
+| `setSessionTitle` 400 before 404 | low | patch | session looked up first |
+| No terminal header UI test | low | reject | API test covers it; the header has no driver guard |
+| Invisible fillers and stacked marks pass | medium | patch | stripped / capped at 3 marks; tests |
+| Right to left names not isolated | medium | patch | `<bdi>` in Needs you, sidebar rows, chat list |
+| Other secret shapes not redacted | medium | defer | deferred-work.md |
+| Rename body limit 1 MiB | low | patch | 16 KiB with plain 413 |
+| Zod wording for wrong types | low | reject | API clients only, UI can't send them |
+| Failed save loses typed name | medium | patch | field reopens with the draft |
+| Esc in the sheet closes the sheet | medium | patch | window capture listener cancels first |
+| Rail too narrow for the field | low | patch | rename not opened in the rail |
+| Focus to row, not menu trigger | low | reject | criterion 3 names the row |
+| One live region per row; stale text | low | defer | deferred-work.md |
+| Assertive announcement lacks chat name | low | defer | deferred-work.md |
+| `aria-description` support | low | patch | `aria-describedby` hint |
+| No visible label on inline field | low | reject | inline rename keeps the name's place; labelled and described |
+| "It is called New chat" wording | low | patch | "Chat name cleared, back to …" |
 
 ## Design Notes
 

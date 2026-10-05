@@ -22,7 +22,11 @@ export const NEW_CHAT_NAME = 'New chat';
 export const CHAT_NAME_TOO_LONG = `A chat name can be at most ${CHAT_NAME_MAX} characters.`;
 
 /** Control and invisible formatting characters (bidirectional overrides, zero width ones), removed from every name. */
-const UNSEEN = /[\p{Cc}\p{Cf}\u2028\u2029]/gu;
+const UNSEEN = /[\p{Cc}\p{Cf}\p{Cs}\u2028\u2029\u034f\u115f\u1160\u3164\uffa0\u2800]/gu;
+
+/** More than this many combining marks on one character are dropped (stacked "zalgo" text); real scripts need fewer. */
+const MAX_MARKS = 3;
+const STACKED_MARKS = new RegExp(`(\\p{M}{${MAX_MARKS}})\\p{M}+`, 'gu');
 
 /** Characters, counted as the user sees them (a surrogate pair is one). */
 const length = (text: string) => [...text].length;
@@ -35,7 +39,7 @@ const length = (text: string) => [...text].length;
  */
 export function normalizeChatName(name: string | null | undefined): string | null {
   if (name === null || name === undefined) return null;
-  const clean = name.replace(/[\r\n\t\u2028\u2029]/g, ' ').replace(UNSEEN, '').replace(/\s+/g, ' ').trim();
+  const clean = name.replace(/[\r\n\t\u2028\u2029]/g, ' ').replace(UNSEEN, '').replace(STACKED_MARKS, '$1').replace(/\s+/g, ' ').trim();
   return clean === '' ? null : clean;
 }
 

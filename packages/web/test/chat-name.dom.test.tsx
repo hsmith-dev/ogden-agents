@@ -99,7 +99,7 @@ describe('renaming from the header', () => {
     elsewhere.remove();
   });
 
-  it('a refusal is said in plain words', async () => {
+  it('a refusal is said in plain words, and the field opens again with what was typed', async () => {
     const { rename } = mount('Fix the login bug', null, () => {
       throw new Error('A chat name can be at most 80 characters.');
     });
@@ -107,10 +107,12 @@ describe('renaming from the header', () => {
     fireEvent.change(field(), { target: { value: 'Something' } });
     fireEvent.keyDown(field(), { key: 'Enter' });
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('A chat name can be at most 80 characters.'));
+    fireEvent.click(screen.getByTestId('chat-rename'));
+    expect(field().value).toBe('Something');
   });
 
   it('a cleared name is announced with the name it falls back to', () => {
-    expect(renamedAnnouncement(null, 'Fix the login bug')).toBe('Chat name cleared. It is called Fix the login bug');
+    expect(renamedAnnouncement(null, 'Fix the login bug')).toBe('Chat name cleared, back to Fix the login bug');
   });
 });
 

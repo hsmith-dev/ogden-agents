@@ -106,9 +106,10 @@ describe('starting on a 0.2.0 data folder (story 10.7)', () => {
     expect((await detectionOf(bmad)).detection).toEqual({ hasBmad: true, hasOutput: false, offerDismissed: false });
     expect((await detectionOf(plain)).detection).toEqual({ hasBmad: false, hasOutput: false, offerDismissed: false });
 
-    // Starting appended only its own `server.started` (every start does); browsing appended nothing.
+    // Starting appended its own `server.started` (every start does) and named each older chat from its
+    // first message (backlog story 2); browsing appended nothing.
     const appended = server.core.events.readAfter(data.events.at(-1)!.seq);
-    expect(appended.map((event) => event.type)).toEqual(['server.started']);
+    expect(appended.map((event) => event.type)).toEqual(['session.renamed', 'session.renamed', 'server.started']);
 
     await server.close();
     expect(oldColumns(data.dataDir)).toEqual(before);

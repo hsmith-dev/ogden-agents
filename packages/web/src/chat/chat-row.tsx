@@ -39,9 +39,9 @@ export function ChatListRow({ wsId, session, meta }: { wsId: string; session: Se
             }}
           >
             <StateGlyph state={session.state} labelMode="hidden" data-testid="chat-row-state" />
-            <span className="min-w-0 flex-1 truncate" data-testid="chat-row-name">
+            <bdi className="min-w-0 flex-1 truncate" data-testid="chat-row-name">
               {name}
-            </span>
+            </bdi>
             {meta}
           </Link>
         </Row>

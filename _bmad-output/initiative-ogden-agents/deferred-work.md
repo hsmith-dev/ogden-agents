@@ -544,3 +544,13 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-every-agent/story-refactor-sweep-plan.md`
   summary: Resolved: node-pty's Windows "Cannot create process, error code: 87" is the same ConPTY race as "Invalid pty handle" (3.8): `PtyConnect` reads the new pseudo-console back from an unlocked list an exiting terminal's thread is editing, and a damaged entry's handle is refused by `CreateProcessW` (ERROR_INVALID_PARAMETER). `spawnWithRetry` now tries that exact error again too, at most `PTY_SPAWN_ATTEMPTS`; every other code still throws at once.
   evidence: CI run 37239378578 attempt 1 (6.7, windows-latest Node 24): `terminal-pty.test.ts` "a CLI that crashes on start" failed at `pty.spawn` right after the previous test's crashed CLI exited; node-pty 1.1.0 `src/win/conpty.cc` `get_pty_baton`/`remove_pty_baton`; tests in `adapters/test/terminal-pty.test.ts`.
+
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-each-chat-has-a-name-the-user-can-change-plan.md`
+  summary: Redact more secret shapes (GitHub, AWS, OpenAI project keys, `PASSWORD=` lines) from a chat's automatic name, which shows in every sidebar.
+  evidence: Review of chat names; `redactApiKeys` covers only Anthropic and Google keys, and core has no general secret masker for user-typed text (the adapters' env masker isn't reachable from core).
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-each-chat-has-a-name-the-user-can-change-plan.md`
+  summary: Name the chat in the assertive "waiting for you" announcement, as Needs you rows now do, and share one live region for rename announcements instead of one per row.
+  evidence: Review of chat names; `diffForAnnouncements` still says only the agent and the request, and each row mounts its own `role="status"` span.
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-each-chat-has-a-name-the-user-can-change-plan.md`
+  summary: Older planning chats are named from their stored skill invocation, not their action's label.
+  evidence: Review of chat names; the backfill has only the first message to go on.

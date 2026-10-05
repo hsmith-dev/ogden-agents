@@ -263,6 +263,11 @@ const SessionRow = memo(function SessionRow({
   const rename = useChatRename({ wsId, sesId, name: title, title: userTitle });
   const item = useRef<HTMLLIElement>(null);
   const row = () => item.current?.querySelector<HTMLElement>('[data-testid="status-row"]');
+  // Not in the rail (md to lg): a name field doesn't fit its width; the header's Rename works there.
+  const startRename = () => {
+    if (window.matchMedia?.('(min-width: 48rem) and (max-width: 63.99rem)').matches) return;
+    rename.start(row);
+  };
   return (
     <SidebarMenuItem ref={item}>
       {rename.editing ? (
@@ -276,11 +281,11 @@ const SessionRow = memo(function SessionRow({
           time={{ label: time, dateTime: updatedAt }}
           isActive={active}
           aria-keyshortcuts="F2"
-          onDoubleClick={() => rename.start(row)}
+          onDoubleClick={startRename}
           onKeyDown={(event) => {
             if (event.key !== 'F2') return;
             event.preventDefault();
-            rename.start(row);
+            startRename();
           }}
         >
           <Link to="/w/$wsId/s/$sesId" params={{ wsId, sesId }} />

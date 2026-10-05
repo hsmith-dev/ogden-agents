@@ -447,7 +447,7 @@ export function SidebarStatusRow({ state, title, caption, time, className, child
         <>
           <StateGlyph state={state} labelMode="none" />
           <span className="flex min-w-0 flex-1 flex-col md:max-lg:sr-only">
-            <span className="truncate">{title}</span>
+            <bdi className="truncate">{title}</bdi>
             <span className="truncate text-caption text-muted-foreground">{caption}</span>
           </span>
           {time === undefined ? null : (

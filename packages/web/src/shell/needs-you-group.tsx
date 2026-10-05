@@ -34,7 +34,14 @@ export function NeedsYouGroup({ items, onOpenFirst }: { items: readonly NeedsYou
                 <Link to="/w/$wsId/s/$sesId" params={{ wsId: item.wsId, sesId: item.sesId }}>
                   <StateGlyph state="waiting" labelMode="hidden" />
                   <SidebarLabel>
-                    {item.chatName === undefined ? item.workspaceName : `${item.workspaceName}, ${item.chatName}`}: {item.text}
+                    {item.workspaceName}
+                    {/* The chat's name is the user's text: isolated, so a right to left name can't reorder the request beside it. */}
+                    {item.chatName === undefined ? null : (
+                      <>
+                        , <bdi>{item.chatName}</bdi>
+                      </>
+                    )}
+                    : {item.text}
                   </SidebarLabel>
                 </Link>
               </SidebarMenuButton>

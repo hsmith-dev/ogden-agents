@@ -31,6 +31,10 @@ describe('the rules a name follows (shared)', () => {
     expect(normalizeChatName(' \n\t ')).toBeNull();
     expect(normalizeChatName(null)).toBeNull();
     expect(normalizeChatName('<b>bold</b>')).toBe('<b>bold</b>');
+    // Fillers that show as nothing, and stacked combining marks (review).
+    expect(normalizeChatName('\u3164\u2800\u115f')).toBeNull();
+    expect(normalizeChatName(`e${'\u0301'.repeat(30)}x`)).toBe(`e${'\u0301'.repeat(3)}x`);
+    expect(normalizeChatName('caf\u0065\u0301')).toBe('caf\u0065\u0301');
   });
 
   it('an automatic name is one line, at most 60 characters, cut at a word with an ellipsis', () => {
@@ -67,6 +71,9 @@ describe('automatic names (criterion 1)', () => {
     const { core, session, say } = setup();
     say('Use sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789 for this');
     expect(core.entities.getSession(session.id)?.autoTitle).toBe('Use [redacted] for this');
+    const split = setup();
+    split.say('key sk-ant-api03-abcdefghij\u200bklmnopqrstuvwxyz0123456789 here');
+    expect(split.core.entities.getSession(split.session.id)?.autoTitle).toBe('key [redacted] here');
   });
 
   it('a Deny reason never names a chat; a message from the terminal does', () => {

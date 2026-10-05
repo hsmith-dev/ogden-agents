@@ -62,6 +62,8 @@ Oneshot: no production behaviour change beyond the card note, because epic 12 ma
 
 ## Review Triage Log
 
+Security and correctness reviewer (one pass each, in one session): no security finding beyond fidelity. Patched: the "no BMad text" check on the fake server's log could not fail, now the harness's own first prompt and session \`_meta\` are asserted (as Grok's test does), plus its home folder and the server log (high); the end to end skill run was only relayed text, now a skill on disk must be listed by the harness as a command (\`found=true\`) (medium); the HOME half of the folder claim was vacuous, now the environment report's \`HOME\` is asserted to be the empty home inside the data folder (medium); the test no longer reads a module level array (low); the card note says it applies where Planning is on (low). Deferred and indexed as a live check: whether the real harness's own project config switch covers \`.opencode/skills\` and parent folders (medium). No intent_gap or bad_plan.
+
 ## Verification
 
 **Commands:** `pnpm typecheck`, `pnpm test`.

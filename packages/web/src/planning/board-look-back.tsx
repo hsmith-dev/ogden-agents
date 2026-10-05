@@ -15,8 +15,8 @@ export interface EpicLookBackControls {
   /** While a look-back is being started: every Look back waits. */
   busy: boolean;
   start: (epic: string) => void;
-  /** The epics whose finished-epic offer was answered with Not now. */
-  dismissed: ReadonlySet<string>;
+  /** The epics whose finished-epic offer was answered with Not now; `undefined` until the server has said (the offer waits for it). */
+  dismissed: ReadonlySet<string> | undefined;
   dismiss: (epic: string) => void;
 }
 
@@ -28,8 +28,6 @@ export interface BoardLookBackState {
   reducedText: string | undefined;
   failure: string | undefined;
 }
-
-const NO_EPICS: ReadonlySet<string> = new Set();
 
 /** The catalog's epic-scoped action: its label, or `undefined` when there is none. */
 function epicAction(catalog: Catalog): { label: string } | undefined {
@@ -83,7 +81,7 @@ export function useBoardLookBack(wsId: string, lookBack: BoardLookBack | undefin
     [queryClient, wsId],
   );
   const action = catalog.data === undefined ? undefined : epicAction(catalog.data);
-  const dismissed = useMemo(() => (offers.data === undefined ? NO_EPICS : new Set(offers.data.dismissed)), [offers.data]);
+  const dismissed = useMemo(() => (offers.data === undefined ? undefined : new Set(offers.data.dismissed)), [offers.data]);
   const controls = useMemo<EpicLookBackControls | undefined>(
     () => (on && action !== undefined && catalog.data?.capabilities.look_back !== false ? { label: action.label, busy: starting, start, dismissed, dismiss } : undefined),
     [on, action, catalog.data, starting, start, dismissed, dismiss],

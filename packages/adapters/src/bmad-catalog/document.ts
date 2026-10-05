@@ -19,9 +19,10 @@
  * `null`. Nothing is written.
  */
 import { constants as fsConstants } from 'node:fs';
-import { lstat, open, readdir, realpath, stat } from 'node:fs/promises';
+import { lstat, open, realpath, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { MAX_DOCUMENT_BYTES, RETROSPECTIVE_FILE_SUFFIX, RepoRelativePath } from '@ogden-agents/shared';
+import { boundedNames } from '../bounded-names.js';
 import { NON_BLOCK, NO_FOLLOW } from '../fs-safe.js';
 import { inside, realRepoRoot } from './skills.js';
 
@@ -129,14 +130,18 @@ export async function readDocument(
   return readCapped(fileReal, limit, stillThere);
 }
 
-/** The most files looked at in one epic folder, so a folder of thousands is not walked. */
+/** The most entries looked at in one epic folder, so a folder of thousands is not walked. */
 const MAX_EPIC_FOLDER_ENTRIES = 2000;
+/** The most candidate files tried, newest name first, before giving up. */
+const MAX_RETROSPECTIVE_CANDIDATES = 5;
 
 /**
- * An epic's retrospective (epic 7): the last file by name ending
- * `-retrospective.md` directly inside `epicFolder`, which must be a real
- * folder (not a link) inside `outputFolder`, read as {@link readDocument}
- * reads (confined, a regular file, capped at `limit`); `null` otherwise.
+ * An epic's retrospective (epic 7): the last regular file (a link is
+ * skipped, as the change watch skips it) by name ending `-retrospective.md`
+ * directly inside `epicFolder`, which must be a real folder (not a link)
+ * inside `outputFolder`, read as {@link readDocument} reads (confined, a
+ * regular file, capped at `limit`); an earlier name is tried when the last
+ * can't be read, up to {@link MAX_RETROSPECTIVE_CANDIDATES}; `null` otherwise.
  */
 export async function readRetrospective(
   repoPath: string,
@@ -153,13 +158,20 @@ export async function readRetrospective(
   try {
     // The epic folder itself is never a link, so the listing is the epic's own.
     if (!(await lstat(folder)).isDirectory()) return null;
-    names = (await readdir(folder)).slice(0, MAX_EPIC_FOLDER_ENTRIES);
+    names = await boundedNames(folder, RETROSPECTIVE_FILE_SUFFIX, MAX_EPIC_FOLDER_ENTRIES);
   } catch {
     return null;
   }
-  const found = names.filter((name) => name.endsWith(RETROSPECTIVE_FILE_SUFFIX) && name.length > RETROSPECTIVE_FILE_SUFFIX.length).sort().at(-1);
-  if (found === undefined) return null;
-  const path = `${folderParts.join('/')}/${found}`;
-  const read = await readDocument(repoPath, outputFolder, path, limit);
-  return read === null ? null : { path, content: read.content };
+  for (const found of names.reverse().slice(0, MAX_RETROSPECTIVE_CANDIDATES)) {
+    try {
+      // A link, a folder or a special file named like a retrospective is passed over, never read.
+      if (!(await lstat(join(folder, found))).isFile()) continue;
+    } catch {
+      continue;
+    }
+    const path = `${folderParts.join('/')}/${found}`;
+    const read = await readDocument(repoPath, outputFolder, path, limit);
+    if (read !== null) return { path, content: read.content };
+  }
+  return null;
 }

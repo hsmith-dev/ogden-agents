@@ -63,7 +63,9 @@ function CardList({ wsId, rows, statuses, highlighted, label, onChoose, saving =
  * dropped filter on, its dropped tickets follow. Story 7.1: with Retrospectives
  * on, its header has **Look back on this epic**.
  */
-export const BoardEpic = memo(function BoardEpic({ wsId, epic, statuses, highlighted, onChoose, saving = false, onBuild, building = false, queued, lookBack }: BoardEpicProps) {
+export const BoardEpic = memo(function BoardEpic({ wsId, epic, statuses, highlighted, onChoose, saving = false, onBuild, building = false, queued, lookBack: lookBackGiven }: BoardEpicProps) {
+  // Tickets in no epic have no folder to look back on.
+  const lookBack = epic.slug === '' ? undefined : lookBackGiven;
   const headingId = useId();
   const retrospective = epic.retrospective;
   return (
@@ -92,12 +94,12 @@ export const BoardEpic = memo(function BoardEpic({ wsId, epic, statuses, highlig
           {retrospective.problem}
         </Text>
       ) : null}
-      {lookBack === undefined || epic.finished ? null : (
+      {lookBack === undefined || epic.finished || retrospective !== null ? null : (
         <Text variant="caption" tone="muted" data-testid="board-look-back-note">
           {LOOK_BACK_UNFINISHED_NOTE}
         </Text>
       )}
-      {lookBack === undefined || !epic.finished || retrospective !== null || lookBack.dismissed.has(epic.slug) ? null : (
+      {lookBack === undefined || !epic.finished || retrospective !== null || lookBack.dismissed === undefined || lookBack.dismissed.has(epic.slug) ? null : (
         <Notice
           data-testid="board-look-back-offer"
           action={

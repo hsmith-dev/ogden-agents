@@ -18,9 +18,12 @@ function frontmatterLines(text: string): string[] | undefined {
 /** A scalar as written: trimmed, one pair of matching quotes removed, a trailing ` #` comment dropped from an unquoted value. */
 function scalar(raw: string): string {
   const value = raw.trim();
-  const quoted = /^(['"])(.*)\1$/.exec(value);
+  // A quoted value, with or without a comment after it.
+  const quoted = /^(['"])([^'"]*)\1(?:[ \t]+#.*)?$/.exec(value);
   if (quoted !== null) return quoted[2]!;
-  return value.replace(/\s+#.*$/, '').trim();
+  // A trailing ` #` comment: found with a linear scan (a regex over repo text could be made quadratic).
+  const hash = value.search(/[ \t]#/);
+  return (hash === -1 ? value : value.slice(0, hash)).trim();
 }
 
 /** The retrospective at `path` (repo-relative) whose file text is `content`. */

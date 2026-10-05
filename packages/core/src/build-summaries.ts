@@ -6,7 +6,7 @@
  * duration and the user's decision. A run still going is left out; at most
  * {@link MAX_EPIC_BUILD_SUMMARIES} of the newest runs, oldest first.
  */
-import { blockedSentence, MAX_EPIC_BUILD_SUMMARIES, type EpicBuildSummary, type Run, type VerificationResult, type WorkspaceId } from '@ogden-agents/shared';
+import { blockedSentence, EpicBuildSummary as EpicBuildSummarySchema, MAX_EPIC_BUILD_SUMMARIES, type EpicBuildSummary, type Run, type VerificationResult, type WorkspaceId } from '@ogden-agents/shared';
 import type { Entities } from './entities.js';
 
 export interface BuildSummaries {
@@ -25,25 +25,30 @@ const verificationOf = (entities: BuildSummariesDeps['entities'], run: Run): Epi
   return verification.outcome === 'verified' ? 'passed' : 'failed';
 };
 
+/** How many of a project's newest runs are looked through for an epic's tickets. */
+const MAX_RUNS_READ = 5000;
+
 export function createBuildSummaries({ entities }: BuildSummariesDeps): BuildSummaries {
   return {
     forTickets(workspaceId, refs) {
       // Newest first from the records, so the cap keeps the newest; shown oldest first.
-      const mine = entities.listRuns(workspaceId).filter((run) => refs.has(run.ticketRef) && run.outcome !== 'running');
+      const mine = entities.listRuns(workspaceId, MAX_RUNS_READ).filter((run) => refs.has(run.ticketRef) && run.outcome !== 'running');
       return mine
         .slice(0, MAX_EPIC_BUILD_SUMMARIES)
         .reverse()
-        .map((run) => {
+        .flatMap((run) => {
           const outcome = run.outcome === 'running' ? 'stopped' : run.outcome;
           const seconds = Math.max(0, Math.round((Date.parse(run.updatedAt) - Date.parse(run.createdAt)) / 1000));
-          return {
+          const parsed = EpicBuildSummarySchema.safeParse({
             ticketRef: run.ticketRef,
             outcome,
             verification: verificationOf(entities, run),
             blockedReason: run.outcome === 'blocked' && run.blockedCode !== null ? blockedSentence(run.blockedCode) : null,
             durationSeconds: Number.isFinite(seconds) ? seconds : 0,
             decision: run.decision,
-          } satisfies EpicBuildSummary;
+          });
+          // A ref that is not a plain ticket ref never reaches the look-back's message.
+          return parsed.success ? [parsed.data] : [];
         });
     },
   };

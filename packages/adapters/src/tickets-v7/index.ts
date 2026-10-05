@@ -364,7 +364,8 @@ export function createTicketsV7({ runner, script: scriptOf, snapshot, workDir, o
             // The first read only builds the tree; after a failed first read, the next success reports every ref.
             const changed = primed ? changedTicketRefs(open.index?.tickets ?? [], next.tickets) : [];
             // Epic 7: an epic's retrospective file changing shows in no ticket row, so its signature is compared too.
-            const retro = options?.onRetrospectiveChange === undefined ? undefined : await retrospectiveSignatures(root, next);
+            // Only while the caller says Retrospectives is on: with it off no retrospective file is looked at.
+            const retro = options?.onRetrospectiveChange === undefined || options.retrospectivesOn?.() !== true ? undefined : await retrospectiveSignatures(root, next);
             if (open.closed) return;
             const retroChanged = retro === undefined || !primed ? [] : changedRetrospectives(open.retro, retro);
             if (retro !== undefined) open.retro = retro;

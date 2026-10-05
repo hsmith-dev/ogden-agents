@@ -4,29 +4,41 @@
  * `*-retrospective.md` is written, so the watch also keeps a small signature
  * per epic (each such file's name, size and modified time) and reports the
  * epics whose signature changed. Only names and `lstat`s are read, never file
- * contents; an epic folder that is a link, or any name that is not one plain
- * folder name, is skipped (so nothing outside the output folder is touched).
+ * contents; an epic folder that is a link, one whose real path leaves the
+ * output folder (a linked parent), or any name that is not one plain folder
+ * name, is skipped (so nothing outside the output folder is touched). Only
+ * regular files count, as the reader reads only those.
  */
-import { lstat, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { lstat, realpath } from 'node:fs/promises';
+import { join, sep } from 'node:path';
+import { boundedNames } from '../bounded-names.js';
 import { EPIC_SLUG_PATTERN, RETROSPECTIVE_FILE_SUFFIX, type TicketsResponse } from '@ogden-agents/shared';
 
 /** The most epics looked at in one read. */
 const MAX_EPICS = 200;
 /** The most directory entries looked at in one epic folder. */
 const MAX_ENTRIES = 2000;
+/** The most retrospective files looked at (`lstat`) in one epic folder. */
+const MAX_FILES = 20;
 
 /** Each epic's signature (`''` when it has no retrospective file), by its name. */
 export async function retrospectiveSignatures(root: string, tree: Pick<TicketsResponse, 'folder' | 'epics'>): Promise<Map<string, string>> {
   const signatures = new Map<string, string>();
   if (tree.folder === null || !EPIC_SLUG_PATTERN.test(tree.folder)) return signatures;
+  let rootReal: string;
+  try {
+    rootReal = await realpath(root);
+  } catch {
+    return signatures;
+  }
   for (const epic of tree.epics.slice(0, MAX_EPICS)) {
     if (!EPIC_SLUG_PATTERN.test(epic.slug)) continue;
     const folder = join(root, tree.folder, epic.slug);
     const parts: string[] = [];
     try {
-      if ((await lstat(folder)).isDirectory()) {
-        const names = (await readdir(folder)).slice(0, MAX_ENTRIES).filter((name) => name.endsWith(RETROSPECTIVE_FILE_SUFFIX)).sort();
+      // A real folder whose real path stays inside the output folder (a linked parent leads out of it).
+      if ((await lstat(folder)).isDirectory() && (await realpath(folder)).startsWith(`${rootReal}${sep}`)) {
+        const names = (await boundedNames(folder, RETROSPECTIVE_FILE_SUFFIX, MAX_ENTRIES)).slice(0, MAX_FILES);
         for (const name of names) {
           const entry = await lstat(join(folder, name));
           if (entry.isFile()) parts.push(`${name}:${entry.size}:${Math.round(entry.mtimeMs)}`);

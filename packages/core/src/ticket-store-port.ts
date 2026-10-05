@@ -51,6 +51,12 @@ export interface TicketWatchOptions {
    * called with `[]`, and not for the first read.
    */
   onRetrospectiveChange?: ((epics: string[]) => void) | undefined;
+  /**
+   * Whether Retrospectives is on now (epic 7): asked before each read, and
+   * the store looks at no retrospective file while it answers `false` or
+   * this is left out (AD-22: nothing is read for a project with it off).
+   */
+  retrospectivesOn?: (() => boolean) | undefined;
 }
 
 export interface TicketStorePort {

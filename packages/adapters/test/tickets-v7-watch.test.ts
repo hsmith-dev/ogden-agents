@@ -94,7 +94,8 @@ describe('tickets-v7 watch: retrospective files (epic 7, story 7.4)', () => {
     const store = createTicketsV7({ runner, snapshot: fakeSnapshot, script: () => '/x/tickets.py', workDir: repo, watchTiming: TIMING });
     const refs: string[][] = [];
     const epics: string[][] = [];
-    const watch = await store.watch(repo, '_bmad-output', (changed) => refs.push(changed), { ...WATCH_GUARD, onRetrospectiveChange: (changed) => epics.push(changed) });
+    const retroOn = { value: true };
+    const watch = await store.watch(repo, '_bmad-output', (changed) => refs.push(changed), { ...WATCH_GUARD, retrospectivesOn: () => retroOn.value, onRetrospectiveChange: (changed) => epics.push(changed) });
     watches.push(watch);
     // The file that was there at the start is the baseline, not a change.
     expect(epics).toEqual([]);
@@ -106,6 +107,13 @@ describe('tickets-v7 watch: retrospective files (epic 7, story 7.4)', () => {
     touch(repo, 'unrelated\n');
     await waitFor(() => state.runs > runs, 'a rerun');
     await sleep(100);
+    expect(epics).toHaveLength(1);
+
+    // With Retrospectives off no retrospective file is looked at: a change then reports nothing.
+    retroOn.value = false;
+    writeFileSync(join(epicFolder, 'epic-a-retrospective.md'), 'changed while off\n');
+    touch(repo, 'while off\n');
+    await sleep(400);
     expect(epics).toHaveLength(1);
   });
 });

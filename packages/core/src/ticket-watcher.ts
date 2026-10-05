@@ -169,6 +169,13 @@ export function createTicketWatcher({ events, entities, bmad, trust, catalog, ti
             }
           }
         },
+        retrospectivesOn: () => {
+          try {
+            return bmad.pieces(workspaceId).includes('retrospectives');
+          } catch {
+            return false;
+          }
+        },
         // Every read reruns the project's own scripts: only while they are the ones the user allowed (story 4.13).
         beforeRun: async () => {
           try {

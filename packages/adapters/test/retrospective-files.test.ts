@@ -60,6 +60,19 @@ describe('bmad-catalog readRetrospective', () => {
     expect(await catalog.readRetrospective('/no/such/repo', '_bmad-output', EPIC)).toBeNull();
   });
 
+  it('passes over a folder, a link or a special file named like a retrospective and reads the next one back', async (ctx) => {
+    const r = repo({ [`${EPIC}/a-retrospective.md`]: RETRO });
+    mkdirSync(join(r.path, EPIC, 'zzz-retrospective.md'));
+    expect(await catalog.readRetrospective(r.path, '_bmad-output', EPIC)).toEqual({ path: `${EPIC}/a-retrospective.md`, content: RETRO });
+    const linked = repo({ [`${EPIC}/a-retrospective.md`]: RETRO, 'outside/b.md': 'outside' });
+    if (!tryLink(join(linked.path, 'outside', 'b.md'), join(linked.path, EPIC, 'zzz-retrospective.md'), false)) return ctx.skip();
+    expect((await catalog.readRetrospective(linked.path, '_bmad-output', EPIC))?.path).toBe(`${EPIC}/a-retrospective.md`);
+    // Only folders and links named like one: nothing to read.
+    const none = repo({});
+    mkdirSync(join(none.path, EPIC, 'only-retrospective.md'), { recursive: true });
+    expect(await catalog.readRetrospective(none.path, '_bmad-output', EPIC)).toBeNull();
+  });
+
   it('reads only the head of a long file', async () => {
     const r = repo({ [`${EPIC}/epic-a-retrospective.md`]: `${RETRO}${'x'.repeat(20_000)}` });
     const read = await catalog.readRetrospective(r.path, '_bmad-output', EPIC);
@@ -111,6 +124,18 @@ describe('the watch signature of retrospective files', () => {
 
     rmSync(file);
     expect(changedRetrospectives(third, await retrospectiveSignatures(root, tree))).toEqual(['epic-a']);
+  });
+
+  it('skips an epic whose parent is a link out of the output folder, and a linked retrospective file', async (ctx) => {
+    const r = repo({ 'elsewhere/epic-a/x-retrospective.md': RETRO });
+    const root = join(r.path, '_bmad-output');
+    mkdirSync(root, { recursive: true });
+    if (!tryLink(join(r.path, 'elsewhere'), join(root, 'initiative-demo'), true)) return ctx.skip();
+    expect((await retrospectiveSignatures(root, tree)).get('epic-a')).toBe('');
+    const linkedFile = repo({ 'outside/real.md': 'x' });
+    mkdirSync(join(linkedFile.path, EPIC), { recursive: true });
+    if (!tryLink(join(linkedFile.path, 'outside', 'real.md'), join(linkedFile.path, EPIC, 'a-retrospective.md'), false)) return ctx.skip();
+    expect((await retrospectiveSignatures(join(linkedFile.path, '_bmad-output'), tree)).get('epic-a')).toBe('');
   });
 
   it('skips an unsafe initiative or epic name and a linked epic folder', async (ctx) => {

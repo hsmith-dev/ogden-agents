@@ -3,13 +3,13 @@ title: 'Look back from the board: the action, the finished-epic offer and the ve
 type: 'feature'
 ticket: '4'
 created: '2026-10-05'
-status: 'in-review'
+status: 'built'
 baseline_revision: '65be8d36d146ab8dabf288e414403e09352dac07'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-retrospectives/epic-retrospectives.md'
@@ -75,6 +75,21 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+- 2026-10-05, pass 1 (security and correctness lenses): high 0, medium 6, low 8. Routed: patch 12, reject 3. No intent_gap or bad_plan.
+  - The watch scanned retrospective files with Retrospectives off (only the append was gated) -- medium, patch: the store asks \`retrospectivesOn\` before each scan; test that a change while off reports nothing.
+  - A hostile epic folder could make the listing large or the choice order-dependent (loaded whole, sliced before the filter) -- medium, patch: a bounded \`opendir\` listing, at most 20 files looked at per epic.
+  - A decoy \`zzz-retrospective.md\` (folder, link, special file) hid the real one -- medium, patch: such names are passed over and an earlier file is tried; the watch counts regular files only, as the reader does.
+  - The watch followed a linked parent folder outside the output folder -- medium, patch: the epic folder's real path must stay inside the output folder.
+  - A value with long runs of spaces made the comment-stripping regex slow -- medium, patch: a linear scan; test.
+  - The offer showed before the server said what was dismissed, and for tickets in no epic -- medium, patch: it waits for the answer and tickets in no epic get no look-back.
+  - A ticket ref of a run was not re-checked before reaching the message -- low, patch: each summary is parsed, a bad one left out.
+  - Only the newest 200 runs were searched for an epic -- low, patch: the newest 5000.
+  - A quoted value followed by a comment did not read -- low, patch; test.
+  - The unfinished note stood beside a verdict chip -- low, patch.
+  - Duration includes queue wait up to the last update -- low, reject: stated as such in the shared comment.
+  - Core picks the first epic-scoped skill without \`look_back\` -- low, reject: 7.3's adapter derives \`look_back\` from the same scope, so they cannot disagree.
+  - Each board fetch reads one file per epic -- low, reject: bounded (200 epics, 8 KB) and read only with the piece on.
 
 ## Verification
 

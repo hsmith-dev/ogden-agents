@@ -1256,6 +1256,32 @@ describe('Look back on an epic on the board (stories 7.1 and 7.4)', () => {
     expect(screen.getByTestId('board-look-back')).toBeTruthy();
   });
 
+  it('the offer waits for the server to say what was dismissed, and tickets in no epic get no look-back', async () => {
+    withLookBack();
+    state.tickets = board(epicRows('done'));
+    state.dismissed = ['epic-first'];
+    mount(<BoardTickets wsId={WS} lookBack={{ onStarted: () => {} }} />);
+    await settle();
+    expect(screen.queryByTestId('board-look-back-offer')).toBeNull();
+    cleanup();
+    state.tickets = board(epicRows('done', ''));
+    state.dismissed = [];
+    mount(<BoardTickets wsId={WS} lookBack={{ onStarted: () => {} }} />);
+    await settle();
+    expect(screen.queryByTestId('board-look-back')).toBeNull();
+    expect(screen.queryByTestId('board-look-back-offer')).toBeNull();
+    expect(screen.queryByTestId('board-look-back-note')).toBeNull();
+  });
+
+  it('an epic with a retrospective shows no unfinished note beside its chip', async () => {
+    withLookBack();
+    state.tickets = board(epicRows('review'), { path: '_bmad-output/i/epic-first/x-retrospective.md', verdict: 'rejected', date: null, problem: null });
+    mount(<BoardTickets wsId={WS} lookBack={{ onStarted: () => {} }} />);
+    await settle();
+    expect(screen.getByTestId('board-retrospective-verdict').textContent).toBe('Not accepted');
+    expect(screen.queryByTestId('board-look-back-note')).toBeNull();
+  });
+
   it('the offer\'s Look back starts the look-back', async () => {
     withLookBack();
     state.tickets = board(epicRows('done'));

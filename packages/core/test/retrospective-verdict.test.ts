@@ -42,6 +42,17 @@ describe('readRetrospectiveFrontmatter', () => {
     expect(readRetrospectiveFrontmatter(PATH, '---\nverdict: accepted\ndate: ' + '1'.repeat(80) + '\n---\n').date).toBeNull();
   });
 
+  it('a quoted value followed by a comment reads', () => {
+    const read = readRetrospectiveFrontmatter(PATH, '---\nverdict: "accepted" # by the user\ndate: \'2026-10-05\' # today\n---\n');
+    expect(read).toEqual({ path: PATH, verdict: 'accepted', date: '2026-10-05', problem: null });
+  });
+
+  it('a long run of spaces in a value costs nothing noticeable', () => {
+    const started = Date.now();
+    readRetrospectiveFrontmatter(PATH, `---\nverdict: x${' '.repeat(7000)}y\ndate: 2026${' '.repeat(7000)}z\n---\n`);
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
   it('a byte order mark is ignored', () => {
     expect(readRetrospectiveFrontmatter(PATH, '﻿---\nverdict: accepted\n---\n').verdict).toBe('accepted');
   });

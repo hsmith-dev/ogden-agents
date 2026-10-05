@@ -6,6 +6,7 @@ import { useRef, useState } from 'react';
 import { AgentPicker, SET_UP_AGENTS } from '@/chat/agent-picker';
 import { agentNameOf, ChatApiError, createChatSession, sendMessage } from '@/chat/chat-api';
 import { Composer } from '@/chat/composer';
+import { StartChatActions, useStartChat } from '@/chat/start-chat';
 import { agentAvailability, projectDefaultAgent, useChatAgents } from '@/chat/use-chat-agents';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
@@ -23,12 +24,19 @@ const started = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeSt
 /**
  * `/w/:wsId`: the workspace's Chats list (story 2.5), newest first, each
  * with its live state (AD-4). New chat and Workspace settings sit in the
- * header. With no chats yet the composer is focused and starts one
+ * header. With no chats yet the page says so, with Start a chat as its one
+ * primary action (the project's default agent), Use another agent while
+ * there is a choice, and the composer focused as the second way in
  * (EXPERIENCE.md Empty chats). The list follows the event stream, so a chat
  * started or a history deleted in any tab shows here without a reload.
  */
 export function WorkspaceChatsPage() {
   const { wsId } = useParams({ strict: false }) as { wsId: string };
+  // One page per project: the router reuses this component from /w/A to /w/B, and a pick, a first chat or an error is that project's.
+  return <ChatsPage key={wsId} wsId={wsId} />;
+}
+
+function ChatsPage({ wsId }: { wsId: string }) {
   const navigate = useNavigate();
   const workspace = useQuery({ queryKey: ['workspace', wsId], queryFn: () => fetchWorkspace(wsId), retry: false });
   const { sessions, error } = useSessions(wsId);
@@ -46,8 +54,7 @@ export function WorkspaceChatsPage() {
   const unavailable = chosen === undefined ? undefined : agentAvailability(chosen);
   // Only while there is a choice: with one agent the page is as before, and the server says why a chat can't start.
   const blocked = !severalAgents || unavailable === undefined || unavailable.available ? undefined : unavailable;
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | undefined>(undefined);
+  const { start, starting: creating, error: createError, setError: setCreateError } = useStartChat(wsId);
   /** The chat the first message created: a retry after a failed send reuses it, never leaving an empty one behind (2.5 F6). */
   const firstChat = useRef<Session | undefined>(undefined);
   const [firstChatId, setFirstChatId] = useState<string | undefined>(undefined);
@@ -57,6 +64,8 @@ export function WorkspaceChatsPage() {
 
   /** The chats list is empty (or holds only the chat a failed first send made): the composer starts the chat. */
   const listEmpty = sessions === undefined || sessions.length === 0 || onlyFirstChat;
+  /** The empty state's Start a chat is shown: the list is empty and the agent it uses is known. */
+  const startShown = sessions !== undefined && listEmpty && chatAgents.data !== undefined && agentId !== undefined;
 
   const onPick = (next: string) => {
     setPickedAgent(next);
@@ -73,15 +82,7 @@ export function WorkspaceChatsPage() {
       setCreateError(blocked.description);
       return;
     }
-    setCreating(true);
-    setCreateError(undefined);
-    createChatSession(wsId, undefined, agentId).then(
-      (session) => openChat(session),
-      (failure: unknown) => {
-        setCreating(false);
-        setCreateError(failure instanceof Error ? failure.message : "Ogden Agents couldn't start a chat. Try again.");
-      },
-    );
+    start(agentId);
   };
 
   return (
@@ -96,7 +97,11 @@ export function WorkspaceChatsPage() {
                 <GearSix aria-hidden />
               </Link>
             </Button>
-            <Button onClick={onNewChat} aria-disabled={creating || blocked !== undefined} aria-describedby={blocked === undefined ? undefined : 'agent-unavailable'} data-testid="new-chat">
+            {/* While the list is empty, Start a chat in the page is the one primary action. */}
+            <Button
+              variant={startShown ? 'outline' : 'primary'}
+              onClick={onNewChat}
+              aria-disabled={creating || blocked !== undefined} aria-describedby={blocked === undefined ? undefined : 'agent-unavailable'} data-testid="new-chat">
               <ChatCircle aria-hidden />
               New chat
             </Button>
@@ -165,11 +170,31 @@ export function WorkspaceChatsPage() {
               </div>
             ) : sessions.length === 0 || onlyFirstChat ? (
               <div className="flex max-w-(--space-chat-column) flex-col gap-4" data-testid="chats-empty">
-                <EmptyState title="No conversations yet." />
+                <EmptyState
+                  title="No conversations yet."
+                  description={
+                    chatAgents.data === undefined || agentId === undefined
+                      ? undefined
+                      : `Start a chat with ${agentNameOf(chatAgents.data, agentId)} to work on this project, or write your first message below.`
+                  }
+                  actions={
+                    !startShown || chatAgents.data === undefined ? undefined : (
+                      <StartChatActions
+                        agents={chatAgents.data.agents}
+                        agentId={agentId}
+                        blocked={blocked}
+                        describedBy="agent-unavailable"
+                        starting={creating}
+                        // A failed first send already made this agent's chat (2.5 F6): open that one, never a second empty chat.
+                        onStart={(next) => (firstChat.current !== undefined && firstChat.current.agentId === next ? void openChat(firstChat.current) : start(next))}
+                        onBlocked={setCreateError}
+                      />
+                    )
+                  }
+                />
+                {/* The second way in: the first message starts the chat with the agent named above. Use another agent is the one chooser here. */}
                 <Composer
                   label={`Message ${agentNameOf(chatAgents.data, agentId)}`}
-                  // The agent picker sits in the composer footer (EXPERIENCE.md Empty chats, DESIGN.md Composer).
-                  footer={chatAgents.data === undefined || agentId === undefined ? undefined : <AgentPicker agents={chatAgents.data.agents} value={agentId} onChange={onPick} />}
                   // The reason is the status line above, tied to the field; a send still goes to the server, which says why.
                   describedBy={blocked === undefined ? undefined : 'agent-unavailable'}
                   onSend={async (text) => {

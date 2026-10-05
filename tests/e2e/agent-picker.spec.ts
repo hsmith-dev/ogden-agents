@@ -104,7 +104,7 @@ test("a new chat preselects the project's default, set in one tab and followed b
   );
 });
 
-test('the empty Chats page puts the picker in the composer footer, and a signed-out default says why before sending', async ({ page }) => {
+test('the empty Chats page says why a signed-out default can\'t start a chat, and Use another agent starts one', async ({ page }) => {
   const third = await fakeSecondAgent({ ...THIRD, setup: await fakeAgentSetup({ ...THIRD, installed: true, auth: 'needs_sign_in' }) });
   await withChatServer(
     page,
@@ -127,19 +127,26 @@ test('the empty Chats page puts the picker in the composer footer, and a signed-
 
       await page.goto(`${server.url}/w/${claude.wsId}`);
       await expect(page.getByTestId('chats-empty')).toBeVisible();
-      const footerPicker = page.getByTestId('composer').getByTestId('agent-picker');
-      await expect(footerPicker).toHaveAttribute('data-agent', THIRD.agentId);
+      // One agent chooser in the empty state: Use another agent, not a picker in the composer footer.
+      await expect(page.getByTestId('composer').getByTestId('agent-picker')).toHaveCount(0);
       await expect(page.getByTestId('agent-unavailable')).toContainText("Third Agent isn't signed in.");
       await expect(page.getByTestId('agent-unavailable-link')).toHaveAttribute('href', '/settings/agents');
+      const start = page.getByTestId('start-chat');
+      await expect(start).toHaveAttribute('aria-disabled', 'true');
+      await expect(start).toHaveAttribute('aria-describedby', 'agent-unavailable');
+      // aria-disabled, so still focusable: Enter says why where it landed.
+      await start.focus();
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('alert')).toContainText("Third Agent isn't signed in.");
+      await expect(page).toHaveURL(new RegExp(`/w/${claude.wsId}$`));
 
-      // Picking Claude Code clears it, and the composer starts a Claude Code chat.
-      await footerPicker.click();
-      await page.getByTestId('agent-option').filter({ hasText: 'Claude Code' }).click();
-      await expect(page.getByTestId('agent-unavailable')).toHaveCount(0);
+      // Use another agent: Claude Code starts a Claude Code chat in one choice.
+      await page.getByTestId('start-chat-other').click();
+      await page.getByTestId('start-chat-option').filter({ hasText: 'Claude Code' }).click();
+      await expect(page).toHaveURL(/\/w\/[^/]+\/s\/ses_/);
       const composer = page.getByRole('textbox', { name: 'Message Claude Code' });
       await composer.fill('whoami');
       await composer.press('Enter');
-      await expect(page).toHaveURL(/\/w\/[^/]+\/s\/ses_/);
       await expect(page.getByTestId('message-agent').last()).toContainText('agent=default');
     },
     { extra: { extraAgents: [third] } },

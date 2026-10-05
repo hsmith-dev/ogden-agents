@@ -95,8 +95,8 @@ export function createRunAwareTickets(deps: RunAwareTicketsDeps): TicketStorePor
   /** The ticket as its run's worktree has it, or `undefined` (scripts changed, worktree gone, unreadable). */
   const fromWorktree = async (active: ActiveWorktree, ref: string): Promise<TicketDetail | undefined> => {
     try {
-      await trust.requireScriptsMatch(active.workspaceId, active.worktree);
-      const detail = await store.find(active.worktree, ref);
+      const scripts = await trust.requireScriptsMatch(active.workspaceId, active.worktree);
+      const detail = await store.find(active.worktree, ref, { scripts });
       return planConfined(active.worktree, detail.plan) ? detail : undefined;
     } catch (error) {
       report('worktree', error);
@@ -105,8 +105,8 @@ export function createRunAwareTickets(deps: RunAwareTicketsDeps): TicketStorePor
   };
 
   return {
-    async tree(repoPath): Promise<TicketsResponse> {
-      const tree = await store.tree(repoPath);
+    async tree(repoPath, guard): Promise<TicketsResponse> {
+      const tree = await store.tree(repoPath, guard);
       const active = activeWorktrees(repoPath);
       if (active.size === 0) return tree;
       const tickets = await Promise.all(
@@ -120,24 +120,24 @@ export function createRunAwareTickets(deps: RunAwareTicketsDeps): TicketStorePor
       return { ...tree, tickets };
     },
 
-    async find(repoPath, ref) {
+    async find(repoPath, ref, guard) {
       const run = activeWorktrees(repoPath).get(ref);
       if (run !== undefined) {
         const detail = await fromWorktree(run, ref);
         if (detail !== undefined) return detail;
       }
-      return store.find(repoPath, ref);
+      return store.find(repoPath, ref, guard);
     },
 
-    async mark(repoPath, ref, status, options) {
+    async mark(repoPath, ref, status, guard, options) {
       const run = activeWorktrees(repoPath).get(ref);
-      if (run === undefined) return store.mark(repoPath, ref, status, options);
+      if (run === undefined) return store.mark(repoPath, ref, status, guard, options);
       // Only the trusted scripts ever run in a worktree: a change refuses the mark (`scripts_changed`).
-      await trust.requireScriptsMatch(run.workspaceId, run.worktree);
+      const scripts = await trust.requireScriptsMatch(run.workspaceId, run.worktree);
       // Never while the agent runs, and only to a plan file inside the worktree with no link on the way (review).
       if (run.outcome === 'running') throw new BuildRefusedError('run_active', RUN_ACTIVE_MESSAGE);
-      if (!planConfined(run.worktree, (await store.find(run.worktree, ref)).plan)) throw new BuildRefusedError('checks_failed', RUN_PLAN_NOT_CONFINED_MESSAGE);
-      return store.mark(run.worktree, ref, status, options);
+      if (!planConfined(run.worktree, (await store.find(run.worktree, ref, { scripts })).plan)) throw new BuildRefusedError('checks_failed', RUN_PLAN_NOT_CONFINED_MESSAGE);
+      return store.mark(run.worktree, ref, status, { scripts }, options);
     },
 
     watch: (repoPath, outputFolder, onChange, options) => store.watch(repoPath, outputFolder, onChange, options),

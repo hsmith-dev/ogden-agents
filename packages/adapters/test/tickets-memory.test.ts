@@ -8,6 +8,7 @@ import { NotFoundError, StatusNotAllowedError, TicketChangedError, TicketsUnavai
 import { boardColumnOf } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import { createMemoryTicketStore } from '../src/index.js';
+import { GUARD } from './snapshot-fake.js';
 
 const tree = {
   tickets: [
@@ -20,20 +21,20 @@ const tree = {
 describe('tickets-memory (story 4.2)', () => {
   it('tree answers the repo’s tickets with the shared defaults; another repo is unavailable', async () => {
     const store = createMemoryTicketStore({ repos: { '/repo': tree } });
-    const answer = await store.tree('/repo');
+    const answer = await store.tree('/repo', GUARD);
     expect(answer.folder).toBe('initiative-demo');
     expect(answer.tickets[1]).toMatchObject({ ref: '1.2', after: [1], blocks: [], hitl: false, file: null });
-    await expect(store.tree('/other')).rejects.toThrow(TicketsUnavailableError);
+    await expect(store.tree('/other', GUARD)).rejects.toThrow(TicketsUnavailableError);
     // A copy: changing it changes nothing kept.
     answer.tickets[0]!.title = 'changed';
-    expect((await store.tree('/repo')).tickets[0]!.title).toBe('One');
+    expect((await store.tree('/repo', GUARD)).tickets[0]!.title).toBe('One');
   });
 
   it('find answers a ticket with its text, and a missing one is NotFoundError', async () => {
     const store = createMemoryTicketStore({ repos: { '/repo': tree }, text: { '1.2': { description: 'Do two.' } } });
-    expect(await store.find('/repo', '1.2')).toMatchObject({ ref: '1.2', description: 'Do two.', verify: '', references: [], hasPlan: false });
-    expect((await store.find('/repo', '1.1')).hasPlan).toBe(true);
-    await expect(store.find('/repo', '9.9')).rejects.toThrow(NotFoundError);
+    expect(await store.find('/repo', '1.2', GUARD)).toMatchObject({ ref: '1.2', description: 'Do two.', verify: '', references: [], hasPlan: false });
+    expect((await store.find('/repo', '1.1', GUARD)).hasPlan).toBe(true);
+    await expect(store.find('/repo', '9.9', GUARD)).rejects.toThrow(NotFoundError);
   });
 
   it('mark changes the row as the plan would, tells each open watch, and refuses done', async () => {
@@ -41,13 +42,13 @@ describe('tickets-memory (story 4.2)', () => {
     const told: string[][] = [];
     const watch = await store.watch('/repo', '_bmad-output', (refs) => told.push(refs));
     expect(store.watching('/repo')).toBe(1);
-    expect(await store.mark('/repo', '1.2', 'ready-for-dev')).toEqual({ ref: '1.2', status: 'ready-for-dev' });
-    const row = (await store.tree('/repo')).tickets[1]!;
+    expect(await store.mark('/repo', '1.2', 'ready-for-dev', GUARD)).toEqual({ ref: '1.2', status: 'ready-for-dev' });
+    const row = (await store.tree('/repo', GUARD)).tickets[1]!;
     expect(row).toMatchObject({ status: 'ready-for-dev', state: 'backlog' });
     expect(boardColumnOf(row)).toBe('ready');
-    await store.mark('/repo', '1.2', 'blocked', { blockedReason: 'Waits on the API' });
-    expect(boardColumnOf((await store.tree('/repo')).tickets[1]!)).toBe('blocked');
-    await expect(store.mark('/repo', '1.2', 'done')).rejects.toThrow(StatusNotAllowedError);
+    await store.mark('/repo', '1.2', 'blocked', GUARD, { blockedReason: 'Waits on the API' });
+    expect(boardColumnOf((await store.tree('/repo', GUARD)).tickets[1]!)).toBe('blocked');
+    await expect(store.mark('/repo', '1.2', 'done', GUARD)).rejects.toThrow(StatusNotAllowedError);
     expect(told).toEqual([['1.2'], ['1.2']]);
 
     store.emit('/repo', ['1.1']);
@@ -59,26 +60,26 @@ describe('tickets-memory (story 4.2)', () => {
     expect(told).toHaveLength(3);
     expect(store.calls.map((call) => call[0])).toEqual(['watch', 'mark', 'tree', 'mark', 'tree', 'mark']);
     // Only core's approve writes done (story 5.2).
-    expect(await store.mark('/repo', '1.2', 'done', { approve: true })).toEqual({ ref: '1.2', status: 'done' });
-    expect(boardColumnOf((await store.tree('/repo')).tickets[1]!)).toBe('done');
+    expect(await store.mark('/repo', '1.2', 'done', GUARD, { approve: true })).toEqual({ ref: '1.2', status: 'done' });
+    expect(boardColumnOf((await store.tree('/repo', GUARD)).tickets[1]!)).toBe('done');
   });
 
   it('mark with an expected status that no longer matches is TicketChangedError and changes nothing (story 4.10)', async () => {
     const store = createMemoryTicketStore({ repos: { '/repo': tree } });
-    await expect(store.mark('/repo', '1.2', 'ready-for-dev', { expectedStatus: 'draft' })).rejects.toThrow(TicketChangedError);
-    expect((await store.tree('/repo')).tickets[1]!.status).toBe('');
-    expect(await store.mark('/repo', '1.2', 'ready-for-dev', { expectedStatus: '' })).toEqual({ ref: '1.2', status: 'ready-for-dev' });
-    await expect(store.mark('/repo', '1.1', 'draft', { expectedStatus: '' })).rejects.toThrow(TicketChangedError);
-    expect(await store.mark('/repo', '1.1', 'draft', { expectedStatus: 'in-review' })).toEqual({ ref: '1.1', status: 'draft' });
+    await expect(store.mark('/repo', '1.2', 'ready-for-dev', GUARD, { expectedStatus: 'draft' })).rejects.toThrow(TicketChangedError);
+    expect((await store.tree('/repo', GUARD)).tickets[1]!.status).toBe('');
+    expect(await store.mark('/repo', '1.2', 'ready-for-dev', GUARD, { expectedStatus: '' })).toEqual({ ref: '1.2', status: 'ready-for-dev' });
+    await expect(store.mark('/repo', '1.1', 'draft', GUARD, { expectedStatus: '' })).rejects.toThrow(TicketChangedError);
+    expect(await store.mark('/repo', '1.1', 'draft', GUARD, { expectedStatus: 'in-review' })).toEqual({ ref: '1.1', status: 'draft' });
   });
 
   it('fail makes every operation unavailable until cleared', async () => {
     const store = createMemoryTicketStore({ repos: { '/repo': tree } });
     store.fail('uv_missing');
-    const error = await store.tree('/repo').catch((caught: unknown) => caught);
+    const error = await store.tree('/repo', GUARD).catch((caught: unknown) => caught);
     expect((error as TicketsUnavailableError).reason).toBe('uv_missing');
     await expect(store.watch('/repo', '_bmad-output', () => {})).rejects.toThrow(TicketsUnavailableError);
     store.fail(undefined);
-    expect((await store.tree('/repo')).tickets).toHaveLength(2);
+    expect((await store.tree('/repo', GUARD)).tickets).toHaveLength(2);
   });
 });

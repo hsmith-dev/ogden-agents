@@ -27,26 +27,41 @@ export interface TicketWatch {
   close(): void;
 }
 
-/** What a watch checks before each read (story 4.13: the project's scripts are still the ones the user allowed). */
+/**
+ * What a run of the project's scripts may use (the maintained-fork story):
+ * `scripts` is the fingerprint of `_bmad/scripts/` the user trusted, as core
+ * just checked it. `tickets-v7` runs only a private snapshot of the scripts
+ * whose bytes hash to it, so a change after core's check never runs.
+ */
+export interface TicketRunGuard {
+  scripts: string;
+}
+
+/**
+ * What a watch checks before each read (story 4.13: the project's scripts
+ * are still the ones the user allowed). It resolves to the guard that read
+ * runs under.
+ */
 export interface TicketWatchOptions {
-  beforeRun?: (() => Promise<void>) | undefined;
+  beforeRun?: (() => Promise<TicketRunGuard>) | undefined;
 }
 
 export interface TicketStorePort {
   /**
-   * Every ticket of the repo's active initiative, in build order, as the
+   * Every operation but `watch` takes the {@link TicketRunGuard} core
+   * checked last. Every ticket of the repo's active initiative, in build order, as the
    * store reports it, plus what it couldn't read (`problems`), the folder it
    * read and the initiative's epics (story 4.1's `status`, renamed).
    * Read-only. Rejects with {@link TicketsUnavailableError} when the tickets
    * can't be read.
    */
-  tree(repoPath: string): Promise<TicketsResponse>;
+  tree(repoPath: string, guard: TicketRunGuard): Promise<TicketsResponse>;
   /**
    * The one ticket `ref` names, with its entry's text. Read-only. Rejects
    * with core's `NotFoundError` when no ticket matches, else with
    * {@link TicketsUnavailableError}.
    */
-  find(repoPath: string, ref: string): Promise<TicketDetail>;
+  find(repoPath: string, ref: string, guard: TicketRunGuard): Promise<TicketDetail>;
   /**
    * Sets the ticket's status in its plan file (creating the plan for a
    * planned entry), with `blockedReason` for `blocked`. The only write the
@@ -62,6 +77,7 @@ export interface TicketStorePort {
     repoPath: string,
     ref: string,
     status: TicketStatus,
+    guard: TicketRunGuard,
     options?: {
       blockedReason?: string | undefined;
       expectedStatus?: TicketStatus | '' | undefined;
@@ -82,8 +98,10 @@ export interface TicketStorePort {
    * tell which. Resolves once watching; rejects when it can't watch (the
    * folder is missing or resolves outside the repo). `close` stops it, and
    * nothing is called after. `beforeRun` (story 4.13) is awaited before
-   * every read the watch makes; when it rejects, that read doesn't run (the
-   * last tree is kept and the next change tries again).
+   * every read the watch makes, and that read runs under the guard it
+   * resolves to; when it rejects, that read doesn't run (the last tree is
+   * kept and the next change tries again). Without `beforeRun` the watch
+   * never reads.
    */
   watch(repoPath: string, outputFolder: string, onChange: (refs: string[]) => void, options?: TicketWatchOptions): Promise<TicketWatch>;
 }

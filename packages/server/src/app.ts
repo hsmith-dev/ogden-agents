@@ -38,6 +38,8 @@ import { registerPermissionRoutes } from './permission-routes.js';
 import { registerPlanningRoutes } from './planning-routes.js';
 import { registerBuildRoutes } from './build-routes.js';
 import { registerRunSettingsRoutes } from './run-settings-routes.js';
+import { registerUpdateRoutes } from './update-routes.js';
+import type { UpdateCheck } from './update-check.js';
 import { registerSettingsRoutes } from './settings-routes.js';
 import { registerShortcutRoutes } from './shortcut-routes.js';
 import type { TerminalAvailabilityCheck } from './terminal-availability.js';
@@ -134,6 +136,8 @@ export interface AppOptions {
   newProjectDefaults?: NewProjectDefaultsStore;
   /** Developer mode, kept and enforced by core (permission modes); without it its routes answer 501. */
   installSettings?: InstallSettings;
+  /** The "newer version" notice (story 13.7); without it its routes answer 501. */
+  updates?: UpdateCheck;
   /** Each agent's install-wide default model (story 11), and whether an agent is registered: `PUT` default model. */
   agentDefaults?: { models: Pick<AgentModels, 'setDefaultModel'>; isAgentRegistered: (agentId: string) => boolean };
   /** The Ogden Agents app shortcut (E2-R10; the `shortcut-memory` stub until 2.4). */
@@ -168,6 +172,7 @@ export function createApp({
   onboarding,
   newProjectDefaults,
   installSettings,
+  updates,
   agentDefaults,
   appShortcut,
   tabs,
@@ -270,6 +275,7 @@ export function createApp({
   registerSettingsRoutes(app, { installSettings, newProjectDefaults, log });
   // The install's run limits and notification settings (story 5.3; 5.8 and 11.4 fill them): the gate, never a piece's guard.
   registerRunSettingsRoutes(app);
+  registerUpdateRoutes(app, { updates });
 
   registerEventSocket(app, { events, log, tabs });
   // A session's terminal (story 3.1): behind the same gate as `/ws`.

@@ -1,4 +1,4 @@
-import { Bell, FolderSimplePlus, GearSix, HandWaving, PaintBrush, Plus, Robot, Wrench } from '@phosphor-icons/react';
+import { Bell, FolderSimplePlus, GearSix, HandWaving, Info, PaintBrush, Plus, Robot, Wrench } from '@phosphor-icons/react';
 import { NEW_PROJECTS_SETTINGS_LABEL } from '@ogden-agents/shared';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { memo, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -361,6 +361,12 @@ function SettingsMenu() {
           <Link to="/settings/tools">
             <Wrench aria-hidden />
             Tools
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
+          <Link to="/settings/about">
+            <Info aria-hidden />
+            About
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>

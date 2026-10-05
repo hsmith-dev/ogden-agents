@@ -103,7 +103,7 @@ export function createMemoryTicketStore(options: MemoryTicketStoreOptions = {}):
         done_checkpoint: extra.done_checkpoint ?? false,
       };
     },
-    async mark(repoPath, ref, status, markOptions = {}) {
+    async mark(repoPath, ref, status, _guard, markOptions = {}) {
       calls.push(['mark', repoPath, ref, status, markOptions.blockedReason]);
       if (status === 'done' && markOptions.approve !== true) throw new StatusNotAllowedError(status);
       const row = rowOf(repoPath, ref);

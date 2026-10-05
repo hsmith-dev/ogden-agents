@@ -46,13 +46,13 @@ A vision and a gap. Coding agents like Claude Code, Codex and Gemini are the str
   - **intent:** In a project with Unattended builds turned on (CAP-19), unattended builds dispatch `bmad-build-auto` per ticket in isolation, respecting prerequisites and a concurrency limit, either for one ticket or autonomously.
   - **success:** Two ready, independent tickets build in parallel without touching each other's files, and a ticket with an unmet prerequisite is not dispatched.
 - **CAP-9**
-  - **intent:** Each run streams live: activity, tool calls, final status, and a plain-language reason if blocked, with a Retry action.
+  - **intent:** In a project with Unattended builds turned on (CAP-19), each run streams live: activity, tool calls, final status, and a plain-language reason if blocked, with a Retry action.
   - **success:** A blocked run shows its reason, and Retry resumes it from the correct status.
 - **CAP-10**
-  - **intent:** After every run, the system itself verifies the outcome: the plan status, an independent re-run of the tests, and a non-empty diff.
+  - **intent:** In a project with Unattended builds turned on (CAP-19), after every run, the system itself verifies the outcome: the plan status, an independent re-run of the tests, and a non-empty diff.
   - **success:** A run that claims success but whose tests fail is shown as failed.
 - **CAP-12**
-  - **intent:** A user reviews a diff and its review findings, then approves (merge and mark done) or rejects and retries.
+  - **intent:** In a project with Unattended builds turned on (CAP-19), a user reviews a diff and its review findings, then approves (merge and mark done) or rejects and retries.
   - **success:** Approving a built ticket merges its branch and marks it done, and no ticket reaches done without approval.
 - **CAP-13**
   - **intent:** In a project with Retrospectives turned on (CAP-19), when an epic completes, a retrospective records evidence-based findings and adds recurring pitfalls to the project's `AGENTS.md`.
@@ -86,7 +86,7 @@ CAP-11 (cost caps) is retired and its number is not reused.
 - It runs natively on macOS, Windows, and Linux, and needs no Docker to install or chat. It binds to `127.0.0.1` with a per-install access token and WebSocket origin checks, because the terminal is effectively a remote shell.
 - No standard flow may require the CLI. The CLI is reachable only through the advanced toggle.
 - It is a single Node process. Both frontend and backend are new builds, and no Ogden code is carried over.
-- Reuse BMAD before building: bmad-loop for dispatch and agent profiles, `tickets.py` for all ticket writes, BMAD's setup scripts for installing into a project.
+- Reuse BMAD before building: `bmad-build-auto` in an Ogden-managed ACP session for builds (bmad-loop only for agents without ACP, not in v1), `tickets.py` for all ticket writes, BMAD's setup scripts for installing into a project.
 - The BMAD v7 files in the repo are the source of truth for ticket and plan state. The database holds only workspaces, sessions, runs and events, and ticket references.
 - Only one side drives a session at a time. While the terminal drives, the chat view is read-only.
 - Guardrails are enforced in code, not in prompts. Ogden commit `b5af7c3` showed that prompted rules get skipped.

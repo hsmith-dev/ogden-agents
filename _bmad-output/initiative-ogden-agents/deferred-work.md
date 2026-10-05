@@ -74,6 +74,13 @@ Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim fr
 - Send now or wait: an edit open on a waiting message is lost when the turn takes the message. From its review. (log: "Editing a waiting message while the turn ends loses the draft silently")
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
+- Epic 5 (a later story): a network allowlist (package registries) for a build's sandboxed commands; until then builds have no network. From 5.2's user decision. (log: "A network allowlist for an unattended build's sandboxed commands")
+- Epic 5 (5.6): core decides a build's file write before Claude Code's unsandboxed Edit/Write performs it, so a symlink swapped in after the decision can redirect it. From 5.2 security review S2. (log: "Core decides a build's file write before Claude Code's unsandboxed Edit/Write tool performs it")
+- Epic 5 (5.6, or a later sandbox story; re-pointed by 5.5, which owns no sandbox environment): a build's sandbox can write the main repo's `.git/objects`; a per-run object store would close it. From 5.2 security review S3. (log: "A build's sandbox can write the main repo's `.git/objects`")
+- Epic 11 (11.4): mask a webhook's host when listing it back; some providers put the token in the host name. From 5.3 security review S10. (log: "Listing a webhook back by its full host can show part of its secret")
+- Epic 5 (5.10, or a later sandbox story): stop a build's commands that leave the agent's process group (`setsid`) or outlive their parent on Windows (cgroup, job object or sandbox-level kill). From 5.4 security review S4. (log: "Stopping a build kills the agent's process group")
+- Epic 5 (5.8) or epic 11 (11.1): prune a run's folder (`<data>/r/<run8>`) and the activity recorder's maps with the run's worktree. From 5.4 security review S6. (log: "Run folders (`<data>/r/<run8>`, up to 32 MiB")
+- Epic 5 (5.10, or a later sandbox story): the board and the run's end read a run's worktree with `tickets.py` while the agent may still be live (check-then-use on the worktree's scripts, which the sandbox denies the agent). From 5.5 security review S2. (log: "Board reads of an active run's worktree run `tickets.py` while its agent may be live")
 
 ## Log
 
@@ -618,6 +625,33 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-choose-whether-new-messages-wait-or-go-right-away-plan.md`
   summary: Editing a waiting message while the turn ends loses the draft silently when the old text is sent.
   evidence: queued-messages.tsx editor does not reserve the message; takeNext sends it and the row unmounts.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-tracer-bullet-one-ticket-built-reviewed-and-approved-from-a-plan.md`
+  summary: A network allowlist for an unattended build's sandboxed commands (package registries, so `npm install` or `uv sync` in a fresh worktree can work); until then a build's commands have no network and such a failure is named in the run's result.
+  evidence: User decision 2026-10-04 on 5.2's Q1 (deny-by-default policy, Bash sandboxed with no network; "an allowlist is a later story").
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-tracer-bullet-one-ticket-built-reviewed-and-approved-from-a-plan.md`
+  summary: Core decides a build's file write before Claude Code's unsandboxed Edit/Write tool performs it, so sandboxed Bash racing a swap of a checked folder for a symlink can still redirect that write outside the worktree.
+  evidence: 5.2 security review S2 (medium, unverified in practice): `core/src/build-permission-policy.ts` decides on the path at request time; dangling links and hard links are refused, but a swap after the decision isn't. Settled by running file tools inside the sandbox too, or by a write-through-fd check in the agent (5.6).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-tracer-bullet-one-ticket-built-reviewed-and-approved-from-a-plan.md`
+  summary: A build's sandbox can write the main repo's `.git/objects` (a commit needs it), so an agent could delete objects and damage unpushed history; a per-run object store (`GIT_OBJECT_DIRECTORY` with the repo's objects as an alternate, copied in at approve) would close it.
+  evidence: 5.2 security review S3 (medium): `core/src/builds.ts` `sandboxFor`; refs and logs are narrowed to the run's own folder, objects can't be without a separate store (5.5).
 - source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-bmad-method-comes-from-the-maintained-fork-plan.md`
   summary: Resolved: "between the content check and Python's import of `config_utils.py`" (4.13 S1 follow-up), by the user decision of 2026-10-04 to maintain a BMad Method fork. The fork's `tickets.py` takes `--config-utils PATH`; core hands the store the trusted fingerprint with each run, and `tickets-v7` reads `_bmad/scripts/` once, hashes those bytes by the trust's rule, refuses a mismatch with `scripts_changed`, and writes the same bytes into a fresh owner-only run folder under `<data>/tools/bmad-script-runs/` whose `config_utils.py` the run imports. A file swapped in after the check is never read; the folder is removed after the run.
   evidence: `adapters/src/bmad-catalog/scripts-snapshot.ts`, `scripts-fingerprint.ts` `readProjectScripts`, `bmad-source/folder-hash.ts` `readFolder`; `adapters/src/tickets-v7/index.ts` `run`; `core/src/ticket-store-port.ts` `TicketRunGuard`; `core/src/bmad-script-trust.ts` `requireScriptsUnchanged`; tests `adapters/test/bmad-catalog-scripts-snapshot.test.ts` ("a config_utils.py swapped in after the check never runs"), the real-uv board tests in `server/test/planning-routes.test.ts`; fork commit `642c4e5` (tag `ogden-agents/2026-10-04`).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-contracts-and-stubs-for-epics-5-and-11-plan.md`
+  summary: Listing a webhook back by its full host can show part of its secret (some providers put the token in the host name); 11.4 should mask it (registrable domain only, or masked).
+  evidence: 5.3 security review S10; `WebhookTarget.host` in packages/shared/src/build-settings.ts; 11.4's own unknown is how a URL is listed back.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-contracts-and-stubs-for-epics-5-and-11-plan.md`
+  summary: Nothing checks a minimum git version, while builds rely on git 2.31+ (`rev-parse --path-format`) and `git apply`'s refusal to write beyond a symbolic link (fixed in 2.39.2, CVE-2023-23946); 5.5 should check the version and refuse older git with a plain reason.
+  evidence: 5.3 security review S15; `vcs-git` `applyPatch` and `worktreeGitPaths`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-headless-build-session-over-acp-for-one-named-ticket-plan.md`
+  summary: Stopping a build kills the agent's process group (POSIX) or `taskkill /T` tree (Windows), so a build command that leaves its group (`setsid`, a daemonizing tool) or whose parent exited on Windows survives with the sandbox's write access to the worktree; a per-run cgroup, job object or sandbox-level kill would close it.
+  evidence: 5.4 security review S4 (medium): `packages/adapters/src/process-tree.ts` `killProcessTree`; 5.4's tests prove only same-group descendants stop.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-headless-build-session-over-acp-for-one-named-ticket-plan.md`
+  summary: Run folders (`<data>/r/<run8>`, up to 32 MiB of activity each) and the activity recorder's in-memory maps are never pruned; remove them with the run's worktree (5.8's cleanup or 11.1's Runs tab).
+  evidence: 5.4 security review S6 (low): `packages/core/src/build-run-folder.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-worktrees-in-the-data-folder-plan.md`
+  summary: Resolved: "Nothing checks a minimum git version" (5.3 entry above) is closed: Build, approve and Commit plan files refuse git older than 2.39.2, or none, with a plain reason (`vcs_unavailable`).
+  evidence: `packages/adapters/src/vcs-git/index.ts` `check`, `packages/core/src/builds.ts` `requireGit`; tests in `vcs-git-worktrees.test.ts` and `builds-worktrees.test.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-worktrees-in-the-data-folder-plan.md`
+  summary: Board reads of an active run's worktree run `tickets.py` while its agent may be live: the scripts' fingerprint is checked, then the script runs (check-then-use), held only by the sandbox's deny of `_bmad/` (case variants on case-insensitive filesystems not verified).
+  evidence: 5.5 security review S2 (medium): `packages/core/src/run-aware-tickets.ts` `fromWorktree`; same class as 5.2's `decideOutcome` read and the 4.13 entry. Marks are refused while the agent runs, and plans reached through links are never used.

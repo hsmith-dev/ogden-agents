@@ -5,7 +5,7 @@
  * agent, so this module never imports the turns.
  */
 import { redactSecrets, type Session, type SessionId, type Workspace } from '@ogden-agents/shared';
-import { AgentError, type AgentEvent, type AgentRestored, type AgentSession } from '../agent-port.js';
+import { AgentError, type AgentEvent, type AgentPermissionRequest, type AgentRestored, type AgentSession } from '../agent-port.js';
 import { PROTECTED_PATHS } from '../permission-matching.js';
 import { PRIME_NEW_MESSAGE, primedPrompt } from '../resume-prime.js';
 import { AGENT_SESSION_REF, AGENT_STARTING_NOTICE_MS, HANDOFF_PENDING_REF } from './constants.js';
@@ -76,7 +76,10 @@ export function createAgents(
       restartPending: false,
       appliedModel: null,
     };
-    const onPermissionRequest = onPermissionRequestFor(session);
+    // A `build` session (story 5.2) runs in its run's worktree, in its sandbox, and its permission
+    // requests are answered by core's build policy, never a card. Without its setup it never starts.
+    const build = session.kind === 'build' ? ctx.options.buildSessions?.get(session.id) : undefined;
+    const onPermissionRequest = build === undefined ? onPermissionRequestFor(session) : async (request: AgentPermissionRequest) => build.decide(request);
     // The agent the session was started with (epic 6), looked up for each start: never another one.
     const agent = agentOf(session.id);
     const agentId = agentIdOf(session);
@@ -85,19 +88,22 @@ export function createAgents(
     entry.appliedModel = startModel;
     // The real-cased path: the case-folded key is for uniqueness only (AD-2).
     const input = {
-      cwd: workspace.realPath ?? workspace.path,
+      cwd: build?.cwd ?? workspace.realPath ?? workspace.path,
       env: { ...agentEnv(session.id) },
       onPermissionRequest,
       ...(entry.guardsRequested ? { protectedPaths: PROTECTED_PATHS } : {}),
       ...(startModel === null ? {} : { model: startModel }),
+      ...(build === undefined ? {} : { sandbox: build.sandbox }),
     };
     const previous = storedAgentSessionId(session.id);
     // A chat that reached an agent before, and has none now, reopens that agent's session (2.7).
     // A dropped agent of this session stops first: never two of its processes at once.
     const begin = (): Promise<{ session: AgentSession; restored: AgentRestored | undefined }> =>
-      previous === undefined
-        ? agent.startSession(input).then((started) => ({ session: started, restored: undefined }))
-        : agent.reopenSession({ ...input, agentSessionId: previous });
+      session.kind === 'build' && build === undefined
+        ? Promise.reject(new AgentError('agent_unavailable', `${agent.displayName} can't run this build any more. Build the ticket again from the board.`))
+        : previous === undefined
+          ? agent.startSession(input).then((started) => ({ session: started, restored: undefined }))
+          : agent.reopenSession({ ...input, agentSessionId: previous });
     const dropped = droppedAgents.get(session.id);
     const opening = dropped === undefined ? begin() : dropped.then(begin);
     // A start that takes a while shows as starting, not stuck (epic 6 entry 5); a quick one adds no event.

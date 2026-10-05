@@ -649,6 +649,30 @@ const EXPECTED_API_ROUTES = [
   `PUT ${API_ROUTES.workspaceBmadScriptTrust}`,
   // A document a planning session wrote (story 4.7), guarded.
   `GET ${API_ROUTES.workspaceDocument}`,
+  // Unattended builds (story 5.2), each through the guarded helper.
+  `POST ${API_ROUTES.workspaceBuilds}`,
+  `GET ${API_ROUTES.workspaceBuild}`,
+  `POST ${API_ROUTES.workspaceBuildApprove}`,
+  `POST ${API_ROUTES.workspaceBuildReject}`,
+  `POST ${API_ROUTES.workspaceBuildCommitPlan}`,
+  `GET ${API_ROUTES.sessionRun}`,
+  // Epics 5 and 11's other routes (story 5.3), each through the guarded helper, 501 until their lanes.
+  `GET ${API_ROUTES.workspaceRuns}`,
+  `GET ${API_ROUTES.workspaceRun}`,
+  `POST ${API_ROUTES.runStop}`,
+  `POST ${API_ROUTES.runRetry}`,
+  `POST ${API_ROUTES.runCheckAgain}`,
+  `GET ${API_ROUTES.workspaceBuildSettings}`,
+  `PATCH ${API_ROUTES.workspaceBuildSettings}`,
+  // The install's run limits and notification settings (story 5.3): install-level, behind the gate only.
+  `GET ${API_ROUTES.runLimits}`,
+  `PATCH ${API_ROUTES.runLimits}`,
+  `GET ${API_ROUTES.notificationSettings}`,
+  `PATCH ${API_ROUTES.notificationSettings}`,
+  `POST ${API_ROUTES.notificationWebhooks}`,
+  `PATCH ${API_ROUTES.notificationWebhook}`,
+  `DELETE ${API_ROUTES.notificationWebhook}`,
+  `POST ${API_ROUTES.notificationWebhookTest}`,
 ] as const;
 
 describe('gate placement', () => {
@@ -704,6 +728,19 @@ describe('gate placement', () => {
         `GET ${API_ROUTES.workspaceBmadSetup}`,
         `POST ${API_ROUTES.workspaceBmadSetup}`,
         `GET ${API_ROUTES.workspaceDocument}`,
+        `POST ${API_ROUTES.workspaceBuilds}`,
+        `GET ${API_ROUTES.workspaceBuild}`,
+        `POST ${API_ROUTES.workspaceBuildApprove}`,
+        `POST ${API_ROUTES.workspaceBuildReject}`,
+        `POST ${API_ROUTES.workspaceBuildCommitPlan}`,
+        `GET ${API_ROUTES.sessionRun}`,
+        `GET ${API_ROUTES.workspaceRuns}`,
+        `GET ${API_ROUTES.workspaceRun}`,
+        `POST ${API_ROUTES.runStop}`,
+        `POST ${API_ROUTES.runRetry}`,
+        `POST ${API_ROUTES.runCheckAgain}`,
+        `GET ${API_ROUTES.workspaceBuildSettings}`,
+        `PATCH ${API_ROUTES.workspaceBuildSettings}`,
       ];
       expect(guardedRouteKeys(app)).toEqual([...pieceRoutes, `GET ${TEST_ROUTES.bmadProbe}`].sort());
       for (const key of guardedRouteKeys(app)) expect(key.slice(key.indexOf(' ') + 1).startsWith(`${API_BASE}/workspaces/:wsId/`), key).toBe(true);

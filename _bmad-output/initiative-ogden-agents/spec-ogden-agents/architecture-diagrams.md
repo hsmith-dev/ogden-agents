@@ -17,7 +17,7 @@
  │  • Session manager ──► selected agent (Claude Code, Codex, …) │
  │  • Terminal bridge ──► agent CLI resumed in a real PTY       │
  │  • Ticket index (v7 tickets.toml + plan frontmatter)         │
- │  • Dispatch via bmad-loop, worktrees, verification, run time │
+ │  • Dispatch via ACP, worktrees, verification, run time       │
  │  • DB: workspaces, sessions, runs, events (no ticket state)  │
  └───────────────────────────┬──────────────────────────────────┘
                    user's repos on disk, each with the forked

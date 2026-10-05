@@ -1,6 +1,7 @@
 export * from './api.js';
 export * from './appearance.js';
 export * from './bmad.js';
+export * from './builds.js';
 export * from './chat.js';
 export * from './chat-name.js';
 export * from './desktop-update.js';
@@ -18,4 +19,7 @@ export * from './tab-token.js';
 export * from './terminal.js';
 export * from './updates.js';
 export * from './toolchain.js';
+export * from './build-runs.js';
+export * from './build-settings.js';
+export * from './build-verification.js';
 export * from './release-source.js';

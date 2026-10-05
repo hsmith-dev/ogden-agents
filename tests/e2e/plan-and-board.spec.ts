@@ -515,7 +515,7 @@ test('the board: cards in their columns, Waits for and the blocked reason, a liv
       await expect(card('1.3')).toHaveAccessibleName('1.3 Build the third thing, Waits for 1.2');
 
       // An agent's write: the store tells the watch, the server appends ticket.changed, the card highlights and moves.
-      await ticketStore.mark(realPath, '1.2', 'in-progress');
+      await ticketStore.mark(realPath, '1.2', 'in-progress', { scripts: 'none' });
       ticketStore.emit(realPath, ['1.2']);
       await expect(card('1.2')).toHaveAttribute('data-highlighted', 'true');
       await expect(card('1.2')).toHaveAttribute('data-column', 'in_progress');

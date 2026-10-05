@@ -4,6 +4,12 @@
 //   node scripts/smoke-installed.mjs [path/to/ogden-agents-<version>.tgz]
 //   node scripts/smoke-installed.mjs --registry-spec ogden-agents@<version>
 //   node scripts/smoke-installed.mjs --omit-optional [path/to/…tgz]
+//   node scripts/smoke-installed.mjs --start-script <start/script> [path/to/…tgz]
+//
+// `--start-script` starts the launcher through one of the double-click start
+// scripts in `start/` (`Start Ogden.command`, `Start Ogden.cmd`,
+// `start-ogden.sh`) instead of npx directly; the script runs npx with the
+// tarball, and every check below is the same.
 //
 // `--omit-optional` installs without optional dependencies (`node-pty`, the
 // hidden sign-in terminal; AD-19), as on a computer where it can't build: the
@@ -44,23 +50,33 @@ const STEP_TIMEOUT_MS = 15_000;
 const root = fileURLToPath(new URL('..', import.meta.url));
 const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
-/** @returns {string | undefined} the value of `--registry-spec <spec>` or `--registry-spec=<spec>` */
-function registrySpecArg() {
-  const argv = process.argv.slice(2);
-  const index = argv.findIndex((arg) => arg === '--registry-spec' || arg.startsWith('--registry-spec='));
+const argv = process.argv.slice(2);
+/** Indexes in argv of flag values given as a separate argument, which are not the tarball. */
+const flagValueIndexes = new Set();
+
+/**
+ * @param {string} flag such as `--registry-spec`
+ * @param {string} example what the value looks like, for the error
+ * @returns {string | undefined} the value of `<flag> <value>` or `<flag>=<value>`
+ */
+function flagValue(flag, example) {
+  const index = argv.findIndex((arg) => arg === flag || arg.startsWith(`${flag}=`));
   if (index === -1) return undefined;
   const arg = /** @type {string} */ (argv[index]);
-  const spec = arg.includes('=') ? arg.slice(arg.indexOf('=') + 1) : argv[index + 1];
-  if (spec === undefined || spec === '' || spec.startsWith('-')) {
-    console.error('smoke: --registry-spec needs a package spec, such as ogden-agents@0.1.0');
+  const value = arg.includes('=') ? arg.slice(arg.indexOf('=') + 1) : argv[index + 1];
+  if (!arg.includes('=')) flagValueIndexes.add(index + 1);
+  if (value === undefined || value === '' || value.startsWith('-')) {
+    console.error(`smoke: ${flag} needs ${example}`);
     process.exit(1);
   }
-  return spec;
+  return value;
 }
 
-const registrySpec = registrySpecArg();
-const omitOptional = process.argv.slice(2).includes('--omit-optional');
-const tarballArg = process.argv.slice(2).find((arg) => !arg.startsWith('--'));
+const registrySpec = flagValue('--registry-spec', 'a package spec, such as ogden-agents@0.1.0');
+const startScriptArg = flagValue('--start-script', 'a start script, such as "start/Start Ogden.command"');
+const startScript = startScriptArg === undefined ? undefined : resolve(startScriptArg);
+const omitOptional = argv.includes('--omit-optional');
+const tarballArg = argv.find((arg, index) => !arg.startsWith('--') && !flagValueIndexes.has(index));
 const tarball =
   registrySpec === undefined ? resolve(tarballArg ?? join(root, `ogden-agents-${version}.tgz`)) : undefined;
 
@@ -73,12 +89,14 @@ if (tarball !== undefined && !existsSync(tarball)) {
 function startInstall() {
   let next;
   try {
-    next = prepareInstall(registrySpec === undefined ? { tarball, omitOptional } : { registrySpec, omitOptional });
+    next = prepareInstall(registrySpec === undefined ? { tarball, omitOptional, startScript } : { registrySpec, omitOptional, startScript });
   } catch (error) {
     console.error(`smoke: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
-  console.log(`smoke: installing ${registrySpec ?? tarball} with npx in ${next.workDir}${omitOptional ? ', without optional dependencies' : ''}`);
+  console.log(
+    `smoke: installing ${registrySpec ?? tarball} with npx in ${next.workDir}${omitOptional ? ', without optional dependencies' : ''}${startScript === undefined ? '' : `, through ${startScript}`}`,
+  );
   return { install: next, launcher: next.runLauncher(['--no-open', '--port', '0'], { echo: echoLines() }) };
 }
 

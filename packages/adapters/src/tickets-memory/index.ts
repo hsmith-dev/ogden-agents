@@ -100,7 +100,7 @@ export function createMemoryTicketStore(options: MemoryTicketStoreOptions = {}):
         hasPlan: row.status !== null && row.status !== '',
       };
     },
-    async mark(repoPath, ref, status, markOptions = {}) {
+    async mark(repoPath, ref, status, _guard, markOptions = {}) {
       calls.push(['mark', repoPath, ref, status, markOptions.blockedReason]);
       if (status === 'done') throw new StatusNotAllowedError(status);
       const row = rowOf(repoPath, ref);

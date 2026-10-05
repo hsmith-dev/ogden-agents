@@ -104,12 +104,12 @@ describe('the trust bound to the scripts (story 4.13, user decision 2026-10-04)'
     return { core, workspace, set: (fingerprint: string | undefined) => scripts.set(workspace.realPath!, fingerprint) };
   }
 
-  it('unchanged scripts pass; changed ones refuse with scripts_changed until the user allows them again', async () => {
+  it('unchanged scripts pass, answering the trusted fingerprint the run checks again; changed ones refuse with scripts_changed until the user allows them again', async () => {
     const { core, workspace, set } = bound();
     set('sha256:a');
     await expect(core.bmadScriptTrust.requireScriptsUnchanged(workspace.id)).rejects.toBeInstanceOf(ScriptsNotTrustedError);
     await core.bmadScriptTrust.trustScripts(workspace.id);
-    await expect(core.bmadScriptTrust.requireScriptsUnchanged(workspace.id)).resolves.toBeUndefined();
+    await expect(core.bmadScriptTrust.requireScriptsUnchanged(workspace.id)).resolves.toBe('sha256:a');
     expect(await core.bmadScriptTrust.scriptsUnchanged(workspace.id)).toBe(true);
 
     // An agent (or anyone) changes `_bmad/scripts/`: refused, still trusted (the prompt asks again).
@@ -124,7 +124,7 @@ describe('the trust bound to the scripts (story 4.13, user decision 2026-10-04)'
     await core.bmadScriptTrust.trustScripts(workspace.id);
     await core.bmadScriptTrust.trustScripts(workspace.id);
     expect(core.events.readAfter(before).map((event) => event.type)).toEqual(['workspace.bmad_scripts_trusted']);
-    await expect(core.bmadScriptTrust.requireScriptsUnchanged(workspace.id)).resolves.toBeUndefined();
+    await expect(core.bmadScriptTrust.requireScriptsUnchanged(workspace.id)).resolves.toBe('sha256:planted');
   });
 
   it('scripts that cannot be hashed (a link, past a bound) count as changed, even right after allowing them', async () => {
@@ -140,7 +140,7 @@ describe('the trust bound to the scripts (story 4.13, user decision 2026-10-04)'
     await core.bmadScriptTrust.trustScripts(workspace.id);
     set('sha256:from-setup');
     await core.bmadScriptTrust.keepTrustAfterSetup(workspace.id);
-    await expect(core.bmadScriptTrust.requireScriptsUnchanged(workspace.id)).resolves.toBeUndefined();
+    await expect(core.bmadScriptTrust.requireScriptsUnchanged(workspace.id)).resolves.toBe('sha256:from-setup');
 
     // Not trusted: nothing is recorded.
     const other = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));

@@ -22,7 +22,8 @@
 import { lstat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { BMAD_SCRIPTS_NONE } from '@ogden-agents/core';
-import { hashFolder } from '../bmad-source/folder-hash.js';
+import { hashEntries, type Entries } from '../bmad-source/archive.js';
+import { readFolder } from '../bmad-source/folder-hash.js';
 
 const PYCACHE: ReadonlySet<string> = new Set(['__pycache__']);
 
@@ -36,12 +37,29 @@ async function kindAt(path: string): Promise<'missing' | 'folder' | 'other'> {
   }
 }
 
-export async function scriptsFingerprint(repoPath: string): Promise<string | undefined> {
+/** The project's scripts as read once: their fingerprint and the very files it was computed from (none for `'none'`). */
+export interface ProjectScripts {
+  readonly fingerprint: string;
+  readonly files: Entries;
+}
+
+/**
+ * Reads the repo's `_bmad/scripts/` once (the maintained-fork story): the
+ * fingerprint {@link scriptsFingerprint} answers, with the LF-normalized
+ * files it hashed, so a caller that checks the fingerprint can then use
+ * exactly those bytes. `undefined` as {@link scriptsFingerprint}.
+ */
+export async function readProjectScripts(repoPath: string): Promise<ProjectScripts | undefined> {
   if (typeof repoPath !== 'string' || repoPath === '' || !isAbsolute(repoPath)) return undefined;
   for (const path of [join(repoPath, '_bmad'), join(repoPath, '_bmad', 'scripts')]) {
     const kind = await kindAt(path);
-    if (kind === 'missing') return BMAD_SCRIPTS_NONE;
+    if (kind === 'missing') return { fingerprint: BMAD_SCRIPTS_NONE, files: new Map() };
     if (kind === 'other') return undefined;
   }
-  return hashFolder(join(repoPath, '_bmad', 'scripts'), { skipFolders: PYCACHE });
+  const read = await readFolder(join(repoPath, '_bmad', 'scripts'), { skipFolders: PYCACHE });
+  return read === undefined ? undefined : { fingerprint: hashEntries(read.files), files: read.files };
+}
+
+export async function scriptsFingerprint(repoPath: string): Promise<string | undefined> {
+  return (await readProjectScripts(repoPath))?.fingerprint;
 }

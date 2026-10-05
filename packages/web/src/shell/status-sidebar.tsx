@@ -265,7 +265,9 @@ const SessionRow = memo(function SessionRow({
   const row = () => item.current?.querySelector<HTMLElement>('[data-testid="status-row"]');
   // Not in the rail (md to lg): a name field doesn't fit its width; the header's Rename works there.
   const startRename = () => {
-    if (window.matchMedia?.('(min-width: 48rem) and (max-width: 63.99rem)').matches) return;
+    // The rail is the row's CSS: there its label is for screen readers only (taken out of the flow).
+    const label = row()?.querySelector('bdi')?.parentElement;
+    if (label != null && getComputedStyle(label).position === 'absolute') return;
     rename.start(row);
   };
   return (

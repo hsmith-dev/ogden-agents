@@ -124,5 +124,5 @@ export function createNativeSandboxStep(options: NativeSandboxOptions = {}): San
 
 /** The native sandbox alone as a `SandboxPort` (the chain without Docker). */
 export function createClaudeNativeSandbox(options: NativeSandboxOptions = {}): SandboxPort {
-  return createSandboxChain({ ...(options.platform === undefined ? {} : { platform: options.platform }), steps: [createNativeSandboxStep(options)], labels: SANDBOX_LABELS });
+  return createSandboxChain({ ...(options.platform === undefined ? {} : { platform: options.platform }), steps: [createNativeSandboxStep(options)], });
 }

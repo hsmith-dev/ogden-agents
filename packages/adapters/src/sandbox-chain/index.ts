@@ -11,7 +11,7 @@
  * the next Build does.
  */
 import type { SandboxCheck, SandboxPort } from '@ogden-agents/core';
-import { DOCKER_INSTALL_URL, type SandboxChoice, type SandboxProbe, type SandboxStatus } from '@ogden-agents/shared';
+import { DOCKER_INSTALL_URL, SANDBOX_LABELS, type SandboxChoice, type SandboxProbe, type SandboxStatus } from '@ogden-agents/shared';
 
 /** What one step found. */
 export interface SandboxStepResult {
@@ -43,7 +43,7 @@ export interface SandboxChainOptions {
   platform?: NodeJS.Platform;
   /** The steps, in the order tried. */
   steps: readonly SandboxStep[];
-  /** The sandbox label per kind, for the available summary. */
+  /** The sandbox label per kind, for the available summary. Default: `SANDBOX_LABELS`. */
   labels?: Readonly<Record<string, string>>;
 }
 
@@ -71,7 +71,7 @@ export function createSandboxChain(options: SandboxChainOptions): SandboxPort {
       }
       results.push(result);
       if (result.kind !== undefined) {
-        const label = options.labels?.[result.kind] ?? result.kind;
+        const label = (options.labels ?? (SANDBOX_LABELS as Readonly<Record<string, string>>))[result.kind] ?? result.kind;
         return {
           check: { available: true, kind: result.kind },
           status: { platform: platformOf(platform), available: true, kind: result.kind, summary: `Builds run inside ${label}.`, probes: results.flatMap((each) => each.probes), choices: [], installHint: null },

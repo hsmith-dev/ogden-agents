@@ -342,6 +342,28 @@ Run them with `npx ogden-agents@next`, in scratch repos made for it, **on macOS,
 
 When every check has passed on all three OSes, finalize the Grok row of `agent-matrix.md` (through `bmad-spec`, leaving no "verify" cell) from these results.
 
+### Live checks with the Local model (epic 14)
+
+Epic 14's stories 14.2 to 14.11 are in `main` (14.11's tests and docs); the release itself, its version and its tag are the user's. CI runs only fakes (the fake agent's OpenCode personality and a fake OpenAI-compatible server), so the real harness and the real model servers need these live checks, which an agent cannot run. Run them with `npx ogden-agents@next` in scratch repos, **on macOS, Windows (x64) and Linux (x64)**, each OS on its own, with a real **Ollama** (http://localhost:11434) and a real **LM Studio** (http://localhost:1234, its server started) with a small model loaded in each.
+
+1. Install: Settings > Agents > Local model says it needs no account and shows **Install**. It downloads the pinned OpenCode 1.18.34 for this OS (and, on Windows, ripgrep 15.1.0), checks every hash, and ends "Installed, no account needed". Nothing is written to your own `~/.config/opencode` or `~/.local/share/opencode`. Note the download size and how long a slow first launch takes (Windows antivirus, macOS Gatekeeper).
+2. Detect and presets: press **Detect** with Ollama and LM Studio running: both are found, with their model counts. Stop one and press Detect again: it is not listed and its official download page is linked. Nothing is probed until you press the button.
+3. Add and Test: add the Ollama preset and the LM Studio preset, **Test connection** on each: "Ready. N models are available." Stop the server and test again: "Not running. Start the server, then test again."
+4. A chat on each server replies and streams. Ogden's own model list matches the server's (Ollama and LM Studio list different models; check the picker and the first reply use the model you chose).
+5. Permission cards: ask for `ls`: a card holds the command until **Allow once**; ask again and **Deny**: the model continues without running it. Then ask it to edit a file in the project: a card first. Small models may fail to call tools at all: note which models you tried and whether they did.
+6. Modes: **Auto** and **Skip all** are shown unavailable with the reason, also with Developer mode on, and the server refuses them if asked directly.
+7. Protected paths: in Ask, ask the model to edit `.claude/settings.json` and `_bmad/scripts/config_utils.py` (a card each).
+8. Restart: Quit, run `npx ogden-agents@next` again, continue the Local model chat: it remembers what was said (resume).
+9. Server stops mid chat: stop Ollama while a reply is streaming: the chat says plainly that the server went away (within a few seconds, not after a minute), and works again after the server is back and you send another message.
+10. Wrong or missing model, and a full context window: remove the chosen model on the server and chat: the plain "model isn't on the server any more" message, with no silent switch to another. Paste a very long text into a small context: the plain "too long for this model" message.
+11. Another server: add an endpoint on another computer or a remote gateway: the card shows where messages go and waits for the confirmation (and warns for plain http); after confirming, a chat works. With an API key: the key is accepted by the server, shows only as saved, and `grep -r "<the key>" <data folder>` finds nothing in `ogden-agents.db`, the event log, `logs/`, `agents/local-home/` or the generated config. Changing the address drops the key.
+12. Privacy: while a chat runs, watch the network (Little Snitch, `lsof -i`, Resource Monitor): the harness talks only to the chosen server and nothing else (no models.dev, no npm, no update check, no share link). The chat history is in plain text in `agents/local-home` (`opencode.db`), as the privacy page says.
+13. Skills: a project skill in `.agents/skills/<name>/SKILL.md` appears as a slash command in a Local model chat, and one in `.claude/skills` does not (note it).
+14. Terminal toggle: the Local model chat's **Chat | Terminal** is disabled and says why. Separately, in a terminal run `opencode --session <the chat's session id>` with `HOME` and the `XDG_*` folders set to the data folder's `agents/local-home` and the same environment as Ogden: record whether it opens the same conversation. If it does, the toggle can be turned on later.
+15. Hardware notes: the card's notes about memory and model size read correctly for your machine.
+
+When every check has passed on all three OSes, tell the maintainer; epic 15 (planning with local models, `structuredComplete`) builds on the same endpoints.
+
 ## Later releases
 
 1. On a branch, set the same new version in `package.json`, `packages/server/package.json` and `packages/web/package.json`, and add its entry to `CHANGELOG.md`. Merge to `main`.

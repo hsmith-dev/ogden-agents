@@ -18,7 +18,7 @@ export function ChatListRow({ wsId, session, meta }: { wsId: string; session: Se
   const name = chatName(session);
   const rename = useChatRename({ wsId, sesId: session.id, name, title: session.title });
   const link = useRef<HTMLAnchorElement>(null);
-  /** Set when Rename was chosen in the menu, so the menu doesn't take focus back from the field. */
+  /** Set when Rename was chosen in the menu: the field opens as the menu closes. */
   const renaming = useRef(false);
   return (
     <li className="flex min-w-0 items-center gap-1">
@@ -54,17 +54,18 @@ export function ChatListRow({ wsId, session, meta }: { wsId: string; session: Se
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
+          // The field opens once the menu has closed and let go of focus, so focus stays in it.
           onCloseAutoFocus={(event) => {
             if (!renaming.current) return;
             renaming.current = false;
             event.preventDefault();
+            rename.start(() => link.current);
           }}
         >
           <DropdownMenuItem
             data-testid="chat-row-rename"
             onSelect={() => {
               renaming.current = true;
-              rename.start(() => link.current);
             }}
           >
             <PencilSimple aria-hidden />

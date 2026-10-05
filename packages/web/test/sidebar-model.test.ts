@@ -44,9 +44,10 @@ describe('buildSidebar (EXPERIENCE.md Status sidebar)', () => {
     expect(model.groups.map((g) => g.name)).toEqual(['Clay-and-kiln', 'Letterpress']);
     expect(rows(model, 'ws_a')).toEqual(['ses_a:working']);
     expect(rows(model, 'ws_b')).toEqual(['ses_b:waiting']);
-    expect(model.groups[1]!.rows[0]!.title).toBe('Chat');
+    // A chat with no name and no message yet (backlog story 2).
+    expect(model.groups[1]!.rows[0]!.title).toBe('New chat');
     expect(model.needsYou).toEqual([
-      { id: 'req_1', wsId: 'ws_b', sesId: 'ses_b', workspaceName: 'Letterpress', text: 'Claude Code wants to run npm test', agentName: 'Claude Code', at: expect.any(String), request: 'run npm test' },
+      { id: 'req_1', wsId: 'ws_b', sesId: 'ses_b', workspaceName: 'Letterpress', chatName: 'New chat', text: 'Claude Code wants to run npm test', agentName: 'Claude Code', at: expect.any(String), request: 'run npm test' },
     ]);
   });
 
@@ -73,6 +74,15 @@ describe('buildSidebar (EXPERIENCE.md Status sidebar)', () => {
     ]);
   });
 
+  it('a chat shows the user’s name, else its automatic name, and Needs you names it (backlog story 2)', () => {
+    const named = { ...session('ses_b', 'ws_b', 'waiting', ago(3 * MINUTE)), autoTitle: 'Fix the login bug' } as Session;
+    const model = buildSidebar([B], [named], emptyStore(), NOW, CLAUDE);
+    expect(model.groups[0]!.rows[0]).toMatchObject({ title: 'Fix the login bug', userTitle: null });
+    expect(model.needsYou[0]).toMatchObject({ chatName: 'Fix the login bug' });
+    const renamed = buildSidebar([B], [{ ...named, title: 'Auth work' }], emptyStore(), NOW, CLAUDE);
+    expect(renamed.groups[0]!.rows[0]).toMatchObject({ title: 'Auth work', userTitle: 'Auth work' });
+  });
+
   it('a workspace with no chats still has its group', () => {
     const model = buildSidebar([A], [], emptyStore(), NOW, CLAUDE);
     expect(model.groups).toEqual([{ wsId: 'ws_a', name: 'Clay-and-kiln', rows: [], earlier: [], summary: [] }]);
@@ -87,7 +97,7 @@ describe('buildSidebar (EXPERIENCE.md Status sidebar)', () => {
 
   it('request outside the window: a waiting session still needs you, with the plain text', () => {
     const model = buildSidebar([B], [session('ses_b', 'ws_b', 'waiting', ago(3 * MINUTE))], emptyStore(), NOW, CLAUDE);
-    expect(model.needsYou).toEqual([{ id: 'ses_b', wsId: 'ws_b', sesId: 'ses_b', workspaceName: 'Letterpress', text: 'Claude Code is waiting for you', agentName: 'Claude Code', at: ago(3 * MINUTE) }]);
+    expect(model.needsYou).toEqual([{ id: 'ses_b', wsId: 'ws_b', sesId: 'ses_b', workspaceName: 'Letterpress', chatName: 'New chat', text: 'Claude Code is waiting for you', agentName: 'Claude Code', at: ago(3 * MINUTE) }]);
   });
 
   it('the window has the session but no state for it: a waiting session still gets the plain row', () => {
@@ -172,8 +182,8 @@ describe('diffForAnnouncements (EXPERIENCE.md Accessibility Floor)', () => {
 
   it('a state change is polite, in words: "<workspace>: <title> is <state>"', () => {
     const changes = diffForAnnouncements(models({ ses_b: 'idle' }), models({ ses_b: 'working' }));
-    expect(changes).toEqual({ polite: [{ sesId: 'ses_b', text: 'Letterpress: Chat is working' }], assertive: [] });
-    expect(diffForAnnouncements(models({ ses_b: 'working' }), models({ ses_b: 'error' })).polite[0]!.text).toBe('Letterpress: Chat stopped with an error');
+    expect(changes).toEqual({ polite: [{ sesId: 'ses_b', text: 'Letterpress: New chat is working' }], assertive: [] });
+    expect(diffForAnnouncements(models({ ses_b: 'working' }), models({ ses_b: 'error' })).polite[0]!.text).toBe('Letterpress: New chat stopped with an error');
   });
 
   it('a new request in a session already shown is assertive, once; moving to waiting is not also polite', () => {

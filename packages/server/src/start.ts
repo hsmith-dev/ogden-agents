@@ -275,7 +275,7 @@ async function listenAndAnnounce({
     onFailure: (error) => log.warn('uv install failed', { code: error.code, reason: error.message, ...error.details }),
   });
   // Every agent is wired before the stored sessions are settled, as before story 6.9's split: a wiring error leaves the database untouched.
-  const { claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent } = wireAgents({ options, dataDir, log, hooks, core });
+  const { localEndpoints, claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent } = wireAgents({ options, dataDir, log, hooks, core });
   descriptors.current = wirings.map((wiring) => wiring.descriptor);
   // Agents from before this start are gone with their processes (AD-3): their sessions can be resumed, not left working.
   const settled = core.entities.settleInterruptedSessions(RESTARTED_REASON);
@@ -416,6 +416,7 @@ async function listenAndAnnounce({
     board,
     builds,
     buildSettings: core.buildSettings,
+    localEndpoints,
     bmadSource,
     // Setup also places the skills in each other agent's folder the project uses (epic 6 entry 8).
     bmadSetup: withAgentSkillFolders(core.bmadSetup, { core, agents }),

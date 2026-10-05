@@ -6,3 +6,4 @@
 export { DEFAULT_MAX_BYTES, DEFAULT_TIMEOUT_MS, EndpointError, callEndpoint, endpointUrl, type EndpointCall, type EndpointFailureKind } from './http.js';
 export { modelIdsOf, probeEndpoint, type EndpointProbe } from './probe.js';
 export { endpointFailureWords, hostOf } from './reasons.js';
+export { createOpenAiLocalModel, failureOf, type OpenAiLocalModelOptions } from './port.js';

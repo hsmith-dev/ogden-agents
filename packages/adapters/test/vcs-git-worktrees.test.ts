@@ -39,7 +39,8 @@ function setup({ deep = false }: { deep?: boolean } = {}) {
   const repo = temp('ogden-agents-wt-repo-');
   const top = temp('ogden-agents-wt-data-');
   // A data folder as deep as a long Windows user name and app-data path, past MAX_PATH once a nested repo file is added (spike 5.1).
-  const data = deep ? join(top, ...Array.from({ length: 8 }, (_, index) => `ogden-agents-data-segment-${index}`)) : top;
+  // About 160 characters: a long user name and app-data path, as spike 5.1 measured (its worktree files then pass 260).
+  const data = deep ? join(top, ...Array.from({ length: 3 }, (_, index) => `ogden-agents-data-segment-${index}`)) : top;
   mkdirSync(data, { recursive: true });
   const emptyConfig = join(top, 'empty-gitconfig');
   writeFileSync(emptyConfig, '');

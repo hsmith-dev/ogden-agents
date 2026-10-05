@@ -170,7 +170,9 @@ async function complete({ client, sessionId, session, config, signal }) {
     });
   } catch (error) {
     if (signal.aborted) throw error;
-    if (delay > 0) await sleep(delay);
+    // The real harness gives up after its retries; a cancel ends them at once (the wait is abortable).
+    if (delay > 0) await Promise.race([sleep(delay), new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))]);
+    if (signal.aborted) throw error;
     throw acp.RequestError.internalError(undefined, 'Cannot connect to API: Unable to connect. Is the computer able to access the url?');
   }
   if (!response.ok) throw acp.RequestError.internalError(undefined, errorFor(response.status, await response.text()));

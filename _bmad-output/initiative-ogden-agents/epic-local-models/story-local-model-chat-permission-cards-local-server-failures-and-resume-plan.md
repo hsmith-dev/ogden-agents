@@ -8,7 +8,7 @@ route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['quick-security', 'quick-correctness']
 review_loop_iteration: 0
 baseline_revision: '89fb9ef307b74fae11c21c4eb4348bf53fe4f17a'
 context:
@@ -70,6 +70,8 @@ Permission cards, cancel and resume were built and tested in 14.2 on the shared 
 ## Plan Change Log
 
 ## Review Triage Log
+
+Security and correctness reviewers (2 lenses), no critical findings. Patched: the watch cut off a busy server (high), now only a refused or not found endpoint counts quickly and a timing out one only after five looks in a row; the pre-send look blocks only a refused connection; a look that finishes after its turn can no longer cancel a later turn (high); a stopped turn is cancelled and given a moment to end (then its harness is closed) before the next message, so late events never land on it (high); the failure words are not used for a sign in failure (medium); the refused key and timeout patterns need a status or a timeout phrase, not any number or word, and a refused key is checked before a missing model (medium); the README, security page and changelog no longer say nothing leaves the computer (they say the harness connects only to your server and that approved commands, web fetches and a server that forwards can reach further) (high, copy); the README agent table has the Local model row (low); the fake harness's retry wait is abortable like the real cancel (low); tests added for a slow look, a message after a stopped turn, the wrapped session's members and mixed error texts (medium). Not changed: the restart test restarts the model server, and resuming with context across an Ogden restart is 14.2's test (low); the Local model's chat still falls back to the agent default when a project default is dropped (core, noted in 14.5); acp-base's acp-agent.ts length is older than this story (low). No intent_gap or bad_plan.
 
 ## Verification
 

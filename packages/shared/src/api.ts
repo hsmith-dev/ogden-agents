@@ -105,6 +105,15 @@ export const API_ROUTES = {
    */
   sessionPermissionMode: `${API_BASE}/workspaces/:wsId/sessions/:sesId/permission-mode`,
   /**
+   * `PUT RenameSessionRequest` → `SessionResponse` (backlog story 2): the
+   * user's name for the chat, normalized (control characters removed, white
+   * space collapsed); blank or `null` clears it. A change appends
+   * `session.renamed` (the same name again: 200, nothing appended). A name
+   * over 80 characters: 400 `invalid_request`, nothing appended. Allowed in
+   * any state, whoever drives.
+   */
+  sessionTitle: `${API_BASE}/workspaces/:wsId/sessions/:sesId/title`,
+  /**
    * `POST PermissionDecisionRequest` → 204 (2.6): the user's answer on a
    * permission card. 409 `permission_not_pending` when it is no longer waiting.
    */

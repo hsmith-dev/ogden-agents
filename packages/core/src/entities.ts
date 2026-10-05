@@ -19,7 +19,12 @@ import {
   SessionKind as SessionKindSchema,
   SessionState as SessionStateSchema,
   TicketRef as TicketRefSchema,
+  autoChatName,
   canonicalBmadPieces,
+  CHAT_NAME_MAX,
+  CHAT_NAME_TOO_LONG,
+  chatNameFits,
+  normalizeChatName,
   DEFAULT_CAUTION_LEVEL,
   type AdapterRefs,
   type AgentId,
@@ -40,7 +45,7 @@ import {
   type Workspace,
   type WorkspaceId,
 } from '@ogden-agents/shared';
-import { and, asc, eq, inArray, ne } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Database } from './db/database.js';
 import { events, runs, sessions, workspaces } from './db/schema.js';
@@ -59,7 +64,10 @@ export interface NewSession {
   driver?: SessionDriver;
   /** Default `idle`. */
   state?: SessionState;
+  /** The user's name for the chat; stored as given (callers normalize). */
   title?: string | null;
+  /** The automatic name it starts with (a planning action's label), normalized and shortened here. */
+  autoTitle?: string | null;
   /** Agent and CLI ids (AD-9). */
   adapterRefs?: AdapterRefs;
   /** The agent it is started with (epic 6), never changed. */
@@ -170,6 +178,21 @@ export interface Entities {
    * server start, so no mode but Ask outlives the run it was chosen in. Returns them.
    */
   resetPermissionModes(): Session[];
+  /**
+   * Sets the user's name for the chat (backlog story 2), normalized:
+   * control characters removed, white space collapsed; blank or `null`
+   * clears it. Appends `session.renamed` (cause `user`) if it changed, and
+   * leaves `updatedAt` alone. {@link ValidationError} (nothing stored) for a
+   * name over {@link CHAT_NAME_MAX} characters; {@link NotFoundError} for an
+   * unknown session.
+   */
+  setSessionTitle(id: SessionId, title: string | null): Session;
+  /**
+   * Names every chat that has no automatic name yet from its first user
+   * message (not a Deny reason): chats from before chat names. Run at a
+   * server start; returns the sessions it named.
+   */
+  backfillAutoTitles(): Session[];
 
   /** Creates the run of a `build` session with outcome `running`, and appends `run.created`. */
   createRun(input: NewRun): Run;
@@ -210,6 +233,7 @@ const toSession = (row: SessionRow): Session => ({
   permissionMode: row.permissionMode,
   ...(row.agentId === null ? {} : { agentId: row.agentId }),
   title: row.title,
+  ...(row.autoTitle === null ? {} : { autoTitle: row.autoTitle }),
   adapterRefs: row.adapterRefs,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
@@ -356,6 +380,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
 
     createSession(input) {
       const at = now();
+      const autoTitle = input.autoTitle == null ? null : autoChatName(input.autoTitle, CHAT_NAME_MAX);
       const session: Session = {
         id: newId('ses'),
         workspaceId: input.workspaceId,
@@ -366,6 +391,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         permissionMode: 'ask',
         ...(input.agentId === undefined ? {} : { agentId: check(AgentIdSchema, input.agentId, 'agent id') }),
         title: input.title ?? null,
+        ...(autoTitle === null ? {} : { autoTitle }),
         adapterRefs: check(AdapterRefsSchema, input.adapterRefs ?? {}, 'adapter refs'),
         createdAt: at,
         updatedAt: at,
@@ -514,6 +540,42 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
           .all()
           .map((row) => this.setSessionPermissionMode(row.id as SessionId, 'ask', 'restart', RESTART_MODE_REASON)),
       );
+    },
+
+    setSessionTitle(id, title) {
+      const name = normalizeChatName(title);
+      return log.transaction(() => {
+        const session = requireSession(id);
+        if (name !== null && !chatNameFits(name)) throw new ValidationError(CHAT_NAME_TOO_LONG, [{ path: ['title'], message: CHAT_NAME_TOO_LONG }]);
+        if (session.title === name) return session;
+        // `updatedAt` is left alone: a rename never moves a chat in the sidebar.
+        orm.update(sessions).set({ title: name }).where(eq(sessions.id, id)).run();
+        sessionEvents.appendSessionEvent(session.id, {
+          type: 'session.renamed',
+          payload: { sessionId: session.id, title: name, autoTitle: session.autoTitle ?? null, cause: 'user' },
+        });
+        return { ...session, title: name };
+      });
+    },
+
+    backfillAutoTitles() {
+      return log.transaction(() => {
+        const named: Session[] = [];
+        const unnamed = orm.select({ id: sessions.id }).from(sessions).where(isNull(sessions.autoTitle)).orderBy(asc(sessions.createdAt), asc(sessions.id)).all();
+        for (const { id } of unnamed) {
+          const messages = orm
+            .select({ payload: events.payload })
+            .from(events)
+            .where(and(eq(events.streamId, id), eq(events.type, 'session.message_completed')))
+            .orderBy(asc(events.seq))
+            .all()
+            .map(({ payload }) => payload as { role: MessageRole; content: string; origin?: string })
+            .filter((message) => message.role === 'user' && message.origin !== 'deny_reason');
+          // As the live path does: the first message with visible text names it.
+          if (messages.some((message) => sessionEvents.nameChat(id as SessionId, message.content))) named.push(requireSession(id as SessionId));
+        }
+        return named;
+      });
     },
 
     createRun(input) {

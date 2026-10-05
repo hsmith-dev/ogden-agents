@@ -130,7 +130,7 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
       if (unavailable !== undefined) throw new AgentNotReadyError(unavailable.code, unavailable.reason, agentId, unavailable.action);
       // The workspace may have been removed while the readiness was read.
       getWorkspace(workspaceId);
-      return entities.createSession({ workspaceId, kind: options.kind ?? 'chat', agentId });
+      return entities.createSession({ workspaceId, kind: options.kind ?? 'chat', agentId, ...(options.autoTitle === undefined ? {} : { autoTitle: options.autoTitle }) });
     },
 
     async chatAgents() {

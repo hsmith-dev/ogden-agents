@@ -59,7 +59,7 @@ test('the epic 2 journey on the installed package', async ({ page, context, brow
     await expect(groupOf(page, repoA).getByTestId('status-row')).toHaveAttribute('data-session-state', 'waiting');
     await expect(groupOf(page, repoB).getByTestId('status-row')).toHaveAttribute('data-session-state', 'working');
     const needsYou = sidebarOf(page).getByTestId('needs-you').getByTestId('needs-you-item');
-    await expect(needsYou).toHaveText(`Waiting for you${basename(repoA)}: Claude Code wants to run npm test`);
+    await expect(needsYou).toHaveText(`Waiting for you${basename(repoA)}, permission: Claude Code wants to run npm test`);
     await expect(needsYou).toHaveAttribute('href', new RegExp(`/w/${chatA.wsId}/s/${chatA.sesId}$`));
   });
 

@@ -5,6 +5,7 @@ import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
 import { AgentPicker, SET_UP_AGENTS } from '@/chat/agent-picker';
 import { agentNameOf, ChatApiError, createChatSession, sendMessage } from '@/chat/chat-api';
+import { ChatListRow } from '@/chat/chat-row';
 import { Composer } from '@/chat/composer';
 import { StartChatActions, useStartChat } from '@/chat/start-chat';
 import { newChatDraftKey } from '@/chat/drafts';
@@ -12,9 +13,8 @@ import { agentAvailability, projectDefaultAgent, useChatAgents } from '@/chat/us
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
 import { EmptyState, PageBody } from '@/ui/page';
-import { Row, RowList, RowMeta } from '@/ui/row-list';
+import { RowList, RowMeta } from '@/ui/row-list';
 import { Skeleton } from '@/ui/skeleton';
-import { StateGlyph } from '@/ui/state-glyph';
 import { Text } from '@/ui/typography';
 import { BmadOffer } from '@/workspaces/bmad-offer';
 import { fetchWorkspace, useSessions, workspaceName } from '@/workspaces/workspace-api';
@@ -211,16 +211,17 @@ function ChatsPage({ wsId }: { wsId: string }) {
             ) : (
               <RowList aria-label="Chats" data-testid="chat-list" className="max-w-(--space-chat-column)">
                 {sessions.map((session) => (
-                  <li key={session.id}>
-                    <Row asChild>
-                      <Link to="/w/$wsId/s/$sesId" params={{ wsId, sesId: session.id }} data-testid="chat-row">
-                        <StateGlyph state={session.state} labelMode="hidden" data-testid="chat-row-state" />
-                        <span className="min-w-0 flex-1 truncate">{session.title ?? 'Chat'}</span>
+                  <ChatListRow
+                    key={session.id}
+                    wsId={wsId}
+                    session={session}
+                    meta={
+                      <>
                         {severalAgents ? <RowMeta data-testid="chat-row-agent">{agentNameOf(chatAgents.data, session.agentId)}</RowMeta> : null}
                         <RowMeta>{started.format(new Date(session.createdAt))}</RowMeta>
-                      </Link>
-                    </Row>
-                  </li>
+                      </>
+                    }
+                  />
                 ))}
               </RowList>
             )}

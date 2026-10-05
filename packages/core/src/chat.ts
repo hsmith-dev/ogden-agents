@@ -137,6 +137,7 @@ export function createChat(options: ChatOptions): Chat {
     createChatSession: async (workspaceId, options) => withAgentId(await workspaces.createChatSession(workspaceId, options)),
     chatAgents: workspaces.chatAgents,
     getSession: (workspaceId, sessionId) => withAgentId(workspaces.getSession(workspaceId, sessionId)),
+    renameSession: (workspaceId, sessionId, title) => withAgentId(entities.setSessionTitle(workspaces.getSession(workspaceId, sessionId).id, title)),
     sendMessage: turns.sendMessage,
     cancel: turns.cancel,
     switchDriver: async (workspaceId, sessionId, driver) => withAgentId(await terminal.switchDriver(workspaceId, sessionId, driver)),

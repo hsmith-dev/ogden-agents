@@ -164,6 +164,7 @@ describe('chat', () => {
     expect(mine.map((event) => event.type)).toEqual([
       'session.created',
       'session.message_completed', // the user's message
+      'session.renamed', // which names the chat (backlog story 2)
       'session.state_changed', // working
       'session.message_delta',
       'session.message_delta',

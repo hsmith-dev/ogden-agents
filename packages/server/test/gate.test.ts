@@ -593,6 +593,7 @@ const EXPECTED_API_ROUTES = [
   `POST ${API_ROUTES.sessionCancel}`,
   `POST ${API_ROUTES.sessionDriver}`,
   `PUT ${API_ROUTES.sessionPermissionMode}`,
+  `PUT ${API_ROUTES.sessionTitle}`,
   `POST ${API_ROUTES.sessionPermission}`,
   `GET ${API_ROUTES.permissionRules}`,
   `DELETE ${API_ROUTES.permissionRule}`,

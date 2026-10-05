@@ -101,7 +101,7 @@ describe('workspace groups and status rows (DESIGN.md Workspace group and Status
     expect(row[0]).toMatch(/border-l-signal/);
     // The glyph alone in the rail: the text column is visually hidden there.
     expect(row[1]).toMatch(/data-slot="state-glyph" data-state="waiting" aria-hidden="true"/);
-    expect(row[1]).toMatch(/md:max-lg:sr-only[^>]*><span class="truncate">Chat<\/span>/);
+    expect(row[1]).toMatch(/md:max-lg:sr-only[^>]*><bdi class="truncate">Chat<\/bdi>/);
     expect(row[1]).toMatch(/<time datetime="2026-09-30T11:55:00.000Z"[^>]*tabular-nums[^>]*>5m<\/time>/i);
   });
 });

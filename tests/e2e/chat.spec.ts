@@ -11,13 +11,13 @@
 import { expect, test, type Page } from '@playwright/test';
 import { startChat, withChatServer } from './chat-server.js';
 
-/** A server with a chat open in its project, titled Chat. Slow chunks, so the browser sees the reply stream in and the session at work. */
+/** A server with a chat open in its project, titled New chat. Slow chunks, so the browser sees the reply stream in and the session at work. */
 const withChat = (page: Page, body: () => Promise<void>) =>
   withChatServer(
     page,
     async ({ repo }) => {
       await startChat(page, repo);
-      await expect(page.getByRole('heading', { name: 'Chat', level: 1 })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'New chat', level: 1 })).toBeVisible();
       await body();
     },
     { chunkDelayMs: 400 },

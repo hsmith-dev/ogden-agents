@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SessionRenameCause } from './chat-name.js';
 import { PermissionMode, Session, SessionDriver, SessionState } from './entities.js';
 import { AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, PermissionDecision, PermissionRequestId, SessionErrorCode, ToolCallDiff, ToolCallStatus, ToolKind } from './events-common.js';
 import { assigned, onSessionStream } from './events-envelope.js';
@@ -82,6 +83,22 @@ export const SessionPermissionModeChangedInput = z.object({
 /** A chat's permission mode changed (core is the only one that changes it). */
 export const SessionPermissionModeChangedEvent = SessionPermissionModeChangedInput.extend(assigned);
 export type SessionPermissionModeChangedEvent = z.infer<typeof SessionPermissionModeChangedEvent>;
+
+export const SessionRenamedInput = z.object({
+  type: z.literal('session.renamed'),
+  ...onSessionStream,
+  payload: z.object({
+    sessionId: SessionId,
+    /** The user's name for the chat, or `null` (the automatic one shows). */
+    title: z.string().min(1).nullable(),
+    /** The name core gave the chat, or `null` while it has none. */
+    autoTitle: z.string().min(1).nullable(),
+    cause: SessionRenameCause,
+  }),
+});
+/** A chat's name changed (backlog story 2): the user renamed it, or core named it from its first message. */
+export const SessionRenamedEvent = SessionRenamedInput.extend(assigned);
+export type SessionRenamedEvent = z.infer<typeof SessionRenamedEvent>;
 
 /** Identifies one message within a session's stream. */
 export const MessageId = z.string().min(1);

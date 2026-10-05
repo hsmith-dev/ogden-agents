@@ -93,7 +93,14 @@ export const Session = z.object({
    * agent, which the server fills in every session it answers.
    */
   agentId: AgentId.optional(),
+  /** The user's name for the chat (backlog story 2); `null` until they give one. */
   title: z.string().nullable(),
+  /**
+   * The name core gave the chat (the planning action's label, or its first
+   * message), set once. Absent in `session.created` events and rows from
+   * before chat names: they read as none.
+   */
+  autoTitle: z.string().nullish(),
   adapterRefs: AdapterRefs,
   createdAt: IsoUtcTimestamp,
   updatedAt: IsoUtcTimestamp,

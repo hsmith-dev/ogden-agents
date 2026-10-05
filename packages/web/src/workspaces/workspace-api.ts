@@ -15,6 +15,7 @@ import { useQueries, useQuery, useQueryClient, type UseQueryResult } from '@tans
 import { useEffect, useMemo } from 'react';
 import { tabAuth, type TabAuth } from '@/auth/tab-token';
 import { call, postJson } from '@/api/http';
+import { withNames } from '@/chat/chat-name';
 import { useEventStream } from '@/events/event-stream';
 import { useEventInvalidation } from '@/events/use-event-invalidation';
 
@@ -103,7 +104,8 @@ export function useSessions(wsId: string) {
       if (event.workspaceId !== wsId) continue;
       if (event.type === 'session.state_changed') states.set(event.payload.sessionId, event.payload.state);
     }
-    return [...query.data]
+    // Names follow `session.renamed` (backlog story 2), so a rename in any tab shows without a refetch.
+    return withNames(query.data, events)
       .map((session) => ({ ...session, state: states.get(session.id) ?? session.state }))
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : a.id < b.id ? 1 : -1));
   }, [query.data, events, wsId]);
@@ -162,6 +164,10 @@ export function useAllSessionsStatus(): AllSessions {
       } else if (event.type === 'session.state_changed') {
         const session = byId.get(event.payload.sessionId);
         if (session !== undefined) byId.set(session.id, { ...session, state: event.payload.state, updatedAt: event.at > session.updatedAt ? event.at : session.updatedAt });
+      } else if (event.type === 'session.renamed') {
+        const session = byId.get(event.payload.sessionId);
+        // A name never moves a chat: `updatedAt` stays.
+        if (session !== undefined) byId.set(session.id, { ...session, title: event.payload.title, autoTitle: event.payload.autoTitle });
       } else if (event.type === 'workspace.history_deleted') {
         for (const [id, session] of byId) if (session.workspaceId === event.workspaceId) byId.delete(id);
       }

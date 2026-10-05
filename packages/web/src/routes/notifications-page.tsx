@@ -21,6 +21,9 @@ const KIND_DESCRIPTIONS: Record<NeedKind, string> = {
   sign_in: 'A chat stopped until its agent is signed in again.',
 };
 
+/** The volume as a percentage, in steps of five. */
+const VOLUME_SCALE = { min: 0, max: 100, step: 5 } as const;
+
 /** Why desktop notifications can't be on, in one sentence, or nothing when they can. */
 export function permissionSentence(permission: DesktopPermission): string | undefined {
   if (permission === 'unsupported') return "This browser can't show notifications. The sound and the Needs you list still tell you.";
@@ -100,9 +103,7 @@ export function NotificationsPage() {
               <Slider
                 data-testid="notification-volume"
                 aria-labelledby="notification-volume-label"
-                min={0}
-                max={100}
-                step={5}
+                {...VOLUME_SCALE}
                 disabled={!settings.sound}
                 value={[Math.round(settings.volume * 100)]}
                 onValueChange={([value]) => update({ volume: (value ?? 0) / 100 })}

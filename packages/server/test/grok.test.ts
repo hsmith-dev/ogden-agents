@@ -192,7 +192,7 @@ describe('Grok beside Claude Code (epic 12 entry 7)', () => {
     const session = await chatWith('grok');
     await send(server, tab, wsId, session.id, 'auth-expired');
     await waitFor(() => stateOf(server, session.id) === 'error', 'the error', 15_000);
-    const failed = server.core.events.readAfter(0).filter((event) => event.streamId === session.id && JSON.stringify(event.payload).includes('Grok needs a valid API key'));
+    const failed = server.core.events.readAfter(0).filter((event) => event.streamId === session.id && JSON.stringify(event.payload).includes('Grok needs a valid xAI API access token'));
     expect(failed.length).toBeGreaterThan(0);
   });
 });

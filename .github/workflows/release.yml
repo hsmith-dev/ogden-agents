@@ -14,6 +14,15 @@ name: Release
 # is idempotent: re-running a release whose version is already on npm from this
 # same commit skips the publish and goes on to verify.
 #
+# The desktop app (epic 13, story 13.9) is built beside the npm path for macOS (one universal
+# .dmg) and Windows (x64 and ARM64 NSIS installers), unsigned. With the repository variable
+# DESKTOP_SIGNING set to `true` it is built in the `desktop-release` environment and its update
+# artifacts are signed with the user's own minisign key (secrets of that environment), and the
+# release carries `latest.json` for the updater; without it the release carries the installers and
+# `SHA256SUMS-desktop.txt` only. The GitHub Release waits for the desktop files, so it is never
+# published half-attached. Apple and Windows code signing are slots that turn on when their secrets
+# are in the environment. See RELEASING.md, "The desktop app".
+#
 # `workflow_dispatch` is a dry run: it builds every release asset and keeps them
 # as workflow artifacts, and creates no release, tag or npm publish.
 #
@@ -74,7 +83,7 @@ jobs:
         run: |
           node --input-type=module -e '
             import { readFileSync, appendFileSync } from "node:fs";
-            const files = ["package.json", "packages/server/package.json", "packages/web/package.json"];
+            const files = ["package.json", "packages/server/package.json", "packages/web/package.json", "packages/desktop/package.json", "packages/desktop/src-tauri/tauri.conf.json"];
             const tag = process.env.TAG_NAME || `v${JSON.parse(readFileSync(files[0], "utf8")).version}`;
             const expected = tag.replace(/^v/, "");
             const mismatches = files
@@ -170,6 +179,149 @@ jobs:
         with:
           name: release-assets
           path: ${{ runner.temp }}/release
+          if-no-files-found: error
+          retention-days: 14
+
+  # The desktop app, built from the tagged commit (or, on a dry run, the branch) on native runners:
+  # one job when the user's updater key is set up (DESKTOP_SIGNING=true, in the protected
+  # `desktop-release` environment, so its secrets exist only there) and one when it is not. Neither
+  # can publish anything: they only upload workflow artifacts.
+  desktop-signed:
+    name: Desktop app, signed updates (${{ matrix.leg }})
+    needs: [guard, ci]
+    if: ${{ !cancelled() && needs.guard.result == 'success' && (needs.ci.result == 'success' || needs.ci.result == 'skipped') && vars.DESKTOP_SIGNING == 'true' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    environment: desktop-release
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { leg: macos-universal, os: macos-latest, target: universal-apple-darwin, rust: 'aarch64-apple-darwin,x86_64-apple-darwin', bundles: 'app,dmg' }
+          - { leg: windows-x64, os: windows-latest, target: x86_64-pc-windows-msvc, rust: x86_64-pc-windows-msvc, bundles: nsis }
+          - { leg: windows-arm64, os: windows-11-arm, target: aarch64-pc-windows-msvc, rust: aarch64-pc-windows-msvc, bundles: nsis }
+    env:
+      # The user's updater key (AD-23): never printed, never written to disk by this workflow.
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      # Optional code signing slots; empty without the user's secrets.
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: The updater key is set
+        shell: bash
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error title=No updater key::DESKTOP_SIGNING is true but the desktop-release environment has no TAURI_SIGNING_PRIVATE_KEY secret. Follow RELEASING.md, 'The desktop app: the updater key', or unset DESKTOP_SIGNING."
+            exit 1
+          fi
+
+      - uses: ./.github/actions/desktop-build
+        with:
+          target: ${{ matrix.target }}
+          rust: ${{ matrix.rust }}
+          bundles: ${{ matrix.bundles }}
+          signing: release
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.leg }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe.sig
+
+  desktop-unsigned:
+    name: Desktop app, no update key (${{ matrix.leg }})
+    needs: [guard, ci]
+    if: ${{ !cancelled() && needs.guard.result == 'success' && (needs.ci.result == 'success' || needs.ci.result == 'skipped') && vars.DESKTOP_SIGNING != 'true' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { leg: macos-universal, os: macos-latest, target: universal-apple-darwin, rust: 'aarch64-apple-darwin,x86_64-apple-darwin', bundles: 'app,dmg' }
+          - { leg: windows-x64, os: windows-latest, target: x86_64-pc-windows-msvc, rust: x86_64-pc-windows-msvc, bundles: nsis }
+          - { leg: windows-arm64, os: windows-11-arm, target: aarch64-pc-windows-msvc, rust: aarch64-pc-windows-msvc, bundles: nsis }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/desktop-build
+        with:
+          target: ${{ matrix.target }}
+          rust: ${{ matrix.rust }}
+          bundles: ${{ matrix.bundles }}
+          signing: none
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.leg }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+
+  # The desktop files as the release carries them: space-free names, SHA256SUMS-desktop.txt, and
+  # latest.json for the updater when the builds were signed with the user's key. Read-only.
+  desktop-assets:
+    name: Collect the desktop release files
+    needs: [guard, desktop-signed, desktop-unsigned]
+    if: ${{ !cancelled() && needs.guard.result == 'success' && (needs.desktop-signed.result == 'success' || needs.desktop-unsigned.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.guard.outputs.version }}
+      TAG: ${{ needs.guard.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: desktop-*
+          path: desktop-in
+
+      - name: Names, checksums and the update manifest
+        run: |
+          node scripts/release-notes.mjs "$VERSION" --repo "$GITHUB_REPOSITORY" > "$RUNNER_TEMP/notes.md"
+          unsigned=""
+          if [ "${{ needs.desktop-signed.result }}" != "success" ]; then unsigned="--unsigned"; fi
+          node packages/desktop/scripts/release-manifest.mjs --in desktop-in --out desktop-release --version "$VERSION" --tag "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md" $unsigned
+          (cd desktop-release && sha256sum --check SHA256SUMS-desktop.txt)
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-release-assets
+          path: desktop-release
           if-no-files-found: error
           retention-days: 14
 
@@ -278,8 +430,9 @@ jobs:
   # replaces the assets. The only job with write access to the repository.
   github-release:
     name: Create the GitHub Release
-    needs: [guard, assets, publish, verify]
-    if: ${{ !cancelled() && github.event_name == 'push' && needs.assets.result == 'success' && (vars.NPM_PUBLISH != 'true' || needs.verify.result == 'success') }}
+    needs: [guard, assets, desktop-assets, publish, verify]
+    # The desktop files are part of the release (story 13.9): never published half-attached.
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.assets.result == 'success' && needs.desktop-assets.result == 'success' && (vars.NPM_PUBLISH != 'true' || needs.verify.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -300,6 +453,14 @@ jobs:
       - name: Checksums still match
         run: (cd release/assets && sha256sum --check SHA256SUMS.txt)
 
+      - uses: actions/download-artifact@v8
+        with:
+          name: desktop-release-assets
+          path: desktop
+
+      - name: Desktop checksums still match
+        run: (cd desktop && sha256sum --check SHA256SUMS-desktop.txt)
+
       - name: Create the release if needed and attach the assets
         run: |
           if ! gh release view "$TAG" >/dev/null 2>&1; then
@@ -308,7 +469,7 @@ jobs:
             gh release create "$TAG" --verify-tag --draft --title "$TAG" $prerelease --notes-file release/notes.md
           fi
           for attempt in 1 2 3; do
-            if gh release upload "$TAG" --clobber release/assets/*; then break; fi
+            if gh release upload "$TAG" --clobber release/assets/* desktop/*; then break; fi
             if [ "$attempt" = 3 ]; then echo "::error::could not attach the assets to release $TAG; re-run this job"; exit 1; fi
             echo "upload failed (attempt $attempt); retrying"
             sleep 10
@@ -317,6 +478,20 @@ jobs:
             gh release edit "$TAG" --draft=false
           fi
           gh release view "$TAG" --json assets --jq '.assets[].name'
+
+      # The next channel's manifest (user decision 2026-10-04): GitHub's `releases/latest` skips
+      # prereleases, so the `next` channel reads `latest.json` from one permanent prerelease whose
+      # asset every release replaces (next is the highest version of all releases, stable ones too).
+      # The stable channel is this release's own `latest.json` (`releases/latest/download/latest.json`).
+      # Only when the builds were signed with the user's key: an unsigned release has no manifest.
+      - name: Point the next channel at this release
+        if: ${{ hashFiles('desktop/latest.json') != '' }}
+        run: |
+          if ! gh release view desktop-channel-next >/dev/null 2>&1; then
+            gh release create desktop-channel-next --target "$GITHUB_SHA" --prerelease --title "Desktop update channel: next" \
+              --notes "This release only holds latest.json, which apps on the next channel read to find updates. Download the app from the newest version release instead."
+          fi
+          gh release upload desktop-channel-next desktop/latest.json --clobber
 
   # Separate from publish so a slow registry or a missing attestation never
   # blocks verify, and verify never waits on it.

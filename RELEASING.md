@@ -8,7 +8,7 @@ Every version tag creates a **GitHub Release**, with or without npm. Publishing 
 
 On a pushed tag `vX.Y.Z`:
 
-1. **Guard.** Fails unless the tagged commit is on `main`'s own (first-parent) history, not a feature-branch commit merged into it, and the version in `package.json`, `packages/server/package.json` and `packages/web/package.json` equals `X.Y.Z`. `tests/packaging.test.ts` keeps those three equal.
+1. **Guard.** Fails unless the tagged commit is on `main`'s own (first-parent) history, not a feature-branch commit merged into it, and the version in `package.json`, `packages/server/package.json`, `packages/web/package.json`, `packages/desktop/package.json` and the desktop app's `tauri.conf.json` equals `X.Y.Z`. `tests/packaging.test.ts` and `tests/desktop-config.test.ts` keep them equal.
 2. **CI.** Reruns the full CI workflow (`ci.yml`) for the tagged commit: tests and a clean-install smoke test on macOS, Windows and Linux for Node 24 and 26, and the browser tests. If anything fails, nothing is published.
 3. **Release assets** (Linux, read-only). Builds the packed tarball once (recording the commit as `gitHead`), smoke-tests that exact tarball, and collects what the release carries: `ogden-agents-X.Y.Z.tgz`, `ogden-install.mjs` (the install helper), the start scripts (`Start-Ogden-macOS.zip`, holding `Start Ogden.command` and the helper and zipped so the script stays executable; `Start-Ogden.cmd`; `start-ogden.sh`), and `SHA256SUMS.txt` with the SHA-256 of every one of them. Asset names have no spaces because GitHub turns them into dots. The release notes are the matching section of `CHANGELOG.md` (`scripts/release-notes.mjs`; a stable version with no section fails, a prerelease falls back to its release's section, then to Unreleased) plus how to install and verify. Everything is kept as the workflow artifact `release-assets`.
 4. **Publish to npm** (only with `NPM_PUBLISH=true`; Linux, environment `npm-release`). Builds and packs the tarball (recording the commit as `gitHead`), smoke-tests that exact tarball, then runs `npm publish ogden-agents-X.Y.Z.tgz --access public --tag <dist-tag>` with npm 11.5.1 or later. A stable version goes to the `latest` dist-tag. A prerelease such as `v0.2.0-rc.1` goes to `next`, so `npx ogden-agents` keeps installing the last stable version and the prerelease is installed with `npx ogden-agents@next`. Publishing is idempotent: if `X.Y.Z` is already on npm from this same commit, the job skips publishing and succeeds, so a re-run carries on to verify; if it is on npm from a different commit, the job fails. This job and its environment protections are unchanged by the GitHub Release path.
@@ -19,6 +19,47 @@ On a pushed tag `vX.Y.Z`:
 ### Dry run
 
 **Actions → Release → Run workflow** (`workflow_dispatch`, or `gh workflow run release.yml --ref <branch>`) runs the guard (versions agree; the tag checks are skipped) and the asset build, and keeps everything as the `release-assets` artifact. It skips CI, publishes nothing and creates no release or tag. Download the artifact to look at the assets and the notes.
+
+## The desktop app
+
+Every version tag also builds the desktop app (epic 13) and attaches it to the same GitHub Release: one universal macOS `.dmg` (Apple silicon and Intel), and a Windows installer for x64 and for ARM64 (`Ogden-Agents_<version>_x64-setup.exe`, `..._arm64-setup.exe`). Linux is not built for now. The apps are **unsigned**: macOS and Windows warn when a user opens them first (the README's Download section has the steps, story 13.11). The release workflow builds them from the tagged commit on native runners (`desktop-signed` or `desktop-unsigned`, then `desktop-assets`), and the GitHub Release job waits for them, so a release is never published without its apps. The release also carries `SHA256SUMS-desktop.txt` (the SHA-256 of every desktop file). A dry run (**Actions, Release, Run workflow**) builds them too and keeps them as the workflow artifact `desktop-release-assets`.
+
+The build for pull requests and `main` is the **Desktop** workflow (`.github/workflows/desktop.yml`): it builds the same apps with a throwaway updater key generated inside the job (never stored), installs them the way a user does (a mounted `.dmg`, a silent NSIS install), and runs the smoke and lifecycle tests. Its workflow artifacts (`ogden-desktop-macos-universal`, `ogden-desktop-windows-x64`, `ogden-desktop-windows-arm64`) are unsigned test builds you can download and try.
+
+### The desktop app: the updater key (your steps; nothing else does these)
+
+Installed apps check for updates on start and only install an update signed with **your own** updater key. It is separate from Apple and Windows code signing. An agent never generates, sees or stores it. Until you set it up, releases carry the installers only (no `latest.json`), so no installed app is offered an update. Do this once:
+
+1. **Create the environment.** GitHub, `hsmith-dev/ogden-agents`, Settings, Environments, New environment, `desktop-release`. Add a deployment tag rule `v*.*.*` (and no branch rule), and yourself as a required reviewer, as for `npm-release`. Do this first: a workflow that names an environment that does not exist creates it with no protection.
+2. **Generate the key pair** on your own computer (it asks for a password; keep it):
+
+   ```sh
+   npx --yes @tauri-apps/cli@2.12.1 signer generate -w ~/.tauri/ogden-agents-updater.key
+   ```
+
+3. **Store the private key and its password as secrets of that environment:**
+
+   ```sh
+   gh secret set TAURI_SIGNING_PRIVATE_KEY --env desktop-release --repo hsmith-dev/ogden-agents < ~/.tauri/ogden-agents-updater.key
+   gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --env desktop-release --repo hsmith-dev/ogden-agents
+   ```
+
+4. **Commit the public key.** Put the contents of `~/.tauri/ogden-agents-updater.key.pub` in `packages/desktop/src-tauri/tauri.conf.json` as `plugins.updater.pubkey`, in a pull request to `main`. (A release build refuses to start while it is empty or not a minisign public key, and says so.)
+5. **Turn signed releases on.** Set the repository variable `DESKTOP_SIGNING` to `true` (Settings, Secrets and variables, Actions, Variables).
+6. **Back the private key and its password up offline.** If they are lost, installed apps can never update again and every user must reinstall by hand.
+
+With that, a tag builds the apps in the `desktop-release` environment (the reviewer approves it), signs their update files with your key, and adds `latest.json` to the release. The stable channel reads `https://github.com/hsmith-dev/ogden-agents/releases/latest/download/latest.json`. The next channel reads the `latest.json` of one permanent prerelease, `desktop-channel-next`, which every release replaces (GitHub's `releases/latest` skips prereleases). The workflow creates `desktop-channel-next` the first time it needs it; nobody tags it by hand.
+
+A dry run of the desktop part with your key, before the first tag: Actions, Release, Run workflow on `main` (no tag, no npm, no release). It builds the apps with your key behind the reviewer and keeps `desktop-release-assets`; check that `latest.json` is in it and that every `.sig` is next to its file. Nothing is published.
+
+### Optional: Apple notarization and Windows signing (slots, off until you add secrets)
+
+These turn on by themselves when their secrets are in the `desktop-release` environment, and do nothing (with a log line saying so) without them:
+
+- macOS: `APPLE_CERTIFICATE` (a base64 `.p12` of your Developer ID Application certificate), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` (for example `Developer ID Application: Your Name (TEAMID)`), and for notarization either `APPLE_ID`, `APPLE_PASSWORD` (an app-specific password) and `APPLE_TEAM_ID`, or an App Store Connect API key (`APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_PATH`). They need a paid Apple Developer account.
+- Windows: `WINDOWS_CERTIFICATE` (a base64 `.pfx`) and `WINDOWS_CERTIFICATE_PASSWORD`. EV certificates no longer skip SmartScreen.
+
+These slots have not been run with real secrets. The first signed release is the first check of them.
 
 ## Installing and updating from GitHub Releases
 

@@ -91,7 +91,7 @@ describe("Grok's chat port (epic 12 entry 7)", () => {
 
   it('without a token, a session it refuses is auth_required, in words about the token and never a sign-in', async () => {
     const failure = await agentOf().startSession({ cwd: tempDir(), env: envOf(), permissionMode: 'ask' }).catch((error: unknown) => error);
-    expect(failure).toMatchObject({ code: 'auth_required', message: 'Grok needs a valid API key. Check it in Settings → Agents.' });
+    expect(failure).toMatchObject({ code: 'auth_required', message: 'Grok needs a valid xAI API access token. Check it in Settings → Agents.' });
   });
 
   it('gives the chat mode once, in _meta: Ask is explicit, Skip all is yoloMode, and a change is refused', async () => {

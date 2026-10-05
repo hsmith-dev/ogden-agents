@@ -24,10 +24,14 @@ export interface InlineContext {
    * unchanged line hands React the same elements.
    */
   cache: Map<string, ReactNode[]>;
+  /** The characters of the lines in {@link cache}. */
+  cachedChars: number;
 }
 
 /** Lines kept in an {@link InlineContext}'s cache before it starts over. */
 const MAX_CACHED_LINES = 5_000;
+/** Characters kept in that cache before it starts over: one long line streaming in can't fill memory. */
+const MAX_CACHED_CHARS = 1_000_000;
 
 /**
  * Links, images, strong and emphasis; code spans are found first by
@@ -35,19 +39,28 @@ const MAX_CACHED_LINES = 5_000;
  * is scanned once, not once per bracket.
  */
 const INLINE =
-  /!\[([^[\]\n]*)\]\(((?:[^()\n]|\([^()\n]*\))*)\)|\[([^[\]\n]+)\]\(((?:[^()\n]|\([^()\n]*\))*)\)|\*\*(\S(?:[^\n]*?\S)?)\*\*|__(\S(?:[^\n]*?\S)?)__|\*(\S(?:[^\n]*?\S)?)\*|(?<![A-Za-z0-9])_(\S(?:[^\n]*?\S)?)_(?![A-Za-z0-9])/g;
+  /!\[([^[\]\n]*)\]\(((?:[^()\n]|\([^()\n]*\))*)\)|\[([^[\]\n]+)\]\(((?:[^()\n]|\([^()\n]*\))*)\)|\*\*(\S(?:[^\n]*?\S)?)\*\*|(?<![A-Za-z0-9])__(\S(?:[^\n]*?\S)?)__(?![A-Za-z0-9])|\*(\S(?:[^\n]*?\S)?)\*|(?<![A-Za-z0-9_])_(\S(?:[^\n]*?\S)?)_(?![A-Za-z0-9_])/g;
 
 /** A bare address in text (chat only): one greedy class, so no backtracking. */
 const BARE_URL = /(?:https?:\/\/|mailto:)[^\s<>"'`]+/gi;
 /** Characters that end a sentence rather than an address. */
-const TRAILING = /[.,;:!?'"\]}*_]/;
+const TRAILING = /[.,;:!?'"\]}*]/;
+
+/**
+ * Characters that make an address read as something else: C0 and C1
+ * controls, spaces, and invisible or direction-changing marks (zero-width
+ * spaces and joiners, bidi overrides and isolates, line and paragraph
+ * separators, the byte order mark).
+ */
+const UNSAFE_CHARACTERS = /[\u0000-\u0020\u007f-\u00a0\u00ad\u061c\u115f\u1160\u180e\u200b-\u200f\u2028-\u202f\u205f-\u2064\u2066-\u206f\u3000\u3164\ufeff\uffa0]/;
 
 const SAFE_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
 
 /**
  * The address a link may follow: an absolute http, https or mailto URL with
- * no space or control character, normalized by `URL`; `null` for anything
- * else (a relative or file path, `javascript:`, `data:`, `file:`).
+ * no space, control, invisible or direction-changing character and no user
+ * name or password, normalized by `URL`; `null` for anything else (a
+ * relative or file path, `javascript:`, `data:`, `file:`).
  */
 export function safeHref(destination: string): string | null {
   let target = destination.trim();
@@ -59,7 +72,7 @@ export function safeHref(destination: string): string | null {
   } else {
     target = target.split(/[ \t]/, 1)[0] ?? '';
   }
-  if (target === '' || /[\u0000- \u007f-\u009f]/.test(target)) return null;
+  if (target === '' || UNSAFE_CHARACTERS.test(target)) return null;
   let url: URL;
   try {
     url = new URL(target);
@@ -68,6 +81,8 @@ export function safeHref(destination: string): string | null {
   }
   if (!SAFE_PROTOCOLS.has(url.protocol)) return null;
   if (url.protocol !== 'mailto:' && url.hostname === '') return null;
+  // `https://trusted.com@evil.com`: an address with a user name or password is never followed.
+  if (url.username !== '' || url.password !== '') return null;
   return url.href;
 }
 
@@ -80,23 +95,28 @@ export function safeHref(destination: string): string | null {
 function SafeLink({ href, children }: { href: string; children: ReactNode }) {
   const hint = useId();
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-describedby={hint}
-      data-slot="markdown-link"
-      className="group/link break-words text-foreground underline decoration-muted-foreground underline-offset-2 hover:decoration-foreground"
-    >
-      {children}
+    <span data-slot="markdown-link-wrap" className="group/link">
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={href}
+        aria-describedby={hint}
+        data-slot="markdown-link"
+        className="break-words text-foreground underline underline-offset-2"
+      >
+        {children}
+      </a>
+      {/* Beside the link, not in it: the address is the link's description, never part of its name. */}
       <span
         id={hint}
+        aria-hidden
         data-slot="markdown-link-address"
-        className="pointer-events-none absolute left-0 z-10 mt-1 hidden w-max max-w-full rounded-sm border border-border bg-popover px-2 py-1 font-mono text-mono-compact break-all text-popover-foreground no-underline group-hover/link:block group-focus-visible/link:block"
+        className="pointer-events-none absolute left-0 z-10 mt-1 hidden w-max max-w-full rounded-sm border border-border bg-popover px-2 py-1 font-mono text-mono-compact break-all text-popover-foreground group-hover/link:block group-has-focus-visible/link:block"
       >
         {href}
       </span>
-    </a>
+    </span>
   );
 }
 
@@ -157,9 +177,17 @@ function line(text: string, context: InlineContext, depth: number, linking: bool
       continue;
     }
     const segment = part.value;
+    // Where bare addresses sit (chat): `_`, `__` or `*` inside one (`pkg/__init__.py`) is part of the address.
+    const addresses = linking ? [...segment.matchAll(BARE_URL)].map((found) => [found.index, found.index + found[0].length] as const) : [];
+    const insideAddress = (at: number) => addresses.some(([from, to]) => at > from && at < to);
     let last = 0;
-    for (const match of segment.matchAll(INLINE)) {
+    const pattern = new RegExp(INLINE);
+    for (let match = pattern.exec(segment); match !== null; match = pattern.exec(segment)) {
       const at = match.index;
+      if (match[0][0] !== '[' && match[0][0] !== '!' && insideAddress(at)) {
+        pattern.lastIndex = at + 1;
+        continue;
+      }
       if (at > last) pushText(nodes, segment.slice(last, at), linking);
       const key = nodes.length;
       const [, alt, imageTarget, linkText, linkTarget, strong1, strong2, em1, em2] = match;
@@ -205,8 +233,14 @@ function cachedLine(text: string, context: InlineContext): ReactNode[] {
   const hit = context.cache.get(text);
   if (hit !== undefined) return hit;
   const nodes = line(text, context, 0, context.variant === 'chat');
-  if (context.cache.size >= MAX_CACHED_LINES) context.cache.clear();
+  // A long line is plain text: nothing to keep.
+  if (text.length > MAX_INLINE_LENGTH) return nodes;
+  if (context.cache.size >= MAX_CACHED_LINES || context.cachedChars + text.length > MAX_CACHED_CHARS) {
+    context.cache.clear();
+    context.cachedChars = 0;
+  }
   context.cache.set(text, nodes);
+  context.cachedChars += text.length;
   return nodes;
 }
 

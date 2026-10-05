@@ -102,8 +102,11 @@ test("an agent's Markdown reply renders formatted while it streams and after a r
       await docs.focus();
       await page.keyboard.press('Shift+Tab');
       await page.keyboard.press('Tab');
-      await expect(docs.locator('[data-slot="markdown-link-address"]')).toBeVisible();
-      await expect(docs.locator('[data-slot="markdown-link-address"]')).toHaveText('https://example.com/docs');
+      const address = page.locator(`[id="${await docs.getAttribute('aria-describedby')}"]`);
+      await expect(address).toBeVisible();
+      await expect(address).toHaveText('https://example.com/docs');
+      await expect(docs).toHaveAccessibleName('docs link');
+      await expect(docs).toHaveAccessibleDescription('https://example.com/docs');
     };
     await expect(reply).toHaveAttribute('data-streaming', 'false');
     await check();

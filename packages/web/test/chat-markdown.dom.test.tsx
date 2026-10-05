@@ -136,9 +136,12 @@ describe('agent replies as Markdown (chat variant)', () => {
       const hint = root.querySelector(`#${CSS.escape(link.getAttribute('aria-describedby')!)}`);
       expect(hint?.textContent).toBe(link.getAttribute('href'));
       expect(hint?.className).toContain('group-hover/link:block');
-      expect(hint?.className).toContain('group-focus-visible/link:block');
+      expect(hint?.className).toContain('group-has-focus-visible/link:block');
+      expect(link.getAttribute('title')).toBe(link.getAttribute('href'));
+      // The address is beside the link, so it never becomes part of the link's name.
+      expect(link.contains(hint)).toBe(false);
     }
-    expect(links[0]!.firstChild?.textContent).toBe('docs');
+    expect(links[0]!.textContent).toBe('docs');
     // The autolink's brackets and a sentence's period and parenthesis stay outside.
     expect(visible(root)).toContain('docs and mail and https://auto.example.com/x.');
     expect(visible(root)).toContain('See https://bare.example.com/path_(x). Or (https://paren.example.com).');
@@ -148,12 +151,38 @@ describe('agent replies as Markdown (chat variant)', () => {
     expect(visible(root)).toContain('/Users/me/project/src/index.ts and C:\\repo\\a.ts and ./docs/readme.md');
   });
 
+  it('keeps underscores and stars inside an address, and a word with double underscores stays text', () => {
+    const { root } = chat('Open https://github.com/x/y/blob/main/pkg/__init__.py and https://x.com/*foo* and https://a.com/_x_ in my__var__name, **see https://b.com**.');
+    expect([...root.querySelectorAll('a')].map((link) => link.getAttribute('href'))).toEqual([
+      'https://github.com/x/y/blob/main/pkg/__init__.py',
+      // A closing star reads as punctuation, as in `**https://x.com**`.
+      'https://x.com/*foo',
+      'https://a.com/_x_',
+      'https://b.com/',
+    ]);
+    expect(visible(root.querySelector('strong')!)).toBe('see https://b.com');
+    expect(root.querySelector('em')).toBeNull();
+    expect(visible(root)).toContain('in my__var__name, see');
+  });
+
+  it('a reply that opens with a rule keeps what follows it (frontmatter is hidden only in documents)', () => {
+    const { root } = chat('---\nFirst section\n---\nSecond');
+    expect(root.textContent).toBe('First sectionSecond');
+    expect(root.querySelectorAll('hr')).toHaveLength(2);
+  });
+
+  it('names each task checkbox, and a plain item in a task list keeps its bullet room', () => {
+    const { root } = chat('- [ ] open\n- [x] done\n- plain');
+    expect([...root.querySelectorAll('input')].map((box) => box.getAttribute('aria-label'))).toEqual(['Not done', 'Done']);
+    expect(root.querySelector('ul')?.className).toContain('pl-6');
+  });
+
   it('decides a link address by URL protocol only', () => {
     expect(safeHref('https://example.com')).toBe('https://example.com/');
     expect(safeHref('<https://example.com/a b>')).toBeNull();
     expect(safeHref('HTTPS://EXAMPLE.com')).toBe('https://example.com/');
     expect(safeHref('mailto:a@b.c')).toBe('mailto:a@b.c');
-    for (const unsafe of ['javascript:alert(1)', ' javascript:x', 'java\tscript:x', 'data:text/html,x', 'file:///etc', 'blob:https://x/y', 'ftp://x', '//evil.com', 'evil.com', '/abs', 'rel/a.md', 'https://', '']) {
+    for (const unsafe of ['javascript:alert(1)', ' javascript:x', 'java\tscript:x', 'data:text/html,x', 'file:///etc', 'blob:https://x/y', 'ftp://x', '//evil.com', 'evil.com', '/abs', 'rel/a.md', 'https://', '', 'https://ex.com/\u202egnp.exe', 'https://ex.com/a\u200bb', 'https://ex.com/a\u2028b', 'https://user:pw@evil.com', 'https://google.com@evil.com']) {
       expect(safeHref(unsafe), unsafe).toBeNull();
     }
   });
@@ -162,7 +191,7 @@ describe('agent replies as Markdown (chat variant)', () => {
     const { root } = chat('![diagram](https://example.com/d.png) ![local](./d.png) ![](https://example.com/e.png) ![x](javascript:alert(1))');
     expect(root.querySelector('img, picture, source')).toBeNull();
     const links = [...root.querySelectorAll('a')];
-    expect(links.map((link) => [link.firstChild?.textContent, link.getAttribute('href')])).toEqual([
+    expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
       ['Image: diagram', 'https://example.com/d.png'],
       ['Image: untitled', 'https://example.com/e.png'],
     ]);
@@ -176,6 +205,7 @@ describe('agent replies as Markdown (chat variant)', () => {
     const copy = screen.getByRole('button', { name: 'Copy bash code' });
     const pre = root.querySelector('pre')!;
     expect(pre.tabIndex).toBe(0);
+    expect(pre.getAttribute('role')).toBe('group');
     expect(pre.getAttribute('aria-label')).toBe('bash code');
     expect(pre.className).toContain('overflow-x-auto');
     await act(async () => {
@@ -204,9 +234,14 @@ describe('agent replies as Markdown (chat variant)', () => {
 
   it('while streaming, an open fence shows the rest as code and the text is parsed at most every 100 ms', () => {
     vi.useFakeTimers();
-    const { root, rerender } = chat('Intro\n\n```py\nprint(1)\n# not a heading', true);
+    let { root, rerender } = chat('Intro\n\n```py\nprint(1)\n# not a heading', true);
     expect(root.querySelector('pre code')?.textContent).toBe('print(1)\n# not a heading');
     expect(root.querySelector('h3')).toBeNull();
+    // A chunk that ends a line inside an open fence adds no empty line to the code.
+    cleanup();
+    expect(chat('```\nline\n', true).root.querySelector('pre code')?.textContent).toBe('line');
+    cleanup();
+    ({ root, rerender } = chat('Intro\n\n```py\nprint(1)\n# not a heading', true));
     // A burst of updates inside the window is held back, then the latest is shown.
     rerender(<Markdown source={'Intro\n\n```py\nprint(1)\n# not a heading\nprint(2)'} variant="chat" streaming />);
     rerender(<Markdown source={'Intro\n\n```py\nprint(1)\n# not a heading\nprint(2)\n```\n\nDone.'} variant="chat" streaming />);
@@ -239,9 +274,16 @@ describe('agent replies as Markdown (chat variant)', () => {
     expect(timed(lines(50, (index) => `${index}${'https://a.b/'.repeat(330)}`)).took).toBeLessThan(bound);
     expect(timed(lines(50, (index) => `${index}${'![a](https://x/'.repeat(260)}`)).took).toBeLessThan(bound);
     expect(timed(lines(50, (index) => `${index}${'**a_b'.repeat(790)}`)).took).toBeLessThan(bound);
-    const huge = timed(`${'Some **bold** text and `code` with https://example.com.\n'.repeat(20_000)}`);
+    // 200,000 characters of distinct lines: only the first part is Markdown, the rest plain text.
+    const source = lines(4_000, (index) => `Line ${index} **bold** text, \`code\` and https://example.com/${index}.`);
+    const huge = timed(source);
+    expect(source.length).toBeGreaterThan(MAX_MARKDOWN_LENGTH);
     expect(huge.took).toBeLessThan(bound);
-    expect(huge.rest?.textContent?.length).toBe(20_000 * 56 - MAX_MARKDOWN_LENGTH);
+    expect(huge.rest?.textContent).toBe(source.slice(MAX_MARKDOWN_LENGTH));
+    // Thousands of tiny blocks: Markdown stops at 5,000 lines.
+    const blocks = timed('```\n'.repeat(40_000));
+    expect(blocks.took).toBeLessThan(bound);
+    expect(blocks.rest?.textContent?.length).toBe(35_000 * 4);
   });
 });
 

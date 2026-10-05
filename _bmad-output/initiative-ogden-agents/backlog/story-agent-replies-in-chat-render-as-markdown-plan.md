@@ -3,13 +3,13 @@ title: 'Agent replies in chat render as Markdown'
 type: 'feature'
 ticket: '2'
 created: '2026-10-04'
-status: 'in-progress'
+status: 'built'
 baseline_revision: 'e5f633143cc06406aa9df32ccf3d13302d0b3cb6'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick', 'security']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/backlog/story-agent-replies-in-chat-render-as-markdown.md'
@@ -85,9 +85,39 @@ context:
 
 ## Implementation Notes
 
+- Implemented directly by the build session (no separate implementer subagent). Files: `ui/markdown.tsx` (component, variants, streaming throttle, length and line cap), new `ui/markdown-parse.ts` (4.7 block parser moved, plus tables, task items, fence language), new `ui/markdown-inline.tsx` (inline, `safeHref`, `SafeLink`, bare-address links, per-message line cache), new `ui/code-block.tsx` (language label, Copy, focusable `pre`); `ui/message.tsx` (agent body is a `div`); `chat/transcript-parts.tsx`; tests `packages/web/test/chat-markdown.dom.test.tsx`, `tests/e2e/chat.spec.ts`, fake agent `markdown` prompt.
+- Split into four files to keep each under 600 lines (AGENTS deferred-work rule).
+- Link text excludes `[` so a run of brackets is linear; a per-message line cache (5,000 lines, 1M characters) means a streaming reply only renders its new lines.
+- The address hint is a sibling of the link, positioned against the Markdown block, so it never widens the chat at phone width (checked in a 375px screenshot) and is never part of the link's name.
+- Added after review: Markdown stops at 5,000 lines as well as 200,000 characters; frontmatter hidden only in the document variant; `__` and `_` emphasis need non-word neighbours; emphasis that starts inside a bare address is skipped; addresses with bidi, zero-width or other invisible characters, or with a user name or password, are not followed.
+- Full e2e run showed one failure in `upgrade-0.2.0.spec.ts` whose trace path pointed at a sibling worktree (`ogden-agents-wt-chat-names`, a `session.renamed` event this branch doesn't have): runs collided; the spec passes alone here.
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (lenses quick, security): high 0, medium 6, low 8, false 1, maybe-false 0.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---------|---------|-------|-------------------|
+| 1 | Safe links have no `title` (plan Always) | low | patch | `SafeLink` had none; added `title={href}`. |
+| 2 | Address hint inside `<a>` joins its accessible name on focus | medium | patch | Hint shown on focus-visible was a child; moved beside the link (`group-has-focus-visible`), `aria-hidden`, still `aria-describedby`. e2e checks name and description. |
+| 3 | Chat reply opening with `---` loses text as "frontmatter" | medium | patch | `withoutFrontmatter` ran for every variant; now document only. Test added. |
+| 4 | `pre` with `aria-label` has generic role | low | patch | Added `role="group"`. |
+| 5 | Task checkboxes unnamed | medium | patch | `aria-label` Done / Not done. |
+| 6 | Emphasis inside bare URLs truncates them (`__init__.py`, `_x_`); `__` intraword bold | medium | patch | Emphasis whose opener lies inside a bare address is skipped; `__`/`_` need non-word neighbours; `_` dropped from trailing trim. Tests added. |
+| 7 | Underline colour muted, plan says foreground | low | patch | Underline now currentColor (foreground). |
+| 8 | Popover tokens outside the four named | false | reject | Plan rule is "only existing tokens"; `popover` is one, design-tokens test passes. |
+| 9 | Huge-input test hits the line cache | low | patch | Test now uses 4,000 distinct lines and asserts the plain-text tail. |
+| 10 | Copy mid-stream adds a trailing newline | low | patch | Unclosed fence drops a final empty line. Test added. |
+| 11 | Bidi / zero-width characters in an address | medium | patch | `safeHref` refuses them. Tests added. |
+| 12 | Credentials and deceptive labels | medium | patch (credentials) | Addresses with user name or password are text. Deceptive link labels are inherent to Markdown links; title and hint show the address; rejected for the label part. |
+| 13 | `|` inside a link in a table cell splits the cell | low | reject | Matches GFM, which requires `\|`; rare. |
+| 14 | 25k tiny blocks render slowly (happy-dom 5 s) | medium | patch | Markdown also stops at 5,000 lines; rest plain text. Test added. |
+| 15 | Line cache grows with one long streaming line | low | patch | Long lines not cached; 1M character budget. |
+| 16 | Extra tab stops on non-overflowing `pre`/table | low | reject | Needed for keyboard scrolling (plan Always); fix would add overflow detection. |
+| 17 | Mixed task/plain list loses bullet room | low | patch | Lists keep `pl-6`; task checkbox pulled into the marker gutter. |
+| 18 | `#` maps to h3 in every message | low | reject | Same mapping as 4.7 by design; semantic. |
 
 ## Design Notes
 

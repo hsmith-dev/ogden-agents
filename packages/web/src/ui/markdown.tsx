@@ -26,6 +26,19 @@ export { safeHref, type MarkdownVariant } from './markdown-inline';
  */
 export const MAX_MARKDOWN_LENGTH = 200_000;
 
+/** Likewise for lines: a reply of thousands of tiny blocks can't build more elements than a tab can hold. */
+export const MAX_MARKDOWN_LINES = 5_000;
+
+/** `text` cut at {@link MAX_MARKDOWN_LENGTH} characters or {@link MAX_MARKDOWN_LINES} lines, whichever comes first. */
+function markdownCut(text: string): number {
+  let at = -1;
+  for (let lines = 0; lines < MAX_MARKDOWN_LINES; lines++) {
+    at = text.indexOf('\n', at + 1);
+    if (at === -1) return Math.min(text.length, MAX_MARKDOWN_LENGTH);
+  }
+  return Math.min(at + 1, MAX_MARKDOWN_LENGTH);
+}
+
 /** While a reply streams, it is parsed again at most this often. */
 export const STREAMING_RENDER_MS = 100;
 
@@ -96,18 +109,18 @@ function renderBlocks(blocks: readonly Block[], context: InlineContext, tight = 
           </div>
         );
       case 'list': {
-        const tasks = block.items.some((item) => item.task !== undefined);
         const items = block.items.map((item, position) => (
           <li key={position} className={cn('break-words', item.task !== undefined && 'list-none')}>
-            <div className={cn('flex gap-2', item.task === undefined && 'flex-col gap-1')}>
+            <div className={cn('flex gap-1.5', item.task === undefined && 'flex-col gap-1')}>
               {item.task !== undefined ? (
                 <input
                   type="checkbox"
                   checked={item.task === 'done'}
                   disabled
                   readOnly
+                  aria-label={item.task === 'done' ? 'Done' : 'Not done'}
                   data-slot="markdown-task"
-                  className="mt-1 size-3.5 shrink-0 accent-foreground"
+                  className="mt-1 -ml-5 size-3.5 shrink-0 accent-foreground"
                 />
               ) : null}
               <div className="flex min-w-0 flex-col gap-1">{renderBlocks(item.blocks, context, true)}</div>
@@ -115,11 +128,11 @@ function renderBlocks(blocks: readonly Block[], context: InlineContext, tight = 
           </li>
         ));
         return block.ordered ? (
-          <ol key={index} start={block.start === 1 ? undefined : block.start} className={cn('m-0 flex list-decimal flex-col gap-1', tasks ? 'pl-1' : 'pl-6')}>
+          <ol key={index} start={block.start === 1 ? undefined : block.start} className="m-0 flex list-decimal flex-col gap-1 pl-6">
             {items}
           </ol>
         ) : (
-          <ul key={index} className={cn('m-0 flex list-disc flex-col gap-1', tasks ? 'pl-1' : 'pl-6')}>
+          <ul key={index} className="m-0 flex list-disc flex-col gap-1 pl-6">
             {items}
           </ul>
         );
@@ -166,11 +179,13 @@ export function Markdown({ source, variant = 'document', streaming = false, clas
   // While streaming, parsed at most every 100 ms, and at low priority so typing stays quick.
   const text = useDeferredValue(useStreamedSource(source, streaming));
   // One cache per message: an unchanged line keeps its elements as more text arrives.
-  const context = useMemo<InlineContext>(() => ({ variant, cache: new Map() }), [variant]);
-  const head = text.length > MAX_MARKDOWN_LENGTH ? text.slice(0, MAX_MARKDOWN_LENGTH) : text;
-  const rest = text.length > MAX_MARKDOWN_LENGTH ? text.slice(MAX_MARKDOWN_LENGTH) : '';
-  // Parsed once per text: the session view re-renders on every event.
-  const blocks = useMemo(() => parseBlocks(withoutFrontmatter(head).split(/\r?\n/)), [head]);
+  const context = useMemo<InlineContext>(() => ({ variant, cache: new Map(), cachedChars: 0 }), [variant]);
+  const cut = markdownCut(text);
+  const head = text.slice(0, cut);
+  const rest = text.slice(cut);
+  // Parsed once per text: the session view re-renders on every event. Frontmatter is a document's
+  // (4.7); a reply that opens with a rule keeps everything after it.
+  const blocks = useMemo(() => parseBlocks((variant === 'document' ? withoutFrontmatter(head) : head).split(/\r?\n/)), [head, variant]);
   const rendered = useMemo(() => renderBlocks(blocks, context), [blocks, context]);
   return (
     <div data-slot="markdown" data-variant={variant} className={cn('relative flex min-w-0 flex-col gap-3 text-body text-foreground', className)} {...props}>

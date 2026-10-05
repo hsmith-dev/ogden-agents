@@ -44,7 +44,7 @@ export function CodeBlock({ text, language }: { text: string; language: string |
         </span>
       </div>
       {/* Focusable so a keyboard can scroll a long line (WCAG 2.1.1). */}
-      <pre tabIndex={0} aria-label={name} className="m-0 overflow-x-auto p-3 font-mono text-mono-compact">
+      <pre tabIndex={0} role="group" aria-label={name} className="m-0 overflow-x-auto p-3 font-mono text-mono-compact">
         <code>{text}</code>
       </pre>
     </div>

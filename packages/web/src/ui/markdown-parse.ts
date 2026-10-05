@@ -190,6 +190,8 @@ export function parseBlocks(lines: readonly string[], depth = 0): Block[] {
         body.push(lines[index]!);
         index++;
       }
+      // A fence still open (a reply streaming) doesn't count the line still being written as code yet.
+      if (index >= lines.length && body.at(-1) === '') body.pop();
       // The closing fence (or the end of the document).
       index++;
       blocks.push({ kind: 'code', text: body.join('\n'), language: LANGUAGE.test(info) ? info : undefined });

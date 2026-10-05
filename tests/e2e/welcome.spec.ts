@@ -267,7 +267,9 @@ test("BMad Method in Welcome starts the first project with Planning and Board; t
       });
       await expect(headline(page)).toHaveText(/^Open Ogden Agents from .+ next time\.$/);
       await page.getByTestId('welcome-shortcut').getByRole('button', { name: 'Not now' }).click();
-      await expect(page).toHaveURL(WORKSPACE_URL);
+      // Added with Planning on, the project opens on its Plan (Flow 1 step 5, story 4.6).
+      await expect(page).toHaveURL(/\/w\/(ws_[0-9A-Z]{26})\/plan$/);
+      await expect(page.getByRole('heading', { name: 'Plan', level: 1 })).toBeVisible();
 
       const [project] = server.core.entities.listWorkspaces();
       expect(server.core.bmad.pieces(project!.id)).toEqual(['planning', 'board']);

@@ -4,13 +4,44 @@ Ogden Agents ships as one npm package, `ogden-agents`. Releases are published on
 
 ## What the release workflow does
 
+Every version tag creates a **GitHub Release**, with or without npm. Publishing to npm is a separate path that is **opt-in**: it runs only when the repository variable `NPM_PUBLISH` is `true` (Settings → Secrets and variables → Actions → Variables). Without it, the `Publish to npm` job (and the registry checks after it) is skipped, so a tag never names the `npm-release` environment unless you set npm up; this also means that **once you want npm releases, set `NPM_PUBLISH=true` first** (step 3 below).
+
 On a pushed tag `vX.Y.Z`:
 
 1. **Guard.** Fails unless the tagged commit is on `main`'s own (first-parent) history, not a feature-branch commit merged into it, and the version in `package.json`, `packages/server/package.json` and `packages/web/package.json` equals `X.Y.Z`. `tests/packaging.test.ts` keeps those three equal.
 2. **CI.** Reruns the full CI workflow (`ci.yml`) for the tagged commit: tests and a clean-install smoke test on macOS, Windows and Linux for Node 24 and 26, and the browser tests. If anything fails, nothing is published.
-3. **Publish** (Linux, environment `npm-release`). Builds and packs the tarball (recording the commit as `gitHead`), smoke-tests that exact tarball, then runs `npm publish ogden-agents-X.Y.Z.tgz --access public --tag <dist-tag>` with npm 11.5.1 or later. A stable version goes to the `latest` dist-tag. A prerelease such as `v0.2.0-rc.1` goes to `next`, so `npx ogden-agents` keeps installing the last stable version and the prerelease is installed with `npx ogden-agents@next`. Publishing is idempotent: if `X.Y.Z` is already on npm from this same commit, the job skips publishing and succeeds, so a re-run carries on to verify; if it is on npm from a different commit, the job fails.
-4. **Registry and provenance.** Waits for `X.Y.Z` to show on npm, then checks provenance. From a public repository npm adds a provenance attestation automatically; the job fails if a public-repository release has none, and only warns if the repository is private. Verify doesn't depend on this job.
-5. **Verify.** On macOS, Windows and Linux, Node 24 and 26, runs `npx --yes ogden-agents@X.Y.Z` in an empty directory with an empty npm cache, reaches the page and `server.started`, then quits the server (`node scripts/smoke-installed.mjs --registry-spec ogden-agents@X.Y.Z`).
+3. **Release assets** (Linux, read-only). Builds the packed tarball once (recording the commit as `gitHead`), smoke-tests that exact tarball, and collects what the release carries: `ogden-agents-X.Y.Z.tgz`, `ogden-install.mjs` (the install helper), the start scripts (`Start-Ogden-macOS.zip`, holding `Start Ogden.command` and the helper and zipped so the script stays executable; `Start-Ogden.cmd`; `start-ogden.sh`), and `SHA256SUMS.txt` with the SHA-256 of every one of them. Asset names have no spaces because GitHub turns them into dots. The release notes are the matching section of `CHANGELOG.md` (`scripts/release-notes.mjs`; a stable version with no section fails, a prerelease falls back to its release's section, then to Unreleased) plus how to install and verify. Everything is kept as the workflow artifact `release-assets`.
+4. **Publish to npm** (only with `NPM_PUBLISH=true`; Linux, environment `npm-release`). Builds and packs the tarball (recording the commit as `gitHead`), smoke-tests that exact tarball, then runs `npm publish ogden-agents-X.Y.Z.tgz --access public --tag <dist-tag>` with npm 11.5.1 or later. A stable version goes to the `latest` dist-tag. A prerelease such as `v0.2.0-rc.1` goes to `next`, so `npx ogden-agents` keeps installing the last stable version and the prerelease is installed with `npx ogden-agents@next`. Publishing is idempotent: if `X.Y.Z` is already on npm from this same commit, the job skips publishing and succeeds, so a re-run carries on to verify; if it is on npm from a different commit, the job fails. This job and its environment protections are unchanged by the GitHub Release path.
+5. **Registry and provenance** (with npm). Waits for `X.Y.Z` to show on npm, then checks provenance. From a public repository npm adds a provenance attestation automatically; the job fails if a public-repository release has none, and only warns if the repository is private. Verify doesn't depend on this job.
+6. **Verify** (with npm). On macOS, Windows and Linux, Node 24 and 26, runs `npx --yes ogden-agents@X.Y.Z` in an empty directory with an empty npm cache, reaches the page and `server.started`, then quits the server (`node scripts/smoke-installed.mjs --registry-spec ogden-agents@X.Y.Z`).
+7. **GitHub Release.** Creates the release for the tag as a draft (marked as a prerelease for a `next` version, so it is never "latest"), checks `SHA256SUMS.txt` against the files, attaches the assets, and only then publishes it, so nobody sees it half-attached. With npm on it waits for verify, because the start scripts' default is `npx ogden-agents@latest`; with npm off it needs only CI and the assets. A re-run replaces the assets. This is the only job with write access to the repository (`contents: write`).
+
+### Dry run
+
+**Actions → Release → Run workflow** (`workflow_dispatch`, or `gh workflow run release.yml --ref <branch>`) runs the guard (versions agree; the tag checks are skipped) and the asset build, and keeps everything as the `release-assets` artifact. It skips CI, publishes nothing and creates no release or tag. Download the artifact to look at the assets and the notes.
+
+## Installing and updating from GitHub Releases
+
+A release is installable without npm having the `ogden-agents` package. The start scripts take a source:
+
+- default `npm`: `npx ogden-agents@latest`, unchanged;
+- `--github` (first option) or `OGDEN_AGENTS_SOURCE=github`: the script runs `ogden-install.mjs`, which has to be **in the same folder as the script** (download it from the same release; the macOS zip already holds it). The script never downloads it.
+
+`ogden-install.mjs start` looks up the newest release of `hsmith-dev/ogden-agents` (`OGDEN_AGENTS_REPO=owner/name` for another), downloads `ogden-agents-<version>.tgz` and `SHA256SUMS.txt`, and **refuses to install** unless the tarball's SHA-256 is on its line in the list (a missing list, a missing line or a different hash all stop it; there is no flag to skip this). It then runs npm on the file (`npm install <file.tgz>` into a version folder; npm extracts it, the installer has no archive code of its own), checks the installed package is the release's version, and starts it. Everything lives under your own user folder, never globally and never with administrator rights: `~/Library/Application Support/ogden-agents-install` (macOS), `%LOCALAPPDATA%\ogden-agents-install` (Windows) or `~/.local/share/ogden-agents-install` (Linux), or `OGDEN_AGENTS_APP_DIR`.
+
+- **Updates.** Each start looks for a newer release; if the check fails (offline) it starts the installed version. The **stable** channel follows `releases/latest` (never a prerelease); the **next** channel follows the highest version of all published releases. The channel follows the installed version (a prerelease follows `next`) unless `OGDEN_AGENTS_CHANNEL=stable|next` says otherwise. Until a stable release exists, set `OGDEN_AGENTS_CHANNEL=next` for the first install. It never downgrades.
+- **Rollback.** The previous version stays installed (older ones are removed). `node ogden-install.mjs rollback` switches back, and the next start does not install the version you rolled back from; `node ogden-install.mjs update` does.
+- **Other commands.** `update` installs without starting; `status` shows what is installed, offline. `--check` on a start script reports the source and runs `status`, and never touches the network.
+- **The registry is still used for dependencies.** The release tarball is the `ogden-agents` package itself; its dependencies (`better-sqlite3`, `hono`, ...) come from npm as in any install.
+- **What the checksum proves.** `SHA256SUMS.txt` comes from the same release as the tarball, so it catches a corrupted, truncated or swapped single file, not a compromised release or account. The release assets are only as trustworthy as the repository's owner; that is also true of the npm package.
+
+### Private repositories
+
+Release files of a **private** repository need authentication; without it GitHub answers **404** (it does not say "private"). It works out of the box for a **public** repository. For a private one the installer uses a token from `OGDEN_AGENTS_GITHUB_TOKEN`, else `GITHUB_TOKEN`, else the GitHub CLI's sign-in (`gh auth token`, asked for only after GitHub says it cannot find the repository). The token needs read access to the repository's contents. It is sent **only** to `api.github.com` (never to the download host GitHub redirects to), is never written to disk by the installer, and is masked in every message. Without a token it says plainly what to do: run `gh auth login`, or set `OGDEN_AGENTS_GITHUB_TOKEN`. This repository's visibility is not changed by any of this; make it public (step 2 below) so everyone can install without a token.
+
+### Reading releases from code
+
+`@ogden-agents/shared/release-source` holds the one definition of "what is the newest version": `VersionSource` (`latest(channel)`), `createGitHubReleasesSource`, `pickRelease`, `isNewer`, `parseSha256Sums`. The installer uses it, and so can the web UI's "a newer version is available" notice (story 13.7: its npm registry source implements the same interface; this GitHub source can sit beside it). Epic 13's desktop updater will add its signed `latest.json` and installers to this same release, so there remains one pipeline.
 
 A failed publish publishes nothing, since `npm publish` is all or nothing. A failed verify means the release is already public: fix it forward (below).
 
@@ -32,7 +63,7 @@ npm only records provenance for packages published from a public repository. The
 
 ### 3. Configure the npm trusted publisher
 
-**First, create the GitHub environment** (required, before any tag is pushed): GitHub → `hsmith-dev/ogden-agents` → Settings → Environments → New environment → `npm-release`. In it:
+**First set the repository variable `NPM_PUBLISH` to `true`** (Settings → Secrets and variables → Actions → Variables; without it the npm publish is skipped and a tag only creates the GitHub Release). **Then create the GitHub environment** (required, before any tag with `NPM_PUBLISH` set is pushed): GitHub → `hsmith-dev/ogden-agents` → Settings → Environments → New environment → `npm-release`. In it:
 
 - Deployment branches and tags → Selected branches and tags → add a **tag** rule `v*.*.*` (and no branch rule), so only a version tag can publish.
 - Required reviewers → add yourself, so each publish waits for your approval.
@@ -143,13 +174,13 @@ If a check fails, fix it on `main` and release `0.3.0-rc.2` the same way.
 
 As in the 0.2.0 checklist, step 6, with the version `0.3.0` and the tag `v0.3.0`. Then move `next` to it too: `npm dist-tag add ogden-agents@0.3.0 next`. Epic 3, Done when 6, is met once `npx ogden-agents` installs `0.3.0`.
 
-## Epic 10 release (0.4.0) checklist
+## 0.4.0 release checklist (epic 10, epic 4 and permission modes)
 
-`0.4.0` is epic 10: BMad Method optional per project (CAP-19). It goes out after `0.3.0`, in the same two steps, by tag: `0.4.0-rc.1` to `next`, checked live, then `0.4.0` to `latest`. `0.2.0` and `0.3.0` are unchanged. As before, the repository owner does every step by hand.
+`0.4.0` is one release of epic 10 (BMad Method optional per project, CAP-19), epic 4 (planning and the board, CAP-2, CAP-6, CAP-7, CAP-18) and the per-chat permission modes story (user decision 2026-10-02: epic 10 does not release on its own). It goes out after `0.3.0`, in the same two steps, by tag: `0.4.0-rc.1` to `next`, checked live, then `0.4.0` to `latest`. `0.2.0` and `0.3.0` are unchanged. As before, the repository owner does every step by hand.
 
 ### 1. Merge the stack to `main`
 
-After `0.3.0` is released, merge epic 10's story branches to `main` in stack order: 10.1, 10.2, 10.5, 10.3, 10.4, 10.6, 10.7, 10.8, then 10.9. 10.9 sets the version to `0.4.0-rc.1` and adds the 0.4.0 entry to `CHANGELOG.md`. Wait for CI on `main` to pass. That includes the installed-package end-to-end suite on macOS, Windows and Linux, with epic 10's BMad journey and the 0.2.0 upgrade.
+After `0.3.0` is released, merge to `main` in stack order: epic 10's 10.1, 10.2, 10.5, 10.3, 10.4, 10.6, 10.7 and 10.8; then epic 4's 4.1, 4.2, 4.14, 4.3, 4.5, 4.8, 4.4, 4.6, 4.9, 4.7, 4.10, 4.11, 4.12 and 4.13. 4.13 merges 10.9 (#59, `0.4.0-rc.1` and its installed BMad journey) and the permission modes story (#63) into the stack, so merging 4.13 brings both in: merge #59 and #63 first (4.13 then merges cleanly) or close them as merged through 4.13. 4.13 has the 0.4.0 entry in `CHANGELOG.md`. Wait for CI on `main` to pass. That includes the installed-package end-to-end suite on macOS, Windows and Linux with epic 10's BMad journey, epic 4's planning journey (BMad Method set up from a local fixture, never the network), the permission modes journey and the 0.2.0 upgrade, and the Provenance job.
 
 ### 2. Tag the release candidate
 
@@ -157,26 +188,78 @@ As in the 0.2.0 checklist, step 4, with the tag `v0.4.0-rc.1`. Then `npm view og
 
 ### 3. Live checks with Claude Code
 
-CI runs only a fake agent, so these checks need the real one. Run them with `npx ogden-agents@next` and a signed-in Claude Code, in a scratch repo made for it (never one you care about), once on macOS (or Linux) and once on Windows. Write each result under "Live check result" in story 10.9's plan (`_bmad-output/initiative-ogden-agents/epic-bmad-optional-per-project/story-end-to-end-suite-and-release-plan.md`) before the story moves to done.
+CI runs only a fake agent and a local BMad Method fixture, so these checks need the real ones. Run them with `npx ogden-agents@next` and a signed-in Claude Code, in scratch repos made for it (never one you care about), once on macOS (or Linux) and once on Windows. Write each result under "Live check result" in the plan named with each group before its story moves to done: story 4.13's (`_bmad-output/initiative-ogden-agents/epic-planning-and-board/story-end-to-end-suite-and-release-plan.md`) for epic 4 and the permission modes, story 10.9's (`_bmad-output/initiative-ogden-agents/epic-bmad-optional-per-project/story-end-to-end-suite-and-release-plan.md`) for epic 10, and story 10.1's for its check.
 
-1. Epic 10, Done when 1: add the scratch repo (with a `.claude/skills` of its own) as a new project, with Settings > New projects left at Simple chats. Its header shows only Chats, and no BMad Method notice. Start two chats and talk to Claude Code in both at once. Nothing is written into the repo (`git status` is clean), and no `_bmad/` appears. Ask Claude Code what skills it has: only the repo's own and your own, nothing from Ogden Agents.
-2. Welcome's question: in a fresh data folder (set `OGDEN_AGENTS_DATA_DIR` to an empty folder for one run), Welcome asks "Simple chats or BMad Method?" once for the first project, with BMad Method greyed and marked Coming soon; Settings > Welcome never asks it again.
-3. Epic 10, Done when 3: a repo that already has `_bmad/` (a copy of one, or `npx bmad-method install` in a scratch repo) shows the offer on its chats page; **Not now** hides it for good, across a reload and a restart. `git status` in that repo is clean.
-4. Epic 10, Done when 4: start `0.4.0-rc.1` on a copy of a data folder `0.3.0` used (with projects, chats, a caution level and an Always allow rule). It opens on Projects, not Welcome; every project, chat, caution level and rule is there; every project is Simple chats; a project with `_bmad/` offers its features once.
-5. Epic 10, Done when 5: in a simple project, turn on Developer mode (Settings > Appearance); **Chat | Terminal** switches to Claude Code's own terminal and back as in epic 3.
+**Epic 4 (story 4.13's plan):**
 
-Epic 10, Done when 2 needs a piece that ships, so until epic 4 it is covered only in CI, with test-registered pieces: the installed suite's BMad journey turns a piece on and off with a second tab following and checks the `feature_off` refusal, and the dev suite (`tests/e2e/bmad-pieces.spec.ts`) checks the choice is kept across a restart. Done when 6 is CI plus step 4.
+1. BMad Method setup download on a real network, epic 4 Done when 1: in an empty scratch repo added as a project, turn on Planning. Setup downloads the pinned BMad Method from GitHub (the first time on this computer), shows its steps and ends with "Ready to plan."; `_bmad/` and `.claude/skills/` are in the repo. Settings > the project shows BMad Method as current. Then turn Planning off in another project and check that it shows no Plan or Board and has no `_bmad/`.
+2. The tracer, epic 4 Done when 2: on the Plan tab, **Start from an idea** with a one-line idea. Answer Claude Code in the planning session until it writes a brief; the document card's **Open** shows it, and its next step starts the spec session; go on until a spec, then **Turn this spec into tickets**, until Claude Code has written an epic with tickets. Use only the chat and the buttons.
+3. Epic 4 Done when 3: turn Board on (it asks to trust the project's scripts first). The board shows the new tickets. Ask Claude Code in a chat to set one ticket's status in its plan file (for example to in-progress): the card moves within seconds, highlighted. Move another ticket to Ready from its card's menu: its plan file now says `ready-for-dev`.
+4. Epic 4 Done when 4: with the server running, install another BMad Method module into the repo (for example with `npx bmad-method install`): it appears on the Plan tab, marked New, and one of its actions starts.
+5. Epic 4 Done when 5: a copy of a repo with an older or plain upstream BMad Method install opens with the reduced-mode notice on Plan (and on Board if its tickets can't be read); **Upgrade this project** ends with the notices gone.
+
+**Permission modes (story 4.13's plan), with real Claude Code:**
+
+6. A chat starts in **Ask**. Switch it to **Auto**: Claude Code edits an ordinary file without a card, and asking it to edit a protected path (for example `.git/config`, a file under `.claude/`, or `_bmad/scripts/config_utils.py`) still shows a card. Then, in a project with Board on and trusted, change `_bmad/scripts/config_utils.py` yourself (add a comment): the Board shows "This project's BMad Method scripts changed. Run them?" and no tickets until you allow it.
+7. With Developer mode off, **Skip all** is not offered. Turn Developer mode on (Settings > Appearance): Skip all is offered behind a red warning; once on, the red banner stays in view while the conversation scrolls and at phone width, and Claude Code runs a command without a card. **Back to Ask** in the banner works. Turn Developer mode off: the chat is back in Ask.
+
+**Epic 10 (story 10.9's plan; story 10.1's for check 9):**
+
+8. Epic 10, Done when 1: add a scratch repo (with a `.claude/skills` of its own) as a new project, with Settings > New projects left at Simple chats. Its header shows only Chats, and no BMad Method notice. Start two chats and talk to Claude Code in both at once. Nothing is written into the repo (`git status` is clean), and no `_bmad/` appears. Ask Claude Code what skills it has: only the repo's own and your own, nothing from Ogden Agents.
+9. Story 10.1: in a project's settings, turn a BMad Method feature on and off with a second tab open on the same page: the second tab follows at once. Restart the server: the choice is kept.
+10. Welcome's question: in a fresh data folder (set `OGDEN_AGENTS_DATA_DIR` to an empty folder for one run), Welcome asks "Simple chats or BMad Method?" once for the first project, with BMad Method available; Settings > Welcome never asks it again.
+11. Epic 10, Done when 3: a repo that already has `_bmad/` shows the offer on its chats page; **Not now** hides it for good, across a reload and a restart. `git status` in that repo is clean.
+12. Epic 10, Done when 4: start `0.4.0-rc.1` on a copy of a data folder `0.3.0` used (with projects, chats, a caution level and an Always allow rule). It opens on Projects, not Welcome; every project, chat, caution level and rule is there; every project is Simple chats and every chat is in Ask; a project with `_bmad/` offers its features once.
+13. Epic 10, Done when 5: in a simple project, with Developer mode on, **Chat | Terminal** switches to Claude Code's own terminal and back as in epic 3.
+
+Epic 10, Done when 2 and 6 and epic 4, Done when 6 are CI (the installed suite on three OSes) plus these checks.
 
 If a check fails, fix it on `main` and release `0.4.0-rc.2` the same way.
 
 ### 4. Release 0.4.0
 
-As in the 0.2.0 checklist, step 6, with the version `0.4.0` and the tag `v0.4.0`. Then move `next` to it too: `npm dist-tag add ogden-agents@0.4.0 next`.
+As in the 0.2.0 checklist, step 6, with the version `0.4.0` and the tag `v0.4.0`. Then move `next` to it too: `npm dist-tag add ogden-agents@0.4.0 next`. Epic 4, Done when 6, is met once `npx ogden-agents` installs `0.4.0`.
+
+## 0.5.0 release checklist (epic 6: Antigravity beside Claude Code)
+
+`0.5.0` is epic 6's release (CAP-15, CAP-3, CAP-5, CAP-16): the agent picker, a default agent per project, and Antigravity as a second chat agent. It goes out after `0.4.0`, in the same two steps, by tag: `0.5.0-rc.1` to `next`, checked live, then `0.5.0` to `latest`. Antigravity ships only if it passes on all three OSes (user, 2026-10-02): any check below failing on any OS is a no-go for Antigravity, and the release then waits for the user's decision (drop entries 5, 7 and 8, as the epic says). As before, the repository owner does every step by hand.
+
+### 1. Merge the stack to `main`
+
+After `0.4.0` is released, merge epic 6 to `main` in stack order: 6.2, 6.3, 6.4, 6.6, 6.5, 6.7, 6.8, 6.9 and 6.10 (spike 6.1, #73, is a findings branch: merge or close it on its own). 6.10 has the `0.5.0-rc.1` version and the 0.5.0 entry in `CHANGELOG.md`. Wait for CI on `main` to pass: that includes the installed-package end-to-end suite on macOS, Windows and Linux with epic 6's agents journey (`tests/e2e-installed/agents-journey.spec.ts`: Claude Code and Antigravity side by side, the picker and default, Antigravity's modes and protected paths, the agent trust gate, Antigravity's install from a local fixture archive, the unsupported message, and `.agents/skills`), and the Provenance job.
+
+### 2. Tag the release candidate
+
+As in the 0.2.0 checklist, step 4, with the tag `v0.5.0-rc.1`. Then `npm view ogden-agents dist-tags` shows `next: 0.5.0-rc.1`.
+
+### 3. Live checks with Antigravity and Claude Code
+
+CI runs only fakes (the fake agent as both agents, a fixture archive on 127.0.0.1), so these need the real ones. Run them with `npx ogden-agents@next`, in scratch repos made for it, **on macOS (Apple silicon), Windows (x64) and Linux (x64)**, each OS on its own. Use a Google account you accept the terms risk for (Google's terms say third-party use of Antigravity sign-in may suspend the account; user decision 2026-10-02) and a Gemini API key from Google AI Studio. Write each result, per OS, under "Live check result" in story 6.10's plan (`_bmad-output/initiative-ogden-agents/epic-every-agent/story-end-to-end-suite-and-release-plan.md`) before the story moves to done.
+
+1. Install, epic 6 Done when 4: Settings > Agents > Antigravity > **Install**. It downloads from Google into the data folder (about 110 to 340 MB) and ends "Installed, needs sign-in" with Version 1.3.0. Nothing appears outside Ogden Agents' data folder except `~/.gemini/antigravity/bin/webm_encoder` (the card says so). On Windows, note how long its first start takes.
+2. Google sign-in: **Sign in with your account** opens Google in a browser on that computer (on Linux, check it opens at all: the known Zed issue). The card ends "Installed, signed in". Start an Antigravity chat and get a reply.
+3. API key: **Sign out**, then save a Gemini API key on the card. A new Antigravity chat replies. Then check that the key appears nowhere: `grep -r "AIza" <data folder>` finds nothing in `ogden-agents.db`, the event log or `logs/`.
+4. Two agents at once, Done when 2: in one Simple project, start a Claude Code chat and an Antigravity chat from the picker, and ask each to run a shell command (for example `ls`). Each shows a permission card that holds the command until you click **Allow once**; both work at the same time. The sidebar names each chat's agent.
+5. Default agent: in the project's settings, set **Default agent** to Antigravity; the Chats page preselects it in another open tab without a reload, and **New chat** starts an Antigravity chat.
+6. Modes, Done when 3: in the Antigravity chat, the mode picker shows **Auto** unavailable with a reason; with Developer mode on, **Skip all** runs a command without a card, behind the red banner.
+7. Protected paths: at "Ask only for risky actions", ask Antigravity to edit an ordinary file (no card), then a file under `.gemini/`, `.agents/` and `_bmad/` (a card each). Also check whether Antigravity reads a `GEMINI.md` in the project root as its instructions (write one with an odd instruction and ask); if it does, say so in the plan (a deferred item).
+8. Restart: Quit Ogden Agents from the app, run `npx ogden-agents@next` again, and continue both chats: each remembers what was said before.
+9. Terminal toggle, Done when 5: with Developer mode on, the Claude Code chat's **Chat | Terminal** works as in 0.3.0; the Antigravity chat's toggle is disabled and says why.
+10. BMad with Antigravity, Done when 6: in a scratch repo whose default agent is Antigravity, turn Planning on. Setup ends "Ready to plan." and the repo has `.agents/skills/` as well as `.claude/skills/`. On Plan, **Start from an idea** in an Antigravity planning session: Antigravity runs the BMad skill (it asks about the idea, as Claude Code would). A Simple project that uses Antigravity gets no `.agents/skills` and no `_bmad/`.
+11. Welcome: with `OGDEN_AGENTS_DATA_DIR` set to an empty folder for one run, Welcome asks which agent; choose Antigravity, and the first project's chats start with it.
+12. Uninstall: Settings > Agents > Antigravity > **Uninstall**; the picker then shows Antigravity unavailable with a link to Settings > Agents.
+
+When every check has passed on all three OSes, write the final Antigravity row of `agent-matrix.md` from the spike and these results (through `bmad-spec`, leaving no "verify" cell), as epic 6's entry 10 says. If a check fails, fix it on `main` and release `0.5.0-rc.2` the same way.
+
+### 4. Release 0.5.0
+
+As in the 0.2.0 checklist, step 6, with the version `0.5.0` and the tag `v0.5.0`. Then move `next` to it too: `npm dist-tag add ogden-agents@0.5.0 next`. Epic 6, Done when 7, is met once `npx ogden-agents` installs `0.5.0`.
 
 ## Later releases
 
 1. On a branch, set the same new version in `package.json`, `packages/server/package.json` and `packages/web/package.json`, and add its entry to `CHANGELOG.md`. Merge to `main`.
 2. Tag that `main` commit `v<version>` and push the tag, as in step 4.
+3. Optionally dry-run first (see Dry run above) to look at the assets and the notes.
 
 For a prerelease, use a version such as `0.2.0-rc.1` and the tag `v0.2.0-rc.1`. It is published to the `next` dist-tag, not `latest`.
 

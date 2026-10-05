@@ -58,6 +58,24 @@
  * the agent's note), `close` waits for the switches in flight and imports
  * the terminals' turns, and a start after a crash imports what it couldn't.
  *
+ * Permission modes: each chat has a mode (Ask, Auto, Skip all) stored on
+ * its session (`chat/permission-mode.ts`). Every agent session starts in it,
+ * each change is told to the live agent, and a mode the agent reports that
+ * the chat didn't choose moves the chat to Ask. With the event log given, the
+ * chat follows it: a stored mode changed elsewhere (Developer mode turned
+ * off) reaches the live agent, and a terminal handed back by Developer mode
+ * is stopped.
+ *
+ * Epic 6: each session carries its agent (`agentId`), looked up in the agent
+ * registry the server wires; a session stored before agents could be chosen
+ * is the registry's legacy agent. Handoff (`chat/handoff.ts`): the user can
+ * continue a chat with another agent, which then reads a brief Ogden built
+ * from the chat's events.
+ *
+ * Story 11: each chat has a model (`chat/model.ts`), the agent's own id or
+ * `null` for its own choice, set at creation from the project's or the
+ * install's default and applied at the idle point before each prompt.
+ *
  * The agent itself sits behind `AgentPort` (AD-1); this file names none.
  */
 import { AgentError } from './agent-port.js';
@@ -65,8 +83,12 @@ import { createAgents } from './chat/agents.js';
 import { createCheckIn } from './chat/check-in.js';
 import { RESTARTED_REASON } from './chat/constants.js';
 import { createChatContext } from './chat/context.js';
+import { createModels } from './chat/model.js';
+import { createHandoff } from './chat/handoff.js';
+import { createModeApplier, createPermissionModes } from './chat/permission-mode.js';
 import { createPermissionRequests } from './chat/permission-requests.js';
 import { createReplies } from './chat/replies.js';
+import { createSendNow } from './chat/send-now.js';
 import { createTerminal } from './chat/terminal.js';
 import { createTurns } from './chat/turns.js';
 import type { Chat, ChatOptions } from './chat/types.js';
@@ -83,26 +105,78 @@ export function createChat(options: ChatOptions): Chat {
   const { flushDelta, stopDeltaTimer, tickDelta, flushSession, finishReply } = createReplies(ctx);
   const { clearQuiet, clearTurnTimers, armQuiet } = createCheckIn(ctx, { flushDelta });
   const { onPermissionRequestFor } = createPermissionRequests(ctx, { flushSession, armQuiet });
-  const { drop, storedAgentSessionId, agentFor, promptFor, releaseAgent } = createAgents(ctx, { stopDeltaTimer, onPermissionRequestFor });
-  const turns = createTurns(ctx, { flushDelta, tickDelta, flushSession, finishReply, clearQuiet, clearTurnTimers, armQuiet, drop, agentFor, promptFor });
+  const applyMode = createModeApplier(ctx);
+  const models = createModels(ctx);
+  const { drop, storedAgentSessionId, agentFor, promptFor, releaseAgent } = createAgents(ctx, {
+    stopDeltaTimer,
+    onPermissionRequestFor,
+    applyMode,
+    noteStarted: models.noteStarted,
+    takesModelAtStart: models.takesModelAtStart,
+    startModelFor: models.startModelFor,
+  });
+  const modes = createPermissionModes(ctx, { drop, finishReply, applyMode });
+  const turns = createTurns(ctx, {
+    flushDelta,
+    tickDelta,
+    flushSession,
+    finishReply,
+    clearQuiet,
+    clearTurnTimers,
+    armQuiet,
+    drop,
+    agentFor,
+    promptFor,
+    onReportedMode: modes.onReportedMode,
+    syncModel: models.syncModel,
+    onReportedModel: models.onReportedModel,
+  });
+  const sendNow = createSendNow(ctx, { sendMessage: turns.sendMessage, stop: turns.stop, finishReply, flushSession });
   const terminal = createTerminal(ctx, { releaseAgent, storedAgentSessionId });
   const { stopTerminal, closeTerminals } = terminal;
-  const workspaces = createWorkspaces(ctx, { drop, stopTerminal });
+  const workspaces = createWorkspaces(ctx, { drop, stopTerminal, initialModel: models.initialModel });
+  const handoff = createHandoff(ctx, { releaseAgent, storedAgentSessionId, sendMessage: turns.sendMessage, initialModel: models.initialModel });
   // A stop that couldn't import the terminal's turns (a crash): they come in now (story 3.4).
   terminal.importAfterRestart();
+  // Changes of a chat's stored mode made elsewhere reach its agent or its terminal (permission modes).
+  // A change the agent itself caused (`agent`) is told by `onReportedMode` only when it must be.
+  const unfollow = options.events?.subscribe(options.events.lastSeq(), (event) => {
+    if (ctx.closing) return;
+    if (event.type === 'session.permission_mode_changed' && event.payload.cause !== 'agent') modes.followStoredMode(event.payload.sessionId);
+    else if (event.type === 'session.driver_changed' && event.payload.cause === 'developer_mode_off') terminal.releaseTerminal(event.payload.sessionId);
+  });
+
+  // Every session the chat answers names its agent (epic 6): one stored before agents could be chosen reads as the legacy agent.
+  const { withAgentId } = ctx;
 
   return {
     openWorkspace: workspaces.openWorkspace,
     listWorkspaces: workspaces.listWorkspaces,
     getWorkspace: workspaces.getWorkspace,
-    listSessions: workspaces.listSessions,
+    listSessions: (workspaceId) => workspaces.listSessions(workspaceId).map(withAgentId),
     deleteHistory: workspaces.deleteHistory,
-    createChatSession: workspaces.createChatSession,
-    getSession: workspaces.getSession,
-    sendMessage: turns.sendMessage,
+    createChatSession: async (workspaceId, options) => withAgentId(await workspaces.createChatSession(workspaceId, options)),
+    chatAgents: workspaces.chatAgents,
+    getSession: (workspaceId, sessionId) => withAgentId(workspaces.getSession(workspaceId, sessionId)),
+    renameSession: (workspaceId, sessionId, title) => withAgentId(entities.setSessionTitle(workspaces.getSession(workspaceId, sessionId).id, title)),
+    sendMessage: sendNow.sendMessage,
+    updateQueuedMessage: sendNow.updateQueuedMessage,
+    removeQueuedMessage: sendNow.removeQueuedMessage,
+    sendQueuedMessageNow: sendNow.sendQueuedMessageNow,
     cancel: turns.cancel,
-    switchDriver: terminal.switchDriver,
+    switchDriver: async (workspaceId, sessionId, driver) => withAgentId(await terminal.switchDriver(workspaceId, sessionId, driver)),
     attachTerminal: terminal.attachTerminal,
+    setPermissionMode: (workspaceId, sessionId, mode, options) => withAgentId(modes.setPermissionMode(workspaceId, sessionId, mode, options)),
+    permissionModeOptions: modes.permissionModeOptions,
+    setModel: (workspaceId, sessionId, model) => withAgentId(models.setModel(workspaceId, sessionId, model)),
+    modelOptions: models.modelOptions,
+    handoffPreview: handoff.handoffPreview,
+    handOff: handoff.handOff,
+
+    async releaseAgent(workspaceId, sessionId) {
+      ctx.getSession(workspaceId, sessionId);
+      await releaseAgent(sessionId);
+    },
 
     async settled() {
       while (running.size > 0) await Promise.all([...running]);
@@ -125,6 +199,7 @@ export function createChat(options: ChatOptions): Chat {
         }
       }
       ctx.closing = true;
+      unfollow?.();
       // The server owns the terminals (AD-3): once the switches in flight end (bounded), they stop
       // with it, their turns are imported and their chats drive again (story 3.4).
       const stoppingTerminals = closeTerminals();

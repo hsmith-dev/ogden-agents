@@ -159,7 +159,7 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('agent setup routes: 
   it('lists Claude Code, signs in through the callback, and keeps the URL out of every event and log line', async () => {
     const { server, tab, lines } = await startSetupServer();
     expect(await agents(server, tab)).toEqual([
-      { agentId: 'claude-code', displayName: 'Claude Code', install: 'installed', version: null, auth: 'needs_sign_in', signInTab: 'agent', apiKey: { saved: false } },
+      { agentId: 'claude-code', displayName: 'Claude Code', provider: 'Anthropic', install: 'installed', version: null, auth: 'needs_sign_in', signInTab: 'agent', apiKey: { saved: false } },
     ]);
 
     const reply = await send(server, signInPath(), { method: 'POST', headers: tab.headers });
@@ -552,19 +552,23 @@ describe('agent setup routes: installing Claude Code (story 9.3)', () => {
     const npmCli = join(mkdtempSync(join(tmpdir(), 'ogden-agents-npm-')), 'npm-cli.js');
     removeAfterTest(dirname(npmCli));
     writeFileSync(npmCli, '');
-    return startSetupServer({}, {
+    // The fake login's state (signed out until a test writes it), read again at every new chat (6.3: a signed-out agent refuses one).
+    const login = stateFile();
+    const started = await startSetupServer({ FAKE_LOGIN_STATE: login }, {
       claudeAdapterPath: undefined,
       claudeInstall: { devAdapter: false, pins, runNpm: npm.runNpm, npmCli },
       claudeExecutable: null,
+      subscriptionMaxAgeMs: 0,
       ...(dataDir === undefined ? {} : { dataDir }),
     });
+    return { ...started, login };
   }
 
   const installEvents = (server: TestServer) => server.core.events.readAfter(0).filter((event) => event.type.startsWith('agent.install_'));
 
   it('Not installed → Install (202) → progress → Installed, needs sign-in; a second Install starts no second npm; a chat then runs the installed adapter', async () => {
     const npm = handNpm();
-    const { server, tab, lines } = await startInstallServer(npm);
+    const { server, tab, lines, login } = await startInstallServer(npm);
     expect((await agents(server, tab))[0]).toMatchObject({ install: 'not_installed', installSize: 'large' });
 
     const first = await send(server, installPath(), { method: 'POST', headers: tab.headers });
@@ -586,7 +590,8 @@ describe('agent setup routes: installing Claude Code (story 9.3)', () => {
     // Installed: Install answers 202 with the status and starts nothing.
     expect(AgentSetupStatus.parse((await send(server, installPath(), { method: 'POST', headers: tab.headers })).json()).install).toBe('installed');
 
-    // A chat starts through the adapter in the data folder, without a restart.
+    // Signed in (a new chat needs it, 6.3), a chat starts through the adapter in the data folder, without a restart.
+    writeFileSync(login, `${JSON.stringify({ loggedIn: true })}\n`);
     const sessionId = await chatOnce(server, tab, 'hello');
     await waitFor(() => settledState(server, sessionId) !== undefined, 'the chat to answer', 10_000);
     expect(settledState(server, sessionId)).toBe('idle');

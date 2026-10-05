@@ -8,16 +8,18 @@
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AgentError, type TerminalProcess } from '@ogden-agents/core';
+import { AgentError, PROTECTED_PATHS, type TerminalProcess } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   bundledClaudeExecutable,
+  claudeAskRules,
   CLAUDE_CLI_NOT_FOUND,
   claudeTerminalCommand,
   createPtyTerminalPort,
   hiddenPtySpawner,
   INVALID_PTY_HANDLE,
   loadPty,
+  PTY_CREATE_PROCESS_INVALID_PARAMETER,
   PTY_SPAWN_ATTEMPTS,
   locateClaudeTerminal,
   resolveClaudeAgentAcp,
@@ -45,14 +47,35 @@ describe("the session's CLI command", () => {
 
   it('runs the chat’s CLAUDE_CODE_EXECUTABLE first, with --resume and the id as separate arguments, and the env as given', () => {
     const env = { PATH: '/usr/bin', CLAUDE_CODE_EXECUTABLE: '/opt/claude/bin/claude' };
-    expect(claudeTerminalCommand(ID, env, { claudeExecutable: '/elsewhere/claude' })).toEqual({ file: '/opt/claude/bin/claude', args: ['--resume', ID], env });
+    expect(claudeTerminalCommand(ID, env, { claudeExecutable: '/elsewhere/claude' })).toEqual({ file: '/opt/claude/bin/claude', args: ['--resume', ID, '--permission-mode', 'default'], env });
     // Then the one the adapter would find, as the chat's adapter does.
     expect(claudeTerminalCommand(ID, { PATH: '' }, { claudeExecutable: '/elsewhere/claude' }).file).toBe('/elsewhere/claude');
+    // Story 11: the chat's model, as `--model`; a value that could read as a flag never reaches it.
+    expect(claudeTerminalCommand(ID, env, { claudeExecutable: '/elsewhere/claude', model: 'opus[1m]' }).args).toEqual(['--resume', ID, '--permission-mode', 'default', '--model', 'opus[1m]']);
+    expect(() => claudeTerminalCommand(ID, env, { claudeExecutable: '/elsewhere/claude', model: '--dangerously-skip-permissions' })).toThrow(AgentError);
   });
 
   it('runs a script CLI under Node, as the Agent SDK does', () => {
     const command = claudeTerminalCommand(ID, { CLAUDE_CODE_EXECUTABLE: FAKE_CLI }, { nodePath: '/node' });
-    expect(command).toMatchObject({ file: '/node', args: [FAKE_CLI, '--resume', ID] });
+    expect(command).toMatchObject({ file: '/node', args: [FAKE_CLI, '--resume', ID, '--permission-mode', 'default'] });
+  });
+
+  it("starts the CLI in the chat's permission mode: Ask and Auto by --permission-mode, Skip all by its skip-permissions flag", () => {
+    const env = { CLAUDE_CODE_EXECUTABLE: '/opt/claude/bin/claude' };
+    expect(claudeTerminalCommand(ID, env, { permissionMode: 'ask' }).args).toEqual(['--resume', ID, '--permission-mode', 'default']);
+    expect(claudeTerminalCommand(ID, env, { permissionMode: 'auto' }).args).toEqual(['--resume', ID, '--permission-mode', 'auto']);
+    expect(claudeTerminalCommand(ID, env, { permissionMode: 'skip_all' }).args).toEqual(['--resume', ID, '--dangerously-skip-permissions']);
+    // Auto keeps the protected paths guarded: the same ask rules as the chat's session, as --settings.
+    expect(claudeTerminalCommand(ID, env, { permissionMode: 'auto', protectedPaths: PROTECTED_PATHS }).args).toEqual([
+      '--resume',
+      ID,
+      '--permission-mode',
+      'auto',
+      '--settings',
+      JSON.stringify({ permissions: { ask: claudeAskRules(PROTECTED_PATHS) } }),
+    ]);
+    // Without a mode, Ask: never the user's own settings' default mode.
+    expect(claudeTerminalCommand(ID, env).args).toEqual(['--resume', ID, '--permission-mode', 'default']);
   });
 
   it('refuses an id that could read as an option or a path, and a CLI it cannot find', () => {
@@ -122,6 +145,27 @@ describe('a spawn that loses its pseudo-console handle (story 3.8)', () => {
     const pty = flakyPty(1, 'File not found: ');
     expect(pty.open).toThrow('File not found');
     expect(pty.calls()).toBe(1);
+  });
+
+  // The same race read back as a damaged handle: CreateProcessW refuses it with 87 (story 6.9, CI run 37239378578).
+  it('a pseudo-console CreateProcessW refuses (error 87) is tried again, and opens', () => {
+    const pty = flakyPty(PTY_SPAWN_ATTEMPTS - 1, PTY_CREATE_PROCESS_INVALID_PARAMETER);
+    expect(pty.open().pid).toBe(7);
+    expect(pty.calls()).toBe(PTY_SPAWN_ATTEMPTS);
+  });
+
+  it('error 87 is tried a bounded number of times, then fails with it', () => {
+    const pty = flakyPty(PTY_SPAWN_ATTEMPTS, PTY_CREATE_PROCESS_INVALID_PARAMETER);
+    expect(pty.open).toThrow(PTY_CREATE_PROCESS_INVALID_PARAMETER);
+    expect(pty.calls()).toBe(PTY_SPAWN_ATTEMPTS);
+  });
+
+  it("CreateProcessW's other errors (a missing program, a missing folder, a longer code) are not retried", () => {
+    for (const code of [2, 267, 870]) {
+      const pty = flakyPty(1, `Cannot create process, error code: ${code}`);
+      expect(pty.open).toThrow(`error code: ${code}`);
+      expect(pty.calls()).toBe(1);
+    }
   });
 });
 

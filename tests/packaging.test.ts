@@ -2,8 +2,9 @@
  * Packaging guard: the root `ogden-agents` package is the only publishable
  * artifact. After `pnpm build` (which `pnpm test` runs first), every bare
  * import in the bundled server must be a Node builtin or a root `dependencies`
- * entry, and the packed tarball must hold only the built files and the
- * vendored forks (AD-13).
+ * entry, and the packed tarball must hold only the built files: no BMad
+ * files, no `vendor/` and no `forks.lock` (AD-13 as amended by story 4.14:
+ * the pinned upstream BMad Method is downloaded only when the user asks).
  */
 import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -121,27 +122,6 @@ const SERVER_ONLY = ['better-sqlite3', 'drizzle-orm', 'hono', '@hono/node-server
 function rootDependencies(): Record<string, string> {
   const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as RootManifest;
   return manifest.dependencies ?? {};
-}
-
-/** The bmad-loop wheel `forks.lock` pins, such as `vendor/bmad-loop/bmad_loop-0.13.0-py3-none-any.whl`. */
-function lockedWheel(): string {
-  const lock = JSON.parse(readFileSync(join(ROOT, 'forks.lock'), 'utf8')) as { forks: Record<string, { vendored: string }> };
-  const wheel = lock.forks['bmad-loop']!.vendored;
-  expect(wheel).toMatch(/^vendor\/bmad-loop\/bmad_loop-.+\.whl$/);
-  return wheel;
-}
-
-/**
- * Files git tracks (or would track) under `vendor/`, as repo-relative POSIX
- * paths. Ignored files such as `.DS_Store` are left out.
- */
-function vendoredFiles(): string[] {
-  const result = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', 'vendor'], {
-    cwd: ROOT,
-    encoding: 'utf8',
-  });
-  if (result.status !== 0) throw new Error(`git ls-files failed (${result.status}): ${result.stderr}`);
-  return [...new Set(result.stdout.split('\0').filter(Boolean))].sort();
 }
 
 /** Paths `pnpm pack` would put in the tarball. */
@@ -297,7 +277,16 @@ describe('packaging', () => {
     expect(manifest.bugs).toEqual({ url: 'https://github.com/hsmith-dev/ogden-agents/issues' });
   });
 
-  it('the tarball holds the launcher, the bundle, the UI and the vendored forks, and no workspace sources', () => {
+  it('the bundled server carries the BMad lock, so the package needs no file of its own for it (story 4.14)', () => {
+    const lock = JSON.parse(readFileSync(join(ROOT, 'packages', 'adapters', 'src', 'bmad-source', 'bmad-lock.json'), 'utf8')) as { sources: Record<string, { commit: string }> };
+    const bundle = readdirSync(DIST)
+      .filter((name) => name.endsWith('.js'))
+      .map((name) => readFileSync(join(DIST, name), 'utf8'))
+      .join('\n');
+    for (const source of Object.values(lock.sources)) expect(bundle).toContain(source.commit);
+  });
+
+  it('the tarball holds the launcher, the bundle and the UI, and no workspace sources or BMad files', () => {
     const files = packedFiles();
     expect(files).toEqual(
       expect.arrayContaining([
@@ -309,13 +298,12 @@ describe('packaging', () => {
         'package.json',
         'README.md',
         'LICENSE',
-        'vendor/bmad-method/skills/bmod-method/bmod.toml',
-        lockedWheel(),
       ]),
     );
-    // Exactly the vendored files ship: every one git lists, and nothing else under vendor/.
-    expect(files.filter((f) => f.startsWith('vendor/')).sort()).toEqual(vendoredFiles());
+    // Story 4.14: no bundled forks, no fork lock, no BMad file anywhere (the lock ships inside the bundle).
+    expect(files.filter((f) => f.startsWith('vendor/') || f === 'forks.lock')).toEqual([]);
+    expect(files.filter((f) => /(^|\/)(SKILL\.md|tickets\.py|setup\.py|bmod\.toml|[^/]+\.whl)$/.test(f))).toEqual([]);
     expect(files.filter((f) => f.startsWith('packages/'))).toEqual([]);
-    expect(files.filter((f) => !/^(bin|dist|vendor)\//.test(f) && !['package.json', 'README.md', 'LICENSE'].includes(f))).toEqual([]);
+    expect(files.filter((f) => !/^(bin|dist)\//.test(f) && !['package.json', 'README.md', 'LICENSE'].includes(f))).toEqual([]);
   });
 });

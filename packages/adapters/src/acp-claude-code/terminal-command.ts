@@ -9,9 +9,16 @@
  * else the Agent SDK's bundled binary, found the way claude-agent-acp's
  * `claudeCliPath` finds it. A script (`.js`, `.mjs`, `.cjs`) runs under
  * Node, as the Agent SDK runs one. Always an argument array, never a shell.
+ *
+ * The CLI starts in the chat's permission mode (permission modes): Ask with
+ * `--permission-mode default`, Auto with `--permission-mode auto`, Skip all
+ * with `--dangerously-skip-permissions`, so it never takes the user's own
+ * settings' default mode.
  */
 import { createRequire } from 'node:module';
-import { AgentError, type AgentCliLocation, type AgentTerminalCommand } from '@ogden-agents/core';
+import { AgentError, type AgentCliLocation, type AgentTerminalCommand, type ProtectedPaths } from '@ogden-agents/core';
+import { ModelId, type PermissionMode } from '@ogden-agents/shared';
+import { claudeGuardSettings } from './claude-guards.js';
 import { findClaudeExecutable } from './detect.js';
 
 /** What a session id must look like to go on the command line: never an option, never a path. */
@@ -24,7 +31,20 @@ export interface ClaudeTerminalOptions {
   adapterPath?: string | undefined;
   /** The Node that runs a script CLI. Default: this one. */
   nodePath?: string | undefined;
+  /** The chat's permission mode, which the CLI starts in. Default Ask. */
+  permissionMode?: PermissionMode | undefined;
+  /** Paths it must still ask before writing (Auto): passed as `--settings` with ask rules. */
+  protectedPaths?: ProtectedPaths | undefined;
+  /** The chat's model (story 11), Claude Code's own id for it: passed as `--model`. Absent: its own choice. */
+  model?: string | undefined;
 }
+
+/** The CLI's arguments for each permission mode. */
+export const CLAUDE_MODE_ARGS: Readonly<Record<PermissionMode, readonly string[]>> = {
+  ask: ['--permission-mode', 'default'],
+  auto: ['--permission-mode', 'auto'],
+  skip_all: ['--dangerously-skip-permissions'],
+};
 
 /**
  * The Agent SDK's bundled `claude` for this platform, resolved from the
@@ -85,6 +105,10 @@ export function claudeTerminalCommand(
   if (!SESSION_ID.test(agentSessionId)) throw new AgentError('agent_unavailable', "This chat's Claude Code session can't be opened in a terminal.");
   const claude = resolveClaudeExecutable(env, options);
   if (claude === undefined) throw new AgentError('agent_unavailable', CLAUDE_CLI_NOT_FOUND);
-  const args = ['--resume', agentSessionId];
+  const guard = options.protectedPaths === undefined ? [] : ['--settings', JSON.stringify(claudeGuardSettings(options.protectedPaths))];
+  // A model id never starts with `-` (shared `ModelId`): checked again here, so it can't read as a flag.
+  if (options.model !== undefined && !ModelId.safeParse(options.model).success) throw new AgentError('agent_unavailable', "This chat's model can't be passed to Claude Code's terminal.");
+  const model = options.model === undefined ? [] : ['--model', options.model];
+  const args = ['--resume', agentSessionId, ...CLAUDE_MODE_ARGS[options.permissionMode ?? 'ask'], ...guard, ...model];
   return /\.[cm]?js$/i.test(claude) ? { file: options.nodePath ?? process.execPath, args: [claude, ...args], env } : { file: claude, args, env };
 }

@@ -1,4 +1,24 @@
-import { FEATURE_OFF_MESSAGE, FEATURE_UNAVAILABLE_MESSAGE, type SessionTerminal, type TerminalUnavailableCode } from '@ogden-agents/shared';
+import {
+  BMAD_DOWNLOAD_INTEGRITY_MESSAGE,
+  BMAD_DOWNLOAD_OFFLINE_MESSAGE,
+  BMAD_NOT_DOWNLOADED_MESSAGE,
+  BMAD_ALREADY_SET_UP_MESSAGE,
+  BMAD_NOT_SET_UP_MESSAGE,
+  BMAD_UPGRADE_REFUSED_TEXT,
+  REDUCED_MODE_MESSAGE,
+  BMAD_SETUP_FAILURE_REASONS,
+  FEATURE_OFF_MESSAGE,
+  FEATURE_UNAVAILABLE_MESSAGE,
+  SCRIPTS_CHANGED_MESSAGE,
+  SCRIPTS_NOT_TRUSTED_MESSAGE,
+  STATUS_NOT_ALLOWED_MESSAGE,
+  TICKET_CHANGED_MESSAGE,
+  REOPEN_NOT_CONFIRMED_MESSAGE,
+  type BmadCapability,
+  type BmadSetupFailureReason,
+  type SessionTerminal,
+  type TerminalUnavailableCode,
+} from '@ogden-agents/shared';
 
 /** Base class for errors core throws on purpose, so callers can tell them from bugs. */
 export class CoreError extends Error {
@@ -67,6 +87,167 @@ export class FeatureUnavailableError extends CoreError {
   }
 }
 
+/**
+ * A use-case that runs the project's own BMad Method scripts was asked for
+ * before the user trusted the project (story 4.2, AD-22 note 2026-10-02):
+ * core refused it and ran nothing.
+ */
+export class ScriptsNotTrustedError extends CoreError {
+  override readonly name = 'ScriptsNotTrustedError';
+  constructor() {
+    super('scripts_not_trusted', SCRIPTS_NOT_TRUSTED_MESSAGE);
+  }
+}
+
+/**
+ * A use-case that runs the project's own BMad Method scripts found them
+ * changed since the user trusted the project (story 4.13, user decision
+ * 2026-10-04: the trust is bound to their contents): core ran nothing.
+ */
+export class ScriptsChangedError extends CoreError {
+  override readonly name = 'ScriptsChangedError';
+  constructor() {
+    super('scripts_changed', SCRIPTS_CHANGED_MESSAGE);
+  }
+}
+
+/**
+ * A use-case that runs BMad Method's scripts was asked for before the pinned
+ * upstream BMad Method was downloaded and verified (story 4.14, AD-13): core
+ * refused it and ran nothing. The UI offers Download BMad Method.
+ */
+export class BmadNotDownloadedError extends CoreError {
+  override readonly name = 'BmadNotDownloadedError';
+  constructor() {
+    super('bmad_not_downloaded', BMAD_NOT_DOWNLOADED_MESSAGE);
+  }
+}
+
+/**
+ * BMad Method's setup was asked for in a project that already has `_bmad/`
+ * (story 4.3; a link or a file there counts too). Nothing was written:
+ * updating a set-up project is Upgrade's (entry 4.11).
+ */
+export class BmadAlreadySetUpError extends CoreError {
+  override readonly name = 'BmadAlreadySetUpError';
+  constructor() {
+    super('bmad_already_set_up', BMAD_ALREADY_SET_UP_MESSAGE);
+  }
+}
+
+/**
+ * A piece that needs BMad Method installed was used in a project without
+ * `_bmad/` (story 4.2's `bmad_not_set_up`; entry 4.11: Upgrade this project
+ * asked for in a project that was never set up). Nothing ran.
+ */
+export class BmadNotSetUpError extends CoreError {
+  override readonly name = 'BmadNotSetUpError';
+  constructor() {
+    super('bmad_not_set_up', BMAD_NOT_SET_UP_MESSAGE);
+  }
+}
+
+/**
+ * Upgrade this project was refused before anything was written (entry 4.11):
+ * the project's `_bmad` is a link or a file, not a folder.
+ */
+export class BmadUpgradeRefusedError extends CoreError {
+  override readonly name = 'BmadUpgradeRefusedError';
+  constructor() {
+    super('bmad_upgrade_refused', BMAD_UPGRADE_REFUSED_TEXT);
+  }
+}
+
+/**
+ * The project's BMad Method lacks a capability the use-case needs (AD-14,
+ * entry 4.11): core refused before anything ran (for the board, before
+ * `tickets.py`). `capability` is the first missing one. The UI shows the
+ * reduced-mode notice with Upgrade this project.
+ */
+export class ReducedModeError extends CoreError {
+  override readonly name = 'ReducedModeError';
+  constructor(readonly capability: BmadCapability) {
+    super('reduced_mode', REDUCED_MODE_MESSAGE);
+  }
+}
+
+/**
+ * Why downloading the pinned BMad Method failed: it didn't arrive
+ * (`offline`: no network, an HTTP error, a timeout, too large) or what
+ * arrived isn't the pinned content (`integrity`: a hash mismatch, an unsafe
+ * or unreadable archive).
+ */
+export type BmadDownloadFailure = 'offline' | 'integrity';
+
+/**
+ * Downloading the pinned BMad Method failed (story 4.14); nothing was saved.
+ * `message` is plain words for the user; `detail` is for the log only (a
+ * status code, the hashes), never shown.
+ */
+export class BmadDownloadError extends CoreError {
+  override readonly name = 'BmadDownloadError';
+  readonly reason: BmadDownloadFailure;
+  readonly detail: string | undefined;
+  constructor(reason: BmadDownloadFailure, detail?: string) {
+    super('bmad_download_failed', reason === 'offline' ? BMAD_DOWNLOAD_OFFLINE_MESSAGE : BMAD_DOWNLOAD_INTEGRITY_MESSAGE);
+    this.reason = reason;
+    this.detail = detail;
+  }
+}
+
+/**
+ * BMad Method's setup failed (story 4.3): no usable uv (`uv_missing`), the
+ * project's folder can't be written (`not_writable`), it took too long
+ * (`timeout`), or anything else (`failed`). `message` is the plain reason
+ * `bmad.setup_failed` carries; nothing holds a path or the script's output.
+ */
+export class BmadSetupError extends CoreError {
+  override readonly name = 'BmadSetupError';
+  constructor(
+    readonly reason: BmadSetupFailureReason,
+    options: { cause?: unknown } = {},
+  ) {
+    super('bmad_setup_failed', BMAD_SETUP_FAILURE_REASONS[reason]);
+    if (options.cause !== undefined) this.cause = options.cause;
+  }
+}
+
+/** A ticket status the board may not set (`done`, AD-10) was asked for (story 4.2); nothing ran. */
+export class StatusNotAllowedError extends CoreError {
+  override readonly name = 'StatusNotAllowedError';
+  constructor(readonly status: string) {
+    super('status_not_allowed', STATUS_NOT_ALLOWED_MESSAGE);
+  }
+}
+
+/**
+ * The ticket's status is no longer the one the request expected (story 4.10):
+ * someone else (an agent, a `git pull`) changed it since the board showed it.
+ * Nothing was written.
+ */
+export class TicketChangedError extends CoreError {
+  override readonly name = 'TicketChangedError';
+  constructor(
+    readonly ref: string,
+    readonly expected: string,
+    readonly actual: string,
+  ) {
+    super('ticket_changed', TICKET_CHANGED_MESSAGE);
+  }
+}
+
+/**
+ * A change to a ticket the board showed as Done that didn't confirm the
+ * reopen (story 4.10, user decision 2026-10-02): `expectedStatus` was `done`
+ * without `reopen: true`. Nothing ran.
+ */
+export class ReopenNotConfirmedError extends CoreError {
+  override readonly name = 'ReopenNotConfirmedError';
+  constructor(readonly ref: string) {
+    super('reopen_not_confirmed', REOPEN_NOT_CONFIRMED_MESSAGE);
+  }
+}
+
 /** An operation is not allowed in the entity's current state. */
 export class InvalidOperationError extends CoreError {
   override readonly name = 'InvalidOperationError';
@@ -98,6 +279,31 @@ export class SessionBusyError extends CoreError {
 /** The session already holds the most queued messages it may (`MAX_QUEUED_MESSAGES`); this one was not stored. */
 export class QueueFullError extends SessionBusyError {
   override readonly name = 'QueueFullError';
+}
+
+/** The plain reason a message can't go right away while a permission card waits (send now or wait). */
+export const ANSWER_FIRST_REASON = 'Answer the request above first, then send your message.';
+
+/**
+ * A message was to be sent right away while the agent waits for an answer on
+ * a permission card (send now or wait): nothing was sent or recorded.
+ */
+export class AnswerFirstError extends CoreError {
+  override readonly name = 'AnswerFirstError';
+  constructor() {
+    super('answer_first', ANSWER_FIRST_REASON);
+  }
+}
+
+/** The plain reason a waiting message can't be changed (send now or wait). */
+export const MESSAGE_NOT_QUEUED_REASON = 'That message is no longer waiting. It was sent, removed, or the agent stopped.';
+
+/** A waiting message was to be changed or sent right away, but it is no longer waiting (send now or wait): nothing changed. */
+export class MessageNotQueuedError extends CoreError {
+  override readonly name = 'MessageNotQueuedError';
+  constructor() {
+    super('message_not_queued', MESSAGE_NOT_QUEUED_REASON);
+  }
 }
 
 /** Stop was asked of a session whose agent is not answering (nothing to stop). */
@@ -151,6 +357,76 @@ export class DriverIsTerminalError extends CoreError {
   override readonly name = 'DriverIsTerminalError';
   constructor(message = 'The terminal is driving this chat. Switch back to the chat to send a message.') {
     super('driver_is_terminal', message);
+  }
+}
+
+/** Skip all was asked for while Developer mode is off (permission modes): nothing changed. */
+export class DeveloperModeRequiredError extends CoreError {
+  override readonly name = 'DeveloperModeRequiredError';
+  constructor(message = 'Skip all is only offered in Developer mode. Turn it on in Settings → Appearance first.') {
+    super('developer_mode_required', message);
+  }
+}
+
+/** Skip all was asked for without the user's confirmation of its warning: nothing changed. */
+export class ConfirmationRequiredError extends CoreError {
+  override readonly name = 'ConfirmationRequiredError';
+  constructor(message = 'Confirm the warning to turn on Skip all.') {
+    super('confirmation_required', message);
+  }
+}
+
+/** A handoff whose brief, agent and chat no unused, unexpired preview token covers (handoff): nothing changed. */
+export class HandoffNotPreviewedError extends CoreError {
+  override readonly name = 'HandoffNotPreviewedError';
+  constructor(message = 'This summary wasn’t previewed for that agent, or its preview expired. Review it again, then continue.') {
+    super('handoff_not_previewed', message);
+  }
+}
+
+/** A permission mode the chat's agent, or its session, doesn't offer: nothing changed. */
+export class ModeUnavailableError extends CoreError {
+  override readonly name = 'ModeUnavailableError';
+  constructor(message: string) {
+    super('mode_unavailable', message);
+  }
+}
+
+/** A chat was asked for a model its agent (or its session) doesn't list (story 11): nothing changed. */
+export class ModelUnavailableError extends CoreError {
+  override readonly name = 'ModelUnavailableError';
+  constructor(message: string) {
+    super('model_unavailable', message);
+  }
+}
+
+/** A new chat named an agent that isn't registered (epic 6): nothing was created. */
+export class UnknownAgentError extends CoreError {
+  override readonly name = 'UnknownAgentError';
+  constructor(message = "Ogden Agents doesn't have that agent on this computer. Pick another one.") {
+    super('agent_unknown', message);
+  }
+}
+
+/** Why a new chat with a registered agent is refused (6.3): it isn't installed, isn't signed in, or needs a trusted project. */
+export type AgentNotReadyCode = 'agent_not_installed' | 'agent_signed_out' | 'project_not_trusted';
+
+/**
+ * A new chat was refused because its agent can't start it now (epic 6, 6.3):
+ * nothing was created. `message` is plain words naming the agent; `action`
+ * is what fixes it. Never a path, a key or a URL.
+ */
+export class AgentNotReadyError extends CoreError {
+  override readonly name = 'AgentNotReadyError';
+  override readonly code: AgentNotReadyCode;
+  constructor(
+    code: AgentNotReadyCode,
+    message: string,
+    readonly agentId: string,
+    readonly action: 'install' | 'sign_in' | 'trust_project',
+  ) {
+    super(code, message);
+    this.code = code;
   }
 }
 
@@ -236,5 +512,60 @@ export class TerminalHandoffError extends CoreError {
     super(code, elapsedMs === undefined ? code : `${code} (${elapsedMs} ms)`);
     this.code = code;
     this.elapsedMs = elapsedMs;
+  }
+}
+
+/** Why a build use-case refused (story 5.2; frozen by 5.3): each answers 409 with its code, and nothing was written. */
+export type BuildRefusalCode =
+  | 'prerequisite_unmet'
+  | 'not_ready'
+  | 'run_active'
+  | 'sandbox_unavailable'
+  | 'checkout_dirty'
+  | 'merge_conflict'
+  | 'checks_failed'
+  | 'plan_uncommitted'
+  | 'vcs_unavailable'
+  | 'disk_space_low'
+  | 'run_not_active';
+
+/**
+ * A use-case whose lane has not shipped yet was asked for (story 5.3: such
+ * as building every ready ticket before 5.8). The server answers 501
+ * `not_implemented`; nothing was written.
+ */
+export class NotImplementedError extends CoreError {
+  override readonly name = 'NotImplementedError';
+  constructor(message: string) {
+    super('not_implemented', message);
+  }
+}
+
+/**
+ * A build, approve or reject was refused (story 5.2): `code` says why for
+ * the API, `message` in plain words for the user (a shared sentence; a
+ * `sandbox_unavailable` may carry the sandbox's own plain reason).
+ */
+export class BuildRefusedError extends CoreError {
+  override readonly name = 'BuildRefusedError';
+  override readonly code: BuildRefusalCode;
+  constructor(code: BuildRefusalCode, message: string) {
+    super(code, message);
+    this.code = code;
+  }
+}
+
+/** What a read-only build session refuses (story 5.2): it runs on its own. */
+export const BUILD_SESSION_READ_ONLY_MESSAGE = 'An unattended build runs on its own: its session is read-only.';
+
+/**
+ * A user message, permission mode, driver change or Stop was asked of an
+ * unattended build's session (story 5.2 review loop 1): core refuses it,
+ * changing nothing. Only the builds use-case sends its first prompt.
+ */
+export class BuildSessionReadOnlyError extends CoreError {
+  override readonly name = 'BuildSessionReadOnlyError';
+  constructor() {
+    super('build_session_read_only', BUILD_SESSION_READ_ONLY_MESSAGE);
   }
 }

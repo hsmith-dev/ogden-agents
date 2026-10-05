@@ -1,16 +1,24 @@
 import { Desktop, Moon, Sun } from '@phosphor-icons/react';
 import { useAppearance } from '@/appearance/appearance-provider';
+import { useDeveloperModeSave } from '@/appearance/developer-mode';
 import { AppShortcutSetting } from '@/appearance/app-shortcut-setting';
 import type { Density, ThemePreference } from '@/appearance/appearance';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Field } from '@/ui/field';
+import { Notice } from '@/ui/notice';
 import { PageBody, PageSection } from '@/ui/page';
 import { Switch } from '@/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/ui/toggle-group';
 
-/** `/settings/appearance`: theme, density, Developer mode and terminal screen-reader mode, applied at once and saved in this browser. */
+/**
+ * `/settings/appearance`: theme, density, Developer mode and terminal
+ * screen-reader mode, applied at once. Theme, density and the screen reader
+ * are saved in this browser; Developer mode is saved by the server (it gates
+ * a chat's Skip all), so every tab follows it.
+ */
 export function AppearancePage() {
   const { appearance, update } = useAppearance();
+  const { saving: developerSaving, error: developerError, save: setDeveloperMode } = useDeveloperModeSave();
   return (
     <>
       <WorkspaceHeader title="Appearance" />
@@ -60,16 +68,23 @@ export function AppearancePage() {
             id="developer-mode"
             layout="inline"
             label="Developer mode"
-            description="Uses Compact density, lists each tool call, shows skill names beside plain labels, and shows keyboard hints."
+            description="Uses Compact density, lists each tool call, shows skill names beside plain labels, shows keyboard hints, and offers the terminal and Skip all. Turning it off puts every chat in Skip all back in Ask."
           >
             <Switch
               id="developer-mode"
               data-testid="developer-mode"
               aria-describedby="developer-mode-description"
               checked={appearance.developerMode}
-              onCheckedChange={(checked) => update({ developerMode: checked })}
+              aria-busy={developerSaving || undefined}
+              disabled={developerSaving}
+              onCheckedChange={setDeveloperMode}
             />
           </Field>
+          {developerError === undefined ? null : (
+            <Notice variant="blocked" role="alert" data-testid="developer-mode-error">
+              {developerError}
+            </Notice>
+          )}
           <Field
             id="terminal-screen-reader"
             layout="inline"

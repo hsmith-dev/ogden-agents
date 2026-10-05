@@ -1,13 +1,14 @@
-import { FolderSimplePlus, GearSix, HandWaving, PaintBrush, Plus, Robot, Wrench } from '@phosphor-icons/react';
+import { Bell, FolderSimplePlus, GearSix, HandWaving, Info, PaintBrush, Plus, Robot, Wrench } from '@phosphor-icons/react';
 import { NEW_PROJECTS_SETTINGS_LABEL } from '@ogden-agents/shared';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { memo, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { AGENT_NAME } from '@/chat/chat-api';
+import { useChatRename } from '@/chat/chat-name';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/ui/dropdown-menu';
 import {
   Sidebar,
   SidebarContent,
   SidebarEarlier,
+  SidebarFilter,
   SidebarFooter,
   SidebarGroup,
   SidebarGroupLabel,
@@ -29,15 +30,17 @@ import { NewTabButton } from './new-tab-button';
 import { QuitButton } from './quit-button';
 import { ServerStatus } from './server-status';
 import { useSidebarData } from './sidebar-data';
+import { SidebarStartChat } from './sidebar-start-chat';
 import { holdOrder, relativeTime, type SidebarModel, type SidebarRow } from './sidebar-model';
 import { Wordmark } from './wordmark';
-import { WorkspaceSwitcher } from './workspace-switcher';
+import { filterProjects, showsProjectFilter } from './project-filter';
 
 /**
- * The status sidebar (EXPERIENCE.md Information Architecture): the workspace
- * switcher in the header, Needs you on top, then each workspace with its
- * session rows (story 2.11) and Add project, then the footer with Settings,
- * New tab, Quit Ogden Agents and the server status.
+ * The status sidebar (EXPERIENCE.md Information Architecture): the one place
+ * to see, open, add and manage projects (backlog story 13). Needs you on top,
+ * then each workspace (its name opens it, a gear its settings) with its
+ * session rows (story 2.11), a filter when there are many, and Add project,
+ * then the footer with Settings, New tab, Quit Ogden Agents and the server status.
  */
 export function StatusSidebar() {
   return (
@@ -135,6 +138,9 @@ function isKeyboardFocus(element: Element): boolean {
  */
 function StatusSidebarBody() {
   const projectsId = useId();
+  const filterId = useId();
+  const [filter, setFilter] = useState('');
+  const { wsId: currentWsId } = useParams({ strict: false }) as { wsId?: string };
   const { model: live, loading, unloaded, now } = useSidebarData();
   const [pointerInside, setPointerInside] = useState(false);
   const [focusInside, setFocusInside] = useState(false);
@@ -148,12 +154,14 @@ function StatusSidebarBody() {
   const [adding, setAdding] = useState(false);
   const navigate = useNavigate();
   const first = model.needsYou[0];
+  const filtering = showsProjectFilter(model.groups.length);
+  // Filtered-out groups stay mounted and only hide in the full form: the rail has no field, so it shows them all.
+  const matching = new Set((filtering ? filterProjects(model.groups, filter) : model.groups).map((group) => group.wsId));
+  const filterStatus = !filtering || filter.trim() === '' ? '' : matching.size === 0 ? 'No projects match' : `${matching.size} of ${model.groups.length} projects`;
   return (
     <>
       <SidebarHeader>
         <Wordmark />
-        {/* The rail has no room for it; Add project stays below. */}
-        <WorkspaceSwitcher className="ml-auto md:max-lg:hidden" />
       </SidebarHeader>
       <SidebarContent
         ref={contentRef}
@@ -174,16 +182,27 @@ function StatusSidebarBody() {
           <SidebarGroupLabel id={projectsId}>Projects</SidebarGroupLabel>
           {!loading && model.groups.length === 0 ? <SidebarText data-testid="no-projects">No projects yet</SidebarText> : null}
           {loading ? <Skeleton data-testid="sidebar-loading" /> : null}
+          {filtering ? (
+            <SidebarFilter id={filterId} label="Filter projects" value={filter} onValueChange={setFilter} status={filterStatus} data-testid="project-filter">
+              {matching.size === 0 ? <SidebarText data-testid="no-project-matches">No projects match</SidebarText> : null}
+            </SidebarFilter>
+          ) : null}
           {model.groups.map((group) => (
             <SidebarWorkspaceGroup
               key={group.wsId}
               data-testid="workspace-group"
               name={group.name}
+              filteredOut={!matching.has(group.wsId)}
+              current={group.wsId === currentWsId}
+              link={<Link to="/w/$wsId" params={{ wsId: group.wsId }} activeOptions={{ exact: true, includeSearch: false }} data-testid="workspace-link" />}
+              settingsLink={<Link to="/w/$wsId/settings" params={{ wsId: group.wsId }} data-testid="workspace-settings" />}
               collapsed={collapsed.has(group.wsId)}
               onCollapsedChange={(value) => setCollapsed(group.wsId, value)}
               summary={group.summary}
             >
               {unloaded.has(group.wsId) ? <Skeleton data-testid="sidebar-loading" /> : null}
+              {/* A project with no chats offers to start one (EXPERIENCE.md Status sidebar). */}
+              {!unloaded.has(group.wsId) && group.rows.length === 0 && group.earlier.length === 0 ? <SidebarStartChat wsId={group.wsId} name={group.name} /> : null}
               <SessionRows rows={group.rows} now={now} />
               <SidebarEarlier count={group.earlier.length}>
                 <SessionRows rows={group.earlier} now={now} />
@@ -236,7 +255,10 @@ function SessionRows({ rows, now }: { rows: readonly SidebarRow[]; now: number }
           sesId={row.sesId}
           state={row.state}
           title={row.title}
+          userTitle={row.userTitle}
           updatedAt={row.updatedAt}
+          agentName={row.agentName}
+          model={row.model}
           time={relativeTime(row.updatedAt, now)}
           active={params.sesId === row.sesId}
         />
@@ -251,27 +273,54 @@ const SessionRow = memo(function SessionRow({
   sesId,
   state,
   title,
+  userTitle,
   updatedAt,
+  agentName,
+  model,
   time,
   active,
-}: Pick<SidebarRow, 'wsId' | 'sesId' | 'state' | 'title' | 'updatedAt'> & { time: string; active: boolean }) {
+}: Pick<SidebarRow, 'wsId' | 'sesId' | 'state' | 'title' | 'userTitle' | 'updatedAt' | 'agentName' | 'model'> & { time: string; active: boolean }) {
+  // Rename in place (backlog story 12): double click the row or press F2 on it.
+  const rename = useChatRename({ wsId, sesId, name: title, title: userTitle });
+  const item = useRef<HTMLLIElement>(null);
+  const row = () => item.current?.querySelector<HTMLElement>('[data-testid="status-row"]');
+  // Not in the rail (md to lg): a name field doesn't fit its width; the header's Rename works there.
+  const startRename = () => {
+    // The rail is the row's CSS: there its label is for screen readers only (taken out of the flow).
+    const label = row()?.querySelector('bdi')?.parentElement;
+    if (label != null && getComputedStyle(label).position === 'absolute') return;
+    rename.start(row);
+  };
   return (
-    <SidebarMenuItem>
-      <SidebarStatusRow
-        data-testid="status-row"
-        state={state}
-        title={title}
-        caption={`${AGENT_NAME}, ${STATE_WORDS[state].toLowerCase()}`}
-        time={{ label: time, dateTime: updatedAt }}
-        isActive={active}
-      >
-        <Link to="/w/$wsId/s/$sesId" params={{ wsId, sesId }} />
-      </SidebarStatusRow>
+    <SidebarMenuItem ref={item}>
+      {rename.editing ? (
+        <div className="px-1 py-1">{rename.field}</div>
+      ) : (
+        <SidebarStatusRow
+          data-testid="status-row"
+          state={state}
+          title={title}
+          caption={`${agentName}, ${STATE_WORDS[state].toLowerCase()}`}
+          detail={model === undefined ? undefined : `${agentName} on ${model}`}
+          time={{ label: time, dateTime: updatedAt }}
+          isActive={active}
+          aria-keyshortcuts="F2"
+          onDoubleClick={startRename}
+          onKeyDown={(event) => {
+            if (event.key !== 'F2') return;
+            event.preventDefault();
+            startRename();
+          }}
+        >
+          <Link to="/w/$wsId/s/$sesId" params={{ wsId, sesId }} />
+        </SidebarStatusRow>
+      )}
+      {rename.status}
     </SidebarMenuItem>
   );
 });
 
-/** Settings sections: Agents (9.1), Appearance, New projects (10.4) and Tools (Notifications arrives with a later epic), and Welcome again (9.5). */
+/** Settings sections: Agents (9.1), Appearance, New projects (10.4), Notifications (backlog story 8; webhooks join it with builds) and Tools, and Welcome again (9.5). */
 function SettingsMenu() {
   const { setSheetOpen } = useSidebar();
   return (
@@ -303,9 +352,21 @@ function SettingsMenu() {
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
+          <Link to="/settings/notifications">
+            <Bell aria-hidden />
+            Notifications
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
           <Link to="/settings/tools">
             <Wrench aria-hidden />
             Tools
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
+          <Link to="/settings/about">
+            <Info aria-hidden />
+            About
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>

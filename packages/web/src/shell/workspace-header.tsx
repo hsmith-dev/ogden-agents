@@ -13,9 +13,15 @@ export function WorkspaceHeader({
   wsId,
   tab = 'chats',
   compactOnPhone = false,
+  titleHidden = false,
+  titleAction,
   children,
 }: {
   title: string;
+  /** The title for screen readers only (while a field stands in for it: a chat's rename). */
+  titleHidden?: boolean;
+  /** Right after the title (a chat's Rename, backlog story 12). */
+  titleAction?: ReactNode;
   wsId?: string;
   tab?: WorkspaceTabId;
   /**
@@ -29,7 +35,11 @@ export function WorkspaceHeader({
   return (
     <PageHeader>
       <SidebarTrigger data-testid="sidebar-trigger" />
-      <PageTitle className={compactOnPhone && wsId !== undefined ? 'max-sm:sr-only' : undefined}>{title}</PageTitle>
+      <PageTitle className={titleHidden ? 'sr-only' : compactOnPhone && wsId !== undefined ? 'max-sm:sr-only' : undefined} data-testid="page-title">
+        {title}
+      </PageTitle>
+      {/* Kept at phone width too: with the title hidden there, Rename is still the way to rename from the header. */}
+      {titleAction}
       {wsId === undefined ? null : <WorkspaceTabs wsId={wsId} active={tab} />}
       {children}
     </PageHeader>

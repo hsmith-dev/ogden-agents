@@ -95,7 +95,8 @@ describe('the new-projects default routes (story 10.4)', () => {
 
   it('refuses an unavailable piece with 409 feature_unavailable, writing nothing', async () => {
     const { server, tab, file, dataDir } = await setup(['planning']);
-    expect(await refusalOf(await request(server, tab, 'PATCH', API_ROUTES.newProjectDefaults, { bmadPieces: ['board'] }))).toEqual({
+    // Retrospectives isn't shipped yet (Planning and Board are, since story 4.2, and Unattended builds since 5.2).
+    expect(await refusalOf(await request(server, tab, 'PATCH', API_ROUTES.newProjectDefaults, { bmadPieces: ['board', 'builds', 'retrospectives'] }))).toEqual({
       status: 409,
       code: 'feature_unavailable',
       message: FEATURE_UNAVAILABLE_MESSAGE,
@@ -137,7 +138,7 @@ describe('adding a project with the default (story 10.4)', () => {
   it('with an unavailable body piece answers 409 feature_unavailable: no project, no event', async () => {
     const { server, tab } = await setup(['planning']);
     const before = server.core.events.lastSeq();
-    expect(await refusalOf(await request(server, tab, 'POST', API_ROUTES.workspaces, { path: tempRepo(), bmadPieces: ['board'] }))).toEqual({
+    expect(await refusalOf(await request(server, tab, 'POST', API_ROUTES.workspaces, { path: tempRepo(), bmadPieces: ['board', 'builds', 'retrospectives'] }))).toEqual({
       status: 409,
       code: 'feature_unavailable',
       message: FEATURE_UNAVAILABLE_MESSAGE,
@@ -160,11 +161,12 @@ describe('adding a project with the default (story 10.4)', () => {
 
   it('a stored default no longer shipped gives a new project only what still works', async () => {
     const dataDir = tempDataDir();
-    writeFileSync(join(dataDir, PREFERENCES_FILE), JSON.stringify({ newProjects: { bmadPieces: ['board', 'builds'] } }));
+    writeFileSync(join(dataDir, PREFERENCES_FILE), JSON.stringify({ newProjects: { bmadPieces: ['board', 'builds', 'retrospectives'] } }));
     const server = await startTestServer({ dataDir, availableBmadPieces: ['planning'] });
     const tab = await signIn(server);
-    expect(await defaultsOf(server, tab)).toEqual({ bmadPieces: ['board', 'builds'] });
+    expect(await defaultsOf(server, tab)).toEqual({ bmadPieces: ['board', 'builds', 'retrospectives'] });
     const workspace = await add(server, tab, { path: tempRepo() });
-    expect(server.core.bmad.pieces(workspace.id)).toEqual([]);
+    // Board ships (story 4.2) and Unattended builds (5.2); Retrospectives doesn't yet.
+    expect(server.core.bmad.pieces(workspace.id)).toEqual(['board', 'builds']);
   });
 });

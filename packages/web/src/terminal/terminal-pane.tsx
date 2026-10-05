@@ -32,7 +32,7 @@ export function conversationProps(driving: boolean, peekOpen: boolean): Pick<Com
   if (!driving) return {};
   return {
     className: peekOpen
-      ? 'absolute inset-y-2 right-(--panel-padding) z-10 w-(--sidebar-width) max-w-[calc(100%-var(--space-12))] rounded-lg border border-border bg-background shadow-float xl:static xl:z-auto xl:w-96 xl:max-w-none xl:flex-none xl:shadow-none'
+      ? 'absolute inset-y-2 right-(--panel-padding) z-10 w-(--sidebar-width) max-w-[calc(100%-var(--space-12))] rounded-lg border border-border bg-background shadow-float xl:relative xl:inset-auto xl:z-auto xl:w-96 xl:max-w-none xl:flex-none xl:shadow-none'
       : 'hidden',
     role: 'region',
     'aria-label': READ_ONLY_CONVERSATION,

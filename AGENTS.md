@@ -16,7 +16,7 @@ A local browser UI for running BMAD with coding agents, shipped as one npm packa
 
 - `pnpm install --frozen-lockfile`, then `pnpm typecheck` and `pnpm test`; `pnpm test` does not typecheck.
 - `pnpm run pack && pnpm smoke` proves a clean npx install of the tarball.
-- `node scripts/vendor-forks.mjs --check` after touching `vendor/` or `forks.lock`.
+- `node scripts/bmad-lock.mjs --check` (network) after touching `packages/adapters/src/bmad-source/bmad-lock.json` or `archive.ts`; how to move a pin is in `CONTRIBUTING.md`.
 
 ## Conventions that differ from defaults
 

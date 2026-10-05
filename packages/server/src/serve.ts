@@ -16,6 +16,7 @@ import { parseArgs } from 'node:util';
 import { ensureDataDir } from '@ogden-agents/core';
 import { createLogger, createRotatingFileWriter, LOG_DIR, redact, type Logger, type LogWriter } from './log.js';
 import { EXIT_ALREADY_RUNNING, ServerAlreadyRunningError } from './instance-lock.js';
+import { shellModeOf, watchParent } from './shell-mode.js';
 import { start, type RunningServer } from './start.js';
 
 /**
@@ -113,6 +114,8 @@ async function main(): Promise<void> {
   };
   process.once('SIGINT', () => stop('SIGINT'));
   process.once('SIGTERM', () => stop('SIGTERM'));
+  // Inside the desktop app (story 13.3): exit when the pipe from the app closes, however the app ended.
+  if (shellModeOf() === 'desktop') watchParent(process.stdin, () => stop('parent gone'));
 }
 
 void main();

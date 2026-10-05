@@ -39,6 +39,18 @@ export async function installAgent(agentId: string, auth: Auth = tabAuth): Promi
   return AgentSetupStatus.parse(json);
 }
 
+/** `DELETE /api/v1/agents/:agentId/install`: uninstalls (epic 6 entry 7). */
+export async function uninstallAgent(agentId: string, auth: Auth = tabAuth): Promise<AgentSetupStatus> {
+  const json = await call(auth, apiPath(API_ROUTES.agentInstall, { agentId }), { method: 'DELETE' }, "Ogden Agents couldn't uninstall that");
+  return AgentSetupStatus.parse(json);
+}
+
+/** `POST /api/v1/agents/:agentId/sign-out`: signs out of the user's own account (epic 6 entry 7). */
+export async function signOutAgent(agentId: string, auth: Auth = tabAuth): Promise<AgentSetupStatus> {
+  const json = await call(auth, apiPath(API_ROUTES.agentSignOut, { agentId }), { method: 'POST' }, "Ogden Agents couldn't sign out");
+  return AgentSetupStatus.parse(json);
+}
+
 /** `DELETE /api/v1/agents/:agentId/sign-in`: stops a sign-in in progress. */
 export const cancelSignIn = (agentId: string, auth: Auth = tabAuth) =>
   callNoContent(auth, apiPath(API_ROUTES.agentSignIn, { agentId }), { method: 'DELETE' }, "Ogden Agents couldn't cancel signing in");
@@ -89,6 +101,11 @@ export interface SignIn {
   sendCode(code: string): Promise<boolean>;
   /** The sign-in page, for a link, when this tab didn't open it (the agent opens its own, or the popup was blocked). */
   link: string | undefined;
+  /**
+   * A code to type on the sign-in page, when the agent's sign-in gives one
+   * (epic 6, entry 6). Like the URL, kept only in this tab's memory.
+   */
+  code: string | undefined;
   /** Whether a request is running (start, cancel or a code). */
   busy: boolean;
   /** Plain words for the last request that failed. */
@@ -99,6 +116,7 @@ export interface SignIn {
 export function useSignIn(agentId: string, auth: Auth = tabAuth): SignIn {
   const queryClient = useQueryClient();
   const [link, setLink] = useState<string | undefined>(undefined);
+  const [code, setCode] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const refresh = useCallback(() => void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY }), [queryClient]);
@@ -114,9 +132,11 @@ export function useSignIn(agentId: string, auth: Auth = tabAuth): SignIn {
     setBusy(true);
     setError(undefined);
     setLink(undefined);
+    setCode(undefined);
     startSignIn(agentId, auth).then(
       (reply) => {
         setBusy(false);
+        if (reply.state === 'signing_in' && reply.code !== undefined) setCode(reply.code);
         if (reply.state === 'signing_in' && reply.url !== null) {
           if (tab !== null && !tab.closed) tab.location.href = reply.url;
           else setLink(reply.url);
@@ -141,6 +161,7 @@ export function useSignIn(agentId: string, auth: Auth = tabAuth): SignIn {
       () => {
         setBusy(false);
         setLink(undefined);
+        setCode(undefined);
         refresh();
       },
       (caught: unknown) => {
@@ -164,7 +185,7 @@ export function useSignIn(agentId: string, auth: Auth = tabAuth): SignIn {
     }
   };
 
-  return { start, cancel, sendCode, link, busy, error };
+  return { start, cancel, sendCode, link, code, busy, error };
 }
 
 export interface ApiKeyActions {
@@ -250,4 +271,45 @@ export function useInstall(agentId: string, auth: Auth = tabAuth): InstallAction
   };
 
   return { start, busy, error };
+}
+
+export interface AgentActions {
+  /** Uninstalls the agent; the card then follows the agents query. */
+  uninstall(): void;
+  /** Signs the agent out of the user's own account. */
+  signOut(): void;
+  /** Which request is running, if any. */
+  busy: 'uninstall' | 'sign_out' | undefined;
+  /** Plain words for the last request that failed. */
+  error: string | undefined;
+}
+
+/** Uninstall and Sign out (epic 6 entry 7), for an agent whose status offers them. */
+export function useAgentActions(agentId: string, auth: Auth = tabAuth): AgentActions {
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState<AgentActions['busy']>(undefined);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const run = (which: NonNullable<AgentActions['busy']>, request: () => Promise<AgentSetupStatus>, fallback: string) => {
+    if (busy !== undefined) return;
+    setBusy(which);
+    setError(undefined);
+    request().then(
+      (agent) => {
+        setBusy(undefined);
+        queryClient.setQueryData<AgentSetupStatus[]>(AGENTS_QUERY_KEY, (agents) => agents?.map((known) => (known.agentId === agent.agentId ? agent : known)));
+        void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
+      },
+      (caught: unknown) => {
+        setBusy(undefined);
+        setError(caught instanceof Error ? caught.message : fallback);
+        void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
+      },
+    );
+  };
+  return {
+    uninstall: () => run('uninstall', () => uninstallAgent(agentId, auth), "Ogden Agents couldn't uninstall that. Try again."),
+    signOut: () => run('sign_out', () => signOutAgent(agentId, auth), "Ogden Agents couldn't sign out. Try again."),
+    busy,
+    error,
+  };
 }

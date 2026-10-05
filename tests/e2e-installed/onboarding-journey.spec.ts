@@ -11,8 +11,9 @@
  *    folder, through the installed server's test install source.
  * 3. Sign in through the fake login: the page's visit to `https://claude.ai/**`
  *    goes to the login's localhost callback. Welcome moves on by itself.
- * 4. Welcome's one question, Simple chats or BMad Method?, with BMad Method
- *    greyed as Coming soon (no piece ships); add the project, say Not now to
+ * 4. Welcome's one question, Simple chats or BMad Method?, with Simple chats
+ *    picked and BMad Method available (epic 4 ships Planning and Board; it
+ *    was Coming soon before 0.4.0); add the project, say Not now to
  *    the shortcut, land in the empty Chats. Settings → Welcome → Continue
  *    doesn't ask the question again.
  * 5. The first chat: the reply streams in.
@@ -30,7 +31,7 @@
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
-import { BMAD_COMING_SOON_LABEL, FIRST_PROJECT_QUESTION } from '../../packages/shared/src/bmad.ts';
+import { FIRST_PROJECT_QUESTION } from '../../packages/shared/src/bmad.ts';
 import { API_ROUTES, requestQuit } from '../support.js';
 import { send } from '../e2e/chat-server.js';
 import { expectConnected, sidebarOf, storedToken } from '../e2e/tab.js';
@@ -113,12 +114,13 @@ async function installClaudeCode(page: Page, launched: Launched, server: Onboard
 /** Adds the project from Welcome through the folder browser, says Not now to the shortcut, and lands in its empty Chats. */
 async function addProjectAndFinish(page: Page, server: OnboardingServer) {
   await expect(headline(page)).toHaveText('Add a project to get started.');
-  // The first project's one question (10.4): Simple chats preselected; with no BMad piece shipped, BMad Method is greyed, Coming soon.
+  // The first project's one question (10.4): Simple chats preselected; epic 4 ships Planning and Board (epic 10 retro
+  // A3), so BMad Method can be picked and isn't Coming soon. The journey keeps Simple chats.
   const question = page.getByTestId('first-project-question');
   await expect(question).toContainText(FIRST_PROJECT_QUESTION);
   await expect(question.getByRole('radio', { name: 'Simple chats' })).toHaveAttribute('aria-checked', 'true');
-  await expect(question.getByRole('radio', { name: 'BMad Method' })).toBeDisabled();
-  await expect(page.getByTestId('first-project-bmad-coming-soon')).toHaveText(BMAD_COMING_SOON_LABEL);
+  await expect(question.getByRole('radio', { name: 'BMad Method' })).toBeEnabled();
+  await expect(page.getByTestId('first-project-bmad-coming-soon')).toHaveCount(0);
   await page.getByTestId('welcome-page').getByRole('button', { name: 'Add project' }).click();
   const dialog = page.getByTestId('add-project-dialog');
   await dialog.getByTestId('folder-quick-picks').getByRole('button', { name: 'Documents' }).click();

@@ -15,6 +15,7 @@ import {
   createNewProjectDefaults,
   FeatureUnavailableError,
   PREFERENCES_FILE,
+  UnknownAgentError,
   ValidationError,
   type Core,
 } from '../src/index.js';
@@ -113,7 +114,7 @@ describe('adding a project (story 10.4)', () => {
     const before = core.events.lastSeq();
     const workspace = adding(core, { get: () => ({ bmadPieces: ['planning'] }) }).addProject(tempDir('ogden-agents-repo-'));
     expect(core.bmad.pieces(workspace.id)).toEqual(['planning']);
-    expect(core.permissions.getSettings(workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: ['planning'] });
+    expect(core.permissions.getSettings(workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: ['planning'], bmadScriptsTrusted: false });
     const appended = core.events.readAfter(before);
     expect(appended.map((event) => event.type)).toEqual(['workspace.created', 'workspace.settings_changed']);
     expect(appended[1]).toMatchObject({
@@ -159,5 +160,79 @@ describe('adding a project (story 10.4)', () => {
     const core = openTestCore(undefined, undefined, { availableBmadPieces: ['planning'] });
     const workspace = adding(core, { get: () => ({ bmadPieces: ['board', 'builds'] }) }).addProject(tempDir('ogden-agents-repo-'));
     expect(core.bmad.pieces(workspace.id)).toEqual([]);
+  });
+});
+
+describe("a project's default agent and the default for new projects (epic 6, entry 6)", () => {
+  const registered = (ids: readonly string[]) => (agentId: string) => ids.includes(agentId);
+
+  it('keeps the default agent beside the pieces, clears it with null, and refuses an agent the install does not have', () => {
+    const dataDir = tempDir();
+    const defaults = createNewProjectDefaults({ dataDir, bmad: { isAvailable: () => false }, isAgentRegistered: registered(['agent-a', 'agent-b']) });
+    expect(defaults.set({ defaultAgentId: 'agent-b' })).toEqual({ bmadPieces: [], defaultAgentId: 'agent-b' });
+    expect(defaults.set({ bmadPieces: [] })).toEqual({ bmadPieces: [], defaultAgentId: 'agent-b' });
+    expect(() => defaults.set({ defaultAgentId: 'gone-agent' })).toThrow(UnknownAgentError);
+    expect(defaults.get().defaultAgentId).toBe('agent-b');
+    expect(defaults.set({ defaultAgentId: null })).toEqual({ bmadPieces: [] });
+    expect(() => defaults.set({})).toThrow(ValidationError);
+    // An agent the install no longer has reads as the install's default.
+    defaults.set({ defaultAgentId: 'agent-b' });
+    expect(createNewProjectDefaults({ dataDir, bmad: { isAvailable: () => false }, isAgentRegistered: registered(['agent-a']) }).get()).toEqual({ bmadPieces: [] });
+  });
+
+  it("writes the default agent on a new project's row, says so in its creation event, and leaves an existing project alone", () => {
+    const core = openTestCore(tempDir(), undefined, { isAgentRegistered: registered(['agent-a', 'agent-b']) });
+    const repoA = tempDir();
+    const existing = adding(core).addProject(repoA);
+    const add = createAddProject({
+      chat: { openWorkspace: (path, options) => core.entities.ensureWorkspace(path, options) },
+      defaults: { get: () => ({ bmadPieces: [], defaultAgentId: 'agent-b' }) },
+      bmad: core.bmad,
+    });
+    const added = add.addProject(tempDir());
+    expect(core.permissions.getSettings(added.id).defaultAgentId).toBe('agent-b');
+    const created = core.events.readAfter(0).filter((event) => event.type === 'workspace.settings_changed' && event.workspaceId === added.id);
+    expect(created.map((event) => event.payload)).toEqual([{ cautionLevel: 'ask_every_time', previous: 'ask_every_time', defaultAgentId: 'agent-b', previousDefaultAgentId: null }]);
+    expect(add.addProject(repoA).id).toBe(existing.id);
+    expect(core.permissions.getSettings(existing.id).defaultAgentId).toBeUndefined();
+  });
+
+  it('changes a project default only to a registered agent, appends only on a change, and reads a gone agent as unset', () => {
+    const dataDir = tempDir();
+    const core = openTestCore(dataDir, undefined, { isAgentRegistered: registered(['agent-a', 'agent-b']) });
+    const workspace = adding(core).addProject(tempDir());
+    const changes = () => core.events.readAfter(0).filter((event) => event.type === 'workspace.settings_changed').length;
+    expect(core.permissions.updateSettings(workspace.id, { defaultAgentId: 'agent-b' }).defaultAgentId).toBe('agent-b');
+    expect(changes()).toBe(1);
+    core.permissions.updateSettings(workspace.id, { defaultAgentId: 'agent-b' });
+    expect(changes()).toBe(1);
+    expect(() => core.permissions.updateSettings(workspace.id, { defaultAgentId: 'gone-agent' })).toThrow(UnknownAgentError);
+    expect(() => core.permissions.updateSettings(workspace.id, { defaultAgentId: 'Not An Id' })).toThrow(UnknownAgentError);
+    expect(changes()).toBe(1);
+    core.close();
+    const later = openTestCore(dataDir, undefined, { isAgentRegistered: registered(['agent-a']) });
+    expect(later.permissions.getSettings(workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false });
+  });
+
+  it('keeps an agent the install lacks now through a pieces-only save, and a damaged agent never costs the pieces (review)', () => {
+    const dataDir = tempDir();
+    createNewProjectDefaults({ dataDir, bmad: { isAvailable: () => true }, isAgentRegistered: registered(['agent-b']) }).set({ defaultAgentId: 'agent-b' });
+    const without = createNewProjectDefaults({ dataDir, bmad: { isAvailable: () => true }, isAgentRegistered: registered([]) });
+    expect(without.set({ bmadPieces: ['planning'] })).toEqual({ bmadPieces: ['planning'] });
+    expect(JSON.parse(readFileSync(join(dataDir, PREFERENCES_FILE), 'utf8'))).toEqual({ newProjects: { bmadPieces: ['planning'], defaultAgentId: 'agent-b' } });
+    writeFileSync(join(dataDir, PREFERENCES_FILE), JSON.stringify({ newProjects: { bmadPieces: ['planning'], defaultAgentId: 'Not An Id!' } }));
+    expect(createNewProjectDefaults({ dataDir, bmad: { isAvailable: () => true } }).get()).toEqual({ bmadPieces: ['planning'] });
+  });
+
+  it('clears a project default whose agent is gone, so it never comes back when the agent is registered again (review)', () => {
+    const dataDir = tempDir();
+    const core = openTestCore(dataDir, undefined, { isAgentRegistered: registered(['agent-b']) });
+    const workspace = adding(core).addProject(tempDir());
+    core.permissions.updateSettings(workspace.id, { defaultAgentId: 'agent-b' });
+    core.close();
+    const without = openTestCore(dataDir, undefined, { isAgentRegistered: registered([]) });
+    without.permissions.updateSettings(workspace.id, { defaultAgentId: null });
+    without.close();
+    expect(openTestCore(dataDir, undefined, { isAgentRegistered: registered(['agent-b']) }).permissions.getSettings(workspace.id).defaultAgentId).toBeUndefined();
   });
 });

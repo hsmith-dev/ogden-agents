@@ -36,13 +36,34 @@ notes = [
 references = ["_bmad-output/initiative-ogden-agents/ux-ogden-agents/EXPERIENCE.md#component-patterns"]
 
 [[entry]]
+id = 14
+type = "story"
+title = "Pinned upstream BMad, verified, instead of bundled forks"
+description = "Replaces the bundled BMad forks (vendor/, forks/, forks.lock, AD-13) with a lock file (bmad-lock.json beside the adapter, as uv-release.json) that pins upstream bmad-code-org/BMAD-METHOD and upstream bmad-code-org/bmad-loop each to a commit and a sha256 contentHash (the commits 1.9 vendored, no bump); a shared download, hash and safe-extract module (used by scripts and the server) fetches the upstream tarball only on an explicit user action (Set up or Update), caches it in Ogden's data folder, verifies the hash before use, refuses a mismatch, extracts into a fresh folder rejecting path traversal, symlinks and other non-regular entries, never downloads on a page load and reports offline as a plain error; setup and the board run BMad's scripts (setup.py, tickets.py) only from that verified cache, so Board on needs the cached BMad (the board says to Set up first); a bmad-loop resolver installs the pinned commit through uv into the data folder, used from epic 5; labels move to Ogden's own mapping file keyed by skill name with the SKILL.md description as fallback (4.5's labels reader takes its path); vendor/ and forks/ leave the repo and the package; CI keeps a drift check that the lock's hashes match upstream at the pinned commits; AD-12, AD-13, AD-14 and bmad-integration.md are amended (user decision 2026-10-02)."
+verify = "Tests against local fixture tarballs (never the network) show a matching hash is cached and used, a mismatched or tampered tarball is refused with nothing extracted, a tarball with a ../ path, an absolute path or a symlink is refused, an offline download is a plain error, no route other than Set up or Update downloads, and the board without the cached BMad answers that setup is needed; the packed package has no vendor/ and pnpm smoke passes with no network; CI's drift check matches the lock's hashes against upstream at the pinned commits."
+covers = ["E4-R1", "E4-R2", "E4-R4"]
+after = [2]
+hitl = false
+risk = "high"
+unknown = "Whether upstream's tarball at the pinned commit hashes the same as the fork's (the fork differed only by CRLF), and how the board behaves for a project already set up before the cache exists."
+notes = [
+  "Decision (2026-10-02, user): replace Ogden's bundled BMad forks with pinned upstream, verified. The user's fork repos on GitHub (hsmith-dev/BMAD-METHOD, hsmith-dev/bmad-loop) are no longer needed; deleting them is the user's own action.",
+  "Coordinates with 4.5 (PR #61): its labels reader reads Ogden's own mapping file instead of the fork's labels.toml; 4.5 is reworked after this entry.",
+]
+references = [
+  "_bmad-output/initiative-ogden-agents/architecture-ogden-agents/architecture-ogden-agents.md#ad-13--forks-are-bundled-and-locked-adopted",
+  "_bmad-output/initiative-ogden-agents/spec-ogden-agents/bmad-integration.md",
+  "scripts/vendor-forks.mjs",
+]
+
+[[entry]]
 id = 3
 type = "story"
 title = "Set up BMad Method in a project from the UI"
 description = "Runs the bundled fork's bmad setup (skills/bmad/scripts/setup.py, and --status for the check) through entry 2's uv runner against the workspace folder, copying skills from the package for Claude Code only (other agents in epic 6, user decision 2026-10-01; the bmad-catalog adapter may name the bmad setup skill per the AD-12 note), streams entry 2's setup progress events to a progress list, answers setup's config questions with defaults (the epic's setup assumption), started when the user turns on the first piece in a project without _bmad/ (from 10.5's BMad Method section) and also offered when a piece is on but _bmad/ is missing, and shows the result: a Set up panel component (not-set-up state, Set up button, progress list) placed on the tracer's Plan and Board pages only when their piece is on (AD-22, user decision 2026-10-01), the project reporting current afterwards, and Workspace settings shows the status with an update when the bundled fork is newer; chats keep working without BMAD; entries 6 and 9 keep the panel when they replace those pages, and entry 11 reuses this setup call for Upgrade this project."
 verify = "Against a fixture empty repo in CI on all three OSes, turning on Planning in Workspace settings starts setup, and Set up ends with setup.py --status reporting current and the progress list showing each step; a setup that fails (uv missing, unwritable folder) shows its plain error and leaves chats working; Workspace settings shows the status."
 covers = ["E4-R1", "E4-R2"]
-after = [2]
+after = [2, 14]
 hitl = false
 risk = "medium"
 unknown = "Which config questions setup.py asks and whether defaults are right for a non-developer; whether npx skills is needed for updates or setup.py covers them."
@@ -58,7 +79,7 @@ title = "Plain-language labels in the BMAD fork"
 description = "Adds to the bmad-method fork the metadata entry 2's catalog shape reads (a plain label, one sentence, a UI group per skill, and the entry action behind Start from an idea, with the next suggested step if help metadata does not give it), with the labels from EXPERIENCE.md Voice and Tone, which entry 4's catalog adapter reads, as one patch on the ogden-agents branch, tags the fork, re-vendors it and updates forks.lock; the hitl step is a person opening the upstream PR."
 verify = "node scripts/vendor-forks.mjs --check passes with the new tag, every planning skill listed in bmad-integration.md has a label and a group in the vendored metadata, and the upstream PR link is recorded in the build record."
 covers = ["E4-R4"]
-after = [2]
+after = [2, 14]
 hitl = true
 risk = "medium"
 unknown = "Where upstream would accept the labels (bmod.toml, SKILL.md frontmatter or a module file), which decides where the catalog reads them."
@@ -74,7 +95,7 @@ title = "The discovered catalog, refreshed as modules are installed"
 description = "Completes the bmad-catalog adapter to entry 2's shape from the workspace's installed metadata (bmod.toml, SKILL.md frontmatter, roster.toml, help files), reads entry 5's labels, groups, entry action and next suggested step (which entry 7 renders) with the SKILL.md description as fallback, needing only entry 5's tagged and re-vendored fork, not its upstream PR, records when each module first appeared for the New tag, reports the fork capabilities entry 11 gates on, and refreshes the catalog when the installed skills change without a restart."
 verify = "Against fixture repos, the catalog lists every vendored skill with its label and group, a skill without a label shows its SKILL.md description, and a test module copied into the fixture's skills while the server runs appears in the catalog with installedAt set and starts a planning session."
 covers = ["E4-R3", "E4-R4"]
-after = [3, 5]
+after = [3, 5, 14]
 hitl = false
 risk = "medium"
 references = [
@@ -174,10 +195,10 @@ references = [
 id = 12
 type = "story"
 title = "Refactor sweep"
-description = "Cleans up code across the epic, scoped when it starts from the build records and the review findings deferred during the epic, with no behavior change."
-verify = "All tests pass and no behavior changes."
+description = "Cleans up code across the epic, scoped when it starts from the build records and the review findings deferred during the epic, with no behavior change. Also (user, 2026-10-02, epic 10 retro A4, A5 and earlier notes): reproduces the sign-in-again.spec.ts:143 failure seen on 4.14 (\"signed in: resends once\") with --repeat-each=20 --retries=0, as 10.8 did, before calling it a flake, and if it reproduces finds the product cause and adds a failing-first test; extends scripts/check-provenance.mjs to fail when a Log entry whose summary starts \"Resolved:\" quotes an index line's (log: \"…\") phrase that is still in the Open items index, and when a Log entry added on the branch has no index line and no \"Resolved:\" closing it (the gap that missed the stale 3.10 F7 entry), and adds that missing \"Resolved:\" entry; makes the skill labels and the Start from an idea action come only from skills in the verified BMad source; dedupes the duplicates the epic's build records list; confirms the Board piece gate is done (every board route and the board page behind the board piece); and removes 4.14's bmad-loop pin in bmad-lock.json and its createBmadLoopResolver, which no v1 build uses since epic 5 took the ACP fallback (user, 2026-10-02; else 5.10 does it)."
+verify = "All tests pass and no behavior changes; sign-in-again.spec.ts passes 100 of 100 with --repeat-each=20 --retries=0 or its product cause is fixed with a failing-first test; the provenance check fails on a planted stale index line and on a planted unindexed Log entry, and passes on the tree; no bmad-loop pin or resolver remains."
 covers = ["E4-R1"]
-after = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+after = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14]
 hitl = false
 risk = "low"
 references = ["_bmad-output/initiative-ogden-agents/deferred-work.md"]
@@ -186,12 +207,14 @@ references = ["_bmad-output/initiative-ogden-agents/deferred-work.md"]
 id = 13
 type = "story"
 title = "End-to-end suite and release"
-description = "Extends the end-to-end suite, run in CI on macOS, Windows and Linux against the packed package, to set up BMAD in an empty repo, start from an idea against the fake agent, see a document card and turn it into tickets, see an agent's plan-file write reach the board, move a ticket to Ready, see a module installed while running appear, open a plain-upstream repo in reduced mode, and add a project with BMad off that shows no Plan or Board and gets no _bmad/ (user decision 2026-10-01); then the user runs the idea-to-ticketed-epic flow live with Claude Code and tags the release through the epic 1 release workflow."
-verify = "The suite passes on all three OSes and fails when the ticket.changed emit is removed, and the tagged ogden-agents version from npm passes the epic's live Done when checks on the user's machine. Each live check's result is written into the plan before the ticket moves to done."
+description = "Releases 0.4.0 as one release of epic 10, epic 4 and the per-chat permission modes story (user, 2026-10-02): first integrates the story/permission-modes branch (PR #63) and 10.9's release prep (the 0.4.0-rc.1 version, the CHANGELOG entry and the RELEASING epic-10 section, from story/10.9-e2e-and-release) onto this epic, then extends the CHANGELOG and RELEASING for epic 4 and the permission modes. Extends the end-to-end suite, run in CI on macOS, Windows and Linux against the packed package, to set up BMAD in an empty repo, start from an idea against the fake agent, see a document card and turn it into tickets, see an agent's plan-file write reach the board, move a ticket to Ready, see a module installed while running appear, open a plain-upstream repo in reduced mode, and add a project with BMad off that shows no Plan or Board and gets no _bmad/ (user decision 2026-10-01); moves the installed suite's Coming soon checks (10.9's bmad-journey.spec.ts \"nothing shipped\" step and onboarding-journey.spec.ts's greyed BMad Method check) off Planning and Board onto the pieces still unshipped, or reads SHIPPED_BMAD_PIECES, and adds an installed check that turning Board on asks to trust the project's scripts (epic 10 retro A3); then the user runs the idea-to-ticketed-epic flow, epic 10's live checks and a permission-mode chat live with Claude Code and tags 0.4.0 (after 0.4.0-rc.1 on next) through the epic 1 release workflow."
+verify = "The suite passes on all three OSes and fails when the ticket.changed emit is removed; the installed BMad journey's Coming soon checks name only pieces epic 4 does not ship, and turning Board on in the installed package asks to trust the project's scripts (epic 10 retro A3); the permission modes suite and 10.9's installed suite pass in the same run; and the tagged ogden-agents 0.4.0 from npm passes the live Done when checks of epic 4, epic 10 and the permission modes story on the user's machine. Each live check's result is written into the plan before the ticket moves to done."
 covers = ["E4-R1", "E4-R2", "E4-R3", "E4-R4", "E4-R5", "E4-R6", "E4-R7", "E4-R8", "E4-R9", "E4-R10"]
-after = [12, "2.13"]
+after = [12, "2.13", "10.9"]
 hitl = true
 risk = "medium"
 notes = [
   "From the epic 9/3 retros (2026-10-01, user approved): the live-check record is epic 9 retro A3 and L3. 3.10 F7 (own-server specs' children) went to 10.9, which runs first.",
+  "User decision 2026-10-02: 0.4.0 = epic 10 + epic 4 + per-chat permission modes (PR #63) in one release; this entry integrates story/permission-modes and 10.9's release prep (0.4.0-rc.1, CHANGELOG, RELEASING epic-10 section) and tags it. The permission modes story is a backlog story outside this tree, so it is named here and not in after.",
+  "Epic 10 retro A3 (approved 2026-10-02): installed tests stop expecting Planning and Board as Coming soon.",
 ]

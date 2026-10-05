@@ -20,12 +20,19 @@
  * transaction, so a card already shown is never re-evaluated. A write to a
  * protected path (`isProtectedSegment`) is never answered by the
  * level or by a rule: it always shows a card.
+ *
+ * A chat in Skip all (permission modes) skips both the level and the rules:
+ * whatever reaches core from it is one of the agent's own safety checks, so
+ * it always shows a card, with no Always allow ({@link SKIP_ALL_REFUSAL}).
+ * The mode is read inside the same transaction as the level.
  */
 import {
   alwaysAllowRefusal,
   DEFAULT_CAUTION_LEVEL,
+  SKIP_ALL_REFUSAL,
   MAX_DENY_REASON_LENGTH,
   ToolKind as ToolKindSchema,
+  type AgentId,
   type AlwaysAllowScope,
   type BmadPiece,
   type CoreEvent,
@@ -78,9 +85,19 @@ export interface PermissionDecisionInput {
   reason?: string | undefined;
 }
 
+/** How one request is decided (story 5.6). */
+export interface PermissionRequestOptions {
+  /**
+   * A build with the user watching: the level is `ask_every_time`, no stored
+   * rule allows it and no Always allow is offered, whatever the project's
+   * own settings say. Only a card (or a Stop) answers.
+   */
+  attended?: boolean | undefined;
+}
+
 export interface Permissions extends WorkspaceSettingsAccess {
   /** Decides one request from the session's agent. Never rejects: a failure is a deny. */
-  request(sessionId: SessionId, request: AgentPermissionRequest): Promise<AgentPermissionDecision>;
+  request(sessionId: SessionId, request: AgentPermissionRequest, options?: PermissionRequestOptions): Promise<AgentPermissionDecision>;
   /**
    * The user's answer to a pending request of this session in this
    * workspace. Throws {@link PermissionNotPendingError} when it is not
@@ -113,7 +130,7 @@ export function createDecliningPermissions(): Permissions {
     removeRule: (_workspaceId, ruleId) => {
       throw new NotFoundError('permission rule', ruleId);
     },
-    getSettings: () => ({ cautionLevel: DEFAULT_CAUTION_LEVEL, bmadPieces: [] }),
+    getSettings: () => ({ cautionLevel: DEFAULT_CAUTION_LEVEL, bmadPieces: [], bmadScriptsTrusted: false }),
     updateSettings: (workspaceId) => {
       throw new NotFoundError('workspace', workspaceId);
     },
@@ -134,6 +151,12 @@ export interface PermissionsOptions {
   onError?: (error: unknown) => void;
   /** Whether this install ships a BMad piece, so it may be turned on (core's `bmad.isAvailable`). Default: none is. */
   isBmadPieceAvailable?: (piece: BmadPiece) => boolean;
+  /** Whether an agent is registered, so it may be a project's default (epic 6, entry 6). Default: every well-formed id. */
+  isAgentRegistered?: ((agentId: AgentId) => boolean) | undefined;
+  /** Whether Developer mode is on now (core's install settings): Skip all as a project's default needs it. Absent: off. */
+  developerMode?: (() => boolean) | undefined;
+  /** The agents' own config folders, which join the protected paths (their descriptors', epic 12, 12.3). Read at each request. Default: none. */
+  agentConfigFolders?: (() => readonly string[]) | undefined;
 }
 
 interface Pending {
@@ -158,7 +181,7 @@ const toRule = (row: RuleRow): PermissionRule => ({
   createdAt: row.createdAt,
 });
 
-export function createPermissions({ db, events, entities, sessionEvents, onError, isBmadPieceAvailable = () => false }: PermissionsOptions): Permissions {
+export function createPermissions({ db, events, entities, sessionEvents, onError, isBmadPieceAvailable = () => false, isAgentRegistered, developerMode, agentConfigFolders }: PermissionsOptions): Permissions {
   const { orm } = db;
   /** Requests waiting for the user, by request id. */
   const pending = new Map<string, Pending>();
@@ -217,9 +240,10 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
 
   return {
     // The caution level and BMad pieces (moved to `workspace-settings.ts`, story 10.8).
-    ...createWorkspaceSettings({ db, events, isBmadPieceAvailable }),
+    ...createWorkspaceSettings({ db, events, isBmadPieceAvailable, isAgentRegistered, developerMode }),
 
-    async request(sessionId, request) {
+    async request(sessionId, request, requestOptions = {}) {
+      const attended = requestOptions.attended === true;
       try {
         if (closed) return { outcome: 'cancelled' };
         const parsedKind = ToolKindSchema.safeParse(request.kind);
@@ -235,9 +259,10 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
         // needs no path, but any path it names must be inside too.
         const named = Array.isArray(request.paths) ? request.paths : [];
         // A write to a protected path, or a command naming one, always shows a card (F1).
+        const extraFolders = agentConfigFolders?.() ?? [];
         const protectedPath =
-          (WRITE_KINDS.has(kind) && (workspace === undefined || touchesProtectedPath(workspace, request.paths))) ||
-          (command !== undefined && commandNamesProtectedPath(command));
+          (WRITE_KINDS.has(kind) && (workspace === undefined || touchesProtectedPath(workspace, request.paths, extraFolders))) ||
+          (command !== undefined && commandNamesProtectedPath(command, extraFolders));
         const cautionPathsInside = PATH_KINDS.has(kind)
           ? pathsInside
           : workspace !== undefined && (named.length === 0 || pathsInsideWorkspace(workspace, named));
@@ -245,7 +270,11 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
         const outcome = events.transaction(() => {
           const session = entities.getSession(sessionId);
           if (session === undefined) throw new NotFoundError('session', sessionId);
-          const cautionLevel = readCautionLevel(orm, session.workspaceId) ?? DEFAULT_CAUTION_LEVEL;
+          const cautionLevel = attended ? 'ask_every_time' : (readCautionLevel(orm, session.workspaceId) ?? DEFAULT_CAUTION_LEVEL);
+          const permissionMode = session.permissionMode;
+          // Skip all: no caution level, no rule, and no Always allow (it never writes a rule).
+          const skipAll = permissionMode === 'skip_all';
+          const offered = skipAll || attended ? null : scope;
           sessionEvents.appendSessionEvent(sessionId, {
             type: 'permission.requested',
             payload: {
@@ -258,8 +287,9 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
                 ...(command === undefined ? {} : { command }),
                 ...(protectedPath ? { protectedPath: true as const } : {}),
               },
-              alwaysAllowScope: scope,
+              alwaysAllowScope: offered,
               cautionLevel,
+              permissionMode,
             },
           });
           if (session.state !== 'working' && session.state !== 'waiting') {
@@ -271,14 +301,14 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
             return { type: 'cancelled' as const };
           }
           // A request that names a command never runs on the level: a command is asked or ruled (2.6).
-          if (!protectedPath && command === undefined && session.workspaceId === workspace?.id && cautionAllows(cautionLevel, kind, cautionPathsInside)) {
+          if (!attended && !skipAll && !protectedPath && command === undefined && session.workspaceId === workspace?.id && cautionAllows(cautionLevel, kind, cautionPathsInside)) {
             sessionEvents.appendSessionEvent(sessionId, {
               type: 'permission.resolved',
               payload: { sessionId, requestId, decision: 'allow_once', by: 'caution' },
             });
             return { type: 'caution' as const };
           }
-          const rule = protectedPath ? undefined : findRule(session.workspaceId, kind, command, pathsInside && session.workspaceId === workspace?.id);
+          const rule = protectedPath || skipAll || attended ? undefined : findRule(session.workspaceId, kind, command, pathsInside && session.workspaceId === workspace?.id);
           if (rule !== undefined) {
             sessionEvents.appendSessionEvent(sessionId, {
               type: 'permission.resolved',
@@ -287,14 +317,14 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
             return { type: 'rule' as const };
           }
           entities.setSessionState(sessionId, 'waiting');
-          return { type: 'ask' as const, workspaceId: session.workspaceId };
+          return { type: 'ask' as const, workspaceId: session.workspaceId, scope: offered, skipAll };
         });
 
         if (outcome.type === 'rule' || outcome.type === 'caution') return { outcome: 'allow_once' };
         if (outcome.type === 'cancelled') return { outcome: 'cancelled' };
         return await new Promise<AgentPermissionDecision>((answer) => {
-          const refusal = kind === 'execute' && command !== undefined ? alwaysAllowRefusal(command) : undefined;
-          pending.set(requestId, { requestId, sessionId, workspaceId: outcome.workspaceId, scope, refusal, answer });
+          const refusal = outcome.skipAll ? SKIP_ALL_REFUSAL : kind === 'execute' && command !== undefined ? alwaysAllowRefusal(command) : undefined;
+          pending.set(requestId, { requestId, sessionId, workspaceId: outcome.workspaceId, scope: outcome.scope, refusal, answer });
         });
       } catch (error) {
         reportError(error);
@@ -312,6 +342,11 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
       }
       if (decision === 'allow_always' && entry.scope === null) {
         throw new ValidationError(entry.refusal ?? "Always allow isn't offered for this request.", [{ path: ['decision'], message: 'no always-allow scope' }]);
+      }
+      // A card shown before the chat moved to Skip all: a Skip-all chat never writes a rule. Read now, in
+      // the same synchronous step as the write below (no await between), so nothing can change it in between.
+      if (decision === 'allow_always' && entities.getSession(sessionId)?.permissionMode === 'skip_all') {
+        throw new ValidationError(SKIP_ALL_REFUSAL, [{ path: ['decision'], message: 'skip_all writes no rule' }]);
       }
       const kept = decision === 'deny' && reason !== undefined && reason.trim() !== '' ? reason : undefined;
       if (kept !== undefined && kept.length > MAX_DENY_REASON_LENGTH) {

@@ -47,4 +47,17 @@ export default defineConfig([
     // handshake and the spawn need: never `better-sqlite3` (packaging test).
     entry: { launcher: 'src/launcher.ts' },
   },
+  {
+    ...common,
+    // `ogden-install.mjs` (story 3): installs and starts Ogden Agents from a
+    // GitHub Release; the start scripts run it, and it ships as a release
+    // asset, not inside the npm package. Everything it needs is bundled
+    // (Node built-ins only, nothing from node_modules), in its own folder so
+    // `assemble-dist` never copies it into `dist/`.
+    entry: { 'ogden-install': 'src/installer/main.ts' },
+    outDir: 'dist-installer',
+    clean: false,
+    fixedExtension: true,
+    deps: { neverBundle: [/^node:/], alwaysBundle: [/^@ogden-agents\//], onlyBundle: false },
+  },
 ]);

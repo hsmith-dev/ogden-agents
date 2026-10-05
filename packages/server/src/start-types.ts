@@ -2,11 +2,15 @@
  * The server's start options and what a started server is (moved from
  * `start.ts`, story 3.9).
  */
-import type { ClaudeCodeSetupOptions, PtyLoader } from '@ogden-agents/adapters';
-import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, Core, SecretStorePort, ToolchainPort } from '@ogden-agents/core';
+import type { ClaudeCodeSetupOptions, FetchLike, PtyLoader } from '@ogden-agents/adapters';
+import type { AgentWiring } from './agent-wiring.js';
+import type { AntigravityPorts } from './antigravity-wiring.js';
+import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, NotifierPort, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort } from '@ogden-agents/core';
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
 import type { Logger } from './log.js';
+import type { ShellMode } from './shell-mode.js';
+import type { UpdatesOption } from './update-check.js';
 
 export interface StartOptions {
   /** Port to try first. `0` asks the OS for any free port. Default `DEFAULT_PORT` (4317). */
@@ -40,8 +44,23 @@ export interface StartOptions {
    * clicks Install.
    */
   toolchain?: ToolchainPort;
-  /** Override the chat agent (tests). Default: the `acp-claude-code` adapter. */
+  /** Override Claude Code's chat agent (tests). Default: the `acp-claude-code` adapter. */
   agent?: AgentPort;
+  /**
+   * More agents a chat can be started with, after Claude Code (epic 6; tests:
+   * the fake ACP agent as a second agent). Never set by the launcher: a
+   * shipped install has Claude Code only until another agent's adapter ships.
+   * Each runs with its own environment rules, its id's API key only, and
+   * its setup port (if any) decides whether a new chat with it is refused (6.3).
+   */
+  extraAgents?: readonly AgentWiring[];
+  /**
+   * Antigravity (epic 6 entry 5), registered after Claude Code: by default
+   * its own adapters on the data folder (a pinned copy found there, a
+   * Gemini API key); a test gives ports in their place (the fake agent's
+   * Antigravity personality), or `false` to leave it out.
+   */
+  antigravity?: false | AntigravityPorts;
   /**
    * The Claude Agent ACP adapter's entry script (or, in tests, any script
    * that speaks ACP over stdio, such as the fake agent). Default:
@@ -113,10 +132,66 @@ export interface StartOptions {
    */
   availableBmadPieces?: readonly BmadPiece[];
   /**
-   * Override the read-only BMad detection (story 10.3). Default: the
-   * `bmad-catalog` adapter. Ignored when {@link core} is given.
+   * Override the read-only BMad detection (story 10.3) and the catalog's
+   * skills (story 4.1). Default: the `bmad-catalog` adapter. With {@link core}
+   * given, only the skills come from it.
    */
   bmadCatalog?: BmadCatalogPort;
+  /**
+   * Override the project's tickets (story 4.1; tests: a stub). Default: the
+   * `tickets-v7` adapter, running the verified pinned `tickets.py` with `uv`.
+   */
+  ticketStore?: TicketStorePort;
+  /**
+   * Override the pinned upstream BMad Method (story 4.14, AD-13; tests: the
+   * `bmad-source-memory` stub, or the real adapter on a fixture lock).
+   * Default: the `bmad-source` adapter on `dataDir`, which downloads only
+   * when the user asks (`POST /api/v1/bmad/source`).
+   */
+  bmadSource?: BmadSourcePort;
+  /**
+   * The `fetch` the default {@link bmadSource} downloads with (tests only: a
+   * counting or failing stub, so no test reaches GitHub). Ignored when
+   * {@link bmadSource} is given. The launcher never sets it.
+   */
+  bmadFetch?: FetchLike;
+  /**
+   * Variables added to the environment of every `uv` child (the version
+   * probe and every BMad Method script run; story 4.2), on top of
+   * `uvEnvironment` (tests only: a temp `UV_CACHE_DIR`, the uv-managed test
+   * Python with no download). The launcher never sets it.
+   */
+  extraUvEnv?: Readonly<Record<string, string>>;
+  /**
+   * Override the sandbox check unattended builds make (story 5.2; tests: a
+   * fixed answer). Default: the `sandbox-claude-native` adapter, or the
+   * `OGDEN_AGENTS_TEST_SANDBOX` hook's answer on a test run.
+   */
+  sandbox?: SandboxPort;
+  /** Override git for unattended builds (story 5.2; tests). Default: the `vcs-git` adapter on the user's `git`. */
+  vcs?: VcsPort;
+  /**
+   * Override the build runner (story 5.3's wiring slot; tests: `build-memory`).
+   * Default: the `buildrunner-acp` adapter (5.4 and 5.7 complete it).
+   */
+  buildRunner?: BuildRunnerPort;
+  /**
+   * Override how notifications are sent (story 5.3's wiring slot; 11.4 wires
+   * `notify-webhook` as the default and reads it; tests: `notify-memory`).
+   */
+  notifier?: NotifierPort;
+  /**
+   * The "newer version" check (story 13.7): `false` turns it off, a client
+   * replaces the real npm one (tests: a fake, so none reaches the network).
+   * Default: the real `fetch`, except `OGDEN_AGENTS_OFFLINE` is set or this is
+   * a test run, which never makes a request.
+   */
+  updates?: UpdatesOption;
+  /**
+   * `desktop` when the desktop app started this server (story 13.3). Default:
+   * `OGDEN_AGENTS_SHELL=desktop` in the environment, which only the app sets.
+   */
+  shell?: ShellMode | null;
   /**
    * Called once the server has stopped by itself (Quit, or a restart the
    * launcher asked for) and everything is closed. A server process exits here.

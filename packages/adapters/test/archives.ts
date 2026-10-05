@@ -64,8 +64,12 @@ export function paxPath(path: string): Entry {
   return { name: 'PaxHeader', type: 'x', data: `${length}${body}` };
 }
 
-/** A zip archive; entries are deflated unless `stored`. */
-export function zip(entries: ReadonlyArray<{ name: string; data: string | Buffer; stored?: boolean }>): Buffer {
+/**
+ * A zip archive; entries are deflated unless `stored`. `mode` writes Unix
+ * file attributes (a link is `0o120777`); `dosAttributes` the MS-DOS ones
+ * (`0x10` is a folder).
+ */
+export function zip(entries: ReadonlyArray<{ name: string; data: string | Buffer; stored?: boolean; mode?: number; dosAttributes?: number }>): Buffer {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
   let offset = 0;
@@ -84,13 +88,14 @@ export function zip(entries: ReadonlyArray<{ name: string; data: string | Buffer
     local.writeUInt16LE(name.length, 26);
     const central = Buffer.alloc(46);
     central.writeUInt32LE(0x02014b50, 0);
-    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(entry.mode === undefined ? 20 : (3 << 8) | 20, 4);
     central.writeUInt16LE(20, 6);
     central.writeUInt16LE(entry.stored ? 0 : 8, 10);
     central.writeUInt32LE(crc, 16);
     central.writeUInt32LE(body.length, 20);
     central.writeUInt32LE(data.length, 24);
     central.writeUInt16LE(name.length, 28);
+    central.writeUInt32LE((((entry.mode ?? 0) << 16) | (entry.dosAttributes ?? 0)) >>> 0, 38);
     central.writeUInt32LE(offset, 42);
     locals.push(local, name, body);
     centrals.push(central, name);

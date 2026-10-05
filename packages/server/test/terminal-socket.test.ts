@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { createAdaptorServer } from '@hono/node-server';
 import { createMemoryTerminalPort, loadPty, projectSlug, stripTerminalEscapes } from '@ogden-agents/adapters';
-import { AGENT_SESSION_REF, createChat, openCore, type AgentEvent, type AgentPort, type AgentSession } from '@ogden-agents/core';
+import { AGENT_SESSION_REF, createAgentRegistry, createChat, openCore, type AgentEvent, type AgentPort, type AgentSession } from '@ogden-agents/core';
 import { Hono } from 'hono';
 import {
   API_ROUTES,
@@ -40,7 +40,7 @@ import {
   registerTerminalSocket,
   TERMINAL_TOO_MANY_VIEWERS,
 } from '../src/terminal-socket.js';
-import { signIn, startTestServer, tempDataDir, trackSocket, waitFor, type SignedIn, type TestServer } from './helpers.js';
+import { signIn, startTestServer, tempDataDir, trackSocket, waitFor, type SignedIn, type TestServer, registered } from './helpers.js';
 
 const FIXTURES = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures');
 const FAKE_CLI = join(FIXTURES, 'fake-claude-cli.mjs');
@@ -279,12 +279,15 @@ describe('the terminal contract on the API (story 3.2)', () => {
         dataDir: tempDataDir(),
         entities: core.entities,
         sessionEvents: core.sessionEvents,
-        agent: {
-          displayName: 'Test Agent',
-          startSession: () => Promise.reject(new Error('no agent in this test')),
-          reopenSession: () => Promise.reject(new Error('no agent in this test')),
-          listAuthMethods: () => Promise.reject(new Error('no agent in this test')),
-        },
+        agents: createAgentRegistry([
+          registered('test-agent', {
+              displayName: 'Test Agent',
+              skillInvocation: (skill) => `/${skill}`,
+              startSession: () => Promise.reject(new Error('no agent in this test')),
+              reopenSession: () => Promise.reject(new Error('no agent in this test')),
+              listAuthMethods: () => Promise.reject(new Error('no agent in this test')),
+            }),
+        ]),
       });
       const lines: string[] = [];
       const app = new Hono();
@@ -384,7 +387,7 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     expect(SessionResponse.parse(await switched.json()).session.driver).toBe('terminal');
     await waitFor(recorded, 'the CLI to start', 10_000);
     const cli = record();
-    expect(cli).toMatchObject({ argv: ['--resume', ref], cwd: realpathSync.native(repo), term: 'xterm-256color' });
+    expect(cli).toMatchObject({ argv: ['--resume', ref, '--permission-mode', 'default'], cwd: realpathSync.native(repo), term: 'xterm-256color' });
     // The chat's environment, and none of the server's own beyond it (AD-16).
     expect(cli.envNames).toContain('CLAUDE_CODE_EXECUTABLE');
     expect(cli.envNames).not.toContain('OGDEN_AGENTS_TEST_SECRET_STORE');
@@ -672,6 +675,29 @@ describe.runIf(realPty.ok || process.env.CI !== undefined)('a chat switched to i
     // The terminal itself runs on.
     expect(server.core.entities.getSession(sessionId)!.driver).toBe('terminal');
   }, 60_000);
+
+  it("starts the CLI in the chat's permission mode, refuses a mode change while it drives, and Developer mode off stops a Skip-all CLI (permission modes)", async () => {
+    const { server, tab, record, recorded } = await startTerminalServer();
+    const { ids, sessionId } = await answeredChat(server, tab);
+    const ref = server.core.entities.getSession(sessionId)!.adapterRefs[AGENT_SESSION_REF]!;
+    const put = (path: string, body: unknown) => fetch(`${server.url}${path}`, { method: 'PUT', headers: { ...tab.headers, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    expect((await put(API_ROUTES.developerMode, { developerMode: true })).status).toBe(200);
+    expect((await put(apiPath(API_ROUTES.sessionPermissionMode, ids), { mode: 'skip_all', confirm: true })).status).toBe(200);
+
+    expect((await switchTo(server, tab, ids, 'terminal')).status).toBe(200);
+    await waitFor(recorded, 'the CLI to start', 10_000);
+    const cli = record();
+    expect(cli.argv).toEqual(['--resume', ref, '--dangerously-skip-permissions']);
+    const refused = await put(apiPath(API_ROUTES.sessionPermissionMode, ids), { mode: 'ask' });
+    expect(refused.status).toBe(409);
+    expect(ApiErrorBody.parse(await refused.json()).error.code).toBe('driver_is_terminal');
+
+    // Developer mode off: the chat drives again, in Ask, and the CLI skipping its checks is gone.
+    expect((await put(API_ROUTES.developerMode, { developerMode: false })).status).toBe(200);
+    expect(server.core.entities.getSession(sessionId)).toMatchObject({ driver: 'ui', permissionMode: 'ask' });
+    expect(driverCauses(server, sessionId).at(-1)).toBe('developer_mode_off');
+    await waitFor(() => !alive(cli.pid), 'the CLI to be gone', 10_000);
+  }, 60_000);
 });
 
 /** A Claude-Code-like agent that answers at once and whose sessions resume in its CLI (for the in-memory terminal). */
@@ -695,6 +721,7 @@ function resumingAgent(): AgentPort {
   };
   return {
     displayName: 'Claude Code',
+    skillInvocation: (skill) => `/${skill}`,
     listAuthMethods: async () => [],
     startSession: async () => open(`agent-${++sessions}`),
     reopenSession: async (input) => ({ session: open(input.agentSessionId), restored: 'resumed' }),
@@ -714,9 +741,9 @@ function resumingAgent(): AgentPort {
 async function socketOnMemoryTerminal(options: { now?: () => number; attachWaitMs?: number } = {}) {
   const core = openCore(tempDataDir());
   const terminal = createMemoryTerminalPort({ echo: false });
-  const chat = createChat({ dataDir: tempDataDir(), entities: core.entities, sessionEvents: core.sessionEvents, agent: resumingAgent(), terminal });
+  const chat = createChat({ dataDir: tempDataDir(), entities: core.entities, sessionEvents: core.sessionEvents, agents: createAgentRegistry([registered('test-agent', resumingAgent())]), terminal });
   const workspace = chat.openWorkspace(tempDir('ogden-agents-repo-'));
-  const session = chat.createChatSession(workspace.id);
+  const session = await chat.createChatSession(workspace.id);
   chat.sendMessage(workspace.id, session.id, 'first question');
   await chat.settled();
   expect((await chat.switchDriver(workspace.id, session.id, 'terminal')).driver).toBe('terminal');

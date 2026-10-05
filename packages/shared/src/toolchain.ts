@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
 /**
- * The toolchain contract (story 1.8): the `uv` that BMad Method's scripts and
- * bmad-loop run through. The server finds a usable `uv` on this computer, or
+ * The toolchain contract (story 1.8): the `uv` that BMad Method's scripts run
+ * through. The server finds a usable `uv` on this computer, or
  * installs a private copy into its data folder when the user clicks Install
  * (AD-21: no standard flow requires a terminal).
  */

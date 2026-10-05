@@ -45,7 +45,7 @@ describe('BMad pieces over REST (story 10.1)', () => {
     const first = await startTestServer({ dataDir, lines, availableBmadPieces: ['planning'] });
     const tab = await signIn(first);
     const workspace = await addProject(first, tab);
-    expect(await settingsOf(first, tab, workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [] });
+    expect(await settingsOf(first, tab, workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false });
 
     const before = first.core.events.lastSeq();
     for (const body of [{ bmadPieces: ['yolo'] }, { bmadPieces: ['planning', 'planning'] }, { bmadPieces: 'planning' }]) {
@@ -57,7 +57,7 @@ describe('BMad pieces over REST (story 10.1)', () => {
 
     const patched = await request(first, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces: ['planning'] });
     expect(patched.status).toBe(200);
-    expect(WorkspaceSettingsResponse.parse(await patched.json()).settings).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: ['planning'] });
+    expect(WorkspaceSettingsResponse.parse(await patched.json()).settings).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: ['planning'], bmadScriptsTrusted: false });
     const changed = first.core.events.readAfter(before);
     expect(changed).toHaveLength(1);
     expect(changed[0]).toMatchObject({
@@ -71,7 +71,7 @@ describe('BMad pieces over REST (story 10.1)', () => {
 
     const second = await startTestServer({ dataDir, availableBmadPieces: ['planning'] });
     const again = await signIn(second);
-    expect(await settingsOf(second, again, workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: ['planning'] });
+    expect(await settingsOf(second, again, workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: ['planning'], bmadScriptsTrusted: false });
   });
 
   it('the probe route answers feature_off while planning is off and succeeds once it is on; it needs a token', async () => {

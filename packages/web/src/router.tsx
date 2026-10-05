@@ -42,6 +42,20 @@ const agentsSettingsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/agents-settings-page'), 'AgentsSettingsPage'),
 });
 
+/** Desktop notifications and the sound for when a chat needs you (backlog story 8). */
+const notificationsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/notifications',
+  component: lazyRouteComponent(() => import('./routes/notifications-page'), 'NotificationsPage'),
+});
+
+/** The version, its channel and the check for newer ones (story 13.7). */
+const aboutRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/about',
+  component: lazyRouteComponent(() => import('./routes/about-page'), 'AboutPage'),
+});
+
 /** The app-wide default for new projects (story 10.4). */
 const newProjectsRoute = createRoute({
   getParentRoute: () => settingsRoute,
@@ -70,6 +84,34 @@ const workspaceSettingsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/workspace-settings-page'), 'WorkspaceSettingsPage'),
 });
 
+/** A project's Plan page (story 4.1): its installed skills, each started as a planning session. */
+const workspacePlanRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$wsId/plan',
+  component: lazyRouteComponent(() => import('./routes/workspace-plan-page'), 'WorkspacePlanPage'),
+});
+
+/** A project's Board page (story 4.1): its tickets. */
+const workspaceBoardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$wsId/board',
+  component: lazyRouteComponent(() => import('./routes/workspace-board-page'), 'WorkspaceBoardPage'),
+});
+
+/** A ticket's detail sheet over the Board (story 4.9), `/w/:wsId/board/:ref`. */
+const workspaceBoardTicketRoute = createRoute({
+  getParentRoute: () => workspaceBoardRoute,
+  path: '$ref',
+  component: lazyRouteComponent(() => import('./routes/workspace-board-ticket'), 'WorkspaceBoardTicket'),
+});
+
+/** A ticket's build review (story 5.2, the tracer), `/w/:wsId/review/:ref`. */
+const workspaceReviewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$wsId/review/$ref',
+  component: lazyRouteComponent(() => import('./routes/workspace-review-page'), 'WorkspaceReviewPage'),
+});
+
 /** The session view's search: `?driver=terminal` mirrors who drives the chat (story 3.6); it never switches by itself. */
 export interface SessionSearch {
   driver?: 'terminal';
@@ -89,8 +131,11 @@ const routeTree = rootRoute.addChildren([
   welcomeRoute,
   workspaceChatsRoute,
   workspaceSettingsRoute,
+  workspacePlanRoute,
+  workspaceBoardRoute.addChildren([workspaceBoardTicketRoute]),
+  workspaceReviewRoute,
   sessionRoute,
-  settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute]),
+  settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute, notificationsRoute, aboutRoute]),
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

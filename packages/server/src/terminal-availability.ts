@@ -22,26 +22,33 @@ import type { Session, SessionTerminal } from '@ogden-agents/shared';
 /** The terminal of one session, as `GET` session reports it. */
 export type TerminalAvailabilityCheck = (session: Session) => Promise<SessionTerminal>;
 
+type TerminalAgent = Pick<AgentPort, 'displayName' | 'terminalResume'>;
+
 export interface TerminalAvailabilityOptions {
-  /** The chat's agent: whether its CLI can resume its sessions, and whether it is here (`locate`: never a wrapper that refreshes sign-in). */
-  agent: Pick<AgentPort, 'displayName' | 'terminalResume'>;
+  /**
+   * The session's agent (epic 6: each session has its own): whether its CLI
+   * can resume its sessions, and whether it is here (`locate`: never a
+   * wrapper that refreshes sign-in). A function is asked per session.
+   */
+  agent: TerminalAgent | ((session: Session) => TerminalAgent);
   /** The terminal port the chat itself uses; `undefined` when there is none. */
   terminal?: TerminalPort;
-  /** The chat's agent environment, read without refreshing anything. */
-  env?: () => Readonly<Record<string, string>>;
+  /** The session's agent environment, read without refreshing anything. */
+  env?: (session: Session) => Readonly<Record<string, string>>;
 }
 
 /** Re-exported for the callers that named it here (story 3.7); core owns it (story 3.4). */
 export { PTY_LOAD_FAILED };
 
-export function createTerminalAvailability({ agent, terminal, env = () => ({}) }: TerminalAvailabilityOptions): TerminalAvailabilityCheck {
+export function createTerminalAvailability({ agent: agentOption, terminal, env = () => ({}) }: TerminalAvailabilityOptions): TerminalAvailabilityCheck {
   return async (session) => {
+    const agent = typeof agentOption === 'function' ? agentOption(session) : agentOption;
     const support = checkTerminalSupport(agent, terminal);
     if ('available' in support) return support;
     const ref = session.adapterRefs[AGENT_SESSION_REF];
     const agentSessionId = ref === undefined || ref === '' ? undefined : ref;
     // No deadline here: each check's promise is awaited as it is.
-    const unavailable = await checkTerminalReady({ agent, support, agentSessionId, env: () => ({ ...env() }), step: (promise) => promise });
+    const unavailable = await checkTerminalReady({ agent, support, agentSessionId, env: () => ({ ...env(session) }), step: (promise) => promise });
     return unavailable ?? { available: true };
   };
 }

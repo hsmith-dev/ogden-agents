@@ -11,7 +11,6 @@ import {
   BMAD_COMING_SOON_LABEL,
   BMAD_FILES_STAY_TEXT,
   BMAD_PIECE_INFO,
-  BMAD_PIECES,
   BMAD_USE_LABEL,
   WORKSPACE_SETTINGS_BMAD_ANCHOR,
   type BmadPiece,
@@ -21,8 +20,8 @@ import { startServer } from '../support.js';
 import { startChat, withChatServer } from './chat-server.js';
 import { launchLink, openConnected } from './tab.js';
 
-/** Planning registered as shipped for this test: no real piece ships until epic 4 (story 10.2). */
-const AVAILABLE: readonly BmadPiece[] = ['planning'];
+/** What this install ships (Planning and Board since story 4.2): the restart keeps the same list. */
+const AVAILABLE: readonly BmadPiece[] = ['planning', 'board'];
 
 test('flipping Planning in one tab shows in another without a reload, and survives a restart', async ({ page, browser }) => {
   await withChatServer(page, async ({ server, dataDir, repo }) => {
@@ -63,21 +62,23 @@ test('flipping Planning in one tab shows in another without a reload, and surviv
   }, { extra: { availableBmadPieces: AVAILABLE } });
 });
 
-test('with no piece shipped, Planning is greyed, marked Coming soon and cannot be turned on', async ({ page }) => {
+test('Retrospectives is greyed, marked Coming soon and cannot be turned on; Planning, Board (story 4.2) and Unattended builds (story 5.2) can', async ({ page }) => {
   await withChatServer(page, async ({ server, repo }) => {
     const { wsId } = await startChat(page, repo);
     await page.goto(`${server.url}/w/${wsId}/settings#${WORKSPACE_SETTINGS_BMAD_ANCHOR}`);
-    const planning = page.getByRole('switch', { name: 'Planning' });
-    await expect(planning).toHaveAttribute('aria-checked', 'false');
-    await expect(planning).toBeDisabled();
-    await expect(page.getByTestId('bmad-planning-coming-soon')).toHaveText(BMAD_COMING_SOON_LABEL);
-    // Story 10.5: all four pieces are greyed and Coming soon, and so is the main switch.
-    for (const piece of BMAD_PIECES) {
-      await expect(page.getByRole('switch', { name: BMAD_PIECE_INFO[piece].label, exact: true })).toBeDisabled();
+    for (const piece of ['retrospectives'] as const) {
+      const control = page.getByRole('switch', { name: BMAD_PIECE_INFO[piece].label, exact: true });
+      await expect(control).toHaveAttribute('aria-checked', 'false');
+      await expect(control).toBeDisabled();
       await expect(page.getByTestId(`bmad-${piece}-coming-soon`)).toHaveText(BMAD_COMING_SOON_LABEL);
     }
-    await expect(page.getByRole('switch', { name: BMAD_USE_LABEL })).toBeDisabled();
-    await expect(page.getByTestId('bmad-use-coming-soon')).toHaveText(BMAD_COMING_SOON_LABEL);
+    // Epic 4 ships Planning and Board (story 4.2), epic 5 Unattended builds (story 5.2): none is Coming soon, and the main switch works.
+    for (const piece of ['planning', 'board', 'builds'] as const) {
+      await expect(page.getByRole('switch', { name: BMAD_PIECE_INFO[piece].label, exact: true })).toBeEnabled();
+      await expect(page.getByTestId(`bmad-${piece}-coming-soon`)).toHaveCount(0);
+    }
+    await expect(page.getByRole('switch', { name: BMAD_USE_LABEL })).toBeEnabled();
+    await expect(page.getByTestId('bmad-use-coming-soon')).toHaveCount(0);
     // Opened at the anchor: the section's heading has focus.
     await expect(page.getByRole('heading', { name: 'BMad Method' })).toBeFocused();
   });
@@ -111,8 +112,10 @@ test('the BMad Method section: the rule as the user picks, Coming soon, and the 
       const otherUse = switchIn(other, BMAD_USE_LABEL);
       await expect(otherBoard).toHaveAttribute('aria-checked', 'false');
 
-      // Unattended builds on: Board turns on too, and the status line says so.
+      // Unattended builds on: Board turns on too, and the status line says so. Both run the project's
+      // scripts, so this untrusted project asks first (story 4.2); allowed once, it never asks again.
       await builds.click();
+      await page.getByTestId('script-trust-confirm').click();
       await expect(builds).toHaveAttribute('aria-checked', 'true');
       await expect(board).toHaveAttribute('aria-checked', 'true');
       await expect(use).toHaveAttribute('aria-checked', 'true');

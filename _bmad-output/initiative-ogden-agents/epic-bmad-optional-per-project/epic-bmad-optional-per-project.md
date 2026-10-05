@@ -57,6 +57,8 @@ The switch, its contract, its settings UI, detection and migration. It installs 
 
 ## Notes
 
+- Decision (2026-10-02, user, epic 10 retro Q1): **0.4.0 ships with epic 4.** Epic 10 is not released on its own; 0.4.0 is one release of epic 10, epic 4 and the per-chat permission modes story (PR #63). 10.9's release prep (`0.4.0-rc.1`, CHANGELOG, RELEASING epic-10 section) is integrated and tagged by 4.13, so Done when 6's "its own `ogden-agents` npm version" is read as "0.4.0, together with epic 4", and the switch ships with Planning and Board behind it.
+- Decision (2026-10-02, user, "Show it now", recorded from the orchestrator log per epic 10 retro A6): the offer for a repo that already has `_bmad/` shows even while every piece is Coming soon.
 - Decision (2026-10-01, user): keep the herdr-like UI for everyone: the multi-workspace sidebar, several agents and several chats per project stay always on. BMad becomes optional per project, with a choice of each piece.
 - Decision (2026-10-01, user): new users start simple (BMad off) and opt in to more.
 - Decision (2026-10-01, user): this is a new epic after epic 3 and before epic 4 in build order.
@@ -107,7 +109,7 @@ The switch, its contract, its settings UI, detection and migration. It installs 
 
 ### Edits to epic 4 (approved by the user 2026-10-01; applied)
 
-- Initiative `tickets.toml`, epic 4 `after`: add `{ epic = 10, needs = "the per-project BMad pieces contract, guard, route helper and BmadCatalogPort.detect (10.2)" }`. Epics 5 and 7 gain the same at their inception (they guard `builds` and `retrospectives`); epic 6's builds use the `builds` guard.
+- Initiative `tickets.toml`, epic 4 `after`: add `{ epic = 10, needs = "the per-project BMad pieces contract, guard, route helper and BmadCatalogPort.detect (10.2)" }`. Epics 5 and 7 gain the same at their inception (they guard `builds` and `retrospectives`); epic 6 has no builds (user, 2026-10-02).
 - Envelope Description and E4-R2: Plan and Board appear only in a project with Planning or Board on; "Set up BMad Method in this project" runs when the user turns on the first piece in a project without `_bmad/` (from 10.5's section), not from a panel shown in every project. "Chats keep working without BMAD" stays.
 - E4-R3: the catalog is scanned only for workspaces with Planning on; `BmadCatalogPort` already exists from 10.2 with `detect`, and epic 4 extends it.
 - E4-R5: the Plan tab and `g p` exist only with Planning on; Board and `g b` only with Board on; they fill 10.6's tab slots.

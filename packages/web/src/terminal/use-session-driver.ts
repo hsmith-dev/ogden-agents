@@ -4,7 +4,7 @@ import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChatApiError, switchDriver } from '@/chat/chat-api';
 import type { SessionSearch } from '@/router';
-import { NOT_IDLE_REASON } from './driver-toggle';
+import { notIdleReason } from './driver-toggle';
 import { useDriverShortcut } from './use-driver-shortcut';
 import { useDriverSwitch } from './use-driver-switch';
 
@@ -24,6 +24,8 @@ export interface SessionDriverOptions {
   queued: number;
   /** Developer mode: the toggle and its shortcut are on only then. */
   developerMode: boolean;
+  /** The chat's agent by its product name (epic 6), for the reasons. */
+  agentName: string;
   /** A switch that failed (or a blocked shortcut), in words; `undefined` clears it. */
   setActionError: (message: string | undefined) => void;
 }
@@ -35,7 +37,7 @@ export interface SessionDriverOptions {
  * time with its shortcut, the cursor back in the composer on returning to the
  * chat, `?driver=terminal` mirroring who drives, and the read-only peek.
  */
-export function useSessionDriver({ wsId, sesId, events, session, state, queued, developerMode, setActionError }: SessionDriverOptions) {
+export function useSessionDriver({ wsId, sesId, events, session, state, queued, developerMode, agentName, setActionError }: SessionDriverOptions) {
   const search = useSearch({ strict: false }) as SessionSearch;
   const navigate = useNavigate();
   /** The driver this tab asked for last, so switching back to chat puts the cursor in the composer. */
@@ -58,7 +60,7 @@ export function useSessionDriver({ wsId, sesId, events, session, state, queued, 
       : state === undefined
         ? null
         : state !== 'idle' || queued > 0
-          ? NOT_IDLE_REASON
+          ? notIdleReason(agentName)
           : undefined;
 
   // The view flipped (or the session changed driver by itself): the switch is over, and availability may have changed.

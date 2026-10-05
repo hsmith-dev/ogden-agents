@@ -43,6 +43,104 @@
       "when": 1790894073503,
       "tag": "0005_bmad_offer_dismissed",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790944597061,
+      "tag": "0006_bmad_scripts_trusted",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1790968723083,
+      "tag": "0007_bmad_modules_seen",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1791088650874,
+      "tag": "0008_permission_modes",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1791122607661,
+      "tag": "0009_bmad_scripts_fingerprint",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1791128954037,
+      "tag": "0010_session_agent",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1791129310850,
+      "tag": "0011_workspace_default_agent",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1791158062229,
+      "tag": "0012_session_auto_title",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1791165205478,
+      "tag": "0013_workspace_default_permission_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1791165317648,
+      "tag": "0014_agent_models",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1791165541116,
+      "tag": "0015_while_working",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1791170099577,
+      "tag": "0016_run_branch",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1791170595848,
+      "tag": "0017_run_contract",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1791171160390,
+      "tag": "0018_run_base_branch",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1791198477316,
+      "tag": "0019_agent_files_fingerprint",
+      "breakpoints": true
     }
   ]
 }

@@ -6,6 +6,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
+import { helperEnvironment } from './child-env.js';
 
 /** What {@link killProcessTree} needs of the system; replaced in tests. */
 export interface ProcessTreeSystem {
@@ -25,7 +26,8 @@ export const nodeProcessTreeSystem: ProcessTreeSystem = {
   get env() {
     return process.env;
   },
-  run: (file, args) => void spawnSync(file, args, { windowsHide: true, stdio: 'ignore' }),
+  // The base allowlist only (AD-16): taskkill never sees an agent key.
+  run: (file, args) => void spawnSync(file, args, { windowsHide: true, stdio: 'ignore', env: helperEnvironment() }),
   killGroup: (pid) => void process.kill(-pid, 'SIGKILL'),
 };
 

@@ -6,6 +6,7 @@ import {
   asksFirstProjectChoice,
   bmadMethodPieces,
   exitTarget,
+  resolveExitTarget,
   firstProjectPieces,
   redirectsToWelcome,
   selectedAgent,
@@ -57,6 +58,27 @@ describe('Welcome rules', () => {
   it('finishing or skipping opens the added project, else Projects', () => {
     expect(exitTarget('ws_1')).toEqual({ to: '/w/$wsId', params: { wsId: 'ws_1' } });
     expect(exitTarget(undefined)).toEqual({ to: '/' });
+    // Story 4.6: a first project added with Planning on opens on its Plan (Flow 1 step 5).
+    expect(exitTarget('ws_1', ['planning', 'board'])).toEqual({ to: '/w/$wsId/plan', params: { wsId: 'ws_1' } });
+    expect(exitTarget('ws_1', ['board'])).toEqual({ to: '/w/$wsId', params: { wsId: 'ws_1' } });
+    expect(exitTarget('ws_1', [])).toEqual({ to: '/w/$wsId', params: { wsId: 'ws_1' } });
+    expect(exitTarget(undefined, ['planning'])).toEqual({ to: '/' });
+  });
+
+  it('resolveExitTarget decides from the pieces the project actually got (story 4.6 review)', async () => {
+    // The question wasn't asked: the server applied New-project defaults that include Planning.
+    expect(await resolveExitTarget('ws_1', async () => ['planning'])).toEqual({ to: '/w/$wsId/plan', params: { wsId: 'ws_1' } });
+    expect(await resolveExitTarget('ws_1', async () => [])).toEqual({ to: '/w/$wsId', params: { wsId: 'ws_1' } });
+    // The settings can't be read: its Chats.
+    expect(await resolveExitTarget('ws_1', () => Promise.reject(new Error('offline')))).toEqual({ to: '/w/$wsId', params: { wsId: 'ws_1' } });
+    let asked = false;
+    expect(
+      await resolveExitTarget(undefined, async () => {
+        asked = true;
+        return ['planning'];
+      }),
+    ).toEqual({ to: '/' });
+    expect(asked).toBe(false);
   });
 
   it('/ sends a tab to Welcome only once onboarding has loaded as not done', () => {

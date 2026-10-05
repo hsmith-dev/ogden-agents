@@ -19,12 +19,19 @@ import {
   type BmadPiece,
   type BmadPieceAvailability,
   type NewProjectDefaults,
+  type PermissionMode,
+  PERMISSION_MODE_LABELS,
 } from '@ogden-agents/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
+import { useAppearance } from '@/appearance/appearance-provider';
+import { keepSaved } from '@/api/keep-saved';
 import { call, type Auth } from '@/api/http';
 import { tabAuth } from '@/auth/tab-token';
+import { DefaultAgentView, type DefaultAgentViewProps } from '@/chat/default-agent-view';
+import { projectDefaultAgent, useChatAgents } from '@/chat/use-chat-agents';
 import { bmadMethodPieces } from '@/onboarding/welcome-model';
+import { DefaultPermissionModeView, SKIP_ALL_NEW_PROJECTS_WARNING, type DefaultPermissionModeViewProps } from '@/permissions/default-permission-mode';
 import { CheckboxOption } from '@/ui/checkbox';
 import { Notice } from '@/ui/notice';
 import { PageSection } from '@/ui/page';
@@ -45,6 +52,35 @@ export const NEW_PROJECT_DEFAULTS_QUERY_KEY = ['new-project-defaults'] as const;
 /** `GET /api/v1/settings/new-projects`. */
 export async function fetchNewProjectDefaults(auth: Auth = tabAuth): Promise<NewProjectDefaults> {
   const json = await call(auth, API_ROUTES.newProjectDefaults, {}, NEW_PROJECTS_LOAD_FAILED);
+  return NewProjectDefaultsResponse.parse(json).defaults;
+}
+
+/**
+ * `PATCH /api/v1/settings/new-projects`: the agent new projects get as their
+ * default (epic 6, entry 6: Welcome's agent choice, or this page).
+ */
+export async function updateNewProjectsAgent(defaultAgentId: string, auth: Auth = tabAuth): Promise<NewProjectDefaults> {
+  const json = await call(
+    auth,
+    API_ROUTES.newProjectDefaults,
+    { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ defaultAgentId }) },
+    "The default agent couldn't be saved",
+  );
+  return NewProjectDefaultsResponse.parse(json).defaults;
+}
+
+/**
+ * `PATCH /api/v1/settings/new-projects`: the mode new projects' chats start
+ * in (default permission mode); Skip all carries `confirm` and needs
+ * Developer mode, checked by the server.
+ */
+export async function updateNewProjectsPermissionMode(defaultPermissionMode: PermissionMode, confirm: boolean, auth: Auth = tabAuth): Promise<NewProjectDefaults> {
+  const json = await call(
+    auth,
+    API_ROUTES.newProjectDefaults,
+    { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ defaultPermissionMode, ...(confirm ? { confirm: true } : {}) }) },
+    "The default permission mode couldn't be saved",
+  );
   return NewProjectDefaultsResponse.parse(json).defaults;
 }
 
@@ -185,11 +221,13 @@ export function NewProjectDefaultsSection() {
     setChosen(pieces);
     setStatus(undefined);
     updateNewProjectDefaults(pieces).then(
-      (saved) => {
+      async (saved) => {
+        if (!latest.isLatest(ticket)) return;
+        // A read still on its way (the page's mount refetch, say) would show the old default (story 4.13).
+        await keepSaved(queryClient, NEW_PROJECT_DEFAULTS_QUERY_KEY, saved);
         if (!latest.isLatest(ticket)) return;
         setSaving(false);
         setChosen(undefined);
-        queryClient.setQueryData(NEW_PROJECT_DEFAULTS_QUERY_KEY, saved);
         setStatus({ kind: 'saved', text: note === undefined ? NEW_PROJECTS_SAVED_TEXT : `${note} ${NEW_PROJECTS_SAVED_TEXT}` });
       },
       (failure: unknown) => {
@@ -226,6 +264,113 @@ export function NewProjectDefaultsSection() {
       onChange={onPiecesChange}
       saving={saving}
       status={status ?? (loadError === undefined ? undefined : { kind: 'error', text: loadError })}
+    />
+  );
+}
+
+/**
+ * The agent new projects get as their default (epic 6, entry 6), shown only
+ * while the install has more than one: saved at once; projects that exist
+ * already keep theirs.
+ */
+export function NewProjectsAgentSection() {
+  const chatAgents = useChatAgents();
+  const defaults = useNewProjectDefaults();
+  const queryClient = useQueryClient();
+  const [saving, setSaving] = useState(false);
+  const [chosen, setChosen] = useState<string | undefined>(undefined);
+  const [status, setStatus] = useState<DefaultAgentViewProps['status']>(undefined);
+  const latest = useRef(createLatestGate()).current;
+  const list = chatAgents.data;
+  if (list === undefined) return null;
+
+  const onChange = (agentId: string) => {
+    const ticket = latest.next();
+    setSaving(true);
+    setChosen(agentId);
+    setStatus(undefined);
+    updateNewProjectsAgent(agentId).then(
+      async (saved) => {
+        if (!latest.isLatest(ticket)) return;
+        await keepSaved(queryClient, NEW_PROJECT_DEFAULTS_QUERY_KEY, saved);
+        if (!latest.isLatest(ticket)) return;
+        setSaving(false);
+        setChosen(undefined);
+        const name = list.agents.find((agent) => agent.agentId === projectDefaultAgent(list, saved.defaultAgentId))?.displayName ?? agentId;
+        setStatus({ kind: 'saved', text: `Saved: new projects start with ${name}.` });
+      },
+      (failure: unknown) => {
+        if (!latest.isLatest(ticket)) return;
+        setSaving(false);
+        setChosen(undefined);
+        setStatus({ kind: 'error', text: failure instanceof Error ? failure.message : "The default agent couldn't be saved. Try again." });
+      },
+    );
+  };
+
+  const value = chosen ?? (defaults.data === undefined ? undefined : projectDefaultAgent(list, defaults.data.defaultAgentId));
+  return (
+    <DefaultAgentView
+      agents={list.agents}
+      value={value}
+      onChange={onChange}
+      saving={saving}
+      status={status ?? (defaults.error instanceof Error ? { kind: 'error', text: defaults.error.message } : undefined)}
+      testId="new-projects-agent"
+      description="The agent a new project's chats start with. Projects you already have keep theirs."
+    />
+  );
+}
+
+/**
+ * The mode new projects' chats start in (default permission mode): saved at
+ * once; projects that exist already keep theirs. Skip all, after its red
+ * warning, still needs each new project's own confirmation.
+ */
+export function NewProjectsPermissionModeSection() {
+  const defaults = useNewProjectDefaults();
+  const { appearance } = useAppearance();
+  const queryClient = useQueryClient();
+  const [saving, setSaving] = useState(false);
+  const [chosen, setChosen] = useState<PermissionMode | undefined>(undefined);
+  const [status, setStatus] = useState<DefaultPermissionModeViewProps['status']>(undefined);
+  const latest = useRef(createLatestGate()).current;
+
+  const onChange = (mode: PermissionMode, confirmed: boolean) => {
+    const ticket = latest.next();
+    setSaving(true);
+    setChosen(mode);
+    setStatus(undefined);
+    updateNewProjectsPermissionMode(mode, confirmed).then(
+      async (saved) => {
+        if (!latest.isLatest(ticket)) return;
+        await keepSaved(queryClient, NEW_PROJECT_DEFAULTS_QUERY_KEY, saved);
+        if (!latest.isLatest(ticket)) return;
+        setSaving(false);
+        setChosen(undefined);
+        setStatus({ kind: 'saved', text: `Saved: new projects' chats start in ${PERMISSION_MODE_LABELS[saved.defaultPermissionMode ?? 'ask']}.` });
+      },
+      (failure: unknown) => {
+        if (!latest.isLatest(ticket)) return;
+        setSaving(false);
+        setChosen(undefined);
+        setStatus({ kind: 'error', text: failure instanceof Error ? failure.message : "The default permission mode couldn't be saved. Try again." });
+      },
+    );
+  };
+
+  return (
+    <DefaultPermissionModeView
+      value={chosen ?? (defaults.data === undefined ? undefined : (defaults.data.defaultPermissionMode ?? 'ask'))}
+      developerMode={appearance.developerMode}
+      onChange={onChange}
+      saving={saving}
+      status={status ?? (defaults.error instanceof Error ? { kind: 'error', text: defaults.error.message } : undefined)}
+      testId="new-projects-mode-default"
+      title="New chats start in"
+      description="The permission mode a new project's chats start in. Projects you already have keep theirs. Skip all still asks you to confirm it once in each new project."
+      confirmTitle="Start new projects' chats in Skip all?"
+      confirmWarning={SKIP_ALL_NEW_PROJECTS_WARNING}
     />
   );
 }

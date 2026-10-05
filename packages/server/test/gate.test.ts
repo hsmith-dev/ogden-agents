@@ -132,7 +132,7 @@ describe('security gate', () => {
   it('bookmark: the app and its assets load without a token (they hold no user data); API calls and /ws get 401', async () => {
     const server = await startTestServer();
     const html = { accept: 'text/html,application/xhtml+xml' };
-    for (const path of ['/', '/settings/appearance', '/no-such-path']) {
+    for (const path of ['/', '/settings/appearance', '/no-such-path', '/w/ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3/board/1.2']) {
       const page = await send(server, path, { headers: html });
       expect(page.status, path).toBe(200);
       expect(page.body, path).toContain('<div id="root"></div>');
@@ -142,6 +142,8 @@ describe('security gate', () => {
     expect(asset.status).toBe(200);
     expect(asset.body).toContain('console.log');
     expect((await send(server, '/assets/missing.js')).status).toBe(404);
+    expect((await send(server, '/w/ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3/board/1.2/x.js')).status).toBe(404);
+    expect((await send(server, '/w/ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3/board/%7Emain.js')).status).toBe(404);
 
     for (const path of ['/api/v1/anything', TAB_CHECK_PATH, '/api', '/ws']) {
       const api = await send(server, path, { headers: { accept: 'application/json' } });
@@ -577,6 +579,8 @@ const EXPECTED_API_ROUTES = [
   `POST ${API_ROUTES.uvInstall}`,
   `GET ${API_ROUTES.workspaces}`,
   `POST ${API_ROUTES.workspaces}`,
+  `GET ${API_ROUTES.chatAgents}`,
+  `PUT ${API_ROUTES.chatAgentDefaultModel}`,
   `GET ${API_ROUTES.workspace}`,
   `DELETE ${API_ROUTES.workspaceHistory}`,
   `GET ${API_ROUTES.workspaceSettings}`,
@@ -588,7 +592,16 @@ const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.workspaceSession}`,
   `POST ${API_ROUTES.sessionMessages}`,
   `POST ${API_ROUTES.sessionCancel}`,
+  `PATCH ${API_ROUTES.sessionQueuedMessage}`,
+  `DELETE ${API_ROUTES.sessionQueuedMessage}`,
+  `POST ${API_ROUTES.sessionQueuedMessageSendNow}`,
   `POST ${API_ROUTES.sessionDriver}`,
+  `PUT ${API_ROUTES.sessionPermissionMode}`,
+  `PUT ${API_ROUTES.sessionTitle}`,
+  `PUT ${API_ROUTES.sessionModel}`,
+  `GET ${API_ROUTES.sessionHandoff}`,
+  `POST ${API_ROUTES.sessionHandoff}`,
+  `POST ${API_ROUTES.sessionHandoffPreview}`,
   `POST ${API_ROUTES.sessionPermission}`,
   `GET ${API_ROUTES.permissionRules}`,
   `DELETE ${API_ROUTES.permissionRule}`,
@@ -598,6 +611,8 @@ const EXPECTED_API_ROUTES = [
   `DELETE ${API_ROUTES.appShortcutOffer}`,
   `GET ${API_ROUTES.agents}`,
   `POST ${API_ROUTES.agentInstall}`,
+  `DELETE ${API_ROUTES.agentInstall}`,
+  `POST ${API_ROUTES.agentSignOut}`,
   `POST ${API_ROUTES.agentSignIn}`,
   `DELETE ${API_ROUTES.agentSignIn}`,
   `POST ${API_ROUTES.agentSignInCode}`,
@@ -606,10 +621,59 @@ const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.onboarding}`,
   `PATCH ${API_ROUTES.onboarding}`,
   `GET ${API_ROUTES.bmadPieces}`,
+  // The pinned upstream BMad Method (story 4.14): install-level, not a piece's.
+  `GET ${API_ROUTES.bmadSource}`,
+  `POST ${API_ROUTES.bmadSource}`,
   `GET ${API_ROUTES.newProjectDefaults}`,
   `PATCH ${API_ROUTES.newProjectDefaults}`,
+  `GET ${API_ROUTES.developerMode}`,
+  `PUT ${API_ROUTES.developerMode}`,
+  `GET ${API_ROUTES.chatSettings}`,
+  `PUT ${API_ROUTES.chatSettings}`,
+  `GET ${API_ROUTES.updates}`,
+  `PUT ${API_ROUTES.updates}`,
+  `POST ${API_ROUTES.updatesCheck}`,
+  `POST ${API_ROUTES.updatesAppRestart}`,
+  `PUT ${API_ROUTES.updatesAppChannel}`,
   `GET ${API_ROUTES.workspaceBmadDetection}`,
   `DELETE ${API_ROUTES.workspaceBmadOffer}`,
+  // Plan and Board (story 4.1), each through the guarded helper.
+  `GET ${API_ROUTES.workspaceCatalog}`,
+  `POST ${API_ROUTES.workspacePlanningSessions}`,
+  `GET ${API_ROUTES.workspaceTickets}`,
+  // Story 4.2's pre-registered routes (guarded; one ticket filled by 4.8, setup by 4.3, the status write 501 until 4.10) and the script trust (unguarded).
+  `GET ${API_ROUTES.workspaceTicket}`,
+  `PUT ${API_ROUTES.workspaceTicketStatus}`,
+  `GET ${API_ROUTES.workspaceBmadSetup}`,
+  `POST ${API_ROUTES.workspaceBmadSetup}`,
+  `PUT ${API_ROUTES.workspaceBmadScriptTrust}`,
+  // A document a planning session wrote (story 4.7), guarded.
+  `GET ${API_ROUTES.workspaceDocument}`,
+  // Unattended builds (story 5.2), each through the guarded helper.
+  `POST ${API_ROUTES.workspaceBuilds}`,
+  `GET ${API_ROUTES.workspaceBuild}`,
+  `POST ${API_ROUTES.workspaceBuildApprove}`,
+  `POST ${API_ROUTES.workspaceBuildReject}`,
+  `POST ${API_ROUTES.workspaceBuildCommitPlan}`,
+  `GET ${API_ROUTES.sessionRun}`,
+  `GET ${API_ROUTES.workspaceBuildSandbox}`,
+  // Epics 5 and 11's other routes (story 5.3), each through the guarded helper, 501 until their lanes.
+  `GET ${API_ROUTES.workspaceRuns}`,
+  `GET ${API_ROUTES.workspaceRun}`,
+  `POST ${API_ROUTES.runStop}`,
+  `POST ${API_ROUTES.runRetry}`,
+  `POST ${API_ROUTES.runCheckAgain}`,
+  `GET ${API_ROUTES.workspaceBuildSettings}`,
+  `PATCH ${API_ROUTES.workspaceBuildSettings}`,
+  // The install's run limits and notification settings (story 5.3): install-level, behind the gate only.
+  `GET ${API_ROUTES.runLimits}`,
+  `PATCH ${API_ROUTES.runLimits}`,
+  `GET ${API_ROUTES.notificationSettings}`,
+  `PATCH ${API_ROUTES.notificationSettings}`,
+  `POST ${API_ROUTES.notificationWebhooks}`,
+  `PATCH ${API_ROUTES.notificationWebhook}`,
+  `DELETE ${API_ROUTES.notificationWebhook}`,
+  `POST ${API_ROUTES.notificationWebhookTest}`,
 ] as const;
 
 describe('gate placement', () => {
@@ -654,14 +718,43 @@ describe('gate placement', () => {
     try {
       const log = createLogger(() => {});
       const gate = createGate({ port: () => 1, codes: createLaunchCodes(), tabs: createTabTokens(), log });
-      const app = createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate, bmad: core.bmad, bmadProbe: true });
-      // The only route serving a piece so far is the test probe (10.1); epics 4 to 7 add theirs the same way.
-      expect(guardedRouteKeys(app)).toEqual([`GET ${TEST_ROUTES.bmadProbe}`]);
+      const app = createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate, bmad: core.bmad, bmadScriptTrust: core.bmadScriptTrust, bmadProbe: true });
+      // The routes serving a piece: Plan and Board (stories 4.1 and 4.2) and the test probe (10.1); epics 5 to 7 add theirs the same way.
+      const pieceRoutes = [
+        `GET ${API_ROUTES.workspaceCatalog}`,
+        `POST ${API_ROUTES.workspacePlanningSessions}`,
+        `GET ${API_ROUTES.workspaceTickets}`,
+        `GET ${API_ROUTES.workspaceTicket}`,
+        `PUT ${API_ROUTES.workspaceTicketStatus}`,
+        `GET ${API_ROUTES.workspaceBmadSetup}`,
+        `POST ${API_ROUTES.workspaceBmadSetup}`,
+        `GET ${API_ROUTES.workspaceDocument}`,
+        `POST ${API_ROUTES.workspaceBuilds}`,
+        `GET ${API_ROUTES.workspaceBuild}`,
+        `POST ${API_ROUTES.workspaceBuildApprove}`,
+        `POST ${API_ROUTES.workspaceBuildReject}`,
+        `POST ${API_ROUTES.workspaceBuildCommitPlan}`,
+        `GET ${API_ROUTES.sessionRun}`,
+        `GET ${API_ROUTES.workspaceBuildSandbox}`,
+        `GET ${API_ROUTES.workspaceRuns}`,
+        `GET ${API_ROUTES.workspaceRun}`,
+        `POST ${API_ROUTES.runStop}`,
+        `POST ${API_ROUTES.runRetry}`,
+        `POST ${API_ROUTES.runCheckAgain}`,
+        `GET ${API_ROUTES.workspaceBuildSettings}`,
+        `PATCH ${API_ROUTES.workspaceBuildSettings}`,
+      ];
+      expect(guardedRouteKeys(app)).toEqual([...pieceRoutes, `GET ${TEST_ROUTES.bmadProbe}`].sort());
+      for (const key of guardedRouteKeys(app)) expect(key.slice(key.indexOf(' ') + 1).startsWith(`${API_BASE}/workspaces/:wsId/`), key).toBe(true);
       const index = app.routes.findIndex((route) => route.path === TEST_ROUTES.bmadProbe);
       expect(index).toBeGreaterThan(0);
       expect(TEST_ROUTES.bmadProbe.startsWith(`${API_BASE}/workspaces/:wsId/`)).toBe(true);
-      // Without the probe's hook nothing serves a piece.
+      // Without the probe's hook only Plan and Board serve a piece; without core's guard, or its script trust, nothing does.
+      expect(guardedRouteKeys(createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate, bmad: core.bmad, bmadScriptTrust: core.bmadScriptTrust }))).toEqual(
+        pieceRoutes.sort(),
+      );
       expect(guardedRouteKeys(createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate, bmad: core.bmad }))).toEqual([]);
+      expect(guardedRouteKeys(createApp({ events: core.events, webRoot: tinyWebRoot(), log, gate }))).toEqual([]);
     } finally {
       core.close();
     }

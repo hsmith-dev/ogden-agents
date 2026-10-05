@@ -17,6 +17,7 @@
  * logged, echoed or returned; only codes reach the log (AD-16).
  */
 import {
+  AgentBusyError,
   ApiKeyRefusedError,
   CoreError,
   NotFoundError,
@@ -64,6 +65,8 @@ const COULD_NOT_SIGN_IN = "Ogden Agents couldn't start signing in. Try again.";
 const COULD_NOT_SAVE_KEY = "Ogden Agents couldn't save the API key. Try again.";
 const COULD_NOT_REMOVE_KEY = "Ogden Agents couldn't remove the API key. Try again.";
 const COULD_NOT_INSTALL = "Ogden Agents couldn't start the install. Try again.";
+const COULD_NOT_UNINSTALL = "Ogden Agents couldn't uninstall that. Try again.";
+const COULD_NOT_SIGN_OUT = "Ogden Agents couldn't sign out. Try again.";
 const COULD_NOT_SAVE_WELCOME = "Ogden Agents couldn't save that. Try again.";
 
 const noStore = (c: Context) => c.header('Cache-Control', 'no-store');
@@ -76,6 +79,8 @@ export function registerAgentSetupRoutes(app: Hono, options: AgentSetupRoutesOpt
   if (agentSetup === undefined) {
     app.get(API_ROUTES.agents, notImplemented);
     app.post(API_ROUTES.agentInstall, notImplemented);
+    app.delete(API_ROUTES.agentInstall, notImplemented);
+    app.post(API_ROUTES.agentSignOut, notImplemented);
     // Never reads the body: a key sent here is not parsed or logged.
     app.put(API_ROUTES.agentApiKey, (c) => {
       noStore(c);
@@ -109,6 +114,7 @@ export function registerAgentSetupRoutes(app: Hono, options: AgentSetupRoutesOpt
     if (error instanceof SignInNotPendingError) return apiError(c, 409, 'sign_in_not_pending', NOT_PENDING);
     if (error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);
     if (error instanceof ApiKeyRefusedError) return apiError(c, 400, 'api_key_refused', error.message);
+    if (error instanceof AgentBusyError) return apiError(c, 409, 'agent_busy', error.message);
     if (error instanceof SecretsUnavailableError) {
       log.warn('the keychain is unavailable', { code: typeof error.cause === 'string' ? error.cause : 'unknown' });
       return apiError(c, 503, 'secrets_unavailable', error.message);
@@ -136,6 +142,32 @@ export function registerAgentSetupRoutes(app: Hono, options: AgentSetupRoutesOpt
       return c.json(AgentSetupStatus.parse(agent), 202);
     } catch (error) {
       return refusal(c, error, COULD_NOT_INSTALL);
+    }
+  });
+
+  // `DELETE` → 200 `AgentSetupStatus`: uninstalls (epic 6 entry 7); 409 `agent_busy` with plain words when it can't now.
+  app.delete(API_ROUTES.agentInstall, async (c) => {
+    const agentId = agentIdOf(c);
+    if (agentId === undefined) return apiError(c, 404, 'not_found', NO_SUCH_AGENT);
+    try {
+      const agent = await agentSetup.uninstall(agentId);
+      log.info('agent uninstalled', { agentId });
+      return c.json(AgentSetupStatus.parse(agent));
+    } catch (error) {
+      return refusal(c, error, COULD_NOT_UNINSTALL);
+    }
+  });
+
+  // `POST` → 200 `AgentSetupStatus`: signs out of the user's own account (epic 6 entry 7). Reads no body.
+  app.post(API_ROUTES.agentSignOut, async (c) => {
+    const agentId = agentIdOf(c);
+    if (agentId === undefined) return apiError(c, 404, 'not_found', NO_SUCH_AGENT);
+    try {
+      const agent = await agentSetup.signOut(agentId);
+      log.info('agent signed out', { agentId });
+      return c.json(AgentSetupStatus.parse(agent));
+    } catch (error) {
+      return refusal(c, error, COULD_NOT_SIGN_OUT);
     }
   });
 

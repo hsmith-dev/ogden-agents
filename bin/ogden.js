@@ -89,6 +89,11 @@ async function runForeground(cli) {
       );
       process.exit(1);
     }
+    // A newer version already migrated this data folder (story 13.6): the message says what to do, and nothing was changed.
+    if (error instanceof Error && error.name === 'DatabaseNewerError') {
+      console.error(error.message);
+      process.exit(1);
+    }
     throw error;
   }
   console.log(`Ogden Agents is running at ${server.url}`);

@@ -18,7 +18,7 @@ import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 // The data-folder module alone, not core's index: the launcher must not load
 // the database driver (`better-sqlite3`) just to find or start a server.
-import { ensureDataDir, DATA_DIR_ENV, PORT_FILE } from '@ogden-agents/core/data-dir';
+import { ensureDataDir, DATA_DIR_ENV, DATABASE_NEWER_MESSAGE, EXIT_DATABASE_NEWER, PORT_FILE } from '@ogden-agents/core/data-dir';
 // The process-tree helper alone, not the adapters index (same reason).
 import { killProcessTree } from '@ogden-agents/adapters/process-tree';
 import { EXIT_ALREADY_RUNNING, isPidAlive } from './instance-lock.js';
@@ -248,8 +248,10 @@ async function startServer(
   });
   let exit: string | undefined;
   let lostTheLock = false;
+  let databaseNewer = false;
   child.once('exit', (code, signal) => {
     if (code === EXIT_ALREADY_RUNNING) lostTheLock = true;
+    else if (code === EXIT_DATABASE_NEWER) databaseNewer = true;
     else exit = signal === null ? `exit code ${code}` : `signal ${signal}`;
   });
   child.once('error', (error) => (exit = error.message));
@@ -259,6 +261,8 @@ async function startServer(
   const logPath = join(dataDir, LOG_DIR, 'server.log');
   const deadline = Date.now() + (options.startTimeoutMs ?? START_TIMEOUT_MS);
   while (Date.now() < deadline) {
+    // A newer version already migrated this data folder: say so as it is, nothing was changed (story 13.6).
+    if (databaseNewer) throw new LauncherError(DATABASE_NEWER_MESSAGE);
     if (exit !== undefined) {
       throw new LauncherError(`Ogden Agents stopped while starting (${exit}). See the log: ${logPath}`);
     }

@@ -151,6 +151,8 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
   const core =
     options.core ??
     openCore(dataDir, {
+      // The version, so an upgrade is backed up and a newer database refused (story 13.6).
+      appVersion: VERSION,
       availableBmadPieces,
       bmadCatalog,
       onBmadSetupFailure: bmadSetupFailureLogger(log),

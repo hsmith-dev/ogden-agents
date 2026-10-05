@@ -330,6 +330,8 @@ async function listenAndAnnounce({
     bmad: core.bmad,
     // Welcome's agent choice (epic 6, entry 6) names an agent this server registers.
     isAgentRegistered: registeredAgent(options),
+    // Skip all as the default for new projects needs Developer mode (default permission mode).
+    developerMode: core.installSettings.developerMode,
     onError: (code) => log.warn('new project defaults unusable', { code }),
   });
   const app = createApp({

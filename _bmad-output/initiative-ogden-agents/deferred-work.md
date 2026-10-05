@@ -64,6 +64,8 @@ Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim fr
 - Unowned: older planning chats are named from their skill invocation, not their action's label. From backlog story 12's review. (log: "Older planning chats are named from their stored skill invocation")
 - Event store (not yet ticketed): keep a session's latest check-in when the live window is trimmed. From backlog 8 review. (log: "Keep a session's latest `session.check_in` when the live event window is trimmed")
 - Notifications follow-up (not yet ticketed): play the chime from a tab with user activation. From backlog 8 review. (log: "Play the attention chime from a tab that can play sound")
+- Unowned (a sweep, with the caution level): arrow keys in the "New chats start in" and caution-level radio groups save every option they pass. From the default permission mode review. (log: "caution-level radio groups save every option they pass")
+- Empty-project start chat story: the empty-project composer and planning sessions send the first prompt to a chat that may start in Skip all before its red banner shows. From the default permission mode security review. (log: "send the first prompt to a chat that may start in Skip all")
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
 
@@ -577,3 +579,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-ogden-notifies-you-with-a-sound-when-something-needs-you-plan.md`
   summary: Play the attention chime from a tab that can play sound (has user activation) instead of whichever tab holds the leader lock.
   evidence: browsers allow AudioContext only after a user gesture in that tab; a launcher-opened or reloaded leader stays silent (review of backlog 8, finding 11). The Settings copy now says so.
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-new-chats-start-in-the-projects-permission-mode-plan.md`
+  summary: Keyboard arrows in the "New chats start in" and caution-level radio groups save every option they pass. A keyboard user can't look at the options without changing the default.
+  evidence: The Radix RadioGroup checks on arrow focus, and each section saves on `onValueChange`. The caution-level section predates this change. Fix both together, for example with an explicit Save or by saving on Space/click only.
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-new-chats-start-in-the-projects-permission-mode-plan.md`
+  summary: The empty-project composer (`workspace-chats-page.tsx`) and planning sessions send the first prompt to a chat that may start in Skip all before the chat page and its red banner show.
+  evidence: Security review S2. `onSend` creates, sends, then opens; `planning.ts` sends at once. Showing the project's starting mode beside that composer belongs with the empty-project story's page.

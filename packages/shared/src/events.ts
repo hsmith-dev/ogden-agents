@@ -40,7 +40,7 @@ import {
   SessionToolCallUpdatedEvent,
   SessionToolCallUpdatedInput,
 } from './events-session.js';
-import { Run, RunOutcome, Workspace } from './entities.js';
+import { PermissionMode, Run, RunOutcome, Workspace } from './entities.js';
 import { BmadPieces } from './bmad.js';
 import {
   BmadSetupCompletedEvent,
@@ -227,6 +227,17 @@ const WorkspaceSettingsChangedInput = z.object({
      */
     defaultAgentId: AgentId.nullable().optional(),
     previousDefaultAgentId: AgentId.nullable().optional(),
+    /**
+     * The mode new chats start in, now and before (default permission mode),
+     * present when it changed; why (`user`, or `developer_mode_off`, which
+     * drops a Skip all default to Ask); and `skipAllConfirmed` when the user
+     * confirmed Skip all's warning for this project. All optional, so every
+     * earlier event still parses (AD-5).
+     */
+    defaultPermissionMode: PermissionMode.optional(),
+    previousDefaultPermissionMode: PermissionMode.optional(),
+    defaultPermissionModeCause: z.enum(['user', 'developer_mode_off']).optional(),
+    skipAllConfirmed: z.literal(true).optional(),
   }),
 });
 /**

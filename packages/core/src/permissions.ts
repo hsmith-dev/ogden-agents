@@ -143,6 +143,8 @@ export interface PermissionsOptions {
   isBmadPieceAvailable?: (piece: BmadPiece) => boolean;
   /** Whether an agent is registered, so it may be a project's default (epic 6, entry 6). Default: every well-formed id. */
   isAgentRegistered?: ((agentId: AgentId) => boolean) | undefined;
+  /** Whether Developer mode is on now (core's install settings): Skip all as a project's default needs it. Absent: off. */
+  developerMode?: (() => boolean) | undefined;
 }
 
 interface Pending {
@@ -167,7 +169,7 @@ const toRule = (row: RuleRow): PermissionRule => ({
   createdAt: row.createdAt,
 });
 
-export function createPermissions({ db, events, entities, sessionEvents, onError, isBmadPieceAvailable = () => false, isAgentRegistered }: PermissionsOptions): Permissions {
+export function createPermissions({ db, events, entities, sessionEvents, onError, isBmadPieceAvailable = () => false, isAgentRegistered, developerMode }: PermissionsOptions): Permissions {
   const { orm } = db;
   /** Requests waiting for the user, by request id. */
   const pending = new Map<string, Pending>();
@@ -226,7 +228,7 @@ export function createPermissions({ db, events, entities, sessionEvents, onError
 
   return {
     // The caution level and BMad pieces (moved to `workspace-settings.ts`, story 10.8).
-    ...createWorkspaceSettings({ db, events, isBmadPieceAvailable, isAgentRegistered }),
+    ...createWorkspaceSettings({ db, events, isBmadPieceAvailable, isAgentRegistered, developerMode }),
 
     async request(sessionId, request) {
       try {

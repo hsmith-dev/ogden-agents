@@ -72,6 +72,14 @@ export interface NewSession {
   adapterRefs?: AdapterRefs;
   /** The agent it is started with (epic 6), never changed. */
   agentId?: AgentId;
+  /**
+   * The permission mode it starts in (default permission mode): chosen and
+   * checked by the caller (its project's default, the agent's modes,
+   * Developer mode). Default Ask.
+   */
+  permissionMode?: PermissionMode;
+  /** Plain words about that starting mode, carried on `session.created`. */
+  permissionModeNote?: string;
 }
 
 /** What a newly created workspace starts with (story 10.4). Ignored when the workspace already exists. */
@@ -90,6 +98,13 @@ export interface NewWorkspaceOptions {
    * (the install's default).
    */
   defaultAgentId?: AgentId | undefined | (() => AgentId | undefined);
+  /**
+   * The mode its new chats start in (the app-wide default for new projects),
+   * or a function that returns it, called only when the workspace is
+   * created. Skip all is kept as Ask waiting for the user's confirmation for
+   * this project (notice `skip_all_unconfirmed`). Default Ask.
+   */
+  defaultPermissionMode?: PermissionMode | undefined | (() => PermissionMode | undefined);
 }
 
 export interface NewRun {
@@ -330,10 +345,22 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         const given = typeof options.bmadPieces === 'function' ? options.bmadPieces() : (options.bmadPieces ?? []);
         const bmadPieces = canonicalBmadPieces(given);
         const defaultAgentId = typeof options.defaultAgentId === 'function' ? options.defaultAgentId() : options.defaultAgentId;
+        const wanted = typeof options.defaultPermissionMode === 'function' ? options.defaultPermissionMode() : options.defaultPermissionMode;
+        // Skip all is confirmed once per project: from the app-wide default it waits for that confirmation, in Ask.
+        const unconfirmed = wanted === 'skip_all';
+        const permissionMode: PermissionMode = wanted === 'auto' ? 'auto' : 'ask';
         const workspace: Workspace = { id: newId('ws'), path: canonical, realPath: real, createdAt: now() };
         orm
           .insert(workspaces)
-          .values({ ...workspace, realPath: real, cautionLevel: DEFAULT_CAUTION_LEVEL, bmadPieces: JSON.stringify(bmadPieces), defaultAgentId: defaultAgentId ?? null })
+          .values({
+            ...workspace,
+            realPath: real,
+            cautionLevel: DEFAULT_CAUTION_LEVEL,
+            bmadPieces: JSON.stringify(bmadPieces),
+            defaultAgentId: defaultAgentId ?? null,
+            defaultPermissionMode: wanted === undefined ? null : permissionMode,
+            defaultPermissionModeNotice: unconfirmed ? 'skip_all_unconfirmed' : null,
+          })
           .run();
         log.append({
           type: 'workspace.created',
@@ -343,7 +370,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         });
         // A project that starts with pieces on (story 10.4) or its own default agent (epic 6, entry 6)
         // says so right after it is created, in the same transaction.
-        if (bmadPieces.length > 0 || defaultAgentId !== undefined) {
+        if (bmadPieces.length > 0 || defaultAgentId !== undefined || permissionMode !== 'ask') {
           log.append({
             type: 'workspace.settings_changed',
             workspaceId: workspace.id,
@@ -353,6 +380,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
               previous: DEFAULT_CAUTION_LEVEL,
               ...(bmadPieces.length > 0 ? { bmadPieces, previousBmadPieces: [] } : {}),
               ...(defaultAgentId === undefined ? {} : { defaultAgentId, previousDefaultAgentId: null }),
+              ...(permissionMode === 'ask' ? {} : { defaultPermissionMode: permissionMode, previousDefaultPermissionMode: 'ask' as const, defaultPermissionModeCause: 'user' as const }),
             },
           });
         }
@@ -387,8 +415,8 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         kind: check(SessionKindSchema, input.kind, 'session kind'),
         state: check(SessionStateSchema, input.state ?? 'idle', 'session state'),
         driver: check(SessionDriverSchema, input.driver ?? 'ui', 'session driver'),
-        // Every chat starts in Ask, whatever the agent's own settings say.
-        permissionMode: 'ask',
+        // Ask unless the caller chose its project's default; never the agent's own settings.
+        permissionMode: check(PermissionModeSchema, input.permissionMode ?? 'ask', 'permission mode'),
         ...(input.agentId === undefined ? {} : { agentId: check(AgentIdSchema, input.agentId, 'agent id') }),
         title: input.title ?? null,
         ...(autoTitle === null ? {} : { autoTitle }),
@@ -399,7 +427,10 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
       return log.transaction(() => {
         if (getWorkspace(input.workspaceId) === undefined) throw new NotFoundError('workspace', input.workspaceId);
         orm.insert(sessions).values(session).run();
-        sessionEvents.appendSessionEvent(session.id, { type: 'session.created', payload: { session } });
+        sessionEvents.appendSessionEvent(session.id, {
+          type: 'session.created',
+          payload: { session, ...(input.permissionModeNote === undefined || input.permissionModeNote === '' ? {} : { permissionModeNote: input.permissionModeNote }) },
+        });
         return session;
       });
     },

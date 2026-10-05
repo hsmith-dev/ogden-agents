@@ -62,6 +62,15 @@ export const workspaces = sqliteTable(
      * Changed only through the workspace settings use-case.
      */
     defaultAgentId: text('default_agent_id'),
+    /**
+     * The permission mode new chats start in (default permission mode):
+     * `ask`, `auto` or `skip_all`; null (and anything unreadable) is Ask.
+     * Changed only through the workspace settings use-case, and set back to
+     * Ask from Skip all when Developer mode is turned off.
+     */
+    defaultPermissionMode: text('default_permission_mode'),
+    /** Why the default reads as it does (`DefaultModeNotice`), or null; cleared by the user's next choice. */
+    defaultPermissionModeNotice: text('default_permission_mode_notice'),
     createdAt: text('created_at').notNull(),
   },
   (t) => [uniqueIndex('workspaces_path_unique').on(t.path)],

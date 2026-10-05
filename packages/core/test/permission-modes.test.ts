@@ -496,8 +496,8 @@ describe('Skip all needs Developer mode and a confirmation, enforced by core (cr
   it('Developer mode is off until turned on, each change is one install-level event, and the same value again appends nothing', () => {
     const core = openTestCore();
     expect(core.installSettings.developerMode()).toBe(false);
-    expect(core.installSettings.setDeveloperMode(true)).toEqual({ developerMode: true, changed: true, dropped: [] });
-    expect(core.installSettings.setDeveloperMode(true)).toEqual({ developerMode: true, changed: false, dropped: [] });
+    expect(core.installSettings.setDeveloperMode(true)).toEqual({ developerMode: true, changed: true, dropped: [], defaultsDropped: 0 });
+    expect(core.installSettings.setDeveloperMode(true)).toEqual({ developerMode: true, changed: false, dropped: [], defaultsDropped: 0 });
     expect(core.installSettings.developerMode()).toBe(true);
     const changes = core.events.readAfter(0).filter((event) => event.type === 'settings.developer_mode_changed');
     expect(changes).toEqual([expect.objectContaining({ workspaceId: null, streamId: 'settings', payload: { developerMode: true, previous: false } })]);

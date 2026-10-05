@@ -1,7 +1,17 @@
 /** Workspaces and their sessions, and deleting a workspace's history (moved from `chat.ts`, story 3.11). */
 import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
-import { PERMISSION_MODES, projectNotTrustedReason, type AgentId, type ChatAgent, type SessionId, type WorkspaceId } from '@ogden-agents/shared';
+import {
+  DEFAULT_MODE_NOTICE_TEXT,
+  PERMISSION_MODE_LABELS,
+  PERMISSION_MODES,
+  projectNotTrustedReason,
+  type AgentId,
+  type ChatAgent,
+  type PermissionMode,
+  type SessionId,
+  type WorkspaceId,
+} from '@ogden-agents/shared';
 import { apiKeyMethod, type AgentDescriptor } from '../agent-descriptor.js';
 import { effectiveDefaultAgent, type AgentPort } from '../agent-port.js';
 import type { AgentReadiness } from '../agent-setup-types.js';
@@ -48,6 +58,41 @@ export function chatAgentOf(descriptor: AgentDescriptor, agent: AgentPort, readi
     permissionModes: PERMISSION_MODES.filter((mode) => mode === 'ask' || declared.includes(mode)),
     ...(unavailable === undefined ? {} : { unavailable }),
   };
+}
+
+/** The mode a new chat starts in and the note that says why (default permission mode). */
+export interface StartingMode {
+  mode: PermissionMode;
+  note?: string | undefined;
+}
+
+/**
+ * The mode a new chat starts in (default permission mode): its project's
+ * default when its agent declares that mode, the agent's sessions this run
+ * haven't left it out, and, for Skip all, Developer mode is on now; else Ask,
+ * with a note naming why. Read by the caller in the same synchronous step
+ * that creates the session, so Developer mode turned off in between can't
+ * leave a new chat in Skip all.
+ */
+export function startingMode(input: {
+  projectDefault: PermissionMode;
+  notice?: string | undefined;
+  agentName: string;
+  declared: readonly PermissionMode[] | undefined;
+  listed: readonly PermissionMode[] | undefined;
+  developerMode: boolean;
+}): StartingMode {
+  const { projectDefault: mode, agentName } = input;
+  if (mode === 'ask') {
+    // A Skip all from the app-wide default that waits for this project's confirmation says so.
+    return input.notice === undefined ? { mode: 'ask' } : { mode: 'ask', note: input.notice };
+  }
+  const label = PERMISSION_MODE_LABELS[mode];
+  const fallback = (why: string): StartingMode => ({ mode: 'ask', note: `${why}, so this chat started in Ask instead of this project's default.` });
+  if (!(input.declared ?? []).includes(mode)) return fallback(`${agentName} doesn't offer ${label}`);
+  if (input.listed !== undefined && !input.listed.includes(mode)) return fallback(`${agentName} on this computer doesn't offer ${label}`);
+  if (mode === 'skip_all' && !input.developerMode) return fallback('Skip all needs Developer mode');
+  return { mode, note: `This chat started in ${label}, this project's default.` };
 }
 
 export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & { stopTerminal: (sessionId: SessionId) => Promise<void> }) {
@@ -130,7 +175,25 @@ export function createWorkspaces(ctx: ChatContext, deps: Pick<Agents, 'drop'> & 
       if (unavailable !== undefined) throw new AgentNotReadyError(unavailable.code, unavailable.reason, agentId, unavailable.action);
       // The workspace may have been removed while the readiness was read.
       getWorkspace(workspaceId);
-      return entities.createSession({ workspaceId, kind: options.kind ?? 'chat', agentId, ...(options.autoTitle === undefined ? {} : { autoTitle: options.autoTitle }) });
+      // From here to the insert nothing awaits: the default, Developer mode and the agent's modes are read
+      // in the same step that creates the session (default permission mode).
+      const settings = ctx.permissions.getSettings(workspaceId);
+      const start = startingMode({
+        projectDefault: settings.defaultPermissionMode ?? 'ask',
+        notice: settings.defaultPermissionModeNotice === 'skip_all_unconfirmed' ? DEFAULT_MODE_NOTICE_TEXT.skip_all_unconfirmed : undefined,
+        agentName: descriptor.displayName,
+        declared: agents.get(agentId)?.permissionModes,
+        listed: ctx.lastSessionModes.get(agentId),
+        developerMode: ctx.developerMode(),
+      });
+      return entities.createSession({
+        workspaceId,
+        kind: options.kind ?? 'chat',
+        agentId,
+        permissionMode: start.mode,
+        ...(start.note === undefined ? {} : { permissionModeNote: start.note }),
+        ...(options.autoTitle === undefined ? {} : { autoTitle: options.autoTitle }),
+      });
     },
 
     async chatAgents() {

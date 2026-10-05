@@ -30,10 +30,21 @@ export const skipAllWarning = (agentName: string) => `${agentName} will run comm
 /** The red banner's words while a chat is in Skip all. */
 export const skipAllBanner = (agentName: string) => `Skip all is on: ${agentName} runs everything in this chat without asking.`;
 
-/** The chat's mode: the latest `session.permission_mode_changed` of its stream, else the session as read, else Ask. */
+/**
+ * The chat's mode: the latest `session.permission_mode_changed` of its
+ * stream, else the session as read, else the mode it was created in (a chat
+ * can start in its project's default, Skip all included: its banner never
+ * waits on the REST read), else Ask.
+ */
 export function usePermissionMode(events: readonly CoreEvent[], read: PermissionMode | undefined): PermissionMode {
   const latest = useMemo(() => events.findLast((event) => event.type === 'session.permission_mode_changed'), [events]);
-  return (latest?.type === 'session.permission_mode_changed' ? latest.payload.mode : undefined) ?? read ?? 'ask';
+  const created = useMemo(() => events.find((event) => event.type === 'session.created'), [events]);
+  return (
+    (latest?.type === 'session.permission_mode_changed' ? latest.payload.mode : undefined) ??
+    read ??
+    (created?.type === 'session.created' ? created.payload.session.permissionMode : undefined) ??
+    'ask'
+  );
 }
 
 export interface PermissionModePickerProps {

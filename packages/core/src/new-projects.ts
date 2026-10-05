@@ -22,16 +22,19 @@ import {
   canonicalBmadPieces,
   DEFAULT_NEW_PROJECT_DEFAULTS,
   NewProjectDefaults as NewProjectDefaultsSchema,
+  PermissionMode as PermissionModeSchema,
   UpdateNewProjectDefaultsRequest,
   type AgentId,
   type BmadPiece,
   type NewProjectDefaults,
+  type PermissionMode,
   type Workspace,
 } from '@ogden-agents/shared';
 import { z } from 'zod';
 import type { BmadFeatures } from './bmad-pieces.js';
 import type { Chat } from './chat/types.js';
-import { FeatureUnavailableError, UnknownAgentError, ValidationError } from './errors.js';
+import { ConfirmationRequiredError, DeveloperModeRequiredError, FeatureUnavailableError, UnknownAgentError, ValidationError } from './errors.js';
+import { SKIP_ALL_DEFAULT_NEEDS_CONFIRMATION, SKIP_ALL_DEFAULT_NEEDS_DEVELOPER_MODE } from './workspace-settings.js';
 
 /** `<dataDir>/<this>`: `{ "newProjects": { "bmadPieces": [...], "defaultAgentId"?: "..." } }`. */
 export const PREFERENCES_FILE = 'preferences.json';
@@ -44,7 +47,13 @@ type PreferencesRecord = z.infer<typeof PreferencesRecord>;
  * damaged `defaultAgentId` reads as the install's default and never costs
  * the pieces (10.4).
  */
-const StoredRecord = z.object({ newProjects: NewProjectDefaultsSchema.omit({ defaultAgentId: true }).extend({ defaultAgentId: z.unknown().optional() }) });
+const StoredRecord = z.object({
+  newProjects: NewProjectDefaultsSchema.omit({ defaultAgentId: true, defaultPermissionMode: true }).extend({
+    defaultAgentId: z.unknown().optional(),
+    // Read on its own too (default permission mode): a damaged value reads as Ask.
+    defaultPermissionMode: z.unknown().optional(),
+  }),
+});
 
 export interface NewProjectDefaultsOptions {
   /** The Ogden Agents data folder. */
@@ -56,6 +65,11 @@ export interface NewProjectDefaultsOptions {
    * default agent for new projects. Absent: every well-formed id.
    */
   isAgentRegistered?: ((agentId: AgentId) => boolean) | undefined;
+  /**
+   * Whether Developer mode is on now (default permission mode): Skip all as
+   * the default needs it to be set, and reads as Ask while it is off. Absent: off.
+   */
+  developerMode?: (() => boolean) | undefined;
   /** A record that exists but can't be read or parsed: its code only. */
   onError?(code: string): void;
 }
@@ -72,13 +86,23 @@ export interface NewProjectDefaultsStore {
    * an agent this install doesn't have; nothing is written then.
    */
   set(input: unknown): NewProjectDefaults;
+  /**
+   * Developer mode was turned off: a Skip all default becomes Ask (the file is
+   * rewritten; it already reads as Ask). Returns whether it changed.
+   */
+  dropSkipAll(): boolean;
 }
 
 export function createNewProjectDefaults(options: NewProjectDefaultsOptions): NewProjectDefaultsStore {
   const file = join(options.dataDir, PREFERENCES_FILE);
   const isAgentRegistered = options.isAgentRegistered ?? (() => true);
+  const developerMode = options.developerMode ?? (() => false);
   /** The agent the file holds as last read, registered or not, so a save that leaves the agent out keeps it. */
   let storedAgent: AgentId | undefined;
+  /** The mode the file holds as last read (Skip all included), so a save that leaves the mode out keeps it. */
+  let storedMode: PermissionMode | undefined;
+  /** The mode as shown: Skip all only while Developer mode is on. */
+  const shownMode = (mode: PermissionMode | undefined) => (mode === undefined || (mode === 'skip_all' && !developerMode()) ? {} : { defaultPermissionMode: mode });
 
   const write = (record: PreferencesRecord) => {
     mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
@@ -109,6 +133,8 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
       const code = (error as NodeJS.ErrnoException).code ?? 'unreadable';
       if (code === 'ENOENT') reported = undefined;
       else report(code);
+      storedAgent = undefined;
+      storedMode = undefined;
       return { bmadPieces: [...DEFAULT_NEW_PROJECT_DEFAULTS.bmadPieces] };
     }
     try {
@@ -117,18 +143,26 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
         reported = undefined;
         const agent = AgentIdSchema.safeParse(parsed.data.newProjects.defaultAgentId);
         storedAgent = agent.success ? agent.data : undefined;
+        const mode = PermissionModeSchema.safeParse(parsed.data.newProjects.defaultPermissionMode);
+        storedMode = mode.success ? mode.data : undefined;
         // An agent this install doesn't have now reads as the install's default; the file keeps it.
-        return { bmadPieces: canonicalBmadPieces(parsed.data.newProjects.bmadPieces), ...(agent.success && isAgentRegistered(agent.data) ? { defaultAgentId: agent.data } : {}) };
+        return {
+          bmadPieces: canonicalBmadPieces(parsed.data.newProjects.bmadPieces),
+          ...(agent.success && isAgentRegistered(agent.data) ? { defaultAgentId: agent.data } : {}),
+          ...shownMode(storedMode),
+        };
       }
     } catch {
       // Not JSON: as if there were no record.
     }
     // Left as it is: the file is the user's to inspect.
     report('corrupt');
+    storedAgent = undefined;
+    storedMode = undefined;
     return { bmadPieces: [...DEFAULT_NEW_PROJECT_DEFAULTS.bmadPieces] };
   };
 
-  return {
+  const store: NewProjectDefaultsStore = {
     get: read,
     set(input) {
       const parsed = UpdateNewProjectDefaultsRequest.safeParse(input);
@@ -137,7 +171,6 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
           { path: ['bmadPieces'], message: 'unknown or repeated piece, or dependency rule' },
         ]);
       }
-      storedAgent = undefined;
       const current = read();
       const kept = current.bmadPieces;
       const pieces = parsed.data.bmadPieces === undefined ? kept : canonicalBmadPieces(parsed.data.bmadPieces);
@@ -147,11 +180,36 @@ export function createNewProjectDefaults(options: NewProjectDefaultsOptions): Ne
       const agent = parsed.data.defaultAgentId;
       if (agent !== undefined && agent !== null && !isAgentRegistered(agent)) throw new UnknownAgentError();
       const keptAgent = agent === undefined ? storedAgent : (agent ?? undefined);
-      write({ newProjects: { bmadPieces: pieces, ...(keptAgent === undefined ? {} : { defaultAgentId: keptAgent }) } });
+      const mode = parsed.data.defaultPermissionMode;
+      // The server is the gate: Skip all as the default needs Developer mode now and the user's confirmation.
+      // Every request for it, even when the file already holds it (it may be left from before Developer mode was turned off).
+      if (mode === 'skip_all') {
+        if (!developerMode()) throw new DeveloperModeRequiredError(SKIP_ALL_DEFAULT_NEEDS_DEVELOPER_MODE);
+        if (parsed.data.confirm !== true) throw new ConfirmationRequiredError(SKIP_ALL_DEFAULT_NEEDS_CONFIRMATION);
+      }
+      // A kept Skip all that no longer shows (Developer mode off) is kept as Ask.
+      const keptMode = mode ?? (storedMode === 'skip_all' && !developerMode() ? 'ask' : storedMode);
+      write({
+        newProjects: {
+          bmadPieces: pieces,
+          ...(keptAgent === undefined ? {} : { defaultAgentId: keptAgent }),
+          ...(keptMode === undefined ? {} : { defaultPermissionMode: keptMode }),
+        },
+      });
+      storedAgent = keptAgent;
+      storedMode = keptMode;
       const shown = keptAgent !== undefined && isAgentRegistered(keptAgent) ? keptAgent : undefined;
-      return { bmadPieces: pieces, ...(shown === undefined ? {} : { defaultAgentId: shown }) };
+      return { bmadPieces: pieces, ...(shown === undefined ? {} : { defaultAgentId: shown }), ...shownMode(keptMode) };
+    },
+
+    dropSkipAll() {
+      read();
+      if (storedMode !== 'skip_all') return false;
+      store.set({ defaultPermissionMode: 'ask' });
+      return true;
     },
   };
+  return store;
 }
 
 /**
@@ -206,7 +264,13 @@ export function createAddProject(options: AddProjectOptions): AddProject {
       // Called only when the workspace is created, inside its transaction: a refusal creates nothing,
       // and an existing project ignores the pieces and the agent. The default agent for new projects
       // (epic 6, entry 6) is read as registered only, so a gone agent leaves the project on the install's.
-      return options.chat.openWorkspace(path, { bmadPieces: resolve, defaultAgentId: () => options.defaults?.get().defaultAgentId });
+      // The mode new chats start in (default permission mode): as read, so Skip all only while Developer mode is on;
+      // the project then keeps it as Ask until the user confirms Skip all for it.
+      return options.chat.openWorkspace(path, {
+        bmadPieces: resolve,
+        defaultAgentId: () => options.defaults?.get().defaultAgentId,
+        defaultPermissionMode: () => options.defaults?.get().defaultPermissionMode,
+      });
     },
   };
 }

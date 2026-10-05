@@ -92,6 +92,13 @@
       "when": 1791158062229,
       "tag": "0012_session_auto_title",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1791165205478,
+      "tag": "0013_workspace_default_permission_mode",
+      "breakpoints": true
     }
   ]
 }

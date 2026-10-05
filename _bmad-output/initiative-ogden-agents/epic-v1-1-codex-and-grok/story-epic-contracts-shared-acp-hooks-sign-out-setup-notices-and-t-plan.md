@@ -10,7 +10,7 @@ review: 'quick'
 review_source: 'pinned'
 lenses_ran: ['quick-security', 'quick-correctness']
 review_loop_iteration: 0
-baseline_revision: '8ecab9c554a5cb67399a23bbc09b15f1f22010a1'
+baseline_revision: '1d05c9bfb4e1592643f91f6d5633553f4a8ff706'
 context:
   - '{project-root}/AGENTS.md'
 ---

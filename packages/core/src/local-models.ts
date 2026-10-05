@@ -6,7 +6,7 @@
  * (`EndpointConfirmationRequiredError`). Detect only ever probes loopback
  * candidates and only when called: never another host, never a scan.
  */
-import { endpointStateWords, readEndpointAddress, type DetectedEndpoint, type LocalEndpointId, type LocalEndpointState, type LocalEndpointTestResponse } from '@ogden-agents/shared';
+import { endpointStateWords, MAX_TEST_MODELS, readEndpointAddress, type DetectedEndpoint, type LocalEndpointId, type LocalEndpointState, type LocalEndpointTestResponse } from '@ogden-agents/shared';
 import type { LocalEndpoints } from './local-endpoints.js';
 import type { LocalModelPort } from './local-model-port.js';
 
@@ -25,13 +25,13 @@ export interface LocalModels {
    * the two that answers counts. A candidate that is not loopback is skipped.
    */
   detect(candidates: readonly DetectCandidate[]): Promise<DetectedEndpoint[]>;
+  /** Detect itself, without the one-at-a-time guard. */
+  detectNow(candidates: readonly DetectCandidate[]): Promise<DetectedEndpoint[]>;
 }
-
-/** How long Detect waits for each probe: a server on this computer answers at once. */
-export const DETECT_TIMEOUT_MS = 1_200;
 
 /** `detectPort` is the port Detect uses, with a short timeout of its own (default: `port`). */
 export function createLocalModels({ endpoints, port, detectPort = port }: { endpoints: LocalEndpoints; port: LocalModelPort; detectPort?: LocalModelPort }): LocalModels {
+  let running: Promise<DetectedEndpoint[]> | undefined;
   return {
     async test(id) {
       const target = await endpoints.target(id);
@@ -39,18 +39,28 @@ export function createLocalModels({ endpoints, port, detectPort = port }: { endp
       const probed = await port.probe({ baseUrl: target.baseUrl, key: target.key });
       let state: LocalEndpointState;
       let models: string[] = [];
+      let count = 0;
       if (probed.ok) {
-        models = probed.models.slice(0, 500);
+        models = probed.models.slice(0, MAX_TEST_MODELS);
+        count = probed.models.length;
         state = probed.models.length > 0 ? 'ready' : 'no_models';
       } else if (probed.kind === 'unreachable' || probed.kind === 'timeout') state = 'not_running';
       else if (probed.kind === 'key_refused') state = 'key_refused';
       else state = 'other';
       // `other` carries the adapter's own plain reason (it names the host, never a key or path).
-      const message = state === 'other' && !probed.ok ? probed.reason : endpointStateWords(state, models.length);
+      const message = state === 'other' && !probed.ok ? probed.reason : endpointStateWords(state, count);
       return { state, models, message };
     },
 
-    async detect(candidates) {
+    detect(candidates) {
+      // One Detect at a time: a second press while one runs gets the same answer, so it can't pile up probes.
+      running ??= this.detectNow(candidates).finally(() => {
+        running = undefined;
+      });
+      return running;
+    },
+
+    async detectNow(candidates) {
       const found: DetectedEndpoint[] = [];
       for (const candidate of candidates) {
         const read = readEndpointAddress(candidate.baseUrl);

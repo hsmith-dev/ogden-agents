@@ -1,7 +1,7 @@
 import { LOOPBACK_PRIVACY_WORDS, remoteConfirmationWords, type LocalEndpointId, type LocalEndpointTestResponse, type LocalEndpointView } from '@ogden-agents/shared';
 import { Key, Trash } from '@phosphor-icons/react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useState, type KeyboardEvent } from 'react';
+import { useEffect, useState, type KeyboardEvent } from 'react';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
@@ -37,6 +37,8 @@ export function LocalEndpointsSection() {
       await work();
       refresh();
     } catch (failure) {
+      // Read again either way: a refusal may mean the row on screen was out of date (a host that needs confirming).
+      refresh();
       setError(failure instanceof Error ? failure.message : 'That did not work. Try again.');
     }
   };
@@ -98,6 +100,8 @@ function EndpointRow({
   const [test, setTest] = useState<LocalEndpointTestResponse | undefined>(undefined);
   const [testing, setTesting] = useState(false);
   const [asking, setAsking] = useState(false);
+  // What a test said is out of date once the key or the confirmation changes.
+  useEffect(() => setTest(undefined), [endpoint.keySaved, endpoint.needsConfirmation, endpoint.host]);
   const runTest = async () => {
     setTesting(true);
     setTest(undefined);
@@ -110,11 +114,11 @@ function EndpointRow({
         {endpoint.label}
         {isDefault && many ? ' (used for new chats)' : ''}
       </Text>
-      <Text variant="caption" data-testid="endpoint-host">
+      <Text variant="caption" data-testid="endpoint-host" className="break-words">
         {endpoint.host}
       </Text>
       {/* The privacy statement for this endpoint, in every state: where messages and project text go. */}
-      <Text variant="caption" data-testid="endpoint-privacy">
+      <Text variant="caption" data-testid="endpoint-privacy" className="break-words">
         {endpoint.loopback ? LOOPBACK_PRIVACY_WORDS : remoteConfirmationWords(endpoint.host, endpoint.insecureRemote)}
       </Text>
       {endpoint.needsConfirmation ? (
@@ -156,11 +160,14 @@ function EndpointRow({
           </Button>
         )}
       </div>
-      {test === undefined ? null : (
-        <Text variant="caption" role="status" data-testid="endpoint-test-result" data-state={test.state}>
-          {test.message}
-        </Text>
-      )}
+      {/* Always on the page, so a screen reader announces what is put in it. */}
+      <div role="status" aria-live="polite">
+        {test === undefined ? null : (
+          <Text variant="caption" data-testid="endpoint-test-result" data-state={test.state}>
+            {test.message}
+          </Text>
+        )}
+      </div>
       <EndpointKey endpointId={endpoint.id} saved={endpoint.keySaved} guard={guard} onChange={onChange} />
     </div>
   );
@@ -211,9 +218,10 @@ function EndpointKey({ endpointId, saved, guard }: { endpointId: LocalEndpointId
   return (
     <div className="flex flex-col gap-1" data-testid="endpoint-key">
       <Label htmlFor={fieldId}>Key</Label>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Input
           id={fieldId}
+          className="min-w-0 flex-1"
           type="password"
           value={value}
           onChange={(event) => setValue(event.target.value)}

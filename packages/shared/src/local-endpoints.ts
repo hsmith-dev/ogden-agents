@@ -232,7 +232,7 @@ export const LocalEndpointPreset = z.object({
   label: z.string().min(1).max(MAX_ENDPOINT_LABEL),
   baseUrl: z.string().min(1).max(MAX_ENDPOINT_URL),
   /** The official page to get it from, linked when none is found. */
-  downloadUrl: z.url(),
+  downloadUrl: z.url().regex(/^https:\/\//, 'A download page must be an https address.'),
 });
 export type LocalEndpointPreset = z.infer<typeof LocalEndpointPreset>;
 
@@ -282,7 +282,7 @@ export function endpointStateWords(state: LocalEndpointState, models: number): s
     case 'not_running':
       return 'Not running. Start the server, then test again.';
     case 'key_refused':
-      return "The server didn't accept the key. Check it and save it again.";
+      return "The server didn't accept the key. Add the right key, or check the one saved, then test again.";
     case 'other':
       return "The server answered, but not in a way Ogden Agents can use. Check its address.";
   }

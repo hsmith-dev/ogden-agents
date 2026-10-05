@@ -136,7 +136,8 @@ describe('the servers section', () => {
   });
 
   it('sends a key once, clears the field, and never shows it again', async () => {
-    api.add.mockResolvedValue(view({ keySaved: true, auth: 'key' }));
+    // The add fails, so the form stays open and the field can be checked while it is still on the page.
+    api.add.mockRejectedValue(new Error('Could not add.'));
     section();
     fireEvent.click(screen.getByTestId('endpoint-add-other'));
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Keyed' } });
@@ -146,8 +147,14 @@ describe('the servers section', () => {
     fireEvent.change(field, { target: { value: 'sk-secret-123' } });
     fireEvent.click(screen.getByTestId('endpoint-add-submit'));
     await waitFor(() => expect(api.add).toHaveBeenCalledWith({ label: 'Keyed', baseUrl: 'http://localhost:1234/v1', key: 'sk-secret-123' }));
-    expect(document.body.innerHTML).not.toContain('sk-secret-123');
+    await waitFor(() => expect(screen.getByTestId('endpoint-form-error').textContent).toBe('Could not add.'));
     expect(field.value).toBe('');
+    expect(document.body.textContent).not.toContain('sk-secret-123');
+    // Cancel leaves nothing typed behind.
+    fireEvent.change(field, { target: { value: 'sk-secret-456' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByTestId('endpoint-add-other'));
+    expect((screen.getByLabelText(/^Key/) as HTMLInputElement).value).toBe('');
   });
 
   it('Detect lists what the server found, with Use it, and says none was found with the download pages', async () => {

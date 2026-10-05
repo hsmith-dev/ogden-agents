@@ -3,12 +3,12 @@ title: 'OpenAI-compatible endpoints card in Settings, Agents: presets, Detect, k
 type: 'feature'
 ticket: '14.4'
 created: '2026-10-05'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['quick-security', 'quick-correctness']
 review_loop_iteration: 0
 baseline_revision: '72344aff3fe8c76a5fdb7fb46ce4a140e5771a1a'
 context:
@@ -72,6 +72,8 @@ Stacked on 14.3. The card section shows for any agent whose status says `noAccou
 ## Plan Change Log
 
 ## Review Triage Log
+
+Security and correctness reviewers (2 lenses), no critical findings. Patched: a preset's download link now must be https (medium, a javascript: or file: link passed \`z.url()\`); Detect is one at a time (low); the typed key, confirmation and Detect result are cleared on Cancel (medium); the Ready count is not cut at 500 (low); the key refused words no longer assume a saved key (low); the unused duplicate Detect timeout is gone (low); a stale test result is cleared when the key or confirmation changes, and a failed action reads the list again so a stale confirmation row appears (medium); the test result is a live region that is always on the page (low); long hosts wrap (low); the form and section errors have their own test ids (low); the vacuous key assertions were replaced by one that can fail (medium). Not changed: Detect download links need the presets request to succeed (low), the closed-port fixture can be taken by another process (low), Test and chat use separate port instances so a disagreement is possible later (low, one adapter today). No intent_gap or bad_plan.
 
 ## Verification
 

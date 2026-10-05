@@ -53,6 +53,7 @@ export function channelOf(version: string): 'stable' | 'preview' | undefined {
 export interface UpdateOffer {
   version: string;
   tag: 'latest' | 'next';
+  source: 'github-releases' | 'npm';
 }
 
 /**
@@ -61,7 +62,7 @@ export interface UpdateOffer {
  * of the highest newer version among `latest` and `next`. A tag that doesn't
  * parse, or an unparsable `current`, offers nothing.
  */
-export function decideUpdate(current: string, tags: Readonly<Record<string, string>>): UpdateOffer | null {
+export function decideUpdate(current: string, tags: Readonly<Record<string, string>>, source: UpdateOffer['source'] = 'npm'): UpdateOffer | null {
   const channel = channelOf(current);
   if (channel === undefined) return null;
   let best: UpdateOffer | null = null;
@@ -70,7 +71,7 @@ export function decideUpdate(current: string, tags: Readonly<Record<string, stri
     if (typeof version !== 'string') continue;
     if (channel === 'stable' && channelOf(version) !== 'stable') continue;
     if ((compareVersions(version, current) ?? 0) <= 0) continue;
-    if (best === null || (compareVersions(version, best.version) ?? 0) > 0) best = { version: version.trim().replace(/^v/, ''), tag };
+    if (best === null || (compareVersions(version, best.version) ?? 0) > 0) best = { version: version.trim().replace(/^v/, ''), tag, source };
   }
   return best;
 }

@@ -142,6 +142,10 @@ export async function startTestServer(options: StartOptions & { lines?: string[]
     // Claude Code (the fake) is signed in unless the test says otherwise (6.3: a signed-out agent refuses a new chat).
     // Antigravity only where a test wires it (`fakeAntigravity`, epic 6 entry 5): the other tests see the agents they name.
     antigravity: false,
+    // Codex likewise (epic 12): only where a test wires it.
+    codex: false,
+    // Grok likewise (epic 12): only where a test wires it.
+    grok: false,
     extraAgentEnv: { FAKE_LOGIN_STATE: signedInLoginState(), ...extraAgentEnv },
     ...rest,
     launch: true,

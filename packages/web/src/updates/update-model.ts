@@ -1,4 +1,4 @@
-import type { DesktopUpdateView, UpdateChannel, UpdateNoticeResponse } from '@ogden-agents/shared';
+import type { DesktopUpdateView, UpdateChannel, UpdateNoticeResponse, UpdateSourceName } from '@ogden-agents/shared';
 
 /**
  * The "newer version" notice's words and its dismissal (story 13.7). User text
@@ -10,6 +10,28 @@ export type Available = NonNullable<UpdateNoticeResponse['available']>;
 /** The command that gets `available`, for how this install was started. Shown, never run for the user. */
 export function updateCommand(notice: Pick<UpdateNoticeResponse, 'installMethod'>, available: Available): string {
   return notice.installMethod === 'global' ? `npm install -g ogden-agents@${available.tag}` : `npx ogden-agents@${available.tag}`;
+}
+
+/** Where an update was found, in words. */
+export const sourceLabel = (source: UpdateSourceName): string => (source === 'npm' ? 'npm' : 'GitHub Releases');
+
+/** The sources a check asks, in words: "GitHub Releases", or "GitHub Releases and npm". */
+export const sourcesLabel = (sources: readonly UpdateSourceName[]): string => (sources.length === 0 ? 'None' : sources.map(sourceLabel).join(' and '));
+
+/** Where the releases are listed, for an install that can't update itself. */
+export const RELEASES_PAGE = 'github.com/hsmith-dev/ogden-agents/releases';
+
+/**
+ * The words that tell how to get `available`, around an optional command:
+ * `lead`, then `code` (in monospace) when there is one, then `tail`. An update
+ * found on npm is the npm command; one found on GitHub Releases is picked up
+ * by the start script of an install made from GitHub Releases, and is
+ * otherwise downloaded from the releases page.
+ */
+export function updateSteps(notice: Pick<UpdateNoticeResponse, 'installMethod'>, available: Available): { lead: string; code: string | null; tail: string } {
+  if (available.source === 'npm') return { lead: HOW_TO_UPDATE, code: updateCommand(notice, available), tail: 'in a terminal.' };
+  if (notice.installMethod === 'github') return { lead: 'To update, start Ogden again with its start script. It updates itself.', code: null, tail: '' };
+  return { lead: 'To update, see', code: RELEASES_PAGE, tail: '.' };
 }
 
 /** "Ogden 0.5.0 is available". */

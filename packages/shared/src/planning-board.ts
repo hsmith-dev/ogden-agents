@@ -98,6 +98,15 @@ export const TicketDetail = TicketRow.extend({
   unknown: z.string(),
   /** Whether the ticket's plan file exists (a planned entry has none until it is marked). */
   hasPlan: z.boolean(),
+  /** The plan file's path relative to the repo, `/`-separated, when it exists inside it (story 5.2); else `null`. */
+  plan: z.string().min(1).nullable().default(null),
+  /**
+   * Whether a build of this ticket pauses before its prompt is sent, and
+   * after the plan is `built` (story 5.4; read from the entry in
+   * `tickets.toml`, which `tickets.py find` doesn't report). Default `false`.
+   */
+  plan_checkpoint: z.boolean().default(false),
+  done_checkpoint: z.boolean().default(false),
 });
 export type TicketDetail = z.infer<typeof TicketDetail>;
 

@@ -38,7 +38,7 @@ export interface FolderHashLimits {
 class Unhashable extends Error {}
 
 /** The contents of the regular file at `path`, opened without following a link, within `budget` bytes. */
-async function readRegularFile(path: string, budget: number): Promise<Buffer> {
+export async function readRegularFile(path: string, budget: number): Promise<Buffer> {
   const handle = await open(path, fsConstants.O_RDONLY | NON_BLOCK | NO_FOLLOW);
   try {
     const stat = await handle.stat();

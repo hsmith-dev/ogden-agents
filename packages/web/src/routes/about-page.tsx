@@ -2,7 +2,8 @@ import { useState } from 'react';
 import type { UpdateCheckOutcome } from '@ogden-agents/shared';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { useUpdateActions, useUpdateNotice } from '@/updates/update-api';
-import { availableSentence, channelLabel, HOW_TO_UPDATE, updateChannelLabel, updateCommand } from '@/updates/update-model';
+import { UpdateHowTo } from '@/updates/update-how-to';
+import { availableSentence, channelLabel, sourcesLabel, updateChannelLabel } from '@/updates/update-model';
 import { Button } from '@/ui/button';
 import { Field } from '@/ui/field';
 import { Notice } from '@/ui/notice';
@@ -11,11 +12,8 @@ import { Switch } from '@/ui/switch';
 import { Text } from '@/ui/typography';
 
 /** What Check now found, in plain words (the newer version has its own sentence). */
-const OUTCOME_WORDS: Record<Exclude<UpdateCheckOutcome, 'newer'>, string> = {
-  current: 'You have the newest version.',
-  failed: 'Ogden could not reach npm. Try again later.',
-  offline: 'Ogden is set to stay offline, so it did not check.',
-};
+const outcomeWords = (outcome: Exclude<UpdateCheckOutcome, 'newer'>, sources: string): string =>
+  outcome === 'current' ? 'You have the newest version.' : outcome === 'failed' ? `Ogden could not reach ${sources}. Try again later.` : 'Ogden is set to stay offline, so it did not check.';
 
 /** "Never", or the time of the last check in the reader's own format. */
 export function lastCheckedText(iso: string | null): string {
@@ -26,8 +24,8 @@ export function lastCheckedText(iso: string | null): string {
 
 /**
  * `/settings/about` (story 13.7): the running version and its channel, when
- * npm was last asked about a newer one, Check now, and the switch for the
- * check when Ogden starts. The server asks npm, never this page.
+ * GitHub Releases (and npm, for npm installs) were last asked about a newer one, Check now, and the switch for the
+ * check when Ogden starts. The server asks, never this page.
  */
 export function AboutPage() {
   const { data, isError } = useUpdateNotice();
@@ -59,6 +57,10 @@ export function AboutPage() {
                 <dd className="m-0" data-testid="about-channel">
                   {channelLabel(data.channel)}
                 </dd>
+                <Text as="dt" variant="label" tone="muted">Checks</Text>
+                <dd className="m-0" data-testid="about-sources">
+                  {data.offline ? 'Nothing (Ogden is set to stay offline)' : sourcesLabel(data.sources)}
+                </dd>
                 <Text as="dt" variant="label" tone="muted">Last checked</Text>
                 <dd className="m-0" data-testid="about-last-checked">
                   {lastCheckedText(data.lastCheckedAt)}
@@ -84,7 +86,7 @@ export function AboutPage() {
               ) : null}
               {data.shell === 'desktop' || data.available === null ? null : (
                 <Notice data-testid="about-available">
-                  {availableSentence(data.available)} {HOW_TO_UPDATE} <Text as="code" variant="mono">{updateCommand(data, data.available)}</Text> in a terminal.
+                  {availableSentence(data.available)} <UpdateHowTo notice={data} available={data.available} />
                 </Notice>
               )}
               {data.shell === 'desktop' ? null : (<>
@@ -94,7 +96,7 @@ export function AboutPage() {
                 </Button>
                 {/* Announced politely when the answer arrives; empty (but present) before. */}
                 <Text variant="label" tone="muted" role="status" data-testid="check-result">
-                  {check.isPending ? 'Checking.' : check.isError ? check.error.message : outcome === undefined ? '' : outcome === 'newer' ? (data.available === null ? '' : availableSentence(data.available)) : OUTCOME_WORDS[outcome]}
+                  {check.isPending ? 'Checking.' : check.isError ? check.error.message : outcome === undefined ? '' : outcome === 'newer' ? (data.available === null ? '' : availableSentence(data.available)) : outcomeWords(outcome, sourcesLabel(data.sources))}
                 </Text>
               </div>
               <Field
@@ -104,7 +106,7 @@ export function AboutPage() {
                 description={
                   data.offline
                     ? 'OGDEN_AGENTS_OFFLINE is set, so Ogden does not check.'
-                    : 'Ogden asks npm for the public list of versions of ogden-agents, once each time it starts. Nothing about you or your projects is sent.'
+                    : `Ogden asks ${sourcesLabel(data.sources)} for the newest published version of Ogden Agents, once each time it starts. Nothing about you or your projects is sent.`
                 }
               >
                 <Switch

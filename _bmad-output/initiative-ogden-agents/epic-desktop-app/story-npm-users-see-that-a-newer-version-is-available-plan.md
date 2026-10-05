@@ -86,7 +86,7 @@ Open question from the ticket (timeout): settled by running off the start path w
 
 ## Plan Change Log
 
-Follow-up (not built): the user prefers GitHub Releases. PR #110 (`@ogden-agents/shared/release-source`, `VersionSource`) is not on `main` yet, so this story stays npm only. Once #110 lands, add the GitHub latest release as a second source in `update-check.ts` (silent on failure, token only to api.github.com as #110 does).
+Follow-up (not built): the user prefers GitHub Releases. PR #110 (`@ogden-agents/shared/release-source`, `VersionSource`) is not on `main` yet, so this story stays npm only. Once #110 lands, add the GitHub latest release as a second source in `update-check.ts` (silent on failure, token only to api.github.com as #110 does). Done in story 14 (story-the-update-notice-reads-github-releases-plan.md): no token is sent, because the repository is public.
 
 ## Review Triage Log
 

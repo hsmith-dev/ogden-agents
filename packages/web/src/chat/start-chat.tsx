@@ -1,11 +1,12 @@
 import type { ChatAgent } from '@ogden-agents/shared';
 import { CaretDown, ChatCircle, GearSix } from '@phosphor-icons/react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useCallback, useRef, useState } from 'react';
 import { Button } from '@/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/ui/dropdown-menu';
 import { SET_UP_AGENTS } from './agent-picker';
-import { createChatSession } from './chat-api';
+import { CHAT_AGENTS_QUERY_KEY, createChatSession } from './chat-api';
 import { agentAvailability, type AgentAvailability } from './use-chat-agents';
 
 /** Said when starting a chat fails with no reason from the server. */
@@ -22,6 +23,7 @@ export const START_A_CHAT = 'Start a chat';
  */
 export function useStartChat(wsId: string, onOpened?: () => void) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const inFlight = useRef(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -43,11 +45,13 @@ export function useStartChat(wsId: string, onOpened?: () => void) {
         },
         (failure: unknown) => {
           done();
+          // The trust may have changed under a cached agent list (a file changed on disk): read it again so the Trust prompt shows (epic 12, 12.3).
+          void queryClient.invalidateQueries({ queryKey: CHAT_AGENTS_QUERY_KEY });
           setError(failure instanceof Error && failure.message !== '' ? failure.message : START_FAILED);
         },
       );
     },
-    [wsId, navigate, onOpened],
+    [wsId, navigate, onOpened, queryClient],
   );
   return { start, starting, error, setError };
 }

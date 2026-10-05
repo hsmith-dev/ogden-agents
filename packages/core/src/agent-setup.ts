@@ -40,7 +40,7 @@ import { ApiKeyRefusedError, NotFoundError, SecretsUnavailableError, ValidationE
 import type { EventLog } from './event-log.js';
 import type { SecretStorePort } from './secret-store-port.js';
 import { createSignIns, stopSignIn } from './agent-setup-sign-in.js';
-import { inheritedKeyOf, installingStatus, shown, subscriptionOf } from './agent-setup-status.js';
+import { inheritedKeyOf, installingStatus, keyOnlyWords, shown, subscriptionOf } from './agent-setup-status.js';
 import { PROGRESS_INTERVAL_MS } from './toolchain.js';
 
 // Not `Flight`, `newFlight` or `SavedKey`: they stay inside this use-case.
@@ -192,15 +192,16 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
   };
 
   /** The secrets store, or the refusal a missing one means. */
-  const store = (): SecretStorePort => {
-    if (options.secrets === undefined) throw new SecretsUnavailableError();
+  const store = (port?: AgentSetupPort): SecretStorePort => {
+    if (options.secrets === undefined) throw keyOnlyWords(port, new SecretsUnavailableError());
     return options.secrets;
   };
 
   /** A store failure as `SecretsUnavailableError`, reported by its code only. */
   const unavailable = (agentId: string, step: string, error: unknown): SecretsUnavailableError => {
     report(agentId, step, error);
-    return error instanceof SecretsUnavailableError ? error : new SecretsUnavailableError(undefined, { cause: 'unexpected' });
+    const refusal = error instanceof SecretsUnavailableError ? error : new SecretsUnavailableError(undefined, { cause: 'unexpected' });
+    return keyOnlyWords(byId.get(agentId), refusal);
   };
 
   /** Whether the agent's key is in use: there is one, and the subscription is known to be signed out. */
@@ -492,7 +493,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
       // The value is never echoed, not even in the error.
       const problem = support.check(value);
       if (problem !== undefined) throw new ValidationError(problem, []);
-      const secrets = store();
+      const secrets = store(port);
       // One at a time per agent, check included, so the store and the card end on the later call.
       return serially(agentId, async () => {
         let verification: ApiKeyVerification;
@@ -528,7 +529,7 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
     async deleteApiKey(agentId) {
       const port = portFor(agentId);
       if (port.apiKey === undefined) return;
-      const secrets = store();
+      const secrets = store(port);
       const name = apiKeySecretName(agentId);
       return serially(agentId, async () => {
         const wasInUse = keyInUse(port);

@@ -22,6 +22,9 @@ import { QueuedMessages } from '@/chat/queued-messages';
 import { otherWayShortcutLabel, useWhileWorking } from '@/chat/send-mode';
 import { useCaughtUp, useEarlierHistory, useSessionEvents } from '@/events/event-stream';
 import { PermissionCard, permissionAnnouncement } from '@/permissions/permission-card';
+import { BuildRunHeader } from '@/planning/build-run-header';
+import { BuildRunPanel } from '@/planning/build-run-panel';
+import { useSessionRun } from '@/planning/builds-api';
 import { DocumentCard } from '@/planning/document-card';
 import { StartModeNote, useStartModeNote } from '@/permissions/default-permission-mode';
 import { PermissionModePicker, SkipAllBanner, usePermissionMode } from '@/permissions/permission-mode-picker';
@@ -234,6 +237,9 @@ export function SessionPage() {
   }, [interruptedKey, caughtUp]);
 
   const state = view.state ?? session.data?.session.state;
+  // An unattended build's session (story 5.2): read-only, no composer, its run's ticket and outcome in the header.
+  const isBuild = session.data?.session.kind === 'build';
+  const buildRun = useSessionRun(wsId, sesId, isBuild);
   // Who drives, and switching (stories 3.1, 3.6; the wiring is the hook's, story 3.9).
   const { driver, terminalDrives, terminalBlockedReason, switchingTo, switchTo, peekOpen, togglePeek, peekId } = useSessionDriver({
     wsId,
@@ -420,37 +426,40 @@ export function SessionPage() {
   return (
     <>
       <WorkspaceHeader
-        title={chatTitle}
+        title={isBuild ? 'Build' : chatTitle}
         wsId={wsId}
         compactOnPhone={appearance.developerMode}
-        titleHidden={rename.editing}
-        titleAction={session.data === undefined ? undefined : <ChatHeaderRename rename={rename} name={chatTitle} />}
+        titleHidden={!isBuild && rename.editing}
+        titleAction={session.data === undefined || isBuild ? undefined : <ChatHeaderRename rename={rename} name={chatTitle} />}
       >
         {/* The chat's agent (E6-R1), named in the header while the install has more than one. */}
-        {severalAgents && session.data !== undefined ? (
+        {isBuild ? <BuildRunHeader wsId={wsId} run={buildRun.data} /> : null}
+        {severalAgents && session.data !== undefined && !isBuild ? (
           <Text as="span" variant="caption" data-testid="session-agent">
             {agentName}
           </Text>
         ) : null}
         {/* The model the chat runs on (story 11), beside its agent. */}
-        {session.data !== undefined ? (
+        {session.data !== undefined && !isBuild ? (
           <Text as="span" variant="caption" data-testid="session-model" data-model={model ?? ''} aria-label={`Model: ${modelWords}`} className="min-w-0 truncate max-sm:sr-only">
             {modelWords}
           </Text>
         ) : null}
         {state === undefined ? null : <StateGlyph state={state} data-testid="session-state" className="ml-auto" />}
-        <span className={state === undefined ? 'ml-auto' : undefined}>
-          <PermissionModePicker
-            agentName={agentName}
-            mode={permissionMode}
-            options={session.data?.permissionModes}
-            developerMode={appearance.developerMode}
-            terminalDrives={terminalDrives}
-            changing={modeChanging}
-            onChoose={(mode, confirmed) => changeMode(mode, confirmed)}
-          />
-        </span>
-        {appearance.developerMode ? (
+        {isBuild ? null : (
+          <span className={state === undefined ? 'ml-auto' : undefined}>
+            <PermissionModePicker
+              agentName={agentName}
+              mode={permissionMode}
+              options={session.data?.permissionModes}
+              developerMode={appearance.developerMode}
+              terminalDrives={terminalDrives}
+              changing={modeChanging}
+              onChoose={(mode, confirmed) => changeMode(mode, confirmed)}
+            />
+          </span>
+        )}
+        {appearance.developerMode && !isBuild ? (
           <DriverToggle
             agentName={agentName}
             driver={driver}
@@ -476,6 +485,7 @@ export function SessionPage() {
       />
       {/* A chat that skips its permission checks says so in red, above the conversation or the terminal, at any scroll position. */}
       {permissionMode === 'skip_all' ? <SkipAllBanner agentName={agentName} changing={modeChanging} onBackToAsk={() => changeMode('ask', false, terminalDrives)} /> : null}
+      {isBuild ? <BuildRunPanel wsId={wsId} run={buildRun.data} /> : null}
       <StartModeNote key={sesId} note={startModeNote} />
       {driver === 'terminal' ? (
         <ReadOnlyBanner
@@ -589,7 +599,7 @@ export function SessionPage() {
                   data-testid="session-error"
                   data-error-code={view.errorCode}
                   action={
-                    terminalDrives ? null : (
+                    terminalDrives || isBuild ? null : (
                       <span className="flex flex-wrap gap-2">
                         {/* Out of usage (handoff): the chat can go on with another agent while this one cools down. */}
                         {view.errorCode === 'usage_limit' && severalAgents ? (
@@ -664,56 +674,58 @@ export function SessionPage() {
             </Button>
           </div>
         ) : null}
-        <Composer
-          label={`Message ${agentName}`}
-          blockedReason={
-            driver === 'terminal'
-              ? TERMINAL_DRIVING_REASON
-              : state === 'waiting'
-                ? `${agentName} is waiting for your answer above.`
-                : undefined
-          }
-          hint={state === 'working' ? workingHint(agentName, whileWorking) : undefined}
-          whileWorking={whileWorking}
-          working={state === 'working'}
-          restore={restore}
-          draftKey={chatDraftKey(wsId, sesId)}
-          footer={
-            <ModelPicker
-              agentName={agentName}
-              model={model}
-              models={sessionModels === undefined ? undefined : sessionModels.available}
-              current={sessionModels?.current}
-              terminalDrives={terminalDrives}
-              changing={modelChanging}
-              open={modelMenuOpen}
-              onOpenChange={setModelMenuOpen}
-              onChoose={changeModel}
-            />
-          }
-          action={
-            busy ? (
-              <Button type="button" variant="outline" onClick={stop} aria-disabled={stopping} data-testid="stop">
-                <Stop aria-hidden />
-                Stop
-              </Button>
-            ) : driver === 'terminal' ? (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => switchTo('ui')}
-                aria-disabled={switchingTo !== undefined || undefined}
-                data-testid="composer-switch-to-chat"
-              >
-                <ChatCircle aria-hidden />
-                Switch to Chat
-              </Button>
-            ) : null
-          }
-          onSend={async (text, delivery) => {
-            await sendMessage(wsId, sesId, text, undefined, delivery);
-          }}
-        />
+        {isBuild ? null : (
+          <Composer
+            label={`Message ${agentName}`}
+            blockedReason={
+              driver === 'terminal'
+                ? TERMINAL_DRIVING_REASON
+                : state === 'waiting'
+                  ? `${agentName} is waiting for your answer above.`
+                  : undefined
+            }
+            hint={state === 'working' ? workingHint(agentName, whileWorking) : undefined}
+            whileWorking={whileWorking}
+            working={state === 'working'}
+            restore={restore}
+            draftKey={chatDraftKey(wsId, sesId)}
+            footer={
+              <ModelPicker
+                agentName={agentName}
+                model={model}
+                models={sessionModels === undefined ? undefined : sessionModels.available}
+                current={sessionModels?.current}
+                terminalDrives={terminalDrives}
+                changing={modelChanging}
+                open={modelMenuOpen}
+                onOpenChange={setModelMenuOpen}
+                onChoose={changeModel}
+              />
+            }
+            action={
+              busy ? (
+                <Button type="button" variant="outline" onClick={stop} aria-disabled={stopping} data-testid="stop">
+                  <Stop aria-hidden />
+                  Stop
+                </Button>
+              ) : driver === 'terminal' ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => switchTo('ui')}
+                  aria-disabled={switchingTo !== undefined || undefined}
+                  data-testid="composer-switch-to-chat"
+                >
+                  <ChatCircle aria-hidden />
+                  Switch to Chat
+                </Button>
+              ) : null
+            }
+            onSend={async (text, delivery) => {
+              await sendMessage(wsId, sesId, text, undefined, delivery);
+            }}
+          />
+        )}
       </PageFooter>
     </>
   );

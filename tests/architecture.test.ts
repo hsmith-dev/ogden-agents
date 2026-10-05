@@ -437,3 +437,33 @@ describe('AD-1 package dependency rules', () => {
     ]);
   });
 });
+
+describe('AD-10: only an approved merge marks a ticket done (story 5.9)', () => {
+  /** Every source file under each package's src folder that passes `approve: true` to a ticket mark, as `package/relative path`. */
+  const approvers = (): string[] => {
+    const out: string[] = [];
+    for (const pkg of readdirSync(join(ROOT, 'packages'), { withFileTypes: true })) {
+      if (!pkg.isDirectory()) continue;
+      const src = join(ROOT, 'packages', pkg.name, 'src');
+      let entries: string[];
+      try {
+        entries = readdirSync(src, { recursive: true, encoding: 'utf8' });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        if (!/\.(ts|tsx)$/.test(entry)) continue;
+        const text = readFileSync(join(src, entry), 'utf8')
+          .split('\n')
+          .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+          .join('\n');
+        if (/\bapprove:\s*true\b/.test(text)) out.push(`${pkg.name}/${entry.split('\\').join('/')}`);
+      }
+    }
+    return out.sort();
+  };
+
+  it("only core's builds use-case marks done with approve: true (the store's own refusal aside)", () => {
+    expect(approvers()).toEqual(['core/builds.ts']);
+  });
+});

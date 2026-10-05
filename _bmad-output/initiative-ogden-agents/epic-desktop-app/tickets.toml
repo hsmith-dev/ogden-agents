@@ -174,3 +174,15 @@ hitl = true
 risk = "medium"
 unknown = "Whether the user has machines or VMs for Windows ARM64 and Linux arm64, or those live checks run on cloud machines."
 references = ["tests/e2e-installed", "RELEASING.md", "https://v2.tauri.app/develop/tests/webdriver/"]
+
+[[entry]]
+id = 14
+type = "story"
+title = "The update notice reads GitHub Releases"
+description = "Story 7's notice asks only npm, where the package is a placeholder, while releases are published on GitHub (PR 110). The notice now asks this project's latest GitHub release through `@ogden-agents/shared/release-source` (and npm too, unless the install came from GitHub Releases), with the same privacy rules, and Settings, About says which sources it checks."
+verify = "A fake client shows one capped, no-redirect GET per source with nothing identifying, a GitHub install asks only GitHub, the highest newer version wins, every failure is silent, and About names the sources."
+covers = ["E13-R7"]
+after = [7]
+hitl = false
+risk = "low"
+references = ["packages/server/src/update-check.ts", "packages/shared/src/release-source.ts", "RELEASING.md"]

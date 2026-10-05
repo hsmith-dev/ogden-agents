@@ -52,6 +52,7 @@
  * the guards have passed.
  */
 import {
+  BuildRefusedError,
   NotFoundError,
   TicketChangedError,
   ReopenNotConfirmedError,
@@ -220,6 +221,8 @@ export function registerPlanningRoutes(app: Hono, { bmad, scriptTrust, planning,
           response = apiError(c, 409, 'ticket_changed', error.message);
         } else if (error instanceof ReopenNotConfirmedError) response = apiError(c, 409, 'reopen_not_confirmed', error.message);
         else if (error instanceof TicketsUnavailableError) response = ticketsUnavailable(c, workspaceId, error);
+        // A ticket whose build is running, or whose plan in the build's worktree isn't confined (story 5.5).
+        else if (error instanceof BuildRefusedError) response = apiError(c, 409, error.code, error.message);
         // `NotFoundError` and `StatusNotAllowedError` answer 404 and 409 through the guarded helper.
         else throw error;
       }

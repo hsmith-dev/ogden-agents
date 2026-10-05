@@ -6,6 +6,7 @@ import type { ClaudeCodeSetupOptions, FetchLike, PtyLoader } from '@ogden-agents
 import type { AgentWiring } from './agent-wiring.js';
 import type { AntigravityPorts } from './antigravity-wiring.js';
 import type { CodexPorts } from './codex-wiring.js';
+import type { GrokPorts } from './grok-wiring.js';
 import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, NotifierPort, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort } from '@ogden-agents/core';
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
@@ -69,6 +70,13 @@ export interface StartOptions {
    * memory setup), or `false` to leave it out.
    */
   codex?: false | CodexPorts;
+  /**
+   * Grok (epic 12 entry 4), registered after Codex: a shipped install registers
+   * it only when `GROK_SHIPPED` (its own adapter folder) is on; a test registers
+   * it with ports (the fake agent's Grok personality, a memory setup), or
+   * `false` to leave it out.
+   */
+  grok?: false | GrokPorts;
   /**
    * The Claude Agent ACP adapter's entry script (or, in tests, any script
    * that speaks ACP over stdio, such as the fake agent). Default:

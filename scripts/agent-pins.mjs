@@ -9,6 +9,7 @@
  *   node scripts/agent-pins.mjs --check --with-binary   the same with the SDK's bundled `claude`
  *   node scripts/agent-pins.mjs --check --agent antigravity   Antigravity's pinned archive (epic 6 entry 5)
  *   node scripts/agent-pins.mjs --agent codex --update 2.1.1   Codex's adapter pins (epic 12 entry 4), and `--check --with-binary` for its CLI binary
+ *   node scripts/agent-pins.mjs --agent grok --update 1.0.49   Grok's package pins (epic 12 entry 4); `--check --with-binary` also decompresses this OS's binary and checks its SHA-256
  *
  * `--update` writes an exact version and a lockfile in which every package
  * has its `resolved` URL and `integrity`; bump the pin in a pull request.
@@ -28,10 +29,12 @@
  * name another). Exits 0 when it succeeds, 1 otherwise.
  */
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { brotliDecompressSync } from 'node:zlib';
 import { sha256WithRetry } from './download-sha256.mjs';
 
 const ANTIGRAVITY_PINS = fileURLToPath(new URL('../packages/adapters/src/setup-antigravity/pins/antigravity-acp.json', import.meta.url));
@@ -42,7 +45,7 @@ const PLATFORMS = ['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64', 'wi
  * `--check --with-binary` looks for (the package scope of its bundled binary, and the file in the adapter that proves an install).
  * Codex's pins fix `@openai/codex` itself beside the adapter (the adapter's `^0.159.1` range would float).
  */
-/** @type {Record<string, { pinsDir: string, adapter: string, project: string, description: string, extra: Record<string, string>, binaryScope: string, binaryPrefix: string }>} */
+/** @type {Record<string, { pinsDir: string, adapter: string, project: string, description: string, extra: Record<string, string>, binaryScope: string, binaryPrefix: string, entry?: string }>} */
 const NPM_AGENTS = {
   'claude-code': {
     pinsDir: fileURLToPath(new URL('../packages/adapters/src/setup-claude-code/pins/', import.meta.url)),
@@ -62,6 +65,17 @@ const NPM_AGENTS = {
     extra: { '@openai/codex': '0.159.3' },
     binaryScope: '@openai',
     binaryPrefix: 'codex-',
+  },
+  grok: {
+    pinsDir: fileURLToPath(new URL('../packages/adapters/src/setup-grok/pins/', import.meta.url)),
+    adapter: '@xai-official/grok',
+    project: 'ogden-agents-grok',
+    description: 'Grok Build and its platform binary packages, which Ogden Agents installs (scripts/agent-pins.mjs --agent grok).',
+    extra: {},
+    binaryScope: '@xai-official',
+    binaryPrefix: 'grok-',
+    // The package's own launcher (`bin/grok`) proves the install; it is never run. The binary is checked by Ogden itself (`binarySha256`).
+    entry: 'bin/grok',
   },
 };
 
@@ -191,6 +205,25 @@ function update(npmCli, version) {
 }
 
 /**
+ * Grok's binary (epic 12 entry 4): this OS's platform package carries it brotli compressed. It is decompressed
+ * as the app does and its SHA-256 compared with the pin in `acp-grok/constants.ts` (xAI publishes none).
+ * @param {string} project
+ */
+function checkGrokBinary(project) {
+  const platform = `${process.platform}-${process.arch}`;
+  const constants = readFileSync(fileURLToPath(new URL('../packages/adapters/src/acp-grok/constants.ts', import.meta.url)), 'utf8');
+  const pinned = new RegExp(`'${platform}': '([0-9a-f]{64})'`).exec(constants)?.[1];
+  if (pinned === undefined) throw new Error(`no binary SHA-256 is pinned for ${platform}`);
+  const name = process.platform === 'win32' ? 'grok.exe.br' : 'grok.br';
+  const compressed = join(project, 'node_modules', '@xai-official', `grok-${platform}`, 'bin', name);
+  const hash = createHash('sha256');
+  hash.update(brotliDecompressSync(readFileSync(compressed)));
+  const actual = hash.digest('hex');
+  if (actual !== pinned) throw new Error(`the ${platform} binary's SHA-256 is ${actual}, pinned ${pinned}`);
+  console.log(`agent-pins: the ${platform} binary matches its pinned SHA-256`);
+}
+
+/**
  * @param {string} npmCli
  * @param {boolean} withBinary
  */
@@ -212,7 +245,8 @@ function check(npmCli, withBinary) {
       ...(withBinary ? [] : ['--omit=optional']),
     ]);
     const root = join(project, 'node_modules', ...ADAPTER.split('/'));
-    if (!existsSync(join(root, 'dist', 'index.js'))) throw new Error(`${ADAPTER} has no dist/index.js`);
+    const entry = AGENT.entry ?? 'dist/index.js';
+    if (!existsSync(join(root, ...entry.split('/')))) throw new Error(`${ADAPTER} has no ${entry}`);
     const installed = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
     if (installed !== version) throw new Error(`installed ${installed}, pinned ${version}`);
     if (withBinary) {
@@ -220,6 +254,7 @@ function check(npmCli, withBinary) {
       const binaries = existsSync(scope) ? readdirSync(scope).filter((name) => name.startsWith(AGENT.binaryPrefix)) : [];
       if (binaries.length === 0) throw new Error(`no bundled binary package for ${process.platform}-${process.arch}`);
       console.log(`agent-pins: bundled binary ${binaries.join(', ')}`);
+      if (agentId === 'grok') checkGrokBinary(project);
     }
     console.log(`agent-pins: ${ADAPTER} ${version} installs${withBinary ? ' with its bundled binary' : ''} on ${process.platform}-${process.arch}`);
   } finally {
@@ -286,7 +321,7 @@ try {
   if (npmCli === undefined) throw new Error('npm-cli.js was not found beside this Node; pass --npm <path to npm-cli.js>');
   if (flag('--update')) update(npmCli, valueOf('--update'));
   else if (flag('--check')) check(npmCli, flag('--with-binary'));
-  else throw new Error('usage: agent-pins.mjs [--agent claude-code|codex] --update <version> | --check [--with-binary] | --check --agent antigravity');
+  else throw new Error('usage: agent-pins.mjs [--agent claude-code|codex|grok] --update <version> | --check [--with-binary] | --check --agent antigravity');
 } catch (error) {
   console.error(`agent-pins: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);

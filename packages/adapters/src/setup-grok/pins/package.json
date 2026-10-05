@@ -1,0 +1,8 @@
+{
+  "name": "ogden-agents-grok",
+  "private": true,
+  "description": "Grok Build and its platform binary packages, which Ogden Agents installs (scripts/agent-pins.mjs --agent grok).",
+  "dependencies": {
+    "@xai-official/grok": "1.0.49"
+  }
+}

@@ -286,7 +286,7 @@ async function opencodeProbe() {
       const cfg = writeConfig(`sw-${name}`, { baseURL: `${fake.url}/v1`, hardened });
       const xdg = join(dataDir, 'sw', name);
       const before = proxy.hits.length;
-      const d = new Driver(name, fake, { cmd: bin, args: ['acp'], wrap, env: baseEnv({ OPENCODE_CONFIG: cfg.path, OGDEN_ENDPOINT_KEY: KEY, ...proxy.env, ...envX }, xdg) }, proxy);
+      const d = new Driver(name, fake, { cmd: bin, args: ['acp'], wrap, env: baseEnv({ OPENCODE_CONFIG: cfg.path, OGDEN_ENDPOINT_KEY: KEY, OPENCODE_LOG_LEVEL: 'DEBUG', ...proxy.env, ...envX }, xdg) }, proxy);
       await d.start();
       const s = await d.newSession();
       const h = s.result?.sessionId ? await d.prompt(s.result.sessionId, 'Say hello', { policy: 'cancel' }) : null;
@@ -297,7 +297,8 @@ async function opencodeProbe() {
         sockets: externalOnly(st.connections),
         commands: d.commands().filter((c) => !['init', 'review', 'customize-opencode'].includes(c)), requestsForHello: h?.fake?.length,
         helloOk: h?.text === 'Hello from the fake model.', model: h?.fake?.map((e) => e.model)?.[0] ?? (h?.error ? 'error' : null),
-        wroteFiles: listTree(xdg).filter((f) => !f.endsWith('/')).slice(0, 12),
+        logHits: (() => { try { return readFileSync(join(xdg, 'data', 'opencode', 'log', 'opencode.log'), 'utf8').split('\n').filter((l) => /github|download|clone|ripgrep|\.zip|\.tar|fetch|install|registry/i.test(l)).map((l) => l.replace(/directory=\S+|path=\S+/g, '').slice(0, 200)).slice(0, 12); } catch { return null; } })(),
+        wroteFiles: listTree(xdg).filter((f) => !f.endsWith('/')).slice(0, 25),
       };
     }
     results.switchMatrix = matrix;

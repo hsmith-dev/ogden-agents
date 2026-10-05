@@ -139,7 +139,7 @@ export function startFakeServer({ port = 0, host = '127.0.0.1', requireKey = nul
         const model = json.model ?? 'fake-small';
         const items = Array.isArray(json.input) ? json.input : [{ role: 'user', content: String(json.input ?? '') }];
         const userIdx = items.map((i) => i.role).lastIndexOf('user');
-        const inputText = JSON.stringify(items[userIdx]?.content ?? '');
+        const inputText = JSON.stringify(items.filter((i) => i.role === 'user').slice(-2).map((i) => i.content));
         entry.userText = inputText.slice(0, 120);
         const hasOutput = items.slice(userIdx + 1).some((i) => i.type === 'function_call_output');
         const wantsTool = (json.tools ?? []).length && !hasOutput && /\brun\b/i.test(inputText);

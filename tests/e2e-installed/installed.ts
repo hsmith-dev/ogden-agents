@@ -13,7 +13,7 @@ import { createDataFolder020, type DataFolder020 } from '../fixtures/data-folder
 import { FIXTURE_TOP, fixtureSource, hasManagedPython, TEST_PYTHON } from '../fixtures/bmad-upstream-source.js';
 import { createFakeBmadRepo, type FakeBmadRepo, type FakeBmadRepoOptions } from '../fixtures/fake-bmad-repo.js';
 import { packFakeAdapter, testNpmCli } from '../fixtures/fake-adapter/pack.mjs';
-import { FAKE_ANTIGRAVITY, FAKE_CODEX, FAKE_GEMINI_KEY, isAlive, plantPinnedAntigravity, readPortFile, ROOT, waitUntil } from '../support.js';
+import { FAKE_ANTIGRAVITY, FAKE_CODEX, FAKE_GEMINI_KEY, FAKE_GROK, isAlive, plantPinnedAntigravity, readPortFile, ROOT, waitUntil } from '../support.js';
 
 /**
  * Where the installed server looks for the Claude Agent ACP adapter
@@ -445,6 +445,10 @@ export const ANTIGRAVITY_INSTALL_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_INSTALL';
 export const CODEX_SERVER_ENV = 'OGDEN_AGENTS_TEST_CODEX_SERVER';
 /** A fake OpenAI key's shape, in the server's environment when Codex is on: only Codex's own process may receive it. */
 export const FAKE_OPENAI_KEY = `sk-proj-${'C'.repeat(40)}7777`;
+/** The installed server's Grok hook (epic 12 entry 7): a Node script in the temp folder plays `grok agent stdio` (the fake's Grok personality). */
+export const GROK_SERVER_ENV = 'OGDEN_AGENTS_TEST_GROK_SERVER';
+/** A fake xAI token's shape, in the server's environment when Grok is on: only Grok's own process may receive it. */
+export const FAKE_XAI_KEY = `xai-${'G'.repeat(60)}7777`;
 /** The installed server's trust-needing test agent (epic 6 entry 10): "Fake Agent", the fake agent, refused until the project is trusted. */
 export const TRUST_AGENT_ENV = 'OGDEN_AGENTS_TEST_TRUST_AGENT';
 
@@ -578,6 +582,8 @@ export interface BmadServerOptions {
   trustAgent?: boolean;
   /** Codex installed (a planted pinned copy, never run) and played by the fake's Codex personality, with a fake OpenAI key in the server's environment (epic 12). */
   codex?: boolean;
+  /** Grok installed (a planted checked binary, never run) and played by the fake's Grok personality, with a fake xAI token in the server's environment (epic 12). */
+  grok?: boolean;
   /** A first run: Welcome not done. */
   firstRun?: boolean;
   /** More variables for the server's environment (planted secrets, say). */
@@ -586,7 +592,7 @@ export interface BmadServerOptions {
 
 export function bmadServer(
   name: string,
-  { available, probe = false, bmadSource = false, antigravity = false, antigravityPins, trustAgent = false, codex = false, firstRun = false, env: extraEnv = {} }: BmadServerOptions = {},
+  { available, probe = false, bmadSource = false, antigravity = false, antigravityPins, trustAgent = false, codex = false, grok = false, firstRun = false, env: extraEnv = {} }: BmadServerOptions = {},
 ): BmadServer {
   const dataDir = extraFolder(`${name}-data`);
   // The fixture BMad Method source (story 4.13), only when asked for: without it Set up would reach GitHub.
@@ -622,6 +628,18 @@ export function bmadServer(
     codexServer = join(extraFolder(`${name}-codex`), 'codex-server.mjs');
     writeFileSync(codexServer, `await import(${JSON.stringify(pathToFileURL(FAKE_CODEX).href)});\n`);
   }
+  let grokServer = '';
+  if (grok) {
+    // Installed as Install leaves it: the checked binary (empty, never run: the hook's script is).
+    const version = (JSON.parse(readFileSync(join(ROOT, 'packages', 'adapters', 'src', 'setup-grok', 'pins', 'package-lock.json'), 'utf8')) as { packages: Record<string, { version: string }> }).packages[
+      'node_modules/@xai-official/grok'
+    ]!.version;
+    const checked = join(dataDir, 'agents', 'grok', `grok-${version}`, 'bin-checked');
+    mkdirSync(checked, { recursive: true });
+    writeFileSync(join(checked, process.platform === 'win32' ? 'grok.exe' : 'grok'), '');
+    grokServer = join(extraFolder(`${name}-grok`), 'grok-server.mjs');
+    writeFileSync(grokServer, `await import(${JSON.stringify(pathToFileURL(FAKE_GROK).href)});\n`);
+  }
   const agyPinned = antigravityPins !== undefined || (antigravity && existsSync(join(dataDir, 'agents', 'antigravity')));
   const agyKey = antigravity && agyPinned;
   // Real paths: macOS temp folders are reached through /var, and Windows ones may be 8.3 short names.
@@ -642,6 +660,8 @@ export function bmadServer(
       [TRUST_AGENT_ENV]: trustAgentScript,
       [CODEX_SERVER_ENV]: codexServer,
       CODEX_API_KEY: codex ? FAKE_OPENAI_KEY : '',
+      [GROK_SERVER_ENV]: grokServer,
+      XAI_API_KEY: grok ? FAKE_XAI_KEY : '',
       GEMINI_API_KEY: agyKey ? FAKE_GEMINI_KEY : '',
       // The server passes ANTHROPIC_API_KEY on to agents, and `session-start` echoes the agent's whole environment into the page.
       ANTHROPIC_API_KEY: '',

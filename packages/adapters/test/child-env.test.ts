@@ -15,6 +15,7 @@ const PLANTED = {
   OGDEN_AGENTS_TEST_CLAUDE_INSTALL: '/planted.json',
   NODE_OPTIONS: '--require /planted.js',
   CLAUDECODE: '1',
+  LC_API_TOKEN: 'planted-lc',
 };
 
 describe('the child process allowlist (AD-16)', () => {

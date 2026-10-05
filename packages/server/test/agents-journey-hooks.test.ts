@@ -12,7 +12,7 @@ import { ANTIGRAVITY_INSTALL_ENV, resolveTestHooks, testAntigravityInstall, test
 import { tempDataDir } from './helpers.js';
 
 const OUTSIDE = process.cwd();
-const run = { NODE_ENV: 'test' };
+const run = { NODE_ENV: 'test', OGDEN_AGENTS_TEST_ANTIGRAVITY_SERVER: '/fake/server.mjs' };
 
 const pin = (url: string) => ({ url, sha256: 'a'.repeat(64), size: 10, binary: 'agy_acp_server.par', args: [], files: { 'agy_acp_server.par': { size: 10, sha256: 'b'.repeat(64) } } });
 const pinsFile = (archives: Record<string, unknown>) => {
@@ -29,11 +29,12 @@ describe('testAntigravityInstall (epic 6 entry 10)', () => {
     expect(testAntigravityInstall({ ...run, [ANTIGRAVITY_INSTALL_ENV]: pinsFile({}) }, tempDataDir())?.pins.archives).toEqual({});
   });
 
-  it('is ignored for an archive anywhere but loopback, outside a test run, outside the temp folder, or unset', () => {
+  it('refuses an archive anywhere but loopback, and pins without the server hook; ignored outside a test run, outside the temp folder, or unset', () => {
     for (const url of ['https://dl.google.com/agy.zip', 'http://localhost:1/agy.zip', 'file:///tmp/agy.zip', 'http://127.0.0.2/agy.zip']) {
-      expect(testAntigravityInstall({ ...run, [ANTIGRAVITY_INSTALL_ENV]: pinsFile({ 'linux-x64': pin(url) }) }, tempDataDir()), url).toBeUndefined();
+      expect(() => testAntigravityInstall({ ...run, [ANTIGRAVITY_INSTALL_ENV]: pinsFile({ 'linux-x64': pin(url) }) }, tempDataDir()), url).toThrow(/must be http:\/\/127\.0\.0\.1/);
     }
     const file = pinsFile({ 'linux-x64': pin('http://127.0.0.1:1/agy.zip') });
+    expect(() => testAntigravityInstall({ NODE_ENV: 'test', [ANTIGRAVITY_INSTALL_ENV]: file }, tempDataDir())).toThrow(/needs OGDEN_AGENTS_TEST_ANTIGRAVITY_SERVER too/);
     expect(testAntigravityInstall({ [ANTIGRAVITY_INSTALL_ENV]: file }, tempDataDir())).toBeUndefined();
     expect(testAntigravityInstall({ ...run, [ANTIGRAVITY_INSTALL_ENV]: file }, OUTSIDE)).toBeUndefined();
     expect(testAntigravityInstall({ ...run, [ANTIGRAVITY_INSTALL_ENV]: join(OUTSIDE, 'package.json') }, tempDataDir())).toBeUndefined();

@@ -3,7 +3,7 @@ title: 'End-to-end suite and release (epic 6)'
 type: 'feature'
 ticket: '10'
 created: '2026-10-04'
-status: 'in-review'
+status: 'built'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
@@ -91,12 +91,26 @@ context:
 - Hooks: `OGDEN_AGENTS_TEST_ANTIGRAVITY_INSTALL` (pins JSON in temp; every archive URL must be `http://127.0.0.1`, else ignored) and `OGDEN_AGENTS_TEST_TRUST_AGENT` (the fake agent as "Fake Agent", `needsProjectTrust: true`), both behind `testHooksAllowed`; audit test green.
 - Installed suite: `tests/e2e-installed/agents-journey.spec.ts` (project `agents`, before epic 1's `journey`), five tests; `bmadServer` gained `antigravityPins`, `trustAgent`, `firstRun`, `env`.
 - Mutation proofs (local, not committed; repacked each time, 2026-10-04 macOS arm64): (1) trust gate disabled in `core/src/chat/workspaces.ts` → the two-agents journey fails at "an agent that needs a trusted project" (Expected 409, Received 201). (2) Antigravity's descriptor declaring `auto: 'auto_edit'` → it fails at "Antigravity offers Ask and Skip all, never Auto" (`permission-mode-auto` not disabled). Both reverted; the clean run passes.
+- `open-url.ts` lives in `packages/server/src`, not adapters as the task list said: `open` is a dependency of the server package only (pnpm's strict layout: adapters can't resolve it), and the launcher already imports from server. Behaviour as planned.
 - The `open.test.ts` mock moved from `open` to `../src/open-url.js` (an unmocked run would open a real browser).
 - Release prep: `0.5.0-rc.1` in the three `package.json`s; CHANGELOG 0.5.0; RELEASING.md "0.5.0 release checklist" (12 live checks per OS); AD-16 dated note; deferred item resolved. Not tagged or published. The final `agent-matrix.md` Antigravity row waits on the live checks (RELEASING.md step 3 says when).
 
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (quick lens, security focus on the AD-16 allowlist): 8 findings: high 0, medium 3, low 5, false 0, maybe-false 0. All patched; no intent_gap or bad_plan.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---------|---------|-------|-------------------|
+| 1 | AD-16 note not logged in the architecture `.memlog.md` (AGENTS.md rule) | low | patch | Real: earlier AD-16 notes are logged there. Added the dated line. |
+| 2 | `open-url.ts` in server, not adapters as the task list said; no reason recorded | low | patch | Real deviation, harmless: `open` resolves only from the server package. Reason added to Implementation Notes. |
+| 3 | Architecture exemption covers every `spawn` in `launcher.ts` | medium | patch | Real: keyed on file+callee only. Now the exemption also needs the call to set `[DATA_DIR_ENV]: dataDir`; a planted second launcher spawn with `process.env` is flagged in the test. |
+| 4 | Rule misses default, mixed, dynamic and `require` loads of child_process | medium | patch | Real. Any load other than a plain named import is now flagged (planted cases tested). Still syntactic: an `env` variable built from `process.env` elsewhere is caught by unit tests (noted above). |
+| 5 | `LC_*` admitted by prefix, so `LC_API_TOKEN` reaches agents and helpers | medium | patch | Real (`pick`). `LC_*` names matching `SECRET_NAME` are dropped; planted `LC_API_TOKEN` in `child-env.test.ts`. |
+| 6 | Install hook falls back to the shipped Google pins for a non-loopback URL, or without the server hook | low | patch | Real for a misconfigured test only: hooks already require `testHooksAllowed`. Both now throw. The redirect sub-claim was rejected: the 127.0.0.1 responder is the test's own and never redirects. |
+| 7 | No unit test at the taskkill and PowerShell spawn sites | low | patch | Real gap. `adapters/test/helper-spawn-env.test.ts` mocks `node:child_process` and checks the env each call gets with planted keys. |
+| 8 | The installed journey doesn't check the third agent's env | low | patch | Real gap. Added a `session-start` env check in the trust step. |
 
 ## Verification
 

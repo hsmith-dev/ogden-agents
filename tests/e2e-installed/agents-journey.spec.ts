@@ -257,6 +257,10 @@ test('two agents at once in a Simple project: picker, own keys only, Antigravity
     await page.goto(`${launched.url}/w/${trustedId}/s/${session.id}`);
     await say(page, 'Fake Agent', 'whoami');
     await expect(replies(page).last()).toContainText('agent=fake-agent');
+    // The third agent gets no other agent's key either (AD-16).
+    const own = await agentEnv(page, 'Fake Agent');
+    for (const name of ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'GEMINI_HOME', PROBE]) expect(Object.keys(own), name).not.toContain(name);
+    expect(JSON.stringify(own)).not.toContain('planted-secret');
     // The trust is bound to the scripts as they were (story 4.13): changed, it is asked again.
     const script = join(bmadRepo.path, '_bmad', 'scripts', 'config_utils.py');
     writeFileSync(script, `${readFileSync(script, 'utf8')}\n# changed\n`);

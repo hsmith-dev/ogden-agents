@@ -239,9 +239,10 @@ export interface TestAntigravityInstall {
 /**
  * Antigravity's test pins from {@link ANTIGRAVITY_INSTALL_ENV}, or
  * `undefined` (the shipped pins): unset, hooks not allowed, the file outside
- * the temp folder, or any archive URL that is not `http://127.0.0.1` (never
- * fetched through this hook). Allowed but unusable (a relative path,
- * unreadable, malformed pins) throws, so the test fails loudly.
+ * the temp folder. Allowed but unusable (a relative path, unreadable,
+ * malformed pins, an archive URL that is not `http://127.0.0.1`, or no
+ * {@link ANTIGRAVITY_SERVER_ENV} beside it) throws, so the test fails loudly
+ * rather than installing from Google.
  */
 export function testAntigravityInstall(env: Env, dataDir: string, tmp: string = tmpdir()): TestAntigravityInstall | undefined {
   const file = env[ANTIGRAVITY_INSTALL_ENV];
@@ -275,9 +276,11 @@ export function testAntigravityInstall(env: Env, dataDir: string, tmp: string = 
     } catch {
       url = undefined;
     }
-    // A local fixture only: an archive anywhere but this computer's loopback is never fetched through this hook.
-    if (url?.protocol !== 'http:' || url.hostname !== '127.0.0.1') return undefined;
+    // A local fixture only: an archive anywhere but this computer's loopback is refused loudly, never fetched (nor the shipped pins used instead).
+    if (url?.protocol !== 'http:' || url.hostname !== '127.0.0.1') fail('every archive url must be http://127.0.0.1');
   }
+  // Its installed server is the fake: without the server hook the shipped server would run.
+  if (env[ANTIGRAVITY_SERVER_ENV] === undefined || env[ANTIGRAVITY_SERVER_ENV] === '') fail(`needs ${ANTIGRAVITY_SERVER_ENV} too`);
   return { pins: pins as AntigravityPins };
 }
 

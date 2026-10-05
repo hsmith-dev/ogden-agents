@@ -43,7 +43,8 @@ function pick(
   const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(source)) {
     if (value === undefined) continue;
-    if (allowed.has(fold(name)) || name === 'LC_ALL' || name.startsWith('LC_')) env[name] = value;
+    // Locale variables by prefix, but never one named like a credential (`LC_*` is a known way to carry values through, as sshd's AcceptEnv).
+    if (allowed.has(fold(name)) || name === 'LC_ALL' || (name.startsWith('LC_') && !SECRET_NAME.test(name))) env[name] = value;
   }
   return env;
 }

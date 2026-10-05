@@ -1,0 +1,132 @@
+# Epic 14 breakdown (v1.2, local models). Table order is the build order; ids never change once written.
+# Drafted autonomously 2026-10-05 for the user's approval; nothing here is approved yet. Open questions are in the epic's Notes.
+# References to other epics use "<epic id>.<entry id>".
+# Real models and the real network are impossible in CI: every test talks to a fake OpenAI-compatible server on loopback. Live checks with real Ollama and LM Studio are hitl.
+# The user's rules (binding): local models need no account and no key; only Claude Code and Antigravity use a subscription sign-in; Codex and Grok are API-key only.
+# Lanes: 2 (tracer) proves the whole path with the thin slice; 3 then owns shared files; 4 and 5 (card, model list) and 8 (manager-ready endpoint) can run in parallel after 3; 6 and 7 follow 5.
+
+[[entry]]
+id = 1
+type = "spike"
+title = "Which route can drive a local model over ACP on all three OSes, and does it stay on the machine?"
+description = "Adds a temporary CI job on Windows, Linux and macOS that starts a fake OpenAI-compatible server on loopback (models, chat completions with streaming and tool calls, responses, a slow first token, a malformed reply) and, for each candidate route, installs its pinned build into a temp data folder (OpenCode's registry binary checked against its sha256 as a pinned download; Codex through the merged codex-acp with a generated config; Goose only if OpenCode fails), writes the harness's config from a template pointing at the fake server, starts it over stdio with an allowlisted environment and an empty home, and records: initialize's capabilities and auth methods, whether it starts and chats with no key and no account, whether codex-acp honours oss_provider or a loopback model_provider, the permission option kinds sent, modes and how they map to Ask, session list/load/resume, which skill folders it reads, whether a tool call from the fake server runs through a permission request, startup time, install size, stopping the process tree, every outbound connection attempted with the fake server as the only allowed destination (model-catalog fetches, update checks, telemetry, sharing) and which config or environment switches stop each, Windows behaviour; it also re-checks the harness licence and terms; the hitl step is the user reading the results and deciding the route and go or no-go."
+verify = "The probe's logs on all three OSes answer each question, the comparison and a recommended route are written into the plan with a proposed agent-matrix.md row, every outbound connection attempt is listed with how it is switched off or that it cannot be, the licence and terms re-check is recorded, the user's live checks are listed, the user's route and go or no-go are recorded as a dated Decision in the epic's Notes, and the temporary job is removed."
+covers = ["CAP-15", "CAP-3", "CAP-4", "CAP-16"]
+after = []
+hitl = true
+risk = "high"
+unknown = "Whether codex-acp honours a local provider; whether OpenCode (or Goose) can be kept entirely off the network by config; how each reports permission requests and resumes over ACP; whether Ollama's and LM Studio's /v1 behave identically enough for one config template."
+references = ["https://github.com/agentclientprotocol/codex-acp", "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json", "https://opencode.ai/docs/providers/", "https://opencode.ai/docs/acp", "https://learn.chatgpt.com/docs/config-file/config-advanced", "https://docs.ollama.com/api/openai-compatibility", "https://lmstudio.ai/docs/developer/openai-compat"]
+
+[[entry]]
+id = 2
+type = "story"
+title = "Tracer bullet: one Local model chat against a fake server, end to end"
+description = "Adds the thinnest path that proves the route: a `local` descriptor and the chosen route's `acp-<route>` adapter of hooks on acp-base, a launch hook that writes the harness's config (endpoint and model) into the data folder, the chosen harness installed from its pin, a fake OpenAI-compatible server fixture, and a bare page where the user picks Local model for a chat in a workspace, sends a message and sees the streamed reply, with the endpoint and model fixed in code."
+verify = "On all three OSes a test starts the fake server, creates a Local model chat through the real server API, and the reply streams into the session view; the harness's only connection is to the fake server; and the chat survives nothing yet (resume is entry 6)."
+covers = ["CAP-15", "CAP-3"]
+after = [1, "6.6", "12.3", "12.4"]
+hitl = false
+risk = "high"
+unknown = "How much of the harness's config generation depends on the route spike 1 picks; the entry is rewritten if the route changes."
+
+[[entry]]
+id = 3
+type = "story"
+title = "Epic contracts and stubs: endpoint, LocalModelPort, no-account descriptor and the fake server"
+description = "Extends the agent-neutral groundwork, naming no route and no vendor: an `AgentDescriptor` flag for agents that need no account and no key (the card shows endpoint state instead of sign-in), `LocalEndpoint` in shared (kind ollama, lmstudio or custom; host; port; chosen model; loopback-only validation), `LocalModelPort` in core (probe, listModels, structuredComplete with a JSON schema) with an in-memory stub named `local-model-memory`, the settings use-cases and routes for the endpoint with the AD-15 gate, a generic launch hook slot that gets the endpoint and model, and the fake OpenAI-compatible server promoted from the tracer to a shared fixture with every failure mode (refused, model not found, slow first token, context full, malformed reply, tool calls)."
+verify = "Unit and architecture tests: core and shared name no route, Ollama or LM Studio; a non-loopback host is refused by the validator and the route; the stub and the fake server satisfy the port's contract tests; the Claude Code, Antigravity, Codex and Grok flows are unchanged."
+covers = ["CAP-15", "CAP-16"]
+after = [2]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 4
+type = "story"
+title = "Connection card in Settings, Agents: host and port, Detect on localhost, Test, no key"
+description = "Adds the Local model card to Settings, Agents on the generic agent card: Ollama or LM Studio or custom with the default host and port prefilled, Detect (probes only 127.0.0.1 and localhost on 11434 and 1234 when pressed, short timeout, never a scan), Test, the plain-words state (not running, running with no models, ready), links to Ollama's and LM Studio's official download pages when none is found, no key field, and the privacy statement that prompts and files stay on this computer (and the one exception if spike 1 found a switch-off-less call)."
+verify = "With the fake server on the default ports a test presses Detect and the card shows ready; with nothing listening it shows not running with the download links; a non-loopback host typed in is refused with its reason; the page makes no request to any non-loopback host; and no key field or secret exists."
+covers = ["CAP-16", "CAP-19"]
+after = [3]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 5
+type = "story"
+title = "Model list and picker: from the server, per project and per chat"
+description = "Adds the model list from the server (`/api/tags` for Ollama, `/v1/models` for LM Studio and custom, with context length and tool capability shown where the server reports them), a model picker per project default and per chat, a missing-model state that names the model and never substitutes another, a plain caution on small models and small context (below the floor spike 1 sets), and the honest hardware and tool-calling notes from the epic's Notes on the card."
+verify = "Against the fake server a test lists the models for both server kinds, picks one for a project and overrides it for a chat, removes it from the server and sees the missing state with its reason, and sees the small-context caution for a model below the floor."
+covers = ["CAP-15"]
+after = [4]
+hitl = false
+risk = "medium"
+unknown = "What each server reports for context length and tool support (Ollama's show endpoint, LM Studio's model metadata); the entry shows only what is reported and says when unknown."
+
+[[entry]]
+id = 6
+type = "story"
+title = "Local model chat: permission cards, local-server failures and resume"
+description = "Completes chat with the Local model on acp-base: permission cards (Allow once, Deny, always allow where the harness offers it) with option kinds mapped by the adapter, normalized states, cancel, resume (resume, then load, then the stored-transcript fallback), and the plain-words failure states for the server stopping, the model unloading or still loading, a timeout, and a full context, each with the fake server's failure mode as its test."
+verify = "Against the fake server on all three OSes a requested shell command does not run until its card is approved and does not run after Deny, a server restart resumes the chat with its context, killing the fake server mid-reply shows the not-running state without hanging, and a context-full reply shows the context-full state."
+covers = ["CAP-15", "CAP-3", "CAP-4"]
+after = [5]
+hitl = false
+risk = "high"
+
+[[entry]]
+id = 7
+type = "story"
+title = "Ask-only modes, safe defaults and the terminal toggle only if the route supports it"
+description = "Declares Ask as the Local model's only mode in its descriptor, so the server refuses Auto and Skip all for it (even with Developer mode on) and the picker shows them unavailable with the reason in plain words, sets Ask as the project default for it, and offers the terminal toggle only if spike 1 showed the route's own CLI resumes the ACP session id on that OS (else agent_unsupported), recording it in agent-matrix.md."
+verify = "A direct API call asking for Auto or Skip all on a Local model chat is refused with the declared-mode error, the picker shows both unavailable with the reason, a Claude Code chat in the same project keeps its own modes, and the terminal toggle appears exactly where the matrix says."
+covers = ["CAP-4", "CAP-5"]
+after = [6]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 8
+type = "story"
+title = "Manager-ready endpoint: a JSON-shaped answer from a local model, and a Test as a manager check"
+description = "Implements `LocalModelPort.structuredComplete` against Ollama and LM Studio (non-streaming, one request, constrained to a caller-supplied JSON schema through the server's structured-output option where it has one, else validated after the fact, with one repair retry, a hard timeout and a size cap, no tools and no files), and adds a Test as a manager action to the model picker that sends a fixed small plan-shaped prompt and reports pass or a plain-words reason (malformed JSON, ignored schema, too slow, context too small); no manager role, session or UI exists yet, it is the hook epic 15 builds on."
+verify = "Against the fake server a conforming reply passes, malformed JSON gets one repair retry then a plain-words failure, an oversize reply is refused, a timeout is reported, and the port's contract tests pass for the stub and the real adapter; core and shared still name no vendor."
+covers = ["CAP-15"]
+after = [5]
+hitl = false
+risk = "medium"
+unknown = "Which structured-output option each server honours (Ollama's `format` schema, `response_format` on /v1, LM Studio's json_schema); the entry uses validation after the fact if a server ignores it."
+
+[[entry]]
+id = 9
+type = "story"
+title = "BMad skills reach the Local model where Planning is on, nothing where it is off"
+description = "With Planning on, makes BMad's skills reachable by the Local model through the route's skill folder with the adapter formatting the invocation and the card cautioning that skills are long and need a large context; with every piece off, no BMad text reaches the chat and nothing is written to the repo (the pieces guard from 10.2)."
+verify = "With Planning on a planning session with the Local model against the fake server runs a BMad skill invocation end to end; with every piece off, a simple-project test shows no BMad text in the session and no file written under the repo."
+covers = ["CAP-15", "CAP-19", "CAP-6"]
+after = [6, "4.3", "4.6", "10.6", "12.9"]
+hitl = false
+risk = "medium"
+
+[[entry]]
+id = 10
+type = "story"
+title = "Refactor sweep"
+description = "Reviews the whole epic's diff for duplication, dead code and boundary leaks, extracts what Codex, Grok and the Local model now share, checks the architecture tests, and fixes small findings."
+verify = "The full unit, architecture and integration suites pass on all three OSes and the sweep's findings are each fixed or recorded."
+covers = ["CAP-15"]
+after = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+hitl = false
+risk = "low"
+
+[[entry]]
+id = 11
+type = "story"
+title = "End-to-end suite and v1.2 release; live checks with real Ollama and LM Studio"
+description = "Adds the epic's end-to-end suite on macOS, Windows and Linux against the fake server (connect, detect, pick a model, chat with a card, Ask-only refusal, restart, the manager test, no non-loopback connection, a simple project with every BMad piece off), updates the README and Settings help, and releases `ogden-agents` v1.2; the hitl step is the user's live checks on a Mac and on Windows with real Ollama and real LM Studio, a small and a larger model, in a scratch repo, listed in the epic's Notes."
+verify = "The suite passes on all three OSes in CI with no real model and no real network, the release workflow publishes v1.2, and the user records each live check as a dated Decision in the epic's Notes."
+covers = ["CAP-15", "CAP-3", "CAP-4", "CAP-16", "CAP-19"]
+after = [10, "12.11"]
+hitl = true
+risk = "medium"

@@ -31,6 +31,7 @@ import { Skeleton } from '@/ui/skeleton';
 import { Text } from '@/ui/typography';
 import { indexTickets, prerequisitesOf, type Prerequisite } from './board-model';
 import { useMarkTicket, useTicket, useTickets } from './planning-api';
+import { TicketBuildSection } from './ticket-build-section';
 import { TicketStatusMenu, type TicketStatusChoice } from './ticket-status-menu';
 
 export interface TicketSheetProps {
@@ -138,6 +139,7 @@ function TicketBody({ wsId, detail }: { wsId: string; detail: TicketDetail }) {
           </Text>
         ) : null}
       </Section>
+      <TicketBuildSection wsId={wsId} ticketRef={detail.ref} />
       <Section heading={TICKET_SUMMARY_HEADING} testId="ticket-sheet-summary">
         <Text variant="body" className="break-words whitespace-pre-wrap" tone={detail.description === '' ? 'muted' : 'default'}>
           {detail.description === '' ? TICKET_NO_PLAN_TEXT : detail.description}

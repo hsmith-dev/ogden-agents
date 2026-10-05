@@ -19,6 +19,8 @@ export interface BoardEpicProps {
   onBuild?: ((ref: string) => void) | undefined;
   /** The refs of tickets whose build waits in the queue (story 5.8): their card says Queued. */
   queued?: ReadonlySet<string> | undefined;
+  /** A ticket's latest build that failed its checks, by ref: the failing check in words (story 11.2). */
+  failures?: ReadonlyMap<string, string> | undefined;
   /** While a build is being started: every Build waits. */
   building?: boolean;
 }
@@ -28,12 +30,12 @@ interface CardListProps extends Omit<BoardEpicProps, 'epic'> {
   label: string;
 }
 
-function CardList({ wsId, rows, statuses, highlighted, label, onChoose, saving = false, onBuild, building = false, queued }: CardListProps) {
+function CardList({ wsId, rows, statuses, highlighted, label, onChoose, saving = false, onBuild, building = false, queued, failures }: CardListProps) {
   return (
     <ul aria-label={label} className="m-0 flex list-none flex-col gap-2 p-0">
       {rows.map((row) => (
         <li key={row.ref}>
-          <TicketCard wsId={wsId} row={row} status={statuses.get(row.ref)!} highlighted={highlighted.has(row.ref)} onChoose={onChoose} busy={saving} onBuild={onBuild} building={building} queued={queued?.has(row.ref) === true} />
+          <TicketCard wsId={wsId} row={row} status={statuses.get(row.ref)!} highlighted={highlighted.has(row.ref)} onChoose={onChoose} busy={saving} onBuild={onBuild} building={building} queued={queued?.has(row.ref) === true} buildFailure={failures?.get(row.ref)} />
         </li>
       ))}
     </ul>
@@ -47,7 +49,7 @@ function CardList({ wsId, rows, statuses, highlighted, label, onChoose, saving =
  * below `md` the non-empty ones stack as lists under their headings. With the
  * dropped filter on, its dropped tickets follow.
  */
-export const BoardEpic = memo(function BoardEpic({ wsId, epic, statuses, highlighted, onChoose, saving = false, onBuild, building = false, queued }: BoardEpicProps) {
+export const BoardEpic = memo(function BoardEpic({ wsId, epic, statuses, highlighted, onChoose, saving = false, onBuild, building = false, queued, failures }: BoardEpicProps) {
   const headingId = useId();
   return (
     <section data-testid="board-epic" data-epic={epic.slug} className="flex flex-col gap-3">
@@ -74,7 +76,7 @@ export const BoardEpic = memo(function BoardEpic({ wsId, epic, statuses, highlig
               <span className="tabular-nums">{rows.length}</span>
             </Text>
             {rows.length === 0 ? null : (
-              <CardList wsId={wsId} rows={rows} statuses={statuses} highlighted={highlighted} onChoose={onChoose} saving={saving} onBuild={onBuild} building={building} queued={queued} label={`${epic.title}, ${BOARD_COLUMN_LABELS[column]}`} />
+              <CardList wsId={wsId} rows={rows} statuses={statuses} highlighted={highlighted} onChoose={onChoose} saving={saving} onBuild={onBuild} building={building} queued={queued} failures={failures} label={`${epic.title}, ${BOARD_COLUMN_LABELS[column]}`} />
             )}
           </div>
         ))}

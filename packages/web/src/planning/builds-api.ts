@@ -2,6 +2,7 @@ import {
   API_ROUTES,
   apiPath,
   APPLY_FIX_FAILED,
+  CHECK_AGAIN_FAILED,
   APPROVE_FAILED,
   BUILD_DIALOG_LOAD_FAILED,
   BUILD_FAILED,
@@ -165,6 +166,28 @@ export async function retryRun(wsId: string, runId: string, auth: Auth = tabAuth
   return RunResponse.parse(json).run;
 }
 
+/** `POST …/runs/:runId/check-again` (11.2): runs the end checks on the run's worktree once more. */
+export async function checkRunAgain(wsId: string, runId: string, auth: Auth = tabAuth): Promise<Run> {
+  const json = await call(auth, apiPath(API_ROUTES.runCheckAgain, { wsId, runId }), { method: 'POST' }, CHECK_AGAIN_FAILED);
+  return RunResponse.parse(json).run;
+}
+
+/** `GET …/runs/:runId` (11.1): the run and its verification (11.2 shows it). */
+export async function fetchRun(wsId: string, runId: string, auth: Auth = tabAuth): Promise<RunResponse> {
+  return RunResponse.parse(await call(auth, apiPath(API_ROUTES.workspaceRun, { wsId, runId }), {}, REVIEW_LOAD_FAILED));
+}
+
+/** One run with its verification, refetched when a `run.*` event of its workspace arrives. */
+export function useRunDetail(wsId: string, runId: string | undefined) {
+  const queryClient = useQueryClient();
+  const { events } = useEventStream();
+  const relevant = events.filter((event) => event.workspaceId === wsId && event.type.startsWith('run.')).length;
+  useEffect(() => {
+    if (relevant > 0) void queryClient.invalidateQueries({ queryKey: ['run', wsId, runId], exact: true });
+  }, [relevant, queryClient, wsId, runId]);
+  return useQuery({ queryKey: ['run', wsId, runId], queryFn: () => fetchRun(wsId, runId!), retry: false, enabled: runId !== undefined });
+}
+
 /** `POST …/runs/:runId/retry` with `mode: 'apply_fix'` (11.1): applies an intent gap's saved fix in the run's worktree and builds again. */
 export async function applySavedFix(wsId: string, runId: string, auth: Auth = tabAuth): Promise<Run> {
   const json = await call(auth, apiPath(API_ROUTES.runRetry, { wsId, runId }), postJson({ mode: 'apply_fix' }), APPLY_FIX_FAILED);
@@ -199,14 +222,16 @@ export function useWorkspaceRuns(wsId: string, enabled: boolean) {
 }
 
 /** Stop or Retry: once settled, the run, the runs and the board's tickets refetch. */
-export function useRunAction(wsId: string, action: 'stop' | 'retry' | 'apply_fix') {
+export function useRunAction(wsId: string, action: 'stop' | 'retry' | 'apply_fix' | 'check_again') {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (runId: string) => (action === 'stop' ? stopRun(wsId, runId) : action === 'apply_fix' ? applySavedFix(wsId, runId) : retryRun(wsId, runId)),
+    mutationFn: (runId: string) => (action === 'stop' ? stopRun(wsId, runId) : action === 'apply_fix' ? applySavedFix(wsId, runId) : action === 'check_again' ? checkRunAgain(wsId, runId) : retryRun(wsId, runId)),
     onSettled: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ['session-run', wsId] }),
         queryClient.invalidateQueries({ queryKey: ['runs', wsId] }),
+        queryClient.invalidateQueries({ queryKey: ['run', wsId] }),
+        queryClient.invalidateQueries({ queryKey: ['review', wsId] }),
         queryClient.invalidateQueries({ queryKey: ['tickets', wsId] }),
       ]),
   });

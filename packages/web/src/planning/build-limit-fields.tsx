@@ -1,4 +1,4 @@
-import { RUN_LIMIT_BOUNDS, RUN_LIMITS_LABEL, RUN_TIME_LIMIT_LABEL } from '@ogden-agents/shared';
+import { MAX_TEST_COMMAND_LENGTH, RUN_LIMIT_BOUNDS, RUN_LIMITS_LABEL, RUN_TIME_LIMIT_LABEL, TEST_COMMAND_HINT, TEST_COMMAND_LABEL } from '@ogden-agents/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Button } from '@/ui/button';
@@ -82,6 +82,69 @@ function NumberSetting({
   );
 }
 
+/**
+ * The project's test command (story 11.2): the one the end checks re-run
+ * instead of the detected one. Empty uses the detected command. Saved with
+ * Save; an empty field saves `null`.
+ */
+function TestCommandSetting({ wsId, value, onSaved }: { wsId: string; value: string | null; onSaved: (settings: Awaited<ReturnType<typeof saveBuildSettings>>) => void }) {
+  const [text, setText] = useState(value ?? '');
+  const [state, setState] = useState<'idle' | 'saving' | 'saved' | { error: string }>('idle');
+  useEffect(() => setText(value ?? ''), [value]);
+  const trimmed = text.trim();
+  const dirty = trimmed !== (value ?? '');
+  const valid = trimmed.length <= MAX_TEST_COMMAND_LENGTH && !/[\r\n\0]/.test(text);
+  const submit = () => {
+    if (!dirty || !valid || state === 'saving') return;
+    setState('saving');
+    saveBuildSettings(wsId, { testCommand: trimmed === '' ? null : trimmed }).then(
+      (saved) => {
+        onSaved(saved);
+        setState('saved');
+      },
+      (error: unknown) => setState({ error: error instanceof Error ? error.message : String(error) }),
+    );
+  };
+  return (
+    <Field id="test-command" label={TEST_COMMAND_LABEL} description={TEST_COMMAND_HINT}>
+      <form
+        className="flex items-center gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
+        }}
+      >
+        <Input
+          id="test-command"
+          className="font-mono"
+          value={text}
+          maxLength={MAX_TEST_COMMAND_LENGTH}
+          aria-describedby="test-command-description"
+          aria-invalid={valid ? undefined : true}
+          data-testid="test-command"
+          onChange={(event) => {
+            setText(event.target.value);
+            setState('idle');
+          }}
+        />
+        <Button type="submit" variant="secondary" disabled={!valid || !dirty || state === 'saving'} data-testid="test-command-save">
+          Save
+        </Button>
+        {state === 'saved' ? (
+          <span role="status" className="text-caption text-muted-foreground" data-testid="test-command-saved">
+            Saved
+          </span>
+        ) : null}
+      </form>
+      {typeof state === 'object' ? (
+        <Notice variant="blocked" role="alert" data-testid="test-command-error">
+          {state.error}
+        </Notice>
+      ) : null}
+    </Field>
+  );
+}
+
 /** Settings, Builds (story 5.8): how many builds run at once in the whole install, and how long one may take. */
 export function InstallBuildLimits() {
   const queryClient = useQueryClient();
@@ -140,6 +203,7 @@ export function ProjectBuildLimit({ wsId }: { wsId: string }) {
         bounds={RUN_LIMIT_BOUNDS.maxConcurrentRunsPerWorkspace}
         save={async (value) => queryClient.setQueryData(['build-settings', wsId], await saveBuildSettings(wsId, { maxConcurrentRuns: value }))}
       />
+      <TestCommandSetting wsId={wsId} value={settings.data.testCommand} onSaved={(saved) => queryClient.setQueryData(['build-settings', wsId], saved)} />
     </PageSection>
   );
 }

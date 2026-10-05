@@ -186,7 +186,7 @@ export const NO_PLAN_FILES_TO_COMMIT_TEXT = "This ticket's plan files have no un
 export const RUN_NOT_ACTIVE_MESSAGE = 'This run has already finished.';
 /** `POST …/runs/:runId/retry` for a run not paused at a checkpoint, until 5.8 builds Retry. */
 export const RETRY_NOT_AVAILABLE_MESSAGE = 'Retry for this run is not available yet.';
-export const ALL_READY_NOT_AVAILABLE_MESSAGE = 'Building every ready story is not available yet.';
+export const ALL_READY_ASK_MESSAGE = 'Ask for every ready ticket with all set to true and no ticket or watching mode.';
 
 /** A run's outcome as the review page and the session header say it. */
 export const RUN_OUTCOME_LABELS: Readonly<Record<RunOutcome, string>> = {
@@ -207,6 +207,7 @@ export const RUN_REASON_PROTECTED_DIFF = "The build changed files it may not cha
 export const RUN_REASON_RESULT_MISMATCH = 'The build changed, or its saved result could not be read back, while Ogden Agents was checking it, so it is not ready for review. Build it again.';
 export const RUN_REASON_NO_NETWORK = 'Builds have no network, so installs such as npm install fail.';
 export const RUN_REASON_INTERRUPTED = 'interrupted';
+export const RUN_REASON_STOPPED = 'You stopped this build.';
 export const RUN_REASON_START_FAILED = "The build couldn't start its agent.";
 
 /** The Build dialog's words (5.6): plain, no dashes. */

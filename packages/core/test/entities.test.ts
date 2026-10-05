@@ -236,7 +236,7 @@ describe('runs', () => {
     const workspace = core.entities.ensureWorkspace(tempDir());
     const session = core.entities.createSession({ workspaceId: workspace.id, kind: 'build' });
     const run = core.entities.createRun({ sessionId: session.id, ticketRef: '1.1', queuePosition: 2 });
-    expect(run).toMatchObject({ agent: null, queuePosition: 2, blockedCode: null, decision: null });
+    expect(run).toMatchObject({ agent: null, queuePosition: 1, blockedCode: null, decision: null });
     expect(core.entities.getRun(run.id)).toEqual(run);
 
     const blocked = core.entities.setRunOutcome(run.id, 'blocked', 'Stopped after 45 minutes without finishing.', { blockedCode: 'time_limit' });

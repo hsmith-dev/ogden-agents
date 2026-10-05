@@ -25,7 +25,6 @@ import { join, relative } from 'node:path';
 import { createFixedSandbox } from '@ogden-agents/adapters';
 import type { TicketStorePort } from '@ogden-agents/core';
 import {
-  ALL_READY_NOT_AVAILABLE_MESSAGE,
   API_ROUTES,
   ApiErrorBody,
   apiPath,
@@ -41,7 +40,7 @@ import {
   WorkspaceResponse,
 } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
-import { createFakeBmadRepo, FAKE_BUILD_PLAN, FAKE_BUILD_TICKET_FILES, FAKE_BUILD_WAITING_PLAN, fixtureGit } from '../../../tests/fixtures/fake-bmad-repo.js';
+import { createFakeBmadRepo, FAKE_BUILD_PLAN, FAKE_BUILD_REPO_FILES, FAKE_BUILD_WAITING_PLAN, fixtureGit } from '../../../tests/fixtures/fake-bmad-repo.js';
 import { createPlanFileTicketStore } from '../../../tests/fixtures/plan-file-ticket-store.js';
 import { removeAfterTest, signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
@@ -72,7 +71,7 @@ const TICKETS = [
 
 /** A fixture repo (git, `main`, everything committed) whose config says husky's hooks folder, as a husky project's does. */
 function buildRepo() {
-  const repo = createFakeBmadRepo({ git: true, files: FAKE_BUILD_TICKET_FILES, prefix: 'ogden-agents-build-repo-' });
+  const repo = createFakeBmadRepo({ git: true, files: FAKE_BUILD_REPO_FILES, prefix: 'ogden-agents-build-repo-' });
   removeAfterTest(repo.path);
   fixtureGit(repo.path, 'config', 'core.hooksPath', '.husky');
   return repo;
@@ -334,7 +333,7 @@ describe('Unattended builds over REST (story 5.2)', () => {
     expect(existsSync(join(run.worktreePath!, 'src', 'built-1.1.txt'))).toBe(false);
   });
 
-  it("epics 5 and 11's other routes (story 5.3): behind the piece's guard, then 501 until their lanes; Build all ready is 501, an unknown agent 400", async () => {
+  it("epics 5 and 11's other routes (story 5.3): behind the piece's guard, then 501 until their lanes; an unknown agent 400", async () => {
     const off = await setup({ builds: false });
     const runId = 'run_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
     const routes = (wsId: string): Array<[string, string]> => [
@@ -351,8 +350,6 @@ describe('Unattended builds over REST (story 5.2)', () => {
     }
     // The install's run limits and notifications are not a piece's: 501 with builds off too.
     for (const [method, path] of [
-      ['GET', API_ROUTES.runLimits],
-      ['PATCH', API_ROUTES.runLimits],
       ['GET', API_ROUTES.notificationSettings],
       ['PATCH', API_ROUTES.notificationSettings],
       ['POST', API_ROUTES.notificationWebhooks],
@@ -365,12 +362,19 @@ describe('Unattended builds over REST (story 5.2)', () => {
 
     const on = await setup();
     for (const [method, path] of routes(on.wsId)) {
-      // Story 5.4 serves Retry for a run at a checkpoint: an unknown run is 404 (the rest of Retry stays 501, below).
-      const expected = path.endsWith('/retry') ? 404 : 501;
+      // Stories 5.4 and 5.8 serve Retry and Stop: an unknown run is 404; 5.8 serves the project's build settings.
+      if (path.includes('/build-settings')) {
+        const served = await request(on.server, on.tab, method, path, method === 'GET' ? undefined : { maxConcurrentRuns: 2 });
+        expect(served.status, `${method} ${path}`).toBe(200);
+        continue;
+      }
+      if (path.endsWith('/runs')) {
+        expect((await request(on.server, on.tab, method, path)).status, `${method} ${path}`).toBe(200);
+        continue;
+      }
+      const expected = path.endsWith('/retry') || path.endsWith('/stop') || path.endsWith(runId) ? 404 : 501;
       expect((await refusalOf(await request(on.server, on.tab, method, path, method === 'GET' ? undefined : {}))).status, `${method} ${path}`).toBe(expected);
     }
-    const all = await request(on.server, on.tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId: on.wsId }), { all: true });
-    expect(await refusalOf(all)).toEqual({ status: 501, code: 'not_implemented', message: ALL_READY_NOT_AVAILABLE_MESSAGE });
     expect(await refusalOf(await request(on.server, on.tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId: on.wsId }), { agent: 'codex', ref: '1.1' }))).toEqual({ status: 400, code: 'invalid_request', message: UNKNOWN_BUILD_AGENT_MESSAGE });
     expect(on.server.core.entities.listSessions(on.wsId)).toEqual([]);
     expect(branches(on.repo.path)).toEqual(['main']);

@@ -31,7 +31,7 @@ import { ScriptTrustPrompt } from '@/workspaces/script-trust-prompt';
 import { BmadDownloadPrompt } from './bmad-download-prompt';
 import { BoardEpic } from './board-epic';
 import { BuildDialog } from './build-dialog';
-import { commitPlanFiles, startBuild } from './builds-api';
+import { commitPlanFiles, startBuild, useWorkspaceRuns } from './builds-api';
 import { cardStatusLine, groupBoard, indexTickets, unmetPrerequisites, type CardStatus } from './board-model';
 import { useBoardEvents, useMarkTicket, useTickets } from './planning-api';
 import { ReducedModeNotice } from './reduced-mode-notice';
@@ -287,6 +287,9 @@ function Board({
   const { onChoose, saving, announcement, failure } = useBoardMarks(wsId, updatedAt, showDropped, droppedId);
   const { onBuild, building, buildFailure, commit, committing, committed, dialogRef, closeDialog, onAttendedStarted } = useBoardBuild(wsId, builds);
   const commitRef = buildFailure?.commitRef;
+  // Story 5.8: a ticket whose build waits for a slot says Queued on its card.
+  const runs = useWorkspaceRuns(wsId, builds !== undefined);
+  const queued = useMemo(() => new Set((runs.data?.queue ?? []).map((entry) => entry.ticketRef)), [runs.data]);
   const epics = useMemo(() => groupBoard(data, showDropped), [data, showDropped]);
   // One status per card, recomputed only when the tickets change, so a highlight re-renders one card.
   const statuses = useMemo(() => {
@@ -344,7 +347,7 @@ function Board({
         <ul aria-label={BOARD_EPICS_LABEL} className="m-0 flex list-none flex-col gap-8 p-0">
           {epics.map((epic) => (
             <li key={epic.slug} className="min-w-0">
-              <BoardEpic wsId={wsId} epic={epic} statuses={statuses} highlighted={highlighted} onChoose={onChoose} saving={saving} onBuild={onBuild} building={building} />
+              <BoardEpic wsId={wsId} epic={epic} statuses={statuses} highlighted={highlighted} onChoose={onChoose} saving={saving} onBuild={onBuild} building={building} queued={queued} />
             </li>
           ))}
         </ul>

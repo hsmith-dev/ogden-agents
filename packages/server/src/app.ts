@@ -9,6 +9,7 @@ import {
   type BmadSourceUseCases,
   type BmadSetupUseCases,
   type BoardUseCases,
+  type BuildSettings,
   type BuildsUseCases,
   type Chat,
   type EventLog,
@@ -123,6 +124,8 @@ export interface AppOptions {
   board?: BoardUseCases;
   /** Unattended builds (story 5.2), behind the `builds` piece's guard and the trust; without them those routes answer 501 once the guards pass. */
   builds?: BuildsUseCases;
+  /** The install's run limits and a project's build settings (story 5.8). */
+  buildSettings?: BuildSettings;
   /** The pinned upstream BMad Method's status and its user-initiated download (story 4.14); without it those routes answer 501. */
   bmadSource?: BmadSourceUseCases;
   /** BMad Method's setup in a project (story 4.3), behind Planning or Board; without it those routes answer 501 once the guard passes. */
@@ -173,6 +176,7 @@ export function createApp({
   planning,
   board,
   builds,
+  buildSettings,
   bmadSource,
   bmadSetup,
   agentSetup,
@@ -287,10 +291,10 @@ export function createApp({
   // Plan and Board (stories 4.1, 4.2): every route through `bmadPieceRoutes`, behind core's guard and the script trust (AD-22).
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerPlanningRoutes(app, { bmad, scriptTrust: bmadScriptTrust, planning, board, bmadSetup, log });
   // Unattended builds (story 5.2): the same helper, guard and trust.
-  if (bmad !== undefined && bmadScriptTrust !== undefined) registerBuildRoutes(app, { bmad, scriptTrust: bmadScriptTrust, builds, log });
+  if (bmad !== undefined && bmadScriptTrust !== undefined) registerBuildRoutes(app, { bmad, scriptTrust: bmadScriptTrust, builds, buildSettings, log });
   registerSettingsRoutes(app, { installSettings, newProjectDefaults, log });
   // The install's run limits and notification settings (story 5.3; 5.8 and 11.4 fill them): the gate, never a piece's guard.
-  registerRunSettingsRoutes(app);
+  registerRunSettingsRoutes(app, { buildSettings, builds, log });
   registerUpdateRoutes(app, { updates, desktop: desktopUpdate, shell });
 
   registerEventSocket(app, { events, log, tabs });

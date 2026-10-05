@@ -42,6 +42,13 @@ const agentsSettingsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/agents-settings-page'), 'AgentsSettingsPage'),
 });
 
+/** How many builds run at once, and the time limit of one (story 5.8). */
+const buildsSettingsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/builds',
+  component: lazyRouteComponent(() => import('./routes/builds-settings-page'), 'BuildsSettingsPage'),
+});
+
 /** Desktop notifications and the sound for when a chat needs you (backlog story 8). */
 const notificationsRoute = createRoute({
   getParentRoute: () => settingsRoute,
@@ -135,7 +142,7 @@ const routeTree = rootRoute.addChildren([
   workspaceBoardRoute.addChildren([workspaceBoardTicketRoute]),
   workspaceReviewRoute,
   sessionRoute,
-  settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute, notificationsRoute, aboutRoute]),
+  settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute, buildsSettingsRoute, notificationsRoute, aboutRoute]),
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

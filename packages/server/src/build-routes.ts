@@ -49,9 +49,10 @@ import {
   VcsError,
   type BmadFeatures,
   type BmadScriptTrust,
+  type BuildSettings,
   type BuildsUseCases,
 } from '@ogden-agents/core';
-import { API_ROUTES, BMAD_NOT_DOWNLOADED_MESSAGE, BuildResponse, CommitPlanFilesResponse, ReviewResponse, RunResponse, SandboxStatusResponse, SessionId, SessionRunResponse } from '@ogden-agents/shared';
+import { AllReadyBuildsResponse, API_ROUTES, BMAD_NOT_DOWNLOADED_MESSAGE, BuildResponse, WorkspaceBuildSettingsResponse, CommitPlanFilesResponse, ReviewResponse, RunResponse, RunsResponse, SandboxStatusResponse, SessionId, SessionRunResponse } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { bmadPieceRoutes } from './bmad-pieces.js';
@@ -70,10 +71,12 @@ export interface BuildRoutesOptions {
   scriptTrust: Pick<BmadScriptTrust, 'requireScriptsTrusted'>;
   /** The builds use-cases; without them every route answers 501. */
   builds?: BuildsUseCases | undefined;
+  /** A project's build settings (story 5.8). */
+  buildSettings?: Pick<BuildSettings, 'workspaceSettings' | 'setWorkspaceSettings'> | undefined;
   log: Logger;
 }
 
-export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, log }: BuildRoutesOptions): void {
+export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, buildSettings, log }: BuildRoutesOptions): void {
   const routes = bmadPieceRoutes(app, { bmad, scriptTrust, log });
 
   /** The builds refusals and failures every route shares; anything else goes to the guarded helper (or 500). */
@@ -111,6 +114,13 @@ export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, log 
         return;
       }
       try {
+        // Build all ready (story 5.8): the runs it started and the queue now.
+        if (typeof body === 'object' && body !== null && (body as { all?: unknown }).all === true) {
+          const all = AllReadyBuildsResponse.parse(await builds.startAll(workspaceId, body));
+          log.info('build all ready started', { workspaceId, runs: all.runs.length, queued: all.queue.length });
+          response = c.json(all, 202);
+          return;
+        }
         const started = await builds.start(workspaceId, body);
         log.info('build started', { workspaceId, runId: started.run.id, sessionId: started.session.id, ref: started.run.ticketRef, sandbox: started.run.sandbox });
         response = c.json(BuildResponse.parse(started), 201);
@@ -188,9 +198,34 @@ export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, log 
 
   // Story 5.3: every other route of epics 5 and 11, guarded and trusted, 501 until its lane fills it.
   const notYet = (c: Context): Response => notImplemented(c);
-  routes.get('builds', API_ROUTES.workspaceRuns, notYet);
-  routes.get('builds', API_ROUTES.workspaceRun, notYet);
-  routes.post('builds', API_ROUTES.runStop, notYet);
+  // Story 5.8: the workspace's runs and its queue (the board's Queued), and one run with its verification; 11.1 builds the views on them.
+  routes.get('builds', API_ROUTES.workspaceRuns, async (c, { workspaceId }) => {
+    if (builds === undefined) return notImplemented(c);
+    try {
+      return c.json(RunsResponse.parse(await builds.runs(workspaceId)));
+    } catch (error) {
+      return refused(c, workspaceId, error);
+    }
+  });
+  routes.get('builds', API_ROUTES.workspaceRun, async (c, { workspaceId }) => {
+    if (builds === undefined) return notImplemented(c);
+    try {
+      return c.json(RunResponse.parse(await builds.run(workspaceId, c.req.param('runId') ?? '')));
+    } catch (error) {
+      return refused(c, workspaceId, error);
+    }
+  });
+  // Story 5.8: Stop.
+  routes.post('builds', API_ROUTES.runStop, async (c, { workspaceId }) => {
+    if (builds === undefined) return notImplemented(c);
+    try {
+      const run = await builds.stop(workspaceId, c.req.param('runId') ?? '');
+      log.info('build stopped', { workspaceId, runId: run.id });
+      return c.json(RunResponse.parse({ run }));
+    } catch (error) {
+      return refused(c, workspaceId, error);
+    }
+  });
   // Story 5.4: Retry resumes a run paused at a checkpoint; any other Retry answers 501 until 5.8.
   routes.post('builds', API_ROUTES.runRetry, async (c, { workspaceId }) => {
     if (builds === undefined) return notImplemented(c);
@@ -217,8 +252,34 @@ export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, log 
     return response ?? tooLarge ?? apiError(c, 413, 'invalid_request', 'That request is too large.');
   });
   routes.post('builds', API_ROUTES.runCheckAgain, notYet);
-  routes.get('builds', API_ROUTES.workspaceBuildSettings, notYet);
-  routes.patch('builds', API_ROUTES.workspaceBuildSettings, notYet);
+  // Story 5.8: the project's build settings (its limit; 11.2 adds the test command's editor).
+  routes.get('builds', API_ROUTES.workspaceBuildSettings, (c, { workspaceId }) => {
+    if (buildSettings === undefined) return notImplemented(c);
+    return c.json(WorkspaceBuildSettingsResponse.parse({ settings: buildSettings.workspaceSettings(workspaceId) }));
+  });
+  routes.patch('builds', API_ROUTES.workspaceBuildSettings, async (c, { workspaceId }) => {
+    if (buildSettings === undefined) return notImplemented(c);
+    let response: Response | undefined;
+    const tooLarge = await limit(c, async () => {
+      let body: unknown;
+      try {
+        body = JSON.parse(await c.req.text());
+      } catch {
+        response = apiError(c, 400, 'invalid_request', 'The request body must be JSON.');
+        return;
+      }
+      try {
+        const settings = buildSettings.setWorkspaceSettings(workspaceId, body);
+        log.info('build settings changed', { workspaceId });
+        // A raised limit may free a slot for a queued run.
+        void builds?.dispatchQueued().catch(() => undefined);
+        response = c.json(WorkspaceBuildSettingsResponse.parse({ settings }));
+      } catch (error) {
+        response = refused(c, workspaceId, error);
+      }
+    });
+    return response ?? tooLarge ?? apiError(c, 413, 'invalid_request', 'That request is too large.');
+  });
 
   routes.get('builds', API_ROUTES.sessionRun, async (c, { workspaceId }) => {
     if (builds === undefined) return notImplemented(c);

@@ -55,7 +55,7 @@ function usable(command: string): string | undefined {
 }
 
 /** The `AGENTS.md` line that names the project's test command: `Tests: \`npm test\`` and its close kin. */
-const AGENTS_TEST_LINE = /^\s*[-*]?\s*(?:\*\*)?(?:test command|tests?|run tests|how to test)(?:\*\*)?\s*[:=]\s*`([^`\n]+)`/im;
+const AGENTS_TEST_LINE = /^\s*[-*]?\s*(?:\*\*)?(?:test command|tests?|run tests|how to test)(?:\*\*)?\s*[:=]\s*(?:\*\*)?\s*`([^`\n]+)`/im;
 
 /** The default `npm init` test script, which only fails. */
 const NPM_DEFAULT_TEST = /no test specified/i;

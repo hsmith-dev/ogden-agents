@@ -288,6 +288,8 @@ export interface Entities {
    * worktrees stay. Returns them.
    */
   settleInterruptedRuns(reason: string): Run[];
+  /** The workspace's runs, newest first, at most `limit` (default 200; story 5.8: the board and the session header). */
+  listRuns(workspaceId: WorkspaceId, limit?: number): Run[];
   /** Every run `running` that left the queue (its agent is, or is about to be, working), oldest first (story 5.8: what the limits count). */
   listRunningRuns(): Run[];
   /** Every queued run (`queuePosition` set), oldest first across workspaces: the dispatcher's order (story 5.8). */
@@ -864,6 +866,10 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         .limit(1)
         .get();
       return row === undefined ? undefined : toRun(row);
+    },
+
+    listRuns(workspaceId, limit = 200) {
+      return orm.select().from(runs).where(eq(runs.workspaceId, workspaceId)).orderBy(desc(runs.createdAt), desc(runs.id)).limit(limit).all().map(toRun);
     },
 
     listRunningRuns() {

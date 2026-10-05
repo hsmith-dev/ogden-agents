@@ -70,7 +70,6 @@ import { existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, posix, relative } from 'node:path';
 import {
   ATTENDED_SANDBOX,
-  ALL_READY_NOT_AVAILABLE_MESSAGE,
   ALREADY_MERGED_MESSAGE,
   ApproveBuildRequest,
   BUILD_RESULT_STATUSES,
@@ -129,9 +128,18 @@ import {
   type TicketDetail,
   type TicketRow,
   type TicketsResponse,
+  type VerificationResult,
   type WorkspaceId,
+  ALL_READY_ASK_MESSAGE,
+  RUN_REASON_STOPPED,
+  type AllReadyBuildsResponse,
+  type RunResponse,
+  type RunsResponse,
+  type TicketStatus,
 } from '@ogden-agents/shared';
 import type { BmadFeatures } from './bmad-pieces.js';
+import type { BuildSettings } from './build-settings.js';
+import { detectTestCommand, verifyRun } from './build-verify.js';
 import type { BmadScriptTrust } from './bmad-script-trust.js';
 import type { BmadSourceUseCases } from './bmad-source-port.js';
 import { BUILD_PERMISSION_DENIED, decideBuildPermission, nodePathNormalizer, type PathNormalizer } from './build-permission-policy.js';
@@ -149,7 +157,7 @@ import { workspaceRepoPath } from './planning.js';
 import { serializedByRepo } from './repo-serialization.js';
 import type { AgentSandbox, SandboxPort } from './sandbox-port.js';
 import type { TicketRunGuard, TicketStorePort } from './ticket-store-port.js';
-import type { VcsPort } from './vcs-port.js';
+import type { VcsHead, VcsPort } from './vcs-port.js';
 
 export { BUILD_PERMISSION_DENIED };
 
@@ -207,6 +215,25 @@ export interface BuildsUseCases {
    * resumes (story 5.4); any other Retry is 5.8's (`NotImplementedError`).
    */
   retry(workspaceId: WorkspaceId, runId: unknown, request: unknown): Promise<Run>;
+  /**
+   * Build all ready (story 5.8; `StartBuildRequest` with `all: true`): starts
+   * every ready ticket (a ticket with an unmet prerequisite never), the rest
+   * queued within the limits, and keeps starting tickets that become ready
+   * until none is left. Answers the runs it started and the queue now.
+   */
+  startAll(workspaceId: WorkspaceId, request: unknown): Promise<AllReadyBuildsResponse>;
+  /**
+   * Stop (story 5.8): a running run's agent stops (its whole process tree)
+   * and the run is `stopped`, its worktree kept; a queued run leaves the
+   * queue. `run_not_active` for any other run.
+   */
+  stop(workspaceId: WorkspaceId, runId: unknown): Promise<Run>;
+  /** The workspace's runs, newest first, and its queue (story 5.8: the board's Queued, the session header). */
+  runs(workspaceId: WorkspaceId): Promise<RunsResponse>;
+  /** One run of the workspace and its verification (the latest `run.verification_completed`). `NotFoundError` for another workspace's. */
+  run(workspaceId: WorkspaceId, runId: unknown): Promise<RunResponse>;
+  /** Starts the queue's next runs where the limits allow (a server start, a changed limit; story 5.8). */
+  dispatchQueued(): Promise<void>;
   /** Resolves once every run's activity handed to the recorder is written (tests). */
   recorded(): Promise<void>;
   /** Resolves once no outcome is being worked out (tests, shutdown). */
@@ -219,9 +246,42 @@ export interface BuildsDeps {
   bmad: Pick<BmadFeatures, 'requireBmadFeature'>;
   trust: Pick<BmadScriptTrust, 'requireScriptsTrusted' | 'requireScriptsUnchanged' | 'requireScriptsMatch'>;
   source: Pick<BmadSourceUseCases, 'requireReady'>;
-  entities: Pick<Entities, 'getWorkspace' | 'getSession' | 'createRun' | 'getRun' | 'getRunBySession' | 'latestRunForTicket' | 'activeRunForTicket' | 'setRunOutcome' | 'setRunDecision' | 'listRunsWithWorktree'>;
-  events: Pick<EventLog, 'subscribe' | 'lastSeq'>;
+  entities: Pick<
+    Entities,
+    | 'getWorkspace'
+    | 'getSession'
+    | 'createRun'
+    | 'getRun'
+    | 'getRunBySession'
+    | 'latestRunForTicket'
+    | 'activeRunForTicket'
+    | 'setRunOutcome'
+    | 'setRunDecision'
+    | 'listRunsWithWorktree'
+    | 'listRunningRuns'
+    | 'listRuns'
+    | 'listSessionEvents'
+    | 'listQueuedRuns'
+    | 'queueOf'
+    | 'queueRun'
+    | 'dispatchRun'
+    | 'leaveQueue'
+  >;
+  events: Pick<EventLog, 'subscribe' | 'lastSeq' | 'append'>;
+  /** The install's run limits and a project's build settings (story 5.8), read at each dispatch. */
+  settings: Pick<BuildSettings, 'runLimits' | 'workspaceSettings'>;
+  /** The environment a re-run command gets: the agents' allowlist, never a key (AD-16; story 5.8). Default: none. */
+  commandEnv?: () => Record<string, string>;
+  /** Sets a timer (the time limit; tests inject one). Default: `setTimeout`, unreferenced. */
+  setTimer?: (run: () => void, ms: number) => { cancel(): void };
+  /** The main checkout's tickets, and a run's worktree when given its path (the store itself, never run-aware). */
   tickets: TicketStorePort;
+  /**
+   * The same store as the board reads it (story 5.8, AD-10): a ticket with an
+   * active run is read and marked in its worktree. For prerequisites (a
+   * ticket built in a worktree is in review) and Retry's mark. Default: `tickets`.
+   */
+  runAwareTickets?: TicketStorePort;
   vcs: VcsPort;
   sandbox: SandboxPort;
   runner: BuildRunnerPort;
@@ -343,7 +403,9 @@ const RESULT_STATUSES: ReadonlySet<string> = new Set(BUILD_RESULT_STATUSES);
 const MAX_RESULT_TEXT = 2000;
 
 export function createBuilds(deps: BuildsDeps): BuildsUseCases {
-  const { bmad, trust, source, entities, events, tickets, vcs, sandbox, runner, chat, buildSessions, dataDir } = deps;
+  const { bmad, trust, source, entities, events, tickets, vcs, sandbox, runner, chat, buildSessions, dataDir, settings } = deps;
+  const commandEnv = deps.commandEnv ?? (() => ({}));
+  const aware = deps.runAwareTickets ?? tickets;
   const paths = deps.paths ?? nodePathNormalizer();
   const mask = deps.mask ?? redactApiKeys;
   const report = (runId: string, step: string, error: unknown) => {
@@ -491,19 +553,21 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
   const deadlineFromNow = (): string => new Date(Date.now() + settings.runLimits().maxRunMinutes * 60_000).toISOString();
 
   /** Everything a start refuses for before it writes anything (see the header); the guards run last, right before the first write. */
-  const validateStart = async (workspaceId: WorkspaceId, repoPath: string, ref: string, agent: BuildAgent, mode: BuildMode): Promise<StartPlan> => {
+  const validateStart = async (workspaceId: WorkspaceId, repoPath: string, ref: string, agent: BuildAgent, mode: BuildMode, self?: RunId): Promise<StartPlan> => {
     // Fail closed: an unattended run needs a sandbox that says it is there; only the user's own `attended` mode runs without one (story 5.6).
     const attended = mode === 'attended';
     const sandboxKind = attended ? ATTENDED_SANDBOX : await requireSandbox(agent);
     await requireGit();
-    if (entities.activeRunForTicket(workspaceId, ref) !== undefined) throw new BuildRefusedError('run_active', RUN_ACTIVE_MESSAGE);
+    const active = entities.activeRunForTicket(workspaceId, ref);
+    // The queued run being dispatched is itself the ticket's active run.
+    if (active !== undefined && active.id !== self) throw new BuildRefusedError('run_active', RUN_ACTIVE_MESSAGE);
     // A run paused at a checkpoint is still this ticket's build (story 5.4): resume or reject it first.
-    const latest = entities.latestRunForTicket(workspaceId, ref);
+    const latest = self === undefined ? entities.latestRunForTicket(workspaceId, ref) : undefined;
     if (latest !== undefined && atCheckpoint(latest)) throw new BuildRefusedError('run_active', RUN_ACTIVE_MESSAGE);
     const { guard } = await guarded(workspaceId);
     const ticket = await tickets.find(repoPath, ref, guard);
     if ((ticket.status ?? '') !== READY_STATUS) throw new BuildRefusedError('not_ready', NOT_READY_MESSAGE);
-    if (ticket.after.length > 0 && !prerequisitesMet(ticket, await tickets.tree(repoPath, guard))) throw new BuildRefusedError('prerequisite_unmet', PREREQUISITE_UNMET_MESSAGE);
+    if (ticket.after.length > 0 && !prerequisitesMet(ticket, await aware.tree(repoPath, guard))) throw new BuildRefusedError('prerequisite_unmet', PREREQUISITE_UNMET_MESSAGE);
     // The project must be its repository's top folder: a worktree is of the whole repository.
     const top = await vcs.topLevel(repoPath);
     if (top === undefined) throw new BuildRefusedError('vcs_unavailable', VCS_UNAVAILABLE_MESSAGE);
@@ -602,7 +666,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       } catch (cleanup) {
         report(run?.id ?? 'none', 'cleanup', cleanup);
       }
-      await vcs.removeWorktree(repoPath, worktreePath, run === undefined || queued !== undefined ? { deleteBranch: branch } : {}).catch((cleanup: unknown) => report(run?.id ?? 'none', 'cleanup', cleanup));
+      await vcs.removeWorktree(repoPath, worktreePath, run === undefined || run.branch !== branch ? { deleteBranch: branch } : {}).catch((cleanup: unknown) => report(run?.id ?? 'none', 'cleanup', cleanup));
       if (run !== undefined) {
         try {
           // A queued run that could not leave the queue leaves it failed.
@@ -611,6 +675,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         } catch (outcome) {
           report(run.id, 'outcome', outcome);
         }
+        scheduleDrain();
       }
       throw error;
     }
@@ -634,9 +699,46 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     return (await tickets.find(repoPath, run.ticketRef, { scripts })).done_checkpoint === true;
   };
 
+  /**
+   * The verification of a run whose plan says built (story 5.8, AD-17): the
+   * three checks, the project's tests re-run in the run's own sandbox (never
+   * unsandboxed; an attended run has none), `run.verification_completed`.
+   * `checkedHead` is the branch head the checks looked at.
+   */
+  const verifyBuilt = async (run: Run, repoPath: string, ticket: TicketDetail): Promise<{ verification: VerificationResult; checkedHead: string | null }> => {
+    const checkedHead = run.branch === null ? null : ((await vcs.branchRevision(repoPath, run.branch)) ?? null);
+    const changes = run.branch === null || run.baseRevision === null ? undefined : await vcs.diff(repoPath, run.baseRevision, run.branch, { maxBytes: 1 });
+    const files = changes?.files ?? [];
+    const attended = run.sandbox === ATTENDED_SANDBOX;
+    const setup = buildSessions.get(run.sessionId);
+    const contained = setup === undefined || setup.attended === true ? undefined : setup;
+    const verification = await verifyRun(
+      { sandbox, mask },
+      {
+        planStatus: ticket.status ?? '',
+        files,
+        forbiddenDetail: files.length > 0 && forbiddenChanges(files, ticket.plan).length > 0 ? RUN_REASON_PROTECTED_DIFF : undefined,
+        emptyDetail: RUN_REASON_EMPTY_DIFF,
+        attended,
+        sandbox: contained?.sandbox,
+        cwd: run.worktreePath ?? repoPath,
+        env: { ...commandEnv(), ...contained?.env },
+        testCommand: detectTestCommand(repoPath, settings.workspaceSettings(run.workspaceId).testCommand) ?? undefined,
+      },
+    );
+    try {
+      events.append({ type: 'run.verification_completed', workspaceId: run.workspaceId, streamId: run.sessionId, payload: { runId: run.id, verification } });
+    } catch (error) {
+      report(run.id, 'verification event', error);
+    }
+    return { verification, checkedHead };
+  };
+
   /** Works out a finished turn's outcome (see the header). */
   const decideOutcome = async (run: Run, ended: 'idle' | 'error', options: { passedDone?: boolean } = {}): Promise<void> => {
     if (run.worktreePath === null) return;
+    // The turn is over: the time limit no longer applies (the tests have their own).
+    disarmDeadline(run.id);
     let repoPath: string;
     try {
       repoPath = workspaceRepoPath(entities, run.workspaceId);
@@ -649,6 +751,13 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     let ticket: TicketDetail | undefined;
     // The branch head the end checks looked at (story 5.7): the run's result must name the same one.
     let checkedHead: string | null = null;
+    let released = false;
+    /** The run's agent is done: its process tree stops now, before anything of the run's is read or re-run. */
+    const releaseAgent = async () => {
+      if (released) return;
+      released = true;
+      await chat.releaseAgent(run.workspaceId, run.sessionId).catch((error: unknown) => report(run.id, 'release', error));
+    };
     try {
       // The agent may have edited the worktree's scripts: they must be the trusted ones before `tickets.py` runs there.
       const scripts = await trust.requireScriptsMatch(run.workspaceId, run.worktreePath);
@@ -660,15 +769,12 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         blockedCode = 'checkpoint_done';
         reason = blockedSentence('checkpoint_done');
       } else if (status === 'built') {
-        checkedHead = run.branch === null ? null : ((await vcs.branchRevision(repoPath, run.branch)) ?? null);
-        const changes = run.branch === null || run.baseRevision === null ? undefined : await vcs.diff(repoPath, run.baseRevision, run.branch, { maxBytes: 1 });
-        if (changes === undefined || changes.files.length === 0) {
-          outcome = 'failed';
-          reason = RUN_REASON_EMPTY_DIFF;
-        } else if (forbiddenChanges(changes.files, ticket.plan).length > 0) {
-          outcome = 'failed';
-          reason = RUN_REASON_PROTECTED_DIFF;
-        } else outcome = 'verified';
+        await releaseAgent();
+        const checked = await verifyBuilt(run, repoPath, ticket);
+        checkedHead = checked.checkedHead;
+        outcome = checked.verification.outcome;
+        // The first failing check says why, in plain words (the plan check cannot fail here: the plan is built).
+        reason = checked.verification.checks.find((each) => each.result === 'fail')?.detail ?? null;
       } else if (status === 'blocked') {
         outcome = 'blocked';
         const said = ticket.blocked_reason === null || ticket.blocked_reason.trim() === '' ? RUN_REASON_NOT_BUILT(status) : ticket.blocked_reason;
@@ -684,9 +790,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       outcome = 'failed';
       reason = error instanceof ScriptsChangedError ? RUN_REASON_SCRIPTS_CHANGED : RUN_REASON_UNREADABLE;
     }
-    // The run's agent is done: its process tree stops now, not at the next server stop.
-    await chat.releaseAgent(run.workspaceId, run.sessionId).catch((error: unknown) => report(run.id, 'release', error));
-    // Only a run still running gets an outcome here: a Reject meanwhile stands.
+    await releaseAgent();
+    // Only a run still running gets an outcome here: a Reject or a Stop meanwhile stands.
     if (entities.getRunBySession(run.sessionId)?.outcome !== 'running') return;
     // Story 5.7: a run is ready for review only when its per-run result lands and, read back through the runner, agrees with
     // the plan, the run and the branch head the checks saw (the agent is released: nothing moves the branch now).
@@ -705,6 +810,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     if (entities.getRunBySession(run.sessionId)?.outcome !== 'running') return;
     const decided = entities.setRunOutcome(run.id, outcome, reason === null ? null : mask(reason), { blockedCode });
     if (!wroteVerified) await writeResult(decided, repoPath, ticket, decided.reason, outcome === 'blocked');
+    // A slot is free: the next queued run starts.
+    scheduleDrain();
   };
 
   /**
@@ -741,12 +848,69 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     void track(run.id, () => decideOutcome(run, state));
   });
 
-  /** Resume (see the header), inside the repo's serialization. */
-  const resumeLocked = async (workspaceId: WorkspaceId, repoPath: string, runId: RunId, note: string | undefined): Promise<Run> => {
-    await guarded(workspaceId);
-    const run = entities.getRun(runId);
-    if (run === undefined || run.workspaceId !== workspaceId) throw new NotFoundError('run', runId);
-    if (!atCheckpoint(run) || run.worktreePath === null || run.branch === null || !isBuildBranch(run.branch)) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
+  // ---- The time limit, the queue, Stop and Retry (story 5.8) ----
+
+  /** Dispatch decisions (limits, queue) are taken one at a time across every repo: this key is never a path. */
+  const DISPATCH_KEY = '\0dispatch';
+  const inDispatch = <T>(work: () => Promise<T>): Promise<T> => serializedByRepo(DISPATCH_KEY, work);
+  const setTimer = deps.setTimer ?? ((run: () => void, ms: number) => {
+    const timer = setTimeout(run, ms);
+    timer.unref?.();
+    return { cancel: () => clearTimeout(timer) };
+  });
+  const timers = new Map<RunId, { cancel(): void }>();
+  /** A note for a queued run's first message (Retry, Reject and retry); kept in memory only. */
+  const pendingNotes = new Map<RunId, string>();
+  /** Workspaces with Build all ready going: the tickets already tried, so a failed one is not tried again. */
+  const draining = new Map<WorkspaceId, Set<string>>();
+  let closed = false;
+
+  /** The run's agent and its session's setup go (Stop). */
+  const stopAgent = async (run: Run): Promise<void> => {
+    await chat.releaseAgent(run.workspaceId, run.sessionId).catch((error: unknown) => report(run.id, 'release', error));
+  };
+
+  const disarmDeadline = (runId: RunId): void => {
+    timers.get(runId)?.cancel();
+    timers.delete(runId);
+  };
+
+  /** Stops the run when its deadline passes: blocked `time_limit` (E5-R7), its worktree kept, Retry resumes it. */
+  const timeUp = async (runId: RunId): Promise<void> => {
+    timers.delete(runId);
+    const seen = entities.getRun(runId);
+    if (seen === undefined || seen.outcome !== 'running' || seen.queuePosition !== null || closed) return;
+    let repoPath: string;
+    try {
+      repoPath = workspaceRepoPath(entities, seen.workspaceId);
+    } catch {
+      return;
+    }
+    await serializedByRepo(repoPath, async () => {
+      const run = entities.getRun(runId);
+      if (run === undefined || run.outcome !== 'running' || run.queuePosition !== null) return;
+      await stopAgent(run);
+      if (entities.getRun(runId)?.outcome !== 'running') return;
+      const reason = blockedSentence('time_limit', { minutes: settings.runLimits().maxRunMinutes });
+      const decided = entities.setRunOutcome(run.id, 'blocked', reason, { blockedCode: 'time_limit' });
+      await writeResult(decided, repoPath, undefined, reason, true);
+    }).catch((error: unknown) => report(runId, 'time limit', error));
+    scheduleDrain();
+  };
+
+  const armDeadline = (run: Run): void => {
+    disarmDeadline(run.id);
+    if (run.deadline === null) return;
+    timers.set(run.id, setTimer(() => void timeUp(run.id), Math.max(0, Date.parse(run.deadline) - Date.now())));
+  };
+
+  /**
+   * Checks a run with a worktree can start there again (Retry, a checkpoint's
+   * Resume, a queued one leaving the queue): the sandbox (fail closed), the
+   * worktree, its scripts, and its session's setup rebuilt after a restart.
+   */
+  const prepareContinue = async (workspaceId: WorkspaceId, repoPath: string, run: Run): Promise<void> => {
+    if (run.worktreePath === null || run.branch === null || !isBuildBranch(run.branch)) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
     // Fail closed, as at the start: never an unsandboxed unattended run (a build the user watches is the one without).
     const attended = run.sandbox === ATTENDED_SANDBOX;
     const sandboxKind = attended ? ATTENDED_SANDBOX : await requireSandbox(run.agent ?? runner.agent);
@@ -754,30 +918,187 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     // The worktree's scripts must still be the trusted ones before anything runs there.
     await trust.requireScriptsMatch(workspaceId, run.worktreePath);
     if (buildSessions.get(run.sessionId) === undefined) {
-      // The server restarted since the pause: the session's setup is rebuilt from the run, so the next prompt starts a fresh agent there.
+      // The server restarted since the pause (or the run was stopped): the setup is rebuilt from the run, so the next prompt starts a fresh agent there.
       const short = runShortOf(run);
       if (short === undefined) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
       buildSessions.set(run.sessionId, attended ? { attended: true, cwd: run.worktreePath } : await unattendedSetup(sandboxKind, run.worktreePath, run.branch, short));
     }
-    const resumed = entities.setRunOutcome(run.id, 'running', null);
-    if (run.blockedCode === 'checkpoint_plan') {
-      try {
-        chat.sendMessage(workspaceId, run.sessionId, runner.invocation(run.ticketRef, { note }), { build: true });
-      } catch (error) {
-        // Nothing was sent: the run stays paused at its checkpoint (review), never `running` with no agent.
-        entities.setRunOutcome(run.id, 'blocked', run.reason, { blockedCode: 'checkpoint_plan' });
-        throw error;
-      }
-      return resumed;
+  };
+
+  /**
+   * Starts `run` again in its worktree, in a slot or in the queue: `running`
+   * with a fresh deadline and its prompt sent (the resume prompt when
+   * `resume`; a plan checkpoint's first prompt otherwise). A prompt that
+   * can't be sent puts the run back as it was.
+   */
+  const startAgain = async (workspaceId: WorkspaceId, run: Run, options: { note?: string | undefined; resume: boolean }): Promise<Run> => {
+    if (!hasCapacity(workspaceId)) {
+      if (options.note !== undefined) pendingNotes.set(run.id, options.note);
+      entities.setRunOutcome(run.id, 'running', null);
+      return entities.queueRun(run.id);
     }
+    return dispatchAgain(workspaceId, run, options);
+  };
+
+  const dispatchAgain = (workspaceId: WorkspaceId, run: Run, options: { note?: string | undefined; resume: boolean }): Run => {
+    const before = run;
+    const started = entities.dispatchRun(run.id, {
+      worktreePath: run.worktreePath!,
+      sandbox: run.sandbox ?? ATTENDED_SANDBOX,
+      branch: run.branch!,
+      baseRevision: run.baseRevision ?? '',
+      baseBranch: run.baseBranch,
+      deadline: deadlineFromNow(),
+    });
+    armDeadline(started);
+    try {
+      chat.sendMessage(workspaceId, run.sessionId, runner.invocation(run.ticketRef, { note: options.note, resume: options.resume }), { build: true });
+    } catch (error) {
+      // Nothing was sent: the run is as it was (a pause, a block), never `running` with no agent.
+      disarmDeadline(run.id);
+      entities.setRunOutcome(run.id, before.outcome, before.reason, { blockedCode: before.blockedCode });
+      throw error;
+    }
+    return started;
+  };
+
+  /** Resume (see the header), inside the repo's serialization. */
+  const resumeLocked = async (workspaceId: WorkspaceId, repoPath: string, runId: RunId, note: string | undefined): Promise<Run> => {
+    await guarded(workspaceId);
+    const run = entities.getRun(runId);
+    if (run === undefined || run.workspaceId !== workspaceId) throw new NotFoundError('run', runId);
+    if (!atCheckpoint(run)) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
+    await prepareContinue(workspaceId, repoPath, run);
+    if (run.blockedCode === 'checkpoint_plan') return startAgain(workspaceId, run, { note, resume: false });
+    const resumed = entities.setRunOutcome(run.id, 'running', null);
     await track(run.id, () => decideOutcome(resumed, 'idle', { passedDone: true }));
     return entities.getRun(run.id) ?? resumed;
+  };
+
+  /** The plan statuses a blocked plan may be marked with to resume (its `blocked_at`, else ready for dev). */
+  const RESUME_STATUSES: ReadonlySet<string> = new Set(['ready-for-dev', 'in-progress', 'in-review']);
+
+  /**
+   * Retry (story 5.8, E5-R7): a blocked, failed or stopped run starts again
+   * in its worktree. A blocked plan is marked with its resume status first
+   * (through the ticket store, which writes in the run's worktree and clears
+   * the blocked fields); any other plan resumes from its own status.
+   */
+  const retryLocked = async (workspaceId: WorkspaceId, repoPath: string, run: Run, note: string | undefined): Promise<Run> => {
+    const { guard } = await guarded(workspaceId);
+    await prepareContinue(workspaceId, repoPath, run);
+    const ticket = await aware.find(repoPath, run.ticketRef, guard);
+    if ((ticket.status ?? '') === 'blocked') {
+      const target = RESUME_STATUSES.has(ticket.blocked_at) ? ticket.blocked_at : READY_STATUS;
+      await aware.mark(repoPath, run.ticketRef, target as TicketStatus, guard);
+    }
+    return startAgain(workspaceId, run, { note, resume: true });
+  };
+
+  /** Starts one queued run now (its slot is free): its worktree and agent, or a retried one's agent again. A run that can't start ends failed; the queue goes on. */
+  const launchQueued = async (queued: Run): Promise<void> => {
+    try {
+      bmad.requireBmadFeature(queued.workspaceId, 'builds');
+    } catch {
+      // The piece is off: nothing is dispatched until it is on again (E5-R8); the run stays queued.
+      return;
+    }
+    let repoPath: string;
+    try {
+      repoPath = workspaceRepoPath(entities, queued.workspaceId);
+    } catch {
+      return;
+    }
+    const note = pendingNotes.get(queued.id);
+    pendingNotes.delete(queued.id);
+    try {
+      await serializedByRepo(repoPath, async () => {
+        const run = entities.getRun(queued.id);
+        // Stopped, rejected or already started meanwhile.
+        if (run === undefined || run.outcome !== 'running' || run.queuePosition === null) return;
+        await guarded(run.workspaceId);
+        if (run.worktreePath !== null) {
+          await prepareContinue(run.workspaceId, repoPath, run);
+          dispatchAgain(run.workspaceId, run, { note, resume: true });
+          return;
+        }
+        const agent = run.agent ?? runner.agent;
+        const plan = await validateStart(run.workspaceId, repoPath, run.ticketRef, agent, run.sandbox === ATTENDED_SANDBOX ? 'attended' : 'unattended', run.id);
+        await begin(run.workspaceId, repoPath, run.ticketRef, agent, plan, run);
+      });
+    } catch (error) {
+      report(queued.id, 'dispatch', error);
+      try {
+        const run = entities.getRun(queued.id);
+        if (run !== undefined && run.outcome === 'running') {
+          entities.leaveQueue(run.id);
+          // The plain reason when a rule refused it; a failure of git or the disk is only reported (codes), never the user's paths.
+          entities.setRunOutcome(run.id, 'failed', error instanceof BuildRefusedError ? error.message : RUN_REASON_START_FAILED);
+        }
+      } catch (outcome) {
+        report(queued.id, 'outcome', outcome);
+      }
+    }
+  };
+
+  /** Starts every ready ticket of a workspace with Build all ready going, once each; the runs started. */
+  const extendAll = async (workspaceId: WorkspaceId, repoPath: string, tried: Set<string>): Promise<Run[]> => {
+    const { guard } = await guarded(workspaceId);
+    const tree = await aware.tree(repoPath, guard);
+    const started: Run[] = [];
+    for (const row of tree.tickets) {
+      if (tried.has(row.ref) || (row.status ?? '') !== READY_STATUS || !prerequisitesMet(row, tree)) continue;
+      if (entities.activeRunForTicket(workspaceId, row.ref) !== undefined) continue;
+      const latest = entities.latestRunForTicket(workspaceId, row.ref);
+      if (latest !== undefined && atCheckpoint(latest)) continue;
+      tried.add(row.ref);
+      try {
+        started.push((await startLocked(workspaceId, repoPath, row.ref, runner.agent, 'unattended')).run);
+      } catch (error) {
+        // A ticket that can't start does not stop the others (a refusal is its own; the rest are reported).
+        if (!(error instanceof BuildRefusedError)) report('none', 'build all', error);
+      }
+    }
+    return started;
+  };
+
+  /** Keeps Build all ready going and starts what the free slots allow: queued runs oldest first, within both limits. */
+  const drainQueue = async (): Promise<void> => {
+    if (closed) return;
+    for (const [workspaceId, tried] of [...draining]) {
+      try {
+        bmad.requireBmadFeature(workspaceId, 'builds');
+        const repoPath = workspaceRepoPath(entities, workspaceId);
+        await serializedByRepo(repoPath, () => extendAll(workspaceId, repoPath, tried));
+        const busy = entities.listRunningRuns().some((each) => each.workspaceId === workspaceId) || entities.queueOf(workspaceId).length > 0;
+        if (!busy) draining.delete(workspaceId);
+      } catch {
+        // The piece went off or the project went away: it is not drained any more.
+        draining.delete(workspaceId);
+      }
+    }
+    for (const queued of entities.listQueuedRuns()) {
+      if (closed) return;
+      if (hasCapacity(queued.workspaceId)) await launchQueued(queued);
+    }
+  };
+
+  /** Starts the queue's next runs once the current dispatch decision settled; never throws. */
+  const scheduleDrain = (): void => {
+    if (closed) return;
+    void inDispatch(drainQueue).catch((error: unknown) => report('none', 'drain', error));
+  };
+
+  /** The run's latest verification (story 5.8), `undefined` before one ran. */
+  const verificationOf = (run: Run): VerificationResult | undefined => {
+    const event = entities.listSessionEvents(run.sessionId, ['run.verification_completed']).at(-1);
+    return event?.type === 'run.verification_completed' ? event.payload.verification : undefined;
   };
 
   /** The workspace's latest run of `ref`, as the review page shows it. */
   const reviewOf = async (repoPath: string, run: Run): Promise<ReviewResponse> => {
     // The summary, verification, findings and diff stats are 5.8's and 5.9's (story 5.3 froze them).
-    const base = { run, outcome: run.outcome, reason: run.reason, summary: null, verification: null, findings: [], diffStats: null };
+    const base = { run, outcome: run.outcome, reason: run.reason, summary: null, verification: verificationOf(run) ?? null, findings: [], diffStats: null };
     if (run.branch === null || run.baseRevision === null || !isBuildBranch(run.branch)) return { ...base, diff: '', truncated: false, files: [], merged: run.decision === 'approved', headRevision: null };
     const headRevision = (await vcs.branchRevision(repoPath, run.branch)) ?? null;
     // An approved run's branch is deleted with its worktree (story 5.5): it is merged.
@@ -824,13 +1145,75 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         const issue = parsed.error.issues[0];
         throw new ValidationError(issue?.message ?? 'Name one ticket to build.', parsed.error.issues.map((each) => ({ path: each.path, message: each.message })));
       }
-      // Every ready ticket is 5.8's dispatcher (story 5.3 froze the request).
-      if (parsed.data.ref === undefined) throw new NotImplementedError(ALL_READY_NOT_AVAILABLE_MESSAGE);
+      // Every ready ticket is `startAll` (story 5.8), which answers with the runs and the queue.
+      if (parsed.data.ref === undefined) throw new ValidationError(ALL_READY_ASK_MESSAGE, [{ path: ['all'], message: ALL_READY_ASK_MESSAGE }]);
       const ref = checkedRef(parsed.data.ref);
       // Each agent builds through its own runner (epic 6 adds runners, not core); v1 has Claude Code's.
       const agent = parsed.data.agent ?? runner.agent;
       if (agent !== runner.agent) throw new ValidationError(UNKNOWN_BUILD_AGENT_MESSAGE, [{ path: ['agent'], message: UNKNOWN_BUILD_AGENT_MESSAGE }]);
-      return serializedByRepo(repoPath, () => startLocked(workspaceId, repoPath, ref, agent, parsed.data.mode));
+      return inDispatch(() => serializedByRepo(repoPath, () => startLocked(workspaceId, repoPath, ref, agent, parsed.data.mode)));
+    },
+
+    async startAll(workspaceId, request) {
+      const { repoPath } = await guarded(workspaceId);
+      const parsed = StartBuildRequest.safeParse(request);
+      if (!parsed.success || parsed.data.all !== true) throw new ValidationError(ALL_READY_ASK_MESSAGE, [{ path: ['all'], message: ALL_READY_ASK_MESSAGE }]);
+      const agent = parsed.data.agent ?? runner.agent;
+      if (agent !== runner.agent) throw new ValidationError(UNKNOWN_BUILD_AGENT_MESSAGE, [{ path: ['agent'], message: UNKNOWN_BUILD_AGENT_MESSAGE }]);
+      // Every ready ticket goes unattended: a build with the user watching is one ticket at a time.
+      if (parsed.data.mode === 'attended') throw new ValidationError(ALL_READY_ASK_MESSAGE, [{ path: ['mode'], message: ALL_READY_ASK_MESSAGE }]);
+      return inDispatch(() =>
+        serializedByRepo(repoPath, async () => {
+          await requireSandbox(agent);
+          const tried = draining.get(workspaceId) ?? new Set<string>();
+          draining.set(workspaceId, tried);
+          const runs = await extendAll(workspaceId, repoPath, tried);
+          return { runs, queue: entities.queueOf(workspaceId) };
+        }),
+      );
+    },
+
+    async stop(workspaceId, runId) {
+      const { repoPath } = await guarded(workspaceId);
+      const checked = checkedRunId(runId);
+      const stopped = await serializedByRepo(repoPath, async () => {
+        await guarded(workspaceId);
+        const run = entities.getRun(checked);
+        if (run === undefined || run.workspaceId !== workspaceId) throw new NotFoundError('run', checked);
+        if (run.outcome !== 'running') throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
+        disarmDeadline(run.id);
+        pendingNotes.delete(run.id);
+        if (run.queuePosition !== null) {
+          entities.leaveQueue(run.id);
+          return entities.setRunOutcome(run.id, 'stopped', RUN_REASON_STOPPED);
+        }
+        // The agent's whole process tree goes (`killProcessTree`); its worktree stays for Retry or Reject.
+        await release(run);
+        // A turn that ended meanwhile may have decided it first.
+        if (entities.getRun(run.id)?.outcome !== 'running') return entities.getRun(run.id) ?? run;
+        const decided = entities.setRunOutcome(run.id, 'stopped', RUN_REASON_STOPPED);
+        await writeResult(decided, repoPath, undefined, RUN_REASON_STOPPED, false);
+        return decided;
+      });
+      scheduleDrain();
+      return stopped;
+    },
+
+    async runs(workspaceId) {
+      await guarded(workspaceId);
+      return { runs: entities.listRuns(workspaceId), queue: entities.queueOf(workspaceId) };
+    },
+
+    async run(workspaceId, runId) {
+      await guarded(workspaceId);
+      const checked = checkedRunId(runId);
+      const run = entities.getRun(checked);
+      if (run === undefined || run.workspaceId !== workspaceId) throw new NotFoundError('run', checked);
+      return { run, verification: verificationOf(run) ?? null };
+    },
+
+    async dispatchQueued() {
+      await inDispatch(drainQueue);
     },
 
     async sandboxStatus(workspaceId) {
@@ -986,20 +1369,33 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       if (!parsed.success) throw new ValidationError('That is not a retry request.', parsed.error.issues.map((each) => ({ path: each.path, message: each.message })));
       const run = entities.getRun(checked);
       if (run === undefined || run.workspaceId !== workspaceId) throw new NotFoundError('run', checked);
-      // Nothing to retry for a run still going, ready for review or decided (review: 409 as the route says).
+      // Nothing to retry for a run still going (or queued), ready for review or decided (review: 409 as the route says).
       if (run.outcome === 'running' || run.outcome === 'verified' || run.decision !== null) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
-      // A checkpoint pause resumes (story 5.4); every other Retry is 5.8's.
-      if (parsed.data.mode !== 'resume' || !atCheckpoint(run)) throw new NotImplementedError(RETRY_NOT_AVAILABLE_MESSAGE);
-      return serializedByRepo(repoPath, () => resumeLocked(workspaceId, repoPath, checked, parsed.data.note));
+      // Update and retry (rebase, 5.9) and Apply the saved fix and retry (11.1) are theirs.
+      if (parsed.data.mode !== 'resume') throw new NotImplementedError(RETRY_NOT_AVAILABLE_MESSAGE);
+      // A checkpoint pause resumes (story 5.4).
+      if (atCheckpoint(run)) return serializedByRepo(repoPath, () => resumeLocked(workspaceId, repoPath, checked, parsed.data.note));
+      // A conflicting merge needs its rebase first (5.9), not another run of the agent.
+      if (run.blockedCode === 'merge_conflict') throw new NotImplementedError(RETRY_NOT_AVAILABLE_MESSAGE);
+      return serializedByRepo(repoPath, async () => {
+        const current = entities.getRun(checked);
+        if (current === undefined || current.outcome === 'running' || current.outcome === 'verified' || current.decision !== null) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
+        return retryLocked(workspaceId, repoPath, current, parsed.data.note);
+      });
     },
 
     recorded: () => recorder.flushed(),
 
     async settled() {
       while (deciding.size > 0) await Promise.all([...deciding]);
+      // Any dispatch the outcomes scheduled (story 5.8) has run when this one does.
+      await inDispatch(async () => undefined);
     },
 
     close() {
+      closed = true;
+      for (const timer of timers.values()) timer.cancel();
+      timers.clear();
       unsubscribe();
       recorder.close();
     },

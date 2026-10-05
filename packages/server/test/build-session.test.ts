@@ -38,7 +38,7 @@ import {
   type RunId,
 } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
-import { createFakeBmadRepo, FAKE_BUILD_PLAN, FAKE_BUILD_TICKET_FILES, FAKE_BUILD_WAITING_PLAN, fixtureGit } from '../../../tests/fixtures/fake-bmad-repo.js';
+import { createFakeBmadRepo, FAKE_BUILD_PLAN, FAKE_BUILD_REPO_FILES, FAKE_BUILD_WAITING_PLAN, fixtureGit } from '../../../tests/fixtures/fake-bmad-repo.js';
 import { createPlanFileTicketStore, type PlanFileTicket } from '../../../tests/fixtures/plan-file-ticket-store.js';
 import { removeAfterTest, signIn, startTestServer, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
@@ -115,7 +115,7 @@ async function serve(options: { repo: string; ticketList: PlanFileTicket[]; env?
 }
 
 async function setup(options: { ticketList?: PlanFileTicket[]; env?: Record<string, string>; lines?: string[] } = {}): Promise<Setup> {
-  const repo = createFakeBmadRepo({ git: true, files: FAKE_BUILD_TICKET_FILES, prefix: 'ogden-agents-session-repo-' });
+  const repo = createFakeBmadRepo({ git: true, files: FAKE_BUILD_REPO_FILES, prefix: 'ogden-agents-session-repo-' });
   removeAfterTest(repo.path);
   return serve({ repo: repo.path, ticketList: options.ticketList ?? tickets(), env: options.env, lines: options.lines });
 }
@@ -250,7 +250,7 @@ describe('the headless build session (story 5.4)', () => {
   });
 
   it('a run paused at plan_checkpoint resumes after a server restart, in a fresh agent session', async () => {
-    const repo = createFakeBmadRepo({ git: true, files: FAKE_BUILD_TICKET_FILES, prefix: 'ogden-agents-session-repo-' });
+    const repo = createFakeBmadRepo({ git: true, files: FAKE_BUILD_REPO_FILES, prefix: 'ogden-agents-session-repo-' });
     removeAfterTest(repo.path);
     const first = await serve({ repo: repo.path, ticketList: tickets({ planCheckpoint: true }) });
     const { run } = BuildResponse.parse(await (await first.build('1.1')).json());

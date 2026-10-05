@@ -165,6 +165,9 @@ export const FAKE_TEST_COMMAND_FILES: Readonly<Record<string, string>> = {
   ].join('\n'),
 };
 
+/** The builds fixture with a test command (story 5.8: the verification's re-run needs one). */
+export const FAKE_BUILD_REPO_FILES: Readonly<Record<string, string>> = { ...FAKE_BUILD_TICKET_FILES, ...FAKE_TEST_COMMAND_FILES };
+
 /** Runs git in `cwd` for the fixture: no hook, a local identity, no output. */
 export function fixtureGit(cwd: string, ...args: string[]): string {
   return execFileSync('git', ['-c', `core.hooksPath=${join(cwd, '.no-hooks')}`, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.com', ...args], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });

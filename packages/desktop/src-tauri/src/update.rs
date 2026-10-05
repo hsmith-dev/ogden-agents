@@ -182,12 +182,16 @@ fn install_now(app: &AppHandle) {
     server::quit(true);
     #[cfg(windows)]
     relaunch_after_install(&update.version);
-    match update.install(&bytes) {
+    #[cfg(windows)]
+    let installed = run_installer(&bytes, &update.version);
+    #[cfg(not(windows))]
+    let installed = update.install(&bytes).map_err(|e| e.to_string());
+    match installed {
         Ok(()) => {
             app.restart();
         }
         Err(e) => {
-            report("update_install_failed", json!({ "error": e.to_string() }));
+            report("update_install_failed", json!({ "error": e }));
             let app2 = app.clone();
             app.dialog()
                 .message("Ogden Agents could not install the update. The version you have is opened again.")
@@ -244,4 +248,31 @@ fn relaunch_after_install(version: &str) {
         .stderr(std::process::Stdio::null())
         .spawn();
     report("update_relaunch_helper", json!({ "started": result.is_ok() }));
+}
+
+/// Windows: runs the downloaded installer (already checked against the signature and the checksum)
+/// silently over the current install, as a first install runs, then ends this process so the installer
+/// can replace its files. The updater plugin's own passive launch left the installer not running in CI
+/// (spike 13.1 saw no relaunch either), and a silent install has no window that can wait for a person.
+#[cfg(windows)]
+fn run_installer(bytes: &[u8], version: &str) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let dir = exe.parent().ok_or("no install folder")?.to_path_buf();
+    let installer = std::env::temp_dir().join(format!("ogden-agents-update-{}-setup.exe", version.replace(|c: char| !(c.is_ascii_alphanumeric() || c == '.' || c == '-'), "_")));
+    std::fs::write(&installer, bytes).map_err(|e| format!("could not save the installer: {e}"))?;
+    let mut cmd = std::process::Command::new(&installer);
+    // `/D=` must be last and is never quoted (NSIS).
+    cmd.args(["/S", "/UPDATE"]);
+    // The installer's own `/R` starts the new version as the user; a test build leaves that to the relaunch helper, which keeps the test's environment.
+    if std::env::var_os("OGDEN_DESKTOP_TEST_REPORT").is_none() {
+        cmd.arg("/R");
+    }
+    cmd.raw_arg(format!("/D={}", dir.display()));
+    // CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB: the installer must outlive this app and its job.
+    cmd.creation_flags(0x0800_0000 | 0x0100_0000).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    cmd.spawn().map_err(|e| format!("could not start the installer: {e}"))?;
+    report("update_installer_started", json!({}));
+    // The installer replaces this program's files: leave now.
+    std::process::exit(0);
 }

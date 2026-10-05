@@ -15,6 +15,7 @@
  * pin is Ogden's own, recorded from the real packages), and refuses the
  * whole install when it does not match. The chat adapter spawns only that file.
  */
+import { grokAcceptsToken } from './token-probe.js';
 import { renameWithRetry } from '../toolchain-uv/uv-toolchain.js';
 import { createReadStream, createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, chmodSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -91,7 +92,7 @@ export async function decompressBinary(source: string, target: string, maxBytes 
 }
 
 /** The finalize step: this platform's binary, decompressed into `<project>/bin-checked/`, checked, executable. */
-function finalizeFor(hashes: GrokBinaryHashes) {
+function finalizeFor(hashes: GrokBinaryHashes, probe: (binary: string) => Promise<boolean>) {
   return async (project: string, words: InstallWords, options: Pick<InstallPinnedNpmOptions, 'signal' | 'onProgress'>): Promise<void> => {
     const platform = `${process.platform}-${process.arch}` as AgentPlatform;
     const pinned = hashes[platform];
@@ -132,11 +133,19 @@ function finalizeFor(hashes: GrokBinaryHashes) {
       throw new AgentSetupError(words.couldNotPlace, { details: { step: 'binary', code: String((error as NodeJS.ErrnoException).code ?? 'unknown').slice(0, 40) }, cause: error });
     }
     options.onProgress({ step: words.checking, percent: 98 });
+    // The unadvertised `xai.api_key` method is the only way in (user decision, 2026-10-05): a version that drops it can't be used, so nothing is installed.
+    if (!(await probe(target))) throw new AgentSetupError(NO_TOKEN_METHOD, { details: { step: 'token_method', accepted: false } });
   };
 }
 
+/** What Install says when the unpacked Grok no longer takes an xAI API access token. */
+export const NO_TOKEN_METHOD = "This version of Grok doesn't accept an xAI API access token the way Ogden Agents needs, so nothing was installed.";
+
+/** Asks the checked binary whether it accepts a token (tests: a stub; the default spawns it, see `token-probe.ts`). */
+export type GrokTokenProbe = (binary: string) => Promise<boolean>;
+
 /** How Grok is installed, for the shared installer. `hashes` is the table the binary is checked against. */
-export function grokInstallSpec(hashes: GrokBinaryHashes = GROK_BINARY_SHA256): PinnedNpmSpec {
+export function grokInstallSpec(hashes: GrokBinaryHashes = GROK_BINARY_SHA256, probe: GrokTokenProbe = grokAcceptsToken): PinnedNpmSpec {
   return {
     displayName: GROK,
     dir: GROK_DIR,
@@ -146,7 +155,7 @@ export function grokInstallSpec(hashes: GrokBinaryHashes = GROK_BINARY_SHA256): 
     folderName: (version) => `grok-${version}`,
     isInstalledFolder: (name) => INSTALLED_FOLDER.test(name),
     binary: { locked: locksBinaries, present: hasBinary },
-    finalize: finalizeFor(hashes),
+    finalize: finalizeFor(hashes, probe),
     resultPath: (folder) => join(folder, GROK_CHECKED_DIR, binaryName(`${process.platform}-${process.arch}`)),
   };
 }
@@ -194,6 +203,8 @@ export type InstallGrokOptions = Omit<InstallPinnedNpmOptions, 'pins' | 'withBin
   pins?: AdapterPins | undefined;
   /** The binary hashes to check against (tests: a fixture binary's). Default: the pinned ones. */
   binarySha256?: GrokBinaryHashes | undefined;
+  /** Asks the unpacked binary whether it takes a token. Default: the real check; tests (and the fixture hook) pass a stub, so no fixture binary is ever run. */
+  tokenProbe?: GrokTokenProbe | undefined;
 };
 
 /**
@@ -202,8 +213,8 @@ export type InstallGrokOptions = Omit<InstallPinnedNpmOptions, 'pins' | 'withBin
  * in plain words, leaving nothing half installed (the shared installer's rules).
  */
 export async function installGrok(options: InstallGrokOptions): Promise<InstalledGrok> {
-  const { binarySha256, ...rest } = options;
-  const spec = binarySha256 === undefined ? GROK_INSTALL_SPEC : grokInstallSpec(binarySha256);
+  const { binarySha256, tokenProbe, ...rest } = options;
+  const spec = binarySha256 === undefined && tokenProbe === undefined ? GROK_INSTALL_SPEC : grokInstallSpec(binarySha256 ?? GROK_BINARY_SHA256, tokenProbe);
   return installPinnedNpm(spec, { ...rest, pins: options.pins ?? GROK_PINS, withBinary: true });
 }
 

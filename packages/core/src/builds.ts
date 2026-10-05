@@ -699,7 +699,9 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       return serializedByRepo(repoPath, async () => {
         await guarded(workspaceId);
         const run = latestRun(workspaceId, checked);
-        if (run.outcome !== 'verified' || run.branch === null || !isBuildBranch(run.branch)) throw new BuildRefusedError('checks_failed', CHECKS_FAILED_MESSAGE);
+        // Approved already (its branch is gone since story 5.5), or rejected.
+        if (run.decision === 'approved') throw new BuildRefusedError('checks_failed', ALREADY_MERGED_MESSAGE);
+        if (run.outcome !== 'verified' || run.decision !== null || run.branch === null || !isBuildBranch(run.branch)) throw new BuildRefusedError('checks_failed', CHECKS_FAILED_MESSAGE);
         if (await vcs.isMerged(repoPath, run.branch)) throw new BuildRefusedError('checks_failed', ALREADY_MERGED_MESSAGE);
         // Exactly what the user reviewed: the branch must still point at it.
         if ((await vcs.branchRevision(repoPath, run.branch)) !== reviewed) throw new BuildRefusedError('checks_failed', REVIEW_STALE_MESSAGE);
@@ -748,6 +750,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         await guarded(workspaceId);
         const run = latestRun(workspaceId, checked);
         if (run.outcome === 'running') throw new BuildRefusedError('run_active', RUN_ACTIVE_MESSAGE);
+        // An approved run is merged: never rejected after (its branch is gone since story 5.5).
+        if (run.decision === 'approved') throw new BuildRefusedError('checks_failed', ALREADY_MERGED_MESSAGE);
         if (run.branch !== null && isBuildBranch(run.branch) && (await vcs.isMerged(repoPath, run.branch)) && run.outcome === 'verified') {
           throw new BuildRefusedError('checks_failed', ALREADY_MERGED_MESSAGE);
         }

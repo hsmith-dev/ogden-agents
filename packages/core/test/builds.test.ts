@@ -460,7 +460,8 @@ describe('Approve and Reject (story 5.2)', () => {
     expect(h.git.calls).toEqual([]);
     h.git.state.status = ['_bmad-output/notes.md'];
     const review = await h.builds.approve(h.wsId, '1.1', { revision: 'b'.repeat(40) });
-    expect(h.git.calls).toEqual(['merge bbbb', `add ${PLAN}`, 'commit', 'worktree remove']);
+    // The merged branch goes with the worktree, merged only (story 5.5).
+    expect(h.git.calls).toEqual(['merge bbbb', `add ${PLAN}`, 'commit', `worktree remove and merged ${h.run.branch}`]);
     expect(h.tickets.calls).toContainEqual(['mark', h.repo, '1.1', 'done', true]);
     expect(h.tickets.status(h.repo, '1.1')).toBe('done');
     expect(h.released).toContain(h.session.id);
@@ -489,12 +490,12 @@ describe('Approve and Reject (story 5.2)', () => {
     expect(h.tickets.calls.filter((call) => call[0] === 'mark')).toEqual([]);
   });
 
-  it('Reject removes the worktree, keeps the branch, stops the run and leaves the ticket untouched', async () => {
+  it('Reject removes the worktree and its branch (a discard, story 5.5), stops the run and leaves the ticket untouched', async () => {
     const h = await verified();
     const review = await h.builds.reject(h.wsId, '1.1');
     expect(review.outcome).toBe('stopped');
-    expect(h.git.calls).toEqual(['worktree remove']);
-    expect(h.git.state.branches.has(h.run.branch!)).toBe(true);
+    expect(h.git.calls).toEqual([`worktree remove and ${h.run.branch}`]);
+    expect(h.git.state.branches.has(h.run.branch!)).toBe(false);
     expect(h.tickets.calls.filter((call) => call[0] === 'mark')).toEqual([]);
     expect(h.tickets.status(h.repo, '1.1')).toBe('ready-for-dev');
   });
@@ -563,12 +564,12 @@ describe('review loop 1 hardening (story 5.2)', () => {
     expect(again.run.branch).not.toBe(failed.branch);
   });
 
-  it('a rebuild after Reject gets a new branch; the rejected one stays', async () => {
+  it('a rebuild after Reject gets a new branch; the rejected one is gone (story 5.5)', async () => {
     const h = await verifiedRun();
     await h.builds.reject(h.wsId, '1.1');
     const again = await h.builds.start(h.wsId, { ref: '1.1' });
     expect(again.run.branch).not.toBe(h.run.branch);
-    expect(h.git.state.branches.has(h.run.branch!)).toBe(true);
+    expect(h.git.state.branches.has(h.run.branch!)).toBe(false);
   });
 
   it('fails a run whose diff touches a protected path, a tickets.toml, or another ticket plan; masks the stored reason; releases the agent', async () => {

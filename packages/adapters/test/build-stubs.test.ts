@@ -202,6 +202,16 @@ describe('vcs-memory (story 5.3): every VcsPort method', () => {
     vcs.badPatches.add('/data/bad.patch');
     expect(await port.applyPatch({ ...at, patchPath: '/data/bad.patch' })).toBe('refused');
 
+    // Story 5.5: the git check, the branch check and Commit plan files.
+    expect(await port.check()).toEqual({ ok: true, version: '2.45.0' });
+    vcs.gitCheck = { ok: false, reason: 'too_old', version: '2.30.0' };
+    expect(await port.check()).toEqual({ ok: false, reason: 'too_old', version: '2.30.0' });
+    expect(await port.isAncestor(repo, (await port.head(repo))!.revision)).toBe(true);
+    vcs.repo(repo).status = ['plan.md', 'other.ts'];
+    const committed = await port.commitPaths(repo, ['plan.md'], 'Plan files');
+    expect((await port.head(repo))!.revision).toBe(committed);
+    expect(await port.status(repo)).toEqual(['other.ts']);
+
     await port.removeWorktree(repo, worktree, { deleteBranch: branch });
     expect(await port.worktreeExists(repo, worktree)).toBe(false);
     expect(await port.branchRevision(repo, branch)).toBeUndefined();

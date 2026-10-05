@@ -169,7 +169,8 @@ describe('Unattended builds over REST (story 5.2)', () => {
     fixtureGit(repo.path, 'clean', '-fq', '--', 'notes.txt');
     writeFileSync(join(repo.path, '_bmad-output', 'scratch.md'), '# Mine\n');
 
-    const approved = await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildApprove, { wsId, ref: '1.1' }), { revision: (await review('1.1')).headRevision });
+    const reviewed = (await review('1.1')).headRevision;
+    const approved = await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildApprove, { wsId, ref: '1.1' }), { revision: reviewed });
     expect(approved.status).toBe(200);
     const approvedReview = ReviewResponse.parse(await approved.json());
     expect(approvedReview.merged).toBe(true);
@@ -189,14 +190,15 @@ describe('Unattended builds over REST (story 5.2)', () => {
     // No hook ran: neither the repo's (husky's folder) nor the ones the agent wrote into its branch.
     expect(existsSync(join(repo.path, '.husky', 'post-merge'))).toBe(true);
     expect(readdirSync(markers)).toEqual([]);
-    // The worktree is gone, the branch kept; a second Approve is refused.
+    // The worktree and the merged branch are gone (story 5.5), and git has no record of either; a second Approve is refused.
     expect(existsSync(worktree)).toBe(false);
-    expect(branches(repo.path)).toEqual(['main', run.branch]);
+    expect(branches(repo.path)).toEqual(['main']);
+    expect(fixtureGit(repo.path, 'worktree', 'list', '--porcelain').split(/\r?\n/).filter((line) => line.startsWith('worktree '))).toHaveLength(1);
     expect((await review('1.1')).merged).toBe(true);
-    expect((await refusalOf(await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildApprove, { wsId, ref: '1.1' }), { revision: (await review('1.1')).headRevision }))).code).toBe('checks_failed');
+    expect((await refusalOf(await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildApprove, { wsId, ref: '1.1' }), { revision: reviewed }))).code).toBe('checks_failed');
   });
 
-  it('a conflicting merge is aborted with the checkout unchanged and blocks the run; Reject keeps the branch and the ticket', async () => {
+  it('a conflicting merge is aborted with the checkout unchanged and blocks the run; Reject discards the worktree and branch, keeps the ticket', async () => {
     const { tab, server, wsId, build, settled, review, repo, store } = await setup();
     const { run } = BuildResponse.parse(await (await build('1.1')).json());
     expect((await settled('1.1')).outcome).toBe('verified');
@@ -230,7 +232,7 @@ describe('Unattended builds over REST (story 5.2)', () => {
     expect((await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceBuildReject, { wsId, ref: '1.1' }))).status).toBe(200);
     expect(decisions()).toHaveLength(1);
     expect(existsSync(run.worktreePath!)).toBe(false);
-    expect(branches(repo.path)).toEqual(['main', run.branch]);
+    expect(branches(repo.path)).toEqual(['main']);
     expect(store.marks).toEqual([]);
     expect(readFileSync(join(repo.path, ...FAKE_BUILD_PLAN.split('/')), 'utf8')).toMatch(/^status: ready-for-dev$/m);
   });

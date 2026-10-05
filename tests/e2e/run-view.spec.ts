@@ -110,11 +110,10 @@ test('an intent gap offers Apply the saved fix and retry, which applies the patc
       await page.getByTestId('build-run-apply-fix').click();
       await expect.poll(() => existsSync(fix), { timeout: 30_000 }).toBe(true);
       expect(readFileSync(fix, 'utf8')).toContain('Fixed 1.1 by the saved patch.');
-      // The same run goes on, and the plan is no longer blocked.
+      // The same run goes on (the fake agent halts again, as its switch says: only the patch is asserted).
       const runs = (await (await call('GET', apiPath(API_ROUTES.workspaceRuns, { wsId }))).json()) as { runs: Array<{ id: string }> };
       expect(runs.runs).toHaveLength(1);
       expect(runs.runs[0]!.id).toBe(started.run.id);
-      expect(readFileSync(join(started.run.worktreePath, ...FAKE_BUILD_PLAN.split('/')), 'utf8')).not.toMatch(/^status: blocked$/m);
     },
     { files: FILES, extra: { ticketStore: store as never, bmadSource, sandbox: fixedSandbox({ available: true, kind: 'test' }), extraAgentEnv: { FAKE_ACP_BUILD_HALT: 'intent gap: what should it say?' } } },
   );

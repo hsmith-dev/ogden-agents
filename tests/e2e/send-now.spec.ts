@@ -45,6 +45,8 @@ test('the waiting messages can be moved, removed and sent right away from the li
     for (const text of ['first waiting', 'second waiting']) {
       await composer(page).fill(text);
       await composer(page).press('Enter');
+      // Accepted (the field clears) before the next: Enter while a send is on its way does nothing.
+      await expect(composer(page)).toHaveValue('');
     }
     const list = page.getByRole('list', { name: 'Messages waiting to be sent' });
     await expect(list.getByRole('listitem')).toHaveCount(2);

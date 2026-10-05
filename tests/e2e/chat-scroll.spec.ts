@@ -36,8 +36,10 @@ async function expectEndsAtLastItem(page: Page) {
   // The last thing in the conversation sits right above the composer, not above empty space.
   const gap = await page.evaluate(() => {
     const scroller = document.querySelector<HTMLElement>('[data-slot="page-body"]')!;
-    // The transcript's last child is its empty end marker (stick to bottom); the item is the one before it.
-    const last = document.querySelector<HTMLElement>('[data-testid="transcript"]')!.lastElementChild!.previousElementSibling as HTMLElement;
+    // The transcript's last child is its empty end marker (stick to bottom); the item is the last one before it that
+    // takes space (a screen-reader-only live region, like the waiting messages' announcement, is skipped).
+    let last = document.querySelector<HTMLElement>('[data-testid="transcript"]')!.lastElementChild!.previousElementSibling as HTMLElement;
+    while (last.previousElementSibling !== null && (last.classList.contains('sr-only') || last.getBoundingClientRect().height === 0)) last = last.previousElementSibling as HTMLElement;
     return Math.round(scroller.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom);
   });
   expect(gap).toBeLessThan(64);

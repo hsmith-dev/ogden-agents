@@ -12,6 +12,11 @@ function childEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
+/** `gh` needs the user's own environment (its config folder, a GH_TOKEN) to say who is signed in. */
+function ghEnv(): NodeJS.ProcessEnv {
+  return { ...process.env };
+}
+
 const deps: CliDeps = {
   fetch: (url, init) => fetch(url, init),
   env: process.env,
@@ -24,7 +29,7 @@ const deps: CliDeps = {
   ghToken: () =>
     new Promise((resolve) => {
       // `gh` is an executable on every OS, so no shell. A missing or signed-out gh is simply "no token".
-      execFile('gh', ['auth', 'token'], { timeout: 10_000, windowsHide: true, maxBuffer: 64 * 1024 }, (error, stdout) => {
+      execFile('gh', ['auth', 'token'], { timeout: 10_000, windowsHide: true, maxBuffer: 64 * 1024, env: ghEnv() }, (error, stdout) => {
         const token = stdout.trim();
         resolve(error === null && token !== '' ? token : undefined);
       });

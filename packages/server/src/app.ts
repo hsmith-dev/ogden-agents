@@ -37,6 +37,9 @@ import { registerPermissionRoutes } from './permission-routes.js';
 import { registerPlanningRoutes } from './planning-routes.js';
 import { registerUpdateRoutes } from './update-routes.js';
 import type { UpdateCheck } from './update-check.js';
+import type { ShellMode } from './shell-mode.js';
+import { registerLauncherUpdateRoutes } from './update-notice/routes.js';
+import type { DesktopUpdate } from './update-notice/desktop-update.js';
 import { registerSettingsRoutes } from './settings-routes.js';
 import { registerShortcutRoutes } from './shortcut-routes.js';
 import type { TerminalAvailabilityCheck } from './terminal-availability.js';
@@ -133,6 +136,10 @@ export interface AppOptions {
   installSettings?: InstallSettings;
   /** The "newer version" notice (story 13.7); without it its routes answer 501. */
   updates?: UpdateCheck;
+  /** Inside the desktop app (`OGDEN_AGENTS_SHELL=desktop`, story 13.3): the update the shell reported, its channel and Restart. */
+  desktopUpdate?: DesktopUpdate;
+  /** `desktop` inside the app, so the page uses app wording. */
+  shell?: ShellMode | null;
   /** Each agent's install-wide default model (story 11), and whether an agent is registered: `PUT` default model. */
   agentDefaults?: { models: Pick<AgentModels, 'setDefaultModel'>; isAgentRegistered: (agentId: string) => boolean };
   /** The Ogden Agents app shortcut (E2-R10; the `shortcut-memory` stub until 2.4). */
@@ -167,6 +174,8 @@ export function createApp({
   newProjectDefaults,
   installSettings,
   updates,
+  desktopUpdate,
+  shell,
   agentDefaults,
   appShortcut,
   tabs,
@@ -188,6 +197,9 @@ export function createApp({
       if (wantsLaunch) log.info('launch code issued for the launcher');
       return c.json(wantsLaunch ? { ...info, launchUrl: control.issueLaunchUrl() } : info);
     });
+
+    // The desktop shell's update calls (story 13.3), only in shell mode.
+    registerLauncherUpdateRoutes(app, { desktop: desktopUpdate });
 
     app.post('/launcher/restart-when-idle', (c) => {
       const result = control.restartWhenIdle();
@@ -265,7 +277,7 @@ export function createApp({
   // Plan and Board (stories 4.1, 4.2): every route through `bmadPieceRoutes`, behind core's guard and the script trust (AD-22).
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerPlanningRoutes(app, { bmad, scriptTrust: bmadScriptTrust, planning, board, bmadSetup, log });
   registerSettingsRoutes(app, { installSettings, newProjectDefaults, log });
-  registerUpdateRoutes(app, { updates });
+  registerUpdateRoutes(app, { updates, desktop: desktopUpdate, shell });
 
   registerEventSocket(app, { events, log, tabs });
   // A session's terminal (story 3.1): behind the same gate as `/ws`.

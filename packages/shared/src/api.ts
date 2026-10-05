@@ -266,6 +266,19 @@ export const API_ROUTES = {
   /** `POST` → `UpdateCheckResponse` (story 13.7): Check now, the server asking npm for its public version list. */
   updatesCheck: `${API_BASE}/updates/check`,
   /**
+   * `POST RestartForUpdateRequest` → `RestartForUpdateResponse` (story 13.3):
+   * "Restart to update" in the desktop app. 409 `sessions_busy` while an agent
+   * turn or a build runs, unless `whenIdle` asks it to wait; 404 with no update.
+   * Appends `app.update_requested`.
+   */
+  updatesAppRestart: `${API_BASE}/updates/app/restart`,
+  /**
+   * `PUT SetUpdateChannelRequest` → `UpdateChannelResponse` (story 13.3): the
+   * desktop app's update channel (`stable` or `next`), kept by the server and
+   * read by the shell. Only in the desktop app; 404 elsewhere.
+   */
+  updatesAppChannel: `${API_BASE}/updates/app/channel`,
+  /**
    * `GET` → `BmadDetectionResponse` (story 10.2's contract; 10.3 serves it):
    * whether the project's repo already has `_bmad/`, read-only. Not guarded.
    */

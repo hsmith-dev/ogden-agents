@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { UpdateCheckOutcome } from '@ogden-agents/shared';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { useUpdateActions, useUpdateNotice } from '@/updates/update-api';
-import { availableSentence, channelLabel, HOW_TO_UPDATE, updateCommand } from '@/updates/update-model';
+import { availableSentence, channelLabel, HOW_TO_UPDATE, updateChannelLabel, updateCommand } from '@/updates/update-model';
 import { Button } from '@/ui/button';
 import { Field } from '@/ui/field';
 import { Notice } from '@/ui/notice';
@@ -31,7 +31,7 @@ export function lastCheckedText(iso: string | null): string {
  */
 export function AboutPage() {
   const { data, isError } = useUpdateNotice();
-  const { save, check } = useUpdateActions();
+  const { save, check, channel } = useUpdateActions();
   const [outcome, setOutcome] = useState<UpdateCheckOutcome | undefined>(undefined);
 
   const checkNow = () => {
@@ -64,11 +64,24 @@ export function AboutPage() {
                   {lastCheckedText(data.lastCheckedAt)}
                 </dd>
               </Text>
-              {data.available === null ? null : (
+              {data.shell === 'desktop' ? (
+                // Inside the desktop app (story 13.3): the app finds updates through its own channel, not npm. The channel row is a stub that 13.10 wires to the shell.
+                <Field id="app-update-channel" layout="inline" label="Update channel" description="Stable gets finished versions. Preview also gets early versions to try.">
+                  <div className="flex gap-2" role="group" aria-label="Update channel">
+                    {(['stable', 'next'] as const).map((value) => (
+                      <Button key={value} variant="outline" size="sm" aria-pressed={data.appChannel === value} disabled={channel.isPending} onClick={() => channel.mutate(value)}>
+                        {updateChannelLabel(value)}
+                      </Button>
+                    ))}
+                  </div>
+                </Field>
+              ) : null}
+              {data.shell === 'desktop' || data.available === null ? null : (
                 <Notice data-testid="about-available">
                   {availableSentence(data.available)} {HOW_TO_UPDATE} <Text as="code" variant="mono">{updateCommand(data, data.available)}</Text> in a terminal.
                 </Notice>
               )}
+              {data.shell === 'desktop' ? null : (<>
               <div className="flex flex-wrap items-center gap-3">
                 <Button variant="outline" data-testid="check-now" disabled={check.isPending} onClick={checkNow}>
                   Check now
@@ -102,6 +115,7 @@ export function AboutPage() {
                   {save.error.message}
                 </Notice>
               ) : null}
+              </>)}
             </>
           )}
         </PageSection>

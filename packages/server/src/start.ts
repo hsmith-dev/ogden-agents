@@ -19,7 +19,7 @@ import {
   type AgentPort,
   type Core,
 } from '@ogden-agents/core';
-import { MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM, type AgentId, type Session } from '@ogden-agents/shared';
+import { channelOf, compareVersions, MAX_TERMINAL_INPUT_BYTES, SERVER_STREAM, type AgentId, type Session } from '@ogden-agents/shared';
 import { WebSocketServer } from 'ws';
 import { checkAgentWiring } from './agent-wiring.js';
 import { createApp, type ServerControl } from './app.js';
@@ -39,7 +39,10 @@ import { broadcast, closeServer, HOST, listen, repointAppShortcut } from './star
 import { bmadSetupFailureLogger, uvPycacheDir, createBmadSourceAndCatalog, createDocumentCards, createPlanAndBoard, stopBmadWork, withAgentSkillFolders, type BmadWiring } from './start-planning.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
 import { openUrl } from './open-url.js';
+import { shellModeOf } from './shell-mode.js';
 import { installMethodOf, wireUpdateCheck } from './update-check.js';
+import { createBusyRule } from './update-notice/busy-rule.js';
+import { createDesktopUpdate } from './update-notice/desktop-update.js';
 
 // Moved out in story 3.9; still exported from here for the callers that import them from `start.ts`.
 export { AGENT_ENV_KEYS, agentEnvironment, agentKeysOf, CHECK_IN_MS_ENV, checkInDelayFromEnv, SECRET_STORE_ENV, SUBSCRIPTION_MAX_AGE_MS, testSecretStore, uvEnvironment, withoutAgentKeys } from './start-env.js';
@@ -338,7 +341,15 @@ async function listenAndAnnounce({
     onError: (code) => log.warn('new project defaults unusable', { code }),
   });
   // The "newer version" notice (story 13.7): checks once after the server is up, never on the start path.
-  const updates = wireUpdateCheck(options.updates, { dataDir, version, installMethod: installMethodOf(options.launcherEntry), events: core.events, log });
+  // Inside the desktop app (shell mode) the npm source never runs: the app finds updates through its own channel.
+  const shell = options.shell === undefined ? shellModeOf() : options.shell;
+  const updates = wireUpdateCheck(shell === 'desktop' ? false : options.updates, { dataDir, version, installMethod: installMethodOf(options.launcherEntry), events: core.events, log });
+  // The desktop app's update (story 13.3): only when the app started this server. One busy rule decides when a restart may go ahead.
+  const busyRule = createBusyRule(() => countBusySessions(core));
+  const desktopUpdate =
+    shell === 'desktop'
+      ? createDesktopUpdate({ dataDir, version, isNewer: (a, b) => (compareVersions(a, b) ?? 0) > 0, defaultChannel: channelOf(version) === 'preview' ? 'next' : 'stable', busy: busyRule, events: core.events, log })
+      : undefined;
   const app = createApp({
     events: core.events,
     webRoot: options.webRoot ?? defaultWebRoot(),
@@ -369,6 +380,8 @@ async function listenAndAnnounce({
     newProjectDefaults,
     installSettings: core.installSettings,
     updates,
+    ...(desktopUpdate === undefined ? {} : { desktopUpdate }),
+    shell,
     agentDefaults: { models: core.agentModels, isAgentRegistered: (agentId) => agents.get(agentId) !== undefined },
     appShortcut,
     tabs,

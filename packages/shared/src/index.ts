@@ -3,6 +3,7 @@ export * from './appearance.js';
 export * from './bmad.js';
 export * from './chat.js';
 export * from './chat-name.js';
+export * from './desktop-update.js';
 export * from './entities.js';
 export * from './errors.js';
 export * from './events.js';

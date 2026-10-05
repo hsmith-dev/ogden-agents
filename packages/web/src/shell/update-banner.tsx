@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { useUpdateNotice } from '@/updates/update-api';
-import { availableSentence, HOW_TO_UPDATE, readDismissed, updateCommand, writeDismissed } from '@/updates/update-model';
+import { useUpdateActions, useUpdateNotice } from '@/updates/update-api';
+import { appUpdateSentence, availableSentence, HOW_TO_UPDATE, readDismissed, updateCommand, writeDismissed } from '@/updates/update-model';
 import { Banner } from '@/ui/banner';
 import { Button } from '@/ui/button';
 import { Text } from '@/ui/typography';
@@ -14,13 +14,38 @@ import { Text } from '@/ui/typography';
  */
 export function UpdateBanner() {
   const { data } = useUpdateNotice();
+  const { restart } = useUpdateActions();
   const [dismissed, setDismissed] = useState<string[]>(() => readDismissed());
   const available = data?.available;
+  const app = data?.app ?? null;
   const showing = data !== undefined && available !== null && available !== undefined && !dismissed.includes(available.version);
   // The polite status region is always mounted, so a screen reader announces the banner when it arrives.
   return (
     <div role="status" data-testid="update-status">
-      {!showing ? null : (
+      {app !== null ? (
+        // The desktop app's update (story 13.3). The server's busy rule says whether Restart may go now.
+        <Banner
+          data-testid="app-update-banner"
+          role={undefined}
+          action={
+            app.update.downloaded && !app.restartRequested ? (
+              <span className="flex flex-wrap gap-2">
+                <Button variant="ghost" size="sm" disabled={app.blocked || restart.isPending} onClick={() => restart.mutate(false)}>
+                  Restart to update
+                </Button>
+                {app.blocked ? (
+                  <Button variant="ghost" size="sm" disabled={restart.isPending} onClick={() => restart.mutate(true)}>
+                    Restart when they finish
+                  </Button>
+                ) : null}
+              </span>
+            ) : undefined
+          }
+        >
+          {appUpdateSentence(app)}
+          {restart.isError ? ` ${restart.error.message}` : ''}
+        </Banner>
+      ) : !showing ? null : (
         <Banner
           data-testid="update-banner"
           role={undefined}

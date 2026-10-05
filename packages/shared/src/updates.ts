@@ -3,6 +3,7 @@
  * server reports about npm's newer versions, and the switch for the check.
  */
 import { z } from 'zod';
+import { DesktopUpdateView, UpdateChannel } from './desktop-update.js';
 
 /** How this install was started, so the notice shows the right command. */
 export const InstallMethod = z.enum(['npx', 'global', 'other']);
@@ -24,6 +25,12 @@ export const UpdateNoticeResponse = z.object({
   /** ISO 8601 UTC of the last check that reached npm, or `null`. */
   lastCheckedAt: z.string().nullable(),
   available: z.object({ version: z.string(), tag: z.enum(['latest', 'next']) }).nullable(),
+  /** `desktop` when the server runs inside the desktop app (`OGDEN_AGENTS_SHELL=desktop`, set only by the app), else `null`. */
+  shell: z.literal('desktop').nullable(),
+  /** The desktop app's chosen update channel; `null` outside the app. */
+  appChannel: UpdateChannel.nullable(),
+  /** The desktop app's downloaded update, reported by its shell; `null` when none (and always in npm installs). */
+  app: DesktopUpdateView.nullable(),
 });
 export type UpdateNoticeResponse = z.infer<typeof UpdateNoticeResponse>;
 

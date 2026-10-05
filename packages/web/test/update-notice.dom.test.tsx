@@ -37,7 +37,7 @@ vi.mock('@/api/http', () => ({
 const { UpdateBanner } = await import('../src/shell/update-banner');
 const { AboutPage } = await import('../src/routes/about-page');
 
-const base: UpdateNoticeResponse = { current: '0.4.0', channel: 'stable', installMethod: 'npx', enabled: true, offline: false, lastCheckedAt: null, available: null };
+const base: UpdateNoticeResponse = { current: '0.4.0', channel: 'stable', installMethod: 'npx', enabled: true, offline: false, lastCheckedAt: null, available: null, shell: null, appChannel: null, app: null };
 const wrap = (node: React.ReactNode) => <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{node}</QueryClientProvider>;
 const settle = () => act(async () => await new Promise((resolve) => setTimeout(resolve, 0)));
 

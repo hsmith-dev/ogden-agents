@@ -1,6 +1,7 @@
 import {
   API_ROUTES,
   apiPath,
+  APPLY_FIX_FAILED,
   APPROVE_FAILED,
   BUILD_DIALOG_LOAD_FAILED,
   BUILD_FAILED,
@@ -164,6 +165,12 @@ export async function retryRun(wsId: string, runId: string, auth: Auth = tabAuth
   return RunResponse.parse(json).run;
 }
 
+/** `POST …/runs/:runId/retry` with `mode: 'apply_fix'` (11.1): applies an intent gap's saved fix in the run's worktree and builds again. */
+export async function applySavedFix(wsId: string, runId: string, auth: Auth = tabAuth): Promise<Run> {
+  const json = await call(auth, apiPath(API_ROUTES.runRetry, { wsId, runId }), postJson({ mode: 'apply_fix' }), APPLY_FIX_FAILED);
+  return RunResponse.parse(json).run;
+}
+
 /** `GET` and `PATCH /api/v1/settings/run-limits`: the install's builds at a time and time limit. */
 export async function fetchRunLimits(auth: Auth = tabAuth): Promise<RunLimitSettings> {
   return RunLimitSettingsResponse.parse(await call(auth, API_ROUTES.runLimits, {}, BUILD_SETTINGS_LOAD_FAILED)).settings;
@@ -192,10 +199,10 @@ export function useWorkspaceRuns(wsId: string, enabled: boolean) {
 }
 
 /** Stop or Retry: once settled, the run, the runs and the board's tickets refetch. */
-export function useRunAction(wsId: string, action: 'stop' | 'retry') {
+export function useRunAction(wsId: string, action: 'stop' | 'retry' | 'apply_fix') {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (runId: string) => (action === 'stop' ? stopRun(wsId, runId) : retryRun(wsId, runId)),
+    mutationFn: (runId: string) => (action === 'stop' ? stopRun(wsId, runId) : action === 'apply_fix' ? applySavedFix(wsId, runId) : retryRun(wsId, runId)),
     onSettled: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ['session-run', wsId] }),

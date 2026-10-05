@@ -46,6 +46,30 @@ import {
 
 export { gitVersionAtLeast, parseGitVersion, type GitVcsOptions } from './checks.js';
 
+/** The most a saved fix may be, in bytes. */
+const MAX_PATCH_BYTES = 1024 * 1024;
+
+/** Every path a unified git patch's headers name: `diff --git`, `rename`/`copy` from and to, `---` and `+++`. Quoted paths are kept as written (git's own check refuses what it can't read). */
+export function headerPaths(patch: string): string[] {
+  const found: string[] = [];
+  const strip = (name: string) => name.replace(/^"?(?:[ab]\/)?/, '').replace(/"$/, '');
+  for (const line of patch.split(/\r?\n/)) {
+    let match = /^diff --git (?:"?a\/(.*?)"? )"?b\/(.*?)"?$/.exec(line);
+    if (match !== null) {
+      found.push(match[1]!, match[2]!);
+      continue;
+    }
+    match = /^(?:rename|copy) (?:from|to) (.*)$/.exec(line);
+    if (match !== null) {
+      found.push(strip(match[1]!).replace(/^"/, ''));
+      continue;
+    }
+    match = /^(?:---|\+\+\+) (?!\/dev\/null)(.*?)(?:\t.*)?$/.exec(line);
+    if (match !== null) found.push(strip(match[1]!));
+  }
+  return found.filter((path) => path !== '');
+}
+
 export function createGitVcs(options: GitVcsOptions): VcsPort {
   const git = options.git ?? 'git';
   const timeout = options.timeoutMs ?? 120_000;
@@ -577,6 +601,15 @@ export function createGitVcs(options: GitVcsOptions): VcsPort {
         const match = /^(?:\d+|-)\t(?:\d+|-)\t(.*)$/s.exec(entry.trim());
         return match === null || match[1] === '' ? [] : [match[1]!];
       });
+      // A rename or copy lists only its destination above: read every path the patch's own headers name too (its sources, deletions).
+      let text: string;
+      try {
+        if (lstatSync(patchPath).size > MAX_PATCH_BYTES) return 'refused';
+        text = readFileSync(patchPath, 'utf8');
+      } catch {
+        return 'refused';
+      }
+      paths.push(...headerPaths(text));
       if (refuse !== undefined && paths.some((path) => refuse(path))) return 'refused';
       // All or nothing, and never a path outside the worktree (git refuses those without --unsafe-paths).
       const check = await run(worktreePath, [...SAFE_CONFIG, 'apply', '--check', '--whitespace=nowarn', patchPath], undefined, pinned);

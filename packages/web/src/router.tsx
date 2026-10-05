@@ -112,6 +112,13 @@ const workspaceBoardTicketRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/workspace-board-ticket'), 'WorkspaceBoardTicket'),
 });
 
+/** A project's Runs page (story 11.1): every build run and the queue. */
+const workspaceRunsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$wsId/runs',
+  component: lazyRouteComponent(() => import('./routes/workspace-runs-page'), 'WorkspaceRunsPage'),
+});
+
 /** A ticket's build review (story 5.2, the tracer), `/w/:wsId/review/:ref`. */
 const workspaceReviewRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -141,6 +148,7 @@ const routeTree = rootRoute.addChildren([
   workspacePlanRoute,
   workspaceBoardRoute.addChildren([workspaceBoardTicketRoute]),
   workspaceReviewRoute,
+  workspaceRunsRoute,
   sessionRoute,
   settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute, buildsSettingsRoute, notificationsRoute, aboutRoute]),
 ]);

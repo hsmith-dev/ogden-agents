@@ -25,9 +25,10 @@
  *   `vcs_unavailable`.
  * - `GET …/sessions/:sesId/run` → `SessionRunResponse`: a `build` session's run; 404 otherwise.
  * - `POST …/runs/:runId/retry` `RetryRunRequest` (story 5.4) → `RunResponse`
- *   for a run paused at a checkpoint (it resumes); 409 `run_not_active` for
- *   a run running, ready for review or decided; 501 for any other run until
- *   5.8; 400 for a malformed body or run id, 404 for another workspace's
+ *   for a run paused at a checkpoint (it resumes), a failed, blocked or
+ *   stopped one (Retry; `mode: 'rebase'` is 5.9's Update and retry,
+ *   `mode: 'apply_fix'` 11.1's Apply the saved fix and retry); 409
+ *   `run_not_active` for a run running, ready for review or decided; 400 for a malformed body or run id, 404 for another workspace's
  *   run, 409 `sandbox_unavailable`.
  *
  * Story 5.3 pre-registers the rest of epics 5 and 11, each behind the same

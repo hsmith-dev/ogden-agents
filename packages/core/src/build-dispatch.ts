@@ -2,11 +2,12 @@
  * Dispatch (story 5.8; story 5.10 split `builds.ts`): the time limit, the
  * queue and its drain, Build all ready, Retry, Resume and Update and retry.
  */
-import { ATTENDED_SANDBOX, blockedSentence, RUN_NOT_ACTIVE_MESSAGE, RunId, CHECKOUT_MOVED_MESSAGE, RUN_REASON_START_FAILED, type Run, type WorkspaceId, REBASE_CONFLICT_MESSAGE, REBASE_REFUSED_MESSAGE, type TicketStatus } from '@ogden-agents/shared';
+import { join } from 'node:path';
+import { APPLY_FIX_REFUSED_MESSAGE, ATTENDED_SANDBOX, blockedSentence, NO_SAVED_FIX_MESSAGE, RUN_NOT_ACTIVE_MESSAGE, RunId, CHECKOUT_MOVED_MESSAGE, RUN_REASON_START_FAILED, type Run, type WorkspaceId, REBASE_CONFLICT_MESSAGE, REBASE_REFUSED_MESSAGE, type TicketStatus } from '@ogden-agents/shared';
 import { BuildRefusedError, NotFoundError } from './errors.js';
 import { workspaceRepoPath } from './planning.js';
 import { serializedByRepo } from './repo-serialization.js';
-import { READY_STATUS, prerequisitesMet, atCheckpoint } from './build-names.js';
+import { READY_STATUS, prerequisitesMet, atCheckpoint, forbiddenChanges, intentGapPatchOf } from './build-names.js';
 import type { BuildCtx } from './build-context.js';
 import type { createOutcome } from './build-outcome.js';
 import type { createStarter } from './build-start.js';
@@ -149,6 +150,42 @@ export function createDispatcher(ctx: BuildCtx, start: ReturnType<typeof createS
     return startAgain(workspaceId, run, { note, resume: true });
   };
 
+  /**
+   * Apply the saved fix and retry (story 11.1, bmad-integration): a run
+   * blocked `intent_gap` whose plan has the saved patch beside it gets the
+   * patch applied in its worktree (all or nothing, through `VcsPort`, with
+   * the protected paths the sandbox never let the agent write refused), its
+   * plan marked `in-review`, and the agent started again to carry on. A patch
+   * that is missing, not a plain file in the run's own `_bmad-output`, or that
+   * doesn't apply, changes nothing and says so.
+   */
+  const applyFixLocked = async (workspaceId: WorkspaceId, repoPath: string, runId: RunId, note: string | undefined): Promise<Run> => {
+    const { guard } = await guarded(workspaceId);
+    const run = entities.getRun(runId);
+    if (run === undefined || run.workspaceId !== workspaceId) throw new NotFoundError('run', runId);
+    if (
+      run.outcome !== 'blocked' || run.blockedCode !== 'intent_gap' || run.decision !== null || run.worktreePath === null || run.branch === null ||
+      entities.latestRunForTicket(workspaceId, run.ticketRef)?.id !== run.id
+    ) {
+      throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
+    }
+    await requireGit();
+    await prepareContinue(workspaceId, repoPath, run);
+    const ticket = await aware.find(repoPath, run.ticketRef, guard);
+    const patch = intentGapPatchOf(run.worktreePath, ticket.plan);
+    if (patch === null) throw new BuildRefusedError('run_not_active', NO_SAVED_FIX_MESSAGE);
+    const applied = await vcs.applyPatch({
+      repoPath,
+      worktreePath: run.worktreePath,
+      branch: run.branch,
+      patchPath: join(run.worktreePath, ...patch.split('/')),
+      refuse: (file) => forbiddenChanges([file], ticket.plan).length > 0,
+    });
+    if (applied === 'refused') throw new BuildRefusedError('merge_conflict', APPLY_FIX_REFUSED_MESSAGE);
+    await aware.mark(repoPath, run.ticketRef, 'in-review', guard);
+    return startAgain(workspaceId, run, { note, resume: true });
+  };
+
   /** Starts one queued run now (its slot is free): its worktree and agent, or a retried one's agent again. A run that can't start ends failed; the queue goes on. */
   const launchQueued = async (queued: Run): Promise<void> => {
     try {
@@ -252,5 +289,5 @@ export function createDispatcher(ctx: BuildCtx, start: ReturnType<typeof createS
   fn.armDeadline = armDeadline;
   fn.scheduleDrain = scheduleDrain;
 
-  return { timeUp, armDeadline, startAgain, dispatchAgain, resumeLocked, rebaseLocked, RESUME_STATUSES, retryLocked, launchQueued, extendAll, drainQueue, scheduleDrain };
+  return { timeUp, armDeadline, startAgain, dispatchAgain, resumeLocked, rebaseLocked, applyFixLocked, RESUME_STATUSES, retryLocked, launchQueued, extendAll, drainQueue, scheduleDrain };
 }

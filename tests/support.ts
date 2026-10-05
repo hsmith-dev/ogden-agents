@@ -99,6 +99,8 @@ export async function startServer(
     verifyApiKey: async () => 'ok',
     // Antigravity only where a test wires it (`fakeAntigravity`, epic 6 entry 5): the other tests see the agents they name.
     antigravity: false,
+    // Codex likewise (epic 12): only where a test wires it.
+    codex: false,
     // The "newer version" check (story 13.7) never reaches npm from a test: a test that wants it passes a fake registry.
     updates: false,
     extraAgentEnv: { FAKE_LOGIN_STATE: loginState, ...extraAgentEnv },

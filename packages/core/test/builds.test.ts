@@ -144,12 +144,17 @@ describe("a build's outcome when its turn ends (story 5.2)", () => {
     await moved.endTurn(second.session.id);
     expect(moved.core.entities.getRun(second.run.id)).toMatchObject({ outcome: 'failed', reason: RUN_REASON_RESULT_MISMATCH });
 
-    // A result that reads back as another run's is not this run's.
+    // A result that does not read back (missing, or another run's) fails the run.
     const lost = await harness({ runner: { ...testRunner, readResult: async () => undefined } });
     const third = await lost.builds.start(lost.wsId, { ref: '1.1' });
     lost.tickets.set(third.run.worktreePath!, '1.1', 'built');
     await lost.endTurn(third.session.id);
     expect(lost.core.entities.getRun(third.run.id)).toMatchObject({ outcome: 'failed', reason: RUN_REASON_RESULT_MISMATCH });
+    const notBuilt = await harness({ runner: { ...testRunner, readResult: async (folder, expected) => (await testRunner.readResult(folder, expected).then((read) => (read === undefined ? undefined : { ...read, status: 'in-review' as const }))) } });
+    const fifth = await notBuilt.builds.start(notBuilt.wsId, { ref: '1.1' });
+    notBuilt.tickets.set(fifth.run.worktreePath!, '1.1', 'built');
+    await notBuilt.endTurn(fifth.session.id);
+    expect(notBuilt.core.entities.getRun(fifth.run.id)).toMatchObject({ outcome: 'failed', reason: RUN_REASON_RESULT_MISMATCH });
     const wrongBase = await harness({ runner: { ...testRunner, readResult: async (folder, expected) => (await testRunner.readResult(folder, expected).then((read) => (read === undefined ? undefined : { ...read, baseRevision: 'e'.repeat(40) }))) } });
     const fourth = await wrongBase.builds.start(wrongBase.wsId, { ref: '1.1' });
     wrongBase.tickets.set(fourth.run.worktreePath!, '1.1', 'built');

@@ -363,9 +363,9 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
    * head and `reason` (the run's reason when it is blocked). Never throws: a
    * result that can't be written is reported, and the run goes on.
    */
-  const writeResult = async (run: Run, repoPath: string, ticket: TicketDetail | undefined, reason: string | null, blocked: boolean): Promise<void> => {
+  const writeResult = async (run: Run, repoPath: string, ticket: TicketDetail | undefined, reason: string | null, blocked: boolean): Promise<boolean> => {
     const short = runShortOf(run);
-    if (short === undefined) return;
+    if (short === undefined) return false;
     try {
       await recorder.flushed(run.id);
       const status = ticket?.status ?? null;
@@ -385,8 +385,10 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         networkFailure: recorder.networkFailure(run.id),
         endedAt: new Date().toISOString(),
       });
+      return true;
     } catch (error) {
       report(run.id, 'result', error);
+      return false;
     }
   };
 
@@ -629,14 +631,17 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     // the plan, the run and the branch head the checks saw (the agent is released: nothing moves the branch now).
     let wroteVerified = false;
     if (outcome === 'verified') {
-      await writeResult(run, repoPath, ticket, null, false);
-      wroteVerified = true;
-      if (!(await resultHolds(run, checkedHead))) {
+      // A write that failed leaves an older result (a checkpoint's) on disk: never read back as this one's.
+      wroteVerified = await writeResult(run, repoPath, ticket, null, false);
+      if (!wroteVerified || !(await resultHolds(run, checkedHead))) {
+        report(run.id, 'result', new Error(wroteVerified ? 'result did not match' : 'result not written'));
         outcome = 'failed';
         reason = RUN_REASON_RESULT_MISMATCH;
         wroteVerified = false;
       }
     }
+    // Re-checked after the awaits above: a Stop or Reject meanwhile stands.
+    if (entities.getRunBySession(run.sessionId)?.outcome !== 'running') return;
     const decided = entities.setRunOutcome(run.id, outcome, reason === null ? null : mask(reason), { blockedCode });
     if (!wroteVerified) await writeResult(decided, repoPath, ticket, decided.reason, outcome === 'blocked');
   };

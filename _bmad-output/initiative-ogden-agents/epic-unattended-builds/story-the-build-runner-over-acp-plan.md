@@ -3,13 +3,13 @@ title: 'The build runner over ACP'
 type: 'feature'
 ticket: '7'
 created: '2026-10-05'
-status: 'in-progress'
+status: 'built'
 baseline_revision: 'e260e8ae1fe64f61638f400b6642cd083cf88ab1'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-unattended-builds/epic-unattended-builds.md'
@@ -70,6 +70,19 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+- 2026-10-05, pass 1, security lens: high 0, medium 1, low 1.
+  - S1 a failed final result write left an older (checkpoint) result that the read-back accepted -- medium, patch: `writeResult` reports success and a `verified` run needs it.
+  - S2 the read-back status is derived from the same plan read, so it is not independent -- low, reject: stated in Design Notes; the commit and base comparisons are the added check.
+  - Drift test skips silently without the skill folder -- low, reject: the folder is tracked in the repo.
+  - Correctness lens (same pass): high 0, medium 1, low 5.
+  - C1 stale checkpoint result accepted if the final write failed -- same as S1, patched.
+  - C2 read-back failure not reported -- low, patch: reported with a code only.
+  - C3 outcome not re-checked after the new awaits -- low, patch: re-checked before `setRunOutcome`.
+  - C4 head not re-read after the read-back if release failed -- low, reject: `approve` re-checks the reviewed revision.
+  - C5 weak tests (no status-mismatch case, environment names not bounded) -- low, patch: both added.
+  - C6 drift test limited to the skill's `blocking condition` phrasing -- low, reject: the 10 or more floor catches a rewording.
+  - C7 intermediate `result.json` says built while running -- low, reject: same as the checkpoint's own writes.
 
 ## Design Notes
 

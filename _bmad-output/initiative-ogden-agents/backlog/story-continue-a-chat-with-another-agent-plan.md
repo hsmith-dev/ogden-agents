@@ -3,7 +3,7 @@ title: 'A chat continues with another agent when its agent hits a usage limit'
 type: 'feature'
 ticket: '2'
 created: '2026-10-04'
-status: 'in-review'
+status: 'built'
 baseline_revision: '2e4d68f8befaae014c336abffc3e7f5b1fc7d984'
 route: 'full'
 route_source: 'auto'
@@ -80,9 +80,38 @@ context:
 
 ## Implementation Notes
 
+- Implemented directly from the plan (no implementation subagent; the planning context was already loaded). Commits e36e5db (contract, detection, brief, core), the server routes, f07d12d (web, e2e), docs, then review fixes.
+- The handoff dialog asks for a first message (prefilled) and sends it with the brief at once; the brief stays pending (`handoffPending` ref) until a prompt carrying it succeeds, so a failure or restart re-sends it.
+- Each agent's own session is kept as `agentSessionId@<agentId>`; where it left as `handoffLeftAt@<agentId>` (written in the same transaction as the event).
+- `redactSecrets` (shared) = API key patterns + `CREDENTIAL_PATTERNS` (now shared with the server log) + token shapes + URL/flag/named passwords; every repeat bounded (linear on 200k-char adversarial inputs, tested).
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (lenses quick, security): high 1, medium 9, low 8, false 0, maybe-false 0.
+
+| Finding | Verdict | Route | Evidence / action |
+|---|---|---|---|
+| NAMED_SECRET catastrophic backtracking (preview and POST block the event loop) | high | patch | Reproduced 23 s on 12 KB; rewritten with bounded repeats, no `.`/`-` in names; probe 200 KB in 2 ms; linear-time test added; POST refuses a brief over 2x budget before masking |
+| Brief masking misses log.ts credentials (ogden.auth, code=, #c/#t, Bearer) | medium | patch | Moved to shared `CREDENTIAL_PATTERNS`, used by log.ts and `redactSecrets` |
+| Common secret shapes unmasked (URL password, --password, quoted values, sk_live, JWT, Basic, DB_PASS) | medium | patch | Patterns added; test added |
+| Goal and action titles cut before masking leak a partial token | medium | patch | Mask then cut |
+| Unterminated PEM swallowed the rest of the brief | low | patch | Unterminated block now takes only whole base64 lines |
+| First message unmasked (frozen intent: brief and message) | medium | patch | `redactSecrets(message)`; test added |
+| Resume fallback after handoff sent unmasked full transcript | medium | patch | Primed transcript masked when a handoff brief is pending |
+| Failed tool calls listed under Actions (plan: completed only) | low | patch | Completed only |
+| Menu enabled in done/switching; wrong reason while waiting; server allowed done | medium | patch | UI reasons per state; server idle or error only, and refuses while closing |
+| Mode carry-over ignored the target's session modes | medium | patch | `modeWith` also checks `lastSessionModes` |
+| Dialog shows resulting mode only on fallback (Skip all carries silently) | medium | patch | Disclosure always states the mode; Skip all says it runs without asking |
+| Stale/edited brief on reopen; focus refetch overwrites edits; Continue enabled while refetching | medium | patch | Per-opening query key, brief reset, no focus/reconnect refetch, `isFetching` blocks send |
+| left-at ref written outside the agent-change transaction | low | patch | Written in `setSessionAgent`'s transaction |
+| 429/rate_limit patterns label short rate limits as usage limits | medium | patch | Removed from both descriptors; agent matrix updated |
+| Confirm disabled with no reason; over-limit alert repeats each keystroke | low | patch | Polite live reason tied to the button by aria-describedby; counter no longer an alert |
+| Session refetched on every load | low | patch | Refetch only on `session.agent_changed` |
+| Server hands off without a preview (UI-only disclosure) | low | defer | Behind AD-15 tab-token gate; recorded in deferred-work |
+| Preview/confirm drift; mode and agent change in two transactions; whole-prompt budget; disabled radios not focusable; dialog focus return from menu | low | defer | Recorded in deferred-work |
+| Missing unit tests for workspace-api fold and SessionMenu | low | reject | Covered by e2e (`handoff.spec.ts` menu reason, divider, agent labels); the fold is three lines |
 
 ## Design Notes
 

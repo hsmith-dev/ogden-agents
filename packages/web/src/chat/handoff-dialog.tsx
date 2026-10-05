@@ -64,6 +64,9 @@ export function HandoffDialog({ open, onOpenChange, wsId, sesId, currentAgentId,
     retry: false,
     staleTime: 0,
     gcTime: 0,
+    // Never replaced under the user's edits while the dialog is open.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
   // A new preview replaces what was in the field.
   useEffect(() => {
@@ -73,7 +76,16 @@ export function HandoffDialog({ open, onOpenChange, wsId, sesId, currentAgentId,
   const target = preview.data?.agent;
   const maxChars = preview.data?.maxChars ?? 0;
   const tooLong = brief.length > maxChars;
-  const canSend = preview.data !== undefined && !tooLong && message.trim() !== '' && !sending;
+  const canSend = preview.data !== undefined && !preview.isFetching && !tooLong && message.trim() !== '' && !sending;
+  /** Why Continue does nothing now, read with the button. */
+  const waitReason =
+    agentId === undefined
+      ? 'Pick an agent that is ready to continue this chat.'
+      : tooLong
+        ? 'Shorten the summary to send it.'
+        : message.trim() === '' && preview.data !== undefined
+          ? 'Write a message for the agent first.'
+          : undefined;
 
   const confirm = () => {
     if (!canSend || agentId === undefined) return;
@@ -153,7 +165,7 @@ export function HandoffDialog({ open, onOpenChange, wsId, sesId, currentAgentId,
                 aria-describedby={`${ids}-brief-count`}
                 aria-invalid={tooLong || undefined}
               />
-              <Text as="span" variant="caption" id={`${ids}-brief-count`} data-testid="handoff-brief-count" role={tooLong ? 'alert' : undefined}>
+              <Text as="span" variant="caption" id={`${ids}-brief-count`} data-testid="handoff-brief-count">
                 {tooLong
                   ? `${brief.length.toLocaleString()} of ${maxChars.toLocaleString()} characters: shorten it to send.`
                   : `${brief.length.toLocaleString()} of ${maxChars.toLocaleString()} characters. Edit or trim it freely; secrets are masked again before it's sent.`}
@@ -176,7 +188,11 @@ export function HandoffDialog({ open, onOpenChange, wsId, sesId, currentAgentId,
               Cancel
             </Button>
           </DialogClose>
-          <Button onClick={confirm} aria-disabled={!canSend || undefined} aria-busy={sending || undefined} data-testid="handoff-confirm">
+          {/* Announced once when it changes, not on each keystroke. */}
+          <Text as="span" variant="caption" id={`${ids}-why`} aria-live="polite" data-testid="handoff-why" className={waitReason === undefined ? 'sr-only' : 'self-center'}>
+            {waitReason}
+          </Text>
+          <Button onClick={confirm} aria-disabled={!canSend || undefined} aria-busy={sending || undefined} aria-describedby={waitReason === undefined ? undefined : `${ids}-why`} data-testid="handoff-confirm">
             {target === undefined ? 'Continue' : `Continue with ${target.displayName}`}
           </Button>
         </div>

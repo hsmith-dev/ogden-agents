@@ -254,10 +254,12 @@ export function SessionPage() {
   // The modes the picker offers depend on the agent session: read the session again when its agent
   // starts or reopens (working, or `session.resumed`); turning idle after it is read again by the driver hook.
   const resumedSeq = useMemo(() => events.findLast((event) => event.type === 'session.resumed')?.seq, [events]);
+  // And when the chat continues with another agent (handoff): its modes are the new agent's.
+  const agentChangedSeq = useMemo(() => events.findLast((event) => event.type === 'session.agent_changed')?.seq, [events]);
   const agentWorking = state === 'working';
   useEffect(() => {
-    if (agentWorking || resumedSeq !== undefined || view.agentId !== undefined) void refetchSession();
-  }, [agentWorking, resumedSeq, view.agentId, refetchSession]);
+    if (agentWorking || resumedSeq !== undefined || agentChangedSeq !== undefined) void refetchSession();
+  }, [agentWorking, resumedSeq, agentChangedSeq, refetchSession]);
 
   // Whether the waiting card is out of view, for the "waiting for you" bar. Not while the terminal
   // drives: the conversation is read-only then, and nothing in it takes focus (3.6 review F2).

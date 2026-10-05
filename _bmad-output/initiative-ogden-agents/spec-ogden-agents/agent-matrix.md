@@ -24,7 +24,7 @@ ACP client library: `@agentclientprotocol/sdk` 1.5.1 (protocol version 1). The `
   4. `cli_not_found`: the agent's CLI can't be found.
 
   Not being idle is not a code: the UI reads the session's state.
-- **Usage limits and handoff (CAP-3, CAP-15; 2026-10-04):** each descriptor lists `usageLimitPatterns`, tested only against the agent's own error text when a prompt fails; a match is error code `usage_limit` and the chat offers to continue with another agent. Claude Code: "usage limit reached", "5-hour/weekly … limit reached", "you've hit your limit", `rate_limit_error`, "API Error: 429". Antigravity: `RESOURCE_EXHAUSTED`, "quota exceeded/exhausted", "exhausted your capacity/quota", "429 … Too Many Requests", "rate limit exceeded". Unverified against live limits: the release's live check confirms them. Handoff brief budgets: Claude Code 100,000 characters, Antigravity 150,000.
+- **Usage limits and handoff (CAP-3, CAP-15; 2026-10-04):** each descriptor lists `usageLimitPatterns`, tested only against the agent's own error text when a prompt fails; a match is error code `usage_limit` and the chat offers to continue with another agent. Claude Code: "usage limit reached", "5-hour/weekly … limit reached", "you've hit your limit". Antigravity: `RESOURCE_EXHAUSTED`, "quota exceeded/exhausted", "exhausted your capacity/quota". A short API rate limit (a 429 that clears in seconds) is left an ordinary error: Try again fits it better than another provider. Unverified against live limits: the release's live check confirms them. Handoff brief budgets: Claude Code 100,000 characters, Antigravity 150,000.
 - **Unattended builds:** the sandbox decision runs in this order:
   1. the agent's native sandbox on this OS;
   2. Docker, if it is already installed;

@@ -80,8 +80,6 @@ export const ANTIGRAVITY_DESCRIPTOR: Readonly<AgentDescriptor> = Object.freeze<A
     /\bRESOURCE_EXHAUSTED\b/,
     /\bquota (?:exceeded|exhausted|has been exhausted)\b/i,
     /exhausted your (?:capacity|quota)/i,
-    /\b429\b[^\n]*\bToo Many Requests\b/i,
-    /\brate limit (?:reached|exceeded)\b/i,
   ],
   // Gemini models hold far more context than a brief needs.
   handoffBudgetChars: 150_000,

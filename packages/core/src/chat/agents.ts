@@ -4,7 +4,7 @@
  * and dropping or releasing it. `apply` comes from the turn that starts the
  * agent, so this module never imports the turns.
  */
-import type { Session, SessionId, Workspace } from '@ogden-agents/shared';
+import { redactSecrets, type Session, type SessionId, type Workspace } from '@ogden-agents/shared';
 import { AgentError, type AgentEvent, type AgentRestored, type AgentSession } from '../agent-port.js';
 import { PROTECTED_PATHS } from '../permission-matching.js';
 import { PRIME_NEW_MESSAGE, primedPrompt } from '../resume-prime.js';
@@ -182,7 +182,9 @@ export function createAgents(
     const brief = pendingBrief(sessionId);
     const told = brief === undefined ? text : `${brief}\n${PRIME_NEW_MESSAGE}\n${text}`;
     if (!entry.prime) return { prompt: told, primed: false, handoff: brief !== undefined };
-    const earlier = entities.listCompletedMessages(sessionId).filter((message) => message.messageId !== messageId);
+    const stored = entities.listCompletedMessages(sessionId).filter((message) => message.messageId !== messageId);
+    // After a handoff the transcript may hold another provider's chat: masked like the brief (AD-16).
+    const earlier = brief === undefined ? stored : stored.map((message) => ({ ...message, content: redactSecrets(message.content) }));
     return { prompt: primedPrompt(earlier, told, agentOf(sessionId).displayName), primed: true, handoff: brief !== undefined };
   };
 

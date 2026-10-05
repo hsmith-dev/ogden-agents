@@ -546,3 +546,10 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-every-agent/story-end-to-end-suite-and-release-plan.md`
   summary: Resolved: "A few helper processes still inherit the server's whole environment" (6.5 review, AD-16). Every child process now gets an explicit allowlisted environment: agents their own key only, helpers none (the kill helper, the Windows shortcut script, npm's adapter install and the browser opener were the ones still inheriting; `uv --version` already used `uvEnvironment`).
   evidence: `adapters/src/child-env.ts` (`baseEnvironment`, `helperEnvironment`), `process-tree.ts`, `shortcut-os/windows.ts`, `setup-claude-code/install.ts` `npmEnv`, `server/src/open-url.ts`; tests `adapters/test/child-env.test.ts`, `server/test/open-url.test.ts`, `claude-code-install.test.ts`, `tests/architecture.test.ts` (AD-16 spawn rule), installed `agents-journey.spec.ts` (each agent's environment).
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-continue-a-chat-with-another-agent-plan.md`
+  summary: Bind a handoff POST to the preview the user saw (preview token or matching agent/mode/resumes), so provider disclosure and the stated mode are enforced by the server, not only the dialog.
+  evidence: Security review F8/F9; today any tab-token holder can POST a handoff without a preview, and a mode changed in another tab between preview and confirm is not re-confirmed.
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-continue-a-chat-with-another-agent-plan.md`
+  summary: Handoff hardening: one transaction for the mode fallback and the agent change; budget the whole first prompt (brief + message + resume transcript), not only the brief; make unavailable agents in the dialog focusable with their reason; return focus to "Chat actions" when the dialog opened from the menu closes.
+  evidence: Review F12, F15, F19, F20; all low and not reached in normal use (a session deleted mid-handoff, a resume fallback after switching back, keyboard-only browsing of unavailable agents).
+

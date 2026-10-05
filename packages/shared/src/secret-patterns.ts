@@ -55,21 +55,37 @@ export const CREDENTIAL_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
  * match, except the last, which keeps `NAME=` and masks the value.
  */
 export const TOKEN_PATTERNS: readonly RegExp[] = [
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g,
+  // A private key block; one with no END line takes the whole key-looking lines after it. Bounded, so it stays linear.
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----(?:[\s\S]{0,10000}?-----END [A-Z ]*PRIVATE KEY-----|(?:\r?\n[A-Za-z0-9+/=]{1,100}(?=\r?\n|$)){0,200})/g,
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g,
   /\bgithub_pat_[A-Za-z0-9_]{20,}/g,
   /\bsk-[A-Za-z0-9_-]{20,}/g,
+  /\b(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{10,}/g,
   /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,
   /\bxox[abprs]-[A-Za-z0-9-]{10,}/g,
+  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
+  /\bBasic\s+[A-Za-z0-9+/]{8,}={0,2}/g,
 ];
 
-/** A `NAME=value` or `NAME: value` whose name says it is a secret: the value is masked. */
-const NAMED_SECRET = /\b([A-Za-z0-9_.-]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|ACCESS_?KEY)[A-Za-z0-9_.-]*["']?\s*[=:]\s*)(["']?)[^\s"',;]{6,}\2/gi;
+/** A password in a URL (`scheme://user:password@host`): the password is masked. */
+const URL_PASSWORD = /(:\/\/[^\s/:@]{1,200}:)[^\s/@]{1,200}@/g;
+
+/** A command-line password (`--password value`): the value is masked. */
+const FLAG_PASSWORD = /(--(?:password|passwd|token|secret|api-key)[= ])[^\s"']{1,200}/gi;
+
+/**
+ * A `NAME=value` or `NAME: value` whose name says it is a secret: the value
+ * (quoted with spaces, or a bare run) is masked. Every repeat is bounded and
+ * the name excludes `.` and `-`, so it runs in linear time on any input.
+ */
+const NAMED_SECRET =
+  /\b([A-Za-z0-9_]{0,40}(?:PASSWORD|PASSWD|PASS|PWD|SECRET|TOKEN|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY|CREDENTIALS?)[A-Za-z0-9_]{0,40}["']?[ \t]{0,10}[=:][ \t]{0,10})("[^"\n]{1,200}"|'[^'\n]{1,200}'|[^\s"',;]{4,200})/gi;
 
 /** `text` with every API key ({@link redactApiKeys}), credential, token and named secret value replaced by {@link REDACTED_SECRET}. */
 export function redactSecrets(text: string): string {
   const keys = redactApiKeys(text);
   const credentials = CREDENTIAL_PATTERNS.reduce((out, [pattern, replacement]) => out.replace(pattern, replacement), keys);
   const tokens = TOKEN_PATTERNS.reduce((out, pattern) => out.replace(pattern, REDACTED_SECRET), credentials);
-  return tokens.replace(NAMED_SECRET, (_match, name: string) => `${name}${REDACTED_SECRET}`);
+  const urls = tokens.replace(URL_PASSWORD, `$1${REDACTED_SECRET}@`).replace(FLAG_PASSWORD, `$1${REDACTED_SECRET}`);
+  return urls.replace(NAMED_SECRET, (_match, name: string) => `${name}${REDACTED_SECRET}`);
 }

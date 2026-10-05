@@ -113,6 +113,8 @@ export function createHandoff(ctx: ChatContext, deps: Pick<Agents, 'releaseAgent
     async handOff(workspaceId, sessionId, { agentId, brief, message }) {
       const prepared = await prepare(workspaceId, sessionId, agentId);
       const { current, descriptor, ownSession, resumes, maxChars, permissionMode, modeNote } = prepared;
+      // Far over the budget is refused before any work on it.
+      if (brief.length > maxChars * 2) throw new InvalidOperationError(`The brief is too long for ${descriptor.displayName}: it can be at most ${maxChars} characters.`);
       // Masked again: what the user edited goes to another provider (AD-16).
       const told = redactSecrets(brief).trim();
       if (told.length > maxChars) throw new InvalidOperationError(`The brief is too long for ${descriptor.displayName}: it can be at most ${maxChars} characters.`);

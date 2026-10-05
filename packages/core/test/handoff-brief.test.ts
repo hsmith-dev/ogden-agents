@@ -76,6 +76,23 @@ describe('the handoff brief', () => {
     expect(text).toContain('password: [redacted]');
   });
 
+  it('masks the goal before cutting it, and the other common secret shapes', () => {
+    const token = `ghp_${'q'.repeat(36)}`;
+    const text = brief([
+      created('first-agent'),
+      message('user', `${'x'.repeat(980)} ${token}`),
+      tool('t1', 'Run psql postgres://me:Sup3rS3cret@db/x --password Hunter2pass', 'completed'),
+      message('agent', '{"password": "correct horse battery"} export DB_PASS=abcd1234 sk_live_abcdefghijkl12'),
+    ]);
+    expect(text).not.toMatch(/ghp_q{4}|Sup3rS3cret|Hunter2pass|correct horse|abcd1234|sk_live_/);
+  });
+
+  it('masks in linear time, however the text repeats', () => {
+    const started = Date.now();
+    brief([created('first-agent'), message('user', 'token.'.repeat(20_000)), message('agent', 'x-token-'.repeat(15_000))], { maxChars: 200_000 });
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
   it('keeps the newest messages whole within the budget, cuts older ones to a first line, then counts the rest', () => {
     const events = [created('first-agent')];
     for (let i = 0; i < 40; i++) events.push(message(i % 2 === 0 ? 'user' : 'agent', `Message ${i} heading\n${'detail '.repeat(40)}`));

@@ -105,7 +105,8 @@ export function buildHandoffBrief(input: HandoffBriefInput): string {
   // Completed tool calls only: one still running or that failed changed nothing to carry over.
   const done = [...calls.values()].filter((call) => call.status === 'completed');
   const files = [...new Set(done.flatMap((call) => call.paths.map((path) => projectRelative(path, projectPath))))];
-  const actions = done.filter((call) => call.title.trim() !== '').map((call) => cut(call.title.trim(), MAX_ACTION_CHARS));
+  // Masked before they are cut, so a cut never leaves part of a secret too short to be recognized.
+  const actions = done.filter((call) => call.title.trim() !== '').map((call) => cut(mask(call.title.trim()), MAX_ACTION_CHARS));
 
   const head: string[] = [
     sinceSeq === undefined
@@ -113,7 +114,7 @@ export function buildHandoffBrief(input: HandoffBriefInput): string {
       : `${HANDOFF_HEADER} you are back in this chat. It went on with ${fromName} while you were away; here is what happened since.`,
     `Project folder: ${projectPath}`,
   ];
-  if (goal !== undefined) head.push(`Original goal: ${cut(goal.trim(), MAX_GOAL_CHARS)}`);
+  if (goal !== undefined) head.push(`Original goal: ${cut(mask(goal.trim()), MAX_GOAL_CHARS)}`);
   const listed = (items: string[], max: number) => {
     const shown = items.slice(-max);
     return shown.join('; ') + (items.length > shown.length ? ` (and ${items.length - shown.length} more)` : '');

@@ -27,13 +27,12 @@ export const CLAUDE_CODE_DESCRIPTOR: Readonly<AgentDescriptor> = Object.freeze<A
   needsProjectTrust: false,
   skillsFolder: '.claude/skills',
   // How Claude Code says a plan's or the API's limit was reached (its prompt fails with the text; handoff, 2026-10-04).
-  // Narrow on purpose: a miss is an ordinary error. The user's live check confirms them.
+  // Narrow on purpose: a miss is an ordinary error, and a short rate limit (an API 429) is not a usage limit.
+  // The user's live check confirms them.
   usageLimitPatterns: [
     /usage limit (?:reached|exceeded)/i,
     /\b(?:5-hour|five-hour|session|weekly|opus|sonnet) limit (?:reached|exceeded)/i,
     /you(?:'|’)ve (?:hit|reached) your (?:usage |weekly |session )?limit/i,
-    /\brate_limit_error\b/,
-    /\bAPI Error: 429\b/i,
   ],
   // Its context holds about 200,000 tokens; the brief takes a modest share of it.
   handoffBudgetChars: 100_000,

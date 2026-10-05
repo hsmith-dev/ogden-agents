@@ -33,7 +33,7 @@ export class EndpointError extends Error {
   override readonly name = 'EndpointError';
   constructor(
     readonly kind: EndpointFailureKind,
-    readonly details: { status?: number; code?: string } = {},
+    readonly details: { status?: number; code?: string; apiCode?: string } = {},
   ) {
     super(`endpoint ${kind}`);
   }
@@ -104,8 +104,10 @@ export async function callEndpoint(call: EndpointCall, path: string, init: { met
       throw new EndpointError('key_refused', { status: response.status });
     }
     if (!response.ok) {
-      void response.body?.cancel().catch(() => {});
-      throw new EndpointError('http', { status: response.status });
+      // The server's own error code (a short token such as `model_not_found`), read to tell a missing model or a full context
+      // from other errors. Its message is never kept or shown.
+      const apiCode = await errorCodeOf(response);
+      throw new EndpointError('http', { status: response.status, ...(apiCode === undefined ? {} : { apiCode }) });
     }
     const text = await readLimited(response, call.maxBytes ?? DEFAULT_MAX_BYTES);
     try {
@@ -120,6 +122,21 @@ export async function callEndpoint(call: EndpointCall, path: string, init: { met
   } finally {
     clearTimeout(timer);
     call.signal?.removeEventListener('abort', onAbort);
+  }
+}
+
+/** The `error.code` (or `error.type`) of a failed answer when it is a short token; the answer is read to at most 8 KB. */
+async function errorCodeOf(response: Response): Promise<string | undefined> {
+  try {
+    const text = await readLimited(response, 8 * 1024);
+    const body = JSON.parse(text) as { error?: { code?: unknown; type?: unknown; message?: unknown } };
+    const code = typeof body.error?.code === 'string' ? body.error.code : typeof body.error?.type === 'string' ? body.error.type : undefined;
+    if (code !== undefined && /^[A-Za-z0-9_.-]{1,60}$/.test(code)) return code;
+    // Some servers give only a message: a context error is recognised by it, never kept.
+    const message = typeof body.error?.message === 'string' ? body.error.message : '';
+    return /context length|context_length|maximum context|too many tokens/i.test(message) ? 'context_length_exceeded' : undefined;
+  } catch {
+    return undefined;
   }
 }
 

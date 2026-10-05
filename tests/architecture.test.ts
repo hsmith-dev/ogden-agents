@@ -467,3 +467,38 @@ describe('AD-10: only an approved merge marks a ticket done (story 5.9)', () => 
     expect(approvers()).toEqual(['core/builds.ts']);
   });
 });
+
+/** The programs a terminal pane may launch (epic 16): launchers are data in the adapters, so the neutral packages name none, not even by executable name. */
+const PANE_PROGRAM_NAMES = ['claude', 'codex', 'grok', 'gemini', 'agy', 'copilot', 'antigravity'] as const;
+
+/** One message per mention of a program name in code (comments allowed to give examples) of a neutral pane file, or of `acp-base`. */
+export function findPaneProgramViolations(files: readonly SourceFile[]): string[] {
+  const named = new RegExp(`(?<![A-Za-z0-9_-])(${PANE_PROGRAM_NAMES.join('|')})(?![A-Za-z0-9_-])`, 'gi');
+  const violations: string[] = [];
+  for (const { pkg, path, source } of files) {
+    const neutral = ((pkg === '@ogden-agents/core' || pkg === '@ogden-agents/shared') && /(^|[\\/])(panes?|events-panes|terminal-port)\.ts$/.test(path)) || /[\\/]acp-base[\\/]/.test(path);
+    if (!neutral) continue;
+    for (const match of withoutComments(source).matchAll(named)) violations.push(`${path}: names the program ${match[1]} (epic 16: launchers are data in the adapters)`);
+  }
+  return violations;
+}
+
+describe('epic 16: core, shared and acp-base name no pane program', () => {
+  it('the pane contracts and use-cases name none', () => {
+    const files = loadWorkspaceSources();
+    expect(files.some((file) => /panes\.ts$/.test(file.path))).toBe(true);
+    expect(findPaneProgramViolations(files)).toEqual([]);
+  });
+
+  it('flags a program name in code, but not in a comment or a longer word', () => {
+    const files: SourceFile[] = [
+      { pkg: '@ogden-agents/core', path: 'core/src/panes.ts', source: "const file = 'claude';\n// codex is only an example\nconst x = 'codex-like';" },
+      { pkg: '@ogden-agents/shared', path: 'shared/src/panes.ts', source: 'const a = `run grok`;' },
+      { pkg: '@ogden-agents/adapters', path: 'adapters/src/pane-launchers/index.ts', source: "const id = 'claude';" },
+    ];
+    expect(findPaneProgramViolations(files)).toEqual([
+      'core/src/panes.ts: names the program claude (epic 16: launchers are data in the adapters)',
+      'shared/src/panes.ts: names the program grok (epic 16: launchers are data in the adapters)',
+    ]);
+  });
+});

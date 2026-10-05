@@ -24,7 +24,16 @@ import { pinnedGrokVersion } from './install.js';
  * rules and instructions): the trust is bound to their contents, so a change asks again (epic 12, 12.3).
  * Not `.claude` as a whole: BMad setup writes skills there.
  */
-export const GROK_PROJECT_FILES: readonly string[] = ['.claude/settings.json', '.claude/settings.local.json', '.mcp.json', '.grok', '.cursor/hooks.json'];
+export const GROK_PROJECT_FILES: readonly string[] = [
+  '.claude/settings.json',
+  '.claude/settings.local.json',
+  '.claude/hooks',
+  '.claude/commands',
+  '.claude/agents',
+  '.mcp.json',
+  '.grok',
+  '.cursor/hooks.json',
+];
 
 export const GROK_DESCRIPTOR: Readonly<AgentDescriptor> = Object.freeze<AgentDescriptor>({
   agentId: GROK_AGENT_ID,
@@ -47,7 +56,7 @@ export const GROK_DESCRIPTOR: Readonly<AgentDescriptor> = Object.freeze<AgentDes
   // Grok follows the project's own `.claude/settings.json`, hooks and `.mcp.json`: a chat starts only in a project the user trusted.
   needsProjectTrust: true,
   projectFiles: GROK_PROJECT_FILES,
-  // Its own config folder joins the protected paths (an edit there is always a card), beside `.agents`, which is already protected.
+  // Its own config folder joins the protected paths (an edit there is a card in Ask; Skip all runs without cards by design), beside `.agents`, which is already protected.
   configFolders: ['.grok'],
   // Grok reads `.claude/skills` (BMad's skills are already placed there for Claude Code) as well as `.grok/skills` and `.agents/skills`.
   skillsFolder: '.claude/skills',

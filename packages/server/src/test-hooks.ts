@@ -60,6 +60,11 @@
  *   adapter and the real Codex are never run in a test). It also registers
  *   Codex in a shipped-style server, which otherwise leaves it out.
  *
+ * - {@link GROK_SERVER_ENV}: a Node script inside the temp folder plays
+ *   Grok's `grok agent stdio` (epic 12 entry 7), so a suite can chat with Grok
+ *   through the fake agent's Grok personality (the real Grok is never run in a
+ *   test). It also registers Grok in a shipped-style server, which otherwise leaves it out.
+ *
  * - {@link CODEX_INSTALL_ENV}: Codex's Install takes its pins (and npm) from a
  *   JSON file inside the temp folder, as {@link CLAUDE_INSTALL_ENV} does for
  *   Claude Code, so a suite can install Codex from a local fixture lock.
@@ -118,6 +123,8 @@ export const ANTIGRAVITY_SERVER_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_SERVER';
 export const ANTIGRAVITY_INSTALL_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_INSTALL';
 /** Path to a JSON file `{ "pins": { "packageJson", "lock" }, "npmCli"?: "<abs>/npm-cli.js" }` for Codex's install, local `file:` fixtures only (tests only; epic 12 entry 6). */
 export const CODEX_INSTALL_ENV = 'OGDEN_AGENTS_TEST_CODEX_INSTALL';
+/** Absolute path to a Node script inside the temp folder, run under Node in place of Grok's checked binary (tests only; epic 12 entry 7). */
+export const GROK_SERVER_ENV = 'OGDEN_AGENTS_TEST_GROK_SERVER';
 /** Absolute path to a Node script inside the temp folder, run under Node as Codex's `codex-acp` adapter (tests only; epic 12 entry 5). */
 export const CODEX_SERVER_ENV = 'OGDEN_AGENTS_TEST_CODEX_SERVER';
 /** Absolute path to a Node script inside the temp folder, registered as a test agent that needs a trusted project (tests only; epic 6 entry 10). */
@@ -339,6 +346,11 @@ export function testCodexServer(env: Env, dataDir: string, tmp: string = tmpdir(
   return testNodeScript(CODEX_SERVER_ENV, env, dataDir, tmp);
 }
 
+/** The Node script {@link GROK_SERVER_ENV} names (see {@link testClaudeCli}), or `undefined` (Grok's checked binary); throws when allowed but unusable. */
+export function testGrokServer(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
+  return testNodeScript(GROK_SERVER_ENV, env, dataDir, tmp);
+}
+
 /** The trust-needing test agent's script from {@link TRUST_AGENT_ENV} (see {@link testClaudeCli}), or `undefined`; throws when allowed but unusable. */
 export function testTrustAgent(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
   return testNodeScript(TRUST_AGENT_ENV, env, dataDir, tmp);
@@ -456,7 +468,7 @@ export function checkInDelayFromEnv(env: Env, dataDir: string, tmp: string = tmp
 }
 
 /** The `start()` options that decide a hook themselves, and whether `start()` opens its own core. */
-export type TestHookOptions = Pick<StartOptions, 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'codex' | 'extraAgents' | 'sandbox'> & {
+export type TestHookOptions = Pick<StartOptions, 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'codex' | 'grok' | 'extraAgents' | 'sandbox'> & {
   /** `false` for a core passed in, which already holds its own BMad pieces: {@link BMAD_AVAILABLE_ENV} is not read. */
   ownsCore: boolean;
   tmp?: string;
@@ -471,6 +483,7 @@ export interface TestHooks {
   antigravityInstall: TestAntigravityInstall | undefined;
   codexServer: string | undefined;
   codexInstall: TestClaudeInstall | undefined;
+  grokServer: string | undefined;
   trustAgent: string | undefined;
   bmadProbe: boolean;
   bmadAvailable: BmadPieceName[];
@@ -500,6 +513,8 @@ export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOpt
     // Codex's ports given (or left out) by a test decide it: the hook is not read.
     codexServer: options.codex === undefined ? testCodexServer(env, dataDir, tmp) : undefined,
     codexInstall: options.codex === undefined ? testCodexInstall(env, dataDir, tmp) : undefined,
+    // Grok's ports given (or left out) by a test decide it: the hook is not read.
+    grokServer: options.grok === undefined ? testGrokServer(env, dataDir, tmp) : undefined,
     // Agents a test registers decide it: the hook is not read.
     trustAgent: options.extraAgents === undefined ? testTrustAgent(env, dataDir, tmp) : undefined,
     bmadProbe: testBmadProbe(env, dataDir, tmp),
@@ -525,6 +540,7 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     hooks.antigravityInstall !== undefined ||
     hooks.codexServer !== undefined ||
     hooks.codexInstall !== undefined ||
+    hooks.grokServer !== undefined ||
     hooks.trustAgent !== undefined ||
     hooks.bmadProbe ||
     hooks.bmadAvailable.length > 0 ||
@@ -540,6 +556,7 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     antigravityInstall: hooks.antigravityInstall !== undefined,
     codexServer: hooks.codexServer !== undefined,
     codexInstall: hooks.codexInstall !== undefined,
+    grokServer: hooks.grokServer !== undefined,
     trustAgent: hooks.trustAgent !== undefined,
     bmadProbe: hooks.bmadProbe,
     bmadAvailable: hooks.bmadAvailable.join(','),

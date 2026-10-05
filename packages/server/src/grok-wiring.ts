@@ -18,13 +18,21 @@ export interface GrokPorts {
 
 export function grokWiring(input: {
   dataDir: string;
+  /** The script a test runs in place of Grok's checked binary (`OGDEN_AGENTS_TEST_GROK_SERVER`), under this Node. */
+  serverScript?: string | undefined;
   given?: GrokPorts | undefined;
   /** Protocol notes for the log; never the environment, stderr or the agent's messages. */
   onDiagnostic?: (message: string, fields?: Record<string, unknown>) => void;
 }): AgentWiring {
   return {
     descriptor: GROK_DESCRIPTOR,
-    agent: input.given?.agent ?? createGrokAgent({ dataDir: input.dataDir, onDiagnostic: input.onDiagnostic }),
+    agent:
+      input.given?.agent ??
+      createGrokAgent({
+        dataDir: input.dataDir,
+        ...(input.serverScript === undefined ? {} : { server: () => ({ command: process.execPath, args: [input.serverScript!] }) }),
+        onDiagnostic: input.onDiagnostic,
+      }),
     setup: input.given?.setup ?? createGrokSetup(),
   };
 }

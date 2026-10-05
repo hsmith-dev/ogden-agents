@@ -233,7 +233,7 @@
 // (as the real agent did in the probe); "permission <command>" offers
 // `allow_once`, `allow_always`, `reject_once` and `reject_always`; "env" replies
 // `GROK_FOLDER_TRUST=<v> GROK_DISABLE_AUTOUPDATER=<v> key=<last 4 or none>`;
-// "skills" replies the folders of `.claude/skills` it sees, none unless
+// "meta" replies `meta=<the _meta its session opened with>`; "skills" replies the folders of `.claude/skills` it sees, none unless
 // GROK_FOLDER_TRUST is `0` (its own folder trust skips project skills otherwise).
 //
 // Antigravity's personality (epic 6 entry 5; spike 6.1's shapes), set by the
@@ -941,7 +941,7 @@ async function runPrompt(params, client, session) {
         return { stopReason: 'cancelled' };
       }
       await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: ran ? 'completed' : 'failed' });
-      await say(client, params.sessionId, `${ran ? 'Ran' : 'Denied'} ${command}.${ANTIGRAVITY || REJECT_OPTIONS ? ` chose=${chosen}` : ''}`);
+      await say(client, params.sessionId, `${ran ? 'Ran' : 'Denied'} ${command}.${ANTIGRAVITY || GROK || REJECT_OPTIONS ? ` chose=${chosen}` : ''}`);
       return { stopReason: 'end_turn' };
     }
     if (text === 'tool') {
@@ -985,6 +985,10 @@ async function runPrompt(params, client, session) {
     if (GROK && text === 'env') {
       const key = process.env.XAI_API_KEY;
       await say(client, params.sessionId, `GROK_FOLDER_TRUST=${process.env.GROK_FOLDER_TRUST ?? '(unset)'} GROK_DISABLE_AUTOUPDATER=${process.env.GROK_DISABLE_AUTOUPDATER ?? '(unset)'} key=${key ? key.slice(-4) : 'none'}`);
+      return { stopReason: 'end_turn' };
+    }
+    if (GROK && text === 'meta') {
+      await say(client, params.sessionId, `meta=${JSON.stringify(session.opened._meta ?? null)}`);
       return { stopReason: 'end_turn' };
     }
     if (GROK && text === 'skills') {

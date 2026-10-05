@@ -37,6 +37,8 @@ import { isServerPath } from './paths.js';
 import { registerPermissionRoutes } from './permission-routes.js';
 import { registerPlanningRoutes } from './planning-routes.js';
 import { registerBuildRoutes } from './build-routes.js';
+import { registerUpdateRoutes } from './update-routes.js';
+import type { UpdateCheck } from './update-check.js';
 import { registerSettingsRoutes } from './settings-routes.js';
 import { registerShortcutRoutes } from './shortcut-routes.js';
 import type { TerminalAvailabilityCheck } from './terminal-availability.js';
@@ -133,6 +135,8 @@ export interface AppOptions {
   newProjectDefaults?: NewProjectDefaultsStore;
   /** Developer mode, kept and enforced by core (permission modes); without it its routes answer 501. */
   installSettings?: InstallSettings;
+  /** The "newer version" notice (story 13.7); without it its routes answer 501. */
+  updates?: UpdateCheck;
   /** Each agent's install-wide default model (story 11), and whether an agent is registered: `PUT` default model. */
   agentDefaults?: { models: Pick<AgentModels, 'setDefaultModel'>; isAgentRegistered: (agentId: string) => boolean };
   /** The Ogden Agents app shortcut (E2-R10; the `shortcut-memory` stub until 2.4). */
@@ -167,6 +171,7 @@ export function createApp({
   onboarding,
   newProjectDefaults,
   installSettings,
+  updates,
   agentDefaults,
   appShortcut,
   tabs,
@@ -267,6 +272,7 @@ export function createApp({
   // Unattended builds (story 5.2): the same helper, guard and trust.
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerBuildRoutes(app, { bmad, scriptTrust: bmadScriptTrust, builds, log });
   registerSettingsRoutes(app, { installSettings, newProjectDefaults, log });
+  registerUpdateRoutes(app, { updates });
 
   registerEventSocket(app, { events, log, tabs });
   // A session's terminal (story 3.1): behind the same gate as `/ws`.

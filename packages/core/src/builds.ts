@@ -102,7 +102,7 @@ import { isProtectedSegment, PROTECTED_PATHS } from './permission-matching.js';
 import { workspaceRepoPath } from './planning.js';
 import { serializedByRepo } from './repo-serialization.js';
 import type { AgentSandbox, SandboxPort } from './sandbox-port.js';
-import type { TicketStorePort } from './ticket-store-port.js';
+import type { TicketRunGuard, TicketStorePort } from './ticket-store-port.js';
 import type { VcsPort } from './vcs-port.js';
 
 export { BUILD_PERMISSION_DENIED };
@@ -240,13 +240,13 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
   };
 
   /** The guards in board's order (the piece, the trust, the pinned BMad Method, the scripts unchanged), then the repo. */
-  const guarded = async (workspaceId: WorkspaceId): Promise<string> => {
+  const guarded = async (workspaceId: WorkspaceId): Promise<{ repoPath: string; guard: TicketRunGuard }> => {
     bmad.requireBmadFeature(workspaceId, 'builds');
     trust.requireScriptsTrusted(workspaceId);
     source.requireReady();
     const repoPath = workspaceRepoPath(entities, workspaceId);
-    await trust.requireScriptsUnchanged(workspaceId);
-    return repoPath;
+    const scripts = await trust.requireScriptsUnchanged(workspaceId);
+    return { repoPath, guard: { scripts } };
   };
 
   /** Throws `plan_uncommitted` when the ticket's plan or a `tickets.toml` above it has uncommitted changes. */
@@ -280,9 +280,10 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     const check = await sandbox.check();
     if (!check.available) throw new BuildRefusedError('sandbox_unavailable', `${SANDBOX_UNAVAILABLE_MESSAGE} ${check.reason}`.trim());
     if (entities.activeRunForTicket(workspaceId, ref) !== undefined) throw new BuildRefusedError('run_active', RUN_ACTIVE_MESSAGE);
-    const ticket = await tickets.find(repoPath, ref);
+    const { guard } = await guarded(workspaceId);
+    const ticket = await tickets.find(repoPath, ref, guard);
     if ((ticket.status ?? '') !== READY_STATUS) throw new BuildRefusedError('not_ready', NOT_READY_MESSAGE);
-    if (ticket.after.length > 0 && !prerequisitesMet(ticket, await tickets.tree(repoPath))) throw new BuildRefusedError('prerequisite_unmet', PREREQUISITE_UNMET_MESSAGE);
+    if (ticket.after.length > 0 && !prerequisitesMet(ticket, await tickets.tree(repoPath, guard))) throw new BuildRefusedError('prerequisite_unmet', PREREQUISITE_UNMET_MESSAGE);
     // The project must be its repository's top folder: a worktree is of the whole repository.
     const top = await vcs.topLevel(repoPath);
     if (top === undefined) throw new BuildRefusedError('vcs_unavailable', VCS_UNAVAILABLE_MESSAGE);
@@ -347,8 +348,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     let reason: string | null = null;
     try {
       // The agent may have edited the worktree's scripts: they must be the trusted ones before `tickets.py` runs there.
-      await trust.requireScriptsMatch(run.workspaceId, run.worktreePath);
-      const ticket = await tickets.find(run.worktreePath, run.ticketRef);
+      const scripts = await trust.requireScriptsMatch(run.workspaceId, run.worktreePath);
+      const ticket = await tickets.find(run.worktreePath, run.ticketRef, { scripts });
       const status = ticket.status ?? '';
       if (status === 'built') {
         const changes = run.branch === null || run.baseRevision === null ? undefined : await vcs.diff(repoPath, run.baseRevision, run.branch, { maxBytes: 1 });
@@ -429,7 +430,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
 
   return {
     async start(workspaceId, request) {
-      const repoPath = await guarded(workspaceId);
+      const { repoPath } = await guarded(workspaceId);
       const parsed = StartBuildRequest.safeParse(request);
       if (!parsed.success) {
         const issue = parsed.error.issues[0];
@@ -440,25 +441,25 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     },
 
     async review(workspaceId, ref) {
-      const repoPath = await guarded(workspaceId);
+      const { repoPath } = await guarded(workspaceId);
       return reviewOf(repoPath, latestRun(workspaceId, checkedRef(ref)));
     },
 
     async approve(workspaceId, ref, request) {
-      const repoPath = await guarded(workspaceId);
+      const { repoPath } = await guarded(workspaceId);
       const checked = checkedRef(ref);
       const parsed = ApproveBuildRequest.safeParse(request);
       if (!parsed.success) throw new ValidationError('Say which revision you reviewed.', parsed.error.issues.map((each) => ({ path: each.path, message: each.message })));
       const reviewed = parsed.data.revision;
       // One operation per repo, shared with the board's marks (review loop 1).
       return serializedByRepo(repoPath, async () => {
-        await guarded(workspaceId);
+        const { guard } = await guarded(workspaceId);
         const run = latestRun(workspaceId, checked);
         if (run.outcome !== 'verified' || run.branch === null || !isBuildBranch(run.branch)) throw new BuildRefusedError('checks_failed', CHECKS_FAILED_MESSAGE);
         if (await vcs.isMerged(repoPath, run.branch)) throw new BuildRefusedError('checks_failed', ALREADY_MERGED_MESSAGE);
         // Exactly what the user reviewed: the branch must still point at it.
         if ((await vcs.branchRevision(repoPath, run.branch)) !== reviewed) throw new BuildRefusedError('checks_failed', REVIEW_STALE_MESSAGE);
-        const { plan } = await tickets.find(repoPath, checked);
+        const { plan } = await tickets.find(repoPath, checked, guard);
         await requireCleanCheckout(repoPath, plan);
         await chat.releaseAgent(workspaceId, run.sessionId).catch((error: unknown) => report(run.id, 'release', error));
         const merged = await vcs.merge(repoPath, reviewed);
@@ -471,10 +472,10 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         let marked = false;
         try {
           // The merged scripts must still be the ones the user trusted before `tickets.py` runs (AD-22 note, story 5.2).
-          await trust.requireScriptsUnchanged(workspaceId);
-          await tickets.mark(repoPath, checked, 'done', { approve: true });
+          const scripts = await trust.requireScriptsUnchanged(workspaceId);
+          await tickets.mark(repoPath, checked, 'done', { scripts }, { approve: true });
           marked = true;
-          const after = (await tickets.find(repoPath, checked)).plan ?? plan;
+          const after = (await tickets.find(repoPath, checked, { scripts })).plan ?? plan;
           if (after !== null) await vcs.add(repoPath, [after]);
           await vcs.commit(repoPath, `Merge ${run.branch}: ticket ${checked} done\n\nApproved in Ogden Agents.`);
         } catch (error) {
@@ -489,7 +490,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     },
 
     async reject(workspaceId, ref) {
-      const repoPath = await guarded(workspaceId);
+      const { repoPath } = await guarded(workspaceId);
       const checked = checkedRef(ref);
       return serializedByRepo(repoPath, async () => {
         await guarded(workspaceId);

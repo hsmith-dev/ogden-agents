@@ -90,7 +90,7 @@ function fakeTickets(repoPath: string) {
       calls.push(['find', path, ref]);
       return detail(path, TICKETS.find((ticket) => ticket.ref === ref)!);
     },
-    async mark(path, ref, status, options = {}) {
+    async mark(path, ref, status, _guard, options = {}) {
       calls.push(['mark', path, ref, status, options.approve === true]);
       statusIn(path).set(ref, status);
       return { ref, status };

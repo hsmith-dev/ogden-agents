@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import type { TicketWatch } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { changedTicketRefs, createTicketsV7, ScriptRunError, type UvScriptRunner } from '../src/index.js';
+import { fakeSnapshot, GUARD, WATCH_GUARD } from './snapshot-fake.js';
 
 const dirs: string[] = [];
 const watches: TicketWatch[] = [];
@@ -75,7 +76,7 @@ const TIMING = { debounceMs: 30, maxWaitMs: 150, pollMs: 100, confirmMs: 100 };
 
 async function watched(repo: string, store: ReturnType<typeof createTicketsV7>, outputFolder = '_bmad-output') {
   const changes: string[][] = [];
-  const watch = await store.watch(repo, outputFolder, (refs) => changes.push(refs));
+  const watch = await store.watch(repo, outputFolder, (refs) => changes.push(refs), WATCH_GUARD);
   watches.push(watch);
   return { watch, changes };
 }
@@ -86,14 +87,14 @@ describe('tickets-v7 watch (story 4.8)', () => {
   it('reports only the changed refs; an identical rerun reports nothing; tree always runs', async () => {
     const repo = tempRepo();
     const { state, runner } = fakeRunner();
-    const store = createTicketsV7({ runner, script: () => '/x/tickets.py', workDir: repo, watchTiming: TIMING });
+    const store = createTicketsV7({ runner, snapshot: fakeSnapshot, script: () => '/x/tickets.py', workDir: repo, watchTiming: TIMING });
     const { changes } = await watched(repo, store);
     expect(state.runs).toBe(1);
     expect(changes).toEqual([]);
 
     // The watch's tree is never served: tree runs the script each time.
     await sleep(250);
-    expect((await store.tree(repo)).tickets.map((each) => [each.ref, each.status])).toEqual([
+    expect((await store.tree(repo, GUARD)).tickets.map((each) => [each.ref, each.status])).toEqual([
       ['1.1', 'draft'],
       ['1.2', ''],
     ]);
@@ -103,7 +104,7 @@ describe('tickets-v7 watch (story 4.8)', () => {
     touch(repo, 'status: in-progress\n');
     await waitFor(() => changes.length === 1, 'the change');
     expect(changes).toEqual([['1.1']]);
-    expect((await store.tree(repo)).tickets[0]!.status).toBe('in-progress');
+    expect((await store.tree(repo, GUARD)).tickets[0]!.status).toBe('in-progress');
 
     // Added and removed rows are reported too.
     state.tickets = [row('1.1', 'in-progress'), row('1.3', '')];
@@ -122,7 +123,7 @@ describe('tickets-v7 watch (story 4.8)', () => {
   it('reads one at a time: changes during a read run one more after it', async () => {
     const repo = tempRepo();
     const { state, runner } = fakeRunner();
-    const store = createTicketsV7({ runner, script: () => '/x/tickets.py', workDir: repo, watchTiming: TIMING });
+    const store = createTicketsV7({ runner, snapshot: fakeSnapshot, script: () => '/x/tickets.py', workDir: repo, watchTiming: TIMING });
     const { changes } = await watched(repo, store);
     let release!: () => void;
     state.gate = new Promise((resolve) => (release = resolve));
@@ -135,7 +136,7 @@ describe('tickets-v7 watch (story 4.8)', () => {
     touch(repo, 'ccc\n');
     await sleep(120);
     // tree runs its own read, alongside the held one.
-    const treeRead = store.tree(repo);
+    const treeRead = store.tree(repo, GUARD);
     release();
     state.gate = undefined;
     await treeRead;
@@ -151,7 +152,7 @@ describe('tickets-v7 watch (story 4.8)', () => {
     const repo = tempRepo();
     const failures: string[] = [];
     const { state, runner } = fakeRunner();
-    const store = createTicketsV7({ runner, script: () => '/x/tickets.py', workDir: repo, watchTiming: TIMING, onFailure: (error) => failures.push(error instanceof ScriptRunError ? error.code : error.reason) });
+    const store = createTicketsV7({ runner, snapshot: fakeSnapshot, script: () => '/x/tickets.py', workDir: repo, watchTiming: TIMING, onFailure: (error) => failures.push(error instanceof ScriptRunError ? error.code : error.reason) });
     const { changes } = await watched(repo, store);
     state.fail = true;
     state.tickets = [row('1.1', 'blocked'), row('1.2', '')];
@@ -160,7 +161,7 @@ describe('tickets-v7 watch (story 4.8)', () => {
     await sleep(50);
     expect(changes).toEqual([]);
     expect(failures).toEqual(['failed']);
-    await expect(store.tree(repo)).rejects.toThrow();
+    await expect(store.tree(repo, GUARD)).rejects.toThrow();
     state.fail = false;
     touch(repo, 'xy\n');
     await waitFor(() => changes.length === 1, 'the retry');
@@ -171,7 +172,7 @@ describe('tickets-v7 watch (story 4.8)', () => {
     const repo = tempRepo();
     const { state, runner } = fakeRunner();
     state.fail = true;
-    const store = createTicketsV7({ runner, script: () => '/x/tickets.py', workDir: repo, watchTiming: TIMING });
+    const store = createTicketsV7({ runner, snapshot: fakeSnapshot, script: () => '/x/tickets.py', workDir: repo, watchTiming: TIMING });
     const { changes } = await watched(repo, store);
     state.fail = false;
     touch(repo, 'y\n');
@@ -182,7 +183,7 @@ describe('tickets-v7 watch (story 4.8)', () => {
   it('a ref that is not a ticket ref is never reported', async () => {
     const repo = tempRepo();
     const { state, runner } = fakeRunner();
-    const store = createTicketsV7({ runner, script: () => '/x/tickets.py', workDir: repo, watchTiming: TIMING });
+    const store = createTicketsV7({ runner, snapshot: fakeSnapshot, script: () => '/x/tickets.py', workDir: repo, watchTiming: TIMING });
     const { changes } = await watched(repo, store);
     state.tickets = [row('1.1', 'built'), { ...row('1.2', ''), ref: '--force' }];
     touch(repo, 'r\n');
@@ -195,7 +196,7 @@ describe('tickets-v7 watch (story 4.8)', () => {
   it('a missing output folder inside the repo is watched until it appears', async () => {
     const repo = tempRepo();
     const { state, runner } = fakeRunner();
-    const store = createTicketsV7({ runner, script: () => '/x/tickets.py', workDir: repo, watchTiming: TIMING });
+    const store = createTicketsV7({ runner, snapshot: fakeSnapshot, script: () => '/x/tickets.py', workDir: repo, watchTiming: TIMING });
     const { changes } = await watched(repo, store, 'later/_bmad-output');
     expect(state.runs).toBe(1);
     state.tickets = [row('1.1', 'in-progress'), row('1.2', '')];
@@ -212,7 +213,7 @@ describe('tickets-v7 watch (story 4.8)', () => {
     symlinkSync(outside, join(repo, 'out-link'), process.platform === 'win32' ? 'junction' : 'dir');
     writeFileSync(join(repo, 'a-file'), 'x');
     const { state, runner } = fakeRunner();
-    const store = createTicketsV7({ runner, script: () => '/x/tickets.py', workDir: repo, watchTiming: TIMING });
+    const store = createTicketsV7({ runner, snapshot: fakeSnapshot, script: () => '/x/tickets.py', workDir: repo, watchTiming: TIMING });
     mkdirSync(join(repo, '.git'));
     for (const folder of ['../', '..', outside, '../missing', 'a-file', 'out-link', 'out-link/missing', '', '.', '.git', '.git/out', 'x/.git/out']) {
       await expect(store.watch(repo, folder, () => {}), folder).rejects.toThrow();
@@ -223,7 +224,7 @@ describe('tickets-v7 watch (story 4.8)', () => {
   it('close stops it: nothing is reported or run after, and a repeat is harmless', async () => {
     const repo = tempRepo();
     const { state, runner } = fakeRunner();
-    const store = createTicketsV7({ runner, script: () => '/x/tickets.py', workDir: repo, watchTiming: TIMING });
+    const store = createTicketsV7({ runner, snapshot: fakeSnapshot, script: () => '/x/tickets.py', workDir: repo, watchTiming: TIMING });
     const { watch, changes } = await watched(repo, store);
     state.tickets = [row('1.1', 'done'), row('1.2', '')];
     touch(repo, 'z\n');
@@ -248,7 +249,7 @@ describe('the watch checks before each read (story 4.13: the script trust bound 
   it('runs nothing while beforeRun refuses, keeps the last tree, and reads again once it passes', async () => {
     const repo = tempRepo();
     const { state, runner } = fakeRunner();
-    const store = createTicketsV7({ runner, script: () => '/verified/tickets.py', workDir: repo, watchTiming: TIMING });
+    const store = createTicketsV7({ runner, snapshot: fakeSnapshot, script: () => '/verified/tickets.py', workDir: repo, watchTiming: TIMING });
     let allowed = true;
     let checks = 0;
     const changes: string[][] = [];
@@ -256,6 +257,7 @@ describe('the watch checks before each read (story 4.13: the script trust bound 
       beforeRun: async () => {
         checks++;
         if (!allowed) throw new Error('scripts_changed');
+        return GUARD;
       },
     });
     watches.push(watch);

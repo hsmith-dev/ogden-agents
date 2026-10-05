@@ -16,4 +16,6 @@ export * from './setup.js';
 export * from './time.js';
 export * from './tab-token.js';
 export * from './terminal.js';
+export * from './updates.js';
 export * from './toolchain.js';
+export * from './release-source.js';

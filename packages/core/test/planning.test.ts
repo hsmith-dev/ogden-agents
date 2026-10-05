@@ -153,7 +153,7 @@ async function setup(
       if (ref !== '1.1') throw new NotFoundError('ticket', ref);
       return { ...TICKETS.tickets[0]!, description: '', verify: '', references: [], notes: [], unknown: '', hasPlan: false, plan: null };
     },
-    mark: async (repoPath, ref, status, options) => {
+    mark: async (repoPath, ref, status, _guard, options) => {
       marks.push([repoPath, ref, status, options]);
       return { ref, status };
     },
@@ -371,12 +371,14 @@ describe('changing a status from the board (story 4.10)', () => {
     const base = await setup();
     const log: string[] = [];
     let status = '';
+    const guards: string[] = [];
     const releases: Array<() => void> = [];
     const store: TicketStorePort = {
       tree: () => Promise.reject(new Error('unused')),
       find: () => Promise.reject(new Error('unused')),
       watch: () => Promise.reject(new Error('unused')),
-      mark: async (_repoPath, ref, next, options = {}) => {
+      mark: async (_repoPath, ref, next, guard, options = {}) => {
+        guards.push(guard.scripts);
         log.push(`start ${next}`);
         await new Promise<void>((resolve) => releases.push(resolve));
         try {
@@ -391,7 +393,7 @@ describe('changing a status from the board (story 4.10)', () => {
     };
     const board = createBoard({ bmad: base.core.bmad, trust: base.core.bmadScriptTrust, source: createBmadSource(fakeSource(true)), entities: base.core.entities, catalog: capabilityCatalog().catalog, tickets: store });
     const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
-    return { ...base, board, log, releases, flush, statusNow: () => status };
+    return { ...base, board, log, releases, guards, flush, statusNow: () => status };
   }
 
   it('runs two marks of one repo one after the other, and a failed mark does not break the chain', async () => {
@@ -407,6 +409,15 @@ describe('changing a status from the board (story 4.10)', () => {
     releases.shift()!();
     expect(await second).toEqual({ ref: '1.1', status: 'ready-for-dev' });
     expect(log).toEqual(['start built', 'end built', 'start ready-for-dev', 'end ready-for-dev']);
+  });
+
+  it('hands the store the fingerprint of the scripts the user trusted, which its run checks again (maintained-fork story)', async () => {
+    const { board, workspace, releases, guards, flush } = await gated();
+    const marked = board.mark(workspace.id, '1.1', { status: 'draft' });
+    await flush();
+    releases.shift()!();
+    await marked;
+    expect(guards).toEqual(['none']);
   });
 
   it('a queued mark checks the guards again on its turn: Board turned off meanwhile runs nothing', async () => {

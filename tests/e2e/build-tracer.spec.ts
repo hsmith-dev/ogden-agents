@@ -14,7 +14,7 @@
  * a fixed sandbox answer (CI's runners have no working bwrap); no real
  * `claude`, keychain or network.
  */
-import { existsSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 // The shared routes' own file (it has no imports), as support.ts reads it.
@@ -76,6 +76,16 @@ test('Build on a ready card builds it unattended, the session streams read-only,
       await page.reload();
       const build = page.getByRole('button', { name: 'Build 1.1' });
       await expect(build).toBeVisible();
+      // Story 5.5: an uncommitted plan refuses Build and offers Commit plan files, which commits exactly that file.
+      const planFile = join(repo, ...FAKE_BUILD_PLAN.split('/'));
+      writeFileSync(planFile, `${readFileSync(planFile, 'utf8')}\nA note before building.\n`);
+      await build.click();
+      await expect(page.getByTestId('board-build-error')).toContainText('uncommitted changes');
+      await page.getByTestId('board-commit-plan').click();
+      await expect(page.getByTestId('board-plan-committed')).toBeVisible();
+      await expect(page.getByTestId('board-build-error')).toHaveCount(0);
+      expect(fixtureGit(repo, 'show', '--name-only', '--format=', 'HEAD').trim()).toBe(FAKE_BUILD_PLAN);
+      expect(fixtureGit(repo, 'status', '--porcelain').trim()).toBe('');
       await build.click();
 
       // The read-only build session: its ticket and outcome in the header, no composer.
@@ -102,7 +112,7 @@ test('Build on a ready card builds it unattended, the session streams read-only,
       await expect(page.getByTestId('review-merged')).toBeVisible();
       await expect(page.getByTestId('review-approve')).toHaveCount(0);
 
-      // One merge commit on main with the change and the plan done; the worktree gone, the branch kept.
+      // One merge commit on main with the change and the plan done; the worktree and the merged branch gone (story 5.5).
       expect(fixtureGit(repo, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe('main');
       expect(fixtureGit(repo, 'rev-list', '--parents', '-n', '1', 'HEAD').trim().split(' ')).toHaveLength(3);
       expect(fixtureGit(repo, 'rev-parse', 'HEAD^1').trim()).toBe(head);
@@ -110,7 +120,7 @@ test('Build on a ready card builds it unattended, the session streams read-only,
       expect(fixtureGit(repo, 'show', `HEAD:${FAKE_BUILD_PLAN}`)).toMatch(/^status: done$/m);
       expect(fixtureGit(repo, 'status', '--porcelain').trim()).toBe('');
       expect(existsSync(join(realpathSync.native(dataDir), 'w', worktrees[0]!))).toBe(false);
-      expect(branches(repo)).toEqual(['main', `ogden/${worktrees[0]}/1.1-build-the-thing`]);
+      expect(branches(repo)).toEqual(['main']);
 
       // The board shows it Done.
       await page.goto(`${server.url}/w/${wsId}/board`);

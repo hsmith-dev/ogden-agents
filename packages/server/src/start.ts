@@ -324,6 +324,8 @@ async function listenAndAnnounce({
   });
   // Unattended builds (story 5.2, `start-builds.ts`): git, the sandbox check and the build runner.
   const builds = createBuildsWiring({ options, core, dataDir, log, chat, tickets: ticketStore, source: bmadSource, hooks });
+  // Worktrees no run needs any more (a removal that failed, a start cut off) go before builds are served (story 5.5).
+  await builds.sweep();
   const appShortcut =
     options.appShortcut ??
     (options.launcherEntry === undefined

@@ -171,6 +171,8 @@ export const Run = z.object({
   branch: z.string().nullable().default(null),
   /** The commit the run's branch started from (story 5.2): its diff is against it. `null` in runs from before it. */
   baseRevision: z.string().nullable().default(null),
+  /** The branch the main checkout had checked out when the run started (story 5.5): approve merges only into it. `null` in runs from before it. */
+  baseBranch: z.string().nullable().default(null),
   /** Why the run ended as it did, in plain words (a blocked or failed run's reason; story 5.2). Never a secret. */
   reason: z.string().nullable().default(null),
   /** The agent that builds (story 5.3): the build runner's agent, Claude Code only in v1. `null` in runs from before it. */

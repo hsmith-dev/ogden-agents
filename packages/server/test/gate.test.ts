@@ -652,6 +652,7 @@ const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.workspaceBuild}`,
   `POST ${API_ROUTES.workspaceBuildApprove}`,
   `POST ${API_ROUTES.workspaceBuildReject}`,
+  `POST ${API_ROUTES.workspaceBuildCommitPlan}`,
   `GET ${API_ROUTES.sessionRun}`,
   // Epics 5 and 11's other routes (story 5.3), each through the guarded helper, 501 until their lanes.
   `GET ${API_ROUTES.workspaceRuns}`,
@@ -729,6 +730,7 @@ describe('gate placement', () => {
         `GET ${API_ROUTES.workspaceBuild}`,
         `POST ${API_ROUTES.workspaceBuildApprove}`,
         `POST ${API_ROUTES.workspaceBuildReject}`,
+        `POST ${API_ROUTES.workspaceBuildCommitPlan}`,
         `GET ${API_ROUTES.sessionRun}`,
         `GET ${API_ROUTES.workspaceRuns}`,
         `GET ${API_ROUTES.workspaceRun}`,

@@ -17,6 +17,8 @@ export * from './build-permission-policy.js';
 export * from './build-runner-port.js';
 export * from './build-run-folder.js';
 export * from './build-sessions.js';
+export * from './build-worktrees.js';
+export * from './run-aware-tickets.js';
 export * from './builds.js';
 export * from './chat.js';
 export * from './core.js';

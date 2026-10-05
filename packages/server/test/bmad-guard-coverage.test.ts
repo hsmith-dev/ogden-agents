@@ -124,6 +124,7 @@ const BUILD_ROUTES: readonly string[] = [
   `GET ${API_ROUTES.workspaceBuild}`,
   `POST ${API_ROUTES.workspaceBuildApprove}`,
   `POST ${API_ROUTES.workspaceBuildReject}`,
+  `POST ${API_ROUTES.workspaceBuildCommitPlan}`,
   `GET ${API_ROUTES.sessionRun}`,
   `GET ${API_ROUTES.workspaceRuns}`,
   `GET ${API_ROUTES.workspaceRun}`,

@@ -57,7 +57,7 @@ import {
   type Workspace,
   type WorkspaceId,
 } from '@ogden-agents/shared';
-import { and, asc, desc, eq, inArray, isNull, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Database } from './db/database.js';
 import { events, runs, sessions, workspaces } from './db/schema.js';
@@ -133,6 +133,8 @@ export interface NewRun {
   branch?: string | null;
   /** The commit its branch started from (story 5.2). */
   baseRevision?: string | null;
+  /** The branch it started from (story 5.5). */
+  baseBranch?: string | null;
   /** The agent that builds (story 5.3). Default Claude Code, the only one in v1. */
   agent?: BuildAgent;
   /** Where it waits in the workspace's queue (story 5.3; 5.8), `null` when dispatched now. */
@@ -259,6 +261,11 @@ export interface Entities {
   getRunBySession(sessionId: SessionId): Run | undefined;
   /** The workspace's latest run of ticket `ticketRef` (story 5.2), if any. */
   latestRunForTicket(workspaceId: WorkspaceId, ticketRef: string): Run | undefined;
+  /**
+   * Every run with a worktree (story 5.5: the startup sweep and the
+   * run-aware ticket store), oldest first; with `workspaceIds`, only theirs.
+   */
+  listRunsWithWorktree(workspaceIds?: readonly WorkspaceId[]): Run[];
   /** The workspace's run of ticket `ticketRef` still `running` (story 5.2), if any. */
   activeRunForTicket(workspaceId: WorkspaceId, ticketRef: string): Run | undefined;
   /**
@@ -332,6 +339,7 @@ const toRun = (row: RunRow): Run => ({
   outcome: row.outcome,
   branch: row.branch,
   baseRevision: row.baseRevision,
+  baseBranch: row.baseBranch,
   reason: row.reason,
   agent: row.agent,
   blockedCode: row.blockedCode,
@@ -761,6 +769,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
           outcome: 'running',
           branch: input.branch ?? null,
           baseRevision: input.baseRevision ?? null,
+          baseBranch: input.baseBranch ?? null,
           reason: null,
           agent,
           blockedCode: null,
@@ -791,6 +800,18 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         .limit(1)
         .get();
       return row === undefined ? undefined : toRun(row);
+    },
+
+    listRunsWithWorktree(workspaceIds) {
+      if (workspaceIds !== undefined && workspaceIds.length === 0) return [];
+      const withWorktree = isNotNull(runs.worktreePath);
+      return orm
+        .select()
+        .from(runs)
+        .where(workspaceIds === undefined ? withWorktree : and(withWorktree, inArray(runs.workspaceId, [...workspaceIds])))
+        .orderBy(asc(runs.createdAt), asc(runs.id))
+        .all()
+        .map(toRun);
     },
 
     activeRunForTicket(workspaceId, ticketRef) {

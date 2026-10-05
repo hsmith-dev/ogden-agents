@@ -34,6 +34,21 @@ export interface VcsWorktreeGitPaths {
   branchLogDir: string;
 }
 
+/**
+ * Whether this computer's VCS can serve builds (story 5.5): `missing` when
+ * it can't be run, `too_old` below the version builds need (shared
+ * `MIN_GIT_VERSION`), with the version found.
+ */
+export type VcsCheck = { ok: true; version: string } | { ok: false; reason: 'missing' } | { ok: false; reason: 'too_old'; version: string };
+
+/** How a run's worktree is removed (story 5.5). */
+export interface RemoveWorktreeOptions {
+  /** Its branch too (one Ogden made, `ogden/…`; any other name is refused). */
+  deleteBranch?: string | undefined;
+  /** Delete that branch only when it is merged into the checked-out branch (an approved run's). */
+  mergedOnly?: boolean | undefined;
+}
+
 /** A branch's changes against where it started. */
 export interface VcsDiff {
   /** The unified diff text, cut at `maxBytes`. */
@@ -44,6 +59,8 @@ export interface VcsDiff {
 }
 
 export interface VcsPort {
+  /** Whether the VCS is there and new enough (story 5.5). Asked once per process; never throws. */
+  check(): Promise<VcsCheck>;
   /**
    * The checked-out branch and its commit, or `undefined` when `repoPath`
    * isn't a repository, `HEAD` is detached, or the branch has no commit.
@@ -63,12 +80,27 @@ export interface VcsPort {
   addWorktree(repoPath: string, input: { path: string; branch: string; base: string }): Promise<void>;
   /** The worktree's git folders, for its branch `branch` (one of the form `<prefix>/<folder>/<name>`). */
   worktreeGitPaths(worktreePath: string, branch: string): Promise<VcsWorktreeGitPaths>;
-  /** Removes the worktree at `path` (forced: its own changes go with it); with `deleteBranch`, its branch too. Missing is fine. */
-  removeWorktree(repoPath: string, path: string, options?: { deleteBranch?: string | undefined }): Promise<void>;
+  /**
+   * Removes the run's worktree at `path` (forced: its own changes go with
+   * it) and only its own metadata in the repo (never a prune of others);
+   * with `deleteBranch`, that branch too. Missing is fine. The adapter
+   * refuses a `path` outside the folder it was given for worktrees, and
+   * never follows a link there (story 5.5).
+   */
+  removeWorktree(repoPath: string, path: string, options?: RemoveWorktreeOptions): Promise<void>;
   /** The paths with uncommitted changes (staged, unstaged or untracked), repo-relative, `/`-separated. */
   status(repoPath: string): Promise<string[]>;
   /** `branch`'s changes since `base`. */
   diff(repoPath: string, base: string, branch: string, options?: { maxBytes?: number }): Promise<VcsDiff>;
+  /** Whether commit `revision` is the checked-out commit or one of its ancestors (story 5.5: approve's branch check). */
+  isAncestor(repoPath: string, revision: string): Promise<boolean>;
+  /**
+   * Commits exactly `paths` (repo-relative; each with changes) as they are
+   * in the working tree, in one commit with `message`, leaving anything
+   * else staged as it was (story 5.5: Commit plan files). Returns the new
+   * commit. No hook runs; the user's identity, else Ogden's.
+   */
+  commitPaths(repoPath: string, paths: readonly string[], message: string): Promise<string>;
   /** Whether `branch` is already merged into the checked-out branch. */
   isMerged(repoPath: string, branch: string): Promise<boolean>;
   /**

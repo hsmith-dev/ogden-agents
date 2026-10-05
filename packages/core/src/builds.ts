@@ -40,10 +40,16 @@
  *   the trusted ones, the ticket is marked `done` (the only path to it,
  *   AD-10), its plan staged, and one merge commit made; a failure after the
  *   mark restores the plan, then aborts the merge. Never a push or a force.
- *   The worktree goes; the branch stays. One operation per repo at a time,
- *   shared with the board's marks.
- * - `reject`: removes the worktree (the branch stays) and stops the run; the
- *   ticket is untouched.
+ *   The worktree and the merged branch go (story 5.5). One operation per
+ *   repo at a time, shared with the board's marks.
+ * - `reject`: stops the run and removes its worktree and branch (a discard,
+ *   story 5.5); the ticket is untouched.
+ * - Story 5.5 (`build-worktrees.ts`): Build and approve need git
+ *   `MIN_GIT_VERSION` or newer (`vcs_unavailable` with a plain reason);
+ *   Build needs 1 GB free (`disk_space_low`); approve needs the branch the
+ *   build started from still checked out (`checkout_dirty`); a removal that
+ *   fails is retried by `sweep` at the next server start; `commitPlanFiles`
+ *   is **Commit plan files**.
  * - Story 5.4: each run has a folder in the data folder (`<data>/r/<runId>`,
  *   `build-run-folder.ts`) with its NDJSON activity and its per-run JSON
  *   result, written each time the session stops. Checkpoint pauses are
@@ -60,7 +66,7 @@
  * Core names no skill, VCS, sandbox or agent (AD-1, AD-12).
  */
 import { randomBytes } from 'node:crypto';
-import { lstatSync, mkdirSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, posix, relative } from 'node:path';
 import {
   ALL_READY_NOT_AVAILABLE_MESSAGE,
@@ -75,7 +81,13 @@ import {
   RunId,
   BMAD_FILES_UNCOMMITTED_MESSAGE,
   BUILD_BRANCH_PREFIX,
+  WORKTREES_FOLDER_NOT_REAL_MESSAGE,
   CHECKOUT_BUSY_MESSAGE,
+  CHECKOUT_MOVED_MESSAGE,
+  DISK_SPACE_LOW_MESSAGE,
+  GIT_MISSING_MESSAGE,
+  gitTooOldMessage,
+  MIN_FREE_DISK_BYTES,
   CHECKOUT_DIRTY_MESSAGE,
   CHECKS_FAILED_MESSAGE,
   MAX_REVIEW_DIFF_BYTES,
@@ -104,6 +116,7 @@ import {
   type BlockedCode,
   type BuildAgent,
   type BuildRunResult,
+  type CommitPlanFilesResponse,
   type ReviewResponse,
   type Run,
   type Session,
@@ -119,6 +132,7 @@ import type { BmadSourceUseCases } from './bmad-source-port.js';
 import { BUILD_PERMISSION_DENIED, decideBuildPermission, nodePathNormalizer, type PathNormalizer } from './build-permission-policy.js';
 import type { BuildRunnerPort } from './build-runner-port.js';
 import { createRunActivityRecorder, runFolderOf, runShortOf, writeRunResult } from './build-run-folder.js';
+import { ensureWorktreesRoot, freeBytesOf, removeRunWorktree, sweepRunBranches, sweepWorktrees } from './build-worktrees.js';
 import type { BuildSessions } from './build-sessions.js';
 import type { Chat } from './chat/types.js';
 import type { Entities } from './entities.js';
@@ -133,8 +147,6 @@ import type { VcsPort } from './vcs-port.js';
 
 export { BUILD_PERMISSION_DENIED };
 
-/** The folder of every run's worktree, inside Ogden Agents' data folder (AD-17): `<data>/w/<id>`. */
-export const WORKTREES_DIR = 'w';
 
 /** The BMad output folder whose uncommitted changes never block approve (user decision 2026-10-01). */
 export const BMAD_OUTPUT_PREFIX = '_bmad-output/';
@@ -160,6 +172,19 @@ export interface BuildsUseCases {
   approve(workspaceId: WorkspaceId, ref: string, request: unknown): Promise<ReviewResponse>;
   /** Reject (see the header). */
   reject(workspaceId: WorkspaceId, ref: string): Promise<ReviewResponse>;
+  /**
+   * **Commit plan files** (story 5.5, user decision 2026-10-04): commits the
+   * ticket's plan and the `tickets.toml` files above it that have changes,
+   * and only those, in one commit. Nothing to commit answers `committed: []`.
+   * `checkout_dirty` during a merge, rebase, cherry-pick or revert.
+   */
+  commitPlanFiles(workspaceId: WorkspaceId, ref: string): Promise<CommitPlanFilesResponse>;
+  /**
+   * The startup sweep (story 5.5, `build-worktrees.ts`): removes what in
+   * `<data>/w` no run needs; then, in the background, branches decided runs
+   * left. Run before builds are served. Never throws.
+   */
+  sweep(): Promise<void>;
   /** The run of `sessionId` (a `build` session of the workspace), behind the full guards. `NotFoundError` otherwise. */
   runOfSession(workspaceId: WorkspaceId, sessionId: SessionId): Promise<Run>;
   /**
@@ -186,7 +211,7 @@ export interface BuildsDeps {
   bmad: Pick<BmadFeatures, 'requireBmadFeature'>;
   trust: Pick<BmadScriptTrust, 'requireScriptsTrusted' | 'requireScriptsUnchanged' | 'requireScriptsMatch'>;
   source: Pick<BmadSourceUseCases, 'requireReady'>;
-  entities: Pick<Entities, 'getWorkspace' | 'getSession' | 'createRun' | 'getRun' | 'getRunBySession' | 'latestRunForTicket' | 'activeRunForTicket' | 'setRunOutcome' | 'setRunDecision'>;
+  entities: Pick<Entities, 'getWorkspace' | 'getSession' | 'createRun' | 'getRun' | 'getRunBySession' | 'latestRunForTicket' | 'activeRunForTicket' | 'setRunOutcome' | 'setRunDecision' | 'listRunsWithWorktree'>;
   events: Pick<EventLog, 'subscribe' | 'lastSeq'>;
   tickets: TicketStorePort;
   vcs: VcsPort;
@@ -202,6 +227,8 @@ export interface BuildsDeps {
   paths?: PathNormalizer;
   /** Masks secrets in a reason stored from the agent's own words (AGENTS.md). Default: Anthropic keys redacted. */
   mask?: (text: string) => string;
+  /** The free bytes on the disk holding a folder, `undefined` when unknown (story 5.5; tests inject one). Default: the OS's. */
+  freeBytes?: (dir: string) => number | undefined;
   /** Told about a failure the user sees only as a run's reason (for the log: codes only). */
   onError?: (runId: string, step: string, error: unknown) => void;
 }
@@ -365,14 +392,28 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     return { repoPath, guard: { scripts } };
   };
 
-  /** Throws `plan_uncommitted` when the ticket's plan or a `tickets.toml` above it has uncommitted changes. */
-  const requirePlanCommitted = async (repoPath: string, plan: string | null): Promise<void> => {
-    if (plan === null) return;
+  /** The ticket's plan files with uncommitted changes: the plan, its epic's `tickets.toml` and the initiative's. */
+  const uncommittedPlanFiles = async (repoPath: string, plan: string | null): Promise<string[]> => {
+    if (plan === null) return [];
     const changed = new Set(await vcs.status(repoPath));
     const epicFolder = posix.dirname(plan);
     const watched = [plan, posix.join(epicFolder, 'tickets.toml'), posix.join(posix.dirname(epicFolder), 'tickets.toml')];
-    if (watched.some((path) => changed.has(path))) throw new BuildRefusedError('plan_uncommitted', PLAN_UNCOMMITTED_MESSAGE);
+    return [...new Set(watched)].filter((path) => changed.has(path));
   };
+
+  /** Throws `plan_uncommitted` when the ticket's plan or a `tickets.toml` above it has uncommitted changes. */
+  const requirePlanCommitted = async (repoPath: string, plan: string | null): Promise<void> => {
+    if ((await uncommittedPlanFiles(repoPath, plan)).length > 0) throw new BuildRefusedError('plan_uncommitted', PLAN_UNCOMMITTED_MESSAGE);
+  };
+
+  /** Throws `vcs_unavailable` with a plain reason when git is missing or older than builds need (story 5.5). */
+  const requireGit = async (): Promise<void> => {
+    const git = await vcs.check();
+    if (git.ok) return;
+    throw new BuildRefusedError('vcs_unavailable', git.reason === 'missing' ? GIT_MISSING_MESSAGE : gitTooOldMessage(git.version));
+  };
+
+  const cleanupDeps = { dataDir, vcs, isBuildBranch };
 
   /** What the run's agent may write: its worktree, the run's own git paths; never hooks, config, `objects/info` or another ref. */
   const sandboxFor = async (kind: string, worktreePath: string, branch: string): Promise<{ sandbox: AgentSandbox; gitWritable: string[] }> => {
@@ -395,6 +436,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     // Fail closed: never an unsandboxed unattended run (user decision 2026-10-04); the sandbox says why.
     const check = await sandbox.check({ agent });
     if (!check.available) throw new BuildRefusedError('sandbox_unavailable', `${SANDBOX_UNAVAILABLE_MESSAGE} ${check.reason}`.trim());
+    await requireGit();
     if (entities.activeRunForTicket(workspaceId, ref) !== undefined) throw new BuildRefusedError('run_active', RUN_ACTIVE_MESSAGE);
     // A run paused at a checkpoint is still this ticket's build (story 5.4): resume or reject it first.
     const latest = entities.latestRunForTicket(workspaceId, ref);
@@ -413,11 +455,25 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     // The guards once more, right before anything is written: a piece turned off meanwhile writes nothing.
     await guarded(workspaceId);
 
-    const runShort = runShortId();
+    // Room for the worktree (story 5.5): refused before anything is written when the disk is nearly full.
+    const free = (deps.freeBytes ?? freeBytesOf)(dataDir);
+    if (free !== undefined && free < MIN_FREE_DISK_BYTES) throw new BuildRefusedError('disk_space_low', DISK_SPACE_LOW_MESSAGE);
+    let parent: string;
+    try {
+      parent = ensureWorktreesRoot(dataDir);
+    } catch {
+      throw new BuildRefusedError('vcs_unavailable', WORKTREES_FOLDER_NOT_REAL_MESSAGE);
+    }
+    // A run id no run, folder or branch has yet (collision-free; 40 random bits, tried a few times, never reused).
+    const taken = async (id: string): Promise<boolean> =>
+      existsSync(join(parent, id)) || entities.listRunsWithWorktree().some((each) => each.branch?.startsWith(`${BUILD_BRANCH_PREFIX}${id}/`) === true) || (await vcs.branchRevision(repoPath, buildBranchName(id, ref, ticket.title))) !== undefined;
+    let runShort = runShortId();
+    for (let attempt = 0; await taken(runShort); attempt++) {
+      if (attempt >= 5) throw new BuildRefusedError('vcs_unavailable', VCS_UNAVAILABLE_MESSAGE);
+      runShort = runShortId();
+    }
     const branch = buildBranchName(runShort, ref, ticket.title);
     if (!isBuildBranch(branch)) throw new ValidationError('That ticket reference makes no usable branch name.', [{ path: ['ref'], message: 'unusable branch name' }]);
-    const parent = join(dataDir, WORKTREES_DIR);
-    mkdirSync(parent, { recursive: true, mode: 0o700 });
     const worktreePath = join(parent, runShort);
     await vcs.addWorktree(repoPath, { path: worktreePath, branch, base: head.revision });
     let run: Run | undefined;
@@ -434,7 +490,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       for (const folder of PRECREATED_FOLDERS) mkdirSync(join(real, folder), { recursive: true });
       const { sandbox: contained, gitWritable } = await sandboxFor(check.kind, real, branch);
       session = await chat.createChatSession(workspaceId, { kind: 'build', agentId: runner.agent });
-      run = entities.createRun({ sessionId: session.id, ticketRef: ref, worktreePath: real, sandbox: check.kind, branch, baseRevision: head.revision, agent });
+      run = entities.createRun({ sessionId: session.id, ticketRef: ref, worktreePath: real, sandbox: check.kind, branch, baseRevision: head.revision, baseBranch: head.branch, agent });
       const scope = { worktree: real, gitWritable, protectedPaths: PROTECTED_PATHS };
       buildSessions.set(session.id, { cwd: real, sandbox: contained, decide: (request) => decideBuildPermission(request, scope, paths) });
       if (ticket.plan_checkpoint === true) {
@@ -445,6 +501,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         return { run, session };
       }
       chat.sendMessage(workspaceId, session.id, runner.invocation(ref), { build: true });
+      // The ticket's previous run, undecided and not running, is superseded (story 5.5 review): no Retry or Reject reaches it now, so its worktree and branch go.
+      if (latest !== undefined && latest.decision === null && latest.outcome !== 'running') await cleanUp(repoPath, latest);
       return { run, session };
     } catch (error) {
       if (session !== undefined) buildSessions.delete(session.id);
@@ -585,9 +643,10 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
   const reviewOf = async (repoPath: string, run: Run): Promise<ReviewResponse> => {
     // The summary, verification, findings and diff stats are 5.8's and 5.9's (story 5.3 froze them).
     const base = { run, outcome: run.outcome, reason: run.reason, summary: null, verification: null, findings: [], diffStats: null };
-    if (run.branch === null || run.baseRevision === null || !isBuildBranch(run.branch)) return { ...base, diff: '', truncated: false, files: [], merged: false, headRevision: null };
+    if (run.branch === null || run.baseRevision === null || !isBuildBranch(run.branch)) return { ...base, diff: '', truncated: false, files: [], merged: run.decision === 'approved', headRevision: null };
     const headRevision = (await vcs.branchRevision(repoPath, run.branch)) ?? null;
-    if (headRevision === null) return { ...base, diff: '', truncated: false, files: [], merged: false, headRevision };
+    // An approved run's branch is deleted with its worktree (story 5.5): it is merged.
+    if (headRevision === null) return { ...base, diff: '', truncated: false, files: [], merged: run.decision === 'approved', headRevision };
     const changes = await vcs.diff(repoPath, run.baseRevision, run.branch, { maxBytes: MAX_REVIEW_DIFF_BYTES });
     const merged = changes.files.length > 0 && (await vcs.isMerged(repoPath, run.branch));
     return { ...base, diff: changes.diff, truncated: changes.truncated, files: changes.files, merged, headRevision };
@@ -599,11 +658,19 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     return run;
   };
 
-  /** Stops the run's agent and removes its worktree (its branch stays). */
-  const retire = async (repoPath: string, run: Run): Promise<void> => {
+  /** Stops the run's agent and forgets its session's setup. */
+  const release = async (run: Run): Promise<void> => {
     await chat.releaseAgent(run.workspaceId, run.sessionId).catch((error: unknown) => report(run.id, 'release', error));
     buildSessions.delete(run.sessionId);
-    if (run.worktreePath !== null) await vcs.removeWorktree(repoPath, run.worktreePath);
+  };
+
+  /**
+   * Removes a decided run's worktree and branch (story 5.5; an approved
+   * run's branch only when merged). A failure is reported, never thrown:
+   * the decision stands and the next server start's sweep tries again.
+   */
+  const cleanUp = async (repoPath: string, run: Run): Promise<void> => {
+    await removeRunWorktree(cleanupDeps, repoPath, run).catch((error: unknown) => report(run.id, 'cleanup', error));
   };
 
   /** Approve's checkout checks: nothing staged, the plan untouched, no operation in progress, nothing changed outside `_bmad-output/`. */
@@ -646,12 +713,20 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       return serializedByRepo(repoPath, async () => {
         const { guard } = await guarded(workspaceId);
         const run = latestRun(workspaceId, checked);
-        if (run.outcome !== 'verified' || run.branch === null || !isBuildBranch(run.branch)) throw new BuildRefusedError('checks_failed', CHECKS_FAILED_MESSAGE);
+        // Approved already (its branch is gone since story 5.5), or rejected.
+        if (run.decision === 'approved') throw new BuildRefusedError('checks_failed', ALREADY_MERGED_MESSAGE);
+        if (run.outcome !== 'verified' || run.decision !== null || run.branch === null || !isBuildBranch(run.branch)) throw new BuildRefusedError('checks_failed', CHECKS_FAILED_MESSAGE);
         if (await vcs.isMerged(repoPath, run.branch)) throw new BuildRefusedError('checks_failed', ALREADY_MERGED_MESSAGE);
         // Exactly what the user reviewed: the branch must still point at it.
         if ((await vcs.branchRevision(repoPath, run.branch)) !== reviewed) throw new BuildRefusedError('checks_failed', REVIEW_STALE_MESSAGE);
+        await requireGit();
         const { plan } = await tickets.find(repoPath, checked, guard);
         await requireCleanCheckout(repoPath, plan);
+        // The branch this build started from must still be checked out (story 5.5): never a detached HEAD or another branch.
+        const current = await vcs.head(repoPath);
+        if (current === undefined || (run.baseBranch !== null && current.branch !== run.baseBranch) || run.baseRevision === null || !(await vcs.isAncestor(repoPath, run.baseRevision))) {
+          throw new BuildRefusedError('checkout_dirty', CHECKOUT_MOVED_MESSAGE);
+        }
         await chat.releaseAgent(workspaceId, run.sessionId).catch((error: unknown) => report(run.id, 'release', error));
         const merged = await vcs.merge(repoPath, reviewed);
         if (merged === 'conflict') {
@@ -676,9 +751,10 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
           throw error;
         }
         const mergeRevision = (await vcs.head(repoPath).catch(() => undefined))?.revision;
-        entities.setRunDecision(run.id, 'approved', mergeRevision, reviewed);
-        await retire(repoPath, run).catch((error: unknown) => report(run.id, 'retire', error));
-        return reviewOf(repoPath, entities.getRunBySession(run.sessionId) ?? run);
+        const approved = entities.setRunDecision(run.id, 'approved', mergeRevision, reviewed);
+        await release(run);
+        await cleanUp(repoPath, approved);
+        return reviewOf(repoPath, entities.getRunBySession(run.sessionId) ?? approved);
       });
     },
 
@@ -689,16 +765,55 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         await guarded(workspaceId);
         const run = latestRun(workspaceId, checked);
         if (run.outcome === 'running') throw new BuildRefusedError('run_active', RUN_ACTIVE_MESSAGE);
+        // An approved run is merged: never rejected after (its branch is gone since story 5.5).
+        if (run.decision === 'approved') throw new BuildRefusedError('checks_failed', ALREADY_MERGED_MESSAGE);
         if (run.branch !== null && isBuildBranch(run.branch) && (await vcs.isMerged(repoPath, run.branch)) && run.outcome === 'verified') {
           throw new BuildRefusedError('checks_failed', ALREADY_MERGED_MESSAGE);
         }
         // A run already rejected stays as it is: a repeat Reject writes nothing (review, story 5.3).
         if (run.decision === 'rejected') return reviewOf(repoPath, run);
-        await retire(repoPath, run);
+        await release(run);
         entities.setRunOutcome(run.id, 'stopped', run.reason);
         const rejected = entities.setRunDecision(run.id, 'rejected');
+        // A discard (story 5.5): the worktree and its branch go; a failure is swept at the next start.
+        await cleanUp(repoPath, rejected);
         return reviewOf(repoPath, rejected);
       });
+    },
+
+    async commitPlanFiles(workspaceId, ref) {
+      const { repoPath } = await guarded(workspaceId);
+      const checked = checkedRef(ref);
+      return serializedByRepo(repoPath, async () => {
+        const { guard } = await guarded(workspaceId);
+        await requireGit();
+        const head = await vcs.head(repoPath);
+        if (head === undefined) throw new BuildRefusedError('vcs_unavailable', VCS_UNAVAILABLE_MESSAGE);
+        if (await vcs.operationInProgress(repoPath)) throw new BuildRefusedError('checkout_dirty', CHECKOUT_BUSY_MESSAGE);
+        const { plan } = await tickets.find(repoPath, checked, guard);
+        const files = await uncommittedPlanFiles(repoPath, plan);
+        if (files.length === 0) return { committed: [], revision: head.revision };
+        const revision = await vcs.commitPaths(repoPath, files, `Plan files for ticket ${checked}\n\nCommitted in Ogden Agents before a build.`);
+        return { committed: files, revision };
+      });
+    },
+
+    async sweep() {
+      const repoOf = (workspaceId: WorkspaceId): string | undefined => {
+        try {
+          return workspaceRepoPath(entities, workspaceId);
+        } catch {
+          return undefined;
+        }
+      };
+      const sweepDeps = { ...cleanupDeps, entities, repoOf, onError: (step: string, error: unknown) => report('none', `sweep ${step}`, error) };
+      try {
+        await sweepWorktrees(sweepDeps);
+      } catch (error) {
+        report('none', 'sweep', error);
+      }
+      // Awaited, so no git of the sweep outlives it or runs beside a served build (review).
+      await sweepRunBranches(sweepDeps).catch((error: unknown) => report('none', 'sweep branch', error));
     },
 
     async runOfSession(workspaceId, sessionId) {

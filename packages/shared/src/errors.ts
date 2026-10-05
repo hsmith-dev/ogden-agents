@@ -165,6 +165,8 @@ export const API_ERROR_CODES = [
   'plan_uncommitted',
   /** Build was refused: the project is not a git repository with a checked-out branch that has a commit. */
   'vcs_unavailable',
+  /** Build was refused: the data folder's disk has too little free space for a worktree (409; story 5.5). */
+  'disk_space_low',
   /** Stop, Retry or Check again was asked of a run in the wrong state: Stop of a finished run, Retry of one not blocked or failed (409; story 5.3). */
   'run_not_active',
   /** Anything else that went wrong on the server (500). */

@@ -4,6 +4,8 @@ import {
   APPROVE_FAILED,
   BUILD_FAILED,
   BuildResponse,
+  COMMIT_PLAN_FILES_FAILED,
+  CommitPlanFilesResponse,
   REJECT_FAILED,
   REVIEW_LOAD_FAILED,
   ReviewResponse,
@@ -27,6 +29,12 @@ import { useSessionEvents } from '@/events/event-stream';
 export async function startBuild(wsId: string, ref: string, auth: Auth = tabAuth): Promise<BuildResponse> {
   const json = await call(auth, apiPath(API_ROUTES.workspaceBuilds, { wsId }), postJson({ ref }), BUILD_FAILED);
   return BuildResponse.parse(json);
+}
+
+/** `POST …/builds/:ref/commit-plan` (story 5.5): commits the ticket's uncommitted plan files, and only those. */
+export async function commitPlanFiles(wsId: string, ref: string, auth: Auth = tabAuth): Promise<CommitPlanFilesResponse> {
+  const json = await call(auth, apiPath(API_ROUTES.workspaceBuildCommitPlan, { wsId, ref }), { method: 'POST' }, COMMIT_PLAN_FILES_FAILED);
+  return CommitPlanFilesResponse.parse(json);
 }
 
 /** `GET /api/v1/workspaces/:wsId/sessions/:sesId/run`: a `build` session's run. */

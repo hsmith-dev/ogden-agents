@@ -9,7 +9,7 @@
  * when `rebaseConflicts` names the worktree; a patch applies unless it is
  * in `badPatches`.
  */
-import { VcsError, type VcsDiff, type VcsHead, type VcsPort, type VcsWorktreeGitPaths } from '@ogden-agents/core';
+import { VcsError, type VcsCheck, type VcsDiff, type VcsHead, type VcsPort, type VcsWorktreeGitPaths } from '@ogden-agents/core';
 import type { DiffStats } from '@ogden-agents/shared';
 
 export interface MemoryRepo {
@@ -40,6 +40,8 @@ export interface MemoryVcs extends VcsPort {
   readonly worktrees: Map<string, { repoPath: string; branch: string }>;
   readonly rebaseConflicts: Set<string>;
   readonly badPatches: Set<string>;
+  /** What `check` answers (story 5.5); git 2.45.0 by default. */
+  gitCheck: VcsCheck;
 }
 
 let commits = 0;
@@ -68,12 +70,34 @@ export function createMemoryVcs(): MemoryVcs {
   /** The branch (other than the checked-out one) at `revision`. */
   const branchOfRevision = (state: MemoryRepo, revision: string): string | undefined => [...state.branches].find(([name, commit]) => name !== state.branch && commit === revision)?.[0];
 
-  return {
+  const vcs: MemoryVcs = {
     calls,
     repo,
     worktrees,
     rebaseConflicts,
     badPatches,
+    gitCheck: { ok: true, version: '2.45.0' },
+
+    async check() {
+      calls.push('check');
+      return vcs.gitCheck;
+    },
+    async isAncestor(repoPath, revision) {
+      calls.push(`isAncestor ${repoPath} ${revision}`);
+      const state = repo(repoPath);
+      // The stub's history: a revision is an ancestor of the checked-out branch when no other branch names it.
+      return state.branch !== undefined && (state.branches.get(state.branch) === revision || ![...state.branches].some(([name, commit]) => name !== state.branch && commit === revision));
+    },
+    async commitPaths(repoPath, paths, message) {
+      calls.push(`commitPaths ${repoPath} ${paths.join(',')} ${message.split('\n')[0] ?? ''}`);
+      const state = repo(repoPath);
+      if (state.branch === undefined || paths.length === 0) throw new VcsError("git couldn't commit the plan files.", { step: 'commit the plan files' });
+      const revision = nextRevision();
+      state.branches.set(state.branch, revision);
+      state.status = state.status.filter((path) => !paths.includes(path));
+      state.staged = state.staged.filter((path) => !paths.includes(path));
+      return revision;
+    },
 
     async head(repoPath): Promise<VcsHead | undefined> {
       calls.push(`head ${repoPath}`);
@@ -121,7 +145,7 @@ export function createMemoryVcs(): MemoryVcs {
       return { commonDir, gitDir: `${commonDir}/worktrees/${worktreePath.split('/').pop() ?? 'w'}`, branchRefDir: `${commonDir}/refs/heads/${folder}`, branchLogDir: `${commonDir}/logs/refs/heads/${folder}` };
     },
     async removeWorktree(repoPath, path, options = {}) {
-      calls.push(`removeWorktree ${repoPath} ${path}${options.deleteBranch === undefined ? '' : ` -D ${options.deleteBranch}`}`);
+      calls.push(`removeWorktree ${repoPath} ${path}${options.deleteBranch === undefined ? '' : ` ${options.mergedOnly === true ? '-d' : '-D'} ${options.deleteBranch}`}`);
       worktrees.delete(path);
       if (options.deleteBranch !== undefined) repo(repoPath).branches.delete(options.deleteBranch);
     },
@@ -196,4 +220,5 @@ export function createMemoryVcs(): MemoryVcs {
       return badPatches.has(patchPath) ? 'refused' : 'applied';
     },
   };
+  return vcs;
 }

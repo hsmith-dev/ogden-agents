@@ -76,11 +76,11 @@ Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim fr
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
 - Epic 5 (a later story): a network allowlist (package registries) for a build's sandboxed commands; until then builds have no network. From 5.2's user decision. (log: "A network allowlist for an unattended build's sandboxed commands")
 - Epic 5 (5.6): core decides a build's file write before Claude Code's unsandboxed Edit/Write performs it, so a symlink swapped in after the decision can redirect it. From 5.2 security review S2. (log: "Core decides a build's file write before Claude Code's unsandboxed Edit/Write tool performs it")
-- Epic 5 (5.5): a build's sandbox can write the main repo's `.git/objects`; a per-run object store would close it. From 5.2 security review S3. (log: "A build's sandbox can write the main repo's `.git/objects`")
+- Epic 5 (5.6, or a later sandbox story; re-pointed by 5.5, which owns no sandbox environment): a build's sandbox can write the main repo's `.git/objects`; a per-run object store would close it. From 5.2 security review S3. (log: "A build's sandbox can write the main repo's `.git/objects`")
 - Epic 11 (11.4): mask a webhook's host when listing it back; some providers put the token in the host name. From 5.3 security review S10. (log: "Listing a webhook back by its full host can show part of its secret")
-- Epic 5 (5.5): check a minimum git version (2.31+ for `rev-parse --path-format`, 2.39.2 for `git apply`'s symlink fix) and refuse older git with a plain reason. From 5.3 security review S15. (log: "Nothing checks a minimum git version")
 - Epic 5 (5.10, or a later sandbox story): stop a build's commands that leave the agent's process group (`setsid`) or outlive their parent on Windows (cgroup, job object or sandbox-level kill). From 5.4 security review S4. (log: "Stopping a build kills the agent's process group")
 - Epic 5 (5.8) or epic 11 (11.1): prune a run's folder (`<data>/r/<run8>`) and the activity recorder's maps with the run's worktree. From 5.4 security review S6. (log: "Run folders (`<data>/r/<run8>`, up to 32 MiB")
+- Epic 5 (5.10, or a later sandbox story): the board and the run's end read a run's worktree with `tickets.py` while the agent may still be live (check-then-use on the worktree's scripts, which the sandbox denies the agent). From 5.5 security review S2. (log: "Board reads of an active run's worktree run `tickets.py` while its agent may be live")
 
 ## Log
 
@@ -649,3 +649,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-headless-build-session-over-acp-for-one-named-ticket-plan.md`
   summary: Run folders (`<data>/r/<run8>`, up to 32 MiB of activity each) and the activity recorder's in-memory maps are never pruned; remove them with the run's worktree (5.8's cleanup or 11.1's Runs tab).
   evidence: 5.4 security review S6 (low): `packages/core/src/build-run-folder.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-worktrees-in-the-data-folder-plan.md`
+  summary: Resolved: "Nothing checks a minimum git version" (5.3 entry above) is closed: Build, approve and Commit plan files refuse git older than 2.39.2, or none, with a plain reason (`vcs_unavailable`).
+  evidence: `packages/adapters/src/vcs-git/index.ts` `check`, `packages/core/src/builds.ts` `requireGit`; tests in `vcs-git-worktrees.test.ts` and `builds-worktrees.test.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-worktrees-in-the-data-folder-plan.md`
+  summary: Board reads of an active run's worktree run `tickets.py` while its agent may be live: the scripts' fingerprint is checked, then the script runs (check-then-use), held only by the sandbox's deny of `_bmad/` (case variants on case-insensitive filesystems not verified).
+  evidence: 5.5 security review S2 (medium): `packages/core/src/run-aware-tickets.ts` `fromWorktree`; same class as 5.2's `decideOutcome` read and the 4.13 entry. Marks are refused while the agent runs, and plans reached through links are never used.

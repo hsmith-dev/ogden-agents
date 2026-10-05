@@ -147,6 +147,8 @@ export const runs = sqliteTable(
     branch: text('branch'),
     /** The commit the run's branch started from (story 5.2): its diff is against it. */
     baseRevision: text('base_revision'),
+    /** The branch the main checkout had checked out when the run started (story 5.5): approve merges only into it. */
+    baseBranch: text('base_branch'),
     /** Why the run ended as it did, in plain words (story 5.2): a blocked or failed run's reason. */
     reason: text('reason'),
     /** The agent that builds (story 5.3); `null` in runs from before it, read as Claude Code. */

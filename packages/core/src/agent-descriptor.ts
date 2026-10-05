@@ -81,6 +81,11 @@ export interface AgentDescriptor {
    */
   permissionModes: Readonly<{ ask: string } & Partial<Record<Exclude<PermissionMode, 'ask'>, string>>>;
   /**
+   * One plain sentence appended to "<agent> doesn't offer <mode>." when a mode it doesn't declare is asked for
+   * (epic 14: why a small local model is Ask only), so the picker says why, not only that.
+   */
+  modesNote?: string | undefined;
+  /**
    * The agent runs the project's own agent settings or hooks, so a chat with
    * it starts only in a project the user trusted.
    */

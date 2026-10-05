@@ -194,6 +194,29 @@ describe('a Local model chat (epic 14 story 14.2)', () => {
     expect(read.terminal).toMatchObject({ available: false, code: 'agent_unsupported' });
   });
 
+  it('shows Auto and Skip all as unavailable with the reason in plain words, keeps a Claude Code chat in the same project on its own modes, and defaults the project to Ask', async () => {
+    const fake = await openAi();
+    const { server, tab, wsId, chat } = await setUp({ target: async () => ({ baseUrl: `${fake.url}/v1` }) });
+    expect((await request(server, tab, 'PUT', API_ROUTES.developerMode, { developerMode: true })).status).toBe(200);
+    const local = await chat();
+    const read = async (id: string) => SessionResponse.parse(await (await request(server, tab, 'GET', apiPath(API_ROUTES.workspaceSession, { wsId, sesId: id }))).json());
+    const options = (await read(local.id)).permissionModes!;
+    expect(options.find((option) => option.mode === 'ask')).toMatchObject({ available: true });
+    for (const mode of ['auto', 'skip_all']) {
+      const option = options.find((each) => each.mode === mode)!;
+      expect(option.available, mode).toBe(false);
+      expect(option.reason).toContain("Local model doesn't offer");
+      expect(option.reason).toContain('Small local models make more mistakes with tools, so every command and file change asks first.');
+      expect(option.reason).not.toMatch(/—|–/);
+    }
+    // A new chat starts in Ask, and a Claude Code chat in the same project keeps its own modes.
+    expect(local.permissionMode).toBe('ask');
+    const claude = SessionResponse.parse(await (await request(server, tab, 'POST', apiPath(API_ROUTES.workspaceSessions, { wsId }), { agentId: 'claude-code' })).json()).session;
+    const claudeOptions = (await read(claude.id)).permissionModes!;
+    expect(claudeOptions.find((option) => option.mode === 'skip_all')?.available).toBe(true);
+    expect(claudeOptions.find((option) => option.mode === 'auto')?.available).toBe(true);
+  });
+
   it('continues a chat after a server restart by resuming its session from the data folder', async () => {
     const fake = await openAi();
     const dataDir = tempDataDir();

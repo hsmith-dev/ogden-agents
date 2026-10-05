@@ -263,7 +263,11 @@ export function createPermissionModes(ctx: ChatContext, deps: Pick<Agents, 'drop
     if (mode === 'ask') return undefined;
     const label = PERMISSION_MODE_LABELS[mode];
     // The chat's own agent (epic 6): each agent declares its modes, and a chat is offered only those.
-    if (!(agent.permissionModes ?? ['ask']).includes(mode)) return `${agent.displayName} doesn't offer ${label}.`;
+    if (!(agent.permissionModes ?? ['ask']).includes(mode)) {
+      // The agent's own plain reason, when its descriptor gives one (epic 14: why a small local model is Ask only).
+      const note = ctx.agents.describe(entities.getSession(sessionId)?.agentId ?? ctx.agents.defaultAgentId)?.modesNote;
+      return `${agent.displayName} doesn't offer ${label}.${note === undefined ? '' : ` ${note}`}`;
+    }
     // This chat's agent session when it started this run, else the one of the same agent that started last in this run (any chat).
     const session = entities.getSession(sessionId);
     const listed = sessionModes.get(sessionId) ?? (session === undefined ? undefined : ctx.lastSessionModes.get(agentIdOf(session)));

@@ -7,6 +7,7 @@ import { AgentPicker, SET_UP_AGENTS } from '@/chat/agent-picker';
 import { agentNameOf, ChatApiError, createChatSession, sendMessage } from '@/chat/chat-api';
 import { Composer } from '@/chat/composer';
 import { StartChatActions, useStartChat } from '@/chat/start-chat';
+import { newChatDraftKey } from '@/chat/drafts';
 import { agentAvailability, projectDefaultAgent, useChatAgents } from '@/chat/use-chat-agents';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
@@ -197,6 +198,7 @@ function ChatsPage({ wsId }: { wsId: string }) {
                   label={`Message ${agentNameOf(chatAgents.data, agentId)}`}
                   // The reason is the status line above, tied to the field; a send still goes to the server, which says why.
                   describedBy={blocked === undefined ? undefined : 'agent-unavailable'}
+                  draftKey={newChatDraftKey(wsId)}
                   onSend={async (text) => {
                     const session = firstChat.current ?? (await createChatSession(wsId, undefined, agentId));
                     firstChat.current = session;

@@ -57,6 +57,8 @@ Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim fr
 - Unowned (TOCTOU, needs a concurrent writer): labels are judged when the catalog is read, not when a skill starts. From the 4.12 review S4. (log: "Labels are judged when the catalog is read, not when a skill starts")
 - Epic 6 (live check): protect `GEMINI.md` too if Antigravity reads it as its instruction file. From the 6.5 review. (log: "may need to join the protected files, if Antigravity reads it as its instruction file")
 - Epic 6 (every agent): setup status reads `.claude/skills` only, so an agent folder that lacks the skills (Antigravity used after Set up) gets them only at the next Set up or Upgrade. From the 6.8 restack. (log: "Setup status reads the installed BMad Method version from `.claude/skills` only")
+- Unowned (composer drafts): text typed in a project's new-chat composer while its first message is on its way stays under the project instead of following into the new chat. From the composer-drafts review. (log: "stays as the `<ws>:new` draft instead of following into the new chat")
+- Unowned (composer drafts): deleting a chat's or project's history leaves its drafts in browser storage until they expire. From the composer-drafts review. (log: "does not remove its composer drafts from browser storage")
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
 
@@ -546,3 +548,11 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-every-agent/story-end-to-end-suite-and-release-plan.md`
   summary: Resolved: "A few helper processes still inherit the server's whole environment" (6.5 review, AD-16). Every child process now gets an explicit allowlisted environment: agents their own key only, helpers none (the kill helper, the Windows shortcut script, npm's adapter install and the browser opener were the ones still inheriting; `uv --version` already used `uvEnvironment`).
   evidence: `adapters/src/child-env.ts` (`baseEnvironment`, `helperEnvironment`), `process-tree.ts`, `shortcut-os/windows.ts`, `setup-claude-code/install.ts` `npmEnv`, `server/src/open-url.ts`; tests `adapters/test/child-env.test.ts`, `server/test/open-url.test.ts`, `claude-code-install.test.ts`, `tests/architecture.test.ts` (AD-16 spawn rule), installed `agents-journey.spec.ts` (each agent's environment).
+
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-the-composer-keeps-unsent-text-per-chat-plan.md`
+  summary: Text typed in a project's new-chat composer while its first message is on its way stays as the `<ws>:new` draft instead of following into the new chat.
+  evidence: The first-chat `onSend` resolves after navigating; `clearDraftIfUnchanged` keeps the edited text under the new-chat key, which is shown only while the project has no chats (review finding 1).
+- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-the-composer-keeps-unsent-text-per-chat-plan.md`
+  summary: Deleting a chat's or project's history does not remove its composer drafts from browser storage; they go only on expiry or eviction.
+  evidence: drafts.ts has no hook on deletion; Delete history and a 404 chat leave `ogden-agents.draft.v1:<ws>:*` keys (review finding 6).
+

@@ -296,6 +296,30 @@ When every check has passed on all three OSes, write the final Antigravity row o
 
 As in the 0.2.0 checklist, step 6, with the version `0.5.0` and the tag `v0.5.0`. Then move `next` to it too: `npm dist-tag add ogden-agents@0.5.0 next`. Epic 6, Done when 7, is met once `npx ogden-agents` installs `0.5.0`.
 
+## v1.1 release checklist (epic 12: Codex beside Claude Code and Antigravity)
+
+Epic 12's Codex stories (12.4 to 12.6, 12.9 and the Codex part of 12.11) are in `main`; Grok is not built (it will be an xAI API access token only, off by default). Codex is OpenAI API key only (user decision, 2026-10-05): there is no ChatGPT sign in, because OpenAI's terms don't allow other apps to use subscription sign in. CI runs only fakes (the fake agent's Codex personality, a fixture install), so the real Codex needs these live checks, which an agent cannot run. Release it as in the 0.2.0 checklist, step 4 (a release candidate to `next`, `npx ogden-agents@next`), then step 6; the version and the tag are the user's.
+
+### Live checks with Codex
+
+Run them with `npx ogden-agents@next`, in scratch repos made for it, **on macOS, Windows (x64) and Linux (x64)**, each OS on its own, with an OpenAI API key you are happy to spend a little on (`sk-...`).
+
+1. Install, epic 12 E12-R4: Settings > Agents > Codex shows the reason there is no sign in ("Codex uses your own OpenAI API key. Signing in with a ChatGPT account isn't supported here..."), no Sign in button, and **Install**. It installs about 400 MB into the data folder and ends "Installed, needs an API key" with Version 2.1.1. Nothing is written to `~/.codex`.
+2. API key: **Add an API key**, paste the key, **Save**: the card says "Installed, using your API key" and shows the key's last four characters only. Try a wrong key (`sk-` and 30 letters): it is refused in plain words and not saved. **Remove key** and the picker shows Codex needing a key.
+3. A Codex chat replies, beside a Claude Code chat in the same project, both at once. Start in **Ask**.
+4. Permission cards, E12-R2: ask Codex to run `ls`: a card holds the command until **Allow once**. Ask again and click **Deny**: Codex continues without running it (it must not end the whole turn; this checks the `decline` option). Then ask it to edit a file and click **Deny**: note whether the turn ends (Codex offers only a cancel option for file changes).
+5. Modes: **Auto** is shown unavailable with a reason; with Developer mode on, **Skip all** runs a command without a card behind the red banner; **Back to Ask** works.
+6. Protected paths: ask Codex to edit `.claude/settings.json`, `.codex/config.toml` and `_bmad/scripts/config_utils.py` (a card each) and an ordinary file at the "Ask only for risky actions" level.
+7. Restart: Quit, run `npx ogden-agents@next` again, continue the Codex chat: it remembers what was said (resume).
+8. The key stays private: `grep -r "sk-" <data folder>` finds nothing in `ogden-agents.db`, the event log, `logs/` or `agents/codex-home/` (there is no `auth.json`), and Codex's home has `config.toml` with `features.plugins = false` and no `.tmp/plugins` folder after a chat.
+9. Terminal toggle, E12-R7: with Developer mode on, the Codex chat's **Chat | Terminal** is disabled and says why. Separately, in a terminal run `codex resume <the chat's session id>` with `CODEX_HOME` set to the data folder's `agents/codex-home` and the key set: record whether it opens the same conversation. If it does, the toggle can be turned on later.
+10. Windows only: the first shell command in Ask and in Skip all runs (note whether Codex's sandbox asks for administrator setup).
+11. BMad with Codex, E12-R6: in a scratch repo whose default agent is Codex, turn Planning on: the repo has `.agents/skills/` as well as `.claude/skills/`, and **Start from an idea** runs the BMad skill in a Codex planning session (the first message is `$bmad-spec ...`, note whether Codex runs it). With every BMad piece off (a Simple project), a Codex chat gets no BMad text and `git status` stays clean.
+12. Handoff: when a Codex chat hits a usage limit or you stop it, **Continue with another agent** starts a Claude Code chat with the conversation (a rate-limit text from OpenAI should be recognised; note what the real text says).
+13. Models: the chat's model picker lists Codex's models and a switch takes effect on the next message.
+
+When every check has passed on all three OSes, finalize the Codex row of `agent-matrix.md` (through `bmad-spec`, leaving no "verify" cell) from these results.
+
 ## Later releases
 
 1. On a branch, set the same new version in `package.json`, `packages/server/package.json` and `packages/web/package.json`, and add its entry to `CHANGELOG.md`. Merge to `main`.

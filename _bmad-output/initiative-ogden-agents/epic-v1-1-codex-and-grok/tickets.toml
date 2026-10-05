@@ -1,0 +1,149 @@
+# Epic 12 breakdown. Table order is the build order; ids never change once written.
+# Entries 1 and 2 (the spikes) were written 2026-10-02 and are built; they cover the spec capabilities directly because the epic's Requirements did not exist yet.
+# Entries 3 to 11 are the full inception, drafted autonomously 2026-10-04 after epic 6's groundwork (6.2, 6.3, 6.4, 6.6) was built, and approved by the user 2026-10-04 (answers in the epic's Notes, Approval).
+# Lanes after 4: Codex (5, 6) and Grok (7, 8) run in parallel and touch only their own adapter folders; 3 and 4 own every shared file first.
+# A no-go agent (its spike's live checks fail, or for Grok the user's terms read) drops its two entries; the other lane is unaffected, and 9 to 11 cover the go agents only.
+# References to other epics use "<epic id>.<entry id>".
+# Each spike ends with the user's go or no-go for that agent. A no-go agent moves back to epic 8 (v2); the other agent is unaffected.
+# Neither spike signs in or uses a secret; live checks with the developer's own account come after, in a scratch repo, never Ogden Agents's own repo.
+
+[[entry]]
+id = 1
+type = "spike"
+title = "Can Ogden drive Codex over ACP on all three OSes?"
+description = "Adds a temporary CI job on Windows, Linux and macOS that installs the registry's pinned codex-acp adapter (with the Codex CLI it bundles) into a temp data folder with npm ci from a pinned lock, checks its integrity, starts it over stdio with an allowlisted environment and an empty home, and records: initialize's capabilities and auth methods, session/new without auth, list, load and resume, the session modes and how they map to Ask, Auto and Skip all, the permission option kinds it sends (from its source), terminal and MCP support, which skill folders it reads, startup time, install size, stopping the process tree, and Windows behaviour including the sandbox; it also re-checks OpenAI's terms on third-party clients; the hitl step is the user reading the results and deciding go or no-go."
+verify = "The probe's logs on all three OSes answer each question, the findings and a go or no-go recommendation are written into the plan with proposed agent-matrix.md rows, the terms re-check is recorded, the user's live checks are listed, the user's go or no-go is recorded as a dated Decision in the epic's Notes, and the temporary job is removed."
+covers = ["CAP-15", "CAP-3", "CAP-5", "CAP-16"]
+after = []
+hitl = true
+risk = "high"
+unknown = "Whether ChatGPT sign-in finishes without a terminal on every OS, whether Codex's Windows sandbox is still experimental, and whether OpenAI's terms allow a third-party local UI to use a ChatGPT subscription."
+references = ["https://github.com/agentclientprotocol/registry/blob/main/codex-acp/agent.json", "https://github.com/agentclientprotocol/codex-acp", "https://developers.openai.com/codex/windows"]
+
+[[entry]]
+id = 2
+type = "spike"
+title = "Can Ogden drive Grok over ACP on all three OSes?"
+description = "Adds a temporary CI job on Windows, Linux and macOS that installs the registry's pinned Grok Build CLI (@xai-official/grok) into a temp data folder with npm ci from a pinned lock, checks its integrity and the platform binary's SHA-256, starts `grok agent stdio` with an allowlisted environment and an empty GROK_HOME, and records: initialize's capabilities and auth methods, session/new without auth, whether an API key can be given over ACP, list, load and resume, how its permission modes map to Ask, Auto and Skip all, the permission option kinds it sends, terminal and MCP support, which skill folders it reads (.claude/skills included), startup time, install size, stopping the process tree, self-update, and Windows behaviour; it also re-checks xAI's terms on third-party clients; the hitl step is the user reading the results and deciding go or no-go."
+verify = "The probe's logs on all three OSes answer each question, the findings and a go or no-go recommendation are written into the plan with proposed agent-matrix.md rows, the API key finding is stated, the terms re-check is recorded, the user's live checks are listed, the user's go or no-go is recorded as a dated Decision in the epic's Notes, and the temporary job is removed."
+covers = ["CAP-15", "CAP-3", "CAP-5", "CAP-16"]
+after = []
+hitl = true
+risk = "high"
+unknown = "Whether Sign in with Grok finishes without a terminal on every OS, how an API key reaches the agent over ACP (only grok.com is advertised), and whether xAI's terms allow a third-party local UI to use a Grok subscription."
+references = ["https://github.com/agentclientprotocol/registry/blob/main/grok-build/agent.json", "https://docs.x.ai/build/cli/headless-scripting.md", "https://docs.x.ai/build/features/permissions.md", "https://x.ai/legal/terms-of-service"]
+
+[[entry]]
+id = 3
+type = "story"
+title = "Epic contracts: shared ACP hooks, sign-out, setup notices and the project trust action"
+description = "Extends the agent-neutral groundwork, naming no agent, with what Codex and Grok need beyond 6.3 and 6.4: an acp-base hook that calls `authenticate` after `initialize` with the method the agent's quirk picks from its environment (an API key method when its key is present), optionally with `_meta`; a hook that picks Deny's `reject_once` option by a preferred id when the agent offers more than one; a launch that receives the chat's permission mode and protected paths, for agents that take them only at start; a descriptor flag for agents whose mode is set once at chat start (passed in the `_meta` of session/new, resume and load instead of `session/set_mode`), with core refusing a mid-chat change for them with a plain reason and the web mode picker showing the mode as fixed for that chat; `AgentSetupPort.signOut?()` with its route and a Sign out action on the agent card; plain-words notices in the setup status that the agent card shows (known limitations, network use); a descriptor field for the agent's own config folders, which core adds to the protected paths so core and shared still name no agent; wiring 4.2's per-project trust store into `ChatOptions.projectTrusted` and giving the picker's `trust_project` refusal an action that opens the trust prompt, worded for agents that run the project's own settings, hooks and MCP servers as well as BMad scripts, with the trust bound to those files' contents (`.claude/settings.json` hooks, `.mcp.json`) as 4.13 binds it to the scripts', so a change asks again (user, 2026-10-04); and the fake ACP agent's generic `FAKE_ACP_*` variables for each of these."
+verify = "Against fake agents: one whose key is set is authenticated with its API key method before session/new; with two `reject_once` options Deny picks the preferred id; a fixed-mode agent gets its mode in session/new and load `_meta` and a mid-chat change is refused while the picker shows it fixed; Sign out calls the port and the card updates; a notice shows on the card; a chat with a trust-needing agent is refused in an untrusted project, the picker offers Trust, and after trusting it starts, and asks again after the fixture's `.mcp.json` changes; Claude Code's existing tests pass unchanged and the architecture test still finds no agent id in core, shared or acp-base."
+covers = ["E12-R1"]
+after = ["6.4", "6.6", "6.9", "4.2", "4.13"]
+hitl = false
+risk = "medium"
+unknown = "How 4.13's content-bound re-check is shaped, so the agent files can join it without a second trust store (one trust covers the Board and Grok, user 2026-10-04)."
+references = ["packages/adapters/src/acp-base/acp-agent.ts", "packages/core/src/agent-descriptor.ts", "packages/core/src/agent-setup-port.ts", "packages/core/src/bmad-script-trust.ts", "packages/server/src/start.ts", "packages/web/src/agents/agent-card.tsx", "tests/fixtures/fake-acp-agent.mjs"]
+
+[[entry]]
+id = 4
+type = "story"
+title = "Codex and Grok stubs: descriptors, pins, wiring slots and fake personalities"
+description = "Adds, so the two lanes after it touch only their own adapter folders: the Codex descriptor (OpenAI; npm `@agentclientprotocol/codex-acp` 2.1.1 with `@openai/codex` 0.159.3 in its lock; `CODEX_HOME`; an OpenAI API key only (no ChatGPT sign-in, user 2026-10-05) on `CODEX_API_KEY` with `OPENAI_API_KEY` also stripped; modes Ask `read-only`, Skip all `agent-full-access`, Auto `agent` left for 5 to declare; no project trust; `.agents/skills`) and the Grok descriptor (xAI; npm `@xai-official/grok` 1.0.49 with each OS's binary SHA-256 from spike 12.2; `GROK_HOME`; Sign in with Grok and `xai.api_key` on `XAI_API_KEY` with `GROK_CODE_XAI_API_KEY` stripped; modes fixed at chat start, Ask default, Skip all `yoloMode`, Auto `autoMode` left for 7; needs project trust; `.claude/skills`); their pins folders checked by scripts/agent-pins.mjs; a pinned-npm installer shared with setup-claude-code (extracted from its install.ts, Claude Code unchanged) that also decompresses a binary the descriptor pins by `binarySha256` and refuses a hash mismatch, so 5's and 7's live checks install with it before 6 and 8 put it behind the UI; the codex and grok wiring slots and adapters index exports with memory stubs for acp-codex, setup-codex, acp-grok and setup-grok, each slot's on switch living in that agent's own folder so 5 and 7 never edit a shared wiring list, registered in a shipped install only once 5 and 7 fill them; `.codex` and `.grok` as the descriptors' own config folders (3's field) and `.agents` in core's protected paths unless 6.5 already added it; key redaction for OpenAI and xAI key formats; and the fake ACP agent's Codex personality (its auth methods, four mode ids, `decline` and `cancel` reject options) and Grok personality (`grok.com` advertised, `xai.api_key` accepted unadvertised, no session modes, `_meta.autoMode` and `_meta.yoloMode`)."
+verify = "Both descriptors validate and the registry builds with both slots in tests; agent-pins --check passes on three OSes and fails on a changed hash; Claude Code's install tests pass unchanged on the shared installer; a planted OpenAI or xAI key is redacted in logs; the protected-path tests cover `.codex`, `.grok` and `.agents`; each fake personality answers initialize as its spike recorded; a shipped server with no test options lists Claude Code alone."
+covers = ["E12-R1", "E12-R8"]
+after = [3]
+hitl = false
+risk = "medium"
+unknown = "Whether Codex and Grok should appear in a shipped install before 12.11 releases them (assumed not: slots register only when filled, and epic 12 merges after v1 ships)."
+references = ["packages/adapters/src/setup-claude-code/descriptor.ts", "packages/adapters/src/setup-claude-code/install.ts", "scripts/agent-pins.mjs", "packages/core/src/permission-matching.ts", "packages/shared/src/secret-patterns.ts", "_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/spike-can-ogden-drive-codex-over-acp-on-all-three-oses-plan.md", "_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/spike-can-ogden-drive-grok-over-acp-on-all-three-oses-plan.md"]
+
+[[entry]]
+id = 5
+type = "story"
+title = "Codex chat: permission cards, modes, resume and the terminal toggle if supported"
+description = "Starts only once the user's live checks from spike 12.1 pass on all three OSes. Its live check installs Codex with 4's shared installer and signs in with a key or a home folder signed into by hand, until 6 puts both behind the UI. Fills the codex slot with acp-codex on acp-base: launches the pinned `codex-acp` with `CODEX_HOME` under the data folder and `INITIAL_AGENT_MODE=read-only`, never setting `CODEX_PATH`; authenticates with the API key method when a key is present (3's hook); maps its tool input fields to card paths; Allow once picks `allow_once` and Deny picks the `decline` option by id, never `cancel`, `allow_always` or an amendment; declares Ask (`read-only`) and Skip all (`agent-full-access`, under the Developer mode gate), and Auto (`agent`) only if Codex can be made to ask before writing every protected path for the session's life, through its sandbox or rules given at launch or session start, otherwise not, as Antigravity; never offers `workspace-write`; drops a chat to Ask when Codex reports a mode that asks less than the chat's; starts Codex with its plugins download off by config until 6 adds the once-asked question and passes its answer to the launch (if Codex has no such switch, this entry says so and 6's answer gates starting Codex); reopens with resume, else load, else the stored-transcript fallback; and adds `codex resume <id>` with `CODEX_HOME` as its terminal resume only if live check 4 showed the CLI resumes the ACP session id, else the toggle reports `agent_unsupported`. The hitl step is the live check: a real Codex chat beside a Claude Code chat in one scratch project, including a shell command held by its card on Windows."
+verify = "Against the fake agent's Codex personality, a shell command waits for its card, Deny sends `decline`, Always allow is enforced by core with no allow option sent to the agent, only the declared modes are offered and the others refused, a chat continues after a server restart, and the toggle matches the descriptor; live, a Codex chat and a Claude Code chat in one scratch project both answer on all three OSes."
+covers = ["E12-R2", "E12-R7", "E12-R8"]
+after = [1, 4, "3.8"]
+hitl = true
+risk = "high"
+unknown = "Whether Codex can keep Ogden's protected paths guarded in Auto (its Auto review asks only about actions it judges unsafe; whether its sandbox can keep `.claude`, `.mcp.json` or `CLAUDE.md` read-only is unverified), whether Codex uses the client's terminal, and whether its Windows sandbox asks for administrator setup on first command."
+references = ["packages/adapters/src/acp-claude-code/claude-code-agent.ts", "packages/adapters/src/acp-claude-code/claude-guards.ts", "https://github.com/agentclientprotocol/codex-acp", "https://developers.openai.com/codex/windows"]
+
+[[entry]]
+id = 6
+type = "story"
+title = "Codex install and OpenAI API key from the UI"
+description = "Completes setup-codex behind AgentSetupPort (rewritten 2026-10-05: Codex is API key only, no ChatGPT sign-in; see the epic's Decision of that date). Install puts the pinned `codex-acp` and its bundled Codex CLI into `<dataDir>/agents/codex/` with the shared pinned-npm installer; nothing is installed globally and `~/.codex` is never read or written. The card asks for an OpenAI API key, stores it through the keychain as `agent-api-key/codex`, checks it with a call that costs nothing (`GET /v1/models`, a fake in tests), shows Key saved and Remove key, and says in plain words when the key is missing or OpenAI refuses it. The key reaches only Codex's process (as `CODEX_API_KEY`). The card states why there is no sign-in: Codex uses your own OpenAI API key, and signing in with a ChatGPT account isn't supported here because OpenAI's terms don't allow other apps to use subscription sign-in. Codex's `CODEX_HOME` gets a `config.toml` Ogden writes (plugins download off). There is no sign-in, no sign-out, no `auth.json` notice and no plugins question."
+verify = "Against fake install fixtures on three OSes, Settings: Agents installs Codex, refuses a tarball that does not match the lock, shows the no-sign-in reason, saves, checks and removes a key, refuses a rejected key in plain words, and a saved key reaches only Codex's child process; a scan of the database, the event log and the logs finds no key; live, a real key chats."
+covers = ["E12-R4", "E12-R8"]
+after = [5]
+hitl = false
+risk = "medium"
+unknown = "Whether `GET /v1/models` accepts every key an OpenAI project can hold."
+references = ["packages/adapters/src/setup-claude-code/api-key.ts"]
+
+[[entry]]
+id = 7
+type = "story"
+title = "Grok chat: per-chat modes, the trust gate, resume and the terminal toggle if supported"
+description = "Starts only once the user has read xAI's current terms and spike 12.2's live checks pass on all three OSes. Its live check installs Grok with 4's shared installer (which unpacks and hash-checks the binary) and signs in with a key or a home folder signed into by hand, until 8 puts both behind the UI. Fills the grok slot with acp-grok on acp-base: spawns Ogden's own verified Grok binary (never npm's launcher or `~/.grok/bin`) with `agent stdio`, `GROK_HOME` under the data folder and `GROK_DISABLE_AUTOUPDATER=1`; authenticates with `xai.api_key` when a key is present (3's hook); sets the chat's mode once at chat start through `_meta` (3's fixed-mode flag): Ask by default, Skip all by `yoloMode` under the Developer mode gate, and Auto by `autoMode` only if Grok can be made to ask before writing every protected path (for example deny rules at launch), otherwise not; makes Ogden's mode win over a project's `.claude/settings.json` `defaultMode`, or refuses the chat with a plain reason when it cannot; starts only in a project the user trusted (descriptor `needsProjectTrust`, 3's trust action), because Grok runs the project's hooks and `.mcp.json`; maps its tool input fields and permission options by kind; reopens with resume, else load, else the stored-transcript fallback; and adds `grok --resume <id>` with `GROK_HOME` as its terminal resume only if live check 6 showed it resumes the ACP session id. The hitl step is the live check: a real Grok chat beside a Claude Code chat in one trusted scratch project."
+verify = "Against the fake agent's Grok personality, a chat in an untrusted project is refused with the trust action and starts after trusting, the chosen mode reaches session/new and reopen `_meta` and a mid-chat change is refused, a fixture project whose `.claude/settings.json` says `bypassPermissions` still gets a card in Ask, a shell command waits for its card, a chat continues after a server restart, and the toggle matches the descriptor; live, a Grok chat and a Claude Code chat in one scratch project both answer on all three OSes."
+covers = ["E12-R3", "E12-R7", "E12-R8"]
+after = [2, 4, "3.8"]
+hitl = true
+risk = "high"
+unknown = "Whether Grok's Auto in an ACP session asks or fails a call it won't allow (spike 12.2), whether `_meta` modes apply on load and resume, Grok's exact permission option ids, whether a project's `.claude/settings.json` can override the mode Ogden sets, and whether Grok uses the client's terminal."
+references = ["https://docs.x.ai/build/features/permissions.md", "https://docs.x.ai/build/features/sessions.md", "https://docs.x.ai/build/cli/headless-scripting.md"]
+
+[[entry]]
+id = 8
+type = "story"
+title = "Grok install, Sign in with Grok and API key from the UI"
+description = "Completes setup-grok behind AgentSetupPort, taking over the install and sign-in path 7's live check used by hand, its processes run with `GROK_HOME` in the data folder. Install puts the pinned `@xai-official/grok` into `<dataDir>/agents/grok/` with 4's shared installer, which decompresses this OS's binary, checks it against the descriptor's SHA-256 and refuses a mismatch; npm's launcher and postinstall never run, and nothing goes into `~/.grok`. Sign-in offers Sign in with Grok (`grok.com`) by the route the live check showed works on each OS, with any URL or code in 6.6's agent card. The API key goes through the keychain as `agent-api-key/grok`, is checked with a call that costs nothing (assumed xAI's `GET /v1/api-key` or `/v1/models`; unverified), reaches only Grok's process, and is offered only after install confirms the unadvertised `authenticate xai.api_key` still works on the pinned version (else the card says why, through 3's notices). Sign out removes Grok's stored sign-in from its home folder."
+verify = "Against fake install and login fixtures on three OSes, Settings: Agents installs Grok, refuses a binary whose hash does not match, never runs npm's launcher, signs in with each offered method, and hides the key option when the fake refuses `xai.api_key`; a saved key reaches only Grok's child process, and a scan of the database, the event log and the logs finds no key; live, a real Sign in with Grok and a real key each chat."
+covers = ["E12-R5", "E12-R8"]
+after = [7]
+hitl = false
+risk = "high"
+unknown = "Whether Sign in with Grok over ACP opens a browser on the user's machine or needs `grok login --device-auth` from the setup adapter, and what Grok writes to its logs (prompts may land in `GROK_HOME/logs`)."
+references = ["https://docs.x.ai/build/enterprise.md", "https://x.ai/legal/terms-of-service"]
+
+[[entry]]
+id = 9
+type = "story"
+title = "BMad skills reach Codex and Grok where Planning is on, nothing where it is off"
+description = "For each go agent, extends 4.3's setup to place the bundled skills in the agent's descriptor `skillsFolder` beside `.claude/skills`, only in projects with Planning on and only when that agent is in use there (the project's default agent, or it has a session with it), as 6.8 decided for Antigravity: Codex needs `.agents/skills`; Grok reads `.claude/skills` already, so it needs nothing new unless live check 7 showed otherwise. Reuses 6.8's `.agents/skills` placement when 6.8 was built (Antigravity's go), else builds it generically from the descriptor's `skillsFolder`. Each adapter formats the planning skill invocation 4.6 asks for (Codex `$skill`). A no-go agent's dropped entry leaves this entry's `after`, and only the go agents are covered. 10.6's simple-project test and the installed `bmad-journey.spec.ts` simple-project step run against each go agent too: no BMad skill or text from Ogden where every piece is off."
+verify = "In a fixture repo with Planning on, a planning session with each fake go agent receives its adapter's invocation and the skills exist in its folder; with every piece off, each fake agent receives no BMad text and the repo's file-tree hash is unchanged."
+covers = ["E12-R6"]
+after = [5, 7, "4.3", "4.6", "10.6"]
+hitl = false
+risk = "medium"
+unknown = "Whether 6.8 (Antigravity, dropped on a no-go) already placed skills in `.agents/skills` by the time this starts, so Codex only reuses it, and how Grok invokes a skill over ACP."
+references = ["_bmad-output/initiative-ogden-agents/epic-every-agent/tickets.toml"]
+
+[[entry]]
+id = 10
+type = "story"
+title = "Refactor sweep"
+description = "Cleans up code across the epic (only the entries built, after a no-go too), scoped when it starts from the build records and the review findings deferred during the epic, with no behaviour change. It also runs the provenance check, keeps the deferred-work.md Open items index current, splits any file the epic grew past 600 lines, and removes the spikes' probe if anything of it remains."
+verify = "All tests pass and no behaviour changes."
+covers = []
+after = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+hitl = false
+risk = "low"
+references = ["_bmad-output/initiative-ogden-agents/deferred-work.md"]
+
+[[entry]]
+id = 11
+type = "story"
+title = "End-to-end suite and v1.1 release"
+description = "Extends the installed end-to-end suite, in CI on macOS, Windows and Linux against the packed package, to run a Claude Code chat and a chat with each go agent's fake at once in one Simple project, with the picker and the project default; restart and resume; each agent's declared modes; Grok's trust gate; install and sign-in of each fake; the terminal toggle where offered; and planning with each go agent where Planning is on. Ships with whichever of Codex and Grok passed its live checks (user, 2026-10-04). Writes the final agent-matrix.md rows for Codex and Grok from the spikes and the live checks through bmad-spec, leaving no verify cell. Then the user runs each go agent's live checks on macOS, Windows and Linux on `npx ogden-agents@next`, including a planning session running a BMad skill, records each result in the plan, and tags `ogden-agents` v1.1 through the release workflow."
+verify = "The suite passes on all three OSes, and the tagged v1.1 from npm passes the epic's live Done when checks for each go agent on the user's machines, each recorded under Live check result before the ticket moves to done."
+covers = ["E12-R1", "E12-R2", "E12-R3", "E12-R4", "E12-R5", "E12-R6", "E12-R7", "E12-R8"]
+after = [10, "6.10"]
+hitl = true
+risk = "medium"
+unknown = "Whether v1 (epic 6's release, 6.10) has shipped first, as v1.1 assumes."

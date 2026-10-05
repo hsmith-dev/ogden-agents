@@ -10,6 +10,7 @@ import {
   CLAUDE_CODE_AGENT_ID,
   CLAUDE_CODE_DESCRIPTOR,
   ANTIGRAVITY_DESCRIPTOR,
+  CODEX_SHIPPED,
   createAntigravityAgent,
   createAntigravitySetup,
   currentPlatform,
@@ -25,6 +26,7 @@ import { agentEnvKeys, AgentSetupError, CoreError, createAgentSetup, type AgentP
 import type { AgentId } from '@ogden-agents/shared';
 import { agentHomeDir, checkAgentWiring, describedLike, type AgentWiring } from './agent-wiring.js';
 import { antigravityWiring, type AntigravityPorts } from './antigravity-wiring.js';
+import { codexWiring } from './codex-wiring.js';
 import type { Logger } from './log.js';
 import { agentEnvironment, agentKeysOf, SUBSCRIPTION_MAX_AGE_MS, withoutAgentKeys } from './start-env.js';
 import type { StartOptions } from './start-types.js';
@@ -68,7 +70,13 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
       ? []
       : [antigravityWiring({ dataDir, given: options.antigravity ?? testAntigravityPorts(dataDir, hooks, log), onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
   for (const wiring of antigravity) checkAgentWiring(wiring);
-  const extraAgents = [...antigravity, ...(options.extraAgents ?? testTrustAgentWiring(hooks, log))];
+  // Codex (epic 12 entry 4): a shipped install registers it only once its own folder says so; a test gives ports.
+  const codex =
+    options.codex === false || (options.codex === undefined && !CODEX_SHIPPED && hooks.codexServer === undefined && hooks.codexInstall === undefined)
+      ? []
+      : [codexWiring({ dataDir, given: options.codex, serverScript: hooks.codexServer, install: hooks.codexInstall === undefined ? undefined : { pins: hooks.codexInstall.pins, ...(hooks.codexInstall.npmCli === undefined ? {} : { npmCli: hooks.codexInstall.npmCli }) }, onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
+  for (const wiring of codex) checkAgentWiring(wiring);
+  const extraAgents = [...antigravity, ...codex, ...(options.extraAgents ?? testTrustAgentWiring(hooks, log))];
   // Every registered agent's API key variables (6.3): each is kept out of every process but its own agent's chat.
   const envKeys = agentEnvKeys([claudeDescriptor, ...extraAgents.map((wiring) => wiring.descriptor)]);
   // The terminal's `claude`: the option's, else (a test run only) a stand-in from the environment (story 3.10).
@@ -166,6 +174,7 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
     get permissionModes() {
       return agent.permissionModes;
     },
+    ...(agent.modeFixedAtStart === true ? { modeFixedAtStart: true } : {}),
     startSession: async (input) => agent.startSession({ ...input, env: await freshChatEnv(agentId, input.env) }),
     reopenSession: async (input) => agent.reopenSession({ ...input, env: await freshChatEnv(agentId, input.env) }),
     listAuthMethods: (input) => agent.listAuthMethods(input),
@@ -234,6 +243,8 @@ function testTrustAgentWiring(hooks: TestHooks, log: Logger): AgentWiring[] {
         signInMethods: [{ id: 'fake-login', kind: 'subscription', label: 'Sign in with your account' }],
         permissionModes: { ask: 'default' },
         needsProjectTrust: true,
+        // The files it would run from the project: the trust is bound to them too (epic 12, 12.3).
+        projectFiles: ['.claude/settings.json', '.mcp.json'],
         skillsFolder: '.fake/skills',
       },
       agent: {

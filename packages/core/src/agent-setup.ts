@@ -36,11 +36,11 @@ import {
 } from '@ogden-agents/shared';
 import type { AgentInstallProgress, AgentPortStatus, AgentSetupPort, AgentSubscriptionState, ApiKeyVerification } from './agent-setup-port.js';
 import { AgentBusyError, AgentSetupError, LAST_KNOWN_AUTH_MAX_AGE_MS, apiKeySecretName, type AgentSetup, type AgentSetupOptions, type Flight, type SavedKey } from './agent-setup-types.js';
-import { ApiKeyRefusedError, NotFoundError, SECRETS_UNAVAILABLE_MESSAGE, SecretsUnavailableError, secretsUnavailableKeyOnlyMessage, ValidationError } from './errors.js';
+import { ApiKeyRefusedError, NotFoundError, SecretsUnavailableError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import type { SecretStorePort } from './secret-store-port.js';
 import { createSignIns, stopSignIn } from './agent-setup-sign-in.js';
-import { inheritedKeyOf, installingStatus, shown, subscriptionOf } from './agent-setup-status.js';
+import { inheritedKeyOf, installingStatus, keyOnlyWords, shown, subscriptionOf } from './agent-setup-status.js';
 import { PROGRESS_INTERVAL_MS } from './toolchain.js';
 
 // Not `Flight`, `newFlight` or `SavedKey`: they stay inside this use-case.
@@ -196,12 +196,6 @@ export function createAgentSetup(events: EventLog, ports: readonly AgentSetupPor
     if (options.secrets === undefined) throw keyOnlyWords(port, new SecretsUnavailableError());
     return options.secrets;
   };
-
-  /** An agent that takes only an API key is never told to sign in with an account instead (user decision, 2026-10-05). */
-  const keyOnlyWords = (port: AgentSetupPort | undefined, error: SecretsUnavailableError): SecretsUnavailableError =>
-    port?.apiKeyOnly === true && error.message === SECRETS_UNAVAILABLE_MESSAGE
-      ? new SecretsUnavailableError(secretsUnavailableKeyOnlyMessage(port.displayName), typeof error.cause === 'string' ? { cause: error.cause } : {})
-      : error;
 
   /** A store failure as `SecretsUnavailableError`, reported by its code only. */
   const unavailable = (agentId: string, step: string, error: unknown): SecretsUnavailableError => {

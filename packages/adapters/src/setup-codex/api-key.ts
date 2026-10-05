@@ -10,7 +10,7 @@
  */
 import type { AgentApiKeySupport, ApiKeyVerification } from '@ogden-agents/core';
 import { CODEX_API_KEY_ENV } from '../acp-codex/constants.js';
-import { errorCode } from '../error-code.js';
+import { bearerKeyVerify } from '../api-key-verify.js';
 
 /** What an OpenAI API key looks like (`sk-` then letters, digits, `-` and `_`, as `sk-proj-...` keys have). */
 export const OPENAI_API_KEY_PATTERN = /^sk-[A-Za-z0-9_-]{20,}$/;
@@ -47,31 +47,7 @@ export function createCodexApiKey(options: CodexApiKeyOptions = {}): AgentApiKey
       // Logging never changes the outcome.
     }
   };
-  const verify = async (value: string, signal: AbortSignal): Promise<ApiKeyVerification> => {
-    const fetchImpl = options.fetch ?? globalThis.fetch;
-    const timeout = AbortSignal.timeout(timeoutMs);
-    let response: Response;
-    try {
-      response = await fetchImpl(OPENAI_VERIFY_URL, {
-        method: 'GET',
-        headers: { authorization: `Bearer ${value}` },
-        redirect: 'error',
-        signal: AbortSignal.any([signal, timeout]),
-      });
-    } catch (error) {
-      const cause = (error as { cause?: { code?: unknown } | null } | null)?.cause;
-      diagnostic('OpenAI API key check failed', { step: 'verify_api_key', code: timeout.aborted ? 'timeout' : errorCode(cause?.code != null ? cause : error, 'unknown') });
-      return 'unchecked';
-    }
-    void response.body?.cancel().catch(() => {});
-    if (response.status === 401 || response.status === 403) {
-      diagnostic('OpenAI refused the API key', { step: 'verify_api_key', status: response.status });
-      return 'refused';
-    }
-    if (response.ok) return 'ok';
-    diagnostic('OpenAI API key check inconclusive', { step: 'verify_api_key', status: response.status });
-    return 'unchecked';
-  };
+  const verify = bearerKeyVerify({ provider: 'OpenAI', url: OPENAI_VERIFY_URL, refusedStatuses: [401, 403], timeoutMs, fetch: options.fetch, onDiagnostic: diagnostic });
   return {
     envName: CODEX_API_KEY_ENV,
     check: (value) => (OPENAI_API_KEY_PATTERN.test(value) ? undefined : BAD_OPENAI_API_KEY),

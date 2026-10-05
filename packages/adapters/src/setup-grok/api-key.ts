@@ -14,7 +14,7 @@
  */
 import type { AgentApiKeySupport, ApiKeyVerification } from '@ogden-agents/core';
 import { GROK_API_KEY_ENV } from '../acp-grok/constants.js';
-import { errorCode } from '../error-code.js';
+import { bearerKeyVerify } from '../api-key-verify.js';
 
 /** What an xAI API key looks like (`xai-` then letters, digits, `-` and `_`). */
 export const XAI_API_KEY_PATTERN = /^xai-[A-Za-z0-9_-]{20,}$/;
@@ -51,32 +51,7 @@ export function createGrokApiKey(options: GrokApiKeyOptions = {}): AgentApiKeySu
       // Logging never changes the outcome.
     }
   };
-  const verify = async (value: string, signal: AbortSignal): Promise<ApiKeyVerification> => {
-    const fetchImpl = options.fetch ?? globalThis.fetch;
-    const timeout = AbortSignal.timeout(timeoutMs);
-    let response: Response;
-    try {
-      response = await fetchImpl(XAI_VERIFY_URL, {
-        method: 'GET',
-        headers: { authorization: `Bearer ${value}` },
-        redirect: 'error',
-        signal: AbortSignal.any([signal, timeout]),
-      });
-    } catch (error) {
-      const cause = (error as { cause?: { code?: unknown } | null } | null)?.cause;
-      diagnostic('xAI API key check failed', { step: 'verify_api_key', code: timeout.aborted ? 'timeout' : errorCode(cause?.code != null ? cause : error, 'unknown') });
-      return 'unchecked';
-    }
-    void response.body?.cancel().catch(() => {});
-    // xAI answered a wrong key with 400 "Incorrect API key provided" on a chat call (spike 12.2); a bad key on this endpoint is 400, 401 or 403.
-    if (response.status === 400 || response.status === 401 || response.status === 403) {
-      diagnostic('xAI refused the API key', { step: 'verify_api_key', status: response.status });
-      return 'refused';
-    }
-    if (response.ok) return 'ok';
-    diagnostic('xAI API key check inconclusive', { step: 'verify_api_key', status: response.status });
-    return 'unchecked';
-  };
+  const verify = bearerKeyVerify({ provider: 'xAI', url: XAI_VERIFY_URL, refusedStatuses: [400, 401, 403], timeoutMs, fetch: options.fetch, onDiagnostic: diagnostic });
   return {
     envName: GROK_API_KEY_ENV,
     check: (value) => (XAI_API_KEY_PATTERN.test(value) ? undefined : BAD_XAI_API_KEY),

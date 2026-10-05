@@ -5,6 +5,7 @@
 import type { AgentSetupStatus } from '@ogden-agents/shared';
 import type { AgentInstallProgress, AgentPortStatus, AgentSetupPort, AgentSubscriptionState } from './agent-setup-port.js';
 import type { AgentSetupOptions } from './agent-setup-types.js';
+import { SECRETS_UNAVAILABLE_MESSAGE, SecretsUnavailableError, secretsUnavailableKeyOnlyMessage } from './errors.js';
 
 /** The subscription state a port reports, or the one derived from its status (see `AgentPortStatus`). */
 export function subscriptionOf(status: AgentPortStatus): AgentSubscriptionState {
@@ -35,4 +36,11 @@ export function inheritedKeyOf(port: AgentSetupPort, inheritedEnv: AgentSetupOpt
   if (exact !== undefined && exact !== '') return exact;
   for (const [key, value] of Object.entries(env)) if (key.toUpperCase() === name.toUpperCase() && value !== undefined && value !== '') return value;
   return undefined;
+}
+
+/** An agent that takes only an API key is never told to sign in with an account instead (user decision, 2026-10-05). */
+export function keyOnlyWords(port: AgentSetupPort | undefined, error: SecretsUnavailableError): SecretsUnavailableError {
+  return port?.apiKeyOnly === true && error.message === SECRETS_UNAVAILABLE_MESSAGE
+    ? new SecretsUnavailableError(secretsUnavailableKeyOnlyMessage(port.displayName), typeof error.cause === 'string' ? { cause: error.cause } : {})
+    : error;
 }

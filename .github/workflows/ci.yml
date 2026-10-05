@@ -272,6 +272,12 @@ jobs:
       - name: Install the pinned Codex adapter with its bundled Codex CLI
         run: node scripts/agent-pins.mjs --agent codex --check --with-binary
 
+      # Grok Build and its platform packages (epic 12 entry 4): `npm ci` of
+      # packages/adapters/src/setup-grok/pins/, then this OS's binary decompressed
+      # and its SHA-256 compared with the pin in acp-grok/constants.ts.
+      - name: Install the pinned Grok package and check its binary's SHA-256
+        run: node scripts/agent-pins.mjs --agent grok --check --with-binary
+
   # UI layout in a real browser (architecture Conventions: jsdom doesn't
   # evaluate media queries): sidebar forms and overflow at 1440, 900 and 390
   # px, theme and density switching, and the signed-out launch page.

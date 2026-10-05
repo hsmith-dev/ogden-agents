@@ -68,6 +68,15 @@ export interface PinnedNpmSpec {
   isInstalledFolder(name: string): boolean;
   /** For an agent whose lock holds a platform binary package: whether the lock has them, and whether npm put one in `project`. */
   binary?: { locked(lock: AdapterLock): boolean; present(project: string): boolean } | undefined;
+  /**
+   * For an agent whose package carries a binary Ogden unpacks and checks itself (Grok's brotli-compressed
+   * binary, epic 12 entry 4): runs after `npm ci` and the checks above, before the swap into place, in the
+   * install's temp folder. It throws an {@link AgentSetupError} in plain words (a hash that does not match
+   * refuses the whole install). Never run for an install without its binary packages.
+   */
+  finalize?: ((project: string, words: InstallWords, options: Pick<InstallPinnedNpmOptions, 'signal' | 'onProgress'>) => Promise<void>) | undefined;
+  /** The runnable's path inside an installed `folder`, when it is not the adapter's entry script (Grok's own checked binary). */
+  resultPath?: ((folder: string) => string) | undefined;
 }
 
 /** The adapter's version the lock pins, or throws (a pins bug). */
@@ -173,8 +182,11 @@ export interface InstallPinnedNpmOptions {
   onCleanupError?: ((error: unknown) => void) | undefined;
 }
 
+/** What {@link wordsFor} returns. */
+export type InstallWords = ReturnType<typeof wordsFor>;
+
 /** The plain words an install says, by the agent's product name. */
-function wordsFor(displayName: string) {
+export function wordsFor(displayName: string) {
   return {
     downloading: `Downloading ${displayName}`,
     checking: `Checking ${displayName}`,
@@ -353,13 +365,15 @@ export async function installPinnedNpm(spec: PinnedNpmSpec, options: InstallPinn
       throw new AgentSetupError(words.noBinary, { details: { step: 'verify', platform: process.platform, arch: process.arch } });
     }
 
+    if (options.withBinary && spec.finalize !== undefined) await spec.finalize(project, words, { signal: options.signal, onProgress: options.onProgress });
+
     const name = spec.folderName(version, options.withBinary);
     const target = join(dir, name);
     // Aside under its own name, so a crash mid-swap can be undone at the next start (`restorePrevious`).
     mkdirSync(join(work, 'previous'));
     await moveIntoPlace(words, project, target, join(work, 'previous', name), onCleanupError);
     options.onProgress({ step: words.checking, percent: 100 });
-    return { path: entryIn(spec, target), version };
+    return { path: spec.resultPath === undefined ? entryIn(spec, target) : spec.resultPath(target), version };
   } finally {
     try {
       rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

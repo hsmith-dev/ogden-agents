@@ -11,6 +11,7 @@ import {
   CLAUDE_CODE_DESCRIPTOR,
   ANTIGRAVITY_DESCRIPTOR,
   CODEX_SHIPPED,
+  GROK_SHIPPED,
   createAntigravityAgent,
   createAntigravitySetup,
   currentPlatform,
@@ -27,6 +28,7 @@ import type { AgentId } from '@ogden-agents/shared';
 import { agentHomeDir, checkAgentWiring, describedLike, type AgentWiring } from './agent-wiring.js';
 import { antigravityWiring, type AntigravityPorts } from './antigravity-wiring.js';
 import { codexWiring } from './codex-wiring.js';
+import { grokWiring } from './grok-wiring.js';
 import type { Logger } from './log.js';
 import { agentEnvironment, agentKeysOf, SUBSCRIPTION_MAX_AGE_MS, withoutAgentKeys } from './start-env.js';
 import type { StartOptions } from './start-types.js';
@@ -76,7 +78,13 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
       ? []
       : [codexWiring({ dataDir, given: options.codex, serverScript: hooks.codexServer, install: hooks.codexInstall === undefined ? undefined : { pins: hooks.codexInstall.pins, ...(hooks.codexInstall.npmCli === undefined ? {} : { npmCli: hooks.codexInstall.npmCli }) }, onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
   for (const wiring of codex) checkAgentWiring(wiring);
-  const extraAgents = [...antigravity, ...codex, ...(options.extraAgents ?? testTrustAgentWiring(hooks, log))];
+  // Grok (epic 12 entry 4): the same, in its own folder's switch.
+  const grok =
+    options.grok === false || (options.grok === undefined && !GROK_SHIPPED)
+      ? []
+      : [grokWiring({ dataDir, given: options.grok, onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
+  for (const wiring of grok) checkAgentWiring(wiring);
+  const extraAgents = [...antigravity, ...codex, ...grok, ...(options.extraAgents ?? testTrustAgentWiring(hooks, log))];
   // Every registered agent's API key variables (6.3): each is kept out of every process but its own agent's chat.
   const envKeys = agentEnvKeys([claudeDescriptor, ...extraAgents.map((wiring) => wiring.descriptor)]);
   // The terminal's `claude`: the option's, else (a test run only) a stand-in from the environment (story 3.10).

@@ -115,6 +115,22 @@ describe('the Codex slot (epic 12 entries 4 and 6)', () => {
   });
 });
 
+describe('the Grok slot (epic 12 entry 4)', () => {
+  it('is not registered by default, and a test registers it as its own agent after Claude Code and Codex', async () => {
+    const bare = await startTestServer();
+    const listed = async (server: TestServer, signed: SignedIn) =>
+      ChatAgentsResponse.parse(await (await request(server, signed, 'GET', API_ROUTES.chatAgents)).json()).agents.map((agent) => agent.agentId);
+    expect(await listed(bare, await signIn(bare))).toEqual(['claude-code']);
+    const withGrok = await startTestServer({ codex: {}, grok: {} });
+    expect(await listed(withGrok, await signIn(withGrok))).toEqual(['claude-code', 'codex', 'grok']);
+    const grokOnly = await startTestServer({ grok: {} });
+    const tab = await signIn(grokOnly);
+    const grok = ChatAgentsResponse.parse(await (await request(grokOnly, tab, 'GET', API_ROUTES.chatAgents)).json()).agents.find((agent) => agent.agentId === 'grok');
+    // Needs project trust, so the picker offers Trust first.
+    expect(grok).toMatchObject({ needsProjectTrust: true, provider: 'xAI' });
+  });
+});
+
 describe('two agents side by side in one project (epic 6, entry 2)', () => {
   it('lists the agents a chat can start with, Claude Code first and the default', async () => {
     const { server, tab } = await setUp();

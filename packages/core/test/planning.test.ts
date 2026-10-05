@@ -205,8 +205,8 @@ describe('planning (story 4.1)', () => {
     expect(session.kind).toBe('planning');
     expect(core.entities.getSession(session.id)?.kind).toBe('planning');
     expect(firstUserMessage(core, session.id)).toEqual(expect.objectContaining({ role: 'user', content: 'run-skill:bmad-spec' }));
-    // Named after the action (its label, here none: its name), never after the skill invocation (backlog story 2).
-    expect(core.entities.getSession(session.id)?.autoTitle).toBe('bmad-spec');
+    // Named after the action as the Plan page shows it (its label, here none: its description), never after the skill invocation (backlog story 2).
+    expect(core.entities.getSession(session.id)?.autoTitle).toBe('Write a spec.');
     await chat.settled();
     expect(agent.prompts).toEqual(['run-skill:bmad-spec']);
     // A plain chat is still a chat.

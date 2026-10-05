@@ -70,7 +70,7 @@ export function chatName(session: { title?: string | null | undefined; autoTitle
  * raw string is bounded here; the server normalizes it and refuses one over
  * {@link CHAT_NAME_MAX} characters.
  */
-export const RenameSessionRequest = z.object({ title: z.string().max(2000).nullable() });
+export const RenameSessionRequest = z.object({ title: z.string().max(2000, CHAT_NAME_TOO_LONG).nullable() });
 export type RenameSessionRequest = z.infer<typeof RenameSessionRequest>;
 
 /** Why a chat's name changed: the user renamed it, or core named it automatically. */

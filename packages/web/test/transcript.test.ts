@@ -60,6 +60,8 @@ describe('sessionView', () => {
     // A message queued meanwhile leaves it standing.
     expect(sessionView([...begun, event('session.message_queued', { sessionId: 'ses_1', messageId: 'u2', content: 'more' })], 'ses_1').starting).toBe(true);
     expect(sessionView([...begun, event('session.agent_started', { sessionId: 'ses_1' })], 'ses_1').starting).toBe(false);
+    // A rename (backlog story 2) is not something the session did.
+    expect(sessionView([...begun, event('session.renamed', { sessionId: 'ses_1', title: 'Mine', autoTitle: 'Hi', cause: 'user' })], 'ses_1').starting).toBe(true);
     expect(sessionView([...begun, delta('a1', 'Hel')], 'ses_1').starting).toBe(false);
     expect(sessionView([...begun, stateChanged('error', 'working', "Antigravity couldn't start. Try again.")], 'ses_1').starting).toBe(false);
     // Another session's start is not this one's.

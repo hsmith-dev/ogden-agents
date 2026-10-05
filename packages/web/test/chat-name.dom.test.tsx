@@ -48,7 +48,7 @@ describe('renaming from the header', () => {
     fireEvent.click(rename);
     expect(field().value).toBe('Fix the login bug');
     expect(document.activeElement).toBe(field());
-    expect(field().maxLength).toBe(80);
+    expect(field().maxLength).toBe(160);
     fireEvent.change(field(), { target: { value: 'Other' } });
     fireEvent.keyDown(field(), { key: 'Escape' });
     expect(screen.queryByRole('textbox')).toBeNull();
@@ -80,6 +80,23 @@ describe('renaming from the header', () => {
     fireEvent.click(second.rename);
     fireEvent.keyDown(field(), { key: 'Enter' });
     expect(second.fetch).not.toHaveBeenCalled();
+  });
+
+  it('a name over 80 characters is said, and not sent; leaving the field never pulls focus back', async () => {
+    const { fetch, rename } = mount();
+    fireEvent.click(rename);
+    fireEvent.change(field(), { target: { value: 'x'.repeat(81) } });
+    fireEvent.keyDown(field(), { key: 'Enter' });
+    expect(screen.getByRole('alert').textContent).toBe('A chat name can be at most 80 characters.');
+    expect(fetch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('chat-rename'));
+    const elsewhere = document.createElement('button');
+    document.body.append(elsewhere);
+    elsewhere.focus();
+    fireEvent.blur(field());
+    await waitFor(() => expect(screen.queryByRole('textbox')).toBeNull());
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
   });
 
   it('a refusal is said in plain words', async () => {

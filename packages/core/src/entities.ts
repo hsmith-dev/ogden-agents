@@ -544,9 +544,9 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
 
     setSessionTitle(id, title) {
       const name = normalizeChatName(title);
-      if (name !== null && !chatNameFits(name)) throw new ValidationError(CHAT_NAME_TOO_LONG, [{ path: ['title'], message: CHAT_NAME_TOO_LONG }]);
       return log.transaction(() => {
         const session = requireSession(id);
+        if (name !== null && !chatNameFits(name)) throw new ValidationError(CHAT_NAME_TOO_LONG, [{ path: ['title'], message: CHAT_NAME_TOO_LONG }]);
         if (session.title === name) return session;
         // `updatedAt` is left alone: a rename never moves a chat in the sidebar.
         orm.update(sessions).set({ title: name }).where(eq(sessions.id, id)).run();
@@ -563,15 +563,16 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
         const named: Session[] = [];
         const unnamed = orm.select({ id: sessions.id }).from(sessions).where(isNull(sessions.autoTitle)).orderBy(asc(sessions.createdAt), asc(sessions.id)).all();
         for (const { id } of unnamed) {
-          const first = orm
+          const messages = orm
             .select({ payload: events.payload })
             .from(events)
             .where(and(eq(events.streamId, id), eq(events.type, 'session.message_completed')))
             .orderBy(asc(events.seq))
             .all()
             .map(({ payload }) => payload as { role: MessageRole; content: string; origin?: string })
-            .find((message) => message.role === 'user' && message.origin !== 'deny_reason');
-          if (first !== undefined && sessionEvents.nameChat(id as SessionId, first.content)) named.push(requireSession(id as SessionId));
+            .filter((message) => message.role === 'user' && message.origin !== 'deny_reason');
+          // As the live path does: the first message with visible text names it.
+          if (messages.some((message) => sessionEvents.nameChat(id as SessionId, message.content))) named.push(requireSession(id as SessionId));
         }
         return named;
       });

@@ -38,7 +38,8 @@ export function WorkspaceHeader({
       <PageTitle className={titleHidden ? 'sr-only' : compactOnPhone && wsId !== undefined ? 'max-sm:sr-only' : undefined} data-testid="page-title">
         {title}
       </PageTitle>
-      {titleAction === undefined ? null : <span className={compactOnPhone && wsId !== undefined && !titleHidden ? 'contents max-sm:hidden' : 'contents'}>{titleAction}</span>}
+      {/* Kept at phone width too: with the title hidden there, Rename is still the way to rename from the header. */}
+      {titleAction}
       {wsId === undefined ? null : <WorkspaceTabs wsId={wsId} active={tab} />}
       {children}
     </PageHeader>

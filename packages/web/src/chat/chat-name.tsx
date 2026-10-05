@@ -1,5 +1,5 @@
 import { PencilSimple } from '@phosphor-icons/react';
-import { API_ROUTES, apiPath, CHAT_NAME_MAX, chatName, normalizeChatName, SessionResponse, type CoreEvent, type Session } from '@ogden-agents/shared';
+import { API_ROUTES, apiPath, CHAT_NAME_MAX, CHAT_NAME_TOO_LONG, chatName, chatNameFits, normalizeChatName, SessionResponse, type CoreEvent, type Session } from '@ogden-agents/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { call } from '@/api/http';
@@ -75,8 +75,9 @@ export function useChatRename({ wsId, sesId, name, title, className }: { wsId: s
   const returnTo = useRef<(() => HTMLElement | null | undefined) | undefined>(undefined);
   const refocus = useRef(false);
 
-  const close = useCallback(() => {
-    refocus.current = true;
+  /** Closes the field; focus goes back to what opened it after Enter or Esc, never after a click elsewhere took it. */
+  const close = useCallback((giveFocusBack = true) => {
+    refocus.current = giveFocusBack;
     setEditing(false);
   }, []);
   // After the field is gone and what opened it is back, focus goes there.
@@ -87,9 +88,14 @@ export function useChatRename({ wsId, sesId, name, title, className }: { wsId: s
   }, [editing]);
 
   const save = useCallback(
-    (value: string) => {
-      close();
+    (value: string, giveFocusBack: boolean) => {
+      close(giveFocusBack);
       const next = normalizeChatName(value);
+      // Counted as the server counts (characters, after normalizing): said here, nothing sent.
+      if (next !== null && !chatNameFits(next)) {
+        setError(CHAT_NAME_TOO_LONG);
+        return;
+      }
       // Unchanged, or the automatic name kept as it was: nothing to save.
       if (next === title || (title === null && next === name)) return;
       setError(undefined);
@@ -114,7 +120,7 @@ export function useChatRename({ wsId, sesId, name, title, className }: { wsId: s
   return {
     editing,
     start,
-    field: editing ? <ChatNameField initial={name} onSave={save} onCancel={close} className={className} /> : null,
+    field: editing ? <ChatNameField initial={name} onSave={save} onCancel={() => close()} className={className} /> : null,
     status: (
       <>
         <span role="status" className="sr-only" data-testid="chat-rename-status">
@@ -131,7 +137,7 @@ export function useChatRename({ wsId, sesId, name, title, className }: { wsId: s
 }
 
 /** The inline name field: focused with its text selected; Enter or leaving it saves, Esc cancels. */
-function ChatNameField({ initial, onSave, onCancel, className }: { initial: string; onSave(value: string): void; onCancel(): void; className?: string | undefined }) {
+function ChatNameField({ initial, onSave, onCancel, className }: { initial: string; onSave(value: string, giveFocusBack: boolean): void; onCancel(): void; className?: string | undefined }) {
   const [value, setValue] = useState(initial);
   const input = useRef<HTMLInputElement>(null);
   /** Set once the field has saved or cancelled, so the blur that follows does nothing. */
@@ -140,10 +146,10 @@ function ChatNameField({ initial, onSave, onCancel, className }: { initial: stri
     input.current?.focus();
     input.current?.select();
   }, []);
-  const finish = (save: boolean) => {
+  const finish = (save: boolean, byKey = true) => {
     if (done.current) return;
     done.current = true;
-    if (save) onSave(value);
+    if (save) onSave(value, byKey);
     else onCancel();
   };
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -161,14 +167,15 @@ function ChatNameField({ initial, onSave, onCancel, className }: { initial: stri
     <Input
       ref={input}
       value={value}
-      maxLength={CHAT_NAME_MAX}
+      // Room for characters outside the basic plane (two code units each) and white space normalizing removes; the cap is checked on save.
+      maxLength={CHAT_NAME_MAX * 2}
       aria-label="Chat name"
       aria-description="Enter saves, Escape cancels. Leave it empty to use the automatic name."
       data-testid="chat-name-input"
       className={cn('h-8', className)}
       onChange={(event) => setValue(event.target.value)}
       onKeyDown={onKeyDown}
-      onBlur={() => finish(true)}
+      onBlur={() => finish(true, false)}
       // A click in the field never reaches the row link it sits in.
       onClick={(event) => {
         event.stopPropagation();

@@ -191,6 +191,8 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
     // Rules live on the workspace's stream; their ids are unique across the install.
     if (event.type === 'workspace.permission_rule_removed') removedRules.add(event.payload.ruleId);
     if (event.streamId !== sessionId) continue;
+    // A chat's name (backlog story 2) is not something the session did: it leaves the transcript, Starting and a check-in alone.
+    if (event.type === 'session.renamed') continue;
     // A check-in stands only until the session does anything else.
     if (event.type !== 'session.check_in') view.checkIn = undefined;
     // Starting stands until the agent is started or anything else happens, but a message queued meanwhile.

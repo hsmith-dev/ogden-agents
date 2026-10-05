@@ -82,6 +82,14 @@ export function startFakeServer({ port = 0, host = '127.0.0.1', requireKey = nul
       const p = entry.path;
       if (req.method === 'GET' && (p === '/v1/models' || p === '/models')) return send(200, { object: 'list', data: models.map((id) => ({ id, object: 'model', created: 1, owned_by: 'fake' })) });
       if (req.method === 'GET' && p === '/api/tags') return send(200, { models: models.map((name) => ({ name, model: name, size: 4_000_000_000, details: { parameter_size: '7B', family: 'fake' } })) });
+      // The two native shapes Ogden reads for sizes, context length and tool support (story 14.5). `fake-small` is small, `fake-large` is big with tools.
+      const context = (name) => (name === 'fake-small' ? 4096 : name === 'fake-large' ? 32768 : 8192);
+      if (req.method === 'POST' && p === '/api/show') {
+        const name = json?.model;
+        if (!models.includes(name)) return send(404, { error: 'model not found' });
+        return send(200, { model_info: { 'fake.context_length': context(name) }, capabilities: name === 'fake-small' ? ['completion'] : ['completion', 'tools'] });
+      }
+      if (req.method === 'GET' && p === '/api/v0/models') return send(200, { object: 'list', data: models.map((id) => ({ id, object: 'model', type: 'llm', state: 'loaded', max_context_length: context(id) * 2, loaded_context_length: context(id), capabilities: id === 'fake-small' ? [] : ['tool_use'] })) });
       if (req.method === 'GET' && p === '/') return send(200, { ok: true });
       if (req.method === 'POST' && (p === '/v1/chat/completions' || p === '/chat/completions')) {
         const messages = json.messages ?? [];

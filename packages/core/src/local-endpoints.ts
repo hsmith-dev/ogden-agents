@@ -55,6 +55,8 @@ export interface LocalEndpointTarget {
   key?: string | undefined;
   /** The model its chats start on, when one is chosen. */
   model?: string | undefined;
+  /** The preset it was made from, if any. */
+  preset?: string | undefined;
 }
 
 export interface LocalEndpoints {
@@ -319,7 +321,7 @@ export function createLocalEndpoints({ db, events, secrets, now = () => new Date
         }
         if (key === undefined) throw new SecretsUnavailableError('The key for this server is no longer in your keychain. Enter it again in Settings, Agents.');
       }
-      return { endpointId: endpoint.id, baseUrl: endpoint.baseUrl, ...(key === undefined ? {} : { key }), ...(endpoint.model === null ? {} : { model: endpoint.model }) };
+      return { endpointId: endpoint.id, baseUrl: endpoint.baseUrl, ...(key === undefined ? {} : { key }), ...(endpoint.model === null ? {} : { model: endpoint.model }), ...(endpoint.preset === null ? {} : { preset: endpoint.preset }) };
     },
   };
 }

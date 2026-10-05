@@ -80,6 +80,8 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Epic 5 (5.5): a build's sandbox can write the main repo's `.git/objects`; a per-run object store would close it. From 5.2 security review S3. (log: "A build's sandbox can write the main repo's `.git/objects`")
 - Epic 11 (11.4): mask a webhook's host when listing it back; some providers put the token in the host name. From 5.3 security review S10. (log: "Listing a webhook back by its full host can show part of its secret")
 - Epic 5 (5.5): check a minimum git version (2.31+ for `rev-parse --path-format`, 2.39.2 for `git apply`'s symlink fix) and refuse older git with a plain reason. From 5.3 security review S15. (log: "Nothing checks a minimum git version")
+- Epic 5 (5.10, or a later sandbox story): stop a build's commands that leave the agent's process group (`setsid`) or outlive their parent on Windows (cgroup, job object or sandbox-level kill). From 5.4 security review S4. (log: "Stopping a build kills the agent's process group")
+- Epic 5 (5.8) or epic 11 (11.1): prune a run's folder (`<data>/r/<run8>`) and the activity recorder's maps with the run's worktree. From 5.4 security review S6. (log: "Run folders (`<data>/r/<run8>`, up to 32 MiB")
 
 ## Log
 

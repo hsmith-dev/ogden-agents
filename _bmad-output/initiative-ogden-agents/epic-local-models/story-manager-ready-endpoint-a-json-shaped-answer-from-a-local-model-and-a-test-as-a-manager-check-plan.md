@@ -3,12 +3,12 @@ title: 'Manager-ready endpoint: a JSON-shaped answer from a local model, and a T
 type: 'feature'
 ticket: '14.8'
 created: '2026-10-05'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['quick-security', 'quick-correctness']
 review_loop_iteration: 0
 baseline_revision: 'efe7f044de30eb031faf11e35ffe2be7be33ba9c'
 context:
@@ -69,6 +69,8 @@ Which structured-output option each real server honours is a live check (docs: L
 ## Plan Change Log
 
 ## Review Triage Log
+
+Security and correctness reviewers (2 lenses), no critical findings. Patched: the schema checker read the prototype chain (\`__proto__\`, \`constructor\` passed \`additionalProperties: false\`), now own keys only (high); a wrong typed answer of 130k items made the problem list overflow the stack, now at most 20 problems collected without spreads (high); the fenced block pattern was quadratic on a hostile reply (about 12 s of blocked event loop at the cap), now linear scans (high); a schema using a rule the checker ignores (\`anyOf\`, \`$ref\`, \`pattern\`) or nested too deep is refused up front (medium); a model's key names are shortened and cleaned in problems and the repair prompt is capped (medium); one deadline for the whole call, not per request (medium); a server's context error is recognised by its code, type or words (vLLM, llama.cpp and a plain string answer) and a 5xx on a response_format rung moves down the ladder (medium); content as a list of parts is read and an empty or null answer is "not JSON", not a broken server, and JSON after prose or a reasoning block is found (medium); an already stopped call sends nothing (low); the manager test message is chosen by an explicit detail token, not by matching text, and a test is shared between presses and has a body limit (medium); stale test results are cleared when the list is read again or a model is chosen (low); the circular import is gone (low). Not changed: any 404 on chat is reported as a missing model, including a wrong base path (low); the stub's contract is checked for success and unreachable only (low); the host and port appear in a failure's words (the user's own address, no path or key) (low). No intent_gap or bad_plan.
 
 ## Verification
 

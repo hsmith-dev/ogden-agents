@@ -8,6 +8,7 @@
 import { CoreError, EndpointConfirmationRequiredError, NotFoundError, SecretsUnavailableError, type LocalModels } from '@ogden-agents/core';
 import { API_ROUTES, LocalEndpointId, LocalEndpointModelsResponse, ManagerTestRequest, ManagerTestResponse, modelCautions } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { apiError, notImplemented } from './errors.js';
 import type { Logger } from './log.js';
 
@@ -39,7 +40,7 @@ export function registerLocalEndpointModelsRoute(app: Hono, { localModels, log }
   });
 
   // Test as a manager (epic 14 story 14.8): one fixed small request to one of the endpoint's models.
-  app.post(API_ROUTES.localEndpointManagerTest, async (c: Context) => {
+  app.post(API_ROUTES.localEndpointManagerTest, bodyLimit({ maxSize: 2 * 1024, onError: (c) => apiError(c, 413, 'invalid_request', 'The request is too large.') }), async (c: Context) => {
     c.header('Cache-Control', 'no-store');
     const id = LocalEndpointId.safeParse(c.req.param('endpointId'));
     if (!id.success) return apiError(c, 404, 'not_found', 'That server is not set up.');

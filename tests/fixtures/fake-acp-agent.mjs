@@ -15,6 +15,8 @@
 //   "permission"   an `execute` tool call (`npm test`), then asks permission
 //                  to run it; replies "Ran npm test." if allowed, else
 //                  "Denied npm test."
+//   "permission-hold"  as "permission", but once allowed the tool call stays
+//                  `in_progress` until the turn is cancelled (a long command)
 //   "permission <command>"  the same for <command> ("Ran <command>." or
 //                  "Denied <command>.")
 //   "permission-edit <path>[|<path>…]"  an `edit` tool call naming those
@@ -622,9 +624,10 @@ acp
       await say(client, params.sessionId, `${edited ? 'Edited' : 'Denied'} ${paths.join(', ')}.`);
       return { stopReason: 'end_turn' };
     }
-    if (text === 'permission' || text.startsWith('permission ') || text.startsWith('permission-safety ')) {
+    if (text === 'permission' || text === 'permission-hold' || text.startsWith('permission ') || text.startsWith('permission-safety ')) {
       const safety = text.startsWith('permission-safety ');
-      const command = text === 'permission' ? 'npm test' : text.slice(safety ? 'permission-safety '.length : 'permission '.length).trim();
+      const holds = text === 'permission-hold';
+      const command = text === 'permission' || holds ? 'npm test' : text.slice(safety ? 'permission-safety '.length : 'permission '.length).trim();
       // Antigravity names the command in `CommandLine` (6.5); Claude Code in `command`.
       const toolCall = { toolCallId: 'call-permission', title: `Run ${command}`, kind: 'execute', rawInput: ANTIGRAVITY ? { CommandLine: command } : { command } };
       await update(client, params.sessionId, { sessionUpdate: 'tool_call', ...toolCall, status: 'pending' });
@@ -652,6 +655,14 @@ acp
       });
       const chosen = answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled';
       const ran = chosen === 'allow' || chosen === 'always' || chosen === 'allow_always';
+      if (holds && ran) {
+        await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: 'in_progress' });
+        await new Promise((resolve) => {
+          session.cancel = () => resolve(undefined);
+        });
+        session.cancel = undefined;
+        return { stopReason: 'cancelled' };
+      }
       await update(client, params.sessionId, { sessionUpdate: 'tool_call_update', toolCallId: toolCall.toolCallId, status: ran ? 'completed' : 'failed' });
       await say(client, params.sessionId, `${ran ? 'Ran' : 'Denied'} ${command}.${ANTIGRAVITY ? ` chose=${chosen}` : ''}`);
       return { stopReason: 'end_turn' };

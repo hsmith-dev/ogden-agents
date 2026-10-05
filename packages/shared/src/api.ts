@@ -86,6 +86,20 @@ export const API_ROUTES = {
    */
   sessionCancel: `${API_BASE}/workspaces/:wsId/sessions/:sesId/cancel`,
   /**
+   * `PATCH UpdateQueuedMessageRequest` → 204, `DELETE` → 204 (send now or
+   * wait): edit, move or remove one message waiting to be sent; appends
+   * `session.queue_changed`. 409 `message_not_queued` when it is no longer
+   * waiting, `driver_is_terminal` while the terminal drives.
+   */
+  sessionQueuedMessage: `${API_BASE}/workspaces/:wsId/sessions/:sesId/queue/:messageId`,
+  /**
+   * `POST` → 204 (send now or wait): sends one waiting message right away,
+   * into the running turn when the agent can take it, else by stopping the
+   * current step (`session.turn_interrupted`). 409 `answer_first` while a
+   * permission card waits, `message_not_queued` when it is no longer waiting.
+   */
+  sessionQueuedMessageSendNow: `${API_BASE}/workspaces/:wsId/sessions/:sesId/queue/:messageId/send-now`,
+  /**
    * `POST SetDriverRequest` → `{ session }` (story 3.1, AD-6): hands the
    * session to its agent's own terminal (`terminal`) or back to the chat
    * (`ui`); appends `session.driver_changed`. When the switch can't happen
@@ -191,6 +205,13 @@ export const API_ROUTES = {
    * chat to Ask in the same transaction.
    */
   developerMode: `${API_BASE}/settings/developer-mode`,
+  /**
+   * `GET` → `ChatSettingsResponse`; `PUT SetChatSettingsRequest` →
+   * `ChatSettingsResponse` (send now or wait): the app-wide choice of what a
+   * message sent while the agent works does. A change appends
+   * `settings.while_working_changed`.
+   */
+  chatSettings: `${API_BASE}/settings/chat`,
   /**
    * `GET` → `BmadDetectionResponse` (story 10.2's contract; 10.3 serves it):
    * whether the project's repo already has `_bmad/`, read-only. Not guarded.

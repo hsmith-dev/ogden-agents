@@ -1,5 +1,6 @@
 import { AgentCard } from '@/agents/agent-card';
 import { useAgents } from '@/agents/agent-setup-api';
+import { AppWhileWorkingSection } from '@/chat/while-working-section';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
@@ -43,6 +44,7 @@ export function AgentsSettingsPage() {
             query.data.map((agent) => <AgentCard key={agent.agentId} agent={agent} />)
           )}
         </PageSection>
+        <AppWhileWorkingSection />
       </PageBody>
     </>
   );

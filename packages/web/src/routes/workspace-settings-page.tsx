@@ -6,6 +6,7 @@ import { useRef, useState } from 'react';
 import { keepSaved } from '@/api/keep-saved';
 import { ChatApiError, removePermissionRule } from '@/chat/chat-api';
 import { DefaultAgentView, type DefaultAgentViewProps } from '@/chat/default-agent-view';
+import { ProjectWhileWorkingSection } from '@/chat/while-working-section';
 import { projectDefaultAgent, useChatAgents } from '@/chat/use-chat-agents';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { AlertDialog, AlertDialogCancel, AlertDialogConfirm, AlertDialogContent, AlertDialogTrigger } from '@/ui/alert-dialog';
@@ -53,6 +54,7 @@ export function WorkspaceSettingsPage() {
           <>
             <CautionLevelSection wsId={wsId} />
             <DefaultAgentSection wsId={wsId} />
+            <ProjectWhileWorkingSection wsId={wsId} />
             <BmadSection wsId={wsId} />
             <AlwaysAllowRulesSection wsId={wsId} name={workspaceName(workspace.data)} />
             <DeleteHistorySection wsId={wsId} name={workspaceName(workspace.data)} />

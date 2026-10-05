@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { BmadPieceSet } from './bmad.js';
-import { AgentAuthMethodKind, AgentAuthState, AgentId, AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, MessageId, PermissionDecision } from './events.js';
+import { AgentAuthMethodKind, AgentAuthState, AgentId, AlwaysAllowScope, CautionLevel, MAX_DENY_REASON_LENGTH, MessageId, PermissionDecision, WhileWorking } from './events.js';
 import { PermissionMode, Session, Workspace } from './entities.js';
 import { PermissionRuleId, WorkspaceId } from './ids.js';
 import { AgentInstallState } from './setup.js';
@@ -136,13 +136,18 @@ export type SessionResponse = z.infer<typeof SessionResponse>;
 /** The longest message the composer may send, in characters. */
 export const MAX_MESSAGE_LENGTH = 100_000;
 
-/** `POST /api/v1/workspaces/:wsId/sessions/:sesId/messages`. */
-export const SendMessageRequest = z.object({
-  text: z
-    .string()
-    .refine((text) => text.trim().length > 0, 'Write a message first.')
-    .pipe(z.string().max(MAX_MESSAGE_LENGTH, `A message can be at most ${MAX_MESSAGE_LENGTH} characters.`)),
-});
+/** A message's text: not blank, at most `MAX_MESSAGE_LENGTH` characters. */
+const MessageText = z
+  .string()
+  .refine((text) => text.trim().length > 0, 'Write a message first.')
+  .pipe(z.string().max(MAX_MESSAGE_LENGTH, `A message can be at most ${MAX_MESSAGE_LENGTH} characters.`));
+
+/**
+ * `POST /api/v1/workspaces/:wsId/sessions/:sesId/messages`. `delivery` is
+ * what the message does if the agent is working (send now or wait): absent
+ * means `wait`, as before. The composer always says which the user chose.
+ */
+export const SendMessageRequest = z.object({ text: MessageText, delivery: WhileWorking.optional() });
 export type SendMessageRequest = z.infer<typeof SendMessageRequest>;
 
 /**
@@ -224,7 +229,14 @@ export type HistoryDeletedResponse = z.infer<typeof HistoryDeletedResponse>;
  * `defaultAgentId` absent: the install's default agent
  * (`ChatAgentsResponse.defaultAgentId`).
  */
-export const WorkspaceSettings = z.object({ cautionLevel: CautionLevel, bmadPieces: BmadPieceSet, bmadScriptsTrusted: z.boolean().default(false), defaultAgentId: AgentId.optional() });
+export const WorkspaceSettings = z.object({
+  cautionLevel: CautionLevel,
+  bmadPieces: BmadPieceSet,
+  bmadScriptsTrusted: z.boolean().default(false),
+  defaultAgentId: AgentId.optional(),
+  /** The project's own choice of what a message sent while the agent works does (send now or wait); absent: the app-wide one. */
+  whileWorking: WhileWorking.optional(),
+});
 export type WorkspaceSettings = z.infer<typeof WorkspaceSettings>;
 
 /** `GET` and `PATCH /api/v1/workspaces/:wsId/settings`. */
@@ -240,9 +252,15 @@ export type WorkspaceSettingsResponse = z.infer<typeof WorkspaceSettingsResponse
  * doesn't have is refused with `agent_unknown`.
  */
 export const UpdateWorkspaceSettingsRequest = z
-  .object({ cautionLevel: CautionLevel.optional(), bmadPieces: BmadPieceSet.optional(), defaultAgentId: AgentId.nullable().optional() })
+  .object({
+    cautionLevel: CautionLevel.optional(),
+    bmadPieces: BmadPieceSet.optional(),
+    defaultAgentId: AgentId.nullable().optional(),
+    /** `null` goes back to the app-wide choice (send now or wait). */
+    whileWorking: WhileWorking.nullable().optional(),
+  })
   .refine(
-    (settings) => settings.cautionLevel !== undefined || settings.bmadPieces !== undefined || settings.defaultAgentId !== undefined,
+    (settings) => settings.cautionLevel !== undefined || settings.bmadPieces !== undefined || settings.defaultAgentId !== undefined || settings.whileWorking !== undefined,
     'Choose a setting to change.',
   );
 export type UpdateWorkspaceSettingsRequest = z.infer<typeof UpdateWorkspaceSettingsRequest>;
@@ -298,3 +316,24 @@ export type DeveloperModeResponse = z.infer<typeof DeveloperModeResponse>;
 /** `PUT /api/v1/settings/developer-mode`. */
 export const SetDeveloperModeRequest = z.object({ developerMode: z.boolean() });
 export type SetDeveloperModeRequest = z.infer<typeof SetDeveloperModeRequest>;
+
+// ---------------------------------------------------------------------------
+// Send now or wait (2026-10-04).
+// ---------------------------------------------------------------------------
+
+/** `GET` and `PUT /api/v1/settings/chat`: the app-wide choice of what a message sent while the agent works does. */
+export const ChatSettingsResponse = z.object({ whileWorking: WhileWorking });
+export type ChatSettingsResponse = z.infer<typeof ChatSettingsResponse>;
+
+/** `PUT /api/v1/settings/chat`. */
+export const SetChatSettingsRequest = z.object({ whileWorking: WhileWorking });
+export type SetChatSettingsRequest = z.infer<typeof SetChatSettingsRequest>;
+
+/**
+ * `PATCH /api/v1/workspaces/:wsId/sessions/:sesId/queue/:messageId`: change
+ * one waiting message: its text, or its place (`position`, 0 = goes next).
+ */
+export const UpdateQueuedMessageRequest = z
+  .object({ content: MessageText.optional(), position: z.number().int().min(0).optional() })
+  .refine((input) => input.content !== undefined || input.position !== undefined, 'Choose what to change.');
+export type UpdateQueuedMessageRequest = z.infer<typeof UpdateQueuedMessageRequest>;

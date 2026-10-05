@@ -12,7 +12,9 @@ import { ReadOnlyConversation } from '@/chat/read-only';
 import { SignInAgain } from '@/chat/sign-in-again';
 import { ToolCalls } from '@/chat/tool-call-row';
 import { sessionView, type TranscriptCheckIn, type TranscriptItem } from '@/chat/transcript';
-import { EarlierHistory, Message, ResumedMarker } from '@/chat/transcript-parts';
+import { EarlierHistory, InterruptedNote, Message, ResumedMarker } from '@/chat/transcript-parts';
+import { QueuedMessages } from '@/chat/queued-messages';
+import { otherWayShortcutLabel, useWhileWorking } from '@/chat/send-mode';
 import { useCaughtUp, useEarlierHistory, useSessionEvents } from '@/events/event-stream';
 import { PermissionCard, permissionAnnouncement } from '@/permissions/permission-card';
 import { DocumentCard } from '@/planning/document-card';
@@ -44,10 +46,18 @@ const itemKey = (item: TranscriptItem, index: number): string =>
         ? `resumed-${item.at}-${index}`
         : item.type === 'document'
           ? `document-${item.path}`
-          : item.permission.requestId;
+          : item.type === 'interrupted'
+            ? `interrupted-${item.messageId}`
+            : item.permission.requestId;
 
 /** What the composer says while the terminal drives (DESIGN.md Composer). */
 const TERMINAL_DRIVING_REASON = 'The terminal is driving this session';
+
+/** What the composer says while the agent works (send now or wait): what `Enter` does, and the other way. */
+const workingHint = (agentName: string, whileWorking: 'wait' | 'now') =>
+  whileWorking === 'now'
+    ? `${agentName} is working. A message you send now goes right away. Press ${otherWayShortcutLabel()} to send it after it finishes.`
+    : `${agentName} is working. A message you send now waits its turn. Press ${otherWayShortcutLabel()} to send it right away.`;
 
 /** What the quiet-agent status line says (user decision, story 2.10). */
 const checkInWords = (checkIn: TranscriptCheckIn, agentName: string) =>
@@ -115,6 +125,8 @@ export function SessionPage() {
   const seenQueued = useRef(new Set<string>());
   const restored = useRef(new Set<string>());
   const [restore, setRestore] = useState<{ key: string; text: string } | undefined>(undefined);
+  // Send now or wait: the project's choice, else the app's.
+  const whileWorking = useWhileWorking(wsId);
 
   useEffect(() => {
     for (const message of view.queued) seenQueued.current.add(message.messageId);
@@ -399,6 +411,8 @@ export function SessionPage() {
                     <ToolCalls key={`tools-${item.calls[0]?.toolCallId ?? index}`} calls={item.calls} density={appearance.density} />
                   ) : item.type === 'resumed' ? (
                     <ResumedMarker key={`resumed-${item.at}-${index}`} />
+                  ) : item.type === 'interrupted' ? (
+                    <InterruptedNote key={`interrupted-${item.messageId}`} />
                   ) : item.type === 'document' ? (
                     <DocumentCard
                       key={`document-${item.path}`}
@@ -420,9 +434,14 @@ export function SessionPage() {
                   ),
                 )
               )}
-              {view.queued.map((message) => (
-                <Message key={message.messageId} message={message} agentName={agentName} />
-              ))}
+              <QueuedMessages
+                wsId={wsId}
+                sesId={sesId}
+                messages={view.queued}
+                readOnly={terminalDrives}
+                sendNowBlockedReason={state === 'waiting' ? 'Answer the request above first, then send your message.' : undefined}
+                onError={setActionError}
+              />
               {state === 'working' && view.starting ? (
                 // A slow agent start (epic 6 entry 5: Antigravity takes about 17 s on Windows) reads as starting, not stuck.
                 <Notice data-testid="agent-starting" role="status">
@@ -516,7 +535,9 @@ export function SessionPage() {
                 ? `${agentName} is waiting for your answer above.`
                 : undefined
           }
-          hint={state === 'working' ? `${agentName} is working. A message you send now waits its turn.` : undefined}
+          hint={state === 'working' ? workingHint(agentName, whileWorking) : undefined}
+          whileWorking={whileWorking}
+          working={state === 'working'}
           restore={restore}
           action={
             busy ? (
@@ -537,8 +558,8 @@ export function SessionPage() {
               </Button>
             ) : null
           }
-          onSend={async (text) => {
-            await sendMessage(wsId, sesId, text);
+          onSend={async (text, delivery) => {
+            await sendMessage(wsId, sesId, text, undefined, delivery);
           }}
         />
       </PageFooter>

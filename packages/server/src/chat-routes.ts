@@ -12,6 +12,7 @@
  * `GET` session.
  */
 import {
+  AnswerFirstError,
   ConfirmationRequiredError,
   CoreError,
   createAddProject,
@@ -20,6 +21,7 @@ import {
   ModeUnavailableError,
   FeatureUnavailableError,
   InvalidOperationError,
+  MessageNotQueuedError,
   NotFoundError,
   QueueFullError,
   SessionBusyError,
@@ -44,6 +46,8 @@ import {
   SessionsResponse,
   SetDriverRequest,
   SetPermissionModeRequest,
+  UpdateQueuedMessageRequest,
+  MessageId,
   type SessionTerminal,
   WorkspaceResponse,
   WorkspacesResponse,
@@ -88,6 +92,9 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
       return apiError(c, 409, 'session_busy', 'Too many messages are waiting. Send this one when the agent has caught up.');
     }
     if (error instanceof SessionNotBusyError) return apiError(c, 409, 'session_not_busy', 'The agent is not working on anything to stop.');
+    // Send now or wait: core's plain reasons; nothing was sent or changed.
+    if (error instanceof AnswerFirstError) return apiError(c, 409, 'answer_first', error.message);
+    if (error instanceof MessageNotQueuedError) return apiError(c, 409, 'message_not_queued', error.message);
     // A switch refused (story 3.2): core's plain reason, and for the terminal the `SessionTerminal` that says why.
     if (error instanceof SessionNotIdleError) return apiError(c, 409, 'session_not_idle', error.message);
     if (error instanceof TerminalUnavailableError) return apiError(c, 409, 'terminal_unavailable', error.message, { terminal: error.terminal });
@@ -228,8 +235,47 @@ export function registerChatRoutes(app: Hono, chat: Chat, log: Logger, { termina
     if (!body.ok) return body.response;
     try {
       // The message itself is the user's content: never logged.
-      const result = chat.sendMessage(scope.workspaceId, scope.sessionId, body.value.text);
+      const result = chat.sendMessage(scope.workspaceId, scope.sessionId, body.value.text, { delivery: body.value.delivery });
       return c.json(SendMessageResponse.parse(result), 202);
+    } catch (error) {
+      return refusal(c, error);
+    }
+  });
+
+  // Send now or wait: the messages waiting to be sent, one at a time. Their text is the user's: never logged.
+  const queuedScope = (c: Context) => {
+    const scope = ids(c);
+    const messageId = MessageId.safeParse(c.req.param('messageId'));
+    return scope?.sessionId === undefined || !messageId.success ? undefined : { workspaceId: scope.workspaceId, sessionId: scope.sessionId, messageId: messageId.data };
+  };
+  app.patch(API_ROUTES.sessionQueuedMessage, limit, async (c) => {
+    const scope = queuedScope(c);
+    if (scope === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+    const body = await readBody(c, UpdateQueuedMessageRequest);
+    if (!body.ok) return body.response;
+    try {
+      chat.updateQueuedMessage(scope.workspaceId, scope.sessionId, scope.messageId, body.value);
+      return c.body(null, 204);
+    } catch (error) {
+      return refusal(c, error);
+    }
+  });
+  app.delete(API_ROUTES.sessionQueuedMessage, (c) => {
+    const scope = queuedScope(c);
+    if (scope === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+    try {
+      chat.removeQueuedMessage(scope.workspaceId, scope.sessionId, scope.messageId);
+      return c.body(null, 204);
+    } catch (error) {
+      return refusal(c, error);
+    }
+  });
+  app.post(API_ROUTES.sessionQueuedMessageSendNow, (c) => {
+    const scope = queuedScope(c);
+    if (scope === undefined) return apiError(c, 404, 'not_found', NOT_FOUND);
+    try {
+      chat.sendQueuedMessageNow(scope.workspaceId, scope.sessionId, scope.messageId);
+      return c.body(null, 204);
     } catch (error) {
       return refusal(c, error);
     }

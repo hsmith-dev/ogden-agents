@@ -16,6 +16,8 @@ import {
   type CautionLevel,
   type WorkspaceId,
   type WorkspaceSettings,
+  type WhileWorking,
+  WhileWorking as WhileWorkingSchema,
 } from '@ogden-agents/shared';
 import { eq } from 'drizzle-orm';
 import { readBmadPieces } from './bmad-pieces.js';
@@ -45,8 +47,10 @@ export interface WorkspaceSettingsAccess {
    * unknown workspace. The default agent (epic 6, entry 6) is an agent id,
    * or `null` for the install's default; {@link UnknownAgentError} for one
    * this install doesn't have. Every refusal writes nothing.
+   * `whileWorking` (send now or wait) is `wait` or `now`, or `null` for the
+   * app-wide choice; {@link ValidationError} for anything else.
    */
-  updateSettings(workspaceId: WorkspaceId, input: { cautionLevel?: unknown; bmadPieces?: unknown; defaultAgentId?: unknown }): WorkspaceSettings;
+  updateSettings(workspaceId: WorkspaceId, input: { cautionLevel?: unknown; bmadPieces?: unknown; defaultAgentId?: unknown; whileWorking?: unknown }): WorkspaceSettings;
 }
 
 /**
@@ -59,6 +63,18 @@ export function readDefaultAgent(orm: Orm, workspaceId: string, isAgentRegistere
   if (row === undefined) return null;
   const parsed = AgentIdSchema.safeParse(row.defaultAgentId);
   return parsed.success && isAgentRegistered(parsed.data) ? parsed.data : undefined;
+}
+
+/**
+ * The project's own choice of what a message sent while the agent works does
+ * (send now or wait), `undefined` for the app-wide one (none chosen, or a
+ * damaged value); `null` for an unknown workspace.
+ */
+export function readWhileWorking(orm: Orm, workspaceId: string): WhileWorking | undefined | null {
+  const row = orm.select({ whileWorking: workspaces.whileWorking }).from(workspaces).where(eq(workspaces.id, workspaceId)).get();
+  if (row === undefined) return null;
+  const parsed = WhileWorkingSchema.safeParse(row.whileWorking);
+  return parsed.success ? parsed.data : undefined;
 }
 
 /** The workspace's stored level; the strictest one when it can't be read; `undefined` for an unknown workspace. */
@@ -90,8 +106,9 @@ export function createWorkspaceSettings({ db, events, isBmadPieceAvailable, isAg
       const bmadPieces = readBmadPieces(orm, workspaceId);
       const bmadScriptsTrusted = readScriptsTrusted(orm, workspaceId);
       const defaultAgentId = readDefaultAgent(orm, workspaceId, isAgentRegistered);
-      if (cautionLevel === undefined || bmadPieces === undefined || bmadScriptsTrusted === undefined || defaultAgentId === null) throw new NotFoundError('workspace', workspaceId);
-      return { cautionLevel, bmadPieces, bmadScriptsTrusted, ...(defaultAgentId === undefined ? {} : { defaultAgentId }) };
+      const whileWorking = readWhileWorking(orm, workspaceId);
+      if (cautionLevel === undefined || bmadPieces === undefined || bmadScriptsTrusted === undefined || defaultAgentId === null || whileWorking === null) throw new NotFoundError('workspace', workspaceId);
+      return { cautionLevel, bmadPieces, bmadScriptsTrusted, ...(defaultAgentId === undefined ? {} : { defaultAgentId }), ...(whileWorking === undefined ? {} : { whileWorking }) };
     },
 
     updateSettings(workspaceId, input) {
@@ -121,14 +138,22 @@ export function createWorkspaceSettings({ db, events, isBmadPieceAvailable, isAg
         if (parsed.data !== null && !isAgentRegistered(parsed.data)) throw new UnknownAgentError();
         agent = parsed.data;
       }
-      if (cautionLevel === undefined && bmadPieces === undefined && agent === undefined) {
+      // What a message sent while the agent works does (send now or wait): `wait`, `now`, or null for the app-wide choice.
+      let whileWorking: WhileWorking | null | undefined;
+      if (input.whileWorking !== undefined) {
+        const parsed = WhileWorkingSchema.nullable().safeParse(input.whileWorking);
+        if (!parsed.success) throw new ValidationError('Choose Wait until it finishes or Send right away.', [{ path: ['whileWorking'], message: 'unknown choice' }]);
+        whileWorking = parsed.data;
+      }
+      if (cautionLevel === undefined && bmadPieces === undefined && agent === undefined && whileWorking === undefined) {
         throw new ValidationError('Choose a setting to change.', [{ path: [], message: 'nothing to change' }]);
       }
       return events.transaction(() => {
         const previous = readCautionLevel(orm, workspaceId);
         const previousBmadPieces = readBmadPieces(orm, workspaceId);
         const previousAgent = readDefaultAgent(orm, workspaceId, isAgentRegistered);
-        if (previous === undefined || previousBmadPieces === undefined || previousAgent === null) throw new NotFoundError('workspace', workspaceId);
+        const previousWhileWorking = readWhileWorking(orm, workspaceId);
+        if (previous === undefined || previousBmadPieces === undefined || previousAgent === null || previousWhileWorking === null) throw new NotFoundError('workspace', workspaceId);
         const level = cautionLevel ?? previous;
         // Compared as sets: the same pieces in another order change nothing.
         const piecesChanged =
@@ -143,11 +168,24 @@ export function createWorkspaceSettings({ db, events, isBmadPieceAvailable, isAg
         const stored = orm.select({ defaultAgentId: workspaces.defaultAgentId }).from(workspaces).where(eq(workspaces.id, workspaceId)).get()?.defaultAgentId ?? null;
         const agentChanged = agent !== undefined && ((agent ?? undefined) !== previousAgent || (agent === null && stored !== null));
         const defaultAgentId = agentChanged ? (agent ?? undefined) : previousAgent;
-        const settings = { cautionLevel: level, bmadPieces: pieces, bmadScriptsTrusted, ...(defaultAgentId === undefined ? {} : { defaultAgentId }) };
-        if (level === previous && !piecesChanged && !agentChanged) return settings;
+        const whileWorkingChanged = whileWorking !== undefined && (whileWorking ?? undefined) !== previousWhileWorking;
+        const projectWhileWorking = whileWorkingChanged ? (whileWorking ?? undefined) : previousWhileWorking;
+        const settings = {
+          cautionLevel: level,
+          bmadPieces: pieces,
+          bmadScriptsTrusted,
+          ...(defaultAgentId === undefined ? {} : { defaultAgentId }),
+          ...(projectWhileWorking === undefined ? {} : { whileWorking: projectWhileWorking }),
+        };
+        if (level === previous && !piecesChanged && !agentChanged && !whileWorkingChanged) return settings;
         orm
           .update(workspaces)
-          .set({ cautionLevel: level, bmadPieces: JSON.stringify(pieces), ...(agentChanged ? { defaultAgentId: agent ?? null } : {}) })
+          .set({
+            cautionLevel: level,
+            bmadPieces: JSON.stringify(pieces),
+            ...(agentChanged ? { defaultAgentId: agent ?? null } : {}),
+            ...(whileWorkingChanged ? { whileWorking: whileWorking ?? null } : {}),
+          })
           .where(eq(workspaces.id, workspaceId))
           .run();
         events.append({
@@ -159,6 +197,7 @@ export function createWorkspaceSettings({ db, events, isBmadPieceAvailable, isAg
             previous,
             ...(piecesChanged ? { bmadPieces: pieces, previousBmadPieces } : {}),
             ...(agentChanged ? { defaultAgentId: agent ?? null, previousDefaultAgentId: previousAgent ?? null } : {}),
+            ...(whileWorkingChanged ? { whileWorking: whileWorking ?? null, previousWhileWorking: previousWhileWorking ?? null } : {}),
           },
         });
         return settings;

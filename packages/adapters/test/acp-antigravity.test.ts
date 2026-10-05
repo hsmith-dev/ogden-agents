@@ -77,6 +77,8 @@ describe("Antigravity's descriptor (epic 6 entry 5)", () => {
     expect(agentEnvKeys([ANTIGRAVITY_DESCRIPTOR])).toEqual(['GEMINI_API_KEY']);
     expect(ANTIGRAVITY_DESCRIPTOR.homeEnv).toBe('GEMINI_HOME');
     expect(ANTIGRAVITY_DESCRIPTOR.skillsFolder).toBe('.agents/skills');
+    // Send now or wait: no steering, so a message sent right away stops the current step.
+    expect(ANTIGRAVITY_DESCRIPTOR.sendNow).toBe('interrupt');
     expect(ANTIGRAVITY_DESCRIPTOR.install).toMatchObject({ kind: 'archive', version: '1.3.0' });
     // The three platforms spike 6.1 hashed, each with its server and Linux's `--uid=`.
     expect(Object.keys(ANTIGRAVITY_PINS.archives).sort()).toEqual(['darwin-arm64', 'linux-x64', 'win32-x64']);
@@ -111,6 +113,15 @@ describe('the pinned server in the data folder', () => {
 });
 
 describe("Antigravity's chat (fake personality)", () => {
+  it('offers no steering (send now or wait): core stops the step instead, and session/cancel ends the turn', async () => {
+    const { session, events } = await start();
+    expect(session.steer).toBeUndefined();
+    const prompting = session.prompt('hold');
+    while (!replyText(events).includes('Holding')) await new Promise((resolve) => setTimeout(resolve, 10));
+    await session.cancel();
+    expect(await prompting).toEqual({ stopReason: 'cancelled' });
+  });
+
   it('authenticates with its API key before the session, and reaches its own home', async () => {
     const { session, events, diagnostics } = await start();
     await session.prompt('auth');

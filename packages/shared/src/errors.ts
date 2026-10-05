@@ -131,6 +131,13 @@ export const API_ERROR_CODES = [
    * trust is bound to their contents). Nothing ran. The UI asks again.
    */
   'scripts_changed',
+  /**
+   * A message was to be sent right away while the agent waits for an answer
+   * on a permission card (409; send now or wait): nothing was sent. Waiting is still possible.
+   */
+  'answer_first',
+  /** A waiting message was to be changed or sent right away, but it is no longer waiting (sent, removed, or the turn ended; 409). */
+  'message_not_queued',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

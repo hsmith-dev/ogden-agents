@@ -74,4 +74,6 @@ export const ANTIGRAVITY_DESCRIPTOR: Readonly<AgentDescriptor> = Object.freeze<A
   // Its own workspace-trust question arrives as a permission card; Ogden's per-project trust (4.2) is not needed.
   needsProjectTrust: false,
   skillsFolder: '.agents/skills',
+  // antigravity-acp 1.3.0 advertises no steering: a message sent right away stops the current step (`session/cancel`).
+  sendNow: 'interrupt',
 });

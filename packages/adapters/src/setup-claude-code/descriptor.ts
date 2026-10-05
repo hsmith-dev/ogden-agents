@@ -26,4 +26,6 @@ export const CLAUDE_CODE_DESCRIPTOR: Readonly<AgentDescriptor> = Object.freeze<A
   permissionModes: { ask: ACP_MODE_IDS.ask, auto: ACP_MODE_IDS.auto, skip_all: ACP_MODE_IDS.skip_all },
   needsProjectTrust: false,
   skillsFolder: '.claude/skills',
+  // claude-agent-acp 0.84 takes a message into the running turn (`_session/steering`, advertised at `initialize`).
+  sendNow: 'inject',
 });

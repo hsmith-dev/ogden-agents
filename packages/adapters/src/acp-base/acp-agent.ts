@@ -62,6 +62,15 @@ import { acpAsksLessThanAsk, acpModeOf, acpReasons, type AcpAgentOptions, type A
 
 export { acpAsksLessThanAsk, acpModeOf, acpReasons, slashSkillInvocation, type AcpAgentOptions, type AcpAgentQuirks, type AcpLaunch } from './quirks.js';
 
+/** The ACP steering extension request (claude-agent-acp 0.84): a user message into the running turn. */
+const STEER_METHOD = '_session/steering';
+
+/** Whether the agent advertised the steering extension (`InitializeResponse._meta.steering.supported`). */
+function steeringAdvertised(init: acp.InitializeResponse): boolean {
+  const steering: unknown = (init._meta as Record<string, unknown> | null | undefined)?.steering;
+  return typeof steering === 'object' && steering !== null && (steering as { supported?: unknown }).supported === true;
+}
+
 /** How long the agent may take to start and answer `initialize` and `session/new`. */
 export const START_TIMEOUT_MS = 60_000;
 /** How long `close` waits, after ending the agent's stdin, for it to exit before killing its process tree. */
@@ -546,6 +555,23 @@ async function startOnChild(
       if (exited || closing) return;
       await connection.agent.notify('session/cancel', { sessionId });
     },
+
+    // Send now or wait: only an agent that declares injection and advertised `_session/steering` at `initialize`.
+    ...(descriptor.sendNow === 'inject' && steeringAdvertised(init)
+      ? {
+          async steer(text: string): Promise<'injected' | 'no_turn'> {
+            if (exited || closing) throw new AgentError('agent_failed', STOPPED);
+            // `promptRequired`: with no turn running the agent starts nothing, and core sends it as a prompt.
+            const answer = await Promise.race([
+              connection.agent.request<{ outcome?: unknown }>(STEER_METHOD, { sessionId, prompt: [{ type: 'text', text }], _meta: { steering: { idleBehavior: 'promptRequired' } } }),
+              gone,
+            ]);
+            if (answer.outcome === 'injected') return 'injected';
+            if (answer.outcome === 'promptRequired') return 'no_turn';
+            throw new AgentError('agent_failed', FAILED);
+          },
+        }
+      : {}),
 
     close() {
       closed ??= (async () => {

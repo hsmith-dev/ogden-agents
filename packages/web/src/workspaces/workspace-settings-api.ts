@@ -7,6 +7,7 @@ import {
   type BmadPiece,
   type BmadPieceAvailability,
   type CautionLevel,
+  type WhileWorking,
   type WorkspaceSettings,
 } from '@ogden-agents/shared';
 import { useQuery } from '@tanstack/react-query';
@@ -38,6 +39,20 @@ export async function updateDefaultAgent(wsId: string, defaultAgentId: string | 
     apiPath(API_ROUTES.workspaceSettings, { wsId }),
     { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ defaultAgentId }) },
     "The default agent couldn't be saved",
+  );
+  return WorkspaceSettingsResponse.parse(json).settings;
+}
+
+/**
+ * `PATCH /api/v1/workspaces/:wsId/settings`: what a message sent while the
+ * agent works does in this project (send now or wait), or `null` for the app's choice.
+ */
+export async function updateWhileWorking(wsId: string, whileWorking: WhileWorking | null, auth: Auth = tabAuth): Promise<WorkspaceSettings> {
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.workspaceSettings, { wsId }),
+    { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ whileWorking }) },
+    "That setting couldn't be saved",
   );
   return WorkspaceSettingsResponse.parse(json).settings;
 }

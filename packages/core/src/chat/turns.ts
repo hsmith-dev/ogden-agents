@@ -196,7 +196,11 @@ export function createTurns(
       const prompting = started.prompt(prompt);
       // Abandoned if the agent is dropped; its late rejection is not unhandled.
       prompting.catch(() => undefined);
-      const result = await Promise.race([prompting, entry.gone.then(() => undefined)]);
+      // While it is out, a message sent right away can go into the turn or stop it (send now or wait).
+      turn.prompting = true;
+      const result = await Promise.race([prompting, entry.gone.then(() => undefined)]).finally(() => {
+        turn.prompting = false;
+      });
       if (result === undefined) return;
       if (primed) {
         // Primed once: the agent has the transcript now, and its session is the chat's (2.7 F4).
@@ -222,7 +226,16 @@ export function createTurns(
     const reason = turn.reasons.shift();
     if (reason !== undefined) return { messageId: newMessageId(), text: reason, queued: false };
     const queued = turn.queue.shift();
-    return queued === undefined ? undefined : { ...queued, queued: true };
+    return queued === undefined ? undefined : { messageId: queued.messageId, text: queued.text, queued: true };
+  };
+
+  /** Waits until no message sent right away is still on its way into the turn (send now or wait). */
+  const steered = async (turn: Turn): Promise<void> => {
+    while (turn.steering !== undefined) {
+      const steering = turn.steering;
+      await steering;
+      if (turn.steering === steering) turn.steering = undefined;
+    }
   };
 
   /** Runs turns until nothing is left to send, then leaves the session settled: never `working` or `waiting`. */
@@ -230,6 +243,8 @@ export function createTurns(
     let next = first;
     for (;;) {
       await runTurn(session, workspace, turn, next.messageId, next.text);
+      // A message sent right away whose answer is still coming is taken in, or goes next, before anything else.
+      await steered(turn);
       if (ctx.closing || turn.failed) break;
       const following = takeNext(turn);
       if (following === undefined) break;
@@ -305,11 +320,24 @@ export function createTurns(
       getSession(workspaceId, sessionId);
       const turn = busy.get(sessionId);
       if (turn === undefined || turn.failed) throw new SessionNotBusyError(sessionId);
+      stop(sessionId, turn, { keepQueue: false });
+    },
+  };
+
+  /**
+   * Stops the running turn: Stop (`keepQueue: false`: what was queued, and any
+   * Deny reason, stays unsent, shown "Not sent"), or a message sent right
+   * away to an agent that can't take it mid-turn (`keepQueue: true`: the
+   * queue, that message first, goes on after the turn ends; send now or wait).
+   */
+  function stop(sessionId: SessionId, turn: Turn, { keepQueue }: { keepQueue: boolean }): void {
+    {
       if (turn.stopping) return;
       turn.stopping = true;
-      // What was queued, and any Deny reason, stays unsent: the UI shows it "Not sent".
-      turn.queue = [];
-      turn.reasons = [];
+      if (!keepQueue) {
+        turn.queue = [];
+        turn.reasons = [];
+      }
       clearQuiet(turn);
       const entry = live.get(sessionId);
       try {
@@ -344,8 +372,8 @@ export function createTurns(
           internalError(sessionId, error);
         }
       });
-    },
-  };
+    }
+  }
 
-  return { hasNext, endTurn, fail, apply, runTurn, takeNext, drive, ...methods };
+  return { hasNext, endTurn, fail, apply, runTurn, takeNext, drive, stop, ...methods };
 }

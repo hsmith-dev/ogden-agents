@@ -78,7 +78,18 @@ export interface AgentDescriptor {
   needsProjectTrust: boolean;
   /** Where in a project its skills go (repo-relative, `/`-separated), for BMad setup. */
   skillsFolder: string;
+  /**
+   * How a message sent right away reaches it while it works (send now or
+   * wait): `inject` puts it into the running turn (the agent must also
+   * advertise it when it starts, else `interrupt` is used); `interrupt`
+   * stops the current step and sends it at once. Absent: `interrupt`.
+   */
+  sendNow?: SendNowStyle | undefined;
 }
+
+/** How an agent takes a message sent right away while it works. */
+export const SEND_NOW_STYLES = ['inject', 'interrupt'] as const;
+export type SendNowStyle = (typeof SEND_NOW_STYLES)[number];
 
 const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -131,6 +142,7 @@ export function agentDescriptorProblems(descriptor: AgentDescriptor): string[] {
     if (typeof nativeId !== 'string' || nativeId.trim() === '') at(`the ${mode} mode has no native id`);
   }
   if (typeof descriptor.permissionModes.ask !== 'string') at('the agent does not declare Ask');
+  if (descriptor.sendNow !== undefined && !(SEND_NOW_STYLES as readonly string[]).includes(descriptor.sendNow)) at(`${String(descriptor.sendNow)} is not a send now style`);
   if (!isRelativeFolder(descriptor.skillsFolder)) at(`the skills folder ${JSON.stringify(descriptor.skillsFolder)} is not a plain repo-relative path`);
   return problems;
 }

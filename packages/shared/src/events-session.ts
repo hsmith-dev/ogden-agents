@@ -117,6 +117,12 @@ export const SessionMessageCompletedInput = z.object({
      * switching back (`terminal`, story 3.2; shown "from terminal").
      */
     origin: z.enum(['deny_reason', 'terminal']).optional(),
+    /**
+     * Set on a user message sent right away that the agent took into its
+     * running turn (`injected`; send now or wait): the turn went on with it.
+     * Absent on every other message, and on events from before.
+     */
+    delivery: z.literal('injected').optional(),
   }),
 });
 /** A finished message with its full content; it replaces that message's deltas. */
@@ -171,11 +177,59 @@ export type SessionResumedEvent = z.infer<typeof SessionResumedEvent>;
 export const SessionMessageQueuedInput = z.object({
   type: z.literal('session.message_queued'),
   ...onSessionStream,
-  payload: z.object({ sessionId: SessionId, messageId: MessageId, content: z.string() }),
+  payload: z.object({
+    sessionId: SessionId,
+    messageId: MessageId,
+    content: z.string(),
+    /**
+     * Sent right away (send now or wait): it goes ahead of every message
+     * still waiting, into the running turn or after the current step is
+     * stopped. Absent on a message that waits, and on events from before.
+     */
+    now: z.literal(true).optional(),
+  }),
 });
 /** A message sent while the agent works, held until it can take it (E2-R1: shown as "Queued"). */
 export const SessionMessageQueuedEvent = SessionMessageQueuedInput.extend(assigned);
 export type SessionMessageQueuedEvent = z.infer<typeof SessionMessageQueuedEvent>;
+
+/** One message still waiting to be sent, as `session.queue_changed` lists it. */
+export const QueuedMessage = z.object({ messageId: MessageId, content: z.string(), now: z.literal(true).optional() });
+export type QueuedMessage = z.infer<typeof QueuedMessage>;
+
+/** Why the waiting messages changed: the user edited, moved or removed one, or sent one right away. */
+export const QueueChangeCause = z.enum(['edited', 'moved', 'removed', 'sent_now']);
+export type QueueChangeCause = z.infer<typeof QueueChangeCause>;
+
+export const SessionQueueChangedInput = z.object({
+  type: z.literal('session.queue_changed'),
+  ...onSessionStream,
+  payload: z.object({ sessionId: SessionId, queue: z.array(QueuedMessage), cause: QueueChangeCause }),
+});
+/**
+ * The user changed the messages waiting to be sent (send now or wait):
+ * `queue` is every one still waiting, in the order they will go, and
+ * replaces what was waiting before. A message missing from it was removed.
+ */
+export const SessionQueueChangedEvent = SessionQueueChangedInput.extend(assigned);
+export type SessionQueueChangedEvent = z.infer<typeof SessionQueueChangedEvent>;
+
+export const SessionTurnInterruptedInput = z.object({
+  type: z.literal('session.turn_interrupted'),
+  ...onSessionStream,
+  payload: z.object({
+    sessionId: SessionId,
+    /** The message sent right away that the step was stopped for. */
+    messageId: MessageId,
+  }),
+});
+/**
+ * The agent's current step was stopped so a message sent right away goes at
+ * once (its agent can't take a message into a running turn): the chat says
+ * so where it happened, and the reply so far stays as it was.
+ */
+export const SessionTurnInterruptedEvent = SessionTurnInterruptedInput.extend(assigned);
+export type SessionTurnInterruptedEvent = z.infer<typeof SessionTurnInterruptedEvent>;
 
 export const SessionCheckInInput = z.object({
   type: z.literal('session.check_in'),

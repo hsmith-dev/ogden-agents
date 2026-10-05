@@ -80,6 +80,7 @@ import { createChatContext } from './chat/context.js';
 import { createModeApplier, createPermissionModes } from './chat/permission-mode.js';
 import { createPermissionRequests } from './chat/permission-requests.js';
 import { createReplies } from './chat/replies.js';
+import { createSendNow } from './chat/send-now.js';
 import { createTerminal } from './chat/terminal.js';
 import { createTurns } from './chat/turns.js';
 import type { Chat, ChatOptions } from './chat/types.js';
@@ -112,6 +113,7 @@ export function createChat(options: ChatOptions): Chat {
     promptFor,
     onReportedMode: modes.onReportedMode,
   });
+  const sendNow = createSendNow(ctx, { sendMessage: turns.sendMessage, stop: turns.stop, finishReply, flushSession });
   const terminal = createTerminal(ctx, { releaseAgent, storedAgentSessionId });
   const { stopTerminal, closeTerminals } = terminal;
   const workspaces = createWorkspaces(ctx, { drop, stopTerminal });
@@ -137,7 +139,10 @@ export function createChat(options: ChatOptions): Chat {
     createChatSession: async (workspaceId, options) => withAgentId(await workspaces.createChatSession(workspaceId, options)),
     chatAgents: workspaces.chatAgents,
     getSession: (workspaceId, sessionId) => withAgentId(workspaces.getSession(workspaceId, sessionId)),
-    sendMessage: turns.sendMessage,
+    sendMessage: sendNow.sendMessage,
+    updateQueuedMessage: sendNow.updateQueuedMessage,
+    removeQueuedMessage: sendNow.removeQueuedMessage,
+    sendQueuedMessageNow: sendNow.sendQueuedMessageNow,
     cancel: turns.cancel,
     switchDriver: async (workspaceId, sessionId, driver) => withAgentId(await terminal.switchDriver(workspaceId, sessionId, driver)),
     attachTerminal: terminal.attachTerminal,

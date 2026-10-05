@@ -70,7 +70,7 @@ export function Message({ message, agentName }: { message: TranscriptMessage; ag
       <div className="flex max-w-[85%] flex-col items-end gap-1 self-end" data-testid="message-queued" data-status={message.status}>
         <UserMessage className="max-w-full">{message.text}</UserMessage>
         <Text variant="caption" data-testid="message-queue-status">
-          {QUEUE_WORDS[message.status]}
+          {message.status === 'queued' && message.now === true ? 'Sending now' : QUEUE_WORDS[message.status]}
         </Text>
       </div>
     );
@@ -88,10 +88,34 @@ export function Message({ message, agentName }: { message: TranscriptMessage; ag
       </div>
     );
   }
+  if (message.role === 'user' && message.delivery === 'injected') {
+    // Sent right away into the running turn (send now or wait).
+    return (
+      <div className="flex max-w-[85%] flex-col items-end gap-1 self-end" data-testid="message-sent-now">
+        <UserMessage className="max-w-full" data-testid="message-user">
+          {message.text}
+        </UserMessage>
+        <Text variant="caption" data-testid="message-delivery">
+          Sent while the agent was working
+        </Text>
+      </div>
+    );
+  }
   if (message.role === 'user') return <UserMessage data-testid="message-user">{message.text}</UserMessage>;
   return (
     <AgentMessage name={agentName} data-testid="message-agent" data-streaming={message.streaming} aria-busy={message.streaming}>
       {message.text}
     </AgentMessage>
+  );
+}
+
+/** Where the agent's step was stopped so a message sent right away went at once (send now or wait). */
+export function InterruptedNote() {
+  return (
+    <div className="flex items-center gap-3" data-testid="turn-interrupted" role="note">
+      <Separator className="flex-1" />
+      <Text variant="caption">Stopped the current step to send your message.</Text>
+      <Separator className="flex-1" />
+    </div>
   );
 }

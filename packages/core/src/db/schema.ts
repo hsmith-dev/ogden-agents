@@ -62,6 +62,11 @@ export const workspaces = sqliteTable(
      * Changed only through the workspace settings use-case.
      */
     defaultAgentId: text('default_agent_id'),
+    /**
+     * The project's own choice of what a message sent while the agent works
+     * does (`wait` | `now`; send now or wait), or NULL for the app-wide one.
+     */
+    whileWorking: text('while_working'),
     createdAt: text('created_at').notNull(),
   },
   (t) => [uniqueIndex('workspaces_path_unique').on(t.path)],
@@ -194,4 +199,16 @@ export const bmadModulesSeen = sqliteTable(
 export const installSettings = sqliteTable('install_settings', {
   id: integer('id').primaryKey(),
   developerMode: integer('developer_mode', { mode: 'boolean' }).notNull().default(false),
+});
+
+/**
+ * App-wide chat settings (one row, `id = 1`, created on first write; send
+ * now or wait): what a message sent while the agent works does. Kept apart
+ * from `install_settings`, whose row's existence says Developer mode was
+ * ever set.
+ */
+export const chatSettings = sqliteTable('chat_settings', {
+  id: integer('id').primaryKey(),
+  /** `wait` | `now`. */
+  whileWorking: text('while_working').notNull().default('wait'),
 });

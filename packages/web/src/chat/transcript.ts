@@ -34,6 +34,10 @@ export interface TranscriptMessage {
    * `deny_reason` was a Deny's reason core sent. Absent otherwise.
    */
   origin?: 'deny_reason' | 'terminal';
+  /** A queued message sent right away (send now or wait): it is on its way now, ahead of the others. */
+  now?: boolean;
+  /** A message sent right away that the agent took into its running turn (send now or wait). */
+  delivery?: 'injected';
 }
 
 /** One tool call as it stands now (story 2.10): each event carries the whole call; diffs only when they changed. */
@@ -96,7 +100,9 @@ export type TranscriptItem =
    * A document the planning session wrote (story 4.7, `session.document_written`):
    * one per path, where its latest write happened.
    */
-  | { type: 'document'; path: string; next: CatalogNext | null; toolCallId: string | null; at: string };
+  | { type: 'document'; path: string; next: CatalogNext | null; toolCallId: string | null; at: string }
+  /** The agent's current step was stopped so a message sent right away goes at once (`session.turn_interrupted`). */
+  | { type: 'interrupted'; messageId: string; at: string };
 
 export interface SessionView {
   /** Whether the event log has this session at all (its `session.created`). */
@@ -155,7 +161,7 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
   const byId = new Map<string, TranscriptMessage>();
   const permissions = new Map<string, TranscriptPermission>();
   const toolCalls = new Map<string, TranscriptToolCall>();
-  const queued = new Map<string, TranscriptMessage>();
+  let queued = new Map<string, TranscriptMessage>();
   const removedRules = new Set<string>(rulesRemoved);
   const message = (messageId: string, role: MessageRole) => {
     let found = byId.get(messageId);
@@ -209,6 +215,7 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
           // The turn ended before these went: they are not sent, where the turn ended.
           for (const unsent of queued.values()) {
             unsent.status = 'not_sent';
+            delete unsent.now;
             view.notSent.push(unsent);
             view.items.push({ type: 'message', message: unsent });
           }
@@ -222,9 +229,31 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
         const { messageId, content } = event.payload;
         if (byId.has(messageId) || queued.has(messageId)) break;
         const waiting: TranscriptMessage = { messageId, role: 'user', text: content, streaming: false, status: 'queued' };
-        queued.set(messageId, waiting);
+        if (event.payload.now === true) {
+          // Sent right away: after the others sent right away, ahead of every one that waits.
+          waiting.now = true;
+          const ahead = [...queued.values()].filter((message) => message.now === true);
+          const behind = [...queued.values()].filter((message) => message.now !== true);
+          queued = new Map([...ahead, waiting, ...behind].map((message) => [message.messageId, message]));
+        } else queued.set(messageId, waiting);
         break;
       }
+      case 'session.queue_changed': {
+        // The user changed what waits: this is all of it, in order. One missing was removed, not "Not sent".
+        const next = new Map<string, TranscriptMessage>();
+        for (const entry of event.payload.queue) {
+          const known = queued.get(entry.messageId) ?? { messageId: entry.messageId, role: 'user' as const, text: '', streaming: false, status: 'queued' as const };
+          known.text = entry.content;
+          if (entry.now === true) known.now = true;
+          else delete known.now;
+          next.set(entry.messageId, known);
+        }
+        queued = next;
+        break;
+      }
+      case 'session.turn_interrupted':
+        view.items.push({ type: 'interrupted', messageId: event.payload.messageId, at: event.at });
+        break;
       case 'session.message_completed': {
         // A queued message is sent now: it takes its place here.
         queued.delete(event.payload.messageId);
@@ -232,6 +261,7 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
         done.text = event.payload.content;
         done.streaming = false;
         if (event.payload.origin !== undefined) done.origin = event.payload.origin;
+        if (event.payload.delivery !== undefined) done.delivery = event.payload.delivery;
         // A Deny reason core sent is not the user's message to try again (9.4 review F4).
         if (event.payload.role === 'user' && event.payload.origin !== 'deny_reason') view.lastUserText = event.payload.content;
         break;

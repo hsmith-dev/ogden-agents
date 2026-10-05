@@ -15,6 +15,8 @@ describe("Claude Code's descriptor (6.3)", () => {
     expect(declaredModes(CLAUDE_CODE_DESCRIPTOR)).toEqual(agent.permissionModes);
     expect(CLAUDE_CODE_DESCRIPTOR.permissionModes).toEqual(ACP_MODE_IDS);
     expect(CLAUDE_CODE_DESCRIPTOR.install).toEqual({ kind: 'npm', package: CLAUDE_AGENT_ACP_PACKAGE, version: pinnedVersion() });
+    // Send now or wait: claude-agent-acp 0.84 takes a message into the running turn.
+    expect(CLAUDE_CODE_DESCRIPTOR.sendNow).toBe('inject');
     expect(CLAUDE_CODE_DESCRIPTOR.homeEnv).toBeUndefined();
     expect(agentEnvKeys([CLAUDE_CODE_DESCRIPTOR])).toEqual(['ANTHROPIC_API_KEY']);
     expect(() => createAgentRegistry([{ descriptor: CLAUDE_CODE_DESCRIPTOR, agent }])).not.toThrow();

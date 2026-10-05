@@ -1,8 +1,13 @@
-import { PaperPlaneRight } from '@phosphor-icons/react';
+import { CaretDown, PaperPlaneRight } from '@phosphor-icons/react';
+import type { WhileWorking } from '@ogden-agents/shared';
 import { useEffect, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { otherWay, otherWayShortcutLabel, SEND_WORDS } from '@/chat/send-mode';
 import { Button } from '@/ui/button';
 import { ComposerFrame } from '@/ui/composer-frame';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/ui/dropdown-menu';
+import { Kbd } from '@/ui/kbd';
 import { Textarea } from '@/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { Text } from '@/ui/typography';
 
 export interface ComposerProps {
@@ -23,16 +28,26 @@ export interface ComposerProps {
    * ahead of anything already typed. Applied once per `key`.
    */
   restore?: { key: string; text: string } | undefined;
-  /** Sends the text; rejects with a plain message to show if it wasn't sent. */
-  onSend(text: string): Promise<void>;
+  /**
+   * Send now or wait: while the agent works, what `Enter` and Send do (the
+   * project's or app's choice). The other way is in the menu beside Send and
+   * on `Cmd/Ctrl+Enter`. Absent: one way only, as before.
+   */
+  whileWorking?: WhileWorking | undefined;
+  /** Whether the agent is working now, so the two ways are offered. */
+  working?: boolean | undefined;
+  /** Sends the text (`delivery` only when the composer offers two ways); rejects with a plain message to show if it wasn't sent. */
+  onSend(text: string, delivery?: WhileWorking): Promise<void>;
 }
 
 /**
  * The session view's composer (EXPERIENCE.md Composer): `Enter` sends,
  * `Shift+Enter` starts a new line. While the agent works, sending queues the
- * message (the page says so in `hint`). `Esc` does nothing here: it never stops the agent.
+ * message (the page says so in `hint`), or sends it right away, by the
+ * project's choice; `Cmd/Ctrl+Enter` and the menu beside Send do the other
+ * (send now or wait). `Esc` does nothing here: it never stops the agent.
  */
-export function Composer({ label, blockedReason, hint, action, footer, describedBy, restore, onSend }: ComposerProps) {
+export function Composer({ label, blockedReason, hint, action, footer, describedBy, restore, whileWorking, working, onSend }: ComposerProps) {
   const [text, setText] = useState('');
   const restoreKey = restore?.key;
   const restoreText = restore?.text;
@@ -44,12 +59,13 @@ export function Composer({ label, blockedReason, hint, action, footer, described
   const [error, setError] = useState<string | undefined>(undefined);
   const blocked = sending || blockedReason !== undefined;
 
-  const submit = () => {
+  const twoWays = whileWorking !== undefined;
+  const submit = (delivery: WhileWorking | undefined = whileWorking) => {
     if (blocked || text.trim() === '') return;
     const sent = text;
     setSending(true);
     setError(undefined);
-    onSend(sent).then(
+    onSend(sent, twoWays ? delivery : undefined).then(
       () => {
         setSending(false);
         // Clear only what was sent: text typed while it was on its way (the
@@ -71,9 +87,16 @@ export function Composer({ label, blockedReason, hint, action, footer, described
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
-      submit();
+      // `Cmd/Ctrl+Enter`: the other way, for this one message.
+      submit(twoWays && (event.metaKey || event.ctrlKey) ? otherWay(whileWorking) : whileWorking);
     }
   };
+  const emptyOrBlocked = blocked || text.trim() === '';
+  const sendButton = (
+    <Button type="submit" size="icon" aria-label="Send" aria-disabled={emptyOrBlocked} aria-keyshortcuts={twoWays && working ? 'Enter Meta+Enter Control+Enter' : 'Enter'}>
+      <PaperPlaneRight aria-hidden />
+    </Button>
+  );
 
   return (
     <form onSubmit={onSubmit} data-testid="composer" className="flex flex-col gap-2">
@@ -91,9 +114,34 @@ export function Composer({ label, blockedReason, hint, action, footer, described
         <div className="flex items-center justify-end gap-2">
           {footer === undefined ? null : <div className="mr-auto flex min-w-0 items-center">{footer}</div>}
           {action}
-          <Button type="submit" size="icon" aria-label="Send" aria-disabled={blocked || text.trim() === ''}>
-            <PaperPlaneRight aria-hidden />
-          </Button>
+          {twoWays && working ? (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>{sendButton}</TooltipTrigger>
+                <TooltipContent data-testid="send-tooltip">
+                  {SEND_WORDS[whileWorking]} <Kbd>Enter</Kbd>. {SEND_WORDS[otherWay(whileWorking)]} <Kbd>{otherWayShortcutLabel()}</Kbd>.
+                </TooltipContent>
+              </Tooltip>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  {/* No "send" in its name: the Send button stays the only one named so. */}
+                  <Button type="button" variant="outline" size="icon" aria-label="Choose when it goes" aria-disabled={emptyOrBlocked} data-testid="send-menu">
+                    <CaretDown aria-hidden />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {(['now', 'wait'] as const).map((way) => (
+                    <DropdownMenuItem key={way} disabled={emptyOrBlocked} data-testid={`send-${way}`} onSelect={() => submit(way)}>
+                      {SEND_WORDS[way]}
+                      {way === whileWorking ? <span className="ml-auto text-caption text-muted-foreground">Enter</span> : <Kbd className="ml-auto">{otherWayShortcutLabel()}</Kbd>}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
+          ) : (
+            sendButton
+          )}
         </div>
       </ComposerFrame>
       {error !== undefined ? (

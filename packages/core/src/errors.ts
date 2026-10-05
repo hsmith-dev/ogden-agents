@@ -281,6 +281,31 @@ export class QueueFullError extends SessionBusyError {
   override readonly name = 'QueueFullError';
 }
 
+/** The plain reason a message can't go right away while a permission card waits (send now or wait). */
+export const ANSWER_FIRST_REASON = 'Answer the request above first, then send your message.';
+
+/**
+ * A message was to be sent right away while the agent waits for an answer on
+ * a permission card (send now or wait): nothing was sent or recorded.
+ */
+export class AnswerFirstError extends CoreError {
+  override readonly name = 'AnswerFirstError';
+  constructor() {
+    super('answer_first', ANSWER_FIRST_REASON);
+  }
+}
+
+/** The plain reason a waiting message can't be changed (send now or wait). */
+export const MESSAGE_NOT_QUEUED_REASON = 'That message is no longer waiting. It was sent, removed, or the agent stopped.';
+
+/** A waiting message was to be changed or sent right away, but it is no longer waiting (send now or wait): nothing changed. */
+export class MessageNotQueuedError extends CoreError {
+  override readonly name = 'MessageNotQueuedError';
+  constructor() {
+    super('message_not_queued', MESSAGE_NOT_QUEUED_REASON);
+  }
+}
+
 /** Stop was asked of a session whose agent is not answering (nothing to stop). */
 export class SessionNotBusyError extends CoreError {
   override readonly name = 'SessionNotBusyError';

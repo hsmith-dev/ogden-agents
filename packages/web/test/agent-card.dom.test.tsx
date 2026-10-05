@@ -96,3 +96,29 @@ describe('the agent card (epic 6 entry 7)', () => {
     expect(screen.getByLabelText('Paste the code')).toBeTruthy();
   });
 });
+
+describe('an API key only agent (Codex; user decision, 2026-10-05)', () => {
+  const NOTICE = "Codex uses your own OpenAI API key. Signing in with a ChatGPT account isn't supported here, because OpenAI's terms don't allow other apps to use subscription sign-in.";
+  const codex: Partial<AgentSetupStatus> = { agentId: 'codex', displayName: 'Codex', provider: 'OpenAI', version: '2.1.1', apiKeyOnly: true, notices: [NOTICE], apiKey: { saved: false } };
+
+  it('says why there is no sign in, offers no Sign in, and asks for the key', () => {
+    card(codex);
+    expect(screen.getByTestId('agent-notice').textContent).toBe(NOTICE);
+    expect(screen.getByTestId('agent-state').textContent).toContain('needs an API key');
+    expect(screen.queryByRole('button', { name: /Sign in/ })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Add an API key' })).toBeTruthy();
+  });
+
+  it('says the key is in use once it is saved, and offers Remove key', () => {
+    card({ ...codex, auth: 'signed_in', method: 'api_key', apiKey: { saved: true, lastFour: '2468' } });
+    expect(screen.getByTestId('agent-state').textContent).toContain('using your API key');
+    expect(screen.getByTestId('agent-api-key-saved').textContent).toContain('2468');
+    expect(screen.getByRole('button', { name: 'Remove key' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Sign in|Sign out/ })).toBeNull();
+  });
+
+  it('shows the notice before it is installed too', () => {
+    card({ ...codex, install: 'not_installed', version: null, apiKey: undefined });
+    expect(screen.getByTestId('agent-notice').textContent).toBe(NOTICE);
+  });
+});

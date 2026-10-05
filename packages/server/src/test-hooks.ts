@@ -60,6 +60,10 @@
  *   adapter and the real Codex are never run in a test). It also registers
  *   Codex in a shipped-style server, which otherwise leaves it out.
  *
+ * - {@link CODEX_INSTALL_ENV}: Codex's Install takes its pins (and npm) from a
+ *   JSON file inside the temp folder, as {@link CLAUDE_INSTALL_ENV} does for
+ *   Claude Code, so a suite can install Codex from a local fixture lock.
+ *
  * {@link resolveTestHooks} reads them all for `start()`, and
  * {@link testHooksLogFields} is its "test hooks in use" line. Every
  * `OGDEN_AGENTS_TEST_*` name is declared here and read only beside a
@@ -112,6 +116,8 @@ export const BMAD_SOURCE_UV_ENV_NAMES: readonly string[] = [
 export const ANTIGRAVITY_SERVER_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_SERVER';
 /** Absolute path to a JSON file `{ "pins": AntigravityPins }` inside the temp folder, every archive on `http://127.0.0.1` (tests only; epic 6 entry 10). */
 export const ANTIGRAVITY_INSTALL_ENV = 'OGDEN_AGENTS_TEST_ANTIGRAVITY_INSTALL';
+/** Path to a JSON file `{ "pins": { "packageJson", "lock" }, "npmCli"?: "<abs>/npm-cli.js" }` for Codex's install, local `file:` fixtures only (tests only; epic 12 entry 6). */
+export const CODEX_INSTALL_ENV = 'OGDEN_AGENTS_TEST_CODEX_INSTALL';
 /** Absolute path to a Node script inside the temp folder, run under Node as Codex's `codex-acp` adapter (tests only; epic 12 entry 5). */
 export const CODEX_SERVER_ENV = 'OGDEN_AGENTS_TEST_CODEX_SERVER';
 /** Absolute path to a Node script inside the temp folder, registered as a test agent that needs a trusted project (tests only; epic 6 entry 10). */
@@ -200,10 +206,19 @@ const INTEGRITY = /^sha512-[A-Za-z0-9+/]+=*$/;
  * fails loudly rather than reaching the registry.
  */
 export function testClaudeInstall(env: Env, dataDir: string, tmp: string = tmpdir()): TestClaudeInstall | undefined {
-  const file = env[CLAUDE_INSTALL_ENV];
+  return testNpmInstall(CLAUDE_INSTALL_ENV, env, dataDir, tmp);
+}
+
+/** Codex's test install source from {@link CODEX_INSTALL_ENV}, checked as {@link testClaudeInstall}'s is (epic 12 entry 6). */
+export function testCodexInstall(env: Env, dataDir: string, tmp: string = tmpdir()): TestClaudeInstall | undefined {
+  return testNpmInstall(CODEX_INSTALL_ENV, env, dataDir, tmp);
+}
+
+function testNpmInstall(name: string, env: Env, dataDir: string, tmp: string): TestClaudeInstall | undefined {
+  const file = env[name];
   if (file === undefined || file === '' || !testHooksAllowed(env, dataDir, tmp)) return undefined;
   const fail = (why: string): never => {
-    throw new Error(`${CLAUDE_INSTALL_ENV}: ${why}`);
+    throw new Error(`${name}: ${why}`);
   };
   if (!isAbsolute(file)) fail('must be an absolute path');
   let text = '';
@@ -455,6 +470,7 @@ export interface TestHooks {
   antigravityServer: string | undefined;
   antigravityInstall: TestAntigravityInstall | undefined;
   codexServer: string | undefined;
+  codexInstall: TestClaudeInstall | undefined;
   trustAgent: string | undefined;
   bmadProbe: boolean;
   bmadAvailable: BmadPieceName[];
@@ -483,6 +499,7 @@ export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOpt
     antigravityInstall: options.antigravity === undefined ? testAntigravityInstall(env, dataDir, tmp) : undefined,
     // Codex's ports given (or left out) by a test decide it: the hook is not read.
     codexServer: options.codex === undefined ? testCodexServer(env, dataDir, tmp) : undefined,
+    codexInstall: options.codex === undefined ? testCodexInstall(env, dataDir, tmp) : undefined,
     // Agents a test registers decide it: the hook is not read.
     trustAgent: options.extraAgents === undefined ? testTrustAgent(env, dataDir, tmp) : undefined,
     bmadProbe: testBmadProbe(env, dataDir, tmp),
@@ -507,6 +524,7 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     hooks.antigravityServer !== undefined ||
     hooks.antigravityInstall !== undefined ||
     hooks.codexServer !== undefined ||
+    hooks.codexInstall !== undefined ||
     hooks.trustAgent !== undefined ||
     hooks.bmadProbe ||
     hooks.bmadAvailable.length > 0 ||
@@ -521,6 +539,7 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     antigravityServer: hooks.antigravityServer !== undefined,
     antigravityInstall: hooks.antigravityInstall !== undefined,
     codexServer: hooks.codexServer !== undefined,
+    codexInstall: hooks.codexInstall !== undefined,
     trustAgent: hooks.trustAgent !== undefined,
     bmadProbe: hooks.bmadProbe,
     bmadAvailable: hooks.bmadAvailable.join(','),

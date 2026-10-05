@@ -67,6 +67,11 @@ export const AgentSetupStatus = z.object({
   canInstall: z.boolean().optional(),
   /** `true` when Ogden Agents installed the agent and can remove it (epic 6 entry 7). */
   canUninstall: z.boolean().optional(),
+  /**
+   * `true` for an agent that takes only an API key, never an account sign-in (Codex, Grok; user decision, 2026-10-05): the card
+   * offers no Sign in, asks for the key, and its notices say why.
+   */
+  apiKeyOnly: z.boolean().optional(),
   /** `true` when the agent is signed in with the user's account through Ogden Agents and can be signed out here (epic 6 entry 7). */
   canSignOut: z.boolean().optional(),
   /** `false` when the agent's sign-in never asks for a code to paste back, so the card offers no code box (epic 6 entry 7). Absent means it may. */

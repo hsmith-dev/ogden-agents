@@ -72,9 +72,9 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
   for (const wiring of antigravity) checkAgentWiring(wiring);
   // Codex (epic 12 entry 4): a shipped install registers it only once its own folder says so; a test gives ports.
   const codex =
-    options.codex === false || (options.codex === undefined && !CODEX_SHIPPED && hooks.codexServer === undefined)
+    options.codex === false || (options.codex === undefined && !CODEX_SHIPPED && hooks.codexServer === undefined && hooks.codexInstall === undefined)
       ? []
-      : [codexWiring({ dataDir, given: options.codex, serverScript: hooks.codexServer, onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
+      : [codexWiring({ dataDir, given: options.codex, serverScript: hooks.codexServer, install: hooks.codexInstall === undefined ? undefined : { pins: hooks.codexInstall.pins, ...(hooks.codexInstall.npmCli === undefined ? {} : { npmCli: hooks.codexInstall.npmCli }) }, onDiagnostic: (message, fields) => log.info(`agent: ${message}`, fields) })];
   for (const wiring of codex) checkAgentWiring(wiring);
   const extraAgents = [...antigravity, ...codex, ...(options.extraAgents ?? testTrustAgentWiring(hooks, log))];
   // Every registered agent's API key variables (6.3): each is kept out of every process but its own agent's chat.

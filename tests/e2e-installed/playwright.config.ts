@@ -61,6 +61,8 @@ export default defineConfig({
     { name: 'agents', testMatch: /(^|[\\/])agents-journey\.spec\.ts$/, dependencies: ['upgrade'] },
     // Epic 12's Codex journey (Codex beside Claude Code, API key only).
     { name: 'codex', testMatch: /(^|[\\/])codex-journey\.spec\.ts$/, dependencies: ['agents'] },
-    { name: 'journey', testMatch: /(^|[\\/])journey\.spec\.ts$/, dependencies: ['codex'] },
+    // Epic 12's Grok journey (Grok beside Claude Code, an xAI API access token only, trusted project).
+    { name: 'grok', testMatch: /(^|[\\/])grok-journey\.spec\.ts$/, dependencies: ['codex'] },
+    { name: 'journey', testMatch: /(^|[\\/])journey\.spec\.ts$/, dependencies: ['grok'] },
   ],
 });

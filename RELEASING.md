@@ -296,9 +296,9 @@ When every check has passed on all three OSes, write the final Antigravity row o
 
 As in the 0.2.0 checklist, step 6, with the version `0.5.0` and the tag `v0.5.0`. Then move `next` to it too: `npm dist-tag add ogden-agents@0.5.0 next`. Epic 6, Done when 7, is met once `npx ogden-agents` installs `0.5.0`.
 
-## v1.1 release checklist (epic 12: Codex beside Claude Code and Antigravity)
+## v1.1 release checklist (epic 12: Codex and Grok beside Claude Code and Antigravity)
 
-Epic 12's Codex stories (12.4 to 12.6, 12.9 and the Codex part of 12.11) are in `main`; Grok is not built (it will be an xAI API access token only, off by default). Codex is OpenAI API key only (user decision, 2026-10-05): there is no ChatGPT sign in, because OpenAI's terms don't allow other apps to use subscription sign in. CI runs only fakes (the fake agent's Codex personality, a fixture install), so the real Codex needs these live checks, which an agent cannot run. Release it as in the 0.2.0 checklist, step 4 (a release candidate to `next`, `npx ogden-agents@next`), then step 6; the version and the tag are the user's.
+Epic 12's Codex stories (12.4 to 12.6, 12.9 and the Codex part of 12.11) are in `main`; Grok's stories (12.4, 12.7 to 12.9 and the Grok part of 12.11) are in `main` too; Grok is an xAI API access token only, off until a token is added (user decision, 2026-10-05). Codex is OpenAI API key only (user decision, 2026-10-05): there is no ChatGPT sign in, because OpenAI's terms don't allow other apps to use subscription sign in. CI runs only fakes (the fake agent's Codex personality, a fixture install), so the real Codex needs these live checks, which an agent cannot run. Release it as in the 0.2.0 checklist, step 4 (a release candidate to `next`, `npx ogden-agents@next`), then step 6; the version and the tag are the user's.
 
 ### Live checks with Codex
 
@@ -319,6 +319,28 @@ Run them with `npx ogden-agents@next`, in scratch repos made for it, **on macOS,
 13. Models: the chat's model picker lists Codex's models and a switch takes effect on the next message.
 
 When every check has passed on all three OSes, finalize the Codex row of `agent-matrix.md` (through `bmad-spec`, leaving no "verify" cell) from these results.
+
+### Live checks with Grok
+
+Run them with `npx ogden-agents@next`, in scratch repos made for it, **on macOS, Windows (x64) and Linux (x64)**, each OS on its own, with an xAI API access token (`xai-...`) from console.x.ai that you are happy to spend a little on. CI runs only fakes (the fake agent's Grok personality, a fixture install), so the real Grok needs these.
+
+0. Terms: read xAI's current terms (x.ai/legal, which refuses automated reading) and decide whether the Grok card may say that they don't allow other apps to use subscription sign in; the card now says only that Grok works with an xAI API access token and that signing in with an account isn't supported here.
+1. Install, E12-R5: Settings > Agents > Grok shows that sentence in every state (not installed, installed, token saved), no Sign in button, and **Install**. It downloads about 50 MB, unpacks the program (about 150 to 175 MB) and ends "Installed, needs an xAI API access token" with Version 1.0.49. Nothing is written to `~/.grok`, and npm's launcher never ran. Check the unpacked program is `agents/grok/grok-1.0.49/bin-checked/grok` (`grok.exe` on Windows). The install itself starts it once with a dummy token (initialize, then authenticate) and must not time out: note how long it takes on a slow first launch (Windows antivirus, macOS Gatekeeper) and that nothing was sent to xAI.
+2. Token: **Add an xAI API access token**, paste it, **Save**: the card says "Installed, using your xAI API access token" and shows the last four characters only. Try a wrong token (`xai-` and 30 letters): note whether the free check (`GET https://api.x.ai/v1/api-key`) refuses it in plain words and does not save it, or saves it as "couldn't check". **Remove token** and the picker shows Grok needing a token. With no token Grok must be refused: "Grok needs your xAI API access token."
+3. A Grok chat replies, beside a Claude Code chat in the same trusted project, both at once. The first Grok chat in a project asks you to trust it (**Trust this project for Grok**); then it starts in **Ask**.
+4. Permission cards, E12-R3: ask Grok to run `ls`: a card holds the command until **Allow once**. Ask again and click **Deny**: Grok continues without running it. Note Grok's real option ids and kinds and its tool input field names (Ogden picks by kind and guesses the field names `path`, `file_path`, `command`).
+5. Ogden's mode wins: in a project whose `.claude/settings.json` says `{"permissions": {"defaultMode": "bypassPermissions"}}` and another with allow rules like `Bash(*)`, a Grok chat started in Ask still shows a card for a shell command. This is the one thing the probe could not show (it covered only Grok's always-approve flag).
+6. Modes: **Auto** is shown unavailable; with Developer mode on, a new chat can start in **Skip all** (a command runs with no card behind the red banner). Once a chat has started its mode cannot be changed and the picker says so.
+7. Protected paths: in Ask, ask Grok to edit `.claude/settings.json`, `.grok/config.toml` and `_bmad/scripts/config_utils.py` (a card each).
+8. Restart: Quit, run `npx ogden-agents@next` again, continue the Grok chat: it remembers what was said (resume), and a Skip all chat is still Skip all.
+9. The token stays private: `grep -r "xai-" <data folder>` finds nothing in `ogden-agents.db`, the event log, `logs/` or `agents/grok-home/` (note what Grok writes to `agents/grok-home/logs`: prompts may land there).
+10. Terminal toggle, E12-R7: the Grok chat's **Chat | Terminal** is disabled and says why. Separately, in a terminal run `grok --resume <the chat's session id>` with `GROK_HOME` set to the data folder's `agents/grok-home` and the token set: record whether it opens the same conversation. If it does, the toggle can be turned on later.
+11. BMad with Grok, E12-R6: in a trusted scratch repo whose default agent is Grok, turn Planning on: **Start from an idea** runs the BMad skill in a Grok planning session (the first message is `/bmad-spec ...`; note whether Grok runs it from `.claude/skills`). With every BMad piece off, a Grok chat gets no BMad text and `git status` stays clean.
+12. Handoff: when a Grok chat hits a usage limit or you stop it, **Continue with another agent** starts a Claude Code chat with the conversation (note what xAI's real limit text says).
+13. Models: the chat's model picker lists Grok's models (grok-4.6, grok-4.5 in the probe) and a switch takes effect on the next message.
+14. Windows only: the first shell command in Ask and in Skip all runs (Grok has no Windows sandbox).
+
+When every check has passed on all three OSes, finalize the Grok row of `agent-matrix.md` (through `bmad-spec`, leaving no "verify" cell) from these results.
 
 ## Later releases
 

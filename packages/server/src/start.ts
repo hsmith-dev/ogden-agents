@@ -2,14 +2,12 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
-import { ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, createWebhookNotifier, projectFilesFingerprint } from '@ogden-agents/adapters';
+import { ANTIGRAVITY_AGENT_ID, CLAUDE_CODE_AGENT_ID, CODEX_AGENT_ID, CODEX_SHIPPED, GROK_AGENT_ID, GROK_SHIPPED, createMemoryAppShortcut, createOsAppShortcut, createPtyTerminalPort, createUvToolchain, projectFilesFingerprint } from '@ogden-agents/adapters';
 import {
   agentConfigFolders,
   agentProjectFiles,
   createAgentRegistry,
   createChat,
-  CoreError,
-  workspaceRepoPath,
   createDataDir,
   createNewProjectDefaults,
   createOnboarding,
@@ -42,6 +40,7 @@ import { wireAgents } from './start-agents.js';
 import { uvEnvironment } from './start-env.js';
 import { broadcast, closeServer, HOST, listen, repointAppShortcut } from './start-io.js';
 import { createBuildsWiring } from './start-builds.js';
+import { createNotificationsWiring } from './start-notifications.js';
 import { bmadSetupFailureLogger, uvPycacheDir, createBmadSourceAndCatalog, createDocumentCards, createPlanAndBoard, stopBmadWork, withAgentSkillFolders, type BmadWiring } from './start-planning.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
 import { openUrl } from './open-url.js';
@@ -358,19 +357,8 @@ async function listenAndAnnounce({
   await builds.sweep();
   // Queued runs a stopped server left start where the limits allow (story 5.8).
   void builds.dispatchQueued().catch((error: unknown) => log.warn('starting queued builds failed', { reason: String(error) }));
-  // Notifications for builds (story 11.4): webhooks whose URLs live in the keychain, sent through `notify-webhook` (a test passes its own notifier).
-  const notifications = core.createNotifications({
-    secrets,
-    notifier: options.notifier ?? createWebhookNotifier(),
-    // The ticket's title for a payload, from the project's own files; any failure sends none.
-    titleOf: async (workspaceId, ref) => {
-      const scripts = await core.bmadScriptTrust.requireScriptsUnchanged(workspaceId);
-      return (await ticketStore.find(workspaceRepoPath(core.entities, workspaceId), ref, { scripts })).title;
-    },
-    // Codes and the status only: never the URL or the answer (AD-16).
-    onSent: (record) => log.info('webhook sent', { webhookId: record.webhookId, event: record.event, ok: record.ok, status: record.status, failure: record.failure }),
-    onError: (step, error) => log.warn('a notification step failed', { step, code: error instanceof CoreError ? error.code : 'unexpected' }),
-  });
+  // Notifications for builds (story 11.4, `start-notifications.ts`): webhooks whose URLs live in the keychain.
+  const notifications = createNotificationsWiring({ options, core, log, secrets, ticketStore });
   const appShortcut =
     options.appShortcut ??
     (options.launcherEntry === undefined

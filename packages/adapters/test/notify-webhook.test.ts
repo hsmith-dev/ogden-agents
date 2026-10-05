@@ -54,7 +54,10 @@ describe('sending a webhook', () => {
     expect(result).toEqual({ ok: true, status: 204, failure: null, message: 'The webhook answered with HTTP 204.' });
     expect(looked).toEqual(['hooks.example.com']);
     expect(requests).toHaveLength(1);
-    expect(requests[0]).toMatchObject({ address: { address: '93.184.216.34', family: 4 }, timeoutMs: WEBHOOK_TIMEOUT_MS, maxResponseBytes: MAX_WEBHOOK_RESPONSE_BYTES });
+    expect(requests[0]).toMatchObject({ address: { address: '93.184.216.34', family: 4 }, maxResponseBytes: MAX_WEBHOOK_RESPONSE_BYTES });
+    // One deadline for the lookup and the send: what is left of the 5 seconds.
+    expect(requests[0]!.timeoutMs).toBeGreaterThan(WEBHOOK_TIMEOUT_MS - 1000);
+    expect(requests[0]!.timeoutMs).toBeLessThanOrEqual(WEBHOOK_TIMEOUT_MS);
     expect(requests[0]!.url.href).toBe('https://hooks.example.com/T0K3N');
     expect(JSON.parse(requests[0]!.body)).toEqual(payload);
   });

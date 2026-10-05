@@ -145,6 +145,19 @@ jobs:
       - name: Lifecycle test
         run: node packages/desktop/scripts/lifecycle.mjs --target ${{ matrix.target }} --app "$APP_PATH"
 
+      # The update test (story 13.10): the installed app N reads a local fake release that serves N+1,
+      # built here with the same throwaway key. Run last: it replaces the installed app.
+      - name: Copy the app for the update test (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p "$RUNNER_TEMP/update-app"
+          ditto "$APP_PATH" "$RUNNER_TEMP/update-app/Ogden Agents.app"
+          echo "UPDATE_APP=$RUNNER_TEMP/update-app/Ogden Agents.app" >> "$GITHUB_ENV"
+
+      - name: Use the installed app for the update test (Windows)
+        if: runner.os == 'Windows'
+        run: echo "UPDATE_APP=$APP_PATH" >> "$GITHUB_ENV"
+
       - name: Unmount the .dmg (macOS)
         if: runner.os == 'macOS' && always()
         run: hdiutil detach "$RUNNER_TEMP/dmg" || true
@@ -162,19 +175,6 @@ jobs:
             packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
             packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
             packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe.sig
-
-      # The update test (story 13.10): the installed app N reads a local fake release that serves N+1,
-      # built here with the same throwaway key. Run last: it replaces the installed app.
-      - name: Copy the app for the update test (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          mkdir -p "$RUNNER_TEMP/update-app"
-          ditto "$APP_PATH" "$RUNNER_TEMP/update-app/Ogden Agents.app"
-          echo "UPDATE_APP=$RUNNER_TEMP/update-app/Ogden Agents.app" >> "$GITHUB_ENV"
-
-      - name: Use the installed app for the update test (Windows)
-        if: runner.os == 'Windows'
-        run: echo "UPDATE_APP=$APP_PATH" >> "$GITHUB_ENV"
 
       - name: Build version N+1
         working-directory: packages/desktop

@@ -47,9 +47,13 @@ export async function createChatSession(wsId: string, auth: Pick<TabAuth, 'fetch
   return SessionResponse.parse(json).session;
 }
 
-/** `GET /api/v1/chat-agents` (epic 6): the agents a chat can be started with, and the default one. */
-export async function fetchChatAgents(auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<ChatAgentsResponse> {
-  const json = await call(auth, API_ROUTES.chatAgents, {}, "Ogden Agents couldn't list the agents");
+/**
+ * `GET /api/v1/chat-agents` (epic 6): the agents a chat can be started with, and the default one.
+ * With `wsId`, an agent that needs project trust says so while that project isn't trusted for it (epic 12, 12.3).
+ */
+export async function fetchChatAgents(auth: Pick<TabAuth, 'fetch'> = tabAuth, wsId?: string): Promise<ChatAgentsResponse> {
+  const path = wsId === undefined ? API_ROUTES.chatAgents : `${API_ROUTES.chatAgents}?workspaceId=${encodeURIComponent(wsId)}`;
+  const json = await call(auth, path, {}, "Ogden Agents couldn't list the agents");
   return ChatAgentsResponse.parse(json);
 }
 

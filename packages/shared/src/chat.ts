@@ -64,7 +64,7 @@ export type AgentAction = z.infer<typeof AgentAction>;
 
 /** Why a new chat with an agent is refused on this install right now, in plain words, and what fixes it (6.3). */
 export const AgentUnavailable = z.object({
-  code: z.enum(['agent_not_installed', 'agent_signed_out']),
+  code: z.enum(['agent_not_installed', 'agent_signed_out', 'project_not_trusted']),
   reason: z.string().min(1),
   action: AgentAction,
 });
@@ -131,6 +131,12 @@ export const SessionPermissionModeOption = z.object({
   mode: PermissionMode,
   available: z.boolean(),
   reason: z.string().min(1).optional(),
+  /**
+   * On the chat's current mode when its agent takes a mode only when a chat
+   * starts and the chat has started (epic 12, 12.3): the mode is fixed for
+   * this chat, and every other mode says why it can't be chosen.
+   */
+  fixed: z.boolean().optional(),
 });
 export type SessionPermissionModeOption = z.infer<typeof SessionPermissionModeOption>;
 

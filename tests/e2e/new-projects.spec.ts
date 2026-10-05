@@ -76,8 +76,11 @@ test('a project added from the dialog starts Simple; with BMad Method and Planni
     await section.getByRole('radio', { name: 'BMad Method' }).click();
     await expect(section.getByRole('checkbox', { name: 'Planning' })).toHaveAttribute('aria-checked', 'true');
     await expect(section.getByRole('checkbox', { name: 'Board' })).toHaveAttribute('aria-checked', 'true');
-    await expect(section.getByRole('checkbox', { name: 'Unattended builds' })).toBeDisabled();
     await expect(page.getByTestId('new-projects-status')).toContainText('Saved.');
+    // Checked once the save settled (every box is disabled while one is in flight): Unattended builds ships (story 5.2) but isn't preselected; Retrospectives is still coming soon.
+    await expect(section.getByRole('checkbox', { name: 'Unattended builds' })).toHaveAttribute('aria-checked', 'false');
+    await expect(section.getByRole('checkbox', { name: 'Unattended builds' })).toBeEnabled();
+    await expect(section.getByRole('checkbox', { name: 'Retrospectives' })).toBeDisabled();
     await section.getByRole('checkbox', { name: 'Board' }).click();
     await expect(section.getByRole('checkbox', { name: 'Board' })).toHaveAttribute('aria-checked', 'false');
     const kept = () => (existsSync(join(dataDir, 'preferences.json')) ? JSON.parse(readFileSync(join(dataDir, 'preferences.json'), 'utf8')) : undefined);

@@ -129,7 +129,7 @@ export function findImportViolations(files: readonly SourceFile[]): string[] {
  * and the tests' second agent. AD-1 (epic 6 note): `packages/core` and
  * `packages/shared` name none of them outside tests; server wiring does.
  */
-export const AGENT_IDS = ['claude-code', 'antigravity', 'codex', 'grok', 'gemini', 'gemini-cli', 'copilot', 'fake-agent'] as const;
+export const AGENT_IDS = ['claude-code', 'antigravity', 'codex', 'grok', 'local', 'gemini', 'gemini-cli', 'copilot', 'fake-agent'] as const;
 
 /**
  * The environment variables one agent reads (its API key, its home folder),
@@ -149,6 +149,8 @@ export const AGENT_ENV_NAMES = [
   'GROK_HOME',
   'GEMINI_API_KEY',
   'GEMINI_HOME',
+  'OPENCODE_CONFIG',
+  'OGDEN_ENDPOINT_KEY',
 ] as const;
 
 /** The packages that must name no agent id. */
@@ -297,6 +299,49 @@ describe('E6-R3: the shared ACP client names no agent (6.4)', () => {
 });
 
 /**
+ * E14-R1 (epic 14): core, shared, the shared ACP client and the web name neither
+ * Ollama, LM Studio nor the route's harness. They come from the Local model's own
+ * adapter and descriptor (the presets are data the server serves).
+ */
+const LOCAL_MODEL_WORDS = /ollama|lm[ -]?studio|opencode/gi;
+const LOCAL_MODEL_NEUTRAL = /(^|[\\/])packages[\\/](?:core|shared|web)[\\/]src[\\/]|(^|[\\/])packages[\\/]adapters[\\/]src[\\/]acp-base[\\/]/;
+
+/** One message per local server or harness name in neutral code (comments aside). */
+export function findLocalModelNameViolations(files: readonly SourceFile[]): string[] {
+  const violations: string[] = [];
+  for (const { path, source } of files) {
+    if (!LOCAL_MODEL_NEUTRAL.test(path)) continue;
+    for (const match of withoutComments(source).matchAll(LOCAL_MODEL_WORDS)) violations.push(`${path}: neutral code names ${match[0]} (E14-R1: it comes from the Local model's adapter and descriptor)`);
+  }
+  return violations;
+}
+
+describe('E14-R1: core, shared, the shared ACP client and the web name no local server or harness (epic 14)', () => {
+  it('no neutral source names Ollama, LM Studio or the route\'s harness', () => {
+    const files = loadWorkspaceSources();
+    for (const area of ['core', 'shared', 'web', 'acp-base']) expect(files.some((file) => (area === 'acp-base' ? ACP_BASE.test(file.path) : file.path.split('\\').join('/').includes(`packages/${area}/src/`))), area).toBe(true);
+    expect(findLocalModelNameViolations(files)).toEqual([]);
+  });
+
+  it('flags a planted name, but not in a comment, in adapters, or in the server', () => {
+    const files: SourceFile[] = [
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/a.ts', source: "const url = 'http://localhost:11434'; // Ollama\nconst label = 'LM Studio';" },
+      { pkg: '@ogden-agents/shared', path: 'packages/shared/src/b.ts', source: 'const kind = `lmstudio`;' },
+      { pkg: '@ogden-agents/web', path: 'packages/web/src/c.tsx', source: "const harness = 'OpenCode';" },
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/acp-base/d.ts', source: "const x = 'opencode';" },
+      { pkg: '@ogden-agents/adapters', path: 'packages/adapters/src/acp-opencode/e.ts', source: "const x = 'OpenCode';" },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/f.ts', source: "const x = 'Ollama';" },
+    ];
+    expect(findLocalModelNameViolations(files)).toEqual([
+      "packages/core/src/a.ts: neutral code names LM Studio (E14-R1: it comes from the Local model's adapter and descriptor)",
+      "packages/shared/src/b.ts: neutral code names lmstudio (E14-R1: it comes from the Local model's adapter and descriptor)",
+      "packages/web/src/c.tsx: neutral code names OpenCode (E14-R1: it comes from the Local model's adapter and descriptor)",
+      "packages/adapters/src/acp-base/d.ts: neutral code names opencode (E14-R1: it comes from the Local model's adapter and descriptor)",
+    ]);
+  });
+});
+
+/**
  * AD-16 (epic 6 entry 10): every child process Ogden Agents starts gets an
  * explicit environment built from the allowlist (`adapters/src/child-env.ts`;
  * an agent's own from its descriptor). A call to a `node:child_process`
@@ -435,5 +480,35 @@ describe('AD-1 package dependency rules', () => {
     expect(findViolations([{ path: 'x', manifest: { name: '@ogden-agents/extra' } }])).toEqual([
       'x: package "@ogden-agents/extra" is not part of the AD-1 diagram',
     ]);
+  });
+});
+
+describe('AD-10: only an approved merge marks a ticket done (story 5.9)', () => {
+  /** Every source file under each package's src folder that passes `approve: true` to a ticket mark, as `package/relative path`. */
+  const approvers = (): string[] => {
+    const out: string[] = [];
+    for (const pkg of readdirSync(join(ROOT, 'packages'), { withFileTypes: true })) {
+      if (!pkg.isDirectory()) continue;
+      const src = join(ROOT, 'packages', pkg.name, 'src');
+      let entries: string[];
+      try {
+        entries = readdirSync(src, { recursive: true, encoding: 'utf8' });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        if (!/\.(ts|tsx)$/.test(entry)) continue;
+        const text = readFileSync(join(src, entry), 'utf8')
+          .split('\n')
+          .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+          .join('\n');
+        if (/\bapprove:\s*true\b/.test(text)) out.push(`${pkg.name}/${entry.split('\\').join('/')}`);
+      }
+    }
+    return out.sort();
+  };
+
+  it("only core's builds use-case marks done with approve: true (the store's own refusal aside)", () => {
+    expect(approvers()).toEqual(['core/builds.ts']);
   });
 });

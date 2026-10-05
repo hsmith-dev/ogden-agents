@@ -25,8 +25,10 @@ export interface NotificationText {
  * the project, the chat and the kind: never a command, a file, a path or what
  * the agent said.
  */
-export function notificationText(need: Pick<NeedsYouEntry, 'kind' | 'workspaceName' | 'chatName'>): NotificationText {
-  return { title: NEED_KIND_LABELS[need.kind], body: `${need.workspaceName}: ${need.chatName}` };
+export function notificationText(need: Pick<NeedsYouEntry, 'kind' | 'workspaceName' | 'chatName' | 'keyRejected'>): NotificationText {
+  // An agent with only an API key has no sign in: its key was rejected.
+  const title = need.keyRejected === true ? 'API key rejected' : NEED_KIND_LABELS[need.kind];
+  return { title, body: `${need.workspaceName}: ${need.chatName}` };
 }
 
 /** Whether the browser lets Ogden show notifications: its permission, or `unsupported`. */

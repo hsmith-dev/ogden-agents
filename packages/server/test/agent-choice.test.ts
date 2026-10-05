@@ -102,6 +102,54 @@ async function say(server: TestServer, tab: SignedIn, wsId: string, sesId: Sessi
   return replies(server, sesId).at(-1)!;
 }
 
+describe('the Codex slot (epic 12 entries 4 and 6)', () => {
+  it('is left out by `codex: false`, registered with ports by a test, and registered by default once shipped', async () => {
+    const bare = await startTestServer();
+    const listed = async (server: TestServer, signed: SignedIn) =>
+      ChatAgentsResponse.parse(await (await request(server, signed, 'GET', API_ROUTES.chatAgents)).json()).agents.map((agent) => agent.agentId);
+    expect(await listed(bare, await signIn(bare))).toEqual(['claude-code']);
+    const withCodex = await startTestServer({ codex: {} });
+    expect(await listed(withCodex, await signIn(withCodex))).toEqual(['claude-code', 'codex']);
+    const shipped = await startTestServer({ codex: undefined });
+    expect(await listed(shipped, await signIn(shipped))).toEqual(['claude-code', 'codex']);
+  });
+});
+
+describe('the Grok slot (epic 12 entries 4 and 8)', () => {
+  it('is left out by `grok: false`, registered once shipped, and a test registers it as its own agent after Claude Code and Codex', async () => {
+    const bare = await startTestServer();
+    const listed = async (server: TestServer, signed: SignedIn) =>
+      ChatAgentsResponse.parse(await (await request(server, signed, 'GET', API_ROUTES.chatAgents)).json()).agents.map((agent) => agent.agentId);
+    expect(await listed(bare, await signIn(bare))).toEqual(['claude-code']);
+    const withGrok = await startTestServer({ codex: {}, grok: {} });
+    expect(await listed(withGrok, await signIn(withGrok))).toEqual(['claude-code', 'codex', 'grok']);
+    const shipped = await startTestServer({ grok: undefined });
+    expect(await listed(shipped, await signIn(shipped))).toEqual(['claude-code', 'grok']);
+    const grokOnly = await startTestServer({ grok: {} });
+    const tab = await signIn(grokOnly);
+    const grok = ChatAgentsResponse.parse(await (await request(grokOnly, tab, 'GET', API_ROUTES.chatAgents)).json()).agents.find((agent) => agent.agentId === 'grok');
+    // Needs project trust, so the picker offers Trust first.
+    expect(grok).toMatchObject({ needsProjectTrust: true, provider: 'xAI' });
+  });
+});
+
+describe('the Local model slot (epic 14 story 14.2)', () => {
+  it('is left out by `local: false` and by a shipped install until its chat is complete, and a test registers it after Grok', async () => {
+    const listed = async (server: TestServer, signed: SignedIn) =>
+      ChatAgentsResponse.parse(await (await request(server, signed, 'GET', API_ROUTES.chatAgents)).json()).agents.map((agent) => agent.agentId);
+    const bare = await startTestServer();
+    expect(await listed(bare, await signIn(bare))).toEqual(['claude-code']);
+    const shipped = await startTestServer({ local: undefined });
+    expect(await listed(shipped, await signIn(shipped))).toEqual(['claude-code']);
+    const withLocal = await startTestServer({ grok: {}, local: {} });
+    const tab = await signIn(withLocal);
+    expect(await listed(withLocal, tab)).toEqual(['claude-code', 'grok', 'local']);
+    const local = ChatAgentsResponse.parse(await (await request(withLocal, tab, 'GET', API_ROUTES.chatAgents)).json()).agents.find((agent) => agent.agentId === 'local');
+    // Ask only, no sign in, no project trust, no terminal.
+    expect(local).toMatchObject({ displayName: 'Local model', signInMethods: [], permissionModes: ['ask'], needsProjectTrust: false, terminalResume: false });
+  });
+});
+
 describe('two agents side by side in one project (epic 6, entry 2)', () => {
   it('lists the agents a chat can start with, Claude Code first and the default', async () => {
     const { server, tab } = await setUp();
@@ -258,6 +306,37 @@ describe('a new chat only with an agent that can start it (epic 6, 6.3)', () => 
     // Agents that need no trust are not held back by it.
     expect((await chatWith()).agentId).toBeDefined();
     expect(server.core.entities.listSessions(wsId as never)).toHaveLength(2);
+  });
+
+  it('the trust also binds the files the agent runs (epic 12, 12.3): the list read for the project says so, and a change asks again before the next start', async () => {
+    const { server, tab, wsId, newChat, chatWith } = await setUp(secondAgent({ descriptor: { needsProjectTrust: true, projectFiles: ['.claude/settings.json', '.mcp.json'] } }));
+    const listed = async () =>
+      ChatAgentsResponse.parse(await (await request(server, tab, 'GET', `${API_ROUTES.chatAgents}?workspaceId=${wsId}`)).json()).agents.find((agent) => agent.agentId === 'fake-agent')!;
+    // Read for no project, the agent is listed as startable: each project asks for its trust.
+    const global = ChatAgentsResponse.parse(await (await request(server, tab, 'GET', API_ROUTES.chatAgents)).json());
+    expect(global.agents.find((agent) => agent.agentId === 'fake-agent')?.unavailable).toBeUndefined();
+    expect((await listed()).unavailable).toMatchObject({ code: 'project_not_trusted', action: 'trust_project' });
+    expect((await request(server, tab, 'PUT', apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId }))).status).toBe(200);
+    expect((await listed()).unavailable).toBeUndefined();
+    const session = await chatWith('fake-agent');
+    expect(await say(server, tab, wsId, session.id, 'whoami')).toBe('agent=fake-agent');
+    // A chat made while the project was trusted, not yet started.
+    const fresh = await chatWith('fake-agent');
+    // A hook planted in the project's settings after the user trusted it: nothing of that agent starts until trusted again.
+    const repo = server.core.entities.getWorkspace(wsId as never)!.path;
+    mkdirSync(join(repo, '.claude'), { recursive: true });
+    writeFileSync(join(repo, '.claude', 'settings.json'), '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo planted"}]}]}}\n');
+    expect((await listed()).unavailable).toMatchObject({ code: 'project_not_trusted' });
+    const refused = await newChat({ agentId: 'fake-agent' });
+    expect(refused.status).toBe(409);
+    expect(ApiErrorBody.parse(await refused.json()).error).toMatchObject({ code: 'project_not_trusted', details: { agentId: 'fake-agent', action: 'trust_project' } });
+    // The chat that exists is held back too: its agent process is not started in a changed project.
+    await send(server, tab, wsId, fresh.id, 'whoami');
+    await waitFor(() => stateOf(server, fresh.id) === 'error', 'the refused start', 15_000);
+    expect(replies(server, fresh.id)).toEqual([]);
+    expect((await request(server, tab, 'PUT', apiPath(API_ROUTES.workspaceBmadScriptTrust, { wsId }))).status).toBe(200);
+    expect((await listed()).unavailable).toBeUndefined();
+    expect((await newChat({ agentId: 'fake-agent' })).status).toBe(201);
   });
 
   it('gives an agent with a home variable its own folder in the data folder, and no other agent its key', async () => {

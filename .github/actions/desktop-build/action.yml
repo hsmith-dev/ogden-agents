@@ -60,7 +60,12 @@ runs:
     - name: Throwaway updater key (test builds)
       if: inputs.signing == 'test'
       shell: bash
-      run: node packages/desktop/scripts/test-updater-key.mjs "$RUNNER_TEMP/updater-key" >> "$GITHUB_ENV"
+      run: |
+        node packages/desktop/scripts/test-updater-key.mjs "$RUNNER_TEMP/updater-key" > "$RUNNER_TEMP/updater-key.env"
+        # Mask the throwaway key and its password in this job's logs, then hand them to later steps.
+        while IFS= read -r line; do echo "::add-mask::${line#*=}"; done < "$RUNNER_TEMP/updater-key.env"
+        cat "$RUNNER_TEMP/updater-key.env" >> "$GITHUB_ENV"
+        rm -f "$RUNNER_TEMP/updater-key.env"
 
     - name: Apple signing and notarization (slot)
       id: apple

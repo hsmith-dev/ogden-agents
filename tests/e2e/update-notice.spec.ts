@@ -8,14 +8,14 @@ import { expect, test } from '@playwright/test';
 import { makeDataDir, removeDataDir, startServer, type RunningServer } from '../support.js';
 import { openConnected } from './tab.js';
 
-/** A registry with one newer stable version than whatever this build is. */
+/** Npm's registry with one newer stable version than whatever this build is; GitHub Releases (also asked, story 13.14) has no release. */
 function newerRegistry(version: string) {
   const requests: string[] = [];
   return {
     requests,
     fetch: async (url: string) => {
       requests.push(url);
-      return Response.json({ latest: version, next: version });
+      return url.startsWith('https://registry.npmjs.org/') ? Response.json({ latest: version, next: version }) : new Response('missing', { status: 404 });
     },
   };
 }
@@ -32,7 +32,7 @@ test('the banner names the newer version, Dismiss keeps it hidden after a reload
     await expect(banner).toContainText('Ogden 99.0.0 is available.');
     await expect(banner).toContainText('npx ogden-agents@latest');
     await expect(page.getByTestId('update-status')).toHaveAttribute('role', 'status');
-    expect(registry.requests).toEqual(['https://registry.npmjs.org/-/package/ogden-agents/dist-tags']);
+    expect(registry.requests.sort()).toEqual(['https://api.github.com/repos/hsmith-dev/ogden-agents/releases?per_page=5', 'https://registry.npmjs.org/-/package/ogden-agents/dist-tags']);
 
     await banner.getByRole('button', { name: 'Dismiss the notice about Ogden 99.0.0' }).click();
     await expect(banner).toHaveCount(0);
@@ -46,7 +46,8 @@ test('the banner names the newer version, Dismiss keeps it hidden after a reload
     await expect(page.getByTestId('about-available')).toContainText('Ogden 99.0.0 is available.');
     await page.getByTestId('check-now').click();
     await expect(page.getByTestId('check-result')).toHaveText('Ogden 99.0.0 is available.');
-    expect(registry.requests).toHaveLength(2);
+    expect(registry.requests).toHaveLength(4);
+    await expect(page.getByTestId('about-sources')).toHaveText('GitHub Releases and npm');
     await expect(page.getByTestId('about-last-checked')).not.toHaveText('Not yet');
   } finally {
     await server?.close();

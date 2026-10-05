@@ -5,7 +5,10 @@
 import type { ClaudeCodeSetupOptions, FetchLike, PtyLoader } from '@ogden-agents/adapters';
 import type { AgentWiring } from './agent-wiring.js';
 import type { AntigravityPorts } from './antigravity-wiring.js';
-import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, Core, SecretStorePort, TicketStorePort, ToolchainPort } from '@ogden-agents/core';
+import type { CodexPorts } from './codex-wiring.js';
+import type { GrokPorts } from './grok-wiring.js';
+import type { LocalPorts } from './local-wiring.js';
+import type { AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, NotifierPort, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort } from '@ogden-agents/core';
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
 import type { Logger } from './log.js';
@@ -61,6 +64,27 @@ export interface StartOptions {
    * Antigravity personality), or `false` to leave it out.
    */
   antigravity?: false | AntigravityPorts;
+  /**
+   * Codex (epic 12 entry 4), registered after Antigravity: a shipped install
+   * registers it only when `CODEX_SHIPPED` (its own adapter folder) is on; a
+   * test registers it with ports (the fake agent's Codex personality, a
+   * memory setup), or `false` to leave it out.
+   */
+  codex?: false | CodexPorts;
+  /**
+   * Grok (epic 12 entry 4), registered after Codex: a shipped install registers
+   * it only when `GROK_SHIPPED` (its own adapter folder) is on; a test registers
+   * it with ports (the fake agent's Grok personality, a memory setup), or
+   * `false` to leave it out.
+   */
+  grok?: false | GrokPorts;
+  /**
+   * The Local model (epic 14 story 14.2), registered after Grok: a shipped
+   * install registers it only when `LOCAL_SHIPPED` (its own adapter folder) is
+   * on; a test registers it with ports (the fake agent's OpenCode personality,
+   * a memory setup) and the endpoint a chat talks to, or `false` to leave it out.
+   */
+  local?: false | LocalPorts;
   /**
    * The Claude Agent ACP adapter's entry script (or, in tests, any script
    * that speaks ACP over stdio, such as the fake agent). Default:
@@ -162,6 +186,24 @@ export interface StartOptions {
    * Python with no download). The launcher never sets it.
    */
   extraUvEnv?: Readonly<Record<string, string>>;
+  /**
+   * Override the sandbox check unattended builds make (story 5.2; tests: a
+   * fixed answer). Default: the `sandbox-claude-native` adapter, or the
+   * `OGDEN_AGENTS_TEST_SANDBOX` hook's answer on a test run.
+   */
+  sandbox?: SandboxPort;
+  /** Override git for unattended builds (story 5.2; tests). Default: the `vcs-git` adapter on the user's `git`. */
+  vcs?: VcsPort;
+  /**
+   * Override the build runner (story 5.3's wiring slot; tests: `build-memory`).
+   * Default: the `buildrunner-acp` adapter (5.4 and 5.7 complete it).
+   */
+  buildRunner?: BuildRunnerPort;
+  /**
+   * Override how notifications are sent (story 5.3's wiring slot; 11.4 wires
+   * `notify-webhook` as the default and reads it; tests: `notify-memory`).
+   */
+  notifier?: NotifierPort;
   /**
    * The "newer version" check (story 13.7): `false` turns it off, a client
    * replaces the real npm one (tests: a fake, so none reaches the network).

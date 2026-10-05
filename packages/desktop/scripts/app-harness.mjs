@@ -122,6 +122,36 @@ export function writeQuit(ws) {
   writeFileSync(ws.quitFile, 'quit\n');
 }
 
+/** The app's own processes (the shell, by its program name), for waiting until one scenario's app is fully gone. */
+export function listApps(ignore = new Set()) {
+  if (IS_WIN) {
+    const r = spawnSync('tasklist', ['/FI', 'IMAGENAME eq ogden-agents.exe', '/FO', 'CSV', '/NH'], { encoding: 'utf8' });
+    return r.stdout
+      .split(/\r?\n/)
+      .filter((l) => l.toLowerCase().includes('ogden-agents.exe'))
+      .map((l) => ({ pid: Number(l.split('","')[1]) }))
+      .filter((p) => !ignore.has(p.pid));
+  }
+  const out = execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' });
+  return out
+    .split('\n')
+    .filter((l) => /\/ogden-agents(\s|$)/.test(l) || l.includes('Contents/MacOS/ogden-agents'))
+    .map((l) => ({ pid: Number(l.trim().split(/\s+/)[0]) }))
+    .filter((p) => !ignore.has(p.pid));
+}
+
+/** Stops the apps left over from a scenario (never one that was running before the run). */
+export function killApps(ignore = new Set()) {
+  for (const { pid } of listApps(ignore)) {
+    try {
+      if (IS_WIN) spawnSync('taskkill', ['/pid', String(pid), '/T', '/F']);
+      else process.kill(pid, 'SIGKILL');
+    } catch {
+      // Already gone.
+    }
+  }
+}
+
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 /** The fake ACP agent the installed-package suite runs (it finds it through OGDEN_AGENTS_CLAUDE_ACP_PATH). */
 export const FAKE_AGENT = join(REPO, 'tests', 'fixtures', 'fake-acp-agent-installed.mjs');

@@ -203,8 +203,23 @@ const PROTECTED_NAMES: ReadonlySet<string> = new Set([...PROTECTED_PATHS.folders
 /** Tool kinds that write: a protected path among their paths always asks. Reads and searches are not protected. */
 export const WRITE_KINDS: ReadonlySet<ToolKind> = new Set<ToolKind>(['edit', 'delete', 'move']);
 
-/** Whether one path segment is a protected name. */
-export const isProtectedSegment = (segment: string): boolean => PROTECTED_NAMES.has(segment.toLowerCase());
+/**
+ * {@link PROTECTED_PATHS} plus the agents' own config folders (their
+ * descriptors' `configFolders`, epic 12, 12.3): what core passes to an agent
+ * that guards paths in Auto, and what every protected-path check uses.
+ */
+export function protectedPathsWith(extraFolders: readonly string[] = []): ProtectedPaths {
+  if (extraFolders.length === 0) return PROTECTED_PATHS;
+  const known = new Set(PROTECTED_PATHS.folders.map((name) => name.toLowerCase()));
+  const added = extraFolders.filter((name, index) => !known.has(name.toLowerCase()) && extraFolders.findIndex((other) => other.toLowerCase() === name.toLowerCase()) === index);
+  return { folders: [...PROTECTED_PATHS.folders, ...added], files: PROTECTED_PATHS.files };
+}
+
+/** Whether one path segment is a protected name (or one of `extraFolders`, the agents' own config folders). */
+export const isProtectedSegment = (segment: string, extraFolders: readonly string[] = []): boolean => {
+  const name = segment.toLowerCase();
+  return PROTECTED_NAMES.has(name) || extraFolders.some((folder) => folder.toLowerCase() === name);
+};
 
 /**
  * Whether any path the tool call names reaches a protected name inside the
@@ -212,7 +227,7 @@ export const isProtectedSegment = (segment: string): boolean => PROTECTED_NAMES.
  * outside the workspace or unresolvable are not checked here: they never
  * pass {@link pathsInsideWorkspace}, so they ask anyway.
  */
-export function touchesProtectedPath(workspace: Pick<Workspace, 'path' | 'realPath'>, paths: readonly string[] | undefined): boolean {
+export function touchesProtectedPath(workspace: Pick<Workspace, 'path' | 'realPath'>, paths: readonly string[] | undefined, extraFolders: readonly string[] = []): boolean {
   if (paths === undefined || paths.length === 0) return false;
   let root: string;
   let base: string;
@@ -226,11 +241,11 @@ export function touchesProtectedPath(workspace: Pick<Workspace, 'path' | 'realPa
   return paths.some((path) => {
     const reached = reachedPath(base, path);
     if (reached === undefined || !reached.startsWith(prefix)) return false;
-    return reached.slice(prefix.length).split(/[\\/]/).some(isProtectedSegment);
+    return reached.slice(prefix.length).split(/[\\/]/).some((segment) => isProtectedSegment(segment, extraFolders));
   });
 }
 
 /** Whether a command names a protected path in any word (`cp x .git/hooks/pre-commit`): no rule answers it. */
-export function commandNamesProtectedPath(command: string): boolean {
-  return words(command).some((word) => word.replace(/["']/g, '').split(/[\\/]/).some(isProtectedSegment));
+export function commandNamesProtectedPath(command: string, extraFolders: readonly string[] = []): boolean {
+  return words(command).some((word) => word.replace(/["']/g, '').split(/[\\/]/).some((segment) => isProtectedSegment(segment, extraFolders)));
 }

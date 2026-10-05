@@ -6,9 +6,11 @@
  */
 import type { AgentId, AgentModel, PermissionMode, Session, SessionId, Workspace, WorkspaceId } from '@ogden-agents/shared';
 import { monotonicFactory } from 'ulid';
-import { AgentError, unregisteredAgent, type AgentPort, type AgentRegistry, type AgentSessionModels } from '../agent-port.js';
+import { AgentError, unregisteredAgent, type AgentPort, type AgentRegistry, type AgentSessionModels, type ProtectedPaths } from '../agent-port.js';
+import { agentConfigFolders } from '../agent-descriptor.js';
 import { canonicalWorkspacePath, type Entities } from '../entities.js';
 import { NotFoundError } from '../errors.js';
+import { protectedPathsWith } from '../permission-matching.js';
 import { createDecliningPermissions, type Permissions } from '../permissions.js';
 import type { SessionEvents } from '../session-events.js';
 import { clampCheckInDelay, DEFAULT_CHECK_IN_MS, PERMISSION_MODE_TIMEOUT_MS, STOP_GRACE_MS } from './constants.js';
@@ -80,6 +82,10 @@ export interface ChatContext {
   readonly nextUlid: () => string;
   readonly newMessageId: () => string;
   readonly getWorkspace: (workspaceId: WorkspaceId) => Workspace;
+  /** Whether the project is trusted now (story 4.2's gate, with its contents since 4.13 and the agent files since 12.3); no port, a no, or a throw is untrusted. */
+  readonly projectTrusted: (workspaceId: WorkspaceId) => Promise<boolean>;
+  /** The protected paths agents are told to keep guarded in Auto: core's, plus the registered agents' own config folders (epic 12, 12.3). */
+  readonly protectedPaths: () => ProtectedPaths;
   readonly getSession: (workspaceId: WorkspaceId, sessionId: SessionId) => Session;
 }
 
@@ -149,6 +155,16 @@ export function createChatContext(options: ChatOptions): ChatContext {
     return session;
   };
 
+  const protectedPaths = (): ProtectedPaths =>
+    protectedPathsWith(agentConfigFolders(agents.agentIds.flatMap((agentId) => agents.describe(agentId) ?? [])));
+  const projectTrusted = async (workspaceId: WorkspaceId): Promise<boolean> => {
+    try {
+      return (await options.projectTrusted?.(workspaceId)) === true;
+    } catch {
+      return false;
+    }
+  };
+
   return {
     options,
     entities,
@@ -182,6 +198,8 @@ export function createChatContext(options: ChatOptions): ChatContext {
     nextUlid,
     newMessageId,
     getWorkspace,
+    projectTrusted,
+    protectedPaths,
     getSession,
   };
 }

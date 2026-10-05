@@ -1,16 +1,16 @@
 import { useState } from 'react';
 import { useUpdateActions, useUpdateNotice } from '@/updates/update-api';
-import { appUpdateSentence, availableSentence, HOW_TO_UPDATE, readDismissed, updateCommand, writeDismissed } from '@/updates/update-model';
+import { UpdateHowTo } from '@/updates/update-how-to';
+import { appUpdateSentence, availableSentence, readDismissed, writeDismissed } from '@/updates/update-model';
 import { Banner } from '@/ui/banner';
 import { Button } from '@/ui/button';
-import { Text } from '@/ui/typography';
 
 /**
  * "Ogden 0.5.0 is available" (story 13.7, E13-R7): a quiet, dismissible
  * banner (a polite status, not a modal) with the command that updates, shown
- * when the server found a newer version on npm. Dismissing it hides that
+ * when the server found a newer version on GitHub Releases or npm. Dismissing it hides that
  * version in this browser; a newer one shows it again. It reads the server's
- * notice only: the browser never asks npm.
+ * notice only: the browser never asks either.
  */
 export function UpdateBanner() {
   const { data } = useUpdateNotice();
@@ -63,7 +63,7 @@ export function UpdateBanner() {
             </Button>
           }
         >
-          {availableSentence(available)} {HOW_TO_UPDATE} <Text as="code" variant="mono">{updateCommand(data, available)}</Text> in a terminal.
+          {availableSentence(available)} <UpdateHowTo notice={data} available={available} />
         </Banner>
       )}
     </div>

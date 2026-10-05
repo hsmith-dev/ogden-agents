@@ -441,6 +441,10 @@ export class WorkspaceBusyError extends CoreError {
 /** What {@link SecretsUnavailableError} says when nothing more specific applies (AD-16 as amended in story 9.2). */
 export const SECRETS_UNAVAILABLE_MESSAGE = "There's no keychain on this computer to keep an API key in. Sign in with your account instead.";
 
+/** What it says for an agent that takes only an API key and can't be signed in with an account (Codex, Grok). */
+export const secretsUnavailableKeyOnlyMessage = (agentName: string) =>
+  `There's no keychain on this computer to keep an API key in, so ${agentName} can't be used here.`;
+
 /** What {@link SecretsUnavailableError} says when the keychain is there but didn't answer: a timeout, a locked keychain or a dismissed prompt. */
 export const KEYCHAIN_NO_ANSWER_MESSAGE = "The keychain didn't answer. Check for a prompt from your computer and try again.";
 
@@ -512,5 +516,60 @@ export class TerminalHandoffError extends CoreError {
     super(code, elapsedMs === undefined ? code : `${code} (${elapsedMs} ms)`);
     this.code = code;
     this.elapsedMs = elapsedMs;
+  }
+}
+
+/** Why a build use-case refused (story 5.2; frozen by 5.3): each answers 409 with its code, and nothing was written. */
+export type BuildRefusalCode =
+  | 'prerequisite_unmet'
+  | 'not_ready'
+  | 'run_active'
+  | 'sandbox_unavailable'
+  | 'checkout_dirty'
+  | 'merge_conflict'
+  | 'checks_failed'
+  | 'plan_uncommitted'
+  | 'vcs_unavailable'
+  | 'disk_space_low'
+  | 'run_not_active';
+
+/**
+ * A use-case whose lane has not shipped yet was asked for (story 5.3: such
+ * as building every ready ticket before 5.8). The server answers 501
+ * `not_implemented`; nothing was written.
+ */
+export class NotImplementedError extends CoreError {
+  override readonly name = 'NotImplementedError';
+  constructor(message: string) {
+    super('not_implemented', message);
+  }
+}
+
+/**
+ * A build, approve or reject was refused (story 5.2): `code` says why for
+ * the API, `message` in plain words for the user (a shared sentence; a
+ * `sandbox_unavailable` may carry the sandbox's own plain reason).
+ */
+export class BuildRefusedError extends CoreError {
+  override readonly name = 'BuildRefusedError';
+  override readonly code: BuildRefusalCode;
+  constructor(code: BuildRefusalCode, message: string) {
+    super(code, message);
+    this.code = code;
+  }
+}
+
+/** What a read-only build session refuses (story 5.2): it runs on its own. */
+export const BUILD_SESSION_READ_ONLY_MESSAGE = 'An unattended build runs on its own: its session is read-only.';
+
+/**
+ * A user message, permission mode, driver change or Stop was asked of an
+ * unattended build's session (story 5.2 review loop 1): core refuses it,
+ * changing nothing. Only the builds use-case sends its first prompt.
+ */
+export class BuildSessionReadOnlyError extends CoreError {
+  override readonly name = 'BuildSessionReadOnlyError';
+  constructor() {
+    super('build_session_read_only', BUILD_SESSION_READ_ONLY_MESSAGE);
   }
 }

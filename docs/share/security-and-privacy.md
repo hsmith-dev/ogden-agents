@@ -32,6 +32,8 @@ We searched the source (`packages/*/src`, `bin/`) for telemetry, analytics, Sent
 
 | Where | When | Source |
 | --- | --- | --- |
+| GitHub (`api.github.com`) | Each time Ogden starts, and when you click Check now in Settings > About, unless `OGDEN_AGENTS_OFFLINE` is set. The switch in Settings > About turns off only the check at start; Check now still asks. One `GET` of this project's latest release (a preview version asks for the newest few), to tell you a newer version exists. No version, account, project, path or token goes with it, redirects are refused, and it times out after 5 seconds. | `packages/server/src/update-check.ts`, `packages/shared/src/release-source.ts` |
+| `registry.npmjs.org` | The same times, only when Ogden was not installed from GitHub Releases. One `GET` of the public version list for `ogden-agents`. Same rules. | `packages/server/src/update-check.ts` |
 | GitHub (`codeload.github.com`) | Only when you click Set up, Update or Download BMad Method. Downloads a pinned version and checks its hash. Never at startup. | `packages/adapters/src/bmad-source/archive.ts`, AD-13 |
 | `api.anthropic.com` | Only when you save an Anthropic API key, to check it | `packages/adapters/src/setup-claude-code/api-key.ts` |
 | `generativelanguage.googleapis.com` | Only when you save a Gemini API key, to check it | `packages/adapters/src/setup-antigravity/api-key.ts` |

@@ -220,12 +220,16 @@ export function SignInAgainView({ agentId, agentName, agent, signedIn, signIn, r
     </Button>
   );
 
-  const kind = signingIn ? 'signing_in' : signedIn ? 'signed_in' : apiKey ? 'api_key' : failed ? 'failed' : 'needs_sign_in';
+  // An agent that takes only an API key (Codex) has no sign-in to offer: the key is changed in Settings: Agents.
+  const keyOnly = agent?.apiKeyOnly === true && agent.auth !== 'signed_in';
+  const kind = keyOnly ? 'api_key_only' : signingIn ? 'signing_in' : signedIn ? 'signed_in' : apiKey ? 'api_key' : failed ? 'failed' : 'needs_sign_in';
   const words =
     kind === 'signed_in'
       ? SIGNED_IN_TRY_AGAIN
-      : kind === 'api_key'
-        ? apiKeyRefused(agentName)
+      : kind === 'api_key_only'
+        ? (reason ?? `${agentName} needs a valid ${agent?.apiKeyName ?? 'API key'}.`)
+        : kind === 'api_key'
+          ? apiKeyRefused(agentName)
         : kind === 'failed'
           ? (agent?.reason ?? `${agentName} couldn't finish signing in. Try again.`)
           : (reason ?? signInAgainWords(agentName));
@@ -244,7 +248,7 @@ export function SignInAgainView({ agentId, agentName, agent, signedIn, signIn, r
         }
       >
         {words}
-        {kind === 'api_key' ? (
+        {kind === 'api_key' || kind === 'api_key_only' ? (
           <>
             {' '}
             <Link to="/settings/agents" className="text-foreground underline underline-offset-4" data-testid="agent-settings-link">

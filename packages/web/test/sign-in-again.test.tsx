@@ -229,3 +229,23 @@ describe('Sign in again resends by itself exactly once (user decision B)', () =>
     expect(run(['signing_in', 'signed_in']).resends).toBe(0);
   });
 });
+
+describe('an API key only agent (Codex; user decision, 2026-10-05)', () => {
+  const words = 'Codex needs a valid API key. Check it in Settings → Agents.';
+  const codex = (auth: AgentAuthState) => agent(auth, { agentId: 'codex', displayName: 'Codex', apiKeyOnly: true, ...(auth === 'signed_in' ? { method: 'api_key' as const } : {}) });
+
+  it('with no key it says the key is needed, with a link to Settings and never a Sign in', async () => {
+    const html = await render({ agentId: 'codex', agentName: 'Codex', agent: codex('needs_sign_in'), reason: words });
+    expect(html).toContain('data-sign-in="api_key_only"');
+    expect(html).toContain(words);
+    expect(html).toContain('data-testid="agent-settings-link"');
+    expect(html).not.toContain('data-testid="sign-in-again"');
+  });
+
+  it('with a saved key that was refused it says so, with the link and no Sign in', async () => {
+    const html = await render({ agentId: 'codex', agentName: 'Codex', agent: codex('signed_in'), reason: words });
+    expect(html).toContain('data-sign-in="api_key"');
+    expect(html).toContain('Codex refused your API key.');
+    expect(html).not.toContain('data-testid="sign-in-again"');
+  });
+});

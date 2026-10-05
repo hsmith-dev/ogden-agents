@@ -11,16 +11,13 @@ import {
   AdapterRefs as AdapterRefsSchema,
   AgentId as AgentIdSchema,
   DriverChangeCause as DriverChangeCauseSchema,
-  IsoUtcTimestamp,
   ModelChangeCause as ModelChangeCauseSchema,
   ModelId as ModelIdSchema,
   PermissionMode as PermissionModeSchema,
   PermissionModeChangeCause as PermissionModeChangeCauseSchema,
-  RunOutcome as RunOutcomeSchema,
   SessionDriver as SessionDriverSchema,
   SessionKind as SessionKindSchema,
   SessionState as SessionStateSchema,
-  TicketRef as TicketRefSchema,
   autoChatName,
   canonicalBmadPieces,
   CHAT_NAME_MAX,
@@ -30,7 +27,9 @@ import {
   DEFAULT_CAUTION_LEVEL,
   type AdapterRefs,
   type AgentId,
+  type BlockedCode,
   type BmadPiece,
+  type BuildAgent,
   type CoreEvent,
   type CoreEventType,
   type SessionAgentChangedEvent,
@@ -40,6 +39,8 @@ import {
   type PermissionMode,
   type PermissionModeChangeCause,
   type Run,
+  type RunQueueEntry,
+  type RunDecision,
   type RunId,
   type RunOutcome,
   type Session,
@@ -52,11 +53,12 @@ import {
   type WorkspaceId,
 } from '@ogden-agents/shared';
 import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
-import { z } from 'zod';
 import type { Database } from './db/database.js';
 import { events, runs, sessions, workspaces } from './db/schema.js';
 import { InvalidOperationError, NotFoundError, ValidationError, WorkspaceBusyError } from './errors.js';
 import type { EventLog, HistoryDeleted } from './event-log.js';
+import { check } from './entity-check.js';
+import { createRunEntities } from './run-entities.js';
 import { newId } from './ids.js';
 import type { SessionEvents } from './session-events.js';
 
@@ -123,6 +125,16 @@ export interface NewRun {
   sandbox?: string | null;
   /** ISO 8601 UTC. */
   deadline?: string | null;
+  /** The run's own branch (story 5.2). */
+  branch?: string | null;
+  /** The commit its branch started from (story 5.2). */
+  baseRevision?: string | null;
+  /** The branch it started from (story 5.5). */
+  baseBranch?: string | null;
+  /** The agent that builds (story 5.3). Default Claude Code, the only one in v1. */
+  agent?: BuildAgent;
+  /** Where it waits in the workspace's queue (story 5.3; 5.8), `null` when dispatched now. */
+  queuePosition?: number | null;
 }
 
 export interface SessionStateDetail {
@@ -241,25 +253,64 @@ export interface Entities {
   /** Creates the run of a `build` session with outcome `running`, and appends `run.created`. */
   createRun(input: NewRun): Run;
   getRun(id: RunId): Run | undefined;
-  /** Sets the outcome (AD-8), appending `run.outcome_changed` if it changed. */
-  setRunOutcome(id: RunId, outcome: RunOutcome): Run;
-}
-
-/** Parses `value`, throwing a {@link ValidationError} that names `what`. */
-function check<T>(schema: z.ZodType<T>, value: unknown, what: string): T {
-  const parsed = schema.safeParse(value);
-  if (!parsed.success) {
-    throw new ValidationError(
-      `invalid ${what}`,
-      parsed.error.issues.map((issue) => ({ path: issue.path, message: issue.message })),
-    );
-  }
-  return parsed.data;
+  /** The run of a `build` session (story 5.2), if it has one. */
+  getRunBySession(sessionId: SessionId): Run | undefined;
+  /** The workspace's latest run of ticket `ticketRef` (story 5.2), if any. */
+  latestRunForTicket(workspaceId: WorkspaceId, ticketRef: string): Run | undefined;
+  /**
+   * Every run with a worktree (story 5.5: the startup sweep and the
+   * run-aware ticket store), oldest first; with `workspaceIds`, only theirs.
+   */
+  listRunsWithWorktree(workspaceIds?: readonly WorkspaceId[]): Run[];
+  /** The workspace's run of ticket `ticketRef` still `running` (story 5.2), if any. */
+  activeRunForTicket(workspaceId: WorkspaceId, ticketRef: string): Run | undefined;
+  /**
+   * Sets the outcome (AD-8) and its plain `reason` (story 5.2: `null` when
+   * not given), appending `run.outcome_changed` if either changed.
+   */
+  setRunOutcome(id: RunId, outcome: RunOutcome, reason?: string | null, options?: { blockedCode?: BlockedCode | null }): Run;
+  /**
+   * Records what the user decided on the review page (story 5.3): sets the
+   * run's `decision` and appends `run.decided` (with the merge commit for
+   * `approved`, and the revision the user reviewed). The outcome is set
+   * separately. The same decision again changes nothing and appends nothing.
+   */
+  setRunDecision(id: RunId, decision: RunDecision, mergeRevision?: string, reviewedRevision?: string): Run;
+  /**
+   * Sets every run still `running` to `blocked` with `reason` and the code
+   * `interrupted` (story 5.2 review loop 1; 5.3): run at a server start,
+   * whose agents are gone with the process that ran them (AD-3). Their
+   * worktrees stay. Returns them.
+   */
+  settleInterruptedRuns(reason: string): Run[];
+  /** The workspace's runs, newest first, at most `limit` (default 200; story 5.8: the board and the session header). */
+  listRuns(workspaceId: WorkspaceId, limit?: number): Run[];
+  /** Every run `running` that left the queue (its agent is, or is about to be, working), oldest first (story 5.8: what the limits count). */
+  listRunningRuns(): Run[];
+  /** Every queued run (`queuePosition` set), oldest first across workspaces: the dispatcher's order (story 5.8). */
+  listQueuedRuns(): Run[];
+  /** The workspace's queue as `run.queue_changed` carries it, in order. */
+  queueOf(workspaceId: WorkspaceId): RunQueueEntry[];
+  /**
+   * Puts a `running` run in its workspace's queue (story 5.8: a retried run
+   * waiting for a slot), last in line, and appends `run.queue_changed`.
+   */
+  queueRun(id: RunId): Run;
+  /**
+   * A queued (or retried) run starts (story 5.8): its worktree, branch,
+   * base, sandbox and deadline are set, it leaves the queue and `running`
+   * is its outcome (blocked fields cleared), appending `run.dispatched`, the
+   * outcome change if there is one, and the queue's change.
+   */
+  dispatchRun(id: RunId, dispatch: { worktreePath: string; sandbox: string; branch: string; baseRevision: string; baseBranch: string | null; deadline: string }): Run;
+  /** Sets the commit the run's branch is measured from (story 5.9: after Update and retry rebased it). */
+  setRunBase(id: RunId, baseRevision: string): Run;
+  /** Takes a queued run out of the queue without a dispatch (it was stopped, story 5.8) and appends the queue's change. */
+  leaveQueue(id: RunId): Run;
 }
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 type SessionRow = typeof sessions.$inferSelect;
-type RunRow = typeof runs.$inferSelect;
 
 const toWorkspace = (row: WorkspaceRow): Workspace => ({
   id: row.id as WorkspaceId,
@@ -284,18 +335,6 @@ const toSession = (row: SessionRow): Session => ({
   updatedAt: row.updatedAt,
 });
 
-const toRun = (row: RunRow): Run => ({
-  id: row.id as RunId,
-  sessionId: row.sessionId as SessionId,
-  workspaceId: row.workspaceId as WorkspaceId,
-  ticketRef: row.ticketRef,
-  worktreePath: row.worktreePath,
-  sandbox: row.sandbox,
-  deadline: row.deadline,
-  outcome: row.outcome,
-  createdAt: row.createdAt,
-  updatedAt: row.updatedAt,
-});
 
 /** Swaps the case of every letter, e.g. `/Users/a` -> `/uSERS/A`. */
 function swapCase(value: string): string {
@@ -355,15 +394,13 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
     const row = orm.select().from(sessions).where(eq(sessions.id, id)).get();
     return row === undefined ? undefined : toSession(row);
   };
-  const getRun = (id: RunId) => {
-    const row = orm.select().from(runs).where(eq(runs.id, id)).get();
-    return row === undefined ? undefined : toRun(row);
-  };
   const requireSession = (id: SessionId) => {
     const session = getSession(id);
     if (session === undefined) throw new NotFoundError('session', id);
     return session;
   };
+
+  const runEntities = createRunEntities({ orm, log, now, requireSession });
 
   return {
     ensureWorkspace(path, options = {}) {
@@ -693,53 +730,6 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
       });
     },
 
-    createRun(input) {
-      const ticketRef = check(TicketRefSchema, input.ticketRef, 'ticket ref');
-      const deadline = check(IsoUtcTimestamp.nullable(), input.deadline ?? null, 'run deadline');
-      return log.transaction(() => {
-        const session = requireSession(input.sessionId);
-        if (session.kind !== 'build') {
-          throw new InvalidOperationError(`a run needs a build session; ${session.id} is a ${session.kind} session`);
-        }
-        const taken = orm.select({ id: runs.id }).from(runs).where(eq(runs.sessionId, session.id)).get();
-        if (taken !== undefined) throw new InvalidOperationError(`session ${session.id} already has run ${taken.id}`);
-        const at = now();
-        const run: Run = {
-          id: newId('run'),
-          sessionId: session.id,
-          workspaceId: session.workspaceId,
-          ticketRef,
-          worktreePath: input.worktreePath ?? null,
-          sandbox: input.sandbox ?? null,
-          deadline,
-          outcome: 'running',
-          createdAt: at,
-          updatedAt: at,
-        };
-        orm.insert(runs).values(run).run();
-        log.append({ type: 'run.created', workspaceId: run.workspaceId, streamId: session.id, payload: { run } });
-        return run;
-      });
-    },
-
-    getRun,
-
-    setRunOutcome(id, outcome) {
-      check(RunOutcomeSchema, outcome, 'run outcome');
-      return log.transaction(() => {
-        const run = getRun(id);
-        if (run === undefined) throw new NotFoundError('run', id);
-        if (run.outcome === outcome) return run;
-        const updated: Run = { ...run, outcome, updatedAt: now() };
-        orm.update(runs).set({ outcome, updatedAt: updated.updatedAt }).where(eq(runs.id, id)).run();
-        log.append({
-          type: 'run.outcome_changed',
-          workspaceId: run.workspaceId,
-          streamId: run.sessionId,
-          payload: { runId: run.id, outcome, previous: run.outcome },
-        });
-        return updated;
-      });
-    },
+    ...runEntities,
   };
 }

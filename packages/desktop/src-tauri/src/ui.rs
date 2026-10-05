@@ -50,6 +50,10 @@ fn open_external(url: &Url) {
 
 pub fn open_window(app: &AppHandle, port: u16, launch_url: &str) -> Result<(), String> {
     let launch: Url = launch_url.parse().map_err(|e| format!("{e}"))?;
+    // The link must point at the server the launcher named, never anywhere else (AD-15).
+    if !same_origin(&launch, port) {
+        return Err("The launch link did not point at the local server.".into());
+    }
     let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(launch))
         .title("Ogden Agents")
         .inner_size(1280.0, 840.0)

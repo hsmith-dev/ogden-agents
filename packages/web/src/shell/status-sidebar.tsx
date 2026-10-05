@@ -1,4 +1,4 @@
-import { Bell, FolderSimplePlus, GearSix, HandWaving, Info, PaintBrush, Plus, Robot, Wrench } from '@phosphor-icons/react';
+import { Bell, FolderSimplePlus, GearSix, HandWaving, Hammer, Info, PaintBrush, Plus, Robot, Wrench } from '@phosphor-icons/react';
 import { NEW_PROJECTS_SETTINGS_LABEL } from '@ogden-agents/shared';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { memo, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -349,6 +349,12 @@ function SettingsMenu() {
           <Link to="/settings/new-projects">
             <FolderSimplePlus aria-hidden />
             {NEW_PROJECTS_SETTINGS_LABEL}
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>
+          <Link to="/settings/builds">
+            <Hammer aria-hidden />
+            Builds
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild onSelect={() => setSheetOpen(false)}>

@@ -11,6 +11,10 @@ import {
   boardMovedText,
   boardProblemsLine,
   boardStatusPlaceText,
+  COMMIT_PLAN_FILES_LABEL,
+  NO_PLAN_FILES_TO_COMMIT_TEXT,
+  PLAN_FILES_COMMITTED_TEXT,
+  PLAN_UNCOMMITTED_MESSAGE,
   TICKET_SAVING_TEXT,
   type TicketsResponse,
 } from '@ogden-agents/shared';
@@ -26,6 +30,8 @@ import { Text } from '@/ui/typography';
 import { ScriptTrustPrompt } from '@/workspaces/script-trust-prompt';
 import { BmadDownloadPrompt } from './bmad-download-prompt';
 import { BoardEpic } from './board-epic';
+import { BuildDialog } from './build-dialog';
+import { commitPlanFiles, startBuild, useWorkspaceRuns } from './builds-api';
 import { cardStatusLine, groupBoard, indexTickets, unmetPrerequisites, type CardStatus } from './board-model';
 import { useBoardEvents, useMarkTicket, useTickets } from './planning-api';
 import { ReducedModeNotice } from './reduced-mode-notice';
@@ -39,7 +45,7 @@ import type { TicketStatusChoice } from './ticket-status-menu';
  * menu changes its status through the server (never `done`, no optimistic
  * move: the card moves once the refetched files say so), announced once in
  * a polite status region, a failure in an alert, focus back on the moved
- * card. No Build here.
+ * card. Story 5.2: with Unattended builds on, a Ready card has Build.
  * A `ticket.changed` refetches and highlights that card's status line for
  * 1.2 s. What couldn't be read is a one-line notice with Show details;
  * dropped tickets stay hidden until "Show dropped tickets" is on. A project
@@ -50,7 +56,16 @@ import type { TicketStatusChoice } from './ticket-status-menu';
  * reduced-mode notice with Upgrade this project instead of the board (so no
  * card menu); a completed upgrade fetches the tickets again.
  */
-export function BoardTickets({ wsId, sheet }: { wsId: string; /** The ticket sheet's outlet: shown only over a loaded board, never over a prompt or an error. */ sheet?: ReactNode }) {
+export function BoardTickets({
+  wsId,
+  sheet,
+  builds,
+}: {
+  wsId: string;
+  /** The ticket sheet's outlet: shown only over a loaded board, never over a prompt or an error. */ sheet?: ReactNode;
+  /** Build on Ready cards (story 5.2): only with Unattended builds on. */
+  builds?: BoardBuilds | undefined;
+}) {
   const tickets = useTickets(wsId);
   const reduced = tickets.data === undefined && isApiError(tickets.error, 'reduced_mode');
   // Once shown, the reduced-mode notice stays mounted in the same place (empty once the board loads), so an
@@ -60,12 +75,12 @@ export function BoardTickets({ wsId, sheet }: { wsId: string; /** The ticket she
   return (
     <>
       {shownReduced.current ? <ReducedModeNotice wsId={wsId} texts={reduced ? [BMAD_CAPABILITY_REDUCED_TEXT.ticket_tree] : []} className="mb-4 flex max-w-(--space-chat-column) flex-col gap-3" /> : null}
-      {reduced ? null : <BoardTicketsBody wsId={wsId} sheet={sheet} tickets={tickets} />}
+      {reduced ? null : <BoardTicketsBody wsId={wsId} sheet={sheet} tickets={tickets} builds={builds} />}
     </>
   );
 }
 
-function BoardTicketsBody({ wsId, sheet, tickets }: { wsId: string; sheet?: ReactNode; tickets: ReturnType<typeof useTickets> }) {
+function BoardTicketsBody({ wsId, sheet, tickets, builds }: { wsId: string; sheet?: ReactNode; tickets: ReturnType<typeof useTickets>; builds?: BoardBuilds | undefined }) {
   const highlighted = useBoardEvents(wsId);
   if (isApiError(tickets.error, 'scripts_not_trusted')) return <ScriptTrustPrompt wsId={wsId} onTrusted={() => void tickets.refetch()} />;
   // Story 4.13: the scripts changed since the user allowed them; Allow allows them as they are now.
@@ -97,7 +112,7 @@ function BoardTicketsBody({ wsId, sheet, tickets }: { wsId: string; sheet?: Reac
           {tickets.error.message}
         </Notice>
       )}
-      <Board wsId={wsId} data={tickets.data} updatedAt={tickets.dataUpdatedAt} highlighted={highlighted} />
+      <Board wsId={wsId} data={tickets.data} updatedAt={tickets.dataUpdatedAt} highlighted={highlighted} builds={builds} />
       {sheet}
     </>
   );
@@ -170,10 +185,111 @@ function useBoardMarks(wsId: string, updatedAt: number, showDropped: boolean, dr
   return { onChoose, saving, announcement, failure };
 }
 
-function Board({ wsId, data, updatedAt, highlighted }: { wsId: string; data: TicketsResponse; /** When `data` was fetched. */ updatedAt: number; highlighted: ReadonlySet<string> }) {
+/** A refused Build: its plain reason, and the ticket whose plan files Commit plan files would commit (story 5.5). */
+interface BuildFailure {
+  message: string;
+  commitRef?: string | undefined;
+}
+
+/**
+ * Build on a Ready card (story 5.2, the tracer), offered only with
+ * Unattended builds on: starts the ticket's build and opens its read-only
+ * session; a refusal (`not_ready`, `sandbox_unavailable`, …) says why in an
+ * alert. Story 5.5 (user decision 2026-10-04): a refusal for the ticket's
+ * uncommitted plan files offers **Commit plan files**, which commits exactly
+ * those, then says to build again.
+ */
+function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
+  const [building, setBuilding] = useState(false);
+  const [buildFailure, setBuildFailure] = useState<BuildFailure | undefined>();
+  const [committing, setCommitting] = useState(false);
+  const [committed, setCommitted] = useState<'committed' | 'nothing' | undefined>();
+  // The ticket whose Build was refused for want of a sandbox: the Build dialog is open for it (story 5.6).
+  const [dialogRef, setDialogRef] = useState<string | undefined>();
+  const pending = useRef(false);
+  const started = useRef(builds?.onStarted);
+  started.current = builds?.onStarted;
+  const build = useCallback(
+    (ref: string) => {
+      if (pending.current) return;
+      pending.current = true;
+      setBuilding(true);
+      setBuildFailure(undefined);
+      setCommitted(undefined);
+      startBuild(wsId, ref)
+        .then(
+          ({ session }) => started.current?.(session.id),
+          (error: unknown) => {
+            // No sandbox (story 5.6): the Build dialog says why and offers the choices, instead of an alert.
+            if (isApiError(error, 'sandbox_unavailable')) {
+              setDialogRef(ref);
+              return;
+            }
+            setBuildFailure({
+              message: error instanceof Error ? error.message : String(error),
+              // Only the plan files themselves: uncommitted BMad scripts share the code but are the user's to commit.
+              commitRef: isApiError(error, 'plan_uncommitted') && error.message === PLAN_UNCOMMITTED_MESSAGE ? ref : undefined,
+            });
+          },
+        )
+        .finally(() => {
+          pending.current = false;
+          setBuilding(false);
+        });
+    },
+    [wsId],
+  );
+  const commit = useCallback(
+    (ref: string) => {
+      if (pending.current) return;
+      pending.current = true;
+      setCommitting(true);
+      commitPlanFiles(wsId, ref)
+        .then(
+          ({ committed: files }) => {
+            setBuildFailure(undefined);
+            setCommitted(files.length === 0 ? 'nothing' : 'committed');
+          },
+          (error: unknown) => setBuildFailure({ message: error instanceof Error ? error.message : String(error), commitRef: ref }),
+        )
+        .finally(() => {
+          pending.current = false;
+          setCommitting(false);
+        });
+    },
+    [wsId],
+  );
+  const closeDialog = useCallback(() => setDialogRef(undefined), []);
+  const onAttendedStarted = useCallback((sessionId: string) => started.current?.(sessionId), []);
+  return { onBuild: builds === undefined ? undefined : build, building, buildFailure, commit, committing, committed, dialogRef, closeDialog, onAttendedStarted };
+}
+
+/** Build on the board (story 5.2): given only with Unattended builds on; `onStarted` opens the new build session. */
+export interface BoardBuilds {
+  onStarted: (sessionId: string) => void;
+}
+
+function Board({
+  wsId,
+  data,
+  updatedAt,
+  highlighted,
+  builds,
+}: {
+  wsId: string;
+  data: TicketsResponse;
+  /** When `data` was fetched. */ updatedAt: number;
+  highlighted: ReadonlySet<string>;
+  builds?: BoardBuilds | undefined;
+}) {
   const [showDropped, setShowDropped] = useState(false);
   const droppedId = useId();
   const { onChoose, saving, announcement, failure } = useBoardMarks(wsId, updatedAt, showDropped, droppedId);
+  const { onBuild, building, buildFailure, commit, committing, committed, dialogRef, closeDialog, onAttendedStarted } = useBoardBuild(wsId, builds);
+  const commitRef = buildFailure?.commitRef;
+  // Story 5.8: a ticket whose build waits for a slot says Queued on its card.
+  const runs = useWorkspaceRuns(wsId, builds !== undefined);
+  const queued = useMemo(() => new Set((runs.data?.queue ?? []).map((entry) => entry.ticketRef)), [runs.data]);
   const epics = useMemo(() => groupBoard(data, showDropped), [data, showDropped]);
   // One status per card, recomputed only when the tickets change, so a highlight re-renders one card.
   const statuses = useMemo(() => {
@@ -190,6 +306,28 @@ function Board({ wsId, data, updatedAt, highlighted }: { wsId: string; data: Tic
       {failure === undefined ? null : (
         <Notice variant="blocked" role="alert" data-testid="board-mark-error">
           {failure}
+        </Notice>
+      )}
+      {buildFailure === undefined ? null : (
+        <Notice
+          variant="blocked"
+          role="alert"
+          data-testid="board-build-error"
+          action={
+            commitRef === undefined ? undefined : (
+              <Button size="sm" variant="secondary" disabled={committing} data-testid="board-commit-plan" onClick={() => commit(commitRef)}>
+                {COMMIT_PLAN_FILES_LABEL}
+              </Button>
+            )
+          }
+        >
+          {buildFailure.message}
+        </Notice>
+      )}
+      {dialogRef === undefined ? null : <BuildDialog wsId={wsId} ticketRef={dialogRef} onClose={closeDialog} onStarted={onAttendedStarted} />}
+      {committed === undefined ? null : (
+        <Notice role="status" data-testid="board-plan-committed" data-committed={committed}>
+          {committed === 'nothing' ? NO_PLAN_FILES_TO_COMMIT_TEXT : PLAN_FILES_COMMITTED_TEXT}
         </Notice>
       )}
       <div className="flex flex-col gap-2">
@@ -209,7 +347,7 @@ function Board({ wsId, data, updatedAt, highlighted }: { wsId: string; data: Tic
         <ul aria-label={BOARD_EPICS_LABEL} className="m-0 flex list-none flex-col gap-8 p-0">
           {epics.map((epic) => (
             <li key={epic.slug} className="min-w-0">
-              <BoardEpic wsId={wsId} epic={epic} statuses={statuses} highlighted={highlighted} onChoose={onChoose} saving={saving} />
+              <BoardEpic wsId={wsId} epic={epic} statuses={statuses} highlighted={highlighted} onChoose={onChoose} saving={saving} onBuild={onBuild} building={building} queued={queued} />
             </li>
           ))}
         </ul>

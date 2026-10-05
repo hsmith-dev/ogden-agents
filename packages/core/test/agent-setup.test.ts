@@ -380,6 +380,12 @@ describe('agent setup: API keys (story 9.2)', () => {
     expect(error).toBeInstanceOf(SecretsUnavailableError);
     expect((error as Error).message).toBe("There's no keychain on this computer to keep an API key in. Sign in with your account instead.");
     expect(setup.agentEnv('claude-code')).toEqual({});
+    // An agent that takes only an API key is never told to sign in with an account instead.
+    const keyOnly = createAgentSetup(core.events, [{ ...port, apiKeyOnly: true }], { secrets: secrets.store });
+    const keyOnlyError = await keyOnly.setApiKey('claude-code', API_KEY).catch((caught: unknown) => caught);
+    expect((keyOnlyError as Error).message).toBe("There's no keychain on this computer to keep an API key in, so Claude Code can't be used here.");
+    const keyOnlyWithoutStore = await createAgentSetup(core.events, [{ ...port, apiKeyOnly: true }]).setApiKey('claude-code', API_KEY).catch((caught: unknown) => caught);
+    expect((keyOnlyWithoutStore as Error).message).not.toMatch(/sign in/i);
     // No store at all is the same refusal.
     const without = createAgentSetup(core.events, [keyPort().port]);
     await expect(without.setApiKey('claude-code', API_KEY)).rejects.toBeInstanceOf(SecretsUnavailableError);
@@ -979,6 +985,17 @@ describe('uninstall and sign-out (epic 6 entry 7)', () => {
 
     await setup.setApiKey('antigravity', 'AIza-test-key');
     expect(setup.agentEnv('antigravity')).toEqual({ GEMINI_API_KEY: 'AIza-test-key' });
+  });
+
+  it("an agent's plain-words notices reach the status the card shows (epic 12, 12.3), and an agent without any has none", async () => {
+    const core = openTestCore();
+    const { port } = removablePort();
+    const status = port.status.bind(port);
+    port.status = async () => ({ ...(await status()), notices: ["This agent keeps its sign-in in a file in Ogden Agents' data folder."] });
+    const setup = createAgentSetup(core.events, [port, fakePort().port]);
+    const listed = await setup.list();
+    expect(listed.find((agent) => agent.agentId === 'antigravity')?.notices).toEqual(["This agent keeps its sign-in in a file in Ogden Agents' data folder."]);
+    expect(listed.find((agent) => agent.agentId !== 'antigravity')?.notices).toBeUndefined();
   });
 
   it('a sign-out the agent refuses keeps it signed in', async () => {

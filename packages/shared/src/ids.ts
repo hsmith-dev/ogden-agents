@@ -15,6 +15,8 @@ export const ID_PREFIXES = {
   permissionRule: 'rule',
   /** A notification webhook target (story 5.3 contract; stored by 11.4). */
   webhook: 'hook',
+  /** A terminal pane of the Terminals workspace (epic 16, story 16.2). */
+  pane: 'pan',
 } as const;
 export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];
 
@@ -48,3 +50,7 @@ export type PermissionRuleId = z.infer<typeof PermissionRuleId>;
 /** A notification webhook target (story 5.3; 11.4 stores it, its URL through `SecretStorePort`). */
 export const WebhookId = prefixedUlid('hook');
 export type WebhookId = z.infer<typeof WebhookId>;
+
+/** A terminal pane (epic 16): one pseudo-terminal running one launcher in a project. */
+export const PaneId = prefixedUlid('pan');
+export type PaneId = z.infer<typeof PaneId>;

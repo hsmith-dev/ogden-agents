@@ -368,6 +368,20 @@ export class DeveloperModeRequiredError extends CoreError {
   }
 }
 
+/** The message refusing a terminal pane without Developer mode (epic 16, E16-R3): the same 403 `developer_mode_required` as Skip all. */
+export const PANES_NEED_DEVELOPER_MODE = 'Terminals are only offered in Developer mode. Turn it on in Settings → Appearance first.';
+
+/** A pane would pass the limit of panes in its project or in this install (epic 16): nothing opened. */
+export class PaneLimitError extends CoreError {
+  override readonly name = 'PaneLimitError';
+  constructor(
+    readonly scope: 'project' | 'install',
+    readonly limit: number,
+  ) {
+    super('pane_limit_reached', scope === 'project' ? `A project can have ${limit} terminals open at once. Close one first.` : `Ogden Agents can have ${limit} terminals open at once. Close one first.`);
+  }
+}
+
 /** Skip all was asked for without the user's confirmation of its warning: nothing changed. */
 export class ConfirmationRequiredError extends CoreError {
   override readonly name = 'ConfirmationRequiredError';

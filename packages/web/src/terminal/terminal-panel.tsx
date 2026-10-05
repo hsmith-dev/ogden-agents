@@ -5,6 +5,7 @@ import { tokenNumber } from '@/ui/tokens';
 import { cn } from '@/ui/utils';
 import { Text } from '@/ui/typography';
 import { connectTerminal, type TerminalConnection } from './terminal-socket';
+import { loadXterm, enableUnicode11 } from './xterm-setup';
 
 /** What the panel says under the terminal, if anything. */
 type PanelStatus = 'loading' | 'connected' | 'reconnecting' | 'ended' | 'disconnected' | 'tooMany' | 'failed';
@@ -73,7 +74,7 @@ export function TerminalPanel({ sesId, agentName, screenReaderMode, className }:
     let disposed = false;
     let cleanup = () => {};
     (async () => {
-      const [{ Terminal }, { FitAddon }] = await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit'), import('@xterm/xterm/css/xterm.css')]);
+      const { Terminal, FitAddon, Unicode11Addon } = await loadXterm();
       const element = host.current;
       if (disposed || element === null) return;
       const style = getComputedStyle(element);
@@ -84,10 +85,14 @@ export function TerminalPanel({ sesId, agentName, screenReaderMode, className }:
         // The `mono` type size of Comfortable density, also in Compact (DESIGN.md Terminal panel).
         fontSize: tokenNumber('--type-mono-size', 13),
         screenReaderMode: screenReader.current,
+        // The Unicode 11 addon needs xterm's proposed API.
+        allowProposedApi: true,
         theme: { background: style.backgroundColor, foreground: style.color, cursor: style.color },
       });
       const fit = new FitAddon();
       term.loadAddon(fit);
+      // Emoji are two cells wide (spike 16.1 finding 5).
+      enableUnicode11(term, Unicode11Addon);
       term.open(element);
       fit.fit();
       terminal.current = term;

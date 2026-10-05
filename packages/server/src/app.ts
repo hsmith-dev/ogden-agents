@@ -15,6 +15,7 @@ import {
   type EventLog,
   type InstallSettings,
   type NewProjectDefaultsStore,
+  type Panes,
   type Onboarding,
   type Permissions,
   type PlanningUseCases,
@@ -35,6 +36,8 @@ import { apiError } from './errors.js';
 import { registerEventSocket } from './event-socket.js';
 import type { Logger } from './log.js';
 import { isServerPath } from './paths.js';
+import { registerPaneRoutes } from './pane-routes.js';
+import { registerPaneSocket } from './pane-socket.js';
 import { registerPermissionRoutes } from './permission-routes.js';
 import { registerPlanningRoutes } from './planning-routes.js';
 import { registerBuildRoutes } from './build-routes.js';
@@ -142,6 +145,8 @@ export interface AppOptions {
   newProjectDefaults?: NewProjectDefaultsStore;
   /** Developer mode, kept and enforced by core (permission modes); without it its routes answer 501. */
   installSettings?: InstallSettings;
+  /** Terminal panes (epic 16): Developer mode only; without it their routes answer 501 and the socket is not registered. */
+  panes?: Panes;
   /** The "newer version" notice (story 13.7); without it its routes answer 501. */
   updates?: UpdateCheck;
   /** Inside the desktop app (`OGDEN_AGENTS_SHELL=desktop`, story 13.3): the update the shell reported, its channel and Restart. */
@@ -188,6 +193,7 @@ export function createApp({
   shell,
   agentDefaults,
   appShortcut,
+  panes,
   tabs,
 }: AppOptions): Hono {
   const app = new Hono();
@@ -292,6 +298,8 @@ export function createApp({
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerPlanningRoutes(app, { bmad, scriptTrust: bmadScriptTrust, planning, board, bmadSetup, log });
   // Unattended builds (story 5.2): the same helper, guard and trust.
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerBuildRoutes(app, { bmad, scriptTrust: bmadScriptTrust, builds, buildSettings, log });
+  // Terminal panes (epic 16): behind the gate, and Developer mode enforced by core on every call.
+  registerPaneRoutes(app, { panes, log });
   registerSettingsRoutes(app, { installSettings, newProjectDefaults, log });
   // The install's run limits and notification settings (story 5.3; 5.8 and 11.4 fill them): the gate, never a piece's guard.
   registerRunSettingsRoutes(app, { buildSettings, builds, log });
@@ -300,6 +308,8 @@ export function createApp({
   registerEventSocket(app, { events, log, tabs });
   // A session's terminal (story 3.1): behind the same gate as `/ws`.
   if (chat !== undefined) registerTerminalSocket(app, { chat, log, tabs });
+  // A pane's terminal (epic 16): the same gate, and core refuses it without Developer mode.
+  if (panes !== undefined) registerPaneSocket(app, { panes, log, tabs });
 
   // The built UI, never under the server's own paths (`paths.ts`).
   const staticFiles = serveStatic({ root: webRoot });

@@ -16,7 +16,9 @@
     "@agentclientprotocol/sdk": "^1.5.1",
     "@napi-rs/keyring": "2.1.0",
     "@ogden-agents/core": "workspace:*",
-    "@ogden-agents/shared": "workspace:*"
+    "@ogden-agents/shared": "workspace:*",
+    "@xterm/addon-serialize": "0.14.0",
+    "@xterm/headless": "6.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

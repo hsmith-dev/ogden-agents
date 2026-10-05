@@ -37,6 +37,7 @@ import { createTerminalAvailability } from './terminal-availability.js';
 import { resolveTestHooks, type TestHooks } from './test-hooks.js';
 import { VERSION } from './version.js';
 import { wireAgents } from './start-agents.js';
+import { createPanesWiring } from './start-panes.js';
 import { uvEnvironment } from './start-env.js';
 import { broadcast, closeServer, HOST, listen, repointAppShortcut } from './start-io.js';
 import { createBuildsWiring } from './start-builds.js';
@@ -305,6 +306,8 @@ async function listenAndAnnounce({
   const agentOf = (session: Session): AgentPort | undefined => agents.get(agentIdOf(session));
   // One terminal port for the chat and the toggle's availability check (story 3.7): they agree on node-pty.
   const terminal = createPtyTerminalPort(options.loadPty);
+  // Terminal panes (epic 16): in memory, Developer mode only, stopped with the server.
+  const panes = createPanesWiring({ options, hooks, core, terminal, onError: (error) => log.warn('a terminal pane listener failed', { error: error instanceof Error ? error.name : 'unknown' }) });
   // Document cards (story 4.7, `start-planning.ts`).
   const planningDocuments = createDocumentCards({ core, catalog: bmadCatalog, agent: chatAgent, agentOf, log });
   const chat = createChat({
@@ -423,6 +426,7 @@ async function listenAndAnnounce({
     shell,
     agentDefaults: { models: core.agentModels, isAgentRegistered: (agentId) => agents.get(agentId) !== undefined },
     appShortcut,
+    panes,
     tabs,
   });
 
@@ -508,6 +512,8 @@ async function listenAndAnnounce({
         await agentSetup.dispose().catch((error: unknown) => log.warn('stopping sign-ins failed', { reason: String(error) }));
         await Promise.race([agentSetup.settled(), new Promise((resolve) => setTimeout(resolve, INSTALL_STOP_MS).unref())]);
       })
+      // Every terminal pane and what it started stops with the server (AD-3).
+      .finally(() => panes.dispose())
       .finally(() => chat.close().catch((error: unknown) => log.warn('stopping agents failed', { reason: String(error) })))
       // An outcome being worked out finishes (bounded by its own reads), then the builds stop following the log.
       .finally(async () => {

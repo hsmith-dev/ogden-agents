@@ -3,13 +3,13 @@ title: 'Release pipeline: app builds, checksums and update manifests on GitHub R
 type: 'feature'
 ticket: '9'
 created: '2026-10-05'
-status: 'in-progress'
+status: 'built'
 baseline_revision: '849ff358779ff0f47a80687269ffc4c5afe5ec40'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-desktop-app/epic-desktop-app.md'
@@ -53,7 +53,7 @@ context:
 - [x] manifest and checksum script, build config script, composite action
 - [x] release.yml jobs, guard versions, github-release attaches, next channel manifest
 - [x] RELEASING.md: the user's steps for the key, the environment, the variable, optional signing secrets
-- [ ] CI green; a release dry run on this branch produces the desktop files
+- [x] CI green; a release dry run on this branch builds the desktop files (the collection step failed on the first run and is fixed, see the triage log)
 - [ ] the user's hitl steps (key, environment, variable) are theirs and are listed in the report
 
 **Acceptance Criteria:**
@@ -70,6 +70,16 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (security and correctness, self-review of the workflow and scripts, plus the dry run): high 1, medium 3, low 1.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---------|---------|-------|-------------------|
+| 1 | An unsigned release has no \`.app.tar.gz\`, but the collector demanded one | high | patch | Found by the release dry run (run 37325101025, "Collect the desktop release files"): the three unsigned builds passed and the collection failed. The collector now skips that file for an unsigned release; tested. |
+| 2 | The user's updater key could reach a job that does not need it | medium | patch | Only \`desktop-signed\` (environment \`desktop-release\`) reads the secrets; the composite action reads none; \`tests/desktop-release-workflow.test.ts\` fails if any other job or the action names a TAURI, APPLE or WINDOWS secret. |
+| 3 | A tag could publish a release without its apps, or the apps without the key's protection | medium | patch | The GitHub Release job needs \`desktop-assets\` to succeed; the environment is named only when \`DESKTOP_SIGNING\` is true (as \`NPM_PUBLISH\` gates \`npm-release\`). |
+| 4 | A release build with an empty or odd committed public key would sign for nothing | medium | patch | \`make-build-config.mjs --mode release\` refuses it before building and says what to do (RELEASING.md); tested. |
+| 5 | The Apple and Windows signing slots are unrun | low | defer | Recorded as an Open item (log: "Desktop release signing slots and live update checks have not run with real secrets"); the first signed release is their first check. |
 
 ## Verification
 

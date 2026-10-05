@@ -17,11 +17,11 @@ import { parseArgs } from 'node:util';
 
 /**
  * What each leg's files are called in a release, and which updater platforms a file serves.
- * @type {Array<{ test: (name: string) => boolean, name: (version: string) => string, platforms: string[] }>}
+ * @type {Array<{ test: (name: string) => boolean, name: (version: string) => string, platforms: string[], onlyWithUpdater?: boolean }>}
  */
 const FILE_RULES = [
   { test: (n) => /^Ogden Agents_.+_universal\.dmg$/.test(n), name: (v) => `Ogden-Agents_${v}_universal.dmg`, platforms: [] },
-  { test: (n) => n === 'Ogden Agents.app.tar.gz', name: (v) => `Ogden-Agents_${v}_universal.app.tar.gz`, platforms: ['darwin-aarch64', 'darwin-x86_64'] },
+  { test: (n) => n === 'Ogden Agents.app.tar.gz', name: (v) => `Ogden-Agents_${v}_universal.app.tar.gz`, platforms: ['darwin-aarch64', 'darwin-x86_64'], onlyWithUpdater: true },
   { test: (n) => /^Ogden Agents_.+_x64-setup\.exe$/.test(n), name: (v) => `Ogden-Agents_${v}_x64-setup.exe`, platforms: ['windows-x86_64'] },
   { test: (n) => /^Ogden Agents_.+_arm64-setup\.exe$/.test(n), name: (v) => `Ogden-Agents_${v}_arm64-setup.exe`, platforms: ['windows-aarch64'] },
 ];
@@ -50,14 +50,16 @@ function walk(dir) {
  * Tauri name), its `.sig` beside it, and the name it gets in the release.
  * @param {string} inDir
  * @param {string} version
+ * @param {boolean} [unsigned] a build with no updater key makes no `.app.tar.gz`
  * @returns {Artifact[]}
  */
-export function collectArtifacts(inDir, version) {
+export function collectArtifacts(inDir, version, unsigned = false) {
   const files = walk(inDir);
   /** @type {Artifact[]} */
   const found = [];
   for (const rule of FILE_RULES) {
     const matches = files.filter((f) => rule.test(basename(f)));
+    if (unsigned && rule.onlyWithUpdater && matches.length === 0) continue;
     if (matches.length !== 1) throw new Error(`expected exactly one file for ${rule.name(version)}, found ${matches.length}`);
     const source = /** @type {string} */ (matches[0]);
     const sig = `${source}.sig`;
@@ -104,7 +106,7 @@ function main() {
   }
   const out = resolve(values.out);
   mkdirSync(out, { recursive: true });
-  const artifacts = collectArtifacts(resolve(values.in), version);
+  const artifacts = collectArtifacts(resolve(values.in), version, values.unsigned);
   /** @type {Array<{ name: string, bytes: Buffer }>} */
   const attached = [];
   for (const artifact of artifacts) {

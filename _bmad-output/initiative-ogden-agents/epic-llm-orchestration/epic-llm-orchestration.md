@@ -16,7 +16,7 @@ Envelope only (drafted autonomously 2026-10-05; not incepted). The user's long-t
 
 The vision: a manager model, by default a local one served by Ollama or LM Studio (epic 14), reads the user's goal and the state of the project, proposes a plan, and writes one structured instruction at a time for a worker. The workers are the agents Ogden already runs in chats: Claude Code and Antigravity (subscription sign-in), Codex (OpenAI API key) and Grok (xAI token), and later others. Ogden, not the model, dispatches each instruction into a worker's chat through the existing chat and handoff machinery and, for builds, through epic 5's Build dialog and review page. The user sees every instruction. By default the user approves, edits, skips or stops each one; a per-team orchestration mode lets the user switch the team to dispatch automatically (user, 2026-10-05). Workers keep their own permission cards and modes. The manager reads each worker's status and result back and proposes the next step.
 
-Why it is different from a chat agent: the manager is not a coding agent. It has no tools, no shell, no files and no credentials. It does exactly one thing, turning context into schema-checked JSON. That keeps it inside the spec's Non-goal "an agent runtime of its own" if the user agrees (open question 1) and avoids the weakest part of small local models, reliable tool calling; it asks only for valid JSON and sensible planning.
+Why it is different from a chat agent: the manager is not a coding agent. It has no tools, no shell, no files and no credentials. It does exactly one thing, turning context into schema-checked JSON. That keeps it inside the spec's Non-goal "an agent runtime of its own" if the user agrees (user decision 2026-10-05, Decisions) and avoids the weakest part of small local models, reliable tool calling; it asks only for valid JSON and sensible planning.
 
 ## Outcome
 
@@ -87,7 +87,7 @@ Orchestration of chats and builds Ogden already runs, driven by a model-written 
 
 - Only Claude Code and Antigravity use a subscription sign-in. Codex and Grok are API-key only; local models need no account. The manager never receives any key.
 - GitHub Copilot CLI is interactive only per its terms: it is never a background or manager-dispatched worker. If it ever joins (epic 8), the manager may only suggest a step for the user to run in that chat, not dispatch it.
-- Driving a subscription agent from a manager is automation of the user's own session at the user's approval, the same shape as epic 5's unattended Claude Code builds, but its terms (Claude Code, and Antigravity per 6.1's re-check) must be re-verified for manager-driven prompts before any "approve once for the plan" mode (question 4).
+- Driving a subscription agent from a manager is automation of the user's own session at the user's approval, the same shape as epic 5's unattended Claude Code builds, but its terms (Claude Code, and Antigravity per 6.1's re-check) must be re-verified for manager-driven prompts before any subscription agent is an automatic worker (open question 3).
 - Each worker's own permission cards, modes and sandbox stay the user's; the manager cannot answer a card. No manager-triggered Skip all, ever, without a separate user decision.
 
 ### Candidate epics and stories, in order (not a breakdown; each is cut at inception)

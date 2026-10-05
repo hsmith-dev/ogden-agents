@@ -19,8 +19,13 @@ export const DesktopUpdateReport = z.object({
   version: z.string().min(1).max(64),
   notes: z.string().max(MAX_UPDATE_NOTES),
   channel: UpdateChannel,
-  /** The update is downloaded and its signature checked: Restart can install it. */
+  /** The update is downloaded and its signature and checksum checked: Restart can install it. */
   downloaded: z.boolean(),
+  /**
+   * Why the update could not be used (a failed download, signature, checksum or install), in plain
+   * words. The running version keeps working. Absent when nothing went wrong.
+   */
+  failed: z.string().max(300).optional(),
 });
 export type DesktopUpdateReport = z.infer<typeof DesktopUpdateReport>;
 

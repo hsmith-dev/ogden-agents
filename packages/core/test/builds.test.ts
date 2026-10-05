@@ -528,7 +528,7 @@ describe('the run folder and checkpoint pauses (story 5.4)', () => {
     expect(h.core.entities.getRun(run.id)?.blockedCode).toBe('checkpoint_done');
   });
 
-  it('resume and Retry refuse a running run (run_not_active); the other Retry modes are 5.9 and 11.1 (501); a refused prompt keeps the pause', async () => {
+  it('resume and Retry refuse a running run (run_not_active); Update and retry is 5.9 and Apply the saved fix is 11.1; a refused prompt keeps the pause', async () => {
     const h = await harness();
     const running = await h.builds.start(h.wsId, { ref: '1.1' });
     expect(await codeOf(h.builds.resume(h.wsId, running.run.id))).toBe('run_not_active');
@@ -536,7 +536,7 @@ describe('the run folder and checkpoint pauses (story 5.4)', () => {
     h.tickets.set(running.run.worktreePath!, '1.1', 'blocked', 'unclear intent');
     await h.endTurn(running.session.id);
     expect(await codeOf(h.builds.resume(h.wsId, running.run.id))).toBe('run_not_active');
-    expect(((await refusal(h.builds.retry(h.wsId, running.run.id, { mode: 'apply_fix' }))) as Error).name).toBe('NotImplementedError');
+    expect(((await refusal(h.builds.retry(h.wsId, running.run.id, { mode: 'apply_fix' }))) as Error).name).toBe('BuildRefusedError');
 
     const paused = await harness();
     paused.tickets.checkpoint('1.1', { plan: true });

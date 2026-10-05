@@ -105,10 +105,14 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Epic 5 (5.9 or 11.1): while a build runs, its branch ref points at objects only the run's own store holds, so the user's own `git log --all`, `git fsck` or `git gc` in the repo reports a bad object for `ogden/<run8>/…` until approve imports it or the run is discarded. Keeping the run's refs out of `refs/heads` would close it. From 5.6. (log: "Known cost of the per-run object store")
 - Epic 5 (a later story): an attended build has no managed Claude Code settings, so the user's own settings can still skip a card. From 5.6. (log: "An attended build's session has no managed Claude Code settings")
 - Epic 5 (a later sandbox story): 5.6's low review findings (a compression-bomb object, an unremovable store, the bubblewrap probe, the docker lookup). From 5.6. (log: "Low findings of 5.6's review")
+- 16.3 (proposed): pane children need a bigger secret free environment than `baseEnvironment()` (`COLORTERM`, Windows `APPDATA`, `LOCALAPPDATA`, `ProgramFiles` and more); add `paneEnvironment()` checked against `SECRET_NAME`, with a sentinel test per OS. From spike 16.1. (log: "Spike 16.1: pane children need a bigger secret free environment")
+- 16.2 (proposed): a server killed hard leaves a pane whose program ignores hangup running on macOS and Windows; record each pane's pid and start time and sweep only those on the next start. From spike 16.1. (log: "Spike 16.1: a server killed hard leaves a pane")
+- Unowned (when the chat terminal is next changed): the chat terminal panel does not load `@xterm/addon-unicode11`, so emoji are one cell wide and misalign a line; panes should load it. From spike 16.1. (log: "Spike 16.1: the chat terminal panel does not load")
 - Epic 5 (a later sandbox story): Stop and Quit do not stop a test re-run in progress, and the macOS Seatbelt profile is allow-default with only network and writes denied, so mach lookups and signals stay open. From 5.8 reviews. (log: "The test re-run is not stopped by Stop or Quit")
 - Epic 5 (a later sandbox story): the read fence uses unresolved credential folder paths and a short list, and macOS shares its temp folders between runs. From 5.8 security review. (log: "Read fences of the sandboxed re-run")
 - Epic 5 (5.9): queued runs start again only when another run ends, a limit changes or the server restarts, not when a turned-off piece is turned back on. From 5.8 review. (log: "Queued runs wait after a piece is turned back on")
 - Epic 5 (11.1): Update and retry takes no run-limit slot and arms no deadline, and every review read runs `tickets.py` once. From 5.9 reviews. (log: "Update and retry takes no run limit slot and arms no deadline")
+- Epic 11 (11.5, which also takes the run folder pruning above): Apply the saved fix leaves the patch applied with the run still blocked when the plan mark or the prompt fails afterwards; the saved patch is read by git three times and not previewed. From 11.1 reviews. (log: "Apply the saved fix after a late failure")
 
 ## Log
 
@@ -758,6 +762,15 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-v1-1-codex-and-grok/story-grok-install-and-xai-api-access-token-from-the-ui-plan.md`
   summary: Epic 12.8 review: other refusal words still say key for Grok, and the install-time token probe's premise that a dummy token sends nothing to xAI is checked on macOS only.
   evidence: `core/errors.ts` `ApiKeyRefusedError`, `web/agents/agent-setup-api.ts`, `setup-grok/token-probe.ts`; Windows and Linux are a live check.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/spike-can-many-panes-run-real-clis-in-ptys-on-all-three-oses-without-leaking-secrets-plan.md`
+  summary: Spike 16.1: pane children need a bigger secret free environment than `baseEnvironment()` (`COLORTERM`, Windows `APPDATA`, `LOCALAPPDATA`, `ProgramFiles`, `ProgramData`, `windir`, `PSModulePath`); proxies and `SSH_AUTH_SOCK` stay opt in.
+  evidence: spike plan `epic-native-cli-terminal/spike-can-many-panes-run-real-clis-in-ptys-on-all-three-oses-without-leaking-secrets-plan.md`, finding 10 (CI run 37362082901: cmd showed `%APPDATA%` unexpanded under the allowlist; no sentinel secret reached a pane).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/spike-can-many-panes-run-real-clis-in-ptys-on-all-three-oses-without-leaking-secrets-plan.md`
+  summary: Spike 16.1: a server killed hard leaves a pane whose program ignores hangup running on macOS and Windows (it stopped on Linux); a normal Quit stops them.
+  evidence: spike plan finding 8 (`safety.probe.mjs`, `server_sigkill_survivors`; CI run 37362082901).
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/spike-can-many-panes-run-real-clis-in-ptys-on-all-three-oses-without-leaking-secrets-plan.md`
+  summary: Spike 16.1: the chat terminal panel does not load `@xterm/addon-unicode11`, so emoji are one cell wide (width 1 by default, 2 with the addon) and misalign a line.
+  evidence: spike plan finding 5 (`browser.probe.mjs`, `browser_unicode_cell_widths`); `packages/web/src/terminal/terminal-panel.tsx`.
 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-unattended-builds/story-dispatch-limits-stop-retry-and-quit-in-core-plan.md`
   summary: The test re-run is not stopped by Stop or Quit, and macOS Seatbelt leaves mach lookups and signals open
@@ -777,3 +790,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-retrospectives/story-tracer-bullet-look-back-on-one-finished-epic-from-the-board-plan.md`
   summary: A look-back's epic folder is derived from tickets.py's folder name and the setup status's output folder (`folder.name` for a nested active initiative, `_bmad/config.toml` only for the output folder), so a nested initiative or an overridden central output folder starts a session naming a missing folder instead of answering 404.
   evidence: correctness review of 7.1 read tickets.py `cmd_status` (`folder.name`) and `tickets_root` (merged config); fix by checking the derived folder exists through the catalog port before starting.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-build-runs-and-notifications/story-live-run-view-and-the-runs-tab-plan.md`
+  summary: Apply the saved fix after a late failure: the patch stays applied while the run is still blocked when the plan mark or the prompt fails; the patch is read by git three times and is not previewed.
+  evidence: 11.1 correctness and security reviews; Retry still works, and the agent is released while the run is blocked.

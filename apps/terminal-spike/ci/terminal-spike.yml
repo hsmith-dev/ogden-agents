@@ -1,0 +1,89 @@
+# SPIKE 16.1 (TEMPORARY): can Ogden host several panes per project, each running an agent's own CLI through node-pty
+# and xterm, on macOS, Windows and Linux? Runs FAKE CLIs only (apps/terminal-spike/fake-cli.mjs): no real vendor CLI,
+# no network, no sign-in, no secrets. Every probe file runs even if an earlier one fails; findings are uploaded as
+# artifacts (findings-<leg>-<probe>.json) and printed in the job summary.
+# Moved out of .github/workflows/ at the spike's final commit, so it no longer runs. Kept as epic 16's recipe.
+# To run it again, copy it back to .github/workflows/.
+name: Terminal spike (16.1, temporary)
+
+on:
+  push:
+    branches: [spike/16.1-native-cli-terminal]
+    paths:
+      - apps/terminal-spike/**
+      - .github/workflows/terminal-spike.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terminal-spike-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  spike:
+    name: ${{ matrix.leg }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { leg: linux-x64, os: ubuntu-latest }
+          - { leg: macos-arm64, os: macos-latest }
+          - { leg: windows-x64, os: windows-latest }
+    defaults:
+      run:
+        shell: bash
+    env:
+      SPIKE_LEG: ${{ matrix.leg }}
+      SPIKE_OUT: ${{ github.workspace }}/spike-out
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install (node-pty is prebuilt on macOS and Windows, built on Linux)
+        run: pnpm install --frozen-lockfile
+
+      - name: Install the spike's two xterm helper packages (not part of the workspace)
+        run: npm install --prefix apps/terminal-spike --no-audit --no-fund --ignore-scripts --no-package-lock
+
+      - name: Install Chromium
+        run: pnpm exec playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
+
+      - name: Record the machine
+        run: |
+          mkdir -p "$SPIKE_OUT"
+          {
+            echo "### ${SPIKE_LEG}: machine"
+            echo
+            echo '```'
+            node -p "process.version + ' ' + process.platform + ' ' + process.arch + ' cpus=' + require('os').cpus().length + ' mem=' + Math.round(require('os').totalmem()/1048576) + 'MB ' + require('os').release()"
+            node -p "require('./packages/adapters/node_modules/node-pty/package.json').version"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Probes
+        run: |
+          status=0
+          for probe in pty-core conpty-quirks safety launch status gate browser conpty; do
+            echo "::group::probe $probe"
+            pnpm exec vitest run --config apps/terminal-spike/vitest.config.mjs "apps/terminal-spike/probes/$probe.probe.mjs" || { echo "::error::probe $probe failed"; echo "- probe \`$probe\` FAILED" >> "$GITHUB_STEP_SUMMARY"; status=1; }
+            echo "::endgroup::"
+          done
+          exit $status
+
+      - name: Upload findings
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: findings-${{ matrix.leg }}
+          path: spike-out/
+          retention-days: 30

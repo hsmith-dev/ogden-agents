@@ -80,7 +80,10 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": ""
+      "pubkey": "",
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

@@ -105,6 +105,12 @@ async function scenario(name, fn) {
   } catch (error) {
     results.push({ name, ok: false, error: error.message });
     console.error(`FAIL ${name}: ${error.message}`);
+    if (process.platform === 'win32') {
+      const ps = (c) => spawnSync('powershell', ['-NoProfile', '-Command', c], { encoding: 'utf8' }).stdout.trim();
+      console.error('installed version:', ps(`(Get-Item '${exe}').VersionInfo.ProductVersion`));
+      console.error('processes:', ps("Get-Process | Where-Object { $_.Name -match 'ogden|setup|nsis|powershell|msiexec' } | ForEach-Object { $_.Name + ' ' + $_.Id + ' ' + $_.StartTime } | Out-String"));
+      console.error('install folder:', ps(`Get-ChildItem '${dirname(exe)}' | ForEach-Object { $_.Name + ' ' + $_.LastWriteTime } | Out-String`));
+    }
     if (current) console.error('shell report:', JSON.stringify(readReport(current.report).map((e) => ({ ev: e.ev, ...e.data }))));
   }
   // Whatever the scenario left running (a failed one never reached its quit): stop it, so the next one starts clean.

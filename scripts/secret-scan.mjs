@@ -34,6 +34,7 @@ const MAX_BYTES = 2 * 1024 * 1024;
 
 /** @param {string} text @returns {{ line: number, name: string }[]} */
 export function scanText(text) {
+  /** @type {{ line: number, name: string }[]} */
   const found = [];
   const lines = text.split('\n');
   lines.forEach((line, i) => {
@@ -96,4 +97,4 @@ function main() {
   console.log(`secret-scan: ${files.length} files, nothing found`);
 }
 
-if (import.meta.url === new URL(process.argv[1], 'file://').href || process.argv[1]?.endsWith('secret-scan.mjs')) main();
+if (process.argv[1]?.endsWith('secret-scan.mjs')) main();

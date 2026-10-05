@@ -50,7 +50,16 @@ chmod +x start-ogden.sh
 
 ## Agents and how they sign in
 
-Each chat uses one coding agent: Claude Code, Google's Antigravity, or OpenAI's Codex. Claude Code and Antigravity can sign in with your own subscription account. Codex uses your own OpenAI API key only. Signing in with a ChatGPT account isn't supported, because OpenAI's terms don't allow other apps to use subscription sign in. A key is kept in your computer's keychain and goes only to its own agent's process. Settings > Agents installs an agent into Ogden Agents' data folder and takes its key.
+Each chat uses one coding agent: Claude Code, Google's Antigravity, OpenAI's Codex or xAI's Grok. Claude Code and Antigravity can sign in with your own subscription account. Codex uses your own OpenAI API key only; signing in with a ChatGPT account isn't supported, because OpenAI's terms don't allow other apps to use subscription sign in. Grok uses your own xAI API access token only; signing in with an account isn't supported here. A key or token is kept in your computer's keychain and goes only to its own agent's process. Settings > Agents installs an agent into Ogden Agents' data folder and takes its key or token. Grok runs a project's own settings, hooks and MCP servers, so a Grok chat starts only in a project you trusted.
+
+| Agent | Sign in | Modes | Needs the project trusted |
+| --- | --- | --- | --- |
+| Claude Code | Your account, or an Anthropic API key | Ask, Auto, Skip all | No |
+| Antigravity | Your Google account, or a Gemini API key | Ask, Skip all | No |
+| Codex | An OpenAI API key only | Ask, Skip all | No |
+| Grok | An xAI API access token only | Ask, Skip all (fixed when the chat starts) | Yes |
+
+Skip all is behind Developer mode.
 
 ## Requirements
 

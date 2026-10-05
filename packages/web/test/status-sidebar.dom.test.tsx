@@ -35,6 +35,8 @@ vi.mock('@/workspaces/add-project-dialog', () => ({ AddProjectDialog: ({ open }:
 vi.mock('../src/shell/new-tab-button', () => ({ NewTabButton: () => null }));
 vi.mock('../src/shell/quit-button', () => ({ QuitButton: () => null }));
 vi.mock('../src/shell/server-status', () => ({ ServerStatus: () => null }));
+// An empty project's Start a chat row (backlog story 2) has its own tests (start-chat.dom.test.tsx); here it is a stand-in.
+vi.mock('../src/shell/sidebar-start-chat', () => ({ SidebarStartChat: () => null }));
 
 const { StatusSidebar, COLLAPSED_KEY } = await import('../src/shell/status-sidebar');
 const { SidebarProvider, SidebarTrigger } = await import('../src/ui/sidebar');

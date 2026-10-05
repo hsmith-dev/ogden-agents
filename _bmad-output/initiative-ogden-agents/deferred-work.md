@@ -57,6 +57,10 @@ Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim fr
 - Unowned (TOCTOU, needs a concurrent writer): labels are judged when the catalog is read, not when a skill starts. From the 4.12 review S4. (log: "Labels are judged when the catalog is read, not when a skill starts")
 - Epic 6 (live check): protect `GEMINI.md` too if Antigravity reads it as its instruction file. From the 6.5 review. (log: "may need to join the protected files, if Antigravity reads it as its instruction file")
 - Epic 6 (every agent): setup status reads `.claude/skills` only, so an agent folder that lacks the skills (Antigravity used after Set up) gets them only at the next Set up or Upgrade. From the 6.8 restack. (log: "Setup status reads the installed BMad Method version from `.claude/skills` only")
+- Story 11 (models): after a reopen, "Agent's default" means the resumed session's model. From the story 11 review. (log: "is the model the resumed session had, not the agent's own default")
+- Story 11 (models): no two-tab test for model and default-model changes. From the story 11 review. (log: "No two-tab test for model and default-model changes")
+- Story 11 (models): the refusal Notice mounts with its text, so some screen readers may miss it. From the story 11 review. (log: "The model refusal Notice mounts with its text")
+- Story 11 (models): Default models in Settings use a menu, not a labelled field, and vanish while loading or on failure. From the story 11 review. (log: "Default models in Settings use a menu rather than a labelled form field")
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
 

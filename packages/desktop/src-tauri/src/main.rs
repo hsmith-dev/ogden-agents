@@ -205,7 +205,9 @@ fn start_server(app: &AppHandle) -> Result<Started, String> {
                 let url = format!("http://127.0.0.1:{port}/launcher/hello?launch=1");
                 if let Ok(resp) = ureq::get(&url).set("x-ogden-launcher-token", &token).timeout(Duration::from_secs(3)).call() {
                     let body: Value = resp.into_string().ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null);
-                    if let Some(launch) = body["launchUrl"].as_str() {
+                    // The link must point at the very server that answered, never anywhere else.
+                    let launch = body["launchUrl"].as_str().filter(|l| l.parse::<Url>().map(|u| same_origin(&u, port)).unwrap_or(false));
+                    if let Some(launch) = launch {
                         report("server_ready", json!({ "port": port, "version": body["version"], "ms": t0.elapsed().as_millis() as u64 }));
                         return Ok(Started { launch_url: launch.to_string(), port });
                     }

@@ -19,6 +19,8 @@ export const ALLOWED: Readonly<Record<string, readonly string[]>> = {
   '@ogden-agents/core': ['@ogden-agents/shared'],
   '@ogden-agents/web': ['@ogden-agents/shared'],
   '@ogden-agents/shared': [],
+  // The desktop shell and its build scripts (epic 13): Rust and Node scripts that build and run the packed server; no source imports.
+  '@ogden-agents/desktop': [],
 };
 
 const DEPENDENCY_FIELDS = [

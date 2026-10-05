@@ -3,13 +3,13 @@ title: 'Tracer bullet: the app opens Ogden''s window on its bundled server'
 type: 'feature'
 ticket: '2'
 created: '2026-10-05'
-status: 'in-progress'
+status: 'built'
 baseline_revision: '2a526961918ed13e2cd6c5fcf69bf3e781ad3978'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-desktop-app/epic-desktop-app.md'
@@ -55,8 +55,8 @@ context:
 - [x] staging script with pins file
 - [x] smoke test and harness helpers
 - [x] `Desktop` CI workflow (macOS arm64 app, Windows x64 NSIS installed silently)
-- [ ] CI green on both legs; commit `Cargo.lock` from the first run
-- [ ] review and triage
+- [x] CI green on both legs (run 37300534255: macOS arm64 and Windows x64 NSIS installed silently, page loaded, tab token minted, quit left no `ogden-node`); `Cargo.lock` committed from it
+- [x] review and triage
 
 **Acceptance Criteria:**
 - Given a PR touching `packages/desktop/`, when CI runs, then both legs build the app, the smoke reaches the page and the tab exchange, and quitting leaves no `ogden-node` process.
@@ -70,6 +70,18 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (security and correctness, self-review of the shell, staging and workflow): high 1, medium 2, low 3.
+
+| # | Finding | Verdict | Route | Evidence / action |
+|---|---------|---------|-------|-------------------|
+| 1 | `packages/desktop/` had no `package.json`, so `tests/architecture.test.ts` and `tests/packaging.test.ts` (which read every `packages/*/package.json`) fail in the full CI | high | patch | Found by running the suite on the stacked branch. Added a private `@ogden-agents/desktop` package (no scripts, no dependencies; the lockfile needs no change) and its entry in the AD-1 map. |
+| 2 | The shell trusted `launchUrl` from the handshake: a local process writing `server.json` could point the window anywhere | medium | patch | The link must be on `http://127.0.0.1:<port>`, the server that answered. Same threat model as the launcher (data folder is mode 0700), still checked. |
+| 3 | The shell computes the data folder itself (env-paths in Rust) | medium | defer | 13.5 replaces it with the launcher's `--json` mode (`dataDir` in its line). |
+| 4 | Windows quit has no graceful step (taskkill tree) | medium | defer | 13.5: quit through the server's own route first. |
+| 5 | Test hooks (`OGDEN_DESKTOP_TEST_REPORT`, `OGDEN_DESKTOP_TEST_QUIT_FILE`) are read in a shipped binary | low | reject | Same-user environment only; the report never holds a URL, token or path to a secret (guarded by `tests/desktop-config.test.ts` in 13.3); the quit file only runs the normal quit. |
+| 6 | Closing the window blocks the UI thread up to 8 s while the server stops | low | defer | 13.5 reworks quit. |
+| 7 | `killSidecars` in the smoke could kill a user's own `ogden-node` | low | patch | Processes present before the run are never counted or killed. |
 
 ## Verification
 

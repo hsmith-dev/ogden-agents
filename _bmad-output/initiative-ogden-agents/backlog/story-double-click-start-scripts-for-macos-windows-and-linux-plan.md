@@ -89,7 +89,7 @@ Pass 1 (lenses: quick, security). high 2, medium 4, low 6, false 0, maybe-false 
 |---|---|---|---|
 | `.cmd` resolves `node`/`npx`/`where`/`findstr` from the current folder (Downloads) first | high | patch | cmd.exe searches the cwd before PATH. Set `NoDefaultCurrentDirectoryInExePath=1`, `cd /d %USERPROFILE%`, call `where.exe`/`findstr.exe` by full path; test with planted `node.bat`/`npx.bat` in cwd. |
 | npx reads `.npmrc`/`node_modules` from the script's folder | high | patch | npm walks up from the cwd. Both scripts now `cd` to the home folder first. |
-| `%*` forwards unquoted dropped paths with `&` to cmd | medium | patch | Arguments not starting with `--` are refused (exit 2); test with `C:\R&D\notes.txt`. |
+| `%*` forwards unquoted dropped paths with `&` to cmd | medium | patch | Path-like arguments (holding `\` or `:`) are refused (exit 2), so `--port 0` still passes (a first `--`-only rule broke the Windows smoke); test with `C:\R&D\notes.txt`. |
 | `--check` echoes data dir/package unquoted (`&` splits the line) | medium | patch | Echo with delayed expansion; test with `R&D data`. |
 | `.cmd` served LF from GitHub Raw (index LF) | medium | patch | `*.cmd -text`, committed CRLF (`i/crlf`). |
 | Linux double-click without a terminal hides errors | medium | patch | README now says run in a terminal / Run in Terminal. |

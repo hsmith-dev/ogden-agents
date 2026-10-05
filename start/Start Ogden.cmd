@@ -17,6 +17,12 @@ rem passed through. OGDEN_AGENTS_PACKAGE overrides the package npx runs
 rem (default ogden-agents@latest; for example ogden-agents@next).
 rem OGDEN_START_NO_PAUSE=1 never waits for a key (for automation).
 setlocal EnableExtensions DisableDelayedExpansion
+rem Find commands on PATH only, never in the current folder (often Downloads,
+rem where a planted node.exe or npx.bat could sit), and run from the home
+rem folder so npx reads no project config or packages from that folder either.
+set "NoDefaultCurrentDirectoryInExePath=1"
+set "OGDEN_SYS=%SystemRoot%\System32"
+cd /d "%USERPROFILE%" 2>nul
 
 rem The minimum Node.js major version: package.json "engines" (a test keeps them equal).
 set "MIN_NODE_MAJOR=24"
@@ -26,7 +32,17 @@ if defined OGDEN_AGENTS_PACKAGE set "OGDEN_PACKAGE=%OGDEN_AGENTS_PACKAGE%"
 set "OGDEN_CHECK=0"
 if /i "%~1"=="--check" set "OGDEN_CHECK=1"
 
-where node >nul 2>nul
+rem Only --options pass to Ogden Agents. Anything else (a file dropped on this
+rem script, say) is refused, so cmd.exe never re-reads it as part of a command.
+:collect_args
+if "%~1"=="" goto :args_ok
+set "OGDEN_ARG=%~1"
+if not "%OGDEN_ARG:~0,2%"=="--" goto :bad_arg
+shift
+goto :collect_args
+:args_ok
+
+"%OGDEN_SYS%\where.exe" node >nul 2>nul
 if errorlevel 1 (
   set "OGDEN_PROBLEM=Node.js is not installed, no node command was found."
   goto :need_node
@@ -37,7 +53,7 @@ for /f "delims=" %%v in ('node --version 2^>nul') do if not defined NODE_VERSION
 if not defined NODE_VERSION set "NODE_VERSION=unknown"
 set "NODE_MAJOR=%NODE_VERSION:~1%"
 for /f "delims=." %%m in ("%NODE_MAJOR%.") do set "NODE_MAJOR=%%m"
-echo(%NODE_MAJOR%| findstr /r /x "[0-9][0-9]*" >nul
+echo(%NODE_MAJOR%| "%OGDEN_SYS%\findstr.exe" /r /x "[0-9][0-9]*" >nul
 if errorlevel 1 (
   set "OGDEN_PROBLEM=the installed Node.js did not report its version."
   goto :need_node
@@ -47,7 +63,7 @@ if %NODE_MAJOR% LSS %MIN_NODE_MAJOR% (
   goto :need_node
 )
 
-where npx >nul 2>nul
+"%OGDEN_SYS%\where.exe" npx >nul 2>nul
 if errorlevel 1 (
   set "OGDEN_PROBLEM=Node.js %NODE_VERSION% is installed, but its npx command is missing. Reinstalling Node.js brings it back."
   goto :need_node
@@ -66,12 +82,21 @@ set "NPM_VERSION=not found"
 for /f "delims=" %%v in ('npm --version 2^>nul') do set "NPM_VERSION=%%v"
 set "OGDEN_DATA=the default for this computer"
 if defined OGDEN_AGENTS_DATA_DIR set "OGDEN_DATA=%OGDEN_AGENTS_DATA_DIR%"
-echo Node.js: %NODE_VERSION%
-echo npm: %NPM_VERSION%
-echo Package: %OGDEN_PACKAGE%
-echo Data folder: %OGDEN_DATA%
+rem Delayed expansion prints the values as text, even with & or | in a folder name.
+setlocal EnableDelayedExpansion
+echo(Node.js: !NODE_VERSION!
+echo(npm: !NPM_VERSION!
+echo(Package: !OGDEN_PACKAGE!
+echo(Data folder: !OGDEN_DATA!
 echo Ready: Ogden Agents can start.
-endlocal & exit /b 0
+endlocal & endlocal & exit /b 0
+
+:bad_arg
+echo.
+echo Ogden Agents can't start: Start Ogden takes only options that begin with --,
+echo such as --check, --no-open or --port 5000. Start it without dropping files on it.
+call :pause_on_error
+endlocal & exit /b 2
 
 :need_node
 echo.

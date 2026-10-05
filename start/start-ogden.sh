@@ -22,6 +22,10 @@ MIN_NODE_MAJOR=24
 NODE_DOWNLOAD_URL="https://nodejs.org/en/download"
 PACKAGE="${OGDEN_AGENTS_PACKAGE:-ogden-agents@latest}"
 
+# Run from the home folder, as macOS does for a .command file: npx then reads
+# no project config (.npmrc) or packages from the folder the script sits in.
+cd "${HOME:-/}" 2>/dev/null || cd /
+
 CHECK=0
 if [ "${1:-}" = "--check" ]; then
   CHECK=1

@@ -174,15 +174,16 @@ jobs:
 
   # The double-click start scripts (start/, README "Start Ogden") attached to
   # the GitHub Release for this tag, created here if it doesn't exist (a
-  # prerelease for a `next` version). Only after publish: the scripts run
-  # `npx ogden-agents@latest`, so they go up once the package is on npm. The
+  # prerelease for a `next` version). Only after verify: the scripts run
+  # `npx ogden-agents@latest`, so they go up once the package is on npm and
+  # starts from the registry on every OS. SHA256SUMS.txt lists each asset. The
   # macOS script goes in a zip, since a browser download drops its executable
   # bit and Archive Utility keeps it; GitHub turns spaces in asset names into
   # dots, so the assets are named without them. Idempotent: a re-run replaces
   # the assets. The only job with write access to the repository.
   start-scripts:
     name: Attach start scripts to the GitHub Release
-    needs: [guard, publish]
+    needs: [guard, verify]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -193,7 +194,10 @@ jobs:
       TAG: ${{ github.ref_name }}
       DIST_TAG: ${{ needs.guard.outputs.dist-tag }}
     steps:
+      # Only start/ is used; the write-scoped token isn't kept in .git/config.
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Build the assets
         run: |
@@ -202,6 +206,7 @@ jobs:
           unzip -Z "$RUNNER_TEMP/assets/Start-Ogden-macOS.zip" | grep -q '^-rwxr-xr-x' || { echo "::error::the zipped Start Ogden.command is not executable"; exit 1; }
           cp "start/Start Ogden.cmd" "$RUNNER_TEMP/assets/Start-Ogden.cmd"
           cp start/start-ogden.sh "$RUNNER_TEMP/assets/start-ogden.sh"
+          (cd "$RUNNER_TEMP/assets" && sha256sum Start-Ogden-macOS.zip Start-Ogden.cmd start-ogden.sh > SHA256SUMS.txt && cat SHA256SUMS.txt)
           ls -l "$RUNNER_TEMP/assets"
 
       - name: Create the release if needed and attach the assets

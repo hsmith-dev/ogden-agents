@@ -9,4 +9,5 @@
 *.tgz binary
 *.whl binary
 # Windows batch files need CRLF: cmd.exe misreads labels and `goto` in an LF file.
-*.cmd text eol=crlf
+# Stored with CRLF and never converted, so GitHub's Raw and Download buttons serve CRLF too.
+*.cmd -text

@@ -3,13 +3,13 @@ title: 'Double-click start scripts for macOS, Windows and Linux'
 type: 'feature'
 ticket: '2'
 created: '2026-10-04'
-status: 'in-progress'
+status: 'built'
 baseline_revision: 'a6e6c12a6636d9957fa134320be5cd8a4bfd670c'
 route: 'full'
 route_source: 'auto'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: ['quick', 'security']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/backlog/story-double-click-start-scripts-for-macos-windows-and-linux.md'
@@ -76,9 +76,33 @@ context:
 
 ## Implementation Notes
 
+- Implemented directly in the session that planned it (the plan was written with the full investigation in context).
+- Smoke via the start script (`--start-script`) passed locally on macOS; the first CI run on PR #105 was fully green, Windows included.
+
 ## Plan Change Log
 
 ## Review Triage Log
+
+Pass 1 (lenses: quick, security). high 2, medium 4, low 6, false 0, maybe-false 0.
+
+| Finding | Verdict | Route | Evidence / action |
+|---|---|---|---|
+| `.cmd` resolves `node`/`npx`/`where`/`findstr` from the current folder (Downloads) first | high | patch | cmd.exe searches the cwd before PATH. Set `NoDefaultCurrentDirectoryInExePath=1`, `cd /d %USERPROFILE%`, call `where.exe`/`findstr.exe` by full path; test with planted `node.bat`/`npx.bat` in cwd. |
+| npx reads `.npmrc`/`node_modules` from the script's folder | high | patch | npm walks up from the cwd. Both scripts now `cd` to the home folder first. |
+| `%*` forwards unquoted dropped paths with `&` to cmd | medium | patch | Arguments not starting with `--` are refused (exit 2); test with `C:\R&D\notes.txt`. |
+| `--check` echoes data dir/package unquoted (`&` splits the line) | medium | patch | Echo with delayed expansion; test with `R&D data`. |
+| `.cmd` served LF from GitHub Raw (index LF) | medium | patch | `*.cmd -text`, committed CRLF (`i/crlf`). |
+| Linux double-click without a terminal hides errors | medium | patch | README now says run in a terminal / Run in Terminal. |
+| No checksums; README teaches bypassing Gatekeeper/SmartScreen | low | patch | `SHA256SUMS.txt` asset; README: download only from the releases page, never a file someone sent. |
+| Assets uploaded after publish, not verify | low | patch | `needs: [guard, verify]`. |
+| Write token persisted by checkout | low | patch | `persist-credentials: false`. |
+| `--check` only as first argument | low | patch | README says "as the first option". |
+| No test for the non-check download-page path / pause | low | patch | POSIX test for the non-check no-Node path (empty PATH, no browser). Pause needs a TTY: not tested. |
+| `call` re-expands `%` and doubles `^` in the package path | low | reject | Only for `OGDEN_AGENTS_PACKAGE` paths with `%`/`^`; fixing needs a non-`call` npx launch with more complexity. |
+| Inline retry loop in release.yml vs AGENTS.md shared-helper rule | low | reject | release.yml already uses inline wait loops for `npm view`; the rule targets install/download helpers. |
+| Draft-release race / `--clobber` partial state | low | reject | A re-run recovers; tags are pushed by the owner one at a time. |
+| `uname` missing shows the Linux hint on macOS in tests | low | reject | Test-only PATH; real macOS has `uname`. Test comment corrected. |
+| Unpinned `@latest` | — | reject | Recorded design decision (ticket Notes). |
 
 ## Design Notes
 

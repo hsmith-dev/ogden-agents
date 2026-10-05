@@ -64,19 +64,18 @@ function fakeBin({ version, npx = true, npxExit = 0 }: { version: string; npx?: 
   return dir;
 }
 
-/** On Windows the system folder, for `where` and `findstr`; on POSIX nothing (the script needs only shell builtins). */
+/** On Windows the system folder (the script calls `where` and `findstr` there by full path anyway); on POSIX nothing: the checks need only shell builtins, and `uname`, `open` and `xdg-open` are optional. */
 const SYSTEM_PATH = IS_WINDOWS ? [join(process.env.SystemRoot ?? 'C:\\Windows', 'System32')] : [];
 
 /**
  * Runs this OS's start script with `args`, a PATH of exactly `path` (or the
  * real one), never waiting for a key, stdin closed.
  */
-function runScript(args: string[], { path, env = {} }: { path?: string[]; env?: Record<string, string> } = {}): SpawnSyncReturns<string> {
+function runScript(args: string[], { path, env = {}, cwd = tempDir() }: { path?: string[]; env?: Record<string, string>; cwd?: string } = {}): SpawnSyncReturns<string> {
   const base: Record<string, string | undefined> = Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !/^(path|ogden_agents_package|ogden_agents_data_dir|ogden_start_no_pause)$/i.test(key)),
   );
   const fullEnv = { ...base, PATH: path === undefined ? process.env.PATH : [...path, ...SYSTEM_PATH].join(IS_WINDOWS ? ';' : ':'), OGDEN_START_NO_PAUSE: '1', ...env };
-  const cwd = tempDir();
   if (IS_WINDOWS) {
     // cmd.exe runs a batch file only through a shell; `/s` strips just the outer quotes.
     return spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `""${WINDOWS}" ${args.join(' ')}"`], {
@@ -173,6 +172,42 @@ describe(`start scripts: ${OWN_SCRIPT.slice(START.length + 1)} on this OS`, () =
     const result = runScript(['--check'], { path: [fakeBin({ version: `v${enginesMinimum()}.0.0`, npx: false })] });
     expect(result.status, output(result)).toBe(1);
     expect(result.stdout).toContain('npx command is missing');
+  });
+
+  it.skipIf(IS_WINDOWS)('without Node, outside check mode: also opens the download page, and exits 1 without waiting when not in a terminal', () => {
+    // An empty PATH: no `open` or `xdg-open` either, so no browser opens in the test.
+    const result = runScript([], { path: [tempDir()], env: { OGDEN_START_NO_PAUSE: '' } });
+    expect(result.status, output(result)).toBe(1);
+    expect(result.stdout).toContain(`Opening the Node.js download page in your browser: ${NODE_DOWNLOAD_URL}`);
+    expect(result.stdout).not.toContain('Press Return');
+  });
+
+  it('ignores a node or npx in the folder it is started from', () => {
+    const cwd = tempDir();
+    if (IS_WINDOWS) {
+      writeFileSync(join(cwd, 'node.bat'), '@echo v99.0.0\r\n');
+      writeFileSync(join(cwd, 'npx.bat'), '@echo PLANTED\r\n');
+    } else {
+      writeFileSync(join(cwd, 'node'), '#!/bin/sh\necho v99.0.0\n', { mode: 0o755 });
+    }
+    const result = runScript(['--check'], { cwd });
+    expect(result.status, output(result)).toBe(0);
+    expect(result.stdout).toContain(`Node.js: ${process.version}`);
+    expect(result.stdout).not.toContain('PLANTED');
+  });
+
+  it.runIf(IS_WINDOWS)('refuses an argument that is not an --option, such as a dropped file, and runs nothing', () => {
+    const result = runScript(['C:\\R^&D\\notes.txt'], { path: [fakeBin({ version: `v${enginesMinimum()}.1.0` })] });
+    expect(result.status, output(result)).toBe(2);
+    expect(result.stdout).toContain('takes only options that begin with --');
+    expect(result.stdout).not.toContain('ARGS:');
+  });
+
+  it('--check prints a data folder with & in its name as text', () => {
+    const data = join(tempDir(), 'R&D data');
+    const result = runScript(['--check'], { env: { OGDEN_AGENTS_DATA_DIR: data } });
+    expect(result.status, output(result)).toBe(0);
+    expect(result.stdout).toContain(`Data folder: ${data}`);
   });
 
   it('runs npx with the package and passes arguments and the data folder through', () => {

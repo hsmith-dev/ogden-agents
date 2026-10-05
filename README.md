@@ -18,7 +18,7 @@ To run it from a checkout instead, see below. Release notes are in [CHANGELOG.md
 
 ## Start Ogden
 
-No terminal needed: download the start script for your computer, double-click it, and Ogden Agents opens in your browser. The scripts are attached to every [release](https://github.com/hsmith-dev/ogden-agents/releases/latest) and are in this repository's [`start/`](start/) folder.
+No terminal needed: download the start script for your computer, double-click it, and Ogden Agents opens in your browser. Download the scripts only from this project's [releases page](https://github.com/hsmith-dev/ogden-agents/releases/latest), where each release also lists their SHA-256 in `SHA256SUMS.txt`; they are also in this repository's [`start/`](start/) folder. The steps below tell your computer to run a script it can't verify, so never follow them for a "Start Ogden" file someone sent you.
 
 First install **Node.js 24 or later** from [nodejs.org/en/download](https://nodejs.org/en/download) (the LTS version is fine). If it's missing or too old, the script tells you so, opens that page, and stops; it never installs anything itself and never asks for an administrator password.
 
@@ -31,7 +31,7 @@ macOS remembers your answer. A Terminal window shows what's happening; you can c
 
 **Windows.** Download `Start-Ogden.cmd` and double-click it. It needs no administrator rights and no PowerShell. If Windows shows "Windows protected your PC", click **More info**, then **Run anyway**. The window closes by itself once Ogden Agents opens.
 
-**Linux.** Download `start-ogden.sh` and make it executable once, then run it (or double-click it, if your file manager runs scripts):
+**Linux.** Download `start-ogden.sh`, make it executable once, and run it in a terminal (if your file manager offers **Run in Terminal**, that works too; plain **Run** shows no window, so you wouldn't see an error):
 
 ```sh
 chmod +x start-ogden.sh
@@ -42,8 +42,9 @@ chmod +x start-ogden.sh
 
 **What the script does.** It checks for Node.js, then runs `npx --yes ogden-agents@latest`: the first start downloads Ogden Agents (about a minute), and later starts check for a newer version. Ogden Agents keeps running in the background after the window closes; stop it with **Quit Ogden Agents** in the app, and double-click the script again to reopen it. If something fails, the window stays open with the reason. Options:
 
-- Anything after the script name goes to Ogden Agents (for example `./start-ogden.sh --port 5000`).
-- `--check` only reports the Node.js, npm and package it found, and opens nothing.
+- Options after the script name go to Ogden Agents (for example `./start-ogden.sh --port 5000`). The Windows script accepts only options that start with `--`.
+- `--check`, as the first option, only reports the Node.js, npm and package it found, and opens nothing.
+- The script runs from your home folder, so npx never picks up settings or packages from the folder you downloaded it to.
 - `OGDEN_AGENTS_DATA_DIR` keeps working (see Run). `OGDEN_AGENTS_PACKAGE` picks another package version, such as `ogden-agents@next`.
 
 ## Requirements

@@ -3,13 +3,13 @@ title: 'Tracer bullet: look back on one finished epic from the board'
 type: 'feature'
 ticket: '1'
 created: '2026-10-05'
-status: 'in-review'
+status: 'built'
 baseline_revision: 'd4c3f9d86ff5ca4cfe5ddd56ec7cdc496fdb8cc0'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-retrospectives/epic-retrospectives.md'
@@ -75,6 +75,15 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+- 2026-10-05, pass 1 (security and correctness lenses): high 0, medium 3, low 3. Routed: patch 5, defer 1, reject 1. No intent_gap or bad_plan.
+  - The output folder (the repo's own setting) went into the first message with only a lexical check -- medium, patch: each part must be one plain name; test with spaces, newline, leading dash.
+  - Stale e2e specs and server tests asserted Retrospectives is coming soon -- medium, patch: a `shippedBmadPieces` start option makes an install that ships fewer; specs and tests use it.
+  - The test-registered-piece test no longer tested the option and hook -- medium, patch: uses `shippedBmadPieces` without Retrospectives.
+  - `DOCUMENT_PIECES` duplicated in two core files -- low, patch: one export.
+  - Slug pattern allows Windows device names (`CON`) -- low, reject: the name is an existing repo folder the board already lists; no traversal.
+  - Derived folder may not exist for a nested active initiative or a central config output folder -- low to medium, defer: logged in deferred-work; the live skill reports a missing folder itself.
+  - e2e-installed journey still registers `retrospectives` as available -- low, reject: harmless, the registration is now redundant.
 
 ## Verification
 

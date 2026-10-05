@@ -61,10 +61,15 @@ export interface RetrospectiveDeps {
   skill: string;
 }
 
+/** One part of the output folder: plain name characters, a leading underscore allowed (`_bmad-output`), never a space, control character or leading dash. */
+const OUTPUT_SEGMENT_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
+
 /** The epic's folder, repo-relative: `<output folder>/<initiative folder>/<epic>`, or `undefined` when any part isn't one safe name. */
 function epicFolder(outputFolder: string | null, initiative: string | null, epic: string): string | undefined {
   if (outputFolder === null || initiative === null || !EPIC_SLUG_PATTERN.test(initiative) || !EPIC_SLUG_PATTERN.test(epic)) return undefined;
   const base = outputFolder.split('/').filter((segment) => segment !== '' && segment !== '.');
+  // The output folder is the repo's own setting and goes into the first message: each part is one plain name too.
+  if (!base.every((segment) => OUTPUT_SEGMENT_PATTERN.test(segment))) return undefined;
   const path = [...base, initiative, epic].join('/');
   if (!RepoRelativePath.safeParse(path).success || !insideOutputFolder(path, outputFolder)) return undefined;
   return path;

@@ -160,7 +160,7 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
   // Every environment hook, on a test run only; one the options already decide is not read (story 10.8).
   const hooks = resolveTestHooks(process.env, dataDir, { ...options, ownsCore });
   // What this install ships, plus a test's own (story 10.2): the option, and the environment hook.
-  const availableBmadPieces = [...new Set([...SHIPPED_BMAD_PIECES, ...(options.availableBmadPieces ?? []), ...hooks.bmadAvailable])];
+  const availableBmadPieces = [...new Set([...(options.shippedBmadPieces ?? SHIPPED_BMAD_PIECES), ...(options.availableBmadPieces ?? []), ...hooks.bmadAvailable])];
   // The pinned BMad Method source, the catalog and setup's script runner holder (`start-planning.ts`).
   const bmadWiring = createBmadSourceAndCatalog(options, dataDir, log, hooks.bmadSource);
   const { bmadCatalog } = bmadWiring;

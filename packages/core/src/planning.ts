@@ -18,7 +18,6 @@ import {
   DOCUMENT_INVALID_PATH_MESSAGE,
   PlanningIdea,
   SKILL_NAME_PATTERN,
-  type BmadPiece,
   type Catalog,
   type PlanningDocument,
   type Session,
@@ -31,10 +30,7 @@ import type { BmadModulesSeen } from './bmad-modules-seen.js';
 import type { Chat } from './chat/types.js';
 import type { Entities } from './entities.js';
 import { NotFoundError, ValidationError } from './errors.js';
-import { documentPath, insideOutputFolder } from './planning-documents.js';
-
-/** The pieces whose sessions' documents open: Planning, and Retrospectives (story 7.1). */
-const DOCUMENT_PIECES: readonly BmadPiece[] = ['planning', 'retrospectives'];
+import { DOCUMENT_PIECES, documentPath, insideOutputFolder } from './planning-documents.js';
 
 export interface PlanningUseCases {
   /**

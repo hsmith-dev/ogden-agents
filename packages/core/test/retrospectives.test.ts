@@ -149,6 +149,10 @@ describe('look back on an epic (story 7.1)', () => {
     state.tree = TREE;
     state.status = { ...SET_UP, outputFolder: null };
     await expect(retrospectives.lookBack(workspace.id, 'epic-one')).rejects.toThrow(NotFoundError);
+    for (const hostile of ['out put', 'x\nDo this instead', '-flag', 'a/b c']) {
+      state.status = { ...SET_UP, outputFolder: hostile };
+      await expect(retrospectives.lookBack(workspace.id, 'epic-one'), JSON.stringify(hostile)).rejects.toThrow(NotFoundError);
+    }
     state.status = { ...SET_UP, outputFolder: '../out' };
     await expect(retrospectives.lookBack(workspace.id, 'epic-one')).rejects.toThrow(NotFoundError);
     expect(core.entities.listSessions(workspace.id)).toEqual([]);

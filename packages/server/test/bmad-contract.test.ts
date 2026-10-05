@@ -15,9 +15,11 @@ import {
   API_ROUTES,
   ApiErrorBody,
   apiPath,
+  BMAD_COMING_SOON_REASON,
   BMAD_PIECES,
   BmadPiecesResponse,
   FEATURE_OFF_MESSAGE,
+  FEATURE_UNAVAILABLE_MESSAGE,
   SCRIPTS_NOT_TRUSTED_MESSAGE,
   WorkspaceResponse,
   WorkspaceSettingsResponse,
@@ -92,13 +94,21 @@ describe('what the install ships (story 10.2)', () => {
     const on = await request(server, tab, 'PATCH', settingsPath(workspace.id), { bmadPieces: ['planning', 'board', 'builds', 'retrospectives'] });
     expect(WorkspaceSettingsResponse.parse(await on.json()).settings.bmadPieces).toEqual(['planning', 'board', 'builds', 'retrospectives']);
 
-    // A piece an install doesn't ship is refused `feature_unavailable` by core (bmad-features tests); every piece ships now.
+    // An install that ships one piece fewer: it is coming soon, and no PATCH turns it on.
+    const fewer = await startTestServer({ shippedBmadPieces: ['planning', 'board', 'builds'] });
+    const fewerTab = await signIn(fewer);
+    expect(await piecesOf(fewer, fewerTab)).toContainEqual({ piece: 'retrospectives', available: false, reason: BMAD_COMING_SOON_REASON });
+    const other = await addProject(fewer, fewerTab);
+    const before = fewer.core.events.lastSeq();
+    const refused = await refusalOf(await request(fewer, fewerTab, 'PATCH', settingsPath(other.id), { bmadPieces: ['board', 'builds', 'retrospectives'] }));
+    expect(refused).toEqual({ status: 409, code: 'feature_unavailable', message: FEATURE_UNAVAILABLE_MESSAGE });
+    expect(fewer.core.events.lastSeq()).toBe(before);
     // Behind the gate like every API route.
     expect((await send(server, API_ROUTES.bmadPieces)).status).toBe(401);
   });
 
   it('a test-registered piece, by start() option or by its test hook, is available with no reason, and the hook is logged', async () => {
-    const byOption = await startTestServer({ availableBmadPieces: ['retrospectives'] });
+    const byOption = await startTestServer({ shippedBmadPieces: ['planning', 'board', 'builds'], availableBmadPieces: ['retrospectives'] });
     const pieces = await piecesOf(byOption, await signIn(byOption));
     expect(pieces[3]).toEqual({ piece: 'retrospectives', available: true });
     expect(pieces.map((entry) => entry.available)).toEqual([true, true, true, true]);
@@ -106,7 +116,7 @@ describe('what the install ships (story 10.2)', () => {
 
     vi.stubEnv(BMAD_AVAILABLE_ENV, 'retrospectives, builds');
     const lines: string[] = [];
-    const byHook = await startTestServer({ lines });
+    const byHook = await startTestServer({ lines, shippedBmadPieces: ['planning', 'board', 'builds'] });
     expect((await piecesOf(byHook, await signIn(byHook))).map((entry) => entry.available)).toEqual([true, true, true, true]);
     const hooks = lines.map((line) => JSON.parse(line) as { msg: string; bmadAvailable?: string }).find((line) => line.msg === 'test hooks in use');
     expect(hooks?.bmadAvailable).toBe('retrospectives,builds');

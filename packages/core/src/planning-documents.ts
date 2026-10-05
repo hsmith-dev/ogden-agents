@@ -27,7 +27,7 @@ import type { SessionEvents } from './session-events.js';
 export const DOCUMENT_EXTENSION = '.md';
 
 /** The pieces whose sessions write document cards: Planning, and Retrospectives (a look-back's retrospective, story 7.1). */
-const DOCUMENT_PIECES: readonly BmadPiece[] = ['planning', 'retrospectives'];
+export const DOCUMENT_PIECES: readonly BmadPiece[] = ['planning', 'retrospectives'];
 
 /** The longest document path taken, in characters: the path reaches the card and the next session's prompt. */
 export const MAX_DOCUMENT_PATH_LENGTH = 512;

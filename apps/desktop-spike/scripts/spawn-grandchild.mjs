@@ -6,4 +6,9 @@ import { appendFileSync } from 'node:fs';
 
 const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1 << 30)'], { stdio: 'ignore', windowsHide: true });
 const file = process.env.OGDEN_SPIKE_GRANDCHILD_FILE;
-if (file) appendFileSync(file, `${JSON.stringify({ serverPid: process.pid, grandchildPid: child.pid, arch: process.arch, execPath: process.execPath })}\n`);
+const record = (data) => {
+  if (file) appendFileSync(file, `${JSON.stringify({ at: Date.now(), ...data })}\n`);
+};
+record({ serverPid: process.pid, grandchildPid: child.pid, arch: process.arch, execPath: process.execPath });
+// If the child ends while the server is still up, say how (it should not).
+child.on('exit', (code, signal) => record({ grandchildExit: { code, signal } }));

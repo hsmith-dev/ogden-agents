@@ -158,7 +158,25 @@ async function waitFor(file, pred, timeoutMs) {
 }
 
 function grandchildInfo(file) {
-  return readEvents(file).pop();
+  return readEvents(file).find((e) => e.grandchildPid !== undefined);
+}
+
+/**
+ * The bundled npm, as the server would use it for agent installs: findNpmCli's rule 2
+ * (`npm_execpath`, absolute `npm-cli.js` that exists), run with the bundled Node.
+ */
+function npmCheck(paths, dir) {
+  if (!paths) return 'no paths event';
+  const out = { npmCli: paths.npmCli, rule2Ok: /npm-cli\.js$/.test(paths.npmCli ?? '') && existsSync(paths.npmCli ?? '') };
+  const env = { ...process.env, PATH: dirname(paths.node) };
+  const v = spawnSync(paths.node, [paths.npmCli, '--version'], { encoding: 'utf8', env });
+  out.version = v.status === 0 ? v.stdout.trim() : `FAIL ${v.status} ${String(v.stderr).slice(0, 300)}`;
+  const prefix = join(dir, 'npm-install-check');
+  mkdirSync(prefix, { recursive: true });
+  const started = Date.now();
+  const i = spawnSync(paths.node, [paths.npmCli, 'install', '--prefix', prefix, '--no-audit', '--no-fund', 'is-number@7.0.0'], { encoding: 'utf8', env, timeout: 120_000 });
+  out.installSmallPackage = i.status === 0 && existsSync(join(prefix, 'node_modules', 'is-number')) ? `ok in ${Date.now() - started} ms` : `FAIL ${i.status} ${String(i.stderr).slice(-400)}`;
+  return out;
 }
 
 /**
@@ -262,6 +280,7 @@ async function launch(name, exe, { mode = 'tree', prefix = [], updateUrl, timeou
         .map((e) => `${e.ev}: ${e.data.url}`);
       await sleep(2000);
       rec.memory = memorySample(shellPid, serverPid);
+      if (name === 'A-tree') rec.npm = npmCheck(rec.paths, dir);
     }
 
     // Wait for the shell to go, then look for anything it left.
@@ -270,6 +289,7 @@ async function launch(name, exe, { mode = 'tree', prefix = [], updateUrl, timeou
     rec.shellExited = !alive(shellPid);
     await sleep(3000);
     const evsAfter = readEvents(reportFile);
+    rec.grandchildEvents = readEvents(gcFile).filter((e) => e.grandchildExit);
     rec.serverStopped = evsAfter.filter((e) => e.ev === 'server_stopped').map((e) => e.data);
     const pids = { server: serverPid, grandchild: gc?.grandchildPid };
     rec.survivors = Object.fromEntries(Object.entries(pids).map(([k, pid]) => [k, pid === undefined ? 'unknown' : alive(pid) ? 'ALIVE' : 'gone']));
@@ -329,7 +349,10 @@ function tryMsi(bundleDir) {
   const logFile = join(work, 'msi.log');
   const i = spawnSync('msiexec', ['/i', msi.path, '/qn', '/l*v', logFile], { stdio: 'inherit' });
   const dir = join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Ogden Agents Spike');
-  const res = { built: true, bytes: msi.bytes, installExit: i.status, installedBytes: existsSync(dir) ? du(dir) : null };
+  const logText = existsSync(logFile) ? readFileSync(logFile, 'utf16le') : '';
+  const installDir = logText.match(/Property\(S\): (?:INSTALLDIR|APPLICATIONFOLDER) = (.*)/)?.[1]?.trim();
+  const where = installDir && existsSync(installDir) ? installDir : dir;
+  const res = { built: true, bytes: msi.bytes, installExit: i.status, installDir: where, installedBytes: existsSync(where) ? du(where) : null };
   const u = spawnSync('msiexec', ['/x', msi.path, '/qn'], { stdio: 'inherit' });
   res.uninstallExit = u.status;
   return res;
@@ -477,13 +500,6 @@ async function main() {
       findings.runs.D_x64_slice = await launch('D-x64-slice', install.exe, { mode: 'tree', prefix: ['arch', '-x86_64'] });
     }
   }
-  if (OS === 'win') {
-    try {
-      findings.msi = tryMsi(args.bundle);
-    } catch (e) {
-      findings.msi = { error: String(e) };
-    }
-  }
   if (OS === 'linux') {
     try {
       findings.deb = installDeb(args.bundle);
@@ -497,6 +513,15 @@ async function main() {
       findings.updater = await updaterDryRun(install, prefix);
     } catch (e) {
       findings.updater = { error: String(e?.stack ?? e) };
+    }
+  }
+
+  // Last: the MSI's install and uninstall also remove the NSIS install.
+  if (OS === 'win') {
+    try {
+      findings.msi = tryMsi(args.bundle);
+    } catch (e) {
+      findings.msi = { error: String(e) };
     }
   }
 

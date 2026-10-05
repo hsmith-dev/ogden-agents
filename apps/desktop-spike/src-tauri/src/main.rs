@@ -91,6 +91,14 @@ fn kill_tree(pid: u32) {
         .status();
 }
 
+fn plain_path(p: PathBuf) -> PathBuf {
+    let plain: Option<PathBuf> = {
+        let s = p.to_string_lossy();
+        s.strip_prefix(r"\\?\").filter(|rest| !rest.starts_with("UNC\\")).map(PathBuf::from)
+    };
+    plain.unwrap_or(p)
+}
+
 struct Started {
     port: u16,
     launch_url: String,
@@ -100,7 +108,8 @@ fn start_server(app: &AppHandle) -> Result<Started, String> {
     let t0 = Instant::now();
     let exe_dir = std::env::current_exe().map_err(|e| e.to_string())?.parent().unwrap().to_path_buf();
     let node = exe_dir.join(if cfg!(windows) { "ogden-node.exe" } else { "ogden-node" });
-    let res = app.path().resource_dir().map_err(|e| e.to_string())?;
+    // Windows gives the resource dir as a verbatim `\\?\C:\...` path; Node and npm get plain ones.
+    let res = plain_path(app.path().resource_dir().map_err(|e| e.to_string())?);
     let pkg = res.join("app").join("node_modules").join("ogden-agents");
     let serve = pkg.join("dist").join("serve.js");
     let web = pkg.join("dist").join("web");

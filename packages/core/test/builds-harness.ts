@@ -1,0 +1,285 @@
+/**
+ * The harness for the builds use-case tests (stories 5.2 to 5.5): a real
+ * core with fake ports (an in-memory VCS, sandbox, build runner, ticket
+ * store and chat).
+ */
+import { existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import type { SessionId, TicketDetail, TicketStatus, WorkspaceId } from '@ogden-agents/shared';
+import { createBuilds, type BuildRunnerPort, type BuildsUseCases, type BuildRefusedError, type Core, type TicketStorePort, type VcsCheck, type VcsHead, type VcsPort } from '../src/index.js';
+import { openTestCore, tempDir, unusedCatalogParts } from './helpers.js';
+
+export const PLAN = '_bmad-output/initiative-demo/epic-first/story-thing-plan.md';
+
+/** A build runner for these tests: names no skill, maps the fake agent's halt to a code (story 5.3's port). */
+export const testRunner: BuildRunnerPort = {
+  agent: 'claude-code',
+  invocation: (ref) => `/build ${ref}`,
+  blockedCode: (condition) => (condition === 'unclear intent' ? 'unclear_intent' : 'other'),
+  readResult: async () => undefined,
+};
+export const REVISION = 'a'.repeat(40);
+
+export interface Ticket {
+  ref: string;
+  title: string;
+  after: Array<string | number>;
+}
+export const TICKETS: Ticket[] = [
+  { ref: '1.1', title: 'Build the thing', after: [] },
+  { ref: '1.2', title: 'Build the next thing', after: [1] },
+];
+export const STATE_OF: Record<string, string> = { 'ready-for-dev': 'backlog', 'in-review': 'review', built: 'review', done: 'done', blocked: 'in-progress', draft: 'backlog' };
+
+/** A ticket store whose statuses are kept per folder (the main checkout, or a worktree). */
+export function fakeTickets(repoPath: string) {
+  const statuses = new Map<string, Map<string, string>>([[repoPath, new Map([['1.1', 'ready-for-dev'], ['1.2', 'ready-for-dev']])]]);
+  const reasons = new Map<string, string>();
+  const checkpoints = new Map<string, { plan?: boolean; done?: boolean }>();
+  const calls: unknown[][] = [];
+  const statusIn = (path: string) => statuses.get(path) ?? statuses.set(path, new Map()).get(path)!;
+  const detail = (path: string, ticket: Ticket): TicketDetail => {
+    const status = statusIn(path).get(ticket.ref) ?? '';
+    return {
+      ref: ticket.ref,
+      id: Number(ticket.ref.split('.')[1]),
+      epic: 'epic-first',
+      title: ticket.title,
+      type: 'story',
+      status,
+      state: STATE_OF[status] ?? 'planned',
+      blocked_reason: reasons.get(`${path}:${ticket.ref}`) ?? '',
+      file: null,
+      tracker_id: '',
+      assignee: '',
+      hitl: false,
+      covers: [],
+      after: ticket.after,
+      blocks: [],
+      blocked_at: '',
+      description: '',
+      verify: '',
+      references: [],
+      notes: [],
+      unknown: '',
+      hasPlan: status !== '',
+      plan: status === '' ? null : PLAN,
+      plan_checkpoint: (checkpoints.get(`${path}:${ticket.ref}`) ?? checkpoints.get(ticket.ref))?.plan === true,
+      done_checkpoint: (checkpoints.get(`${path}:${ticket.ref}`) ?? checkpoints.get(ticket.ref))?.done === true,
+    };
+  };
+  const store: TicketStorePort = {
+    async tree(path) {
+      calls.push(['tree', path]);
+      return { tickets: TICKETS.map((ticket) => detail(path, ticket)), problems: [], folder: 'initiative-demo', epics: [] };
+    },
+    async find(path, ref) {
+      calls.push(['find', path, ref]);
+      return detail(path, TICKETS.find((ticket) => ticket.ref === ref)!);
+    },
+    async mark(path, ref, status, options = {}) {
+      calls.push(['mark', path, ref, status, options.approve === true]);
+      statusIn(path).set(ref, status);
+      return { ref, status };
+    },
+    watch: async () => ({ close() {} }),
+  };
+  return {
+    store,
+    calls,
+    set: (path: string, ref: string, status: TicketStatus, reason?: string) => {
+      statusIn(path).set(ref, status);
+      if (reason !== undefined) reasons.set(`${path}:${ref}`, reason);
+    },
+    status: (path: string, ref: string) => statusIn(path).get(ref),
+    /** The ticket's checkpoint flags everywhere, or only in the folder `path` (a worktree the agent edited). */
+    checkpoint: (ref: string, which: { plan?: boolean; done?: boolean }, path?: string) => void checkpoints.set(path === undefined ? ref : `${path}:${ref}`, which),
+  };
+}
+
+/** A VCS in memory: what it was asked, in order. */
+export function fakeVcs() {
+  const calls: string[] = [];
+  const state = {
+    head: { branch: 'main', revision: REVISION } as VcsHead | undefined,
+    status: [] as string[],
+    files: ['src/thing.ts', PLAN],
+    merged: false,
+    merge: 'merged' as 'merged' | 'conflict' | 'refused',
+    onMerge: () => {},
+    top: undefined as string | undefined,
+    staged: [] as string[],
+    inProgress: false,
+    revisions: new Map<string, string>(),
+    worktrees: new Set<string>(),
+    branches: new Set<string>(['main']),
+    git: { ok: true, version: '2.45.0' } as VcsCheck,
+    ancestor: true,
+    committed: [] as string[][],
+    removeFails: false,
+  };
+  const vcs: VcsPort = {
+    check: async () => state.git,
+    isAncestor: async () => state.ancestor,
+    async commitPaths(_repo, paths) {
+      calls.push(`commit paths ${paths.join(',')}`);
+      state.committed.push([...paths]);
+      state.status = state.status.filter((path) => !paths.includes(path));
+      return 'c'.repeat(40);
+    },
+    head: async () => state.head,
+    topLevel: async (repo) => state.top ?? repo,
+    branchRevision: async (_repo, branch) => (state.branches.has(branch) ? (state.revisions.get(branch) ?? 'b'.repeat(40)) : undefined),
+    operationInProgress: async () => state.inProgress,
+    staged: async () => state.staged,
+    async restore(_repo, paths) {
+      calls.push(`restore ${paths.join(',')}`);
+    },
+    async addWorktree(_repo, { path, branch, base }) {
+      calls.push(`worktree add ${branch} ${base}`);
+      mkdirSync(path, { recursive: true });
+      state.worktrees.add(path);
+      state.branches.add(branch);
+    },
+    worktreeGitPaths: async (_path, branch) => ({
+      commonDir: '/repo/.git',
+      gitDir: '/repo/.git/worktrees/x',
+      branchRefDir: `/repo/.git/refs/heads/${branch.split('/').slice(0, -1).join('/')}`,
+      branchLogDir: `/repo/.git/logs/refs/heads/${branch.split('/').slice(0, -1).join('/')}`,
+    }),
+    async removeWorktree(_repo, path, options = {}) {
+      calls.push(`worktree remove${options.deleteBranch === undefined ? '' : ` and ${options.mergedOnly === true ? 'merged ' : ''}${options.deleteBranch}`}`);
+      if (state.removeFails) throw new Error('a file is still open there');
+      state.worktrees.delete(path);
+      // As git does: the folder goes (story 5.5's sweep checks what is left on disk).
+      rmSync(path, { recursive: true, force: true });
+      if (options.deleteBranch !== undefined) state.branches.delete(options.deleteBranch);
+    },
+    status: async () => state.status,
+    diff: async () => ({ diff: state.files.length === 0 ? '' : 'diff --git a/src/thing.ts b/src/thing.ts\n', truncated: false, files: state.files }),
+    isMerged: async () => state.merged,
+    async merge(_repo, revision) {
+      calls.push(`merge ${revision.slice(0, 4)}`);
+      state.onMerge();
+      return state.merge;
+    },
+    async abortMerge() {
+      calls.push('abort');
+    },
+    async add(_repo, paths) {
+      calls.push(`add ${paths.join(',')}`);
+    },
+    async commit() {
+      calls.push('commit');
+      state.merged = true;
+    },
+    diffStats: async () => ({ files: state.files.length, insertions: 1, deletions: 0 }),
+    // The run stores the worktree's real path (macOS: `/private/var/…`).
+    worktreeExists: async (_repo, path) => [...state.worktrees].some((each) => each === path || (existsSync(each) && realpathSync.native(each) === path)),
+    rebase: async () => 'rebased',
+    applyPatch: async () => 'applied',
+  };
+  return { vcs, calls, state };
+}
+
+export interface Harness {
+  core: Core;
+  builds: BuildsUseCases;
+  wsId: WorkspaceId;
+  repo: string;
+  dataDir: string;
+  tickets: ReturnType<typeof fakeTickets>;
+  git: ReturnType<typeof fakeVcs>;
+  sent: Array<{ sessionId: SessionId; text: string }>;
+  released: SessionId[];
+  fingerprints: Map<string, string>;
+  worktreeFingerprint: { value: string };
+  sandbox: { available: boolean };
+  /** Makes the next build prompts fail to send (a chat that refuses them). */
+  sendFails: { value: boolean };
+  /** Ends the build session's turn (working, then `idle` or `error`) and waits for the outcome. */
+  endTurn(sessionId: SessionId, state?: 'idle' | 'error'): Promise<void>;
+}
+
+export async function harness({ pieces = ['board', 'builds'] as const, trusted = true, freeBytes }: { pieces?: readonly string[]; trusted?: boolean; freeBytes?: (dir: string) => number | undefined } = {}): Promise<Harness> {
+  const dataDir = tempDir('ogden-agents-builds-data-');
+  const repo = tempDir('ogden-agents-builds-repo-');
+  const fingerprints = new Map<string, string>();
+  /** What every new worktree's `_bmad/scripts/` hash to (the committed scripts). */
+  const worktreeFingerprint = { value: 'trusted' };
+  const core = openTestCore(dataDir, undefined, {
+    availableBmadPieces: ['planning', 'board', 'builds'],
+    bmadCatalog: {
+      detect: async () => ({ hasBmad: true, hasOutput: true }),
+      skills: async () => [],
+      ...unusedCatalogParts,
+      // Every copy of the project (the checkout, each worktree) has the trusted scripts unless a test says otherwise.
+      scriptsFingerprint: async (path) => fingerprints.get(path) ?? (path.startsWith(join(realpathSync.native(dataDir), 'w')) ? worktreeFingerprint.value : 'trusted'),
+    },
+  });
+  const workspace = core.entities.ensureWorkspace(repo);
+  core.permissions.updateSettings(workspace.id, { bmadPieces: [...pieces] });
+  if (trusted) await core.bmadScriptTrust.trustScripts(workspace.id);
+  const tickets = fakeTickets(workspace.realPath!);
+  const git = fakeVcs();
+  const sent: Array<{ sessionId: SessionId; text: string }> = [];
+  const released: SessionId[] = [];
+  const sandbox = { available: true };
+  const sendFails = { value: false };
+  const builds = createBuilds({
+    bmad: core.bmad,
+    trust: core.bmadScriptTrust,
+    source: { requireReady() {} },
+    entities: core.entities,
+    events: core.events,
+    tickets: tickets.store,
+    vcs: git.vcs,
+    sandbox: { check: async () => (sandbox.available ? { available: true, kind: 'test' } : { available: false, reason: 'none' }) },
+    runner: testRunner,
+    chat: {
+      createChatSession: async (wsId, options) => core.entities.createSession({ workspaceId: wsId, kind: options?.kind ?? 'chat' }),
+      sendMessage: (_wsId, sessionId, text, options) => {
+        if (options?.build !== true) throw new Error('a build session takes only the build prompt');
+        if (sendFails.value) throw new Error('the chat refused it');
+        sent.push({ sessionId, text });
+        return { messageId: 'msg_1', queued: false };
+      },
+      releaseAgent: async (_wsId, sessionId) => void released.push(sessionId),
+    },
+    buildSessions: core.buildSessions,
+    dataDir,
+    ...(freeBytes === undefined ? {} : { freeBytes }),
+  });
+  return {
+    core,
+    builds,
+    wsId: workspace.id,
+    repo: workspace.realPath!,
+    dataDir,
+    tickets,
+    git,
+    sent,
+    released,
+    fingerprints,
+    worktreeFingerprint,
+    sandbox,
+    sendFails,
+    async endTurn(sessionId, state = 'idle') {
+      core.entities.setSessionState(sessionId, 'working');
+      core.entities.setSessionState(sessionId, state, state === 'error' ? { reason: 'It broke.' } : {});
+      await builds.settled();
+    },
+  };
+}
+
+export const refusal = async (promise: Promise<unknown>) => {
+  try {
+    await promise;
+  } catch (error) {
+    return error;
+  }
+  throw new Error('expected a refusal');
+};
+
+export const codeOf = async (promise: Promise<unknown>) => ((await refusal(promise)) as BuildRefusedError).code;
+

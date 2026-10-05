@@ -91,9 +91,10 @@ describe('vcs-git (story 5.2)', () => {
     expect(existsSync(path)).toBe(false);
     expect(git(repo, 'branch', '--format=%(refname:short)').trim().split('\n').sort()).toEqual(['main', 'ogden/1.1-build-it']);
     // With deleteBranch, the branch goes too (a run that never started).
-    await vcs.addWorktree(repo, { path, branch: 'ogden/1.2-gone', base: head });
-    await vcs.removeWorktree(repo, path, { deleteBranch: 'ogden/1.2-gone' });
-    expect(git(repo, 'branch', '--format=%(refname:short)')).not.toContain('ogden/1.2-gone');
+    // Story 5.5: only the run's own branch, `ogden/<its folder's id>/…`.
+    await vcs.addWorktree(repo, { path, branch: 'ogden/abcdefgh/1.2-gone', base: head });
+    await vcs.removeWorktree(repo, path, { deleteBranch: 'ogden/abcdefgh/1.2-gone' });
+    expect(git(repo, 'branch', '--format=%(refname:short)')).not.toContain('ogden/abcdefgh/1.2-gone');
     // Removing a worktree that is already gone is fine.
     await vcs.removeWorktree(repo, path);
     expect(readdirSync(markers)).toEqual([]);

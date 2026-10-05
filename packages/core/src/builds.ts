@@ -81,6 +81,7 @@ import {
   RunId,
   BMAD_FILES_UNCOMMITTED_MESSAGE,
   BUILD_BRANCH_PREFIX,
+  WORKTREES_FOLDER_NOT_REAL_MESSAGE,
   CHECKOUT_BUSY_MESSAGE,
   CHECKOUT_MOVED_MESSAGE,
   DISK_SPACE_LOW_MESSAGE,
@@ -453,13 +454,23 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
     // The guards once more, right before anything is written: a piece turned off meanwhile writes nothing.
     await guarded(workspaceId);
 
-    const parent = ensureWorktreesRoot(dataDir);
     // Room for the worktree (story 5.5): refused before anything is written when the disk is nearly full.
-    const free = (deps.freeBytes ?? freeBytesOf)(parent);
+    const free = (deps.freeBytes ?? freeBytesOf)(dataDir);
     if (free !== undefined && free < MIN_FREE_DISK_BYTES) throw new BuildRefusedError('disk_space_low', DISK_SPACE_LOW_MESSAGE);
-    // A run id no folder or branch has yet (collision-free; 40 random bits, tried a few times).
+    let parent: string;
+    try {
+      parent = ensureWorktreesRoot(dataDir);
+    } catch {
+      throw new BuildRefusedError('vcs_unavailable', WORKTREES_FOLDER_NOT_REAL_MESSAGE);
+    }
+    // A run id no run, folder or branch has yet (collision-free; 40 random bits, tried a few times, never reused).
+    const taken = async (id: string): Promise<boolean> =>
+      existsSync(join(parent, id)) || entities.listRunsWithWorktree().some((each) => each.branch?.startsWith(`${BUILD_BRANCH_PREFIX}${id}/`) === true) || (await vcs.branchRevision(repoPath, buildBranchName(id, ref, ticket.title))) !== undefined;
     let runShort = runShortId();
-    for (let attempt = 0; attempt < 5 && (existsSync(join(parent, runShort)) || (await vcs.branchRevision(repoPath, buildBranchName(runShort, ref, ticket.title))) !== undefined); attempt++) runShort = runShortId();
+    for (let attempt = 0; await taken(runShort); attempt++) {
+      if (attempt >= 5) throw new BuildRefusedError('vcs_unavailable', VCS_UNAVAILABLE_MESSAGE);
+      runShort = runShortId();
+    }
     const branch = buildBranchName(runShort, ref, ticket.title);
     if (!isBuildBranch(branch)) throw new ValidationError('That ticket reference makes no usable branch name.', [{ path: ['ref'], message: 'unusable branch name' }]);
     const worktreePath = join(parent, runShort);
@@ -478,7 +489,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       for (const folder of PRECREATED_FOLDERS) mkdirSync(join(real, folder), { recursive: true });
       const { sandbox: contained, gitWritable } = await sandboxFor(check.kind, real, branch);
       session = await chat.createChatSession(workspaceId, { kind: 'build', agentId: runner.agent });
-      run = entities.createRun({ sessionId: session.id, ticketRef: ref, worktreePath: real, sandbox: check.kind, branch, baseRevision: head.revision, agent });
+      run = entities.createRun({ sessionId: session.id, ticketRef: ref, worktreePath: real, sandbox: check.kind, branch, baseRevision: head.revision, baseBranch: head.branch, agent });
       const scope = { worktree: real, gitWritable, protectedPaths: PROTECTED_PATHS };
       buildSessions.set(session.id, { cwd: real, sandbox: contained, decide: (request) => decideBuildPermission(request, scope, paths) });
       if (ticket.plan_checkpoint === true) {
@@ -489,6 +500,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         return { run, session };
       }
       chat.sendMessage(workspaceId, session.id, runner.invocation(ref), { build: true });
+      // The ticket's previous run, undecided and not running, is superseded (story 5.5 review): no Retry or Reject reaches it now, so its worktree and branch go.
+      if (latest !== undefined && latest.decision === null && latest.outcome !== 'running') await cleanUp(repoPath, latest);
       return { run, session };
     } catch (error) {
       if (session !== undefined) buildSessions.delete(session.id);
@@ -709,7 +722,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         const { plan } = await tickets.find(repoPath, checked);
         await requireCleanCheckout(repoPath, plan);
         // The branch this build started from must still be checked out (story 5.5): never a detached HEAD or another branch.
-        if ((await vcs.head(repoPath)) === undefined || run.baseRevision === null || !(await vcs.isAncestor(repoPath, run.baseRevision))) {
+        const current = await vcs.head(repoPath);
+        if (current === undefined || (run.baseBranch !== null && current.branch !== run.baseBranch) || run.baseRevision === null || !(await vcs.isAncestor(repoPath, run.baseRevision))) {
           throw new BuildRefusedError('checkout_dirty', CHECKOUT_MOVED_MESSAGE);
         }
         await chat.releaseAgent(workspaceId, run.sessionId).catch((error: unknown) => report(run.id, 'release', error));
@@ -797,7 +811,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       } catch (error) {
         report('none', 'sweep', error);
       }
-      void sweepRunBranches(sweepDeps).catch((error: unknown) => report('none', 'sweep branch', error));
+      // Awaited, so no git of the sweep outlives it or runs beside a served build (review).
+      await sweepRunBranches(sweepDeps).catch((error: unknown) => report('none', 'sweep branch', error));
     },
 
     async runOfSession(workspaceId, sessionId) {

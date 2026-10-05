@@ -350,8 +350,9 @@ export const API_ROUTES = {
    * 2026-10-04): **Commit plan files**. Commits exactly the ticket's plan and
    * the `tickets.toml` files a `plan_uncommitted` refusal watches, when they
    * have changes, in one commit of their own (other staged changes stay
-   * staged). 409 `plan_uncommitted` when none has changes, `checkout_dirty`
-   * during a merge, rebase, cherry-pick or revert.
+   * staged). With none changed, nothing is committed (`committed: []`).
+   * 409 `checkout_dirty` during a merge, rebase, cherry-pick or revert,
+   * `vcs_unavailable` without a branch or a usable git.
    */
   workspaceBuildCommitPlan: `${API_BASE}/workspaces/:wsId/builds/:ref/commit-plan`,
   /** `GET` → `SessionRunResponse` (story 5.2): the run of a `build` session; 404 for one without a run. */

@@ -68,18 +68,30 @@ export function isOwnWorktreePath(dataDir: string, path: string): boolean {
   return RUN_SHORT_ID.test(basename(path)) && realOf(dirname(path)) === realOf(root);
 }
 
-/** Whether a run's worktree and branch should go now: only once the user decided (approved or rejected). */
-export function worktreeDisposition(run: Pick<Run, 'decision'>): 'remove' | 'keep' {
-  return run.decision === null ? 'keep' : 'remove';
+/**
+ * Whether a run's worktree and branch should go now: once the user decided
+ * (approved or rejected), or once a newer run of the same ticket superseded
+ * it (`superseded`; review: no Retry or Reject reaches it then) and it isn't
+ * running.
+ */
+export function worktreeDisposition(run: Pick<Run, 'decision' | 'outcome'>, superseded = false): 'remove' | 'keep' {
+  if (run.decision !== null) return 'remove';
+  return superseded && run.outcome !== 'running' ? 'remove' : 'keep';
 }
 
-/** Removes the link (or Windows junction) `path` itself, never what it points at. */
-function unlinkEntry(path: string): void {
+/**
+ * Removes the link (or Windows junction) or file `path` itself, never what
+ * it points at, and never a real folder (shared with `vcs-git`).
+ */
+export function removeLinkOnly(path: string): void {
+  const entry = lstatSync(path);
+  if (entry.isDirectory() && !entry.isSymbolicLink()) throw new Error('That is a folder, not a link.');
   try {
     unlinkSync(path);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'EPERM' && code !== 'EISDIR') throw error;
+    // Windows: a directory link or junction goes with `rmdir`, which never touches its target; checked again first.
+    if ((code !== 'EPERM' && code !== 'EISDIR') || !lstatSync(path).isSymbolicLink()) throw error;
     rmdirSync(path);
   }
 }
@@ -149,24 +161,28 @@ export async function sweepWorktrees(deps: SweepDeps): Promise<{ removed: number
   if (!entry.isDirectory() || entry.isSymbolicLink()) {
     // Not Ogden's own folder: the link itself goes, never what it points at; nothing in it is swept.
     try {
-      unlinkEntry(root);
+      removeLinkOnly(root);
     } catch (error) {
       report('root', error);
     }
     return { removed: 0 };
   }
   const runs = deps.entities.listRunsWithWorktree();
-  const realRoot = realOf(root);
+  // Keyed by the run id alone, wherever the stored path says the data folder was (review: a moved or
+  // differently spelled data folder must never make a kept run's worktree look like an orphan).
   const byName = new Map<string, Run>();
+  const latest = new Map<string, Run>();
   for (const run of runs) {
-    if (run.worktreePath !== null && realOf(dirname(run.worktreePath)) === realRoot) byName.set(basename(run.worktreePath), run);
+    if (run.worktreePath !== null && RUN_SHORT_ID.test(basename(run.worktreePath))) byName.set(basename(run.worktreePath), run);
+    // Oldest first: the last one seen is the ticket's latest run.
+    latest.set(`${run.workspaceId}\u0000${run.ticketRef}`, run);
   }
   let removed = 0;
   for (const item of readdirSync(root, { withFileTypes: true })) {
     const path = join(root, item.name);
     try {
       if (item.isSymbolicLink() || !item.isDirectory()) {
-        unlinkEntry(path);
+        removeLinkOnly(path);
         removed++;
         continue;
       }
@@ -177,7 +193,7 @@ export async function sweepWorktrees(deps: SweepDeps): Promise<{ removed: number
         removed++;
         continue;
       }
-      if (worktreeDisposition(run) === 'keep') continue;
+      if (worktreeDisposition(run, latest.get(`${run.workspaceId}\u0000${run.ticketRef}`) !== run) === 'keep') continue;
       const repoPath = deps.repoOf(run.workspaceId);
       if (repoPath === undefined) {
         rmSync(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });

@@ -12,6 +12,7 @@ import {
   boardProblemsLine,
   boardStatusPlaceText,
   COMMIT_PLAN_FILES_LABEL,
+  NO_PLAN_FILES_TO_COMMIT_TEXT,
   PLAN_FILES_COMMITTED_TEXT,
   PLAN_UNCOMMITTED_MESSAGE,
   TICKET_SAVING_TEXT,
@@ -201,7 +202,7 @@ function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
   const [building, setBuilding] = useState(false);
   const [buildFailure, setBuildFailure] = useState<BuildFailure | undefined>();
   const [committing, setCommitting] = useState(false);
-  const [committed, setCommitted] = useState(false);
+  const [committed, setCommitted] = useState<'committed' | 'nothing' | undefined>();
   const pending = useRef(false);
   const started = useRef(builds?.onStarted);
   started.current = builds?.onStarted;
@@ -211,7 +212,7 @@ function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
       pending.current = true;
       setBuilding(true);
       setBuildFailure(undefined);
-      setCommitted(false);
+      setCommitted(undefined);
       startBuild(wsId, ref)
         .then(
           ({ session }) => started.current?.(session.id),
@@ -236,9 +237,9 @@ function useBoardBuild(wsId: string, builds: BoardBuilds | undefined) {
       setCommitting(true);
       commitPlanFiles(wsId, ref)
         .then(
-          () => {
+          ({ committed: files }) => {
             setBuildFailure(undefined);
-            setCommitted(true);
+            setCommitted(files.length === 0 ? 'nothing' : 'committed');
           },
           (error: unknown) => setBuildFailure({ message: error instanceof Error ? error.message : String(error), commitRef: ref }),
         )
@@ -309,11 +310,11 @@ function Board({
           {buildFailure.message}
         </Notice>
       )}
-      {committed ? (
-        <Notice role="status" data-testid="board-plan-committed">
-          {PLAN_FILES_COMMITTED_TEXT}
+      {committed === undefined ? null : (
+        <Notice role="status" data-testid="board-plan-committed" data-committed={committed}>
+          {committed === 'nothing' ? NO_PLAN_FILES_TO_COMMIT_TEXT : PLAN_FILES_COMMITTED_TEXT}
         </Notice>
-      ) : null}
+      )}
       <div className="flex flex-col gap-2">
         {data.problems.length === 0 ? null : <BoardProblems problems={data.problems} />}
         <CheckboxOption

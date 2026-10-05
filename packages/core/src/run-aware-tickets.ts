@@ -12,8 +12,17 @@
  * (the agent may have edited them): when they don't, or the worktree can't
  * be read, reads fall back to the main checkout and a mark is refused.
  * `watch` is the main checkout's only.
+ *
+ * Review (security): `tickets.py` runs unsandboxed, so a worktree's plan is
+ * used only when its path, segment by segment from the worktree, holds no
+ * link and stays inside the worktree (the agent can write links into
+ * `_bmad-output/`); and a mark goes to a worktree only while the run's agent
+ * isn't running (no one can swap a link in after the check).
  */
-import type { TicketDetail, TicketsResponse, WorkspaceId } from '@ogden-agents/shared';
+import { lstatSync, realpathSync } from 'node:fs';
+import { isAbsolute, join, relative } from 'node:path';
+import { RUN_ACTIVE_MESSAGE, RUN_PLAN_NOT_CONFINED_MESSAGE, type RunOutcome, type TicketDetail, TicketsResponse, WorkspaceId } from '@ogden-agents/shared';
+import { BuildRefusedError } from './errors.js';
 import type { BmadScriptTrust } from './bmad-script-trust.js';
 import { isOwnWorktreePath, isRealFolder } from './build-worktrees.js';
 import type { Entities } from './entities.js';
@@ -32,6 +41,27 @@ export interface RunAwareTicketsDeps {
 interface ActiveWorktree {
   workspaceId: WorkspaceId;
   worktree: string;
+  outcome: RunOutcome;
+}
+
+/** Whether repo-relative `plan` is a regular file inside `worktree`, with no link on its way there. */
+export function planConfined(worktree: string, plan: string | null): boolean {
+  if (plan === null) return false;
+  const segments = plan.split('/');
+  if (segments.some((segment) => segment === '' || segment === '.' || segment === '..')) return false;
+  try {
+    let path = worktree;
+    for (const [index, segment] of segments.entries()) {
+      path = join(path, segment);
+      const entry = lstatSync(path);
+      if (entry.isSymbolicLink()) return false;
+      if (index === segments.length - 1 ? !entry.isFile() || entry.nlink > 1 : !entry.isDirectory()) return false;
+    }
+    const rel = relative(realpathSync.native(worktree), realpathSync.native(path));
+    return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+  } catch {
+    return false;
+  }
 }
 
 export function createRunAwareTickets(deps: RunAwareTicketsDeps): TicketStorePort {
@@ -55,7 +85,7 @@ export function createRunAwareTickets(deps: RunAwareTicketsDeps): TicketStorePor
     for (const run of entities.listRunsWithWorktree(workspaceIds)) {
       const worktree = run.worktreePath;
       const active = run.decision === null && worktree !== null && isOwnWorktreePath(dataDir, worktree) && isRealFolder(worktree);
-      latest.set(run.ticketRef, active ? { workspaceId: run.workspaceId, worktree } : undefined);
+      latest.set(run.ticketRef, active ? { workspaceId: run.workspaceId, worktree, outcome: run.outcome } : undefined);
     }
     const found = new Map<string, ActiveWorktree>();
     for (const [ref, active] of latest) if (active !== undefined) found.set(ref, active);
@@ -66,7 +96,8 @@ export function createRunAwareTickets(deps: RunAwareTicketsDeps): TicketStorePor
   const fromWorktree = async (active: ActiveWorktree, ref: string): Promise<TicketDetail | undefined> => {
     try {
       await trust.requireScriptsMatch(active.workspaceId, active.worktree);
-      return await store.find(active.worktree, ref);
+      const detail = await store.find(active.worktree, ref);
+      return planConfined(active.worktree, detail.plan) ? detail : undefined;
     } catch (error) {
       report('worktree', error);
       return undefined;
@@ -103,6 +134,9 @@ export function createRunAwareTickets(deps: RunAwareTicketsDeps): TicketStorePor
       if (run === undefined) return store.mark(repoPath, ref, status, options);
       // Only the trusted scripts ever run in a worktree: a change refuses the mark (`scripts_changed`).
       await trust.requireScriptsMatch(run.workspaceId, run.worktree);
+      // Never while the agent runs, and only to a plan file inside the worktree with no link on the way (review).
+      if (run.outcome === 'running') throw new BuildRefusedError('run_active', RUN_ACTIVE_MESSAGE);
+      if (!planConfined(run.worktree, (await store.find(run.worktree, ref)).plan)) throw new BuildRefusedError('checks_failed', RUN_PLAN_NOT_CONFINED_MESSAGE);
       return store.mark(run.worktree, ref, status, options);
     },
 

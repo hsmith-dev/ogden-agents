@@ -49,7 +49,7 @@ describe('Build: git and disk guards (story 5.5)', () => {
     const disk = (await refusal(full.builds.start(full.wsId, { ref: '1.1' }))) as BuildRefusedError;
     expect([disk.code, disk.message]).toEqual(['disk_space_low', DISK_SPACE_LOW_MESSAGE]);
     expect(full.git.calls.filter((call) => call.startsWith('worktree'))).toEqual([]);
-    expect(readdirSync(join(full.dataDir, 'w'))).toEqual([]);
+    expect(existsSync(join(full.dataDir, 'w'))).toBe(false);
     expect(full.core.entities.listSessions(full.wsId)).toEqual([]);
     // Enough room (or a disk that can't say) builds.
     const roomy = await harness({ freeBytes: () => MIN_FREE_DISK_BYTES });
@@ -62,7 +62,8 @@ describe('Build: git and disk guards (story 5.5)', () => {
     const h = await harness();
     const elsewhere = tempDir('ogden-agents-elsewhere-');
     link(elsewhere, join(h.dataDir, 'w'));
-    await expect(h.builds.start(h.wsId, { ref: '1.1' })).rejects.toThrow(/real folder/);
+    // A plain refusal, not a server error (review).
+    expect(await codeOf(h.builds.start(h.wsId, { ref: '1.1' }))).toBe('vcs_unavailable');
     expect(readdirSync(elsewhere)).toEqual([]);
     expect(h.git.calls.filter((call) => call.startsWith('worktree'))).toEqual([]);
   });
@@ -91,6 +92,27 @@ describe('Approve and Reject: the checkout and cleanup (story 5.5)', () => {
     expect(h.core.entities.getRun(h.run.id)).toMatchObject({ outcome: 'verified', decision: null });
   });
 
+  it('refuses approve when another branch is checked out, even one holding the build base (review)', async () => {
+    const h = await verified();
+    expect(h.run.baseBranch).toBe('main');
+    h.git.state.head = { branch: 'feature', revision: 'c'.repeat(40) };
+    const moved = (await refusal(h.builds.approve(h.wsId, '1.1', { revision: 'b'.repeat(40) }))) as BuildRefusedError;
+    expect([moved.code, moved.message]).toEqual(['checkout_dirty', CHECKOUT_MOVED_MESSAGE]);
+    expect(h.git.calls.filter((call) => call.startsWith('merge'))).toEqual([]);
+  });
+
+  it("a new Build supersedes the ticket's undecided, finished run: its worktree and branch go (review)", async () => {
+    const h = await harness();
+    const first = await h.builds.start(h.wsId, { ref: '1.1' });
+    h.tickets.set(first.run.worktreePath!, '1.1', 'in-progress');
+    await h.endTurn(first.session.id);
+    expect(h.core.entities.getRun(first.run.id)?.outcome).toBe('failed');
+    const second = await h.builds.start(h.wsId, { ref: '1.1' });
+    expect(existsSync(first.run.worktreePath!)).toBe(false);
+    expect(h.git.calls).toContain(`worktree remove and ${first.run.branch}`);
+    expect(existsSync(second.run.worktreePath!)).toBe(true);
+  });
+
   it('an approved run is never rejected or approved again; a cleanup that fails never fails the decision', async () => {
     const h = await verified();
     h.git.state.removeFails = true;
@@ -108,9 +130,13 @@ describe('Approve and Reject: the checkout and cleanup (story 5.5)', () => {
   });
 
   it('keeps the worktree of a run that is blocked, failed or interrupted (Retry, Reject)', () => {
-    expect(worktreeDisposition({ decision: null })).toBe('keep');
-    expect(worktreeDisposition({ decision: 'approved' })).toBe('remove');
-    expect(worktreeDisposition({ decision: 'rejected' })).toBe('remove');
+    expect(worktreeDisposition({ decision: null, outcome: 'blocked' })).toBe('keep');
+    expect(worktreeDisposition({ decision: null, outcome: 'failed' })).toBe('keep');
+    expect(worktreeDisposition({ decision: 'approved', outcome: 'verified' })).toBe('remove');
+    expect(worktreeDisposition({ decision: 'rejected', outcome: 'stopped' })).toBe('remove');
+    // A run a newer one of its ticket superseded goes, unless it still runs (review).
+    expect(worktreeDisposition({ decision: null, outcome: 'failed' }, true)).toBe('remove');
+    expect(worktreeDisposition({ decision: null, outcome: 'running' }, true)).toBe('keep');
   });
 });
 
@@ -201,6 +227,19 @@ describe('the startup sweep (story 5.5)', () => {
     expect(h.git.calls.filter((call) => call.startsWith('worktree remove'))).toEqual([]);
   });
 
+  it("keeps an undecided run's worktree even when its stored path names the data folder differently (moved or respelled; review)", async () => {
+    const h = await harness();
+    const { run } = await h.builds.start(h.wsId, { ref: '1.1' });
+    const id = run.worktreePath!.split(/[\\/]/).pop()!;
+    const session = h.core.entities.createSession({ workspaceId: h.wsId, kind: 'build' });
+    // A second, undecided run whose stored path is under another spelling of the data folder.
+    const moved = h.core.entities.createRun({ sessionId: session.id, ticketRef: '1.2', worktreePath: join(tempDir('ogden-agents-old-data-'), 'w', 'mmmmmmmm'), branch: 'ogden/mmmmmmmm/1.2-x' });
+    h.core.entities.setRunOutcome(moved.id, 'blocked', 'Needs you');
+    mkdirSync(join(h.dataDir, 'w', 'mmmmmmmm'));
+    await h.builds.sweep();
+    expect(readdirSync(join(h.dataDir, 'w')).sort()).toEqual([id, 'mmmmmmmm'].sort());
+  });
+
   it('unlinks a worktrees folder that is a link, and sweeps nothing where it points', async () => {
     const h = await harness();
     const elsewhere = tempDir('ogden-agents-elsewhere-');
@@ -234,6 +273,9 @@ describe('the run-aware ticket store (story 5.5, AD-10)', () => {
     const h = await harness();
     const { run, session } = await h.builds.start(h.wsId, { ref: '1.1' });
     const store = createRunAwareTickets({ store: h.tickets.store, entities: h.core.entities, trust: h.core.bmadScriptTrust, dataDir: h.dataDir });
+    // The plan file in the worktree, as the checkout has it.
+    mkdirSync(join(run.worktreePath!, ...PLAN.split('/').slice(0, -1)), { recursive: true });
+    writeFileSync(join(run.worktreePath!, ...PLAN.split('/')), 'status: in-progress\n');
     h.tickets.set(run.worktreePath!, '1.1', 'in-progress');
     expect((await store.find(h.repo, '1.1')).status).toBe('in-progress');
     const tree = await store.tree(h.repo);
@@ -241,6 +283,11 @@ describe('the run-aware ticket store (story 5.5, AD-10)', () => {
     expect(tree.tickets.find((row) => row.ref === '1.2')?.status).toBe('ready-for-dev');
     // The main checkout itself is unchanged.
     expect(h.tickets.status(h.repo, '1.1')).toBe('ready-for-dev');
+    // Never a mark while the agent runs (review).
+    expect(await codeOf(store.mark(h.repo, '1.1', 'blocked', { blockedReason: 'Retry me' }))).toBe('run_active');
+    h.tickets.set(run.worktreePath!, '1.1', 'blocked', 'Needs you');
+    await h.endTurn(session.id);
+    expect(h.core.entities.getRun(run.id)?.outcome).toBe('blocked');
     await store.mark(h.repo, '1.1', 'blocked', { blockedReason: 'Retry me' });
     expect(h.tickets.status(run.worktreePath!, '1.1')).toBe('blocked');
     expect(h.tickets.status(h.repo, '1.1')).toBe('ready-for-dev');
@@ -253,9 +300,17 @@ describe('the run-aware ticket store (story 5.5, AD-10)', () => {
     await expect(store.mark(h.repo, '1.1', 'in-progress')).rejects.toBeInstanceOf(ScriptsChangedError);
     h.worktreeFingerprint.value = 'trusted';
 
+    // A plan reached through a link the agent planted: never read or written (review).
+    const outside = tempDir('ogden-agents-planted-');
+    const epicFolder = join(run.worktreePath!, ...PLAN.split('/').slice(0, -1));
+    rmSync(epicFolder, { recursive: true, force: true });
+    mkdirSync(join(outside, 'epic'), { recursive: true });
+    writeFileSync(join(outside, 'epic', PLAN.split('/').pop()!), 'status: blocked\n');
+    link(join(outside, 'epic'), epicFolder);
+    expect((await store.find(h.repo, '1.1')).status).toBe('ready-for-dev');
+    expect(await codeOf(store.mark(h.repo, '1.1', 'in-progress'))).toBe('checks_failed');
+
     // Once decided (rejected), the main checkout answers again.
-    h.tickets.set(run.worktreePath!, '1.1', 'built');
-    await h.endTurn(session.id);
     await h.builds.reject(h.wsId, '1.1');
     expect((await store.find(h.repo, '1.1')).status).toBe('ready-for-dev');
     // The watch is the main checkout's.

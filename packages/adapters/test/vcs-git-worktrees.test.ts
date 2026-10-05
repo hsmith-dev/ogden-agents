@@ -174,6 +174,9 @@ describe('vcs-git: worktrees in the data folder (story 5.5)', () => {
     expect(git(repo, 'branch', '--list', 'ogden/*').trim()).not.toBe('');
     await expect(vcs.removeWorktree(repo, join(root, 'ffffffff'), { deleteBranch: 'main' })).rejects.toBeInstanceOf(VcsError);
     expect(git(repo, 'branch', '--list', 'main').trim()).not.toBe('');
+    // Only this run's own branch (review): another run's `ogden/` branch is refused too.
+    await expect(vcs.removeWorktree(repo, join(root, 'ffffffff'), { deleteBranch: 'ogden/eeeeeeee/1.1-unmerged' })).rejects.toBeInstanceOf(VcsError);
+    expect(git(repo, 'branch', '--list', 'ogden/eeeeeeee/*').trim()).not.toBe('');
   });
 
   it("removes only its own worktree's metadata: a user's stale worktree elsewhere keeps its own", async () => {
@@ -202,6 +205,31 @@ describe('vcs-git: worktrees in the data folder (story 5.5)', () => {
     expect(existsSync(join(repo, '.git', 'worktrees'))).toBe(false);
     expect(worktreeList(repo)).toHaveLength(1);
     expect(git(repo, 'branch', '--list', 'ogden/*').trim()).toBe('');
+  });
+
+  it("a worktree folder swapped for a link to the user's other worktree: only the link goes, the user's worktree stays registered (review)", async () => {
+    const { repo, root, vcs, head } = setup();
+    const users = join(temp('ogden-agents-wt-user-'), 'mine');
+    git(repo, 'worktree', 'add', '-q', '-b', 'users-branch', users);
+    writeFileSync(join(users, 'work.txt'), 'in progress\n');
+    const path = join(root, 'nnnnnnnn');
+    await vcs.addWorktree(repo, { path, branch: 'ogden/nnnnnnnn/1.1-swap', base: head });
+    rmSync(path, { recursive: true, force: true });
+    symlinkSync(users, path, process.platform === 'win32' ? 'junction' : 'dir');
+    // The agent also pointed its own record at the user's worktree.
+    writeFileSync(join(repo, '.git', 'worktrees', 'nnnnnnnn', 'gitdir'), `${join(users, '.git')}\n`);
+    await vcs.removeWorktree(repo, path, { deleteBranch: 'ogden/nnnnnnnn/1.1-swap' });
+    expect(existsSync(path)).toBe(false);
+    expect(readFileSync(join(users, 'work.txt'), 'utf8')).toBe('in progress\n');
+    expect(readdirSync(join(repo, '.git', 'worktrees'))).toEqual(['mine']);
+    expect(git(repo, 'branch', '--list', 'ogden/*').trim()).toBe('');
+  });
+
+  it('refuses a folder in the worktrees folder that is not named like a run', async () => {
+    const { repo, root, vcs } = setup();
+    mkdirSync(join(root, 'not-a-run'));
+    await expect(vcs.removeWorktree(repo, join(root, 'not-a-run'))).rejects.toBeInstanceOf(VcsError);
+    expect(existsSync(join(root, 'not-a-run'))).toBe(true);
   });
 
   it("never removes outside its worktrees folder, the repo itself, or a link's target", async () => {
@@ -261,6 +289,26 @@ describe('vcs-git: Commit plan files (story 5.5)', () => {
     expect(git(repo, 'status', '--porcelain', '--untracked-files=all')).toContain('?? other.txt');
     expect(readdirSync(markers)).toEqual([]);
     await expect(vcs.commitPaths(repo, ['../escape'], 'no')).rejects.toBeInstanceOf(VcsError);
+    // A path is literal, never a glob or pathspec magic (review): `[ab].md` commits only that file.
+    writeFileSync(join(repo, '[ab].md'), 'literal\n');
+    writeFileSync(join(repo, 'a.md'), 'not mine\n');
+    git(repo, 'add', 'a.md');
+    git(repo, 'commit', '-q', '--no-verify', '-m', 'a');
+    writeFileSync(join(repo, 'a.md'), 'my work in progress\n');
+    await vcs.commitPaths(repo, ['[ab].md'], 'literal');
+    expect(git(repo, 'show', '--name-only', '--format=', 'HEAD').trim()).toBe('[ab].md');
+    expect(git(repo, 'status', '--porcelain')).toContain(' M a.md');
     await expect(vcs.commitPaths(repo, [], 'no')).rejects.toBeInstanceOf(VcsError);
+  });
+
+  it('a commit that fails leaves the plan files unstaged, as they were (review)', async () => {
+    const { repo, vcs } = setup();
+    writeFileSync(join(repo, 'plan.md'), 'status: ready-for-dev\n');
+    // The user's signing setup that can't sign: the commit fails after the add.
+    git(repo, 'config', 'commit.gpgsign', 'true');
+    git(repo, 'config', 'gpg.program', join(temp('ogden-agents-wt-nogpg-'), 'no-such-gpg'));
+    await expect(vcs.commitPaths(repo, ['plan.md'], 'Plan files')).rejects.toBeInstanceOf(VcsError);
+    expect(git(repo, 'diff', '--cached', '--name-only').trim()).toBe('');
+    expect(git(repo, 'status', '--porcelain')).toContain('?? plan.md');
   });
 });

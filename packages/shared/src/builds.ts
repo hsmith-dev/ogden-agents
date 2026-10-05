@@ -174,11 +174,13 @@ export const gitTooOldMessage = (found: string) => `Builds need git ${MIN_GIT_VE
 /** The least free space the data folder's disk must have for a new worktree (story 5.5). */
 export const MIN_FREE_DISK_BYTES = 1024 * 1024 * 1024;
 export const DISK_SPACE_LOW_MESSAGE = 'Your disk has less than 1 GB free, so a build has no room for its own copy of the project. Free some space, then build again.';
+export const RUN_PLAN_NOT_CONFINED_MESSAGE = "This ticket's plan in its build isn't a plain file inside the build's folder, so its status wasn't changed.";
+export const WORKTREES_FOLDER_NOT_REAL_MESSAGE = "Ogden Agents' folder for builds isn't a plain folder (it points somewhere else), so nothing was started.";
 export const CHECKOUT_MOVED_MESSAGE = "Your project isn't on the branch this build started from (it switched branches, or none is checked out). Check that branch out, then approve again.";
-export const NO_PLAN_FILES_TO_COMMIT_MESSAGE = "This ticket's plan files have no uncommitted changes.";
 export const COMMIT_PLAN_FILES_LABEL = 'Commit plan files';
 export const COMMIT_PLAN_FILES_FAILED = "The plan files couldn't be committed. Try again.";
 export const PLAN_FILES_COMMITTED_TEXT = 'Plan files committed. Build again.';
+export const NO_PLAN_FILES_TO_COMMIT_TEXT = "This ticket's plan files have no uncommitted changes. Build again.";
 export const RUN_NOT_ACTIVE_MESSAGE = 'This run has already finished.';
 /** `POST …/runs/:runId/retry` for a run not paused at a checkpoint, until 5.8 builds Retry. */
 export const RETRY_NOT_AVAILABLE_MESSAGE = 'Retry for this run is not available yet.';

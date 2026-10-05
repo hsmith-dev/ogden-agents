@@ -133,6 +133,8 @@ export interface NewRun {
   branch?: string | null;
   /** The commit its branch started from (story 5.2). */
   baseRevision?: string | null;
+  /** The branch it started from (story 5.5). */
+  baseBranch?: string | null;
   /** The agent that builds (story 5.3). Default Claude Code, the only one in v1. */
   agent?: BuildAgent;
   /** Where it waits in the workspace's queue (story 5.3; 5.8), `null` when dispatched now. */
@@ -337,6 +339,7 @@ const toRun = (row: RunRow): Run => ({
   outcome: row.outcome,
   branch: row.branch,
   baseRevision: row.baseRevision,
+  baseBranch: row.baseBranch,
   reason: row.reason,
   agent: row.agent,
   blockedCode: row.blockedCode,
@@ -766,6 +769,7 @@ export function createEntities(db: Database, log: EventLog, sessionEvents: Sessi
           outcome: 'running',
           branch: input.branch ?? null,
           baseRevision: input.baseRevision ?? null,
+          baseBranch: input.baseBranch ?? null,
           reason: null,
           agent,
           blockedCode: null,

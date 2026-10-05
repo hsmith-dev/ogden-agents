@@ -8,6 +8,7 @@ import { keepSaved } from '@/api/keep-saved';
 import { ChatApiError, removePermissionRule } from '@/chat/chat-api';
 import { DefaultAgentView, type DefaultAgentViewProps } from '@/chat/default-agent-view';
 import { appDefaultWords, DefaultModelsSection } from '@/chat/default-models';
+import { ProjectWhileWorkingSection } from '@/chat/while-working-section';
 import { projectDefaultAgent, useChatAgents } from '@/chat/use-chat-agents';
 import { DefaultPermissionModeView, type DefaultPermissionModeViewProps } from '@/permissions/default-permission-mode';
 import { WorkspaceHeader } from '@/shell/workspace-header';
@@ -59,6 +60,7 @@ export function WorkspaceSettingsPage() {
             <DefaultPermissionModeSection wsId={wsId} />
             <DefaultAgentSection wsId={wsId} />
             <ProjectModelsSection wsId={wsId} />
+            <ProjectWhileWorkingSection wsId={wsId} />
             <BmadSection wsId={wsId} />
             <AlwaysAllowRulesSection wsId={wsId} name={workspaceName(workspace.data)} />
             <DeleteHistorySection wsId={wsId} name={workspaceName(workspace.data)} />

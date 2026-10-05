@@ -17,7 +17,9 @@ import { ReadOnlyConversation } from '@/chat/read-only';
 import { SignInAgain } from '@/chat/sign-in-again';
 import { ToolCalls } from '@/chat/tool-call-row';
 import { sessionView, type TranscriptCheckIn, type TranscriptItem } from '@/chat/transcript';
-import { AgentChangedMarker, EarlierHistory, Message, ResumedMarker } from '@/chat/transcript-parts';
+import { AgentChangedMarker, EarlierHistory, InterruptedNote, Message, ResumedMarker } from '@/chat/transcript-parts';
+import { QueuedMessages } from '@/chat/queued-messages';
+import { otherWayShortcutLabel, useWhileWorking } from '@/chat/send-mode';
 import { useCaughtUp, useEarlierHistory, useSessionEvents } from '@/events/event-stream';
 import { PermissionCard, permissionAnnouncement } from '@/permissions/permission-card';
 import { DocumentCard } from '@/planning/document-card';
@@ -52,10 +54,18 @@ const itemKey = (item: TranscriptItem, index: number): string =>
           ? `document-${item.path}`
           : item.type === 'agent_changed'
             ? `agent-${item.at}-${index}`
+          : item.type === 'interrupted'
+            ? `interrupted-${item.messageId}`
             : item.permission.requestId;
 
 /** What the composer says while the terminal drives (DESIGN.md Composer). */
 const TERMINAL_DRIVING_REASON = 'The terminal is driving this session';
+
+/** What the composer says while the agent works (send now or wait): what `Enter` does, and the other way. */
+const workingHint = (agentName: string, whileWorking: 'wait' | 'now') =>
+  whileWorking === 'now'
+    ? `${agentName} is working. While it works, your message goes right away. To send it after it finishes, press ${otherWayShortcutLabel()} or use the menu beside Send.`
+    : `${agentName} is working. While it works, your message waits its turn. To send it right away, press ${otherWayShortcutLabel()} or use the menu beside Send.`;
 
 /** What the quiet-agent status line says (user decision, story 2.10). */
 const checkInWords = (checkIn: TranscriptCheckIn, agentName: string) =>
@@ -125,6 +135,8 @@ export function SessionPage() {
   const seenQueued = useRef(new Set<string>());
   const restored = useRef(new Set<string>());
   const [restore, setRestore] = useState<{ key: string; text: string } | undefined>(undefined);
+  // Send now or wait: the project's choice, else the app's.
+  const whileWorking = useWhileWorking(wsId);
 
   useEffect(() => {
     for (const message of view.queued) seenQueued.current.add(message.messageId);
@@ -206,6 +218,20 @@ export function SessionPage() {
     announced.current.add(waitingFor.requestId);
     setAnnouncement(`${agentName} is waiting for you: ${permissionAnnouncement(waitingFor)}`);
   }, [waitingFor]);
+
+  // A step stopped so a message sent right away goes (send now or wait): said once, as it happens.
+  const lastInterrupted = view.items.findLast((item) => item.type === 'interrupted');
+  const interruptedKey = lastInterrupted?.type === 'interrupted' ? lastInterrupted.messageId : undefined;
+  const seenInterrupted = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!caughtUp) {
+      seenInterrupted.current = interruptedKey;
+      return;
+    }
+    if (interruptedKey === undefined || seenInterrupted.current === interruptedKey) return;
+    seenInterrupted.current = interruptedKey;
+    setAnnouncement('Stopped the current step to send your message.');
+  }, [interruptedKey, caughtUp]);
 
   const state = view.state ?? session.data?.session.state;
   // Who drives, and switching (stories 3.1, 3.6; the wiring is the hook's, story 3.9).
@@ -493,6 +519,8 @@ export function SessionPage() {
                     <ResumedMarker key={`resumed-${item.at}-${index}`} />
                   ) : item.type === 'agent_changed' ? (
                     <AgentChangedMarker key={`agent-${item.at}-${index}`} agentName={nameOf(item.agentId)} />
+                  ) : item.type === 'interrupted' ? (
+                    <InterruptedNote key={`interrupted-${item.messageId}`} cancelledRequest={item.cancelledRequest} />
                   ) : item.type === 'document' ? (
                     <DocumentCard
                       key={`document-${item.path}`}
@@ -514,9 +542,14 @@ export function SessionPage() {
                   ),
                 )
               )}
-              {view.queued.map((message) => (
-                <Message key={message.messageId} message={message} agentName={agentName} />
-              ))}
+              <QueuedMessages
+                wsId={wsId}
+                sesId={sesId}
+                messages={view.queued}
+                readOnly={terminalDrives}
+                sendNowBlockedReason={state === 'waiting' ? 'Answer the request above first, then send your message.' : undefined}
+                onError={setActionError}
+              />
               {state === 'working' && view.starting ? (
                 // A slow agent start (epic 6 entry 5: Antigravity takes about 17 s on Windows) reads as starting, not stuck.
                 <Notice data-testid="agent-starting" role="status">
@@ -640,7 +673,9 @@ export function SessionPage() {
                 ? `${agentName} is waiting for your answer above.`
                 : undefined
           }
-          hint={state === 'working' ? `${agentName} is working. A message you send now waits its turn.` : undefined}
+          hint={state === 'working' ? workingHint(agentName, whileWorking) : undefined}
+          whileWorking={whileWorking}
+          working={state === 'working'}
           restore={restore}
           draftKey={chatDraftKey(wsId, sesId)}
           footer={
@@ -675,8 +710,8 @@ export function SessionPage() {
               </Button>
             ) : null
           }
-          onSend={async (text) => {
-            await sendMessage(wsId, sesId, text);
+          onSend={async (text, delivery) => {
+            await sendMessage(wsId, sesId, text, undefined, delivery);
           }}
         />
       </PageFooter>

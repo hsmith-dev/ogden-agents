@@ -36,4 +36,6 @@ export const CLAUDE_CODE_DESCRIPTOR: Readonly<AgentDescriptor> = Object.freeze<A
   ],
   // Its context holds about 200,000 tokens; the brief takes a modest share of it.
   handoffBudgetChars: 100_000,
+  // claude-agent-acp 0.84 takes a message into the running turn (`_session/steering`, advertised at `initialize`).
+  sendNow: 'inject',
 });

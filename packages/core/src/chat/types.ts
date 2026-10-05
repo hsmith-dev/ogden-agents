@@ -3,7 +3,7 @@
  * `ChatOptions`, `TerminalViewer` and `Chat`, and the state the chat modules
  * share by reference (`Live`, `Terminal`, `Turn`).
  */
-import type { AgentId, ChatAgent, HandoffPreviewResponse, PermissionMode, SessionResponse, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, Workspace, WorkspaceId } from '@ogden-agents/shared';
+import type { AgentId, ChatAgent, HandoffPreviewResponse, PermissionMode, SessionResponse, Session, SessionDriver, SessionId, SessionKind, SessionPermissionModeOption, ToolCallDiff, ToolCallStatus, ToolKind, WhileWorking, Workspace, WorkspaceId } from '@ogden-agents/shared';
 import type { AgentModels } from '../agent-models.js';
 import type { AgentError, AgentRegistry, AgentSession } from '../agent-port.js';
 import type { AgentReadiness } from '../agent-setup-types.js';
@@ -197,8 +197,29 @@ export interface Chat {
    * already queued, `SessionBusyError` while a failed turn is ending,
    * `DriverIsTerminalError` while the terminal drives the session (AD-6),
    * and `SessionNotIdleError` while it is switching drivers.
+   * With `delivery: 'now'` (send now or wait) a message sent while the agent
+   * works goes ahead of the waiting ones at once: into the running turn when
+   * its agent can take it there, else after the current step is stopped
+   * (`session.turn_interrupted`); `AnswerFirstError` while a permission card
+   * waits. Absent or `wait`: as before.
    */
-  sendMessage(workspaceId: WorkspaceId, sessionId: SessionId, text: string): { messageId: string; queued: boolean };
+  sendMessage(workspaceId: WorkspaceId, sessionId: SessionId, text: string, options?: { delivery?: WhileWorking | undefined }): { messageId: string; queued: boolean };
+  /**
+   * Send now or wait: changes one message waiting to be sent, its text or its
+   * place (0 goes next), and appends `session.queue_changed`. Throws
+   * `MessageNotQueuedError` when it is no longer waiting (or is being sent
+   * right away), `DriverIsTerminalError` / `SessionNotIdleError` as
+   * {@link sendMessage}.
+   */
+  updateQueuedMessage(workspaceId: WorkspaceId, sessionId: SessionId, messageId: string, change: { content?: string | undefined; position?: number | undefined }): void;
+  /** Removes one waiting message (appends `session.queue_changed`); refused as {@link updateQueuedMessage}. */
+  removeQueuedMessage(workspaceId: WorkspaceId, sessionId: SessionId, messageId: string): void;
+  /**
+   * Sends one waiting message right away, as `sendMessage` with `delivery:
+   * 'now'` does; refused as {@link updateQueuedMessage}, and with
+   * `AnswerFirstError` while a permission card waits.
+   */
+  sendQueuedMessageNow(workspaceId: WorkspaceId, sessionId: SessionId, messageId: string): void;
   /**
    * Stop: asks the agent to cancel its running prompt, declines the pending
    * permission requests (the session leaves `waiting` for `idle`) and drops
@@ -354,10 +375,26 @@ export interface Terminal {
   exit: { exitCode: number | null } | undefined;
 }
 
+/** A message waiting to be sent (story 2.10; send now or wait). */
+export interface QueuedItem {
+  messageId: string;
+  text: string;
+  /** Sent right away: it goes ahead of every message that waits. */
+  now?: true | undefined;
+  /** Being put into the running turn right now: it can't be changed meanwhile. */
+  sending?: boolean | undefined;
+}
+
 /** A session whose agent is answering: from the first message until nothing is left to send. */
 export interface Turn {
-  /** Messages sent while the agent answered, oldest first. */
-  queue: Array<{ messageId: string; text: string }>;
+  /** Messages sent while the agent answered, in the order they will go. */
+  queue: QueuedItem[];
+  /** Messages being put into the running turn (send now or wait): the next one is picked only once they settled. */
+  steering?: Promise<void> | undefined;
+  /** Sends a message sent right away once the next prompt is out (it came while the agent was starting). */
+  whenPrompting?: (() => void) | undefined;
+  /** A prompt is out to the agent (its turn can be stopped or steered). */
+  prompting?: boolean | undefined;
   /** Deny reasons to send after the turn, ahead of the queue. */
   reasons: string[];
   /** Fires the check-in after a quiet stretch. */

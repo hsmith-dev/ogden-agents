@@ -83,4 +83,6 @@ export const ANTIGRAVITY_DESCRIPTOR: Readonly<AgentDescriptor> = Object.freeze<A
   ],
   // Gemini models hold far more context than a brief needs.
   handoffBudgetChars: 150_000,
+  // antigravity-acp 1.3.0 advertises no steering: a message sent right away stops the current step (`session/cancel`).
+  sendNow: 'interrupt',
 });

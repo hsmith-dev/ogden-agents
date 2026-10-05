@@ -6,10 +6,10 @@
  * Each change appends `settings.developer_mode_changed` (install-level), which
  * every tab follows.
  */
-import { SETTINGS_STREAM, type Session } from '@ogden-agents/shared';
+import { DEFAULT_WHILE_WORKING, SETTINGS_STREAM, WhileWorking as WhileWorkingSchema, type Session, type WhileWorking } from '@ogden-agents/shared';
 import { eq } from 'drizzle-orm';
 import type { Database } from './db/database.js';
-import { installSettings } from './db/schema.js';
+import { chatSettings, installSettings } from './db/schema.js';
 import type { Entities } from './entities.js';
 import { ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
@@ -48,6 +48,13 @@ export interface InstallSettings {
    * those events). `ValidationError` for a value that is not a boolean.
    */
   setDeveloperMode(on: boolean): DeveloperModeChange;
+  /** What a message sent while the agent works does, app-wide (send now or wait; `wait` until the user changes it). */
+  whileWorking(): WhileWorking;
+  /**
+   * Sets it, appending `settings.while_working_changed` when it changed.
+   * `ValidationError` for anything but `wait` or `now`.
+   */
+  setWhileWorking(value: WhileWorking): { whileWorking: WhileWorking; changed: boolean };
 }
 
 export interface InstallSettingsOptions {
@@ -60,8 +67,28 @@ export function createInstallSettings({ db, events, entities }: InstallSettingsO
   const { orm } = db;
   const read = (): boolean => orm.select({ developerMode: installSettings.developerMode }).from(installSettings).where(eq(installSettings.id, ROW_ID)).get()?.developerMode === true;
 
+  const readWhileWorking = (): WhileWorking => {
+    const parsed = WhileWorkingSchema.safeParse(orm.select({ whileWorking: chatSettings.whileWorking }).from(chatSettings).where(eq(chatSettings.id, ROW_ID)).get()?.whileWorking);
+    return parsed.success ? parsed.data : DEFAULT_WHILE_WORKING;
+  };
+
   return {
     developerMode: read,
+
+    whileWorking: readWhileWorking,
+
+    setWhileWorking(value) {
+      const parsed = WhileWorkingSchema.safeParse(value);
+      if (!parsed.success) throw new ValidationError('Choose Wait until it finishes or Send right away.', [{ path: ['whileWorking'], message: 'unknown choice' }]);
+      const whileWorking = parsed.data;
+      return events.transaction(() => {
+        const previous = readWhileWorking();
+        if (previous === whileWorking) return { whileWorking, changed: false };
+        orm.insert(chatSettings).values({ id: ROW_ID, whileWorking }).onConflictDoUpdate({ target: chatSettings.id, set: { whileWorking } }).run();
+        events.append({ type: 'settings.while_working_changed', workspaceId: null, streamId: SETTINGS_STREAM, payload: { whileWorking, previous } });
+        return { whileWorking, changed: true };
+      });
+    },
 
     developerModeEverSet: () => orm.select({ id: installSettings.id }).from(installSettings).where(eq(installSettings.id, ROW_ID)).get() !== undefined,
 

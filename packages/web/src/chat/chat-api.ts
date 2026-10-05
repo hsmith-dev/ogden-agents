@@ -12,6 +12,7 @@ import {
   type PermissionRule,
   type Session,
   type SessionDriver,
+  type WhileWorking,
   type Workspace,
 } from '@ogden-agents/shared';
 import { call, callNoContent, ChatApiError, postJson } from '@/api/http';
@@ -79,8 +80,9 @@ export async function fetchSession(wsId: string, sesId: string, auth: Pick<TabAu
 }
 
 /** `POST /api/v1/workspaces/:wsId/sessions/:sesId/messages`. */
-export async function sendMessage(wsId: string, sesId: string, text: string, auth: Pick<TabAuth, 'fetch'> = tabAuth): Promise<string> {
-  const json = await call(auth, apiPath(API_ROUTES.sessionMessages, { wsId, sesId }), postJson({ text }), "Your message couldn't be sent");
+export async function sendMessage(wsId: string, sesId: string, text: string, auth: Pick<TabAuth, 'fetch'> = tabAuth, delivery?: WhileWorking): Promise<string> {
+  // `delivery` (send now or wait): what it does if the agent is working; absent waits, as before.
+  const json = await call(auth, apiPath(API_ROUTES.sessionMessages, { wsId, sesId }), postJson(delivery === undefined ? { text } : { text, delivery }), "Your message couldn't be sent");
   return SendMessageResponse.parse(json).messageId;
 }
 

@@ -1,9 +1,16 @@
 import { z } from 'zod';
-import { AgentId, AlwaysAllowScope, CautionLevel, MAX_PAGE_EVENTS, Seq, SERVER_STREAM } from './events-common.js';
+import { AgentId, AlwaysAllowScope, CautionLevel, MAX_PAGE_EVENTS, Seq, SERVER_STREAM, WhileWorking } from './events-common.js';
 import { assigned, onSessionStream, onWorkspaceStream } from './events-envelope.js';
-import { SettingsAgentDefaultModelChangedEvent, SettingsAgentDefaultModelChangedInput, SettingsDeveloperModeChangedEvent, SettingsDeveloperModeChangedInput } from './events-settings.js';
+import {
+  SettingsAgentDefaultModelChangedEvent,
+  SettingsAgentDefaultModelChangedInput,
+  SettingsDeveloperModeChangedEvent,
+  SettingsDeveloperModeChangedInput,
+  SettingsWhileWorkingChangedEvent,
+  SettingsWhileWorkingChangedInput,
+} from './events-settings.js';
 
-export { SettingsAgentDefaultModelChangedEvent, SettingsDeveloperModeChangedEvent } from './events-settings.js';
+export { SettingsAgentDefaultModelChangedEvent, SettingsDeveloperModeChangedEvent, SettingsWhileWorkingChangedEvent } from './events-settings.js';
 import {
   PermissionRequestedEvent,
   PermissionRequestedInput,
@@ -31,6 +38,10 @@ import {
   SessionMessageQueuedInput,
   SessionModelChangedEvent,
   SessionModelChangedInput,
+  SessionQueueChangedEvent,
+  SessionQueueChangedInput,
+  SessionTurnInterruptedEvent,
+  SessionTurnInterruptedInput,
   SessionPermissionModeChangedEvent,
   SessionPermissionModeChangedInput,
   SessionRenamedEvent,
@@ -117,6 +128,10 @@ export {
   ResumedVia,
   SessionResumedEvent,
   SessionMessageQueuedEvent,
+  QueuedMessage,
+  QueueChangeCause,
+  SessionQueueChangedEvent,
+  SessionTurnInterruptedEvent,
   SessionCheckInEvent,
   SessionDocumentWrittenEvent,
   SessionAgentStartingEvent,
@@ -254,6 +269,13 @@ const WorkspaceSettingsChangedInput = z.object({
      */
     defaultModels: z.record(AgentId, ModelId).optional(),
     previousDefaultModels: z.record(AgentId, ModelId).optional(),
+    /**
+     * The project's own choice of what a message sent while the agent works
+     * does, now and before (send now or wait), present when it changed.
+     * `null`: the app-wide choice. Optional, so every earlier event still parses.
+     */
+    whileWorking: WhileWorking.nullable().optional(),
+    previousWhileWorking: WhileWorking.nullable().optional(),
   }),
 });
 /**
@@ -319,6 +341,8 @@ export const CoreEvent = z.discriminatedUnion('type', [
   SessionToolCallUpdatedEvent,
   SessionResumedEvent,
   SessionMessageQueuedEvent,
+  SessionQueueChangedEvent,
+  SessionTurnInterruptedEvent,
   SessionCheckInEvent,
   SessionDocumentWrittenEvent,
   SessionAgentStartingEvent,
@@ -340,6 +364,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   AgentAuthChangedEvent,
   SettingsDeveloperModeChangedEvent,
   SettingsAgentDefaultModelChangedEvent,
+  SettingsWhileWorkingChangedEvent,
 ]);
 export type CoreEvent = z.infer<typeof CoreEvent>;
 export type CoreEventType = CoreEvent['type'];
@@ -371,6 +396,8 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   SessionToolCallUpdatedInput,
   SessionResumedInput,
   SessionMessageQueuedInput,
+  SessionQueueChangedInput,
+  SessionTurnInterruptedInput,
   SessionCheckInInput,
   SessionDocumentWrittenInput,
   SessionAgentStartingInput,
@@ -392,6 +419,7 @@ export const NewCoreEvent = z.discriminatedUnion('type', [
   AgentAuthChangedInput,
   SettingsDeveloperModeChangedInput,
   SettingsAgentDefaultModelChangedInput,
+  SettingsWhileWorkingChangedInput,
 ]);
 export type NewCoreEvent = z.infer<typeof NewCoreEvent>;
 

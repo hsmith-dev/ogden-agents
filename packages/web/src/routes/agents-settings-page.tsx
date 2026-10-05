@@ -5,6 +5,7 @@ import { CHAT_AGENTS_QUERY_KEY, setAgentDefaultModel } from '@/chat/chat-api';
 import { DefaultModelsSection } from '@/chat/default-models';
 import { agentDefaultLabel } from '@/chat/model-picker';
 import { useChatAgents } from '@/chat/use-chat-agents';
+import { AppWhileWorkingSection } from '@/chat/while-working-section';
 import { WorkspaceHeader } from '@/shell/workspace-header';
 import { Button } from '@/ui/button';
 import { Notice } from '@/ui/notice';
@@ -49,6 +50,7 @@ export function AgentsSettingsPage() {
           )}
         </PageSection>
         <AppModelsSection />
+        <AppWhileWorkingSection />
       </PageBody>
     </>
   );

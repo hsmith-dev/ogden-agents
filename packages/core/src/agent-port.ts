@@ -179,6 +179,15 @@ export interface AgentSession {
   prompt(text: string): Promise<{ stopReason: string }>;
   /** Asks the agent to stop the running prompt; it ends with `idle`. */
   cancel(): Promise<void>;
+  /**
+   * Puts a user message into the running prompt's turn (send now or wait):
+   * `injected` when the agent took it (what it says next streams as part of
+   * the running prompt, which resolves only once it has answered it);
+   * `no_turn` when no turn was running, so nothing was sent. Rejects when
+   * the agent refused it. Absent when the agent (or this session of it)
+   * can't take a message mid-turn: core stops the step instead.
+   */
+  steer?(text: string): Promise<'injected' | 'no_turn'>;
   /** Ends the session and stops the agent's process. Safe to call more than once. */
   close(): Promise<void>;
   /** Calls `listener` with every event from now on. Returns the unsubscribe. */

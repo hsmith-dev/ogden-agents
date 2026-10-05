@@ -37,6 +37,13 @@
 //                  long as a test needs, then ends on its own
 //   "hold"         one chunk, then waits until cancelled (`cancelled`), with no
 //                  timer: the session stays `working` for as long as a test needs
+//   While any prompt runs, `_session/steering` (advertised as
+//                  `_meta.steering.supported` at `initialize`, not in the
+//                  Antigravity or generic personalities) injects a message:
+//                  a turn waiting ("hold", "wait", "slow", "quiet") goes on
+//                  at once, and the turn ends with "Steered: <text>." and
+//                  `end_turn`; with no turn running it answers
+//                  `promptRequired` (send now or wait)
 //   "tools"        reads three files (src/a.ts, src/b.ts, src/c.ts), then edits
 //                  src/a.ts with a diff; replies "Changed src/a.ts."
 //   "quiet-tool"   one chunk and an `execute` tool call left in progress
@@ -53,6 +60,7 @@
 //   "env"          replies with the CLAUDE_CODE_EXECUTABLE it was given
 //   "echo-env"     replies with its whole environment, `NAME=value` per line,
 //                  each value split across two chunks, and writes it to stderr
+//   "cancels"      replies `cancels=<session/cancel notifications this session got>`
 //   "pids"         replies `pid=<its pid> grandchild=<pid or none>`
 //   "session-start"  replies one JSON line `{ via, cwd, mcpServers, meta,
 //                  prompt, env }`: how the session was opened (`new`,
@@ -262,6 +270,13 @@ const REOPEN_FAIL = new Set((process.env.FAKE_ACP_REOPEN_FAIL ?? '').split(',').
 const NEW_MESSAGE = '[Ogden Agents] New message:\n';
 /** Antigravity's personality (epic 6 entry 5), from `fake-antigravity.mjs`. */
 const ANTIGRAVITY = process.env.FAKE_ACP_PERSONALITY === 'antigravity';
+
+/**
+ * Whether it offers the steering extension (send now or wait): as
+ * claude-agent-acp 0.84 does, advertised at `initialize`; Antigravity's
+ * personality and a generic agent (FAKE_ACP_MODES) don't.
+ */
+const STEERING = !ANTIGRAVITY && process.env.FAKE_ACP_MODES === undefined;
 const INIT_DELAY_MS = Number(process.env.FAKE_ACP_INIT_DELAY_MS ?? '0');
 /** The sign-in method `authenticate` chose in this process, if any. */
 let authenticatedWith;
@@ -396,7 +411,7 @@ const say = (client, sessionId, text) =>
 
 const stream = acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin));
 
-acp
+const agentBuilder = acp
   .agent({ name: 'fake-acp-agent' })
   .onRequest('initialize', async ({ params }) => {
     if (INIT_DELAY_MS > 0) await sleep(INIT_DELAY_MS);
@@ -420,6 +435,7 @@ acp
               ]
             : [],
       agentInfo: ANTIGRAVITY ? { name: 'antigravity-acp', title: 'Google Antigravity', version: '1.3.0' } : { name: 'fake-acp-agent', version: '1.0.0' },
+      ...(STEERING ? { _meta: { steering: { supported: true } } } : {}),
     };
   })
   .onRequest('authenticate', async ({ params }) => {
@@ -514,6 +530,36 @@ acp
   .onRequest('session/prompt', async ({ params, client }) => {
     const session = sessions.get(params.sessionId);
     if (session === undefined) throw acp.RequestError.invalidParams(undefined, `no session ${params.sessionId}`);
+    session.turns = (session.turns ?? 0) + 1;
+    session.steered = [];
+    try {
+      const result = await runPrompt(params, client, session);
+      // Messages steered into the turn are answered before it ends; a wait they ended is no cancel.
+      const steered = session.steered.splice(0);
+      for (const text of steered) await say(client, params.sessionId, `Steered: ${text}.`);
+      return steered.length > 0 ? { stopReason: 'end_turn' } : result;
+    } finally {
+      session.turns -= 1;
+    }
+  })
+  // The steering extension (claude-agent-acp 0.84, send now or wait): a message into the running turn.
+  .onRequest('_session/steering', { parse: (params) => params }, async ({ params }) => {
+    const session = sessions.get(params.sessionId);
+    if (session === undefined) throw acp.RequestError.invalidParams(undefined, `no session ${params.sessionId}`);
+    if (!STEERING) throw acp.RequestError.methodNotFound('_session/steering');
+    if ((session.turns ?? 0) === 0) return { outcome: 'promptRequired', reason: 'noRunningTurn' };
+    const text = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('');
+    session.steered.push(text);
+    // A turn waiting on something ("hold", "wait", "slow", "quiet") goes on with the message, after
+    // this answer is out (as the real adapter answers before the model's next output).
+    setTimeout(() => session.cancel?.(), 20);
+    return { outcome: 'injected' };
+  });
+
+/** One prompt's turn (the behaviors listed at the top). */
+async function runPrompt(params, client, session) {
+  {
+    // Kept as a block: the behaviors below were the prompt handler's body.
     const whole = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('');
     const primedAt = whole.lastIndexOf(NEW_MESSAGE);
     const primer = primedAt === -1 ? '' : whole.slice(0, primedAt);
@@ -782,6 +828,10 @@ acp
       await say(client, params.sessionId, JSON.stringify(reply));
       return { stopReason: 'end_turn' };
     }
+    if (text === 'cancels') {
+      await say(client, params.sessionId, `cancels=${session.cancels ?? 0}`);
+      return { stopReason: 'end_turn' };
+    }
     if (text === 'pids') {
       await say(client, params.sessionId, `pid=${process.pid} grandchild=${grandchild?.pid ?? 'none'}`);
       return { stopReason: 'end_turn' };
@@ -861,9 +911,14 @@ acp
       // The record is the test's to check; the chat answers either way (as the fake CLI does).
     }
     return { stopReason: 'end_turn' };
-  })
+  }
+}
+
+agentBuilder
   .onNotification('session/cancel', ({ params }) => {
-    sessions.get(params.sessionId)?.cancel?.();
+    const cancelled = sessions.get(params.sessionId);
+    if (cancelled !== undefined) cancelled.cancels = (cancelled.cancels ?? 0) + 1;
+    cancelled?.cancel?.();
   })
   .onRequest('session/close', ({ params }) => {
     sessions.delete(params.sessionId);

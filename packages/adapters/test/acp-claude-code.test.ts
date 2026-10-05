@@ -686,3 +686,23 @@ describe('paths a search can reach (story 2.8 review F2)', () => {
     expect(pathsOf({ toolCallId: 't', kind: 'read', rawInput: { file_path: 'a.ts' } }, cwd)).toEqual(['a.ts']);
   });
 });
+
+describe('send now or wait: a message into the running turn (claude-agent-acp 0.84 `_session/steering`)', () => {
+  it('offers steer, puts the message into the running turn without a cancel, and the prompt ends answering it', async () => {
+    const { session, events } = await startFake();
+    expect(session.steer).toBeTypeOf('function');
+    const prompting = session.prompt('hold');
+    await until(() => events.some((event) => event.type === 'message_chunk' && event.text === 'Holding'), 'the turn to start');
+    expect(await session.steer!('use the other file')).toBe('injected');
+    expect(await prompting).toEqual({ stopReason: 'end_turn' });
+    const reply = events.flatMap((event) => (event.type === 'message_chunk' ? [event.text] : [])).join('');
+    expect(reply).toBe('HoldingSteered: use the other file.');
+  });
+
+  it('answers no_turn, starting nothing, when no turn runs', async () => {
+    const { session, events } = await startFake();
+    expect(await session.steer!('anyone there')).toBe('no_turn');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(events.filter((event) => event.type === 'state')).toEqual([]);
+  });
+});

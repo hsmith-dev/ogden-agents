@@ -21,6 +21,8 @@ import {
   type PermissionMode,
   type WorkspaceId,
   type WorkspaceSettings,
+  type WhileWorking,
+  WhileWorking as WhileWorkingSchema,
 } from '@ogden-agents/shared';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -51,10 +53,12 @@ export interface WorkspaceSettingsAccess {
    * unknown workspace. The default agent (epic 6, entry 6) is an agent id,
    * or `null` for the install's default; {@link UnknownAgentError} for one
    * this install doesn't have. Every refusal writes nothing.
+   * `whileWorking` (send now or wait) is `wait` or `now`, or `null` for the
+   * app-wide choice; {@link ValidationError} for anything else.
    */
   updateSettings(
     workspaceId: WorkspaceId,
-    input: { cautionLevel?: unknown; bmadPieces?: unknown; defaultAgentId?: unknown; defaultPermissionMode?: unknown; confirm?: unknown; defaultModels?: unknown },
+    input: { cautionLevel?: unknown; bmadPieces?: unknown; defaultAgentId?: unknown; defaultPermissionMode?: unknown; confirm?: unknown; defaultModels?: unknown; whileWorking?: unknown },
   ): WorkspaceSettings;
 }
 
@@ -171,6 +175,18 @@ const modelsField = (models: Record<AgentId, string>) => (Object.keys(models).le
 const sameModels = (a: Readonly<Record<string, string>>, b: Readonly<Record<string, string>>) =>
   Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([agentId, model]) => b[agentId] === model);
 
+/**
+ * The project's own choice of what a message sent while the agent works does
+ * (send now or wait), `undefined` for the app-wide one (none chosen, or a
+ * damaged value); `null` for an unknown workspace.
+ */
+export function readWhileWorking(orm: Orm, workspaceId: string): WhileWorking | undefined | null {
+  const row = orm.select({ whileWorking: workspaces.whileWorking }).from(workspaces).where(eq(workspaces.id, workspaceId)).get();
+  if (row === undefined) return null;
+  const parsed = WhileWorkingSchema.safeParse(row.whileWorking);
+  return parsed.success ? parsed.data : undefined;
+}
+
 /** The workspace's stored level; the strictest one when it can't be read; `undefined` for an unknown workspace. */
 export function readCautionLevel(orm: Orm, workspaceId: string): CautionLevel | undefined {
   const row = orm.select({ cautionLevel: workspaces.cautionLevel }).from(workspaces).where(eq(workspaces.id, workspaceId)).get();
@@ -213,10 +229,19 @@ export function createWorkspaceSettings({
       const defaultAgentId = readDefaultAgent(orm, workspaceId, isAgentRegistered);
       const mode = readDefaultPermissionMode(orm, workspaceId);
       const defaultModels = readDefaultModels(orm, workspaceId);
-      if (cautionLevel === undefined || bmadPieces === undefined || bmadScriptsTrusted === undefined || defaultAgentId === null || mode === undefined || defaultModels === null) {
+      const whileWorking = readWhileWorking(orm, workspaceId);
+      if (cautionLevel === undefined || bmadPieces === undefined || bmadScriptsTrusted === undefined || defaultAgentId === null || mode === undefined || defaultModels === null || whileWorking === null) {
         throw new NotFoundError('workspace', workspaceId);
       }
-      return { cautionLevel, bmadPieces, bmadScriptsTrusted, ...(defaultAgentId === undefined ? {} : { defaultAgentId }), ...modeFields(mode), ...modelsField(defaultModels) };
+      return {
+        cautionLevel,
+        bmadPieces,
+        bmadScriptsTrusted,
+        ...(defaultAgentId === undefined ? {} : { defaultAgentId }),
+        ...modeFields(mode),
+        ...modelsField(defaultModels),
+        ...(whileWorking === undefined ? {} : { whileWorking }),
+      };
     },
 
     updateSettings(workspaceId, input) {
@@ -261,7 +286,14 @@ export function createWorkspaceSettings({
         for (const agentId of Object.keys(parsed.data)) if (!isAgentRegistered(agentId)) throw new UnknownAgentError();
         modelChanges = parsed.data;
       }
-      if (cautionLevel === undefined && bmadPieces === undefined && agent === undefined && permissionMode === undefined && modelChanges === undefined) {
+      // What a message sent while the agent works does (send now or wait): `wait`, `now`, or null for the app-wide choice.
+      let whileWorking: WhileWorking | null | undefined;
+      if (input.whileWorking !== undefined) {
+        const parsed = WhileWorkingSchema.nullable().safeParse(input.whileWorking);
+        if (!parsed.success) throw new ValidationError('Choose Wait until it finishes or Send right away.', [{ path: ['whileWorking'], message: 'unknown choice' }]);
+        whileWorking = parsed.data;
+      }
+      if (cautionLevel === undefined && bmadPieces === undefined && agent === undefined && permissionMode === undefined && modelChanges === undefined && whileWorking === undefined) {
         throw new ValidationError('Choose a setting to change.', [{ path: [], message: 'nothing to change' }]);
       }
       return events.transaction(() => {
@@ -274,7 +306,8 @@ export function createWorkspaceSettings({
         const previousBmadPieces = readBmadPieces(orm, workspaceId);
         const previousAgent = readDefaultAgent(orm, workspaceId, isAgentRegistered);
         const previousMode = readDefaultPermissionMode(orm, workspaceId);
-        if (previous === undefined || previousBmadPieces === undefined || previousAgent === null || previousMode === undefined) throw new NotFoundError('workspace', workspaceId);
+        const previousWhileWorking = readWhileWorking(orm, workspaceId);
+        if (previous === undefined || previousBmadPieces === undefined || previousAgent === null || previousMode === undefined || previousWhileWorking === null) throw new NotFoundError('workspace', workspaceId);
         const level = cautionLevel ?? previous;
         // Compared as sets: the same pieces in another order change nothing.
         const piecesChanged =
@@ -299,8 +332,18 @@ export function createWorkspaceSettings({
           else defaultModels[agentId] = model;
         }
         const modelsChanged = !sameModels(defaultModels, previousModels);
-        const settings = { cautionLevel: level, bmadPieces: pieces, bmadScriptsTrusted, ...(defaultAgentId === undefined ? {} : { defaultAgentId }), ...modeFields(mode), ...modelsField(defaultModels) };
-        if (level === previous && !piecesChanged && !agentChanged && !modeChanged && !modelsChanged) return settings;
+        const whileWorkingChanged = whileWorking !== undefined && (whileWorking ?? undefined) !== previousWhileWorking;
+        const projectWhileWorking = whileWorkingChanged ? (whileWorking ?? undefined) : previousWhileWorking;
+        const settings = {
+          cautionLevel: level,
+          bmadPieces: pieces,
+          bmadScriptsTrusted,
+          ...(defaultAgentId === undefined ? {} : { defaultAgentId }),
+          ...modeFields(mode),
+          ...modelsField(defaultModels),
+          ...(projectWhileWorking === undefined ? {} : { whileWorking: projectWhileWorking }),
+        };
+        if (level === previous && !piecesChanged && !agentChanged && !modeChanged && !modelsChanged && !whileWorkingChanged) return settings;
         orm
           .update(workspaces)
           .set({
@@ -309,6 +352,7 @@ export function createWorkspaceSettings({
             ...(agentChanged ? { defaultAgentId: agent ?? null } : {}),
             ...(modeChanged ? { defaultPermissionMode: mode.mode, defaultPermissionModeNotice: null } : {}),
             ...(modelsChanged ? { defaultModels: JSON.stringify(defaultModels) } : {}),
+            ...(whileWorkingChanged ? { whileWorking: whileWorking ?? null } : {}),
           })
           .where(eq(workspaces.id, workspaceId))
           .run();
@@ -331,6 +375,7 @@ export function createWorkspaceSettings({
                 }
               : {}),
             ...(modelsChanged ? { defaultModels, previousDefaultModels: previousModels } : {}),
+            ...(whileWorkingChanged ? { whileWorking: whileWorking ?? null, previousWhileWorking: previousWhileWorking ?? null } : {}),
           },
         });
         return settings;

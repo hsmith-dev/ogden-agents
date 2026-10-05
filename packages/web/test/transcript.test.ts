@@ -402,3 +402,81 @@ describe('document cards in the transcript (story 4.7)', () => {
     expect(view.messages[0]?.agentId).toBe('first-agent');
   });
 });
+
+describe('sessionView: send now or wait', () => {
+  const queuedNow = (messageId: string, content: string) => event('session.message_queued', { sessionId: 'ses_1', messageId, content, now: true });
+  const queuedWait = (messageId: string, content: string) => event('session.message_queued', { sessionId: 'ses_1', messageId, content });
+  const begun = () => [created(), completed('u1', 'user', 'first'), stateChanged('working', 'idle')];
+
+  it('puts a message sent right away ahead of the waiting ones, after the others sent right away', () => {
+    const view = sessionView([...begun(), queuedWait('w1', 'later'), queuedNow('n1', 'urgent'), queuedNow('n2', 'also urgent')], 'ses_1');
+    expect(view.queued.map((message) => [message.messageId, message.now === true])).toEqual([
+      ['n1', true],
+      ['n2', true],
+      ['w1', false],
+    ]);
+  });
+
+  it('replaces what waits with each queue_changed: edited text, new order, removed ones gone (not "Not sent")', () => {
+    const view = sessionView(
+      [
+        ...begun(),
+        queuedWait('w1', 'a'),
+        queuedWait('w2', 'b'),
+        queuedWait('w3', 'c'),
+        event('session.queue_changed', { sessionId: 'ses_1', cause: 'removed', queue: [{ messageId: 'w3', content: 'c' }, { messageId: 'w1', content: 'a, edited', now: true }] }),
+        stateChanged('idle', 'working'),
+      ],
+      'ses_1',
+    );
+    expect(view.queued).toEqual([]);
+    expect(view.notSent.map((message) => [message.messageId, message.text])).toEqual([
+      ['w3', 'c'],
+      ['w1', 'a, edited'],
+    ]);
+    expect(view.notSent.every((message) => message.now === undefined)).toBe(true);
+  });
+
+  it('shows a message taken into the running turn where it went, marked, and the stop note where the step was stopped', () => {
+    const view = sessionView(
+      [
+        ...begun(),
+        delta('a1', 'Working'),
+        queuedNow('n1', 'urgent'),
+        completed('a1', 'agent', 'Working'),
+        event('session.message_completed', { messageId: 'n1', role: 'user', content: 'urgent', delivery: 'injected' }),
+        queuedNow('n2', 'stop and do this'),
+        event('session.turn_interrupted', { sessionId: 'ses_1', messageId: 'n2' }),
+      ],
+      'ses_1',
+    );
+    expect(view.items.map((item) => (item.type === 'message' ? item.message.messageId : item.type))).toEqual(['u1', 'a1', 'n1', 'interrupted']);
+    expect(view.messages.find((message) => message.messageId === 'n1')).toMatchObject({ delivery: 'injected' });
+    expect(view.messages.find((message) => message.messageId === 'n1')?.status).toBeUndefined();
+    expect(view.queued.map((message) => message.messageId)).toEqual(['n2']);
+  });
+
+  it('shows a message first marked "Not sent" as sent when the agent had taken it (a Stop during a send now)', () => {
+    const view = sessionView([...begun(), queuedNow('n1', 'urgent'), stateChanged('idle', 'working'), event('session.message_completed', { messageId: 'n1', role: 'user', content: 'urgent', delivery: 'injected' })], 'ses_1');
+    expect(view.notSent).toEqual([]);
+    expect(view.messages.filter((message) => message.messageId === 'n1')).toHaveLength(1);
+    expect(view.messages.find((message) => message.messageId === 'n1')).toMatchObject({ delivery: 'injected' });
+  });
+
+  it('says on the stop note when a request raised while the step was stopping was cancelled, and only then', () => {
+    const requested = event('permission.requested', {
+      sessionId: 'ses_1',
+      requestId: 'req_1',
+      toolCall: { toolCallId: 't1', title: 'Run npm test', kind: 'execute' },
+      alwaysAllowScope: null,
+      cautionLevel: 'ask_every_time',
+    });
+    const cancelled = event('permission.resolved', { sessionId: 'ses_1', requestId: 'req_1', decision: 'deny', by: 'cancelled' });
+    const interrupted = event('session.turn_interrupted', { sessionId: 'ses_1', messageId: 'n1' });
+    const note = (events: CoreEvent[]) => sessionView(events, 'ses_1').items.find((item) => item.type === 'interrupted');
+    expect(note([...begun(), queuedNow('n1', 'urgent'), interrupted, requested, cancelled])).toMatchObject({ cancelledRequest: true });
+    // A request cancelled after the message went belongs to a later turn.
+    const later = [...begun(), queuedNow('n1', 'urgent'), interrupted, completed('n1', 'user', 'urgent'), requested, cancelled];
+    expect(note(later)?.type === 'interrupted' && note(later)?.cancelledRequest).toBeFalsy();
+  });
+});

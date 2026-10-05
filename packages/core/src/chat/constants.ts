@@ -68,6 +68,12 @@ export const DELTA_INTERVAL_MS = 50;
 /** How long Stop waits for the agent to end its turn before it drops the agent. */
 export const STOP_GRACE_MS = 5_000;
 
+/**
+ * How long an agent may take to answer a message sent right away into its
+ * running turn (send now or wait) before core stops the step instead.
+ */
+export const STEER_TIMEOUT_MS = 10_000;
+
 /** The most recent terminal output core keeps (in memory only) for a viewer that attaches. */
 export const TERMINAL_BACKLOG_CHARS = 64 * 1024;
 

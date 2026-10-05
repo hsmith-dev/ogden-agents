@@ -62,6 +62,17 @@ export const CautionLevel = z.enum(CAUTION_LEVELS);
 export type CautionLevel = z.infer<typeof CautionLevel>;
 export const DEFAULT_CAUTION_LEVEL: CautionLevel = 'ask_every_time';
 
+/**
+ * What a message sent while the agent works does (send now or wait,
+ * 2026-10-04): `wait` holds it until the turn ends (story 2.10, the
+ * default); `now` sends it right away, into the running turn when the agent
+ * can take it there, else by stopping the current step first.
+ */
+export const WHILE_WORKING = ['wait', 'now'] as const;
+export const WhileWorking = z.enum(WHILE_WORKING);
+export type WhileWorking = z.infer<typeof WhileWorking>;
+export const DEFAULT_WHILE_WORKING: WhileWorking = 'wait';
+
 /** An agent's stable id, kebab-case (`claude-code`, `codex`). Not an Ogden Agents key (AD-9). */
 export const AgentId = z
   .string()

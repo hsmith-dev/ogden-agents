@@ -431,4 +431,21 @@ describe('sessionView: send now or wait', () => {
     expect(view.messages.filter((message) => message.messageId === 'n1')).toHaveLength(1);
     expect(view.messages.find((message) => message.messageId === 'n1')).toMatchObject({ delivery: 'injected' });
   });
+
+  it('says on the stop note when a request raised while the step was stopping was cancelled, and only then', () => {
+    const requested = event('permission.requested', {
+      sessionId: 'ses_1',
+      requestId: 'req_1',
+      toolCall: { toolCallId: 't1', title: 'Run npm test', kind: 'execute' },
+      alwaysAllowScope: null,
+      cautionLevel: 'ask_every_time',
+    });
+    const cancelled = event('permission.resolved', { sessionId: 'ses_1', requestId: 'req_1', decision: 'deny', by: 'cancelled' });
+    const interrupted = event('session.turn_interrupted', { sessionId: 'ses_1', messageId: 'n1' });
+    const note = (events: CoreEvent[]) => sessionView(events, 'ses_1').items.find((item) => item.type === 'interrupted');
+    expect(note([...begun(), queuedNow('n1', 'urgent'), interrupted, requested, cancelled])).toMatchObject({ cancelledRequest: true });
+    // A request cancelled after the message went belongs to a later turn.
+    const later = [...begun(), queuedNow('n1', 'urgent'), interrupted, completed('n1', 'user', 'urgent'), requested, cancelled];
+    expect(note(later)?.type === 'interrupted' && note(later)?.cancelledRequest).toBeFalsy();
+  });
 });

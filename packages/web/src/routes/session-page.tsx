@@ -426,7 +426,7 @@ export function SessionPage() {
                   ) : item.type === 'resumed' ? (
                     <ResumedMarker key={`resumed-${item.at}-${index}`} />
                   ) : item.type === 'interrupted' ? (
-                    <InterruptedNote key={`interrupted-${item.messageId}`} />
+                    <InterruptedNote key={`interrupted-${item.messageId}`} cancelledRequest={item.cancelledRequest} />
                   ) : item.type === 'document' ? (
                     <DocumentCard
                       key={`document-${item.path}`}

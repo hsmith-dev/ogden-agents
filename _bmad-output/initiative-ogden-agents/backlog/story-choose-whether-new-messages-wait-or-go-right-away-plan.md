@@ -122,6 +122,8 @@ Pass 1 (lenses quick, races-ux): high 3, medium 9, low 6, false 0. All patch unl
 | Default `wait` before settings load | low | reject | only the first instant after opening; same result as today's behaviour. |
 | Two send now with mixed outcomes; edit racing the drive loop; requests during an interrupt cancelled | medium | defer | deferred-work.md entries; the last recorded as a decision (it is Stop's cancel). |
 
+Follow-up (coordinator decision, 2026-10-04): a request cancelled while the step stops for a message sent right away stays cancelled (Stop's rule), and the stop note now adds "A pending approval request was cancelled; the agent can ask again." Tests: transcript and DOM. Its deferred entry is removed.
+
 ## Design Notes
 
 Inject: core records `message_queued` first (draft clears on 202), calls `steer` without awaiting in the route; `drive` awaits any in-flight steer before `takeNext`, so a `no_turn` answer puts the message at the queue front before the next pick. On `injected`: `finishReply`, then `completeMessage(delivery 'injected')`.

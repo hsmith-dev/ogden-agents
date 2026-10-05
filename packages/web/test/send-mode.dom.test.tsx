@@ -11,6 +11,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Composer } from '../src/chat/composer';
 import { QueuedMessages } from '../src/chat/queued-messages';
+import { InterruptedNote } from '../src/chat/transcript-parts';
 import type { TranscriptMessage } from '../src/chat/transcript';
 import { TooltipProvider } from '../src/ui/tooltip';
 
@@ -132,3 +133,14 @@ describe('the messages that wait', () => {
     expect(screen.queryByRole('button')).toBeNull();
   });
 });
+
+describe('the stop note', () => {
+  it('says plainly when a pending approval request was cancelled', () => {
+    render(<InterruptedNote cancelledRequest />);
+    expect(screen.getByTestId('turn-interrupted').textContent).toBe('Stopped the current step to send your message. A pending approval request was cancelled; the agent can ask again.');
+    cleanup();
+    render(<InterruptedNote />);
+    expect(screen.getByTestId('turn-interrupted').textContent).toBe('Stopped the current step to send your message.');
+  });
+});
+

@@ -110,11 +110,14 @@ export function Message({ message, agentName }: { message: TranscriptMessage; ag
 }
 
 /** Where the agent's step was stopped so a message sent right away went at once (send now or wait). */
-export function InterruptedNote() {
+export function InterruptedNote({ cancelledRequest = false }: { cancelledRequest?: boolean | undefined }) {
   return (
     <div className="flex items-center gap-3" data-testid="turn-interrupted" role="note">
       <Separator className="flex-1" />
-      <Text variant="caption">Stopped the current step to send your message.</Text>
+      <Text variant="caption">
+        Stopped the current step to send your message.
+        {cancelledRequest ? ' A pending approval request was cancelled; the agent can ask again.' : ''}
+      </Text>
       <Separator className="flex-1" />
     </div>
   );

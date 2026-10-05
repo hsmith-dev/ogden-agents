@@ -102,7 +102,13 @@ export type TranscriptItem =
    */
   | { type: 'document'; path: string; next: CatalogNext | null; toolCallId: string | null; at: string }
   /** The agent's current step was stopped so a message sent right away goes at once (`session.turn_interrupted`). */
-  | { type: 'interrupted'; messageId: string; at: string };
+  | {
+      type: 'interrupted';
+      messageId: string;
+      at: string;
+      /** A permission request the agent raised while its step was stopping was cancelled (no card shown). */
+      cancelledRequest?: boolean;
+    };
 
 export interface SessionView {
   /** Whether the event log has this session at all (its `session.created`). */
@@ -162,6 +168,8 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
   const permissions = new Map<string, TranscriptPermission>();
   const toolCalls = new Map<string, TranscriptToolCall>();
   let queued = new Map<string, TranscriptMessage>();
+  /** The latest stop for a message sent right away, until a message of the user's is sent after it. */
+  let openInterrupt: Extract<TranscriptItem, { type: 'interrupted' }> | undefined;
   const removedRules = new Set<string>(rulesRemoved);
   const message = (messageId: string, role: MessageRole) => {
     let found = byId.get(messageId);
@@ -252,7 +260,8 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
         break;
       }
       case 'session.turn_interrupted':
-        view.items.push({ type: 'interrupted', messageId: event.payload.messageId, at: event.at });
+        openInterrupt = { type: 'interrupted', messageId: event.payload.messageId, at: event.at };
+        view.items.push(openInterrupt);
         break;
       case 'session.message_completed': {
         // A queued message is sent now: it takes its place here.
@@ -272,6 +281,7 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
         if (event.payload.delivery !== undefined) done.delivery = event.payload.delivery;
         // A Deny reason core sent is not the user's message to try again (9.4 review F4).
         if (event.payload.role === 'user' && event.payload.origin !== 'deny_reason') view.lastUserText = event.payload.content;
+        if (event.payload.role === 'user') openInterrupt = undefined;
         break;
       }
       case 'session.tool_call':
@@ -319,6 +329,8 @@ export function sessionView(events: readonly CoreEvent[], sessionId: string, rul
       case 'permission.resolved': {
         const permission = permissions.get(event.payload.requestId);
         if (permission === undefined) break;
+        // Cancelled while the step was stopping for a message sent right away: the note says so.
+        if (event.payload.by === 'cancelled' && openInterrupt !== undefined) openInterrupt.cancelledRequest = true;
         permission.status = 'resolved';
         permission.resolution = {
           decision: event.payload.decision,

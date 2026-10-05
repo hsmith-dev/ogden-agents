@@ -59,7 +59,6 @@ Each index line ends `(log: "<phrase>")`, where the phrase is copied verbatim fr
 - Epic 6 (every agent): setup status reads `.claude/skills` only, so an agent folder that lacks the skills (Antigravity used after Set up) gets them only at the next Set up or Upgrade. From the 6.8 restack. (log: "Setup status reads the installed BMad Method version from `.claude/skills` only")
 - Send now or wait: two messages sent right away at once can cut off or misorder each other. From its review. (log: "Two messages sent right away at once with different outcomes")
 - Send now or wait: an edit open on a waiting message is lost when the turn takes the message. From its review. (log: "Editing a waiting message while the turn ends loses the draft silently")
-- Send now or wait: a request raised between an interrupt's cancel and the turn's end is cancelled without a card. From its review. (log: "A permission request the agent raises between an interrupt's cancel")
 
 Closed in code with no "Resolved:" entry: the session-event `workspaceId` check (1.3; `packages/core/src/session-events.ts`, story 2.2), the full-history replay on page load (1.3; windowed subscriptions, story 2.9), and the "9.4" note in `secret-store-port.ts` (2.12; it now names 9.2). The rename note (paths) and the 9.7 note on the plan's step 6 wording are notes, not open items.
 
@@ -555,7 +554,3 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-choose-whether-new-messages-wait-or-go-right-away-plan.md`
   summary: Editing a waiting message while the turn ends loses the draft silently when the old text is sent.
   evidence: queued-messages.tsx editor does not reserve the message; takeNext sends it and the row unmounts.
-- source_plan: `_bmad-output/initiative-ogden-agents/backlog/story-choose-whether-new-messages-wait-or-go-right-away-plan.md`
-  summary: A permission request the agent raises between an interrupt's cancel and its turn ending is cancelled without a card (as during Stop).
-  evidence: permission-requests.ts declines while `turn.stopping`; decide whether the interrupted note should say so.
-

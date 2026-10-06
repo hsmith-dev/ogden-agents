@@ -36,7 +36,7 @@ describe('the checked binary is re-checked before each start', () => {
     const { path, grok } = install(version, 'binary-one');
     expect(grok.path).toBe(path);
     expect(grokBinaryUnchanged(grok, hashes('binary-one'), version)).toBe(true);
-    // Still the same state: not hashed again, still fine.
+    // Still fine (a file this new is hashed again each time, so a rewrite in the same clock tick is seen).
     expect(grokBinaryUnchanged(grok, hashes('binary-one'), version)).toBe(true);
     writeFileSync(path, 'binary-two');
     expect(grokBinaryUnchanged(grok, hashes('binary-one'), version)).toBe(false);

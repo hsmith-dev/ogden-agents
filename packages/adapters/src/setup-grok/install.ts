@@ -175,6 +175,9 @@ export const GROK_CHECK_RECORD_SUFFIX = '.sha256';
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
+/** A file changed more recently than this is hashed again each time: file times are coarse, so equal times prove nothing yet. */
+const RACY_MS = 3000;
+
 /** Binaries already re-checked in this process, by what identifies this file's state (size, inode, change and modify times). */
 const rechecked = new Map<string, string>();
 
@@ -214,7 +217,8 @@ export function grokBinaryUnchanged(grok: InstalledGrok, hashes: GrokBinaryHashe
       rechecked.delete(grok.path);
       return false;
     }
-    rechecked.set(grok.path, state);
+    // Remembered only once the file is older than the clock's granularity (Windows stamps in ticks of about 16 ms), so a rewrite right after the hash can't carry the same state.
+    if (Date.now() - Math.max(info.ctimeMs, info.mtimeMs) > RACY_MS) rechecked.set(grok.path, state);
     return true;
   } catch {
     return false;

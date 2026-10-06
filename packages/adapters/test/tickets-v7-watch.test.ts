@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import type { TicketWatch } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { changedTicketRefs, createTicketsV7, ScriptRunError, type UvScriptRunner } from '../src/index.js';
+import { defaultWatchDir, type WatchDir } from '../src/tickets-v7/folder-watch.js';
 import { fakeSnapshot, GUARD, WATCH_GUARD } from './snapshot-fake.js';
 
 const dirs: string[] = [];
@@ -158,25 +159,43 @@ describe('tickets-v7 watch (story 4.8)', () => {
   it('reads one at a time: changes during a read run one more after it', async () => {
     const repo = tempRepo();
     const { state, runner } = fakeRunner();
-    const store = createTicketsV7({ runner, snapshot: fakeSnapshot, script: () => '/x/tickets.py', workDir: repo, watchTiming: TIMING });
+    // Raw file events, with when the last one arrived: the OS may deliver them late (macOS, loaded CI), and an event
+    // that settles after the catch-up read has started is a legitimate further read, so the test waits for the
+    // events and their settling scans to be done before it lets the held read go.
+    let events = 0;
+    let lastEventAt = 0;
+    const watchDir: WatchDir = (dir, listener, recursive) =>
+      defaultWatchDir(dir, (type, name) => {
+        events++;
+        lastEventAt = Date.now();
+        listener(type, name);
+      }, recursive);
+    const store = createTicketsV7({ runner, snapshot: fakeSnapshot, script: () => '/x/tickets.py', workDir: repo, watchTiming: TIMING, watchDir });
     const { changes } = await watched(repo, store);
+    // Let the arming's confirming scan pass, so nothing but the test's own writes is left to settle.
+    await sleep(TIMING.confirmMs + 100);
     let release!: () => void;
     state.gate = new Promise((resolve) => (release = resolve));
     state.tickets = [row('1.1', 'built'), row('1.2', '')];
     touch(repo, 'a\n');
     await waitFor(() => state.runs === 2, 'the held read');
     // While it is held, two more settled changes.
+    const before = events;
     touch(repo, 'bb\n');
-    await sleep(120);
+    await waitFor(() => events > before, 'the second change event');
+    await sleep(TIMING.debounceMs * 3);
+    const middle = events;
     touch(repo, 'ccc\n');
-    await sleep(120);
+    await waitFor(() => events > middle, 'the third change event');
+    // Quiet: every event of the writes has arrived and been scanned, so the change is queued behind the held read.
+    await waitFor(() => Date.now() - lastEventAt > TIMING.debounceMs * 6, 'the events to settle');
     // tree runs its own read, alongside the held one.
     const treeRead = store.tree(repo, GUARD);
     release();
     state.gate = undefined;
     await treeRead;
     await waitFor(() => changes.length === 1 && state.inFlight === 0, 'the reads');
-    await sleep(100);
+    await sleep(TIMING.debounceMs * 6);
     expect(state.maxInFlight).toBeLessThanOrEqual(2);
     // The held read, one more for the changes during it, and the tree's own.
     expect(state.runs).toBe(4);

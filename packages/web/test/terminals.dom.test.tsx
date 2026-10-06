@@ -127,6 +127,9 @@ const mount = async (developerMode = true) => {
     </QueryClientProvider>,
   );
   await settle();
+  // Each pane connects once its (lazily imported) terminal is up: wait for that, not for a fixed number of ticks,
+  // which a slow runner (Windows CI) can outrun. Bounded; a pane that never connects fails its own assertions.
+  for (let i = 0; i < 500 && fakes.connections.length < screen.queryAllByTestId('pane').length; i++) await settle();
 };
 
 beforeEach(() => {

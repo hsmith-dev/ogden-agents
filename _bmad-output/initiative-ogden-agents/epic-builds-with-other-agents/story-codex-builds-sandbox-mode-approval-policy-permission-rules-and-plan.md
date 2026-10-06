@@ -61,4 +61,4 @@ Live check result: none yet; these are the user's, recorded in RELEASING.md by e
 
 ## Review Triage Log
 
-(filled after the review)
+One combined security and correctness review (an independent agent), loop 1; no blocking finding, fail closed holds. Fixed: Codex's reason is only set while it is unverified; a test pins the gate (an unverified Codex refuses a start with a sandbox and spawns nothing); a misplaced comment moved. Noted: `unattendedBuild !== false` in the server treats an agent that says nothing as capable (unchanged from 17.3, with the start path refusing it anyway).

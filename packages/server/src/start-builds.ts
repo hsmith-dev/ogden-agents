@@ -65,9 +65,9 @@ export function createBuildsWiring({
   registeredAgents: (agentId: string) => boolean;
   /** Whether an agent can run an unattended build here (its port says so; `AgentPort.unattendedBuild`). */
   unattendedAgents: (agentId: string) => boolean;
-  /** An agent's product name and where its skills go in a project (its descriptor). */
   /** An agent's own plain reason it builds only with the user watching, when it says one. */
   attendedOnlyReason: (agentId: string) => string | undefined;
+  /** An agent's product name and where its skills go in a project (its descriptor). */
   describeAgent: (agentId: string) => { displayName: string; skillsFolder: string } | undefined;
 }): BuildsUseCases {
   // Git runs as the user, with the agents' allowlist and never an API key (AD-16).

@@ -128,7 +128,7 @@ export function createCodexAgent(options: CodexAgentOptions): AgentPort {
       },
     },
     // Until the live checks show its sandbox holds, a build is with the user watching, and the picker says so in these words.
-    attendedOnlyReason: CODEX_ATTENDED_ONLY_REASON,
+    ...((options.unattendedVerified ?? CODEX_UNATTENDED_VERIFIED) ? {} : { attendedOnlyReason: CODEX_ATTENDED_ONLY_REASON }),
     toolInputPaths: TOOL_INPUT_PATHS,
     // Only `read-only` asks as much as Ask: `workspace-write` and `agent` ask less, so core tells it Ask.
     askingModeIds: [CODEX_MODE_IDS.ask],

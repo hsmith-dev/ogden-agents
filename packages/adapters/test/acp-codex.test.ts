@@ -225,6 +225,10 @@ describe("Codex's chat port (epic 12 entry 5)", () => {
       expect(CODEX_ATTENDED_ONLY_REASON).not.toMatch(/[\u2013\u2014]/);
       const verified = createCodexAgent({ dataDir: tempDir(), server: () => ({ command: process.execPath, args: [FAKE_CODEX] }), unattendedVerified: true });
       expect(verified.unattendedBuild).toBe(true);
+      expect(verified.attendedOnlyReason).toBeUndefined();
+      // The default is the gate: with it off a start with a sandbox never spawns anything.
+      const gate = await agentOf().startSession({ cwd: tempDir(), env: envOf({ CODEX_API_KEY: KEY }), sandbox: sandboxOf(tempDir()) }).catch((error: unknown) => error);
+      expect(gate).toMatchObject({ code: 'agent_unavailable' });
       const cwd = tempDir();
       const empty = await verified.startSession({ cwd, env: envOf({ CODEX_API_KEY: KEY }), sandbox: { kind: 'test', writableRoots: [], deniedPaths: [], deniedReads: [], allowedReads: [] } }).catch((error: unknown) => error);
       expect(empty).toMatchObject({ code: 'agent_unavailable' });

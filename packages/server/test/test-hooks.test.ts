@@ -6,7 +6,7 @@
  * test install must still be a local `file:` fixture pinned by integrity. No
  * test here installs anything or reaches the network.
  */
-import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFixedSandbox } from '@ogden-agents/adapters';
@@ -32,6 +32,8 @@ import {
   testHooksAllowed,
   SANDBOX_ENV,
   testSandbox,
+  testNotifier,
+  NOTIFIER_ENV,
   TEST_SANDBOX_KIND,
   TEST_SANDBOX_UNAVAILABLE_REASON,
 } from '../src/test-hooks.js';
@@ -394,5 +396,19 @@ describe('the server and the hooks', () => {
     await startTestServer({ lines: without });
     expect(hooksLine(without)).toMatchObject({ claudeCli: true });
     expect(hooksLine(without)).not.toHaveProperty('checkInMs');
+  });
+});
+
+describe('testNotifier (story 11.6)', () => {
+  it('records each send as a JSON line in a temp file and answers 204; inert outside a test run or for a file outside the temp folder', async () => {
+    const dir = tempDataDir();
+    const file = join(dir, 'sent.ndjson');
+    const payload = { version: 1, event: 'test', workspace: null, ticket: null, run: null, text: 'x', sentAt: '2026-10-05T00:00:00.000Z' } as never;
+    const notifier = testNotifier({ VITEST: 'true', [NOTIFIER_ENV]: file }, dir)!;
+    expect(await notifier.send('https://hooks.example.com/x', payload)).toMatchObject({ ok: true, status: 204 });
+    expect(readFileSync(file, 'utf8').trim().split('\n').map((line) => JSON.parse(line))).toEqual([{ url: 'https://hooks.example.com/x', payload }]);
+    expect(testNotifier({ [NOTIFIER_ENV]: file }, dir)).toBeUndefined();
+    expect(testNotifier({ VITEST: 'true', [NOTIFIER_ENV]: '/etc/sent.ndjson' }, dir)).toBeUndefined();
+    expect(testNotifier({ VITEST: 'true', [NOTIFIER_ENV]: 'relative.ndjson' }, dir)).toBeUndefined();
   });
 });

@@ -77,7 +77,7 @@ export interface AcpAgentQuirks {
    * Without it a session doesn't protect paths, and core keeps it out of
    * Auto; an agent without it can't run a build session.
    */
-  sessionMeta?: ((protectedPaths: ProtectedPaths | undefined, sandbox?: AgentSandbox | undefined) => Record<string, unknown> | undefined) | undefined;
+  sessionMeta?: ((protectedPaths: ProtectedPaths | undefined, sandbox?: AgentSandbox | undefined, attended?: boolean) => Record<string, unknown> | undefined) | undefined;
   /** The raw-input fields of its tools that name paths. */
   toolInputPaths: AcpToolInputPaths;
   /** Its session modes that ask as much as Ask (or more); any other, known or not, asks less. */

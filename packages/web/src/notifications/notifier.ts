@@ -1,4 +1,4 @@
-import type { NeedKind, NeedsYouEntry } from '@/shell/sidebar-model';
+import type { NeedKind, NeedsYouEntry, NotifiableNeedKind } from '@/shell/sidebar-model';
 import type { NotificationSettings } from './notification-settings';
 
 /**
@@ -8,11 +8,13 @@ import type { NotificationSettings } from './notification-settings';
  */
 
 /** Each kind in plain words: the notification's title and the settings' checkbox labels. */
-export const NEED_KIND_LABELS: Record<NeedKind, string> = {
+export const NEED_KIND_LABELS: Record<NotifiableNeedKind, string> = {
   permission: 'Approval needed',
   waiting: 'Waiting for your answer',
   check_in: 'Agent is quiet',
   sign_in: 'Sign in needed',
+  run_blocked: 'Build blocked',
+  run_review: 'Ready for review',
 };
 
 export interface NotificationText {
@@ -27,7 +29,7 @@ export interface NotificationText {
  */
 export function notificationText(need: Pick<NeedsYouEntry, 'kind' | 'workspaceName' | 'chatName' | 'keyRejected'>): NotificationText {
   // An agent with only an API key has no sign in: its key was rejected.
-  const title = need.keyRejected === true ? 'API key rejected' : NEED_KIND_LABELS[need.kind];
+  const title = need.keyRejected === true ? 'API key rejected' : need.kind === 'pane' ? 'A terminal may need you' : NEED_KIND_LABELS[need.kind];
   return { title, body: `${need.workspaceName}: ${need.chatName}` };
 }
 
@@ -68,6 +70,8 @@ export function createNotifier(deps: NotifierDeps): Notifier {
       for (const need of fresh) seen.add(need.id);
       // A need that left the list is answered: its notification goes too.
       const current = new Set(needs.map((need) => need.id));
+      // A build need that left the list (retried, decided) is news again if it comes back.
+      for (const id of seen) if (!current.has(id) && (id.startsWith('run_blocked:') || id.startsWith('run_review:'))) seen.delete(id);
       for (const [id, notification] of shown) {
         if (current.has(id)) continue;
         notification.close();
@@ -78,7 +82,8 @@ export function createNotifier(deps: NotifierDeps): Notifier {
         return;
       }
       if (!deps.isLeader()) return;
-      const due = fresh.filter((need) => settings.kinds[need.kind] && known.has(need.sesId));
+      // A terminal pane's attention only for the panes the user opted in (story 16.8); then the same sound, desktop and away settings apply.
+      const due = fresh.filter((need) => (need.kind === 'pane' ? need.notify === true : settings.kinds[need.kind] && known.has(need.sesId)));
       if (due.length === 0) return;
       if (settings.onlyWhenAway && deps.anyTabFocused()) return;
       if (settings.desktop && deps.permission() === 'granted') {

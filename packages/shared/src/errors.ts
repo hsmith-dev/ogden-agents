@@ -28,10 +28,12 @@ export const API_ERROR_CODES = [
   'terminal_unavailable',
   /** A chat message was refused: the session's terminal drives it (409, story 3.2, AD-6). */
   'driver_is_terminal',
-  /** Skip all was asked for while Developer mode is off (403): nothing changed. */
+  /** Skip all, or a terminal pane (epic 16), was asked for while Developer mode is off (403): nothing changed. */
   'developer_mode_required',
   /** Skip all was asked for without the user's confirmation of its warning (400): nothing changed. */
   'confirmation_required',
+  /** Developer mode was asked to turn off while terminal panes' programs are running and no choice was given (409; epic 16, 16.9): `details.running` says how many. Nothing changed; ask again with `panes: 'stop'` or `'keep'`. */
+  'panes_running',
   /** A permission mode the chat's agent, or its session, doesn't offer (409): nothing changed. */
   'mode_unavailable',
   /** A model the chat's agent, or its session, doesn't list (409; story 11): nothing changed. */
@@ -57,6 +59,10 @@ export const API_ERROR_CODES = [
    * `details.action` is `trust_project`.
    */
   'project_not_trusted',
+  /** A terminal launcher can't start a pane (409; epic 16, 16.5): it is unknown, its program was not found (the install page is in `details.installUrl` when it has one) or it did not answer. Nothing was started. */
+  'launcher_unavailable',
+  /** A terminal pane would pass the limit of panes in a project or in this install (409; epic 16). `details` says which limit and how many. */
+  'pane_limit_reached',
   /** uv's status or install could not be read or started (500). */
   'toolchain_unavailable',
   /** A route or socket request whose lane has not shipped yet (501; the story 2.3 stubs). */
@@ -169,6 +175,13 @@ export const API_ERROR_CODES = [
   'disk_space_low',
   /** Stop, Retry or Check again was asked of a run in the wrong state: Stop of a finished run, Retry of one not blocked or failed (409; story 5.3). */
   'run_not_active',
+  // Retrospectives (epic 7, story 7.2). Each is a 409 and nothing was written.
+  /** Save the lessons: neither AGENTS.md nor the retrospective file has a change to commit. */
+  'nothing_to_save',
+  /** Save the lessons: a merge, rebase, cherry-pick or revert is in progress in the checkout. */
+  'checkout_busy',
+  /** Save the lessons: the project has no AGENTS.md that git tracks. */
+  'agents_file_missing',
   /** A Local model endpoint on a host that is not this computer was used before the user confirmed it, or its address changed since (409; epic 14 story 14.3). Nothing was called. */
   'endpoint_confirmation_required',
   /** Anything else that went wrong on the server (500). */

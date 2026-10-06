@@ -111,6 +111,8 @@ export interface VerifyInput {
   env: Readonly<Record<string, string>>;
   /** The test command from the main checkout and the project's settings, `undefined` when none. */
   testCommand: string | undefined;
+  /** Aborted when the run is stopped or the server quits: the re-run ends and the tests check fails as not runnable. */
+  signal?: AbortSignal | undefined;
 }
 
 export interface VerifyDeps {
@@ -131,7 +133,8 @@ export async function verifyRun(deps: VerifyDeps, input: VerifyInput): Promise<V
   const codeCheck = changed ? check('code_changed', 'pass', null) : check('code_changed', 'fail', input.files.length === 0 ? input.emptyDetail : (input.forbiddenDetail ?? input.emptyDetail));
 
   let testsCheck: VerificationCheck;
-  const testCommand = input.testCommand ?? null;
+  // Masked like the output: a command with a credential in it is never kept or shown as written.
+  const testCommand = input.testCommand === undefined ? null : deps.mask(input.testCommand);
   let tail: string | null = null;
   if (!built || !changed) {
     // Nothing to run the tests on, and no reason to run the agent's code yet.
@@ -144,7 +147,7 @@ export async function verifyRun(deps: VerifyDeps, input: VerifyInput): Promise<V
     testsCheck = check('tests_pass', 'fail', TESTS_NOT_RUNNABLE_DETAIL);
   } else {
     const ran = await deps.sandbox
-      .run({ sandbox: input.sandbox, cwd: input.cwd, command: input.testCommand, env: input.env, timeoutMs: TEST_RERUN_TIMEOUT_MS, maxOutputBytes: MAX_TEST_OUTPUT_TAIL_BYTES })
+      .run({ sandbox: input.sandbox, cwd: input.cwd, command: input.testCommand, env: input.env, timeoutMs: TEST_RERUN_TIMEOUT_MS, maxOutputBytes: MAX_TEST_OUTPUT_TAIL_BYTES, signal: input.signal })
       .catch(() => undefined);
     if (ran === undefined) {
       testsCheck = check('tests_pass', 'fail', TESTS_NOT_RUNNABLE_DETAIL);

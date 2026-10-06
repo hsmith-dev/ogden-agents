@@ -98,7 +98,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
   } = ctx;
   const { startLocked } = start;
   const { deciding, unsubscribe } = outcome;
-  const { resumeLocked, rebaseLocked, applyFixLocked, retryLocked, extendAll, drainQueue, scheduleDrain } = dispatch;
+  const { resumeLocked, rebaseLocked, applyFixLocked, checkAgainLocked, retryLocked, extendAll, drainQueue, scheduleDrain } = dispatch;
   const { reviewOf } = reviewer;
 
   return {
@@ -148,6 +148,8 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
         if (run.outcome !== 'running') throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
         disarmDeadline(run.id);
         bump(run.id);
+        // A test re-run in progress stops with the run (its whole process tree).
+        ctx.abortRerun(run.id);
         pendingNotes.delete(run.id);
         if (run.queuePosition !== null) {
           entities.leaveQueue(run.id);
@@ -349,6 +351,12 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       return inDispatch(() => serializedByRepo(repoPath, () => resumeLocked(workspaceId, repoPath, checked, undefined)));
     },
 
+    async checkAgain(workspaceId, runId) {
+      const { repoPath } = await guarded(workspaceId);
+      const checked = checkedRunId(runId);
+      return inDispatch(() => serializedByRepo(repoPath, () => checkAgainLocked(workspaceId, repoPath, checked)));
+    },
+
     async retry(workspaceId, runId, request) {
       const { repoPath } = await guarded(workspaceId);
       const checked = checkedRunId(runId);
@@ -389,6 +397,7 @@ export function createBuilds(deps: BuildsDeps): BuildsUseCases {
       state.closed = true;
       for (const timer of timers.values()) timer.cancel();
       timers.clear();
+      ctx.abortAllReruns();
       unsubscribe();
       recorder.close();
     },

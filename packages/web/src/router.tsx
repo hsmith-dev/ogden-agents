@@ -56,6 +56,13 @@ const notificationsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/notifications-page'), 'NotificationsPage'),
 });
 
+/** Developer mode's Terminals settings (epic 16, story 16.9). */
+const terminalsSettingsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/terminals',
+  component: lazyRouteComponent(() => import('./routes/terminals-settings-page'), 'TerminalsSettingsPage'),
+});
+
 /** The version, its channel and the check for newer ones (story 13.7). */
 const aboutRoute = createRoute({
   getParentRoute: () => settingsRoute,
@@ -119,6 +126,13 @@ const workspaceRunsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/workspace-runs-page'), 'WorkspaceRunsPage'),
 });
 
+/** A project's Terminals page (epic 16, story 16.2): its terminal panes, in Developer mode. */
+const workspaceTerminalsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$wsId/terminals',
+  component: lazyRouteComponent(() => import('./routes/workspace-terminals-page'), 'WorkspaceTerminalsPage'),
+});
+
 /** A ticket's build review (story 5.2, the tracer), `/w/:wsId/review/:ref`. */
 const workspaceReviewRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -149,8 +163,9 @@ const routeTree = rootRoute.addChildren([
   workspaceBoardRoute.addChildren([workspaceBoardTicketRoute]),
   workspaceReviewRoute,
   workspaceRunsRoute,
+  workspaceTerminalsRoute,
   sessionRoute,
-  settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute, buildsSettingsRoute, notificationsRoute, aboutRoute]),
+  settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute, buildsSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

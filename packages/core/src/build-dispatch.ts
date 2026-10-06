@@ -7,7 +7,7 @@ import { APPLY_FIX_REFUSED_MESSAGE, ATTENDED_SANDBOX, blockedSentence, NO_SAVED_
 import { BuildRefusedError, NotFoundError } from './errors.js';
 import { workspaceRepoPath } from './planning.js';
 import { serializedByRepo } from './repo-serialization.js';
-import { READY_STATUS, prerequisitesMet, atCheckpoint, forbiddenChanges, intentGapPatchOf } from './build-names.js';
+import { NO_FREE_SLOT_MESSAGE, READY_STATUS, prerequisitesMet, atCheckpoint, forbiddenChanges, intentGapPatchOf } from './build-names.js';
 import type { BuildCtx } from './build-context.js';
 import type { createOutcome } from './build-outcome.js';
 import type { createStarter } from './build-start.js';
@@ -87,6 +87,15 @@ export function createDispatcher(ctx: BuildCtx, start: ReturnType<typeof createS
     return started;
   };
 
+  /**
+   * The end checks of a run with no agent to start (Update and retry, Check again, Resume at the done
+   * checkpoint) take a run-limit slot like any run: with none free the request is refused before anything
+   * changes, so the limits hold (story 5.8 review). The tests' re-run has its own time limit.
+   */
+  const requireSlot = (workspaceId: WorkspaceId): void => {
+    if (!hasCapacity(workspaceId)) throw new BuildRefusedError('run_active', NO_FREE_SLOT_MESSAGE);
+  };
+
   /** Resume (see the header), inside the repo's serialization. */
   const resumeLocked = async (workspaceId: WorkspaceId, repoPath: string, runId: RunId, note: string | undefined): Promise<Run> => {
     await guarded(workspaceId);
@@ -95,6 +104,7 @@ export function createDispatcher(ctx: BuildCtx, start: ReturnType<typeof createS
     if (!atCheckpoint(run)) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
     await prepareContinue(workspaceId, repoPath, run);
     if (run.blockedCode === 'checkpoint_plan') return startAgain(workspaceId, run, { note, resume: false });
+    requireSlot(workspaceId);
     const resumed = entities.setRunOutcome(run.id, 'running', null);
     // The end checks (the tests' re-run can take minutes) run on their own: the repo's lock is not held for them, so Stop works.
     void track(run.id, () => decideOutcome(resumed, 'idle', { passedDone: true }));
@@ -116,6 +126,7 @@ export function createDispatcher(ctx: BuildCtx, start: ReturnType<typeof createS
       throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
     }
     await requireGit();
+    requireSlot(workspaceId);
     await prepareContinue(workspaceId, repoPath, run);
     const head = await vcs.head(repoPath);
     if (head === undefined || (run.baseBranch !== null && head.branch !== run.baseBranch)) throw new BuildRefusedError('checkout_dirty', CHECKOUT_MOVED_MESSAGE);
@@ -128,6 +139,33 @@ export function createDispatcher(ctx: BuildCtx, start: ReturnType<typeof createS
     // The checks run on their own, so the repo's lock is free for Stop.
     void track(run.id, () => decideOutcome(entities.getRun(run.id) ?? resumed, 'idle', { passedDone: true }));
     return resumed;
+  };
+
+  /**
+   * Check again (story 11.2): the end checks run once more on a failed or
+   * ready-for-review run's worktree (the plan's status, the tests re-run in
+   * the run's sandbox, the diff), with the project's test command as it is
+   * now. The agent does not run. Never for a decided run or one that is not
+   * the ticket's latest.
+   */
+  const checkAgainLocked = async (workspaceId: WorkspaceId, repoPath: string, runId: RunId): Promise<Run> => {
+    await guarded(workspaceId);
+    const run = entities.getRun(runId);
+    if (run === undefined || run.workspaceId !== workspaceId) throw new NotFoundError('run', runId);
+    if (
+      (run.outcome !== 'failed' && run.outcome !== 'verified') || run.decision !== null || run.worktreePath === null ||
+      entities.latestRunForTicket(workspaceId, run.ticketRef)?.id !== run.id
+    ) {
+      throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
+    }
+    await requireGit();
+    requireSlot(workspaceId);
+    await prepareContinue(workspaceId, repoPath, run);
+    bump(run.id);
+    const checking = entities.setRunOutcome(run.id, 'running', null);
+    // The checks run on their own, so the repo's lock is free for Stop.
+    void track(run.id, () => decideOutcome(entities.getRun(run.id) ?? checking, 'idle', { passedDone: true }));
+    return checking;
   };
 
   /** The plan statuses a blocked plan may be marked with to resume (its `blocked_at`, else ready for dev). */
@@ -289,5 +327,5 @@ export function createDispatcher(ctx: BuildCtx, start: ReturnType<typeof createS
   fn.armDeadline = armDeadline;
   fn.scheduleDrain = scheduleDrain;
 
-  return { timeUp, armDeadline, startAgain, dispatchAgain, resumeLocked, rebaseLocked, applyFixLocked, RESUME_STATUSES, retryLocked, launchQueued, extendAll, drainQueue, scheduleDrain };
+  return { timeUp, armDeadline, startAgain, dispatchAgain, resumeLocked, rebaseLocked, applyFixLocked, checkAgainLocked, RESUME_STATUSES, retryLocked, launchQueued, extendAll, drainQueue, scheduleDrain };
 }

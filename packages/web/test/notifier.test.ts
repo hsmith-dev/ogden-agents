@@ -178,7 +178,7 @@ describe('notification settings', () => {
   it('keeps valid saved fields and drops the rest', () => {
     expect(parseNotificationSettings('{not json')).toEqual(DEFAULT_NOTIFICATION_SETTINGS);
     const parsed = parseNotificationSettings(JSON.stringify({ desktop: true, sound: 'yes', volume: 7, kinds: { waiting: false, bogus: true }, onlyWhenAway: false }));
-    expect(parsed).toEqual({ desktop: true, sound: true, volume: 1, kinds: { permission: true, waiting: false, check_in: true, sign_in: true }, onlyWhenAway: false });
+    expect(parsed).toEqual({ desktop: true, sound: true, volume: 1, kinds: { permission: true, waiting: false, check_in: true, sign_in: true, run_blocked: true, run_review: true }, onlyWhenAway: false });
   });
 });
 
@@ -316,5 +316,28 @@ describe('playChime', () => {
     expect(Ctor).not.toHaveBeenCalled();
     vi.stubGlobal('AudioContext', undefined);
     expect(() => playChime(0.5)).not.toThrow();
+  });
+});
+
+describe('a terminal pane\'s attention (epic 16, story 16.8): opt in only, state and name only', () => {
+  const pane = (id: string, notify: boolean): NeedsYouEntry => need(id, 'pane', { sesId: '', paneId: 'pan_1', notify, chatName: 'Terminal 1', text: 'Terminal 1 may need you', request: undefined, agentName: '' });
+
+  it('a pane that is not opted in never makes a sound or a notice; one that is does, once, with its name and the project only', () => {
+    const { notifier, shown, chimes } = setup();
+    notifier.update([], ON, true, SESSIONS);
+    notifier.update([pane('pane:a:1', false)], ON, true, SESSIONS);
+    expect(shown).toEqual([]);
+    expect(chimes).toEqual([]);
+    notifier.update([pane('pane:a:1', false), pane('pane:b:2', true)], ON, true, SESSIONS);
+    notifier.update([pane('pane:a:1', false), pane('pane:b:2', true)], ON, true, SESSIONS);
+    expect(shown.map((s) => [s.id, s.title, s.body])).toEqual([['pane:b:2', 'A terminal may need you', 'Letterpress: Terminal 1']]);
+    expect(chimes).toEqual([ON.volume]);
+  });
+
+  it('the same away and desktop settings apply: not while Ogden is in front', () => {
+    const { notifier, shown } = setup({ anyTabFocused: () => true });
+    notifier.update([], ON, true, SESSIONS);
+    notifier.update([pane('pane:b:2', true)], ON, true, SESSIONS);
+    expect(shown).toEqual([]);
   });
 });

@@ -37,9 +37,11 @@ import { createTerminalAvailability } from './terminal-availability.js';
 import { resolveTestHooks, type TestHooks } from './test-hooks.js';
 import { VERSION } from './version.js';
 import { wireAgents } from './start-agents.js';
+import { createPanesWiring } from './start-panes.js';
 import { uvEnvironment } from './start-env.js';
 import { broadcast, closeServer, HOST, listen, repointAppShortcut } from './start-io.js';
-import { createBuildsWiring } from './start-builds.js';
+import { createBuildsWiring, createServerVcs } from './start-builds.js';
+import { createNotificationsWiring } from './start-notifications.js';
 import { bmadSetupFailureLogger, uvPycacheDir, createBmadSourceAndCatalog, createDocumentCards, createPlanAndBoard, stopBmadWork, withAgentSkillFolders, type BmadWiring } from './start-planning.js';
 import type { PortFile, RunningServer, StartOptions, StopReason } from './start-types.js';
 import { openUrl } from './open-url.js';
@@ -87,12 +89,24 @@ const INSTALL_STOP_MS = 10_000;
 /** Session states that keep the server from restarting (AD-4, AD-20). */
 const BUSY_STATES = new Set(['working', 'waiting']);
 
-/** Sessions across every workspace that are `working` or `waiting`. */
+/**
+ * Work that stopping the server would cut off: sessions across every workspace that are `working` or `waiting`,
+ * and each build run still running whose session is not (the tests' re-run and the end checks have no agent
+ * working, story 5.8 review). Queued runs are not counted: they start again with the server. One rule for Quit
+ * and "Restart to update".
+ */
 export function countBusySessions(core: Core): number {
   let busy = 0;
+  const counted = new Set<string>();
   for (const workspace of core.entities.listWorkspaces()) {
-    for (const session of core.entities.listSessions(workspace.id)) if (BUSY_STATES.has(session.state)) busy++;
+    for (const session of core.entities.listSessions(workspace.id)) {
+      if (BUSY_STATES.has(session.state)) {
+        busy++;
+        counted.add(session.id);
+      }
+    }
   }
+  for (const run of core.entities.listRunningRuns()) if (!counted.has(run.sessionId)) busy++;
   return busy;
 }
 
@@ -161,7 +175,7 @@ async function startLocked(options: StartOptions, dataDir: string, lock: Instanc
   // Every environment hook, on a test run only; one the options already decide is not read (story 10.8).
   const hooks = resolveTestHooks(process.env, dataDir, { ...options, ownsCore });
   // What this install ships, plus a test's own (story 10.2): the option, and the environment hook.
-  const availableBmadPieces = [...new Set([...SHIPPED_BMAD_PIECES, ...(options.availableBmadPieces ?? []), ...hooks.bmadAvailable])];
+  const availableBmadPieces = [...new Set([...(options.shippedBmadPieces ?? SHIPPED_BMAD_PIECES), ...(options.availableBmadPieces ?? []), ...hooks.bmadAvailable])];
   // The pinned BMad Method source, the catalog and setup's script runner holder (`start-planning.ts`).
   const bmadWiring = createBmadSourceAndCatalog(options, dataDir, log, hooks.bmadSource);
   const { bmadCatalog } = bmadWiring;
@@ -306,6 +320,8 @@ async function listenAndAnnounce({
   const agentOf = (session: Session): AgentPort | undefined => agents.get(agentIdOf(session));
   // One terminal port for the chat and the toggle's availability check (story 3.7): they agree on node-pty.
   const terminal = createPtyTerminalPort(options.loadPty);
+  // Terminal panes (epic 16): in memory, Developer mode only, stopped with the server.
+  const panes = createPanesWiring({ options, hooks, core, terminal, dataDir, onError: (error) => log.warn('a terminal pane listener failed', { error: error instanceof Error ? error.name : 'unknown' }), onSweep: (result) => log.info('terminal panes left running by a hard stop were cleaned up', result) });
   // Document cards (story 4.7, `start-planning.ts`).
   const planningDocuments = createDocumentCards({ core, catalog: bmadCatalog, agent: chatAgent, agentOf, log });
   const chat = createChat({
@@ -337,7 +353,10 @@ async function listenAndAnnounce({
     ...(checkInDelayMs === undefined ? {} : { checkInDelayMs }),
   });
   // Plan and Board (story 4.1, `start-planning.ts`): planning sessions, the script runner, the tickets and their watch.
-  const { planning, scriptRunner, bmadSource, board, ticketWatcher, ticketStore, boardTickets } = createPlanAndBoard({
+  // One git for builds and for Save the lessons (epic 7).
+  const vcs = createServerVcs(options, dataDir);
+  const { planning, scriptRunner, bmadSource, board, retrospectives, ticketWatcher, ticketStore, boardTickets } = createPlanAndBoard({
+    vcs,
     options,
     core,
     dataDir,
@@ -354,11 +373,13 @@ async function listenAndAnnounce({
   // Inside the desktop app (story 13.11) there is no shortcut to offer: the app is the shortcut.
   const shell = options.shell === undefined ? shellModeOf() : options.shell;
   // Unattended builds (story 5.2, `start-builds.ts`): git, the sandbox check and the build runner.
-  const builds = createBuildsWiring({ options, core, dataDir, log, chat, tickets: ticketStore, runAwareTickets: boardTickets, source: bmadSource, hooks });
+  const builds = createBuildsWiring({ options, core, dataDir, log, chat, tickets: ticketStore, runAwareTickets: boardTickets, source: bmadSource, hooks, vcs });
   // Worktrees no run needs any more (a removal that failed, a start cut off) go before builds are served (story 5.5).
   await builds.sweep();
   // Queued runs a stopped server left start where the limits allow (story 5.8).
   void builds.dispatchQueued().catch((error: unknown) => log.warn('starting queued builds failed', { reason: String(error) }));
+  // Notifications for builds (story 11.4, `start-notifications.ts`): webhooks whose URLs live in the keychain.
+  const notifications = createNotificationsWiring({ options, core, log, secrets, ticketStore, hooks });
   const appShortcut =
     shell === 'desktop'
       ? undefined
@@ -413,8 +434,10 @@ async function listenAndAnnounce({
     bmadScriptTrust: core.bmadScriptTrust,
     planning,
     board,
+    retrospectives,
     builds,
     buildSettings: core.buildSettings,
+    notifications,
     ...endpointApi,
     bmadSource,
     // Setup also places the skills in each other agent's folder the project uses (epic 6 entry 8).
@@ -428,6 +451,8 @@ async function listenAndAnnounce({
     shell,
     agentDefaults: { models: core.agentModels, isAgentRegistered: (agentId) => agents.get(agentId) !== undefined },
     appShortcut,
+    panes,
+    terminalsSettings: core.terminalsSettings,
     tabs,
   });
 
@@ -483,6 +508,7 @@ async function listenAndAnnounce({
     // As on stop: the runner's close kills any run a watch waits on.
     const watching = ticketWatcher.close();
     builds.close();
+    notifications.close();
     await scriptRunner.close().catch(() => {});
     await watching;
     // Nothing may stay listening on a server that failed to start.
@@ -513,11 +539,14 @@ async function listenAndAnnounce({
         await agentSetup.dispose().catch((error: unknown) => log.warn('stopping sign-ins failed', { reason: String(error) }));
         await Promise.race([agentSetup.settled(), new Promise((resolve) => setTimeout(resolve, INSTALL_STOP_MS).unref())]);
       })
+      // Every terminal pane and what it started stops with the server (AD-3).
+      .finally(() => panes.dispose())
       .finally(() => chat.close().catch((error: unknown) => log.warn('stopping agents failed', { reason: String(error) })))
       // An outcome being worked out finishes (bounded by its own reads), then the builds stop following the log.
       .finally(async () => {
         await builds.settled().catch(() => undefined);
         builds.close();
+        notifications.close();
       })
       // Document detection, a setup in progress, the ticket watches and every BMad Method script (`start-planning.ts`).
       .finally(() => stopBmadWork({ planningDocuments, bmadSetup: core.bmadSetup, ticketWatcher, scriptRunner, log }))

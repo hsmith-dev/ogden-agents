@@ -9,7 +9,9 @@ import {
   type BmadSourceUseCases,
   type BmadSetupUseCases,
   type BoardUseCases,
+  type RetrospectiveUseCases,
   type BuildSettings,
+  type Notifications,
   type LocalEndpoints,
   type LocalModels,
   type BuildsUseCases,
@@ -17,6 +19,8 @@ import {
   type EventLog,
   type InstallSettings,
   type NewProjectDefaultsStore,
+  type Panes,
+  type TerminalsSettingsStore,
   type Onboarding,
   type Permissions,
   type PlanningUseCases,
@@ -37,8 +41,11 @@ import { apiError } from './errors.js';
 import { registerEventSocket } from './event-socket.js';
 import type { Logger } from './log.js';
 import { isServerPath } from './paths.js';
+import { registerPaneRoutes } from './pane-routes.js';
+import { registerPaneSocket } from './pane-socket.js';
 import { registerPermissionRoutes } from './permission-routes.js';
 import { registerPlanningRoutes } from './planning-routes.js';
+import { registerRetrospectiveRoutes } from './retrospective-routes.js';
 import { registerBuildRoutes } from './build-routes.js';
 import { registerLocalEndpointRoutes } from './local-endpoint-routes.js';
 import { registerLocalEndpointModelsRoute } from './local-endpoint-models-route.js';
@@ -50,6 +57,7 @@ import type { ShellMode } from './shell-mode.js';
 import { registerLauncherUpdateRoutes } from './update-notice/routes.js';
 import type { DesktopUpdate } from './update-notice/desktop-update.js';
 import { registerSettingsRoutes } from './settings-routes.js';
+import { registerTerminalsSettingsRoutes } from './terminals-settings-routes.js';
 import { registerShortcutRoutes } from './shortcut-routes.js';
 import type { TerminalAvailabilityCheck } from './terminal-availability.js';
 import { registerTerminalSocket } from './terminal-socket.js';
@@ -127,10 +135,14 @@ export interface AppOptions {
   planning?: PlanningUseCases;
   /** The project's tickets (story 4.1), behind the `board` piece's guard; without it that route answers 501 once the guard passes. */
   board?: BoardUseCases;
+  /** Looking back on an epic (story 7.1), behind the `retrospectives` piece's guard and the trust; without it that route answers 501 once the guards pass. */
+  retrospectives?: RetrospectiveUseCases;
   /** Unattended builds (story 5.2), behind the `builds` piece's guard and the trust; without them those routes answer 501 once the guards pass. */
   builds?: BuildsUseCases;
   /** The install's run limits and a project's build settings (story 5.8). */
   buildSettings?: BuildSettings;
+  /** Notification settings and webhooks (story 11.4). */
+  notifications?: Notifications;
   /** The Local model's endpoints (epic 14 story 14.3); without it those routes answer 501. */
   localEndpoints?: LocalEndpoints | undefined;
   /** Test connection and Detect (epic 14 story 14.4); without it those routes answer 501. */
@@ -153,6 +165,10 @@ export interface AppOptions {
   newProjectDefaults?: NewProjectDefaultsStore;
   /** Developer mode, kept and enforced by core (permission modes); without it its routes answer 501. */
   installSettings?: InstallSettings;
+  /** The install's Terminals settings (epic 16, story 16.9); without it their routes answer 501. */
+  terminalsSettings?: TerminalsSettingsStore;
+  /** Terminal panes (epic 16): Developer mode only; without it their routes answer 501 and the socket is not registered. */
+  panes?: Panes;
   /** The "newer version" notice (story 13.7); without it its routes answer 501. */
   updates?: UpdateCheck;
   /** Inside the desktop app (`OGDEN_AGENTS_SHELL=desktop`, story 13.3): the update the shell reported, its channel and Restart. */
@@ -186,8 +202,10 @@ export function createApp({
   bmadScriptTrust,
   planning,
   board,
+  retrospectives,
   builds,
   buildSettings,
+  notifications,
   localEndpoints,
   localModels,
   endpointPresets,
@@ -202,6 +220,8 @@ export function createApp({
   shell,
   agentDefaults,
   appShortcut,
+  panes,
+  terminalsSettings,
   tabs,
 }: AppOptions): Hono {
   const app = new Hono();
@@ -293,7 +313,7 @@ export function createApp({
     const addProject = createAddProject({ chat, defaults: newProjectDefaults, bmad });
     registerChatRoutes(app, chat, log, { terminalAvailability, addProject, agentDefaults });
   }
-  registerWorkspaceRoutes(app, { chat, permissions, bmad, bmadProbe, log });
+  registerWorkspaceRoutes(app, { chat, permissions, bmad, bmadProbe, builds, log });
   registerPermissionRoutes(app, { permissions, log });
   registerShortcutRoutes(app, { appShortcut, log });
   registerAgentSetupRoutes(app, { agentSetup, onboarding, log });
@@ -304,11 +324,16 @@ export function createApp({
   registerBmadTrustRoutes(app, { scriptTrust: bmadScriptTrust, permissions, log });
   // Plan and Board (stories 4.1, 4.2): every route through `bmadPieceRoutes`, behind core's guard and the script trust (AD-22).
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerPlanningRoutes(app, { bmad, scriptTrust: bmadScriptTrust, planning, board, bmadSetup, log });
+  // Retrospectives (story 7.1): the same helper, guard and trust.
+  if (bmad !== undefined && bmadScriptTrust !== undefined) registerRetrospectiveRoutes(app, { bmad, scriptTrust: bmadScriptTrust, retrospectives, log });
   // Unattended builds (story 5.2): the same helper, guard and trust.
   if (bmad !== undefined && bmadScriptTrust !== undefined) registerBuildRoutes(app, { bmad, scriptTrust: bmadScriptTrust, builds, buildSettings, log });
-  registerSettingsRoutes(app, { installSettings, newProjectDefaults, log });
+  // Terminal panes (epic 16): behind the gate, and Developer mode enforced by core on every call.
+  registerPaneRoutes(app, { panes, log });
+  registerSettingsRoutes(app, { installSettings, newProjectDefaults, panes, log });
+  registerTerminalsSettingsRoutes(app, { terminalsSettings, installSettings, log });
   // The install's run limits and notification settings (story 5.3; 5.8 and 11.4 fill them): the gate, never a piece's guard.
-  registerRunSettingsRoutes(app, { buildSettings, builds, log });
+  registerRunSettingsRoutes(app, { buildSettings, builds, notifications, log });
   // The Local model's endpoints (epic 14 story 14.3): app-wide, behind the gate, never a piece's guard; a key never leaves.
   registerLocalEndpointRoutes(app, { localEndpoints, log });
   registerLocalEndpointUseRoutes(app, { localModels, presets: endpointPresets ?? [], log });
@@ -318,6 +343,8 @@ export function createApp({
   registerEventSocket(app, { events, log, tabs });
   // A session's terminal (story 3.1): behind the same gate as `/ws`.
   if (chat !== undefined) registerTerminalSocket(app, { chat, log, tabs });
+  // A pane's terminal (epic 16): the same gate, and core refuses it without Developer mode.
+  if (panes !== undefined) registerPaneSocket(app, { panes, log, tabs });
 
   // The built UI, never under the server's own paths (`paths.ts`).
   const staticFiles = serveStatic({ root: webRoot });

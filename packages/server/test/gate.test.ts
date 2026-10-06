@@ -367,11 +367,13 @@ describe('security gate', () => {
     expect((await send(server, TAB_CHECK_PATH, { headers: bearer(tab) })).status).toBe(204);
   });
 
-  it('terminal socket (story 3.1): /ws/terminal/* needs the tab token subprotocol and a matching Origin exactly like /ws, and echoes only ogden.v1', async () => {
+  it.each([
+    ['terminal socket (story 3.1): /ws/terminal/*', '/ws/terminal/ses_00000000000000000000000000'],
+    ['pane socket (epic 16): /ws/pane/*', '/ws/pane/pan_00000000000000000000000000'],
+  ])('%s needs the tab token subprotocol and a matching Origin exactly like /ws, and echoes only ogden.v1', async (_name, path) => {
     const server = await startTestServer();
     const tab = await connectTab(server);
     const other = await connectTab(server, server.issueLaunchUrl());
-    const path = '/ws/terminal/ses_00000000000000000000000000';
     const origin = { origin: server.url };
     const status = async (protocols: string[], headers: Record<string, string>) => (await upgradeWith(server, protocols, headers, path)).status;
 
@@ -573,6 +575,17 @@ describe('security gate', () => {
 /** Every API route with its methods, as the lanes' route files register them (stories 2.2, 2.3 and 9.1). */
 const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.tabCheck}`,
+  // Terminal panes (epic 16): behind the gate; Developer mode is enforced by core on every call.
+  `GET ${API_ROUTES.workspacePanes}`,
+  `POST ${API_ROUTES.workspacePanes}`,
+  `DELETE ${API_ROUTES.workspacePane}`,
+  `GET ${API_ROUTES.terminalSettings}`,
+  `PUT ${API_ROUTES.terminalSettings}`,
+  `GET ${API_ROUTES.terminalLaunchers}`,
+  `POST ${API_ROUTES.terminalLaunchers}`,
+  `PUT ${API_ROUTES.workspacePaneLayout}`,
+  `PATCH ${API_ROUTES.workspacePane}`,
+  `POST ${API_ROUTES.workspacePaneRestart}`,
   `POST ${API_ROUTES.launchCodes}`,
   `POST ${API_ROUTES.serverQuit}`,
   `GET ${API_ROUTES.toolchain}`,
@@ -641,6 +654,12 @@ const EXPECTED_API_ROUTES = [
   `GET ${API_ROUTES.workspaceCatalog}`,
   `POST ${API_ROUTES.workspacePlanningSessions}`,
   `GET ${API_ROUTES.workspaceTickets}`,
+  // Looking back on an epic (story 7.1), guarded with the trust.
+  `POST ${API_ROUTES.workspaceEpicLookBack}`,
+  `GET ${API_ROUTES.workspaceLookBackOffers}`,
+  `DELETE ${API_ROUTES.workspaceEpicLookBackOffer}`,
+  `POST ${API_ROUTES.workspaceRetrospectiveSessions}`,
+  `POST ${API_ROUTES.workspaceRetrospectiveSave}`,
   // Story 4.2's pre-registered routes (guarded; one ticket filled by 4.8, setup by 4.3, the status write 501 until 4.10) and the script trust (unguarded).
   `GET ${API_ROUTES.workspaceTicket}`,
   `PUT ${API_ROUTES.workspaceTicketStatus}`,
@@ -739,6 +758,11 @@ describe('gate placement', () => {
         `GET ${API_ROUTES.workspaceCatalog}`,
         `POST ${API_ROUTES.workspacePlanningSessions}`,
         `GET ${API_ROUTES.workspaceTickets}`,
+        `POST ${API_ROUTES.workspaceEpicLookBack}`,
+        `GET ${API_ROUTES.workspaceLookBackOffers}`,
+        `DELETE ${API_ROUTES.workspaceEpicLookBackOffer}`,
+        `POST ${API_ROUTES.workspaceRetrospectiveSessions}`,
+        `POST ${API_ROUTES.workspaceRetrospectiveSave}`,
         `GET ${API_ROUTES.workspaceTicket}`,
         `PUT ${API_ROUTES.workspaceTicketStatus}`,
         `GET ${API_ROUTES.workspaceBmadSetup}`,

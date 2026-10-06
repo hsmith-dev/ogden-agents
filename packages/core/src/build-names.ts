@@ -10,8 +10,14 @@ import { BUILD_RESULT_STATUSES, CHECKPOINT_BLOCKED_CODES, RunId, BUILD_BRANCH_PR
 import { ValidationError } from './errors.js';
 import { isProtectedSegment } from './permission-matching.js';
 
+/** Said when a re-check or Update and retry finds every run slot taken (the limits hold; nothing changed). */
+export const NO_FREE_SLOT_MESSAGE = 'Other builds are using every free slot. Try again when one finishes.';
+
 /** The BMad output folder whose uncommitted changes never block approve (user decision 2026-10-01). */
 export const BMAD_OUTPUT_PREFIX = '_bmad-output/';
+
+/** The project's agent instructions file at the repo root: Save the lessons (epic 7) commits it, and approve's clean-checkout check tolerates it uncommitted. */
+export const AGENTS_FILE = 'AGENTS.md';
 
 /** The plan status a ticket must have to be built. */
 export const READY_STATUS = 'ready-for-dev';
@@ -23,7 +29,42 @@ export const PREREQUISITE_MET_STATES: ReadonlySet<string> = new Set(['done', 're
 export const PRECREATED_FOLDERS = ['.claude', '.vscode', '.idea', '_bmad'];
 
 /** The user's credential folders a build's commands may never read (review loop 1), under the home folder. */
-export const CREDENTIAL_FOLDERS = ['.ssh', '.aws', '.gnupg', join('.config', 'gh'), '.netrc', '.docker'];
+export const CREDENTIAL_FOLDERS = [
+  // Keys, cloud and registry credentials, and tool tokens.
+  '.ssh', '.aws', '.gnupg', '.netrc', '.docker', '.kube', '.azure', '.npmrc', '.pypirc', '.git-credentials', '.password-store',
+  // The whole config folder (gh, gcloud, browsers on Linux and more), not only gh's.
+  '.config',
+  // Other agents' homes and logins, and Claude Code's own settings and login (story 5.8 review: an unattended command reads none of them).
+  '.claude', '.claude.json', '.codex', '.gemini', '.grok', '.antigravity', join('.local', 'share', 'keyrings'),
+  // macOS: keychains, cookies and the browsers' profiles.
+  join('Library', 'Keychains'), join('Library', 'Cookies'), join('Library', 'Safari'),
+  join('Library', 'Application Support', 'Google', 'Chrome'), join('Library', 'Application Support', 'Firefox'), join('Library', 'Application Support', 'BraveSoftware'), join('Library', 'Application Support', 'Microsoft Edge'), join('Library', 'Application Support', 'Arc'),
+  // Linux browsers' profiles outside `.config`.
+  '.mozilla', join('snap', 'firefox'),
+];
+
+/**
+ * The paths a build's commands may not read under `home`: each credential folder as listed and, when it is
+ * a link or `home` itself is one, where it really leads (a fence on the link alone is bypassed by the real path).
+ */
+export function credentialReadFences(home: string, realpath: (path: string) => string | undefined): string[] {
+  const fences: string[] = [];
+  const add = (path: string) => {
+    if (!fences.includes(path)) fences.push(path);
+  };
+  for (const folder of CREDENTIAL_FOLDERS) {
+    const listed = join(home, folder);
+    add(listed);
+    const real = realpath(listed);
+    if (real !== undefined) add(real);
+    else {
+      // Not there yet: the folder under the home's real path still fences it.
+      const realHome = realpath(home);
+      if (realHome !== undefined) add(join(realHome, folder));
+    }
+  }
+  return fences;
+}
 
 
 /** `ref` as the store takes it, or {@link ValidationError}. */

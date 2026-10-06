@@ -15,12 +15,13 @@
  * only in a repo with `_bmad/` (or a status other than `not_set_up`), then
  * clears its missing capabilities and applies its `afterUpgrade` catalog.
  */
-import { BmadAlreadySetUpError, BmadSetupError, type BmadCatalogPort, type BmadRepoDetection, type InstalledSkill } from '@ogden-agents/core';
+import { BmadAlreadySetUpError, BmadSetupError, MAX_RETROSPECTIVE_BYTES, type BmadCatalogPort, type BmadRepoDetection, type InstalledSkill } from '@ogden-agents/core';
 import {
   BMAD_CAPABILITIES,
   BMAD_SETUP_STEP_LABELS,
   BMAD_SETUP_STEPS,
   CatalogSkill,
+  type CatalogSkillInput,
   MAX_DOCUMENT_BYTES,
   type BmadCapabilities,
   type BmadCapability,
@@ -41,6 +42,8 @@ export interface MemoryBmadCatalog extends BmadCatalogPort {
   readonly setupCalls: ReadonlyArray<readonly ['status' | 'setup', string]>;
   /** Every `readDocument` call, as `[repoPath, outputFolder, path]`, in order (story 4.7). */
   readonly documentCalls: ReadonlyArray<readonly [string, string, string]>;
+  /** Every `readRetrospective` call, as `[repoPath, outputFolder, epicFolder]`, in order (story 7.4). */
+  readonly retrospectiveCalls: ReadonlyArray<readonly [string, string, string]>;
   /** Every `missingCapabilities` call, as `[repoPath, wanted]`, in order (entry 4.11). */
   readonly capabilityCalls: ReadonlyArray<readonly [string, readonly BmadCapability[]]>;
   /** Every `setup` call's options, in order (entry 4.11: `{ upgrade: true }` for an upgrade, `{}` otherwise). */
@@ -52,9 +55,12 @@ export interface MemoryBmadCatalog extends BmadCatalogPort {
 /** The version the memory catalog says Ogden Agents bundles. */
 export const MEMORY_BUNDLED_BMAD_VERSION = '7.0.0';
 
+/** A repo's catalog beyond its skills: capabilities left out are present (epic 7 added `look_back`). */
+export type MemoryCatalogRest = Partial<Omit<Catalog, 'skills' | 'capabilities'>> & { capabilities?: Partial<BmadCapabilities> };
+
 export interface MemoryBmadCatalogOptions {
   /** Each repo path's catalog beyond its skills (modules, agents, entry action, capabilities). */
-  catalogs?: Readonly<Record<string, Partial<Omit<Catalog, 'skills'>>>>;
+  catalogs?: Readonly<Record<string, MemoryCatalogRest>>;
   /** Each repo path's setup status before any `setup`; any other path is `not_set_up`. */
   setup?: Readonly<Record<string, BmadSetupStatus>>;
   /** `setup` rejects with this error (a setup that fails). */
@@ -94,7 +100,7 @@ const notSetUp = (): BmadSetupStatus => ({
  */
 export function createMemoryBmadCatalog(
   repos: Readonly<Record<string, Partial<BmadRepoDetection>>> = {},
-  skills: Readonly<Record<string, readonly InstalledSkill[] | readonly CatalogSkill[]>> = {},
+  skills: Readonly<Record<string, readonly InstalledSkill[] | readonly CatalogSkillInput[]>> = {},
   options: MemoryBmadCatalogOptions = {},
 ): MemoryBmadCatalog {
   const known = new Map(Object.entries(repos));
@@ -105,6 +111,7 @@ export function createMemoryBmadCatalog(
   const catalogCalls: string[] = [];
   const setupCalls: Array<readonly ['status' | 'setup', string]> = [];
   const documentCalls: Array<readonly [string, string, string]> = [];
+  const retrospectiveCalls: Array<readonly [string, string, string]> = [];
   const capabilityCalls: Array<readonly [string, readonly BmadCapability[]]> = [];
   const setupOptions: Array<{ upgrade?: boolean; skillFolders?: readonly string[] }> = [];
   const catalogs = new Map(Object.entries(options.catalogs ?? {}).map(([path, rest]) => [path, structuredClone(rest)]));
@@ -114,11 +121,11 @@ export function createMemoryBmadCatalog(
     const named = missing.get(repoPath);
     if (named !== undefined) return named;
     const capabilities = catalogs.get(repoPath)?.capabilities;
-    return new Set(capabilities === undefined ? [] : BMAD_CAPABILITIES.filter((capability) => !capabilities[capability]));
+    return new Set(capabilities === undefined ? [] : BMAD_CAPABILITIES.filter((capability) => capabilities[capability] === false));
   };
   const capabilitiesOf = (repoPath: string): BmadCapabilities => {
     const lacks = missingOf(repoPath);
-    return { plain_labels: !lacks.has('plain_labels'), ticket_tree: !lacks.has('ticket_tree') };
+    return { plain_labels: !lacks.has('plain_labels'), ticket_tree: !lacks.has('ticket_tree'), look_back: !lacks.has('look_back') };
   };
   const statusOf = (repoPath: string) => structuredClone(setups.get(repoPath) ?? notSetUp());
   const scripts = new Map<string, string | undefined>(Object.entries(options.scripts ?? {}));
@@ -128,6 +135,7 @@ export function createMemoryBmadCatalog(
     catalogCalls,
     setupCalls,
     documentCalls,
+    retrospectiveCalls,
     capabilityCalls,
     setupOptions,
     missingCapabilities: async (repoPath, wanted) => {
@@ -149,6 +157,18 @@ export function createMemoryBmadCatalog(
       return bytes.length > MAX_DOCUMENT_BYTES
         ? { content: bytes.subarray(0, MAX_DOCUMENT_BYTES).toString('utf8'), truncated: true }
         : { content, truncated: false };
+    },
+    readRetrospective: async (repoPath, outputFolder, epicFolder) => {
+      retrospectiveCalls.push([repoPath, outputFolder, epicFolder]);
+      const folder = outputFolder.replace(/\/+$/, '');
+      if (!epicFolder.startsWith(`${folder}/`)) return null;
+      const prefix = `${epicFolder.replace(/\/+$/, '')}/`;
+      const documents = options.documents?.[repoPath] ?? {};
+      const path = Object.keys(documents)
+        .filter((key) => key.startsWith(prefix) && !key.slice(prefix.length).includes('/') && key.endsWith('-retrospective.md'))
+        .sort()
+        .at(-1);
+      return path === undefined ? null : { path, content: documents[path]!.slice(0, MAX_RETROSPECTIVE_BYTES) };
     },
     skills: async (repoPath) => {
       skillCalls.push(repoPath);

@@ -57,12 +57,16 @@ export default defineConfig({
     { name: 'bmad', testMatch: /(^|[\\/])bmad-journey\.spec\.ts$/, dependencies: ['terminal'] },
     { name: 'planning', testMatch: /(^|[\\/])planning-journey\.spec\.ts$/, dependencies: ['bmad'] },
     { name: 'modes', testMatch: /(^|[\\/])permission-modes-journey\.spec\.ts$/, dependencies: ['planning'] },
-    { name: 'upgrade', testMatch: /(^|[\\/])upgrade-journey\.spec\.ts$/, dependencies: ['modes'] },
+    // Epic 7's retrospectives journey (the look-back, the lessons and Save the lessons), on a server of its own.
+    { name: 'retrospectives', testMatch: /(^|[\\/])retrospectives-journey\.spec\.ts$/, dependencies: ['modes'] },
+    { name: 'upgrade', testMatch: /(^|[\\/])upgrade-journey\.spec\.ts$/, dependencies: ['retrospectives'] },
     { name: 'agents', testMatch: /(^|[\\/])agents-journey\.spec\.ts$/, dependencies: ['upgrade'] },
     // Epic 12's Codex journey (Codex beside Claude Code, API key only).
     { name: 'codex', testMatch: /(^|[\\/])codex-journey\.spec\.ts$/, dependencies: ['agents'] },
     // Epic 12's Grok journey (Grok beside Claude Code, an xAI API access token only, trusted project).
     { name: 'grok', testMatch: /(^|[\\/])grok-journey\.spec\.ts$/, dependencies: ['codex'] },
-    { name: 'journey', testMatch: /(^|[\\/])journey\.spec\.ts$/, dependencies: ['grok'] },
+    // Epic 11's builds journey (story 11.6): Build all ready, the run view, a failing re-run, Needs you and the webhook, an intent gap.
+    { name: 'builds', testMatch: /(^|[\\/])builds-journey\.spec\.ts$/, dependencies: ['grok'] },
+    { name: 'journey', testMatch: /(^|[\\/])journey\.spec\.ts$/, dependencies: ['builds'] },
   ],
 });

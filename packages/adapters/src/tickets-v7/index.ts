@@ -83,6 +83,7 @@ import {
 import type { SnapshotScripts } from '../bmad-catalog/scripts-snapshot.js';
 import { codeOf } from '../fs-safe.js';
 import { ScriptRunError, type UvScriptRunner } from '../toolchain-uv/script-runner.js';
+import { changedRetrospectives, retrospectiveSignatures } from './retrospective-watch.js';
 import { startFolderWatch, type FolderWatch, type FolderWatchTiming, type WatchDir } from './folder-watch.js';
 
 export { DEFAULT_FOLDER_WATCH_TIMING, defaultWatchDir, MAX_SCAN_ENTRIES, MAX_WATCHED_DIRS, type DirWatcher, type FolderWatchTiming, type WatchDir } from './folder-watch.js';
@@ -205,6 +206,8 @@ interface OpenWatch {
   again: boolean;
   closed: boolean;
   folder: FolderWatch | undefined;
+  /** The retrospective signatures of the last tree read (epic 7). */
+  retro: Map<string, string>;
 }
 
 export function createTicketsV7({ runner, script: scriptOf, snapshot, workDir, onFailure, watchTiming, watchDir, onWatchFallback }: TicketsV7Options): TicketStorePort {
@@ -330,7 +333,7 @@ export function createTicketsV7({ runner, script: scriptOf, snapshot, workDir, o
 
     async watch(repoPath, outputFolder, onChange, options) {
       const root = await containedRoot(repoPath, outputFolder);
-      const open: OpenWatch = { index: undefined, reading: false, again: false, closed: false, folder: undefined };
+      const open: OpenWatch = { index: undefined, reading: false, again: false, closed: false, folder: undefined, retro: new Map() };
       let primed = false;
       /** Reruns `status` and reports what changed; serialized, a request meanwhile runs one more after it. */
       const refresh = async (): Promise<void> => {
@@ -360,8 +363,21 @@ export function createTicketsV7({ runner, script: scriptOf, snapshot, workDir, o
             if (open.closed) return;
             // The first read only builds the tree; after a failed first read, the next success reports every ref.
             const changed = primed ? changedTicketRefs(open.index?.tickets ?? [], next.tickets) : [];
+            // Epic 7: an epic's retrospective file changing shows in no ticket row, so its signature is compared too.
+            // Only while the caller says Retrospectives is on: with it off no retrospective file is looked at.
+            const retro = options?.onRetrospectiveChange === undefined || options.retrospectivesOn?.() !== true ? undefined : await retrospectiveSignatures(root, next);
+            if (open.closed) return;
+            const retroChanged = retro === undefined || !primed ? [] : changedRetrospectives(open.retro, retro);
+            if (retro !== undefined) open.retro = retro;
             primed = true;
             open.index = next;
+            if (retroChanged.length > 0) {
+              try {
+                options?.onRetrospectiveChange?.(retroChanged);
+              } catch {
+                // The caller's failure never stops the watch.
+              }
+            }
             if (changed.length > 0) {
               try {
                 onChange(changed);

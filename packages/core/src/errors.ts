@@ -368,6 +368,33 @@ export class DeveloperModeRequiredError extends CoreError {
   }
 }
 
+/** The message refusing a terminal pane without Developer mode (epic 16, E16-R3): the same 403 `developer_mode_required` as Skip all. */
+export const PANES_NEED_DEVELOPER_MODE = 'Terminals are only offered in Developer mode. Turn it on in Settings → Appearance first.';
+
+/** A launcher can't start a pane (epic 16, story 16.5): unknown, its program not found on this computer, or found but it did not answer. `reason` is plain words; nothing was started. */
+export class LauncherUnavailableError extends CoreError {
+  override readonly name = 'LauncherUnavailableError';
+  constructor(
+    readonly launcherCode: 'unknown_launcher' | 'not_found' | 'failed' | 'bad_args',
+    message: string,
+    /** The vendor's install page, when the launcher has one. */
+    readonly installUrl?: string,
+  ) {
+    super('launcher_unavailable', message);
+  }
+}
+
+/** A pane would pass the limit of panes in its project or in this install (epic 16): nothing opened. */
+export class PaneLimitError extends CoreError {
+  override readonly name = 'PaneLimitError';
+  constructor(
+    readonly scope: 'project' | 'install',
+    readonly limit: number,
+  ) {
+    super('pane_limit_reached', scope === 'project' ? `A project can have ${limit} terminals open at once. Close one first.` : `Ogden Agents can have ${limit} terminals open at once. Close one first.`);
+  }
+}
+
 /** Skip all was asked for without the user's confirmation of its warning: nothing changed. */
 export class ConfirmationRequiredError extends CoreError {
   override readonly name = 'ConfirmationRequiredError';
@@ -554,6 +581,20 @@ export class BuildRefusedError extends CoreError {
   override readonly name = 'BuildRefusedError';
   override readonly code: BuildRefusalCode;
   constructor(code: BuildRefusalCode, message: string) {
+    super(code, message);
+    this.code = code;
+  }
+}
+
+/**
+ * Save the lessons was refused (epic 7, story 7.2): `code` says why for the
+ * API, `message` in plain words for the user (a shared sentence); nothing was
+ * committed. Each answers 409.
+ */
+export class LessonsRefusedError extends CoreError {
+  override readonly name = 'LessonsRefusedError';
+  override readonly code: 'nothing_to_save' | 'checkout_busy' | 'agents_file_missing';
+  constructor(code: 'nothing_to_save' | 'checkout_busy' | 'agents_file_missing', message: string) {
     super(code, message);
     this.code = code;
   }

@@ -21,6 +21,12 @@
  *   suite's terminal runs the fake CLI on every OS (Windows takes only a real
  *   `claude.exe` from `PATH`). It is narrower than `OGDEN_AGENTS_CLAUDE_ACP_PATH`,
  *   which already picks the agent's script for anyone.
+ * - {@link PANE_SHELL_ENV}: a Node script inside the temp folder that terminal
+ *   panes run in place of the user's shell (epic 16), so the suites open panes
+ *   with a fake program on every OS.
+ * - {@link PANE_PATH_ENV}: a folder inside the temp folder that terminal pane
+ *   detection treats as its whole PATH (epic 16), holding fake programs. In a
+ *   test run with none named, detection finds nothing.
  * - {@link BMAD_PROBE_ENV} = `1`: registers the test-only route that serves
  *   the `planning` BMad piece behind core's guard (story 10.1), so a test can
  *   see `feature_off` while the piece is off.
@@ -83,12 +89,12 @@
  * `OGDEN_AGENTS_TEST_*` name is declared here and read only beside a
  * {@link testHooksAllowed} call (`test/test-hooks-audit.test.ts`).
  */
-import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { appendFileSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, relative } from 'node:path';
 import type { AdapterPins, AntigravityPins } from '@ogden-agents/adapters';
-import { clampCheckInDelay, type ApiKeyVerification, type SandboxCheck } from '@ogden-agents/core';
-import { BmadLock, BmadPiece, type BmadPiece as BmadPieceName } from '@ogden-agents/shared';
+import { clampCheckInDelay, type ApiKeyVerification, type NotifierPort, type SandboxCheck } from '@ogden-agents/core';
+import { BmadLock, BmadPiece, webhookHttpMessage, type BmadPiece as BmadPieceName } from '@ogden-agents/shared';
 import type { StartOptions } from './start-types.js';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -100,6 +106,21 @@ export const API_KEY_CHECK_ENV = 'OGDEN_AGENTS_TEST_API_KEY_CHECK';
 
 /** Absolute path to a `claude` stand-in inside the temp folder, run as the agents' `CLAUDE_CODE_EXECUTABLE` (tests only). */
 export const CLAUDE_CLI_ENV = 'OGDEN_AGENTS_TEST_CLAUDE_CLI';
+
+/**
+ * Absolute path to a Node script inside the temp folder that a terminal pane
+ * runs in place of the user's own shell (epic 16, story 16.2; tests only), so
+ * a suite's panes run a fake on every OS and never the real shell or a CLI.
+ */
+export const PANE_SHELL_ENV = 'OGDEN_AGENTS_TEST_PANE_SHELL';
+
+/**
+ * Absolute path to a folder inside the temp folder that holds fake programs
+ * (a `claude`, a `codex` ...): terminal pane detection looks only there, as
+ * its whole PATH and home (epic 16, story 16.5; tests only), so no suite ever
+ * finds or runs a real CLI.
+ */
+export const PANE_PATH_ENV = 'OGDEN_AGENTS_TEST_PANE_PATH';
 
 /** `1`: register `TEST_ROUTES.bmadProbe`, a route guarded by the `planning` piece (tests only; story 10.1). */
 export const BMAD_PROBE_ENV = 'OGDEN_AGENTS_TEST_BMAD_PROBE';
@@ -146,6 +167,31 @@ export const CODEX_SERVER_ENV = 'OGDEN_AGENTS_TEST_CODEX_SERVER';
 export const TRUST_AGENT_ENV = 'OGDEN_AGENTS_TEST_TRUST_AGENT';
 /** `available` or `unavailable`: the sandbox check unattended builds get (tests only; story 5.2). */
 export const SANDBOX_ENV = 'OGDEN_AGENTS_TEST_SANDBOX';
+
+/**
+ * Absolute path to a file inside the temp folder (tests only; story 11.6): every
+ * webhook the server would send is appended there as one JSON line
+ * (`{"url": …, "payload": …}`) and answered with a 204. Nothing is sent over
+ * the network.
+ */
+export const NOTIFIER_ENV = 'OGDEN_AGENTS_TEST_NOTIFIER';
+
+/**
+ * The recording notifier from {@link NOTIFIER_ENV}, or `undefined` (the real
+ * `notify-webhook`): unset, hooks not allowed, the file not absolute or
+ * outside the temp folder.
+ */
+export function testNotifier(env: Env, dataDir: string, tmp: string = tmpdir()): NotifierPort | undefined {
+  const file = env[NOTIFIER_ENV];
+  if (file === undefined || file === '' || !testHooksAllowed(env, dataDir, tmp)) return undefined;
+  if (!isAbsolute(file) || !insideTemp(dirname(file), tmp)) return undefined;
+  return {
+    async send(url, payload) {
+      appendFileSync(file, `${JSON.stringify({ url, payload })}\n`);
+      return { ok: true, status: 204, failure: null, message: webhookHttpMessage(204) };
+    },
+  };
+}
 
 /** The kind a run records under {@link SANDBOX_ENV} = `available`. */
 export const TEST_SANDBOX_KIND = 'test';
@@ -293,6 +339,30 @@ export function testApiKeyCheck(env: Env, dataDir: string, tmp: string = tmpdir(
  */
 export function testClaudeCli(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
   return testNodeScript(CLAUDE_CLI_ENV, env, dataDir, tmp);
+}
+
+/** The Node script {@link PANE_SHELL_ENV} names (see {@link testClaudeCli}), or `undefined` (the user's own shell); throws when allowed but unusable. */
+export function testPaneShell(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
+  return testNodeScript(PANE_SHELL_ENV, env, dataDir, tmp);
+}
+
+/** The folder {@link PANE_PATH_ENV} names, by its real path; `''` (finds nothing) in a test run that names none; `undefined` when hooks are not allowed or the folder is outside the temp folder: not inside the temp folder, or not an absolute folder (allowed but unusable throws). */
+export function testPanePath(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
+  const folder = env[PANE_PATH_ENV];
+  if (!testHooksAllowed(env, dataDir, tmp)) return undefined;
+  // A test run with no folder named finds nothing at all: detection never looks at the real computer, so no suite ever runs a real CLI.
+  if (folder === undefined || folder === '') return '';
+  if (!isAbsolute(folder)) throw new Error(`${PANE_PATH_ENV}: must be an absolute path`);
+  let real: string;
+  try {
+    real = realpathSync(folder);
+    if (!statSync(real).isDirectory()) throw new Error('not a folder');
+  } catch {
+    throw new Error(`${PANE_PATH_ENV}: must be an existing folder`);
+  }
+  // Allowed but unusable throws, so a test never falls back to looking at the real computer.
+  if (!insideTemp(real, tmp)) throw new Error(`${PANE_PATH_ENV}: must be a folder inside the temp folder`);
+  return real;
 }
 
 /**
@@ -526,7 +596,7 @@ export function checkInDelayFromEnv(env: Env, dataDir: string, tmp: string = tmp
 }
 
 /** The `start()` options that decide a hook themselves, and whether `start()` opens its own core. */
-export type TestHookOptions = Pick<StartOptions, 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'codex' | 'grok' | 'local' | 'extraAgents' | 'sandbox'> & {
+export type TestHookOptions = Pick<StartOptions, 'paneShell' | 'paneLaunchers' | 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'codex' | 'grok' | 'local' | 'extraAgents' | 'sandbox' | 'notifier'> & {
   /** `false` for a core passed in, which already holds its own BMad pieces: {@link BMAD_AVAILABLE_ENV} is not read. */
   ownsCore: boolean;
   tmp?: string;
@@ -537,6 +607,8 @@ export interface TestHooks {
   claudeInstall: TestClaudeInstall | undefined;
   apiKeyCheck: ((value: string, signal: AbortSignal) => Promise<ApiKeyVerification>) | undefined;
   claudeCli: string | undefined;
+  paneShell: string | undefined;
+  panePath: string | undefined;
   antigravityServer: string | undefined;
   antigravityInstall: TestAntigravityInstall | undefined;
   codexServer: string | undefined;
@@ -552,6 +624,7 @@ export interface TestHooks {
   checkInMs: number | undefined;
   secretStore: 'memory' | undefined;
   sandbox: SandboxCheck | undefined;
+  notifier: NotifierPort | undefined;
 }
 
 /**
@@ -568,6 +641,9 @@ export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOpt
     claudeInstall: options.claudeInstall === undefined ? testClaudeInstall(env, dataDir, tmp) : undefined,
     apiKeyCheck: options.verifyApiKey === undefined ? testApiKeyCheck(env, dataDir, tmp) : undefined,
     claudeCli: options.extraAgentEnv?.CLAUDE_CODE_EXECUTABLE === undefined ? testClaudeCli(env, dataDir, tmp) : undefined,
+    // A shell a test passes decides it: the hook is not read.
+    paneShell: options.paneShell === undefined ? testPaneShell(env, dataDir, tmp) : undefined,
+    panePath: options.paneLaunchers === undefined ? testPanePath(env, dataDir, tmp) : undefined,
     // Antigravity's ports given (or left out) by a test decide it: the hook is not read.
     antigravityServer: options.antigravity === undefined ? testAntigravityServer(env, dataDir, tmp) : undefined,
     antigravityInstall: options.antigravity === undefined ? testAntigravityInstall(env, dataDir, tmp) : undefined,
@@ -588,6 +664,8 @@ export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOpt
     checkInMs: options.checkInDelayMs === undefined ? checkInDelayFromEnv(env, dataDir, tmp) : undefined,
     secretStore: options.secrets === undefined ? testSecretStore(env, dataDir, tmp) : undefined,
     sandbox: options.sandbox === undefined ? testSandbox(env, dataDir, tmp) : undefined,
+    // A notifier a test passes decides it: the hook is not read.
+    notifier: options.notifier === undefined ? testNotifier(env, dataDir, tmp) : undefined,
   };
 }
 
@@ -601,6 +679,8 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     hooks.claudeInstall !== undefined ||
     hooks.apiKeyCheck !== undefined ||
     hooks.claudeCli !== undefined ||
+    hooks.paneShell !== undefined ||
+    (hooks.panePath !== undefined && hooks.panePath !== '') ||
     hooks.antigravityServer !== undefined ||
     hooks.antigravityInstall !== undefined ||
     hooks.codexServer !== undefined ||
@@ -614,12 +694,15 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     hooks.bmadAvailable.length > 0 ||
     hooks.bmadSource !== undefined ||
     hooks.checkInMs !== undefined ||
-    hooks.sandbox !== undefined;
+    hooks.sandbox !== undefined ||
+    hooks.notifier !== undefined;
   if (!inUse) return undefined;
   return {
     claudeInstall: hooks.claudeInstall !== undefined,
     apiKeyCheck: hooks.apiKeyCheck !== undefined,
     claudeCli: hooks.claudeCli !== undefined,
+    paneShell: hooks.paneShell !== undefined,
+    panePath: hooks.panePath !== undefined && hooks.panePath !== '',
     antigravityServer: hooks.antigravityServer !== undefined,
     antigravityInstall: hooks.antigravityInstall !== undefined,
     codexServer: hooks.codexServer !== undefined,
@@ -633,6 +716,7 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     bmadAvailable: hooks.bmadAvailable.join(','),
     bmadSource: hooks.bmadSource !== undefined,
     ...(hooks.sandbox === undefined ? {} : { sandbox: hooks.sandbox.available ? 'available' : 'unavailable' }),
+    ...(hooks.notifier === undefined ? {} : { notifier: true }),
     ...(hooks.checkInMs === undefined ? {} : { checkInMs: hooks.checkInMs }),
   };
 }

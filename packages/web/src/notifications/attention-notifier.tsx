@@ -17,8 +17,10 @@ import { createTabPresence, type TabPresence } from './tab-presence';
  * group and the tab title are the visual signal.
  */
 export function AttentionNotifier() {
-  const { model } = useSidebarData();
-  const { caughtUp } = useEventStream();
+  const { model, runsSettled } = useSidebarData();
+  const { caughtUp: streamCaughtUp } = useEventStream();
+  // Run needs are read over REST after the stream: what they hold at first is not news either (story 11.4).
+  const caughtUp = streamCaughtUp && runsSettled;
   const { settings } = useNotificationSettings();
   const router = useRouter();
   const notifier = useRef<Notifier | undefined>(undefined);
@@ -37,7 +39,11 @@ export function AttentionNotifier() {
           const notification = new Notification(text.title, { body: text.body, tag: need.id });
           notification.onclick = () => {
             window.focus();
-            void router.navigate({ to: '/w/$wsId/s/$sesId', params: { wsId: need.wsId, sesId: need.sesId } });
+            if (need.paneId !== undefined) void router.navigate({ to: '/w/$wsId/terminals' as never, params: { wsId: need.wsId } as never });
+            else
+              void (need.reviewRef === undefined
+                ? router.navigate({ to: '/w/$wsId/s/$sesId', params: { wsId: need.wsId, sesId: need.sesId } })
+                : router.navigate({ to: '/w/$wsId/review/$ref', params: { wsId: need.wsId, ref: need.reviewRef } }));
             notification.close();
           };
           return notification;

@@ -1,4 +1,4 @@
-import { chatName, NEW_CHAT_NAME, type CoreEvent, type Session, type SessionErrorCode, type SessionState, type Workspace } from '@ogden-agents/shared';
+import { chatName, NEW_CHAT_NAME, runPhase, type CoreEvent, type Run, type Session, type SessionErrorCode, type SessionState, type Workspace } from '@ogden-agents/shared';
 import { UNKNOWN_AGENT_NAME } from '@/chat/chat-api';
 import { sessionView, type TranscriptCheckIn, type TranscriptPermission } from '@/chat/transcript';
 import { streamEvents, type EventStoreState } from '@/events/event-store';
@@ -42,9 +42,14 @@ export interface SidebarWorkspace {
  * What kind of thing waits on the user: a permission request, a waiting
  * session whose request is older than the window, a working agent that went
  * quiet (`session.check_in`, story 2.10), or a chat stopped until its agent
- * is signed in again (`auth_required`, 9.4). Build checkpoints join later.
+ * is signed in again (`auth_required`, 9.4); a build run that is blocked
+ * (`run_blocked`) or ready for review (`run_review`, story 11.4); a terminal
+ * pane that seems to be waiting for the user (`pane`, epic 16: a guess from its status event).
  */
-export type NeedKind = 'permission' | 'waiting' | 'check_in' | 'sign_in';
+export type NeedKind = 'permission' | 'waiting' | 'check_in' | 'sign_in' | 'run_blocked' | 'run_review' | 'pane';
+
+/** The kinds that can make a sound or a desktop notification and have a setting: a terminal pane's attention is opt in per pane (story 16.8), so it is not among them. */
+export type NotifiableNeedKind = Exclude<NeedKind, 'pane'>;
 
 /** One thing waiting on the user, of one {@link NeedKind}. */
 export interface NeedsYouEntry {
@@ -63,8 +68,53 @@ export interface NeedsYouEntry {
   at: string;
   /** The announcement for a new request ("run npm test"); absent for a waiting session with no request in view. */
   request?: string;
+  /** The pane a `pane` need is about (it has no chat: `sesId` is empty). */
+  paneId?: string;
+  /** Whether the user opted this pane in to notifications (story 16.8): only then may it make a sound or a notice. */
+  notify?: boolean;
   /** Set on a sign in need of an agent that takes only an API key: its key was rejected, there is no sign in. */
   keyRejected?: true;
+  /** A run ready for review opens its review page for this ticket, not its session (story 11.4). */
+  reviewRef?: string;
+}
+
+/** The Needs you text of a blocked build run and of one ready for review (story 11.4). */
+export const runBlockedText = (ref: string) => `Build ${ref} is blocked`;
+export const runReviewText = (ref: string) => `Build ${ref} is ready for review`;
+
+/**
+ * Blocked runs and runs ready for review as Needs you entries (story 11.4):
+ * only each ticket's latest run (`runs` come newest first), a run waiting at a
+ * checkpoint counting as blocked, one the user decided or stopped as nothing.
+ * Never a command, a file or what the agent said: the ticket's ref and the
+ * state only.
+ */
+export function buildRunNeeds(workspaces: readonly Workspace[], runsByWorkspace: ReadonlyMap<string, readonly Run[]>): NeedsYouEntry[] {
+  const entries: NeedsYouEntry[] = [];
+  for (const workspace of workspaces) {
+    const seen = new Set<string>();
+    for (const run of runsByWorkspace.get(workspace.id) ?? []) {
+      if (seen.has(run.ticketRef)) continue;
+      seen.add(run.ticketRef);
+      const phase = runPhase(run);
+      if (phase !== 'needs_you' && phase !== 'checkpoint' && phase !== 'built') continue;
+      const blocked = phase !== 'built';
+      entries.push({
+        // Stable while the run stays in this state, so a changed reason says nothing twice; a run that leaves it and comes back is new news (the notifier forgets it meanwhile).
+        id: `${blocked ? 'run_blocked' : 'run_review'}:${run.id}`,
+        kind: blocked ? 'run_blocked' : 'run_review',
+        wsId: workspace.id,
+        sesId: run.sessionId,
+        workspaceName: workspaceName(workspace),
+        chatName: `Build ${run.ticketRef}`,
+        text: blocked ? runBlockedText(run.ticketRef) : runReviewText(run.ticketRef),
+        agentName: '',
+        at: run.updatedAt,
+        ...(blocked ? {} : { reviewRef: run.ticketRef }),
+      });
+    }
+  }
+  return entries;
 }
 
 export interface SidebarModel {
@@ -168,6 +218,57 @@ function pendingRequests(folded: FoldedStream | undefined, session: Session): { 
  * Needs you built from each session's event window. `now` decides which done
  * sessions are "Earlier".
  */
+/**
+ * The panes of a workspace that seem to be waiting for the user (epic 16,
+ * story 16.6), folded from its pane events: state only, so nothing here can
+ * hold terminal text. A pane is listed from the status event that said
+ * `needs_attention` until its next status, its exit or its close.
+ */
+export function paneNeeds(store: EventStoreState, wsId: string, workspaceName: string): NeedsYouEntry[] {
+  // Panes live in memory: what an earlier run of the server left in the log is gone with it.
+  const startedSeq = store.install.events.findLast((event) => event.type === 'server.started')?.seq ?? 0;
+  const events = streamEvents(store, wsId, wsId).filter((event) => event.seq > startedSeq);
+  const panes = new Map<string, { title: string; notify: boolean; waiting: { seq: number; at: string } | undefined }>();
+  for (const event of events) {
+    switch (event.type) {
+      case 'terminal.pane_opened':
+        panes.set(event.payload.paneId, { title: event.payload.title, notify: false, waiting: undefined });
+        break;
+      case 'terminal.pane_renamed': {
+        const pane = panes.get(event.payload.paneId);
+        if (pane !== undefined) {
+          pane.title = event.payload.title;
+          if (event.payload.notify !== undefined) pane.notify = event.payload.notify;
+        }
+        break;
+      }
+      case 'terminal.pane_status_changed': {
+        const pane = panes.get(event.payload.paneId) ?? { title: event.payload.title ?? 'Terminal', notify: false, waiting: undefined };
+        if (event.payload.title !== undefined) pane.title = event.payload.title;
+        pane.notify = event.payload.notify === true;
+        pane.waiting = event.payload.status === 'needs_attention' ? { seq: event.seq, at: event.at } : undefined;
+        panes.set(event.payload.paneId, pane);
+        break;
+      }
+      case 'terminal.pane_exited': {
+        const pane = panes.get(event.payload.paneId);
+        if (pane !== undefined) pane.waiting = undefined;
+        break;
+      }
+      case 'terminal.pane_closed':
+        panes.delete(event.payload.paneId);
+        break;
+      default:
+        break;
+    }
+  }
+  return [...panes].flatMap(([paneId, pane]) =>
+    pane.waiting === undefined
+      ? []
+      : [{ id: `pane:${paneId}:${pane.waiting.seq}`, kind: 'pane' as const, wsId, sesId: '', paneId, notify: pane.notify, workspaceName, chatName: pane.title, text: `${pane.title} may need you`, agentName: '', at: pane.waiting.at }],
+  );
+}
+
 export function buildSidebar(
   workspaces: readonly Workspace[],
   sessions: readonly Session[],
@@ -179,6 +280,8 @@ export function buildSidebar(
   modelName: (agentId: string | undefined, model: string) => string = (_agentId, model) => model,
   /** Whether a chat's agent takes only an API key, never an account sign in (Codex, Grok): its sign in need says the key was rejected. */
   keyOnly: (agentId: string | undefined) => boolean = () => false,
+  /** Blocked runs and runs ready for review (story 11.4), from `buildRunNeeds`. */
+  runNeeds: readonly NeedsYouEntry[] = [],
 ): SidebarModel {
   const byWorkspace = new Map<string, Session[]>();
   for (const session of sessions) {
@@ -246,6 +349,8 @@ export function buildSidebar(
     const summary = STATE_ORDER.flatMap((state) => (counts.has(state) ? [{ state, count: counts.get(state)! }] : []));
     groups.push({ wsId: workspace.id, name, rows, earlier, summary });
   }
+  for (const workspace of ordered) needsYou.push(...paneNeeds(store, workspace.id, workspaceName(workspace)));
+  needsYou.push(...runNeeds);
   needsYou.sort((a, b) => time(a.at) - time(b.at) || (a.id < b.id ? -1 : 1));
   return { groups, needsYou };
 }
@@ -321,6 +426,10 @@ export function diffForAnnouncements(previous: SidebarModel, next: SidebarModel)
     }
   }
   const known = new Set(previous.needsYou.map((entry) => entry.id));
+  // A run that became blocked or ready for review is news in the polite region (the build session's own state change is said above).
+  for (const entry of next.needsYou) {
+    if ((entry.kind === 'run_blocked' || entry.kind === 'run_review') && !known.has(entry.id) && before.has(entry.sesId)) polite.push({ sesId: entry.sesId, text: `${entry.workspaceName}: ${entry.text}` });
+  }
   // A request in a session the sidebar did not have yet is its list loading, not news.
   // A quiet agent or a sign-in need changes no state worth a word on its own, so it is said here, never only by sound.
   const assertive = next.needsYou.flatMap((entry) => {

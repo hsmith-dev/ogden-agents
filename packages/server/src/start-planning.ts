@@ -15,6 +15,9 @@ import {
   createBoard,
   createRunAwareTickets,
   createPlanning,
+  createBuildSummaries,
+  createRetrospectives,
+  type VcsPort,
   createPlanningDocuments,
   createTicketWatcher,
   type AgentPort,
@@ -128,7 +131,7 @@ export function createDocumentCards({ core, catalog, agent, agentOf, log }: { co
   });
 }
 
-/** Plan and Board (story 4.1): the catalog, planning sessions and the tickets, each behind core's guard (AD-22). */
+/** Plan and Board (story 4.1): the catalog, planning sessions and the tickets, each behind core's guard (AD-22); story 7.1 adds the look-back. */
 export function createPlanAndBoard({
   options,
   core,
@@ -142,7 +145,10 @@ export function createPlanAndBoard({
   agentOf,
   uvToolchain,
   uvChildEnv,
+  vcs,
 }: {
+  /** The server's git, for Save the lessons (epic 7). */
+  vcs: VcsPort;
   options: StartOptions;
   core: Core;
   dataDir: string;
@@ -194,6 +200,8 @@ export function createPlanAndBoard({
     onError: (step, error) => log.info("a build's plan was read from the main checkout", { step, code: errorCode(error, 'unexpected') }),
   });
   const board = createBoard({ bmad: core.bmad, trust: core.bmadScriptTrust, source: bmadSource, entities: core.entities, catalog: bmadCatalog, tickets: boardTickets });
+  // Looking back on an epic (story 7.1): a planning session on the retrospective skill, behind the Retrospectives piece; it reads the board's tree.
+  const retrospectives = createRetrospectives({ bmad: core.bmad, entities: core.entities, board, catalog: bmadCatalog, chat, agent, agentOf, summaries: createBuildSummaries({ entities: core.entities }), offers: core.lookBackOffers, vcs });
   // One watch per project with Board on, trusted and BMad Method set up (story 4.8; the setup status is entry 4.3's):
   // an agent's ticket write reaches the board as `ticket.changed`.
   const ticketWatcher = createTicketWatcher({
@@ -206,7 +214,7 @@ export function createPlanAndBoard({
     // Codes only: never a path or the script's output.
     onError: (workspaceId, step, error) => log.warn('ticket watch failed', { workspaceId, step, code: errorCode(error, 'unexpected') }),
   });
-  return { planning, scriptRunner, bmadSource, board, ticketWatcher, ticketStore, boardTickets };
+  return { planning, scriptRunner, bmadSource, board, retrospectives, ticketWatcher, ticketStore, boardTickets };
 }
 
 /** How core's failed BMad Method setup is logged: codes only, since a setup's own error can name the user's paths. */

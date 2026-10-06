@@ -167,7 +167,7 @@ export const REVIEW_SHOW_CHANGES_LABEL = (count: number) => `Show the code chang
 export const REJECT_NOTE_LABEL = 'A note for the next try (optional)';
 export const RUN_ACTIVE_MESSAGE = 'This ticket is already being built.';
 export const SANDBOX_UNAVAILABLE_MESSAGE = "Unattended builds need a sandbox, and this computer doesn't have one Ogden Agents can use, so nothing was started.";
-export const CHECKOUT_DIRTY_MESSAGE = 'Your project has uncommitted changes outside the BMad output folder. Commit or stash them, then approve again.';
+export const CHECKOUT_DIRTY_MESSAGE = 'Your project has uncommitted changes outside the BMad output folder and AGENTS.md. Commit or stash them, then approve again.';
 export const MERGE_CONFLICT_MESSAGE = "The build's changes conflict with your project, so nothing was merged. The run needs a rebase.";
 export const CHECKS_FAILED_MESSAGE = "This run didn't pass its checks, so it can't be approved.";
 export const ALREADY_MERGED_MESSAGE = 'This run is already merged.';
@@ -256,6 +256,13 @@ export const OBJECTS_NOT_IMPORTED_MESSAGE = "The build's saved changes couldn't 
 
 /** The web app's Build, review, approve and reject words. */
 export const BUILD_LABEL = 'Build';
+export const BUILD_THIS_STORY_LABEL = 'Build this story';
+export const BUILD_ALL_READY_LABEL = 'Build all ready';
+export const BUILD_ALL_NONE_READY_TEXT = 'No story is ready to build.';
+export const BUILD_ALL_FAILED = "The builds couldn't start. Try again.";
+export const buildAllStartedText = (count: number) => (count === 1 ? 'Started 1 build.' : `Started ${count} builds.`);
+export const BUILD_ALL_NOTHING_STARTED_TEXT = 'Nothing was started. Each ready story either waits for another or is already being built.';
+export const BUILD_ALL_FOLLOW_LABEL = 'Follow them in Runs';
 export const BUILD_FAILED = "The build couldn't start. Try again.";
 export const REVIEW_PAGE_TITLE = 'Review';
 export const REVIEW_LOAD_FAILED = "The review couldn't be loaded. Try again.";

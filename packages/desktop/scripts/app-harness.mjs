@@ -5,7 +5,8 @@
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const IS_WIN = process.platform === 'win32';
 export const IS_MAC = process.platform === 'darwin';
@@ -99,6 +100,29 @@ function listAllSidecars() {
     .map((l) => ({ pid: Number(l.trim().split(/\s+/)[0]), command: l.trim().slice(0, 200) }));
 }
 
+/** The sidecars as `pid ppid state command` lines (not on Windows), to say what was left when a check fails. */
+export function describeSidecars(ignore = new Set()) {
+  if (IS_WIN) return listSidecars(ignore).map((p) => String(p.pid));
+  const out = execFileSync('ps', ['-axo', 'pid=,ppid=,stat=,command='], { encoding: 'utf8' });
+  return out
+    .split('\n')
+    .filter((l) => /ogden-node/.test(l) && !ignore.has(Number(l.trim().split(/\s+/)[0])))
+    .map((l) => l.trim().slice(0, 220));
+}
+
+/**
+ * Stops what a scenario left behind in an order that cannot start more: the app first (a server that
+ * loses its launcher, or an agent killed under a live server, could otherwise be restarted), then the
+ * sidecars until a pass finds none (a process started during a pass is caught by the next).
+ */
+export function sweepScenario(appsIgnore, sidecarsIgnore) {
+  killApps(appsIgnore);
+  for (let pass = 0; pass < 5; pass++) {
+    if (listSidecars(sidecarsIgnore).length === 0) return;
+    killSidecars(sidecarsIgnore);
+  }
+}
+
 /** Kills the sidecars left behind that were not running before `ignore` was taken (cleanup after a failed check only). */
 export function killSidecars(ignore = new Set()) {
   for (const { pid } of listSidecars(ignore)) {
@@ -134,7 +158,7 @@ export function listApps(ignore = new Set()) {
   const out = execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' });
   return out
     .split('\n')
-    .filter((l) => /\/ogden-agents(\s|$)/.test(l) || l.includes('Contents/MacOS/ogden-agents'))
+    .filter((l) => /(^|\s|\/)ogden-agents(\s|$)/.test(l.trim().replace(/^\d+\s+/, '')) || l.includes('Contents/MacOS/ogden-agents'))
     .map((l) => ({ pid: Number(l.trim().split(/\s+/)[0]) }))
     .filter((p) => !ignore.has(p.pid));
 }
@@ -149,4 +173,33 @@ export function killApps(ignore = new Set()) {
       // Already gone.
     }
   }
+}
+
+const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+/** The fake ACP agent the installed-package suite runs (it finds it through OGDEN_AGENTS_CLAUDE_ACP_PATH). */
+export const FAKE_AGENT = join(REPO, 'tests', 'fixtures', 'fake-acp-agent-installed.mjs');
+
+/**
+ * A script that runs the fake agent, optionally with a long-lived child of its own as the real adapter
+ * starts `claude` (the agents get an allowlisted environment, so the switch is set inside the script).
+ */
+export function agentWrapper(dir, { grandchild = false } = {}) {
+  const file = join(dir, 'agent.mjs');
+  writeFileSync(file, `${grandchild ? "process.env.FAKE_ACP_SPAWN_GRANDCHILD = '1';\n" : ''}await import(${JSON.stringify(pathToFileURL(FAKE_AGENT).href)});\n`);
+  return file;
+}
+
+/** A tab on the running server the way the page gets one: a launch link from the launcher handshake, exchanged. */
+export async function tabOf(ws, port) {
+  const url = `http://127.0.0.1:${port}`;
+  const token = readFileSync(join(ws.data, 'launcher.token'), 'utf8').trim();
+  const hello = await (await fetch(`${url}/launcher/hello?launch=1`, { headers: { 'x-ogden-launcher-token': token } })).json();
+  const res = await fetch(`${url}/api/v1/tab/exchange`, { method: 'POST', headers: { origin: url, 'content-type': 'application/json' }, body: JSON.stringify({ code: new URL(hello.launchUrl).hash.replace(/^#c=/, '') }) });
+  if (res.status !== 200) throw new Error(`tab exchange answered ${res.status}`);
+  const headers = { authorization: `Bearer ${(await res.json()).token}`, origin: url, 'content-type': 'application/json' };
+  return {
+    pid: hello.pid,
+    get: async (path) => (await fetch(`${url}${path}`, { headers })).json(),
+    post: (path, body) => fetch(`${url}${path}`, { method: 'POST', headers, body: JSON.stringify(body) }),
+  };
 }

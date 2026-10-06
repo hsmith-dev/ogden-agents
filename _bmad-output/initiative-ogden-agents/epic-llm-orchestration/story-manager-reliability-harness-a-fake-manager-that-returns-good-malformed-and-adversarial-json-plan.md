@@ -55,14 +55,24 @@ context:
 
 ## Tasks & Acceptance
 
-- [ ] cases and table, reference rules
-- [ ] fake manager stub, fake server mode, runner and report
-- [ ] tests, RELEASING.md checklist
+- [x] cases and table, reference rules
+- [x] fake manager stub, fake server mode, runner and report
+- [x] tests, RELEASING.md checklist
 
 **Acceptance Criteria:**
 - Given the table, each case yields its scripted reply on cue from the stub and the fake server, the reference rules give each case its listed outcome, the same table holds through the real adapter against the fake server, the report over the fake returns the expected tally, and RELEASING.md holds the live-check checklist.
 
 ## Implementation Notes
+
+- Entry 2 imports `MANAGER_CASES`, `REFUSAL_CODES`, `HARNESS_LIMITS`, `checkManagerReply` (replace it with the real schemas, keep the table), `createFakeManager`, `runCaseTable` and `measureModel` from `tests/fixtures/manager-cases.ts` and `tests/fixtures/manager-harness.ts`. Root tests and package tests already import from `tests/fixtures`, so core's AD-1 edges are untouched (type-only import of `LocalModelPort`).
+- The harness's schemas, size caps (4000 character instruction, 20 steps, 256 KiB reply) and field names (`version`, `goal`, `steps[id, worker, chat, instruction, mode, depends_on]`; decision `action`, `reason`, `step_id`, `question`) are placeholders for the table's sake. Entry 2 owns the real ones and must keep every row's expected outcome true, or change the row on purpose.
+- An override attempt in an instruction is accepted as text: the defence is that mode, roster and limits are enforced in code, not that a filter spots the words.
+- The fake server's `managerCases` option is new and inert unless given; no existing rule changed.
+- Real model measurement is not run in CI; the checklist is in RELEASING.md under "Epic 15 live check".
+
+## Live check result
+
+Not run yet (the user's check; see RELEASING.md).
 
 ## Plan Change Log
 

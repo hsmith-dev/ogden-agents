@@ -471,6 +471,19 @@ describe('building again from an unattended run with an agent that builds with y
   });
 });
 
+describe('building again unattended with no sandbox changes nothing', () => {
+  it('an attended run asked to be built again unattended, with no sandbox here, is refused before anything is discarded', async () => {
+    const claude = ROWS.find((row) => row.id === 'claude-code')!;
+    const s = await setup(claude, { sandbox: false, env: { FAKE_ACP_BUILD_FAIL: 'usage', FAKE_ACP_BUILD_FAIL_TEXT: claude.usageText } });
+    const first = BuildResponse.parse(await (await request(s.server, s.tab, 'POST', apiPath(API_ROUTES.workspaceBuilds, { wsId: s.wsId }), { ref: '1.1', mode: 'attended' })).json());
+    expect((await s.settled()).run.blockedCode).toBe('usage_limit');
+    const again = await request(s.server, s.tab, 'POST', apiPath(API_ROUTES.workspaceBuildReject, { wsId: s.wsId, ref: '1.1' }), { retry: true, mode: 'unattended' });
+    expect(again.status).toBe(409);
+    expect(s.server.core.entities.getRun(first.run.id)).toMatchObject({ outcome: 'blocked', decision: null });
+    expect(existsSync(first.run.worktreePath!)).toBe(true);
+  });
+});
+
 describe('building again with another agent that cannot build changes nothing', () => {
   it('a skill that is not in the project refuses it before anything is discarded: the blocked run, its copy and its work stay', async () => {
     const codex = ROWS.find((row) => row.id === 'codex')!;

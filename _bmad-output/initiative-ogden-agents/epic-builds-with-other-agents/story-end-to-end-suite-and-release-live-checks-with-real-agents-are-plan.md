@@ -53,4 +53,4 @@ Live check result: none yet; they are the user's (RELEASING.md, "Builds with oth
 
 ## Review Triage Log
 
-(filled after the review)
+One combined security and correctness review (an independent agent), loop 1; no blocker. Confirmed: \`mode\` and \`agent\` on a reject request go through the same start checks (\`startLocked\`, \`validateStart\`, \`requireSandbox\`); attended is the person watching every card, as on a start request; the web sends attended only for an agent that builds with you watching or a run that was attended; the docs are accurate and decide none of the user's questions. Fixed: the check before anything is discarded now runs for every Reject and retry whose effective mode is unattended (not only when the agent changes), so a sandbox that is gone leaves the blocked run and its copy alone (tested); the effective mode is computed once; the journey waits for the second card with the long limit and uses the plan's own constant. Kept: the fixed 1.5 s wait in the usage limit test only backs a negative check.

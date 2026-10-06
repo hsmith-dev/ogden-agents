@@ -29,7 +29,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { apiPath } from '../../packages/shared/src/api.ts';
-import { FAKE_BUILD_PLAN, FAKE_BUILD_REPO_FILES, fixtureGit } from '../fixtures/fake-bmad-repo.js';
+import { FAKE_BUILD_REPO_FILES, FAKE_BUILD_WAITING_PLAN, fixtureGit } from '../fixtures/fake-bmad-repo.js';
 import { API_ROUTES, ROOT } from '../support.js';
 import { expectConnected, landConnected, storedToken } from '../e2e/tab.js';
 import { bmadServer, CLAUDE_ACP_PATH_ENV, uvReady, type BmadServer, type Launched } from './installed.js';
@@ -156,7 +156,7 @@ test('Build asks which agent, Claude Code builds on its own, Codex with you watc
     await expect(card).toBeVisible(LIVE);
     await card.getByRole('button', { name: 'Allow once' }).click();
     await expect(page.getByTestId('permission-record')).toHaveCount(1);
-    await expect(card).toBeVisible();
+    await expect(card).toBeVisible(LIVE);
     await card.getByRole('button', { name: 'Deny' }).click();
     await expect(page.getByTestId('build-run-outcome')).toHaveText('Ready for review', LIVE);
     await expect(page.getByTestId('build-run-agent')).toHaveText('Codex');
@@ -174,7 +174,7 @@ test('Build asks which agent, Claude Code builds on its own, Codex with you watc
     await expect(page.getByTestId('review-approve')).toBeEnabled(LIVE);
     await page.getByTestId('review-approve').click();
     await expect(page.getByTestId('review-merged')).toBeVisible(LIVE);
-    expect(fixtureGit(repo.path, 'show', `HEAD:${FAKE_BUILD_PLAN.replace('story-build-the-thing', 'story-build-the-next-thing')}`)).toMatch(/status: done/);
+    expect(fixtureGit(repo.path, 'show', `HEAD:${FAKE_BUILD_WAITING_PLAN}`)).toMatch(/status: done/);
     const first = (await runsOf(page, wsId)).find((run) => run.ticketRef === '1.1')!;
     await page.goto(`${url}/w/${wsId}/review/1.1`);
     await page.getByTestId('review-reject').click();

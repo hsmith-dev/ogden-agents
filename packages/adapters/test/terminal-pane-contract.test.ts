@@ -22,6 +22,15 @@ describe('the pane contract on terminal-memory', () => {
     await expect(port.openPane!(INPUT)).rejects.toThrow('no pty');
   });
 
+  it('the pane reads through to its terminal: an exit or a kill after opening shows on both (16.3 review)', async () => {
+    const { pane, memory } = await open();
+    const live = pane as PaneProcess & { exitCode?: number | null | undefined; kills?: number };
+    expect(live.exitCode).toBeUndefined();
+    memory.exit(4);
+    expect(live.exitCode).toBe(4);
+    expect(memory.exitCode).toBe(4);
+  });
+
   it('attach gives the snapshot first, then what is printed after, in order', async () => {
     const { pane, memory } = await open();
     memory.print('before ');

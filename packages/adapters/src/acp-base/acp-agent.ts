@@ -65,11 +65,12 @@ import {
 import type { PermissionMode } from '@ogden-agents/shared';
 import { killProcessTree } from '../process-tree.js';
 import { withTimeout } from '../with-timeout.js';
-import { buildFixedStart, checkFixedModeWiring, namesForbiddenSwitch, startFixedMode, type FixedModeStart } from './fixed-mode.js';
+import { prepareBuildStart } from './build-start.js';
+import { buildFixedStart, checkFixedModeWiring, startFixedMode, type FixedModeStart } from './fixed-mode.js';
 import { createStreamMasker, maskSecrets, secretValues } from './mask.js';
 import { agentWords, modelOptionOf, modelsOf } from './models.js';
 import { answerPermissionRequest, type Diagnostic, type PermissionCallback } from './permission-request.js';
-import { acpAsksLessThanAsk, acpModeOf, acpReasons, type AcpAgentOptions, type AcpAgentQuirks, type AcpBuildStart, type AcpLaunch, type AcpLaunchInput } from './quirks.js';
+import { acpAsksLessThanAsk, acpModeOf, acpReasons, type AcpAgentOptions, type AcpAgentQuirks, type AcpLaunch, type AcpLaunchInput } from './quirks.js';
 
 export { acpAsksLessThanAsk, acpModeOf, acpReasons, slashSkillInvocation } from './quirks.js';
 export type { AcpAgentOptions, AcpAgentQuirks, AcpAuthChoice, AcpBuildSessionQuirk, AcpBuildStart, AcpLaunch, AcpLaunchInput, AcpStartOptions } from './quirks.js';
@@ -185,27 +186,10 @@ export function createAcpAgent(descriptor: AgentDescriptor, quirks: AcpAgentQuir
     },
     opening: Opening,
   ) => {
-    // Fail closed: an agent with no way to take the sandbox never runs a build session without one (story 5.2).
-    // Codex-style agents take it through their own start (epic 17: `buildSession`), and only when it is verified.
-    const buildQuirk = input.sandbox !== undefined ? quirks.buildSession : undefined;
-    if (input.sandbox !== undefined && quirks.sessionMeta === undefined && buildQuirk === undefined) {
-      throw new AgentError('agent_unavailable', `${descriptor.displayName} can't run a sandboxed build.`);
-    }
-    if (buildQuirk !== undefined && !buildQuirk.verified) {
-      throw new AgentError('agent_unavailable', `${descriptor.displayName} can't build unattended on this computer yet. Build with you watching instead.`);
-    }
+    // Fail closed, before anything is spawned (a quirk that throws must not leave a process behind): see `prepareBuildStart`.
+    const buildStart = prepareBuildStart(descriptor.displayName, quirks, input.sandbox, reasons);
     const startModel = descriptor.models?.list.some((each) => each.id === input.model) === true ? input.model : undefined;
     const permissionMode = input.permissionMode ?? 'ask';
-    // Before anything is spawned: a quirk that throws must not leave a process behind.
-    let buildStart: AcpBuildStart | undefined;
-    if (buildQuirk !== undefined && input.sandbox !== undefined) {
-      try {
-        buildStart = buildQuirk.start(input.sandbox);
-        if (namesForbiddenSwitch(buildStart)) throw new Error('a build start may not name a switch that skips a permission decision');
-      } catch (error) {
-        throw new AgentError('agent_unavailable', reasons.couldNotStart, { cause: error });
-      }
-    }
     const fixed = buildStart !== undefined ? buildFixedStart(buildStart, reasons) : startFixedModeSafely(permissionMode, input.protectedPaths);
     // Fail closed: a fixed-mode start has no place for the sandbox, so a build session never runs without it (story 5.2, epic 12).
     if (input.sandbox !== undefined && fixed !== undefined && buildStart === undefined) throw new AgentError('agent_unavailable', `${descriptor.displayName} can't run a sandboxed build.`);

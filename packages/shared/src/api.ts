@@ -541,7 +541,7 @@ export const API_ROUTES = {
    * a build step, naming the run the dialog started. It starts nothing: it records which run the step follows. 400 `invalid_request` when the run is not a build of the
    * step's ticket in this project (or came before the plan, or is linked already), 409 `step_not_proposed`, `run_not_open`.
    */
-  workspaceOrchestrationStepBuild: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId/steps/:stepId/build`,
+  workspaceOrchestrationStepLink: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId/steps/:stepId/link`,
   /** `POST` → `OrchestrationRunResponse` (15.6): the user skips a step that was not sent; it never dispatches and the steps that need it wait. 409 `step_not_changeable`. */
   workspaceOrchestrationStepSkip: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId/steps/:stepId/skip`,
   /** `POST ReorderOrchestrationStepsRequest` → `OrchestrationRunResponse` (15.6): the whole new order; 409 `bad_order` when a step would come before its prerequisite or a sent step moves, 409 `run_not_open`. */

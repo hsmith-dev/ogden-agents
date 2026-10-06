@@ -720,7 +720,7 @@ const EXPECTED_API_ROUTES = [
   `POST ${API_ROUTES.workspaceOrchestrationStepDispatch}`,
   `POST ${API_ROUTES.workspaceOrchestrationStepEdit}`,
   `POST ${API_ROUTES.workspaceOrchestrationStepSkip}`,
-  `POST ${API_ROUTES.workspaceOrchestrationStepBuild}`,
+  `POST ${API_ROUTES.workspaceOrchestrationStepLink}`,
   `POST ${API_ROUTES.workspaceOrchestrationReorder}`,
   `POST ${API_ROUTES.workspaceOrchestrationStop}`,
   `POST ${API_ROUTES.workspaceOrchestrationAnswer}`,

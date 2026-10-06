@@ -7,7 +7,7 @@
  * failure kind is told in plain words, and the masked answer is recorded. No
  * model, network or keychain.
  */
-import { MANAGER_DECISION_VERSION, MANAGER_PLAN_VERSION, MANAGER_REFUSAL_REASONS, type ManagerPlan } from '@ogden-agents/shared';
+import { MANAGER_DECISION_VERSION, MANAGER_PLAN_JSON_SCHEMA, MANAGER_PLAN_VERSION, MANAGER_PLAN_WITH_BUILDS_JSON_SCHEMA, MANAGER_REFUSAL_REASONS, type ManagerPlan } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import {
   EndpointConfirmationRequiredError,
@@ -120,6 +120,37 @@ describe('a good answer', () => {
     const result = await manager(port).proposePlan(context());
     expect(result).toMatchObject({ ok: false, kind: 'malformed', code: 'forbidden_field' });
     expect(JSON.stringify(result)).not.toContain('sk-ant');
+  });
+});
+
+describe('a build step (15.11)', () => {
+  const BUILD_PLAN = { version: MANAGER_PLAN_VERSION, goal: 'Build the first ticket', steps: [{ id: 'b1', build: { ticket: '1.1' }, reason: 'It is ready.', depends_on: [] }] };
+  const READY = [{ ref: '1.1', title: 'Build the login form' }];
+
+  it('is asked with the schema that has the build kind only when a ticket is ready, and with the worker step alone otherwise', async () => {
+    const withTickets = scripted([ok(BUILD_PLAN)]);
+    const accepted = await manager(withTickets.port).proposePlan(context({ buildable: READY }));
+    expect(accepted).toMatchObject({ ok: true, record: { outcome: 'accepted' } });
+    expect(withTickets.requests[0]!.request.schema).toEqual(MANAGER_PLAN_WITH_BUILDS_JSON_SCHEMA);
+    expect(withTickets.requests[0]!.request.prompt).toContain('- 1.1: Build the login form');
+
+    const without = scripted([ok(PLAN)]);
+    await manager(without.port).proposePlan(context());
+    expect(without.requests[0]!.request.schema).toEqual(MANAGER_PLAN_JSON_SCHEMA);
+    expect(without.requests[0]!.request.prompt).not.toContain('ready to build');
+    // A decision is asked with its own schema whatever is ready.
+    const decision = scripted([ok(DISPATCH)]);
+    await manager(decision.port).decideNext(decideContext({ buildable: READY }));
+    expect(decision.requests[0]!.request.schemaName).toBe('manager_decision');
+  });
+
+  it('is refused for a ticket that is not ready, or one that names how to build, after one repair, with the rule only in our words', async () => {
+    const unready = scripted([ok(BUILD_PLAN)]);
+    const refused = await manager(unready.port).proposePlan(context());
+    expect(refused).toMatchObject({ ok: false, kind: 'malformed', code: 'build_ticket_unavailable', record: { outcome: 'refused', repaired: true } });
+    expect(unready.requests).toHaveLength(2);
+    const named = scripted([ok({ ...BUILD_PLAN, steps: [{ ...BUILD_PLAN.steps[0]!, agent: 'alpha', mode: 'unattended' }] })]);
+    expect(await manager(named.port).proposePlan(context({ buildable: READY }))).toMatchObject({ ok: false, code: 'build_field_forbidden', reason: MANAGER_REFUSAL_REASONS.build_field_forbidden });
   });
 });
 

@@ -32,6 +32,7 @@ import {
   MANAGER_DECISION_JSON_SCHEMA,
   MANAGER_LIMITS,
   MANAGER_PLAN_JSON_SCHEMA,
+  MANAGER_PLAN_WITH_BUILDS_JSON_SCHEMA,
   MANAGER_REFUSAL_REASONS,
   redactSecrets,
   type LocalEndpointId,
@@ -200,7 +201,8 @@ export function createModelManager({ port, endpoints, endpointId, model, context
     const place: LocalModelTarget = { baseUrl: target.baseUrl, key: target.key, preset: target.preset };
 
     const contextTokens = await (contextOf?.(place, model, signal) ?? Promise.resolve(undefined)).catch(() => undefined);
-    const schema = kind === 'plan' ? MANAGER_PLAN_JSON_SCHEMA : MANAGER_DECISION_JSON_SCHEMA;
+    // A plan may hold a build step only when some ticket is ready to build (15.11): the schema asked with has that kind then, and not otherwise.
+    const schema = kind === 'plan' ? ((context.buildable?.length ?? 0) > 0 ? MANAGER_PLAN_WITH_BUILDS_JSON_SCHEMA : MANAGER_PLAN_JSON_SCHEMA) : MANAGER_DECISION_JSON_SCHEMA;
     const built = buildManagerInput(kind, context, inputBudgetChars(contextTokens), JSON.stringify(schema).length);
     if (!built.ok) {
       contextOf?.forget?.(place, model);

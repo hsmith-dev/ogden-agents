@@ -508,7 +508,8 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
   const buildRunOf = (workspaceId: WorkspaceId, ticketRef: string, buildRunId: string): { view: OrchestrationBuildRunView; blockedCode: string | null; reason: string | null } | undefined => {
     const row = orm.select().from(runsTable).where(eq(runsTable.id, buildRunId)).get();
     if (row === undefined || row.workspaceId !== workspaceId || row.ticketRef !== ticketRef) return undefined;
-    const reason = row.outcome === 'blocked' && row.blockedCode !== null ? blockedSentence(row.blockedCode) : row.reason;
+    // Only Ogden's own sentence for a blocked build: a stored reason may hold the build agent's words, which the manager never reads.
+    const reason = row.outcome === 'blocked' && row.blockedCode !== null ? blockedSentence(row.blockedCode) : null;
     return {
       view: { runId: row.id as OrchestrationBuildRunView['runId'], outcome: row.outcome, decision: row.decision, checks: checksOf(workspaceId, row.sessionId as SessionId) },
       blockedCode: row.blockedCode,
@@ -1520,7 +1521,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
         // and not the run of another step. Nothing is started and nothing is decided by this.
         const build = orm.select().from(runsTable).where(eq(runsTable.id, parsed.data.runId)).get();
         const taken = orm.select({ stepId: orchestrationSteps.stepId }).from(orchestrationSteps).where(eq(orchestrationSteps.buildRunId, parsed.data.runId)).get();
-        if (build === undefined || build.workspaceId !== workspaceId || build.ticketRef !== step.buildRef || Date.parse(build.createdAt) < Date.parse(live.createdAt) || taken !== undefined) {
+        if (build === undefined || build.workspaceId !== workspaceId || build.ticketRef !== step.buildRef || !(Date.parse(build.createdAt) >= Date.parse(live.createdAt)) || taken !== undefined) {
           throw new ValidationError(ORCHESTRATION_BUILD_NOT_THIS_TICKET_MESSAGE, []);
         }
         orm.update(orchestrationSteps).set({ state: 'dispatched', approvedBy: 'user', buildRunId: build.id }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, step.stepId))).run();

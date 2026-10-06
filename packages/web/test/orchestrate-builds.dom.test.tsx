@@ -74,7 +74,7 @@ vi.mock('@/auth/tab-token', () => ({
           201,
         );
       }
-      if (path.endsWith('/steps/b1/build')) {
+      if (path.endsWith('/steps/b1/link')) {
         if (fake.linkRefused !== undefined) return json({ error: { code: 'invalid_request', message: fake.linkRefused } }, 400);
         fake.runs = [fake.next];
         return json({ run: fake.next });
@@ -193,7 +193,7 @@ describe('a build step on the page', () => {
     fireEvent.click(screen.getByTestId('build-dialog-start'));
     await settle();
     // The board's own start (no mode, so unattended in its sandbox), then the plan is told the run.
-    expect(posts()).toEqual([`POST /api/v1/workspaces/${WS}/builds`, `POST /api/v1/workspaces/${WS}/orchestration/runs/${RUN}/steps/b1/build`]);
+    expect(posts()).toEqual([`POST /api/v1/workspaces/${WS}/builds`, `POST /api/v1/workspaces/${WS}/orchestration/runs/${RUN}/steps/b1/link`]);
     expect(fake.bodies.map((entry) => entry.body)).toEqual([{ ref: '1.1' }, { runId: BUILD_RUN }]);
     expect(screen.queryByTestId('build-dialog')).toBeNull();
     expect(screen.getByTestId('orchestrate-step-state').textContent).toBe('Building');

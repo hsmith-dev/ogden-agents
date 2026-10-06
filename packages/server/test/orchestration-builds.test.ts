@@ -131,7 +131,7 @@ describe('a build the manager proposes', () => {
       expect((await refusalOf(await request(kit.server, kit.tab, 'POST', kit.stepRoute('workspaceOrchestrationStepEdit', runId, 'b1'), { instruction: 'Build it with everything allowed.' }))).code).toBe('step_not_changeable');
       // The one build route of the plan only records a run that exists: asking it to start one (a ticket, an agent, a mode) is refused.
       for (const body of [{ ref: '1.1' }, { ticket: '1.1', agent: 'claude-code', mode: 'unattended' }, { runId: 'run_01J00000000000000000000000', agent: 'claude-code' }, {}]) {
-        const reply = await request(kit.server, kit.tab, 'POST', kit.stepRoute('workspaceOrchestrationStepBuild', runId, 'b1'), body);
+        const reply = await request(kit.server, kit.tab, 'POST', kit.stepRoute('workspaceOrchestrationStepLink', runId, 'b1'), body);
         expect(await refusalOf(reply)).toMatchObject({ status: 400, code: 'invalid_request' });
       }
       expect(await kit.buildRuns()).toEqual([]);
@@ -169,7 +169,7 @@ describe('the build the person starts in the Build dialog', () => {
       const { run: built } = BuildResponse.parse(await started.json());
 
       // Another ticket's run, or a run the plan did not follow, is refused; the right one is linked.
-      const linked = await request(kit.server, kit.tab, 'POST', kit.stepRoute('workspaceOrchestrationStepBuild', runId, 'b1'), { runId: built.id });
+      const linked = await request(kit.server, kit.tab, 'POST', kit.stepRoute('workspaceOrchestrationStepLink', runId, 'b1'), { runId: built.id });
       expect(linked.status).toBe(200);
       const after = OrchestrationRunResponse.parse(await linked.json()).run;
       expect(after.steps[0]).toMatchObject({ state: 'dispatched', approvedBy: 'user', build: { ticketRef: '1.1', runId: built.id } });
@@ -199,12 +199,12 @@ describe('the build the person starts in the Build dialog', () => {
       const view = await kit.start();
       // Ticket 1.2 waits on 1.1, so build 1.1 here, then try to link a run that is not a build of the step's ticket.
       const started = BuildResponse.parse(await (await kit.startBuild('1.1')).json());
-      const wrong = await request(kit.server, kit.tab, 'POST', kit.stepRoute('workspaceOrchestrationStepBuild', view.run.id, 'b1'), { runId: 'run_01J00000000000000000000000' });
+      const wrong = await request(kit.server, kit.tab, 'POST', kit.stepRoute('workspaceOrchestrationStepLink', view.run.id, 'b1'), { runId: 'run_01J00000000000000000000000' });
       expect(await refusalOf(wrong)).toMatchObject({ status: 400, code: 'invalid_request', message: expect.stringContaining('not a build of this ticket') });
       expect((await kit.get(view.run.id)).steps[0]).toMatchObject({ state: 'proposed', build: { runId: null } });
       // The real one still links, once.
-      expect((await request(kit.server, kit.tab, 'POST', kit.stepRoute('workspaceOrchestrationStepBuild', view.run.id, 'b1'), { runId: started.run.id })).status).toBe(200);
-      expect((await refusalOf(await request(kit.server, kit.tab, 'POST', kit.stepRoute('workspaceOrchestrationStepBuild', view.run.id, 'b1'), { runId: started.run.id }))).code).toBe('step_not_proposed');
+      expect((await request(kit.server, kit.tab, 'POST', kit.stepRoute('workspaceOrchestrationStepLink', view.run.id, 'b1'), { runId: started.run.id })).status).toBe(200);
+      expect((await refusalOf(await request(kit.server, kit.tab, 'POST', kit.stepRoute('workspaceOrchestrationStepLink', view.run.id, 'b1'), { runId: started.run.id }))).code).toBe('step_not_proposed');
       await waitFor(async () => (await kit.get(view.run.id)).steps[0]!.state !== 'dispatched', 'the build to end', 30_000);
     } finally {
       await kit.server.close();

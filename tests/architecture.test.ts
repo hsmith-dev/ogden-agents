@@ -939,7 +939,7 @@ describe('E15: a build is started only in the Build dialog (story 15.11)', () =>
     // It reads the run table and writes the step; it makes no run, session or chat.
     expect(link).not.toMatch(/createRun|createSession|createChatSession|sendMessage|insert\(runsTable\)|update\(runsTable\)/);
     const routes = files.find((file) => ORCHESTRATION_ROUTES.test(file.path))!.source;
-    expect(routes).toContain('workspaceOrchestrationStepBuild');
+    expect(routes).toContain('workspaceOrchestrationStepLink');
     expect(routes).not.toMatch(/API_ROUTES\.workspaceBuild/);
   });
 

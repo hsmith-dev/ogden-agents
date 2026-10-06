@@ -319,18 +319,27 @@ function exportable(schema: unknown): unknown {
 
 const jsonSchemaOf = (schema: z.ZodType): Readonly<Record<string, unknown>> => exportable(z.toJSONSchema(schema, { target: 'draft-7', io: 'input', unrepresentable: 'any' })) as Record<string, unknown>;
 
+/** The plan's schema for steps that go to workers, as the server is asked with it when no build may be proposed (nothing is ready to build). */
+const workPlanSchema = (): Readonly<Record<string, unknown>> => {
+  const base = jsonSchemaOf(ManagerPlan) as { properties: { steps: { items?: unknown } } };
+  base.properties.steps.items = jsonSchemaOf(ManagerPlanStep);
+  return base;
+};
+export const MANAGER_PLAN_JSON_SCHEMA = workPlanSchema();
+
 /**
- * The plan's schema as the server is asked with it. A step is one object with the fields of either kind, only `id` and `depends_on` required
- * (the subset has no `anyOf`); Ogden's own check refuses a step that mixes the two or names anything more.
+ * The plan's schema when a build may be proposed (15.11: some ticket is ready to build). A step is one object with the fields of either kind,
+ * only `id` and `depends_on` required (the subset has no `anyOf`), so the server's own check is looser here; Ogden's check refuses a step
+ * that mixes the two, names anything more or leaves out what its kind needs. Nothing in it names how to build.
  */
-const planSchema = (): Readonly<Record<string, unknown>> => {
+const planWithBuildsSchema = (): Readonly<Record<string, unknown>> => {
   const base = jsonSchemaOf(ManagerPlan) as { properties: { steps: { items?: unknown } } };
   const work = jsonSchemaOf(ManagerPlanStep) as { properties: Record<string, unknown> };
   const build = jsonSchemaOf(ManagerBuildStep) as { properties: Record<string, unknown> };
   base.properties.steps.items = { type: 'object', properties: { ...work.properties, ...build.properties }, required: ['id', 'depends_on'], additionalProperties: false };
   return base;
 };
-export const MANAGER_PLAN_JSON_SCHEMA = planSchema();
+export const MANAGER_PLAN_WITH_BUILDS_JSON_SCHEMA = planWithBuildsSchema();
 export const MANAGER_DECISION_JSON_SCHEMA = jsonSchemaOf(ManagerDecision);
 export const MANAGER_STATUS_JSON_SCHEMA = jsonSchemaOf(ManagerStatusReport);
 

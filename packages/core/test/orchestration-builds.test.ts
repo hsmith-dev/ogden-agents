@@ -391,10 +391,11 @@ describe('a build step follows its build run', () => {
     const view = await kit.orchestration.getRun(kit.workspaceId, run.id);
     expect(view.steps[0]).toMatchObject({ state: 'failed', buildRun: { outcome: 'failed', checks: { passed: 2, failed: 1, notRun: 0 } } });
     expect(view.steps[0]!.report).toMatchObject({ state: 'error' });
-    expect(view.steps[0]!.report!.summary).toContain('3 tests failed');
+    expect(view.steps[0]!.report!.summary).toContain('Build of ticket 1.1 failed');
+    // The agent's own words in a stored reason never reach the manager.
+    expect(view.steps[0]!.report!.summary).not.toContain('3 tests failed');
     expect(view.steps[0]!.report!.summary).not.toContain('sk-ant');
-    expect(view.steps[0]!.report!.summary.length).toBeLessThan(1_300);
-    expect(view.run).toMatchObject({ state: 'failed', stopReason: 'worker_error' });
+        expect(view.run).toMatchObject({ state: 'failed', stopReason: 'worker_error' });
   });
 
   it.each([

@@ -239,7 +239,7 @@ export function registerOrchestrationRoutes(app: Hono, { orchestration, permissi
   // The person's own call, after the Build dialog started a build for a build step (15.11): it names the run the dialog started. It starts
   // nothing and approves nothing: it records which run the step follows. No route of orchestration starts a build; the dialog's own start
   // is `POST /builds`, and nothing the manager's code can reach calls either (an architecture test).
-  routes.post(API_ROUTES.workspaceOrchestrationStepBuild, async (c, { workspaceId }) => {
+  routes.post(API_ROUTES.workspaceOrchestrationStepLink, async (c, { workspaceId }) => {
     let answer: Response | undefined;
     const tooLong = await reviewLimit(c, async () => {
       const body = await readJson(c);

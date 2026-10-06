@@ -72,11 +72,11 @@ export async function answerOrchestrationQuestion(wsId: string, runId: string, a
 }
 
 /**
- * `POST …/steps/:stepId/build` (15.11): after the Build dialog started a build for a build step, tells the plan which run it was. It starts
+ * `POST …/steps/:stepId/link` (15.11): after the Build dialog started a build for a build step, tells the plan which run it was. It starts
  * nothing: the dialog's own start already did, and the server checks the run is a build of the step's ticket in this project.
  */
 export async function linkOrchestrationBuild(wsId: string, runId: string, stepId: string, buildRunId: string, auth: Auth = tabAuth): Promise<OrchestrationRunView> {
-  const json = await call(auth, apiPath(API_ROUTES.workspaceOrchestrationStepBuild, { wsId, runId, stepId }), postJson({ runId: buildRunId }), ORCHESTRATION_BUILD_LINK_FAILED);
+  const json = await call(auth, apiPath(API_ROUTES.workspaceOrchestrationStepLink, { wsId, runId, stepId }), postJson({ runId: buildRunId }), ORCHESTRATION_BUILD_LINK_FAILED);
   return OrchestrationRunResponse.parse(json).run;
 }
 

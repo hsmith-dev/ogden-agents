@@ -135,9 +135,10 @@ export type CatalogAgent = z.infer<typeof CatalogAgent>;
  * its surface in reduced mode with {@link BMAD_CAPABILITY_REDUCED_TEXT}.
  *
  * - `plain_labels`: plain-language labels, groups and the entry action (the fork label patch, entry 4.5);
- * - `ticket_tree`: the v7 ticket tree `tickets.py` reads (the Board).
+ * - `ticket_tree`: the v7 ticket tree `tickets.py` reads (the Board);
+ * - `look_back`: an installed, verified retrospective skill with an epic scope in the label mapping (epic 7).
  */
-export const BMAD_CAPABILITIES = ['plain_labels', 'ticket_tree'] as const;
+export const BMAD_CAPABILITIES = ['plain_labels', 'ticket_tree', 'look_back'] as const;
 export const BmadCapability = z.enum(BMAD_CAPABILITIES);
 export type BmadCapability = z.infer<typeof BmadCapability>;
 
@@ -145,23 +146,29 @@ export type BmadCapability = z.infer<typeof BmadCapability>;
 export const BMAD_CAPABILITY_REDUCED_TEXT: Readonly<Record<BmadCapability, string>> = {
   plain_labels: "This project's BMad Method has actions Ogden Agents doesn't know, so starting from an idea isn't available and its actions show without plain names or groups.",
   ticket_tree: "This project's BMad Method doesn't keep tickets the way Ogden Agents reads them, so the board isn't available.",
+  look_back: "This project's BMad Method has no step for looking back on an epic that Ogden Agents knows, so looking back isn't available.",
 };
 
 /** Which capabilities the project's installed metadata has: every one is listed, `true` or `false`. */
-export const BmadCapabilities = z.object({ plain_labels: z.boolean(), ticket_tree: z.boolean() });
+export const BmadCapabilities = z.object({
+  plain_labels: z.boolean(),
+  ticket_tree: z.boolean(),
+  /** Added by epic 7: an answer from before it reads as present, so no old fixture is put in reduced mode by it. */
+  look_back: z.boolean().default(true),
+});
 export type BmadCapabilities = z.infer<typeof BmadCapabilities>;
 
 /**
  * The capabilities each piece needs (entry 4.11, AD-14): Planning the plain
- * labels and the entry action, Board the ticket tree. Builds and
- * retrospectives need none until epics 5 and 7 say otherwise. A capability
+ * labels and the entry action, Board the ticket tree, Retrospectives the
+ * look-back step (epic 7). Builds needs none. A capability
  * is read (and its notice shown) only for a piece that is on.
  */
 export const BMAD_PIECE_CAPABILITIES: Readonly<Record<BmadPiece, readonly BmadCapability[]>> = {
   planning: ['plain_labels'],
   board: ['ticket_tree'],
   builds: [],
-  retrospectives: [],
+  retrospectives: ['look_back'],
 };
 
 /** The capabilities `pieces` need, each once, in {@link BMAD_CAPABILITIES} order. */

@@ -49,4 +49,4 @@ Open review items carried (deferred-work): Codex's sandbox is not given the run'
 
 ## Review Triage Log
 
-(filled after the review)
+One review (an independent agent) compared the moved code with the previous code: behaviour identical (the fail closed checks keep their order and all run before anything is spawned; the Claude Code path, attended and chat starts, an unverified quirk, a forbidden switch, a throwing start, and the fixed-mode refusal for Grok-like agents are unchanged; the per-agent sandbox's check, status and run are line for line the old code). No finding.

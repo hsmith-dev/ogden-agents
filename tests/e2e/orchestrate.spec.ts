@@ -15,9 +15,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import { apiPath } from '../../packages/shared/src/api.ts';
 import { startFakeServer } from '../fixtures/fake-openai-server.mjs';
-import { API_ROUTES, fakeSecondAgent, serverModule } from '../support.js';
+import { API_ROUTES, fakeSecondAgent, serverModule, startServer } from '../support.js';
 import { withChatServer } from './chat-server.js';
-import { storedToken } from './tab.js';
+import { openConnected, storedToken } from './tab.js';
 
 /** Opens the project at `repo` through the REST API, with this tab's token, as the app does. */
 async function addProject(page: Page, repo: string): Promise<string> {
@@ -498,5 +498,192 @@ test('a Stop cannot be blocked: with the piece switched off the run still stops,
       await expect(page.getByTestId('orchestrate-run')).toHaveAttribute('data-run-state', 'stopped');
     },
     { extra: { manager: createMemoryManager() } },
+  );
+});
+
+
+// ---- the loop (15.9) ----
+
+const claudePlan = {
+  version: 'ogden.manager.plan.v1',
+  goal: 'Add a contact form',
+  steps: [
+    { id: 's1', worker: 'claude-code', chat: 'new', instruction: 'permission', mode: 'ask', depends_on: [] },
+    { id: 's2', worker: 'claude-code', chat: 'new', instruction: 'Add the form fields.', mode: 'ask', depends_on: ['s1'] },
+  ],
+};
+const row = (page: Page, id: string) => page.locator(`[data-testid="orchestrate-step"][data-step-id="${id}"]`);
+
+test('a requested shell command waits on its card: the run pauses with a link to that chat, the user answers on the worker\'s own card, and the run goes on with the manager\'s suggestion', async ({ page }) => {
+  const { createMemoryManager } = await serverModule();
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const wsId = await addProject(page, repo);
+      const origin = server.url;
+      const headers = { authorization: `Bearer ${(await storedToken(page))!}`, origin, 'content-type': 'application/json' };
+      await fetch(`${origin}${apiPath(API_ROUTES.workspaceSettings, { wsId })}`, { method: 'PATCH', headers, body: JSON.stringify({ orchestrationEnabled: true }) });
+      await page.goto(`${origin}/w/${wsId}/orchestrate`);
+      await page.getByTestId('orchestrate-goal').fill('Add a contact form');
+      await page.getByTestId('orchestrate-plan').click();
+      await row(page, 's1').getByTestId('orchestrate-approve').click();
+
+      // The worker asks to run a command: the run pauses, plainly, with a link to the chat that holds the card.
+      await expect(page.getByTestId('orchestrate-run')).toHaveAttribute('data-run-state', 'paused');
+      await expect(page.getByTestId('orchestrate-run-state')).toHaveText('Paused, waiting for you');
+      await expect(page.getByTestId('orchestrate-waiting-words')).toHaveText("A worker is waiting for your answer on its permission card, so the run is paused. Answer the card in the worker's chat and the run goes on.");
+      // Nothing answers it here, and nothing else is offered meanwhile (only Stop).
+      await expect(page.getByTestId('orchestrate-approve')).toHaveCount(0);
+      await expect(page.getByTestId('orchestrate-stop')).toBeVisible();
+      await page.waitForTimeout(800);
+      await expect(page.getByTestId('orchestrate-run')).toHaveAttribute('data-run-state', 'paused');
+
+      // The user answers on the worker's own card.
+      await page.getByTestId('orchestrate-waiting-chat').click();
+      await expect(page.getByTestId('permission-card')).toBeVisible();
+      await expect(page.getByTestId('permission-command')).toHaveText('npm test');
+      await page.getByTestId('permission-card').getByRole('button', { name: 'Allow once' }).click();
+      await expect(page.getByTestId('message-agent').last()).toContainText('Ran npm test.');
+      await page.goBack();
+
+      // The run goes on: the step finished, and the manager suggests the next one, which still waits for the user.
+      await expect(row(page, 's1').getByTestId('orchestrate-step-state')).toHaveText('Finished');
+      await expect(page.getByTestId('orchestrate-decision')).toContainText('The manager suggests step s2 next.');
+      await expect(row(page, 's2').getByTestId('orchestrate-step-suggested')).toBeVisible();
+      await expect(row(page, 's2').getByTestId('orchestrate-step-state')).toHaveText('Waiting for you');
+      await row(page, 's2').getByTestId('orchestrate-approve').click();
+      await expect(page.getByTestId('orchestrate-run')).toHaveAttribute('data-run-state', 'finished');
+    },
+    { extra: { manager: createMemoryManager({ plans: [claudePlan] }) } },
+  );
+});
+
+test('Deny on the worker\'s card ends the step, stops the run, and the manager is told it was denied', async ({ page }) => {
+  const { createMemoryManager } = await serverModule();
+  const manager = createMemoryManager({ plans: [claudePlan], decisions: [{ version: 'ogden.manager.decision.v1', action: 'stop', reason: 'The command was denied, so I stop.' }] });
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const wsId = await addProject(page, repo);
+      const origin = server.url;
+      const headers = { authorization: `Bearer ${(await storedToken(page))!}`, origin, 'content-type': 'application/json' };
+      await fetch(`${origin}${apiPath(API_ROUTES.workspaceSettings, { wsId })}`, { method: 'PATCH', headers, body: JSON.stringify({ orchestrationEnabled: true }) });
+      await page.goto(`${origin}/w/${wsId}/orchestrate`);
+      await page.getByTestId('orchestrate-goal').fill('Add a contact form');
+      await page.getByTestId('orchestrate-plan').click();
+      await row(page, 's1').getByTestId('orchestrate-approve').click();
+      await expect(page.getByTestId('orchestrate-run')).toHaveAttribute('data-run-state', 'paused');
+      await page.getByTestId('orchestrate-waiting-chat').click();
+      await page.getByTestId('permission-card').getByRole('button', { name: 'Deny' }).click();
+      await expect(page.getByTestId('permission-record')).toContainText('Denied: npm test');
+      await page.goBack();
+
+      await expect(page.getByTestId('orchestrate-run')).toHaveAttribute('data-run-state', 'stopped');
+      await expect(row(page, 's1').getByTestId('orchestrate-step-state')).toHaveText('Denied, the step ended');
+      await expect(page.getByTestId('orchestrate-stop-reason')).toHaveAttribute('data-stop-reason', 'permission_denied');
+      await expect(row(page, 's2').getByTestId('orchestrate-step-state')).toHaveText('Not sent. The run was stopped.');
+      // The manager was told, and what it said is shown.
+      await expect(page.getByTestId('orchestrate-decision')).toContainText('The manager was told the permission was denied. It said: stop. The command was denied, so I stop.');
+      expect(manager.calls.filter((call) => call.method === 'decideNext')).toHaveLength(1);
+      await expect(page.getByTestId('orchestrate-activity-entry').first().getByTestId('orchestrate-activity-result')).toHaveText('Denied, the step ended');
+    },
+    { extra: { manager } },
+  );
+});
+
+test('the manager\'s question waits for the user, and the answer reaches the manager before it decides', async ({ page }) => {
+  const { createMemoryManager } = await serverModule();
+  const plan = { ...claudePlan, steps: [{ ...claudePlan.steps[0]!, instruction: 'Write the failing test first.' }, claudePlan.steps[1]!] };
+  const manager = createMemoryManager({
+    plans: [plan],
+    decisions: [
+      { version: 'ogden.manager.decision.v1', action: 'ask_user', reason: 'It needs a choice.', question: 'Which fields should the form have?' },
+      { version: 'ogden.manager.decision.v1', action: 'done', reason: 'The test is enough for now.' },
+    ],
+  });
+  await withChatServer(
+    page,
+    async ({ server, repo }) => {
+      const wsId = await addProject(page, repo);
+      const origin = server.url;
+      const headers = { authorization: `Bearer ${(await storedToken(page))!}`, origin, 'content-type': 'application/json' };
+      await fetch(`${origin}${apiPath(API_ROUTES.workspaceSettings, { wsId })}`, { method: 'PATCH', headers, body: JSON.stringify({ orchestrationEnabled: true }) });
+      await page.goto(`${origin}/w/${wsId}/orchestrate`);
+      await page.getByTestId('orchestrate-goal').fill('Add a contact form');
+      await page.getByTestId('orchestrate-plan').click();
+      await row(page, 's1').getByTestId('orchestrate-approve').click();
+      await expect(page.getByTestId('orchestrate-question')).toHaveText('Which fields should the form have?');
+      await expect(page.getByTestId('orchestrate-run-state')).toHaveText('Waiting for you');
+      await page.getByTestId('orchestrate-answer').fill('Name and email');
+      await page.getByTestId('orchestrate-answer-send').click();
+      // The manager decides with the answer; here it says the goal is done.
+      await expect(page.getByTestId('orchestrate-run')).toHaveAttribute('data-run-state', 'finished');
+      await expect(page.getByTestId('orchestrate-decision')).toContainText('The manager says the goal is done. The test is enough for now.');
+      await expect(row(page, 's2').getByTestId('orchestrate-step-state')).toHaveText('Not needed, the manager said the goal is done');
+    },
+    { extra: { manager } },
+  );
+});
+
+test('a restart in the middle of an automatic run picks it up without a second dispatch, and it goes on when the worker finishes', async ({ page }) => {
+  const { createMemoryManager } = await serverModule();
+  const plan = {
+    version: 'ogden.manager.plan.v1',
+    goal: 'Add a contact form',
+    steps: [
+      { id: 's1', worker: 'fake-codex', chat: 'new', instruction: 'permission', mode: 'ask', depends_on: [] },
+      { id: 's2', worker: 'fake-grok', chat: 'new', instruction: 'Add the form fields.', mode: 'ask', depends_on: ['s1'] },
+    ],
+  };
+  const manager = createMemoryManager({ plans: [plan] });
+  const extra = { manager, extraAgents: [await apiKeyWorker('fake-codex', 'Fake Codex'), await apiKeyWorker('fake-grok', 'Fake Grok')] };
+  await withChatServer(
+    page,
+    async ({ server, repo, dataDir }) => {
+      const wsId = await addProject(page, repo);
+      const headers = { authorization: `Bearer ${(await storedToken(page))!}`, origin: server.url, 'content-type': 'application/json' };
+      expect((await fetch(`${server.url}${apiPath(API_ROUTES.workspaceSettings, { wsId })}`, { method: 'PATCH', headers, body: JSON.stringify({ orchestrationEnabled: true, orchestrationRoster: rosterOf('fake-codex', 'fake-grok'), orchestrationMode: 'automatic', confirm: true }) })).status).toBe(200);
+      await page.goto(`${server.url}/w/${wsId}/orchestrate`);
+      await page.getByTestId('orchestrate-goal').fill('Add a contact form');
+      await page.getByTestId('orchestrate-plan').click();
+      // The first instruction went by itself and its worker waits on a card.
+      await expect(page.getByTestId('orchestrate-run')).toHaveAttribute('data-run-state', 'paused');
+      await expect(page.getByTestId('orchestrate-waiting')).toHaveAttribute('data-waiting', 'permission_card');
+      await server.close();
+
+      // The app starts again on the same data folder.
+      const second = await startServer(dataDir, 0, extra);
+      try {
+        await openConnected(page, `/w/${wsId}/orchestrate`, second.launchUrl);
+        await expect(page.getByTestId('orchestrate-waiting')).toHaveAttribute('data-waiting', 'interrupted');
+        await expect(page.getByTestId('orchestrate-waiting-words')).toContainText('Ogden Agents was restarted while a worker was in the middle of its turn. Nothing was sent again.');
+        await expect(page.getByTestId('orchestrate-run-counter')).toHaveText('1 of 20 instructions sent. Dispatching automatically.');
+        await expect(row(page, 's1').getByTestId('orchestrate-step-state')).toHaveText('Sent, the worker is on it');
+        await expect(row(page, 's2').getByTestId('orchestrate-step-state')).toHaveText('Waiting for you');
+
+        // The user lets the worker carry on in its own chat; when it finishes, the run goes on by itself, and the first instruction is never sent again.
+        await page.getByTestId('orchestrate-waiting-chat').click();
+        const composer = page.getByRole('textbox', { name: 'Message Fake Codex' });
+        await composer.fill('Please carry on.');
+        await composer.press('Enter');
+        await expect(composer).toHaveValue('');
+        await expect(page.getByTestId('message-agent').last()).toContainText('Hello from the fake agent.');
+        await page.goBack();
+        await expect(page.getByTestId('orchestrate-run')).toHaveAttribute('data-run-state', 'finished', { timeout: 20_000 });
+        await expect(page.getByTestId('orchestrate-run-counter')).toHaveText('2 of 20 instructions sent. Dispatching automatically.');
+        await expect(page.getByTestId('orchestrate-activity-entry')).toHaveCount(2);
+        const origins = await page.evaluate(
+          async ({ url, wsId: ws, token }) => {
+            const list = (await (await fetch(`${url}/api/v1/workspaces/${ws}/sessions`, { headers: { authorization: `Bearer ${token}` } })).json()) as { sessions: unknown[] };
+            return list.sessions.length;
+          },
+          { url: second.url, wsId, token: (await storedToken(page))! },
+        );
+        expect(origins).toBe(2);
+      } finally {
+        await second.close();
+      }
+    },
+    { extra },
   );
 });

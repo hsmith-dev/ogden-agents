@@ -1,8 +1,12 @@
 import {
   MANAGER_LIMITS,
+  ORCHESTRATION_DECISION_UNAVAILABLE_WORDS,
   ORCHESTRATION_MODE_INFO,
   ORCHESTRATION_NEEDS_YOUR_APPROVAL,
   ORCHESTRATION_NO_MANAGER_MESSAGE,
+  ORCHESTRATION_TOLD_WORDS,
+  ORCHESTRATION_WAITING_CARD_WORDS,
+  ORCHESTRATION_WAITING_INTERRUPTED_WORDS,
   orchestrationStopWords,
   type OrchestrationActivityEntry,
   type OrchestrationMode,
@@ -50,7 +54,7 @@ const RUN_STATE_WORDS: Readonly<Record<OrchestrationRunView['run']['state'], str
   planning: 'The manager is thinking',
   awaiting_user: 'Waiting for you',
   running: 'Working',
-  paused: 'Paused',
+  paused: 'Paused, waiting for you',
   stopped: 'Stopped',
   finished: 'Finished',
   failed: 'The run failed',
@@ -88,6 +92,8 @@ export interface OrchestrateViewProps {
   /** The whole new order of the steps, by step id. */
   onReorder: (order: string[]) => void;
   onStop: () => void;
+  /** Sends the user's answer to the manager's question; resolves true when it was kept (the box clears). */
+  onAnswer?: ((answer: string) => Promise<boolean>) | undefined;
   /** A stop request is in flight. */
   stopping: boolean;
   /** The project's mode now (15.8). Absent from an older server: Approve each instruction. */
@@ -108,7 +114,7 @@ interface StepActions {
   onMove: (stepId: string, by: -1 | 1) => void;
 }
 
-export function OrchestrateView({ wsId, managerReady, managerMessage, run, busy, error, onStart, onApprove, onSend, onEdit, onSkip, onReorder, onStop, stopping, mode = 'approve_each', activity, activityError }: OrchestrateViewProps) {
+export function OrchestrateView({ wsId, managerReady, managerMessage, run, busy, error, onStart, onApprove, onSend, onEdit, onSkip, onReorder, onStop, onAnswer, stopping, mode = 'approve_each', activity, activityError }: OrchestrateViewProps) {
   const [goal, setGoal] = useState('');
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -148,7 +154,7 @@ export function OrchestrateView({ wsId, managerReady, managerMessage, run, busy,
           </Notice>
         )}
       </PageSection>
-      {run === undefined ? null : <RunSection wsId={wsId} view={run} where={managerReady ? managerMessage : undefined} busy={busy} stopping={stopping} onApprove={onApprove} onSend={onSend} onEdit={onEdit} onSkip={onSkip} onReorder={onReorder} onStop={onStop} />}
+      {run === undefined ? null : <RunSection wsId={wsId} view={run} where={managerReady ? managerMessage : undefined} busy={busy} stopping={stopping} onApprove={onApprove} onSend={onSend} onEdit={onEdit} onSkip={onSkip} onReorder={onReorder} onStop={onStop} onAnswer={onAnswer} />}
       <ActivityLog wsId={wsId} entries={activity} error={activityError} />
     </div>
   );
@@ -175,11 +181,15 @@ interface RunSectionProps {
   onSkip: (stepId: string) => void;
   onReorder: (order: string[]) => void;
   onStop: () => void;
+  onAnswer?: ((answer: string) => Promise<boolean>) | undefined;
 }
 
-function RunSection({ wsId, view, where, busy, stopping, onApprove, onSend, onEdit, onSkip, onReorder, onStop }: RunSectionProps) {
-  const { run, steps } = view;
+function RunSection({ wsId, view, where, busy, stopping, onApprove, onSend, onEdit, onSkip, onReorder, onStop, onAnswer }: RunSectionProps) {
+  const { run, steps, waiting, decision } = view;
   const live = isLive(run.state);
+  // While the run is paused on a worker's card, nothing is approved or sent from here: the user answers on the worker's own card.
+  const canAct = live && run.state !== 'paused';
+  const suggested = live && decision?.action === 'dispatch' && ['proposed', 'approved'].includes(steps.find((one) => one.stepId === decision.stepId)?.state ?? '') ? decision.stepId : undefined;
   const stateOf = new Map(steps.map((step) => [step.stepId, step.state]));
   // The instruction counter: what was sent, nothing about money.
   const sent = steps.filter((step) => step.sessionId !== null).length;
@@ -215,7 +225,7 @@ function RunSection({ wsId, view, where, busy, stopping, onApprove, onSend, onEd
           {where}
         </Text>
       )}
-      {run.state === 'planning' ? <Thinking /> : null}
+      {run.state === 'planning' || view.thinking === true ? <Thinking /> : null}
       {run.stopReason === 'user' && run.state === 'stopped' ? (
         <Text variant="caption" data-testid="orchestrate-stopped-note">
           {orchestrationStopWords('user', run.limits)}
@@ -226,7 +236,9 @@ function RunSection({ wsId, view, where, busy, stopping, onApprove, onSend, onEd
           {orchestrationStopWords(run.stopReason, run.limits)}
         </Notice>
       ) : null}
-      {run.mode === 'automatic' && run.state === 'awaiting_user' && steps.some((step) => step.state === 'proposed' && step.dependsOn.every((id) => stateOf.get(id) === 'done')) ? (
+      {waiting == null ? null : <WaitingNote wsId={wsId} waiting={waiting} onAnswer={onAnswer} busy={busy} />}
+      <DecisionNote view={view} />
+      {waiting == null && run.mode === 'automatic' && run.state === 'awaiting_user' && steps.some((step) => step.state === 'proposed' && step.dependsOn.every((id) => stateOf.get(id) === 'done')) ? (
         <Text variant="caption" data-testid="orchestrate-needs-approval">
           {ORCHESTRATION_NEEDS_YOUR_APPROVAL}
         </Text>
@@ -240,8 +252,11 @@ function RunSection({ wsId, view, where, busy, stopping, onApprove, onSend, onEd
             stateOf={stateOf}
             first={at === 0}
             last={at === steps.length - 1}
-            live={live}
+            live={canAct}
             stopped={run.state === 'stopped'}
+            ended={run.state === 'finished' || run.state === 'failed' ? run.state : undefined}
+            denied={run.stopReason === 'permission_denied'}
+            suggested={suggested === step.stepId}
             actions={{ busy, onApprove, onSend, onEdit, onSkip, onMove: move }}
           />
         ))}
@@ -262,10 +277,16 @@ interface StepRowProps {
   last: boolean;
   live: boolean;
   stopped: boolean;
+  /** The run ended another way than a stop: finished (steps never sent are not needed) or failed. */
+  ended?: 'finished' | 'failed' | undefined;
+  /** A Deny ended the run: the step that failed was the one denied. */
+  denied?: boolean | undefined;
+  /** The manager suggested this step as the next one (15.9). */
+  suggested?: boolean | undefined;
   actions: StepActions;
 }
 
-function StepRow({ wsId, step, stateOf, first, last, live, stopped, actions }: StepRowProps) {
+function StepRow({ wsId, step, stateOf, first, last, live, stopped, ended, denied = false, suggested = false, actions }: StepRowProps) {
   const { busy, onApprove, onSend, onEdit, onSkip, onMove } = actions;
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(step.instruction);
@@ -273,7 +294,11 @@ function StepRow({ wsId, step, stateOf, first, last, live, stopped, actions }: S
   const skippedNeeds = waitingOn.filter((id) => stateOf.get(id) === 'skipped');
   const ready = waitingOn.length === 0;
   const changeable = live && canChange(step.state);
-  const stateWords = (stopped && !(step.state === 'failed' && step.sessionState === 'error') ? STOPPED_STEP_WORDS[step.state] : undefined) ?? STEP_STATE_WORDS[step.state];
+  const stateWords =
+    (denied && step.state === 'failed' ? 'Denied, the step ended' : undefined) ??
+    (ended === 'finished' && (step.state === 'proposed' || step.state === 'approved') ? 'Not needed, the manager said the goal is done' : undefined) ??
+    (stopped && !(step.state === 'failed' && step.sessionState === 'error') ? STOPPED_STEP_WORDS[step.state] : undefined) ??
+    STEP_STATE_WORDS[step.state];
   const save = () => {
     if (busy || text.trim() === '') return;
     void onEdit(step.stepId, text).then((kept) => {
@@ -288,6 +313,11 @@ function StepRow({ wsId, step, stateOf, first, last, live, stopped, actions }: S
           {step.workerLabel}
         </Badge>
         <Badge data-testid="orchestrate-step-state">{stateWords}</Badge>
+        {suggested ? (
+          <Badge variant="outline" data-testid="orchestrate-step-suggested">
+            The manager suggests this next
+          </Badge>
+        ) : null}
         {step.approvedBy === 'mode' && step.state !== 'proposed' ? (
           <Badge variant="outline" data-testid="orchestrate-step-approver">
             Sent automatically
@@ -418,12 +448,73 @@ function StepRow({ wsId, step, stateOf, first, last, live, stopped, actions }: S
   );
 }
 
+/** Why the run waits, in plain words: a worker's card (answered on the worker's own card), the manager's question, or a worker the restart cut off. */
+function WaitingNote({ wsId, waiting, onAnswer, busy }: { wsId: string; waiting: NonNullable<OrchestrationRunView['waiting']>; onAnswer?: ((answer: string) => Promise<boolean>) | undefined; busy: boolean }) {
+  const [answer, setAnswer] = useState('');
+  if (waiting.kind === 'question') {
+    const submit = (event: FormEvent) => {
+      event.preventDefault();
+      if (answer.trim() === '' || busy || onAnswer === undefined) return;
+      void onAnswer(answer).then((kept) => {
+        if (kept) setAnswer('');
+      });
+    };
+    return (
+      <Notice variant="info" infoGlyph role="status" data-testid="orchestrate-waiting" data-waiting="question">
+        <div className="flex flex-col gap-2">
+          <Text variant="label">The manager is asking you a question</Text>
+          <Text data-testid="orchestrate-question">{waiting.question}</Text>
+          <form className="flex flex-col gap-2" onSubmit={submit} data-testid="orchestrate-answer-form">
+            <Field id="orchestrate-answer" label="Your answer" description="The manager reads it as information, then decides what comes next.">
+              <Input id="orchestrate-answer" data-testid="orchestrate-answer" value={answer} maxLength={MANAGER_LIMITS.maxGoalChars} disabled={busy} onChange={(event) => setAnswer(event.target.value)} />
+            </Field>
+            <Button type="submit" size="sm" className="self-start" data-testid="orchestrate-answer-send" aria-disabled={busy || answer.trim() === ''}>
+              Send answer
+            </Button>
+          </form>
+        </div>
+      </Notice>
+    );
+  }
+  const card = waiting.kind === 'permission_card';
+  return (
+    <Notice variant="info" infoGlyph role="status" data-testid="orchestrate-waiting" data-waiting={waiting.kind}>
+      <div className="flex flex-col gap-2">
+        <Text data-testid="orchestrate-waiting-words">{card ? ORCHESTRATION_WAITING_CARD_WORDS : ORCHESTRATION_WAITING_INTERRUPTED_WORDS}</Text>
+        <Link to="/w/$wsId/s/$sesId" params={{ wsId, sesId: waiting.sessionId }} className="text-label underline" data-testid="orchestrate-waiting-chat">
+          {card ? 'Open the worker chat to answer the card' : 'Open the worker chat'}
+        </Link>
+      </div>
+    </Notice>
+  );
+}
+
+/** What the manager decided last, in plain words (15.9): its suggestion, its question's answer pending, that it said done or stop, or that it could not decide. */
+function DecisionNote({ view }: { view: OrchestrationRunView }) {
+  const { run, decision } = view;
+  if (decision == null) return null;
+  const live = isLive(run.state);
+  let words: string | undefined;
+  if (decision.told !== undefined) words = `${ORCHESTRATION_TOLD_WORDS[decision.told]} It said: ${decision.action === 'unavailable' ? 'nothing usable' : `${decision.action.replace('_', ' ')}. ${decision.reason}`}`;
+  else if (decision.action === 'dispatch' && live) words = `The manager suggests step ${decision.stepId ?? ''} next. ${decision.reason}`;
+  else if (decision.action === 'done') words = `The manager says the goal is done. ${decision.reason}`;
+  else if (decision.action === 'stop') words = `The manager chose to stop. ${decision.reason}`;
+  else if (decision.action === 'unavailable' && live) words = ORCHESTRATION_DECISION_UNAVAILABLE_WORDS;
+  if (words === undefined) return null;
+  return (
+    <Text variant="caption" data-testid="orchestrate-decision" data-action={decision.action} data-told={decision.told}>
+      {words}
+    </Text>
+  );
+}
+
 const ACTIVITY_RESULT_WORDS: Readonly<Record<OrchestrationActivityEntry['result'], string>> = {
   working: 'The worker is on it',
   finished: 'Finished',
   failed: 'Failed',
   refused: 'Not sent',
   stopped: 'Stopped before it finished',
+  denied: 'Denied, the step ended',
 };
 
 /** When something happened, in the reader's own time zone, to the minute. */

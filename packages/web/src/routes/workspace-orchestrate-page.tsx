@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from '@tanstack/react-router';
 import { useState } from 'react';
 import {
+  answerOrchestrationQuestion,
   approveOrchestrationStep,
   dispatchOrchestrationStep,
   editOrchestrationStep,
@@ -167,6 +168,7 @@ function OrchestrateOn({ wsId }: { wsId: string }) {
               return dispatchOrchestrationStep(wsId, run.run.id, stepId);
             })
       }
+      onAnswer={(answer) => (run === undefined ? Promise.resolve(false) : act(() => answerOrchestrationQuestion(wsId, run.run.id, answer)))}
       onSend={(stepId) => (run === undefined ? undefined : void act(() => dispatchOrchestrationStep(wsId, run.run.id, stepId)))}
     />
   );

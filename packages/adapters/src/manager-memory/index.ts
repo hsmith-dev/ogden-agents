@@ -8,6 +8,7 @@
  * it plans one step per ready worker, in order, and dispatches them in turn.
  */
 import {
+  dispatchableSteps,
   MANAGER_FAILURE_WORDS,
   validateDecisionFor,
   validatePlanFor,
@@ -64,7 +65,8 @@ export function createMemoryManager(script: MemoryManagerScript = {}): MemoryMan
   const defaultDecision = (context: ManagerDecisionContext): ManagerDecision => {
     const ids = context.plan.steps.map((step) => step.id);
     const after = context.lastReport === undefined ? -1 : ids.indexOf(context.lastReport.step_id);
-    const nextId = ids[after + 1];
+    // With the run's step states (15.9): the first step that can be sent now; without them, the one after the last report.
+    const nextId = dispatchableSteps(context)?.[0] ?? (context.stepStates === undefined ? ids[after + 1] : undefined);
     return nextId === undefined
       ? { version: MANAGER_DECISION_VERSION, action: 'done', reason: 'Every step has been done.' }
       : { version: MANAGER_DECISION_VERSION, action: 'dispatch', reason: 'It is the next step.', step_id: nextId };

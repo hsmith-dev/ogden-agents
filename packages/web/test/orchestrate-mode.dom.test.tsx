@@ -316,7 +316,7 @@ describe('the Orchestrate page under each mode', () => {
     cleanup();
     fake.runs = [view([step('s1')], 'stopped', { stopReason: 'dispatch_refused' })];
     await mount(<WorkspaceOrchestratePage />);
-    expect(screen.getByTestId('orchestrate-stop-reason').textContent).toBe('The run stopped because an instruction could not be sent. The activity log says why.');
+    expect(screen.getByTestId('orchestrate-stop-reason').textContent).toBe('The run stopped because an instruction could not be sent. The activity log says why. The manager was told.');
     cleanup();
     fake.runs = [view([step('s1')], 'stopped', { stopReason: 'time_limit', limits: { maxInstructions: 20, maxDepth: 3, maxMinutes: 12 } })];
     await mount(<WorkspaceOrchestratePage />);

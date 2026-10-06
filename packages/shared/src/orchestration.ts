@@ -73,6 +73,7 @@ export const MANAGER_REFUSAL_CODES = [
   'bad_text',
   'bad_reference',
   'unknown_step',
+  'step_not_available',
 ] as const;
 export const ManagerRefusalCode = z.enum(MANAGER_REFUSAL_CODES);
 export type ManagerRefusalCode = z.infer<typeof ManagerRefusalCode>;
@@ -103,6 +104,7 @@ export const MANAGER_REFUSAL_REASONS: Readonly<Record<ManagerRefusalCode, string
   bad_text: 'The manager sent text with characters that are not allowed.',
   bad_reference: 'The manager named a step or a chat in a way Ogden does not accept.',
   unknown_step: 'The manager chose a step that is not in the plan.',
+  step_not_available: 'The manager chose a step that cannot be sent now: it is not waiting, or a step it needs is not finished.',
 };
 
 export type ManagerCheck<T> = { ok: true; value: T } | { ok: false; code: ManagerRefusalCode; reason: string };
@@ -370,6 +372,11 @@ export function checkManagerPlan(value: unknown, context: ManagerPlanCheckContex
 export interface ManagerDecisionCheckContext {
   /** The ids of the steps in the plan. A decision may only name one of them. */
   planStepIds: readonly string[];
+  /**
+   * The ids of the steps that may be sent now: still waiting, with every step they need done (15.9). When given, a `dispatch` may name only
+   * one of them. Absent: any step of the plan (older callers).
+   */
+  dispatchable?: readonly string[] | undefined;
 }
 
 /**
@@ -386,6 +393,7 @@ export function checkManagerDecision(value: unknown, context: ManagerDecisionChe
   // Whatever the action, a step the decision names must be a step of the plan.
   if (stepId !== undefined && !context.planStepIds.includes(stepId)) return refuse('unknown_step');
   if (action === 'ask_user' && question === undefined) return refuse('missing_field');
+  if (action === 'dispatch' && context.dispatchable !== undefined && !context.dispatchable.includes(stepId!)) return refuse('step_not_available');
   return { ok: true, value: parsed.data };
 }
 
@@ -458,8 +466,8 @@ export const BoundedRunLimits = z.strictObject({
 
 /**
  * How deep a step is (15.8): a step that needs nothing is at depth 1, and any other is one deeper than the deepest step it needs, so a
- * run's depth is its longest chain of `depends_on`. (The manager's own decisions nest no deeper than that until the loop, entry 9,
- * which counts a decision that follows a result as one more level.) A step that needs one not in the list is counted as if it did not.
+ * run's depth is its longest chain of `depends_on`. (The loop, 15.9, adds no level: the manager can only choose among the plan's steps, so a
+ * decision never nests deeper than the plan does.) A step that needs one not in the list is counted as if it did not.
  */
 export function stepDepths(steps: ReadonlyArray<{ stepId: string; dependsOn: readonly string[] }>): Map<string, number> {
   const needs = new Map(steps.map((step) => [step.stepId, step.dependsOn]));
@@ -525,7 +533,7 @@ export const Approver = z.enum(APPROVERS);
 export type Approver = z.infer<typeof Approver>;
 
 /** Why a run stopped. */
-export const ORCHESTRATION_STOP_REASONS = ['user', 'instruction_limit', 'depth_limit', 'time_limit', 'manager_refused', 'worker_error', 'permission_denied', 'dispatch_refused'] as const;
+export const ORCHESTRATION_STOP_REASONS = ['user', 'instruction_limit', 'depth_limit', 'time_limit', 'manager_refused', 'worker_error', 'permission_denied', 'dispatch_refused', 'manager_stopped', 'restarted'] as const;
 export const OrchestrationStopReason = z.enum(ORCHESTRATION_STOP_REASONS);
 export type OrchestrationStopReason = z.infer<typeof OrchestrationStopReason>;
 
@@ -627,7 +635,44 @@ export const OrchestrationStepView = OrchestrationStep.extend({
 });
 export type OrchestrationStepView = z.infer<typeof OrchestrationStepView>;
 
-export const OrchestrationRunView = z.object({ run: OrchestrationRun, steps: z.array(OrchestrationStepView) });
+/**
+ * What the manager decided last (15.9), as the page shows it: its action (or `unavailable` when it gave none), its masked reason, the step it
+ * suggests, the question it asks, and `told` when it was only told what happened (a Deny or a refused dispatch) after the run had stopped.
+ */
+export const DECISION_OUTCOMES = [...DECISION_ACTIONS, 'unavailable'] as const;
+export const DecisionOutcome = z.enum(DECISION_OUTCOMES);
+export type DecisionOutcome = z.infer<typeof DecisionOutcome>;
+export const OrchestrationDecisionView = z.object({
+  action: DecisionOutcome,
+  reason: z.string().min(1).max(400),
+  stepId: ManagerStepId.optional(),
+  question: z.string().max(MANAGER_LIMITS.maxQuestionChars).optional(),
+  told: z.enum(['denied', 'refused']).optional(),
+  at: IsoUtcTimestamp,
+});
+export type OrchestrationDecisionView = z.infer<typeof OrchestrationDecisionView>;
+
+/**
+ * Why a live run is waiting, plainly (15.9): a worker's permission card nobody has answered (the user answers on the worker's own card),
+ * a question from the manager, or a worker the restart cut off in the middle of its turn.
+ */
+export const OrchestrationWaiting = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('permission_card'), stepId: ManagerStepId, sessionId: SessionId }),
+  z.object({ kind: z.literal('question'), question: z.string().min(1).max(MANAGER_LIMITS.maxQuestionChars) }),
+  z.object({ kind: z.literal('interrupted'), stepId: ManagerStepId, sessionId: SessionId }),
+]);
+export type OrchestrationWaiting = z.infer<typeof OrchestrationWaiting>;
+
+export const OrchestrationRunView = z.object({
+  run: OrchestrationRun,
+  steps: z.array(OrchestrationStepView),
+  /** Why the run waits, when it does (15.9). Absent from older servers. */
+  waiting: OrchestrationWaiting.nullable().optional(),
+  /** The manager's latest decision after the latest result (15.9), or what it said when told of a Deny or a refusal. */
+  decision: OrchestrationDecisionView.nullable().optional(),
+  /** The manager is working out the next decision right now (15.9); the user may still act meanwhile. */
+  thinking: z.boolean().optional(),
+});
 export type OrchestrationRunView = z.infer<typeof OrchestrationRunView>;
 
 /** `POST …/orchestration/runs`, `GET …/runs/:runId` and each step action. */
@@ -768,9 +813,13 @@ export function orchestrationStopWords(reason: OrchestrationStopReason, limits: 
     case 'worker_error':
       return 'A worker hit an error, so the run stopped.';
     case 'permission_denied':
-      return 'A permission was denied, so the run stopped.';
+      return "A permission request in a worker's chat was denied, so that step ended and the run stopped. The manager was told.";
     case 'dispatch_refused':
-      return 'The run stopped because an instruction could not be sent. The activity log says why.';
+      return 'The run stopped because an instruction could not be sent. The activity log says why. The manager was told.';
+    case 'manager_stopped':
+      return 'The manager decided to stop the run. Nothing more was sent.';
+    case 'restarted':
+      return 'Ogden Agents was restarted while the manager was making the plan, so the run stopped. Start it again.';
   }
 }
 
@@ -797,7 +846,7 @@ export const OrchestrationActivityEntry = z.object({
   /** The start of the instruction, masked. */
   instruction: z.string().max(200),
   /** Where it stands: sent and the worker is on it, finished, failed, refused or stopped. */
-  result: z.enum(['working', 'finished', 'failed', 'refused', 'stopped']),
+  result: z.enum(['working', 'finished', 'failed', 'refused', 'stopped', 'denied']),
   /** Plain words: why it was refused, or the start of the worker's reply (masked). Empty when there is nothing to say. */
   note: z.string().max(300),
 });
@@ -809,3 +858,31 @@ export const OrchestrationActivityResponse = z.object({
 });
 export type OrchestrationActivityResponse = z.infer<typeof OrchestrationActivityResponse>;
 export const ORCHESTRATION_ACTIVITY_PAGE = 100;
+
+// ---- the loop (15.9) ----
+
+/** What the user types to answer the manager's question: a sentence or two, folded to one line. Masked and kept as data for the manager. */
+export const AnswerOrchestrationQuestionRequest = z.object({
+  answer: z
+    .string()
+    .transform((text) => text.replace(/\s+/g, ' ').trim())
+    .pipe(line(MANAGER_LIMITS.maxGoalChars)),
+});
+export type AnswerOrchestrationQuestionRequest = z.infer<typeof AnswerOrchestrationQuestionRequest>;
+
+export const ORCHESTRATION_NO_QUESTION_MESSAGE = 'The manager is not asking you anything right now.';
+export const ORCHESTRATION_ANSWER_BAD_TEXT_MESSAGE = 'Write your answer in a sentence or two, up to 500 characters.';
+export const ORCHESTRATION_ANSWER_SECRET_MESSAGE = ORCHESTRATION_EDIT_SECRET_MESSAGE;
+
+/** What the page says while a worker's permission card waits: the user answers on the worker's own card, never here. */
+export const ORCHESTRATION_WAITING_CARD_WORDS = "A worker is waiting for your answer on its permission card, so the run is paused. Answer the card in the worker's chat and the run goes on.";
+export const ORCHESTRATION_WAITING_INTERRUPTED_WORDS = 'Ogden Agents was restarted while a worker was in the middle of its turn. Nothing was sent again. Open its chat to let it continue, or stop the run.';
+/** What the page says when the manager gave no usable next decision and the run waits for the user's own pick. */
+export const ORCHESTRATION_DECISION_UNAVAILABLE_WORDS = 'The manager could not suggest the next step, so the choice is yours.';
+
+/** What the told manager's reply is shown as, when the run had already stopped. */
+export const ORCHESTRATION_TOLD_WORDS = { denied: 'The manager was told the permission was denied.', refused: 'The manager was told the instruction could not be sent.' } as const;
+
+/** What a worker's summary says for a step a Deny or a refusal ended: Ogden's own words, handed to the manager as the step's result. */
+export const ORCHESTRATION_DENIED_RESULT = 'Ogden: the user denied a permission request for this step, so the step ended before it finished.';
+export const orchestrationRefusedResult = (words: string): string => `Ogden: the instruction was not sent. ${words}`;

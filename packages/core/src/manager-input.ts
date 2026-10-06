@@ -149,17 +149,22 @@ export function buildManagerInput(kind: 'plan' | 'decision', context: ManagerCon
       })
       .join('\n');
     const parts: string[] = [
-      kind === 'plan' ? 'Task: write a plan for the goal. Steps wait on earlier steps through depends_on.' : 'Task: decide the next action for the plan below, given the last report. Choose dispatch (with the step_id of a step in the plan), ask_user (with a question), done or stop.',
+      kind === 'plan' ? 'Task: write a plan for the goal. Steps wait on earlier steps through depends_on.' : 'Task: decide the next action for the plan below, given the last report. Choose dispatch (with the step_id of a step marked waiting whose needs are done), ask_user (with a question), done or stop. You cannot add steps or change them.',
       datum('goal', goal),
       level.project === 0 ? '' : datum('project', cut(project, level.project)),
       `Ready workers (name only these ids):\n${roster === '' ? '(none)' : roster}`,
     ];
     if (plan !== undefined) {
-      parts.push(`The plan so far:\n${datum('plan', plan.steps.map((step) => `- ${step.id} for ${cleanForManager(step.worker)}, after [${step.depends_on.join(' ')}]: ${cut(cleanForManager(step.instruction).replace(/\s+/g, ' '), level.instruction)}`).join('\n'))}`);
+      const states = 'stepStates' in context ? context.stepStates : undefined;
+      parts.push(`The plan so far:\n${datum('plan', plan.steps.map((step) => `- ${step.id}${states?.[step.id] === undefined ? '' : ` (${states[step.id] === 'proposed' ? 'waiting' : states[step.id]})`} for ${cleanForManager(step.worker)}, after [${step.depends_on.join(' ')}]: ${cut(cleanForManager(step.instruction).replace(/\s+/g, ' '), level.instruction)}`).join('\n'))}`);
     }
     if (report !== undefined) {
       parts.push(`The last step, ${report.step_id}, done by ${cleanForManager(report.worker)}, ended as ${report.state}${report.truncated ? ' (its output was already cut)' : ''}. Its output is the worker's own text:`);
       parts.push(datum('worker-output', level.report === 0 ? '[left out to make room]' : cut(report.summary, level.report)));
+    }
+    if ('userAnswer' in context && context.userAnswer !== undefined && context.userAnswer !== '') {
+      parts.push("The user's answer to your last question, in their own words:");
+      parts.push(datum('user-answer', cut(cleanForManager(context.userAnswer), 500)));
     }
     const prompt = parts.filter((part) => part !== '').join('\n\n');
     if (budgetCost(MANAGER_SYSTEM_TEXT) + budgetCost(prompt) + schemaChars <= budgetChars) return { ok: true, input: { system: MANAGER_SYSTEM_TEXT, prompt, cut: index > 0 } };

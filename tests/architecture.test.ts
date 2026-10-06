@@ -594,7 +594,7 @@ export function findOrchestrationViolations(files: readonly SourceFile[]): strin
  * `dispatchStep`). A manager's answer is data; there is no function it can
  * reach that approves, edits, skips, reorders or stops.
  */
-const USER_ACTIONS = /\b(approveStep|editStep|skipStep|reorderSteps|stopRun)\b/;
+const USER_ACTIONS = /\b(approveStep|editStep|skipStep|reorderSteps|stopRun|answerQuestion)\b/;
 /** The manager's own code: core's manager files and the fake manager. */
 const MANAGER_CODE = /(^|[\\/])packages[\\/]core[\\/]src[\\/](?:manager-[\w-]+|model-manager)\.ts$|(^|[\\/])packages[\\/]adapters[\\/]src[\\/](?:manager-memory|local-model[\w-]*)[\\/]/;
 const ORCHESTRATION_USE_CASE = /(^|[\\/])packages[\\/]core[\\/]src[\\/]orchestration\.ts$/;
@@ -629,7 +629,7 @@ export function findUserActionReaches(files: readonly SourceFile[]): string[] {
     }
     // Outside core and its tests, only the server's orchestration routes call the use-cases.
     if (/(^|[\\/])packages[\\/]server[\\/]src[\\/]/.test(path) && !USER_ACTION_CALLERS.test(path)) {
-      for (const match of code.matchAll(/\.(approveStep|editStep|skipStep|reorderSteps|stopRun)\(/g)) violations.push(`${path}: calls ${match[1]} (E15: only orchestration-routes.ts, a user's route, may)`);
+      for (const match of code.matchAll(/\.(approveStep|editStep|skipStep|reorderSteps|stopRun|answerQuestion)\(/g)) violations.push(`${path}: calls ${match[1]} (E15: only orchestration-routes.ts, a user's route, may)`);
     }
   }
   return violations;
@@ -785,6 +785,54 @@ describe('E15: orchestration code is tool-free and names no model product (story
       'packages/shared/src/orchestration.ts: imports child_process (E15: the manager has no shell, file, agent or credential)',
       'packages/adapters/src/manager-memory/index.ts: names the model product GPT (E15: the manager is whatever endpoint the user configured)',
       'packages/adapters/src/manager-memory/index.ts: imports ../../../core/src/agent-port.js (E15: the manager has no shell, file, agent or credential)',
+    ]);
+  });
+});
+
+/**
+ * E15 (story 15.9): the loop and the manager can never answer a permission card. A worker's card is the user's to answer on the worker's own
+ * card; the orchestration use-case (the loop, the pause, the Deny reading, the resume) only reads the worker session's events and state, and the
+ * manager's code never reaches the permission use-case. None of them names the permission answer (`decide`), a rule change (`removeRule`), the
+ * decision input, or a session event writer, so a card cannot be allowed or denied from there. The server's orchestration routes take only the
+ * settings read of the permissions use-case.
+ */
+const CARD_ANSWERS = /\b(decide(?=\s*\()|removeRule|PermissionDecisionInput|createPermissions|appendSessionEvent|completeMessage)\b/;
+const ORCHESTRATION_ROUTES = /(^|[\\/])packages[\\/]server[\\/]src[\\/]orchestration-routes\.ts$/;
+export function findCardAnswerReaches(files: readonly SourceFile[]): string[] {
+  const violations: string[] = [];
+  for (const { path, source } of files) {
+    if (!ORCHESTRATION_USE_CASE.test(path) && !MANAGER_CODE.test(path) && !ORCHESTRATION_ROUTES.test(path)) continue;
+    for (const match of withoutComments(source).matchAll(new RegExp(CARD_ANSWERS.source, 'g'))) violations.push(`${path}: names ${match[1]} (E15: the manager and the loop never answer a permission card)`);
+  }
+  return violations;
+}
+
+describe('E15: the manager and the loop never answer a permission card (story 15.9)', () => {
+  it('the orchestration use-case, the manager code and the orchestration routes name no way to answer a card or write a session event', () => {
+    const files = loadWorkspaceSources();
+    expect(files.some((file) => ORCHESTRATION_USE_CASE.test(file.path))).toBe(true);
+    expect(files.some((file) => ORCHESTRATION_ROUTES.test(file.path))).toBe(true);
+    expect(files.filter((file) => MANAGER_CODE.test(file.path)).length).toBeGreaterThan(3);
+    expect(findCardAnswerReaches(files)).toEqual([]);
+  });
+
+  it('the orchestration use-case reads a Deny from the session events (it only reads them)', () => {
+    const source = loadWorkspaceSources().find((file) => ORCHESTRATION_USE_CASE.test(file.path))!.source;
+    expect(source).toContain("'permission.resolved'");
+    expect(source).not.toMatch(/\.append\(\{\s*type:\s*'permission\./);
+  });
+
+  it('flags a planted card answer in the use-case, the manager code or the routes', () => {
+    const files: SourceFile[] = [
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/orchestration.ts', source: "// decide is only a word here\npermissions.decide(ws, session, request, { decision: 'allow_once' });" },
+      { pkg: '@ogden-agents/core', path: 'packages/core/src/model-manager.ts', source: 'permissions.removeRule(ws, rule);' },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/orchestration-routes.ts', source: 'sessionEvents.appendSessionEvent(id, event);' },
+      { pkg: '@ogden-agents/server', path: 'packages/server/src/permission-routes.ts', source: 'permissions.decide(a, b, c, d);' },
+    ];
+    expect(findCardAnswerReaches(files)).toEqual([
+      'packages/core/src/orchestration.ts: names decide (E15: the manager and the loop never answer a permission card)',
+      'packages/core/src/model-manager.ts: names removeRule (E15: the manager and the loop never answer a permission card)',
+      'packages/server/src/orchestration-routes.ts: names appendSessionEvent (E15: the manager and the loop never answer a permission card)',
     ]);
   });
 });

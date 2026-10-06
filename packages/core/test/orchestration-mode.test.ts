@@ -21,6 +21,7 @@ import { describe, expect, it } from 'vitest';
 import { ConfirmationRequiredError, createNewProjectDefaults, NotFoundError, StepNotApprovedError, ValidationError, validatePlanFor, type Core, type ManagerPort, type OrchestrationChat } from '../src/index.js';
 import { openDatabase } from '../src/db/database.js';
 import { openTestCore, tempDir } from './helpers.js';
+import { decideInOrder } from './orchestration-fixtures.js';
 
 const agentOf = (agentId: string, displayName: string, fields: Record<string, unknown> = {}) => ({
   agentId,
@@ -51,8 +52,8 @@ const stubManager = (plan: ManagerPlan): ManagerPort => ({
   async proposePlan(context) {
     return validatePlanFor(context, plan);
   },
-  async decideNext() {
-    return { ok: false, kind: 'unavailable', reason: 'not used here' };
+  async decideNext(context) {
+    return decideInOrder(context);
   },
 });
 

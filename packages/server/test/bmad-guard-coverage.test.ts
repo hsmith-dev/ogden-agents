@@ -62,6 +62,7 @@ const WORKSPACE_ROUTES_WITHOUT_A_PIECE: readonly string[] = [
   `POST ${API_ROUTES.workspaceOrchestrationStepSkip}`,
   `POST ${API_ROUTES.workspaceOrchestrationReorder}`,
   `POST ${API_ROUTES.workspaceOrchestrationStop}`,
+  `POST ${API_ROUTES.workspaceOrchestrationAnswer}`,
   `GET ${API_ROUTES.workspaceOrchestrationActivity}`,
   `GET ${API_ROUTES.workspaceBmadDetection}`,
   `DELETE ${API_ROUTES.workspaceBmadOffer}`,
@@ -98,6 +99,7 @@ const UNGUARDED_BY_DESIGN: readonly string[] = [
   `POST ${API_ROUTES.workspaceOrchestrationStepSkip}`,
   `POST ${API_ROUTES.workspaceOrchestrationReorder}`,
   `POST ${API_ROUTES.workspaceOrchestrationStop}`,
+  `POST ${API_ROUTES.workspaceOrchestrationAnswer}`,
   `GET ${API_ROUTES.workspaceOrchestrationActivity}`,
 ];
 

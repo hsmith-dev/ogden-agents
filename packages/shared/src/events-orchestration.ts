@@ -16,6 +16,7 @@ import { assigned, onWorkspaceStream } from './events-envelope.js';
 import { SessionId, OrchestrationRunId } from './ids.js';
 import {
   Approver,
+  DecisionOutcome,
   DispatchRefusalReason,
   ManagerDecision,
   ManagerFailureKind,
@@ -184,6 +185,45 @@ export const OrchestrationManagerRepliedInput = z.object({
 export const OrchestrationManagerRepliedEvent = OrchestrationManagerRepliedInput.extend(assigned);
 export type OrchestrationManagerRepliedEvent = z.infer<typeof OrchestrationManagerRepliedEvent>;
 
+export const OrchestrationDecisionMadeInput = z.object({
+  type: z.literal('orchestration.decision_made'),
+  ...onWorkspaceStream,
+  payload: z.object({
+    ...runId,
+    /** The step whose result led to the decision; `null` when none did. */
+    after: ManagerStepId.nullable(),
+    /** What the manager chose, or `unavailable` when it gave no usable decision. */
+    action: DecisionOutcome,
+    /** The manager's reason, masked (or Ogden's plain words for `unavailable`). */
+    reason: z.string().min(1).max(400),
+    stepId: ManagerStepId.optional(),
+    question: z.string().min(1).max(MANAGER_LIMITS.maxQuestionChars).optional(),
+    /** Set when the run had already ended (a Deny, a refused dispatch) and the manager was only told: its answer changes nothing. */
+    told: z.enum(['denied', 'refused']).optional(),
+  }),
+});
+/** The manager decided what comes next after a result (15.9). A run's loop state is read back from these events. */
+export const OrchestrationDecisionMadeEvent = OrchestrationDecisionMadeInput.extend(assigned);
+export type OrchestrationDecisionMadeEvent = z.infer<typeof OrchestrationDecisionMadeEvent>;
+
+export const OrchestrationQuestionAnsweredInput = z.object({
+  type: z.literal('orchestration.question_answered'),
+  ...onWorkspaceStream,
+  payload: z.object({ ...runId, answer: ManagerGoal }),
+});
+/** The user answered the manager's question (their words, masked). It goes to the manager as data on the next decision. */
+export const OrchestrationQuestionAnsweredEvent = OrchestrationQuestionAnsweredInput.extend(assigned);
+export type OrchestrationQuestionAnsweredEvent = z.infer<typeof OrchestrationQuestionAnsweredEvent>;
+
+export const OrchestrationRunResumedInput = z.object({
+  type: z.literal('orchestration.run_resumed'),
+  ...onWorkspaceStream,
+  payload: z.object({ ...runId, reason: z.enum(['card_answered', 'restart']) }),
+});
+/** A paused run goes on: the worker's card was answered, or the app restarted and the run was picked up from its events. */
+export const OrchestrationRunResumedEvent = OrchestrationRunResumedInput.extend(assigned);
+export type OrchestrationRunResumedEvent = z.infer<typeof OrchestrationRunResumedEvent>;
+
 /** Every orchestration event's input, for `NewCoreEvent`. */
 export const ORCHESTRATION_INPUTS = [
   OrchestrationRunStartedInput,
@@ -201,4 +241,7 @@ export const ORCHESTRATION_INPUTS = [
   OrchestrationRunFinishedInput,
   OrchestrationModeChangedInput,
   OrchestrationManagerRepliedInput,
+  OrchestrationDecisionMadeInput,
+  OrchestrationQuestionAnsweredInput,
+  OrchestrationRunResumedInput,
 ] as const;

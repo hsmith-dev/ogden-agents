@@ -40,6 +40,15 @@ import {
   RunLimits as RunLimitsSchema,
   RUN_LIMITS,
   stepDepths,
+  AnswerOrchestrationQuestionRequest,
+  ORCHESTRATION_ANSWER_BAD_TEXT_MESSAGE,
+  ORCHESTRATION_ANSWER_SECRET_MESSAGE,
+  ORCHESTRATION_DENIED_RESULT,
+  orchestrationRefusedResult,
+  OrchestrationDecisionView,
+  OrchestrationWaiting,
+  MANAGER_PLAN_VERSION,
+  type DecisionOutcome,
   StartOrchestrationRunRequest,
   EditOrchestrationStepRequest,
   ReorderOrchestrationStepsRequest,
@@ -50,12 +59,14 @@ import {
   canMoveRun,
   canMoveStep,
   makeStatusReport,
+  ManagerStatusReport as ManagerStatusReportSchema,
   redactSecrets,
   dispatchRefusalWords,
   type DispatchRefusalReason,
   MANAGER_LIMITS,
   ORCHESTRATION_NO_MANAGER_MESSAGE,
   type ManagerStatusView,
+  type ManagerDecision,
   type ManagerPlan,
   type ManagerStatusReport,
   type OrchestrationRunState,
@@ -65,14 +76,15 @@ import {
   type SessionId,
   type WorkspaceId,
 } from '@ogden-agents/shared';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { Database } from './db/database.js';
 import { events as eventsTable, orchestrationRuns, orchestrationSteps } from './db/schema.js';
 import { readAutomaticConfirmed, readDefaultPermissionMode, readOrchestrationMode } from './workspace-settings.js';
-import { AgentNotReadyError, BadOrderError, DispatchRefusedError, DriverIsTerminalError, ManagerFailedError, ManagerUnavailableError, NotFoundError, OrchestrationOffError, QueueFullError, RunNotOpenError, SessionBusyError, SessionNotIdleError, StepNotApprovedError, StepNotChangeableError, StepNotProposedError, UnknownAgentError, ValidationError } from './errors.js';
+import { AgentNotReadyError, BadOrderError, DispatchRefusedError, DriverIsTerminalError, ManagerFailedError, ManagerUnavailableError, NoQuestionPendingError, NotFoundError, OrchestrationOffError, QueueFullError, RunNotOpenError, SessionBusyError, SessionNotIdleError, StepNotApprovedError, StepNotChangeableError, StepNotProposedError, UnknownAgentError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import type { OrchestrationFeature } from './orchestration-feature.js';
-import type { ManagerContext, ManagerPort, ManagerRecord } from './manager-port.js';
+import { dispatchableSteps, MANAGER_FAILURE_WORDS, type ManagerContext, type ManagerDecisionContext, type ManagerPort, type ManagerRecord } from './manager-port.js';
+import { RESTARTED_REASON } from './chat/constants.js';
 import type { ManagerSource } from './manager-source.js';
 import { isSubscription, type Team } from './team-roster.js';
 import type { Chat } from './chat/types.js';
@@ -126,6 +138,18 @@ export interface Orchestration {
    * chat, when, and how it stands. No money, only what was sent.
    */
   activity(workspaceId: WorkspaceId): Promise<OrchestrationActivityEntry[]>;
+  /**
+   * The user answers the manager's question (15.9). The answer is masked, kept as `orchestration.question_answered` and goes to the manager
+   * as data with the next decision. {@link NoQuestionPendingError} when the run is not waiting for an answer, {@link RunNotOpenError} for an
+   * ended run, {@link ValidationError} for bad text or a secret.
+   */
+  answerQuestion(workspaceId: WorkspaceId, runId: string, request: unknown): Promise<OrchestrationRunView>;
+  /**
+   * Picks up every open run from its rows and events after a start (15.9): a run that was making its plan is closed (`restarted`), the
+   * others re-arm (the time limit counts from the run's start), settle what finished, ask for a decision that was owed, and never send
+   * an instruction that was already sent. Returns how many runs were picked up. The server calls it once, after it has its chat.
+   */
+  resume(): Promise<number>;
   /**
    * Resolves when no automatic dispatch is pending (15.8). A test awaits it after a worker finishes; the server never needs it.
    */
@@ -224,6 +248,11 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
   const moveRun = (runId: string, to: OrchestrationRunState, stopReason?: OrchestrationRun['stopReason']): void => {
     const row = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, runId)).get();
     if (row === undefined || row.state === to) return;
+    // A paused run has no way to `finished`: it is waiting again first (the worker's card was answered, so it is not paused any more).
+    if (row.state === 'paused' && to === 'finished') {
+      orm.update(orchestrationRuns).set({ state: 'awaiting_user', updatedAt: now() }).where(eq(orchestrationRuns.id, runId)).run();
+      row.state = 'awaiting_user';
+    }
     if (!canMoveRun(row.state as OrchestrationRunState, to)) return;
     orm.update(orchestrationRuns).set({ state: to, stopReason: stopReason ?? row.stopReason, updatedAt: now() }).where(eq(orchestrationRuns.id, runId)).run();
   };
@@ -301,6 +330,93 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     return tools === '' ? reply : reply === '' ? tools : `${tools}\n\n${reply}`;
   };
 
+  /**
+   * Whether a worker's permission card was Denied during this instruction (15.9): the title of the denied tool call (possibly empty), or
+   * `undefined`. Read from the worker session's own `permission.resolved` events since the manager's instruction, so it survives a restart.
+   * A card that was cancelled (the worker was stopped) is not a Deny.
+   */
+  const deniedSince = (workspaceId: WorkspaceId, sessionId: SessionId, instruction: string, reused: boolean): { title: string } | undefined => {
+    const page = events.readBefore(workspaceId, events.lastSeq() + 1, REPLY_WINDOW, sessionId);
+    const denied: string[] = [];
+    const titles = new Map<string, string>();
+    let found = false;
+    for (let at = page.events.length - 1; at >= 0; at--) {
+      const event = page.events[at]!;
+      if (event.type === 'permission.resolved') {
+        if (event.payload.decision === 'deny' && event.payload.by !== 'cancelled') denied.push(event.payload.requestId);
+      } else if (event.type === 'permission.requested') titles.set(event.payload.requestId, event.payload.toolCall.title);
+      else if (event.type === 'session.message_completed' && event.payload.role !== 'agent' && (event.payload.origin === 'manager' || event.payload.origin === 'manager_auto') && event.payload.content === instruction) {
+        found = true;
+        break;
+      }
+    }
+    if ((reused && !found) || denied.length === 0) return undefined;
+    return { title: redactSecrets(titles.get(denied[0]!) ?? '').replace(/\s+/g, ' ').trim().slice(0, 80) };
+  };
+
+  /** Whether the worker's chat was left idle because Ogden Agents restarted in the middle of its turn (its newest state change says so). */
+  const cutOffByRestart = (workspaceId: WorkspaceId, sessionId: SessionId): boolean => {
+    const page = events.readBefore(workspaceId, events.lastSeq() + 1, 60, sessionId);
+    for (let at = page.events.length - 1; at >= 0; at--) {
+      const event = page.events[at]!;
+      if (event.type === 'session.state_changed') return event.payload.state === 'idle' && event.payload.resumable === true && event.payload.reason === RESTARTED_REASON;
+    }
+    return false;
+  };
+
+  /**
+   * Where a run's loop stands, read from its events (15.9): the events are the log, so this is the same after a restart. After a step's
+   * result a decision is owed (carrying the capped report and, after a question, the user's answer); a decision made clears it.
+   */
+  interface LoopState {
+    owed: { after: string | null; report: ManagerStatusReport | null; answer: string | null } | null;
+    /** The latest decision since the latest result (or what the manager said when only told), as the page shows it. */
+    decision: OrchestrationDecisionView | null;
+    /** The step the latest result was about, and its report. */
+    lastAfter: string | null;
+    lastReport: ManagerStatusReport | null;
+  }
+  const loopOf = (workspaceId: WorkspaceId, runId: string): LoopState => {
+    const rows = orm
+      .select()
+      .from(eventsTable)
+      .where(and(eq(eventsTable.streamId, workspaceId), inArray(eventsTable.type, ['orchestration.result_read', 'orchestration.decision_made', 'orchestration.question_answered']), sql`json_extract(${eventsTable.payload}, '$.runId') = ${runId}`))
+      .orderBy(asc(eventsTable.seq))
+      .all();
+    const state: LoopState = { owed: null, decision: null, lastAfter: null, lastReport: null };
+    let askedAfter: string | null = null;
+    for (const row of rows) {
+      if (row.type === 'orchestration.result_read') {
+        const report = ManagerStatusReportSchema.safeParse((row.payload as { report?: unknown }).report);
+        // Only a step that finished asks for a decision; a failed or denied one ended the run.
+        if (!report.success || (report.data.state !== 'idle' && report.data.state !== 'done')) continue;
+        state.lastAfter = report.data.step_id;
+        state.lastReport = report.data;
+        state.owed = { after: report.data.step_id, report: report.data, answer: null };
+        state.decision = null;
+      } else if (row.type === 'orchestration.decision_made') {
+        const payload = row.payload as { after?: string | null; action?: string; reason?: string; stepId?: string; question?: string; told?: 'denied' | 'refused' };
+        const view = OrchestrationDecisionView.safeParse({ action: payload.action, reason: payload.reason, stepId: payload.stepId, question: payload.question, told: payload.told, at: row.at });
+        if (!view.success) continue;
+        state.decision = view.data;
+        // What the manager said when only told does not answer what is owed (the run had ended).
+        if (payload.told === undefined) {
+          state.owed = null;
+          askedAfter = payload.after ?? null;
+        }
+      } else if (row.type === 'orchestration.question_answered') {
+        if (state.owed === null && state.decision?.action === 'ask_user') {
+          state.owed = { after: askedAfter, report: state.lastReport, answer: (row.payload as { answer?: string }).answer ?? '' };
+          state.decision = null;
+        }
+      }
+    }
+    return state;
+  };
+
+  /** The manager of this project now, or `undefined` when none is ready (a test's fixed manager wins). */
+  const managerOf = (workspaceId: WorkspaceId): ManagerPort | undefined => fixedManager ?? (statusOf(workspaceId).state === 'ready' ? managers?.managerFor(workspaceId) : undefined);
+
   /** Reads back every dispatched step: its chat's state and a masked, capped report; settles a finished one once. */
   const readBack = async (workspaceId: WorkspaceId, given: RunRow, known?: Map<string, string>, quiet = false): Promise<OrchestrationRunView> => {
     const run = syncMode(workspaceId, given);
@@ -308,20 +424,51 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     const names = known ?? (await labels(workspaceId));
     const views: OrchestrationStepView[] = [];
     let settledAny = false;
+    let waiting: OrchestrationWaiting | null = null;
+    let denial: { step: StepRow; report: ManagerStatusReport } | undefined;
     for (const row of stepsOf(run.id)) {
       let step = stepOf(row);
       let sessionState: OrchestrationStepView['sessionState'] = null;
       let report: ManagerStatusReport | null = null;
-      if (step.sessionId !== null) {
+      const sid = step.sessionId;
+      if (sid !== null) {
         try {
-          sessionState = chat.getSession(workspaceId, step.sessionId).state;
+          sessionState = chat.getSession(workspaceId, sid).state;
         } catch (error) {
           if (!(error instanceof NotFoundError)) throw error;
           // The chat is gone (its history was deleted): the step reads as failed.
           sessionState = 'error';
         }
-        report = makeStatusReport({ stepId: step.stepId, worker: step.worker, state: sessionState, text: lastReply(workspaceId, step.sessionId, step.instruction, step.chat !== 'new') });
-        const finished = sessionState === 'idle' || sessionState === 'done';
+        report = makeStatusReport({ stepId: step.stepId, worker: step.worker, state: sessionState, text: lastReply(workspaceId, sid, step.instruction, step.chat !== 'new') });
+        const live = step.state === 'dispatched' && !isRunOver(run.state as OrchestrationRunState);
+        // A Deny of one of the worker's permission cards ends this step (15.9), whatever the worker does next: the run stops and the manager is told.
+        const denied = live && sessionState !== 'error' ? deniedSince(workspaceId, sid, step.instruction, step.chat !== 'new') : undefined;
+        if (denied !== undefined) {
+          const summary = `${ORCHESTRATION_DENIED_RESULT}${denied.title === '' ? '' : ` The request was: ${denied.title}.`}`;
+          const deniedReport = makeStatusReport({ stepId: step.stepId, worker: step.worker, state: 'error', text: summary });
+          const ended = events.transaction(() => {
+            const current = requireStep(run.id, step.stepId);
+            const runNow = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get();
+            if (current.state !== 'dispatched' || runNow === undefined || isRunOver(runNow.state as OrchestrationRunState)) return false;
+            orm.update(orchestrationSteps).set({ state: 'failed' }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, step.stepId))).run();
+            events.append({ type: 'orchestration.result_read', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], report: deniedReport } });
+            closeRunNow(workspaceId, run, 'stopped', 'permission_denied', []);
+            return true;
+          });
+          if (ended) {
+            disarm(run.id);
+            // The worker was told "no" and may be trying something else: its turn ends with the step.
+            if (sessionState === 'working') cancelTurns(workspaceId, [row]);
+            denial = { step: row, report: deniedReport };
+            step = { ...step, state: 'failed' };
+            report = deniedReport;
+            settledAny = true;
+          }
+        }
+        const cutOff = step.state === 'dispatched' && (sessionState === 'idle' || sessionState === 'done') && cutOffByRestart(workspaceId, sid);
+        const finished = (sessionState === 'idle' || sessionState === 'done') && !cutOff;
+        if (step.state === 'dispatched' && cutOff) waiting ??= { kind: 'interrupted', stepId: step.stepId, sessionId: sid };
+        if (step.state === 'dispatched' && sessionState === 'waiting') waiting ??= { kind: 'permission_card', stepId: step.stepId, sessionId: sid };
         if (step.state === 'dispatched' && (finished || sessionState === 'error')) {
           const to = finished ? 'done' : 'failed';
           const settled = events.transaction(() => {
@@ -354,9 +501,14 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       views.push(OrchestrationStepView.parse({ ...step, workerLabel: names.get(step.worker) ?? step.worker, sessionState, report }));
     }
     const fresh = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get() ?? run;
-    // A read that settled a step of a run that dispatches on its own lets it go on (the listener does the same when the worker's chat changes).
-    if ((settledAny || becameAutomatic) && !quiet && fresh.mode === 'automatic') scheduleAdvance(workspaceId, run.id);
-    return OrchestrationRunView.parse({ run: runOf(fresh), steps: views });
+    // A read that settled a step lets the run go on (the listener does the same when the worker's chat changes): its next decision, and the next step of an automatic run.
+    if (settledAny && !quiet) void scheduleAdvance(workspaceId, run.id);
+    else if (becameAutomatic && !quiet && fresh.mode === 'automatic') void scheduleAdvance(workspaceId, run.id);
+    if (denial !== undefined) tell(workspaceId, run.id, denial.step, denial.report, 'denied');
+    const loop = loopOf(workspaceId, run.id);
+    // A question the manager asked and the user has not answered (the run is live and waits for them).
+    if (waiting === null && isLive(fresh.state) && loop.decision?.action === 'ask_user' && loop.owed === null && loop.decision.question !== undefined) waiting = { kind: 'question', question: loop.decision.question };
+    return OrchestrationRunView.parse({ run: runOf(fresh), steps: views, waiting: isLive(fresh.state) ? waiting : null, decision: loop.decision, thinking: isLive(fresh.state) && planning.has(fresh.id) });
   };
 
   /** The worker's own chats the manager may continue: plain chats the terminal does not drive that are idle, newest first, a few. */
@@ -494,6 +646,12 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
    * `run_stopped` event; a step whose worker was cut off did not finish, so it is failed. Returns whether this call ended it. With
    * `strict`, a run that already ended is {@link RunNotOpenError} (the user's Stop); otherwise it is left as it is.
    */
+  /** The closing itself, for a caller that is already inside a transaction (15.9: a Deny closes the run in the same one that fails its step). */
+  const closeRunNow = (workspaceId: WorkspaceId, run: RunRow, to: 'stopped' | 'failed', reason: OrchestrationStopReason, inFlight: readonly StepRow[]): void => {
+    moveRun(run.id, to, reason);
+    for (const step of inFlight) orm.update(orchestrationSteps).set({ state: 'failed' }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, step.stepId), eq(orchestrationSteps.state, 'dispatched'))).run();
+    events.append({ type: 'orchestration.run_stopped', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], reason } });
+  };
   const closeRun = (workspaceId: WorkspaceId, run: RunRow, to: 'stopped' | 'failed', reason: OrchestrationStopReason, inFlight: readonly StepRow[], strict: boolean): boolean => {
     const ended = events.transaction(() => {
       const live = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get();
@@ -501,9 +659,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
         if (strict) throw new RunNotOpenError();
         return false;
       }
-      moveRun(run.id, to, reason);
-      for (const step of inFlight) orm.update(orchestrationSteps).set({ state: 'failed' }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, step.stepId), eq(orchestrationSteps.state, 'dispatched'))).run();
-      events.append({ type: 'orchestration.run_stopped', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], reason } });
+      closeRunNow(workspaceId, run, to, reason, inFlight);
       return true;
     });
     if (ended) disarm(run.id);
@@ -553,7 +709,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       let result: OrchestrationActivityEntry['result'] = 'refused';
       if (!refused) {
         if (step.state === 'done') result = 'finished';
-        else if (step.state === 'failed') result = run.stopReason !== null && run.stopReason !== 'worker_error' ? 'stopped' : 'failed';
+        else if (step.state === 'failed') result = run.stopReason === 'permission_denied' ? 'denied' : run.stopReason !== null && run.stopReason !== 'worker_error' ? 'stopped' : 'failed';
         else result = 'working';
       }
       const parsed = OrchestrationActivityEntry.safeParse({
@@ -575,17 +731,23 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     return entries.reverse().slice(0, ORCHESTRATION_ACTIVITY_PAGE);
   };
 
-  // ---- Dispatch automatically (15.8) ----
+  // ---- Dispatch automatically (15.8) and the loop (15.9) ----
 
   /**
-   * Core itself sends an automatic run's steps, one at a time, in the plan's order, when the one before has finished: `scheduleAdvance`
-   * is the only way in, run one at a time per run. Each pass re-reads everything (the project's mode, the piece, the run, the steps), so
-   * a pass that is late or repeated does nothing wrong. It stops at the first refusal, error or limit with a plain reason. The manager
-   * has no way to call it; it names no settings mutator and never the user's own actions (an architecture test).
+   * Core itself looks at a run when something happened (a worker's chat changed, the project's mode changed, a read settled a step, the user
+   * changed the plan, the time limit came): `scheduleAdvance` is the only way in, run one at a time per run. Each pass re-reads everything (the
+   * project's mode, the piece, the run, the steps, the events), so a pass that is late or repeated does nothing wrong. It pauses the run while a
+   * worker waits on a permission card, asks the manager for the decision a result is owed, and, in automatic mode, sends the next step within
+   * the run's limits, stopping at the first refusal, error, Deny or limit with a plain reason. The manager has no way to call it; it names no
+   * settings mutator, never the user's own actions and never a way to answer a permission card (an architecture test).
    */
   const chains = new Map<string, Promise<void>>();
   const pending = new Set<Promise<void>>();
   const asked = new Set<string>();
+  const track = (work: Promise<void>): void => {
+    pending.add(work);
+    void work.then(() => pending.delete(work));
+  };
   const scheduleAdvance = (workspaceId: WorkspaceId, runId: string): Promise<void> => {
     const next = (chains.get(runId) ?? Promise.resolve()).then(() => advanceOnce(workspaceId, runId)).catch(() => undefined);
     chains.set(runId, next);
@@ -597,10 +759,10 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     return next;
   };
   const advanceNow = scheduleAdvance;
-  /** Lets an automatic, open run look again after the user changed it (not awaited; a pass re-reads everything). */
+  /** Lets an open run look again after the user changed it (not awaited; a pass re-reads everything). */
   const kick = (workspaceId: WorkspaceId, runId: string): void => {
     const row = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, runId)).get();
-    if (row !== undefined && row.mode === 'automatic' && isOpen(row.state)) void scheduleAdvance(workspaceId, runId);
+    if (row !== undefined && isLive(row.state)) void scheduleAdvance(workspaceId, runId);
   };
 
   const timeUp = (run: RunRow, limits: RunLimits): boolean => nowMs() - Date.parse(run.createdAt) >= limits.maxMinutes * 60_000;
@@ -664,6 +826,153 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     }
   };
 
+  // ---- the manager's next decision (15.9) ----
+
+  /** What the manager is given each turn about the workers: who is ready, their modes and their own idle chats (the same as at the start of a run). */
+  const workerContext = async (workspaceId: WorkspaceId, goal: string): Promise<ManagerContext> => {
+    const { agents } = await chat.chatAgents(workspaceId);
+    // Only the rostered workers (15.5): the project's worker and its reviewer when that is an agent. Without a roster, every agent.
+    const rostered = team === undefined ? undefined : await team.workers(workspaceId);
+    const addressable = rostered === undefined ? agents : rostered.flatMap((worker) => agents.filter((agent) => agent.agentId === worker.agentId));
+    return {
+      goal,
+      projectSummary: 'A software project in the folder the user opened.',
+      workers: addressable.map((agent) => ({
+        agentId: agent.agentId,
+        label: agent.displayName,
+        ready: rostered === undefined ? agent.unavailable === undefined : (rostered.find((worker) => worker.agentId === agent.agentId)?.ready ?? false),
+        modes: agent.permissionModes,
+        chats: ownChats(workspaceId, agent.agentId),
+      })),
+    };
+  };
+
+  /** The plan as it stands (the stored steps, their text masked when they were kept), for the manager to decide on. */
+  const planOfRows = (run: RunRow, rows: readonly StepRow[]): ManagerPlan => ({
+    version: MANAGER_PLAN_VERSION,
+    goal: run.goal,
+    steps: rows.map((row) => {
+      const step = stepOf(row);
+      return { id: step.stepId, worker: step.worker, chat: step.chat, instruction: step.instruction, mode: 'ask' as const, depends_on: step.dependsOn };
+    }),
+  });
+  const statesOf = (rows: readonly StepRow[]): Record<string, OrchestrationStepState> => Object.fromEntries(rows.map((row) => [row.stepId, row.state as OrchestrationStepState]));
+
+  const decisionRecord = (decision: ManagerDecision | undefined, words: string): { action: DecisionOutcome; reason: string; stepId?: string; question?: string } => {
+    if (decision === undefined) return { action: 'unavailable', reason: redactSecrets(words).slice(0, 400) };
+    return {
+      action: decision.action,
+      reason: redactSecrets(decision.reason).slice(0, MANAGER_LIMITS.maxReasonChars),
+      ...(decision.step_id === undefined ? {} : { stepId: decision.step_id }),
+      ...(decision.question === undefined ? {} : { question: redactSecrets(decision.question).slice(0, MANAGER_LIMITS.maxQuestionChars) }),
+    };
+  };
+
+  /**
+   * Asks the manager what comes next after a result (15.9). The run reads as thinking meanwhile (the view says so; the user can still approve,
+   * edit or skip, because the suggestion is only a suggestion) and Stop abandons the call. The decision is
+   * checked in code (a step of the plan, still waiting, its needs done) and recorded; then: `dispatch` marks the step as the manager's next
+   * suggestion (in the default mode the user still approves it; the automatic engine takes it), `ask_user` shows the question and the run
+   * waits, `done` finishes the run, `stop` stops it. No usable decision: the user chooses (default mode), or an automatic run stops.
+   */
+  const askForDecision = async (workspaceId: WorkspaceId, run: RunRow, rows: readonly StepRow[], owed: NonNullable<LoopState['owed']>): Promise<void> => {
+    const runId = run.id as OrchestrationRun['id'];
+    const manager = managerOf(workspaceId);
+    const thinking = new AbortController();
+    planning.set(run.id, thinking);
+    let result: Awaited<ReturnType<ManagerPort['decideNext']>>;
+    try {
+      const base = await workerContext(workspaceId, run.goal);
+      const context: ManagerDecisionContext = {
+        ...base,
+        plan: planOfRows(run, rows),
+        stepStates: statesOf(rows),
+        ...(owed.report === null ? {} : { lastReport: owed.report }),
+        ...(owed.answer === null || owed.answer === '' ? {} : { userAnswer: owed.answer }),
+      };
+      result = manager === undefined ? { ok: false, kind: 'unavailable', reason: MANAGER_FAILURE_WORDS.unavailable } : await manager.decideNext(context, thinking.signal);
+    } catch {
+      // The port promises not to throw; if one does, it is no usable decision.
+      result = { ok: false, kind: 'unavailable', reason: MANAGER_FAILURE_WORDS.unavailable };
+    } finally {
+      planning.delete(run.id);
+    }
+    const live = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get();
+    if (live === undefined || isRunOver(live.state as OrchestrationRunState)) {
+      // Stopped while the manager thought: whatever it answered is kept in the log only.
+      events.transaction(() => noteReply(workspaceId, runId, result.record));
+      return;
+    }
+    const fresh = stepsOf(run.id);
+    // The user may have sent another step while the manager thought: with a worker on a step, the answer is only logged (its result owes the next decision).
+    if (fresh.some((step) => step.state === 'dispatched')) {
+      events.transaction(() => noteReply(workspaceId, runId, result.record));
+      return;
+    }
+    let decision: ManagerDecision | undefined = result.ok ? result.value : undefined;
+    // The plan may have changed while the manager thought (the user skipped, edited or sent a step): a step it chose must still be one that can
+    // be sent. If not, its answer is only logged and it is asked again.
+    if (decision?.action === 'dispatch' && !(dispatchableSteps({ plan: planOfRows(run, fresh), stepStates: statesOf(fresh) })?.includes(decision.step_id ?? '') ?? false)) {
+      events.transaction(() => noteReply(workspaceId, runId, result.record));
+      void scheduleAdvance(workspaceId, run.id);
+      return;
+    }
+    const words = result.ok ? '' : result.reason;
+    const record = decisionRecord(decision, words);
+    // The user may have switched the mode while the manager thought: what it is now decides what a failed decision means.
+    const automatic = live.mode === 'automatic';
+    events.transaction(() => {
+      noteReply(workspaceId, runId, result.record);
+      events.append({ type: 'orchestration.decision_made', workspaceId, streamId: workspaceId, payload: { runId, after: owed.after, ...record } });
+      if (decision === undefined) moveRun(run.id, 'awaiting_user');
+      else if (decision.action === 'dispatch') moveRun(run.id, 'awaiting_user');
+      else if (decision.action === 'ask_user') {
+        moveRun(run.id, 'awaiting_user');
+        events.append({ type: 'orchestration.run_paused', workspaceId, streamId: workspaceId, payload: { runId, reason: 'awaiting_user' } });
+      } else if (decision.action === 'done') {
+        moveRun(run.id, 'finished');
+        events.append({ type: 'orchestration.run_finished', workspaceId, streamId: workspaceId, payload: { runId, reason: record.reason } });
+      } else closeRunNow(workspaceId, run, 'stopped', 'manager_stopped', []);
+    });
+    if (decision === undefined && automatic) closeRun(workspaceId, run, 'stopped', 'manager_refused', [], false);
+    else if (decision === undefined || decision.action === 'done' || decision.action === 'stop') disarm(run.id);
+    else if (decision.action === 'dispatch' && automatic) void scheduleAdvance(workspaceId, run.id);
+  };
+
+  /**
+   * Tells the manager what ended a step the run could not go on from (15.9): a Deny of a worker's permission card, or an instruction that
+   * could not be sent. The run has already stopped, so the answer changes nothing; it is kept in the log (`told`) and shown, so the user can
+   * read what the manager thought. Best effort and never blocking Stop.
+   */
+  const tell = (workspaceId: WorkspaceId, runId: string, step: StepRow, report: ManagerStatusReport, kind: 'denied' | 'refused'): void => {
+    track(
+      (async () => {
+        const manager = managerOf(workspaceId);
+        if (manager === undefined) return;
+        const run = requireRun(workspaceId, runId);
+        const rows = stepsOf(runId);
+        const context: ManagerDecisionContext = { ...(await workerContext(workspaceId, run.goal)), plan: planOfRows(run, rows), stepStates: statesOf(rows), lastReport: report };
+        const result = await manager.decideNext(context);
+        const id = runId as OrchestrationRun['id'];
+        const record = decisionRecord(result.ok ? result.value : undefined, result.ok ? '' : result.reason);
+        events.transaction(() => {
+          noteReply(workspaceId, id, result.record);
+          events.append({ type: 'orchestration.decision_made', workspaceId, streamId: workspaceId, payload: { runId: id, after: step.stepId, ...record, told: kind } });
+        });
+      })().catch(() => undefined),
+    );
+  };
+
+  /** A worker waits on a permission card: the run is paused until the user answers it on the worker's own card (never answered here). */
+  const pauseForCard = (workspaceId: WorkspaceId, run: RunRow): void => {
+    events.transaction(() => {
+      const live = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get();
+      if (live === undefined || live.state === 'paused' || !canMoveRun(live.state as OrchestrationRunState, 'paused')) return;
+      moveRun(run.id, 'paused');
+      events.append({ type: 'orchestration.run_paused', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], reason: 'permission_card' } });
+    });
+  };
+
   const advancePass = async (workspaceId: WorkspaceId, runId: string): Promise<void> => {
     let run: RunRow;
     try {
@@ -674,24 +983,90 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       return;
     }
     run = syncMode(workspaceId, run);
-    if (run.mode !== 'automatic' || !isOpen(run.state)) return;
-    // What the workers finished is settled first (a step done, the run finished when none is left).
+    if (!isLive(run.state)) return;
+    // What the workers finished is settled first (a step done, a Deny ends its step, the run finished when none is left).
     await readBack(workspaceId, run, undefined, true);
     run = syncMode(workspaceId, requireRun(workspaceId, runId));
-    if (run.mode !== 'automatic' || !isOpen(run.state)) return;
+    if (!isLive(run.state)) return;
+    const automatic = run.mode === 'automatic';
     const limits = limitsOf(run);
-    if (!timeUp(run, limits)) armTimer(workspaceId, run, limits);
-    const rows = stepsOf(run.id);
+    if (automatic && !timeUp(run, limits)) armTimer(workspaceId, run, limits);
+    let rows = stepsOf(run.id);
     const halt = (reason: OrchestrationStopReason, inFlight: readonly StepRow[] = []): void => {
       if (closeRun(workspaceId, run, 'stopped', reason, inFlight, false)) cancelTurns(workspaceId, inFlight);
     };
-    if (rows.some((step) => step.state === 'dispatched')) {
+    const dispatched = rows.filter((step) => step.state === 'dispatched');
+    if (dispatched.length > 0) {
       // A worker is on a step: nothing more goes until it is done, unless the run has run out of time (then its turn is asked to stop).
-      if (timeUp(run, limits)) halt('time_limit', workersInFlight(workspaceId, run));
+      if (automatic && timeUp(run, limits)) return halt('time_limit', workersInFlight(workspaceId, run));
+      // A worker waiting on a permission card pauses the run; the user answers on that card, and the run goes on once it is answered.
+      const states = dispatched.map((step) => {
+        try {
+          return { step, state: chat.getSession(workspaceId, step.sessionId as SessionId).state };
+        } catch {
+          return { step, state: 'error' as const };
+        }
+      });
+      if (states.some((entry) => entry.state === 'waiting')) return pauseForCard(workspaceId, run);
+      if (states.some((entry) => (entry.state === 'idle' || entry.state === 'done') && cutOffByRestart(workspaceId, entry.step.sessionId as SessionId))) {
+        // The restart cut a worker off in the middle of its turn: nothing is sent again; the user lets it continue in its chat, or stops the run.
+        waitForUser(workspaceId, run, dispatched[0]!.stepId);
+        return;
+      }
+      if (run.state === 'paused') {
+        events.transaction(() => {
+          moveRun(run.id, 'running');
+          events.append({ type: 'orchestration.run_resumed', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], reason: 'card_answered' } });
+        });
+      }
       return;
     }
-    if (rows.some((step) => step.state === 'failed')) return;
-    const next = rows.find((step) => step.state === 'proposed' || step.state === 'approved');
+    if (run.state === 'paused') {
+      events.transaction(() => {
+        moveRun(run.id, 'awaiting_user');
+        events.append({ type: 'orchestration.run_resumed', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], reason: 'card_answered' } });
+      });
+    }
+    // A failed step with the run still open (the process ended between the two writes) ends the run, as a worker's error does.
+    if (rows.some((step) => step.state === 'failed')) {
+      closeRun(workspaceId, run, 'failed', 'worker_error', [], false);
+      return;
+    }
+    // The decision a result is owed. A suggestion that cannot be followed any more (its step was skipped or taken), or that the manager could
+    // not make before the project went automatic, is asked for again.
+    const loop = loopOf(workspaceId, run.id);
+    let owed = loop.owed;
+    if (owed === null && loop.decision !== null && loop.decision.told === undefined) {
+      const chosen = loop.decision.stepId === undefined ? undefined : rows.find((step) => step.stepId === loop.decision!.stepId);
+      const stale = loop.decision.action === 'dispatch' && (chosen === undefined || (chosen.state !== 'proposed' && chosen.state !== 'approved'));
+      if (stale || (loop.decision.action === 'unavailable' && automatic)) owed = { after: loop.lastAfter, report: loop.lastReport, answer: null };
+    }
+    const remaining = rows.filter((step) => step.state === 'proposed' || step.state === 'approved');
+    // Nothing the manager could choose: every step left is the user's to send or waits on a step that was skipped. Then there is nothing to ask,
+    // and the run waits for the user (the engine below says so in automatic mode).
+    const choosable = dispatchableSteps({ plan: planOfRows(run, rows), stepStates: statesOf(rows) }) ?? [];
+    if (owed !== null && remaining.length > 0 && choosable.length === 0) owed = null;
+    if (owed !== null) {
+      if (remaining.length === 0) {
+        // Nothing is left for the manager to choose: the plan is done.
+        events.transaction(() => {
+          moveRun(run.id, 'finished');
+          events.append({ type: 'orchestration.run_finished', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'] } });
+        });
+        return;
+      }
+      if (automatic && timeUp(run, limits)) return halt('time_limit');
+      if (automatic && rows.filter((step) => step.sessionId !== null).length >= limits.maxInstructions) return halt('instruction_limit');
+      await askForDecision(workspaceId, run, rows, owed);
+      return;
+    }
+    if (!automatic) return;
+    // The manager's question waits for the user's own answer.
+    if (loop.decision?.action === 'ask_user') return;
+    rows = stepsOf(run.id);
+    // The step the manager chose (or, before any result, the first one that waits).
+    const chosen = loop.decision?.action === 'dispatch' && loop.decision.stepId !== undefined ? rows.find((step) => step.stepId === loop.decision!.stepId) : undefined;
+    const next = chosen ?? rows.find((step) => step.state === 'proposed' || step.state === 'approved');
     if (next === undefined) return;
     if (timeUp(run, limits)) return halt('time_limit');
     // A step the user approved is the user's to send (their own Send button); only what the mode approved, or still waits, is sent here.
@@ -711,7 +1086,18 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     try {
       await api.dispatchStep(workspaceId, run.id, next.stepId);
     } catch (error) {
-      if (error instanceof StepNotApprovedError || error instanceof OrchestrationOffError) return;
+      if (error instanceof OrchestrationOffError) return;
+      if (error instanceof StepNotApprovedError) {
+        // A step the mode approved that can no longer be sent by the mode (the project went back to Approve each instruction): it is the user's again.
+        const handedBack = events.transaction(() => {
+          const step = requireStep(run.id, next.stepId);
+          if (step.state !== 'approved' || step.approvedBy !== 'mode') return false;
+          orm.update(orchestrationSteps).set({ state: 'proposed', approvedBy: null }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, next.stepId))).run();
+          return true;
+        });
+        if (handedBack) waitForUser(workspaceId, run, next.stepId);
+        return;
+      }
       if (error instanceof DispatchRefusedError && error.reason === 'approve_each_only') {
         // The worker turned out to be one only the user may send to: the step is the user's again.
         events.transaction(() => {
@@ -720,21 +1106,24 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
         });
         return waitForUser(workspaceId, run, next.stepId);
       }
-      // The first refusal or error stops the run (a refusal is already an event; the stop is its own).
-      if (error instanceof DispatchRefusedError) closeRun(workspaceId, run, 'stopped', 'dispatch_refused', [], false);
-      else closeRun(workspaceId, run, 'failed', 'worker_error', [], false);
+      // The first refusal or error stops the run (a refusal is already an event; the stop is its own). The manager is told of a refusal as a result.
+      if (error instanceof DispatchRefusedError) {
+        if (closeRun(workspaceId, run, 'stopped', 'dispatch_refused', [], false)) tell(workspaceId, run.id, next, makeStatusReport({ stepId: next.stepId, worker: next.worker, state: 'error', text: orchestrationRefusedResult(error.message) }), 'refused');
+      } else closeRun(workspaceId, run, 'failed', 'worker_error', [], false);
       return;
     }
     // Look again: the worker may already be done, and the step after it goes next.
     void scheduleAdvance(workspaceId, run.id);
   };
 
-  // A worker's chat going quiet, or the project's mode changing, lets an automatic run go on, or go back to asking the user.
+  // A worker's chat going quiet or waiting, a card being answered or the project's mode changing, lets a run go on, pause, or go back to asking the user.
   events.subscribe(events.lastSeq(), (event) => {
     try {
-      if (event.type === 'session.state_changed' && event.payload.state !== 'working') {
-        const step = orm.select({ runId: orchestrationSteps.runId }).from(orchestrationSteps).where(and(eq(orchestrationSteps.sessionId, event.payload.sessionId), eq(orchestrationSteps.state, 'dispatched'))).get();
-        if (step !== undefined && event.workspaceId !== null) void scheduleAdvance(event.workspaceId, step.runId);
+      const dispatchedOn = (sessionId: string): Array<{ runId: string }> => orm.select({ runId: orchestrationSteps.runId }).from(orchestrationSteps).where(and(eq(orchestrationSteps.sessionId, sessionId), eq(orchestrationSteps.state, 'dispatched'))).all();
+      if (event.type === 'session.state_changed' && (event.payload.state !== 'working' || event.payload.previous === 'waiting')) {
+        for (const step of dispatchedOn(event.payload.sessionId)) if (event.workspaceId !== null) void scheduleAdvance(event.workspaceId, step.runId);
+      } else if (event.type === 'permission.resolved' && event.payload.decision === 'deny') {
+        for (const step of dispatchedOn(event.payload.sessionId)) if (event.workspaceId !== null) void scheduleAdvance(event.workspaceId, step.runId);
       } else if (event.type === 'workspace.settings_changed' && (event.payload.orchestrationMode !== undefined || event.payload.orchestrationEnabled === true)) {
         for (const live of orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.workspaceId, event.workspaceId)).all()) {
           if (!isRunOver(live.state as OrchestrationRunState)) void scheduleAdvance(event.workspaceId, live.id);
@@ -761,21 +1150,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       const manager = fixedManager ?? (status.state === 'ready' ? managers?.managerFor(workspaceId) : undefined);
       if (manager === undefined) throw new ManagerUnavailableError(status.state === 'ready' ? ORCHESTRATION_NO_MANAGER_MESSAGE : status.message);
 
-      const { agents } = await chat.chatAgents(workspaceId);
-      // Only the rostered workers (15.5): the project's worker and its reviewer when that is an agent. Without a roster, every agent.
-      const rostered = team === undefined ? undefined : await team.workers(workspaceId);
-      const addressable = rostered === undefined ? agents : rostered.flatMap((worker) => agents.filter((agent) => agent.agentId === worker.agentId));
-      const context: ManagerContext = {
-        goal,
-        projectSummary: 'A software project in the folder the user opened.',
-        workers: addressable.map((agent) => ({
-          agentId: agent.agentId,
-          label: agent.displayName,
-          ready: rostered === undefined ? agent.unavailable === undefined : (rostered.find((worker) => worker.agentId === agent.agentId)?.ready ?? false),
-          modes: agent.permissionModes,
-          chats: ownChats(workspaceId, agent.agentId),
-        })),
-      };
+      const context = await workerContext(workspaceId, goal);
       if (team !== undefined && !context.workers.some((worker) => worker.ready)) throw new ManagerUnavailableError(NO_READY_WORKER);
       const runId = newId('orc') as OrchestrationRun['id'];
       const at = now();
@@ -958,6 +1333,54 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     async activity(workspaceId) {
       feature.requireOrchestration(workspaceId);
       return activityOf(workspaceId);
+    },
+
+    async answerQuestion(workspaceId, runId, request) {
+      feature.requireOrchestration(workspaceId);
+      const run = requireRun(workspaceId, runId);
+      const parsed = AnswerOrchestrationQuestionRequest.safeParse(request);
+      if (!parsed.success) throw new ValidationError(ORCHESTRATION_ANSWER_BAD_TEXT_MESSAGE, parsed.error.issues);
+      // The same rule as an edit: a secret is refused, not quietly changed, so the user sees what is kept.
+      if (redactSecrets(parsed.data.answer) !== parsed.data.answer) throw new ValidationError(ORCHESTRATION_ANSWER_SECRET_MESSAGE, []);
+      events.transaction(() => {
+        const live = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get();
+        if (live === undefined || !isLive(live.state)) throw new RunNotOpenError();
+        // Only a question the manager asked and the user has not answered: the answer goes once.
+        const loop = loopOf(workspaceId, run.id);
+        if (loop.decision?.action !== 'ask_user' || loop.owed !== null || stepsOf(run.id).some((step) => step.state === 'dispatched')) throw new NoQuestionPendingError();
+        events.append({ type: 'orchestration.question_answered', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], answer: parsed.data.answer } });
+      });
+      // The answer is data for the manager's next decision.
+      void scheduleAdvance(workspaceId, run.id);
+      return readBack(workspaceId, requireRun(workspaceId, runId), undefined, true);
+    },
+
+    async resume() {
+      let picked = 0;
+      const open = orm.select().from(orchestrationRuns).where(inArray(orchestrationRuns.state, ['planning', 'awaiting_user', 'running', 'paused'])).all();
+      for (const row of open) {
+        const workspaceId = row.workspaceId as WorkspaceId;
+        try {
+          if (!feature.enabled(workspaceId)) continue;
+          if (row.state === 'planning') {
+            // The manager was making the plan when the app stopped: nothing was stored, nothing was sent, so the run ends plainly. A run that
+            // already holds a plan was asking for its next decision: it goes back to waiting and the decision is asked for again.
+            if (stepsOf(row.id).length === 0) {
+              closeRun(workspaceId, row, 'failed', 'restarted', [], false);
+              continue;
+            }
+            events.transaction(() => moveRun(row.id, 'awaiting_user'));
+          }
+          events.append({ type: 'orchestration.run_resumed', workspaceId, streamId: workspaceId, payload: { runId: row.id as OrchestrationRun['id'], reason: 'restart' } });
+          picked += 1;
+          // Settles what finished, asks for a decision that was owed, re-arms the time limit (counted from the run's start) and goes on; an
+          // instruction already sent is never sent again, because only a step still waiting or approved by the mode is ever dispatched.
+          void scheduleAdvance(workspaceId, row.id);
+        } catch {
+          // A run whose project is gone is not picked up.
+        }
+      }
+      return picked;
     },
 
     whenIdle: async () => {

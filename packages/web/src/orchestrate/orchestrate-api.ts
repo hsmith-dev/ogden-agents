@@ -64,6 +64,12 @@ export async function reorderOrchestrationSteps(wsId: string, runId: string, ord
   return OrchestrationRunResponse.parse(json).run;
 }
 
+/** `POST …/answer`: the user answers the manager's question; it goes to the manager as data on its next decision (15.9). */
+export async function answerOrchestrationQuestion(wsId: string, runId: string, answer: string, auth: Auth = tabAuth): Promise<OrchestrationRunView> {
+  const json = await call(auth, apiPath(API_ROUTES.workspaceOrchestrationAnswer, { wsId, runId }), postJson({ answer }), "The answer couldn't be sent");
+  return OrchestrationRunResponse.parse(json).run;
+}
+
 /** `POST …/stop`: Stop. The run ends and a worker turn in flight is cancelled. */
 export async function stopOrchestrationRun(wsId: string, runId: string, auth: Auth = tabAuth): Promise<OrchestrationRunView> {
   const json = await call(auth, apiPath(API_ROUTES.workspaceOrchestrationStop, { wsId, runId }), { method: 'POST' }, "The run couldn't be stopped");

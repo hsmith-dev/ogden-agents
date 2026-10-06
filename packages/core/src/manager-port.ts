@@ -27,6 +27,7 @@ import {
   type ManagerPlan,
   type ManagerRefusalCode,
   type ManagerStatusReport,
+  type OrchestrationStepState,
   type PermissionMode,
   type SessionState,
 } from '@ogden-agents/shared';
@@ -62,6 +63,20 @@ export interface ManagerContext {
 /** What the manager needs to decide the next step: the context and the plan it proposed. */
 export interface ManagerDecisionContext extends ManagerContext {
   plan: ManagerPlan;
+  /**
+   * Where each step of the plan stands (15.9). When given, a `dispatch` may name only a step still waiting (`proposed`) whose needed steps
+   * are done, and the input says which steps those are. Absent: any step of the plan.
+   */
+  stepStates?: Readonly<Record<string, OrchestrationStepState>> | undefined;
+  /** The user's answer to the manager's last question (15.9), masked: data for the manager, never instructions. */
+  userAnswer?: string | undefined;
+}
+
+/** The steps a decision may send now: waiting, with every step they need done. */
+export function dispatchableSteps(context: Pick<ManagerDecisionContext, 'plan' | 'stepStates'>): string[] | undefined {
+  const states = context.stepStates;
+  if (states === undefined) return undefined;
+  return context.plan.steps.filter((step) => states[step.id] === 'proposed' && step.depends_on.every((id) => states[id] === 'done')).map((step) => step.id);
 }
 
 export { MANAGER_FAILURE_KINDS, type ManagerFailureKind };
@@ -134,6 +149,6 @@ export function validatePlanFor(context: ManagerContext, value: unknown): Manage
 
 /** `value` as a decision for `context`'s plan, or the failure to return instead. */
 export function validateDecisionFor(context: ManagerDecisionContext, value: unknown): ManagerResult<ManagerDecision> {
-  const checked = checkManagerDecision(value, { planStepIds: context.plan.steps.map((step) => step.id) });
+  const checked = checkManagerDecision(value, { planStepIds: context.plan.steps.map((step) => step.id), dispatchable: dispatchableSteps(context) });
   return checked.ok ? { ok: true, value: checked.value } : { ok: false, kind: failureKindFor(checked.code), code: checked.code, reason: checked.reason };
 }

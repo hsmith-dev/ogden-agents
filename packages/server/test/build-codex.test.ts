@@ -8,7 +8,7 @@
 import { mkdtempSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createCodexAgent, createFixedSandbox, createMemoryAgentSetup } from '@ogden-agents/adapters';
+import { CODEX_ATTENDED_ONLY_REASON, createCodexAgent, createFixedSandbox, createMemoryAgentSetup } from '@ogden-agents/adapters';
 import type { AgentSetupPort, TicketStorePort } from '@ogden-agents/core';
 import { API_ROUTES, apiPath, BuildAgentsResponse, BuildResponse, ReviewResponse, UNKNOWN_BUILD_AGENT_MESSAGE, WorkspaceResponse } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
@@ -132,7 +132,8 @@ describe('a second agent builds (epic 17 tracer): Codex against its fake persona
     expect(refused.status).toBe(409);
     const body = JSON.stringify(await refused.json());
     expect(body).toContain('sandbox_unavailable');
-    expect(body).toContain('It can build with you watching');
+    // Codex's own words for why, not a generic line.
+    expect(body).toContain(CODEX_ATTENDED_ONLY_REASON);
     expect(fixtureGit(repo.path, 'branch', '--format=%(refname:short)').trim()).toBe('main');
   });
 
@@ -155,7 +156,7 @@ describe('a second agent builds (epic 17 tracer): Codex against its fake persona
     expect(sandboxed.defaultAgentId).toBe('claude-code');
     // Only agents wired here are listed (Grok and Antigravity have runners but are not registered); Codex is not verified, so it is attended only.
     expect(sandboxed.agents.map((agent) => [agent.agentId, agent.way])).toEqual([['claude-code', 'unattended'], ['codex', 'attended_only']]);
-    expect(sandboxed.agents[1]!.reason).toContain('can build with you watching');
+    expect(sandboxed.agents[1]!.reason).toBe(CODEX_ATTENDED_ONLY_REASON);
     expect(sandboxed.agents[0]!.reason).toBeNull();
     const verified = await list(await setup({ sandbox: true, verified: true }));
     expect(verified.agents.find((agent) => agent.agentId === 'codex')).toMatchObject({ way: 'unattended', reason: null });

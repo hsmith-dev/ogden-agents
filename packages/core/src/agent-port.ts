@@ -279,6 +279,8 @@ export interface AgentPort {
    * (epic 17). Absent or `false`: it builds only with the user watching. Core never reads it; the server's sandbox check does.
    */
   readonly unattendedBuild?: boolean | undefined;
+  /** Plain words on why it builds only with the user watching (epic 17), shown in the Build picker; no dashes. Only with `unattendedBuild` false. */
+  readonly attendedOnlyReason?: string | undefined;
   /**
    * Starts the agent and a new session in `cwd`. Rejects with an
    * {@link AgentError} (code `agent_unavailable` when it can't be started).

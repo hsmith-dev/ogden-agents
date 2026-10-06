@@ -79,6 +79,9 @@ export interface CodexAgentOptions {
  */
 export const CODEX_UNATTENDED_VERIFIED = false;
 
+/** The Build picker's line for Codex while its own sandbox is not verified here (plain words, no dashes). */
+export const CODEX_ATTENDED_ONLY_REASON = "Codex's own sandbox hasn't been checked on this computer yet, so it builds with you watching.";
+
 const hasKey = (env: Readonly<Record<string, string>>) => [CODEX_API_KEY_ENV, OPENAI_API_KEY_ENV].some((name) => (env[name] ?? '') !== '');
 
 export function createCodexAgent(options: CodexAgentOptions): AgentPort {
@@ -114,12 +117,18 @@ export function createCodexAgent(options: CodexAgentOptions): AgentPort {
     // 2.1.1 source). Refused unless verified; core's policy answers every request that still reaches it.
     buildSession: {
       verified: options.unattendedVerified ?? CODEX_UNATTENDED_VERIFIED,
-      start: (sandbox) => ({
-        addEnv: { [CODEX_INITIAL_MODE_ENV]: CODEX_MODE_IDS.workspaceWrite },
-        sessionParams: { additionalDirectories: [...sandbox.writableRoots] },
-        modeIds: [CODEX_MODE_IDS.workspaceWrite],
-      }),
+      start: (sandbox) => {
+        // Nothing writable means nothing to give: a wiring bug, never a start with Codex's own defaults.
+        if (sandbox.writableRoots.length === 0) throw new Error('a build sandbox has no writable root');
+        return {
+          addEnv: { [CODEX_INITIAL_MODE_ENV]: CODEX_MODE_IDS.workspaceWrite },
+          sessionParams: { additionalDirectories: [...sandbox.writableRoots] },
+          modeIds: [CODEX_MODE_IDS.workspaceWrite],
+        };
+      },
     },
+    // Until the live checks show its sandbox holds, a build is with the user watching, and the picker says so in these words.
+    attendedOnlyReason: CODEX_ATTENDED_ONLY_REASON,
     toolInputPaths: TOOL_INPUT_PATHS,
     // Only `read-only` asks as much as Ask: `workspace-write` and `agent` ask less, so core tells it Ask.
     askingModeIds: [CODEX_MODE_IDS.ask],

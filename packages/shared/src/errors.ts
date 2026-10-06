@@ -57,6 +57,8 @@ export const API_ERROR_CODES = [
    * `details.action` is `trust_project`.
    */
   'project_not_trusted',
+  /** A terminal launcher can't start a pane (409; epic 16, 16.5): it is unknown, its program was not found (the install page is in `details.installUrl` when it has one) or it did not answer. Nothing was started. */
+  'launcher_unavailable',
   /** A terminal pane would pass the limit of panes in a project or in this install (409; epic 16). `details` says which limit and how many. */
   'pane_limit_reached',
   /** uv's status or install could not be read or started (500). */

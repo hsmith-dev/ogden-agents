@@ -10,6 +10,7 @@
 //   exit [n]    exits with code n (default 0)
 //   size        prints `size=<cols>x<rows>`
 //   alt         paints a full-screen picture on the alternate screen, once, and prints no prompt (a replay probe)
+//   args        prints `args=<its arguments as JSON>` (what the launcher passed)
 //   pid         prints `pid=<pid>`
 //   cwd         prints `cwd=<folder>`
 //   secret      prints `secret=<value>` for each variable whose name contains KEY, TOKEN, SECRET, PASSWORD or SSH_AUTH_SOCK (should print none)
@@ -26,6 +27,11 @@ import { spawn } from 'node:child_process';
 import { renameSync, writeFileSync } from 'node:fs';
 
 const flags = process.argv.slice(2);
+// As a stand-in for an agent's own CLI (epic 16, story 16.5): `--version` answers and exits, as a real CLI does for detection.
+if (flags.includes('--version')) {
+  process.stdout.write('fake-cli 1.2.3\n');
+  process.exit(0);
+}
 const flagValue = (name) => (flags.includes(name) ? flags[flags.indexOf(name) + 1] : undefined);
 const recordFile = flagValue('--record');
 let grandchild = null;
@@ -63,6 +69,7 @@ const run = (text) => {
     process.exit(Number(rest[0] ?? 0));
   }
   if (command === 'size') out(`size=${process.stdout.columns}x${process.stdout.rows}\r\n`);
+  else if (command === 'args') out(`args=${JSON.stringify(flags)}\r\n`);
   else if (command === 'pid') out(`pid=${process.pid}\r\n`);
   else if (command === 'cwd') out(`cwd=${process.cwd()}\r\n`);
   else if (command === 'alt') {

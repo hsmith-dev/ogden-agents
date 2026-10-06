@@ -13,6 +13,7 @@ import {
   ApiErrorBody,
   apiPath,
   PANE_CLOSE,
+  PaneLaunchersResponse,
   PaneResponse,
   PanesResponse,
   WorkspaceResponse,
@@ -20,6 +21,7 @@ import {
 } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
+import { addFakeCli, makeFakeCliFolder } from '../../../tests/fixtures/fake-cli-folder.js';
 import { signIn, startTestServer, trackSocket, waitFor, type SignedIn, type TestServer } from './helpers.js';
 
 const FAKE_SHELL = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-pane-shell.mjs');
@@ -383,4 +385,87 @@ describe('the layout over the API (story 16.4)', () => {
     expect(put.status).toBe(403);
     expect((await fetch(paneUrl(setup, 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W3'), { method: 'PATCH', headers: jsonHeaders(setup.tab), body: JSON.stringify({ title: 'x' }) })).status).toBe(403);
   }, 30_000);
+});
+
+describe('launchers and install detection over the API (story 16.5)', () => {
+  /** A server whose detection sees only a folder of fake programs. */
+  async function startWithFakeClis(names: string[]) {
+    const folder = makeFakeCliFolder(names);
+    dirs.push(folder);
+    process.env.OGDEN_AGENTS_TEST_PANE_PATH = folder;
+    try {
+      const setup = await startPaneServer();
+      return { setup, folder };
+    } finally {
+      delete process.env.OGDEN_AGENTS_TEST_PANE_PATH;
+    }
+  }
+  const launchersUrl = (setup: Setup) => `${setup.server.url}${API_ROUTES.terminalLaunchers}`;
+  const states = async (setup: Setup, init: RequestInit = {}) => {
+    const response = await fetch(launchersUrl(setup), { headers: setup.tab.headers, ...init });
+    expect(response.status).toBe(200);
+    const body = PaneLaunchersResponse.parse(await response.json());
+    return { body, text: JSON.stringify(body), states: Object.fromEntries(body.launchers.map((one) => [one.launcher.id, one.detection.state])) };
+  };
+
+  it('Developer mode only: refused 403 without it', async () => {
+    const setup = await startPaneServer({ developerMode: false });
+    expect((await fetch(launchersUrl(setup), { headers: setup.tab.headers })).status).toBe(403);
+    expect((await fetch(launchersUrl(setup), { method: 'POST', headers: setup.tab.headers })).status).toBe(403);
+  }, 30_000);
+
+  it('lists what detection found: the programs in the folder are found, the others not found with their install page, an uninstalled Gemini left out, and no path given out', async () => {
+    const { setup, folder } = await startWithFakeClis(['claude', 'codex']);
+    const { body, text, states: found } = await states(setup);
+    expect(found).toEqual({ shell: 'found', 'claude-code': 'found', codex: 'found', grok: 'not_found', antigravity: 'not_found', copilot: 'not_found' });
+    expect(body.launchers.find((one) => one.launcher.id === 'grok')!.launcher.installUrl).toBe('https://x.ai/cli');
+    expect(body.launchers.find((one) => one.launcher.id === 'copilot')!.launcher.termsNote).toBe('interactive_only');
+    expect(body.launchers.find((one) => one.launcher.id === 'claude-code')!.detection.version).toBe('fake-cli 1.2.3');
+    expect(text).not.toContain(folder);
+    expect(text).not.toContain(tmpdir());
+    // Detect looks again: a program installed since (by the user) is then found; nothing was installed by Ogden.
+    addFakeCli(folder, 'grok');
+    expect((await states(setup)).states.grok).toBe('not_found');
+    expect((await states(setup, { method: 'POST' })).states.grok).toBe('found');
+    expect((await states(setup)).states.grok).toBe('found');
+    addFakeCli(folder, 'gemini');
+    expect((await states(setup, { method: 'POST' })).states.gemini).toBe('found');
+  }, 60_000);
+
+  it('a found program starts as a pane with its own arguments and what the user typed, no flag of Ogden\'s, and no secret of the server', async () => {
+    const { setup } = await startWithFakeClis(['codex']);
+    const sentinel = 'sk-launcher-sentinel';
+    process.env.OPENAI_API_KEY = sentinel;
+    try {
+      const response = await fetch(panesUrl(setup), { method: 'POST', headers: jsonHeaders(setup.tab), body: JSON.stringify({ cols: 90, rows: 28, launcherId: 'codex', args: '--model big "two words"' }) });
+      expect(response.status).toBe(201);
+      const pane = PaneResponse.parse(await response.json()).pane;
+      expect(pane).toMatchObject({ launcherId: 'codex', title: 'Codex 1' });
+      const viewer = viewPane(setup, pane.id);
+      await viewer.opened;
+      await waitFor(() => viewer.state.output.includes('fake-shell-ready'), 'the CLI to start', 20_000);
+      viewer.type('args\r');
+      await waitFor(() => viewer.state.output.includes('args='), 'its arguments', 15_000);
+      expect(viewer.state.output.replace(/\s/g, '')).toContain('args=["--model","big","twowords"]'.replace(/\s/g, ''));
+      viewer.type('secret\r');
+      await waitFor(() => viewer.state.output.includes('secret-done'), 'the secret listing', 15_000);
+      expect(viewer.state.output).not.toContain('secret=');
+      expect(viewer.state.raw).not.toContain(sentinel);
+    } finally {
+      delete process.env.OPENAI_API_KEY;
+    }
+  }, 60_000);
+
+  it('refuses a program that is not found with 409 and plain words, opens nothing, and refuses unknown launcher ids and unclosed quotes', async () => {
+    const { setup } = await startWithFakeClis(['codex']);
+    const post = (body: unknown) => fetch(panesUrl(setup), { method: 'POST', headers: jsonHeaders(setup.tab), body: JSON.stringify({ cols: 80, rows: 24, ...(body as object) }) });
+    const missing = await post({ launcherId: 'grok' });
+    expect(missing.status).toBe(409);
+    expect(ApiErrorBody.parse(await missing.json()).error).toMatchObject({ code: 'launcher_unavailable', message: 'Grok was not found on this computer. Install it yourself, then press Detect.', details: { launcher: 'not_found', installUrl: 'https://x.ai/cli' } });
+    expect((await post({ launcherId: 'nope' })).status).toBe(409);
+    expect((await post({ launcherId: 'codex', args: '"open' })).status).toBe(400);
+    expect((await post({ launcherId: 'codex', args: 'bad\u0007' })).status).toBe(400);
+    const listed = PanesResponse.parse(await (await fetch(panesUrl(setup), { headers: setup.tab.headers })).json());
+    expect(listed.panes).toEqual([]);
+  }, 60_000);
 });

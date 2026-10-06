@@ -1,7 +1,7 @@
 import { ORCHESTRATION_OFF_MESSAGE, PLAN_OPEN_SETTINGS_LABEL, type OrchestrationRunView } from '@ogden-agents/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   answerOrchestrationQuestion,
   approveOrchestrationStep,
@@ -100,6 +100,12 @@ function OrchestrateOn({ wsId }: { wsId: string }) {
   const [stopping, setStopping] = useState(false);
   // The Build dialog, open for a build step (15.11): the person confirms the build there and nowhere else.
   const [building, setBuilding] = useState<{ stepId: string; ticketRef: string } | undefined>(undefined);
+  // The dialog closes when its step is no longer waiting in a live run (stopped, skipped or started elsewhere): a Build pressed then could not be linked.
+  const waitingStep = building === undefined ? undefined : run?.steps.find((one) => one.stepId === building.stepId);
+  const stale = building !== undefined && (waitingStep === undefined || waitingStep.state !== 'proposed' || !['awaiting_user', 'running'].includes(run?.run.state ?? ''));
+  useEffect(() => {
+    if (stale) setBuilding(undefined);
+  }, [stale]);
 
   /** Runs one request and shows what came back or why it was refused; resolves true when it was kept. */
   const act = (work: () => Promise<OrchestrationRunView>): Promise<boolean> => {

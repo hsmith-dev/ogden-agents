@@ -3,12 +3,12 @@ title: "Builds proposed by the manager: Build ticket N through the Build dialog 
 type: 'feature'
 ticket: '15.11'
 created: '2026-10-06'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['quick-security', 'quick-correctness']
 review_loop_iteration: 0
 baseline_revision: '993fe33751318d405ec0b44a1565145f42d3fbdd'
 context:
@@ -100,8 +100,10 @@ None yet.
 
 ## Review Triage Log
 
-Not run yet.
+2026-10-06, security and correctness reviewers, no critical, high or medium findings. Patched: a build's stored reason can hold the build agent's own words, which reached the manager in the summary (low), now only Ogden's own blocked sentence is used and the check counts say the rest; the link check let an unparseable date pass (low), now it fails closed; the plan's 30 minute clock could stop an automatic run while the person's build was still going (low), now it only halts for a worker turn, and the build keeps its own limits in Runs; the Build dialog stayed open if the run stopped or the step changed meanwhile, so a build could start that could not be linked (low), now the page closes it. Not changed: any build of the ticket made after the plan began can be linked by the person's own call, including one the board started (low, a wrong association at worst, never a start; the person's call needs the tab token); per read cost of the check counts for each build step, up to 500 events (low, small at present volumes); a settled step whose build run was later deleted shows an error report while the step stays done (cosmetic); a double click in the dialog can send two starts (low, the builds refuse a second build of a ticket that is running); a step left dispatched in a stopped run when its build is abandoned at a checkpoint shows Building (low).
 
 ## Verification
 
-Not run yet.
+**Results:** `pnpm typecheck` clean; `pnpm test` 347 files, 4387 passed, 8 skipped; Playwright `orchestrate`, `board-build-actions` and `build-sandbox` 21 passed (orchestrate has 3 new); `PROVENANCE_BASE=origin/main pnpm provenance` passes.
+
+**Commands:** `pnpm typecheck`, `pnpm test`, `npx playwright test tests/e2e/orchestrate.spec.ts` (after `pnpm run build`), `PROVENANCE_BASE=origin/main pnpm provenance`.

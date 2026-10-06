@@ -1152,7 +1152,8 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     const dispatched = rows.filter((step) => step.state === 'dispatched');
     if (dispatched.length > 0) {
       // A worker is on a step: nothing more goes until it is done, unless the run has run out of time (then its turn is asked to stop).
-      if (automatic && timeUp(run, limits)) return halt('time_limit', workersInFlight(workspaceId, run));
+      // A build the person started runs in its own time (their build limit, Runs to stop it): the plan's clock never ends the run under it.
+      if (automatic && timeUp(run, limits) && dispatched.some((step) => step.sessionId !== null)) return halt('time_limit', workersInFlight(workspaceId, run));
       // A worker waiting on a permission card pauses the run; the user answers on that card, and the run goes on once it is answered.
       // A build step has no worker chat (15.11): it follows its build run, which the user runs and stops in the Runs tab.
       const states = dispatched.filter((step) => step.sessionId !== null).map((step) => {

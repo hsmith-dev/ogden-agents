@@ -1,5 +1,5 @@
 /** The builds use-cases and what they are given (story 5.10 split `builds.ts`; the header of `builds.ts` says what each does). */
-import { ApproveBuildRequest, RetryRunRequest, StartBuildRequest, type BuildAgentsResponse, type CommitPlanFilesResponse, type ReviewResponse, type Run, type SandboxStatus, type Session, type SessionId, type WorkspaceId, type AllReadyBuildsResponse, type RunResponse, type RunsResponse } from '@ogden-agents/shared';
+import { ApproveBuildRequest, RetryRunRequest, StartBuildRequest, type BuildAgent, type BuildAgentsResponse, type CommitPlanFilesResponse, type ReviewResponse, type Run, type SandboxStatus, type Session, type SessionId, type WorkspaceId, type AllReadyBuildsResponse, type RunResponse, type RunsResponse } from '@ogden-agents/shared';
 import type { BmadFeatures } from './bmad-pieces.js';
 import type { BuildSettings } from './build-settings.js';
 import type { BmadScriptTrust } from './bmad-script-trust.js';
@@ -145,6 +145,12 @@ export interface BuildsDeps {
    * with none is refused (`UNKNOWN_BUILD_AGENT_MESSAGE`). Core names no agent: each runner says which it is.
    */
   runners?: readonly BuildRunnerPort[];
+  /**
+   * Whether `agent` can find the build skill in `worktreePath` (epic 17: a worktree has only committed files, so the
+   * agent's own skill folder must hold it there): a plain reason when it cannot, else `undefined`. Only asked for an
+   * agent whose runner is one of {@link runners}. A build without it is refused, never run without the skill.
+   */
+  skillReach?: (agent: BuildAgent, worktreePath: string) => string | undefined;
   chat: Pick<Chat, 'createChatSession' | 'sendMessage' | 'releaseAgent' | 'chatAgents'>;
   buildSessions: BuildSessions;
   /** Ogden Agents' data folder: worktrees go in `<dataDir>/w/`. */

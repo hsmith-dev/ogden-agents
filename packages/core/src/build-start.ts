@@ -113,6 +113,10 @@ export function createStarter(ctx: BuildCtx) {
         if (error instanceof ScriptsChangedError) throw new BuildRefusedError('plan_uncommitted', BMAD_FILES_UNCOMMITTED_MESSAGE);
         throw error;
       }
+      // Another agent's skill folder must hold the build skill in this worktree (only committed files are there): never built without it.
+      // The default agent's own skill folder is not checked here (epic 5's live checks cover it); every other agent's is.
+      const noSkill = runnerFor(agent) !== runner ? deps.skillReach?.(agent, real) : undefined;
+      if (noSkill !== undefined) throw new BuildRefusedError('plan_uncommitted', noSkill);
       for (const folder of PRECREATED_FOLDERS) mkdirSync(join(real, folder), { recursive: true });
       // An attended run has no sandbox, so no object store: the user answers every card. A sandboxed run's git writes its own store.
       const setup = attended ? ({ attended: true, cwd: real } as const) : await unattendedSetup(sandboxKind, real, branch, runShort);
@@ -184,6 +188,9 @@ export function createStarter(ctx: BuildCtx) {
     if (!(await vcs.worktreeExists(repoPath, run.worktreePath))) throw new BuildRefusedError('run_not_active', RUN_NOT_ACTIVE_MESSAGE);
     // The worktree's scripts must still be the trusted ones before anything runs there.
     await trust.requireScriptsMatch(workspaceId, run.worktreePath);
+    // The other agent's build skill must still be there (a retry or a queued run with a worktree starts from it too).
+    const noSkill = runnerFor(run.agent ?? runner.agent) !== runner ? deps.skillReach?.(run.agent ?? runner.agent, run.worktreePath) : undefined;
+    if (noSkill !== undefined) throw new BuildRefusedError('plan_uncommitted', noSkill);
     if (buildSessions.get(run.sessionId) === undefined) {
       // The server restarted since the pause (or the run was stopped): the setup is rebuilt from the run, so the next prompt starts a fresh agent there.
       const short = runShortOf(run);

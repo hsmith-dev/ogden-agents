@@ -13,7 +13,7 @@
  * token is saved with a note, never refused wrongly.
  */
 import type { AgentApiKeySupport, ApiKeyVerification } from '@ogden-agents/core';
-import { GROK_API_KEY_ENV } from '../acp-grok/constants.js';
+import { GROK_API_KEY_ENV, GROK_KEY_NAME } from '../acp-grok/constants.js';
 import { bearerKeyVerify } from '../api-key-verify.js';
 
 /** What an xAI API key looks like (`xai-` then letters, digits, `-` and `_`). */
@@ -54,6 +54,7 @@ export function createGrokApiKey(options: GrokApiKeyOptions = {}): AgentApiKeySu
   const verify = bearerKeyVerify({ provider: 'xAI', url: XAI_VERIFY_URL, refusedStatuses: [400, 401, 403], timeoutMs, fetch: options.fetch, onDiagnostic: diagnostic });
   return {
     envName: GROK_API_KEY_ENV,
+    keyName: GROK_KEY_NAME,
     check: (value) => (XAI_API_KEY_PATTERN.test(value) ? undefined : BAD_XAI_API_KEY),
     verify: options.verify ?? verify,
   };

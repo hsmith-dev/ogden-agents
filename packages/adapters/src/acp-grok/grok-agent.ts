@@ -42,7 +42,7 @@ import { acpReasons, createAcpAgent, type AcpAgentQuirks } from '../acp-base/acp
 import { slashSkillInvocation } from '../acp-base/quirks.js';
 import type { AcpToolInputPaths } from '../acp-base/tool-paths.js';
 import { GROK_DESCRIPTOR } from '../setup-grok/descriptor.js';
-import { installedGrok } from '../setup-grok/install.js';
+import { grokBinaryUnchanged, installedGrok, type GrokBinaryHashes } from '../setup-grok/install.js';
 import {
   GROK_API_KEY_ENV,
   GROK_AUTH_METHOD_IDS,
@@ -56,6 +56,9 @@ import {
  * names; they only narrow what a rule may answer, since the shared client reads `locations` first.
  */
 const TOOL_INPUT_PATHS: AcpToolInputPaths = { pathFields: ['path', 'file_path', 'filePath'], patternFields: [] };
+
+/** What a chat with Grok says when its checked binary is not the one the install checked. */
+export const GROK_BINARY_CHANGED = "Grok's installed copy is not the one Ogden Agents checked, so it was not started. Remove Grok in Settings → Agents and install it again.";
 
 /** How to start Grok: a program by absolute path and its arguments. */
 export interface GrokServerCommand {
@@ -74,6 +77,8 @@ export interface GrokAgentOptions {
    * binary in {@link dataDir} with {@link GROK_ARGS}; `undefined` from it means not installed.
    */
   server?: (() => GrokServerCommand | undefined) | undefined;
+  /** The binary hashes the checked binary is re-checked against at each start (tests: a fixture's). Default: the pinned ones. */
+  binarySha256?: GrokBinaryHashes | undefined;
   /** Called with protocol notes, for the log. Never includes the environment. */
   onDiagnostic?: (message: string, fields?: Record<string, unknown>) => void;
 }
@@ -89,7 +94,14 @@ export function createGrokAgent(options: GrokAgentOptions): AgentPort {
       if (options.server !== undefined) server = options.server();
       else {
         const installed = installedGrok(options.dataDir);
-        if (installed !== undefined) server = { command: installed.path, args: GROK_ARGS };
+        if (installed !== undefined) {
+          // The checked binary is checked again before each start (a first one hashes it; later ones only look at the file's state).
+          if (!(options.binarySha256 === undefined ? grokBinaryUnchanged(installed) : grokBinaryUnchanged(installed, options.binarySha256))) {
+            options.onDiagnostic?.('the checked Grok binary no longer matches its check');
+            throw new AgentError('agent_unavailable', GROK_BINARY_CHANGED);
+          }
+          server = { command: installed.path, args: GROK_ARGS };
+        }
       }
       if (server === undefined) throw new AgentError('agent_unavailable', reasons.notSetUp);
       // Without its own home Grok would use `~/.grok` (its sign in, sessions and logs, and `~/.grok/bin`'s own copy): never started so.

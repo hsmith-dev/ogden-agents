@@ -43,6 +43,9 @@ export const GROK_DISABLE_AUTOUPDATER_ENV = 'GROK_DISABLE_AUTOUPDATER';
  */
 export const GROK_FOLDER_TRUST_ENV = 'GROK_FOLDER_TRUST';
 
+/** What Grok's key is called on the card and in short sentences. */
+export const GROK_KEY_NAME = 'xAI API access token';
+
 /**
  * Its own sign-in method ids (spike 12.2). Ogden uses only `apiKey` (user decision,
  * 2026-10-05: Grok is an xAI API access token only; `grok.com` ("Sign in with Grok")

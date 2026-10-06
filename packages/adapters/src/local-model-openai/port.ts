@@ -1,6 +1,6 @@
 /**
  * `LocalModelPort` over an OpenAI-compatible endpoint (epic 14 story 14.3):
- * probe and list models with `GET {base}/models`. Names no vendor. The server
+ * probe and list models with `GET {base}/models`. Names no vendor outside presets.ts and native.ts. The server
  * is the only caller (AD-15); the key is only sent as a bearer token (AD-16).
  * `structuredComplete` (story 14.8) is `structured.ts`.
  */

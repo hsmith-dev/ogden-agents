@@ -138,6 +138,32 @@ describe("Grok's chat port (epic 12 entry 7)", () => {
     expect(await say(session, events, 'permission rm -rf build')).toBe('Denied rm -rf build. chose=reject_once');
   });
 
+  it("a project's own allow rules never loosen Ask: the explicit Ask reaches Grok on a start and on every reopen, and the card is still asked", async () => {
+    const cwd = tempDir();
+    mkdirSync(join(cwd, '.claude'));
+    writeFileSync(join(cwd, '.claude', 'settings.json'), JSON.stringify({ permissions: { allow: ['Bash(npm test)', 'Bash(rm:*)'], defaultMode: 'acceptEdits' } }));
+    const asked: string[] = [];
+    const decide: Decide = async (request) => {
+      asked.push(request.command ?? '');
+      return { outcome: 'allow_once' };
+    };
+    const first = await agentOf().startSession({ cwd, env: envOf({ XAI_API_KEY: KEY }), onPermissionRequest: decide, protectedPaths: PROTECTED_PATHS, permissionMode: 'ask' });
+    sessions.push(first);
+    const firstEvents: AgentEvent[] = [];
+    first.onEvent((event) => firstEvents.push(event));
+    expect(await say(first, firstEvents, 'meta')).toBe('meta={"yoloMode":false,"autoMode":false}');
+    expect(await say(first, firstEvents, 'permission npm test')).toBe('Ran npm test. chose=allow_once');
+    for (const fail of ['', 'resume', 'resume,load']) {
+      const reopened = await agentOf().reopenSession({ cwd, env: envOf({ XAI_API_KEY: KEY, ...(fail === '' ? {} : { FAKE_ACP_REOPEN_FAIL: fail }) }), agentSessionId: first.agentSessionId, onPermissionRequest: decide, permissionMode: 'ask' });
+      sessions.push(reopened.session);
+      const events: AgentEvent[] = [];
+      reopened.session.onEvent((event) => events.push(event));
+      expect(await say(reopened.session, events, 'meta'), `reopen with ${fail || 'resume'}`).toBe('meta={"yoloMode":false,"autoMode":false}');
+    }
+    // Every card went to Ogden: the project's allow rules answered none of them.
+    expect(asked).toEqual(['npm test']);
+  });
+
   it('reopens in a new process with resume, else load, else a new one, with the mode in _meta each time', async () => {
     const cwd = tempDir();
     const { session } = await start({ cwd });

@@ -58,6 +58,8 @@ describe('notificationText (privacy)', () => {
     expect(notificationText(need('x', 'sign_in')).title).toBe('Sign in needed');
     // An agent with only an API key has no sign in: its key was rejected.
     expect(notificationText(need('x', 'sign_in', { keyRejected: true })).title).toBe('API key rejected');
+    // Grok takes a token, and says so.
+    expect(notificationText(need('x', 'sign_in', { keyRejected: true, keyName: 'xAI API access token' })).title).toBe('xAI API access token rejected');
   });
 });
 

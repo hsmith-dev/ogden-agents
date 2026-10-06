@@ -146,7 +146,7 @@ describe('Test as a manager (epic 14 story 14.8)', () => {
   const run = async (result: Awaited<ReturnType<LocalModelPort['structuredComplete']>>) => {
     const core = openTestCore(tempDir());
     const endpoints = core.localEndpoints(secrets());
-    const added = await endpoints.add({ label: 'x', baseUrl: 'http://localhost:1234/v1', key: 'k' });
+    const added = await endpoints.add({ label: 'x', baseUrl: 'http://localhost:1234/v1', key: 'key-1' });
     const calls: Array<{ target: { baseUrl: string; key?: string }; request: { model: string; schema: unknown; timeoutMs?: number; prompt: string } }> = [];
     const answer = await createLocalModels({ endpoints, port: answering(result, calls) }).managerTest(added.id, 'm1');
     return { answer, calls };
@@ -157,7 +157,7 @@ describe('Test as a manager (epic 14 story 14.8)', () => {
     expect(answer).toMatchObject({ pass: true, mode: 'json_schema', message: 'Passed. The model answered in the shape a manager needs, with the server enforcing the shape.' });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.request).toMatchObject({ model: 'm1', timeoutMs: 60_000 });
-    expect(calls[0]!.target).toEqual({ baseUrl: 'http://localhost:1234/v1', key: 'k' });
+    expect(calls[0]!.target).toEqual({ baseUrl: 'http://localhost:1234/v1', key: 'key-1' });
     expect(JSON.stringify(calls[0]!.request.schema)).toContain('"tasks"');
     expect((await run({ ok: true, value: {}, mode: 'prompt' })).answer.message).toContain('in plain words');
   });

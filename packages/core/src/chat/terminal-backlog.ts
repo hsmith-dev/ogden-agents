@@ -17,6 +17,8 @@ const BEL = '\x07';
 function escapeEnd(text: string, esc: number): number {
   const kind = text[esc + 1];
   if (kind === undefined) return -1;
+  // `ESC` then a control character (a line feed, say) is a lone `ESC`: the control character is not part of it.
+  if (kind.charCodeAt(0) < 0x20) return esc + 1;
   if (kind === '[') {
     for (let i = esc + 2; i < text.length; i++) {
       const code = text.charCodeAt(i);
@@ -52,5 +54,12 @@ export function trimBacklog(text: string, max: number = TERMINAL_BACKLOG_CHARS):
     if (end > start) start = end;
   }
   const line = text.indexOf('\n', start);
-  return line === -1 ? text.slice(start) : text.slice(line + 1);
+  if (line !== -1) return text.slice(line + 1);
+  // No line break after the cut: never start on the second half of an astral character (an emoji).
+  const low = text.charCodeAt(start);
+  if (low >= 0xdc00 && low <= 0xdfff && start > 0) {
+    const high = text.charCodeAt(start - 1);
+    if (high >= 0xd800 && high <= 0xdbff) start++;
+  }
+  return text.slice(start);
 }

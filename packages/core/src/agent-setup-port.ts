@@ -60,6 +60,8 @@ export type ApiKeyVerification = 'ok' | 'refused' | 'unchecked';
 export interface AgentApiKeySupport {
   /** The environment variable the agent's chat process reads its key from (Claude Code: `ANTHROPIC_API_KEY`). */
   readonly envName: string;
+  /** What the agent calls its key, when it is not "API key" (Grok: "xAI API access token"); the last word names it in short sentences. */
+  readonly keyName?: string | undefined;
   /** Plain words when `value` can't be a key for this agent, else `undefined`. Never echoes the value. */
   check(value: string): string | undefined;
   /**

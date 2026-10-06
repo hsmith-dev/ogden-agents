@@ -137,3 +137,65 @@ test('with Developer mode turned off the server refuses a pane request, whatever
     expect(((await response.json()) as { error: { code: string } }).error.code).toBe('developer_mode_required');
   });
 });
+
+test('a project gets tabs and splits: split a terminal, move the divider and focus by keyboard, add a tab, rename it, and the layout survives a reload', async ({ page }) => {
+  test.skip(!process.env.CI && !(await ptyLoads()), 'node-pty cannot load on this computer');
+  await withChatServer(
+    page,
+    async ({ repo }) => {
+      const wsId = await openProject(page, repo);
+      await setBrowserDeveloperMode(page, true);
+      await setDeveloperMode(page, true);
+      await page.goto(at(page, `/w/${wsId}/terminals`));
+      await page.getByTestId('terminals-new').click();
+      await expect(page.getByTestId('pane')).toHaveCount(1);
+      await expect(page.getByTestId('pane-terminal').locator('.xterm-rows')).toContainText('fake-shell-ready');
+
+      // Split beside: two panes in one tab, with a divider between them.
+      await page.getByTestId('pane-split-row').click();
+      await expect(page.getByTestId('pane')).toHaveCount(2);
+      await expect(page.getByTestId('layout-divider')).toHaveCount(1);
+      await expect(page.getByTestId('terminal-tab')).toHaveCount(1);
+      const panes = page.getByTestId('pane');
+      const first = await panes.nth(0).boundingBox();
+      const second = await panes.nth(1).boundingBox();
+      expect(first !== null && second !== null && first.x + first.width <= second.x + 1).toBe(true);
+
+      // The divider moves with the arrow keys, 5 percent each.
+      const divider = page.getByTestId('layout-divider');
+      await divider.focus();
+      await divider.press('ArrowRight');
+      await expect(divider).toHaveAttribute('aria-valuenow', '55');
+
+      // Focus moves between panes with Alt+Shift+Arrow, and the arrow never reaches the program.
+      await expect(panes.nth(1).locator('.xterm-rows')).toContainText('fake-shell-ready');
+      await panes.nth(0).locator('textarea').focus();
+      await page.keyboard.press('Alt+Shift+ArrowRight');
+      await expect(panes.nth(1).locator('textarea')).toBeFocused();
+      await page.keyboard.press('Alt+Shift+ArrowLeft');
+      await expect(panes.nth(0).locator('textarea')).toBeFocused();
+
+      // A new terminal is a tab of its own, which can be renamed.
+      await page.getByTestId('terminals-new').click();
+      await expect(page.getByTestId('terminal-tab')).toHaveCount(2);
+      await expect(page.getByTestId('pane')).toHaveCount(1);
+      await page.getByTestId('terminal-tab').nth(1).dblclick();
+      await page.getByTestId('tab-title-input').fill('Servers');
+      await page.getByTestId('tab-title-input').press('Enter');
+      await expect(page.getByTestId('terminal-tab').nth(1)).toHaveText('Servers');
+
+      // Reload: the same tabs and split come back (replayed from the server).
+      await page.reload();
+      await expect(page.getByTestId('terminal-tab')).toHaveText(['Terminal 1', 'Servers']);
+      await page.getByTestId('terminal-tab').nth(0).click();
+      await expect(page.getByTestId('pane')).toHaveCount(2);
+      await expect(page.getByTestId('layout-divider')).toHaveAttribute('aria-valuenow', '55');
+
+      // Closing a pane gives its space to the other.
+      await page.getByTestId('pane-close').first().click();
+      await expect(page.getByTestId('pane')).toHaveCount(1);
+      await expect(page.getByTestId('layout-divider')).toHaveCount(0);
+    },
+    { extra: { paneShell: { file: process.execPath, args: [FAKE_SHELL] } } },
+  );
+});

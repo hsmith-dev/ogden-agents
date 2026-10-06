@@ -17,9 +17,11 @@ const PANE = 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
 
 const fakes = vi.hoisted(() => ({
   connections: [] as Array<{ handlers: PaneSocketHandlers; closed: boolean; typed: string[] }>,
-  terminals: [] as Array<{ cols: number; rows: number; written: string[]; resets: number; options: Record<string, unknown>; unicode: { activeVersion: string } }>,
+  terminals: [] as Array<{ focused: number; cols: number; rows: number; written: string[]; resets: number; options: Record<string, unknown>; unicode: { activeVersion: string } }>,
   requests: [] as Array<{ method: string; path: string; body?: string }>,
   panes: [] as unknown[],
+  /** The layout the server answers; by default one tab per pane. */
+  layout: undefined as unknown,
   terminal: { available: true } as unknown,
   denied: false,
 }));
@@ -38,7 +40,10 @@ vi.mock('@xterm/xterm', () => ({
     }
     loadAddon() {}
     open() {}
-    focus() {}
+    focused = 0;
+    focus() {
+      this.focused++;
+    }
     dispose() {}
     write(bytes: Uint8Array) {
       this.written.push(new TextDecoder().decode(bytes));
@@ -71,11 +76,21 @@ vi.mock('@/auth/tab-token', () => ({
       const method = init?.method ?? 'GET';
       fakes.requests.push({ method, path, ...(typeof init?.body === 'string' ? { body: init.body } : {}) });
       if (fakes.denied) return new Response(JSON.stringify({ error: { code: 'developer_mode_required', message: 'Terminals are only offered in Developer mode.' } }), { status: 403 });
-      if (method === 'GET') return new Response(JSON.stringify({ panes: fakes.panes, terminal: fakes.terminal, limits: { perProject: 8, perInstall: 16 } }));
+      if (method === 'GET') {
+        const panes = fakes.panes as Array<{ id: string; title: string }>;
+        const layout = fakes.layout ?? { tabs: panes.map((p, i) => ({ id: `t${i}`, title: p.title, root: { type: 'pane', paneId: p.id } })), activeTabId: panes.length === 0 ? null : 't0' };
+        return new Response(JSON.stringify({ panes, layout, terminal: fakes.terminal, limits: { perProject: 8, perInstall: 16 } }));
+      }
+      if (method === 'PUT') {
+        const { layout } = JSON.parse(String(init?.body)) as { layout: unknown };
+        fakes.layout = layout;
+        return new Response(JSON.stringify({ panes: fakes.panes, layout, terminal: fakes.terminal, limits: { perProject: 8, perInstall: 16 } }));
+      }
+      if (method === 'PATCH') return new Response(JSON.stringify({ pane: { ...(fakes.panes[0] as object), title: JSON.parse(String(init?.body)).title } }));
       if (method === 'POST' && path.endsWith('/restart')) return new Response(JSON.stringify({ pane: fakes.panes[0] }));
       if (method === 'POST') {
         const pane = { id: PANE, workspaceId: WS, launcherId: 'shell', title: 'Terminal 1', state: 'starting', exitCode: null };
-        fakes.panes = [pane];
+        if (fakes.panes.length === 0) fakes.panes = [pane];
         return new Response(JSON.stringify({ pane }), { status: 201 });
       }
       if (method === 'DELETE') {
@@ -114,6 +129,7 @@ beforeEach(() => {
   fakes.terminals.length = 0;
   fakes.requests.length = 0;
   fakes.panes = [];
+  fakes.layout = undefined;
   fakes.terminal = { available: true };
   fakes.denied = false;
 });
@@ -160,6 +176,137 @@ describe('the Terminals page (E16-R3, AD-21)', () => {
     await settle();
     expect(fakes.requests.some((r) => r.method === 'DELETE' && r.path === `/api/v1/workspaces/${WS}/panes/${PANE}`)).toBe(true);
     expect(screen.queryByTestId('pane')).toBeNull();
+  });
+});
+
+const two = () => {
+  const a = pane({ id: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2WA', title: 'Terminal 1', state: 'running' });
+  const b = pane({ id: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2WB', title: 'Terminal 2', state: 'running' });
+  fakes.panes = [a, b];
+  fakes.layout = {
+    tabs: [
+      { id: 'ta', title: 'Main', root: { type: 'split', direction: 'row', ratio: 0.5, first: { type: 'pane', paneId: a.id }, second: { type: 'pane', paneId: b.id } } },
+      { id: 'tb', title: 'Other', root: { type: 'pane', paneId: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2WC' } },
+    ],
+    activeTabId: 'ta',
+  };
+  fakes.panes.push(pane({ id: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2WC', title: 'Terminal 3', state: 'running' }));
+};
+const puts = () => fakes.requests.filter((r) => r.method === 'PUT').map((r) => JSON.parse(r.body!).layout);
+
+describe('tabs, splits and the layout (story 16.4)', () => {
+  it('shows the active tab only: its split panes connect, the other tab\'s do not', async () => {
+    two();
+    await mount();
+    expect(screen.getAllByTestId('pane')).toHaveLength(2);
+    // The other tab's pane is not connected.
+    expect(fakes.connections).toHaveLength(2);
+    expect(screen.getAllByTestId('terminal-tab').map((t) => t.textContent)).toEqual(['Main', 'Other']);
+    expect(screen.getAllByTestId('layout-divider')).toHaveLength(1);
+  });
+
+  it('switching tab saves the active tab, closes the old tab\'s sockets and shows the other tab\'s pane', async () => {
+    two();
+    await mount();
+    fireEvent.click(screen.getAllByTestId('terminal-tab')[1]!);
+    await settle();
+    expect(puts().at(-1).activeTabId).toBe('tb');
+    expect(screen.getAllByTestId('pane')).toHaveLength(1);
+    expect(fakes.connections.filter((c) => c.closed)).toHaveLength(2);
+  });
+
+  it('a split does not reconnect the pane that was already shown (panes stay mounted as the layout changes)', async () => {
+    const a = pane({ id: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2WA', title: 'Terminal 1', state: 'running' });
+    fakes.panes = [a];
+    await mount();
+    expect(fakes.connections).toHaveLength(1);
+    const b = pane({ id: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2WB', title: 'Terminal 2', state: 'running' });
+    fakes.panes = [a, b];
+    fakes.layout = { tabs: [{ id: 'ta', title: 'Main', root: { type: 'split', direction: 'row', ratio: 0.5, first: { type: 'pane', paneId: a.id }, second: { type: 'pane', paneId: b.id } } }], activeTabId: 'ta' };
+    fireEvent.click(screen.getByTestId('pane-split-row'));
+    await settle();
+    expect(screen.getAllByTestId('pane')).toHaveLength(2);
+    expect(fakes.connections).toHaveLength(2);
+    expect(fakes.connections[0]!.closed).toBe(false);
+  });
+
+  it('a drag of the divider saves its new ratio once, and a click without a move saves nothing', async () => {
+    two();
+    await mount();
+    const stage = screen.getByTestId('layout-stage');
+    stage.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 500, width: 1000, height: 500, x: 0, y: 0, toJSON() {} });
+    const divider = screen.getByTestId('layout-divider');
+    fireEvent.pointerDown(divider, { clientX: 500, clientY: 100, pointerId: 1 });
+    fireEvent.pointerUp(divider, { clientX: 500, clientY: 100, pointerId: 1 });
+    await settle();
+    expect(puts()).toHaveLength(0);
+    fireEvent.pointerDown(divider, { clientX: 500, clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(divider, { clientX: 300, clientY: 100, pointerId: 1 });
+    fireEvent.pointerUp(divider, { clientX: 300, clientY: 100, pointerId: 1 });
+    await settle();
+    expect(puts()).toHaveLength(1);
+    expect(puts()[0].tabs[0].root.ratio).toBeCloseTo(0.3);
+  });
+
+  it('only a pane the user just opened takes keyboard focus', async () => {
+    two();
+    await mount();
+    expect(fakes.terminals.every((t) => (t as { focused?: number }).focused === undefined || (t as { focused: number }).focused === 0)).toBe(true);
+  });
+
+  it('a divider moves with the arrow keys, 5 percent each, and is saved', async () => {
+    two();
+    await mount();
+    const divider = screen.getByTestId('layout-divider');
+    expect(divider.getAttribute('aria-valuenow')).toBe('50');
+    fireEvent.keyDown(divider, { key: 'ArrowRight' });
+    await settle();
+    expect(puts().at(-1).tabs[0].root.ratio).toBeCloseTo(0.55);
+    for (let i = 0; i < 2; i += 1) {
+      fireEvent.keyDown(screen.getByTestId('layout-divider'), { key: 'ArrowLeft' });
+      await settle();
+    }
+    expect(puts().at(-1).tabs[0].root.ratio).toBeCloseTo(0.45);
+    // At the end of its range a divider stops: 10 percent is the smallest.
+    for (let i = 0; i < 12; i += 1) {
+      fireEvent.keyDown(screen.getByTestId('layout-divider'), { key: 'ArrowLeft' });
+      await settle();
+    }
+    expect(puts().at(-1).tabs[0].root.ratio).toBeCloseTo(0.1);
+  });
+
+  it('Split right asks for a pane beside this one, and is refused in words at the limit', async () => {
+    two();
+    await mount();
+    fireEvent.click(screen.getAllByTestId('pane-split-row')[0]!);
+    await settle();
+    const post = fakes.requests.find((r) => r.method === 'POST')!;
+    expect(JSON.parse(post.body!)).toMatchObject({ placement: { kind: 'split', paneId: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2WA', direction: 'row' } });
+    cleanup();
+    fakes.panes = Array.from({ length: 8 }, (_, i) => pane({ id: `pan_01J9Z3K4M5N6P7Q8R9S0T1V2W${i}`, title: `T${i}`, state: 'running' }));
+    await mount();
+    expect(screen.getByTestId('terminals-full').textContent).toBe('A project can have 8 terminals open at once. Close one first.');
+    expect((screen.getByTestId('terminals-new') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('renames a pane from its name and a tab by double click, Enter saves and Escape does not', async () => {
+    two();
+    await mount();
+    fireEvent.click(screen.getAllByTestId('pane-title')[0]!);
+    const input = screen.getByTestId('pane-title-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'Server' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await settle();
+    expect(fakes.requests.find((r) => r.method === 'PATCH')).toMatchObject({ body: JSON.stringify({ title: 'Server' }) });
+    fireEvent.doubleClick(screen.getAllByTestId('terminal-tab')[0]!);
+    const tabInput = screen.getByTestId('tab-title-input') as HTMLInputElement;
+    fireEvent.change(tabInput, { target: { value: 'Servers' } });
+    fireEvent.keyDown(tabInput, { key: 'Enter' });
+    await settle();
+    expect(puts().at(-1).tabs[0].title).toBe('Servers');
+    fireEvent.doubleClick(screen.getAllByTestId('terminal-tab')[0]!);
+    fireEvent.keyDown(screen.getByTestId('tab-title-input'), { key: 'Escape' });
+    expect(screen.queryByTestId('tab-title-input')).toBeNull();
   });
 });
 

@@ -520,7 +520,9 @@ export const API_ROUTES = {
    * guarded by a piece (E16-R3).
    */
   workspacePanes: `${API_BASE}/workspaces/:wsId/panes`,
-  /** `DELETE` → 204 (epic 16): closes the pane and stops its process tree. Developer mode only. 404 for another workspace's pane. */
+  /** `PUT ArrangePanesRequest` → `PanesResponse` (epic 16, story 16.4): the project's layout arrangement. 400 unless it is the same panes, each once. Developer mode only. */
+  workspacePaneLayout: `${API_BASE}/workspaces/:wsId/pane-layout`,
+  /** `PATCH RenamePaneRequest` → `PaneResponse` (story 16.4): rename a pane. `DELETE` → 204 (epic 16): closes the pane and stops its process tree. Developer mode only. 404 for another workspace's pane. */
   workspacePane: `${API_BASE}/workspaces/:wsId/panes/:paneId`,
   /** `POST` → `PaneResponse` (epic 16): Restart pane. Stops what is left of the pane's program and starts it again in the same pane. Developer mode only. */
   workspacePaneRestart: `${API_BASE}/workspaces/:wsId/panes/:paneId/restart`,

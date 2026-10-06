@@ -6,7 +6,7 @@
  */
 import type { Pane } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createPanes, DeveloperModeRequiredError, NotFoundError, PaneLimitError, TerminalUnavailableError, type Panes, type PanesOptions } from '../src/index.js';
+import { createPanes, DeveloperModeRequiredError, NotFoundError, PaneLimitError, TerminalUnavailableError, ValidationError, type Panes, type PanesOptions } from '../src/index.js';
 import { openTestCore, tempDir } from './helpers.js';
 import { fakeTerminal, type FakeTerminalOptions } from './support/fake-terminal.js';
 
@@ -231,10 +231,10 @@ describe('pane events: state only (story 16.3)', () => {
     fake.processes[0]!.exit(5);
     panes.close(workspace.id, pane.id);
     const events = paneEvents(core);
-    expect(events.map((e) => e.type)).toEqual(['terminal.pane_opened', 'terminal.pane_exited', 'terminal.pane_closed']);
+    expect(events.map((e) => e.type)).toEqual(['terminal.pane_opened', 'terminal.layout_changed', 'terminal.pane_exited', 'terminal.layout_changed', 'terminal.pane_closed']);
     expect(events[0]).toMatchObject({ workspaceId: workspace.id, streamId: workspace.id, payload: { paneId: pane.id, launcherId: 'shell', title: 'Terminal 1' } });
-    expect(events[1]!.payload).toEqual({ paneId: pane.id, exitCode: 5 });
-    expect(events[2]!.payload).toEqual({ paneId: pane.id, cause: 'user' });
+    expect(events[2]!.payload).toEqual({ paneId: pane.id, exitCode: 5 });
+    expect(events[4]!.payload).toEqual({ paneId: pane.id, cause: 'user' });
     expect(JSON.stringify(events)).not.toContain('SECRET-OUTPUT-MARKER');
   });
 
@@ -258,7 +258,7 @@ describe('pane events: state only (story 16.3)', () => {
     core.events.subscribe(core.events.lastSeq(), (event) => void heard.push(event.type));
     core.installSettings.setDeveloperMode(false);
     await new Promise((resolve) => setImmediate(resolve));
-    expect(heard).toEqual(['settings.developer_mode_changed', 'terminal.pane_closed']);
+    expect(heard).toEqual(['settings.developer_mode_changed', 'terminal.layout_changed', 'terminal.pane_closed']);
   });
 
   it('announces nothing for a pane closed while it was starting', async () => {
@@ -288,6 +288,99 @@ describe('pane events: state only (story 16.3)', () => {
     const { core, panes, workspace } = setup({ terminal: { openError: new Error('no') } });
     await panes.open(workspace.id, SIZE).catch(() => undefined);
     expect(paneEvents(core)).toEqual([]);
+  });
+});
+
+describe('the layout (story 16.4)', () => {
+  it('a new pane gets a tab of its own; a split placement puts it beside another; closing collapses', async () => {
+    const { panes, workspace } = setup();
+    expect(panes.layout(workspace.id)).toEqual({ tabs: [], activeTabId: null });
+    const a = await panes.open(workspace.id, SIZE);
+    const b = await panes.open(workspace.id, SIZE, { kind: 'split', paneId: a.id, direction: 'row' });
+    const c = await panes.open(workspace.id, SIZE);
+    const layout = panes.layout(workspace.id);
+    expect(layout.tabs).toHaveLength(2);
+    expect(layout.tabs[0]!.root).toMatchObject({ type: 'split', direction: 'row', first: { paneId: a.id }, second: { paneId: b.id } });
+    expect(layout.tabs[1]!.root).toEqual({ type: 'pane', paneId: c.id });
+    expect(layout.activeTabId).toBe(layout.tabs[1]!.id);
+    panes.close(workspace.id, a.id);
+    expect(panes.layout(workspace.id).tabs[0]!.root).toEqual({ type: 'pane', paneId: b.id });
+    panes.close(workspace.id, c.id);
+    expect(panes.layout(workspace.id).tabs).toHaveLength(1);
+  });
+
+  it('a split of a pane that is not there falls back to a tab of its own', async () => {
+    const { panes, workspace } = setup();
+    await panes.open(workspace.id, SIZE, { kind: 'split', paneId: 'pan_01J9Z3K4M5N6P7Q8R9S0T1V2W3', direction: 'column' });
+    expect(panes.layout(workspace.id).tabs).toHaveLength(1);
+  });
+
+  it('arranges ratios, tab names and the active tab, and refuses any other change', async () => {
+    const { panes, workspace } = setup();
+    const a = await panes.open(workspace.id, SIZE);
+    await panes.open(workspace.id, SIZE, { kind: 'split', paneId: a.id, direction: 'row' });
+    const layout = panes.layout(workspace.id);
+    const tab = layout.tabs[0]!;
+    const next = { ...layout, tabs: [{ ...tab, title: 'Servers', root: { ...tab.root, ratio: 0.25 } }] };
+    expect(panes.arrange(workspace.id, next)).toEqual(next);
+    expect(panes.layout(workspace.id).tabs[0]).toMatchObject({ title: 'Servers', root: { ratio: 0.25 } });
+    expect(() => panes.arrange(workspace.id, { tabs: [], activeTabId: null })).toThrow(ValidationError);
+    expect(() => panes.arrange(workspace.id, 'x')).toThrow(ValidationError);
+  });
+
+  it('renames a pane (plain names only) and says so in an event with no other text; the layout events carry counts', async () => {
+    const { core, panes, workspace } = setup();
+    const a = await panes.open(workspace.id, SIZE);
+    expect(panes.rename(workspace.id, a.id, '  Server  ').title).toBe('Server');
+    expect(() => panes.rename(workspace.id, a.id, 'bad\u0007')).toThrow(ValidationError);
+    expect(() => panes.rename(workspace.id, a.id, '   ')).toThrow(ValidationError);
+    const events = core.events.readAfter(0).filter((e) => e.type.startsWith('terminal.'));
+    expect(events.map((e) => e.type)).toEqual(['terminal.pane_opened', 'terminal.layout_changed', 'terminal.pane_renamed']);
+    expect(events[1]!.payload).toEqual({ tabCount: 1, paneCount: 1 });
+    expect(events[2]!.payload).toEqual({ paneId: a.id, title: 'Server' });
+  });
+});
+
+describe('layout review findings (16.4)', () => {
+  it('arrange refuses an unknown project and announces nothing when the layout did not change', async () => {
+    const { core, panes, workspace } = setup();
+    const pane = await panes.open(workspace.id, SIZE);
+    expect(() => panes.arrange('ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3', { tabs: [], activeTabId: null })).toThrow(NotFoundError);
+    const before = core.events.readAfter(0).length;
+    panes.arrange(workspace.id, panes.layout(workspace.id));
+    expect(core.events.readAfter(0).length).toBe(before);
+    expect(pane.id).toBeTruthy();
+  });
+
+  it('the layout is empty once Developer mode turned off the panes, and arrange needs Developer mode', async () => {
+    const { core, panes, workspace } = setup();
+    await panes.open(workspace.id, SIZE);
+    core.installSettings.setDeveloperMode(false);
+    expect(() => panes.arrange(workspace.id, { tabs: [], activeTabId: null })).toThrow(DeveloperModeRequiredError);
+    core.installSettings.setDeveloperMode(true);
+    expect(panes.layout(workspace.id)).toEqual({ tabs: [], activeTabId: null });
+  });
+
+  it('a split whose target closes while the new pane starts still gets a place, and nothing opens after dispose', async () => {
+    const { panes, workspace } = setup();
+    const a = await panes.open(workspace.id, SIZE);
+    panes.close(workspace.id, a.id);
+    await panes.open(workspace.id, SIZE, { kind: 'split', paneId: a.id, direction: 'row' });
+    expect(panes.layout(workspace.id).tabs).toHaveLength(1);
+    panes.dispose();
+    await expect(panes.open(workspace.id, SIZE)).rejects.toBeInstanceOf(DeveloperModeRequiredError);
+  });
+
+  it('a pane that is still starting can not be renamed (nothing announced it yet)', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { panes, workspace } = setup({ terminal: { opening: () => gate } });
+    const opening = panes.open(workspace.id, SIZE);
+    await new Promise((resolve) => setImmediate(resolve));
+    const id = panes.list(workspace.id)[0]!.id;
+    expect(() => panes.rename(workspace.id, id, 'x')).toThrow(NotFoundError);
+    release();
+    await opening;
   });
 });
 

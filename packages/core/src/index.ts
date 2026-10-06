@@ -49,6 +49,7 @@ export * from './install-settings.js';
 export * from './look-back-offers.js';
 export * from './new-projects.js';
 export * from './onboarding.js';
+export * from './pane-layout.js';
 export * from './panes.js';
 export * from './permissions.js';
 export * from './planning.js';

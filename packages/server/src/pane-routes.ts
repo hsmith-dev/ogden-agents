@@ -5,9 +5,11 @@
  * never behind a BMad piece's guard (E16-R3). They carry no terminal text:
  * only each pane's state (AD-6, AD-16).
  */
-import { CoreError, DeveloperModeRequiredError, NotFoundError, PaneLimitError, TerminalUnavailableError, type Panes } from '@ogden-agents/core';
+import { CoreError, DeveloperModeRequiredError, NotFoundError, PaneLimitError, TerminalUnavailableError, ValidationError, type Panes } from '@ogden-agents/core';
 import {
   API_ROUTES,
+  ArrangePanesRequest,
+  RenamePaneRequest,
   OpenPaneRequest,
   PaneId,
   PaneResponse,
@@ -26,6 +28,8 @@ import { readBody } from './request-input.js';
 
 /** `{"cols":1000,"rows":500}` with room to spare. */
 const MAX_BODY_BYTES = 1024;
+/** A layout of up to 8 panes in nested splits, with room to spare. */
+const MAX_LAYOUT_BODY_BYTES = 16 * 1024;
 
 export interface PaneRoutesOptions {
   panes?: Panes | undefined;
@@ -37,6 +41,8 @@ export function registerPaneRoutes(app: Hono, { panes, log }: PaneRoutesOptions)
     app.get(API_ROUTES.workspacePanes, notImplemented);
     app.post(API_ROUTES.workspacePanes, notImplemented);
     app.delete(API_ROUTES.workspacePane, notImplemented);
+    app.patch(API_ROUTES.workspacePane, notImplemented);
+    app.put(API_ROUTES.workspacePaneLayout, notImplemented);
     app.post(API_ROUTES.workspacePaneRestart, notImplemented);
     return;
   }
@@ -44,6 +50,7 @@ export function registerPaneRoutes(app: Hono, { panes, log }: PaneRoutesOptions)
   /** The error answers every pane route shares; a failure of our own is a 500 and never says what the pane printed. */
   const refuse = (c: Context, error: unknown): Response => {
     if (error instanceof DeveloperModeRequiredError) return apiError(c, 403, 'developer_mode_required', error.message);
+    if (error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);
     if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', 'There is no such terminal.');
     if (error instanceof PaneLimitError) return apiError(c, 409, 'pane_limit_reached', error.message, { scope: error.scope, limit: error.limit });
     if (error instanceof TerminalUnavailableError) return apiError(c, 409, 'terminal_unavailable', error.message, { terminal: error.terminal });
@@ -69,7 +76,7 @@ export function registerPaneRoutes(app: Hono, { panes, log }: PaneRoutesOptions)
       const list = panes.list(id);
       const pty = await panes.available();
       const terminal: SessionTerminal = pty.ok ? { available: true } : { available: false, code: 'pty_unavailable', reason: pty.reason };
-      return c.json(PanesResponse.parse({ panes: list, terminal, limits: { perProject: MAX_PANES_PER_PROJECT, perInstall: MAX_PANES_PER_INSTALL } }));
+      return c.json(PanesResponse.parse({ panes: list, layout: panes.layout(id), terminal, limits: { perProject: MAX_PANES_PER_PROJECT, perInstall: MAX_PANES_PER_INSTALL } }));
     } catch (error) {
       return refuse(c, error);
     }
@@ -81,9 +88,36 @@ export function registerPaneRoutes(app: Hono, { panes, log }: PaneRoutesOptions)
     const body = await readBody(c, OpenPaneRequest);
     if (!body.ok) return body.response;
     try {
-      const pane = await panes.open(id, body.value);
+      const pane = await panes.open(id, { cols: body.value.cols, rows: body.value.rows }, body.value.placement);
       log.info('terminal pane opened', { paneId: pane.id, workspaceId: id });
       return c.json(PaneResponse.parse({ pane }), 201);
+    } catch (error) {
+      return refuse(c, error);
+    }
+  });
+
+  app.put(API_ROUTES.workspacePaneLayout, bodyLimit({ maxSize: MAX_LAYOUT_BODY_BYTES, onError: tooLarge }), async (c) => {
+    const id = workspaceId(c);
+    if (id === undefined) return notFound(c);
+    const body = await readBody(c, ArrangePanesRequest);
+    if (!body.ok) return body.response;
+    try {
+      panes.arrange(id, body.value.layout);
+      const pty = await panes.available();
+      const terminal: SessionTerminal = pty.ok ? { available: true } : { available: false, code: 'pty_unavailable', reason: pty.reason };
+      return c.json(PanesResponse.parse({ panes: panes.list(id), layout: panes.layout(id), terminal, limits: { perProject: MAX_PANES_PER_PROJECT, perInstall: MAX_PANES_PER_INSTALL } }));
+    } catch (error) {
+      return refuse(c, error);
+    }
+  });
+
+  app.patch(API_ROUTES.workspacePane, bodyLimit({ maxSize: MAX_BODY_BYTES, onError: tooLarge }), async (c) => {
+    const ids = paneIds(c);
+    if (ids === undefined) return notFound(c);
+    const body = await readBody(c, RenamePaneRequest);
+    if (!body.ok) return body.response;
+    try {
+      return c.json(PaneResponse.parse({ pane: panes.rename(ids.workspaceId, ids.paneId, body.value.title) }));
     } catch (error) {
       return refuse(c, error);
     }

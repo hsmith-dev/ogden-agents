@@ -26,6 +26,7 @@
  */
 import {
   DEFAULT_ORCHESTRATION_MODE,
+  type OrchestrationMode,
   MAX_PAGE_EVENTS,
   ORCHESTRATION_RUNS_PAGE,
   OrchestrationRunId as OrchestrationRunIdSchema,
@@ -67,8 +68,8 @@ import {
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { Database } from './db/database.js';
 import { events as eventsTable, orchestrationRuns, orchestrationSteps } from './db/schema.js';
-import { readOrchestrationMode } from './workspace-settings.js';
-import { AgentNotReadyError, BadOrderError, DispatchRefusedError, DriverIsTerminalError, ManagerFailedError, ManagerUnavailableError, NotFoundError, QueueFullError, RunNotOpenError, SessionBusyError, SessionNotIdleError, StepNotApprovedError, StepNotChangeableError, StepNotProposedError, UnknownAgentError, ValidationError } from './errors.js';
+import { readAutomaticConfirmed, readDefaultPermissionMode, readOrchestrationMode } from './workspace-settings.js';
+import { AgentNotReadyError, BadOrderError, DispatchRefusedError, DriverIsTerminalError, ManagerFailedError, ManagerUnavailableError, NotFoundError, OrchestrationOffError, QueueFullError, RunNotOpenError, SessionBusyError, SessionNotIdleError, StepNotApprovedError, StepNotChangeableError, StepNotProposedError, UnknownAgentError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import type { OrchestrationFeature } from './orchestration-feature.js';
 import type { ManagerContext, ManagerPort, ManagerRecord } from './manager-port.js';
@@ -235,7 +236,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
   const syncMode = (workspaceId: WorkspaceId, run: RunRow): RunRow => {
     const fresh = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get() ?? run;
     if (isRunOver(fresh.state as OrchestrationRunState)) return fresh;
-    const projectMode = readOrchestrationMode(orm, workspaceId) ?? DEFAULT_ORCHESTRATION_MODE;
+    const projectMode = projectModeOf(workspaceId);
     /** In the default mode only the user approves: what the mode approved and did not send waits for the user again (whatever left it so). */
     const returnToUser = (): void => {
       for (const step of stepsOf(run.id)) {
@@ -252,6 +253,12 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       if (projectMode === 'approve_each') returnToUser();
     });
     return orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get() ?? fresh;
+  };
+
+  /** The project's mode as the engine honours it: automatic only while the project's confirmation is on record (fail safe, never the other way). */
+  const projectModeOf = (workspaceId: WorkspaceId): OrchestrationMode => {
+    const mode = readOrchestrationMode(orm, workspaceId) ?? DEFAULT_ORCHESTRATION_MODE;
+    return mode === 'automatic' && !readAutomaticConfirmed(orm, workspaceId) ? 'approve_each' : mode;
   };
 
   const labels = async (workspaceId: WorkspaceId): Promise<Map<string, string>> => {
@@ -297,6 +304,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
   /** Reads back every dispatched step: its chat's state and a masked, capped report; settles a finished one once. */
   const readBack = async (workspaceId: WorkspaceId, given: RunRow, known?: Map<string, string>, quiet = false): Promise<OrchestrationRunView> => {
     const run = syncMode(workspaceId, given);
+    const becameAutomatic = run.mode === 'automatic' && given.mode !== 'automatic' && isOpen(run.state);
     const names = known ?? (await labels(workspaceId));
     const views: OrchestrationStepView[] = [];
     let settledAny = false;
@@ -347,7 +355,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     }
     const fresh = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get() ?? run;
     // A read that settled a step of a run that dispatches on its own lets it go on (the listener does the same when the worker's chat changes).
-    if (settledAny && !quiet && fresh.mode === 'automatic') scheduleAdvance(workspaceId, run.id);
+    if ((settledAny || becameAutomatic) && !quiet && fresh.mode === 'automatic') scheduleAdvance(workspaceId, run.id);
     return OrchestrationRunView.parse({ run: runOf(fresh), steps: views });
   };
 
@@ -545,7 +553,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       let result: OrchestrationActivityEntry['result'] = 'refused';
       if (!refused) {
         if (step.state === 'done') result = 'finished';
-        else if (step.state === 'failed') result = run.stopReason === 'user' ? 'stopped' : 'failed';
+        else if (step.state === 'failed') result = run.stopReason !== null && run.stopReason !== 'worker_error' ? 'stopped' : 'failed';
         else result = 'working';
       }
       const parsed = OrchestrationActivityEntry.safeParse({
@@ -589,6 +597,11 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     return next;
   };
   const advanceNow = scheduleAdvance;
+  /** Lets an automatic, open run look again after the user changed it (not awaited; a pass re-reads everything). */
+  const kick = (workspaceId: WorkspaceId, runId: string): void => {
+    const row = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, runId)).get();
+    if (row !== undefined && row.mode === 'automatic' && isOpen(row.state)) void scheduleAdvance(workspaceId, runId);
+  };
 
   const timeUp = (run: RunRow, limits: RunLimits): boolean => nowMs() - Date.parse(run.createdAt) >= limits.maxMinutes * 60_000;
   const armTimer = (workspaceId: WorkspaceId, run: RunRow, limits: RunLimits): void => {
@@ -626,7 +639,32 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     });
   };
 
+  /** One pass, with an unexpected failure ending the run plainly instead of leaving it open with nothing happening. */
   const advanceOnce = async (workspaceId: WorkspaceId, runId: string): Promise<void> => {
+    try {
+      await advancePass(workspaceId, runId);
+    } catch (error) {
+      if (error instanceof OrchestrationOffError || error instanceof NotFoundError) return;
+      try {
+        closeRun(workspaceId, requireRun(workspaceId, runId), 'failed', 'worker_error', [], false);
+      } catch {
+        // The run or the database is gone: nothing left to close.
+      }
+    }
+  };
+
+  /** Whether the chat a step would go to is in a mode other than Ask: a named chat's own mode, or the project's default for a new chat. */
+  const runsWithoutAsking = async (workspaceId: WorkspaceId, step: StepRow): Promise<boolean> => {
+    if (step.chat === 'new') return (readDefaultPermissionMode(orm, workspaceId)?.mode ?? 'ask') !== 'ask';
+    try {
+      return (chat.getSession(workspaceId, step.chat as SessionId).permissionMode ?? 'ask') !== 'ask';
+    } catch {
+      // A chat that is gone is refused by the dispatch itself, with its own words.
+      return false;
+    }
+  };
+
+  const advancePass = async (workspaceId: WorkspaceId, runId: string): Promise<void> => {
     let run: RunRow;
     try {
       run = requireRun(workspaceId, runId);
@@ -642,7 +680,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     run = syncMode(workspaceId, requireRun(workspaceId, runId));
     if (run.mode !== 'automatic' || !isOpen(run.state)) return;
     const limits = limitsOf(run);
-    armTimer(workspaceId, run, limits);
+    if (!timeUp(run, limits)) armTimer(workspaceId, run, limits);
     const rows = stepsOf(run.id);
     const halt = (reason: OrchestrationStopReason, inFlight: readonly StepRow[] = []): void => {
       if (closeRun(workspaceId, run, 'stopped', reason, inFlight, false)) cancelTurns(workspaceId, inFlight);
@@ -655,9 +693,9 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     if (rows.some((step) => step.state === 'failed')) return;
     const next = rows.find((step) => step.state === 'proposed' || step.state === 'approved');
     if (next === undefined) return;
+    if (timeUp(run, limits)) return halt('time_limit');
     // A step the user approved is the user's to send (their own Send button); only what the mode approved, or still waits, is sent here.
     if (next.state === 'approved' && next.approvedBy === 'user') return;
-    if (timeUp(run, limits)) return halt('time_limit');
     if (rows.filter((step) => step.sessionId !== null).length >= limits.maxInstructions) return halt('instruction_limit');
     if ((stepDepths(rows.map((step) => ({ stepId: step.stepId, dependsOn: stepOf(step).dependsOn }))).get(next.stepId) ?? 1) > limits.maxDepth) return halt('depth_limit');
     // A step that needs one that is not done (one the user skipped) waits for the user, as in the default mode.
@@ -666,11 +704,14 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     const { agents } = await chat.chatAgents(workspaceId);
     const agent = agents.find((candidate) => candidate.agentId === next.worker);
     if (next.state === 'proposed' && agent !== undefined && isSubscription(agent)) return waitForUser(workspaceId, run, next.stepId);
+    // The mode never sends into a chat that runs without asking the user: the worker's own cards are the user's last say (a named chat's mode, or
+    // the mode a new chat of the project starts in). The user's own approval of that step is still theirs to give.
+    if (next.state === 'proposed' && (await runsWithoutAsking(workspaceId, next))) return waitForUser(workspaceId, run, next.stepId);
     if (next.state === 'proposed' && !approveByMode(workspaceId, run.id, next.stepId)) return;
     try {
       await api.dispatchStep(workspaceId, run.id, next.stepId);
     } catch (error) {
-      if (error instanceof StepNotApprovedError) return;
+      if (error instanceof StepNotApprovedError || error instanceof OrchestrationOffError) return;
       if (error instanceof DispatchRefusedError && error.reason === 'approve_each_only') {
         // The worker turned out to be one only the user may send to: the step is the user's again.
         events.transaction(() => {
@@ -739,7 +780,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       const runId = newId('orc') as OrchestrationRun['id'];
       const at = now();
       // The run goes under the project's own mode and the install's limits as they are now (15.8); a later change of the mode reaches the run itself.
-      const mode = readOrchestrationMode(orm, workspaceId) ?? DEFAULT_ORCHESTRATION_MODE;
+      const mode = projectModeOf(workspaceId);
       const limits = limitsNow();
       events.transaction(() => {
         orm.insert(orchestrationRuns).values({ id: runId, workspaceId, goal, state: 'planning', mode, limits: JSON.stringify(limits), stopReason: null, createdAt: at, updatedAt: at }).run();
@@ -785,7 +826,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
         for (const step of plan.steps) events.append({ type: 'orchestration.step_proposed', workspaceId, streamId: workspaceId, payload: { runId, stepId: step.id } });
       });
       // Under Dispatch automatically the run begins at once: core sends the first step itself, within the run's limits.
-      if (requireRun(workspaceId, runId).mode === 'automatic') await advanceNow(workspaceId, runId);
+      if (syncMode(workspaceId, requireRun(workspaceId, runId)).mode === 'automatic') await advanceNow(workspaceId, runId);
       return readBack(workspaceId, requireRun(workspaceId, runId));
     },
 
@@ -818,6 +859,8 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
         orm.update(orchestrationSteps).set({ state: 'approved', approvedBy: 'user' }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, step.stepId))).run();
         events.append({ type: 'orchestration.step_approved', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], stepId: step.stepId, by: 'user' } });
       });
+      // Under Dispatch automatically what the user changed may let the run go on (a skipped step, an edited one, a new order).
+      kick(workspaceId, runId);
       return readBack(workspaceId, requireRun(workspaceId, runId));
     },
 
@@ -838,6 +881,8 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
         orm.update(orchestrationSteps).set({ instruction: text, state: 'proposed', approvedBy: null }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, step.stepId))).run();
         events.append({ type: 'orchestration.step_edited', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], stepId: step.stepId, instruction: text } });
       });
+      // Under Dispatch automatically what the user changed may let the run go on (a skipped step, an edited one, a new order).
+      kick(workspaceId, runId);
       return readBack(workspaceId, requireRun(workspaceId, runId));
     },
 
@@ -858,6 +903,8 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
           events.append({ type: 'orchestration.run_finished', workspaceId, streamId: workspaceId, payload: { runId: id } });
         }
       });
+      // Under Dispatch automatically what the user changed may let the run go on (a skipped step, an edited one, a new order).
+      kick(workspaceId, runId);
       return readBack(workspaceId, requireRun(workspaceId, runId));
     },
 
@@ -891,6 +938,8 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
         });
         events.append({ type: 'orchestration.steps_reordered', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], order } });
       });
+      // Under Dispatch automatically what the user changed may let the run go on (a skipped step, an edited one, a new order).
+      kick(workspaceId, runId);
       return readBack(workspaceId, requireRun(workspaceId, runId));
     },
 

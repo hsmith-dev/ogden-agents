@@ -3,12 +3,12 @@ title: 'Orchestration mode, Stop and per-run limits: Approve each instruction or
 type: 'feature'
 ticket: '15.8'
 created: '2026-10-06'
-status: 'in-progress'
+status: 'in-review'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['quick-security', 'quick-correctness']
 review_loop_iteration: 0
 baseline_revision: '3d535e0d443e78885b685bdeddfd39730edc1682'
 context:
@@ -95,7 +95,7 @@ context:
 - Activity log (`activity`, `GET .../orchestration/activity`): the newest 400 approval, dispatch and refusal events of the project's stream, folded into at most 100 entries (when, worker, chat new or existing, who approved, the start of the instruction masked and cut to 200, result `working`, `finished`, `failed`, `stopped` or `refused`, the refusal's words); the Orchestrate page lists them. The counter on a run is "N of M instructions sent", no money anywhere (a test looks for money words).
 - Honest transcript: a new message origin `manager_auto` ("Sent by the manager automatically") for what the mode sent; `manager` keeps "approved by you".
 - New project layout: `orchestrate/mode-api.ts`, `orchestrate/mode-section.tsx` (`ModeChoiceView`, `ProjectMode`, `DefaultsView`, `OrchestrationDefaultsSection`), the mode and limits under Orchestration in the project settings and in Settings for new projects, the Orchestrate page's mode line, counter, stop reasons, wait note and `ActivityLog`.
-- Tests: shared (+11), core `orchestration-mode` (22) plus changes to the 15.7 tests, server `orchestration-mode` (9), web DOM `orchestrate-mode` (21), architecture (+3), Playwright (+3).
+- Tests: shared (+11), core `orchestration-mode` (25) plus changes to the 15.7 tests, server `orchestration-mode` (9), web DOM `orchestrate-mode` (21), architecture (+3), Playwright (+3).
 
 ## Spec proposals
 
@@ -108,8 +108,10 @@ Written to the memlogs with `_bmad/scripts/memlog.py` (never to the frozen docum
 
 ## Review Triage Log
 
-(Filled in after review.)
+2026-10-06, security and correctness reviewers, no critical findings. Patched: an automatic run stalled after the user skipped, edited or reordered a step, or approved one (high), now each lets the run look again; a project switched to automatic while the manager was thinking, or synced by a read, never advanced (medium), now the start uses the synced mode and a read that made a run automatic lets it go on; a run past its time limit waiting on a user approved step re-armed a one second timer for good and never halted (medium), now the time check comes first and no timer is armed once past; an unexpected error in a pass left the run open silently (low), now it fails the run as `worker_error`; deleting a project's history removed the confirmation record but left the mode, and the engine trusted the mode alone (medium), now the engine honours automatic only while the confirmation is on record; the mode sent into a chat that runs without asking (Auto or Skip all) although the confirmation says agents still ask (medium), now the run waits for the user at such a step (a named chat's mode, or the project's default for a new chat), and the wait note and confirmation say so; turning the piece off mid-run failed the run as `worker_error` (low), now the pass leaves it; a step cut off by a limit read as failed in the activity log (low), now stopped. Tests added for the skip, the missing confirmation, and the non Ask chat. Not changed: the activity log reads the newest 400 events, so an old instruction's approver can read as unknown beyond that (low, audit only); re-enabling the piece or switching the mode lets open runs go on, including a step just edited (low, by design, the confirmation is about dispatching on its own); the in memory set of steps already asked about grows with runs and repeats a `run_paused` after a restart (low, entry 9); a refusal on a freshly made chat records `worker_error` rather than `dispatch_refused` (low, 15.7 behaviour, the run still stops); a rare `approve_each_only` refusal leaves a "Not sent" activity line for a run that waits (low); the needs approval note keys on run state, not the step's agent (low); the limits form snaps back after a refused save and keeps "Saved." (low); the time limit counts planning time and the user's own Send is not held by the limits (low, by design); `cancelTurns` can cancel a turn the user later starts in a named chat (low, as 15.6).
 
 ## Verification
+
+**Results:** `pnpm typecheck` clean; `pnpm test` 335 files, 4183 passed, 8 skipped; Playwright `orchestrate` (9) passed; `PROVENANCE_BASE=origin/main pnpm provenance` passes.
 
 **Commands:** `pnpm typecheck`, `pnpm test`, `npx playwright test tests/e2e/orchestrate.spec.ts` (after `pnpm run build`), `PROVENANCE_BASE=origin/main pnpm provenance`.

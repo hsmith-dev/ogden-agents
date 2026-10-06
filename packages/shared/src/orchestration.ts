@@ -726,7 +726,7 @@ export const dispatchRefusalWords = (reason: DispatchRefusalReason, worker: stri
 /** What the user is asked, once for a project, before it may dispatch automatically. Plain words, no dashes. */
 export const ORCHESTRATION_AUTOMATIC_CONFIRM_TITLE = 'Dispatch automatically in this project?';
 export const ORCHESTRATION_AUTOMATIC_CONFIRM_WORDS =
-  'The manager will send each instruction to your agents on its own, without asking you each time. It stops at the first problem, when it reaches the limits below, or when you press Stop. Your agents still ask you before they run a command or change a file. An agent that signs in with your account still waits for you to approve each instruction. You will not be asked again in this project.';
+  'The manager will send each instruction to your agents on its own, without asking you each time. It stops at the first problem, when it reaches the limits below, or when you press Stop. Your agents still ask you before they run a command or change a file. An agent that signs in with your account, or a chat that runs without asking you first, still waits for you to approve each instruction. You will not be asked again in this project.';
 export const ORCHESTRATION_AUTOMATIC_CONFIRM_BUTTON = 'Dispatch automatically';
 
 /** A new project starts on Approve each instruction whatever the install default says, until the user confirms automatic for that project. */
@@ -774,8 +774,8 @@ export function orchestrationStopWords(reason: OrchestrationStopReason, limits: 
   }
 }
 
-/** What a step that waits for the user in a run that dispatches automatically says: the agent signs in with the user's account. */
-export const ORCHESTRATION_NEEDS_YOUR_APPROVAL = 'This agent signs in with your account, so it only takes instructions you approve one by one. The run waits for you.';
+/** What a step that waits for the user in a run that dispatches automatically says: its agent signs in with the user's account, or its chat runs without asking. */
+export const ORCHESTRATION_NEEDS_YOUR_APPROVAL = 'This step needs your approval before it is sent: its agent signs in with your account, or its chat runs without asking you first. The run waits for you.';
 
 /** What the transcript says under an instruction the mode sent on its own (the user did not approve that one). */
 export const ORCHESTRATION_MANAGER_AUTO_MARK = 'Sent by the manager automatically';

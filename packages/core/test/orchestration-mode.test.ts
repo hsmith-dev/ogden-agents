@@ -516,3 +516,29 @@ describe('the install\'s orchestration defaults', () => {
     expect(defaults.get()).toEqual({ mode: 'automatic', limits: { maxInstructions: 20, maxDepth: 3, maxMinutes: 30 } });
   });
 });
+
+describe('review fixes (15.8)', () => {
+  it('goes on by itself after the user skips the step the run was waiting at', async () => {
+    const kit = setUp({ plan: planOf(['claude-code'], ['codex']) });
+    const { run } = await kit.orchestration.startRun(kit.workspace.id, { goal: 'Do the work' });
+    expect((await kit.read(run.id)).run.state).toBe('awaiting_user');
+    await kit.orchestration.skipStep(kit.workspace.id, run.id, 's1');
+    await kit.settle();
+    expect(stateOf(await kit.read(run.id), 's2')).toBe('dispatched');
+  });
+
+  it('never sends by the mode when the confirmation is not on record (history deleted), and waits at a chat that runs without asking', async () => {
+    const kit = setUp({ plan: THREE_INDEPENDENT });
+    kit.core.events.deleteWorkspaceHistory(kit.workspace.id);
+    const { run } = await kit.orchestration.startRun(kit.workspace.id, { goal: 'Do the work' });
+    expect(run.mode).toBe('approve_each');
+    expect(kit.sent).toEqual([]);
+
+    const auto = setUp({ plan: THREE_INDEPENDENT });
+    auto.core.permissions.updateSettings(auto.workspace.id, { defaultPermissionMode: 'auto' });
+    const started = await auto.orchestration.startRun(auto.workspace.id, { goal: 'Do the work' });
+    await auto.settle();
+    expect(auto.sent).toEqual([]);
+    expect((await auto.read(started.run.id)).run.state).toBe('awaiting_user');
+  });
+});

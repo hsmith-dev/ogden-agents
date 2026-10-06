@@ -175,6 +175,13 @@ export const API_ERROR_CODES = [
   'disk_space_low',
   /** Stop, Retry or Check again was asked of a run in the wrong state: Stop of a finished run, Retry of one not blocked or failed (409; story 5.3). */
   'run_not_active',
+  // Retrospectives (epic 7, story 7.2). Each is a 409 and nothing was written.
+  /** Save the lessons: neither AGENTS.md nor the retrospective file has a change to commit. */
+  'nothing_to_save',
+  /** Save the lessons: a merge, rebase, cherry-pick or revert is in progress in the checkout. */
+  'checkout_busy',
+  /** Save the lessons: the project has no AGENTS.md that git tracks. */
+  'agents_file_missing',
   /** A Local model endpoint on a host that is not this computer was used before the user confirmed it, or its address changed since (409; epic 14 story 14.3). Nothing was called. */
   'endpoint_confirmation_required',
   /** Anything else that went wrong on the server (500). */

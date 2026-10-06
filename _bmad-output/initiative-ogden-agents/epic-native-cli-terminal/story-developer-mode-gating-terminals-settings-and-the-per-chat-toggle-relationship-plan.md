@@ -45,7 +45,7 @@ context:
 ## Code Map
 
 - `shared/src/panes.ts` (`TerminalsSettingsResponse`, `UpdateTerminalsSettingsRequest`), `chat.ts` (`SetDeveloperModeRequest.panes`), `errors.ts` (`panes_running`), `api.ts` (`terminalSettings`), `events-settings.ts` (`settings.terminals_changed`).
-- `core/src/terminals-settings.ts`, `db/schema.ts` and `drizzle/0024_terminals_settings.sql`, `core.ts`, `panes.ts` (`runningCount`, `keepRunningOnNextDeveloperModeOff`).
+- `core/src/terminals-settings.ts`, `db/schema.ts` and `drizzle/0026_terminals_settings.sql`, `core.ts`, `panes.ts` (`runningCount`, `keepRunningOnNextDeveloperModeOff`).
 - `server/src/terminals-settings-routes.ts`, `settings-routes.ts` (the question), `start-panes.ts` (settings into the environment and notifications), `pane-routes.ts` (plain reason).
 - `web/src/terminal/terminals-settings.ts`, `routes/terminals-settings-page.tsx`, `appearance/developer-mode.tsx` and `routes/appearance-page.tsx` (the dialog), `shell/workspace-tabs.tsx`, `status-sidebar.tsx`, `terminals-view.tsx`, `launcher-list.tsx`.
 

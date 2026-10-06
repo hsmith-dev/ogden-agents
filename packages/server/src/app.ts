@@ -11,6 +11,7 @@ import {
   type BoardUseCases,
   type RetrospectiveUseCases,
   type BuildSettings,
+  type Notifications,
   type LocalEndpoints,
   type LocalModels,
   type BuildsUseCases,
@@ -47,6 +48,7 @@ import { registerPlanningRoutes } from './planning-routes.js';
 import { registerRetrospectiveRoutes } from './retrospective-routes.js';
 import { registerBuildRoutes } from './build-routes.js';
 import { registerLocalEndpointRoutes } from './local-endpoint-routes.js';
+import { registerLocalEndpointModelsRoute } from './local-endpoint-models-route.js';
 import { registerLocalEndpointUseRoutes, type EndpointPresetData } from './local-endpoint-use-routes.js';
 import { registerRunSettingsRoutes } from './run-settings-routes.js';
 import { registerUpdateRoutes } from './update-routes.js';
@@ -139,6 +141,8 @@ export interface AppOptions {
   builds?: BuildsUseCases;
   /** The install's run limits and a project's build settings (story 5.8). */
   buildSettings?: BuildSettings;
+  /** Notification settings and webhooks (story 11.4). */
+  notifications?: Notifications;
   /** The Local model's endpoints (epic 14 story 14.3); without it those routes answer 501. */
   localEndpoints?: LocalEndpoints | undefined;
   /** Test connection and Detect (epic 14 story 14.4); without it those routes answer 501. */
@@ -201,6 +205,7 @@ export function createApp({
   retrospectives,
   builds,
   buildSettings,
+  notifications,
   localEndpoints,
   localModels,
   endpointPresets,
@@ -328,10 +333,11 @@ export function createApp({
   registerSettingsRoutes(app, { installSettings, newProjectDefaults, panes, log });
   registerTerminalsSettingsRoutes(app, { terminalsSettings, installSettings, log });
   // The install's run limits and notification settings (story 5.3; 5.8 and 11.4 fill them): the gate, never a piece's guard.
-  registerRunSettingsRoutes(app, { buildSettings, builds, log });
+  registerRunSettingsRoutes(app, { buildSettings, builds, notifications, log });
   // The Local model's endpoints (epic 14 story 14.3): app-wide, behind the gate, never a piece's guard; a key never leaves.
   registerLocalEndpointRoutes(app, { localEndpoints, log });
   registerLocalEndpointUseRoutes(app, { localModels, presets: endpointPresets ?? [], log });
+  registerLocalEndpointModelsRoute(app, { localModels, log });
   registerUpdateRoutes(app, { updates, desktop: desktopUpdate, shell });
 
   registerEventSocket(app, { events, log, tabs });

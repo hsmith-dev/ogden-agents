@@ -1,4 +1,4 @@
-import { chatName, NEW_CHAT_NAME, type CoreEvent, type Session, type SessionErrorCode, type SessionState, type Workspace } from '@ogden-agents/shared';
+import { chatName, NEW_CHAT_NAME, runPhase, type CoreEvent, type Run, type Session, type SessionErrorCode, type SessionState, type Workspace } from '@ogden-agents/shared';
 import { UNKNOWN_AGENT_NAME } from '@/chat/chat-api';
 import { sessionView, type TranscriptCheckIn, type TranscriptPermission } from '@/chat/transcript';
 import { streamEvents, type EventStoreState } from '@/events/event-store';
@@ -42,11 +42,11 @@ export interface SidebarWorkspace {
  * What kind of thing waits on the user: a permission request, a waiting
  * session whose request is older than the window, a working agent that went
  * quiet (`session.check_in`, story 2.10), or a chat stopped until its agent
- * is signed in again (`auth_required`, 9.4). A terminal pane that seems to be
- * waiting for the user (`pane`, epic 16: a guess from its status event).
- * Build checkpoints join later.
+ * is signed in again (`auth_required`, 9.4); a build run that is blocked
+ * (`run_blocked`) or ready for review (`run_review`, story 11.4); a terminal
+ * pane that seems to be waiting for the user (`pane`, epic 16: a guess from its status event).
  */
-export type NeedKind = 'permission' | 'waiting' | 'check_in' | 'sign_in' | 'pane';
+export type NeedKind = 'permission' | 'waiting' | 'check_in' | 'sign_in' | 'run_blocked' | 'run_review' | 'pane';
 
 /** The kinds that can make a sound or a desktop notification and have a setting: a terminal pane's attention is opt in per pane (story 16.8), so it is not among them. */
 export type NotifiableNeedKind = Exclude<NeedKind, 'pane'>;
@@ -74,6 +74,47 @@ export interface NeedsYouEntry {
   notify?: boolean;
   /** Set on a sign in need of an agent that takes only an API key: its key was rejected, there is no sign in. */
   keyRejected?: true;
+  /** A run ready for review opens its review page for this ticket, not its session (story 11.4). */
+  reviewRef?: string;
+}
+
+/** The Needs you text of a blocked build run and of one ready for review (story 11.4). */
+export const runBlockedText = (ref: string) => `Build ${ref} is blocked`;
+export const runReviewText = (ref: string) => `Build ${ref} is ready for review`;
+
+/**
+ * Blocked runs and runs ready for review as Needs you entries (story 11.4):
+ * only each ticket's latest run (`runs` come newest first), a run waiting at a
+ * checkpoint counting as blocked, one the user decided or stopped as nothing.
+ * Never a command, a file or what the agent said: the ticket's ref and the
+ * state only.
+ */
+export function buildRunNeeds(workspaces: readonly Workspace[], runsByWorkspace: ReadonlyMap<string, readonly Run[]>): NeedsYouEntry[] {
+  const entries: NeedsYouEntry[] = [];
+  for (const workspace of workspaces) {
+    const seen = new Set<string>();
+    for (const run of runsByWorkspace.get(workspace.id) ?? []) {
+      if (seen.has(run.ticketRef)) continue;
+      seen.add(run.ticketRef);
+      const phase = runPhase(run);
+      if (phase !== 'needs_you' && phase !== 'checkpoint' && phase !== 'built') continue;
+      const blocked = phase !== 'built';
+      entries.push({
+        // Stable while the run stays in this state, so a changed reason says nothing twice; a run that leaves it and comes back is new news (the notifier forgets it meanwhile).
+        id: `${blocked ? 'run_blocked' : 'run_review'}:${run.id}`,
+        kind: blocked ? 'run_blocked' : 'run_review',
+        wsId: workspace.id,
+        sesId: run.sessionId,
+        workspaceName: workspaceName(workspace),
+        chatName: `Build ${run.ticketRef}`,
+        text: blocked ? runBlockedText(run.ticketRef) : runReviewText(run.ticketRef),
+        agentName: '',
+        at: run.updatedAt,
+        ...(blocked ? {} : { reviewRef: run.ticketRef }),
+      });
+    }
+  }
+  return entries;
 }
 
 export interface SidebarModel {
@@ -239,6 +280,8 @@ export function buildSidebar(
   modelName: (agentId: string | undefined, model: string) => string = (_agentId, model) => model,
   /** Whether a chat's agent takes only an API key, never an account sign in (Codex, Grok): its sign in need says the key was rejected. */
   keyOnly: (agentId: string | undefined) => boolean = () => false,
+  /** Blocked runs and runs ready for review (story 11.4), from `buildRunNeeds`. */
+  runNeeds: readonly NeedsYouEntry[] = [],
 ): SidebarModel {
   const byWorkspace = new Map<string, Session[]>();
   for (const session of sessions) {
@@ -307,6 +350,7 @@ export function buildSidebar(
     groups.push({ wsId: workspace.id, name, rows, earlier, summary });
   }
   for (const workspace of ordered) needsYou.push(...paneNeeds(store, workspace.id, workspaceName(workspace)));
+  needsYou.push(...runNeeds);
   needsYou.sort((a, b) => time(a.at) - time(b.at) || (a.id < b.id ? -1 : 1));
   return { groups, needsYou };
 }
@@ -382,6 +426,10 @@ export function diffForAnnouncements(previous: SidebarModel, next: SidebarModel)
     }
   }
   const known = new Set(previous.needsYou.map((entry) => entry.id));
+  // A run that became blocked or ready for review is news in the polite region (the build session's own state change is said above).
+  for (const entry of next.needsYou) {
+    if ((entry.kind === 'run_blocked' || entry.kind === 'run_review') && !known.has(entry.id) && before.has(entry.sesId)) polite.push({ sesId: entry.sesId, text: `${entry.workspaceName}: ${entry.text}` });
+  }
   // A request in a session the sidebar did not have yet is its list loading, not news.
   // A quiet agent or a sign-in need changes no state worth a word on its own, so it is said here, never only by sound.
   const assertive = next.needsYou.flatMap((entry) => {

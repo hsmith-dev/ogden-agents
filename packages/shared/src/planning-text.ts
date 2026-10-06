@@ -67,10 +67,13 @@ export interface CatalogSkillGroup {
  * {@link catalogGroupRank} order, each group once, a group with no skill
  * left out, and an unknown or missing group together last as
  * {@link CATALOG_OTHER_GROUP_LABEL}. Stable: skills keep their order within a group.
+ * An epic-scoped skill (epic 7's look-back) is left out: it shows on the
+ * board's epic header, never in Plan home.
  */
 export function groupCatalogSkills(skills: readonly CatalogSkill[]): CatalogSkillGroup[] {
   const groups = new Map<number, CatalogSkillGroup>();
   for (const skill of skills) {
+    if (skill.scope === 'epic') continue;
     const rank = catalogGroupRank(skill.group);
     let group = groups.get(rank);
     if (group === undefined) {

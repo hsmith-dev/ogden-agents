@@ -48,7 +48,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const WS = 'ws_01J9Z3K4M5N6P7Q8R9S0T1V2W3';
 
 const state = vi.hoisted(() => ({
-  capabilities: { plain_labels: false, ticket_tree: false } as BmadCapabilities,
+  capabilities: { plain_labels: false, ticket_tree: false, look_back: true } as BmadCapabilities,
   entryAction: null as string | null,
   /** The tickets' answer: `reduced` until upgraded. */
   reduced: true,
@@ -153,7 +153,7 @@ async function upgrade() {
 /** The server's upgrade run, step by step, ending completed (the files now have both capabilities). */
 async function serverUpgrades() {
   emit({ type: 'bmad.setup_started', payload: {} }, { type: 'bmad.setup_progress', payload: { step: 'checking', label: BMAD_SETUP_STEP_LABELS.checking } });
-  state.capabilities = { plain_labels: true, ticket_tree: true };
+  state.capabilities = { plain_labels: true, ticket_tree: true, look_back: true };
   state.entryAction = 'bmad-help';
   state.reduced = false;
   emit({ type: 'bmad.setup_completed', payload: { status: CURRENT } });
@@ -161,7 +161,7 @@ async function serverUpgrades() {
 }
 
 beforeEach(() => {
-  state.capabilities = { plain_labels: false, ticket_tree: false };
+  state.capabilities = { plain_labels: false, ticket_tree: false, look_back: true };
   state.entryAction = null;
   state.reduced = true;
   state.calls = [];
@@ -188,14 +188,14 @@ describe('Plan in reduced mode (entry 4.11)', () => {
   });
 
   it('with labels but no entry action: the entry sentence', async () => {
-    state.capabilities = { plain_labels: true, ticket_tree: true };
+    state.capabilities = { plain_labels: true, ticket_tree: true, look_back: true };
     mount(<PlanHome wsId={WS} onStarted={() => {}} />);
     await settle();
     expect(screen.getByTestId('reduced-mode-notice').textContent).toContain(PLAN_ENTRY_REDUCED_TEXT);
   });
 
   it('nothing is missing: no notice, the idea prompt', async () => {
-    state.capabilities = { plain_labels: true, ticket_tree: true };
+    state.capabilities = { plain_labels: true, ticket_tree: true, look_back: true };
     state.entryAction = 'bmad-help';
     mount(<PlanHome wsId={WS} onStarted={() => {}} />);
     await settle();
@@ -237,7 +237,7 @@ describe('Plan in reduced mode (entry 4.11)', () => {
     expect(screen.getAllByTestId('bmad-setup-step').map((step) => step.getAttribute('data-state'))).toEqual(['done', 'current', 'pending', 'pending']);
     const catalogReads = state.calls.filter((call) => call.endsWith('/catalog')).length;
 
-    state.capabilities = { plain_labels: true, ticket_tree: true };
+    state.capabilities = { plain_labels: true, ticket_tree: true, look_back: true };
     state.entryAction = 'bmad-help';
     emit({ type: 'bmad.setup_completed', payload: { status: CURRENT } });
     await settle();

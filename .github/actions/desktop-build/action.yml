@@ -11,13 +11,13 @@ description: >
 
 inputs:
   target:
-    description: The Rust target triple (universal-apple-darwin, x86_64-pc-windows-msvc, aarch64-pc-windows-msvc).
+    description: The Rust target triple (universal-apple-darwin, x86_64-pc-windows-msvc, aarch64-pc-windows-msvc, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu).
     required: true
   rust:
     description: Rust targets to install, comma separated.
     required: true
   bundles:
-    description: The Tauri bundles to build (app,dmg or nsis).
+    description: The Tauri bundles to build (app,dmg, nsis or appimage,deb).
     required: true
   signing:
     description: test, release or none.
@@ -32,6 +32,16 @@ runs:
       with:
         node-version: 24
         cache: pnpm
+
+    # The webview and bundling libraries the AppImage and .deb need (webkit2gtk-4.1 on Ubuntu 22.04, story 13.15).
+    - name: Linux build dependencies
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev patchelf libfuse2 file build-essential libssl-dev libdbus-1-dev libsecret-1-dev
+        # linuxdeploy's strip fails on some ELF files (.relr.dyn).
+        echo "NO_STRIP=true" >> "$GITHUB_ENV"
 
     - uses: dtolnay/rust-toolchain@master
       with:

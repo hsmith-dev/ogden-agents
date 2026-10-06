@@ -75,6 +75,13 @@ export interface BuildsUseCases {
   runs(workspaceId: WorkspaceId): Promise<RunsResponse>;
   /** One run of the workspace and its verification (the latest `run.verification_completed`). `NotFoundError` for another workspace's. */
   run(workspaceId: WorkspaceId, runId: unknown): Promise<RunResponse>;
+  /**
+   * Check again (story 11.2): re-runs the three end checks on the run's
+   * worktree (a failed or ready-for-review run, not decided, the ticket's
+   * latest) and answers the run as it then is, running while they do.
+   * `run_not_active` otherwise.
+   */
+  checkAgain(workspaceId: WorkspaceId, runId: unknown): Promise<Run>;
   /** Starts the queue's next runs where the limits allow (a server start, a changed limit; story 5.8). */
   dispatchQueued(): Promise<void>;
   /** Resolves once every run's activity handed to the recorder is written (tests). */

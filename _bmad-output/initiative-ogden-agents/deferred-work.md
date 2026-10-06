@@ -98,7 +98,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Unowned: the project trust prompt's "changed" wording keys on the trusted flag only, and the terminal trust refusal uses code `agent_unsupported`. From 12.3 review. (log: "the project trust prompt's changed wording keys on the trusted flag only")
 - Epic 5 (a later story): a network allowlist (package registries) for a build's sandboxed commands; until then builds have no network. From 5.2's user decision. (log: "A network allowlist for an unattended build's sandboxed commands")
 - Epic 5 (5.6): core decides a build's file write before Claude Code's unsandboxed Edit/Write performs it, so a symlink swapped in after the decision can redirect it. From 5.2 security review S2. (log: "Core decides a build's file write before Claude Code's unsandboxed Edit/Write tool performs it")
-- Epic 11 (11.4): mask a webhook's host when listing it back; some providers put the token in the host name. From 5.3 security review S10. (log: "Listing a webhook back by its full host can show part of its secret")
 - Epic 5 (a later sandbox story; 5.10's sweep left it, no behavior change): stop a build's commands that leave the agent's process group (`setsid`) or outlive their parent on Windows (cgroup, job object or sandbox-level kill). From 5.4 security review S4. (log: "Stopping a build kills the agent's process group")
 - Epic 5 (5.8) or epic 11 (11.1): prune a run's folder (`<data>/r/<run8>`) and the activity recorder's maps with the run's worktree. From 5.4 security review S6. (log: "Run folders (`<data>/r/<run8>`, up to 32 MiB")
 - Epic 5 (a later sandbox story; 5.10's sweep left it, no behavior change): the board and the run's end read a run's worktree with `tickets.py` while the agent may still be live (check-then-use on the worktree's scripts, which the sandbox denies the agent). From 5.5 security review S2. (log: "Board reads of an active run's worktree run `tickets.py` while its agent may be live")
@@ -120,6 +119,9 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - Epic 5 (5.9): queued runs start again only when another run ends, a limit changes or the server restarts, not when a turned-off piece is turned back on. From 5.8 review. (log: "Queued runs wait after a piece is turned back on")
 - Epic 5 (11.1): Update and retry takes no run-limit slot and arms no deadline, and every review read runs `tickets.py` once. From 5.9 reviews. (log: "Update and retry takes no run limit slot and arms no deadline")
 - Epic 11 (11.5, which also takes the run folder pruning above): Apply the saved fix leaves the patch applied with the run still blocked when the plan mark or the prompt fails afterwards; the saved patch is read by git three times and not previewed. From 11.1 reviews. (log: "Apply the saved fix after a late failure")
+- Epic 11 (11.5): a Check again that ends without a built plan or on a read failure leaves the older verification shown beside the new reason; Check again is offered for runs the server then refuses; tests for the settings field and the re-check edge cases. From 11.2 reviews. (log: "Check again edge cases after 11.2")
+- Epic 11 (11.5): Build all ready and the detail sheet's build section have thin DOM tests, "Started N builds." is not announced through a live region that was already mounted, and the Build dialog over the sheet is an untested nested modal. From 11.3 reviews. (log: "Board build actions edge cases after 11.3")
+- Epic 11 (11.5): webhook edges: concurrent adds can pass the cap, Remove with an unreachable keychain orphans the saved address, focus after Remove or add, the add form while the list failed to load, and a minute of stale build needs after a socket gap. From 11.4 reviews. (log: "Webhook edges after 11.4")
 - 14.10 (proposed): Local model chat re-checks only file sizes of the installed harness at launch, not its SHA-256. From 14.2 review. (log: "Local model chat re-checks only file sizes of the installed harness at launch, not its SHA-256")
 - 14.10 (proposed): The harness's tool permissions list names each tool (bash, edit, webfetch, websearch, codesearch, task, external_directory, doom_loop) instead of a wildcard ask. From 14.2 review. (log: "The harness's tool permissions list names each tool (bash, edit, webfetch, websearch, codesearch, task, external_directory, doom_loop) instead of a wildcard ask")
 - 14.10 (proposed): An approved env or printenv card puts an endpoint's key into the harness's tool output and so into opencode.db. From 14.2 review. (log: "An approved env or printenv card puts an endpoint's key into the harness's tool output and so into opencode.db")
@@ -128,6 +130,7 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - 14.10 (proposed): The harness's own chat requests may follow a redirect from a confirmed host to an unconfirmed one. From 14.3 review. (log: "The harness's own chat requests may follow a redirect from a confirmed host to an unconfirmed one")
 - 14.10 (proposed): Endpoint key and database steps are not one transaction (set, remove and remove key races leave an orphan keychain entry). From 14.3 review. (log: "Endpoint key and database steps are not one transaction (set, remove and remove key races leave an orphan keychain entry)")
 - 14.10 (proposed): shared/src/events.ts is over 600 lines and shared compiles with DOM types. From 14.3 review. (log: "shared/src/events.ts is over 600 lines and shared compiles with DOM types")
+- 14.11 (live check): The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model. From 14.9 review. (log: "The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model")
 
 ## Log
 
@@ -837,9 +840,27 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-retrospectives/story-tracer-bullet-look-back-on-one-finished-epic-from-the-board-plan.md`
   summary: A look-back's epic folder is derived from tickets.py's folder name and the setup status's output folder (`folder.name` for a nested active initiative, `_bmad/config.toml` only for the output folder), so a nested initiative or an overridden central output folder starts a session naming a missing folder instead of answering 404.
   evidence: correctness review of 7.1 read tickets.py `cmd_status` (`folder.name`) and `tickets_root` (merged config); fix by checking the derived folder exists through the catalog port before starting.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-retrospectives/story-epic-contracts-and-stubs-plan.md`
+  summary: A build summary's blockedReason is agent-authored text that reaches the look-back's first message (it can hold text a script or agent wrote), so 7.4 builds that message from bounded single-line plain text.
+  evidence: security review of 7.2 on `EpicBuildSummary.blockedReason` (max 500, no pattern); the message is built only in 7.4.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-retrospectives/story-look-back-and-the-board-plan.md`
+  summary: Resolved: "A build summary's blockedReason is agent-authored text that reaches the look-back's first message" is closed in 7.4: the summary's blocked reason is Ogden's own fixed sentence for the run's code, never the run's reason text, and each line of the message is plain, single-line and bounded.
+  evidence: `packages/core/src/build-summaries.ts` (`blockedSentence`, `summaryLine`) and its test.
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-build-runs-and-notifications/story-live-run-view-and-the-runs-tab-plan.md`
   summary: Apply the saved fix after a late failure: the patch stays applied while the run is still blocked when the plan mark or the prompt fails; the patch is read by git three times and is not previewed.
   evidence: 11.1 correctness and security reviews; Retry still works, and the agent is released while the run is blocked.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-build-runs-and-notifications/story-verification-reporting-plan.md`
+  summary: Check again edge cases after 11.2: a re-check that ends without a built plan or on a read failure leaves the older verification shown beside the new reason; the button is offered for runs the server then refuses; the settings field and the re-check edge cases have thin tests.
+  evidence: 11.2 correctness review; the reason is right, the checks list can be stale; a fix needs a marker on the verification event.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-build-runs-and-notifications/story-build-actions-on-the-board-plan.md`
+  summary: Board build actions edge cases after 11.3: Build all ready and the sheet's build section have thin DOM tests, the started notice is not announced through an already mounted live region, and the Build dialog over the sheet is an untested nested modal.
+  evidence: 11.3 correctness review; the e2e covers the happy paths and the refused dialog.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-build-runs-and-notifications/story-needs-you-and-webhook-notifications-plan.md`
+  summary: Resolved: "Listing a webhook back by its full host can show part of its secret" (5.3 security review S10), by 11.4: a webhook is listed back by its registrable domain only (`maskedHost` in core), "this computer" or "an IP address" for those, and its URL lives only in the keychain.
+  evidence: `core/src/notifications.ts` `maskedHost` and `addWebhook`; tests `core/test/notifications.test.ts` and `server/test/notification-routes.test.ts`.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-build-runs-and-notifications/story-needs-you-and-webhook-notifications-plan.md`
+  summary: Webhook edges after 11.4: concurrent adds can pass the cap of 10, Remove with an unreachable keychain orphans the saved address, focus is not managed after Remove or add, the add form shows while the list failed to load, and a socket gap leaves build needs stale for up to a minute.
+  evidence: 11.4 reviews; each is low and none leaks a URL.
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-tracer-bullet-one-local-model-chat-against-a-fake-server-end-to-end-plan.md`
   summary: Local model chat re-checks only file sizes of the installed harness at launch, not its SHA-256: the install checks the SHA-256 of the binary and ripgrep, but a same-size replacement by anything running as the user would be run; re-hashing about 185 MB at every start costs a second or two. Decide when 14.10 sweeps.
   evidence: 14.2 security review; data folder is owner-only.
@@ -864,3 +885,6 @@ Closed in code with no "Resolved:" entry: the session-event `workspaceId` check 
 - source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-epic-contracts-and-stubs-endpoint-localmodelport-no-account-descriptor-and-the-fake-server-plan.md`
   summary: shared/src/events.ts is over 600 lines and shared compiles with DOM types: events.ts grew from 615 to 621 lines with the endpoint event and shared's tsconfig gained the DOM lib only for URL; a narrower URL declaration and a split of events.ts are the sweep's.
   evidence: 14.3 correctness review.
+- source_plan: `_bmad-output/initiative-ogden-agents/epic-local-models/story-bmad-skills-reach-the-local-model-where-planning-is-on-nothing-where-it-is-off-plan.md`
+  summary: The real OpenCode also reads .opencode/skills and parent folders' skill folders, which the fake harness does not model: spike 14.1 says it reads `.opencode/skills` unless project config is disabled and walks up from the project folder; whether `OPENCODE_DISABLE_PROJECT_CONFIG` covers `.opencode/skills` is a live check on the real harness.
+  evidence: 14.9 review; spike 14.1 report.

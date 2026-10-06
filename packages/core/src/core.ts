@@ -1,12 +1,14 @@
 import type { AgentId } from '@ogden-agents/shared';
 import type { BmadCatalogPort } from './bmad-catalog-port.js';
 import { createBmadDetection, type BmadDetectionUseCases } from './bmad-detection.js';
+import { createLookBackOffers, type LookBackOffers } from './look-back-offers.js';
 import { createBmadFeatures, parseAvailableBmadPieces, type BmadFeatures, type BmadFeaturesOptions } from './bmad-pieces.js';
 import { createBmadModulesSeen, type BmadModulesSeen } from './bmad-modules-seen.js';
 import { createBmadScriptTrust, type BmadScriptTrust } from './bmad-script-trust.js';
 import { createBmadSetup, type BmadSetupUseCases } from './bmad-setup.js';
 import { createBuildSessions, type BuildSessions } from './build-sessions.js';
 import { createBuildSettings, type BuildSettings } from './build-settings.js';
+import { createNotifications, type Notifications, type NotificationsPorts } from './notifications.js';
 import { createLocalEndpoints, type LocalEndpoints } from './local-endpoints.js';
 import type { SecretStorePort } from './secret-store-port.js';
 import { openDatabase, type OpenDatabaseOptions } from './db/database.js';
@@ -35,6 +37,8 @@ export interface Core {
   readonly bmad: BmadFeatures;
   /** Whether a project's repo already uses BMad Method, and Not now on the offer (story 10.3). */
   readonly bmadDetection: BmadDetectionUseCases;
+  /** The finished-epic offer's Not now (epic 7, story 7.2), behind the Retrospectives guard. */
+  readonly lookBackOffers: LookBackOffers;
   /** The per-project script trust (story 4.2): checked with the pieces guard for every use of the project's own scripts. */
   readonly bmadScriptTrust: BmadScriptTrust;
   /** When each BMad Method module first appeared in a project (story 4.4): fills the catalog's `installedAt`. */
@@ -56,6 +60,8 @@ export interface Core {
   readonly terminalsSettings: TerminalsSettingsStore;
   /** Unattended builds' limits and a project's build settings (story 5.8). */
   readonly buildSettings: BuildSettings;
+  /** Notifications for builds (story 11.4): webhooks and what is sent to them, over the server's keychain and sender. Call once. */
+  readonly createNotifications: (ports: NotificationsPorts) => Notifications;
   /**
    * The Local model's endpoints (epic 14 story 14.3) over the keychain the server holds (AD-16): their keys are
    * never in the database. The server calls it once, after it has its secret store.
@@ -104,6 +110,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
   // Which pieces this install ships is the server wiring's list (story 10.2), never core's.
   const bmad = createBmadFeatures(db, { availableBmadPieces });
   const bmadDetection = createBmadDetection({ orm: db.orm, events, entities, catalog: options.bmadCatalog });
+  const lookBackOffers = createLookBackOffers({ orm: db.orm, events, bmad });
   const catalog = options.bmadCatalog;
   const bmadScriptTrust = createBmadScriptTrust({
     orm: db.orm,
@@ -145,6 +152,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     permissions,
     bmad,
     bmadDetection,
+    lookBackOffers,
     bmadScriptTrust,
     bmadModulesSeen,
     bmadSetup,
@@ -154,6 +162,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     buildSettings: createBuildSettings({ db, events, entities }),
     paneStore: createPaneStore({ db }),
     terminalsSettings: createTerminalsSettings({ db, events }),
+    createNotifications: (ports) => createNotifications({ ...ports, db, events, entities, bmad }),
     localEndpoints: (secrets) => createLocalEndpoints({ db, events, secrets }),
     close: () => {
       try {

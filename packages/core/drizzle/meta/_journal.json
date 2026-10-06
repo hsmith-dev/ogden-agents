@@ -159,22 +159,36 @@
     {
       "idx": 22,
       "version": "6",
-      "when": 1791247126762,
-      "tag": "0022_terminal_panes",
+      "when": 1791245483489,
+      "tag": "0022_look_back_offers",
       "breakpoints": true
     },
     {
       "idx": 23,
       "version": "6",
-      "when": 1791248173439,
-      "tag": "0023_pane_notify",
+      "when": 1791249188580,
+      "tag": "0023_notifications",
       "breakpoints": true
     },
     {
       "idx": 24,
       "version": "6",
-      "when": 1791249057269,
-      "tag": "0024_terminals_settings",
+      "when": 1791258030136,
+      "tag": "0024_terminal_panes",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1791260072839,
+      "tag": "0025_pane_notify",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1791261600531,
+      "tag": "0026_terminals_settings",
       "breakpoints": true
     }
   ]

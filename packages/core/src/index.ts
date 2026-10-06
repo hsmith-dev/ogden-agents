@@ -12,6 +12,8 @@ export * from './bmad-script-trust.js';
 export * from './bmad-setup.js';
 export * from './bmad-source-port.js';
 export * from './board.js';
+export * from './build-summaries.js';
+export * from './retrospective-verdict.js';
 export * from './bmad-skill-folders.js';
 export * from './build-permission-policy.js';
 export * from './build-runner-port.js';
@@ -46,6 +48,8 @@ export {
 } from './event-log.js';
 export { newId } from './ids.js';
 export * from './install-settings.js';
+export * from './notifications.js';
+export * from './look-back-offers.js';
 export * from './new-projects.js';
 export * from './onboarding.js';
 export * from './pane-launchers.js';

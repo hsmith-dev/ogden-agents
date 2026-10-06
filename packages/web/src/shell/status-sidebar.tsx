@@ -180,7 +180,12 @@ function StatusSidebarBody() {
           onOpenFirst={
             first === undefined
               ? undefined
-              : () => void (first.paneId === undefined ? navigate({ to: '/w/$wsId/s/$sesId', params: { wsId: first.wsId, sesId: first.sesId } }) : navigate({ to: '/w/$wsId/terminals' as never, params: { wsId: first.wsId } as never }))
+              : () =>
+                  void (first.paneId !== undefined
+                    ? navigate({ to: '/w/$wsId/terminals' as never, params: { wsId: first.wsId } as never })
+                    : first.reviewRef === undefined
+                      ? navigate({ to: '/w/$wsId/s/$sesId', params: { wsId: first.wsId, sesId: first.sesId } })
+                      : navigate({ to: '/w/$wsId/review/$ref', params: { wsId: first.wsId, ref: first.reviewRef } }))
           }
         />
         <SidebarGroup aria-labelledby={projectsId}>

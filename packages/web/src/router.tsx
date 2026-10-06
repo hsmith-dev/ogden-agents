@@ -126,6 +126,13 @@ const workspaceRunsRoute = createRoute({
   component: lazyRouteComponent(() => import('./routes/workspace-runs-page'), 'WorkspaceRunsPage'),
 });
 
+/** A project's Orchestrate page (epic 15, 15.3): a goal, the manager's plan, the user's approval of each instruction. Only with the Orchestration piece on. */
+const workspaceOrchestrateRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$wsId/orchestrate',
+  component: lazyRouteComponent(() => import('./routes/workspace-orchestrate-page'), 'WorkspaceOrchestratePage'),
+});
+
 /** A project's Terminals page (epic 16, story 16.2): its terminal panes, in Developer mode. */
 const workspaceTerminalsRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -163,6 +170,7 @@ const routeTree = rootRoute.addChildren([
   workspaceBoardRoute.addChildren([workspaceBoardTicketRoute]),
   workspaceReviewRoute,
   workspaceRunsRoute,
+  workspaceOrchestrateRoute,
   workspaceTerminalsRoute,
   sessionRoute,
   settingsRoute.addChildren([appearanceRoute, toolsRoute, agentsSettingsRoute, newProjectsRoute, buildsSettingsRoute, notificationsRoute, terminalsSettingsRoute, aboutRoute]),

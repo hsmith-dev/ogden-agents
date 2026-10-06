@@ -8,7 +8,7 @@ import type { AntigravityPorts } from './antigravity-wiring.js';
 import type { CodexPorts } from './codex-wiring.js';
 import type { GrokPorts } from './grok-wiring.js';
 import type { LocalPorts } from './local-wiring.js';
-import type { LocalModelPort, AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, NotifierPort, PaneLaunchers, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort } from '@ogden-agents/core';
+import type { LocalModelPort, ManagerPort, AgentApiKeySupport, AgentPort, AgentSetupPort, AppShortcutPort, BmadCatalogPort, BmadSourcePort, BuildRunnerPort, Core, NotifierPort, PaneLaunchers, SandboxPort, SecretStorePort, TicketStorePort, ToolchainPort, VcsPort } from '@ogden-agents/core';
 import type { BmadPiece } from '@ogden-agents/shared';
 import type { Clock, TabTokens } from './auth.js';
 import type { Logger } from './log.js';
@@ -180,6 +180,12 @@ export interface StartOptions {
    * that does. The launcher never sets it. Ignored when {@link core} is given.
    */
   orchestrationAvailable?: boolean;
+  /**
+   * The manager Orchestration asks for plans (epic 15, 15.3): a test passes the
+   * `manager-memory` stub. Without it, and without the test hook, a real
+   * install has none yet (the real adapter is 15.4) and Orchestrate says so.
+   */
+  manager?: ManagerPort;
   /**
    * Override the read-only BMad detection (story 10.3) and the catalog's
    * skills (story 4.1). Default: the `bmad-catalog` adapter. With {@link core}

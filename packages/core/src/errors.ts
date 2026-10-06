@@ -9,6 +9,9 @@ import {
   BMAD_SETUP_FAILURE_REASONS,
   FEATURE_OFF_MESSAGE,
   ORCHESTRATION_OFF_MESSAGE,
+  ORCHESTRATION_NO_MANAGER_MESSAGE,
+  ORCHESTRATION_STEP_NOT_APPROVED_MESSAGE,
+  ORCHESTRATION_STEP_NOT_PROPOSED_MESSAGE,
   ORCHESTRATION_UNAVAILABLE_MESSAGE,
   FEATURE_UNAVAILABLE_MESSAGE,
   SCRIPTS_CHANGED_MESSAGE,
@@ -98,6 +101,38 @@ export class OrchestrationOffError extends CoreError {
   override readonly name = 'OrchestrationOffError';
   constructor() {
     super('feature_off', ORCHESTRATION_OFF_MESSAGE);
+  }
+}
+
+/** A run was asked for but this install has no manager set up yet (epic 15, 15.3); nothing was stored. */
+export class ManagerUnavailableError extends CoreError {
+  override readonly name = 'ManagerUnavailableError';
+  constructor() {
+    super('manager_unavailable', ORCHESTRATION_NO_MANAGER_MESSAGE);
+  }
+}
+
+/** The manager did not give a usable plan; `message` is its plain reason. The run is marked failed and holds no step. */
+export class ManagerFailedError extends CoreError {
+  override readonly name = 'ManagerFailedError';
+  constructor(message: string) {
+    super('manager_failed', message);
+  }
+}
+
+/** An instruction was to be sent before the user approved it: nothing was created or sent (code, not the page, refuses it). */
+export class StepNotApprovedError extends CoreError {
+  override readonly name = 'StepNotApprovedError';
+  constructor() {
+    super('step_not_approved', ORCHESTRATION_STEP_NOT_APPROVED_MESSAGE);
+  }
+}
+
+/** A step was to be approved but is not waiting for approval, or a step it needs is not done. */
+export class StepNotProposedError extends CoreError {
+  override readonly name = 'StepNotProposedError';
+  constructor() {
+    super('step_not_proposed', ORCHESTRATION_STEP_NOT_PROPOSED_MESSAGE);
   }
 }
 

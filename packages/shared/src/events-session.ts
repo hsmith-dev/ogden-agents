@@ -195,9 +195,11 @@ export const SessionMessageCompletedInput = z.object({
      * reason they gave with a Deny, which core sent for the user
      * (`deny_reason`; Try again never resends it as a plain message, 9.4
      * review F4), or one typed in the agent's own terminal and imported after
-     * switching back (`terminal`, story 3.2; shown "from terminal").
+     * switching back (`terminal`, story 3.2; shown "from terminal"), or an
+     * instruction the orchestration manager wrote and the user approved
+     * (`manager`, epic 15, 15.3; shown "Sent by the manager, approved by you").
      */
-    origin: z.enum(['deny_reason', 'terminal']).optional(),
+    origin: z.enum(['deny_reason', 'terminal', 'manager']).optional(),
     /**
      * Set on a user message sent right away that the agent took into its
      * running turn (`injected`; send now or wait): the turn went on with it.

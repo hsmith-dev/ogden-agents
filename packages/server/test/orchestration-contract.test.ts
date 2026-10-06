@@ -52,10 +52,10 @@ const settingsPath = (wsId: string) => apiPath(API_ROUTES.workspaceSettings, { w
 const orchestrationPath = (wsId: string) => apiPath(API_ROUTES.workspaceOrchestration, { wsId });
 const settingsOf = async (server: TestServer, tab: SignedIn, wsId: string) => WorkspaceSettingsResponse.parse(await (await request(server, tab, 'GET', settingsPath(wsId))).json()).settings;
 
-describe('Orchestration is off by default and not yet shipped', () => {
-  it('a real install does not ship it, a project has it off, and the route answers feature_off', async () => {
-    expect(SHIPPED_ORCHESTRATION).toBe(false);
-    const server = await startTestServer();
+describe('Orchestration is off by default', () => {
+  it('a project has it off, the route answers feature_off, and an install that does not ship it refuses turning it on', async () => {
+    expect(SHIPPED_ORCHESTRATION).toBe(true);
+    const server = await startTestServer({ orchestrationAvailable: false });
     const tab = await signIn(server);
     const workspace = await addProject(server, tab);
     expect(await settingsOf(server, tab, workspace.id)).toEqual({ cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false });
@@ -88,6 +88,8 @@ describe('an install that ships Orchestration', () => {
       mode: 'approve_each',
       limits: RUN_LIMITS,
       roster: { manager: null, planner: null, worker: null, reviewer: null },
+      // No manager is set up in a plain test server (the real adapter is 15.4).
+      managerReady: false,
     });
     // Another project is unchanged.
     expect(await refusalOf(await request(server, tab, 'GET', orchestrationPath(other.id)))).toMatchObject({ status: 409, code: 'feature_off' });
@@ -123,7 +125,16 @@ describe('the route helper', () => {
     const core = openCore(tempDataDir());
     cores.push(core);
     const app = fullTestApp(core);
-    expect(orchestrationRouteKeys(app)).toEqual([`GET ${API_ROUTES.workspaceOrchestration}`]);
+    expect(orchestrationRouteKeys(app)).toEqual(
+      [
+        `GET ${API_ROUTES.workspaceOrchestration}`,
+        `GET ${API_ROUTES.workspaceOrchestrationRuns}`,
+        `POST ${API_ROUTES.workspaceOrchestrationRuns}`,
+        `GET ${API_ROUTES.workspaceOrchestrationRun}`,
+        `POST ${API_ROUTES.workspaceOrchestrationStepApprove}`,
+        `POST ${API_ROUTES.workspaceOrchestrationStepDispatch}`,
+      ].sort(),
+    );
     expect(guardedRouteKeys(app)).not.toContain(`GET ${API_ROUTES.workspaceOrchestration}`);
     // Every route under an orchestration path is one the helper registered: a new one cannot skip the guard.
     const served = [...new Set(app.routes.filter((route) => /\/orchestration(\/|$)/.test(route.path)).map((route) => `${route.method} ${route.path}`))].sort();

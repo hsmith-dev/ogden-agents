@@ -61,8 +61,10 @@ export function SidebarDataProvider({ children }: { children: ReactNode }) {
         (agentId, model) => modelLabel(chatAgents.data?.agents.find((agent) => agent.agentId === (agentId ?? chatAgents.data?.defaultAgentId))?.models, model),
         // An agent with only API key methods (Codex, Grok): its sign in need says the key was rejected.
         (agentId) => {
-          const methods = chatAgents.data?.agents.find((agent) => agent.agentId === (agentId ?? chatAgents.data?.defaultAgentId))?.signInMethods ?? [];
-          return methods.length > 0 && methods.every((method) => method.kind === 'api_key');
+          const agent = chatAgents.data?.agents.find((each) => each.agentId === (agentId ?? chatAgents.data?.defaultAgentId));
+          const methods = agent?.signInMethods ?? [];
+          // The name its key goes by (Grok: "xAI API access token"), else plain true.
+          return methods.length > 0 && methods.every((method) => method.kind === 'api_key') ? (agent?.apiKeyName ?? true) : false;
         },
         buildRunNeeds(workspaces.data ?? NO_WORKSPACES, runsByWorkspace),
       ),

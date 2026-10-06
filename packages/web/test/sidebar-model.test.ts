@@ -134,6 +134,9 @@ describe('buildSidebar (EXPERIENCE.md Status sidebar)', () => {
     const rejected = event('ws_b', 'ses_b', 'session.state_changed', { sessionId: 'ses_b', state: 'error', previous: 'working', reason: 'Codex needs a valid API key.', errorCode: 'auth_required' });
     const model = buildSidebar([B], [session('ses_b', 'ws_b', 'error')], store(rejected), NOW, () => 'Codex', undefined, () => true);
     expect(model.needsYou).toMatchObject([{ kind: 'sign_in', text: "Codex's API key was rejected", keyRejected: true }]);
+    // An agent that names its key (Grok's token) is told in its own words.
+    const grok = buildSidebar([B], [session('ses_b', 'ws_b', 'error')], store(rejected), NOW, () => 'Grok', undefined, () => 'xAI API access token');
+    expect(grok.needsYou).toMatchObject([{ kind: 'sign_in', text: "Grok's xAI API access token was rejected", keyRejected: true, keyName: 'xAI API access token' }]);
     expect(JSON.stringify(model.needsYou)).not.toMatch(/sign in/i);
   });
 

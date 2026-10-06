@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createOnboarding, ONBOARDING_FILE, ValidationError } from '../src/index.js';
@@ -54,6 +54,18 @@ describe('onboarding', () => {
     expect(onboarding.get()).toEqual({ welcomeCompleted: false });
     expect(onboarding.get()).toEqual({ welcomeCompleted: false });
     expect(codes).toEqual(['corrupt', 'corrupt']);
+  });
+
+  it('reports an unreadable record once per code while it stays unreadable, and again after it was readable', () => {
+    const { onboarding, file, codes } = setup();
+    mkdirSync(file);
+    for (let i = 0; i < 4; i++) expect(onboarding.get()).toEqual({ welcomeCompleted: false });
+    expect(codes).toEqual(['EISDIR']);
+    rmSync(file, { recursive: true });
+    expect(onboarding.get()).toEqual({ welcomeCompleted: false });
+    mkdirSync(file);
+    expect(onboarding.get()).toEqual({ welcomeCompleted: false });
+    expect(codes).toEqual(['EISDIR', 'EISDIR']);
   });
 
   it('a corrupt record with existing projects counts as done', () => {

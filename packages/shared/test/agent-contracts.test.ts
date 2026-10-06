@@ -76,3 +76,12 @@ describe("a project's default agent (6.3, kept from entry 6)", () => {
     expect(CoreEvent.safeParse({ ...changed, payload: { ...changed.payload, defaultAgentId: 'Not An Id' } }).success).toBe(false);
   });
 });
+
+describe('keyWordOf: the one word an agent calls its key', () => {
+  it('is key for an API key and the last word of its own name otherwise', async () => {
+    const { keyWordOf } = await import('../src/index.js');
+    expect(keyWordOf(undefined)).toBe('key');
+    expect(keyWordOf('API key')).toBe('key');
+    expect(keyWordOf('xAI API access token')).toBe('token');
+  });
+});

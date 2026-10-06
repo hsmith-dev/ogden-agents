@@ -23,7 +23,11 @@ import { join } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { crc32, createInflateRaw } from 'node:zlib';
-import type { AntigravityFilePin } from './descriptor.js';
+/** One file an archive holds, as Ogden pinned it: its size and SHA-256. */
+export interface PinnedFile {
+  size: number;
+  sha256: string;
+}
 
 export class UnsafeArchiveError extends Error {
   override readonly name = 'UnsafeArchiveError';
@@ -55,7 +59,7 @@ export function isSafeEntryName(name: string): boolean {
 }
 
 /** Reads the central directory and checks every entry before anything is written. */
-async function readEntries(archive: string, files: Readonly<Record<string, AntigravityFilePin>>): Promise<Entry[]> {
+async function readEntries(archive: string, files: Readonly<Record<string, PinnedFile>>): Promise<Entry[]> {
   const handle = await open(archive, 'r');
   try {
     const { size } = await handle.stat();
@@ -138,7 +142,7 @@ async function readEntries(archive: string, files: Readonly<Record<string, Antig
  * that isn't what the pin says; a file that fails its check is left for the
  * caller to remove with `dir`.
  */
-export async function extractPinned(archive: string, dir: string, files: Readonly<Record<string, AntigravityFilePin>>): Promise<void> {
+export async function extractPinned(archive: string, dir: string, files: Readonly<Record<string, PinnedFile>>): Promise<void> {
   const entries = await readEntries(archive, files);
   for (const entry of entries) {
     const pin = files[entry.name]!;

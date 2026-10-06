@@ -391,7 +391,12 @@ test('Settings: Agents installs Antigravity from a local fixture archive (a tamp
   await page.goto(`${launched.url}/settings/agents`);
 
   // The stand-in Google page: visiting it is the user approving (the fake signs in when it sees the file).
-  await context.route('https://accounts.google.com/**', (route) => {
+  // Held until the test has seen the card's "Finish signing in" step: the fake approves instantly, so without the
+  // gate the card can go straight to "signed in" before the (transient) message is ever polled, most often on a slow runner.
+  let approve!: () => void;
+  const approved = new Promise<void>((resolve) => (approve = resolve));
+  await context.route('https://accounts.google.com/**', async (route) => {
+    await approved;
     writeFileSync(join(server.antigravityHome, 'fake-google-consent'), '');
     return route.fulfill({ status: 200, contentType: 'text/html', body: '<title>Google</title><p>Signed in. You can close this tab.</p>' });
   });
@@ -408,6 +413,7 @@ test('Settings: Agents installs Antigravity from a local fixture archive (a tamp
 
   await agentCard(page).getByRole('button', { name: 'Sign in with your account' }).click();
   await expect(agentCard(page)).toContainText('Finish signing in in the tab that just opened.');
+  approve();
   if (process.platform === 'win32') {
     // Windows: Antigravity opens the browser itself; the card offers the link.
     await expect(agentCard(page).getByRole('link', { name: 'Open the sign-in page' })).toHaveAttribute('href', /^https:\/\/accounts\.google\.com\//);

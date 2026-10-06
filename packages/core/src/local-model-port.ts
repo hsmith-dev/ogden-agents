@@ -54,8 +54,10 @@ export interface LocalFailure {
   kind: LocalFailureKind;
   /** The HTTP status, for `http`. */
   status?: number | undefined;
-  /** Plain words for the user. Never the address, a key or an answer's text. */
+  /** Plain words for the user. Never a key or an answer's text (the address's host and port only). */
   reason: string;
+  /** For `bad_answer`: why, as a short token (`not_json`, `off_shape`, `no_way_to_ask`, `bad_schema`). */
+  detail?: string | undefined;
 }
 
 /** One model an endpoint serves, with what the server reports of it (nothing is guessed). */

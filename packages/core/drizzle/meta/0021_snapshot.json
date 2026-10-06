@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "31414b96-2f77-45d8-8599-db060b6f7014",
+  "id": "2b6f7a53-d78e-4fb5-bd97-eb5696e34b5e",
   "prevId": "c037ee89-b7dc-41fa-b64e-5c1349c68c1e",
   "tables": {
     "agent_settings": {
@@ -274,8 +274,8 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "notification_settings": {
-      "name": "notification_settings",
+    "local_endpoint_settings": {
+      "name": "local_endpoint_settings",
       "columns": {
         "id": {
           "name": "id",
@@ -284,13 +284,12 @@
           "notNull": true,
           "autoincrement": false
         },
-        "browser_notifications": {
-          "name": "browser_notifications",
-          "type": "integer",
+        "default_endpoint_id": {
+          "name": "default_endpoint_id",
+          "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {},
@@ -299,8 +298,8 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "notification_webhooks": {
-      "name": "notification_webhooks",
+    "local_endpoints": {
+      "name": "local_endpoints",
       "columns": {
         "id": {
           "name": "id",
@@ -309,18 +308,47 @@
           "notNull": true,
           "autoincrement": false
         },
-        "host": {
-          "name": "host",
+        "label": {
+          "name": "label",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "events": {
-          "name": "events",
+        "preset": {
+          "name": "preset",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "base_url": {
+          "name": "base_url",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "auth": {
+          "name": "auth",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'none'"
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "remote_confirmed_for": {
+          "name": "remote_confirmed_for",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "created_at": {

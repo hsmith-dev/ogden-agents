@@ -36,9 +36,12 @@ async function refusalOf(reply: Response) {
   return { status: reply.status, ...ApiErrorBody.parse(await reply.json()).error };
 }
 
+/** An install that ships every piece but Retrospectives (story 7.1 ships it): these tests need a piece an install lacks. */
+const UNSHIPPED_RETROSPECTIVES: readonly BmadPiece[] = ['planning', 'board', 'builds'];
+
 async function setup(availableBmadPieces: readonly BmadPiece[] = [], lines?: string[]) {
   const dataDir = tempDataDir();
-  const server = await startTestServer({ dataDir, availableBmadPieces, ...(lines === undefined ? {} : { lines }) });
+  const server = await startTestServer({ dataDir, shippedBmadPieces: UNSHIPPED_RETROSPECTIVES, availableBmadPieces, ...(lines === undefined ? {} : { lines }) });
   const tab = await signIn(server);
   return { server, tab, dataDir, file: join(dataDir, PREFERENCES_FILE) };
 }
@@ -95,7 +98,7 @@ describe('the new-projects default routes (story 10.4)', () => {
 
   it('refuses an unavailable piece with 409 feature_unavailable, writing nothing', async () => {
     const { server, tab, file, dataDir } = await setup(['planning']);
-    // Retrospectives isn't shipped yet (Planning and Board are, since story 4.2, and Unattended builds since 5.2).
+    // This install doesn't ship Retrospectives (the start option).
     expect(await refusalOf(await request(server, tab, 'PATCH', API_ROUTES.newProjectDefaults, { bmadPieces: ['board', 'builds', 'retrospectives'] }))).toEqual({
       status: 409,
       code: 'feature_unavailable',
@@ -162,7 +165,7 @@ describe('adding a project with the default (story 10.4)', () => {
   it('a stored default no longer shipped gives a new project only what still works', async () => {
     const dataDir = tempDataDir();
     writeFileSync(join(dataDir, PREFERENCES_FILE), JSON.stringify({ newProjects: { bmadPieces: ['board', 'builds', 'retrospectives'] } }));
-    const server = await startTestServer({ dataDir, availableBmadPieces: ['planning'] });
+    const server = await startTestServer({ dataDir, shippedBmadPieces: UNSHIPPED_RETROSPECTIVES, availableBmadPieces: ['planning'] });
     const tab = await signIn(server);
     expect(await defaultsOf(server, tab)).toEqual({ bmadPieces: ['board', 'builds', 'retrospectives'] });
     const workspace = await add(server, tab, { path: tempRepo() });

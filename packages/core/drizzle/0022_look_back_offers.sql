@@ -1,0 +1,1 @@
+ALTER TABLE `workspaces` ADD `look_back_dismissed` text DEFAULT '[]' NOT NULL;

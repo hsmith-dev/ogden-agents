@@ -148,6 +148,7 @@ export async function startTestServer(options: StartOptions & { lines?: string[]
     codex: false,
     // Grok likewise (epic 12): only where a test wires it.
     grok: false,
+    local: false,
     extraAgentEnv: { FAKE_LOGIN_STATE: signedInLoginState(), ...extraAgentEnv },
     ...rest,
     launch: true,

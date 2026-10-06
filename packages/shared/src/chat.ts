@@ -92,6 +92,8 @@ export const ChatAgent = z.object({
   auth: AgentAuthState,
   terminalResume: z.boolean(),
   needsProjectTrust: z.boolean(),
+  /** `true` for an agent that needs no account and no key (epic 14: the Local model): its card shows its endpoint's state, not a sign in. */
+  noAccount: z.boolean().optional(),
   permissionModes: z.array(PermissionMode).min(1),
   unavailable: AgentUnavailable.optional(),
   /**

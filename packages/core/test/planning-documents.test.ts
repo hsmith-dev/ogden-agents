@@ -7,7 +7,7 @@
  * inside the output folder, through the port.
  */
 import { join } from 'node:path';
-import { CatalogSkill, DOCUMENT_INVALID_PATH_MESSAGE, type BmadSetupStatus, type Catalog, type SessionDocumentWrittenEvent, type SessionId } from '@ogden-agents/shared';
+import { BMAD_PIECES, CatalogSkill, DOCUMENT_INVALID_PATH_MESSAGE, type BmadPiece, type BmadSetupStatus, type Catalog, type SessionDocumentWrittenEvent, type SessionId } from '@ogden-agents/shared';
 import { describe, expect, it } from 'vitest';
 import {
   createChat,
@@ -103,8 +103,8 @@ function writes(text: string): AgentEvent[] {
   ];
 }
 
-function setup({ pieces = ['planning'] as ('planning' | 'board')[], documents = {} as Record<string, string>, throwing = false } = {}) {
-  const core: Core = openTestCore(tempDir(), undefined, { availableBmadPieces: ['planning', 'board'] });
+function setup({ pieces = ['planning'] as BmadPiece[], documents = {} as Record<string, string>, throwing = false } = {}) {
+  const core: Core = openTestCore(tempDir(), undefined, { availableBmadPieces: BMAD_PIECES });
   const workspace = core.entities.ensureWorkspace(tempDir('ogden-agents-repo-'));
   if (pieces.length > 0) core.permissions.updateSettings(workspace.id, { bmadPieces: pieces });
   const catalog = fakeCatalog(documents);
@@ -145,7 +145,7 @@ function setup({ pieces = ['planning'] as ('planning' | 'board')[], documents = 
     await chat.settled();
     return session;
   };
-  return { core, workspace, repo, catalog, chat, planning, send, written, start, told, internal };
+  return { core, workspace, repo, catalog, chat, planning, send, written, start, told, internal, agent };
 }
 
 describe('document detection (story 4.7)', () => {
@@ -279,6 +279,23 @@ describe('document detection (story 4.7)', () => {
       [session.id, 'no_output_folder'],
       [session.id, 'feature_off'],
     ]);
+    await chat.close();
+  });
+
+  it('with only Retrospectives on (story 7.1), a look-back session\'s write gets a card and its document opens; Board alone gets neither', async () => {
+    const { repo, send, written, chat, core, workspace, planning, catalog, agent } = setup({ pieces: ['board', 'builds', 'retrospectives'], documents: { '_bmad-output/retro.md': '# Retro\n' } });
+    // A look-back is a planning session whose first message invokes a skill (the planning use-case itself is off).
+    const session = await chat.createChatSession(workspace.id, { kind: 'planning' });
+    chat.sendMessage(workspace.id, session.id, agent.skillInvocation('bmad-spec', '_bmad-output/epic-x'));
+    await chat.settled();
+    await send(session.id, `write completed ${join(repo, '_bmad-output', 'retro.md')}`);
+    expect(written(session.id).map((event) => event.payload.path)).toEqual(['_bmad-output/retro.md']);
+    expect((await planning.document(workspace.id, '_bmad-output/retro.md')).content).toBe('# Retro\n');
+    core.permissions.updateSettings(workspace.id, { bmadPieces: ['board'] });
+    await send(session.id, `write completed ${join(repo, '_bmad-output', 'retro-2.md')}`);
+    expect(written(session.id)).toHaveLength(1);
+    await expect(planning.document(workspace.id, '_bmad-output/retro.md')).rejects.toThrow(FeatureOffError);
+    expect(catalog.reads).toHaveLength(1);
     await chat.close();
   });
 

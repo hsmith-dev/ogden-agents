@@ -21,6 +21,7 @@ import {
   BMAD_SETUP_STEP_LABELS,
   BMAD_SETUP_STEPS,
   CatalogSkill,
+  type CatalogSkillInput,
   MAX_DOCUMENT_BYTES,
   type BmadCapabilities,
   type BmadCapability,
@@ -94,7 +95,7 @@ const notSetUp = (): BmadSetupStatus => ({
  */
 export function createMemoryBmadCatalog(
   repos: Readonly<Record<string, Partial<BmadRepoDetection>>> = {},
-  skills: Readonly<Record<string, readonly InstalledSkill[] | readonly CatalogSkill[]>> = {},
+  skills: Readonly<Record<string, readonly InstalledSkill[] | readonly CatalogSkillInput[]>> = {},
   options: MemoryBmadCatalogOptions = {},
 ): MemoryBmadCatalog {
   const known = new Map(Object.entries(repos));

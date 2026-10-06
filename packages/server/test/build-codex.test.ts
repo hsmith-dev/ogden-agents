@@ -62,7 +62,8 @@ async function setup(options: { sandbox?: boolean; verified?: boolean; env?: Rec
   return { repo, server, tab, wsId, review, settled };
 }
 
-describe('a second agent builds (epic 17 tracer): Codex against its fake personality', () => {
+// Each test starts a server, a git repo and a fake agent: slow on a loaded Windows runner, so a long timeout.
+describe('a second agent builds (epic 17 tracer): Codex against its fake personality', { timeout: 120_000 }, () => {
   it('an attended Codex build asks a card for each write, runs in the run worktree, and ends as a Claude Code build does', async () => {
     const { repo, server, tab, wsId, settled } = await setup();
     // Codex is asked for by name; the default (Claude Code) is not used.

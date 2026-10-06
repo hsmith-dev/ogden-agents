@@ -13,7 +13,7 @@ import { Text } from '@/ui/typography';
 /** What the notice says when the chat's agent needs a new sign-in (EXPERIENCE.md State Patterns: Sign-in expired). */
 export const signInAgainWords = (agentName: string) => `${agentName} needs you to sign in again.`;
 export const SIGNED_IN_TRY_AGAIN = 'Signed in. Try again to continue.';
-export const apiKeyRefused = (agentName: string) => `${agentName} refused your API key.`;
+export const apiKeyRefused = (agentName: string, keyName = 'API key') => `${agentName} refused your ${keyName}.`;
 
 /**
  * What one Sign in again notice has seen of the agent's sign-in (9.4): the

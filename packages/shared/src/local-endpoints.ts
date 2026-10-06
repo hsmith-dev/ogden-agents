@@ -120,6 +120,8 @@ const EndpointKey = z
   .string()
   .trim()
   .min(1, 'Enter the key.')
+  // Shorter than 4 characters could not be hidden if the harness printed it (acp-base masks 4 and up).
+  .min(4, 'That is too short to be a key.')
   .max(MAX_ENDPOINT_KEY, 'That is too long to be a key.')
   // A pasted line break or other control character can never be part of a key (it would break the request).
   .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), 'That key has a line break or a hidden character in it. Paste it again.');

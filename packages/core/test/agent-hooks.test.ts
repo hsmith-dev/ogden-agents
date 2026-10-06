@@ -359,6 +359,35 @@ describe('the project trust for an agent that runs the project’s own files (12
     expect(agent.starts).toHaveLength(1);
   });
 
+  it('a reopen asks again too: a chat with a stored agent session, its process gone, is refused when trust was withdrawn', async () => {
+    const { core, chat, agent, workspace, trust } = setUp({ needsTrust: true });
+    const session = await chat.createChatSession(workspace.id, { agentId: AGENT });
+    chat.sendMessage(workspace.id, session.id, 'hi');
+    await chat.settled();
+    expect(agent.starts).toHaveLength(1);
+    // A second chat object on the same data, as after a restart: no live agent, a stored agent session to reopen.
+    const again = createChat({
+      dataDir: tempDir('ogden-agents-data-'),
+      entities: core.entities,
+      sessionEvents: core.sessionEvents,
+      agents: createAgentRegistry([registered(AGENT, agent, { modeFixedAtStart: true, needsProjectTrust: true, projectFiles: ['.mcp.json'] })]),
+      permissions: core.permissions,
+      events: core.events,
+      installSettings: core.installSettings,
+      projectTrusted: () => trust.current,
+    });
+    trust.current = false;
+    again.sendMessage(workspace.id, session.id, 'again');
+    await again.settled();
+    expect(agent.reopens).toEqual([]);
+    expect(agent.starts).toHaveLength(1);
+    expect(JSON.stringify(streamOf(core, session.id))).toContain(projectNotTrustedReason('Fixed Agent'));
+    trust.current = true;
+    again.sendMessage(workspace.id, session.id, 'once more');
+    await again.settled();
+    expect(agent.reopens).toHaveLength(1);
+  });
+
   it('an agent that does not need trust is never asked', async () => {
     const { chat, agent, workspace } = setUp({ trust: { current: false } });
     const session = await chat.createChatSession(workspace.id, { agentId: AGENT });

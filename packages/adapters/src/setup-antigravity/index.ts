@@ -5,9 +5,9 @@
  *
  * - Install (only when the user asks): the pinned archive for this computer
  *   (`pins/antigravity-acp.json`) is downloaded into the data folder,
- *   resuming an interrupted download (`download.ts`), checked against its
+ *   resuming an interrupted download (`archive/download.ts`), checked against its
  *   pinned size and SHA-256, unpacked file by file into a staging folder
- *   (`unzip.ts`: only the pinned files, each checked against its own pinned
+ *   (`archive/unzip.ts`: only the pinned files, each checked against its own pinned
  *   SHA-256), started once to read the version its `initialize` reports
  *   (never `--version`, which hangs on Windows), then renamed into
  *   `<dataDir>/agents/antigravity/<version>/` with Ogden's install record.
@@ -40,10 +40,10 @@ import { errorCode } from '../error-code.js';
 import { readServerVersion, SETUP_INITIALIZE, startSetupServer, withTimeout, type ServerCommand } from './acp-probe.js';
 import { createGeminiApiKey, type GeminiApiKeyOptions } from './api-key.js';
 import { ANTIGRAVITY, ANTIGRAVITY_AGENT_ID, ANTIGRAVITY_GOOGLE_LOGIN_ID, ANTIGRAVITY_PINS, GEMINI_API_KEY_ENV, GEMINI_HOME_ENV, type AntigravityArchivePin, type AntigravityPins } from './descriptor.js';
-import { DownloadError, discardPartial, downloadVerified, sha256File } from './download.js';
+import { DownloadError, discardPartial, downloadVerified, sha256File } from '../archive/download.js';
 import { antigravityInstallDir, antigravityPin, antigravityVersionDir, currentPlatform, pinnedServer, readInstallRecord, signInRecordPath, writeInstallRecord } from './layout.js';
 import { GOOGLE_SIGN_IN_HOSTS, startGoogleSignIn } from './sign-in.js';
-import { UnsafeArchiveError, extractPinned } from './unzip.js';
+import { UnsafeArchiveError, extractPinned } from '../archive/unzip.js';
 
 export {
   ANTIGRAVITY,
@@ -73,8 +73,8 @@ export {
   type InstallRecord,
 } from './layout.js';
 export { BAD_GEMINI_KEY, createGeminiApiKey, GEMINI_API_KEY_PATTERN, GEMINI_VERIFY_URL, type GeminiApiKeyOptions } from './api-key.js';
-export { DownloadError, downloadVerified, type DownloadOptions } from './download.js';
-export { extractPinned, isSafeEntryName, UnsafeArchiveError } from './unzip.js';
+export { DownloadError, downloadVerified, type DownloadOptions } from '../archive/download.js';
+export { extractPinned, isSafeEntryName, UnsafeArchiveError } from '../archive/unzip.js';
 export { GOOGLE_SIGN_IN_HOSTS } from './sign-in.js';
 export type { ServerCommand } from './acp-probe.js';
 

@@ -33,6 +33,7 @@ import {
 } from '../src/index.js';
 import { openDatabase } from '../src/db/database.js';
 import { openTestCore, tempDir } from './helpers.js';
+import { decideInOrder } from './orchestration-fixtures.js';
 
 const PLAN: ManagerPlan = {
   version: MANAGER_PLAN_VERSION,
@@ -66,8 +67,8 @@ function stubManager(reply: unknown | (() => unknown) = PLAN): ManagerPort & { g
       contexts.push(context);
       return validatePlanFor(context, typeof reply === 'function' ? (reply as () => unknown)() : reply);
     },
-    async decideNext() {
-      return { ok: false, kind: 'unavailable', reason: 'not used here' };
+    async decideNext(context) {
+      return decideInOrder(context);
     },
   };
 }
@@ -320,7 +321,9 @@ describe('read back', () => {
     expect(step.report?.summary).not.toContain(secret);
     expect(step.report?.summary.startsWith('Done. The key is ')).toBe(true);
     expect(done.run.state).toBe('awaiting_user');
-    expect(eventTypes(core, before)).toEqual(['orchestration.result_read']);
+    // The result is read once; the manager's decision for what comes next follows (15.9).
+    await orchestration.whenIdle();
+    expect(eventTypes(core, before)).toEqual(['orchestration.result_read', 'orchestration.decision_made']);
     // The event holds the same masked report, never the key.
     expect(JSON.stringify(core.events.readAfter(before))).not.toContain(secret);
 
@@ -579,8 +582,8 @@ describe('plan review (15.6): stop', () => {
         });
         return validatePlanFor(context, PLAN3);
       },
-      async decideNext() {
-        return { ok: false, kind: 'unavailable', reason: 'not used here' };
+      async decideNext(context) {
+        return decideInOrder(context);
       },
     };
     const { core, workspace, orchestration } = setUp(slow);

@@ -542,6 +542,8 @@ export const API_ROUTES = {
   workspaceOrchestrationReorder: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId/reorder`,
   /** `POST` → `OrchestrationRunResponse` (15.6): Stop. The run ends (`stopped`, reason `user`) and a worker turn in flight is cancelled. Works with the Orchestration piece off: a Stop is never blockable (15.8). 409 `run_not_open` for a run that already ended. */
   workspaceOrchestrationStop: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId/stop`,
+  /** `POST AnswerOrchestrationQuestionRequest` → `OrchestrationRunResponse` (15.9): the user answers the manager's question; it goes to the manager as data on the next decision. 409 `no_question` when none is asked, 409 `run_not_open`. */
+  workspaceOrchestrationAnswer: `${API_BASE}/workspaces/:wsId/orchestration/runs/:runId/answer`,
   /** `GET` → `OrchestrationActivityResponse` (15.8): every instruction that was sent or refused, newest first, read from the events. Behind the Orchestration piece. */
   workspaceOrchestrationActivity: `${API_BASE}/workspaces/:wsId/orchestration/activity`,
   /**

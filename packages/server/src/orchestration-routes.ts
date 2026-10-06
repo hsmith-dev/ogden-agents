@@ -19,6 +19,7 @@ import {
   SessionBusyError,
   SessionNotIdleError,
   ManagerUnavailableError,
+  NoQuestionPendingError,
   NotFoundError,
   OrchestrationOffError,
   DispatchRefusedError,
@@ -148,6 +149,7 @@ export function registerOrchestrationRoutes(app: Hono, { orchestration, permissi
     if (error instanceof StepNotChangeableError) return apiError(c, 409, 'step_not_changeable', error.message);
     if (error instanceof BadOrderError) return apiError(c, 409, 'bad_order', error.message);
     if (error instanceof RunNotOpenError) return apiError(c, 409, 'run_not_open', error.message);
+    if (error instanceof NoQuestionPendingError) return apiError(c, 409, 'no_question', error.message);
     // The worker chat could not take the instruction (stopping, busy): nothing more was done, and the plain reason is core's.
     if (error instanceof InvalidOperationError || error instanceof SessionBusyError || error instanceof SessionNotIdleError) return apiError(c, 409, 'session_busy', error.message);
     if (error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);
@@ -262,6 +264,21 @@ export function registerOrchestrationRoutes(app: Hono, { orchestration, permissi
       }),
     { guarded: false },
   );
+
+  // The manager's question (15.9): the user's own answer, as data for the manager's next decision. Nothing the manager's code can reach calls it.
+  routes.post(API_ROUTES.workspaceOrchestrationAnswer, async (c, { workspaceId }) => {
+    let answer: Response | undefined;
+    const tooLong = await limit(c, async () => {
+      const body = await readJson(c);
+      if (!body.ok) {
+        answer = body.response;
+        return;
+      }
+      // The answer is the user's own words: never logged.
+      answer = await run(c, async (use) => c.json(OrchestrationRunResponse.parse({ run: await use.answerQuestion(workspaceId, c.req.param('runId') ?? '', body.value) })));
+    });
+    return tooLong ?? answer!;
+  });
 
   // The activity log (15.8): every instruction sent or refused, read from the events.
   routes.get(API_ROUTES.workspaceOrchestrationActivity, (c, { workspaceId }) => run(c, async (use) => c.json(OrchestrationActivityResponse.parse({ entries: await use.activity(workspaceId) }))));

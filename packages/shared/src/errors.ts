@@ -200,6 +200,8 @@ export const API_ERROR_CODES = [
   'run_not_open',
   /** Orchestration (15.7): an approved instruction was not sent because the worker or its chat cannot take it (409); `details.reason` is the token, the message says why. Nothing was created or sent. */
   'dispatch_refused',
+  /** Orchestration (15.9): the user answered a question the manager is not asking (409). Nothing was stored. */
+  'no_question',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

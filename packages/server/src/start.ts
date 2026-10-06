@@ -432,6 +432,14 @@ async function listenAndAnnounce({
     team,
     limits: () => orchestrationDefaults.get().limits,
   });
+  // A run that was going when the last server stopped is picked up from its rows and events: it re-arms, settles what finished, asks for a decision
+  // that was owed and never sends an instruction twice (15.9). The stored sessions were settled above, so a worker cut off by the restart reads so.
+  void orchestrationRuns.resume().then(
+    (picked) => {
+      if (picked > 0) log.info('orchestration runs picked up after the start', { runs: picked });
+    },
+    (error: unknown) => log.warn('orchestration runs could not be picked up', { reason: String(error) }),
+  );
   const app = createApp({
     events: core.events,
     webRoot: options.webRoot ?? defaultWebRoot(),

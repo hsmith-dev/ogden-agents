@@ -13,6 +13,7 @@ import {
   ORCHESTRATION_STEP_NOT_APPROVED_MESSAGE,
   ORCHESTRATION_STEP_NOT_PROPOSED_MESSAGE,
   ORCHESTRATION_STEP_NOT_CHANGEABLE_MESSAGE,
+  ORCHESTRATION_NO_QUESTION_MESSAGE,
   ORCHESTRATION_RUN_NOT_OPEN_MESSAGE,
   ORCHESTRATION_UNAVAILABLE_MESSAGE,
   FEATURE_UNAVAILABLE_MESSAGE,
@@ -152,6 +153,14 @@ export class BadOrderError extends CoreError {
   override readonly name = 'BadOrderError';
   constructor(message: string) {
     super('bad_order', message);
+  }
+}
+
+/** The user answered a question the manager is not asking (the run is not waiting for an answer). Nothing was stored. */
+export class NoQuestionPendingError extends CoreError {
+  override readonly name = 'NoQuestionPendingError';
+  constructor() {
+    super('no_question', ORCHESTRATION_NO_QUESTION_MESSAGE);
   }
 }
 

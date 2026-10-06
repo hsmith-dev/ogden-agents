@@ -12,6 +12,7 @@ import { Notice } from '@/ui/notice';
 import { PageBody, PageSection } from '@/ui/page';
 import { Slider } from '@/ui/slider';
 import { Switch } from '@/ui/switch';
+import { WebhookSettings } from '@/notifications/webhook-settings';
 
 /** What each kind of need means, under its checkbox. */
 const KIND_DESCRIPTIONS: Record<NeedKind, string> = {
@@ -19,6 +20,8 @@ const KIND_DESCRIPTIONS: Record<NeedKind, string> = {
   waiting: 'A chat is waiting for you to answer.',
   check_in: 'An agent has sent nothing for 10 minutes while it works.',
   sign_in: 'A chat stopped until its agent is signed in again.',
+  run_blocked: 'A build stopped and needs you.',
+  run_review: 'A build passed its checks and waits for your review.',
 };
 
 /** The volume as a percentage, in steps of five. */
@@ -150,6 +153,7 @@ export function NotificationsPage() {
             />
           </Field>
         </PageSection>
+        <WebhookSettings />
       </PageBody>
     </>
   );

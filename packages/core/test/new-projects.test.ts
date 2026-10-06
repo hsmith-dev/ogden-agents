@@ -95,7 +95,9 @@ describe('the new-projects default (story 10.4)', () => {
 
   it('drops pieces no longer available, then pieces whose needs are off', () => {
     expect(applicableDefaultPieces(['board', 'builds'], (piece) => piece === 'planning')).toEqual([]);
-    expect(applicableDefaultPieces(['board', 'builds', 'retrospectives'], (piece) => piece !== 'builds')).toEqual(['board']);
+    expect(applicableDefaultPieces(['board', 'builds', 'retrospectives'], (piece) => piece !== 'builds')).toEqual(['board', 'retrospectives']);
+    // Retrospectives needs Board, not Unattended builds (story 7.2): it stays with Board alone, and goes without Board.
+    expect(applicableDefaultPieces(['board', 'builds', 'retrospectives'], (piece) => piece !== 'board')).toEqual([]);
     expect(applicableDefaultPieces(['planning', 'board'], () => true)).toEqual(['planning', 'board']);
   });
 });

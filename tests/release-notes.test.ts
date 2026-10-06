@@ -48,7 +48,7 @@ describe('release notes from CHANGELOG.md', () => {
 
   it('names the desktop app files, links the README download steps, and has no dashes in its words (story 13.9)', () => {
     const notes = releaseNotes(CHANGELOG, '0.4.0', 'o/r');
-    for (const file of ['Ogden-Agents_0.4.0_universal.dmg', 'Ogden-Agents_0.4.0_x64-setup.exe', 'Ogden-Agents_0.4.0_arm64-setup.exe', 'SHA256SUMS-desktop.txt']) expect(notes).toContain(file);
+    for (const file of ['Ogden-Agents_0.4.0_universal.dmg', 'Ogden-Agents_0.4.0_x64-setup.exe', 'Ogden-Agents_0.4.0_arm64-setup.exe', 'Ogden-Agents_0.4.0_amd64.AppImage', 'Ogden-Agents_0.4.0_aarch64.AppImage', 'SHA256SUMS-desktop.txt']) expect(notes).toContain(file);
     expect(notes).toContain('https://github.com/o/r/blob/main/README.md#download');
     const paragraph = notes.split('\n').find((line) => line.startsWith('**The desktop app.**'))!;
     expect(paragraph.replaceAll(/`[^`]*`/g, '')).not.toMatch(/[–—]/);

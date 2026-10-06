@@ -224,7 +224,7 @@ describe('tickets-v7 (story 4.1)', () => {
 
   it('keeps the initiative’s epics as status reports them (story 4.2)', async () => {
     const epic = { slug: 'epic-a', id: 1, status: 'in-progress', after: [], blocks: ['epic-b'] };
-    expect((await store({ tickets: [], epics: [epic] }).tickets.tree('/repo', GUARD)).epics).toEqual([epic]);
+    expect((await store({ tickets: [], epics: [epic] }).tickets.tree('/repo', GUARD)).epics).toEqual([{ ...epic, retrospective: null }]);
   });
 });
 

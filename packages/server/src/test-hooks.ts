@@ -71,6 +71,12 @@
  *   through the fake agent's Grok personality (the real Grok is never run in a
  *   test). It also registers Grok in a shipped-style server, which otherwise leaves it out.
  *
+ * - {@link LOCAL_SERVER_ENV}: a Node script inside the temp folder plays the
+ *   Local model's pinned harness (epic 14), so a suite can chat through the
+ *   fake agent's OpenCode personality (the real harness is never run in a test).
+ *   {@link LOCAL_ENDPOINT_ENV} names the loopback endpoint its chats talk to.
+ *   Either registers the Local model in a shipped-style server, which otherwise leaves it out.
+ *
  * - {@link GROK_INSTALL_ENV}: Grok's Install takes its pins, npm and binary hashes from a
  *   local fixture lock (and never runs the unpacked fixture binary), so a suite can install Grok.
  *
@@ -151,6 +157,10 @@ export const CODEX_INSTALL_ENV = 'OGDEN_AGENTS_TEST_CODEX_INSTALL';
 export const GROK_INSTALL_ENV = 'OGDEN_AGENTS_TEST_GROK_INSTALL';
 /** Absolute path to a Node script inside the temp folder, run under Node in place of Grok's checked binary (tests only; epic 12 entry 7). */
 export const GROK_SERVER_ENV = 'OGDEN_AGENTS_TEST_GROK_SERVER';
+/** Absolute path to a Node script inside the temp folder, run under Node in place of the Local model's pinned harness (tests only; epic 14 story 14.2). */
+export const LOCAL_SERVER_ENV = 'OGDEN_AGENTS_TEST_LOCAL_SERVER';
+/** JSON `{ "baseUrl": "http://127.0.0.1:<port>/v1", "key"?: "<dummy key>", "model"?: "<id>" }`: the endpoint the Local model's chats talk to, loopback only (tests only; epic 14 story 14.2). */
+export const LOCAL_ENDPOINT_ENV = 'OGDEN_AGENTS_TEST_LOCAL_ENDPOINT';
 /** Absolute path to a Node script inside the temp folder, run under Node as Codex's `codex-acp` adapter (tests only; epic 12 entry 5). */
 export const CODEX_SERVER_ENV = 'OGDEN_AGENTS_TEST_CODEX_SERVER';
 /** Absolute path to a Node script inside the temp folder, registered as a test agent that needs a trusted project (tests only; epic 6 entry 10). */
@@ -411,6 +421,39 @@ export function testGrokServer(env: Env, dataDir: string, tmp: string = tmpdir()
   return testNodeScript(GROK_SERVER_ENV, env, dataDir, tmp);
 }
 
+/** The Node script {@link LOCAL_SERVER_ENV} names (see {@link testClaudeCli}), or `undefined` (the Local model's checked harness); throws when allowed but unusable. */
+export function testLocalServer(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
+  return testNodeScript(LOCAL_SERVER_ENV, env, dataDir, tmp);
+}
+
+/** What a Local model chat asks at each start for the endpoint to talk to. */
+export type TestLocalEndpoint = () => Promise<{ baseUrl: string; key?: string; model?: string }>;
+
+/**
+ * The endpoint {@link LOCAL_ENDPOINT_ENV} names, as the source a Local model chat asks at each start, or
+ * `undefined` (the user's own endpoints): unset or hooks not allowed. Allowed but unusable (bad JSON, a base URL
+ * that is not `http://127.0.0.1` or `http://localhost`) throws, so a test fails loudly rather than reaching anywhere else.
+ */
+export function testLocalEndpoint(env: Env, dataDir: string, tmp: string = tmpdir()): TestLocalEndpoint | undefined {
+  const raw = env[LOCAL_ENDPOINT_ENV];
+  if (raw === undefined || raw === '' || !testHooksAllowed(env, dataDir, tmp)) return undefined;
+  let parsed: { baseUrl?: unknown; key?: unknown; model?: unknown };
+  try {
+    parsed = JSON.parse(raw) as typeof parsed;
+  } catch {
+    throw new Error(`${LOCAL_ENDPOINT_ENV}: not JSON`);
+  }
+  let url: URL | undefined;
+  try {
+    url = typeof parsed.baseUrl === 'string' ? new URL(parsed.baseUrl) : undefined;
+  } catch {
+    url = undefined;
+  }
+  if (url?.protocol !== 'http:' || (url.hostname !== '127.0.0.1' && url.hostname !== 'localhost')) throw new Error(`${LOCAL_ENDPOINT_ENV}: baseUrl must be http://127.0.0.1 or http://localhost`);
+  const target = { baseUrl: parsed.baseUrl as string, ...(typeof parsed.key === 'string' ? { key: parsed.key } : {}), ...(typeof parsed.model === 'string' ? { model: parsed.model } : {}) };
+  return async () => target;
+}
+
 /** The trust-needing test agent's script from {@link TRUST_AGENT_ENV} (see {@link testClaudeCli}), or `undefined`; throws when allowed but unusable. */
 export function testTrustAgent(env: Env, dataDir: string, tmp: string = tmpdir()): string | undefined {
   return testNodeScript(TRUST_AGENT_ENV, env, dataDir, tmp);
@@ -528,7 +571,7 @@ export function checkInDelayFromEnv(env: Env, dataDir: string, tmp: string = tmp
 }
 
 /** The `start()` options that decide a hook themselves, and whether `start()` opens its own core. */
-export type TestHookOptions = Pick<StartOptions, 'paneShell' | 'paneLaunchers' | 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'codex' | 'grok' | 'extraAgents' | 'sandbox'> & {
+export type TestHookOptions = Pick<StartOptions, 'paneShell' | 'paneLaunchers' | 'claudeInstall' | 'verifyApiKey' | 'extraAgentEnv' | 'checkInDelayMs' | 'secrets' | 'bmadSource' | 'bmadFetch' | 'antigravity' | 'codex' | 'grok' | 'local' | 'extraAgents' | 'sandbox'> & {
   /** `false` for a core passed in, which already holds its own BMad pieces: {@link BMAD_AVAILABLE_ENV} is not read. */
   ownsCore: boolean;
   tmp?: string;
@@ -547,6 +590,8 @@ export interface TestHooks {
   codexInstall: TestClaudeInstall | undefined;
   grokServer: string | undefined;
   grokInstall: TestClaudeInstall | undefined;
+  localServer: string | undefined;
+  localEndpoint: TestLocalEndpoint | undefined;
   trustAgent: string | undefined;
   bmadProbe: boolean;
   bmadAvailable: BmadPieceName[];
@@ -582,6 +627,9 @@ export function resolveTestHooks(env: Env, dataDir: string, options: TestHookOpt
     // Grok's ports given (or left out) by a test decide it: the hook is not read.
     grokServer: options.grok === undefined ? testGrokServer(env, dataDir, tmp) : undefined,
     grokInstall: options.grok === undefined ? testGrokInstall(env, dataDir, tmp) : undefined,
+    // The Local model's ports given (or left out) by a test decide it: the hooks are not read.
+    localServer: options.local === undefined ? testLocalServer(env, dataDir, tmp) : undefined,
+    localEndpoint: options.local === undefined ? testLocalEndpoint(env, dataDir, tmp) : undefined,
     // Agents a test registers decide it: the hook is not read.
     trustAgent: options.extraAgents === undefined ? testTrustAgent(env, dataDir, tmp) : undefined,
     bmadProbe: testBmadProbe(env, dataDir, tmp),
@@ -611,6 +659,8 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     hooks.codexInstall !== undefined ||
     hooks.grokServer !== undefined ||
     hooks.grokInstall !== undefined ||
+    hooks.localServer !== undefined ||
+    hooks.localEndpoint !== undefined ||
     hooks.trustAgent !== undefined ||
     hooks.bmadProbe ||
     hooks.bmadAvailable.length > 0 ||
@@ -630,6 +680,8 @@ export function testHooksLogFields(hooks: TestHooks): Record<string, unknown> | 
     codexInstall: hooks.codexInstall !== undefined,
     grokServer: hooks.grokServer !== undefined,
     grokInstall: hooks.grokInstall !== undefined,
+    localServer: hooks.localServer !== undefined,
+    localEndpoint: hooks.localEndpoint !== undefined,
     trustAgent: hooks.trustAgent !== undefined,
     bmadProbe: hooks.bmadProbe,
     bmadAvailable: hooks.bmadAvailable.join(','),

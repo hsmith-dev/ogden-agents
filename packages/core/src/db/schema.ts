@@ -47,6 +47,13 @@ export const workspaces = sqliteTable(
      */
     bmadOfferDismissed: integer('bmad_offer_dismissed', { mode: 'boolean' }).notNull().default(false),
     /**
+     * The epics whose "Look back on it?" offer the user answered with Not now
+     * (epic 7, story 7.2), as JSON array text of epic names, `[]` for new and
+     * upgraded workspaces. Changed only by `lookBackOffers.dismiss`; parsed
+     * only there, so a damaged value reads as none dismissed.
+     */
+    lookBackDismissed: text('look_back_dismissed').notNull().default('[]'),
+    /**
      * Whether the user allowed Ogden Agents to run this project's own BMad
      * Method scripts (story 4.2, AD-22 note 2026-10-02). Not trusted for new
      * and upgraded workspaces; changed only by `bmadScriptTrust.trustScripts`,
@@ -299,4 +306,48 @@ export const workspaceBuildSettings = sqliteTable('workspace_build_settings', {
     .references(() => workspaces.id),
   maxConcurrentRuns: integer('max_concurrent_runs'),
   testCommand: text('test_command'),
+});
+
+/**
+ * OpenAI-compatible endpoints the Local model talks to (epic 14 story 14.3).
+ * No key is ever here: `auth` says only that one is saved in the keychain
+ * (`agent-endpoint-key/<id>`, AD-16). `remote_confirmed_for` is the host
+ * (name and port) the user confirmed prompts and project text may go to;
+ * `NULL` until then.
+ */
+export const localEndpoints = sqliteTable('local_endpoints', {
+  id: text('id').primaryKey(),
+  label: text('label').notNull(),
+  preset: text('preset'),
+  baseUrl: text('base_url').notNull(),
+  auth: text('auth').notNull().default('none'),
+  model: text('model'),
+  remoteConfirmedFor: text('remote_confirmed_for'),
+  createdAt: text('created_at').notNull(),
+});
+
+/** The one row of Local model endpoint settings: which endpoint new chats use (`NULL`: the first). */
+export const localEndpointSettings = sqliteTable('local_endpoint_settings', {
+  id: integer('id').primaryKey(),
+  defaultEndpointId: text('default_endpoint_id'),
+});
+
+/**
+ * Notification webhooks (story 11.4): one row per webhook the user added. Only
+ * its id, its host as it may be shown (masked) and the events it gets; the URL
+ * itself, which usually carries a token, is kept through `SecretStorePort`
+ * under the id, never here (AD-16).
+ */
+export const notificationWebhooks = sqliteTable('notification_webhooks', {
+  id: text('id').primaryKey(),
+  host: text('host').notNull(),
+  /** JSON array of `blocked` and `ready_for_review`. */
+  events: text('events').notNull(),
+  createdAt: text('created_at').notNull(),
+});
+
+/** Install-wide notification settings (story 11.4; one row, `id = 1`, created on first write). */
+export const notificationSettings = sqliteTable('notification_settings', {
+  id: integer('id').primaryKey(),
+  browserNotifications: integer('browser_notifications', { mode: 'boolean' }).notNull().default(false),
 });

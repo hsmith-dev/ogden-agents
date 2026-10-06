@@ -4,11 +4,13 @@
  * that the system text calls the person's wishes. A rule is a suggestion: nothing here widens the roster, the vendor's terms or the mode,
  * which are checked in code exactly as before. No learned routing: a rule exists only because the person wrote it.
  */
-import { redactSecrets, ROUTING_LIMITS, ORCHESTRATION_ROUTING_WORDS, RoutingRule as RoutingRuleSchema, RoutingRuleId as RoutingRuleIdSchema, SetOrchestrationRoutingRequest, type RoutingRule } from '@ogden-agents/shared';
+import { redactSecrets, ROUTING_LIMITS, ORCHESTRATION_ROUTING_WORDS, RoutingRule as RoutingRuleSchema, RoutingRuleId as RoutingRuleIdSchema, SetOrchestrationRoutingRequest, type RoutingRule, type WorkspaceId } from '@ogden-agents/shared';
 import { eq } from 'drizzle-orm';
 import type { Orm } from './db/database.js';
 import { workspaces } from './db/schema.js';
 import { ValidationError } from './errors.js';
+import type { EventLog } from './event-log.js';
+import type { OrchestrationFeature } from './orchestration-feature.js';
 
 /** What the column holds: the rules and the number the next new rule's id takes, which only grows so an id is never given to two rules. */
 interface Stored {
@@ -95,3 +97,35 @@ export function checkRoutingRequest(request: unknown, current: readonly RoutingR
 
 /** Whether two lists say the same, rule for rule and in order. */
 export const sameRules = (a: readonly RoutingRule[], b: readonly RoutingRule[]): boolean => a.length === b.length && a.every((rule, index) => rule.id === b[index]?.id && rule.text === b[index]?.text);
+
+/**
+ * The two uses of the rules (15.12): read them, and save the whole list. Each asks the Orchestration piece's guard first. A change appends
+ * `orchestration.routing_changed` (ids only), in the same transaction as the write. This is the only code that writes the rules, and it
+ * touches no roster, mode, approval, dispatch or build code.
+ */
+export function createRouting({ orm, events, feature }: { orm: Orm; events: EventLog; feature: OrchestrationFeature }) {
+  return {
+    /** The project's routing rules: the person's plain sentences, in their order, each with the id a plan names when a step followed it. */
+    getRouting(workspaceId: WorkspaceId): RoutingRule[] {
+      feature.requireOrchestration(workspaceId);
+      return readRoutingRules(orm, workspaceId) ?? [];
+    },
+    /**
+     * The person saves the whole list of rules. At most 10, each one clean line of at most 300 characters holding no secret
+     * ({@link ValidationError} in plain words otherwise, nothing stored). Items that name an existing rule's id keep it; the rest are new rules.
+     * Returns the rules as stored.
+     */
+    setRouting(workspaceId: WorkspaceId, request: unknown): RoutingRule[] {
+      feature.requireOrchestration(workspaceId);
+      return events.transaction(() => {
+        const current = readRoutingRules(orm, workspaceId) ?? [];
+        const { rules: next, next: counter } = checkRoutingRequest(request, current, readRoutingNext(orm, workspaceId));
+        if (!sameRules(current, next)) {
+          writeRoutingRules(orm, workspaceId, next, counter);
+          events.append({ type: 'orchestration.routing_changed', workspaceId, streamId: workspaceId, payload: { ruleIds: next.map((rule) => rule.id), previousRuleIds: current.map((rule) => rule.id) } });
+        }
+        return next;
+      });
+    },
+  };
+}

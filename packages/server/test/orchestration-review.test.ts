@@ -104,6 +104,26 @@ describe('the plan review over REST', () => {
     expect(await refusalOf(await post(server, tab, edit, { instruction: 'Too late.' }))).toMatchObject({ status: 409, code: 'step_not_changeable' });
   });
 
+  it('an oversized body with no length (chunked) is refused 413 like one that declares its size', async () => {
+    const { server, tab, route, start, wsId } = await setUp();
+    const { run } = await start();
+    const chunked = (path: string, size: number) =>
+      fetch(`${server.url}${path}`, {
+        method: 'POST',
+        headers: { ...tab.headers, 'content-type': 'application/json' },
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            const piece = new TextEncoder().encode('x'.repeat(8 * 1024));
+            for (let sent = 0; sent < size; sent += piece.length) controller.enqueue(piece);
+            controller.close();
+          },
+        }),
+        duplex: 'half',
+      } as RequestInit);
+    expect((await chunked(route('workspaceOrchestrationStepEdit', run.id, 's1'), 64 * 1024)).status).toBe(413);
+    expect((await chunked(apiPath(API_ROUTES.workspaceOrchestrationRuns, { wsId }), 64 * 1024)).status).toBe(413);
+  });
+
   it('a skipped step never sends, and the steps that need it wait', async () => {
     const { server, tab, route, view, sessions, start } = await setUp();
     const { run } = await start();

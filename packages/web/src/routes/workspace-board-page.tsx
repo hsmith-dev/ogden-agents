@@ -14,6 +14,12 @@ export function WorkspaceBoardPage() {
   const navigate = useNavigate();
   // Build on Ready cards (story 5.2) only with Unattended builds on; a started build opens its session.
   const buildsOn = useWorkspaceSettings(wsId).data?.bmadPieces.includes('builds') === true;
+  // Look back on an epic (story 7.1) only with Retrospectives on; a started look-back opens its session.
+  const lookBackOn = useWorkspaceSettings(wsId).data?.bmadPieces.includes('retrospectives') === true;
+  const lookBack = useMemo(
+    () => (lookBackOn ? { onStarted: (sesId: string) => void navigate({ to: '/w/$wsId/s/$sesId', params: { wsId, sesId } }) } : undefined),
+    [lookBackOn, navigate, wsId],
+  );
   const builds = useMemo(
     () => (buildsOn ? { onStarted: (sesId: string) => void navigate({ to: '/w/$wsId/s/$sesId', params: { wsId, sesId } }) } : undefined),
     [buildsOn, navigate, wsId],
@@ -25,7 +31,7 @@ export function WorkspaceBoardPage() {
         <PlanPieceGate wsId={wsId} piece="board">
           <BmadSetupGate wsId={wsId}>
             {/* The ticket detail sheet, `/w/:wsId/board/:ref` (story 4.9): only over a loaded board, never over its prompts. */}
-            <BoardTickets wsId={wsId} sheet={<Outlet />} builds={builds} />
+            <BoardTickets wsId={wsId} sheet={<Outlet />} builds={builds} lookBack={lookBack} />
           </BmadSetupGate>
         </PlanPieceGate>
       </PageBody>

@@ -154,12 +154,14 @@ const PIECE_ROUTES: readonly string[] = [
   `POST ${API_ROUTES.workspaceBmadSetup}`,
   // A document a planning session wrote (story 4.7): no trust, it reads one file and runs nothing.
   `GET ${API_ROUTES.workspaceDocument}`,
+  // Looking back on an epic (story 7.1): the Retrospectives piece, with the trust (it reads the board).
+  `POST ${API_ROUTES.workspaceEpicLookBack}`,
   // Unattended builds (story 5.2): every route with the trust.
   ...BUILD_ROUTES,
 ].sort();
 
 /** The routes that run the project's own scripts, so they check its trust too (story 4.2): every `board` and `builds` route, never setup. */
-const TRUSTED_ROUTES: readonly string[] = [`GET ${API_ROUTES.workspaceTickets}`, `GET ${API_ROUTES.workspaceTicket}`, `PUT ${API_ROUTES.workspaceTicketStatus}`, ...BUILD_ROUTES].sort();
+const TRUSTED_ROUTES: readonly string[] = [`GET ${API_ROUTES.workspaceTickets}`, `GET ${API_ROUTES.workspaceTicket}`, `PUT ${API_ROUTES.workspaceTicketStatus}`, `POST ${API_ROUTES.workspaceEpicLookBack}`, ...BUILD_ROUTES].sort();
 
 const BOARD = `${API_BASE}/workspaces/:wsId/board`;
 const CATALOG = `${API_BASE}/bmad/catalog`;

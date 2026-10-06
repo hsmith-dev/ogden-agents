@@ -292,7 +292,8 @@ async function listenAndAnnounce({
     onFailure: (error) => log.warn('uv install failed', { code: error.code, reason: error.message, ...error.details }),
   });
   // Every agent is wired before the stored sessions are settled, as before story 6.9's split: a wiring error leaves the database untouched.
-  const { endpointApi, claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent } = wireAgents({ options, dataDir, log, hooks, core });
+  const { endpointApi, localModelPort, claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent } = wireAgents({ options, dataDir, log, hooks, core });
+  const { localEndpoints } = endpointApi;
   descriptors.current = wirings.map((wiring) => wiring.descriptor);
   // Agents from before this start are gone with their processes (AD-3): their sessions can be resumed, not left working.
   const settled = core.entities.settleInterruptedSessions(RESTARTED_REASON);
@@ -416,8 +417,10 @@ async function listenAndAnnounce({
     shell === 'desktop'
       ? createDesktopUpdate({ dataDir, version, isNewer: (a, b) => (compareVersions(a, b) ?? 0) > 0, defaultChannel: channelOf(version) === 'preview' ? 'next' : 'stable', busy: busyRule, events: core.events, log })
       : undefined;
-  // Orchestration (epic 15, 15.3) over the chat: the manager is a test's stub, else none yet (the real adapter is 15.4).
-  const orchestrationRuns = core.createOrchestration({ chat, manager: options.manager ?? (hooks.manager === 'memory' ? createMemoryManager() : undefined) });
+  // Orchestration (epic 15) over the chat. The manager is a test's stub when one is given (test hooks keep the memory fake); else each
+  // project's own, read from its roster: a model on one of its endpoints, called through the endpoints' confirmation rule (15.4).
+  const managers = core.createManagerSource({ endpoints: () => localEndpoints, port: localModelPort });
+  const orchestrationRuns = core.createOrchestration({ chat, manager: options.manager ?? (hooks.manager === 'memory' ? createMemoryManager() : undefined), managers });
   const app = createApp({
     events: core.events,
     webRoot: options.webRoot ?? defaultWebRoot(),

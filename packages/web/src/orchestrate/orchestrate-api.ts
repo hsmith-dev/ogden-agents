@@ -7,6 +7,7 @@ import {
   WorkspaceSettingsResponse,
   type OrchestrationRunView,
   type OrchestrationSettings,
+  type TeamRoster,
   type WorkspaceSettings,
 } from '@ogden-agents/shared';
 import { useQuery } from '@tanstack/react-query';
@@ -57,6 +58,18 @@ export async function updateOrchestrationEnabled(wsId: string, orchestrationEnab
   return WorkspaceSettingsResponse.parse(json).settings;
 }
 
+/** `PATCH …/settings`: chooses the model that is the project's manager (other roles are kept as they are), or `null` for none. */
+export async function updateManagerModel(wsId: string, roster: TeamRoster, manager: { endpointId: string; model: string } | null, auth: Auth = tabAuth): Promise<WorkspaceSettings> {
+  const next = { ...roster, manager: manager === null ? null : { kind: 'model', endpointId: manager.endpointId, model: manager.model } };
+  const json = await call(
+    auth,
+    apiPath(API_ROUTES.workspaceSettings, { wsId }),
+    { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ orchestrationRoster: next }) },
+    "The manager couldn't be chosen",
+  );
+  return WorkspaceSettingsResponse.parse(json).settings;
+}
+
 /** The project's runs, kept current from the event stream (and the worker's state while a step runs). */
 export function useOrchestrationRuns(wsId: string) {
   useEventInvalidation((event) => {
@@ -69,5 +82,7 @@ export function useOrchestrationRuns(wsId: string) {
 }
 
 export function useOrchestrationSettings(wsId: string) {
+  // The manager's state follows the project's roster and the servers: read again when either changes.
+  useEventInvalidation((event) => (event.type === 'workspace.settings_changed' && event.workspaceId === wsId) || event.type === 'settings.local_endpoints_changed' ? [['orchestration-settings', wsId]] : []);
   return useQuery({ queryKey: ['orchestration-settings', wsId], queryFn: () => fetchOrchestrationSettings(wsId), retry: false });
 }

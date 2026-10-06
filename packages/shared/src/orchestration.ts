@@ -41,6 +41,8 @@ export const MANAGER_LIMITS = {
   maxReplyBytes: 256 * 1024,
   /** The most of a worker's output a status report carries. */
   maxSummaryChars: 4_000,
+  /** The most of the manager's answer an event keeps. */
+  maxRecordChars: 4_000,
 } as const;
 
 /** What the manager may decide next. `dispatch` still needs the user's approval in the default mode (enforced by core). */
@@ -74,6 +76,11 @@ export const MANAGER_REFUSAL_CODES = [
 ] as const;
 export const ManagerRefusalCode = z.enum(MANAGER_REFUSAL_CODES);
 export type ManagerRefusalCode = z.infer<typeof ManagerRefusalCode>;
+
+/** Why a manager call failed, in the kinds the user is told about (15.4 added `endpoint_missing`). */
+export const MANAGER_FAILURE_KINDS = ['malformed', 'off_roster', 'too_large', 'too_slow', 'context_too_small', 'host_not_confirmed', 'endpoint_missing', 'unavailable'] as const;
+export const ManagerFailureKind = z.enum(MANAGER_FAILURE_KINDS);
+export type ManagerFailureKind = z.infer<typeof ManagerFailureKind>;
 
 /** Plain words for each refusal, as a user reads them. No dashes. */
 export const MANAGER_REFUSAL_REASONS: Readonly<Record<ManagerRefusalCode, string>> = {
@@ -510,13 +517,37 @@ export type OrchestrationStep = z.infer<typeof OrchestrationStep>;
 
 // ---- settings and the one route ----
 
+/**
+ * Where the project's manager stands (15.4): `ready` (a model on an endpoint that is set up and, when it is on
+ * another computer, confirmed), or why not. Plain words come from {@link MANAGER_STATE_WORDS}.
+ */
+export const MANAGER_STATES = ['ready', 'not_chosen', 'endpoint_missing', 'host_not_confirmed'] as const;
+export const ManagerState = z.enum(MANAGER_STATES);
+export type ManagerState = z.infer<typeof ManagerState>;
+
+export const MANAGER_STATE_WORDS: Readonly<Record<Exclude<ManagerState, 'ready'>, string>> = {
+  not_chosen: "No manager is chosen yet. Choose a model for the manager in this project's settings.",
+  endpoint_missing: "The server you chose for the manager is not set up any more. Choose a model for the manager again in this project's settings.",
+  host_not_confirmed: 'You have not confirmed the server the manager runs on. Confirm it in Settings, under Agents, and try again.',
+};
+
+/** The manager's state with the sentence to show. */
+export const ManagerStatusView = z.object({
+  state: ManagerState,
+  /** Plain words. For `ready` it says where the manager runs (this computer or another one). */
+  message: z.string().min(1).max(400),
+});
+export type ManagerStatusView = z.infer<typeof ManagerStatusView>;
+
 /** A project's orchestration settings as read: the mode, the limits in force and the roster. */
 export const OrchestrationSettings = z.object({
   mode: OrchestrationMode,
   limits: RunLimits,
   roster: TeamRoster,
-  /** Whether a manager is set up in this install. Absent from older servers; read as not set up. */
+  /** Whether a manager is ready for this project. Absent from older servers; read as not ready. */
   managerReady: z.boolean().optional(),
+  /** Which state the project's manager is in, in plain words (15.4). Absent from older servers. */
+  manager: ManagerStatusView.optional(),
 });
 export type OrchestrationSettings = z.infer<typeof OrchestrationSettings>;
 
@@ -559,7 +590,7 @@ export type OrchestrationRunsResponse = z.infer<typeof OrchestrationRunsResponse
 export const ORCHESTRATION_RUNS_PAGE = 20;
 
 /** Plain words for the tracer's states and refusals. No dashes. */
-export const ORCHESTRATION_NO_MANAGER_MESSAGE = 'There is no manager yet. A manager model comes with a later update, so a plan cannot be made here yet.';
+export const ORCHESTRATION_NO_MANAGER_MESSAGE = MANAGER_STATE_WORDS.not_chosen;
 export const ORCHESTRATION_STEP_NOT_APPROVED_MESSAGE = 'This instruction has not been approved, so it was not sent.';
 export const ORCHESTRATION_STEP_NOT_PROPOSED_MESSAGE = 'This instruction is not waiting for your approval, or a step it needs is not finished yet.';
 export const ORCHESTRATION_MANAGER_MARK = 'Sent by the manager, approved by you';

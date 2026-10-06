@@ -8,7 +8,7 @@
  * words. The Switch in project settings turns the piece on and off. The REST
  * calls, the event stream and the router are stand-ins.
  */
-import { ORCHESTRATION_NO_MANAGER_MESSAGE, ORCHESTRATION_OFF_MESSAGE, type OrchestrationRunView } from '@ogden-agents/shared';
+import { MANAGER_STATE_WORDS, ORCHESTRATION_NO_MANAGER_MESSAGE, ORCHESTRATION_OFF_MESSAGE, type OrchestrationRunView } from '@ogden-agents/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -43,6 +43,12 @@ const view = (steps: unknown[], state = 'awaiting_user'): OrchestrationRunView =
 const fake = vi.hoisted(() => ({
   enabled: true,
   managerReady: true,
+  /** The manager's state as the server words it (absent: an older server). */
+  manager: undefined as undefined | { state: string; message: string },
+  /** The project's roster as saved, and the body of the last roster change. */
+  roster: { manager: null, planner: null, worker: null, reviewer: null } as Record<string, unknown>,
+  rosterSaved: undefined as undefined | Record<string, unknown>,
+  servers: [] as unknown[],
   runs: [] as unknown[],
   calls: [] as string[],
   /** What the next dispatch does. */
@@ -68,12 +74,18 @@ vi.mock('@/auth/tab-token', () => ({
       const method = init?.method ?? 'GET';
       fake.calls.push(`${method} ${path}`);
       const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-      if (path.endsWith('/settings') && method === 'GET') return json({ settings: { cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false, orchestrationEnabled: fake.enabled } });
+      if (path.endsWith('/settings') && method === 'GET') return json({ settings: { cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false, orchestrationEnabled: fake.enabled, orchestrationRoster: fake.roster } });
       if (path.endsWith('/settings') && method === 'PATCH') {
-        fake.switchSaved = (JSON.parse(String(init?.body)) as { orchestrationEnabled: boolean }).orchestrationEnabled;
-        return json({ settings: { cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false, orchestrationEnabled: fake.switchSaved } });
+        const body = JSON.parse(String(init?.body)) as { orchestrationEnabled?: boolean; orchestrationRoster?: Record<string, unknown> };
+        if (body.orchestrationRoster !== undefined) {
+          fake.rosterSaved = body.orchestrationRoster;
+          fake.roster = body.orchestrationRoster;
+        } else fake.switchSaved = body.orchestrationEnabled;
+        return json({ settings: { cautionLevel: 'ask_every_time', bmadPieces: [], bmadScriptsTrusted: false, orchestrationEnabled: fake.switchSaved ?? fake.enabled, orchestrationRoster: fake.roster } });
       }
-      if (path.endsWith('/orchestration')) return json({ settings: { mode: 'approve_each', limits: { maxInstructions: 20, maxDepth: 3, maxMinutes: 30 }, roster: { manager: null, planner: null, worker: null, reviewer: null }, managerReady: fake.managerReady } });
+      if (path.endsWith('/orchestration')) return json({ settings: { mode: 'approve_each', limits: { maxInstructions: 20, maxDepth: 3, maxMinutes: 30 }, roster: { manager: null, planner: null, worker: null, reviewer: null }, managerReady: fake.managerReady, ...(fake.manager === undefined ? {} : { manager: fake.manager }) } });
+      if (path === '/api/v1/local-endpoints') return json({ endpoints: fake.servers, defaultEndpointId: null });
+      if (path.endsWith('/models')) return json({ state: 'ready', message: 'Ready. 2 models are available.', models: [{ id: 'model-a', cautions: [] }, { id: 'model-b', cautions: [] }], model: null, missing: null });
       if (path.endsWith('/orchestration/runs') && method === 'GET') return json({ runs: fake.runs });
       if (path.endsWith('/orchestration/runs') && method === 'POST') {
         fake.runs = [fake.next];
@@ -94,7 +106,7 @@ vi.mock('@/auth/tab-token', () => ({
 }));
 
 const { WorkspaceOrchestratePage } = await import('../src/routes/workspace-orchestrate-page');
-const { OrchestrationSection, OrchestrationSectionView } = await import('../src/workspaces/orchestration-section');
+const { ManagerModelView, OrchestrationSection, OrchestrationSectionView } = await import('../src/workspaces/orchestration-section');
 const { TooltipProvider } = await import('../src/ui/tooltip');
 const { Message } = await import('../src/chat/transcript-parts');
 
@@ -115,6 +127,10 @@ const mount = async (node: ReactNode) => {
 beforeEach(() => {
   fake.enabled = true;
   fake.managerReady = true;
+  fake.manager = undefined;
+  fake.roster = { manager: null, planner: null, worker: null, reviewer: null };
+  fake.rosterSaved = undefined;
+  fake.servers = [];
   fake.runs = [];
   fake.calls = [];
   fake.dispatchFails = false;
@@ -138,6 +154,25 @@ describe('the Orchestrate page', () => {
     expect(screen.getByTestId('orchestrate-no-manager').textContent).toBe(ORCHESTRATION_NO_MANAGER_MESSAGE);
     expect((screen.getByTestId('orchestrate-goal') as HTMLInputElement).disabled).toBe(true);
     expect(fake.calls.some((call) => call.startsWith('POST'))).toBe(false);
+  });
+
+  it('says which state the manager is in, in the server\'s own plain words, and cannot make a plan until it is ready', async () => {
+    for (const state of ['not_chosen', 'endpoint_missing', 'host_not_confirmed'] as const) {
+      cleanup();
+      fake.managerReady = false;
+      fake.manager = { state, message: MANAGER_STATE_WORDS[state] };
+      await mount(<WorkspaceOrchestratePage />);
+      expect(screen.getByTestId('orchestrate-no-manager').textContent, state).toBe(MANAGER_STATE_WORDS[state]);
+      expect((screen.getByTestId('orchestrate-goal') as HTMLInputElement).disabled, state).toBe(true);
+    }
+  });
+
+  it('says where a ready manager runs, and lets a goal be written', async () => {
+    fake.manager = { state: 'ready', message: 'The manager is model-a on this computer, on My Mac.' };
+    await mount(<WorkspaceOrchestratePage />);
+    expect(screen.queryByTestId('orchestrate-no-manager')).toBeNull();
+    expect(screen.getByTestId('orchestrate-manager').textContent).toBe('The manager is model-a on this computer, on My Mac.');
+    expect((screen.getByTestId('orchestrate-goal') as HTMLInputElement).disabled).toBe(false);
   });
 
   it('makes a plan from a goal and lists its steps with who gets each', async () => {
@@ -225,6 +260,69 @@ describe('the project settings switch', () => {
       </TooltipProvider>,
     );
     expect(screen.getByTestId('orchestration-error').textContent).toContain("isn't in this version");
+  });
+});
+
+const SERVER = { id: 'lep_01J9Z3K4M5N6P7Q8R9S0T1V2W3', label: 'My Mac', baseUrl: 'http://localhost:1234/v1', preset: null, auth: 'none', model: null, remoteConfirmedFor: null, createdAt: '2026-10-05T00:00:00.000Z', host: 'localhost:1234', loopback: true, needsConfirmation: false, insecureRemote: false, keySaved: false };
+
+describe('the manager model setting', () => {
+  it('shows nothing about a manager while the piece is off', async () => {
+    fake.enabled = false;
+    await mount(<OrchestrationSection wsId={WS} />);
+    expect(screen.queryByTestId('manager-model')).toBeNull();
+  });
+
+  it('says no manager is chosen and offers the user\'s servers, with where each runs', async () => {
+    fake.servers = [SERVER, { ...SERVER, id: 'lep_01J9Z3K4M5N6P7Q8R9S0T1V2W4', label: 'Company gateway', loopback: false, host: 'gateway.example.com' }];
+    await mount(<OrchestrationSection wsId={WS} />);
+    expect(screen.getByTestId('manager-model-current').textContent).toBe('No manager is chosen yet.');
+    expect(screen.getAllByTestId('manager-show-models')).toHaveLength(2);
+    expect(screen.getByTestId(`manager-server-${SERVER.id}`).textContent).toContain('My Mac (on this computer)');
+    expect(screen.getByTestId('manager-server-lep_01J9Z3K4M5N6P7Q8R9S0T1V2W4').textContent).toContain('Company gateway (on another computer)');
+    expect(screen.queryByTestId('manager-clear')).toBeNull();
+  });
+
+  it('sends the user to Settings when no server is set up', async () => {
+    await mount(<OrchestrationSection wsId={WS} />);
+    expect(screen.getByTestId('manager-model-no-servers').textContent).toContain('Add one in Settings');
+  });
+
+  it('reads a server\'s models, saves the chosen one as a model manager keeping the other roles, and shows it', async () => {
+    fake.servers = [SERVER];
+    fake.roster = { manager: null, planner: null, worker: { kind: 'agent', agentId: 'claude-code' }, reviewer: null };
+    await mount(<OrchestrationSection wsId={WS} />);
+    fireEvent.click(screen.getByTestId('manager-show-models'));
+    await settle();
+    expect(fake.calls).toContain(`GET /api/v1/local-endpoints/${SERVER.id}/models`);
+    fireEvent.click(screen.getByTestId('manager-use-model-b'));
+    await settle();
+    expect(fake.rosterSaved).toEqual({ manager: { kind: 'model', endpointId: SERVER.id, model: 'model-b' }, planner: null, worker: { kind: 'agent', agentId: 'claude-code' }, reviewer: null });
+    expect(screen.getByTestId('manager-model-current').textContent).toBe('The manager is model-b on My Mac.');
+    expect(screen.getByTestId('manager-model').textContent).not.toMatch(/[–—]| - /);
+  });
+
+  it('clears the manager, and says so when the chosen server is gone', async () => {
+    fake.servers = [SERVER];
+    fake.roster = { manager: { kind: 'model', endpointId: SERVER.id, model: 'model-a' }, planner: null, worker: null, reviewer: null };
+    await mount(<OrchestrationSection wsId={WS} />);
+    fireEvent.click(screen.getByTestId('manager-clear'));
+    await settle();
+    expect(fake.rosterSaved).toEqual({ manager: null, planner: null, worker: null, reviewer: null });
+    expect(screen.getByTestId('manager-model-current').textContent).toBe('No manager is chosen yet.');
+    cleanup();
+    fake.servers = [];
+    fake.roster = { manager: { kind: 'model', endpointId: SERVER.id, model: 'model-a' }, planner: null, worker: null, reviewer: null };
+    await mount(<OrchestrationSection wsId={WS} />);
+    expect(screen.getByTestId('manager-model-current').textContent).toBe('The manager is model-a, on a server that is not set up any more.');
+  });
+
+  it('says why a choice failed', () => {
+    render(
+      <TooltipProvider>
+        <ManagerModelView chosen={null} servers={[SERVER as never]} models={undefined} loading={undefined} saving={false} error="The manager must be a model on one of your servers, not an agent." onShowModels={() => {}} onChoose={() => {}} onClear={() => {}} />
+      </TooltipProvider>,
+    );
+    expect(screen.getByTestId('manager-model-error').textContent).toContain('The manager must be a model on one of your servers, not an agent.');
   });
 });
 

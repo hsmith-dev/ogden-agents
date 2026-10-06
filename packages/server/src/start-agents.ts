@@ -247,7 +247,7 @@ export function wireAgents({ options, dataDir, log, hooks, core }: { options: St
   const localModels = createLocalModels({ onModels: rememberLocalModels, endpoints: localEndpoints(), port: localModelPort, detectPort: options.localModelPort ?? createOpenAiLocalModel({ timeoutMs: DETECT_PROBE_TIMEOUT_MS }) });
   // What the app's routes need for the Local model's endpoints (epic 14).
   const endpointApi = { localModels, localEndpoints: localEndpoints(), endpointPresets: options.endpointPresets ?? ENDPOINT_PRESETS };
-  return { endpointApi, claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent };
+  return { endpointApi, localModelPort, claudeSetup, secrets, agentSetup, subscriptionMaxAgeMs, wirings, chatEnv, forChat, chatAgent };
 }
 
 /**

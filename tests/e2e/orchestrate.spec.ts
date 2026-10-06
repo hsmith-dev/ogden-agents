@@ -7,11 +7,14 @@
  * tab appears; a goal makes a plan; Approve and send puts the instruction into
  * a new worker chat, whose transcript says it came from the manager at the
  * user's approval; and the worker's status reads back on the page. With the
- * piece off there is no tab and the page says so; with no manager the page says
- * "no manager yet".
+ * piece off there is no tab and the page says so; with no manager chosen the
+ * page says so. Story 15.4: the user picks a model on one of their servers as
+ * the project's manager in the settings, and a goal becomes a plan from that
+ * model (the fake OpenAI-compatible server, on this computer).
  */
 import { expect, test, type Page } from '@playwright/test';
 import { apiPath } from '../../packages/shared/src/api.ts';
+import { startFakeServer } from '../fixtures/fake-openai-server.mjs';
 import { API_ROUTES, serverModule } from '../support.js';
 import { withChatServer } from './chat-server.js';
 import { storedToken } from './tab.js';
@@ -86,10 +89,53 @@ test('with no manager set up the page says so, and a direct call to send an unap
     const headers = { authorization: `Bearer ${token}`, origin, 'content-type': 'application/json' };
     await fetch(`${origin}${apiPath(API_ROUTES.workspaceSettings, { wsId })}`, { method: 'PATCH', headers, body: JSON.stringify({ orchestrationEnabled: true }) });
     await page.goto(`${origin}/w/${wsId}/orchestrate`);
-    await expect(page.getByTestId('orchestrate-no-manager')).toHaveText('There is no manager yet. A manager model comes with a later update, so a plan cannot be made here yet.');
+    await expect(page.getByTestId('orchestrate-no-manager')).toHaveText("No manager is chosen yet. Choose a model for the manager in this project's settings.");
     await expect(page.getByTestId('orchestrate-goal')).toBeDisabled();
     const refused = await fetch(`${origin}${apiPath(API_ROUTES.workspaceOrchestrationRuns, { wsId })}`, { method: 'POST', headers, body: JSON.stringify({ goal: 'Add a form' }) });
     expect(refused.status).toBe(409);
     expect(((await refused.json()) as { error: { code: string } }).error.code).toBe('manager_unavailable');
   });
+});
+
+test('the user picks a model on their own server as the manager, and a goal becomes a plan from it', async ({ page }) => {
+  const plan = { version: 'ogden.manager.plan.v1', goal: 'Add a contact form', steps: [{ id: 's1', worker: 'claude-code', chat: 'new', instruction: 'Write the failing test first.', mode: 'ask', depends_on: [] }] };
+  const model = await startFakeServer({ models: ['model-a', 'model-b'], managerCases: { e2e: { replies: [JSON.stringify(plan)] } } });
+  try {
+    await withChatServer(page, async ({ server, repo }) => {
+      const wsId = await addProject(page, repo);
+      const origin = server.url;
+      const headers = { authorization: `Bearer ${(await storedToken(page))!}`, origin, 'content-type': 'application/json' };
+      await fetch(`${origin}${apiPath(API_ROUTES.workspaceSettings, { wsId })}`, { method: 'PATCH', headers, body: JSON.stringify({ orchestrationEnabled: true }) });
+      // The user's own server, on this computer.
+      const added = await fetch(`${origin}${API_ROUTES.localEndpoints}`, { method: 'POST', headers, body: JSON.stringify({ label: 'My Mac', baseUrl: `http://127.0.0.1:${model.port}/v1` }) });
+      expect(added.status).toBeLessThan(300);
+
+      // Nothing is chosen yet: the page says so and the goal box is off.
+      await page.goto(`${origin}/w/${wsId}/orchestrate`);
+      await expect(page.getByTestId('orchestrate-no-manager')).toContainText('No manager is chosen yet');
+      await expect(page.getByTestId('orchestrate-goal')).toBeDisabled();
+
+      // In the project's settings: read the server's models and use one as the manager.
+      await page.goto(`${origin}/w/${wsId}/settings`);
+      await expect(page.getByTestId('manager-model-current')).toHaveText('No manager is chosen yet.');
+      await page.getByRole('button', { name: 'Choose a model on My Mac' }).click();
+      await page.getByRole('button', { name: 'Use model-b as the manager' }).click();
+      await expect(page.getByTestId('manager-model-current')).toHaveText('The manager is model-b on My Mac.');
+
+      // Orchestrate says where the manager runs, and a goal becomes a plan from that model.
+      await page.goto(`${origin}/w/${wsId}/orchestrate`);
+      await expect(page.getByTestId('orchestrate-manager')).toHaveText('The manager is model-b on this computer, on My Mac.');
+      await page.getByTestId('orchestrate-goal').fill('Add a contact form MANAGER_CASE:e2e');
+      await page.getByTestId('orchestrate-plan').click();
+      const first = page.getByTestId('orchestrate-step').first();
+      await expect(first).toHaveAttribute('data-state', 'proposed');
+      await expect(first.getByTestId('orchestrate-step-instruction')).toHaveText('Write the failing test first.');
+      // The model was asked on this computer, with no tools and no streaming.
+      const asked = model.log.filter((entry) => entry.path.endsWith('/chat/completions'));
+      expect(asked.length).toBeGreaterThan(0);
+      expect(asked.every((entry) => (entry.tools ?? []).length === 0 && entry.stream === false && entry.model === 'model-b')).toBe(true);
+    });
+  } finally {
+    await model.close();
+  }
 });

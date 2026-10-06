@@ -5,6 +5,8 @@ import { createLookBackOffers, type LookBackOffers } from './look-back-offers.js
 import { createOrchestrationFeature, type OrchestrationFeature } from './orchestration-feature.js';
 import { createOrchestration, type Orchestration, type OrchestrationChat } from './orchestration.js';
 import type { ManagerPort } from './manager-port.js';
+import { createManagerSource, type ManagerSource } from './manager-source.js';
+import type { LocalModelPort } from './local-model-port.js';
 import { createBmadFeatures, parseAvailableBmadPieces, type BmadFeatures, type BmadFeaturesOptions } from './bmad-pieces.js';
 import { createBmadModulesSeen, type BmadModulesSeen } from './bmad-modules-seen.js';
 import { createBmadScriptTrust, type BmadScriptTrust } from './bmad-script-trust.js';
@@ -76,7 +78,12 @@ export interface Core {
    * The Orchestration use-case (epic 15, 15.3) over the chat the server holds and a manager when there is one.
    * Every call is behind {@link Core.orchestration}'s guard. The server calls it once, after it has its chat.
    */
-  createOrchestration(ports: { chat: OrchestrationChat; manager?: ManagerPort | undefined }): Orchestration;
+  createOrchestration(ports: { chat: OrchestrationChat; manager?: ManagerPort | undefined; managers?: ManagerSource | undefined }): Orchestration;
+  /**
+   * Each project's manager, read from its roster over the model port and the endpoints (epic 15, 15.4). The server
+   * calls it once, after it has its endpoints.
+   */
+  createManagerSource(ports: { endpoints: () => LocalEndpoints; port: LocalModelPort; timeoutMs?: number | undefined }): ManagerSource;
   close(): void;
 }
 
@@ -180,6 +187,7 @@ export function openCore(dataDir: string, options: OpenCoreOptions = {}): Core {
     createNotifications: (ports) => createNotifications({ ...ports, db, events, entities, bmad }),
     localEndpoints: (secrets) => createLocalEndpoints({ db, events, secrets }),
     createOrchestration: (ports) => createOrchestration({ db, events, feature: orchestration, ...ports }),
+    createManagerSource: (ports) => createManagerSource({ db, ...ports }),
     close: () => {
       try {
         permissions.close();

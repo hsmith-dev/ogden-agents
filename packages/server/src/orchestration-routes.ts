@@ -30,6 +30,7 @@ import {
   API_ROUTES,
   BMAD_PROJECT_NOT_FOUND_MESSAGE,
   DEFAULT_ORCHESTRATION_MODE,
+  ORCHESTRATION_NO_MANAGER_MESSAGE,
   ORCHESTRATION_OFF_MESSAGE,
   OrchestrationRunResponse,
   OrchestrationRunsResponse,
@@ -129,13 +130,15 @@ export function registerOrchestrationRoutes(app: Hono, { orchestration, permissi
   routes.get(API_ROUTES.workspaceOrchestration, (c, { workspaceId }) => {
     if (permissions === undefined) return notImplemented(c);
     const settings = permissions.getSettings(workspaceId);
+    const manager = runs?.managerStatus(workspaceId) ?? { state: 'not_chosen' as const, message: ORCHESTRATION_NO_MANAGER_MESSAGE };
     return c.json(
       OrchestrationSettingsResponse.parse({
         settings: {
           mode: settings.orchestrationMode ?? DEFAULT_ORCHESTRATION_MODE,
           limits: RUN_LIMITS,
           roster: settings.orchestrationRoster ?? TeamRoster.parse({}),
-          managerReady: runs?.managerReady() ?? false,
+          managerReady: manager.state === 'ready',
+          manager,
         },
       }),
     );

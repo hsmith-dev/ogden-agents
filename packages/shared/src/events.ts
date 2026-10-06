@@ -34,7 +34,7 @@ export { LOCAL_ENDPOINT_CHANGES, SettingsLocalEndpointsChangedEvent } from './ev
 import * as orch from './events-orchestration.js';
 
 export {
-  OrchestrationModeChangedEvent, OrchestrationPlanProposedEvent, OrchestrationResultReadEvent, OrchestrationRunFinishedEvent, OrchestrationRunPausedEvent, OrchestrationRunStartedEvent,
+  OrchestrationManagerRepliedEvent, OrchestrationModeChangedEvent, OrchestrationPlanProposedEvent, OrchestrationResultReadEvent, OrchestrationRunFinishedEvent, OrchestrationRunPausedEvent, OrchestrationRunStartedEvent,
   OrchestrationRunStoppedEvent, OrchestrationStepApprovedEvent, OrchestrationStepDispatchedEvent, OrchestrationStepEditedEvent, OrchestrationStepProposedEvent, OrchestrationStepSkippedEvent,
 } from './events-orchestration.js';
 // Build run events and the builds and notification settings events (stories 5.2, 5.3).
@@ -409,7 +409,7 @@ export const CoreEvent = z.discriminatedUnion('type', [
   runs.SettingsNotificationsChangedEvent,
   SettingsLocalEndpointsChangedEvent,
   orch.OrchestrationRunStartedEvent, orch.OrchestrationPlanProposedEvent, orch.OrchestrationStepProposedEvent, orch.OrchestrationStepApprovedEvent, orch.OrchestrationStepEditedEvent, orch.OrchestrationStepSkippedEvent,
-  orch.OrchestrationStepDispatchedEvent, orch.OrchestrationResultReadEvent, orch.OrchestrationRunPausedEvent, orch.OrchestrationRunStoppedEvent, orch.OrchestrationRunFinishedEvent, orch.OrchestrationModeChangedEvent,
+  orch.OrchestrationStepDispatchedEvent, orch.OrchestrationResultReadEvent, orch.OrchestrationRunPausedEvent, orch.OrchestrationRunStoppedEvent, orch.OrchestrationRunFinishedEvent, orch.OrchestrationModeChangedEvent, orch.OrchestrationManagerRepliedEvent,
   SettingsUpdateNoticeChangedEvent,
   SettingsTerminalsChangedEvent,
   AppUpdateAvailableEvent,

@@ -104,11 +104,11 @@ export class OrchestrationOffError extends CoreError {
   }
 }
 
-/** A run was asked for but this install has no manager set up yet (epic 15, 15.3); nothing was stored. */
+/** A run was asked for but the project has no usable manager (15.3; 15.4 says which state in `message`); nothing was stored. */
 export class ManagerUnavailableError extends CoreError {
   override readonly name = 'ManagerUnavailableError';
-  constructor() {
-    super('manager_unavailable', ORCHESTRATION_NO_MANAGER_MESSAGE);
+  constructor(message: string = ORCHESTRATION_NO_MANAGER_MESSAGE) {
+    super('manager_unavailable', message);
   }
 }
 

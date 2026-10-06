@@ -19,9 +19,11 @@
  * - It does not name a model product.
  */
 import {
+  MANAGER_FAILURE_KINDS,
   checkManagerDecision,
   checkManagerPlan,
   type ManagerDecision,
+  type ManagerFailureKind,
   type ManagerPlan,
   type ManagerRefusalCode,
   type ManagerStatusReport,
@@ -62,9 +64,36 @@ export interface ManagerDecisionContext extends ManagerContext {
   plan: ManagerPlan;
 }
 
-/** Why a manager call failed, in the kinds the user is told about. */
-export const MANAGER_FAILURE_KINDS = ['malformed', 'off_roster', 'too_large', 'too_slow', 'context_too_small', 'host_not_confirmed', 'unavailable'] as const;
-export type ManagerFailureKind = (typeof MANAGER_FAILURE_KINDS)[number];
+export { MANAGER_FAILURE_KINDS, type ManagerFailureKind };
+
+/** What the user is told for each kind of failure. Plain words, no dashes; never the model's text, a key or an address. */
+export const MANAGER_FAILURE_WORDS: Readonly<Record<ManagerFailureKind, string>> = {
+  malformed: 'The manager did not answer in the shape Ogden needs.',
+  off_roster: 'The manager named an agent that is not on this team.',
+  too_large: 'The manager sent back far more than a plan needs.',
+  too_slow: 'The manager took too long to answer.',
+  context_too_small: "The manager's model cannot hold what it needs to read. Load it with a larger context in its server.",
+  host_not_confirmed: 'You have not confirmed the server the manager runs on yet.',
+  endpoint_missing: 'The server the manager runs on is not set up any more.',
+  unavailable: 'The manager is not available right now.',
+};
+
+/**
+ * What a call to the manager leaves for the event log (story 15.4): how it went and the manager's answer as masked,
+ * capped JSON text. Core appends it as `orchestration.manager_replied`, because it knows the run. Never the prompt,
+ * a key or an address.
+ */
+export interface ManagerRecord {
+  call: 'plan' | 'decision';
+  outcome: 'accepted' | 'refused';
+  /** How the server was asked, from the strictest; `null` when it never answered. */
+  asked: 'json_schema' | 'json_object' | 'prompt' | null;
+  /** Whether Ogden asked again once, naming the rule that failed. */
+  repaired: boolean;
+  failure?: ManagerFailureKind | undefined;
+  code?: ManagerRefusalCode | undefined;
+  output?: string | undefined;
+}
 
 export interface ManagerFailure {
   ok: false;
@@ -73,9 +102,11 @@ export interface ManagerFailure {
   reason: string;
   /** The protocol rule behind a `malformed` or `off_roster` failure. */
   code?: ManagerRefusalCode | undefined;
+  /** For the event log; absent from a stub. */
+  record?: ManagerRecord | undefined;
 }
 
-export type ManagerResult<T> = { ok: true; value: T } | ManagerFailure;
+export type ManagerResult<T> = { ok: true; value: T; record?: ManagerRecord | undefined } | ManagerFailure;
 
 export interface ManagerPort {
   /** A plan for the goal: validated, with every worker a ready worker. */

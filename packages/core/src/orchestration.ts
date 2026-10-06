@@ -40,6 +40,9 @@ import {
   canMoveStep,
   makeStatusReport,
   redactSecrets,
+  MANAGER_LIMITS,
+  ORCHESTRATION_NO_MANAGER_MESSAGE,
+  type ManagerStatusView,
   type ManagerPlan,
   type ManagerStatusReport,
   type OrchestrationRunState,
@@ -52,7 +55,8 @@ import { orchestrationRuns, orchestrationSteps } from './db/schema.js';
 import { ManagerFailedError, ManagerUnavailableError, NotFoundError, StepNotApprovedError, StepNotProposedError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import type { OrchestrationFeature } from './orchestration-feature.js';
-import type { ManagerContext, ManagerPort } from './manager-port.js';
+import type { ManagerContext, ManagerPort, ManagerRecord } from './manager-port.js';
+import type { ManagerSource } from './manager-source.js';
 import type { Chat } from './chat/types.js';
 import { newId } from './ids.js';
 
@@ -60,8 +64,8 @@ import { newId } from './ids.js';
 export type OrchestrationChat = Pick<Chat, 'chatAgents' | 'createChatSession' | 'sendMessage' | 'getSession'>;
 
 export interface Orchestration {
-  /** Whether a manager is set up in this install (the real adapter is 15.4; none until then outside tests). */
-  managerReady(): boolean;
+  /** Where the project's manager stands, in plain words: ready, or why not (15.4). */
+  managerStatus(workspaceId: WorkspaceId): ManagerStatusView;
   /**
    * Starts a run from the user's goal (`StartOrchestrationRunRequest`): asks the
    * manager for a plan and stores it as proposed steps. {@link ValidationError}
@@ -84,8 +88,10 @@ export interface OrchestrationOptions {
   events: EventLog;
   feature: OrchestrationFeature;
   chat: OrchestrationChat;
-  /** Absent: no manager is set up yet. */
+  /** A manager used for every project (a test's stub). It wins over {@link managers}. */
   manager?: ManagerPort | undefined;
+  /** The manager of each project, read from its roster (the real one, 15.4). Absent with no `manager`: no project has one. */
+  managers?: ManagerSource | undefined;
 }
 
 /** How much of a session's newest events are read for its last reply. */
@@ -123,7 +129,7 @@ const stepOf = (row: StepRow): OrchestrationStep =>
     sessionId: row.sessionId,
   });
 
-export function createOrchestration({ db, events, feature, chat, manager }: OrchestrationOptions): Orchestration {
+export function createOrchestration({ db, events, feature, chat, manager: fixedManager, managers }: OrchestrationOptions): Orchestration {
   const { orm } = db;
   const now = () => new Date().toISOString();
   /** Steps being sent right now: a second dispatch of the same step is refused, not raced. */
@@ -218,10 +224,37 @@ export function createOrchestration({ db, events, feature, chat, manager }: Orch
   };
 
   /** The plan with every manager string masked (AD-16), for the store and the event. */
+  const NO_MANAGER: ManagerStatusView = { state: 'not_chosen', message: ORCHESTRATION_NO_MANAGER_MESSAGE };
+  const statusOf = (workspaceId: WorkspaceId): ManagerStatusView => (fixedManager !== undefined ? { state: 'ready', message: 'The manager is ready.' } : (managers?.status(workspaceId) ?? NO_MANAGER));
+
+  /** Appends what a manager call left for the log (its masked answer and how it went), when it left anything. */
+  const noteReply = (workspaceId: WorkspaceId, runId: OrchestrationRun['id'], record: ManagerRecord | undefined): void => {
+    if (record === undefined) return;
+    const output = record.output === undefined ? undefined : redactSecrets(record.output).slice(0, MANAGER_LIMITS.maxRecordChars);
+    events.append({
+      type: 'orchestration.manager_replied',
+      workspaceId,
+      streamId: workspaceId,
+      payload: {
+        runId,
+        call: record.call,
+        outcome: record.outcome,
+        asked: record.asked,
+        repaired: record.repaired,
+        ...(record.failure === undefined ? {} : { failure: record.failure }),
+        ...(record.code === undefined ? {} : { code: record.code }),
+        ...(output === undefined ? {} : { output }),
+      },
+    });
+  };
+
   const masked = (plan: ManagerPlan): ManagerPlan => ({ ...plan, goal: redactSecrets(plan.goal), steps: plan.steps.map((step) => ({ ...step, instruction: redactSecrets(step.instruction) })) });
 
   return {
-    managerReady: () => manager !== undefined,
+    managerStatus(workspaceId) {
+      feature.requireOrchestration(workspaceId);
+      return statusOf(workspaceId);
+    },
 
     async startRun(workspaceId, request) {
       feature.requireOrchestration(workspaceId);
@@ -229,7 +262,9 @@ export function createOrchestration({ db, events, feature, chat, manager }: Orch
       if (!parsed.success) throw new ValidationError('Write the goal in a sentence or two, up to 500 characters.', parsed.error.issues);
       // The goal is the user's own text; a secret pasted into it is masked before anything keeps or sends it.
       const goal = redactSecrets(parsed.data.goal);
-      if (manager === undefined) throw new ManagerUnavailableError();
+      const status = statusOf(workspaceId);
+      const manager = fixedManager ?? (status.state === 'ready' ? managers?.managerFor(workspaceId) : undefined);
+      if (manager === undefined) throw new ManagerUnavailableError(status.state === 'ready' ? ORCHESTRATION_NO_MANAGER_MESSAGE : status.message);
 
       const { agents } = await chat.chatAgents(workspaceId);
       const context: ManagerContext = {
@@ -253,6 +288,7 @@ export function createOrchestration({ db, events, feature, chat, manager }: Orch
       }
       if (!result.ok) {
         events.transaction(() => {
+          noteReply(workspaceId, runId, result.record);
           moveRun(runId, 'failed', 'manager_refused');
           events.append({ type: 'orchestration.run_stopped', workspaceId, streamId: workspaceId, payload: { runId, reason: 'manager_refused' } });
         });
@@ -260,6 +296,7 @@ export function createOrchestration({ db, events, feature, chat, manager }: Orch
       }
       const plan = masked(result.value);
       events.transaction(() => {
+        noteReply(workspaceId, runId, result.record);
         plan.steps.forEach((step, position) => {
           orm
             .insert(orchestrationSteps)

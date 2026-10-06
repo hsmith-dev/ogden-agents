@@ -42,6 +42,8 @@ export interface OrchestrateViewProps {
   wsId: string;
   /** Whether a manager is set up in this install. */
   managerReady: boolean;
+  /** Where the manager stands in plain words (15.4): why it is not ready, or where it runs. Absent from an older server. */
+  managerMessage?: string | undefined;
   /** The latest run, if any. */
   run: OrchestrationRunView | undefined;
   /** A request is in flight (starting, approving or sending). */
@@ -53,7 +55,7 @@ export interface OrchestrateViewProps {
   onSend: (stepId: string) => void;
 }
 
-export function OrchestrateView({ wsId, managerReady, run, busy, error, onStart, onApprove, onSend }: OrchestrateViewProps) {
+export function OrchestrateView({ wsId, managerReady, managerMessage, run, busy, error, onStart, onApprove, onSend }: OrchestrateViewProps) {
   const [goal, setGoal] = useState('');
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -64,9 +66,15 @@ export function OrchestrateView({ wsId, managerReady, run, busy, error, onStart,
     <div className="flex flex-col gap-6" data-testid="orchestrate">
       <PageSection title="Goal">
         <Text>{ORCHESTRATE_INTRO}</Text>
-        {managerReady ? null : (
+        {managerReady ? (
+          managerMessage === undefined ? null : (
+            <Text variant="caption" data-testid="orchestrate-manager" data-manager="ready">
+              {managerMessage}
+            </Text>
+          )
+        ) : (
           <Notice data-testid="orchestrate-no-manager" role="status">
-            {ORCHESTRATION_NO_MANAGER_MESSAGE}
+            {managerMessage ?? ORCHESTRATION_NO_MANAGER_MESSAGE}
           </Notice>
         )}
         <form className="flex flex-col gap-3" onSubmit={submit} data-testid="orchestrate-goal-form">

@@ -100,7 +100,7 @@ describe('start a run', () => {
       ['s2', 'proposed', null, null, 'Claude Code'],
     ]);
     expect(eventTypes(core, before)).toEqual(['orchestration.run_started', 'orchestration.plan_proposed', 'orchestration.step_proposed', 'orchestration.step_proposed']);
-    expect(orchestration.managerReady()).toBe(true);
+    expect(orchestration.managerStatus(workspace.id).state).toBe('ready');
   });
 
   it('folds the goal to one line, masks a secret in it before the manager or the store sees it, and refuses a goal that is empty or too long', async () => {
@@ -118,7 +118,7 @@ describe('start a run', () => {
   it('answers plain "no manager yet" with nothing stored when there is no manager', async () => {
     const { core, workspace, orchestration } = setUp(null);
     const before = core.events.lastSeq();
-    expect(orchestration.managerReady()).toBe(false);
+    expect(orchestration.managerStatus(workspace.id)).toMatchObject({ state: 'not_chosen' });
     await expect(orchestration.startRun(workspace.id, { goal: 'Add a form' })).rejects.toBeInstanceOf(ManagerUnavailableError);
     expect(core.events.lastSeq()).toBe(before);
     expect(await orchestration.listRuns(workspace.id)).toEqual([]);

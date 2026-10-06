@@ -17,10 +17,12 @@ import { SessionId, OrchestrationRunId } from './ids.js';
 import {
   Approver,
   ManagerDecision,
+  ManagerFailureKind,
   ManagerGoal,
   ManagerInstruction,
   ManagerReason,
   ManagerPlan,
+  ManagerRefusalCode,
   ManagerStatusReport,
   ManagerStepId,
   MANAGER_LIMITS,
@@ -141,6 +143,28 @@ export const OrchestrationModeChangedInput = z.object({
 export const OrchestrationModeChangedEvent = OrchestrationModeChangedInput.extend(assigned);
 export type OrchestrationModeChangedEvent = z.infer<typeof OrchestrationModeChangedEvent>;
 
+export const OrchestrationManagerRepliedInput = z.object({
+  type: z.literal('orchestration.manager_replied'),
+  ...onWorkspaceStream,
+  payload: z.object({
+    ...runId,
+    call: z.enum(['plan', 'decision']),
+    outcome: z.enum(['accepted', 'refused']),
+    /** How the server was asked, from the strictest; `null` when it never answered. */
+    asked: z.enum(['json_schema', 'json_object', 'prompt']).nullable(),
+    /** Whether Ogden asked again once, naming the rule that failed. */
+    repaired: z.boolean(),
+    /** For a refusal: the kind the user is told, and the rule behind it when there is one. */
+    failure: ManagerFailureKind.optional(),
+    code: ManagerRefusalCode.optional(),
+    /** The manager's answer as masked JSON text (secrets masked, cut to {@link MANAGER_LIMITS.maxRecordChars}), so a run can be replayed. Absent when nothing parsed. Never the prompt. */
+    output: z.string().max(MANAGER_LIMITS.maxRecordChars).optional(),
+  }),
+});
+/** The manager answered a call (its masked answer and how the call went). Never the prompt, a key or an address. */
+export const OrchestrationManagerRepliedEvent = OrchestrationManagerRepliedInput.extend(assigned);
+export type OrchestrationManagerRepliedEvent = z.infer<typeof OrchestrationManagerRepliedEvent>;
+
 /** Every orchestration event's input, for `NewCoreEvent`. */
 export const ORCHESTRATION_INPUTS = [
   OrchestrationRunStartedInput,
@@ -155,4 +179,5 @@ export const ORCHESTRATION_INPUTS = [
   OrchestrationRunStoppedInput,
   OrchestrationRunFinishedInput,
   OrchestrationModeChangedInput,
+  OrchestrationManagerRepliedInput,
 ] as const;

@@ -148,13 +148,15 @@ test('two agents at once in a Simple project: picker, own keys only, Antigravity
     await expect(picker).toHaveAttribute('data-agent', 'claude-code');
     await picker.click();
     const options = page.getByTestId('agent-option');
-    await expect(options).toHaveCount(5);
+    await expect(options).toHaveCount(6);
     await expect(options.nth(0)).toContainText('Claude Code');
     await expect(options.nth(1)).toContainText('Antigravity');
     // Codex ships beside them (epic 12), not ready until it has an OpenAI API key.
     await expect(options.nth(2)).toContainText('Codex');
     // And Grok (epic 12): not ready until it has an xAI API access token, and it needs the project trusted.
     await expect(options.nth(3)).toContainText('Grok');
+    // And the Local model (epic 14): no account to sign in to, ready once the server is set up.
+    await expect(options.filter({ hasText: 'Local model' })).toHaveCount(1);
     const untrusted = options.filter({ hasText: 'Fake Agent' });
     // Needing the project trusted is fixed in place (epic 12, 12.3): choosable, with its reason and a Trust item.
     await expect(untrusted).not.toHaveAttribute('aria-disabled', 'true');

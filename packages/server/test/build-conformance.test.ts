@@ -49,6 +49,8 @@ function apiKeySetup(agentId: string, displayName: string, envName: string): Age
 /** One agent of the table: how the server wires it, its key, what it can do and how its skill is found. */
 interface Row {
   id: keyof typeof KEYS;
+  /** Its product name: what its own plain reason names. */
+  name: string;
   /** The server's options to wire it (none for Claude Code, which is always there). */
   wire(): Partial<StartOptions> | undefined;
   /** Builds unattended here (Codex only when its sandbox is verified, which a test turns on). */
@@ -64,9 +66,10 @@ interface Row {
 const PINNED = ANTIGRAVITY_PINS.archives[`${process.platform}-${process.arch}` as keyof typeof ANTIGRAVITY_PINS.archives];
 
 const ROWS: Row[] = [
-  { id: 'claude-code', wire: () => undefined, unattended: true, skillFolder: null, prefix: '/', asksForProtected: true },
+  { id: 'claude-code', name: 'Claude Code', wire: () => undefined, unattended: true, skillFolder: null, prefix: '/', asksForProtected: true },
   {
     id: 'codex',
+    name: 'Codex',
     wire: () => ({ codex: { agent: createCodexAgent({ dataDir: temp('p-codex-'), server: () => ({ command: process.execPath, args: [fixture('fake-codex.mjs')] }), unattendedVerified: true }), setup: apiKeySetup('codex', 'Codex', 'CODEX_API_KEY') } satisfies CodexPorts }),
     unattended: true,
     skillFolder: '.agents/skills',
@@ -75,6 +78,7 @@ const ROWS: Row[] = [
   },
   {
     id: 'grok',
+    name: 'Grok',
     wire: () => ({ grok: { agent: createGrokAgent({ dataDir: temp('p-grok-'), server: () => ({ command: process.execPath, args: [fixture('fake-grok.mjs')] }) }), setup: apiKeySetup('grok', 'Grok', 'XAI_API_KEY') } satisfies GrokPorts }),
     unattended: false,
     skillFolder: '.claude/skills',
@@ -86,6 +90,7 @@ const ROWS: Row[] = [
     : ([
         {
           id: 'antigravity',
+          name: 'Antigravity',
           wire: () => {
             const dataDir = temp('p-agy-');
             const folder = join(dataDir, 'agents', 'antigravity', ANTIGRAVITY_PINS.version);
@@ -243,6 +248,18 @@ describe.each(ROWS)('every agent that builds: $id', { timeout: 90_000 }, (row) =
       expect(ended.outcome).toBe('failed');
       expect(ended.run.reason).toContain("can't be approved");
     }
+  });
+
+  it('an agent that builds only attended says so in its own words, naming itself, in the picker', async () => {
+    // Antigravity's own words come with its story (17.7).
+    if (row.unattended || row.id === 'antigravity') return;
+    const s = await setup(row);
+    const list = BuildAgentsResponse.parse(await (await request(s.server, s.tab, 'GET', apiPath(API_ROUTES.workspaceBuildAgents, { wsId: s.wsId }))).json());
+    const mine = list.agents.find((agent) => agent.agentId === row.id)!;
+    expect(mine.way).toBe('attended_only');
+    expect(mine.reason).toContain(row.name);
+    expect(mine.reason).toContain('with you watching');
+    expect(mine.reason).not.toMatch(/[\u2013\u2014]/);
   });
 
   it('with no sandbox on this computer an unattended build is refused for every agent, writing nothing', async () => {

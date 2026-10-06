@@ -66,6 +66,9 @@ export interface GrokServerCommand {
   args: readonly string[];
 }
 
+/** The Build picker's line for Grok (epic 17): it takes no sandbox for a build that Ogden Agents can set up, so it builds with the user watching (plain words, no dashes). */
+export const GROK_ATTENDED_ONLY_REASON = "Grok has no sandbox that Ogden Agents can set up for a build yet, so it builds with you watching. On Windows it has none at all.";
+
 /** The arguments of the real binary: the agent, never joining a shared leader process, over stdio. */
 export const GROK_ARGS: readonly string[] = ['agent', '--no-leader', 'stdio'];
 
@@ -114,6 +117,8 @@ export function createGrokAgent(options: GrokAgentOptions): AgentPort {
         logFields: { server: server.command },
       };
     },
+    // Attended only (user decision 2026-10-06): a build session is a chat start in Ask (the explicit mode below), never a sandboxed one.
+    attendedOnlyReason: GROK_ATTENDED_ONLY_REASON,
     toolInputPaths: TOOL_INPUT_PATHS,
     // No session modes: only a mode Grok started in exists, so nothing asks less than Ask behind core's back.
     askingModeIds: [GROK_DESCRIPTOR.permissionModes.ask],

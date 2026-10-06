@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { AgentError, PROTECTED_PATHS, type AgentEvent, type AgentPermissionDecision, type AgentPermissionRequest, type AgentSession } from '@ogden-agents/core';
 import type { PermissionMode } from '@ogden-agents/shared';
 import { afterEach, describe, expect, it } from 'vitest';
-import { acpReasons, createGrokAgent, GROK_ARGS } from '../src/index.js';
+import { acpReasons, createGrokAgent, GROK_ARGS, GROK_ATTENDED_ONLY_REASON } from '../src/index.js';
 
 const FAKE_GROK = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-grok.mjs');
 const KEY = `xai-${'K'.repeat(60)}4321`;
@@ -199,5 +199,30 @@ describe("Grok's chat port (epic 12 entry 7)", () => {
     const limit = (text: string) => GROK_DESCRIPTOR.usageLimitPatterns!.some((pattern) => pattern.test(text));
     expect(limit('You have exhausted your credits')).toBe(true);
     expect(limit('network error')).toBe(false);
+  });
+
+  describe('builds (epic 17: attended only)', () => {
+    it('takes no sandbox for a build: an unattended start is refused, and it says why in plain words', async () => {
+      const agent = agentOf();
+      expect(agent.unattendedBuild).toBe(false);
+      expect(agent.attendedOnlyReason).toBe(GROK_ATTENDED_ONLY_REASON);
+      expect(GROK_ATTENDED_ONLY_REASON).not.toMatch(/[\u2013\u2014]/);
+      const cwd = tempDir();
+      const refused = await agent.startSession({ cwd, env: envOf({ XAI_API_KEY: KEY }), sandbox: { kind: 'test', writableRoots: [cwd], deniedPaths: [], deniedReads: [], allowedReads: [cwd] } }).catch((error: unknown) => error);
+      expect(refused).toMatchObject({ code: 'agent_unavailable' });
+    });
+
+    it('an attended build session starts in explicit Ask (never always-approve or Auto), with folder trust still off and only its own token', async () => {
+      const cwd = tempDir();
+      const env = envOf({ XAI_API_KEY: KEY });
+      const session = await agentOf().startSession({ cwd, env, attended: true, permissionMode: 'ask', protectedPaths: PROTECTED_PATHS });
+      sessions.push(session);
+      const events: AgentEvent[] = [];
+      session.onEvent((event) => events.push(event));
+      expect(await say(session, events, 'meta')).toBe('meta={"yoloMode":false,"autoMode":false}');
+      expect(await say(session, events, 'env')).toBe('GROK_FOLDER_TRUST=0 GROK_DISABLE_AUTOUPDATER=1 key=4321');
+      // Its mode is the one it started in: no other is taken.
+      await expect(session.setPermissionMode!('skip_all')).rejects.toBeInstanceOf(AgentError);
+    });
   });
 });

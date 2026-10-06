@@ -348,7 +348,7 @@ describe('the manager addresses only the rostered workers (15.5)', () => {
     core.permissions.updateSettings(workspace.id, { orchestrationEnabled: true });
     const list = [agent('alpha', 'Alpha'), agent('beta', 'Beta'), agent('gamma', 'Gamma')];
     let agentsNow = list;
-    const chat = { async chatAgents() { return { agents: agentsNow, defaultAgentId: 'alpha' }; } } as unknown as OrchestrationChat;
+    const chat = { listSessions: () => [], async chatAgents() { return { agents: agentsNow, defaultAgentId: 'alpha' }; } } as unknown as OrchestrationChat;
     const team = core.createTeam({ chat, endpoints: () => core.localEndpoints(memorySecrets()), tests: () => ({ result: () => undefined, all: () => [] }), defaults: createNewProjectDefaults({ dataDir: tempDir(), bmad: core.bmad }) });
     const seen: string[][] = [];
     const orchestration = core.createOrchestration({

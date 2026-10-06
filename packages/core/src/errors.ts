@@ -23,6 +23,7 @@ import {
   REOPEN_NOT_CONFIRMED_MESSAGE,
   type BmadCapability,
   type BmadSetupFailureReason,
+  type DispatchRefusalReason,
   type SessionTerminal,
   type TerminalUnavailableCode,
 } from '@ogden-agents/shared';
@@ -159,6 +160,21 @@ export class RunNotOpenError extends CoreError {
   override readonly name = 'RunNotOpenError';
   constructor() {
     super('run_not_open', ORCHESTRATION_RUN_NOT_OPEN_MESSAGE);
+  }
+}
+
+/**
+ * An approved instruction was not sent (15.7): the worker is gone from the team or not ready, its vendor's terms or the run's
+ * mode forbid it, or the chat the step names cannot take it. `reason` is the token and `message` the plain words for the
+ * user and the manager. Nothing was created or sent, so every chat is as it was.
+ */
+export class DispatchRefusedError extends CoreError {
+  override readonly name = 'DispatchRefusedError';
+  constructor(
+    readonly reason: DispatchRefusalReason,
+    message: string,
+  ) {
+    super('dispatch_refused', message);
   }
 }
 

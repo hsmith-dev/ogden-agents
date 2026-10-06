@@ -46,6 +46,8 @@ import {
   canMoveStep,
   makeStatusReport,
   redactSecrets,
+  dispatchRefusalWords,
+  type DispatchRefusalReason,
   MANAGER_LIMITS,
   ORCHESTRATION_NO_MANAGER_MESSAGE,
   type ManagerStatusView,
@@ -59,17 +61,17 @@ import {
 import { and, desc, eq } from 'drizzle-orm';
 import type { Database } from './db/database.js';
 import { orchestrationRuns, orchestrationSteps } from './db/schema.js';
-import { BadOrderError, ManagerFailedError, ManagerUnavailableError, NotFoundError, RunNotOpenError, StepNotApprovedError, StepNotChangeableError, StepNotProposedError, ValidationError } from './errors.js';
+import { AgentNotReadyError, BadOrderError, DispatchRefusedError, DriverIsTerminalError, ManagerFailedError, ManagerUnavailableError, NotFoundError, QueueFullError, RunNotOpenError, SessionBusyError, SessionNotIdleError, StepNotApprovedError, StepNotChangeableError, StepNotProposedError, UnknownAgentError, ValidationError } from './errors.js';
 import type { EventLog } from './event-log.js';
 import type { OrchestrationFeature } from './orchestration-feature.js';
 import type { ManagerContext, ManagerPort, ManagerRecord } from './manager-port.js';
 import type { ManagerSource } from './manager-source.js';
-import type { Team } from './team-roster.js';
+import { isSubscription, type Team } from './team-roster.js';
 import type { Chat } from './chat/types.js';
 import { newId } from './ids.js';
 
 /** What the use-case needs of the chat: the same calls the chat page makes, nothing else. */
-export type OrchestrationChat = Pick<Chat, 'chatAgents' | 'createChatSession' | 'sendMessage' | 'getSession' | 'cancel'>;
+export type OrchestrationChat = Pick<Chat, 'chatAgents' | 'createChatSession' | 'sendMessage' | 'getSession' | 'listSessions' | 'renameSession' | 'removeQueuedMessage' | 'cancel'>;
 
 export interface Orchestration {
   /** Where the project's manager stands, in plain words: ready, or why not (15.4). */
@@ -105,7 +107,11 @@ export interface Orchestration {
    * abandoned and a worker turn in flight is cancelled. {@link RunNotOpenError} for a run that already ended.
    */
   stopRun(workspaceId: WorkspaceId, runId: string): Promise<OrchestrationRunView>;
-  /** Sends an approved step's instruction into a new worker chat. {@link StepNotApprovedError} for any step not approved, before anything is created. */
+  /**
+   * Sends an approved step's instruction into a new worker chat, or into the worker's own idle chat the step names (15.7).
+   * {@link StepNotApprovedError} for any step not approved, and {@link DispatchRefusedError} (plain words, a reason token) when the
+   * worker or the chat cannot take it: both before anything is created or sent, so every chat is as it was.
+   */
   dispatchStep(workspaceId: WorkspaceId, runId: string, stepId: string): Promise<OrchestrationRunView>;
 }
 
@@ -126,7 +132,15 @@ export interface OrchestrationOptions {
 export const NO_READY_WORKER = 'No worker on this project\'s team is ready. Choose a worker, or sign in to one, in the project settings under Orchestration.';
 
 /** How much of a session's newest events are read for its last reply. */
-const REPLY_WINDOW = Math.min(MAX_PAGE_EVENTS, 200);
+const REPLY_WINDOW = Math.min(MAX_PAGE_EVENTS, 500);
+/** How many tool calls the read-back names, and the most characters of them. */
+const TOOL_CALLS_SHOWN = 10;
+const TOOL_CALLS_CHARS = 800;
+/** How many of a worker's own idle chats the manager is told about. */
+const CHATS_OFFERED = 5;
+
+/** The refusal for an agent the install says cannot start a chat now. */
+const reasonOf = (code: string): DispatchRefusalReason => (code === 'agent_signed_out' ? 'worker_signed_out' : code === 'project_not_trusted' ? 'trust_not_given' : 'worker_not_ready');
 
 const isOpen = (state: string): boolean => state === 'awaiting_user' || state === 'running';
 /** A run the user may still change (edit, skip, reorder): open, or paused for a card. */
@@ -201,14 +215,35 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     }
   };
 
-  /** The worker chat's last reply, as plain text: its newest finished agent message. */
-  const lastReply = (workspaceId: WorkspaceId, sessionId: SessionId): string => {
+  /**
+   * What the worker did for one instruction: the tool calls after it (the newest few, with their last status) and its newest
+   * finished reply after it, as plain text for {@link makeStatusReport}, which masks and caps it. The instruction is found by its
+   * text among the chat's newest events; a chat that was used before the instruction shows only what came after it.
+   */
+  const lastReply = (workspaceId: WorkspaceId, sessionId: SessionId, instruction: string, reused: boolean): string => {
     const page = events.readBefore(workspaceId, events.lastSeq() + 1, REPLY_WINDOW, sessionId);
+    let reply = '';
+    let found = false;
+    const calls = new Map<string, string>();
     for (let at = page.events.length - 1; at >= 0; at--) {
       const event = page.events[at]!;
-      if (event.type === 'session.message_completed' && event.payload.role === 'agent') return event.payload.content;
+      if (event.type === 'session.message_completed') {
+        if (event.payload.role === 'agent') {
+          if (reply === '') reply = event.payload.content;
+        } else if (event.payload.origin === 'manager' && event.payload.content === instruction) {
+          found = true;
+          break;
+        }
+      } else if (event.type === 'session.tool_call' || event.type === 'session.tool_call_updated') {
+        // Newest first: the first time a call is seen is its latest status.
+        if (!calls.has(event.payload.toolCallId)) calls.set(event.payload.toolCallId, `${redactSecrets(event.payload.title).replace(/\s+/g, ' ').trim().slice(0, 80)} (${event.payload.status})`);
+      }
     }
-    return '';
+    // A chat the user used before: if the instruction is not in the window, nothing of it is the worker's result (never the user's own history).
+    if (reused && !found) return '';
+    const shown = [...calls.values()].slice(0, TOOL_CALLS_SHOWN).reverse();
+    const tools = shown.length === 0 ? '' : `Tool calls${calls.size > shown.length ? ` (the last ${shown.length} of ${calls.size})` : ''}: ${shown.join('; ')}`.slice(0, TOOL_CALLS_CHARS);
+    return tools === '' ? reply : reply === '' ? tools : `${tools}\n\n${reply}`;
   };
 
   /** Reads back every dispatched step: its chat's state and a masked, capped report; settles a finished one once. */
@@ -227,7 +262,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
           // The chat is gone (its history was deleted): the step reads as failed.
           sessionState = 'error';
         }
-        report = makeStatusReport({ stepId: step.stepId, worker: step.worker, state: sessionState, text: lastReply(workspaceId, step.sessionId) });
+        report = makeStatusReport({ stepId: step.stepId, worker: step.worker, state: sessionState, text: lastReply(workspaceId, step.sessionId, step.instruction, step.chat !== 'new') });
         const finished = sessionState === 'idle' || sessionState === 'done';
         if (step.state === 'dispatched' && (finished || sessionState === 'error')) {
           const to = finished ? 'done' : 'failed';
@@ -259,6 +294,61 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
     }
     const fresh = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get() ?? run;
     return OrchestrationRunView.parse({ run: runOf(fresh), steps: views });
+  };
+
+  /** The worker's own chats the manager may continue: plain chats the terminal does not drive that are idle, newest first, a few. */
+  const ownChats = (workspaceId: WorkspaceId, agentId: string) => {
+    // A chat made for a step whose send failed is left empty and is never offered back.
+    const unsent = new Set(orm.select({ sessionId: orchestrationSteps.sessionId }).from(orchestrationSteps).where(eq(orchestrationSteps.state, 'failed')).all().map((row) => row.sessionId));
+    return chat
+      .listSessions(workspaceId)
+      .filter((session) => !unsent.has(session.id) && session.kind === 'chat' && session.agentId === agentId && session.driver === 'ui' && session.state === 'idle')
+      .reverse()
+      .slice(0, CHATS_OFFERED)
+      .map((session) => ({ sessionId: session.id, state: session.state }));
+  };
+
+  /**
+   * Whether `row`'s worker can be given an instruction now, checked before any chat is made. Plain refusals ({@link DispatchRefusedError}):
+   * not on the team any more, its vendor allows only a person, it signs in with the user's account and the instruction was not
+   * approved by the user one by one, not signed in, project not trusted, or not ready. The worker's own readiness is read again here: the
+   * plan was checked when it was proposed, and the roster, the sign in or the mode may have changed since.
+   */
+  const requireWorkerReady = async (workspaceId: WorkspaceId, run: RunRow, row: StepRow): Promise<string> => {
+    const { agents } = await chat.chatAgents(workspaceId);
+    const agent = agents.find((candidate) => candidate.agentId === row.worker);
+    const label = agent?.displayName ?? row.worker;
+    const refuse = (reason: DispatchRefusalReason): never => {
+      throw new DispatchRefusedError(reason, dispatchRefusalWords(reason, label));
+    };
+    if (agent === undefined) return refuse('worker_not_on_team');
+    const rostered = team === undefined ? undefined : (await team.workers(workspaceId)).find((worker) => worker.agentId === row.worker);
+    if (team !== undefined && rostered === undefined) return refuse('worker_not_on_team');
+    // The vendor's terms, in code: an agent only a person may drive is never sent an instruction, and a subscription agent only takes the user's own approval.
+    if (agent.interactiveOnly !== undefined) return refuse('interactive_only');
+    if (isSubscription(agent) && (run.mode === 'automatic' || row.approvedBy !== 'user')) return refuse('approve_each_only');
+    if (agent.unavailable !== undefined) return refuse(reasonOf(agent.unavailable.code));
+    if (rostered !== undefined && !rostered.ready) return refuse('worker_not_ready');
+    return label;
+  };
+
+  /** Whether the chat a step names can take an instruction now (read as it is, no await): the worker's own, a plain chat, idle, not in the terminal. */
+  const requireChatReady = (workspaceId: WorkspaceId, row: StepRow, chatId: string, label: string): SessionId => {
+    const refuse = (reason: DispatchRefusalReason): never => {
+      throw new DispatchRefusedError(reason, dispatchRefusalWords(reason, label));
+    };
+    let session: ReturnType<OrchestrationChat['getSession']>;
+    try {
+      session = chat.getSession(workspaceId, chatId as SessionId);
+    } catch (error) {
+      if (error instanceof NotFoundError) return refuse('chat_gone');
+      throw error;
+    }
+    if (session.kind !== 'chat') return refuse('chat_not_a_chat');
+    if (session.agentId !== row.worker) return refuse('chat_other_agent');
+    if (session.driver !== 'ui') return refuse('driver_is_terminal');
+    if (session.state !== 'idle') return refuse('chat_busy');
+    return session.id;
   };
 
   /** The plan with every manager string masked (AD-16), for the store and the event. */
@@ -316,7 +406,7 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
           label: agent.displayName,
           ready: rostered === undefined ? agent.unavailable === undefined : (rostered.find((worker) => worker.agentId === agent.agentId)?.ready ?? false),
           modes: agent.permissionModes,
-          chats: [],
+          chats: ownChats(workspaceId, agent.agentId),
         })),
       };
       if (team !== undefined && !context.workers.some((worker) => worker.ready)) throw new ManagerUnavailableError(NO_READY_WORKER);
@@ -521,21 +611,85 @@ export function createOrchestration({ db, events, feature, chat, manager: fixedM
       if (sending.has(key)) throw new StepNotApprovedError();
       sending.add(key);
       try {
-        // The worker's own chat: created in its own default mode (this never sets one), then told the instruction as the manager's, at the user's approval.
-        const session = await chat.createChatSession(workspaceId, { kind: 'chat', agentId: row.worker });
-        // The run may have been closed while the chat was made: nothing is sent then.
-        const again = requireRun(workspaceId, runId);
-        const current = requireStep(run.id, row.stepId);
-        // What is sent is the text the user approved: an edit meanwhile sent the step back to waiting, and a changed text is never sent.
-        if (current.state !== 'approved' || current.approvedBy === null || current.instruction !== row.instruction || !isOpen(again.state)) throw new StepNotApprovedError();
+        // Everything that can be refused is checked before a chat is made, so a refusal leaves every chat as it was (15.7).
+        const label = await requireWorkerReady(workspaceId, run, row);
+        const named = row.chat === 'new' ? undefined : row.chat;
+        if (named !== undefined) requireChatReady(workspaceId, row, named, label);
+        // The run may have been stopped, or the step edited, while the worker was checked: nothing is created then.
+        const stillApproved = (): StepRow => {
+          const again = requireRun(workspaceId, runId);
+          const current = requireStep(run.id, row.stepId);
+          // What is sent is the text the user approved: an edit meanwhile sent the step back to waiting, and a changed text is never sent.
+          if (current.state !== 'approved' || current.approvedBy === null || current.instruction !== row.instruction || !isOpen(again.state)) throw new StepNotApprovedError();
+          return current;
+        };
+        stillApproved();
+        // The worker's own chat, in its own mode: a new one is created with the worker's default (this never sets one), an existing one keeps the mode it is in.
+        let session: { id: SessionId };
+        if (named !== undefined) session = { id: named as SessionId };
+        else {
+          try {
+            session = await chat.createChatSession(workspaceId, { kind: 'chat', agentId: row.worker });
+          } catch (error) {
+            if (error instanceof AgentNotReadyError) throw new DispatchRefusedError(reasonOf(error.code), dispatchRefusalWords(reasonOf(error.code), label));
+            if (error instanceof UnknownAgentError) throw new DispatchRefusedError('worker_not_on_team', dispatchRefusalWords('worker_not_on_team', label));
+            throw error;
+          }
+        }
+        const made = named === undefined;
+        /** A chat made for this step that did not get its instruction: named so it is not mistaken for work, never sent into twice. */
+        const leaveUnsent = (): void => {
+          if (!made) return;
+          try {
+            chat.renameSession(workspaceId, session.id, `Not sent: step ${row.stepId}`);
+          } catch {
+            // The name is a courtesy; the step records the chat.
+          }
+        };
+        let current: StepRow;
         try {
-          chat.sendMessage(workspaceId, session.id, current.instruction, { origin: 'manager' });
+          current = stillApproved();
         } catch (error) {
-          // The chat exists but did not take the instruction: the step is failed and says which chat, so a retry never sends twice.
+          leaveUnsent();
+          throw error;
+        }
+        if (named !== undefined) requireChatReady(workspaceId, row, named, label);
+        try {
+          const sent = chat.sendMessage(workspaceId, session.id, current.instruction, { origin: 'manager' });
+          if (sent.queued) {
+            // The chat took it to wait behind a turn that was still ending: it is not an instruction at once, so it is taken back.
+            let taken = true;
+            try {
+              chat.removeQueuedMessage(workspaceId, session.id, sent.messageId);
+            } catch {
+              // It was sent meanwhile: it counts as sent, and the step reads back like any other.
+              taken = false;
+            }
+            if (taken) throw new DispatchRefusedError('chat_busy', dispatchRefusalWords('chat_busy', label));
+          }
+        } catch (error) {
+          const refusal =
+            error instanceof DispatchRefusedError
+              ? error
+              : error instanceof DriverIsTerminalError
+                ? new DispatchRefusedError('driver_is_terminal', dispatchRefusalWords('driver_is_terminal', label))
+                : error instanceof SessionNotIdleError || error instanceof SessionBusyError || error instanceof QueueFullError
+                  ? new DispatchRefusedError('chat_busy', dispatchRefusalWords('chat_busy', label))
+                  : undefined;
+          // The worker's own chat took nothing: whatever the reason, the step and the chat are left as they were.
+          if (named !== undefined) throw refusal ?? error;
+          // A chat made for this step exists but did not take the instruction (or nobody can tell): the step is failed and says which chat, so a retry never sends twice.
           events.transaction(() => {
             orm.update(orchestrationSteps).set({ state: 'failed', sessionId: session.id }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, row.stepId))).run();
+            // As a worker's own error does at read-back: a failed step is final, so the run stops here, plainly.
+            const live = orm.select().from(orchestrationRuns).where(eq(orchestrationRuns.id, run.id)).get();
+            if (live !== undefined && !isRunOver(live.state as OrchestrationRunState)) {
+              moveRun(run.id, 'failed', 'worker_error');
+              events.append({ type: 'orchestration.run_stopped', workspaceId, streamId: workspaceId, payload: { runId: run.id as OrchestrationRun['id'], reason: 'worker_error' } });
+            }
           });
-          throw error;
+          leaveUnsent();
+          throw refusal ?? error;
         }
         events.transaction(() => {
           orm.update(orchestrationSteps).set({ state: 'dispatched', sessionId: session.id }).where(and(eq(orchestrationSteps.runId, run.id), eq(orchestrationSteps.stepId, row.stepId))).run();

@@ -198,6 +198,8 @@ export const API_ERROR_CODES = [
   'bad_order',
   /** Orchestration (15.6): the run has already ended (409). */
   'run_not_open',
+  /** Orchestration (15.7): an approved instruction was not sent because the worker or its chat cannot take it (409); `details.reason` is the token, the message says why. Nothing was created or sent. */
+  'dispatch_refused',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

@@ -622,3 +622,53 @@ export const ORCHESTRATION_ORDER_WORDS = {
   sent_step_moved: 'A step that was already sent cannot move.',
   prerequisite: (step: string, needs: string): string => `Step ${step} needs step ${needs} first, so it cannot come before it.`,
 } as const;
+
+// ---- dispatch refusals and the worker's terms (15.7) ----
+
+/**
+ * Why an approved instruction was not sent. Each is checked in code before any chat is made, so a refusal
+ * leaves every chat as it was. The manager is told the same plain words as a result (`dispatch_refused`).
+ */
+export const DISPATCH_REFUSAL_REASONS = [
+  'worker_not_on_team',
+  'worker_not_ready',
+  'worker_signed_out',
+  'trust_not_given',
+  'interactive_only',
+  'approve_each_only',
+  'chat_gone',
+  'chat_not_a_chat',
+  'chat_other_agent',
+  'chat_busy',
+  'driver_is_terminal',
+] as const;
+export const DispatchRefusalReason = z.enum(DISPATCH_REFUSAL_REASONS);
+export type DispatchRefusalReason = z.infer<typeof DispatchRefusalReason>;
+
+/** The plain words for each refusal, naming the worker the user knows. No dashes. */
+export const dispatchRefusalWords = (reason: DispatchRefusalReason, worker: string): string => {
+  switch (reason) {
+    case 'worker_not_on_team':
+      return `${worker} is not on this project's team any more, so the instruction was not sent. Choose a worker in the project settings under Orchestration.`;
+    case 'worker_not_ready':
+      return `${worker} is not ready, so the instruction was not sent.`;
+    case 'worker_signed_out':
+      return `${worker} is signed out, so the instruction was not sent. Sign in to ${worker} in Settings, under Agents.`;
+    case 'trust_not_given':
+      return `You have not trusted this project for ${worker}, so the instruction was not sent. Trust the project first.`;
+    case 'interactive_only':
+      return `${worker} is never given instructions by a manager, so nothing was sent.`;
+    case 'approve_each_only':
+      return `${worker} signs in with your account, so it only takes instructions you approve one by one. Nothing was sent.`;
+    case 'chat_gone':
+      return 'The chat this step names is not in this project any more, so nothing was sent.';
+    case 'chat_not_a_chat':
+      return 'The step names something that is not an ordinary chat, so nothing was sent.';
+    case 'chat_other_agent':
+      return `The chat this step names is not one of ${worker}'s, so nothing was sent.`;
+    case 'chat_busy':
+      return `The chat this step names is busy or finished, so nothing was sent. It must be idle to take an instruction.`;
+    case 'driver_is_terminal':
+      return 'The terminal is driving the chat this step names, so nothing was sent. Switch the chat back to the chat view first.';
+  }
+};

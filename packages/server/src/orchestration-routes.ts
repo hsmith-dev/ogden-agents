@@ -21,6 +21,7 @@ import {
   ManagerUnavailableError,
   NotFoundError,
   OrchestrationOffError,
+  DispatchRefusedError,
   StepNotApprovedError,
   StepNotProposedError,
   ValidationError,
@@ -128,6 +129,7 @@ export function registerOrchestrationRoutes(app: Hono, { orchestration, permissi
   const refusal = (c: Context, error: unknown): Response => {
     if (error instanceof ManagerUnavailableError) return apiError(c, 409, 'manager_unavailable', error.message);
     if (error instanceof ManagerFailedError) return apiError(c, 409, 'manager_failed', error.message);
+    if (error instanceof DispatchRefusedError) return apiError(c, 409, 'dispatch_refused', error.message, { reason: error.reason });
     if (error instanceof StepNotApprovedError) return apiError(c, 409, 'step_not_approved', error.message);
     if (error instanceof StepNotProposedError) return apiError(c, 409, 'step_not_proposed', error.message);
     if (error instanceof StepNotChangeableError) return apiError(c, 409, 'step_not_changeable', error.message);

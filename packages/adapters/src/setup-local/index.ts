@@ -70,7 +70,7 @@ export function createLocalSetup(options: LocalSetupOptions): LocalSetup {
       // Logging never changes an outcome.
     }
   };
-  const base = { agentId: LOCAL_AGENT_ID, displayName: LOCAL, notices: [LOCAL_PRIVACY_NOTICE] };
+  const base = { agentId: LOCAL_AGENT_ID, displayName: LOCAL, notices: [LOCAL_PRIVACY_NOTICE], noAccount: true as const };
   let installing: AbortController | undefined;
   removeLocalLeftovers(options.dataDir, pins, onCleanupError);
   // An uninstall the OS was still holding files for is finished by the next start.

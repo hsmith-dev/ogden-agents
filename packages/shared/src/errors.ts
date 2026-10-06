@@ -169,6 +169,8 @@ export const API_ERROR_CODES = [
   'disk_space_low',
   /** Stop, Retry or Check again was asked of a run in the wrong state: Stop of a finished run, Retry of one not blocked or failed (409; story 5.3). */
   'run_not_active',
+  /** A Local model endpoint on a host that is not this computer was used before the user confirmed it, or its address changed since (409; epic 14 story 14.3). Nothing was called. */
+  'endpoint_confirmation_required',
   /** Anything else that went wrong on the server (500). */
   'internal_error',
 ] as const;

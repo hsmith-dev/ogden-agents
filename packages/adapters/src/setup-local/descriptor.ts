@@ -61,6 +61,7 @@ export const LOCAL_DESCRIPTOR: Readonly<AgentDescriptor> = Object.freeze<AgentDe
   },
   // No account and no key to sign in with: an endpoint's own optional key belongs to the endpoint (story 14.3), not to the agent.
   signInMethods: [],
+  noAccount: true,
   // Ask only (user decision, 2026-10-05): the config makes every tool ask, and the mode is fixed at start, so the server refuses Auto and Skip all.
   permissionModes: { ask: LOCAL_MODE_IDS.ask },
   modeFixedAtStart: true,

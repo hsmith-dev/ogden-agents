@@ -19,6 +19,7 @@ export * from './build-memory/index.js';
 export * from './buildrunner-acp/index.js';
 export * from './catalog-memory/index.js';
 export * from './child-env.js';
+export * from './local-model-memory/index.js';
 export * from './local-model-openai/index.js';
 export { projectFilesFingerprint } from './project-files-fingerprint.js';
 export { errorCode } from './error-code.js';

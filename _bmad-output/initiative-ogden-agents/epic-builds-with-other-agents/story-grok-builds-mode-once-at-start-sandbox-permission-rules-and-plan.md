@@ -58,4 +58,4 @@ Live check (the user's, entry 11): whether Grok's own sandbox (Seatbelt on macOS
 
 ## Review Triage Log
 
-(filled after the review)
+One combined security and correctness review (an independent agent), loop 1; no blocking finding. Checked and confirmed: no unattended Grok start exists (three layers: the per-agent sandbox answer, `requireSandbox`, and the fixed-mode start's refusal of a sandbox), an attended Grok build is explicit Ask whatever the project default (build sessions are created in Ask), and a build session's mode cannot change. Kept: the Windows sentence in Grok's reason shows on every OS (accurate, slightly noisy).

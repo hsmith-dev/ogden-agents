@@ -10,6 +10,8 @@ export interface FakeServerOptions {
   models?: string[];
   /** How long `GET /v1/models` waits before answering (a busy server). */
   modelsDelayMs?: number;
+  /** Scripted manager replies by case id (epic 15 story 15.1): a prompt carrying `MANAGER_CASE:<id>` gets the next of `replies` (the last repeats); `hang` never answers. */
+  managerCases?: Record<string, { replies: readonly string[]; hang?: boolean }>;
 }
 
 /** One request the server got. Never holds a key, only whether one came. */

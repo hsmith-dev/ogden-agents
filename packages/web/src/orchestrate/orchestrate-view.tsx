@@ -350,7 +350,7 @@ function StepRow({ wsId, step, stateOf, first, last, live, stopped, ended, denie
             Review of step {step.reviewOf}
           </Badge>
         )}
-        {step.rule === null ? null : (
+        {!step.rule ? null : (
           <Badge variant="outline" data-testid="orchestrate-step-rule" data-rule-id={step.rule.id}>
             {ORCHESTRATION_ROUTING_WORDS.followed}
           </Badge>
@@ -366,7 +366,7 @@ function StepRow({ wsId, step, stateOf, first, last, live, stopped, ended, denie
           </Badge>
         ) : null}
       </div>
-      {step.rule === null ? null : (
+      {!step.rule ? null : (
         <Text variant="caption" data-testid="orchestrate-step-rule-text">
           Your rule: {step.rule.text} (a suggestion the manager followed; you still decide)
         </Text>

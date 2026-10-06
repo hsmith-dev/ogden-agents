@@ -829,7 +829,7 @@ export const SetOrchestrationRoutingRequest = z.object({ rules: z.array(z.object
 export type SetOrchestrationRoutingRequest = z.infer<typeof SetOrchestrationRoutingRequest>;
 
 export const ORCHESTRATION_ROUTING_WORDS = {
-  intro: 'Write, in plain words, which kind of work should go to which worker, for example "tests go to Claude Code" or "reviews go to a different agent". The manager reads them as your wishes and may follow them. They are suggestions only: they never give a worker anything the team, its terms or the mode do not already allow, and you still approve every step.',
+  intro: 'Write, in plain words, which kind of work should go to which worker, for example "tests go to the first agent" or "reviews go to a different agent". The manager reads them as your wishes and may follow them. They are suggestions only: they never give a worker anything the team, its terms or the mode do not already allow, and you still approve every step.',
   none: 'No rules yet. The manager chooses on its own.',
   tooMany: `A project can have at most ${ROUTING_LIMITS.maxRules} rules. Take one out first.`,
   tooLong: `A rule can be at most ${ROUTING_LIMITS.maxRuleChars} characters.`,

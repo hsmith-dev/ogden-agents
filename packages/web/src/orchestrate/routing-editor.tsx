@@ -76,7 +76,7 @@ export function RoutingEditorView({ rows, saved, maxRules, maxRuleChars, saving,
                   data-testid="routing-rule-text"
                   value={row.text}
                   maxLength={maxRuleChars}
-                  placeholder="For example: tests go to Claude Code"
+                  placeholder="For example: tests go to the first agent"
                   disabled={saving}
                   onChange={(event) => set(index, event.target.value)}
                 />

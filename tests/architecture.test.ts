@@ -748,6 +748,30 @@ describe('E15: the manager never changes the mode or the confirmation (story 15.
   });
 });
 
+describe('E15: routing rules only suggest (story 15.12)', () => {
+  it('the rules store and the use-case that saves them touch no roster, mode, approval, dispatch or build code', () => {
+    const files = loadWorkspaceSources();
+    const store = files.find((file) => /packages[\\/]core[\\/]src[\\/]orchestration-routing\.ts$/.test(file.path))!.source;
+    const forbidden = /team-roster|orchestrationRoster|orchestrationMode|setOrchestration|approveStep|dispatchStep|createBuilds|builds\.start|sendMessage|createChatSession/;
+    // Words in comments say what the file does not do, so only code is checked.
+    const code = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    expect(code(store)).not.toMatch(forbidden);
+    const useCase = files.find((file) => ORCHESTRATION_USE_CASE.test(file.path))!.source;
+    const setRouting = useCase.slice(useCase.indexOf('    setRouting(workspaceId, request) {'), useCase.indexOf('    async listRuns('));
+    expect(setRouting.length).toBeGreaterThan(200);
+    expect(code(setRouting)).not.toMatch(forbidden);
+  });
+
+  it('a step\'s rule is checked only after the roster, so no rule can make a worker allowed', () => {
+    const shared = loadWorkspaceSources().find((file) => /packages[\\/]shared[\\/]src[\\/]orchestration\.ts$/.test(file.path))!.source;
+    const check = shared.slice(shared.indexOf('export function checkManagerPlan('), shared.indexOf('function buildStepProblem('));
+    expect(check.indexOf("'off_roster_worker'")).toBeGreaterThan(-1);
+    expect(check.indexOf("'off_roster_worker'")).toBeLessThan(check.indexOf("'unknown_rule'"));
+    // Nothing in a rule's path reads the roster to widen it: the rule list is only compared by id.
+    expect(check).toMatch(/context\.rules \?\? \[\]\)\.includes\(step\.rule\)/);
+  });
+});
+
 describe('E15: orchestration code is tool-free and names no model product (story 15.2)', () => {
   it('core, shared and the fake manager keep to the rules', () => {
     const files = loadWorkspaceSources();
@@ -760,6 +784,7 @@ describe('E15: orchestration code is tool-free and names no model product (story
         'packages/core/src/model-manager.ts',
         'packages/core/src/orchestration-feature.ts',
         'packages/core/src/orchestration.ts',
+        'packages/core/src/orchestration-routing.ts',
         'packages/core/src/team-roster.ts',
         'packages/shared/src/roster.ts',
         'packages/shared/src/events-orchestration.ts',

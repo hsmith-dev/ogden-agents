@@ -55,7 +55,7 @@ export function registerPaneRoutes(app: Hono, { panes, log }: PaneRoutesOptions)
     if (error instanceof DeveloperModeRequiredError) return apiError(c, 403, 'developer_mode_required', error.message);
     if (error instanceof ValidationError) return apiError(c, 400, 'invalid_request', error.message);
     if (error instanceof NotFoundError) return apiError(c, 404, 'not_found', 'There is no such terminal.');
-    if (error instanceof LauncherUnavailableError) return apiError(c, 409, 'launcher_unavailable', error.message, { launcher: error.launcherCode });
+    if (error instanceof LauncherUnavailableError) return apiError(c, 409, 'launcher_unavailable', error.message, { launcher: error.launcherCode, ...(error.installUrl === undefined ? {} : { installUrl: error.installUrl }) });
     if (error instanceof PaneLimitError) return apiError(c, 409, 'pane_limit_reached', error.message, { scope: error.scope, limit: error.limit });
     if (error instanceof TerminalUnavailableError) return apiError(c, 409, 'terminal_unavailable', error.message, { terminal: error.terminal });
     log.error('a terminal pane request failed', { code: error instanceof CoreError ? error.code : 'unexpected' });

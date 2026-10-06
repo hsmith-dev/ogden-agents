@@ -6,8 +6,15 @@
 import { createPaneLaunchers, defaultPaneShell, nodeDetectSystem, PANE_LAUNCHERS, paneEnvironment, type PaneShell } from '@ogden-agents/adapters';
 import type { PaneLaunchers } from '@ogden-agents/core';
 import { createPanes, type Core, type Panes, type TerminalPort } from '@ogden-agents/core';
+import { isAbsolute, relative } from 'node:path';
 import type { StartOptions } from './start-types.js';
 import type { TestHooks } from './test-hooks.js';
+
+/** Whether `path` is inside `folder` (a folder of the same prefix is not). */
+const inside = (folder: string, path: string): boolean => {
+  const from = relative(folder, path);
+  return from !== '' && !from.startsWith('..') && !isAbsolute(from);
+};
 
 export interface PanesWiringOptions {
   options: Pick<StartOptions, 'paneShell' | 'paneLaunchers'>;
@@ -37,7 +44,7 @@ export function createPanesWiring({ options, hooks, core, terminal, onError }: P
           : ((folder: string) => ({
               ...nodeDetectSystem,
               // Only a file inside the test's folder is ever looked at or run (`''`: nothing is).
-              runnable: (path: string) => folder !== '' && path.startsWith(folder) && nodeDetectSystem.runnable(path),
+              runnable: (path: string) => folder !== '' && inside(folder, path) && nodeDetectSystem.runnable(path),
               env: { PATH: folder, HOME: folder, ...(process.platform === 'win32' ? { PATHEXT: '.EXE;.CMD', SystemRoot: process.env.SystemRoot ?? 'C:\\Windows', ComSpec: process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe' } : {}) },
             }))(hooks.panePath),
     });

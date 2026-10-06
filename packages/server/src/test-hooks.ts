@@ -325,7 +325,9 @@ export function testPanePath(env: Env, dataDir: string, tmp: string = tmpdir()):
   } catch {
     throw new Error(`${PANE_PATH_ENV}: must be an existing folder`);
   }
-  return insideTemp(real, tmp) ? real : undefined;
+  // Allowed but unusable throws, so a test never falls back to looking at the real computer.
+  if (!insideTemp(real, tmp)) throw new Error(`${PANE_PATH_ENV}: must be a folder inside the temp folder`);
+  return real;
 }
 
 /**

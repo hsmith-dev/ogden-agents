@@ -3,13 +3,13 @@ title: 'CLI launcher and install detection: Claude Code, Codex, Grok, Antigravit
 type: 'feature'
 ticket: '5'
 created: '2026-10-05'
-status: 'in-review'
+status: 'built'
 baseline_revision: '12bc31ee90ee1e840b911a7c333304820220bcb9'
 route: 'full'
 route_source: 'auto'
 review: 'quick'
 review_source: 'pinned'
-lenses_ran: []
+lenses_ran: ['security', 'correctness']
 review_loop_iteration: 0
 context:
   - '{project-root}/_bmad-output/initiative-ogden-agents/epic-native-cli-terminal/epic-native-cli-terminal.md'
@@ -71,3 +71,21 @@ context:
 ## Plan Change Log
 
 ## Review Triage Log
+
+Two reviews ran (one security, one correctness).
+
+| Finding | Verdict | Route |
+|---|---|---|
+| The probe could hang and detection with it (a grandchild keeping the pipes open; SIGTERM ignored) (S, C) | high, real | patch: SIGKILL, a hard timer, no input, a neutral working folder |
+| Windows .cmd shim: typed arguments with cmd characters reach cmd.exe (S) | medium, real on Windows | patch: such arguments are refused for a batch shim with plain words; comments corrected |
+| The first runnable candidate decided: a stale shim hid a working install (C) | medium, real | patch: every candidate is tried |
+| Restart pane reused a stale path; a program removed since opening was blamed on the terminal (C) | medium, real | patch: looked up again on restart, the program is named, Detect runs again for the page |
+| `splitLauncherArgs` mangled Windows paths in double quotes (C) | medium, real | patch |
+| A test folder outside temp fell back to the real computer (C) | medium, real | patch: throws |
+| Folder prefix check had no separator boundary (S, C) | low | patch: relative path check |
+| `launcher_unavailable` lacked the install page the code comment promised (C) | low | patch |
+| Unset variable gave a path at the drive root; quoted PATH entries; network share entries; ComSpec case and fallback; rejected look cached; concurrent Detect (S, C) | low | patch |
+| `open` could finish after `dispose` (C) | low | patch |
+| The page: failure hidden in the closed details, plain "Start" labels, no live region, Start not disabled while detecting, install link on a program that did not answer (C) | low | patch |
+| Copilot interactive only is a label, and typed args are ignored for the shell (C) | by design | the plan says marked; automation is out of this epic |
+| No test with a space in the fixture path or a real hung probe; no Windows run of the shim fixture here (C) | low | defer: CI runs the shim on Windows; the live check covers a path with a space |

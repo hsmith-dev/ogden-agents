@@ -74,7 +74,11 @@ export function usePaneActions(wsId: string, auth: Auth = tabAuth) {
   const refresh = () => queryClient.invalidateQueries({ queryKey: panesQueryKey(wsId) });
   const [error, setError] = useState<string | undefined>(undefined);
   const failed = (failure: unknown) => setError(failure instanceof Error ? failure.message : undefined);
-  const open = useMutation({ onMutate: () => setError(undefined), onError: failed, mutationFn: (input: { size: { cols: number; rows: number }; placement?: PanePlacement; launch?: { launcherId: string; args: string } }) => openPane(wsId, input.size, input.placement, input.launch, auth), onSettled: refresh });
+  const open = useMutation({ onMutate: () => setError(undefined), onError: (failure) => {
+      failed(failure);
+      // A program that would not start may be gone: the list is read again.
+      void queryClient.invalidateQueries({ queryKey: launchersQueryKey });
+    }, mutationFn: (input: { size: { cols: number; rows: number }; placement?: PanePlacement; launch?: { launcherId: string; args: string } }) => openPane(wsId, input.size, input.placement, input.launch, auth), onSettled: refresh });
   const close = useMutation({ onMutate: () => setError(undefined), onError: failed, mutationFn: (paneId: string) => closePane(wsId, paneId, auth), onSettled: refresh });
   const rename = useMutation({ onMutate: () => setError(undefined), onError: failed, mutationFn: (input: { paneId: string; title: string }) => renamePane(wsId, input.paneId, input.title, auth), onSettled: refresh });
   const arrangeKey = ['pane-arrange', wsId] as const;

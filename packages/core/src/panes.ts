@@ -134,8 +134,10 @@ interface ViewerEntry {
 interface Entry {
   pane: Pane;
   cwd: string;
-  /** What a launcher found, run again by Restart pane (the detected absolute path); the shell is looked up each time. */
+  /** What the launcher resolved at open. Restart pane resolves it again (the program may have moved); the shell is looked up each time. */
   command: TerminalCommand | undefined;
+  /** The arguments the user typed, read (kept for Restart pane). */
+  typed: readonly string[];
   process: PaneProcess | undefined;
   size: TerminalSize;
   viewers: Set<ViewerEntry>;
@@ -325,14 +327,16 @@ export function createPanes(options: PanesOptions): Panes {
       // What to run, looked up before a slot is taken: a launcher that is not there opens nothing.
       let command: TerminalCommand | undefined;
       let label: string | undefined;
+      let typed: readonly string[] = [];
       const launcherId = launch?.launcherId ?? 'shell';
       if (launcherId !== 'shell') {
         const launcher = options.launchers?.get(launcherId);
-        const typed = launch?.args === undefined ? [] : splitLauncherArgs(launch.args);
+        const read = launch?.args === undefined ? [] : splitLauncherArgs(launch.args);
         if (launcher === undefined || launcher.kind === 'shell') throw new LauncherUnavailableError('unknown_launcher', 'That program is not one Ogden Agents can start.');
-        if (typed === undefined) throw new ValidationError('The arguments are not closed quotes or are too many.', [{ path: ['args'], message: 'unreadable arguments' }]);
+        if (read === undefined) throw new ValidationError('The arguments are not closed quotes or are too many.', [{ path: ['args'], message: 'unreadable arguments' }]);
+        typed = read;
         const found = await options.launchers!.command(launcherId, typed);
-        if (!found.ok) throw new LauncherUnavailableError(found.code, found.reason);
+        if (!found.ok) throw new LauncherUnavailableError(found.code, found.reason, launcher.installUrl);
         command = { file: found.file, args: found.args };
         label = launcher.label;
       }
@@ -346,6 +350,7 @@ export function createPanes(options: PanesOptions): Panes {
         pane: { id: newId('pan'), workspaceId, launcherId, title: titleFor(workspaceId, label), state: 'starting', exitCode: null },
         cwd: workspace.realPath ?? workspace.path,
         command,
+        typed,
         process: undefined,
         size: { cols: clamp(size.cols, MAX_TERMINAL_COLS), rows: clamp(size.rows, MAX_TERMINAL_ROWS) },
         viewers: new Set(),
@@ -357,12 +362,18 @@ export function createPanes(options: PanesOptions): Panes {
       try {
         await start(entry, entry.size);
       } catch (error) {
+        // Found a moment ago but would not start (removed since): say so about the program, and look again for the page.
+        if (entry.command !== undefined && error instanceof TerminalUnavailableError && options.launchers !== undefined) {
+          void options.launchers.detect().catch(() => undefined);
+          forget(entry);
+          throw new LauncherUnavailableError('failed', `${label ?? 'That program'} could not be started. It may have been moved or removed. Press Detect, then try again.`, options.launchers.get(launcherId)?.installUrl);
+        }
         // It never opened: no event, only the viewers that found it meanwhile are let go.
         forget(entry);
         throw error;
       }
       // Closed while it started (closed by the user, Developer mode turned off, the server stopping): nothing is left running, and nothing was announced.
-      if (entry.closed) throw new NotFoundError('pane', entry.pane.id);
+      if (entry.closed || disposed) throw new NotFoundError('pane', entry.pane.id);
       entry.announced = true;
       const current = layoutOf(workspaceId);
       const split = placement?.kind === 'split' ? splitPane(current, placement.paneId, entry.pane.id, placement.direction) : undefined;
@@ -413,6 +424,13 @@ export function createPanes(options: PanesOptions): Panes {
     async restart(workspaceId, paneId, size) {
       requireDeveloperMode();
       const entry = find(workspaceId, paneId);
+      // A launcher's program may have moved or gone since it opened: looked up again, with the same typed arguments.
+      if (entry.command !== undefined && options.launchers !== undefined) {
+        const again = await options.launchers.command(entry.pane.launcherId, entry.typed);
+        if (!again.ok) throw new LauncherUnavailableError(again.code, again.reason, options.launchers.get(entry.pane.launcherId)?.installUrl);
+        entry.command = { file: again.file, args: again.args };
+      }
+      if (entry.closed) throw new NotFoundError('pane', paneId);
       const old = entry.process;
       entry.process = undefined;
       for (const viewer of entry.viewers) {

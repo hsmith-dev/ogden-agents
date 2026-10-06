@@ -13,7 +13,7 @@ import type { PaneDetection, PaneLauncher, PaneLauncherStatus } from '@ogden-age
 import type { TerminalCommand } from './terminal-port.js';
 
 /** Why a launcher can't start a pane now. */
-export type LauncherRefusal = { ok: false; code: 'unknown_launcher' | 'not_found' | 'failed'; reason: string };
+export type LauncherRefusal = { ok: false; code: 'unknown_launcher' | 'not_found' | 'failed' | 'bad_args'; reason: string };
 
 export interface PaneLaunchers {
   /** Every launcher worth showing, with what detection found (looked up once, then kept). */
@@ -35,7 +35,7 @@ export const MAX_LAUNCHER_ARGS = 32;
 /**
  * Splits the text of a launcher's argument field into arguments, the way a
  * person reads it: spaces separate, single or double quotes keep spaces
- * together, and a backslash inside double quotes escapes the next character. It
+ * together, and inside double quotes a backslash escapes only a quote or another backslash (a Windows path keeps its own). It
  * interprets nothing else: no variable, no glob, no `;` or `&&`: each token is
  * one argument given to the program directly, never to a shell. `undefined`
  * for an unclosed quote or too many arguments.
@@ -62,7 +62,7 @@ export function splitLauncherArgs(text: string): string[] | undefined {
         started = true;
       }
     } else if (ch === quote) quote = undefined;
-    else if (ch === '\\' && quote === '"' && i + 1 < text.length) current += text[++i]!;
+    else if (ch === '\\' && quote === '"' && (text[i + 1] === '"' || text[i + 1] === '\\')) current += text[++i]!;
     else current += ch;
   }
   if (quote !== undefined) return undefined;

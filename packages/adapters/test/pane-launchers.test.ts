@@ -88,6 +88,26 @@ describe('detection looks, and never installs (E16-R5)', () => {
     expect(known).toMatchObject({ state: 'found', path: 'C:\\Users\\u\\.local\\bin\\claude.exe' });
   });
 
+  it('a stale first candidate that does not answer does not hide a working one further on', async () => {
+    const found = await detectLauncher(byId('claude-code'), computer(['/usr/bin/claude', '/home/u/.local/bin/claude'], { failing: ['/usr/bin/claude'] }));
+    expect(found).toMatchObject({ state: 'found', path: '/home/u/.local/bin/claude' });
+  });
+
+  it('a variable that is not set means no candidate: nothing is tried at the root of the drive', async () => {
+    const probed: Array<{ path: string; env: Record<string, string> }> = [];
+    const system = computer(['/.local/bin/claude', '\\.local\\bin\\claude.exe'], { env: { PATH: '/usr/bin' }, probed });
+    expect((await detectLauncher(byId('claude-code'), system)).state).toBe('not_found');
+    expect(probed).toEqual([]);
+  });
+
+  it('Windows: quoted PATH folders count, a network share and a root relative folder do not, and a program name with a space in its folder is found', async () => {
+    const env = { Path: '"C:\\Program Files\\Tools";\\\\server\\share;\\bin', PATHEXT: '.EXE', USERPROFILE: 'C:\\Users\\u' };
+    const found = await detectLauncher(byId('codex'), computer(['C:\\Program Files\\Tools\\codex.exe', '\\\\server\\share\\codex.exe'], { platform: 'win32', env }));
+    expect(found).toMatchObject({ state: 'found', path: 'C:\\Program Files\\Tools\\codex.exe' });
+    const onlyShare = await detectLauncher(byId('codex'), computer(['\\\\server\\share\\codex.exe'], { platform: 'win32', env }));
+    expect(onlyShare.state).toBe('not_found');
+  });
+
   it('the shell is always found without looking', async () => {
     expect(await detectLauncher(SHELL_LAUNCHER, computer([]))).toEqual({ launcherId: 'shell', state: 'found' });
   });
@@ -125,6 +145,16 @@ describe('the launchers port', () => {
   it('starts exactly the absolute path found, with only the launcher\'s own arguments then what the user typed', async () => {
     const port = launchers(['/usr/bin/claude']);
     expect(await port.command('claude-code', ['--model', 'x'])).toEqual({ ok: true, file: '/usr/bin/claude', args: ['--model', 'x'] });
+  });
+
+  it('Windows: a batch shim takes no argument cmd.exe would read as its own, a plain .exe takes anything', async () => {
+    const env = { Path: 'C:\\bin', PATHEXT: '.EXE;.CMD' };
+    const shim = createPaneLaunchers({ launchers: PANE_LAUNCHERS, system: computer(['C:\\bin\\codex.cmd'], { platform: 'win32', env }) });
+    expect(await shim.command('codex', ['--model', 'big'])).toMatchObject({ ok: true, file: 'C:\\bin\\codex.cmd' });
+    expect(await shim.command('codex', ['x&calc'])).toMatchObject({ ok: false, code: 'bad_args' });
+    expect(await shim.command('codex', ['say "hi"'])).toMatchObject({ ok: false, code: 'bad_args' });
+    const exe = createPaneLaunchers({ launchers: PANE_LAUNCHERS, system: computer(['C:\\bin\\codex.exe'], { platform: 'win32', env }) });
+    expect(await exe.command('codex', ['x&calc'])).toMatchObject({ ok: true });
   });
 
   it('refuses in plain words a program that is not found, one that did not answer, the shell and an unknown id', async () => {

@@ -11,6 +11,7 @@
  * Ogden runs in can stand in for a program.
  */
 import { execFile } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { accessSync, constants, statSync } from 'node:fs';
 import { delimiter, posix, win32 } from 'node:path';
 import type { LauncherRefusal, PaneLaunchers } from '@ogden-agents/core';
@@ -51,13 +52,29 @@ export const nodeDetectSystem: DetectSystem = {
       const win = process.platform === 'win32';
       const shim = win && /\.(cmd|bat)$/i.test(path);
       // Node refuses to run a .cmd or .bat without a shell; a shim goes through cmd.exe with the whole command in one more pair of quotes.
-      const file = shim ? (env.ComSpec ?? env.COMSPEC ?? 'cmd.exe') : path;
+      // A shim's path with a character cmd would read as its own is not run (a Windows file name has no quote, so this is depth, not a hole).
+      if (shim && /["%^!\r\n]/.test(path)) {
+        resolve({ ok: false });
+        return;
+      }
+      const comspec = Object.entries(env).find(([key]) => key.toUpperCase() === 'COMSPEC')?.[1];
+      const root = Object.entries(env).find(([key]) => key.toUpperCase() === 'SYSTEMROOT')?.[1] ?? 'C:\\Windows';
+      const file = shim ? (comspec ?? win32.join(root, 'System32', 'cmd.exe')) : path;
       const args = shim ? ['/d', '/s', '/c', `""${path}" --version"`] : ['--version'];
       try {
-        execFile(file, args, { env, timeout: PROBE_TIMEOUT_MS, windowsHide: true, windowsVerbatimArguments: shim, maxBuffer: 64 * 1024 }, (error, stdout) => {
+        // Run away from any project: the program's own working folder is a neutral one.
+        const child = execFile(file, args, { env, cwd: tmpdir(), timeout: PROBE_TIMEOUT_MS, killSignal: 'SIGKILL', windowsHide: true, windowsVerbatimArguments: shim, maxBuffer: 64 * 1024 }, (error, stdout) => {
+          clearTimeout(hard);
           if (error) resolve({ ok: false });
           else resolve({ ok: true, version: String(stdout).trim().split(/\r?\n/, 1)[0]?.slice(0, 80) ?? '' });
         });
+        // The program is never given input, and a grandchild that keeps the pipes open can't hold detection up past its time.
+        child.stdin?.end();
+        const hard = setTimeout(() => {
+          child.kill('SIGKILL');
+          resolve({ ok: false });
+        }, PROBE_TIMEOUT_MS + 1_000);
+        hard.unref();
       } catch {
         resolve({ ok: false });
       }
@@ -79,13 +96,22 @@ function candidatesFor(entry: string, system: DetectSystem): string[] {
   const env = system.env;
   const lookup = (name: string) => Object.entries(env).find(([key]) => (win ? key.toUpperCase() === name.toUpperCase() : key === name))?.[1];
   if (/^[A-Za-z0-9._-]+$/.test(entry)) {
-    const dirs = (lookup('PATH') ?? '').split(win ? ';' : delimiter).filter((dir) => dir !== '' && path.isAbsolute(dir));
+    // Only absolute folders (on Windows with a drive letter: no network share and no folder relative to the current drive's root).
+    const unquoted = (dir: string) => (win ? dir.replace(/^"(.*)"$/, '$1') : dir);
+    const dirs = (lookup('PATH') ?? '').split(win ? ';' : delimiter).map(unquoted).filter((dir) => dir !== '' && (win ? /^[A-Za-z]:[\\/]/.test(dir) : path.isAbsolute(dir)));
     const exts = win ? (lookup('PATHEXT') ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean).map((ext) => ext.toLowerCase()) : [''];
     return dirs.flatMap((dir) => exts.map((ext) => path.join(dir, `${entry}${ext}`)));
   }
-  const home = lookup('HOME') ?? lookup('USERPROFILE') ?? '';
-  const expanded = entry.replace(/^~/, home).replace(/%([A-Za-z()0-9]+)%/g, (_, name: string) => lookup(name) ?? '');
-  return path.isAbsolute(expanded) && !expanded.includes('%') ? [expanded] : [];
+  const home = win ? (lookup('USERPROFILE') ?? lookup('HOME')) : lookup('HOME');
+  // A variable that is not set means the place is not known: no candidate, never a path at the drive root.
+  let missing = false;
+  const withHome = entry.startsWith('~') ? (home === undefined || home === '' ? ((missing = true), entry) : home + entry.slice(1)) : entry;
+  const expanded = withHome.replace(/%([\w()]+)%/g, (_, name: string) => {
+    const value = lookup(name);
+    if (value === undefined || value === '') missing = true;
+    return value ?? '';
+  });
+  return !missing && path.isAbsolute(expanded) && !expanded.includes('%') ? [expanded] : [];
 }
 
 export interface Detected extends PaneDetection {
@@ -98,15 +124,17 @@ export async function detectLauncher(launcher: PaneLauncher, system: DetectSyste
   if (launcher.kind === 'shell') return { launcherId: launcher.id, state: 'found' };
   const env = probeEnvironment(system);
   const entries = launcher.executables[platformKey(system.platform)];
+  // The first candidate that answers wins; one that is there but silent (a stale shim) does not hide a working one further on.
+  let silent: string | undefined;
   for (const entry of entries) {
     for (const candidate of candidatesFor(entry, system)) {
       if (!system.runnable(candidate)) continue;
       const answer = await system.probe(candidate, env);
-      return answer.ok
-        ? { launcherId: launcher.id, state: 'found', path: candidate, ...(answer.version === '' ? {} : { version: answer.version }) }
-        : { launcherId: launcher.id, state: 'failed', path: candidate, reason: `${launcher.label} is installed but did not answer. Try running it in a terminal yourself.` };
+      if (answer.ok) return { launcherId: launcher.id, state: 'found', path: candidate, ...(answer.version === '' ? {} : { version: answer.version }) };
+      silent ??= candidate;
     }
   }
+  if (silent !== undefined) return { launcherId: launcher.id, state: 'failed', path: silent, reason: `${launcher.label} is installed but did not answer. Try running it in a terminal yourself.` };
   return { launcherId: launcher.id, state: 'not_found', reason: `${launcher.label} was not found on this computer. Install it yourself, then press Detect.` };
 }
 
@@ -120,7 +148,14 @@ export function createPaneLaunchers({ launchers, system = nodeDetectSystem }: Pa
   let found: Promise<Map<string, Detected>> | undefined;
   const run = (): Promise<Map<string, Detected>> =>
     Promise.all(launchers.map((launcher) => detectLauncher(launcher, system))).then((all) => new Map(all.map((one) => [one.launcherId, one])));
-  const results = () => (found ??= run());
+  // One look at a time: a Detect pressed while another runs shares it; a look that failed is not kept.
+  const results = () => {
+    const current = (found ??= run());
+    current.catch(() => {
+      if (found === current) found = undefined;
+    });
+    return current;
+  };
   const view = async (): Promise<PaneLauncherStatus[]> => {
     const map = await results();
     return launchers.flatMap((launcher) => {
@@ -132,8 +167,8 @@ export function createPaneLaunchers({ launchers, system = nodeDetectSystem }: Pa
   return {
     list: view,
     detect() {
-      found = run();
-      return view();
+      const current = (found = run());
+      return current.then(() => view());
     },
     get: (launcherId) => launchers.find((launcher) => launcher.id === launcherId),
     async command(launcherId, args) {
@@ -144,6 +179,10 @@ export function createPaneLaunchers({ launchers, system = nodeDetectSystem }: Pa
         return refusal('not_found', detection?.reason ?? `${launcher.label} was not found on this computer. Install it yourself, then press Detect.`);
       }
       if (detection.state === 'failed') return refusal('failed', detection.reason ?? `${launcher.label} did not answer.`);
+      // On Windows an npm shim is a batch file: cmd.exe reads its command line, so a typed argument with a character cmd treats as its own is not passed.
+      if (system.platform === 'win32' && /\.(cmd|bat)$/i.test(detection.path) && args.some((arg) => /[&|<>^%!"()\r\n]/.test(arg))) {
+        return refusal('bad_args', `${launcher.label} is started through a Windows batch file, which can't take & | < > ^ % ! " or parentheses in its arguments. Take them out and try again.`);
+      }
       // The absolute path found, the launcher's own plain arguments, then what the user typed. No credential, no flag of Ogden's own that skips a prompt.
       return { ok: true, file: detection.path, args: [...launcher.defaultArgs, ...args] };
     },

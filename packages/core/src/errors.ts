@@ -375,8 +375,10 @@ export const PANES_NEED_DEVELOPER_MODE = 'Terminals are only offered in Develope
 export class LauncherUnavailableError extends CoreError {
   override readonly name = 'LauncherUnavailableError';
   constructor(
-    readonly launcherCode: 'unknown_launcher' | 'not_found' | 'failed',
+    readonly launcherCode: 'unknown_launcher' | 'not_found' | 'failed' | 'bad_args',
     message: string,
+    /** The vendor's install page, when the launcher has one. */
+    readonly installUrl?: string,
   ) {
     super('launcher_unavailable', message);
   }

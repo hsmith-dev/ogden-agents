@@ -39,7 +39,7 @@ export function LauncherList({
   const programs = statuses.filter((status) => status.launcher.kind === 'cli');
   if (programs.length === 0 && !failed) return null;
   return (
-    <details className="rounded-lg border border-border p-3" data-testid="launchers">
+    <details className="rounded-lg border border-border p-3" data-testid="launchers" open={failed || undefined}>
       <summary className="cursor-pointer text-label">Start a program in a terminal</summary>
       <div className="mt-3 flex flex-col gap-3">
         <Text variant="caption" className="text-muted-foreground">
@@ -71,14 +71,14 @@ export function LauncherList({
                     onChange={(event) => setArgs((current) => ({ ...current, [launcher.id]: event.target.value }))}
                     className="h-(--control-height) min-w-40 flex-1 rounded-md border border-border bg-transparent px-2 text-label"
                   />
-                  <Button size="sm" disabled={disabled} onClick={() => onStart(launcher.id, args[launcher.id] ?? '')} data-testid="launcher-start">
+                  <Button size="sm" aria-label={`Start ${launcher.label}`} disabled={disabled || detecting} onClick={() => onStart(launcher.id, args[launcher.id] ?? '')} data-testid="launcher-start">
                     Start
                   </Button>
                 </>
               ) : (
                 <Text variant="caption" data-testid="launcher-missing">
                   {detection.state === 'failed' ? `It is installed but did not answer. Try it in a terminal yourself, then press Detect. ` : `${INSTALL_YOURSELF} `}
-                  {launcher.installUrl === undefined ? null : (
+                  {launcher.installUrl === undefined || detection.state === 'failed' ? null : (
                     <a href={launcher.installUrl} target="_blank" rel="noopener noreferrer" className="underline" data-testid="launcher-install-link">
                       Install page
                     </a>
@@ -93,6 +93,9 @@ export function LauncherList({
             </li>
           ))}
         </ul>
+        <div role="status" aria-live="polite" className="sr-only" data-testid="launchers-live">
+          {detecting ? 'Looking for programs' : ''}
+        </div>
         <div>
           <Button variant="outline" size="sm" onClick={onDetect} disabled={detecting} data-testid="launchers-detect">
             Detect

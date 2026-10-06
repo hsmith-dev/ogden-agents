@@ -254,9 +254,10 @@ describe("what the pane's program is given (E16-R2, AD-16)", () => {
       await waitFor(() => viewer.state.output.includes('secret-done'), 'the secret listing', 15_000);
       const { envNames, colorterm, term } = recordOf(setup);
       for (const name of Object.keys(sentinels)) expect(envNames, name).not.toContain(name);
-      expect(envNames).toEqual(expect.arrayContaining(['PATH', 'COLORTERM', 'TERM']));
+      expect(envNames).toEqual(expect.arrayContaining(process.platform === 'win32' ? ['PATH', 'COLORTERM'] : ['PATH', 'COLORTERM', 'TERM']));
       expect(colorterm).toBe('truecolor');
-      expect(term).toBe('xterm-256color');
+      // node-pty names the terminal for a POSIX program; a ConPTY program has no TERM.
+      if (process.platform !== 'win32') expect(term).toBe('xterm-256color');
       expect(viewer.state.output).not.toContain('secret=');
       for (const value of Object.values(sentinels)) expect(viewer.state.raw).not.toContain(value);
     } finally {
@@ -459,7 +460,7 @@ describe('launchers and install detection over the API (story 16.5)', () => {
     const post = (body: unknown) => fetch(panesUrl(setup), { method: 'POST', headers: jsonHeaders(setup.tab), body: JSON.stringify({ cols: 80, rows: 24, ...(body as object) }) });
     const missing = await post({ launcherId: 'grok' });
     expect(missing.status).toBe(409);
-    expect(ApiErrorBody.parse(await missing.json()).error).toMatchObject({ code: 'launcher_unavailable', message: 'Grok was not found on this computer. Install it yourself, then press Detect.', details: { launcher: 'not_found' } });
+    expect(ApiErrorBody.parse(await missing.json()).error).toMatchObject({ code: 'launcher_unavailable', message: 'Grok was not found on this computer. Install it yourself, then press Detect.', details: { launcher: 'not_found', installUrl: 'https://x.ai/cli' } });
     expect((await post({ launcherId: 'nope' })).status).toBe(409);
     expect((await post({ launcherId: 'codex', args: '"open' })).status).toBe(400);
     expect((await post({ launcherId: 'codex', args: 'bad\u0007' })).status).toBe(400);

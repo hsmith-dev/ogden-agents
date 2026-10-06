@@ -417,6 +417,8 @@ export const API_ROUTES = {
    * choices. Serves the `builds` piece (guarded, trust); probes only.
    */
   workspaceBuildSandbox: `${API_BASE}/workspaces/:wsId/build-sandbox`,
+  /** Which agents can build here and how each would (epic 17, entry 3). */
+  workspaceBuildAgents: `${API_BASE}/workspaces/:wsId/build-agents`,
   /** `GET` → `ReviewResponse` (story 5.2): the ticket's latest run, for the review page; 404 without one. */
   workspaceBuild: `${API_BASE}/workspaces/:wsId/builds/:ref`,
   /**

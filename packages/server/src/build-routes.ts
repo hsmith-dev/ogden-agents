@@ -53,7 +53,7 @@ import {
   type BuildSettings,
   type BuildsUseCases,
 } from '@ogden-agents/core';
-import { AllReadyBuildsResponse, API_ROUTES, BMAD_NOT_DOWNLOADED_MESSAGE, BuildResponse, WorkspaceBuildSettingsResponse, CommitPlanFilesResponse, ReviewResponse, RunResponse, RunsResponse, SandboxStatusResponse, SessionId, SessionRunResponse } from '@ogden-agents/shared';
+import { AllReadyBuildsResponse, API_ROUTES, BMAD_NOT_DOWNLOADED_MESSAGE, BuildAgentsResponse, BuildResponse, WorkspaceBuildSettingsResponse, CommitPlanFilesResponse, ReviewResponse, RunResponse, RunsResponse, SandboxStatusResponse, SessionId, SessionRunResponse } from '@ogden-agents/shared';
 import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { bmadPieceRoutes } from './bmad-pieces.js';
@@ -195,6 +195,16 @@ export function registerBuildRoutes(app: Hono, { bmad, scriptTrust, builds, buil
     if (builds === undefined) return notImplemented(c);
     try {
       return c.json(SandboxStatusResponse.parse({ status: await builds.sandboxStatus(workspaceId) }));
+    } catch (error) {
+      return refused(c, workspaceId, error);
+    }
+  });
+
+  // Epic 17: which agents can build here and how each would, for the Build dialog's picker.
+  routes.get('builds', API_ROUTES.workspaceBuildAgents, async (c, { workspaceId }) => {
+    if (builds === undefined) return notImplemented(c);
+    try {
+      return c.json(BuildAgentsResponse.parse(await builds.buildAgents(workspaceId)));
     } catch (error) {
       return refused(c, workspaceId, error);
     }

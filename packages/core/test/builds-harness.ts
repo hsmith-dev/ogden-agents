@@ -323,6 +323,7 @@ export async function harness({ pieces = ['board', 'builds'] as const, trusted =
     sandbox: fakeSandbox(() => (sandbox.available ? { available: true, kind: 'test' } : { available: false, reason: 'none' }), rerun),
     runner,
     chat: {
+      chatAgents: async () => ({ agents: [], defaultAgentId: 'claude-code' }),
       createChatSession: async (wsId, options) => core.entities.createSession({ workspaceId: wsId, kind: options?.kind ?? 'chat' }),
       sendMessage: (_wsId, sessionId, text, options) => {
         if (options?.build !== true) throw new Error('a build session takes only the build prompt');

@@ -52,6 +52,41 @@ export function startFixedMode(
 }
 
 /**
+ * Words of the switches that skip an agent's own permission decision (Skip all, always-approve, yolo, full access,
+ * Auto, `auto_edit`, accept-edits, folder trust off), compared with every character but letters and digits removed
+ * and case ignored, so `auto-edit`, `autoEdit` and `AUTO_EDIT` are one word. A build start that names any of them is a
+ * wiring bug and is refused: Ogden's rule answers every request of a build, and no agent switch may answer instead
+ * (epic 17, user decisions 2026-10-05).
+ */
+export const FORBIDDEN_BUILD_SWITCHES = [
+  'agentfullaccess', 'dangerfullaccess', 'fullaccess', 'yolo', 'yolomode', 'bypasspermissions', 'bypassapprovals', 'autoedit', 'automode', 'acceptedits', 'dontask',
+  'alwaysapprove', 'dangerouslyskip', 'dangerouslybypass', 'skipall', 'skippermissions', 'trustoff', 'foldertrust',
+] as const;
+
+const squash = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]/g, '');
+const forbidden = (text: string): boolean => FORBIDDEN_BUILD_SWITCHES.some((word) => squash(text).includes(word));
+
+/**
+ * Whether `value` names a forbidden switch: by a mode id or any string value (a path under `additionalDirectories` is
+ * a path, not a switch, and is skipped), or by a key that says one with a value that turns it on (`yoloMode: false`
+ * is how an agent is told it is NOT on, so it passes).
+ */
+function namesSwitch(value: unknown, key?: string): boolean {
+  if (key === 'additionalDirectories') return false;
+  if (typeof value === 'string') return forbidden(value);
+  if (Array.isArray(value)) return value.some((item) => namesSwitch(item));
+  if (typeof value === 'object' && value !== null) {
+    return Object.entries(value).some(([name, inner]) => (forbidden(name) && inner !== false && inner !== null && inner !== '' && inner !== 0) || namesSwitch(inner, name));
+  }
+  return false;
+}
+
+/** Whether `build` names a switch that skips a decision (see {@link FORBIDDEN_BUILD_SWITCHES}). */
+export function namesForbiddenSwitch(build: AcpBuildStart): boolean {
+  return namesSwitch({ addEnv: build.addEnv, sessionParams: build.sessionParams ?? null, meta: build.meta ?? null, modeIds: build.modeIds });
+}
+
+/**
  * An unattended build session's start (epic 17): the sandbox is given once, at
  * start, in the agent's own places, so the session runs in the mode it was
  * started in (to core, Ask: a build session is read-only and its mode is

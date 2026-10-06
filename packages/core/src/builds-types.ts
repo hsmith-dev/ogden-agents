@@ -1,5 +1,5 @@
 /** The builds use-cases and what they are given (story 5.10 split `builds.ts`; the header of `builds.ts` says what each does). */
-import { ApproveBuildRequest, RetryRunRequest, StartBuildRequest, type CommitPlanFilesResponse, type ReviewResponse, type Run, type SandboxStatus, type Session, type SessionId, type WorkspaceId, type AllReadyBuildsResponse, type RunResponse, type RunsResponse } from '@ogden-agents/shared';
+import { ApproveBuildRequest, RetryRunRequest, StartBuildRequest, type BuildAgentsResponse, type CommitPlanFilesResponse, type ReviewResponse, type Run, type SandboxStatus, type Session, type SessionId, type WorkspaceId, type AllReadyBuildsResponse, type RunResponse, type RunsResponse } from '@ogden-agents/shared';
 import type { BmadFeatures } from './bmad-pieces.js';
 import type { BuildSettings } from './build-settings.js';
 import type { BmadScriptTrust } from './bmad-script-trust.js';
@@ -20,6 +20,8 @@ export interface BuildsUseCases {
   start(workspaceId: WorkspaceId, request: unknown): Promise<{ run: Run; session: Session }>;
   /** What a build's sandbox is here, in plain words, for the Build dialog (story 5.6). Probes only. */
   sandboxStatus(workspaceId: WorkspaceId): Promise<SandboxStatus>;
+  /** Which agents can build here and how each would (epic 17: the picker's data). Probes only. */
+  buildAgents(workspaceId: WorkspaceId): Promise<BuildAgentsResponse>;
   /** The ticket's latest run for the review page. `NotFoundError` without one. */
   review(workspaceId: WorkspaceId, ref: string): Promise<ReviewResponse>;
   /** Approve (see the header): `request` is `ApproveBuildRequest`, the revision the user reviewed. */
@@ -143,7 +145,7 @@ export interface BuildsDeps {
    * with none is refused (`UNKNOWN_BUILD_AGENT_MESSAGE`). Core names no agent: each runner says which it is.
    */
   runners?: readonly BuildRunnerPort[];
-  chat: Pick<Chat, 'createChatSession' | 'sendMessage' | 'releaseAgent'>;
+  chat: Pick<Chat, 'createChatSession' | 'sendMessage' | 'releaseAgent' | 'chatAgents'>;
   buildSessions: BuildSessions;
   /** Ogden Agents' data folder: worktrees go in `<dataDir>/w/`. */
   dataDir: string;

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AgentId } from './events-common.js';
 import { BuildAgent, BuildMode, RunQueueEntry } from './build-runs.js';
 import { VerificationResult } from './build-verification.js';
 import { Run, RunOutcome, Session } from './entities.js';
@@ -20,6 +21,27 @@ import { TICKET_REF_PATTERN } from './planning-board.js';
  * to the install's build runner's agent, Claude Code in v1 (story 5.3).
  */
 export const UNKNOWN_BUILD_AGENT_MESSAGE = 'That agent cannot build here.';
+/**
+ * `GET /api/v1/workspaces/:wsId/build-agents` (epic 17, entry 3: the picker's contract, built on by entry 8): every
+ * agent that can build, in the order the agent list gives, and how each would build here now. `unattended`: it runs
+ * in its sandbox with core answering every request. `attended_only`: it builds only with the user watching, and
+ * `reason` says why in plain words (no sandbox on this computer, not verified yet). `unavailable`: it cannot be
+ * started at all now (not installed, no key), and `reason` says what to do. `defaultAgentId`: the agent a Build
+ * with no choice uses.
+ */
+export const BUILD_WAYS = ['unattended', 'attended_only', 'unavailable'] as const;
+export const BuildWay = z.enum(BUILD_WAYS);
+export type BuildWay = z.infer<typeof BuildWay>;
+export const BuildAgentChoice = z.object({
+  agentId: AgentId,
+  displayName: z.string().min(1),
+  way: BuildWay,
+  reason: z.string().max(1000).nullable(),
+});
+export type BuildAgentChoice = z.infer<typeof BuildAgentChoice>;
+export const BuildAgentsResponse = z.object({ agents: z.array(BuildAgentChoice).max(20), defaultAgentId: AgentId });
+export type BuildAgentsResponse = z.infer<typeof BuildAgentsResponse>;
+
 export const BUILD_TARGET_MESSAGE = 'Name one ticket to build, or ask for every ready one.';
 export const StartBuildRequest = z
   .object({

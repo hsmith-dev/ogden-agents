@@ -9,7 +9,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AgentError, PROTECTED_PATHS, type AgentDescriptor, type AgentEvent, type AgentPermissionRequest, type AgentSession } from '@ogden-agents/core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { acpReasons, createAcpAgent, slashSkillInvocation, type AcpAgentQuirks } from '../src/acp-base/index.js';
+import { namesForbiddenSwitch } from '../src/acp-base/fixed-mode.js';
+import { acpReasons, createAcpAgent, slashSkillInvocation, type AcpAgentQuirks, type AcpBuildStart } from '../src/acp-base/index.js';
 
 const FAKE_AGENT = join(import.meta.dirname, '..', '..', '..', 'tests', 'fixtures', 'fake-acp-agent.mjs');
 const dirs: string[] = [];
@@ -160,6 +161,21 @@ describe('the shared ACP client with a second agent (6.4)', () => {
     await opened.prompt('session-start');
     expect(JSON.parse(replyText(events)).meta).toEqual({ secondAgent: { roots: ['/work'] } });
     await expect(secondAgent().startSession({ cwd: tempDir(), env: baseEnv(), sandbox })).rejects.toMatchObject({ code: 'agent_unavailable' });
+  });
+
+  it('a build start that names a switch which skips a permission decision is refused (epic 17), and an unverified one never starts', async () => {
+    const sandbox = { kind: 'test', writableRoots: ['/work'], deniedPaths: [], deniedReads: [], allowedReads: ['/work'] };
+    const bads: Array<Partial<AcpBuildStart>> = [{ addEnv: { MODE: 'agent-full-access' } }, { addEnv: {}, meta: { yoloMode: true } }, { addEnv: {}, sessionParams: { flags: ['--always-approve'] } }, { addEnv: {}, meta: { x: 'auto_edit' } }, { addEnv: {}, meta: { x: 'Auto-Edit' } }, { addEnv: {}, meta: { mode: 'dangerFullAccess' } }, { addEnv: { FLAG: 'full_access' } }];
+    for (const bad of bads) {
+      const agent = secondAgent({ buildSession: { verified: true, start: () => ({ modeIds: ['m'], addEnv: {}, ...bad }) } });
+      await expect(agent.startSession({ cwd: tempDir(), env: baseEnv(), sandbox })).rejects.toMatchObject({ code: 'agent_unavailable' });
+    }
+    // A path that happens to contain a word, and a switch told it is off, are not switches.
+    expect(namesForbiddenSwitch({ modeIds: ['ws'], addEnv: {}, sessionParams: { additionalDirectories: ['/work/yolo-app'] }, meta: { yoloMode: false } })).toBe(false);
+    expect(namesForbiddenSwitch({ modeIds: ['ws'], addEnv: {}, meta: { yoloMode: true } })).toBe(true);
+    const unverified = secondAgent({ buildSession: { verified: false, start: () => ({ modeIds: ['m'], addEnv: {} }) } });
+    await expect(unverified.startSession({ cwd: tempDir(), env: baseEnv(), sandbox })).rejects.toMatchObject({ code: 'agent_unavailable' });
+    expect(unverified.unattendedBuild).toBe(false);
   });
 
   it('reopens by resume, then load, then new', async () => {

@@ -69,7 +69,7 @@ async function refusalOf(reply: Response) {
  * A whole build, review and Approve is real work: a server, a fixture repo, a worktree and run object store, the fake agent,
  * and a dozen `git` processes (merge, `fsck`). It takes ~1.4 s on a quiet machine and 3.5x that on a macOS CI runner running
  * the other test files beside it, past Vitest's 5 s default (main runs 37444572876, 37427267242, 37415804606 timed out at
- * its limit with the file's other tests green). Only these full-flow tests get the longer limit; the rest keep the default.
+ * its limit with the file's other tests green). Only these full-flow tests (and the one that sets up three whole servers and fixture repos: it took 32 s on a loaded Windows runner, main run 37458461174) get the longer limit; the rest keep the default.
  */
 const FULL_BUILD_TEST_TIMEOUT_MS = 30_000;
 
@@ -401,7 +401,7 @@ describe('the sandbox status and attended builds over REST (story 5.6)', () => {
 
     const off = await setup({ builds: false });
     expect((await refusalOf(await request(off.server, off.tab, 'GET', apiPath(API_ROUTES.workspaceBuildSandbox, { wsId: off.wsId })))).code).toBe('feature_off');
-  });
+  }, FULL_BUILD_TEST_TIMEOUT_MS);
 
   it('with no sandbox, only an explicit attended build starts: a card at ask_every_time for each tool call, no sandbox, the same review', async () => {
     const { server, tab, wsId, build, settled, repo } = await setup({ sandbox: false });
